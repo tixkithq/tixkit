@@ -169,6 +169,159 @@ describe('finalizeOrderActivity inventory holds', () => {
   });
 });
 
+describe('finalizeOrderActivity promo code redemption', () => {
+  beforeEach(() => {
+    dbState.tables = {};
+    dbState.locks = [];
+    dbState.destroy.mockClear();
+  });
+
+  it('consumes a valid promo code on first finalize, incrementing uses_count', async () => {
+    seedCheckoutWithDiscount({
+      holdExpiresAt: new Date(Date.now() + 60_000),
+      discountCode: 'EARLYBIRD',
+      usesCount: 0,
+      maxUses: 10,
+      status: 'active',
+    });
+
+    const result = await finalizeOrderActivity({
+      checkoutSessionId: 'cs_1',
+      tenantId: 'tnt_1',
+    });
+
+    expect(result.ok).toBe(true);
+    expect(dbState.tables.discount_codes.dc_1.uses_count).toBe(1);
+    expect(Object.values(dbState.tables.discount_redemptions)).toHaveLength(1);
+    expect(dbState.tables.discount_redemptions).toMatchObject({
+      [Object.keys(dbState.tables.discount_redemptions)[0]]: {
+        discount_code_id: 'dc_1',
+        checkout_session_id: 'cs_1',
+      },
+    });
+  });
+
+  it('is idempotent on duplicate finalize/retry - does not double-increment uses_count', async () => {
+    seedCheckoutWithDiscount({
+      holdExpiresAt: new Date(Date.now() + 60_000),
+      discountCode: 'EARLYBIRD',
+      usesCount: 0,
+      maxUses: 10,
+      status: 'active',
+    });
+
+    // First finalize
+    const result1 = await finalizeOrderActivity({
+      checkoutSessionId: 'cs_1',
+      tenantId: 'tnt_1',
+    });
+    expect(result1.ok).toBe(true);
+    expect(dbState.tables.discount_codes.dc_1.uses_count).toBe(1);
+
+    // Simulate a retry: the existing order check returns early
+    dbState.tables.orders = {
+      ord_existing: {
+        id: 'ord_existing',
+        checkout_session_id: 'cs_1',
+      },
+    };
+
+    const result2 = await finalizeOrderActivity({
+      checkoutSessionId: 'cs_1',
+      tenantId: 'tnt_1',
+    });
+
+    expect(result2.ok).toBe(true);
+    expect(result2).toMatchObject({ value: { orderId: 'ord_existing' } });
+    // uses_count should still be 1 - no double increment
+    expect(dbState.tables.discount_codes.dc_1.uses_count).toBe(1);
+  });
+
+  it('rejects an exhausted promo code (uses_count >= max_uses)', async () => {
+    seedCheckoutWithDiscount({
+      holdExpiresAt: new Date(Date.now() + 60_000),
+      discountCode: 'SOLDOUT',
+      usesCount: 5,
+      maxUses: 5,
+      status: 'active',
+    });
+
+    const result = await finalizeOrderActivity({
+      checkoutSessionId: 'cs_1',
+      tenantId: 'tnt_1',
+    });
+
+    expect(result).toMatchObject({
+      ok: false,
+      errorCode: 'DISCOUNT_EXHAUSTED',
+      retryable: false,
+    });
+    expect(dbState.tables.discount_codes.dc_1.uses_count).toBe(5);
+    expect(Object.values(dbState.tables.discount_redemptions ?? {})).toHaveLength(0);
+    expect(Object.values(dbState.tables.orders)).toHaveLength(0);
+  });
+
+  it('rejects an inactive promo code', async () => {
+    seedCheckoutWithDiscount({
+      holdExpiresAt: new Date(Date.now() + 60_000),
+      discountCode: 'INACTIVE',
+      usesCount: 0,
+      maxUses: 10,
+      status: 'paused',
+    });
+
+    const result = await finalizeOrderActivity({
+      checkoutSessionId: 'cs_1',
+      tenantId: 'tnt_1',
+    });
+
+    expect(result).toMatchObject({
+      ok: false,
+      errorCode: 'DISCOUNT_INVALID',
+      retryable: false,
+    });
+    expect(dbState.tables.discount_codes.dc_1.uses_count).toBe(0);
+    expect(Object.values(dbState.tables.discount_redemptions ?? {})).toHaveLength(0);
+  });
+
+  it('rejects an expired promo code (valid_until in the past)', async () => {
+    seedCheckoutWithDiscount({
+      holdExpiresAt: new Date(Date.now() + 60_000),
+      discountCode: 'EXPIRED',
+      usesCount: 0,
+      maxUses: 10,
+      status: 'active',
+      validUntil: new Date(Date.now() - 86_400_000).toISOString(),
+    });
+
+    const result = await finalizeOrderActivity({
+      checkoutSessionId: 'cs_1',
+      tenantId: 'tnt_1',
+    });
+
+    expect(result).toMatchObject({
+      ok: false,
+      errorCode: 'DISCOUNT_INVALID',
+      retryable: false,
+    });
+  });
+
+  it('does not consume a discount code when no discountCode in cart', async () => {
+    seedCheckout({
+      holdExpiresAt: new Date(Date.now() + 60_000),
+    });
+
+    const result = await finalizeOrderActivity({
+      checkoutSessionId: 'cs_1',
+      tenantId: 'tnt_1',
+    });
+
+    expect(result.ok).toBe(true);
+    expect(dbState.tables.discount_codes).toBeUndefined();
+    expect(dbState.tables.discount_redemptions).toBeUndefined();
+  });
+});
+
 function seedCheckout(input: { holdExpiresAt: Date }) {
   dbState.tables = {
     orders: {},
@@ -234,6 +387,108 @@ function seedCheckout(input: { holdExpiresAt: Date }) {
       pool_1: {
         id: 'pool_1',
         sold_count: 0,
+      },
+    },
+    questions: {},
+    payment_intents: {},
+    affiliates: {},
+  };
+}
+
+function seedCheckoutWithDiscount(input: {
+  holdExpiresAt: Date;
+  discountCode: string;
+  usesCount: number;
+  maxUses: number;
+  status: string;
+  validUntil?: string;
+}) {
+  dbState.tables = {
+    orders: {},
+    order_line_items: {},
+    attendees: {},
+    tickets: {},
+    message_consents: {},
+    order_timeline_events: {},
+    discount_redemptions: {},
+    checkout_sessions: {
+      cs_1: {
+        id: 'cs_1',
+        tenant_id: 'tnt_1',
+        brand_id: 'brd_1',
+        event_id: 'evt_1',
+        status: 'pending',
+        currency: 'USD',
+        quote: JSON.stringify({
+          subtotalCents: 1000,
+          discountCents: 100,
+          taxCents: 0,
+          feeCents: 0,
+          totalCents: 900,
+          lineItems: [
+            {
+              ticketTypeId: 'tt_1',
+              name: 'General Admission',
+              quantity: 1,
+              unitPriceCents: 1000,
+              subtotalCents: 1000,
+              discountCents: 100,
+              taxCents: 0,
+              feeCents: 0,
+              totalCents: 900,
+            },
+          ],
+        }),
+        cart: JSON.stringify({
+          items: [{ ticketTypeId: 'tt_1', quantity: 1 }],
+          buyerFields: {},
+          attendeeFields: {},
+          discountCode: input.discountCode,
+        }),
+        buyer: JSON.stringify({ email: 'buyer@example.test', firstName: 'Ada', lastName: 'Lovelace' }),
+      },
+    },
+    events: {
+      evt_1: {
+        id: 'evt_1',
+        organization_id: 'org_1',
+      },
+    },
+    checkout_holds: {
+      hld_1: {
+        id: 'hld_1',
+        checkout_session_id: 'cs_1',
+        inventory_pool_id: 'pool_1',
+        ticket_type_id: 'tt_1',
+        quantity: 1,
+        expires_at: input.holdExpiresAt,
+        status: 'active',
+      },
+    },
+    inventory_pools: {
+      pool_1: {
+        id: 'pool_1',
+        sold_count: 0,
+      },
+    },
+    discount_codes: {
+      dc_1: {
+        id: 'dc_1',
+        event_id: 'evt_1',
+        code: input.discountCode.toUpperCase(),
+        type: 'percentage',
+        value: 1000,
+        currency: 'USD',
+        max_uses: input.maxUses,
+        uses_count: input.usesCount,
+        valid_from: null,
+        valid_until: input.validUntil ?? null,
+        min_order_cents: null,
+        max_discount_cents: null,
+        ticket_type_ids: null,
+        status: input.status,
+        created_at: new Date(),
+        updated_at: new Date(),
       },
     },
     questions: {},

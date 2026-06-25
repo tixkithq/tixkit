@@ -2,6 +2,7 @@ import { Migrator, type MigrationProvider, type Migration } from 'kysely/migrati
 import { sql } from 'kysely';
 import { createDb, getDriver, type Database } from './client.js';
 import { InitialMigration } from './migrations/0001_initial.js';
+import { DiscountRedemptionsMigration } from './migrations/0002_discount_redemptions.js';
 
 const INITIAL_MIGRATION_NAME = '0001_initial';
 const MIGRATION_TABLE = 'kysely_migration';
@@ -85,6 +86,7 @@ class GateKitMigrationProvider implements MigrationProvider {
   async getMigrations(): Promise<Record<string, Migration>> {
     return {
       [INITIAL_MIGRATION_NAME]: InitialMigration,
+      '0002_discount_redemptions': DiscountRedemptionsMigration,
     };
   }
 }

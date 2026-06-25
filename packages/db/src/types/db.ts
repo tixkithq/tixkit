@@ -453,6 +453,16 @@ export interface DiscountCodeTable {
   updated_at: Timestamp;
 }
 
+export interface DiscountRedemptionTable {
+  id: string;
+  discount_code_id: string;
+  event_id: string;
+  checkout_session_id: string;
+  order_id: string | null;
+  tenant_id: string | null;
+  created_at: Timestamp;
+}
+
 export interface TaxRuleTable {
   id: string;
   event_id: string;
@@ -909,6 +919,7 @@ export interface DB {
   refunds: RefundTable;
   payment_events: PaymentEventTable;
   discount_codes: DiscountCodeTable;
+  discount_redemptions: DiscountRedemptionTable;
   tax_rules: TaxRuleTable;
   fee_rules: FeeRuleTable;
   products: ProductTable;

@@ -332,6 +332,7 @@ export async function finalizeOrderActivity(input: {
       items: { ticketTypeId: string; quantity: number }[];
       buyerFields?: Record<string, unknown>;
       attendeeFields?: Record<string, unknown[]>;
+      discountCode?: string;
     }>(session.cart);
     const buyer = parseStoredJson<{ email?: string; firstName?: string; lastName?: string; phone?: string }>(session.buyer);
 
@@ -403,6 +404,95 @@ export async function finalizeOrderActivity(input: {
           message: heldCart.message,
           retryable: false,
         };
+      }
+
+      // Consume promo code idempotently under lock. The discount_codes row is
+      // locked for update, revalidated against max_uses, and a redemption
+      // record is inserted with a unique constraint on checkout_session_id.
+      // If the activity retries after committing, the existing redemption
+      // makes the consumption a no-op. The DB check constraint
+      // uses_count <= max_uses is the final backstop against race conditions.
+      if (cart.discountCode && quote.discountCents > 0) {
+        const discount = await trx
+          .selectFrom('discount_codes')
+          .selectAll()
+          .where('event_id', '=', session.event_id)
+          .where('code', '=', cart.discountCode.toUpperCase())
+          .forUpdate()
+          .executeTakeFirst();
+
+        if (!discount) {
+          return {
+            ok: false,
+            errorCode: 'DISCOUNT_INVALID',
+            message: `Discount code ${cart.discountCode} not found`,
+            retryable: false,
+          };
+        }
+
+        const existingRedemption = await trx
+          .selectFrom('discount_redemptions')
+          .select(['id'])
+          .where('checkout_session_id', '=', input.checkoutSessionId)
+          .executeTakeFirst();
+
+        if (!existingRedemption) {
+          if (discount.status !== 'active') {
+            return {
+              ok: false,
+              errorCode: 'DISCOUNT_INVALID',
+              message: `Discount code ${cart.discountCode} status is ${discount.status}`,
+              retryable: false,
+            };
+          }
+          const nowDate = now;
+          if (discount.valid_from && new Date(discount.valid_from) > nowDate) {
+            return {
+              ok: false,
+              errorCode: 'DISCOUNT_INVALID',
+              message: `Discount code ${cart.discountCode} not yet valid`,
+              retryable: false,
+            };
+          }
+          if (discount.valid_until && new Date(discount.valid_until) < nowDate) {
+            return {
+              ok: false,
+              errorCode: 'DISCOUNT_INVALID',
+              message: `Discount code ${cart.discountCode} expired`,
+              retryable: false,
+            };
+          }
+          if (Number(discount.uses_count) >= Number(discount.max_uses)) {
+            return {
+              ok: false,
+              errorCode: 'DISCOUNT_EXHAUSTED',
+              message: `Discount code ${cart.discountCode} max uses reached`,
+              retryable: false,
+            };
+          }
+
+          await trx
+            .updateTable('discount_codes')
+            .set((eb) => ({
+              uses_count: eb('uses_count', '+', 1),
+              updated_at: now,
+            }))
+            .where('id', '=', discount.id)
+            .execute();
+
+          await trx
+            .insertInto('discount_redemptions')
+            .values({
+              id: `dred_${ulid()}`,
+              discount_code_id: discount.id,
+              event_id: session.event_id,
+              checkout_session_id: input.checkoutSessionId,
+              order_id: orderId,
+              tenant_id: input.tenantId,
+              created_at: now,
+            })
+            .execute();
+        }
       }
 
       // Create order
