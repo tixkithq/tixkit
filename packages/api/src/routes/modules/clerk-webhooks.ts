@@ -17,9 +17,20 @@ type ClerkWebhookData = {
 export const clerkWebhookRoutes: FastifyPluginAsync = async (app) => {
   const db = app.context.db;
   const temporalClient = app.context.temporalClient;
-  const webhookSecret = process.env.CLERK_WEBHOOK_SECRET ?? '';
+  const webhookSecret = process.env.CLERK_WEBHOOK_SECRET;
 
   app.post('/', async (request, reply) => {
+    if (!webhookSecret) {
+      request.log.error('CLERK_WEBHOOK_SECRET is not configured; rejecting Clerk webhook');
+      return reply.status(503).send({
+        error: {
+          code: 'WEBHOOK_NOT_CONFIGURED',
+          message: 'Clerk webhook verification is not configured',
+          requestId: request.id,
+        },
+      });
+    }
+
     const rawBody = (request as unknown as { rawBody?: string }).rawBody;
     if (!rawBody) {
       throw new WebhookSignatureError('Missing raw body required for signature verification');
@@ -32,11 +43,9 @@ export const clerkWebhookRoutes: FastifyPluginAsync = async (app) => {
       throw new WebhookSignatureError('Missing required webhook headers');
     }
 
-    if (webhookSecret) {
-      if (!verifySvixSignature(rawBody, msgId, timestamp, signature, webhookSecret)) {
+    if (!verifySvixSignature(rawBody, msgId, timestamp, signature, webhookSecret)) {
         throw new WebhookSignatureError('Invalid signature');
       }
-    }
 
     const event = request.body as { type: string; data: ClerkWebhookData };
 

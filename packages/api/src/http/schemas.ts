@@ -5,7 +5,17 @@ import { ValidationError } from '@gatekit/domain';
 const ulidSchema = z.string().min(1);
 const currencySchema = z.string().length(3);
 const iso8601Schema = z.string().datetime();
-const urlSchema = z.string().url();
+const urlSchema = z.string().url().refine(
+  (val) => {
+    try {
+      const url = new URL(val);
+      return url.protocol === 'https:' || url.protocol === 'http:';
+    } catch {
+      return false;
+    }
+  },
+  { message: 'URL must use http or https scheme; javascript:, data:, and file: schemes are not allowed' },
+);
 
 /**
  * Validates that a URL uses an allowed scheme (https in production, http in dev).
