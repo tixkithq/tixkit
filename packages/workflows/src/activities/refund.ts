@@ -374,6 +374,27 @@ export async function restoreInventoryActivity(input: {
         .executeTakeFirst();
       if (!order) return 0;
 
+      // Read pool IDs without lock first, then lock pools in sorted order
+      // before locking holds. This matches the finalize activity's lock
+      // ordering (pools -> holds) to prevent deadlocks under concurrent
+      // finalize/refund operations.
+      const candidateHolds = await trx
+        .selectFrom('checkout_holds')
+        .selectAll()
+        .where('checkout_session_id', '=', order.checkout_session_id)
+        .where('status', '=', 'converted')
+        .execute();
+      const poolIds = [...new Set(candidateHolds.map((hold) => hold.inventory_pool_id))].sort();
+      for (const poolId of poolIds) {
+        // eslint-disable-next-line no-await-in-loop -- inventory pools must be locked sequentially in sorted order to avoid deadlocks.
+        await trx
+          .selectFrom('inventory_pools')
+          .select(['id'])
+          .where('id', '=', poolId)
+          .forUpdate()
+          .executeTakeFirstOrThrow();
+      }
+
       const holds = await trx
         .selectFrom('checkout_holds')
         .selectAll()
