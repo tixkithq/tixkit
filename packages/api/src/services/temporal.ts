@@ -29,6 +29,7 @@ import {
   notificationWorkflowId,
   smsDeliveryWorkflowId,
   holdExpirationWorkflowId,
+  HOLD_EXPIRATION_WORKFLOW_VERSION,
   type CheckoutSessionWorkflowInput,
   type PaymentReconciliationWorkflowInput,
   type RefundWorkflowInput,
@@ -234,6 +235,7 @@ export class TemporalClient {
       return await this.client.workflow.start(holdExpirationWorkflow, {
         taskQueue: 'gatekit',
         workflowId,
+        args: [{ version: HOLD_EXPIRATION_WORKFLOW_VERSION }],
       });
     } catch (err) {
       if (isWorkflowAlreadyStartedError(err)) {

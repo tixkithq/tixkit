@@ -4,7 +4,7 @@ import { createRequire } from 'node:module';
 import { config } from './config.js';
 import * as allActivities from './activities/index.js';
 import { holdExpirationWorkflow } from './workflows/index.js';
-import { holdExpirationWorkflowId } from './shared/types.js';
+import { holdExpirationWorkflowId, HOLD_EXPIRATION_WORKFLOW_VERSION } from './shared/types.js';
 import { buildWorkerStartupFailureMessage } from './startup-diagnostics.js';
 
 const require = createRequire(import.meta.url);
@@ -32,6 +32,7 @@ async function runWorker(): Promise<void> {
       await client.workflow.start(holdExpirationWorkflow, {
         taskQueue: 'gatekit',
         workflowId,
+        args: [{ version: HOLD_EXPIRATION_WORKFLOW_VERSION }],
       });
     } catch (err) {
       // Already running is fine.
