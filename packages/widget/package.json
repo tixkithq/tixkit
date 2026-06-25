@@ -1,0 +1,20 @@
+{
+  "name": "@gatekit/widget",
+  "version": "0.1.0",
+  "type": "module",
+  "main": "./dist/gatekit-widget.js",
+  "scripts": {
+    "build": "tsc --noEmit && esbuild src/index.ts --bundle --minify --format=esm --outfile=dist/gatekit-widget.js",
+    "dev": "esbuild src/index.ts --bundle --format=esm --outfile=dist/gatekit-widget.js --watch",
+    "lint": "oxlint src",
+    "typecheck": "tsc --noEmit",
+    "test:unit": "vitest run",
+    "clean": "rm -rf dist"
+  },
+  "devDependencies": {
+    "typescript": "5.9.3",
+    "esbuild": "^0.28.0",
+    "vitest": "^4.1.0",
+    "jsdom": "^26.1.0"
+  }
+}

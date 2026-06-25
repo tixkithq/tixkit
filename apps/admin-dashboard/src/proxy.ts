@@ -1,0 +1,31 @@
+import { clerkMiddleware } from '@clerk/nextjs/server'
+import { NextResponse, type NextFetchEvent, type NextRequest } from 'next/server'
+
+function hasUsableClerkPublishableKey(): boolean {
+  const key =
+    process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY ??
+    process.env.CLERK_PUBLISHABLE_KEY
+  return Boolean(
+    key &&
+      key !== 'pk_test_' &&
+      key !== 'pk_live_' &&
+      (key.startsWith('pk_test_') || key.startsWith('pk_live_')),
+  )
+}
+
+const clerkProxy = clerkMiddleware()
+
+export default function proxy(request: NextRequest, event: NextFetchEvent) {
+  if (!hasUsableClerkPublishableKey()) {
+    return NextResponse.next()
+  }
+  return clerkProxy(request, event)
+}
+
+export const config = {
+  matcher: [
+    '/((?!_next|[^?]*\\.(?:html?|css|js(?!on)|jpe?g|webp|png|gif|svg|ttf|woff2?|ico|csv|docx?|xlsx?|zip|webmanifest)).*)',
+    '/(api|trpc)(.*)',
+    '/__clerk/(.*)',
+  ],
+}

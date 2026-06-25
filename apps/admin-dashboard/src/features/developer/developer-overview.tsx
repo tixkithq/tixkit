@@ -1,0 +1,138 @@
+'use client'
+
+import * as React from 'react'
+import Link from 'next/link'
+import { KeyRound, Webhook, BookOpen, Code2 } from 'lucide-react'
+import { adminApi } from '@/lib/api'
+import { routes } from '@/lib/routes'
+import { Button } from '@/components/ui/button'
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
+import { Skeleton } from '@/components/ui/skeleton'
+import { Badge } from '@/components/ui/badge'
+import { useAdminData } from '@/hooks/use-admin-data'
+
+export function DeveloperOverview() {
+  const { data: apiKeys, loading: keysLoading } = useAdminData(() =>
+    adminApi.listApiKeys()
+  )
+  const { data: webhooks, loading: webhooksLoading } = useAdminData(() =>
+    adminApi.listWebhookEndpoints()
+  )
+
+  const activeKeys = (apiKeys ?? []).length
+  const activeWebhooks = (webhooks ?? []).filter(
+    (w) => w.status === 'active'
+  ).length
+
+  return (
+    <div className='space-y-6'>
+      <div className='flex flex-wrap items-center justify-between gap-2'>
+        <div className='space-y-1'>
+          <h1 className='text-2xl font-bold tracking-tight'>Developer</h1>
+          <p className='text-sm text-muted-foreground'>
+            API keys, webhooks, and platform integrations
+          </p>
+        </div>
+        <Button asChild>
+          <Link href={routes.developerApiKeys}>
+            <KeyRound className='size-4' />
+            Create API key
+          </Link>
+        </Button>
+      </div>
+
+      <div className='grid gap-4 sm:grid-cols-2'>
+        <Card>
+          <CardHeader className='flex flex-row items-center justify-between space-y-0 pb-2'>
+            <CardTitle className='text-sm font-medium'>API Keys</CardTitle>
+            <KeyRound className='size-4 text-muted-foreground' />
+          </CardHeader>
+          <CardContent>
+            {keysLoading ? (
+              <Skeleton className='h-8 w-20' />
+            ) : (
+              <>
+                <div className='text-2xl font-bold'>{activeKeys}</div>
+                <p className='text-xs text-muted-foreground'>
+                  active key{(apiKeys ?? []).length === 1 ? '' : 's'}
+                </p>
+                <Button
+                  variant='link'
+                  size='sm'
+                  asChild
+                  className='mt-2 h-auto p-0'
+                >
+                  <Link href={routes.developerApiKeys}>Manage keys →</Link>
+                </Button>
+              </>
+            )}
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader className='flex flex-row items-center justify-between space-y-0 pb-2'>
+            <CardTitle className='text-sm font-medium'>Webhooks</CardTitle>
+            <Webhook className='size-4 text-muted-foreground' />
+          </CardHeader>
+          <CardContent>
+            {webhooksLoading ? (
+              <Skeleton className='h-8 w-20' />
+            ) : (
+              <>
+                <div className='text-2xl font-bold'>{activeWebhooks}</div>
+                <p className='text-xs text-muted-foreground'>
+                  active endpoint{(webhooks ?? []).length === 1 ? '' : 's'}
+                </p>
+                <Button
+                  variant='link'
+                  size='sm'
+                  asChild
+                  className='mt-2 h-auto p-0'
+                >
+                  <Link href={routes.developerWebhooks}>
+                    Manage endpoints →
+                  </Link>
+                </Button>
+              </>
+            )}
+          </CardContent>
+        </Card>
+      </div>
+
+      <Card>
+        <CardHeader>
+          <CardTitle className='flex items-center gap-2'>
+            <BookOpen className='size-5' />
+            Resources
+          </CardTitle>
+        </CardHeader>
+        <CardContent className='space-y-3'>
+          <div className='flex items-center justify-between rounded-lg border p-3'>
+            <div className='flex items-center gap-3'>
+              <Code2 className='size-5 text-muted-foreground' />
+              <div>
+                <p className='font-medium'>API Reference</p>
+                <p className='text-sm text-muted-foreground'>
+                  Full REST API documentation
+                </p>
+              </div>
+            </div>
+            <Badge variant='outline'>Coming soon</Badge>
+          </div>
+          <div className='flex items-center justify-between rounded-lg border p-3'>
+            <div className='flex items-center gap-3'>
+              <Webhook className='size-5 text-muted-foreground' />
+              <div>
+                <p className='font-medium'>Webhook Guide</p>
+                <p className='text-sm text-muted-foreground'>
+                  Event types, payloads, and signatures
+                </p>
+              </div>
+            </div>
+            <Badge variant='outline'>Coming soon</Badge>
+          </div>
+        </CardContent>
+      </Card>
+    </div>
+  )
+}

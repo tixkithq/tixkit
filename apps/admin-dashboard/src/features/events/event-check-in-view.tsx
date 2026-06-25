@@ -1,0 +1,239 @@
+'use client'
+
+import * as React from 'react'
+import { QrCode, Search, CheckCircle2, XCircle, AlertCircle } from 'lucide-react'
+import { type CheckInScanResult, adminApi } from '@/lib/api'
+import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
+import { EmptyState } from '@/components/empty-state'
+import { Skeleton } from '@/components/ui/skeleton'
+import { useAdminData } from '@/hooks/use-admin-data'
+import { cn } from '@/lib/utils'
+
+export function EventCheckInView({ eventId }: { eventId: string }) {
+  const [qrPayload, setQrPayload] = React.useState('')
+  const [scanning, setScanning] = React.useState(false)
+  const [lastResult, setLastResult] = React.useState<CheckInScanResult | null>(null)
+  const [manualSearch, setManualSearch] = React.useState('')
+
+  const { data: eventData, loading: eventLoading } = useAdminData(
+    () => adminApi.getEvent(eventId),
+    [eventId]
+  )
+  const { data: attendeesData } = useAdminData(
+    () => adminApi.listAttendees({ eventId }),
+    [eventId]
+  )
+
+  const event = eventData
+  const attendees = attendeesData?.items ?? []
+
+  const handleScan = async () => {
+    if (!qrPayload) return
+    setScanning(true)
+    const result = await adminApi.scanTicket({
+      eventId,
+      qrPayload,
+      scannedAt: new Date().toISOString(),
+    })
+    setScanning(false)
+    if (result.ok) {
+      setLastResult(result.data)
+      setQrPayload('')
+    } else {
+      setLastResult({
+        status: 'invalid',
+        message: result.error.message,
+        scannedAt: new Date().toISOString(),
+      })
+    }
+  }
+
+  if (eventLoading) {
+    return <Skeleton className='h-96 w-full' />
+  }
+
+  if (!event) {
+    return (
+      <EmptyState
+        icon={QrCode}
+        title='Event not found'
+        description='The event you are looking for does not exist.'
+      />
+    )
+  }
+
+  const filteredAttendees = manualSearch
+    ? attendees.filter(
+        (a) =>
+          a.name.toLowerCase().includes(manualSearch.toLowerCase()) ||
+          a.email?.toLowerCase().includes(manualSearch.toLowerCase()) ||
+          a.ticketId.includes(manualSearch)
+      )
+    : attendees.slice(0, 10)
+
+  return (
+    <div className='space-y-6'>
+      {event && (
+        <Card>
+          <CardHeader>
+            <CardTitle>Check-in Summary</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className='grid gap-4 sm:grid-cols-3'>
+              <div className='space-y-1'>
+                <p className='text-sm text-muted-foreground'>Capacity</p>
+                <p className='text-2xl font-bold'>
+                  {event.capacity ?? '—'}
+                </p>
+              </div>
+              <div className='space-y-1'>
+                <p className='text-sm text-muted-foreground'>Tickets Sold</p>
+                <p className='text-2xl font-bold'>{event.ticketsSold}</p>
+              </div>
+              <div className='space-y-1'>
+                <p className='text-sm text-muted-foreground'>Checked In</p>
+                <p className='text-2xl font-bold'>{event.checkIns}</p>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
+      <div className='grid gap-6 lg:grid-cols-2'>
+        <Card>
+          <CardHeader>
+            <CardTitle className='flex items-center gap-2'>
+              <QrCode className='size-5' />
+              Scan Ticket
+            </CardTitle>
+          </CardHeader>
+          <CardContent className='space-y-4'>
+            <div className='flex gap-2'>
+              <Input
+                placeholder='Enter QR code or ticket ID'
+                value={qrPayload}
+                onChange={(e) => setQrPayload(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') handleScan()
+                }}
+              />
+              <Button onClick={handleScan} disabled={scanning || !qrPayload}>
+                {scanning ? 'Scanning...' : 'Scan'}
+              </Button>
+            </div>
+            {lastResult && <ScanResult result={lastResult} />}
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader>
+            <CardTitle className='flex items-center gap-2'>
+              <Search className='size-5' />
+              Manual Lookup
+            </CardTitle>
+          </CardHeader>
+          <CardContent className='space-y-3'>
+            <Input
+              placeholder='Search by name, email, or ticket ID'
+              value={manualSearch}
+              onChange={(e) => setManualSearch(e.target.value)}
+            />
+            <div className='max-h-64 space-y-1 overflow-y-auto'>
+              {filteredAttendees.length === 0 ? (
+                <p className='py-4 text-center text-sm text-muted-foreground'>
+                  No attendees found
+                </p>
+              ) : (
+                filteredAttendees.map((attendee) => (
+                  <div
+                    key={attendee.id}
+                    className='flex items-center justify-between rounded-md border p-2 text-sm'
+                  >
+                    <div>
+                      <p className='font-medium'>{attendee.name}</p>
+                      <p className='text-xs text-muted-foreground'>
+                        {attendee.ticketTypeName}
+                      </p>
+                    </div>
+                    <span
+                      className={cn(
+                        'text-xs',
+                        attendee.checkInStatus === 'checked_in'
+                          ? 'text-emerald-600 dark:text-emerald-400'
+                          : 'text-muted-foreground'
+                      )}
+                    >
+                      {attendee.checkInStatus === 'checked_in'
+                        ? 'Checked in'
+                        : 'Pending'}
+                    </span>
+                  </div>
+                ))
+              )}
+            </div>
+          </CardContent>
+        </Card>
+      </div>
+    </div>
+  )
+}
+
+function ScanResult({ result }: { result: CheckInScanResult }) {
+  const config = {
+    accepted: {
+      icon: CheckCircle2,
+      className:
+        'border-emerald-500/30 bg-emerald-500/10 text-emerald-700 dark:text-emerald-400',
+    },
+    duplicate: {
+      icon: AlertCircle,
+      className:
+        'border-amber-500/30 bg-amber-500/10 text-amber-700 dark:text-amber-400',
+    },
+    invalid: {
+      icon: XCircle,
+      className:
+        'border-red-500/30 bg-red-500/10 text-red-700 dark:text-red-400',
+    },
+    revoked: {
+      icon: XCircle,
+      className:
+        'border-red-500/30 bg-red-500/10 text-red-700 dark:text-red-400',
+    },
+    wrong_event: {
+      icon: AlertCircle,
+      className:
+        'border-amber-500/30 bg-amber-500/10 text-amber-700 dark:text-amber-400',
+    },
+  }
+
+  const { icon: Icon, className } = config[result.status]
+
+  return (
+    <div
+      className={cn(
+        'flex items-start gap-3 rounded-lg border p-4',
+        className
+      )}
+    >
+      <Icon className='mt-0.5 size-5 shrink-0' />
+      <div className='space-y-1'>
+        <p className='font-medium capitalize'>
+          {result.status.replace('_', ' ')}
+        </p>
+        <p className='text-sm'>
+          {result.status === 'accepted'
+            ? `${result.attendee.name} has been checked in.`
+            : result.message}
+        </p>
+        {result.attendee && result.status !== 'accepted' && (
+          <p className='text-xs text-muted-foreground'>
+            Attendee: {result.attendee.name} ({result.attendee.ticketTypeName})
+          </p>
+        )}
+      </div>
+    </div>
+  )
+}
