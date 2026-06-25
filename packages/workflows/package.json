@@ -1,0 +1,37 @@
+{
+  "name": "@gatekit/workflows",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsx watch src/worker.ts",
+    "start": "node dist/worker.js",
+    "lint": "oxlint src",
+    "typecheck": "tsc --noEmit",
+    "test:unit": "vitest run",
+    "clean": "rm -rf dist"
+  },
+  "dependencies": {
+    "@gatekit/domain": "workspace:*",
+    "@gatekit/db": "workspace:*",
+    "@gatekit/email-transport": "workspace:*",
+    "@temporalio/client": "^1.18.0",
+    "stripe": "^22.2.0",
+    "@temporalio/worker": "^1.18.0",
+    "@temporalio/workflow": "^1.18.0",
+    "@temporalio/activity": "^1.18.0",
+    "@temporalio/common": "^1.18.0",
+    "@temporalio/testing": "^1.18.0",
+    "ioredis": "^5.11.0",
+    "ulid": "^2.3.0"
+  },
+  "devDependencies": {
+    "typescript": "5.9.3",
+    "tsx": "^4.22.0",
+    "vitest": "^4.1.0",
+    "@types/node": "^22.20.0"
+  }
+}
