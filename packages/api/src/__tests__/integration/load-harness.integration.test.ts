@@ -1,0 +1,493 @@
+import { describe, expect, it, beforeAll, afterAll, beforeEach } from 'vitest';
+import { createDb, type Database } from '@gatekit/db';
+import {
+  PaymentEventRepository,
+  TicketRepository,
+  AttendeeRepository,
+  OrderRepository,
+} from '@gatekit/db';
+import { InventoryService } from '../../services/inventory.js';
+import { ulid } from 'ulid';
+
+/**
+ * T44 Load and concurrency harnesses (real PostgreSQL).
+ *
+ * These tests exercise high-concurrency paths against a real database to
+ * verify oversell prevention, webhook burst dedupe, scanner burst duplicate
+ * detection, and large export generation. They require a running PostgreSQL
+ * instance (`bun run infra:up`) and are skipped when `DATABASE_URL` is unset.
+ *
+ * All test data is scoped under a single tenant/org/brand/event created for
+ * this run and torn down afterwards, so it does not interfere with other
+ * integration tests.
+ */
+
+let db: Database;
+let inventoryService: InventoryService;
+let paymentEventRepo: PaymentEventRepository;
+let ticketRepo: TicketRepository;
+let attendeeRepo: AttendeeRepository;
+let orderRepo: OrderRepository;
+
+const RUN_ID = ulid().slice(-10);
+const TENANT_ID = `tnt_load_${RUN_ID}`;
+const ORG_ID = `org_load_${RUN_ID}`;
+const BRAND_ID = `brd_load_${RUN_ID}`;
+const EVENT_ID = `evt_load_${RUN_ID}`;
+
+async function seedTenantGraph(trx: Database): Promise<void> {
+  await trx.insertInto('tenants').values({
+    id: TENANT_ID,
+    name: 'Load Harness Tenant',
+    status: 'active',
+    plan: 'test',
+    created_at: new Date(),
+    updated_at: new Date(),
+  }).execute();
+  await trx.insertInto('organizations').values({
+    id: ORG_ID,
+    tenant_id: TENANT_ID,
+    name: 'Load Harness Org',
+    slug: `load-${RUN_ID}`,
+    clerk_organization_id: null,
+    status: 'active',
+    created_at: new Date(),
+    updated_at: new Date(),
+  }).execute();
+  await trx.insertInto('brands').values({
+    id: BRAND_ID,
+    tenant_id: TENANT_ID,
+    organization_id: ORG_ID,
+    name: 'Load Harness Brand',
+    slug: `load-${RUN_ID}`,
+    status: 'active',
+    theme: JSON.stringify({}),
+    legal_urls: JSON.stringify({}),
+    white_label: false,
+    payment_account_id: null,
+    created_at: new Date(),
+    updated_at: new Date(),
+  }).execute();
+  await trx.insertInto('events').values({
+    id: EVENT_ID,
+    tenant_id: TENANT_ID,
+    organization_id: ORG_ID,
+    brand_id: BRAND_ID,
+    slug: `load-${RUN_ID}`,
+    title: 'Load Harness Event',
+    description: null,
+    status: 'published',
+    timezone: 'UTC',
+    starts_at: new Date(Date.now() + 86400000),
+    ends_at: null,
+    visibility: 'public',
+    seo: JSON.stringify({}),
+    capacity: null,
+    cover_image_url: null,
+    external_url: null,
+    created_at: new Date(),
+    updated_at: new Date(),
+  }).execute();
+}
+
+async function cleanupAll(db: Database): Promise<void> {
+  // Clean up load-harness data in reverse FK order.
+  await db.deleteFrom('scan_logs').where('tenant_id', '=', TENANT_ID).execute();
+  await db.deleteFrom('tickets').where('event_id', '=', EVENT_ID).execute();
+  await db.deleteFrom('attendees').where('event_id', '=', EVENT_ID).execute();
+  await db.deleteFrom('orders').where('tenant_id', '=', TENANT_ID).execute();
+  await db.deleteFrom('export_job_events').where('tenant_id', '=', TENANT_ID).execute();
+  await db.deleteFrom('export_jobs').where('tenant_id', '=', TENANT_ID).execute();
+  await db.deleteFrom('payment_events').where('tenant_id', '=', TENANT_ID).execute();
+  await db.deleteFrom('checkout_holds').where('checkout_session_id', 'like', 'cs_load_%').execute();
+  await db.deleteFrom('checkout_sessions').where('id', 'like', 'cs_load_%').execute();
+  await db.deleteFrom('ticket_types').where('event_id', '=', EVENT_ID).execute();
+  await db.deleteFrom('inventory_pools').where('event_id', '=', EVENT_ID).execute();
+  await db.deleteFrom('events').where('id', '=', EVENT_ID).execute();
+  await db.deleteFrom('brands').where('id', '=', BRAND_ID).execute();
+  await db.deleteFrom('organizations').where('id', '=', ORG_ID).execute();
+  await db.deleteFrom('tenants').where('id', '=', TENANT_ID).execute();
+}
+
+async function createPool(db: Database, capacity: number, ttl = 300): Promise<string> {
+  const poolId = `pool_load_${ulid().slice(-10)}`;
+  await db.insertInto('inventory_pools').values({
+    id: poolId,
+    event_id: EVENT_ID,
+    name: `Load Pool ${poolId}`,
+    total_capacity: capacity,
+    reserved_count: 0,
+    sold_count: 0,
+    hold_ttl_seconds: ttl,
+    created_at: new Date(),
+    updated_at: new Date(),
+  }).execute();
+  return poolId;
+}
+
+async function createTicketType(db: Database, poolId: string): Promise<string> {
+  const ticketTypeId = `tt_load_${ulid().slice(-10)}`;
+  await db.insertInto('ticket_types').values({
+    id: ticketTypeId,
+    event_id: EVENT_ID,
+    name: `Load Ticket ${ticketTypeId}`,
+    description: null,
+    kind: 'paid',
+    status: 'active',
+    visibility: 'public',
+    currency: 'USD',
+    price_cents: 1000,
+    minimum_price_cents: null,
+    sales_start_at: null,
+    sales_end_at: null,
+    min_per_order: 1,
+    max_per_order: 10,
+    inventory_pool_id: poolId,
+    sort_order: 0,
+    requires_access_code: false,
+    access_code_hint: null,
+    created_at: new Date(),
+    updated_at: new Date(),
+  }).execute();
+  return ticketTypeId;
+}
+
+async function createCheckoutSession(db: Database, ticketTypeId: string): Promise<string> {
+  const sessionId = `cs_load_${ulid().slice(-10)}`;
+  await db.insertInto('checkout_sessions').values({
+    id: sessionId,
+    tenant_id: TENANT_ID,
+    event_id: EVENT_ID,
+    brand_id: BRAND_ID,
+    status: 'open',
+    hold_id: `hld_${ulid()}`,
+    currency: 'USD',
+    cart: JSON.stringify({ items: [{ ticketTypeId, quantity: 1 }] }),
+    buyer: JSON.stringify({ email: 'load@example.com' }),
+    quote: JSON.stringify({ totalCents: 1000, feeCents: 0, subtotalCents: 1000, discountCents: 0, taxCents: 0 }),
+    expires_at: new Date(Date.now() + 300000),
+    idempotency_key: `ik_load_${ulid()}`,
+    success_url: null,
+    cancel_url: null,
+    order_id: null,
+    client_token: ulid(),
+    payment_intent_id: null,
+    created_at: new Date(),
+    updated_at: new Date(),
+  }).execute();
+  return sessionId;
+}
+
+async function createOrder(): Promise<string> {
+  // orders.checkout_session_id has a FK to checkout_sessions.id, so we must
+  // create a real checkout session row before inserting the order.
+  const sessionId = `cs_load_${ulid().slice(-10)}`;
+  await db.insertInto('checkout_sessions').values({
+    id: sessionId,
+    tenant_id: TENANT_ID,
+    event_id: EVENT_ID,
+    brand_id: BRAND_ID,
+    status: 'open',
+    hold_id: `hld_${ulid()}`,
+    currency: 'USD',
+    cart: JSON.stringify({ items: [] }),
+    buyer: JSON.stringify({ email: 'load-buyer@example.com' }),
+    quote: JSON.stringify({ totalCents: 1000, feeCents: 0, subtotalCents: 1000, discountCents: 0, taxCents: 0 }),
+    expires_at: new Date(Date.now() + 300000),
+    idempotency_key: `ik_load_${ulid()}`,
+    success_url: null,
+    cancel_url: null,
+    order_id: null,
+    client_token: ulid(),
+    payment_intent_id: null,
+    created_at: new Date(),
+    updated_at: new Date(),
+  }).execute();
+
+  const order = await orderRepo.create({
+    tenantId: TENANT_ID,
+    organizationId: ORG_ID,
+    brandId: BRAND_ID,
+    eventId: EVENT_ID,
+    checkoutSessionId: sessionId,
+    orderNumber: `GK-LOAD-${ulid()}`,
+    status: 'paid',
+    currency: 'USD',
+    subtotalCents: 1000,
+    discountCents: 0,
+    taxCents: 0,
+    feeCents: 0,
+    totalCents: 1000,
+    buyerEmail: 'load-buyer@example.com',
+  });
+  return order.id;
+}
+
+/**
+ * CSV serialization mirroring the real export activity so the harness validates
+ * the same data shape that production exports emit.
+ */
+function toCsv(rows: Record<string, unknown>[]): string {
+  if (rows.length === 0) return '';
+  const headers = Object.keys(rows[0]);
+  const lines = [headers.join(',')];
+  for (const row of rows) {
+    lines.push(headers.map((h) => escapeCsv(row[h])).join(','));
+  }
+  return lines.join('\n');
+}
+
+function escapeCsv(val: unknown): string {
+  if (val === null || val === undefined) return '';
+  const str = String(val);
+  if (str.includes(',') || str.includes('"') || str.includes('\n')) {
+    return `"${str.replace(/"/g, '""')}"`;
+  }
+  return str;
+}
+
+describe.skipIf(!process.env.DATABASE_URL)('Load and concurrency harnesses (real PostgreSQL)', () => {
+  beforeAll(async () => {
+    db = createDb(process.env.DATABASE_URL);
+    inventoryService = new InventoryService(db);
+    paymentEventRepo = new PaymentEventRepository(db);
+    ticketRepo = new TicketRepository(db);
+    attendeeRepo = new AttendeeRepository(db);
+    orderRepo = new OrderRepository(db);
+    await seedTenantGraph(db);
+  });
+
+  afterAll(async () => {
+    await cleanupAll(db);
+    await db.destroy();
+  });
+
+  beforeEach(async () => {
+    // Reset per-test mutation targets scoped to this run. Order matters because
+    // of FK constraints: tickets/attendees reference orders, orders reference
+    // checkout_sessions.
+    await db.deleteFrom('scan_logs').where('tenant_id', '=', TENANT_ID).execute();
+    await db.deleteFrom('tickets').where('event_id', '=', EVENT_ID).execute();
+    await db.deleteFrom('attendees').where('event_id', '=', EVENT_ID).execute();
+    await db.deleteFrom('orders').where('tenant_id', '=', TENANT_ID).execute();
+    await db.deleteFrom('export_job_events').where('tenant_id', '=', TENANT_ID).execute();
+    await db.deleteFrom('export_jobs').where('tenant_id', '=', TENANT_ID).execute();
+    await db.deleteFrom('payment_events').where('tenant_id', '=', TENANT_ID).execute();
+    await db.deleteFrom('checkout_holds').where('checkout_session_id', 'like', 'cs_load_%').execute();
+    await db.deleteFrom('checkout_sessions').where('id', 'like', 'cs_load_%').execute();
+    await db.deleteFrom('ticket_types').where('event_id', '=', EVENT_ID).execute();
+    await db.deleteFrom('inventory_pools').where('event_id', '=', EVENT_ID).execute();
+  });
+
+  it('prevents oversell when 120 concurrent checkout reservations target a 25-capacity pool', async () => {
+    const CAPACITY = 25;
+    const CONCURRENT_CLIENTS = 120;
+
+    const poolId = await createPool(db, CAPACITY);
+    const ticketTypeId = await createTicketType(db, poolId);
+
+    const sessionIds: string[] = [];
+    for (let i = 0; i < CONCURRENT_CLIENTS; i++) {
+      sessionIds.push(await createCheckoutSession(db, ticketTypeId));
+    }
+
+    const results = await Promise.allSettled(
+      sessionIds.map((sessionId) =>
+        inventoryService.reserveCart({
+          items: [{ inventoryPoolId: poolId, ticketTypeId, quantity: 1 }],
+          checkoutSessionId: sessionId,
+        }),
+      ),
+    );
+
+    const succeeded = results.filter((r) => r.status === 'fulfilled').length;
+    const failed = results.filter((r) => r.status === 'rejected').length;
+
+    expect(succeeded).toBe(CAPACITY);
+    expect(failed).toBe(CONCURRENT_CLIENTS - CAPACITY);
+
+    const pool = await db
+      .selectFrom('inventory_pools')
+      .selectAll()
+      .where('id', '=', poolId)
+      .executeTakeFirstOrThrow();
+
+    const activeHolds = await db
+      .selectFrom('checkout_holds')
+      .select(db.fn.sum('quantity').as('total'))
+      .where('inventory_pool_id', '=', poolId)
+      .where('status', '=', 'active')
+      .executeTakeFirst();
+
+    const held = Number(activeHolds?.total ?? 0);
+    expect(Number(pool.sold_count)).toBe(0);
+    expect(held).toBe(CAPACITY);
+    expect(Number(pool.sold_count) + held).toBeLessThanOrEqual(CAPACITY);
+  });
+
+  it('webhook burst: concurrent deliveries for the same Stripe event dedupe to a single stored and processed row', async () => {
+    const BURST = 50;
+    const provider = 'stripe';
+    const providerEventId = `evt_load_${ulid()}`;
+    const eventType = 'payment_intent.succeeded';
+    const rawPayload = { id: providerEventId, type: eventType };
+
+    // Simulate the webhook route's store-then-process flow under a burst of
+    // concurrent deliveries for the same provider event. The unique constraint
+    // on (provider, provider_event_id) guarantees only one row is stored; the
+    // winner marks it processed while every other delivery observes a duplicate.
+    const deliver = async (): Promise<'created' | 'duplicate'> => {
+      try {
+        const stored = await paymentEventRepo.create({
+          tenantId: TENANT_ID,
+          provider,
+          providerEventId,
+          eventType,
+          rawPayload,
+          idempotencyKey: providerEventId,
+        });
+        await paymentEventRepo.markProcessed(stored.id);
+        return 'created';
+      } catch {
+        const existing = await paymentEventRepo.findByProviderEventId(provider, providerEventId);
+        if (!existing) throw new Error('webhook burst: race lost but no row found');
+        return 'duplicate';
+      }
+    };
+
+    const outcomes = await Promise.all(Array.from({ length: BURST }, () => deliver()));
+
+    const created = outcomes.filter((o) => o === 'created').length;
+    const duplicates = outcomes.filter((o) => o === 'duplicate').length;
+
+    expect(created).toBe(1);
+    expect(duplicates).toBe(BURST - 1);
+
+    const rows = await db
+      .selectFrom('payment_events')
+      .selectAll()
+      .where('provider', '=', provider)
+      .where('provider_event_id', '=', providerEventId)
+      .execute();
+
+    expect(rows).toHaveLength(1);
+    expect(rows[0].processed_at).not.toBeNull();
+    expect(rows[0].tenant_id).toBe(TENANT_ID);
+  });
+
+  it('scanner burst: concurrent scans for the same ticket yield exactly one accepted check-in', async () => {
+    const BURST = 60;
+    const deviceId = `dev_load_${ulid().slice(-8)}`;
+    const qrHash = `qrh_load_${ulid()}`;
+    const qrPayload = `payload_${ulid()}`;
+    const poolId = await createPool(db, 1000);
+    const ticketTypeId = await createTicketType(db, poolId);
+
+    const orderId = await createOrder();
+    const attendee = await attendeeRepo.create({
+      tenantId: TENANT_ID,
+      orderId,
+      eventId: EVENT_ID,
+      ticketTypeId,
+      email: 'load-scanner@example.com',
+      firstName: 'Scanner',
+      lastName: 'Burst',
+    });
+    const ticket = await ticketRepo.create({
+      tenantId: TENANT_ID,
+      orderId,
+      attendeeId: attendee.id,
+      eventId: EVENT_ID,
+      ticketTypeId,
+      code: `code_${ulid()}`,
+      qrPayload,
+      qrHash,
+    });
+
+    const scannedAt = new Date();
+    const outcomes = await Promise.all(
+      Array.from({ length: BURST }, () => ticketRepo.checkInIfValid(ticket.id, deviceId, scannedAt)),
+    );
+
+    const accepted = outcomes.filter(Boolean).length;
+    const duplicates = outcomes.filter((v) => !v).length;
+
+    expect(accepted).toBe(1);
+    expect(duplicates).toBe(BURST - 1);
+
+    const refreshed = await ticketRepo.findById(ticket.id);
+    expect(refreshed?.status).toBe('checked_in');
+    expect(refreshed?.checked_in_by_device_id).toBe(deviceId);
+  });
+
+  it('large export: 100+ attendees are exported correctly into CSV', async () => {
+    const ATTENDEE_COUNT = 120;
+    const ticketTypeId = await createTicketType(db, await createPool(db, ATTENDEE_COUNT));
+    // attendees.order_id has a FK to orders.id; create one real order and link
+    // every exported attendee to it.
+    const orderId = await createOrder();
+
+    const createdAttendees: { id: string; email: string; firstName: string; lastName: string }[] = [];
+    for (let i = 0; i < ATTENDEE_COUNT; i++) {
+      const row = await attendeeRepo.create({
+        tenantId: TENANT_ID,
+        orderId,
+        eventId: EVENT_ID,
+        ticketTypeId,
+        email: `load-attendee-${i}@example.com`,
+        firstName: `First${i}`,
+        lastName: `Last${i}`,
+      });
+      createdAttendees.push({
+        id: row.id,
+        email: row.email,
+        firstName: row.first_name as string,
+        lastName: row.last_name as string,
+      });
+    }
+
+    // Read attendees the same way the export activity does (tenant + event scoped).
+    const rows = await db
+      .selectFrom('attendees')
+      .selectAll()
+      .where('tenant_id', '=', TENANT_ID)
+      .where('event_id', '=', EVENT_ID)
+      .execute();
+
+    expect(rows).toHaveLength(ATTENDEE_COUNT);
+
+    const exportRows = rows.map((a) => ({
+      id: a.id,
+      email: a.email,
+      firstName: a.first_name,
+      lastName: a.last_name,
+      phone: a.phone,
+      status: a.status,
+      eventId: a.event_id,
+      orderId: a.order_id,
+      checkedInAt: a.checked_in_at,
+      createdAt: a.created_at,
+    }));
+
+    const csv = toCsv(exportRows);
+    const csvLines = csv.split('\n');
+
+    // Header + one row per attendee.
+    expect(csvLines).toHaveLength(ATTENDEE_COUNT + 1);
+    expect(csvLines[0]).toBe('id,email,firstName,lastName,phone,status,eventId,orderId,checkedInAt,createdAt');
+
+    // Spot-check first and last seeded attendee appear in the export.
+    const firstAttendee = createdAttendees[0];
+    const lastAttendee = createdAttendees[ATTENDEE_COUNT - 1];
+    expect(csv).toContain(firstAttendee.email);
+    expect(csv).toContain(lastAttendee.email);
+    expect(csv).toContain(firstAttendee.firstName);
+    expect(csv).toContain(lastAttendee.lastName);
+
+    // Every seeded email must be present exactly once.
+    for (const a of createdAttendees) {
+      const occurrences = csv.split(a.email).length - 1;
+      expect(occurrences).toBe(1);
+    }
+  });
+});

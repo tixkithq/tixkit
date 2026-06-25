@@ -194,6 +194,131 @@ type ExportFilters = {
   checkInStatus?: 'checked_in' | 'not_checked_in';
 };
 
+type ExportQuestion = {
+  id: string;
+  label: string;
+  is_consent_field: boolean | null;
+  consent_text: string | null;
+  consent_version: string | null;
+  applies_to: string | null;
+  ticket_type_id: string | null;
+  sort_order: number | null;
+};
+
+type ConsentAnswerSnapshot = {
+  accepted: true;
+  consentText: string;
+  consentVersion: string;
+  consentedAt: string;
+};
+
+function isConsentAnswerSnapshot(value: unknown): value is ConsentAnswerSnapshot {
+  return Boolean(
+    value &&
+      typeof value === 'object' &&
+      !Array.isArray(value) &&
+      (value as { accepted?: unknown }).accepted === true &&
+      typeof (value as { consentText?: unknown }).consentText === 'string' &&
+      typeof (value as { consentVersion?: unknown }).consentVersion === 'string' &&
+      typeof (value as { consentedAt?: unknown }).consentedAt === 'string',
+  );
+}
+
+function isConsentAccepted(value: unknown): boolean {
+  return value === true || isConsentAnswerSnapshot(value);
+}
+
+/**
+ * Normalizes a consent version string for display, ensuring it carries a `v`
+ * prefix without doubling it (e.g. `1` -> `v1`, `v2` -> `v2`).
+ */
+function normalizeVersionLabel(version: string): string {
+  const trimmed = version.trim();
+  if (/^v/i.test(trimmed)) return trimmed;
+  return `v${trimmed}`;
+}
+
+/**
+ * Renders a custom answer value into a CSV/JSON-friendly string.
+ * Arrays are joined with `; ` so a single cell preserves all selected options.
+ */
+function formatAnswerValue(value: unknown): string {
+  if (value === null || value === undefined) return '';
+  if (Array.isArray(value)) return value.map((v) => String(v)).join('; ');
+  if (typeof value === 'boolean') return value ? 'true' : 'false';
+  return String(value);
+}
+
+/**
+ * Builds the per-question column headers and per-attendee answer values for the
+ * attendee export. Returns header suffixes and a function that maps an
+ * attendee's `custom_answers` payload to the question/consent columns.
+ *
+ * Consent fields emit two columns:
+ *   - `<label>` - "accepted" when the attendee accepted, empty otherwise
+ *   - `<label> (consent text)` - the historical consent text + version snapshot
+ * This preserves the consent text/version that was in force at acceptance time
+ * for auditability, per the reporting & export contract (C6).
+ */
+function buildQuestionColumns(questions: ExportQuestion[]): {
+  headers: string[];
+  valuesFor: (customAnswers: string | null) => Record<string, string>;
+} {
+  const sorted = [...questions].sort(
+    (a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0),
+  );
+  const headers: string[] = [];
+  const accessors: Array<(answers: Record<string, unknown>) => string> = [];
+
+  for (const q of sorted) {
+    if (q.is_consent_field) {
+      headers.push(q.label);
+      headers.push(`${q.label} (consent text)`);
+      accessors.push((answers) => {
+        const answer = answers[q.id];
+        return isConsentAccepted(answer) ? 'accepted' : '';
+      });
+      accessors.push((answers) => {
+        const answer = answers[q.id];
+        if (isConsentAnswerSnapshot(answer)) {
+          return `${answer.consentText} (${normalizeVersionLabel(answer.consentVersion)})`;
+        }
+        if (answer === true) {
+          // No snapshot stored; fall back to the question definition.
+          const text = q.consent_text ?? q.label;
+          const version = q.consent_version ?? '1';
+          return `${text} (${normalizeVersionLabel(version)})`;
+        }
+        return '';
+      });
+    } else {
+      headers.push(q.label);
+      accessors.push((answers) => formatAnswerValue(answers[q.id]));
+    }
+  }
+
+  const valuesFor = (customAnswers: string | null): Record<string, string> => {
+    let parsed: Record<string, unknown> = {};
+    if (customAnswers) {
+      try {
+        const decoded = JSON.parse(customAnswers);
+        if (decoded && typeof decoded === 'object' && !Array.isArray(decoded)) {
+          parsed = decoded as Record<string, unknown>;
+        }
+      } catch {
+        // Leave parsed empty if the JSON is malformed.
+      }
+    }
+    const out: Record<string, string> = {};
+    headers.forEach((header, idx) => {
+      out[header] = accessors[idx](parsed);
+    });
+    return out;
+  };
+
+  return { headers, valuesFor };
+}
+
 function applyDateFilter<T extends { created_at: Date | string }>(
   query: T[],
   filters: ExportFilters,
@@ -282,6 +407,43 @@ export async function generateExportActivity(input: {
         checkedInAt: a.checked_in_at,
         createdAt: a.created_at,
       }));
+
+      // Append checkout question and consent answer columns when the event has
+      // configured questions. This preserves historical consent text/version
+      // snapshots for auditability (C6).
+      if (eventId) {
+        const questions = await db
+          .selectFrom('questions')
+          .select([
+            'id',
+            'label',
+            'is_consent_field',
+            'consent_text',
+            'consent_version',
+            'applies_to',
+            'ticket_type_id',
+            'sort_order',
+          ])
+          .where('event_id', '=', eventId)
+          .execute() as ExportQuestion[];
+
+        if (questions.length > 0) {
+          const { valuesFor } = buildQuestionColumns(questions);
+          rows = attendees.map((a) => ({
+            id: a.id,
+            email: a.email,
+            firstName: a.first_name,
+            lastName: a.last_name,
+            phone: a.phone,
+            status: a.status,
+            eventId: a.event_id,
+            orderId: a.order_id,
+            checkedInAt: a.checked_in_at,
+            createdAt: a.created_at,
+            ...valuesFor(a.custom_answers as string | null),
+          }));
+        }
+      }
     } else if (input.type === 'orders') {
       let query = db
         .selectFrom('orders')
