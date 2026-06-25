@@ -1,0 +1,46 @@
+{
+  "name": "@gatekit/db",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./migrations": {
+      "types": "./dist/migrations/index.d.ts",
+      "import": "./dist/migrations/index.js"
+    },
+    "./repositories": {
+      "types": "./dist/repositories/index.d.ts",
+      "import": "./dist/repositories/index.js"
+    }
+  },
+  "scripts": {
+    "build": "tsc",
+    "lint": "oxlint src",
+    "typecheck": "tsc --noEmit",
+    "migrate": "tsx src/migrate.ts",
+    "migrate:mysql": "DB_DRIVER=mysql tsx src/migrate.ts",
+    "test:unit": "vitest run src/__tests__/unit/client.test.ts",
+    "test:integration": "vitest run src/__tests__/integration/db.integration.test.ts",
+    "test:mysql": "DB_INTEGRATION_DRIVER=mysql vitest run src/__tests__/integration/db.integration.test.ts",
+    "clean": "rm -rf dist"
+  },
+  "dependencies": {
+    "@gatekit/domain": "workspace:*",
+    "kysely": "^0.29.0",
+    "pg": "^8.22.0",
+    "mysql2": "^3.22.0",
+    "ulid": "^2.3.0"
+  },
+  "devDependencies": {
+    "@types/pg": "^8.20.0",
+    "typescript": "5.9.3",
+    "tsx": "^4.22.0",
+    "vitest": "^4.1.0"
+  }
+}

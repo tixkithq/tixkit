@@ -1,0 +1,76 @@
+{
+  "name": "@gatekit/domain",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./tenant": {
+      "types": "./dist/tenant/index.d.ts",
+      "import": "./dist/tenant/index.js"
+    },
+    "./identity": {
+      "types": "./dist/identity/index.d.ts",
+      "import": "./dist/identity/index.js"
+    },
+    "./events": {
+      "types": "./dist/events/index.d.ts",
+      "import": "./dist/events/index.js"
+    },
+    "./ticketing": {
+      "types": "./dist/ticketing/index.d.ts",
+      "import": "./dist/ticketing/index.js"
+    },
+    "./pricing": {
+      "types": "./dist/pricing/index.d.ts",
+      "import": "./dist/pricing/index.js"
+    },
+    "./checkout": {
+      "types": "./dist/checkout/index.d.ts",
+      "import": "./dist/checkout/index.js"
+    },
+    "./payments": {
+      "types": "./dist/payments/index.d.ts",
+      "import": "./dist/payments/index.js"
+    },
+    "./tickets": {
+      "types": "./dist/tickets/index.d.ts",
+      "import": "./dist/tickets/index.js"
+    },
+    "./forms": {
+      "types": "./dist/forms/index.d.ts",
+      "import": "./dist/forms/index.js"
+    },
+    "./messaging": {
+      "types": "./dist/messaging/index.d.ts",
+      "import": "./dist/messaging/index.js"
+    },
+    "./reporting": {
+      "types": "./dist/reporting/index.d.ts",
+      "import": "./dist/reporting/index.js"
+    },
+    "./developer": {
+      "types": "./dist/developer/index.d.ts",
+      "import": "./dist/developer/index.js"
+    }
+  },
+  "scripts": {
+    "build": "tsc",
+    "lint": "oxlint src",
+    "typecheck": "tsc --noEmit",
+    "test:unit": "vitest run",
+    "clean": "rm -rf dist"
+  },
+  "dependencies": {
+    "zod": "^4.4.3"
+  },
+  "devDependencies": {
+    "typescript": "5.9.3",
+    "vitest": "^4.1.0"
+  }
+}
