@@ -1,0 +1,167 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  lint-typecheck:
+    name: Lint & Typecheck
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.3.14
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: bun install --frozen-lockfile
+      - run: bun run lint
+      - run: bun run typecheck
+
+  build:
+    name: Build
+    runs-on: ubuntu-latest
+    needs: lint-typecheck
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.3.14
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: bun install --frozen-lockfile
+      - run: bunx turbo run build --force
+
+  unit-tests:
+    name: Unit Tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.3.14
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: bun install --frozen-lockfile
+      - run: bun run test:unit
+
+  integration-tests-postgres:
+    name: Integration Tests (PostgreSQL)
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: gatekit
+          POSTGRES_PASSWORD: gatekit
+          POSTGRES_DB: gatekit
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U gatekit"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+      temporal:
+        image: temporalio/auto-setup:1.24
+        ports:
+          - 7233:7233
+        env:
+          DB: postgres12
+          DB_PORT: 5432
+          POSTGRES_SEEDS: postgres
+          POSTGRES_USER: temporal
+          POSTGRES_PWD: temporal
+        options: >-
+          --health-cmd "tctl --address localhost:7233 operator namespace describe default"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      DATABASE_URL: postgres://gatekit:gatekit@localhost:5432/gatekit
+      REDIS_URL: redis://localhost:6379
+      TEMPORAL_ADDRESS: localhost:7233
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.3.14
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: bun install --frozen-lockfile
+      - run: bun run db:migrate
+      - run: bun run test:integration
+
+  integration-tests-mysql:
+    name: Integration Tests (MySQL)
+    runs-on: ubuntu-latest
+    services:
+      mysql:
+        image: mysql:8.4
+        env:
+          MYSQL_ROOT_PASSWORD: gatekit
+          MYSQL_DATABASE: gatekit
+          MYSQL_USER: gatekit
+          MYSQL_PASSWORD: gatekit
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd "mysqladmin ping -h localhost -u gatekit -pgatekit"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 10
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+      temporal:
+        image: temporalio/auto-setup:1.24
+        ports:
+          - 7233:7233
+        env:
+          DB: mysql
+          DB_PORT: 3306
+          MYSQL_SEEDS: mysql
+          MYSQL_USER: gatekit
+          MYSQL_PWD: gatekit
+        options: >-
+          --health-cmd "tctl --address localhost:7233 operator namespace describe default"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      DATABASE_URL_MYSQL: mysql://gatekit:gatekit@localhost:3306/gatekit
+      REDIS_URL: redis://localhost:6379
+      TEMPORAL_ADDRESS: localhost:7233
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.3.14
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: bun install --frozen-lockfile
+      - run: bun run db:migrate:mysql
+      - run: DB_INTEGRATION_DRIVER=mysql bun run test:integration

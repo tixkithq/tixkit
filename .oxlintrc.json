@@ -1,0 +1,34 @@
+{
+  "$schema": "./node_modules/oxlint/configuration-schema.json",
+  "plugins": ["typescript", "react", "jsx-a11y", "unicorn", "oxc"],
+  "env": {
+    "browser": true,
+    "es2022": true,
+    "node": true
+  },
+  "categories": {
+    "correctness": "error",
+    "suspicious": "warn",
+    "perf": "warn"
+  },
+  "rules": {
+    "no-unused-vars": "warn",
+    "typescript/no-unused-vars": "warn",
+    "typescript/no-explicit-any": "warn",
+    "typescript/no-empty-object-type": "off",
+    "react/react-in-jsx-scope": "off",
+    "react/no-unstable-nested-components": "off",
+    "react/no-array-index-key": "off",
+    "react/no-set-state": "off",
+    "no-explicit-any": "off"
+  },
+  "ignorePatterns": [
+    "**/.next/**",
+    "**/dist/**",
+    "**/build/**",
+    "**/coverage/**",
+    "**/graphify-out/**",
+    "**/.turbo/**",
+    "**/*.config.{js,mjs,ts,cjs}"
+  ]
+}

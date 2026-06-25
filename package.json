@@ -1,0 +1,49 @@
+{
+  "name": "gatekit",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Headless white-label event commerce platform",
+  "license": "MIT",
+  "packageManager": "bun@1.3.14",
+  "workspaces": [
+    "packages/*",
+    "apps/*"
+  ],
+  "scripts": {
+    "build": "turbo run build",
+    "dev": "turbo run dev",
+    "dev:api": "bun run --env-file=.env.local --filter @gatekit/api dev",
+    "dev:checkout": "bun run --env-file=.env.local --filter @gatekit/checkout dev -- -p 3000",
+    "dev:admin": "bun run --env-file=.env.local --filter @gatekit/admin-dashboard dev -- -p 3001",
+    "dev:worker": "bun run --env-file=.env.local --filter @gatekit/workflows dev",
+    "dev:all": "sh -c 'bun run dev:api & bun run dev:worker & bun run dev:checkout & bun run dev:admin & wait'",
+    "lint": "turbo run lint",
+    "typecheck": "turbo run typecheck",
+    "test": "turbo run test:unit test:integration",
+    "test:unit": "turbo run test:unit",
+    "test:integration": "turbo run test:integration",
+    "db:migrate": "bun run --env-file=.env.local --filter @gatekit/db migrate",
+    "db:migrate:mysql": "bun run --env-file=.env.local --filter @gatekit/db migrate:mysql",
+    "infra:up": "docker compose -f infra/docker-compose.yml up -d",
+    "infra:down": "docker compose -f infra/docker-compose.yml down",
+    "clean": "turbo run clean && rm -rf node_modules"
+  },
+  "devDependencies": {
+    "turbo": "^2.9.0",
+    "typescript": "6.0.3",
+    "typescript-tsgo": "npm:typescript@7.0.1-rc",
+    "@types/node": "^22.20.0",
+    "vitest": "^4.1.0",
+    "@vitest/coverage-v8": "^4.1.0",
+    "oxlint": "^1.71.0",
+    "prettier": "^3.8.0"
+  },
+  "engines": {
+    "node": ">=20.0.0",
+    "bun": ">=1.3.0"
+  },
+  "dependencies": {
+    "zod": "^4.4.3"
+  }
+}
