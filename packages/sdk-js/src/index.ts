@@ -887,17 +887,11 @@ class WebhookEndpointResource {
 
 class PaymentAccountResource {
   constructor(private client: GateKitClient) {}
-  async list(params?: PaginationParams): Promise<PageResult<PaymentAccount>> {
-    return this.client.request('GET', '/payment-accounts', { params: paginationParams(params) });
+  async list(organizationId: string, params?: PaginationParams): Promise<PageResult<PaymentAccount>> {
+    return this.client.request('GET', `/organizations/${organizationId}/payment-accounts`, { params: paginationParams(params) });
   }
-  async create(input: { organizationId: string; provider: string; defaultCurrency?: string }): Promise<PaymentAccount> {
-    return this.client.request('POST', '/payment-accounts', { body: input });
-  }
-  async startOnboarding(paymentAccountId: string, returnUrl: string): Promise<{ url: string; expiresAt: string }> {
-    return this.client.request('POST', `/payment-accounts/${paymentAccountId}/onboarding`, { body: { returnUrl } });
-  }
-  async bindToBrand(brandId: string, paymentAccountId: string): Promise<Brand> {
-    return this.client.request('POST', `/brands/${brandId}/payment-account`, { body: { paymentAccountId } });
+  async createStripeConnect(organizationId: string): Promise<PaymentAccount> {
+    return this.client.request('POST', `/organizations/${organizationId}/payment-accounts/stripe-connect`);
   }
 }
 

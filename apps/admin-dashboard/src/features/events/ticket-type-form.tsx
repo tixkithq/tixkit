@@ -50,6 +50,11 @@ export const ticketSchema = z
     salesStartAt: z.string().optional(),
     salesEndAt: z.string().optional(),
     requiresAccessCode: z.boolean().optional(),
+    // Inventory pool fields (create mode only). The live API requires an
+    // inventoryPoolId to create a ticket type, so the form creates a pool
+    // first and attaches its id.
+    inventoryPoolName: z.string().optional(),
+    inventoryPoolCapacity: z.number().int().min(1, 'Capacity must be at least 1').optional(),
   })
   .superRefine((data, ctx) => {
     // Sales end must be after sales start when both are present.
@@ -113,6 +118,8 @@ export function TicketTypeFormDrawer({
       salesStartAt: '',
       salesEndAt: '',
       requiresAccessCode: false,
+      inventoryPoolName: '',
+      inventoryPoolCapacity: undefined,
     },
   })
 
@@ -127,12 +134,17 @@ export function TicketTypeFormDrawer({
         salesStartAt: toLocalDatetimeInput(ticketType?.salesStartAt),
         salesEndAt: toLocalDatetimeInput(ticketType?.salesEndAt),
         requiresAccessCode: ticketType?.requiresAccessCode ?? false,
+        // Pool fields are only used in create mode; default the pool name to
+        // the ticket type name and capacity to the quantityTotal.
+        inventoryPoolName: '',
+        inventoryPoolCapacity: ticketType?.quantityTotal,
       })
     }
   }, [open, ticketType, form])
 
   const onSubmit = async (values: TicketFormValues) => {
     setSubmitting(true)
+
     const baseInput: CreateTicketTypeInput = {
       name: values.name,
       description: values.description || undefined,
@@ -143,12 +155,46 @@ export function TicketTypeFormDrawer({
       salesEndAt: values.salesEndAt || undefined,
       requiresAccessCode: values.requiresAccessCode,
     }
-    const result = isEditing && ticketType
-      ? await adminApi.updateTicketType(ticketType.id, baseInput as UpdateTicketTypeInput)
-      : await adminApi.createTicketType(eventId, baseInput)
+
+    if (isEditing && ticketType) {
+      const result = await adminApi.updateTicketType(
+        ticketType.id,
+        baseInput as UpdateTicketTypeInput
+      )
+      setSubmitting(false)
+      if (result.ok) {
+        toast.success('Ticket type updated')
+        onOpenChange(false)
+        onSuccess?.()
+      } else {
+        toast.error(result.error.message)
+      }
+      return
+    }
+
+    // Create mode: the live API requires an inventoryPoolId. Create a pool
+    // first, then attach its id to the ticket type creation request.
+    const poolName = values.inventoryPoolName?.trim() || `${values.name} Pool`
+    const poolCapacity = values.inventoryPoolCapacity ?? values.quantityTotal ?? 100
+    const poolResult = await adminApi.createInventoryPool(eventId, {
+      name: poolName,
+      totalCapacity: poolCapacity,
+    })
+    if (!poolResult.ok) {
+      setSubmitting(false)
+      toast.error(
+        poolResult.error.message || 'Failed to create inventory pool'
+      )
+      return
+    }
+
+    const result = await adminApi.createTicketType(eventId, {
+      ...baseInput,
+      inventoryPoolId: poolResult.data.id,
+    })
     setSubmitting(false)
     if (result.ok) {
-      toast.success(isEditing ? 'Ticket type updated' : 'Ticket type created')
+      toast.success('Ticket type created')
       onOpenChange(false)
       onSuccess?.()
     } else {
@@ -324,6 +370,64 @@ export function TicketTypeFormDrawer({
                   </FormItem>
                 )}
               />
+              {!isEditing && (
+                <div className='space-y-3 rounded-lg border p-3'>
+                  <div className='space-y-1'>
+                    <p className='text-sm font-medium'>Inventory Pool</p>
+                    <p className='text-xs text-muted-foreground'>
+                      A shared inventory pool is created for this ticket type.
+                      The pool controls how many tickets can be held or sold.
+                    </p>
+                  </div>
+                  <FormField
+                    control={form.control}
+                    name='inventoryPoolName'
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>Pool Name</FormLabel>
+                        <FormControl>
+                          <Input
+                            placeholder={`${form.getValues('name') || 'General Admission'} Pool`}
+                            {...field}
+                          />
+                        </FormControl>
+                        <FormDescription>
+                          Defaults to the ticket type name + &ldquo;Pool&rdquo;.
+                        </FormDescription>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+                  <FormField
+                    control={form.control}
+                    name='inventoryPoolCapacity'
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>Pool Capacity</FormLabel>
+                        <FormControl>
+                          <Input
+                            type='number'
+                            placeholder='100'
+                            value={field.value ?? ''}
+                            onChange={(e) =>
+                              field.onChange(
+                                e.target.value
+                                  ? Number(e.target.value)
+                                  : undefined
+                              )
+                            }
+                          />
+                        </FormControl>
+                        <FormDescription>
+                          Total tickets this pool can hold. Defaults to the
+                          quantity above or 100.
+                        </FormDescription>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+                </div>
+              )}
               <SheetFooter>
                 <Button
                   type='button'

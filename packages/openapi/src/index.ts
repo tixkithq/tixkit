@@ -768,14 +768,6 @@ export const openApiSpec = {
         },
         required: ['items', 'nextCursor', 'hasMore'],
       },
-      PaymentAccountOnboarding: {
-        type: 'object',
-        properties: {
-          url: { type: 'string', description: 'Stripe Connect onboarding URL' },
-          expiresAt: { type: 'string', format: 'date-time' },
-        },
-        required: ['url', 'expiresAt'],
-      },
       Question: {
         type: 'object',
         properties: {
@@ -1176,6 +1168,46 @@ export const openApiSpec = {
     '/public/events/{eventId}/availability': {
       get: { summary: 'Get public availability (no auth, hidden excluded)', responses: { '200': { description: 'Buyer-facing ticket availability', content: { 'application/json': { schema: { type: 'array', items: { $ref: '#/components/schemas/PublicAvailabilityItem' } } } } } } },
     },
+    '/public/events/{eventId}/access-code': {
+      post: {
+        summary: 'Validate an access code or buyer email for locked ticket types (no auth)',
+        requestBody: {
+          required: true,
+          content: {
+            'application/json': {
+              schema: {
+                type: 'object',
+                properties: {
+                  ticketTypeIds: { type: 'array', items: { type: 'string' }, minItems: 1 },
+                  accessCode: { type: 'string' },
+                  buyerEmail: { type: 'string', format: 'email' },
+                },
+                required: ['ticketTypeIds'],
+              },
+            },
+          },
+        },
+        responses: {
+          '200': {
+            description: 'Access code validated',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  properties: {
+                    valid: { type: 'boolean' },
+                    ticketTypeIds: { type: 'array', items: { type: 'string' } },
+                  },
+                  required: ['valid', 'ticketTypeIds'],
+                },
+              },
+            },
+          },
+          '400': { description: 'Validation error', content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } } },
+          '404': { description: 'Event not found', content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } } },
+        },
+      },
+    },
     '/checkout/sessions': {
       post: {
         summary: 'Create checkout session (public, Idempotency-Key required)',
@@ -1343,7 +1375,15 @@ export const openApiSpec = {
     },
     '/events/{eventId}/attendees': {
       get: {
-        summary: 'List attendees',
+        summary: 'List attendees for an event',
+        security: [{ BearerAuth: [] }],
+        parameters: [{ $ref: '#/components/parameters/Cursor' }, { $ref: '#/components/parameters/Limit' }],
+        responses: { '200': { description: 'Page of attendees', content: { 'application/json': { schema: { $ref: '#/components/schemas/AttendeePage' } } } } },
+      },
+    },
+    '/attendees': {
+      get: {
+        summary: 'List all attendees across the tenant (cross-event)',
         security: [{ BearerAuth: [] }],
         parameters: [{ $ref: '#/components/parameters/Cursor' }, { $ref: '#/components/parameters/Limit' }],
         responses: { '200': { description: 'Page of attendees', content: { 'application/json': { schema: { $ref: '#/components/schemas/AttendeePage' } } } } },
@@ -1596,93 +1636,191 @@ export const openApiSpec = {
         },
       },
     },
-    '/payment-accounts': {
+    '/me': {
       get: {
-        summary: 'List payment accounts',
+        summary: 'Get the authenticated principal (identity introspection)',
         security: [{ BearerAuth: [] }],
-        parameters: [{ $ref: '#/components/parameters/Cursor' }, { $ref: '#/components/parameters/Limit' }],
+        responses: {
+          '200': {
+            description: 'Current principal and permissions',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  properties: {
+                    id: { type: 'string' },
+                    tenantId: { type: 'string' },
+                    type: { type: 'string' },
+                    scopes: { type: 'array', items: { type: 'string' } },
+                    organizationIds: { type: 'array', items: { type: 'string' } },
+                    permissions: { type: 'array', items: { type: 'string' } },
+                  },
+                },
+              },
+            },
+          },
+          '401': { description: 'Unauthorized', content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } } },
+        },
+      },
+    },
+    '/organizations/{organizationId}': {
+      patch: {
+        summary: 'Update organization',
+        security: [{ BearerAuth: [] }],
+        requestBody: {
+          required: true,
+          content: {
+            'application/json': {
+              schema: {
+                type: 'object',
+                properties: {
+                  name: { type: 'string' },
+                  slug: { type: 'string' },
+                  clerkOrganizationId: { type: 'string', nullable: true },
+                },
+              },
+            },
+          },
+        },
+        responses: {
+          '200': { description: 'Organization updated', content: { 'application/json': { schema: { $ref: '#/components/schemas/Organization' } } } },
+          '401': { description: 'Unauthorized', content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } } },
+          '403': { description: 'Forbidden', content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } } },
+          '404': { description: 'Organization not found', content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } } },
+        },
+      },
+    },
+    '/organizations/{organizationId}/members': {
+      get: {
+        summary: 'List organization members',
+        security: [{ BearerAuth: [] }],
+        responses: {
+          '200': {
+            description: 'List of organization members',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'array',
+                  items: {
+                    type: 'object',
+                    properties: {
+                      id: { type: 'string' },
+                      organizationId: { type: 'string' },
+                      name: { type: 'string' },
+                      email: { type: 'string' },
+                      role: { type: 'string' },
+                      status: { type: 'string' },
+                      invitedAt: { type: 'string', format: 'date-time' },
+                      joinedAt: { type: 'string', format: 'date-time', nullable: true },
+                    },
+                  },
+                },
+              },
+            },
+          },
+          '401': { description: 'Unauthorized', content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } } },
+          '403': { description: 'Forbidden', content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } } },
+          '404': { description: 'Organization not found', content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } } },
+        },
+      },
+    },
+    '/organizations/{organizationId}/members/invitations': {
+      post: {
+        summary: 'Invite a member to the organization',
+        security: [{ BearerAuth: [] }],
+        requestBody: {
+          required: true,
+          content: {
+            'application/json': {
+              schema: {
+                type: 'object',
+                properties: {
+                  email: { type: 'string', format: 'email' },
+                  role: { type: 'string', enum: ['owner', 'admin', 'organizer', 'viewer'] },
+                },
+                required: ['email'],
+              },
+            },
+          },
+        },
+        responses: {
+          '201': {
+            description: 'Invitation created',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  properties: {
+                    id: { type: 'string' },
+                    organizationId: { type: 'string' },
+                    name: { type: 'string' },
+                    email: { type: 'string' },
+                    role: { type: 'string' },
+                    status: { type: 'string' },
+                    invitedAt: { type: 'string', format: 'date-time' },
+                    joinedAt: { type: 'string', format: 'date-time', nullable: true },
+                  },
+                },
+              },
+            },
+          },
+          '400': { description: 'Validation error', content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } } },
+          '401': { description: 'Unauthorized', content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } } },
+          '403': { description: 'Forbidden', content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } } },
+          '404': { description: 'Organization not found', content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } } },
+        },
+      },
+    },
+    '/organizations/{organizationId}/payment-accounts': {
+      get: {
+        summary: 'List payment accounts for an organization',
+        security: [{ BearerAuth: [] }],
         responses: {
           '200': { description: 'Page of payment accounts', content: { 'application/json': { schema: { $ref: '#/components/schemas/PaymentAccountPage' } } } },
           '401': { description: 'Unauthorized', content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } } },
           '403': { description: 'Forbidden', content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } } },
-        },
-      },
-      post: {
-        summary: 'Create payment account (Stripe Connect)',
-        security: [{ BearerAuth: [] }],
-        requestBody: {
-          required: true,
-          content: {
-            'application/json': {
-              schema: {
-                type: 'object',
-                properties: {
-                  organizationId: { type: 'string' },
-                  provider: { type: 'string', enum: ['stripe', 'stripe_connect'] },
-                  defaultCurrency: { type: 'string' },
-                },
-                required: ['organizationId', 'provider'],
-              },
-            },
-          },
-        },
-        responses: {
-          '201': { description: 'Payment account created', content: { 'application/json': { schema: { $ref: '#/components/schemas/PaymentAccount' } } } },
-          '400': { description: 'Validation error', content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } } },
-          '401': { description: 'Unauthorized', content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } } },
-          '403': { description: 'Forbidden', content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } } },
+          '404': { description: 'Organization not found', content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } } },
         },
       },
     },
-    '/payment-accounts/{paymentAccountId}/onboarding': {
+    '/organizations/{organizationId}/payment-accounts/stripe-connect': {
       post: {
-        summary: 'Start Stripe Connect onboarding',
+        summary: 'Create or return the Stripe Connect payment account for an organization',
         security: [{ BearerAuth: [] }],
-        requestBody: {
-          required: true,
-          content: {
-            'application/json': {
-              schema: {
-                type: 'object',
-                properties: {
-                  returnUrl: { type: 'string', format: 'uri' },
-                },
-                required: ['returnUrl'],
-              },
-            },
-          },
-        },
         responses: {
-          '200': { description: 'Onboarding URL', content: { 'application/json': { schema: { $ref: '#/components/schemas/PaymentAccountOnboarding' } } } },
+          '200': { description: 'Existing active Stripe payment account returned', content: { 'application/json': { schema: { $ref: '#/components/schemas/PaymentAccount' } } } },
           '401': { description: 'Unauthorized', content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } } },
           '403': { description: 'Forbidden', content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } } },
-          '404': { description: 'Payment account not found', content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } } },
+          '404': { description: 'Organization not found', content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } } },
+          '422': { description: 'Stripe Connect onboarding is not configured for this environment', content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } } },
         },
       },
     },
-    '/brands/{brandId}/payment-account': {
-      post: {
-        summary: 'Bind a payment account to a brand',
+    '/organizations/{organizationId}/billing': {
+      get: {
+        summary: 'Get billing overview for an organization',
         security: [{ BearerAuth: [] }],
-        requestBody: {
-          required: true,
-          content: {
-            'application/json': {
-              schema: {
-                type: 'object',
-                properties: {
-                  paymentAccountId: { type: 'string' },
+        responses: {
+          '200': {
+            description: 'Billing overview',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  properties: {
+                    organizationId: { type: 'string' },
+                    plan: { type: 'string' },
+                    status: { type: 'string' },
+                    ticketsThisMonth: { type: 'integer' },
+                  },
+                  required: ['organizationId', 'plan', 'status', 'ticketsThisMonth'],
                 },
-                required: ['paymentAccountId'],
               },
             },
           },
-        },
-        responses: {
-          '200': { description: 'Brand updated with payment account', content: { 'application/json': { schema: { $ref: '#/components/schemas/Brand' } } } },
           '401': { description: 'Unauthorized', content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } } },
           '403': { description: 'Forbidden', content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } } },
-          '404': { description: 'Brand or payment account not found', content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } } },
+          '404': { description: 'Organization not found', content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } } },
         },
       },
     },
@@ -1829,7 +1967,125 @@ export const openApiSpec = {
         },
       },
     },
+    '/exports/{exportId}': {
+      get: {
+        summary: 'Get export job status',
+        security: [{ BearerAuth: [] }],
+        responses: {
+          '200': {
+            description: 'Export job status',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  properties: {
+                    exportId: { type: 'string' },
+                    eventId: { type: 'string' },
+                    type: { type: 'string' },
+                    format: { type: 'string' },
+                    status: { type: 'string', enum: ['pending', 'completed', 'failed'] },
+                    fileUrl: { type: 'string', nullable: true },
+                    downloadUrl: { type: 'string', nullable: true },
+                    createdAt: { type: 'string', format: 'date-time' },
+                    completedAt: { type: 'string', format: 'date-time', nullable: true },
+                  },
+                  required: ['exportId', 'type', 'format', 'status', 'createdAt'],
+                },
+              },
+            },
+          },
+          '401': { description: 'Unauthorized', content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } } },
+          '403': { description: 'Forbidden', content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } } },
+          '404': { description: 'Export job not found', content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } } },
+        },
+      },
+    },
+    '/exports/{exportId}/events': {
+      get: {
+        summary: 'Stream export job events (Server-Sent Events)',
+        security: [{ BearerAuth: [] }],
+        parameters: [
+          {
+            name: 'Last-Event-ID',
+            in: 'header',
+            required: false,
+            schema: { type: 'string' },
+            description: 'Resume the SSE stream from the last received event id',
+          },
+        ],
+        responses: {
+          '200': {
+            description: 'Server-Sent Events stream of export job status updates',
+            content: {
+              'text/event-stream': {
+                schema: { type: 'string', description: 'SSE stream; each event is an export job status payload' },
+              },
+            },
+          },
+          '401': { description: 'Unauthorized', content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } } },
+          '403': { description: 'Forbidden', content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } } },
+          '404': { description: 'Export job not found', content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } } },
+        },
+      },
+    },
+    '/exports/{exportId}/download': {
+      get: {
+        summary: 'Download a completed export file',
+        security: [{ BearerAuth: [] }],
+        responses: {
+          '302': { description: 'Redirect to the signed export file URL' },
+          '401': { description: 'Unauthorized', content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } } },
+          '403': { description: 'Forbidden', content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } } },
+          '404': { description: 'Export job not found', content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } } },
+          '409': { description: 'Export is not ready for download', content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } } },
+        },
+      },
+    },
     '/events/{eventId}/messages': {
+      get: {
+        summary: 'List message campaigns for an event',
+        security: [{ BearerAuth: [] }],
+        responses: {
+          '200': {
+            description: 'List of campaign summaries',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  properties: {
+                    items: {
+                      type: 'array',
+                      items: {
+                        type: 'object',
+                        properties: {
+                          id: { type: 'string' },
+                          eventId: { type: 'string' },
+                          tenantId: { type: 'string' },
+                          brandId: { type: 'string' },
+                          templateKey: { type: 'string' },
+                          channel: { type: 'string', enum: ['email', 'sms', 'both'] },
+                          status: { type: 'string' },
+                          audienceCount: { type: 'integer' },
+                          queuedEmailJobs: { type: 'integer' },
+                          queuedSmsJobs: { type: 'integer' },
+                          suppressedRecipients: { type: 'integer' },
+                          consentExclusions: { type: 'integer' },
+                          skippedRecipients: { type: 'integer' },
+                          createdAt: { type: 'string', format: 'date-time' },
+                          updatedAt: { type: 'string', format: 'date-time' },
+                        },
+                      },
+                    },
+                  },
+                  required: ['items'],
+                },
+              },
+            },
+          },
+          '401': { description: 'Unauthorized', content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } } },
+          '403': { description: 'Forbidden', content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } } },
+        },
+      },
       post: {
         summary: 'Queue event email message',
         security: [{ BearerAuth: [] }],
@@ -1858,6 +2114,90 @@ export const openApiSpec = {
           '400': { description: 'Validation error', content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } } },
           '401': { description: 'Unauthorized', content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } } },
           '403': { description: 'Forbidden', content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } } },
+        },
+      },
+    },
+    '/events/{eventId}/messages/{campaignId}': {
+      get: {
+        summary: 'Get message campaign detail',
+        security: [{ BearerAuth: [] }],
+        responses: {
+          '200': { description: 'Campaign detail with jobs and deliveries', content: { 'application/json': { schema: { type: 'object' } } } },
+          '401': { description: 'Unauthorized', content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } } },
+          '403': { description: 'Forbidden', content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } } },
+          '404': { description: 'Campaign not found', content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } } },
+        },
+      },
+    },
+    '/events/{eventId}/messages/{campaignId}/jobs': {
+      get: {
+        summary: 'List message jobs for a campaign',
+        security: [{ BearerAuth: [] }],
+        responses: {
+          '200': { description: 'List of email/SMS jobs', content: { 'application/json': { schema: { type: 'object', properties: { items: { type: 'array', items: { type: 'object' } } }, required: ['items'] } } } },
+          '401': { description: 'Unauthorized', content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } } },
+          '403': { description: 'Forbidden', content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } } },
+          '404': { description: 'Campaign not found', content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } } },
+        },
+      },
+    },
+    '/events/{eventId}/messages/{campaignId}/jobs/{channel}/{jobId}': {
+      get: {
+        summary: 'Get a single message job',
+        security: [{ BearerAuth: [] }],
+        responses: {
+          '200': { description: 'Message job detail', content: { 'application/json': { schema: { type: 'object' } } } },
+          '401': { description: 'Unauthorized', content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } } },
+          '403': { description: 'Forbidden', content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } } },
+          '404': { description: 'Job not found', content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } } },
+        },
+      },
+    },
+    '/events/{eventId}/messages/{campaignId}/delivery-logs': {
+      get: {
+        summary: 'List delivery logs for a campaign',
+        security: [{ BearerAuth: [] }],
+        responses: {
+          '200': { description: 'List of email/SMS delivery logs', content: { 'application/json': { schema: { type: 'object', properties: { items: { type: 'array', items: { type: 'object' } } }, required: ['items'] } } } },
+          '401': { description: 'Unauthorized', content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } } },
+          '403': { description: 'Forbidden', content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } } },
+          '404': { description: 'Campaign not found', content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } } },
+        },
+      },
+    },
+    '/events/{eventId}/messages/{campaignId}/delivery-logs/{channel}/{deliveryId}': {
+      get: {
+        summary: 'Get a single delivery log',
+        security: [{ BearerAuth: [] }],
+        responses: {
+          '200': { description: 'Delivery log detail', content: { 'application/json': { schema: { type: 'object' } } } },
+          '401': { description: 'Unauthorized', content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } } },
+          '403': { description: 'Forbidden', content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } } },
+          '404': { description: 'Delivery log not found', content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } } },
+        },
+      },
+    },
+    '/events/{eventId}/messages/{campaignId}/provider-events': {
+      get: {
+        summary: 'List provider events for a campaign',
+        security: [{ BearerAuth: [] }],
+        responses: {
+          '200': { description: 'List of SMS provider events', content: { 'application/json': { schema: { type: 'object', properties: { items: { type: 'array', items: { type: 'object' } } }, required: ['items'] } } } },
+          '401': { description: 'Unauthorized', content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } } },
+          '403': { description: 'Forbidden', content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } } },
+          '404': { description: 'Campaign not found', content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } } },
+        },
+      },
+    },
+    '/events/{eventId}/messages/{campaignId}/provider-events/{providerEventId}': {
+      get: {
+        summary: 'Get a single provider event',
+        security: [{ BearerAuth: [] }],
+        responses: {
+          '200': { description: 'Provider event detail', content: { 'application/json': { schema: { type: 'object' } } } },
+          '401': { description: 'Unauthorized', content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } } },
+          '403': { description: 'Forbidden', content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } } },
+          '404': { description: 'Provider event not found', content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } } },
         },
       },
     },
@@ -1964,6 +2304,49 @@ export const openApiSpec = {
           },
         },
         responses: { '200': { description: 'Endpoint updated', content: { 'application/json': { schema: { $ref: '#/components/schemas/WebhookEndpoint' } } } } },
+      },
+    },
+    '/webhook-endpoints/{endpointId}/events': {
+      get: {
+        summary: 'List webhook delivery events for an endpoint',
+        security: [{ BearerAuth: [] }],
+        parameters: [{ $ref: '#/components/parameters/Cursor' }, { $ref: '#/components/parameters/Limit' }],
+        responses: {
+          '200': {
+            description: 'Page of webhook delivery events',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  properties: {
+                    items: {
+                      type: 'array',
+                      items: {
+                        type: 'object',
+                        properties: {
+                          id: { type: 'string' },
+                          endpointId: { type: 'string' },
+                          eventType: { type: 'string' },
+                          status: { type: 'string' },
+                          statusCode: { type: 'integer' },
+                          attemptCount: { type: 'integer' },
+                          deliveredAt: { type: 'string', format: 'date-time', nullable: true },
+                          createdAt: { type: 'string', format: 'date-time' },
+                        },
+                      },
+                    },
+                    nextCursor: { type: ['string', 'null'] },
+                    hasMore: { type: 'boolean' },
+                  },
+                  required: ['items', 'nextCursor', 'hasMore'],
+                },
+              },
+            },
+          },
+          '401': { description: 'Unauthorized', content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } } },
+          '403': { description: 'Forbidden', content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } } },
+          '404': { description: 'Endpoint not found', content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } } },
+        },
       },
     },
     '/webhook-events/{eventId}/replay': {

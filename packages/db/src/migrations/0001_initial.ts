@@ -1253,6 +1253,7 @@ export const InitialMigration: Migration = {
       'fee_rules',
       'tax_rules',
       'discount_codes',
+      'discount_redemptions',
       'payment_events',
       'refunds',
       'payment_intents',

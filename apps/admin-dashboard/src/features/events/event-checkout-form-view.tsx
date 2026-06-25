@@ -237,6 +237,7 @@ export function EventCheckoutFormView({ eventId }: { eventId: string }) {
   const [submittingId, setSubmittingId] = React.useState<string>()
 
   const orderedQuestions = React.useMemo(
+    // eslint-disable-next-line unicorn/no-array-sort -- creates a new array via spread
     () => [...(questions ?? [])].sort((a, b) => a.sortOrder - b.sortOrder || a.id.localeCompare(b.id)),
     [questions]
   )

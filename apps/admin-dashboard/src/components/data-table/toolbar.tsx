@@ -28,11 +28,13 @@ type DataTableToolbarProps<TData> = {
   children?: React.ReactNode
 }
 
+const EMPTY_FILTERS: DataTableFilter[] = []
+
 export function DataTableToolbar<TData>({
   table,
   searchPlaceholder = 'Search...',
   searchKey,
-  filters = [],
+  filters = EMPTY_FILTERS,
   children,
 }: DataTableToolbarProps<TData>) {
   const isFiltered = table.getState().columnFilters.length > 0

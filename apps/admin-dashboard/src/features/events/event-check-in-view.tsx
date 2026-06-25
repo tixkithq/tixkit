@@ -8,10 +8,18 @@ import { Input } from '@/components/ui/input'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { EmptyState } from '@/components/empty-state'
 import { Skeleton } from '@/components/ui/skeleton'
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select'
 import { useAdminData } from '@/hooks/use-admin-data'
 import { cn } from '@/lib/utils'
 
 export function EventCheckInView({ eventId }: { eventId: string }) {
+  const [selectedCheckInListId, setSelectedCheckInListId] = React.useState<string>('')
   const [qrPayload, setQrPayload] = React.useState('')
   const [scanning, setScanning] = React.useState(false)
   const [lastResult, setLastResult] = React.useState<CheckInScanResult | null>(null)
@@ -21,6 +29,10 @@ export function EventCheckInView({ eventId }: { eventId: string }) {
     () => adminApi.getEvent(eventId),
     [eventId]
   )
+  const { data: checkInListsData, loading: checkInListsLoading } = useAdminData(
+    () => adminApi.listCheckInLists(eventId),
+    [eventId]
+  )
   const { data: attendeesData } = useAdminData(
     () => adminApi.listAttendees({ eventId }),
     [eventId]
@@ -28,12 +40,22 @@ export function EventCheckInView({ eventId }: { eventId: string }) {
 
   const event = eventData
   const attendees = attendeesData?.items ?? []
+  const checkInLists = checkInListsData ?? []
+
+  // Auto-select the only active check-in list when one is available.
+  React.useEffect(() => {
+    if (!selectedCheckInListId && checkInLists.length === 1) {
+      setSelectedCheckInListId(checkInLists[0].id)
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- checkInLists is stable from useQuery and only changes on event switch
+  }, [selectedCheckInListId])
 
   const handleScan = async () => {
-    if (!qrPayload) return
+    if (!selectedCheckInListId || !qrPayload) return
     setScanning(true)
     const result = await adminApi.scanTicket({
       eventId,
+      checkInListId: selectedCheckInListId,
       qrPayload,
       scannedAt: new Date().toISOString(),
     })
@@ -101,6 +123,34 @@ export function EventCheckInView({ eventId }: { eventId: string }) {
         </Card>
       )}
 
+      <div className='flex flex-col gap-2'>
+        <span className='text-sm font-medium'>Check-in List</span>
+        {checkInListsLoading ? (
+          <Skeleton className='h-10 w-full max-w-xs' />
+        ) : checkInLists.length === 0 ? (
+          <p className='text-sm text-muted-foreground'>
+            No active check-in lists for this event. Create a check-in list
+            before scanning.
+          </p>
+        ) : (
+          <Select
+            value={selectedCheckInListId}
+            onValueChange={setSelectedCheckInListId}
+          >
+            <SelectTrigger className='w-full max-w-xs'>
+              <SelectValue placeholder='Choose a check-in list' />
+            </SelectTrigger>
+            <SelectContent>
+              {checkInLists.map((list) => (
+                <SelectItem key={list.id} value={list.id}>
+                  {list.name}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        )}
+      </div>
+
       <div className='grid gap-6 lg:grid-cols-2'>
         <Card>
           <CardHeader>
@@ -119,7 +169,10 @@ export function EventCheckInView({ eventId }: { eventId: string }) {
                   if (e.key === 'Enter') handleScan()
                 }}
               />
-              <Button onClick={handleScan} disabled={scanning || !qrPayload}>
+              <Button
+                onClick={handleScan}
+                disabled={scanning || !qrPayload || !selectedCheckInListId}
+              >
                 {scanning ? 'Scanning...' : 'Scan'}
               </Button>
             </div>

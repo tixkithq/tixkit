@@ -95,6 +95,29 @@ export type AdminTicketType = {
   salesStartAt?: string
   salesEndAt?: string
   requiresAccessCode: boolean
+  inventoryPoolId?: string
+}
+
+export type AdminInventoryPool = {
+  id: string
+  eventId: string
+  name: string
+  totalCapacity: number
+  reservedCount: number
+  soldCount: number
+  holdTtlSeconds?: number
+  createdAt?: string
+  updatedAt?: string
+}
+
+export type AdminCheckInList = {
+  id: string
+  eventId: string
+  name: string
+  ticketTypeIds: string[]
+  status: 'active' | 'paused' | 'closed'
+  createdAt?: string
+  updatedAt?: string
 }
 
 export type AdminQuestionType =
@@ -526,6 +549,12 @@ export type CreateTicketTypeInput = {
   requiresAccessCode?: boolean
 }
 
+export type CreateInventoryPoolInput = {
+  name: string
+  totalCapacity: number
+  holdTtlSeconds?: number
+}
+
 export type UpdateTicketTypeInput = Partial<CreateTicketTypeInput> & {
   status?: TicketTypeStatus
 }
@@ -656,6 +685,7 @@ export type AdminApi = {
   listTicketTypes(eventId: string): Promise<ApiResult<AdminTicketType[]>>
   createTicketType(eventId: string, input: CreateTicketTypeInput): Promise<ApiResult<AdminTicketType>>
   updateTicketType(ticketTypeId: string, input: UpdateTicketTypeInput): Promise<ApiResult<AdminTicketType>>
+  createInventoryPool(eventId: string, input: CreateInventoryPoolInput): Promise<ApiResult<AdminInventoryPool>>
   listCheckoutQuestions(eventId: string): Promise<ApiResult<AdminCheckoutQuestion[]>>
   createCheckoutQuestion(eventId: string, input: CreateCheckoutQuestionInput): Promise<ApiResult<AdminCheckoutQuestion>>
   updateCheckoutQuestion(questionId: string, input: UpdateCheckoutQuestionInput): Promise<ApiResult<AdminCheckoutQuestion>>
@@ -668,6 +698,7 @@ export type AdminApi = {
 
   listAttendees(input: PageCursor & { eventId?: string }): Promise<ApiResult<PageResult<AdminAttendeeListItem>>>
   updateAttendee(attendeeId: string, input: UpdateAttendeeInput): Promise<ApiResult<AdminAttendeeListItem>>
+  listCheckInLists(eventId: string): Promise<ApiResult<AdminCheckInList[]>>
   scanTicket(input: ScanTicketInput): Promise<ApiResult<CheckInScanResult>>
 
   sendMessage(eventId: string, input: SendMessageInput): Promise<ApiResult<AdminMessageCampaign>>
@@ -1318,6 +1349,44 @@ const fixtureCheckoutQuestions: Record<string, AdminCheckoutQuestion[]> = {
     },
   ],
 }
+
+const fixtureCheckInLists: Record<string, AdminCheckInList[]> = {
+  evt_demo_001: [
+    {
+      id: 'cil_demo_001',
+      eventId: 'evt_demo_001',
+      name: 'Main Entrance',
+      ticketTypeIds: [],
+      status: 'active',
+      createdAt: iso(-86_400_000),
+      updatedAt: iso(-86_400_000),
+    },
+  ],
+  evt_demo_002: [
+    {
+      id: 'cil_demo_002',
+      eventId: 'evt_demo_002',
+      name: 'Conference Registration',
+      ticketTypeIds: [],
+      status: 'active',
+      createdAt: iso(-172_800_000),
+      updatedAt: iso(-172_800_000),
+    },
+  ],
+  evt_demo_004: [
+    {
+      id: 'cil_demo_003',
+      eventId: 'evt_demo_004',
+      name: 'Show Floor Entrance',
+      ticketTypeIds: [],
+      status: 'active',
+      createdAt: iso(-604_800_000),
+      updatedAt: iso(-604_800_000),
+    },
+  ],
+}
+
+const fixtureInventoryPools: Record<string, AdminInventoryPool[]> = {}
 
 const fixtureOrders: AdminOrderListItem[] = [
   {
@@ -2069,6 +2138,7 @@ export const adminApi: AdminApi = {
           salesStartAt: input.salesStartAt,
           salesEndAt: input.salesEndAt,
           requiresAccessCode: input.requiresAccessCode ?? false,
+          inventoryPoolId: input.inventoryPoolId,
         }
         if (!fixtureTicketTypes[eventId]) fixtureTicketTypes[eventId] = []
         fixtureTicketTypes[eventId].push(newTt)
@@ -2097,6 +2167,32 @@ export const adminApi: AdminApi = {
           return err<AdminTicketType>(apiError('not_found', 'Ticket type not found', 404))
         Object.assign(found, input)
         return ok(found)
+      }
+    )
+  },
+
+  async createInventoryPool(eventId, input) {
+    return withFixture(
+      () =>
+        request<AdminInventoryPool>(`/v1/events/${eventId}/inventory-pools`, {
+          method: 'POST',
+          body: JSON.stringify(input),
+        }),
+      () => {
+        const pool: AdminInventoryPool = {
+          id: `ip_${Math.random().toString(36).slice(2, 11)}`,
+          eventId,
+          name: input.name,
+          totalCapacity: input.totalCapacity,
+          reservedCount: 0,
+          soldCount: 0,
+          holdTtlSeconds: input.holdTtlSeconds,
+          createdAt: iso(0),
+          updatedAt: iso(0),
+        }
+        if (!fixtureInventoryPools[eventId]) fixtureInventoryPools[eventId] = []
+        fixtureInventoryPools[eventId].push(pool)
+        return ok(pool)
       }
     )
   },
@@ -2140,7 +2236,8 @@ export const adminApi: AdminApi = {
         })
         if (!fixtureCheckoutQuestions[eventId]) fixtureCheckoutQuestions[eventId] = []
         fixtureCheckoutQuestions[eventId].push(question)
-        fixtureCheckoutQuestions[eventId].sort((a, b) => a.sortOrder - b.sortOrder)
+        // eslint-disable-next-line unicorn/no-array-sort -- creates a new array via spread
+        fixtureCheckoutQuestions[eventId] = [...fixtureCheckoutQuestions[eventId]].sort((a, b) => a.sortOrder - b.sortOrder)
         return ok(question)
       }
     )
@@ -2166,7 +2263,8 @@ export const adminApi: AdminApi = {
               updatedAt: iso(0),
             })
             questions[index] = updated
-            questions.sort((a, b) => a.sortOrder - b.sortOrder)
+            // eslint-disable-next-line unicorn/no-array-sort -- creates a new array via spread
+            fixtureCheckoutQuestions[eventId] = [...questions].sort((a, b) => a.sortOrder - b.sortOrder)
             return ok(updated)
           }
         }
@@ -2308,6 +2406,19 @@ export const adminApi: AdminApi = {
         Object.assign(attendee, input)
         return ok(attendee)
       }
+    )
+  },
+
+  async listCheckInLists(eventId) {
+    return withFixture(
+      async () => {
+        const result = await request<PageResult<AdminCheckInList> | AdminCheckInList[]>(
+          `/v1/events/${eventId}/check-in-lists`,
+          { method: 'GET' }
+        )
+        return result.ok ? ok(unwrapItems(result.data)) : result
+      },
+      () => ok(fixtureCheckInLists[eventId] ?? [])
     )
   },
 
