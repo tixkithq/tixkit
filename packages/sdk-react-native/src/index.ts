@@ -166,18 +166,45 @@ export type SyncResult = {
   results: { qrHash: string; outcome: string }[];
 };
 
+export type GateKitScannerStorage = {
+  getItem(key: string): Promise<string | null> | string | null;
+  setItem(key: string, value: string): Promise<void> | void;
+  removeItem(key: string): Promise<void> | void;
+};
+
+export type GateKitScannerConflict = {
+  qrHash: string;
+  outcome: string;
+};
+
+export type GateKitScannerClientConfig = {
+  deviceId: string;
+  deviceSecret: string;
+  apiBaseUrl?: string;
+  manifestSigningKey: string;
+  storage?: GateKitScannerStorage;
+  storageKey?: string;
+  onSyncConflict?: (conflict: GateKitScannerConflict) => void;
+};
+
 export class GateKitScannerClient {
   private client: GateKitClient;
   private readonly deviceId: string;
   private readonly deviceSecret: string;
   private readonly manifestSigningKey: string;
+  private readonly storage?: GateKitScannerStorage;
+  private readonly storageKey: string;
+  private readonly onSyncConflict?: (conflict: GateKitScannerConflict) => void;
   private manifest: OfflineManifest | null = null;
   private offlineScans = new Map<string, string>();
 
-  constructor(config: { deviceId: string; deviceSecret: string; apiBaseUrl?: string; manifestSigningKey?: string }) {
+  constructor(config: GateKitScannerClientConfig) {
     this.deviceId = config.deviceId;
     this.deviceSecret = config.deviceSecret;
-    this.manifestSigningKey = config.manifestSigningKey ?? 'gatekit-manifest-secret-dev-only';
+    this.manifestSigningKey = config.manifestSigningKey;
+    this.storage = config.storage;
+    this.storageKey = config.storageKey ?? `gatekit:scanner:${config.deviceId}:offline-scans`;
+    this.onSyncConflict = config.onSyncConflict;
     this.client = new GateKitClient({ apiBaseUrl: config.apiBaseUrl });
   }
 
@@ -248,6 +275,7 @@ export class GateKitScannerClient {
     }
 
     this.offlineScans.set(qrHash, new Date().toISOString());
+    void this.persistOfflineScans();
     return { outcome: 'accepted', message: 'Check-in successful (offline)', ticketId: ticket.ticketId };
   }
 
@@ -269,11 +297,40 @@ export class GateKitScannerClient {
       return { accepted: 0, duplicates: 0, invalid: 0, results: [] };
     }
 
-    return this.client.request('POST', '/check-ins/sync', {
+    const result = await this.client.request<SyncResult>('POST', '/check-ins/sync', {
       body: { checkInListId, scans },
       idempotencyKey: this.syncIdempotencyKey(checkInListId, scans),
       headers: this.authHeaders(),
     });
+    for (const item of result.results) {
+      if (item.outcome !== 'accepted') {
+        this.onSyncConflict?.({ qrHash: item.qrHash, outcome: item.outcome });
+      }
+    }
+    for (const item of result.results) {
+      if (item.outcome === 'accepted') this.offlineScans.delete(item.qrHash);
+    }
+    await this.persistOfflineScans();
+    return result;
+  }
+
+  async restoreOfflineScans(): Promise<void> {
+    if (!this.storage) return;
+    const raw = await this.storage.getItem(this.storageKey);
+    if (!raw) return;
+    const parsed = JSON.parse(raw) as Array<[string, string]>;
+    this.offlineScans = new Map(
+      parsed.filter((entry): entry is [string, string] =>
+        Array.isArray(entry) &&
+        typeof entry[0] === 'string' &&
+        typeof entry[1] === 'string',
+      ),
+    );
+  }
+
+  async clearOfflineScans(): Promise<void> {
+    this.offlineScans.clear();
+    await this.storage?.removeItem(this.storageKey);
   }
 
   /**
@@ -314,7 +371,16 @@ export class GateKitScannerClient {
       lastTimestamp,
     ].join(':');
   }
+
+  private async persistOfflineScans(): Promise<void> {
+    if (!this.storage) return;
+    if (this.offlineScans.size === 0) {
+      await this.storage.removeItem(this.storageKey);
+      return;
+    }
+    await this.storage.setItem(this.storageKey, JSON.stringify([...this.offlineScans.entries()]));
+  }
 }
 
-// React Native components would be exported here
-// They require React Native and are compiled separately
+// Exported for testing against node:crypto known-answer vectors.
+export { sha256, hmacSha256 };

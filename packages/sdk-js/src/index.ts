@@ -42,6 +42,7 @@ export type Event = {
   title: string;
   description?: string;
   status: string;
+  currency: string;
   timezone: string;
   startsAt: string;
   endsAt?: string;
@@ -398,6 +399,83 @@ export type PaymentAccount = {
   updatedAt: string;
 };
 
+export type Question = {
+  id: string;
+  eventId: string;
+  label: string;
+  fieldKey: string;
+  type: string;
+  required: boolean;
+  options?: string[];
+  sortOrder: number;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type ReorderQuestionInput = {
+  id: string;
+  sortOrder: number;
+};
+
+export type OAuthApplication = {
+  id: string;
+  organizationId: string;
+  name: string;
+  clientId: string;
+  clientSecret?: string;
+  redirectUris: string[];
+  scopes: string[];
+  status: string;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type AuthMe = {
+  userId: string;
+  email: string;
+  firstName?: string;
+  lastName?: string;
+  organizationId?: string;
+  role?: string;
+  scopes?: string[];
+};
+
+export type ExportJob = {
+  exportId: string;
+  status: string;
+  type: string;
+  format: string;
+  createdAt: string;
+  completedAt?: string;
+  downloadUrl?: string;
+  error?: string;
+};
+
+export type MessageCampaign = {
+  id: string;
+  eventId: string;
+  templateKey: string;
+  channel: string;
+  audience: string;
+  status: string;
+  queued: number;
+  sent: number;
+  failed: number;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type WebhookEvent = {
+  id: string;
+  endpointId: string;
+  eventType: string;
+  status: string;
+  attemptCount: number;
+  createdAt: string;
+  deliveredAt?: string;
+  responseStatus?: number;
+};
+
 export type PageResult<T> = {
   items: T[];
   nextCursor: string | null;
@@ -438,6 +516,10 @@ export class GateKitClient {
   readonly messages: MessageResource;
   readonly webhookEndpoints: WebhookEndpointResource;
   readonly paymentAccounts: PaymentAccountResource;
+  readonly questions: QuestionResource;
+  readonly oauthApplications: OAuthApplicationResource;
+  readonly public: PublicResource;
+  readonly auth: AuthResource;
 
   constructor(config: GateKitConfig) {
     if (isBrowserRuntime() && config.apiKey && looksLikeSecretApiKey(config.apiKey)) {
@@ -468,6 +550,10 @@ export class GateKitClient {
     this.messages = new MessageResource(this);
     this.webhookEndpoints = new WebhookEndpointResource(this);
     this.paymentAccounts = new PaymentAccountResource(this);
+    this.questions = new QuestionResource(this);
+    this.oauthApplications = new OAuthApplicationResource(this);
+    this.public = new PublicResource(this);
+    this.auth = new AuthResource(this);
   }
 
   async request<T>(
@@ -596,6 +682,7 @@ class CheckoutResource {
     }[];
     discountCode?: string;
     affiliateCode?: string;
+    trackingId?: string;
     buyerFields?: Record<string, unknown>;
     buyer?: { email?: string; firstName?: string; lastName?: string; phone?: string };
     successUrl?: string;
@@ -657,6 +744,7 @@ class EventResource {
     brandId: string;
     slug: string;
     title: string;
+    currency: string;
     timezone: string;
     startsAt: string;
     endsAt?: string;
@@ -667,6 +755,18 @@ class EventResource {
 
   async publish(eventId: string): Promise<Event> {
     return this.client.request('POST', `/events/${eventId}/publish`);
+  }
+
+  async update(eventId: string, input: Partial<Pick<Event, 'title' | 'description' | 'currency' | 'status' | 'timezone' | 'startsAt' | 'endsAt' | 'visibility' | 'capacity' | 'coverImageUrl' | 'externalUrl' | 'venue' | 'seo'>>): Promise<Event> {
+    return this.client.request('PATCH', `/events/${eventId}`, { body: input });
+  }
+
+  async pause(eventId: string): Promise<Event> {
+    return this.client.request('POST', `/events/${eventId}/pause`);
+  }
+
+  async archive(eventId: string): Promise<Event> {
+    return this.client.request('POST', `/events/${eventId}/archive`);
   }
 
   async getAvailability(eventId: string): Promise<PageResult<{
@@ -732,6 +832,9 @@ class OrganizationResource {
   async create(input: { name: string; slug: string; clerkOrganizationId?: string }): Promise<Organization> {
     return this.client.request('POST', '/organizations', { body: input });
   }
+  async update(organizationId: string, input: Partial<Pick<Organization, 'name' | 'slug' | 'status'>>): Promise<Organization> {
+    return this.client.request('PATCH', `/organizations/${organizationId}`, { body: input });
+  }
 }
 
 class BrandResource {
@@ -742,7 +845,12 @@ class BrandResource {
   async create(input: { organizationId: string; name: string; slug: string; theme?: Record<string, unknown>; whiteLabel?: boolean }): Promise<Brand> {
     return this.client.request('POST', '/brands', { body: input });
   }
-  async update(brandId: string, input: Partial<Pick<Brand, 'name' | 'slug' | 'status' | 'theme' | 'supportUrl' | 'legalUrls' | 'whiteLabel'>>): Promise<Brand> {
+  async update(
+    brandId: string,
+    input: Partial<Pick<Brand, 'name' | 'slug' | 'status' | 'theme' | 'supportUrl' | 'legalUrls' | 'whiteLabel'>> & {
+      paymentAccountId?: string | null;
+    },
+  ): Promise<Brand> {
     return this.client.request('PATCH', `/brands/${brandId}`, { body: input });
   }
   async addDomain(brandId: string, input: { domain: string; isPrimary?: boolean }): Promise<BrandDomain> {
@@ -774,6 +882,14 @@ class AttendeeResource {
   constructor(private client: GateKitClient) {}
   async list(eventId: string, params?: PaginationParams): Promise<PageResult<Attendee>> {
     return this.client.request('GET', `/events/${eventId}/attendees`, { params: paginationParams(params) });
+  }
+  async listAll(params?: PaginationParams & { eventId?: string; status?: string }): Promise<PageResult<Attendee>> {
+    const query: Record<string, string> = {};
+    if (params?.cursor) query.cursor = params.cursor;
+    if (params?.limit !== undefined) query.limit = String(params.limit);
+    if (params?.eventId) query.eventId = params.eventId;
+    if (params?.status) query.status = params.status;
+    return this.client.request('GET', '/attendees', { params: Object.keys(query).length > 0 ? query : undefined });
   }
   async update(attendeeId: string, input: Partial<Pick<Attendee, 'firstName' | 'lastName' | 'email' | 'phone' | 'status'>>): Promise<Attendee> {
     return this.client.request('PATCH', `/attendees/${attendeeId}`, { body: input });
@@ -859,6 +975,15 @@ class ExportResource {
     const { idempotencyKey, ...body } = input;
     return this.client.request('POST', '/exports', { body, idempotencyKey });
   }
+  async get(exportId: string): Promise<ExportJob> {
+    return this.client.request('GET', `/exports/${exportId}`);
+  }
+  async getEvents(exportId: string): Promise<unknown> {
+    return this.client.request('GET', `/exports/${exportId}/events`);
+  }
+  async download(exportId: string): Promise<{ downloadUrl: string; expiresAt: string }> {
+    return this.client.request('GET', `/exports/${exportId}/download`);
+  }
 }
 
 class MessageResource {
@@ -866,6 +991,30 @@ class MessageResource {
   async send(eventId: string, input: { templateKey: string; audience: string; attendeeIds?: string[]; variables?: Record<string, unknown>; channel: string } & IdempotencyOptions): Promise<MessageQueued> {
     const { idempotencyKey, ...body } = input;
     return this.client.request('POST', `/events/${eventId}/messages`, { body, idempotencyKey });
+  }
+  async list(eventId: string, params?: PaginationParams): Promise<PageResult<MessageCampaign>> {
+    return this.client.request('GET', `/events/${eventId}/messages`, { params: paginationParams(params) });
+  }
+  async getCampaign(eventId: string, campaignId: string): Promise<MessageCampaign> {
+    return this.client.request('GET', `/events/${eventId}/messages/${campaignId}`);
+  }
+  async jobs(eventId: string, campaignId: string, params?: PaginationParams): Promise<PageResult<unknown>> {
+    return this.client.request('GET', `/events/${eventId}/messages/${campaignId}/jobs`, { params: paginationParams(params) });
+  }
+  async job(eventId: string, campaignId: string, channel: string, jobId: string): Promise<unknown> {
+    return this.client.request('GET', `/events/${eventId}/messages/${campaignId}/jobs/${channel}/${jobId}`);
+  }
+  async deliveryLogs(eventId: string, campaignId: string, params?: PaginationParams): Promise<PageResult<unknown>> {
+    return this.client.request('GET', `/events/${eventId}/messages/${campaignId}/delivery-logs`, { params: paginationParams(params) });
+  }
+  async deliveryLog(eventId: string, campaignId: string, channel: string, deliveryId: string): Promise<unknown> {
+    return this.client.request('GET', `/events/${eventId}/messages/${campaignId}/delivery-logs/${channel}/${deliveryId}`);
+  }
+  async providerEvents(eventId: string, campaignId: string, params?: PaginationParams): Promise<PageResult<unknown>> {
+    return this.client.request('GET', `/events/${eventId}/messages/${campaignId}/provider-events`, { params: paginationParams(params) });
+  }
+  async providerEvent(eventId: string, campaignId: string, providerEventId: string): Promise<unknown> {
+    return this.client.request('GET', `/events/${eventId}/messages/${campaignId}/provider-events/${providerEventId}`);
   }
 }
 
@@ -880,6 +1029,9 @@ class WebhookEndpointResource {
   async update(endpointId: string, input: Partial<Pick<WebhookEndpoint, 'url' | 'events' | 'status' | 'description'>>): Promise<WebhookEndpoint> {
     return this.client.request('PATCH', `/webhook-endpoints/${endpointId}`, { body: input });
   }
+  async listEvents(endpointId: string, params?: PaginationParams): Promise<PageResult<WebhookEvent>> {
+    return this.client.request('GET', `/webhook-endpoints/${endpointId}/events`, { params: paginationParams(params) });
+  }
   async replay(eventId: string): Promise<{ message: string; eventId: string; endpoints: number }> {
     return this.client.request('POST', `/webhook-events/${eventId}/replay`);
   }
@@ -892,6 +1044,101 @@ class PaymentAccountResource {
   }
   async createStripeConnect(organizationId: string): Promise<PaymentAccount> {
     return this.client.request('POST', `/organizations/${organizationId}/payment-accounts/stripe-connect`);
+  }
+}
+
+class QuestionResource {
+  constructor(private client: GateKitClient) {}
+  async list(eventId: string): Promise<PageResult<Question>> {
+    return this.client.request('GET', `/events/${eventId}/questions`);
+  }
+  async create(eventId: string, input: { label: string; fieldKey: string; type: string; required?: boolean; options?: string[]; sortOrder?: number }): Promise<Question> {
+    return this.client.request('POST', `/events/${eventId}/questions`, { body: input });
+  }
+  async update(questionId: string, input: Partial<Pick<Question, 'label' | 'fieldKey' | 'type' | 'required' | 'options' | 'sortOrder'>>): Promise<Question> {
+    return this.client.request('PATCH', `/questions/${questionId}`, { body: input });
+  }
+  async reorder(eventId: string, questions: ReorderQuestionInput[]): Promise<PageResult<Question>> {
+    return this.client.request('POST', `/events/${eventId}/questions/reorder`, {
+      body: { questions },
+    });
+  }
+  async delete(questionId: string): Promise<void> {
+    return this.client.request('DELETE', `/questions/${questionId}`);
+  }
+}
+
+class OAuthApplicationResource {
+  constructor(private client: GateKitClient) {}
+  async list(params?: PaginationParams): Promise<PageResult<OAuthApplication>> {
+    return this.client.request('GET', '/oauth-applications', { params: paginationParams(params) });
+  }
+  async create(input: { organizationId: string; name: string; redirectUris: string[]; scopes: string[] }): Promise<OAuthApplication> {
+    return this.client.request('POST', '/oauth-applications', { body: input });
+  }
+  async delete(appId: string): Promise<void> {
+    return this.client.request('DELETE', `/oauth-applications/${appId}`);
+  }
+}
+
+class PublicResource {
+  constructor(private client: GateKitClient) {}
+  async getEvent(eventId: string): Promise<Event> {
+    return this.client.request('GET', `/public/events/${eventId}`);
+  }
+  async getBrand(brandId: string): Promise<Brand> {
+    return this.client.request('GET', `/public/brands/${brandId}`);
+  }
+  /**
+   * Fetches ticket availability for a published event. Pass `products` to
+   * filter/reveal hidden ticket types for direct-link or widget purchase flows.
+   */
+  async getAvailability(eventId: string, products?: string[]): Promise<Array<{
+    ticketTypeId: string;
+    name?: string;
+    kind?: string;
+    priceCents: number;
+    currency: string;
+    minimumPriceCents?: number;
+    available: number;
+    status: string;
+    requiresAccessCode?: boolean;
+    accessCodeHint?: string;
+    description?: string;
+    salesStartAt?: string;
+    salesEndAt?: string;
+    maxPerOrder?: number;
+  }>> {
+    const query = products?.length ? `?products=${products.join(',')}` : '';
+    return this.client.request('GET', `/public/events/${eventId}/availability${query}`);
+  }
+  /**
+   * Validates an access code or buyer email against locked ticket types.
+   * The API requires `ticketTypeIds` and at least `accessCode` or `buyerEmail`.
+   */
+  async validateAccessCode(eventId: string, input: {
+    ticketTypeIds: string[];
+    accessCode?: string;
+    buyerEmail?: string;
+  }): Promise<{ valid: boolean; ticketTypeIds?: string[] }> {
+    return this.client.request('POST', `/public/events/${eventId}/access-code`, { body: input });
+  }
+  /**
+   * Lists checkout questions for a published event, grouped by buyer and
+   * attendee scope. Returns `{ buyerQuestions, attendeeQuestions }`.
+   */
+  async listQuestions(eventId: string): Promise<{
+    buyerQuestions: Question[];
+    attendeeQuestions: Question[];
+  }> {
+    return this.client.request('GET', `/public/events/${eventId}/questions`);
+  }
+}
+
+class AuthResource {
+  constructor(private client: GateKitClient) {}
+  async me(): Promise<AuthMe> {
+    return this.client.request('GET', '/me');
   }
 }
 

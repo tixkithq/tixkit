@@ -59,6 +59,38 @@ describe('GateKitCheckoutButton', () => {
     unmount();
   });
 
+  it('constructs URL with discount, tracking, products, and brand params', () => {
+    const mockOpen = vi.fn();
+    window.open = mockOpen;
+
+    const { container, unmount } = render(
+      <GateKitProvider config={{ checkoutBaseUrl: 'https://checkout.gatekit.com' }}>
+        <GateKitCheckoutButton
+          eventId="evt_123"
+          items={[{ ticketTypeId: 'tt_1', quantity: 2 }]}
+          brand="brd_1"
+          products={['tt_1', 'tt_2']}
+          discountCode="PROMO10"
+          trackingId="campaign_123"
+          checkoutMode="modal"
+        >
+          Buy Tickets
+        </GateKitCheckoutButton>
+      </GateKitProvider>,
+    );
+
+    const button = container.querySelector('button');
+    button!.click();
+
+    const calledUrl = mockOpen.mock.calls[0][0] as string;
+    expect(calledUrl).toContain('brand=brd_1');
+    expect(calledUrl).toContain('products=tt_1%2Ctt_2');
+    expect(calledUrl).toContain('discount=PROMO10');
+    expect(calledUrl).toContain('tracking=campaign_123');
+
+    unmount();
+  });
+
   it('redirects to checkout URL with eventId in redirect mode', () => {
     const hrefSetter = vi.fn();
     Object.defineProperty(window, 'location', {
@@ -87,7 +119,7 @@ describe('GateKitCheckoutButton', () => {
 });
 
 describe('GateKitTicketWidget', () => {
-  it('iframe src points at /e/{eventId} route (not /widget)', () => {
+  it('iframe src points at /checkout?eventId= route', () => {
     const { container, unmount } = render(
       <GateKitProvider config={{ widgetBaseUrl: 'https://widget.gatekit.com' }}>
         <GateKitTicketWidget brand="brd_1" event="evt_456" />
@@ -96,7 +128,7 @@ describe('GateKitTicketWidget', () => {
 
     const iframe = container.querySelector('iframe');
     expect(iframe).not.toBeNull();
-    expect(iframe!.src).toContain('/e/evt_456');
+    expect(iframe!.src).toContain('/checkout?eventId=evt_456');
     expect(iframe!.getAttribute('src')).not.toMatch(/\/widget[?/]/);
 
     unmount();
@@ -111,7 +143,7 @@ describe('GateKitTicketWidget', () => {
 
     const iframe = container.querySelector('iframe');
     expect(iframe).not.toBeNull();
-    expect(iframe!.getAttribute('sandbox')).toBe('allow-scripts allow-forms allow-popups allow-popups-to-escape-sandbox');
+    expect(iframe!.getAttribute('sandbox')).toBe('allow-scripts allow-same-origin allow-forms allow-popups allow-popups-to-escape-sandbox');
     expect(iframe!.getAttribute('allow')).toBe('payment; publickey-credentials-create *; publickey-credentials-get *');
 
     unmount();
