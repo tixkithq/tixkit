@@ -76,3 +76,4 @@ apps/checkout/public/gatekit-widget.js
 .factory
 .reference/
 .vscode/
+.playwright*
