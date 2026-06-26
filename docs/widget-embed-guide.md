@@ -27,7 +27,7 @@ Use `gatekit-widget` when tickets should render directly inside the page.
   checkout-mode="inline"
   products="tt_general,tt_vip"
   discount-code="EARLYBIRD"
-  tracking-id="affiliate_123"
+  tracking-id="campaign_spring_launch"
   api-base-url="https://checkout.gatekit.com"
 ></gatekit-widget>
 ```
@@ -41,7 +41,7 @@ Supported attributes:
 | `checkout-mode` | no | `inline`, `modal`, or `redirect`. Defaults to `inline` for `gatekit-widget`. |
 | `products` | no | Comma-separated ticket/product IDs to show or direct-link, including hidden tickets. |
 | `discount-code` | no | Promo or access code to prefill. Server validation remains authoritative. |
-| `tracking-id` | no | Non-PII attribution value persisted with checkout. |
+| `tracking-id` | no | Non-PII attribution value persisted with checkout. Affiliate/referral attribution is separate and must use an explicit affiliate code parameter. |
 | `locale` | no | Locale hint forwarded to hosted checkout. |
 | `theme` | no | `auto`, `light`, or `dark`. |
 | `api-base-url` | no | Checkout origin. Defaults to `https://checkout.gatekit.com`. |
@@ -57,7 +57,7 @@ Use `gatekit-button` when a page should open checkout from a button. The button 
   items="tt_general=2,tt_vip=1"
   checkout-mode="modal"
   discount-code="EARLYBIRD"
-  tracking-id="affiliate_123"
+  tracking-id="campaign_spring_launch"
   api-base-url="https://checkout.gatekit.com"
 >
   Buy tickets
