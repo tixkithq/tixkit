@@ -7,6 +7,7 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { EmptyState } from '@/components/empty-state'
+import { ApiErrorState } from '@/components/api-error-state'
 import { Skeleton } from '@/components/ui/skeleton'
 import {
   Select,
@@ -26,14 +27,14 @@ export function CheckInView() {
   const [lastResult, setLastResult] = React.useState<CheckInScanResult | null>(null)
   const [manualSearch, setManualSearch] = React.useState('')
 
-  const { data: eventsData, loading: eventsLoading } = useAdminData(() =>
+  const { data: eventsData, loading: eventsLoading, error: eventsError, refetch: refetchEvents } = useAdminData(() =>
     adminApi.listEvents()
   )
 
   const events = eventsData?.items ?? []
   const selectedEvent = events.find((e) => e.id === selectedEventId)
 
-  const { data: checkInListsData, loading: checkInListsLoading } = useAdminData(
+  const { data: checkInListsData, loading: checkInListsLoading, error: checkInListsError, refetch: refetchLists } = useAdminData(
     () => adminApi.listCheckInLists(selectedEventId),
     [selectedEventId]
   )
@@ -84,6 +85,10 @@ export function CheckInView() {
     )
   }
 
+  if (eventsError) {
+    return <ApiErrorState error={eventsError} onRetry={refetchEvents} />
+  }
+
   if (events.length === 0) {
     return (
       <EmptyState
@@ -117,6 +122,8 @@ export function CheckInView() {
           <span className='text-sm font-medium'>Check-in List</span>
           {checkInListsLoading ? (
             <Skeleton className='h-10 w-full max-w-xs' />
+          ) : checkInListsError ? (
+            <ApiErrorState error={checkInListsError} onRetry={refetchLists} className='border-0 bg-transparent p-0' />
           ) : checkInLists.length === 0 ? (
             <p className='text-sm text-muted-foreground'>
               No active check-in lists for this event. Create a check-in list
@@ -275,7 +282,7 @@ function ManualLookup({
   search: string
   onSearchChange: (value: string) => void
 }) {
-  const { data, loading } = useAdminData(
+  const { data, loading, error } = useAdminData(
     () => adminApi.listAttendees({ eventId }),
     [eventId]
   )
@@ -291,6 +298,7 @@ function ManualLookup({
     : attendees.slice(0, 10)
 
   if (loading) return <Skeleton className='h-32 w-full' />
+  if (error) return <ApiErrorState error={error} className='border-0 bg-transparent p-0' />
 
   return (
     <div className='space-y-3'>

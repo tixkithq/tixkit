@@ -7,6 +7,7 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { EmptyState } from '@/components/empty-state'
+import { ApiErrorState } from '@/components/api-error-state'
 import { Skeleton } from '@/components/ui/skeleton'
 import {
   Select,
@@ -25,15 +26,15 @@ export function EventCheckInView({ eventId }: { eventId: string }) {
   const [lastResult, setLastResult] = React.useState<CheckInScanResult | null>(null)
   const [manualSearch, setManualSearch] = React.useState('')
 
-  const { data: eventData, loading: eventLoading } = useAdminData(
+  const { data: eventData, loading: eventLoading, error: eventError, refetch: refetchEvent } = useAdminData(
     () => adminApi.getEvent(eventId),
     [eventId]
   )
-  const { data: checkInListsData, loading: checkInListsLoading } = useAdminData(
+  const { data: checkInListsData, loading: checkInListsLoading, error: checkInListsError, refetch: refetchLists } = useAdminData(
     () => adminApi.listCheckInLists(eventId),
     [eventId]
   )
-  const { data: attendeesData } = useAdminData(
+  const { data: attendeesData, error: attendeesError } = useAdminData(
     () => adminApi.listAttendees({ eventId }),
     [eventId]
   )
@@ -74,6 +75,10 @@ export function EventCheckInView({ eventId }: { eventId: string }) {
 
   if (eventLoading) {
     return <Skeleton className='h-96 w-full' />
+  }
+
+  if (eventError) {
+    return <ApiErrorState error={eventError} onRetry={refetchEvent} />
   }
 
   if (!event) {
@@ -127,6 +132,8 @@ export function EventCheckInView({ eventId }: { eventId: string }) {
         <span className='text-sm font-medium'>Check-in List</span>
         {checkInListsLoading ? (
           <Skeleton className='h-10 w-full max-w-xs' />
+        ) : checkInListsError ? (
+          <ApiErrorState error={checkInListsError} onRetry={refetchLists} className='border-0 bg-transparent p-0' />
         ) : checkInLists.length === 0 ? (
           <p className='text-sm text-muted-foreground'>
             No active check-in lists for this event. Create a check-in list
@@ -194,7 +201,11 @@ export function EventCheckInView({ eventId }: { eventId: string }) {
               onChange={(e) => setManualSearch(e.target.value)}
             />
             <div className='max-h-64 space-y-1 overflow-y-auto'>
-              {filteredAttendees.length === 0 ? (
+              {attendeesError ? (
+                <p className='py-4 text-center text-sm text-destructive'>
+                  Failed to load attendees: {attendeesError.message}
+                </p>
+              ) : filteredAttendees.length === 0 ? (
                 <p className='py-4 text-center text-sm text-muted-foreground'>
                   No attendees found
                 </p>

@@ -10,12 +10,13 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Badge } from '@/components/ui/badge'
 import { useAdminData } from '@/hooks/use-admin-data'
+import { ApiErrorState } from '@/components/api-error-state'
 
 export function DeveloperOverview() {
-  const { data: apiKeys, loading: keysLoading } = useAdminData(() =>
+  const { data: apiKeys, loading: keysLoading, error: keysError, refetch: refetchKeys } = useAdminData(() =>
     adminApi.listApiKeys()
   )
-  const { data: webhooks, loading: webhooksLoading } = useAdminData(() =>
+  const { data: webhooks, loading: webhooksLoading, error: webhooksError, refetch: refetchWebhooks } = useAdminData(() =>
     adminApi.listWebhookEndpoints()
   )
 
@@ -50,6 +51,8 @@ export function DeveloperOverview() {
           <CardContent>
             {keysLoading ? (
               <Skeleton className='h-8 w-20' />
+            ) : keysError ? (
+              <ApiErrorState error={keysError} onRetry={refetchKeys} className='border-0 bg-transparent p-0' />
             ) : (
               <>
                 <div className='text-2xl font-bold'>{activeKeys}</div>
@@ -77,6 +80,8 @@ export function DeveloperOverview() {
           <CardContent>
             {webhooksLoading ? (
               <Skeleton className='h-8 w-20' />
+            ) : webhooksError ? (
+              <ApiErrorState error={webhooksError} onRetry={refetchWebhooks} className='border-0 bg-transparent p-0' />
             ) : (
               <>
                 <div className='text-2xl font-bold'>{activeWebhooks}</div>

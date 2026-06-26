@@ -3,13 +3,14 @@
 import * as React from 'react'
 import Link from 'next/link'
 import { ArrowLeft, Ban, RotateCcw, Mail, User } from 'lucide-react'
-import { type AdminAttendeeListItem, adminApi } from '@/lib/api'
+import { adminApi } from '@/lib/api'
 import { routes } from '@/lib/routes'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Badge } from '@/components/ui/badge'
 import { ConfirmDialog } from '@/components/confirm-dialog'
+import { RefundDialog } from './refund-dialog'
 import { useAdminData } from '@/hooks/use-admin-data'
 import { formatCurrency, formatDate, formatDateTime } from '@/lib/format'
 import { OrderStatusBadge } from '@/features/events/event-status-badge'
@@ -23,17 +24,7 @@ export function OrderDetailView({ orderId }: { orderId: string }) {
     () => adminApi.getOrder(orderId),
     [orderId]
   )
-  const { data: attendeesData } = useAdminData(
-    () =>
-      order
-        ? adminApi.listAttendees({ eventId: order.eventId })
-        : Promise.resolve({ ok: true as const, data: { items: [] } as { items: AdminAttendeeListItem[] } }),
-    [order?.eventId]
-  )
-
-  const attendees = (attendeesData?.items ?? []).filter(
-    (a) => a.orderId === orderId
-  )
+  const attendees = order?.attendees ?? []
 
   const handleCancel = async () => {
     setPending(true)
@@ -42,19 +33,6 @@ export function OrderDetailView({ orderId }: { orderId: string }) {
     if (result.ok) {
       toast.success('Order cancelled')
       setCancelOpen(false)
-      refetch()
-    } else {
-      toast.error(result.error.message)
-    }
-  }
-
-  const handleRefund = async () => {
-    setPending(true)
-    const result = await adminApi.refundOrder(orderId, {})
-    setPending(false)
-    if (result.ok) {
-      toast.success(result.data.message || 'Refund workflow queued')
-      setRefundOpen(false)
       refetch()
     } else {
       toast.error(result.error.message)
@@ -173,7 +151,7 @@ export function OrderDetailView({ orderId }: { orderId: string }) {
               <div className='flex justify-between text-sm'>
                 <span className='text-muted-foreground'>Attendees</span>
                 <span className='font-medium'>
-                  {order.attendeeCount}
+                  {attendees.length || order.attendeeCount}
                 </span>
               </div>
               <div className='flex justify-between text-sm'>
@@ -205,9 +183,14 @@ export function OrderDetailView({ orderId }: { orderId: string }) {
                     <div className='flex items-center gap-3'>
                       <Mail className='size-4 text-muted-foreground' />
                       <div>
-                        <p className='text-sm font-medium'>{attendee.name}</p>
+                        <p className='text-sm font-medium'>
+                          {attendee.name ??
+                            [attendee.firstName, attendee.lastName].filter(Boolean).join(' ') ??
+                            attendee.email ??
+                            attendee.id}
+                        </p>
                         <p className='text-xs text-muted-foreground'>
-                          {attendee.ticketTypeName}
+                          {attendee.ticketTypeName ?? attendee.ticketTypeId ?? 'Ticket'}
                           {attendee.email && ` · ${attendee.email}`}
                         </p>
                       </div>
@@ -223,15 +206,44 @@ export function OrderDetailView({ orderId }: { orderId: string }) {
 
       <Card>
         <CardHeader>
+          <CardTitle>Line Items</CardTitle>
+        </CardHeader>
+        <CardContent>
+          {order.lineItems.length === 0 ? (
+            <p className='text-sm text-muted-foreground'>No line items available.</p>
+          ) : (
+            <div className='space-y-2'>
+              {order.lineItems.map((item) => (
+                <div key={item.id} className='flex items-center justify-between rounded-lg border p-3 text-sm'>
+                  <div>
+                    <p className='font-medium'>{item.description}</p>
+                    <p className='text-muted-foreground'>Qty {item.quantity}</p>
+                  </div>
+                  <span className='font-medium'>{formatCurrency(item.totalCents, item.currency)}</span>
+                </div>
+              ))}
+            </div>
+          )}
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
           <CardTitle>Timeline</CardTitle>
         </CardHeader>
         <CardContent>
           <div className='space-y-3'>
-            <TimelineItem
-              label='Order Created'
-              date={order.createdAt}
-              icon={User}
-            />
+            {order.timeline.length > 0 ? (
+              order.timeline.map((item) => (
+                <TimelineItem key={item.id} label={item.description} date={item.createdAt} icon={User} />
+              ))
+            ) : (
+              <TimelineItem
+                label='Order Created'
+                date={order.createdAt}
+                icon={User}
+              />
+            )}
             {order.status === 'paid' && (
               <TimelineItem
                 label='Payment Confirmed'
@@ -267,16 +279,14 @@ export function OrderDetailView({ orderId }: { orderId: string }) {
         pending={pending}
         onConfirm={handleCancel}
       />
-      <ConfirmDialog
-        open={refundOpen}
-        onOpenChange={setRefundOpen}
-        title='Refund order'
-        description={`Refund the full balance (${formatCurrency(order.totalCents - order.refundedCents, order.currency)}) to the buyer?`}
-        confirmText='Refund order'
-        variant='destructive'
-        pending={pending}
-        onConfirm={handleRefund}
-      />
+      {canRefund && (
+        <RefundDialog
+          order={order}
+          open={refundOpen}
+          onOpenChange={setRefundOpen}
+          onSuccess={refetch}
+        />
+      )}
     </div>
   )
 }

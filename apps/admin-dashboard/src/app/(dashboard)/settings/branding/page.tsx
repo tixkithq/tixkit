@@ -7,10 +7,13 @@ import { Input } from '@/components/ui/input'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { EmptyState } from '@/components/empty-state'
+import { GatedControl } from '@/components/gated-control'
 import { adminApi, type AdminBrand, type AdminBrandDomain } from '@/lib/api'
 import { toast } from 'sonner'
+import { useBootstrap } from '@/context/bootstrap-provider'
 
 export default function BrandingPage() {
+  const { availableBrands, brandId, loading: bootstrapLoading, error: bootstrapError } = useBootstrap()
   const [brand, setBrand] = React.useState<AdminBrand | null>(null)
   const [primaryColor, setPrimaryColor] = React.useState('#222222')
   const [domain, setDomain] = React.useState('')
@@ -23,25 +26,27 @@ export default function BrandingPage() {
   const loadBranding = React.useCallback(async () => {
     setLoading(true)
     setError(null)
-    const result = await adminApi.listBrands()
-    if (!result.ok) {
+
+    if (bootstrapLoading) return
+
+    if (bootstrapError) {
       setBrand(null)
       setDomains([])
-      setError(result.error.message)
+      setError(bootstrapError)
       setLoading(false)
       return
     }
 
-    const firstBrand = result.data[0] ?? null
-    setBrand(firstBrand)
+    const selectedBrand = availableBrands.find((candidate) => candidate.id === brandId) ?? null
+    setBrand(selectedBrand)
     setPrimaryColor(
-      typeof firstBrand?.theme.primary === 'string'
-        ? firstBrand.theme.primary
-        : firstBrand?.theme.primaryColor ?? '#222222',
+      typeof selectedBrand?.theme.primaryColor === 'string'
+        ? selectedBrand.theme.primaryColor
+        : '#222222',
     )
-    setDomains(firstBrand?.domains ?? [])
+    setDomains(selectedBrand?.domains ?? [])
     setLoading(false)
-  }, [])
+  }, [availableBrands, bootstrapError, bootstrapLoading, brandId])
 
   React.useEffect(() => {
     void loadBranding()
@@ -80,7 +85,7 @@ export default function BrandingPage() {
     const result = await adminApi.updateBrand(brand.id, {
       theme: {
         ...brand.theme,
-        primary: primaryColor,
+        primaryColor,
       },
     })
     setSaving(false)
@@ -102,7 +107,7 @@ export default function BrandingPage() {
           Logo, colors, domains, and event page defaults
         </p>
       </div>
-      {loading ? (
+      {bootstrapLoading || loading ? (
         <Card>
           <CardContent className='p-4 text-sm text-muted-foreground'>
             Loading branding settings...
@@ -122,8 +127,8 @@ export default function BrandingPage() {
       ) : !brand ? (
         <EmptyState
           icon={ImageIcon}
-          title='No brand found'
-          description='Create a brand before configuring checkout branding.'
+          title='Select a brand'
+          description='Choose a brand from the workspace selector before configuring checkout branding.'
         />
       ) : (
       <>
@@ -139,11 +144,17 @@ export default function BrandingPage() {
             <div className='flex size-16 items-center justify-center rounded-lg border bg-muted'>
               <ImageIcon className='size-6 text-muted-foreground' />
             </div>
-            <Button variant='outline'>
+            <GatedControl
+              variant='outline'
+              reason='Logo upload is gated because the admin API does not expose an upload artifact endpoint yet.'
+            >
               <Upload className='size-4' />
               Upload Logo
-            </Button>
+            </GatedControl>
           </div>
+          <p className='text-sm text-muted-foreground'>
+            Logo upload will be available once file storage and validation are configured.
+          </p>
         </CardContent>
       </Card>
       <Card>

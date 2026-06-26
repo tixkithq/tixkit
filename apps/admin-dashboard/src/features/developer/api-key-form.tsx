@@ -6,6 +6,7 @@ import { zodResolver } from '@hookform/resolvers/zod'
 import { z } from 'zod'
 import { Copy, Check, KeyRound, AlertTriangle } from 'lucide-react'
 import { type AdminApiKey, type CreateApiKeyInput, adminApi } from '@/lib/api'
+import { useBootstrap } from '@/context/bootstrap-provider'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Checkbox } from '@/components/ui/checkbox'
@@ -71,6 +72,7 @@ export function ApiKeyFormDialog({
   const [createdKey, setCreatedKey] = React.useState<AdminApiKey | null>(null)
   const [oneTimeSecret, setOneTimeSecret] = React.useState<string>('')
   const [copied, setCopied] = React.useState(false)
+  const { organizationId } = useBootstrap()
 
   const form = useForm<ApiKeyFormValues>({
     resolver: zodResolver(apiKeySchema),
@@ -78,8 +80,13 @@ export function ApiKeyFormDialog({
   })
 
   const onSubmit = async (values: ApiKeyFormValues) => {
+    if (!organizationId) {
+      toast.error('Organization context is required to create an API key.')
+      return
+    }
     setSubmitting(true)
     const input: CreateApiKeyInput = {
+      organizationId,
       name: values.name,
       scopes: values.scopes,
     }

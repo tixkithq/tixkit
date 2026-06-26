@@ -173,6 +173,38 @@ describe('AdminApi reports date range', () => {
       to: '2026-02-28',
     })
     expect(result.ok).toBe(true)
+    if (result.ok) {
+      expect(result.data.eventId).toBe('evt_demo_001')
+      expect(result.data.totalTaxCollectedCents).toBeGreaterThanOrEqual(0)
+    }
+  })
+
+  it('returns attendance, promo, conversion, and affiliate reports through typed methods', async () => {
+    const attendance = await adminApi.getAttendanceReport('evt_demo_001')
+    const promo = await adminApi.getPromoReport('evt_demo_001')
+    const conversion = await adminApi.getConversionReport('evt_demo_001')
+    const affiliate = await adminApi.getAffiliateReport('org_demo')
+
+    expect(attendance.ok).toBe(true)
+    expect(promo.ok).toBe(true)
+    expect(conversion.ok).toBe(true)
+    expect(affiliate.ok).toBe(true)
+
+    if (attendance.ok) {
+      expect(attendance.data).toMatchObject({ eventId: 'evt_demo_001' })
+      expect(attendance.data.totalAttendees).toBeGreaterThanOrEqual(attendance.data.checkedIn)
+    }
+    if (promo.ok) {
+      expect(promo.data.discountCodes[0]).toHaveProperty('revenueAttributedCents')
+    }
+    if (conversion.ok) {
+      expect(conversion.data.widgetViews ?? 0).toBeGreaterThanOrEqual(0)
+      expect(conversion.data.conversionRate).toBeGreaterThanOrEqual(0)
+    }
+    if (affiliate.ok) {
+      expect(affiliate.data.organizationId).toBe('org_demo')
+      expect(affiliate.data.affiliates[0]).toHaveProperty('commissionCents')
+    }
   })
 
   it('createExport returns a queued export job through the typed API', async () => {
@@ -229,12 +261,87 @@ describe('AdminApi order timestamps', () => {
     }
   })
 
+  it('refundOrder supports partial refund with amountCents', async () => {
+    // ord_001 is paid with totalCents 5000, refundedCents 0.
+    const result = await adminApi.refundOrder('ord_001', {
+      amountCents: 2000,
+      reason: 'partial customer request',
+      voidTickets: false,
+      restoreInventory: true,
+    })
+    expect(result.ok).toBe(true)
+    if (result.ok) {
+      expect(result.data.refundAmount).toBe(2000)
+      expect(result.data.status).toBe('pending')
+    }
+    // Verify order state transitioned to partially_refunded.
+    const orderResult = await adminApi.getOrder('ord_001')
+    expect(orderResult.ok).toBe(true)
+    if (orderResult.ok) {
+      expect(orderResult.data.status).toBe('partially_refunded')
+      expect(orderResult.data.refundedCents).toBe(2000)
+    }
+  })
+
+  it('refundOrder passes reason through to the API', async () => {
+    // Use ord_001 which now has 2000 refunded. Refund the rest.
+    const result = await adminApi.refundOrder('ord_001', {
+      reason: 'final partial refund',
+    })
+    expect(result.ok).toBe(true)
+    if (result.ok) {
+      // Full remaining refund: 5000 - 2000 = 3000
+      expect(result.data.refundAmount).toBe(3000)
+    }
+  })
+
   it('cancelOrder sets cancelledAt', async () => {
     // ord_003 is pending.
     const result = await adminApi.cancelOrder('ord_003')
     expect(result.ok).toBe(true)
     if (result.ok) {
       expect(result.data.cancelledAt).toBeDefined()
+    }
+  })
+})
+
+describe('AdminApi create methods pass explicit org/brand context', () => {
+  it('createEvent accepts organizationId and brandId from bootstrap context', async () => {
+    const result = await adminApi.createEvent({
+      organizationId: 'org_demo',
+      brandId: 'brd_demo',
+      title: 'Bootstrap Context Event',
+      startsAt: '2026-09-01T19:00',
+      timezone: 'UTC',
+      currency: 'USD',
+    })
+    expect(result.ok).toBe(true)
+    if (result.ok) {
+      expect(result.data.title).toBe('Bootstrap Context Event')
+    }
+  })
+
+  it('createApiKey accepts organizationId from bootstrap context', async () => {
+    const result = await adminApi.createApiKey({
+      organizationId: 'org_demo',
+      name: 'Bootstrap Context Key',
+      scopes: ['events.read'],
+    })
+    expect(result.ok).toBe(true)
+    if (result.ok) {
+      expect(result.data.name).toBe('Bootstrap Context Key')
+    }
+  })
+
+  it('createWebhookEndpoint accepts organizationId from bootstrap context', async () => {
+    const result = await adminApi.createWebhookEndpoint({
+      organizationId: 'org_demo',
+      url: 'https://example.com/hooks/bootstrap',
+      events: ['order.created'],
+    })
+    expect(result.ok).toBe(true)
+    if (result.ok) {
+      expect(result.data.url).toBe('https://example.com/hooks/bootstrap')
     }
   })
 })

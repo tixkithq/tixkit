@@ -5,6 +5,7 @@ import { useForm } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { z } from 'zod'
 import { type AdminWebhookEndpoint, type CreateWebhookEndpointInput, type UpdateWebhookEndpointInput, adminApi } from '@/lib/api'
+import { useBootstrap } from '@/context/bootstrap-provider'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Textarea } from '@/components/ui/textarea'
@@ -62,6 +63,7 @@ export function WebhookFormDrawer({
   onSuccess,
 }: WebhookFormDrawerProps) {
   const [submitting, setSubmitting] = React.useState(false)
+  const { organizationId } = useBootstrap()
 
   const form = useForm<WebhookFormValues>({
     resolver: zodResolver(webhookSchema),
@@ -93,8 +95,13 @@ export function WebhookFormDrawer({
   }
 
   const onSubmit = async (values: WebhookFormValues) => {
+    if (!endpoint && !organizationId) {
+      toast.error('Organization context is required to create a webhook endpoint.')
+      return
+    }
     setSubmitting(true)
     const input: CreateWebhookEndpointInput = {
+      organizationId: organizationId,
       url: values.url,
       description: values.description || undefined,
       events: values.events,

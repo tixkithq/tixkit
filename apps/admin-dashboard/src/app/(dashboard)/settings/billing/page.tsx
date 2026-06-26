@@ -6,36 +6,40 @@ import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { EmptyState } from '@/components/empty-state'
+import { GatedControl } from '@/components/gated-control'
 import { adminApi, type AdminBillingOverview, type AdminOrganization } from '@/lib/api'
+import { useBootstrap } from '@/context/bootstrap-provider'
 
 export default function BillingPage() {
+  const { organizations, organizationId, loading: bootstrapLoading, error: bootstrapError } = useBootstrap()
   const [organization, setOrganization] = React.useState<AdminOrganization | null>(null)
   const [billing, setBilling] = React.useState<AdminBillingOverview | null>(null)
   const [loading, setLoading] = React.useState(true)
   const [error, setError] = React.useState<string | null>(null)
 
   const loadBilling = React.useCallback(async () => {
+    if (bootstrapLoading) return
+
     setLoading(true)
     setError(null)
 
-    const organizationsResult = await adminApi.listOrganizations()
-    if (!organizationsResult.ok) {
+    if (bootstrapError) {
       setOrganization(null)
       setBilling(null)
-      setError(organizationsResult.error.message)
+      setError(bootstrapError)
       setLoading(false)
       return
     }
 
-    const firstOrganization = organizationsResult.data[0] ?? null
-    setOrganization(firstOrganization)
-    if (!firstOrganization) {
+    const selectedOrganization = organizations.find((org) => org.id === organizationId) ?? null
+    setOrganization(selectedOrganization)
+    if (!selectedOrganization) {
       setBilling(null)
       setLoading(false)
       return
     }
 
-    const billingResult = await adminApi.getBillingOverview(firstOrganization.id)
+    const billingResult = await adminApi.getBillingOverview(selectedOrganization.id)
     if (!billingResult.ok) {
       setBilling(null)
       setError(billingResult.error.message)
@@ -45,7 +49,7 @@ export default function BillingPage() {
 
     setBilling(billingResult.data)
     setLoading(false)
-  }, [])
+  }, [bootstrapError, bootstrapLoading, organizationId, organizations])
 
   React.useEffect(() => {
     void loadBilling()
@@ -73,7 +77,7 @@ export default function BillingPage() {
           </CardDescription>
         </CardHeader>
         <CardContent className='space-y-4'>
-          {loading ? (
+          {bootstrapLoading || loading ? (
             <p className='text-sm text-muted-foreground'>Loading billing settings...</p>
           ) : error ? (
             <EmptyState
@@ -89,8 +93,8 @@ export default function BillingPage() {
           ) : !organization ? (
             <EmptyState
               icon={CreditCard}
-              title='No organization found'
-              description='Create an organization before viewing billing.'
+              title='Select an organization'
+              description='Choose an organization from the workspace selector before viewing billing.'
             />
           ) : (
           <>
@@ -120,10 +124,13 @@ export default function BillingPage() {
               <p className='text-2xl font-bold'>{billing?.paymentMethodLabel ?? 'Unavailable'}</p>
             </div>
           </div>
-          <Button variant='outline' disabled>
+          <GatedControl
+            variant='outline'
+            reason='Invoice downloads are gated because the admin API does not expose an invoice download endpoint yet.'
+          >
             <Download className='size-4' />
             Download Invoices
-          </Button>
+          </GatedControl>
           </>
           )}
         </CardContent>

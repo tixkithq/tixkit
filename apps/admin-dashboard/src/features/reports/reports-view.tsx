@@ -2,30 +2,34 @@
 
 import * as React from 'react'
 import {
+  BadgePercent,
   BarChart3,
-  DollarSign,
-  Ticket,
-  TrendingUp,
-  Download,
-  Receipt,
   CalendarCheck,
   CalendarRange,
+  Download,
+  DollarSign,
+  MousePointerClick,
+  Receipt,
+  Ticket,
+  TrendingUp,
+  Users,
 } from 'lucide-react'
 import {
-  Bar,
-  BarChart,
-  CartesianGrid,
-  ResponsiveContainer,
-  Tooltip,
-  XAxis,
-  YAxis,
-} from 'recharts'
-import { type AdminExportJob, type AdminSalesReportSummary, adminApi } from '@/lib/api'
+  type AdminAffiliateReport,
+  type AdminAttendanceReport,
+  type AdminConversionReport,
+  type AdminExportJob,
+  type AdminExportType,
+  type AdminPromoReport,
+  type AdminSalesReportSummary,
+  type AdminTaxReport,
+  adminApi,
+} from '@/lib/api'
+import { ApiErrorState } from '@/components/api-error-state'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
-import { EmptyState } from '@/components/empty-state'
-import { Skeleton } from '@/components/ui/skeleton'
 import { DatePicker } from '@/components/date-picker'
+import { EmptyState } from '@/components/empty-state'
 import {
   Select,
   SelectContent,
@@ -33,48 +37,133 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select'
+import { Skeleton } from '@/components/ui/skeleton'
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from '@/components/ui/table'
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { useAdminData } from '@/hooks/use-admin-data'
-import { formatCurrency, formatNumber, formatDate } from '@/lib/format'
+import { formatCurrency, formatDate, formatNumber } from '@/lib/format'
 import { subscribeToExportJob } from '@/lib/export-jobs'
 import { toast } from 'sonner'
+import type { AdminApiError } from '@/lib/api'
+
+type ReportTab = 'sales' | 'tax' | 'attendance' | 'promo' | 'conversion' | 'affiliate'
+
+type ReportsViewProps = {
+  eventId?: string
+}
+
+type LoadState<T> = {
+  data: T | undefined
+  loading: boolean
+  error: AdminApiError | undefined
+  refetch: () => void
+}
+
+const EXPORT_TYPES: Partial<Record<ReportTab, AdminExportType>> = {
+  sales: 'sales',
+  tax: 'tax',
+  attendance: 'attendees',
+}
 
 function toIsoDate(date: Date): string {
   return date.toISOString().slice(0, 10)
 }
 
-export function ReportsView() {
-  const [selectedEventId, setSelectedEventId] = React.useState<string>('')
+function formatPercent(value: number): string {
+  return new Intl.NumberFormat(undefined, {
+    style: 'percent',
+    maximumFractionDigits: 1,
+  }).format(value)
+}
+
+function emptyResult<T>(): Promise<{ ok: true; data: T | null }> {
+  return Promise.resolve({ ok: true as const, data: null })
+}
+
+export function ReportsView({ eventId }: ReportsViewProps) {
+  const [selectedEventId, setSelectedEventId] = React.useState<string>(eventId ?? '')
+  const [activeTab, setActiveTab] = React.useState<ReportTab>('sales')
   const [exporting, setExporting] = React.useState(false)
   const [lastExport, setLastExport] = React.useState<AdminExportJob | null>(null)
   const exportSubscriptionRef = React.useRef<(() => void) | null>(null)
-  // Default to the last 30 days.
   const [from, setFrom] = React.useState<Date | undefined>(
     () => new Date(Date.now() - 30 * 86_400_000)
   )
   const [to, setTo] = React.useState<Date | undefined>(() => new Date())
 
-  const { data: eventsData, loading: eventsLoading } = useAdminData(() =>
-    adminApi.listEvents()
+  React.useEffect(() => {
+    if (eventId) setSelectedEventId(eventId)
+  }, [eventId])
+
+  const eventsState = useAdminData(
+    () =>
+      eventId
+        ? Promise.resolve({ ok: true as const, data: { items: [], total: 0 } })
+        : adminApi.listEvents(),
+    [eventId]
   )
-  const events = eventsData?.items ?? []
+  const organizationsState = useAdminData(() => adminApi.listOrganizations())
+  const events = eventsState.data?.items ?? []
+  const selectedEvent = events.find((event) => event.id === selectedEventId)
+  const primaryOrganizationId = organizationsState.data?.[0]?.id
 
   const range = React.useMemo(
     () => ({
       from: from ? toIsoDate(from) : undefined,
       to: to ? toIsoDate(to) : undefined,
     }),
-    [from, to],
+    [from, to]
   )
+  const selectedRangeKey = `${range.from ?? ''}:${range.to ?? ''}`
 
-  const { data: report, loading: reportLoading } = useAdminData(
+  const salesState = useAdminData(
     () =>
       selectedEventId
         ? adminApi.getSalesReport(selectedEventId, range)
-        : Promise.resolve({
-            ok: true as const,
-            data: null as AdminSalesReportSummary | null,
-          }),
-    [selectedEventId, range.from, range.to]
+        : emptyResult<AdminSalesReportSummary>(),
+    [selectedEventId, selectedRangeKey]
+  )
+  const taxState = useAdminData(
+    () =>
+      selectedEventId
+        ? adminApi.getTaxReport(selectedEventId, range)
+        : emptyResult<AdminTaxReport>(),
+    [selectedEventId, selectedRangeKey]
+  )
+  const attendanceState = useAdminData(
+    () =>
+      selectedEventId
+        ? adminApi.getAttendanceReport(selectedEventId)
+        : emptyResult<AdminAttendanceReport>(),
+    [selectedEventId]
+  )
+  const promoState = useAdminData(
+    () =>
+      selectedEventId
+        ? adminApi.getPromoReport(selectedEventId)
+        : emptyResult<AdminPromoReport>(),
+    [selectedEventId]
+  )
+  const conversionState = useAdminData(
+    () =>
+      selectedEventId
+        ? adminApi.getConversionReport(selectedEventId)
+        : emptyResult<AdminConversionReport>(),
+    [selectedEventId]
+  )
+  const affiliateState = useAdminData(
+    () =>
+      primaryOrganizationId
+        ? adminApi.getAffiliateReport(primaryOrganizationId)
+        : emptyResult<AdminAffiliateReport>(),
+    [primaryOrganizationId]
   )
 
   React.useEffect(() => {
@@ -84,12 +173,14 @@ export function ReportsView() {
   }, [])
 
   const handleExport = async () => {
-    if (!selectedEventId) return
+    const exportType = EXPORT_TYPES[activeTab]
+    if (!selectedEventId || !exportType) return
+
     exportSubscriptionRef.current?.()
     setExporting(true)
     const result = await adminApi.createExport({
       eventId: selectedEventId,
-      type: 'sales',
+      type: exportType,
       format: 'csv',
       filters: range,
     })
@@ -119,38 +210,47 @@ export function ReportsView() {
     })
   }
 
-  if (eventsLoading) {
+  if (eventsState.loading && !eventId) {
     return <Skeleton className='h-96 w-full' />
   }
 
-  if (events.length === 0) {
+  if (eventsState.error && !eventId) {
+    return <ApiErrorState error={eventsState.error} onRetry={eventsState.refetch} className='h-96' />
+  }
+
+  if (!eventId && events.length === 0) {
     return (
       <EmptyState
         icon={BarChart3}
         title='No events to report on'
-        description='Create an event first to view sales and attendance reports.'
+        description='Create an event first to view sales, tax, attendance, promo, conversion, and affiliate reports.'
       />
     )
   }
 
+  const exportType = EXPORT_TYPES[activeTab]
+  const currency = salesState.data?.currency ?? selectedEvent?.currency ?? 'USD'
+
   return (
     <div className='space-y-6'>
       <div className='flex flex-wrap items-end justify-between gap-4'>
-        <div className='grid gap-2'>
-          <span className='text-sm font-medium'>Event</span>
-          <Select value={selectedEventId} onValueChange={setSelectedEventId}>
-            <SelectTrigger className='w-full max-w-xs'>
-              <SelectValue placeholder='Select an event' />
-            </SelectTrigger>
-            <SelectContent>
-              {events.map((event) => (
-                <SelectItem key={event.id} value={event.id}>
-                  {event.title}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        </div>
+        {!eventId ? (
+          <div className='grid gap-2'>
+            <span className='text-sm font-medium'>Event</span>
+            <Select value={selectedEventId} onValueChange={setSelectedEventId}>
+              <SelectTrigger className='w-full max-w-xs'>
+                <SelectValue placeholder='Select an event' />
+              </SelectTrigger>
+              <SelectContent>
+                {events.map((event) => (
+                  <SelectItem key={event.id} value={event.id}>
+                    {event.title}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+        ) : null}
 
         <div className='flex flex-wrap items-end gap-4'>
           <div className='grid gap-2'>
@@ -174,7 +274,7 @@ export function ReportsView() {
           <Button
             variant='outline'
             onClick={handleExport}
-            disabled={!selectedEventId || !report || exporting}
+            disabled={!selectedEventId || !exportType || exporting}
           >
             <Download className='size-4' />
             {exporting ? 'Exporting...' : 'Export'}
@@ -182,107 +282,224 @@ export function ReportsView() {
         </div>
       </div>
 
-      {lastExport && <ExportStatusNotice exportJob={lastExport} />}
+      {lastExport ? <ExportStatusNotice exportJob={lastExport} /> : null}
 
       {!selectedEventId ? (
         <EmptyState
           icon={BarChart3}
           title='Select an event'
-          description='Pick an event to view revenue, fees, and check-in metrics.'
+          description='Pick an event to view reporting tabs.'
         />
-      ) : reportLoading || !report ? (
-        <div className='grid gap-4 sm:grid-cols-2 lg:grid-cols-4'>
-          {Array.from({ length: 4 }).map((_, i) => (
-            <Skeleton key={i} className='h-28 w-full' />
-          ))}
-          <Skeleton className='h-64 w-full sm:col-span-2 lg:col-span-4' />
-        </div>
       ) : (
-        <>
-          <div className='flex items-center gap-2 text-sm text-muted-foreground'>
-            <CalendarRange className='size-4' />
-            <span>
-              Showing data for{' '}
-              {formatDate(report.range.from)} – {formatDate(report.range.to)}
-            </span>
-          </div>
+        <Tabs value={activeTab} onValueChange={(value) => setActiveTab(value as ReportTab)}>
+          <TabsList className='flex h-auto w-full flex-wrap justify-start'>
+            <TabsTrigger value='sales'>Sales</TabsTrigger>
+            <TabsTrigger value='tax'>Tax</TabsTrigger>
+            <TabsTrigger value='attendance'>Attendance</TabsTrigger>
+            <TabsTrigger value='promo'>Promo</TabsTrigger>
+            <TabsTrigger value='conversion'>Conversion</TabsTrigger>
+            <TabsTrigger value='affiliate'>Affiliate</TabsTrigger>
+          </TabsList>
 
-          <div className='grid gap-4 sm:grid-cols-2 lg:grid-cols-4'>
-            <ReportCard
-              title='Gross Sales'
-              value={formatCurrency(report.grossSalesCents, report.currency)}
-              icon={DollarSign}
-            />
-            <ReportCard
-              title='Net Revenue'
-              value={formatCurrency(report.netRevenueCents, report.currency)}
-              icon={TrendingUp}
-            />
-            <ReportCard
-              title='Tickets Sold'
-              value={formatNumber(report.ticketsSold)}
-              icon={Ticket}
-            />
-            <ReportCard
-              title='Check-ins'
-              value={formatNumber(report.checkIns)}
-              icon={CalendarCheck}
-            />
-          </div>
-
-          <div className='grid gap-4 sm:grid-cols-2 lg:grid-cols-4'>
-            <ReportCard
-              title='Fees'
-              value={formatCurrency(report.feesCents, report.currency)}
-              icon={Receipt}
-            />
-            <ReportCard
-              title='Tax'
-              value={formatCurrency(report.taxCents, report.currency)}
-              icon={Receipt}
-            />
-            <ReportCard
-              title='Refunds'
-              value={formatCurrency(report.refundsCents, report.currency)}
-              icon={Receipt}
-            />
-            <ReportCard
-              title='Paid Orders'
-              value={formatNumber(report.paidOrdersCount)}
-              icon={TrendingUp}
-            />
-          </div>
-
-          <Card>
-            <CardHeader>
-              <CardTitle>Revenue Breakdown</CardTitle>
-            </CardHeader>
-            <CardContent>
-              <ResponsiveContainer width='100%' height={300}>
-                <BarChart
-                  data={[
-                    { name: 'Gross', value: report.grossSalesCents / 100 },
-                    { name: 'Fees', value: report.feesCents / 100 },
-                    { name: 'Tax', value: report.taxCents / 100 },
-                    { name: 'Refunds', value: report.refundsCents / 100 },
-                    { name: 'Net', value: report.netRevenueCents / 100 },
-                  ]}
-                >
-                  <CartesianGrid strokeDasharray='3 3' className='stroke-border' />
-                  <XAxis dataKey='name' className='text-xs' />
-                  <YAxis className='text-xs' />
-                  <Tooltip
-                    formatter={(value: unknown) =>
-                      formatCurrency(Number(value) * 100, report.currency)
-                    }
-                  />
-                  <Bar dataKey='value' fill='var(--chart-1)' radius={4} />
-                </BarChart>
-              </ResponsiveContainer>
-            </CardContent>
-          </Card>
-        </>
+          <TabsContent value='sales'>
+            <ReportLoadState state={salesState} render={(report) => <SalesReportPanel report={report} />} />
+          </TabsContent>
+          <TabsContent value='tax'>
+            <ReportLoadState state={taxState} render={(report) => <TaxReportPanel report={report} />} />
+          </TabsContent>
+          <TabsContent value='attendance'>
+            <ReportLoadState state={attendanceState} render={(report) => <AttendanceReportPanel report={report} />} />
+          </TabsContent>
+          <TabsContent value='promo'>
+            <ReportLoadState state={promoState} render={(report) => <PromoReportPanel report={report} currency={currency} />} />
+          </TabsContent>
+          <TabsContent value='conversion'>
+            <ReportLoadState state={conversionState} render={(report) => <ConversionReportPanel report={report} />} />
+          </TabsContent>
+          <TabsContent value='affiliate'>
+            <ReportLoadState state={affiliateState} render={(report) => <AffiliateReportPanel report={report} />} />
+          </TabsContent>
+        </Tabs>
       )}
+    </div>
+  )
+}
+
+function ReportLoadState<T>({
+  state,
+  render,
+}: {
+  state: LoadState<T | null>
+  render: (data: T) => React.ReactNode
+}) {
+  if (state.error) return <ApiErrorState error={state.error} onRetry={state.refetch} />
+  if (state.loading || !state.data) return <ReportSkeleton />
+  return <>{render(state.data)}</>
+}
+
+function SalesReportPanel({ report }: { report: AdminSalesReportSummary }) {
+  return (
+    <div className='space-y-6'>
+      <div className='flex items-center gap-2 text-sm text-muted-foreground'>
+        <CalendarRange className='size-4' />
+        <span>
+          Showing data for {formatDate(report.range.from)} - {formatDate(report.range.to)}
+        </span>
+      </div>
+      <div className='grid gap-4 sm:grid-cols-2 lg:grid-cols-4'>
+        <ReportCard title='Gross Sales' value={formatCurrency(report.grossSalesCents, report.currency)} icon={DollarSign} />
+        <ReportCard title='Net Revenue' value={formatCurrency(report.netRevenueCents, report.currency)} icon={TrendingUp} />
+        <ReportCard title='Tickets Sold' value={formatNumber(report.ticketsSold)} icon={Ticket} />
+        <ReportCard title='Check-ins' value={formatNumber(report.checkIns)} icon={CalendarCheck} />
+        <ReportCard title='Fees' value={formatCurrency(report.feesCents, report.currency)} icon={Receipt} />
+        <ReportCard title='Tax' value={formatCurrency(report.taxCents, report.currency)} icon={Receipt} />
+        <ReportCard title='Refunds' value={formatCurrency(report.refundsCents, report.currency)} icon={Receipt} />
+        <ReportCard title='Paid Orders' value={formatNumber(report.paidOrdersCount)} icon={TrendingUp} />
+      </div>
+    </div>
+  )
+}
+
+function TaxReportPanel({ report }: { report: AdminTaxReport }) {
+  return (
+    <div className='space-y-6'>
+      <div className='grid gap-4 sm:grid-cols-2 lg:grid-cols-4'>
+        <ReportCard title='Tax Collected' value={formatCurrency(report.totalTaxCollectedCents, report.currency)} icon={Receipt} />
+        <ReportCard title='Tax Buckets' value={formatNumber(report.breakdown.length)} icon={BarChart3} />
+      </div>
+      <ReportTable
+        headers={['Tax Rule', 'Rate', 'Taxable Amount', 'Tax Collected']}
+        rows={report.breakdown.map((row) => [
+          row.taxRuleName,
+          row.rate == null ? 'Actual' : formatPercent(row.rate > 1 ? row.rate / 10_000 : row.rate),
+          formatCurrency(row.taxableAmountCents, report.currency),
+          formatCurrency(row.taxCollectedCents, report.currency),
+        ])}
+      />
+    </div>
+  )
+}
+
+function AttendanceReportPanel({ report }: { report: AdminAttendanceReport }) {
+  return (
+    <div className='space-y-6'>
+      <div className='grid gap-4 sm:grid-cols-2 lg:grid-cols-4'>
+        <ReportCard title='Attendees' value={formatNumber(report.totalAttendees)} icon={Users} />
+        <ReportCard title='Checked In' value={formatNumber(report.checkedIn)} icon={CalendarCheck} />
+        <ReportCard title='Not Checked In' value={formatNumber(report.notCheckedIn)} icon={Ticket} />
+        <ReportCard title='Check-in Rate' value={formatPercent(report.checkInRate)} icon={TrendingUp} />
+      </div>
+      <ReportTable
+        headers={['Ticket Type', 'Total', 'Checked In', 'Rate']}
+        rows={report.breakdownByTicketType.map((row) => [
+          row.ticketTypeName,
+          formatNumber(row.total),
+          formatNumber(row.checkedIn),
+          formatPercent(row.total > 0 ? row.checkedIn / row.total : 0),
+        ])}
+      />
+    </div>
+  )
+}
+
+function PromoReportPanel({ report, currency }: { report: AdminPromoReport; currency: string }) {
+  const totalDiscount = report.discountCodes.reduce((sum, row) => sum + row.discountAmountCents, 0)
+  const totalRevenue = report.discountCodes.reduce((sum, row) => sum + row.revenueAttributedCents, 0)
+  return (
+    <div className='space-y-6'>
+      <div className='grid gap-4 sm:grid-cols-2 lg:grid-cols-4'>
+        <ReportCard title='Promo Codes' value={formatNumber(report.discountCodes.length)} icon={BadgePercent} />
+        <ReportCard title='Uses' value={formatNumber(report.discountCodes.reduce((sum, row) => sum + row.usesCount, 0))} icon={Ticket} />
+        <ReportCard title='Discounts' value={formatCurrency(totalDiscount, currency)} icon={Receipt} />
+        <ReportCard title='Attributed Revenue' value={formatCurrency(totalRevenue, currency)} icon={DollarSign} />
+      </div>
+      <ReportTable
+        headers={['Code', 'Uses', 'Discounts', 'Attributed Revenue']}
+        rows={report.discountCodes.map((row) => [
+          row.code,
+          formatNumber(row.usesCount),
+          formatCurrency(row.discountAmountCents, currency),
+          formatCurrency(row.revenueAttributedCents, currency),
+        ])}
+      />
+    </div>
+  )
+}
+
+function ConversionReportPanel({ report }: { report: AdminConversionReport }) {
+  return (
+    <div className='grid gap-4 sm:grid-cols-2 lg:grid-cols-4'>
+      <ReportCard title='Widget Views' value={formatNumber(report.widgetViews ?? 0)} icon={MousePointerClick} />
+      <ReportCard title='Checkout Started' value={formatNumber(report.checkoutStarted)} icon={Ticket} />
+      <ReportCard title='Checkout Completed' value={formatNumber(report.checkoutCompleted)} icon={CalendarCheck} />
+      <ReportCard title='Conversion Rate' value={formatPercent(report.conversionRate)} icon={TrendingUp} />
+    </div>
+  )
+}
+
+function AffiliateReportPanel({ report }: { report: AdminAffiliateReport }) {
+  const totalRevenue = report.affiliates.reduce((sum, row) => sum + row.revenueAttributedCents, 0)
+  const totalCommission = report.affiliates.reduce((sum, row) => sum + row.commissionCents, 0)
+  return (
+    <div className='space-y-6'>
+      <div className='grid gap-4 sm:grid-cols-2 lg:grid-cols-4'>
+        <ReportCard title='Affiliates' value={formatNumber(report.affiliates.length)} icon={Users} />
+        <ReportCard title='Referrals' value={formatNumber(report.affiliates.reduce((sum, row) => sum + row.referralsCount, 0))} icon={Ticket} />
+        <ReportCard title='Revenue' value={formatCurrency(totalRevenue)} icon={DollarSign} />
+        <ReportCard title='Commission' value={formatCurrency(totalCommission)} icon={Receipt} />
+      </div>
+      <ReportTable
+        headers={['Affiliate', 'Code', 'Referrals', 'Revenue', 'Commission']}
+        rows={report.affiliates.map((row) => [
+          row.name,
+          row.code,
+          formatNumber(row.referralsCount),
+          formatCurrency(row.revenueAttributedCents),
+          formatCurrency(row.commissionCents),
+        ])}
+      />
+    </div>
+  )
+}
+
+function ReportTable({ headers, rows }: { headers: string[]; rows: string[][] }) {
+  if (rows.length === 0) {
+    return (
+      <div className='rounded-md border bg-muted/20 p-6 text-sm text-muted-foreground'>
+        No rows for this report.
+      </div>
+    )
+  }
+
+  return (
+    <Table>
+      <TableHeader>
+        <TableRow className='hover:bg-transparent'>
+          {headers.map((header) => (
+            <TableHead key={header}>{header}</TableHead>
+          ))}
+        </TableRow>
+      </TableHeader>
+      <TableBody>
+        {rows.map((row) => (
+          <TableRow key={row.join(':')}>
+            {row.map((cell, index) => (
+              <TableCell key={`${cell}-${index}`}>{cell}</TableCell>
+            ))}
+          </TableRow>
+        ))}
+      </TableBody>
+    </Table>
+  )
+}
+
+function ReportSkeleton() {
+  return (
+    <div className='grid gap-4 sm:grid-cols-2 lg:grid-cols-4'>
+      {Array.from({ length: 4 }).map((_, i) => (
+        <Skeleton key={i} className='h-28 w-full' />
+      ))}
+      <Skeleton className='h-64 w-full sm:col-span-2 lg:col-span-4' />
     </div>
   )
 }
@@ -294,14 +511,14 @@ function ExportStatusNotice({ exportJob }: { exportJob: AdminExportJob }) {
       <span>
         Export {exportJob.exportId} is {exportJob.status}.
       </span>
-      {exportJob.status === 'completed' && href && (
+      {exportJob.status === 'completed' && href ? (
         <Button asChild size='sm' variant='outline'>
           <a href={href} target='_blank' rel='noreferrer'>
             <Download className='size-4' />
             Download
           </a>
         </Button>
-      )}
+      ) : null}
     </div>
   )
 }

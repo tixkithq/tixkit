@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { ticketSchema } from './ticket-type-form'
+import { buildTicketSalesWindowPayload, ticketSchema } from './ticket-type-form'
 
 const validBase = {
   name: 'General Admission',
@@ -45,5 +45,18 @@ describe('ticketSchema sales window refinement', () => {
       salesEndAt: '2026-08-15T19:00',
     })
     expect(result.success).toBe(false)
+  })
+})
+
+describe('buildTicketSalesWindowPayload', () => {
+  it('converts datetime-local form values to backend ISO timestamps', () => {
+    const payload = buildTicketSalesWindowPayload({
+      salesStartAt: '2026-08-15T19:00',
+      salesEndAt: '2026-08-16T19:00',
+    })
+
+    expect(payload.salesStartAt).toMatch(/^\d{4}-\d{2}-\d{2}T\d{2}:00:00\.000Z$/)
+    expect(payload.salesEndAt).toMatch(/^\d{4}-\d{2}-\d{2}T\d{2}:00:00\.000Z$/)
+    expect(payload.salesStartAt).not.toBe('2026-08-15T19:00')
   })
 })

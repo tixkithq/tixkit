@@ -27,6 +27,7 @@ import {
 import { adminApi, type AdminOrganization, type AdminTeamMember, type TeamMemberRole } from '@/lib/api'
 import { getDisplayNameInitials } from '@/lib/utils'
 import { toast } from 'sonner'
+import { useBootstrap } from '@/context/bootstrap-provider'
 
 const roleLabels: Record<TeamMemberRole, string> = {
   owner: 'Owner',
@@ -36,6 +37,7 @@ const roleLabels: Record<TeamMemberRole, string> = {
 }
 
 export function TeamView() {
+  const { organizations, organizationId, loading: bootstrapLoading, error: bootstrapError } = useBootstrap()
   const [inviteOpen, setInviteOpen] = React.useState(false)
   const [inviteEmail, setInviteEmail] = React.useState('')
   const [inviteRole, setInviteRole] = React.useState<TeamMemberRole>('viewer')
@@ -46,27 +48,28 @@ export function TeamView() {
   const [error, setError] = React.useState<string | null>(null)
 
   const loadTeam = React.useCallback(async () => {
+    if (bootstrapLoading) return
+
     setLoading(true)
     setError(null)
 
-    const organizationsResult = await adminApi.listOrganizations()
-    if (!organizationsResult.ok) {
+    if (bootstrapError) {
       setOrganization(null)
       setMembers([])
-      setError(organizationsResult.error.message)
+      setError(bootstrapError)
       setLoading(false)
       return
     }
 
-    const firstOrganization = organizationsResult.data[0] ?? null
-    setOrganization(firstOrganization)
-    if (!firstOrganization) {
+    const selectedOrganization = organizations.find((org) => org.id === organizationId) ?? null
+    setOrganization(selectedOrganization)
+    if (!selectedOrganization) {
       setMembers([])
       setLoading(false)
       return
     }
 
-    const membersResult = await adminApi.listTeamMembers(firstOrganization.id)
+    const membersResult = await adminApi.listTeamMembers(selectedOrganization.id)
     if (!membersResult.ok) {
       setMembers([])
       setError(membersResult.error.message)
@@ -76,7 +79,7 @@ export function TeamView() {
 
     setMembers(membersResult.data)
     setLoading(false)
-  }, [])
+  }, [bootstrapError, bootstrapLoading, organizationId, organizations])
 
   React.useEffect(() => {
     void loadTeam()
@@ -126,7 +129,7 @@ export function TeamView() {
         </Button>
       </div>
 
-      {loading ? (
+      {bootstrapLoading || loading ? (
         <Card>
           <CardContent className='p-4 text-sm text-muted-foreground'>
             Loading team members...
@@ -146,8 +149,8 @@ export function TeamView() {
       ) : !organization ? (
         <EmptyState
           icon={UsersRound}
-          title='No organization found'
-          description='Create an organization before managing team access.'
+          title='Select an organization'
+          description='Choose an organization from the workspace selector before managing team access.'
         />
       ) : members.length === 0 ? (
         <EmptyState

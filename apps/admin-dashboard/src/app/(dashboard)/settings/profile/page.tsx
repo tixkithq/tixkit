@@ -1,8 +1,12 @@
 'use client'
 
 import * as React from 'react'
+import { ExternalLink } from 'lucide-react'
+import { useClerk } from '@clerk/nextjs'
 import { useAdminUser } from '@/context/admin-user-provider'
+import { hasClerkKey } from '@/lib/auth'
 import { Button } from '@/components/ui/button'
+import { GatedControl } from '@/components/gated-control'
 import { Input } from '@/components/ui/input'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Label } from '@/components/ui/label'
@@ -11,8 +15,16 @@ import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'
 
 export default function ProfilePage() {
   const user = useAdminUser()
-  const [name, setName] = React.useState(user.name)
-  const [email, setEmail] = React.useState(user.email)
+  const clerkEnabled = hasClerkKey()
+  const clerk = useClerk()
+
+  const openProfile = () => {
+    if (clerk?.openUserProfile) {
+      clerk.openUserProfile()
+    } else {
+      window.open('/user', '_blank')
+    }
+  }
 
   return (
     <div className='space-y-6'>
@@ -26,7 +38,9 @@ export default function ProfilePage() {
         <CardHeader>
           <CardTitle>Personal Information</CardTitle>
           <CardDescription>
-            Update your personal profile information.
+            {clerkEnabled
+              ? 'Profile details are managed by Clerk. Click "Manage in Clerk" to update your name, email, avatar, and security settings.'
+              : 'Profile details are managed by your identity provider. Configure Clerk to enable profile management.'}
           </CardDescription>
         </CardHeader>
         <CardContent className='space-y-4'>
@@ -39,17 +53,33 @@ export default function ProfilePage() {
                 {getDisplayNameInitials(user.name || '?')}
               </AvatarFallback>
             </Avatar>
-            <Button variant='outline' size='sm' disabled>
-              Change Avatar
-            </Button>
+            {clerkEnabled ? (
+              <Button
+                variant='outline'
+                size='sm'
+                onClick={openProfile}
+              >
+                <ExternalLink className='size-4' />
+                Manage in Clerk
+              </Button>
+            ) : (
+              <GatedControl
+                variant='outline'
+                size='sm'
+                reason='Avatar changes are gated because Clerk authentication or a profile image upload endpoint is not configured.'
+              >
+                Change Avatar
+              </GatedControl>
+            )}
           </div>
           <div className='grid gap-4 sm:grid-cols-2'>
             <div className='space-y-2'>
               <Label htmlFor='name'>Display Name</Label>
               <Input
                 id='name'
-                value={name}
-                onChange={(e) => setName(e.target.value)}
+                value={user.name}
+                readOnly
+                className='bg-muted/50'
               />
             </div>
             <div className='space-y-2'>
@@ -57,12 +87,22 @@ export default function ProfilePage() {
               <Input
                 id='email'
                 type='email'
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
+                value={user.email}
+                readOnly
+                className='bg-muted/50'
               />
             </div>
           </div>
-          <Button disabled>Save Changes</Button>
+          {clerkEnabled ? (
+            <Button onClick={() => window.open('/user', '_blank')}>
+              <ExternalLink className='size-4' />
+              Manage Profile in Clerk
+            </Button>
+          ) : (
+            <GatedControl reason='Profile changes are gated because Clerk authentication or a profile update endpoint is not configured.'>
+              Save Changes
+            </GatedControl>
+          )}
         </CardContent>
       </Card>
     </div>

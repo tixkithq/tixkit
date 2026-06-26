@@ -39,6 +39,7 @@ import {
   SheetTitle,
 } from '@/components/ui/sheet'
 import { toast } from 'sonner'
+import { isoToLocalDatetimeInput, localDatetimeInputToIso } from '@/lib/datetime'
 
 export const ticketSchema = z
   .object({
@@ -79,6 +80,15 @@ export const ticketSchema = z
 
 type TicketFormValues = z.infer<typeof ticketSchema>
 
+export function buildTicketSalesWindowPayload(
+  values: Pick<TicketFormValues, 'salesStartAt' | 'salesEndAt'>,
+) {
+  return {
+    salesStartAt: localDatetimeInputToIso(values.salesStartAt),
+    salesEndAt: localDatetimeInputToIso(values.salesEndAt),
+  }
+}
+
 type TicketTypeFormDrawerProps = {
   eventId: string
   open: boolean
@@ -86,15 +96,6 @@ type TicketTypeFormDrawerProps = {
   onSuccess?: () => void
   /** Existing ticket type to edit. Omit for create mode. */
   ticketType?: AdminTicketType
-}
-
-function toLocalDatetimeInput(iso?: string): string {
-  if (!iso) return ''
-  // datetime-local inputs expect yyyy-MM-ddTHH:mm in local time.
-  const d = new Date(iso)
-  if (Number.isNaN(d.getTime())) return ''
-  const pad = (n: number) => String(n).padStart(2, '0')
-  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`
 }
 
 export function TicketTypeFormDrawer({
@@ -131,8 +132,8 @@ export function TicketTypeFormDrawer({
         priceCents: ticketType?.priceCents ?? 0,
         currency: ticketType?.currency ?? 'USD',
         quantityTotal: ticketType?.quantityTotal,
-        salesStartAt: toLocalDatetimeInput(ticketType?.salesStartAt),
-        salesEndAt: toLocalDatetimeInput(ticketType?.salesEndAt),
+        salesStartAt: isoToLocalDatetimeInput(ticketType?.salesStartAt),
+        salesEndAt: isoToLocalDatetimeInput(ticketType?.salesEndAt),
         requiresAccessCode: ticketType?.requiresAccessCode ?? false,
         // Pool fields are only used in create mode; default the pool name to
         // the ticket type name and capacity to the quantityTotal.
@@ -151,8 +152,7 @@ export function TicketTypeFormDrawer({
       priceCents: values.priceCents,
       currency: values.currency,
       quantityTotal: values.quantityTotal || undefined,
-      salesStartAt: values.salesStartAt || undefined,
-      salesEndAt: values.salesEndAt || undefined,
+      ...buildTicketSalesWindowPayload(values),
       requiresAccessCode: values.requiresAccessCode,
     }
 

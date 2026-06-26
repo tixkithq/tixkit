@@ -20,6 +20,7 @@ import {
 import { DataTableColumnHeader } from '@/components/data-table/column-header'
 import { OrderStatusBadge } from '@/features/events/event-status-badge'
 import { ConfirmDialog } from '@/components/confirm-dialog'
+import { RefundDialog } from './refund-dialog'
 import { toast } from 'sonner'
 
 export function getOrderColumns(
@@ -119,34 +120,21 @@ export function getOrderColumns(
       enableHiding: false,
       cell: function OrderRowActions({ row }) {
         const order = row.original
-        const [confirmOpen, setConfirmOpen] = React.useState(false)
-        const [actionType, setActionType] = React.useState<'cancel' | 'refund'>('cancel')
+        const [cancelOpen, setCancelOpen] = React.useState(false)
+        const [refundOpen, setRefundOpen] = React.useState(false)
         const [pending, setPending] = React.useState(false)
 
         const canCancel = order.status === 'pending' || order.status === 'paid'
         const canRefund =
           order.status === 'paid' || order.status === 'partially_refunded'
 
-        const handleAction = async () => {
+        const handleCancel = async () => {
           setPending(true)
-          if (actionType === 'cancel') {
-            const result = await adminApi.cancelOrder(order.id)
-            setPending(false)
-            setConfirmOpen(false)
-            if (result.ok) {
-              toast.success('Order cancelled successfully')
-              onRefetch?.()
-            } else {
-              toast.error(result.error.message)
-            }
-            return
-          }
-
-          const result = await adminApi.refundOrder(order.id, {})
+          const result = await adminApi.cancelOrder(order.id)
           setPending(false)
-          setConfirmOpen(false)
+          setCancelOpen(false)
           if (result.ok) {
-            toast.success(result.data.message || 'Refund workflow queued')
+            toast.success('Order cancelled successfully')
             onRefetch?.()
           } else {
             toast.error(result.error.message)
@@ -172,10 +160,7 @@ export function getOrderColumns(
                 </DropdownMenuItem>
                 {canCancel && (
                   <DropdownMenuItem
-                    onClick={() => {
-                      setActionType('cancel')
-                      setConfirmOpen(true)
-                    }}
+                    onClick={() => setCancelOpen(true)}
                   >
                     <Ban className='size-4' />
                     Cancel
@@ -184,10 +169,7 @@ export function getOrderColumns(
                 {canRefund && (
                   <DropdownMenuItem
                     variant='destructive'
-                    onClick={() => {
-                      setActionType('refund')
-                      setConfirmOpen(true)
-                    }}
+                    onClick={() => setRefundOpen(true)}
                   >
                     <RotateCcw className='size-4' />
                     Refund
@@ -196,23 +178,23 @@ export function getOrderColumns(
               </DropdownMenuContent>
             </DropdownMenu>
             <ConfirmDialog
-              open={confirmOpen}
-              onOpenChange={setConfirmOpen}
-              title={
-                actionType === 'cancel' ? 'Cancel order' : 'Refund order'
-              }
-              description={
-                actionType === 'cancel'
-                  ? `Are you sure you want to cancel order ${order.id}? This cannot be undone.`
-                  : `Are you sure you want to refund order ${order.id}? The full refundable balance will be returned to the buyer.`
-              }
-              confirmText={
-                actionType === 'cancel' ? 'Cancel order' : 'Refund order'
-              }
+              open={cancelOpen}
+              onOpenChange={setCancelOpen}
+              title='Cancel order'
+              description={`Are you sure you want to cancel order ${order.id}? This cannot be undone.`}
+              confirmText='Cancel order'
               variant='destructive'
               pending={pending}
-              onConfirm={handleAction}
+              onConfirm={handleCancel}
             />
+            {canRefund && (
+              <RefundDialog
+                order={order}
+                open={refundOpen}
+                onOpenChange={setRefundOpen}
+                onSuccess={onRefetch}
+              />
+            )}
           </>
         )
       },

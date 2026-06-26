@@ -8,6 +8,7 @@ import { routes } from '@/lib/routes'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { EmptyState } from '@/components/empty-state'
+import { ApiErrorState } from '@/components/api-error-state'
 import { Skeleton } from '@/components/ui/skeleton'
 import { EventStatusBadge } from '@/features/events/event-status-badge'
 import { OrderStatusBadge } from '@/features/events/event-status-badge'
@@ -16,9 +17,9 @@ import { formatCurrency, formatNumber, formatDate } from '@/lib/format'
 
 export function DashboardView() {
   const [drawerOpen, setDrawerOpen] = React.useState(false)
-  const { data: eventsData, loading: eventsLoading, refetch: refetchEvents } =
+  const { data: eventsData, loading: eventsLoading, error: eventsError, refetch: refetchEvents } =
     useAdminData(() => adminApi.listEvents())
-  const { data: ordersData, refetch: refetchOrders } = useAdminData(() =>
+  const { data: ordersData, loading: ordersLoading, error: ordersError, refetch: refetchOrders } = useAdminData(() =>
     adminApi.listOrders({ limit: 5 })
   )
 
@@ -86,7 +87,15 @@ export function DashboardView() {
           ? Array.from({ length: 4 }).map((_, i) => (
               <Skeleton key={i} className='h-28 w-full' />
             ))
-          : metrics.map((m) => (
+          : eventsError
+            ? Array.from({ length: 4 }).map((_, i) => (
+                <Card key={i} className='h-28'>
+                  <CardContent className='flex items-center justify-center p-4'>
+                    <ApiErrorState error={eventsError} onRetry={refetchEvents} className='border-0 bg-transparent p-0' />
+                  </CardContent>
+                </Card>
+              ))
+            : metrics.map((m) => (
               <Card key={m.title}>
                 <CardHeader className='flex flex-row items-center justify-between space-y-0 pb-2'>
                   <CardTitle className='text-sm font-medium'>
@@ -114,6 +123,8 @@ export function DashboardView() {
                   <Skeleton key={i} className='h-16 w-full' />
                 ))}
               </div>
+            ) : eventsError ? (
+              <ApiErrorState error={eventsError} onRetry={refetchEvents} />
             ) : events.length === 0 ? (
               <EmptyState
                 icon={Ticket}
@@ -154,7 +165,15 @@ export function DashboardView() {
             <CardTitle>Recent Orders</CardTitle>
           </CardHeader>
           <CardContent>
-            {recentOrders.length === 0 ? (
+            {ordersLoading ? (
+              <div className='space-y-2'>
+                {Array.from({ length: 3 }).map((_, i) => (
+                  <Skeleton key={i} className='h-16 w-full' />
+                ))}
+              </div>
+            ) : ordersError ? (
+              <ApiErrorState error={ordersError} onRetry={refetchOrders} />
+            ) : recentOrders.length === 0 ? (
               <EmptyState
                 icon={DollarSign}
                 title='No orders yet'

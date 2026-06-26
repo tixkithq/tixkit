@@ -5,6 +5,8 @@ import { useForm } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { z } from 'zod'
 import { type CreateEventInput, type UpdateEventInput, type AdminEventListItem, adminApi } from '@/lib/api'
+import { isoToLocalDatetimeInput, localDatetimeInputToIso } from '@/lib/datetime'
+import { useBootstrap } from '@/context/bootstrap-provider'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Textarea } from '@/components/ui/textarea'
@@ -66,6 +68,12 @@ export const eventSchema = z
 
 type EventFormValues = z.infer<typeof eventSchema>
 
+export function buildEventDatePayload(values: Pick<EventFormValues, 'startsAt' | 'endsAt'>) {
+  const startsAt = localDatetimeInputToIso(values.startsAt)
+  const endsAt = localDatetimeInputToIso(values.endsAt)
+  return startsAt ? { startsAt, endsAt } : null
+}
+
 const commonTimezones = [
   'America/New_York',
   'America/Chicago',
@@ -91,6 +99,7 @@ type EventFormProps = {
 
 export function EventForm({ event, onSuccess, onCancel }: EventFormProps) {
   const [submitting, setSubmitting] = React.useState(false)
+  const { organizationId, brandId, loading: bootstrapLoading } = useBootstrap()
 
   const form = useForm<EventFormValues>({
     resolver: zodResolver(eventSchema),
@@ -99,8 +108,8 @@ export function EventForm({ event, onSuccess, onCancel }: EventFormProps) {
           title: event.title,
           slug: event.slug ?? '',
           description: '',
-          startsAt: event.startsAt,
-          endsAt: event.endsAt ?? '',
+          startsAt: isoToLocalDatetimeInput(event.startsAt),
+          endsAt: isoToLocalDatetimeInput(event.endsAt),
           timezone: event.timezone,
           venueName: event.venueName ?? '',
           address: '',
@@ -120,14 +129,26 @@ export function EventForm({ event, onSuccess, onCancel }: EventFormProps) {
   })
 
   const onSubmit = async (values: EventFormValues) => {
+    if (!event && (!organizationId || !brandId)) {
+      toast.error('Organization and brand context are required to create an event. Please ensure your account is properly configured.')
+      return
+    }
     setSubmitting(true)
     try {
-      const input: CreateEventInput = {
+      const datePayload = buildEventDatePayload(values)
+      if (!datePayload) {
+        toast.error('Start date must be a valid date and time')
+        return
+      }
+
+      const createInput: CreateEventInput = {
+        organizationId: organizationId,
+        brandId: brandId,
         title: values.title,
         slug: values.slug || undefined,
         description: values.description || undefined,
-        startsAt: values.startsAt,
-        endsAt: values.endsAt || undefined,
+        startsAt: datePayload.startsAt,
+        endsAt: datePayload.endsAt,
         timezone: values.timezone,
         venueName: values.venueName || undefined,
         address: values.address || undefined,
@@ -135,8 +156,15 @@ export function EventForm({ event, onSuccess, onCancel }: EventFormProps) {
       }
 
       const result = event
-        ? await adminApi.updateEvent(event.id, input as UpdateEventInput)
-        : await adminApi.createEvent(input)
+        ? await adminApi.updateEvent(event.id, {
+            title: values.title,
+            description: values.description || undefined,
+            startsAt: datePayload.startsAt,
+            endsAt: datePayload.endsAt,
+            timezone: values.timezone,
+            currency: values.currency,
+          } satisfies UpdateEventInput)
+        : await adminApi.createEvent(createInput)
 
       if (result.ok) {
         toast.success(event ? 'Event updated' : 'Event created')
@@ -308,7 +336,7 @@ export function EventForm({ event, onSuccess, onCancel }: EventFormProps) {
               Cancel
             </Button>
           )}
-          <Button type='submit' disabled={submitting}>
+          <Button type='submit' disabled={submitting || (!event && bootstrapLoading)}>
             {submitting ? 'Saving...' : event ? 'Save Changes' : 'Create Event'}
           </Button>
         </div>

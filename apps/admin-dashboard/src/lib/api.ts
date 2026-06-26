@@ -190,6 +190,79 @@ export type AdminOrderListItem = {
   cancelledAt?: string
 }
 
+export type AdminOrderLineItem = {
+  id: string
+  orderId: string
+  ticketTypeId?: string
+  attendeeId?: string
+  description: string
+  quantity: number
+  unitPriceCents: number
+  subtotalCents: number
+  discountCents: number
+  taxCents: number
+  feeCents: number
+  totalCents: number
+  currency: string
+  createdAt: string
+  updatedAt: string
+}
+
+export type AdminOrderRefund = {
+  id: string
+  orderId: string
+  amountCents: number
+  currency: string
+  status: string
+  reason: string
+  createdAt: string
+  updatedAt: string
+}
+
+export type AdminOrderTimelineItem = {
+  id: string
+  orderId: string
+  type: string
+  description: string
+  metadata?: Record<string, unknown>
+  actorId?: string
+  createdAt: string
+}
+
+export type AdminOrderAttendee = {
+  id: string
+  orderId: string
+  eventId: string
+  ticketTypeId?: string
+  ticketId?: string
+  firstName?: string
+  lastName?: string
+  name?: string
+  email?: string
+  ticketTypeName?: string
+  status: string
+  checkInStatus?: string
+  customAnswers?: Record<string, unknown>
+  createdAt: string
+  updatedAt?: string
+}
+
+export type AdminOrderDetail = AdminOrderListItem & {
+  lineItems: AdminOrderLineItem[]
+  attendees: AdminOrderAttendee[]
+  checkoutAnswers: {
+    buyerFields: Record<string, unknown>
+    attendeeFields: Record<string, unknown>
+  }
+  consentSnapshots: Record<string, unknown>
+  refunds: AdminOrderRefund[]
+  timeline: AdminOrderTimelineItem[]
+  deliveryStatus: {
+    email: string
+    tickets: string
+  }
+}
+
 export type AttendeeStatus = 'active' | 'cancelled' | 'refunded' | 'transferred'
 export type CheckInStatus = 'not_checked_in' | 'checked_in' | 'duplicate' | 'revoked'
 
@@ -246,8 +319,11 @@ export type AdminMessageCampaign = {
     | 'not_checked_in'
     | 'ticket_type'
     | 'custom'
+  queuedCount: number
   sentCount: number
+  deliveredCount: number
   failedCount: number
+  suppressedCount: number
   scheduledAt?: string
   createdAt: string
 }
@@ -296,6 +372,9 @@ type BackendMessageCampaign = {
   audienceCount?: number
   queuedEmailJobs?: number
   queuedSmsJobs?: number
+  sentCount?: number
+  deliveredCount?: number
+  failedCount?: number
   suppressedRecipients?: number
   consentExclusions?: number
   skippedRecipients?: number
@@ -312,7 +391,11 @@ type BackendMessageList = {
 }
 
 function normalizeMessageCampaign(campaign: BackendMessageCampaign): AdminMessageCampaign {
-  const failedCount = Number(campaign.suppressedRecipients ?? 0)
+  const queuedCount = Number(campaign.queuedEmailJobs ?? 0) + Number(campaign.queuedSmsJobs ?? 0)
+  const sentCount = Number(campaign.sentCount ?? (campaign.status === 'sent' ? queuedCount : 0))
+  const deliveredCount = Number(campaign.deliveredCount ?? 0)
+  const failedCount = Number(campaign.failedCount ?? (campaign.status === 'failed' ? queuedCount : 0))
+  const suppressedCount = Number(campaign.suppressedRecipients ?? 0)
   return {
     id: campaign.id,
     eventId: campaign.eventId,
@@ -320,8 +403,11 @@ function normalizeMessageCampaign(campaign: BackendMessageCampaign): AdminMessag
     channel: campaign.channel,
     status: campaign.status,
     audience: 'all_attendees',
-    sentCount: Number(campaign.queuedEmailJobs ?? 0) + Number(campaign.queuedSmsJobs ?? 0),
+    queuedCount,
+    sentCount,
+    deliveredCount,
     failedCount,
+    suppressedCount,
     createdAt: campaign.createdAt ?? new Date().toISOString(),
   }
 }
@@ -360,6 +446,62 @@ export type AdminSalesReportSummary = {
     from: string
     to: string
   }
+}
+
+export type AdminTaxReport = {
+  eventId: string
+  currency: string
+  totalTaxCollectedCents: number
+  breakdown: Array<{
+    taxRuleName: string
+    rate: number | null
+    taxableAmountCents: number
+    taxCollectedCents: number
+  }>
+}
+
+export type AdminAttendanceReport = {
+  eventId: string
+  totalAttendees: number
+  checkedIn: number
+  notCheckedIn: number
+  checkInRate: number
+  breakdownByTicketType: Array<{
+    ticketTypeId: string
+    ticketTypeName: string
+    total: number
+    checkedIn: number
+  }>
+}
+
+export type AdminPromoReport = {
+  eventId: string
+  discountCodes: Array<{
+    code: string
+    usesCount: number
+    discountAmountCents: number
+    revenueAttributedCents: number
+  }>
+}
+
+export type AdminConversionReport = {
+  eventId: string
+  widgetViews: number | null
+  checkoutStarted: number
+  checkoutCompleted: number
+  conversionRate: number
+}
+
+export type AdminAffiliateReport = {
+  organizationId: string
+  affiliates: Array<{
+    affiliateId: string
+    code: string
+    name: string
+    referralsCount: number
+    revenueAttributedCents: number
+    commissionCents: number
+  }>
 }
 
 export type ApiKeyStatus = 'active' | 'revoked' | 'expired'
@@ -458,6 +600,7 @@ export type AdminBrand = {
   }
   domains: AdminBrandDomain[]
   whiteLabel: boolean
+  paymentAccountId?: string | null
   createdAt?: string
   updatedAt?: string
 }
@@ -643,6 +786,7 @@ export type UpdateBrandInput = {
   slug?: string
   theme?: AdminBrand['theme']
   whiteLabel?: boolean
+  paymentAccountId?: string | null
 }
 
 export type InviteTeamMemberInput = {
@@ -692,7 +836,7 @@ export type AdminApi = {
   deleteCheckoutQuestion(questionId: string): Promise<ApiResult<void>>
 
   listOrders(input?: PageCursor & { eventId?: string }): Promise<ApiResult<PageResult<AdminOrderListItem>>>
-  getOrder(orderId: string): Promise<ApiResult<AdminOrderListItem>>
+  getOrder(orderId: string): Promise<ApiResult<AdminOrderDetail>>
   cancelOrder(orderId: string): Promise<ApiResult<AdminOrderListItem>>
   refundOrder(orderId: string, input: RefundOrderInput): Promise<ApiResult<RefundOrderResult>>
 
@@ -711,7 +855,11 @@ export type AdminApi = {
   listMessageProviderEvents(eventId: string, campaignId: string): Promise<ApiResult<AdminMessageProviderEvent[]>>
   getMessageProviderEvent(eventId: string, campaignId: string, providerEventId: string): Promise<ApiResult<AdminMessageProviderEvent>>
   getSalesReport(eventId: string, range?: ReportDateRange): Promise<ApiResult<AdminSalesReportSummary>>
-  getTaxReport(eventId: string, range?: ReportDateRange): Promise<ApiResult<unknown>>
+  getTaxReport(eventId: string, range?: ReportDateRange): Promise<ApiResult<AdminTaxReport>>
+  getAttendanceReport(eventId: string): Promise<ApiResult<AdminAttendanceReport>>
+  getPromoReport(eventId: string): Promise<ApiResult<AdminPromoReport>>
+  getConversionReport(eventId: string): Promise<ApiResult<AdminConversionReport>>
+  getAffiliateReport(organizationId: string): Promise<ApiResult<AdminAffiliateReport>>
   createExport(input: {
     eventId?: string
     type: AdminExportType
@@ -765,8 +913,15 @@ function err<T>(error: AdminApiError): ApiResult<T> {
 async function getClerkToken(): Promise<string | null> {
   if (typeof window === 'undefined') return null
 
+  // When no Clerk publishable key is configured, skip polling entirely.
+  // This prevents the 5-second wait on every request in local dev mode.
+  if (!hasClerkKey()) return null
+
+  // Clerk is configured. Wait briefly for it to load if it hasn't yet.
   const startedAt = Date.now()
   while (!window.Clerk && Date.now() - startedAt < CLERK_TOKEN_WAIT_MS) {
+    // Intentional sequential wait: we need Clerk to load before proceeding.
+    // eslint-disable-next-line no-await-in-loop
     await new Promise((resolve) => window.setTimeout(resolve, 50))
   }
 
@@ -875,13 +1030,6 @@ async function withFixture<T>(
   return call()
 }
 
-function defaultOrganizationId(): string | undefined {
-  return process.env.NEXT_PUBLIC_GATEKIT_ORGANIZATION_ID
-}
-
-function defaultBrandId(): string | undefined {
-  return process.env.NEXT_PUBLIC_GATEKIT_BRAND_ID
-}
 
 function unwrapPage<T>(value: PageResult<T> | T[]): PageResult<T> {
   return Array.isArray(value) ? { items: value, total: value.length } : value
@@ -967,6 +1115,7 @@ function normalizeBrand(value: Record<string, unknown>): AdminBrand {
     theme: parseJsonRecord(value.theme),
     domains,
     whiteLabel: Boolean(value.whiteLabel ?? value.white_label),
+    paymentAccountId: stringValue(value.paymentAccountId ?? value.payment_account_id, undefined) ?? null,
     createdAt: stringValue(value.createdAt ?? value.created_at, undefined),
     updatedAt: stringValue(value.updatedAt ?? value.updated_at, undefined),
   }
@@ -1690,8 +1839,11 @@ const fixtureMessages: AdminMessageCampaign[] = [
     channel: 'email',
     status: 'sent',
     audience: 'all_attendees',
+    queuedCount: 0,
     sentCount: 193,
+    deliveredCount: 187,
     failedCount: 0,
+    suppressedCount: 0,
     createdAt: iso(-604_800_000),
   },
   {
@@ -1701,8 +1853,11 @@ const fixtureMessages: AdminMessageCampaign[] = [
     channel: 'sms',
     status: 'scheduled',
     audience: 'not_checked_in',
+    queuedCount: 0,
     sentCount: 0,
+    deliveredCount: 0,
     failedCount: 0,
+    suppressedCount: 0,
     scheduledAt: daysFromNow(1),
     createdAt: iso(-86_400_000),
   },
@@ -1737,6 +1892,79 @@ function fixtureSalesReport(
       from: range?.from ?? iso(-30 * 86_400_000),
       to: range?.to ?? iso(0),
     },
+  }
+}
+
+function fixtureTaxReport(eventId: string, range?: ReportDateRange): AdminTaxReport {
+  const sales = fixtureSalesReport(eventId, range)
+  return {
+    eventId,
+    currency: sales.currency,
+    totalTaxCollectedCents: sales.taxCents,
+    breakdown: sales.taxCents > 0
+      ? [{
+          taxRuleName: 'Actual collected tax',
+          rate: null,
+          taxableAmountCents: sales.grossSalesCents - sales.refundsCents,
+          taxCollectedCents: sales.taxCents,
+        }]
+      : [],
+  }
+}
+
+function fixtureAttendanceReport(eventId: string): AdminAttendanceReport {
+  const attendees = fixtureAttendees.filter((a) => a.eventId === eventId)
+  const checkedIn = attendees.filter((a) => a.checkInStatus === 'checked_in').length
+  return {
+    eventId,
+    totalAttendees: attendees.length,
+    checkedIn,
+    notCheckedIn: Math.max(0, attendees.length - checkedIn),
+    checkInRate: attendees.length > 0 ? checkedIn / attendees.length : 0,
+    breakdownByTicketType: [],
+  }
+}
+
+function fixturePromoReport(eventId: string): AdminPromoReport {
+  const sales = fixtureSalesReport(eventId)
+  return {
+    eventId,
+    discountCodes: [
+      {
+        code: 'PROMO10',
+        usesCount: Math.max(1, Math.round(sales.paidOrdersCount / 3)),
+        discountAmountCents: Math.round(sales.grossSalesCents * 0.1),
+        revenueAttributedCents: Math.round(sales.grossSalesCents * 0.35),
+      },
+    ],
+  }
+}
+
+function fixtureConversionReport(eventId: string): AdminConversionReport {
+  const sales = fixtureSalesReport(eventId)
+  const checkoutStarted = Math.max(sales.paidOrdersCount, Math.round(sales.paidOrdersCount / 0.68))
+  return {
+    eventId,
+    widgetViews: checkoutStarted,
+    checkoutStarted,
+    checkoutCompleted: sales.paidOrdersCount,
+    conversionRate: checkoutStarted > 0 ? sales.paidOrdersCount / checkoutStarted : 0,
+  }
+}
+
+function fixtureAffiliateReport(organizationId: string): AdminAffiliateReport {
+  return {
+    organizationId,
+    affiliates: [
+      {
+        affiliateId: 'aff_demo_001',
+        code: 'ADA',
+        name: 'Ada Partners',
+        referralsCount: 12,
+        revenueAttributedCents: 124_000,
+        commissionCents: 12_400,
+      },
+    ],
   }
 }
 
@@ -1970,15 +2198,15 @@ export const adminApi: AdminApi = {
   async createEvent(input) {
     return withFixture(
       async () => {
-        const organizationId = input.organizationId ?? defaultOrganizationId()
-        const brandId = input.brandId ?? defaultBrandId()
-        if (!organizationId || !brandId) {
+        if (!input.organizationId || !input.brandId) {
           return Promise.resolve(err<AdminEventListItem>(apiError(
             'missing_scope',
-            'organizationId and brandId are required to create events against the live API.',
+            'organizationId and brandId are required to create events. These are provided by the admin bootstrap context.',
             400
           )))
         }
+        const organizationId = input.organizationId
+        const brandId = input.brandId
         const result = await request<AdminEventListItem>('/v1/events', {
           method: 'POST',
           body: JSON.stringify({
@@ -1987,6 +2215,7 @@ export const adminApi: AdminApi = {
             slug: input.slug ?? input.title.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, ''),
             title: input.title,
             description: input.description,
+            currency: input.currency,
             timezone: input.timezone,
             startsAt: input.startsAt,
             endsAt: input.endsAt,
@@ -2024,9 +2253,18 @@ export const adminApi: AdminApi = {
   async updateEvent(eventId, input) {
     return withFixture(
       async () => {
+        const body: Record<string, unknown> = {}
+        if (input.title !== undefined) body.title = input.title
+        if (input.description !== undefined) body.description = input.description
+        if (input.currency !== undefined) body.currency = input.currency
+        if (input.timezone !== undefined) body.timezone = input.timezone
+        if (input.startsAt !== undefined) body.startsAt = input.startsAt
+        if (input.endsAt !== undefined) body.endsAt = input.endsAt
+        if (input.status !== undefined) body.status = input.status
+
         const result = await request<AdminEventListItem>(`/v1/events/${eventId}`, {
           method: 'PATCH',
-          body: JSON.stringify(input),
+          body: JSON.stringify(body),
         })
         return result.ok ? ok(normalizeEvent(result.data)) : result
       },
@@ -2209,6 +2447,7 @@ export const adminApi: AdminApi = {
           ? ok(unwrapItems(result.data).map((question) => normalizeQuestion(asRecord(question))))
           : result
       },
+      // eslint-disable-next-line unicorn/no-array-sort -- creates a new array via spread
       () => ok([...(fixtureCheckoutQuestions[eventId] ?? [])].sort((a, b) => a.sortOrder - b.sortOrder))
     )
   },
@@ -2317,11 +2556,20 @@ export const adminApi: AdminApi = {
 
   async getOrder(orderId) {
     return withFixture(
-      () => request<AdminOrderListItem>(`/v1/orders/${orderId}`, { method: 'GET' }),
+      () => request<AdminOrderDetail>(`/v1/orders/${orderId}`, { method: 'GET' }),
       () => {
         const order = fixtureOrders.find((o) => o.id === orderId)
-        if (!order) return err<AdminOrderListItem>(apiError('not_found', 'Order not found', 404))
-        return ok(order)
+        if (!order) return err<AdminOrderDetail>(apiError('not_found', 'Order not found', 404))
+        return ok({
+          ...order,
+          lineItems: [],
+          attendees: fixtureAttendees.filter((attendee) => attendee.orderId === orderId),
+          checkoutAnswers: { buyerFields: {}, attendeeFields: {} },
+          consentSnapshots: {},
+          refunds: [],
+          timeline: [],
+          deliveryStatus: { email: order.buyerEmail ? 'pending' : 'not_applicable', tickets: 'issued' },
+        })
       }
     )
   },
@@ -2512,8 +2760,11 @@ export const adminApi: AdminApi = {
           channel: input.channel === 'both' ? 'email' : input.channel,
           status: 'sent',
           audience: input.audience === 'all' ? 'all_attendees' : input.audience === 'specific' ? 'custom' : input.audience,
-          sentCount: fixtureAttendees.filter((a) => a.eventId === eventId).length,
+          queuedCount: fixtureAttendees.filter((a) => a.eventId === eventId).length,
+          sentCount: 0,
+          deliveredCount: 0,
           failedCount: 0,
+          suppressedCount: 0,
           createdAt: iso(0),
         }
         fixtureMessages.unshift(campaign)
@@ -2535,9 +2786,9 @@ export const adminApi: AdminApi = {
         return ok({
           ...campaign,
           templateKey: campaign.name,
-          queuedEmailJobs: campaign.channel === 'email' ? campaign.sentCount : 0,
-          queuedSmsJobs: campaign.channel === 'sms' ? campaign.sentCount : 0,
-          suppressedRecipients: campaign.failedCount,
+          queuedEmailJobs: campaign.channel === 'email' ? campaign.queuedCount : 0,
+          queuedSmsJobs: campaign.channel === 'sms' ? campaign.queuedCount : 0,
+          suppressedRecipients: campaign.suppressedCount,
           consentExclusions: 0,
           skippedRecipients: 0,
           emailJobs: [],
@@ -2621,8 +2872,36 @@ export const adminApi: AdminApi = {
     if (range?.to) params.set('to', range.to)
     const qs = params.toString()
     return withFixture(
-      () => request<unknown>(`/v1/events/${eventId}/reports/tax${qs ? `?${qs}` : ''}`, { method: 'GET' }),
-      () => ok({ eventId, taxCents: fixtureSalesReport(eventId, range).taxCents })
+      () => request<AdminTaxReport>(`/v1/events/${eventId}/reports/tax${qs ? `?${qs}` : ''}`, { method: 'GET' }),
+      () => ok(fixtureTaxReport(eventId, range))
+    )
+  },
+
+  async getAttendanceReport(eventId) {
+    return withFixture(
+      () => request<AdminAttendanceReport>(`/v1/events/${eventId}/reports/attendance`, { method: 'GET' }),
+      () => ok(fixtureAttendanceReport(eventId))
+    )
+  },
+
+  async getPromoReport(eventId) {
+    return withFixture(
+      () => request<AdminPromoReport>(`/v1/events/${eventId}/reports/promo`, { method: 'GET' }),
+      () => ok(fixturePromoReport(eventId))
+    )
+  },
+
+  async getConversionReport(eventId) {
+    return withFixture(
+      () => request<AdminConversionReport>(`/v1/events/${eventId}/reports/conversion`, { method: 'GET' }),
+      () => ok(fixtureConversionReport(eventId))
+    )
+  },
+
+  async getAffiliateReport(organizationId) {
+    return withFixture(
+      () => request<AdminAffiliateReport>(`/v1/organizations/${organizationId}/reports/affiliate`, { method: 'GET' }),
+      () => ok(fixtureAffiliateReport(organizationId))
     )
   },
 
@@ -2681,14 +2960,14 @@ export const adminApi: AdminApi = {
   async createApiKey(input) {
     return withFixture(
       () => {
-        const organizationId = input.organizationId ?? defaultOrganizationId()
-        if (!organizationId) {
+        if (!input.organizationId) {
           return Promise.resolve(err<AdminApiKey>(apiError(
             'missing_scope',
-            'organizationId is required to create API keys against the live API.',
+            'organizationId is required to create API keys. This is provided by the admin bootstrap context.',
             400
           )))
         }
+        const organizationId = input.organizationId
         return request<AdminApiKey>('/v1/api-keys', {
           method: 'POST',
           body: JSON.stringify({
@@ -2742,14 +3021,14 @@ export const adminApi: AdminApi = {
   async createWebhookEndpoint(input) {
     return withFixture(
       () => {
-        const organizationId = input.organizationId ?? defaultOrganizationId()
-        if (!organizationId) {
+        if (!input.organizationId) {
           return Promise.resolve(err<AdminWebhookEndpoint>(apiError(
             'missing_scope',
-            'organizationId is required to create webhook endpoints against the live API.',
+            'organizationId is required to create webhook endpoints. This is provided by the admin bootstrap context.',
             400
           )))
         }
+        const organizationId = input.organizationId
         return request<AdminWebhookEndpoint>('/v1/webhook-endpoints', {
           method: 'POST',
           body: JSON.stringify({
