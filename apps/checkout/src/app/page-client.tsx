@@ -4,7 +4,6 @@ import { useEffect } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
 import { TicketIcon } from 'lucide-react'
 import { EmptyState } from '@/components/empty-state'
-import { Button } from '@/components/ui/button'
 
 export default function RootPageClient() {
   const router = useRouter()
@@ -40,11 +39,6 @@ export default function RootPageClient() {
           icon={TicketIcon}
           title='No event selected'
           description='Open the ticket link from your event invite or organizer page to start checkout.'
-          action={
-            <Button variant='outline' asChild>
-              <a href='/e/demo'>Open demo event</a>
-            </Button>
-          }
         />
       </div>
     </div>

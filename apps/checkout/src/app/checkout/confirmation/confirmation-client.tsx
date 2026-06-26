@@ -41,15 +41,14 @@ export { deriveState, type ConfirmationState } from './confirmation-state'
 
 function emitOrderCompleted(detail: Record<string, unknown>) {
   if (typeof window === 'undefined') return
-  window.parent?.postMessage(
-    {
-      source: 'gatekit-checkout',
-      event: 'order_completed',
-      type: 'order_completed',
-      ...detail,
-    },
-    '*',
-  )
+  const message = {
+    source: 'gatekit-checkout',
+    event: 'order_completed',
+    type: 'order_completed',
+    ...detail,
+  }
+  window.parent?.postMessage(message, '*')
+  window.opener?.postMessage(message, '*')
 }
 
 export default function ConfirmationClient() {

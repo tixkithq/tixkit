@@ -361,6 +361,7 @@ export const checkoutApi = {
     buyerFields?: Record<string, unknown>
     discountCode?: string
     affiliateCode?: string
+    trackingId?: string
     accessCode?: string
     successUrl?: string
     cancelUrl?: string

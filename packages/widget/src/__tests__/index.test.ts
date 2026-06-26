@@ -242,7 +242,7 @@ describe('widget iframe security (runtime)', () => {
     const iframe = el.shadowRoot?.querySelector('iframe')
     expect(iframe).not.toBeNull()
     expect(iframe!.getAttribute('sandbox')).toBe(
-      'allow-scripts allow-forms allow-popups allow-popups-to-escape-sandbox',
+      'allow-scripts allow-same-origin allow-forms allow-popups allow-popups-to-escape-sandbox',
     )
     expect(iframe!.allow).toContain('payment')
     expect(iframe!.allow).toContain('publickey-credentials-get')
@@ -290,8 +290,9 @@ describe('widget checkout modes (runtime)', () => {
     expect(el.shadowRoot?.querySelector('iframe.gk-modal-frame')).toBeNull()
   })
 
-  it('redirect mode dispatches opened + checkout_started on click', () => {
+  it('redirect mode dispatches opened but not checkout_started on click', () => {
     const el = createWidget({ 'checkout-mode': 'redirect' })
+    const openSpy = vi.spyOn(window, 'open').mockReturnValue(null)
 
     el.connectedCallback()
     const openedSpy = vi.fn()
@@ -300,11 +301,15 @@ describe('widget checkout modes (runtime)', () => {
     el.addEventListener('checkout_started', startedSpy)
     const button = el.shadowRoot?.querySelector('button')
     expect(button).not.toBeNull()
-    // jsdom ignores window.location navigation; the events dispatch before
-    // the navigation attempt regardless.
     button!.click()
     expect(openedSpy).toHaveBeenCalledTimes(1)
-    expect(startedSpy).toHaveBeenCalledTimes(1)
+    expect(startedSpy).not.toHaveBeenCalled()
+    expect(openSpy).toHaveBeenCalledWith(
+      expect.stringContaining('/checkout?eventId=evt_demo'),
+      '_self',
+      'noopener',
+    )
+    openSpy.mockRestore()
   })
 })
 
@@ -322,12 +327,14 @@ describe('GateKitButton lifecycle (runtime)', () => {
     expect(spy).toHaveBeenCalledTimes(1)
   })
 
-  it('passes button prefill, product, discount, and tracking params to checkout', () => {
+  it('passes button prefill, product, discount, access code, tracking, and affiliate params to checkout', () => {
     const el = createButton({
       items: 'tt_1=2',
       products: 'tt_1,tt_2',
       'discount-code': 'PROMO',
-      'tracking-id': 'aff_123',
+      'access-code': 'VIP123',
+      'tracking-id': 'campaign_123',
+      'affiliate-code': 'aff_123',
     })
 
     el.connectedCallback()
@@ -343,7 +350,29 @@ describe('GateKitButton lifecycle (runtime)', () => {
     expect(url.searchParams.get('items')).toBe('tt_1=2')
     expect(url.searchParams.get('products')).toBe('tt_1,tt_2')
     expect(url.searchParams.get('discount')).toBe('PROMO')
-    expect(url.searchParams.get('tracking')).toBe('aff_123')
+    expect(url.searchParams.get('accessCode')).toBe('VIP123')
+    expect(url.searchParams.get('tracking')).toBe('campaign_123')
+    expect(url.searchParams.get('affiliateCode')).toBe('aff_123')
+  })
+
+  it('does not dispatch checkout_started from a button click before hosted checkout postMessage', () => {
+    const el = createButton()
+
+    el.connectedCallback()
+    const openedSpy = vi.fn()
+    const startedSpy = vi.fn()
+    el.addEventListener('opened', openedSpy)
+    el.addEventListener('checkout_started', startedSpy)
+    el.shadowRoot?.querySelector('button')?.click()
+
+    expect(startedSpy).not.toHaveBeenCalled()
+    expect(openedSpy).not.toHaveBeenCalled()
+
+    const frame = el.shadowRoot?.querySelector('iframe.gk-modal-frame')
+    expect(frame).not.toBeNull()
+    frame!.dispatchEvent(new Event('load'))
+    expect(openedSpy).toHaveBeenCalledTimes(1)
+    expect(startedSpy).not.toHaveBeenCalled()
   })
 
   it('dispatches order_completed from trusted checkout postMessage in modal button flows', () => {

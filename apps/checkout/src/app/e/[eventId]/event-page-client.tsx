@@ -37,6 +37,7 @@ type Props = {
   refundUrl?: string
   presetDiscountCode?: string
   trackingId?: string
+  affiliateCode?: string
 }
 
 export default function EventPageClient({
@@ -48,6 +49,7 @@ export default function EventPageClient({
   refundUrl,
   presetDiscountCode,
   trackingId,
+  affiliateCode,
 }: Props) {
   const router = useRouter()
   const [event, setEvent] = useState<PublicEvent | null>(null)
@@ -119,6 +121,7 @@ export default function EventPageClient({
     if (refundUrl) params.set('refundUrl', refundUrl)
     if (presetDiscountCode) params.set('discount', presetDiscountCode)
     if (trackingId) params.set('tracking', trackingId)
+    if (affiliateCode) params.set('affiliateCode', affiliateCode)
     router.push(`/checkout?${params.toString()}`)
   }
 

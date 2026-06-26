@@ -19,12 +19,8 @@ type Props = {
   donationAmounts?: Record<string, number>
   /** Callback when a donation amount changes. */
   onDonationAmountChange?: (ticketTypeId: string, amountCents: number) => void
-  /** Access code entered for locked tickets. */
-  accessCode?: string
-  /** Callback when access code changes. */
-  onAccessCodeChange?: (code: string) => void
-  /** Whether the access code has been validated/applied. */
-  accessCodeApplied?: boolean
+  /** Locked ticket types unlocked by the current access code. */
+  unlockedTicketTypeIds?: Set<string>
 }
 
 export function TicketSelection({
@@ -35,21 +31,21 @@ export function TicketSelection({
   onIncrease,
   donationAmounts = {},
   onDonationAmountChange,
-  accessCode = '',
-  onAccessCodeChange,
-  accessCodeApplied = false,
+  unlockedTicketTypeIds = new Set(),
 }: Props) {
   const hasLockedTicket = tickets.some((t) => t.requiresAccessCode)
+  const unlockedLockedCount = tickets.filter(
+    (ticket) =>
+      ticket.requiresAccessCode && unlockedTicketTypeIds.has(ticket.ticketTypeId),
+  ).length
+  const accessCodeApplied = unlockedLockedCount > 0
 
   return (
     <div className='space-y-4'>
       {hasLockedTicket ? (
-        <LockedTicketPrompt
+        <LockedTicketBanner
           hint={tickets.find((t) => t.requiresAccessCode)?.accessCodeHint}
-          accessCode={accessCode}
           applied={accessCodeApplied}
-          disabled={loading}
-          onChange={onAccessCodeChange ?? (() => {})}
         />
       ) : null}
 
@@ -60,7 +56,9 @@ export function TicketSelection({
             ticket.status === 'sold_out' || ticket.available <= 0
           const atMax = quantity >= Math.min(ticket.maxPerOrder, ticket.available)
           const decreaseDisabled = quantity <= 0 || loading
-          const isLocked = ticket.requiresAccessCode && !accessCodeApplied
+          const isLocked =
+            ticket.requiresAccessCode &&
+            !unlockedTicketTypeIds.has(ticket.ticketTypeId)
           const increaseDisabled =
             soldOut || loading || atMax || isLocked
           const isDonation = ticket.kind === 'donation'
@@ -189,50 +187,27 @@ export function TicketSelection({
   )
 }
 
-function LockedTicketPrompt({
+function LockedTicketBanner({
   hint,
-  accessCode,
   applied,
-  disabled,
-  onChange,
 }: {
   hint?: string
-  accessCode: string
   applied: boolean
-  disabled: boolean
-  onChange: (code: string) => void
 }) {
   return (
-    <div className='space-y-2 rounded-lg border border-amber-200 bg-amber-50 p-3 dark:border-amber-900 dark:bg-amber-950/30'>
+    <div className='space-y-1 rounded-lg border border-amber-200 bg-amber-50 p-3 dark:border-amber-900 dark:bg-amber-950/30'>
       <div className='flex items-center gap-2 text-sm font-medium text-amber-800 dark:text-amber-300'>
         <LockIcon className='size-4' />
-        Access code required
+        {applied ? 'Access code verified' : 'Access code required'}
       </div>
       {hint ? (
         <p className='text-xs text-muted-foreground'>{hint}</p>
       ) : null}
-      <div className='flex items-center gap-2'>
-        <Label htmlFor='accessCode' className='sr-only'>
-          Access code for locked tickets
-        </Label>
-        <Input
-          id='accessCode'
-          name='accessCode'
-          type='text'
-          value={accessCode}
-          onChange={(e) => onChange(e.target.value)}
-          placeholder='Enter access code'
-          autoComplete='off'
-          disabled={disabled || applied}
-          className='flex-1'
-          aria-label='Access code for locked tickets'
-        />
-        {applied ? (
-          <Badge variant='outline' className='border-emerald-300 text-emerald-700'>
-            Unlocked
-          </Badge>
-        ) : null}
-      </div>
+      {!applied ? (
+        <p className='text-xs text-muted-foreground'>
+          Enter your access code in the field below to unlock locked tickets.
+        </p>
+      ) : null}
     </div>
   )
 }

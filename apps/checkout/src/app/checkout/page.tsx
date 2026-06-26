@@ -39,6 +39,7 @@ export default async function CheckoutPage({
         refundUrl={firstParam(params.refundUrl)}
         presetDiscountCode={firstParam(params.discount)}
         trackingId={firstParam(params.tracking)}
+        affiliateCode={firstParam(params.affiliateCode) || firstParam(params.affiliate)}
         prefilledItemsParam={firstParam(params.items)}
         productFilterParam={firstParam(params.products)}
       />

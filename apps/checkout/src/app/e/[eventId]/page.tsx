@@ -23,6 +23,7 @@ export default async function EventPage({ params, searchParams }: PageProps) {
       refundUrl={firstParam(query.refundUrl)}
       presetDiscountCode={firstParam(query.discount)}
       trackingId={firstParam(query.tracking)}
+      affiliateCode={firstParam(query.affiliateCode) || firstParam(query.affiliate)}
     />
   )
 }

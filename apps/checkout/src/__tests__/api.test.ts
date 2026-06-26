@@ -113,6 +113,53 @@ describe('checkoutApi.getSession', () => {
   })
 })
 
+describe('checkoutApi.createSession', () => {
+  it('sends trackingId separately from affiliateCode', async () => {
+    const fetchMock = vi.fn(async () =>
+      new Response(
+        JSON.stringify({
+          id: 'cs_1',
+          eventId: 'evt_1',
+          status: 'open',
+          currency: 'USD',
+          clientToken: 'tok_1',
+          quote: {
+            totalCents: 2500,
+            subtotalCents: 2500,
+            discountCents: 0,
+            taxCents: 0,
+            feeCents: 0,
+          },
+          expiresAt: '2026-06-01T00:00:00.000Z',
+        }),
+        { status: 201, headers: { 'Content-Type': 'application/json' } },
+      ),
+    )
+    vi.stubGlobal('fetch', fetchMock)
+
+    await checkoutApi.createSession({
+      eventId: 'evt_1',
+      items: [{ ticketTypeId: 'tt_1', quantity: 1 }],
+      buyer: { email: 'buyer@example.com' },
+      discountCode: 'SAVE10',
+      accessCode: 'VIP123',
+      trackingId: 'campaign-123',
+      affiliateCode: 'AFF123',
+    })
+
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+    const [_url, init] = fetchMock.mock.calls[0] as unknown as [string, RequestInit]
+    const body = JSON.parse(String(init.body)) as Record<string, unknown>
+    expect(body).toMatchObject({
+      eventId: 'evt_1',
+      discountCode: 'SAVE10',
+      accessCode: 'VIP123',
+      trackingId: 'campaign-123',
+      affiliateCode: 'AFF123',
+    })
+  })
+})
+
 describe('publicApi.getAvailability', () => {
   it('passes explicit product filters for hidden/direct-link ticket lookup', async () => {
     const fetchMock = vi.fn(async () =>

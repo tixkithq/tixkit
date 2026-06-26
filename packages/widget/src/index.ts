@@ -29,7 +29,9 @@ type WidgetConfig = {
   theme?: 'auto' | 'light' | 'dark';
   products?: string;
   discountCode?: string;
+  accessCode?: string;
   trackingId?: string;
+  affiliateCode?: string;
   checkoutMode?: 'inline' | 'modal' | 'redirect';
 };
 
@@ -44,7 +46,7 @@ type CheckoutMessage = {
   orderId?: string;
 };
 
-const IFRAME_SANDBOX = 'allow-scripts allow-forms allow-popups allow-popups-to-escape-sandbox';
+const IFRAME_SANDBOX = 'allow-scripts allow-same-origin allow-forms allow-popups allow-popups-to-escape-sandbox';
 const IFRAME_ALLOW = 'payment; publickey-credentials-create *; publickey-credentials-get *';
 
 const STYLES = `
@@ -253,7 +255,9 @@ class GateKitWidget extends HTMLElement {
       'theme',
       'products',
       'discount-code',
+      'access-code',
       'tracking-id',
+      'affiliate-code',
       'checkout-mode',
     ];
   }
@@ -266,7 +270,9 @@ class GateKitWidget extends HTMLElement {
       theme: 'theme',
       products: 'products',
       'discount-code': 'discountCode',
+      'access-code': 'accessCode',
       'tracking-id': 'trackingId',
+      'affiliate-code': 'affiliateCode',
       'checkout-mode': 'checkoutMode',
     };
     const key = mapping[name];
@@ -361,7 +367,9 @@ class GateKitWidget extends HTMLElement {
     if (this.config.theme) params.set('theme', this.config.theme);
     if (this.config.products) params.set('products', this.config.products);
     if (this.config.discountCode) params.set('discount', this.config.discountCode);
+    if (this.config.accessCode) params.set('accessCode', this.config.accessCode);
     if (this.config.trackingId) params.set('tracking', this.config.trackingId);
+    if (this.config.affiliateCode) params.set('affiliateCode', this.config.affiliateCode);
     return `${checkoutBase(this)}/checkout?${params.toString()}`;
   }
 
@@ -457,10 +465,10 @@ class GateKitWidget extends HTMLElement {
     btn.className = 'gk-retry';
     btn.textContent = 'Buy tickets';
     btn.addEventListener('click', () => {
-      // Dispatch opened + checkout_started before redirecting.
+      // A redirect opens the hosted checkout. checkout_started is emitted only
+      // after the hosted checkout confirms buyer intent via postMessage.
       dispatchLifecycle(this, 'opened', this.config.event);
-      dispatchLifecycle(this, 'checkout_started', this.config.event);
-      window.location.href = this.buildWidgetUrl();
+      window.open(this.buildWidgetUrl(), '_self', 'noopener');
     });
 
     state.appendChild(btn);
@@ -532,7 +540,16 @@ class GateKitWidget extends HTMLElement {
 
   // Public methods for programmatic control.
   openCheckout(): void {
-    dispatchLifecycle(this, 'checkout_started', this.config.event);
+    const mode = this.config.checkoutMode ?? 'inline';
+    const url = this.buildWidgetUrl();
+    if (mode === 'modal') {
+      this.openModal(url);
+      return;
+    }
+    if (mode === 'redirect') {
+      dispatchLifecycle(this, 'opened', this.config.event);
+      window.location.href = url;
+    }
   }
 
   closeCheckout(): void {
@@ -547,7 +564,9 @@ class GateKitButton extends HTMLElement {
   private brand = '';
   private products = '';
   private discountCode = '';
+  private accessCode = '';
   private trackingId = '';
+  private affiliateCode = '';
   private checkoutMode: CheckoutMode = 'modal';
   private modal: HTMLDivElement | null = null;
   private messageHandler: ((event: MessageEvent) => void) | null = null;
@@ -566,7 +585,9 @@ class GateKitButton extends HTMLElement {
       'brand',
       'products',
       'discount-code',
+      'access-code',
       'tracking-id',
+      'affiliate-code',
       'checkout-mode',
     ];
   }
@@ -577,7 +598,9 @@ class GateKitButton extends HTMLElement {
     if (name === 'brand') this.brand = newValue;
     if (name === 'products') this.products = newValue;
     if (name === 'discount-code') this.discountCode = newValue;
+    if (name === 'access-code') this.accessCode = newValue;
     if (name === 'tracking-id') this.trackingId = newValue;
+    if (name === 'affiliate-code') this.affiliateCode = newValue;
     if (name === 'checkout-mode') this.checkoutMode = newValue as CheckoutMode;
     this.render();
   }
@@ -662,7 +685,9 @@ class GateKitButton extends HTMLElement {
     if (this.items) params.set('items', this.items);
     if (this.products) params.set('products', this.products);
     if (this.discountCode) params.set('discount', this.discountCode);
+    if (this.accessCode) params.set('accessCode', this.accessCode);
     if (this.trackingId) params.set('tracking', this.trackingId);
+    if (this.affiliateCode) params.set('affiliateCode', this.affiliateCode);
     params.set('mode', this.checkoutMode);
     return `${checkoutBase(this)}/checkout?${params.toString()}`;
   }
@@ -674,12 +699,10 @@ class GateKitButton extends HTMLElement {
       );
       return;
     }
-    dispatchLifecycle(this, 'opened', this.eventId);
-    dispatchLifecycle(this, 'checkout_started', this.eventId);
-
     const url = this.buildCheckoutUrl();
 
     if (this.checkoutMode === 'redirect') {
+      dispatchLifecycle(this, 'opened', this.eventId);
       window.location.href = url;
       return;
     }
@@ -724,6 +747,9 @@ class GateKitButton extends HTMLElement {
     frame.src = url;
     frame.allow = IFRAME_ALLOW;
     frame.setAttribute('sandbox', IFRAME_SANDBOX);
+    frame.addEventListener('load', () => {
+      dispatchLifecycle(this, 'opened', this.eventId);
+    });
 
     modal.appendChild(head);
     modal.appendChild(frame);

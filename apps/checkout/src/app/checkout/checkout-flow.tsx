@@ -68,6 +68,7 @@ type Props = {
   refundUrl?: string
   presetDiscountCode?: string
   trackingId?: string
+  affiliateCode?: string
   prefilledItemsParam?: string
   productFilterParam?: string
 }
@@ -79,15 +80,14 @@ function emitCheckoutEvent(
   detail: Record<string, unknown>,
 ) {
   if (typeof window === 'undefined') return
-  window.parent?.postMessage(
-    {
-      source: 'gatekit-checkout',
-      event,
-      type: event,
-      ...detail,
-    },
-    '*',
-  )
+  const message = {
+    source: 'gatekit-checkout',
+    event,
+    type: event,
+    ...detail,
+  }
+  window.parent?.postMessage(message, '*')
+  window.opener?.postMessage(message, '*')
 }
 
 export default function CheckoutFlow({
@@ -101,6 +101,7 @@ export default function CheckoutFlow({
   refundUrl,
   presetDiscountCode,
   trackingId,
+  affiliateCode,
   prefilledItemsParam,
   productFilterParam,
 }: Props) {
@@ -126,8 +127,12 @@ export default function CheckoutFlow({
   const [discountCode, setDiscountCode] = useState<string | undefined>(
     presetDiscountCode,
   )
-  const [accessCode, setAccessCode] = useState<string>('')
-  const [accessCodeApplied, setAccessCodeApplied] = useState(false)
+  // Initialize accessCode with presetDiscountCode so locked-ticket direct links
+  // (e.g. ?discount=VIP&products=locked_tt) prefill the access code field.
+  const [accessCode, setAccessCode] = useState<string>(presetDiscountCode ?? '')
+  const [unlockedTicketTypeIds, setUnlockedTicketTypeIds] = useState<Set<string>>(
+    () => new Set(),
+  )
   const [promoApplied, setPromoApplied] = useState(
     Boolean(presetDiscountCode),
   )
@@ -185,6 +190,7 @@ export default function CheckoutFlow({
     () => visibleAvailability.some((item) => item.requiresAccessCode),
     [visibleAvailability],
   )
+  const accessCodeApplied = unlockedTicketTypeIds.size > 0
 
   const selectedItems = useMemo<CartItem[]>(() => {
     const baseItems: CartItem[] = []
@@ -196,11 +202,14 @@ export default function CheckoutFlow({
           ? (donationAmounts[item.ticketTypeId] ??
             Math.max(item.minimumPriceCents ?? 0, item.priceCents))
           : item.priceCents
-      baseItems.push({
+      const cartItem: CartItem = {
         ticketTypeId: item.ticketTypeId,
         quantity: qty,
-        unitAmountCents,
-      })
+      }
+      if (item.kind === 'donation') {
+        cartItem.unitAmountCents = unitAmountCents
+      }
+      baseItems.push(cartItem)
     }
 
     // Build attendeeFields for each item based on attendee question answers.
@@ -314,8 +323,14 @@ export default function CheckoutFlow({
     }
 
     // Validate access code when cart has locked tickets.
-    if (cartHasLockedTicket && !accessCodeApplied) {
-      return 'An access code is required to purchase locked tickets.'
+    if (cartHasLockedTicket) {
+      const lockedTicket = selectedItems.find((item) => {
+        const ticket = visibleAvailability.find(
+          (candidate) => candidate.ticketTypeId === item.ticketTypeId,
+        )
+        return ticket?.requiresAccessCode && !unlockedTicketTypeIds.has(item.ticketTypeId)
+      })
+      if (lockedTicket) return 'An access code is required to purchase locked tickets.'
     }
 
     return null
@@ -460,7 +475,7 @@ export default function CheckoutFlow({
 
   function increase(ticketTypeId: string) {
     const ticket = visibleAvailability.find((t) => t.ticketTypeId === ticketTypeId)
-    if (ticket?.requiresAccessCode && !accessCodeApplied) return
+    if (ticket?.requiresAccessCode && !unlockedTicketTypeIds.has(ticketTypeId)) return
     setQuantities((current) => ({
       ...current,
       [ticketTypeId]: (current[ticketTypeId] ?? 0) + 1,
@@ -483,49 +498,51 @@ export default function CheckoutFlow({
     }))
   }
 
-  function handleAccessCodeChange(code: string) {
+  async function applyAccessCode(code: string) {
+    const lockedTicketTypeIds = visibleAvailability
+      .filter((ticket) => ticket.requiresAccessCode)
+      .map((ticket) => ticket.ticketTypeId)
+    if (lockedTicketTypeIds.length === 0) return
+
     setAccessCode(code)
-    setAccessCodeApplied(false)
-  }
-
-  async function applyPromo(code: string) {
-    // When the cart has locked tickets, the code is an access code;
-    // otherwise it is a discount/promo code.
-    if (hasVisibleLockedTicket) {
-      const lockedTicketTypeIds = visibleAvailability
-        .filter((ticket) => ticket.requiresAccessCode)
-        .map((ticket) => ticket.ticketTypeId)
-      if (lockedTicketTypeIds.length === 0) return
-
-      setAccessCode(code)
-      setAccessCodeApplied(false)
-      setValidationError(null)
-      setLoading(true)
-      try {
-        await publicApi.validateAccessCode(eventId, {
-          ticketTypeIds: lockedTicketTypeIds,
-          accessCode: code,
-          buyerEmail: buyer.email || undefined,
-        })
-        setAccessCodeApplied(true)
-      } catch (err) {
-        setValidationError(userFacingMessage(err))
-      } finally {
-        setLoading(false)
+    setUnlockedTicketTypeIds(new Set())
+    setValidationError(null)
+    setLoading(true)
+    try {
+      const result = await publicApi.validateAccessCode(eventId, {
+        ticketTypeIds: lockedTicketTypeIds,
+        accessCode: code,
+        buyerEmail: buyer.email || undefined,
+      })
+      if (result.ticketTypeIds.length === 0) {
+        setValidationError('Access code did not unlock any tickets.')
+        return
       }
-    } else {
-      setDiscountCode(code)
-      setPromoApplied(true)
+      setUnlockedTicketTypeIds(new Set(result.ticketTypeIds))
+      if (promoApplied && discountCode === code) {
+        setDiscountCode(undefined)
+        setPromoApplied(false)
+      }
+    } catch (err) {
+      setValidationError(userFacingMessage(err))
+    } finally {
+      setLoading(false)
     }
   }
-  function removePromo() {
-    if (hasVisibleLockedTicket) {
-      setAccessCode('')
-      setAccessCodeApplied(false)
-    } else {
-      setDiscountCode(undefined)
-      setPromoApplied(false)
-    }
+
+  function removeAccessCode() {
+    setAccessCode('')
+    setUnlockedTicketTypeIds(new Set())
+  }
+
+  function applyDiscount(code: string) {
+    setDiscountCode(code)
+    setPromoApplied(true)
+  }
+
+  function removeDiscount() {
+    setDiscountCode(undefined)
+    setPromoApplied(false)
   }
 
   function validateEmail() {
@@ -572,9 +589,12 @@ export default function CheckoutFlow({
               ).some((question) => question.id === questionId),
           ),
         ),
-        discountCode: cartHasLockedTicket ? undefined : discountCode,
-        accessCode: cartHasLockedTicket ? accessCode : undefined,
-        affiliateCode: trackingId,
+        // Pass both discountCode and accessCode when both are set, so buyers
+        // can use a promo code alongside an access code for locked tickets.
+        discountCode: discountCode || undefined,
+        accessCode: accessCodeApplied ? accessCode : undefined,
+        trackingId,
+        affiliateCode,
         successUrl,
         cancelUrl: window.location.href,
       })
@@ -773,31 +793,36 @@ export default function CheckoutFlow({
                       onIncrease={increase}
                       donationAmounts={donationAmounts}
                       onDonationAmountChange={handleDonationAmountChange}
-                      accessCode={accessCode}
-                      onAccessCodeChange={handleAccessCodeChange}
-                      accessCodeApplied={accessCodeApplied}
+                      unlockedTicketTypeIds={unlockedTicketTypeIds}
                     />
                   )}
 
                   <Separator />
 
+                  {hasVisibleLockedTicket ? (
+                    <div className='space-y-4'>
+                      <div className='space-y-2'>
+                        <p className='text-sm font-medium'>Access code</p>
+                        <PromoInput
+                          initialCode={accessCode}
+                          disabled={loading}
+                          applied={accessCodeApplied}
+                          onApply={applyAccessCode}
+                          onRemove={removeAccessCode}
+                          accessMode
+                        />
+                      </div>
+                    </div>
+                  ) : null}
+
                   <div className='space-y-2'>
-                    <p className='text-sm font-medium'>
-                      {hasVisibleLockedTicket
-                        ? 'Access code'
-                        : 'Have a promo code?'}
-                    </p>
+                    <p className='text-sm font-medium'>Have a promo code?</p>
                     <PromoInput
-                      initialCode={
-                        hasVisibleLockedTicket ? accessCode : discountCode
-                      }
+                      initialCode={discountCode}
                       disabled={loading}
-                      applied={
-                        hasVisibleLockedTicket ? accessCodeApplied : promoApplied
-                      }
-                      onApply={applyPromo}
-                      onRemove={removePromo}
-                      accessMode={hasVisibleLockedTicket}
+                      applied={promoApplied}
+                      onApply={applyDiscount}
+                      onRemove={removeDiscount}
                     />
                   </div>
                 </CardContent>

@@ -13,6 +13,7 @@ type Props = {
   refundUrl?: string
   presetDiscountCode?: string
   trackingId?: string
+  affiliateCode?: string
   prefilledItemsParam?: string
   productFilterParam?: string
 }
