@@ -1,4 +1,5 @@
 import Fastify from 'fastify';
+import rateLimit from '@fastify/rate-limit';
 import { describe, expect, it, vi } from 'vitest';
 import type { Principal } from '@gatekit/domain';
 import type { Database } from '@gatekit/db';
@@ -119,8 +120,15 @@ async function setupApp(
   principal: Principal,
   tables: Record<string, unknown> = {},
   contextOverrides: Record<string, unknown> = {},
+  options: { rateLimit?: boolean } = {},
 ) {
   const app = Fastify();
+  if (options.rateLimit) {
+    await app.register(rateLimit, {
+      max: 1000,
+      timeWindow: '1 minute',
+    });
+  }
   const context = {
     db: createMockDb(tables) as unknown as Database,
     pricingEngine: { calculate: () => ({ currency: 'USD', totalCents: 0, subtotalCents: 0, discountCents: 0, taxCents: 0, feeCents: 0, lineItems: [] }) },
@@ -160,6 +168,10 @@ function customQuestionRow(overrides: Record<string, unknown> = {}) {
     placeholder: null,
     validation_pattern: null,
     conditional_visibility: null,
+    status: 'active',
+    is_hidden: false,
+    hidden_at: null,
+    deleted_at: null,
     sort_order: 0,
     is_consent_field: false,
     consent_text: null,
@@ -420,6 +432,83 @@ describe('brand domain creation', () => {
   });
 });
 
+describe('public checkout questions', () => {
+  const publishedEvent = {
+    id: 'evt_1',
+    slug: 'event',
+    title: 'Event',
+    description: null,
+    status: 'published',
+    timezone: 'America/New_York',
+    starts_at: new Date('2026-06-01T00:00:00.000Z'),
+    ends_at: null,
+    venue: null,
+    brand_id: 'br_1',
+  };
+
+  it('serializes conditionalVisibility for buyer and attendee questions', async () => {
+    const app = await setupApp(publicRoutes, makePrincipal(), {
+      events: [publishedEvent],
+      questions: [
+        customQuestionRow({
+          id: 'q_parent',
+          applies_to: 'buyer',
+          type: 'select',
+          label: 'Bring guest?',
+          options: JSON.stringify(['yes', 'no']),
+          required: true,
+          sort_order: 1,
+        }),
+        customQuestionRow({
+          id: 'q_child',
+          applies_to: 'attendee',
+          label: 'Guest name',
+          required: true,
+          conditional_visibility: JSON.stringify({
+            field: 'q_parent',
+            operator: 'equals',
+            value: 'yes',
+          }),
+          sort_order: 2,
+        }),
+      ],
+    });
+
+    const res = await app.inject({ method: 'GET', url: '/public/events/evt_1/questions' });
+    expect(res.statusCode).toBe(200);
+    const body = res.json();
+    expect(body.buyerQuestions[0]).toMatchObject({ id: 'q_parent', appliesTo: 'buyer' });
+    expect(body.attendeeQuestions[0]).toMatchObject({
+      id: 'q_child',
+      appliesTo: 'attendee',
+      conditionalVisibility: { field: 'q_parent', operator: 'equals', value: 'yes' },
+    });
+    await app.close();
+  });
+
+  it('omits soft-hidden questions from public checkout', async () => {
+    const app = await setupApp(publicRoutes, makePrincipal(), {
+      events: [publishedEvent],
+      questions: [
+        customQuestionRow({ id: 'q_visible', label: 'Visible', applies_to: 'buyer' }),
+        customQuestionRow({
+          id: 'q_hidden',
+          label: 'Hidden',
+          applies_to: 'buyer',
+          status: 'hidden',
+          is_hidden: true,
+          hidden_at: new Date('2026-06-01T00:00:00.000Z'),
+        }),
+      ],
+    });
+
+    const res = await app.inject({ method: 'GET', url: '/public/events/evt_1/questions' });
+    expect(res.statusCode).toBe(200);
+    expect(res.json().buyerQuestions.map((question: { id: string }) => question.id)).toEqual(['q_visible']);
+    await app.close();
+  });
+});
+
 describe('public access code validation', () => {
   it('accepts a valid access code for a published locked ticket', async () => {
     const now = new Date('2026-06-01T00:00:00.000Z');
@@ -536,8 +625,166 @@ describe('public access code validation', () => {
       },
     });
 
-    expect(res.statusCode).toBe(403);
-    expect(res.json().message).toContain('requires an access code');
+    expect(res.statusCode).toBe(400);
+    expect(res.json().message).toContain('Access code is not valid');
+    await app.close();
+  });
+
+  it('throttles repeated access-code validation attempts per event', async () => {
+    const now = new Date('2026-06-01T00:00:00.000Z');
+    const app = await setupApp(publicRoutes, makePrincipal(), {
+      events: [{
+        id: 'evt_1',
+        slug: 'event',
+        title: 'Event',
+        description: null,
+        status: 'published',
+        timezone: 'America/New_York',
+        starts_at: now,
+        ends_at: null,
+        venue: null,
+        brand_id: 'br_1',
+      }],
+      ticket_types: [{
+        id: 'tt_locked',
+        event_id: 'evt_1',
+        name: 'VIP',
+        description: null,
+        kind: 'paid',
+        status: 'active',
+        visibility: 'locked',
+        currency: 'USD',
+        price_cents: 5000,
+        minimum_price_cents: null,
+        sales_start_at: null,
+        sales_end_at: null,
+        min_per_order: 1,
+        max_per_order: 4,
+        inventory_pool_id: 'inv_1',
+        sort_order: 1,
+        requires_access_code: true,
+        access_code_hint: null,
+      }],
+      access_rules: [{
+        id: 'acr_1',
+        ticket_type_id: 'tt_locked',
+        type: 'access_code',
+        value: 'VIP123',
+        max_uses: null,
+        uses_count: 0,
+        expires_at: null,
+      }],
+    }, {}, { rateLimit: true });
+
+    let lastStatus = 0;
+    for (let attempt = 0; attempt < 11; attempt++) {
+      // Sequential requests are required because the route-level limiter increments per completed request.
+      // eslint-disable-next-line no-await-in-loop
+      const res = await app.inject({
+        method: 'POST',
+        url: '/public/events/evt_1/access-code',
+        payload: {
+          ticketTypeIds: ['tt_locked'],
+          accessCode: `WRONG-${attempt}`,
+        },
+      });
+      lastStatus = res.statusCode;
+    }
+
+    expect(lastStatus).toBe(429);
+    await app.close();
+  });
+
+  it('returns only locked ticket IDs unlocked by the supplied access code', async () => {
+    const now = new Date('2026-06-01T00:00:00.000Z');
+    const app = await setupApp(publicRoutes, makePrincipal(), {
+      events: [{
+        id: 'evt_1',
+        slug: 'event',
+        title: 'Event',
+        description: null,
+        status: 'published',
+        timezone: 'America/New_York',
+        starts_at: now,
+        ends_at: null,
+        venue: null,
+        brand_id: 'br_1',
+      }],
+      ticket_types: [
+        {
+          id: 'tt_vip',
+          event_id: 'evt_1',
+          name: 'VIP',
+          description: null,
+          kind: 'paid',
+          status: 'active',
+          visibility: 'locked',
+          currency: 'USD',
+          price_cents: 5000,
+          minimum_price_cents: null,
+          sales_start_at: null,
+          sales_end_at: null,
+          min_per_order: 1,
+          max_per_order: 4,
+          inventory_pool_id: 'inv_1',
+          sort_order: 1,
+          requires_access_code: true,
+          access_code_hint: null,
+        },
+        {
+          id: 'tt_staff',
+          event_id: 'evt_1',
+          name: 'Staff',
+          description: null,
+          kind: 'paid',
+          status: 'active',
+          visibility: 'locked',
+          currency: 'USD',
+          price_cents: 0,
+          minimum_price_cents: null,
+          sales_start_at: null,
+          sales_end_at: null,
+          min_per_order: 1,
+          max_per_order: 4,
+          inventory_pool_id: 'inv_2',
+          sort_order: 2,
+          requires_access_code: true,
+          access_code_hint: null,
+        },
+      ],
+      access_rules: [
+        {
+          id: 'acr_vip',
+          ticket_type_id: 'tt_vip',
+          type: 'access_code',
+          value: 'VIP123',
+          max_uses: null,
+          uses_count: 0,
+          expires_at: null,
+        },
+        {
+          id: 'acr_staff',
+          ticket_type_id: 'tt_staff',
+          type: 'access_code',
+          value: 'STAFF123',
+          max_uses: null,
+          uses_count: 0,
+          expires_at: null,
+        },
+      ],
+    });
+
+    const res = await app.inject({
+      method: 'POST',
+      url: '/public/events/evt_1/access-code',
+      payload: {
+        ticketTypeIds: ['tt_vip', 'tt_staff'],
+        accessCode: 'VIP123',
+      },
+    });
+
+    expect(res.statusCode).toBe(200);
+    expect(res.json()).toEqual({ valid: true, ticketTypeIds: ['tt_vip'] });
     await app.close();
   });
 });
@@ -1129,20 +1376,14 @@ describe('custom questions CRUD', () => {
     await app.close();
   });
 
-  it('DELETE /questions/:questionId refuses hard delete when historical answers exist without hide support', async () => {
+  it('DELETE /questions/:questionId hard-deletes questions without historical answers', async () => {
     const tables = {
       questions: [customQuestionRow()],
       events: [event],
-      attendees: [{
-        id: 'att_1',
-        event_id: 'evt_1',
-        custom_answers: JSON.stringify({ q_1: 'Ada Lovelace' }),
-      }],
     };
     const app = await setupApp(questionRoutes, makePrincipal(), tables);
     const res = await app.inject({ method: 'DELETE', url: '/questions/q_1' });
-    expect(res.statusCode).toBe(409);
-    expect(res.json().message).toContain('historical answers');
+    expect(res.statusCode).toBe(204);
     await app.close();
   });
 });
@@ -1562,6 +1803,10 @@ describe('checkout question validation', () => {
       placeholder: null,
       validation_pattern: null,
       conditional_visibility: null,
+      status: 'active',
+      is_hidden: false,
+      hidden_at: null,
+      deleted_at: null,
       sort_order: 0,
       is_consent_field: false,
       consent_text: null,
@@ -1666,6 +1911,41 @@ describe('checkout question validation', () => {
 
     expect(res.statusCode).toBe(400);
     expect(res.json().message).toContain('Guest name is required');
+  });
+
+  it('ignores hidden and deleted required buyer questions during session validation', async () => {
+    const tables = {
+      events: [baseEvent],
+      ticket_types: [baseTicketType],
+      checkout_sessions: [],
+      idempotency_records: [],
+      questions: [
+        question({ id: 'q_hidden', label: 'Hidden required', status: 'hidden', is_hidden: true }),
+        question({ id: 'q_deleted', label: 'Deleted required', deleted_at: new Date() }),
+      ],
+    };
+
+    const res = await postCheckoutSession(tables, { buyerFields: {} });
+
+    expect(res.statusCode).toBe(201);
+  });
+
+  it('persists trackingId separately from affiliateCode', async () => {
+    const tables = {
+      events: [baseEvent],
+      ticket_types: [baseTicketType],
+      checkout_sessions: [],
+      idempotency_records: [],
+      questions: [],
+    };
+
+    const res = await postCheckoutSession(tables, { trackingId: 'utm-widget-1' });
+
+    expect(res.statusCode).toBe(201);
+    const storedSession = (tables.checkout_sessions as Array<{ cart: string }>)[0];
+    const cart = JSON.parse(storedSession.cart) as { affiliateCode?: string; trackingId?: string };
+    expect(cart.trackingId).toBe('utm-widget-1');
+    expect(cart.affiliateCode).toBeUndefined();
   });
 
   it('validates required attendee questions for every purchased quantity', async () => {

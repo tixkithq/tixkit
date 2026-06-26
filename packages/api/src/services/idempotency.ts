@@ -19,7 +19,27 @@ type IdempotencyRecord = {
 };
 
 export function hashRequest(payload: unknown): string {
-  return createHash('sha256').update(JSON.stringify(payload ?? null)).digest('hex');
+  return createHash('sha256').update(stableStringify(payload ?? null)).digest('hex');
+}
+
+function stableStringify(value: unknown): string {
+  if (value === null || typeof value !== 'object') {
+    return JSON.stringify(value);
+  }
+
+  if (Array.isArray(value)) {
+    return `[${value.map((entry) => stableStringify(entry)).join(',')}]`;
+  }
+
+  if (value instanceof Date) {
+    return JSON.stringify(value.toISOString());
+  }
+
+  const record = value as Record<string, unknown>;
+  return `{${Object.keys(record)
+    .sort()
+    .map((key) => `${JSON.stringify(key)}:${stableStringify(record[key])}`)
+    .join(',')}}`;
 }
 
 /**
@@ -41,7 +61,7 @@ export async function withIdempotency(
     requestHash: string;
     ttlSeconds?: number;
   },
-    handler: () => Promise<IdempotentResponse>,
+  handler: () => Promise<IdempotentResponse>,
 ): Promise<IdempotentResponse> {
   const replayExisting = async (): Promise<IdempotentResponse | null> => {
     const deadline = Date.now() + 10_000;

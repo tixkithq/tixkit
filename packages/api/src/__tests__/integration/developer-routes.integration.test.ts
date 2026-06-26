@@ -66,6 +66,36 @@ function createWebhookDb(tables: Record<string, Record<string, unknown>[]>) {
   };
 }
 
+function createWebhookEndpointListDb(rows: Record<string, unknown>[]) {
+  return {
+    selectFrom(table: string) {
+      expect(table).toBe('webhook_endpoints');
+      const query = {
+        select(columns: string[]) {
+          expect(columns).not.toContain('secret');
+          return query;
+        },
+        selectAll() {
+          throw new Error('Webhook endpoint list must not select secret material');
+        },
+        where() {
+          return query;
+        },
+        orderBy() {
+          return query;
+        },
+        limit() {
+          return query;
+        },
+        execute() {
+          return Promise.resolve(rows);
+        },
+      };
+      return query;
+    },
+  };
+}
+
 describe('developer routes integration', () => {
   it('lists API keys as a paginated public contract without secret material', async () => {
     const principal: Principal = {
@@ -144,6 +174,45 @@ describe('developer routes integration', () => {
     expect(body.items[0]).not.toHaveProperty('hashed_key');
     expect(body.items[0]).not.toHaveProperty('hashedKey');
 
+    await app.close();
+  });
+
+  it('lists webhook endpoints without selecting or serializing secrets', async () => {
+    const principal: Principal = {
+      type: 'user',
+      id: 'usr_1',
+      tenantId: 'tnt_1',
+      organizationIds: ['org_1'],
+      scopes: ['developers.write'],
+    };
+    const app = Fastify();
+    app.decorate('context', {
+      db: createWebhookEndpointListDb([
+        {
+          id: 'wh_1',
+          tenant_id: 'tnt_1',
+          organization_id: 'org_1',
+          url: 'https://example.com/webhooks',
+          events: JSON.stringify(['order.paid']),
+          status: 'active',
+          description: null,
+          created_at: new Date('2026-06-01T00:00:00Z'),
+          updated_at: new Date('2026-06-01T00:00:00Z'),
+        },
+      ]) as unknown as Database,
+      pricingEngine: {},
+      inventoryService: {},
+      qrService: {},
+      temporalClient: {},
+    } as AppContext);
+    app.addHook('onRequest', async (request) => {
+      request.principal = principal;
+    });
+    await app.register(webhookRoutes);
+
+    const res = await app.inject({ method: 'GET', url: '/webhook-endpoints' });
+    expect(res.statusCode).toBe(200);
+    expect(res.json().items[0].secret).toBeUndefined();
     await app.close();
   });
 

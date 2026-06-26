@@ -14,6 +14,33 @@ export type AuthConfig = {
   secretKey: string;
 };
 
+/**
+ * Deterministic IDs for the local dev principal and seed data.
+ * These are only used when NODE_ENV === 'development' and no Clerk secret
+ * key is configured. Production never activates this path.
+ */
+export const DEV_TENANT_ID = 'tnt_dev_local';
+export const DEV_ORG_ID = 'org_dev_local';
+export const DEV_BRAND_ID = 'brd_dev_local';
+
+const ALL_PERMISSIONS: Permission[] = [
+  'events.read',
+  'events.write',
+  'tickets.write',
+  'orders.read',
+  'orders.write',
+  'refunds.write',
+  'attendees.read',
+  'attendees.write',
+  'checkins.read',
+  'checkins.write',
+  'messages.write',
+  'reports.read',
+  'settings.write',
+  'developers.write',
+  'billing.write',
+];
+
 export class ClerkAuthService {
   private config: AuthConfig;
 
@@ -22,6 +49,110 @@ export class ClerkAuthService {
     private db: Database,
   ) {
     this.config = { secretKey };
+  }
+
+  /**
+   * Returns true when the API should allow unauthenticated local dev access.
+   * This is only active when NODE_ENV is 'development' and no Clerk secret
+   * key is configured. Production deployments with a Clerk secret key always
+   * require real authentication.
+   */
+  isLocalDevMode(): boolean {
+    return (
+      process.env.NODE_ENV === 'development' &&
+      !this.config.secretKey
+    );
+  }
+
+  /**
+   * Returns a deterministic dev principal with all permissions. Only callable
+   * when `isLocalDevMode()` returns true.
+   */
+  async authenticateLocalDev(): Promise<AuthResult> {
+    if (!this.isLocalDevMode()) {
+      throw new UnauthorizedError('Local dev mode is not active');
+    }
+
+    const principal: Principal = {
+      type: 'user',
+      id: 'usr_dev_local',
+      clerkUserId: undefined,
+      tenantId: DEV_TENANT_ID,
+      organizationIds: [DEV_ORG_ID],
+      scopes: ALL_PERMISSIONS,
+    };
+
+    return { principal };
+  }
+
+  /**
+   * Seeds a dev tenant, organization, and brand if they don't already exist.
+   * Called at API startup when in local dev mode so the admin dashboard has
+   * the minimum context needed to create events.
+   */
+  async ensureDevSeed(): Promise<void> {
+    if (!this.isLocalDevMode()) return;
+
+    const existingTenant = await this.db
+      .selectFrom('tenants')
+      .selectAll()
+      .where('id', '=', DEV_TENANT_ID)
+      .executeTakeFirst();
+
+    if (!existingTenant) {
+      const now = new Date();
+      await this.db.insertInto('tenants').values({
+        id: DEV_TENANT_ID,
+        name: 'Local Development',
+        status: 'active',
+        plan: 'free',
+        created_at: now,
+        updated_at: now,
+      }).execute();
+    }
+
+    const existingOrg = await this.db
+      .selectFrom('organizations')
+      .selectAll()
+      .where('id', '=', DEV_ORG_ID)
+      .executeTakeFirst();
+
+    if (!existingOrg) {
+      const now = new Date();
+      await this.db.insertInto('organizations').values({
+        id: DEV_ORG_ID,
+        tenant_id: DEV_TENANT_ID,
+        name: 'GateKit Dev',
+        slug: 'gatekit-dev',
+        clerk_organization_id: null,
+        status: 'active',
+        created_at: now,
+        updated_at: now,
+      }).execute();
+    }
+
+    const existingBrand = await this.db
+      .selectFrom('brands')
+      .selectAll()
+      .where('id', '=', DEV_BRAND_ID)
+      .executeTakeFirst();
+
+    if (!existingBrand) {
+      const now = new Date();
+      await this.db.insertInto('brands').values({
+        id: DEV_BRAND_ID,
+        tenant_id: DEV_TENANT_ID,
+        organization_id: DEV_ORG_ID,
+        name: 'GateKit Dev',
+        slug: 'gatekit-dev',
+        status: 'active',
+        theme: JSON.stringify({ primaryColor: '#6366f1' }),
+        legal_urls: JSON.stringify({}),
+        white_label: false,
+        created_at: now,
+        updated_at: now,
+      }).execute();
+    }
   }
 
   /**
@@ -343,6 +474,12 @@ export function createAuthMiddleware(authService: ClerkAuthService) {
         request.principal = result.principal;
       } else if (authHeader?.startsWith('Bearer ')) {
         const result = await authService.authenticateRequest(request);
+        request.principal = result.principal;
+      } else if (authService.isLocalDevMode()) {
+        // Local dev mode: allow unauthenticated requests when no Clerk secret
+        // key is configured and NODE_ENV is 'development'. Production never
+        // reaches this branch because isLocalDevMode() returns false.
+        const result = await authService.authenticateLocalDev();
         request.principal = result.principal;
       } else {
         throw new UnauthorizedError();

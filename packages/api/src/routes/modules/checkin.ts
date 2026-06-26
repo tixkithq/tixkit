@@ -1,4 +1,4 @@
-import type { FastifyPluginAsync } from 'fastify';
+import type { FastifyPluginAsync, FastifyRequest } from 'fastify';
 import { createHmac } from 'node:crypto';
 import { ClerkAuthService } from '../../auth/clerk.js';
 import {
@@ -32,15 +32,20 @@ export const checkInRoutes: FastifyPluginAsync = async (app) => {
     return event;
   };
 
+  const requireEventAccess = (principal: NonNullable<FastifyRequest['principal']>, event: Record<string, unknown>, eventId: string) => {
+    ClerkAuthService.requireResourceTenant(principal, event, 'Event', eventId);
+    ClerkAuthService.requireOrganizationScope(principal, event.organization_id as string | undefined);
+    ClerkAuthService.requireBrandScope(principal, event.brand_id as string | undefined);
+    ClerkAuthService.requireEventScope(principal, eventId);
+  };
+
   app.get('/events/:eventId/attendees', async (request) => {
     const principal = request.principal!;
     ClerkAuthService.requirePermission(principal, 'attendees.read');
     const { eventId } = request.params as { eventId: string };
     const pagination = parsePagination(request.query);
     const event = await loadEvent(eventId);
-    ClerkAuthService.requireResourceTenant(principal, event, 'Event', eventId);
-    ClerkAuthService.requireBrandScope(principal, event.brand_id);
-    ClerkAuthService.requireEventScope(principal, eventId);
+    requireEventAccess(principal, event, eventId);
     const repo = new AttendeeRepository(db);
     const rows = await repo.findByEvent(eventId, pagination.limit + 1, pagination.cursor, principal.tenantId);
     return pageEnvelope(rows.map((row) => serializeAttendee(row)), pagination.limit);
@@ -52,10 +57,17 @@ export const checkInRoutes: FastifyPluginAsync = async (app) => {
     const pagination = parsePagination(request.query);
     let query = db
       .selectFrom('attendees')
-      .selectAll()
-      .where('tenant_id', '=', principal.tenantId)
+      .innerJoin('events', 'events.id', 'attendees.event_id')
+      .selectAll('attendees')
+      .where('attendees.tenant_id', '=', principal.tenantId)
       .orderBy('id', 'asc')
       .limit(pagination.limit + 1);
+    if (principal.type !== 'system') {
+      if (principal.organizationIds.length === 0) {
+        return pageEnvelope([], pagination.limit);
+      }
+      query = query.where('events.organization_id', 'in', principal.organizationIds);
+    }
     if (pagination.cursor) query = query.where('id', '>', pagination.cursor);
     const rows = await query.execute();
     return pageEnvelope(rows.map((row) => serializeAttendee(row)), pagination.limit);
@@ -71,9 +83,7 @@ export const checkInRoutes: FastifyPluginAsync = async (app) => {
     if (!existing) throw new NotFoundError('Attendee', attendeeId);
     const event = await loadEvent(existing.event_id);
     ClerkAuthService.requireResourceTenant(principal, existing, 'Attendee', attendeeId);
-    ClerkAuthService.requireResourceTenant(principal, event, 'Event', existing.event_id);
-    ClerkAuthService.requireBrandScope(principal, event.brand_id);
-    ClerkAuthService.requireEventScope(principal, existing.event_id);
+    requireEventAccess(principal, event, existing.event_id);
     const updateData = pickAllowedFields(body, ['firstName', 'lastName', 'email', 'phone', 'status'], {
       firstName: 'first_name',
       lastName: 'last_name',
@@ -97,9 +107,7 @@ export const checkInRoutes: FastifyPluginAsync = async (app) => {
 
     const event = await loadEvent(ticket.event_id);
     ClerkAuthService.requireResourceTenant(principal, ticket, 'Ticket', ticketId);
-    ClerkAuthService.requireResourceTenant(principal, event, 'Event', ticket.event_id);
-    ClerkAuthService.requireBrandScope(principal, event.brand_id);
-    ClerkAuthService.requireEventScope(principal, ticket.event_id);
+    requireEventAccess(principal, event, ticket.event_id);
 
     const result = await withIdempotency(
       db,
@@ -134,9 +142,7 @@ export const checkInRoutes: FastifyPluginAsync = async (app) => {
     const { eventId } = request.params as { eventId: string };
     const pagination = parsePagination(request.query);
     const event = await loadEvent(eventId);
-    ClerkAuthService.requireResourceTenant(principal, event, 'Event', eventId);
-    ClerkAuthService.requireBrandScope(principal, event.brand_id);
-    ClerkAuthService.requireEventScope(principal, eventId);
+    requireEventAccess(principal, event, eventId);
     const repo = new CheckInListRepository(db);
     const rows = await repo.findByEvent(eventId, pagination.limit + 1, pagination.cursor);
     return pageEnvelope(rows.map((row) => serializeCheckInList(row)), pagination.limit);
@@ -147,9 +153,7 @@ export const checkInRoutes: FastifyPluginAsync = async (app) => {
     ClerkAuthService.requirePermission(principal, 'checkins.read');
     const { eventId, checkInListId } = request.params as { eventId: string; checkInListId: string };
     const event = await loadEvent(eventId);
-    ClerkAuthService.requireResourceTenant(principal, event, 'Event', eventId);
-    ClerkAuthService.requireBrandScope(principal, event.brand_id);
-    ClerkAuthService.requireEventScope(principal, eventId);
+    requireEventAccess(principal, event, eventId);
 
     const listRepo = new CheckInListRepository(db);
     const list = await listRepo.findById(checkInListId);
@@ -197,11 +201,9 @@ export const checkInRoutes: FastifyPluginAsync = async (app) => {
 
     const list = await listRepo.findById(body.checkInListId);
     if (!list) throw new NotFoundError('CheckInList', body.checkInListId);
-    if (list.status !== 'active') throw new ValidationError('Check-in list is not active');
     const event = await loadEvent(list.event_id);
-    ClerkAuthService.requireResourceTenant(principal, event, 'Event', list.event_id);
-    ClerkAuthService.requireBrandScope(principal, event.brand_id);
-    ClerkAuthService.requireEventScope(principal, list.event_id);
+    requireEventAccess(principal, event, list.event_id);
+    if (list.status !== 'active') throw new ValidationError('Check-in list is not active');
 
     const effectiveDeviceId = resolveCheckInDeviceId(principal, body.deviceId);
     const requestHash = hashRequest({
@@ -277,11 +279,9 @@ export const checkInRoutes: FastifyPluginAsync = async (app) => {
 
     const list = await listRepo.findById(body.checkInListId);
     if (!list) throw new NotFoundError('CheckInList', body.checkInListId);
-    if (list.status !== 'active') throw new ValidationError('Check-in list is not active');
     const event = await loadEvent(list.event_id);
-    ClerkAuthService.requireResourceTenant(principal, event, 'Event', list.event_id);
-    ClerkAuthService.requireBrandScope(principal, event.brand_id);
-    ClerkAuthService.requireEventScope(principal, list.event_id);
+    requireEventAccess(principal, event, list.event_id);
+    if (list.status !== 'active') throw new ValidationError('Check-in list is not active');
     const effectiveDeviceId = resolveCheckInDeviceId(principal, body.deviceId);
 
     // Deterministic conflict resolution: sort by scannedAt so the earliest

@@ -17,6 +17,10 @@
     "./repositories": {
       "types": "./dist/repositories/index.d.ts",
       "import": "./dist/repositories/index.js"
+    },
+    "./migrate": {
+      "types": "./dist/migrate.d.ts",
+      "import": "./dist/migrate.js"
     }
   },
   "scripts": {
@@ -25,6 +29,8 @@
     "typecheck": "tsc --noEmit",
     "migrate": "tsx src/migrate.ts",
     "migrate:mysql": "DB_DRIVER=mysql tsx src/migrate.ts",
+    "reset": "tsx src/reset.ts",
+    "reset:mysql": "DB_DRIVER=mysql tsx src/reset.ts",
     "test:unit": "vitest run src/__tests__/unit/client.test.ts",
     "test:integration": "vitest run src/__tests__/integration/db.integration.test.ts",
     "test:mysql": "DB_INTEGRATION_DRIVER=mysql vitest run src/__tests__/integration/db.integration.test.ts",

@@ -104,6 +104,7 @@ export const openApiSpec = {
           title: { type: 'string' },
           slug: { type: 'string' },
           status: { type: 'string', enum: ['draft', 'published', 'paused', 'ended', 'archived'] },
+          currency: { type: 'string', minLength: 3, maxLength: 3 },
           startsAt: { type: 'string', format: 'date-time' },
           endsAt: { type: 'string', format: 'date-time' },
           timezone: { type: 'string' },
@@ -113,7 +114,7 @@ export const openApiSpec = {
           venue: { type: 'object' },
           seo: { type: 'object' },
         },
-        required: ['id', 'title', 'slug', 'status', 'startsAt', 'timezone'],
+        required: ['id', 'title', 'slug', 'status', 'currency', 'startsAt', 'timezone'],
       },
       EventPage: {
         type: 'object',
@@ -462,6 +463,7 @@ export const openApiSpec = {
           supportUrl: { type: 'string' },
           legalUrls: { type: 'object' },
           whiteLabel: { type: 'boolean' },
+          paymentAccountId: { type: 'string', nullable: true, description: 'Payment account bound to this brand for paid checkout routing.' },
           createdAt: { type: 'string', format: 'date-time' },
           updatedAt: { type: 'string', format: 'date-time' },
         },
@@ -801,6 +803,24 @@ export const openApiSpec = {
         },
         required: ['items', 'nextCursor', 'hasMore'],
       },
+      ReorderQuestionsRequest: {
+        type: 'object',
+        properties: {
+          questions: {
+            type: 'array',
+            minItems: 1,
+            items: {
+              type: 'object',
+              properties: {
+                id: { type: 'string' },
+                sortOrder: { type: 'integer' },
+              },
+              required: ['id', 'sortOrder'],
+            },
+          },
+        },
+        required: ['questions'],
+      },
       RefundQueued: {
         type: 'object',
         properties: {
@@ -935,6 +955,7 @@ export const openApiSpec = {
                   supportUrl: { type: 'string', format: 'uri' },
                   legalUrls: { type: 'object' },
                   whiteLabel: { type: 'boolean' },
+                  paymentAccountId: { type: 'string', nullable: true, description: 'Bind a payment account to this brand for paid checkout routing. Must belong to the same tenant and organization.' },
                 },
               },
             },
@@ -987,6 +1008,7 @@ export const openApiSpec = {
                   slug: { type: 'string' },
                   title: { type: 'string' },
                   description: { type: 'string' },
+                  currency: { type: 'string', minLength: 3, maxLength: 3 },
                   timezone: { type: 'string' },
                   startsAt: { type: 'string', format: 'date-time' },
                   endsAt: { type: 'string', format: 'date-time' },
@@ -995,7 +1017,7 @@ export const openApiSpec = {
                   seo: { type: 'object' },
                   capacity: { type: 'integer' },
                 },
-                required: ['organizationId', 'brandId', 'slug', 'title', 'timezone', 'startsAt'],
+                required: ['organizationId', 'brandId', 'slug', 'title', 'currency', 'timezone', 'startsAt'],
               },
             },
           },
@@ -1017,6 +1039,7 @@ export const openApiSpec = {
                 properties: {
                   title: { type: 'string' },
                   description: { type: 'string' },
+                  currency: { type: 'string', minLength: 3, maxLength: 3 },
                   timezone: { type: 'string' },
                   startsAt: { type: 'string', format: 'date-time' },
                   endsAt: { type: 'string', format: 'date-time', nullable: true },
@@ -1236,6 +1259,7 @@ export const openApiSpec = {
                   },
                   discountCode: { type: 'string' },
                   affiliateCode: { type: 'string' },
+                  trackingId: { type: 'string' },
                   accessCode: { type: 'string' },
                   buyer: {
                     type: 'object',
@@ -1619,7 +1643,7 @@ export const openApiSpec = {
         summary: 'Get conversion report',
         security: [{ BearerAuth: [] }],
         responses: {
-          '200': { description: 'Conversion funnel metrics', content: { 'application/json': { schema: { type: 'object', properties: { widgetViews: { type: 'number' }, checkoutSessionsStarted: { type: 'number' }, checkoutSessionsCompleted: { type: 'number' }, viewToStartRatePercentage: { type: 'number' }, startToCompleteRatePercentage: { type: 'number' }, overallConversionRatePercentage: { type: 'number' } }, required: ['widgetViews', 'checkoutSessionsStarted', 'checkoutSessionsCompleted', 'viewToStartRatePercentage', 'startToCompleteRatePercentage', 'overallConversionRatePercentage'] } } } },
+          '200': { description: 'Conversion funnel metrics', content: { 'application/json': { schema: { type: 'object', properties: { eventId: { type: 'string' }, checkoutStarted: { type: 'number' }, checkoutCompleted: { type: 'number' }, conversionRate: { type: 'number' } }, required: ['eventId', 'checkoutStarted', 'checkoutCompleted', 'conversionRate'] } } } },
           '401': { description: 'Unauthorized', content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } } },
           '403': { description: 'Forbidden', content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } } },
         },
@@ -1870,6 +1894,27 @@ export const openApiSpec = {
           '400': { description: 'Validation error', content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } } },
           '401': { description: 'Unauthorized', content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } } },
           '403': { description: 'Forbidden', content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } } },
+        },
+      },
+    },
+    '/events/{eventId}/questions/reorder': {
+      post: {
+        summary: 'Atomically reorder custom questions for an event',
+        security: [{ BearerAuth: [] }],
+        requestBody: {
+          required: true,
+          content: {
+            'application/json': {
+              schema: { $ref: '#/components/schemas/ReorderQuestionsRequest' },
+            },
+          },
+        },
+        responses: {
+          '200': { description: 'Questions reordered', content: { 'application/json': { schema: { $ref: '#/components/schemas/QuestionPage' } } } },
+          '400': { description: 'Validation error', content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } } },
+          '401': { description: 'Unauthorized', content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } } },
+          '403': { description: 'Forbidden', content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } } },
+          '404': { description: 'Event or question not found', content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } } },
         },
       },
     },

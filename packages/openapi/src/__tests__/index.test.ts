@@ -47,6 +47,13 @@ describe('openApiSpec', () => {
     });
   });
 
+  it('documents brand payment account binding on response schemas', () => {
+    expect(openApiSpec.components.schemas.Brand.properties).toHaveProperty('paymentAccountId');
+    expect(openApiSpec.paths['/brands/{brandId}'].patch.requestBody.content['application/json'].schema.properties).toHaveProperty(
+      'paymentAccountId',
+    );
+  });
+
   it('documents signed QR payloads for online check-in scans', () => {
     const schema =
       openApiSpec.paths['/check-ins/scan'].post.requestBody.content['application/json'].schema;
@@ -78,11 +85,36 @@ describe('openApiSpec', () => {
     expect(openApiSpec.paths['/attendees/{attendeeId}']).toBeDefined();
     expect(openApiSpec.paths['/tickets/{ticketId}/transfer']).toBeDefined();
     expect(openApiSpec.paths['/events/{eventId}/inventory-pools']).toBeDefined();
+    expect(openApiSpec.paths['/events/{eventId}/questions/reorder']).toBeDefined();
     expect(openApiSpec.paths['/events/{eventId}/reports/sales']).toBeDefined();
     expect(openApiSpec.paths['/events/{eventId}/reports/tax']).toBeDefined();
     expect(openApiSpec.paths['/exports']).toBeDefined();
     expect(openApiSpec.paths['/events/{eventId}/messages']).toBeDefined();
     expect(openApiSpec.paths['/webhook-events/{eventId}/replay']).toBeDefined();
+  });
+
+  it('documents checkout tracking separately from affiliate attribution', () => {
+    const checkoutSessionBody =
+      openApiSpec.paths['/checkout/sessions'].post.requestBody.content['application/json'].schema;
+    expect(checkoutSessionBody.properties.affiliateCode).toEqual({ type: 'string' });
+    expect(checkoutSessionBody.properties.trackingId).toEqual({ type: 'string' });
+  });
+
+  it('documents the atomic checkout-question reorder contract', () => {
+    const path = openApiSpec.paths['/events/{eventId}/questions/reorder'];
+    expect(path.post).toBeDefined();
+    expect(path.post.requestBody.content['application/json'].schema).toEqual({
+      $ref: '#/components/schemas/ReorderQuestionsRequest',
+    });
+    expect(path.post.responses['200'].content['application/json'].schema).toEqual({
+      $ref: '#/components/schemas/QuestionPage',
+    });
+    expect(openApiSpec.components.schemas.ReorderQuestionsRequest).toMatchObject({
+      required: ['questions'],
+      properties: {
+        questions: expect.objectContaining({ minItems: 1 }),
+      },
+    });
   });
 
   it('does not document unimplemented route groups', () => {
@@ -99,5 +131,19 @@ describe('openApiSpec', () => {
     expect(openApiSpec.paths['/checkout/sessions'].post.parameters).toContainEqual({
       $ref: '#/components/parameters/RequiredIdempotencyKey',
     });
+  });
+
+  it('keeps event create/update schemas aligned with backend currency and status contracts', () => {
+    const eventSchema = openApiSpec.components.schemas.Event;
+    expect(eventSchema.required).toContain('currency');
+    expect(eventSchema.properties).toHaveProperty('currency');
+
+    const createSchema = openApiSpec.paths['/events'].post.requestBody.content['application/json'].schema;
+    expect(createSchema.required).toContain('currency');
+    expect(createSchema.properties).toHaveProperty('currency');
+
+    const updateSchema = openApiSpec.paths['/events/{eventId}'].patch.requestBody.content['application/json'].schema;
+    expect(updateSchema.properties).toHaveProperty('currency');
+    expect(updateSchema.properties).toHaveProperty('status');
   });
 });

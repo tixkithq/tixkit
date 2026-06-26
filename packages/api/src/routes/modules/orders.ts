@@ -10,7 +10,10 @@ import {
   parsePagination,
   serializeOrder,
   serializeOrderLineItem,
+  serializeAttendee,
+  serializeRefund,
   serializeTimelineEvent,
+  parseJsonValue,
 } from '../../http/contracts.js';
 import { refundSchema, parseBody } from '../../http/schemas.js';
 
@@ -21,6 +24,9 @@ export const orderRoutes: FastifyPluginAsync = async (app) => {
     const principal = request.principal!;
     ClerkAuthService.requirePermission(principal, 'orders.read');
     const pagination = parsePagination(request.query);
+    if (principal.type !== 'system' && principal.organizationIds.length === 0) {
+      return pageEnvelope([], pagination.limit);
+    }
     let query = db
       .selectFrom('orders')
       .selectAll()
@@ -30,6 +36,7 @@ export const orderRoutes: FastifyPluginAsync = async (app) => {
 
     const { organizationId, eventId } = request.query as { organizationId?: string; eventId?: string };
     if (organizationId) {
+      ClerkAuthService.requireOrganizationScope(principal, organizationId);
       query = query.where('organization_id', '=', organizationId);
     }
     if (eventId) {
@@ -42,7 +49,7 @@ export const orderRoutes: FastifyPluginAsync = async (app) => {
     if (principal.eventIds && principal.eventIds.length > 0) {
       query = query.where('event_id', 'in', principal.eventIds);
     }
-    if (principal.organizationIds.length > 0) {
+    if (principal.type !== 'system') {
       query = query.where('organization_id', 'in', principal.organizationIds);
     }
     const rows = await query.execute();
@@ -57,18 +64,52 @@ export const orderRoutes: FastifyPluginAsync = async (app) => {
     const order = await repo.findById(orderId);
     if (!order) throw new NotFoundError('Order', orderId);
     ClerkAuthService.requireResourceTenant(principal, order, 'Order', orderId);
+    ClerkAuthService.requireOrganizationScope(principal, order.organization_id);
     ClerkAuthService.requireBrandScope(principal, order.brand_id);
     ClerkAuthService.requireEventScope(principal, order.event_id);
 
-    const [lineItems, timeline] = await Promise.all([
+    const [lineItems, timeline, attendees, refunds, checkoutSession] = await Promise.all([
       repo.getLineItems(orderId),
       repo.getTimeline(orderId),
+      db.selectFrom('attendees').selectAll().where('order_id', '=', orderId).execute(),
+      db.selectFrom('refunds').selectAll().where('order_id', '=', orderId).orderBy('created_at', 'asc').execute(),
+      order.checkout_session_id
+        ? db.selectFrom('checkout_sessions').selectAll().where('id', '=', order.checkout_session_id).executeTakeFirst()
+        : Promise.resolve(undefined),
     ]);
+    const cart = parseJsonValue(checkoutSession?.cart, {}) as Record<string, unknown>;
+    const buyerFields = cart.buyerFields && typeof cart.buyerFields === 'object'
+      ? (cart.buyerFields as Record<string, unknown>)
+      : {};
+    const attendeeFields = cart.attendeeFields && typeof cart.attendeeFields === 'object'
+      ? (cart.attendeeFields as Record<string, unknown>)
+      : {};
+    const consentSnapshots = Object.fromEntries(
+      Object.entries(buyerFields).filter(([, answer]) => {
+        return Boolean(
+          answer &&
+            typeof answer === 'object' &&
+            'consentText' in answer &&
+            'consentVersion' in answer,
+        );
+      }),
+    );
 
     return {
       ...serializeOrder(order),
       lineItems: lineItems.map((row) => serializeOrderLineItem(row)),
+      attendees: attendees.map((row) => serializeAttendee(row)),
+      checkoutAnswers: {
+        buyerFields,
+        attendeeFields,
+      },
+      consentSnapshots,
+      refunds: refunds.map((row) => serializeRefund(row)),
       timeline: timeline.map((row) => serializeTimelineEvent(row)),
+      deliveryStatus: {
+        email: order.buyer_email ? 'pending' : 'not_applicable',
+        tickets: attendees.length > 0 ? 'issued' : 'not_issued',
+      },
     };
   });
 
@@ -80,6 +121,7 @@ export const orderRoutes: FastifyPluginAsync = async (app) => {
     const order = await repo.findById(orderId);
     if (!order) throw new NotFoundError('Order', orderId);
     ClerkAuthService.requireResourceTenant(principal, order, 'Order', orderId);
+    ClerkAuthService.requireOrganizationScope(principal, order.organization_id);
     ClerkAuthService.requireBrandScope(principal, order.brand_id);
     ClerkAuthService.requireEventScope(principal, order.event_id);
 
@@ -115,6 +157,7 @@ export const orderRoutes: FastifyPluginAsync = async (app) => {
     const order = await orderRepo.findById(orderId);
     if (!order) throw new NotFoundError('Order', orderId);
     ClerkAuthService.requireResourceTenant(principal, order, 'Order', orderId);
+    ClerkAuthService.requireOrganizationScope(principal, order.organization_id);
     ClerkAuthService.requireBrandScope(principal, order.brand_id);
     ClerkAuthService.requireEventScope(principal, order.event_id);
 

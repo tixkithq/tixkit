@@ -17,6 +17,73 @@ const urlSchema = z.string().url().refine(
   { message: 'URL must use http or https scheme; javascript:, data:, and file: schemes are not allowed' },
 );
 
+function isDevelopmentLike(): boolean {
+  return process.env.NODE_ENV === 'development' || process.env.NODE_ENV === 'test';
+}
+
+function isLocalhost(hostname: string): boolean {
+  const host = hostname.toLowerCase();
+  return host === 'localhost' || host.endsWith('.localhost') || host === '127.0.0.1' || host === '::1' || host === '[::1]';
+}
+
+function isPrivateIpv4(hostname: string): boolean {
+  const parts = hostname.split('.').map((part) => Number(part));
+  if (parts.length !== 4 || parts.some((part) => !Number.isInteger(part) || part < 0 || part > 255)) {
+    return false;
+  }
+
+  const [a, b] = parts;
+  return (
+    a === 10 ||
+    a === 127 ||
+    a === 0 ||
+    (a === 100 && b >= 64 && b <= 127) ||
+    (a === 169 && b === 254) ||
+    (a === 172 && b >= 16 && b <= 31) ||
+    (a === 192 && b === 168)
+  );
+}
+
+function isPrivateHostname(hostname: string): boolean {
+  const host = hostname.toLowerCase().replace(/^\[|\]$/g, '');
+  return (
+    isLocalhost(host) ||
+    isPrivateIpv4(host) ||
+    host === '::1' ||
+    host.startsWith('fc') ||
+    host.startsWith('fd') ||
+    host.startsWith('fe80') ||
+    host.endsWith('.local') ||
+    host.endsWith('.internal') ||
+    !host.includes('.')
+  );
+}
+
+const webhookUrlSchema = z.string().url().refine(
+  (val) => {
+    try {
+      const url = new URL(val);
+      return url.protocol === 'https:' && !isPrivateHostname(url.hostname);
+    } catch {
+      return false;
+    }
+  },
+  { message: 'Webhook URL must use https and must not target localhost, private, or internal hosts' },
+);
+
+const oauthRedirectUrlSchema = z.string().url().refine(
+  (val) => {
+    try {
+      const url = new URL(val);
+      if (url.protocol === 'https:') return true;
+      return isDevelopmentLike() && url.protocol === 'http:' && isLocalhost(url.hostname);
+    } catch {
+      return false;
+    }
+  },
+  { message: 'OAuth redirect URI must use https, except localhost http in development/test' },
+);
+
 /**
  * Validates that a URL uses an allowed scheme (https in production, http in dev).
  * Rejects javascript:, data:, file: schemes.
@@ -27,7 +94,7 @@ export function safeRedirectUrl(devMode: boolean): z.ZodString {
       try {
         const url = new URL(val);
         if (url.protocol === 'https:') return true;
-        if (devMode && url.protocol === 'http:') return true;
+        if (devMode && url.protocol === 'http:' && isLocalhost(url.hostname)) return true;
         return false;
       } catch {
         return false;
@@ -53,6 +120,7 @@ export const createCheckoutSessionSchema = (devMode: boolean) =>
       .min(1),
     discountCode: z.string().optional(),
     affiliateCode: z.string().optional(),
+    trackingId: z.string().optional(),
     accessCode: z.string().optional(),
     buyer: z
       .object({
@@ -100,6 +168,7 @@ export const createEventSchema = z.object({
   slug: z.string().min(1),
   title: z.string().min(1),
   description: z.string().optional(),
+  currency: currencySchema,
   timezone: z.string().min(1),
   startsAt: iso8601Schema,
   endsAt: iso8601Schema.optional(),
@@ -112,6 +181,7 @@ export const createEventSchema = z.object({
 export const updateEventSchema = z.object({
   title: z.string().min(1).optional(),
   description: z.string().optional(),
+  currency: currencySchema.optional(),
   timezone: z.string().min(1).optional(),
   startsAt: iso8601Schema.optional(),
   endsAt: iso8601Schema.nullable().optional(),
@@ -143,6 +213,7 @@ export const updateBrandSchema = z.object({
   supportUrl: urlSchema.optional(),
   legalUrls: z.record(z.string(), z.string()).optional(),
   whiteLabel: z.boolean().optional(),
+  paymentAccountId: ulidSchema.nullable().optional(),
 }).strict();
 
 export const addBrandDomainSchema = z.object({
@@ -212,13 +283,13 @@ export const createScannerDeviceSchema = z.object({
 // Webhook schemas
 export const createWebhookEndpointSchema = z.object({
   organizationId: ulidSchema,
-  url: urlSchema,
+  url: webhookUrlSchema,
   events: z.array(z.string().min(1)),
   description: z.string().optional(),
 }).strict();
 
 export const updateWebhookEndpointSchema = z.object({
-  url: urlSchema.optional(),
+  url: webhookUrlSchema.optional(),
   events: z.array(z.string().min(1)).optional(),
   status: z.enum(['active', 'disabled']).optional(),
   description: z.string().nullable().optional(),
@@ -306,7 +377,7 @@ export const createQuestionSchema = z.object({
 export const createOAuthAppSchema = z.object({
   organizationId: ulidSchema,
   name: z.string().min(1),
-  redirectUris: z.array(urlSchema),
+  redirectUris: z.array(oauthRedirectUrlSchema),
   scopes: z.array(z.string().min(1)),
 }).strict();
 
@@ -326,6 +397,15 @@ export const updateQuestionSchema = z.object({
   isConsentField: z.boolean().optional(),
   consentText: z.string().nullable().optional(),
   consentVersion: z.string().min(1).nullable().optional(),
+}).strict();
+
+export const reorderQuestionsSchema = z.object({
+  questions: z.array(
+    z.object({
+      id: ulidSchema,
+      sortOrder: z.number().int(),
+    }),
+  ).min(1),
 }).strict();
 
 /**

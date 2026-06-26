@@ -191,6 +191,7 @@ export const messagingRoutes: FastifyPluginAsync = async (app) => {
     }
 
     const campaignId = idempotencyKey.trim();
+    await loadAuthorizedEvent(eventId, principal, db);
     const result = await withIdempotency(
       db,
       {
@@ -468,7 +469,8 @@ async function loadAuthorizedEvent(eventId: string, principal: Principal, db: Da
     throw new ValidationError('Event not found');
   }
   ClerkAuthService.requireResourceTenant(principal, event, 'Event', eventId);
-  ClerkAuthService.requireBrandScope(principal, event.brand_id);
+  ClerkAuthService.requireOrganizationScope(principal, event.organization_id as string | undefined);
+  ClerkAuthService.requireBrandScope(principal, event.brand_id as string | undefined);
   ClerkAuthService.requireEventScope(principal, eventId);
   return event;
 }

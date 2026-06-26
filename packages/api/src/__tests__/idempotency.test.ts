@@ -16,6 +16,51 @@ describe('hashRequest', () => {
     expect(h1).not.toBe(h2);
   });
 
+  it('does not depend on object key insertion order', () => {
+    const h1 = hashRequest({
+      eventId: 'evt_1',
+      buyer: { email: 'buyer@test.com', firstName: 'Ada' },
+      items: [{ ticketTypeId: 'tt_1', quantity: 1 }],
+    });
+    const h2 = hashRequest({
+      items: [{ quantity: 1, ticketTypeId: 'tt_1' }],
+      buyer: { firstName: 'Ada', email: 'buyer@test.com' },
+      eventId: 'evt_1',
+    });
+    expect(h1).toBe(h2);
+  });
+
+  it('changes when material checkout create-session fields change', () => {
+    const base = {
+      eventId: 'evt_1',
+      items: [
+        {
+          ticketTypeId: 'tt_1',
+          quantity: 1,
+          attendeeFields: [{ q_attendee: 'Ada' }],
+        },
+      ],
+      buyer: { email: 'buyer@test.com', firstName: 'Ada', lastName: 'Lovelace', phone: '+15555550123' },
+      buyerFields: { q_buyer: 'yes' },
+      discountCode: 'SAVE25',
+      accessCode: 'VIP',
+      affiliateCode: 'AFF1',
+      successUrl: 'https://example.com/success',
+      cancelUrl: 'https://example.com/cancel',
+    };
+
+    const baseHash = hashRequest(base);
+    expect(hashRequest({ ...base, discountCode: 'SAVE50' })).not.toBe(baseHash);
+    expect(hashRequest({ ...base, accessCode: 'STAFF' })).not.toBe(baseHash);
+    expect(hashRequest({ ...base, affiliateCode: 'AFF2' })).not.toBe(baseHash);
+    expect(hashRequest({ ...base, buyerFields: { q_buyer: 'no' } })).not.toBe(baseHash);
+    expect(hashRequest({ ...base, successUrl: 'https://example.com/thanks' })).not.toBe(baseHash);
+    expect(hashRequest({
+      ...base,
+      items: [{ ticketTypeId: 'tt_1', quantity: 1, attendeeFields: [{ q_attendee: 'Grace' }] }],
+    })).not.toBe(baseHash);
+  });
+
   it('handles null and undefined payloads', () => {
     const h1 = hashRequest(null);
     const h2 = hashRequest(undefined);

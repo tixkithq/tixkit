@@ -99,6 +99,7 @@ export type CartInput = {
   items: CartItem[];
   discountCode?: string;
   affiliateCode?: string;
+  trackingId?: string;
   buyerFields?: Record<string, unknown>;
   attendeeFields?: Record<string, unknown[]>;
 };

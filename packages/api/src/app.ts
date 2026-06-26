@@ -51,7 +51,7 @@ export async function buildApp(): Promise<FastifyInstance> {
     credentials: true,
   });
   await app.register(rateLimit, {
-    max: 100,
+    max: config.nodeEnv === 'production' ? 100 : 1000,
     timeWindow: '1 minute',
   });
 
@@ -67,12 +67,16 @@ export async function buildApp(): Promise<FastifyInstance> {
   });
 
   // Initialize services
-  const db = createDb();
+  const db = createDb(config.databaseUrl);
   const pricingEngine = new PricingEngine();
   const inventoryService = new InventoryService(db);
   const qrService = new QrService();
   const authService = new ClerkAuthService(config.clerkSecretKey, db);
 	  const temporalClient = await TemporalClient.connect();
+
+	  // Seed dev tenant/org/brand when in local dev mode (no Clerk secret key).
+	  // This ensures the admin dashboard has minimum context to create events.
+	  await authService.ensureDevSeed();
 
 	  const ctx: AppContext = { db, pricingEngine, inventoryService, qrService, authService, temporalClient };
 	  app.decorate('context', ctx);

@@ -1,4 +1,4 @@
-import type { FastifyPluginAsync } from 'fastify';
+import type { FastifyPluginAsync, FastifyRequest } from 'fastify';
 import { ClerkAuthService } from '../../auth/clerk.js';
 import { EventRepository, TicketTypeRepository, InventoryPoolRepository } from '@gatekit/db';
 import { NotFoundError } from '@gatekit/domain';
@@ -27,6 +27,13 @@ export const ticketingRoutes: FastifyPluginAsync = async (app) => {
     return event;
   };
 
+  const requireEventAccess = (principal: NonNullable<FastifyRequest['principal']>, event: Record<string, unknown>, eventId: string) => {
+    ClerkAuthService.requireResourceTenant(principal, event, 'Event', eventId);
+    ClerkAuthService.requireOrganizationScope(principal, event.organization_id as string | undefined);
+    ClerkAuthService.requireBrandScope(principal, event.brand_id as string | undefined);
+    ClerkAuthService.requireEventScope(principal, eventId);
+  };
+
   app.post('/events/:eventId/ticket-types', async (request, reply) => {
     const principal = request.principal!;
     ClerkAuthService.requirePermission(principal, 'tickets.write');
@@ -34,9 +41,7 @@ export const ticketingRoutes: FastifyPluginAsync = async (app) => {
     const body = parseBody(createTicketTypeSchema, request.body);
 
     const event = await loadEvent(eventId);
-    ClerkAuthService.requireResourceTenant(principal, event, 'Event', eventId);
-    ClerkAuthService.requireBrandScope(principal, event.brand_id);
-    ClerkAuthService.requireEventScope(principal, eventId);
+    requireEventAccess(principal, event, eventId);
 
     const repo = new TicketTypeRepository(db);
     const pool = await new InventoryPoolRepository(db).findById(body.inventoryPoolId);
@@ -73,9 +78,7 @@ export const ticketingRoutes: FastifyPluginAsync = async (app) => {
     const existing = await repo.findById(ticketTypeId);
     if (!existing) throw new NotFoundError('TicketType', ticketTypeId);
     const event = await loadEvent(existing.event_id);
-    ClerkAuthService.requireResourceTenant(principal, event, 'Event', existing.event_id);
-    ClerkAuthService.requireBrandScope(principal, event.brand_id);
-    ClerkAuthService.requireEventScope(principal, existing.event_id);
+    requireEventAccess(principal, event, existing.event_id);
     const updateData = pickAllowedFields(
       body,
       [
@@ -126,9 +129,7 @@ export const ticketingRoutes: FastifyPluginAsync = async (app) => {
     const { eventId } = request.params as { eventId: string };
     const pagination = parsePagination(request.query);
     const event = await loadEvent(eventId);
-    ClerkAuthService.requireResourceTenant(principal, event, 'Event', eventId);
-    ClerkAuthService.requireBrandScope(principal, event.brand_id);
-    ClerkAuthService.requireEventScope(principal, eventId);
+    requireEventAccess(principal, event, eventId);
     const repo = new TicketTypeRepository(db);
     const rows = await repo.findByEvent(eventId, pagination.limit + 1, pagination.cursor);
     return pageEnvelope(rows.map((row) => serializeTicketType(row)), pagination.limit);
@@ -141,9 +142,7 @@ export const ticketingRoutes: FastifyPluginAsync = async (app) => {
     const body = parseBody(createInventoryPoolSchema, request.body);
 
     const event = await loadEvent(eventId);
-    ClerkAuthService.requireResourceTenant(principal, event, 'Event', eventId);
-    ClerkAuthService.requireBrandScope(principal, event.brand_id);
-    ClerkAuthService.requireEventScope(principal, eventId);
+    requireEventAccess(principal, event, eventId);
 
     const repo = new InventoryPoolRepository(db);
     const pool = await repo.create({
@@ -161,9 +160,7 @@ export const ticketingRoutes: FastifyPluginAsync = async (app) => {
     ClerkAuthService.requirePermission(principal, 'events.read');
     const { eventId } = request.params as { eventId: string };
     const event = await loadEvent(eventId);
-    ClerkAuthService.requireResourceTenant(principal, event, 'Event', eventId);
-    ClerkAuthService.requireBrandScope(principal, event.brand_id);
-    ClerkAuthService.requireEventScope(principal, eventId);
+    requireEventAccess(principal, event, eventId);
 
     const ttRepo = new TicketTypeRepository(db);
     const ticketTypes = await ttRepo.findByEvent(eventId);

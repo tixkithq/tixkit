@@ -136,11 +136,19 @@ type QuestionRow = {
   placeholder: string | null;
   validation_pattern: string | null;
   conditional_visibility: string | null;
+  status?: string;
+  is_hidden?: boolean | number | null;
+  hidden_at?: Date | string | null;
+  deleted_at?: Date | string | null;
   sort_order: number;
   is_consent_field: boolean;
   consent_text: string | null;
   consent_version: string | null;
 };
+
+function isVisibleCheckoutQuestion(q: QuestionRow): boolean {
+  return q.status !== 'hidden' && !q.is_hidden && !q.hidden_at && !q.deleted_at;
+}
 
 function toDomainQuestion(q: QuestionRow): Question {
   return {
@@ -335,7 +343,7 @@ export const checkoutRoutes: FastifyPluginAsync = async (app) => {
       {
         key: idempotencyKey,
         tenantId: event.tenant_id,
-        requestHash: hashRequest({ eventId: body.eventId, items: body.items, buyer: body.buyer }),
+        requestHash: hashRequest(body),
       },
       async () => {
         const ttRepo = new TicketTypeRepository(db);
@@ -348,7 +356,9 @@ export const checkoutRoutes: FastifyPluginAsync = async (app) => {
           .selectAll()
           .where('event_id', '=', body.eventId)
           .execute();
-        const eventQuestions: Question[] = questionRows.map((q) => toDomainQuestion(q));
+        const eventQuestions: Question[] = (questionRows as QuestionRow[])
+          .filter(isVisibleCheckoutQuestion)
+          .map((q) => toDomainQuestion(q));
 
         const answeredAt = new Date().toISOString();
         const buyerFields = normalizeValidAnswers(
@@ -469,6 +479,7 @@ export const checkoutRoutes: FastifyPluginAsync = async (app) => {
           })),
           discountCode: body.discountCode,
           affiliateCode: body.affiliateCode,
+          trackingId: body.trackingId,
           buyerFields,
           attendeeFields: attendeeFieldsByTicketType,
         };

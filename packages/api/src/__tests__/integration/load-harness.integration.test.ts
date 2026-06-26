@@ -77,6 +77,7 @@ async function seedTenantGraph(trx: Database): Promise<void> {
     title: 'Load Harness Event',
     description: null,
     status: 'published',
+    currency: 'USD',
     timezone: 'UTC',
     starts_at: new Date(Date.now() + 86400000),
     ends_at: null,

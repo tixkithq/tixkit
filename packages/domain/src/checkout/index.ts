@@ -106,6 +106,7 @@ export type CreateCheckoutSessionInput = {
   items: { ticketTypeId: Ulid; quantity: number; unitAmountCents?: number; attendeeFields?: Record<string, unknown>[] }[];
   discountCode?: string;
   affiliateCode?: string;
+  trackingId?: string;
   buyerFields?: Record<string, unknown>;
   buyer?: BuyerInfo;
   successUrl?: string;

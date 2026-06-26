@@ -100,6 +100,7 @@ export function serializeEvent(row: Record<string, unknown>) {
     title: row.title,
     description: row.description ?? undefined,
     status: row.status,
+    currency: row.currency ?? 'USD',
     timezone: row.timezone,
     startsAt: toIso(row.starts_at as Date | string),
     endsAt: toIso(row.ends_at as Date | string | null),
@@ -199,6 +200,24 @@ export function serializeOrderLineItem(row: Record<string, unknown>) {
     feeCents: Number(row.fee_cents),
     totalCents: Number(row.total_cents),
     currency: row.currency,
+    createdAt: toIso(row.created_at as Date | string),
+    updatedAt: toIso(row.updated_at as Date | string),
+  };
+}
+
+export function serializeRefund(row: Record<string, unknown>) {
+  return {
+    id: row.id,
+    tenantId: row.tenant_id,
+    orderId: row.order_id,
+    paymentIntentId: row.payment_intent_id ?? undefined,
+    provider: row.provider,
+    providerRefundId: row.provider_refund_id,
+    amountCents: Number(row.amount_cents),
+    currency: row.currency,
+    status: row.status,
+    reason: row.reason,
+    metadata: parseJsonValue(row.metadata, {}),
     createdAt: toIso(row.created_at as Date | string),
     updatedAt: toIso(row.updated_at as Date | string),
   };

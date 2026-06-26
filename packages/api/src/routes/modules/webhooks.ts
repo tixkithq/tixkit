@@ -61,7 +61,17 @@ export const webhookRoutes: FastifyPluginAsync = async (app) => {
     // Query across all principal.organizationIds, not just the first.
     let query = db
       .selectFrom('webhook_endpoints')
-      .selectAll()
+      .select([
+        'id',
+        'tenant_id',
+        'organization_id',
+        'url',
+        'events',
+        'status',
+        'description',
+        'created_at',
+        'updated_at',
+      ])
       .where('tenant_id', '=', principal.tenantId)
       .orderBy('id', 'asc')
       .limit(pagination.limit + 1);

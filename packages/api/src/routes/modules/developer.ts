@@ -146,6 +146,15 @@ export const developerRoutes: FastifyPluginAsync = async (app) => {
       .where('tenant_id', '=', principal.tenantId)
       .orderBy('id', 'asc')
       .limit(pagination.limit + 1);
+    // Filter by principal's organizations to prevent cross-org data exposure
+    // within the same tenant. System principals bypass this filter.
+    // Fail closed: a non-system principal with no org memberships sees nothing.
+    if (principal.type !== 'system') {
+      if (principal.organizationIds.length === 0) {
+        return pageEnvelope([], pagination.limit);
+      }
+      query = query.where('organization_id', 'in', principal.organizationIds);
+    }
     if (pagination.cursor) query = query.where('id', '>', pagination.cursor);
     const keys = await query.execute();
 
@@ -207,6 +216,9 @@ export const developerRoutes: FastifyPluginAsync = async (app) => {
     const principal = request.principal!;
     ClerkAuthService.requirePermission(principal, 'developers.write');
     const pagination = parsePagination(request.query);
+    if (principal.type !== 'system' && principal.organizationIds.length === 0) {
+      return pageEnvelope([], pagination.limit);
+    }
     let query = db
       .selectFrom('scanner_devices')
       .select([
@@ -225,7 +237,7 @@ export const developerRoutes: FastifyPluginAsync = async (app) => {
       .orderBy('id', 'asc')
       .limit(pagination.limit + 1);
     if (pagination.cursor) query = query.where('id', '>', pagination.cursor);
-    if (principal.organizationIds.length > 0) {
+    if (principal.type !== 'system') {
       query = query.where('organization_id', 'in', principal.organizationIds);
     }
     const rows = await query.execute();
@@ -318,6 +330,9 @@ export const developerRoutes: FastifyPluginAsync = async (app) => {
     const principal = request.principal!;
     ClerkAuthService.requirePermission(principal, 'developers.write');
     const pagination = parsePagination(request.query);
+    if (principal.type !== 'system' && principal.organizationIds.length === 0) {
+      return pageEnvelope([], pagination.limit);
+    }
     let query = db
       .selectFrom('oauth_applications')
       .select(['id', 'tenant_id', 'organization_id', 'name', 'client_id', 'redirect_uris', 'scopes', 'status', 'created_at', 'updated_at'])
@@ -325,7 +340,7 @@ export const developerRoutes: FastifyPluginAsync = async (app) => {
       .orderBy('id', 'asc')
       .limit(pagination.limit + 1);
     if (pagination.cursor) query = query.where('id', '>', pagination.cursor);
-    if (principal.organizationIds.length > 0) {
+    if (principal.type !== 'system') {
       query = query.where('organization_id', 'in', principal.organizationIds);
     }
     const rows = await query.execute();

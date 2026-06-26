@@ -165,6 +165,7 @@ export interface EventTable {
   title: string;
   description: string | null;
   status: string;
+  currency: string;
   timezone: string;
   starts_at: Timestamp;
   ends_at: Timestamp | null;
@@ -539,6 +540,10 @@ export interface QuestionTable {
   placeholder: string | null;
   validation_pattern: string | null;
   conditional_visibility: string | null;
+  status: Generated<string>;
+  is_hidden: Generated<boolean>;
+  hidden_at: Timestamp | null;
+  deleted_at: Timestamp | null;
   sort_order: number;
   is_consent_field: boolean;
   consent_text: string | null;
@@ -597,6 +602,7 @@ export interface IdempotencyRecordTable {
 
 export interface AffiliateTable {
   id: string;
+  tenant_id: string | null;
   organization_id: string;
   code: string;
   name: string;

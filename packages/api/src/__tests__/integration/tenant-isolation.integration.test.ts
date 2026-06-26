@@ -13,6 +13,7 @@ import { webhookRoutes } from '../../routes/modules/webhooks.js';
 import { developerRoutes } from '../../routes/modules/developer.js';
 import { reportingRoutes } from '../../routes/modules/reporting.js';
 import { messagingRoutes } from '../../routes/modules/messaging.js';
+import { hashRequest } from '../../services/idempotency.js';
 
 /**
  * Cross-tenant denial tests (T04/T43).
@@ -381,6 +382,52 @@ function scannerDeviceRow(overrides: Row = {}): Row {
   };
 }
 
+function organizationRow(overrides: Row = {}): Row {
+  return {
+    id: 'org_1',
+    tenant_id: 'tnt_1',
+    name: 'Org 1',
+    slug: 'org-1',
+    status: 'active',
+    clerk_organization_id: null,
+    created_at: new Date(),
+    updated_at: new Date(),
+    ...overrides,
+  };
+}
+
+function paymentAccountRow(overrides: Row = {}): Row {
+  return {
+    id: 'pa_1',
+    tenant_id: 'tnt_1',
+    organization_id: 'org_1',
+    provider: 'stripe_connect',
+    provider_account_id: 'acct_1',
+    status: 'active',
+    default_currency: 'USD',
+    created_at: new Date(),
+    updated_at: new Date(),
+    ...overrides,
+  };
+}
+
+function oauthApplicationRow(overrides: Row = {}): Row {
+  return {
+    id: 'oa_1',
+    tenant_id: 'tnt_1',
+    organization_id: 'org_1',
+    name: 'OAuth app',
+    client_id: 'gk_oauth_1',
+    client_secret_hash: 'hash',
+    redirect_uris: JSON.stringify(['https://example.com/callback']),
+    scopes: JSON.stringify(['events.read']),
+    status: 'active',
+    created_at: new Date(),
+    updated_at: new Date(),
+    ...overrides,
+  };
+}
+
 function exportJobRow(overrides: Row = {}): Row {
   return {
     id: 'exp_1',
@@ -550,6 +597,26 @@ describe('cross-tenant denial', () => {
     await app.close();
   });
 
+  it('POST /check-ins/scan returns 404 before revealing inactive list state in another tenant', async () => {
+    const tables: Tables = {
+      check_in_lists: [checkInListRow({ tenant_id: 'tnt_other', event_id: 'evt_other', status: 'inactive' })],
+      events: [eventRow({ id: 'evt_other', tenant_id: 'tnt_other' })],
+    };
+    const app = await setupApp(checkInRoutes, principal, tables);
+    const res = await app.inject({
+      method: 'POST',
+      url: '/check-ins/scan',
+      payload: {
+        checkInListId: 'cil_1',
+        qrPayload: 'payload',
+        scannedAt: '2026-06-01T00:00:00.000Z',
+      },
+    });
+    expect(res.statusCode).toBe(404);
+    expect(res.json().message).not.toContain('not active');
+    await app.close();
+  });
+
   it('GET /events/:eventId/check-in-lists/:listId/manifest returns 404 for event in another tenant', async () => {
     const tables: Tables = { events: [eventRow({ tenant_id: 'tnt_other' })] };
     const app = await setupApp(checkInRoutes, principal, tables);
@@ -570,6 +637,72 @@ describe('cross-tenant denial', () => {
       payload: { name: 'Hijacked' },
     });
     expect(res.statusCode).toBe(404);
+    await app.close();
+  });
+
+  // Payment account binding validation tests (T24 regression coverage)
+  it('PATCH /brands/:brandId rejects payment account from another tenant', async () => {
+    const tables: Tables = {
+      brands: [brandRow()],
+      payment_accounts: [{
+        id: 'pa_1',
+        tenant_id: 'tnt_other',
+        organization_id: 'org_1',
+        provider: 'stripe_connect',
+        provider_account_id: 'acct_1',
+        status: 'active',
+        default_currency: 'USD',
+        created_at: new Date(),
+        updated_at: new Date(),
+      }],
+    };
+    const app = await setupApp(tenantRoutes, principal, tables);
+    const res = await app.inject({
+      method: 'PATCH',
+      url: '/brands/brd_1',
+      payload: { paymentAccountId: 'pa_1' },
+    });
+    expect(res.statusCode).toBe(404);
+    await app.close();
+  });
+
+  it('PATCH /brands/:brandId rejects payment account from another organization', async () => {
+    const tables: Tables = {
+      brands: [brandRow({ organization_id: 'org_1' })],
+      payment_accounts: [{
+        id: 'pa_1',
+        tenant_id: 'tnt_1',
+        organization_id: 'org_other',
+        provider: 'stripe_connect',
+        provider_account_id: 'acct_1',
+        status: 'active',
+        default_currency: 'USD',
+        created_at: new Date(),
+        updated_at: new Date(),
+      }],
+    };
+    const app = await setupApp(tenantRoutes, principal, tables);
+    const res = await app.inject({
+      method: 'PATCH',
+      url: '/brands/brd_1',
+      payload: { paymentAccountId: 'pa_1' },
+    });
+    expect(res.statusCode).toBe(400);
+    await app.close();
+  });
+
+  it('PATCH /brands/:brandId rejects non-existent payment account', async () => {
+    const tables: Tables = {
+      brands: [brandRow()],
+      payment_accounts: [],
+    };
+    const app = await setupApp(tenantRoutes, principal, tables);
+    const res = await app.inject({
+      method: 'PATCH',
+      url: '/brands/brd_1',
+      payload: { paymentAccountId: 'pa_nonexistent' },
+    });
+    expect(res.statusCode).toBe(400);
     await app.close();
   });
 
@@ -598,6 +731,23 @@ describe('cross-tenant denial', () => {
     const app = await setupApp(developerRoutes, principal, tables);
     const res = await app.inject({ method: 'DELETE', url: '/api-keys/ak_1' });
     expect(res.statusCode).toBe(404);
+    await app.close();
+  });
+
+  it('GET /api-keys does not return keys from other organizations in same tenant', async () => {
+    const tables: Tables = {
+      api_keys: [
+        apiKeyRow({ id: 'ak_1', organization_id: 'org_1' }),
+        apiKeyRow({ id: 'ak_2', organization_id: 'org_other' }),
+      ],
+    };
+    const app = await setupApp(developerRoutes, principal, tables);
+    const res = await app.inject({ method: 'GET', url: '/api-keys' });
+    expect(res.statusCode).toBe(200);
+    const body = JSON.parse(res.body);
+    const keyIds = body.items?.map((k: { id: string }) => k.id) ?? [];
+    expect(keyIds).toContain('ak_1');
+    expect(keyIds).not.toContain('ak_2');
     await app.close();
   });
 
@@ -648,6 +798,83 @@ describe('cross-tenant denial', () => {
 describe('cross-organization denial (same tenant)', () => {
   const principal = makePrincipal({ organizationIds: ['org_A'] });
 
+  it('GET /events/:eventId returns 404 for event in another organization', async () => {
+    const tables: Tables = {
+      events: [eventRow({ tenant_id: 'tnt_1', organization_id: 'org_B' })],
+    };
+    const app = await setupApp(eventRoutes, principal, tables);
+    const res = await app.inject({ method: 'GET', url: '/events/evt_1' });
+    expect(res.statusCode).toBe(404);
+    await app.close();
+  });
+
+  it('PATCH /events/:eventId returns 404 for event in another organization', async () => {
+    const tables: Tables = {
+      events: [eventRow({ tenant_id: 'tnt_1', organization_id: 'org_B' })],
+    };
+    const app = await setupApp(eventRoutes, principal, tables);
+    const res = await app.inject({
+      method: 'PATCH',
+      url: '/events/evt_1',
+      payload: { title: 'Hijacked' },
+    });
+    expect(res.statusCode).toBe(404);
+    await app.close();
+  });
+
+  it('GET /orders/:orderId returns 404 for order in another organization', async () => {
+    const tables: Tables = {
+      orders: [orderRow({ tenant_id: 'tnt_1', organization_id: 'org_B' })],
+    };
+    const app = await setupApp(orderRoutes, principal, tables);
+    const res = await app.inject({ method: 'GET', url: '/orders/ord_1' });
+    expect(res.statusCode).toBe(404);
+    await app.close();
+  });
+
+  it('POST /orders/:orderId/refunds returns 404 for order in another organization', async () => {
+    const tables: Tables = {
+      orders: [orderRow({ tenant_id: 'tnt_1', organization_id: 'org_B' })],
+    };
+    const app = await setupApp(orderRoutes, principal, tables);
+    const res = await app.inject({
+      method: 'POST',
+      url: '/orders/ord_1/refunds',
+      headers: { 'idempotency-key': 'key-cross-org-refund' },
+      payload: { reason: 'Customer request', amountCents: 5000 },
+    });
+    expect(res.statusCode).toBe(404);
+    await app.close();
+  });
+
+  it('PATCH /organizations/:organizationId returns 404 for another organization', async () => {
+    const tables: Tables = {
+      organizations: [organizationRow({ id: 'org_B', tenant_id: 'tnt_1' })],
+    };
+    const app = await setupApp(tenantRoutes, principal, tables);
+    const res = await app.inject({
+      method: 'PATCH',
+      url: '/organizations/org_B',
+      payload: { name: 'Hijacked' },
+    });
+    expect(res.statusCode).toBe(404);
+    await app.close();
+  });
+
+  it('GET /organizations/:organizationId/payment-accounts returns 404 for another organization', async () => {
+    const tables: Tables = {
+      organizations: [organizationRow({ id: 'org_B', tenant_id: 'tnt_1' })],
+      payment_accounts: [paymentAccountRow({ organization_id: 'org_B' })],
+    };
+    const app = await setupApp(tenantRoutes, principal, tables);
+    const res = await app.inject({
+      method: 'GET',
+      url: '/organizations/org_B/payment-accounts',
+    });
+    expect(res.statusCode).toBe(404);
+    await app.close();
+  });
+
   it('PATCH /webhook-endpoints/:endpointId returns 404 for endpoint in another organization', async () => {
     const tables: Tables = {
       webhook_endpoints: [webhookEndpointRow({ tenant_id: 'tnt_1', organization_id: 'org_B' })],
@@ -659,6 +886,52 @@ describe('cross-organization denial (same tenant)', () => {
       payload: { url: 'https://evil.example.com/hook' },
     });
     expect(res.statusCode).toBe(404);
+    await app.close();
+  });
+
+  it('POST /check-ins/sync returns 404 before revealing inactive list state in another organization', async () => {
+    const tables: Tables = {
+      check_in_lists: [checkInListRow({ tenant_id: 'tnt_1', event_id: 'evt_B', status: 'inactive' })],
+      events: [eventRow({ id: 'evt_B', tenant_id: 'tnt_1', organization_id: 'org_B' })],
+    };
+    const app = await setupApp(checkInRoutes, principal, tables);
+    const res = await app.inject({
+      method: 'POST',
+      url: '/check-ins/sync',
+      headers: { 'idempotency-key': 'key-cross-org-sync-inactive' },
+      payload: {
+        checkInListId: 'cil_1',
+        scans: [{ qrHash: 'hash_1', scannedAt: '2026-06-01T00:00:00.000Z', offline: true }],
+      },
+    });
+    expect(res.statusCode).toBe(404);
+    expect(res.json().message).not.toContain('not active');
+    await app.close();
+  });
+
+  it('POST /events/:eventId/messages does not replay same-tenant idempotency across organizations', async () => {
+    const payload = { templateKey: 'attendee-message', audience: 'all', channel: 'sms' };
+    const tables: Tables = {
+      events: [eventRow({ id: 'evt_1', tenant_id: 'tnt_1', organization_id: 'org_B' })],
+      idempotency_records: [{
+        id: 'idm_msg_1',
+        key: 'key-cross-org-message',
+        tenant_id: 'tnt_1',
+        request_hash: hashRequest({ eventId: 'evt_1', body: payload }),
+        response_status: 202,
+        response_body: JSON.stringify({ campaignId: 'cached', status: 'sent' }),
+        status: 'completed',
+      }],
+    };
+    const app = await setupApp(messagingRoutes, principal, tables);
+    const res = await app.inject({
+      method: 'POST',
+      url: '/events/evt_1/messages',
+      headers: { 'idempotency-key': 'key-cross-org-message' },
+      payload,
+    });
+    expect(res.statusCode).toBe(404);
+    expect(res.json()).toMatchObject({ code: 'NOT_FOUND' });
     await app.close();
   });
 
@@ -706,7 +979,7 @@ describe('cross-organization denial (same tenant)', () => {
     await app.close();
   });
 
-  it('GET /events?organizationId=otherOrg returns no rows for an org outside principal scope', async () => {
+  it('GET /events?organizationId=otherOrg returns 404 for an org outside principal scope', async () => {
     const tables: Tables = {
       events: [
         eventRow({ id: 'evt_A', tenant_id: 'tnt_1', organization_id: 'org_A' }),
@@ -715,9 +988,47 @@ describe('cross-organization denial (same tenant)', () => {
     };
     const app = await setupApp(eventRoutes, principal, tables);
     const res = await app.inject({ method: 'GET', url: '/events?organizationId=org_B' });
+    expect(res.statusCode).toBe(404);
+    await app.close();
+  });
+});
+
+describe('empty organization principal fail-closed lists', () => {
+  const principal = makePrincipal({ organizationIds: [] });
+
+  it('GET /events returns no rows for a non-system principal with no organizations', async () => {
+    const tables: Tables = { events: [eventRow({ organization_id: 'org_1' })] };
+    const app = await setupApp(eventRoutes, principal, tables);
+    const res = await app.inject({ method: 'GET', url: '/events' });
     expect(res.statusCode).toBe(200);
-    const body = res.json();
-    expect(body.items).toHaveLength(0);
+    expect(res.json().items).toHaveLength(0);
+    await app.close();
+  });
+
+  it('GET /orders returns no rows for a non-system principal with no organizations', async () => {
+    const tables: Tables = { orders: [orderRow({ organization_id: 'org_1' })] };
+    const app = await setupApp(orderRoutes, principal, tables);
+    const res = await app.inject({ method: 'GET', url: '/orders' });
+    expect(res.statusCode).toBe(200);
+    expect(res.json().items).toHaveLength(0);
+    await app.close();
+  });
+
+  it('GET /scanner-devices returns no rows for a non-system principal with no organizations', async () => {
+    const tables: Tables = { scanner_devices: [scannerDeviceRow({ organization_id: 'org_1' })] };
+    const app = await setupApp(developerRoutes, principal, tables);
+    const res = await app.inject({ method: 'GET', url: '/scanner-devices' });
+    expect(res.statusCode).toBe(200);
+    expect(res.json().items).toHaveLength(0);
+    await app.close();
+  });
+
+  it('GET /oauth-applications returns no rows for a non-system principal with no organizations', async () => {
+    const tables: Tables = { oauth_applications: [oauthApplicationRow({ organization_id: 'org_1' })] };
+    const app = await setupApp(developerRoutes, principal, tables);
+    const res = await app.inject({ method: 'GET', url: '/oauth-applications' });
+    expect(res.statusCode).toBe(200);
+    expect(res.json().items).toHaveLength(0);
     await app.close();
   });
 });

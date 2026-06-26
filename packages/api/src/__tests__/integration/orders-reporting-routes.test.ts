@@ -34,7 +34,18 @@ const dbState = vi.hoisted(() => ({
     updated_at: new Date('2026-06-01'),
   } as Record<string, unknown>,
   orders: [] as Record<string, unknown>[],
+  event: {
+    id: 'evt_1',
+    tenant_id: 'tnt_1',
+    organization_id: 'org_1',
+    brand_id: 'brd_1',
+    currency: 'USD',
+  } as Record<string, unknown>,
   lineItems: [] as Record<string, unknown>[],
+  attendees: [] as Record<string, unknown>[],
+  checkoutSession: null as Record<string, unknown> | null,
+  refunds: [] as Record<string, unknown>[],
+  queryWheres: [] as Array<{ table: string; wheres: Array<{ column: string; op: string; value: unknown }> }>,
   timeline: [] as Record<string, unknown>[],
   timelineEvents: [] as Record<string, unknown>[],
   updatedOrder: null as Record<string, unknown> | null,
@@ -72,9 +83,10 @@ function createMockDb(): unknown {
       },
       async executeTakeFirst() {
         if (table === 'orders') return dbState.order;
-        if (table === 'events') return { id: 'evt_1', tenant_id: 'tnt_1', brand_id: 'brd_1', organization_id: 'org_1' };
+        if (table === 'events') return dbState.event;
         if (table === 'idempotency_records') return dbState.idempotencyCheck;
         if (table === 'export_jobs') return dbState.exportJobs[0];
+        if (table === 'checkout_sessions') return dbState.checkoutSession;
         if (table === 'order_line_items') return undefined;
         if (table === 'email_jobs') return undefined;
         if (table === 'email_provider_routes') return { id: 'epr_1' };
@@ -87,8 +99,18 @@ function createMockDb(): unknown {
         throw new Error(`No mock for ${table}`);
       },
       async execute() {
+        dbState.queryWheres.push({ table, wheres: [...query.wheres] });
         if (table === 'orders') return dbState.orders;
         if (table === 'order_line_items') return dbState.lineItems;
+        if (table === 'attendees') return dbState.attendees;
+        if (table === 'refunds') {
+          return dbState.refunds.filter((refund) => {
+            for (const where of query.wheres) {
+              if (where.column === 'refunds.status' && refund.status !== where.value) return false;
+            }
+            return true;
+          });
+        }
         if (table === 'tickets') return [];
         if (table === 'discount_codes') return [{ code: 'PROMO10', uses_count: 5, event_id: 'evt_1' }];
         if (table === 'tax_rules') return [{ name: 'VAT', rate: 2500, type: 'exclusive', event_id: 'evt_1' }];
@@ -255,6 +277,101 @@ describe('order routes', () => {
     dbState.idempotencyCheck = null;
     dbState.updatedOrder = null;
     dbState.exportEvents = [];
+    dbState.lineItems = [];
+    dbState.attendees = [];
+    dbState.refunds = [];
+    dbState.timelineEvents = [];
+    dbState.checkoutSession = null;
+  });
+
+  it('GET /orders/:orderId returns the full persisted detail contract', async () => {
+    dbState.lineItems = [{
+      id: 'oli_1',
+      order_id: 'ord_1',
+      ticket_type_id: 'tt_1',
+      attendee_id: 'att_1',
+      description: 'General admission',
+      quantity: 1,
+      unit_price_cents: 10000,
+      subtotal_cents: 10000,
+      discount_cents: 0,
+      tax_cents: 500,
+      fee_cents: 200,
+      total_cents: 10700,
+      currency: 'USD',
+      created_at: new Date('2026-06-01'),
+      updated_at: new Date('2026-06-01'),
+    }];
+    dbState.attendees = [{
+      id: 'att_1',
+      tenant_id: 'tnt_1',
+      order_id: 'ord_1',
+      event_id: 'evt_1',
+      ticket_type_id: 'tt_1',
+      ticket_id: 'tkt_1',
+      first_name: 'Ada',
+      last_name: 'Lovelace',
+      email: 'buyer@test.com',
+      phone: null,
+      status: 'active',
+      custom_answers: JSON.stringify({ q_attendee: 'Ada' }),
+      checked_in_at: null,
+      check_in_device_id: null,
+      created_at: new Date('2026-06-01'),
+      updated_at: new Date('2026-06-01'),
+    }];
+    dbState.refunds = [{
+      id: 'ref_1',
+      tenant_id: 'tnt_1',
+      order_id: 'ord_1',
+      payment_intent_id: 'pi_1',
+      provider: 'stripe',
+      provider_refund_id: 're_1',
+      amount_cents: 1000,
+      currency: 'USD',
+      status: 'succeeded',
+      reason: 'customer request',
+      metadata: '{}',
+      created_at: new Date('2026-06-02'),
+      updated_at: new Date('2026-06-02'),
+    }];
+    dbState.timelineEvents = [{
+      id: 'ote_1',
+      order_id: 'ord_1',
+      type: 'order.created',
+      description: 'Order created',
+      metadata: '{}',
+      actor_id: null,
+      created_at: new Date('2026-06-01'),
+    }];
+    dbState.checkoutSession = {
+      id: 'cs_1',
+      cart: JSON.stringify({
+        buyerFields: {
+          q_consent: {
+            accepted: true,
+            consentText: 'I agree',
+            consentVersion: 'v1',
+            consentedAt: '2026-06-01T00:00:00.000Z',
+          },
+        },
+        attendeeFields: { tt_1: [{ q_attendee: 'Ada' }] },
+      }),
+    };
+    const app = await setupApp(orderRoutes, makePrincipal());
+
+    const res = await app.inject({ method: 'GET', url: '/orders/ord_1' });
+
+    expect(res.statusCode).toBe(200);
+    const body = res.json();
+    expect(body.lineItems).toHaveLength(1);
+    expect(body.attendees).toHaveLength(1);
+    expect(body.refunds).toHaveLength(1);
+    expect(body.timeline).toHaveLength(1);
+    expect(body.checkoutAnswers.buyerFields.q_consent.accepted).toBe(true);
+    expect(body.consentSnapshots.q_consent.consentVersion).toBe('v1');
+    expect(body.deliveryStatus).toEqual({ email: 'pending', tickets: 'issued' });
+    await app.close();
   });
 
   it('POST /orders/:orderId/cancel rejects paid orders', async () => {
@@ -507,7 +624,16 @@ describe('reporting routes', () => {
       paid_at: new Date('2026-06-01'), created_at: new Date('2026-06-01'), updated_at: new Date('2026-06-01'),
     };
     dbState.orders = [dbState.order];
+    dbState.event = {
+      id: 'evt_1',
+      tenant_id: 'tnt_1',
+      organization_id: 'org_1',
+      brand_id: 'brd_1',
+      currency: 'USD',
+    };
     dbState.lineItems = [{ quantity: 2, subtotal_cents: 10000, discount_cents: 0, tax_cents: 500 }];
+    dbState.refunds = [];
+    dbState.queryWheres = [];
     dbState.exportJobs = [];
     dbState.exportEvents = [];
     dbState.startExportCalled = false;
@@ -516,14 +642,36 @@ describe('reporting routes', () => {
   });
 
   it('GET /events/:eventId/reports/sales returns sales metrics with refund subtraction', async () => {
+    dbState.refunds = [
+      { amount_cents: 1000, status: 'succeeded' },
+      { amount_cents: 700, status: 'failed' },
+    ];
     const app = await setupApp(reportingRoutes, makePrincipal());
     const res = await app.inject({ method: 'GET', url: '/events/evt_1/reports/sales' });
     expect(res.statusCode).toBe(200);
     const body = res.json();
     expect(body.eventId).toBe('evt_1');
     expect(body.grossSalesCents).toBe(10700);
-    expect(body.refundsCents).toBe(0);
-    expect(body.netRevenueCents).toBe(10700);
+    expect(body.refundsCents).toBe(1000);
+    expect(body.netRevenueCents).toBe(9700);
+    expect(dbState.queryWheres).toContainEqual(expect.objectContaining({
+      table: 'refunds',
+      wheres: expect.arrayContaining([
+        { column: 'refunds.status', op: '=', value: 'succeeded' },
+        { column: 'orders.tenant_id', op: '=', value: 'tnt_1' },
+      ]),
+    }));
+    await app.close();
+  });
+
+  it('GET /events/:eventId/reports/sales falls back to event currency when there are no orders', async () => {
+    dbState.orders = [];
+    dbState.lineItems = [];
+    dbState.event.currency = 'EUR';
+    const app = await setupApp(reportingRoutes, makePrincipal());
+    const res = await app.inject({ method: 'GET', url: '/events/evt_1/reports/sales' });
+    expect(res.statusCode).toBe(200);
+    expect(res.json().currency).toBe('EUR');
     await app.close();
   });
 
@@ -569,7 +717,7 @@ describe('reporting routes', () => {
     const res = await app.inject({ method: 'GET', url: '/events/evt_1/reports/conversion' });
     expect(res.statusCode).toBe(200);
     const body = res.json();
-    expect(body).toHaveProperty('widgetViews');
+    expect(body).not.toHaveProperty('widgetViews');
     expect(body).toHaveProperty('checkoutCompleted');
     expect(body).toHaveProperty('conversionRate');
     await app.close();
@@ -582,6 +730,13 @@ describe('reporting routes', () => {
     const body = res.json();
     expect(body.affiliates[0].code).toBe('ADA');
     expect(body.affiliates[0].revenueAttributedCents).toBeGreaterThanOrEqual(0);
+    expect(dbState.queryWheres).toContainEqual(expect.objectContaining({
+      table: 'orders',
+      wheres: expect.arrayContaining([
+        { column: 'tenant_id', op: '=', value: 'tnt_1' },
+        { column: 'organization_id', op: '=', value: 'org_1' },
+      ]),
+    }));
     await app.close();
   });
 

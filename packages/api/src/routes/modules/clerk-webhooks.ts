@@ -50,20 +50,24 @@ export const clerkWebhookRoutes: FastifyPluginAsync = async (app) => {
     const event = request.body as { type: string; data: ClerkWebhookData };
 
     // Persist + dedupe before processing. Svix message IDs are unique per event.
+    // If a previous attempt stored the event but failed before marking it
+    // processed, replay must retry sync instead of treating it as a completed
+    // duplicate (same pattern as Stripe webhook handler).
     const eventRepo = new PaymentEventRepository(db);
-    const existingEvent = await eventRepo.findByProviderEventId('clerk', msgId);
-    if (existingEvent) {
+    let storedEvent = await eventRepo.findByProviderEventId('clerk', msgId);
+    if (storedEvent?.processed_at) {
       return reply.status(200).send({ received: true, duplicate: true });
     }
-
-    const storedEvent = await eventRepo.create({
-      tenantId: 'system',
-      provider: 'clerk',
-      providerEventId: msgId,
-      eventType: event.type,
-      rawPayload: event as unknown as Record<string, unknown>,
-      idempotencyKey: `${msgId}-${timestamp}`,
-    });
+    if (!storedEvent) {
+      storedEvent = await eventRepo.create({
+        tenantId: 'system',
+        provider: 'clerk',
+        providerEventId: msgId,
+        eventType: event.type,
+        rawPayload: event as unknown as Record<string, unknown>,
+        idempotencyKey: `${msgId}-${timestamp}`,
+      });
+    }
 
     const isOrgEvent = event.type.startsWith('organization');
     await temporalClient.startClerkIdentitySync({
@@ -77,6 +81,8 @@ export const clerkWebhookRoutes: FastifyPluginAsync = async (app) => {
       orgName: isOrgEvent ? event.data.name : undefined,
     });
 
+    // Mark only after durable sync has been accepted. Clerk can safely replay
+    // unprocessed rows if this final update fails.
     await eventRepo.markProcessed(storedEvent.id);
 
     return reply.status(200).send({ received: true });

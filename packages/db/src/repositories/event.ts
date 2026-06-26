@@ -9,6 +9,7 @@ export class EventRepository extends BaseRepository {
     slug: string;
     title: string;
     description?: string;
+    currency: string;
     timezone: string;
     startsAt: Date;
     endsAt?: Date;
@@ -30,6 +31,7 @@ export class EventRepository extends BaseRepository {
         title: input.title,
         description: input.description ?? null,
         status: 'draft',
+        currency: input.currency,
         timezone: input.timezone,
         starts_at: input.startsAt,
         ends_at: input.endsAt ?? null,

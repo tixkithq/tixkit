@@ -60,6 +60,7 @@ async function seedEvent(trx: Database): Promise<void> {
     title: 'Concurrency Test Event',
     description: null,
     status: 'published',
+    currency: 'USD',
     timezone: 'UTC',
     starts_at: new Date(Date.now() + 86400000),
     ends_at: null,

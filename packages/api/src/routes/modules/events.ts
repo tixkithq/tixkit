@@ -33,6 +33,7 @@ export const eventRoutes: FastifyPluginAsync = async (app) => {
       slug: body.slug,
       title: body.title,
       description: body.description,
+      currency: body.currency,
       timezone: body.timezone,
       startsAt: new Date(body.startsAt),
       endsAt: body.endsAt ? new Date(body.endsAt) : undefined,
@@ -56,6 +57,9 @@ export const eventRoutes: FastifyPluginAsync = async (app) => {
     const principal = request.principal!;
     ClerkAuthService.requirePermission(principal, 'events.read');
     const pagination = parsePagination(request.query);
+    if (principal.type !== 'system' && principal.organizationIds.length === 0) {
+      return pageEnvelope([], pagination.limit);
+    }
 	    let query = db
 	      .selectFrom('events')
 	      .selectAll()
@@ -65,6 +69,7 @@ export const eventRoutes: FastifyPluginAsync = async (app) => {
 
       const { organizationId } = request.query as { organizationId?: string };
       if (organizationId) {
+        ClerkAuthService.requireOrganizationScope(principal, organizationId);
         query = query.where('organization_id', '=', organizationId);
       }
 	    if (pagination.cursor) query = query.where('id', '>', pagination.cursor);
@@ -74,7 +79,7 @@ export const eventRoutes: FastifyPluginAsync = async (app) => {
 	    if (principal.eventIds && principal.eventIds.length > 0) {
 	      query = query.where('id', 'in', principal.eventIds);
 	    }
-	    if (principal.organizationIds.length > 0) {
+	    if (principal.type !== 'system') {
 	      query = query.where('organization_id', 'in', principal.organizationIds);
 	    }
 	    const rows = await query.execute();
@@ -89,6 +94,7 @@ export const eventRoutes: FastifyPluginAsync = async (app) => {
     const event = await repo.findById(eventId);
     if (!event) throw new NotFoundError('Event', eventId);
     ClerkAuthService.requireResourceTenant(principal, event, 'Event', eventId);
+    ClerkAuthService.requireOrganizationScope(principal, event.organization_id);
     ClerkAuthService.requireBrandScope(principal, event.brand_id);
     ClerkAuthService.requireEventScope(principal, eventId);
     return serializeEvent(event);
@@ -104,17 +110,20 @@ export const eventRoutes: FastifyPluginAsync = async (app) => {
     const existing = await repo.findById(eventId);
     if (!existing) throw new NotFoundError('Event', eventId);
     ClerkAuthService.requireResourceTenant(principal, existing, 'Event', eventId);
+    ClerkAuthService.requireOrganizationScope(principal, existing.organization_id);
     ClerkAuthService.requireBrandScope(principal, existing.brand_id);
     ClerkAuthService.requireEventScope(principal, eventId);
 
     const updateData: Record<string, unknown> = {};
     if (body.title !== undefined) updateData.title = body.title;
     if (body.description !== undefined) updateData.description = body.description;
+    if (body.currency !== undefined) updateData.currency = body.currency;
     if (body.timezone !== undefined) updateData.timezone = body.timezone;
     if (body.startsAt !== undefined) updateData.starts_at = new Date(body.startsAt);
     if (body.endsAt !== undefined) updateData.ends_at = body.endsAt ? new Date(body.endsAt) : null;
     if (body.visibility !== undefined) updateData.visibility = body.visibility;
     if (body.capacity !== undefined) updateData.capacity = body.capacity;
+    if (body.status !== undefined) updateData.status = body.status;
 
     return serializeEvent(await repo.update(eventId, updateData));
   });
@@ -127,6 +136,7 @@ export const eventRoutes: FastifyPluginAsync = async (app) => {
     const existing = await repo.findById(eventId);
     if (!existing) throw new NotFoundError('Event', eventId);
     ClerkAuthService.requireResourceTenant(principal, existing, 'Event', eventId);
+    ClerkAuthService.requireOrganizationScope(principal, existing.organization_id);
     ClerkAuthService.requireBrandScope(principal, existing.brand_id);
     ClerkAuthService.requireEventScope(principal, eventId);
     const result = await repo.updateStatus(eventId, 'published');
@@ -146,6 +156,7 @@ export const eventRoutes: FastifyPluginAsync = async (app) => {
     const existing = await repo.findById(eventId);
     if (!existing) throw new NotFoundError('Event', eventId);
     ClerkAuthService.requireResourceTenant(principal, existing, 'Event', eventId);
+    ClerkAuthService.requireOrganizationScope(principal, existing.organization_id);
     ClerkAuthService.requireBrandScope(principal, existing.brand_id);
     ClerkAuthService.requireEventScope(principal, eventId);
     const result = await repo.updateStatus(eventId, 'paused');
@@ -165,6 +176,7 @@ export const eventRoutes: FastifyPluginAsync = async (app) => {
     const existing = await repo.findById(eventId);
     if (!existing) throw new NotFoundError('Event', eventId);
     ClerkAuthService.requireResourceTenant(principal, existing, 'Event', eventId);
+    ClerkAuthService.requireOrganizationScope(principal, existing.organization_id);
     ClerkAuthService.requireBrandScope(principal, existing.brand_id);
     ClerkAuthService.requireEventScope(principal, eventId);
     const result = await repo.updateStatus(eventId, 'archived');

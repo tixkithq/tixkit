@@ -437,7 +437,7 @@ export async function finalizeOrderActivity(input: {
         brand_id: session.brand_id,
         event_id: session.event_id,
         checkout_session_id: input.checkoutSessionId,
-        order_number: `GK-${Date.now().toString(36).toUpperCase()}`,
+        order_number: `GK-${orderId.replace(/^ord_/, '').toUpperCase()}`,
         status: 'paid',
         currency: session.currency,
         subtotal_cents: quote.subtotalCents,
@@ -604,6 +604,8 @@ export async function finalizeOrderActivity(input: {
           .selectFrom('affiliates')
           .selectAll()
           .where('code', '=', input.affiliateCode)
+          .where('tenant_id', '=', session.tenant_id)
+          .where('organization_id', '=', event.organization_id)
           .where('status', '=', 'active')
           .executeTakeFirst();
         if (affiliate) {

@@ -1,7 +1,7 @@
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, beforeAll, afterAll, describe, expect, it } from 'vitest';
 import type { Database } from '../../client.js';
 import { createDb } from '../../client.js';
-import { InitialMigration } from '../../migrations/0001_initial.js';
+import { runMigrations, truncateAllData } from '../../migrate.js';
 import {
   BrandRepository,
   EventRepository,
@@ -16,28 +16,26 @@ type DriverCase = {
   url: string;
 };
 
+// When DATABASE_URL / DATABASE_URL_MYSQL are unset (no --env-file), the
+// driver case is excluded so the suite skips gracefully instead of failing
+// with an invalid URL. When set (via `bun --env-file=.env.local run
+// test:integration`), the real connection string is used.
 const allDriverCases: DriverCase[] = [
   {
     driver: 'postgres',
-    url: process.env.DATABASE_URL ?? 'postgres://gatekit:gatekit@localhost:5432/gatekit',
+    url: process.env.DATABASE_URL ?? '',
   },
   {
     driver: 'mysql',
-    url: process.env.DATABASE_URL_MYSQL ?? 'mysql://gatekit:gatekit@localhost:3306/gatekit',
+    url: process.env.DATABASE_URL_MYSQL ?? '',
   },
 ];
 
 const requestedDriver = process.env.DB_INTEGRATION_DRIVER;
-const driverCases = requestedDriver
+const driverCases = (requestedDriver
   ? allDriverCases.filter((driverCase) => driverCase.driver === requestedDriver)
-  : allDriverCases;
-
-async function resetSchema(db: Database) {
-  if (InitialMigration.down) {
-    await InitialMigration.down(db).catch(() => undefined);
-  }
-  await InitialMigration.up(db);
-}
+  : allDriverCases
+).filter((driverCase) => driverCase.url.length > 0);
 
 async function createCatalog(db: Database) {
   const tenant = await new TenantRepository(db).create({ name: 'Integration Tenant' });
@@ -59,6 +57,7 @@ async function createCatalog(db: Database) {
     slug: 'integration-event',
     title: 'Integration Event',
     description: 'Repository parity test event',
+    currency: 'USD',
     timezone: 'America/New_York',
     startsAt: new Date('2027-01-01T18:00:00.000Z'),
   });
@@ -79,16 +78,37 @@ async function createCatalog(db: Database) {
   return { tenant, organization, brand, event, pool, ticketType };
 }
 
+// Guard: when no DATABASE_URL / DATABASE_URL_MYSQL is configured (no
+// --env-file), vitest would fail with "no test suite found". Add a single
+// skipped test so the suite reports a clean skip instead of an error.
+if (driverCases.length === 0) {
+  it.skip('database integration (skipped: no DATABASE_URL or DATABASE_URL_MYSQL configured)', () => {});
+}
+
 describe.each(driverCases)('database integration: $driver', ({ driver, url }) => {
   let db: Database;
 
-  beforeEach(async () => {
+  beforeAll(async () => {
     process.env.DB_DRIVER = driver;
+    // Ensure the schema is migrated once before all tests in this driver
+    // case. This replaces the old per-test `resetSchema` which dropped and
+    // recreated the entire schema, causing conflicts with concurrent API
+    // integration tests sharing the same database.
+    await runMigrations(url);
     db = createDb(url);
-    await resetSchema(db);
+  }, 120_000);
+
+  beforeEach(async () => {
+    // Non-destructive: remove all rows but keep the schema intact so
+    // concurrent test suites are not affected.
+    await truncateAllData(db);
   }, 60_000);
 
   afterEach(async () => {
+    // Keep the connection alive between tests; destroyed in afterAll.
+  }, 60_000);
+
+  afterAll(async () => {
     await db?.destroy();
   }, 60_000);
 

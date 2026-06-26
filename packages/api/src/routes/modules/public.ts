@@ -1,12 +1,7 @@
 import type { FastifyPluginAsync } from 'fastify';
 import { AccessRuleRepository, EventRepository, TicketTypeRepository, BrandRepository } from '@gatekit/db';
-import { NotFoundError, ValidationError, validateTicketPurchase } from '@gatekit/domain';
-import type {
-  AccessRuleRecord,
-  TicketTypeKind,
-  TicketTypeStatus,
-  TicketVisibility,
-} from '@gatekit/domain';
+import { NotFoundError, ValidationError } from '@gatekit/domain';
+import type { AccessRuleRecord } from '@gatekit/domain';
 import { parseJsonValue } from '../../http/contracts.js';
 
 function firstQueryParam(value: unknown): string {
@@ -23,6 +18,24 @@ function parseRequestedProducts(value: unknown): string[] {
 function parseTicketTypeIds(value: unknown): string[] {
   if (!Array.isArray(value)) return [];
   return [...new Set(value.filter((id): id is string => typeof id === 'string' && id.trim().length > 0))];
+}
+
+function toDate(value?: Date | string | null): Date | undefined {
+  if (value === undefined || value === null) return undefined;
+  return value instanceof Date ? value : new Date(value);
+}
+
+function accessRuleUnlocks(
+  rule: AccessRuleRecord,
+  input: { accessCode?: string; buyerEmail?: string; now: Date },
+): boolean {
+  const expiresAt = toDate(rule.expiresAt);
+  if (expiresAt && input.now > expiresAt) return false;
+  if (rule.maxUses != null && rule.usesCount >= rule.maxUses) return false;
+  if (rule.type === 'allowlist') {
+    return Boolean(input.buyerEmail) && rule.value.toLowerCase() === input.buyerEmail!.toLowerCase();
+  }
+  return Boolean(input.accessCode) && rule.value === input.accessCode;
 }
 
 /**
@@ -104,7 +117,21 @@ export const publicRoutes: FastifyPluginAsync = async (app) => {
     return results;
   });
 
-  app.post('/public/events/:eventId/access-code', async (request) => {
+  app.post(
+    '/public/events/:eventId/access-code',
+    {
+      config: {
+        rateLimit: {
+          max: 10,
+          timeWindow: '1 minute',
+          keyGenerator: (request) => {
+            const { eventId } = request.params as { eventId?: string };
+            return `${request.ip}:${eventId ?? 'unknown'}`;
+          },
+        },
+      },
+    },
+    async (request) => {
     const { eventId } = request.params as { eventId: string };
     const body = (request.body ?? {}) as {
       ticketTypeIds?: unknown;
@@ -137,47 +164,32 @@ export const publicRoutes: FastifyPluginAsync = async (app) => {
       throw new ValidationError('One or more ticket types are not available for this event');
     }
 
+    const now = new Date();
     const accessRules = await new AccessRuleRepository(db).findByTicketTypes(ticketTypeIds);
+    const unlockedTicketTypeIds: string[] = [];
     for (const ticketType of ticketTypes) {
-      validateTicketPurchase({
-        ticketType: {
-          id: ticketType.id,
-          kind: ticketType.kind as TicketTypeKind,
-          status: ticketType.status as TicketTypeStatus,
-          visibility: ticketType.visibility as TicketVisibility,
-          priceCents: Number(ticketType.price_cents),
-          minimumPriceCents: ticketType.minimum_price_cents === null
-            ? null
-            : Number(ticketType.minimum_price_cents),
-          salesStartAt: ticketType.sales_start_at,
-          salesEndAt: ticketType.sales_end_at,
-          minPerOrder: ticketType.min_per_order,
-          maxPerOrder: ticketType.max_per_order,
-          requiresAccessCode: ticketType.requires_access_code,
-        },
-        quantity: ticketType.min_per_order,
-        unitAmountCents: ticketType.kind === 'donation'
-          ? Math.max(
-            Number(ticketType.minimum_price_cents ?? 0),
-            Number(ticketType.price_cents),
-          )
-          : undefined,
-        accessCode,
-        buyerEmail,
-        accessRules: accessRules
-          .filter((rule) => rule.ticket_type_id === ticketType.id)
-          .map((rule) => ({
-            type: rule.type as AccessRuleRecord['type'],
-            value: rule.value,
-            maxUses: rule.max_uses,
-            usesCount: rule.uses_count,
-            expiresAt: rule.expires_at,
-          })),
-      });
+      const rules = accessRules
+        .filter((rule) => rule.ticket_type_id === ticketType.id)
+        .map((rule) => ({
+          type: rule.type as AccessRuleRecord['type'],
+          value: rule.value,
+          maxUses: rule.max_uses,
+          usesCount: rule.uses_count,
+          expiresAt: rule.expires_at,
+        }));
+      const unlocked = rules.some((rule) => accessRuleUnlocks(rule, { accessCode, buyerEmail, now }));
+      if (unlocked) {
+        unlockedTicketTypeIds.push(ticketType.id);
+      }
     }
 
-    return { valid: true, ticketTypeIds };
-  });
+    if (unlockedTicketTypeIds.length === 0) {
+      throw new ValidationError('Access code is not valid for these tickets');
+    }
+
+      return { valid: true, ticketTypeIds: unlockedTicketTypeIds };
+    },
+  );
 
   app.get('/public/events/:eventId/questions', async (request) => {
     const { eventId } = request.params as { eventId: string };
@@ -191,7 +203,7 @@ export const publicRoutes: FastifyPluginAsync = async (app) => {
       .orderBy('sort_order', 'asc')
       .execute();
 
-    const serialized = questions.map((q) => ({
+    const serialized = questions.filter((q) => !isHiddenQuestion(q)).map((q) => ({
       id: q.id,
       eventId: q.event_id,
       ticketTypeId: q.ticket_type_id ?? undefined,
@@ -205,6 +217,7 @@ export const publicRoutes: FastifyPluginAsync = async (app) => {
       isConsentField: q.is_consent_field,
       consentText: q.consent_text ?? undefined,
       consentVersion: q.consent_version ?? undefined,
+      conditionalVisibility: parseJsonValue(q.conditional_visibility, undefined),
       sortOrder: q.sort_order,
     }));
 
@@ -218,3 +231,11 @@ export const publicRoutes: FastifyPluginAsync = async (app) => {
     };
   });
 };
+
+function isHiddenQuestion(row: Record<string, unknown>): boolean {
+  return row.status === 'hidden' ||
+    row.status === 'deleted' ||
+    row.is_hidden === true ||
+    row.hidden_at != null ||
+    row.deleted_at != null;
+}

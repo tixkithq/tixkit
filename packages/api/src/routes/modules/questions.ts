@@ -11,7 +11,7 @@ import {
   type QuestionType,
 } from '@gatekit/domain';
 import { parseJsonValue, parsePagination, pageEnvelope } from '../../http/contracts.js';
-import { createQuestionSchema, updateQuestionSchema, parseBody } from '../../http/schemas.js';
+import { createQuestionSchema, reorderQuestionsSchema, updateQuestionSchema, parseBody } from '../../http/schemas.js';
 
 export const questionRoutes: FastifyPluginAsync = async (app) => {
   const db = app.context.db;
@@ -147,6 +147,53 @@ export const questionRoutes: FastifyPluginAsync = async (app) => {
     if (pagination.cursor) query = query.where('id', '>', pagination.cursor);
     const rows = await query.execute();
     return pageEnvelope(rows.filter((row) => !isHiddenQuestion(row)).map((row) => serializeQuestion(row)), pagination.limit);
+  });
+
+  app.post('/events/:eventId/questions/reorder', async (request) => {
+    const principal = request.principal!;
+    ClerkAuthService.requirePermission(principal, 'events.write');
+    const { eventId } = request.params as { eventId: string };
+    const body = parseBody(reorderQuestionsSchema, request.body);
+
+    const event = await loadEvent(eventId);
+    requireEventAccess(principal, event, eventId);
+
+    const questionIds = body.questions.map((question) => question.id);
+    if (new Set(questionIds).size !== questionIds.length) {
+      throw new ValidationError('Duplicate question IDs are not allowed in a reorder request');
+    }
+
+    const existing = await db
+      .selectFrom('questions')
+      .selectAll()
+      .where('event_id', '=', eventId)
+      .where('id', 'in', questionIds)
+      .execute();
+    if (existing.length !== questionIds.length) {
+      throw new NotFoundError('Question', questionIds.find((id) => !existing.some((question) => question.id === id)) ?? eventId);
+    }
+
+    await db.transaction().execute(async (trx) => {
+      for (const question of body.questions) {
+        await trx
+          .updateTable('questions')
+          .set({ sort_order: question.sortOrder, updated_at: new Date() })
+          .where('event_id', '=', eventId)
+          .where('id', '=', question.id)
+          .execute();
+      }
+    });
+
+    const rows = await db
+      .selectFrom('questions')
+      .selectAll()
+      .where('event_id', '=', eventId)
+      .where('id', 'in', questionIds)
+      .orderBy('sort_order', 'asc')
+      .orderBy('id', 'asc')
+      .execute();
+
+    return pageEnvelope(rows.filter((row) => !isHiddenQuestion(row)).map((row) => serializeQuestion(row)), rows.length);
   });
 
   app.patch('/questions/:questionId', async (request) => {

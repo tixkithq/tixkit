@@ -21,6 +21,13 @@ export const reportingRoutes: FastifyPluginAsync = async (app) => {
     return event;
   };
 
+  const requireReportEventAccess = (principal: Principal, event: Record<string, unknown>, eventId: string) => {
+    ClerkAuthService.requireResourceTenant(principal, event, 'Event', eventId);
+    ClerkAuthService.requireOrganizationScope(principal, event.organization_id as string | undefined);
+    ClerkAuthService.requireBrandScope(principal, event.brand_id as string | undefined);
+    ClerkAuthService.requireEventScope(principal, eventId);
+  };
+
   const loadScopedExportJob = async (principal: Principal, exportId: string) => {
     const exportJob = await db
       .selectFrom('export_jobs')
@@ -32,9 +39,7 @@ export const reportingRoutes: FastifyPluginAsync = async (app) => {
 
     if (exportJob.event_id) {
       const event = await loadEvent(exportJob.event_id);
-      ClerkAuthService.requireResourceTenant(principal, event, 'Event', exportJob.event_id);
-      ClerkAuthService.requireBrandScope(principal, event.brand_id);
-      ClerkAuthService.requireEventScope(principal, exportJob.event_id);
+      requireReportEventAccess(principal, event, exportJob.event_id);
     }
 
     return exportJob;
@@ -49,9 +54,7 @@ export const reportingRoutes: FastifyPluginAsync = async (app) => {
     const to = typeof query.to === 'string' ? new Date(query.to) : undefined;
 
     const event = await loadEvent(eventId);
-    ClerkAuthService.requireResourceTenant(principal, event, 'Event', eventId);
-    ClerkAuthService.requireBrandScope(principal, event.brand_id);
-    ClerkAuthService.requireEventScope(principal, eventId);
+    requireReportEventAccess(principal, event, eventId);
 
     let orderQuery = db
       .selectFrom('orders')
@@ -69,7 +72,9 @@ export const reportingRoutes: FastifyPluginAsync = async (app) => {
       .selectFrom('refunds')
       .innerJoin('orders', 'refunds.order_id', 'orders.id')
       .select(['refunds.amount_cents'])
-      .where('orders.event_id', '=', eventId);
+      .where('orders.event_id', '=', eventId)
+      .where('orders.tenant_id', '=', principal.tenantId)
+      .where('refunds.status', '=', 'succeeded');
     if (from) refundQuery = refundQuery.where('refunds.created_at', '>=', from);
     if (to) refundQuery = refundQuery.where('refunds.created_at', '<=', to);
     const refundRows = await refundQuery.execute();
@@ -80,21 +85,30 @@ export const reportingRoutes: FastifyPluginAsync = async (app) => {
     const feesCollected = orders.reduce((sum, o) => sum + Number(o.fee_cents), 0);
     const taxCollected = orders.reduce((sum, o) => sum + Number(o.tax_cents), 0);
 
-    // Count tickets sold, subtracting refunded/voided tickets.
+    // Prefer ticket rows so refunded/voided tickets are excluded. Fall back to
+    // line items for older fixture data that does not materialize tickets.
+    const activeTicketsRow = await db
+      .selectFrom('tickets')
+      .select((eb) => eb.fn.countAll<number>().as('count'))
+      .where('event_id', '=', eventId)
+      .where('status', 'in', ['valid', 'checked_in'])
+      .executeTakeFirst();
+    const activeTicketsSold = Number(activeTicketsRow?.count ?? 0);
     const lineItemRows =
-      orderIds.length === 0
+      activeTicketsSold > 0 || orderIds.length === 0
         ? []
         : await db
             .selectFrom('order_line_items')
             .select(['quantity'])
             .where('order_id', 'in', orderIds)
             .execute();
-    const ticketsSold = lineItemRows.reduce((sum, row) => sum + Number(row.quantity), 0);
+    const ticketsSold = activeTicketsSold > 0 ? activeTicketsSold : lineItemRows.reduce((sum, row) => sum + Number(row.quantity), 0);
 
     const allOrdersRow = await db
       .selectFrom('orders')
       .select((eb) => eb.fn.countAll<number>().as('count'))
       .where('event_id', '=', eventId)
+      .where('tenant_id', '=', principal.tenantId)
       .executeTakeFirst();
     const totalOrdersCount = Number(allOrdersRow?.count ?? 0);
     const paidOrders = orders.length;
@@ -108,7 +122,7 @@ export const reportingRoutes: FastifyPluginAsync = async (app) => {
 
     return {
       eventId,
-      currency: orders[0]?.currency ?? 'USD',
+      currency: orders[0]?.currency ?? event.currency ?? 'USD',
       grossSalesCents: grossSales,
       netRevenueCents: netRevenue,
       refundsCents: refunds,
@@ -131,9 +145,7 @@ export const reportingRoutes: FastifyPluginAsync = async (app) => {
     const { eventId } = request.params as { eventId: string };
 
     const event = await loadEvent(eventId);
-    ClerkAuthService.requireResourceTenant(principal, event, 'Event', eventId);
-    ClerkAuthService.requireBrandScope(principal, event.brand_id);
-    ClerkAuthService.requireEventScope(principal, eventId);
+    requireReportEventAccess(principal, event, eventId);
 
     const query = request.query as Record<string, unknown>;
     const from = typeof query.from === 'string' ? new Date(query.from) : undefined;
@@ -184,7 +196,7 @@ export const reportingRoutes: FastifyPluginAsync = async (app) => {
 
     return {
       eventId,
-      currency: orders[0]?.currency ?? 'USD',
+      currency: orders[0]?.currency ?? event.currency ?? 'USD',
       totalTaxCollectedCents: totalTax,
       breakdown,
     };
@@ -196,9 +208,7 @@ export const reportingRoutes: FastifyPluginAsync = async (app) => {
     const { eventId } = request.params as { eventId: string };
 
     const event = await loadEvent(eventId);
-    ClerkAuthService.requireResourceTenant(principal, event, 'Event', eventId);
-    ClerkAuthService.requireBrandScope(principal, event.brand_id);
-    ClerkAuthService.requireEventScope(principal, eventId);
+    requireReportEventAccess(principal, event, eventId);
 
     const totalAttendeesRow = await db
       .selectFrom('attendees')
@@ -259,9 +269,7 @@ export const reportingRoutes: FastifyPluginAsync = async (app) => {
     const { eventId } = request.params as { eventId: string };
 
     const event = await loadEvent(eventId);
-    ClerkAuthService.requireResourceTenant(principal, event, 'Event', eventId);
-    ClerkAuthService.requireBrandScope(principal, event.brand_id);
-    ClerkAuthService.requireEventScope(principal, eventId);
+    requireReportEventAccess(principal, event, eventId);
 
     // Get all discount codes for the event.
     const discountCodes = await db.selectFrom('discount_codes').selectAll().where('event_id', '=', eventId).execute();
@@ -320,9 +328,7 @@ export const reportingRoutes: FastifyPluginAsync = async (app) => {
     const { eventId } = request.params as { eventId: string };
 
     const event = await loadEvent(eventId);
-    ClerkAuthService.requireResourceTenant(principal, event, 'Event', eventId);
-    ClerkAuthService.requireBrandScope(principal, event.brand_id);
-    ClerkAuthService.requireEventScope(principal, eventId);
+    requireReportEventAccess(principal, event, eventId);
 
     // Count checkout sessions and completed orders for conversion funnel.
     const sessionsRow = await db
@@ -342,7 +348,6 @@ export const reportingRoutes: FastifyPluginAsync = async (app) => {
 
     return {
       eventId,
-      widgetViews: null,
       checkoutStarted,
       checkoutCompleted,
       conversionRate,
@@ -355,7 +360,12 @@ export const reportingRoutes: FastifyPluginAsync = async (app) => {
     const { organizationId } = request.params as { organizationId: string };
     ClerkAuthService.requireOrganizationScope(principal, organizationId);
 
-    const affiliates = await db.selectFrom('affiliates').selectAll().where('organization_id', '=', organizationId).execute();
+    const affiliates = await db
+      .selectFrom('affiliates')
+      .selectAll()
+      .where('tenant_id', '=', principal.tenantId)
+      .where('organization_id', '=', organizationId)
+      .execute();
     const affiliatesReport = [];
     for (const aff of affiliates) {
       const attributions = await db
@@ -373,6 +383,8 @@ export const reportingRoutes: FastifyPluginAsync = async (app) => {
               .selectFrom('orders')
               .select(['total_cents', 'refunded_cents'])
               .where('id', 'in', orderIds)
+              .where('tenant_id', '=', principal.tenantId)
+              .where('organization_id', '=', organizationId)
               .execute();
       const revenueAttributedCents = attributedOrders.reduce(
         (sum, o) => sum + Number(o.total_cents) - Number(o.refunded_cents),
@@ -405,9 +417,7 @@ export const reportingRoutes: FastifyPluginAsync = async (app) => {
 
     if (body.eventId) {
       const event = await loadEvent(body.eventId);
-      ClerkAuthService.requireResourceTenant(principal, event, 'Event', body.eventId);
-      ClerkAuthService.requireBrandScope(principal, event.brand_id);
-      ClerkAuthService.requireEventScope(principal, body.eventId);
+      requireReportEventAccess(principal, event, body.eventId);
     }
 
     const result = await withIdempotency(
