@@ -23,7 +23,7 @@ import {
 import { useSearch } from '@/context/search-provider'
 import { useTheme } from '@/context/theme-provider'
 import { usePermissions } from '@/context/permission-provider'
-import { type GateKitPermission } from '@/lib/permissions'
+import { type TixkitPermission } from '@/lib/permissions'
 import { routes } from '@/lib/routes'
 import {
   CommandDialog,
@@ -45,7 +45,7 @@ type CommandMenuItem = {
   icon?: React.ElementType
   keywords?: string[]
   action?: () => void
-  requiredPermission?: GateKitPermission
+  requiredPermission?: TixkitPermission
 }
 
 export function CommandMenu() {

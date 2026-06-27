@@ -3,15 +3,15 @@
 import { createContext, useContext, useEffect, useMemo, useState } from 'react'
 import {
   LOCAL_DEV_PERMISSIONS,
-  type GateKitPermission,
+  type TixkitPermission,
   hasPermission,
 } from '@/lib/permissions'
 import { hasClerkKey } from '@/lib/auth'
 import { adminApi } from '@/lib/api'
 
 type PermissionContextValue = {
-  permissions: GateKitPermission[]
-  can: (permission?: GateKitPermission) => boolean
+  permissions: TixkitPermission[]
+  can: (permission?: TixkitPermission) => boolean
   /** True while the principal/permissions are being resolved in production. */
   loading: boolean
   /** Set when the principal fetch failed (production). Null when OK or in dev. */
@@ -22,12 +22,12 @@ const PermissionContext = createContext<PermissionContextValue | null>(null)
 
 /**
  * Module-level cache for the resolved principal so the fetch happens at most
- * once per browser session (the GateKit principal is stable for a session).
+ * once per browser session (the Tixkit principal is stable for a session).
  */
-let principalCache: GateKitPermission[] | null = null
-let principalFetchPromise: Promise<GateKitPermission[]> | null = null
+let principalCache: TixkitPermission[] | null = null
+let principalFetchPromise: Promise<TixkitPermission[]> | null = null
 
-async function resolvePermissions(): Promise<GateKitPermission[]> {
+async function resolvePermissions(): Promise<TixkitPermission[]> {
   if (!hasClerkKey()) {
     return LOCAL_DEV_PERMISSIONS
   }
@@ -40,7 +40,7 @@ async function resolvePermissions(): Promise<GateKitPermission[]> {
     if (result.ok) {
       // Fail closed: only honor permissions the backend actually granted.
       const granted = result.data.permissions.filter(
-        (p): p is GateKitPermission =>
+        (p): p is TixkitPermission =>
           typeof p === 'string' && p.length > 0,
       )
       principalCache = granted
@@ -68,7 +68,7 @@ export function resetPrincipalCache(): void {
 }
 
 export function PermissionProvider({ children }: { children: React.ReactNode }) {
-  const [permissions, setPermissions] = useState<GateKitPermission[]>(
+  const [permissions, setPermissions] = useState<TixkitPermission[]>(
     () => []
   )
   const [loading, setLoading] = useState<boolean>(() => hasClerkKey())
@@ -106,7 +106,7 @@ export function PermissionProvider({ children }: { children: React.ReactNode }) 
   const value = useMemo<PermissionContextValue>(
     () => ({
       permissions,
-      can: (permission?: GateKitPermission) =>
+      can: (permission?: TixkitPermission) =>
         hasPermission(permissions, permission),
       loading,
       error,

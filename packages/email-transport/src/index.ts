@@ -2,12 +2,12 @@ import type {
   EmailTransport,
   SendEmailInput,
   SendEmailResult,
-} from '@gatekit/domain';
+} from '@tixkit/domain';
 import type {
   SmsTransport,
   SendSmsInput,
   SendSmsResult,
-} from '@gatekit/domain/messaging';
+} from '@tixkit/domain/messaging';
 import { ulid } from 'ulid';
 
 /**
@@ -122,6 +122,7 @@ export class FallbackEmailTransport implements EmailTransport {
 
     for (const fallback of this.fallbacks) {
       try {
+        // eslint-disable-next-line no-await-in-loop -- fallback providers must be attempted sequentially to avoid duplicate sends.
         const result = await fallback.send(input);
         attempted.push(result.provider);
         return { ...result, attemptedFallbackProviders: attempted };
@@ -161,6 +162,7 @@ export class FallbackSmsTransport implements SmsTransport {
 
     for (const fallback of this.fallbacks) {
       try {
+        // eslint-disable-next-line no-await-in-loop -- fallback providers must be attempted sequentially to avoid duplicate sends.
         const result = await fallback.send(input);
         attempted.push(result.provider);
         return { ...result, attemptedFallbackProviders: attempted };
@@ -363,7 +365,7 @@ export class PlivoSmsTransport implements SmsTransport {
 
 /**
  * OpenCore Email SDK transport adapter.
- * Maps GateKit message format to Email SDK message format.
+ * Maps Tixkit message format to Email SDK message format.
  * In production, this wraps the actual @opencoredev/email-sdk package.
  */
 export class OpenCoreEmailSdkTransport implements EmailTransport {
@@ -429,20 +431,25 @@ export class ProviderRouteSelector {
 
   select(category: 'transactional' | 'bulk' | 'staff' | 'system'): EmailTransport | null {
     const eligible = this.routes
-      .filter((r) => r.allowedCategories.includes(category))
-      .sort((a, b) => {
-        if (a.isFallback !== b.isFallback) return a.isFallback ? 1 : -1;
-        return a.priority - b.priority;
-      });
+      .filter((r) => r.allowedCategories.includes(category));
+
+    // eslint-disable-next-line unicorn/no-array-sort -- sorting a fresh filtered array preserves configured route priority without mutating selector input.
+    eligible.sort((a, b) => {
+      if (a.isFallback !== b.isFallback) return a.isFallback ? 1 : -1;
+      return a.priority - b.priority;
+    });
 
     return eligible[0]?.transport ?? null;
   }
 
   getFallbacks(category: 'transactional' | 'bulk' | 'staff' | 'system'): EmailTransport[] {
-    return this.routes
-      .filter((r) => r.isFallback && r.allowedCategories.includes(category))
-      .sort((a, b) => a.priority - b.priority)
-      .map((r) => r.transport);
+    const eligibleFallbacks = this.routes
+      .filter((r) => r.isFallback && r.allowedCategories.includes(category));
+
+    // eslint-disable-next-line unicorn/no-array-sort -- sorting a fresh filtered array preserves configured fallback priority without mutating selector input.
+    eligibleFallbacks.sort((a, b) => a.priority - b.priority);
+
+    return eligibleFallbacks.map((r) => r.transport);
   }
 }
 

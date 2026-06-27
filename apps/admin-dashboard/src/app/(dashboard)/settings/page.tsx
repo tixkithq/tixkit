@@ -72,7 +72,7 @@ export default function SettingsPage() {
       </div>
       <div className='grid gap-3 md:grid-cols-2 xl:grid-cols-3'>
         {settingsSections.map((section) => (
-          <Link key={section.href} href={section.href}>
+          <Link key={section.href} href={section.href} prefetch={false}>
             <Card className='h-full transition-colors hover:bg-accent/40'>
               <CardHeader className='flex flex-row items-start gap-3'>
                 <div className='rounded-md border bg-background p-2'>

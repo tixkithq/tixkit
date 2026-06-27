@@ -47,7 +47,7 @@ export type ResolvedBrand = {
 
 const PLATFORM_DEFAULT: ResolvedBrand = {
   id: 'brand_platform',
-  name: 'GateKit',
+  name: 'Tixkit',
   supportUrl: undefined,
   legalUrls: {},
   theme: {},
@@ -108,7 +108,7 @@ function clean(value: string | undefined): string | undefined {
 }
 
 function configuredDomainBrandMap(): string | undefined {
-  return clean(process.env.NEXT_PUBLIC_GATEKIT_DOMAIN_BRANDS)
+  return clean(process.env.NEXT_PUBLIC_TIXKIT_DOMAIN_BRANDS)
 }
 
 function normalizeHost(host: string | undefined): string | undefined {
@@ -284,7 +284,7 @@ export function resolveBrandFromHost(input: {
     const params = new URLSearchParams(search)
     const explicitBrand =
       clean(params.get('brand') ?? undefined) ??
-      clean(params.get('x-gatekit-brand') ?? undefined)
+      clean(params.get('x-tixkit-brand') ?? undefined)
     if (explicitBrand) return explicitBrand
 
     const mapped = findMappedBrandId(

@@ -1,7 +1,7 @@
 import Fastify from 'fastify';
 import { describe, expect, it } from 'vitest';
-import type { Principal } from '@gatekit/domain';
-import type { Database } from '@gatekit/db';
+import type { Principal } from '@tixkit/domain';
+import type { Database } from '@tixkit/db';
 import type { AppContext } from '../app.js';
 import { eventRoutes } from '../routes/modules/events.js';
 
@@ -260,7 +260,14 @@ describe('event routes', () => {
       method: 'PATCH',
       url: '/events/evt_1',
       payload: {
-        venue: { name: 'Riverside', address: '100 River Walk', city: 'Austin' },
+        venue: {
+          name: 'Riverside',
+          address: '100 River Walk',
+          city: 'Austin',
+          region: 'TX',
+          postalCode: '78701',
+          country: 'US',
+        },
         visibility: 'unlisted',
         seo: { title: 'Search title', description: 'Search description' },
         capacity: 250,
@@ -271,7 +278,14 @@ describe('event routes', () => {
 
     expect(response.statusCode).toBe(200);
     expect(response.json()).toMatchObject({
-      venue: { name: 'Riverside', address: '100 River Walk', city: 'Austin' },
+      venue: {
+        name: 'Riverside',
+        address: '100 River Walk',
+        city: 'Austin',
+        region: 'TX',
+        postalCode: '78701',
+        country: 'US',
+      },
       visibility: 'unlisted',
       seo: { title: 'Search title', description: 'Search description' },
       capacity: 250,
@@ -280,7 +294,14 @@ describe('event routes', () => {
     });
     expect(updates).toContainEqual(
       expect.objectContaining({
-        venue: JSON.stringify({ name: 'Riverside', address: '100 River Walk', city: 'Austin' }),
+        venue: JSON.stringify({
+          name: 'Riverside',
+          address: '100 River Walk',
+          city: 'Austin',
+          region: 'TX',
+          postalCode: '78701',
+          country: 'US',
+        }),
         visibility: 'unlisted',
         seo: JSON.stringify({ title: 'Search title', description: 'Search description' }),
         capacity: 250,
@@ -326,6 +347,56 @@ describe('event routes', () => {
         external_url: null,
       }),
     );
+    await app.close();
+  });
+
+  it('upserts GA4 marketing integrations for an event', async () => {
+    const { db, inserted } = createEventMutationDb({ event: baseEventRow({ status: 'published' }) });
+    const app = await setupEventApp(db, writePrincipal);
+
+    const response = await app.inject({
+      method: 'PUT',
+      url: '/events/evt_1/marketing-integrations/ga4',
+      payload: {
+        config: { measurementId: 'G-TEST123' },
+        consentRequired: true,
+        status: 'active',
+      },
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(inserted).toContainEqual(
+      expect.objectContaining({
+        event_id: 'evt_1',
+        provider: 'ga4',
+        config: JSON.stringify({ measurementId: 'G-TEST123' }),
+        consent_required: true,
+        status: 'active',
+      }),
+    );
+    expect(response.json()).toMatchObject({
+      provider: 'ga4',
+      config: { measurementId: 'G-TEST123' },
+      consentRequired: true,
+      status: 'active',
+    });
+    await app.close();
+  });
+
+  it('rejects non-HTTPS generic marketing pixels', async () => {
+    const { db } = createEventMutationDb({ event: baseEventRow({ status: 'published' }) });
+    const app = await setupEventApp(db, writePrincipal);
+
+    const response = await app.inject({
+      method: 'PUT',
+      url: '/events/evt_1/marketing-integrations/generic_tag',
+      payload: {
+        config: { pixelUrl: 'http://analytics.example/pixel' },
+        status: 'active',
+      },
+    });
+
+    expect(response.statusCode).toBe(400);
     await app.close();
   });
 

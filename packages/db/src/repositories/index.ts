@@ -8,6 +8,7 @@ export {
 } from './tenant.js';
 export {
   EventRepository,
+  EventOccurrenceRepository,
   TicketTypeRepository,
   InventoryPoolRepository,
   AccessRuleRepository,

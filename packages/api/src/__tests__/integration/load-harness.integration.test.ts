@@ -1,21 +1,29 @@
-import { describe, expect, it, beforeAll, afterAll, beforeEach } from 'vitest';
-import { createDb, type Database } from '@gatekit/db';
+import { expect, it, beforeAll, afterAll, beforeEach } from 'vitest';
+import { createDb, type Database } from '@tixkit/db';
 import {
   PaymentEventRepository,
   TicketRepository,
   AttendeeRepository,
   OrderRepository,
-} from '@gatekit/db';
+} from '@tixkit/db';
 import { InventoryService } from '../../services/inventory.js';
+import { hashRequest, withIdempotency } from '../../services/idempotency.js';
 import { ulid } from 'ulid';
+import {
+  describeWithIntegrationDatabase,
+  integrationDatabaseUrl,
+  restoreDatabaseDriver,
+  setIntegrationDatabaseDriver,
+} from './integration-database.js';
 
 /**
- * T44 Load and concurrency harnesses (real PostgreSQL).
+ * T44 Load and concurrency harnesses (real database).
  *
  * These tests exercise high-concurrency paths against a real database to
  * verify oversell prevention, webhook burst dedupe, scanner burst duplicate
- * detection, and large export generation. They require a running PostgreSQL
- * instance (`bun run infra:up`) and are skipped when `DATABASE_URL` is unset.
+ * detection, idempotency replay, and large export generation. They require a
+ * running database (`bun run infra:up`) and are skipped when no selected
+ * integration database URL is set.
  *
  * All test data is scoped under a single tenant/org/brand/event created for
  * this run and torn down afterwards, so it does not interfere with other
@@ -28,6 +36,7 @@ let paymentEventRepo: PaymentEventRepository;
 let ticketRepo: TicketRepository;
 let attendeeRepo: AttendeeRepository;
 let orderRepo: OrderRepository;
+let previousDbDriver: string | undefined;
 
 const RUN_ID = ulid().slice(-10);
 const TENANT_ID = `tnt_load_${RUN_ID}`;
@@ -91,28 +100,28 @@ async function seedTenantGraph(trx: Database): Promise<void> {
   }).execute();
 }
 
-async function cleanupAll(db: Database): Promise<void> {
+async function cleanupAll(database: Database): Promise<void> {
   // Clean up load-harness data in reverse FK order.
-  await db.deleteFrom('scan_logs').where('tenant_id', '=', TENANT_ID).execute();
-  await db.deleteFrom('tickets').where('event_id', '=', EVENT_ID).execute();
-  await db.deleteFrom('attendees').where('event_id', '=', EVENT_ID).execute();
-  await db.deleteFrom('orders').where('tenant_id', '=', TENANT_ID).execute();
-  await db.deleteFrom('export_job_events').where('tenant_id', '=', TENANT_ID).execute();
-  await db.deleteFrom('export_jobs').where('tenant_id', '=', TENANT_ID).execute();
-  await db.deleteFrom('payment_events').where('tenant_id', '=', TENANT_ID).execute();
-  await db.deleteFrom('checkout_holds').where('checkout_session_id', 'like', 'cs_load_%').execute();
-  await db.deleteFrom('checkout_sessions').where('id', 'like', 'cs_load_%').execute();
-  await db.deleteFrom('ticket_types').where('event_id', '=', EVENT_ID).execute();
-  await db.deleteFrom('inventory_pools').where('event_id', '=', EVENT_ID).execute();
-  await db.deleteFrom('events').where('id', '=', EVENT_ID).execute();
-  await db.deleteFrom('brands').where('id', '=', BRAND_ID).execute();
-  await db.deleteFrom('organizations').where('id', '=', ORG_ID).execute();
-  await db.deleteFrom('tenants').where('id', '=', TENANT_ID).execute();
+  await database.deleteFrom('scan_logs').where('tenant_id', '=', TENANT_ID).execute();
+  await database.deleteFrom('tickets').where('event_id', '=', EVENT_ID).execute();
+  await database.deleteFrom('attendees').where('event_id', '=', EVENT_ID).execute();
+  await database.deleteFrom('orders').where('tenant_id', '=', TENANT_ID).execute();
+  await database.deleteFrom('export_job_events').where('tenant_id', '=', TENANT_ID).execute();
+  await database.deleteFrom('export_jobs').where('tenant_id', '=', TENANT_ID).execute();
+  await database.deleteFrom('payment_events').where('tenant_id', '=', TENANT_ID).execute();
+  await database.deleteFrom('checkout_holds').where('checkout_session_id', 'like', 'cs_load_%').execute();
+  await database.deleteFrom('checkout_sessions').where('id', 'like', 'cs_load_%').execute();
+  await database.deleteFrom('ticket_types').where('event_id', '=', EVENT_ID).execute();
+  await database.deleteFrom('inventory_pools').where('event_id', '=', EVENT_ID).execute();
+  await database.deleteFrom('events').where('id', '=', EVENT_ID).execute();
+  await database.deleteFrom('brands').where('id', '=', BRAND_ID).execute();
+  await database.deleteFrom('organizations').where('id', '=', ORG_ID).execute();
+  await database.deleteFrom('tenants').where('id', '=', TENANT_ID).execute();
 }
 
-async function createPool(db: Database, capacity: number, ttl = 300): Promise<string> {
+async function createPool(database: Database, capacity: number, ttl = 300): Promise<string> {
   const poolId = `pool_load_${ulid().slice(-10)}`;
-  await db.insertInto('inventory_pools').values({
+  await database.insertInto('inventory_pools').values({
     id: poolId,
     event_id: EVENT_ID,
     name: `Load Pool ${poolId}`,
@@ -126,9 +135,9 @@ async function createPool(db: Database, capacity: number, ttl = 300): Promise<st
   return poolId;
 }
 
-async function createTicketType(db: Database, poolId: string): Promise<string> {
+async function createTicketType(database: Database, poolId: string): Promise<string> {
   const ticketTypeId = `tt_load_${ulid().slice(-10)}`;
-  await db.insertInto('ticket_types').values({
+  await database.insertInto('ticket_types').values({
     id: ticketTypeId,
     event_id: EVENT_ID,
     name: `Load Ticket ${ticketTypeId}`,
@@ -153,9 +162,9 @@ async function createTicketType(db: Database, poolId: string): Promise<string> {
   return ticketTypeId;
 }
 
-async function createCheckoutSession(db: Database, ticketTypeId: string): Promise<string> {
+async function createCheckoutSession(database: Database, ticketTypeId: string): Promise<string> {
   const sessionId = `cs_load_${ulid().slice(-10)}`;
-  await db.insertInto('checkout_sessions').values({
+  await database.insertInto('checkout_sessions').values({
     id: sessionId,
     tenant_id: TENANT_ID,
     event_id: EVENT_ID,
@@ -211,7 +220,7 @@ async function createOrder(): Promise<string> {
     brandId: BRAND_ID,
     eventId: EVENT_ID,
     checkoutSessionId: sessionId,
-    orderNumber: `GK-LOAD-${ulid()}`,
+    orderNumber: `TK-LOAD-${ulid()}`,
     status: 'paid',
     currency: 'USD',
     subtotalCents: 1000,
@@ -247,9 +256,10 @@ function escapeCsv(val: unknown): string {
   return str;
 }
 
-describe.skipIf(!process.env.DATABASE_URL)('Load and concurrency harnesses (real PostgreSQL)', () => {
+describeWithIntegrationDatabase('Load and concurrency harnesses', () => {
   beforeAll(async () => {
-    db = createDb(process.env.DATABASE_URL);
+    previousDbDriver = setIntegrationDatabaseDriver();
+    db = createDb(integrationDatabaseUrl());
     inventoryService = new InventoryService(db);
     paymentEventRepo = new PaymentEventRepository(db);
     ticketRepo = new TicketRepository(db);
@@ -261,6 +271,7 @@ describe.skipIf(!process.env.DATABASE_URL)('Load and concurrency harnesses (real
   afterAll(async () => {
     await cleanupAll(db);
     await db.destroy();
+    restoreDatabaseDriver(previousDbDriver);
   });
 
   beforeEach(async () => {
@@ -289,6 +300,7 @@ describe.skipIf(!process.env.DATABASE_URL)('Load and concurrency harnesses (real
 
     const sessionIds: string[] = [];
     for (let i = 0; i < CONCURRENT_CLIENTS; i++) {
+      // eslint-disable-next-line no-await-in-loop -- load setup creates persisted sessions before the concurrent reservation burst.
       sessionIds.push(await createCheckoutSession(db, ticketTypeId));
     }
 
@@ -376,6 +388,47 @@ describe.skipIf(!process.env.DATABASE_URL)('Load and concurrency harnesses (real
     expect(rows[0].tenant_id).toBe(TENANT_ID);
   });
 
+  it('idempotency burst: concurrent requests with the same key run one side effect and replay the stored response', async () => {
+    const BURST = 40;
+    const key = `idem_load_${ulid()}`;
+    const requestHash = hashRequest({ operation: 'load-harness-idempotency', key });
+    let sideEffects = 0;
+
+    const outcomes = await Promise.all(
+      Array.from({ length: BURST }, () =>
+        withIdempotency(
+          db,
+          {
+            key,
+            tenantId: TENANT_ID,
+            requestHash,
+          },
+          async () => {
+            sideEffects += 1;
+            await new Promise((resolve) => setTimeout(resolve, 25));
+            return { status: 202, body: { accepted: true, sideEffects } };
+          },
+        ),
+      ),
+    );
+
+    expect(sideEffects).toBe(1);
+    expect(outcomes).toHaveLength(BURST);
+    for (const outcome of outcomes) {
+      expect(outcome).toEqual({ status: 202, body: { accepted: true, sideEffects: 1 } });
+    }
+
+    const records = await db
+      .selectFrom('idempotency_records')
+      .selectAll()
+      .where('tenant_id', '=', TENANT_ID)
+      .where('key', '=', key)
+      .execute();
+
+    expect(records).toHaveLength(1);
+    expect(records[0].status).toBe('completed');
+  });
+
   it('scanner burst: concurrent scans for the same ticket yield exactly one accepted check-in', async () => {
     const BURST = 60;
     const deviceId = `dev_load_${ulid().slice(-8)}`;
@@ -430,6 +483,7 @@ describe.skipIf(!process.env.DATABASE_URL)('Load and concurrency harnesses (real
 
     const createdAttendees: { id: string; email: string; firstName: string; lastName: string }[] = [];
     for (let i = 0; i < ATTENDEE_COUNT; i++) {
+      // eslint-disable-next-line no-await-in-loop -- export load setup persists deterministic attendee rows before measuring the scoped read.
       const row = await attendeeRepo.create({
         tenantId: TENANT_ID,
         orderId,

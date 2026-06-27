@@ -7,7 +7,7 @@ describe('QrService', () => {
   it('should generate a signed QR payload', () => {
     const result = qrService.generate('tkt_123');
     expect(result.ticketId).toBe('tkt_123');
-    expect(result.code).toMatch(/^GK-[A-F0-9]+$/);
+    expect(result.code).toMatch(/^TK-[A-F0-9]+$/);
     expect(result.payload).toBeTruthy();
     expect(result.hash).toHaveLength(64);
   });
@@ -41,5 +41,27 @@ describe('QrService', () => {
     const tampered = Buffer.from(JSON.stringify({ p: JSON.stringify(parsed), s: decoded.s })).toString('base64url');
     const result = qrService.getQrPayload(tampered);
     expect(result.valid).toBe(false);
+  });
+
+  it('requires an explicit QR signing secret in production', () => {
+    const originalNodeEnv = process.env.NODE_ENV;
+    const originalSigningSecret = process.env.QR_SIGNING_SECRET;
+    process.env.NODE_ENV = 'production';
+    delete process.env.QR_SIGNING_SECRET;
+
+    try {
+      expect(() => new QrService()).toThrow('QR_SIGNING_SECRET is required in production');
+    } finally {
+      if (originalNodeEnv === undefined) {
+        delete process.env.NODE_ENV;
+      } else {
+        process.env.NODE_ENV = originalNodeEnv;
+      }
+      if (originalSigningSecret === undefined) {
+        delete process.env.QR_SIGNING_SECRET;
+      } else {
+        process.env.QR_SIGNING_SECRET = originalSigningSecret;
+      }
+    }
   });
 });

@@ -143,6 +143,7 @@ export function DashboardView() {
                   <Link
                     key={event.id}
                     href={routes.eventDetail(event.id)}
+                    prefetch={false}
                     className='flex items-center justify-between rounded-lg border p-3 hover:bg-accent/50 transition-colors'
                   >
                     <div className='min-w-0'>
@@ -185,6 +186,7 @@ export function DashboardView() {
                   <Link
                     key={order.id}
                     href={routes.orderDetail(order.id)}
+                    prefetch={false}
                     className='flex items-center justify-between rounded-lg border p-3 hover:bg-accent/50 transition-colors'
                   >
                     <div className='min-w-0'>

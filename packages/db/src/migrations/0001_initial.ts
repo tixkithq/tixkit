@@ -123,9 +123,9 @@ export const InitialMigration: Migration = {
       .createTable('clerk_identity_links')
       .addColumn('id', varchar(32), (col) => col.primaryKey())
       .addColumn('clerk_user_id', varchar(255), (col) => col.notNull())
-      .addColumn('gatekit_user_id', varchar(32), (col) => col.notNull())
+      .addColumn('tixkit_user_id', varchar(32), (col) => col.notNull())
       .addColumn('clerk_organization_id', varchar(255))
-      .addColumn('gatekit_organization_id', varchar(32))
+      .addColumn('tixkit_organization_id', varchar(32))
       .addColumn('last_synced_at', timestampType(), (col) => col.notNull().defaultTo(nowDefault()))
       .addColumn('created_at', timestampType(), (col) => col.notNull().defaultTo(nowDefault()))
       .addColumn('updated_at', timestampType(), (col) => col.notNull().defaultTo(nowDefault()))
@@ -1301,6 +1301,7 @@ export const InitialMigration: Migration = {
       const next: string[] = [];
       for (const table of remaining) {
         try {
+          // eslint-disable-next-line no-await-in-loop -- down migration retries ordered drops so FK-dependent tables can be removed in later passes.
           await db.schema.dropTable(table).ifExists().execute();
         } catch {
           next.push(table);

@@ -2,7 +2,16 @@ import { proxyActivities, sleep } from '@temporalio/workflow';
 import type { WorkflowActivityResult } from '../shared/types.js';
 
 const { deliverWebhookActivity } = proxyActivities<{
-  deliverWebhookActivity(input: { endpointId: string; eventId: string; payload: string; secret: string; attempt: number }): Promise<WorkflowActivityResult<{ statusCode: number; response: string }>>;
+  deliverWebhookActivity(input: {
+    apiVersion?: string;
+    endpointId: string;
+    eventId: string;
+    eventType?: string;
+    payload: string;
+    secret: string;
+    attempt: number;
+    finalAttempt: boolean;
+  }): Promise<WorkflowActivityResult<{ statusCode: number; response: string }>>;
 }>({
   startToCloseTimeout: '30 seconds',
   retry: {
@@ -14,8 +23,11 @@ const { deliverWebhookActivity } = proxyActivities<{
 
 export type WebhookDeliveryWorkflowInput = {
   version: number;
+  apiVersion?: string;
   endpointId: string;
   eventId: string;
+  eventType?: string;
+  replayNonce?: string;
   payload: Record<string, unknown>;
   secret: string;
   maxAttempts: number;
@@ -25,12 +37,16 @@ export async function webhookDeliveryWorkflow(input: WebhookDeliveryWorkflowInpu
   const payloadStr = JSON.stringify(input.payload);
 
   for (let attempt = 1; attempt <= input.maxAttempts; attempt++) {
+    // eslint-disable-next-line no-await-in-loop -- webhook retries must observe each attempt result before deciding whether to back off or dead-letter.
     const result = await deliverWebhookActivity({
+      apiVersion: input.apiVersion,
       endpointId: input.endpointId,
       eventId: input.eventId,
+      eventType: input.eventType,
       payload: payloadStr,
       secret: input.secret,
       attempt,
+      finalAttempt: attempt === input.maxAttempts,
     });
 
     if (result.ok && result.value.statusCode >= 200 && result.value.statusCode < 300) {
@@ -39,6 +55,7 @@ export async function webhookDeliveryWorkflow(input: WebhookDeliveryWorkflowInpu
 
     if (attempt < input.maxAttempts) {
       // Exponential backoff: 5s, 10s, 20s, 40s...
+      // eslint-disable-next-line no-await-in-loop -- retry backoff is intentionally sequential in workflow history.
       await sleep(`${5 * Math.pow(2, attempt - 1)} seconds`);
     }
   }

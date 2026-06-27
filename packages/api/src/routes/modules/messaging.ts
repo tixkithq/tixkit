@@ -13,9 +13,9 @@ import {
   SmsJobRepository,
   SmsProviderEventRepository,
   SmsProviderRouteRepository,
-} from '@gatekit/db';
+} from '@tixkit/db';
 import { ClerkAuthService } from '../../auth/clerk.js';
-import { type Principal, ValidationError } from '@gatekit/domain';
+import { type Principal, ValidationError } from '@tixkit/domain';
 import { sendMessageSchema } from '../../http/schemas.js';
 import { hashRequest, withIdempotency } from '../../services/idempotency.js';
 
@@ -30,6 +30,35 @@ type MessageAttendee = {
   email: string | null;
   phone: string | null;
   status: string;
+};
+
+type ChannelDecision =
+  | {
+      status: 'eligible';
+      attendee: MessageAttendee;
+      consentExcluded: false;
+      suppressionExcluded: false;
+    }
+  | {
+      status: 'suppressed';
+      attendee: MessageAttendee;
+      consentExcluded: boolean;
+      suppressionExcluded: boolean;
+    }
+  | {
+      status: 'missing_contact';
+      attendee: MessageAttendee;
+      consentExcluded: false;
+      suppressionExcluded: false;
+    };
+
+type QueuedEmailJob = {
+  jobId: string;
+  toEmail: string;
+  toName?: string;
+  templateVersionId: string;
+  providerRouteId: string;
+  variables: Record<string, unknown>;
 };
 
 export const messagingRoutes: FastifyPluginAsync = async (app) => {
@@ -274,8 +303,7 @@ export const messagingRoutes: FastifyPluginAsync = async (app) => {
       attendeeIds: body.attendeeIds,
       channel: body.channel,
     });
-    const attendees = audienceResolution.attendees;
-    if (attendees.length === 0) {
+    if (audienceResolution.attendees.length === 0) {
       throw new ValidationError('No matching recipients for this message campaign');
     }
 
@@ -283,22 +311,11 @@ export const messagingRoutes: FastifyPluginAsync = async (app) => {
     const variables: Record<string, unknown> = {
       ...body.variables,
       campaignAudience: body.audience,
-      campaignAudienceAttendeeIds: body.audience === 'specific' ? body.attendeeIds ?? [] : undefined,
+      campaignAudienceAttendeeIds: body.audience === 'specific' ? body.attendeeIds ?? [] : [],
+      campaignAudienceCount: audienceResolution.attendees.length,
     };
-    const queuedEmailJobs: Array<{
-      jobId: string;
-      toEmail: string;
-      toName?: string;
-      templateVersionId: string;
-      providerRouteId: string;
-      variables: Record<string, unknown>;
-    }> = [];
+    let queuedEmailJobs: QueuedEmailJob[] = [];
     const queuedSmsJobIds: string[] = [];
-    let skippedRecipients = 0;
-    let suppressedRecipients = 0;
-    let consentExclusions = 0;
-    const consentByAttendee = audienceResolution.consentByAttendee;
-
     if (body.channel === 'email' || body.channel === 'both') {
       const template = await new NotificationTemplateRepository(db).findByKeyForBrand(principal.tenantId, body.templateKey, event.brand_id);
       if (!template) {
@@ -317,16 +334,12 @@ export const messagingRoutes: FastifyPluginAsync = async (app) => {
       }
 
       const emailRepo = new EmailJobRepository(db);
-      for (const attendee of attendees) {
-        if (!attendee.email) {
-          skippedRecipients += 1;
-          continue;
+      const emailJobResults = await Promise.all(audienceResolution.emailDecisions.map(async (decision): Promise<QueuedEmailJob | undefined> => {
+        const attendee = decision.attendee;
+        if (decision.status === 'missing_contact' || !attendee.email) {
+          return undefined;
         }
-        const consent = consentByAttendee.get(attendee.id);
-        const suppression = audienceResolution.emailSuppressionByAttendee.get(attendee.id);
-        if (!consent?.email_opt_in || consent.revoked_at || suppression) {
-          suppressedRecipients += 1;
-          consentExclusions += !consent?.email_opt_in || Boolean(consent.revoked_at) ? 1 : 0;
+        if (decision.status === 'suppressed') {
           const jobKey = `${campaignId}:email:${attendee.id}`;
           const existing = await emailRepo.findByIdempotencyKey(principal.tenantId, jobKey);
           const job = existing ?? await emailRepo.create({
@@ -341,8 +354,8 @@ export const messagingRoutes: FastifyPluginAsync = async (app) => {
               attendeeId: attendee.id,
               eventId,
               notificationType,
-              consentExcluded: !consent?.email_opt_in || Boolean(consent.revoked_at),
-              suppressionExcluded: Boolean(suppression),
+              consentExcluded: decision.consentExcluded,
+              suppressionExcluded: decision.suppressionExcluded,
             },
             providerRouteId: emailRoute.id,
             priority: 'low',
@@ -352,7 +365,7 @@ export const messagingRoutes: FastifyPluginAsync = async (app) => {
           if (job.status !== 'suppressed') {
             await emailRepo.update(job.id, { status: 'suppressed' });
           }
-          continue;
+          return undefined;
         }
         const jobKey = `${campaignId}:email:${attendee.id}`;
         const existing = await emailRepo.findByIdempotencyKey(principal.tenantId, jobKey);
@@ -374,7 +387,7 @@ export const messagingRoutes: FastifyPluginAsync = async (app) => {
           idempotencyKey: jobKey,
         });
         if (job.status !== 'suppressed') {
-          queuedEmailJobs.push({
+          return {
             jobId: job.id,
             toEmail: attendee.email,
             toName: attendeeName(attendee),
@@ -386,9 +399,11 @@ export const messagingRoutes: FastifyPluginAsync = async (app) => {
               eventId,
               notificationType,
             },
-          });
+          };
         }
-      }
+        return undefined;
+      }));
+      queuedEmailJobs = emailJobResults.filter((job): job is QueuedEmailJob => Boolean(job));
     }
 
     if (body.channel === 'sms' || body.channel === 'both') {
@@ -404,16 +419,13 @@ export const messagingRoutes: FastifyPluginAsync = async (app) => {
         ? variables.body
         : body.templateKey;
       const smsRepo = new SmsJobRepository(db);
-      for (const attendee of attendees) {
-        if (!attendee.phone) {
-          skippedRecipients += 1;
-          continue;
+      const smsJobResults = await Promise.all(audienceResolution.smsDecisions.map(async (decision) => {
+        const attendee = decision.attendee;
+        if (decision.status === 'missing_contact' || !attendee.phone) {
+          return undefined;
         }
-        const consent = consentByAttendee.get(attendee.id);
         const jobKey = `${campaignId}:sms:${attendee.id}`;
-        if (!consent?.sms_opt_in || consent.revoked_at) {
-          suppressedRecipients += 1;
-          consentExclusions += 1;
+        if (decision.status === 'suppressed') {
           const existing = await smsRepo.findByIdempotencyKey(principal.tenantId, jobKey);
           const job = existing ?? await smsRepo.create({
             tenantId: principal.tenantId,
@@ -436,7 +448,7 @@ export const messagingRoutes: FastifyPluginAsync = async (app) => {
           if (job.status !== 'suppressed') {
             await smsRepo.update(job.id, { status: 'suppressed' });
           }
-          continue;
+          return undefined;
         }
         const existing = await smsRepo.findByIdempotencyKey(principal.tenantId, jobKey);
         const job = existing ?? await smsRepo.create({
@@ -456,13 +468,15 @@ export const messagingRoutes: FastifyPluginAsync = async (app) => {
           idempotencyKey: jobKey,
         });
         if (job.status !== 'suppressed') {
-          queuedSmsJobIds.push(job.id);
+          return job.id;
         }
-      }
+        return undefined;
+      }));
+      queuedSmsJobIds.push(...smsJobResults.filter((jobId): jobId is string => typeof jobId === 'string'));
     }
 
-    for (const job of queuedEmailJobs) {
-      await app.context.temporalClient.startNotificationDelivery({
+    await Promise.all(queuedEmailJobs.map((job) =>
+      app.context.temporalClient.startNotificationDelivery({
         jobId: job.jobId,
         tenantId: principal.tenantId,
         brandId: event.brand_id,
@@ -473,20 +487,20 @@ export const messagingRoutes: FastifyPluginAsync = async (app) => {
         variables: job.variables,
         providerRouteId: job.providerRouteId,
         notificationType,
-      });
-    }
+      }),
+    ));
 
     if (body.channel === 'sms' || body.channel === 'both') {
       const smsRouteId = await getSmsProviderRouteId(db, event.brand_id, notificationType);
-      for (const jobId of queuedSmsJobIds) {
-        await app.context.temporalClient.startSmsDelivery({
+      await Promise.all(queuedSmsJobIds.map((jobId) =>
+        app.context.temporalClient.startSmsDelivery({
           jobId,
           tenantId: principal.tenantId,
           brandId: event.brand_id,
           providerRouteId: smsRouteId,
           notificationType,
-        });
-      }
+        }),
+      ));
     }
 
     return {
@@ -497,12 +511,12 @@ export const messagingRoutes: FastifyPluginAsync = async (app) => {
         templateKey: body.templateKey,
         channel: body.channel,
         status: queuedEmailJobs.length + queuedSmsJobIds.length > 0 ? 'queued' : 'suppressed',
-        audienceCount: attendees.length,
+        audienceCount: audienceResolution.attendees.length,
         queuedEmailJobs: queuedEmailJobs.length,
         queuedSmsJobs: queuedSmsJobIds.length,
-        suppressedRecipients,
-        consentExclusions,
-        skippedRecipients,
+        suppressedRecipients: audienceResolution.suppressedRecipients,
+        consentExclusions: audienceResolution.consentExclusions,
+        skippedRecipients: audienceResolution.skippedRecipients,
         emailJobIds: queuedEmailJobs.map((job) => job.jobId),
         smsJobIds: queuedSmsJobIds,
       },
@@ -533,11 +547,12 @@ function audienceToResponse(audience: MessageAudience) {
   return audience;
 }
 
-function audienceFromVariables(variables: Record<string, unknown>) {
+function rawAudienceFromVariables(variables: Record<string, unknown>): MessageAudience | undefined {
   const audience = variables.campaignAudience;
-  if (audience === 'checked_in' || audience === 'not_checked_in') return audience;
-  if (audience === 'specific') return 'custom';
-  return 'all_attendees';
+  if (audience === 'all' || audience === 'checked_in' || audience === 'not_checked_in' || audience === 'specific') {
+    return audience;
+  }
+  return undefined;
 }
 
 async function loadMessageAudienceAttendees(input: {
@@ -605,48 +620,91 @@ async function resolveMessageAudience(input: {
   const emailSuppressionByAttendee = new Map<string, Record<string, unknown>>();
   if (input.channel === 'email' || input.channel === 'both') {
     const suppressionRepo = new EmailSuppressionRepository(input.db);
-    for (const attendee of attendees) {
-      if (!attendee.email) continue;
+    const suppressions = await Promise.all(attendees.map(async (attendee) => {
+      if (!attendee.email) return undefined;
       const suppression = await suppressionRepo.findByEmail(input.tenantId, attendee.email);
-      if (suppression) emailSuppressionByAttendee.set(attendee.id, suppression);
+      return suppression ? { attendeeId: attendee.id, suppression } : undefined;
+    }));
+    for (const result of suppressions) {
+      if (result) emailSuppressionByAttendee.set(result.attendeeId, result.suppression);
     }
   }
 
   let skippedRecipients = 0;
   let suppressedRecipients = 0;
   let consentExclusions = 0;
-  const eligibleRecipients: MessageAttendee[] = [];
+  const eligibleRecipientIds = new Set<string>();
+  const emailDecisions: ChannelDecision[] = [];
+  const smsDecisions: ChannelDecision[] = [];
   for (const attendee of attendees) {
     const consent = consentByAttendee.get(attendee.id);
-    let channelEligible = false;
     if (input.channel === 'email' || input.channel === 'both') {
       if (!attendee.email) {
         skippedRecipients += 1;
+        emailDecisions.push({
+          attendee,
+          status: 'missing_contact',
+          consentExcluded: false,
+          suppressionExcluded: false,
+        });
       } else if (!consent?.email_opt_in || consent.revoked_at || emailSuppressionByAttendee.has(attendee.id)) {
+        const consentExcluded = !consent?.email_opt_in || Boolean(consent.revoked_at);
+        const suppressionExcluded = emailSuppressionByAttendee.has(attendee.id);
         suppressedRecipients += 1;
-        consentExclusions += !consent?.email_opt_in || Boolean(consent.revoked_at) ? 1 : 0;
+        consentExclusions += consentExcluded ? 1 : 0;
+        emailDecisions.push({
+          attendee,
+          status: 'suppressed',
+          consentExcluded,
+          suppressionExcluded,
+        });
       } else {
-        channelEligible = true;
+        eligibleRecipientIds.add(attendee.id);
+        emailDecisions.push({
+          attendee,
+          status: 'eligible',
+          consentExcluded: false,
+          suppressionExcluded: false,
+        });
       }
     }
     if (input.channel === 'sms' || input.channel === 'both') {
       if (!attendee.phone) {
         skippedRecipients += 1;
+        smsDecisions.push({
+          attendee,
+          status: 'missing_contact',
+          consentExcluded: false,
+          suppressionExcluded: false,
+        });
       } else if (!consent?.sms_opt_in || consent.revoked_at) {
         suppressedRecipients += 1;
         consentExclusions += 1;
+        smsDecisions.push({
+          attendee,
+          status: 'suppressed',
+          consentExcluded: true,
+          suppressionExcluded: false,
+        });
       } else {
-        channelEligible = true;
+        eligibleRecipientIds.add(attendee.id);
+        smsDecisions.push({
+          attendee,
+          status: 'eligible',
+          consentExcluded: false,
+          suppressionExcluded: false,
+        });
       }
     }
-    if (channelEligible) eligibleRecipients.push(attendee);
   }
 
   return {
     attendees,
     consentByAttendee,
     emailSuppressionByAttendee,
-    eligibleRecipients,
+    emailDecisions,
+    smsDecisions,
+    eligibleRecipients: attendees.filter((attendee) => eligibleRecipientIds.has(attendee.id)),
     skippedRecipients,
     suppressedRecipients,
     consentExclusions,
@@ -679,7 +737,7 @@ function buildJobItems(
   emailJobs: Array<Record<string, unknown>>,
   smsJobs: Array<Record<string, unknown>>,
 ) {
-  return [
+  return sortNewestFirst([
     ...emailJobs.map((job) => ({
       channel: 'email' as const,
       campaignId,
@@ -692,7 +750,7 @@ function buildJobItems(
       eventId,
       job,
     })),
-  ].sort((a, b) => toIso(b.job.created_at).localeCompare(toIso(a.job.created_at)));
+  ], (item) => item.job.created_at);
 }
 
 function buildDeliveryLogItems(
@@ -701,7 +759,7 @@ function buildDeliveryLogItems(
   emailDeliveries: Array<Record<string, unknown>>,
   smsDeliveries: Array<Record<string, unknown>>,
 ) {
-  return [
+  return sortNewestFirst([
     ...emailDeliveries.map((delivery) => ({
       channel: 'email' as const,
       campaignId,
@@ -714,7 +772,7 @@ function buildDeliveryLogItems(
       eventId,
       delivery,
     })),
-  ].sort((a, b) => toIso(b.delivery.created_at).localeCompare(toIso(a.delivery.created_at)));
+  ], (item) => item.delivery.created_at);
 }
 
 function filterDeliveriesByJobs(
@@ -739,15 +797,14 @@ async function loadCampaignProviderEventItems(eventId: string, campaignId: strin
   const providerEvents = await new SmsProviderEventRepository(db).findByProviderMessageIds(principal.tenantId, providerMessageIds);
   const providerMessageIdSet = new Set(providerMessageIds);
 
-  return providerEvents
+  return sortNewestFirst(providerEvents
     .filter((event) => event.tenant_id === principal.tenantId && typeof event.provider_message_id === 'string' && providerMessageIdSet.has(event.provider_message_id))
     .map((event) => ({
       channel: 'sms' as const,
       campaignId,
       eventId,
       event,
-    }))
-    .sort((a, b) => toIso(b.event.created_at).localeCompare(toIso(a.event.created_at)));
+    })), (item) => item.event.created_at);
 }
 
 function attendeeName(attendee: { first_name: string | null; last_name: string | null }) {
@@ -792,6 +849,39 @@ function toIso(value: unknown) {
   return new Date().toISOString();
 }
 
+function audienceLabel(audience: MessageAudience, attendeeIds: string[]) {
+  if (audience === 'all') return 'All attendees';
+  if (audience === 'checked_in') return 'Checked in';
+  if (audience === 'not_checked_in') return 'Not checked in';
+  const count = attendeeIds.length;
+  return count === 1 ? 'Custom (1 attendee)' : `Custom (${count} attendees)`;
+}
+
+function campaignAudienceMetadata(jobs: Array<Record<string, unknown>>) {
+  const variablesByJob = jobs.map(jobVariables);
+  const audience = variablesByJob.map(rawAudienceFromVariables).find((candidate): candidate is MessageAudience => Boolean(candidate)) ?? 'all';
+  const attendeeIds = audience === 'specific'
+    ? safeArray(variablesByJob.find((variables) => Array.isArray(variables.campaignAudienceAttendeeIds))?.campaignAudienceAttendeeIds).map(String)
+    : [];
+  const persistedCount = variablesByJob
+    .map((variables) => Number(variables.campaignAudienceCount))
+    .find((count) => Number.isInteger(count) && count >= 0);
+  const attendeeIdsFromJobs = new Set(
+    variablesByJob
+      .map((variables) => variables.attendeeId)
+      .filter((attendeeId): attendeeId is string => typeof attendeeId === 'string' && attendeeId.length > 0),
+  );
+  const audienceCount = persistedCount ?? (audience === 'specific' && attendeeIds.length > 0 ? attendeeIds.length : attendeeIdsFromJobs.size || jobs.length);
+
+  return {
+    audience,
+    responseAudience: audienceToResponse(audience),
+    attendeeIds,
+    audienceCount,
+    label: audienceLabel(audience, attendeeIds),
+  };
+}
+
 function buildCampaignSummaries(input: {
   eventId: string;
   emailJobs: Array<Record<string, unknown>>;
@@ -811,11 +901,12 @@ function buildCampaignSummaries(input: {
     groups.set(id, group);
   }
 
-  return [...groups.entries()]
+  return sortNewestFirst([...groups.entries()]
     .map(([id, group]) => {
       const jobs = [...group.emailJobs, ...group.smsJobs];
       const firstJob = jobs[0] ?? {};
       const variables = jobVariables(firstJob);
+      const audienceMetadata = campaignAudienceMetadata(jobs);
       const statuses = jobs.map((job) => String(job.status));
       const suppressedRecipients = statuses.filter((status) => status === 'suppressed').length;
       const consentExclusions = jobs.filter((job) => jobVariables(job).consentExcluded === true).length;
@@ -838,8 +929,11 @@ function buildCampaignSummaries(input: {
         templateKey: String(firstJob.template_key ?? variables.templateKey ?? 'attendee-message'),
         channel: group.emailJobs.length > 0 && group.smsJobs.length > 0 ? 'both' : group.smsJobs.length > 0 ? 'sms' : 'email',
         status: campaignStatus(statuses),
-        audience: audienceFromVariables(variables),
-        audienceCount: jobs.length,
+        audience: audienceMetadata.responseAudience,
+        audienceKey: audienceMetadata.audience,
+        audienceAttendeeIds: audienceMetadata.attendeeIds,
+        audienceLabel: audienceMetadata.label,
+        audienceCount: audienceMetadata.audienceCount,
         queuedEmailJobs: emailQueued,
         queuedSmsJobs: smsQueued,
         suppressedRecipients,
@@ -848,8 +942,12 @@ function buildCampaignSummaries(input: {
         createdAt: toIso(Number.isFinite(createdAt) ? new Date(createdAt) : firstJob.created_at),
         updatedAt: toIso(updatedAt > 0 ? new Date(updatedAt) : firstJob.updated_at),
       };
-    })
-    .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+    }), (summary) => summary.createdAt);
+}
+
+function sortNewestFirst<T>(items: T[], createdAt: (item: T) => unknown) {
+  // eslint-disable-next-line unicorn/no-array-sort -- sorting a copied response array preserves deterministic newest-first API output.
+  return [...items].sort((a, b) => toIso(createdAt(b)).localeCompare(toIso(createdAt(a))));
 }
 
 function campaignStatus(statuses: string[]) {

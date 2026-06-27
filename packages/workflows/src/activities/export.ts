@@ -1,10 +1,10 @@
-import { createDb, type Database } from '@gatekit/db';
+import { createDb, type Database } from '@tixkit/db';
 import { Redis } from 'ioredis';
 import { ulid } from 'ulid';
 import type { WorkflowActivityResult } from '../shared/types.js';
 import { okResult, errResult } from '../shared/types.js';
 
-const exportEventChannel = (exportId: string) => `gatekit:export-job:${exportId}:events`;
+const exportEventChannel = (exportId: string) => `tixkit:export-job:${exportId}:events`;
 
 type ExportJobStatus = 'pending' | 'processing' | 'completed' | 'failed';
 
@@ -264,6 +264,7 @@ function buildQuestionColumns(questions: ExportQuestion[]): {
   headers: string[];
   valuesFor: (customAnswers: string | null) => Record<string, string>;
 } {
+  // eslint-disable-next-line unicorn/no-array-sort -- sorting a copied question list keeps export columns deterministic.
   const sorted = [...questions].sort(
     (a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0),
   );
@@ -319,17 +320,29 @@ function buildQuestionColumns(questions: ExportQuestion[]): {
   return { headers, valuesFor };
 }
 
+function parseDateFilterBoundary(value: string, boundary: 'start' | 'end'): Date {
+  if (/^\d{4}-\d{2}-\d{2}$/.test(value)) {
+    return new Date(
+      boundary === 'start'
+        ? `${value}T00:00:00.000Z`
+        : `${value}T23:59:59.999Z`,
+    );
+  }
+
+  return new Date(value);
+}
+
 function applyDateFilter<T extends { created_at: Date | string }>(
   query: T[],
   filters: ExportFilters,
 ): T[] {
   let result = query;
   if (filters.from) {
-    const from = new Date(filters.from);
+    const from = parseDateFilterBoundary(filters.from, 'start');
     result = result.filter((row) => new Date(row.created_at) >= from);
   }
   if (filters.to) {
-    const to = new Date(filters.to);
+    const to = parseDateFilterBoundary(filters.to, 'end');
     result = result.filter((row) => new Date(row.created_at) <= to);
   }
   return result;
@@ -429,19 +442,20 @@ export async function generateExportActivity(input: {
 
         if (questions.length > 0) {
           const { valuesFor } = buildQuestionColumns(questions);
-          rows = attendees.map((a) => ({
-            id: a.id,
-            email: a.email,
-            firstName: a.first_name,
-            lastName: a.last_name,
-            phone: a.phone,
-            status: a.status,
-            eventId: a.event_id,
-            orderId: a.order_id,
-            checkedInAt: a.checked_in_at,
-            createdAt: a.created_at,
-            ...valuesFor(a.custom_answers as string | null),
-          }));
+          rows = attendees.map((a) =>
+            Object.assign({
+              id: a.id,
+              email: a.email,
+              firstName: a.first_name,
+              lastName: a.last_name,
+              phone: a.phone,
+              status: a.status,
+              eventId: a.event_id,
+              orderId: a.order_id,
+              checkedInAt: a.checked_in_at,
+              createdAt: a.created_at,
+            }, valuesFor(a.custom_answers as string | null)),
+          );
         }
       }
     } else if (input.type === 'orders') {
@@ -624,7 +638,7 @@ export async function uploadFileActivity(input: {
   format: string;
 }): Promise<WorkflowActivityResult<{ fileUrl: string }>> {
   try {
-    const bucket = process.env.S3_EXPORT_BUCKET ?? 'gatekit-exports';
+    const bucket = process.env.S3_EXPORT_BUCKET ?? 'tixkit-exports';
     const region = process.env.S3_EXPORT_REGION ?? 'us-east-1';
     const key = `exports/${input.exportId}.${input.format}`;
     const fileUrl = `https://${bucket}.s3.${region}.amazonaws.com/${key}`;
@@ -733,7 +747,7 @@ export async function notifyExportCompleteActivity(input: {
           .executeTakeFirst();
 
         if (route && templateVersion) {
-          const { EmailJobRepository } = await import('@gatekit/db');
+          const { EmailJobRepository } = await import('@tixkit/db');
           const job = await new EmailJobRepository(db).create({
             tenantId: user.tenant_id,
             brandId: route.brand_id,
@@ -757,12 +771,13 @@ export async function notifyExportCompleteActivity(input: {
             const { notificationWorkflowId, NOTIFICATION_WORKFLOW_VERSION } = await import('../shared/types.js');
             const temporalAddress = process.env.TEMPORAL_ADDRESS ?? 'localhost:7233';
             const temporalNamespace = process.env.TEMPORAL_NAMESPACE ?? 'default';
+            const temporalTaskQueue = process.env.TEMPORAL_TASK_QUEUE ?? 'tixkit';
             const connection = await Connection.connect({ address: temporalAddress });
             const client = new Client({ connection, namespace: temporalNamespace });
             const workflowId = notificationWorkflowId(job.id);
             try {
               await client.workflow.start(notificationDeliveryWorkflow, {
-                taskQueue: 'gatekit',
+                taskQueue: temporalTaskQueue,
                 workflowId,
                 args: [{
                   version: NOTIFICATION_WORKFLOW_VERSION,

@@ -1,4 +1,4 @@
-import { type GateKitPermission, type NavBadgeTone } from '@/lib/permissions'
+import { type TixkitPermission, type NavBadgeTone } from '@/lib/permissions'
 
 type SidebarUser = {
   name: string
@@ -11,7 +11,7 @@ type BaseNavItem = {
   badge?: string
   badgeTone?: NavBadgeTone
   icon?: React.ElementType
-  requiredPermission?: GateKitPermission
+  requiredPermission?: TixkitPermission
 }
 
 type NavLink = BaseNavItem & {

@@ -1,13 +1,29 @@
 import type { BaseEntity, CurrencyCode, ISO8601Date, Ulid } from '../shared/index.js';
 
 export type PriceLineItem = {
-  ticketTypeId: Ulid;
+  type: 'ticket' | 'product';
+  ticketTypeId?: Ulid;
+  eventOccurrenceId?: Ulid;
+  productId?: Ulid;
   name: string;
   quantity: number;
   unitPriceCents: number;
   subtotalCents: number;
   discountCents: number;
   taxCents: number;
+  taxBreakdown?: Array<{
+    taxRuleId?: Ulid;
+    taxRuleName: string;
+    rate: number;
+    type: 'inclusive' | 'exclusive';
+    appliedTo: 'ticket' | 'fee' | 'all';
+    taxableAmountCents: number;
+    taxCents: number;
+    jurisdictionCountry?: string;
+    jurisdictionRegion?: string;
+    provider?: string;
+    providerCalculationId?: string;
+  }>;
   feeCents: number;
   totalCents: number;
 };
@@ -89,7 +105,9 @@ export type Attribution = BaseEntity & {
 };
 
 export type CartItem = {
-  ticketTypeId: Ulid;
+  ticketTypeId?: Ulid;
+  occurrenceId?: Ulid;
+  productId?: Ulid;
   quantity: number;
   unitAmountCents?: number;
   attendeeFields?: Record<string, unknown>[];

@@ -56,11 +56,13 @@ import {
   normalizeCheckoutAnswers,
   visibleCheckoutQuestions,
 } from '@/lib/checkout-questions'
+import { trackMarketingEvent, type MarketingEventItem } from '@/lib/marketing'
 
 type Props = {
   initialEventId: string
   initialSessionId: string
   initialSessionToken: string
+  waitlistClaimToken?: string
   brandId?: string
   supportUrl?: string
   termsUrl?: string
@@ -73,6 +75,18 @@ type Props = {
   productFilterParam?: string
 }
 
+function availabilityItemId(item: AvailabilityItem): string {
+  if (item.ticketTypeId) return `ticket:${item.ticketTypeId}:${item.eventOccurrenceId ?? 'event'}`
+  if (item.productId) return `product:${item.productId}`
+  return item.name
+}
+
+function cartItemId(item: CartItem): string {
+  if (item.ticketTypeId) return `ticket:${item.ticketTypeId}:${item.occurrenceId ?? 'event'}`
+  if (item.productId) return `product:${item.productId}`
+  return ''
+}
+
 type Phase = 'select' | 'confirm' | 'payment' | 'completed'
 
 function emitCheckoutEvent(
@@ -81,7 +95,7 @@ function emitCheckoutEvent(
 ) {
   if (typeof window === 'undefined') return
   const message = {
-    source: 'gatekit-checkout',
+    source: 'tixkit-checkout',
     event,
     type: event,
     ...detail,
@@ -94,6 +108,7 @@ export default function CheckoutFlow({
   initialEventId,
   initialSessionId,
   initialSessionToken,
+  waitlistClaimToken,
   brandId,
   supportUrl,
   termsUrl,
@@ -144,7 +159,14 @@ export default function CheckoutFlow({
   const [error, setError] = useState<string | null>(null)
   const [emailError, setEmailError] = useState<string | undefined>()
   const [validationError, setValidationError] = useState<string | null>(null)
+  const [waitlistMessage, setWaitlistMessage] = useState<string | null>(null)
+  const [waitlistTicketTypeIds, setWaitlistTicketTypeIds] = useState<Set<string>>(
+    () => new Set(),
+  )
+  const [claimTicketTypeId, setClaimTicketTypeId] = useState<string | null>(null)
+  const [claimQuantity, setClaimQuantity] = useState(1)
   const didApplyPrefilledItemsRef = useRef(false)
+  const didApplyWaitlistClaimRef = useRef(false)
 
   const brand: ResolvedBrand = useResolvedBrand(
     useMemo(
@@ -167,7 +189,7 @@ export default function CheckoutFlow({
   const visibleAvailability = useMemo(
     () =>
       productFilter
-        ? availability.filter((item) => productFilter.has(item.ticketTypeId))
+        ? availability.filter((item) => productFilter.has(availabilityItemId(item)))
         : availability,
     [availability, productFilter],
   )
@@ -182,6 +204,7 @@ export default function CheckoutFlow({
       visibleAvailability.some(
         (item) =>
           item.requiresAccessCode &&
+          item.ticketTypeId &&
           (quantities[item.ticketTypeId] ?? 0) > 0,
       ),
     [visibleAvailability, quantities],
@@ -195,17 +218,20 @@ export default function CheckoutFlow({
   const selectedItems = useMemo<CartItem[]>(() => {
     const baseItems: CartItem[] = []
     for (const item of visibleAvailability) {
-      const qty = quantities[item.ticketTypeId] ?? 0
+      const itemId = availabilityItemId(item)
+      const qty = quantities[itemId] ?? 0
       if (qty === 0) continue
       const unitAmountCents =
         item.kind === 'donation'
-          ? (donationAmounts[item.ticketTypeId] ??
+          ? (donationAmounts[itemId] ??
             Math.max(item.minimumPriceCents ?? 0, item.priceCents))
           : item.priceCents
       const cartItem: CartItem = {
-        ticketTypeId: item.ticketTypeId,
         quantity: qty,
       }
+      if (item.ticketTypeId) cartItem.ticketTypeId = item.ticketTypeId
+      if (item.eventOccurrenceId) cartItem.occurrenceId = item.eventOccurrenceId
+      if (item.productId) cartItem.productId = item.productId
       if (item.kind === 'donation') {
         cartItem.unitAmountCents = unitAmountCents
       }
@@ -214,6 +240,8 @@ export default function CheckoutFlow({
 
     // Build attendeeFields for each item based on attendee question answers.
     return baseItems.map((item) => {
+      if (!item.ticketTypeId) return item
+      const lineId = cartItemId(item)
       const ticketQuestions =
         questions?.attendeeQuestions.filter(
           (q) =>
@@ -224,14 +252,14 @@ export default function CheckoutFlow({
       const attendeeFields: Record<string, unknown>[] = []
       for (let i = 0; i < item.quantity; i++) {
         const answersForAttendee = Object.fromEntries(
-          ticketQuestions.map((q) => [
-            q.id,
-            attendeeAnswers[`${item.ticketTypeId}:${i}:${q.id}`],
-          ]),
+            ticketQuestions.map((q) => [
+              q.id,
+              attendeeAnswers[`${lineId}:${i}:${q.id}`],
+            ]),
         )
         const fields: Record<string, unknown> = {}
         for (const q of visibleCheckoutQuestions(ticketQuestions, answersForAttendee)) {
-          const key = `${item.ticketTypeId}:${i}:${q.id}`
+          const key = `${lineId}:${i}:${q.id}`
           const answer = attendeeAnswers[key]
           if (answer !== undefined) {
             fields[q.id] = answer
@@ -239,15 +267,16 @@ export default function CheckoutFlow({
         }
         attendeeFields.push(fields)
       }
-      return { ...item, attendeeFields }
+      return Object.assign({}, item, { attendeeFields })
     })
   }, [visibleAvailability, quantities, donationAmounts, questions, attendeeAnswers])
 
   const previewTotal = useMemo(
     () =>
       selectedItems.reduce((total, item) => {
+        const itemId = cartItemId(item)
         const ticket = visibleAvailability.find(
-          (c) => c.ticketTypeId === item.ticketTypeId,
+          (c) => availabilityItemId(c) === itemId,
         )
         const unit =
           item.unitAmountCents ??
@@ -261,18 +290,46 @@ export default function CheckoutFlow({
 
   const displayCurrency =
     visibleAvailability[0]?.currency ?? availability[0]?.currency ?? session?.currency ?? 'USD'
+  const selectedMarketingItems = useMemo<MarketingEventItem[]>(
+    () =>
+      selectedItems.map((item) => {
+        const availabilityItem = visibleAvailability.find(
+          (candidate) => availabilityItemId(candidate) === cartItemId(item),
+        )
+        return {
+          id: item.ticketTypeId ?? item.productId,
+          name: availabilityItem?.name,
+          quantity: item.quantity,
+          priceCents: item.unitAmountCents ?? availabilityItem?.priceCents,
+        }
+      }),
+    [selectedItems, visibleAvailability],
+  )
 
   const emailValid = buyer.email.includes('@') && buyer.email.includes('.')
+  const paymentBillingDetails = useMemo(() => {
+    const name = [buyer.firstName, buyer.lastName].filter(Boolean).join(' ')
+    return {
+      name: name || undefined,
+      email: buyer.email || undefined,
+      phone: buyer.phone || undefined,
+    }
+  }, [buyer.email, buyer.firstName, buyer.lastName, buyer.phone])
 
   // Validate donation amounts and attendee questions before creating session.
   function validateCart(): string | null {
     for (const item of selectedItems) {
+      if (!item.ticketTypeId) continue
+      const lineId = cartItemId(item)
       const ticket = visibleAvailability.find(
-        (t) => t.ticketTypeId === item.ticketTypeId,
+        (t) => availabilityItemId(t) === lineId,
       )
       if (!ticket) continue
+      if (item.quantity > 0 && item.quantity < ticket.minPerOrder) {
+        return `${ticket.name} requires at least ${ticket.minPerOrder} per order.`
+      }
       if (ticket.kind === 'donation') {
-        const amount = donationAmounts[item.ticketTypeId] ?? item.unitAmountCents ?? 0
+        const amount = donationAmounts[lineId] ?? item.unitAmountCents ?? 0
         if (amount < (ticket.minimumPriceCents ?? 0)) {
           return `Donation for ${ticket.name} must be at least ${formatCurrency(ticket.minimumPriceCents ?? 0, ticket.currency)}.`
         }
@@ -282,8 +339,10 @@ export default function CheckoutFlow({
     // Validate required attendee questions.
     if (questions) {
       for (const item of selectedItems) {
+        if (!item.ticketTypeId) continue
+        const lineId = cartItemId(item)
         const ticketType = visibleAvailability.find(
-          (t) => t.ticketTypeId === item.ticketTypeId,
+          (t) => availabilityItemId(t) === lineId,
         )
         const ticketQuestions = questions.attendeeQuestions.filter(
           (q) => !q.ticketTypeId || q.ticketTypeId === item.ticketTypeId,
@@ -292,15 +351,12 @@ export default function CheckoutFlow({
           const answersForAttendee = Object.fromEntries(
             ticketQuestions.map((q) => [
               q.id,
-              attendeeAnswers[`${item.ticketTypeId}:${i}:${q.id}`],
+              attendeeAnswers[`${lineId}:${i}:${q.id}`],
             ]),
           )
           for (const q of visibleCheckoutQuestions(ticketQuestions, answersForAttendee)) {
-            if (q.type === 'file' && q.required) {
-              return 'File upload questions are not available for checkout yet.'
-            }
             if (!q.required) continue
-            const key = `${item.ticketTypeId}:${i}:${q.id}`
+            const key = `${lineId}:${i}:${q.id}`
             const answer = attendeeAnswers[key]
             if (isAnswerEmpty(answer)) {
               return `Please complete all required attendee fields for ${ticketType?.name ?? 'this ticket'}.`
@@ -311,9 +367,6 @@ export default function CheckoutFlow({
 
       // Validate required buyer questions.
       for (const q of visibleCheckoutQuestions(questions.buyerQuestions, buyerAnswers)) {
-        if (q.type === 'file' && q.required) {
-          return 'File upload questions are not available for checkout yet.'
-        }
         if (!q.required) continue
         const answer = buyerAnswers[q.id]
         if (isAnswerEmpty(answer)) {
@@ -325,8 +378,10 @@ export default function CheckoutFlow({
     // Validate access code when cart has locked tickets.
     if (cartHasLockedTicket) {
       const lockedTicket = selectedItems.find((item) => {
+        if (!item.ticketTypeId) return false
+        const lineId = cartItemId(item)
         const ticket = visibleAvailability.find(
-          (candidate) => candidate.ticketTypeId === item.ticketTypeId,
+          (candidate) => availabilityItemId(candidate) === lineId,
         )
         return ticket?.requiresAccessCode && !unlockedTicketTypeIds.has(item.ticketTypeId)
       })
@@ -415,6 +470,7 @@ export default function CheckoutFlow({
             : prefilledItems
           const next: Record<string, number> = {}
           for (const item of loadedAvailability) {
+            const itemId = availabilityItemId(item)
             const prefilledItem = initialPrefilledItems.find(
               (preset) => preset.ticketTypeId === item.ticketTypeId,
             )
@@ -425,8 +481,8 @@ export default function CheckoutFlow({
                 item.available,
               )
               : 0
-            next[item.ticketTypeId] =
-              current[item.ticketTypeId] ?? prefilledQuantity
+            next[itemId] =
+              current[itemId] ?? prefilledQuantity
           }
           didApplyPrefilledItemsRef.current = true
           return next
@@ -436,8 +492,9 @@ export default function CheckoutFlow({
           const next = { ...current }
           for (const item of loadedAvailability) {
             if (item.kind === 'donation') {
-              next[item.ticketTypeId] =
-                current[item.ticketTypeId] ??
+              const itemId = availabilityItemId(item)
+              next[itemId] =
+                current[itemId] ??
                 Math.max(item.minimumPriceCents ?? 0, item.priceCents)
             }
           }
@@ -469,38 +526,109 @@ export default function CheckoutFlow({
     }
   }, [eventId, prefilledItems, productFilterParam])
 
+  useEffect(() => {
+    if (!waitlistClaimToken) return
+    const claimToken = waitlistClaimToken
+    let cancelled = false
+    const controller = new AbortController()
+
+    async function loadWaitlistClaim() {
+      setLoading(true)
+      setError(null)
+      try {
+        const claim = await publicApi.getWaitlistClaim(
+          claimToken,
+          controller.signal,
+        )
+        if (cancelled) return
+        if (claim.eventId && claim.eventId !== eventId) {
+          setEventId(claim.eventId)
+        }
+        setClaimTicketTypeId(claim.ticketTypeId)
+        setClaimQuantity(Math.max(1, claim.quantity))
+        setBuyer((current) => ({
+          ...current,
+          email: current.email || claim.email,
+          firstName: current.firstName || claim.firstName || '',
+          lastName: current.lastName || claim.lastName || '',
+          phone: current.phone || claim.phone || '',
+        }))
+        setWaitlistMessage('Waitlist offer applied.')
+      } catch (err) {
+        if (!cancelled && !controller.signal.aborted) {
+          setError(userFacingMessage(err))
+        }
+      } finally {
+        if (!cancelled) setLoading(false)
+      }
+    }
+
+    void loadWaitlistClaim()
+    return () => {
+      cancelled = true
+      controller.abort()
+    }
+  }, [eventId, waitlistClaimToken])
+
+  useEffect(() => {
+    if (!claimTicketTypeId || didApplyWaitlistClaimRef.current) return
+    const claimTicket = visibleAvailability.find(
+      (ticket) => ticket.ticketTypeId === claimTicketTypeId,
+    )
+    if (!claimTicket) return
+    didApplyWaitlistClaimRef.current = true
+    const quantity = Math.min(claimQuantity, claimTicket.maxPerOrder)
+    setQuantities((current) => ({
+      ...current,
+      [availabilityItemId(claimTicket)]: quantity,
+    }))
+  }, [claimQuantity, claimTicketTypeId, visibleAvailability])
+
   const handlePaymentError = useCallback((message: string) => {
     setError(message)
   }, [])
 
-  function increase(ticketTypeId: string) {
-    const ticket = visibleAvailability.find((t) => t.ticketTypeId === ticketTypeId)
-    if (ticket?.requiresAccessCode && !unlockedTicketTypeIds.has(ticketTypeId)) return
-    setQuantities((current) => ({
-      ...current,
-      [ticketTypeId]: (current[ticketTypeId] ?? 0) + 1,
-    }))
+  function increase(itemId: string) {
+    const ticket = visibleAvailability.find((t) => availabilityItemId(t) === itemId)
+    if (ticket?.ticketTypeId && ticket.requiresAccessCode && !unlockedTicketTypeIds.has(ticket.ticketTypeId)) return
+    setQuantities((current) => {
+      const quantity = current[itemId] ?? 0
+      const maximum = Math.min(ticket?.maxPerOrder ?? Number.POSITIVE_INFINITY, ticket?.available ?? Number.POSITIVE_INFINITY)
+      const minimum = ticket?.minPerOrder ?? 1
+      const nextQuantity = quantity === 0 ? minimum : quantity + 1
+      return {
+        ...current,
+        [itemId]: Math.min(nextQuantity, maximum),
+      }
+    })
   }
-  function decrease(ticketTypeId: string) {
-    setQuantities((current) => ({
-      ...current,
-      [ticketTypeId]: Math.max(0, (current[ticketTypeId] ?? 0) - 1),
-    }))
+  function decrease(itemId: string) {
+    const ticket = visibleAvailability.find((t) => availabilityItemId(t) === itemId)
+    setQuantities((current) => {
+      const quantity = current[itemId] ?? 0
+      const minimum = ticket?.minPerOrder ?? 1
+      return {
+        ...current,
+        [itemId]: quantity <= minimum ? 0 : quantity - 1,
+      }
+    })
   }
 
   function handleDonationAmountChange(
-    ticketTypeId: string,
+    itemId: string,
     amountCents: number,
   ) {
     setDonationAmounts((current) => ({
       ...current,
-      [ticketTypeId]: amountCents,
+      [itemId]: amountCents,
     }))
   }
 
   async function applyAccessCode(code: string) {
     const lockedTicketTypeIds = visibleAvailability
-      .filter((ticket) => ticket.requiresAccessCode)
+      .filter((ticket): ticket is AvailabilityItem & { ticketTypeId: string } =>
+        Boolean(ticket.ticketTypeId && ticket.requiresAccessCode),
+      )
       .map((ticket) => ticket.ticketTypeId)
     if (lockedTicketTypeIds.length === 0) return
 
@@ -543,6 +671,35 @@ export default function CheckoutFlow({
   function removeDiscount() {
     setDiscountCode(undefined)
     setPromoApplied(false)
+  }
+
+  async function joinWaitlist(ticket: AvailabilityItem) {
+    if (!ticket.ticketTypeId) return
+    if (!validateEmail()) return
+    setLoading(true)
+    setError(null)
+    setValidationError(null)
+    setWaitlistMessage(null)
+    try {
+      const entry = await publicApi.joinWaitlist(eventId, {
+        ticketTypeId: ticket.ticketTypeId,
+        email: buyer.email,
+        firstName: buyer.firstName || undefined,
+        lastName: buyer.lastName || undefined,
+        phone: buyer.phone || undefined,
+        quantity: Math.max(1, quantities[availabilityItemId(ticket)] ?? 1),
+      })
+      setWaitlistTicketTypeIds((current) => {
+        const next = new Set(current)
+        next.add(entry.ticketTypeId)
+        return next
+      })
+      setWaitlistMessage(`You're on the waitlist for ${ticket.name}.`)
+    } catch (err) {
+      setError(userFacingMessage(err))
+    } finally {
+      setLoading(false)
+    }
   }
 
   function validateEmail() {
@@ -593,6 +750,7 @@ export default function CheckoutFlow({
         // can use a promo code alongside an access code for locked tickets.
         discountCode: discountCode || undefined,
         accessCode: accessCodeApplied ? accessCode : undefined,
+        waitlistClaimToken: waitlistClaimToken || undefined,
         trackingId,
         affiliateCode,
         successUrl,
@@ -612,6 +770,13 @@ export default function CheckoutFlow({
       // Store the token in sessionStorage for resume after redirect.
       // Do NOT write the token to the URL or browser history.
       storeSessionToken(created.id, created.clientToken)
+      trackMarketingEvent(event?.marketingIntegrations, 'begin_checkout', {
+        eventId,
+        sessionId: created.id,
+        currency: created.currency ?? displayCurrency,
+        valueCents: created.quote.totalCents,
+        items: selectedMarketingItems,
+      })
       emitCheckoutEvent('checkout_started', {
         sessionId: created.id,
         eventId,
@@ -633,6 +798,14 @@ export default function CheckoutFlow({
       if ('order' in result) {
         setPhase('completed')
         const order = result.order
+        trackMarketingEvent(event?.marketingIntegrations, 'purchase', {
+          eventId,
+          sessionId: session.id,
+          orderId: order.id,
+          currency: order.currency ?? session.currency ?? displayCurrency,
+          valueCents: order.totalCents,
+          items: selectedMarketingItems,
+        })
         emitCheckoutEvent('order_completed', {
           sessionId: session.id,
           orderId: order.id,
@@ -670,14 +843,16 @@ export default function CheckoutFlow({
   const attendeeQuestionGroups = useMemo(() => {
     if (!questions) return []
     return selectedItems
+      .filter((item): item is CartItem & { ticketTypeId: string } => Boolean(item.ticketTypeId))
       .map((item) => {
         const ticket = visibleAvailability.find(
-          (t) => t.ticketTypeId === item.ticketTypeId,
+          (t) => availabilityItemId(t) === cartItemId(item),
         )
         const itemQuestions = questions.attendeeQuestions.filter(
           (q) => !q.ticketTypeId || q.ticketTypeId === item.ticketTypeId,
         )
         return {
+          lineId: cartItemId(item),
           ticketTypeId: item.ticketTypeId,
           ticketName: ticket?.name ?? 'Ticket',
           quantity: item.quantity,
@@ -794,6 +969,8 @@ export default function CheckoutFlow({
                       donationAmounts={donationAmounts}
                       onDonationAmountChange={handleDonationAmountChange}
                       unlockedTicketTypeIds={unlockedTicketTypeIds}
+                      waitlistTicketTypeIds={waitlistTicketTypeIds}
+                      onJoinWaitlist={joinWaitlist}
                     />
                   )}
 
@@ -840,6 +1017,7 @@ export default function CheckoutFlow({
                     onChange={setBuyer}
                     disabled={loading && phase === 'confirm'}
                     emailError={emailError}
+                    eventId={eventId}
                     buyerQuestions={questions?.buyerQuestions}
                     buyerAnswers={buyerAnswers}
                     onBuyerAnswersChange={setBuyerAnswers}
@@ -863,6 +1041,7 @@ export default function CheckoutFlow({
                     }
                     currency={confirmResult.currency}
                     totalCents={confirmResult.totalCents}
+                    billingDetails={paymentBillingDetails}
                     // Return URL contains only sessionId, no token.
                     // The confirmation page resolves the session via
                     // sessionId using the token from sessionStorage.
@@ -906,6 +1085,14 @@ export default function CheckoutFlow({
                     <AlertCircleIcon />
                     <AlertTitle>Please fix the following</AlertTitle>
                     <AlertDescription>{validationError}</AlertDescription>
+                  </Alert>
+                ) : null}
+
+                {waitlistMessage ? (
+                  <Alert>
+                    <CheckCircle2Icon />
+                    <AlertTitle>Waitlist</AlertTitle>
+                    <AlertDescription>{waitlistMessage}</AlertDescription>
                   </Alert>
                 ) : null}
 
@@ -976,11 +1163,11 @@ function Surface({
   children: React.ReactNode
 }) {
   return (
-    <div
+    <main
       className='min-h-svh bg-background text-foreground'
       style={brandThemeStyle(brand)}
     >
       {children}
-    </div>
+    </main>
   )
 }

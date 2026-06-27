@@ -113,14 +113,38 @@ export function DataTable<TData, TValue>({
             {table.getHeaderGroups().map((headerGroup) => (
               <TableRow key={headerGroup.id} className='hover:bg-transparent'>
                 {headerGroup.headers.map((header) => {
+                  const headerDefinition = header.column.columnDef.header
+                  const hasFallbackHeader =
+                    header.isPlaceholder ||
+                    headerDefinition === null ||
+                    headerDefinition === undefined ||
+                    headerDefinition === ''
+                  const headerContent = header.isPlaceholder
+                    ? null
+                    : flexRender(
+                        headerDefinition,
+                        header.getContext()
+                      )
+                  const needsFallbackHeader =
+                    hasFallbackHeader ||
+                    headerContent === null ||
+                    headerContent === undefined ||
+                    headerContent === false ||
+                    headerContent === ''
+                  const fallbackHeader =
+                    header.column.id === 'actions' ? 'Actions' : header.column.id
+
                   return (
-                    <TableHead key={header.id} colSpan={header.colSpan}>
-                      {header.isPlaceholder
-                        ? null
-                        : flexRender(
-                            header.column.columnDef.header,
-                            header.getContext()
-                          )}
+                    <TableHead
+                      key={header.id}
+                      colSpan={header.colSpan}
+                      aria-label={needsFallbackHeader ? fallbackHeader : undefined}
+                    >
+                      {needsFallbackHeader ? (
+                        <span className='sr-only'>{fallbackHeader}</span>
+                      ) : (
+                        headerContent
+                      )}
                     </TableHead>
                   )
                 })}

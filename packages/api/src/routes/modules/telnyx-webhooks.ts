@@ -1,6 +1,6 @@
 import type { FastifyPluginAsync } from 'fastify';
 import { createPublicKey, verify as verifySignature } from 'node:crypto';
-import { SmsDeliveryRepository, SmsProviderEventRepository } from '@gatekit/db';
+import { SmsDeliveryRepository, SmsProviderEventRepository } from '@tixkit/db';
 
 type TelnyxWebhookData = {
   id?: string;
@@ -20,6 +20,8 @@ type TelnyxWebhookBody = {
 };
 
 const RAW_ED25519_PUBLIC_KEY_DER_PREFIX = Buffer.from('302a300506032b6570032100', 'hex');
+const TELNYX_WEBHOOK_TIMESTAMP_TOLERANCE_SECONDS = 5 * 60;
+const TERMINAL_DELIVERY_STATUSES = new Set(['delivered', 'failed']);
 
 export const telnyxWebhookRoutes: FastifyPluginAsync = async (app) => {
   const db = app.context.db;
@@ -41,6 +43,7 @@ export const telnyxWebhookRoutes: FastifyPluginAsync = async (app) => {
       timestamp: request.headers['telnyx-timestamp'],
       signature: request.headers['telnyx-signature-ed25519'],
       publicKey: process.env.TELNYX_WEBHOOK_PUBLIC_KEY ?? process.env.TELNYX_PUBLIC_KEY,
+      allowUnsigned: process.env.TELNYX_WEBHOOK_ALLOW_UNSIGNED,
       nodeEnv: process.env.NODE_ENV,
     });
 
@@ -70,32 +73,50 @@ export const telnyxWebhookRoutes: FastifyPluginAsync = async (app) => {
       });
     }
 
-    const eventRepo = new SmsProviderEventRepository(db);
-    const existingEvent = await eventRepo.findByProviderEventId('telnyx', providerEventId);
-    if (existingEvent) {
-      return reply.status(200).send({ received: true, duplicate: true });
-    }
+    try {
+      const result = await db.transaction().execute(async (trx) => {
+        const txDb = trx as typeof db;
+        const eventRepo = new SmsProviderEventRepository(txDb);
+        const existingEvent = await eventRepo.findByProviderEventId('telnyx', providerEventId);
+        if (existingEvent) {
+          return { duplicate: true };
+        }
 
-    const deliveryRepo = new SmsDeliveryRepository(db);
-    const delivery = providerMessageId
-      ? await deliveryRepo.findByProviderMessageId('telnyx', providerMessageId)
-      : undefined;
+        const deliveryRepo = new SmsDeliveryRepository(txDb);
+        const delivery = providerMessageId
+          ? await deliveryRepo.findByProviderMessageId('telnyx', providerMessageId)
+          : undefined;
 
-    if (delivery && providerMessageId) {
-      const update = telnyxDeliveryUpdate(eventType, data?.payload);
-      if (Object.keys(update).length > 0) {
-        await deliveryRepo.update(delivery.id, update);
+        await eventRepo.create({
+          tenantId: delivery?.tenant_id ?? null,
+          provider: 'telnyx',
+          providerEventId,
+          eventType,
+          providerMessageId,
+          rawPayload: body as Record<string, unknown>,
+        });
+
+        if (delivery && providerMessageId) {
+          const update = telnyxDeliveryUpdate(eventType, data?.payload);
+          if (shouldApplyTelnyxDeliveryUpdate(delivery.status, update)) {
+            await deliveryRepo.update(delivery.id, update);
+          }
+        }
+
+        return { duplicate: false };
+      });
+
+      if (result.duplicate) {
+        return reply.status(200).send({ received: true, duplicate: true });
       }
+    } catch (err) {
+      const eventRepo = new SmsProviderEventRepository(db);
+      const racedEvent = await eventRepo.findByProviderEventId('telnyx', providerEventId);
+      if (racedEvent) {
+        return reply.status(200).send({ received: true, duplicate: true });
+      }
+      throw err;
     }
-
-    await eventRepo.create({
-      tenantId: delivery?.tenant_id ?? null,
-      provider: 'telnyx',
-      providerEventId,
-      eventType,
-      providerMessageId,
-      rawPayload: body as Record<string, unknown>,
-    });
 
     return reply.status(200).send({ received: true });
   });
@@ -106,6 +127,7 @@ export function verifyTelnyxWebhookRequest(input: {
   timestamp: unknown;
   signature: unknown;
   publicKey?: string;
+  allowUnsigned?: string;
   nodeEnv?: string;
 }):
   | { ok: true }
@@ -115,17 +137,16 @@ export function verifyTelnyxWebhookRequest(input: {
       code: string;
       message: string;
     } {
-  const shouldVerify = Boolean(input.publicKey);
-  if (!shouldVerify) {
-    if (input.nodeEnv === 'production') {
-      return {
-        ok: false,
-        status: 503,
-        code: 'WEBHOOK_NOT_CONFIGURED',
-        message: 'Telnyx webhook public key is not configured',
-      };
-    }
-    return { ok: true };
+  const publicKey = typeof input.publicKey === 'string' ? input.publicKey.trim() : '';
+  if (!publicKey) {
+    if (input.nodeEnv === 'test' && input.allowUnsigned === 'true') return { ok: true };
+
+    return {
+      ok: false,
+      status: 503,
+      code: 'WEBHOOK_NOT_CONFIGURED',
+      message: 'Telnyx webhook public key is not configured',
+    };
   }
 
   if (typeof input.timestamp !== 'string' || typeof input.signature !== 'string') {
@@ -137,8 +158,30 @@ export function verifyTelnyxWebhookRequest(input: {
     };
   }
 
+  const timestamp = parseTelnyxTimestamp(input.timestamp);
+  if (timestamp === undefined) {
+    return {
+      ok: false,
+      status: 400,
+      code: 'WEBHOOK_SIGNATURE_INVALID',
+      message: 'Telnyx webhook timestamp is invalid',
+    };
+  }
+
+  const nowSeconds = Math.floor(Date.now() / 1000);
+  const earliestAllowed = nowSeconds - TELNYX_WEBHOOK_TIMESTAMP_TOLERANCE_SECONDS;
+  const latestAllowed = nowSeconds + TELNYX_WEBHOOK_TIMESTAMP_TOLERANCE_SECONDS;
+  if (timestamp < earliestAllowed || timestamp > latestAllowed) {
+    return {
+      ok: false,
+      status: 400,
+      code: 'WEBHOOK_SIGNATURE_INVALID',
+      message: 'Telnyx webhook timestamp is outside the allowed tolerance',
+    };
+  }
+
   try {
-    const key = createTelnyxPublicKey(input.publicKey!);
+    const key = createTelnyxPublicKey(publicKey);
     const payload = Buffer.from(`${input.timestamp}|${input.rawBody}`);
     const signature = Buffer.from(input.signature, 'base64');
     if (!verifySignature(null, payload, key, signature)) {
@@ -158,6 +201,13 @@ export function verifyTelnyxWebhookRequest(input: {
       message: err instanceof Error ? err.message : 'Telnyx webhook signature is invalid',
     };
   }
+}
+
+function parseTelnyxTimestamp(timestamp: string): number | undefined {
+  if (!/^\d+$/.test(timestamp)) return undefined;
+  const parsed = Number(timestamp);
+  if (!Number.isSafeInteger(parsed)) return undefined;
+  return parsed;
 }
 
 function createTelnyxPublicKey(publicKey: string) {
@@ -207,4 +257,13 @@ function telnyxDeliveryUpdate(
     failed_at: new Date(),
     failure_reason: failureReason,
   };
+}
+
+function shouldApplyTelnyxDeliveryUpdate(currentStatus: unknown, update: Record<string, unknown>): boolean {
+  if (Object.keys(update).length === 0) return false;
+
+  const nextStatus = update.status;
+  if (typeof currentStatus !== 'string' || typeof nextStatus !== 'string') return true;
+
+  return !(TERMINAL_DELIVERY_STATUSES.has(currentStatus) && !TERMINAL_DELIVERY_STATUSES.has(nextStatus));
 }

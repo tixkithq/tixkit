@@ -1,4 +1,4 @@
-export type GateKitPermission =
+export type TixkitPermission =
   | 'events.read'
   | 'events.write'
   | 'tickets.write'
@@ -24,9 +24,9 @@ export type NavBadgeTone =
 
 /**
  * All permissions granted to the local-dev user when Clerk is unavailable.
- * In production these come from the GateKit principal resolved after Clerk auth.
+ * In production these come from the Tixkit principal resolved after Clerk auth.
  */
-export const LOCAL_DEV_PERMISSIONS: GateKitPermission[] = [
+export const LOCAL_DEV_PERMISSIONS: TixkitPermission[] = [
   'events.read',
   'events.write',
   'tickets.write',
@@ -49,8 +49,8 @@ export const LOCAL_DEV_PERMISSIONS: GateKitPermission[] = [
  * Returns true when no permission is required or the set includes it.
  */
 export function hasPermission(
-  granted: GateKitPermission[] | undefined,
-  required: GateKitPermission | undefined
+  granted: TixkitPermission[] | undefined,
+  required: TixkitPermission | undefined
 ): boolean {
   if (!required) return true
   if (!granted) return false

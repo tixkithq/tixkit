@@ -1,5 +1,6 @@
-import { createDb } from '@gatekit/db';
-import { OrderRepository, PaymentIntentRepository, RefundRepository } from '@gatekit/db';
+import { createDb, type Database } from '@tixkit/db';
+import { OrderRepository, PaymentIntentRepository, RefundRepository } from '@tixkit/db';
+import { withSpan } from '@tixkit/shared';
 import { Connection, Client } from '@temporalio/client';
 import Stripe from 'stripe';
 import { notificationDeliveryWorkflow } from '../workflows/notification.js';
@@ -10,6 +11,7 @@ import { okResult, errResult } from '../shared/types.js';
 
 const TEMPORAL_ADDRESS = process.env.TEMPORAL_ADDRESS ?? 'localhost:7233';
 const TEMPORAL_NAMESPACE = process.env.TEMPORAL_NAMESPACE ?? 'default';
+const TEMPORAL_TASK_QUEUE = process.env.TEMPORAL_TASK_QUEUE ?? 'tixkit';
 
 let cachedClient: Client | null = null;
 
@@ -27,7 +29,7 @@ async function startNotificationWorkflow(input: Omit<NotificationDeliveryWorkflo
     const workflowId = notificationWorkflowId(input.jobId);
     try {
       await client.workflow.start(notificationDeliveryWorkflow, {
-        taskQueue: 'gatekit',
+        taskQueue: TEMPORAL_TASK_QUEUE,
         workflowId,
         args: [{ version: NOTIFICATION_WORKFLOW_VERSION, ...input }],
       });
@@ -66,100 +68,137 @@ export async function processRefundActivity(input: {
 }): Promise<WorkflowActivityResult<{ providerRefundId: string; status: string }>> {
   const db = createDb();
   try {
-    const orderRepo = new OrderRepository(db);
-    const piRepo = new PaymentIntentRepository(db);
-    const refundRepo = new RefundRepository(db);
-
-    const order = await orderRepo.findById(input.orderId);
-    if (!order) {
-      return errResult('ORDER_NOT_FOUND', 'Order not found', false);
-    }
-
     const callerKey = input.idempotencyKey ?? `refund-${input.orderId}`;
     const stripeIdempotencyKey = `${callerKey}:${input.nonce}`;
-
-    const dbPi = order.payment_intent_id ? await piRepo.findById(order.payment_intent_id) : null;
     const stripeSecretKey = process.env.STRIPE_SECRET_KEY;
 
-    const existingRefunds = await refundRepo.findByOrder(order.id);
-    const existingForKey = existingRefunds.find((refund) => {
-      const metadata = parseMetadata(refund.metadata);
-      return metadata.stripeIdempotencyKey === stripeIdempotencyKey || metadata.refundNonce === input.nonce;
-    });
+    return await db.transaction().execute(async (trx): Promise<WorkflowActivityResult<{ providerRefundId: string; status: string }>> => {
+      const orderRepo = new OrderRepository(trx as Database);
+      const piRepo = new PaymentIntentRepository(trx as Database);
+      const refundRepo = new RefundRepository(trx as Database);
 
-    const alreadyRefunded = existingRefunds.reduce((sum, r) => sum + Number(r.amount_cents), 0);
-    if (!existingForKey && alreadyRefunded + input.amountCents > Number(order.total_cents)) {
-      return errResult('REFUND_EXCEEDS_TOTAL', 'Refund amount exceeds order total', false);
-    }
+      const order = await trx
+        .selectFrom('orders')
+        .selectAll()
+        .where('id', '=', input.orderId)
+        .forUpdate()
+        .executeTakeFirst();
+      if (!order) {
+        return errResult('ORDER_NOT_FOUND', 'Order not found', false);
+      }
 
-    let stripeRefundId: string | undefined;
-    let providerRefundId: string = existingForKey?.provider_refund_id as string;
-    let createdRefund = false;
+      const dbPi = order.payment_intent_id ? await piRepo.findById(order.payment_intent_id) : null;
 
-    if (!existingForKey) {
-      if (stripeSecretKey && dbPi?.provider_intent_id) {
-        const stripe = new Stripe(stripeSecretKey);
+      const existingRefunds = await trx
+        .selectFrom('refunds')
+        .selectAll()
+        .where('order_id', '=', order.id)
+        .execute();
+      const existingForKey = existingRefunds.find((refund) => {
+        const metadata = parseMetadata(refund.metadata);
+        return metadata.stripeIdempotencyKey === stripeIdempotencyKey || metadata.refundNonce === input.nonce;
+      });
 
-        const refundOpts: Stripe.RefundCreateParams = {
-          payment_intent: dbPi.provider_intent_id,
-          amount: input.amountCents,
-          reason: 'requested_by_customer',
-        };
+      const alreadyRefunded = existingRefunds
+        .filter((refund) => refund.status === 'succeeded')
+        .reduce((sum, r) => sum + Number(r.amount_cents), 0);
+      if (!existingForKey && alreadyRefunded + input.amountCents > Number(order.total_cents)) {
+        return errResult('REFUND_EXCEEDS_TOTAL', 'Refund amount exceeds order total', false);
+      }
 
-        const stripeRefund = await stripe.refunds.create(
-          refundOpts,
-          {
-            idempotencyKey: stripeIdempotencyKey,
-          },
+      let stripeRefundId: string | undefined;
+      let providerRefundId = existingForKey?.provider_refund_id ?? '';
+      let createdRefund = false;
+
+      if (!existingForKey) {
+        if (stripeSecretKey && dbPi?.provider_intent_id) {
+          const stripe = new Stripe(stripeSecretKey);
+
+          const refundOpts: Stripe.RefundCreateParams = {
+            payment_intent: dbPi.provider_intent_id,
+            amount: input.amountCents,
+            reason: 'requested_by_customer',
+          };
+
+          const stripeRefund = await withSpan(
+            'provider.stripe.refund.create',
+            {
+              'tixkit.provider': 'stripe',
+              'tixkit.provider.operation': 'refund.create',
+              'tixkit.tenant_id': order.tenant_id,
+              'tixkit.order_id': input.orderId,
+              'tixkit.payment_intent_id': dbPi.id,
+            },
+            async (span) => {
+              const created = await stripe.refunds.create(
+                refundOpts,
+                {
+                  idempotencyKey: stripeIdempotencyKey,
+                },
+              );
+              span.setAttribute('tixkit.provider.refund_id', created.id);
+              span.setAttribute('tixkit.provider.refund_status', created.status ?? 'unknown');
+              return created;
+            },
+          );
+          stripeRefundId = stripeRefund.id;
+          providerRefundId = stripeRefund.id;
+        } else {
+          // No Stripe configured or no payment intent; use a local deterministic id.
+          providerRefundId = `local-refund:${input.orderId}:${input.nonce}`;
+        }
+
+        // Dedupe only on the true provider refund id (from Stripe response) for webhook replay.
+        if (!existingRefunds.some((r) => r.provider_refund_id === providerRefundId)) {
+          await refundRepo.create({
+            tenantId: order.tenant_id,
+            orderId: order.id,
+            paymentIntentId: dbPi?.id,
+            provider: 'stripe',
+            providerRefundId,
+            amountCents: input.amountCents,
+            currency: order.currency,
+            reason: input.reason,
+            metadata: { stripeIdempotencyKey, stripeRefundId: stripeRefundId ?? providerRefundId, refundNonce: input.nonce },
+            status: 'succeeded',
+          });
+          createdRefund = true;
+        }
+      }
+
+      // Recompute the refunded total from persisted refund records so the ledger
+      // is correct regardless of how many times this activity is retried.
+      const allRefunds = await trx
+        .selectFrom('refunds')
+        .selectAll()
+        .where('order_id', '=', order.id)
+        .execute();
+      const totalRefunded = allRefunds
+        .filter((refund) => refund.status === 'succeeded')
+        .reduce((sum, r) => sum + Number(r.amount_cents), 0);
+      const newStatus = totalRefunded >= Number(order.total_cents) ? 'refunded' : 'partially_refunded';
+      await orderRepo.update(order.id, {
+        refunded_cents: totalRefunded,
+        status: newStatus,
+        refunded_at: new Date(),
+      });
+      await trx
+        .updateTable('invoices')
+        .set({ refunded_cents: totalRefunded, updated_at: new Date() })
+        .where('order_id', '=', order.id)
+        .execute();
+
+      if (createdRefund) {
+        await orderRepo.addTimelineEvent(
+          order.id,
+          'order.refunded',
+          `Refunded ${input.amountCents} cents: ${input.reason}`,
+          { refundId: providerRefundId },
         );
-        stripeRefundId = stripeRefund.id;
-        providerRefundId = stripeRefund.id;
-      } else {
-        // No Stripe configured or no payment intent; use a local deterministic id.
-        providerRefundId = `local-refund:${input.orderId}:${input.nonce}`;
       }
 
-      // Dedupe only on the true provider refund id (from Stripe response) for webhook replay.
-      if (!existingRefunds.some((r) => r.provider_refund_id === providerRefundId)) {
-        await refundRepo.create({
-          tenantId: order.tenant_id,
-          orderId: order.id,
-          paymentIntentId: dbPi?.id,
-          provider: 'stripe',
-          providerRefundId,
-          amountCents: input.amountCents,
-          currency: order.currency,
-          reason: input.reason,
-          metadata: { stripeIdempotencyKey, stripeRefundId: stripeRefundId ?? providerRefundId, refundNonce: input.nonce },
-          status: 'succeeded',
-        });
-        createdRefund = true;
-      }
-    }
-
-    // Recompute the refunded total from persisted refund records so the ledger
-    // is correct regardless of how many times this activity is retried.
-    const allRefunds = await refundRepo.findByOrder(order.id);
-    const totalRefunded = allRefunds
-      .filter((refund) => refund.status === 'succeeded')
-      .reduce((sum, r) => sum + Number(r.amount_cents), 0);
-    const newStatus = totalRefunded >= Number(order.total_cents) ? 'refunded' : 'partially_refunded';
-    await orderRepo.update(order.id, {
-      refunded_cents: totalRefunded,
-      status: newStatus,
-      refunded_at: new Date(),
+      return okResult({ providerRefundId, status: 'succeeded' });
     });
-
-    if (createdRefund) {
-      await orderRepo.addTimelineEvent(
-        order.id,
-        'order.refunded',
-        `Refunded ${input.amountCents} cents: ${input.reason}`,
-        { refundId: providerRefundId },
-      );
-    }
-
-    return okResult({ providerRefundId, status: 'succeeded' });
   } catch (err) {
     return errResult('REFUND_FAILED', err instanceof Error ? err.message : 'Unknown error', true);
   } finally {
@@ -197,7 +236,14 @@ export async function updateLedgerActivity(input: {
 
     const refundAmount = input.refundAmountCents;
     const ratio = total > 0 ? refundAmount / total : 0;
-    const taxRefundCents = Math.min(Number(order.tax_cents), Math.round(Number(order.tax_cents) * ratio));
+    const taxSnapshots = await db
+      .selectFrom('order_tax_snapshots')
+      .select(['tax_cents'])
+      .where('order_id', '=', input.orderId)
+      .execute();
+    const persistedTaxCents = taxSnapshots.reduce((sum, snapshot) => sum + Number(snapshot.tax_cents), 0);
+    const taxBasisCents = persistedTaxCents > 0 ? persistedTaxCents : Number(order.tax_cents);
+    const taxRefundCents = Math.min(taxBasisCents, Math.round(taxBasisCents * ratio));
     const feeRefundCents = Math.min(Number(order.fee_cents), Math.round(Number(order.fee_cents) * ratio));
     const grossRefundCents = Math.max(0, refundAmount - taxRefundCents - feeRefundCents);
     const netRevenueDeltaCents = -Math.max(0, refundAmount - taxRefundCents);
@@ -288,6 +334,7 @@ export async function voidTicketsActivity(input: {
         }
 
         // Sort line items by unit price descending so we void expensive tickets first.
+        // eslint-disable-next-line unicorn/no-array-sort -- sorting a copied line-item list preserves deterministic refund allocation.
         const sortedLines = [...lineItems].sort(
           (a, b) => Number(b.unit_price_cents) - Number(a.unit_price_cents),
         );
@@ -296,6 +343,7 @@ export async function voidTicketsActivity(input: {
         ticketsToVoid = [];
 
         for (const line of sortedLines) {
+          if (!line.ticket_type_id) continue;
           if (remainingAmount <= 0) break;
           const quantity = Math.max(1, Number(line.quantity));
           const lineTotalCents = Number(line.total_cents ?? 0);
@@ -319,9 +367,19 @@ export async function voidTicketsActivity(input: {
 
     const voidedTicketIds: string[] = [];
     const now = new Date();
-    for (const ticket of ticketsToVoid) {
-      await db.updateTable('tickets').set({ status: 'void', updated_at: now }).where('id', '=', ticket.id).execute();
-      voidedTicketIds.push(ticket.id);
+    await Promise.all(
+      ticketsToVoid.map((ticket) =>
+        db.updateTable('tickets').set({ status: 'void', updated_at: now }).where('id', '=', ticket.id).execute(),
+      ),
+    );
+    voidedTicketIds.push(...ticketsToVoid.map((ticket) => ticket.id));
+    if (voidedTicketIds.length > 0) {
+      await db
+        .updateTable('wallet_passes')
+        .set({ status: 'revoked', revoked_at: now, updated_at: now })
+        .where('ticket_id', 'in', voidedTicketIds)
+        .where('status', '=', 'active')
+        .execute();
     }
 
     if (refund) {
@@ -384,6 +442,7 @@ export async function restoreInventoryActivity(input: {
         .where('checkout_session_id', '=', order.checkout_session_id)
         .where('status', '=', 'converted')
         .execute();
+      // eslint-disable-next-line unicorn/no-array-sort -- sorted lock acquisition order prevents inventory-pool deadlocks.
       const poolIds = [...new Set(candidateHolds.map((hold) => hold.inventory_pool_id))].sort();
       for (const poolId of poolIds) {
         // eslint-disable-next-line no-await-in-loop -- inventory pools must be locked sequentially in sorted order to avoid deadlocks.
@@ -432,6 +491,7 @@ export async function restoreInventoryActivity(input: {
           const alreadyRestored = previouslyRestoredByTicketType.get(hold.ticket_type_id) ?? 0;
           const remainingQuantity = Math.max(0, Number(hold.quantity) - alreadyRestored);
           if (remainingQuantity === 0) continue;
+          // eslint-disable-next-line no-await-in-loop -- full-refund restoration updates each hold before adjusting its inventory pool.
           await trx
             .updateTable('checkout_holds')
             .set({
@@ -440,6 +500,7 @@ export async function restoreInventoryActivity(input: {
             })
             .where('id', '=', hold.id)
             .execute();
+          // eslint-disable-next-line no-await-in-loop -- pool sold counts are restored immediately after the corresponding hold row.
           await trx
             .updateTable('inventory_pools')
             .set((eb) => ({ sold_count: eb('sold_count', '-', remainingQuantity), updated_at: now }))
@@ -478,6 +539,7 @@ export async function restoreInventoryActivity(input: {
               const remainingHoldQuantity = Math.max(0, Number(hold.quantity) - alreadyRestored);
               if (remainingHoldQuantity === 0) continue;
               const restoreQty = Math.min(remainingHoldQuantity, remaining);
+              // eslint-disable-next-line no-await-in-loop -- partial refund restoration walks matching holds in order until the voided quantity is restored.
               await trx
                 .updateTable('inventory_pools')
                 .set((eb) => ({ sold_count: eb('sold_count', '-', restoreQty), updated_at: now }))
@@ -576,7 +638,7 @@ export async function notifyRefundActivity(input: {
       return okResult({ notified: false });
     }
 
-    const job = await new (await import('@gatekit/db')).EmailJobRepository(db).create({
+    const job = await new (await import('@tixkit/db')).EmailJobRepository(db).create({
       tenantId: input.tenantId,
       brandId: input.brandId,
       templateKey: 'order-refunded',

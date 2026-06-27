@@ -1,17 +1,24 @@
-import { describe, expect, it, beforeAll, afterAll, beforeEach } from 'vitest';
-import { createDb, type Database } from '@gatekit/db';
+import { expect, it, beforeAll, afterAll, beforeEach } from 'vitest';
+import { createDb, type Database } from '@tixkit/db';
 import { InventoryService } from '../../services/inventory.js';
-import { HoldExpiredError } from '@gatekit/domain';
+import { HoldExpiredError } from '@tixkit/domain';
 import { ulid } from 'ulid';
+import {
+  describeWithIntegrationDatabase,
+  integrationDatabaseUrl,
+  restoreDatabaseDriver,
+  setIntegrationDatabaseDriver,
+} from './integration-database.js';
 
 /**
- * Real PostgreSQL concurrency tests for inventory reserve/finalize/refund.
- * These tests require a running PostgreSQL database (bun run infra:up).
+ * Real database concurrency tests for inventory reserve/finalize/refund.
+ * These tests require a running database (bun run infra:up).
  * They prove that sold_count never exceeds capacity under concurrent load.
  */
 
 let db: Database;
 let inventoryService: InventoryService;
+let previousDbDriver: string | undefined;
 
 const TENANT_ID = `tnt_conc_${ulid().slice(-10)}`;
 const ORG_ID = `org_conc_${ulid().slice(-10)}`;
@@ -74,21 +81,21 @@ async function seedEvent(trx: Database): Promise<void> {
   }).execute();
 }
 
-async function cleanupEvent(db: Database): Promise<void> {
+async function cleanupEvent(database: Database): Promise<void> {
   // Clean up in reverse FK order
-  await db.deleteFrom('checkout_holds').where('checkout_session_id', 'like', 'cs_conc_%').execute();
-  await db.deleteFrom('checkout_sessions').where('id', 'like', 'cs_conc_%').execute();
-  await db.deleteFrom('ticket_types').where('event_id', '=', EVENT_ID).execute();
-  await db.deleteFrom('inventory_pools').where('event_id', '=', EVENT_ID).execute();
-  await db.deleteFrom('events').where('id', '=', EVENT_ID).execute();
-  await db.deleteFrom('brands').where('id', '=', BRAND_ID).execute();
-  await db.deleteFrom('organizations').where('id', '=', ORG_ID).execute();
-  await db.deleteFrom('tenants').where('id', '=', TENANT_ID).execute();
+  await database.deleteFrom('checkout_holds').where('checkout_session_id', 'like', 'cs_conc_%').execute();
+  await database.deleteFrom('checkout_sessions').where('id', 'like', 'cs_conc_%').execute();
+  await database.deleteFrom('ticket_types').where('event_id', '=', EVENT_ID).execute();
+  await database.deleteFrom('inventory_pools').where('event_id', '=', EVENT_ID).execute();
+  await database.deleteFrom('events').where('id', '=', EVENT_ID).execute();
+  await database.deleteFrom('brands').where('id', '=', BRAND_ID).execute();
+  await database.deleteFrom('organizations').where('id', '=', ORG_ID).execute();
+  await database.deleteFrom('tenants').where('id', '=', TENANT_ID).execute();
 }
 
-async function createPool(db: Database, capacity: number, ttl = 300): Promise<string> {
+async function createPool(database: Database, capacity: number, ttl = 300): Promise<string> {
   const poolId = `pool_conc_${ulid().slice(-10)}`;
-  await db.insertInto('inventory_pools').values({
+  await database.insertInto('inventory_pools').values({
     id: poolId,
     event_id: EVENT_ID,
     name: `Concurrency Pool ${poolId}`,
@@ -102,9 +109,9 @@ async function createPool(db: Database, capacity: number, ttl = 300): Promise<st
   return poolId;
 }
 
-async function createTicketType(db: Database, poolId: string): Promise<string> {
+async function createTicketType(database: Database, poolId: string): Promise<string> {
   const ticketTypeId = `tt_conc_${ulid().slice(-10)}`;
-  await db.insertInto('ticket_types').values({
+  await database.insertInto('ticket_types').values({
     id: ticketTypeId,
     event_id: EVENT_ID,
     name: `Concurrency Ticket ${ticketTypeId}`,
@@ -129,9 +136,9 @@ async function createTicketType(db: Database, poolId: string): Promise<string> {
   return ticketTypeId;
 }
 
-async function createCheckoutSession(db: Database, _poolId: string, ticketTypeId: string): Promise<string> {
+async function createCheckoutSession(database: Database, _poolId: string, ticketTypeId: string): Promise<string> {
   const sessionId = `cs_conc_${ulid().slice(-10)}`;
-  await db.insertInto('checkout_sessions').values({
+  await database.insertInto('checkout_sessions').values({
     id: sessionId,
     tenant_id: TENANT_ID,
     event_id: EVENT_ID,
@@ -155,9 +162,10 @@ async function createCheckoutSession(db: Database, _poolId: string, ticketTypeId
   return sessionId;
 }
 
-describe.skipIf(!process.env.DATABASE_URL)('InventoryService concurrency (real PostgreSQL)', () => {
+describeWithIntegrationDatabase('InventoryService concurrency', () => {
   beforeAll(async () => {
-    db = createDb(process.env.DATABASE_URL);
+    previousDbDriver = setIntegrationDatabaseDriver();
+    db = createDb(integrationDatabaseUrl());
     inventoryService = new InventoryService(db);
     await seedEvent(db);
   });
@@ -165,6 +173,7 @@ describe.skipIf(!process.env.DATABASE_URL)('InventoryService concurrency (real P
   afterAll(async () => {
     await cleanupEvent(db);
     await db.destroy();
+    restoreDatabaseDriver(previousDbDriver);
   });
 
   beforeEach(async () => {
@@ -186,6 +195,7 @@ describe.skipIf(!process.env.DATABASE_URL)('InventoryService concurrency (real P
     // Create checkout sessions for each client
     const sessionIds: string[] = [];
     for (let i = 0; i < CONCURRENT_CLIENTS; i++) {
+      // eslint-disable-next-line no-await-in-loop -- setup creates distinct persisted sessions before the concurrent reservation phase begins.
       sessionIds.push(await createCheckoutSession(db, poolId, ticketTypeId));
     }
 
@@ -236,7 +246,9 @@ describe.skipIf(!process.env.DATABASE_URL)('InventoryService concurrency (real P
     // Create sessions and reserve inventory sequentially (to ensure all get holds)
     const sessionIds: string[] = [];
     for (let i = 0; i < CONCURRENT_CLIENTS; i++) {
+      // eslint-disable-next-line no-await-in-loop -- each setup session must exist before reserving its hold.
       const sessionId = await createCheckoutSession(db, poolId, ticketTypeId);
+      // eslint-disable-next-line no-await-in-loop -- this precondition intentionally reserves all holds before concurrent finalization starts.
       await inventoryService.reserveCart({
         items: [{ inventoryPoolId: poolId, ticketTypeId, quantity: 1 }],
         checkoutSessionId: sessionId,
@@ -301,7 +313,9 @@ describe.skipIf(!process.env.DATABASE_URL)('InventoryService concurrency (real P
     // Pre-reserve 5 holds
     const preReservedSessions: string[] = [];
     for (let i = 0; i < 5; i++) {
+      // eslint-disable-next-line no-await-in-loop -- setup creates one session and active hold at a time before the mixed concurrency phase.
       const sessionId = await createCheckoutSession(db, poolId, ticketTypeId);
+      // eslint-disable-next-line no-await-in-loop -- pre-reserved holds are the deterministic baseline for the later concurrent finalize/reserve race.
       await inventoryService.reserveCart({
         items: [{ inventoryPoolId: poolId, ticketTypeId, quantity: 1 }],
         checkoutSessionId: sessionId,
@@ -312,6 +326,7 @@ describe.skipIf(!process.env.DATABASE_URL)('InventoryService concurrency (real P
     // Now concurrently: finalize the 5 pre-reserved + 10 new reserve attempts
     const newSessions: string[] = [];
     for (let i = 0; i < 10; i++) {
+      // eslint-disable-next-line no-await-in-loop -- setup creates independent sessions before the concurrent reserve attempts are launched.
       newSessions.push(await createCheckoutSession(db, poolId, ticketTypeId));
     }
 
@@ -365,11 +380,14 @@ describe.skipIf(!process.env.DATABASE_URL)('InventoryService concurrency (real P
     // Reserve and convert 3 holds
     const sessionIds: string[] = [];
     for (let i = 0; i < CAPACITY; i++) {
+      // eslint-disable-next-line no-await-in-loop -- refund setup intentionally creates, reserves, and converts each session before assertions.
       const sessionId = await createCheckoutSession(db, poolId, ticketTypeId);
+      // eslint-disable-next-line no-await-in-loop -- each hold must be active before it is converted for the refund-restore fixture.
       await inventoryService.reserveCart({
         items: [{ inventoryPoolId: poolId, ticketTypeId, quantity: 1 }],
         checkoutSessionId: sessionId,
       });
+      // eslint-disable-next-line no-await-in-loop -- converted sold inventory is the required starting state for the restore check.
       await inventoryService.convertHoldsForSession(sessionId);
       sessionIds.push(sessionId);
     }

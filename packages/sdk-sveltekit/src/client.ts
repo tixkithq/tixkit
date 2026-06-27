@@ -1,11 +1,11 @@
 /**
- * Browser-safe entrypoint for @gatekit/sveltekit.
+ * Browser-safe entrypoint for @tixkit/sveltekit.
  *
  * This module is safe to import from client-side SvelteKit code.
  * It contains no server-only dependencies.
  *
  * ```ts
- * import { checkoutWidgetUrl, checkoutUrl } from '@gatekit/sveltekit/client';
+ * import { checkoutWidgetUrl, checkoutUrl } from '@tixkit/sveltekit/client';
  * ```
  */
 
@@ -26,7 +26,7 @@ export const checkoutUrl = (config: {
   locale?: string;
   theme?: string;
 }) => {
-  const base = config.checkoutBaseUrl ?? config.apiBaseUrl ?? 'https://checkout.gatekit.com';
+  const base = config.checkoutBaseUrl ?? config.apiBaseUrl ?? 'https://checkout.tixkit.com';
   const params = new URLSearchParams();
   params.set('eventId', config.event);
   if (config.brand) params.set('brand', config.brand);
@@ -58,7 +58,7 @@ export const checkoutWidgetUrl = (config: {
   trackingId?: string;
   mode?: 'inline' | 'modal' | 'redirect';
 }) => {
-  const base = config.widgetBaseUrl ?? config.apiBaseUrl ?? 'https://checkout.gatekit.com';
+  const base = config.widgetBaseUrl ?? config.apiBaseUrl ?? 'https://checkout.tixkit.com';
   const params = new URLSearchParams();
   if (config.brand) params.set('brand', config.brand);
   if (config.locale) params.set('locale', config.locale);
@@ -71,9 +71,9 @@ export const checkoutWidgetUrl = (config: {
 };
 
 /**
- * Lifecycle events emitted by GateKit checkout widgets and buttons.
+ * Lifecycle events emitted by Tixkit checkout widgets and buttons.
  */
-export type GateKitCheckoutEvent =
+export type TixkitCheckoutEvent =
   | 'loaded'
   | 'loading'
   | 'error'
@@ -81,3 +81,65 @@ export type GateKitCheckoutEvent =
   | 'closed'
   | 'checkout_started'
   | 'order_completed';
+
+export type TixkitWidgetPostMessage = {
+  type: TixkitCheckoutEvent;
+  eventId?: string;
+  orderId?: string;
+  raw: Record<string, unknown>;
+};
+
+export type TixkitWidgetIframeConfig = Parameters<typeof checkoutWidgetUrl>[0] & {
+  title?: string;
+};
+
+export type TixkitWidgetIframeAttributes = {
+  src: string;
+  title: string;
+  sandbox: string;
+  allow: string;
+  referrerPolicy: string;
+};
+
+const CHECKOUT_EVENTS = new Set<TixkitCheckoutEvent>([
+  'loaded',
+  'loading',
+  'error',
+  'opened',
+  'closed',
+  'checkout_started',
+  'order_completed',
+]);
+
+export function isTixkitCheckoutEvent(value: unknown): value is TixkitCheckoutEvent {
+  return typeof value === 'string' && CHECKOUT_EVENTS.has(value as TixkitCheckoutEvent);
+}
+
+export function tixkitWidgetIframeAttributes(config: TixkitWidgetIframeConfig): TixkitWidgetIframeAttributes {
+  return {
+    src: checkoutWidgetUrl(config),
+    title: config.title ?? 'Tixkit checkout',
+    sandbox: 'allow-forms allow-modals allow-popups allow-popups-to-escape-sandbox allow-scripts allow-same-origin',
+    allow: 'payment *',
+    referrerPolicy: 'strict-origin-when-cross-origin',
+  };
+}
+
+export function parseTixkitWidgetMessage(
+  message: { origin: string; data: unknown },
+  expectedOrigin?: string,
+): TixkitWidgetPostMessage | null {
+  if (expectedOrigin && message.origin !== expectedOrigin) return null;
+  if (!message.data || typeof message.data !== 'object') return null;
+
+  const raw = message.data as Record<string, unknown>;
+  const type = raw.type ?? raw.event;
+  if (!isTixkitCheckoutEvent(type)) return null;
+
+  return {
+    type,
+    eventId: typeof raw.eventId === 'string' ? raw.eventId : undefined,
+    orderId: typeof raw.orderId === 'string' ? raw.orderId : undefined,
+    raw,
+  };
+}

@@ -77,7 +77,7 @@ export type AttendanceReport = {
 
 export type ConversionFunnel = {
   eventId: Ulid;
-  widgetViews: number | null;
+  widgetViews: number;
   checkoutStarted: number;
   checkoutCompleted: number;
   conversionRate: number;

@@ -7,12 +7,12 @@ import type {
   DiscountCode,
   CurrencyCode,
   Ulid,
-} from '@gatekit/domain';
+} from '@tixkit/domain';
 import { ulid } from 'ulid';
 import {
   DiscountInvalidError,
   ValidationError,
-} from '@gatekit/domain';
+} from '@tixkit/domain';
 
 export type TicketTypeForPricing = {
   id: string;
@@ -25,10 +25,22 @@ export type TicketTypeForPricing = {
   maxPerOrder: number;
 };
 
+export type ProductForPricing = {
+  id: string;
+  name: string;
+  priceCents: number;
+  currency: string;
+  maxPerOrder: number;
+  status: 'active' | 'paused' | 'archived';
+  availableFrom?: string;
+  availableUntil?: string;
+};
+
 export type PricingInput = {
   currency: CurrencyCode;
   cart: CartInput;
   ticketTypes: Map<string, TicketTypeForPricing>;
+  products?: Map<string, ProductForPricing>;
   taxRules: TaxRule[];
   feeRules: FeeRule[];
   discountCodes: DiscountCode[];
@@ -40,12 +52,16 @@ export type PricingInput = {
 export class PricingEngine {
   calculate(input: PricingInput): PriceQuote {
     const { currency, cart, ticketTypes, taxRules, feeRules, discountCodes } = input;
+    const products = input.products ?? new Map<string, ProductForPricing>();
     const now = new Date();
     const expiresAt = new Date(now.getTime() + (input.quoteTtlSeconds ?? 600) * 1000);
 
     let subtotalCents = 0;
     const pricedLines: Array<{
-      ticketTypeId: string;
+      type: 'ticket' | 'product';
+      ticketTypeId?: string;
+      eventOccurrenceId?: string;
+      productId?: string;
       name: string;
       quantity: number;
       unitPriceCents: number;
@@ -53,38 +69,66 @@ export class PricingEngine {
     }> = [];
 
     for (const item of cart.items) {
-      const tt = ticketTypes.get(item.ticketTypeId);
-      if (!tt) {
-        throw new DiscountInvalidError(item.ticketTypeId, 'ticket type not found');
-      }
-      if (tt.currency !== currency) {
-        throw new ValidationError(`Ticket type ${tt.id} currency ${tt.currency} does not match cart currency ${currency}`);
+      if (item.ticketTypeId) {
+        const tt = ticketTypes.get(item.ticketTypeId);
+        if (!tt) {
+          throw new DiscountInvalidError(item.ticketTypeId, 'ticket type not found');
+        }
+        if (tt.currency !== currency) {
+          throw new ValidationError(`Ticket type ${tt.id} currency ${tt.currency} does not match cart currency ${currency}`);
+        }
+
+        const quantity = item.quantity;
+        if (quantity < tt.minPerOrder || quantity > tt.maxPerOrder) {
+          throw new DiscountInvalidError(
+            item.ticketTypeId,
+            `quantity ${quantity} outside allowed range ${tt.minPerOrder}-${tt.maxPerOrder}`,
+          );
+        }
+
+        const unitPrice = this.resolveUnitPrice(tt, item.unitAmountCents);
+
+        if (tt.kind === 'donation' && tt.minimumPriceCents && unitPrice < tt.minimumPriceCents) {
+          throw new DiscountInvalidError(
+            item.ticketTypeId,
+            `donation amount ${unitPrice} below minimum ${tt.minimumPriceCents}`,
+          );
+        }
+
+        const lineSubtotal = unitPrice * quantity;
+        subtotalCents += lineSubtotal;
+        pricedLines.push({
+          type: 'ticket',
+          ticketTypeId: item.ticketTypeId,
+          eventOccurrenceId: item.occurrenceId,
+          name: tt.name,
+          quantity,
+          unitPriceCents: unitPrice,
+          subtotalCents: lineSubtotal,
+        });
+        continue;
       }
 
-      const quantity = item.quantity;
-      if (quantity < tt.minPerOrder || quantity > tt.maxPerOrder) {
-        throw new DiscountInvalidError(
-          item.ticketTypeId,
-          `quantity ${quantity} outside allowed range ${tt.minPerOrder}-${tt.maxPerOrder}`,
-        );
+      if (!item.productId) {
+        throw new ValidationError('Cart item must include ticketTypeId or productId');
+      }
+      const product = products.get(item.productId);
+      if (!product) {
+        throw new DiscountInvalidError(item.productId, 'product not found');
+      }
+      this.validateProduct(product, item.quantity, currency, now);
+      if (item.unitAmountCents !== undefined) {
+        throw new ValidationError(`unitAmountCents is not accepted for product ${item.productId}`);
       }
 
-      const unitPrice = this.resolveUnitPrice(tt, item.unitAmountCents);
-
-      if (tt.kind === 'donation' && tt.minimumPriceCents && unitPrice < tt.minimumPriceCents) {
-        throw new DiscountInvalidError(
-          item.ticketTypeId,
-          `donation amount ${unitPrice} below minimum ${tt.minimumPriceCents}`,
-        );
-      }
-
-      const lineSubtotal = unitPrice * quantity;
+      const lineSubtotal = product.priceCents * item.quantity;
       subtotalCents += lineSubtotal;
       pricedLines.push({
-        ticketTypeId: item.ticketTypeId,
-        name: tt.name,
-        quantity,
-        unitPriceCents: unitPrice,
+        type: 'product',
+        productId: item.productId,
+        name: product.name,
+        quantity: item.quantity,
+        unitPriceCents: product.priceCents,
         subtotalCents: lineSubtotal,
       });
     }
@@ -102,10 +146,12 @@ export class PricingEngine {
     let remainingDiscountCap = appliedDiscount?.maxDiscountCents ?? Number.POSITIVE_INFINITY;
 
     for (const line of pricedLines) {
-      const tt = ticketTypes.get(line.ticketTypeId)!;
-
       let lineDiscount = 0;
-      if (appliedDiscount && (!appliedDiscount.ticketTypeIds || appliedDiscount.ticketTypeIds.includes(line.ticketTypeId))) {
+      if (
+        appliedDiscount &&
+        (!appliedDiscount.ticketTypeIds ||
+          (line.ticketTypeId && appliedDiscount.ticketTypeIds.includes(line.ticketTypeId)))
+      ) {
         lineDiscount = Math.min(
           this.calculateDiscountForLine(appliedDiscount, line.subtotalCents, line.quantity),
           remainingDiscountCap,
@@ -126,6 +172,7 @@ export class PricingEngine {
       }
 
       let lineTax = 0;
+      const taxBreakdown: NonNullable<PriceLineItem['taxBreakdown']> = [];
       for (const taxRule of taxRules) {
         if (!this.taxApplies(taxRule, input.buyerCountry, input.buyerRegion)) continue;
         const taxableBase = taxRule.appliedTo === 'ticket' || taxRule.appliedTo === 'all'
@@ -133,12 +180,27 @@ export class PricingEngine {
           : 0;
         const feeTaxable = taxRule.appliedTo === 'fee' || taxRule.appliedTo === 'all' ? lineFee : 0;
         const totalTaxable = taxableBase + feeTaxable;
+        if (totalTaxable <= 0) continue;
+        let ruleTax = 0;
         if (taxRule.type === 'inclusive') {
           const taxPortion = Math.round(totalTaxable - totalTaxable / (1 + taxRule.rate / 10000));
-          lineTax += taxPortion;
+          ruleTax = taxPortion;
         } else {
-          lineTax += Math.round((totalTaxable * taxRule.rate) / 10000);
+          ruleTax = Math.round((totalTaxable * taxRule.rate) / 10000);
         }
+        lineTax += ruleTax;
+        taxBreakdown.push({
+          taxRuleId: taxRule.id,
+          taxRuleName: taxRule.name,
+          rate: taxRule.rate,
+          type: taxRule.type,
+          appliedTo: taxRule.appliedTo,
+          taxableAmountCents: totalTaxable,
+          taxCents: ruleTax,
+          jurisdictionCountry: taxRule.countries?.[0],
+          jurisdictionRegion: taxRule.regions?.[0],
+          provider: 'tixkit_rules',
+        });
       }
 
       const hasInclusiveTax = taxRules.some((r) => r.type === 'inclusive' && this.taxApplies(r, input.buyerCountry, input.buyerRegion));
@@ -147,13 +209,17 @@ export class PricingEngine {
         : line.subtotalCents - lineDiscount + lineFee + lineTax;
 
       lineItems.push({
-        ticketTypeId: line.ticketTypeId as Ulid,
-        name: tt.name,
+        type: line.type,
+        ticketTypeId: line.ticketTypeId as Ulid | undefined,
+        eventOccurrenceId: line.eventOccurrenceId as Ulid | undefined,
+        productId: line.productId as Ulid | undefined,
+        name: line.name,
         quantity: line.quantity,
         unitPriceCents: line.unitPriceCents,
         subtotalCents: line.subtotalCents,
         discountCents: lineDiscount,
         taxCents: lineTax,
+        taxBreakdown,
         feeCents: lineFee,
         totalCents: lineTotal,
       });
@@ -197,6 +263,27 @@ export class PricingEngine {
       throw new DiscountInvalidError(tt.id, 'donation amount is required');
     }
     return requestedUnitAmountCents;
+  }
+
+  private validateProduct(product: ProductForPricing, quantity: number, currency: CurrencyCode, now: Date): void {
+    if (product.currency !== currency) {
+      throw new ValidationError(`Product ${product.id} currency ${product.currency} does not match cart currency ${currency}`);
+    }
+    if (quantity < 1 || quantity > product.maxPerOrder) {
+      throw new DiscountInvalidError(
+        product.id,
+        `quantity ${quantity} outside allowed range 1-${product.maxPerOrder}`,
+      );
+    }
+    if (product.status !== 'active') {
+      throw new DiscountInvalidError(product.id, `status is ${product.status}`);
+    }
+    if (product.availableFrom && now < new Date(product.availableFrom)) {
+      throw new DiscountInvalidError(product.id, 'not yet available');
+    }
+    if (product.availableUntil && now > new Date(product.availableUntil)) {
+      throw new DiscountInvalidError(product.id, 'no longer available');
+    }
   }
 
   private findDiscount(

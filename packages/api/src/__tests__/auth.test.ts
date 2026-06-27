@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { ClerkAuthService, DEV_TENANT_ID, DEV_ORG_ID } from '../auth/clerk.js';
-import { ForbiddenError, NotFoundError, UnauthorizedError } from '@gatekit/domain';
-import type { Principal, Permission } from '@gatekit/domain';
+import { ForbiddenError, NotFoundError, UnauthorizedError } from '@tixkit/domain';
+import type { Principal, Permission } from '@tixkit/domain';
 import { requireAssignableScopes } from '../http/contracts.js';
 
 function makePrincipal(overrides: Partial<Principal> = {}): Principal {

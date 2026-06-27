@@ -2,7 +2,7 @@
 
 import * as React from 'react'
 import { QrCode, Search, CheckCircle2, XCircle, AlertCircle } from 'lucide-react'
-import { type CheckInScanResult, adminApi } from '@/lib/api'
+import { type AdminCheckInList, type CheckInScanResult, adminApi } from '@/lib/api'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
@@ -18,6 +18,8 @@ import {
 } from '@/components/ui/select'
 import { useAdminData } from '@/hooks/use-admin-data'
 import { cn } from '@/lib/utils'
+
+const EMPTY_CHECK_IN_LISTS: AdminCheckInList[] = []
 
 export function CheckInView() {
   const [selectedEventId, setSelectedEventId] = React.useState<string>('')
@@ -35,11 +37,17 @@ export function CheckInView() {
   const selectedEvent = events.find((e) => e.id === selectedEventId)
 
   const { data: checkInListsData, loading: checkInListsLoading, error: checkInListsError, refetch: refetchLists } = useAdminData(
-    () => adminApi.listCheckInLists(selectedEventId),
+    () =>
+      selectedEventId
+        ? adminApi.listCheckInLists(selectedEventId)
+        : Promise.resolve({
+            ok: true as const,
+            data: EMPTY_CHECK_IN_LISTS,
+          }),
     [selectedEventId]
   )
 
-  const checkInLists = checkInListsData ?? []
+  const checkInLists = checkInListsData ?? EMPTY_CHECK_IN_LISTS
 
   // Reset the selected check-in list whenever the event changes.
   React.useEffect(() => {
@@ -51,8 +59,7 @@ export function CheckInView() {
     if (!selectedCheckInListId && checkInLists.length === 1) {
       setSelectedCheckInListId(checkInLists[0].id)
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- checkInLists is stable from useQuery and only changes on event switch
-  }, [selectedEventId, selectedCheckInListId])
+  }, [checkInLists, selectedCheckInListId])
 
   const handleScan = async () => {
     if (!selectedEventId || !selectedCheckInListId || !qrPayload) return
@@ -104,7 +111,7 @@ export function CheckInView() {
       <div className='flex flex-col gap-2'>
         <span className='text-sm font-medium'>Select Event</span>
         <Select value={selectedEventId} onValueChange={setSelectedEventId}>
-          <SelectTrigger className='w-full max-w-xs'>
+          <SelectTrigger className='w-full max-w-xs' aria-label='Event'>
             <SelectValue placeholder='Choose an event' />
           </SelectTrigger>
           <SelectContent>
@@ -134,7 +141,7 @@ export function CheckInView() {
               value={selectedCheckInListId}
               onValueChange={setSelectedCheckInListId}
             >
-              <SelectTrigger className='w-full max-w-xs'>
+              <SelectTrigger className='w-full max-w-xs' aria-label='Check-in list'>
                 <SelectValue placeholder='Choose a check-in list' />
               </SelectTrigger>
               <SelectContent>
@@ -260,7 +267,9 @@ function ScanResult({ result }: { result: CheckInScanResult }) {
         </p>
         <p className='text-sm'>
           {result.status === 'accepted'
-            ? `${result.attendee.name} has been checked in.`
+            ? result.attendee
+              ? `${result.attendee.name} has been checked in.`
+              : result.message ?? 'Check-in successful'
             : result.message}
         </p>
         {result.attendee && result.status !== 'accepted' && (

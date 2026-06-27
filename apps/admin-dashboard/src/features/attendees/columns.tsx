@@ -103,6 +103,7 @@ export function getAttendeeColumns(
     },
     {
       id: 'actions',
+      header: () => <span className='sr-only'>Actions</span>,
       enableHiding: false,
       cell: ({ row }) => (
         <Button

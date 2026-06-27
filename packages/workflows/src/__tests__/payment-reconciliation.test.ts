@@ -1,7 +1,18 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const mockState = vi.hoisted(() => ({
-  db: { destroy: async () => undefined },
+  db: {
+    destroy: async () => undefined,
+    updateTable: (table: string) => ({
+      set: (input: Record<string, unknown>) => ({
+        where: (_column: string, _operator: string, id: string) => ({
+          execute: async () => {
+            mockState.updates.push({ table, id, input });
+          },
+        }),
+      }),
+    }),
+  },
   paymentIntent: undefined as Record<string, unknown> | undefined,
   order: undefined as Record<string, unknown> | undefined,
   refunds: [] as Record<string, unknown>[],
@@ -10,7 +21,7 @@ const mockState = vi.hoisted(() => ({
   timeline: [] as Array<{ orderId: string; type: string; description: string }>,
 }));
 
-vi.mock('@gatekit/db', () => ({
+vi.mock('@tixkit/db', () => ({
   createDb: () => mockState.db,
   PaymentIntentRepository: class {
     async findByProviderIntentId() {
@@ -166,6 +177,11 @@ describe('reconcileRefundActivity', () => {
       id: 'ord_1',
       input: expect.objectContaining({ refunded_cents: 5000, status: 'partially_refunded' }),
     });
+    expect(mockState.updates).toContainEqual({
+      table: 'invoices',
+      id: 'ord_1',
+      input: expect.objectContaining({ refunded_cents: 5000 }),
+    });
     expect(mockState.timeline).toHaveLength(0);
   });
 
@@ -192,6 +208,11 @@ describe('reconcileRefundActivity', () => {
       table: 'orders',
       id: 'ord_1',
       input: expect.objectContaining({ refunded_cents: 5000, status: 'partially_refunded' }),
+    });
+    expect(mockState.updates).toContainEqual({
+      table: 'invoices',
+      id: 'ord_1',
+      input: expect.objectContaining({ refunded_cents: 5000 }),
     });
     expect(mockState.timeline).toHaveLength(0);
   });

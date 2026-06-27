@@ -4,6 +4,7 @@ const mockState = vi.hoisted(() => ({
   activities: {} as Record<string, (...args: any[]) => any>,
   signals: {} as Record<string, (...args: any[]) => void>,
   conditionResult: true as boolean,
+  sleeps: [] as string[],
 }));
 
 vi.mock('@temporalio/workflow', () => ({
@@ -21,14 +22,19 @@ vi.mock('@temporalio/workflow', () => ({
   setHandler: (signal: string, handler: (...args: any[]) => void) => {
     mockState.signals[signal] = handler;
   },
-  condition: async (_fn: () => boolean, _timeout?: string) => mockState.conditionResult,
+  condition: async (fn: () => boolean, _timeout?: string) => fn() || mockState.conditionResult,
+  sleep: async (duration: string) => {
+    mockState.sleeps.push(duration);
+  },
   startChild: async () => ({ workflowId: 'child-mock' }),
 }));
 
 import { checkoutSessionWorkflow } from '../workflows/checkout.js';
 import { refundWorkflow } from '../workflows/refund.js';
 import { exportWorkflow } from '../workflows/export.js';
-import { okResult, errResult, webhookDeliveryWorkflowId } from '../shared/types.js';
+import { webhookDeliveryWorkflow } from '../workflows/webhook-delivery.js';
+import { holdExpirationWorkflow } from '../workflows/hold-expiration.js';
+import { okResult, errResult, webhookDeliveryWorkflowId, webhookDeliveryReplayWorkflowId } from '../shared/types.js';
 
 function setActivity(name: string, impl: (...args: any[]) => any) {
   mockState.activities[name] = impl;
@@ -38,6 +44,7 @@ function resetState() {
   for (const key of Object.keys(mockState.activities)) delete mockState.activities[key];
   for (const key of Object.keys(mockState.signals)) delete mockState.signals[key];
   mockState.conditionResult = true;
+  mockState.sleeps = [];
 }
 
 function makeCheckoutInput(overrides: Record<string, unknown> = {}) {
@@ -76,6 +83,20 @@ function makeRefundInput(overrides: Record<string, unknown> = {}) {
   };
 }
 
+function makeWebhookDeliveryInput(overrides: Record<string, unknown> = {}) {
+  return {
+    version: 1,
+    apiVersion: '2026-01-01',
+    endpointId: 'wh_1',
+    eventId: 'whe_1',
+    eventType: 'order.paid',
+    payload: { orderId: 'ord_1' },
+    secret: 'secret_1',
+    maxAttempts: 3,
+    ...overrides,
+  };
+}
+
 const defaultActivities = {
   createPaymentIntentActivity: async () => okResult({ providerIntentId: 'pi_test_1', clientSecret: 'cs_test_1' }),
   finalizeOrderActivity: async () => okResult({ orderId: 'ord_test_1' }),
@@ -92,6 +113,10 @@ const defaultActivities = {
   uploadFileActivity: async () => okResult({ fileUrl: 'https://exports.example.test/exp_1.csv' }),
   markExportFailedActivity: async () => okResult({ failed: true }),
   notifyExportCompleteActivity: async () => okResult({ notified: true }),
+  deliverWebhookActivity: async () => okResult({ statusCode: 200, response: 'ok' }),
+  expireStaleHoldsActivity: async () => okResult({ expiredCount: 0 }),
+  expireStaleSessionsActivity: async () => okResult({ expiredCount: 0 }),
+  processWaitlistOffersActivity: async () => okResult({ expiredCount: 0, offeredCount: 0, queuedEmailCount: 0 }),
 };
 
 describe('checkoutSessionWorkflow', () => {
@@ -140,22 +165,40 @@ describe('checkoutSessionWorkflow', () => {
     });
   });
 
+  it('auto-completes local capture paid checkout without an external payment signal', async () => {
+    mockState.conditionResult = false;
+    setActivity('createPaymentIntentActivity', async () =>
+      okResult({ providerIntentId: 'pi_capture_cs_test_1', clientSecret: 'pi_capture_cs_test_1_secret' }),
+    );
+
+    const result = await checkoutSessionWorkflow(makeCheckoutInput({ isFreeOrder: false }));
+
+    expect(result.status).toBe('completed');
+    expect(result.orderId).toBe('ord_test_1');
+  });
+
   it('fails when payment intent creation fails and releases hold', async () => {
-    let released = false;
+    let releaseInput: Record<string, unknown> | undefined;
     setActivity('createPaymentIntentActivity', async () => errResult('PAYMENT_FAILED', 'Stripe error', false));
-    setActivity('releaseHoldActivity', async () => { released = true; return okResult({ released: true }); });
+    setActivity('releaseHoldActivity', async (input) => {
+      releaseInput = input;
+      return okResult({ released: true });
+    });
     const result = await checkoutSessionWorkflow(makeCheckoutInput({ isFreeOrder: false }));
     expect(result.status).toBe('failed');
-    expect(released).toBe(true);
+    expect(releaseInput).toEqual({ checkoutSessionId: 'cs_test_1', checkoutSessionStatus: 'expired' });
   });
 
   it('fails on payment timeout and releases hold', async () => {
-    let released = false;
-    setActivity('releaseHoldActivity', async () => { released = true; return okResult({ released: true }); });
+    let releaseInput: Record<string, unknown> | undefined;
+    setActivity('releaseHoldActivity', async (input) => {
+      releaseInput = input;
+      return okResult({ released: true });
+    });
     mockState.conditionResult = false; // Timeout
     const result = await checkoutSessionWorkflow(makeCheckoutInput({ isFreeOrder: false }));
     expect(result.status).toBe('failed');
-    expect(released).toBe(true);
+    expect(releaseInput).toEqual({ checkoutSessionId: 'cs_test_1', checkoutSessionStatus: 'expired' });
   });
 });
 
@@ -277,5 +320,84 @@ describe('exportWorkflow', () => {
 describe('workflow id conventions', () => {
   it('scopes webhook delivery workflows by event and endpoint', () => {
     expect(webhookDeliveryWorkflowId('whe_1', 'wh_1')).toBe('webhook-delivery:whe_1:wh_1');
+  });
+
+  it('scopes webhook replay workflows by event, endpoint, and replay nonce', () => {
+    expect(webhookDeliveryReplayWorkflowId('whe_1', 'wh_1', 'rpl_1')).toBe('webhook-delivery:whe_1:wh_1:replay:rpl_1');
+  });
+});
+
+describe('holdExpirationWorkflow', () => {
+  beforeEach(() => {
+    resetState();
+    Object.entries(defaultActivities).forEach(([name, impl]) => setActivity(name, impl));
+  });
+
+  it('runs bounded expiration ticks with legacy-compatible input', async () => {
+    const calls: string[] = [];
+    setActivity('expireStaleHoldsActivity', async () => {
+      calls.push('holds');
+      return okResult({ expiredCount: 1 });
+    });
+    setActivity('expireStaleSessionsActivity', async () => {
+      calls.push('sessions');
+      return okResult({ expiredCount: 1 });
+    });
+    setActivity('processWaitlistOffersActivity', async () => {
+      calls.push('waitlist');
+      return okResult({ expiredCount: 1, offeredCount: 1, queuedEmailCount: 1 });
+    });
+
+    await holdExpirationWorkflow({ maxIterations: 2, tickIntervalSeconds: 15 });
+
+    expect(calls).toEqual(['holds', 'sessions', 'waitlist', 'holds', 'sessions', 'waitlist']);
+    expect(mockState.sleeps).toEqual(['15 seconds']);
+  });
+});
+
+describe('webhookDeliveryWorkflow', () => {
+  beforeEach(() => {
+    resetState();
+    Object.entries(defaultActivities).forEach(([name, impl]) => setActivity(name, impl));
+  });
+
+  it('delivers successfully on the first attempt', async () => {
+    const attempts: Array<Record<string, unknown>> = [];
+    setActivity('deliverWebhookActivity', async (input) => {
+      attempts.push(input);
+      return okResult({ statusCode: 204, response: '' });
+    });
+
+    const result = await webhookDeliveryWorkflow(makeWebhookDeliveryInput());
+
+    expect(result.status).toBe('delivered');
+    expect(attempts).toEqual([
+      {
+        apiVersion: '2026-01-01',
+        endpointId: 'wh_1',
+        eventId: 'whe_1',
+        eventType: 'order.paid',
+        payload: JSON.stringify({ orderId: 'ord_1' }),
+        secret: 'secret_1',
+        attempt: 1,
+        finalAttempt: false,
+      },
+    ]);
+    expect(mockState.sleeps).toEqual([]);
+  });
+
+  it('retries failed deliveries and marks the final attempt', async () => {
+    const attempts: Array<Record<string, unknown>> = [];
+    setActivity('deliverWebhookActivity', async (input) => {
+      attempts.push(input);
+      return okResult({ statusCode: 500, response: 'server error' });
+    });
+
+    const result = await webhookDeliveryWorkflow(makeWebhookDeliveryInput());
+
+    expect(result.status).toBe('dead_lettered');
+    expect(attempts.map((attempt) => attempt.attempt)).toEqual([1, 2, 3]);
+    expect(attempts.map((attempt) => attempt.finalAttempt)).toEqual([false, false, true]);
+    expect(mockState.sleeps).toEqual(['5 seconds', '10 seconds']);
   });
 });

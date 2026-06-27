@@ -73,7 +73,7 @@ export function OrderDetailView({ orderId }: { orderId: string }) {
     return (
       <div className='space-y-4'>
         <Button variant='ghost' asChild>
-          <Link href={routes.orders}>
+          <Link href={routes.orders} prefetch={false}>
             <ArrowLeft className='size-4' />
             Back to orders
           </Link>
@@ -96,7 +96,7 @@ export function OrderDetailView({ orderId }: { orderId: string }) {
   return (
     <div className='space-y-6'>
       <Button variant='ghost' asChild>
-        <Link href={routes.orders}>
+        <Link href={routes.orders} prefetch={false}>
           <ArrowLeft className='size-4' />
           Back to orders
         </Link>

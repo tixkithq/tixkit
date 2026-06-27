@@ -1,4 +1,4 @@
-import type { FastifyPluginAsync } from 'fastify';
+import type { FastifyPluginAsync, FastifyRequest } from 'fastify';
 import { ClerkAuthService } from '../../auth/clerk.js';
 import {
   ApiKeyRepository,
@@ -6,8 +6,8 @@ import {
   AuditLogRepository,
   BrandRepository,
   EventRepository,
-} from '@gatekit/db';
-import { ForbiddenError, NotFoundError } from '@gatekit/domain';
+} from '@tixkit/db';
+import { ForbiddenError, NotFoundError } from '@tixkit/domain';
 import { writeAuditLog } from '../../auth/audit.js';
 import {
   pageEnvelope,
@@ -20,6 +20,7 @@ import { createApiKeySchema, createScannerDeviceSchema, parseBody, createOAuthAp
 
 const SENSITIVE_API_KEY_FIELDS = ['hashed_key'] as const;
 const SENSITIVE_DEVICE_FIELDS = ['hashed_secret'] as const;
+type Principal = NonNullable<FastifyRequest['principal']>;
 
 function sanitize<T extends Record<string, unknown>>(record: T, fields: readonly string[]): Partial<T> {
   const copy: Record<string, unknown> = { ...record };
@@ -27,62 +28,56 @@ function sanitize<T extends Record<string, unknown>>(record: T, fields: readonly
   return copy as Partial<T>;
 }
 
+function requireAssignableResourceScope(principal: Principal, input: { brandIds?: string[]; eventIds?: string[] }) {
+  const principalHasBrandScope = Boolean(principal.brandIds?.length);
+  const principalHasEventScope = Boolean(principal.eventIds?.length);
+  const requestedBrandScope = Boolean(input.brandIds?.length);
+  const requestedEventScope = Boolean(input.eventIds?.length);
+
+  if (principalHasEventScope) {
+    if (requestedBrandScope) {
+      throw new ForbiddenError('Event-scoped principals cannot grant brand-scoped access');
+    }
+    if (!requestedEventScope) {
+      throw new ForbiddenError('Event-scoped principals must create event-scoped credentials');
+    }
+  } else if (principalHasBrandScope && !requestedBrandScope && !requestedEventScope) {
+    throw new ForbiddenError('Brand-scoped principals must create brand- or event-scoped credentials');
+  }
+}
+
+function requireAssignableScannerScope(principal: Principal, eventIds?: string[]) {
+  if ((principal.brandIds?.length || principal.eventIds?.length) && (!eventIds || eventIds.length === 0)) {
+    throw new ForbiddenError('Scoped principals must bind scanner devices to explicit events');
+  }
+}
+
 export const developerRoutes: FastifyPluginAsync = async (app) => {
   const db = app.context.db;
 
-  async function assertBrandIds(principal: NonNullable<import('fastify').FastifyRequest['principal']>, brandIds?: string[]) {
+  async function assertBrandIds(principal: Principal, brandIds?: string[]) {
     if (!brandIds) return;
     const repo = new BrandRepository(db);
-    for (const brandId of brandIds) {
+    await Promise.all(brandIds.map(async (brandId) => {
       const brand = await repo.findById(brandId);
       if (!brand) throw new NotFoundError('Brand', brandId);
       ClerkAuthService.requireResourceTenant(principal, brand, 'Brand', brandId);
       ClerkAuthService.requireOrganizationScope(principal, brand.organization_id);
       ClerkAuthService.requireBrandScope(principal, brandId);
-    }
+    }));
   }
 
-  async function assertEventIds(principal: NonNullable<import('fastify').FastifyRequest['principal']>, eventIds?: string[]) {
+  async function assertEventIds(principal: Principal, eventIds?: string[]) {
     if (!eventIds) return;
     const repo = new EventRepository(db);
-    for (const eventId of eventIds) {
+    await Promise.all(eventIds.map(async (eventId) => {
       const event = await repo.findById(eventId);
       if (!event) throw new NotFoundError('Event', eventId);
       ClerkAuthService.requireResourceTenant(principal, event, 'Event', eventId);
       ClerkAuthService.requireOrganizationScope(principal, event.organization_id);
       ClerkAuthService.requireBrandScope(principal, event.brand_id);
       ClerkAuthService.requireEventScope(principal, eventId);
-    }
-  }
-
-  function requireAssignableResourceScope(
-    principal: NonNullable<import('fastify').FastifyRequest['principal']>,
-    input: { brandIds?: string[]; eventIds?: string[] },
-  ) {
-    const principalHasBrandScope = Boolean(principal.brandIds?.length);
-    const principalHasEventScope = Boolean(principal.eventIds?.length);
-    const requestedBrandScope = Boolean(input.brandIds?.length);
-    const requestedEventScope = Boolean(input.eventIds?.length);
-
-    if (principalHasEventScope) {
-      if (requestedBrandScope) {
-        throw new ForbiddenError('Event-scoped principals cannot grant brand-scoped access');
-      }
-      if (!requestedEventScope) {
-        throw new ForbiddenError('Event-scoped principals must create event-scoped credentials');
-      }
-    } else if (principalHasBrandScope && !requestedBrandScope && !requestedEventScope) {
-      throw new ForbiddenError('Brand-scoped principals must create brand- or event-scoped credentials');
-    }
-  }
-
-  function requireAssignableScannerScope(
-    principal: NonNullable<import('fastify').FastifyRequest['principal']>,
-    eventIds?: string[],
-  ) {
-    if ((principal.brandIds?.length || principal.eventIds?.length) && (!eventIds || eventIds.length === 0)) {
-      throw new ForbiddenError('Scoped principals must bind scanner devices to explicit events');
-    }
+    }));
   }
 
   app.post('/api-keys', async (request, reply) => {
@@ -281,8 +276,8 @@ export const developerRoutes: FastifyPluginAsync = async (app) => {
 
     const { ulid } = await import('ulid');
     const { createHash } = await import('crypto');
-    const clientId = `gk_oauth_${ulid()}`;
-    const clientSecret = `gk_secret_${ulid()}`;
+    const clientId = `tk_oauth_${ulid()}`;
+    const clientSecret = `tk_secret_${ulid()}`;
     const clientSecretHash = createHash('sha256').update(clientSecret).digest('hex');
     const id = `oapp_${ulid()}`;
     const now = new Date();
@@ -365,10 +360,10 @@ export const developerRoutes: FastifyPluginAsync = async (app) => {
     const principal = request.principal!;
     ClerkAuthService.requirePermission(principal, 'developers.write');
     const { appId } = request.params as { appId: string };
-    const app = await db.selectFrom('oauth_applications').selectAll().where('id', '=', appId).executeTakeFirst();
-    if (!app) throw new NotFoundError('OAuthApplication', appId);
-    ClerkAuthService.requireResourceTenant(principal, app, 'OAuthApplication', appId);
-    ClerkAuthService.requireOrganizationScope(principal, app.organization_id);
+    const oauthApp = await db.selectFrom('oauth_applications').selectAll().where('id', '=', appId).executeTakeFirst();
+    if (!oauthApp) throw new NotFoundError('OAuthApplication', appId);
+    ClerkAuthService.requireResourceTenant(principal, oauthApp, 'OAuthApplication', appId);
+    ClerkAuthService.requireOrganizationScope(principal, oauthApp.organization_id);
 
     await db.updateTable('oauth_applications').set({ status: 'revoked', updated_at: new Date() }).where('id', '=', appId).execute();
     await writeAuditLog(new AuditLogRepository(db), request, principal, {

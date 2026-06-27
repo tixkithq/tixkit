@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import { InventoryService } from '../services/inventory.js';
-import { InventoryExhaustedError, HoldExpiredError, ValidationError } from '@gatekit/domain';
+import { InventoryExhaustedError, HoldExpiredError, ValidationError } from '@tixkit/domain';
 
 /**
  * In-memory mock database that simulates inventory_pools and checkout_holds
@@ -49,8 +49,8 @@ class MockTable {
       select: (arg: any) => {
         if (typeof arg === 'string') {
           if (arg === 'id') idOnly = true;
-        } else if (arg && arg.__sumCol) {
-          sumCol = arg.__sumCol;
+        } else if (arg && arg.sumColumn) {
+          sumCol = arg.sumColumn;
         }
         return chain;
       },
@@ -147,7 +147,7 @@ function createMockDb() {
     insertInto: (table: string) =>
       table === 'checkout_holds' ? holdTable.insertInto() : { values: () => ({ execute: () => Promise.resolve() }) },
     fn: {
-      sum: (col: string) => ({ __sumCol: col, as: () => ({ __sumCol: col }) }),
+      sum: (col: string) => ({ sumColumn: col, as: () => ({ sumColumn: col }) }),
     },
   };
 
@@ -338,6 +338,39 @@ describe('InventoryService', () => {
 
       expect(mock.getPool('pool_1')!.sold_count).toBe(3);
     });
+
+    it('throws when a session hold has already been marked expired', async () => {
+      mock.addPool({ id: 'pool_1', total_capacity: 10, sold_count: 0 });
+      mock.addHold({
+        id: 'hld_1',
+        inventory_pool_id: 'pool_1',
+        checkout_session_id: 'cs_1',
+        quantity: 2,
+        status: 'expired',
+      });
+
+      await expect(service.convertHoldsForSession('cs_1')).rejects.toThrow(HoldExpiredError);
+
+      expect(mock.getHold('hld_1')!.status).toBe('expired');
+      expect(mock.getPool('pool_1')!.sold_count).toBe(0);
+    });
+
+    it('expires stale active session holds before throwing', async () => {
+      mock.addPool({ id: 'pool_1', total_capacity: 10, sold_count: 0 });
+      mock.addHold({
+        id: 'hld_1',
+        inventory_pool_id: 'pool_1',
+        checkout_session_id: 'cs_1',
+        quantity: 2,
+        expires_at: new Date(Date.now() - 10_000),
+        status: 'active',
+      });
+
+      await expect(service.convertHoldsForSession('cs_1')).rejects.toThrow(HoldExpiredError);
+
+      expect(mock.getHold('hld_1')!.status).toBe('expired');
+      expect(mock.getPool('pool_1')!.sold_count).toBe(0);
+    });
   });
 
   describe('releaseHoldsForSession', () => {
@@ -425,7 +458,8 @@ describe('InventoryService', () => {
     });
 
     it('throws HoldExpiredError for expired hold', async () => {
-      mock.addHold({ id: 'hld_1', status: 'expired' });
+      mock.addPool({ id: 'pool_1', total_capacity: 10, sold_count: 0 });
+      mock.addHold({ id: 'hld_1', inventory_pool_id: 'pool_1', status: 'expired' });
 
       await expect(service.convertHold('hld_1')).rejects.toThrow(HoldExpiredError);
     });

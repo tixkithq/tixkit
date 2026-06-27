@@ -1,6 +1,6 @@
 # Clerk Setup Guide
 
-GateKit uses [Clerk](https://clerk.com) for admin dashboard authentication, organization/tenant mapping, and identity synchronization. This guide covers dashboard auth, API auth, organizations, webhooks, metadata limits, and key rotation.
+Tixkit uses [Clerk](https://clerk.com) for admin dashboard authentication, organization/tenant mapping, and identity synchronization. This guide covers dashboard auth, API auth, organizations, webhooks, metadata limits, and key rotation.
 
 The Clerk integration lives in `packages/api/src/auth/clerk.ts` and the webhook handler in `packages/api/src/routes/modules/clerk-webhooks.ts`. The admin dashboard uses `@clerk/nextjs` (see `apps/admin-dashboard`).
 
@@ -19,7 +19,7 @@ In this mode, the dashboard uses fixture/local state for empty screens and the A
 
 ## Local Development With Clerk
 
-When `NODE_ENV=development` and Clerk keys are configured, GateKit verifies the Clerk session normally. If the verified Clerk user does not yet have a `user_profiles` row, the API auto-provisions that user into the deterministic local development tenant and organization with local-dev permissions. This keeps dev Clerk sign-in usable without requiring public Clerk webhooks or a completed Temporal identity-sync run on every workstation.
+When `NODE_ENV=development` and Clerk keys are configured, Tixkit verifies the Clerk session normally. If the verified Clerk user does not yet have a `user_profiles` row, the API auto-provisions that user into the deterministic local development tenant and organization with local-dev permissions. This keeps dev Clerk sign-in usable without requiring public Clerk webhooks or a completed Temporal identity-sync run on every workstation.
 
 Production does not use this path. Outside `NODE_ENV=development`, missing `user_profiles` rows still fail closed with `401 User profile not found. Identity sync may be pending.`
 
@@ -42,9 +42,9 @@ CLERK_WEBHOOK_SECRET=whsec_...
 
 ### 2. Dashboard auth
 
-The admin dashboard (`apps/admin-dashboard`) wraps the app in Clerk's `<ClerkProvider>` and uses `<SignIn />` / `<SignedIn>` / `<SignedOut>` components. After sign-in, the dashboard calls `GET /v1/me` with the Clerk session JWT to load the GateKit principal and permissions.
+The admin dashboard (`apps/admin-dashboard`) wraps the app in Clerk's `<ClerkProvider>` and uses `<SignIn />` / `<SignedIn>` / `<SignedOut>` components. After sign-in, the dashboard calls `GET /v1/me` with the Clerk session JWT to load the Tixkit principal and permissions.
 
-Product authorization comes from **GateKit permission grants**, not Clerk roles alone. The API resolves a `user_profiles` row from the Clerk `sub` claim and loads `permission_grants` for the active tenant.
+Product authorization comes from **Tixkit permission grants**, not Clerk roles alone. The API resolves a `user_profiles` row from the Clerk `sub` claim and loads `permission_grants` for the active tenant.
 
 ### 3. API auth
 
@@ -54,13 +54,13 @@ Admin and integration API routes accept Clerk session JWTs as bearer tokens:
 Authorization: Bearer <clerk-session-jwt>
 ```
 
-The API verifies the JWT with `CLERK_SECRET_KEY`, resolves the active organization from the Clerk `org_id` claim, and maps it to a GateKit tenant via `organizations.clerk_organization_id`. If the user belongs to multiple tenants and no `org_id` is present, the client must send `X-Tenant-Id: <tenantId>`. Ambiguous cases return `401 UNAUTHORIZED` with a message asking for the active organization or header.
+The API verifies the JWT with `CLERK_SECRET_KEY`, resolves the active organization from the Clerk `org_id` claim, and maps it to a Tixkit tenant via `organizations.clerk_organization_id`. If the user belongs to multiple tenants and no `org_id` is present, the client must send `X-Tenant-Id: <tenantId>`. Ambiguous cases return `401 UNAUTHORIZED` with a message asking for the active organization or header.
 
 Suspended `user_profiles` are rejected with `403 FORBIDDEN`.
 
 ### 4. Clerk organizations
 
-GateKit maps Clerk organizations to GateKit organizations and tenants:
+Tixkit maps Clerk organizations to Tixkit organizations and tenants:
 
 - A Clerk `organization.created` webhook starts the `clerkIdentitySyncWorkflow`, which calls `syncOrganizationActivity` to insert/update the `organizations` row with `clerk_organization_id`.
 - A Clerk `user.created` / `user.updated` webhook calls `syncUserActivity` to upsert a `user_profiles` row.
@@ -79,9 +79,9 @@ POST https://api.<your-domain>/v1/webhooks/clerk
 
 ### 5. Metadata limits
 
-Clerk public/private metadata is **not** the source of truth for GateKit permissions. Permission grants are persisted in the GateKit `permission_grants` table and resolved by the API at request time. Do not rely on Clerk `publicMetadata`/`privateMetadata` for authorization decisions; use it only for non-authoritative display hints (e.g. display name).
+Clerk public/private metadata is **not** the source of truth for Tixkit permissions. Permission grants are persisted in the Tixkit `permission_grants` table and resolved by the API at request time. Do not rely on Clerk `publicMetadata`/`privateMetadata` for authorization decisions; use it only for non-authoritative display hints (e.g. display name).
 
-Clerk metadata has a 4 KB limit per object. Keep GateKit-related metadata minimal; store structured data in the GateKit database instead.
+Clerk metadata has a 4 KB limit per object. Keep Tixkit-related metadata minimal; store structured data in the Tixkit database instead.
 
 ### 6. Webhook signing and dedupe
 
@@ -118,7 +118,7 @@ Never commit real Clerk keys to the repository. If a real key is copied into `.e
 
 With Clerk keys configured:
 
-1. `http://localhost:3001/dashboard` should resolve a GateKit principal and permissions (no local-dev fallback).
+1. `http://localhost:3001/dashboard` should resolve a Tixkit principal and permissions (no local-dev fallback).
 2. `GET /v1/me` with a Clerk session JWT returns the principal with `permissions: [...]`.
 3. Clerk user/org webhook deliveries to `POST /v1/webhooks/clerk` return `{ "received": true }` and start identity sync workflows visible in Temporal UI at `http://localhost:8080`.
 4. The `user_profiles` and `organizations` tables reflect Clerk sync state.

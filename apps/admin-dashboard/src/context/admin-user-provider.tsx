@@ -1,6 +1,6 @@
 'use client'
 
-import { createContext, useContext } from 'react'
+import { createContext, useContext, useMemo } from 'react'
 import { useUser } from '@clerk/nextjs'
 import {
   type AdminUser,
@@ -13,14 +13,17 @@ const AdminUserContext = createContext<AdminUser>(LOCAL_DEV_USER)
 function ClerkUserProvider({ children }: { children: React.ReactNode }) {
   const { user, isLoaded, isSignedIn } = useUser()
 
-  const value: AdminUser =
-    isLoaded && isSignedIn && user
-      ? {
-          name: user.fullName ?? user.firstName ?? 'User',
-          email: user.primaryEmailAddress?.emailAddress ?? '',
-          imageUrl: user.imageUrl ?? null,
-        }
-      : { name: '', email: '', imageUrl: null }
+  const value = useMemo<AdminUser>(
+    () =>
+      isLoaded && isSignedIn && user
+        ? {
+            name: user.fullName ?? user.firstName ?? 'User',
+            email: user.primaryEmailAddress?.emailAddress ?? '',
+            imageUrl: user.imageUrl ?? null,
+          }
+        : { name: '', email: '', imageUrl: null },
+    [isLoaded, isSignedIn, user]
+  )
 
   return (
     <AdminUserContext value={value}>{children}</AdminUserContext>

@@ -1,8 +1,49 @@
 import { test, expect, requireReachable } from './fixtures/validation-test';
+import type { Page, TestInfo } from '@playwright/test';
 import { expectNoAxeViolations } from './helpers/axe';
 import { adminBaseUrl } from './helpers/env';
 
+const settingsRoutes = [
+  { path: '/settings', heading: 'Settings Home', name: 'home' },
+  { path: '/settings/organization', heading: 'Organization', name: 'organization' },
+  { path: '/settings/branding', heading: 'Brand', name: 'brand' },
+  { path: '/settings/team', heading: 'Team', name: 'team' },
+  { path: '/settings/payments', heading: 'Payments', name: 'payments' },
+  { path: '/settings/billing', heading: 'Billing', name: 'billing' },
+  { path: '/settings/profile', heading: 'Profile', name: 'profile' },
+  { path: '/settings/appearance', heading: 'Appearance', name: 'appearance' },
+] as const;
+
+async function attachScreenshot(page: Page, testInfo: TestInfo, name: string): Promise<void> {
+  await testInfo.attach(name, {
+    body: await page.screenshot({ fullPage: true }),
+    contentType: 'image/png',
+  });
+}
+
 test.describe('admin settings validation', () => {
+  test('settings primary routes render across desktop and mobile without accessibility regressions', async ({ page }, testInfo) => {
+    test.slow();
+    await requireReachable(page, adminBaseUrl, 'admin dashboard');
+
+    await page.setViewportSize({ width: 1440, height: 1000 });
+    for (const route of settingsRoutes) {
+      await page.goto(`${adminBaseUrl}${route.path}`);
+      await expect(page.getByRole('heading', { name: route.heading })).toBeVisible();
+      await expect(page.getByRole('navigation').getByRole('link', { name: 'Organization' })).toBeVisible();
+      await attachScreenshot(page, testInfo, `settings-${route.name}-desktop`);
+      await expectNoAxeViolations(page, testInfo);
+    }
+
+    await page.setViewportSize({ width: 390, height: 844 });
+    for (const route of settingsRoutes) {
+      await page.goto(`${adminBaseUrl}${route.path}`);
+      await expect(page.getByRole('heading', { name: route.heading })).toBeVisible();
+      await attachScreenshot(page, testInfo, `settings-${route.name}-mobile`);
+    }
+    await expectNoAxeViolations(page, testInfo);
+  });
+
   test('profile gated actions stay inactive and pass axe', async ({ page }, testInfo) => {
     await requireReachable(page, adminBaseUrl, 'admin dashboard');
 
@@ -19,10 +60,7 @@ test.describe('admin settings validation', () => {
       await expect(save).toHaveAttribute('aria-disabled', 'true');
     }
 
-    await testInfo.attach('settings-profile', {
-      body: await page.screenshot({ fullPage: true }),
-      contentType: 'image/png',
-    });
+    await attachScreenshot(page, testInfo, 'settings-profile');
     await expectNoAxeViolations(page, testInfo);
   });
 
@@ -37,10 +75,7 @@ test.describe('admin settings validation', () => {
       await expect(invoices).toHaveAttribute('aria-disabled', 'true');
     }
 
-    await testInfo.attach('settings-billing', {
-      body: await page.screenshot({ fullPage: true }),
-      contentType: 'image/png',
-    });
+    await attachScreenshot(page, testInfo, 'settings-billing');
     await expectNoAxeViolations(page, testInfo);
   });
 });

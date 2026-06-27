@@ -58,13 +58,13 @@ jobs:
       postgres:
         image: postgres:16-alpine
         env:
-          POSTGRES_USER: gatekit
-          POSTGRES_PASSWORD: gatekit
-          POSTGRES_DB: gatekit
+          POSTGRES_USER: tixkit
+          POSTGRES_PASSWORD: tixkit
+          POSTGRES_DB: tixkit
         ports:
           - 5432:5432
         options: >-
-          --health-cmd "pg_isready -U gatekit"
+          --health-cmd "pg_isready -U tixkit"
           --health-interval 5s
           --health-timeout 3s
           --health-retries 10
@@ -93,7 +93,7 @@ jobs:
           --health-timeout 5s
           --health-retries 10
     env:
-      DATABASE_URL: postgres://gatekit:gatekit@localhost:5432/gatekit
+      DATABASE_URL: postgres://tixkit:tixkit@localhost:5432/tixkit
       REDIS_URL: redis://localhost:6379
       TEMPORAL_ADDRESS: localhost:7233
     steps:
@@ -115,14 +115,14 @@ jobs:
       mysql:
         image: mysql:8.4
         env:
-          MYSQL_ROOT_PASSWORD: gatekit
-          MYSQL_DATABASE: gatekit
-          MYSQL_USER: gatekit
-          MYSQL_PASSWORD: gatekit
+          MYSQL_ROOT_PASSWORD: tixkit
+          MYSQL_DATABASE: tixkit
+          MYSQL_USER: tixkit
+          MYSQL_PASSWORD: tixkit
         ports:
           - 3306:3306
         options: >-
-          --health-cmd "mysqladmin ping -h localhost -u gatekit -pgatekit"
+          --health-cmd "mysqladmin ping -h localhost -u tixkit -ptixkit"
           --health-interval 10s
           --health-timeout 5s
           --health-retries 10
@@ -143,15 +143,15 @@ jobs:
           DB: mysql
           DB_PORT: 3306
           MYSQL_SEEDS: mysql
-          MYSQL_USER: gatekit
-          MYSQL_PWD: gatekit
+          MYSQL_USER: tixkit
+          MYSQL_PWD: tixkit
         options: >-
           --health-cmd "tctl --address localhost:7233 operator namespace describe default"
           --health-interval 10s
           --health-timeout 5s
           --health-retries 10
     env:
-      DATABASE_URL_MYSQL: mysql://gatekit:gatekit@localhost:3306/gatekit
+      DATABASE_URL_MYSQL: mysql://tixkit:tixkit@localhost:3306/tixkit
       REDIS_URL: redis://localhost:6379
       TEMPORAL_ADDRESS: localhost:7233
     steps:
@@ -164,4 +164,294 @@ jobs:
           node-version: 22
       - run: bun install --frozen-lockfile
       - run: bun run db:migrate:mysql
-      - run: DB_INTEGRATION_DRIVER=mysql bun run test:integration
+      - name: MySQL Tier 1 correctness suites
+        run: |
+          cd packages/api
+          DB_INTEGRATION_DRIVER=mysql bun vitest run src/__tests__/integration/inventory-concurrency.integration.test.ts src/__tests__/integration/load-harness.integration.test.ts
+          cd ../..
+          DB_INTEGRATION_DRIVER=mysql bun --filter @tixkit/workflows test:mysql-tier1
+      - run: DB_INTEGRATION_DRIVER=mysql bun run test:integration:serial
+
+  e2e-browser-matrix:
+    name: E2E Browser Matrix (${{ matrix.browser }})
+    runs-on: ubuntu-latest
+    needs:
+      - build
+      - unit-tests
+      - integration-tests-postgres
+      - integration-tests-mysql
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        browser: [chromium, firefox, webkit]
+    env:
+      CI: "true"
+      ADMIN_DASHBOARD_URL: http://localhost:3202
+      CHECKOUT_URL: http://localhost:3201
+      TIXKIT_API_URL: http://localhost:4200
+      TEMPORAL_TASK_QUEUE: tixkit-e2e-${{ matrix.browser }}
+      DATABASE_URL: postgres://tixkit:tixkit@localhost:5432/tixkit
+      DATABASE_URL_MYSQL: mysql://tixkit:tixkit@localhost:3306/tixkit
+      REDIS_URL: redis://localhost:6379
+      TEMPORAL_ADDRESS: localhost:7233
+      TEMPORAL_NAMESPACE: default
+      S3_ENDPOINT: http://localhost:9000
+      S3_BUCKET: tixkit
+      S3_ACCESS_KEY_ID: minioadmin
+      S3_SECRET_ACCESS_KEY: minioadmin
+      S3_REGION: us-east-1
+      QR_SIGNING_SECRET: ci-qr-signing-secret
+      OFFLINE_MANIFEST_SIGNING_KEY: ci-offline-manifest-signing-key
+      OFFLINE_MANIFEST_KEY_ID: manifest:ci
+      CLERK_SECRET_KEY: ""
+      CLERK_PUBLISHABLE_KEY: ""
+      NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY: ""
+      CLERK_WEBHOOK_SECRET: ""
+      STRIPE_SECRET_KEY: ""
+      STRIPE_WEBHOOK_SECRET: ""
+      NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY: ""
+      OTEL_SDK_DISABLED: "true"
+      RATE_LIMIT_MAX: "100000"
+      RATE_LIMIT_TIME_WINDOW: 1 minute
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.3.14
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: bun install --frozen-lockfile
+      - name: Install Playwright browsers
+        run: bunx playwright install --with-deps ${{ matrix.browser }}
+      - name: Write CI env file
+        run: |
+          cat > .env.local <<EOF
+          NODE_ENV=development
+          PORT=4000
+          LOG_LEVEL=info
+          OTEL_SDK_DISABLED=true
+          API_BASE_URL=http://localhost:4000
+          NEXT_PUBLIC_TIXKIT_API_BASE_URL=http://localhost:4000/v1
+          NEXT_PUBLIC_ADMIN_API_BASE_URL=http://localhost:4000
+          DATABASE_URL=postgres://tixkit:tixkit@localhost:5432/tixkit
+          DATABASE_URL_MYSQL=mysql://tixkit:tixkit@localhost:3306/tixkit
+          REDIS_URL=redis://localhost:6379
+          QR_SIGNING_SECRET=ci-qr-signing-secret
+          OFFLINE_MANIFEST_SIGNING_KEY=ci-offline-manifest-signing-key
+          OFFLINE_MANIFEST_KEY_ID=manifest:ci
+          TEMPORAL_ADDRESS=localhost:7233
+          TEMPORAL_NAMESPACE=default
+          TEMPORAL_TASK_QUEUE=tixkit-e2e-${{ matrix.browser }}
+          CLERK_SECRET_KEY=
+          CLERK_PUBLISHABLE_KEY=
+          NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY=
+          CLERK_WEBHOOK_SECRET=
+          STRIPE_SECRET_KEY=
+          STRIPE_WEBHOOK_SECRET=
+          NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY=
+          TELNYX_API_KEY=
+          TELNYX_WEBHOOK_PUBLIC_KEY=
+          S3_ENDPOINT=http://localhost:9000
+          S3_BUCKET=tixkit
+          S3_ACCESS_KEY_ID=minioadmin
+          S3_SECRET_ACCESS_KEY=minioadmin
+          S3_REGION=us-east-1
+          EOF
+      - name: Start Docker-backed services
+        run: docker compose -f infra/docker-compose.yml up -d --wait postgres mysql redis temporal temporal-postgresql minio
+      - name: Wait for Temporal
+        run: |
+          for attempt in {1..30}; do
+            if docker compose -f infra/docker-compose.yml exec -T temporal tctl --address temporal:7233 operator namespace describe default >/dev/null 2>&1; then
+              exit 0
+            fi
+            sleep 2
+          done
+          docker compose -f infra/docker-compose.yml logs temporal
+          exit 1
+      - name: Run database migrations
+        run: |
+          bun run --env-file=.env.local db:migrate
+          bun run --env-file=.env.local db:migrate:mysql
+      - name: Build widget bundle
+        run: bun run --filter @tixkit/widget build
+      - name: Run Playwright ${{ matrix.browser }}
+        run: bun run test:e2e -- --project=${{ matrix.browser }}
+      - name: Upload Playwright report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report-${{ matrix.browser }}
+          path: playwright-report/
+          if-no-files-found: ignore
+          retention-days: 14
+      - name: Upload Playwright screenshots and axe attachments
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-test-results-${{ matrix.browser }}
+          path: test-results/
+          if-no-files-found: ignore
+          retention-days: 14
+      - name: Show Docker logs on failure
+        if: failure()
+        run: docker compose -f infra/docker-compose.yml logs --no-color
+      - name: Stop Docker-backed services
+        if: always()
+        run: docker compose -f infra/docker-compose.yml down -v
+
+  provider-tests-stripe:
+    name: Provider Tests (Stripe)
+    runs-on: ubuntu-latest
+    needs:
+      - build
+      - unit-tests
+      - integration-tests-postgres
+    timeout-minutes: 45
+    env:
+      CI: "true"
+      ADMIN_DASHBOARD_URL: http://localhost:3202
+      CHECKOUT_URL: http://localhost:3201
+      TIXKIT_API_URL: http://localhost:4200
+      TEMPORAL_TASK_QUEUE: tixkit-provider-ci
+      DATABASE_URL: postgres://tixkit:tixkit@localhost:5432/tixkit
+      REDIS_URL: redis://localhost:6379
+      TEMPORAL_ADDRESS: localhost:7233
+      TEMPORAL_NAMESPACE: default
+      QR_SIGNING_SECRET: ci-qr-signing-secret
+      OFFLINE_MANIFEST_SIGNING_KEY: ci-offline-manifest-signing-key
+      OFFLINE_MANIFEST_KEY_ID: manifest:ci
+      CLERK_SECRET_KEY: ""
+      CLERK_PUBLISHABLE_KEY: ""
+      NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY: ""
+      CLERK_WEBHOOK_SECRET: ""
+      STRIPE_SECRET_KEY: ${{ secrets.STRIPE_SECRET_KEY }}
+      STRIPE_WEBHOOK_SECRET: ${{ secrets.STRIPE_WEBHOOK_SECRET }}
+      NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY: ${{ secrets.NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY }}
+      STRIPE_CONNECT_CLIENT_ID: ${{ secrets.STRIPE_CONNECT_CLIENT_ID }}
+      OTEL_SDK_DISABLED: "true"
+      RATE_LIMIT_MAX: "100000"
+      RATE_LIMIT_TIME_WINDOW: 1 minute
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.3.14
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Detect provider secrets
+        id: provider-secrets
+        run: |
+          missing=()
+          for name in STRIPE_SECRET_KEY STRIPE_WEBHOOK_SECRET NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY STRIPE_CONNECT_CLIENT_ID; do
+            if [ -z "${!name}" ]; then
+              missing+=("$name")
+            fi
+          done
+
+          if [ "${#missing[@]}" -gt 0 ]; then
+            {
+              echo "### Stripe provider tests skipped"
+              echo
+              echo "Missing CI-managed test-mode secrets: ${missing[*]}"
+              echo
+              echo "This is expected for forked pull requests. Configure all listed secrets to run direct Stripe, hosted Stripe Elements, and Stripe Connect provider gates."
+            } >> "$GITHUB_STEP_SUMMARY"
+            echo "available=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "available=true" >> "$GITHUB_OUTPUT"
+          fi
+      - run: bun install --frozen-lockfile
+        if: steps.provider-secrets.outputs.available == 'true'
+      - name: Install Chromium
+        if: steps.provider-secrets.outputs.available == 'true'
+        run: bunx playwright install --with-deps chromium
+      - name: Write provider CI env file
+        if: steps.provider-secrets.outputs.available == 'true'
+        run: |
+          cat > .env.local <<EOF
+          NODE_ENV=development
+          PORT=4000
+          LOG_LEVEL=info
+          OTEL_SDK_DISABLED=true
+          API_BASE_URL=http://localhost:4000
+          NEXT_PUBLIC_TIXKIT_API_BASE_URL=http://localhost:4000/v1
+          NEXT_PUBLIC_ADMIN_API_BASE_URL=http://localhost:4000
+          DATABASE_URL=postgres://tixkit:tixkit@localhost:5432/tixkit
+          REDIS_URL=redis://localhost:6379
+          QR_SIGNING_SECRET=ci-qr-signing-secret
+          OFFLINE_MANIFEST_SIGNING_KEY=ci-offline-manifest-signing-key
+          OFFLINE_MANIFEST_KEY_ID=manifest:ci
+          TEMPORAL_ADDRESS=localhost:7233
+          TEMPORAL_NAMESPACE=default
+          TEMPORAL_TASK_QUEUE=tixkit-provider-ci
+          CLERK_SECRET_KEY=
+          CLERK_PUBLISHABLE_KEY=
+          NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY=
+          CLERK_WEBHOOK_SECRET=
+          STRIPE_SECRET_KEY=${STRIPE_SECRET_KEY}
+          STRIPE_WEBHOOK_SECRET=${STRIPE_WEBHOOK_SECRET}
+          NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY=${NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY}
+          STRIPE_CONNECT_CLIENT_ID=${STRIPE_CONNECT_CLIENT_ID}
+          EOF
+      - name: Start Docker-backed services
+        if: steps.provider-secrets.outputs.available == 'true'
+        run: docker compose -f infra/docker-compose.yml up -d --wait postgres redis temporal temporal-postgresql
+      - name: Wait for Temporal
+        if: steps.provider-secrets.outputs.available == 'true'
+        run: |
+          for attempt in {1..30}; do
+            if docker compose -f infra/docker-compose.yml exec -T temporal tctl --address temporal:7233 operator namespace describe default >/dev/null 2>&1; then
+              exit 0
+            fi
+            sleep 2
+          done
+          docker compose -f infra/docker-compose.yml logs temporal
+          exit 1
+      - name: Run database migrations
+        if: steps.provider-secrets.outputs.available == 'true'
+        run: bun run --env-file=.env.local db:migrate
+      - name: Run direct Stripe provider workflow test
+        if: steps.provider-secrets.outputs.available == 'true'
+        run: RUN_STRIPE_PROVIDER_TESTS=1 bun run --env-file=.env.local --filter @tixkit/workflows test:provider:stripe
+      - name: Run hosted Stripe Elements browser test
+        if: steps.provider-secrets.outputs.available == 'true'
+        run: bun run --env-file=.env.local test:e2e:stripe-provider
+      - name: Run Stripe Connect provider test
+        if: steps.provider-secrets.outputs.available == 'true'
+        run: cd packages/api && RUN_STRIPE_CONNECT_TESTS=1 bun --env-file=../../.env.local vitest run src/__tests__/integration/stripe-connect-provider.integration.test.ts
+      - name: Record provider success
+        if: steps.provider-secrets.outputs.available == 'true'
+        run: |
+          {
+            echo "### Stripe provider tests passed"
+            echo
+            echo "- Direct Stripe create/confirm/refund activity validation ran."
+            echo "- Hosted Stripe Elements checkout/refund browser validation ran."
+            echo "- Stripe Connect account creation/status refresh validation ran."
+          } >> "$GITHUB_STEP_SUMMARY"
+      - name: Upload provider Playwright report
+        if: always() && steps.provider-secrets.outputs.available == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report-stripe-provider
+          path: playwright-report/
+          if-no-files-found: ignore
+          retention-days: 14
+      - name: Upload provider Playwright artifacts
+        if: always() && steps.provider-secrets.outputs.available == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-test-results-stripe-provider
+          path: test-results/
+          if-no-files-found: ignore
+          retention-days: 14
+      - name: Show Docker logs on failure
+        if: failure() && steps.provider-secrets.outputs.available == 'true'
+        run: docker compose -f infra/docker-compose.yml logs --no-color
+      - name: Stop Docker-backed services
+        if: always() && steps.provider-secrets.outputs.available == 'true'
+        run: docker compose -f infra/docker-compose.yml down -v

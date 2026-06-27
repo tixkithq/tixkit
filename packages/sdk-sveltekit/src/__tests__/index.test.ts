@@ -1,7 +1,12 @@
 import { createHmac } from 'node:crypto';
-import { describe, expect, it } from 'vitest';
-import { verifyGateKitWebhook } from '../server.js';
-import { checkoutWidgetUrl, checkoutUrl } from '../client.js';
+import { describe, expect, it, vi } from 'vitest';
+import { createCheckoutFormAction, verifyTixkitWebhook } from '../server.js';
+import {
+  checkoutWidgetUrl,
+  checkoutUrl,
+  tixkitWidgetIframeAttributes,
+  parseTixkitWidgetMessage,
+} from '../client.js';
 
 function signature(body: string, secret: string, timestamp: number): string {
   const digest = createHmac('sha256', secret).update(`${timestamp}.${body}`).digest('hex');
@@ -9,13 +14,13 @@ function signature(body: string, secret: string, timestamp: number): string {
 }
 
 describe('SvelteKit server helpers', () => {
-  it('verifies timestamped GateKit webhook signatures', () => {
+  it('verifies timestamped Tixkit webhook signatures', () => {
     const body = JSON.stringify({ id: 'wevt_1' });
     const secret = 'whsec_test';
     const timestamp = Math.floor(Date.now() / 1000);
 
     expect(
-      verifyGateKitWebhook({
+      verifyTixkitWebhook({
         body,
         secret,
         signature: signature(body, secret, timestamp),
@@ -29,13 +34,78 @@ describe('SvelteKit server helpers', () => {
     const timestamp = Math.floor(Date.now() / 1000) - 301;
 
     expect(
-      verifyGateKitWebhook({
+      verifyTixkitWebhook({
         body,
         secret,
         signature: signature(body, secret, timestamp),
         toleranceSeconds: 300,
       }),
     ).toBe(false);
+  });
+
+  it('creates checkout sessions from validated form actions', async () => {
+    const checkoutCreate = vi.fn(async (input: unknown) => ({ id: 'cs_1', status: 'open', input }));
+    const action = createCheckoutFormAction(
+      { checkout: { create: checkoutCreate } } as never,
+      {
+        successUrl: 'https://app.example.test/success',
+        cancelUrl: 'https://app.example.test/cancel',
+      },
+    );
+    const formData = new FormData();
+    formData.set('eventId', 'evt_1');
+    formData.set('idempotencyKey', 'idem_1');
+    formData.append('ticketTypeId', 'tt_1');
+    formData.append('quantity', '2');
+    formData.append('productId', 'prod_1');
+    formData.append('productQuantity', '1');
+    formData.set('buyerEmail', 'buyer@example.test');
+    formData.set('discountCode', 'SAVE20');
+    formData.set('trackingId', 'campaign_1');
+
+    await expect(action({ request: { formData: async () => formData } })).resolves.toEqual({
+      success: true,
+      session: {
+        id: 'cs_1',
+        status: 'open',
+        input: expect.objectContaining({
+          eventId: 'evt_1',
+          idempotencyKey: 'idem_1',
+          items: [
+            { ticketTypeId: 'tt_1', quantity: 2 },
+            { productId: 'prod_1', quantity: 1 },
+          ],
+          buyer: expect.objectContaining({ email: 'buyer@example.test' }),
+          discountCode: 'SAVE20',
+          trackingId: 'campaign_1',
+          successUrl: 'https://app.example.test/success',
+          cancelUrl: 'https://app.example.test/cancel',
+        }),
+      },
+    });
+    expect(checkoutCreate).toHaveBeenCalledTimes(1);
+  });
+
+  it('returns typed form validation errors before creating checkout sessions', async () => {
+    const checkoutCreate = vi.fn();
+    const action = createCheckoutFormAction({ checkout: { create: checkoutCreate } } as never);
+    const formData = new FormData();
+    formData.set('eventId', '');
+    formData.set('idempotencyKey', '');
+    formData.append('ticketTypeId', 'tt_1');
+    formData.append('quantity', '0');
+
+    await expect(action({ request: { formData: async () => formData } })).resolves.toEqual({
+      success: false,
+      status: 400,
+      error: 'Checkout form is invalid.',
+      fieldErrors: {
+        eventId: 'Event is required.',
+        idempotencyKey: 'Idempotency key is required.',
+        quantity: 'Ticket quantity must be a positive integer.',
+      },
+    });
+    expect(checkoutCreate).not.toHaveBeenCalled();
   });
 });
 
@@ -95,6 +165,79 @@ describe('SvelteKit client helpers', () => {
     expect(url).toContain('discount=SAVE20');
     expect(url).toContain('tracking=camp_1');
     expect(url).toContain('mode=redirect');
+  });
+
+  it('builds Svelte widget iframe attributes with the shared sandbox policy', () => {
+    const attributes = tixkitWidgetIframeAttributes({
+      widgetBaseUrl: 'https://checkout.example.test',
+      brand: 'brd_1',
+      event: 'evt_1',
+      title: 'Event checkout',
+      mode: 'inline',
+    });
+
+    expect(attributes).toEqual({
+      src: 'https://checkout.example.test/checkout?eventId=evt_1&brand=brd_1&mode=inline',
+      title: 'Event checkout',
+      sandbox: 'allow-forms allow-modals allow-popups allow-popups-to-escape-sandbox allow-scripts allow-same-origin',
+      allow: 'payment *',
+      referrerPolicy: 'strict-origin-when-cross-origin',
+    });
+  });
+
+  it('filters Svelte widget postMessages by origin and lifecycle event type', () => {
+    expect(
+      parseTixkitWidgetMessage(
+        {
+          origin: 'https://checkout.example.test',
+          data: {
+            type: 'order_completed',
+            eventId: 'evt_1',
+            orderId: 'ord_1',
+          },
+        },
+        'https://checkout.example.test',
+      ),
+    ).toEqual({
+      type: 'order_completed',
+      eventId: 'evt_1',
+      orderId: 'ord_1',
+      raw: {
+        type: 'order_completed',
+        eventId: 'evt_1',
+        orderId: 'ord_1',
+      },
+    });
+
+    expect(
+      parseTixkitWidgetMessage(
+        { origin: 'https://evil.example.test', data: { type: 'order_completed' } },
+        'https://checkout.example.test',
+      ),
+    ).toBeNull();
+    expect(
+      parseTixkitWidgetMessage(
+        { origin: 'https://checkout.example.test', data: { type: '<script>alert(1)</script>' } },
+        'https://checkout.example.test',
+      ),
+    ).toBeNull();
+  });
+
+  it('ships a Svelte 5 widget component subpath backed by client helpers', async () => {
+    const componentSource = await import('node:fs').then((fs) =>
+      fs.readFileSync(new URL('../TixkitWidget.svelte', import.meta.url), 'utf-8'),
+    );
+    const declarationSource = await import('node:fs').then((fs) =>
+      fs.readFileSync(new URL('../TixkitWidget.svelte.d.ts', import.meta.url), 'utf-8'),
+    );
+
+    expect(componentSource).toContain('let {');
+    expect(componentSource).toContain('$props()');
+    expect(componentSource).toContain('tixkitWidgetIframeAttributes');
+    expect(componentSource).toContain('parseTixkitWidgetMessage');
+    expect(componentSource).toContain('<svelte:window onmessage={handleMessage} />');
+    expect(componentSource).toContain('<iframe');
+    expect(declarationSource).toContain('export type TixkitWidgetProps');
   });
 });
 

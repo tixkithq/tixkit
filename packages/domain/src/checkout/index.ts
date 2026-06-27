@@ -40,6 +40,7 @@ export type OrderStatus =
 export type OrderLineItem = BaseEntity & {
   orderId: Ulid;
   ticketTypeId: Ulid;
+  eventOccurrenceId?: Ulid;
   attendeeId?: Ulid;
   description: string;
   quantity: number;
@@ -82,6 +83,7 @@ export type Attendee = BaseEntity & {
   orderId: Ulid;
   eventId: Ulid;
   ticketTypeId: Ulid;
+  eventOccurrenceId?: Ulid;
   ticketId?: Ulid;
   firstName?: string;
   lastName?: string;
@@ -103,7 +105,14 @@ export type OrderTimelineEvent = BaseEntity & {
 
 export type CreateCheckoutSessionInput = {
   eventId: Ulid;
-  items: { ticketTypeId: Ulid; quantity: number; unitAmountCents?: number; attendeeFields?: Record<string, unknown>[] }[];
+  items: {
+    ticketTypeId?: Ulid;
+    occurrenceId?: Ulid;
+    productId?: Ulid;
+    quantity: number;
+    unitAmountCents?: number;
+    attendeeFields?: Record<string, unknown>[];
+  }[];
   discountCode?: string;
   affiliateCode?: string;
   trackingId?: string;
@@ -112,6 +121,7 @@ export type CreateCheckoutSessionInput = {
   successUrl?: string;
   cancelUrl?: string;
   accessCode?: string;
+  waitlistClaimToken?: string;
   idempotencyKey: IdempotencyKey;
 };
 

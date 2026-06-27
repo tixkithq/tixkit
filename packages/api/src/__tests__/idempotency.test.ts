@@ -1,6 +1,6 @@
 import { describe, it, expect, vi } from 'vitest';
 import { hashRequest, withIdempotency } from '../services/idempotency.js';
-import { IdempotencyConflictError } from '@gatekit/domain';
+import { IdempotencyConflictError } from '@tixkit/domain';
 
 describe('hashRequest', () => {
   it('produces a deterministic hash for the same payload', () => {
@@ -80,8 +80,17 @@ describe('hashRequest', () => {
  *   db.insertInto('idempotency_records').values(...).execute()
  *   db.updateTable('idempotency_records').set(...).where(...).execute()
  */
-function createMockDb(existingRecords: Record<string, unknown>[] = [], insertShouldFail = false) {
+type InsertFailureOptions = boolean | {
+  failCount: number;
+  beforeFail?: (records: Record<string, unknown>[]) => void;
+};
+
+function createMockDb(existingRecords: Record<string, unknown>[] = [], insertFailure: InsertFailureOptions = false) {
   const records = [...existingRecords];
+  let remainingInsertFailures = typeof insertFailure === 'boolean'
+    ? (insertFailure ? Number.POSITIVE_INFINITY : 0)
+    : insertFailure.failCount;
+  const beforeInsertFailure = typeof insertFailure === 'boolean' ? undefined : insertFailure.beforeFail;
 
   const chainable = {
     selectFrom(_table: string) {
@@ -111,7 +120,9 @@ function createMockDb(existingRecords: Record<string, unknown>[] = [], insertSho
         values(vals: Record<string, unknown>) {
           return {
             execute() {
-              if (insertShouldFail) {
+              if (remainingInsertFailures > 0) {
+                remainingInsertFailures -= 1;
+                beforeInsertFailure?.(records);
                 return Promise.reject(new Error('unique constraint violation'));
               }
               records.push(vals);
@@ -176,7 +187,7 @@ describe('withIdempotency', () => {
     expect(records[0]?.response_status).toBe(201);
   });
 
-  it('replays the stored response on second use with same payload', async () => {
+  it('replays the non-expired stored response on second use with same payload', async () => {
     const reqHash = hashRequest({ cart: { items: [] } });
     const { db } = createMockDb([
       {
@@ -187,6 +198,7 @@ describe('withIdempotency', () => {
         response_status: 200,
         response_body: JSON.stringify({ ok: true }),
         status: 'completed',
+        expires_at: new Date(Date.now() + 60_000),
       },
     ]);
 
@@ -201,6 +213,71 @@ describe('withIdempotency', () => {
     expect(result.status).toBe(200);
     expect(result.body).toEqual({ ok: true });
     expect(handler).not.toHaveBeenCalled();
+  });
+
+  it('does not replay an expired completed record and persists a new response', async () => {
+    const reqHash = hashRequest({ cart: { items: ['fresh'] } });
+    const { db, records } = createMockDb([
+      {
+        id: 'idm_expired_completed',
+        key: 'idem-expired-completed',
+        tenant_id: 'tnt_1',
+        request_hash: reqHash,
+        response_status: 200,
+        response_body: JSON.stringify({ id: 'stale' }),
+        status: 'completed',
+        expires_at: new Date(Date.now() - 1_000),
+      },
+    ]);
+
+    const handler = vi.fn(async () => ({ status: 201, body: { id: 'fresh' } }));
+
+    const result = await withIdempotency(db, {
+      key: 'idem-expired-completed',
+      tenantId: 'tnt_1',
+      requestHash: reqHash,
+    }, handler);
+
+    expect(result.status).toBe(201);
+    expect(result.body).toEqual({ id: 'fresh' });
+    expect(handler).toHaveBeenCalledOnce();
+    expect(records).toHaveLength(1);
+    expect(records[0]?.id).not.toBe('idm_expired_completed');
+    expect(records[0]?.status).toBe('completed');
+    expect(records[0]?.response_status).toBe(201);
+    expect(JSON.parse(records[0]?.response_body as string)).toEqual({ id: 'fresh' });
+  });
+
+  it('does not treat an expired in-progress record as stuck and persists a new response', async () => {
+    const reqHash = hashRequest({ cart: { items: ['retry'] } });
+    const { db, records } = createMockDb([
+      {
+        id: 'idm_expired_in_progress',
+        key: 'idem-expired-in-progress',
+        tenant_id: 'tnt_1',
+        request_hash: reqHash,
+        response_status: 0,
+        response_body: 'null',
+        status: 'in_progress',
+        expires_at: new Date(Date.now() - 1_000),
+      },
+    ]);
+
+    const handler = vi.fn(async () => ({ status: 202, body: { id: 'completed-after-expiry' } }));
+
+    const result = await withIdempotency(db, {
+      key: 'idem-expired-in-progress',
+      tenantId: 'tnt_1',
+      requestHash: reqHash,
+    }, handler);
+
+    expect(result.status).toBe(202);
+    expect(result.body).toEqual({ id: 'completed-after-expiry' });
+    expect(handler).toHaveBeenCalledOnce();
+    expect(records).toHaveLength(1);
+    expect(records[0]?.id).not.toBe('idm_expired_in_progress');
+    expect(records[0]?.status).toBe('completed');
+    expect(records[0]?.response_status).toBe(202);
   });
 
   it('throws IdempotencyConflictError when same key is reused with different payload', async () => {
@@ -287,7 +364,42 @@ describe('withIdempotency', () => {
     ).rejects.toThrow(IdempotencyConflictError);
   });
 
-	  it('persists handler failures as completed idempotent error responses', async () => {
+  it('does not replay an expired insert race winner and retries reservation', async () => {
+    const reqHash = hashRequest({ foo: 'bar' });
+    const { db, records } = createMockDb([], {
+      failCount: 1,
+      beforeFail: (currentRecords) => {
+        currentRecords.push({
+          id: 'idm_expired_winner',
+          key: 'idem-expired-race',
+          tenant_id: 'tnt_1',
+          request_hash: reqHash,
+          response_status: 200,
+          response_body: JSON.stringify({ id: 'stale-winner' }),
+          status: 'completed',
+          expires_at: new Date(Date.now() - 1_000),
+        });
+      },
+    });
+
+    const handler = vi.fn(async () => ({ status: 201, body: { id: 'fresh-after-race' } }));
+
+    const result = await withIdempotency(db, {
+      key: 'idem-expired-race',
+      tenantId: 'tnt_1',
+      requestHash: reqHash,
+    }, handler);
+
+    expect(result.status).toBe(201);
+    expect(result.body).toEqual({ id: 'fresh-after-race' });
+    expect(handler).toHaveBeenCalledOnce();
+    expect(records).toHaveLength(1);
+    expect(records[0]?.id).not.toBe('idm_expired_winner');
+    expect(records[0]?.status).toBe('completed');
+    expect(records[0]?.response_status).toBe(201);
+  });
+
+  it('persists handler failures as completed idempotent error responses', async () => {
     const { db, records } = createMockDb();
     const handler = vi.fn(async () => {
       const error = new Error('Refund already processed') as Error & { statusCode: number; code: string };

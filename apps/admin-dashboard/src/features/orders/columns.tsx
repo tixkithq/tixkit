@@ -60,6 +60,7 @@ export function getOrderColumns(
       cell: ({ row }) => (
         <Link
           href={routes.orderDetail(row.original.id)}
+          prefetch={false}
           className='font-mono text-sm font-medium hover:underline'
         >
           {row.original.id}
@@ -117,6 +118,7 @@ export function getOrderColumns(
     },
     {
       id: 'actions',
+      header: () => <span className='sr-only'>Actions</span>,
       enableHiding: false,
       cell: function OrderRowActions({ row }) {
         const order = row.original
@@ -153,7 +155,7 @@ export function getOrderColumns(
               <DropdownMenuContent align='end'>
                 <DropdownMenuLabel>Actions</DropdownMenuLabel>
                 <DropdownMenuItem asChild>
-                  <Link href={routes.orderDetail(order.id)}>
+                  <Link href={routes.orderDetail(order.id)} prefetch={false}>
                     <Eye className='size-4' />
                     View
                   </Link>

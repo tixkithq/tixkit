@@ -1,6 +1,6 @@
 import type { FastifyPluginAsync } from 'fastify';
 import Stripe from 'stripe';
-import { PaymentEventRepository, type Database } from '@gatekit/db';
+import { PaymentEventRepository, type Database } from '@tixkit/db';
 
 export const stripeWebhookRoutes: FastifyPluginAsync = async (app) => {
   const db = app.context.db;
@@ -30,7 +30,7 @@ export const stripeWebhookRoutes: FastifyPluginAsync = async (app) => {
 
     let event: Stripe.Event;
     try {
-      const stripe = new Stripe(stripeSecretKey || 'sk_test_gatekit_unconfigured');
+      const stripe = new Stripe(stripeSecretKey || 'sk_test_tixkit_unconfigured');
       event = stripe.webhooks.constructEvent(rawBody, signature, webhookSecret);
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Unknown error';
@@ -82,14 +82,17 @@ export const stripeWebhookRoutes: FastifyPluginAsync = async (app) => {
       const paymentIntent = event.data.object as Stripe.PaymentIntent;
       const checkoutSessionId = paymentIntent.metadata?.checkoutSessionId;
       if (checkoutSessionId) {
-        try {
-          if (event.type === 'payment_intent.succeeded') {
-            await temporalClient.signalPaymentSucceeded(checkoutSessionId, paymentIntent.id);
-          } else {
-            await temporalClient.signalPaymentFailed(checkoutSessionId, paymentIntent.last_payment_error?.message ?? 'Payment failed');
+        const isTrustedCheckoutPaymentIntent = await validateStripeCheckoutPaymentIntent(db, event, paymentIntent, checkoutSessionId);
+        if (isTrustedCheckoutPaymentIntent) {
+          try {
+            if (event.type === 'payment_intent.succeeded') {
+              await temporalClient.signalPaymentSucceeded(checkoutSessionId, paymentIntent.id);
+            } else {
+              await temporalClient.signalPaymentFailed(checkoutSessionId, paymentIntent.last_payment_error?.message ?? 'Payment failed');
+            }
+          } catch {
+            // If the checkout workflow is no longer running, reconciliation still owns provider state convergence.
           }
-        } catch {
-          // If the checkout workflow is no longer running, the reconciliation workflow will still reconcile DB state.
         }
       }
     }
@@ -101,6 +104,62 @@ export const stripeWebhookRoutes: FastifyPluginAsync = async (app) => {
     return reply.status(200).send({ received: true, duplicate: false });
   });
 };
+
+async function validateStripeCheckoutPaymentIntent(
+  db: Database,
+  event: Stripe.Event,
+  paymentIntent: Stripe.PaymentIntent,
+  checkoutSessionId: string,
+): Promise<boolean> {
+  if (!paymentIntent.id || typeof paymentIntent.amount !== 'number' || typeof paymentIntent.currency !== 'string') {
+    return false;
+  }
+
+  const checkoutSession = await db
+    .selectFrom('checkout_sessions')
+    .select(['id', 'tenant_id'])
+    .where('id', '=', checkoutSessionId)
+    .executeTakeFirst();
+  if (!checkoutSession) return false;
+
+  const storedPaymentIntent = await db
+    .selectFrom('payment_intents')
+    .select([
+      'id',
+      'tenant_id',
+      'checkout_session_id',
+      'provider_intent_id',
+      'amount_cents',
+      'currency',
+      'payment_account_id',
+    ])
+    .where('provider_intent_id', '=', paymentIntent.id)
+    .where('checkout_session_id', '=', checkoutSessionId)
+    .executeTakeFirst();
+  if (!storedPaymentIntent) return false;
+
+  const paymentIntentMatchesSession =
+    storedPaymentIntent.tenant_id === checkoutSession.tenant_id &&
+    storedPaymentIntent.checkout_session_id === checkoutSession.id &&
+    storedPaymentIntent.provider_intent_id === paymentIntent.id &&
+    Number(storedPaymentIntent.amount_cents) === paymentIntent.amount &&
+    String(storedPaymentIntent.currency).toUpperCase() === paymentIntent.currency.toUpperCase();
+  if (!paymentIntentMatchesSession) return false;
+
+  const stripeAccount = (event as unknown as { account?: string }).account;
+  if (!stripeAccount) return true;
+
+  const paymentAccountId = storedPaymentIntent.payment_account_id;
+  if (!paymentAccountId) return false;
+
+  const paymentAccount = await db
+    .selectFrom('payment_accounts')
+    .select(['provider_account_id'])
+    .where('id', '=', paymentAccountId)
+    .executeTakeFirst();
+
+  return paymentAccount?.provider_account_id === stripeAccount;
+}
 
 async function resolveStripeEventTenantId(
   db: Database,

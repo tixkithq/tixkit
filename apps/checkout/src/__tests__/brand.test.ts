@@ -21,7 +21,7 @@ describe('resolveBrand', () => {
     const brand = resolveBrand({})
     expect(brand.fallback).toBe(true)
     expect(brand.id).toBe('brand_platform')
-    expect(brand.name).toBe('GateKit')
+    expect(brand.name).toBe('Tixkit')
     expect(brand.legalUrls).toEqual({})
   })
 
@@ -82,7 +82,7 @@ describe('resolveBrand', () => {
 
   it('uses event ownership when no explicit or domain brand is available', () => {
     const brand = resolveBrand({
-      host: 'checkout.gatekit.test',
+      host: 'checkout.tixkit.test',
       domainBrandMap: 'tickets.acme.test:brand_domain',
       eventBrandId: 'brand_event',
     })
@@ -252,7 +252,7 @@ describe('brandThemeStyle', () => {
 })
 
 describe('resolveBrandFromHost', () => {
-  it('returns undefined when no x-gatekit-brand param is present', () => {
+  it('returns undefined when no x-tixkit-brand param is present', () => {
     // jsdom or node environment without window
     if (typeof window === 'undefined') {
       expect(resolveBrandFromHost()).toBeUndefined()
@@ -292,7 +292,7 @@ describe('resolveBrandFromHost', () => {
   it('falls back to event ownership when query and domain do not resolve', () => {
     const brandId = resolveBrandFromHost({
       search: '?mode=inline',
-      host: 'checkout.gatekit.test',
+      host: 'checkout.tixkit.test',
       domainBrandMap: 'tickets.acme.test:brand_domain',
       eventBrandId: 'brand_event',
     })

@@ -69,7 +69,7 @@ graphify-out/
 # Generated implementation-plan render artifacts
 implementation-plan.html
 implementation-plan.css
-apps/checkout/public/gatekit-widget.js
+apps/checkout/public/tixkit-widget.js
 .codex
 .cursor
 .droid

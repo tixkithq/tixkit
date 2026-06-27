@@ -28,7 +28,11 @@ export const test = base.extend<ValidationFixtures>({
 
       page.on('console', (message) => {
         if (message.type() !== 'error') return;
-        const text = `[console.error] ${message.text()}`;
+        const location = message.location();
+        const source = location.url
+          ? ` (${location.url}:${location.lineNumber}:${location.columnNumber})`
+          : '';
+        const text = `[console.error] ${message.text()}${source}`;
         if (!isIgnoredConsoleError(text)) errors.push(text);
       });
 

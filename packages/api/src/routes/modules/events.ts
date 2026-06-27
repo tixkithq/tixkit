@@ -1,10 +1,53 @@
 import type { FastifyPluginAsync } from 'fastify';
+import { z } from 'zod';
+import { ulid } from 'ulid';
 import { ClerkAuthService } from '../../auth/clerk.js';
-import { BrandRepository, EventRepository, AuditLogRepository } from '@gatekit/db';
-import { NotFoundError } from '@gatekit/domain';
+import { BrandRepository, EventRepository, EventOccurrenceRepository, AuditLogRepository } from '@tixkit/db';
+import { NotFoundError, ValidationError } from '@tixkit/domain';
 import { writeAuditLog } from '../../auth/audit.js';
-import { pageEnvelope, parsePagination, serializeEvent } from '../../http/contracts.js';
-import { createEventSchema, updateEventSchema, parseBody } from '../../http/schemas.js';
+import {
+  pageEnvelope,
+  parsePagination,
+  serializeEvent,
+  serializeEventOccurrence,
+  serializeMarketingIntegration,
+} from '../../http/contracts.js';
+import {
+  createEventOccurrenceSchema,
+  createEventSchema,
+  parseBody,
+  updateEventOccurrenceSchema,
+  updateEventSchema,
+} from '../../http/schemas.js';
+
+const marketingIntegrationSchema = z.object({
+  provider: z.enum(['ga4', 'meta_pixel', 'generic_tag']),
+  config: z.record(z.string(), z.unknown()),
+  consentRequired: z.boolean().default(true),
+  status: z.enum(['active', 'disabled']).default('active'),
+}).strict().superRefine((value, ctx) => {
+  if (value.provider === 'ga4' && typeof value.config.measurementId !== 'string') {
+    ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['config', 'measurementId'], message: 'measurementId is required for GA4 integrations' });
+  }
+  if (value.provider === 'meta_pixel' && typeof value.config.pixelId !== 'string') {
+    ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['config', 'pixelId'], message: 'pixelId is required for Meta Pixel integrations' });
+  }
+  if (value.provider === 'generic_tag') {
+    const pixelUrl = value.config.pixelUrl;
+    if (typeof pixelUrl !== 'string') {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['config', 'pixelUrl'], message: 'pixelUrl is required for generic tag integrations' });
+      return;
+    }
+    try {
+      const parsed = new URL(pixelUrl);
+      if (parsed.protocol !== 'https:') {
+        ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['config', 'pixelUrl'], message: 'pixelUrl must use https' });
+      }
+    } catch {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['config', 'pixelUrl'], message: 'pixelUrl must be a valid URL' });
+    }
+  }
+});
 
 export const eventRoutes: FastifyPluginAsync = async (app) => {
   const db = app.context.db;
@@ -102,6 +145,93 @@ export const eventRoutes: FastifyPluginAsync = async (app) => {
     return serializeEvent(event);
   });
 
+  app.get('/events/:eventId/occurrences', async (request) => {
+    const principal = request.principal!;
+    ClerkAuthService.requirePermission(principal, 'events.read');
+    const { eventId } = request.params as { eventId: string };
+    const event = await new EventRepository(db).findById(eventId);
+    if (!event) throw new NotFoundError('Event', eventId);
+    ClerkAuthService.requireResourceTenant(principal, event, 'Event', eventId);
+    ClerkAuthService.requireOrganizationScope(principal, event.organization_id);
+    ClerkAuthService.requireBrandScope(principal, event.brand_id);
+    ClerkAuthService.requireEventScope(principal, eventId);
+
+    const rows = await new EventOccurrenceRepository(db).findByEvent(eventId);
+    return { items: rows.map(serializeEventOccurrence) };
+  });
+
+  app.post('/events/:eventId/occurrences', async (request, reply) => {
+    const principal = request.principal!;
+    ClerkAuthService.requirePermission(principal, 'events.write');
+    const { eventId } = request.params as { eventId: string };
+    const body = parseBody(createEventOccurrenceSchema, request.body);
+    const startsAt = new Date(body.startsAt);
+    const endsAt = new Date(body.endsAt);
+    if (endsAt <= startsAt) {
+      throw new ValidationError('Occurrence end time must be after start time');
+    }
+    const event = await new EventRepository(db).findById(eventId);
+    if (!event) throw new NotFoundError('Event', eventId);
+    ClerkAuthService.requireResourceTenant(principal, event, 'Event', eventId);
+    ClerkAuthService.requireOrganizationScope(principal, event.organization_id);
+    ClerkAuthService.requireBrandScope(principal, event.brand_id);
+    ClerkAuthService.requireEventScope(principal, eventId);
+
+    const occurrence = await new EventOccurrenceRepository(db).create({
+      eventId,
+      title: body.title,
+      startsAt,
+      endsAt,
+      timezone: body.timezone,
+      venue: body.venue as Record<string, unknown> | null | undefined,
+      capacity: body.capacity,
+      sortOrder: body.sortOrder,
+      status: body.status,
+    });
+    await writeAuditLog(audit(), request, principal, {
+      action: 'event_occurrence.created',
+      resourceType: 'EventOccurrence',
+      resourceId: occurrence.id,
+      diffSummary: { eventId, title: body.title },
+    });
+    return reply.status(201).send(serializeEventOccurrence(occurrence));
+  });
+
+  app.patch('/events/:eventId/occurrences/:occurrenceId', async (request) => {
+    const principal = request.principal!;
+    ClerkAuthService.requirePermission(principal, 'events.write');
+    const { eventId, occurrenceId } = request.params as { eventId: string; occurrenceId: string };
+    const body = parseBody(updateEventOccurrenceSchema, request.body);
+    const event = await new EventRepository(db).findById(eventId);
+    if (!event) throw new NotFoundError('Event', eventId);
+    ClerkAuthService.requireResourceTenant(principal, event, 'Event', eventId);
+    ClerkAuthService.requireOrganizationScope(principal, event.organization_id);
+    ClerkAuthService.requireBrandScope(principal, event.brand_id);
+    ClerkAuthService.requireEventScope(principal, eventId);
+
+    const repo = new EventOccurrenceRepository(db);
+    const existing = await repo.findById(occurrenceId);
+    if (!existing || existing.event_id !== eventId) throw new NotFoundError('EventOccurrence', occurrenceId);
+
+    const startsAt = body.startsAt ? new Date(body.startsAt) : new Date(existing.starts_at);
+    const endsAt = body.endsAt ? new Date(body.endsAt) : new Date(existing.ends_at);
+    if (endsAt <= startsAt) {
+      throw new ValidationError('Occurrence end time must be after start time');
+    }
+
+    const updateData: Record<string, unknown> = {};
+    if (body.title !== undefined) updateData.title = body.title;
+    if (body.startsAt !== undefined) updateData.starts_at = startsAt;
+    if (body.endsAt !== undefined) updateData.ends_at = endsAt;
+    if (body.timezone !== undefined) updateData.timezone = body.timezone;
+    if (body.venue !== undefined) updateData.venue = body.venue ? JSON.stringify(body.venue) : null;
+    if (body.capacity !== undefined) updateData.capacity = body.capacity;
+    if (body.sortOrder !== undefined) updateData.sort_order = body.sortOrder;
+    if (body.status !== undefined) updateData.status = body.status;
+
+    return serializeEventOccurrence(await repo.update(occurrenceId, updateData));
+  });
+
   app.patch('/events/:eventId', async (request) => {
     const principal = request.principal!;
     ClerkAuthService.requirePermission(principal, 'events.write');
@@ -132,6 +262,79 @@ export const eventRoutes: FastifyPluginAsync = async (app) => {
     if (body.status !== undefined) updateData.status = body.status;
 
     return serializeEvent(await repo.update(eventId, updateData));
+  });
+
+  app.get('/events/:eventId/marketing-integrations', async (request) => {
+    const principal = request.principal!;
+    ClerkAuthService.requirePermission(principal, 'events.read');
+    const { eventId } = request.params as { eventId: string };
+    const event = await new EventRepository(db).findById(eventId);
+    if (!event) throw new NotFoundError('Event', eventId);
+    ClerkAuthService.requireResourceTenant(principal, event, 'Event', eventId);
+    ClerkAuthService.requireOrganizationScope(principal, event.organization_id);
+    ClerkAuthService.requireBrandScope(principal, event.brand_id);
+    ClerkAuthService.requireEventScope(principal, eventId);
+
+    const rows = await db
+      .selectFrom('marketing_integrations')
+      .selectAll()
+      .where('event_id', '=', eventId)
+      .execute();
+    return { items: rows.map((row) => serializeMarketingIntegration(row)), nextCursor: null, hasMore: false };
+  });
+
+  app.put('/events/:eventId/marketing-integrations/:provider', async (request) => {
+    const principal = request.principal!;
+    ClerkAuthService.requirePermission(principal, 'events.write');
+    const { eventId, provider } = request.params as { eventId: string; provider: string };
+    const body = parseBody(marketingIntegrationSchema, { ...(request.body as Record<string, unknown>), provider });
+    const event = await new EventRepository(db).findById(eventId);
+    if (!event) throw new NotFoundError('Event', eventId);
+    ClerkAuthService.requireResourceTenant(principal, event, 'Event', eventId);
+    ClerkAuthService.requireOrganizationScope(principal, event.organization_id);
+    ClerkAuthService.requireBrandScope(principal, event.brand_id);
+    ClerkAuthService.requireEventScope(principal, eventId);
+
+    const existing = await db
+      .selectFrom('marketing_integrations')
+      .selectAll()
+      .where('event_id', '=', eventId)
+      .where('provider', '=', body.provider)
+      .executeTakeFirst();
+    const now = new Date();
+    if (existing) {
+      await db
+        .updateTable('marketing_integrations')
+        .set({
+          config: JSON.stringify(body.config),
+          consent_required: body.consentRequired,
+          status: body.status,
+          updated_at: now,
+        })
+        .where('id', '=', existing.id)
+        .execute();
+      const updated = await db
+        .selectFrom('marketing_integrations')
+        .selectAll()
+        .where('id', '=', existing.id)
+        .executeTakeFirstOrThrow();
+      return serializeMarketingIntegration(updated);
+    }
+    await db.insertInto('marketing_integrations').values({
+      id: `mkt_${ulid()}`,
+      tenant_id: event.tenant_id,
+      organization_id: event.organization_id,
+      brand_id: event.brand_id,
+      event_id: eventId,
+      provider: body.provider,
+      config: JSON.stringify(body.config),
+      consent_required: body.consentRequired,
+      status: body.status,
+      created_at: now,
+      updated_at: now,
+    }).execute();
+    const created = await db.selectFrom('marketing_integrations').selectAll().where('event_id', '=', eventId).where('provider', '=', body.provider).executeTakeFirstOrThrow();
+    return serializeMarketingIntegration(created);
   });
 
   app.post('/events/:eventId/publish', async (request) => {

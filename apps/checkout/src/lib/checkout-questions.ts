@@ -1,6 +1,13 @@
 import type { CheckoutQuestion } from './api'
 
-export type CheckoutAnswerValue = string | string[] | boolean
+export type UploadArtifactAnswer = {
+  artifactId: string
+  fileName?: string
+  contentType?: string
+  sizeBytes?: number
+}
+
+export type CheckoutAnswerValue = string | string[] | boolean | UploadArtifactAnswer
 export type CheckoutAnswers = Record<string, CheckoutAnswerValue>
 
 export function isAnswerEmpty(answer: unknown): boolean {

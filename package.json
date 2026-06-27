@@ -1,5 +1,5 @@
 {
-  "name": "gatekit",
+  "name": "tixkit",
   "version": "0.1.0",
   "private": true,
   "type": "module",
@@ -13,27 +13,37 @@
   "scripts": {
     "build": "turbo run build",
     "dev": "bun run --env-file=.env.local turbo run dev",
-    "dev:api": "bun run --env-file=.env.local --filter @gatekit/api dev",
-    "dev:checkout": "bun run --env-file=.env.local --filter @gatekit/checkout dev -- -p 3000",
-    "dev:admin": "bun run --env-file=.env.local --filter @gatekit/admin-dashboard dev -- -p 3001",
-    "dev:worker": "bun run --env-file=.env.local --filter @gatekit/workflows dev",
+    "dev:api": "bun run --env-file=.env.local --filter @tixkit/api dev",
+    "dev:checkout": "bun run --env-file=.env.local --filter @tixkit/checkout dev -- -p 3000",
+    "dev:admin": "bun run --env-file=.env.local --filter @tixkit/admin-dashboard dev -- -p 3001",
+    "dev:worker": "bun run --env-file=.env.local --filter @tixkit/workflows dev",
     "dev:all": "sh -c 'bun run dev:api & bun run dev:worker & bun run dev:checkout & bun run dev:admin & wait'",
     "lint": "turbo run lint",
     "typecheck": "turbo run typecheck",
     "test": "turbo run test:unit test:integration",
     "test:unit": "turbo run test:unit",
     "test:integration": "turbo run test:integration",
+    "test:integration:serial": "turbo run test:integration --concurrency=1",
     "test:e2e": "playwright test",
     "test:e2e:settings": "playwright test e2e/settings-gated-actions.spec.ts",
     "test:e2e:checkout-widget": "playwright test e2e/checkout-widget-console.spec.ts",
+    "test:e2e:stripe-provider": "E2E_STRIPE_PROVIDER=1 playwright test e2e/checkout-stripe-provider-workflow.spec.ts --project=chromium",
     "test:e2e:ui": "playwright test --ui",
     "test:e2e:debug": "playwright test --debug",
-    "db:migrate": "bun run --env-file=.env.local --filter @gatekit/db migrate",
-    "db:migrate:mysql": "bun run --env-file=.env.local --filter @gatekit/db migrate:mysql",
-    "db:reset": "bun run --env-file=.env.local --filter @gatekit/db reset",
-    "db:reset:mysql": "bun run --env-file=.env.local --filter @gatekit/db reset:mysql",
+    "db:migrate": "bun run --env-file=.env.local --filter @tixkit/db migrate",
+    "db:migrate:mysql": "bun run --env-file=.env.local --filter @tixkit/db migrate:mysql",
+    "db:reset": "bun run --env-file=.env.local --filter @tixkit/db reset",
+    "db:reset:mysql": "bun run --env-file=.env.local --filter @tixkit/db reset:mysql",
     "infra:up": "docker compose -f infra/docker-compose.yml up -d",
     "infra:down": "docker compose -f infra/docker-compose.yml down",
+    "iac:lint": "helm lint infra/helm/tixkit",
+    "iac:template": "helm template tixkit infra/helm/tixkit --namespace tixkit",
+    "release:dry-run": "infra/scripts/release-dry-run.sh",
+    "dr:backup:postgres": "infra/scripts/backup-postgres.sh",
+    "dr:restore:postgres": "infra/scripts/restore-postgres.sh",
+    "dr:backup:object-storage": "infra/scripts/backup-object-storage.sh",
+    "dr:restore:object-storage": "infra/scripts/restore-object-storage.sh",
+    "dr:migration-rehearsal": "infra/scripts/migration-rehearsal.sh",
     "clean": "turbo run clean && rm -rf node_modules"
   },
   "devDependencies": {
@@ -54,5 +64,13 @@
   },
   "dependencies": {
     "zod": "^4.4.3"
+  },
+  "overrides": {
+    "postcss": "8.5.15",
+    "protobufjs": "7.6.4",
+    "js-yaml": "4.3.0",
+    "cookie": "1.0.1",
+    "@opentelemetry/core": "2.8.0",
+    "joi": "17.13.4"
   }
 }

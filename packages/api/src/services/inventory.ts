@@ -1,5 +1,5 @@
-import type { Database } from '@gatekit/db';
-import { InventoryExhaustedError, HoldExpiredError, ValidationError } from '@gatekit/domain';
+import type { Database } from '@tixkit/db';
+import { InventoryExhaustedError, HoldExpiredError, ValidationError } from '@tixkit/domain';
 import { ulid } from 'ulid';
 
 export type HoldResult = {
@@ -58,9 +58,11 @@ export class InventoryService {
       let earliestExpiry: Date | null = null;
 
       // Lock pools in a deterministic order to avoid deadlocks.
+      // eslint-disable-next-line unicorn/no-array-sort -- sorting a fresh array gives deterministic lock order without mutating shared input.
       const poolIds = [...perPool.keys()].sort();
 
       for (const poolId of poolIds) {
+        // eslint-disable-next-line no-await-in-loop -- inventory pools must be locked sequentially in sorted order to avoid deadlocks.
         const pool = await trx
           .selectFrom('inventory_pools')
           .selectAll()
@@ -69,6 +71,7 @@ export class InventoryService {
           .executeTakeFirstOrThrow();
 
         // Lazy cleanup of expired holds for this pool.
+        // eslint-disable-next-line no-await-in-loop -- each locked pool is cleaned before its availability is recalculated.
         await trx
           .updateTable('checkout_holds')
           .set({ status: 'expired', updated_at: now })
@@ -77,6 +80,7 @@ export class InventoryService {
           .where('expires_at', '<', now)
           .execute();
 
+        // eslint-disable-next-line no-await-in-loop -- availability must be read after cleanup while this pool remains locked.
         const activeHolds = await trx
           .selectFrom('checkout_holds')
           .select(trx.fn.sum('quantity').as('total_held'))
@@ -98,6 +102,7 @@ export class InventoryService {
 
         for (const item of itemsByPool.get(poolId) ?? []) {
           const holdId = `hld_${ulid()}`;
+          // eslint-disable-next-line no-await-in-loop -- hold rows are inserted sequentially under the pool lock so partial failure rolls back the transaction.
           await trx
             .insertInto('checkout_holds')
             .values({
@@ -132,20 +137,42 @@ export class InventoryService {
   /**
    * Converts every active hold for a checkout session into sold inventory,
    * incrementing each affected pool's sold_count. Idempotent: already-converted
-   * holds are skipped.
+   * holds are skipped. Expired holds are terminal even when a background
+   * expiration worker has already marked them expired.
    */
   async convertHoldsForSession(checkoutSessionId: string): Promise<void> {
     const expiredHoldId = await this.db.transaction().execute(async (trx) => {
       const now = new Date();
+      const candidateHolds = await trx
+        .selectFrom('checkout_holds')
+        .select(['id', 'inventory_pool_id'])
+        .where('checkout_session_id', '=', checkoutSessionId)
+        .execute();
+
+      // Match reserveCart lock ordering: inventory pools first, sorted, then
+      // checkout holds. This avoids MySQL deadlocks during reserve/finalize races.
+      // eslint-disable-next-line unicorn/no-array-sort -- sorting a fresh array gives deterministic lock order without mutating shared input.
+      const poolIds = [...new Set(candidateHolds.map((hold) => hold.inventory_pool_id as string))].sort();
+      for (const poolId of poolIds) {
+        // eslint-disable-next-line no-await-in-loop -- deterministic sequential pool locking prevents deadlocks across dialects.
+        await trx
+          .selectFrom('inventory_pools')
+          .select('id')
+          .where('id', '=', poolId)
+          .forUpdate()
+          .executeTakeFirstOrThrow();
+      }
+
       const holds = await trx
         .selectFrom('checkout_holds')
         .selectAll()
         .where('checkout_session_id', '=', checkoutSessionId)
-        .where('status', '=', 'active')
         .forUpdate()
         .execute();
 
-      const expiredHold = holds.find((hold) => new Date(hold.expires_at) <= now);
+      const expiredHold = holds.find(
+        (hold) => hold.status === 'expired' || (hold.status === 'active' && new Date(hold.expires_at) <= now),
+      );
       if (expiredHold) {
         await trx
           .updateTable('checkout_holds')
@@ -157,12 +184,14 @@ export class InventoryService {
         return expiredHold.id as string;
       }
 
-      for (const hold of holds) {
+      for (const hold of holds.filter((candidate) => candidate.status === 'active')) {
+        // eslint-disable-next-line no-await-in-loop -- hold conversion must update each hold before incrementing its matching pool count.
         await trx
           .updateTable('checkout_holds')
           .set({ status: 'converted', updated_at: now })
           .where('id', '=', hold.id)
           .execute();
+        // eslint-disable-next-line no-await-in-loop -- inventory increments are paired with the just-converted hold inside the same transaction.
         await trx
           .updateTable('inventory_pools')
           .set((eb) => ({ sold_count: eb('sold_count', '+', hold.quantity), updated_at: now }))
@@ -269,6 +298,19 @@ export class InventoryService {
   async convertHold(holdId: string): Promise<void> {
     const expiredHoldId = await this.db.transaction().execute(async (trx) => {
       const now = new Date();
+      const candidateHold = await trx
+        .selectFrom('checkout_holds')
+        .select(['id', 'inventory_pool_id'])
+        .where('id', '=', holdId)
+        .executeTakeFirstOrThrow();
+
+      await trx
+        .selectFrom('inventory_pools')
+        .select('id')
+        .where('id', '=', candidateHold.inventory_pool_id)
+        .forUpdate()
+        .executeTakeFirstOrThrow();
+
       const hold = await trx
         .selectFrom('checkout_holds')
         .selectAll()
@@ -346,6 +388,21 @@ export class InventoryService {
    */
   async restoreInventory(holdId: string, quantity: number): Promise<void> {
     await this.db.transaction().execute(async (trx) => {
+      const candidateHold = await trx
+        .selectFrom('checkout_holds')
+        .select(['id', 'inventory_pool_id'])
+        .where('id', '=', holdId)
+        .executeTakeFirst();
+
+      if (!candidateHold) return;
+
+      await trx
+        .selectFrom('inventory_pools')
+        .select('id')
+        .where('id', '=', candidateHold.inventory_pool_id)
+        .forUpdate()
+        .executeTakeFirstOrThrow();
+
       const hold = await trx
         .selectFrom('checkout_holds')
         .selectAll()

@@ -87,6 +87,21 @@ describe('buildEventUpdatePayload', () => {
     expect(buildEventUpdatePayload(fullValues, {})).toEqual({})
   })
 
+  it('uses initial values as a fallback when dirty fields omit changed optional values', () => {
+    expect(buildEventUpdatePayload({
+      ...fullValues,
+      coverImageUrl: 'https://example.com/cover.jpg',
+      externalUrl: 'https://example.com/event',
+      seoImageUrl: 'https://example.com/seo.jpg',
+    }, {}, fullValues)).toMatchObject({
+      coverImageUrl: 'https://example.com/cover.jpg',
+      externalUrl: 'https://example.com/event',
+      seo: {
+        imageUrl: 'https://example.com/seo.jpg',
+      },
+    })
+  })
+
   it('sends null when nullable detail fields are cleared', () => {
     expect(buildEventUpdatePayload(fullValues, {
       capacity: true,

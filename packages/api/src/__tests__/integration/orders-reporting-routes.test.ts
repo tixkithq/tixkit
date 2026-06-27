@@ -1,7 +1,7 @@
 import Fastify from 'fastify';
 import { describe, expect, it, vi, beforeEach } from 'vitest';
-import type { Principal } from '@gatekit/domain';
-import type { Database } from '@gatekit/db';
+import type { Principal } from '@tixkit/domain';
+import type { Database } from '@tixkit/db';
 import type { AppContext } from '../../app.js';
 import { orderRoutes } from '../../routes/modules/orders.js';
 import { reportingRoutes } from '../../routes/modules/reporting.js';
@@ -14,7 +14,7 @@ const dbState = vi.hoisted(() => ({
     brand_id: 'brd_1',
     event_id: 'evt_1',
     checkout_session_id: 'cs_1',
-    order_number: 'GK-1001',
+    order_number: 'TK-1001',
     status: 'paid',
     currency: 'USD',
     subtotal_cents: 10000,
@@ -43,8 +43,12 @@ const dbState = vi.hoisted(() => ({
   } as Record<string, unknown>,
   lineItems: [] as Record<string, unknown>[],
   attendees: [] as Record<string, unknown>[],
+  tickets: [] as Record<string, unknown>[],
   checkoutSession: null as Record<string, unknown> | null,
+  widgetImpressions: [] as Record<string, unknown>[],
   refunds: [] as Record<string, unknown>[],
+  affiliates: [] as Record<string, unknown>[],
+  attributions: [] as Record<string, unknown>[],
   queryWheres: [] as Array<{ table: string; wheres: Array<{ column: string; op: string; value: unknown }> }>,
   timeline: [] as Record<string, unknown>[],
   timelineEvents: [] as Record<string, unknown>[],
@@ -58,6 +62,20 @@ const dbState = vi.hoisted(() => ({
   idempotencyCheck: null as Record<string, unknown> | null,
   destroy: vi.fn(),
 }));
+
+function rowMatchesWheres(row: Record<string, unknown>, wheres: Array<{ column: string; op: string; value: unknown }>): boolean {
+  return wheres.every((where) => {
+    const column = where.column.includes('.') ? where.column.split('.').at(-1)! : where.column;
+    const value = row[column];
+    if (where.op === '=') return value === where.value;
+    if (where.op === 'in') return Array.isArray(where.value) && where.value.includes(value);
+    if (where.op === 'is') return value === where.value;
+    if (where.op === 'is not') return value !== where.value;
+    if (where.op === '>=') return new Date(value as string | Date).getTime() >= new Date(where.value as string | Date).getTime();
+    if (where.op === '<=') return new Date(value as string | Date).getTime() <= new Date(where.value as string | Date).getTime();
+    return true;
+  });
+}
 
 function createMockDb(): unknown {
   function createQuery(table: string) {
@@ -82,11 +100,21 @@ function createMockDb(): unknown {
         countAll: () => 'count',
       },
       async executeTakeFirst() {
+        dbState.queryWheres.push({ table, wheres: [...query.wheres] });
+        if (table === 'tickets') {
+          return { count: dbState.tickets.filter((ticket) => rowMatchesWheres(ticket, query.wheres)).length };
+        }
+        if (table === 'attendees') {
+          return { count: dbState.attendees.filter((attendee) => rowMatchesWheres(attendee, query.wheres)).length };
+        }
         if (table === 'orders') return dbState.order;
         if (table === 'events') return dbState.event;
         if (table === 'idempotency_records') return dbState.idempotencyCheck;
         if (table === 'export_jobs') return dbState.exportJobs[0];
         if (table === 'checkout_sessions') return dbState.checkoutSession;
+        if (table === 'widget_impressions') {
+          return { count: dbState.widgetImpressions.filter((impression) => rowMatchesWheres(impression, query.wheres)).length };
+        }
         if (table === 'order_line_items') return undefined;
         if (table === 'email_jobs') return undefined;
         if (table === 'email_provider_routes') return { id: 'epr_1' };
@@ -100,9 +128,11 @@ function createMockDb(): unknown {
       },
       async execute() {
         dbState.queryWheres.push({ table, wheres: [...query.wheres] });
-        if (table === 'orders') return dbState.orders;
-        if (table === 'order_line_items') return dbState.lineItems;
-        if (table === 'attendees') return dbState.attendees;
+        if (table === 'orders') return dbState.orders.filter((order) => rowMatchesWheres(order, query.wheres));
+        if (table === 'order_line_items') {
+          return dbState.lineItems.filter((lineItem) => rowMatchesWheres(lineItem, query.wheres));
+        }
+        if (table === 'attendees') return dbState.attendees.filter((attendee) => rowMatchesWheres(attendee, query.wheres));
         if (table === 'refunds') {
           return dbState.refunds.filter((refund) => {
             for (const where of query.wheres) {
@@ -111,10 +141,15 @@ function createMockDb(): unknown {
             return true;
           });
         }
-        if (table === 'tickets') return [];
+        if (table === 'tickets') return dbState.tickets.filter((ticket) => rowMatchesWheres(ticket, query.wheres));
         if (table === 'discount_codes') return [{ code: 'PROMO10', uses_count: 5, event_id: 'evt_1' }];
         if (table === 'tax_rules') return [{ name: 'VAT', rate: 2500, type: 'exclusive', event_id: 'evt_1' }];
-        if (table === 'ticket_types') return [];
+        if (table === 'ticket_types') {
+          return [
+            { id: 'tt_1', event_id: 'evt_1', name: 'General Admission' },
+            { id: 'tt_2', event_id: 'evt_1', name: 'VIP' },
+          ].filter((ticketType) => rowMatchesWheres(ticketType, query.wheres));
+        }
         if (table === 'checkout_sessions') return [];
         if (table === 'checkout_holds') return [];
         if (table === 'export_job_events') {
@@ -129,8 +164,18 @@ function createMockDb(): unknown {
             return true;
           });
         }
-        if (table === 'affiliates') return [{ id: 'aff_1', code: 'ADA', name: 'Ada', organization_id: 'org_1' }];
-        if (table === 'attributions') return [{ affiliate_id: 'aff_1', order_id: 'ord_1', commission_cents: 100 }];
+        if (table === 'affiliates') {
+          const affiliates = dbState.affiliates.length > 0
+            ? dbState.affiliates
+            : [{ id: 'aff_1', tenant_id: 'tnt_1', code: 'ADA', name: 'Ada', organization_id: 'org_1' }];
+          return affiliates.filter((affiliate) => rowMatchesWheres(affiliate, query.wheres));
+        }
+        if (table === 'attributions') {
+          const attributions = dbState.attributions.length > 0
+            ? dbState.attributions
+            : [{ affiliate_id: 'aff_1', order_id: 'ord_1', commission_cents: 100 }];
+          return attributions.filter((attribution) => rowMatchesWheres(attribution, query.wheres));
+        }
         if (table === 'export_jobs') return [];
         if (table === 'order_timeline_events') return dbState.timelineEvents;
         if (table === 'user_profiles') return null;
@@ -265,7 +310,7 @@ describe('order routes', () => {
   beforeEach(() => {
     dbState.order = {
       id: 'ord_1', tenant_id: 'tnt_1', organization_id: 'org_1', brand_id: 'brd_1', event_id: 'evt_1',
-      checkout_session_id: 'cs_1', order_number: 'GK-1001', status: 'paid', currency: 'USD',
+      checkout_session_id: 'cs_1', order_number: 'TK-1001', status: 'paid', currency: 'USD',
       subtotal_cents: 10000, discount_cents: 0, tax_cents: 500, fee_cents: 200, total_cents: 10700,
       refunded_cents: 0, buyer_email: 'buyer@test.com', buyer_first_name: 'Ada', buyer_last_name: 'Lovelace',
       buyer_phone: null, payment_intent_id: 'pi_1', payment_provider: 'stripe',
@@ -278,6 +323,7 @@ describe('order routes', () => {
     dbState.updatedOrder = null;
     dbState.exportEvents = [];
     dbState.lineItems = [];
+    dbState.tickets = [];
     dbState.attendees = [];
     dbState.refunds = [];
     dbState.timelineEvents = [];
@@ -617,7 +663,7 @@ describe('reporting routes', () => {
   beforeEach(() => {
     dbState.order = {
       id: 'ord_1', tenant_id: 'tnt_1', organization_id: 'org_1', brand_id: 'brd_1', event_id: 'evt_1',
-      checkout_session_id: 'cs_1', order_number: 'GK-1001', status: 'paid', currency: 'USD',
+      checkout_session_id: 'cs_1', order_number: 'TK-1001', status: 'paid', currency: 'USD',
       subtotal_cents: 10000, discount_cents: 0, tax_cents: 500, fee_cents: 200, total_cents: 10700,
       refunded_cents: 0, buyer_email: 'buyer@test.com', buyer_first_name: 'Ada', buyer_last_name: 'Lovelace',
       buyer_phone: null, payment_intent_id: 'pi_1', payment_provider: 'stripe',
@@ -631,8 +677,20 @@ describe('reporting routes', () => {
       brand_id: 'brd_1',
       currency: 'USD',
     };
-    dbState.lineItems = [{ quantity: 2, subtotal_cents: 10000, discount_cents: 0, tax_cents: 500 }];
+    dbState.lineItems = [{
+      order_id: 'ord_1',
+      ticket_type_id: 'tt_1',
+      product_id: null,
+      quantity: 2,
+      subtotal_cents: 10000,
+      discount_cents: 0,
+      tax_cents: 500,
+    }];
+    dbState.tickets = [];
     dbState.refunds = [];
+    dbState.affiliates = [];
+    dbState.attributions = [];
+    dbState.widgetImpressions = [];
     dbState.queryWheres = [];
     dbState.exportJobs = [];
     dbState.exportEvents = [];
@@ -646,6 +704,18 @@ describe('reporting routes', () => {
       { amount_cents: 1000, status: 'succeeded' },
       { amount_cents: 700, status: 'failed' },
     ];
+    dbState.lineItems = [
+      { order_id: 'ord_1', ticket_type_id: 'tt_1', product_id: null, quantity: 4, subtotal_cents: 10000, discount_cents: 0, tax_cents: 500 },
+      { order_id: 'ord_1', ticket_type_id: null, product_id: 'prd_1', quantity: 3, subtotal_cents: 4500, discount_cents: 0, tax_cents: 0 },
+    ];
+    dbState.tickets = [
+      { id: 'tkt_1', tenant_id: 'tnt_1', event_id: 'evt_1', order_id: 'ord_1', status: 'valid' },
+      { id: 'tkt_2', tenant_id: 'tnt_1', event_id: 'evt_1', order_id: 'ord_1', status: 'checked_in' },
+      { id: 'tkt_3', tenant_id: 'tnt_1', event_id: 'evt_1', order_id: 'ord_1', status: 'void' },
+      { id: 'tkt_4', tenant_id: 'tnt_1', event_id: 'evt_1', order_id: 'ord_1', status: 'refunded' },
+      { id: 'tkt_other_event', tenant_id: 'tnt_1', event_id: 'evt_2', order_id: 'ord_2', status: 'valid' },
+      { id: 'tkt_other_tenant', tenant_id: 'tnt_2', event_id: 'evt_1', order_id: 'ord_1', status: 'valid' },
+    ];
     const app = await setupApp(reportingRoutes, makePrincipal());
     const res = await app.inject({ method: 'GET', url: '/events/evt_1/reports/sales' });
     expect(res.statusCode).toBe(200);
@@ -654,11 +724,50 @@ describe('reporting routes', () => {
     expect(body.grossSalesCents).toBe(10700);
     expect(body.refundsCents).toBe(1000);
     expect(body.netRevenueCents).toBe(9700);
+    expect(body.ticketsSold).toBe(2);
+    expect(body.checkIns).toBe(1);
     expect(dbState.queryWheres).toContainEqual(expect.objectContaining({
       table: 'refunds',
       wheres: expect.arrayContaining([
         { column: 'refunds.status', op: '=', value: 'succeeded' },
         { column: 'orders.tenant_id', op: '=', value: 'tnt_1' },
+      ]),
+    }));
+    expect(dbState.queryWheres).toContainEqual(expect.objectContaining({
+      table: 'tickets',
+      wheres: expect.arrayContaining([
+        { column: 'tenant_id', op: '=', value: 'tnt_1' },
+        { column: 'event_id', op: '=', value: 'evt_1' },
+        { column: 'order_id', op: 'in', value: ['ord_1'] },
+        { column: 'status', op: 'in', value: ['valid', 'checked_in'] },
+      ]),
+    }));
+    expect(dbState.queryWheres).toContainEqual(expect.objectContaining({
+      table: 'tickets',
+      wheres: expect.arrayContaining([
+        { column: 'tenant_id', op: '=', value: 'tnt_1' },
+        { column: 'event_id', op: '=', value: 'evt_1' },
+        { column: 'status', op: '=', value: 'checked_in' },
+      ]),
+    }));
+    await app.close();
+  });
+
+  it('GET /events/:eventId/reports/sales fallback ticket count ignores product line items', async () => {
+    dbState.lineItems = [
+      { order_id: 'ord_1', ticket_type_id: 'tt_1', product_id: null, quantity: 2, subtotal_cents: 10000, discount_cents: 0, tax_cents: 500 },
+      { order_id: 'ord_1', ticket_type_id: null, product_id: 'prd_1', quantity: 4, subtotal_cents: 6000, discount_cents: 0, tax_cents: 0 },
+    ];
+    dbState.tickets = [];
+    const app = await setupApp(reportingRoutes, makePrincipal());
+    const res = await app.inject({ method: 'GET', url: '/events/evt_1/reports/sales' });
+    expect(res.statusCode).toBe(200);
+    expect(res.json().ticketsSold).toBe(2);
+    expect(dbState.queryWheres).toContainEqual(expect.objectContaining({
+      table: 'order_line_items',
+      wheres: expect.arrayContaining([
+        { column: 'order_id', op: 'in', value: ['ord_1'] },
+        { column: 'ticket_type_id', op: 'is not', value: null },
       ]),
     }));
     await app.close();
@@ -675,6 +784,29 @@ describe('reporting routes', () => {
     await app.close();
   });
 
+  it('GET /events/:eventId/reports/sales includes the full date-only to day', async () => {
+    dbState.order.created_at = new Date('2026-06-01T18:30:00.000Z');
+    dbState.orders = [dbState.order];
+    const app = await setupApp(reportingRoutes, makePrincipal());
+    const res = await app.inject({
+      method: 'GET',
+      url: '/events/evt_1/reports/sales?from=2026-06-01&to=2026-06-01',
+    });
+    expect(res.statusCode).toBe(200);
+    expect(res.json()).toMatchObject({
+      grossSalesCents: 10700,
+      netRevenueCents: 10700,
+    });
+    expect(dbState.queryWheres).toContainEqual(expect.objectContaining({
+      table: 'orders',
+      wheres: expect.arrayContaining([
+        { column: 'created_at', op: '>=', value: new Date('2026-06-01T00:00:00.000Z') },
+        { column: 'created_at', op: '<=', value: new Date('2026-06-01T23:59:59.999Z') },
+      ]),
+    }));
+    await app.close();
+  });
+
   it('GET /events/:eventId/reports/tax returns tax breakdown from line items', async () => {
     const app = await setupApp(reportingRoutes, makePrincipal());
     const res = await app.inject({ method: 'GET', url: '/events/evt_1/reports/tax' });
@@ -688,51 +820,141 @@ describe('reporting routes', () => {
   });
 
   it('GET /events/:eventId/reports/attendance returns attendance metrics', async () => {
+    dbState.attendees = [
+      { id: 'att_1', tenant_id: 'tnt_1', event_id: 'evt_1', status: 'confirmed' },
+      { id: 'att_2', tenant_id: 'tnt_1', event_id: 'evt_1', status: 'checked_in' },
+      { id: 'att_cancelled', tenant_id: 'tnt_1', event_id: 'evt_1', status: 'cancelled' },
+      { id: 'att_other_tenant', tenant_id: 'tnt_2', event_id: 'evt_1', status: 'checked_in' },
+    ];
+    dbState.tickets = [
+      { id: 'tkt_1', tenant_id: 'tnt_1', event_id: 'evt_1', ticket_type_id: 'tt_1', status: 'valid' },
+      { id: 'tkt_2', tenant_id: 'tnt_1', event_id: 'evt_1', ticket_type_id: 'tt_1', status: 'checked_in' },
+      { id: 'tkt_other_tenant', tenant_id: 'tnt_2', event_id: 'evt_1', ticket_type_id: 'tt_1', status: 'checked_in' },
+      { id: 'tkt_other_event', tenant_id: 'tnt_1', event_id: 'evt_2', ticket_type_id: 'tt_1', status: 'checked_in' },
+      { id: 'tkt_void', tenant_id: 'tnt_1', event_id: 'evt_1', ticket_type_id: 'tt_1', status: 'void' },
+    ];
+
     const app = await setupApp(reportingRoutes, makePrincipal());
     const res = await app.inject({ method: 'GET', url: '/events/evt_1/reports/attendance' });
     expect(res.statusCode).toBe(200);
     const body = res.json();
     expect(body.eventId).toBe('evt_1');
-    expect(body).toHaveProperty('totalAttendees');
-    expect(body).toHaveProperty('checkedIn');
-    expect(body).toHaveProperty('checkInRate');
+    expect(body.totalAttendees).toBe(2);
+    expect(body.checkedIn).toBe(1);
+    expect(body.notCheckedIn).toBe(1);
+    expect(body.checkInRate).toBe(0.5);
+    expect(body.breakdownByTicketType).toContainEqual({
+      ticketTypeId: 'tt_1',
+      ticketTypeName: 'General Admission',
+      total: 2,
+      checkedIn: 1,
+    });
+    expect(dbState.queryWheres).toContainEqual(expect.objectContaining({
+      table: 'attendees',
+      wheres: expect.arrayContaining([
+        { column: 'tenant_id', op: '=', value: 'tnt_1' },
+        { column: 'event_id', op: '=', value: 'evt_1' },
+        { column: 'status', op: 'in', value: ['confirmed', 'checked_in'] },
+      ]),
+    }));
+    expect(dbState.queryWheres).toContainEqual(expect.objectContaining({
+      table: 'tickets',
+      wheres: expect.arrayContaining([
+        { column: 'tenant_id', op: '=', value: 'tnt_1' },
+        { column: 'event_id', op: '=', value: 'evt_1' },
+        { column: 'status', op: '=', value: 'checked_in' },
+      ]),
+    }));
     await app.close();
   });
 
   it('GET /events/:eventId/reports/promo returns non-zero discount amount', async () => {
     dbState.order.discount_cents = 1000;
+    dbState.order.refunded_cents = 1200;
+    dbState.order.status = 'partially_refunded';
+    dbState.order.cart = JSON.stringify({ discountCode: 'PROMO10' });
     dbState.orders = [dbState.order];
     const app = await setupApp(reportingRoutes, makePrincipal());
     const res = await app.inject({ method: 'GET', url: '/events/evt_1/reports/promo' });
     expect(res.statusCode).toBe(200);
     const body = res.json();
     expect(body.discountCodes[0].usesCount).toBe(5);
-    // Should not be hardcoded 0
-    expect(body.discountCodes[0].discountAmountCents).toBeGreaterThanOrEqual(0);
+    expect(body.discountCodes[0].discountAmountCents).toBe(1000);
+    expect(body.discountCodes[0].revenueAttributedCents).toBe(9500);
     await app.close();
   });
 
   it('GET /events/:eventId/reports/conversion returns conversion funnel', async () => {
+    dbState.widgetImpressions = [
+      { id: 'wim_1', event_id: 'evt_1' },
+      { id: 'wim_2', event_id: 'evt_1' },
+      { id: 'wim_other', event_id: 'evt_other' },
+    ];
     const app = await setupApp(reportingRoutes, makePrincipal());
     const res = await app.inject({ method: 'GET', url: '/events/evt_1/reports/conversion' });
     expect(res.statusCode).toBe(200);
     const body = res.json();
-    expect(body.widgetViews).toBeNull();
+    expect(body.widgetViews).toBe(2);
     expect(body).toHaveProperty('checkoutCompleted');
     expect(body).toHaveProperty('conversionRate');
     await app.close();
   });
 
   it('GET /organizations/:organizationId/reports/affiliate returns revenue from order join', async () => {
+    dbState.orders = [
+      {
+        ...dbState.order,
+        id: 'ord_1',
+        tenant_id: 'tnt_1',
+        organization_id: 'org_1',
+        total_cents: 10000,
+        refunded_cents: 1200,
+      },
+      {
+        ...dbState.order,
+        id: 'ord_over_refunded',
+        tenant_id: 'tnt_1',
+        organization_id: 'org_1',
+        total_cents: 5000,
+        refunded_cents: 7000,
+      },
+      {
+        ...dbState.order,
+        id: 'ord_other_org',
+        tenant_id: 'tnt_1',
+        organization_id: 'org_2',
+        total_cents: 9000,
+        refunded_cents: 0,
+      },
+      {
+        ...dbState.order,
+        id: 'ord_other_tenant',
+        tenant_id: 'tnt_2',
+        organization_id: 'org_1',
+        total_cents: 11000,
+        refunded_cents: 0,
+      },
+    ];
+    dbState.affiliates = [{ id: 'aff_1', tenant_id: 'tnt_1', code: 'ADA', name: 'Ada', organization_id: 'org_1' }];
+    dbState.attributions = [
+      { affiliate_id: 'aff_1', order_id: 'ord_1', commission_cents: 100 },
+      { affiliate_id: 'aff_1', order_id: 'ord_over_refunded', commission_cents: 50 },
+      { affiliate_id: 'aff_1', order_id: 'ord_other_org', commission_cents: 90 },
+      { affiliate_id: 'aff_1', order_id: 'ord_other_tenant', commission_cents: 110 },
+    ];
+
     const app = await setupApp(reportingRoutes, makePrincipal());
     const res = await app.inject({ method: 'GET', url: '/organizations/org_1/reports/affiliate' });
     expect(res.statusCode).toBe(200);
     const body = res.json();
     expect(body.affiliates[0].code).toBe('ADA');
-    expect(body.affiliates[0].revenueAttributedCents).toBeGreaterThanOrEqual(0);
+    expect(body.affiliates[0].referralsCount).toBe(2);
+    expect(body.affiliates[0].revenueAttributedCents).toBe(8800);
+    expect(body.affiliates[0].commissionCents).toBe(150);
     expect(dbState.queryWheres).toContainEqual(expect.objectContaining({
       table: 'orders',
       wheres: expect.arrayContaining([
+        { column: 'id', op: 'in', value: ['ord_1', 'ord_over_refunded', 'ord_other_org', 'ord_other_tenant'] },
         { column: 'tenant_id', op: '=', value: 'tnt_1' },
         { column: 'organization_id', op: '=', value: 'org_1' },
       ]),

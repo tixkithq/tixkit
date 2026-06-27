@@ -23,12 +23,12 @@ describe('AdminApi settings fixtures', () => {
     expect(organization).toBeDefined()
 
     const updateResult = await adminApi.updateOrganization(organization.id, {
-      name: 'Updated GateKit',
+      name: 'Updated Tixkit',
       slug: organization.slug,
     })
     expect(updateResult.ok).toBe(true)
     if (updateResult.ok) {
-      expect(updateResult.data.name).toBe('Updated GateKit')
+      expect(updateResult.data.name).toBe('Updated Tixkit')
     }
   })
 
@@ -69,7 +69,26 @@ describe('AdminApi settings fixtures', () => {
     expect(accountResult.ok).toBe(true)
     if (accountResult.ok) {
       expect(accountResult.data.provider).toBe('stripe_connect')
+      const refreshResult = await adminApi.refreshStripeConnectAccount('org_demo', accountResult.data.id)
+      expect(refreshResult.ok).toBe(true)
+      if (refreshResult.ok) {
+        expect(refreshResult.data.status).toBe('active')
+      }
     }
+  })
+})
+
+describe('AdminApi message campaign fixtures', () => {
+  it('preserves persisted audience labels on reloaded campaigns', async () => {
+    const result = await adminApi.listMessages('evt_demo_002')
+    expect(result.ok).toBe(true)
+    if (!result.ok) return
+
+    expect(result.data[0]).toMatchObject({
+      audience: 'not_checked_in',
+      audienceKey: 'not_checked_in',
+      audienceLabel: 'Not checked in',
+    })
   })
 })
 
@@ -413,7 +432,7 @@ describe('AdminApi reports date range', () => {
       expect(promo.data.discountCodes[0]).toHaveProperty('revenueAttributedCents')
     }
     if (conversion.ok) {
-      expect(conversion.data.widgetViews).toBeNull()
+      expect(conversion.data.widgetViews).toBe(0)
       expect(conversion.data.conversionRate).toBeGreaterThanOrEqual(0)
     }
     if (affiliate.ok) {

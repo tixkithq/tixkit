@@ -1,8 +1,19 @@
 import type { FastifyPluginAsync } from 'fastify';
-import { AccessRuleRepository, EventRepository, TicketTypeRepository, BrandRepository } from '@gatekit/db';
-import { NotFoundError, ValidationError } from '@gatekit/domain';
-import type { AccessRuleRecord } from '@gatekit/domain';
-import { parseJsonValue } from '../../http/contracts.js';
+import { createHash } from 'node:crypto';
+import { z } from 'zod';
+import {
+  AccessRuleRepository,
+  EventRepository,
+  TicketTypeRepository,
+  BrandRepository,
+  ProductRepository,
+  EventOccurrenceRepository,
+} from '@tixkit/db';
+import { NotFoundError, ValidationError } from '@tixkit/domain';
+import type { AccessRuleRecord } from '@tixkit/domain';
+import { parseJsonValue, serializeMarketingIntegration } from '../../http/contracts.js';
+import { parseBody } from '../../http/schemas.js';
+import { ulid } from 'ulid';
 
 function firstQueryParam(value: unknown): string {
   return Array.isArray(value) ? String(value[0] ?? '') : typeof value === 'string' ? value : '';
@@ -20,9 +31,35 @@ function parseTicketTypeIds(value: unknown): string[] {
   return [...new Set(value.filter((id): id is string => typeof id === 'string' && id.trim().length > 0))];
 }
 
+const widgetImpressionSchema = z.object({
+  visitorId: z.string().min(8).max(128).optional(),
+  instanceId: z.string().min(1).max(128).optional(),
+  trackingId: z.string().min(1).max(255).optional(),
+  affiliateCode: z.string().min(1).max(128).optional(),
+  host: z.string().min(1).max(255).optional(),
+  pageUrl: z.string().min(1).max(2048).optional(),
+  referrer: z.string().min(1).max(2048).optional(),
+}).strict();
+
 function toDate(value?: Date | string | null): Date | undefined {
   if (value === undefined || value === null) return undefined;
   return value instanceof Date ? value : new Date(value);
+}
+
+function hashWidgetVisitor(input: { eventId: string; visitorId?: string; ip?: string; userAgent?: string; date: string }): string {
+  const secret = process.env.WIDGET_IMPRESSION_HASH_SECRET ?? 'local-widget-impression-secret';
+  const visitorMaterial = input.visitorId ?? `${input.ip ?? 'unknown'}|${input.userAgent ?? 'unknown'}`;
+  return createHash('sha256')
+    .update([secret, input.eventId, input.date, visitorMaterial].join('|'))
+    .digest('hex');
+}
+
+function isDuplicateInsert(error: unknown): boolean {
+  const record = error as { code?: string; errno?: number; message?: string };
+  return record.code === '23505' ||
+    record.code === 'ER_DUP_ENTRY' ||
+    record.errno === 1062 ||
+    /duplicate|unique/i.test(record.message ?? '');
 }
 
 function accessRuleUnlocks(
@@ -52,6 +89,12 @@ export const publicRoutes: FastifyPluginAsync = async (app) => {
     const { eventId } = request.params as { eventId: string };
     const event = await new EventRepository(db).findById(eventId);
     if (!event || event.status !== 'published') throw new NotFoundError('Event', eventId);
+    const marketingIntegrations = await db
+      .selectFrom('marketing_integrations')
+      .selectAll()
+      .where('event_id', '=', eventId)
+      .where('status', '=', 'active')
+      .execute();
     return {
       id: event.id,
       slug: event.slug,
@@ -63,7 +106,94 @@ export const publicRoutes: FastifyPluginAsync = async (app) => {
       endsAt: event.ends_at,
       venue: parseJsonValue(event.venue, null),
       brandId: event.brand_id,
+      marketingIntegrations: marketingIntegrations.map((row) =>
+        serializeMarketingIntegration(row, { public: true }),
+      ),
     };
+  });
+
+  app.get('/public/events/:eventId/marketing-integrations', async (request) => {
+    const { eventId } = request.params as { eventId: string };
+    const event = await new EventRepository(db).findById(eventId);
+    if (!event || event.status !== 'published') throw new NotFoundError('Event', eventId);
+    const rows = await db
+      .selectFrom('marketing_integrations')
+      .selectAll()
+      .where('event_id', '=', eventId)
+      .where('status', '=', 'active')
+      .execute();
+    return {
+      items: rows.map((row) => serializeMarketingIntegration(row, { public: true })),
+      nextCursor: null,
+      hasMore: false,
+    };
+  });
+
+  app.get('/public/events/:eventId/occurrences', async (request) => {
+    const { eventId } = request.params as { eventId: string };
+    const event = await new EventRepository(db).findById(eventId);
+    if (!event || event.status !== 'published') throw new NotFoundError('Event', eventId);
+
+    const occurrences = await new EventOccurrenceRepository(db).findByEvent(eventId);
+    return {
+      items: occurrences
+        .filter((occurrence) => occurrence.status === 'scheduled')
+        .map((occurrence) => ({
+          id: occurrence.id,
+          eventId: occurrence.event_id,
+          title: occurrence.title,
+          startsAt: occurrence.starts_at,
+          endsAt: occurrence.ends_at,
+          timezone: occurrence.timezone,
+          venue: parseJsonValue(occurrence.venue, null),
+          capacity: occurrence.capacity,
+          sortOrder: occurrence.sort_order,
+          status: occurrence.status,
+        })),
+      nextCursor: null,
+      hasMore: false,
+    };
+  });
+
+  app.post('/public/events/:eventId/widget-impressions', async (request, reply) => {
+    const { eventId } = request.params as { eventId: string };
+    const body = parseBody(widgetImpressionSchema, request.body);
+    const event = await new EventRepository(db).findById(eventId);
+    if (!event || event.status !== 'published') throw new NotFoundError('Event', eventId);
+
+    const impressionDate = new Date().toISOString().slice(0, 10);
+    const forwardedFor = firstQueryParam(request.headers['x-forwarded-for']).split(',')[0]?.trim();
+    const visitorHash = hashWidgetVisitor({
+      eventId,
+      visitorId: body.visitorId,
+      ip: forwardedFor || request.ip,
+      userAgent: request.headers['user-agent'],
+      date: impressionDate,
+    });
+
+    try {
+      await db.insertInto('widget_impressions').values({
+        id: `wim_${ulid()}`,
+        tenant_id: event.tenant_id,
+        organization_id: event.organization_id,
+        brand_id: event.brand_id,
+        event_id: event.id,
+        visitor_hash: visitorHash,
+        impression_date: impressionDate,
+        source: 'widget',
+        tracking_id: body.trackingId ?? null,
+        affiliate_code: body.affiliateCode ?? null,
+        host: body.host ?? null,
+        page_url: body.pageUrl ?? null,
+        referrer: body.referrer ?? null,
+        created_at: new Date(),
+      }).execute();
+    } catch (error) {
+      if (!isDuplicateInsert(error)) throw error;
+      return reply.status(200).send({ tracked: false, deduped: true });
+    }
+
+    return reply.status(201).send({ tracked: true, deduped: false });
   });
 
   app.get('/public/brands/:brandId', async (request) => {
@@ -92,12 +222,13 @@ export const publicRoutes: FastifyPluginAsync = async (app) => {
     // Public listings include public ticket types. Explicit product filters may
     // also reveal hidden ticket IDs for direct-link/widget purchase flows.
     const ticketTypes = await ttRepo.findPublicOrRequestedByEvent(eventId, requestedProducts);
+    const products = await new ProductRepository(db).findByEvent(eventId);
 
-    const results = [];
-    for (const tt of ticketTypes) {
+    const results: Record<string, unknown>[] = await Promise.all(ticketTypes.map(async (tt) => {
       const availability = await inventoryService.getAvailability(tt.inventory_pool_id);
-      results.push({
+      return {
         ticketTypeId: tt.id,
+        eventOccurrenceId: tt.event_occurrence_id ?? undefined,
         name: tt.name,
         kind: tt.kind,
         priceCents: Number(tt.price_cents),
@@ -112,6 +243,32 @@ export const publicRoutes: FastifyPluginAsync = async (app) => {
         description: tt.description ?? undefined,
         salesStartAt: tt.sales_start_at,
         salesEndAt: tt.sales_end_at,
+      };
+    }));
+    const now = new Date();
+    for (const product of products) {
+      const availableFrom = toDate(product.available_from);
+      const availableUntil = toDate(product.available_until);
+      const unavailable =
+        product.status !== 'active' ||
+        (availableFrom && now < availableFrom) ||
+        (availableUntil && now > availableUntil);
+      if (unavailable) continue;
+      results.push({
+        type: 'product',
+        productId: product.id,
+        name: product.name,
+        kind: 'product',
+        priceCents: Number(product.price_cents),
+        currency: product.currency,
+        minPerOrder: 1,
+        maxPerOrder: product.max_per_order,
+        available: product.max_per_order,
+        status: product.status,
+        requiresAccessCode: false,
+        description: product.description ?? undefined,
+        salesStartAt: product.available_from,
+        salesEndAt: product.available_until,
       });
     }
     return results;
@@ -224,10 +381,10 @@ export const publicRoutes: FastifyPluginAsync = async (app) => {
     return {
       buyerQuestions: serialized
         .filter((q) => q.appliesTo === 'buyer' || q.appliesTo === 'both')
-        .map((q) => ({ ...q, appliesTo: 'buyer' as const })),
+        .map((q) => Object.assign({}, q, { appliesTo: 'buyer' as const })),
       attendeeQuestions: serialized
         .filter((q) => q.appliesTo === 'attendee' || q.appliesTo === 'both')
-        .map((q) => ({ ...q, appliesTo: 'attendee' as const })),
+        .map((q) => Object.assign({}, q, { appliesTo: 'attendee' as const })),
     };
   });
 };

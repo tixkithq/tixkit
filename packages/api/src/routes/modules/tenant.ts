@@ -6,11 +6,68 @@ import {
   BrandRepository,
   PaymentAccountRepository,
   AuditLogRepository,
-} from '@gatekit/db';
-import type { CreateOrganizationInput, CreateBrandInput, AddBrandDomainInput } from '@gatekit/domain';
-import { ValidationError } from '@gatekit/domain';
+} from '@tixkit/db';
+import type { CreateOrganizationInput, CreateBrandInput, AddBrandDomainInput } from '@tixkit/domain';
+import { ValidationError } from '@tixkit/domain';
 import { writeAuditLog } from '../../auth/audit.js';
 import { parseBody, updateBrandSchema } from '../../http/schemas.js';
+import Stripe from 'stripe';
+
+type PaymentAccountRow = {
+  id: string;
+  tenant_id: string;
+  organization_id: string;
+  provider: string;
+  provider_account_id: string;
+  status: string;
+  default_currency: string;
+  created_at: Date;
+  updated_at: Date;
+};
+
+function serializePaymentAccount(account: PaymentAccountRow, onboardingUrl?: string) {
+  return {
+    id: account.id,
+    tenantId: account.tenant_id,
+    organizationId: account.organization_id,
+    provider: account.provider,
+    providerAccountId: account.provider_account_id,
+    status: account.status,
+    defaultCurrency: account.default_currency,
+    createdAt: account.created_at instanceof Date ? account.created_at.toISOString() : account.created_at,
+    updatedAt: account.updated_at instanceof Date ? account.updated_at.toISOString() : account.updated_at,
+    ...(onboardingUrl ? { onboardingUrl } : {}),
+  };
+}
+
+function stripeConnectReturnUrl(organizationId: string): string {
+  const baseUrl = process.env.ADMIN_DASHBOARD_URL ?? process.env.API_BASE_URL ?? 'http://localhost:3001';
+  return `${baseUrl.replace(/\/$/, '')}/settings/payments?organizationId=${encodeURIComponent(organizationId)}&stripeConnect=return`;
+}
+
+function stripeConnectRefreshUrl(organizationId: string): string {
+  const baseUrl = process.env.ADMIN_DASHBOARD_URL ?? process.env.API_BASE_URL ?? 'http://localhost:3001';
+  return `${baseUrl.replace(/\/$/, '')}/settings/payments?organizationId=${encodeURIComponent(organizationId)}&stripeConnect=refresh`;
+}
+
+function stripeAccountStatus(account: Stripe.Account): 'active' | 'pending' | 'restricted' {
+  if (account.charges_enabled && account.payouts_enabled) return 'active';
+  if ((account.requirements?.disabled_reason ?? null) !== null) return 'restricted';
+  return 'pending';
+}
+
+function stripeAccountLinkType(status: string): 'account_onboarding' | 'account_update' {
+  return status === 'active' ? 'account_update' : 'account_onboarding';
+}
+
+function stripeClientFromContext(context: unknown): Pick<Stripe, 'accounts' | 'accountLinks'> | null {
+  const injected = (context as { stripe?: Pick<Stripe, 'accounts' | 'accountLinks'> }).stripe;
+  if (injected) return injected;
+  const secretKey = process.env.STRIPE_SECRET_KEY;
+  const connectClientId = process.env.STRIPE_CONNECT_CLIENT_ID;
+  if (!secretKey || !connectClientId) return null;
+  return new Stripe(secretKey);
+}
 
 export const tenantRoutes: FastifyPluginAsync = async (app) => {
   const db = app.context.db;
@@ -34,6 +91,7 @@ export const tenantRoutes: FastifyPluginAsync = async (app) => {
 
   app.get('/organizations', async (request) => {
     const principal = request.principal!;
+    ClerkAuthService.requirePermission(principal, 'settings.write');
     const repo = new OrganizationRepository(db);
     const orgs = await repo.findByTenant(principal.tenantId);
     // Filter by principal's organizations to prevent cross-org data exposure
@@ -242,6 +300,7 @@ export const tenantRoutes: FastifyPluginAsync = async (app) => {
 
   app.get('/brands', async (request) => {
     const principal = request.principal!;
+    ClerkAuthService.requirePermission(principal, 'settings.write');
     const brandRepo = new BrandRepository(db);
     const brands = await brandRepo.findByTenant(principal.tenantId);
     // Filter by principal's organizations to prevent cross-org data exposure.
@@ -259,7 +318,8 @@ export const tenantRoutes: FastifyPluginAsync = async (app) => {
     ClerkAuthService.requireResourceTenant(principal, organization, 'Organization', organizationId);
     ClerkAuthService.requireOrganizationScope(principal, organizationId);
 
-    return new PaymentAccountRepository(db).findByOrganization(organizationId);
+    const accounts = await new PaymentAccountRepository(db).findByOrganization(organizationId);
+    return accounts.map((account) => serializePaymentAccount(account));
   });
 
   app.post('/organizations/:organizationId/payment-accounts/stripe-connect', async (request, reply) => {
@@ -271,11 +331,116 @@ export const tenantRoutes: FastifyPluginAsync = async (app) => {
     ClerkAuthService.requireResourceTenant(principal, organization, 'Organization', organizationId);
     ClerkAuthService.requireOrganizationScope(principal, organizationId);
 
-    const existing = await new PaymentAccountRepository(db).findByOrganization(organizationId);
+    const paymentAccounts = new PaymentAccountRepository(db);
+    const existing = await paymentAccounts.findByOrganization(organizationId);
     const activeStripe = existing.find((account) => account.provider === 'stripe_connect' || account.provider === 'stripe');
-    if (activeStripe) return reply.status(200).send(activeStripe);
+    const stripe = stripeClientFromContext(app.context);
+    if (!stripe) {
+      if (activeStripe) return reply.status(200).send(serializePaymentAccount(activeStripe));
+      throw new ValidationError('Stripe Connect onboarding is not configured for this environment');
+    }
 
-    throw new ValidationError('Stripe Connect onboarding is not configured for this environment');
+    let account = activeStripe;
+    if (!account) {
+      const stripeAccount = await stripe.accounts.create({
+        type: 'express',
+        country: 'US',
+        business_profile: {
+          name: organization.name,
+        },
+        metadata: {
+          tenantId: organization.tenant_id,
+          organizationId: organization.id,
+        },
+      });
+      account = await paymentAccounts.create({
+        tenantId: organization.tenant_id,
+        organizationId,
+        provider: 'stripe_connect',
+        providerAccountId: stripeAccount.id,
+        status: stripeAccountStatus(stripeAccount),
+        defaultCurrency: stripeAccount.default_currency?.toUpperCase() ?? 'USD',
+      });
+      await writeAuditLog(audit(), request, principal, {
+        action: 'payment_account.created',
+        resourceType: 'PaymentAccount',
+        resourceId: account.id,
+        diffSummary: {
+          provider: 'stripe_connect',
+          providerAccountId: stripeAccount.id,
+          organizationId,
+        },
+      });
+    }
+
+    const accountLink = await stripe.accountLinks.create({
+      account: account.provider_account_id,
+      type: stripeAccountLinkType(account.status),
+      refresh_url: stripeConnectRefreshUrl(organizationId),
+      return_url: stripeConnectReturnUrl(organizationId),
+    });
+
+    return reply.status(activeStripe ? 200 : 201).send(serializePaymentAccount(account, accountLink.url));
+  });
+
+  app.post('/organizations/:organizationId/payment-accounts/:paymentAccountId/stripe-connect/refresh', async (request) => {
+    const principal = request.principal!;
+    ClerkAuthService.requirePermission(principal, 'billing.write');
+    const { organizationId, paymentAccountId } = request.params as { organizationId: string; paymentAccountId: string };
+    const organization = await new OrganizationRepository(db).findById(organizationId);
+    if (!organization) throw new ValidationError('Organization not found');
+    ClerkAuthService.requireResourceTenant(principal, organization, 'Organization', organizationId);
+    ClerkAuthService.requireOrganizationScope(principal, organizationId);
+
+    const paymentAccounts = new PaymentAccountRepository(db);
+    const account = await paymentAccounts.findById(paymentAccountId);
+    if (!account) throw new ValidationError('Payment account not found');
+    ClerkAuthService.requireResourceTenant(principal, account, 'PaymentAccount', paymentAccountId);
+    if (account.organization_id !== organizationId) {
+      throw new ValidationError('Payment account does not belong to the organization');
+    }
+    if (account.provider !== 'stripe_connect' && account.provider !== 'stripe') {
+      throw new ValidationError('Payment account is not a Stripe Connect account');
+    }
+
+    const stripe = stripeClientFromContext(app.context);
+    if (!stripe) {
+      throw new ValidationError('Stripe Connect status refresh is not configured for this environment');
+    }
+
+    const previousStatus = account.status;
+    const previousDefaultCurrency = account.default_currency;
+    const stripeAccount = await stripe.accounts.retrieve(account.provider_account_id) as Stripe.Account;
+    const nextStatus = stripeAccountStatus(stripeAccount);
+    const nextCurrency = stripeAccount.default_currency?.toUpperCase() ?? account.default_currency;
+    const updated = await paymentAccounts.update(account.id, {
+      status: nextStatus,
+      default_currency: nextCurrency,
+    });
+
+    if (updated.status !== previousStatus || updated.default_currency !== previousDefaultCurrency) {
+      await writeAuditLog(audit(), request, principal, {
+        action: 'payment_account.refreshed',
+        resourceType: 'PaymentAccount',
+        resourceId: updated.id,
+        diffSummary: {
+          providerAccountId: updated.provider_account_id,
+          previousStatus,
+          status: updated.status,
+          previousDefaultCurrency,
+          defaultCurrency: updated.default_currency,
+        },
+      });
+    }
+
+    const accountLink = await stripe.accountLinks.create({
+      account: updated.provider_account_id,
+      type: stripeAccountLinkType(updated.status),
+      refresh_url: stripeConnectRefreshUrl(organizationId),
+      return_url: stripeConnectReturnUrl(organizationId),
+    });
+
+    return serializePaymentAccount(updated, accountLink.url);
   });
 
   app.get('/organizations/:organizationId/billing', async (request) => {

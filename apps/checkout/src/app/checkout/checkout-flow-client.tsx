@@ -6,6 +6,7 @@ type Props = {
   initialEventId: string
   initialSessionId: string
   initialSessionToken: string
+  waitlistClaimToken?: string
   brandId?: string
   supportUrl?: string
   termsUrl?: string

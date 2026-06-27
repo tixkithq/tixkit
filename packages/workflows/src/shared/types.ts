@@ -34,6 +34,10 @@ export function webhookDeliveryWorkflowId(eventId: string, endpointId: string): 
   return `webhook-delivery:${eventId}:${endpointId}`;
 }
 
+export function webhookDeliveryReplayWorkflowId(eventId: string, endpointId: string, replayNonce: string): string {
+  return `webhook-delivery:${eventId}:${endpointId}:replay:${replayNonce}`;
+}
+
 export function notificationWorkflowId(jobId: string): string {
   return `notification:${jobId}`;
 }

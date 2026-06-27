@@ -29,8 +29,8 @@ export function BrandFooter({ brand }: { brand: ResolvedBrand }) {
         ) : (
           <p>
             {brand.fallback
-              ? 'Powered by GateKit'
-              : `${brand.name} · Powered by GateKit`}
+              ? 'Powered by Tixkit'
+              : `${brand.name} · Powered by Tixkit`}
           </p>
         )}
         {links.length > 0 ? (

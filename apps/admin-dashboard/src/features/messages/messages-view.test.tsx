@@ -3,6 +3,7 @@ import '@testing-library/jest-dom/vitest'
 import * as React from 'react'
 import { JSDOM } from 'jsdom'
 import { afterEach, describe, expect, it, vi } from 'vitest'
+import { EventMessagesView } from '@/features/events/event-messages-view'
 import { MessageFormDialog } from './message-form'
 import { MessageCampaignDetailPanel } from './messages-view'
 
@@ -37,6 +38,7 @@ afterEach(() => {
 })
 
 type MessagesAdminApiMock = {
+  listMessages: ReturnType<typeof vi.fn>
   previewMessageRecipients: ReturnType<typeof vi.fn>
   sendMessage: ReturnType<typeof vi.fn>
   getMessage: ReturnType<typeof vi.fn>
@@ -47,9 +49,10 @@ type MessagesAdminApiMock = {
 
 function getAdminApiMock(): MessagesAdminApiMock {
   const globalWithMock = globalThis as typeof globalThis & {
-    __messagesAdminApiMock?: MessagesAdminApiMock
+    messagesAdminApiMock?: MessagesAdminApiMock
   }
-  globalWithMock.__messagesAdminApiMock ??= {
+  globalWithMock.messagesAdminApiMock ??= {
+    listMessages: vi.fn(),
     previewMessageRecipients: vi.fn(),
     sendMessage: vi.fn(),
     getMessage: vi.fn(),
@@ -57,7 +60,7 @@ function getAdminApiMock(): MessagesAdminApiMock {
     listMessageDeliveryLogs: vi.fn(),
     listMessageProviderEvents: vi.fn(),
   }
-  return globalWithMock.__messagesAdminApiMock
+  return globalWithMock.messagesAdminApiMock
 }
 
 vi.mock('@/lib/api', () => ({
@@ -126,6 +129,38 @@ describe('MessageFormDialog', () => {
   })
 })
 
+describe('EventMessagesView', () => {
+  it('renders persisted audience labels after campaign reload', async () => {
+    adminApiMock.listMessages.mockResolvedValue({
+      ok: true,
+      data: [{
+        id: 'msg_1',
+        eventId: 'evt_1',
+        name: 'checked-in-campaign',
+        channel: 'email',
+        status: 'queued',
+        audience: 'all_attendees',
+        audienceKey: 'specific',
+        audienceAttendeeIds: ['att_1', 'att_2'],
+        audienceLabel: 'Custom audience (2 attendees)',
+        queuedCount: 2,
+        sentCount: 0,
+        deliveredCount: 0,
+        failedCount: 0,
+        suppressedCount: 0,
+        createdAt: '2026-01-01T00:00:00.000Z',
+      }],
+    })
+
+    const view = render(<EventMessagesView eventId='evt_1' />)
+
+    await waitFor(() => {
+      expect(view.getByText('checked-in-campaign')).toBeInTheDocument()
+    })
+    expect(view.getByText('Custom audience (2 attendees) · 2 queued')).toBeInTheDocument()
+  })
+})
+
 describe('MessageCampaignDetailPanel', () => {
   it('renders job, delivery-log, and provider-event records', async () => {
     adminApiMock.getMessage.mockResolvedValue({
@@ -137,6 +172,9 @@ describe('MessageCampaignDetailPanel', () => {
         channel: 'email',
         status: 'sent',
         audience: 'all_attendees',
+        audienceKey: 'all',
+        audienceAttendeeIds: [],
+        audienceLabel: 'All attendees',
         queuedCount: 1,
         sentCount: 1,
         deliveredCount: 1,

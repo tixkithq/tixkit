@@ -34,13 +34,24 @@ export type PublicEvent = {
   } | null
   brandId?: string
   coverImageUrl?: string
+  marketingIntegrations?: MarketingIntegration[]
+}
+
+export type MarketingIntegration = {
+  provider: 'ga4' | 'meta_pixel' | 'generic_tag'
+  config: Record<string, unknown>
+  consentRequired: boolean
+  status: string
 }
 
 export type AvailabilityItem = {
-  ticketTypeId: string
+  type?: 'ticket' | 'product'
+  ticketTypeId?: string
+  eventOccurrenceId?: string
+  productId?: string
   name: string
   description?: string
-  kind: 'free' | 'paid' | 'donation'
+  kind: 'free' | 'paid' | 'donation' | 'product'
   priceCents: number
   currency: string
   minimumPriceCents?: number
@@ -62,6 +73,7 @@ export type CheckoutQuote = {
   feeCents: number
   lineItems?: Array<{
     ticketTypeId?: string
+    productId?: string
     description: string
     quantity: number
     unitAmountCents?: number
@@ -85,6 +97,26 @@ export type CheckoutSession = {
   successUrl?: string | null
   cancelUrl?: string | null
   orderId?: string | null
+}
+
+export type CheckoutWalletPassTicket = {
+  ticketId: string
+  ticketCode: string
+  appleUrl?: string
+  googleUrl?: string
+}
+
+export type CheckoutWalletPasses = {
+  tickets: CheckoutWalletPassTicket[]
+}
+
+export type UploadArtifact = {
+  artifactId: string
+  uploadUrl: string
+  uploadHeaders: Record<string, string>
+  completeUrl: string
+  completeToken?: string
+  expiresAt: string
 }
 
 export type OrderSummary = {
@@ -117,10 +149,25 @@ export type Buyer = {
 }
 
 export type CartItem = {
-  ticketTypeId: string
+  ticketTypeId?: string
+  occurrenceId?: string
+  productId?: string
   quantity: number
   unitAmountCents?: number
   attendeeFields?: Record<string, unknown>[]
+}
+
+export type PublicEventOccurrence = {
+  id: string
+  eventId: string
+  title: string
+  startsAt: string
+  endsAt?: string | null
+  timezone: string
+  venue?: PublicEvent['venue']
+  capacity?: number | null
+  sortOrder: number
+  status: string
 }
 
 export type CheckoutQuestion = {
@@ -163,6 +210,21 @@ export type AccessCodeValidationResponse = {
   ticketTypeIds: string[]
 }
 
+export type WaitlistEntry = {
+  id: string
+  eventId: string
+  ticketTypeId: string
+  email: string
+  firstName?: string
+  lastName?: string
+  phone?: string
+  quantity: number
+  status: string
+  offerExpiresAt?: string
+  createdAt: string
+  updatedAt: string
+}
+
 export type BrandViewModel = {
   id: string
   name: string
@@ -194,7 +256,7 @@ const DEFAULT_API_BASE_URL = 'http://localhost:4000/v1'
 
 export function apiBaseUrl(): string {
   return (
-    process.env.NEXT_PUBLIC_GATEKIT_API_BASE_URL ?? DEFAULT_API_BASE_URL
+    process.env.NEXT_PUBLIC_TIXKIT_API_BASE_URL ?? DEFAULT_API_BASE_URL
   ).replace(/\/$/, '')
 }
 
@@ -214,13 +276,17 @@ function normalizeQuestionsResponse(value: unknown): QuestionsResponse {
           (question) =>
             question.appliesTo === 'buyer' || question.appliesTo === 'both',
         )
-        .map((question) => ({ ...question, appliesTo: 'buyer' })),
+        .map((question) =>
+          Object.assign({}, question, { appliesTo: 'buyer' as const }),
+        ),
       attendeeQuestions: questions
         .filter(
           (question) =>
             question.appliesTo === 'attendee' || question.appliesTo === 'both',
         )
-        .map((question) => ({ ...question, appliesTo: 'attendee' })),
+        .map((question) =>
+          Object.assign({}, question, { appliesTo: 'attendee' as const }),
+        ),
     }
   }
 
@@ -312,6 +378,28 @@ export const publicApi = {
     )
   },
 
+  async getOccurrences(
+    eventId: string,
+    signal?: AbortSignal,
+  ): Promise<PublicEventOccurrence[]> {
+    const response = await apiRequest<{ items?: PublicEventOccurrence[] } | PublicEventOccurrence[]>(
+      `/public/events/${encodeURIComponent(eventId)}/occurrences`,
+      { signal },
+    )
+    return Array.isArray(response) ? response : response.items ?? []
+  },
+
+  async getMarketingIntegrations(
+    eventId: string,
+    signal?: AbortSignal,
+  ): Promise<MarketingIntegration[]> {
+    const response = await apiRequest<{ items?: MarketingIntegration[] } | MarketingIntegration[]>(
+      `/public/events/${encodeURIComponent(eventId)}/marketing-integrations`,
+      { signal },
+    )
+    return Array.isArray(response) ? response : response.items ?? []
+  },
+
   async getQuestions(
     eventId: string,
     signal?: AbortSignal,
@@ -321,6 +409,43 @@ export const publicApi = {
       { signal },
     )
     return normalizeQuestionsResponse(response)
+  },
+
+  async uploadCheckoutArtifact(
+    eventId: string,
+    file: File,
+    questionId?: string,
+  ): Promise<{ artifactId: string; fileName: string; contentType: string; sizeBytes: number }> {
+    const artifact = await apiRequest<UploadArtifact>(
+      `/public/events/${encodeURIComponent(eventId)}/upload-artifacts`,
+      {
+        method: 'POST',
+        body: JSON.stringify({
+          fileName: file.name,
+          contentType: file.type || 'application/octet-stream',
+          sizeBytes: file.size,
+          questionId,
+        }),
+      },
+    )
+    const uploadResponse = await fetch(artifact.uploadUrl, {
+      method: 'PUT',
+      headers: artifact.uploadHeaders,
+      body: file,
+    })
+    if (!uploadResponse.ok) {
+      throw new CheckoutApiError('UPLOAD_FAILED', 'File upload failed', uploadResponse.status)
+    }
+    await apiRequest(artifact.completeUrl.replace(/^\/v1/, ''), {
+      method: 'POST',
+      body: JSON.stringify({ token: artifact.completeToken }),
+    })
+    return {
+      artifactId: artifact.artifactId,
+      fileName: file.name,
+      contentType: file.type || 'application/octet-stream',
+      sizeBytes: file.size,
+    }
   },
 
   async validateAccessCode(
@@ -339,6 +464,35 @@ export const publicApi = {
         signal,
         body: JSON.stringify(input),
       },
+    )
+  },
+
+  async joinWaitlist(
+    eventId: string,
+    input: {
+      ticketTypeId: string
+      email: string
+      firstName?: string
+      lastName?: string
+      phone?: string
+      quantity?: number
+    },
+    signal?: AbortSignal,
+  ): Promise<WaitlistEntry> {
+    return apiRequest<WaitlistEntry>(
+      `/public/events/${encodeURIComponent(eventId)}/waitlist`,
+      {
+        method: 'POST',
+        signal,
+        body: JSON.stringify(input),
+      },
+    )
+  },
+
+  async getWaitlistClaim(token: string, signal?: AbortSignal): Promise<WaitlistEntry> {
+    return apiRequest<WaitlistEntry>(
+      `/public/waitlist/claims/${encodeURIComponent(token)}`,
+      { signal },
     )
   },
 
@@ -363,6 +517,7 @@ export const checkoutApi = {
     affiliateCode?: string
     trackingId?: string
     accessCode?: string
+    waitlistClaimToken?: string
     successUrl?: string
     cancelUrl?: string
   }): Promise<CheckoutSession> {
@@ -383,6 +538,16 @@ export const checkoutApi = {
       : ''
     return apiRequest<CheckoutSession>(
       `/checkout/sessions/${encodeURIComponent(sessionId)}${query}`,
+      sessionToken ? { sessionToken } : undefined,
+    )
+  },
+
+  async getWalletPasses(
+    sessionId: string,
+    sessionToken?: string,
+  ): Promise<CheckoutWalletPasses> {
+    return apiRequest<CheckoutWalletPasses>(
+      `/checkout/sessions/${encodeURIComponent(sessionId)}/wallet-passes`,
       sessionToken ? { sessionToken } : undefined,
     )
   },

@@ -1,6 +1,6 @@
-# GateKit Webhook Guide
+# Tixkit Webhook Guide
 
-GateKit delivers outbound webhooks to customer-configured endpoints when domain events happen (order paid, ticket issued, attendee updated, etc.). This guide covers the envelope, headers, signing, retries, replay, and testing.
+Tixkit delivers outbound webhooks to customer-configured endpoints when domain events happen (order paid, ticket issued, attendee updated, etc.). This guide covers the envelope, headers, signing, retries, replay, and testing.
 
 For inbound provider webhooks (Clerk, Stripe, Telnyx) see [Clerk Setup Guide](./clerk-setup-guide.md), [Production Deployment Guide](./production-deployment-guide.md), and `docs/telnyx-sms-local.md`.
 
@@ -10,11 +10,11 @@ Webhook endpoints are scoped to an organization. Create one via the API (or the 
 
 ```bash
 curl -X POST http://localhost:4000/v1/webhook-endpoints \
-  -H "Authorization: Bearer gk_..." \
+  -H "Authorization: Bearer tk_..." \
   -H "Content-Type: application/json" \
   -d '{
     "organizationId": "org_...",
-    "url": "https://shop.example.com/gatekit-webhooks",
+    "url": "https://shop.example.com/tixkit-webhooks",
     "events": ["order.paid", "order.refunded", "ticket.issued"],
     "description": "Production order feed"
   }'
@@ -26,7 +26,7 @@ Response `201`:
 {
   "id": "whk_...",
   "organizationId": "org_...",
-  "url": "https://shop.example.com/gatekit-webhooks",
+  "url": "https://shop.example.com/tixkit-webhooks",
   "secret": "whsec_...",
   "events": ["order.paid", "order.refunded", "ticket.issued"],
   "status": "active",
@@ -80,15 +80,15 @@ Each delivery is a `POST` with these headers:
 | Header | Description |
 | --- | --- |
 | `Content-Type: application/json` | UTF-8 JSON body |
-| `X-GateKit-Event-Id: wevt_...` | Stable event ID (ULID) |
-| `X-GateKit-Event-Type: order.paid` | Event type |
-| `X-GateKit-Delivery: <deliveryId>` | Unique per delivery attempt |
-| `X-GateKit-Signature: t=...,v1=...` | HMAC-SHA256 signature (see below) |
-| `User-Agent: GateKit-Webhook/1.0` | Static identifier |
+| `X-Tixkit-Event-Id: wevt_...` | Stable event ID (ULID) |
+| `X-Tixkit-Event-Type: order.paid` | Event type |
+| `X-Tixkit-Delivery: <deliveryId>` | Unique per delivery attempt |
+| `X-Tixkit-Signature: t=...,v1=...` | HMAC-SHA256 signature (see below) |
+| `User-Agent: Tixkit-Webhook/1.0` | Static identifier |
 
 ## Signing
 
-Signatures are HMAC-SHA256 over `${timestamp}.${rawBody}` using the endpoint's `secret`. The `X-GateKit-Signature` header has the form:
+Signatures are HMAC-SHA256 over `${timestamp}.${rawBody}` using the endpoint's `secret`. The `X-Tixkit-Signature` header has the form:
 
 ```
 t=1719250496,v1=4f3c...hex...signature
@@ -99,7 +99,7 @@ Verify in your handler:
 ```ts
 import { createHmac, timingSafeEqual } from 'node:crypto';
 
-function verifyGateKitWebhook({
+function verifyTixkitWebhook({
   rawBody,
   signatureHeader,
   secret,
@@ -135,7 +135,7 @@ function verifyGateKitWebhook({
 
 Use the **raw** request body (bytes before JSON parsing) to compute the signature. Comparing the parsed/re-serialized body will fail. Always compare signatures in constant time.
 
-This is the same algorithm used by `@gatekit/domain`'s `signWebhookPayload` / `verifyWebhookSignature` helpers, which the GateKit SDKs expose directly.
+This is the same algorithm used by `@tixkit/domain`'s `signWebhookPayload` / `verifyWebhookSignature` helpers, which the Tixkit SDKs expose directly.
 
 ## Retries and Dead-Lettering
 
@@ -157,7 +157,7 @@ Re-deliver an event to all active endpoints subscribed to its type:
 
 ```bash
 curl -X POST http://localhost:4000/v1/webhook-events/wevt_01HN.../replay \
-  -H "Authorization: Bearer gk_..."
+  -H "Authorization: Bearer tk_..."
 ```
 
 Response `202`:
@@ -174,7 +174,7 @@ List deliveries for an endpoint (newest first, cursor-paginated):
 
 ```bash
 curl http://localhost:4000/v1/webhook-endpoints/whk_.../events?limit=50 \
-  -H "Authorization: Bearer gk_..."
+  -H "Authorization: Bearer tk_..."
 ```
 
 Returns delivery rows with `eventType`, `status`, `statusCode`, `attemptCount`, `deliveredAt`, and `createdAt`. Use this to triage failed deliveries before replaying.
@@ -195,22 +195,22 @@ SECRET="whsec_..."
 RAW=$(cat body.json)
 TIMESTAMP=$(date +%s)
 SIG="v1=$(printf '%s.%s' "$TIMESTAMP" "$RAW" | openssl dgst -sha256 -hmac "$SECRET" | awk '{print $NF}')"
-curl -X POST https://your.endpoint/gatekit-webhooks \
+curl -X POST https://your.endpoint/tixkit-webhooks \
   -H "Content-Type: application/json" \
-  -H "X-GateKit-Signature: t=$TIMESTAMP,$SIG" \
-  -H "X-GateKit-Event-Id: wevt_test_1" \
-  -H "X-GateKit-Event-Type: order.paid" \
+  -H "X-Tixkit-Signature: t=$TIMESTAMP,$SIG" \
+  -H "X-Tixkit-Event-Id: wevt_test_1" \
+  -H "X-Tixkit-Event-Type: order.paid" \
   --data-binary "$RAW"
 ```
 
 ### SDK helpers
 
-The GateKit SDKs (`@gatekit/sdk-next`, `@gatekit/sdk-sveltekit`) ship a `verifyWebhookSignature` helper that wraps the algorithm above. Use it in your route handler to avoid re-implementing the crypto.
+The Tixkit SDKs (`@tixkit/sdk-next`, `@tixkit/sdk-sveltekit`) ship a `verifyWebhookSignature` helper that wraps the algorithm above. Use it in your route handler to avoid re-implementing the crypto.
 
 ## Best Practices
 
 - **Verify before processing.** Reject `401` early if the signature is missing or invalid.
-- **Be idempotent.** Use `X-GateKit-Event-Id` to deduplicate; the same event can be delivered more than once across replays or retries.
+- **Be idempotent.** Use `X-Tixkit-Event-Id` to deduplicate; the same event can be delivered more than once across replays or retries.
 - **Return 2xx fast.** Long-running work should be queued asynchronously so Temporal sees a quick success and does not retry.
 - **Never put secrets in the response body.** The endpoint `secret` is shown once; treat it like a password.
 - **Pin to `apiVersion`.** When the API version bumps, update your handler to handle both envelopes during the deprecation window.

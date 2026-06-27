@@ -50,19 +50,19 @@ export function ProfileDropdown() {
           <DropdownMenuSeparator />
           <DropdownMenuGroup>
             <DropdownMenuItem asChild>
-              <Link href='/settings/profile'>
+              <Link href='/settings/profile' prefetch={false}>
                 Profile
                 <DropdownMenuShortcut>⇧⌘P</DropdownMenuShortcut>
               </Link>
             </DropdownMenuItem>
             <DropdownMenuItem asChild>
-              <Link href='/settings/organization'>
+              <Link href='/settings/organization' prefetch={false}>
                 Organization
                 <DropdownMenuShortcut>⌘O</DropdownMenuShortcut>
               </Link>
             </DropdownMenuItem>
             <DropdownMenuItem asChild>
-              <Link href='/settings/appearance'>
+              <Link href='/settings/appearance' prefetch={false}>
                 Appearance
                 <DropdownMenuShortcut>⌘S</DropdownMenuShortcut>
               </Link>

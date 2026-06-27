@@ -1,3 +1,14 @@
-export { createGateKitClient, verifyGateKitWebhook } from './server.js';
-export { GateKitCheckoutButton, GateKitTicketWidget, GateKitProvider, useGateKit } from './client.js';
-export type { GateKitConfig } from '@gatekit/js';
+export {
+  createTixkitClient,
+  verifyTixkitWebhook,
+  createWebhookHandler,
+  createTixkitWebhookRouteHandler,
+  createCheckoutSessionRouteHandler,
+} from './server.js';
+export type {
+  TixkitNextClientConfig,
+  TixkitWebhookRouteHandlerOptions,
+  TixkitCheckoutSessionRouteHandlerOptions,
+} from './server.js';
+export { TixkitCheckoutButton, TixkitTicketWidget, TixkitProvider, useTixkit } from './client.js';
+export type { TixkitConfig } from '@tixkit/js';

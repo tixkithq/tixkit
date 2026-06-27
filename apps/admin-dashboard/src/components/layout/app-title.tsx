@@ -26,6 +26,7 @@ export function AppTitle() {
         >
           <Link
             href='/dashboard'
+            prefetch={false}
             onClick={() => setOpenMobile(false)}
             className={cn(
               'flex min-w-0 flex-1 items-center gap-3 rounded-md text-start text-sm leading-tight',
@@ -36,7 +37,7 @@ export function AppTitle() {
               <Ticket aria-hidden='true' className='size-4' />
             </span>
             <span className='grid min-w-0 flex-1'>
-              <span className='truncate font-bold'>GateKit</span>
+              <span className='truncate font-bold'>Tixkit</span>
               <span className='truncate text-xs'>Admin</span>
             </span>
           </Link>

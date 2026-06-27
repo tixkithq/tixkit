@@ -10,9 +10,8 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
     <NextThemesProvider
       attribute='class'
       defaultTheme='system'
-      storageKey='gatekit-checkout-theme'
+      storageKey='tixkit-checkout-theme'
       enableColorScheme
-      disableTransitionOnChange
     >
       {children}
     </NextThemesProvider>

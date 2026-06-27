@@ -1,12 +1,11 @@
 'use client'
 
 import * as React from 'react'
-import { Wallet, CheckCircle2, Clock3, Link2 } from 'lucide-react'
+import { Wallet, CheckCircle2, Clock3, Link2, RefreshCw } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { PermissionGuard } from '@/components/permission-guard'
 import { EmptyState } from '@/components/empty-state'
-import { GatedControl } from '@/components/gated-control'
 import {
   Select,
   SelectContent,
@@ -38,6 +37,17 @@ export default function PaymentsPage() {
   const [selectedPaymentAccountId, setSelectedPaymentAccountId] = React.useState<string>('none')
   const [selectedBrandId, setSelectedBrandId] = React.useState<string>('')
   const [bindingBrand, setBindingBrand] = React.useState(false)
+  const [refreshingAccountId, setRefreshingAccountId] = React.useState<string | null>(null)
+
+  const upsertAccount = React.useCallback((nextAccount: AdminPaymentAccount) => {
+    setAccounts((current) => {
+      const existing = current.some((account) => account.id === nextAccount.id)
+      if (existing) {
+        return current.map((account) => account.id === nextAccount.id ? nextAccount : account)
+      }
+      return [nextAccount, ...current]
+    })
+  }, [])
 
   const loadPayments = React.useCallback(async () => {
     if (bootstrapLoading) return
@@ -108,9 +118,42 @@ export default function PaymentsPage() {
       return
     }
 
-    setAccounts((current) => [result.data, ...current])
+    upsertAccount(result.data)
     setNotConfigured(false)
+    if (result.data.onboardingUrl) {
+      toast.success('Redirecting to Stripe onboarding')
+      window.location.assign(result.data.onboardingUrl)
+      return
+    }
     toast.success('Payment account record created')
+  }
+
+  const handleRefreshAccount = async (redirectToStripe: boolean) => {
+    if (!organization || !connectedAccount) {
+      toast.error('Connect Stripe before refreshing status')
+      return
+    }
+
+    setRefreshingAccountId(connectedAccount.id)
+    const result = await adminApi.refreshStripeConnectAccount(organization.id, connectedAccount.id)
+    setRefreshingAccountId(null)
+
+    if (!result.ok) {
+      if (result.error.message.includes('not configured')) {
+        setNotConfigured(true)
+      }
+      toast.error(result.error.message)
+      return
+    }
+
+    upsertAccount(result.data)
+    setNotConfigured(false)
+    if (redirectToStripe && result.data.onboardingUrl) {
+      toast.success('Redirecting to Stripe onboarding')
+      window.location.assign(result.data.onboardingUrl)
+      return
+    }
+    toast.success(`Stripe account ${result.data.status}`)
   }
 
   const handleBindPaymentAccount = async () => {
@@ -145,6 +188,7 @@ export default function PaymentsPage() {
 
   const connectedAccount = accounts.find((account) => account.provider === 'stripe_connect' || account.provider === 'stripe')
   const isActive = connectedAccount?.status === 'active'
+  const isRefreshingConnected = refreshingAccountId === connectedAccount?.id
 
   return (
     <PermissionGuard required='billing.write'>
@@ -202,14 +246,26 @@ export default function PaymentsPage() {
                   ) : null}
                 </div>
               </div>
-              {!isActive ? (
-                <GatedControl
+              <div className='flex flex-wrap gap-2'>
+                {!isActive ? (
+                  <Button
+                    variant='outline'
+                    onClick={() => void handleRefreshAccount(true)}
+                    disabled={isRefreshingConnected}
+                  >
+                    <Link2 className='size-4' />
+                    {isRefreshingConnected ? 'Refreshing...' : 'Continue Onboarding'}
+                  </Button>
+                ) : null}
+                <Button
                   variant='outline'
-                  reason='Stripe onboarding links are gated because the current admin API only creates the payment account record and does not expose an onboarding URL endpoint.'
+                  onClick={() => void handleRefreshAccount(false)}
+                  disabled={isRefreshingConnected}
                 >
-                  Continue Onboarding
-                </GatedControl>
-              ) : null}
+                  <RefreshCw className='size-4' />
+                  {isRefreshingConnected ? 'Refreshing...' : 'Refresh Status'}
+                </Button>
+              </div>
             </div>
           ) : notConfigured ? (
             <div className='space-y-4'>
@@ -219,8 +275,9 @@ export default function PaymentsPage() {
                   <p className='font-medium'>Stripe Connect onboarding is not configured</p>
                   <p className='text-sm text-muted-foreground'>
                     This environment does not have Stripe Connect onboarding enabled.
-                    Configure <code className='font-mono'>STRIPE_SECRET_KEY</code> on the
-                    backend to enable Connect account creation and onboarding links.
+                    Configure <code className='font-mono'>STRIPE_SECRET_KEY</code> and{' '}
+                    <code className='font-mono'>STRIPE_CONNECT_CLIENT_ID</code> on the backend to enable
+                    Connect account creation and onboarding links.
                   </p>
                 </div>
               </div>

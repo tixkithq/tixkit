@@ -4,13 +4,13 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 const bootstrapState = vi.hoisted(() => ({
   value: {
     organizations: [
-      { id: 'org_1', name: 'GateKit Dev' },
+      { id: 'org_1', name: 'Tixkit Dev' },
     ],
     brands: [
-      { id: 'brd_1', organizationId: 'org_1', name: 'GateKit Dev' },
+      { id: 'brd_1', organizationId: 'org_1', name: 'Tixkit Dev' },
     ],
     availableBrands: [
-      { id: 'brd_1', organizationId: 'org_1', name: 'GateKit Dev' },
+      { id: 'brd_1', organizationId: 'org_1', name: 'Tixkit Dev' },
     ],
     organizationId: 'org_1',
     brandId: 'brd_1',
@@ -31,13 +31,13 @@ describe('ScopeSelector', () => {
   beforeEach(() => {
     bootstrapState.value = {
       organizations: [
-        { id: 'org_1', name: 'GateKit Dev' },
+        { id: 'org_1', name: 'Tixkit Dev' },
       ],
       brands: [
-        { id: 'brd_1', organizationId: 'org_1', name: 'GateKit Dev' },
+        { id: 'brd_1', organizationId: 'org_1', name: 'Tixkit Dev' },
       ],
       availableBrands: [
-        { id: 'brd_1', organizationId: 'org_1', name: 'GateKit Dev' },
+        { id: 'brd_1', organizationId: 'org_1', name: 'Tixkit Dev' },
       ],
       organizationId: 'org_1',
       brandId: 'brd_1',
@@ -48,28 +48,30 @@ describe('ScopeSelector', () => {
     }
   })
 
-  it('renders single organization and brand as labeled static scope pills', () => {
+  it('renders single organization and brand as borderless sidebar rows', () => {
     render(<ScopeSelector />)
 
     expect(screen.getByText('Org')).toBeInTheDocument()
     expect(screen.getByText('Brand')).toBeInTheDocument()
-    expect(screen.getAllByText('GateKit Dev')).toHaveLength(2)
+    expect(screen.getAllByText('Tixkit Dev')).toHaveLength(2)
     expect(screen.queryByRole('combobox')).not.toBeInTheDocument()
+    expect(screen.getByText('Org').closest('div')).not.toHaveClass('border')
+    expect(screen.getByText('Brand').closest('div')).not.toHaveClass('border')
   })
 
   it('renders dropdowns only when there are multiple choices', () => {
     bootstrapState.value = {
       ...bootstrapState.value,
       organizations: [
-        { id: 'org_1', name: 'GateKit Dev' },
+        { id: 'org_1', name: 'Tixkit Dev' },
         { id: 'org_2', name: 'Tour Ops' },
       ],
       brands: [
-        { id: 'brd_1', organizationId: 'org_1', name: 'GateKit Dev' },
+        { id: 'brd_1', organizationId: 'org_1', name: 'Tixkit Dev' },
         { id: 'brd_2', organizationId: 'org_1', name: 'Festival Brand' },
       ],
       availableBrands: [
-        { id: 'brd_1', organizationId: 'org_1', name: 'GateKit Dev' },
+        { id: 'brd_1', organizationId: 'org_1', name: 'Tixkit Dev' },
         { id: 'brd_2', organizationId: 'org_1', name: 'Festival Brand' },
       ],
     }

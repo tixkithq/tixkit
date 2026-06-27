@@ -89,19 +89,19 @@ export function NavUser() {
               <DropdownMenuSeparator />
               <DropdownMenuGroup>
                 <DropdownMenuItem asChild>
-                  <Link href='/settings/profile'>
+                  <Link href='/settings/profile' prefetch={false}>
                     <BadgeCheck />
                     Profile
                   </Link>
                 </DropdownMenuItem>
                 <DropdownMenuItem asChild>
-                  <Link href='/settings/organization'>
+                  <Link href='/settings/organization' prefetch={false}>
                     <CreditCard />
                     Organization
                   </Link>
                 </DropdownMenuItem>
                 <DropdownMenuItem asChild>
-                  <Link href='/settings/appearance'>
+                  <Link href='/settings/appearance' prefetch={false}>
                     <Settings />
                     Appearance
                   </Link>

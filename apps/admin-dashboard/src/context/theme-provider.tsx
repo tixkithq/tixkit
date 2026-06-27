@@ -10,7 +10,7 @@ type Theme = 'dark' | 'light' | 'system'
 type ResolvedTheme = Exclude<Theme, 'system'>
 
 const DEFAULT_THEME: Theme = 'system'
-const THEME_STORAGE_KEY = 'gatekit-theme'
+const THEME_STORAGE_KEY = 'tixkit-theme'
 
 type ThemeProviderProps = {
   children: ReactNode

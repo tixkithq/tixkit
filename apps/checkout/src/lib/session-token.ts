@@ -11,7 +11,7 @@
  * page can resolve a session after a Stripe redirect without the token in the URL.
  */
 
-const STORAGE_PREFIX = 'gk:session:'
+const STORAGE_PREFIX = 'tk:session:'
 
 export function storeSessionToken(sessionId: string, token: string): void {
   if (typeof window === 'undefined') return

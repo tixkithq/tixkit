@@ -8,6 +8,7 @@ import {
   type CreateTicketTypeInput,
   type UpdateTicketTypeInput,
   type AdminTicketType,
+  type AdminEventOccurrence,
   type AdminInventoryPool,
   type AdminAccessRule,
   adminApi,
@@ -60,6 +61,7 @@ export const ticketSchema = z
     maxPerOrder: z.number().int().min(1, 'Maximum per order must be at least 1').optional(),
     requiresAccessCode: z.boolean().optional(),
     accessCodeHint: z.string().optional(),
+    eventOccurrenceId: z.string().optional(),
     accessCodes: z.string().optional(),
     inventoryPoolMode: z.enum(['new', 'existing']),
     inventoryPoolId: z.string().optional(),
@@ -138,6 +140,17 @@ type TicketTypeFormDrawerProps = {
   ticketType?: AdminTicketType
 }
 
+function buildAccessRuleInputs(accessCodes: string | undefined) {
+  return [
+    ...new Set(
+      (accessCodes ?? '')
+        .split(/\r?\n|,/)
+        .map((code) => code.trim())
+        .filter(Boolean)
+    ),
+  ].map((value) => ({ type: 'code' as const, value }))
+}
+
 export function TicketTypeFormDrawer({
   eventId,
   open,
@@ -148,6 +161,7 @@ export function TicketTypeFormDrawer({
   const [submitting, setSubmitting] = React.useState(false)
   const isEditing = Boolean(ticketType)
   const [inventoryPools, setInventoryPools] = React.useState<AdminInventoryPool[]>([])
+  const [eventOccurrences, setEventOccurrences] = React.useState<AdminEventOccurrence[]>([])
   const [accessRules, setAccessRules] = React.useState<AdminAccessRule[]>([])
   const [deletingRuleId, setDeletingRuleId] = React.useState<string | null>(null)
 
@@ -169,6 +183,7 @@ export function TicketTypeFormDrawer({
       maxPerOrder: 10,
       requiresAccessCode: false,
       accessCodeHint: '',
+      eventOccurrenceId: '',
       accessCodes: '',
       inventoryPoolMode: 'new',
       inventoryPoolId: '',
@@ -181,6 +196,9 @@ export function TicketTypeFormDrawer({
     if (open) {
       void adminApi.listInventoryPools(eventId).then((result) => {
         if (result.ok) setInventoryPools(result.data)
+      })
+      void adminApi.listEventOccurrences(eventId).then((result) => {
+        if (result.ok) setEventOccurrences(result.data)
       })
       if (ticketType?.id) {
         void adminApi.listAccessRules(ticketType.id).then((result) => {
@@ -205,6 +223,7 @@ export function TicketTypeFormDrawer({
         maxPerOrder: ticketType?.maxPerOrder ?? 10,
         requiresAccessCode: ticketType?.requiresAccessCode ?? false,
         accessCodeHint: ticketType?.accessCodeHint ?? '',
+        eventOccurrenceId: ticketType?.eventOccurrenceId ?? '',
         accessCodes: '',
         inventoryPoolMode: ticketType?.inventoryPoolId ? 'existing' : 'new',
         inventoryPoolId: ticketType?.inventoryPoolId ?? '',
@@ -219,10 +238,6 @@ export function TicketTypeFormDrawer({
   const kind = form.watch('kind')
   const visibility = form.watch('visibility')
   const inventoryPoolMode = form.watch('inventoryPoolMode')
-
-  const buildAccessRuleInputs = (accessCodes: string | undefined) =>
-    [...new Set((accessCodes ?? '').split(/\r?\n|,/).map((code) => code.trim()).filter(Boolean))]
-      .map((value) => ({ type: 'code' as const, value }))
 
   const deleteAccessRule = async (rule: AdminAccessRule) => {
     setDeletingRuleId(rule.id)
@@ -259,6 +274,7 @@ export function TicketTypeFormDrawer({
       maxPerOrder: values.maxPerOrder,
       requiresAccessCode: values.requiresAccessCode,
       accessCodeHint: values.accessCodeHint?.trim() || null,
+      eventOccurrenceId: values.eventOccurrenceId || null,
       inventoryPoolId: values.inventoryPoolMode === 'existing' ? values.inventoryPoolId : undefined,
     }
 
@@ -434,6 +450,37 @@ export function TicketTypeFormDrawer({
                   />
                 )}
               </div>
+              <FormField
+                control={form.control}
+                name='eventOccurrenceId'
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Occurrence</FormLabel>
+                    <Select
+                      onValueChange={(value) => field.onChange(value === 'event' ? '' : value)}
+                      value={field.value || 'event'}
+                    >
+                      <FormControl>
+                        <SelectTrigger>
+                          <SelectValue />
+                        </SelectTrigger>
+                      </FormControl>
+                      <SelectContent>
+                        <SelectItem value='event'>All occurrences</SelectItem>
+                        {eventOccurrences.map((occurrence) => (
+                          <SelectItem key={occurrence.id} value={occurrence.id}>
+                            {occurrence.title}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                    <FormDescription>
+                      Scope this ticket type to one scheduled session, or leave it shared.
+                    </FormDescription>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
               <div className='grid gap-4 sm:grid-cols-2'>
                 <FormField
                   control={form.control}
@@ -736,7 +783,7 @@ export function TicketTypeFormDrawer({
                   />
                 )}
                 <div className='rounded-md bg-muted p-3 text-xs text-muted-foreground'>
-                  Product and add-on API contracts are separate from this ticket form. Checkout product purchasing is not enabled from this workflow yet.
+                  Product and add-on management now lives on the event Products page. Checkout product purchasing is tracked separately from this ticket form.
                 </div>
               </div>
               {inventoryPoolMode === 'new' && (

@@ -3,7 +3,7 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>GateKit Widget Demo</title>
+    <title>Tixkit Widget Demo</title>
     <style>
       body {
         margin: 0;
@@ -66,7 +66,7 @@
   </head>
   <body>
     <div class="wrap">
-      <h1>GateKit Widget Demo</h1>
+      <h1>Tixkit Widget Demo</h1>
       <p class="lede">
         Embedded widget and buy-button with lifecycle events. Point the widgets
         at a real event by editing the <code>event</code> attribute.
@@ -76,22 +76,22 @@
         <h2>Inline widget</h2>
         <!--
           In production, load the bundled widget from your CDN:
-          <script src="https://cdn.gatekit.com/widget/gatekit-widget.js"></script>
+          <script src="https://cdn.tixkit.com/widget/tixkit-widget.js"></script>
           For this demo we load the local build.
         -->
-        <gatekit-widget
+        <tixkit-widget
           id="inline-widget"
           brand="brand_demo"
           event="evt_demo"
           checkout-mode="inline"
           api-base-url="http://localhost:3000"
-        ></gatekit-widget>
+        ></tixkit-widget>
       </section>
 
       <section class="demo">
         <h2>Buy buttons (modal / redirect)</h2>
         <div class="events">
-          <gatekit-button
+          <tixkit-button
             event="evt_demo"
             brand="brand_demo"
             items="tt_demo=2"
@@ -99,9 +99,9 @@
             api-base-url="http://localhost:3000"
           >
             Buy 2 tickets (modal)
-          </gatekit-button>
+          </tixkit-button>
 
-          <gatekit-button
+          <tixkit-button
             event="evt_demo"
             brand="brand_demo"
             items="tt_demo=1"
@@ -109,7 +109,7 @@
             api-base-url="http://localhost:3000"
           >
             Buy 1 ticket (redirect)
-          </gatekit-button>
+          </tixkit-button>
         </div>
       </section>
 
@@ -119,7 +119,7 @@
       </section>
     </div>
 
-    <script type="module" src="/gatekit-widget.js"></script>
+    <script type="module" src="/tixkit-widget.js"></script>
     <script type="module">
       const log = document.getElementById('log');
       const record = (target, name) => {
@@ -133,7 +133,7 @@
         widget.addEventListener(ev, (e) => record('widget', ev)),
       );
 
-      document.querySelectorAll('gatekit-button').forEach((btn) => {
+      document.querySelectorAll('tixkit-button').forEach((btn) => {
         ['loaded', 'opened', 'closed', 'checkout_started', 'error'].forEach((ev) =>
           btn.addEventListener(ev, () => record('button', ev)),
         );

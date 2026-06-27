@@ -123,18 +123,41 @@ function hasDirtyField(dirtyFields: EventFormDirtyFields, fields: Array<keyof Ev
   return fields.some((field) => Boolean(dirtyFields[field]))
 }
 
+function hasChangedField(
+  values: EventFormValues,
+  dirtyFields: EventFormDirtyFields,
+  initialValues: EventFormValues | undefined,
+  field: keyof EventFormValues
+) {
+  return Boolean(dirtyFields[field]) || (
+    initialValues !== undefined &&
+    values[field] !== initialValues[field]
+  )
+}
+
+function hasChangedAnyField(
+  values: EventFormValues,
+  dirtyFields: EventFormDirtyFields,
+  initialValues: EventFormValues | undefined,
+  fields: Array<keyof EventFormValues>
+) {
+  if (hasDirtyField(dirtyFields, fields)) return true
+  return fields.some((field) => hasChangedField(values, dirtyFields, initialValues, field))
+}
+
 export function buildEventUpdatePayload(
   values: EventFormValues,
-  dirtyFields: EventFormDirtyFields
+  dirtyFields: EventFormDirtyFields,
+  initialValues?: EventFormValues
 ): UpdateEventInput | null {
   const payload: UpdateEventInput = {}
-  if (dirtyFields.title) payload.title = values.title
-  if (dirtyFields.description) payload.description = values.description
-  if (dirtyFields.currency) payload.currency = values.currency
-  if (dirtyFields.status) payload.status = values.status
-  if (dirtyFields.visibility) payload.visibility = values.visibility
+  if (hasChangedField(values, dirtyFields, initialValues, 'title')) payload.title = values.title
+  if (hasChangedField(values, dirtyFields, initialValues, 'description')) payload.description = values.description
+  if (hasChangedField(values, dirtyFields, initialValues, 'currency')) payload.currency = values.currency
+  if (hasChangedField(values, dirtyFields, initialValues, 'status')) payload.status = values.status
+  if (hasChangedField(values, dirtyFields, initialValues, 'visibility')) payload.visibility = values.visibility
 
-  if (hasDirtyField(dirtyFields, ['startsAt', 'endsAt', 'timezone'])) {
+  if (hasChangedAnyField(values, dirtyFields, initialValues, ['startsAt', 'endsAt', 'timezone'])) {
     const datePayload = buildEventDatePayload(values)
     if (!datePayload) return null
     payload.startsAt = datePayload.startsAt
@@ -142,17 +165,17 @@ export function buildEventUpdatePayload(
     payload.timezone = values.timezone
   }
 
-  if (hasDirtyField(dirtyFields, ['venueName', 'address', 'city', 'region', 'postalCode', 'country'])) {
+  if (hasChangedAnyField(values, dirtyFields, initialValues, ['venueName', 'address', 'city', 'region', 'postalCode', 'country'])) {
     payload.venue = buildVenuePayload(values)
   }
 
-  if (hasDirtyField(dirtyFields, ['seoTitle', 'seoDescription', 'seoImageUrl'])) {
+  if (hasChangedAnyField(values, dirtyFields, initialValues, ['seoTitle', 'seoDescription', 'seoImageUrl'])) {
     payload.seo = buildSeoPayload(values)
   }
 
-  if (dirtyFields.capacity) payload.capacity = values.capacity ?? null
-  if (dirtyFields.coverImageUrl) payload.coverImageUrl = emptyStringToNull(values.coverImageUrl)
-  if (dirtyFields.externalUrl) payload.externalUrl = emptyStringToNull(values.externalUrl)
+  if (hasChangedField(values, dirtyFields, initialValues, 'capacity')) payload.capacity = values.capacity ?? null
+  if (hasChangedField(values, dirtyFields, initialValues, 'coverImageUrl')) payload.coverImageUrl = emptyStringToNull(values.coverImageUrl)
+  if (hasChangedField(values, dirtyFields, initialValues, 'externalUrl')) payload.externalUrl = emptyStringToNull(values.externalUrl)
 
   return payload
 }
@@ -184,9 +207,8 @@ export function EventForm({ event, onSuccess, onCancel }: EventFormProps) {
   const [submitting, setSubmitting] = React.useState(false)
   const { organizationId, brandId, loading: bootstrapLoading } = useBootstrap()
 
-  const form = useForm<EventFormValues>({
-    resolver: zodResolver(eventSchema) as Resolver<EventFormValues>,
-    defaultValues: event
+  const initialValues = React.useMemo<EventFormValues>(
+    () => event
       ? {
           title: event.title,
           slug: event.slug ?? '',
@@ -233,7 +255,14 @@ export function EventForm({ event, onSuccess, onCancel }: EventFormProps) {
           seoImageUrl: '',
           currency: 'USD',
         },
+    [event]
+  )
+
+  const form = useForm<EventFormValues>({
+    resolver: zodResolver(eventSchema) as Resolver<EventFormValues>,
+    defaultValues: initialValues,
   })
+  const { dirtyFields } = form.formState
 
   const onSubmit = async (values: EventFormValues) => {
     if (!event && (!organizationId || !brandId)) {
@@ -270,7 +299,7 @@ export function EventForm({ event, onSuccess, onCancel }: EventFormProps) {
       }
 
       const updateInput = event
-        ? buildEventUpdatePayload(values, form.formState.dirtyFields as EventFormDirtyFields)
+        ? buildEventUpdatePayload(values, dirtyFields as EventFormDirtyFields, initialValues)
         : null
       if (event && !updateInput) {
         toast.error('Start date must be a valid date and time')

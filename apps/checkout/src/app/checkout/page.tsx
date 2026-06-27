@@ -32,6 +32,11 @@ export default async function CheckoutPage({
         initialEventId={eventId}
         initialSessionId={firstParam(params.sessionId)}
         initialSessionToken={''}
+        waitlistClaimToken={
+          firstParam(params.waitlistClaim) ||
+          firstParam(params.claimToken) ||
+          firstParam(params.waitlistToken)
+        }
         brandId={firstParam(params.brand)}
         supportUrl={firstParam(params.supportUrl)}
         termsUrl={firstParam(params.termsUrl)}

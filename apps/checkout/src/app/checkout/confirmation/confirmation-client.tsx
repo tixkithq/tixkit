@@ -12,6 +12,9 @@ import {
   XCircleIcon,
   RefreshCwIcon,
   LoaderCircleIcon,
+  WalletCardsIcon,
+  DownloadIcon,
+  ExternalLinkIcon,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
@@ -24,12 +27,14 @@ import {
   publicApi,
   userFacingMessage,
   type CheckoutSession,
+  type CheckoutWalletPassTicket,
   type PublicEvent,
 } from '@/lib/api'
 import { brandThemeStyle, type ResolvedBrand } from '@/lib/brand'
 import { useResolvedBrand } from '@/lib/use-brand'
 import { getSessionToken } from '@/lib/session-token'
 import { formatCurrency, formatDateTime } from '@/lib/format'
+import { trackMarketingEvent } from '@/lib/marketing'
 import {
   deriveState,
   type ConfirmationState,
@@ -42,7 +47,7 @@ export { deriveState, type ConfirmationState } from './confirmation-state'
 function emitOrderCompleted(detail: Record<string, unknown>) {
   if (typeof window === 'undefined') return
   const message = {
-    source: 'gatekit-checkout',
+    source: 'tixkit-checkout',
     event: 'order_completed',
     type: 'order_completed',
     ...detail,
@@ -61,6 +66,7 @@ export default function ConfirmationClient() {
     params.get('payment_intent_client_secret') ?? undefined
 
   const [session, setSession] = useState<CheckoutSession | null>(null)
+  const [walletPasses, setWalletPasses] = useState<CheckoutWalletPassTicket[]>([])
   const [event, setEvent] = useState<PublicEvent | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
@@ -166,12 +172,43 @@ export default function ConfirmationClient() {
 
   useEffect(() => {
     if (confirmationState !== 'confirmed' || !sessionId) return
+    if (session) {
+      trackMarketingEvent(event?.marketingIntegrations, 'purchase', {
+        eventId: session.eventId,
+        sessionId,
+        orderId: orderId || session.orderId || undefined,
+        currency: session.currency,
+        valueCents: session.quote.totalCents,
+      })
+    }
     emitOrderCompleted({
       sessionId,
       orderId: orderId || session?.orderId,
       eventId: session?.eventId,
     })
-  }, [confirmationState, sessionId, orderId, session])
+  }, [confirmationState, event, sessionId, orderId, session])
+
+  useEffect(() => {
+    let cancelled = false
+    async function loadWalletPasses() {
+      if (confirmationState !== 'confirmed' || !sessionId) {
+        setWalletPasses([])
+        return
+      }
+      const token = getSessionToken(sessionId)
+      try {
+        const result = await checkoutApi.getWalletPasses(sessionId, token)
+        if (!cancelled) setWalletPasses(result.tickets)
+      } catch {
+        if (!cancelled) setWalletPasses([])
+      }
+    }
+
+    void loadWalletPasses()
+    return () => {
+      cancelled = true
+    }
+  }, [confirmationState, sessionId])
 
   const total = session?.quote.totalCents ?? 0
   const currency = session?.currency ?? 'USD'
@@ -317,6 +354,49 @@ export default function ConfirmationClient() {
                 />
               </CardContent>
             </Card>
+
+            {walletPasses.length > 0 ? (
+              <Card>
+                <CardHeader>
+                  <CardTitle className='flex items-center gap-2'>
+                    <WalletCardsIcon className='size-5' />
+                    Add to Wallet
+                  </CardTitle>
+                </CardHeader>
+                <CardContent className='space-y-3'>
+                  {walletPasses.map((ticket) => (
+                    <div
+                      key={ticket.ticketId}
+                      className='flex flex-col gap-3 rounded-md border p-3 sm:flex-row sm:items-center sm:justify-between'
+                    >
+                      <div className='min-w-0'>
+                        <p className='truncate font-mono text-sm font-medium'>
+                          {ticket.ticketCode}
+                        </p>
+                      </div>
+                      <div className='flex flex-col gap-2 sm:flex-row'>
+                        {ticket.appleUrl ? (
+                          <Button asChild size='sm' className='gap-1.5'>
+                            <a href={ticket.appleUrl}>
+                              <DownloadIcon className='size-4' />
+                              Apple Wallet
+                            </a>
+                          </Button>
+                        ) : null}
+                        {ticket.googleUrl ? (
+                          <Button asChild size='sm' variant='outline' className='gap-1.5'>
+                            <a href={ticket.googleUrl} target='_blank' rel='noreferrer'>
+                              <ExternalLinkIcon className='size-4' />
+                              Google Wallet
+                            </a>
+                          </Button>
+                        ) : null}
+                      </div>
+                    </div>
+                  ))}
+                </CardContent>
+              </Card>
+            ) : null}
 
             {event ? (
               <Card>

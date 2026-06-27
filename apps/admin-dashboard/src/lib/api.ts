@@ -1,5 +1,5 @@
 /**
- * AdminApi client for the GateKit admin dashboard.
+ * AdminApi client for the Tixkit admin dashboard.
  *
  * Calls the backend at `/v1/...`.
  *
@@ -8,22 +8,12 @@
  * below as test doubles.
  *
  * Function signatures match the final AdminApi contract from the
- * implementation plan. View-model types match the GateKit Domain Contracts.
+ * implementation plan. View-model types match the Tixkit Domain Contracts.
  */
 
-import { hasClerkKey } from '@/lib/auth'
-
-declare global {
-  interface Window {
-    Clerk?: {
-      loaded?: boolean
-      load?: () => Promise<void>
-      session?: {
-        getToken: () => Promise<string | null>
-      }
-    }
-  }
-}
+import { getAdminApiBaseUrl, request, withFixture } from './api-http'
+export { getAdminApiAuthHeaders, getAdminApiBaseUrl } from './api-http'
+export { hasClerkKey } from '@/lib/auth'
 
 // ---------------------------------------------------------------------------
 // Result / pagination envelopes
@@ -40,6 +30,39 @@ export type ApiResult<T> =
   | { ok: true; data: T }
   | { ok: false; error: AdminApiError }
 
+function apiError(
+  code: string,
+  message: string,
+  status?: number,
+  details?: unknown
+): AdminApiError {
+  return { code, message, status, details }
+}
+
+function ok<T>(data: T): ApiResult<T> {
+  return { ok: true, data }
+}
+
+function err<T>(error: AdminApiError): ApiResult<T> {
+  return { ok: false, error }
+}
+
+async function putUploadBytes(ticket: UploadArtifactTicket, file: File): Promise<ApiResult<void>> {
+  try {
+    const response = await fetch(ticket.uploadUrl, {
+      method: 'PUT',
+      headers: ticket.uploadHeaders,
+      body: file,
+    })
+    if (!response.ok) {
+      return err(apiError('upload_failed', `Upload failed with status ${response.status}`, response.status))
+    }
+    return ok(undefined)
+  } catch (error) {
+    return err(apiError('upload_failed', error instanceof Error ? error.message : 'Upload failed'))
+  }
+}
+
 export type PageCursor = {
   limit?: number
   cursor?: string
@@ -52,7 +75,7 @@ export type PageResult<T> = {
 }
 
 // ---------------------------------------------------------------------------
-// View-model types (GateKit Domain Contracts)
+// View-model types (Tixkit Domain Contracts)
 // ---------------------------------------------------------------------------
 
 export type EventStatus = 'draft' | 'published' | 'paused' | 'archived'
@@ -104,6 +127,37 @@ export type AdminEventDetail = AdminEventListItem & {
   createdAt?: string
 }
 
+export type AdminEventOccurrence = {
+  id: string
+  eventId: string
+  title: string
+  startsAt: string
+  endsAt: string
+  timezone: string
+  venue?: AdminEventListItem['venue'] | null
+  capacity?: number | null
+  sortOrder: number
+  status: 'scheduled' | 'cancelled' | 'completed'
+  createdAt?: string
+  updatedAt?: string
+}
+
+export type AdminMarketingIntegrationProvider = 'ga4' | 'meta_pixel' | 'generic_tag'
+
+export type AdminMarketingIntegration = {
+  id: string
+  tenantId?: string
+  organizationId?: string
+  brandId?: string
+  eventId?: string
+  provider: AdminMarketingIntegrationProvider
+  config: Record<string, unknown>
+  consentRequired: boolean
+  status: 'active' | 'disabled'
+  createdAt?: string
+  updatedAt?: string
+}
+
 export type TicketTypeStatus =
   | 'draft'
   | 'active'
@@ -131,7 +185,37 @@ export type AdminTicketType = {
   requiresAccessCode: boolean
   accessCodeHint?: string | null
   inventoryPoolId?: string
+  eventOccurrenceId?: string | null
   sortOrder?: number
+}
+
+export type AdminWaitlistEntry = {
+  id: string
+  eventId: string
+  ticketTypeId: string
+  email: string
+  firstName?: string
+  lastName?: string
+  phone?: string
+  quantity: number
+  status: 'joined' | 'offered' | 'claimed' | 'cancelled' | 'expired'
+  offerExpiresAt?: string
+  offeredAt?: string
+  claimedAt?: string
+  cancelledAt?: string
+  createdAt: string
+  updatedAt: string
+}
+
+export type AdminWaitlistOffer = {
+  entry: AdminWaitlistEntry
+  claimToken: string
+  claimUrl?: string
+}
+
+export type AdminWaitlistSettings = {
+  autoOfferEnabled: boolean
+  offerTtlMinutes: number
 }
 
 export type AdminInventoryPool = {
@@ -268,6 +352,7 @@ export type AdminOrderLineItem = {
   id: string
   orderId: string
   ticketTypeId?: string
+  eventOccurrenceId?: string
   attendeeId?: string
   description: string
   quantity: number
@@ -280,6 +365,45 @@ export type AdminOrderLineItem = {
   currency: string
   createdAt: string
   updatedAt: string
+}
+
+export type AdminTaxSnapshot = {
+  id: string
+  orderId: string
+  orderLineItemId: string
+  eventId: string
+  taxRuleId?: string
+  taxRuleName: string
+  rate: number
+  type: string
+  appliedTo: string
+  taxableAmountCents: number
+  taxCents: number
+  currency: string
+  inclusive: boolean
+  provider: string
+  createdAt: string
+}
+
+export type AdminInvoice = {
+  id: string
+  orderId: string
+  invoiceNumber: string
+  status: string
+  currency: string
+  subtotalCents: number
+  discountCents: number
+  taxCents: number
+  feeCents: number
+  totalCents: number
+  refundedCents: number
+  buyerEmail: string
+  buyerName?: string
+  buyerTaxId?: string
+  sellerName: string
+  sellerTaxId?: string
+  reverseCharge: boolean
+  issuedAt: string
 }
 
 export type AdminOrderRefund = {
@@ -324,6 +448,8 @@ export type AdminOrderAttendee = {
 export type AdminOrderDetail = AdminOrderListItem & {
   lineItems: AdminOrderLineItem[]
   attendees: AdminOrderAttendee[]
+  invoice?: AdminInvoice
+  taxSnapshots?: AdminTaxSnapshot[]
   checkoutAnswers: {
     buyerFields: Record<string, unknown>
     attendeeFields: Record<string, unknown>
@@ -358,7 +484,8 @@ export type AdminAttendeeListItem = {
 export type CheckInScanResult =
   | {
       status: 'accepted'
-      attendee: AdminAttendeeListItem
+      message?: string
+      attendee?: AdminAttendeeListItem
       scannedAt: string
     }
   | {
@@ -367,6 +494,12 @@ export type CheckInScanResult =
       attendee?: AdminAttendeeListItem
       scannedAt: string
     }
+
+export type LiveCheckInScanResponse = {
+  outcome: CheckInScanResult['status'] | 'not_found'
+  ticketId?: string
+  message?: string
+}
 
 export type MessageChannel = 'email' | 'sms' | 'both'
 export type MessageStatus =
@@ -393,6 +526,9 @@ export type AdminMessageCampaign = {
     | 'not_checked_in'
     | 'ticket_type'
     | 'custom'
+  audienceKey?: SendMessageInput['audience']
+  audienceAttendeeIds?: string[]
+  audienceLabel: string
   queuedCount: number
   sentCount: number
   deliveredCount: number
@@ -460,6 +596,9 @@ type BackendMessageCampaign = {
   channel: MessageChannel
   status: MessageStatus
   audience?: AdminMessageCampaign['audience']
+  audienceKey?: SendMessageInput['audience']
+  audienceAttendeeIds?: string[]
+  audienceLabel?: string
   audienceCount?: number
   queuedEmailJobs?: number
   queuedSmsJobs?: number
@@ -481,19 +620,34 @@ type BackendMessageList = {
   items: BackendMessageCampaign[]
 }
 
+function messageAudienceLabel(audience: AdminMessageCampaign['audience'], attendeeIds: string[] = []) {
+  if (audience === 'checked_in') return 'Checked in'
+  if (audience === 'not_checked_in') return 'Not checked in'
+  if (audience === 'custom') {
+    return attendeeIds.length === 1 ? 'Custom (1 attendee)' : `Custom (${attendeeIds.length} attendees)`
+  }
+  if (audience === 'ticket_type') return 'Ticket type'
+  return 'All attendees'
+}
+
 function normalizeMessageCampaign(campaign: BackendMessageCampaign): AdminMessageCampaign {
   const queuedCount = Number(campaign.queuedEmailJobs ?? 0) + Number(campaign.queuedSmsJobs ?? 0)
   const sentCount = Number(campaign.sentCount ?? (campaign.status === 'sent' ? queuedCount : 0))
   const deliveredCount = Number(campaign.deliveredCount ?? 0)
   const failedCount = Number(campaign.failedCount ?? (campaign.status === 'failed' ? queuedCount : 0))
   const suppressedCount = Number(campaign.suppressedRecipients ?? 0)
+  const audience = campaign.audience ?? 'all_attendees'
+  const audienceAttendeeIds = campaign.audienceAttendeeIds ?? []
   return {
     id: campaign.id,
     eventId: campaign.eventId,
     name: campaign.templateKey ?? campaign.id,
     channel: campaign.channel,
     status: campaign.status,
-    audience: campaign.audience ?? 'all_attendees',
+    audience,
+    audienceKey: campaign.audienceKey,
+    audienceAttendeeIds,
+    audienceLabel: campaign.audienceLabel ?? messageAudienceLabel(audience, audienceAttendeeIds),
     queuedCount,
     sentCount,
     deliveredCount,
@@ -577,7 +731,7 @@ export type AdminPromoReport = {
 
 export type AdminConversionReport = {
   eventId: string
-  widgetViews: number | null
+  widgetViews: number
   checkoutStarted: number
   checkoutCompleted: number
   conversionRate: number
@@ -646,10 +800,10 @@ export type AdminWebhookEvent = {
 }
 
 /**
- * GateKit principal resolved after Clerk authentication.
+ * Tixkit principal resolved after Clerk authentication.
  * Returned by `GET /v1/me`. Permissions drive route/nav gating.
  */
-export type GateKitPrincipal = {
+export type TixkitPrincipal = {
   permissions: string[]
   tenantId: string
   organizationIds: string[]
@@ -719,6 +873,7 @@ export type AdminPaymentAccount = {
   providerAccountId: string
   status: PaymentAccountStatus
   defaultCurrency: string
+  onboardingUrl?: string
   createdAt?: string
   updatedAt?: string
 }
@@ -792,6 +947,27 @@ export type CreateTicketTypeInput = {
   maxPerOrder?: number
   requiresAccessCode?: boolean
   accessCodeHint?: string | null
+  eventOccurrenceId?: string | null
+}
+
+export type CreateEventOccurrenceInput = {
+  title: string
+  startsAt: string
+  endsAt: string
+  timezone: string
+  venue?: AdminEventListItem['venue'] | null
+  capacity?: number | null
+  sortOrder?: number
+  status?: AdminEventOccurrence['status']
+}
+
+export type UpdateEventOccurrenceInput = Partial<CreateEventOccurrenceInput>
+
+export type UpsertMarketingIntegrationInput = {
+  provider: AdminMarketingIntegrationProvider
+  config: Record<string, unknown>
+  consentRequired?: boolean
+  status?: AdminMarketingIntegration['status']
 }
 
 export type CreateInventoryPoolInput = {
@@ -939,6 +1115,34 @@ export type UpdateBrandInput = {
   paymentAccountId?: string | null
 }
 
+export type AdminUploadPurpose = 'checkout_answer' | 'brand_logo' | 'user_avatar'
+
+export type CreateUploadArtifactInput = {
+  purpose: AdminUploadPurpose
+  fileName: string
+  contentType: string
+  sizeBytes: number
+  brandId?: string
+  eventId?: string
+  metadata?: Record<string, unknown>
+}
+
+export type UploadArtifactTicket = {
+  artifactId: string
+  uploadUrl: string
+  uploadHeaders: Record<string, string>
+  completeUrl: string
+  completeToken?: string
+  expiresAt: string
+}
+
+export type CompletedUploadArtifact = {
+  artifactId: string
+  status: string
+  scanStatus: string
+  downloadUrl?: string
+}
+
 export type InviteTeamMemberInput = {
   email: string
   role: TeamMemberRole
@@ -954,8 +1158,8 @@ export type ReportDateRange = {
 }
 
 export type AdminApi = {
-  /** Resolves the authenticated GateKit principal + permissions (`GET /v1/me`). */
-  getPrincipal(token?: string): Promise<ApiResult<GateKitPrincipal>>
+  /** Resolves the authenticated Tixkit principal + permissions (`GET /v1/me`). */
+  getPrincipal(token?: string): Promise<ApiResult<TixkitPrincipal>>
 
   listOrganizations(): Promise<ApiResult<AdminOrganization[]>>
   updateOrganization(organizationId: string, input: UpdateOrganizationInput): Promise<ApiResult<AdminOrganization>>
@@ -966,7 +1170,15 @@ export type AdminApi = {
   inviteTeamMember(organizationId: string, input: InviteTeamMemberInput): Promise<ApiResult<AdminTeamMember>>
   listPaymentAccounts(organizationId: string): Promise<ApiResult<AdminPaymentAccount[]>>
   createStripeConnectAccount(organizationId: string): Promise<ApiResult<AdminPaymentAccount>>
+  refreshStripeConnectAccount(organizationId: string, paymentAccountId: string): Promise<ApiResult<AdminPaymentAccount>>
   getBillingOverview(organizationId: string): Promise<ApiResult<AdminBillingOverview>>
+  uploadArtifact(input: {
+    purpose: AdminUploadPurpose
+    file: File
+    brandId?: string
+    eventId?: string
+    metadata?: Record<string, unknown>
+  }): Promise<ApiResult<CompletedUploadArtifact>>
 
   listEvents(input?: PageCursor): Promise<ApiResult<PageResult<AdminEventListItem>>>
   getEvent(eventId: string): Promise<ApiResult<AdminEventDetail>>
@@ -975,12 +1187,20 @@ export type AdminApi = {
   publishEvent(eventId: string): Promise<ApiResult<AdminEventDetail>>
   pauseEvent(eventId: string): Promise<ApiResult<AdminEventDetail>>
   archiveEvent(eventId: string): Promise<ApiResult<AdminEventDetail>>
+  listEventOccurrences(eventId: string): Promise<ApiResult<AdminEventOccurrence[]>>
+  createEventOccurrence(eventId: string, input: CreateEventOccurrenceInput): Promise<ApiResult<AdminEventOccurrence>>
+  updateEventOccurrence(eventId: string, occurrenceId: string, input: UpdateEventOccurrenceInput): Promise<ApiResult<AdminEventOccurrence>>
+  listMarketingIntegrations(eventId: string): Promise<ApiResult<AdminMarketingIntegration[]>>
+  upsertMarketingIntegration(eventId: string, input: UpsertMarketingIntegrationInput): Promise<ApiResult<AdminMarketingIntegration>>
 
   listTicketTypes(eventId: string): Promise<ApiResult<AdminTicketType[]>>
   createTicketType(eventId: string, input: CreateTicketTypeInput): Promise<ApiResult<AdminTicketType>>
   updateTicketType(ticketTypeId: string, input: UpdateTicketTypeInput): Promise<ApiResult<AdminTicketType>>
   createTicketTypeBatch(eventId: string, input: CreateTicketTypeBatchInput): Promise<ApiResult<SaveTicketTypeResult>>
   updateTicketTypeBatch(ticketTypeId: string, input: UpdateTicketTypeBatchInput): Promise<ApiResult<SaveTicketTypeResult>>
+  listWaitlist(eventId: string): Promise<ApiResult<{ items: AdminWaitlistEntry[]; settings: AdminWaitlistSettings }>>
+  offerWaitlistEntry(eventId: string, entryId: string, input?: { expiresInMinutes?: number }): Promise<ApiResult<AdminWaitlistOffer>>
+  updateWaitlistSettings(eventId: string, input: AdminWaitlistSettings): Promise<ApiResult<AdminWaitlistSettings>>
   listAccessRules(ticketTypeId: string): Promise<ApiResult<AdminAccessRule[]>>
   createAccessRule(ticketTypeId: string, input: CreateAccessRuleInput): Promise<ApiResult<AdminAccessRule>>
   deleteAccessRule(accessRuleId: string): Promise<ApiResult<void>>
@@ -1046,163 +1266,33 @@ export type AdminApi = {
   replayWebhookEvent(eventId: string): Promise<ApiResult<{ queued: true }>>
 }
 
-// ---------------------------------------------------------------------------
-// Internal fetch helper
-// ---------------------------------------------------------------------------
-
-const API_BASE_URL = (
-  process.env.NEXT_PUBLIC_ADMIN_API_BASE_URL ||
-  process.env.NEXT_PUBLIC_API_BASE_URL ||
-  'http://localhost:4000'
-).replace(/\/$/, '')
-const DEFAULT_TIMEOUT_MS = 15_000
-const CLERK_TOKEN_WAIT_MS = 5_000
-const FIXTURES_ALLOWED = process.env.NODE_ENV === 'test'
-
-function apiError(
-  code: string,
-  message: string,
-  status?: number,
-  details?: unknown
-): AdminApiError {
-  return { code, message, status, details }
-}
-
-function ok<T>(data: T): ApiResult<T> {
-  return { ok: true, data }
-}
-
-function err<T>(error: AdminApiError): ApiResult<T> {
-  return { ok: false, error }
-}
-
-async function getClerkToken(): Promise<string | null> {
-  if (typeof window === 'undefined') return null
-
-  // When no Clerk publishable key is configured, skip polling entirely.
-  // This prevents the 5-second wait on every request in local dev mode.
-  if (!hasClerkKey()) return null
-
-  // Clerk is configured. Wait briefly for it to load if it hasn't yet.
-  const startedAt = Date.now()
-  while (!window.Clerk && Date.now() - startedAt < CLERK_TOKEN_WAIT_MS) {
-    // Intentional sequential wait: we need Clerk to load before proceeding.
-    // eslint-disable-next-line no-await-in-loop
-    await new Promise((resolve) => window.setTimeout(resolve, 50))
-  }
-
-  const clerk = window.Clerk
-  if (!clerk) return null
-
-  if (!clerk.loaded && typeof clerk.load === 'function') {
-    const timeout = new Promise<void>((resolve) => {
-      window.setTimeout(resolve, CLERK_TOKEN_WAIT_MS)
-    })
-    await Promise.race([clerk.load().catch(() => undefined), timeout])
-  }
-
-  return clerk.session?.getToken() ?? null
-}
-
-export function getAdminApiBaseUrl(): string {
-  return API_BASE_URL
-}
-
-export async function getAdminApiAuthHeaders(
-  headers: Record<string, string> = {}
-): Promise<Record<string, string>> {
-  const resolvedHeaders = { ...headers }
-  if (!resolvedHeaders.Authorization && typeof window !== 'undefined') {
-    const clerkToken = await getClerkToken()
-    if (clerkToken) {
-      resolvedHeaders.Authorization = `Bearer ${clerkToken}`
-    }
-  }
-  return resolvedHeaders
-}
-
-async function request<T>(
-  path: string,
-  options: RequestInit = {}
-): Promise<ApiResult<T>> {
-  const url = `${API_BASE_URL}${path}`
-  const controller = new AbortController()
-  const timeout = setTimeout(() => controller.abort(), DEFAULT_TIMEOUT_MS)
-
-  try {
-    const headers: Record<string, string> = {
-      'Content-Type': 'application/json',
-      ...(options.headers as Record<string, string> | undefined),
-    }
-
-    if (!headers.Authorization && typeof window !== 'undefined') {
-      const clerkToken = await getClerkToken()
-      if (clerkToken) {
-        headers.Authorization = `Bearer ${clerkToken}`
-      }
-    }
-
-    const res = await fetch(url, {
-      ...options,
-      headers,
-      signal: controller.signal,
-      credentials: 'include',
-    })
-
-    clearTimeout(timeout)
-
-    if (res.status === 204) {
-      return ok(undefined as T)
-    }
-
-    const json = await res.json().catch(() => null)
-
-    if (!res.ok) {
-      const body = json as { error?: { code?: string; message?: string; details?: unknown } } | null
-      return err<T>(
-        apiError(
-          body?.error?.code ?? 'http_error',
-          body?.error?.message ?? `Request failed with status ${res.status}`,
-          res.status,
-          body?.error?.details
-        )
-      )
-    }
-
-    return ok(json as T)
-  } catch (e) {
-    clearTimeout(timeout)
-    if (e instanceof Error) {
-      if (e.name === 'AbortError') {
-        return err<T>(apiError('timeout', 'The request timed out'))
-      }
-      return err<T>(apiError('network_error', e.message))
-    }
-    return err<T>(apiError('unknown', 'An unknown error occurred'))
-  }
-}
-
-/**
- * Uses fixture providers only under the test runner. Browser/runtime code must
- * call the configured API and surface real failures.
- */
-async function withFixture<T>(
-  call: () => Promise<ApiResult<T>>,
-  fixture: () => Promise<ApiResult<T>> | ApiResult<T>
-): Promise<ApiResult<T>> {
-  if (FIXTURES_ALLOWED) {
-    return Promise.resolve(fixture()).then((f) => f)
-  }
-  return call()
-}
-
-
 function unwrapPage<T>(value: PageResult<T> | T[]): PageResult<T> {
   return Array.isArray(value) ? { items: value, total: value.length } : value
 }
 
 function unwrapItems<T>(value: PageResult<T> | T[]): T[] {
   return Array.isArray(value) ? value : value.items
+}
+
+export function normalizeLiveCheckInScanResult(
+  value: LiveCheckInScanResponse,
+  scannedAt?: string
+): CheckInScanResult {
+  const status = value.outcome === 'not_found' ? 'invalid' : value.outcome
+  const timestamp = scannedAt ?? new Date().toISOString()
+  if (status === 'accepted') {
+    return {
+      status,
+      message: value.message ?? 'Check-in successful',
+      scannedAt: timestamp,
+    }
+  }
+
+  return {
+    status,
+    message: value.message ?? `Check-in ${status.replace('_', ' ')}`,
+    scannedAt: timestamp,
+  }
 }
 
 function finiteNumber(value: unknown, fallback = 0): number {
@@ -1315,6 +1405,7 @@ function normalizePaymentAccount(value: Record<string, unknown>, organizationId:
     providerAccountId: String(value.providerAccountId ?? value.provider_account_id ?? ''),
     status,
     defaultCurrency: stringValue(value.defaultCurrency ?? value.default_currency, 'USD'),
+    onboardingUrl: stringValue(value.onboardingUrl ?? value.onboarding_url, undefined),
     createdAt: stringValue(value.createdAt ?? value.created_at, undefined),
     updatedAt: stringValue(value.updatedAt ?? value.updated_at, undefined),
   }
@@ -1499,7 +1590,84 @@ function normalizeTicketType(value: Partial<AdminTicketType> & Record<string, un
     requiresAccessCode: Boolean(value.requiresAccessCode ?? value.requires_access_code),
     accessCodeHint: stringValue(value.accessCodeHint ?? value.access_code_hint, undefined),
     inventoryPoolId: stringValue(value.inventoryPoolId ?? value.inventory_pool_id, undefined),
+    eventOccurrenceId: stringValue(value.eventOccurrenceId ?? value.event_occurrence_id, undefined),
     sortOrder: sortOrder == null ? undefined : finiteNumber(sortOrder),
+  }
+}
+
+function normalizeEventOccurrence(value: Partial<AdminEventOccurrence> & Record<string, unknown>): AdminEventOccurrence {
+  const statusValues: AdminEventOccurrence['status'][] = ['scheduled', 'cancelled', 'completed']
+  const status = statusValues.includes(value.status as AdminEventOccurrence['status'])
+    ? (value.status as AdminEventOccurrence['status'])
+    : 'scheduled'
+  return {
+    id: String(value.id),
+    eventId: String(value.eventId ?? value.event_id ?? ''),
+    title: stringValue(value.title, 'Occurrence'),
+    startsAt: stringValue(value.startsAt ?? value.starts_at, ''),
+    endsAt: stringValue(value.endsAt ?? value.ends_at, ''),
+    timezone: stringValue(value.timezone, 'UTC'),
+    venue: (value.venue as AdminEventListItem['venue'] | null | undefined) ?? null,
+    capacity: value.capacity == null ? null : finiteNumber(value.capacity),
+    sortOrder: finiteNumber(value.sortOrder ?? value.sort_order),
+    status,
+    createdAt: stringValue(value.createdAt ?? value.created_at, undefined),
+    updatedAt: stringValue(value.updatedAt ?? value.updated_at, undefined),
+  }
+}
+
+function normalizeMarketingIntegration(value: Partial<AdminMarketingIntegration> & Record<string, unknown>): AdminMarketingIntegration {
+  const providers: AdminMarketingIntegrationProvider[] = ['ga4', 'meta_pixel', 'generic_tag']
+  const provider = providers.includes(value.provider as AdminMarketingIntegrationProvider)
+    ? (value.provider as AdminMarketingIntegrationProvider)
+    : 'generic_tag'
+  const status = value.status === 'disabled' ? 'disabled' : 'active'
+  const rawConfig = value.config
+  return {
+    id: String(value.id ?? `${provider}:${value.eventId ?? value.event_id ?? ''}`),
+    tenantId: stringValue(value.tenantId ?? value.tenant_id, undefined),
+    organizationId: stringValue(value.organizationId ?? value.organization_id, undefined),
+    brandId: stringValue(value.brandId ?? value.brand_id, undefined),
+    eventId: stringValue(value.eventId ?? value.event_id, undefined),
+    provider,
+    config: rawConfig && typeof rawConfig === 'object' && !Array.isArray(rawConfig)
+      ? (rawConfig as Record<string, unknown>)
+      : {},
+    consentRequired: Boolean(value.consentRequired ?? value.consent_required ?? true),
+    status,
+    createdAt: stringValue(value.createdAt ?? value.created_at, undefined),
+    updatedAt: stringValue(value.updatedAt ?? value.updated_at, undefined),
+  }
+}
+
+function normalizeWaitlistEntry(value: Partial<AdminWaitlistEntry> & Record<string, unknown>): AdminWaitlistEntry {
+  const statusValues: AdminWaitlistEntry['status'][] = ['joined', 'offered', 'claimed', 'cancelled', 'expired']
+  const status = statusValues.includes(value.status as AdminWaitlistEntry['status'])
+    ? (value.status as AdminWaitlistEntry['status'])
+    : 'joined'
+  return {
+    id: String(value.id),
+    eventId: String(value.eventId ?? value.event_id ?? ''),
+    ticketTypeId: String(value.ticketTypeId ?? value.ticket_type_id ?? ''),
+    email: stringValue(value.email ?? value.buyerEmail ?? value.buyer_email, ''),
+    firstName: stringValue(value.firstName ?? value.buyerFirstName ?? value.buyer_first_name, undefined),
+    lastName: stringValue(value.lastName ?? value.buyerLastName ?? value.buyer_last_name, undefined),
+    phone: stringValue(value.phone ?? value.buyerPhone ?? value.buyer_phone, undefined),
+    quantity: finiteNumber(value.quantity, 1),
+    status,
+    offerExpiresAt: stringValue(value.offerExpiresAt ?? value.offer_expires_at, undefined),
+    offeredAt: stringValue(value.offeredAt ?? value.offered_at, undefined),
+    claimedAt: stringValue(value.claimedAt ?? value.claimed_at, undefined),
+    cancelledAt: stringValue(value.cancelledAt ?? value.cancelled_at, undefined),
+    createdAt: stringValue(value.createdAt ?? value.created_at, new Date(0).toISOString()),
+    updatedAt: stringValue(value.updatedAt ?? value.updated_at, new Date(0).toISOString()),
+  }
+}
+
+function normalizeWaitlistSettings(value: Partial<AdminWaitlistSettings> & Record<string, unknown>): AdminWaitlistSettings {
+  return {
+    autoOfferEnabled: Boolean(value.autoOfferEnabled ?? value.auto_offer_enabled ?? true),
+    offerTtlMinutes: finiteNumber(value.offerTtlMinutes ?? value.offer_ttl_minutes, 1440),
   }
 }
 
@@ -1604,7 +1772,7 @@ export function normalizeExportJob(value: Partial<AdminExportJob> & Record<strin
     status,
     fileUrl: stringValue(value.fileUrl ?? value.file_url, undefined),
     downloadUrl: downloadUrl?.startsWith('/v1/')
-      ? `${API_BASE_URL}${downloadUrl}`
+      ? `${getAdminApiBaseUrl()}${downloadUrl}`
       : downloadUrl,
     createdAt: stringValue(value.createdAt ?? value.created_at, undefined),
     completedAt: stringValue(value.completedAt ?? value.completed_at, undefined),
@@ -2042,7 +2210,7 @@ const fixtureApiKeys: AdminApiKey[] = [
   {
     id: 'key_001',
     name: 'Production Server',
-    keyPrefix: 'gk_live_ab',
+    keyPrefix: 'tk_live_ab',
     scopes: [],
     lastUsedAt: iso(-3_600_000),
     expiresAt: undefined,
@@ -2051,7 +2219,7 @@ const fixtureApiKeys: AdminApiKey[] = [
   {
     id: 'key_002',
     name: 'CI/CD Pipeline',
-    keyPrefix: 'gk_test_cd',
+    keyPrefix: 'tk_test_cd',
     scopes: [],
     lastUsedAt: iso(-86_400_000),
     expiresAt: undefined,
@@ -2062,7 +2230,7 @@ const fixtureApiKeys: AdminApiKey[] = [
 const fixtureWebhooks: AdminWebhookEndpoint[] = [
   {
     id: 'wh_001',
-    url: 'https://example.com/webhooks/gatekit',
+    url: 'https://example.com/webhooks/tixkit',
     description: 'Production webhook handler',
     events: ['order.created', 'order.paid', 'order.refunded'],
     status: 'active',
@@ -2129,7 +2297,7 @@ const fixtureWebhookEvents: AdminWebhookEvent[] = [
  * Local-dev principal grants all permissions so the UI is fully functional
  * without a backend. In production this is overridden by `GET /v1/me`.
  */
-const fixturePrincipal: GateKitPrincipal = {
+const fixturePrincipal: TixkitPrincipal = {
   permissions: [
     'events.read',
     'events.write',
@@ -2155,8 +2323,8 @@ const fixtureOrganizations: AdminOrganization[] = [
   {
     id: 'org_demo',
     tenantId: 'tenant_demo',
-    name: 'GateKit',
-    slug: 'gatekit',
+    name: 'Tixkit',
+    slug: 'tixkit',
     status: 'active',
     createdAt: iso(-30),
     updatedAt: iso(0),
@@ -2181,8 +2349,8 @@ const fixtureBrands: AdminBrand[] = [
     id: 'brd_demo',
     tenantId: 'tenant_demo',
     organizationId: 'org_demo',
-    name: 'GateKit',
-    slug: 'gatekit',
+    name: 'Tixkit',
+    slug: 'tixkit',
     status: 'draft',
     theme: { primaryColor: '#222222' },
     domains: fixtureBrandDomains,
@@ -2209,6 +2377,9 @@ const fixtureMessages: AdminMessageCampaign[] = [
     channel: 'email',
     status: 'sent',
     audience: 'all_attendees',
+    audienceKey: 'all',
+    audienceAttendeeIds: [],
+    audienceLabel: 'All attendees',
     queuedCount: 0,
     sentCount: 193,
     deliveredCount: 187,
@@ -2223,6 +2394,9 @@ const fixtureMessages: AdminMessageCampaign[] = [
     channel: 'sms',
     status: 'scheduled',
     audience: 'not_checked_in',
+    audienceKey: 'not_checked_in',
+    audienceAttendeeIds: [],
+    audienceLabel: 'Not checked in',
     queuedCount: 0,
     sentCount: 0,
     deliveredCount: 0,
@@ -2315,7 +2489,7 @@ function fixtureConversionReport(eventId: string): AdminConversionReport {
   const checkoutStarted = Math.max(sales.paidOrdersCount, Math.round(sales.paidOrdersCount / 0.68))
   return {
     eventId,
-    widgetViews: null,
+    widgetViews: 0,
     checkoutStarted,
     checkoutCompleted: sales.paidOrdersCount,
     conversionRate: checkoutStarted > 0 ? sales.paidOrdersCount / checkoutStarted : 0,
@@ -2365,7 +2539,7 @@ export const adminApi: AdminApi = {
   // ---- Principal / permissions ----
   async getPrincipal(token?: string) {
     return withFixture(
-      () => request<GateKitPrincipal>('/v1/me', {
+      () => request<TixkitPrincipal>('/v1/me', {
         method: 'GET',
         headers: token ? { Authorization: `Bearer ${token}` } : undefined
       }),
@@ -2527,6 +2701,31 @@ export const adminApi: AdminApi = {
     )
   },
 
+  async refreshStripeConnectAccount(organizationId, paymentAccountId) {
+    return withFixture(
+      async () => {
+        const result = await request<AdminPaymentAccount>(
+          `/v1/organizations/${organizationId}/payment-accounts/${paymentAccountId}/stripe-connect/refresh`,
+          { method: 'POST' }
+        )
+        return result.ok ? ok(normalizePaymentAccount(asRecord(result.data), organizationId)) : result
+      },
+      () => {
+        const account = fixturePaymentAccounts.find((candidate) => candidate.id === paymentAccountId && candidate.organizationId === organizationId)
+        if (!account) {
+          return err<AdminPaymentAccount>(apiError('payment_account_not_found', 'Payment account not found', 404))
+        }
+        const updated = {
+          ...account,
+          status: account.status === 'pending' ? 'active' : account.status,
+          updatedAt: new Date().toISOString(),
+        } satisfies AdminPaymentAccount
+        Object.assign(account, updated)
+        return ok(updated)
+      }
+    )
+  },
+
   async getBillingOverview(organizationId) {
     return withFixture(
       async () => {
@@ -2534,6 +2733,51 @@ export const adminApi: AdminApi = {
         return result.ok ? ok(normalizeBillingOverview(asRecord(result.data), organizationId)) : result
       },
       () => ok({ ...fixtureBillingOverview, organizationId })
+    )
+  },
+
+  async uploadArtifact(input) {
+    return withFixture(
+      async () => {
+        const createResult = await request<UploadArtifactTicket>('/v1/upload-artifacts', {
+          method: 'POST',
+          body: JSON.stringify({
+            purpose: input.purpose,
+            fileName: input.file.name,
+            contentType: input.file.type || 'application/octet-stream',
+            sizeBytes: input.file.size,
+            brandId: input.brandId,
+            eventId: input.eventId,
+            metadata: input.metadata,
+          } satisfies CreateUploadArtifactInput),
+        })
+        if (!createResult.ok) return createResult
+
+        const uploadResult = await putUploadBytes(createResult.data, input.file)
+        if (!uploadResult.ok) return uploadResult
+
+        const completeResult = await request<CompletedUploadArtifact>(createResult.data.completeUrl, {
+          method: 'POST',
+          body: JSON.stringify({}),
+        })
+        if (!completeResult.ok) return completeResult
+
+        const downloadResult = await request<{ downloadUrl: string }>(
+          `/v1/upload-artifacts/${completeResult.data.artifactId}/download`,
+          { method: 'GET' }
+        )
+        return ok({
+          ...completeResult.data,
+          downloadUrl: downloadResult.ok ? downloadResult.data.downloadUrl : undefined,
+        })
+      },
+      () =>
+        ok({
+          artifactId: `upl_${Math.random().toString(36).slice(2, 11)}`,
+          status: 'uploaded',
+          scanStatus: 'clean',
+          downloadUrl: URL.createObjectURL(input.file),
+        })
     )
   },
 
@@ -2720,6 +2964,76 @@ export const adminApi: AdminApi = {
     )
   },
 
+  async listEventOccurrences(eventId) {
+    return withFixture(
+      async () => {
+        const result = await request<PageResult<AdminEventOccurrence> | AdminEventOccurrence[]>(
+          `/v1/events/${eventId}/occurrences`,
+          { method: 'GET' }
+        )
+        return result.ok ? ok(unwrapItems(result.data).map((occurrence) => normalizeEventOccurrence(asRecord(occurrence)))) : result
+      },
+      () => ok([])
+    )
+  },
+
+  async createEventOccurrence(eventId, input) {
+    return withFixture(
+      async () => {
+        const result = await request<AdminEventOccurrence>(`/v1/events/${eventId}/occurrences`, {
+          method: 'POST',
+          body: JSON.stringify(input),
+        })
+        return result.ok ? ok(normalizeEventOccurrence(asRecord(result.data))) : result
+      },
+      () => err<AdminEventOccurrence>(apiError('fixture_unavailable', 'Event occurrences require the live API.', 400))
+    )
+  },
+
+  async updateEventOccurrence(eventId, occurrenceId, input) {
+    return withFixture(
+      async () => {
+        const result = await request<AdminEventOccurrence>(`/v1/events/${eventId}/occurrences/${occurrenceId}`, {
+          method: 'PATCH',
+          body: JSON.stringify(input),
+        })
+        return result.ok ? ok(normalizeEventOccurrence(asRecord(result.data))) : result
+      },
+      () => err<AdminEventOccurrence>(apiError('fixture_unavailable', 'Event occurrences require the live API.', 400))
+    )
+  },
+
+  async listMarketingIntegrations(eventId) {
+    return withFixture(
+      async () => {
+        const result = await request<PageResult<AdminMarketingIntegration> | AdminMarketingIntegration[]>(
+          `/v1/events/${eventId}/marketing-integrations`,
+          { method: 'GET' }
+        )
+        return result.ok
+          ? ok(unwrapItems(result.data).map((integration) => normalizeMarketingIntegration(asRecord(integration))))
+          : result
+      },
+      () => ok([])
+    )
+  },
+
+  async upsertMarketingIntegration(eventId, input) {
+    return withFixture(
+      async () => {
+        const result = await request<AdminMarketingIntegration>(
+          `/v1/events/${eventId}/marketing-integrations/${input.provider}`,
+          {
+            method: 'PUT',
+            body: JSON.stringify(input),
+          }
+        )
+        return result.ok ? ok(normalizeMarketingIntegration(asRecord(result.data))) : result
+      },
+      () => err<AdminMarketingIntegration>(apiError('fixture_unavailable', 'Marketing integrations require the live API.', 400))
+    )
+  },
+
   // ---- Ticket Types ----
   async listTicketTypes(eventId) {
     return withFixture(
@@ -2758,6 +3072,7 @@ export const adminApi: AdminApi = {
             maxPerOrder: input.maxPerOrder,
             requiresAccessCode: input.requiresAccessCode,
             accessCodeHint: input.accessCodeHint,
+            eventOccurrenceId: input.eventOccurrenceId,
           }),
         })
       },
@@ -2782,6 +3097,7 @@ export const adminApi: AdminApi = {
           requiresAccessCode: input.requiresAccessCode ?? false,
           accessCodeHint: input.accessCodeHint,
           inventoryPoolId: input.inventoryPoolId,
+          eventOccurrenceId: input.eventOccurrenceId,
         })
         if (!fixtureTicketTypes[eventId]) fixtureTicketTypes[eventId] = []
         fixtureTicketTypes[eventId].push(newTt)
@@ -2920,6 +3236,56 @@ export const adminApi: AdminApi = {
     )
   },
 
+  async listWaitlist(eventId) {
+    return withFixture(
+      async () => {
+        const result = await request<{ items: AdminWaitlistEntry[]; settings?: AdminWaitlistSettings } | AdminWaitlistEntry[]>(`/v1/events/${eventId}/waitlist`, { method: 'GET' })
+        if (!result.ok) return result
+        if (Array.isArray(result.data)) {
+          return ok({ items: result.data.map((entry) => normalizeWaitlistEntry(asRecord(entry))), settings: { autoOfferEnabled: true, offerTtlMinutes: 1440 } })
+        }
+        const data = asRecord(result.data)
+        return ok({
+          items: unwrapItems(data as PageResult<AdminWaitlistEntry>).map((entry) => normalizeWaitlistEntry(asRecord(entry))),
+          settings: normalizeWaitlistSettings(asRecord(data.settings)),
+        })
+      },
+      () => ok({ items: [], settings: { autoOfferEnabled: true, offerTtlMinutes: 1440 } })
+    )
+  },
+
+  async offerWaitlistEntry(eventId, entryId, input) {
+    return withFixture(
+      async () => {
+        const result = await request<AdminWaitlistOffer>(`/v1/events/${eventId}/waitlist/${entryId}/offer`, {
+          method: 'POST',
+          body: JSON.stringify(input ?? {}),
+        })
+        if (!result.ok) return result
+        const data = asRecord(result.data)
+        return ok({
+          entry: normalizeWaitlistEntry(asRecord(data.entry)),
+          claimToken: stringValue(data.claimToken, ''),
+          claimUrl: stringValue(data.claimUrl, undefined),
+        })
+      },
+      () => err<AdminWaitlistOffer>(apiError('fixture_unavailable', 'Waitlist offers require the live API.', 400))
+    )
+  },
+
+  async updateWaitlistSettings(eventId, input) {
+    return withFixture(
+      async () => {
+        const result = await request<AdminWaitlistSettings>(`/v1/events/${eventId}/waitlist/settings`, {
+          method: 'PATCH',
+          body: JSON.stringify(input),
+        })
+        return result.ok ? ok(normalizeWaitlistSettings(asRecord(result.data))) : result
+      },
+      () => ok(input)
+    )
+  },
+
   async listAccessRules(ticketTypeId) {
     return withFixture(
       async () => {
@@ -3024,6 +3390,7 @@ export const adminApi: AdminApi = {
           ? ok(unwrapItems(result.data).map((category) => normalizeProductCategory(asRecord(category))))
           : result
       },
+      // eslint-disable-next-line unicorn/no-array-sort -- creates a new array via spread; ES2023 toSorted is outside this app's TS lib target.
       () => ok([...(fixtureProductCategories[eventId] ?? [])].sort((a, b) => a.sortOrder - b.sortOrder))
     )
   },
@@ -3064,6 +3431,7 @@ export const adminApi: AdminApi = {
           ? ok(unwrapItems(result.data).map((product) => normalizeProduct(asRecord(product))))
           : result
       },
+      // eslint-disable-next-line unicorn/no-array-sort -- creates a new array via spread; ES2023 toSorted is outside this app's TS lib target.
       () => ok([...(fixtureProducts[eventId] ?? [])].sort((a, b) => a.sortOrder - b.sortOrder))
     )
   },
@@ -3398,7 +3766,7 @@ export const adminApi: AdminApi = {
 
   async scanTicket(input) {
     return withFixture(
-      () => {
+      async () => {
         if (!input.checkInListId) {
           return Promise.resolve(err<CheckInScanResult>(apiError(
             'missing_check_in_list',
@@ -3406,7 +3774,7 @@ export const adminApi: AdminApi = {
             400
           )))
         }
-        return request<CheckInScanResult>('/v1/check-ins/scan', {
+        const result = await request<LiveCheckInScanResponse>('/v1/check-ins/scan', {
           method: 'POST',
           body: JSON.stringify({
             checkInListId: input.checkInListId,
@@ -3415,6 +3783,9 @@ export const adminApi: AdminApi = {
             deviceId: input.deviceId,
           }),
         })
+        return result.ok
+          ? ok(normalizeLiveCheckInScanResult(result.data, input.scannedAt))
+          : result
       },
       () => {
         // Simulate scan: find attendee by ticket id in qrPayload
@@ -3521,6 +3892,12 @@ export const adminApi: AdminApi = {
           channel: input.channel === 'both' ? 'email' : input.channel,
           status: 'sent',
           audience: input.audience === 'all' ? 'all_attendees' : input.audience === 'specific' ? 'custom' : input.audience,
+          audienceKey: input.audience,
+          audienceAttendeeIds: input.attendeeIds ?? [],
+          audienceLabel: messageAudienceLabel(
+            input.audience === 'all' ? 'all_attendees' : input.audience === 'specific' ? 'custom' : input.audience,
+            input.attendeeIds ?? []
+          ),
           queuedCount: fixtureAttendees.filter((a) => a.eventId === eventId).length,
           sentCount: 0,
           deliveredCount: 0,
@@ -3739,7 +4116,7 @@ export const adminApi: AdminApi = {
         })
       },
       () => {
-        const secret = `gk_live_${Math.random().toString(36).slice(2)}${Math.random().toString(36).slice(2)}`
+        const secret = `tk_live_${Math.random().toString(36).slice(2)}${Math.random().toString(36).slice(2)}`
         const scopes = input.scopes ?? ['events:read', 'events:write', 'orders:read']
         const key: AdminApiKey = {
           id: `key_${Math.random().toString(36).slice(2, 11)}`,
@@ -3857,5 +4234,3 @@ export const adminApi: AdminApi = {
 // ---------------------------------------------------------------------------
 // React hook for permission-aware API access in client components
 // ---------------------------------------------------------------------------
-
-export { hasClerkKey }

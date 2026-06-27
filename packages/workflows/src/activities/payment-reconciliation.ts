@@ -1,5 +1,5 @@
-import { createDb } from '@gatekit/db';
-import { PaymentIntentRepository, OrderRepository, RefundRepository } from '@gatekit/db';
+import { createDb } from '@tixkit/db';
+import { PaymentIntentRepository, OrderRepository, RefundRepository } from '@tixkit/db';
 import type { WorkflowActivityResult } from '../shared/types.js';
 import { okResult, errResult } from '../shared/types.js';
 
@@ -66,6 +66,30 @@ function isFailedPaymentEvent(eventType: string, status: string): boolean {
   );
 }
 
+async function updateRefundReconciliationState(
+  db: ReturnType<typeof createDb>,
+  orderRepo: InstanceType<typeof OrderRepository>,
+  order: { id: string; total_cents: number | string | bigint },
+  refundedCents: number,
+): Promise<string> {
+  const reconciledRefunded = Math.min(Number(order.total_cents), refundedCents);
+  const reconciledStatus =
+    reconciledRefunded >= Number(order.total_cents) ? 'refunded' : 'partially_refunded';
+
+  await orderRepo.update(order.id, {
+    refunded_cents: reconciledRefunded,
+    status: reconciledStatus,
+    refunded_at: new Date(),
+  });
+  await db
+    .updateTable('invoices')
+    .set({ refunded_cents: reconciledRefunded, updated_at: new Date() })
+    .where('order_id', '=', order.id)
+    .execute();
+
+  return reconciledStatus;
+}
+
 export async function reconcileRefundActivity(input: {
   providerEventId: string;
   provider: string;
@@ -112,15 +136,14 @@ export async function reconcileRefundActivity(input: {
       : refundOrCharge.amount ?? 0;
     if (refundAmount <= 0) {
       const reconciledRefunded = Math.min(Number(order.total_cents), existingRefunded);
-      if (reconciledRefunded > 0 && reconciledRefunded !== Number(order.refunded_cents)) {
-        const reconciledStatus =
-          reconciledRefunded >= Number(order.total_cents) ? 'refunded' : 'partially_refunded';
-        await orderRepo.update(order.id, {
-          refunded_cents: reconciledRefunded,
-          status: reconciledStatus,
-          refunded_at: new Date(),
-        });
-        return okResult({ orderId: order.id, status: reconciledStatus });
+      const reconciledStatus =
+        reconciledRefunded >= Number(order.total_cents) ? 'refunded' : 'partially_refunded';
+      if (
+        reconciledRefunded > 0 &&
+        (reconciledRefunded !== Number(order.refunded_cents) || reconciledStatus !== order.status)
+      ) {
+        const status = await updateRefundReconciliationState(db, orderRepo, order, reconciledRefunded);
+        return okResult({ orderId: order.id, status });
       }
       return okResult({ orderId: order.id, status: order.status });
     }
@@ -147,12 +170,7 @@ export async function reconcileRefundActivity(input: {
       Number(order.total_cents),
       allRefunds.reduce((sum, refund) => sum + Number(refund.amount_cents), 0),
     );
-    const newStatus = newRefunded >= Number(order.total_cents) ? 'refunded' : 'partially_refunded';
-    await orderRepo.update(order.id, {
-      refunded_cents: newRefunded,
-      status: newStatus,
-      refunded_at: new Date(),
-    });
+    const newStatus = await updateRefundReconciliationState(db, orderRepo, order, newRefunded);
     if (createdRefund) {
       await orderRepo.addTimelineEvent(order.id, 'order.refunded', `Refunded ${refundAmount} cents via Stripe`);
     }

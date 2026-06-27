@@ -1,12 +1,11 @@
 import Fastify from 'fastify';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import type { Database } from '@gatekit/db';
+import type { Database } from '@tixkit/db';
 import type { AppContext } from '../app.js';
-import { stripeWebhookRoutes } from '../routes/modules/stripe-webhooks.js';
 
-const stripeMock = vi.hoisted(() => ({
+const stripeMock = {
   constructEvent: vi.fn((rawBody: string) => JSON.parse(rawBody)),
-}));
+};
 
 vi.mock('stripe', () => {
   class MockStripe {
@@ -17,6 +16,8 @@ vi.mock('stripe', () => {
 
   return { default: MockStripe, Stripe: MockStripe };
 });
+
+const { stripeWebhookRoutes } = await import('../routes/modules/stripe-webhooks.js');
 
 type PaymentEventRow = {
   id: string;
@@ -33,26 +34,67 @@ type PaymentEventRow = {
 type StripeWebhookTestState = {
   events: PaymentEventRow[];
   checkoutSession?: { id: string; tenant_id: string };
-  paymentIntent?: { provider_intent_id: string; tenant_id: string };
+  paymentIntent?: {
+    id: string;
+    provider_intent_id: string;
+    checkout_session_id: string;
+    tenant_id: string;
+    amount_cents: number;
+    currency: string;
+    payment_account_id?: string | null;
+  };
+  paymentAccount?: { id: string; provider_account_id: string };
   operations: string[];
   failInsertOnce?: boolean;
+  eventOnFailedInsert?: PaymentEventRow;
+  failSelectOnceForTable?: string;
 };
 
 function createMockDb(state: StripeWebhookTestState): unknown {
+  type QueryFilter = { column: string; value: unknown };
+
+  function findPaymentEvent(filters: QueryFilter[]) {
+    return state.events.find((event) =>
+      filters.every((filter) => {
+        if (filter.column === 'id') return event.id === filter.value;
+        if (filter.column === 'provider') return event.provider === filter.value;
+        if (filter.column === 'provider_event_id') return event.provider_event_id === filter.value;
+        return true;
+      }),
+    );
+  }
+
+  // eslint-disable-next-line unicorn/consistent-function-scoping -- keep the mock query helpers grouped inside the DB factory.
+  function rowMatches<T extends object>(row: T | undefined, filters: QueryFilter[]) {
+    const record = row as Record<string, unknown> | undefined;
+    return Boolean(record) && filters.every((filter) => record?.[filter.column] === filter.value);
+  }
+
   function createQuery(table: string) {
+    const filters: QueryFilter[] = [];
     const query = {
       select: () => query,
       selectAll: () => query,
-      where: () => query,
+      where: (column: string, _operator: string, value: unknown) => {
+        filters.push({ column, value });
+        return query;
+      },
       async executeTakeFirst() {
-        if (table === 'payment_events') return state.events[0];
-        if (table === 'checkout_sessions') return state.checkoutSession;
-        if (table === 'payment_intents') return state.paymentIntent;
-        if (table === 'payment_accounts') return undefined;
+        if (state.failSelectOnceForTable === table) {
+          state.failSelectOnceForTable = undefined;
+          throw new Error(`Simulated ${table} lookup failure`);
+        }
+        if (table === 'payment_events') return findPaymentEvent(filters);
+        if (table === 'checkout_sessions') return rowMatches(state.checkoutSession, filters) ? state.checkoutSession : undefined;
+        if (table === 'payment_intents') return rowMatches(state.paymentIntent, filters) ? state.paymentIntent : undefined;
+        if (table === 'payment_accounts') return rowMatches(state.paymentAccount, filters) ? state.paymentAccount : undefined;
         return undefined;
       },
       async executeTakeFirstOrThrow() {
-        if (table === 'payment_events') return state.events[0];
+        if (table === 'payment_events') {
+          const event = findPaymentEvent(filters);
+          if (event) return event;
+        }
         throw new Error(`No row for ${table}`);
       },
     };
@@ -67,6 +109,8 @@ function createMockDb(state: StripeWebhookTestState): unknown {
             if (table !== 'payment_events') throw new Error(`Unexpected insert into ${table}`);
             if (state.failInsertOnce) {
               state.failInsertOnce = false;
+              state.operations.push('insert-conflict:payment_events');
+              if (state.eventOnFailedInsert) state.events.push(state.eventOnFailedInsert);
               throw new Error('duplicate key value violates unique constraint');
             }
             state.operations.push('insert:payment_events');
@@ -92,23 +136,31 @@ function createMockDb(state: StripeWebhookTestState): unknown {
   }
 
   function createUpdate(table: string) {
+    const filters: QueryFilter[] = [];
     return {
       set: (values: Record<string, unknown>) => ({
-        where: () => ({
+        where: (column: string, _operator: string, value: unknown) => {
+          filters.push({ column, value });
+          return {
           returningAll: () => ({
             executeTakeFirstOrThrow: async () => {
               if (table !== 'payment_events') throw new Error(`Unexpected update on ${table}`);
+              const event = findPaymentEvent(filters);
+              if (!event) throw new Error('No row for payment_events');
               state.operations.push('update:payment_events');
-              Object.assign(state.events[0], values);
-              return state.events[0];
+              Object.assign(event, values);
+              return event;
             },
           }),
           execute: async () => {
             if (table !== 'payment_events') throw new Error(`Unexpected update on ${table}`);
+            const event = findPaymentEvent(filters);
+            if (!event) throw new Error('No row for payment_events');
             state.operations.push('update:payment_events');
-            Object.assign(state.events[0], values);
+            Object.assign(event, values);
           },
-        }),
+        };
+        },
       }),
     };
   }
@@ -145,6 +197,8 @@ function createStripePaymentIntentEvent(overrides: Record<string, unknown> = {})
     data: {
       object: {
         id: 'pi_stripe_1',
+        amount: 1000,
+        currency: 'usd',
         status: 'succeeded',
         metadata: { checkoutSessionId: 'cs_1' },
       },
@@ -174,6 +228,15 @@ describe('Stripe webhook route', () => {
     const state: StripeWebhookTestState = {
       events: [],
       checkoutSession: { id: 'cs_1', tenant_id: 'tnt_1' },
+      paymentIntent: {
+        id: 'pi_1',
+        tenant_id: 'tnt_1',
+        checkout_session_id: 'cs_1',
+        provider_intent_id: 'pi_stripe_1',
+        amount_cents: 1000,
+        currency: 'USD',
+        payment_account_id: null,
+      },
       operations: [],
     };
     const temporalClient = {
@@ -215,10 +278,13 @@ describe('Stripe webhook route', () => {
       eventType: 'payment_intent.succeeded',
       data: {
         id: 'pi_stripe_1',
+        amount: 1000,
+        currency: 'usd',
         status: 'succeeded',
         metadata: { checkoutSessionId: 'cs_1' },
       },
     });
+    expect(temporalClient.signalPaymentSucceeded).toHaveBeenCalledWith('cs_1', 'pi_stripe_1');
 
     await app.close();
   });
@@ -238,6 +304,16 @@ describe('Stripe webhook route', () => {
           created_at: new Date(),
         },
       ],
+      checkoutSession: { id: 'cs_1', tenant_id: 'tnt_1' },
+      paymentIntent: {
+        id: 'pi_1',
+        tenant_id: 'tnt_1',
+        checkout_session_id: 'cs_1',
+        provider_intent_id: 'pi_stripe_1',
+        amount_cents: 1000,
+        currency: 'USD',
+        payment_account_id: null,
+      },
       operations: [],
     };
     const temporalClient = {
@@ -277,6 +353,16 @@ describe('Stripe webhook route', () => {
           created_at: new Date(),
         },
       ],
+      checkoutSession: { id: 'cs_1', tenant_id: 'tnt_1' },
+      paymentIntent: {
+        id: 'pi_1',
+        tenant_id: 'tnt_1',
+        checkout_session_id: 'cs_1',
+        provider_intent_id: 'pi_stripe_1',
+        amount_cents: 1000,
+        currency: 'USD',
+        payment_account_id: null,
+      },
       operations: [],
     };
     const temporalClient = {
@@ -305,6 +391,162 @@ describe('Stripe webhook route', () => {
       'update:payment_events',
     ]);
     expect(state.events[0].processed_at).toBeInstanceOf(Date);
+
+    await app.close();
+  });
+
+  it('retries reconciliation after a duplicate insert race stores an unprocessed event', async () => {
+    const racedEvent: PaymentEventRow = {
+      id: 'pevt_raced',
+      tenant_id: 'tnt_1',
+      provider: 'stripe',
+      provider_event_id: 'evt_stripe_1',
+      event_type: 'payment_intent.succeeded',
+      raw_payload: '{}',
+      processed_at: null,
+      idempotency_key: 'evt_stripe_1',
+      created_at: new Date(),
+    };
+    const state: StripeWebhookTestState = {
+      events: [],
+      checkoutSession: { id: 'cs_1', tenant_id: 'tnt_1' },
+      paymentIntent: {
+        id: 'pi_1',
+        tenant_id: 'tnt_1',
+        checkout_session_id: 'cs_1',
+        provider_intent_id: 'pi_stripe_1',
+        amount_cents: 1000,
+        currency: 'USD',
+        payment_account_id: null,
+      },
+      operations: [],
+      failInsertOnce: true,
+      eventOnFailedInsert: racedEvent,
+    };
+    const temporalClient = {
+      startPaymentReconciliation: vi.fn(async () => {
+        state.operations.push('start:payment-reconciliation');
+      }),
+      signalPaymentSucceeded: vi.fn(async () => {
+        state.operations.push('signal:payment-succeeded');
+      }),
+      signalPaymentFailed: vi.fn(),
+    };
+    const app = await setupStripeWebhookApp(createMockDb(state) as Database, temporalClient);
+
+    const res = await app.inject({
+      method: 'POST',
+      url: '/',
+      headers: { 'content-type': 'application/json', 'stripe-signature': 'sig_test' },
+      payload: createStripePaymentIntentEvent(),
+    });
+
+    expect(res.statusCode).toBe(200);
+    expect(res.json()).toEqual({ received: true, duplicate: false });
+    expect(state.events).toHaveLength(1);
+    expect(state.events[0]?.id).toBe('pevt_raced');
+    expect(state.events[0]?.processed_at).toBeInstanceOf(Date);
+    expect(state.operations).toEqual([
+      'insert-conflict:payment_events',
+      'start:payment-reconciliation',
+      'signal:payment-succeeded',
+      'update:payment_events',
+    ]);
+    expect(temporalClient.startPaymentReconciliation).toHaveBeenCalledOnce();
+    expect(temporalClient.signalPaymentSucceeded).toHaveBeenCalledOnce();
+
+    await app.close();
+  });
+
+  it('starts reconciliation but does not signal when metadata checkout session points at a mismatched payment intent', async () => {
+    const state: StripeWebhookTestState = {
+      events: [],
+      checkoutSession: { id: 'cs_1', tenant_id: 'tnt_1' },
+      paymentIntent: {
+        id: 'pi_1',
+        tenant_id: 'tnt_1',
+        checkout_session_id: 'cs_1',
+        provider_intent_id: 'pi_different',
+        amount_cents: 1000,
+        currency: 'USD',
+        payment_account_id: null,
+      },
+      operations: [],
+    };
+    const temporalClient = {
+      startPaymentReconciliation: vi.fn(async () => {
+        state.operations.push('start:payment-reconciliation');
+      }),
+      signalPaymentSucceeded: vi.fn(async () => {
+        state.operations.push('signal:payment-succeeded');
+      }),
+      signalPaymentFailed: vi.fn(),
+    };
+    const app = await setupStripeWebhookApp(createMockDb(state) as Database, temporalClient);
+
+    const res = await app.inject({
+      method: 'POST',
+      url: '/',
+      headers: { 'content-type': 'application/json', 'stripe-signature': 'sig_test' },
+      payload: createStripePaymentIntentEvent(),
+    });
+
+    expect(res.statusCode).toBe(200);
+    expect(res.json()).toEqual({ received: true, duplicate: false });
+    expect(state.operations).toEqual([
+      'insert:payment_events',
+      'start:payment-reconciliation',
+      'update:payment_events',
+    ]);
+    expect(temporalClient.startPaymentReconciliation).toHaveBeenCalledOnce();
+    expect(temporalClient.signalPaymentSucceeded).not.toHaveBeenCalled();
+
+    await app.close();
+  });
+
+  it('leaves the provider event unprocessed when payment intent validation lookup fails', async () => {
+    const state: StripeWebhookTestState = {
+      events: [],
+      checkoutSession: { id: 'cs_1', tenant_id: 'tnt_1' },
+      paymentIntent: {
+        id: 'pi_1',
+        tenant_id: 'tnt_1',
+        checkout_session_id: 'cs_1',
+        provider_intent_id: 'pi_stripe_1',
+        amount_cents: 1000,
+        currency: 'USD',
+        payment_account_id: null,
+      },
+      operations: [],
+      failSelectOnceForTable: 'payment_intents',
+    };
+    const temporalClient = {
+      startPaymentReconciliation: vi.fn(async () => {
+        state.operations.push('start:payment-reconciliation');
+      }),
+      signalPaymentSucceeded: vi.fn(async () => {
+        state.operations.push('signal:payment-succeeded');
+      }),
+      signalPaymentFailed: vi.fn(),
+    };
+    const app = await setupStripeWebhookApp(createMockDb(state) as Database, temporalClient);
+
+    const res = await app.inject({
+      method: 'POST',
+      url: '/',
+      headers: { 'content-type': 'application/json', 'stripe-signature': 'sig_test' },
+      payload: createStripePaymentIntentEvent(),
+    });
+
+    expect(res.statusCode).toBe(500);
+    expect(state.events).toHaveLength(1);
+    expect(state.events[0]?.processed_at).toBeNull();
+    expect(state.operations).toEqual([
+      'insert:payment_events',
+      'start:payment-reconciliation',
+    ]);
+    expect(temporalClient.startPaymentReconciliation).toHaveBeenCalledOnce();
+    expect(temporalClient.signalPaymentSucceeded).not.toHaveBeenCalled();
 
     await app.close();
   });

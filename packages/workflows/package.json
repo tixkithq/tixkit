@@ -1,5 +1,5 @@
 {
-  "name": "@gatekit/workflows",
+  "name": "@tixkit/workflows",
   "version": "0.1.0",
   "private": true,
   "type": "module",
@@ -11,27 +11,40 @@
     "start": "node dist/worker.js",
     "lint": "oxlint src",
     "typecheck": "tsc --noEmit",
-    "test:unit": "vitest run",
+    "test:unit": "vitest run --exclude \"src/**/*.integration.test.ts\"",
+    "test:integration": "vitest run src/**/*.integration.test.ts",
+    "test:mysql-tier1": "DB_INTEGRATION_DRIVER=mysql vitest run src/__tests__/mysql-tier1-parity.integration.test.ts",
+    "test:provider:stripe": "vitest run src/__tests__/stripe-provider.integration.test.ts",
     "clean": "rm -rf dist"
   },
   "dependencies": {
-    "@gatekit/domain": "workspace:*",
-    "@gatekit/db": "workspace:*",
-    "@gatekit/email-transport": "workspace:*",
+    "@tixkit/db": "workspace:*",
+    "@tixkit/domain": "workspace:*",
+    "@tixkit/email-transport": "workspace:*",
+    "@tixkit/shared": "workspace:*",
+    "@opentelemetry/api": "1.9.1",
+    "@opentelemetry/core": "2.8.0",
+    "@opentelemetry/resources": "2.8.0",
+    "@opentelemetry/sdk-trace-base": "2.8.0",
+    "@temporalio/activity": "^1.18.0",
     "@temporalio/client": "^1.18.0",
-    "stripe": "^22.2.0",
+    "@temporalio/common": "^1.18.0",
+    "@temporalio/interceptors-opentelemetry": "^1.18.1",
+    "@temporalio/testing": "^1.18.0",
     "@temporalio/worker": "^1.18.0",
     "@temporalio/workflow": "^1.18.0",
-    "@temporalio/activity": "^1.18.0",
-    "@temporalio/common": "^1.18.0",
-    "@temporalio/testing": "^1.18.0",
     "ioredis": "^5.11.0",
+    "passkit-generator": "^3.5.6",
+    "pdf-lib": "^1.17.1",
+    "qrcode": "^1.5.4",
+    "stripe": "^22.2.0",
     "ulid": "^2.3.0"
   },
   "devDependencies": {
-    "typescript": "5.9.3",
+    "@types/node": "^22.20.0",
+    "@types/qrcode": "^1.5.6",
     "tsx": "^4.22.0",
-    "vitest": "^4.1.0",
-    "@types/node": "^22.20.0"
+    "typescript": "5.9.3",
+    "vitest": "^4.1.0"
   }
 }

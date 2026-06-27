@@ -2,7 +2,7 @@
 
 import * as React from 'react'
 import { QrCode, Search, CheckCircle2, XCircle, AlertCircle } from 'lucide-react'
-import { type CheckInScanResult, adminApi } from '@/lib/api'
+import { type AdminCheckInList, type CheckInScanResult, adminApi } from '@/lib/api'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
@@ -18,6 +18,8 @@ import {
 } from '@/components/ui/select'
 import { useAdminData } from '@/hooks/use-admin-data'
 import { cn } from '@/lib/utils'
+
+const EMPTY_CHECK_IN_LISTS: AdminCheckInList[] = []
 
 export function EventCheckInView({ eventId }: { eventId: string }) {
   const [selectedCheckInListId, setSelectedCheckInListId] = React.useState<string>('')
@@ -41,15 +43,14 @@ export function EventCheckInView({ eventId }: { eventId: string }) {
 
   const event = eventData
   const attendees = attendeesData?.items ?? []
-  const checkInLists = checkInListsData ?? []
+  const checkInLists = checkInListsData ?? EMPTY_CHECK_IN_LISTS
 
   // Auto-select the only active check-in list when one is available.
   React.useEffect(() => {
     if (!selectedCheckInListId && checkInLists.length === 1) {
       setSelectedCheckInListId(checkInLists[0].id)
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- checkInLists is stable from useQuery and only changes on event switch
-  }, [selectedCheckInListId])
+  }, [checkInLists, selectedCheckInListId])
 
   const handleScan = async () => {
     if (!selectedCheckInListId || !qrPayload) return
@@ -144,7 +145,7 @@ export function EventCheckInView({ eventId }: { eventId: string }) {
             value={selectedCheckInListId}
             onValueChange={setSelectedCheckInListId}
           >
-            <SelectTrigger className='w-full max-w-xs'>
+            <SelectTrigger className='w-full max-w-xs' aria-label='Check-in list'>
               <SelectValue placeholder='Choose a check-in list' />
             </SelectTrigger>
             <SelectContent>
@@ -289,7 +290,9 @@ function ScanResult({ result }: { result: CheckInScanResult }) {
         </p>
         <p className='text-sm'>
           {result.status === 'accepted'
-            ? `${result.attendee.name} has been checked in.`
+            ? result.attendee
+              ? `${result.attendee.name} has been checked in.`
+              : result.message ?? 'Check-in successful'
             : result.message}
         </p>
         {result.attendee && result.status !== 'accepted' && (

@@ -257,6 +257,10 @@ export type MessageCampaignSummary = {
   templateKey: TemplateKey | string;
   channel: MessageCampaignChannel;
   status: MessageCampaignStatus;
+  audience?: 'all_attendees' | 'checked_in' | 'not_checked_in' | 'custom';
+  audienceKey?: 'all' | 'checked_in' | 'not_checked_in' | 'specific';
+  audienceAttendeeIds?: Ulid[];
+  audienceLabel?: string;
   audienceCount: number;
   queuedEmailJobs: number;
   queuedSmsJobs: number;

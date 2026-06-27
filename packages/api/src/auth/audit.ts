@@ -1,6 +1,6 @@
 import type { FastifyRequest } from 'fastify';
-import type { Principal } from '@gatekit/domain';
-import type { AuditLogRepository } from '@gatekit/db';
+import type { Principal } from '@tixkit/domain';
+import type { AuditLogRepository } from '@tixkit/db';
 
 export type AuditEntry = {
   action: string;

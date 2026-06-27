@@ -1,13 +1,13 @@
 export const openApiSpec = {
   openapi: '3.1.0',
   info: {
-    title: 'GateKit API',
+    title: 'Tixkit API',
     version: '2026-01-01',
     description: 'Headless white-label event commerce platform API',
     license: { name: 'MIT' },
   },
   servers: [
-    { url: 'https://api.gatekit.com/v1', description: 'Production' },
+    { url: 'https://api.tixkit.com/v1', description: 'Production' },
     { url: 'http://localhost:4000/v1', description: 'Local development' },
   ],
   components: {
@@ -21,7 +21,7 @@ export const openApiSpec = {
         type: 'apiKey',
         in: 'header',
         name: 'Authorization',
-        description: 'Bearer gk_<key>',
+        description: 'Bearer tk_<key>',
       },
       ScannerDeviceAuth: {
         type: 'apiKey',
@@ -132,6 +132,7 @@ export const openApiSpec = {
         properties: {
           id: { type: 'string' },
           eventId: { type: 'string' },
+          eventOccurrenceId: { type: 'string' },
           name: { type: 'string' },
           kind: { type: 'string', enum: ['free', 'paid', 'donation'] },
           status: { type: 'string', enum: ['draft', 'active', 'paused', 'sold_out', 'ended'] },
@@ -146,6 +147,63 @@ export const openApiSpec = {
         },
         required: ['id', 'name', 'kind', 'currency', 'priceCents'],
       },
+      EventOccurrence: {
+        type: 'object',
+        properties: {
+          id: { type: 'string' },
+          eventId: { type: 'string' },
+          title: { type: 'string' },
+          startsAt: { type: 'string', format: 'date-time' },
+          endsAt: { type: 'string', format: 'date-time' },
+          timezone: { type: 'string' },
+          venue: { type: 'object' },
+          capacity: { type: ['integer', 'null'] },
+          sortOrder: { type: 'integer' },
+          status: { type: 'string', enum: ['scheduled', 'cancelled', 'completed'] },
+          createdAt: { type: 'string', format: 'date-time' },
+          updatedAt: { type: 'string', format: 'date-time' },
+        },
+        required: ['id', 'eventId', 'title', 'startsAt', 'endsAt', 'timezone', 'sortOrder', 'status'],
+      },
+      EventOccurrencePage: {
+        type: 'object',
+        properties: {
+          items: { type: 'array', items: { $ref: '#/components/schemas/EventOccurrence' } },
+          nextCursor: { type: ['string', 'null'] },
+          hasMore: { type: 'boolean' },
+        },
+        required: ['items'],
+      },
+      MarketingIntegration: {
+        type: 'object',
+        properties: {
+          id: { type: 'string' },
+          tenantId: { type: 'string' },
+          organizationId: { type: 'string' },
+          brandId: { type: 'string' },
+          eventId: { type: 'string' },
+          provider: { type: 'string', enum: ['ga4', 'meta_pixel', 'generic_tag'] },
+          config: {
+            type: 'object',
+            additionalProperties: true,
+            description: 'GA4 uses measurementId, Meta Pixel uses pixelId, generic tags use an HTTPS pixelUrl.',
+          },
+          consentRequired: { type: 'boolean' },
+          status: { type: 'string', enum: ['active', 'disabled'] },
+          createdAt: { type: 'string', format: 'date-time' },
+          updatedAt: { type: 'string', format: 'date-time' },
+        },
+        required: ['provider', 'config', 'consentRequired', 'status'],
+      },
+      MarketingIntegrationPage: {
+        type: 'object',
+        properties: {
+          items: { type: 'array', items: { $ref: '#/components/schemas/MarketingIntegration' } },
+          nextCursor: { type: ['string', 'null'] },
+          hasMore: { type: 'boolean' },
+        },
+        required: ['items', 'nextCursor', 'hasMore'],
+      },
       TicketTypePage: {
         type: 'object',
         properties: {
@@ -154,6 +212,63 @@ export const openApiSpec = {
           hasMore: { type: 'boolean' },
         },
         required: ['items', 'nextCursor', 'hasMore'],
+      },
+      WaitlistEntry: {
+        type: 'object',
+        properties: {
+          id: { type: 'string' },
+          eventId: { type: 'string' },
+          ticketTypeId: { type: 'string' },
+          email: { type: 'string', format: 'email' },
+          firstName: { type: 'string' },
+          lastName: { type: 'string' },
+          phone: { type: 'string' },
+          quantity: { type: 'integer', minimum: 1 },
+          status: { type: 'string', enum: ['joined', 'offered', 'claimed', 'cancelled', 'expired'] },
+          offerExpiresAt: { type: 'string', format: 'date-time' },
+          offeredAt: { type: 'string', format: 'date-time' },
+          claimedAt: { type: 'string', format: 'date-time' },
+          cancelledAt: { type: 'string', format: 'date-time' },
+          createdAt: { type: 'string', format: 'date-time' },
+          updatedAt: { type: 'string', format: 'date-time' },
+        },
+        required: ['id', 'eventId', 'ticketTypeId', 'email', 'quantity', 'status', 'createdAt', 'updatedAt'],
+      },
+      WaitlistEntryPage: {
+        type: 'object',
+        properties: {
+          items: { type: 'array', items: { $ref: '#/components/schemas/WaitlistEntry' } },
+          settings: { $ref: '#/components/schemas/WaitlistSettings' },
+        },
+        required: ['items', 'settings'],
+      },
+      WaitlistSettings: {
+        type: 'object',
+        properties: {
+          autoOfferEnabled: { type: 'boolean' },
+          offerTtlMinutes: { type: 'integer', minimum: 5, maximum: 10080 },
+        },
+        required: ['autoOfferEnabled', 'offerTtlMinutes'],
+      },
+      JoinWaitlistRequest: {
+        type: 'object',
+        properties: {
+          ticketTypeId: { type: 'string' },
+          email: { type: 'string', format: 'email' },
+          firstName: { type: 'string' },
+          lastName: { type: 'string' },
+          phone: { type: 'string' },
+          quantity: { type: 'integer', minimum: 1, maximum: 20, default: 1 },
+        },
+        required: ['ticketTypeId', 'email'],
+      },
+      WaitlistOffer: {
+        type: 'object',
+        properties: {
+          entry: { $ref: '#/components/schemas/WaitlistEntry' },
+          claimToken: { type: 'string' },
+        },
+        required: ['entry', 'claimToken'],
       },
       AccessRule: {
         type: 'object',
@@ -315,6 +430,7 @@ export const openApiSpec = {
         type: 'object',
         properties: {
           ticketTypeId: { type: 'string' },
+          eventOccurrenceId: { type: 'string' },
           available: { type: 'integer' },
           total: { type: 'integer' },
           reserved: { type: 'integer' },
@@ -336,6 +452,7 @@ export const openApiSpec = {
         type: 'object',
         properties: {
           ticketTypeId: { type: 'string' },
+          eventOccurrenceId: { type: 'string' },
           name: { type: 'string' },
           kind: { type: 'string', enum: ['free', 'paid', 'donation'] },
           priceCents: { type: 'integer' },
@@ -402,6 +519,88 @@ export const openApiSpec = {
         },
         required: ['id', 'eventId', 'status', 'currency', 'quote', 'expiresAt'],
       },
+      CheckoutWalletPasses: {
+        type: 'object',
+        properties: {
+          tickets: {
+            type: 'array',
+            items: {
+              type: 'object',
+              properties: {
+                ticketId: { type: 'string' },
+                ticketCode: { type: 'string' },
+                appleUrl: { type: 'string', format: 'uri' },
+                googleUrl: { type: 'string', format: 'uri' },
+              },
+              required: ['ticketId', 'ticketCode'],
+            },
+          },
+        },
+        required: ['tickets'],
+      },
+      CreateUploadArtifact: {
+        type: 'object',
+        properties: {
+          purpose: { type: 'string', enum: ['checkout_answer', 'brand_logo', 'user_avatar'] },
+          fileName: { type: 'string', minLength: 1, maxLength: 255 },
+          contentType: { type: 'string', minLength: 1, maxLength: 255 },
+          sizeBytes: { type: 'integer', minimum: 1 },
+          brandId: { type: 'string' },
+          eventId: { type: 'string' },
+          metadata: { type: 'object', additionalProperties: true },
+        },
+        required: ['purpose', 'fileName', 'contentType', 'sizeBytes'],
+      },
+      PublicCreateUploadArtifact: {
+        type: 'object',
+        properties: {
+          fileName: { type: 'string', minLength: 1, maxLength: 255 },
+          contentType: { type: 'string', minLength: 1, maxLength: 255 },
+          sizeBytes: { type: 'integer', minimum: 1 },
+          questionId: { type: 'string' },
+        },
+        required: ['fileName', 'contentType', 'sizeBytes'],
+      },
+      UploadArtifactTicket: {
+        type: 'object',
+        properties: {
+          artifactId: { type: 'string' },
+          uploadUrl: { type: 'string', format: 'uri' },
+          uploadHeaders: { type: 'object', additionalProperties: { type: 'string' } },
+          completeUrl: { type: 'string' },
+          completeToken: { type: 'string' },
+          expiresAt: { type: 'string', format: 'date-time' },
+        },
+        required: ['artifactId', 'uploadUrl', 'uploadHeaders', 'completeUrl', 'expiresAt'],
+      },
+      PublicCompleteUploadArtifact: {
+        type: 'object',
+        properties: {
+          token: { type: 'string', minLength: 1 },
+        },
+        required: ['token'],
+      },
+      CompleteUploadArtifact: {
+        type: 'object',
+        properties: {},
+        additionalProperties: false,
+      },
+      UploadArtifactCompleteResult: {
+        type: 'object',
+        properties: {
+          artifactId: { type: 'string' },
+          status: { type: 'string' },
+          scanStatus: { type: 'string' },
+        },
+        required: ['artifactId', 'status', 'scanStatus'],
+      },
+      UploadArtifactDownload: {
+        type: 'object',
+        properties: {
+          downloadUrl: { type: 'string', format: 'uri' },
+        },
+        required: ['downloadUrl'],
+      },
       CheckoutConfirmCompleted: {
         type: 'object',
         properties: {
@@ -449,6 +648,8 @@ export const openApiSpec = {
             type: 'array',
             items: { $ref: '#/components/schemas/OrderLineItem' },
           },
+          invoice: { $ref: '#/components/schemas/Invoice' },
+          taxSnapshots: { type: 'array', items: { $ref: '#/components/schemas/TaxSnapshot' } },
           timeline: {
             type: 'array',
             items: { $ref: '#/components/schemas/OrderTimelineEvent' },
@@ -470,6 +671,8 @@ export const openApiSpec = {
         properties: {
           id: { type: 'string' },
           ticketTypeId: { type: 'string' },
+          eventOccurrenceId: { type: 'string' },
+          productId: { type: 'string' },
           description: { type: 'string' },
           quantity: { type: 'integer' },
           unitPriceCents: { type: 'integer' },
@@ -477,6 +680,62 @@ export const openApiSpec = {
           totalCents: { type: 'integer' },
         },
         required: ['id', 'description', 'quantity', 'unitPriceCents', 'totalCents'],
+      },
+      TaxSnapshot: {
+        type: 'object',
+        properties: {
+          id: { type: 'string' },
+          orderId: { type: 'string' },
+          orderLineItemId: { type: 'string' },
+          eventId: { type: 'string' },
+          taxRuleId: { type: 'string' },
+          taxRuleName: { type: 'string' },
+          rate: { type: 'integer' },
+          type: { type: 'string', enum: ['inclusive', 'exclusive'] },
+          appliedTo: { type: 'string', enum: ['ticket', 'fee', 'all'] },
+          taxableAmountCents: { type: 'integer' },
+          taxCents: { type: 'integer' },
+          currency: { type: 'string' },
+          inclusive: { type: 'boolean' },
+          provider: { type: 'string' },
+          providerCalculationId: { type: 'string' },
+          createdAt: { type: 'string', format: 'date-time' },
+        },
+        required: ['id', 'orderId', 'orderLineItemId', 'eventId', 'taxRuleName', 'rate', 'type', 'appliedTo', 'taxableAmountCents', 'taxCents', 'currency', 'inclusive', 'provider', 'createdAt'],
+      },
+      Invoice: {
+        type: 'object',
+        properties: {
+          id: { type: 'string' },
+          orderId: { type: 'string' },
+          invoiceNumber: { type: 'string' },
+          status: { type: 'string', enum: ['issued', 'void'] },
+          currency: { type: 'string' },
+          subtotalCents: { type: 'integer' },
+          discountCents: { type: 'integer' },
+          taxCents: { type: 'integer' },
+          feeCents: { type: 'integer' },
+          totalCents: { type: 'integer' },
+          refundedCents: { type: 'integer' },
+          buyerEmail: { type: 'string' },
+          buyerName: { type: 'string' },
+          buyerTaxId: { type: 'string' },
+          sellerName: { type: 'string' },
+          sellerTaxId: { type: 'string' },
+          reverseCharge: { type: 'boolean' },
+          issuedAt: { type: 'string', format: 'date-time' },
+        },
+        required: ['id', 'orderId', 'invoiceNumber', 'status', 'currency', 'subtotalCents', 'discountCents', 'taxCents', 'feeCents', 'totalCents', 'refundedCents', 'buyerEmail', 'sellerName', 'reverseCharge', 'issuedAt'],
+      },
+      InvoiceDocument: {
+        type: 'object',
+        properties: {
+          invoice: { $ref: '#/components/schemas/Invoice' },
+          order: { $ref: '#/components/schemas/Order' },
+          lineItems: { type: 'array', items: { $ref: '#/components/schemas/OrderLineItem' } },
+          taxSnapshots: { type: 'array', items: { $ref: '#/components/schemas/TaxSnapshot' } },
+        },
+        required: ['invoice', 'order', 'lineItems', 'taxSnapshots'],
       },
       OrderTimelineEvent: {
         type: 'object',
@@ -534,7 +793,7 @@ export const openApiSpec = {
           {
             type: 'object',
             properties: {
-              apiKey: { type: 'string', description: 'Full API key (gk_...). Store securely; never returned again.' },
+              apiKey: { type: 'string', description: 'Full API key (tk_...). Store securely; never returned again.' },
             },
             required: ['apiKey'],
           },
@@ -914,6 +1173,7 @@ export const openApiSpec = {
           providerAccountId: { type: 'string' },
           status: { type: 'string', enum: ['pending', 'active', 'restricted', 'disabled'] },
           defaultCurrency: { type: 'string' },
+          onboardingUrl: { type: 'string', format: 'uri' },
           createdAt: { type: 'string', format: 'date-time' },
           updatedAt: { type: 'string', format: 'date-time' },
         },
@@ -1018,6 +1278,17 @@ export const openApiSpec = {
             required: ['clientSecret'],
           },
         ],
+      },
+      OAuthTokenResponse: {
+        type: 'object',
+        properties: {
+          access_token: { type: 'string' },
+          token_type: { type: 'string', enum: ['Bearer'] },
+          expires_in: { type: 'integer' },
+          scope: { type: 'string' },
+          refresh_token: { type: 'string' },
+        },
+        required: ['access_token', 'token_type', 'expires_in', 'scope'],
       },
     },
   },
@@ -1279,6 +1550,7 @@ export const openApiSpec = {
                   inventoryPoolId: { type: 'string' },
                   requiresAccessCode: { type: 'boolean' },
                   accessCodeHint: { type: 'string' },
+                  eventOccurrenceId: { type: ['string', 'null'] },
                 },
                 required: ['name', 'kind', 'currency', 'priceCents', 'inventoryPoolId'],
               },
@@ -1301,6 +1573,155 @@ export const openApiSpec = {
             description: 'Ticket type and access rules created',
             content: { 'application/json': { schema: { $ref: '#/components/schemas/TicketTypeBatchResult' } } },
           },
+        },
+      },
+    },
+    '/events/{eventId}/occurrences': {
+      get: {
+        summary: 'List event occurrences',
+        security: [{ BearerAuth: [] }],
+        responses: { '200': { description: 'Event occurrences', content: { 'application/json': { schema: { $ref: '#/components/schemas/EventOccurrencePage' } } } } },
+      },
+      post: {
+        summary: 'Create event occurrence',
+        security: [{ BearerAuth: [] }],
+        requestBody: {
+          required: true,
+          content: {
+            'application/json': {
+              schema: {
+                type: 'object',
+                properties: {
+                  title: { type: 'string' },
+                  startsAt: { type: 'string', format: 'date-time' },
+                  endsAt: { type: 'string', format: 'date-time' },
+                  timezone: { type: 'string' },
+                  venue: { type: 'object' },
+                  capacity: { type: ['integer', 'null'] },
+                  sortOrder: { type: 'integer' },
+                  status: { type: 'string', enum: ['scheduled', 'cancelled', 'completed'] },
+                },
+                required: ['title', 'startsAt', 'endsAt', 'timezone'],
+              },
+            },
+          },
+        },
+        responses: { '201': { description: 'Event occurrence created', content: { 'application/json': { schema: { $ref: '#/components/schemas/EventOccurrence' } } } } },
+      },
+    },
+    '/events/{eventId}/occurrences/{occurrenceId}': {
+      patch: {
+        summary: 'Update event occurrence',
+        security: [{ BearerAuth: [] }],
+        requestBody: {
+          required: true,
+          content: { 'application/json': { schema: { $ref: '#/components/schemas/EventOccurrence' } } },
+        },
+        responses: { '200': { description: 'Event occurrence updated', content: { 'application/json': { schema: { $ref: '#/components/schemas/EventOccurrence' } } } } },
+      },
+    },
+    '/events/{eventId}/marketing-integrations': {
+      get: {
+        summary: 'List event marketing integrations',
+        security: [{ BearerAuth: [] }],
+        responses: {
+          '200': {
+            description: 'Event marketing integrations',
+            content: { 'application/json': { schema: { $ref: '#/components/schemas/MarketingIntegrationPage' } } },
+          },
+        },
+      },
+    },
+    '/events/{eventId}/marketing-integrations/{provider}': {
+      put: {
+        summary: 'Create or update an event marketing integration',
+        security: [{ BearerAuth: [] }],
+        parameters: [
+          {
+            name: 'provider',
+            in: 'path',
+            required: true,
+            schema: { type: 'string', enum: ['ga4', 'meta_pixel', 'generic_tag'] },
+          },
+        ],
+        requestBody: {
+          required: true,
+          content: {
+            'application/json': {
+              schema: {
+                type: 'object',
+                properties: {
+                  provider: { type: 'string', enum: ['ga4', 'meta_pixel', 'generic_tag'] },
+                  config: { type: 'object', additionalProperties: true },
+                  consentRequired: { type: 'boolean', default: true },
+                  status: { type: 'string', enum: ['active', 'disabled'], default: 'active' },
+                },
+                required: ['provider', 'config'],
+              },
+            },
+          },
+        },
+        responses: {
+          '200': {
+            description: 'Marketing integration saved',
+            content: { 'application/json': { schema: { $ref: '#/components/schemas/MarketingIntegration' } } },
+          },
+        },
+      },
+    },
+    '/events/{eventId}/waitlist': {
+      get: {
+        summary: 'List waitlist entries for an event',
+        security: [{ BearerAuth: [] }],
+        responses: {
+          '200': { description: 'Waitlist entries', content: { 'application/json': { schema: { $ref: '#/components/schemas/WaitlistEntryPage' } } } },
+          '401': { description: 'Unauthorized', content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } } },
+          '403': { description: 'Forbidden', content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } } },
+          '404': { description: 'Event not found', content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } } },
+        },
+      },
+    },
+    '/events/{eventId}/waitlist/{entryId}/offer': {
+      post: {
+        summary: 'Create a time-bounded waitlist offer',
+        security: [{ BearerAuth: [] }],
+        requestBody: {
+          required: false,
+          content: {
+            'application/json': {
+              schema: {
+                type: 'object',
+                properties: {
+                  expiresInMinutes: { type: 'integer', minimum: 5, maximum: 10080, default: 1440 },
+                },
+              },
+            },
+          },
+        },
+        responses: {
+          '200': { description: 'Waitlist offer token', content: { 'application/json': { schema: { $ref: '#/components/schemas/WaitlistOffer' } } } },
+          '400': { description: 'Validation error', content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } } },
+          '401': { description: 'Unauthorized', content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } } },
+          '403': { description: 'Forbidden', content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } } },
+          '404': { description: 'Event or waitlist entry not found', content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } } },
+          '409': { description: 'No capacity is available for an offer', content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } } },
+        },
+      },
+    },
+    '/events/{eventId}/waitlist/settings': {
+      patch: {
+        summary: 'Update event waitlist auto-offer settings',
+        security: [{ BearerAuth: [] }],
+        requestBody: {
+          required: true,
+          content: { 'application/json': { schema: { $ref: '#/components/schemas/WaitlistSettings' } } },
+        },
+        responses: {
+          '200': { description: 'Waitlist settings', content: { 'application/json': { schema: { $ref: '#/components/schemas/WaitlistSettings' } } } },
+          '400': { description: 'Validation error', content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } } },
+          '401': { description: 'Unauthorized', content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } } },
+          '403': { description: 'Forbidden', content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } } },
+          '404': { description: 'Event not found', content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } } },
         },
       },
     },
@@ -1546,6 +1967,23 @@ export const openApiSpec = {
     '/public/events/{eventId}/availability': {
       get: { summary: 'Get public availability (no auth, hidden excluded)', responses: { '200': { description: 'Buyer-facing ticket availability', content: { 'application/json': { schema: { type: 'array', items: { $ref: '#/components/schemas/PublicAvailabilityItem' } } } } } } },
     },
+    '/public/events/{eventId}/occurrences': {
+      get: {
+        summary: 'List public event occurrences',
+        responses: { '200': { description: 'Published event occurrences', content: { 'application/json': { schema: { $ref: '#/components/schemas/EventOccurrencePage' } } } } },
+      },
+    },
+    '/public/events/{eventId}/marketing-integrations': {
+      get: {
+        summary: 'List active public marketing integrations',
+        responses: {
+          '200': {
+            description: 'Public browser-safe marketing integrations',
+            content: { 'application/json': { schema: { $ref: '#/components/schemas/MarketingIntegrationPage' } } },
+          },
+        },
+      },
+    },
     '/public/events/{eventId}/access-code': {
       post: {
         summary: 'Validate an access code or buyer email for locked ticket types (no auth)',
@@ -1586,6 +2024,101 @@ export const openApiSpec = {
         },
       },
     },
+    '/public/events/{eventId}/waitlist': {
+      post: {
+        summary: 'Join a sold-out ticket waitlist',
+        requestBody: {
+          required: true,
+          content: { 'application/json': { schema: { $ref: '#/components/schemas/JoinWaitlistRequest' } } },
+        },
+        responses: {
+          '201': { description: 'Waitlist entry', content: { 'application/json': { schema: { $ref: '#/components/schemas/WaitlistEntry' } } } },
+          '400': { description: 'Validation error or ticket not sold out', content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } } },
+          '404': { description: 'Event or ticket type not found', content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } } },
+        },
+      },
+    },
+    '/public/waitlist/claims/{token}': {
+      get: {
+        summary: 'Resolve a waitlist claim token',
+        responses: {
+          '200': { description: 'Offered waitlist entry', content: { 'application/json': { schema: { $ref: '#/components/schemas/WaitlistEntry' } } } },
+          '404': { description: 'Claim token not found or expired', content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } } },
+        },
+      },
+    },
+    '/public/events/{eventId}/upload-artifacts': {
+      post: {
+        summary: 'Create a public checkout upload artifact ticket',
+        requestBody: {
+          required: true,
+          content: {
+            'application/json': {
+              schema: { $ref: '#/components/schemas/PublicCreateUploadArtifact' },
+            },
+          },
+        },
+        responses: {
+          '201': { description: 'Signed upload ticket', content: { 'application/json': { schema: { $ref: '#/components/schemas/UploadArtifactTicket' } } } },
+          '400': { description: 'Validation error', content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } } },
+          '404': { description: 'Event not found', content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } } },
+        },
+      },
+    },
+    '/public/events/{eventId}/widget-impressions': {
+      post: {
+        summary: 'Record a deduped widget impression for conversion reporting',
+        requestBody: {
+          required: true,
+          content: {
+            'application/json': {
+              schema: {
+                type: 'object',
+                properties: {
+                  visitorId: { type: 'string', minLength: 8, maxLength: 128 },
+                  instanceId: { type: 'string', maxLength: 128 },
+                  trackingId: { type: 'string', maxLength: 255 },
+                  affiliateCode: { type: 'string', maxLength: 128 },
+                  host: { type: 'string', maxLength: 255 },
+                  pageUrl: { type: 'string', maxLength: 2048 },
+                  referrer: { type: 'string', maxLength: 2048 },
+                },
+              },
+            },
+          },
+        },
+        responses: {
+          '201': {
+            description: 'Impression persisted',
+            content: { 'application/json': { schema: { type: 'object', properties: { tracked: { type: 'boolean' }, deduped: { type: 'boolean' } }, required: ['tracked', 'deduped'] } } },
+          },
+          '200': {
+            description: 'Impression already counted for this visitor/day',
+            content: { 'application/json': { schema: { type: 'object', properties: { tracked: { type: 'boolean' }, deduped: { type: 'boolean' } }, required: ['tracked', 'deduped'] } } },
+          },
+          '400': { description: 'Validation error', content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } } },
+          '404': { description: 'Event not found', content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } } },
+        },
+      },
+    },
+    '/public/upload-artifacts/{artifactId}/complete': {
+      post: {
+        summary: 'Complete and scan a public checkout upload artifact',
+        requestBody: {
+          required: true,
+          content: {
+            'application/json': {
+              schema: { $ref: '#/components/schemas/PublicCompleteUploadArtifact' },
+            },
+          },
+        },
+        responses: {
+          '200': { description: 'Upload completed and scanned clean', content: { 'application/json': { schema: { $ref: '#/components/schemas/UploadArtifactCompleteResult' } } } },
+          '400': { description: 'Validation error or blocked upload', content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } } },
+          '404': { description: 'Upload artifact not found', content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } } },
+        },
+      },
+    },
     '/checkout/sessions': {
       post: {
         summary: 'Create checkout session (public, Idempotency-Key required)',
@@ -1605,17 +2138,23 @@ export const openApiSpec = {
                       type: 'object',
                       properties: {
                         ticketTypeId: { type: 'string' },
+                        occurrenceId: { type: 'string' },
+                        productId: { type: 'string' },
                         quantity: { type: 'integer', minimum: 1 },
                         unitAmountCents: { type: 'integer' },
                         attendeeFields: { type: 'array', items: { type: 'object' } },
                       },
-                      required: ['ticketTypeId', 'quantity'],
+                      oneOf: [
+                        { required: ['ticketTypeId', 'quantity'], not: { required: ['productId'] } },
+                        { required: ['productId', 'quantity'], not: { required: ['ticketTypeId'] } },
+                      ],
                     },
                   },
                   discountCode: { type: 'string' },
                   affiliateCode: { type: 'string' },
                   trackingId: { type: 'string' },
                   accessCode: { type: 'string' },
+                  waitlistClaimToken: { type: 'string' },
                   buyer: {
                     type: 'object',
                     properties: {
@@ -1646,6 +2185,60 @@ export const openApiSpec = {
         },
       },
     },
+    '/upload-artifacts': {
+      post: {
+        summary: 'Create a signed upload artifact ticket',
+        security: [{ BearerAuth: [] }, { ApiKey: [] }],
+        requestBody: {
+          required: true,
+          content: {
+            'application/json': {
+              schema: { $ref: '#/components/schemas/CreateUploadArtifact' },
+            },
+          },
+        },
+        responses: {
+          '201': { description: 'Signed upload ticket', content: { 'application/json': { schema: { $ref: '#/components/schemas/UploadArtifactTicket' } } } },
+          '400': { description: 'Validation error', content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } } },
+          '401': { description: 'Unauthorized', content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } } },
+          '403': { description: 'Forbidden', content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } } },
+          '404': { description: 'Brand or event not found', content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } } },
+        },
+      },
+    },
+    '/upload-artifacts/{artifactId}/complete': {
+      post: {
+        summary: 'Complete and scan an upload artifact',
+        security: [{ BearerAuth: [] }, { ApiKey: [] }],
+        requestBody: {
+          required: false,
+          content: {
+            'application/json': {
+              schema: { $ref: '#/components/schemas/CompleteUploadArtifact' },
+            },
+          },
+        },
+        responses: {
+          '200': { description: 'Upload completed and scanned clean', content: { 'application/json': { schema: { $ref: '#/components/schemas/UploadArtifactCompleteResult' } } } },
+          '400': { description: 'Validation error or blocked upload', content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } } },
+          '401': { description: 'Unauthorized', content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } } },
+          '403': { description: 'Forbidden', content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } } },
+          '404': { description: 'Upload artifact not found', content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } } },
+        },
+      },
+    },
+    '/upload-artifacts/{artifactId}/download': {
+      get: {
+        summary: 'Get a signed download URL for a completed upload artifact',
+        security: [{ BearerAuth: [] }, { ApiKey: [] }],
+        responses: {
+          '200': { description: 'Signed download URL', content: { 'application/json': { schema: { $ref: '#/components/schemas/UploadArtifactDownload' } } } },
+          '401': { description: 'Unauthorized', content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } } },
+          '403': { description: 'Forbidden', content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } } },
+          '404': { description: 'Upload artifact not found', content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } } },
+        },
+      },
+    },
     '/checkout/sessions/{sessionId}': {
       get: {
         summary: 'Get checkout session',
@@ -1656,6 +2249,35 @@ export const openApiSpec = {
         summary: 'Update checkout session',
         parameters: [{ $ref: '#/components/parameters/CheckoutSessionToken' }],
         responses: { '200': { description: 'Checkout session updated', content: { 'application/json': { schema: { $ref: '#/components/schemas/CheckoutSession' } } } } },
+      },
+    },
+    '/checkout/sessions/{sessionId}/wallet-passes': {
+      get: {
+        summary: 'List active wallet pass links for a checkout session',
+        parameters: [{ $ref: '#/components/parameters/CheckoutSessionToken' }],
+        responses: {
+          '200': {
+            description: 'Active Apple Wallet and Google Wallet links grouped by ticket',
+            content: { 'application/json': { schema: { $ref: '#/components/schemas/CheckoutWalletPasses' } } },
+          },
+        },
+      },
+    },
+    '/wallet-passes/{passId}/apple.pkpass': {
+      get: {
+        summary: 'Download an Apple Wallet pass package',
+        responses: {
+          '200': {
+            description: 'Apple Wallet pass package',
+            content: {
+              'application/vnd.apple.pkpass': {
+                schema: { type: 'string', format: 'binary' },
+              },
+            },
+          },
+          '404': { description: 'Wallet pass not found', content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } } },
+          '503': { description: 'Wallet pass signing unavailable', content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } } },
+        },
       },
     },
     '/checkout/sessions/{sessionId}/confirm': {
@@ -1711,6 +2333,12 @@ export const openApiSpec = {
     },
     '/orders/{orderId}': {
       get: { summary: 'Get order', security: [{ BearerAuth: [] }], responses: { '200': { description: 'Order details', content: { 'application/json': { schema: { $ref: '#/components/schemas/Order' } } } } } },
+    },
+    '/orders/{orderId}/invoice': {
+      get: { summary: 'Get invoice document', security: [{ BearerAuth: [] }], responses: { '200': { description: 'Invoice document', content: { 'application/json': { schema: { $ref: '#/components/schemas/InvoiceDocument' } } } } } },
+    },
+    '/orders/{orderId}/invoice/download': {
+      get: { summary: 'Download invoice JSON document', security: [{ BearerAuth: [] }], responses: { '200': { description: 'Downloadable invoice JSON', content: { 'application/json': { schema: { $ref: '#/components/schemas/InvoiceDocument' } } } } } },
     },
     '/orders/{orderId}/cancel': {
       post: {
@@ -1820,7 +2448,7 @@ export const openApiSpec = {
                 type: 'object',
                 properties: {
                   checkInListId: { type: 'string' },
-                  qrPayload: { type: 'string', description: 'Signed canonical QR payload generated by GateKit' },
+                  qrPayload: { type: 'string', description: 'Signed canonical QR payload generated by Tixkit' },
                   scannedAt: { type: 'string', format: 'date-time' },
                   offline: { type: 'boolean' },
                 },
@@ -1998,7 +2626,7 @@ export const openApiSpec = {
         summary: 'Get conversion report',
         security: [{ BearerAuth: [] }],
         responses: {
-          '200': { description: 'Conversion funnel metrics', content: { 'application/json': { schema: { type: 'object', properties: { eventId: { type: 'string' }, widgetViews: { type: 'number', nullable: true }, checkoutStarted: { type: 'number' }, checkoutCompleted: { type: 'number' }, conversionRate: { type: 'number' } }, required: ['eventId', 'widgetViews', 'checkoutStarted', 'checkoutCompleted', 'conversionRate'] } } } },
+          '200': { description: 'Conversion funnel metrics', content: { 'application/json': { schema: { type: 'object', properties: { eventId: { type: 'string' }, widgetViews: { type: 'number' }, checkoutStarted: { type: 'number' }, checkoutCompleted: { type: 'number' }, conversionRate: { type: 'number' } }, required: ['eventId', 'widgetViews', 'checkoutStarted', 'checkoutCompleted', 'conversionRate'] } } } },
           '401': { description: 'Unauthorized', content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } } },
           '403': { description: 'Forbidden', content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } } },
         },
@@ -2168,10 +2796,24 @@ export const openApiSpec = {
         security: [{ BearerAuth: [] }],
         responses: {
           '200': { description: 'Existing active Stripe payment account returned', content: { 'application/json': { schema: { $ref: '#/components/schemas/PaymentAccount' } } } },
+          '201': { description: 'Stripe Connect payment account created with onboarding link', content: { 'application/json': { schema: { $ref: '#/components/schemas/PaymentAccount' } } } },
           '401': { description: 'Unauthorized', content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } } },
           '403': { description: 'Forbidden', content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } } },
           '404': { description: 'Organization not found', content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } } },
-          '422': { description: 'Stripe Connect onboarding is not configured for this environment', content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } } },
+          '400': { description: 'Stripe Connect onboarding is not configured for this environment', content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } } },
+        },
+      },
+    },
+    '/organizations/{organizationId}/payment-accounts/{paymentAccountId}/stripe-connect/refresh': {
+      post: {
+        summary: 'Refresh Stripe Connect payment account status and return a fresh account link',
+        security: [{ BearerAuth: [] }],
+        responses: {
+          '200': { description: 'Payment account status refreshed from Stripe', content: { 'application/json': { schema: { $ref: '#/components/schemas/PaymentAccount' } } } },
+          '401': { description: 'Unauthorized', content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } } },
+          '403': { description: 'Forbidden', content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } } },
+          '404': { description: 'Organization or payment account not found', content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } } },
+          '400': { description: 'Stripe Connect status refresh is not configured for this environment', content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } } },
         },
       },
     },
@@ -2466,6 +3108,9 @@ export const openApiSpec = {
                           channel: { type: 'string', enum: ['email', 'sms', 'both'] },
                           status: { type: 'string' },
                           audience: { type: 'string', enum: ['all_attendees', 'checked_in', 'not_checked_in', 'custom'] },
+                          audienceKey: { type: 'string', enum: ['all', 'checked_in', 'not_checked_in', 'specific'] },
+                          audienceAttendeeIds: { type: 'array', items: { type: 'string' } },
+                          audienceLabel: { type: 'string' },
                           audienceCount: { type: 'integer' },
                           queuedEmailJobs: { type: 'integer' },
                           queuedSmsJobs: { type: 'integer' },
@@ -2715,6 +3360,55 @@ export const openApiSpec = {
         },
       },
     },
+    '/oauth/authorize': {
+      get: {
+        summary: 'Authorize OAuth application and redirect with authorization code',
+        security: [{ BearerAuth: [] }],
+        parameters: [
+          { name: 'response_type', in: 'query', required: true, schema: { type: 'string', enum: ['code'] } },
+          { name: 'client_id', in: 'query', required: true, schema: { type: 'string' } },
+          { name: 'redirect_uri', in: 'query', required: true, schema: { type: 'string', format: 'uri' } },
+          { name: 'scope', in: 'query', required: false, schema: { type: 'string' } },
+          { name: 'state', in: 'query', required: false, schema: { type: 'string' } },
+        ],
+        responses: { '302': { description: 'Redirect with code and optional state' } },
+      },
+    },
+    '/oauth/token': {
+      post: {
+        summary: 'Exchange authorization code or refresh token for OAuth access token',
+        requestBody: {
+          required: true,
+          content: {
+            'application/json': {
+              schema: {
+                type: 'object',
+                properties: {
+                  grant_type: { type: 'string', enum: ['authorization_code', 'refresh_token'] },
+                  client_id: { type: 'string' },
+                  client_secret: { type: 'string' },
+                  code: { type: 'string' },
+                  redirect_uri: { type: 'string', format: 'uri' },
+                  refresh_token: { type: 'string' },
+                },
+                required: ['grant_type', 'client_id', 'client_secret'],
+              },
+            },
+          },
+        },
+        responses: { '200': { description: 'OAuth token response', content: { 'application/json': { schema: { $ref: '#/components/schemas/OAuthTokenResponse' } } } } },
+      },
+    },
+    '/oauth/revoke': {
+      post: {
+        summary: 'Revoke OAuth access or refresh token',
+        requestBody: {
+          required: true,
+          content: { 'application/json': { schema: { type: 'object', properties: { client_id: { type: 'string' }, client_secret: { type: 'string' }, token: { type: 'string' } }, required: ['client_id', 'client_secret', 'token'] } } },
+        },
+        responses: { '200': { description: 'Token revoked', content: { 'application/json': { schema: { type: 'object', properties: { revoked: { type: 'boolean' } }, required: ['revoked'] } } } } },
+      },
+    },
     '/webhook-endpoints': {
       get: {
         summary: 'List webhook endpoints',
@@ -2771,6 +3465,7 @@ export const openApiSpec = {
     '/webhook-endpoints/{endpointId}/events': {
       get: {
         summary: 'List webhook delivery events for an endpoint',
+        description: 'Returns delivery events in newest-first delivery creation order. Use nextCursor opaquely as the next cursor value.',
         security: [{ BearerAuth: [] }],
         parameters: [{ $ref: '#/components/parameters/Cursor' }, { $ref: '#/components/parameters/Limit' }],
         responses: {

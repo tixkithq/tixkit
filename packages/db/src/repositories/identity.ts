@@ -90,7 +90,7 @@ export class ApiKeyRepository extends BaseRepository {
     expiresAt?: Date;
   }): Promise<{ apiKey: string; record: Record<string, unknown> }> {
     const id = `key_${ulid()}`;
-    const rawKey = `gk_${randomBytes(32).toString('hex')}`;
+    const rawKey = `tk_${randomBytes(32).toString('hex')}`;
     const keyPrefix = rawKey.substring(0, 12);
     const hashedKey = createHash('sha256').update(rawKey).digest('hex');
     const now = new Date();

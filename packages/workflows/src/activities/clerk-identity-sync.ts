@@ -1,5 +1,5 @@
-import { createDb } from '@gatekit/db';
-import { UserProfileRepository, OrganizationRepository } from '@gatekit/db';
+import { createDb } from '@tixkit/db';
+import { UserProfileRepository, OrganizationRepository } from '@tixkit/db';
 import type { WorkflowActivityResult } from '../shared/types.js';
 import { okResult, errResult } from '../shared/types.js';
 
@@ -78,11 +78,11 @@ export async function deleteUserActivity(input: {
     const repo = new UserProfileRepository(db);
     // Suspend every profile across all tenants; never delete history.
     const profiles = await repo.findAllByClerkUserId(input.clerkUserId);
-    for (const profile of profiles) {
-      if (profile.status !== 'suspended') {
-        await repo.suspend(profile.id);
-      }
-    }
+    await Promise.all(
+      profiles
+        .filter((profile) => profile.status !== 'suspended')
+        .map((profile) => repo.suspend(profile.id)),
+    );
     return okResult({ suspended: profiles.length > 0 });
   } catch (err) {
     return errResult('USER_DELETE_FAILED', err instanceof Error ? err.message : 'Unknown error', true);

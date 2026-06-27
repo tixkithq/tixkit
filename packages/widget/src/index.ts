@@ -1,4 +1,4 @@
-// GateKit Embeddable Widget - TypeScript Web Components.
+// Tixkit Embeddable Widget - TypeScript Web Components.
 //
 // Can be loaded once and mount multiple widgets on a page. No secret
 // credentials are embedded in browser code.
@@ -13,14 +13,14 @@
 //   order_completed   - buyer completed an order (postMessage from checkout)
 //
 // Style hooks (CSS custom properties on the host element):
-//   --gk-radius   - border radius for widget surfaces (default 0.625rem)
-//   --gk-primary  - primary accent color used for buttons/headers
-//   --gk-bg       - widget background
-//   --gk-fg       - widget foreground text
+//   --tk-radius   - border radius for widget surfaces (default 0.625rem)
+//   --tk-primary  - primary accent color used for buttons/headers
+//   --tk-bg       - widget background
+//   --tk-fg       - widget foreground text
 //
 // The widget iframe posts messages back to the host for lifecycle integration.
-// The hosted checkout posts { source: 'gatekit-checkout', event: 'order_completed', ... }
-// and { source: 'gatekit-checkout', event: 'checkout_started', ... }.
+// The hosted checkout posts { source: 'tixkit-checkout', event: 'order_completed', ... }
+// and { source: 'tixkit-checkout', event: 'checkout_started', ... }.
 
 type WidgetConfig = {
   brand: string;
@@ -46,6 +46,15 @@ type CheckoutMessage = {
   orderId?: string;
 };
 
+type MarketingIntegration = {
+  provider: 'ga4' | 'meta_pixel' | 'generic_tag';
+  config: Record<string, unknown>;
+  consentRequired: boolean;
+  status: string;
+};
+
+type MarketingEventName = 'view_item' | 'begin_checkout' | 'purchase';
+
 const IFRAME_SANDBOX = 'allow-scripts allow-same-origin allow-forms allow-popups allow-popups-to-escape-sandbox';
 const IFRAME_ALLOW = 'payment; publickey-credentials-create *; publickey-credentials-get *';
 
@@ -53,30 +62,30 @@ const STYLES = `
   :host {
     display: block;
     width: 100%;
-    --gk-radius: var(--gk-radius, 0.625rem);
-    --gk-primary: var(--gk-primary, oklch(0.208 0.042 265.755));
-    --gk-bg: var(--gk-bg, #ffffff);
-    --gk-fg: var(--gk-fg, #171717);
-    color: var(--gk-fg);
+    --tk-radius: var(--tk-radius, 0.625rem);
+    --tk-primary: var(--tk-primary, oklch(0.208 0.042 265.755));
+    --tk-bg: var(--tk-bg, #ffffff);
+    --tk-fg: var(--tk-fg, #171717);
+    color: var(--tk-fg);
   }
-  .gk-root {
+  .tk-root {
     position: relative;
     width: 100%;
     min-height: 420px;
-    border-radius: var(--gk-radius);
+    border-radius: var(--tk-radius);
     overflow: hidden;
-    background: var(--gk-bg);
+    background: var(--tk-bg);
     border: 1px solid rgba(23, 23, 23, 0.12);
   }
-  .gk-frame {
+  .tk-frame {
     width: 100%;
     height: 100%;
     min-height: 420px;
     border: 0;
     display: block;
-    background: var(--gk-bg);
+    background: var(--tk-bg);
   }
-  .gk-state {
+  .tk-state {
     position: absolute;
     inset: 0;
     display: flex;
@@ -86,20 +95,20 @@ const STYLES = `
     gap: 12px;
     padding: 24px;
     text-align: center;
-    background: var(--gk-bg);
-    color: var(--gk-fg);
+    background: var(--tk-bg);
+    color: var(--tk-fg);
     font: 14px/1.5 ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
   }
-  .gk-spinner {
+  .tk-spinner {
     width: 24px;
     height: 24px;
     border: 2px solid rgba(23, 23, 23, 0.18);
-    border-top-color: var(--gk-primary);
+    border-top-color: var(--tk-primary);
     border-radius: 50%;
-    animation: gk-spin 0.8s linear infinite;
+    animation: tk-spin 0.8s linear infinite;
   }
-  @keyframes gk-spin { to { transform: rotate(360deg); } }
-  .gk-error-icon {
+  @keyframes tk-spin { to { transform: rotate(360deg); } }
+  .tk-error-icon {
     width: 32px;
     height: 32px;
     border-radius: 999px;
@@ -111,18 +120,18 @@ const STYLES = `
     font-size: 18px;
     font-weight: 700;
   }
-  .gk-retry {
+  .tk-retry {
     border: 1px solid rgba(23, 23, 23, 0.18);
-    background: var(--gk-bg);
-    color: var(--gk-fg);
+    background: var(--tk-bg);
+    color: var(--tk-fg);
     border-radius: 6px;
     padding: 8px 14px;
     font: inherit;
     font-weight: 600;
     cursor: pointer;
   }
-  .gk-retry:hover { background: rgba(23, 23, 23, 0.05); }
-  .gk-modal-backdrop {
+  .tk-retry:hover { background: rgba(23, 23, 23, 0.05); }
+  .tk-modal-backdrop {
     position: fixed;
     inset: 0;
     z-index: 9999;
@@ -132,40 +141,40 @@ const STYLES = `
     justify-content: center;
     padding: 16px;
   }
-  .gk-modal {
+  .tk-modal {
     width: min(560px, 100%);
     max-height: 90vh;
-    border-radius: var(--gk-radius);
+    border-radius: var(--tk-radius);
     overflow: hidden;
-    background: var(--gk-bg);
+    background: var(--tk-bg);
     display: flex;
     flex-direction: column;
   }
-  .gk-modal-head {
+  .tk-modal-head {
     display: flex;
     align-items: center;
     justify-content: space-between;
     padding: 12px 16px;
     border-bottom: 1px solid rgba(23, 23, 23, 0.1);
-    color: var(--gk-fg);
+    color: var(--tk-fg);
   }
-  .gk-modal-title { font-weight: 600; }
-  .gk-modal-close {
+  .tk-modal-title { font-weight: 600; }
+  .tk-modal-close {
     border: 0;
     background: transparent;
-    color: var(--gk-fg);
+    color: var(--tk-fg);
     font-size: 20px;
     line-height: 1;
     cursor: pointer;
     padding: 4px 8px;
     border-radius: 6px;
   }
-  .gk-modal-close:hover { background: rgba(23, 23, 23, 0.06); }
-  .gk-modal-frame {
+  .tk-modal-close:hover { background: rgba(23, 23, 23, 0.06); }
+  .tk-modal-frame {
     width: 100%;
     height: 70vh;
     border: 0;
-    background: var(--gk-bg);
+    background: var(--tk-bg);
   }
 `;
 
@@ -176,7 +185,176 @@ function injectStyles(shadow: ShadowRoot): void {
 }
 
 function checkoutBase(element: HTMLElement): string {
-  return (element.getAttribute('api-base-url') ?? 'https://checkout.gatekit.com').replace(/\/$/, '');
+  return (element.getAttribute('api-base-url') ?? 'https://checkout.tixkit.com').replace(/\/$/, '');
+}
+
+function reportingApiBase(element: HTMLElement): string {
+  const explicit = element.getAttribute('reporting-api-url');
+  if (explicit) return explicit.replace(/\/$/, '');
+
+  try {
+    const url = new URL(checkoutBase(element));
+    if (url.hostname === 'localhost' || url.hostname === '127.0.0.1') {
+      url.port = '4000';
+      return url.origin;
+    }
+    if (url.hostname.startsWith('checkout.')) {
+      url.hostname = url.hostname.replace(/^checkout\./, 'api.');
+      return url.origin;
+    }
+  } catch {
+    return 'https://api.tixkit.com';
+  }
+
+  return 'https://api.tixkit.com';
+}
+
+function widgetVisitorId(): string {
+  const key = 'tixkit:visitor-id';
+  try {
+    const existing = window.localStorage.getItem(key);
+    if (existing) return existing;
+    const generated = globalThis.crypto?.randomUUID?.() ?? `visitor_${Math.random().toString(36).slice(2)}${Date.now().toString(36)}`;
+    window.localStorage.setItem(key, generated);
+    return generated;
+  } catch {
+    return `visitor_${Math.random().toString(36).slice(2)}${Date.now().toString(36)}`;
+  }
+}
+
+function recordWidgetImpression(
+  element: HTMLElement,
+  input: { eventId: string; trackingId?: string; affiliateCode?: string },
+): void {
+  if (!input.eventId || typeof fetch !== 'function') return;
+  const body = {
+    visitorId: widgetVisitorId(),
+    instanceId: element.id || undefined,
+    trackingId: input.trackingId || undefined,
+    affiliateCode: input.affiliateCode || undefined,
+    host: window.location.host || undefined,
+    pageUrl: window.location.href || undefined,
+    referrer: document.referrer || undefined,
+  };
+  void fetch(`${reportingApiBase(element)}/v1/public/events/${encodeURIComponent(input.eventId)}/widget-impressions`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+    keepalive: true,
+    credentials: 'omit',
+  }).catch(() => {
+    // Analytics must never block checkout rendering.
+  });
+}
+
+const marketingCache = new Map<string, Promise<MarketingIntegration[]>>();
+
+function marketingConsentGranted(integration: MarketingIntegration): boolean {
+  if (!integration.consentRequired) return true;
+  try {
+    const value = window.localStorage.getItem('tixkit_marketing_consent');
+    return value === 'granted' || value === 'true' || value === '1';
+  } catch {
+    return false;
+  }
+}
+
+function marketingConfigString(config: Record<string, unknown>, key: string): string | undefined {
+  const value = config[key];
+  return typeof value === 'string' && value.trim() ? value.trim() : undefined;
+}
+
+function ensureMarketingScript(id: string, src: string): void {
+  if (document.getElementById(id)) return;
+  const script = document.createElement('script');
+  script.id = id;
+  script.async = true;
+  script.src = src;
+  document.head.appendChild(script);
+}
+
+function trackGa4(integration: MarketingIntegration, name: MarketingEventName, eventId: string): void {
+  const measurementId = marketingConfigString(integration.config, 'measurementId');
+  if (!measurementId) return;
+  const win = window as Window & { dataLayer?: unknown[]; gtag?: (...args: unknown[]) => void };
+  win.dataLayer = win.dataLayer ?? [];
+  win.gtag = win.gtag ?? ((...args: unknown[]) => {
+    win.dataLayer?.push(args);
+  });
+  ensureMarketingScript(
+    `tixkit-ga4-${measurementId.replace(/[^a-zA-Z0-9_-]/g, '')}`,
+    `https://www.googletagmanager.com/gtag/js?id=${encodeURIComponent(measurementId)}`,
+  );
+  win.gtag('js', new Date());
+  win.gtag('config', measurementId, { send_page_view: false });
+  win.gtag('event', name, { event_id: eventId, items: [{ item_id: eventId }] });
+}
+
+function trackMeta(integration: MarketingIntegration, name: MarketingEventName, eventId: string): void {
+  const pixelId = marketingConfigString(integration.config, 'pixelId');
+  if (!pixelId) return;
+  const win = window as Window & { fbq?: (...args: unknown[]) => void };
+  if (!win.fbq) {
+    const queue: unknown[] = [];
+    win.fbq = (...args: unknown[]) => {
+      queue.push(args);
+    };
+    (win.fbq as unknown as { queue: unknown[]; loaded: boolean; version: string }).queue = queue;
+    (win.fbq as unknown as { queue: unknown[]; loaded: boolean; version: string }).loaded = true;
+    (win.fbq as unknown as { queue: unknown[]; loaded: boolean; version: string }).version = '2.0';
+    (win as unknown as Record<string, unknown>)['_fbq'] = win.fbq;
+    ensureMarketingScript('tixkit-meta-pixel', 'https://connect.facebook.net/en_US/fbevents.js');
+  }
+  win.fbq('init', pixelId);
+  win.fbq('track', name === 'view_item' ? 'PageView' : name === 'begin_checkout' ? 'InitiateCheckout' : 'Purchase', {
+    content_type: 'event',
+    content_ids: [eventId],
+  });
+}
+
+function trackGeneric(integration: MarketingIntegration, name: MarketingEventName, eventId: string): void {
+  const pixelUrl = marketingConfigString(integration.config, 'pixelUrl');
+  if (!pixelUrl) return;
+  try {
+    const url = new URL(pixelUrl);
+    if (url.protocol !== 'https:') return;
+    url.searchParams.set('tk_event', name);
+    url.searchParams.set('event_id', eventId);
+    const beacon = document.createElement('img');
+    beacon.referrerPolicy = 'strict-origin-when-cross-origin';
+    beacon.src = url.toString();
+  } catch {
+    return;
+  }
+}
+
+function fetchMarketingIntegrations(element: HTMLElement, eventId: string): Promise<MarketingIntegration[]> {
+  if (!eventId || typeof fetch !== 'function') return Promise.resolve([]);
+  const cacheKey = `${reportingApiBase(element)}:${eventId}`;
+  const existing = marketingCache.get(cacheKey);
+  if (existing) return existing;
+  const request = fetch(`${reportingApiBase(element)}/v1/public/events/${encodeURIComponent(eventId)}/marketing-integrations`, {
+    credentials: 'omit',
+  })
+    .then(async (response) => {
+      if (!response.ok) return [];
+      const body = await response.json() as { items?: MarketingIntegration[] } | MarketingIntegration[];
+      return Array.isArray(body) ? body : body.items ?? [];
+    })
+    .catch(() => []);
+  marketingCache.set(cacheKey, request);
+  return request;
+}
+
+function trackWidgetMarketingEvent(element: HTMLElement, eventId: string, name: MarketingEventName): void {
+  void fetchMarketingIntegrations(element, eventId).then((integrations) => {
+    for (const integration of integrations) {
+      if (integration.status !== 'active' || !marketingConsentGranted(integration)) continue;
+      if (integration.provider === 'ga4') trackGa4(integration, name, eventId);
+      if (integration.provider === 'meta_pixel') trackMeta(integration, name, eventId);
+      if (integration.provider === 'generic_tag') trackGeneric(integration, name, eventId);
+    }
+  });
 }
 
 function isTrustedCheckoutOrigin(element: HTMLElement, origin: string): boolean {
@@ -226,7 +404,7 @@ function dispatchLifecycle(
   );
 }
 
-class GateKitWidget extends HTMLElement {
+class TixkitWidget extends HTMLElement {
   private shadow: ShadowRoot;
   private config: WidgetConfig = {
     brand: '',
@@ -241,6 +419,7 @@ class GateKitWidget extends HTMLElement {
   private messageHandler: ((event: MessageEvent) => void) | null = null;
   private unloadHandler: (() => void) | null = null;
   private modalKeyHandler: ((event: KeyboardEvent) => void) | null = null;
+  private impressionRecorded = false;
 
   constructor() {
     super();
@@ -286,6 +465,15 @@ class GateKitWidget extends HTMLElement {
     this.render();
     this.listenForCheckoutMessages();
     dispatchLifecycle(this, 'loaded', this.config.event);
+    if (!this.impressionRecorded) {
+      this.impressionRecorded = true;
+      recordWidgetImpression(this, {
+        eventId: this.config.event,
+        trackingId: this.config.trackingId,
+        affiliateCode: this.config.affiliateCode,
+      });
+      trackWidgetMarketingEvent(this, this.config.event, 'view_item');
+    }
 
     // Dispatch 'closed' on host page unload.
     if (this.unloadHandler) window.removeEventListener('beforeunload', this.unloadHandler);
@@ -317,11 +505,16 @@ class GateKitWidget extends HTMLElement {
     this.messageHandler = (event: MessageEvent) => {
       if (!isTrustedCheckoutOrigin(this, event.origin)) return;
       const data = event.data as CheckoutMessage | undefined;
-      if (!data || data.source !== 'gatekit-checkout') return;
+      if (!data || data.source !== 'tixkit-checkout') return;
       if (!checkoutMessageMatchesEvent(data, this.config.event)) return;
 
       const name = checkoutEventName(data);
       if (!name) return;
+      trackWidgetMarketingEvent(
+        this,
+        this.config.event,
+        name === 'checkout_started' ? 'begin_checkout' : 'purchase',
+      );
       dispatchLifecycle(this, name, this.config.event, checkoutMessageDetail(this.config.event, data));
     };
     window.addEventListener('message', this.messageHandler);
@@ -330,7 +523,7 @@ class GateKitWidget extends HTMLElement {
   private showLoading(): void {
     if (!this.stateEl) return;
     this.stateEl.style.display = 'flex';
-    this.stateEl.innerHTML = `<div class="gk-spinner"></div><p>Loading tickets…</p>`;
+    this.stateEl.innerHTML = `<div class="tk-spinner"></div><p>Loading tickets…</p>`;
     dispatchLifecycle(this, 'loading', this.config.event);
   }
 
@@ -341,14 +534,14 @@ class GateKitWidget extends HTMLElement {
     this.stateEl.replaceChildren();
 
     const icon = document.createElement('div');
-    icon.className = 'gk-error-icon';
+    icon.className = 'tk-error-icon';
     icon.textContent = '!';
 
     const text = document.createElement('p');
     text.textContent = message;
 
     const retry = document.createElement('button');
-    retry.className = 'gk-retry';
+    retry.className = 'tk-retry';
     retry.type = 'button';
     retry.textContent = 'Retry';
     retry.addEventListener('click', () => {
@@ -388,8 +581,8 @@ class GateKitWidget extends HTMLElement {
 
     if (!this.config.brand || !this.config.event) {
       const state = document.createElement('div');
-      state.className = 'gk-state';
-      state.textContent = 'GateKit widget: brand and event attributes are required.';
+      state.className = 'tk-state';
+      state.textContent = 'Tixkit widget: brand and event attributes are required.';
       this.shadow.appendChild(state);
       this.showError('Brand and event attributes are required.');
       return;
@@ -413,16 +606,16 @@ class GateKitWidget extends HTMLElement {
 
   private renderInline(): void {
     const root = document.createElement('div');
-    root.className = 'gk-root';
+    root.className = 'tk-root';
 
     this.stateEl = document.createElement('div');
-    this.stateEl.className = 'gk-state';
+    this.stateEl.className = 'tk-state';
     root.appendChild(this.stateEl);
     this.showLoading();
 
     const iframe = document.createElement('iframe');
-    iframe.className = 'gk-frame';
-    iframe.title = 'GateKit Tickets';
+    iframe.className = 'tk-frame';
+    iframe.title = 'Tixkit Tickets';
     iframe.loading = 'lazy';
     iframe.allow = IFRAME_ALLOW;
     iframe.setAttribute('sandbox', IFRAME_SANDBOX);
@@ -444,15 +637,15 @@ class GateKitWidget extends HTMLElement {
 
   private renderModalButton(): void {
     const root = document.createElement('div');
-    root.className = 'gk-root';
+    root.className = 'tk-root';
 
     const state = document.createElement('div');
-    state.className = 'gk-state';
+    state.className = 'tk-state';
     state.style.display = 'flex';
 
     const btn = document.createElement('button');
     btn.type = 'button';
-    btn.className = 'gk-retry';
+    btn.className = 'tk-retry';
     btn.textContent = 'Buy tickets';
     btn.addEventListener('click', () => this.openModal(this.buildWidgetUrl()));
 
@@ -463,15 +656,15 @@ class GateKitWidget extends HTMLElement {
 
   private renderRedirect(): void {
     const root = document.createElement('div');
-    root.className = 'gk-root';
+    root.className = 'tk-root';
 
     const state = document.createElement('div');
-    state.className = 'gk-state';
+    state.className = 'tk-state';
     state.style.display = 'flex';
 
     const btn = document.createElement('button');
     btn.type = 'button';
-    btn.className = 'gk-retry';
+    btn.className = 'tk-retry';
     btn.textContent = 'Buy tickets';
     btn.addEventListener('click', () => {
       // A redirect opens the hosted checkout. checkout_started is emitted only
@@ -488,22 +681,22 @@ class GateKitWidget extends HTMLElement {
   private openModal(url: string): void {
     this.closeModal();
     const backdrop = document.createElement('div');
-    backdrop.className = 'gk-modal-backdrop';
+    backdrop.className = 'tk-modal-backdrop';
     backdrop.addEventListener('click', (e) => {
       if (e.target === backdrop) this.closeModal();
     });
 
     const modal = document.createElement('div');
-    modal.className = 'gk-modal';
+    modal.className = 'tk-modal';
 
     const head = document.createElement('div');
-    head.className = 'gk-modal-head';
+    head.className = 'tk-modal-head';
     const title = document.createElement('span');
-    title.className = 'gk-modal-title';
+    title.className = 'tk-modal-title';
     title.textContent = 'Checkout';
     const close = document.createElement('button');
     close.type = 'button';
-    close.className = 'gk-modal-close';
+    close.className = 'tk-modal-close';
     close.setAttribute('aria-label', 'Close checkout');
     close.textContent = '×';
     close.addEventListener('click', () => this.closeModal());
@@ -511,8 +704,8 @@ class GateKitWidget extends HTMLElement {
     head.appendChild(close);
 
     const frame = document.createElement('iframe');
-    frame.className = 'gk-modal-frame';
-    frame.title = 'GateKit Checkout';
+    frame.className = 'tk-modal-frame';
+    frame.title = 'Tixkit Checkout';
     frame.src = url;
     frame.allow = IFRAME_ALLOW;
     frame.setAttribute('sandbox', IFRAME_SANDBOX);
@@ -566,7 +759,7 @@ class GateKitWidget extends HTMLElement {
   }
 }
 
-class GateKitButton extends HTMLElement {
+class TixkitButton extends HTMLElement {
   private shadow: ShadowRoot;
   private eventId = '';
   private items = '';
@@ -581,6 +774,7 @@ class GateKitButton extends HTMLElement {
   private messageHandler: ((event: MessageEvent) => void) | null = null;
   private unloadHandler: (() => void) | null = null;
   private modalKeyHandler: ((event: KeyboardEvent) => void) | null = null;
+  private impressionRecorded = false;
 
   constructor() {
     super();
@@ -618,6 +812,15 @@ class GateKitButton extends HTMLElement {
     this.render();
     this.listenForCheckoutMessages();
     dispatchLifecycle(this, 'loaded', this.eventId);
+    if (!this.impressionRecorded) {
+      this.impressionRecorded = true;
+      recordWidgetImpression(this, {
+        eventId: this.eventId,
+        trackingId: this.trackingId,
+        affiliateCode: this.affiliateCode,
+      });
+      trackWidgetMarketingEvent(this, this.eventId, 'view_item');
+    }
 
     if (this.unloadHandler) window.removeEventListener('beforeunload', this.unloadHandler);
     this.unloadHandler = () => {
@@ -647,11 +850,16 @@ class GateKitButton extends HTMLElement {
     this.messageHandler = (event: MessageEvent) => {
       if (!isTrustedCheckoutOrigin(this, event.origin)) return;
       const data = event.data as CheckoutMessage | undefined;
-      if (!data || data.source !== 'gatekit-checkout') return;
+      if (!data || data.source !== 'tixkit-checkout') return;
       if (!checkoutMessageMatchesEvent(data, this.eventId)) return;
 
       const name = checkoutEventName(data);
       if (!name) return;
+      trackWidgetMarketingEvent(
+        this,
+        this.eventId,
+        name === 'checkout_started' ? 'begin_checkout' : 'purchase',
+      );
       dispatchLifecycle(this, name, this.eventId, checkoutMessageDetail(this.eventId, data));
     };
     window.addEventListener('message', this.messageHandler);
@@ -664,11 +872,11 @@ class GateKitButton extends HTMLElement {
     const style = document.createElement('style');
     style.textContent = `
       button {
-        background: var(--gk-primary, oklch(0.208 0.042 265.755));
+        background: var(--tk-primary, oklch(0.208 0.042 265.755));
         color: white;
         border: none;
         padding: 12px 24px;
-        border-radius: var(--gk-radius, 0.5rem);
+        border-radius: var(--tk-radius, 0.5rem);
         font-size: 16px;
         font-weight: 600;
         cursor: pointer;
@@ -728,22 +936,22 @@ class GateKitButton extends HTMLElement {
   private openModal(url: string): void {
     this.closeModal();
     const backdrop = document.createElement('div');
-    backdrop.className = 'gk-modal-backdrop';
+    backdrop.className = 'tk-modal-backdrop';
     backdrop.addEventListener('click', (e) => {
       if (e.target === backdrop) this.closeModal();
     });
 
     const modal = document.createElement('div');
-    modal.className = 'gk-modal';
+    modal.className = 'tk-modal';
 
     const head = document.createElement('div');
-    head.className = 'gk-modal-head';
+    head.className = 'tk-modal-head';
     const title = document.createElement('span');
-    title.className = 'gk-modal-title';
+    title.className = 'tk-modal-title';
     title.textContent = 'Checkout';
     const close = document.createElement('button');
     close.type = 'button';
-    close.className = 'gk-modal-close';
+    close.className = 'tk-modal-close';
     close.setAttribute('aria-label', 'Close checkout');
     close.textContent = '×';
     close.addEventListener('click', () => this.closeModal());
@@ -751,8 +959,8 @@ class GateKitButton extends HTMLElement {
     head.appendChild(close);
 
     const frame = document.createElement('iframe');
-    frame.className = 'gk-modal-frame';
-    frame.title = 'GateKit Checkout';
+    frame.className = 'tk-modal-frame';
+    frame.title = 'Tixkit Checkout';
     frame.src = url;
     frame.allow = IFRAME_ALLOW;
     frame.setAttribute('sandbox', IFRAME_SANDBOX);
@@ -788,12 +996,12 @@ class GateKitButton extends HTMLElement {
 }
 
 if (typeof window !== 'undefined' && 'customElements' in window) {
-  if (!customElements.get('gatekit-widget')) {
-    customElements.define('gatekit-widget', GateKitWidget);
+  if (!customElements.get('tixkit-widget')) {
+    customElements.define('tixkit-widget', TixkitWidget);
   }
-  if (!customElements.get('gatekit-button')) {
-    customElements.define('gatekit-button', GateKitButton);
+  if (!customElements.get('tixkit-button')) {
+    customElements.define('tixkit-button', TixkitButton);
   }
 }
 
-export { GateKitWidget, GateKitButton };
+export { TixkitWidget, TixkitButton };

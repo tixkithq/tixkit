@@ -50,6 +50,9 @@ vi.mock('@/components/ui/tabs', () => {
     onValueChange?: (value: string) => void
   }>({})
 
+  // Keep these mock components inside the hoisted factory so the tab context is
+  // initialized with the mocked module instead of test-file execution order.
+  // eslint-disable-next-line unicorn/consistent-function-scoping
   function Tabs({
     value,
     onValueChange,
@@ -59,13 +62,19 @@ vi.mock('@/components/ui/tabs', () => {
     onValueChange?: (value: string) => void
     children: React.ReactNode
   }) {
+    const contextValue = React.useMemo(
+      () => ({ value, onValueChange }),
+      [onValueChange, value]
+    )
+
     return (
-      <TabsContext.Provider value={{ value, onValueChange }}>
+      <TabsContext.Provider value={contextValue}>
         <div>{children}</div>
       </TabsContext.Provider>
     )
   }
 
+  // eslint-disable-next-line unicorn/consistent-function-scoping
   function TabsList({ children }: { children: React.ReactNode }) {
     return <div role='tablist'>{children}</div>
   }
@@ -122,9 +131,9 @@ type ReportsAdminApiMock = {
 
 function getAdminApiMock(): ReportsAdminApiMock {
   const globalWithMock = globalThis as typeof globalThis & {
-    __reportsAdminApiMock?: ReportsAdminApiMock
+    reportsAdminApiMock?: ReportsAdminApiMock
   }
-  globalWithMock.__reportsAdminApiMock ??= {
+  globalWithMock.reportsAdminApiMock ??= {
     listEvents: vi.fn(),
     listOrganizations: vi.fn(),
     getSalesReport: vi.fn(),
@@ -135,7 +144,7 @@ function getAdminApiMock(): ReportsAdminApiMock {
     getAffiliateReport: vi.fn(),
     createExport: vi.fn(),
   }
-  return globalWithMock.__reportsAdminApiMock
+  return globalWithMock.reportsAdminApiMock
 }
 
 vi.mock('@/lib/api', () => ({
@@ -218,7 +227,7 @@ describe('ReportsView', () => {
       ok: true,
       data: {
         eventId: 'evt_1',
-        widgetViews: null,
+        widgetViews: 18,
         checkoutStarted: 12,
         checkoutCompleted: 6,
         conversionRate: 0.5,
@@ -247,9 +256,17 @@ describe('ReportsView', () => {
   it('renders navigation tabs for all existing report APIs', async () => {
     const view = render(<ReportsView eventId='evt_1' />)
 
-    for (const tab of ['Sales', 'Tax', 'Attendance', 'Promo', 'Conversion', 'Affiliate']) {
-      expect(await view.findByRole('tab', { name: tab })).toBeInTheDocument()
-    }
+    const renderedTabs = await view.findAllByRole('tab')
+    expect(renderedTabs.map((tab) => tab.textContent)).toEqual(
+      expect.arrayContaining([
+        'Sales',
+        'Tax',
+        'Attendance',
+        'Promo',
+        'Conversion',
+        'Affiliate',
+      ])
+    )
   })
 
   it('shows report data when switching tabs', async () => {
@@ -271,8 +288,7 @@ describe('ReportsView', () => {
 
     fireEvent.click(view.getByRole('tab', { name: 'Conversion' }))
     expect(await view.findByText('Widget Views')).toBeInTheDocument()
-    expect(view.getByText('Untracked')).toBeInTheDocument()
-    expect(view.getByText(/Widget impressions are not tracked/i)).toBeInTheDocument()
+    expect(view.getByText('18')).toBeInTheDocument()
 
     fireEvent.click(view.getByRole('tab', { name: 'Affiliate' }))
     expect(await view.findAllByText('Select report scope')).not.toHaveLength(0)

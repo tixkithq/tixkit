@@ -43,9 +43,9 @@ export type UserProfile = TenantScopedEntity & {
 
 export type ClerkIdentityLink = BaseEntity & {
   clerkUserId: string;
-  gateKitUserId: Ulid;
+  tixkitUserId: Ulid;
   clerkOrganizationId?: string;
-  gateKitOrganizationId?: Ulid;
+  tixkitOrganizationId?: Ulid;
   lastSyncedAt: ISO8601Date;
 };
 

@@ -5,7 +5,7 @@ import {
   MockEmailTransport,
   validateProviderFields,
 } from '../index.js';
-import type { SendEmailInput } from '@gatekit/domain';
+import type { SendEmailInput } from '@tixkit/domain';
 
 const baseInput = (overrides: Partial<SendEmailInput> = {}): SendEmailInput => ({
   tenantId: 'tnt_1',

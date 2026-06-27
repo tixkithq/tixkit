@@ -23,7 +23,7 @@ export function verifySignature(payload: string, signature: string, secret: stri
 }
 
 export function generateApiKey(): { key: string; hashedKey: string; keyPrefix: string } {
-  const rawKey = `gk_${randomBytes(32).toString('hex')}`;
+  const rawKey = `tk_${randomBytes(32).toString('hex')}`;
   return {
     key: rawKey,
     hashedKey: hashString(rawKey),
@@ -88,3 +88,5 @@ export function maskApiKey(key: string): string {
   if (key.length <= 12) return key;
   return `${key.substring(0, 12)}${'*'.repeat(key.length - 16)}${key.substring(key.length - 4)}`;
 }
+
+export * from './observability.js';

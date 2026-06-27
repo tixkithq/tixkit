@@ -1,7 +1,7 @@
 import type { FastifyPluginAsync } from 'fastify';
 import { ulid } from 'ulid';
 import { ClerkAuthService } from '../../auth/clerk.js';
-import { EventRepository, type Database } from '@gatekit/db';
+import { EventRepository, type Database } from '@tixkit/db';
 import {
   ConflictError,
   NotFoundError,
@@ -9,9 +9,35 @@ import {
   validateQuestionDefinition,
   type Principal,
   type QuestionType,
-} from '@gatekit/domain';
+} from '@tixkit/domain';
 import { parseJsonValue, parsePagination, pageEnvelope } from '../../http/contracts.js';
 import { createQuestionSchema, reorderQuestionsSchema, updateQuestionSchema, parseBody } from '../../http/schemas.js';
+
+type QuestionDefinitionInput = {
+  id?: string;
+  type: QuestionType;
+  options?: string[] | null;
+  validationPattern?: string | null;
+  conditionalVisibility?: { field: string; operator: 'equals' | 'not_equals' | 'contains'; value: string } | null;
+  sortOrder?: number;
+  isConsentField?: boolean;
+  consentText?: string | null;
+  consentVersion?: string | null;
+};
+
+function requireEventAccess(principal: Principal, event: Record<string, unknown>, eventId: string) {
+  ClerkAuthService.requireResourceTenant(principal, event, 'Event', eventId);
+  ClerkAuthService.requireOrganizationScope(principal, event.organization_id as string | undefined);
+  ClerkAuthService.requireBrandScope(principal, event.brand_id as string | undefined);
+  ClerkAuthService.requireEventScope(principal, eventId);
+}
+
+function assertQuestionDefinition(input: QuestionDefinitionInput) {
+  const errors = validateQuestionDefinition(input);
+  if (errors.length > 0) {
+    throw new ValidationError(errors[0], { errors });
+  }
+}
 
 export const questionRoutes: FastifyPluginAsync = async (app) => {
   const db = app.context.db;
@@ -21,13 +47,6 @@ export const questionRoutes: FastifyPluginAsync = async (app) => {
     const event = await eventRepo.findById(eventId);
     if (!event) throw new NotFoundError('Event', eventId);
     return event;
-  };
-
-  const requireEventAccess = (principal: Principal, event: Record<string, unknown>, eventId: string) => {
-    ClerkAuthService.requireResourceTenant(principal, event, 'Event', eventId);
-    ClerkAuthService.requireOrganizationScope(principal, event.organization_id as string | undefined);
-    ClerkAuthService.requireBrandScope(principal, event.brand_id as string | undefined);
-    ClerkAuthService.requireEventScope(principal, eventId);
   };
 
   const loadScopedTicketType = async (eventId: string, ticketTypeId?: string | null) => {
@@ -54,23 +73,6 @@ export const questionRoutes: FastifyPluginAsync = async (app) => {
       .executeTakeFirst();
     if (!source || source.event_id !== eventId) {
       throw new ValidationError('Conditional visibility source question must belong to this event');
-    }
-  };
-
-  const assertQuestionDefinition = (input: {
-    id?: string;
-    type: QuestionType;
-    options?: string[] | null;
-    validationPattern?: string | null;
-    conditionalVisibility?: { field: string; operator: 'equals' | 'not_equals' | 'contains'; value: string } | null;
-    sortOrder?: number;
-    isConsentField?: boolean;
-    consentText?: string | null;
-    consentVersion?: string | null;
-  }) => {
-    const errors = validateQuestionDefinition(input);
-    if (errors.length > 0) {
-      throw new ValidationError(errors[0], { errors });
     }
   };
 
@@ -175,6 +177,7 @@ export const questionRoutes: FastifyPluginAsync = async (app) => {
 
     await db.transaction().execute(async (trx) => {
       for (const question of body.questions) {
+        // eslint-disable-next-line no-await-in-loop -- reorder updates run sequentially on one transaction connection for deterministic rollback behavior.
         await trx
           .updateTable('questions')
           .set({ sort_order: question.sortOrder, updated_at: new Date() })

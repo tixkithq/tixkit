@@ -1,11 +1,11 @@
 {
-  "name": "@gatekit/widget",
+  "name": "@tixkit/widget",
   "version": "0.1.0",
   "type": "module",
-  "main": "./dist/gatekit-widget.js",
+  "main": "./dist/tixkit-widget.js",
   "scripts": {
-    "build": "tsc --noEmit && esbuild src/index.ts --bundle --minify --format=esm --outfile=dist/gatekit-widget.js",
-    "dev": "esbuild src/index.ts --bundle --format=esm --outfile=dist/gatekit-widget.js --watch",
+    "build": "tsc --noEmit && esbuild src/index.ts --bundle --minify --format=esm --outfile=dist/tixkit-widget.js",
+    "dev": "esbuild src/index.ts --bundle --format=esm --outfile=dist/tixkit-widget.js --watch",
     "lint": "oxlint src",
     "typecheck": "tsc --noEmit",
     "test:unit": "vitest run",

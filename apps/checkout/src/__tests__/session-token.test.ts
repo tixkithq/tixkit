@@ -40,8 +40,8 @@ describe('session-token storage', () => {
     expect(getSessionToken('cs_456')).toBeUndefined()
   })
 
-  it('uses a gk:session: prefix for storage keys', () => {
+  it('uses a tk:session: prefix for storage keys', () => {
     storeSessionToken('cs_789', 'tok_prefix')
-    expect(store.get('gk:session:cs_789')).toBe('tok_prefix')
+    expect(store.get('tk:session:cs_789')).toBe('tok_prefix')
   })
 })

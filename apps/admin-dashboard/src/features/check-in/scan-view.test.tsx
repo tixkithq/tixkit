@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { adminApi } from '@/lib/api'
+import { adminApi, normalizeLiveCheckInScanResult } from '@/lib/api'
 
 describe('Check-in scan result', () => {
   it('returns accepted for valid unchecked-in attendee', async () => {
@@ -12,7 +12,7 @@ describe('Check-in scan result', () => {
     if (result.ok) {
       expect(result.data.status).toBe('accepted')
       if (result.data.status === 'accepted') {
-        expect(result.data.attendee.name).toBe('Alice Johnson')
+        expect(result.data.attendee?.name).toBe('Alice Johnson')
       }
     }
   })
@@ -67,5 +67,44 @@ describe('Check-in scan result', () => {
       expect(result.data.scannedAt).toBeDefined()
       expect(typeof result.data.scannedAt).toBe('string')
     }
+  })
+
+  it('normalizes live accepted scan responses for the scanner UI', () => {
+    const result = normalizeLiveCheckInScanResult(
+      { outcome: 'accepted', ticketId: 'tkt_live_001', message: 'Check-in successful' },
+      '2026-06-27T12:00:00.000Z'
+    )
+
+    expect(result).toEqual({
+      status: 'accepted',
+      message: 'Check-in successful',
+      scannedAt: '2026-06-27T12:00:00.000Z',
+    })
+  })
+
+  it('normalizes live duplicate scan responses for the scanner UI', () => {
+    const result = normalizeLiveCheckInScanResult(
+      { outcome: 'duplicate', ticketId: 'tkt_live_001', message: 'Check-in duplicate' },
+      '2026-06-27T12:01:00.000Z'
+    )
+
+    expect(result).toEqual({
+      status: 'duplicate',
+      message: 'Check-in duplicate',
+      scannedAt: '2026-06-27T12:01:00.000Z',
+    })
+  })
+
+  it('normalizes live not_found scan responses as invalid for the scanner UI', () => {
+    const result = normalizeLiveCheckInScanResult(
+      { outcome: 'not_found', message: 'Check-in not_found' },
+      '2026-06-27T12:02:00.000Z'
+    )
+
+    expect(result).toEqual({
+      status: 'invalid',
+      message: 'Check-in not_found',
+      scannedAt: '2026-06-27T12:02:00.000Z',
+    })
   })
 })

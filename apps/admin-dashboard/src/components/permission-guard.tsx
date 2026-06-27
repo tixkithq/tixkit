@@ -4,7 +4,7 @@ import * as React from 'react'
 import Link from 'next/link'
 import { ShieldAlertIcon } from 'lucide-react'
 import { usePermissions } from '@/context/permission-provider'
-import { type GateKitPermission } from '@/lib/permissions'
+import { type TixkitPermission } from '@/lib/permissions'
 import { routes } from '@/lib/routes'
 import { Card, CardContent } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
@@ -12,7 +12,7 @@ import { Skeleton } from '@/components/ui/skeleton'
 
 type PermissionGuardProps = {
   /** Permission required to view the guarded route content. */
-  required: GateKitPermission
+  required: TixkitPermission
   children: React.ReactNode
 }
 
@@ -59,7 +59,7 @@ function AccessDenied() {
             administrator if you believe this is an error.
           </p>
           <Button asChild variant='outline' className='mt-2'>
-            <Link href={routes.dashboard}>Back to dashboard</Link>
+            <Link href={routes.dashboard} prefetch={false}>Back to dashboard</Link>
           </Button>
         </CardContent>
       </Card>

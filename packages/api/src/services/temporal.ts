@@ -1,4 +1,5 @@
 import { Connection, Client } from '@temporalio/client';
+import { OpenTelemetryWorkflowClientInterceptor } from '@temporalio/interceptors-opentelemetry';
 import {
   checkoutSessionWorkflow,
   paymentReconciliationWorkflow,
@@ -39,7 +40,7 @@ import {
   type NotificationDeliveryWorkflowInput,
   type SmsDeliveryWorkflowInput,
   type CheckoutState,
-} from '@gatekit/workflows';
+} from '@tixkit/workflows';
 import { config } from '../config/index.js';
 
 export type { CheckoutState };
@@ -58,15 +59,18 @@ export class TemporalClient {
     const client = new Client({
       connection,
       namespace: config.temporalNamespace,
+      interceptors: {
+        workflow: [new OpenTelemetryWorkflowClientInterceptor()],
+      },
     });
     return new TemporalClient(client);
   }
 
-  async startCheckoutSession(input: Omit<CheckoutSessionWorkflowInput, 'version'> & { holdId: string }) {
+  async startCheckoutSession(input: Omit<CheckoutSessionWorkflowInput, 'version'>) {
     const workflowId = checkoutWorkflowId(input.checkoutSessionId);
     try {
       return await this.client.workflow.start(checkoutSessionWorkflow, {
-        taskQueue: 'gatekit',
+        taskQueue: config.temporalTaskQueue,
         workflowId,
         args: [
           {
@@ -102,7 +106,7 @@ export class TemporalClient {
     const workflowId = refundWorkflowId(input.orderId, input.nonce);
     try {
       return await this.client.workflow.start(refundWorkflow, {
-        taskQueue: 'gatekit',
+        taskQueue: config.temporalTaskQueue,
         workflowId,
         args: [
           {
@@ -123,7 +127,7 @@ export class TemporalClient {
     const workflowId = paymentReconciliationWorkflowId(input.providerEventId);
     try {
       return await this.client.workflow.start(paymentReconciliationWorkflow, {
-        taskQueue: 'gatekit',
+        taskQueue: config.temporalTaskQueue,
         workflowId,
         args: [
           {
@@ -143,7 +147,7 @@ export class TemporalClient {
   async startClerkIdentitySync(input: Omit<ClerkIdentitySyncWorkflowInput, 'version'>) {
     const workflowId = clerkIdentitySyncWorkflowId(input.clerkUserId ?? input.clerkOrgId ?? 'unknown');
     return this.client.workflow.start(clerkIdentitySyncWorkflow, {
-      taskQueue: 'gatekit',
+      taskQueue: config.temporalTaskQueue,
       workflowId,
       args: [
         {
@@ -154,10 +158,11 @@ export class TemporalClient {
     });
   }
 
-  async startWebhookDelivery(input: Omit<WebhookDeliveryWorkflowInput, 'version'>) {
-    const workflowId = webhookDeliveryWorkflowId(input.eventId, input.endpointId);
+  async startWebhookDelivery(input: Omit<WebhookDeliveryWorkflowInput, 'version'> & { replayNonce?: string }) {
+    const baseWorkflowId = webhookDeliveryWorkflowId(input.eventId, input.endpointId);
+    const workflowId = input.replayNonce ? `${baseWorkflowId}:replay:${input.replayNonce}` : baseWorkflowId;
     return this.client.workflow.start(webhookDeliveryWorkflow, {
-      taskQueue: 'gatekit',
+      taskQueue: config.temporalTaskQueue,
       workflowId,
       args: [
         {
@@ -171,7 +176,7 @@ export class TemporalClient {
   async startExport(input: Omit<ExportWorkflowInput, 'version'>) {
     const workflowId = exportWorkflowId(input.exportId);
     return this.client.workflow.start(exportWorkflow, {
-      taskQueue: 'gatekit',
+      taskQueue: config.temporalTaskQueue,
       workflowId,
       args: [
         {
@@ -191,7 +196,7 @@ export class TemporalClient {
     const workflowId = notificationWorkflowId(input.jobId);
     try {
       return await this.client.workflow.start(notificationDeliveryWorkflow, {
-        taskQueue: 'gatekit',
+        taskQueue: config.temporalTaskQueue,
         workflowId,
         args: [
           {
@@ -212,7 +217,7 @@ export class TemporalClient {
     const workflowId = smsDeliveryWorkflowId(input.jobId);
     try {
       return await this.client.workflow.start(smsDeliveryWorkflow, {
-        taskQueue: 'gatekit',
+        taskQueue: config.temporalTaskQueue,
         workflowId,
         args: [
           {
@@ -233,7 +238,7 @@ export class TemporalClient {
     const workflowId = holdExpirationWorkflowId();
     try {
       return await this.client.workflow.start(holdExpirationWorkflow, {
-        taskQueue: 'gatekit',
+        taskQueue: config.temporalTaskQueue,
         workflowId,
         args: [{ version: HOLD_EXPIRATION_WORKFLOW_VERSION }],
       });

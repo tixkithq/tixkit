@@ -1,5 +1,5 @@
 {
-  "name": "@gatekit/next",
+  "name": "@tixkit/next",
   "version": "0.1.0",
   "type": "module",
   "main": "./dist/index.js",
@@ -16,6 +16,10 @@
     "./server": {
       "types": "./dist/server.d.ts",
       "import": "./dist/server.js"
+    },
+    "./route-handlers": {
+      "types": "./dist/route-handlers.d.ts",
+      "import": "./dist/route-handlers.js"
     }
   },
   "scripts": {
@@ -26,7 +30,7 @@
     "clean": "rm -rf dist"
   },
   "dependencies": {
-    "@gatekit/js": "workspace:*"
+    "@tixkit/js": "workspace:*"
   },
   "peerDependencies": {
     "react": "^19.0.0"

@@ -104,7 +104,7 @@ export default function BillingPage() {
               <div>
                 <p className='font-medium'>{plan}</p>
                 <p className='text-sm text-muted-foreground'>
-                  Billing status from the GateKit API
+                  Billing status from the Tixkit API
                 </p>
               </div>
             </div>

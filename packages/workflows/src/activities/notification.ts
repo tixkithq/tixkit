@@ -1,4 +1,4 @@
-import { createDb } from '@gatekit/db';
+import { createDb } from '@tixkit/db';
 import {
   NotificationTemplateVersionRepository,
   EmailProviderRouteRepository,
@@ -9,7 +9,7 @@ import {
   SmsSenderIdentityRepository,
   SmsJobRepository,
   SmsDeliveryRepository,
-} from '@gatekit/db';
+} from '@tixkit/db';
 import {
   OpenCoreEmailSdkTransport,
   SmtpEmailTransport,
@@ -22,9 +22,9 @@ import {
   FallbackSmsTransport,
   ProviderRouteSelector,
   validateProviderFields,
-} from '@gatekit/email-transport';
-import type { EmailTransport } from '@gatekit/domain';
-import type { SmsTransport } from '@gatekit/domain/messaging';
+} from '@tixkit/email-transport';
+import type { EmailTransport } from '@tixkit/domain';
+import type { SmsTransport } from '@tixkit/domain/messaging';
 import { ulid } from 'ulid';
 import type { WorkflowActivityResult } from '../shared/types.js';
 import { okResult, errResult } from '../shared/types.js';
@@ -145,7 +145,7 @@ export async function renderTemplateActivity(input: {
 
     if (!version) {
       return okResult({
-        subject: renderTemplateString('GateKit Notification', input.variables),
+        subject: renderTemplateString('Tixkit Notification', input.variables),
         html: renderTemplateString('<p>You have a new notification.</p>', input.variables),
         text: 'You have a new notification.',
       });
@@ -229,7 +229,7 @@ export async function sendEmailActivity(input: {
 
     const routes = await routeRepo.findActiveByBrand(job.brand_id);
     if (routes.length === 0) {
-      const senderDomain = process.env.EMAIL_SENDER_DOMAIN ?? 'gatekit.com';
+      const senderDomain = process.env.EMAIL_SENDER_DOMAIN ?? 'tixkit.com';
       const transport = new OpenCoreEmailSdkTransport(
         process.env.EMAIL_SDK_CREDENTIALS_REF ?? 'default',
         senderDomain,
@@ -242,7 +242,7 @@ export async function sendEmailActivity(input: {
         templateKey: job.template_key,
         templateVersionId: job.template_version_id,
         deliveryId,
-        from: { email: `noreply@${senderDomain}`, name: 'GateKit' },
+        from: { email: `noreply@${senderDomain}`, name: 'Tixkit' },
         to: [{ email: job.to_email, name: job.to_name ?? undefined }],
         subject: input.subject,
         html: input.html,
@@ -268,7 +268,7 @@ export async function sendEmailActivity(input: {
 
     const senderIdentity = await senderRepo.findVerifiedByBrand(job.brand_id);
     const fromEmail = senderIdentity?.email ?? `noreply@${routes[0].sender_domain}`;
-    const fromName = senderIdentity?.name ?? 'GateKit';
+    const fromName = senderIdentity?.name ?? 'Tixkit';
     const replyTo = senderIdentity?.reply_to_email
       ? { email: senderIdentity.reply_to_email, name: fromName }
       : undefined;
@@ -390,11 +390,10 @@ export async function sendSmsActivity(input: {
       return errResult('NO_SMS_PROVIDER_ROUTE', 'No active SMS provider route for this brand', false);
     }
 
-    const selectorRoutes = [];
-    for (const route of routes) {
+    const selectorRouteCandidates = await Promise.all(routes.map(async (route) => {
       const sender = await senderRepo.findById(route.sender_identity_id);
-      if (!sender || !sender.verified) continue;
-      selectorRoutes.push({
+      if (!sender || !sender.verified) return undefined;
+      return {
         id: route.id,
         transport: buildSmsTransport(route.provider_type, route.credentials_ref),
         priority: route.priority,
@@ -403,11 +402,13 @@ export async function sendSmsActivity(input: {
         rateLimitPerHour: route.rate_limit_per_hour ?? undefined,
         sender: sender.sender,
         webhookUrl: route.webhook_url ?? undefined,
-      });
-    }
+      };
+    }));
+    const selectorRoutes = selectorRouteCandidates.filter((route): route is NonNullable<(typeof selectorRouteCandidates)[number]> => Boolean(route));
 
     const eligibleRoutes = selectorRoutes
       .filter((route) => route.allowedCategories.includes(input.notificationType))
+      // eslint-disable-next-line unicorn/no-array-sort -- sorting a freshly filtered route list preserves provider priority order.
       .sort((a, b) => {
         if (a.isFallback !== b.isFallback) return a.isFallback ? 1 : -1;
         return a.priority - b.priority;

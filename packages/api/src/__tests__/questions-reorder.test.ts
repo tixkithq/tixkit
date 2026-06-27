@@ -1,7 +1,7 @@
 import Fastify from 'fastify';
 import { describe, expect, it } from 'vitest';
-import type { Principal } from '@gatekit/domain';
-import type { Database } from '@gatekit/db';
+import type { Principal } from '@tixkit/domain';
+import type { Database } from '@tixkit/db';
 import type { AppContext } from '../app.js';
 import { questionRoutes } from '../routes/modules/questions.js';
 
@@ -82,6 +82,7 @@ function createQuestionReorderDb(rows: QuestionRow[], failOnQuestionId?: string)
             result = result.filter((row) => value.includes(row.id));
           }
         }
+        // eslint-disable-next-line unicorn/no-array-sort -- the mock query orders a fresh result array to match repository ordering.
         return result.sort((a, b) => a.sort_order - b.sort_order || a.id.localeCompare(b.id));
       },
     };

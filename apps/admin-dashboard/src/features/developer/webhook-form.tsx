@@ -141,7 +141,7 @@ export function WebhookFormDrawer({
                     <FormLabel>URL</FormLabel>
                     <FormControl>
                       <Input
-                        placeholder='https://example.com/webhooks/gatekit'
+                        placeholder='https://example.com/webhooks/tixkit'
                         {...field}
                       />
                     </FormControl>

@@ -1,9 +1,9 @@
-import type { Principal, Permission } from '@gatekit/domain';
-import { ForbiddenError, ValidationError } from '@gatekit/domain';
+import type { Principal, Permission } from '@tixkit/domain';
+import { ForbiddenError, ValidationError } from '@tixkit/domain';
 export {
   signWebhookPayload,
   verifyWebhookSignature,
-} from '@gatekit/domain/developer';
+} from '@tixkit/domain/developer';
 
 export type PageEnvelope<T> = {
   items: T[];
@@ -115,6 +115,43 @@ export function serializeEvent(row: Record<string, unknown>) {
   };
 }
 
+export function serializeEventOccurrence(row: Record<string, unknown>) {
+  return {
+    id: row.id,
+    eventId: row.event_id,
+    title: row.title,
+    startsAt: toIso(row.starts_at as Date | string),
+    endsAt: toIso(row.ends_at as Date | string),
+    timezone: row.timezone,
+    venue: parseJsonValue(row.venue, null),
+    capacity: row.capacity ?? undefined,
+    sortOrder: row.sort_order,
+    status: row.status,
+    createdAt: toIso(row.created_at as Date | string),
+    updatedAt: toIso(row.updated_at as Date | string),
+  };
+}
+
+export function serializeMarketingIntegration(row: Record<string, unknown>, options: { public?: boolean } = {}) {
+  const base = {
+    provider: row.provider,
+    config: parseJsonValue(row.config, {}),
+    consentRequired: Boolean(row.consent_required),
+    status: row.status,
+  };
+  if (options.public) return base;
+  return {
+    id: row.id,
+    tenantId: row.tenant_id,
+    organizationId: row.organization_id,
+    brandId: row.brand_id,
+    eventId: row.event_id ?? undefined,
+    ...base,
+    createdAt: toIso(row.created_at as Date | string),
+    updatedAt: toIso(row.updated_at as Date | string),
+  };
+}
+
 export function serializeTicketType(row: Record<string, unknown>) {
   return {
     id: row.id,
@@ -135,6 +172,7 @@ export function serializeTicketType(row: Record<string, unknown>) {
     sortOrder: row.sort_order,
     requiresAccessCode: row.requires_access_code,
     accessCodeHint: row.access_code_hint ?? undefined,
+    eventOccurrenceId: row.event_occurrence_id ?? undefined,
     createdAt: toIso(row.created_at as Date | string),
     updatedAt: toIso(row.updated_at as Date | string),
   };
@@ -233,7 +271,9 @@ export function serializeOrderLineItem(row: Record<string, unknown>) {
   return {
     id: row.id,
     orderId: row.order_id,
-    ticketTypeId: row.ticket_type_id,
+    ticketTypeId: row.ticket_type_id ?? undefined,
+    eventOccurrenceId: row.event_occurrence_id ?? undefined,
+    productId: row.product_id ?? undefined,
     attendeeId: row.attendee_id ?? undefined,
     description: row.description,
     quantity: row.quantity,
@@ -267,6 +307,61 @@ export function serializeRefund(row: Record<string, unknown>) {
   };
 }
 
+export function serializeTaxSnapshot(row: Record<string, unknown>) {
+  return {
+    id: row.id,
+    orderId: row.order_id,
+    orderLineItemId: row.order_line_item_id,
+    eventId: row.event_id,
+    taxRuleId: row.tax_rule_id ?? undefined,
+    taxRuleName: row.tax_rule_name,
+    rate: Number(row.rate),
+    type: row.type,
+    appliedTo: row.applied_to,
+    jurisdictionCountry: row.jurisdiction_country ?? undefined,
+    jurisdictionRegion: row.jurisdiction_region ?? undefined,
+    taxableAmountCents: Number(row.taxable_amount_cents),
+    taxCents: Number(row.tax_cents),
+    currency: row.currency,
+    inclusive: Boolean(row.inclusive),
+    provider: row.provider,
+    providerCalculationId: row.provider_calculation_id ?? undefined,
+    metadata: parseJsonValue(row.metadata, undefined),
+    createdAt: toIso(row.created_at as Date | string),
+  };
+}
+
+export function serializeInvoice(row: Record<string, unknown>) {
+  return {
+    id: row.id,
+    orderId: row.order_id,
+    tenantId: row.tenant_id,
+    organizationId: row.organization_id,
+    brandId: row.brand_id,
+    eventId: row.event_id,
+    invoiceNumber: row.invoice_number,
+    status: row.status,
+    currency: row.currency,
+    subtotalCents: Number(row.subtotal_cents),
+    discountCents: Number(row.discount_cents),
+    taxCents: Number(row.tax_cents),
+    feeCents: Number(row.fee_cents),
+    totalCents: Number(row.total_cents),
+    refundedCents: Number(row.refunded_cents),
+    buyerEmail: row.buyer_email,
+    buyerName: row.buyer_name ?? undefined,
+    buyerTaxId: row.buyer_tax_id ?? undefined,
+    sellerName: row.seller_name,
+    sellerTaxId: row.seller_tax_id ?? undefined,
+    reverseCharge: Boolean(row.reverse_charge),
+    issuedAt: toIso(row.issued_at as Date | string),
+    voidedAt: toIso(row.voided_at as Date | string | null),
+    metadata: parseJsonValue(row.metadata, undefined),
+    createdAt: toIso(row.created_at as Date | string),
+    updatedAt: toIso(row.updated_at as Date | string),
+  };
+}
+
 export function serializeTimelineEvent(row: Record<string, unknown>) {
   return {
     id: row.id,
@@ -286,6 +381,7 @@ export function serializeAttendee(row: Record<string, unknown>) {
     orderId: row.order_id,
     eventId: row.event_id,
     ticketTypeId: row.ticket_type_id,
+    eventOccurrenceId: row.event_occurrence_id ?? undefined,
     ticketId: row.ticket_id ?? undefined,
     firstName: row.first_name ?? undefined,
     lastName: row.last_name ?? undefined,
@@ -308,6 +404,7 @@ export function serializeTicket(row: Record<string, unknown>) {
     attendeeId: row.attendee_id,
     eventId: row.event_id,
     ticketTypeId: row.ticket_type_id,
+    eventOccurrenceId: row.event_occurrence_id ?? undefined,
     status: row.status,
     code: row.code,
     qrPayload: row.qr_payload,

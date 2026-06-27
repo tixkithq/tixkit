@@ -4,7 +4,7 @@ import {
   FallbackSmsTransport,
   TelnyxSmsTransport,
 } from './index.js';
-import type { SendSmsInput, SendSmsResult, SmsTransport } from '@gatekit/domain/messaging';
+import type { SendSmsInput, SendSmsResult, SmsTransport } from '@tixkit/domain/messaging';
 
 const smsInput: SendSmsInput = {
   tenantId: 'tnt_1',
@@ -14,7 +14,7 @@ const smsInput: SendSmsInput = {
   deliveryId: 'smd_1',
   from: '+15550000001',
   to: '+15550000002',
-  body: 'GateKit update',
+  body: 'Tixkit update',
   providerRouteId: 'spr_1',
   idempotencyKey: 'sms:test',
   notificationType: 'bulk',
@@ -67,7 +67,7 @@ describe('SMS transports', () => {
       expect(JSON.parse(String(calls[0].init.body))).toMatchObject({
         from: { phone_number: '+15550000001' },
         to: [{ phone_number: '+15550000002' }],
-        text: 'GateKit update',
+        text: 'Tixkit update',
         type: 'SMS',
       });
     } finally {

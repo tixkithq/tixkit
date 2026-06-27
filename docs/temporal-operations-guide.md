@@ -1,6 +1,6 @@
 # Temporal Operations Guide
 
-GateKit uses [Temporal](https://temporal.io) for all durable multi-step workflows: checkout finalization, payment reconciliation, refunds, notifications, SMS delivery, webhook delivery, exports, hold expiration, and Clerk identity sync. This guide covers local dev, worker deployment, task queues, workflow versioning, retries, replay safety, and incident recovery.
+Tixkit uses [Temporal](https://temporal.io) for all durable multi-step workflows: checkout finalization, payment reconciliation, refunds, notifications, SMS delivery, webhook delivery, exports, hold expiration, and Clerk identity sync. This guide covers local dev, worker deployment, task queues, workflow versioning, retries, replay safety, and incident recovery.
 
 Implementation lives in `packages/workflows` (workflows and activities) and `packages/api/src/services/temporal.ts` (API client).
 
@@ -12,19 +12,19 @@ The dev stack includes Temporal plus a dedicated Temporal PostgreSQL and the Tem
 bun run infra:up      # starts postgres, mysql, redis, temporal, temporal-ui, minio
 bun run db:migrate
 bun run dev:api       # API on :4000
-bun run dev:worker    # worker on the 'gatekit' task queue
+bun run dev:worker    # worker on the 'tixkit' task queue
 ```
 
 - Temporal address: `localhost:7233` (`TEMPORAL_ADDRESS`)
 - Namespace: `default` (`TEMPORAL_NAMESPACE`)
 - Temporal UI: `http://localhost:8080`
 
-The worker (`packages/workflows/src/worker.ts`) registers all workflows and activities on the `gatekit` task queue. On boot it also starts the long-running `holdExpirationWorkflow` if it is not already running.
+The worker (`packages/workflows/src/worker.ts`) registers all workflows and activities on the `tixkit` task queue. On boot it also starts the long-running `holdExpirationWorkflow` if it is not already running.
 
 If Temporal is unreachable, the worker exits with a diagnostic message:
 
 ```
-GateKit worker failed to start.
+Tixkit worker failed to start.
 - Start local infrastructure with `bun run infra:up`.
 - Verify Temporal is reachable at localhost:7233.
 - Run `bun run db:migrate` before starting worker activities that touch storage.
@@ -41,13 +41,15 @@ Production checklist:
 
 1. Set `TEMPORAL_ADDRESS` and `TEMPORAL_NAMESPACE` to the production Temporal cluster.
 2. Set `DATABASE_URL` and `REDIS_URL` so activities can read/write domain state.
-3. Run `bun run dev:worker` (or the compiled equivalent `node dist/worker.js`) under your process supervisor (systemd, Kubernetes, ECS, etc.).
-4. Ensure exactly one worker revision is live during a deploy that changes workflow code (see [Versioning](#workflow-versioning)) to avoid non-deterministic replay errors.
-5. Monitor Temporal worker metrics; alert on `workflow_failed`, `activity_failed`, and dead-lettered webhook deliveries.
+3. Set `OTEL_EXPORTER_OTLP_ENDPOINT` so worker/workflow/activity spans export to the collector.
+4. Set `PROMETHEUS_PUSHGATEWAY_URL` when the worker process cannot be scraped directly.
+5. Run `bun run dev:worker` (or the compiled equivalent `node dist/worker.js`) under your process supervisor (systemd, Kubernetes, ECS, etc.).
+6. Ensure exactly one worker revision is live during a deploy that changes workflow code (see [Versioning](#workflow-versioning)) to avoid non-deterministic replay errors.
+7. Monitor `tixkit_temporal_activity_events_total`, `tixkit_temporal_activity_duration_seconds`, Temporal worker metrics, and dead-lettered webhook deliveries.
 
 ## Task Queues
 
-GateKit uses a single task queue named `gatekit` for all workflows and activities. This keeps the worker deployment simple and is sufficient for the current workload. If you split task queues in the future, update `packages/workflows/src/worker.ts` and the `taskQueue: 'gatekit'` arguments in `packages/api/src/services/temporal.ts` together.
+Tixkit uses a single task queue named `tixkit` for all workflows and activities. This keeps the worker deployment simple and is sufficient for the current workload. If you split task queues in the future, update `packages/workflows/src/worker.ts` and the `taskQueue: 'tixkit'` arguments in `packages/api/src/services/temporal.ts` together.
 
 ## Workflows
 
@@ -105,7 +107,7 @@ Activity defaults (set via `proxyActivities` in each workflow):
 
 Activities return a `WorkflowActivityResult<T>` discriminated union (`{ ok: true, value }` or `{ ok: false, errorCode, retryable, message }`). Non-retryable activity errors should return `{ ok: false, retryable: false }` so the workflow can branch instead of burning retries. Retryable errors propagate to Temporal's retry policy.
 
-The checkout workflow waits up to **10 minutes** for a payment signal before timing out and releasing the hold. Free orders skip the wait and finalize synchronously.
+The checkout workflow waits up to **10 minutes** for a payment signal before timing out and releasing the hold. Free orders skip the wait and finalize synchronously. If a payment succeeds after the hold is expired or after finalization can no longer produce a valid order, the payment is treated as orphaned: Tixkit must not create a late order by default, must not issue tickets, and must compensate the payment by canceling/voiding the authorization when possible or refunding captured funds.
 
 ## Replay Safety
 
@@ -131,14 +133,15 @@ See [Incident Runbooks](./incident-runbooks.md) for step-by-step recovery proced
 
 1. Find the workflow ID in Temporal UI (e.g. `checkout-session:cs_...`).
 2. Inspect the event history to identify the stuck activity or signal wait.
-3. If waiting on a signal that will never come (e.g. an orphaned payment), signal `cancelCheckout` to release the hold and close the workflow.
-4. If an activity is repeatedly failing, fix the underlying issue (DB, provider) and let the retry policy recover. For non-retryable failures, terminate the workflow and re-start from the API after repairing state.
-5. For refund/reconciliation workflows stuck after a provider outage, replay the original provider webhook (Stripe/Telnyx) or use the admin replay endpoint to re-queue webhook deliveries.
+3. If waiting on a signal that will never come, signal `cancelCheckout` to release the hold and close the workflow.
+4. If a successful provider payment exists but the checkout session is expired or no valid order can be finalized, follow the orphan-payment compensation path: persist the orphan state, cancel/void or refund idempotently by provider payment ID, mark the checkout session failed/expired, and require the buyer to retry.
+5. If an activity is repeatedly failing, fix the underlying issue (DB, provider) and let the retry policy recover. For non-retryable failures, terminate the workflow and re-start from the API after repairing state.
+6. For refund/reconciliation workflows stuck after a provider outage, replay the original provider webhook (Stripe/Telnyx) or use the admin replay endpoint to re-queue webhook deliveries.
 
 ## Testing
 
 Workflow tests live in `packages/workflows/src/__tests__` and use the Temporal testing environment (`TestWorkflowEnvironment`). Tests cover happy path, retry, timeout, duplicate signal, provider retry, non-retryable failure, full/partial refund, and compensation. Run them with:
 
 ```bash
-bun run --env-file=.env.local --filter @gatekit/workflows test:unit
+bun run --env-file=.env.local --filter @tixkit/workflows test:unit
 ```

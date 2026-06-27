@@ -11,8 +11,8 @@ import {
  * Bootstrap context providing the current organization and brand IDs
  * resolved from the live API (or fixtures in test mode).
  *
- * This replaces the old `NEXT_PUBLIC_GATEKIT_ORGANIZATION_ID` /
- * `NEXT_PUBLIC_GATEKIT_BRAND_ID` env var fallbacks. Event creation, API key
+ * This replaces the old `NEXT_PUBLIC_TIXKIT_ORGANIZATION_ID` /
+ * `NEXT_PUBLIC_TIXKIT_BRAND_ID` env var fallbacks. Event creation, API key
  * creation, and webhook creation must pass these IDs explicitly from this
  * context rather than relying on hidden env defaults.
  */
@@ -31,8 +31,8 @@ type BootstrapContextValue = {
 }
 
 const BootstrapContext = createContext<BootstrapContextValue | null>(null)
-const selectedOrganizationStorageKey = 'gatekit:selected-organization-id'
-const selectedBrandStorageKey = 'gatekit:selected-brand-id'
+const selectedOrganizationStorageKey = 'tixkit:selected-organization-id'
+const selectedBrandStorageKey = 'tixkit:selected-brand-id'
 
 function storedSelection(key: string): string | undefined {
   if (typeof window === 'undefined') return undefined

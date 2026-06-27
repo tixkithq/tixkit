@@ -1,0 +1,31 @@
+{{- if .Values.migrations.enabled }}
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ include "tixkit.fullname" . }}-migrate
+  labels:
+    {{- include "tixkit.labels" . | nindent 4 }}
+    app.kubernetes.io/component: migrate
+  annotations:
+    "helm.sh/hook": pre-install,pre-upgrade
+    "helm.sh/hook-delete-policy": before-hook-creation,hook-succeeded
+spec:
+  backoffLimit: {{ .Values.migrations.backoffLimit }}
+  template:
+    metadata:
+      labels:
+        {{- include "tixkit.selectorLabels" . | nindent 8 }}
+        app.kubernetes.io/component: migrate
+    spec:
+      restartPolicy: Never
+      containers:
+        - name: migrate
+          image: {{ include "tixkit.image" (dict "Values" .Values "image" .Values.migrations.image) }}
+          imagePullPolicy: {{ .Values.global.imagePullPolicy }}
+          command: ["bun", "run", "db:migrate"]
+          envFrom:
+            - configMapRef:
+                name: {{ include "tixkit.fullname" . }}-config
+            - secretRef:
+                name: {{ .Values.secrets.name }}
+{{- end }}

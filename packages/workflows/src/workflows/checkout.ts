@@ -45,7 +45,11 @@ const {
     tenantId: string;
     brandId: string;
   }): Promise<WorkflowActivityResult<{ issued: number; jobId?: string }>>;
-  releaseHoldActivity(input: { holdId?: string; checkoutSessionId?: string }): Promise<WorkflowActivityResult<{ released: boolean }>>;
+  releaseHoldActivity(input: {
+    holdId?: string;
+    checkoutSessionId?: string;
+    checkoutSessionStatus?: 'cancelled' | 'expired';
+  }): Promise<WorkflowActivityResult<{ released: boolean }>>;
   emitWebhookEventActivity(input: {
     tenantId: string;
     organizationId: string;
@@ -88,7 +92,7 @@ export type CheckoutSessionWorkflowInput = {
   organizationId: string;
   eventId: string;
   brandId: string;
-  holdId: string;
+  holdId?: string;
   currency: string;
   amountCents: number;
   feeCents: number;
@@ -199,7 +203,7 @@ export async function checkoutSessionWorkflow(
   });
 
   if (!paymentResult.ok) {
-    await releaseHoldActivity({ checkoutSessionId: input.checkoutSessionId });
+    await releaseHoldActivity({ checkoutSessionId: input.checkoutSessionId, checkoutSessionStatus: 'expired' });
     state = { status: 'failed', holdId: input.holdId, error: paymentResult.message };
     return { status: 'failed' };
   }
@@ -207,6 +211,9 @@ export async function checkoutSessionWorkflow(
   paymentIntentId = paymentResult.value.providerIntentId;
   const clientSecret = paymentResult.value.clientSecret;
   state = { status: 'payment_pending', holdId: input.holdId, paymentIntentId, clientSecret };
+  if (paymentIntentId.startsWith('pi_capture_')) {
+    paymentSucceeded = true;
+  }
 
   const paymentTimeout = '10 minutes';
   const gotPayment = await condition(
@@ -215,19 +222,19 @@ export async function checkoutSessionWorkflow(
   );
 
   if (cancelled) {
-    await releaseHoldActivity({ checkoutSessionId: input.checkoutSessionId });
+    await releaseHoldActivity({ checkoutSessionId: input.checkoutSessionId, checkoutSessionStatus: 'cancelled' });
     state = { status: 'cancelled', holdId: input.holdId, paymentIntentId, clientSecret };
     return { status: 'cancelled' };
   }
 
   if (paymentError) {
-    await releaseHoldActivity({ checkoutSessionId: input.checkoutSessionId });
+    await releaseHoldActivity({ checkoutSessionId: input.checkoutSessionId, checkoutSessionStatus: 'expired' });
     state = { status: 'failed', holdId: input.holdId, paymentIntentId, clientSecret, error: paymentError };
     return { status: 'failed' };
   }
 
   if (!gotPayment) {
-    await releaseHoldActivity({ checkoutSessionId: input.checkoutSessionId });
+    await releaseHoldActivity({ checkoutSessionId: input.checkoutSessionId, checkoutSessionStatus: 'expired' });
     state = { status: 'failed', holdId: input.holdId, paymentIntentId, clientSecret, error: 'Payment timeout' };
     return { status: 'failed' };
   }

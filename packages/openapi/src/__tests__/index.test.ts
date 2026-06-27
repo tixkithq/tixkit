@@ -2,6 +2,10 @@ import { describe, expect, it } from 'vitest';
 import { openApiSpec } from '../index.js';
 
 describe('openApiSpec', () => {
+  it('publishes the documented API lifecycle version', () => {
+    expect(openApiSpec.info.version).toBe('2026-01-01');
+  });
+
   it('documents the root-level health route outside the versioned API server', () => {
     expect(openApiSpec.paths['/health'].get).toBeDefined();
     expect(openApiSpec.paths['/health'].get.summary).toBe('Health check');
@@ -52,6 +56,16 @@ describe('openApiSpec', () => {
     expect(openApiSpec.paths['/brands/{brandId}'].patch.requestBody.content['application/json'].schema.properties).toHaveProperty(
       'paymentAccountId',
     );
+  });
+
+  it('documents Stripe Connect onboarding URL responses', () => {
+    expect(openApiSpec.components.schemas.PaymentAccount.properties).toHaveProperty('onboardingUrl');
+    expect(
+      openApiSpec.paths['/organizations/{organizationId}/payment-accounts/stripe-connect'].post.responses,
+    ).toHaveProperty('201');
+    expect(
+      openApiSpec.paths['/organizations/{organizationId}/payment-accounts/{paymentAccountId}/stripe-connect/refresh'].post.responses,
+    ).toHaveProperty('200');
   });
 
   it('documents signed QR payloads for online check-in scans', () => {
@@ -110,11 +124,55 @@ describe('openApiSpec', () => {
     expect(checkoutSessionBody.properties.trackingId).toEqual({ type: 'string' });
   });
 
-  it('documents conversion widget impressions as explicitly nullable while untracked', () => {
+  it('documents conversion widget impressions as persisted counts', () => {
     const schema =
       openApiSpec.paths['/events/{eventId}/reports/conversion'].get.responses['200'].content['application/json'].schema;
     expect(schema.required).toContain('widgetViews');
-    expect(schema.properties.widgetViews).toEqual({ type: 'number', nullable: true });
+    expect(schema.properties.widgetViews).toEqual({ type: 'number' });
+  });
+
+  it('documents public widget impression ingestion', () => {
+    const path = openApiSpec.paths['/public/events/{eventId}/widget-impressions'];
+    expect(path.post).toBeDefined();
+    expect(path.post.responses['201']).toBeDefined();
+    const body = path.post.requestBody.content['application/json'].schema;
+    expect(body.properties.visitorId).toMatchObject({ type: 'string' });
+  });
+
+  it('documents marketing integration management and public exposure', () => {
+    expect(openApiSpec.components.schemas.MarketingIntegration.properties.provider.enum).toEqual([
+      'ga4',
+      'meta_pixel',
+      'generic_tag',
+    ]);
+    expect(
+      openApiSpec.paths['/events/{eventId}/marketing-integrations'].get.responses['200']
+        .content['application/json'].schema,
+    ).toEqual({ $ref: '#/components/schemas/MarketingIntegrationPage' });
+    expect(openApiSpec.paths['/events/{eventId}/marketing-integrations/{provider}'].put).toBeDefined();
+    expect(
+      openApiSpec.paths['/public/events/{eventId}/marketing-integrations'].get.responses['200']
+        .content['application/json'].schema,
+    ).toEqual({ $ref: '#/components/schemas/MarketingIntegrationPage' });
+  });
+
+  it('requires public upload completion tokens without requiring them for authenticated completion', () => {
+    expect(openApiSpec.components.schemas.PublicCompleteUploadArtifact).toMatchObject({
+      required: ['token'],
+      properties: {
+        token: { type: 'string', minLength: 1 },
+      },
+    });
+
+    expect(
+      openApiSpec.paths['/public/upload-artifacts/{artifactId}/complete'].post.requestBody.content['application/json'].schema,
+    ).toEqual({ $ref: '#/components/schemas/PublicCompleteUploadArtifact' });
+    expect(
+      openApiSpec.paths['/upload-artifacts/{artifactId}/complete'].post.requestBody.content['application/json'].schema,
+    ).toEqual({ $ref: '#/components/schemas/CompleteUploadArtifact' });
+    expect(openApiSpec.components.schemas.CompleteUploadArtifact).not.toHaveProperty('required');
+    expect(openApiSpec.components.schemas.CompleteUploadArtifact.properties).not.toHaveProperty('token');
+    expect(openApiSpec.paths['/upload-artifacts/{artifactId}/complete'].post.requestBody.required).toBe(false);
   });
 
   it('documents the atomic checkout-question reorder contract', () => {

@@ -1,8 +1,8 @@
 import { expect, it, describe, vi, beforeEach, afterEach } from 'vitest'
-import { GateKitWidget, GateKitButton } from '../index.js'
+import { TixkitWidget, TixkitButton } from '../index.js'
 
-const CHECKOUT_BASE = 'https://checkout.gatekit.com'
-const mountedElements: Array<GateKitWidget | GateKitButton> = []
+const CHECKOUT_BASE = 'https://checkout.tixkit.com'
+const mountedElements: Array<TixkitWidget | TixkitButton> = []
 
 /**
  * jsdom does not fully upgrade custom elements via `document.createElement`,
@@ -13,8 +13,8 @@ const mountedElements: Array<GateKitWidget | GateKitButton> = []
  * events. This still asserts that events *actually dispatch* at runtime via
  * spies, rather than matching source strings.
  */
-function createWidget(attrs: Record<string, string> = {}): GateKitWidget {
-  const el = new GateKitWidget()
+function createWidget(attrs: Record<string, string> = {}): TixkitWidget {
+  const el = new TixkitWidget()
   el.setAttribute('api-base-url', CHECKOUT_BASE)
   el.setAttribute('brand', 'brand_demo')
   el.setAttribute('event', 'evt_demo')
@@ -23,8 +23,8 @@ function createWidget(attrs: Record<string, string> = {}): GateKitWidget {
   return el
 }
 
-function createButton(attrs: Record<string, string> = {}): GateKitButton {
-  const el = new GateKitButton()
+function createButton(attrs: Record<string, string> = {}): TixkitButton {
+  const el = new TixkitButton()
   el.setAttribute('api-base-url', CHECKOUT_BASE)
   el.setAttribute('event', 'evt_demo')
   el.setAttribute('brand', 'brand_demo')
@@ -41,15 +41,30 @@ function postCheckoutMessage(
   window.dispatchEvent(
     new MessageEvent('message', {
       origin,
-      data: { source: 'gatekit-checkout', event, ...detail },
+      data: { source: 'tixkit-checkout', event, ...detail },
     }),
   )
 }
+
+beforeEach(() => {
+  window.localStorage.clear()
+  vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
+    const url = String(input)
+    const body = url.includes('/marketing-integrations')
+      ? { items: [] }
+      : { tracked: true, deduped: false }
+    return new Response(JSON.stringify(body), {
+      status: 201,
+      headers: { 'Content-Type': 'application/json' },
+    })
+  }))
+})
 
 afterEach(() => {
   while (mountedElements.length > 0) {
     mountedElements.pop()?.disconnectedCallback()
   }
+  vi.unstubAllGlobals()
 })
 
 describe('widget lifecycle events (runtime)', () => {
@@ -65,6 +80,82 @@ describe('widget lifecycle events (runtime)', () => {
     el.connectedCallback()
     expect(spy).toHaveBeenCalledTimes(1)
     expect(spy.mock.calls[0]?.[0]).toBeInstanceOf(CustomEvent)
+  })
+
+  it('records one persisted widget impression when loaded', () => {
+    const el = createWidget({
+      'reporting-api-url': 'https://api.test',
+      'tracking-id': 'utm-widget',
+      'affiliate-code': 'AFF123',
+    })
+
+    el.connectedCallback()
+
+    const fetchMock = vi.mocked(globalThis.fetch)
+    const [url, init] = fetchMock.mock.calls.find(([requestUrl]) =>
+      String(requestUrl).includes('/widget-impressions'),
+    )!
+    expect(String(url)).toBe('https://api.test/v1/public/events/evt_demo/widget-impressions')
+    expect(init?.method).toBe('POST')
+    const body = JSON.parse(String(init?.body)) as Record<string, unknown>
+    expect(body.visitorId).toEqual(expect.any(String))
+    expect(body.trackingId).toBe('utm-widget')
+    expect(body.affiliateCode).toBe('AFF123')
+  })
+
+  it('does not record duplicate impressions across repeated connectedCallback calls for one element', () => {
+    const el = createWidget({ 'reporting-api-url': 'https://api.test' })
+
+    el.connectedCallback()
+    el.connectedCallback()
+
+    const impressionCalls = vi.mocked(globalThis.fetch).mock.calls.filter(([url]) =>
+      String(url).includes('/widget-impressions'),
+    )
+    expect(impressionCalls).toHaveLength(1)
+  })
+
+  it('loads consent-gated generic marketing tags only after host consent', async () => {
+    vi.mocked(globalThis.fetch).mockImplementation(async (input: RequestInfo | URL) => {
+      const url = String(input)
+      if (url.includes('/marketing-integrations')) {
+        return new Response(JSON.stringify({
+          items: [
+            {
+              provider: 'generic_tag',
+              status: 'active',
+              consentRequired: true,
+              config: { pixelUrl: 'https://analytics.example/pixel' },
+            },
+          ],
+        }), { status: 200, headers: { 'Content-Type': 'application/json' } })
+      }
+      return new Response(JSON.stringify({ tracked: true, deduped: false }), {
+        status: 201,
+        headers: { 'Content-Type': 'application/json' },
+      })
+    })
+    const createdImages: HTMLImageElement[] = []
+    const imageSpy = vi.spyOn(document, 'createElement')
+    imageSpy.mockImplementation(((tagName: string) => {
+      const element = document.createElementNS('http://www.w3.org/1999/xhtml', tagName) as HTMLElement
+      if (tagName.toLowerCase() === 'img') createdImages.push(element as HTMLImageElement)
+      return element
+    }) as typeof document.createElement)
+
+    const blocked = createWidget({ event: 'evt_marketing', 'reporting-api-url': 'https://api.test' })
+    blocked.connectedCallback()
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    expect(createdImages).toHaveLength(0)
+
+    window.localStorage.setItem('tixkit_marketing_consent', 'granted')
+    const allowed = createButton({ event: 'evt_marketing', 'reporting-api-url': 'https://api.test' })
+    allowed.connectedCallback()
+    await new Promise((resolve) => setTimeout(resolve, 0))
+
+    expect(createdImages.at(-1)?.src).toContain('https://analytics.example/pixel?')
+    expect(createdImages.at(-1)?.src).toContain('tk_event=view_item')
+    imageSpy.mockRestore()
   })
 
   it('dispatches opened when the inline iframe finishes loading', () => {
@@ -137,7 +228,7 @@ describe('widget lifecycle events (runtime)', () => {
 
     ;(el as unknown as { showError(message: string): void }).showError('<img src=x onerror=alert(1)>')
 
-    const state = el.shadowRoot?.querySelector('.gk-state')
+    const state = el.shadowRoot?.querySelector('.tk-state')
     expect(state?.textContent).toContain('<img src=x onerror=alert(1)>')
     expect(state?.querySelector('img')).toBeNull()
   })
@@ -214,6 +305,57 @@ describe('widget lifecycle events (runtime)', () => {
     expect(spy).toHaveBeenCalledTimes(1)
   })
 
+  it('cold-starts many inline widgets with isolated lifecycle and message delivery', () => {
+    const widgets = Array.from({ length: 100 }, (_, index) =>
+      createWidget({ event: `evt_cold_${index}`, brand: `brand_cold_${index}` }),
+    )
+    const loadedSpies = widgets.map(() => vi.fn())
+    const openedSpies = widgets.map(() => vi.fn())
+    const completedSpies = widgets.map(() => vi.fn())
+
+    widgets.forEach((widget, index) => {
+      widget.addEventListener('loaded', loadedSpies[index] as EventListener)
+      widget.addEventListener('opened', openedSpies[index] as EventListener)
+      widget.addEventListener('order_completed', completedSpies[index] as EventListener)
+      widget.connectedCallback()
+      widget.shadowRoot?.querySelector('iframe')?.dispatchEvent(new Event('load'))
+    })
+
+    loadedSpies.forEach((spy) => expect(spy).toHaveBeenCalledTimes(1))
+    openedSpies.forEach((spy) => expect(spy).toHaveBeenCalledTimes(1))
+    widgets.forEach((widget, index) => {
+      const iframe = widget.shadowRoot?.querySelector('iframe')
+      expect(iframe?.getAttribute('src')).toContain(`eventId=evt_cold_${index}`)
+      expect(iframe?.getAttribute('src')).toContain(`brand=brand_cold_${index}`)
+    })
+
+    postCheckoutMessage('order_completed', {
+      eventId: 'evt_cold_42',
+      sessionId: 'cs_cold_42',
+      orderId: 'ord_cold_42',
+    })
+
+    completedSpies.forEach((spy, index) => {
+      expect(spy).toHaveBeenCalledTimes(index === 42 ? 1 : 0)
+    })
+    expect(completedSpies[42]?.mock.calls[0]?.[0]).toMatchObject({
+      detail: {
+        event: 'evt_cold_42',
+        eventId: 'evt_cold_42',
+        sessionId: 'cs_cold_42',
+        orderId: 'ord_cold_42',
+      },
+    })
+
+    widgets.forEach((widget) => widget.disconnectedCallback())
+    postCheckoutMessage('order_completed', {
+      eventId: 'evt_cold_42',
+      sessionId: 'cs_after_disconnect',
+      orderId: 'ord_after_disconnect',
+    })
+    expect(completedSpies[42]).toHaveBeenCalledTimes(1)
+  })
+
   it('removes checkout message listeners on disconnectedCallback', () => {
     const el = createWidget()
 
@@ -272,10 +414,10 @@ describe('widget checkout modes (runtime)', () => {
     const button = el.shadowRoot?.querySelector('button')
     expect(button).not.toBeNull()
     // No inline iframe is rendered in modal mode.
-    expect(el.shadowRoot?.querySelector('iframe.gk-frame')).toBeNull()
+    expect(el.shadowRoot?.querySelector('iframe.tk-frame')).toBeNull()
     // Clicking the button opens the modal (renders a modal iframe).
     button!.click()
-    const modalFrame = el.shadowRoot?.querySelector('iframe.gk-modal-frame')
+    const modalFrame = el.shadowRoot?.querySelector('iframe.tk-modal-frame')
     expect(modalFrame).not.toBeNull()
   })
 
@@ -289,16 +431,16 @@ describe('widget checkout modes (runtime)', () => {
     el.addEventListener('closed', closedSpy)
 
     el.shadowRoot?.querySelector('button')?.click()
-    const modalFrame = el.shadowRoot?.querySelector('iframe.gk-modal-frame')
+    const modalFrame = el.shadowRoot?.querySelector('iframe.tk-modal-frame')
     expect(modalFrame).not.toBeNull()
     modalFrame!.dispatchEvent(new Event('load'))
     expect(openedSpy).toHaveBeenCalledTimes(1)
 
-    const close = el.shadowRoot?.querySelector<HTMLButtonElement>('button.gk-modal-close')
+    const close = el.shadowRoot?.querySelector<HTMLButtonElement>('button.tk-modal-close')
     expect(close).not.toBeNull()
     close!.click()
     expect(closedSpy).toHaveBeenCalledTimes(1)
-    expect(el.shadowRoot?.querySelector('iframe.gk-modal-frame')).toBeNull()
+    expect(el.shadowRoot?.querySelector('iframe.tk-modal-frame')).toBeNull()
   })
 
   it('redirect mode dispatches opened but not checkout_started on click', () => {
@@ -324,7 +466,7 @@ describe('widget checkout modes (runtime)', () => {
   })
 })
 
-describe('GateKitButton lifecycle (runtime)', () => {
+describe('TixkitButton lifecycle (runtime)', () => {
   beforeEach(() => {
     document.body.innerHTML = ''
   })
@@ -336,6 +478,17 @@ describe('GateKitButton lifecycle (runtime)', () => {
 
     el.connectedCallback()
     expect(spy).toHaveBeenCalledTimes(1)
+  })
+
+  it('records button impressions using the reporting API origin', () => {
+    const el = createButton({ 'reporting-api-url': 'https://api.test' })
+
+    el.connectedCallback()
+
+    const [url] = vi.mocked(globalThis.fetch).mock.calls.find(([requestUrl]) =>
+      String(requestUrl).includes('/widget-impressions'),
+    )!
+    expect(String(url)).toBe('https://api.test/v1/public/events/evt_demo/widget-impressions')
   })
 
   it('passes button prefill, product, discount, access code, tracking, and affiliate params to checkout', () => {
@@ -353,7 +506,7 @@ describe('GateKitButton lifecycle (runtime)', () => {
     expect(button).not.toBeNull()
     button!.click()
 
-    const frame = el.shadowRoot?.querySelector('iframe.gk-modal-frame')
+    const frame = el.shadowRoot?.querySelector('iframe.tk-modal-frame')
     expect(frame).not.toBeNull()
     const url = new URL(frame!.getAttribute('src') ?? '')
     expect(url.searchParams.get('eventId')).toBe('evt_demo')
@@ -379,7 +532,7 @@ describe('GateKitButton lifecycle (runtime)', () => {
     expect(startedSpy).not.toHaveBeenCalled()
     expect(openedSpy).not.toHaveBeenCalled()
 
-    const frame = el.shadowRoot?.querySelector('iframe.gk-modal-frame')
+    const frame = el.shadowRoot?.querySelector('iframe.tk-modal-frame')
     expect(frame).not.toBeNull()
     frame!.dispatchEvent(new Event('load'))
     expect(openedSpy).toHaveBeenCalledTimes(1)
@@ -431,11 +584,11 @@ describe('GateKitButton lifecycle (runtime)', () => {
     const spy = vi.fn()
     el.addEventListener('closed', spy)
     el.shadowRoot?.querySelector('button')?.click()
-    const close = el.shadowRoot?.querySelector<HTMLButtonElement>('button.gk-modal-close')
+    const close = el.shadowRoot?.querySelector<HTMLButtonElement>('button.tk-modal-close')
     expect(close).not.toBeNull()
     close!.click()
 
     expect(spy).toHaveBeenCalledTimes(1)
-    expect(el.shadowRoot?.querySelector('iframe.gk-modal-frame')).toBeNull()
+    expect(el.shadowRoot?.querySelector('iframe.tk-modal-frame')).toBeNull()
   })
 })

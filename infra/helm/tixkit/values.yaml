@@ -1,0 +1,127 @@
+global:
+  imageRegistry: ghcr.io/your-org/tixkit
+  imagePullPolicy: IfNotPresent
+  imageTag: "0.1.0"
+  environment: production
+  apiBaseUrl: https://api.example.com
+  checkoutUrl: https://checkout.example.com
+  adminUrl: https://admin.example.com
+  corsAllowedOrigins:
+    - https://checkout.example.com
+    - https://admin.example.com
+
+secrets:
+  create: true
+  name: tixkit-secrets
+  databaseUrl: postgres://tixkit:tixkit@tixkit-postgres:5432/tixkit
+  databaseUrlMysql: ""
+  redisUrl: redis://tixkit-redis:6379
+  temporalAddress: tixkit-temporal:7233
+  temporalNamespace: default
+  clerkSecretKey: ""
+  clerkPublishableKey: ""
+  clerkWebhookSecret: ""
+  stripeSecretKey: ""
+  stripeWebhookSecret: ""
+  stripePublishableKey: ""
+  stripeConnectClientId: ""
+  telnyxApiKey: ""
+  telnyxWebhookPublicKey: ""
+  qrSigningSecret: ""
+  offlineManifestSigningKey: ""
+  offlineManifestKeyId: manifest:production
+  s3Endpoint: http://tixkit-minio:9000
+  s3Bucket: tixkit
+  s3AccessKeyId: minioadmin
+  s3SecretAccessKey: minioadmin
+  s3Region: us-east-1
+  otelExporterOtlpEndpoint: ""
+  prometheusPushgatewayUrl: ""
+  metricsBearerToken: ""
+
+api:
+  replicas: 2
+  image: api
+  port: 4000
+  trustProxy: "10.0.0.0/8,172.16.0.0/12,192.168.0.0/16"
+  resources:
+    requests:
+      cpu: 250m
+      memory: 512Mi
+    limits:
+      cpu: "1"
+      memory: 1Gi
+
+worker:
+  replicas: 2
+  image: worker
+  resources:
+    requests:
+      cpu: 250m
+      memory: 512Mi
+    limits:
+      cpu: "1"
+      memory: 1Gi
+
+checkout:
+  replicas: 2
+  image: checkout
+  port: 3000
+  resources:
+    requests:
+      cpu: 200m
+      memory: 384Mi
+    limits:
+      cpu: "1"
+      memory: 768Mi
+
+admin:
+  replicas: 2
+  image: admin-dashboard
+  port: 3001
+  resources:
+    requests:
+      cpu: 200m
+      memory: 384Mi
+    limits:
+      cpu: "1"
+      memory: 768Mi
+
+migrations:
+  enabled: true
+  image: db-migrate
+  backoffLimit: 1
+
+ingress:
+  enabled: false
+  className: nginx
+  tlsSecretName: tixkit-tls
+  apiHost: api.example.com
+  checkoutHost: checkout.example.com
+  adminHost: admin.example.com
+  blockPublicMetrics: true
+
+postgres:
+  enabled: true
+  image: postgres:16-alpine
+  storageSize: 20Gi
+  user: tixkit
+  password: tixkit
+  database: tixkit
+
+redis:
+  enabled: true
+  image: redis:7-alpine
+
+temporal:
+  enabled: true
+  image: temporalio/auto-setup:1.24
+  postgresqlImage: postgres:16-alpine
+  postgresqlStorageSize: 10Gi
+
+minio:
+  enabled: true
+  image: minio/minio:latest
+  storageSize: 20Gi
+  rootUser: minioadmin
+  rootPassword: minioadmin

@@ -1,8 +1,8 @@
 import Fastify from 'fastify';
 import { createHash } from 'node:crypto';
 import { describe, expect, it, vi } from 'vitest';
-import type { Principal } from '@gatekit/domain';
-import type { Database } from '@gatekit/db';
+import type { Principal } from '@tixkit/domain';
+import type { Database } from '@tixkit/db';
 import type { AppContext } from '../../app.js';
 import { ClerkAuthService } from '../../auth/clerk.js';
 import { eventRoutes } from '../../routes/modules/events.js';
@@ -34,27 +34,35 @@ import { hashRequest } from '../../services/idempotency.js';
 type Row = Record<string, unknown>;
 type Tables = Record<string, Row[]>;
 
-function createMockDb(tables: Tables = {}): unknown {
-  function matchesWheres(row: Row, wheres: Array<{ column: string; op: string; value: unknown }>): boolean {
-    for (const w of wheres) {
-      const val = row[w.column];
-      if (w.op === '=') {
-        if (val !== w.value) return false;
-      } else if (w.op === 'in') {
-        if (!Array.isArray(w.value) || !w.value.includes(val)) return false;
-      } else if (w.op === '>') {
-        if (val == null || !(String(val) > String(w.value))) return false;
-      } else if (w.op === 'is') {
-        // `is null` semantics
-        if (w.value === null) {
-          if (val !== null && val !== undefined) return false;
-        }
+function matchesWheres(row: Row, wheres: Array<{ column: string; op: string; value: unknown }>): boolean {
+  for (const w of wheres) {
+    const val = row[w.column];
+    if (w.op === '=') {
+      if (val !== w.value) return false;
+    } else if (w.op === 'in') {
+      if (!Array.isArray(w.value) || !w.value.includes(val)) return false;
+    } else if (w.op === '>') {
+      if (val == null || !(String(val) > String(w.value))) return false;
+    } else if (w.op === 'is') {
+      // `is null` semantics
+      if (w.value === null) {
+        if (val !== null && val !== undefined) return false;
       }
-      // Other operators (like, >=, <=) are not needed for these denial tests.
     }
-    return true;
+    // Other operators (like, >=, <=) are not needed for these denial tests.
   }
+  return true;
+}
 
+function createDelete(_table: string) {
+  return {
+    where() {
+      return { execute: async () => {} };
+    },
+  };
+}
+
+function createMockDb(tables: Tables = {}): unknown {
   function createQuery(table: string) {
     const wheres: Array<{ column: string; op: string; value: unknown }> = [];
     const q = {
@@ -85,13 +93,12 @@ function createMockDb(tables: Tables = {}): unknown {
         countAll: () => 'count',
       },
       async executeTakeFirst() {
-        const rows = (tables[table] ?? []).filter((r) => matchesWheres(r, wheres));
-        return rows[0];
+        return (tables[table] ?? []).find((row) => matchesWheres(row, wheres));
       },
       async executeTakeFirstOrThrow() {
-        const rows = (tables[table] ?? []).filter((r) => matchesWheres(r, wheres));
-        if (!rows[0]) throw new Error(`No mock row for ${table}`);
-        return rows[0];
+        const row = (tables[table] ?? []).find((candidate) => matchesWheres(candidate, wheres));
+        if (!row) throw new Error(`No mock row for ${table}`);
+        return row;
       },
       async execute() {
         return (tables[table] ?? []).filter((r) => matchesWheres(r, wheres));
@@ -138,14 +145,6 @@ function createMockDb(tables: Tables = {}): unknown {
             (tables[table] ??= []).push(row);
           },
         };
-      },
-    };
-  }
-
-  function createDelete(_table: string) {
-    return {
-      where() {
-        return { execute: async () => {} };
       },
     };
   }
@@ -224,7 +223,7 @@ function orderRow(overrides: Row = {}): Row {
     brand_id: 'brd_1',
     event_id: 'evt_1',
     checkout_session_id: 'cs_1',
-    order_number: 'GK-1001',
+    order_number: 'TK-1001',
     status: 'paid',
     currency: 'USD',
     subtotal_cents: 10000,
@@ -351,7 +350,7 @@ function apiKeyRow(overrides: Row = {}): Row {
     tenant_id: 'tnt_1',
     organization_id: 'org_1',
     name: 'Server key',
-    key_prefix: 'gk_1234',
+    key_prefix: 'tk_1234',
     hashed_key: 'hash',
     scopes: JSON.stringify(['events.read']),
     brand_ids: null,
@@ -417,7 +416,7 @@ function oauthApplicationRow(overrides: Row = {}): Row {
     tenant_id: 'tnt_1',
     organization_id: 'org_1',
     name: 'OAuth app',
-    client_id: 'gk_oauth_1',
+    client_id: 'tk_oauth_1',
     client_secret_hash: 'hash',
     redirect_uris: JSON.stringify(['https://example.com/callback']),
     scopes: JSON.stringify(['events.read']),
@@ -490,6 +489,70 @@ async function setupApp(
   await app.register(routes);
   return app;
 }
+
+// ===========================================================================
+// 0. Explicit permission gates on tenant settings list routes
+// ===========================================================================
+
+describe('tenant settings list permission gates', () => {
+  it('GET /organizations rejects principals without settings.write', async () => {
+    const app = await setupApp(
+      tenantRoutes,
+      makePrincipal({ scopes: ['events.read'] }),
+      { organizations: [organizationRow()] },
+    );
+    const res = await app.inject({ method: 'GET', url: '/organizations' });
+    expect(res.statusCode).toBe(403);
+    expect(res.json().message).toContain('settings.write');
+    await app.close();
+  });
+
+  it('GET /brands rejects principals without settings.write', async () => {
+    const app = await setupApp(
+      tenantRoutes,
+      makePrincipal({ scopes: ['events.read'] }),
+      { brands: [brandRow()] },
+    );
+    const res = await app.inject({ method: 'GET', url: '/brands' });
+    expect(res.statusCode).toBe(403);
+    expect(res.json().message).toContain('settings.write');
+    await app.close();
+  });
+
+  it('GET /organizations remains scoped for principals with settings.write', async () => {
+    const app = await setupApp(
+      tenantRoutes,
+      makePrincipal({ organizationIds: ['org_1'], scopes: ['settings.write'] }),
+      {
+        organizations: [
+          organizationRow({ id: 'org_1' }),
+          organizationRow({ id: 'org_other' }),
+        ],
+      },
+    );
+    const res = await app.inject({ method: 'GET', url: '/organizations' });
+    expect(res.statusCode).toBe(200);
+    expect(res.json().map((org: { id: string }) => org.id)).toEqual(['org_1']);
+    await app.close();
+  });
+
+  it('GET /brands remains scoped for principals with settings.write', async () => {
+    const app = await setupApp(
+      tenantRoutes,
+      makePrincipal({ organizationIds: ['org_1'], scopes: ['settings.write'] }),
+      {
+        brands: [
+          brandRow({ id: 'brd_1', organization_id: 'org_1' }),
+          brandRow({ id: 'brd_other', organization_id: 'org_other' }),
+        ],
+      },
+    );
+    const res = await app.inject({ method: 'GET', url: '/brands' });
+    expect(res.statusCode).toBe(200);
+    expect(res.json().map((brand: { id: string }) => brand.id)).toEqual(['brd_1']);
+    await app.close();
+  });
+});
 
 // ===========================================================================
 // 1. Cross-tenant denial (principal in tnt_1 cannot touch tnt_other resources)
@@ -1038,6 +1101,70 @@ describe('empty organization principal fail-closed lists', () => {
 // ===========================================================================
 
 describe('brand and event scope denial', () => {
+  it('GET /attendees only returns permitted event attendees for event-scoped keys', async () => {
+    const principal = makePrincipal({
+      type: 'api_key',
+      id: 'ak_event_scoped',
+      eventIds: ['evt_A'],
+      scopes: ['attendees.read'],
+    });
+    const tables: Tables = {
+      attendees: [
+        attendeeRow({
+          id: 'att_A',
+          event_id: 'evt_A',
+          'attendees.tenant_id': 'tnt_1',
+          'attendees.event_id': 'evt_A',
+          'events.organization_id': 'org_1',
+        }),
+        attendeeRow({
+          id: 'att_B',
+          event_id: 'evt_B',
+          'attendees.tenant_id': 'tnt_1',
+          'attendees.event_id': 'evt_B',
+          'events.organization_id': 'org_1',
+        }),
+      ],
+    };
+    const app = await setupApp(checkInRoutes, principal, tables);
+    const res = await app.inject({ method: 'GET', url: '/attendees' });
+    expect(res.statusCode).toBe(200);
+    expect(res.json().items.map((attendee: { id: string }) => attendee.id)).toEqual(['att_A']);
+    await app.close();
+  });
+
+  it('GET /attendees only returns permitted brand attendees for brand-scoped keys', async () => {
+    const principal = makePrincipal({
+      type: 'api_key',
+      id: 'ak_brand_scoped',
+      brandIds: ['brd_A'],
+      scopes: ['attendees.read'],
+    });
+    const tables: Tables = {
+      attendees: [
+        attendeeRow({
+          id: 'att_A',
+          event_id: 'evt_A',
+          'attendees.tenant_id': 'tnt_1',
+          'events.organization_id': 'org_1',
+          'events.brand_id': 'brd_A',
+        }),
+        attendeeRow({
+          id: 'att_B',
+          event_id: 'evt_B',
+          'attendees.tenant_id': 'tnt_1',
+          'events.organization_id': 'org_1',
+          'events.brand_id': 'brd_B',
+        }),
+      ],
+    };
+    const app = await setupApp(checkInRoutes, principal, tables);
+    const res = await app.inject({ method: 'GET', url: '/attendees' });
+    expect(res.statusCode).toBe(200);
+    expect(res.json().items.map((attendee: { id: string }) => attendee.id)).toEqual(['att_A']);
+    await app.close();
+  });
+
   it('GET /events/:eventId returns 404 for brand-scoped key accessing other brand event', async () => {
     const principal = makePrincipal({
       type: 'api_key',
@@ -1129,7 +1256,7 @@ describe('API key scope enforcement', () => {
   });
 
   it('authenticates a valid API key and maps tenant/scopes', async () => {
-    const rawKey = 'gk_testkeyvalid';
+    const rawKey = 'tk_testkeyvalid';
     const hashedKey = createHash('sha256').update(rawKey).digest('hex');
     const tables: Tables = {
       api_keys: [
@@ -1156,7 +1283,7 @@ describe('API key scope enforcement', () => {
   });
 
   it('rejects a revoked API key with 401 Unauthorized', async () => {
-    const rawKey = 'gk_testkeyrevoked';
+    const rawKey = 'tk_testkeyrevoked';
     const hashedKey = createHash('sha256').update(rawKey).digest('hex');
     const tables: Tables = {
       api_keys: [
@@ -1179,7 +1306,7 @@ describe('API key scope enforcement', () => {
   });
 
   it('rejects an expired API key with 401 Unauthorized', async () => {
-    const rawKey = 'gk_testkeyexpired';
+    const rawKey = 'tk_testkeyexpired';
     const hashedKey = createHash('sha256').update(rawKey).digest('hex');
     const tables: Tables = {
       api_keys: [
@@ -1203,7 +1330,7 @@ describe('API key scope enforcement', () => {
   });
 
   it('rejects an API key with an unknown hash (no row)', async () => {
-    const rawKey = 'gk_testkeyunknown';
+    const rawKey = 'tk_testkeyunknown';
     const tables: Tables = { api_keys: [] };
     const db = createMockDb(tables) as unknown as Database;
     const service = new ClerkAuthService('test-secret', db);

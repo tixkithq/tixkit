@@ -248,13 +248,13 @@ describe('validateTicketPurchase', () => {
 
     it('accepts allowlisted email', () => {
       const rules: AccessRuleRecord[] = [
-        { type: 'allowlist', value: 'vip@gatekit.com', usesCount: 0 },
+        { type: 'allowlist', value: 'vip@tixkit.com', usesCount: 0 },
       ];
       expect(() =>
         validateTicketPurchase({
           ticketType: makeTicketType({ visibility: 'locked' }),
           quantity: 1,
-          buyerEmail: 'vip@gatekit.com',
+          buyerEmail: 'vip@tixkit.com',
           accessRules: rules,
           now: fixedNow,
         }),
@@ -263,13 +263,13 @@ describe('validateTicketPurchase', () => {
 
     it('rejects non-allowlisted email', () => {
       const rules: AccessRuleRecord[] = [
-        { type: 'allowlist', value: 'vip@gatekit.com', usesCount: 0 },
+        { type: 'allowlist', value: 'vip@tixkit.com', usesCount: 0 },
       ];
       expect(() =>
         validateTicketPurchase({
           ticketType: makeTicketType({ visibility: 'locked' }),
           quantity: 1,
-          buyerEmail: 'other@gatekit.com',
+          buyerEmail: 'other@tixkit.com',
           accessRules: rules,
           now: fixedNow,
         }),
@@ -278,13 +278,13 @@ describe('validateTicketPurchase', () => {
 
     it('allowlist match is case-insensitive', () => {
       const rules: AccessRuleRecord[] = [
-        { type: 'allowlist', value: 'VIP@GateKit.com', usesCount: 0 },
+        { type: 'allowlist', value: 'VIP@Tixkit.com', usesCount: 0 },
       ];
       expect(() =>
         validateTicketPurchase({
           ticketType: makeTicketType({ visibility: 'locked' }),
           quantity: 1,
-          buyerEmail: 'vip@gatekit.com',
+          buyerEmail: 'vip@tixkit.com',
           accessRules: rules,
           now: fixedNow,
         }),

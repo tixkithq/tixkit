@@ -246,7 +246,7 @@ export function ReportsView({ eventId }: ReportsViewProps) {
           <div className='grid gap-2'>
             <span className='text-sm font-medium'>Event</span>
             <Select value={selectedEventId} onValueChange={setSelectedEventId}>
-              <SelectTrigger className='w-full max-w-xs'>
+              <SelectTrigger className='w-full max-w-xs' aria-label='Select an event for reports'>
                 <SelectValue placeholder='Select an event' />
               </SelectTrigger>
               <SelectContent>
@@ -264,7 +264,7 @@ export function ReportsView({ eventId }: ReportsViewProps) {
           <div className='grid gap-2'>
             <span className='text-sm font-medium'>Organization</span>
             <Select value={selectedOrganizationId} onValueChange={setSelectedOrganizationId}>
-              <SelectTrigger className='w-full max-w-xs'>
+              <SelectTrigger className='w-full max-w-xs' aria-label='Select report scope'>
                 <SelectValue placeholder='Select report scope' />
               </SelectTrigger>
               <SelectContent>
@@ -471,19 +471,12 @@ function PromoReportPanel({ report, currency }: { report: AdminPromoReport; curr
 }
 
 function ConversionReportPanel({ report }: { report: AdminConversionReport }) {
-  const widgetViews = report.widgetViews
-  const widgetViewsTracked = widgetViews !== null && widgetViews !== undefined
   return (
     <div className='space-y-3'>
-      {!widgetViewsTracked && (
-        <p className='rounded-md border border-dashed p-3 text-sm text-muted-foreground'>
-          Widget impressions are not tracked for this event yet. Conversion rates only use persisted checkout starts and completions.
-        </p>
-      )}
       <div className='grid gap-4 sm:grid-cols-2 lg:grid-cols-4'>
         <ReportCard
           title='Widget Views'
-          value={widgetViewsTracked ? formatNumber(widgetViews) : 'Untracked'}
+          value={formatNumber(report.widgetViews)}
           icon={MousePointerClick}
         />
         <ReportCard title='Checkout Started' value={formatNumber(report.checkoutStarted)} icon={Ticket} />

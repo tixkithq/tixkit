@@ -23,10 +23,10 @@ describe('API key create/revoke', () => {
     if (result.ok) {
       expect(result.data.name).toBe('Test Key')
       expect(result.data.id).toBeDefined()
-      expect(result.data.keyPrefix).toMatch(/^gk_live_/)
+      expect(result.data.keyPrefix).toMatch(/^tk_live_/)
       // The backend returns the full secret exactly once on creation.
       expect(result.data.apiKey).toBeDefined()
-      expect(result.data.apiKey).toMatch(/^gk_live_/)
+      expect(result.data.apiKey).toMatch(/^tk_live_/)
       expect(result.data.scopes).toEqual(scopes)
     }
   })

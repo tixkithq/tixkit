@@ -1,7 +1,18 @@
 import { describe, expect, it, vi } from 'vitest'
-import { render, screen, fireEvent } from '@testing-library/react'
+import { render, screen, fireEvent, waitFor } from '@testing-library/react'
 import { AttendeeForm, type AttendeeAnswers } from '@/components/checkout/attendee-form'
-import type { Buyer, CheckoutQuestion } from '@/lib/api'
+import { publicApi, type Buyer, type CheckoutQuestion } from '@/lib/api'
+
+vi.mock('@/lib/api', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/lib/api')>()
+  return {
+    ...actual,
+    publicApi: {
+      ...actual.publicApi,
+      uploadCheckoutArtifact: vi.fn(),
+    },
+  }
+})
 
 const buyer: Buyer = { email: 'a@b.com', firstName: '', lastName: '', phone: '' }
 
@@ -89,7 +100,7 @@ describe('AttendeeForm dynamic question types', () => {
     expect(screen.getByLabelText(/Guest name/)).toBeInTheDocument()
   })
 
-  it('renders an unsupported state for file questions', () => {
+  it('uploads file question answers as upload artifacts', async () => {
     const question: CheckoutQuestion = {
       id: 'q_file',
       label: 'Upload ID',
@@ -104,16 +115,36 @@ describe('AttendeeForm dynamic question types', () => {
         buyer={buyer}
         onChange={() => {}}
         disabled={false}
+        eventId='evt_1'
         buyerQuestions={[question]}
         buyerAnswers={{}}
         onBuyerAnswersChange={onChange}
       />,
     )
 
+    vi.mocked(publicApi.uploadCheckoutArtifact).mockResolvedValueOnce({
+      artifactId: 'upl_01JYTESTARTIFACT',
+      fileName: 'id.png',
+      contentType: 'image/png',
+      sizeBytes: 12,
+    })
+    const file = new File(['test-upload'], 'id.png', { type: 'image/png' })
     expect(screen.getByText('Upload ID')).toBeInTheDocument()
-    expect(screen.getByText(/File upload questions are not available/)).toBeInTheDocument()
-    expect(screen.queryByLabelText(/Upload ID/)).toBeNull()
-    expect(onChange).not.toHaveBeenCalled()
+    fireEvent.change(screen.getByLabelText(/Upload ID/), {
+      target: { files: [file] },
+    })
+
+    await waitFor(() => {
+      expect(onChange).toHaveBeenCalledWith({
+        q_file: {
+          artifactId: 'upl_01JYTESTARTIFACT',
+          fileName: 'id.png',
+          contentType: 'image/png',
+          sizeBytes: 12,
+        },
+      })
+    })
+    expect(publicApi.uploadCheckoutArtifact).toHaveBeenCalledWith('evt_1', file, 'q_file')
   })
 
   it('renders a select dropdown for select questions', () => {
@@ -136,5 +167,41 @@ describe('AttendeeForm dynamic question types', () => {
       />,
     )
     expect(screen.getByText('None')).toBeInTheDocument()
+  })
+
+  it('renders HTML-looking question text as escaped content', () => {
+    const questions: CheckoutQuestion[] = [{
+      id: 'q_text_xss',
+      label: '<img src=x onerror=alert(1)>',
+      description: '<script>alert(1)</script>',
+      type: 'text',
+      required: false,
+      appliesTo: 'buyer',
+    }, {
+      id: 'q_select_xss',
+      label: 'Select payload',
+      type: 'select',
+      required: false,
+      appliesTo: 'buyer',
+      options: ['<svg onload=alert(1)>'],
+    }]
+
+    const { container } = render(
+      <AttendeeForm
+        buyer={buyer}
+        onChange={() => {}}
+        disabled={false}
+        buyerQuestions={questions}
+        buyerAnswers={{}}
+        onBuyerAnswersChange={() => {}}
+      />,
+    )
+
+    expect(screen.getByText('<img src=x onerror=alert(1)>')).toBeInTheDocument()
+    expect(screen.getByText('<script>alert(1)</script>')).toBeInTheDocument()
+    expect(screen.getByText('<svg onload=alert(1)>')).toBeInTheDocument()
+    expect(container.querySelector('img')).toBeNull()
+    expect(container.querySelector('script')).toBeNull()
+    expect(container.querySelector('[onload]')).toBeNull()
   })
 })

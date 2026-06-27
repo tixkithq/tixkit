@@ -19,7 +19,7 @@ import {
   updateProductSchema,
   updateTicketTypeBatchSchema,
 } from '../http/schemas.js';
-import { ValidationError } from '@gatekit/domain';
+import { ValidationError } from '@tixkit/domain';
 
 describe('safeRedirectUrl / successUrl / cancelUrl validation', () => {
   it('rejects javascript: scheme in successUrl', () => {
@@ -88,6 +88,48 @@ describe('safeRedirectUrl / successUrl / cancelUrl validation', () => {
       successUrl: 'https://example.com/success',
     });
     expect(body.successUrl).toBe('https://example.com/success');
+  });
+
+  it('accepts product checkout items', () => {
+    const body = parseBody(createCheckoutSessionSchema(false), {
+      eventId: 'evt_1',
+      items: [
+        { ticketTypeId: 'tt_1', quantity: 1 },
+        { productId: 'prd_1', quantity: 2 },
+      ],
+    });
+
+    expect(body.items).toEqual([
+      { ticketTypeId: 'tt_1', quantity: 1 },
+      { productId: 'prd_1', quantity: 2 },
+    ]);
+  });
+
+  it('accepts occurrence-scoped ticket checkout items', () => {
+    const body = parseBody(createCheckoutSessionSchema(false), {
+      eventId: 'evt_1',
+      items: [{ ticketTypeId: 'tt_1', occurrenceId: 'occ_1', quantity: 1 }],
+    });
+
+    expect(body.items).toEqual([{ ticketTypeId: 'tt_1', occurrenceId: 'occ_1', quantity: 1 }]);
+  });
+
+  it('rejects occurrence identifiers on product checkout items', () => {
+    expect(() =>
+      parseBody(createCheckoutSessionSchema(false), {
+        eventId: 'evt_1',
+        items: [{ productId: 'prd_1', occurrenceId: 'occ_1', quantity: 1 }],
+      }),
+    ).toThrow(ValidationError);
+  });
+
+  it('rejects checkout items that mix ticket and product identifiers', () => {
+    expect(() =>
+      parseBody(createCheckoutSessionSchema(false), {
+        eventId: 'evt_1',
+        items: [{ ticketTypeId: 'tt_1', productId: 'prd_1', quantity: 1 }],
+      }),
+    ).toThrow(ValidationError);
   });
 
   it('validates updateCheckoutSessionSchema successUrl too', () => {
@@ -243,20 +285,20 @@ describe('webhook and OAuth URL policy', () => {
   it('accepts external https webhook URLs', () => {
     const body = parseBody(createWebhookEndpointSchema, {
       organizationId: 'org_1',
-      url: 'https://hooks.example.com/gatekit',
+      url: 'https://hooks.example.com/tixkit',
       events: ['order.created'],
     });
-    expect(body.url).toBe('https://hooks.example.com/gatekit');
+    expect(body.url).toBe('https://hooks.example.com/tixkit');
   });
 
   it.each([
-    'http://hooks.example.com/gatekit',
-    'https://localhost:8443/gatekit',
-    'https://127.0.0.1/gatekit',
-    'https://10.0.0.10/gatekit',
-    'https://172.16.0.10/gatekit',
-    'https://192.168.1.10/gatekit',
-    'https://metadata.internal/gatekit',
+    'http://hooks.example.com/tixkit',
+    'https://localhost:8443/tixkit',
+    'https://127.0.0.1/tixkit',
+    'https://10.0.0.10/tixkit',
+    'https://172.16.0.10/tixkit',
+    'https://192.168.1.10/tixkit',
+    'https://metadata.internal/tixkit',
   ])('rejects unsafe webhook URL %s', (url) => {
     expect(() =>
       parseBody(createWebhookEndpointSchema, {
@@ -268,7 +310,7 @@ describe('webhook and OAuth URL policy', () => {
   });
 
   it('applies webhook URL policy to updates', () => {
-    expect(() => parseBody(updateWebhookEndpointSchema, { url: 'https://127.0.0.1/gatekit' })).toThrow(
+    expect(() => parseBody(updateWebhookEndpointSchema, { url: 'https://127.0.0.1/tixkit' })).toThrow(
       ValidationError,
     );
   });

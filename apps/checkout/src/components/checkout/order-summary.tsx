@@ -27,7 +27,8 @@ export function OrderSummary({
 }: Props) {
   const lines = items
     .map((item) => {
-      const ticket = tickets.find((t) => t.ticketTypeId === item.ticketTypeId)
+      const itemId = cartItemId(item)
+      const ticket = tickets.find((t) => availabilityItemId(t) === itemId)
       if (!ticket) return null
       const unit =
         item.unitAmountCents ??
@@ -105,6 +106,18 @@ export function OrderSummary({
       </div>
     </div>
   )
+}
+
+function availabilityItemId(item: AvailabilityItem): string {
+  if (item.ticketTypeId) return `ticket:${item.ticketTypeId}:${item.eventOccurrenceId ?? 'event'}`
+  if (item.productId) return `product:${item.productId}`
+  return item.name
+}
+
+function cartItemId(item: CartItem): string {
+  if (item.ticketTypeId) return `ticket:${item.ticketTypeId}:${item.occurrenceId ?? 'event'}`
+  if (item.productId) return `product:${item.productId}`
+  return ''
 }
 
 function Row({

@@ -36,7 +36,14 @@ export type Question = BaseEntity & {
 
 export type QuestionAnswer = {
   questionId: Ulid;
-  value: string | string[] | boolean | ConsentAnswerSnapshot | null;
+  value: string | string[] | boolean | ConsentAnswerSnapshot | UploadArtifactAnswer | null;
+};
+
+export type UploadArtifactAnswer = {
+  artifactId: Ulid;
+  fileName?: string;
+  contentType?: string;
+  sizeBytes?: number;
 };
 
 export type ConsentAnswerSnapshot = {
@@ -122,10 +129,6 @@ export function validateQuestionDefinition(input: QuestionDefinitionValidationIn
   const errors: string[] = [];
   const options = input.options ?? undefined;
 
-  if (input.type === 'file') {
-    errors.push('File questions are not supported until upload storage and validation are available');
-  }
-
   if (OPTION_BEARING_TYPES.has(input.type)) {
     if (!options || options.length === 0) {
       errors.push(`${input.type} questions require at least one option`);
@@ -167,7 +170,7 @@ export function validateQuestionDefinition(input: QuestionDefinitionValidationIn
 
   if (input.validationPattern) {
     try {
-      new RegExp(input.validationPattern);
+      RegExp(input.validationPattern);
     } catch {
       errors.push('Validation pattern must be a valid regular expression');
     }
@@ -194,6 +197,16 @@ export function isConsentAnswerSnapshot(answer: unknown): answer is ConsentAnswe
 
 export function isConsentAccepted(answer: unknown): boolean {
   return answer === true || isConsentAnswerSnapshot(answer);
+}
+
+export function isUploadArtifactAnswer(answer: unknown): answer is UploadArtifactAnswer {
+  return Boolean(
+    answer &&
+      typeof answer === 'object' &&
+      !Array.isArray(answer) &&
+      typeof (answer as { artifactId?: unknown }).artifactId === 'string' &&
+      (answer as { artifactId: string }).artifactId.startsWith('upl_'),
+  );
 }
 
 export function normalizeQuestionAnswers(
@@ -241,11 +254,15 @@ export function validateAnswers(
     const answer = answers[question.id];
     const isEmpty = isAnswerEmpty(answer);
 
-    if (question.type === 'file' && (question.required || !isEmpty)) {
-      errors.push({
-        questionId: question.id,
-        message: `${question.label} file uploads are not supported for checkout yet`,
-      });
+    if (question.type === 'file') {
+      if (question.required && isEmpty) {
+        errors.push({ questionId: question.id, message: `${question.label} is required` });
+      } else if (!isEmpty && !isUploadArtifactAnswer(answer)) {
+        errors.push({
+          questionId: question.id,
+          message: `${question.label} must reference a completed upload artifact`,
+        });
+      }
       continue;
     }
 
@@ -259,24 +276,26 @@ export function validateAnswers(
     // Type-specific validation
     switch (question.type) {
       case 'email':
-        if (typeof answer === 'string' && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(answer)) {
+        if (typeof answer !== 'string' || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(answer)) {
           errors.push({ questionId: question.id, message: `${question.label} must be a valid email` });
         }
         break;
       case 'phone':
-        if (typeof answer === 'string' && !/^[+\d\s()-]{7,}$/.test(answer)) {
+        if (typeof answer !== 'string' || !/^[+\d\s()-]{7,}$/.test(answer)) {
           errors.push({ questionId: question.id, message: `${question.label} must be a valid phone number` });
         }
         break;
       case 'select':
-        if (typeof answer === 'string' && question.options && !question.options.includes(answer)) {
+        if (typeof answer !== 'string' || (question.options && !question.options.includes(answer))) {
           errors.push({ questionId: question.id, message: `${question.label} has an invalid option` });
         }
         break;
       case 'multiselect':
-        if (Array.isArray(answer) && question.options) {
+        if (!Array.isArray(answer)) {
+          errors.push({ questionId: question.id, message: `${question.label} has an invalid option` });
+        } else if (question.options) {
           for (const val of answer) {
-            if (typeof val === 'string' && !question.options.includes(val)) {
+            if (typeof val !== 'string' || !question.options.includes(val)) {
               errors.push({ questionId: question.id, message: `${question.label} has an invalid option` });
               break;
             }

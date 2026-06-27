@@ -6,8 +6,8 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
+import { Label } from '@/components/ui/label'
 import { EmptyState } from '@/components/empty-state'
-import { GatedControl } from '@/components/gated-control'
 import { adminApi, type AdminBrand, type AdminBrandDomain } from '@/lib/api'
 import { toast } from 'sonner'
 import { useBootstrap } from '@/context/bootstrap-provider'
@@ -21,6 +21,7 @@ export default function BrandingPage() {
   const [loading, setLoading] = React.useState(true)
   const [saving, setSaving] = React.useState(false)
   const [addingDomain, setAddingDomain] = React.useState(false)
+  const [uploadingLogo, setUploadingLogo] = React.useState(false)
   const [error, setError] = React.useState<string | null>(null)
 
   const loadBranding = React.useCallback(async () => {
@@ -99,6 +100,44 @@ export default function BrandingPage() {
     toast.success('Branding settings saved')
   }
 
+  const handleLogoUpload = async (file: File | undefined) => {
+    if (!file) return
+    if (!brand) {
+      toast.error('No brand is available for logo upload')
+      return
+    }
+
+    setUploadingLogo(true)
+    const uploadResult = await adminApi.uploadArtifact({
+      purpose: 'brand_logo',
+      file,
+      brandId: brand.id,
+      metadata: { source: 'admin_branding' },
+    })
+    if (!uploadResult.ok) {
+      setUploadingLogo(false)
+      toast.error(uploadResult.error.message)
+      return
+    }
+
+    const updateResult = await adminApi.updateBrand(brand.id, {
+      theme: {
+        ...brand.theme,
+        logoUrl: uploadResult.data.downloadUrl,
+        logoArtifactId: uploadResult.data.artifactId,
+      },
+    })
+    setUploadingLogo(false)
+
+    if (!updateResult.ok) {
+      toast.error(updateResult.error.message)
+      return
+    }
+
+    setBrand(updateResult.data)
+    toast.success('Logo uploaded')
+  }
+
   return (
     <div className='space-y-6'>
       <div className='space-y-1'>
@@ -141,20 +180,37 @@ export default function BrandingPage() {
         </CardHeader>
         <CardContent className='space-y-4'>
           <div className='flex items-center gap-4'>
-            <div className='flex size-16 items-center justify-center rounded-lg border bg-muted'>
-              <ImageIcon className='size-6 text-muted-foreground' />
+            <div className='flex size-16 items-center justify-center overflow-hidden rounded-lg border bg-muted'>
+              {typeof brand.theme.logoUrl === 'string' && brand.theme.logoUrl ? (
+                <img src={brand.theme.logoUrl} alt={`${brand.name} logo`} className='size-full object-contain' />
+              ) : (
+                <ImageIcon className='size-6 text-muted-foreground' />
+              )}
             </div>
-            <GatedControl
-              variant='outline'
-              reason='Logo upload is gated because the admin API does not expose an upload artifact endpoint yet.'
-            >
-              <Upload className='size-4' />
-              Upload Logo
-            </GatedControl>
+            {uploadingLogo ? (
+              <Button type='button' variant='outline' disabled>
+                <Upload className='size-4' />
+                Uploading...
+              </Button>
+            ) : (
+              <Button asChild variant='outline'>
+                <Label htmlFor='brand-logo-upload' className='cursor-pointer'>
+                  <Upload className='size-4' />
+                  Upload Logo
+                </Label>
+              </Button>
+            )}
+            <Input
+              id='brand-logo-upload'
+              type='file'
+              accept='image/png,image/jpeg,image/webp,image/svg+xml'
+              className='sr-only'
+              onChange={(event) => {
+                void handleLogoUpload(event.target.files?.[0])
+                event.currentTarget.value = ''
+              }}
+            />
           </div>
-          <p className='text-sm text-muted-foreground'>
-            Logo upload will be available once file storage and validation are configured.
-          </p>
         </CardContent>
       </Card>
       <Card>
@@ -165,18 +221,26 @@ export default function BrandingPage() {
           </CardDescription>
         </CardHeader>
         <CardContent className='space-y-4'>
-          <div className='flex items-center gap-3'>
-            <input
-              type='color'
-              value={primaryColor}
-              onChange={(e) => setPrimaryColor(e.target.value)}
-              className='size-10 rounded-md border cursor-pointer'
-            />
-            <Input
-              value={primaryColor}
-              onChange={(e) => setPrimaryColor(e.target.value)}
-              className='w-32'
-            />
+          <div className='flex flex-wrap items-end gap-3'>
+            <div className='space-y-2'>
+              <Label htmlFor='brand-primary-color-picker'>Primary color</Label>
+              <input
+                id='brand-primary-color-picker'
+                type='color'
+                value={primaryColor}
+                onChange={(e) => setPrimaryColor(e.target.value)}
+                className='size-10 cursor-pointer rounded-md border'
+              />
+            </div>
+            <div className='space-y-2'>
+              <Label htmlFor='brand-primary-color-hex'>Hex value</Label>
+              <Input
+                id='brand-primary-color-hex'
+                value={primaryColor}
+                onChange={(e) => setPrimaryColor(e.target.value)}
+                className='w-32'
+              />
+            </div>
           </div>
         </CardContent>
       </Card>
@@ -188,15 +252,19 @@ export default function BrandingPage() {
           </CardDescription>
         </CardHeader>
         <CardContent className='space-y-4'>
-          <div className='flex gap-2'>
-            <Input
-              placeholder='events.example.com'
-              value={domain}
-              onChange={(e) => setDomain(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === 'Enter') handleAddDomain()
-              }}
-            />
+          <div className='grid gap-2 sm:grid-cols-[1fr_auto] sm:items-end'>
+            <div className='space-y-2'>
+              <Label htmlFor='brand-domain'>Domain</Label>
+              <Input
+                id='brand-domain'
+                placeholder='events.example.com'
+                value={domain}
+                onChange={(e) => setDomain(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') handleAddDomain()
+                }}
+              />
+            </div>
             <Button onClick={handleAddDomain}>Add</Button>
           </div>
           {domains.length > 0 && (

@@ -1,4 +1,4 @@
-import { GateKitClient } from '@gatekit/js';
+import { TixkitClient } from '@tixkit/js';
 
 // NOTE: React Native does not provide Node.js `crypto` APIs by default.
 // The following is a pure-JS HMAC-SHA256 implementation so the SDK works
@@ -126,6 +126,14 @@ function hexToBytes(hex: string): Uint8Array {
   return bytes;
 }
 
+function bytesToHex(bytes: Uint8Array): string {
+  return Array.from(bytes, (byte) => byte.toString(16).padStart(2, '0')).join('');
+}
+
+export function qrHashForPayload(qrPayload: string): string {
+  return bytesToHex(sha256(new TextEncoder().encode(qrPayload)));
+}
+
 // Constant-time comparison in pure JS. A polyfill for timingSafeEqual is not
 // guaranteed in React Native, so we implement a constant-time compare here.
 function timingSafeCompare(a: Uint8Array, b: Uint8Array): boolean {
@@ -166,46 +174,482 @@ export type SyncResult = {
   results: { qrHash: string; outcome: string }[];
 };
 
-export type GateKitScannerStorage = {
+export type TixkitScannerStorage = {
   getItem(key: string): Promise<string | null> | string | null;
   setItem(key: string, value: string): Promise<void> | void;
   removeItem(key: string): Promise<void> | void;
 };
 
-export type GateKitScannerConflict = {
+export type TixkitSecureStorageAdapter = {
+  getItem(key: string): Promise<string | null> | string | null;
+  setItem(key: string, value: string): Promise<void> | void;
+  removeItem?: (key: string) => Promise<void> | void;
+  deleteItem?: (key: string) => Promise<void> | void;
+};
+
+export type TixkitScannerCredentials = {
+  deviceId: string;
+  deviceSecret: string;
+  manifestSigningKey: string;
+  apiBaseUrl?: string;
+  checkoutBaseUrl?: string;
+};
+
+export type TixkitSecureStorageOptions = {
+  keyPrefix?: string;
+};
+
+export type TixkitCheckoutHandoffItem = {
+  ticketTypeId?: string;
+  productId?: string;
+  quantity: number;
+};
+
+export type TixkitCheckoutHandoffOptions = {
+  checkoutBaseUrl?: string;
+  eventId: string;
+  brandId?: string;
+  items?: TixkitCheckoutHandoffItem[];
+  products?: string[];
+  discountCode?: string;
+  accessCode?: string;
+  trackingId?: string;
+  affiliateCode?: string;
+  locale?: string;
+  theme?: string;
+  mode?: 'inline' | 'modal' | 'redirect';
+  successUrl?: string;
+  cancelUrl?: string;
+};
+
+export type TixkitCheckoutOpenOptions = TixkitCheckoutHandoffOptions & {
+  openURL: (url: string) => Promise<unknown> | unknown;
+};
+
+export type TixkitCreateElement = (
+  type: unknown,
+  props: Record<string, unknown> | null,
+  ...children: unknown[]
+) => unknown;
+
+export type TixkitReactNativeRuntime = {
+  createElement: TixkitCreateElement;
+  View: unknown;
+  Text: unknown;
+  Pressable?: unknown;
+  CameraView?: unknown;
+  ActivityIndicator?: unknown;
+};
+
+export type TixkitTicketDisplay = {
+  ticketId: string;
+  ticketTypeId?: string;
+  attendeeName?: string;
+  status: string;
+};
+
+export type TixkitTicketDisplayProps = {
+  ticket: TixkitTicketDisplay;
+  title?: string;
+  onPress?: (ticket: TixkitTicketDisplay) => void;
+  testID?: string;
+};
+
+export type TixkitScannerStatusProps = {
+  result?: ScanResult;
+  manifest?: Pick<OfflineManifest, 'eventId' | 'checkInListId' | 'expiresAt'>;
+  offlineScanCount?: number;
+  onSync?: () => void;
+  testID?: string;
+};
+
+export type TixkitCameraPermissionState = 'granted' | 'denied' | 'prompt' | 'unknown';
+export type TixkitScannerMode = 'online' | 'offline' | 'auto';
+
+export type TixkitBarcodeScanEvent =
+  | string
+  | {
+      data?: string;
+      rawValue?: string;
+      value?: string;
+      nativeEvent?: {
+        data?: string;
+        rawValue?: string;
+        value?: string;
+        codeStringValue?: string;
+      };
+    };
+
+export type TixkitScannerSyncRequest = {
+  checkInListId: string;
+  trigger: 'manual' | 'offline_accepted';
+};
+
+export type TixkitCameraScannerProps = {
+  client: TixkitScannerClient;
+  checkInListId: string;
+  mode?: TixkitScannerMode;
+  disabled?: boolean;
+  cameraPermission?: TixkitCameraPermissionState;
+  barcodeTypes?: string[];
+  throttleMs?: number;
+  testID?: string;
+  cameraProps?: Record<string, unknown>;
+  now?: () => number;
+  qrHashFromPayload?: (qrPayload: string) => string;
+  onRequestPermission?: () => Promise<boolean> | boolean;
+  onResult?: (result: ScanResult) => void;
+  onError?: (error: Error) => void;
+  onSync?: (request: TixkitScannerSyncRequest) => Promise<SyncResult> | SyncResult;
+  onSyncResult?: (result: SyncResult) => void;
+  syncAfterOfflineAccepted?: boolean;
+  renderOverlay?: (state: {
+    disabled: boolean;
+    mode: TixkitScannerMode;
+    permission: TixkitCameraPermissionState;
+  }) => unknown;
+};
+
+export type TixkitReactNativeComponents = {
+  TixkitTicketCard(props: TixkitTicketDisplayProps): unknown;
+  TixkitScannerStatus(props: TixkitScannerStatusProps): unknown;
+  TixkitCameraScanner(props: TixkitCameraScannerProps): unknown;
+};
+
+export type TixkitBarcodeScanOptions = {
+  client: TixkitScannerClient;
+  checkInListId: string;
+  qrPayload: string;
+  mode?: TixkitScannerMode;
+  qrHashFromPayload?: (qrPayload: string) => string;
+};
+
+export type TixkitScannerConflict = {
   qrHash: string;
   outcome: string;
 };
 
-export type GateKitScannerClientConfig = {
+export type TixkitScannerClientConfig = {
   deviceId: string;
   deviceSecret: string;
   apiBaseUrl?: string;
+  checkoutBaseUrl?: string;
   manifestSigningKey: string;
-  storage?: GateKitScannerStorage;
+  storage?: TixkitScannerStorage;
   storageKey?: string;
-  onSyncConflict?: (conflict: GateKitScannerConflict) => void;
+  onSyncConflict?: (conflict: TixkitScannerConflict) => void;
 };
 
-export class GateKitScannerClient {
-  private client: GateKitClient;
+const DEFAULT_SECURE_STORAGE_PREFIX = 'tixkit';
+const DEFAULT_SCANNER_CREDENTIALS_KEY = 'scanner:credentials';
+
+function secureStorageKey(key: string, keyPrefix = DEFAULT_SECURE_STORAGE_PREFIX): string {
+  return key.startsWith(`${keyPrefix}:`) ? key : `${keyPrefix}:${key}`;
+}
+
+export function createTixkitSecureStorage(
+  adapter: TixkitSecureStorageAdapter,
+  options: TixkitSecureStorageOptions = {},
+): TixkitScannerStorage {
+  const keyPrefix = options.keyPrefix ?? DEFAULT_SECURE_STORAGE_PREFIX;
+  return {
+    getItem: (key) => adapter.getItem(secureStorageKey(key, keyPrefix)),
+    setItem: (key, value) => adapter.setItem(secureStorageKey(key, keyPrefix), value),
+    removeItem: (key) => {
+      const resolvedKey = secureStorageKey(key, keyPrefix);
+      if (adapter.removeItem) return adapter.removeItem(resolvedKey);
+      if (adapter.deleteItem) return adapter.deleteItem(resolvedKey);
+      return adapter.setItem(resolvedKey, '');
+    },
+  };
+}
+
+function assertScannerCredentials(value: unknown): TixkitScannerCredentials | null {
+  if (!value || typeof value !== 'object') return null;
+  const credentials = value as Partial<Record<keyof TixkitScannerCredentials, unknown>>;
+  if (
+    typeof credentials.deviceId !== 'string' ||
+    typeof credentials.deviceSecret !== 'string' ||
+    typeof credentials.manifestSigningKey !== 'string'
+  ) {
+    return null;
+  }
+  return {
+    deviceId: credentials.deviceId,
+    deviceSecret: credentials.deviceSecret,
+    manifestSigningKey: credentials.manifestSigningKey,
+    apiBaseUrl: typeof credentials.apiBaseUrl === 'string' ? credentials.apiBaseUrl : undefined,
+    checkoutBaseUrl: typeof credentials.checkoutBaseUrl === 'string' ? credentials.checkoutBaseUrl : undefined,
+  };
+}
+
+export async function saveScannerCredentials(
+  storage: TixkitScannerStorage,
+  credentials: TixkitScannerCredentials,
+  key = DEFAULT_SCANNER_CREDENTIALS_KEY,
+): Promise<void> {
+  await storage.setItem(key, JSON.stringify(credentials));
+}
+
+export async function loadScannerCredentials(
+  storage: TixkitScannerStorage,
+  key = DEFAULT_SCANNER_CREDENTIALS_KEY,
+): Promise<TixkitScannerCredentials | null> {
+  const raw = await storage.getItem(key);
+  if (!raw) return null;
+  try {
+    return assertScannerCredentials(JSON.parse(raw));
+  } catch {
+    return null;
+  }
+}
+
+export async function clearScannerCredentials(
+  storage: TixkitScannerStorage,
+  key = DEFAULT_SCANNER_CREDENTIALS_KEY,
+): Promise<void> {
+  await storage.removeItem(key);
+}
+
+function statusLabel(status: string): string {
+  return status
+    .split('_')
+    .filter(Boolean)
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+    .join(' ') || 'Unknown';
+}
+
+export function extractBarcodePayload(event: TixkitBarcodeScanEvent): string | null {
+  if (typeof event === 'string') return event.trim() || null;
+
+  const payload =
+    event.data ??
+    event.rawValue ??
+    event.value ??
+    event.nativeEvent?.data ??
+    event.nativeEvent?.rawValue ??
+    event.nativeEvent?.value ??
+    event.nativeEvent?.codeStringValue;
+
+  return typeof payload === 'string' && payload.trim().length > 0 ? payload.trim() : null;
+}
+
+export async function scanBarcodePayload(options: TixkitBarcodeScanOptions): Promise<ScanResult> {
+  const mode = options.mode ?? 'online';
+  if (mode === 'offline') {
+    return options.client.scanOffline((options.qrHashFromPayload ?? qrHashForPayload)(options.qrPayload));
+  }
+
+  try {
+    return await options.client.scanOnline(options.checkInListId, options.qrPayload);
+  } catch (error) {
+    if (mode !== 'auto') throw error;
+    return options.client.scanOffline((options.qrHashFromPayload ?? qrHashForPayload)(options.qrPayload));
+  }
+}
+
+export function createTixkitReactNativeComponents(
+  runtime: TixkitReactNativeRuntime,
+): TixkitReactNativeComponents {
+  const { createElement, View, Text, Pressable, CameraView, ActivityIndicator } = runtime;
+
+  function text(value: string, key: string): unknown {
+    return createElement(Text, { key }, value);
+  }
+
+  function TixkitTicketCard(props: TixkitTicketDisplayProps): unknown {
+    const body = [
+      text(props.title ?? 'Ticket', 'title'),
+      text(props.ticket.attendeeName ?? 'Guest', 'attendeeName'),
+      text(`Ticket ${props.ticket.ticketId}`, 'ticketId'),
+      text(statusLabel(props.ticket.status), 'status'),
+    ];
+    if (props.ticket.ticketTypeId) {
+      body.splice(3, 0, text(`Type ${props.ticket.ticketTypeId}`, 'ticketTypeId'));
+    }
+
+    if (props.onPress && Pressable) {
+      return createElement(
+        Pressable,
+        { testID: props.testID, onPress: () => props.onPress?.(props.ticket) },
+        ...body,
+      );
+    }
+
+    return createElement(View, { testID: props.testID }, ...body);
+  }
+
+  function TixkitScannerStatus(props: TixkitScannerStatusProps): unknown {
+    const body = [
+      text(props.result ? statusLabel(props.result.outcome) : 'Ready to scan', 'status'),
+      text(props.result?.message ?? 'Download a manifest for offline scanning.', 'message'),
+    ];
+    if (props.manifest) {
+      body.push(text(`Event ${props.manifest.eventId}`, 'eventId'));
+      body.push(text(`List ${props.manifest.checkInListId}`, 'checkInListId'));
+      body.push(text(`Expires ${props.manifest.expiresAt}`, 'expiresAt'));
+    }
+    if (props.offlineScanCount !== undefined) {
+      body.push(text(`Offline scans ${props.offlineScanCount}`, 'offlineScanCount'));
+    }
+    if (props.onSync && Pressable) {
+      body.push(createElement(Pressable, { key: 'sync', onPress: props.onSync }, text('Sync', 'syncText')));
+    }
+    return createElement(View, { testID: props.testID }, ...body);
+  }
+
+  function TixkitCameraScanner(props: TixkitCameraScannerProps): unknown {
+    const mode = props.mode ?? 'online';
+    const permission = props.cameraPermission ?? 'unknown';
+    const disabled = Boolean(props.disabled);
+    const throttleMs = props.throttleMs ?? 1_500;
+    const barcodeTypes = props.barcodeTypes ?? ['qr'];
+    let inFlight = false;
+    let lastPayload = '';
+    let lastScanAt = 0;
+
+    async function sync(trigger: TixkitScannerSyncRequest['trigger']): Promise<void> {
+      if (!props.onSync) return;
+      try {
+        const result = await props.onSync({ checkInListId: props.checkInListId, trigger });
+        props.onSyncResult?.(result);
+      } catch (error) {
+        props.onError?.(error instanceof Error ? error : new Error(String(error)));
+      }
+    }
+
+    async function onBarcodeScanned(event: TixkitBarcodeScanEvent): Promise<void> {
+      if (disabled || inFlight) return;
+      const qrPayload = extractBarcodePayload(event);
+      if (!qrPayload) return;
+
+      const now = props.now?.() ?? Date.now();
+      if (qrPayload === lastPayload && now - lastScanAt < throttleMs) return;
+      lastPayload = qrPayload;
+      lastScanAt = now;
+      inFlight = true;
+
+      try {
+        const result = await scanBarcodePayload({
+          client: props.client,
+          checkInListId: props.checkInListId,
+          qrPayload,
+          mode,
+          qrHashFromPayload: props.qrHashFromPayload,
+        });
+        props.onResult?.(result);
+        if (props.syncAfterOfflineAccepted && mode !== 'online' && result.outcome === 'accepted') {
+          await sync('offline_accepted');
+        }
+      } catch (error) {
+        props.onError?.(error instanceof Error ? error : new Error(String(error)));
+      } finally {
+        inFlight = false;
+      }
+    }
+
+    if (permission !== 'granted') {
+      const body = [
+        text(permission === 'denied' ? 'Camera permission denied' : 'Camera permission required', 'permission'),
+      ];
+      if (props.onRequestPermission && Pressable) {
+        body.push(
+          createElement(
+            Pressable,
+            { key: 'permissionAction', onPress: props.onRequestPermission },
+            text('Allow camera', 'permissionActionText'),
+          ),
+        );
+      }
+      return createElement(View, { testID: props.testID }, ...body);
+    }
+
+    if (!CameraView) {
+      return createElement(
+        View,
+        { testID: props.testID },
+        text('Camera view adapter is required', 'missingCamera'),
+      );
+    }
+
+    const camera = createElement(CameraView, {
+      ...props.cameraProps,
+      key: 'camera',
+      testID: props.testID ? `${props.testID}-camera` : undefined,
+      barcodeScannerSettings: { barcodeTypes },
+      onBarcodeScanned: disabled ? undefined : onBarcodeScanned,
+    });
+    const body = [
+      camera,
+      text(disabled ? 'Scanner paused' : `Scanner ready (${mode})`, 'status'),
+    ];
+    if (disabled && ActivityIndicator) {
+      body.push(createElement(ActivityIndicator, { key: 'activity', animating: false }));
+    }
+    const overlay = props.renderOverlay?.({ disabled, mode, permission });
+    if (overlay !== undefined && overlay !== null) body.push(overlay);
+    if (props.onSync && Pressable) {
+      body.push(createElement(Pressable, { key: 'sync', onPress: () => sync('manual') }, text('Sync', 'syncText')));
+    }
+    return createElement(View, { testID: props.testID }, ...body);
+  }
+
+  return { TixkitTicketCard, TixkitScannerStatus, TixkitCameraScanner };
+}
+
+function encodeCheckoutItems(items: TixkitCheckoutHandoffItem[] | undefined): string | undefined {
+  if (!items?.length) return undefined;
+  const encoded = items
+    .map((item) => {
+      const id = item.ticketTypeId ?? item.productId;
+      if (!id || !Number.isInteger(item.quantity) || item.quantity <= 0) return null;
+      return `${id}=${item.quantity}`;
+    })
+    .filter((item): item is string => Boolean(item));
+  return encoded.length > 0 ? encoded.join(',') : undefined;
+}
+
+export function checkoutHandoffUrl(options: TixkitCheckoutHandoffOptions): string {
+  const base = options.checkoutBaseUrl ?? 'https://checkout.tixkit.com';
+  const url = new URL('/checkout', base);
+  url.searchParams.set('eventId', options.eventId);
+  if (options.brandId) url.searchParams.set('brand', options.brandId);
+  const items = encodeCheckoutItems(options.items);
+  if (items) url.searchParams.set('items', items);
+  if (options.products?.length) url.searchParams.set('products', options.products.join(','));
+  if (options.discountCode) url.searchParams.set('discount', options.discountCode);
+  if (options.accessCode) url.searchParams.set('accessCode', options.accessCode);
+  if (options.trackingId) url.searchParams.set('tracking', options.trackingId);
+  if (options.affiliateCode) url.searchParams.set('affiliate', options.affiliateCode);
+  if (options.locale) url.searchParams.set('locale', options.locale);
+  if (options.theme) url.searchParams.set('theme', options.theme);
+  if (options.mode) url.searchParams.set('mode', options.mode);
+  if (options.successUrl) url.searchParams.set('successUrl', options.successUrl);
+  if (options.cancelUrl) url.searchParams.set('cancelUrl', options.cancelUrl);
+  return url.toString();
+}
+
+export class TixkitScannerClient {
+  private client: TixkitClient;
   private readonly deviceId: string;
   private readonly deviceSecret: string;
+  private readonly checkoutBaseUrl?: string;
   private readonly manifestSigningKey: string;
-  private readonly storage?: GateKitScannerStorage;
+  private readonly storage?: TixkitScannerStorage;
   private readonly storageKey: string;
-  private readonly onSyncConflict?: (conflict: GateKitScannerConflict) => void;
+  private readonly onSyncConflict?: (conflict: TixkitScannerConflict) => void;
   private manifest: OfflineManifest | null = null;
   private offlineScans = new Map<string, string>();
 
-  constructor(config: GateKitScannerClientConfig) {
+  constructor(config: TixkitScannerClientConfig) {
     this.deviceId = config.deviceId;
     this.deviceSecret = config.deviceSecret;
+    this.checkoutBaseUrl = config.checkoutBaseUrl;
     this.manifestSigningKey = config.manifestSigningKey;
     this.storage = config.storage;
-    this.storageKey = config.storageKey ?? `gatekit:scanner:${config.deviceId}:offline-scans`;
+    this.storageKey = config.storageKey ?? `tixkit:scanner:${config.deviceId}:offline-scans`;
     this.onSyncConflict = config.onSyncConflict;
-    this.client = new GateKitClient({ apiBaseUrl: config.apiBaseUrl });
+    this.client = new TixkitClient({ apiBaseUrl: config.apiBaseUrl });
   }
 
   /**
@@ -331,6 +775,19 @@ export class GateKitScannerClient {
   async clearOfflineScans(): Promise<void> {
     this.offlineScans.clear();
     await this.storage?.removeItem(this.storageKey);
+  }
+
+  checkoutUrl(options: Omit<TixkitCheckoutHandoffOptions, 'checkoutBaseUrl'>): string {
+    return checkoutHandoffUrl({
+      checkoutBaseUrl: this.checkoutBaseUrl,
+      ...options,
+    });
+  }
+
+  async openCheckout(options: Omit<TixkitCheckoutOpenOptions, 'checkoutBaseUrl'>): Promise<string> {
+    const url = this.checkoutUrl(options);
+    await options.openURL(url);
+    return url;
   }
 
   /**

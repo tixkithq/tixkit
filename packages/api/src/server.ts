@@ -7,7 +7,7 @@ async function start(): Promise<void> {
   try {
     app = await buildApp();
     await app.listen({ port: config.port, host: '0.0.0.0' });
-    app.log.info(`GateKit API server running on port ${config.port}`);
+    app.log.info(`Tixkit API server running on port ${config.port}`);
   } catch (err) {
     const message = buildStartupFailureMessage(err, {
       service: 'API',

@@ -8,7 +8,6 @@ import {
   ArrowDown,
   ArrowUp,
   Copy,
-  FileX2,
   Pencil,
   Plus,
   Trash2,
@@ -66,8 +65,9 @@ const fieldTypes = [
   { value: 'multiselect', label: 'Multiple choice' },
   { value: 'checkbox', label: 'Checkbox' },
   { value: 'date', label: 'Date' },
+  { value: 'file', label: 'File upload' },
   { value: 'waiver', label: 'Waiver / consent' },
-] satisfies { value: Exclude<AdminQuestionType, 'file'>; label: string }[]
+] satisfies { value: AdminQuestionType; label: string }[]
 
 export const questionFormSchema = z
   .object({
@@ -80,6 +80,7 @@ export const questionFormSchema = z
       'multiselect',
       'checkbox',
       'date',
+      'file',
       'waiver',
     ]),
     label: z.string().trim().min(1, 'Label is required'),
@@ -199,7 +200,7 @@ function questionToValues(
   questions: AdminCheckoutQuestion[]
 ): CheckoutQuestionFormValues {
   return {
-    type: question?.type === 'file' ? 'text' : question?.type ?? 'text',
+    type: question?.type ?? 'text',
     label: question?.label ?? '',
     description: question?.description ?? '',
     required: question?.required ?? false,
@@ -405,9 +406,6 @@ export function EventCheckoutFormView({ eventId }: { eventId: string }) {
                         <h3 className='truncate font-medium'>{question.label}</h3>
                         {question.required && <Badge variant='secondary'>Required</Badge>}
                         {question.isConsentField && <Badge variant='outline'>Consent</Badge>}
-                        {question.type === 'file' && (
-                          <Badge variant='destructive'>Unsupported</Badge>
-                        )}
                       </div>
                       <div className='flex flex-wrap gap-2 text-xs text-muted-foreground'>
                         <span>{formatType(question.type)}</span>
@@ -460,7 +458,7 @@ export function EventCheckoutFormView({ eventId }: { eventId: string }) {
                         type='button'
                         variant='outline'
                         size='icon'
-                        disabled={submittingId === question.id || question.type === 'file'}
+                        disabled={submittingId === question.id}
                         onClick={() => openEdit(question)}
                         aria-label='Edit field'
                       >
@@ -517,10 +515,6 @@ export function EventCheckoutFormView({ eventId }: { eventId: string }) {
               />
             ))
           )}
-          <div className='rounded-md border border-dashed p-3 text-sm text-muted-foreground'>
-            <FileX2 className='mb-2 size-4' />
-            File upload fields are blocked until upload storage and validation are available.
-          </div>
         </CardContent>
       </Card>
 
@@ -597,13 +591,13 @@ function PreviewField({
           {(question.options ?? []).map((option) => (
             <label key={option} className='flex items-center gap-2 text-sm'>
               <Checkbox
-                checked={selectedValues.includes(option)}
-                onCheckedChange={(checked) => {
-                  const next = checked
-                    ? [...selectedValues, option]
-                    : selectedValues.filter((value) => value !== option)
-                  onChange(next)
-                }}
+	                checked={selectedValues.includes(option)}
+	                onCheckedChange={(checked) => {
+	                  const next = checked
+	                    ? [...selectedValues, option]
+	                    : selectedValues.filter((selectedValue) => selectedValue !== option)
+	                  onChange(next)
+	                }}
               />
               <span>{option}</span>
             </label>
@@ -622,6 +616,8 @@ function PreviewField({
             ))}
           </SelectContent>
         </Select>
+      ) : question.type === 'file' ? (
+        <Input type='file' onChange={(event) => onChange(event.target.files?.[0]?.name ?? '')} />
       ) : (
         <Input
           value={stringValue}

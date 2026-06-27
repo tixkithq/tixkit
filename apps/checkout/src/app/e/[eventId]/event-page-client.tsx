@@ -27,6 +27,7 @@ import {
 import { brandThemeStyle, type ResolvedBrand } from '@/lib/brand'
 import { useResolvedBrand } from '@/lib/use-brand'
 import { formatCurrency, formatDateTime } from '@/lib/format'
+import { trackMarketingEvent } from '@/lib/marketing'
 
 type Props = {
   eventId: string
@@ -104,12 +105,22 @@ export default function EventPageClient({
     }
   }, [eventId])
 
-  const visibleTickets = availability.filter(
-    (t) => t.status === 'active' || t.status === 'sold_out',
+  const visibleTickets = useMemo(
+    () => availability.filter((t) => t.status === 'active' || t.status === 'sold_out'),
+    [availability],
   )
   const hasActiveTickets = visibleTickets.some((t) => t.status === 'active')
   const startsAt = event ? formatDateTime(event.startsAt, event.timezone) : null
   const venueName = event?.venue?.name
+
+  useEffect(() => {
+    if (!event) return
+    trackMarketingEvent(event.marketingIntegrations, 'view_item', {
+      eventId: event.id,
+      currency: visibleTickets[0]?.currency,
+      items: [{ id: event.id, name: event.title, quantity: 1 }],
+    })
+  }, [event, visibleTickets])
 
   function goToCheckout() {
     const params = new URLSearchParams()
@@ -268,7 +279,7 @@ export default function EventPageClient({
         {hasActiveTickets ? (
           <div className='flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between'>
             <p className='text-sm text-muted-foreground'>
-              Secure checkout powered by GateKit
+              Secure checkout powered by Tixkit
             </p>
             <Button size='lg' onClick={goToCheckout} className='gap-1.5'>
               Get tickets

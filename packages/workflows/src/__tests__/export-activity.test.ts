@@ -45,7 +45,7 @@ const dbState = vi.hoisted(() => ({
   orders: [
     {
       id: 'ord_1',
-      order_number: 'GK-1001',
+      order_number: 'TK-1001',
       status: 'paid',
       total_cents: 10000,
       refunded_cents: 0,
@@ -67,7 +67,7 @@ const dbState = vi.hoisted(() => ({
   destroy: vi.fn(),
 }));
 
-vi.mock('@gatekit/db', () => {
+vi.mock('@tixkit/db', () => {
   class EmailJobRepository {
     async create(input: Record<string, unknown>) {
       dbState.createdJobs.push(input);
@@ -186,7 +186,7 @@ describe('generateExportActivity', () => {
     dbState.orders = [
       {
         id: 'ord_1',
-        order_number: 'GK-1001',
+        order_number: 'TK-1001',
         status: 'paid',
         total_cents: 10000,
         refunded_cents: 0,
@@ -550,6 +550,25 @@ describe('T30 export content validation - attendee CSV', () => {
     }
   });
 
+  it('includes rows through the end of a date-only to filter', async () => {
+    dbState.exportJob = {
+      ...dbState.exportJob,
+      filters: JSON.stringify({ from: '2026-06-01', to: '2026-06-01' }),
+    };
+
+    const result = await generateExportActivity({
+      exportId: 'exp_1',
+      type: 'attendees',
+      format: 'csv',
+    });
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.value.rowCount).toBe(2);
+    const rows = parseCsv(result.value.data);
+    expect(rows.map((row) => row[1])).toEqual(['email', 'ada@test.com', 'grace@test.com']);
+  });
+
   it('includes attendee field values in the correct columns', async () => {
     const result = await generateExportActivity({
       exportId: 'exp_1',
@@ -613,7 +632,7 @@ describe('T30 export content validation - sales report CSV', () => {
     dbState.orders = [
       {
         id: 'ord_1',
-        order_number: 'GK-1001',
+        order_number: 'TK-1001',
         status: 'paid',
         total_cents: 10000,
         refunded_cents: 0,
@@ -627,7 +646,7 @@ describe('T30 export content validation - sales report CSV', () => {
       },
       {
         id: 'ord_2',
-        order_number: 'GK-1002',
+        order_number: 'TK-1002',
         status: 'partially_refunded',
         total_cents: 5000,
         refunded_cents: 1500,

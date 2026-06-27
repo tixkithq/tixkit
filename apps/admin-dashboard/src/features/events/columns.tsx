@@ -66,6 +66,7 @@ export function getEventColumns(
         return (
           <Link
             href={routes.eventDetail(event.id)}
+            prefetch={false}
             className='font-medium hover:underline'
           >
             {event.title}
@@ -122,6 +123,7 @@ export function getEventColumns(
     },
     {
       id: 'actions',
+      header: () => <span className='sr-only'>Actions</span>,
       enableHiding: false,
       cell: function EventRowActions({ row }) {
         const event = row.original
@@ -159,7 +161,7 @@ export function getEventColumns(
               <DropdownMenuContent align='end'>
                 <DropdownMenuLabel>Actions</DropdownMenuLabel>
                 <DropdownMenuItem asChild>
-                  <Link href={routes.eventDetail(event.id)}>
+                  <Link href={routes.eventDetail(event.id)} prefetch={false}>
                     <Eye className='size-4' />
                     View
                   </Link>

@@ -1,7 +1,7 @@
 import type { FastifyPluginAsync } from 'fastify';
 import { createHmac, timingSafeEqual } from 'node:crypto';
-import { WebhookSignatureError } from '@gatekit/domain';
-import { PaymentEventRepository } from '@gatekit/db';
+import { WebhookSignatureError } from '@tixkit/domain';
+import { PaymentEventRepository } from '@tixkit/db';
 
 const SVIX_TOLERANCE_SECONDS = 5 * 60;
 
@@ -59,14 +59,22 @@ export const clerkWebhookRoutes: FastifyPluginAsync = async (app) => {
       return reply.status(200).send({ received: true, duplicate: true });
     }
     if (!storedEvent) {
-      storedEvent = await eventRepo.create({
-        tenantId: 'system',
-        provider: 'clerk',
-        providerEventId: msgId,
-        eventType: event.type,
-        rawPayload: event as unknown as Record<string, unknown>,
-        idempotencyKey: `${msgId}-${timestamp}`,
-      });
+      try {
+        storedEvent = await eventRepo.create({
+          tenantId: 'system',
+          provider: 'clerk',
+          providerEventId: msgId,
+          eventType: event.type,
+          rawPayload: event as unknown as Record<string, unknown>,
+          idempotencyKey: `${msgId}-${timestamp}`,
+        });
+      } catch (err) {
+        storedEvent = await eventRepo.findByProviderEventId('clerk', msgId);
+        if (!storedEvent) throw err;
+        if (storedEvent.processed_at) {
+          return reply.status(200).send({ received: true, duplicate: true });
+        }
+      }
     }
 
     const isOrgEvent = event.type.startsWith('organization');

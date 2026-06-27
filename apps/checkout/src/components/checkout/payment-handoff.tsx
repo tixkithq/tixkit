@@ -1,7 +1,11 @@
 'use client'
 
 import { useEffect, useRef, useState } from 'react'
-import { loadStripe, type Stripe, type StripeElements } from '@stripe/stripe-js'
+import type {
+  Stripe,
+  StripeElements,
+  StripePaymentElementOptions,
+} from '@stripe/stripe-js'
 import {
   ShieldCheckIcon,
   LoaderCircleIcon,
@@ -15,15 +19,25 @@ type Props = {
   currency: string
   totalCents: number
   returnUrl: string
+  billingDetails?: {
+    name?: string
+    email?: string
+    phone?: string
+  }
   onError: (message: string) => void
 }
 
 // Stripe.js is loaded lazily and only when a payment is actually in flight.
 let stripePromise: Promise<Stripe | null> | null = null
-function getStripe(): Promise<Stripe | null> {
+async function getStripe(): Promise<Stripe | null> {
   if (!stripePromise) {
     const publishableKey = process.env.NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY
-    stripePromise = publishableKey ? loadStripe(publishableKey) : loadStripe('')
+    if (!publishableKey) {
+      stripePromise = Promise.resolve(null)
+      return stripePromise
+    }
+    const { loadStripe } = await import('@stripe/stripe-js')
+    stripePromise = loadStripe(publishableKey)
   }
   return stripePromise
 }
@@ -38,11 +52,26 @@ type PaymentElementLike = {
   ): void
 }
 
+function stripeRedirectStatus(status?: string): string {
+  if (status === 'succeeded') return 'succeeded'
+  if (status === 'processing') return 'processing'
+  return 'failed'
+}
+
+function isLocalCaptureClientSecret(value: string): boolean {
+  return value.startsWith('pi_capture_') && value.endsWith('_secret')
+}
+
+function localCaptureIntentId(value: string): string {
+  return value.slice(0, -'_secret'.length)
+}
+
 export function PaymentHandoff({
   clientSecret,
   currency,
   totalCents,
   returnUrl,
+  billingDetails,
   onError,
 }: Props) {
   const containerRef = useRef<HTMLDivElement>(null)
@@ -54,11 +83,18 @@ export function PaymentHandoff({
   )
   const [mountError, setMountError] = useState<string | null>(null)
   const [submitting, setSubmitting] = useState(false)
+  const isLocalCapture = isLocalCaptureClientSecret(clientSecret)
 
   useEffect(() => {
     let cancelled = false
 
     async function mount() {
+      if (isLocalCapture) {
+        setMountError(null)
+        setStatus('ready')
+        return
+      }
+
       const container = containerRef.current
       if (!container) return
       try {
@@ -78,8 +114,15 @@ export function PaymentHandoff({
           clientSecret,
         })
         elementsRef.current = elements
+        const paymentOptions: StripePaymentElementOptions = {
+          defaultValues: billingDetails
+            ? { billingDetails }
+            : undefined,
+          wallets: { link: 'never' },
+        }
         const paymentElement = elements.create(
           'payment',
+          paymentOptions,
         ) as unknown as PaymentElementLike
         paymentElementRef.current = paymentElement
         if (cancelled) return
@@ -110,12 +153,25 @@ export function PaymentHandoff({
       paymentElementRef.current = null
       elementsRef.current = null
     }
-  }, [clientSecret, onError])
+  }, [billingDetails, clientSecret, isLocalCapture, onError])
 
   async function handlePay() {
+    if (isLocalCapture) {
+      setSubmitting(true)
+      const url = new URL(returnUrl)
+      url.searchParams.set('payment_intent', localCaptureIntentId(clientSecret))
+      url.searchParams.set('payment_intent_client_secret', clientSecret)
+      url.searchParams.set('redirect_status', 'succeeded')
+      window.location.assign(url.toString())
+      return
+    }
+
     const stripe = stripeRef.current
     const elements = elementsRef.current
-    if (!stripe || !elements) return
+    if (!stripe || !elements) {
+      onError('Payment form is still loading. Please try again.')
+      return
+    }
     setSubmitting(true)
     try {
       const { error: submitError } = await elements.submit()
@@ -123,13 +179,36 @@ export function PaymentHandoff({
         onError(submitError.message ?? 'Could not submit payment details.')
         return
       }
-      const { error } = await stripe.confirmPayment({
+      const { error, paymentIntent } = await stripe.confirmPayment({
         elements,
         confirmParams: { return_url: returnUrl },
+        redirect: 'if_required',
       })
       if (error) {
         onError(error.message ?? 'Payment failed.')
+        return
       }
+      let confirmedIntent = paymentIntent
+      if (!confirmedIntent) {
+        const retrieved = await stripe.retrievePaymentIntent(clientSecret)
+        if (retrieved.error) {
+          onError(retrieved.error.message ?? 'Payment status could not be verified.')
+          return
+        }
+        confirmedIntent = retrieved.paymentIntent
+      }
+      if (confirmedIntent) {
+        const url = new URL(returnUrl)
+        url.searchParams.set('payment_intent', confirmedIntent.id)
+        url.searchParams.set('payment_intent_client_secret', clientSecret)
+        url.searchParams.set(
+          'redirect_status',
+          stripeRedirectStatus(confirmedIntent.status),
+        )
+        window.location.assign(url.toString())
+        return
+      }
+      onError('Payment confirmation did not return a payment intent.')
     } catch (err) {
       onError(err instanceof Error ? err.message : 'Payment failed.')
     } finally {
@@ -141,7 +220,7 @@ export function PaymentHandoff({
     <div className='space-y-4'>
       <div className='flex items-center gap-2 text-sm text-muted-foreground'>
         <ShieldCheckIcon className='size-4' />
-        Secure payment processed by Stripe
+        {isLocalCapture ? 'Payment is ready for local capture' : 'Secure payment processed by Stripe'}
       </div>
 
       {mountError ? (

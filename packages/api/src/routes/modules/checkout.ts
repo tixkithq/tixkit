@@ -1,4 +1,5 @@
 import type { FastifyPluginAsync, FastifyRequest } from 'fastify';
+import { createHash, timingSafeEqual } from 'node:crypto';
 import { ulid } from 'ulid';
 import {
   EventRepository,
@@ -9,11 +10,14 @@ import {
   TaxRuleRepository,
   FeeRuleRepository,
   AccessRuleRepository,
-} from '@gatekit/db';
-import type { TicketTypeForPricing } from '../../services/pricing.js';
+  ProductRepository,
+  EventOccurrenceRepository,
+} from '@tixkit/db';
+import type { ProductForPricing, TicketTypeForPricing } from '../../services/pricing.js';
 import type { CartReservationItem } from '../../services/inventory.js';
 import { withIdempotency, hashRequest } from '../../services/idempotency.js';
-import type { CheckoutState } from '@gatekit/workflows';
+import type { CheckoutState } from '@tixkit/workflows';
+import { assertCompletedUploadArtifacts } from '../../services/uploads.js';
 import type {
   CreateCheckoutSessionInput,
   CartInput,
@@ -21,7 +25,7 @@ import type {
   DiscountCode,
   FeeRule,
   TaxRule,
-} from '@gatekit/domain';
+} from '@tixkit/domain';
 import {
   NotFoundError,
   ValidationError,
@@ -29,8 +33,8 @@ import {
   validateTicketPurchase,
   validateAnswers,
   normalizeQuestionAnswers,
-} from '@gatekit/domain';
-import type { Question } from '@gatekit/domain';
+} from '@tixkit/domain';
+import type { Question } from '@tixkit/domain';
 import { parseJsonValue, pickAllowedFields } from '../../http/contracts.js';
 import {
   createCheckoutSessionSchema,
@@ -38,6 +42,7 @@ import {
   confirmCheckoutSchema,
   parseBody,
 } from '../../http/schemas.js';
+import { hashWaitlistClaimToken } from './waitlist.js';
 
 function requireIdempotencyKey(request: FastifyRequest): string {
   const key = request.headers['idempotency-key'];
@@ -59,6 +64,17 @@ function assertCheckoutSessionToken(session: { id: string; client_token: string 
   if (session.client_token !== clientToken) {
     throw new NotFoundError('CheckoutSession', session.id);
   }
+}
+
+function walletPassTokenHash(token: string): string {
+  return createHash('sha256').update(token).digest('hex');
+}
+
+function tokenHashMatches(expected: string | null, candidate: string): boolean {
+  if (!expected) return false;
+  const expectedBuffer = Buffer.from(expected, 'hex');
+  const candidateBuffer = Buffer.from(walletPassTokenHash(candidate), 'hex');
+  return expectedBuffer.length === candidateBuffer.length && timingSafeEqual(expectedBuffer, candidateBuffer);
 }
 
 function publicCheckoutSession(session: {
@@ -91,29 +107,65 @@ function publicCheckoutSession(session: {
 
 function normalizeCartItems(
   items: CreateCheckoutSessionInput['items'],
-  ticketTypes: Map<string, { kind: string; price_cents: number }>,
+  ticketTypes: Map<string, { kind: string; price_cents: number; event_occurrence_id?: string | null }>,
+  products: Map<string, { price_cents: number }>,
 ): CartInput['items'] {
-  const normalized = new Map<string, { ticketTypeId: string; quantity: number; unitAmountCents?: number }>();
+  const normalized = new Map<
+    string,
+    {
+      ticketTypeId?: string;
+      occurrenceId?: string;
+      productId?: string;
+      quantity: number;
+      unitAmountCents?: number;
+      attendeeFields?: Record<string, unknown>[];
+    }
+  >();
 
   for (const item of items) {
-    const ticketType = ticketTypes.get(item.ticketTypeId);
-    if (!ticketType) throw new NotFoundError('TicketType', item.ticketTypeId);
-    if (ticketType.kind !== 'donation' && item.unitAmountCents !== undefined) {
-      throw new ValidationError(`unitAmountCents is only accepted for donation ticket ${item.ticketTypeId}`);
+    if (item.ticketTypeId) {
+      const ticketType = ticketTypes.get(item.ticketTypeId);
+      if (!ticketType) throw new NotFoundError('TicketType', item.ticketTypeId);
+      if (ticketType.kind !== 'donation' && item.unitAmountCents !== undefined) {
+        throw new ValidationError(`unitAmountCents is only accepted for donation ticket ${item.ticketTypeId}`);
+      }
+
+      const occurrenceId = item.occurrenceId ?? ticketType.event_occurrence_id ?? undefined;
+      const key = `ticket:${item.ticketTypeId}:${occurrenceId ?? 'event'}`;
+      const existing = normalized.get(key);
+      const unitAmountCents = ticketType.kind === 'donation' ? item.unitAmountCents : undefined;
+      if (existing) {
+        if (existing.unitAmountCents !== unitAmountCents) {
+          throw new ValidationError(`Duplicate donation lines for ${item.ticketTypeId} must use the same amount`);
+        }
+        existing.quantity += item.quantity;
+        if (item.attendeeFields) {
+          existing.attendeeFields = [...(existing.attendeeFields ?? []), ...item.attendeeFields];
+        }
+      } else {
+        normalized.set(key, {
+          ticketTypeId: item.ticketTypeId,
+          occurrenceId,
+          quantity: item.quantity,
+          unitAmountCents,
+          attendeeFields: item.attendeeFields,
+        });
+      }
+      continue;
     }
 
-    const existing = normalized.get(item.ticketTypeId);
-    const unitAmountCents = ticketType.kind === 'donation' ? item.unitAmountCents : undefined;
+    if (!item.productId) {
+      throw new ValidationError('Cart item must include ticketTypeId or productId');
+    }
+    if (!products.has(item.productId)) throw new NotFoundError('Product', item.productId);
+    const key = `product:${item.productId}`;
+    const existing = normalized.get(key);
     if (existing) {
-      if (existing.unitAmountCents !== unitAmountCents) {
-        throw new ValidationError(`Duplicate donation lines for ${item.ticketTypeId} must use the same amount`);
-      }
       existing.quantity += item.quantity;
     } else {
-      normalized.set(item.ticketTypeId, {
-        ticketTypeId: item.ticketTypeId,
+      normalized.set(key, {
+        productId: item.productId,
         quantity: item.quantity,
-        unitAmountCents,
       });
     }
   }
@@ -204,6 +256,39 @@ function normalizeValidAnswers(
 ): Record<string, unknown> {
   assertValidAnswers(questions, answers, context);
   return normalizeQuestionAnswers(questions, answers, answeredAt);
+}
+
+function assertWaitlistOfferUsable(entry: {
+  status: string;
+  offer_expires_at: Date | string | null;
+  event_id: string;
+  ticket_type_id: string;
+  quantity: number;
+  buyer_email: string;
+}, input: {
+  eventId: string;
+  items: { ticketTypeId?: string; quantity: number }[];
+  buyerEmail?: string;
+}): void {
+  if (entry.event_id !== input.eventId) {
+    throw new ValidationError('Waitlist offer does not belong to this event');
+  }
+  if (entry.status !== 'offered') {
+    throw new ValidationError('Waitlist offer is not available');
+  }
+  if (!entry.offer_expires_at || new Date(entry.offer_expires_at) <= new Date()) {
+    throw new ValidationError('Waitlist offer has expired');
+  }
+  const claimedItem = input.items.find((item) => item.ticketTypeId === entry.ticket_type_id);
+  if (!claimedItem) {
+    throw new ValidationError('Waitlist offer ticket type is required in the checkout cart');
+  }
+  if (claimedItem.quantity > entry.quantity) {
+    throw new ValidationError('Checkout quantity exceeds the waitlist offer quantity');
+  }
+  if (input.buyerEmail && input.buyerEmail.trim().toLowerCase() !== entry.buyer_email) {
+    throw new ValidationError('Waitlist offer email does not match the checkout buyer');
+  }
 }
 
 type DiscountCodeRow = {
@@ -347,8 +432,46 @@ export const checkoutRoutes: FastifyPluginAsync = async (app) => {
       },
       async () => {
         const ttRepo = new TicketTypeRepository(db);
-        const ticketTypes = await ttRepo.findByEvent(body.eventId);
+        const productRepo = new ProductRepository(db);
+        const [ticketTypes, products] = await Promise.all([
+          ttRepo.findByEvent(body.eventId),
+          productRepo.findByEvent(body.eventId),
+        ]);
         const ttById = new Map(ticketTypes.map((t) => [t.id, t]));
+        const productById = new Map(products.map((product) => [product.id, product]));
+        const occurrenceIds = [...new Set(body.items.map((item) => item.occurrenceId).filter((id): id is string => Boolean(id)))];
+        const occurrenceRows = occurrenceIds.length > 0
+          ? await new EventOccurrenceRepository(db).findByEvent(body.eventId)
+          : [];
+        const occurrenceById = new Map(occurrenceRows.map((occurrence) => [occurrence.id, occurrence]));
+        for (const item of body.items) {
+          if (!item.ticketTypeId) continue;
+          const ticketType = ttById.get(item.ticketTypeId);
+          if (!ticketType) continue;
+          if (item.occurrenceId && !occurrenceById.has(item.occurrenceId)) {
+            throw new NotFoundError('EventOccurrence', item.occurrenceId);
+          }
+          if (ticketType.event_occurrence_id && item.occurrenceId && ticketType.event_occurrence_id !== item.occurrenceId) {
+            throw new ValidationError('Ticket type does not belong to the requested event occurrence');
+          }
+        }
+        const waitlistEntry = body.waitlistClaimToken
+          ? await db
+              .selectFrom('waitlist_entries')
+              .selectAll()
+              .where('claim_token_hash', '=', hashWaitlistClaimToken(body.waitlistClaimToken))
+              .executeTakeFirst()
+          : undefined;
+        if (body.waitlistClaimToken && !waitlistEntry) {
+          throw new NotFoundError('WaitlistOffer', 'claim');
+        }
+        if (waitlistEntry) {
+          assertWaitlistOfferUsable(waitlistEntry, {
+            eventId: body.eventId,
+            items: body.items,
+            buyerEmail: body.buyer?.email,
+          });
+        }
 
         // Load the event's custom questions and validate attendee answers.
         const questionRows = await db
@@ -367,23 +490,28 @@ export const checkoutRoutes: FastifyPluginAsync = async (app) => {
           'Buyer question',
           answeredAt,
         );
+        await assertCompletedUploadArtifacts(db, event.tenant_id, body.eventId, buyerFields);
 
         // Validate attendeeFields for each cart item against only questions
         // applicable to that attendee scope and ticket type.
         for (const item of body.items) {
+          if (!item.ticketTypeId) continue;
           const itemQuestions = applicableQuestions(eventQuestions, 'attendee', item.ticketTypeId);
           if (itemQuestions.length > 0) {
             for (let attendeeIndex = 0; attendeeIndex < item.quantity; attendeeIndex++) {
+              const attendeeAnswers = item.attendeeFields?.[attendeeIndex] ?? {};
               assertValidAnswers(
                 itemQuestions,
-                item.attendeeFields?.[attendeeIndex] ?? {},
+                attendeeAnswers,
                 'Attendee question',
               );
+              // eslint-disable-next-line no-await-in-loop -- each attendee answer set is validated against scoped upload artifacts before session persistence.
+              await assertCompletedUploadArtifacts(db, event.tenant_id, body.eventId, attendeeAnswers);
             }
           }
         }
 
-        const normalizedItems = normalizeCartItems(body.items, ttById);
+        const normalizedItems = normalizeCartItems(body.items, ttById, productById);
         const ttMap = new Map<string, TicketTypeForPricing>();
         for (const tt of ticketTypes) {
           ttMap.set(tt.id, {
@@ -397,10 +525,26 @@ export const checkoutRoutes: FastifyPluginAsync = async (app) => {
             maxPerOrder: tt.max_per_order,
           });
         }
+        const productMap = new Map<string, ProductForPricing>();
+        for (const product of products) {
+          productMap.set(product.id, {
+            id: product.id,
+            name: product.name,
+            priceCents: Number(product.price_cents),
+            currency: product.currency,
+            maxPerOrder: product.max_per_order,
+            status: product.status as ProductForPricing['status'],
+            availableFrom: toIsoString(product.available_from),
+            availableUntil: toIsoString(product.available_until),
+          });
+        }
 
         // Load access rules for the requested ticket types only.
         const accessRuleRepo = new AccessRuleRepository(db);
-        const accessRulesRows = await accessRuleRepo.findByTicketTypes(normalizedItems.map((i) => i.ticketTypeId));
+        const ticketItems = normalizedItems.filter((item): item is CartInput['items'][number] & { ticketTypeId: string } =>
+          Boolean(item.ticketTypeId),
+        );
+        const accessRulesRows = await accessRuleRepo.findByTicketTypes(ticketItems.map((i) => i.ticketTypeId));
         const rulesByTicket = new Map<string, AccessRuleRecord[]>();
         for (const row of accessRulesRows) {
           const list = rulesByTicket.get(row.ticket_type_id) ?? [];
@@ -416,7 +560,7 @@ export const checkoutRoutes: FastifyPluginAsync = async (app) => {
 
         // Validate every line item before reserving inventory.
         const reservationItems: CartReservationItem[] = [];
-        for (const item of normalizedItems) {
+        for (const item of ticketItems) {
           const ttRecord = ttById.get(item.ticketTypeId);
           if (!ttRecord) throw new NotFoundError('TicketType', item.ticketTypeId);
           validateTicketPurchase({
@@ -460,6 +604,7 @@ export const checkoutRoutes: FastifyPluginAsync = async (app) => {
         // Build a map of ticketTypeId → attendeeFields for persistence.
         const attendeeFieldsByTicketType: Record<string, unknown[]> = {};
         for (const item of body.items) {
+          if (!item.ticketTypeId) continue;
           const itemQuestions = applicableQuestions(eventQuestions, 'attendee', item.ticketTypeId);
           if (itemQuestions.length > 0) {
             const fields = Array.from({ length: item.quantity }, (_, attendeeIndex) =>
@@ -474,8 +619,11 @@ export const checkoutRoutes: FastifyPluginAsync = async (app) => {
         const cart: CartInput = {
           items: normalizedItems.map((i) => ({
             ticketTypeId: i.ticketTypeId,
+            occurrenceId: i.occurrenceId,
+            productId: i.productId,
             quantity: i.quantity,
             unitAmountCents: i.unitAmountCents,
+            attendeeFields: i.attendeeFields,
           })),
           discountCode: body.discountCode,
           affiliateCode: body.affiliateCode,
@@ -484,11 +632,15 @@ export const checkoutRoutes: FastifyPluginAsync = async (app) => {
           attendeeFields: attendeeFieldsByTicketType,
         };
 
-        const currency = ttById.get(body.items[0].ticketTypeId)?.currency ?? 'USD';
+        const firstItem = normalizedItems[0];
+        const currency = firstItem.ticketTypeId
+          ? ttById.get(firstItem.ticketTypeId)?.currency ?? 'USD'
+          : productById.get(firstItem.productId!)?.currency ?? 'USD';
         const quote = pricingEngine.calculate({
           currency,
           cart,
           ticketTypes: ttMap,
+          products: productMap,
           taxRules: (taxRules as TaxRuleRow[]).map(toDomainTaxRule),
           feeRules: (feeRules as FeeRuleRow[]).map(toDomainFeeRule),
           discountCodes: (discounts as DiscountCodeRow[]).map(toDomainDiscountCode),
@@ -497,17 +649,19 @@ export const checkoutRoutes: FastifyPluginAsync = async (app) => {
         // Reserve inventory across every pool the cart draws from.
         const sessionRepo = new CheckoutSessionRepository(db);
         const sessionId = `cs_${ulid()}`;
-        const reservation = await inventoryService.reserveCart({
-          items: reservationItems,
-          checkoutSessionId: sessionId,
-        });
+        const reservation = reservationItems.length > 0
+          ? await inventoryService.reserveCart({
+              items: reservationItems,
+              checkoutSessionId: sessionId,
+            })
+          : { primaryHoldId: null, expiresAt: new Date(Date.now() + 10 * 60 * 1000) };
 
         const session = await sessionRepo.create({
           id: sessionId,
           tenantId: event.tenant_id,
           eventId: body.eventId,
           brandId: event.brand_id,
-          holdId: reservation.primaryHoldId,
+          holdId: reservation.primaryHoldId ?? undefined,
           currency: quote.currency,
           cart: cart as Record<string, unknown>,
           buyer: (body.buyer as Record<string, unknown>) ?? {},
@@ -517,6 +671,19 @@ export const checkoutRoutes: FastifyPluginAsync = async (app) => {
           successUrl: body.successUrl,
           cancelUrl: body.cancelUrl,
         });
+
+        if (waitlistEntry) {
+          await db
+            .updateTable('waitlist_entries')
+            .set({
+              status: 'claimed',
+              claimed_at: new Date(),
+              updated_at: new Date(),
+            })
+            .where('id', '=', waitlistEntry.id)
+            .where('status', '=', 'offered')
+            .execute();
+        }
 
         return { status: 201, body: publicCheckoutSession(session) };
       },
@@ -558,6 +725,79 @@ export const checkoutRoutes: FastifyPluginAsync = async (app) => {
     return publicCheckoutSession(session);
   });
 
+  app.get('/checkout/sessions/:sessionId/wallet-passes', async (request) => {
+    const { sessionId } = request.params as { sessionId: string };
+    const repo = new CheckoutSessionRepository(db);
+    const session = await repo.findById(sessionId);
+    if (!session) throw new NotFoundError('CheckoutSession', sessionId);
+
+    const clientToken = request.headers['x-checkout-session-token'];
+    if (typeof clientToken === 'string') {
+      assertCheckoutSessionToken(session, clientToken);
+    } else if (session.status !== 'completed') {
+      throw new ValidationError('X-Checkout-Session-Token header is required');
+    }
+
+    if (!session.order_id) return { tickets: [] };
+
+    const rows = await db
+      .selectFrom('wallet_passes')
+      .innerJoin('tickets', 'tickets.id', 'wallet_passes.ticket_id')
+      .select([
+        'wallet_passes.ticket_id as ticket_id',
+        'wallet_passes.provider as provider',
+        'wallet_passes.pass_url as pass_url',
+        'tickets.code as ticket_code',
+      ])
+      .where('wallet_passes.tenant_id', '=', session.tenant_id)
+      .where('tickets.order_id', '=', session.order_id)
+      .where('wallet_passes.status', '=', 'active')
+      .orderBy('tickets.id', 'asc')
+      .execute();
+
+    const tickets = new Map<string, {
+      ticketId: string;
+      ticketCode: string;
+      appleUrl?: string;
+      googleUrl?: string;
+    }>();
+    for (const row of rows) {
+      const current = tickets.get(row.ticket_id) ?? {
+        ticketId: row.ticket_id,
+        ticketCode: row.ticket_code,
+      };
+      if (row.provider === 'apple') current.appleUrl = row.pass_url;
+      if (row.provider === 'google') current.googleUrl = row.pass_url;
+      tickets.set(row.ticket_id, current);
+    }
+
+    return { tickets: [...tickets.values()] };
+  });
+
+  app.get('/wallet-passes/:passId/apple.pkpass', async (request, reply) => {
+    const { passId } = request.params as { passId: string };
+    const { token } = request.query as { token?: string };
+    if (!token) {
+      throw new NotFoundError('WalletPass', passId);
+    }
+
+    const pass = await db
+      .selectFrom('wallet_passes')
+      .selectAll()
+      .where('id', '=', passId)
+      .where('provider', '=', 'apple')
+      .executeTakeFirst();
+    if (!pass || pass.status !== 'active' || !tokenHashMatches(pass.access_token_hash, token) || !pass.artifact_base64) {
+      throw new NotFoundError('WalletPass', passId);
+    }
+
+    const content = Buffer.from(pass.artifact_base64, 'base64');
+    return reply
+      .header('Content-Type', pass.content_type ?? 'application/vnd.apple.pkpass')
+      .header('Content-Disposition', `attachment; filename="${pass.serial_number}.pkpass"`)
+      .send(content);
+  });
+
   app.patch('/checkout/sessions/:sessionId', async (request) => {
     const { sessionId } = request.params as { sessionId: string };
     const clientToken = requireCheckoutSessionToken(request);
@@ -569,6 +809,9 @@ export const checkoutRoutes: FastifyPluginAsync = async (app) => {
     assertCheckoutSessionToken(session, clientToken);
     if (session.status !== 'open') {
       throw new ValidationError(`Checkout session is not editable: ${session.status}`);
+    }
+    if (session.payment_intent_id) {
+      throw new ValidationError('Checkout session is not editable: payment is in progress');
     }
     const updateData = pickAllowedFields(body as Record<string, unknown>, ['buyer', 'successUrl', 'cancelUrl'], {
       successUrl: 'success_url',
@@ -681,7 +924,7 @@ export const checkoutRoutes: FastifyPluginAsync = async (app) => {
           organizationId: event.organization_id,
           eventId: session.event_id,
           brandId: session.brand_id,
-          holdId: session.hold_id,
+          holdId: session.hold_id ?? undefined,
           currency: session.currency,
           amountCents: quote.totalCents,
           feeCents: quote.feeCents,
@@ -703,7 +946,14 @@ export const checkoutRoutes: FastifyPluginAsync = async (app) => {
         let state: CheckoutState | undefined;
         while (Date.now() < deadline) {
           try {
+            // eslint-disable-next-line no-await-in-loop -- checkout state polling must observe each Temporal state transition before deciding whether to retry.
             state = await temporalClient.getCheckoutState(handle.workflowId);
+            if (state.status === 'completed' && state.orderId) {
+              // eslint-disable-next-line no-await-in-loop -- a completed state exits the polling loop immediately after loading the finalized order.
+              const order = await orderRepo.findById(state.orderId);
+              if (!order) throw new NotFoundError('Order', state.orderId);
+              return { status: 200, body: { order, sessionId, status: 'completed' } };
+            }
             if (state.paymentIntentId) break;
             if (state.status === 'failed') {
               return {
@@ -720,7 +970,29 @@ export const checkoutRoutes: FastifyPluginAsync = async (app) => {
           } catch (err) {
             lastError = err instanceof Error ? err : new Error(String(err));
           }
+          // eslint-disable-next-line no-await-in-loop -- retry delay intentionally spaces Temporal state reads until the payment intent appears or the deadline expires.
           await new Promise((resolve) => setTimeout(resolve, 100));
+        }
+
+        if (state?.paymentIntentId?.startsWith('pi_capture_')) {
+          const workflowResult = await handle.result();
+          if (workflowResult.status === 'completed' && workflowResult.orderId) {
+            const order = await orderRepo.findById(workflowResult.orderId);
+            if (!order) throw new NotFoundError('Order', workflowResult.orderId);
+            return { status: 200, body: { order, sessionId, status: 'completed' } };
+          }
+          if (workflowResult.status === 'failed') {
+            return {
+              status: 402,
+              body: {
+                error: {
+                  code: 'PAYMENT_FAILED',
+                  message: 'Payment failed',
+                  requestId: request.id,
+                },
+              },
+            };
+          }
         }
 
         if (!state?.paymentIntentId) {

@@ -10,19 +10,30 @@ import {
   BarChart3,
   ClipboardList,
   Calendar,
+  Package,
   MapPin,
   Globe,
   Pencil,
+  Save,
 } from 'lucide-react'
-import { adminApi } from '@/lib/api'
+import {
+  adminApi,
+  type AdminMarketingIntegration,
+  type AdminMarketingIntegrationProvider,
+} from '@/lib/api'
 import { routes } from '@/lib/routes'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
+import { Input } from '@/components/ui/input'
+import { Label } from '@/components/ui/label'
+import { Switch } from '@/components/ui/switch'
 import { Skeleton } from '@/components/ui/skeleton'
 import { EventStatusBadge, TicketTypeStatusBadge, OrderStatusBadge } from './event-status-badge'
 import { useAdminData } from '@/hooks/use-admin-data'
 import { formatCurrency, formatDate, formatNumber } from '@/lib/format'
 import { CreateEventDrawer } from './create-event-drawer'
+
+const EMPTY_MARKETING_INTEGRATIONS: AdminMarketingIntegration[] = []
 
 export function EventDetailView({ eventId }: { eventId: string }) {
   const { data: event, loading, error, refetch } = useAdminData(
@@ -35,6 +46,10 @@ export function EventDetailView({ eventId }: { eventId: string }) {
   )
   const { data: ordersData } = useAdminData(
     () => adminApi.listOrders({ eventId, limit: 5 }),
+    [eventId]
+  )
+  const { data: marketingIntegrations, refetch: refetchMarketing } = useAdminData(
+    () => adminApi.listMarketingIntegrations(eventId),
     [eventId]
   )
   const [editOpen, setEditOpen] = React.useState(false)
@@ -61,7 +76,7 @@ export function EventDetailView({ eventId }: { eventId: string }) {
           {error?.message ?? 'The event you are looking for does not exist.'}
         </p>
         <Button asChild>
-          <Link href={routes.events}>Back to events</Link>
+          <Link href={routes.events} prefetch={false}>Back to events</Link>
         </Button>
       </div>
     )
@@ -72,6 +87,7 @@ export function EventDetailView({ eventId }: { eventId: string }) {
 
   const quickLinks = [
     { title: 'Tickets', icon: Ticket, href: routes.eventTickets(eventId) },
+    { title: 'Products', icon: Package, href: routes.eventProducts(eventId) },
     { title: 'Checkout Form', icon: ClipboardList, href: routes.eventCheckoutForm(eventId) },
     { title: 'Attendees', icon: Users, href: routes.eventAttendees(eventId) },
     { title: 'Check-in', icon: QrCode, href: routes.eventCheckIn(eventId) },
@@ -128,6 +144,7 @@ export function EventDetailView({ eventId }: { eventId: string }) {
                 <Link
                   key={link.title}
                   href={link.href}
+                  prefetch={false}
                   className='flex items-center gap-3 rounded-lg border p-3 hover:bg-accent/50 transition-colors'
                 >
                   <link.icon className='size-5 text-muted-foreground' />
@@ -151,6 +168,7 @@ export function EventDetailView({ eventId }: { eventId: string }) {
                   <Link
                     key={order.id}
                     href={routes.orderDetail(order.id)}
+                    prefetch={false}
                     className='flex items-center justify-between rounded-lg border p-2 hover:bg-accent/50 transition-colors'
                   >
                     <div className='min-w-0'>
@@ -180,6 +198,7 @@ export function EventDetailView({ eventId }: { eventId: string }) {
               No ticket types configured.{' '}
               <Link
                 href={routes.eventTickets(eventId)}
+                prefetch={false}
                 className='font-medium underline'
               >
                 Add tickets →
@@ -211,6 +230,12 @@ export function EventDetailView({ eventId }: { eventId: string }) {
         </CardContent>
       </Card>
 
+      <MarketingIntegrationsPanel
+        eventId={eventId}
+        integrations={marketingIntegrations ?? EMPTY_MARKETING_INTEGRATIONS}
+        onSaved={refetchMarketing}
+      />
+
       <CreateEventDrawer
         open={editOpen}
         onOpenChange={setEditOpen}
@@ -218,6 +243,153 @@ export function EventDetailView({ eventId }: { eventId: string }) {
         onSuccess={refetch}
       />
     </div>
+  )
+}
+
+type MarketingDraft = {
+  value: string
+  consentRequired: boolean
+  status: 'active' | 'disabled'
+  saving: boolean
+  error?: string
+}
+
+const MARKETING_PROVIDERS: Array<{
+  provider: AdminMarketingIntegrationProvider
+  title: string
+  field: 'measurementId' | 'pixelId' | 'pixelUrl'
+  placeholder: string
+}> = [
+  { provider: 'ga4', title: 'Google Analytics 4', field: 'measurementId', placeholder: 'G-XXXXXXXXXX' },
+  { provider: 'meta_pixel', title: 'Meta Pixel', field: 'pixelId', placeholder: '123456789012345' },
+  { provider: 'generic_tag', title: 'Generic HTTPS Pixel', field: 'pixelUrl', placeholder: 'https://analytics.example/pixel' },
+]
+
+function MarketingIntegrationsPanel({
+  eventId,
+  integrations,
+  onSaved,
+}: {
+  eventId: string
+  integrations: AdminMarketingIntegration[]
+  onSaved: () => void | Promise<void>
+}) {
+  const [drafts, setDrafts] = React.useState<Record<AdminMarketingIntegrationProvider, MarketingDraft>>({
+    ga4: { value: '', consentRequired: true, status: 'disabled', saving: false },
+    meta_pixel: { value: '', consentRequired: true, status: 'disabled', saving: false },
+    generic_tag: { value: '', consentRequired: true, status: 'disabled', saving: false },
+  })
+
+  React.useEffect(() => {
+    setDrafts((current) => {
+      const next = { ...current }
+      for (const spec of MARKETING_PROVIDERS) {
+        const integration = integrations.find((item) => item.provider === spec.provider)
+        next[spec.provider] = {
+          value: typeof integration?.config[spec.field] === 'string'
+            ? String(integration.config[spec.field])
+            : '',
+          consentRequired: integration?.consentRequired ?? true,
+          status: integration?.status ?? 'disabled',
+          saving: false,
+        }
+      }
+      return next
+    })
+  }, [integrations])
+
+  async function saveProvider(spec: (typeof MARKETING_PROVIDERS)[number]) {
+    const draft = drafts[spec.provider]
+    setDrafts((current) => ({
+      ...current,
+      [spec.provider]: { ...current[spec.provider], saving: true, error: undefined },
+    }))
+    const result = await adminApi.upsertMarketingIntegration(eventId, {
+      provider: spec.provider,
+      config: { [spec.field]: draft.value.trim() },
+      consentRequired: draft.consentRequired,
+      status: draft.status,
+    })
+    setDrafts((current) => ({
+      ...current,
+      [spec.provider]: {
+        ...current[spec.provider],
+        saving: false,
+        error: result.ok ? undefined : result.error.message,
+      },
+    }))
+    if (result.ok) await onSaved()
+  }
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle>Marketing Integrations</CardTitle>
+      </CardHeader>
+      <CardContent className='grid gap-4 lg:grid-cols-3'>
+        {MARKETING_PROVIDERS.map((spec) => {
+          const draft = drafts[spec.provider]
+          const disabled = draft.saving || (draft.status === 'active' && !draft.value.trim())
+          return (
+            <div key={spec.provider} className='rounded-md border p-4'>
+              <div className='space-y-4'>
+                <div>
+                  <h3 className='text-sm font-semibold'>{spec.title}</h3>
+                  {draft.error ? <p className='mt-1 text-xs text-destructive'>{draft.error}</p> : null}
+                </div>
+                <div className='space-y-2'>
+                  <Label htmlFor={`${spec.provider}-value`}>{spec.field}</Label>
+                  <Input
+                    id={`${spec.provider}-value`}
+                    value={draft.value}
+                    placeholder={spec.placeholder}
+                    onChange={(event) =>
+                      setDrafts((current) => ({
+                        ...current,
+                        [spec.provider]: { ...current[spec.provider], value: event.target.value },
+                      }))
+                    }
+                  />
+                </div>
+                <div className='flex items-center justify-between gap-3'>
+                  <Label htmlFor={`${spec.provider}-status`}>Active</Label>
+                  <Switch
+                    id={`${spec.provider}-status`}
+                    checked={draft.status === 'active'}
+                    onCheckedChange={(checked) =>
+                      setDrafts((current) => ({
+                        ...current,
+                        [spec.provider]: {
+                          ...current[spec.provider],
+                          status: checked ? 'active' : 'disabled',
+                        },
+                      }))
+                    }
+                  />
+                </div>
+                <div className='flex items-center justify-between gap-3'>
+                  <Label htmlFor={`${spec.provider}-consent`}>Require consent</Label>
+                  <Switch
+                    id={`${spec.provider}-consent`}
+                    checked={draft.consentRequired}
+                    onCheckedChange={(checked) =>
+                      setDrafts((current) => ({
+                        ...current,
+                        [spec.provider]: { ...current[spec.provider], consentRequired: checked },
+                      }))
+                    }
+                  />
+                </div>
+                <Button size='sm' onClick={() => void saveProvider(spec)} disabled={disabled}>
+                  <Save className='size-4' />
+                  {draft.saving ? 'Saving' : 'Save'}
+                </Button>
+              </div>
+            </div>
+          )
+        })}
+      </CardContent>
+    </Card>
   )
 }
 

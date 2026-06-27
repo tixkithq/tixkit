@@ -63,12 +63,18 @@ export type ScanLog = BaseEntity & {
   metadata?: Record<string, unknown>;
 };
 
+export type WalletPassProvider = 'apple' | 'google';
+
+export type WalletPassStatus = 'active' | 'revoked';
+
 export type WalletPass = BaseEntity & {
+  tenantId: Ulid;
   ticketId: Ulid;
-  platform: 'apple' | 'google';
+  provider: WalletPassProvider;
   passUrl: string;
   serialNumber: string;
-  status: 'active' | 'voided';
+  status: WalletPassStatus;
+  revokedAt?: ISO8601Date;
 };
 
 export type OfflineCheckInManifest = {
@@ -143,11 +149,15 @@ export class QrService {
   private readonly key: string;
 
   constructor(secret?: string) {
-    this.key = secret ?? process.env.QR_SIGNING_SECRET ?? 'gatekit-qr-secret-dev-only';
+    const configuredSecret = secret ?? process.env.QR_SIGNING_SECRET;
+    if (!configuredSecret && process.env.NODE_ENV === 'production') {
+      throw new Error('QR_SIGNING_SECRET is required in production');
+    }
+    this.key = configuredSecret ?? 'tixkit-qr-secret-dev-only';
   }
 
   generate(ticketId: string): QrPayload {
-    const code = `GK-${randomBytes(6).toString('hex').toUpperCase()}`;
+    const code = `TK-${randomBytes(6).toString('hex').toUpperCase()}`;
     const signedPayload = JSON.stringify({ ticketId, code, ts: Date.now() });
     const signature = createHmac('sha256', this.key).update(signedPayload).digest('hex');
     const payload = Buffer.from(JSON.stringify({ p: signedPayload, s: signature })).toString('base64url');

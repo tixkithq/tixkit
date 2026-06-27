@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { ValidationError } from '@gatekit/domain';
+import { ValidationError } from '@tixkit/domain';
 
 // Reusable primitives
 const ulidSchema = z.string().min(1);
@@ -110,18 +110,34 @@ export const createCheckoutSessionSchema = (devMode: boolean) =>
     eventId: ulidSchema,
     items: z
       .array(
-        z.object({
-          ticketTypeId: ulidSchema,
-          quantity: z.number().int().min(1),
-          unitAmountCents: z.number().int().min(0).optional(),
-          attendeeFields: z.array(z.record(z.string(), z.unknown())).optional(),
-        }),
+        z
+          .object({
+            ticketTypeId: ulidSchema.optional(),
+            occurrenceId: ulidSchema.optional(),
+            productId: ulidSchema.optional(),
+            quantity: z.number().int().min(1),
+            unitAmountCents: z.number().int().min(0).optional(),
+            attendeeFields: z.array(z.record(z.string(), z.unknown())).optional(),
+          })
+          .refine((item) => Boolean(item.ticketTypeId) !== Boolean(item.productId), {
+            message: 'Each checkout item must include exactly one of ticketTypeId or productId',
+          })
+          .refine((item) => Boolean(item.ticketTypeId) || item.unitAmountCents === undefined, {
+            message: 'unitAmountCents is only accepted for ticket items',
+          })
+          .refine((item) => Boolean(item.ticketTypeId) || item.attendeeFields === undefined, {
+            message: 'attendeeFields are only accepted for ticket items',
+          })
+          .refine((item) => Boolean(item.ticketTypeId) || item.occurrenceId === undefined, {
+            message: 'occurrenceId is only accepted for ticket items',
+          }),
       )
       .min(1),
     discountCode: z.string().optional(),
     affiliateCode: z.string().optional(),
     trackingId: z.string().optional(),
     accessCode: z.string().optional(),
+    waitlistClaimToken: z.string().min(16).optional(),
     buyer: z
       .object({
         email: z.string().email().optional(),
@@ -196,6 +212,19 @@ export const updateEventSchema = z.object({
   status: z.enum(['draft', 'published', 'paused', 'archived']).optional(),
 }).strict();
 
+export const createEventOccurrenceSchema = z.object({
+  title: z.string().min(1),
+  startsAt: iso8601Schema,
+  endsAt: iso8601Schema,
+  timezone: z.string().min(1),
+  venue: z.record(z.string(), z.unknown()).nullable().optional(),
+  capacity: z.number().int().positive().nullable().optional(),
+  sortOrder: z.number().int().min(0).optional(),
+  status: z.enum(['active', 'paused', 'cancelled']).optional(),
+}).strict();
+
+export const updateEventOccurrenceSchema = createEventOccurrenceSchema.partial().strict();
+
 // Tenant schemas
 export const createOrganizationSchema = z.object({
   name: z.string().min(1),
@@ -241,6 +270,7 @@ export const createTicketTypeSchema = z.object({
   minPerOrder: z.number().int().min(1).optional(),
   maxPerOrder: z.number().int().min(1).optional(),
   inventoryPoolId: ulidSchema,
+  eventOccurrenceId: ulidSchema.nullable().optional(),
   requiresAccessCode: z.boolean().optional(),
   accessCodeHint: z.string().optional(),
 }).strict();
@@ -259,6 +289,7 @@ export const updateTicketTypeSchema = z.object({
   minPerOrder: z.number().int().min(1).optional(),
   maxPerOrder: z.number().int().min(1).optional(),
   inventoryPoolId: ulidSchema.optional(),
+  eventOccurrenceId: ulidSchema.nullable().optional(),
   requiresAccessCode: z.boolean().optional(),
   accessCodeHint: z.string().nullable().optional(),
   sortOrder: z.number().int().optional(),

@@ -1,7 +1,7 @@
 import Fastify from 'fastify';
 import { describe, expect, it, vi } from 'vitest';
-import type { Principal } from '@gatekit/domain';
-import type { Database } from '@gatekit/db';
+import type { Principal } from '@tixkit/domain';
+import type { Database } from '@tixkit/db';
 import type { AppContext } from '../app.js';
 import { buildOfflineManifest, checkInRoutes, processScan, verifyOfflineManifestSignature } from '../routes/modules/checkin.js';
 
@@ -28,6 +28,98 @@ function repo(row: Record<string, unknown> | null, checkInResult = true) {
     findByQrHash: vi.fn(async () => row),
     checkInIfValid: vi.fn(async () => checkInResult),
   };
+}
+
+type OfflineSyncMockOverrides = {
+  list?: Record<string, unknown> | null;
+  event?: Record<string, unknown> | null;
+  ticket?: Record<string, unknown> | null;
+  checkInSucceeds?: boolean;
+  existingIdempotency?: Record<string, unknown> | null;
+};
+
+function buildOfflineSyncMockDb(overrides: OfflineSyncMockOverrides = {}) {
+  const checkInList = overrides.list !== undefined ? overrides.list : {
+    id: 'cil_1',
+    event_id: 'evt_1',
+    ticket_type_ids: JSON.stringify(['tt_allowed']),
+    status: 'active',
+  };
+  const event = overrides.event ?? {
+    id: 'evt_1',
+    tenant_id: 'tnt_1',
+    brand_id: 'brd_1',
+    organization_id: 'org_1',
+  };
+  const ticketRow = overrides.ticket !== undefined ? overrides.ticket : {
+    id: 'tkt_1',
+    event_id: 'evt_1',
+    ticket_type_id: 'tt_allowed',
+    qr_hash: 'hash_1',
+    status: 'valid',
+  };
+
+  // Table-aware query builder: returns the right mock data per table.
+  function makeQuery(table: string) {
+    const q = {
+      innerJoin() { return q; },
+      select() { return q; },
+      selectAll() { return q; },
+      where() { return q; },
+      orderBy() { return q; },
+      limit() { return q; },
+      async executeTakeFirst() {
+        if (table === 'check_in_lists') return checkInList;
+        if (table === 'events') return event;
+        if (table === 'tickets') return ticketRow;
+        if (table === 'idempotency_records') return overrides.existingIdempotency ?? null;
+        return null;
+      },
+      async executeTakeFirstOrThrow() {
+        const result = await q.executeTakeFirst();
+        if (result === null || result === undefined) throw new Error(`No row for ${table}`);
+        return result;
+      },
+      async execute() {
+        if (table === 'check_in_lists') return checkInList ? [checkInList] : [];
+        if (table === 'tickets') return ticketRow ? [ticketRow] : [];
+        return [];
+      },
+    };
+    return q;
+  }
+
+  const db = {
+    selectFrom: vi.fn((table: string) => makeQuery(table)),
+    insertInto: vi.fn(() => ({
+      values: () => ({
+        returningAll: () => ({
+          executeTakeFirstOrThrow: vi.fn(async () => ({ id: 'slog_1' })),
+        }),
+        execute: vi.fn(async () => []),
+      }),
+    })),
+    updateTable: vi.fn(() => {
+      const updateChain = {
+        set: () => updateChain,
+        where: () => updateChain,
+        async executeTakeFirst() { return { numUpdatedRows: 1n }; },
+        async execute() { return []; },
+      };
+      return updateChain;
+    }),
+    deleteFrom: vi.fn(() => ({
+      where: () => ({
+        execute: vi.fn(async () => []),
+      }),
+    })),
+    transaction: vi.fn(() => ({
+      execute: async (cb: (trx: unknown) => Promise<unknown>) => cb(db),
+    })),
+    destroy: vi.fn(async () => {}),
+  };
+
+  return { db };
 }
 
 describe('processScan', () => {
@@ -165,6 +257,7 @@ describe('buildOfflineManifest', () => {
         {
           ticket_id: 'tkt_1',
           ticket_type_id: 'tt_allowed',
+          event_occurrence_id: null,
           qr_hash: 'hash_1',
           status: 'valid',
           first_name: 'Ada',
@@ -174,6 +267,7 @@ describe('buildOfflineManifest', () => {
         {
           ticket_id: 'tkt_2',
           ticket_type_id: 'tt_allowed',
+          event_occurrence_id: null,
           qr_hash: 'hash_2',
           status: 'transferred',
           first_name: null,
@@ -215,101 +309,44 @@ describe('buildOfflineManifest', () => {
     const tampered = { ...manifest, eventId: 'evt_tampered' };
     expect(verifyOfflineManifestSignature(tampered)).toBe(false);
   });
+
+  it('requires an explicit manifest signing secret in production', () => {
+    const originalNodeEnv = process.env.NODE_ENV;
+    const originalManifestKey = process.env.OFFLINE_MANIFEST_SIGNING_KEY;
+    const originalQrSigningSecret = process.env.QR_SIGNING_SECRET;
+    process.env.NODE_ENV = 'production';
+    delete process.env.OFFLINE_MANIFEST_SIGNING_KEY;
+    delete process.env.QR_SIGNING_SECRET;
+
+    try {
+      expect(() =>
+        buildOfflineManifest({
+          eventId: 'evt_1',
+          checkInListId: 'cil_1',
+          rows: [],
+        }),
+      ).toThrow('OFFLINE_MANIFEST_SIGNING_KEY or QR_SIGNING_SECRET is required in production');
+    } finally {
+      if (originalNodeEnv === undefined) {
+        delete process.env.NODE_ENV;
+      } else {
+        process.env.NODE_ENV = originalNodeEnv;
+      }
+      if (originalManifestKey === undefined) {
+        delete process.env.OFFLINE_MANIFEST_SIGNING_KEY;
+      } else {
+        process.env.OFFLINE_MANIFEST_SIGNING_KEY = originalManifestKey;
+      }
+      if (originalQrSigningSecret === undefined) {
+        delete process.env.QR_SIGNING_SECRET;
+      } else {
+        process.env.QR_SIGNING_SECRET = originalQrSigningSecret;
+      }
+    }
+  });
 });
 
 describe('offline sync endpoint', () => {
-  // Build a mock DB that supports the sync flow: list lookup, event lookup,
-  // ticket repo, scan log repo, and idempotency guard.
-  function buildMockDb(overrides: {
-    list?: Record<string, unknown> | null;
-    event?: Record<string, unknown> | null;
-    ticket?: Record<string, unknown> | null;
-    checkInSucceeds?: boolean;
-    existingIdempotency?: Record<string, unknown> | null;
-  } = {}) {
-    const list = overrides.list !== undefined ? overrides.list : {
-      id: 'cil_1',
-      event_id: 'evt_1',
-      ticket_type_ids: JSON.stringify(['tt_allowed']),
-      status: 'active',
-    };
-    const event = overrides.event ?? {
-      id: 'evt_1',
-      tenant_id: 'tnt_1',
-      brand_id: 'brd_1',
-      organization_id: 'org_1',
-    };
-    const ticket = overrides.ticket !== undefined ? overrides.ticket : {
-      id: 'tkt_1',
-      event_id: 'evt_1',
-      ticket_type_id: 'tt_allowed',
-      qr_hash: 'hash_1',
-      status: 'valid',
-    };
-
-    // Table-aware query builder: returns the right mock data per table.
-    function makeQuery(table: string) {
-      const q = {
-        innerJoin() { return q; },
-        select() { return q; },
-        selectAll() { return q; },
-        where() { return q; },
-        orderBy() { return q; },
-        limit() { return q; },
-        async executeTakeFirst() {
-          if (table === 'check_in_lists') return list;
-          if (table === 'events') return event;
-          if (table === 'tickets') return ticket;
-          if (table === 'idempotency_records') return overrides.existingIdempotency ?? null;
-          return null;
-        },
-        async executeTakeFirstOrThrow() {
-          const result = await q.executeTakeFirst();
-          if (result === null || result === undefined) throw new Error(`No row for ${table}`);
-          return result;
-        },
-        async execute() {
-          if (table === 'check_in_lists') return list ? [list] : [];
-          if (table === 'tickets') return ticket ? [ticket] : [];
-          return [];
-        },
-      };
-      return q;
-    }
-
-    const db = {
-      selectFrom: vi.fn((table: string) => makeQuery(table)),
-      insertInto: vi.fn(() => ({
-        values: () => ({
-          returningAll: () => ({
-            executeTakeFirstOrThrow: vi.fn(async () => ({ id: 'slog_1' })),
-          }),
-          execute: vi.fn(async () => []),
-        }),
-      })),
-      updateTable: vi.fn(() => {
-        const updateChain = {
-          set: () => updateChain,
-          where: () => updateChain,
-          async executeTakeFirst() { return { numUpdatedRows: 1n }; },
-          async execute() { return []; },
-        };
-        return updateChain;
-      }),
-      deleteFrom: vi.fn(() => ({
-        where: () => ({
-          execute: vi.fn(async () => []),
-        }),
-      })),
-      transaction: vi.fn(() => ({
-        execute: async (cb: (trx: unknown) => Promise<unknown>) => cb(db),
-      })),
-      destroy: vi.fn(async () => {}),
-    };
-
-    return { db };
-  }
-
   it('processes offline scans and returns accepted/duplicate/invalid counts', async () => {
     const principal: Principal = {
       type: 'mobile_device',
@@ -319,7 +356,7 @@ describe('offline sync endpoint', () => {
       scopes: ['checkins.write'],
       eventIds: ['evt_1'],
     };
-    const { db } = buildMockDb();
+    const { db } = buildOfflineSyncMockDb();
     const app = Fastify();
     app.decorate('context', {
       db,
@@ -369,7 +406,7 @@ describe('offline sync endpoint', () => {
     };
     // Track checkInIfValid calls: first succeeds, second fails (duplicate).
     let checkInCallCount = 0;
-    const { db } = buildMockDb({});
+    const { db } = buildOfflineSyncMockDb({});
     // Override updateTable to track calls and fail on second check-in.
     db.updateTable = vi.fn(() => {
       const updateChain = {
@@ -429,7 +466,7 @@ describe('offline sync endpoint', () => {
       scopes: ['checkins.write'],
       eventIds: ['evt_1'],
     };
-    const { db } = buildMockDb({ list: null });
+    const { db } = buildOfflineSyncMockDb({ list: null });
     const app = Fastify();
     app.decorate('context', {
       db,

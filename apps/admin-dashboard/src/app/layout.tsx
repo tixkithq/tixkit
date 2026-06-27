@@ -10,8 +10,8 @@ import './globals.css'
 
 export const metadata = {
   title: {
-    default: 'GateKit Admin Dashboard',
-    template: '%s | GateKit Admin',
+    default: 'Tixkit Admin Dashboard',
+    template: '%s | Tixkit Admin',
   },
   description: 'Event ticketing and management platform',
 }

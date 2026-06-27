@@ -39,7 +39,11 @@ vi.mock('@/components/ui/select', async () => {
     ))
   }
 
+  // Keep these tiny mock components inside the hoisted factory so the Radix
+  // replacement remains self-contained for Vitest module mocking.
+  // eslint-disable-next-line unicorn/consistent-function-scoping
   function SelectValue() { return null }
+  // eslint-disable-next-line unicorn/consistent-function-scoping
   function SelectContent({ children }: { children: React.ReactNode }) { return children }
   function SelectItem({ value, children }: { value: string; children: React.ReactNode }) {
     const ctx = React.useContext(SelectContext)

@@ -6,7 +6,7 @@ import {
   validateQuestionDefinition,
   validateAnswers,
   type Question,
-} from '@gatekit/domain';
+} from '@tixkit/domain';
 
 function makeQuestion(overrides: Partial<Question> = {}): Question {
   return {
@@ -51,6 +51,11 @@ describe('validateAnswers', () => {
     expect(validateAnswers(questions, { q_1: 'ada@test.com' }).valid).toBe(true);
   });
 
+  it('rejects email object answers', () => {
+    const questions = [makeQuestion({ id: 'q_1', type: 'email', required: true })];
+    expect(validateAnswers(questions, { q_1: { email: 'ada@test.com' } }).valid).toBe(false);
+  });
+
   it('validates phone type', () => {
     const questions = [makeQuestion({ id: 'q_1', type: 'phone', required: true })];
     expect(validateAnswers(questions, { q_1: 'abc' }).valid).toBe(false);
@@ -63,10 +68,20 @@ describe('validateAnswers', () => {
     expect(validateAnswers(questions, { q_1: 'A' }).valid).toBe(true);
   });
 
+  it('rejects select object answers', () => {
+    const questions = [makeQuestion({ id: 'q_1', type: 'select', options: ['A', 'B'], required: true })];
+    expect(validateAnswers(questions, { q_1: { value: 'A' } }).valid).toBe(false);
+  });
+
   it('validates multiselect option membership', () => {
     const questions = [makeQuestion({ id: 'q_1', type: 'multiselect', options: ['A', 'B', 'C'], required: true })];
     expect(validateAnswers(questions, { q_1: ['A', 'D'] }).valid).toBe(false);
     expect(validateAnswers(questions, { q_1: ['A', 'B'] }).valid).toBe(true);
+  });
+
+  it('rejects multiselect string answers', () => {
+    const questions = [makeQuestion({ id: 'q_1', type: 'multiselect', options: ['A', 'B', 'C'], required: true })];
+    expect(validateAnswers(questions, { q_1: 'A' }).valid).toBe(false);
   });
 
   it('validates consent/waiver fields require true', () => {
@@ -75,12 +90,25 @@ describe('validateAnswers', () => {
     expect(validateAnswers(questions, { q_1: true }).valid).toBe(true);
   });
 
-  it('rejects file answers until upload artifact validation exists', () => {
+  it('accepts completed upload artifact answers for file questions', () => {
     const questions = [makeQuestion({ id: 'q_1', type: 'file', required: false })];
     expect(validateAnswers(questions, {}).valid).toBe(true);
+    const result = validateAnswers(questions, {
+      q_1: {
+        artifactId: 'upl_01JYTESTARTIFACT',
+        fileName: 'waiver.pdf',
+        contentType: 'application/pdf',
+        sizeBytes: 1024,
+      },
+    });
+    expect(result.valid).toBe(true);
+  });
+
+  it('rejects file answers that are not upload artifact references', () => {
+    const questions = [makeQuestion({ id: 'q_1', type: 'file', required: false })];
     const result = validateAnswers(questions, { q_1: 'waiver.pdf' });
     expect(result.valid).toBe(false);
-    expect(result.errors[0].message).toContain('file uploads are not supported');
+    expect(result.errors[0].message).toContain('must reference a completed upload artifact');
   });
 
   it('validates regex pattern', () => {
@@ -154,8 +182,8 @@ describe('validateQuestionDefinition', () => {
     expect(errors).toContain('Question options must be unique');
   });
 
-  it('rejects file questions until upload support exists', () => {
-    expect(validateQuestionDefinition({ type: 'file' })).toContain('File questions are not supported until upload storage and validation are available');
+  it('allows file questions', () => {
+    expect(validateQuestionDefinition({ type: 'file' })).toEqual([]);
   });
 
   it('requires consent metadata for consent fields', () => {

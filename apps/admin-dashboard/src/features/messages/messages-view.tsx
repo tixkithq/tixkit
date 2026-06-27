@@ -56,7 +56,7 @@ export function MessagesView() {
             setSelectedCampaignId('')
           }}
         >
-          <SelectTrigger className='w-full max-w-xs'>
+          <SelectTrigger className='w-full max-w-xs' aria-label='Message event'>
             <SelectValue placeholder='Select an event' />
           </SelectTrigger>
           <SelectContent>
@@ -118,7 +118,7 @@ export function MessagesView() {
                   <div>
                     <p className='font-medium'>{campaign.name}</p>
                     <p className='text-sm text-muted-foreground'>
-                      {campaign.audience.replace(/_/g, ' ')} · {campaign.queuedCount} queued
+                      {campaign.audienceLabel} · {campaign.queuedCount} queued
                       {campaign.sentCount > 0 && ` · ${campaign.sentCount} sent`}
                       {campaign.deliveredCount > 0 && ` · ${campaign.deliveredCount} delivered`}
                       {campaign.failedCount > 0 && ` · ${campaign.failedCount} failed`}

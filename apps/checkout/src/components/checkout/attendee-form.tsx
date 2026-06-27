@@ -1,9 +1,10 @@
 'use client'
 
+import { useState } from 'react'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Textarea } from '@/components/ui/textarea'
-import type { Buyer, CheckoutQuestion } from '@/lib/api'
+import { publicApi, type Buyer, type CheckoutQuestion } from '@/lib/api'
 import {
   type CheckoutAnswers,
   type CheckoutAnswerValue,
@@ -11,6 +12,14 @@ import {
 } from '@/lib/checkout-questions'
 
 export type AttendeeAnswers = CheckoutAnswers
+
+type AttendeeQuestionGroup = {
+  lineId: string
+  ticketTypeId: string
+  ticketName: string
+  quantity: number
+  questions: CheckoutQuestion[]
+}
 
 type Props = {
   buyer: Buyer
@@ -23,30 +32,32 @@ type Props = {
   buyerAnswers?: AttendeeAnswers
   /** Callback when buyer question answers change. */
   onBuyerAnswersChange?: (answers: AttendeeAnswers) => void
-  /** Per-attendee question answers, keyed by `${ticketTypeId}:${attendeeIndex}`. */
-  attendeeQuestionGroups?: Array<{
-    ticketTypeId: string
-    ticketName: string
-    quantity: number
-    questions: CheckoutQuestion[]
-  }>
-  /** Per-attendee answers keyed by `${ticketTypeId}:${attendeeIndex}:${questionId}`. */
+  /** Per-attendee question answers, keyed by `${lineId}:${attendeeIndex}`. */
+  attendeeQuestionGroups?: AttendeeQuestionGroup[]
+  /** Per-attendee answers keyed by `${lineId}:${attendeeIndex}:${questionId}`. */
   attendeeAnswers?: CheckoutAnswers
   /** Callback when attendee answers change. */
   onAttendeeAnswersChange?: (answers: CheckoutAnswers) => void
+  eventId?: string
 }
+
+const EMPTY_BUYER_QUESTIONS: CheckoutQuestion[] = []
+const EMPTY_BUYER_ANSWERS: AttendeeAnswers = {}
+const EMPTY_ATTENDEE_QUESTION_GROUPS: AttendeeQuestionGroup[] = []
+const EMPTY_ATTENDEE_ANSWERS: CheckoutAnswers = {}
 
 export function AttendeeForm({
   buyer,
   onChange,
   disabled,
   emailError,
-  buyerQuestions = [],
-  buyerAnswers = {},
+  buyerQuestions = EMPTY_BUYER_QUESTIONS,
+  buyerAnswers = EMPTY_BUYER_ANSWERS,
   onBuyerAnswersChange,
-  attendeeQuestionGroups = [],
-  attendeeAnswers = {},
+  attendeeQuestionGroups = EMPTY_ATTENDEE_QUESTION_GROUPS,
+  attendeeAnswers = EMPTY_ATTENDEE_ANSWERS,
   onAttendeeAnswersChange,
+  eventId,
 }: Props) {
   return (
     <div className='grid gap-4'>
@@ -123,6 +134,7 @@ export function AttendeeForm({
                 question={q}
                 value={buyerAnswers[q.id] ?? ''}
                 disabled={disabled}
+                eventId={eventId}
                 onChange={(val) =>
                   onBuyerAnswersChange?.({ ...buyerAnswers, [q.id]: val })
                 }
@@ -134,13 +146,13 @@ export function AttendeeForm({
       {attendeeQuestionGroups.map((group) => {
         if (group.questions.length === 0 || group.quantity === 0) return null
         return (
-          <div key={group.ticketTypeId} className='space-y-4 border-t pt-4'>
+          <div key={group.lineId} className='space-y-4 border-t pt-4'>
             <p className='text-sm font-medium'>
               {group.ticketName} - attendee details
             </p>
             {Array.from({ length: group.quantity }, (_, i) => (
               <div
-                key={`${group.ticketTypeId}:${i}`}
+                key={`${group.lineId}:${i}`}
                 className='space-y-3 rounded-md border bg-muted/30 p-3'
               >
                 <p className='text-xs font-medium text-muted-foreground'>
@@ -152,20 +164,21 @@ export function AttendeeForm({
                       group.questions.map((question) => [
                         question.id,
                         attendeeAnswers[
-                          `${group.ticketTypeId}:${i}:${question.id}`
+                          `${group.lineId}:${i}:${question.id}`
                         ],
                       ]),
                     )
                     return isCheckoutQuestionVisible(q, answersForAttendee)
                   })
                   .map((q) => {
-                    const key = `${group.ticketTypeId}:${i}:${q.id}`
+                    const key = `${group.lineId}:${i}:${q.id}`
                     return (
                       <DynamicQuestionField
                         key={key}
                         question={q}
                         value={attendeeAnswers[key] ?? ''}
                         disabled={disabled}
+                        eventId={eventId}
                         onChange={(val) =>
                           onAttendeeAnswersChange?.({
                             ...attendeeAnswers,
@@ -188,13 +201,17 @@ function DynamicQuestionField({
   question,
   value,
   disabled,
+  eventId,
   onChange,
 }: {
   question: CheckoutQuestion
   value: CheckoutAnswerValue | ''
   disabled: boolean
+  eventId?: string
   onChange: (value: CheckoutAnswerValue) => void
 }) {
+  const [uploading, setUploading] = useState(false)
+  const [uploadError, setUploadError] = useState<string | null>(null)
   const id = `q_${question.id}`
   const stringValue = typeof value === 'string' ? value : ''
   const label = (
@@ -324,19 +341,42 @@ function DynamicQuestionField({
   }
 
   if (question.type === 'file') {
+    const uploaded = value && typeof value === 'object' && !Array.isArray(value) && 'artifactId' in value
+      ? value
+      : null
     return (
       <div className='grid gap-2'>
-        <p className='text-sm font-medium'>
-          {question.label}
-          {question.required ? (
-            <span className='text-destructive'> *</span>
-          ) : null}
-        </p>
-        <p
-          className='rounded-md border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive'
-        >
-          File upload questions are not available for checkout yet.
-        </p>
+        {label}
+        <Input
+          id={id}
+          type='file'
+          disabled={disabled || uploading || !eventId}
+          required={question.required && !uploaded}
+          onChange={async (event) => {
+            const file = event.target.files?.[0]
+            if (!file || !eventId) return
+            setUploading(true)
+            setUploadError(null)
+            try {
+              const artifact = await publicApi.uploadCheckoutArtifact(eventId, file, question.id)
+              onChange(artifact)
+            } catch (err) {
+              setUploadError(err instanceof Error ? err.message : 'File upload failed')
+              event.target.value = ''
+            } finally {
+              setUploading(false)
+            }
+          }}
+        />
+        {uploaded ? (
+          <p className='text-xs text-muted-foreground'>
+            Uploaded {uploaded.fileName ?? 'file'}
+          </p>
+        ) : uploading ? (
+          <p className='text-xs text-muted-foreground'>Uploading file...</p>
+        ) : uploadError ? (
+          <p className='text-xs text-destructive'>{uploadError}</p>
+        ) : null}
         {question.description ? (
           <p className='text-xs text-muted-foreground'>
             {question.description}
