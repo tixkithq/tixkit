@@ -19,6 +19,8 @@ out/
 # Turbo and test artifacts
 .turbo/
 **/.turbo/
+.gradle/
+**/.gradle/
 coverage/
 **/coverage/
 .nyc_output/
