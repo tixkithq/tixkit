@@ -62,8 +62,8 @@ export type TicketType = {
   name: string;
   description?: string;
   kind: 'free' | 'paid' | 'donation';
-  status: string;
-  visibility: string;
+  status: 'draft' | 'active' | 'paused' | 'sold_out' | 'ended';
+  visibility: 'public' | 'hidden' | 'locked';
   currency: string;
   priceCents: number;
   minimumPriceCents?: number;
@@ -79,6 +79,18 @@ export type TicketType = {
   updatedAt: string;
 };
 
+export type AccessRule = {
+  id: string;
+  ticketTypeId: string;
+  type: 'code' | 'email_domain';
+  value: string;
+  maxUses?: number;
+  usesCount: number;
+  expiresAt?: string;
+  createdAt?: string;
+  updatedAt?: string;
+};
+
 export type InventoryPool = {
   id: string;
   eventId: string;
@@ -89,6 +101,61 @@ export type InventoryPool = {
   holdTtlSeconds: number;
   createdAt: string;
   updatedAt: string;
+};
+
+export type CreateInventoryPoolInput = {
+  name: string;
+  totalCapacity: number;
+  holdTtlSeconds?: number;
+};
+
+export type CreateAccessRuleInput = {
+  type: AccessRule['type'];
+  value: string;
+  maxUses?: number | null;
+  expiresAt?: string | null;
+};
+
+export type TicketTypeBatchResult = {
+  ticketType: TicketType;
+  accessRules: AccessRule[];
+};
+
+export type CreateTicketTypeBatchInput = {
+  ticketType: Record<string, unknown>;
+  inventoryPool?: CreateInventoryPoolInput;
+  accessRules?: CreateAccessRuleInput[];
+};
+
+export type UpdateTicketTypeBatchInput = {
+  ticketType: Record<string, unknown>;
+  accessRules?: CreateAccessRuleInput[];
+};
+
+export type ProductCategory = {
+  id: string;
+  eventId: string;
+  name: string;
+  sortOrder: number;
+  createdAt?: string;
+  updatedAt?: string;
+};
+
+export type Product = {
+  id: string;
+  eventId: string;
+  name: string;
+  description?: string;
+  priceCents: number;
+  currency: string;
+  categoryId?: string;
+  maxPerOrder: number;
+  availableFrom?: string;
+  availableUntil?: string;
+  status: 'active' | 'inactive';
+  sortOrder: number;
+  createdAt?: string;
+  updatedAt?: string;
 };
 
 export type CheckoutSession = {
@@ -353,18 +420,69 @@ export type TaxReport = {
   breakdown: { taxRuleName: string; rate: number; taxableAmountCents: number; taxCollectedCents: number }[];
 };
 
+export type AttendanceReport = {
+  eventId: string;
+  totalAttendees: number;
+  checkedIn: number;
+  notCheckedIn: number;
+  checkInRate: number;
+  breakdownByTicketType: Array<{
+    ticketTypeId: string;
+    ticketTypeName: string;
+    total: number;
+    checkedIn: number;
+  }>;
+};
+
+export type PromoReport = {
+  eventId: string;
+  discountCodes: Array<{
+    code: string;
+    usesCount: number;
+    discountAmountCents: number;
+    revenueAttributedCents: number;
+  }>;
+};
+
+export type ConversionReport = {
+  eventId: string;
+  widgetViews: number | null;
+  checkoutStarted: number;
+  checkoutCompleted: number;
+  conversionRate: number;
+};
+
+export type AffiliateReport = {
+  organizationId: string;
+  affiliates: Array<{
+    affiliateId: string;
+    code: string;
+    name: string;
+    referralsCount: number;
+    revenueAttributedCents: number;
+    commissionCents: number;
+  }>;
+};
+
 export type ExportJobQueued = {
   exportId: string;
   status: string;
 };
 
 export type MessageQueued = {
-  message: string;
+  campaignId: string;
   eventId: string;
   templateKey: string;
   channel: string;
-  queued: number;
-  jobIds: string[];
+  status: string;
+  audienceCount: number;
+  queuedEmailJobs: number;
+  queuedSmsJobs: number;
+  suppressedRecipients: number;
+  consentExclusions: number;
+  skippedRecipients: number;
+  emailJobIds: string[];
+  smsJobIds: string[];
 };
 
 export type Ticket = {
@@ -402,14 +520,54 @@ export type PaymentAccount = {
 export type Question = {
   id: string;
   eventId: string;
+  ticketTypeId?: string;
   label: string;
-  fieldKey: string;
   type: string;
+  description?: string;
   required: boolean;
+  appliesTo: 'buyer' | 'attendee' | 'both';
   options?: string[];
+  placeholder?: string;
+  validationPattern?: string;
+  conditionalVisibility?: {
+    field: string;
+    operator: 'equals' | 'not_equals' | 'contains';
+    value: string;
+  };
   sortOrder: number;
+  isConsentField: boolean;
+  consentText?: string;
+  consentVersion?: string;
   createdAt: string;
   updatedAt: string;
+};
+
+export type CreateQuestionInput = {
+  ticketTypeId?: string;
+  label: string;
+  type: Question['type'];
+  description?: string;
+  required?: boolean;
+  appliesTo?: Question['appliesTo'];
+  options?: string[];
+  placeholder?: string;
+  validationPattern?: string;
+  conditionalVisibility?: Question['conditionalVisibility'];
+  sortOrder?: number;
+  isConsentField?: boolean;
+  consentText?: string;
+  consentVersion?: string;
+};
+
+export type UpdateQuestionInput = Partial<CreateQuestionInput> & {
+  ticketTypeId?: string | null;
+  description?: string | null;
+  options?: string[] | null;
+  placeholder?: string | null;
+  validationPattern?: string | null;
+  conditionalVisibility?: Question['conditionalVisibility'] | null;
+  consentText?: string | null;
+  consentVersion?: string | null;
 };
 
 export type ReorderQuestionInput = {
@@ -454,15 +612,61 @@ export type ExportJob = {
 export type MessageCampaign = {
   id: string;
   eventId: string;
+  tenantId?: string;
+  brandId?: string;
   templateKey: string;
   channel: string;
-  audience: string;
   status: string;
-  queued: number;
-  sent: number;
-  failed: number;
+  audience?: string;
+  audienceCount: number;
+  queuedEmailJobs: number;
+  queuedSmsJobs: number;
+  suppressedRecipients: number;
+  consentExclusions: number;
+  skippedRecipients: number;
   createdAt: string;
   updatedAt: string;
+  emailJobs?: Array<Record<string, unknown>>;
+  smsJobs?: Array<Record<string, unknown>>;
+  emailDeliveries?: Array<Record<string, unknown>>;
+  smsDeliveries?: Array<Record<string, unknown>>;
+};
+
+export type MessageRecipientPreview = {
+  audience: string;
+  audienceCount: number;
+  eligibleCount: number;
+  suppressedRecipients: number;
+  consentExclusions: number;
+  skippedRecipients: number;
+  recipients: Array<{
+    id: string;
+    name: string;
+    email?: string;
+    phone?: string;
+    status: string;
+  }>;
+};
+
+export type MessageJob = {
+  channel: string;
+  campaignId: string;
+  eventId: string;
+  job: Record<string, unknown>;
+};
+
+export type MessageDeliveryLog = {
+  channel: string;
+  campaignId: string;
+  eventId: string;
+  delivery: Record<string, unknown>;
+};
+
+export type MessageProviderEvent = {
+  channel: string;
+  campaignId: string;
+  eventId: string;
+  event: Record<string, unknown>;
 };
 
 export type WebhookEvent = {
@@ -506,6 +710,7 @@ export class GateKitClient {
   readonly brands: BrandResource;
   readonly ticketTypes: TicketTypeResource;
   readonly inventoryPools: InventoryPoolResource;
+  readonly products: ProductResource;
   readonly attendees: AttendeeResource;
   readonly checkInLists: CheckInListResource;
   readonly checkIns: CheckInResource;
@@ -540,6 +745,7 @@ export class GateKitClient {
     this.brands = new BrandResource(this);
     this.ticketTypes = new TicketTypeResource(this);
     this.inventoryPools = new InventoryPoolResource(this);
+    this.products = new ProductResource(this);
     this.attendees = new AttendeeResource(this);
     this.checkInLists = new CheckInListResource(this);
     this.checkIns = new CheckInResource(this);
@@ -869,12 +1075,68 @@ class TicketTypeResource {
   async update(ticketTypeId: string, input: Record<string, unknown>): Promise<TicketType> {
     return this.client.request('PATCH', `/ticket-types/${ticketTypeId}`, { body: input });
   }
+  async createBatch(eventId: string, input: CreateTicketTypeBatchInput): Promise<TicketTypeBatchResult> {
+    return this.client.request('POST', `/events/${eventId}/ticket-types/batch`, { body: input });
+  }
+  async updateBatch(ticketTypeId: string, input: UpdateTicketTypeBatchInput): Promise<TicketTypeBatchResult> {
+    return this.client.request('PATCH', `/ticket-types/${ticketTypeId}/batch`, { body: input });
+  }
+  async listAccessRules(ticketTypeId: string): Promise<PageResult<AccessRule>> {
+    return this.client.request('GET', `/ticket-types/${ticketTypeId}/access-rules`);
+  }
+  async createAccessRule(ticketTypeId: string, input: CreateAccessRuleInput): Promise<AccessRule> {
+    return this.client.request('POST', `/ticket-types/${ticketTypeId}/access-rules`, { body: input });
+  }
+  async deleteAccessRule(accessRuleId: string): Promise<void> {
+    return this.client.request('DELETE', `/access-rules/${accessRuleId}`);
+  }
 }
 
 class InventoryPoolResource {
   constructor(private client: GateKitClient) {}
-  async create(eventId: string, input: { name: string; totalCapacity: number; holdTtlSeconds?: number }): Promise<InventoryPool> {
+  async create(eventId: string, input: CreateInventoryPoolInput): Promise<InventoryPool> {
     return this.client.request('POST', `/events/${eventId}/inventory-pools`, { body: input });
+  }
+}
+
+class ProductResource {
+  constructor(private client: GateKitClient) {}
+  async list(eventId: string, params?: PaginationParams): Promise<PageResult<Product>> {
+    return this.client.request('GET', `/events/${eventId}/products`, { params: paginationParams(params) });
+  }
+  async create(eventId: string, input: {
+    name: string;
+    description?: string;
+    priceCents: number;
+    currency: string;
+    categoryId?: string;
+    maxPerOrder?: number;
+    availableFrom?: string;
+    availableUntil?: string;
+    status?: Product['status'];
+    sortOrder?: number;
+  }): Promise<Product> {
+    return this.client.request('POST', `/events/${eventId}/products`, { body: input });
+  }
+  async update(productId: string, input: Partial<{
+    name: string;
+    description: string | null;
+    priceCents: number;
+    currency: string;
+    categoryId: string | null;
+    maxPerOrder: number;
+    availableFrom: string | null;
+    availableUntil: string | null;
+    status: Product['status'];
+    sortOrder: number;
+  }>): Promise<Product> {
+    return this.client.request('PATCH', `/products/${productId}`, { body: input });
+  }
+  async listCategories(eventId: string, params?: PaginationParams): Promise<PageResult<ProductCategory>> {
+    return this.client.request('GET', `/events/${eventId}/product-categories`, { params: paginationParams(params) });
+  }
+  async createCategory(eventId: string, input: { name: string; sortOrder?: number }): Promise<ProductCategory> {
+    return this.client.request('POST', `/events/${eventId}/product-categories`, { body: input });
   }
 }
 
@@ -955,16 +1217,16 @@ class ReportResource {
   async tax(eventId: string): Promise<TaxReport> {
     return this.client.request('GET', `/events/${eventId}/reports/tax`);
   }
-  async attendance(eventId: string): Promise<unknown> {
+  async attendance(eventId: string): Promise<AttendanceReport> {
     return this.client.request('GET', `/events/${eventId}/reports/attendance`);
   }
-  async promo(eventId: string): Promise<unknown> {
+  async promo(eventId: string): Promise<PromoReport> {
     return this.client.request('GET', `/events/${eventId}/reports/promo`);
   }
-  async conversion(eventId: string): Promise<unknown> {
+  async conversion(eventId: string): Promise<ConversionReport> {
     return this.client.request('GET', `/events/${eventId}/reports/conversion`);
   }
-  async affiliate(organizationId: string): Promise<unknown> {
+  async affiliate(organizationId: string): Promise<AffiliateReport> {
     return this.client.request('GET', `/organizations/${organizationId}/reports/affiliate`);
   }
 }
@@ -992,28 +1254,31 @@ class MessageResource {
     const { idempotencyKey, ...body } = input;
     return this.client.request('POST', `/events/${eventId}/messages`, { body, idempotencyKey });
   }
+  async previewRecipients(eventId: string, input: { templateKey: string; audience: string; attendeeIds?: string[]; channel: string }): Promise<MessageRecipientPreview> {
+    return this.client.request('POST', `/events/${eventId}/messages/preview`, { body: input });
+  }
   async list(eventId: string, params?: PaginationParams): Promise<PageResult<MessageCampaign>> {
     return this.client.request('GET', `/events/${eventId}/messages`, { params: paginationParams(params) });
   }
   async getCampaign(eventId: string, campaignId: string): Promise<MessageCampaign> {
     return this.client.request('GET', `/events/${eventId}/messages/${campaignId}`);
   }
-  async jobs(eventId: string, campaignId: string, params?: PaginationParams): Promise<PageResult<unknown>> {
+  async jobs(eventId: string, campaignId: string, params?: PaginationParams): Promise<PageResult<MessageJob>> {
     return this.client.request('GET', `/events/${eventId}/messages/${campaignId}/jobs`, { params: paginationParams(params) });
   }
-  async job(eventId: string, campaignId: string, channel: string, jobId: string): Promise<unknown> {
+  async job(eventId: string, campaignId: string, channel: string, jobId: string): Promise<MessageJob> {
     return this.client.request('GET', `/events/${eventId}/messages/${campaignId}/jobs/${channel}/${jobId}`);
   }
-  async deliveryLogs(eventId: string, campaignId: string, params?: PaginationParams): Promise<PageResult<unknown>> {
+  async deliveryLogs(eventId: string, campaignId: string, params?: PaginationParams): Promise<PageResult<MessageDeliveryLog>> {
     return this.client.request('GET', `/events/${eventId}/messages/${campaignId}/delivery-logs`, { params: paginationParams(params) });
   }
-  async deliveryLog(eventId: string, campaignId: string, channel: string, deliveryId: string): Promise<unknown> {
+  async deliveryLog(eventId: string, campaignId: string, channel: string, deliveryId: string): Promise<MessageDeliveryLog> {
     return this.client.request('GET', `/events/${eventId}/messages/${campaignId}/delivery-logs/${channel}/${deliveryId}`);
   }
-  async providerEvents(eventId: string, campaignId: string, params?: PaginationParams): Promise<PageResult<unknown>> {
+  async providerEvents(eventId: string, campaignId: string, params?: PaginationParams): Promise<PageResult<MessageProviderEvent>> {
     return this.client.request('GET', `/events/${eventId}/messages/${campaignId}/provider-events`, { params: paginationParams(params) });
   }
-  async providerEvent(eventId: string, campaignId: string, providerEventId: string): Promise<unknown> {
+  async providerEvent(eventId: string, campaignId: string, providerEventId: string): Promise<MessageProviderEvent> {
     return this.client.request('GET', `/events/${eventId}/messages/${campaignId}/provider-events/${providerEventId}`);
   }
 }
@@ -1052,10 +1317,10 @@ class QuestionResource {
   async list(eventId: string): Promise<PageResult<Question>> {
     return this.client.request('GET', `/events/${eventId}/questions`);
   }
-  async create(eventId: string, input: { label: string; fieldKey: string; type: string; required?: boolean; options?: string[]; sortOrder?: number }): Promise<Question> {
+  async create(eventId: string, input: CreateQuestionInput): Promise<Question> {
     return this.client.request('POST', `/events/${eventId}/questions`, { body: input });
   }
-  async update(questionId: string, input: Partial<Pick<Question, 'label' | 'fieldKey' | 'type' | 'required' | 'options' | 'sortOrder'>>): Promise<Question> {
+  async update(questionId: string, input: UpdateQuestionInput): Promise<Question> {
     return this.client.request('PATCH', `/questions/${questionId}`, { body: input });
   }
   async reorder(eventId: string, questions: ReorderQuestionInput[]): Promise<PageResult<Question>> {

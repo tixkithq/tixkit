@@ -252,6 +252,83 @@ describe('event routes', () => {
     await app.close();
   });
 
+  it('persists full event detail fields when updating events through PATCH', async () => {
+    const { db, updates } = createEventMutationDb({ event: baseEventRow() });
+    const app = await setupEventApp(db, writePrincipal);
+
+    const response = await app.inject({
+      method: 'PATCH',
+      url: '/events/evt_1',
+      payload: {
+        venue: { name: 'Riverside', address: '100 River Walk', city: 'Austin' },
+        visibility: 'unlisted',
+        seo: { title: 'Search title', description: 'Search description' },
+        capacity: 250,
+        coverImageUrl: 'https://cdn.example.test/cover.jpg',
+        externalUrl: 'https://events.example.test/detail',
+      },
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toMatchObject({
+      venue: { name: 'Riverside', address: '100 River Walk', city: 'Austin' },
+      visibility: 'unlisted',
+      seo: { title: 'Search title', description: 'Search description' },
+      capacity: 250,
+      coverImageUrl: 'https://cdn.example.test/cover.jpg',
+      externalUrl: 'https://events.example.test/detail',
+    });
+    expect(updates).toContainEqual(
+      expect.objectContaining({
+        venue: JSON.stringify({ name: 'Riverside', address: '100 River Walk', city: 'Austin' }),
+        visibility: 'unlisted',
+        seo: JSON.stringify({ title: 'Search title', description: 'Search description' }),
+        capacity: 250,
+        cover_image_url: 'https://cdn.example.test/cover.jpg',
+        external_url: 'https://events.example.test/detail',
+      }),
+    );
+    await app.close();
+  });
+
+  it('clears nullable event detail fields when PATCH sends null', async () => {
+    const { db, updates } = createEventMutationDb({
+      event: baseEventRow({
+        ends_at: new Date('2026-07-02T00:00:00.000Z'),
+        venue: JSON.stringify({ name: 'Riverside' }),
+        capacity: 250,
+        cover_image_url: 'https://cdn.example.test/cover.jpg',
+        external_url: 'https://events.example.test/detail',
+      }),
+    });
+    const app = await setupEventApp(db, writePrincipal);
+
+    const response = await app.inject({
+      method: 'PATCH',
+      url: '/events/evt_1',
+      payload: {
+        endsAt: null,
+        venue: null,
+        capacity: null,
+        coverImageUrl: null,
+        externalUrl: null,
+      },
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json().venue).toBeNull();
+    expect(updates).toContainEqual(
+      expect.objectContaining({
+        ends_at: null,
+        venue: null,
+        capacity: null,
+        cover_image_url: null,
+        external_url: null,
+      }),
+    );
+    await app.close();
+  });
+
   it('applies brand and event scope filters when listing events', async () => {
     const principal: Principal = {
       type: 'api_key',

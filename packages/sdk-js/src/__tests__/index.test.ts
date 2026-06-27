@@ -250,11 +250,11 @@ describe('GateKitClient new resource methods', () => {
   function mockFetch(status: number, body: unknown) {
     const init: ResponseInit = { status, headers: { 'Content-Type': 'application/json' } };
     if (status !== 204) {
-      return vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+      return vi.spyOn(globalThis, 'fetch').mockImplementation(async () =>
         new Response(JSON.stringify(body), init),
       );
     }
-    return vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+    return vi.spyOn(globalThis, 'fetch').mockImplementation(async () =>
       new Response(null, init),
     );
   }
@@ -353,6 +353,56 @@ describe('GateKitClient new resource methods', () => {
     expect(call.url).toBe('https://api.test/v1/exports/exp_1/download');
   });
 
+  it('reports.conversion returns nullable widget view counts from the API contract', async () => {
+    const fm = mockFetch(200, {
+      eventId: 'evt_1',
+      widgetViews: null,
+      checkoutStarted: 12,
+      checkoutCompleted: 6,
+      conversionRate: 0.5,
+    });
+    const c = new GateKitClient({ apiKey: '***********', apiBaseUrl: 'https://api.test', maxRetries: 0 });
+    const report = await c.reports.conversion('evt_1');
+    const call = getCall(fm);
+    expect(call.url).toBe('https://api.test/v1/events/evt_1/reports/conversion');
+    expect(report.widgetViews).toBeNull();
+  });
+
+  it('products resource sends category and product management requests', async () => {
+    const fm = mockFetch(201, {
+      id: 'prd_1',
+      eventId: 'evt_1',
+      name: 'T-shirt',
+      priceCents: 2500,
+      currency: 'USD',
+      maxPerOrder: 3,
+      status: 'active',
+      sortOrder: 1,
+    });
+    const c = new GateKitClient({ apiKey: '***********', apiBaseUrl: 'https://api.test', maxRetries: 0 });
+
+    await c.products.createCategory('evt_1', { name: 'Merch', sortOrder: 1 });
+    expect(getCall(fm).url).toBe('https://api.test/v1/events/evt_1/product-categories');
+    expect(JSON.parse(getCall(fm).body)).toEqual({ name: 'Merch', sortOrder: 1 });
+
+    await c.products.create('evt_1', {
+      name: 'T-shirt',
+      priceCents: 2500,
+      currency: 'USD',
+      categoryId: 'pcat_1',
+      maxPerOrder: 3,
+      status: 'active',
+      sortOrder: 1,
+    });
+    expect(getCall(fm, 1).url).toBe('https://api.test/v1/events/evt_1/products');
+    expect(JSON.parse(getCall(fm, 1).body)).toMatchObject({ name: 'T-shirt', categoryId: 'pcat_1' });
+
+    await c.products.update('prd_1', { description: null, status: 'inactive' });
+    expect(getCall(fm, 2).url).toBe('https://api.test/v1/products/prd_1');
+    expect(getCall(fm, 2).method).toBe('PATCH');
+    expect(JSON.parse(getCall(fm, 2).body)).toEqual({ description: null, status: 'inactive' });
+  });
+
   it('messages.list sends GET with pagination', async () => {
     const fm = mockFetch(200, { items: [], nextCursor: null, hasMore: false });
     const c = new GateKitClient({ apiKey: '***********', apiBaseUrl: 'https://api.test', maxRetries: 0 });
@@ -361,12 +411,102 @@ describe('GateKitClient new resource methods', () => {
     expect(call.url).toBe('https://api.test/v1/events/evt_1/messages?limit=10');
   });
 
-  it('messages.getCampaign sends GET', async () => {
-    const fm = mockFetch(200, { id: 'cmp_1', status: 'sent' });
+  it('messages.previewRecipients sends POST body', async () => {
+    const fm = mockFetch(200, {
+      audience: 'checked_in',
+      audienceCount: 12,
+      eligibleCount: 10,
+      suppressedRecipients: 1,
+      consentExclusions: 1,
+      skippedRecipients: 1,
+      recipients: [],
+    });
     const c = new GateKitClient({ apiKey: '***********', apiBaseUrl: 'https://api.test', maxRetries: 0 });
-    await c.messages.getCampaign('evt_1', 'cmp_1');
+    await c.messages.previewRecipients('evt_1', {
+      templateKey: 'admin-campaign',
+      audience: 'checked_in',
+      channel: 'email',
+    });
+    const call = getCall(fm);
+    expect(call.url).toBe('https://api.test/v1/events/evt_1/messages/preview');
+    expect(call.method).toBe('POST');
+    expect(JSON.parse(call.body)).toEqual({
+      templateKey: 'admin-campaign',
+      audience: 'checked_in',
+      channel: 'email',
+    });
+  });
+
+  it('messages.getCampaign sends GET', async () => {
+    const fm = mockFetch(200, {
+      id: 'cmp_1',
+      eventId: 'evt_1',
+      templateKey: 'admin-campaign',
+      channel: 'email',
+      status: 'sent',
+      audienceCount: 1,
+      queuedEmailJobs: 1,
+      queuedSmsJobs: 0,
+      suppressedRecipients: 0,
+      consentExclusions: 0,
+      skippedRecipients: 0,
+      createdAt: '2026-01-01T00:00:00.000Z',
+      updatedAt: '2026-01-01T00:00:00.000Z',
+    });
+    const c = new GateKitClient({ apiKey: '***********', apiBaseUrl: 'https://api.test', maxRetries: 0 });
+    const campaign = await c.messages.getCampaign('evt_1', 'cmp_1');
     const call = getCall(fm);
     expect(call.url).toBe('https://api.test/v1/events/evt_1/messages/cmp_1');
+    expect(campaign).toMatchObject({ queuedEmailJobs: 1, suppressedRecipients: 0 });
+    expect(campaign).not.toHaveProperty('queued');
+  });
+
+  it('ticketTypes access-rule methods send typed requests', async () => {
+    const fm = mockFetch(201, {
+      id: 'acr_1',
+      ticketTypeId: 'tt_1',
+      type: 'code',
+      value: 'VIP123',
+      usesCount: 0,
+    });
+    const c = new GateKitClient({ apiKey: '***********', apiBaseUrl: 'https://api.test', maxRetries: 0 });
+    await c.ticketTypes.createAccessRule('tt_1', { type: 'code', value: 'VIP123', maxUses: 5 });
+    const call = getCall(fm);
+    expect(call.url).toBe('https://api.test/v1/ticket-types/tt_1/access-rules');
+    expect(call.method).toBe('POST');
+    expect(JSON.parse(call.body)).toEqual({ type: 'code', value: 'VIP123', maxUses: 5 });
+  });
+
+  it('ticketTypes batch methods send atomic ticket and access-rule requests', async () => {
+    const fm = mockFetch(201, {
+      ticketType: { id: 'tt_1', name: 'VIP', kind: 'paid', currency: 'USD', priceCents: 5000 },
+      accessRules: [{ id: 'acr_1', ticketTypeId: 'tt_1', type: 'code', value: 'VIP123', usesCount: 0 }],
+    });
+    const c = new GateKitClient({ apiKey: '***********', apiBaseUrl: 'https://api.test', maxRetries: 0 });
+    await c.ticketTypes.createBatch('evt_1', {
+      ticketType: { name: 'VIP', kind: 'paid', currency: 'USD', priceCents: 5000 },
+      inventoryPool: { name: 'VIP Pool', totalCapacity: 25 },
+      accessRules: [{ type: 'code', value: 'VIP123' }],
+    });
+    let call = getCall(fm);
+    expect(call.url).toBe('https://api.test/v1/events/evt_1/ticket-types/batch');
+    expect(call.method).toBe('POST');
+    expect(JSON.parse(call.body)).toMatchObject({
+      inventoryPool: { totalCapacity: 25 },
+      accessRules: [{ value: 'VIP123' }],
+    });
+
+    await c.ticketTypes.updateBatch('tt_1', {
+      ticketType: { name: 'VIP 2' },
+      accessRules: [{ type: 'code', value: 'VIP456' }],
+    });
+    call = getCall(fm, 1);
+    expect(call.url).toBe('https://api.test/v1/ticket-types/tt_1/batch');
+    expect(call.method).toBe('PATCH');
+    expect(JSON.parse(call.body)).toEqual({
+      ticketType: { name: 'VIP 2' },
+      accessRules: [{ type: 'code', value: 'VIP456' }],
+    });
   });
 
   it('webhookEndpoints.listEvents sends GET', async () => {
@@ -386,13 +526,31 @@ describe('GateKitClient new resource methods', () => {
   });
 
   it('questions.create sends POST with body', async () => {
-    const fm = mockFetch(201, { id: 'q_1', label: 'Name', fieldKey: 'name', type: 'text', required: true });
+    const fm = mockFetch(201, { id: 'q_1', label: 'Name', type: 'text', required: true, appliesTo: 'buyer', isConsentField: false });
     const c = new GateKitClient({ apiKey: '***********', apiBaseUrl: 'https://api.test', maxRetries: 0 });
-    await c.questions.create('evt_1', { label: 'Name', fieldKey: 'name', type: 'text', required: true });
+    await c.questions.create('evt_1', {
+      label: 'Name',
+      type: 'text',
+      required: true,
+      appliesTo: 'buyer',
+      ticketTypeId: 'tt_1',
+      placeholder: 'Ada Lovelace',
+      conditionalVisibility: { field: 'q_opt_in', operator: 'equals', value: 'yes' },
+      isConsentField: false,
+    });
     const call = getCall(fm);
     expect(call.url).toBe('https://api.test/v1/events/evt_1/questions');
     expect(call.method).toBe('POST');
-    expect(JSON.parse(call.body)).toEqual({ label: 'Name', fieldKey: 'name', type: 'text', required: true });
+    expect(JSON.parse(call.body)).toEqual({
+      label: 'Name',
+      type: 'text',
+      required: true,
+      appliesTo: 'buyer',
+      ticketTypeId: 'tt_1',
+      placeholder: 'Ada Lovelace',
+      conditionalVisibility: { field: 'q_opt_in', operator: 'equals', value: 'yes' },
+      isConsentField: false,
+    });
   });
 
   it('questions.update sends PATCH', async () => {

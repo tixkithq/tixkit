@@ -176,6 +176,8 @@ export const createEventSchema = z.object({
   visibility: z.enum(['public', 'unlisted', 'private']).optional(),
   seo: z.record(z.string(), z.unknown()).optional(),
   capacity: z.number().int().positive().optional(),
+  coverImageUrl: urlSchema.optional(),
+  externalUrl: urlSchema.optional(),
 }).strict();
 
 export const updateEventSchema = z.object({
@@ -185,8 +187,12 @@ export const updateEventSchema = z.object({
   timezone: z.string().min(1).optional(),
   startsAt: iso8601Schema.optional(),
   endsAt: iso8601Schema.nullable().optional(),
+  venue: z.record(z.string(), z.unknown()).nullable().optional(),
   visibility: z.enum(['public', 'unlisted', 'private']).optional(),
+  seo: z.record(z.string(), z.unknown()).optional(),
   capacity: z.number().int().positive().nullable().optional(),
+  coverImageUrl: urlSchema.nullable().optional(),
+  externalUrl: urlSchema.nullable().optional(),
   status: z.enum(['draft', 'published', 'paused', 'archived']).optional(),
 }).strict();
 
@@ -258,10 +264,69 @@ export const updateTicketTypeSchema = z.object({
   sortOrder: z.number().int().optional(),
 }).strict();
 
+export const createAccessRuleSchema = z.object({
+  type: z.enum(['code', 'email_domain']),
+  value: z.string().min(1),
+  maxUses: z.number().int().positive().nullable().optional(),
+  expiresAt: iso8601Schema.nullable().optional(),
+}).strict();
+
 export const createInventoryPoolSchema = z.object({
   name: z.string().min(1),
   totalCapacity: z.number().int().min(1),
   holdTtlSeconds: z.number().int().min(1).optional(),
+}).strict();
+
+export const createTicketTypeBatchSchema = z.object({
+  ticketType: createTicketTypeSchema.omit({ inventoryPoolId: true }).extend({
+    inventoryPoolId: ulidSchema.optional(),
+  }),
+  inventoryPool: createInventoryPoolSchema.optional(),
+  accessRules: z.array(createAccessRuleSchema).optional(),
+}).strict().superRefine((data, ctx) => {
+  if (!data.ticketType.inventoryPoolId && !data.inventoryPool) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ['inventoryPoolId'],
+      message: 'Provide inventoryPoolId or inventoryPool',
+    });
+  }
+});
+
+export const updateTicketTypeBatchSchema = z.object({
+  ticketType: updateTicketTypeSchema,
+  accessRules: z.array(createAccessRuleSchema).optional(),
+}).strict();
+
+export const createProductCategorySchema = z.object({
+  name: z.string().min(1),
+  sortOrder: z.number().int().optional(),
+}).strict();
+
+export const createProductSchema = z.object({
+  name: z.string().min(1),
+  description: z.string().optional(),
+  priceCents: z.number().int().min(0),
+  currency: currencySchema,
+  categoryId: ulidSchema.optional(),
+  maxPerOrder: z.number().int().min(1).optional(),
+  availableFrom: iso8601Schema.optional(),
+  availableUntil: iso8601Schema.optional(),
+  status: z.enum(['active', 'inactive']).optional(),
+  sortOrder: z.number().int().optional(),
+}).strict();
+
+export const updateProductSchema = z.object({
+  name: z.string().min(1).optional(),
+  description: z.string().nullable().optional(),
+  priceCents: z.number().int().min(0).optional(),
+  currency: currencySchema.optional(),
+  categoryId: ulidSchema.nullable().optional(),
+  maxPerOrder: z.number().int().min(1).optional(),
+  availableFrom: iso8601Schema.nullable().optional(),
+  availableUntil: iso8601Schema.nullable().optional(),
+  status: z.enum(['active', 'inactive']).optional(),
+  sortOrder: z.number().int().optional(),
 }).strict();
 
 // Developer schemas

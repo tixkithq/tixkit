@@ -113,6 +113,8 @@ export const openApiSpec = {
           capacity: { type: 'integer' },
           venue: { type: 'object' },
           seo: { type: 'object' },
+          coverImageUrl: { type: 'string', format: 'uri' },
+          externalUrl: { type: 'string', format: 'uri' },
         },
         required: ['id', 'title', 'slug', 'status', 'currency', 'startsAt', 'timezone'],
       },
@@ -148,6 +150,162 @@ export const openApiSpec = {
         type: 'object',
         properties: {
           items: { type: 'array', items: { $ref: '#/components/schemas/TicketType' } },
+          nextCursor: { type: ['string', 'null'] },
+          hasMore: { type: 'boolean' },
+        },
+        required: ['items', 'nextCursor', 'hasMore'],
+      },
+      AccessRule: {
+        type: 'object',
+        properties: {
+          id: { type: 'string' },
+          ticketTypeId: { type: 'string' },
+          type: { type: 'string', enum: ['code', 'email_domain'] },
+          value: { type: 'string' },
+          maxUses: { type: 'integer' },
+          usesCount: { type: 'integer' },
+          expiresAt: { type: 'string', format: 'date-time' },
+          createdAt: { type: 'string', format: 'date-time' },
+          updatedAt: { type: 'string', format: 'date-time' },
+        },
+        required: ['id', 'ticketTypeId', 'type', 'value', 'usesCount'],
+      },
+      AccessRulePage: {
+        type: 'object',
+        properties: {
+          items: { type: 'array', items: { $ref: '#/components/schemas/AccessRule' } },
+          nextCursor: { type: ['string', 'null'] },
+          hasMore: { type: 'boolean' },
+        },
+        required: ['items', 'nextCursor', 'hasMore'],
+      },
+      TicketTypeBatchResult: {
+        type: 'object',
+        properties: {
+          ticketType: { $ref: '#/components/schemas/TicketType' },
+          accessRules: { type: 'array', items: { $ref: '#/components/schemas/AccessRule' } },
+        },
+        required: ['ticketType', 'accessRules'],
+      },
+      CreateTicketTypeBatch: {
+        type: 'object',
+        properties: {
+          ticketType: {
+            type: 'object',
+            properties: {
+              name: { type: 'string' },
+              description: { type: 'string' },
+              kind: { type: 'string', enum: ['free', 'paid', 'donation'] },
+              visibility: { type: 'string', enum: ['public', 'hidden', 'locked'] },
+              currency: { type: 'string' },
+              priceCents: { type: 'integer' },
+              minimumPriceCents: { type: 'integer', nullable: true },
+              salesStartAt: { type: 'string', format: 'date-time' },
+              salesEndAt: { type: 'string', format: 'date-time' },
+              minPerOrder: { type: 'integer' },
+              maxPerOrder: { type: 'integer' },
+              inventoryPoolId: { type: 'string' },
+              requiresAccessCode: { type: 'boolean' },
+              accessCodeHint: { type: 'string', nullable: true },
+            },
+            required: ['name', 'kind', 'currency', 'priceCents'],
+          },
+          inventoryPool: {
+            type: 'object',
+            properties: {
+              name: { type: 'string' },
+              totalCapacity: { type: 'integer' },
+              holdTtlSeconds: { type: 'integer' },
+            },
+            required: ['name', 'totalCapacity'],
+          },
+          accessRules: { type: 'array', items: { $ref: '#/components/schemas/AccessRuleCreate' } },
+        },
+        required: ['ticketType'],
+      },
+      UpdateTicketTypeBatch: {
+        type: 'object',
+        properties: {
+          ticketType: {
+            type: 'object',
+            properties: {
+              name: { type: 'string' },
+              description: { type: 'string' },
+              kind: { type: 'string', enum: ['free', 'paid', 'donation'] },
+              status: { type: 'string', enum: ['draft', 'active', 'paused', 'sold_out', 'ended'] },
+              visibility: { type: 'string', enum: ['public', 'hidden', 'locked'] },
+              currency: { type: 'string' },
+              priceCents: { type: 'integer' },
+              minimumPriceCents: { type: 'integer', nullable: true },
+              salesStartAt: { type: 'string', format: 'date-time', nullable: true },
+              salesEndAt: { type: 'string', format: 'date-time', nullable: true },
+              minPerOrder: { type: 'integer' },
+              maxPerOrder: { type: 'integer' },
+              inventoryPoolId: { type: 'string' },
+              requiresAccessCode: { type: 'boolean' },
+              accessCodeHint: { type: 'string', nullable: true },
+              sortOrder: { type: 'integer' },
+            },
+          },
+          accessRules: { type: 'array', items: { $ref: '#/components/schemas/AccessRuleCreate' } },
+        },
+        required: ['ticketType'],
+      },
+      AccessRuleCreate: {
+        type: 'object',
+        properties: {
+          type: { type: 'string', enum: ['code', 'email_domain'] },
+          value: { type: 'string' },
+          maxUses: { type: 'integer', nullable: true },
+          expiresAt: { type: 'string', format: 'date-time', nullable: true },
+        },
+        required: ['type', 'value'],
+      },
+      ProductCategory: {
+        type: 'object',
+        properties: {
+          id: { type: 'string' },
+          eventId: { type: 'string' },
+          name: { type: 'string' },
+          sortOrder: { type: 'integer' },
+          createdAt: { type: 'string', format: 'date-time' },
+          updatedAt: { type: 'string', format: 'date-time' },
+        },
+        required: ['id', 'eventId', 'name', 'sortOrder'],
+      },
+      ProductCategoryPage: {
+        type: 'object',
+        properties: {
+          items: { type: 'array', items: { $ref: '#/components/schemas/ProductCategory' } },
+          nextCursor: { type: ['string', 'null'] },
+          hasMore: { type: 'boolean' },
+        },
+        required: ['items', 'nextCursor', 'hasMore'],
+      },
+      Product: {
+        type: 'object',
+        properties: {
+          id: { type: 'string' },
+          eventId: { type: 'string' },
+          name: { type: 'string' },
+          description: { type: 'string' },
+          priceCents: { type: 'integer' },
+          currency: { type: 'string' },
+          categoryId: { type: 'string' },
+          maxPerOrder: { type: 'integer' },
+          availableFrom: { type: 'string', format: 'date-time' },
+          availableUntil: { type: 'string', format: 'date-time' },
+          status: { type: 'string', enum: ['active', 'inactive'] },
+          sortOrder: { type: 'integer' },
+          createdAt: { type: 'string', format: 'date-time' },
+          updatedAt: { type: 'string', format: 'date-time' },
+        },
+        required: ['id', 'eventId', 'name', 'priceCents', 'currency', 'maxPerOrder', 'status', 'sortOrder'],
+      },
+      ProductPage: {
+        type: 'object',
+        properties: {
+          items: { type: 'array', items: { $ref: '#/components/schemas/Product' } },
           nextCursor: { type: ['string', 'null'] },
           hasMore: { type: 'boolean' },
         },
@@ -1016,6 +1174,8 @@ export const openApiSpec = {
                   visibility: { type: 'string', enum: ['public', 'unlisted', 'private'] },
                   seo: { type: 'object' },
                   capacity: { type: 'integer' },
+                  coverImageUrl: { type: 'string', format: 'uri' },
+                  externalUrl: { type: 'string', format: 'uri' },
                 },
                 required: ['organizationId', 'brandId', 'slug', 'title', 'currency', 'timezone', 'startsAt'],
               },
@@ -1043,8 +1203,12 @@ export const openApiSpec = {
                   timezone: { type: 'string' },
                   startsAt: { type: 'string', format: 'date-time' },
                   endsAt: { type: 'string', format: 'date-time', nullable: true },
+                  venue: { type: 'object', nullable: true },
                   visibility: { type: 'string', enum: ['public', 'unlisted', 'private'] },
+                  seo: { type: 'object' },
                   capacity: { type: 'integer', nullable: true },
+                  coverImageUrl: { type: 'string', format: 'uri', nullable: true },
+                  externalUrl: { type: 'string', format: 'uri', nullable: true },
                   status: { type: 'string', enum: ['draft', 'published', 'paused', 'archived'] },
                 },
               },
@@ -1124,6 +1288,22 @@ export const openApiSpec = {
         responses: { '201': { description: 'Ticket type created', content: { 'application/json': { schema: { $ref: '#/components/schemas/TicketType' } } } } },
       },
     },
+    '/events/{eventId}/ticket-types/batch': {
+      post: {
+        summary: 'Create ticket type with inventory pool and access rules atomically',
+        security: [{ BearerAuth: [] }],
+        requestBody: {
+          required: true,
+          content: { 'application/json': { schema: { $ref: '#/components/schemas/CreateTicketTypeBatch' } } },
+        },
+        responses: {
+          '201': {
+            description: 'Ticket type and access rules created',
+            content: { 'application/json': { schema: { $ref: '#/components/schemas/TicketTypeBatchResult' } } },
+          },
+        },
+      },
+    },
     '/ticket-types/{ticketTypeId}': {
       patch: {
         summary: 'Update ticket type',
@@ -1159,7 +1339,85 @@ export const openApiSpec = {
         responses: { '200': { description: 'Ticket type updated', content: { 'application/json': { schema: { $ref: '#/components/schemas/TicketType' } } } } },
       },
     },
+    '/ticket-types/{ticketTypeId}/batch': {
+      patch: {
+        summary: 'Update ticket type and append access rules atomically',
+        security: [{ BearerAuth: [] }],
+        requestBody: {
+          required: true,
+          content: { 'application/json': { schema: { $ref: '#/components/schemas/UpdateTicketTypeBatch' } } },
+        },
+        responses: {
+          '200': {
+            description: 'Ticket type updated and access rules returned',
+            content: { 'application/json': { schema: { $ref: '#/components/schemas/TicketTypeBatchResult' } } },
+          },
+        },
+      },
+    },
+    '/ticket-types/{ticketTypeId}/access-rules': {
+      get: {
+        summary: 'List access rules for a ticket type',
+        security: [{ BearerAuth: [] }],
+        responses: {
+          '200': { description: 'Access rules', content: { 'application/json': { schema: { $ref: '#/components/schemas/AccessRulePage' } } } },
+        },
+      },
+      post: {
+        summary: 'Create access rule for a ticket type',
+        security: [{ BearerAuth: [] }],
+        requestBody: {
+          required: true,
+          content: {
+            'application/json': {
+              schema: {
+                type: 'object',
+                properties: {
+                  type: { type: 'string', enum: ['code', 'email_domain'] },
+                  value: { type: 'string' },
+                  maxUses: { type: 'integer', nullable: true },
+                  expiresAt: { type: 'string', format: 'date-time', nullable: true },
+                },
+                required: ['type', 'value'],
+              },
+            },
+          },
+        },
+        responses: {
+          '201': { description: 'Access rule created', content: { 'application/json': { schema: { $ref: '#/components/schemas/AccessRule' } } } },
+        },
+      },
+    },
+    '/access-rules/{accessRuleId}': {
+      delete: {
+        summary: 'Delete access rule',
+        security: [{ BearerAuth: [] }],
+        responses: { '204': { description: 'Access rule deleted' } },
+      },
+    },
     '/events/{eventId}/inventory-pools': {
+      get: {
+        summary: 'List inventory pools',
+        security: [{ BearerAuth: [] }],
+        responses: {
+          '200': {
+            description: 'Page of inventory pools',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  properties: {
+                    items: { type: 'array', items: { $ref: '#/components/schemas/InventoryPool' } },
+                    nextCursor: { type: 'string', nullable: true },
+                    hasMore: { type: 'boolean' },
+                  },
+                  required: ['items'],
+                },
+              },
+            },
+          },
+        },
+      },
       post: {
         summary: 'Create inventory pool',
         security: [{ BearerAuth: [] }],
@@ -1180,6 +1438,103 @@ export const openApiSpec = {
           },
         },
         responses: { '201': { description: 'Inventory pool created', content: { 'application/json': { schema: { $ref: '#/components/schemas/InventoryPool' } } } } },
+      },
+    },
+    '/events/{eventId}/product-categories': {
+      get: {
+        summary: 'List product categories',
+        security: [{ BearerAuth: [] }],
+        parameters: [{ $ref: '#/components/parameters/Cursor' }, { $ref: '#/components/parameters/Limit' }],
+        responses: {
+          '200': { description: 'Page of product categories', content: { 'application/json': { schema: { $ref: '#/components/schemas/ProductCategoryPage' } } } },
+        },
+      },
+      post: {
+        summary: 'Create product category',
+        security: [{ BearerAuth: [] }],
+        requestBody: {
+          required: true,
+          content: {
+            'application/json': {
+              schema: {
+                type: 'object',
+                properties: {
+                  name: { type: 'string' },
+                  sortOrder: { type: 'integer' },
+                },
+                required: ['name'],
+              },
+            },
+          },
+        },
+        responses: { '201': { description: 'Product category created', content: { 'application/json': { schema: { $ref: '#/components/schemas/ProductCategory' } } } } },
+      },
+    },
+    '/events/{eventId}/products': {
+      get: {
+        summary: 'List products',
+        security: [{ BearerAuth: [] }],
+        parameters: [{ $ref: '#/components/parameters/Cursor' }, { $ref: '#/components/parameters/Limit' }],
+        responses: {
+          '200': { description: 'Page of products', content: { 'application/json': { schema: { $ref: '#/components/schemas/ProductPage' } } } },
+        },
+      },
+      post: {
+        summary: 'Create product',
+        security: [{ BearerAuth: [] }],
+        requestBody: {
+          required: true,
+          content: {
+            'application/json': {
+              schema: {
+                type: 'object',
+                properties: {
+                  name: { type: 'string' },
+                  description: { type: 'string' },
+                  priceCents: { type: 'integer' },
+                  currency: { type: 'string' },
+                  categoryId: { type: 'string' },
+                  maxPerOrder: { type: 'integer' },
+                  availableFrom: { type: 'string', format: 'date-time' },
+                  availableUntil: { type: 'string', format: 'date-time' },
+                  status: { type: 'string', enum: ['active', 'inactive'] },
+                  sortOrder: { type: 'integer' },
+                },
+                required: ['name', 'priceCents', 'currency'],
+              },
+            },
+          },
+        },
+        responses: { '201': { description: 'Product created', content: { 'application/json': { schema: { $ref: '#/components/schemas/Product' } } } } },
+      },
+    },
+    '/products/{productId}': {
+      patch: {
+        summary: 'Update product',
+        security: [{ BearerAuth: [] }],
+        requestBody: {
+          required: true,
+          content: {
+            'application/json': {
+              schema: {
+                type: 'object',
+                properties: {
+                  name: { type: 'string' },
+                  description: { type: 'string', nullable: true },
+                  priceCents: { type: 'integer' },
+                  currency: { type: 'string' },
+                  categoryId: { type: 'string', nullable: true },
+                  maxPerOrder: { type: 'integer' },
+                  availableFrom: { type: 'string', format: 'date-time', nullable: true },
+                  availableUntil: { type: 'string', format: 'date-time', nullable: true },
+                  status: { type: 'string', enum: ['active', 'inactive'] },
+                  sortOrder: { type: 'integer' },
+                },
+              },
+            },
+          },
+        },
+        responses: { '200': { description: 'Product updated', content: { 'application/json': { schema: { $ref: '#/components/schemas/Product' } } } } },
       },
     },
     '/events/{eventId}/availability': {
@@ -1643,7 +1998,7 @@ export const openApiSpec = {
         summary: 'Get conversion report',
         security: [{ BearerAuth: [] }],
         responses: {
-          '200': { description: 'Conversion funnel metrics', content: { 'application/json': { schema: { type: 'object', properties: { eventId: { type: 'string' }, checkoutStarted: { type: 'number' }, checkoutCompleted: { type: 'number' }, conversionRate: { type: 'number' } }, required: ['eventId', 'checkoutStarted', 'checkoutCompleted', 'conversionRate'] } } } },
+          '200': { description: 'Conversion funnel metrics', content: { 'application/json': { schema: { type: 'object', properties: { eventId: { type: 'string' }, widgetViews: { type: 'number', nullable: true }, checkoutStarted: { type: 'number' }, checkoutCompleted: { type: 'number' }, conversionRate: { type: 'number' } }, required: ['eventId', 'widgetViews', 'checkoutStarted', 'checkoutCompleted', 'conversionRate'] } } } },
           '401': { description: 'Unauthorized', content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } } },
           '403': { description: 'Forbidden', content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } } },
         },
@@ -2110,6 +2465,7 @@ export const openApiSpec = {
                           templateKey: { type: 'string' },
                           channel: { type: 'string', enum: ['email', 'sms', 'both'] },
                           status: { type: 'string' },
+                          audience: { type: 'string', enum: ['all_attendees', 'checked_in', 'not_checked_in', 'custom'] },
                           audienceCount: { type: 'integer' },
                           queuedEmailJobs: { type: 'integer' },
                           queuedSmsJobs: { type: 'integer' },
@@ -2156,6 +2512,67 @@ export const openApiSpec = {
         },
         responses: {
           '501': { description: 'Email campaign delivery is not wired yet', content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } } },
+          '400': { description: 'Validation error', content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } } },
+          '401': { description: 'Unauthorized', content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } } },
+          '403': { description: 'Forbidden', content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } } },
+        },
+      },
+    },
+    '/events/{eventId}/messages/preview': {
+      post: {
+        summary: 'Preview eligible message recipients',
+        security: [{ BearerAuth: [] }],
+        requestBody: {
+          required: true,
+          content: {
+            'application/json': {
+              schema: {
+                type: 'object',
+                properties: {
+                  templateKey: { type: 'string' },
+                  audience: { type: 'string', enum: ['all', 'checked_in', 'not_checked_in', 'specific'] },
+                  attendeeIds: { type: 'array', items: { type: 'string' } },
+                  channel: { type: 'string', enum: ['email', 'sms', 'both'] },
+                },
+                required: ['templateKey', 'audience', 'channel'],
+              },
+            },
+          },
+        },
+        responses: {
+          '200': {
+            description: 'Recipient preview using send-time eligibility rules',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  properties: {
+                    audience: { type: 'string', enum: ['all_attendees', 'checked_in', 'not_checked_in', 'custom'] },
+                    audienceCount: { type: 'integer' },
+                    eligibleCount: { type: 'integer' },
+                    suppressedRecipients: { type: 'integer' },
+                    consentExclusions: { type: 'integer' },
+                    skippedRecipients: { type: 'integer' },
+                    recipients: {
+                      type: 'array',
+                      items: {
+                        type: 'object',
+                        properties: {
+                          id: { type: 'string' },
+                          name: { type: 'string' },
+                          email: { type: 'string' },
+                          phone: { type: 'string' },
+                          status: { type: 'string' },
+                        },
+                        required: ['id', 'name', 'status'],
+                      },
+                    },
+                  },
+                  required: ['audience', 'audienceCount', 'eligibleCount', 'suppressedRecipients', 'consentExclusions', 'skippedRecipients', 'recipients'],
+                },
+              },
+            },
+          },
           '400': { description: 'Validation error', content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } } },
           '401': { description: 'Unauthorized', content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } } },
           '403': { description: 'Forbidden', content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } } },

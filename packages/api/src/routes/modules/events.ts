@@ -41,6 +41,8 @@ export const eventRoutes: FastifyPluginAsync = async (app) => {
       visibility: body.visibility,
       seo: body.seo as Record<string, unknown> | undefined,
       capacity: body.capacity,
+      coverImageUrl: body.coverImageUrl,
+      externalUrl: body.externalUrl,
     });
 
     await writeAuditLog(audit(), request, principal, {
@@ -121,8 +123,12 @@ export const eventRoutes: FastifyPluginAsync = async (app) => {
     if (body.timezone !== undefined) updateData.timezone = body.timezone;
     if (body.startsAt !== undefined) updateData.starts_at = new Date(body.startsAt);
     if (body.endsAt !== undefined) updateData.ends_at = body.endsAt ? new Date(body.endsAt) : null;
+    if (body.venue !== undefined) updateData.venue = body.venue ? JSON.stringify(body.venue) : null;
     if (body.visibility !== undefined) updateData.visibility = body.visibility;
+    if (body.seo !== undefined) updateData.seo = JSON.stringify(body.seo);
     if (body.capacity !== undefined) updateData.capacity = body.capacity;
+    if (body.coverImageUrl !== undefined) updateData.cover_image_url = body.coverImageUrl;
+    if (body.externalUrl !== undefined) updateData.external_url = body.externalUrl;
     if (body.status !== undefined) updateData.status = body.status;
 
     return serializeEvent(await repo.update(eventId, updateData));

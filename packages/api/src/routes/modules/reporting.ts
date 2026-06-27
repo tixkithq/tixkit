@@ -348,6 +348,7 @@ export const reportingRoutes: FastifyPluginAsync = async (app) => {
 
     return {
       eventId,
+      widgetViews: null,
       checkoutStarted,
       checkoutCompleted,
       conversionRate,

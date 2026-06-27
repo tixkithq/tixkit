@@ -11,6 +11,8 @@ export {
   TicketTypeRepository,
   InventoryPoolRepository,
   AccessRuleRepository,
+  ProductCategoryRepository,
+  ProductRepository,
 } from './event.js';
 export {
   CheckoutHoldRepository,

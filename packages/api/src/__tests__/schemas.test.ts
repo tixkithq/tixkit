@@ -8,8 +8,16 @@ import {
   updateWebhookEndpointSchema,
   createOAuthAppSchema,
   createEventSchema,
+  updateEventSchema,
   createTicketTypeSchema,
+  updateTicketTypeSchema,
+  createAccessRuleSchema,
+  createTicketTypeBatchSchema,
+  createProductCategorySchema,
+  createProductSchema,
   updateBrandSchema,
+  updateProductSchema,
+  updateTicketTypeBatchSchema,
 } from '../http/schemas.js';
 import { ValidationError } from '@gatekit/domain';
 
@@ -118,6 +126,116 @@ describe('API mutation schema drift guards', () => {
   it('accepts paymentAccountId on brand updates', () => {
     expect(parseBody(updateBrandSchema, { paymentAccountId: 'pa_1' }).paymentAccountId).toBe('pa_1');
     expect(parseBody(updateBrandSchema, { paymentAccountId: null }).paymentAccountId).toBeNull();
+  });
+
+  it('accepts full editable event detail fields on event updates', () => {
+    const parsed = parseBody(updateEventSchema, {
+      venue: { name: 'Riverside', address: '100 River Walk' },
+      visibility: 'unlisted',
+      seo: { title: 'Search title', description: 'Search description' },
+      capacity: 250,
+      coverImageUrl: 'https://cdn.example.test/cover.jpg',
+      externalUrl: 'https://events.example.test/detail',
+    });
+
+    expect(parsed.venue).toEqual({ name: 'Riverside', address: '100 River Walk' });
+    expect(parsed.visibility).toBe('unlisted');
+    expect(parsed.seo).toEqual({ title: 'Search title', description: 'Search description' });
+    expect(parsed.coverImageUrl).toBe('https://cdn.example.test/cover.jpg');
+  });
+
+  it('accepts ended but rejects hidden ticket statuses on updates', () => {
+    const parsed = parseBody(updateTicketTypeSchema, { status: 'ended' });
+    expect(parsed.status).toBe('ended');
+    expect(() => parseBody(updateTicketTypeSchema, { status: 'hidden' })).toThrow(ValidationError);
+  });
+
+  it('validates access-rule creation payloads', () => {
+    const parsed = parseBody(createAccessRuleSchema, {
+      type: 'code',
+      value: 'VIP123',
+      maxUses: 10,
+      expiresAt: '2026-08-01T00:00:00.000Z',
+    });
+    expect(parsed.value).toBe('VIP123');
+    expect(() => parseBody(createAccessRuleSchema, { type: 'code', value: '' })).toThrow(ValidationError);
+  });
+
+  it('validates atomic ticket type batch payloads', () => {
+    const create = parseBody(createTicketTypeBatchSchema, {
+      ticketType: {
+        name: 'Locked VIP',
+        kind: 'paid',
+        visibility: 'locked',
+        priceCents: 7500,
+        currency: 'USD',
+        requiresAccessCode: true,
+      },
+      inventoryPool: {
+        name: 'VIP pool',
+        totalCapacity: 50,
+      },
+      accessRules: [
+        { type: 'code', value: 'VIP123' },
+      ],
+    });
+    expect(create.inventoryPool?.totalCapacity).toBe(50);
+    expect(create.accessRules?.[0]?.value).toBe('VIP123');
+
+    const update = parseBody(updateTicketTypeBatchSchema, {
+      ticketType: {
+        status: 'active',
+        visibility: 'locked',
+      },
+      accessRules: [
+        { type: 'code', value: 'VIP456', maxUses: 10 },
+      ],
+    });
+    expect(update.ticketType.status).toBe('active');
+    expect(update.accessRules?.[0]?.maxUses).toBe(10);
+
+    expect(() =>
+      parseBody(createTicketTypeBatchSchema, {
+        ticketType: {
+          name: 'No pool',
+          kind: 'paid',
+          priceCents: 7500,
+          currency: 'USD',
+        },
+      }),
+    ).toThrow(ValidationError);
+  });
+
+  it('validates product and product category payloads', () => {
+    const category = parseBody(createProductCategorySchema, { name: 'Merch', sortOrder: 2 });
+    expect(category).toEqual({ name: 'Merch', sortOrder: 2 });
+
+    const product = parseBody(createProductSchema, {
+      name: 'T-shirt',
+      description: 'Cotton shirt',
+      priceCents: 2500,
+      currency: 'USD',
+      categoryId: 'pcat_1',
+      maxPerOrder: 3,
+      availableFrom: '2026-08-01T00:00:00.000Z',
+      status: 'active',
+      sortOrder: 1,
+    });
+    expect(product.priceCents).toBe(2500);
+    expect(product.categoryId).toBe('pcat_1');
+
+    const update = parseBody(updateProductSchema, {
+      description: null,
+      categoryId: null,
+      availableUntil: null,
+      status: 'inactive',
+    });
+    expect(update.description).toBeNull();
+    expect(update.categoryId).toBeNull();
+    expect(update.availableUntil).toBeNull();
+
+    expect(() => parseBody(createProductSchema, { name: 'Bad', priceCents: -1, currency: 'USD' })).toThrow(ValidationError);
+    expect(() => parseBody(updateProductSchema, { status: 'archived' })).toThrow(ValidationError);
   });
 });
 

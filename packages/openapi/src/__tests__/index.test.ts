@@ -85,12 +85,22 @@ describe('openApiSpec', () => {
     expect(openApiSpec.paths['/attendees/{attendeeId}']).toBeDefined();
     expect(openApiSpec.paths['/tickets/{ticketId}/transfer']).toBeDefined();
     expect(openApiSpec.paths['/events/{eventId}/inventory-pools']).toBeDefined();
+    expect(openApiSpec.paths['/events/{eventId}/product-categories']).toBeDefined();
+    expect(openApiSpec.paths['/events/{eventId}/products']).toBeDefined();
+    expect(openApiSpec.paths['/products/{productId}']).toBeDefined();
+    expect(openApiSpec.paths['/events/{eventId}/ticket-types/batch']).toBeDefined();
+    expect(openApiSpec.paths['/ticket-types/{ticketTypeId}/batch']).toBeDefined();
+    expect(openApiSpec.paths['/ticket-types/{ticketTypeId}/access-rules']).toBeDefined();
+    expect(openApiSpec.paths['/access-rules/{accessRuleId}']).toBeDefined();
     expect(openApiSpec.paths['/events/{eventId}/questions/reorder']).toBeDefined();
     expect(openApiSpec.paths['/events/{eventId}/reports/sales']).toBeDefined();
     expect(openApiSpec.paths['/events/{eventId}/reports/tax']).toBeDefined();
     expect(openApiSpec.paths['/exports']).toBeDefined();
     expect(openApiSpec.paths['/events/{eventId}/messages']).toBeDefined();
+    expect(openApiSpec.paths['/events/{eventId}/messages/preview']).toBeDefined();
     expect(openApiSpec.paths['/webhook-events/{eventId}/replay']).toBeDefined();
+    expect(openApiSpec.components.schemas.TicketTypeBatchResult.required).toEqual(['ticketType', 'accessRules']);
+    expect(openApiSpec.components.schemas.CreateTicketTypeBatch.required).toContain('ticketType');
   });
 
   it('documents checkout tracking separately from affiliate attribution', () => {
@@ -98,6 +108,13 @@ describe('openApiSpec', () => {
       openApiSpec.paths['/checkout/sessions'].post.requestBody.content['application/json'].schema;
     expect(checkoutSessionBody.properties.affiliateCode).toEqual({ type: 'string' });
     expect(checkoutSessionBody.properties.trackingId).toEqual({ type: 'string' });
+  });
+
+  it('documents conversion widget impressions as explicitly nullable while untracked', () => {
+    const schema =
+      openApiSpec.paths['/events/{eventId}/reports/conversion'].get.responses['200'].content['application/json'].schema;
+    expect(schema.required).toContain('widgetViews');
+    expect(schema.properties.widgetViews).toEqual({ type: 'number', nullable: true });
   });
 
   it('documents the atomic checkout-question reorder contract', () => {

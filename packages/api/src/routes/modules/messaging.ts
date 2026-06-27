@@ -19,6 +19,19 @@ import { type Principal, ValidationError } from '@gatekit/domain';
 import { sendMessageSchema } from '../../http/schemas.js';
 import { hashRequest, withIdempotency } from '../../services/idempotency.js';
 
+type MessageAudience = 'all' | 'checked_in' | 'not_checked_in' | 'specific';
+type MessageChannel = 'email' | 'sms' | 'both';
+
+type MessageAttendee = {
+  id: string;
+  event_id?: string | null;
+  first_name: string | null;
+  last_name: string | null;
+  email: string | null;
+  phone: string | null;
+  status: string;
+};
+
 export const messagingRoutes: FastifyPluginAsync = async (app) => {
   const db = app.context.db;
 
@@ -163,6 +176,57 @@ export const messagingRoutes: FastifyPluginAsync = async (app) => {
     return item;
   });
 
+  app.post('/events/:eventId/messages/preview', async (request) => {
+    const principal = request.principal!;
+    ClerkAuthService.requirePermission(principal, 'messages.write');
+    const { eventId } = request.params as { eventId: string };
+    const parsed = sendMessageSchema.pick({
+      audience: true,
+      attendeeIds: true,
+      channel: true,
+      templateKey: true,
+    }).safeParse(request.body);
+    if (!parsed.success) {
+      throw new ValidationError('Invalid message preview request', {
+        issues: parsed.error.issues.map((issue) => ({
+          path: issue.path.join('.'),
+          message: issue.message,
+        })),
+      });
+    }
+    if (parsed.data.audience === 'specific' && (!parsed.data.attendeeIds || parsed.data.attendeeIds.length === 0)) {
+      throw new ValidationError('attendeeIds is required when audience is specific', {
+        field: 'attendeeIds',
+      });
+    }
+
+    await loadAuthorizedEvent(eventId, principal, db);
+    const resolved = await resolveMessageAudience({
+      db,
+      tenantId: principal.tenantId,
+      eventId,
+      audience: parsed.data.audience,
+      attendeeIds: parsed.data.attendeeIds,
+      channel: parsed.data.channel,
+    });
+
+    return {
+      audience: audienceToResponse(parsed.data.audience),
+      audienceCount: resolved.attendees.length,
+      eligibleCount: resolved.eligibleRecipients.length,
+      suppressedRecipients: resolved.suppressedRecipients,
+      consentExclusions: resolved.consentExclusions,
+      skippedRecipients: resolved.skippedRecipients,
+      recipients: resolved.eligibleRecipients.slice(0, 25).map((attendee) => ({
+        id: attendee.id,
+        name: attendeeName(attendee) ?? attendee.email ?? attendee.phone ?? attendee.id,
+        email: attendee.email ?? undefined,
+        phone: attendee.phone ?? undefined,
+        status: attendee.status,
+      })),
+    };
+  });
+
   app.post('/events/:eventId/messages', async (request, reply) => {
     const principal = request.principal!;
     ClerkAuthService.requirePermission(principal, 'messages.write');
@@ -202,27 +266,25 @@ export const messagingRoutes: FastifyPluginAsync = async (app) => {
       async () => {
     const event = await loadAuthorizedEvent(eventId, principal, db);
 
-    let attendeeQuery = db
-      .selectFrom('attendees')
-      .select(['id', 'first_name', 'last_name', 'email', 'phone', 'status'])
-      .where('event_id', '=', eventId)
-      .where('status', 'in', ['confirmed', 'checked_in']);
-
-    if (body.audience === 'checked_in') {
-      attendeeQuery = attendeeQuery.where('status', '=', 'checked_in');
-    } else if (body.audience === 'not_checked_in') {
-      attendeeQuery = attendeeQuery.where('status', '=', 'confirmed');
-    } else if (body.audience === 'specific') {
-      attendeeQuery = attendeeQuery.where('id', 'in', body.attendeeIds ?? []);
-    }
-
-    const attendees = await attendeeQuery.execute();
+    const audienceResolution = await resolveMessageAudience({
+      db,
+      tenantId: principal.tenantId,
+      eventId,
+      audience: body.audience,
+      attendeeIds: body.attendeeIds,
+      channel: body.channel,
+    });
+    const attendees = audienceResolution.attendees;
     if (attendees.length === 0) {
       throw new ValidationError('No matching recipients for this message campaign');
     }
 
     const notificationType = 'bulk' as const;
-    const variables = body.variables ?? {};
+    const variables: Record<string, unknown> = {
+      ...body.variables,
+      campaignAudience: body.audience,
+      campaignAudienceAttendeeIds: body.audience === 'specific' ? body.attendeeIds ?? [] : undefined,
+    };
     const queuedEmailJobs: Array<{
       jobId: string;
       toEmail: string;
@@ -235,16 +297,7 @@ export const messagingRoutes: FastifyPluginAsync = async (app) => {
     let skippedRecipients = 0;
     let suppressedRecipients = 0;
     let consentExclusions = 0;
-    const consents = await new MessageConsentRepository(db).findActiveByAttendeeIds(
-      principal.tenantId,
-      attendees.map((attendee) => attendee.id),
-    );
-    const consentByAttendee = new Map<string, (typeof consents)[number]>();
-    for (const consent of consents) {
-      if (!consentByAttendee.has(consent.attendee_id)) {
-        consentByAttendee.set(consent.attendee_id, consent);
-      }
-    }
+    const consentByAttendee = audienceResolution.consentByAttendee;
 
     if (body.channel === 'email' || body.channel === 'both') {
       const template = await new NotificationTemplateRepository(db).findByKeyForBrand(principal.tenantId, body.templateKey, event.brand_id);
@@ -263,7 +316,6 @@ export const messagingRoutes: FastifyPluginAsync = async (app) => {
         throw new ValidationError('No active email provider route for this brand');
       }
 
-      const suppressionRepo = new EmailSuppressionRepository(db);
       const emailRepo = new EmailJobRepository(db);
       for (const attendee of attendees) {
         if (!attendee.email) {
@@ -271,7 +323,7 @@ export const messagingRoutes: FastifyPluginAsync = async (app) => {
           continue;
         }
         const consent = consentByAttendee.get(attendee.id);
-        const suppression = await suppressionRepo.findByEmail(principal.tenantId, attendee.email);
+        const suppression = audienceResolution.emailSuppressionByAttendee.get(attendee.id);
         if (!consent?.email_opt_in || consent.revoked_at || suppression) {
           suppressedRecipients += 1;
           consentExclusions += !consent?.email_opt_in || Boolean(consent.revoked_at) ? 1 : 0;
@@ -475,6 +527,132 @@ async function loadAuthorizedEvent(eventId: string, principal: Principal, db: Da
   return event;
 }
 
+function audienceToResponse(audience: MessageAudience) {
+  if (audience === 'all') return 'all_attendees';
+  if (audience === 'specific') return 'custom';
+  return audience;
+}
+
+function audienceFromVariables(variables: Record<string, unknown>) {
+  const audience = variables.campaignAudience;
+  if (audience === 'checked_in' || audience === 'not_checked_in') return audience;
+  if (audience === 'specific') return 'custom';
+  return 'all_attendees';
+}
+
+async function loadMessageAudienceAttendees(input: {
+  db: Database;
+  eventId: string;
+  audience: MessageAudience;
+  attendeeIds?: string[];
+}) {
+  let attendeeQuery = input.db
+    .selectFrom('attendees')
+    .select(['id', 'event_id', 'first_name', 'last_name', 'email', 'phone', 'status'])
+    .where('event_id', '=', input.eventId)
+    .where('status', 'in', ['confirmed', 'checked_in']);
+
+  if (input.audience === 'checked_in') {
+    attendeeQuery = attendeeQuery.where('status', '=', 'checked_in');
+  } else if (input.audience === 'not_checked_in') {
+    attendeeQuery = attendeeQuery.where('status', '=', 'confirmed');
+  } else if (input.audience === 'specific') {
+    attendeeQuery = attendeeQuery.where('id', 'in', input.attendeeIds ?? []);
+  }
+
+  const rows = await attendeeQuery.execute();
+  const requested = new Set(input.attendeeIds ?? []);
+  return rows
+    .filter((attendee) =>
+      typeof attendee.id === 'string' &&
+      (typeof attendee.event_id !== 'string' || attendee.event_id === input.eventId) &&
+      (attendee.status === 'confirmed' || attendee.status === 'checked_in') &&
+      (input.audience !== 'specific' || requested.has(attendee.id)) &&
+      (input.audience !== 'checked_in' || attendee.status === 'checked_in') &&
+      (input.audience !== 'not_checked_in' || attendee.status === 'confirmed'),
+    )
+    .map((attendee) => ({
+      id: attendee.id,
+      event_id: attendee.event_id,
+      first_name: attendee.first_name ?? null,
+      last_name: attendee.last_name ?? null,
+      email: attendee.email ?? null,
+      phone: attendee.phone ?? null,
+      status: attendee.status,
+    }));
+}
+
+async function resolveMessageAudience(input: {
+  db: Database;
+  tenantId: string;
+  eventId: string;
+  audience: MessageAudience;
+  attendeeIds?: string[];
+  channel: MessageChannel;
+}) {
+  const attendees = await loadMessageAudienceAttendees(input);
+  const consents = await new MessageConsentRepository(input.db).findActiveByAttendeeIds(
+    input.tenantId,
+    attendees.map((attendee) => attendee.id),
+  );
+  const consentByAttendee = new Map<string, (typeof consents)[number]>();
+  for (const consent of consents) {
+    if (!consentByAttendee.has(consent.attendee_id)) {
+      consentByAttendee.set(consent.attendee_id, consent);
+    }
+  }
+
+  const emailSuppressionByAttendee = new Map<string, Record<string, unknown>>();
+  if (input.channel === 'email' || input.channel === 'both') {
+    const suppressionRepo = new EmailSuppressionRepository(input.db);
+    for (const attendee of attendees) {
+      if (!attendee.email) continue;
+      const suppression = await suppressionRepo.findByEmail(input.tenantId, attendee.email);
+      if (suppression) emailSuppressionByAttendee.set(attendee.id, suppression);
+    }
+  }
+
+  let skippedRecipients = 0;
+  let suppressedRecipients = 0;
+  let consentExclusions = 0;
+  const eligibleRecipients: MessageAttendee[] = [];
+  for (const attendee of attendees) {
+    const consent = consentByAttendee.get(attendee.id);
+    let channelEligible = false;
+    if (input.channel === 'email' || input.channel === 'both') {
+      if (!attendee.email) {
+        skippedRecipients += 1;
+      } else if (!consent?.email_opt_in || consent.revoked_at || emailSuppressionByAttendee.has(attendee.id)) {
+        suppressedRecipients += 1;
+        consentExclusions += !consent?.email_opt_in || Boolean(consent.revoked_at) ? 1 : 0;
+      } else {
+        channelEligible = true;
+      }
+    }
+    if (input.channel === 'sms' || input.channel === 'both') {
+      if (!attendee.phone) {
+        skippedRecipients += 1;
+      } else if (!consent?.sms_opt_in || consent.revoked_at) {
+        suppressedRecipients += 1;
+        consentExclusions += 1;
+      } else {
+        channelEligible = true;
+      }
+    }
+    if (channelEligible) eligibleRecipients.push(attendee);
+  }
+
+  return {
+    attendees,
+    consentByAttendee,
+    emailSuppressionByAttendee,
+    eligibleRecipients,
+    skippedRecipients,
+    suppressedRecipients,
+    consentExclusions,
+  };
+}
+
 async function loadAuthorizedCampaign(eventId: string, campaignId: string, principal: Principal, db: Database) {
   const event = await loadAuthorizedEvent(eventId, principal, db);
   const [emailJobs, smsJobs] = await Promise.all([
@@ -660,6 +838,7 @@ function buildCampaignSummaries(input: {
         templateKey: String(firstJob.template_key ?? variables.templateKey ?? 'attendee-message'),
         channel: group.emailJobs.length > 0 && group.smsJobs.length > 0 ? 'both' : group.smsJobs.length > 0 ? 'sms' : 'email',
         status: campaignStatus(statuses),
+        audience: audienceFromVariables(variables),
         audienceCount: jobs.length,
         queuedEmailJobs: emailQueued,
         queuedSmsJobs: smsQueued,

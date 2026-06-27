@@ -717,7 +717,7 @@ describe('reporting routes', () => {
     const res = await app.inject({ method: 'GET', url: '/events/evt_1/reports/conversion' });
     expect(res.statusCode).toBe(200);
     const body = res.json();
-    expect(body).not.toHaveProperty('widgetViews');
+    expect(body.widgetViews).toBeNull();
     expect(body).toHaveProperty('checkoutCompleted');
     expect(body).toHaveProperty('conversionRate');
     await app.close();

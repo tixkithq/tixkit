@@ -154,6 +154,50 @@ export function serializeInventoryPool(row: Record<string, unknown>) {
   };
 }
 
+export function serializeAccessRule(row: Record<string, unknown>) {
+  return {
+    id: row.id,
+    ticketTypeId: row.ticket_type_id,
+    type: row.type,
+    value: row.value,
+    maxUses: row.max_uses == null ? undefined : Number(row.max_uses),
+    usesCount: Number(row.uses_count ?? 0),
+    expiresAt: toIso(row.expires_at as Date | string | null),
+    createdAt: toIso(row.created_at as Date | string),
+    updatedAt: toIso(row.updated_at as Date | string),
+  };
+}
+
+export function serializeProductCategory(row: Record<string, unknown>) {
+  return {
+    id: row.id,
+    eventId: row.event_id,
+    name: row.name,
+    sortOrder: row.sort_order,
+    createdAt: toIso(row.created_at as Date | string),
+    updatedAt: toIso(row.updated_at as Date | string),
+  };
+}
+
+export function serializeProduct(row: Record<string, unknown>) {
+  return {
+    id: row.id,
+    eventId: row.event_id,
+    name: row.name,
+    description: row.description ?? undefined,
+    priceCents: Number(row.price_cents),
+    currency: row.currency,
+    categoryId: row.category_id ?? undefined,
+    maxPerOrder: row.max_per_order,
+    availableFrom: toIso(row.available_from as Date | string | null),
+    availableUntil: toIso(row.available_until as Date | string | null),
+    status: row.status,
+    sortOrder: row.sort_order,
+    createdAt: toIso(row.created_at as Date | string),
+    updatedAt: toIso(row.updated_at as Date | string),
+  };
+}
+
 export function serializeOrder(row: Record<string, unknown>) {
   return {
     id: row.id,

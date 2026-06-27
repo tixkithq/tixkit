@@ -131,6 +131,17 @@ describe('widget lifecycle events (runtime)', () => {
     expect(spy).toHaveBeenCalledTimes(1)
   })
 
+  it('renders HTML-looking error messages as text', () => {
+    const el = createWidget()
+    el.connectedCallback()
+
+    ;(el as unknown as { showError(message: string): void }).showError('<img src=x onerror=alert(1)>')
+
+    const state = el.shadowRoot?.querySelector('.gk-state')
+    expect(state?.textContent).toContain('<img src=x onerror=alert(1)>')
+    expect(state?.querySelector('img')).toBeNull()
+  })
+
   it('all five required lifecycle events actually dispatch', () => {
     const el = createWidget()
     const spies: Record<string, ReturnType<typeof vi.fn>> = {

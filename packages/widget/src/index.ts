@@ -338,16 +338,25 @@ class GateKitWidget extends HTMLElement {
     this.errored = true;
     if (!this.stateEl) return;
     this.stateEl.style.display = 'flex';
-    this.stateEl.innerHTML = `
-      <div class="gk-error-icon">!</div>
-      <p>${message}</p>
-      <button class="gk-retry" type="button">Retry</button>
-    `;
-    const retry = this.stateEl.querySelector('.gk-retry');
-    retry?.addEventListener('click', () => {
+    this.stateEl.replaceChildren();
+
+    const icon = document.createElement('div');
+    icon.className = 'gk-error-icon';
+    icon.textContent = '!';
+
+    const text = document.createElement('p');
+    text.textContent = message;
+
+    const retry = document.createElement('button');
+    retry.className = 'gk-retry';
+    retry.type = 'button';
+    retry.textContent = 'Retry';
+    retry.addEventListener('click', () => {
       this.errored = false;
       this.render();
     });
+
+    this.stateEl.append(icon, text, retry);
     this.dispatchEvent(
       new CustomEvent('error', {
         detail: { message, event: this.config.event, eventId: this.config.event },

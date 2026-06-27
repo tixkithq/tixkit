@@ -14,6 +14,17 @@ export type AuthConfig = {
   secretKey: string;
 };
 
+type ClerkSessionClaims = {
+  sub: string;
+  org_id?: string;
+  email?: string;
+  email_address?: string;
+  first_name?: string;
+  last_name?: string;
+  given_name?: string;
+  family_name?: string;
+};
+
 /**
  * Deterministic IDs for the local dev principal and seed data.
  * These are only used when NODE_ENV === 'development' and no Clerk secret
@@ -51,6 +62,10 @@ export class ClerkAuthService {
     this.config = { secretKey };
   }
 
+  private isDevelopmentMode(): boolean {
+    return process.env.NODE_ENV === 'development';
+  }
+
   /**
    * Returns true when the API should allow unauthenticated local dev access.
    * This is only active when NODE_ENV is 'development' and no Clerk secret
@@ -59,7 +74,7 @@ export class ClerkAuthService {
    */
   isLocalDevMode(): boolean {
     return (
-      process.env.NODE_ENV === 'development' &&
+      this.isDevelopmentMode() &&
       !this.config.secretKey
     );
   }
@@ -87,11 +102,11 @@ export class ClerkAuthService {
 
   /**
    * Seeds a dev tenant, organization, and brand if they don't already exist.
-   * Called at API startup when in local dev mode so the admin dashboard has
-   * the minimum context needed to create events.
+   * Called at API startup in development so the admin dashboard has the
+   * minimum context needed to create events, with or without Clerk enabled.
    */
   async ensureDevSeed(): Promise<void> {
-    if (!this.isLocalDevMode()) return;
+    if (!this.isDevelopmentMode()) return;
 
     const existingTenant = await this.db
       .selectFrom('tenants')
@@ -156,6 +171,88 @@ export class ClerkAuthService {
   }
 
   /**
+   * In local development with Clerk enabled, webhooks are often not configured.
+   * If Clerk has already verified the session, auto-provision a deterministic
+   * GateKit profile so the dashboard does not depend on external webhook
+   * delivery. Production still fails closed when identity sync is missing.
+   */
+  private async ensureDevelopmentClerkProfile(claims: ClerkSessionClaims) {
+    if (!this.isDevelopmentMode()) {
+      throw new UnauthorizedError('User profile not found. Identity sync may be pending.');
+    }
+
+    await this.ensureDevSeed();
+
+    const suffix = createHash('sha256').update(claims.sub).digest('hex').slice(0, 16);
+    const userId = `usr_dev_${suffix}`;
+    const now = new Date();
+
+    const existing = await this.db
+      .selectFrom('user_profiles')
+      .selectAll()
+      .where('tenant_id', '=', DEV_TENANT_ID)
+      .where('clerk_user_id', '=', claims.sub)
+      .executeTakeFirst();
+
+    if (existing) return existing;
+
+    const email =
+      claims.email ??
+      claims.email_address ??
+      `${claims.sub.replace(/[^a-zA-Z0-9._-]/g, '-')}@clerk.local`;
+
+    await this.db.insertInto('user_profiles').values({
+      id: userId,
+      tenant_id: DEV_TENANT_ID,
+      clerk_user_id: claims.sub,
+      email,
+      first_name: claims.first_name ?? claims.given_name ?? null,
+      last_name: claims.last_name ?? claims.family_name ?? null,
+      avatar_url: null,
+      status: 'active',
+      last_seen_at: now,
+      created_at: now,
+      updated_at: now,
+    }).execute();
+
+    await this.db.insertInto('organization_members').values({
+      id: `mem_dev_${suffix}`,
+      tenant_id: DEV_TENANT_ID,
+      organization_id: DEV_ORG_ID,
+      user_id: userId,
+      role: 'owner',
+      invited_at: now,
+      accepted_at: now,
+      created_at: now,
+      updated_at: now,
+    }).execute();
+
+    for (const permission of ALL_PERMISSIONS) {
+      const grantSuffix = createHash('sha256')
+        .update(`${userId}:${permission}`)
+        .digest('hex')
+        .slice(0, 20);
+      await this.db.insertInto('permission_grants').values({
+        id: `pgr_${grantSuffix}`,
+        tenant_id: DEV_TENANT_ID,
+        principal_type: 'user',
+        principal_id: userId,
+        permission,
+        scope_type: 'organization',
+        scope_id: DEV_ORG_ID,
+        created_at: now,
+        updated_at: now,
+      }).execute();
+    }
+
+    return this.db
+      .selectFrom('user_profiles')
+      .selectAll()
+      .where('id', '=', userId)
+      .executeTakeFirstOrThrow();
+  }
+
+  /**
    * Verifies a Clerk session JWT and maps it to a GateKit Principal.
    */
   async authenticateRequest(request: FastifyRequest): Promise<AuthResult> {
@@ -167,16 +264,22 @@ export class ClerkAuthService {
     const token = authHeader.substring(7);
 
     try {
-      const { sub: clerkUserId, org_id } = await this.verifyToken(token);
+      const claims = await this.verifyToken(token);
+      const { sub: clerkUserId, org_id } = claims;
 
       // Resolve tenant safely for users that may belong to multiple tenants.
       // Priority: active Clerk org -> mapped tenant; else explicit X-Tenant-Id
       // header; else the single profile if unambiguous.
-      const profiles = await this.db
+      let profiles = await this.db
         .selectFrom('user_profiles')
         .selectAll()
         .where('clerk_user_id', '=', clerkUserId)
         .execute();
+
+      if (profiles.length === 0) {
+        const devProfile = await this.ensureDevelopmentClerkProfile(claims);
+        profiles = devProfile ? [devProfile] : [];
+      }
 
       if (profiles.length === 0) {
         throw new UnauthorizedError('User profile not found. Identity sync may be pending.');
@@ -251,17 +354,17 @@ export class ClerkAuthService {
     }
   }
 
-  private async verifyToken(token: string): Promise<{
-    sub: string;
-    org_id?: string;
-  }> {
+  private async verifyToken(token: string): Promise<ClerkSessionClaims> {
     if (!this.config.secretKey) {
       throw new UnauthorizedError('Clerk secret key is not configured');
     }
 
     try {
       const result = await verifyToken(token, { secretKey: this.config.secretKey });
-      const verified = result as { sub?: string; org_id?: string; data?: { sub?: string; org_id?: string }; errors?: Array<{ message: string }> };
+      const verified = result as Partial<ClerkSessionClaims> & {
+        data?: Partial<ClerkSessionClaims>;
+        errors?: Array<{ message: string }>;
+      };
       if (verified.errors && verified.errors.length > 0) {
         throw new UnauthorizedError(verified.errors[0].message);
       }
@@ -269,10 +372,7 @@ export class ClerkAuthService {
       if (!payload || !payload.sub) {
         throw new UnauthorizedError('Token missing subject');
       }
-      return {
-        sub: payload.sub,
-        org_id: payload.org_id as string | undefined,
-      };
+      return { ...payload, sub: payload.sub };
     } catch (err) {
       if (err instanceof UnauthorizedError) throw err;
       throw new UnauthorizedError('Token verification failed');

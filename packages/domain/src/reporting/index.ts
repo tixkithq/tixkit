@@ -77,7 +77,7 @@ export type AttendanceReport = {
 
 export type ConversionFunnel = {
   eventId: Ulid;
-  widgetViews: number;
+  widgetViews: number | null;
   checkoutStarted: number;
   checkoutCompleted: number;
   conversionRate: number;
@@ -100,7 +100,7 @@ export type ExportRequest = {
   id: Ulid;
   tenantId: Ulid;
   eventId?: Ulid;
-  type: 'attendees' | 'orders' | 'scan_logs' | 'sales' | 'tax';
+  type: 'attendees' | 'orders' | 'scan_logs' | 'sales' | 'tax' | 'tickets';
   format: 'csv' | 'xlsx';
   status: 'pending' | 'processing' | 'completed' | 'failed';
   fileUrl?: string;

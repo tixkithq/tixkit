@@ -17,6 +17,8 @@ export class EventRepository extends BaseRepository {
     visibility?: string;
     seo?: Record<string, unknown>;
     capacity?: number;
+    coverImageUrl?: string;
+    externalUrl?: string;
   }) {
     const id = `evt_${ulid()}`;
     const now = new Date();
@@ -39,8 +41,8 @@ export class EventRepository extends BaseRepository {
         visibility: input.visibility ?? 'public',
         seo: JSON.stringify(input.seo ?? {}),
         capacity: input.capacity ?? null,
-        cover_image_url: null,
-        external_url: null,
+        cover_image_url: input.coverImageUrl ?? null,
+        external_url: input.externalUrl ?? null,
         created_at: now,
         updated_at: now,
       },
@@ -278,6 +280,7 @@ export class AccessRuleRepository extends BaseRepository {
       .selectFrom('access_rules')
       .selectAll()
       .where('ticket_type_id', '=', ticketTypeId)
+      .orderBy('id', 'asc')
       .execute();
   }
 
@@ -296,5 +299,116 @@ export class AccessRuleRepository extends BaseRepository {
       .set((eb) => ({ uses_count: eb('uses_count', '+', 1), updated_at: new Date() }))
       .where('id', '=', id)
       .execute();
+  }
+
+  async delete(id: string) {
+    return this.db
+      .deleteFrom('access_rules')
+      .where('id', '=', id)
+      .executeTakeFirst();
+  }
+}
+
+export class ProductCategoryRepository extends BaseRepository {
+  async create(input: {
+    eventId: string;
+    name: string;
+    sortOrder?: number;
+  }) {
+    const id = `pcat_${ulid()}`;
+    const now = new Date();
+    return this.insertReturning(
+      'product_categories',
+      {
+        id,
+        event_id: input.eventId,
+        name: input.name,
+        sort_order: input.sortOrder ?? 0,
+        created_at: now,
+        updated_at: now,
+      },
+      id,
+    );
+  }
+
+  async findById(id: string) {
+    return this.db
+      .selectFrom('product_categories')
+      .selectAll()
+      .where('id', '=', id)
+      .executeTakeFirst();
+  }
+
+  async findByEvent(eventId: string, limit?: number, cursor?: string) {
+    let query = this.db
+      .selectFrom('product_categories')
+      .selectAll()
+      .where('event_id', '=', eventId)
+      .orderBy('id', 'asc');
+    if (cursor) query = query.where('id', '>', cursor);
+    if (limit) query = query.limit(limit);
+    return query.execute();
+  }
+}
+
+export class ProductRepository extends BaseRepository {
+  async create(input: {
+    eventId: string;
+    name: string;
+    priceCents: number;
+    currency: string;
+    description?: string;
+    categoryId?: string;
+    maxPerOrder?: number;
+    availableFrom?: Date;
+    availableUntil?: Date;
+    status?: string;
+    sortOrder?: number;
+  }) {
+    const id = `prd_${ulid()}`;
+    const now = new Date();
+    return this.insertReturning(
+      'products',
+      {
+        id,
+        event_id: input.eventId,
+        name: input.name,
+        description: input.description ?? null,
+        price_cents: input.priceCents,
+        currency: input.currency,
+        category_id: input.categoryId ?? null,
+        max_per_order: input.maxPerOrder ?? 10,
+        available_from: input.availableFrom ?? null,
+        available_until: input.availableUntil ?? null,
+        status: input.status ?? 'active',
+        sort_order: input.sortOrder ?? 0,
+        created_at: now,
+        updated_at: now,
+      },
+      id,
+    );
+  }
+
+  async findById(id: string) {
+    return this.db
+      .selectFrom('products')
+      .selectAll()
+      .where('id', '=', id)
+      .executeTakeFirst();
+  }
+
+  async findByEvent(eventId: string, limit?: number, cursor?: string) {
+    let query = this.db
+      .selectFrom('products')
+      .selectAll()
+      .where('event_id', '=', eventId)
+      .orderBy('id', 'asc');
+    if (cursor) query = query.where('id', '>', cursor);
+    if (limit) query = query.limit(limit);
+    return query.execute();
+  }
+
+  async update(id: string, input: Record<string, unknown>) {
+    return this.updateReturning('products', id, { ...input, updated_at: new Date() });
   }
 }

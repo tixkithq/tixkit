@@ -842,6 +842,111 @@ describe('messaging endpoint', () => {
     await app.close();
   });
 
+  it('POST /events/:eventId/messages/preview uses backend eligibility for more than 100 recipients', async () => {
+    const now = new Date();
+    const attendees = Array.from({ length: 125 }, (_, index) => ({
+      id: `att_${index}`,
+      tenant_id: 'tnt_1',
+      order_id: `ord_${index}`,
+      event_id: 'evt_1',
+      ticket_type_id: 'tt_1',
+      ticket_id: `tkt_${index}`,
+      first_name: 'Guest',
+      last_name: String(index),
+      email: `guest${index}@test.com`,
+      phone: `+1555000${String(index).padStart(4, '0')}`,
+      status: 'confirmed',
+      custom_answers: null,
+      checked_in_at: null,
+      check_in_device_id: null,
+      created_at: now,
+      updated_at: now,
+    }));
+    const tables = {
+      events: [{ id: 'evt_1', tenant_id: 'tnt_1', organization_id: 'org_1', brand_id: 'brd_1', status: 'published', slug: 'evt', title: 'Event', timezone: 'UTC', starts_at: now, visibility: 'public', seo: '{}' }],
+      attendees,
+      message_consents: attendees.map((attendee) => ({
+        id: `msc_${attendee.id}`,
+        tenant_id: 'tnt_1',
+        attendee_id: attendee.id,
+        email: attendee.email,
+        phone: attendee.phone,
+        email_opt_in: true,
+        sms_opt_in: true,
+        consent_text: 'Updates',
+        consent_version: 'v1',
+        consented_at: now,
+        revoked_at: null,
+        created_at: now,
+      })),
+    };
+    const app = await setupApp(messagingRoutes, makePrincipal(), tables);
+    const res = await app.inject({
+      method: 'POST',
+      url: '/events/evt_1/messages/preview',
+      payload: { templateKey: 'attendee-message', audience: 'all', channel: 'sms' },
+    });
+    expect(res.statusCode).toBe(200);
+    expect(res.json()).toMatchObject({
+      audience: 'all_attendees',
+      audienceCount: 125,
+      eligibleCount: 125,
+      suppressedRecipients: 0,
+      consentExclusions: 0,
+    });
+    expect(res.json().recipients).toHaveLength(25);
+    await app.close();
+  });
+
+  it('POST /events/:eventId/messages/preview applies check-in and specific-recipient audiences', async () => {
+    const now = new Date();
+    const attendees = [
+      { id: 'att_checked', tenant_id: 'tnt_1', order_id: 'ord_1', event_id: 'evt_1', ticket_type_id: 'tt_1', ticket_id: 'tkt_1', first_name: 'Checked', last_name: 'Guest', email: 'checked@test.com', phone: '+15550000001', status: 'checked_in', custom_answers: null, checked_in_at: now, check_in_device_id: null, created_at: now, updated_at: now },
+      { id: 'att_waiting', tenant_id: 'tnt_1', order_id: 'ord_2', event_id: 'evt_1', ticket_type_id: 'tt_1', ticket_id: 'tkt_2', first_name: 'Waiting', last_name: 'Guest', email: 'waiting@test.com', phone: '+15550000002', status: 'confirmed', custom_answers: null, checked_in_at: null, check_in_device_id: null, created_at: now, updated_at: now },
+      { id: 'att_other_event', tenant_id: 'tnt_1', order_id: 'ord_3', event_id: 'evt_other', ticket_type_id: 'tt_1', ticket_id: 'tkt_3', first_name: 'Other', last_name: 'Event', email: 'other@test.com', phone: '+15550000003', status: 'confirmed', custom_answers: null, checked_in_at: null, check_in_device_id: null, created_at: now, updated_at: now },
+    ];
+    const tables = {
+      events: [{ id: 'evt_1', tenant_id: 'tnt_1', organization_id: 'org_1', brand_id: 'brd_1', status: 'published', slug: 'evt', title: 'Event', timezone: 'UTC', starts_at: now, visibility: 'public', seo: '{}' }],
+      attendees,
+      message_consents: attendees.map((attendee) => ({ id: `msc_${attendee.id}`, tenant_id: 'tnt_1', attendee_id: attendee.id, email: attendee.email, phone: attendee.phone, email_opt_in: true, sms_opt_in: true, consent_text: 'Updates', consent_version: 'v1', consented_at: now, revoked_at: null, created_at: now })),
+    };
+    const app = await setupApp(messagingRoutes, makePrincipal(), tables);
+
+    const checkedIn = await app.inject({ method: 'POST', url: '/events/evt_1/messages/preview', payload: { templateKey: 'attendee-message', audience: 'checked_in', channel: 'sms' } });
+    expect(checkedIn.statusCode).toBe(200);
+    expect(checkedIn.json().recipients.map((recipient: { id: string }) => recipient.id)).toEqual(['att_checked']);
+
+    const notCheckedIn = await app.inject({ method: 'POST', url: '/events/evt_1/messages/preview', payload: { templateKey: 'attendee-message', audience: 'not_checked_in', channel: 'sms' } });
+    expect(notCheckedIn.statusCode).toBe(200);
+    expect(notCheckedIn.json().recipients.map((recipient: { id: string }) => recipient.id)).toEqual(['att_waiting']);
+
+    const specific = await app.inject({ method: 'POST', url: '/events/evt_1/messages/preview', payload: { templateKey: 'attendee-message', audience: 'specific', attendeeIds: ['att_waiting', 'att_other_event'], channel: 'sms' } });
+    expect(specific.statusCode).toBe(200);
+    expect(specific.json().recipients.map((recipient: { id: string }) => recipient.id)).toEqual(['att_waiting']);
+    await app.close();
+  });
+
+  it('POST /events/:eventId/messages/preview reports suppression and consent exclusions', async () => {
+    const now = new Date();
+    const attendee = { id: 'att_1', tenant_id: 'tnt_1', order_id: 'ord_1', event_id: 'evt_1', ticket_type_id: 'tt_1', ticket_id: 'tkt_1', first_name: 'Ada', last_name: 'Lovelace', email: 'ada@test.com', phone: '+15550000002', status: 'confirmed', custom_answers: null, checked_in_at: null, check_in_device_id: null, created_at: now, updated_at: now };
+    const tables = {
+      events: [{ id: 'evt_1', tenant_id: 'tnt_1', organization_id: 'org_1', brand_id: 'brd_1', status: 'published', slug: 'evt', title: 'Event', timezone: 'UTC', starts_at: now, visibility: 'public', seo: '{}' }],
+      attendees: [attendee],
+      message_consents: [{ id: 'msc_1', tenant_id: 'tnt_1', attendee_id: 'att_1', email: 'ada@test.com', phone: '+15550000002', email_opt_in: false, sms_opt_in: true, consent_text: 'Updates', consent_version: 'v1', consented_at: now, revoked_at: null, created_at: now }],
+      email_suppressions: [{ id: 'esu_1', tenant_id: 'tnt_1', email: 'ada@test.com', reason: 'bounce', bounce_type: 'hard', source: 'provider', created_at: now, updated_at: now }],
+    };
+    const app = await setupApp(messagingRoutes, makePrincipal(), tables);
+    const res = await app.inject({ method: 'POST', url: '/events/evt_1/messages/preview', payload: { templateKey: 'attendee-message', audience: 'all', channel: 'email' } });
+    expect(res.statusCode).toBe(200);
+    expect(res.json()).toMatchObject({
+      audienceCount: 1,
+      eligibleCount: 0,
+      suppressedRecipients: 1,
+      consentExclusions: 1,
+    });
+    await app.close();
+  });
+
   it('GET /events/:eventId/messages returns persisted campaign summaries', async () => {
     const now = new Date();
     const tables = {
@@ -853,7 +958,7 @@ describe('messaging endpoint', () => {
         to_phone: '+15550000002',
         body: 'Update',
         template_key: 'attendee-message',
-        variables: JSON.stringify({ eventId: 'evt_1', attendeeId: 'att_1', notificationType: 'bulk' }),
+        variables: JSON.stringify({ eventId: 'evt_1', attendeeId: 'att_1', notificationType: 'bulk', campaignAudience: 'checked_in' }),
         provider_route_id: 'spr_1',
         status: 'queued',
         priority: 'low',
@@ -872,6 +977,7 @@ describe('messaging endpoint', () => {
       eventId: 'evt_1',
       channel: 'sms',
       status: 'queued',
+      audience: 'checked_in',
       queuedSmsJobs: 1,
     });
     await app.close();
