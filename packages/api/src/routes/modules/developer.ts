@@ -107,6 +107,7 @@ export const developerRoutes: FastifyPluginAsync = async (app) => {
 
     await writeAuditLog(new AuditLogRepository(db), request, principal, {
       action: 'api_key.created',
+      organizationId: body.organizationId,
       resourceType: 'ApiKey',
       resourceId: record.id as string,
       diffSummary: { name: body.name, scopes: body.scopes },
@@ -168,6 +169,7 @@ export const developerRoutes: FastifyPluginAsync = async (app) => {
     await repo.revoke(keyId);
     await writeAuditLog(new AuditLogRepository(db), request, principal, {
       action: 'api_key.revoked',
+      organizationId: key.organization_id,
       resourceType: 'ApiKey',
       resourceId: keyId,
     });
@@ -193,6 +195,7 @@ export const developerRoutes: FastifyPluginAsync = async (app) => {
 
     await writeAuditLog(new AuditLogRepository(db), request, principal, {
       action: 'scanner_device.created',
+      organizationId: body.organizationId,
       resourceType: 'ScannerDevice',
       resourceId: record.id as string,
       diffSummary: { name: body.name, eventIds: body.eventIds },
@@ -259,6 +262,7 @@ export const developerRoutes: FastifyPluginAsync = async (app) => {
     await repo.revoke(device.id);
     await writeAuditLog(new AuditLogRepository(db), request, principal, {
       action: 'scanner_device.revoked',
+      organizationId: device.organization_id,
       resourceType: 'ScannerDevice',
       resourceId: device.id,
     });
@@ -301,6 +305,7 @@ export const developerRoutes: FastifyPluginAsync = async (app) => {
 
     await writeAuditLog(new AuditLogRepository(db), request, principal, {
       action: 'oauth_app.created',
+      organizationId: body.organizationId,
       resourceType: 'OAuthApplication',
       resourceId: id,
       diffSummary: { name: body.name, clientId },
@@ -368,6 +373,7 @@ export const developerRoutes: FastifyPluginAsync = async (app) => {
     await db.updateTable('oauth_applications').set({ status: 'revoked', updated_at: new Date() }).where('id', '=', appId).execute();
     await writeAuditLog(new AuditLogRepository(db), request, principal, {
       action: 'oauth_app.revoked',
+      organizationId: oauthApp.organization_id,
       resourceType: 'OAuthApplication',
       resourceId: appId,
     });

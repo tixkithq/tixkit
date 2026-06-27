@@ -384,6 +384,18 @@ Sales metrics account for refunded/voided tickets and persisted financial snapsh
 
 Conversion reports return persisted `widgetViews` from deduped widget impression records. Checkout starts and completions continue to use persisted checkout-session data; conversion rate uses completed orders divided by widget views when views exist, otherwise it falls back to checkout starts.
 
+### Audit Logs & Privacy Requests
+
+| Method | Path | Scope | Description |
+| --- | --- | --- | --- |
+| `GET` | `/v1/audit-logs` | `settings.write` | Filter tenant/org/brand-scoped privileged mutation history |
+| `GET` | `/v1/privacy/requests` | `settings.write` | List GDPR data export and erasure requests |
+| `GET` | `/v1/privacy/requests/:id` | `settings.write` | Get GDPR request status/result |
+| `POST` | `/v1/privacy/data-exports` | `settings.write` | Queue data export workflow (requires `Idempotency-Key`) |
+| `POST` | `/v1/privacy/erasures` | `settings.write` | Queue erasure workflow (requires `Idempotency-Key`) |
+
+Privacy requests accept `organizationId`, optional `brandId`, `subjectType` (`buyer` or `attendee`), and either `subjectEmail` or `subjectId`. Export and erasure processing runs through Temporal workflow `privacy-request:<requestId>`. See [Privacy Retention Policy](./privacy-retention-policy.md).
+
 ### Developer & Webhooks
 
 | Method | Path | Scope | Description |

@@ -385,6 +385,7 @@ Tail Fastify logs with `pino-pretty` in dev and structured JSON in production. E
 - Restrict Temporal UI and admin dashboard to internal networks or authenticated access.
 - Rotate Clerk, Stripe, and Telnyx keys on a schedule and after personnel changes.
 - Enforce API key scopes and revocation from the admin Developer settings.
+- Retain audit logs, privacy request ledgers, financial records, invoices, tax snapshots, and provider events according to [Privacy Retention Policy](./privacy-retention-policy.md). Erasure workflows redact buyer/attendee PII without deleting commerce ledgers.
 - See `docs/security-tenant-isolation-audit.md` for the tenant isolation audit.
 
 ## Smoke Test After Deploy

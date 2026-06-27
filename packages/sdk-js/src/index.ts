@@ -803,6 +803,48 @@ export type ExportJob = {
   error?: string;
 };
 
+export type AuditLog = {
+  id: string;
+  tenantId: string;
+  organizationId: string | null;
+  brandId: string | null;
+  actorType: string;
+  actorId: string;
+  action: string;
+  resourceType: string;
+  resourceId: string;
+  diffSummary: Record<string, unknown> | null;
+  requestId: string | null;
+  ip: string | null;
+  userAgent: string | null;
+  createdAt: string;
+};
+
+export type PrivacyRequest = {
+  id: string;
+  tenantId: string;
+  organizationId: string;
+  brandId: string | null;
+  requestType: 'export' | 'erasure' | string;
+  subjectType: 'buyer' | 'attendee' | string;
+  subjectId: string | null;
+  subjectEmail: string | null;
+  status: 'pending' | 'processing' | 'completed' | 'failed' | string;
+  requestedBy: string;
+  result: Record<string, unknown> | null;
+  error: string | null;
+  createdAt: string;
+  completedAt: string | null;
+};
+
+export type PrivacyRequestInput = {
+  organizationId: string;
+  brandId?: string;
+  subjectType: 'buyer' | 'attendee';
+  subjectId?: string;
+  subjectEmail?: string;
+};
+
 export type MessageCampaign = {
   id: string;
   eventId: string;
@@ -921,6 +963,7 @@ export class TixkitClient {
   readonly questions: QuestionResource;
   readonly oauthApplications: OAuthApplicationResource;
   readonly uploads: UploadResource;
+  readonly privacy: PrivacyResource;
   readonly public: PublicResource;
   readonly auth: AuthResource;
 
@@ -957,6 +1000,7 @@ export class TixkitClient {
     this.questions = new QuestionResource(this);
     this.oauthApplications = new OAuthApplicationResource(this);
     this.uploads = new UploadResource(this);
+    this.privacy = new PrivacyResource(this);
     this.public = new PublicResource(this);
     this.auth = new AuthResource(this);
   }
@@ -1069,12 +1113,18 @@ function isSafeMethod(method: string): boolean {
   return method === 'GET' || method === 'HEAD' || method === 'OPTIONS';
 }
 
-function paginationParams(input?: PaginationParams): Record<string, string> | undefined {
-  if (!input?.cursor && input?.limit === undefined) return undefined;
+function paginationParams(
+  input?: PaginationParams & Record<string, string | number | boolean | undefined>,
+): Record<string, string> | undefined {
+  if (!input) return undefined;
   const params: Record<string, string> = {};
   if (input.cursor) params.cursor = input.cursor;
   if (input.limit !== undefined) params.limit = String(input.limit);
-  return params;
+  for (const [key, value] of Object.entries(input)) {
+    if (key === 'cursor' || key === 'limit' || value === undefined) continue;
+    params[key] = String(value);
+  }
+  return Object.keys(params).length === 0 ? undefined : params;
 }
 
 class CheckoutResource {
@@ -1537,6 +1587,49 @@ class ExportResource {
   }
   async download(exportId: string): Promise<{ downloadUrl: string; expiresAt: string }> {
     return this.client.request('GET', `/exports/${exportId}/download`);
+  }
+}
+
+class PrivacyResource {
+  constructor(private client: TixkitClient) {}
+
+  async listAuditLogs(
+    params?: PaginationParams & {
+      organizationId?: string;
+      brandId?: string;
+      action?: string;
+      resourceType?: string;
+      actorId?: string;
+    },
+  ): Promise<PageResult<AuditLog>> {
+    return this.client.request('GET', '/audit-logs', { params: paginationParams(params) });
+  }
+
+  async listRequests(
+    params?: PaginationParams & {
+      organizationId?: string;
+      brandId?: string;
+      requestType?: 'export' | 'erasure';
+      status?: 'pending' | 'processing' | 'completed' | 'failed';
+    },
+  ): Promise<PageResult<PrivacyRequest>> {
+    return this.client.request('GET', '/privacy/requests', { params: paginationParams(params) });
+  }
+
+  async getRequest(requestId: string): Promise<PrivacyRequest> {
+    return this.client.request('GET', `/privacy/requests/${requestId}`);
+  }
+
+  async createDataExport(
+    input: PrivacyRequestInput & IdempotencyOptions,
+  ): Promise<PrivacyRequest> {
+    const { idempotencyKey, ...body } = input;
+    return this.client.request('POST', '/privacy/data-exports', { body, idempotencyKey });
+  }
+
+  async createErasure(input: PrivacyRequestInput & IdempotencyOptions): Promise<PrivacyRequest> {
+    const { idempotencyKey, ...body } = input;
+    return this.client.request('POST', '/privacy/erasures', { body, idempotencyKey });
   }
 }
 

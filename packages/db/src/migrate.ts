@@ -18,6 +18,7 @@ import { MarketingIntegrationsMigration } from './migrations/0014_marketing_inte
 import { MarketingIntegrationsUniqueMigration } from './migrations/0015_marketing_integrations_unique.js';
 import { PaymentCompensationsMigration } from './migrations/0016_payment_compensations.js';
 import { PaymentAccountCapabilitiesMigration } from './migrations/0017_payment_account_capabilities.js';
+import { PrivacyRequestsMigration } from './migrations/0018_privacy_requests.js';
 
 const INITIAL_MIGRATION_NAME = '0001_initial';
 const MIGRATION_TABLE = 'kysely_migration';
@@ -105,6 +106,7 @@ const ALL_SCHEMA_TABLES = [
   'oauth_access_tokens',
   'marketing_integrations',
   'payment_compensations',
+  'privacy_requests',
 ] as const;
 
 function buildMigrationFailureMessage(error: unknown): string {
@@ -139,6 +141,7 @@ class TixkitMigrationProvider implements MigrationProvider {
     '0015_marketing_integrations_unique': MarketingIntegrationsUniqueMigration,
     '0016_payment_compensations': PaymentCompensationsMigration,
     '0017_payment_account_capabilities': PaymentAccountCapabilitiesMigration,
+    '0018_privacy_requests': PrivacyRequestsMigration,
   };
   }
 }

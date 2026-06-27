@@ -145,15 +145,35 @@ export interface ScannerDeviceTable {
 export interface AuditLogTable {
   id: string;
   tenant_id: string;
+  organization_id: string | null;
+  brand_id: string | null;
   actor_type: string;
   actor_id: string;
   action: string;
   resource_type: string;
   resource_id: string;
   diff_summary: string | null;
+  request_id: string | null;
   ip: string | null;
   user_agent: string | null;
   created_at: Timestamp;
+}
+
+export interface PrivacyRequestTable {
+  id: string;
+  tenant_id: string;
+  organization_id: string;
+  brand_id: string | null;
+  request_type: string;
+  subject_type: string;
+  subject_id: string | null;
+  subject_email: string | null;
+  status: string;
+  requested_by: string;
+  result: string | null;
+  error: string | null;
+  created_at: Timestamp;
+  completed_at: Timestamp | null;
 }
 
 export interface EventTable {
@@ -1141,6 +1161,7 @@ export interface DB {
   api_keys: ApiKeyTable;
   scanner_devices: ScannerDeviceTable;
   audit_logs: AuditLogTable;
+  privacy_requests: PrivacyRequestTable;
   events: EventTable;
   event_pages: EventPageTable;
   event_occurrences: EventOccurrenceTable;

@@ -3,6 +3,7 @@ import { OpenTelemetryWorkflowClientInterceptor } from '@temporalio/interceptors
 import {
   checkoutSessionWorkflow,
   paymentReconciliationWorkflow,
+  privacyRequestWorkflow,
   refundWorkflow,
   clerkIdentitySyncWorkflow,
   webhookDeliveryWorkflow,
@@ -18,12 +19,14 @@ import {
   NOTIFICATION_WORKFLOW_VERSION,
   SMS_DELIVERY_WORKFLOW_VERSION,
   PAYMENT_RECONCILIATION_WORKFLOW_VERSION,
+  PRIVACY_REQUEST_WORKFLOW_VERSION,
   CLERK_IDENTITY_SYNC_WORKFLOW_VERSION,
   WEBHOOK_DELIVERY_WORKFLOW_VERSION,
   EXPORT_WORKFLOW_VERSION,
   checkoutWorkflowId,
   refundWorkflowId,
   paymentReconciliationWorkflowId,
+  privacyRequestWorkflowId,
   clerkIdentitySyncWorkflowId,
   webhookDeliveryWorkflowId,
   exportWorkflowId,
@@ -33,6 +36,7 @@ import {
   HOLD_EXPIRATION_WORKFLOW_VERSION,
   type CheckoutSessionWorkflowInput,
   type PaymentReconciliationWorkflowInput,
+  type PrivacyRequestWorkflowInput,
   type RefundWorkflowInput,
   type ClerkIdentitySyncWorkflowInput,
   type WebhookDeliveryWorkflowInput,
@@ -190,6 +194,27 @@ export class TemporalClient {
   async waitForExport(exportId: string): Promise<{ status: string; fileUrl?: string }> {
     const handle = this.client.workflow.getHandle(exportWorkflowId(exportId));
     return handle.result();
+  }
+
+  async startPrivacyRequest(input: Omit<PrivacyRequestWorkflowInput, 'version'>) {
+    const workflowId = privacyRequestWorkflowId(input.requestId);
+    try {
+      return await this.client.workflow.start(privacyRequestWorkflow, {
+        taskQueue: config.temporalTaskQueue,
+        workflowId,
+        args: [
+          {
+            version: PRIVACY_REQUEST_WORKFLOW_VERSION,
+            ...input,
+          } satisfies PrivacyRequestWorkflowInput,
+        ],
+      });
+    } catch (err) {
+      if (isWorkflowAlreadyStartedError(err)) {
+        return this.client.workflow.getHandle(workflowId);
+      }
+      throw err;
+    }
   }
 
   async startNotificationDelivery(input: Omit<NotificationDeliveryWorkflowInput, 'version'>) {

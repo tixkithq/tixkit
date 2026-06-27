@@ -15,3 +15,4 @@ export { MarketingIntegrationsMigration } from './0014_marketing_integrations.js
 export { MarketingIntegrationsUniqueMigration } from './0015_marketing_integrations_unique.js';
 export { PaymentCompensationsMigration } from './0016_payment_compensations.js';
 export { PaymentAccountCapabilitiesMigration } from './0017_payment_account_capabilities.js';
+export { PrivacyRequestsMigration } from './0018_privacy_requests.js';

@@ -193,6 +193,8 @@ export const orderRoutes: FastifyPluginAsync = async (app) => {
     await repo.addTimelineEvent(orderId, 'order.cancelled', 'Order cancelled', undefined, principal.id);
     await writeAuditLog(new AuditLogRepository(db), request, principal, {
       action: 'order.cancelled',
+      organizationId: order.organization_id,
+      brandId: order.brand_id,
       resourceType: 'Order',
       resourceId: orderId,
     });
@@ -266,6 +268,8 @@ export const orderRoutes: FastifyPluginAsync = async (app) => {
 
         await writeAuditLog(new AuditLogRepository(db), request, principal, {
           action: 'order.refund.requested',
+          organizationId: order.organization_id,
+          brandId: order.brand_id,
           resourceType: 'Order',
           resourceId: orderId,
           diffSummary: { amountCents: refundAmount, reason: body.reason },

@@ -197,8 +197,16 @@ describe('openApiSpec', () => {
     });
   });
 
-  it('does not document unimplemented route groups', () => {
-    expect(openApiSpec.paths).not.toHaveProperty('/audit-logs');
+  it('documents audit logging and GDPR privacy request routes', () => {
+    expect(openApiSpec.paths['/audit-logs'].get.responses['200'].content['application/json'].schema).toEqual({
+      $ref: '#/components/schemas/AuditLogPage',
+    });
+    expect(openApiSpec.paths['/privacy/data-exports'].post.parameters).toContainEqual({
+      $ref: '#/components/parameters/RequiredIdempotencyKey',
+    });
+    expect(openApiSpec.paths['/privacy/erasures'].post.requestBody.content['application/json'].schema).toEqual({
+      $ref: '#/components/schemas/PrivacyRequestInput',
+    });
   });
 
   it('documents implemented status codes and required idempotency headers', () => {

@@ -158,6 +158,7 @@ export const tenantRoutes: FastifyPluginAsync = async (app) => {
     });
     await writeAuditLog(audit(), request, principal, {
       action: 'organization.updated',
+      organizationId,
       resourceType: 'Organization',
       resourceId: organizationId,
       diffSummary: {
@@ -214,6 +215,7 @@ export const tenantRoutes: FastifyPluginAsync = async (app) => {
 
     await writeAuditLog(audit(), request, principal, {
       action: 'organization_member.invited',
+      organizationId,
       resourceType: 'Organization',
       resourceId: organizationId,
       diffSummary: { email, role },
@@ -253,6 +255,8 @@ export const tenantRoutes: FastifyPluginAsync = async (app) => {
 
     await writeAuditLog(audit(), request, principal, {
       action: 'brand.created',
+      organizationId: body.organizationId,
+      brandId: brand.id,
       resourceType: 'Brand',
       resourceId: brand.id,
       diffSummary: { name: body.name, slug: body.slug, organizationId: body.organizationId },
@@ -299,6 +303,8 @@ export const tenantRoutes: FastifyPluginAsync = async (app) => {
     });
     await writeAuditLog(audit(), request, principal, {
       action: 'brand.updated',
+      organizationId: brand.organization_id,
+      brandId,
       resourceType: 'Brand',
       resourceId: brandId,
       diffSummary: {
@@ -328,6 +334,8 @@ export const tenantRoutes: FastifyPluginAsync = async (app) => {
     const domain = await brandRepo.addDomain(brandId, body.domain, body.isPrimary);
     await writeAuditLog(audit(), request, principal, {
       action: 'brand_domain.created',
+      organizationId: brand.organization_id,
+      brandId,
       resourceType: 'Brand',
       resourceId: brandId,
       diffSummary: { domain: body.domain, isPrimary: body.isPrimary },
@@ -406,6 +414,7 @@ export const tenantRoutes: FastifyPluginAsync = async (app) => {
       });
       await writeAuditLog(audit(), request, principal, {
         action: 'payment_account.created',
+        organizationId,
         resourceType: 'PaymentAccount',
         resourceId: account.id,
         diffSummary: {
@@ -468,6 +477,7 @@ export const tenantRoutes: FastifyPluginAsync = async (app) => {
     if (updated.status !== previousStatus || updated.default_currency !== previousDefaultCurrency) {
       await writeAuditLog(audit(), request, principal, {
         action: 'payment_account.refreshed',
+        organizationId,
         resourceType: 'PaymentAccount',
         resourceId: updated.id,
         diffSummary: {

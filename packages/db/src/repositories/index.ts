@@ -28,6 +28,7 @@ export {
   ApiKeyRepository,
   ScannerDeviceRepository,
   AuditLogRepository,
+  PrivacyRequestRepository,
   PermissionGrantRepository,
 } from './identity.js';
 export { DiscountCodeRepository, TaxRuleRepository, FeeRuleRepository } from './pricing.js';

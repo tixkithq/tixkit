@@ -908,6 +908,48 @@ export type AdminExportJob = {
   completedAt?: string
 }
 
+export type AdminAuditLog = {
+  id: string
+  tenantId: string
+  organizationId: string | null
+  brandId: string | null
+  actorType: string
+  actorId: string
+  action: string
+  resourceType: string
+  resourceId: string
+  diffSummary: Record<string, unknown> | null
+  requestId: string | null
+  ip: string | null
+  userAgent: string | null
+  createdAt: string
+}
+
+export type AdminPrivacyRequest = {
+  id: string
+  tenantId: string
+  organizationId: string
+  brandId: string | null
+  requestType: 'export' | 'erasure' | string
+  subjectType: 'buyer' | 'attendee' | string
+  subjectId: string | null
+  subjectEmail: string | null
+  status: 'pending' | 'processing' | 'completed' | 'failed' | string
+  requestedBy: string
+  result: Record<string, unknown> | null
+  error: string | null
+  createdAt: string
+  completedAt: string | null
+}
+
+export type CreatePrivacyRequestInput = {
+  organizationId: string
+  brandId?: string
+  subjectType: 'buyer' | 'attendee'
+  subjectId?: string
+  subjectEmail?: string
+}
+
 // ---------------------------------------------------------------------------
 // Form input types
 // ---------------------------------------------------------------------------
@@ -1258,6 +1300,22 @@ export type AdminApi = {
     filters?: Record<string, unknown>
   }): Promise<ApiResult<AdminExportJob>>
   getExport(exportId: string): Promise<ApiResult<AdminExportJob>>
+  listAuditLogs(input?: PageCursor & {
+    organizationId?: string
+    brandId?: string
+    action?: string
+    resourceType?: string
+    actorId?: string
+  }): Promise<ApiResult<PageResult<AdminAuditLog>>>
+  listPrivacyRequests(input?: PageCursor & {
+    organizationId?: string
+    brandId?: string
+    requestType?: 'export' | 'erasure'
+    status?: 'pending' | 'processing' | 'completed' | 'failed'
+  }): Promise<ApiResult<PageResult<AdminPrivacyRequest>>>
+  getPrivacyRequest(requestId: string): Promise<ApiResult<AdminPrivacyRequest>>
+  createPrivacyExport(input: CreatePrivacyRequestInput): Promise<ApiResult<AdminPrivacyRequest>>
+  createPrivacyErasure(input: CreatePrivacyRequestInput): Promise<ApiResult<AdminPrivacyRequest>>
 
   listApiKeys(): Promise<ApiResult<AdminApiKey[]>>
   createApiKey(input: CreateApiKeyInput): Promise<ApiResult<AdminApiKey>>
@@ -1314,6 +1372,10 @@ function stringValue(value: unknown, fallback: string): string
 function stringValue(value: unknown, fallback: undefined): string | undefined
 function stringValue(value: unknown, fallback = ''): string | undefined {
   return typeof value === 'string' && value.length > 0 ? value : fallback
+}
+
+function nullableStringValue(value: unknown): string | null {
+  return typeof value === 'string' && value.length > 0 ? value : null
 }
 
 function parseJsonRecord(value: unknown): Record<string, unknown> {
@@ -1789,6 +1851,47 @@ export function normalizeExportJob(value: Partial<AdminExportJob> & Record<strin
       : downloadUrl,
     createdAt: stringValue(value.createdAt ?? value.created_at, undefined),
     completedAt: stringValue(value.completedAt ?? value.completed_at, undefined),
+  }
+}
+
+export function normalizeAuditLog(value: Partial<AdminAuditLog> & Record<string, unknown>): AdminAuditLog {
+  return {
+    id: String(value.id),
+    tenantId: stringValue(value.tenantId ?? value.tenant_id, ''),
+    organizationId: nullableStringValue(value.organizationId ?? value.organization_id),
+    brandId: nullableStringValue(value.brandId ?? value.brand_id),
+    actorType: stringValue(value.actorType ?? value.actor_type, ''),
+    actorId: stringValue(value.actorId ?? value.actor_id, ''),
+    action: stringValue(value.action, ''),
+    resourceType: stringValue(value.resourceType ?? value.resource_type, ''),
+    resourceId: stringValue(value.resourceId ?? value.resource_id, ''),
+    diffSummary:
+      value.diffSummary == null && value.diff_summary == null
+        ? null
+        : asRecord(value.diffSummary ?? value.diff_summary),
+    requestId: nullableStringValue(value.requestId ?? value.request_id),
+    ip: nullableStringValue(value.ip),
+    userAgent: nullableStringValue(value.userAgent ?? value.user_agent),
+    createdAt: stringValue(value.createdAt ?? value.created_at, iso(0)),
+  }
+}
+
+export function normalizePrivacyRequest(value: Partial<AdminPrivacyRequest> & Record<string, unknown>): AdminPrivacyRequest {
+  return {
+    id: String(value.id),
+    tenantId: stringValue(value.tenantId ?? value.tenant_id, ''),
+    organizationId: stringValue(value.organizationId ?? value.organization_id, ''),
+    brandId: nullableStringValue(value.brandId ?? value.brand_id),
+    requestType: stringValue(value.requestType ?? value.request_type, 'export'),
+    subjectType: stringValue(value.subjectType ?? value.subject_type, 'buyer'),
+    subjectId: nullableStringValue(value.subjectId ?? value.subject_id),
+    subjectEmail: nullableStringValue(value.subjectEmail ?? value.subject_email),
+    status: stringValue(value.status, 'pending'),
+    requestedBy: stringValue(value.requestedBy ?? value.requested_by, ''),
+    result: value.result == null ? null : asRecord(value.result),
+    error: nullableStringValue(value.error),
+    createdAt: stringValue(value.createdAt ?? value.created_at, iso(0)),
+    completedAt: nullableStringValue(value.completedAt ?? value.completed_at),
   }
 }
 
@@ -2382,6 +2485,44 @@ const fixtureBillingOverview: AdminBillingOverview = {
 
 const fixtureExportJobs: AdminExportJob[] = []
 
+const fixtureAuditLogs: AdminAuditLog[] = [
+  {
+    id: 'audit_demo_privacy',
+    tenantId: 'tnt_demo',
+    organizationId: 'org_demo',
+    brandId: 'brd_demo',
+    actorType: 'user',
+    actorId: 'usr_demo',
+    action: 'privacy.export.requested',
+    resourceType: 'PrivacyRequest',
+    resourceId: 'prv_demo_export',
+    diffSummary: { subjectType: 'buyer', subjectEmail: 'buyer@example.com' },
+    requestId: 'req_demo_privacy',
+    ip: '127.0.0.1',
+    userAgent: 'Tixkit Admin Demo',
+    createdAt: iso(-3_600_000),
+  },
+]
+
+const fixturePrivacyRequests: AdminPrivacyRequest[] = [
+  {
+    id: 'prv_demo_export',
+    tenantId: 'tnt_demo',
+    organizationId: 'org_demo',
+    brandId: 'brd_demo',
+    requestType: 'export',
+    subjectType: 'buyer',
+    subjectId: null,
+    subjectEmail: 'buyer@example.com',
+    status: 'completed',
+    requestedBy: 'usr_demo',
+    result: { orders: 1, attendees: 2 },
+    error: null,
+    createdAt: iso(-3_600_000),
+    completedAt: iso(-3_540_000),
+  },
+]
+
 const fixtureMessages: AdminMessageCampaign[] = [
   {
     id: 'msg_001',
@@ -2539,6 +2680,15 @@ function paginate<T>(items: T[], cursor?: string, limit?: number): PageResult<T>
     nextCursor: endIndex < items.length ? String(endIndex) : undefined,
     total: items.length,
   }
+}
+
+function buildQuery(input?: PageCursor & Record<string, string | number | undefined>): string {
+  const params = new URLSearchParams()
+  for (const [key, value] of Object.entries(input ?? {})) {
+    if (value !== undefined) params.set(key, String(value))
+  }
+  const qs = params.toString()
+  return qs ? `?${qs}` : ''
 }
 
 function adminIdempotencyKey(prefix: string): string {
@@ -4103,6 +4253,111 @@ export const adminApi: AdminApi = {
         const job = fixtureExportJobs.find((item) => item.exportId === exportId)
         if (!job) return err<AdminExportJob>(apiError('not_found', 'Export job not found', 404))
         return ok(job)
+      }
+    )
+  },
+
+  async listAuditLogs(input) {
+    return withFixture(
+      async () => {
+        const result = await request<PageResult<AdminAuditLog>>(`/v1/audit-logs${buildQuery(input)}`, {
+          method: 'GET',
+        })
+        return result.ok
+          ? ok({ ...result.data, items: result.data.items.map(normalizeAuditLog) })
+          : result
+      },
+      () => ok(paginate(fixtureAuditLogs, input?.cursor, input?.limit))
+    )
+  },
+
+  async listPrivacyRequests(input) {
+    return withFixture(
+      async () => {
+        const result = await request<PageResult<AdminPrivacyRequest>>(
+          `/v1/privacy/requests${buildQuery(input)}`,
+          { method: 'GET' }
+        )
+        return result.ok
+          ? ok({ ...result.data, items: result.data.items.map(normalizePrivacyRequest) })
+          : result
+      },
+      () => ok(paginate(fixturePrivacyRequests, input?.cursor, input?.limit))
+    )
+  },
+
+  async getPrivacyRequest(requestId) {
+    return withFixture(
+      async () => {
+        const result = await request<AdminPrivacyRequest>(`/v1/privacy/requests/${requestId}`, {
+          method: 'GET',
+        })
+        return result.ok ? ok(normalizePrivacyRequest(result.data)) : result
+      },
+      () => {
+        const item = fixturePrivacyRequests.find((entry) => entry.id === requestId)
+        if (!item) return err<AdminPrivacyRequest>(apiError('not_found', 'Privacy request not found', 404))
+        return ok(item)
+      }
+    )
+  },
+
+  async createPrivacyExport(input) {
+    return withFixture(
+      async () => {
+        const result = await request<AdminPrivacyRequest>('/v1/privacy/data-exports', {
+          method: 'POST',
+          headers: { 'Idempotency-Key': adminIdempotencyKey('privacy_export') },
+          body: JSON.stringify(input),
+        })
+        return result.ok ? ok(normalizePrivacyRequest(result.data)) : result
+      },
+      () => {
+        const row = normalizePrivacyRequest({
+          id: adminIdempotencyKey('prv'),
+          tenantId: fixturePrincipal.tenantId,
+          organizationId: input.organizationId,
+          brandId: input.brandId ?? null,
+          requestType: 'export',
+          subjectType: input.subjectType,
+          subjectId: input.subjectId ?? null,
+          subjectEmail: input.subjectEmail ?? null,
+          status: 'pending',
+          requestedBy: 'usr_demo',
+          createdAt: iso(0),
+        })
+        fixturePrivacyRequests.unshift(row)
+        return ok(row)
+      }
+    )
+  },
+
+  async createPrivacyErasure(input) {
+    return withFixture(
+      async () => {
+        const result = await request<AdminPrivacyRequest>('/v1/privacy/erasures', {
+          method: 'POST',
+          headers: { 'Idempotency-Key': adminIdempotencyKey('privacy_erasure') },
+          body: JSON.stringify(input),
+        })
+        return result.ok ? ok(normalizePrivacyRequest(result.data)) : result
+      },
+      () => {
+        const row = normalizePrivacyRequest({
+          id: adminIdempotencyKey('prv'),
+          tenantId: fixturePrincipal.tenantId,
+          organizationId: input.organizationId,
+          brandId: input.brandId ?? null,
+          requestType: 'erasure',
+          subjectType: input.subjectType,
+          subjectId: input.subjectId ?? null,
+          subjectEmail: input.subjectEmail ?? null,
+          status: 'pending',
+          requestedBy: 'usr_demo',
+          createdAt: iso(0),
+        })
+        fixturePrivacyRequests.unshift(row)
+        return ok(row)
       }
     )
   },

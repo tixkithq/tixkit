@@ -90,6 +90,8 @@ export const eventRoutes: FastifyPluginAsync = async (app) => {
 
     await writeAuditLog(audit(), request, principal, {
       action: 'event.created',
+      organizationId: body.organizationId,
+      brandId: body.brandId,
       resourceType: 'Event',
       resourceId: event.id,
       diffSummary: { slug: body.slug, title: body.title },
@@ -190,6 +192,8 @@ export const eventRoutes: FastifyPluginAsync = async (app) => {
     });
     await writeAuditLog(audit(), request, principal, {
       action: 'event_occurrence.created',
+      organizationId: event.organization_id,
+      brandId: event.brand_id,
       resourceType: 'EventOccurrence',
       resourceId: occurrence.id,
       diffSummary: { eventId, title: body.title },
@@ -351,6 +355,8 @@ export const eventRoutes: FastifyPluginAsync = async (app) => {
     const result = await repo.updateStatus(eventId, 'published');
     await writeAuditLog(audit(), request, principal, {
       action: 'event.published',
+      organizationId: existing.organization_id,
+      brandId: existing.brand_id,
       resourceType: 'Event',
       resourceId: eventId,
     });
@@ -371,6 +377,8 @@ export const eventRoutes: FastifyPluginAsync = async (app) => {
     const result = await repo.updateStatus(eventId, 'paused');
     await writeAuditLog(audit(), request, principal, {
       action: 'event.paused',
+      organizationId: existing.organization_id,
+      brandId: existing.brand_id,
       resourceType: 'Event',
       resourceId: eventId,
     });
@@ -391,6 +399,8 @@ export const eventRoutes: FastifyPluginAsync = async (app) => {
     const result = await repo.updateStatus(eventId, 'archived');
     await writeAuditLog(audit(), request, principal, {
       action: 'event.archived',
+      organizationId: existing.organization_id,
+      brandId: existing.brand_id,
       resourceType: 'Event',
       resourceId: eventId,
     });

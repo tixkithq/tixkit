@@ -21,6 +21,7 @@ import { developerRoutes } from './routes/modules/developer.js';
 import { oauthAuthorizeRoutes, oauthTokenRoutes } from './routes/modules/oauth.js';
 import { messagingRoutes } from './routes/modules/messaging.js';
 import { reportingRoutes } from './routes/modules/reporting.js';
+import { privacyRoutes } from './routes/modules/privacy.js';
 import { clerkWebhookRoutes } from './routes/modules/clerk-webhooks.js';
 import { stripeWebhookRoutes } from './routes/modules/stripe-webhooks.js';
 import { telnyxWebhookRoutes } from './routes/modules/telnyx-webhooks.js';
@@ -158,6 +159,7 @@ export async function buildApp(): Promise<FastifyInstance> {
     await authenticated.register(oauthAuthorizeRoutes, { prefix: '/v1' });
     await authenticated.register(messagingRoutes, { prefix: '/v1' });
     await authenticated.register(reportingRoutes, { prefix: '/v1' });
+    await authenticated.register(privacyRoutes, { prefix: '/v1' });
     await authenticated.register(questionRoutes, { prefix: '/v1' });
     await authenticated.register(authRoutes, { prefix: '/v1' });
     await authenticated.register(uploadRoutes, { prefix: '/v1' });

@@ -4,6 +4,8 @@ import type { AuditLogRepository } from '@tixkit/db';
 
 export type AuditEntry = {
   action: string;
+  organizationId?: string | null;
+  brandId?: string | null;
   resourceType: string;
   resourceId: string;
   diffSummary?: Record<string, unknown>;
@@ -23,12 +25,15 @@ export async function writeAuditLog(
   try {
     await repo.create({
       tenantId: principal.tenantId,
+      organizationId: entry.organizationId,
+      brandId: entry.brandId,
       actorType: principal.type,
       actorId: principal.id,
       action: entry.action,
       resourceType: entry.resourceType,
       resourceId: entry.resourceId,
       diffSummary: entry.diffSummary,
+      requestId: request.id,
       ip: request.ip,
       userAgent: request.headers['user-agent'],
     });
