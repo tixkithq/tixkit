@@ -72,6 +72,20 @@ jobs:
       - name: Build example app
         run: cd packages/sdk-flutter/example && flutter build web --release
 
+  ios-sdk:
+    name: iOS SDK
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build Swift package
+        run: cd packages/sdk-ios && swift build
+      - name: Run Swift package tests
+        run: cd packages/sdk-ios && swift test
+      - name: Build example app
+        run: cd packages/sdk-ios/Examples/TixkitIOSExample && swift build
+      - name: Run example scanner smoke
+        run: cd packages/sdk-ios/Examples/TixkitIOSExample && swift run TixkitIOSExample
+
   integration-tests-postgres:
     name: Integration Tests (PostgreSQL)
     runs-on: ubuntu-latest
