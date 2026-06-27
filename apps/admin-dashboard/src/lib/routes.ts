@@ -28,6 +28,7 @@ export const routes = {
   settingsWorkspace: '/settings/workspace',
   settingsOrganization: '/settings/organization',
   settingsAppearance: '/settings/appearance',
+  settingsMembers: '/settings/members',
   settingsTeam: '/settings/team',
   settingsBilling: '/settings/billing',
   settingsPayments: '/settings/payments',

@@ -32,7 +32,7 @@ const settingsSections = [
   {
     title: 'Members',
     description: 'Invite people and manage workspace roles.',
-    href: routes.settingsTeam,
+    href: routes.settingsMembers,
     icon: Users,
   },
   {

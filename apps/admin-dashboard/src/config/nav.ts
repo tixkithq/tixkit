@@ -91,7 +91,7 @@ export const sidebarData: SidebarData = {
         },
         {
           title: 'Members',
-          url: '/settings/team',
+          url: '/settings/members',
           icon: Users,
           requiredPermission: 'settings.write',
         },

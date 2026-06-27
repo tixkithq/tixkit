@@ -262,10 +262,10 @@ export function ReportsView({ eventId }: ReportsViewProps) {
 
         {activeTab === 'affiliate' && (
           <div className='grid gap-2'>
-            <span className='text-sm font-medium'>Organization</span>
+            <span className='text-sm font-medium'>Workspace</span>
             <Select value={selectedOrganizationId} onValueChange={setSelectedOrganizationId}>
-              <SelectTrigger className='w-full max-w-xs' aria-label='Select report scope'>
-                <SelectValue placeholder='Select report scope' />
+              <SelectTrigger className='w-full max-w-xs' aria-label='Select workspace'>
+                <SelectValue placeholder='Select workspace' />
               </SelectTrigger>
               <SelectContent>
                 {organizations.map((organization) => (
@@ -356,8 +356,8 @@ export function ReportsView({ eventId }: ReportsViewProps) {
             {!selectedOrganizationId ? (
               <EmptyState
                 icon={Users}
-                title='Select report scope'
-                description='Choose an organization before loading affiliate reporting.'
+                title='Select workspace'
+                description='Choose a workspace before loading affiliate reporting.'
               />
             ) : (
               <ReportLoadState state={affiliateState} render={(report) => <AffiliateReportPanel report={report} />} />

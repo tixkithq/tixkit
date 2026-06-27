@@ -81,7 +81,7 @@ export function ApiKeyFormDialog({
 
   const onSubmit = async (values: ApiKeyFormValues) => {
     if (!organizationId) {
-      toast.error('Organization context is required to create an API key.')
+      toast.error('Workspace context is required to create an API key.')
       return
     }
     setSubmitting(true)

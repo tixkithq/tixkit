@@ -5,9 +5,9 @@ import { adminBaseUrl } from './helpers/env';
 
 const settingsRoutes = [
   { path: '/settings', heading: 'Settings Home', name: 'home' },
-  { path: '/settings/organization', heading: 'Organization', name: 'organization' },
+  { path: '/settings/workspace', heading: 'Workspace', name: 'workspace' },
   { path: '/settings/branding', heading: 'Brand', name: 'brand' },
-  { path: '/settings/team', heading: 'Team', name: 'team' },
+  { path: '/settings/members', heading: 'Members', name: 'members' },
   { path: '/settings/payments', heading: 'Payments', name: 'payments' },
   { path: '/settings/billing', heading: 'Billing', name: 'billing' },
   { path: '/settings/profile', heading: 'Profile', name: 'profile' },
@@ -30,7 +30,7 @@ test.describe('admin settings validation', () => {
     for (const route of settingsRoutes) {
       await page.goto(`${adminBaseUrl}${route.path}`);
       await expect(page.getByRole('heading', { name: route.heading })).toBeVisible();
-      await expect(page.getByRole('navigation').getByRole('link', { name: 'Organization' })).toBeVisible();
+      await expect(page.getByRole('navigation').getByRole('link', { name: 'Workspace' })).toBeVisible();
       await attachScreenshot(page, testInfo, `settings-${route.name}-desktop`);
       await expectNoAxeViolations(page, testInfo);
     }

@@ -10,7 +10,7 @@ import { cn } from '@/lib/utils'
 const settingsNav = [
   { title: 'Workspace', href: routes.settingsWorkspace, icon: Building2 },
   { title: 'Brand', href: routes.settingsBranding, icon: ImageIcon },
-  { title: 'Members', href: routes.settingsTeam, icon: Users },
+  { title: 'Members', href: routes.settingsMembers, icon: Users },
   { title: 'Payments', href: routes.settingsPayments, icon: Wallet },
   { title: 'Billing', href: routes.settingsBilling, icon: CreditCard },
   { title: 'Profile', href: routes.settingsProfile, icon: User },

@@ -57,7 +57,7 @@ export function ScopeSelector({ className }: ScopeSelectorProps) {
   if (organizations.length === 0) {
     return (
       <div className={cn('text-xs text-muted-foreground', className)}>
-        No organizations available
+        No workspaces available
       </div>
     );
   }
@@ -116,7 +116,7 @@ export function ScopeSelector({ className }: ScopeSelectorProps) {
             <Store className="size-4 text-sidebar-foreground/70" />
             <span className="text-xs font-medium text-sidebar-foreground/70">Brand</span>
             <SelectValue
-              placeholder={organizationId ? 'Select brand' : 'Select organization first'}
+              placeholder={organizationId ? 'Select brand' : 'Select workspace first'}
             />
           </SelectTrigger>
           <SelectContent>

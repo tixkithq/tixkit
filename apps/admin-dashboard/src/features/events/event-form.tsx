@@ -266,7 +266,7 @@ export function EventForm({ event, onSuccess, onCancel }: EventFormProps) {
 
   const onSubmit = async (values: EventFormValues) => {
     if (!event && (!organizationId || !brandId)) {
-      toast.error('Organization and brand context are required to create an event. Please ensure your account is properly configured.')
+      toast.error('Workspace and brand context are required to create an event. Please ensure your account is properly configured.')
       return
     }
     setSubmitting(true)

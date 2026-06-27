@@ -96,7 +96,7 @@ export function WebhookFormDrawer({
 
   const onSubmit = async (values: WebhookFormValues) => {
     if (!endpoint && !organizationId) {
-      toast.error('Organization context is required to create a webhook endpoint.')
+      toast.error('Workspace context is required to create a webhook endpoint.')
       return
     }
     setSubmitting(true)
