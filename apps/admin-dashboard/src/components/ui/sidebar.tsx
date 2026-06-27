@@ -166,7 +166,8 @@ function Sidebar({
 
   if (collapsible === 'none') {
     return (
-      <div
+      <aside
+        aria-label='Sidebar navigation'
         data-slot='sidebar'
         className={cn(
           'flex h-full w-(--sidebar-width) flex-col bg-sidebar text-sidebar-foreground',
@@ -175,7 +176,7 @@ function Sidebar({
         {...props}
       >
         {children}
-      </div>
+      </aside>
     )
   }
 
@@ -205,7 +206,8 @@ function Sidebar({
   }
 
   return (
-    <div
+    <aside
+      aria-label='Sidebar navigation'
       className='group peer hidden text-sidebar-foreground md:block'
       data-state={state}
       data-collapsible={state === 'collapsed' ? collapsible : ''}
@@ -248,7 +250,7 @@ function Sidebar({
           {children}
         </div>
       </div>
-    </div>
+    </aside>
   )
 }
 

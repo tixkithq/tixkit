@@ -102,9 +102,9 @@ export default function BrandingPage() {
   return (
     <div className='space-y-6'>
       <div className='space-y-1'>
-        <h2 className='text-xl font-semibold tracking-tight'>Branding</h2>
+        <h2 className='text-xl font-semibold tracking-tight'>Brand</h2>
         <p className='text-sm text-muted-foreground'>
-          Logo, colors, domains, and event page defaults
+          Checkout identity, colors, domains, and event page defaults
         </p>
       </div>
       {bootstrapLoading || loading ? (
@@ -116,7 +116,7 @@ export default function BrandingPage() {
       ) : error ? (
         <EmptyState
           icon={ImageIcon}
-          title='Branding settings unavailable'
+          title='Brand settings unavailable'
           description={error}
           action={
             <Button variant='outline' onClick={() => void loadBranding()}>
@@ -128,7 +128,7 @@ export default function BrandingPage() {
         <EmptyState
           icon={ImageIcon}
           title='Select a brand'
-          description='Choose a brand from the workspace selector before configuring checkout branding.'
+          description='Choose a brand from the workspace selector before configuring checkout identity.'
         />
       ) : (
       <>
@@ -136,7 +136,7 @@ export default function BrandingPage() {
         <CardHeader>
           <CardTitle>Logo</CardTitle>
           <CardDescription>
-            Upload your organization logo for checkout pages and emails.
+            Upload the brand logo for checkout pages and emails.
           </CardDescription>
         </CardHeader>
         <CardContent className='space-y-4'>

@@ -3,8 +3,13 @@ import { buildTicketSalesWindowPayload, ticketSchema } from './ticket-type-form'
 
 const validBase = {
   name: 'General Admission',
+  kind: 'paid',
+  visibility: 'public',
   priceCents: 2500,
   currency: 'USD',
+  minPerOrder: 1,
+  maxPerOrder: 10,
+  inventoryPoolMode: 'new',
 }
 
 describe('ticketSchema sales window refinement', () => {
@@ -45,6 +50,12 @@ describe('ticketSchema sales window refinement', () => {
       salesEndAt: '2026-08-15T19:00',
     })
     expect(result.success).toBe(false)
+  })
+
+  it('matches the backend ticket status enum', () => {
+    expect(ticketSchema.safeParse({ ...validBase, status: 'ended' }).success).toBe(true)
+    expect(ticketSchema.safeParse({ ...validBase, status: 'hidden' }).success).toBe(false)
+    expect(ticketSchema.safeParse({ ...validBase, status: 'archived' }).success).toBe(false)
   })
 })
 

@@ -1,6 +1,38 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/react'
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { fireEvent, render, waitFor } from '@testing-library/react'
+import '@testing-library/jest-dom/vitest'
+import * as React from 'react'
+import { JSDOM } from 'jsdom'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { ReportsView } from './reports-view'
+
+if (typeof window === 'undefined') {
+  const dom = new JSDOM('<!doctype html><html><body></body></html>')
+  Object.assign(globalThis, {
+    window: dom.window,
+    document: dom.window.document,
+    HTMLElement: dom.window.HTMLElement,
+    Node: dom.window.Node,
+    navigator: dom.window.navigator,
+  })
+}
+
+afterEach(() => {
+  document.body.innerHTML = ''
+})
+
+Object.defineProperty(window, 'matchMedia', {
+  writable: true,
+  value: vi.fn().mockImplementation((query: string) => ({
+    matches: false,
+    media: query,
+    onchange: null,
+    addEventListener: vi.fn(),
+    removeEventListener: vi.fn(),
+    addListener: vi.fn(),
+    removeListener: vi.fn(),
+    dispatchEvent: vi.fn(),
+  })),
+})
 
 vi.mock('recharts', () => ({
   Bar: () => null,
@@ -12,8 +44,7 @@ vi.mock('recharts', () => ({
   YAxis: () => null,
 }))
 
-vi.mock('@/components/ui/tabs', async () => {
-  const React = await import('react')
+vi.mock('@/components/ui/tabs', () => {
   const TabsContext = React.createContext<{
     value?: string
     onValueChange?: (value: string) => void
@@ -77,25 +108,41 @@ vi.mock('@/lib/export-jobs', () => ({
   subscribeToExportJob: vi.fn(() => vi.fn()),
 }))
 
-const adminApiMock = vi.hoisted(() => ({
-  listEvents: vi.fn(),
-  listOrganizations: vi.fn(),
-  getSalesReport: vi.fn(),
-  getTaxReport: vi.fn(),
-  getAttendanceReport: vi.fn(),
-  getPromoReport: vi.fn(),
-  getConversionReport: vi.fn(),
-  getAffiliateReport: vi.fn(),
-  createExport: vi.fn(),
+type ReportsAdminApiMock = {
+  listEvents: ReturnType<typeof vi.fn>
+  listOrganizations: ReturnType<typeof vi.fn>
+  getSalesReport: ReturnType<typeof vi.fn>
+  getTaxReport: ReturnType<typeof vi.fn>
+  getAttendanceReport: ReturnType<typeof vi.fn>
+  getPromoReport: ReturnType<typeof vi.fn>
+  getConversionReport: ReturnType<typeof vi.fn>
+  getAffiliateReport: ReturnType<typeof vi.fn>
+  createExport: ReturnType<typeof vi.fn>
+}
+
+function getAdminApiMock(): ReportsAdminApiMock {
+  const globalWithMock = globalThis as typeof globalThis & {
+    __reportsAdminApiMock?: ReportsAdminApiMock
+  }
+  globalWithMock.__reportsAdminApiMock ??= {
+    listEvents: vi.fn(),
+    listOrganizations: vi.fn(),
+    getSalesReport: vi.fn(),
+    getTaxReport: vi.fn(),
+    getAttendanceReport: vi.fn(),
+    getPromoReport: vi.fn(),
+    getConversionReport: vi.fn(),
+    getAffiliateReport: vi.fn(),
+    createExport: vi.fn(),
+  }
+  return globalWithMock.__reportsAdminApiMock
+}
+
+vi.mock('@/lib/api', () => ({
+  adminApi: getAdminApiMock(),
 }))
 
-vi.mock('@/lib/api', async () => {
-  const actual = await vi.importActual<typeof import('@/lib/api')>('@/lib/api')
-  return {
-    ...actual,
-    adminApi: adminApiMock,
-  }
-})
+const adminApiMock = getAdminApiMock()
 
 describe('ReportsView', () => {
   beforeEach(() => {
@@ -171,7 +218,7 @@ describe('ReportsView', () => {
       ok: true,
       data: {
         eventId: 'evt_1',
-        widgetViews: 20,
+        widgetViews: null,
         checkoutStarted: 12,
         checkoutCompleted: 6,
         conversionRate: 0.5,
@@ -198,51 +245,63 @@ describe('ReportsView', () => {
   })
 
   it('renders navigation tabs for all existing report APIs', async () => {
-    render(<ReportsView eventId='evt_1' />)
+    const view = render(<ReportsView eventId='evt_1' />)
 
     for (const tab of ['Sales', 'Tax', 'Attendance', 'Promo', 'Conversion', 'Affiliate']) {
-      expect(await screen.findByRole('tab', { name: tab })).toBeInTheDocument()
+      expect(await view.findByRole('tab', { name: tab })).toBeInTheDocument()
     }
   })
 
   it('shows report data when switching tabs', async () => {
-    render(<ReportsView eventId='evt_1' />)
+    const view = render(<ReportsView eventId='evt_1' />)
 
-    expect(await screen.findByText('Gross Sales')).toBeInTheDocument()
+    expect(await view.findByText('Gross Sales')).toBeInTheDocument()
 
-    fireEvent.click(screen.getByRole('tab', { name: 'Tax' }))
-    expect(await screen.findAllByText('Tax Collected')).toHaveLength(2)
-    expect(screen.getByText('Actual collected tax')).toBeInTheDocument()
+    fireEvent.click(view.getByRole('tab', { name: 'Tax' }))
+    expect(await view.findAllByText('Tax Collected')).toHaveLength(2)
+    expect(view.getByText('Actual collected tax')).toBeInTheDocument()
 
-    fireEvent.click(screen.getByRole('tab', { name: 'Attendance' }))
-    expect(await screen.findByText('Check-in Rate')).toBeInTheDocument()
-    expect(screen.getByText('General Admission')).toBeInTheDocument()
+    fireEvent.click(view.getByRole('tab', { name: 'Attendance' }))
+    expect(await view.findByText('Check-in Rate')).toBeInTheDocument()
+    expect(view.getByText('General Admission')).toBeInTheDocument()
 
-    fireEvent.click(screen.getByRole('tab', { name: 'Promo' }))
-    expect(await screen.findByText('Promo Codes')).toBeInTheDocument()
-    expect(screen.getByText('PROMO10')).toBeInTheDocument()
+    fireEvent.click(view.getByRole('tab', { name: 'Promo' }))
+    expect(await view.findByText('Promo Codes')).toBeInTheDocument()
+    expect(view.getByText('PROMO10')).toBeInTheDocument()
 
-    fireEvent.click(screen.getByRole('tab', { name: 'Conversion' }))
-    expect(await screen.findByText('Widget Views')).toBeInTheDocument()
+    fireEvent.click(view.getByRole('tab', { name: 'Conversion' }))
+    expect(await view.findByText('Widget Views')).toBeInTheDocument()
+    expect(view.getByText('Untracked')).toBeInTheDocument()
+    expect(view.getByText(/Widget impressions are not tracked/i)).toBeInTheDocument()
 
-    fireEvent.click(screen.getByRole('tab', { name: 'Affiliate' }))
-    expect(await screen.findByText('Affiliates')).toBeInTheDocument()
-    expect(screen.getByText('Ada Partners')).toBeInTheDocument()
+    fireEvent.click(view.getByRole('tab', { name: 'Affiliate' }))
+    expect(await view.findAllByText('Select report scope')).not.toHaveLength(0)
+    expect(adminApiMock.getAffiliateReport).not.toHaveBeenCalled()
   })
 
-  it('exports the currently selected supported report type', async () => {
-    render(<ReportsView eventId='evt_1' />)
+  it('exposes and queues every backend-supported report export type', async () => {
+    const view = render(<ReportsView eventId='evt_1' />)
 
-    await screen.findByText('Gross Sales')
-    fireEvent.click(screen.getByRole('tab', { name: 'Tax' }))
-    await screen.findAllByText('Tax Collected')
-    fireEvent.click(screen.getByRole('button', { name: /export/i }))
+    await view.findByText('Gross Sales')
+
+    for (const name of [
+      'Export sales CSV',
+      'Export tax CSV',
+      'Export attendees CSV',
+      'Export orders CSV',
+      'Export tickets CSV',
+      'Export scan logs CSV',
+    ]) {
+      expect(view.getByRole('button', { name })).toBeInTheDocument()
+    }
+
+    fireEvent.click(view.getByRole('button', { name: 'Export orders CSV' }))
 
     await waitFor(() => {
       expect(adminApiMock.createExport).toHaveBeenCalledWith(
         expect.objectContaining({
           eventId: 'evt_1',
-          type: 'tax',
+          type: 'orders',
           format: 'csv',
         })
       )

@@ -11,9 +11,11 @@ import { Badge } from '@/components/ui/badge'
 import { useAdminData } from '@/hooks/use-admin-data'
 import { formatDate } from '@/lib/format'
 import { MessageFormDialog } from '@/features/messages/message-form'
+import { MessageCampaignDetailPanel } from '@/features/messages/messages-view'
 
 export function EventMessagesView({ eventId }: { eventId: string }) {
   const [dialogOpen, setDialogOpen] = React.useState(false)
+  const [selectedCampaignId, setSelectedCampaignId] = React.useState<string>('')
   const { data, loading, error, refetch } = useAdminData(
     () => adminApi.listMessages(eventId),
     [eventId]
@@ -100,11 +102,17 @@ export function EventMessagesView({ eventId }: { eventId: string }) {
                   {formatDate(campaign.createdAt)}
                 </span>
                 <Badge variant='outline'>{campaign.status}</Badge>
+                <Button size='sm' variant='outline' onClick={() => setSelectedCampaignId(campaign.id)}>
+                  Details
+                </Button>
               </div>
             </CardContent>
           </Card>
         ))}
       </div>
+      {selectedCampaignId && (
+        <MessageCampaignDetailPanel eventId={eventId} campaignId={selectedCampaignId} />
+      )}
       <MessageFormDialog
         eventId={eventId}
         open={dialogOpen}

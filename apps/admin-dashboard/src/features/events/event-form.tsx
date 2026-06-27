@@ -1,11 +1,11 @@
 'use client'
 
 import * as React from 'react'
-import { useForm } from 'react-hook-form'
+import { type Resolver, useForm } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { z } from 'zod'
-import { type CreateEventInput, type UpdateEventInput, type AdminEventListItem, adminApi } from '@/lib/api'
-import { isoToLocalDatetimeInput, localDatetimeInputToIso } from '@/lib/datetime'
+import { type CreateEventInput, type UpdateEventInput, type AdminEventDetail, adminApi } from '@/lib/api'
+import { isoToTimezoneDatetimeInput, timezoneDatetimeInputToIso } from '@/lib/datetime'
 import { useBootstrap } from '@/context/bootstrap-provider'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -42,8 +42,20 @@ export const eventSchema = z
     startsAt: z.string().min(1, 'Start date is required'),
     endsAt: z.string().optional(),
     timezone: z.string().min(1, 'Timezone is required'),
+    status: z.enum(['draft', 'published', 'paused', 'archived']).optional(),
+    visibility: z.enum(['public', 'unlisted', 'private']),
     venueName: z.string().optional(),
     address: z.string().optional(),
+    city: z.string().optional(),
+    region: z.string().optional(),
+    postalCode: z.string().optional(),
+    country: z.string().optional(),
+    capacity: z.number().int().positive().optional(),
+    coverImageUrl: z.string().url('Cover image must be a valid URL').optional().or(z.literal('')),
+    externalUrl: z.string().url('External URL must be a valid URL').optional().or(z.literal('')),
+    seoTitle: z.string().optional(),
+    seoDescription: z.string().optional(),
+    seoImageUrl: z.string().url('SEO image must be a valid URL').optional().or(z.literal('')),
     currency: z.string().min(1, 'Currency is required'),
   })
   .superRefine((data, ctx) => {
@@ -53,8 +65,10 @@ export const eventSchema = z
       data.endsAt &&
       data.endsAt.trim() !== ''
     ) {
-      const start = new Date(data.startsAt).getTime()
-      const end = new Date(data.endsAt).getTime()
+      const startIso = timezoneDatetimeInputToIso(data.startsAt, data.timezone)
+      const endIso = timezoneDatetimeInputToIso(data.endsAt, data.timezone)
+      const start = startIso ? new Date(startIso).getTime() : Number.NaN
+      const end = endIso ? new Date(endIso).getTime() : Number.NaN
       if (Number.isNaN(start) || Number.isNaN(end)) return
       if (end <= start) {
         ctx.addIssue({
@@ -67,11 +81,80 @@ export const eventSchema = z
   })
 
 type EventFormValues = z.infer<typeof eventSchema>
+type EventFormDirtyFields = Partial<Record<keyof EventFormValues, unknown>>
 
-export function buildEventDatePayload(values: Pick<EventFormValues, 'startsAt' | 'endsAt'>) {
-  const startsAt = localDatetimeInputToIso(values.startsAt)
-  const endsAt = localDatetimeInputToIso(values.endsAt)
+export function buildEventDatePayload(values: Pick<EventFormValues, 'startsAt' | 'endsAt' | 'timezone'>) {
+  const startsAt = timezoneDatetimeInputToIso(values.startsAt, values.timezone)
+  const endsAt = timezoneDatetimeInputToIso(values.endsAt, values.timezone)
   return startsAt ? { startsAt, endsAt } : null
+}
+
+const emptyStringToUndefined = (value?: string) => {
+  const trimmed = value?.trim()
+  return trimmed ? trimmed : undefined
+}
+
+const emptyStringToNull = (value?: string) => {
+  const trimmed = value?.trim()
+  return trimmed ? trimmed : null
+}
+
+function buildVenuePayload(values: EventFormValues): AdminEventDetail['venue'] {
+  const venue = {
+    name: emptyStringToUndefined(values.venueName),
+    address: emptyStringToUndefined(values.address),
+    city: emptyStringToUndefined(values.city),
+    region: emptyStringToUndefined(values.region),
+    postalCode: emptyStringToUndefined(values.postalCode),
+    country: emptyStringToUndefined(values.country),
+  }
+  return Object.values(venue).some(Boolean) ? venue : null
+}
+
+function buildSeoPayload(values: EventFormValues) {
+  return {
+    title: emptyStringToUndefined(values.seoTitle),
+    description: emptyStringToUndefined(values.seoDescription),
+    imageUrl: emptyStringToUndefined(values.seoImageUrl),
+  }
+}
+
+function hasDirtyField(dirtyFields: EventFormDirtyFields, fields: Array<keyof EventFormValues>) {
+  return fields.some((field) => Boolean(dirtyFields[field]))
+}
+
+export function buildEventUpdatePayload(
+  values: EventFormValues,
+  dirtyFields: EventFormDirtyFields
+): UpdateEventInput | null {
+  const payload: UpdateEventInput = {}
+  if (dirtyFields.title) payload.title = values.title
+  if (dirtyFields.description) payload.description = values.description
+  if (dirtyFields.currency) payload.currency = values.currency
+  if (dirtyFields.status) payload.status = values.status
+  if (dirtyFields.visibility) payload.visibility = values.visibility
+
+  if (hasDirtyField(dirtyFields, ['startsAt', 'endsAt', 'timezone'])) {
+    const datePayload = buildEventDatePayload(values)
+    if (!datePayload) return null
+    payload.startsAt = datePayload.startsAt
+    payload.endsAt = values.endsAt?.trim() ? datePayload.endsAt : null
+    payload.timezone = values.timezone
+  }
+
+  if (hasDirtyField(dirtyFields, ['venueName', 'address', 'city', 'region', 'postalCode', 'country'])) {
+    payload.venue = buildVenuePayload(values)
+  }
+
+  if (hasDirtyField(dirtyFields, ['seoTitle', 'seoDescription', 'seoImageUrl'])) {
+    payload.seo = buildSeoPayload(values)
+  }
+
+  if (dirtyFields.capacity) payload.capacity = values.capacity ?? null
+  if (dirtyFields.coverImageUrl) payload.coverImageUrl = emptyStringToNull(values.coverImageUrl)
+  if (dirtyFields.externalUrl) payload.externalUrl = emptyStringToNull(values.externalUrl)
+
+  return payload
 }
 
 const commonTimezones = [
@@ -92,8 +175,8 @@ const commonTimezones = [
 const commonCurrencies = ['USD', 'EUR', 'GBP', 'JPY', 'AUD', 'CAD', 'SGD']
 
 type EventFormProps = {
-  event?: AdminEventListItem
-  onSuccess?: (event: AdminEventListItem) => void
+  event?: AdminEventDetail
+  onSuccess?: (event: AdminEventDetail) => void
   onCancel?: () => void
 }
 
@@ -102,17 +185,29 @@ export function EventForm({ event, onSuccess, onCancel }: EventFormProps) {
   const { organizationId, brandId, loading: bootstrapLoading } = useBootstrap()
 
   const form = useForm<EventFormValues>({
-    resolver: zodResolver(eventSchema),
+    resolver: zodResolver(eventSchema) as Resolver<EventFormValues>,
     defaultValues: event
       ? {
           title: event.title,
           slug: event.slug ?? '',
-          description: '',
-          startsAt: isoToLocalDatetimeInput(event.startsAt),
-          endsAt: isoToLocalDatetimeInput(event.endsAt),
+          description: event.description ?? '',
+          startsAt: isoToTimezoneDatetimeInput(event.startsAt, event.timezone),
+          endsAt: isoToTimezoneDatetimeInput(event.endsAt, event.timezone),
           timezone: event.timezone,
-          venueName: event.venueName ?? '',
-          address: '',
+          status: event.status,
+          visibility: event.visibility,
+          venueName: event.venue?.name ?? event.venueName ?? '',
+          address: event.venue?.address ?? '',
+          city: event.venue?.city ?? event.city ?? '',
+          region: event.venue?.region ?? '',
+          postalCode: event.venue?.postalCode ?? '',
+          country: event.venue?.country ?? '',
+          capacity: event.capacity ?? undefined,
+          coverImageUrl: event.coverImageUrl ?? '',
+          externalUrl: event.externalUrl ?? '',
+          seoTitle: event.seo.title ?? '',
+          seoDescription: event.seo.description ?? '',
+          seoImageUrl: event.seo.imageUrl ?? '',
           currency: event.currency,
         }
       : {
@@ -122,8 +217,20 @@ export function EventForm({ event, onSuccess, onCancel }: EventFormProps) {
           startsAt: '',
           endsAt: '',
           timezone: 'America/New_York',
+          status: 'draft',
+          visibility: 'public',
           venueName: '',
           address: '',
+          city: '',
+          region: '',
+          postalCode: '',
+          country: '',
+          capacity: undefined,
+          coverImageUrl: '',
+          externalUrl: '',
+          seoTitle: '',
+          seoDescription: '',
+          seoImageUrl: '',
           currency: 'USD',
         },
   })
@@ -141,6 +248,9 @@ export function EventForm({ event, onSuccess, onCancel }: EventFormProps) {
         return
       }
 
+      const venue = buildVenuePayload(values) ?? undefined
+      const seo = buildSeoPayload(values)
+
       const createInput: CreateEventInput = {
         organizationId: organizationId,
         brandId: brandId,
@@ -150,20 +260,25 @@ export function EventForm({ event, onSuccess, onCancel }: EventFormProps) {
         startsAt: datePayload.startsAt,
         endsAt: datePayload.endsAt,
         timezone: values.timezone,
-        venueName: values.venueName || undefined,
-        address: values.address || undefined,
+        venue,
+        visibility: values.visibility,
+        seo,
+        capacity: values.capacity,
+        coverImageUrl: emptyStringToUndefined(values.coverImageUrl),
+        externalUrl: emptyStringToUndefined(values.externalUrl),
         currency: values.currency,
       }
 
+      const updateInput = event
+        ? buildEventUpdatePayload(values, form.formState.dirtyFields as EventFormDirtyFields)
+        : null
+      if (event && !updateInput) {
+        toast.error('Start date must be a valid date and time')
+        return
+      }
+
       const result = event
-        ? await adminApi.updateEvent(event.id, {
-            title: values.title,
-            description: values.description || undefined,
-            startsAt: datePayload.startsAt,
-            endsAt: datePayload.endsAt,
-            timezone: values.timezone,
-            currency: values.currency,
-          } satisfies UpdateEventInput)
+        ? await adminApi.updateEvent(event.id, updateInput as UpdateEventInput)
         : await adminApi.createEvent(createInput)
 
       if (result.ok) {
@@ -228,6 +343,73 @@ export function EventForm({ event, onSuccess, onCancel }: EventFormProps) {
                     ))}
                   </SelectContent>
                 </Select>
+                <FormMessage />
+              </FormItem>
+            )}
+          />
+        </div>
+        <div className='grid gap-4 sm:grid-cols-3'>
+          <FormField
+            control={form.control}
+            name='status'
+            render={({ field }) => (
+              <FormItem>
+                <FormLabel>Status</FormLabel>
+                <Select onValueChange={field.onChange} defaultValue={field.value}>
+                  <FormControl>
+                    <SelectTrigger>
+                      <SelectValue placeholder='Select status' />
+                    </SelectTrigger>
+                  </FormControl>
+                  <SelectContent>
+                    <SelectItem value='draft'>Draft</SelectItem>
+                    <SelectItem value='published'>Published</SelectItem>
+                    <SelectItem value='paused'>Paused</SelectItem>
+                    <SelectItem value='archived'>Archived</SelectItem>
+                  </SelectContent>
+                </Select>
+                <FormMessage />
+              </FormItem>
+            )}
+          />
+          <FormField
+            control={form.control}
+            name='visibility'
+            render={({ field }) => (
+              <FormItem>
+                <FormLabel>Visibility</FormLabel>
+                <Select onValueChange={field.onChange} defaultValue={field.value}>
+                  <FormControl>
+                    <SelectTrigger>
+                      <SelectValue placeholder='Select visibility' />
+                    </SelectTrigger>
+                  </FormControl>
+                  <SelectContent>
+                    <SelectItem value='public'>Public</SelectItem>
+                    <SelectItem value='unlisted'>Unlisted</SelectItem>
+                    <SelectItem value='private'>Private</SelectItem>
+                  </SelectContent>
+                </Select>
+                <FormMessage />
+              </FormItem>
+            )}
+          />
+          <FormField
+            control={form.control}
+            name='capacity'
+            render={({ field }) => (
+              <FormItem>
+                <FormLabel>Capacity</FormLabel>
+                <FormControl>
+                  <Input
+                    type='number'
+                    placeholder='Unlimited'
+                    value={field.value ?? ''}
+                    onChange={(e) =>
+                      field.onChange(e.target.value ? Number(e.target.value) : undefined)
+                    }
+                  />
+                </FormControl>
                 <FormMessage />
               </FormItem>
             )}
@@ -324,6 +506,135 @@ export function EventForm({ event, onSuccess, onCancel }: EventFormProps) {
                 <FormLabel>Address</FormLabel>
                 <FormControl>
                   <Input placeholder='123 Main St' {...field} />
+                </FormControl>
+                <FormMessage />
+              </FormItem>
+            )}
+          />
+        </div>
+        <div className='grid gap-4 sm:grid-cols-3'>
+          <FormField
+            control={form.control}
+            name='city'
+            render={({ field }) => (
+              <FormItem>
+                <FormLabel>City</FormLabel>
+                <FormControl>
+                  <Input placeholder='Austin' {...field} />
+                </FormControl>
+                <FormMessage />
+              </FormItem>
+            )}
+          />
+          <FormField
+            control={form.control}
+            name='region'
+            render={({ field }) => (
+              <FormItem>
+                <FormLabel>Region</FormLabel>
+                <FormControl>
+                  <Input placeholder='TX' {...field} />
+                </FormControl>
+                <FormMessage />
+              </FormItem>
+            )}
+          />
+          <FormField
+            control={form.control}
+            name='postalCode'
+            render={({ field }) => (
+              <FormItem>
+                <FormLabel>Postal Code</FormLabel>
+                <FormControl>
+                  <Input placeholder='78701' {...field} />
+                </FormControl>
+                <FormMessage />
+              </FormItem>
+            )}
+          />
+        </div>
+        <FormField
+          control={form.control}
+          name='country'
+          render={({ field }) => (
+            <FormItem>
+              <FormLabel>Country</FormLabel>
+              <FormControl>
+                <Input placeholder='US' {...field} />
+              </FormControl>
+              <FormMessage />
+            </FormItem>
+          )}
+        />
+        <div className='grid gap-4 sm:grid-cols-2'>
+          <FormField
+            control={form.control}
+            name='coverImageUrl'
+            render={({ field }) => (
+              <FormItem>
+                <FormLabel>Cover Image URL</FormLabel>
+                <FormControl>
+                  <Input placeholder='https://cdn.example.com/cover.jpg' {...field} />
+                </FormControl>
+                <FormMessage />
+              </FormItem>
+            )}
+          />
+          <FormField
+            control={form.control}
+            name='externalUrl'
+            render={({ field }) => (
+              <FormItem>
+                <FormLabel>External URL</FormLabel>
+                <FormControl>
+                  <Input placeholder='https://example.com/event' {...field} />
+                </FormControl>
+                <FormMessage />
+              </FormItem>
+            )}
+          />
+        </div>
+        <div className='space-y-3 rounded-lg border p-3'>
+          <div className='space-y-1'>
+            <p className='text-sm font-medium'>SEO</p>
+            <p className='text-xs text-muted-foreground'>
+              Optional page metadata used by hosted event pages and previews.
+            </p>
+          </div>
+          <FormField
+            control={form.control}
+            name='seoTitle'
+            render={({ field }) => (
+              <FormItem>
+                <FormLabel>SEO Title</FormLabel>
+                <FormControl>
+                  <Input placeholder='Summer Music Festival tickets' {...field} />
+                </FormControl>
+                <FormMessage />
+              </FormItem>
+            )}
+          />
+          <FormField
+            control={form.control}
+            name='seoDescription'
+            render={({ field }) => (
+              <FormItem>
+                <FormLabel>SEO Description</FormLabel>
+                <FormControl>
+                  <Textarea className='resize-none' placeholder='Short search/social summary' {...field} />
+                </FormControl>
+                <FormMessage />
+              </FormItem>
+            )}
+          />
+          <FormField
+            control={form.control}
+            name='seoImageUrl'
+            render={({ field }) => (
+              <FormItem>
+                <FormLabel>SEO Image URL</FormLabel>
+                <FormControl>
+                  <Input placeholder='https://cdn.example.com/social.jpg' {...field} />
                 </FormControl>
                 <FormMessage />
               </FormItem>

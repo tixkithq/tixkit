@@ -1,7 +1,7 @@
 'use client'
 
 import * as React from 'react'
-import { type AdminEventListItem } from '@/lib/api'
+import { type AdminEventDetail } from '@/lib/api'
 import {
   Sheet,
   SheetContent,
@@ -14,7 +14,7 @@ import { EventForm } from './event-form'
 type CreateEventDrawerProps = {
   open: boolean
   onOpenChange: (open: boolean) => void
-  event?: AdminEventListItem
+  event?: AdminEventDetail
   onSuccess?: () => void
 }
 
@@ -28,7 +28,7 @@ export function CreateEventDrawer({
     <Sheet open={open} onOpenChange={onOpenChange}>
       <SheetContent
         side='right'
-        className='w-full overflow-y-auto sm:max-w-lg'
+        className='w-full overflow-y-auto sm:max-w-2xl'
       >
         <SheetHeader>
           <SheetTitle>{event ? 'Edit Event' : 'Create Event'}</SheetTitle>

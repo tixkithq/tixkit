@@ -3,6 +3,7 @@ import {
   Code2,
   CreditCard,
   HelpCircle,
+  Building2,
   LayoutDashboard,
   MessageSquare,
   Palette,
@@ -11,7 +12,6 @@ import {
   ShoppingCart,
   Ticket,
   Users,
-  UsersRound,
 } from 'lucide-react'
 import { type SidebarData } from '@/components/layout/types'
 
@@ -20,20 +20,6 @@ export const sidebarData: SidebarData = {
     name: 'Local Organizer',
     email: 'organizer@localhost',
   },
-  teams: [
-    {
-      id: 'gatekit',
-      name: 'GateKit',
-      logo: Ticket,
-      plan: 'Admin',
-    },
-    {
-      id: 'acme-events',
-      name: 'Acme Events',
-      logo: UsersRound,
-      plan: 'Organization',
-    },
-  ],
   navGroups: [
     {
       title: 'Operate',
@@ -86,7 +72,13 @@ export const sidebarData: SidebarData = {
       title: 'Configure',
       items: [
         {
-          title: 'Branding',
+          title: 'Organization',
+          url: '/settings/organization',
+          icon: Building2,
+          requiredPermission: 'settings.write',
+        },
+        {
+          title: 'Brand',
           url: '/settings/branding',
           icon: Palette,
           requiredPermission: 'settings.write',
@@ -100,7 +92,7 @@ export const sidebarData: SidebarData = {
         {
           title: 'Team',
           url: '/settings/team',
-          icon: UsersRound,
+          icon: Users,
           requiredPermission: 'settings.write',
         },
         {
@@ -119,7 +111,6 @@ export const sidebarData: SidebarData = {
           requiredPermission: 'settings.write',
           items: [
             { title: 'Profile', url: '/settings/profile' },
-            { title: 'Organization', url: '/settings/organization' },
             { title: 'Appearance', url: '/settings/appearance' },
             { title: 'Billing', url: '/settings/billing', requiredPermission: 'billing.write' },
           ],

@@ -77,6 +77,7 @@ describe('AdminApi.updateTicketType', () => {
   it('updates an existing ticket type by id', async () => {
     const createResult = await adminApi.createTicketType('evt_demo_001', {
       name: 'Original Name',
+      kind: 'paid',
       priceCents: 3000,
       currency: 'USD',
     })
@@ -96,6 +97,220 @@ describe('AdminApi.updateTicketType', () => {
 
   it('returns not_found for a nonexistent ticket type', async () => {
     const result = await adminApi.updateTicketType('tt_nonexistent', {
+      name: 'Nope',
+    })
+    expect(result.ok).toBe(false)
+    if (!result.ok) {
+      expect(result.error.code).toBe('not_found')
+      expect(result.error.status).toBe(404)
+    }
+  })
+
+  it('creates, lists, and deletes access rules for locked tickets', async () => {
+    const ticketResult = await adminApi.createTicketType('evt_demo_001', {
+      name: 'Locked Invite',
+      kind: 'paid',
+      visibility: 'locked',
+      priceCents: 5000,
+      currency: 'USD',
+      requiresAccessCode: true,
+      accessCodeHint: 'Invite code',
+    })
+    expect(ticketResult.ok).toBe(true)
+    if (!ticketResult.ok) return
+
+    const createRule = await adminApi.createAccessRule(ticketResult.data.id, {
+      type: 'code',
+      value: 'VIP123',
+      maxUses: 5,
+    })
+    expect(createRule.ok).toBe(true)
+    if (!createRule.ok) return
+
+    const listRules = await adminApi.listAccessRules(ticketResult.data.id)
+    expect(listRules.ok).toBe(true)
+    if (listRules.ok) {
+      expect(listRules.data).toEqual(expect.arrayContaining([
+        expect.objectContaining({ id: createRule.data.id, value: 'VIP123', usesCount: 0 }),
+      ]))
+    }
+
+    const deleteRule = await adminApi.deleteAccessRule(createRule.data.id)
+    expect(deleteRule.ok).toBe(true)
+
+    const afterDelete = await adminApi.listAccessRules(ticketResult.data.id)
+    expect(afterDelete.ok).toBe(true)
+    if (afterDelete.ok) {
+      expect(afterDelete.data.some((rule) => rule.id === createRule.data.id)).toBe(false)
+    }
+  })
+
+  it('creates locked tickets with access rules and a new inventory pool atomically through the batch API', async () => {
+    const result = await adminApi.createTicketTypeBatch('evt_demo_001', {
+      ticketType: {
+        name: 'Atomic Locked VIP',
+        kind: 'paid',
+        visibility: 'locked',
+        priceCents: 7500,
+        currency: 'USD',
+        requiresAccessCode: true,
+      },
+      inventoryPool: {
+        name: 'Atomic VIP Pool',
+        totalCapacity: 25,
+      },
+      accessRules: [
+        { type: 'code', value: 'ATOMICVIP' },
+      ],
+    })
+
+    expect(result.ok).toBe(true)
+    if (!result.ok) return
+    expect(result.data.ticketType.inventoryPoolId).toMatch(/^ip_/)
+    expect(result.data.accessRules).toEqual([
+      expect.objectContaining({ ticketTypeId: result.data.ticketType.id, value: 'ATOMICVIP' }),
+    ])
+  })
+
+  it('updates tickets and appends access rules through the batch API', async () => {
+    const createResult = await adminApi.createTicketTypeBatch('evt_demo_001', {
+      ticketType: {
+        name: 'Editable Locked VIP',
+        kind: 'paid',
+        visibility: 'locked',
+        priceCents: 5000,
+        currency: 'USD',
+        requiresAccessCode: true,
+      },
+      inventoryPool: {
+        name: 'Editable VIP Pool',
+        totalCapacity: 15,
+      },
+      accessRules: [{ type: 'code', value: 'EDITVIP1' }],
+    })
+    expect(createResult.ok).toBe(true)
+    if (!createResult.ok) return
+
+    const updateResult = await adminApi.updateTicketTypeBatch(createResult.data.ticketType.id, {
+      ticketType: {
+        name: 'Updated Locked VIP',
+        priceCents: 6500,
+      },
+      accessRules: [{ type: 'code', value: 'EDITVIP2' }],
+    })
+
+    expect(updateResult.ok).toBe(true)
+    if (!updateResult.ok) return
+    expect(updateResult.data.ticketType.name).toBe('Updated Locked VIP')
+    expect(updateResult.data.ticketType.priceCents).toBe(6500)
+    expect(updateResult.data.accessRules.map((rule) => rule.value)).toEqual(
+      expect.arrayContaining(['EDITVIP1', 'EDITVIP2'])
+    )
+  })
+
+  it('rejects duplicate access codes before fixture writes', async () => {
+    const result = await adminApi.createTicketTypeBatch('evt_demo_001', {
+      ticketType: {
+        name: 'Duplicate Locked VIP',
+        kind: 'paid',
+        visibility: 'locked',
+        priceCents: 7500,
+        currency: 'USD',
+        requiresAccessCode: true,
+      },
+      inventoryPool: {
+        name: 'Duplicate VIP Pool',
+        totalCapacity: 10,
+      },
+      accessRules: [
+        { type: 'code', value: 'DUPVIP' },
+        { type: 'code', value: ' dupvip ' },
+      ],
+    })
+
+    expect(result.ok).toBe(false)
+    if (!result.ok) {
+      expect(result.error.code).toBe('duplicate_access_rule')
+    }
+  })
+
+  it('fails batch create when neither an existing nor new inventory pool is provided', async () => {
+    const result = await adminApi.createTicketTypeBatch('evt_demo_001', {
+      ticketType: {
+        name: 'No Pool',
+        kind: 'paid',
+        priceCents: 7500,
+        currency: 'USD',
+      },
+    })
+
+    expect(result.ok).toBe(false)
+    if (!result.ok) {
+      expect(result.error.code).toBe('missing_inventory_pool')
+    }
+  })
+
+  it('creates, lists, and updates products and product categories', async () => {
+    const categoryResult = await adminApi.createProductCategory('evt_demo_001', {
+      name: 'Merch',
+      sortOrder: 3,
+    })
+    expect(categoryResult.ok).toBe(true)
+    if (!categoryResult.ok) return
+
+    const categoriesResult = await adminApi.listProductCategories('evt_demo_001')
+    expect(categoriesResult.ok).toBe(true)
+    if (categoriesResult.ok) {
+      expect(categoriesResult.data).toEqual(expect.arrayContaining([
+        expect.objectContaining({ id: categoryResult.data.id, name: 'Merch', sortOrder: 3 }),
+      ]))
+    }
+
+    const productResult = await adminApi.createProduct('evt_demo_001', {
+      name: 'Festival T-shirt',
+      description: 'Soft cotton shirt',
+      priceCents: 2500,
+      currency: 'USD',
+      categoryId: categoryResult.data.id,
+      maxPerOrder: 2,
+      status: 'active',
+      sortOrder: 5,
+    })
+    expect(productResult.ok).toBe(true)
+    if (!productResult.ok) return
+
+    const productsResult = await adminApi.listProducts('evt_demo_001')
+    expect(productsResult.ok).toBe(true)
+    if (productsResult.ok) {
+      expect(productsResult.data).toEqual(expect.arrayContaining([
+        expect.objectContaining({
+          id: productResult.data.id,
+          categoryId: categoryResult.data.id,
+          maxPerOrder: 2,
+          priceCents: 2500,
+        }),
+      ]))
+    }
+
+    const updateResult = await adminApi.updateProduct(productResult.data.id, {
+      name: 'Festival Hoodie',
+      description: null,
+      categoryId: null,
+      priceCents: 4500,
+      status: 'inactive',
+    })
+    expect(updateResult.ok).toBe(true)
+    if (updateResult.ok) {
+      expect(updateResult.data.name).toBe('Festival Hoodie')
+      expect(updateResult.data.description).toBeUndefined()
+      expect(updateResult.data.categoryId).toBeUndefined()
+      expect(updateResult.data.priceCents).toBe(4500)
+      expect(updateResult.data.status).toBe('inactive')
+    }
+  })
+
+  it('returns not_found for a nonexistent product update', async () => {
+    const result = await adminApi.updateProduct('prd_nonexistent', {
       name: 'Nope',
     })
     expect(result.ok).toBe(false)
@@ -198,7 +413,7 @@ describe('AdminApi reports date range', () => {
       expect(promo.data.discountCodes[0]).toHaveProperty('revenueAttributedCents')
     }
     if (conversion.ok) {
-      expect(conversion.data.widgetViews ?? 0).toBeGreaterThanOrEqual(0)
+      expect(conversion.data.widgetViews).toBeNull()
       expect(conversion.data.conversionRate).toBeGreaterThanOrEqual(0)
     }
     if (affiliate.ok) {

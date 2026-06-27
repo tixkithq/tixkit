@@ -23,8 +23,7 @@ const ticketStatusConfig: Record<TicketTypeStatus, { label: string; className: s
   active: { label: 'Active', className: 'bg-emerald-500/15 text-emerald-700 dark:text-emerald-400 border-transparent' },
   paused: { label: 'Paused', className: 'bg-amber-500/15 text-amber-700 dark:text-amber-400 border-transparent' },
   sold_out: { label: 'Sold Out', className: 'bg-red-500/15 text-red-700 dark:text-red-400 border-transparent' },
-  hidden: { label: 'Hidden', className: 'bg-zinc-500/15 text-zinc-600 dark:text-zinc-400 border-transparent' },
-  archived: { label: 'Archived', className: 'bg-zinc-500/15 text-zinc-600 dark:text-zinc-400 border-transparent' },
+  ended: { label: 'Ended', className: 'bg-zinc-500/15 text-zinc-600 dark:text-zinc-400 border-transparent' },
 }
 
 export function TicketTypeStatusBadge({ status }: { status: TicketTypeStatus }) {

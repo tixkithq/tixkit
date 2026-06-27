@@ -4,7 +4,7 @@ import * as React from 'react'
 import { useForm } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { z } from 'zod'
-import { type SendMessageInput, adminApi } from '@/lib/api'
+import { type MessageRecipientPreview, type SendMessageInput, adminApi } from '@/lib/api'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Textarea } from '@/components/ui/textarea'
@@ -61,6 +61,9 @@ export function MessageFormDialog({
   onSuccess,
 }: MessageFormDialogProps) {
   const [submitting, setSubmitting] = React.useState(false)
+  const [previewLoading, setPreviewLoading] = React.useState(false)
+  const [previewError, setPreviewError] = React.useState<string | null>(null)
+  const [preview, setPreview] = React.useState<MessageRecipientPreview | null>(null)
 
   const form = useForm<MessageFormValues>({
     resolver: zodResolver(messageSchema),
@@ -71,6 +74,37 @@ export function MessageFormDialog({
       audience: 'all',
     },
   })
+  const audience = form.watch('audience')
+  const channel = form.watch('channel')
+  const templateKey = form.watch('templateKey')
+
+  React.useEffect(() => {
+    if (!open || !eventId) {
+      setPreview(null)
+      setPreviewError(null)
+      return
+    }
+    let cancelled = false
+    setPreviewLoading(true)
+    setPreviewError(null)
+    void adminApi.previewMessageRecipients(eventId, {
+      audience,
+      channel,
+      templateKey,
+    }).then((result) => {
+      if (cancelled) return
+      setPreviewLoading(false)
+      if (!result.ok) {
+        setPreviewError(result.error.message)
+        setPreview(null)
+        return
+      }
+      setPreview(result.data)
+    })
+    return () => {
+      cancelled = true
+    }
+  }, [audience, channel, eventId, open, templateKey])
 
   const onSubmit = async (values: MessageFormValues) => {
     if (!eventId) {
@@ -186,6 +220,33 @@ export function MessageFormDialog({
                 </FormItem>
               )}
             />
+            <div className='rounded-md border p-3 text-sm'>
+              <div className='flex items-center justify-between gap-3'>
+                <p className='font-medium'>Recipient preview</p>
+                <span className='text-muted-foreground'>
+                  {previewLoading ? 'Loading...' : previewError ? 'Unavailable' : `${preview?.eligibleCount ?? 0} recipients`}
+                </span>
+              </div>
+              {previewError ? (
+                <p className='mt-2 text-destructive'>{previewError}</p>
+              ) : preview && preview.eligibleCount > 0 ? (
+                <div className='mt-2 max-h-28 space-y-1 overflow-y-auto text-xs text-muted-foreground'>
+                  {preview.recipients.slice(0, 5).map((attendee) => (
+                    <p key={attendee.id}>
+                      {attendee.name} · {attendee.email ?? 'no email'}
+                    </p>
+                  ))}
+                  {preview.eligibleCount > preview.recipients.length && <p>+{preview.eligibleCount - preview.recipients.length} more eligible</p>}
+                  {(preview.suppressedRecipients > 0 || preview.consentExclusions > 0 || preview.skippedRecipients > 0) && (
+                    <p>
+                      {preview.suppressedRecipients} suppressed · {preview.consentExclusions} consent excluded · {preview.skippedRecipients} missing contact
+                    </p>
+                  )}
+                </div>
+              ) : !previewLoading ? (
+                <p className='mt-2 text-muted-foreground'>No eligible recipients for the selected audience.</p>
+              ) : null}
+            </div>
             <DialogFooter>
               <Button
                 type='button'

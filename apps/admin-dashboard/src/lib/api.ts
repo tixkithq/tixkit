@@ -56,6 +56,22 @@ export type PageResult<T> = {
 // ---------------------------------------------------------------------------
 
 export type EventStatus = 'draft' | 'published' | 'paused' | 'archived'
+export type EventVisibility = 'public' | 'unlisted' | 'private'
+
+export type AdminEventSeo = {
+  title?: string
+  description?: string
+  imageUrl?: string
+}
+
+export type AdminEventVenue = {
+  name?: string
+  address?: string
+  city?: string
+  region?: string
+  postalCode?: string
+  country?: string
+}
 
 export type AdminEventListItem = {
   id: string
@@ -66,13 +82,26 @@ export type AdminEventListItem = {
   endsAt?: string
   timezone: string
   venueName?: string
+  venue?: AdminEventVenue | null
   city?: string
+  description?: string
+  visibility: EventVisibility
+  seo: AdminEventSeo
   currency: string
   grossSalesCents: number
   ticketsSold: number
-  capacity?: number
+  capacity?: number | null
+  coverImageUrl?: string | null
+  externalUrl?: string | null
   checkIns: number
   updatedAt: string
+}
+
+export type AdminEventDetail = AdminEventListItem & {
+  tenantId?: string
+  organizationId?: string
+  brandId?: string
+  createdAt?: string
 }
 
 export type TicketTypeStatus =
@@ -80,22 +109,29 @@ export type TicketTypeStatus =
   | 'active'
   | 'paused'
   | 'sold_out'
-  | 'hidden'
-  | 'archived'
+  | 'ended'
 
 export type AdminTicketType = {
   id: string
   eventId: string
   name: string
+  description?: string
+  kind?: 'free' | 'paid' | 'donation'
+  visibility?: 'public' | 'hidden' | 'locked'
   status: TicketTypeStatus
   priceCents: number
+  minimumPriceCents?: number | null
   currency: string
   quantityTotal?: number
   quantitySold: number
   salesStartAt?: string
   salesEndAt?: string
+  minPerOrder?: number
+  maxPerOrder?: number
   requiresAccessCode: boolean
+  accessCodeHint?: string | null
   inventoryPoolId?: string
+  sortOrder?: number
 }
 
 export type AdminInventoryPool = {
@@ -106,6 +142,44 @@ export type AdminInventoryPool = {
   reservedCount: number
   soldCount: number
   holdTtlSeconds?: number
+  createdAt?: string
+  updatedAt?: string
+}
+
+export type AdminAccessRule = {
+  id: string
+  ticketTypeId: string
+  type: 'code' | 'email_domain'
+  value: string
+  maxUses?: number
+  usesCount: number
+  expiresAt?: string
+  createdAt?: string
+  updatedAt?: string
+}
+
+export type AdminProductCategory = {
+  id: string
+  eventId: string
+  name: string
+  sortOrder: number
+  createdAt?: string
+  updatedAt?: string
+}
+
+export type AdminProduct = {
+  id: string
+  eventId: string
+  name: string
+  description?: string
+  priceCents: number
+  currency: string
+  categoryId?: string
+  maxPerOrder: number
+  availableFrom?: string
+  availableUntil?: string
+  status: 'active' | 'inactive'
+  sortOrder: number
   createdAt?: string
   updatedAt?: string
 }
@@ -328,6 +402,22 @@ export type AdminMessageCampaign = {
   createdAt: string
 }
 
+export type MessageRecipientPreview = {
+  audience: AdminMessageCampaign['audience']
+  audienceCount: number
+  eligibleCount: number
+  suppressedRecipients: number
+  consentExclusions: number
+  skippedRecipients: number
+  recipients: Array<{
+    id: string
+    name: string
+    email?: string
+    phone?: string
+    status: string
+  }>
+}
+
 export type AdminMessageCampaignDetail = AdminMessageCampaign & {
   updatedAt?: string
   templateKey: string
@@ -369,6 +459,7 @@ type BackendMessageCampaign = {
   templateKey?: string
   channel: MessageChannel
   status: MessageStatus
+  audience?: AdminMessageCampaign['audience']
   audienceCount?: number
   queuedEmailJobs?: number
   queuedSmsJobs?: number
@@ -402,7 +493,7 @@ function normalizeMessageCampaign(campaign: BackendMessageCampaign): AdminMessag
     name: campaign.templateKey ?? campaign.id,
     channel: campaign.channel,
     status: campaign.status,
-    audience: 'all_attendees',
+    audience: campaign.audience ?? 'all_attendees',
     queuedCount,
     sentCount,
     deliveredCount,
@@ -668,10 +759,16 @@ export type CreateEventInput = {
   slug?: string
   description?: string
   startsAt: string
-  endsAt?: string
+  endsAt?: string | null
   timezone: string
+  venue?: AdminEventVenue | null
   venueName?: string
   address?: string
+  visibility?: EventVisibility
+  seo?: AdminEventSeo
+  capacity?: number | null
+  coverImageUrl?: string | null
+  externalUrl?: string | null
   currency: string
 }
 
@@ -682,14 +779,19 @@ export type UpdateEventInput = Partial<CreateEventInput> & {
 export type CreateTicketTypeInput = {
   name: string
   description?: string
-  kind?: 'free' | 'paid' | 'donation'
+  kind: 'free' | 'paid' | 'donation'
+  visibility?: 'public' | 'hidden' | 'locked'
   inventoryPoolId?: string
   priceCents: number
+  minimumPriceCents?: number | null
   currency: string
   quantityTotal?: number
   salesStartAt?: string
   salesEndAt?: string
+  minPerOrder?: number
+  maxPerOrder?: number
   requiresAccessCode?: boolean
+  accessCodeHint?: string | null
 }
 
 export type CreateInventoryPoolInput = {
@@ -700,6 +802,54 @@ export type CreateInventoryPoolInput = {
 
 export type UpdateTicketTypeInput = Partial<CreateTicketTypeInput> & {
   status?: TicketTypeStatus
+}
+
+export type CreateAccessRuleInput = {
+  type: AdminAccessRule['type']
+  value: string
+  maxUses?: number | null
+  expiresAt?: string | null
+}
+
+export type SaveTicketTypeResult = {
+  ticketType: AdminTicketType
+  accessRules: AdminAccessRule[]
+}
+
+export type CreateTicketTypeBatchInput = {
+  ticketType: CreateTicketTypeInput
+  inventoryPool?: CreateInventoryPoolInput
+  accessRules?: CreateAccessRuleInput[]
+}
+
+export type UpdateTicketTypeBatchInput = {
+  ticketType: UpdateTicketTypeInput
+  accessRules?: CreateAccessRuleInput[]
+}
+
+export type CreateProductCategoryInput = {
+  name: string
+  sortOrder?: number
+}
+
+export type CreateProductInput = {
+  name: string
+  description?: string
+  priceCents: number
+  currency: string
+  categoryId?: string
+  maxPerOrder?: number
+  availableFrom?: string
+  availableUntil?: string
+  status?: AdminProduct['status']
+  sortOrder?: number
+}
+
+export type UpdateProductInput = Partial<Omit<CreateProductInput, 'description' | 'categoryId' | 'availableFrom' | 'availableUntil'>> & {
+  description?: string | null
+  categoryId?: string | null
+  availableFrom?: string | null
+  availableUntil?: string | null
 }
 
 export type CreateCheckoutQuestionInput = {
@@ -819,20 +969,32 @@ export type AdminApi = {
   getBillingOverview(organizationId: string): Promise<ApiResult<AdminBillingOverview>>
 
   listEvents(input?: PageCursor): Promise<ApiResult<PageResult<AdminEventListItem>>>
-  getEvent(eventId: string): Promise<ApiResult<AdminEventListItem>>
-  createEvent(input: CreateEventInput): Promise<ApiResult<AdminEventListItem>>
-  updateEvent(eventId: string, input: UpdateEventInput): Promise<ApiResult<AdminEventListItem>>
-  publishEvent(eventId: string): Promise<ApiResult<AdminEventListItem>>
-  pauseEvent(eventId: string): Promise<ApiResult<AdminEventListItem>>
-  archiveEvent(eventId: string): Promise<ApiResult<AdminEventListItem>>
+  getEvent(eventId: string): Promise<ApiResult<AdminEventDetail>>
+  createEvent(input: CreateEventInput): Promise<ApiResult<AdminEventDetail>>
+  updateEvent(eventId: string, input: UpdateEventInput): Promise<ApiResult<AdminEventDetail>>
+  publishEvent(eventId: string): Promise<ApiResult<AdminEventDetail>>
+  pauseEvent(eventId: string): Promise<ApiResult<AdminEventDetail>>
+  archiveEvent(eventId: string): Promise<ApiResult<AdminEventDetail>>
 
   listTicketTypes(eventId: string): Promise<ApiResult<AdminTicketType[]>>
   createTicketType(eventId: string, input: CreateTicketTypeInput): Promise<ApiResult<AdminTicketType>>
   updateTicketType(ticketTypeId: string, input: UpdateTicketTypeInput): Promise<ApiResult<AdminTicketType>>
+  createTicketTypeBatch(eventId: string, input: CreateTicketTypeBatchInput): Promise<ApiResult<SaveTicketTypeResult>>
+  updateTicketTypeBatch(ticketTypeId: string, input: UpdateTicketTypeBatchInput): Promise<ApiResult<SaveTicketTypeResult>>
+  listAccessRules(ticketTypeId: string): Promise<ApiResult<AdminAccessRule[]>>
+  createAccessRule(ticketTypeId: string, input: CreateAccessRuleInput): Promise<ApiResult<AdminAccessRule>>
+  deleteAccessRule(accessRuleId: string): Promise<ApiResult<void>>
+  listInventoryPools(eventId: string): Promise<ApiResult<AdminInventoryPool[]>>
   createInventoryPool(eventId: string, input: CreateInventoryPoolInput): Promise<ApiResult<AdminInventoryPool>>
+  listProductCategories(eventId: string): Promise<ApiResult<AdminProductCategory[]>>
+  createProductCategory(eventId: string, input: CreateProductCategoryInput): Promise<ApiResult<AdminProductCategory>>
+  listProducts(eventId: string): Promise<ApiResult<AdminProduct[]>>
+  createProduct(eventId: string, input: CreateProductInput): Promise<ApiResult<AdminProduct>>
+  updateProduct(productId: string, input: UpdateProductInput): Promise<ApiResult<AdminProduct>>
   listCheckoutQuestions(eventId: string): Promise<ApiResult<AdminCheckoutQuestion[]>>
   createCheckoutQuestion(eventId: string, input: CreateCheckoutQuestionInput): Promise<ApiResult<AdminCheckoutQuestion>>
   updateCheckoutQuestion(questionId: string, input: UpdateCheckoutQuestionInput): Promise<ApiResult<AdminCheckoutQuestion>>
+  reorderCheckoutQuestions(eventId: string, questions: Array<{ id: string; sortOrder: number }>): Promise<ApiResult<AdminCheckoutQuestion[]>>
   deleteCheckoutQuestion(questionId: string): Promise<ApiResult<void>>
 
   listOrders(input?: PageCursor & { eventId?: string }): Promise<ApiResult<PageResult<AdminOrderListItem>>>
@@ -845,6 +1007,10 @@ export type AdminApi = {
   listCheckInLists(eventId: string): Promise<ApiResult<AdminCheckInList[]>>
   scanTicket(input: ScanTicketInput): Promise<ApiResult<CheckInScanResult>>
 
+  previewMessageRecipients(
+    eventId: string,
+    input: Pick<SendMessageInput, 'audience' | 'attendeeIds' | 'channel' | 'templateKey'>
+  ): Promise<ApiResult<MessageRecipientPreview>>
   sendMessage(eventId: string, input: SendMessageInput): Promise<ApiResult<AdminMessageCampaign>>
   listMessages(eventId: string): Promise<ApiResult<AdminMessageCampaign[]>>
   getMessage(eventId: string, campaignId: string): Promise<ApiResult<AdminMessageCampaignDetail>>
@@ -1166,16 +1332,36 @@ function normalizeBillingOverview(value: Record<string, unknown>, organizationId
   }
 }
 
-function normalizeEvent(value: Partial<AdminEventListItem> & Record<string, unknown>): AdminEventListItem {
-  const venue = value.venue as { name?: unknown; city?: unknown } | undefined
+function normalizeEvent(value: Partial<AdminEventDetail> & Record<string, unknown>): AdminEventDetail {
+  const venue = asRecord(value.venue)
+  const seo = asRecord(value.seo)
+  const visibility =
+    value.visibility === 'unlisted' || value.visibility === 'private'
+      ? value.visibility
+      : 'public'
   return {
     id: String(value.id),
+    tenantId: stringValue(value.tenantId ?? value.tenant_id, undefined),
+    organizationId: stringValue(value.organizationId ?? value.organization_id, undefined),
+    brandId: stringValue(value.brandId ?? value.brand_id, undefined),
     title: String(value.title ?? 'Untitled event'),
     slug: typeof value.slug === 'string' ? value.slug : undefined,
     status: (value.status as EventStatus | undefined) ?? 'draft',
     startsAt: String(value.startsAt ?? value.createdAt ?? new Date(0).toISOString()),
     endsAt: typeof value.endsAt === 'string' ? value.endsAt : undefined,
     timezone: String(value.timezone ?? 'UTC'),
+    description: stringValue(value.description, undefined),
+    venue:
+      venue && Object.keys(venue).length > 0
+        ? {
+            name: stringValue(venue.name, undefined),
+            address: stringValue(venue.address, undefined),
+            city: stringValue(venue.city, undefined),
+            region: stringValue(venue.region, undefined),
+            postalCode: stringValue(venue.postalCode ?? venue.postal_code, undefined),
+            country: stringValue(venue.country, undefined),
+          }
+        : null,
     venueName:
       typeof value.venueName === 'string'
         ? value.venueName
@@ -1188,11 +1374,20 @@ function normalizeEvent(value: Partial<AdminEventListItem> & Record<string, unkn
         : typeof venue?.city === 'string'
           ? venue.city
           : undefined,
+    visibility,
+    seo: {
+      title: stringValue(seo?.title, undefined),
+      description: stringValue(seo?.description, undefined),
+      imageUrl: stringValue(seo?.imageUrl ?? seo?.image_url, undefined),
+    },
     currency: typeof value.currency === 'string' ? value.currency : 'USD',
     grossSalesCents: finiteNumber(value.grossSalesCents),
     ticketsSold: finiteNumber(value.ticketsSold),
     capacity: value.capacity == null ? undefined : finiteNumber(value.capacity),
+    coverImageUrl: stringValue(value.coverImageUrl ?? value.cover_image_url, undefined),
+    externalUrl: stringValue(value.externalUrl ?? value.external_url, undefined),
     checkIns: finiteNumber(value.checkIns),
+    createdAt: stringValue(value.createdAt ?? value.created_at, undefined),
     updatedAt: String(value.updatedAt ?? value.createdAt ?? new Date(0).toISOString()),
   }
 }
@@ -1265,6 +1460,128 @@ function normalizeQuestion(value: Partial<AdminCheckoutQuestion> & Record<string
   }
 }
 
+function normalizeTicketType(value: Partial<AdminTicketType> & Record<string, unknown>): AdminTicketType {
+  const minimumPrice = value.minimumPriceCents ?? value.minimum_price_cents
+  const quantityTotal = value.quantityTotal ?? value.quantity_total
+  const minPerOrder = value.minPerOrder ?? value.min_per_order
+  const maxPerOrder = value.maxPerOrder ?? value.max_per_order
+  const sortOrder = value.sortOrder ?? value.sort_order
+  const kind = value.kind === 'donation' || value.kind === 'free' || value.kind === 'paid'
+    ? value.kind
+    : finiteNumber(value.priceCents ?? value.price_cents) > 0
+      ? 'paid'
+      : 'free'
+  const visibility =
+    value.visibility === 'hidden' || value.visibility === 'locked'
+      ? value.visibility
+      : 'public'
+  const statusValues: TicketTypeStatus[] = ['draft', 'active', 'paused', 'sold_out', 'ended']
+  const status = statusValues.includes(value.status as TicketTypeStatus)
+    ? (value.status as TicketTypeStatus)
+    : 'active'
+  return {
+    id: String(value.id),
+    eventId: String(value.eventId ?? value.event_id ?? ''),
+    name: stringValue(value.name, 'Untitled ticket'),
+    description: stringValue(value.description, undefined),
+    kind,
+    visibility,
+    status,
+    priceCents: finiteNumber(value.priceCents ?? value.price_cents),
+    minimumPriceCents: minimumPrice == null ? null : finiteNumber(minimumPrice),
+    currency: stringValue(value.currency, 'USD'),
+    quantityTotal: quantityTotal == null ? undefined : finiteNumber(quantityTotal),
+    quantitySold: finiteNumber(value.quantitySold ?? value.quantity_sold),
+    salesStartAt: stringValue(value.salesStartAt ?? value.sales_start_at, undefined),
+    salesEndAt: stringValue(value.salesEndAt ?? value.sales_end_at, undefined),
+    minPerOrder: minPerOrder == null ? 1 : finiteNumber(minPerOrder),
+    maxPerOrder: maxPerOrder == null ? 10 : finiteNumber(maxPerOrder),
+    requiresAccessCode: Boolean(value.requiresAccessCode ?? value.requires_access_code),
+    accessCodeHint: stringValue(value.accessCodeHint ?? value.access_code_hint, undefined),
+    inventoryPoolId: stringValue(value.inventoryPoolId ?? value.inventory_pool_id, undefined),
+    sortOrder: sortOrder == null ? undefined : finiteNumber(sortOrder),
+  }
+}
+
+function normalizeAccessRule(value: Partial<AdminAccessRule> & Record<string, unknown>): AdminAccessRule {
+  const maxUses = value.maxUses ?? value.max_uses
+  return {
+    id: String(value.id),
+    ticketTypeId: String(value.ticketTypeId ?? value.ticket_type_id ?? ''),
+    type: value.type === 'email_domain' ? 'email_domain' : 'code',
+    value: stringValue(value.value, ''),
+    maxUses: maxUses == null ? undefined : finiteNumber(maxUses),
+    usesCount: finiteNumber(value.usesCount ?? value.uses_count),
+    expiresAt: stringValue(value.expiresAt ?? value.expires_at, undefined),
+    createdAt: stringValue(value.createdAt ?? value.created_at, undefined),
+    updatedAt: stringValue(value.updatedAt ?? value.updated_at, undefined),
+  }
+}
+
+function firstDuplicateAccessRule(rules: CreateAccessRuleInput[]) {
+  const seen = new Set<string>()
+  for (const rule of rules) {
+    const key = `${rule.type}:${rule.value.trim().toLowerCase()}`
+    if (seen.has(key)) return rule.value
+    seen.add(key)
+  }
+  return undefined
+}
+
+function createFixtureAccessRules(ticketTypeId: string, rules: CreateAccessRuleInput[]) {
+  const created = rules.map((input) => normalizeAccessRule({
+    id: `acr_${Math.random().toString(36).slice(2, 11)}`,
+    ticketTypeId,
+    type: input.type,
+    value: input.value.trim(),
+    maxUses: input.maxUses ?? undefined,
+    usesCount: 0,
+    expiresAt: input.expiresAt ?? undefined,
+    createdAt: iso(0),
+    updatedAt: iso(0),
+  }))
+  if (created.length > 0) {
+    if (!fixtureAccessRules[ticketTypeId]) fixtureAccessRules[ticketTypeId] = []
+    fixtureAccessRules[ticketTypeId].push(...created)
+  }
+  return created
+}
+
+function normalizeProductCategory(value: Partial<AdminProductCategory> & Record<string, unknown>): AdminProductCategory {
+  return {
+    id: String(value.id),
+    eventId: String(value.eventId ?? value.event_id ?? ''),
+    name: stringValue(value.name, 'Untitled category'),
+    sortOrder: finiteNumber(value.sortOrder ?? value.sort_order),
+    createdAt: stringValue(value.createdAt ?? value.created_at, undefined),
+    updatedAt: stringValue(value.updatedAt ?? value.updated_at, undefined),
+  }
+}
+
+function normalizeProduct(value: Partial<AdminProduct> & Record<string, unknown>): AdminProduct {
+  const status = value.status === 'inactive' ? 'inactive' : 'active'
+  const description = value.description
+  const categoryId = value.categoryId ?? value.category_id
+  const availableFrom = value.availableFrom ?? value.available_from
+  const availableUntil = value.availableUntil ?? value.available_until
+  return {
+    id: String(value.id),
+    eventId: String(value.eventId ?? value.event_id ?? ''),
+    name: stringValue(value.name, 'Untitled product'),
+    description: typeof description === 'string' && description.length > 0 ? description : undefined,
+    priceCents: finiteNumber(value.priceCents ?? value.price_cents),
+    currency: stringValue(value.currency, 'USD'),
+    categoryId: typeof categoryId === 'string' && categoryId.length > 0 ? categoryId : undefined,
+    maxPerOrder: finiteNumber(value.maxPerOrder ?? value.max_per_order, 10),
+    availableFrom: typeof availableFrom === 'string' && availableFrom.length > 0 ? availableFrom : undefined,
+    availableUntil: typeof availableUntil === 'string' && availableUntil.length > 0 ? availableUntil : undefined,
+    status,
+    sortOrder: finiteNumber(value.sortOrder ?? value.sort_order),
+    createdAt: stringValue(value.createdAt ?? value.created_at, undefined),
+    updatedAt: stringValue(value.updatedAt ?? value.updated_at, undefined),
+  }
+}
+
 export function normalizeExportJob(value: Partial<AdminExportJob> & Record<string, unknown>): AdminExportJob {
   const status =
     value.status === 'processing' ||
@@ -1302,21 +1619,36 @@ const now = Date.now()
 const iso = (offsetMs: number) => new Date(now + offsetMs).toISOString()
 const daysFromNow = (d: number) => iso(d * 86_400_000)
 
-const fixtureEvents: AdminEventListItem[] = [
+const fixtureEvents: AdminEventDetail[] = [
   {
     id: 'evt_demo_001',
     title: 'Summer Music Festival 2026',
     slug: 'summer-music-festival-2026',
     status: 'published',
+    description: 'Outdoor music festival with general admission and VIP access.',
     startsAt: daysFromNow(14),
     endsAt: daysFromNow(15),
     timezone: 'America/New_York',
+    venue: {
+      name: 'Riverside Amphitheater',
+      address: '100 River Walk',
+      city: 'Austin',
+      region: 'TX',
+      country: 'US',
+    },
     venueName: 'Riverside Amphitheater',
     city: 'Austin',
+    visibility: 'public',
+    seo: {
+      title: 'Summer Music Festival 2026',
+      description: 'Reserve tickets for Summer Music Festival 2026.',
+    },
     currency: 'USD',
     grossSalesCents: 482_500,
     ticketsSold: 193,
     capacity: 500,
+    coverImageUrl: 'https://cdn.example.test/events/summer-festival.jpg',
+    externalUrl: 'https://tickets.example.test/summer-music-festival-2026',
     checkIns: 0,
     updatedAt: iso(-3_600_000),
   },
@@ -1325,11 +1657,21 @@ const fixtureEvents: AdminEventListItem[] = [
     title: 'TechConf 2026',
     slug: 'techconf-2026',
     status: 'published',
+    description: 'Conference for engineering leaders and product teams.',
     startsAt: daysFromNow(30),
     endsAt: daysFromNow(32),
     timezone: 'America/Los_Angeles',
+    venue: {
+      name: 'Moscone Center',
+      address: '747 Howard St',
+      city: 'San Francisco',
+      region: 'CA',
+      country: 'US',
+    },
     venueName: 'Moscone Center',
     city: 'San Francisco',
+    visibility: 'public',
+    seo: {},
     currency: 'USD',
     grossSalesCents: 1_240_000,
     ticketsSold: 248,
@@ -1342,10 +1684,18 @@ const fixtureEvents: AdminEventListItem[] = [
     title: 'Local Food Tasting',
     slug: 'local-food-tasting',
     status: 'draft',
+    description: 'Small tasting event for local vendors.',
     startsAt: daysFromNow(45),
     timezone: 'Europe/London',
+    venue: {
+      name: 'Borough Market',
+      city: 'London',
+      country: 'GB',
+    },
     venueName: 'Borough Market',
     city: 'London',
+    visibility: 'unlisted',
+    seo: {},
     currency: 'GBP',
     grossSalesCents: 0,
     ticketsSold: 0,
@@ -1358,11 +1708,19 @@ const fixtureEvents: AdminEventListItem[] = [
     title: 'Indie Game Showcase',
     slug: 'indie-game-showcase',
     status: 'paused',
+    description: 'Showcase floor for independent game studios.',
     startsAt: daysFromNow(-7),
     endsAt: daysFromNow(-6),
     timezone: 'Asia/Tokyo',
+    venue: {
+      name: 'Akihabara Hall',
+      city: 'Tokyo',
+      country: 'JP',
+    },
     venueName: 'Akihabara Hall',
     city: 'Tokyo',
+    visibility: 'private',
+    seo: {},
     currency: 'JPY',
     grossSalesCents: 340_000,
     ticketsSold: 85,
@@ -1375,11 +1733,20 @@ const fixtureEvents: AdminEventListItem[] = [
     title: 'Annual Charity Gala',
     slug: 'annual-charity-gala',
     status: 'archived',
+    description: 'Archived gala event with historical sales and check-in data.',
     startsAt: daysFromNow(-90),
     endsAt: daysFromNow(-90),
     timezone: 'America/Chicago',
+    venue: {
+      name: 'Grand Ballroom',
+      city: 'Chicago',
+      region: 'IL',
+      country: 'US',
+    },
     venueName: 'Grand Ballroom',
     city: 'Chicago',
+    visibility: 'public',
+    seo: {},
     currency: 'USD',
     grossSalesCents: 875_000,
     ticketsSold: 350,
@@ -1536,6 +1903,9 @@ const fixtureCheckInLists: Record<string, AdminCheckInList[]> = {
 }
 
 const fixtureInventoryPools: Record<string, AdminInventoryPool[]> = {}
+const fixtureAccessRules: Record<string, AdminAccessRule[]> = {}
+const fixtureProductCategories: Record<string, AdminProductCategory[]> = {}
+const fixtureProducts: Record<string, AdminProduct[]> = {}
 
 const fixtureOrders: AdminOrderListItem[] = [
   {
@@ -1945,7 +2315,7 @@ function fixtureConversionReport(eventId: string): AdminConversionReport {
   const checkoutStarted = Math.max(sales.paidOrdersCount, Math.round(sales.paidOrdersCount / 0.68))
   return {
     eventId,
-    widgetViews: checkoutStarted,
+    widgetViews: null,
     checkoutStarted,
     checkoutCompleted: sales.paidOrdersCount,
     conversionRate: checkoutStarted > 0 ? sales.paidOrdersCount / checkoutStarted : 0,
@@ -2184,12 +2554,12 @@ export const adminApi: AdminApi = {
   async getEvent(eventId) {
     return withFixture(
       async () => {
-        const result = await request<AdminEventListItem>(`/v1/events/${eventId}`, { method: 'GET' })
+        const result = await request<AdminEventDetail>(`/v1/events/${eventId}`, { method: 'GET' })
         return result.ok ? ok(normalizeEvent(result.data)) : result
       },
       () => {
         const event = fixtureEvents.find((e) => e.id === eventId)
-        if (!event) return err<AdminEventListItem>(apiError('not_found', 'Event not found', 404))
+        if (!event) return err<AdminEventDetail>(apiError('not_found', 'Event not found', 404))
         return ok(event)
       }
     )
@@ -2199,7 +2569,7 @@ export const adminApi: AdminApi = {
     return withFixture(
       async () => {
         if (!input.organizationId || !input.brandId) {
-          return Promise.resolve(err<AdminEventListItem>(apiError(
+          return Promise.resolve(err<AdminEventDetail>(apiError(
             'missing_scope',
             'organizationId and brandId are required to create events. These are provided by the admin bootstrap context.',
             400
@@ -2207,7 +2577,11 @@ export const adminApi: AdminApi = {
         }
         const organizationId = input.organizationId
         const brandId = input.brandId
-        const result = await request<AdminEventListItem>('/v1/events', {
+        const venue = input.venue ?? {
+          name: input.venueName,
+          address: input.address,
+        }
+        const result = await request<AdminEventDetail>('/v1/events', {
           method: 'POST',
           body: JSON.stringify({
             organizationId,
@@ -2219,28 +2593,38 @@ export const adminApi: AdminApi = {
             timezone: input.timezone,
             startsAt: input.startsAt,
             endsAt: input.endsAt,
-            venue: {
-              name: input.venueName,
-              address: input.address,
-            },
+            venue: Object.values(venue).some(Boolean) ? venue : undefined,
+            visibility: input.visibility,
+            seo: input.seo,
+            capacity: input.capacity,
+            coverImageUrl: input.coverImageUrl,
+            externalUrl: input.externalUrl,
           }),
         })
         return result.ok ? ok(normalizeEvent(result.data)) : result
       },
       () => {
-        const newEvent: AdminEventListItem = {
+        const venue = input.venue ?? { name: input.venueName, address: input.address }
+        const newEvent: AdminEventDetail = {
           id: `evt_${Math.random().toString(36).slice(2, 11)}`,
           title: input.title,
           slug: input.slug ?? input.title.toLowerCase().replace(/[^a-z0-9]+/g, '-'),
           status: 'draft',
           startsAt: input.startsAt,
-          endsAt: input.endsAt,
+          endsAt: input.endsAt ?? undefined,
           timezone: input.timezone,
-          venueName: input.venueName,
-          city: undefined,
+          description: input.description,
+          venue: Object.values(venue).some(Boolean) ? venue : null,
+          venueName: input.venueName ?? input.venue?.name,
+          city: input.venue?.city,
+          visibility: input.visibility ?? 'public',
+          seo: input.seo ?? {},
           currency: input.currency,
           grossSalesCents: 0,
           ticketsSold: 0,
+          capacity: input.capacity ?? undefined,
+          coverImageUrl: input.coverImageUrl ?? undefined,
+          externalUrl: input.externalUrl ?? undefined,
           checkIns: 0,
           updatedAt: iso(0),
         }
@@ -2260,9 +2644,18 @@ export const adminApi: AdminApi = {
         if (input.timezone !== undefined) body.timezone = input.timezone
         if (input.startsAt !== undefined) body.startsAt = input.startsAt
         if (input.endsAt !== undefined) body.endsAt = input.endsAt
+        if (input.venue !== undefined || input.venueName !== undefined || input.address !== undefined) {
+          const venue = input.venue ?? { name: input.venueName, address: input.address }
+          body.venue = Object.values(venue).some(Boolean) ? venue : null
+        }
+        if (input.visibility !== undefined) body.visibility = input.visibility
+        if (input.seo !== undefined) body.seo = input.seo
+        if (input.capacity !== undefined) body.capacity = input.capacity
+        if (input.coverImageUrl !== undefined) body.coverImageUrl = input.coverImageUrl
+        if (input.externalUrl !== undefined) body.externalUrl = input.externalUrl
         if (input.status !== undefined) body.status = input.status
 
-        const result = await request<AdminEventListItem>(`/v1/events/${eventId}`, {
+        const result = await request<AdminEventDetail>(`/v1/events/${eventId}`, {
           method: 'PATCH',
           body: JSON.stringify(body),
         })
@@ -2270,8 +2663,8 @@ export const adminApi: AdminApi = {
       },
       () => {
         const event = fixtureEvents.find((e) => e.id === eventId)
-        if (!event) return err<AdminEventListItem>(apiError('not_found', 'Event not found', 404))
-        const updated = { ...event, ...input, updatedAt: iso(0) }
+        if (!event) return err<AdminEventDetail>(apiError('not_found', 'Event not found', 404))
+        const updated = normalizeEvent({ ...event, ...input, updatedAt: iso(0) } as Record<string, unknown>)
         const idx = fixtureEvents.indexOf(event)
         fixtureEvents[idx] = updated
         return ok(updated)
@@ -2332,9 +2725,9 @@ export const adminApi: AdminApi = {
     return withFixture(
       async () => {
         const result = await request<PageResult<AdminTicketType> | AdminTicketType[]>(`/v1/events/${eventId}/ticket-types`, { method: 'GET' })
-        return result.ok ? ok(unwrapItems(result.data)) : result
+        return result.ok ? ok(unwrapItems(result.data).map((ticketType) => normalizeTicketType(asRecord(ticketType)))) : result
       },
-      () => ok(fixtureTicketTypes[eventId] ?? [])
+      () => ok((fixtureTicketTypes[eventId] ?? []).map((ticketType) => normalizeTicketType(ticketType)))
     )
   },
 
@@ -2353,31 +2746,43 @@ export const adminApi: AdminApi = {
           body: JSON.stringify({
             name: input.name,
             description: input.description,
-            kind: input.kind ?? (input.priceCents > 0 ? 'paid' : 'free'),
+            kind: input.kind,
+            visibility: input.visibility,
             currency: input.currency,
             priceCents: input.priceCents,
+            minimumPriceCents: input.minimumPriceCents,
             inventoryPoolId: input.inventoryPoolId,
             salesStartAt: input.salesStartAt,
             salesEndAt: input.salesEndAt,
+            minPerOrder: input.minPerOrder,
+            maxPerOrder: input.maxPerOrder,
             requiresAccessCode: input.requiresAccessCode,
+            accessCodeHint: input.accessCodeHint,
           }),
         })
       },
       () => {
-        const newTt: AdminTicketType = {
+        const newTt = normalizeTicketType({
           id: `tt_${Math.random().toString(36).slice(2, 11)}`,
           eventId,
           name: input.name,
-          status: 'draft',
+          description: input.description,
+          kind: input.kind,
+          visibility: input.visibility,
+          status: 'active',
           priceCents: input.priceCents,
+          minimumPriceCents: input.minimumPriceCents,
           currency: input.currency,
           quantityTotal: input.quantityTotal,
           quantitySold: 0,
           salesStartAt: input.salesStartAt,
           salesEndAt: input.salesEndAt,
+          minPerOrder: input.minPerOrder,
+          maxPerOrder: input.maxPerOrder,
           requiresAccessCode: input.requiresAccessCode ?? false,
+          accessCodeHint: input.accessCodeHint,
           inventoryPoolId: input.inventoryPoolId,
-        }
+        })
         if (!fixtureTicketTypes[eventId]) fixtureTicketTypes[eventId] = []
         fixtureTicketTypes[eventId].push(newTt)
         return ok(newTt)
@@ -2404,8 +2809,181 @@ export const adminApi: AdminApi = {
         if (!found)
           return err<AdminTicketType>(apiError('not_found', 'Ticket type not found', 404))
         Object.assign(found, input)
-        return ok(found)
+        return ok(normalizeTicketType(found))
       }
+    )
+  },
+
+  async createTicketTypeBatch(eventId, input) {
+    return withFixture(
+      async () => {
+        const result = await request<{ ticketType: AdminTicketType; accessRules: AdminAccessRule[] }>(
+          `/v1/events/${eventId}/ticket-types/batch`,
+          {
+            method: 'POST',
+            body: JSON.stringify(input),
+          }
+        )
+        return result.ok
+          ? ok({
+              ticketType: normalizeTicketType(asRecord(result.data.ticketType)),
+              accessRules: result.data.accessRules.map((rule) => normalizeAccessRule(asRecord(rule))),
+            })
+          : result
+      },
+      () => {
+        let inventoryPoolId = input.ticketType.inventoryPoolId
+        if (!inventoryPoolId && input.inventoryPool) {
+          const pool: AdminInventoryPool = {
+            id: `ip_${Math.random().toString(36).slice(2, 11)}`,
+            eventId,
+            name: input.inventoryPool.name,
+            totalCapacity: input.inventoryPool.totalCapacity,
+            reservedCount: 0,
+            soldCount: 0,
+            holdTtlSeconds: input.inventoryPool.holdTtlSeconds,
+            createdAt: iso(0),
+            updatedAt: iso(0),
+          }
+          if (!fixtureInventoryPools[eventId]) fixtureInventoryPools[eventId] = []
+          fixtureInventoryPools[eventId].push(pool)
+          inventoryPoolId = pool.id
+        }
+        if (!inventoryPoolId) {
+          return err<SaveTicketTypeResult>(apiError('missing_inventory_pool', 'Choose or create an inventory pool', 400))
+        }
+        const duplicate = firstDuplicateAccessRule(input.accessRules ?? [])
+        if (duplicate) {
+          return err<SaveTicketTypeResult>(apiError('duplicate_access_rule', `Duplicate access rule value: ${duplicate}`, 400))
+        }
+        const newTt = normalizeTicketType({
+          id: `tt_${Math.random().toString(36).slice(2, 11)}`,
+          eventId,
+          ...input.ticketType,
+          inventoryPoolId,
+          status: 'active',
+          quantitySold: 0,
+        })
+        if (!fixtureTicketTypes[eventId]) fixtureTicketTypes[eventId] = []
+        fixtureTicketTypes[eventId].push(newTt)
+        const rules = createFixtureAccessRules(newTt.id, input.accessRules ?? [])
+        return ok({ ticketType: newTt, accessRules: rules })
+      }
+    )
+  },
+
+  async updateTicketTypeBatch(ticketTypeId, input) {
+    return withFixture(
+      async () => {
+        const result = await request<{ ticketType: AdminTicketType; accessRules: AdminAccessRule[] }>(
+          `/v1/ticket-types/${ticketTypeId}/batch`,
+          {
+            method: 'PATCH',
+            body: JSON.stringify(input),
+          }
+        )
+        return result.ok
+          ? ok({
+              ticketType: normalizeTicketType(asRecord(result.data.ticketType)),
+              accessRules: result.data.accessRules.map((rule) => normalizeAccessRule(asRecord(rule))),
+            })
+          : result
+      },
+      () => {
+        let found: AdminTicketType | undefined
+        for (const eventId of Object.keys(fixtureTicketTypes)) {
+          const tt = fixtureTicketTypes[eventId].find((t) => t.id === ticketTypeId)
+          if (tt) {
+            found = tt
+            break
+          }
+        }
+        if (!found) {
+          return err<SaveTicketTypeResult>(apiError('not_found', 'Ticket type not found', 404))
+        }
+        const duplicate = firstDuplicateAccessRule(input.accessRules ?? [])
+        if (duplicate) {
+          return err<SaveTicketTypeResult>(apiError('duplicate_access_rule', `Duplicate access rule value: ${duplicate}`, 400))
+        }
+        const existingRules = fixtureAccessRules[ticketTypeId] ?? []
+        const existingKeys = new Set(existingRules.map((rule) => `${rule.type}:${rule.value.trim().toLowerCase()}`))
+        const existingDuplicate = (input.accessRules ?? []).find((rule) =>
+          existingKeys.has(`${rule.type}:${rule.value.trim().toLowerCase()}`)
+        )
+        if (existingDuplicate) {
+          return err<SaveTicketTypeResult>(apiError('duplicate_access_rule', `Access rule already exists: ${existingDuplicate.value}`, 400))
+        }
+        Object.assign(found, input.ticketType)
+        const newRules = createFixtureAccessRules(ticketTypeId, input.accessRules ?? [])
+        return ok({ ticketType: normalizeTicketType(found), accessRules: [...existingRules, ...newRules] })
+      }
+    )
+  },
+
+  async listAccessRules(ticketTypeId) {
+    return withFixture(
+      async () => {
+        const result = await request<PageResult<AdminAccessRule> | AdminAccessRule[]>(
+          `/v1/ticket-types/${ticketTypeId}/access-rules`,
+          { method: 'GET' }
+        )
+        return result.ok ? ok(unwrapItems(result.data).map((rule) => normalizeAccessRule(asRecord(rule)))) : result
+      },
+      () => ok(fixtureAccessRules[ticketTypeId] ?? [])
+    )
+  },
+
+  async createAccessRule(ticketTypeId, input) {
+    return withFixture(
+      () =>
+        request<AdminAccessRule>(`/v1/ticket-types/${ticketTypeId}/access-rules`, {
+          method: 'POST',
+          body: JSON.stringify(input),
+        }),
+      () => {
+        const rule: AdminAccessRule = {
+          id: `acr_${Math.random().toString(36).slice(2, 11)}`,
+          ticketTypeId,
+          type: input.type,
+          value: input.value,
+          maxUses: input.maxUses ?? undefined,
+          usesCount: 0,
+          expiresAt: input.expiresAt ?? undefined,
+          createdAt: iso(0),
+          updatedAt: iso(0),
+        }
+        if (!fixtureAccessRules[ticketTypeId]) fixtureAccessRules[ticketTypeId] = []
+        fixtureAccessRules[ticketTypeId].push(rule)
+        return ok(rule)
+      }
+    )
+  },
+
+  async deleteAccessRule(accessRuleId) {
+    return withFixture(
+      async () => {
+        const result = await request<void>(`/v1/access-rules/${accessRuleId}`, { method: 'DELETE' })
+        return result.ok ? ok(undefined) : result
+      },
+      () => {
+        for (const ticketTypeId of Object.keys(fixtureAccessRules)) {
+          fixtureAccessRules[ticketTypeId] = fixtureAccessRules[ticketTypeId].filter((rule) => rule.id !== accessRuleId)
+        }
+        return ok(undefined)
+      }
+    )
+  },
+
+  async listInventoryPools(eventId) {
+    return withFixture(
+      async () => {
+        const result = await request<PageResult<AdminInventoryPool> | AdminInventoryPool[]>(
+          `/v1/events/${eventId}/inventory-pools`,
+          { method: 'GET' }
+        )
+        return result.ok ? ok(unwrapItems(result.data)) : result
+      },
+      () => ok(fixtureInventoryPools[eventId] ?? [])
     )
   },
 
@@ -2431,6 +3009,126 @@ export const adminApi: AdminApi = {
         if (!fixtureInventoryPools[eventId]) fixtureInventoryPools[eventId] = []
         fixtureInventoryPools[eventId].push(pool)
         return ok(pool)
+      }
+    )
+  },
+
+  async listProductCategories(eventId) {
+    return withFixture(
+      async () => {
+        const result = await request<PageResult<AdminProductCategory> | AdminProductCategory[]>(
+          `/v1/events/${eventId}/product-categories`,
+          { method: 'GET' }
+        )
+        return result.ok
+          ? ok(unwrapItems(result.data).map((category) => normalizeProductCategory(asRecord(category))))
+          : result
+      },
+      () => ok([...(fixtureProductCategories[eventId] ?? [])].sort((a, b) => a.sortOrder - b.sortOrder))
+    )
+  },
+
+  async createProductCategory(eventId, input) {
+    return withFixture(
+      async () => {
+        const result = await request<AdminProductCategory>(`/v1/events/${eventId}/product-categories`, {
+          method: 'POST',
+          body: JSON.stringify(input),
+        })
+        return result.ok ? ok(normalizeProductCategory(asRecord(result.data))) : result
+      },
+      () => {
+        const category = normalizeProductCategory({
+          id: `pcat_${Math.random().toString(36).slice(2, 11)}`,
+          eventId,
+          name: input.name,
+          sortOrder: input.sortOrder ?? (fixtureProductCategories[eventId]?.length ?? 0),
+          createdAt: iso(0),
+          updatedAt: iso(0),
+        })
+        if (!fixtureProductCategories[eventId]) fixtureProductCategories[eventId] = []
+        fixtureProductCategories[eventId].push(category)
+        return ok(category)
+      }
+    )
+  },
+
+  async listProducts(eventId) {
+    return withFixture(
+      async () => {
+        const result = await request<PageResult<AdminProduct> | AdminProduct[]>(
+          `/v1/events/${eventId}/products`,
+          { method: 'GET' }
+        )
+        return result.ok
+          ? ok(unwrapItems(result.data).map((product) => normalizeProduct(asRecord(product))))
+          : result
+      },
+      () => ok([...(fixtureProducts[eventId] ?? [])].sort((a, b) => a.sortOrder - b.sortOrder))
+    )
+  },
+
+  async createProduct(eventId, input) {
+    return withFixture(
+      async () => {
+        const result = await request<AdminProduct>(`/v1/events/${eventId}/products`, {
+          method: 'POST',
+          body: JSON.stringify(input),
+        })
+        return result.ok ? ok(normalizeProduct(asRecord(result.data))) : result
+      },
+      () => {
+        const product = normalizeProduct({
+          id: `prd_${Math.random().toString(36).slice(2, 11)}`,
+          eventId,
+          name: input.name,
+          description: input.description,
+          priceCents: input.priceCents,
+          currency: input.currency,
+          categoryId: input.categoryId,
+          maxPerOrder: input.maxPerOrder ?? 10,
+          availableFrom: input.availableFrom,
+          availableUntil: input.availableUntil,
+          status: input.status ?? 'active',
+          sortOrder: input.sortOrder ?? (fixtureProducts[eventId]?.length ?? 0),
+          createdAt: iso(0),
+          updatedAt: iso(0),
+        })
+        if (!fixtureProducts[eventId]) fixtureProducts[eventId] = []
+        fixtureProducts[eventId].push(product)
+        return ok(product)
+      }
+    )
+  },
+
+  async updateProduct(productId, input) {
+    return withFixture(
+      async () => {
+        const result = await request<AdminProduct>(`/v1/products/${productId}`, {
+          method: 'PATCH',
+          body: JSON.stringify(input),
+        })
+        return result.ok ? ok(normalizeProduct(asRecord(result.data))) : result
+      },
+      () => {
+        for (const eventId of Object.keys(fixtureProducts)) {
+          const index = fixtureProducts[eventId].findIndex((product) => product.id === productId)
+          if (index === -1) continue
+
+          const existing = fixtureProducts[eventId][index]
+          const updated = normalizeProduct({
+            ...existing,
+            ...input,
+            description: input.description === null ? undefined : input.description ?? existing.description,
+            categoryId: input.categoryId === null ? undefined : input.categoryId ?? existing.categoryId,
+            availableFrom: input.availableFrom === null ? undefined : input.availableFrom ?? existing.availableFrom,
+            availableUntil: input.availableUntil === null ? undefined : input.availableUntil ?? existing.availableUntil,
+            updatedAt: iso(0),
+          })
+          fixtureProducts[eventId][index] = updated
+          return ok(updated)
+        }
+        return err<AdminProduct>(apiError('not_found', 'Product not found', 404))
       }
     )
   },
@@ -2508,6 +3206,34 @@ export const adminApi: AdminApi = {
           }
         }
         return err<AdminCheckoutQuestion>(apiError('not_found', 'Question not found', 404))
+      }
+    )
+  },
+
+  async reorderCheckoutQuestions(eventId, questions) {
+    return withFixture(
+      async () => {
+        const result = await request<PageResult<AdminCheckoutQuestion> | AdminCheckoutQuestion[]>(
+          `/v1/events/${eventId}/questions/reorder`,
+          {
+            method: 'POST',
+            body: JSON.stringify({ questions }),
+          }
+        )
+        return result.ok
+          ? ok(unwrapItems(result.data).map((question) => normalizeQuestion(asRecord(question))))
+          : result
+      },
+      () => {
+        const existing = fixtureCheckoutQuestions[eventId] ?? []
+        const orderById = new Map(questions.map((question) => [question.id, question.sortOrder]))
+        for (const question of existing) {
+          const sortOrder = orderById.get(question.id)
+          if (sortOrder !== undefined) question.sortOrder = sortOrder
+        }
+        // eslint-disable-next-line unicorn/no-array-sort -- creates a new array via spread
+        fixtureCheckoutQuestions[eventId] = [...existing].sort((a, b) => a.sortOrder - b.sortOrder)
+        return ok(fixtureCheckoutQuestions[eventId])
       }
     )
   },
@@ -2738,6 +3464,41 @@ export const adminApi: AdminApi = {
         return ok(result.data.items.map(normalizeMessageCampaign))
       },
       () => ok(fixtureMessages.filter((m) => m.eventId === eventId))
+    )
+  },
+
+  async previewMessageRecipients(eventId, input) {
+    return withFixture(
+      async () =>
+        request<MessageRecipientPreview>(`/v1/events/${eventId}/messages/preview`, {
+          method: 'POST',
+          body: JSON.stringify(input),
+        }),
+      () => {
+        const attendees = fixtureAttendees
+          .filter((attendee) => attendee.eventId === eventId)
+          .filter((attendee) => attendee.status === 'active')
+          .filter((attendee) => {
+            if (input.audience === 'checked_in') return attendee.checkInStatus === 'checked_in'
+            if (input.audience === 'not_checked_in') return attendee.checkInStatus !== 'checked_in'
+            if (input.audience === 'specific') return new Set(input.attendeeIds ?? []).has(attendee.id)
+            return true
+          })
+        return ok({
+          audience: input.audience === 'all' ? 'all_attendees' : input.audience === 'specific' ? 'custom' : input.audience,
+          audienceCount: attendees.length,
+          eligibleCount: attendees.length,
+          suppressedRecipients: 0,
+          consentExclusions: 0,
+          skippedRecipients: 0,
+          recipients: attendees.slice(0, 25).map((attendee) => ({
+            id: attendee.id,
+            name: attendee.name,
+            email: attendee.email,
+            status: attendee.status,
+          })),
+        })
+      }
     )
   },
 

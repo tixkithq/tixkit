@@ -8,13 +8,13 @@ import { routes } from '@/lib/routes'
 import { cn } from '@/lib/utils'
 
 const settingsNav = [
-  { title: 'Profile', href: routes.settingsProfile, icon: User },
   { title: 'Organization', href: routes.settingsOrganization, icon: Building2 },
-  { title: 'Appearance', href: routes.settingsAppearance, icon: Palette },
+  { title: 'Brand', href: routes.settingsBranding, icon: ImageIcon },
   { title: 'Team', href: routes.settingsTeam, icon: Users },
-  { title: 'Billing', href: routes.settingsBilling, icon: CreditCard },
   { title: 'Payments', href: routes.settingsPayments, icon: Wallet },
-  { title: 'Branding', href: routes.settingsBranding, icon: ImageIcon },
+  { title: 'Billing', href: routes.settingsBilling, icon: CreditCard },
+  { title: 'Profile', href: routes.settingsProfile, icon: User },
+  { title: 'Appearance', href: routes.settingsAppearance, icon: Palette },
 ]
 
 export default function SettingsLayout({

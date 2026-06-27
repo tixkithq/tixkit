@@ -6,13 +6,6 @@ type SidebarUser = {
   avatar?: string
 }
 
-type SidebarTeam = {
-  id: string
-  name: string
-  logo: React.ElementType
-  plan?: string
-}
-
 type BaseNavItem = {
   title: string
   badge?: string
@@ -40,7 +33,6 @@ type NavGroup = {
 
 type SidebarData = {
   user: SidebarUser
-  teams: SidebarTeam[]
   navGroups: NavGroup[]
 }
 

@@ -2,7 +2,6 @@
 
 import * as React from 'react'
 import { ExternalLink } from 'lucide-react'
-import { useClerk } from '@clerk/nextjs'
 import { useAdminUser } from '@/context/admin-user-provider'
 import { hasClerkKey } from '@/lib/auth'
 import { Button } from '@/components/ui/button'
@@ -16,14 +15,9 @@ import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'
 export default function ProfilePage() {
   const user = useAdminUser()
   const clerkEnabled = hasClerkKey()
-  const clerk = useClerk()
 
   const openProfile = () => {
-    if (clerk?.openUserProfile) {
-      clerk.openUserProfile()
-    } else {
-      window.open('/user', '_blank')
-    }
+    window.open('/user', '_blank')
   }
 
   return (

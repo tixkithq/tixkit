@@ -2,7 +2,7 @@
 
 import * as React from 'react'
 import Link from 'next/link'
-import { ArrowLeft, Ban, RotateCcw, Mail, User } from 'lucide-react'
+import { ArrowLeft, Ban, RotateCcw, Mail, User, ClipboardList, Truck } from 'lucide-react'
 import { adminApi } from '@/lib/api'
 import { routes } from '@/lib/routes'
 import { Button } from '@/components/ui/button'
@@ -15,6 +15,23 @@ import { useAdminData } from '@/hooks/use-admin-data'
 import { formatCurrency, formatDate, formatDateTime } from '@/lib/format'
 import { OrderStatusBadge } from '@/features/events/event-status-badge'
 import { toast } from 'sonner'
+
+export function attendeeDisplayName(attendee: {
+  name?: string | null
+  firstName?: string | null
+  lastName?: string | null
+  email?: string | null
+  id: string
+}) {
+  const explicitName = attendee.name?.trim()
+  if (explicitName) return explicitName
+  const fullName = [attendee.firstName, attendee.lastName]
+    .map((part) => part?.trim())
+    .filter(Boolean)
+    .join(' ')
+  if (fullName) return fullName
+  return attendee.email?.trim() || attendee.id
+}
 
 export function OrderDetailView({ orderId }: { orderId: string }) {
   const [cancelOpen, setCancelOpen] = React.useState(false)
@@ -72,6 +89,9 @@ export function OrderDetailView({ orderId }: { orderId: string }) {
   const canCancel = order.status === 'pending' || order.status === 'paid'
   const canRefund =
     order.status === 'paid' || order.status === 'partially_refunded'
+  const buyerAnswers = Object.entries(order.checkoutAnswers?.buyerFields ?? {})
+  const attendeeAnswers = Object.entries(order.checkoutAnswers?.attendeeFields ?? {})
+  const consentSnapshots = Object.entries(order.consentSnapshots ?? {})
 
   return (
     <div className='space-y-6'>
@@ -184,10 +204,7 @@ export function OrderDetailView({ orderId }: { orderId: string }) {
                       <Mail className='size-4 text-muted-foreground' />
                       <div>
                         <p className='text-sm font-medium'>
-                          {attendee.name ??
-                            [attendee.firstName, attendee.lastName].filter(Boolean).join(' ') ??
-                            attendee.email ??
-                            attendee.id}
+                          {attendeeDisplayName(attendee)}
                         </p>
                         <p className='text-xs text-muted-foreground'>
                           {attendee.ticketTypeName ?? attendee.ticketTypeId ?? 'Ticket'}
@@ -217,7 +234,14 @@ export function OrderDetailView({ orderId }: { orderId: string }) {
                 <div key={item.id} className='flex items-center justify-between rounded-lg border p-3 text-sm'>
                   <div>
                     <p className='font-medium'>{item.description}</p>
-                    <p className='text-muted-foreground'>Qty {item.quantity}</p>
+                    <p className='text-muted-foreground'>
+                      Qty {item.quantity} · Unit {formatCurrency(item.unitPriceCents, item.currency)}
+                    </p>
+                    {(item.discountCents > 0 || item.taxCents > 0 || item.feeCents > 0) && (
+                      <p className='text-xs text-muted-foreground'>
+                        Discount {formatCurrency(item.discountCents, item.currency)} · Tax {formatCurrency(item.taxCents, item.currency)} · Fees {formatCurrency(item.feeCents, item.currency)}
+                      </p>
+                    )}
                   </div>
                   <span className='font-medium'>{formatCurrency(item.totalCents, item.currency)}</span>
                 </div>
@@ -226,6 +250,76 @@ export function OrderDetailView({ orderId }: { orderId: string }) {
           )}
         </CardContent>
       </Card>
+
+      <div className='grid gap-6 lg:grid-cols-2'>
+        <Card>
+          <CardHeader>
+            <CardTitle>Checkout Answers</CardTitle>
+          </CardHeader>
+          <CardContent className='space-y-4'>
+            <AnswerList title='Buyer' entries={buyerAnswers} />
+            <AnswerList title='Attendees' entries={attendeeAnswers} />
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader>
+            <CardTitle>Consent Snapshots</CardTitle>
+          </CardHeader>
+          <CardContent>
+            {consentSnapshots.length === 0 ? (
+              <p className='text-sm text-muted-foreground'>No consent snapshots captured.</p>
+            ) : (
+              <div className='space-y-2'>
+                {consentSnapshots.map(([key, value]) => (
+                  <div key={key} className='rounded-lg border p-3 text-sm'>
+                    <p className='font-medium'>{key}</p>
+                    <p className='mt-1 break-words text-muted-foreground'>{formatUnknown(value)}</p>
+                  </div>
+                ))}
+              </div>
+            )}
+          </CardContent>
+        </Card>
+      </div>
+
+      <div className='grid gap-6 lg:grid-cols-2'>
+        <Card>
+          <CardHeader>
+            <CardTitle>Refund Ledger</CardTitle>
+          </CardHeader>
+          <CardContent>
+            {order.refunds.length === 0 ? (
+              <p className='text-sm text-muted-foreground'>No refunds recorded.</p>
+            ) : (
+              <div className='space-y-2'>
+                {order.refunds.map((refund) => (
+                  <div key={refund.id} className='flex items-start justify-between gap-3 rounded-lg border p-3 text-sm'>
+                    <div>
+                      <p className='font-medium'>{refund.reason || refund.id}</p>
+                      <p className='text-xs text-muted-foreground'>{formatDateTime(refund.createdAt)}</p>
+                    </div>
+                    <div className='text-right'>
+                      <p className='font-medium'>-{formatCurrency(refund.amountCents, refund.currency)}</p>
+                      <Badge variant='outline'>{refund.status}</Badge>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader>
+            <CardTitle>Delivery Status</CardTitle>
+          </CardHeader>
+          <CardContent className='space-y-3'>
+            <DeliveryRow icon={Mail} label='Email' value={order.deliveryStatus.email} />
+            <DeliveryRow icon={Truck} label='Tickets' value={order.deliveryStatus.tickets} />
+          </CardContent>
+        </Card>
+      </div>
 
       <Card>
         <CardHeader>
@@ -311,4 +405,46 @@ function TimelineItem({
       </div>
     </div>
   )
+}
+
+function AnswerList({ title, entries }: { title: string; entries: Array<[string, unknown]> }) {
+  return (
+    <div className='space-y-2'>
+      <div className='flex items-center gap-2 text-sm font-medium'>
+        <ClipboardList className='size-4 text-muted-foreground' />
+        {title}
+      </div>
+      {entries.length === 0 ? (
+        <p className='text-sm text-muted-foreground'>No answers captured.</p>
+      ) : (
+        <div className='space-y-2'>
+          {entries.map(([key, value]) => (
+            <div key={key} className='rounded-lg border p-3 text-sm'>
+              <p className='font-medium'>{key}</p>
+              <p className='mt-1 break-words text-muted-foreground'>{formatUnknown(value)}</p>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
+
+function DeliveryRow({ icon: Icon, label, value }: { icon: React.ElementType; label: string; value: string }) {
+  return (
+    <div className='flex items-center justify-between rounded-lg border p-3 text-sm'>
+      <div className='flex items-center gap-2'>
+        <Icon className='size-4 text-muted-foreground' />
+        <span>{label}</span>
+      </div>
+      <Badge variant='outline'>{value.replace(/_/g, ' ')}</Badge>
+    </div>
+  )
+}
+
+function formatUnknown(value: unknown): string {
+  if (value == null) return '—'
+  if (typeof value === 'string') return value
+  if (typeof value === 'number' || typeof value === 'boolean') return String(value)
+  return JSON.stringify(value)
 }

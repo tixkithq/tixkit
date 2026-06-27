@@ -18,11 +18,13 @@ import {
   type AdminAffiliateReport,
   type AdminAttendanceReport,
   type AdminConversionReport,
+  type AdminEventListItem,
   type AdminExportJob,
   type AdminExportType,
   type AdminPromoReport,
   type AdminSalesReportSummary,
   type AdminTaxReport,
+  type PageResult,
   adminApi,
 } from '@/lib/api'
 import { ApiErrorState } from '@/components/api-error-state'
@@ -66,11 +68,14 @@ type LoadState<T> = {
   refetch: () => void
 }
 
-const EXPORT_TYPES: Partial<Record<ReportTab, AdminExportType>> = {
-  sales: 'sales',
-  tax: 'tax',
-  attendance: 'attendees',
-}
+const EXPORT_OPTIONS: Array<{ type: AdminExportType; label: string; ariaLabel: string }> = [
+  { type: 'sales', label: 'Sales', ariaLabel: 'Export sales CSV' },
+  { type: 'tax', label: 'Tax', ariaLabel: 'Export tax CSV' },
+  { type: 'attendees', label: 'Attendees', ariaLabel: 'Export attendees CSV' },
+  { type: 'orders', label: 'Orders', ariaLabel: 'Export orders CSV' },
+  { type: 'tickets', label: 'Tickets', ariaLabel: 'Export tickets CSV' },
+  { type: 'scan_logs', label: 'Scan logs', ariaLabel: 'Export scan logs CSV' },
+]
 
 function toIsoDate(date: Date): string {
   return date.toISOString().slice(0, 10)
@@ -87,11 +92,16 @@ function emptyResult<T>(): Promise<{ ok: true; data: T | null }> {
   return Promise.resolve({ ok: true as const, data: null })
 }
 
+function emptyPage<T>(): Promise<{ ok: true; data: PageResult<T> }> {
+  return Promise.resolve({ ok: true as const, data: { items: [], total: 0 } })
+}
+
 export function ReportsView({ eventId }: ReportsViewProps) {
   const [selectedEventId, setSelectedEventId] = React.useState<string>(eventId ?? '')
   const [activeTab, setActiveTab] = React.useState<ReportTab>('sales')
   const [exporting, setExporting] = React.useState(false)
   const [lastExport, setLastExport] = React.useState<AdminExportJob | null>(null)
+  const [selectedOrganizationId, setSelectedOrganizationId] = React.useState('')
   const exportSubscriptionRef = React.useRef<(() => void) | null>(null)
   const [from, setFrom] = React.useState<Date | undefined>(
     () => new Date(Date.now() - 30 * 86_400_000)
@@ -105,14 +115,14 @@ export function ReportsView({ eventId }: ReportsViewProps) {
   const eventsState = useAdminData(
     () =>
       eventId
-        ? Promise.resolve({ ok: true as const, data: { items: [], total: 0 } })
+        ? emptyPage<AdminEventListItem>()
         : adminApi.listEvents(),
     [eventId]
   )
   const organizationsState = useAdminData(() => adminApi.listOrganizations())
   const events = eventsState.data?.items ?? []
+  const organizations = organizationsState.data ?? []
   const selectedEvent = events.find((event) => event.id === selectedEventId)
-  const primaryOrganizationId = organizationsState.data?.[0]?.id
 
   const range = React.useMemo(
     () => ({
@@ -160,10 +170,10 @@ export function ReportsView({ eventId }: ReportsViewProps) {
   )
   const affiliateState = useAdminData(
     () =>
-      primaryOrganizationId
-        ? adminApi.getAffiliateReport(primaryOrganizationId)
+      selectedOrganizationId
+        ? adminApi.getAffiliateReport(selectedOrganizationId)
         : emptyResult<AdminAffiliateReport>(),
-    [primaryOrganizationId]
+    [selectedOrganizationId]
   )
 
   React.useEffect(() => {
@@ -172,9 +182,8 @@ export function ReportsView({ eventId }: ReportsViewProps) {
     }
   }, [])
 
-  const handleExport = async () => {
-    const exportType = EXPORT_TYPES[activeTab]
-    if (!selectedEventId || !exportType) return
+  const handleExport = async (exportType: AdminExportType) => {
+    if (!selectedEventId) return
 
     exportSubscriptionRef.current?.()
     setExporting(true)
@@ -228,7 +237,6 @@ export function ReportsView({ eventId }: ReportsViewProps) {
     )
   }
 
-  const exportType = EXPORT_TYPES[activeTab]
   const currency = salesState.data?.currency ?? selectedEvent?.currency ?? 'USD'
 
   return (
@@ -252,6 +260,24 @@ export function ReportsView({ eventId }: ReportsViewProps) {
           </div>
         ) : null}
 
+        {activeTab === 'affiliate' && (
+          <div className='grid gap-2'>
+            <span className='text-sm font-medium'>Organization</span>
+            <Select value={selectedOrganizationId} onValueChange={setSelectedOrganizationId}>
+              <SelectTrigger className='w-full max-w-xs'>
+                <SelectValue placeholder='Select report scope' />
+              </SelectTrigger>
+              <SelectContent>
+                {organizations.map((organization) => (
+                  <SelectItem key={organization.id} value={organization.id}>
+                    {organization.name}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+        )}
+
         <div className='flex flex-wrap items-end gap-4'>
           <div className='grid gap-2'>
             <span className='text-sm font-medium'>From</span>
@@ -271,14 +297,24 @@ export function ReportsView({ eventId }: ReportsViewProps) {
               disabled={!selectedEventId}
             />
           </div>
-          <Button
-            variant='outline'
-            onClick={handleExport}
-            disabled={!selectedEventId || !exportType || exporting}
-          >
-            <Download className='size-4' />
-            {exporting ? 'Exporting...' : 'Export'}
-          </Button>
+          <div className='grid gap-2'>
+            <span className='text-sm font-medium'>Exports</span>
+            <div className='flex max-w-3xl flex-wrap gap-2'>
+              {EXPORT_OPTIONS.map((option) => (
+                <Button
+                  key={option.type}
+                  aria-label={option.ariaLabel}
+                  variant='outline'
+                  size='sm'
+                  onClick={() => handleExport(option.type)}
+                  disabled={!selectedEventId || exporting}
+                >
+                  <Download className='size-4' />
+                  {exporting ? 'Exporting...' : option.label}
+                </Button>
+              ))}
+            </div>
+          </div>
         </div>
       </div>
 
@@ -317,7 +353,15 @@ export function ReportsView({ eventId }: ReportsViewProps) {
             <ReportLoadState state={conversionState} render={(report) => <ConversionReportPanel report={report} />} />
           </TabsContent>
           <TabsContent value='affiliate'>
-            <ReportLoadState state={affiliateState} render={(report) => <AffiliateReportPanel report={report} />} />
+            {!selectedOrganizationId ? (
+              <EmptyState
+                icon={Users}
+                title='Select report scope'
+                description='Choose an organization before loading affiliate reporting.'
+              />
+            ) : (
+              <ReportLoadState state={affiliateState} render={(report) => <AffiliateReportPanel report={report} />} />
+            )}
           </TabsContent>
         </Tabs>
       )}
@@ -427,12 +471,25 @@ function PromoReportPanel({ report, currency }: { report: AdminPromoReport; curr
 }
 
 function ConversionReportPanel({ report }: { report: AdminConversionReport }) {
+  const widgetViews = report.widgetViews
+  const widgetViewsTracked = widgetViews !== null && widgetViews !== undefined
   return (
-    <div className='grid gap-4 sm:grid-cols-2 lg:grid-cols-4'>
-      <ReportCard title='Widget Views' value={formatNumber(report.widgetViews ?? 0)} icon={MousePointerClick} />
-      <ReportCard title='Checkout Started' value={formatNumber(report.checkoutStarted)} icon={Ticket} />
-      <ReportCard title='Checkout Completed' value={formatNumber(report.checkoutCompleted)} icon={CalendarCheck} />
-      <ReportCard title='Conversion Rate' value={formatPercent(report.conversionRate)} icon={TrendingUp} />
+    <div className='space-y-3'>
+      {!widgetViewsTracked && (
+        <p className='rounded-md border border-dashed p-3 text-sm text-muted-foreground'>
+          Widget impressions are not tracked for this event yet. Conversion rates only use persisted checkout starts and completions.
+        </p>
+      )}
+      <div className='grid gap-4 sm:grid-cols-2 lg:grid-cols-4'>
+        <ReportCard
+          title='Widget Views'
+          value={widgetViewsTracked ? formatNumber(widgetViews) : 'Untracked'}
+          icon={MousePointerClick}
+        />
+        <ReportCard title='Checkout Started' value={formatNumber(report.checkoutStarted)} icon={Ticket} />
+        <ReportCard title='Checkout Completed' value={formatNumber(report.checkoutCompleted)} icon={CalendarCheck} />
+        <ReportCard title='Conversion Rate' value={formatPercent(report.conversionRate)} icon={TrendingUp} />
+      </div>
     </div>
   )
 }

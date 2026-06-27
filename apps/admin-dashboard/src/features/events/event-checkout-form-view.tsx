@@ -23,6 +23,7 @@ import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Checkbox } from '@/components/ui/checkbox'
+import { ConfirmDialog } from '@/components/confirm-dialog'
 import {
   Form,
   FormControl,
@@ -168,6 +169,31 @@ function formatType(type: AdminQuestionType): string {
   return fieldTypes.find((fieldType) => fieldType.value === type)?.label ?? 'Unsupported'
 }
 
+function dependencyLabel(question: AdminCheckoutQuestion, questions: AdminCheckoutQuestion[]): string {
+  const field = question.conditionalVisibility?.field
+  if (!field) return ''
+  return questions.find((item) => item.id === field)?.label ?? field
+}
+
+function answerValues(answer: unknown): string[] {
+  if (Array.isArray(answer)) {
+    return answer.filter((value): value is string => typeof value === 'string')
+  }
+  if (typeof answer === 'string') return answer ? [answer] : []
+  if (typeof answer === 'boolean') return [answer ? 'true' : 'false']
+  return []
+}
+
+export function conditionMatches(question: AdminCheckoutQuestion, answers: Record<string, unknown>) {
+  const condition = question.conditionalVisibility
+  if (!condition) return true
+  const values = answerValues(answers[condition.field])
+  const matches = values.includes(condition.value)
+  if (condition.operator === 'equals') return matches
+  if (condition.operator === 'not_equals') return !matches
+  return values.some((value) => value.includes(condition.value))
+}
+
 function questionToValues(
   question: AdminCheckoutQuestion | undefined,
   questions: AdminCheckoutQuestion[]
@@ -234,7 +260,10 @@ export function EventCheckoutFormView({ eventId }: { eventId: string }) {
   )
   const [drawerOpen, setDrawerOpen] = React.useState(false)
   const [editingQuestion, setEditingQuestion] = React.useState<AdminCheckoutQuestion>()
+  const [deleteTarget, setDeleteTarget] = React.useState<AdminCheckoutQuestion>()
   const [submittingId, setSubmittingId] = React.useState<string>()
+  const [selectedPreviewTicketId, setSelectedPreviewTicketId] = React.useState(allTicketsValue)
+  const [previewAnswers, setPreviewAnswers] = React.useState<Record<string, unknown>>({})
 
   const orderedQuestions = React.useMemo(
     // eslint-disable-next-line unicorn/no-array-sort -- creates a new array via spread
@@ -257,7 +286,8 @@ export function EventCheckoutFormView({ eventId }: { eventId: string }) {
     const result = await adminApi.deleteCheckoutQuestion(question.id)
     setSubmittingId(undefined)
     if (result.ok) {
-      toast.success('Checkout field removed')
+      toast.success('Checkout field removed or hidden')
+      setDeleteTarget(undefined)
       await refetch()
     } else {
       toast.error(result.error.message)
@@ -297,26 +327,32 @@ export function EventCheckoutFormView({ eventId }: { eventId: string }) {
     if (!swapWith) return
 
     setSubmittingId(question.id)
-    const first = await adminApi.updateCheckoutQuestion(question.id, {
-      sortOrder: swapWith.sortOrder,
+    const nextQuestions = orderedQuestions.map((item) => {
+      if (item.id === question.id) return { id: item.id, sortOrder: swapWith.sortOrder }
+      if (item.id === swapWith.id) return { id: item.id, sortOrder: question.sortOrder }
+      return { id: item.id, sortOrder: item.sortOrder }
     })
-    if (!first.ok) {
-      setSubmittingId(undefined)
-      toast.error(first.error.message)
-      return
-    }
-
-    const second = await adminApi.updateCheckoutQuestion(swapWith.id, {
-      sortOrder: question.sortOrder,
-    })
+    const result = await adminApi.reorderCheckoutQuestions(eventId, nextQuestions)
     setSubmittingId(undefined)
-
-    if (second.ok) {
+    if (result.ok) {
       await refetch()
     } else {
-      toast.error(second.error.message)
+      setSubmittingId(undefined)
+      toast.error(`Reorder failed: ${result.error.message}`)
     }
   }
+
+  const previewQuestions = React.useMemo(
+    () =>
+      orderedQuestions.filter((question) => {
+        const ticketMatches =
+          selectedPreviewTicketId === allTicketsValue ||
+          !question.ticketTypeId ||
+          question.ticketTypeId === selectedPreviewTicketId
+        return ticketMatches && conditionMatches(question, previewAnswers)
+      }),
+    [orderedQuestions, previewAnswers, selectedPreviewTicketId]
+  )
 
   if (loading) {
     return (
@@ -379,7 +415,7 @@ export function EventCheckoutFormView({ eventId }: { eventId: string }) {
                         <span>{ticketName}</span>
                         {question.conditionalVisibility && (
                           <span>
-                            Conditional on {question.conditionalVisibility.field}
+                            Conditional on {dependencyLabel(question, orderedQuestions)}
                           </span>
                         )}
                       </div>
@@ -435,7 +471,7 @@ export function EventCheckoutFormView({ eventId }: { eventId: string }) {
                         variant='outline'
                         size='icon'
                         disabled={submittingId === question.id}
-                        onClick={() => deleteQuestion(question)}
+                        onClick={() => setDeleteTarget(question)}
                         aria-label='Delete field'
                       >
                         <Trash2 className='size-4' />
@@ -454,11 +490,31 @@ export function EventCheckoutFormView({ eventId }: { eventId: string }) {
           <CardTitle>Preview</CardTitle>
         </CardHeader>
         <CardContent className='space-y-4'>
+          <Select value={selectedPreviewTicketId} onValueChange={setSelectedPreviewTicketId}>
+            <SelectTrigger>
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value={allTicketsValue}>All tickets</SelectItem>
+              {(ticketTypes ?? []).map((ticketType) => (
+                <SelectItem key={ticketType.id} value={ticketType.id}>
+                  {ticketType.name}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
           {orderedQuestions.length === 0 ? (
             <p className='text-sm text-muted-foreground'>No fields to preview.</p>
+          ) : previewQuestions.length === 0 ? (
+            <p className='text-sm text-muted-foreground'>No fields match this ticket and conditional state.</p>
           ) : (
-            orderedQuestions.map((question) => (
-              <PreviewField key={question.id} question={question} />
+            previewQuestions.map((question) => (
+              <PreviewField
+                key={question.id}
+                question={question}
+                value={previewAnswers[question.id]}
+                onChange={(value) => setPreviewAnswers((answers) => ({ ...answers, [question.id]: value }))}
+              />
             ))
           )}
           <div className='rounded-md border border-dashed p-3 text-sm text-muted-foreground'>
@@ -477,11 +533,37 @@ export function EventCheckoutFormView({ eventId }: { eventId: string }) {
         ticketTypes={ticketTypes ?? []}
         onSuccess={refetch}
       />
+      <ConfirmDialog
+        open={Boolean(deleteTarget)}
+        onOpenChange={(open) => {
+          if (!open) setDeleteTarget(undefined)
+        }}
+        title='Remove checkout field'
+        description='Fields with historical answers are hidden instead of hard-deleted so existing order answers and consent snapshots remain auditable.'
+        confirmText='Remove field'
+        variant='destructive'
+        pending={Boolean(deleteTarget && submittingId === deleteTarget.id)}
+        onConfirm={() => {
+          if (deleteTarget) void deleteQuestion(deleteTarget)
+        }}
+      />
     </div>
   )
 }
 
-function PreviewField({ question }: { question: AdminCheckoutQuestion }) {
+function PreviewField({
+  question,
+  value,
+  onChange,
+}: {
+  question: AdminCheckoutQuestion
+  value: unknown
+  onChange: (value: unknown) => void
+}) {
+  const stringValue = typeof value === 'string' ? value : ''
+  const selectedValues = Array.isArray(value)
+    ? value.filter((item): item is string => typeof item === 'string')
+    : []
   const label = (
     <label className='text-sm font-medium'>
       {question.label}
@@ -493,7 +575,7 @@ function PreviewField({ question }: { question: AdminCheckoutQuestion }) {
     return (
       <div className='space-y-2'>
         <div className='flex items-start gap-2'>
-          <Checkbox disabled />
+          <Checkbox checked={value === 'true'} onCheckedChange={(checked) => onChange(checked ? 'true' : 'false')} />
           <div className='space-y-1'>
             {label}
             {question.consentText && (
@@ -509,15 +591,44 @@ function PreviewField({ question }: { question: AdminCheckoutQuestion }) {
     <div className='space-y-2'>
       {label}
       {question.type === 'textarea' ? (
-        <Textarea disabled placeholder={question.placeholder} />
-      ) : question.type === 'select' || question.type === 'multiselect' ? (
-        <Select disabled>
+        <Textarea value={stringValue} onChange={(event) => onChange(event.target.value)} placeholder={question.placeholder} />
+      ) : question.type === 'multiselect' ? (
+        <div className='space-y-2 rounded-md border p-3'>
+          {(question.options ?? []).map((option) => (
+            <label key={option} className='flex items-center gap-2 text-sm'>
+              <Checkbox
+                checked={selectedValues.includes(option)}
+                onCheckedChange={(checked) => {
+                  const next = checked
+                    ? [...selectedValues, option]
+                    : selectedValues.filter((value) => value !== option)
+                  onChange(next)
+                }}
+              />
+              <span>{option}</span>
+            </label>
+          ))}
+        </div>
+      ) : question.type === 'select' ? (
+        <Select value={stringValue} onValueChange={onChange}>
           <SelectTrigger>
             <SelectValue placeholder={question.options?.[0] ?? 'Select'} />
           </SelectTrigger>
+          <SelectContent>
+            {(question.options ?? []).map((option) => (
+              <SelectItem key={option} value={option}>
+                {option}
+              </SelectItem>
+            ))}
+          </SelectContent>
         </Select>
       ) : (
-        <Input disabled type={question.type === 'date' ? 'date' : 'text'} placeholder={question.placeholder} />
+        <Input
+          value={stringValue}
+          onChange={(event) => onChange(event.target.value)}
+          type={question.type === 'date' ? 'date' : question.type === 'email' ? 'email' : 'text'}
+          placeholder={question.placeholder}
+        />
       )}
       {question.description && (
         <p className='text-xs text-muted-foreground'>{question.description}</p>

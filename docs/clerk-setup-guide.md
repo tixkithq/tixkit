@@ -17,6 +17,12 @@ CLERK_WEBHOOK_SECRET=
 
 In this mode, the dashboard uses fixture/local state for empty screens and the API accepts the local principal. **Local dev mode never grants production access** and must not be enabled in deployed environments.
 
+## Local Development With Clerk
+
+When `NODE_ENV=development` and Clerk keys are configured, GateKit verifies the Clerk session normally. If the verified Clerk user does not yet have a `user_profiles` row, the API auto-provisions that user into the deterministic local development tenant and organization with local-dev permissions. This keeps dev Clerk sign-in usable without requiring public Clerk webhooks or a completed Temporal identity-sync run on every workstation.
+
+Production does not use this path. Outside `NODE_ENV=development`, missing `user_profiles` rows still fail closed with `401 User profile not found. Identity sync may be pending.`
+
 ## Production Configuration
 
 ### 1. Create a Clerk application
