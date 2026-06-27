@@ -55,7 +55,7 @@ describe('AdminApi settings fixtures', () => {
     }
   })
 
-  it('invites team members and starts payment account setup through the typed API', async () => {
+  it('invites members and starts payment account setup through the typed API', async () => {
     const inviteResult = await adminApi.inviteTeamMember('org_demo', {
       email: 'teammate@example.test',
       role: 'viewer',
