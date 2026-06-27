@@ -45,7 +45,7 @@ vi.mock('./nav-user', () => ({
 vi.mock('./scope-selector', () => ({
   ScopeSelector: ({ className }: { className?: string }) => (
     <nav aria-label="Workspace scope" className={className}>
-      Org Tixkit Dev Brand Tixkit Dev
+      Workspace Tixkit Dev
     </nav>
   ),
 }));

@@ -87,7 +87,7 @@ export function TeamView() {
 
   const handleInvite = async () => {
     if (!organization) {
-      toast.error('Create an organization before inviting team members')
+      toast.error('Create a workspace before inviting members')
       return
     }
 
@@ -120,7 +120,7 @@ export function TeamView() {
     <div className='space-y-6'>
       <div className='flex flex-wrap items-center justify-between gap-2'>
         <div className='space-y-1'>
-          <h1 className='text-2xl font-bold tracking-tight'>Team</h1>
+          <h1 className='text-2xl font-bold tracking-tight'>Members</h1>
           <p className='text-sm text-muted-foreground'>Members and roles</p>
         </div>
         <Button onClick={() => setInviteOpen(true)} disabled={!organization}>
@@ -132,13 +132,13 @@ export function TeamView() {
       {bootstrapLoading || loading ? (
         <Card>
           <CardContent className='p-4 text-sm text-muted-foreground'>
-            Loading team members...
+            Loading members...
           </CardContent>
         </Card>
       ) : error ? (
         <EmptyState
           icon={UsersRound}
-          title='Team settings unavailable'
+          title='Members unavailable'
           description={error}
           action={
             <Button variant='outline' onClick={() => void loadTeam()}>
@@ -149,14 +149,14 @@ export function TeamView() {
       ) : !organization ? (
         <EmptyState
           icon={UsersRound}
-          title='Select an organization'
-          description='Choose an organization from the workspace selector before managing team access.'
+          title='Select a workspace'
+          description='Choose a workspace from the sidebar before managing member access.'
         />
       ) : members.length === 0 ? (
         <EmptyState
           icon={UsersRound}
-          title='No team members yet'
-          description='Invite teammates and assign roles to collaborate on events.'
+          title='No members yet'
+          description='Invite members and assign roles to collaborate on events.'
           action={
             <Button onClick={() => setInviteOpen(true)}>
               <Plus className='size-4' />
@@ -202,9 +202,9 @@ export function TeamView() {
       <Dialog open={inviteOpen} onOpenChange={setInviteOpen}>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>Invite Team Member</DialogTitle>
+            <DialogTitle>Invite Member</DialogTitle>
             <DialogDescription>
-              Send an invitation to join your organization.
+              Send an invitation to join your workspace.
             </DialogDescription>
           </DialogHeader>
           <div className='space-y-4'>
@@ -215,7 +215,7 @@ export function TeamView() {
                 <Input
                   id='invite-email'
                   type='email'
-                  placeholder='teammate@example.com'
+                  placeholder='member@example.com'
                   value={inviteEmail}
                   onChange={(e) => setInviteEmail(e.target.value)}
                   className='ps-8'

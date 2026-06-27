@@ -102,7 +102,7 @@ export default function PaymentsPage() {
 
   const handleConnect = async () => {
     if (!organization) {
-      toast.error('Create an organization before connecting Stripe')
+      toast.error('Create a workspace before connecting Stripe')
       return
     }
 
@@ -223,8 +223,8 @@ export default function PaymentsPage() {
           ) : !organization ? (
             <EmptyState
               icon={Wallet}
-              title='Select an organization'
-              description='Choose an organization from the workspace selector before configuring payment providers.'
+              title='Select a workspace'
+              description='Choose a workspace from the sidebar before configuring payment providers.'
             />
           ) : connectedAccount ? (
             <div className='space-y-4'>

@@ -161,9 +161,9 @@ export function CommandMenu() {
 
   const settingsItems: CommandMenuItem[] = [
     { id: 'settings-profile', title: 'Profile Settings', href: routes.settingsProfile, icon: User, keywords: ['profile', 'account'] },
-    { id: 'settings-org', title: 'Organization Settings', href: routes.settingsOrganization, icon: Building2, keywords: ['organization', 'tenant'] },
+    { id: 'settings-workspace', title: 'Workspace Settings', href: routes.settingsWorkspace, icon: Building2, keywords: ['workspace', 'organization', 'tenant'] },
     { id: 'settings-appearance', title: 'Appearance Settings', href: routes.settingsAppearance, icon: Palette, keywords: ['theme', 'appearance', 'dark', 'light'] },
-    { id: 'settings-team', title: 'Team Settings', href: routes.settingsTeam, icon: Users, keywords: ['team', 'members', 'roles'], requiredPermission: 'settings.write' },
+    { id: 'settings-members', title: 'Members Settings', href: routes.settingsTeam, icon: Users, keywords: ['members', 'users', 'team', 'roles'], requiredPermission: 'settings.write' },
     { id: 'settings-billing', title: 'Billing Settings', href: routes.settingsBilling, icon: CreditCard, keywords: ['billing', 'plan', 'invoices'], requiredPermission: 'billing.write' },
     { id: 'settings-payments', title: 'Payment Settings', href: routes.settingsPayments, icon: Wallet, keywords: ['payments', 'stripe', 'connect'], requiredPermission: 'billing.write' },
     { id: 'settings-branding', title: 'Branding Settings', href: routes.settingsBranding, icon: Palette, keywords: ['branding', 'logo', 'colors', 'domains'], requiredPermission: 'settings.write' },

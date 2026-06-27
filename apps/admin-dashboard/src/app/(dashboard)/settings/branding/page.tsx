@@ -15,6 +15,7 @@ import { useBootstrap } from '@/context/bootstrap-provider'
 export default function BrandingPage() {
   const { availableBrands, brandId, loading: bootstrapLoading, error: bootstrapError } = useBootstrap()
   const [brand, setBrand] = React.useState<AdminBrand | null>(null)
+  const [brandName, setBrandName] = React.useState('')
   const [primaryColor, setPrimaryColor] = React.useState('#222222')
   const [domain, setDomain] = React.useState('')
   const [domains, setDomains] = React.useState<AdminBrandDomain[]>([])
@@ -40,6 +41,7 @@ export default function BrandingPage() {
 
     const selectedBrand = availableBrands.find((candidate) => candidate.id === brandId) ?? null
     setBrand(selectedBrand)
+    setBrandName(selectedBrand?.name ?? '')
     setPrimaryColor(
       typeof selectedBrand?.theme.primaryColor === 'string'
         ? selectedBrand.theme.primaryColor
@@ -82,8 +84,15 @@ export default function BrandingPage() {
       return
     }
 
+    const nextBrandName = brandName.trim()
+    if (!nextBrandName) {
+      toast.error('Brand name is required')
+      return
+    }
+
     setSaving(true)
     const result = await adminApi.updateBrand(brand.id, {
+      name: nextBrandName,
       theme: {
         ...brand.theme,
         primaryColor,
@@ -97,7 +106,8 @@ export default function BrandingPage() {
     }
 
     setBrand(result.data)
-    toast.success('Branding settings saved')
+    setBrandName(result.data.name)
+    toast.success('Brand settings saved')
   }
 
   const handleLogoUpload = async (file: File | undefined) => {
@@ -167,10 +177,28 @@ export default function BrandingPage() {
         <EmptyState
           icon={ImageIcon}
           title='Select a brand'
-          description='Choose a brand from the workspace selector before configuring checkout identity.'
+          description='Choose a brand from the sidebar before configuring checkout identity.'
         />
       ) : (
       <>
+      <Card>
+        <CardHeader>
+          <CardTitle>Brand Details</CardTitle>
+          <CardDescription>
+            Set the public-facing brand name for checkout and event pages.
+          </CardDescription>
+        </CardHeader>
+        <CardContent className='space-y-4'>
+          <div className='space-y-2'>
+            <Label htmlFor='brand-name'>Brand Name</Label>
+            <Input
+              id='brand-name'
+              value={brandName}
+              onChange={(event) => setBrandName(event.target.value)}
+            />
+          </div>
+        </CardContent>
+      </Card>
       <Card>
         <CardHeader>
           <CardTitle>Logo</CardTitle>

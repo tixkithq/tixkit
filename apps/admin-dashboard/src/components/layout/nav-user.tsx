@@ -3,8 +3,8 @@
 import Link from 'next/link'
 import {
   BadgeCheck,
+  Building2,
   ChevronsUpDown,
-  CreditCard,
   LogOut,
   Settings,
 } from 'lucide-react'
@@ -95,9 +95,9 @@ export function NavUser() {
                   </Link>
                 </DropdownMenuItem>
                 <DropdownMenuItem asChild>
-                  <Link href='/settings/organization' prefetch={false}>
-                    <CreditCard />
-                    Organization
+                  <Link href='/settings/workspace' prefetch={false}>
+                    <Building2 />
+                    Workspace
                   </Link>
                 </DropdownMenuItem>
                 <DropdownMenuItem asChild>

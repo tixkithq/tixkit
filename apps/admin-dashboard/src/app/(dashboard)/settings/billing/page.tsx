@@ -93,8 +93,8 @@ export default function BillingPage() {
           ) : !organization ? (
             <EmptyState
               icon={CreditCard}
-              title='Select an organization'
-              description='Choose an organization from the workspace selector before viewing billing.'
+              title='Select a workspace'
+              description='Choose a workspace from the sidebar before viewing billing.'
             />
           ) : (
           <>

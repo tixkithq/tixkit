@@ -68,6 +68,11 @@ export function ScopeSelector({ className }: ScopeSelectorProps) {
   const selectedBrand = availableBrands.find((brand) => brand.id === brandId);
   const canSwitchOrganizations = organizations.length > 1;
   const canSwitchBrands = availableBrands.length > 1;
+  const brandMatchesWorkspace =
+    !!selectedBrand &&
+    !!selectedOrganization &&
+    selectedBrand.name.trim().toLowerCase() === selectedOrganization.name.trim().toLowerCase();
+  const showBrandScope = canSwitchBrands || !brandMatchesWorkspace;
 
   return (
     <nav
@@ -77,13 +82,13 @@ export function ScopeSelector({ className }: ScopeSelectorProps) {
       {canSwitchOrganizations ? (
         <Select value={organizationId} onValueChange={setOrganizationId}>
           <SelectTrigger
-            aria-label="Select organization"
+            aria-label="Select workspace"
             size="sm"
             className="h-7 w-full min-w-0 border-0 bg-transparent px-2 text-sidebar-foreground shadow-none hover:bg-sidebar-accent hover:text-sidebar-accent-foreground focus-visible:ring-0 focus-visible:ring-offset-0 dark:bg-transparent dark:hover:bg-sidebar-accent [&_svg:not([class*='text-'])]:text-sidebar-foreground/70"
           >
             <Building2 className="size-4 text-sidebar-foreground/70" />
-            <span className="text-xs font-medium text-sidebar-foreground/70">Org</span>
-            <SelectValue placeholder="Select organization" />
+            <span className="text-xs font-medium text-sidebar-foreground/70">Workspace</span>
+            <SelectValue placeholder="Select workspace" />
           </SelectTrigger>
           <SelectContent>
             {organizations.map((organization) => (
@@ -94,10 +99,10 @@ export function ScopeSelector({ className }: ScopeSelectorProps) {
           </SelectContent>
         </Select>
       ) : (
-        <ScopePill icon={Building2} label="Org" value={selectedOrganization?.name} />
+        <ScopePill icon={Building2} label="Workspace" value={selectedOrganization?.name} />
       )}
 
-      {canSwitchBrands ? (
+      {showBrandScope && canSwitchBrands ? (
         <Select
           value={brandId}
           onValueChange={setBrandId}
@@ -123,7 +128,7 @@ export function ScopeSelector({ className }: ScopeSelectorProps) {
           </SelectContent>
         </Select>
       ) : (
-        <ScopePill icon={Store} label="Brand" value={selectedBrand?.name} />
+        showBrandScope ? <ScopePill icon={Store} label="Brand" value={selectedBrand?.name} /> : null
       )}
     </nav>
   );

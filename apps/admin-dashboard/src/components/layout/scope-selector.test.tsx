@@ -48,14 +48,33 @@ describe('ScopeSelector', () => {
     }
   })
 
-  it('renders single organization and brand as borderless sidebar rows', () => {
+  it('renders a single workspace as a borderless sidebar row and hides a same-name single brand', () => {
     render(<ScopeSelector />)
 
-    expect(screen.getByText('Org')).toBeInTheDocument()
-    expect(screen.getByText('Brand')).toBeInTheDocument()
-    expect(screen.getAllByText('Tixkit Dev')).toHaveLength(2)
+    expect(screen.getByText('Workspace')).toBeInTheDocument()
+    expect(screen.queryByText('Brand')).not.toBeInTheDocument()
+    expect(screen.getAllByText('Tixkit Dev')).toHaveLength(1)
     expect(screen.queryByRole('combobox')).not.toBeInTheDocument()
-    expect(screen.getByText('Org').closest('div')).not.toHaveClass('border')
+    expect(screen.getByText('Workspace').closest('div')).not.toHaveClass('border')
+  })
+
+  it('shows a single brand when its name differs from the selected workspace', () => {
+    bootstrapState.value = {
+      ...bootstrapState.value,
+      availableBrands: [
+        { id: 'brd_1', organizationId: 'org_1', name: 'Festival Brand' },
+      ],
+      brands: [
+        { id: 'brd_1', organizationId: 'org_1', name: 'Festival Brand' },
+      ],
+    }
+
+    render(<ScopeSelector />)
+
+    expect(screen.getByText('Workspace')).toBeInTheDocument()
+    expect(screen.getByText('Brand')).toBeInTheDocument()
+    expect(screen.getByText('Tixkit Dev')).toBeInTheDocument()
+    expect(screen.getByText('Festival Brand')).toBeInTheDocument()
     expect(screen.getByText('Brand').closest('div')).not.toHaveClass('border')
   })
 
@@ -79,7 +98,7 @@ describe('ScopeSelector', () => {
     render(<ScopeSelector />)
 
     expect(
-      screen.getByRole('combobox', { name: 'Select organization' }),
+      screen.getByRole('combobox', { name: 'Select workspace' }),
     ).toBeInTheDocument()
     expect(
       screen.getByRole('combobox', { name: 'Select brand' }),

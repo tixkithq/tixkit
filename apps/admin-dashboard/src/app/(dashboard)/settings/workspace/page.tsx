@@ -11,7 +11,7 @@ import { Building2 } from 'lucide-react'
 import { toast } from 'sonner'
 import { useBootstrap } from '@/context/bootstrap-provider'
 
-export default function OrganizationPage() {
+export default function WorkspacePage() {
   const { organizations, organizationId, loading: bootstrapLoading, error: bootstrapError } = useBootstrap()
   const [organization, setOrganization] = React.useState<AdminOrganization | null>(null)
   const [name, setName] = React.useState('')
@@ -39,7 +39,7 @@ export default function OrganizationPage() {
 
   const handleSave = async () => {
     if (!organization) {
-      toast.error('No organization is available to update')
+      toast.error('No workspace is available to update')
       return
     }
 
@@ -56,47 +56,47 @@ export default function OrganizationPage() {
     }
 
     setOrganization(result.data)
-    toast.success('Organization settings saved')
+    toast.success('Workspace settings saved')
   }
 
   return (
     <div className='space-y-6'>
       <div className='space-y-1'>
-        <h2 className='text-xl font-semibold tracking-tight'>Organization</h2>
+        <h2 className='text-xl font-semibold tracking-tight'>Workspace</h2>
         <p className='text-sm text-muted-foreground'>
-          Tenant and organization details
+          Workspace name, slug, and account-level details
         </p>
       </div>
       {bootstrapLoading ? (
         <Card>
           <CardContent className='p-4 text-sm text-muted-foreground'>
-            Loading organization settings...
+            Loading workspace settings...
           </CardContent>
         </Card>
       ) : error ? (
         <EmptyState
           icon={Building2}
-          title='Organization settings unavailable'
+          title='Workspace settings unavailable'
           description={error}
         />
       ) : !organization ? (
         <EmptyState
           icon={Building2}
-          title='Select an organization'
-          description='Choose an organization from the workspace selector before editing organization settings.'
+          title='Select a workspace'
+          description='Choose a workspace from the sidebar before editing workspace settings.'
         />
       ) : (
       <Card>
         <CardHeader>
-          <CardTitle>Organization Details</CardTitle>
+          <CardTitle>Workspace Details</CardTitle>
           <CardDescription>
-            Configure your persisted organization name and slug.
+            Configure your workspace name and slug.
           </CardDescription>
         </CardHeader>
         <CardContent className='space-y-4'>
           <div className='grid gap-4 sm:grid-cols-2'>
             <div className='space-y-2'>
-              <Label htmlFor='org-name'>Organization Name</Label>
+              <Label htmlFor='org-name'>Workspace Name</Label>
               <Input
                 id='org-name'
                 value={name}

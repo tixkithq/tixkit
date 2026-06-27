@@ -39,6 +39,7 @@ const localApiEnv = {
   STRIPE_SECRET_KEY: stripeSecretKey,
   STRIPE_WEBHOOK_SECRET: stripeWebhookSecret,
   NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY: stripePublishableKey,
+  CORS_ALLOWED_ORIGINS: [checkoutUrl, adminUrl, 'http://localhost:3000', 'http://localhost:3001'].join(','),
   RATE_LIMIT_MAX: '100000',
   RATE_LIMIT_TIME_WINDOW: '1 minute',
 };

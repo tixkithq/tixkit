@@ -56,8 +56,8 @@ export function ProfileDropdown() {
               </Link>
             </DropdownMenuItem>
             <DropdownMenuItem asChild>
-              <Link href='/settings/organization' prefetch={false}>
-                Organization
+              <Link href='/settings/workspace' prefetch={false}>
+                Workspace
                 <DropdownMenuShortcut>⌘O</DropdownMenuShortcut>
               </Link>
             </DropdownMenuItem>
