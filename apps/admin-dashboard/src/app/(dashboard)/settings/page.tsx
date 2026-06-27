@@ -18,9 +18,9 @@ import { routes } from '@/lib/routes'
 
 const settingsSections = [
   {
-    title: 'Organization',
-    description: 'Workspace name, slug, and tenant-level details.',
-    href: routes.settingsOrganization,
+    title: 'Workspace',
+    description: 'Workspace name, slug, and account-level details.',
+    href: routes.settingsWorkspace,
     icon: Building2,
   },
   {
@@ -30,8 +30,8 @@ const settingsSections = [
     icon: ImageIcon,
   },
   {
-    title: 'Team',
-    description: 'Invite teammates and manage organization roles.',
+    title: 'Members',
+    description: 'Invite people and manage workspace roles.',
     href: routes.settingsTeam,
     icon: Users,
   },

@@ -72,8 +72,8 @@ export const sidebarData: SidebarData = {
       title: 'Configure',
       items: [
         {
-          title: 'Organization',
-          url: '/settings/organization',
+          title: 'Workspace',
+          url: '/settings/workspace',
           icon: Building2,
           requiredPermission: 'settings.write',
         },
@@ -90,7 +90,7 @@ export const sidebarData: SidebarData = {
           requiredPermission: 'billing.write',
         },
         {
-          title: 'Team',
+          title: 'Members',
           url: '/settings/team',
           icon: Users,
           requiredPermission: 'settings.write',

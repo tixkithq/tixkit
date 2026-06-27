@@ -25,6 +25,7 @@ export const routes = {
   developerWebhooks: '/developer/webhooks',
   settings: '/settings',
   settingsProfile: '/settings/profile',
+  settingsWorkspace: '/settings/workspace',
   settingsOrganization: '/settings/organization',
   settingsAppearance: '/settings/appearance',
   settingsTeam: '/settings/team',

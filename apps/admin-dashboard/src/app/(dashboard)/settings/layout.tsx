@@ -8,9 +8,9 @@ import { routes } from '@/lib/routes'
 import { cn } from '@/lib/utils'
 
 const settingsNav = [
-  { title: 'Organization', href: routes.settingsOrganization, icon: Building2 },
+  { title: 'Workspace', href: routes.settingsWorkspace, icon: Building2 },
   { title: 'Brand', href: routes.settingsBranding, icon: ImageIcon },
-  { title: 'Team', href: routes.settingsTeam, icon: Users },
+  { title: 'Members', href: routes.settingsTeam, icon: Users },
   { title: 'Payments', href: routes.settingsPayments, icon: Wallet },
   { title: 'Billing', href: routes.settingsBilling, icon: CreditCard },
   { title: 'Profile', href: routes.settingsProfile, icon: User },
@@ -29,7 +29,7 @@ export default function SettingsLayout({
       <div className='space-y-1'>
         <h1 className='text-2xl font-bold tracking-tight'>Settings</h1>
         <p className='text-sm text-muted-foreground'>
-          Manage your account, organization, and platform configuration
+          Manage your account, workspace, and platform configuration
         </p>
       </div>
       <div className='flex flex-col gap-8 lg:flex-row'>
