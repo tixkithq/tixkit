@@ -1386,7 +1386,7 @@ function normalizeTeamMember(value: Record<string, unknown>, organizationId: str
   return {
     id: String(value.id),
     organizationId: String(value.organizationId ?? value.organization_id ?? organizationId),
-    name: stringValue(value.name, email.split('@')[0] || 'Team member'),
+    name: stringValue(value.name, email.split('@')[0] || 'Member'),
     email,
     role,
     status,
@@ -2567,7 +2567,7 @@ export const adminApi: AdminApi = {
         }),
       () => {
         const organization = fixtureOrganizations.find((org) => org.id === organizationId)
-        if (!organization) return err<AdminOrganization>(apiError('not_found', 'Organization not found', 404))
+        if (!organization) return err<AdminOrganization>(apiError('not_found', 'Workspace not found', 404))
         Object.assign(organization, input, { updatedAt: iso(0) })
         return ok(organization)
       }
