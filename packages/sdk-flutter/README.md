@@ -36,5 +36,9 @@ Run locally with a Flutter toolchain:
 
 ```sh
 cd packages/sdk-flutter
+flutter pub get
 flutter test
+cd example
+flutter pub get
+flutter build web --release
 ```

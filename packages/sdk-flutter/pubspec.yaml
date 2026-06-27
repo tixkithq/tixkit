@@ -1,7 +1,7 @@
 name: tixkit_flutter
 description: Flutter SDK for Tixkit scanner, ticket display, checkout handoff, and offline sync.
 version: 0.1.0
-publish_to: none
+homepage: https://tixkit.com
 
 environment:
   sdk: ">=3.4.0 <4.0.0"
@@ -16,4 +16,4 @@ dependencies:
 dev_dependencies:
   flutter_test:
     sdk: flutter
-  lints: ^5.1.1
+  lints: ^4.0.0
