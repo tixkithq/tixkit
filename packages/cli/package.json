@@ -1,0 +1,30 @@
+{
+  "name": "@tixkit/cli",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Tixkit developer-experience CLI: quickstart, setup validation, and local webhook automation",
+  "license": "MIT",
+  "main": "./src/index.ts",
+  "scripts": {
+    "build": "tsc",
+    "lint": "oxlint src",
+    "typecheck": "tsc --noEmit",
+    "test:unit": "vitest run src/__tests__",
+    "quickstart": "bun run src/index.ts quickstart",
+    "seed:sample-data": "bun run src/index.ts seed:sample-data",
+    "setup:check": "bun run src/index.ts setup:check",
+    "dev:webhooks": "bun run src/index.ts dev:webhooks",
+    "clean": "rm -rf dist"
+  },
+  "dependencies": {
+    "@tixkit/db": "workspace:*",
+    "@tixkit/domain": "workspace:*",
+    "zod": "^4.4.3"
+  },
+  "devDependencies": {
+    "@types/node": "^22.20.0",
+    "typescript": "5.9.3",
+    "vitest": "^4.1.0"
+  }
+}

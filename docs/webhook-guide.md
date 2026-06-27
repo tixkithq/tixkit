@@ -4,6 +4,32 @@ Tixkit delivers outbound webhooks to customer-configured endpoints when domain e
 
 For inbound provider webhooks (Clerk, Stripe, Telnyx) see [Clerk Setup Guide](./clerk-setup-guide.md), [Production Deployment Guide](./production-deployment-guide.md), and `docs/telnyx-sms-local.md`.
 
+## Local Stripe webhook forwarding (C-052)
+
+For local development with real Stripe provider events, run:
+
+```bash
+bun run dev:webhooks
+```
+
+This checks that the Stripe CLI is installed and authenticated, starts `stripe listen`, forwards the required payment and Connect events to `http://localhost:4000/v1/stripe/webhooks`, captures the local webhook signing secret, and writes it to `STRIPE_WEBHOOK_SECRET` in `.env.local`. The forwarded event set is:
+
+- `payment_intent.succeeded`
+- `payment_intent.payment_failed`
+- `payment_intent.canceled`
+- `charge.refunded`
+- `charge.refund.updated`
+- `account.updated` (Stripe Connect)
+
+Run a dry-run to see the planned forwarding without starting the Stripe CLI:
+
+```bash
+bun run dev:webhooks --dry-run
+```
+
+If the Stripe CLI is missing, the command prints an install link. If it is installed but not authenticated, run `stripe login` and retry.
+
+
 ## Endpoint Management
 
 Webhook endpoints are scoped to an organization. Create one via the API (or the admin Developer settings):
@@ -60,16 +86,16 @@ Every delivery uses a versioned envelope. The `apiVersion` field is currently `2
 
 ### Supported event types
 
-| Type | When emitted | `data` shape |
-| --- | --- | --- |
-| `order.created` | Order finalized from checkout | `{ orderId, eventId, checkoutSessionId }` |
-| `order.paid` | Paid order finalized (also emitted for free orders) | `{ orderId, eventId, checkoutSessionId }` |
-| `order.refunded` | Refund workflow completed | `{ orderId, refundAmountCents, providerRefundId }` |
-| `ticket.issued` | Tickets issued after finalization | `{ orderId, ticketIds }` |
-| `ticket.checked_in` | Attendee scanned in | `{ ticketId, eventId, checkInListId }` |
-| `attendee.updated` | Attendee record updated | `{ attendeeId, eventId }` |
-| `event.published` | Event status changed to `published` | `{ eventId }` |
-| `event.cancelled` | Event cancelled | `{ eventId }` |
+| Type                | When emitted                                        | `data` shape                                       |
+| ------------------- | --------------------------------------------------- | -------------------------------------------------- |
+| `order.created`     | Order finalized from checkout                       | `{ orderId, eventId, checkoutSessionId }`          |
+| `order.paid`        | Paid order finalized (also emitted for free orders) | `{ orderId, eventId, checkoutSessionId }`          |
+| `order.refunded`    | Refund workflow completed                           | `{ orderId, refundAmountCents, providerRefundId }` |
+| `ticket.issued`     | Tickets issued after finalization                   | `{ orderId, ticketIds }`                           |
+| `ticket.checked_in` | Attendee scanned in                                 | `{ ticketId, eventId, checkInListId }`             |
+| `attendee.updated`  | Attendee record updated                             | `{ attendeeId, eventId }`                          |
+| `event.published`   | Event status changed to `published`                 | `{ eventId }`                                      |
+| `event.cancelled`   | Event cancelled                                     | `{ eventId }`                                      |
 
 Only events listed in the endpoint's `events` array are delivered.
 
@@ -77,14 +103,14 @@ Only events listed in the endpoint's `events` array are delivered.
 
 Each delivery is a `POST` with these headers:
 
-| Header | Description |
-| --- | --- |
-| `Content-Type: application/json` | UTF-8 JSON body |
-| `X-Tixkit-Event-Id: wevt_...` | Stable event ID (ULID) |
-| `X-Tixkit-Event-Type: order.paid` | Event type |
-| `X-Tixkit-Delivery: <deliveryId>` | Unique per delivery attempt |
+| Header                             | Description                       |
+| ---------------------------------- | --------------------------------- |
+| `Content-Type: application/json`   | UTF-8 JSON body                   |
+| `X-Tixkit-Event-Id: wevt_...`      | Stable event ID (ULID)            |
+| `X-Tixkit-Event-Type: order.paid`  | Event type                        |
+| `X-Tixkit-Delivery: <deliveryId>`  | Unique per delivery attempt       |
 | `X-Tixkit-Signature: t=...,v1=...` | HMAC-SHA256 signature (see below) |
-| `User-Agent: Tixkit-Webhook/1.0` | Static identifier |
+| `User-Agent: Tixkit-Webhook/1.0`   | Static identifier                 |
 
 ## Signing
 
@@ -123,9 +149,7 @@ function verifyTixkitWebhook({
   const now = Math.floor(Date.now() / 1000);
   if (Math.abs(now - timestamp) > toleranceSeconds) return false;
 
-  const expected = createHmac('sha256', secret)
-    .update(`${timestamp}.${rawBody}`)
-    .digest('hex');
+  const expected = createHmac('sha256', secret).update(`${timestamp}.${rawBody}`).digest('hex');
 
   const a = Buffer.from(expected, 'hex');
   const b = Buffer.from(signature, 'hex');
@@ -141,13 +165,13 @@ This is the same algorithm used by `@tixkit/domain`'s `signWebhookPayload` / `ve
 
 Deliveries are run by the `webhookDeliveryWorkflow` Temporal workflow (`packages/workflows/src/workflows/webhook-delivery.ts`). One workflow runs per `(eventId, endpointId)` pair.
 
-| Setting | Value |
-| --- | --- |
-| Max attempts | 5 (passed by the API; configurable per endpoint on start) |
-| Backoff | Exponential: 5s, 10s, 20s, 40s after attempts 1-4 |
-| Success | Any `2xx` response |
-| Retry | Non-2xx or activity failure |
-| Dead-letter | After `maxAttempts` exhausted; delivery row marked `dead_lettered` |
+| Setting      | Value                                                              |
+| ------------ | ------------------------------------------------------------------ |
+| Max attempts | 5 (passed by the API; configurable per endpoint on start)          |
+| Backoff      | Exponential: 5s, 10s, 20s, 40s after attempts 1-4                  |
+| Success      | Any `2xx` response                                                 |
+| Retry        | Non-2xx or activity failure                                        |
+| Dead-letter  | After `maxAttempts` exhausted; delivery row marked `dead_lettered` |
 
 The workflow returns `{ status: "delivered" }` on success or `{ status: "dead_lettered" }` when all attempts fail. Delivery records are persisted with `attempt`, `statusCode`, `response`, `deliveredAt`, and `status` for inspection.
 
