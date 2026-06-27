@@ -2,6 +2,8 @@
 // Works in Node.js and browsers with separate entry points.
 // Never exposes secret API keys in browser bundles.
 
+export const TIXKIT_API_VERSION = '2026-01-01';
+
 export type TixkitConfig = {
   apiKey?: string;
   apiBaseUrl?: string;
@@ -929,7 +931,7 @@ export class TixkitClient {
 
     this.apiKey = config.apiKey;
     this.apiBaseUrl = config.apiBaseUrl ?? 'https://api.tixkit.com';
-    this.apiVersion = config.apiVersion ?? '2026-01-01';
+    this.apiVersion = config.apiVersion ?? TIXKIT_API_VERSION;
     this.timeout = config.timeout ?? 30000;
     this.maxRetries = config.maxRetries ?? 3;
 

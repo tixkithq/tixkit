@@ -1,0 +1,7 @@
+node_modules/
+coverage/
+src/
+*.tsbuildinfo
+!dist/
+!dist/**
+dist/__tests__/

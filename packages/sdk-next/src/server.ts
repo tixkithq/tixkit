@@ -1,6 +1,8 @@
 import { TixkitClient } from '@tixkit/js';
 import { createHmac, timingSafeEqual } from 'node:crypto';
 
+export { TIXKIT_API_VERSION } from '@tixkit/js';
+
 export type TixkitNextClientConfig = {
   apiKey: string;
   apiBaseUrl?: string;
