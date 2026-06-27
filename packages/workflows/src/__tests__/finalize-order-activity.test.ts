@@ -222,6 +222,7 @@ describe('createPaymentIntentActivity capture mode', () => {
       value: {
         providerIntentId: 'pi_capture_cs_1',
         clientSecret: 'pi_capture_cs_1_secret',
+        provider: 'stripe_capture',
       },
     });
     expect(dbState.tables.payment_intents.pi_1).toMatchObject({
@@ -273,6 +274,7 @@ describe('createPaymentIntentActivity capture mode', () => {
       value: {
         providerIntentId: 'pi_provider_1',
         clientSecret: 'pi_provider_1_secret',
+        provider: 'stripe',
       },
     });
     expect(stripeMock.paymentIntentsCreate).toHaveBeenCalledTimes(1);
@@ -280,6 +282,58 @@ describe('createPaymentIntentActivity capture mode', () => {
     expect(dbState.tables.checkout_sessions.cs_1.payment_intent_id).toBe('pi_existing');
     expect(dbState.tables.checkout_sessions.cs_1.status).toBe('pending_payment');
     expect(dbState.destroy).toHaveBeenCalledTimes(1);
+  });
+
+  it('creates Stripe Connect destination charges with the configured application fee', async () => {
+    process.env.STRIPE_SECRET_KEY = 'sk_test_1';
+    dbState.tables.brands = {
+      brd_1: {
+        id: 'brd_1',
+        payment_account_id: 'pa_1',
+      },
+    };
+    dbState.tables.payment_accounts = {
+      pa_1: {
+        id: 'pa_1',
+        provider: 'stripe_connect',
+        provider_account_id: 'acct_connect_1',
+        status: 'active',
+        charges_enabled: true,
+        payouts_enabled: true,
+      },
+    };
+
+    const result = await checkoutActivities.createPaymentIntentActivity({
+      checkoutSessionId: 'cs_1',
+      tenantId: 'tnt_1',
+      brandId: 'brd_1',
+      amountCents: 2500,
+      currency: 'USD',
+      description: 'Stripe Connect checkout',
+      feeCents: 225,
+    });
+
+    expect(result).toEqual({
+      ok: true,
+      value: {
+        providerIntentId: 'pi_provider_1',
+        clientSecret: 'pi_provider_1_secret',
+        provider: 'stripe_connect',
+      },
+    });
+    expect(stripeMock.paymentIntentsCreate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        amount: 2500,
+        currency: 'usd',
+        transfer_data: { destination: 'acct_connect_1' },
+        application_fee_amount: 225,
+      }),
+      { idempotencyKey: 'cs_1' },
+    );
+    expect(dbState.tables.payment_intents.pi_1).toMatchObject({
+      provider: 'stripe_connect',
+      payment_account_id: 'pa_1',
+    });
   });
 
   it('fails closed when attaching a payment intent to an expired checkout session', async () => {

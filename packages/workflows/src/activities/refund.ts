@@ -119,6 +119,17 @@ export async function processRefundActivity(input: {
             amount: input.amountCents,
             reason: 'requested_by_customer',
           };
+          if (dbPi.payment_account_id) {
+            const connectedPaymentAccount = await trx
+              .selectFrom('payment_accounts')
+              .select(['provider'])
+              .where('id', '=', dbPi.payment_account_id)
+              .executeTakeFirst();
+            if (connectedPaymentAccount?.provider === 'stripe_connect') {
+              refundOpts.reverse_transfer = true;
+              refundOpts.refund_application_fee = true;
+            }
+          }
 
           const stripeRefund = await withSpan(
             'provider.stripe.refund.create',

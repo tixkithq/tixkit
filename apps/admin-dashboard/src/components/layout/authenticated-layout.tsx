@@ -6,7 +6,7 @@ import { LayoutProvider } from '@/context/layout-provider';
 import { SearchProvider } from '@/context/search-provider';
 import { PermissionProvider } from '@/context/permission-provider';
 import { BootstrapProvider } from '@/context/bootstrap-provider';
-import { SidebarInset, SidebarProvider } from '@/components/ui/sidebar';
+import { SidebarInset, SidebarProvider, SidebarTrigger } from '@/components/ui/sidebar';
 import { AppSidebar } from '@/components/layout/app-sidebar';
 import { SkipToMain } from '@/components/skip-to-main';
 
@@ -33,9 +33,10 @@ export function AuthenticatedLayout({ children, headerActions }: AuthenticatedLa
                 )}
               >
                 <header className="sticky top-0 z-50 border-b bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/80">
-                  <div className="flex min-h-16 w-full items-center justify-end px-4 py-3">
+                  <div className="flex min-h-16 w-full items-center gap-3 px-4 py-3">
+                    <SidebarTrigger className="shrink-0 md:hidden" />
                     {headerActions ? (
-                      <div className="flex w-full min-w-0 items-center justify-end gap-3 sm:gap-4">
+                      <div className="flex min-w-0 flex-1 items-center justify-end gap-3 sm:gap-4">
                         {headerActions}
                       </div>
                     ) : null}

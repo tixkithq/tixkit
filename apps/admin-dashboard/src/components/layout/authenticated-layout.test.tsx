@@ -43,6 +43,7 @@ describe('AuthenticatedLayout', () => {
     renderLayout();
 
     const header = screen.getByRole('banner');
+    expect(header).toContainElement(screen.getByRole('button', { name: 'Toggle Sidebar' }));
     expect(header).toContainElement(screen.getByRole('button', { name: 'Header action' }));
     expect(header).not.toContainElement(screen.getByRole('complementary', { name: 'App sidebar' }));
     expect(screen.getByRole('complementary', { name: 'App sidebar' })).toBeInTheDocument();

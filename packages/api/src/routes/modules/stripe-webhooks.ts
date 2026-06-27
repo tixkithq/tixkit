@@ -67,15 +67,19 @@ export const stripeWebhookRoutes: FastifyPluginAsync = async (app) => {
       }
     }
 
-    // Start the durable reconciliation workflow; never process provider state in
-    // the request handler. Reconciliation expects the inner Stripe object
-    // (PaymentIntent, Charge, etc.), not the whole event envelope.
-    await temporalClient.startPaymentReconciliation({
-      providerEventId: event.id,
-      provider: 'stripe',
-      eventType: event.type,
-      data: (event.data?.object ?? {}) as unknown as Record<string, unknown>,
-    });
+    if (event.type === 'account.updated') {
+      await syncStripeConnectAccount(db, event.data.object as Stripe.Account);
+    } else {
+      // Start the durable reconciliation workflow; never process payment state in
+      // the request handler. Reconciliation expects the inner Stripe object
+      // (PaymentIntent, Charge, etc.), not the whole event envelope.
+      await temporalClient.startPaymentReconciliation({
+        providerEventId: event.id,
+        provider: 'stripe',
+        eventType: event.type,
+        data: (event.data?.object ?? {}) as unknown as Record<string, unknown>,
+      });
+    }
 
     // Signal the checkout workflow for payment lifecycle events so it can finalize or fail.
     if (event.type === 'payment_intent.succeeded' || event.type === 'payment_intent.payment_failed') {
@@ -182,11 +186,13 @@ async function resolveStripeEventTenantId(
 
   // Resolve tenant via the connected account (Stripe Connect).
   const stripeAccount = (event as unknown as { account?: string }).account;
-  if (stripeAccount) {
+  const accountObjectId = event.type === 'account.updated' && typeof object.id === 'string' ? object.id : undefined;
+  const connectedAccountId = stripeAccount ?? accountObjectId;
+  if (connectedAccountId) {
     const paymentAccount = await db
       .selectFrom('payment_accounts')
       .select(['tenant_id'])
-      .where('provider_account_id', '=', stripeAccount)
+      .where('provider_account_id', '=', connectedAccountId)
       .executeTakeFirst();
     if (paymentAccount?.tenant_id) return paymentAccount.tenant_id;
   }
@@ -205,4 +211,29 @@ async function resolveStripeEventTenantId(
     .where('provider_intent_id', '=', providerIntentId)
     .executeTakeFirst();
   return paymentIntent?.tenant_id ?? null;
+}
+
+function stripeAccountStatus(account: Stripe.Account): 'active' | 'pending' | 'restricted' {
+  if (account.charges_enabled && account.payouts_enabled) return 'active';
+  if ((account.requirements?.disabled_reason ?? null) !== null) return 'restricted';
+  return 'pending';
+}
+
+async function syncStripeConnectAccount(db: Database, account: Stripe.Account): Promise<void> {
+  if (!account.id) return;
+  await db
+    .updateTable('payment_accounts')
+    .set({
+      status: stripeAccountStatus(account),
+      default_currency: account.default_currency?.toUpperCase() ?? 'USD',
+      details_submitted: Boolean(account.details_submitted),
+      charges_enabled: Boolean(account.charges_enabled),
+      payouts_enabled: Boolean(account.payouts_enabled),
+      requirements: JSON.stringify(account.requirements ?? {}),
+      disabled_reason: account.requirements?.disabled_reason ?? null,
+      updated_at: new Date(),
+    })
+    .where('provider', '=', 'stripe_connect')
+    .where('provider_account_id', '=', account.id)
+    .execute();
 }

@@ -1133,6 +1133,11 @@ export const InitialMigration: Migration = {
       .addColumn('provider_account_id', varchar(255), (col) => col.notNull())
       .addColumn('status', varchar(50), (col) => col.notNull().defaultTo('pending'))
       .addColumn('default_currency', varchar(3), (col) => col.notNull().defaultTo('USD'))
+      .addColumn('details_submitted', booleanType(), (col) => col.notNull().defaultTo(false))
+      .addColumn('charges_enabled', booleanType(), (col) => col.notNull().defaultTo(false))
+      .addColumn('payouts_enabled', booleanType(), (col) => col.notNull().defaultTo(false))
+      .addColumn('requirements', jsonType())
+      .addColumn('disabled_reason', varchar(255))
       .addColumn('created_at', timestampType(), (col) => col.notNull().defaultTo(nowDefault()))
       .addColumn('updated_at', timestampType(), (col) => col.notNull().defaultTo(nowDefault()))
       .execute();

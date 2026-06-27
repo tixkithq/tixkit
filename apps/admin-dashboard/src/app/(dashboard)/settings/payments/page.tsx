@@ -189,6 +189,9 @@ export default function PaymentsPage() {
   const connectedAccount = accounts.find((account) => account.provider === 'stripe_connect' || account.provider === 'stripe')
   const isActive = connectedAccount?.status === 'active'
   const isRefreshingConnected = refreshingAccountId === connectedAccount?.id
+  const requirements = connectedAccount?.requirements ?? {}
+  const currentRequirements = Array.isArray(requirements.currently_due) ? requirements.currently_due.length : 0
+  const pendingRequirements = Array.isArray(requirements.pending_verification) ? requirements.pending_verification.length : 0
 
   return (
     <PermissionGuard required='billing.write'>
@@ -246,6 +249,30 @@ export default function PaymentsPage() {
                   ) : null}
                 </div>
               </div>
+              <div className='grid gap-3 sm:grid-cols-2 lg:grid-cols-4'>
+                <div className='rounded-md border p-3'>
+                  <p className='text-xs font-medium uppercase text-muted-foreground'>Details</p>
+                  <p className='text-sm'>{connectedAccount.detailsSubmitted ? 'Submitted' : 'Required'}</p>
+                </div>
+                <div className='rounded-md border p-3'>
+                  <p className='text-xs font-medium uppercase text-muted-foreground'>Charges</p>
+                  <p className='text-sm'>{connectedAccount.chargesEnabled ? 'Enabled' : 'Disabled'}</p>
+                </div>
+                <div className='rounded-md border p-3'>
+                  <p className='text-xs font-medium uppercase text-muted-foreground'>Payouts</p>
+                  <p className='text-sm'>{connectedAccount.payoutsEnabled ? 'Enabled' : 'Disabled'}</p>
+                </div>
+                <div className='rounded-md border p-3'>
+                  <p className='text-xs font-medium uppercase text-muted-foreground'>Requirements</p>
+                  <p className='text-sm'>{currentRequirements} due, {pendingRequirements} pending</p>
+                </div>
+              </div>
+              {connectedAccount.disabledReason ? (
+                <div className='rounded-md border border-amber-500/30 bg-amber-500/10 p-3'>
+                  <p className='text-sm font-medium'>Stripe disabled reason</p>
+                  <p className='text-sm text-muted-foreground'>{connectedAccount.disabledReason}</p>
+                </div>
+              ) : null}
               <div className='flex flex-wrap gap-2'>
                 {!isActive ? (
                   <Button

@@ -60,6 +60,11 @@ describe('openApiSpec', () => {
 
   it('documents Stripe Connect onboarding URL responses', () => {
     expect(openApiSpec.components.schemas.PaymentAccount.properties).toHaveProperty('onboardingUrl');
+    expect(openApiSpec.components.schemas.PaymentAccount.properties).toHaveProperty('detailsSubmitted');
+    expect(openApiSpec.components.schemas.PaymentAccount.properties).toHaveProperty('chargesEnabled');
+    expect(openApiSpec.components.schemas.PaymentAccount.properties).toHaveProperty('payoutsEnabled');
+    expect(openApiSpec.components.schemas.PaymentAccount.properties).toHaveProperty('requirements');
+    expect(openApiSpec.components.schemas.PaymentAccount.properties).toHaveProperty('disabledReason');
     expect(
       openApiSpec.paths['/organizations/{organizationId}/payment-accounts/stripe-connect'].post.responses,
     ).toHaveProperty('201');

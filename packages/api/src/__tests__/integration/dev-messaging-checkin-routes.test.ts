@@ -497,8 +497,9 @@ describe('brand domain creation', () => {
           id: 'acct_created_1',
           charges_enabled: false,
           payouts_enabled: false,
+          details_submitted: false,
           default_currency: 'usd',
-          requirements: { disabled_reason: null },
+          requirements: { currently_due: ['business_profile.url'], pending_verification: [], disabled_reason: null },
         })),
       },
       accountLinks: {
@@ -517,6 +518,11 @@ describe('brand domain creation', () => {
       providerAccountId: 'acct_created_1',
       status: 'pending',
       defaultCurrency: 'USD',
+      detailsSubmitted: false,
+      chargesEnabled: false,
+      payoutsEnabled: false,
+      requirements: { currently_due: ['business_profile.url'], pending_verification: [], disabled_reason: null },
+      disabledReason: null,
       onboardingUrl: 'https://connect.stripe.test/onboard/acct_created_1',
     });
     expect(tables.payment_accounts).toHaveLength(1);
@@ -527,6 +533,13 @@ describe('brand domain creation', () => {
       provider_account_id: 'acct_created_1',
       status: 'pending',
       default_currency: 'USD',
+      details_submitted: false,
+      charges_enabled: false,
+      payouts_enabled: false,
+      disabled_reason: null,
+    });
+    expect(JSON.parse(String((tables.payment_accounts as Array<Record<string, unknown>>)[0].requirements))).toMatchObject({
+      currently_due: ['business_profile.url'],
     });
     expect(stripe.accounts.create).toHaveBeenCalledWith({
       type: 'express',
@@ -566,6 +579,11 @@ describe('brand domain creation', () => {
         provider_account_id: 'acct_refresh_1',
         status: 'pending',
         default_currency: 'USD',
+        details_submitted: false,
+        charges_enabled: false,
+        payouts_enabled: false,
+        requirements: null,
+        disabled_reason: null,
         created_at: new Date(),
         updated_at: new Date(),
       }],
@@ -577,6 +595,7 @@ describe('brand domain creation', () => {
           id: 'acct_refresh_1',
           charges_enabled: true,
           payouts_enabled: true,
+          details_submitted: true,
           default_currency: 'cad',
           requirements: { disabled_reason: null },
         })),
@@ -597,11 +616,23 @@ describe('brand domain creation', () => {
       providerAccountId: 'acct_refresh_1',
       status: 'active',
       defaultCurrency: 'CAD',
+      detailsSubmitted: true,
+      chargesEnabled: true,
+      payoutsEnabled: true,
+      requirements: { disabled_reason: null },
+      disabledReason: null,
       onboardingUrl: 'https://connect.stripe.test/update/acct_refresh_1',
     });
     expect(tables.payment_accounts[0]).toMatchObject({
       status: 'active',
       default_currency: 'CAD',
+      details_submitted: true,
+      charges_enabled: true,
+      payouts_enabled: true,
+      disabled_reason: null,
+    });
+    expect(JSON.parse(String((tables.payment_accounts as Array<Record<string, unknown>>)[0].requirements))).toMatchObject({
+      disabled_reason: null,
     });
     expect(tables.audit_logs).toHaveLength(1);
     expect(stripe.accounts.retrieve).toHaveBeenCalledWith('acct_refresh_1');

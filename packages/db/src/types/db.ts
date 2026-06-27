@@ -577,6 +577,26 @@ export interface RefundTable {
   updated_at: Timestamp;
 }
 
+export interface PaymentCompensationTable {
+  id: string;
+  tenant_id: string;
+  checkout_session_id: string;
+  payment_intent_id: string | null;
+  provider: string;
+  provider_intent_id: string;
+  amount_cents: number;
+  currency: string;
+  action: string;
+  status: string;
+  provider_compensation_id: string | null;
+  attempts: number;
+  reason: string;
+  last_error: string | null;
+  metadata: string;
+  created_at: Timestamp;
+  updated_at: Timestamp;
+}
+
 export interface PaymentEventTable {
   id: string;
   tenant_id: string | null;
@@ -1007,6 +1027,11 @@ export interface PaymentAccountTable {
   provider_account_id: string;
   status: string;
   default_currency: string;
+  details_submitted: boolean;
+  charges_enabled: boolean;
+  payouts_enabled: boolean;
+  requirements: string | null;
+  disabled_reason: string | null;
   created_at: Timestamp;
   updated_at: Timestamp;
 }
@@ -1139,6 +1164,7 @@ export interface DB {
   scan_logs: ScanLogTable;
   payment_intents: PaymentIntentTable;
   refunds: RefundTable;
+  payment_compensations: PaymentCompensationTable;
   payment_events: PaymentEventTable;
   discount_codes: DiscountCodeTable;
   discount_redemptions: DiscountRedemptionTable;

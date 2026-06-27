@@ -16,6 +16,8 @@ import { TaxInvoicesMigration } from './migrations/0012_tax_invoices.js';
 import { OAuthGrantsMigration } from './migrations/0013_oauth_grants.js';
 import { MarketingIntegrationsMigration } from './migrations/0014_marketing_integrations.js';
 import { MarketingIntegrationsUniqueMigration } from './migrations/0015_marketing_integrations_unique.js';
+import { PaymentCompensationsMigration } from './migrations/0016_payment_compensations.js';
+import { PaymentAccountCapabilitiesMigration } from './migrations/0017_payment_account_capabilities.js';
 
 const INITIAL_MIGRATION_NAME = '0001_initial';
 const MIGRATION_TABLE = 'kysely_migration';
@@ -102,6 +104,7 @@ const ALL_SCHEMA_TABLES = [
   'oauth_refresh_tokens',
   'oauth_access_tokens',
   'marketing_integrations',
+  'payment_compensations',
 ] as const;
 
 function buildMigrationFailureMessage(error: unknown): string {
@@ -134,7 +137,9 @@ class TixkitMigrationProvider implements MigrationProvider {
     '0013_oauth_grants': OAuthGrantsMigration,
     '0014_marketing_integrations': MarketingIntegrationsMigration,
     '0015_marketing_integrations_unique': MarketingIntegrationsUniqueMigration,
-    };
+    '0016_payment_compensations': PaymentCompensationsMigration,
+    '0017_payment_account_capabilities': PaymentAccountCapabilitiesMigration,
+  };
   }
 }
 

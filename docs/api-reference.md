@@ -273,7 +273,10 @@ All routes below require authentication. Most mutations are tenant-scoped and ad
 | `GET` | `/v1/brands` | any | List brands in tenant |
 | `GET` | `/v1/organizations/:organizationId/payment-accounts` | `billing.write` | List payment accounts |
 | `POST` | `/v1/organizations/:organizationId/payment-accounts/stripe-connect` | `billing.write` | Register/return Stripe Connect account |
+| `POST` | `/v1/organizations/:organizationId/payment-accounts/:paymentAccountId/stripe-connect/refresh` | `billing.write` | Refresh Stripe Connect account status and onboarding/update link |
 | `GET` | `/v1/organizations/:organizationId/billing` | `billing.write` | Plan and ticket usage summary |
+
+Payment account responses include Connect lifecycle fields: `detailsSubmitted`, `chargesEnabled`, `payoutsEnabled`, `requirements`, `disabledReason`, and optional `onboardingUrl`.
 
 ### Events
 

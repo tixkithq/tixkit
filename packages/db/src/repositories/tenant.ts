@@ -238,6 +238,11 @@ export class PaymentAccountRepository extends BaseRepository {
     providerAccountId: string;
     status?: string;
     defaultCurrency?: string;
+    detailsSubmitted?: boolean;
+    chargesEnabled?: boolean;
+    payoutsEnabled?: boolean;
+    requirements?: Record<string, unknown>;
+    disabledReason?: string | null;
   }) {
     const id = `pa_${ulid()}`;
     const now = new Date();
@@ -251,6 +256,11 @@ export class PaymentAccountRepository extends BaseRepository {
         provider_account_id: input.providerAccountId,
         status: input.status ?? 'pending',
         default_currency: input.defaultCurrency ?? 'USD',
+        details_submitted: input.detailsSubmitted ?? false,
+        charges_enabled: input.chargesEnabled ?? false,
+        payouts_enabled: input.payoutsEnabled ?? false,
+        requirements: JSON.stringify(input.requirements ?? {}),
+        disabled_reason: input.disabledReason ?? null,
         created_at: now,
         updated_at: now,
       },

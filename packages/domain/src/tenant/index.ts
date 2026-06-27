@@ -73,6 +73,11 @@ export type PaymentAccount = TenantScopedEntity & {
   providerAccountId: string;
   status: 'pending' | 'active' | 'restricted';
   defaultCurrency: string;
+  detailsSubmitted: boolean;
+  chargesEnabled: boolean;
+  payoutsEnabled: boolean;
+  requirements: Record<string, unknown>;
+  disabledReason: string | null;
 };
 
 export type FeatureFlag = TenantScopedEntity & {

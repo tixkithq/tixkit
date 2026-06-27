@@ -17,14 +17,22 @@ const mockState = vi.hoisted(() => ({
   order: undefined as Record<string, unknown> | undefined,
   refunds: [] as Record<string, unknown>[],
   createdRefunds: [] as Record<string, unknown>[],
+  compensations: [] as Record<string, unknown>[],
   updates: [] as Array<{ table: string; id: string; input: Record<string, unknown> }>,
   timeline: [] as Array<{ orderId: string; type: string; description: string }>,
+}));
+
+vi.mock('../activities/checkout.js', () => ({
+  compensateOrphanPaymentActivity: async (input: Record<string, unknown>) => {
+    mockState.compensations.push(input);
+    return { ok: true, value: { status: 'succeeded', action: 'refund', compensationId: 'pcmp_1' } };
+  },
 }));
 
 vi.mock('@tixkit/db', () => ({
   createDb: () => mockState.db,
   PaymentIntentRepository: class {
-    async findByProviderIntentId() {
+    async findByProviderAndIntentId() {
       return mockState.paymentIntent;
     }
 
@@ -87,6 +95,7 @@ describe('reconcilePaymentActivity', () => {
     };
     mockState.refunds = [];
     mockState.createdRefunds = [];
+    mockState.compensations = [];
     mockState.updates = [];
     mockState.timeline = [];
   });
@@ -129,6 +138,42 @@ describe('reconcilePaymentActivity', () => {
       description: 'Payment confirmed via Stripe',
     });
   });
+
+  it('compensates a succeeded payment intent when no order is attached', async () => {
+    mockState.paymentIntent = {
+      id: 'pi_db_1',
+      tenant_id: 'tnt_1',
+      order_id: null,
+      checkout_session_id: 'cs_1',
+      provider: 'stripe',
+      provider_intent_id: 'pi_provider_1',
+      amount_cents: 10000,
+      currency: 'USD',
+      status: 'requires_payment_method',
+    };
+
+    const result = await reconcilePaymentActivity({
+      providerEventId: 'evt_orphan_success',
+      provider: 'stripe',
+      eventType: 'payment_intent.succeeded',
+      data: { id: 'pi_provider_1', status: 'succeeded' },
+    });
+
+    expect(result).toMatchObject({ ok: true, value: { orderId: undefined, status: 'compensated:succeeded' } });
+    expect(mockState.compensations).toContainEqual({
+      checkoutSessionId: 'cs_1',
+      tenantId: 'tnt_1',
+      provider: 'stripe',
+      providerIntentId: 'pi_provider_1',
+      amountCents: 10000,
+      currency: 'USD',
+      reason: 'Successful provider payment has no durable order attached',
+      providerEventId: 'evt_orphan_success',
+      eventType: 'payment_intent.succeeded',
+      providerStatus: 'succeeded',
+      source: 'payment_reconciliation',
+    });
+  });
 });
 
 describe('reconcileRefundActivity', () => {
@@ -149,6 +194,7 @@ describe('reconcileRefundActivity', () => {
     };
     mockState.refunds = [];
     mockState.createdRefunds = [];
+    mockState.compensations = [];
     mockState.updates = [];
     mockState.timeline = [];
   });

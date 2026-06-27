@@ -22,7 +22,7 @@ export {
   AttendeeRepository,
 } from './checkout.js';
 export { TicketRepository, CheckInListRepository, ScanLogRepository } from './ticket.js';
-export { PaymentIntentRepository, RefundRepository, PaymentEventRepository } from './payment.js';
+export { PaymentIntentRepository, PaymentCompensationRepository, RefundRepository, PaymentEventRepository } from './payment.js';
 export {
   UserProfileRepository,
   ApiKeyRepository,

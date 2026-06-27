@@ -691,6 +691,11 @@ export type PaymentAccount = {
   providerAccountId: string;
   status: string;
   defaultCurrency: string;
+  detailsSubmitted: boolean;
+  chargesEnabled: boolean;
+  payoutsEnabled: boolean;
+  requirements: Record<string, unknown>;
+  disabledReason: string | null;
   onboardingUrl?: string;
   createdAt: string;
   updatedAt: string;

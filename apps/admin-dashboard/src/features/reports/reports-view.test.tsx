@@ -291,7 +291,7 @@ describe('ReportsView', () => {
     expect(view.getByText('18')).toBeInTheDocument()
 
     fireEvent.click(view.getByRole('tab', { name: 'Affiliate' }))
-    expect(await view.findAllByText('Select report scope')).not.toHaveLength(0)
+    expect(await view.findAllByText('Select workspace')).not.toHaveLength(0)
     expect(adminApiMock.getAffiliateReport).not.toHaveBeenCalled()
   })
 

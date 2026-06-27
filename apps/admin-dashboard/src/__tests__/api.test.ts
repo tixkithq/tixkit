@@ -69,10 +69,23 @@ describe('AdminApi settings fixtures', () => {
     expect(accountResult.ok).toBe(true)
     if (accountResult.ok) {
       expect(accountResult.data.provider).toBe('stripe_connect')
+      expect(accountResult.data).toMatchObject({
+        detailsSubmitted: false,
+        chargesEnabled: false,
+        payoutsEnabled: false,
+        requirements: {},
+        disabledReason: null,
+      })
       const refreshResult = await adminApi.refreshStripeConnectAccount('org_demo', accountResult.data.id)
       expect(refreshResult.ok).toBe(true)
       if (refreshResult.ok) {
         expect(refreshResult.data.status).toBe('active')
+        expect(refreshResult.data).toMatchObject({
+          detailsSubmitted: true,
+          chargesEnabled: true,
+          payoutsEnabled: true,
+          disabledReason: null,
+        })
       }
     }
   })

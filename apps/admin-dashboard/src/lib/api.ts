@@ -873,6 +873,11 @@ export type AdminPaymentAccount = {
   providerAccountId: string
   status: PaymentAccountStatus
   defaultCurrency: string
+  detailsSubmitted: boolean
+  chargesEnabled: boolean
+  payoutsEnabled: boolean
+  requirements: Record<string, unknown>
+  disabledReason: string | null
   onboardingUrl?: string
   createdAt?: string
   updatedAt?: string
@@ -1398,6 +1403,9 @@ function normalizeTeamMember(value: Record<string, unknown>, organizationId: str
 function normalizePaymentAccount(value: Record<string, unknown>, organizationId: string): AdminPaymentAccount {
   const provider = value.provider === 'stripe' || value.provider === 'mock' ? value.provider : 'stripe_connect'
   const status = value.status === 'active' || value.status === 'restricted' ? value.status : 'pending'
+  const requirements = value.requirements && typeof value.requirements === 'object' && !Array.isArray(value.requirements)
+    ? value.requirements as Record<string, unknown>
+    : {}
   return {
     id: String(value.id),
     organizationId: String(value.organizationId ?? value.organization_id ?? organizationId),
@@ -1405,6 +1413,11 @@ function normalizePaymentAccount(value: Record<string, unknown>, organizationId:
     providerAccountId: String(value.providerAccountId ?? value.provider_account_id ?? ''),
     status,
     defaultCurrency: stringValue(value.defaultCurrency ?? value.default_currency, 'USD'),
+    detailsSubmitted: Boolean(value.detailsSubmitted ?? value.details_submitted),
+    chargesEnabled: Boolean(value.chargesEnabled ?? value.charges_enabled),
+    payoutsEnabled: Boolean(value.payoutsEnabled ?? value.payouts_enabled),
+    requirements,
+    disabledReason: stringValue(value.disabledReason ?? value.disabled_reason, undefined) ?? null,
     onboardingUrl: stringValue(value.onboardingUrl ?? value.onboarding_url, undefined),
     createdAt: stringValue(value.createdAt ?? value.created_at, undefined),
     updatedAt: stringValue(value.updatedAt ?? value.updated_at, undefined),
@@ -2692,6 +2705,11 @@ export const adminApi: AdminApi = {
           providerAccountId: `acct_${Math.random().toString(36).slice(2, 14)}`,
           status: 'pending',
           defaultCurrency: 'USD',
+          detailsSubmitted: false,
+          chargesEnabled: false,
+          payoutsEnabled: false,
+          requirements: {},
+          disabledReason: null,
           createdAt: iso(0),
           updatedAt: iso(0),
         }
@@ -2718,6 +2736,11 @@ export const adminApi: AdminApi = {
         const updated = {
           ...account,
           status: account.status === 'pending' ? 'active' : account.status,
+          detailsSubmitted: true,
+          chargesEnabled: true,
+          payoutsEnabled: true,
+          requirements: {},
+          disabledReason: null,
           updatedAt: new Date().toISOString(),
         } satisfies AdminPaymentAccount
         Object.assign(account, updated)

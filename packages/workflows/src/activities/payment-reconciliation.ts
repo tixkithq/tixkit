@@ -2,6 +2,22 @@ import { createDb } from '@tixkit/db';
 import { PaymentIntentRepository, OrderRepository, RefundRepository } from '@tixkit/db';
 import type { WorkflowActivityResult } from '../shared/types.js';
 import { okResult, errResult } from '../shared/types.js';
+import { compensateOrphanPaymentActivity } from './checkout.js';
+
+async function findPaymentIntentForProviderEvent(
+  repo: PaymentIntentRepository,
+  provider: string,
+  providerIntentId: string,
+) {
+  const exact = await repo.findByProviderAndIntentId(provider, providerIntentId);
+  if (exact) return exact;
+
+  if (provider === 'stripe') {
+    return repo.findByProviderAndIntentId('stripe_connect', providerIntentId);
+  }
+
+  return undefined;
+}
 
 export async function reconcilePaymentActivity(input: {
   providerEventId: string;
@@ -21,7 +37,7 @@ export async function reconcilePaymentActivity(input: {
 
     const piRepo = new PaymentIntentRepository(db);
     const orderRepo = new OrderRepository(db);
-    const dbPi = await piRepo.findByProviderIntentId(providerIntentId);
+    const dbPi = await findPaymentIntentForProviderEvent(piRepo, input.provider, providerIntentId);
     if (!dbPi) {
       return okResult({ orderId: undefined, status: 'noop' });
     }
@@ -40,6 +56,26 @@ export async function reconcilePaymentActivity(input: {
 	      }
 	      return okResult({ orderId: dbPi.order_id, status: paymentIntent.status });
 	    }
+
+    if (isSuccessfulPaymentEvent(input.eventType, paymentIntent.status)) {
+      const compensation = await compensateOrphanPaymentActivity({
+        checkoutSessionId: dbPi.checkout_session_id,
+        tenantId: dbPi.tenant_id,
+        provider: dbPi.provider,
+        providerIntentId: dbPi.provider_intent_id,
+        amountCents: Number(dbPi.amount_cents),
+        currency: dbPi.currency,
+        reason: 'Successful provider payment has no durable order attached',
+        providerEventId: input.providerEventId,
+        eventType: input.eventType,
+        providerStatus: paymentIntent.status,
+        source: 'payment_reconciliation',
+      });
+      if (!compensation.ok) {
+        return errResult(compensation.errorCode, compensation.message, compensation.retryable);
+      }
+      return okResult({ orderId: undefined, status: `compensated:${compensation.value.status}` });
+    }
 
     return okResult({ orderId: undefined, status: paymentIntent.status });
   } catch (err) {
@@ -117,7 +153,7 @@ export async function reconcileRefundActivity(input: {
       return okResult({ orderId: undefined, status: 'noop' });
     }
 
-    const dbPi = await piRepo.findByProviderIntentId(providerIntentId);
+    const dbPi = await findPaymentIntentForProviderEvent(piRepo, input.provider, providerIntentId);
     if (!dbPi?.order_id) {
       return okResult({ orderId: undefined, status: 'noop' });
     }
@@ -208,7 +244,7 @@ export async function reconcileDisputeActivity(input: {
 
     const piRepo = new PaymentIntentRepository(db);
     const orderRepo = new OrderRepository(db);
-    const dbPi = await piRepo.findByProviderIntentId(providerIntentId);
+    const dbPi = await findPaymentIntentForProviderEvent(piRepo, input.provider, providerIntentId);
     if (!dbPi?.order_id) {
       return okResult({ orderId: undefined, status: 'noop' });
     }

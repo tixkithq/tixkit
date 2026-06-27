@@ -98,8 +98,9 @@ function makeWebhookDeliveryInput(overrides: Record<string, unknown> = {}) {
 }
 
 const defaultActivities = {
-  createPaymentIntentActivity: async () => okResult({ providerIntentId: 'pi_test_1', clientSecret: 'cs_test_1' }),
+  createPaymentIntentActivity: async () => okResult({ providerIntentId: 'pi_test_1', clientSecret: 'cs_test_1', provider: 'stripe' }),
   finalizeOrderActivity: async () => okResult({ orderId: 'ord_test_1' }),
+  compensateOrphanPaymentActivity: async () => okResult({ status: 'succeeded', action: 'refund', compensationId: 'pcmp_1' }),
   sendConfirmationEmailActivity: async () => okResult({ jobId: 'emj_1', status: 'queued' }),
   issueTicketsActivity: async () => okResult({ issued: 2, jobId: 'emj_2' }),
   releaseHoldActivity: async () => okResult({ released: true }),
@@ -151,7 +152,7 @@ describe('checkoutSessionWorkflow', () => {
     let paymentInput: Record<string, unknown> | undefined;
     setActivity('createPaymentIntentActivity', async (input) => {
       paymentInput = input;
-      return okResult({ providerIntentId: 'pi_test_1', clientSecret: 'cs_test_1' });
+      return okResult({ providerIntentId: 'pi_test_1', clientSecret: 'cs_test_1', provider: 'stripe' });
     });
 
     const result = await checkoutSessionWorkflow(makeCheckoutInput({ isFreeOrder: false, feeCents: 725 }));
@@ -199,6 +200,83 @@ describe('checkoutSessionWorkflow', () => {
     const result = await checkoutSessionWorkflow(makeCheckoutInput({ isFreeOrder: false }));
     expect(result.status).toBe('failed');
     expect(releaseInput).toEqual({ checkoutSessionId: 'cs_test_1', checkoutSessionStatus: 'expired' });
+  });
+
+  it('compensates paid checkout when finalize fails after payment success', async () => {
+    let releaseInput: Record<string, unknown> | undefined;
+    let compensationInput: Record<string, unknown> | undefined;
+    let emailCalled = false;
+    let issueTicketsCalled = false;
+    let webhookCalled = false;
+
+    setActivity('finalizeOrderActivity', async () => errResult('HOLD_EXPIRED', 'Checkout hold hld_1 has expired', false));
+    setActivity('releaseHoldActivity', async (input) => {
+      releaseInput = input;
+      return okResult({ released: true });
+    });
+    setActivity('compensateOrphanPaymentActivity', async (input) => {
+      compensationInput = input;
+      return okResult({ status: 'succeeded', action: 'refund', compensationId: 'pcmp_1' });
+    });
+    setActivity('sendConfirmationEmailActivity', async () => {
+      emailCalled = true;
+      return okResult({ jobId: 'emj_1', status: 'queued' });
+    });
+    setActivity('issueTicketsActivity', async () => {
+      issueTicketsCalled = true;
+      return okResult({ issued: 2, jobId: 'emj_2' });
+    });
+    setActivity('emitWebhookEventActivity', async () => {
+      webhookCalled = true;
+      return okResult({ eventId: 'evt_1', deliveries: [] });
+    });
+
+    const result = await checkoutSessionWorkflow(makeCheckoutInput({ isFreeOrder: false }));
+
+    expect(result.status).toBe('failed');
+    expect(releaseInput).toEqual({ checkoutSessionId: 'cs_test_1', checkoutSessionStatus: 'expired' });
+    expect(compensationInput).toMatchObject({
+      checkoutSessionId: 'cs_test_1',
+      tenantId: 'tnt_1',
+      provider: 'stripe',
+      providerIntentId: 'pi_test_1',
+      amountCents: 10000,
+      currency: 'USD',
+      reason: 'Checkout hold hld_1 has expired',
+      source: 'checkout_finalize_failed',
+      metadata: { eventId: 'evt_1', brandId: 'brd_1', errorCode: 'HOLD_EXPIRED' },
+    });
+    expect(emailCalled).toBe(false);
+    expect(issueTicketsCalled).toBe(false);
+    expect(webhookCalled).toBe(false);
+  });
+
+  it('compensates when payment succeeds while timeout release is in progress', async () => {
+    let compensationInput: Record<string, unknown> | undefined;
+
+    mockState.conditionResult = false;
+    setActivity('releaseHoldActivity', async () => {
+      mockState.signals.paymentSucceeded?.('pi_test_1');
+      return okResult({ released: true });
+    });
+    setActivity('compensateOrphanPaymentActivity', async (input) => {
+      compensationInput = input;
+      return okResult({ status: 'succeeded', action: 'refund', compensationId: 'pcmp_1' });
+    });
+
+    const result = await checkoutSessionWorkflow(makeCheckoutInput({ isFreeOrder: false }));
+
+    expect(result.status).toBe('failed');
+    expect(compensationInput).toMatchObject({
+      checkoutSessionId: 'cs_test_1',
+      tenantId: 'tnt_1',
+      provider: 'stripe',
+      providerIntentId: 'pi_test_1',
+      amountCents: 10000,
+      currency: 'USD',
+      reason: 'Payment succeeded after checkout timeout',
+      source: 'checkout_timeout_race',
+    });
   });
 });
 

@@ -17,7 +17,7 @@ The local development contract is defined in `.env.local.example`, `package.json
 | Temporal UI (optional) | Workflow inspection | `infra/docker-compose.yml` `temporal-ui` | Internal-only UI behind auth |
 | S3-compatible object storage | Export files, upload artifacts, branding assets, avatar assets | `infra/docker-compose.yml` `minio` | S3, GCS via S3 API, R2 |
 | Clerk | Admin auth and identity sync | dev mode (no keys) | Clerk production instance |
-| Stripe | Payments (Stripe Connect) | capture/mock mode | Stripe live keys + Connect |
+| Stripe | Payments (Stripe Connect) | capture/mock mode | Stripe live keys + Connect, connected-account webhooks, and at least one onboarded charges-enabled test account for release validation |
 | Telnyx | SMS transport | capture/mock mode | Telnyx production keys |
 | Email transport | Transactional + bulk email | capture adapter | Provider route in `email_provider_routes` |
 | OpenTelemetry collector | Trace collection | OTLP endpoint on `localhost:4318` if configured | Managed collector or vendor OTLP ingest |

@@ -43,7 +43,19 @@ type StripeWebhookTestState = {
     currency: string;
     payment_account_id?: string | null;
   };
-  paymentAccount?: { id: string; provider_account_id: string };
+  paymentAccount?: {
+    id: string;
+    tenant_id?: string;
+    provider?: string;
+    provider_account_id: string;
+    status?: string;
+    default_currency?: string;
+    details_submitted?: boolean;
+    charges_enabled?: boolean;
+    payouts_enabled?: boolean;
+    requirements?: string | null;
+    disabled_reason?: string | null;
+  };
   operations: string[];
   failInsertOnce?: boolean;
   eventOnFailedInsert?: PaymentEventRow;
@@ -137,31 +149,41 @@ function createMockDb(state: StripeWebhookTestState): unknown {
 
   function createUpdate(table: string) {
     const filters: QueryFilter[] = [];
-    return {
-      set: (values: Record<string, unknown>) => ({
-        where: (column: string, _operator: string, value: unknown) => {
-          filters.push({ column, value });
-          return {
-          returningAll: () => ({
-            executeTakeFirstOrThrow: async () => {
-              if (table !== 'payment_events') throw new Error(`Unexpected update on ${table}`);
-              const event = findPaymentEvent(filters);
-              if (!event) throw new Error('No row for payment_events');
-              state.operations.push('update:payment_events');
-              Object.assign(event, values);
-              return event;
-            },
-          }),
-          execute: async () => {
-            if (table !== 'payment_events') throw new Error(`Unexpected update on ${table}`);
-            const event = findPaymentEvent(filters);
-            if (!event) throw new Error('No row for payment_events');
-            state.operations.push('update:payment_events');
-            Object.assign(event, values);
-          },
-        };
+    const updateQuery = (values: Record<string, unknown>) => ({
+      where(column: string, _operator: string, value: unknown) {
+        filters.push({ column, value });
+        return updateQuery(values);
+      },
+      returningAll: () => ({
+        executeTakeFirstOrThrow: async () => {
+          if (table !== 'payment_events') throw new Error(`Unexpected update on ${table}`);
+          const event = findPaymentEvent(filters);
+          if (!event) throw new Error('No row for payment_events');
+          state.operations.push('update:payment_events');
+          Object.assign(event, values);
+          return event;
         },
       }),
+      execute: async () => {
+        if (table === 'payment_events') {
+          const event = findPaymentEvent(filters);
+          if (!event) throw new Error('No row for payment_events');
+          state.operations.push('update:payment_events');
+          Object.assign(event, values);
+          return;
+        }
+        if (table === 'payment_accounts') {
+          if (rowMatches(state.paymentAccount, filters)) {
+            state.operations.push('update:payment_accounts');
+            Object.assign(state.paymentAccount!, values);
+          }
+          return;
+        }
+        throw new Error(`Unexpected update on ${table}`);
+      },
+    });
+    return {
+      set: updateQuery,
     };
   }
 
@@ -204,6 +226,28 @@ function createStripePaymentIntentEvent(overrides: Record<string, unknown> = {})
       },
     },
     ...overrides,
+  };
+}
+
+function createStripeAccountUpdatedEvent() {
+  return {
+    id: 'evt_account_updated_1',
+    type: 'account.updated',
+    account: 'acct_connect_1',
+    data: {
+      object: {
+        id: 'acct_connect_1',
+        details_submitted: true,
+        charges_enabled: true,
+        payouts_enabled: false,
+        default_currency: 'cad',
+        requirements: {
+          currently_due: ['external_account'],
+          pending_verification: [],
+          disabled_reason: 'requirements.past_due',
+        },
+      },
+    },
   };
 }
 
@@ -285,6 +329,62 @@ describe('Stripe webhook route', () => {
       },
     });
     expect(temporalClient.signalPaymentSucceeded).toHaveBeenCalledWith('cs_1', 'pi_stripe_1');
+
+    await app.close();
+  });
+
+  it('ingests account.updated events into the connected payment account state', async () => {
+    const state: StripeWebhookTestState = {
+      events: [],
+      paymentAccount: {
+        id: 'pa_1',
+        tenant_id: 'tnt_1',
+        provider: 'stripe_connect',
+        provider_account_id: 'acct_connect_1',
+        status: 'pending',
+        default_currency: 'USD',
+        details_submitted: false,
+        charges_enabled: false,
+        payouts_enabled: false,
+        requirements: null,
+        disabled_reason: null,
+      },
+      operations: [],
+    };
+    const temporalClient = {
+      startPaymentReconciliation: vi.fn(),
+      signalPaymentSucceeded: vi.fn(),
+      signalPaymentFailed: vi.fn(),
+    };
+    const app = await setupStripeWebhookApp(createMockDb(state) as Database, temporalClient);
+
+    const res = await app.inject({
+      method: 'POST',
+      url: '/',
+      headers: { 'content-type': 'application/json', 'stripe-signature': 'sig_test' },
+      payload: createStripeAccountUpdatedEvent(),
+    });
+
+    expect(res.statusCode).toBe(200);
+    expect(res.json()).toEqual({ received: true, duplicate: false });
+    expect(temporalClient.startPaymentReconciliation).not.toHaveBeenCalled();
+    expect(state.paymentAccount).toMatchObject({
+      status: 'restricted',
+      default_currency: 'CAD',
+      details_submitted: true,
+      charges_enabled: true,
+      payouts_enabled: false,
+      disabled_reason: 'requirements.past_due',
+    });
+    expect(JSON.parse(state.paymentAccount?.requirements ?? '{}')).toMatchObject({
+      currently_due: ['external_account'],
+      disabled_reason: 'requirements.past_due',
+    });
+    expect(state.operations).toEqual([
+      'insert:payment_events',
+      'update:payment_accounts',
+      'update:payment_events',
+    ]);
 
     await app.close();
   });

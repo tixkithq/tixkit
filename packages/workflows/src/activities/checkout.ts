@@ -1,5 +1,5 @@
 import { createDb, type Database } from '@tixkit/db';
-import { EmailJobRepository, PaymentIntentRepository, OrderRepository } from '@tixkit/db';
+import { EmailJobRepository, PaymentCompensationRepository, PaymentIntentRepository, OrderRepository } from '@tixkit/db';
 import { ulid } from 'ulid';
 import { QrService } from '@tixkit/domain/tickets';
 import { isConsentAccepted, isConsentAnswerSnapshot } from '@tixkit/domain';
@@ -42,6 +42,12 @@ type FinalizeTransactionResult =
 type FinalizePaymentIntentValidationResult =
   | { ok: true; paymentIntent?: { id: string; provider: string } }
   | { ok: false; errorCode: string; message: string; retryable: boolean };
+
+type OrphanPaymentCompensationAction = 'cancel' | 'refund' | 'local_noop';
+type OrphanPaymentCompensationStatus = 'succeeded' | 'failed' | 'manual_review' | 'already_ordered';
+
+type PaymentIntentRow = NonNullable<Awaited<ReturnType<PaymentIntentRepository['findById']>>>;
+type PaymentCompensationRow = NonNullable<Awaited<ReturnType<PaymentCompensationRepository['findByProviderIntent']>>>;
 
 type TicketPdfInput = {
   ticket: {
@@ -125,6 +131,154 @@ function isUniqueConstraintError(error: unknown): boolean {
   const errno = String(record.errno ?? '');
   const message = String(record.message ?? '').toLowerCase();
   return code === '23505' || code === 'SQLITE_CONSTRAINT' || code === 'ER_DUP_ENTRY' || errno === '1062' || message.includes('unique constraint') || message.includes('duplicate entry');
+}
+
+function isStripePaymentProvider(provider: string): boolean {
+  return provider === 'stripe' || provider === 'stripe_connect';
+}
+
+function stripeCompensationIdempotencyKey(input: {
+  action: OrphanPaymentCompensationAction;
+  provider: string;
+  providerIntentId: string;
+  checkoutSessionId: string;
+}): string {
+  return `orphan-payment:${input.action}:${input.provider}:${input.providerIntentId}:${input.checkoutSessionId}`;
+}
+
+function stripePaymentIntentIsCancelable(status: string): boolean {
+  return [
+    'requires_payment_method',
+    'requires_confirmation',
+    'requires_action',
+    'requires_capture',
+    'processing',
+  ].includes(status);
+}
+
+function providerIntentMetadata(input: {
+  reason: string;
+  providerEventId?: string;
+  eventType?: string;
+  providerStatus?: string;
+  source?: string;
+  metadata?: Record<string, unknown>;
+}): Record<string, unknown> {
+  return {
+    ...input.metadata,
+    reason: input.reason,
+    providerEventId: input.providerEventId,
+    eventType: input.eventType,
+    providerStatus: input.providerStatus,
+    source: input.source,
+  };
+}
+
+async function findCompensablePaymentIntent(input: {
+  repo: PaymentIntentRepository;
+  checkoutSessionId: string;
+  provider?: string;
+  providerIntentId?: string;
+}): Promise<PaymentIntentRow | undefined> {
+  if (input.provider && input.providerIntentId) {
+    const exact = await input.repo.findByProviderAndIntentId(input.provider, input.providerIntentId);
+    if (exact) return exact;
+  }
+
+  if (input.providerIntentId) {
+    const sessionScoped = await input.repo.findByCheckoutSessionAndProviderIntentId(
+      input.checkoutSessionId,
+      input.providerIntentId,
+    );
+    if (sessionScoped) return sessionScoped;
+    return undefined;
+  }
+
+  return input.repo.findLatestByCheckoutSession(input.checkoutSessionId);
+}
+
+async function releaseOrphanCheckoutResources(db: Database, checkoutSessionId: string): Promise<void> {
+  const now = new Date();
+  await db.transaction().execute(async (trx) => {
+    await trx
+      .updateTable('checkout_holds')
+      .set({ status: 'released', updated_at: now })
+      .where('checkout_session_id', '=', checkoutSessionId)
+      .where('status', '=', 'active')
+      .execute();
+
+    await trx
+      .updateTable('checkout_sessions')
+      .set({ status: 'expired', updated_at: now })
+      .where('id', '=', checkoutSessionId)
+      .where('status', '!=', 'completed')
+      .execute();
+  });
+}
+
+async function createOrLoadPaymentCompensation(input: {
+  repo: PaymentCompensationRepository;
+  tenantId: string;
+  checkoutSessionId: string;
+  paymentIntentId?: string | null;
+  provider: string;
+  providerIntentId: string;
+  amountCents: number;
+  currency: string;
+  action: OrphanPaymentCompensationAction;
+  reason: string;
+  metadata: Record<string, unknown>;
+}): Promise<PaymentCompensationRow> {
+  const existing = await input.repo.findByProviderIntent(
+    input.provider,
+    input.providerIntentId,
+    input.checkoutSessionId,
+  );
+  if (existing) return existing;
+
+  try {
+    return await input.repo.create({
+      tenantId: input.tenantId,
+      checkoutSessionId: input.checkoutSessionId,
+      paymentIntentId: input.paymentIntentId,
+      provider: input.provider,
+      providerIntentId: input.providerIntentId,
+      amountCents: input.amountCents,
+      currency: input.currency,
+      action: input.action,
+      status: 'pending',
+      reason: input.reason,
+      metadata: input.metadata,
+    });
+  } catch (err) {
+    if (!isUniqueConstraintError(err)) throw err;
+    const replayed = await input.repo.findByProviderIntent(
+      input.provider,
+      input.providerIntentId,
+      input.checkoutSessionId,
+    );
+    if (!replayed) throw err;
+    return replayed;
+  }
+}
+
+async function completePaymentCompensation(input: {
+  repo: PaymentCompensationRepository;
+  compensation: PaymentCompensationRow;
+  action: OrphanPaymentCompensationAction;
+  status: OrphanPaymentCompensationStatus;
+  providerCompensationId?: string | null;
+  lastError?: string | null;
+  metadata?: Record<string, unknown>;
+}): Promise<PaymentCompensationRow> {
+  return input.repo.update(input.compensation.id, {
+    action: input.action,
+    status: input.status,
+    provider_compensation_id: input.providerCompensationId ?? null,
+    attempts: Number(input.compensation.attempts) + 1,
+    last_error: input.lastError ?? null,
+    metadata: JSON.stringify(input.metadata ?? {}),
+  });
 }
 
 async function findReusablePaymentIntent(input: {
@@ -274,6 +428,7 @@ async function validateFinalizePaymentIntent(input: {
       'currency',
     ])
     .where('provider_intent_id', '=', input.providerIntentId)
+    .where('checkout_session_id', '=', input.checkoutSessionId)
     .executeTakeFirst();
 
   if (!paymentIntent) {
@@ -319,7 +474,7 @@ export async function createPaymentIntentActivity(input: {
   currency: string;
   description?: string;
   feeCents?: number;
-}): Promise<WorkflowActivityResult<{ providerIntentId: string; clientSecret?: string }>> {
+}): Promise<WorkflowActivityResult<{ providerIntentId: string; clientSecret?: string; provider?: string }>> {
   const db = createDb();
   try {
     const stripeSecretKey = process.env.STRIPE_SECRET_KEY;
@@ -389,7 +544,7 @@ export async function createPaymentIntentActivity(input: {
         );
       }
 
-      return okResult({ providerIntentId, clientSecret });
+      return okResult({ providerIntentId, clientSecret, provider });
     }
 
     const stripe = new Stripe(stripeSecretKey);
@@ -517,9 +672,331 @@ export async function createPaymentIntentActivity(input: {
     return okResult({
       providerIntentId: paymentIntent.id,
       clientSecret,
+      provider,
     });
   } catch (err) {
     return errResult('PAYMENT_INTENT_FAILED', err instanceof Error ? err.message : 'Unknown error', true);
+  } finally {
+    await db.destroy();
+  }
+}
+
+export async function compensateOrphanPaymentActivity(input: {
+  checkoutSessionId: string;
+  tenantId: string;
+  provider?: string;
+  providerIntentId?: string;
+  amountCents?: number;
+  currency?: string;
+  reason: string;
+  providerEventId?: string;
+  eventType?: string;
+  providerStatus?: string;
+  source?: string;
+  metadata?: Record<string, unknown>;
+}): Promise<
+  WorkflowActivityResult<{
+    status: OrphanPaymentCompensationStatus;
+    action: OrphanPaymentCompensationAction;
+    compensationId?: string;
+    providerCompensationId?: string;
+  }>
+> {
+  const db = createDb();
+  let compensationRepo: PaymentCompensationRepository | undefined;
+  let compensation: PaymentCompensationRow | undefined;
+  let attemptedAction: OrphanPaymentCompensationAction = 'refund';
+  let compensationMetadata: Record<string, unknown> = {};
+  try {
+    const piRepo = new PaymentIntentRepository(db);
+    compensationRepo = new PaymentCompensationRepository(db);
+    const paymentIntent = await findCompensablePaymentIntent({
+      repo: piRepo,
+      checkoutSessionId: input.checkoutSessionId,
+      provider: input.provider,
+      providerIntentId: input.providerIntentId,
+    });
+
+    const existingOrder = await db
+      .selectFrom('orders')
+      .select(['id'])
+      .where('checkout_session_id', '=', input.checkoutSessionId)
+      .executeTakeFirst();
+    if (paymentIntent?.order_id || existingOrder) {
+      return okResult({ status: 'already_ordered', action: 'local_noop' });
+    }
+
+    const session = await db
+      .selectFrom('checkout_sessions')
+      .select(['id', 'tenant_id', 'currency'])
+      .where('id', '=', input.checkoutSessionId)
+      .executeTakeFirst();
+
+    const tenantId = paymentIntent?.tenant_id ?? session?.tenant_id ?? input.tenantId;
+    if (tenantId !== input.tenantId) {
+      return errResult('PAYMENT_COMPENSATION_TENANT_MISMATCH', 'Payment intent tenant does not match checkout tenant', false);
+    }
+
+    const provider = paymentIntent?.provider ?? input.provider;
+    const providerIntentId = paymentIntent?.provider_intent_id ?? input.providerIntentId;
+    if (!provider || !providerIntentId) {
+      return errResult('PAYMENT_COMPENSATION_UNTRUSTED', 'Provider and provider intent are required', false);
+    }
+
+    const amountCents = Number(paymentIntent?.amount_cents ?? input.amountCents ?? 0);
+    const currency = String(paymentIntent?.currency ?? input.currency ?? session?.currency ?? 'USD').toUpperCase();
+    const initialAction: OrphanPaymentCompensationAction = provider === 'stripe_capture' ? 'local_noop' : 'refund';
+    const metadata = providerIntentMetadata({
+      reason: input.reason,
+      providerEventId: input.providerEventId,
+      eventType: input.eventType,
+      providerStatus: input.providerStatus ?? paymentIntent?.status,
+      source: input.source,
+      metadata: input.metadata,
+    });
+    compensationMetadata = metadata;
+    compensation = await createOrLoadPaymentCompensation({
+      repo: compensationRepo,
+      tenantId,
+      checkoutSessionId: input.checkoutSessionId,
+      paymentIntentId: paymentIntent?.id,
+      provider,
+      providerIntentId,
+      amountCents,
+      currency,
+      action: initialAction,
+      reason: input.reason,
+      metadata,
+    });
+
+    if (compensation.status === 'succeeded') {
+      return okResult({
+        status: 'succeeded',
+        action: compensation.action as OrphanPaymentCompensationAction,
+        compensationId: compensation.id,
+        providerCompensationId: compensation.provider_compensation_id ?? undefined,
+      });
+    }
+    if (compensation.status === 'manual_review') {
+      return okResult({
+        status: 'manual_review',
+        action: compensation.action as OrphanPaymentCompensationAction,
+        compensationId: compensation.id,
+        providerCompensationId: compensation.provider_compensation_id ?? undefined,
+      });
+    }
+
+    await releaseOrphanCheckoutResources(db, input.checkoutSessionId);
+
+    if (provider === 'stripe_capture') {
+      attemptedAction = 'local_noop';
+      const updated = await completePaymentCompensation({
+        repo: compensationRepo,
+        compensation,
+        action: 'local_noop',
+        status: 'succeeded',
+        providerCompensationId: `local:${providerIntentId}`,
+        metadata,
+      });
+      return okResult({
+        status: 'succeeded',
+        action: 'local_noop',
+        compensationId: updated.id,
+        providerCompensationId: updated.provider_compensation_id ?? undefined,
+      });
+    }
+
+    if (!isStripePaymentProvider(provider)) {
+      attemptedAction = 'local_noop';
+      const updated = await completePaymentCompensation({
+        repo: compensationRepo,
+        compensation,
+        action: 'local_noop',
+        status: 'manual_review',
+        lastError: `Unsupported payment provider ${provider}`,
+        metadata,
+      });
+      return okResult({
+        status: 'manual_review',
+        action: 'local_noop',
+        compensationId: updated.id,
+        providerCompensationId: updated.provider_compensation_id ?? undefined,
+      });
+    }
+
+    const stripeSecretKey = process.env.STRIPE_SECRET_KEY;
+    if (!stripeSecretKey) {
+      attemptedAction = 'refund';
+      const updated = await completePaymentCompensation({
+        repo: compensationRepo,
+        compensation,
+        action: 'refund',
+        status: 'manual_review',
+        lastError: 'Stripe secret key is not configured',
+        metadata,
+      });
+      return okResult({
+        status: 'manual_review',
+        action: 'refund',
+        compensationId: updated.id,
+        providerCompensationId: updated.provider_compensation_id ?? undefined,
+      });
+    }
+
+    const stripe = new Stripe(stripeSecretKey);
+    const stripePaymentIntent = await withSpan(
+      'provider.stripe.payment_intent.retrieve',
+      {
+        'tixkit.provider': 'stripe',
+        'tixkit.provider.operation': 'payment_intent.retrieve',
+        'tixkit.tenant_id': tenantId,
+        'tixkit.checkout_session_id': input.checkoutSessionId,
+      },
+      async (span) => {
+        const retrieved = await stripe.paymentIntents.retrieve(providerIntentId);
+        span.setAttribute('tixkit.provider.intent_id', retrieved.id);
+        span.setAttribute('tixkit.provider.intent_status', retrieved.status);
+        return retrieved;
+      },
+    );
+
+    if (paymentIntent) {
+      await piRepo.update(paymentIntent.id, { status: stripePaymentIntent.status });
+    }
+
+    if (stripePaymentIntent.status === 'succeeded') {
+      attemptedAction = 'refund';
+      const refundAmount = amountCents > 0 ? amountCents : stripePaymentIntent.amount_received || stripePaymentIntent.amount;
+      const idempotencyKey = stripeCompensationIdempotencyKey({
+        action: 'refund',
+        provider,
+        providerIntentId,
+        checkoutSessionId: input.checkoutSessionId,
+      });
+      const refund = await withSpan(
+        'provider.stripe.refund.create',
+        {
+          'tixkit.provider': 'stripe',
+          'tixkit.provider.operation': 'refund.create',
+          'tixkit.tenant_id': tenantId,
+          'tixkit.checkout_session_id': input.checkoutSessionId,
+          'tixkit.payment_intent_id': paymentIntent?.id ?? providerIntentId,
+        },
+        async (span) => {
+          const created = await stripe.refunds.create(
+            { payment_intent: providerIntentId, amount: refundAmount },
+            { idempotencyKey },
+          );
+          span.setAttribute('tixkit.provider.refund_id', created.id);
+          span.setAttribute('tixkit.provider.refund_status', created.status ?? 'unknown');
+          return created;
+        },
+      );
+      const updated = await completePaymentCompensation({
+        repo: compensationRepo,
+        compensation,
+        action: 'refund',
+        status: 'succeeded',
+        providerCompensationId: refund.id,
+        metadata: { ...metadata, stripeIdempotencyKey: idempotencyKey, stripePaymentIntentStatus: stripePaymentIntent.status },
+      });
+      return okResult({
+        status: 'succeeded',
+        action: 'refund',
+        compensationId: updated.id,
+        providerCompensationId: updated.provider_compensation_id ?? undefined,
+      });
+    }
+
+    if (stripePaymentIntent.status === 'canceled') {
+      attemptedAction = 'cancel';
+      const updated = await completePaymentCompensation({
+        repo: compensationRepo,
+        compensation,
+        action: 'cancel',
+        status: 'succeeded',
+        providerCompensationId: providerIntentId,
+        metadata: { ...metadata, stripePaymentIntentStatus: stripePaymentIntent.status },
+      });
+      return okResult({
+        status: 'succeeded',
+        action: 'cancel',
+        compensationId: updated.id,
+        providerCompensationId: updated.provider_compensation_id ?? undefined,
+      });
+    }
+
+    if (stripePaymentIntentIsCancelable(stripePaymentIntent.status)) {
+      attemptedAction = 'cancel';
+      const idempotencyKey = stripeCompensationIdempotencyKey({
+        action: 'cancel',
+        provider,
+        providerIntentId,
+        checkoutSessionId: input.checkoutSessionId,
+      });
+      const cancelled = await withSpan(
+        'provider.stripe.payment_intent.cancel',
+        {
+          'tixkit.provider': 'stripe',
+          'tixkit.provider.operation': 'payment_intent.cancel',
+          'tixkit.tenant_id': tenantId,
+          'tixkit.checkout_session_id': input.checkoutSessionId,
+          'tixkit.payment_intent_id': paymentIntent?.id ?? providerIntentId,
+        },
+        async (span) => {
+          const cancelledIntent = await stripe.paymentIntents.cancel(providerIntentId, {}, { idempotencyKey });
+          span.setAttribute('tixkit.provider.intent_id', cancelledIntent.id);
+          span.setAttribute('tixkit.provider.intent_status', cancelledIntent.status);
+          return cancelledIntent;
+        },
+      );
+      const updated = await completePaymentCompensation({
+        repo: compensationRepo,
+        compensation,
+        action: 'cancel',
+        status: 'succeeded',
+        providerCompensationId: cancelled.id,
+        metadata: { ...metadata, stripeIdempotencyKey: idempotencyKey, stripePaymentIntentStatus: stripePaymentIntent.status },
+      });
+      return okResult({
+        status: 'succeeded',
+        action: 'cancel',
+        compensationId: updated.id,
+        providerCompensationId: updated.provider_compensation_id ?? undefined,
+      });
+    }
+
+    const updated = await completePaymentCompensation({
+      repo: compensationRepo,
+      compensation,
+      action: 'refund',
+      status: 'manual_review',
+      lastError: `Stripe payment intent status ${stripePaymentIntent.status} is not automatically compensable`,
+      metadata: { ...metadata, stripePaymentIntentStatus: stripePaymentIntent.status },
+    });
+    return okResult({
+      status: 'manual_review',
+      action: 'refund',
+      compensationId: updated.id,
+      providerCompensationId: updated.provider_compensation_id ?? undefined,
+    });
+  } catch (err) {
+    const message = err instanceof Error ? err.message : 'Unknown error';
+    if (compensationRepo && compensation) {
+      try {
+        await completePaymentCompensation({
+          repo: compensationRepo,
+          compensation,
+          action: attemptedAction,
+          status: 'failed',
+          lastError: message,
+          metadata: compensationMetadata,
+        });
+      } catch {
+        // Preserve the provider error as the activity failure; a retry can repair the compensation row.
+      }
+    }
+    return errResult('PAYMENT_COMPENSATION_FAILED', message, true);
   } finally {
     await db.destroy();
   }

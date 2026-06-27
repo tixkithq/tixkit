@@ -426,7 +426,7 @@ describe('processRefundActivity - Stripe Connect', () => {
     dbState.createdRefunds = [];
     dbState.stripeRefunds = [];
     dbState.paymentIntent = { id: 'pi_db_1', provider_intent_id: 'pi_stripe_1', payment_account_id: 'pa_1' };
-    dbState.paymentAccount = { provider_account_id: 'acct_connect_1' };
+    dbState.paymentAccount = { provider: 'stripe_connect', provider_account_id: 'acct_connect_1' };
     process.env.STRIPE_SECRET_KEY = 'sk_test_1';
   });
 
@@ -440,7 +440,12 @@ describe('processRefundActivity - Stripe Connect', () => {
     if (result.ok) {
       expect(dbState.stripeRefunds).toHaveLength(1);
       expect(dbState.stripeRefunds[0].opts2).toEqual({ idempotencyKey: 'refund-ord_1:refund_nonce_3' });
-      expect(dbState.stripeRefunds[0].opts).toMatchObject({ payment_intent: 'pi_stripe_1', amount: 5000 });
+      expect(dbState.stripeRefunds[0].opts).toMatchObject({
+        payment_intent: 'pi_stripe_1',
+        amount: 5000,
+        reverse_transfer: true,
+        refund_application_fee: true,
+      });
     }
   });
 });

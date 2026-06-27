@@ -21,9 +21,29 @@ type PaymentAccountRow = {
   provider_account_id: string;
   status: string;
   default_currency: string;
+  details_submitted?: boolean | number | null;
+  charges_enabled?: boolean | number | null;
+  payouts_enabled?: boolean | number | null;
+  requirements?: string | Record<string, unknown> | null;
+  disabled_reason?: string | null;
   created_at: Date;
   updated_at: Date;
 };
+
+function parseJsonObject(value: string | Record<string, unknown> | null | undefined): Record<string, unknown> {
+  if (!value) return {};
+  if (typeof value !== 'string') return Array.isArray(value) ? {} : value;
+  try {
+    const parsed = JSON.parse(value);
+    return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed as Record<string, unknown> : {};
+  } catch {
+    return {};
+  }
+}
+
+function boolValue(value: boolean | number | null | undefined): boolean {
+  return value === true || value === 1;
+}
 
 function serializePaymentAccount(account: PaymentAccountRow, onboardingUrl?: string) {
   return {
@@ -34,6 +54,11 @@ function serializePaymentAccount(account: PaymentAccountRow, onboardingUrl?: str
     providerAccountId: account.provider_account_id,
     status: account.status,
     defaultCurrency: account.default_currency,
+    detailsSubmitted: boolValue(account.details_submitted),
+    chargesEnabled: boolValue(account.charges_enabled),
+    payoutsEnabled: boolValue(account.payouts_enabled),
+    requirements: parseJsonObject(account.requirements),
+    disabledReason: account.disabled_reason ?? null,
     createdAt: account.created_at instanceof Date ? account.created_at.toISOString() : account.created_at,
     updatedAt: account.updated_at instanceof Date ? account.updated_at.toISOString() : account.updated_at,
     ...(onboardingUrl ? { onboardingUrl } : {}),
@@ -54,6 +79,18 @@ function stripeAccountStatus(account: Stripe.Account): 'active' | 'pending' | 'r
   if (account.charges_enabled && account.payouts_enabled) return 'active';
   if ((account.requirements?.disabled_reason ?? null) !== null) return 'restricted';
   return 'pending';
+}
+
+function stripeAccountState(account: Stripe.Account) {
+  return {
+    status: stripeAccountStatus(account),
+    defaultCurrency: account.default_currency?.toUpperCase() ?? 'USD',
+    detailsSubmitted: Boolean(account.details_submitted),
+    chargesEnabled: Boolean(account.charges_enabled),
+    payoutsEnabled: Boolean(account.payouts_enabled),
+    requirements: account.requirements ? account.requirements as unknown as Record<string, unknown> : {},
+    disabledReason: account.requirements?.disabled_reason ?? null,
+  };
 }
 
 function stripeAccountLinkType(status: string): 'account_onboarding' | 'account_update' {
@@ -353,13 +390,19 @@ export const tenantRoutes: FastifyPluginAsync = async (app) => {
           organizationId: organization.id,
         },
       });
+      const stripeState = stripeAccountState(stripeAccount);
       account = await paymentAccounts.create({
         tenantId: organization.tenant_id,
         organizationId,
         provider: 'stripe_connect',
         providerAccountId: stripeAccount.id,
-        status: stripeAccountStatus(stripeAccount),
-        defaultCurrency: stripeAccount.default_currency?.toUpperCase() ?? 'USD',
+        status: stripeState.status,
+        defaultCurrency: stripeState.defaultCurrency,
+        detailsSubmitted: stripeState.detailsSubmitted,
+        chargesEnabled: stripeState.chargesEnabled,
+        payoutsEnabled: stripeState.payoutsEnabled,
+        requirements: stripeState.requirements,
+        disabledReason: stripeState.disabledReason,
       });
       await writeAuditLog(audit(), request, principal, {
         action: 'payment_account.created',
@@ -411,11 +454,15 @@ export const tenantRoutes: FastifyPluginAsync = async (app) => {
     const previousStatus = account.status;
     const previousDefaultCurrency = account.default_currency;
     const stripeAccount = await stripe.accounts.retrieve(account.provider_account_id) as Stripe.Account;
-    const nextStatus = stripeAccountStatus(stripeAccount);
-    const nextCurrency = stripeAccount.default_currency?.toUpperCase() ?? account.default_currency;
+    const stripeState = stripeAccountState(stripeAccount);
     const updated = await paymentAccounts.update(account.id, {
-      status: nextStatus,
-      default_currency: nextCurrency,
+      status: stripeState.status,
+      default_currency: stripeState.defaultCurrency ?? account.default_currency,
+      details_submitted: stripeState.detailsSubmitted,
+      charges_enabled: stripeState.chargesEnabled,
+      payouts_enabled: stripeState.payoutsEnabled,
+      requirements: JSON.stringify(stripeState.requirements),
+      disabled_reason: stripeState.disabledReason,
     });
 
     if (updated.status !== previousStatus || updated.default_currency !== previousDefaultCurrency) {
