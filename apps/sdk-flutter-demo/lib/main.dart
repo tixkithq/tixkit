@@ -15,7 +15,6 @@ class TixkitFlutterDemo extends StatelessWidget {
       deviceSecret: 'demo-device-secret',
       manifestSigningKey: 'demo-manifest-signing-key',
       apiBaseUrl: 'http://localhost:4000/v1',
-      checkoutBaseUrl: 'http://localhost:3000',
       storage: TixkitMemoryScannerStorage(),
     );
 
@@ -248,7 +247,7 @@ class _OfflineSyncTabState extends State<OfflineSyncTab> {
       _status = 'Syncing offline scans...';
     });
     try {
-      final result = await widget.client.syncScans('cil_demo');
+      final result = await widget.client.syncScans(checkInListId: 'cil_demo');
       setState(() {
         _status = 'Sync complete: ${result.accepted} accepted, '
             '${result.duplicates} duplicates, ${result.invalid} invalid';

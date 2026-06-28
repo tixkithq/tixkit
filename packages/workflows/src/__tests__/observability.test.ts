@@ -4,7 +4,9 @@ import type { ReadableSpan, SpanExporter } from '@opentelemetry/sdk-trace-base';
 import { createTixkitMetrics } from '@tixkit/shared';
 import { resourceFromAttributes } from '@opentelemetry/resources';
 import { execFile } from 'node:child_process';
+import { writeFileSync, unlinkSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
+import { join } from 'node:path';
 import { promisify } from 'node:util';
 import { describe, expect, it } from 'vitest';
 import { TixkitActivityMetricsInterceptor } from '../observability.js';
@@ -34,9 +36,20 @@ describe('worker observability', () => {
       console.log(typeof OpenTelemetryActivityInboundInterceptor, typeof sink.export);
     `;
 
-    const { stdout, stderr } = await execFileAsync(process.execPath, ['-e', smokeScript], {
-      cwd: workflowRoot,
-    });
+    const smokeFile = join(
+      workflowRoot,
+      `.smoke-${Date.now()}-${Math.random().toString(36).slice(2)}.mjs`,
+    );
+    writeFileSync(smokeFile, smokeScript);
+    let stdout: string;
+    let stderr: string;
+    try {
+      ({ stdout, stderr } = await execFileAsync(process.execPath, [smokeFile], {
+        cwd: workflowRoot,
+      }));
+    } finally {
+      unlinkSync(smokeFile);
+    }
 
     expect(stderr).toBe('');
     expect(stdout.trim()).toBe('function object');

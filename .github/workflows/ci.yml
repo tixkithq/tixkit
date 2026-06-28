@@ -22,7 +22,7 @@ jobs:
       - run: bun run audit
       - run: bun run format:check
       - run: bun run lint
-      - run: bun run typecheck
+      - run: npx turbo run typecheck
 
   build:
     name: Build
@@ -193,10 +193,10 @@ jobs:
           POSTGRES_USER: tixkit
           POSTGRES_PWD: tixkit
         options: >-
-          --health-cmd "tctl --address localhost:7233 operator namespace describe default"
-          --health-interval 10s
-          --health-timeout 5s
-          --health-retries 10
+          --health-cmd "bash -c 'cat < /dev/null > /dev/tcp/localhost/7233'"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 30
     env:
       DATABASE_URL: postgres://tixkit:tixkit@localhost:5432/tixkit
       REDIS_URL: redis://localhost:6379
@@ -251,10 +251,10 @@ jobs:
           MYSQL_USER: tixkit
           MYSQL_PWD: tixkit
         options: >-
-          --health-cmd "tctl --address localhost:7233 operator namespace describe default"
-          --health-interval 10s
-          --health-timeout 5s
-          --health-retries 10
+          --health-cmd "bash -c 'cat < /dev/null > /dev/tcp/localhost/7233'"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 30
     env:
       DATABASE_URL_MYSQL: mysql://tixkit:tixkit@localhost:3306/tixkit
       REDIS_URL: redis://localhost:6379
