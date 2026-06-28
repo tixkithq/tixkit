@@ -15,6 +15,8 @@ import {
   Globe,
   Pencil,
   Save,
+  Copy,
+  ExternalLink,
 } from 'lucide-react';
 import {
   adminApi,
@@ -28,9 +30,12 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Switch } from '@/components/ui/switch';
 import { Skeleton } from '@/components/ui/skeleton';
+import { toast } from 'sonner';
 import { EventStatusBadge, TicketTypeStatusBadge, OrderStatusBadge } from './event-status-badge';
 import { useAdminData } from '@/hooks/use-admin-data';
 import { formatCurrency, formatDate, formatNumber } from '@/lib/format';
+import { publicEventUrl } from '@/lib/event-links';
+import { useBootstrap } from '@/context/bootstrap-provider';
 import { CreateEventDrawer } from './create-event-drawer';
 
 const EMPTY_MARKETING_INTEGRATIONS: AdminMarketingIntegration[] = [];
@@ -51,6 +56,7 @@ export function EventDetailView({ eventId }: { eventId: string }) {
     () => adminApi.listMarketingIntegrations(eventId),
     [eventId],
   );
+  const { brands } = useBootstrap();
   const [editOpen, setEditOpen] = React.useState(false);
 
   if (loading) {
@@ -85,6 +91,12 @@ export function EventDetailView({ eventId }: { eventId: string }) {
 
   const recentOrders = ordersData?.items ?? [];
   const tickets = ticketTypes ?? [];
+  const shareUrl = publicEventUrl(event, brands);
+
+  const copyShareUrl = async () => {
+    await navigator.clipboard?.writeText(shareUrl);
+    toast.success('Public event link copied');
+  };
 
   const quickLinks = [
     { title: 'Tickets', icon: Ticket, href: routes.eventTickets(eventId) },
@@ -121,10 +133,22 @@ export function EventDetailView({ eventId }: { eventId: string }) {
             </span>
           </div>
         </div>
-        <Button variant="outline" onClick={() => setEditOpen(true)}>
-          <Pencil className="size-4" />
-          Edit
-        </Button>
+        <div className="flex flex-wrap items-center gap-2">
+          <Button variant="outline" asChild>
+            <a href={shareUrl} target="_blank" rel="noreferrer">
+              <ExternalLink className="size-4" />
+              Open public page
+            </a>
+          </Button>
+          <Button variant="outline" onClick={copyShareUrl}>
+            <Copy className="size-4" />
+            Copy link
+          </Button>
+          <Button variant="outline" onClick={() => setEditOpen(true)}>
+            <Pencil className="size-4" />
+            Edit
+          </Button>
+        </div>
       </div>
 
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">

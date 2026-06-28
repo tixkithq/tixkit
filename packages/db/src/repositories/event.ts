@@ -87,6 +87,27 @@ export class EventRepository extends BaseRepository {
       .executeTakeFirst();
   }
 
+  async findByBrandSlug(brandId: string, slug: string) {
+    return this.db
+      .selectFrom('events')
+      .selectAll()
+      .where('brand_id', '=', brandId)
+      .where('slug', '=', slug)
+      .executeTakeFirst();
+  }
+
+  async isSlugAvailable(brandId: string, slug: string, excludeEventId?: string) {
+    let query = this.db
+      .selectFrom('events')
+      .select('id')
+      .where('brand_id', '=', brandId)
+      .where('slug', '=', slug)
+      .limit(1);
+    if (excludeEventId) query = query.where('id', '!=', excludeEventId);
+    const existing = await query.executeTakeFirst();
+    return !existing;
+  }
+
   async update(id: string, input: Record<string, unknown>) {
     return this.updateReturning('events', id, { ...input, updated_at: new Date() });
   }

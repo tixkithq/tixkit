@@ -60,6 +60,17 @@ function parseTicketTypeIds(value: unknown): string[] {
   ];
 }
 
+function normalizeAnalyticsUrl(value?: string): string | null {
+  if (!value) return null;
+  try {
+    const url = new URL(value);
+    if (url.protocol !== 'http:' && url.protocol !== 'https:') return null;
+    return `${url.origin}${url.pathname}`;
+  } catch {
+    return null;
+  }
+}
+
 const widgetImpressionSchema = z
   .object({
     visitorId: z.string().min(8).max(128).optional(),
@@ -307,8 +318,8 @@ export const publicRoutes: FastifyPluginAsync = async (app) => {
           tracking_id: body.trackingId ?? null,
           affiliate_code: body.affiliateCode ?? null,
           host: body.host ?? null,
-          page_url: body.pageUrl ?? null,
-          referrer: body.referrer ?? null,
+          page_url: normalizeAnalyticsUrl(body.pageUrl),
+          referrer: normalizeAnalyticsUrl(body.referrer),
           created_at: new Date(),
         })
         .execute();

@@ -203,6 +203,24 @@ export class BrandRepository extends BaseRepository {
       .executeTakeFirst();
   }
 
+  async findByActiveDomain(domain: string) {
+    const brandDomain = await this.db
+      .selectFrom('brand_domains')
+      .selectAll()
+      .where('domain', '=', domain)
+      .where('is_verified', '=', true)
+      .where('ssl_status', '=', 'active')
+      .executeTakeFirst();
+
+    if (!brandDomain) return null;
+
+    return this.db
+      .selectFrom('brands')
+      .selectAll()
+      .where('id', '=', brandDomain.brand_id)
+      .executeTakeFirst();
+  }
+
   async update(id: string, input: Record<string, unknown>) {
     return this.updateReturning('brands', id, { ...input, updated_at: new Date() });
   }
@@ -281,11 +299,21 @@ export class PaymentAccountRepository extends BaseRepository {
       .execute();
   }
 
-  async findByProviderAccountId(providerAccountId: string) {
+  async findByProviderAccountId(provider: string, providerAccountId: string) {
     return this.db
       .selectFrom('payment_accounts')
       .selectAll()
+      .where('provider', '=', provider)
       .where('provider_account_id', '=', providerAccountId)
+      .executeTakeFirst();
+  }
+
+  async findByOrganizationAndProvider(organizationId: string, provider: string) {
+    return this.db
+      .selectFrom('payment_accounts')
+      .selectAll()
+      .where('organization_id', '=', organizationId)
+      .where('provider', '=', provider)
       .executeTakeFirst();
   }
 

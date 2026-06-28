@@ -30,7 +30,9 @@ import { formatCurrency, formatDateTime } from '@/lib/format';
 import { trackMarketingEvent } from '@/lib/marketing';
 
 type Props = {
-  eventId: string;
+  eventId?: string;
+  eventSlug?: string;
+  customDomainHost?: string;
   brandId?: string;
   supportUrl?: string;
   termsUrl?: string;
@@ -43,6 +45,8 @@ type Props = {
 
 export default function EventPageClient({
   eventId,
+  eventSlug,
+  customDomainHost,
   brandId,
   supportUrl,
   termsUrl,
@@ -78,14 +82,17 @@ export default function EventPageClient({
     const controller = new AbortController();
 
     async function load() {
-      if (!eventId) return;
+      if (!eventId && (!eventSlug || !customDomainHost)) return;
       setLoading(true);
       setError(null);
       try {
-        const [loadedEvent, loadedAvailability] = await Promise.all([
-          publicApi.getEvent(eventId, controller.signal),
-          publicApi.getAvailability(eventId, controller.signal),
-        ]);
+        const loadedEvent = eventId
+          ? await publicApi.getEvent(eventId, controller.signal)
+          : await publicApi.getEventBySlug(eventSlug!, customDomainHost!, controller.signal);
+        const loadedAvailability = await publicApi.getAvailability(
+          loadedEvent.id,
+          controller.signal,
+        );
         if (cancelled) return;
         setEvent(loadedEvent);
         setAvailability(loadedAvailability);
@@ -103,7 +110,7 @@ export default function EventPageClient({
       cancelled = true;
       controller.abort();
     };
-  }, [eventId]);
+  }, [customDomainHost, eventId, eventSlug]);
 
   const visibleTickets = useMemo(
     () => availability.filter((t) => t.status === 'active' || t.status === 'sold_out'),
@@ -123,8 +130,10 @@ export default function EventPageClient({
   }, [event, visibleTickets]);
 
   function goToCheckout() {
+    const checkoutEventId = event?.id ?? eventId;
+    if (!checkoutEventId) return;
     const params = new URLSearchParams();
-    params.set('eventId', eventId);
+    params.set('eventId', checkoutEventId);
     if (brand.id && !brand.fallback) params.set('brand', brand.id);
     if (supportUrl) params.set('supportUrl', supportUrl);
     if (termsUrl) params.set('termsUrl', termsUrl);

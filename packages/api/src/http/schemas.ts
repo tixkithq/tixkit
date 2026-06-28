@@ -5,6 +5,11 @@ import { ValidationError } from '@tixkit/domain';
 const ulidSchema = z.string().min(1);
 const currencySchema = z.string().length(3);
 const iso8601Schema = z.string().datetime();
+const eventSlugSchema = z
+  .string()
+  .min(1)
+  .regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/, 'Slug must be URL-safe lowercase text');
+const hostnameLabelSchema = /^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/;
 const urlSchema = z
   .string()
   .url()
@@ -80,6 +85,39 @@ function isPrivateHostname(hostname: string): boolean {
     !host.includes('.')
   );
 }
+
+function normalizeCustomDomain(value: string): string | null {
+  const trimmed = value.trim();
+  if (
+    !trimmed ||
+    trimmed.includes('://') ||
+    /[\s,/?#:[\]]/.test(trimmed) ||
+    trimmed.startsWith('.') ||
+    trimmed.includes('..')
+  ) {
+    return null;
+  }
+
+  const hostname = trimmed.toLowerCase().replace(/\.$/, '');
+  const labels = hostname.split('.');
+  if (labels.length < 2 || labels.some((label) => !hostnameLabelSchema.test(label))) {
+    return null;
+  }
+  if (isPrivateHostname(hostname)) return null;
+  return hostname;
+}
+
+const customDomainSchema = z.string().transform((value, ctx) => {
+  const normalized = normalizeCustomDomain(value);
+  if (!normalized) {
+    ctx.addIssue({
+      code: 'custom',
+      message: 'Domain must be a public hostname without scheme, port, path, query, or fragment',
+    });
+    return z.NEVER;
+  }
+  return normalized;
+});
 
 const webhookUrlSchema = z
   .string()
@@ -224,7 +262,7 @@ export const createEventSchema = z
   .object({
     organizationId: ulidSchema,
     brandId: ulidSchema,
-    slug: z.string().min(1),
+    slug: eventSlugSchema,
     title: z.string().min(1),
     description: z.string().optional(),
     currency: currencySchema,
@@ -243,6 +281,7 @@ export const createEventSchema = z
 export const updateEventSchema = z
   .object({
     title: z.string().min(1).optional(),
+    slug: eventSlugSchema.optional(),
     description: z.string().optional(),
     currency: currencySchema.optional(),
     timezone: z.string().min(1).optional(),
@@ -307,7 +346,7 @@ export const updateBrandSchema = z
 
 export const addBrandDomainSchema = z
   .object({
-    domain: z.string().min(1),
+    domain: customDomainSchema,
     isPrimary: z.boolean().optional(),
   })
   .strict();

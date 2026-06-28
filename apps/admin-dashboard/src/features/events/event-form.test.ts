@@ -131,6 +131,7 @@ describe('buildEventUpdatePayload', () => {
       buildEventUpdatePayload(
         {
           ...fullValues,
+          slug: 'new-event-slug',
           description: 'Detailed description',
           endsAt: '2026-08-16T19:00',
           venueName: 'Main Hall',
@@ -163,9 +164,11 @@ describe('buildEventUpdatePayload', () => {
           seoImageUrl: true,
           visibility: true,
           status: true,
+          slug: true,
         },
       ),
     ).toMatchObject({
+      slug: 'new-event-slug',
       description: 'Detailed description',
       endsAt: '2026-08-16T23:00:00.000Z',
       venue: {

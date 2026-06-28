@@ -155,6 +155,7 @@ export function buildEventUpdatePayload(
 ): UpdateEventInput | null {
   const payload: UpdateEventInput = {};
   if (hasChangedField(values, dirtyFields, initialValues, 'title')) payload.title = values.title;
+  if (hasChangedField(values, dirtyFields, initialValues, 'slug')) payload.slug = values.slug;
   if (hasChangedField(values, dirtyFields, initialValues, 'description'))
     payload.description = values.description;
   if (hasChangedField(values, dirtyFields, initialValues, 'currency'))
