@@ -1,0 +1,67 @@
+services:
+  - type: web
+    name: tixkit-api
+    env: docker
+    dockerfilePath: ./Dockerfile.api
+    healthCheckPath: /health
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: DATABASE_URL
+        fromDatabase: postgres
+      - key: REDIS_URL
+        fromService:
+          type: redis
+          name: tixkit-redis
+          property: connectionString
+      - key: PORT
+        value: 4000
+    plan: starter
+
+  - type: worker
+    name: tixkit-worker
+    env: docker
+    dockerfilePath: ./Dockerfile.worker
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: DATABASE_URL
+        fromDatabase: postgres
+      - key: REDIS_URL
+        fromService:
+          type: redis
+          name: tixkit-redis
+          property: connectionString
+    plan: starter
+
+  - type: web
+    name: tixkit-checkout
+    env: docker
+    dockerfilePath: ./Dockerfile.checkout
+    healthCheckPath: /health
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: PORT
+        value: 3000
+    plan: starter
+
+  - type: web
+    name: tixkit-admin
+    env: docker
+    dockerfilePath: ./Dockerfile.admin
+    healthCheckPath: /
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: PORT
+        value: 3001
+    plan: starter
+
+databases:
+  - name: postgres
+    plan: starter
+
+  - name: tixkit-redis
+    type: redis
+    plan: starter
