@@ -12,7 +12,19 @@ const POOL_ID = `pool_wl_${RUN_ID}`;
 const TICKET_TYPE_ID = `tt_wl_${RUN_ID}`;
 const SHARED_POOL_TICKET_TYPE_ID = `tt_wl_shared_${RUN_ID}`;
 
-describe('processWaitlistOffersActivity', () => {
+const requestedDriver = process.env.DB_INTEGRATION_DRIVER;
+const dbUrl =
+  requestedDriver === 'mysql'
+    ? process.env.DATABASE_URL_MYSQL
+    : requestedDriver === 'mssql'
+      ? process.env.DATABASE_URL_MSSQL
+      : process.env.DATABASE_URL;
+
+if (requestedDriver) {
+  process.env.DB_DRIVER = requestedDriver;
+}
+
+describe.skipIf(!dbUrl)('processWaitlistOffersActivity', () => {
   let db: Database;
 
   beforeAll(async () => {
