@@ -1,5 +1,5 @@
 import { Connection, Client } from '@temporalio/client';
-import { OpenTelemetryWorkflowClientInterceptor } from '@temporalio/interceptors-opentelemetry';
+import type { OpenTelemetryWorkflowClientInterceptor as _OTelInterceptor } from '@temporalio/interceptors-opentelemetry';
 import {
   checkoutSessionWorkflow,
   paymentReconciliationWorkflow,
@@ -58,6 +58,8 @@ export class TemporalClient {
   }
 
   static async connect(): Promise<TemporalClient> {
+    const { OpenTelemetryWorkflowClientInterceptor } =
+      await import('@temporalio/interceptors-opentelemetry');
     const connection = await Connection.connect({
       address: config.temporalAddress,
     });
