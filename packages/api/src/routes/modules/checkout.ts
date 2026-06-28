@@ -1128,6 +1128,7 @@ export const checkoutRoutes: FastifyPluginAsync = async (app) => {
             }
           } catch (err) {
             lastError = err instanceof Error ? err : new Error(String(err));
+            // eslint-disable-next-line no-await-in-loop -- after a payment-intent creation failure, check for a durable pending payment before retrying.
             const durablePendingPayment = await readDurablePendingPayment({
               sessionId,
               tenantId: session.tenant_id,

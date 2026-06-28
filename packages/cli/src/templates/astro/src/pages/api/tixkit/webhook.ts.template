@@ -17,7 +17,7 @@ export const POST: APIRoute = async ({ request }) => {
 
   const event = JSON.parse(body);
   console.log('Tixkit webhook received', event);
-  return new Response(JSON.stringify({ received: true, handledBy: 'sdk-astro-demo' }), {
+  return new Response(JSON.stringify({ received: true }), {
     status: 200,
     headers: { 'content-type': 'application/json' },
   });

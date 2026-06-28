@@ -1,0 +1,33 @@
+# __TITLE__
+
+Generated with `create-tixkit-app` (Remix + @tixkit/remix).
+
+## Getting started
+
+1. Copy the environment template and fill in your Tixkit API key and webhook secret:
+
+   ```bash
+   cp .env.local.example .env.local
+   # edit .env.local
+   ```
+
+2. Start the Tixkit backend and checkout app (see the main Tixkit repo).
+
+3. Run the dev server:
+
+   ```bash
+   bun run dev
+   ```
+
+4. Open `http://localhost:__PORT__` and try the widget iframe and checkout handoff.
+
+## Files of note
+
+- `app/routes/_index.tsx` — demo page with a `@tixkit/remix` widget iframe, checkout handoff URL, and lifecycle event listener.
+- `app/routes/api.tixkit-webhook.ts` — verified webhook receiver using `verifyTixkitWebhook`.
+
+## Next steps
+
+- Replace the demo `__BRAND_ID__`, `__EVENT_ID__`, and `__TICKET_TYPE_ID__` values in `app/routes/_index.tsx` with real identifiers from your Tixkit dashboard.
+- Use `TIXKIT_API_KEY` from a live API key in your Tixkit dashboard.
+- Run `bun run typecheck` and `bun run build` to verify the generated app. The production server can be started with `bun run start`.

@@ -4,18 +4,10 @@ import node from '@astrojs/node';
 export default defineConfig({
   output: 'server',
   adapter: node({ mode: 'standalone' }),
-  devToolbar: {
-    enabled: false,
-  },
-  server: {
-    port: 4321,
-  },
+  devToolbar: { enabled: false },
+  server: { port: __PORT__ },
   vite: {
-    build: {
-      target: 'esnext',
-    },
-    esbuild: {
-      target: 'esnext',
-    },
+    build: { target: 'esnext' },
+    esbuild: { target: 'esnext' },
   },
 });

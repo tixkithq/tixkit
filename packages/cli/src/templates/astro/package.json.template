@@ -1,18 +1,18 @@
 {
-  "name": "@tixkit/sdk-astro-demo",
+  "name": "__NAME__",
   "version": "0.1.0",
   "private": true,
   "type": "module",
   "scripts": {
-    "build": "bunx astro build",
-    "dev": "astro dev",
-    "preview": "astro preview",
-    "typecheck": "tsc --noEmit",
+    "build": "astro build",
+    "dev": "astro dev --port __PORT__",
+    "preview": "node ./dist/server/entry.mjs",
+    "typecheck": "astro check",
     "clean": "rm -rf dist .astro"
   },
   "dependencies": {
     "@tixkit/astro": "workspace:*",
-    "astro": "7.0.3"
+    "astro": "^7.0.0"
   },
   "devDependencies": {
     "@astrojs/check": "^0.9.4",

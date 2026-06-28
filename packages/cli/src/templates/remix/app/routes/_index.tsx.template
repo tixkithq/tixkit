@@ -5,7 +5,7 @@ import type { LoaderFunctionArgs } from '@remix-run/node';
 
 export async function loader(_args: LoaderFunctionArgs) {
   return {
-    checkoutBaseUrl: process.env.TIXKIT_CHECKOUT_URL ?? 'http://localhost:3201',
+    checkoutBaseUrl: process.env.TIXKIT_CHECKOUT_URL ?? 'http://localhost:3000',
   };
 }
 
@@ -15,16 +15,16 @@ export default function Index() {
 
   const widgetAttrs = tixkitWidgetIframeAttributes({
     widgetBaseUrl: checkoutBaseUrl,
-    brand: 'brd_demo',
-    event: 'evt_demo',
+    brand: '__BRAND_ID__',
+    event: '__EVENT_ID__',
     mode: 'inline',
     title: 'Tixkit Ticket Widget',
   });
 
   const handoffUrl = checkoutUrl({
-    event: 'evt_demo',
-    brand: 'brd_demo',
-    items: [{ ticketTypeId: 'tt_demo_general', quantity: 2 }],
+    event: '__EVENT_ID__',
+    brand: '__BRAND_ID__',
+    items: [{ ticketTypeId: '__TICKET_TYPE_ID__', quantity: 2 }],
     checkoutBaseUrl,
   });
 
@@ -44,7 +44,7 @@ export default function Index() {
     <main
       style={{ fontFamily: 'system-ui, sans-serif', maxWidth: 960, margin: '0 auto', padding: 32 }}
     >
-      <h1>Tixkit Remix Demo</h1>
+      <h1>__TITLE__</h1>
       <p>Demonstrates the @tixkit/remix SDK: widget iframe, checkout handoff, and lifecycle events.</p>
 
       <section style={{ marginTop: 24 }}>

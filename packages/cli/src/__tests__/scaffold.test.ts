@@ -122,4 +122,127 @@ describe('scaffold inside repo', () => {
     const envExample = await readFile(path.join(targetDir, '.env.local.example'), 'utf8');
     expect(envExample).toContain('NEXT_PUBLIC_APP_URL=http://localhost:3400');
   });
+
+  it('generates a vue/nuxt app with rendered placeholders', async () => {
+    const result = await scaffold({
+      targetDir,
+      template: 'vue',
+      projectName: 'my-vue-app',
+      port: 3500,
+      brandId: 'brd_vue',
+      eventId: 'evt_vue',
+      ticketTypeId: 'tt_vue',
+      skipGit: true,
+    });
+    if (!result.ok) {
+      throw new Error(result.message);
+    }
+
+    const files = await readdir(targetDir, { recursive: true });
+    expect(files).toContain('package.json');
+    expect(files).toContain('nuxt.config.ts');
+    expect(files).toContain('app.vue');
+    expect(files).toContain(path.join('server', 'api', 'tixkit', 'webhook.post.ts'));
+
+    const pkg = JSON.parse(await readFile(path.join(targetDir, 'package.json'), 'utf8')) as {
+      name: string;
+      dependencies: Record<string, string>;
+    };
+    expect(pkg.name).toBe('my-vue-app');
+    expect(pkg.dependencies['@tixkit/vue']).toBe('workspace:*');
+
+    const appVue = await readFile(path.join(targetDir, 'app.vue'), 'utf8');
+    expect(appVue).toContain('brd_vue');
+    expect(appVue).toContain('evt_vue');
+    expect(appVue).toContain('tt_vue');
+    expect(appVue).not.toContain('__BRAND_ID__');
+    expect(appVue).toContain('tixkitWidgetIframeAttributes');
+
+    const webhook = await readFile(
+      path.join(targetDir, 'server', 'api', 'tixkit', 'webhook.post.ts'),
+      'utf8',
+    );
+    expect(webhook).toContain('verifyTixkitWebhook');
+    expect(webhook).not.toContain('__NAME__');
+  });
+
+  it('generates an astro app with rendered placeholders', async () => {
+    const result = await scaffold({
+      targetDir,
+      template: 'astro',
+      projectName: 'my-astro-app',
+      port: 3600,
+      brandId: 'brd_astro',
+      eventId: 'evt_astro',
+      ticketTypeId: 'tt_astro',
+      skipGit: true,
+    });
+    if (!result.ok) {
+      throw new Error(result.message);
+    }
+
+    const files = await readdir(targetDir, { recursive: true });
+    expect(files).toContain('package.json');
+    expect(files).toContain('astro.config.mjs');
+    expect(files).toContain(path.join('src', 'pages', 'index.astro'));
+    expect(files).toContain(path.join('src', 'pages', 'api', 'tixkit', 'webhook.ts'));
+
+    const pkg = JSON.parse(await readFile(path.join(targetDir, 'package.json'), 'utf8')) as {
+      name: string;
+      dependencies: Record<string, string>;
+      devDependencies: Record<string, string>;
+    };
+    expect(pkg.name).toBe('my-astro-app');
+    expect(pkg.dependencies['@tixkit/astro']).toBe('workspace:*');
+    expect(pkg.devDependencies['@astrojs/node']).toBeDefined();
+
+    const config = await readFile(path.join(targetDir, 'astro.config.mjs'), 'utf8');
+    expect(config).toContain('3600');
+    expect(config).not.toContain('__PORT__');
+
+    const index = await readFile(path.join(targetDir, 'src', 'pages', 'index.astro'), 'utf8');
+    expect(index).toContain('brd_astro');
+    expect(index).toContain('evt_astro');
+    expect(index).not.toContain('__EVENT_ID__');
+  });
+
+  it('generates a remix app with rendered placeholders', async () => {
+    const result = await scaffold({
+      targetDir,
+      template: 'remix',
+      projectName: 'my-remix-app',
+      port: 3700,
+      brandId: 'brd_remix',
+      eventId: 'evt_remix',
+      ticketTypeId: 'tt_remix',
+      skipGit: true,
+    });
+    if (!result.ok) {
+      throw new Error(result.message);
+    }
+
+    const files = await readdir(targetDir, { recursive: true });
+    expect(files).toContain('package.json');
+    expect(files).toContain('vite.config.ts');
+    expect(files).toContain(path.join('app', 'root.tsx'));
+    expect(files).toContain(path.join('app', 'routes', '_index.tsx'));
+    expect(files).toContain(path.join('app', 'routes', 'api.tixkit-webhook.ts'));
+
+    const pkg = JSON.parse(await readFile(path.join(targetDir, 'package.json'), 'utf8')) as {
+      name: string;
+      dependencies: Record<string, string>;
+    };
+    expect(pkg.name).toBe('my-remix-app');
+    expect(pkg.dependencies['@tixkit/remix']).toBe('workspace:*');
+
+    const index = await readFile(path.join(targetDir, 'app', 'routes', '_index.tsx'), 'utf8');
+    expect(index).toContain('brd_remix');
+    expect(index).toContain('evt_remix');
+    expect(index).not.toContain('__BRAND_ID__');
+    expect(index).toContain('tixkitWidgetIframeAttributes');
+
+    const vite = await readFile(path.join(targetDir, 'vite.config.ts'), 'utf8');
+    expect(vite).toContain('3700');
+    expect(vite).not.toContain('__PORT__');
+  });
 });

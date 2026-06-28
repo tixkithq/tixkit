@@ -11,5 +11,5 @@ export default defineEventHandler(async (event) => {
   }
 
   console.log('Tixkit webhook received', body);
-  return { received: true, handledBy: 'sdk-nuxt-demo' };
+  return { received: true };
 });

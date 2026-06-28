@@ -1,0 +1,22 @@
+{
+  "name": "__NAME__",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "nuxt build",
+    "dev": "nuxt dev --port __PORT__",
+    "preview": "nuxt preview",
+    "typecheck": "nuxt typecheck",
+    "clean": "rm -rf .nuxt .output"
+  },
+  "dependencies": {
+    "@tixkit/vue": "workspace:*",
+    "nuxt": "^3.14.0",
+    "vue": "^3.5.0"
+  },
+  "devDependencies": {
+    "typescript": "5.9.3",
+    "vue-tsc": "^2.1.0"
+  }
+}

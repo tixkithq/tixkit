@@ -7,7 +7,7 @@ import { findRepoRoot } from './env.js';
 
 const execFileAsync = promisify(execFile);
 
-export type ScaffoldTemplate = 'nextjs';
+export type ScaffoldTemplate = 'nextjs' | 'vue' | 'astro' | 'remix';
 
 export interface ScaffoldOptions {
   targetDir: string;
@@ -26,14 +26,21 @@ interface TemplateEntry {
   destination: string;
 }
 
-const templateDir = fileURLToPath(new URL('templates/nextjs', import.meta.url));
+const templateDirFor = (template: ScaffoldTemplate): string =>
+  fileURLToPath(new URL(`templates/${template}`, import.meta.url));
 
-export const SCAFFOLD_TEMPLATES: ScaffoldTemplate[] = ['nextjs'];
+export const SCAFFOLD_TEMPLATES: ScaffoldTemplate[] = ['nextjs', 'vue', 'astro', 'remix'];
 
 export function scaffoldTemplateDescription(template: ScaffoldTemplate): string {
   switch (template) {
     case 'nextjs':
       return 'Next.js App Router app with @tixkit/next';
+    case 'vue':
+      return 'Nuxt 3 app with @tixkit/vue';
+    case 'astro':
+      return 'Astro app with @tixkit/astro';
+    case 'remix':
+      return 'Remix app with @tixkit/remix';
     default:
       return template;
   }
@@ -134,7 +141,7 @@ export async function scaffold(
       };
     }
 
-    for await (const entry of walkTemplates(templateDir)) {
+    for await (const entry of walkTemplates(templateDirFor(options.template))) {
       const destination = path.join(options.targetDir, entry.destination);
       await mkdir(path.dirname(destination), { recursive: true });
       const rendered = await renderTemplate(entry.source, options, repoRoot);

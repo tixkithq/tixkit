@@ -13,5 +13,5 @@ export async function action({ request }: ActionFunctionArgs) {
 
   const event = JSON.parse(body);
   console.log('Tixkit webhook received', event);
-  return json({ received: true, handledBy: 'sdk-remix-demo' });
+  return json({ received: true });
 }

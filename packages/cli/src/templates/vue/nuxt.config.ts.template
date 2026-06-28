@@ -5,15 +5,11 @@ export default defineNuxtConfig({
     tixkitApiKey: process.env.TIXKIT_API_KEY ?? '',
     tixkitWebhookSecret: process.env.TIXKIT_WEBHOOK_SECRET ?? '',
     public: {
-      tixkitCheckoutUrl: process.env.NUXT_PUBLIC_TIXKIT_CHECKOUT_URL ?? 'http://localhost:3201',
+      tixkitCheckoutUrl: process.env.NUXT_PUBLIC_TIXKIT_CHECKOUT_URL ?? 'http://localhost:3000',
     },
   },
   vite: {
-    build: {
-      target: 'esnext',
-    },
-    esbuild: {
-      target: 'esnext',
-    },
+    build: { target: 'esnext' },
+    esbuild: { target: 'esnext' },
   },
 });
