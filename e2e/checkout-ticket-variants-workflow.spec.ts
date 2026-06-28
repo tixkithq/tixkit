@@ -1,7 +1,11 @@
 import type { APIResponse, APIRequestContext, Page, TestInfo } from '@playwright/test';
 import { expectNoAxeViolations } from './helpers/axe';
 import { apiBaseUrl, checkoutBaseUrl } from './helpers/env';
-import { readCheckoutOrderState, seedTicketVariantCheckoutEvent } from './helpers/seed';
+import {
+  readCheckoutOrderState,
+  seedTicketVariantCheckoutEvent,
+  setInventoryPoolCapacity,
+} from './helpers/seed';
 import { expect, requireReachable, test } from './fixtures/validation-test';
 
 type CheckoutSessionResponse = {
@@ -342,5 +346,123 @@ test.describe('checkout ticket variant workflows', () => {
     await expect(page.getByRole('heading', { name: 'Order confirmed' })).toBeVisible();
 
     await attachScreenshot(page, testInfo, 'checkout-ticket-variants-direct-complete');
+  });
+
+  test('buyer can claim a waitlist offer and complete checkout', async ({
+    page,
+    request,
+  }, testInfo) => {
+    await requireReachable(page, `${apiBaseUrl}/health`, 'api');
+    await requireReachable(page, checkoutBaseUrl, 'checkout app');
+
+    const suffix = `waitlist-claim-${testInfo.workerIndex}-${Date.now()}`;
+    const seeded = await seedTicketVariantCheckoutEvent(request, suffix);
+    const buyerEmail = `claim+${suffix}@example.com`;
+
+    const joinedEntry = (await expectJsonResponse(
+      await request.post(`${apiBaseUrl}/v1/public/events/${seeded.event.id}/waitlist`, {
+        data: {
+          ticketTypeId: seeded.tickets.soldOut.id,
+          email: buyerEmail,
+          firstName: 'Claim',
+          lastName: 'Buyer',
+          quantity: 1,
+        },
+        failOnStatusCode: false,
+      }),
+      201,
+    )) as { id: string; status: string; ticketTypeId: string };
+    expect(joinedEntry).toMatchObject({
+      status: 'joined',
+      ticketTypeId: seeded.tickets.soldOut.id,
+    });
+
+    await setInventoryPoolCapacity(seeded.pools.soldOut.id, 2);
+
+    const offer = (await expectJsonResponse(
+      await request.post(
+        `${apiBaseUrl}/v1/events/${seeded.event.id}/waitlist/${joinedEntry.id}/offer`,
+        {
+          data: {},
+          failOnStatusCode: false,
+        },
+      ),
+      200,
+    )) as { claimToken: string; entry: { id: string; status: string; offerExpiresAt?: string } };
+    expect(offer).toMatchObject({
+      entry: {
+        id: joinedEntry.id,
+        status: 'offered',
+        offerExpiresAt: expect.any(String),
+      },
+    });
+    expect(offer.claimToken).toHaveLength(32);
+
+    const claimUrl = new URL(`${checkoutBaseUrl}/checkout`);
+    claimUrl.searchParams.set('eventId', seeded.event.id);
+    claimUrl.searchParams.set('waitlistClaim', offer.claimToken);
+    await page.goto(claimUrl.toString());
+
+    await expect(page.getByRole('heading', { name: seeded.event.title })).toBeVisible();
+    await expect(page.getByText('Waitlist offer applied.')).toBeVisible();
+    await expect(page.getByLabel('Email')).toHaveValue(buyerEmail);
+    const soldOutQuantity = page.getByRole('group', {
+      name: `${seeded.tickets.soldOut.name} quantity`,
+    });
+    await expect(soldOutQuantity.locator('output')).toHaveText('1');
+
+    await page.getByRole('button', { name: 'Continue' }).click();
+    await expect(page.getByRole('button', { name: 'Place free order' })).toBeVisible();
+
+    const reservedOffer = (await expectJsonResponse(
+      await request.get(`${apiBaseUrl}/v1/events/${seeded.event.id}/waitlist`, {
+        failOnStatusCode: false,
+      }),
+      200,
+    )) as { items: Array<{ id: string; status: string }> };
+    expect(reservedOffer.items).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          id: joinedEntry.id,
+          status: 'offered',
+        }),
+      ]),
+    );
+
+    await page.getByRole('button', { name: 'Place free order' }).click();
+    await expect(page.getByRole('heading', { name: 'Order confirmed' })).toBeVisible();
+
+    const confirmationUrl = new URL(page.url());
+    const sessionId = confirmationUrl.searchParams.get('sessionId');
+    const orderId = confirmationUrl.searchParams.get('orderId');
+    expect(sessionId).toBeTruthy();
+    expect(orderId).toBeTruthy();
+
+    const orderState = await readCheckoutOrderState(sessionId!, seeded.pools.soldOut.id);
+    expect(orderState).toMatchObject({
+      session: { status: 'completed' },
+      order: { id: orderId, status: 'paid', totalCents: 0 },
+      holds: [{ ticketTypeId: seeded.tickets.soldOut.id, status: 'converted', quantity: 1 }],
+      inventoryPool: { soldCount: 2 },
+      ticketCount: 1,
+    });
+
+    const persistedClaim = (await expectJsonResponse(
+      await request.get(`${apiBaseUrl}/v1/events/${seeded.event.id}/waitlist`, {
+        failOnStatusCode: false,
+      }),
+      200,
+    )) as { items: Array<{ id: string; status: string }> };
+    expect(persistedClaim.items).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          id: joinedEntry.id,
+          status: 'claimed',
+        }),
+      ]),
+    );
+
+    await attachScreenshot(page, testInfo, 'checkout-waitlist-claim-confirmation');
+    await expectNoAxeViolations(page, testInfo);
   });
 });

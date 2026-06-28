@@ -697,6 +697,7 @@ export const checkoutRoutes: FastifyPluginAsync = async (app) => {
           trackingId: body.trackingId,
           buyerFields,
           attendeeFields: attendeeFieldsByTicketType,
+          waitlistEntryId: waitlistEntry?.id,
         };
 
         const firstItem = normalizedItems[0];
@@ -739,19 +740,6 @@ export const checkoutRoutes: FastifyPluginAsync = async (app) => {
           successUrl: body.successUrl,
           cancelUrl: body.cancelUrl,
         });
-
-        if (waitlistEntry) {
-          await db
-            .updateTable('waitlist_entries')
-            .set({
-              status: 'claimed',
-              claimed_at: new Date(),
-              updated_at: new Date(),
-            })
-            .where('id', '=', waitlistEntry.id)
-            .where('status', '=', 'offered')
-            .execute();
-        }
 
         return { status: 201, body: publicCheckoutSession(session) };
       },

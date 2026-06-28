@@ -46,6 +46,13 @@ type FinalizePaymentIntentValidationResult =
 type OrphanPaymentCompensationAction = 'cancel' | 'refund' | 'local_noop';
 type OrphanPaymentCompensationStatus = 'succeeded' | 'failed' | 'manual_review' | 'already_ordered';
 
+class WaitlistOfferUnavailableError extends Error {
+  constructor() {
+    super('Waitlist offer is no longer available');
+    this.name = 'WaitlistOfferUnavailableError';
+  }
+}
+
 type PaymentIntentRow = NonNullable<Awaited<ReturnType<PaymentIntentRepository['findById']>>>;
 type PaymentCompensationRow = NonNullable<Awaited<ReturnType<PaymentCompensationRepository['findByProviderIntent']>>>;
 
@@ -1131,6 +1138,7 @@ export async function finalizeOrderActivity(input: {
       buyerFields?: Record<string, unknown>;
       attendeeFields?: Record<string, unknown[]>;
       discountCode?: string;
+      waitlistEntryId?: string;
     }>(session.cart);
     const buyer = parseStoredJson<{ email?: string; firstName?: string; lastName?: string; phone?: string }>(session.buyer);
 
@@ -1295,6 +1303,27 @@ export async function finalizeOrderActivity(input: {
               created_at: now,
             })
             .execute();
+        }
+      }
+
+      if (cart.waitlistEntryId) {
+        const waitlistClaim = await trx
+          .updateTable('waitlist_entries')
+          .set({
+            status: 'claimed',
+            claimed_at: now,
+            updated_at: now,
+          })
+          .where('id', '=', cart.waitlistEntryId)
+          .where('tenant_id', '=', input.tenantId)
+          .where('event_id', '=', session.event_id)
+          .where('status', '=', 'offered')
+          .executeTakeFirst();
+        const changedRows = Number(
+          (waitlistClaim as { numUpdatedRows?: bigint }).numUpdatedRows ?? 0,
+        );
+        if (changedRows === 0) {
+          throw new WaitlistOfferUnavailableError();
         }
       }
 
@@ -1593,6 +1622,9 @@ export async function finalizeOrderActivity(input: {
       }
     } catch {
       // fall through to error result
+    }
+    if (err instanceof WaitlistOfferUnavailableError) {
+      return errResult('WAITLIST_OFFER_UNAVAILABLE', err.message, false);
     }
     return errResult(
       'ORDER_FINALIZE_FAILED',

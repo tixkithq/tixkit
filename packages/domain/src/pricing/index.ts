@@ -120,6 +120,7 @@ export type CartInput = {
   trackingId?: string;
   buyerFields?: Record<string, unknown>;
   attendeeFields?: Record<string, unknown[]>;
+  waitlistEntryId?: Ulid;
 };
 
 export type PricingContext = {

@@ -217,18 +217,18 @@ export default function ConfirmationClient() {
   if (loading) {
     return (
       <Surface brand={brand}>
-        <div className="mx-auto w-full max-w-xl space-y-6 px-4 py-16 sm:px-6">
+        <main className="mx-auto w-full max-w-xl space-y-6 px-4 py-16 sm:px-6">
           <Skeleton className="mx-auto size-16 rounded-full" />
           <Skeleton className="h-8 w-64 mx-auto" />
           <Skeleton className="h-40 w-full" />
-        </div>
+        </main>
       </Surface>
     );
   }
 
   return (
     <Surface brand={brand}>
-      <div className="mx-auto w-full max-w-xl space-y-8 px-4 py-12 sm:px-6">
+      <main className="mx-auto w-full max-w-xl space-y-8 px-4 py-12 sm:px-6">
         <ConfirmationHeader state={confirmationState} />
 
         {(orderNumber || orderId) && confirmationState !== 'error' ? (
@@ -427,7 +427,7 @@ export default function ConfirmationClient() {
         </div>
 
         <BrandFooter brand={brand} />
-      </div>
+      </main>
     </Surface>
   );
 }

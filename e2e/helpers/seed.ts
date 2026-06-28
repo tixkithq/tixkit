@@ -623,6 +623,19 @@ export async function seedTicketVariantCheckoutEvent(
   };
 }
 
+export async function setInventoryPoolCapacity(
+  poolId: string,
+  totalCapacity: number,
+): Promise<void> {
+  await withE2eDb(async (db) => {
+    await db
+      .updateTable('inventory_pools')
+      .set({ total_capacity: totalCapacity, updated_at: new Date() })
+      .where('id', '=', poolId)
+      .execute();
+  });
+}
+
 export async function seedRefundNotificationPrerequisites(suffix: string): Promise<void> {
   const now = new Date();
   const safeSuffix = safeIdPart(suffix);
