@@ -458,6 +458,26 @@ export type AdminOrderDetail = AdminOrderListItem & {
   };
 };
 
+export type AdminPaymentCompensation = {
+  id: string;
+  tenantId: string;
+  checkoutSessionId: string;
+  paymentIntentId?: string | null;
+  provider: string;
+  providerIntentId: string;
+  amountCents: number;
+  currency: string;
+  action: string;
+  status: 'pending' | 'succeeded' | 'failed' | 'manual_review' | 'already_ordered' | string;
+  providerCompensationId?: string | null;
+  attempts: number;
+  reason: string;
+  lastError?: string | null;
+  metadata?: Record<string, unknown>;
+  createdAt: string;
+  updatedAt: string;
+};
+
 export type AttendeeStatus = 'active' | 'cancelled' | 'refunded' | 'transferred';
 export type CheckInStatus = 'not_checked_in' | 'checked_in' | 'duplicate' | 'revoked';
 
@@ -1326,6 +1346,9 @@ export type AdminApi = {
   listOrders(
     input?: PageCursor & { eventId?: string },
   ): Promise<ApiResult<PageResult<AdminOrderListItem>>>;
+  listPaymentCompensations(
+    input?: PageCursor & { status?: string; checkoutSessionId?: string },
+  ): Promise<ApiResult<PageResult<AdminPaymentCompensation>>>;
   getOrder(orderId: string): Promise<ApiResult<AdminOrderDetail>>;
   cancelOrder(orderId: string): Promise<ApiResult<AdminOrderListItem>>;
   refundOrder(orderId: string, input: RefundOrderInput): Promise<ApiResult<RefundOrderResult>>;
@@ -3870,11 +3893,12 @@ export const adminApi: AdminApi = {
             )
           : result;
       },
-      // eslint-disable-next-line unicorn/no-array-sort -- creates a new array via spread; ES2023 toSorted is outside this app's TS lib target.
-      () =>
-        ok(
-          [...(fixtureProductCategories[eventId] ?? [])].sort((a, b) => a.sortOrder - b.sortOrder),
-        ),
+      () => {
+        const categories = [...(fixtureProductCategories[eventId] ?? [])];
+        // oxlint-disable-next-line unicorn/no-array-sort -- sorts a copied array; ES2023 toSorted is outside this app's TS lib target.
+        categories.sort((a, b) => a.sortOrder - b.sortOrder);
+        return ok(categories);
+      },
     );
   },
 
@@ -4007,11 +4031,12 @@ export const adminApi: AdminApi = {
           ? ok(unwrapItems(result.data).map((question) => normalizeQuestion(asRecord(question))))
           : result;
       },
-      // eslint-disable-next-line unicorn/no-array-sort -- creates a new array via spread
-      () =>
-        ok(
-          [...(fixtureCheckoutQuestions[eventId] ?? [])].sort((a, b) => a.sortOrder - b.sortOrder),
-        ),
+      () => {
+        const questions = [...(fixtureCheckoutQuestions[eventId] ?? [])];
+        // oxlint-disable-next-line unicorn/no-array-sort -- sorts a copied array; ES2023 toSorted is outside this app's TS lib target.
+        questions.sort((a, b) => a.sortOrder - b.sortOrder);
+        return ok(questions);
+      },
     );
   },
 
@@ -4145,6 +4170,24 @@ export const adminApi: AdminApi = {
         if (input?.eventId) orders = orders.filter((o) => o.eventId === input.eventId);
         return ok(paginate(orders, input?.cursor, input?.limit));
       },
+    );
+  },
+
+  async listPaymentCompensations(input) {
+    return withFixture(
+      () => {
+        const params = new URLSearchParams();
+        if (input?.cursor) params.set('cursor', input.cursor);
+        if (input?.limit) params.set('limit', String(input.limit));
+        if (input?.status) params.set('status', input.status);
+        if (input?.checkoutSessionId) params.set('checkoutSessionId', input.checkoutSessionId);
+        const qs = params.toString();
+        return request<PageResult<AdminPaymentCompensation>>(
+          `/v1/payment-compensations${qs ? `?${qs}` : ''}`,
+          { method: 'GET' },
+        );
+      },
+      () => ok(paginate([], input?.cursor, input?.limit)),
     );
   },
 

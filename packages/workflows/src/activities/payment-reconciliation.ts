@@ -1,5 +1,6 @@
 import { createDb } from '@tixkit/db';
 import {
+  CheckoutSessionRepository,
   PaymentIntentRepository,
   OrderRepository,
   RefundRepository,
@@ -24,6 +25,11 @@ async function findPaymentIntentForProviderEvent(
   return undefined;
 }
 
+function checkoutSessionCanStillFinalize(session: { status: string; expires_at: Date | string }): boolean {
+  if (!['open', 'pending_payment'].includes(session.status)) return false;
+  return new Date(session.expires_at).getTime() > Date.now();
+}
+
 export async function reconcilePaymentActivity(input: {
   providerEventId: string;
   provider: string;
@@ -42,6 +48,7 @@ export async function reconcilePaymentActivity(input: {
 
     const piRepo = new PaymentIntentRepository(db);
     const orderRepo = new OrderRepository(db);
+    const checkoutSessionRepo = new CheckoutSessionRepository(db);
     const dbPi = await findPaymentIntentForProviderEvent(piRepo, input.provider, providerIntentId);
     if (!dbPi) {
       return okResult({ orderId: undefined, status: 'noop' });
@@ -75,6 +82,17 @@ export async function reconcilePaymentActivity(input: {
     }
 
     if (isSuccessfulPaymentEvent(input.eventType, paymentIntent.status)) {
+      const checkoutSession = dbPi.checkout_session_id
+        ? await checkoutSessionRepo.findById(dbPi.checkout_session_id)
+        : undefined;
+      if (checkoutSession && checkoutSessionCanStillFinalize(checkoutSession)) {
+        return errResult(
+          'ORDER_NOT_FINALIZED_YET',
+          'Checkout session is still finalizing for this successful payment',
+          true,
+        );
+      }
+
       const compensation = await compensateOrphanPaymentActivity({
         checkoutSessionId: dbPi.checkout_session_id,
         tenantId: dbPi.tenant_id,

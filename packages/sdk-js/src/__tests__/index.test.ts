@@ -451,6 +451,50 @@ describe('TixkitClient', () => {
     expect(body).toEqual({ paymentMethodId: 'pm_1' });
   });
 
+  it('checkout.get can recover pending sessions with a payment intent client secret', async () => {
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+      new Response(JSON.stringify({ id: 'cs_1', status: 'pending_payment' }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      }),
+    );
+
+    const client = new TixkitClient({
+      apiBaseUrl: 'https://api.test',
+      maxRetries: 0,
+    });
+    await client.checkout.get('cs_1', { paymentIntentClientSecret: 'pi_secret_123' });
+
+    const [url, init] = fetchMock.mock.calls[0]!;
+    const headers = init?.headers as Record<string, string>;
+
+    expect(String(url)).toBe(
+      'https://api.test/v1/checkout/sessions/cs_1?payment_intent_client_secret=pi_secret_123',
+    );
+    expect(headers).not.toHaveProperty('X-Checkout-Session-Token');
+  });
+
+  it('checkout.get keeps the legacy token argument for session reads', async () => {
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+      new Response(JSON.stringify({ id: 'cs_1', status: 'open' }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      }),
+    );
+
+    const client = new TixkitClient({
+      apiBaseUrl: 'https://api.test',
+      maxRetries: 0,
+    });
+    await client.checkout.get('cs_1', 'cstok_1');
+
+    const [url, init] = fetchMock.mock.calls[0]!;
+    const headers = init?.headers as Record<string, string>;
+
+    expect(String(url)).toBe('https://api.test/v1/checkout/sessions/cs_1');
+    expect(headers['X-Checkout-Session-Token']).toBe('cstok_1');
+  });
+
   it('does not retry unsafe mutations without an idempotency key', async () => {
     const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue(
       new Response(
@@ -1118,6 +1162,20 @@ describe('TixkitClient new resource methods', () => {
       'https://api.test/v1/organizations/org_1/payment-accounts/pa_1/stripe-connect/refresh',
     );
     expect(call.method).toBe('POST');
+  });
+
+  it('orders.list sends organization and event filters with pagination', async () => {
+    const fm = mockFetch(200, { items: [], nextCursor: null, hasMore: false });
+    const c = new TixkitClient({
+      apiKey: 'tk_test_123',
+      apiBaseUrl: 'https://api.test',
+      maxRetries: 0,
+    });
+    await c.orders.list({ limit: 50, organizationId: 'org_1', eventId: 'evt_1' });
+    const call = getCall(fm);
+    expect(call.url).toBe(
+      'https://api.test/v1/orders?limit=50&organizationId=org_1&eventId=evt_1',
+    );
   });
 
   it('public.getEvent sends GET without auth', async () => {

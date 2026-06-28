@@ -78,6 +78,12 @@ function cartItemId(item: CartItem): string {
   return '';
 }
 
+function productFilterMatches(item: AvailabilityItem, productFilter: Set<string>): boolean {
+  if (productFilter.has(availabilityItemId(item))) return true;
+  if (item.ticketTypeId && productFilter.has(item.ticketTypeId)) return true;
+  return !!item.productId && productFilter.has(item.productId);
+}
+
 type Phase = 'select' | 'confirm' | 'payment' | 'completed';
 
 function emitCheckoutEvent(
@@ -170,7 +176,7 @@ export default function CheckoutFlow({
   const visibleAvailability = useMemo(
     () =>
       productFilter
-        ? availability.filter((item) => productFilter.has(availabilityItemId(item)))
+        ? availability.filter((item) => productFilterMatches(item, productFilter))
         : availability,
     [availability, productFilter],
   );
@@ -181,7 +187,7 @@ export default function CheckoutFlow({
     () =>
       visibleAvailability.some(
         (item) =>
-          item.requiresAccessCode && item.ticketTypeId && (quantities[item.ticketTypeId] ?? 0) > 0,
+          item.requiresAccessCode && item.ticketTypeId && (quantities[availabilityItemId(item)] ?? 0) > 0,
       ),
     [visibleAvailability, quantities],
   );

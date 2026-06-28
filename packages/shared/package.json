@@ -20,6 +20,7 @@
     "clean": "rm -rf dist"
   },
   "dependencies": {
+    "@tixkit/domain": "workspace:*",
     "@opentelemetry/api": "1.9.1",
     "@opentelemetry/exporter-trace-otlp-http": "0.219.0",
     "@opentelemetry/resources": "2.8.0",

@@ -187,6 +187,7 @@ vi.mock('@tixkit/db', () => {
       async findLatestByCheckoutSession(checkoutSessionId: string) {
         return Object.values(rowsFor('payment_intents'))
           .filter((row) => row.checkout_session_id === checkoutSessionId)
+          // oxlint-disable-next-line unicorn/no-array-sort -- sorts a fresh test array under ES2022.
           .sort((left, right) => new Date(right.created_at).getTime() - new Date(left.created_at).getTime())[0];
       }
 

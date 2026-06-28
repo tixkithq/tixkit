@@ -148,6 +148,36 @@ export class PaymentCompensationRepository extends BaseRepository {
       .executeTakeFirst();
   }
 
+  async findLatestByCheckoutSession(checkoutSessionId: string) {
+    return this.db
+      .selectFrom('payment_compensations')
+      .selectAll()
+      .where('checkout_session_id', '=', checkoutSessionId)
+      .orderBy('created_at', 'desc')
+      .executeTakeFirst();
+  }
+
+  async listForTenant(input: {
+    tenantId: string;
+    status?: string;
+    checkoutSessionId?: string;
+    limit: number;
+    cursor?: string;
+  }) {
+    let query = this.db
+      .selectFrom('payment_compensations')
+      .selectAll()
+      .where('tenant_id', '=', input.tenantId)
+      .orderBy('id', 'asc')
+      .limit(input.limit + 1);
+    if (input.status) query = query.where('status', '=', input.status);
+    if (input.checkoutSessionId) {
+      query = query.where('checkout_session_id', '=', input.checkoutSessionId);
+    }
+    if (input.cursor) query = query.where('id', '>', input.cursor);
+    return query.execute();
+  }
+
   async update(id: string, input: Record<string, unknown>) {
     return this.updateReturning('payment_compensations', id, { ...input, updated_at: new Date() });
   }
@@ -160,6 +190,8 @@ export class RefundRepository extends BaseRepository {
     paymentIntentId?: string | null;
     provider: string;
     providerRefundId: string;
+    requestIdempotencyKey?: string | null;
+    requestNonce?: string | null;
     amountCents: number;
     currency: string;
     reason: string;
@@ -177,6 +209,9 @@ export class RefundRepository extends BaseRepository {
         payment_intent_id: input.paymentIntentId ?? null,
         provider: input.provider,
         provider_refund_id: input.providerRefundId,
+        request_idempotency_key:
+          input.requestIdempotencyKey ?? `provider:${input.provider}:${input.providerRefundId}`,
+        request_nonce: input.requestNonce ?? null,
         amount_cents: input.amountCents,
         currency: input.currency,
         status: input.status ?? 'pending',

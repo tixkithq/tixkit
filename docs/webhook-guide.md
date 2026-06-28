@@ -99,6 +99,8 @@ Every delivery uses a versioned envelope. The `apiVersion` field is currently `2
 
 Only events listed in the endpoint's `events` array are delivered.
 
+Successful provider payment alone does not emit order or ticket webhooks. If Tixkit cannot safely finalize the checkout session, hold, and order path, the payment is treated as orphaned and is canceled/voided or refunded; no `order.created`, `order.paid`, or `ticket.issued` event is emitted.
+
 ## Headers
 
 Each delivery is a `POST` with these headers:

@@ -8,6 +8,7 @@ import {
   registerObservability,
   type ApiObservability,
 } from '../observability.js';
+import { config } from '../config/index.js';
 
 function createHoldDb(rows: Array<{ quantity: number | string }>): Database {
   const query = {
@@ -112,6 +113,39 @@ describe('API observability', () => {
     expect(dbProvider).toHaveBeenCalledTimes(1);
 
     await app.close();
+  });
+
+  it('requires metrics auth by default outside development and test before querying inventory holds', async () => {
+    const previousNodeEnv = config.nodeEnv;
+    const previousMetricsBearerToken = config.metricsBearerToken;
+    config.nodeEnv = 'staging';
+    config.metricsBearerToken = '';
+
+    const app = Fastify({ logger: false, genReqId: () => 'req_metrics_default_auth' });
+    const observability: ApiObservability = {
+      metrics: createTixkitMetrics('test-api-metrics-default-auth'),
+    };
+    const dbProvider = vi.fn(() => createHoldDb([{ quantity: 7 }]));
+
+    try {
+      registerMetricsRoute(app, observability, dbProvider);
+
+      const response = await app.inject({ method: 'GET', url: '/metrics' });
+
+      expect(response.statusCode).toBe(401);
+      expect(response.json()).toEqual({
+        error: {
+          code: 'UNAUTHORIZED',
+          message: 'Unauthorized',
+          requestId: 'req_metrics_default_auth',
+        },
+      });
+      expect(dbProvider).not.toHaveBeenCalled();
+    } finally {
+      config.nodeEnv = previousNodeEnv;
+      config.metricsBearerToken = previousMetricsBearerToken;
+      await app.close();
+    }
   });
 
   it('can refresh the inventory gauge independently for integration tests', async () => {

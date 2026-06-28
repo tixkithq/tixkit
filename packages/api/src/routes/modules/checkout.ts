@@ -12,6 +12,7 @@ import {
   AccessRuleRepository,
   ProductRepository,
   EventOccurrenceRepository,
+  PaymentCompensationRepository,
 } from '@tixkit/db';
 import type { ProductForPricing, TicketTypeForPricing } from '../../services/pricing.js';
 import type { CartReservationItem } from '../../services/inventory.js';
@@ -95,6 +96,17 @@ function publicCheckoutSession(session: {
   cancel_url: string | null;
   order_id: string | null;
   client_token: string;
+}, compensation?: {
+  id: string;
+  status: string;
+  action: string;
+  provider: string;
+  provider_intent_id: string;
+  provider_compensation_id: string | null;
+  attempts: number;
+  reason: string;
+  last_error: string | null;
+  updated_at: Date | string;
 }) {
   return {
     id: session.id,
@@ -108,6 +120,20 @@ function publicCheckoutSession(session: {
     cancelUrl: session.cancel_url,
     orderId: session.order_id,
     clientToken: session.client_token,
+    paymentCompensation: compensation
+      ? {
+          id: compensation.id,
+          status: compensation.status,
+          action: compensation.action,
+          provider: compensation.provider,
+          providerIntentId: compensation.provider_intent_id,
+          providerCompensationId: compensation.provider_compensation_id,
+          attempts: compensation.attempts,
+          reason: compensation.reason,
+          lastError: compensation.last_error,
+          updatedAt: compensation.updated_at,
+        }
+      : undefined,
   };
 }
 
@@ -764,7 +790,8 @@ export const checkoutRoutes: FastifyPluginAsync = async (app) => {
       throw new ValidationError('X-Checkout-Session-Token header is required');
     }
 
-    return publicCheckoutSession(session);
+    const compensation = await new PaymentCompensationRepository(db).findLatestByCheckoutSession(sessionId);
+    return publicCheckoutSession(session, compensation);
   });
 
   app.get('/checkout/sessions/:sessionId/wallet-passes', async (request) => {
@@ -945,6 +972,35 @@ export const checkoutRoutes: FastifyPluginAsync = async (app) => {
         if (session.status === 'pending_payment') {
           const workflowId = `checkout-session:${sessionId}`;
           const state = await temporalClient.getCheckoutState(workflowId);
+          if (state.status === 'completed' && state.orderId) {
+            const order = await orderRepo.findById(state.orderId);
+            if (!order) throw new NotFoundError('Order', state.orderId);
+            return { status: 200, body: { order, sessionId, status: 'completed' } };
+          }
+          if (state.status === 'failed') {
+            return {
+              status: 402,
+              body: {
+                error: {
+                  code: 'PAYMENT_RETRY_REQUIRED',
+                  message: state.error ?? 'Payment failed. Retry checkout with a fresh session.',
+                  requestId: request.id,
+                },
+              },
+            };
+          }
+          if (state.status === 'cancelled') {
+            return {
+              status: 409,
+              body: {
+                error: {
+                  code: 'CHECKOUT_CANCELLED',
+                  message: 'Checkout session has been cancelled',
+                  requestId: request.id,
+                },
+              },
+            };
+          }
           if (state.paymentIntentId) {
             return {
               status: 200,
@@ -955,18 +1011,6 @@ export const checkoutRoutes: FastifyPluginAsync = async (app) => {
                 clientSecret: state.clientSecret,
                 totalCents: quote.totalCents,
                 currency: session.currency,
-              },
-            };
-          }
-          if (state.status === 'failed') {
-            return {
-              status: 402,
-              body: {
-                error: {
-                  code: 'PAYMENT_FAILED',
-                  message: state.error ?? 'Payment failed',
-                  requestId: request.id,
-                },
               },
             };
           }

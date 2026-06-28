@@ -2,6 +2,7 @@ import Fastify from 'fastify';
 import { createHash } from 'node:crypto';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { verifyToken } from '@clerk/backend';
+import { jwtVerify } from 'jose';
 import type { FastifyRequest } from 'fastify';
 import type { Principal, Permission } from '@tixkit/domain';
 import { ForbiddenError, UnauthorizedError } from '@tixkit/domain';
@@ -11,10 +12,16 @@ import {
   DEV_ORG_ID,
   DEV_TENANT_ID,
 } from '../auth/clerk.js';
+import { OIDCAdapter } from '../auth/providers.js';
 import { authRoutes } from '../routes/modules/auth.js';
 
 vi.mock('@clerk/backend', () => ({
   verifyToken: vi.fn(),
+}));
+
+vi.mock('jose', () => ({
+  createRemoteJWKSet: vi.fn(() => ({})),
+  jwtVerify: vi.fn(),
 }));
 
 type Row = Record<string, unknown>;
@@ -62,6 +69,7 @@ function createAuthDb(initialTables: Tables) {
       if (operator === '=') return actual === value;
       if (operator === '!=') return actual !== value;
       if (operator === 'is') return value === null ? actual === null : actual === value;
+      if (operator === 'in') return Array.isArray(value) && value.includes(actual);
       return false;
     });
 
@@ -209,6 +217,80 @@ describe('ClerkAuthService signed-in user auth', () => {
       tenantId: 'tnt_1',
       organizationIds: ['org_1'],
       scopes: ['events.read', 'orders.read'],
+    });
+  });
+
+  it('maps event-scoped Clerk user permission grants to principal eventIds', async () => {
+    vi.mocked(verifyToken).mockResolvedValue({ sub: 'clerk_user_1' } as never);
+    const { db } = createAuthDb({
+      user_profiles: [
+        {
+          id: 'usr_1',
+          tenant_id: 'tnt_1',
+          clerk_user_id: 'clerk_user_1',
+          status: 'active',
+        },
+      ],
+      permission_grants: [
+        {
+          tenant_id: 'tnt_1',
+          principal_type: 'user',
+          principal_id: 'usr_1',
+          permission: 'events.read',
+          scope_type: 'event',
+          scope_id: 'evt_A',
+        },
+      ],
+      organization_members: [{ user_id: 'usr_1', organization_id: 'org_1' }],
+    });
+
+    const service = new ClerkAuthService('sk_test_auth', db as never);
+    const result = await service.authenticateRequest(
+      request({ authorization: 'Bearer clerk_session_token' }),
+    );
+
+    expect(result.principal).toMatchObject({
+      id: 'usr_1',
+      scopes: ['events.read'],
+      eventIds: ['evt_A'],
+    });
+    expect(result.principal.eventIds).toEqual(['evt_A']);
+    expect(() => ClerkAuthService.requireEventScope(result.principal, 'evt_other')).toThrow();
+  });
+
+  it('maps brand-scoped Clerk user permission grants to principal brandIds', async () => {
+    vi.mocked(verifyToken).mockResolvedValue({ sub: 'clerk_user_1' } as never);
+    const { db } = createAuthDb({
+      user_profiles: [
+        {
+          id: 'usr_1',
+          tenant_id: 'tnt_1',
+          clerk_user_id: 'clerk_user_1',
+          status: 'active',
+        },
+      ],
+      permission_grants: [
+        {
+          tenant_id: 'tnt_1',
+          principal_type: 'user',
+          principal_id: 'usr_1',
+          permission: 'events.write',
+          scope_type: 'brand',
+          scope_id: 'brd_A',
+        },
+      ],
+      organization_members: [{ user_id: 'usr_1', organization_id: 'org_1' }],
+    });
+
+    const service = new ClerkAuthService('sk_test_auth', db as never);
+    const result = await service.authenticateRequest(
+      request({ authorization: 'Bearer clerk_session_token' }),
+    );
+
+    expect(result.principal).toMatchObject({
+      id: 'usr_1',
+      scopes: ['events.write'],
+      brandIds: ['brd_A'],
     });
   });
 
@@ -475,6 +557,83 @@ describe('ClerkAuthService signed-in user auth', () => {
     await expect(
       service.authenticateRequest(request({ authorization: 'Bearer invalid' })),
     ).rejects.toThrow('Token verification failed');
+  });
+});
+
+function createOidcAdapter(db: unknown): OIDCAdapter {
+  return new OIDCAdapter(new ClerkAuthService('sk_test_auth', db as never), db as never, {
+    issuerUrl: 'https://issuer.example.test/',
+    audience: 'tixkit-api',
+  });
+}
+
+describe('OIDCAdapter signed-in user auth', () => {
+  beforeEach(() => {
+    vi.mocked(jwtVerify).mockReset();
+  });
+
+  it('rejects a single-profile user when requested organization does not map to membership', async () => {
+    vi.mocked(jwtVerify).mockResolvedValue({
+      payload: {
+        sub: 'oidc_user_1',
+        organization_id: 'org_unknown',
+      },
+    } as never);
+    const { db } = createAuthDb({
+      user_profiles: [
+        {
+          id: 'usr_1',
+          tenant_id: 'tnt_1',
+          clerk_user_id: 'oidc:https://issuer.example.test:oidc_user_1',
+          status: 'active',
+        },
+      ],
+      organization_members: [{ user_id: 'usr_1', organization_id: 'org_1' }],
+    });
+
+    await expect(
+      createOidcAdapter(db).authenticateUser(request({ authorization: 'Bearer oidc_token' })),
+    ).rejects.toThrow('Active OIDC organization does not map to Tixkit membership');
+  });
+
+  it('accepts a single-profile user when requested organization maps to membership', async () => {
+    vi.mocked(jwtVerify).mockResolvedValue({
+      payload: {
+        sub: 'oidc_user_1',
+        org_id: 'org_1',
+      },
+    } as never);
+    const { db } = createAuthDb({
+      user_profiles: [
+        {
+          id: 'usr_1',
+          tenant_id: 'tnt_1',
+          clerk_user_id: 'oidc:https://issuer.example.test:oidc_user_1',
+          status: 'active',
+        },
+      ],
+      permission_grants: [
+        {
+          tenant_id: 'tnt_1',
+          principal_type: 'user',
+          principal_id: 'usr_1',
+          permission: 'events.read',
+        },
+      ],
+      organization_members: [{ user_id: 'usr_1', organization_id: 'org_1' }],
+    });
+
+    await expect(
+      createOidcAdapter(db).authenticateUser(request({ authorization: 'Bearer oidc_token' })),
+    ).resolves.toMatchObject({
+      principal: {
+        type: 'user',
+        id: 'usr_1',
+        tenantId: 'tnt_1',
+        organizationIds: ['org_1'],
+        scopes: ['events.read'],
+      },
+    });
   });
 });
 

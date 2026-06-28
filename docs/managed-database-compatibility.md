@@ -1,6 +1,6 @@
 # Managed Database Compatibility
 
-Tixkit supports PostgreSQL (reference) and MySQL (Tier 1) via Kysely. This document lists managed database providers that work via connection string, along with operational caveats.
+Tixkit supports PostgreSQL (reference), MySQL (Tier 1), and an initial MSSQL target via Kysely. This document lists managed database providers that work via connection string, along with operational caveats.
 
 ## PostgreSQL (Reference Driver)
 
@@ -43,6 +43,20 @@ PlanetScale does not enforce foreign key constraints by default. Tixkit's schema
 
 **Recommendation**: Use PlanetScale only with an explicit foreign key compatibility mode or compensating application-level validation. For production deployments requiring referential integrity, prefer Neon, Supabase, Aurora, or Google Cloud SQL.
 
+## MSSQL (Initial Enterprise Driver)
+
+### Supported Providers
+
+| Provider | Format | Caveats |
+| --- | --- | --- |
+| Azure SQL Database | `sqlserver://` + `<user>:<password>@<server>:1433/db?encrypt=true` | Recommended managed SQL Server target |
+| Amazon RDS for SQL Server | `sqlserver://` + `<user>:<password>@<host>:1433/db?encrypt=true` | Confirm edition-specific feature limits before production |
+| SQL Server on VM | `mssql://` + `<user>:<password>@<host>:1433/db?encrypt=true` | Operator owns patching, backups, and high availability |
+
+### Configuration
+
+Set `DATABASE_URL_MSSQL` to the managed provider connection string and `DB_DRIVER=mssql` to switch the primary driver. See [MSSQL Database Support](./mssql-roadmap.md) for helper coverage, migration caveats, and gated CI validation.
+
 ## SSL/TLS Requirements
 
 Managed databases typically require SSL/TLS connections. Set `sslmode=require` in the PostgreSQL connection string or configure SSL in the MySQL connection options. Tixkit's Kysely dialect passes connection string options through to the underlying driver.
@@ -60,5 +74,6 @@ Run `bun run db:migrate` with the managed database connection string. For zero-d
 | --- | --- | --- |
 | `DATABASE_URL` | PostgreSQL connection string | Local dev default uses localhost |
 | `DATABASE_URL_MYSQL` | MySQL connection string (required when `DB_DRIVER=mysql`) | Local dev default uses localhost |
-| `DB_DRIVER` | Primary database driver: `postgres` or `mysql` | `postgres` |
+| `DATABASE_URL_MSSQL` | MSSQL connection string (required when `DB_DRIVER=mssql`) | none |
+| `DB_DRIVER` | Primary database driver: `postgres`, `mysql`, or `mssql` | `postgres` |
 | `DB_INTEGRATION_DRIVER` | Integration test database driver | `postgres` |

@@ -75,8 +75,9 @@ export function registerMetricsRoute(
   options: MetricsRouteOptions = {},
 ): void {
   const bearerToken = options.bearerToken ?? config.metricsBearerToken;
+  const isLocalMetricsEnvironment = config.nodeEnv === 'development' || config.nodeEnv === 'test';
   const requireBearerToken =
-    options.requireBearerToken ?? (config.nodeEnv === 'production' || bearerToken.length > 0);
+    options.requireBearerToken ?? (!isLocalMetricsEnvironment || bearerToken.length > 0);
 
   app.get('/metrics', async (request, reply) => {
     if (requireBearerToken && !isAuthorizedMetricsRequest(request, bearerToken)) {

@@ -69,6 +69,83 @@ function stringArray(value: unknown): string[] {
     : [];
 }
 
+type RefundRow = {
+  id: string;
+  order_id: string;
+  provider_refund_id: string;
+  request_idempotency_key?: string | null;
+  request_nonce?: string | null;
+  amount_cents: number | string | bigint;
+  currency: string;
+  status: string;
+  metadata?: unknown;
+};
+
+type RefundActivityValue = { providerRefundId: string; status: string };
+
+type RefundReservation =
+  | { action: 'return'; result: WorkflowActivityResult<RefundActivityValue> }
+  | {
+      action: 'call-provider';
+      order: {
+        id: string;
+        tenantId: string;
+        totalCents: number;
+        currency: string;
+      };
+      paymentIntent: { id: string; providerIntentId: string | null };
+      paymentAccountProvider?: string;
+      pendingProviderRefundId: string;
+    };
+
+const CAPACITY_REFUND_STATUSES = new Set(['pending', 'succeeded']);
+
+function refundMatchesRequest(refund: RefundRow, requestKey: string, nonce: string): boolean {
+  if (refund.request_idempotency_key === requestKey || refund.request_nonce === nonce) {
+    return true;
+  }
+  const metadata = parseMetadata(refund.metadata);
+  return metadata.stripeIdempotencyKey === requestKey || metadata.refundNonce === nonce;
+}
+
+function sumRefundsForCapacity(refunds: RefundRow[]): number {
+  return refunds
+    .filter((refund) => CAPACITY_REFUND_STATUSES.has(refund.status))
+    .reduce((sum, refund) => sum + Number(refund.amount_cents), 0);
+}
+
+function sumSucceededRefunds(refunds: RefundRow[]): number {
+  return refunds
+    .filter((refund) => refund.status === 'succeeded')
+    .reduce((sum, refund) => sum + Number(refund.amount_cents), 0);
+}
+
+function refundRequestConflicts(
+  refund: RefundRow,
+  input: { amountCents: number },
+  currency: string,
+): boolean {
+  return Number(refund.amount_cents) !== input.amountCents || refund.currency !== currency;
+}
+
+function buildRefundMetadata(input: {
+  stripeIdempotencyKey: string;
+  stripeRefundId: string;
+  nonce: string;
+  status: 'pending' | 'succeeded' | 'superseded';
+  supersededByProviderRefundId?: string;
+}): Record<string, string> {
+  return {
+    stripeIdempotencyKey: input.stripeIdempotencyKey,
+    stripeRefundId: input.stripeRefundId,
+    refundNonce: input.nonce,
+    refundReservationStatus: input.status,
+    ...(input.supersededByProviderRefundId
+      ? { supersededByProviderRefundId: input.supersededByProviderRefundId }
+      : {}),
+  };
+}
+
 export async function processRefundActivity(input: {
   orderId: string;
   amountCents: number;
@@ -81,158 +158,362 @@ export async function processRefundActivity(input: {
     const callerKey = input.idempotencyKey ?? `refund-${input.orderId}`;
     const stripeIdempotencyKey = `${callerKey}:${input.nonce}`;
     const stripeSecretKey = process.env.STRIPE_SECRET_KEY;
+    const pendingProviderRefundId = `pending-refund:${input.orderId}:${input.nonce}`;
 
-    return await db
-      .transaction()
-      .execute(
-        async (
-          trx,
-        ): Promise<WorkflowActivityResult<{ providerRefundId: string; status: string }>> => {
-          const orderRepo = new OrderRepository(trx as Database);
-          const piRepo = new PaymentIntentRepository(trx as Database);
-          const refundRepo = new RefundRepository(trx as Database);
+    const reservation = await db.transaction().execute(async (trx): Promise<RefundReservation> => {
+      const orderRepo = new OrderRepository(trx as Database);
+      const piRepo = new PaymentIntentRepository(trx as Database);
+      const refundRepo = new RefundRepository(trx as Database);
 
-          const order = await trx
-            .selectFrom('orders')
-            .selectAll()
-            .where('id', '=', input.orderId)
-            .forUpdate()
+      const order = await trx
+        .selectFrom('orders')
+        .selectAll()
+        .where('id', '=', input.orderId)
+        .forUpdate()
+        .executeTakeFirst();
+      if (!order) {
+        return { action: 'return', result: errResult('ORDER_NOT_FOUND', 'Order not found', false) };
+      }
+
+      const dbPi = order.payment_intent_id ? await piRepo.findById(order.payment_intent_id) : null;
+      const existingRefunds = (await trx
+        .selectFrom('refunds')
+        .selectAll()
+        .where('order_id', '=', order.id)
+        .execute()) as RefundRow[];
+      const existingForKey = existingRefunds.find((refund) =>
+        refundMatchesRequest(refund, stripeIdempotencyKey, input.nonce),
+      );
+
+      const repairAndReturn = async (
+        providerRefundId: string,
+      ): Promise<RefundReservation> => {
+        const allRefunds = (await trx
+          .selectFrom('refunds')
+          .selectAll()
+          .where('order_id', '=', order.id)
+          .execute()) as RefundRow[];
+        const totalRefunded = sumSucceededRefunds(allRefunds);
+        const newStatus =
+          totalRefunded >= Number(order.total_cents) ? 'refunded' : 'partially_refunded';
+        await orderRepo.update(order.id, {
+          refunded_cents: totalRefunded,
+          status: newStatus,
+          refunded_at: new Date(),
+        });
+        await trx
+          .updateTable('invoices')
+          .set({ refunded_cents: totalRefunded, updated_at: new Date() })
+          .where('order_id', '=', order.id)
+          .execute();
+
+        return { action: 'return', result: okResult({ providerRefundId, status: 'succeeded' }) };
+      };
+
+      if (existingForKey) {
+        if (refundRequestConflicts(existingForKey, input, order.currency)) {
+          return {
+            action: 'return',
+            result: errResult(
+              'REFUND_IDEMPOTENCY_CONFLICT',
+              'Refund idempotency key was already used for a different refund request',
+              false,
+            ),
+          };
+        }
+
+        if (existingForKey.status === 'succeeded') {
+          return repairAndReturn(existingForKey.provider_refund_id);
+        }
+
+        if (existingForKey.status === 'superseded') {
+          const metadata = parseMetadata(existingForKey.metadata);
+          const supersededBy = metadata.supersededByProviderRefundId;
+          const providerRefundId =
+            typeof supersededBy === 'string' ? supersededBy : existingForKey.provider_refund_id;
+          return repairAndReturn(providerRefundId);
+        }
+
+        if (existingForKey.status !== 'pending') {
+          await refundRepo.update(existingForKey.id, {
+            status: 'pending',
+            provider_refund_id: pendingProviderRefundId,
+            request_idempotency_key: stripeIdempotencyKey,
+            request_nonce: input.nonce,
+            metadata: JSON.stringify(
+              buildRefundMetadata({
+                stripeIdempotencyKey,
+                stripeRefundId: pendingProviderRefundId,
+                nonce: input.nonce,
+                status: 'pending',
+              }),
+            ),
+          });
+        }
+
+        let paymentAccountProvider: string | undefined;
+        if (dbPi?.payment_account_id) {
+          const connectedPaymentAccount = await trx
+            .selectFrom('payment_accounts')
+            .select(['provider'])
+            .where('id', '=', dbPi.payment_account_id)
             .executeTakeFirst();
-          if (!order) {
-            return errResult('ORDER_NOT_FOUND', 'Order not found', false);
-          }
+          paymentAccountProvider = connectedPaymentAccount?.provider;
+        }
 
-          const dbPi = order.payment_intent_id
-            ? await piRepo.findById(order.payment_intent_id)
-            : null;
+        return {
+          action: 'call-provider',
+          order: {
+            id: order.id,
+            tenantId: order.tenant_id,
+            totalCents: Number(order.total_cents),
+            currency: order.currency,
+          },
+          paymentIntent: {
+            id: dbPi?.id ?? '',
+            providerIntentId: dbPi?.provider_intent_id ?? null,
+          },
+          paymentAccountProvider,
+          pendingProviderRefundId,
+        };
+      }
 
-          const existingRefunds = await trx
-            .selectFrom('refunds')
-            .selectAll()
-            .where('order_id', '=', order.id)
-            .execute();
-          const existingForKey = existingRefunds.find((refund) => {
-            const metadata = parseMetadata(refund.metadata);
-            return (
-              metadata.stripeIdempotencyKey === stripeIdempotencyKey ||
-              metadata.refundNonce === input.nonce
-            );
+      const reservedOrRefunded = sumRefundsForCapacity(existingRefunds);
+      if (reservedOrRefunded + input.amountCents > Number(order.total_cents)) {
+        return {
+          action: 'return',
+          result: errResult('REFUND_EXCEEDS_TOTAL', 'Refund amount exceeds order total', false),
+        };
+      }
+
+      await refundRepo.create({
+        tenantId: order.tenant_id,
+        orderId: order.id,
+        paymentIntentId: dbPi?.id,
+        provider: 'stripe',
+        providerRefundId: pendingProviderRefundId,
+        requestIdempotencyKey: stripeIdempotencyKey,
+        requestNonce: input.nonce,
+        amountCents: input.amountCents,
+        currency: order.currency,
+        reason: input.reason,
+        metadata: buildRefundMetadata({
+          stripeIdempotencyKey,
+          stripeRefundId: pendingProviderRefundId,
+          nonce: input.nonce,
+          status: 'pending',
+        }),
+        status: 'pending',
+      });
+
+      let paymentAccountProvider: string | undefined;
+      if (dbPi?.payment_account_id) {
+        const connectedPaymentAccount = await trx
+          .selectFrom('payment_accounts')
+          .select(['provider'])
+          .where('id', '=', dbPi.payment_account_id)
+          .executeTakeFirst();
+        paymentAccountProvider = connectedPaymentAccount?.provider;
+      }
+
+      return {
+        action: 'call-provider',
+        order: {
+          id: order.id,
+          tenantId: order.tenant_id,
+          totalCents: Number(order.total_cents),
+          currency: order.currency,
+        },
+        paymentIntent: {
+          id: dbPi?.id ?? '',
+          providerIntentId: dbPi?.provider_intent_id ?? null,
+        },
+        paymentAccountProvider,
+        pendingProviderRefundId,
+      };
+    });
+
+    if (reservation.action === 'return') {
+      return reservation.result;
+    }
+
+    let providerRefundId: string;
+    if (stripeSecretKey && reservation.paymentIntent.providerIntentId) {
+      const stripe = new Stripe(stripeSecretKey);
+      const refundOpts: Stripe.RefundCreateParams = {
+        payment_intent: reservation.paymentIntent.providerIntentId,
+        amount: input.amountCents,
+        reason: 'requested_by_customer',
+      };
+      if (reservation.paymentAccountProvider === 'stripe_connect') {
+        refundOpts.reverse_transfer = true;
+        refundOpts.refund_application_fee = true;
+      }
+
+      const stripeRefund = await withSpan(
+        'provider.stripe.refund.create',
+        {
+          'tixkit.provider': 'stripe',
+          'tixkit.provider.operation': 'refund.create',
+          'tixkit.tenant_id': reservation.order.tenantId,
+          'tixkit.order_id': input.orderId,
+          'tixkit.payment_intent_id': reservation.paymentIntent.id,
+        },
+        async (span) => {
+          const created = await stripe.refunds.create(refundOpts, {
+            idempotencyKey: stripeIdempotencyKey,
           });
-
-          const alreadyRefunded = existingRefunds
-            .filter((refund) => refund.status === 'succeeded')
-            .reduce((sum, r) => sum + Number(r.amount_cents), 0);
-          if (!existingForKey && alreadyRefunded + input.amountCents > Number(order.total_cents)) {
-            return errResult('REFUND_EXCEEDS_TOTAL', 'Refund amount exceeds order total', false);
-          }
-
-          let stripeRefundId: string | undefined;
-          let providerRefundId = existingForKey?.provider_refund_id ?? '';
-          let createdRefund = false;
-
-          if (!existingForKey) {
-            if (stripeSecretKey && dbPi?.provider_intent_id) {
-              const stripe = new Stripe(stripeSecretKey);
-
-              const refundOpts: Stripe.RefundCreateParams = {
-                payment_intent: dbPi.provider_intent_id,
-                amount: input.amountCents,
-                reason: 'requested_by_customer',
-              };
-              if (dbPi.payment_account_id) {
-                const connectedPaymentAccount = await trx
-                  .selectFrom('payment_accounts')
-                  .select(['provider'])
-                  .where('id', '=', dbPi.payment_account_id)
-                  .executeTakeFirst();
-                if (connectedPaymentAccount?.provider === 'stripe_connect') {
-                  refundOpts.reverse_transfer = true;
-                  refundOpts.refund_application_fee = true;
-                }
-              }
-
-              const stripeRefund = await withSpan(
-                'provider.stripe.refund.create',
-                {
-                  'tixkit.provider': 'stripe',
-                  'tixkit.provider.operation': 'refund.create',
-                  'tixkit.tenant_id': order.tenant_id,
-                  'tixkit.order_id': input.orderId,
-                  'tixkit.payment_intent_id': dbPi.id,
-                },
-                async (span) => {
-                  const created = await stripe.refunds.create(refundOpts, {
-                    idempotencyKey: stripeIdempotencyKey,
-                  });
-                  span.setAttribute('tixkit.provider.refund_id', created.id);
-                  span.setAttribute('tixkit.provider.refund_status', created.status ?? 'unknown');
-                  return created;
-                },
-              );
-              stripeRefundId = stripeRefund.id;
-              providerRefundId = stripeRefund.id;
-            } else {
-              // No Stripe configured or no payment intent; use a local deterministic id.
-              providerRefundId = `local-refund:${input.orderId}:${input.nonce}`;
-            }
-
-            // Dedupe only on the true provider refund id (from Stripe response) for webhook replay.
-            if (!existingRefunds.some((r) => r.provider_refund_id === providerRefundId)) {
-              await refundRepo.create({
-                tenantId: order.tenant_id,
-                orderId: order.id,
-                paymentIntentId: dbPi?.id,
-                provider: 'stripe',
-                providerRefundId,
-                amountCents: input.amountCents,
-                currency: order.currency,
-                reason: input.reason,
-                metadata: {
-                  stripeIdempotencyKey,
-                  stripeRefundId: stripeRefundId ?? providerRefundId,
-                  refundNonce: input.nonce,
-                },
-                status: 'succeeded',
-              });
-              createdRefund = true;
-            }
-          }
-
-          // Recompute the refunded total from persisted refund records so the ledger
-          // is correct regardless of how many times this activity is retried.
-          const allRefunds = await trx
-            .selectFrom('refunds')
-            .selectAll()
-            .where('order_id', '=', order.id)
-            .execute();
-          const totalRefunded = allRefunds
-            .filter((refund) => refund.status === 'succeeded')
-            .reduce((sum, r) => sum + Number(r.amount_cents), 0);
-          const newStatus =
-            totalRefunded >= Number(order.total_cents) ? 'refunded' : 'partially_refunded';
-          await orderRepo.update(order.id, {
-            refunded_cents: totalRefunded,
-            status: newStatus,
-            refunded_at: new Date(),
-          });
-          await trx
-            .updateTable('invoices')
-            .set({ refunded_cents: totalRefunded, updated_at: new Date() })
-            .where('order_id', '=', order.id)
-            .execute();
-
-          if (createdRefund) {
-            await orderRepo.addTimelineEvent(
-              order.id,
-              'order.refunded',
-              `Refunded ${input.amountCents} cents: ${input.reason}`,
-              { refundId: providerRefundId },
-            );
-          }
-
-          return okResult({ providerRefundId, status: 'succeeded' });
+          span.setAttribute('tixkit.provider.refund_id', created.id);
+          span.setAttribute('tixkit.provider.refund_status', created.status ?? 'unknown');
+          return created;
         },
       );
+      providerRefundId = stripeRefund.id;
+    } else {
+      providerRefundId = `local-refund:${input.orderId}:${input.nonce}`;
+    }
+
+    return await db.transaction().execute(async (trx) => {
+      const orderRepo = new OrderRepository(trx as Database);
+      const refundRepo = new RefundRepository(trx as Database);
+
+      const order = await trx
+        .selectFrom('orders')
+        .selectAll()
+        .where('id', '=', input.orderId)
+        .forUpdate()
+        .executeTakeFirst();
+      if (!order) {
+        return errResult('ORDER_NOT_FOUND', 'Order not found', false);
+      }
+
+      const existingRefunds = (await trx
+        .selectFrom('refunds')
+        .selectAll()
+        .where('order_id', '=', order.id)
+        .execute()) as RefundRow[];
+      const requestRefund = existingRefunds.find((refund) =>
+        refundMatchesRequest(refund, stripeIdempotencyKey, input.nonce),
+      );
+      const providerRefund = existingRefunds.find(
+        (refund) => refund.provider_refund_id === providerRefundId,
+      );
+
+      let createdTimelineEvent = false;
+      if (requestRefund?.status === 'succeeded') {
+        providerRefundId = requestRefund.provider_refund_id;
+      } else if (providerRefund && providerRefund.id !== requestRefund?.id) {
+        if (requestRefund) {
+          await refundRepo.update(requestRefund.id, {
+            status: 'superseded',
+            metadata: JSON.stringify(
+              buildRefundMetadata({
+                stripeIdempotencyKey,
+                stripeRefundId: providerRefundId,
+                nonce: input.nonce,
+                status: 'superseded',
+                supersededByProviderRefundId: providerRefundId,
+              }),
+            ),
+          });
+        }
+      } else if (requestRefund) {
+        try {
+          await refundRepo.update(requestRefund.id, {
+            provider_refund_id: providerRefundId,
+            status: 'succeeded',
+            metadata: JSON.stringify(
+              buildRefundMetadata({
+                stripeIdempotencyKey,
+                stripeRefundId: providerRefundId,
+                nonce: input.nonce,
+                status: 'succeeded',
+              }),
+            ),
+          });
+          createdTimelineEvent = true;
+        } catch (err) {
+          const refreshedRefunds = (await trx
+            .selectFrom('refunds')
+            .selectAll()
+            .where('order_id', '=', order.id)
+            .execute()) as RefundRow[];
+          const racedProviderRefund = refreshedRefunds.find(
+            (refund) => refund.provider_refund_id === providerRefundId,
+          );
+          if (!racedProviderRefund) {
+            throw err;
+          }
+          await refundRepo.update(requestRefund.id, {
+            status: 'superseded',
+            metadata: JSON.stringify(
+              buildRefundMetadata({
+                stripeIdempotencyKey,
+                stripeRefundId: providerRefundId,
+                nonce: input.nonce,
+                status: 'superseded',
+                supersededByProviderRefundId: providerRefundId,
+              }),
+            ),
+          });
+        }
+      } else {
+        const reservedOrRefunded = sumRefundsForCapacity(existingRefunds);
+        if (reservedOrRefunded + input.amountCents > Number(order.total_cents)) {
+          return errResult('REFUND_EXCEEDS_TOTAL', 'Refund amount exceeds order total', false);
+        }
+        await refundRepo.create({
+          tenantId: order.tenant_id,
+          orderId: order.id,
+          paymentIntentId: order.payment_intent_id,
+          provider: 'stripe',
+          providerRefundId,
+          requestIdempotencyKey: stripeIdempotencyKey,
+          requestNonce: input.nonce,
+          amountCents: input.amountCents,
+          currency: order.currency,
+          reason: input.reason,
+          metadata: buildRefundMetadata({
+            stripeIdempotencyKey,
+            stripeRefundId: providerRefundId,
+            nonce: input.nonce,
+            status: 'succeeded',
+          }),
+          status: 'succeeded',
+        });
+        createdTimelineEvent = true;
+      }
+
+      const allRefunds = (await trx
+        .selectFrom('refunds')
+        .selectAll()
+        .where('order_id', '=', order.id)
+        .execute()) as RefundRow[];
+      const totalRefunded = sumSucceededRefunds(allRefunds);
+      const newStatus =
+        totalRefunded >= Number(order.total_cents) ? 'refunded' : 'partially_refunded';
+      await orderRepo.update(order.id, {
+        refunded_cents: totalRefunded,
+        status: newStatus,
+        refunded_at: new Date(),
+      });
+      await trx
+        .updateTable('invoices')
+        .set({ refunded_cents: totalRefunded, updated_at: new Date() })
+        .where('order_id', '=', order.id)
+        .execute();
+
+      if (createdTimelineEvent) {
+        await orderRepo.addTimelineEvent(
+          order.id,
+          'order.refunded',
+          `Refunded ${input.amountCents} cents: ${input.reason}`,
+          { refundId: providerRefundId },
+        );
+      }
+
+      return okResult({ providerRefundId, status: 'succeeded' });
+    });
   } catch (err) {
     return errResult('REFUND_FAILED', err instanceof Error ? err.message : 'Unknown error', true);
   } finally {
@@ -551,13 +832,26 @@ export async function restoreInventoryActivity(input: {
           );
         }
       }
+      const consumePreviouslyRestored = (ticketTypeId: string, quantity: number) => {
+        const restoredBudget = previouslyRestoredByTicketType.get(ticketTypeId) ?? 0;
+        const consumed = Math.min(quantity, restoredBudget);
+        const remainingBudget = restoredBudget - consumed;
+        if (remainingBudget > 0) {
+          previouslyRestoredByTicketType.set(ticketTypeId, remainingBudget);
+        } else {
+          previouslyRestoredByTicketType.delete(ticketTypeId);
+        }
+        return quantity - consumed;
+      };
 
       if (input.isFullRefund) {
         // Full refund: restore each hold's remaining quantity after any prior
         // partial refunds recorded on earlier refund metadata.
         for (const hold of holds) {
-          const alreadyRestored = previouslyRestoredByTicketType.get(hold.ticket_type_id) ?? 0;
-          const remainingQuantity = Math.max(0, Number(hold.quantity) - alreadyRestored);
+          const remainingQuantity = consumePreviouslyRestored(
+            hold.ticket_type_id,
+            Number(hold.quantity),
+          );
           if (remainingQuantity === 0) continue;
           // eslint-disable-next-line no-await-in-loop -- full-refund restoration updates each hold before adjusting its inventory pool.
           await trx
@@ -609,8 +903,10 @@ export async function restoreInventoryActivity(input: {
             const matchingHolds = holds.filter((hold) => hold.ticket_type_id === ticketTypeId);
             for (const hold of matchingHolds) {
               if (remaining <= 0) break;
-              const alreadyRestored = previouslyRestoredByTicketType.get(hold.ticket_type_id) ?? 0;
-              const remainingHoldQuantity = Math.max(0, Number(hold.quantity) - alreadyRestored);
+              const remainingHoldQuantity = consumePreviouslyRestored(
+                hold.ticket_type_id,
+                Number(hold.quantity),
+              );
               if (remainingHoldQuantity === 0) continue;
               const restoreQty = Math.min(remainingHoldQuantity, remaining);
               // eslint-disable-next-line no-await-in-loop -- partial refund restoration walks matching holds in order until the voided quantity is restored.

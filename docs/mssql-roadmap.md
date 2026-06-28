@@ -1,56 +1,64 @@
-# MSSQL Database Support Roadmap
+# MSSQL Database Support
 
-Tixkit supports PostgreSQL (reference) and MySQL (Tier 1) via Kysely. This document outlines the roadmap for adding Microsoft SQL Server (MSSQL) as a third production database target.
+Tixkit supports PostgreSQL as the reference database, MySQL as a tier-1 parity target, and an initial Microsoft SQL Server target for enterprise deployments.
 
-## Motivation
+## Configuration
 
-Enterprise Windows-shop environments often standardize on MSSQL. Adding MSSQL support widens Tixkit's enterprise deployability without requiring customers to adopt PostgreSQL or MySQL.
+Use `DB_DRIVER=mssql` with `DATABASE_URL_MSSQL`:
 
-## Implementation Plan
-
-### 1. Dialect Construction
-
-Add a MSSQL Kysely dialect using the `tedious` driver. MSSQL uses `[]` for identifier quoting and `TOP` instead of `LIMIT`.
-
-```typescript
-import { MssqlDialect } from 'kysely';
-import tedious from 'tedious';
-
-const dialect = new MssqlDialect({
-  connection: {
-    server: host,
-    options: { port, database, encrypt: true },
-    authentication: { type: 'default', options: { userName, password } },
-  },
-});
+```bash
+DB_DRIVER=mssql
+DATABASE_URL_MSSQL=sqlserver://<user>:<password>@<host>:1433/<database>?encrypt=true&trustServerCertificate=false
 ```
 
-### 2. Migrations
+The MSSQL URL parser also accepts `mssql://`. The driver uses `tedious` through Kysely's `MssqlDialect`, with `tarn` for pooling.
 
-MSSQL does not support `CREATE TABLE IF NOT EXISTS`. Migrations must use `IF EXISTS` checks or `OBJECT_ID()` queries. The migration runner needs MSSQL-specific SQL generation.
+## Implemented Surface
 
-### 3. Upsert Behavior
+The MSSQL support code lives in `packages/db/src/dialects/mssql.ts`.
 
-MSSQL uses `MERGE` for upserts, which has different syntax from PostgreSQL's `ON CONFLICT` and MySQL's `ON DUPLICATE KEY UPDATE`. The Kysely `onConflict` API does not map to `MERGE`; a custom upsert helper is needed.
+Implemented helpers:
 
-### 4. Transactional Locking
+| Helper | Purpose |
+| --- | --- |
+| `parseMssqlConnectionUrl` | Parses SQL Server URLs into tedious-compatible connection settings. |
+| `createMssqlDialect` | Creates a Kysely MSSQL dialect backed by `tedious`. |
+| `mssqlObjectIdExists` | Generates `OBJECT_ID()` existence checks for migration helpers. |
+| `mssqlDropTableIfExists` | Generates SQL Server-safe conditional table drops. |
+| `buildMssqlMergeUpsert` | Generates `MERGE` SQL for upsert semantics. |
+| `mssqlForUpdateTable` | Produces `WITH (UPDLOCK, HOLDLOCK)` table hints for row-locking reads. |
+| `executeMssqlForUpdate` | Executes a raw locked read through Kysely. |
 
-MSSQL uses `WITH (UPDLOCK, HOLDLOCK)` for `SELECT ... FOR UPDATE` semantics. Kysely's `forUpdate()` does not generate this; a custom locking helper is needed.
+`packages/db/src/client.ts` recognizes:
 
-### 5. Reset/Cleanup
+- `DB_DRIVER=mssql`
+- `DB_DRIVER=sqlserver`
+- `DATABASE_URL_MSSQL`
+- `mssql://...`
+- `sqlserver://...`
 
-MSSQL reset scripts must drop tables in dependency order (respecting foreign keys) or use `DROP TABLE ... CASCADE` equivalent.
+## Migration Notes
 
-### 6. CI
+SQL Server does not support every PostgreSQL/MySQL migration idiom. MSSQL migrations should use:
 
-Add a `test:mssql` provider job that runs correctness-critical suites against MSSQL in CI. Use a Docker-based MSSQL or Azure SQL Edge for local testing.
+- `IF EXISTS` checks for destructive operations.
+- `OBJECT_ID()` checks for table existence.
+- explicit foreign-key cleanup order when resetting schemas.
+- `MERGE` for upsert behavior instead of PostgreSQL `ON CONFLICT` or MySQL `ON DUPLICATE KEY UPDATE`.
+- `WITH (UPDLOCK, HOLDLOCK)` where Tixkit needs `SELECT ... FOR UPDATE` semantics.
 
-## Coordination with Phase 3
+## Validation
 
-C-055 requires modifying `packages/db/` (dialect, migrations, repositories). These are Phase 3-owned surfaces. Phase 4 will provide the roadmap and design; Phase 3 will implement the dialect and migration helpers.
+Local validation evidence:
 
-## Status
+```bash
+bun run --filter @tixkit/db typecheck
+bun run --filter @tixkit/db test:unit
+bun run --filter @tixkit/db lint
+```
 
-- **Design**: This document
-- **Implementation**: Pending Phase 3 coordination
-- **Priority**: P2 (after Postgres/MySQL surface is stable)
+CI includes a gated `integration-tests-mssql` job. It only runs when `RUN_MSSQL_TESTS` is enabled because the SQL Server container is heavier than the default Postgres/MySQL services.
+
+## Remaining Work
+
+The current implementation provides dialect construction and correctness-critical SQL helpers. Full repository-by-repository MSSQL integration parity should be expanded as production customers select SQL Server as their primary database.

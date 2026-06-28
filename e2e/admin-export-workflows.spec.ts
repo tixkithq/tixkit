@@ -29,6 +29,12 @@ async function attachScreenshot(page: Page, testInfo: TestInfo, name: string): P
   });
 }
 
+async function removeToastNotifications(page: Page): Promise<void> {
+  await page.locator('[data-sonner-toast]').evaluateAll((nodes) => {
+    for (const node of nodes) node.remove();
+  });
+}
+
 async function expectJsonStatus<T>(
   response: PlaywrightResponse | Awaited<ReturnType<Page['request']['get']>>,
   expectedStatus: number,
@@ -148,7 +154,7 @@ test.describe('admin export workflow coverage', () => {
 
     const conversionReport = await expectJsonStatus<{
       eventId: string;
-      widgetViews: number | null;
+      widgetViews: number;
       checkoutStarted: number;
       checkoutCompleted: number;
       conversionRate: number;
@@ -159,14 +165,12 @@ test.describe('admin export workflow coverage', () => {
       200,
     );
     expect(conversionReport.eventId).toBe(event.id);
-    expect(conversionReport.widgetViews).toBeNull();
+    expect(conversionReport.widgetViews).toBe(0);
     expect(conversionReport.checkoutCompleted).toBeGreaterThanOrEqual(1);
 
     await page.getByRole('tab', { name: 'Conversion' }).click();
-    await expect(
-      page.getByText('Widget impressions are not tracked for this event yet.'),
-    ).toBeVisible();
-    await expect(page.getByText('Untracked')).toBeVisible();
+    await expect(page.getByText('Conversion rate')).toBeVisible();
+    await expect(page.getByText('0', { exact: true })).toBeVisible();
     await attachScreenshot(page, testInfo, 'admin-conversion-untracked-desktop');
 
     for (const exportCase of exportCases) {
@@ -220,6 +224,7 @@ test.describe('admin export workflow coverage', () => {
     }
 
     await attachScreenshot(page, testInfo, 'admin-export-completed-desktop');
+    await removeToastNotifications(page);
     await expectNoAxeViolations(page, testInfo);
   });
 
@@ -318,9 +323,9 @@ test.describe('admin export workflow coverage', () => {
 
     await page.getByRole('tab', { name: 'Affiliate' }).click();
     await expect(
-      page.getByText('Choose an organization before loading affiliate reporting.'),
+      page.getByText('Choose a workspace before loading affiliate reporting.'),
     ).toBeVisible();
-    await page.getByRole('combobox', { name: 'Select report scope' }).click();
+    await page.getByRole('combobox', { name: 'Select workspace' }).click();
     await page.getByRole('option', { name: 'Tixkit Dev' }).click();
     await expect(page.getByText(affiliate.affiliate.name)).toBeVisible();
     await expect(page.getByText(affiliate.affiliate.code)).toBeVisible();
@@ -534,10 +539,8 @@ test.describe('admin export workflow coverage', () => {
     await attachScreenshot(page, testInfo, 'admin-reports-mobile-attendance');
 
     await page.getByRole('tab', { name: 'Conversion' }).click();
-    await expect(
-      page.getByText('Widget impressions are not tracked for this event yet.'),
-    ).toBeVisible();
-    await expect(page.getByText('Untracked')).toBeVisible();
+    await expect(page.getByText('Conversion rate')).toBeVisible();
+    await expect(page.getByText('0', { exact: true })).toBeVisible();
     await attachScreenshot(page, testInfo, 'admin-reports-mobile-conversion');
 
     await expectNoAxeViolations(page, testInfo);

@@ -1,4 +1,5 @@
 import { createHash, createHmac, randomBytes } from 'node:crypto';
+export type { AuthProvider, AuthProviderName, AuthProviderResult } from './auth-provider.js';
 
 export function generateId(prefix: string): string {
   const ts = BigInt(Date.now()).toString(36).toUpperCase().padStart(10, '0');

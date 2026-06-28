@@ -548,6 +548,27 @@ describe('paymentReconciliationWorkflow', () => {
     );
     expect(marked).toBe(false);
   });
+
+  it('does not mark the provider event processed when checkout finalization is still retryable', async () => {
+    let marked = false;
+
+    setActivity('reconcilePaymentActivity', async () =>
+      errResult(
+        'ORDER_NOT_FINALIZED_YET',
+        'Checkout session is still finalizing for this successful payment',
+        true,
+      ),
+    );
+    setActivity('markProviderEventProcessedActivity', async () => {
+      marked = true;
+      return okResult({ processed: true });
+    });
+
+    await expect(paymentReconciliationWorkflow(makePaymentReconciliationInput())).rejects.toThrow(
+      'Payment reconciliation failed (ORDER_NOT_FINALIZED_YET): Checkout session is still finalizing for this successful payment',
+    );
+    expect(marked).toBe(false);
+  });
 });
 
 describe('clerkIdentitySyncWorkflow', () => {

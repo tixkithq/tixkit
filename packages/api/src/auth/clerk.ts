@@ -1,5 +1,6 @@
 import type { FastifyRequest, FastifyReply } from 'fastify';
 import { verifyToken } from '@clerk/backend';
+import type { AuthProvider } from '@tixkit/shared';
 import type { Principal, Permission, Ulid } from '@tixkit/domain';
 import { UnauthorizedError, ForbiddenError, NotFoundError } from '@tixkit/domain';
 import type { Database } from '@tixkit/db';
@@ -51,6 +52,21 @@ const ALL_PERMISSIONS: Permission[] = [
   'developers.write',
   'billing.write',
 ];
+
+function grantScopeIds(
+  grants: Array<{ scope_type?: unknown; scope_id?: unknown }>,
+  scopeType: 'brand' | 'event',
+): Ulid[] | undefined {
+  const ids = [
+    ...new Set(
+      grants
+        .filter((grant) => grant.scope_type === scopeType && typeof grant.scope_id === 'string')
+        .map((grant) => grant.scope_id as Ulid),
+    ),
+  ];
+
+  return ids.length > 0 ? ids : undefined;
+}
 
 export class ClerkAuthService {
   private config: AuthConfig;
@@ -353,6 +369,8 @@ export class ClerkAuthService {
         .execute();
 
       const organizationIds = memberships.map((m) => m.organization_id as Ulid);
+      const brandIds = grantScopeIds(grants, 'brand');
+      const eventIds = grantScopeIds(grants, 'event');
 
       const principal: Principal = {
         type: 'user',
@@ -362,6 +380,8 @@ export class ClerkAuthService {
         tenantId: userProfile.tenant_id,
         organizationIds,
         scopes,
+        brandIds,
+        eventIds,
       };
 
       return { principal, clerkUserId };
@@ -647,7 +667,13 @@ export class ClerkAuthService {
   }
 }
 
-export function createAuthMiddleware(authService: ClerkAuthService) {
+type AuthMiddlewareProvider =
+  | AuthProvider<FastifyRequest>
+  | (ClerkAuthService & {
+      authenticateUser?: AuthProvider<FastifyRequest>['authenticateUser'];
+    });
+
+export function createAuthMiddleware(authService: AuthMiddlewareProvider) {
   return async (request: FastifyRequest, reply: FastifyReply) => {
     const authHeader = request.headers.authorization;
 
@@ -662,7 +688,11 @@ export function createAuthMiddleware(authService: ClerkAuthService) {
         const result = await authService.authenticateApiKey(request);
         request.principal = result.principal;
       } else if (authHeader?.startsWith('Bearer ')) {
-        const result = await authService.authenticateRequest(request);
+        const authenticateUser =
+          authService.authenticateUser ??
+          (authService as unknown as { authenticateRequest: AuthProvider<FastifyRequest>['authenticateUser'] })
+            .authenticateRequest;
+        const result = await authenticateUser.call(authService, request);
         request.principal = result.principal;
       } else if (authService.isLocalDevMode()) {
         // Local dev mode: allow unauthenticated requests when no Clerk secret

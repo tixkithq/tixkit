@@ -262,12 +262,12 @@ export function EventCheckoutFormView({ eventId }: { eventId: string }) {
   const [selectedPreviewTicketId, setSelectedPreviewTicketId] = React.useState(allTicketsValue);
   const [previewAnswers, setPreviewAnswers] = React.useState<Record<string, unknown>>({});
 
-  const orderedQuestions = React.useMemo(
-    // eslint-disable-next-line unicorn/no-array-sort -- creates a new array via spread
-    () =>
-      [...(questions ?? [])].sort((a, b) => a.sortOrder - b.sortOrder || a.id.localeCompare(b.id)),
-    [questions],
-  );
+  const orderedQuestions = React.useMemo(() => {
+    const sortedQuestions = [...(questions ?? [])];
+    // oxlint-disable-next-line unicorn/no-array-sort -- sorts a copied array; ES2023 toSorted is outside this app's TS lib target.
+    sortedQuestions.sort((a, b) => a.sortOrder - b.sortOrder || a.id.localeCompare(b.id));
+    return sortedQuestions;
+  }, [questions]);
 
   const openCreate = () => {
     setEditingQuestion(undefined);

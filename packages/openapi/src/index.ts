@@ -53,6 +53,22 @@ export const openApiSpec = {
         description:
           'Client token returned when the checkout session is created; required to read public session details',
       },
+      OptionalCheckoutSessionToken: {
+        name: 'X-Checkout-Session-Token',
+        in: 'header',
+        required: false,
+        schema: { type: 'string' },
+        description:
+          'Client token returned when the checkout session is created. GET session recovery may alternatively use payment_intent_client_secret for pending payment sessions.',
+      },
+      PaymentIntentClientSecret: {
+        name: 'payment_intent_client_secret',
+        in: 'query',
+        required: false,
+        schema: { type: 'string' },
+        description:
+          'Stripe PaymentIntent client secret accepted only for recovering pending_payment checkout sessions when the checkout session token is unavailable.',
+      },
       ScannerDeviceSecret: {
         name: 'X-Device-Secret',
         in: 'header',
@@ -550,6 +566,7 @@ export const openApiSpec = {
           successUrl: { type: 'string' },
           cancelUrl: { type: 'string' },
           orderId: { type: 'string' },
+          paymentCompensation: { $ref: '#/components/schemas/PaymentCompensation' },
           expiresAt: { type: 'string', format: 'date-time' },
         },
         required: ['id', 'eventId', 'status', 'currency', 'quote', 'expiresAt'],
@@ -705,6 +722,50 @@ export const openApiSpec = {
         type: 'object',
         properties: {
           items: { type: 'array', items: { $ref: '#/components/schemas/Order' } },
+          nextCursor: { type: ['string', 'null'] },
+          hasMore: { type: 'boolean' },
+        },
+        required: ['items', 'nextCursor', 'hasMore'],
+      },
+      PaymentCompensation: {
+        type: 'object',
+        properties: {
+          id: { type: 'string' },
+          tenantId: { type: 'string' },
+          checkoutSessionId: { type: 'string' },
+          paymentIntentId: { type: ['string', 'null'] },
+          provider: { type: 'string' },
+          providerIntentId: { type: 'string' },
+          amountCents: { type: 'integer' },
+          currency: { type: 'string' },
+          action: { type: 'string' },
+          status: {
+            type: 'string',
+            enum: ['pending', 'succeeded', 'failed', 'manual_review', 'already_ordered'],
+          },
+          providerCompensationId: { type: ['string', 'null'] },
+          attempts: { type: 'integer' },
+          reason: { type: 'string' },
+          lastError: { type: ['string', 'null'] },
+          metadata: { type: 'object', additionalProperties: true },
+          createdAt: { type: 'string', format: 'date-time' },
+          updatedAt: { type: 'string', format: 'date-time' },
+        },
+        required: [
+          'id',
+          'provider',
+          'providerIntentId',
+          'action',
+          'status',
+          'attempts',
+          'reason',
+          'updatedAt',
+        ],
+      },
+      PaymentCompensationPage: {
+        type: 'object',
+        properties: {
+          items: { type: 'array', items: { $ref: '#/components/schemas/PaymentCompensation' } },
           nextCursor: { type: ['string', 'null'] },
           hasMore: { type: 'boolean' },
         },
@@ -1543,6 +1604,10 @@ export const openApiSpec = {
   },
   paths: {
     '/health': {
+      servers: [
+        { url: 'https://api.tixkit.com', description: 'Production operational root' },
+        { url: 'http://localhost:4000', description: 'Local operational root' },
+      ],
       get: { summary: 'Health check', responses: { '200': { description: 'OK' } } },
     },
     '/organizations': {
@@ -2969,7 +3034,10 @@ export const openApiSpec = {
     '/checkout/sessions/{sessionId}': {
       get: {
         summary: 'Get checkout session',
-        parameters: [{ $ref: '#/components/parameters/CheckoutSessionToken' }],
+        parameters: [
+          { $ref: '#/components/parameters/OptionalCheckoutSessionToken' },
+          { $ref: '#/components/parameters/PaymentIntentClientSecret' },
+        ],
         responses: {
           '200': {
             description: 'Redacted checkout session details',
@@ -3097,11 +3165,42 @@ export const openApiSpec = {
         parameters: [
           { $ref: '#/components/parameters/Cursor' },
           { $ref: '#/components/parameters/Limit' },
+          { name: 'organizationId', in: 'query', schema: { type: 'string' } },
+          { name: 'eventId', in: 'query', schema: { type: 'string' } },
         ],
         responses: {
           '200': {
             description: 'Page of orders',
             content: { 'application/json': { schema: { $ref: '#/components/schemas/OrderPage' } } },
+          },
+        },
+      },
+    },
+    '/payment-compensations': {
+      get: {
+        summary: 'List orphan payment compensations',
+        security: [{ BearerAuth: [] }],
+        parameters: [
+          { $ref: '#/components/parameters/Cursor' },
+          { $ref: '#/components/parameters/Limit' },
+          {
+            name: 'status',
+            in: 'query',
+            schema: {
+              type: 'string',
+              enum: ['pending', 'succeeded', 'failed', 'manual_review', 'already_ordered'],
+            },
+          },
+          { name: 'checkoutSessionId', in: 'query', schema: { type: 'string' } },
+        ],
+        responses: {
+          '200': {
+            description: 'Page of orphan payment compensations',
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/PaymentCompensationPage' },
+              },
+            },
           },
         },
       },

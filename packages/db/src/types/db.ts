@@ -588,6 +588,8 @@ export interface RefundTable {
   payment_intent_id: string | null;
   provider: string;
   provider_refund_id: string;
+  request_idempotency_key: string | null;
+  request_nonce: string | null;
   amount_cents: number;
   currency: string;
   status: string;

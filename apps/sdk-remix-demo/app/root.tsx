@@ -1,3 +1,4 @@
+import type * as React from 'react';
 import { Links, Meta, Outlet, Scripts } from '@remix-run/react';
 
 export function Layout({ children }: { children: React.ReactNode }) {
@@ -18,5 +19,5 @@ export function Layout({ children }: { children: React.ReactNode }) {
 }
 
 export default function App() {
-  return <Outlet />;
+  return Outlet({});
 }

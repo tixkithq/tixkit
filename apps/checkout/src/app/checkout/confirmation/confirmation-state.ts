@@ -22,14 +22,17 @@ export function deriveState(
   redirectStatus: string | null,
 ): ConfirmationState {
   if (redirectStatus === 'failed') return 'failed';
-  if (redirectStatus === 'succeeded') return 'confirmed';
-  if (!session) return 'unknown';
+  if (!session) {
+    return redirectStatus === 'succeeded' ? 'confirmed' : 'unknown';
+  }
+
   const status = session.status;
-  if (status === 'completed') return 'confirmed';
-  if (status === 'pending_payment') return 'pending';
+  if (status === 'failed') return 'failed';
   if (status === 'expired') return 'expired';
   if (status === 'cancelled') return 'cancelled';
-  if (status === 'failed') return 'failed';
+  if (status === 'completed') return 'confirmed';
+  if (redirectStatus === 'succeeded') return 'confirmed';
+  if (status === 'pending_payment') return 'pending';
   // Paid orders have session status "completed" but the order status may be "paid".
   if (status === 'open') return 'pending';
   return 'unknown';

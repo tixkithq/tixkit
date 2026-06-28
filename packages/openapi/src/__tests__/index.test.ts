@@ -9,6 +9,10 @@ describe('openApiSpec', () => {
   it('documents the root-level health route outside the versioned API server', () => {
     expect(openApiSpec.paths['/health'].get).toBeDefined();
     expect(openApiSpec.paths['/health'].get.summary).toBe('Health check');
+    expect(openApiSpec.paths['/health'].servers).toEqual([
+      { url: 'https://api.tixkit.com', description: 'Production operational root' },
+      { url: 'http://localhost:4000', description: 'Local operational root' },
+    ]);
   });
 
   it('documents paginated private list endpoints as envelopes', () => {
@@ -152,6 +156,32 @@ describe('openApiSpec', () => {
       openApiSpec.paths['/checkout/sessions'].post.requestBody.content['application/json'].schema;
     expect(checkoutSessionBody.properties.affiliateCode).toEqual({ type: 'string' });
     expect(checkoutSessionBody.properties.trackingId).toEqual({ type: 'string' });
+  });
+
+  it('documents checkout session recovery through token header or payment intent client secret', () => {
+    expect(openApiSpec.components.parameters.OptionalCheckoutSessionToken).toMatchObject({
+      name: 'X-Checkout-Session-Token',
+      in: 'header',
+      required: false,
+    });
+    expect(openApiSpec.components.parameters.PaymentIntentClientSecret).toMatchObject({
+      name: 'payment_intent_client_secret',
+      in: 'query',
+      required: false,
+    });
+    expect(openApiSpec.paths['/checkout/sessions/{sessionId}'].get.parameters).toEqual([
+      { $ref: '#/components/parameters/OptionalCheckoutSessionToken' },
+      { $ref: '#/components/parameters/PaymentIntentClientSecret' },
+    ]);
+  });
+
+  it('documents implemented order list filters', () => {
+    expect(openApiSpec.paths['/orders'].get.parameters).toEqual([
+      { $ref: '#/components/parameters/Cursor' },
+      { $ref: '#/components/parameters/Limit' },
+      { name: 'organizationId', in: 'query', schema: { type: 'string' } },
+      { name: 'eventId', in: 'query', schema: { type: 'string' } },
+    ]);
   });
 
   it('documents conversion widget impressions as persisted counts', () => {

@@ -341,6 +341,7 @@ describe('OAuth authorization code redemption', () => {
     };
 
     const responses = await Promise.all([app.inject(tokenRequest), app.inject(tokenRequest)]);
+    // oxlint-disable-next-line unicorn/no-array-sort -- sorting a local two-item result keeps the race assertion deterministic under ES2022.
     const statusCodes = responses.map((res) => res.statusCode).sort((a, b) => a - b);
 
     expect(statusCodes).toEqual([200, 401]);

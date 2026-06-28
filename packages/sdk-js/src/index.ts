@@ -209,6 +209,7 @@ export type CheckoutSession = {
   cancelUrl?: string;
   orderId?: string;
   expiresAt: string;
+  paymentCompensation?: PaymentCompensation;
 };
 
 export type CheckoutWalletPassTicket = {
@@ -325,6 +326,26 @@ export type CheckoutConfirmPending = {
 };
 
 export type CheckoutConfirmResult = CheckoutConfirmCompleted | CheckoutConfirmPending;
+
+export type PaymentCompensation = {
+  id: string;
+  tenantId?: string;
+  checkoutSessionId?: string;
+  paymentIntentId?: string | null;
+  provider: string;
+  providerIntentId: string;
+  amountCents?: number;
+  currency?: string;
+  action: string;
+  status: 'pending' | 'succeeded' | 'failed' | 'manual_review' | 'already_ordered' | string;
+  providerCompensationId?: string | null;
+  attempts: number;
+  reason: string;
+  lastError?: string | null;
+  metadata?: Record<string, unknown>;
+  createdAt?: string;
+  updatedAt: string;
+};
 
 export type Order = {
   id: string;
@@ -935,6 +956,16 @@ export type PaginationParams = {
   limit?: number;
 };
 
+export type CheckoutSessionGetOptions = {
+  clientToken?: string;
+  paymentIntentClientSecret?: string;
+};
+
+export type OrderListParams = PaginationParams & {
+  organizationId?: string;
+  eventId?: string;
+};
+
 export type IdempotencyOptions = {
   idempotencyKey: string;
 };
@@ -1164,9 +1195,19 @@ class CheckoutResource {
     });
   }
 
-  async get(sessionId: string, clientToken: string): Promise<CheckoutSession> {
+  async get(
+    sessionId: string,
+    options?: string | CheckoutSessionGetOptions,
+  ): Promise<CheckoutSession> {
+    const recovery =
+      typeof options === 'string' ? { clientToken: options } : (options ?? {});
     return this.client.request('GET', `/checkout/sessions/${sessionId}`, {
-      headers: { 'X-Checkout-Session-Token': clientToken },
+      headers: recovery.clientToken
+        ? { 'X-Checkout-Session-Token': recovery.clientToken }
+        : undefined,
+      params: recovery.paymentIntentClientSecret
+        ? { payment_intent_client_secret: recovery.paymentIntentClientSecret }
+        : undefined,
     });
   }
 
@@ -1392,7 +1433,7 @@ class EventResource {
 class OrderResource {
   constructor(private client: TixkitClient) {}
 
-  async list(params?: PaginationParams): Promise<PageResult<Order>> {
+  async list(params?: OrderListParams): Promise<PageResult<Order>> {
     return this.client.request('GET', '/orders', { params: paginationParams(params) });
   }
 
@@ -1427,6 +1468,14 @@ class OrderResource {
     return this.client.request('POST', `/orders/${orderId}/refunds`, {
       body,
       idempotencyKey,
+    });
+  }
+
+  async listPaymentCompensations(
+    params?: PaginationParams & { status?: string; checkoutSessionId?: string },
+  ): Promise<PageResult<PaymentCompensation>> {
+    return this.client.request('GET', '/payment-compensations', {
+      params: paginationParams(params),
     });
   }
 }

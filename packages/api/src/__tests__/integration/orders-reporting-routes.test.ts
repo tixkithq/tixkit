@@ -608,6 +608,38 @@ describe('order routes', () => {
     await app.close();
   });
 
+  it('GET /orders applies organizationId and eventId query filters', async () => {
+    dbState.orders = [
+      dbState.order,
+      {
+        ...dbState.order,
+        id: 'ord_other_event',
+        order_number: 'TK-1002',
+        event_id: 'evt_2',
+      },
+      {
+        ...dbState.order,
+        id: 'ord_other_org',
+        order_number: 'TK-1003',
+        organization_id: 'org_2',
+        event_id: 'evt_1',
+      },
+    ];
+    const app = await setupApp(
+      orderRoutes,
+      makePrincipal({ organizationIds: ['org_1', 'org_2'] }),
+    );
+
+    const res = await app.inject({
+      method: 'GET',
+      url: '/orders?organizationId=org_1&eventId=evt_1',
+    });
+
+    expect(res.statusCode).toBe(200);
+    expect(res.json().items.map((order: { id: string }) => order.id)).toEqual(['ord_1']);
+    await app.close();
+  });
+
   it('GET /exports/:exportId returns scoped export job status', async () => {
     dbState.exportJobs = [
       {

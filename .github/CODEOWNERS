@@ -7,6 +7,9 @@
 /packages/sdk-next/ @tixkit/maintainers
 /packages/sdk-sveltekit/ @tixkit/maintainers
 /packages/sdk-react-native/ @tixkit/maintainers
+/packages/sdk-vue/ @tixkit/maintainers
+/packages/sdk-astro/ @tixkit/maintainers
+/packages/sdk-remix/ @tixkit/maintainers
 /packages/sdk-flutter/ @tixkit/maintainers
 /packages/sdk-ios/ @tixkit/maintainers
 /packages/sdk-android/ @tixkit/maintainers

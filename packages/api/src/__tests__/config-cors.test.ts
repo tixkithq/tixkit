@@ -107,6 +107,38 @@ describe('API exposure config parsing', () => {
     expect(parseTrustProxy(undefined)).toBe(false);
   });
 
+  it('rejects TRUST_PROXY=true in production', () => {
+    process.env.NODE_ENV = 'production';
+    process.env.TRUST_PROXY = 'true';
+
+    expect(() => loadConfig()).toThrow(
+      'TRUST_PROXY=true is not allowed in production. Set TRUST_PROXY to a numeric hop count or an explicit proxy CIDR/list.',
+    );
+  });
+
+  it('accepts bounded TRUST_PROXY values in production', () => {
+    process.env.NODE_ENV = 'production';
+
+    process.env.TRUST_PROXY = '1';
+    expect(loadConfig().trustProxy).toBe(1);
+
+    process.env.TRUST_PROXY = '10.0.0.0/8';
+    expect(loadConfig().trustProxy).toBe('10.0.0.0/8');
+
+    process.env.TRUST_PROXY = '10.0.0.0/8,192.168.0.0/16';
+    expect(loadConfig().trustProxy).toEqual(['10.0.0.0/8', '192.168.0.0/16']);
+  });
+
+  it('accepts TRUST_PROXY=true outside production', () => {
+    process.env.TRUST_PROXY = 'true';
+
+    process.env.NODE_ENV = 'development';
+    expect(loadConfig().trustProxy).toBe(true);
+
+    process.env.NODE_ENV = 'test';
+    expect(loadConfig().trustProxy).toBe(true);
+  });
+
   it('defaults local CORS origins in development but not production', () => {
     delete process.env.CORS_ALLOWED_ORIGINS;
     process.env.NODE_ENV = 'development';

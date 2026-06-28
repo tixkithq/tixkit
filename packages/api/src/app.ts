@@ -6,6 +6,8 @@ import { createDb, type Database } from '@tixkit/db';
 import { pinoRedactionPaths } from '@tixkit/shared';
 import { config } from './config/index.js';
 import { ClerkAuthService, createAuthMiddleware } from './auth/clerk.js';
+import { createAuthProvider } from './auth/providers.js';
+import type { AuthProvider } from '@tixkit/shared';
 import { PricingEngine } from './services/pricing.js';
 import { InventoryService } from './services/inventory.js';
 import { QrService } from './services/qr.js';
@@ -45,7 +47,7 @@ export type AppContext = {
   pricingEngine: PricingEngine;
   inventoryService: InventoryService;
   qrService: QrService;
-  authService: ClerkAuthService;
+  authService: AuthProvider;
   temporalClient: TemporalClient;
   stripe?: Stripe;
 };
@@ -60,11 +62,17 @@ export function createCorsOriginValidator(allowedOrigins: readonly string[]) {
 export function registerErrorHandler(app: FastifyInstance): void {
   app.setErrorHandler((error, request, reply) => {
     const requestId = request.id;
-    const err = error as Error & { statusCode?: number; code?: string };
-    if (err.statusCode && err.statusCode >= 400 && err.statusCode < 500) {
-      return reply.status(err.statusCode).send({
+    const err = error as Error & { statusCode?: number; code?: string; expose?: boolean };
+    const statusCode = err.statusCode;
+    const exposesError =
+      typeof statusCode === 'number' &&
+      statusCode >= 400 &&
+      statusCode < 600 &&
+      (statusCode < 500 || err.expose === true);
+    if (exposesError) {
+      return reply.status(statusCode).send({
         error: {
-          code: err.code ?? 'VALIDATION_ERROR',
+          code: err.code ?? (statusCode >= 500 ? 'SERVICE_UNAVAILABLE' : 'VALIDATION_ERROR'),
           message: err.message,
           requestId,
         },
@@ -121,12 +129,21 @@ export async function buildApp(): Promise<FastifyInstance> {
   const pricingEngine = new PricingEngine();
   const inventoryService = new InventoryService(db);
   const qrService = new QrService();
-  const authService = new ClerkAuthService(config.clerkSecretKey, db);
+  const authService = createAuthProvider(
+    {
+      provider: config.authProvider,
+      nodeEnv: config.nodeEnv,
+      clerkSecretKey: config.clerkSecretKey,
+      oidcIssuerUrl: config.oidcIssuerUrl,
+      oidcAudience: config.oidcAudience,
+    },
+    db,
+  );
   const temporalClient = await TemporalClient.connect();
 
   // Seed dev tenant/org/brand when in local dev mode (no Clerk secret key).
   // This ensures the admin dashboard has minimum context to create events.
-  await authService.ensureDevSeed();
+  await new ClerkAuthService(config.clerkSecretKey, db).ensureDevSeed();
 
   const ctx: AppContext = {
     db,
@@ -137,6 +154,7 @@ export async function buildApp(): Promise<FastifyInstance> {
     temporalClient,
   };
   app.decorate('context', ctx);
+  registerErrorHandler(app);
 
   // Health check
   app.get('/health', async () => ({ status: 'ok', timestamp: new Date().toISOString() }));
@@ -178,8 +196,6 @@ export async function buildApp(): Promise<FastifyInstance> {
     await authenticated.register(uploadRoutes, { prefix: '/v1' });
     await authenticated.register(waitlistRoutes, { prefix: '/v1' });
   });
-
-  registerErrorHandler(app);
 
   return app;
 }

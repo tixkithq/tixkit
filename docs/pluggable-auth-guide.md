@@ -1,62 +1,92 @@
-# Pluggable Auth Provider Design
+# Pluggable Auth Providers
 
-Tixkit currently uses Clerk as its sole auth provider. This document describes the design for abstracting auth behind an `AuthProvider` boundary so self-hosters can use alternative providers.
+Tixkit authenticates API requests through an `AuthProvider` boundary. Clerk remains the production default, local development uses a deterministic dev provider by default, and self-hosters can use a standard OIDC provider such as Keycloak, Auth0, or Okta.
 
-## Current State
+## Provider Selection
 
-Auth is Clerk-bound: the API validates Clerk session tokens, the admin dashboard uses Clerk's React SDK, and the worker syncs identity via Clerk webhooks. Local development works without Clerk keys by falling back to a deterministic dev principal, but production requires Clerk.
+Set `AUTH_PROVIDER` to one of:
 
-## Proposed Architecture
+| Value | Use case |
+| --- | --- |
+| `clerk` | Hosted production default. Wraps existing Clerk token verification plus existing API key, OAuth access token, scanner-device, and local-dev fallback behavior. |
+| `dev` | Local development only. Returns the deterministic local dev principal and refuses to start in production. |
+| `oidc` | Self-hosted OIDC. Verifies bearer JWTs against the issuer JWKS and maps the OIDC subject to a Tixkit user profile. |
 
-### AuthProvider Interface
+When `AUTH_PROVIDER` is unset, development defaults to `dev`; every other environment defaults to `clerk`.
+
+## Shared Interface
+
+The shared contract lives at `packages/shared/src/auth-provider.ts`.
 
 ```typescript
-interface AuthProvider {
-  name: string;
-  verifyToken(token: string): Promise<AuthPrincipal | null>;
-  getPrincipal(userId: string): Promise<AuthPrincipal | null>;
-  syncWebhooks?: (event: WebhookEvent) => Promise<void>;
+export interface AuthProvider<Request = unknown> {
+  readonly name: AuthProviderName;
+  authenticateUser(request: Request): Promise<AuthProviderResult>;
+  authenticateApiKey(token: string): Promise<AuthProviderResult>;
+  authenticateOAuthAccessToken(token: string): Promise<AuthProviderResult>;
+  authenticateScannerDevice(token: string): Promise<AuthProviderResult>;
+  authenticateLocalDev(): Promise<AuthProviderResult>;
+  isLocalDevMode(): boolean;
 }
 ```
 
-### AuthPrincipal
+The API constructs the active provider in `packages/api/src/app.ts` and the auth middleware consumes the interface instead of depending directly on Clerk.
 
-```typescript
-interface AuthPrincipal {
-  userId: string;
-  email: string;
-  tenantId?: string;
-  organizationId?: string;
-  role: string;
-  metadata?: Record<string, unknown>;
-}
+## Clerk
+
+`ClerkAdapter` wraps the existing Clerk auth service. It preserves the current Clerk session-token path, API key auth, OAuth access-token auth, scanner device auth, and local development seed behavior.
+
+Required production variables:
+
+```bash
+AUTH_PROVIDER=clerk
+CLERK_SECRET_KEY=<clerk-secret-key>
+CLERK_WEBHOOK_SECRET=<clerk-webhook-secret>
 ```
 
-### Adapters
+## Dev
 
-1. **ClerkAdapter** (default, production) — wraps existing Clerk token verification and identity sync.
-2. **DevAdapter** (local development) — deterministic email/password principal without external auth service.
-3. **OIDCAdapter** (self-hosted) — standard OpenID Connect integration for Keycloak, Auth0, Okta, or any OIDC provider.
+`DevAdapter` is for local development only. It fails closed when `NODE_ENV=production`, so a missing hosted auth configuration cannot silently become a dev principal in production.
 
-### Configuration
+```bash
+NODE_ENV=development
+AUTH_PROVIDER=dev
+```
 
-Set `AUTH_PROVIDER=clerk|dev|oidc` to select the active provider. Production fails closed when the configured provider is incomplete (missing keys, unverified tokens).
+## OIDC
 
-### Migration Path
+`OIDCAdapter` verifies JWT bearer tokens with the issuer's JWKS and expected audience. A user profile must exist with:
 
-1. Extract the `AuthProvider` interface in `packages/shared/src/auth-provider.ts`.
-2. Wrap existing Clerk logic in `ClerkAdapter`.
-3. Implement `DevAdapter` (already partially exists as the dev principal fallback).
-4. Implement `OIDCAdapter` for self-hosters.
-5. Update API middleware, admin dashboard, and worker to use the provider abstraction.
-6. Add tests for each adapter.
+```text
+clerk_user_id = oidc:<issuer-url>:<subject>
+```
 
-### Coordination with Phase 3
+The mapped user must have an active tenant membership. If an organization claim is supplied, it must map to an active organization membership. Missing issuer/audience, invalid tokens, missing user profiles, suspended profiles, or ambiguous tenant mappings fail closed.
 
-C-053 requires modifying the API auth middleware (`packages/api/src/middleware/`), admin dashboard auth (`apps/admin-dashboard/src/app/(auth)/`), and worker identity sync (`packages/workflows/src/activities/clerk-identity-sync.ts`). These are Phase 3-owned surfaces. Phase 4 will provide the interface and adapters; Phase 3 will integrate them into the existing auth flow.
+Required variables:
 
-## Status
+```bash
+AUTH_PROVIDER=oidc
+OIDC_ISSUER_URL=https://issuer.example.com
+OIDC_AUDIENCE=tixkit-api
+```
 
-- **Interface design**: This document
-- **Implementation**: Pending Phase 3 coordination
-- **DevAdapter**: Partially exists as the dev principal fallback in the API
+Recommended token claims:
+
+| Claim | Purpose |
+| --- | --- |
+| `sub` | Stable provider subject. Required. |
+| `email` | Auditing and operator visibility. |
+| `org_id` or `organization_id` | Optional organization selection. |
+| `tenant_id` | Optional tenant hint. The database grant remains authoritative. |
+
+## Validation
+
+Local evidence from the implementation pass:
+
+- `bun run --filter @tixkit/shared build`
+- `bun run --filter @tixkit/shared typecheck`
+- `bun run --filter @tixkit/shared lint`
+- `bun run --filter @tixkit/api typecheck`
+- `bun run --filter @tixkit/api test:unit`
+- `bun run --filter @tixkit/api lint`

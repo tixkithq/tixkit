@@ -29,11 +29,14 @@
     "typecheck": "tsc --noEmit",
     "migrate": "tsx src/migrate.ts",
     "migrate:mysql": "DB_DRIVER=mysql tsx src/migrate.ts",
+    "migrate:mssql": "DB_DRIVER=mssql tsx src/migrate.ts",
     "reset": "tsx src/reset.ts",
     "reset:mysql": "DB_DRIVER=mysql tsx src/reset.ts",
-    "test:unit": "vitest run src/__tests__/unit/client.test.ts",
+    "reset:mssql": "DB_DRIVER=mssql tsx src/reset.ts",
+    "test:unit": "vitest run src/__tests__/unit",
     "test:integration": "vitest run src/__tests__/integration/db.integration.test.ts",
     "test:mysql": "DB_INTEGRATION_DRIVER=mysql vitest run src/__tests__/integration/db.integration.test.ts",
+    "test:mssql": "DB_INTEGRATION_DRIVER=mssql vitest run src/__tests__/integration/db.integration.test.ts",
     "clean": "rm -rf dist"
   },
   "dependencies": {
@@ -41,6 +44,8 @@
     "kysely": "^0.29.0",
     "pg": "^8.22.0",
     "mysql2": "^3.22.0",
+    "tarn": "^3.0.2",
+    "tedious": "^18.6.1",
     "ulid": "^2.3.0"
   },
   "devDependencies": {

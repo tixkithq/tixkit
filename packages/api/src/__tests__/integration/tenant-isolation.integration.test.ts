@@ -1195,6 +1195,73 @@ describe('developer credential resource scope containment', () => {
 // ===========================================================================
 
 describe('brand and event scope denial', () => {
+  it('PATCH /brands/:brandId returns 404 for brand-scoped key accessing another same-org brand', async () => {
+    const principal = makePrincipal({
+      type: 'api_key',
+      id: 'ak_brand_scoped',
+      brandIds: ['brd_A'],
+      scopes: ['settings.write'],
+    });
+    const tables: Tables = {
+      brands: [
+        brandRow({ id: 'brd_A', organization_id: 'org_1' }),
+        brandRow({ id: 'brd_B', organization_id: 'org_1' }),
+      ],
+    };
+    const app = await setupApp(tenantRoutes, principal, tables);
+    const res = await app.inject({
+      method: 'PATCH',
+      url: '/brands/brd_B',
+      payload: { name: 'Hijacked' },
+    });
+    expect(res.statusCode).toBe(404);
+    await app.close();
+  });
+
+  it('POST /brands/:brandId/domains returns 404 for brand-scoped key accessing another same-org brand', async () => {
+    const principal = makePrincipal({
+      type: 'api_key',
+      id: 'ak_brand_scoped',
+      brandIds: ['brd_A'],
+      scopes: ['settings.write'],
+    });
+    const tables: Tables = {
+      brands: [
+        brandRow({ id: 'brd_A', organization_id: 'org_1' }),
+        brandRow({ id: 'brd_B', organization_id: 'org_1' }),
+      ],
+    };
+    const app = await setupApp(tenantRoutes, principal, tables);
+    const res = await app.inject({
+      method: 'POST',
+      url: '/brands/brd_B/domains',
+      payload: { domain: 'brand-b.example.com', isPrimary: true },
+    });
+    expect(res.statusCode).toBe(404);
+    await app.close();
+  });
+
+  it('GET /brands returns only organization brands inside populated brand scope', async () => {
+    const principal = makePrincipal({
+      type: 'api_key',
+      id: 'ak_brand_scoped',
+      brandIds: ['brd_A'],
+      scopes: ['settings.write'],
+    });
+    const tables: Tables = {
+      brands: [
+        brandRow({ id: 'brd_A', organization_id: 'org_1' }),
+        brandRow({ id: 'brd_B', organization_id: 'org_1' }),
+        brandRow({ id: 'brd_C', organization_id: 'org_other' }),
+      ],
+    };
+    const app = await setupApp(tenantRoutes, principal, tables);
+    const res = await app.inject({ method: 'GET', url: '/brands' });
+    expect(res.statusCode).toBe(200);
+    expect(res.json().map((brand: { id: string }) => brand.id)).toEqual(['brd_A']);
+    await app.close();
+  });
+
   it('GET /attendees only returns permitted event attendees for event-scoped keys', async () => {
     const principal = makePrincipal({
       type: 'api_key',

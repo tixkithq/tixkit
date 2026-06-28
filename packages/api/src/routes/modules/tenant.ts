@@ -305,6 +305,7 @@ export const tenantRoutes: FastifyPluginAsync = async (app) => {
     const brand = await brandRepo.findById(brandId);
     if (!brand) throw new ValidationError('Brand not found');
     ClerkAuthService.requireResourceTenant(principal, brand, 'Brand', brandId);
+    ClerkAuthService.requireBrandScope(principal, brandId);
     ClerkAuthService.requireOrganizationScope(principal, brand.organization_id);
 
     // Validate payment account belongs to the same tenant and organization
@@ -369,6 +370,7 @@ export const tenantRoutes: FastifyPluginAsync = async (app) => {
     const brand = await brandRepo.findById(brandId);
     if (!brand) throw new ValidationError('Brand not found');
     ClerkAuthService.requireResourceTenant(principal, brand, 'Brand', brandId);
+    ClerkAuthService.requireBrandScope(principal, brandId);
     ClerkAuthService.requireOrganizationScope(principal, brand.organization_id);
     const domain = await brandRepo.addDomain(brandId, body.domain, body.isPrimary);
     await writeAuditLog(audit(), request, principal, {
@@ -390,7 +392,13 @@ export const tenantRoutes: FastifyPluginAsync = async (app) => {
     // Filter by principal's organizations to prevent cross-org data exposure.
     // System principals see all brands.
     if (principal.type === 'system') return brands;
-    return brands.filter((brand) => principal.organizationIds.includes(brand.organization_id));
+    return brands.filter(
+      (brand) =>
+        principal.organizationIds.includes(brand.organization_id) &&
+        (!principal.brandIds ||
+          principal.brandIds.length === 0 ||
+          principal.brandIds.includes(brand.id)),
+    );
   });
 
   app.get('/organizations/:organizationId/payment-accounts', async (request) => {

@@ -36,6 +36,13 @@ async function loadWidgetHostPage(page: Page, path: string, body: string): Promi
       body: JSON.stringify({ tracked: true, deduped: false }),
     }),
   );
+  await page.route(`${widgetHostBaseUrl()}/v1/public/events/**/marketing-integrations`, (route) =>
+    route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({ items: [] }),
+    }),
+  );
   await page.route(url, (route) =>
     route.fulfill({
       contentType: 'text/html',

@@ -23,6 +23,7 @@ import { stripeWebhookRoutes } from '../../routes/modules/stripe-webhooks.js';
 import { telnyxWebhookRoutes } from '../../routes/modules/telnyx-webhooks.js';
 import { emailWebhookRoutes } from '../../routes/modules/email-webhooks.js';
 import type { AppContext } from '../../app.js';
+import { createApiObservability, registerMetricsRoute } from '../../observability.js';
 
 /**
  * Route-presence contract test (T33).
@@ -41,6 +42,8 @@ type CapturedRoute = {
   method: string;
   url: string;
 };
+
+const operationalRoutesExcludedFromOpenApi = new Set(['GET /health', 'GET /metrics']);
 
 async function buildRouteManifest(): Promise<CapturedRoute[]> {
   const routes: CapturedRoute[] = [];
@@ -69,6 +72,9 @@ async function buildRouteManifest(): Promise<CapturedRoute[]> {
 
   // Health check (outside /v1 prefix, documented separately in OpenAPI).
   app.get('/health', async () => ({ status: 'ok' }));
+  registerMetricsRoute(app, createApiObservability(), () => mockContext.db, {
+    requireBearerToken: false,
+  });
 
   // Public webhook routes (no auth, signature-verified).
   await app.register(clerkWebhookRoutes, { prefix: '/v1/webhooks/clerk' });
@@ -130,6 +136,12 @@ describe('Route-presence contract (T33)', () => {
   it('builds a route manifest without errors', async () => {
     manifest = await buildRouteManifest();
     expect(manifest.length).toBeGreaterThan(0);
+    expect(manifest).toEqual(
+      expect.arrayContaining([
+        { method: 'GET', url: '/health' },
+        { method: 'GET', url: '/metrics' },
+      ]),
+    );
   });
 
   it('every registered route has a matching OpenAPI path+method', () => {
@@ -137,7 +149,7 @@ describe('Route-presence contract (T33)', () => {
 
     const missingFromSpec: string[] = [];
     for (const route of manifest) {
-      if (route.url === '/health') continue; // documented separately
+      if (operationalRoutesExcludedFromOpenApi.has(`${route.method} ${route.url}`)) continue;
       if (route.method === 'HEAD') continue; // Fastify auto-generates HEAD for GET
 
       const normalizedPath = stripPrefix(normalizeUrl(route.url));

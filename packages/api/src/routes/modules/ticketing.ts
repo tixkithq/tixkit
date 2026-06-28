@@ -199,16 +199,15 @@ export const ticketingRoutes: FastifyPluginAsync = async (app) => {
       const accessRuleRepo = new AccessRuleRepository(txDb);
       const createdRules = [];
       for (const rule of accessRules) {
-        // eslint-disable-next-line no-await-in-loop -- access rules are created sequentially inside the ticket-type transaction for deterministic rollback behavior.
-        createdRules.push(
-          await accessRuleRepo.create({
-            ticketTypeId: ticketType.id,
-            type: rule.type,
-            value: rule.value,
-            maxUses: rule.maxUses ?? undefined,
-            expiresAt: rule.expiresAt ? new Date(rule.expiresAt) : undefined,
-          }),
-        );
+        // oxlint-disable-next-line no-await-in-loop -- access rules are created sequentially inside the ticket-type transaction for deterministic rollback behavior.
+        const createdRule = await accessRuleRepo.create({
+          ticketTypeId: ticketType.id,
+          type: rule.type,
+          value: rule.value,
+          maxUses: rule.maxUses ?? undefined,
+          expiresAt: rule.expiresAt ? new Date(rule.expiresAt) : undefined,
+        });
+        createdRules.push(createdRule);
       }
 
       return { ticketType, accessRules: createdRules };

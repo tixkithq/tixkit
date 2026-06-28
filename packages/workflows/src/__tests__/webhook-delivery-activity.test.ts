@@ -163,6 +163,7 @@ describe('deliverWebhookActivity', () => {
           connected: false,
           options,
         };
+        // oxlint-disable-next-line unicorn/consistent-function-scoping -- scoped to each mocked request so tests cannot leak handlers between requests.
         let errorHandler: (error: Error) => void = () => {};
         const request = {
           end: vi.fn(() => {

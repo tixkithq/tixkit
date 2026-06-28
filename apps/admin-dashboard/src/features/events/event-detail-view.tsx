@@ -351,7 +351,7 @@ function MarketingIntegrationsPanel({
             <div key={spec.provider} className="rounded-md border p-4">
               <div className="space-y-4">
                 <div>
-                  <h3 className="text-sm font-semibold">{spec.title}</h3>
+                  <p className="text-sm font-semibold">{spec.title}</p>
                   {draft.error ? (
                     <p className="mt-1 text-xs text-destructive">{draft.error}</p>
                   ) : null}

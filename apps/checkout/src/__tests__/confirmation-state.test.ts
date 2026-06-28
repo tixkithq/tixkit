@@ -31,6 +31,17 @@ describe('confirmation state derivation', () => {
     expect(deriveState(makeSession('pending_payment'), 'succeeded')).toBe('confirmed');
   });
 
+  it.each([
+    ['failed', 'failed'],
+    ['expired', 'expired'],
+    ['cancelled', 'cancelled'],
+  ] as const)(
+    'returns %s for %s session status even when redirect_status=succeeded',
+    (status, expected) => {
+      expect(deriveState(makeSession(status), 'succeeded')).toBe(expected);
+    },
+  );
+
   it('returns pending for pending_payment status', () => {
     expect(deriveState(makeSession('pending_payment'), null)).toBe('pending');
   });
@@ -60,7 +71,7 @@ describe('confirmation state derivation', () => {
     expect(deriveState(null, null)).toBe('unknown');
   });
 
-  it('redirect_status=succeeded overrides session status', () => {
+  it('redirect_status=succeeded confirms non-terminal session status', () => {
     expect(deriveState(makeSession('pending_payment'), 'succeeded')).toBe('confirmed');
   });
 

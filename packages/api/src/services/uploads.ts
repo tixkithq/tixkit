@@ -40,6 +40,7 @@ export type UploadArtifactResponse = {
 
 const EICAR_SIGNATURE = 'X5O!P%@AP[4\\PZX54(P^)7CC)7}$EICAR-STANDARD-ANTIVIRUS-TEST-FILE!$H+H*';
 const UPLOAD_TTL_SECONDS = 15 * 60;
+const UPLOAD_SCANNER_UNAVAILABLE_MESSAGE = 'Upload malware scanner is unavailable';
 
 const PURPOSE_LIMITS: Record<
   UploadPurpose,
@@ -105,6 +106,28 @@ function assertUploadAllowed(
     input.sizeBytes > limits.maxSizeBytes
   ) {
     throw new ValidationError(`Upload exceeds ${limits.maxSizeBytes} byte limit`);
+  }
+}
+
+class UploadScannerUnavailableError extends Error {
+  readonly code = 'SERVICE_UNAVAILABLE';
+  readonly statusCode = 503;
+  readonly expose = true;
+
+  constructor(message = UPLOAD_SCANNER_UNAVAILABLE_MESSAGE) {
+    super(message);
+    this.name = 'UploadScannerUnavailableError';
+  }
+}
+
+function uploadScannerMode(): string {
+  return process.env.UPLOAD_MALWARE_SCANNER ?? (process.env.NODE_ENV === 'production' ? '' : 'eicar');
+}
+
+function assertProductionUploadScannerConfigured(mode: string): void {
+  if (process.env.NODE_ENV !== 'production') return;
+  if (mode !== 'clamav' || !process.env.CLAMAV_HOST?.trim()) {
+    throw new UploadScannerUnavailableError();
   }
 }
 
@@ -255,8 +278,8 @@ export async function cleanupExpiredUploadArtifacts(
 export async function scanUploadBuffer(
   buffer: Buffer,
 ): Promise<{ clean: boolean; result: string }> {
-  const mode =
-    process.env.UPLOAD_MALWARE_SCANNER ?? (process.env.NODE_ENV === 'production' ? '' : 'eicar');
+  const mode = uploadScannerMode();
+  assertProductionUploadScannerConfigured(mode);
   if (mode === 'clamav') return scanWithClamAv(buffer);
   if (mode === 'eicar') {
     const text = buffer.toString('utf8');
@@ -264,7 +287,7 @@ export async function scanUploadBuffer(
       ? { clean: false, result: 'EICAR test signature found' }
       : { clean: true, result: 'No EICAR test signature found' };
   }
-  throw new Error('UPLOAD_MALWARE_SCANNER must be configured in production');
+  throw new UploadScannerUnavailableError();
 }
 
 export async function createUploadArtifact(
@@ -272,6 +295,7 @@ export async function createUploadArtifact(
   input: CreateUploadInput,
 ): Promise<UploadArtifactResponse> {
   assertUploadAllowed(input);
+  assertProductionUploadScannerConfigured(uploadScannerMode());
   const id = `upl_${ulid()}`;
   const now = new Date();
   const expiresAt = new Date(now.getTime() + UPLOAD_TTL_SECONDS * 1000);

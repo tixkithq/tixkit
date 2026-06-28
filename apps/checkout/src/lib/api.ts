@@ -97,6 +97,20 @@ export type CheckoutSession = {
   successUrl?: string | null;
   cancelUrl?: string | null;
   orderId?: string | null;
+  paymentCompensation?: CheckoutPaymentCompensation;
+};
+
+export type CheckoutPaymentCompensation = {
+  id: string;
+  status: 'pending' | 'succeeded' | 'failed' | 'manual_review' | 'already_ordered' | string;
+  action: string;
+  provider: string;
+  providerIntentId: string;
+  providerCompensationId?: string | null;
+  attempts: number;
+  reason: string;
+  lastError?: string | null;
+  updatedAt: string;
 };
 
 export type CheckoutWalletPassTicket = {

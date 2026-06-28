@@ -2,8 +2,9 @@ import { Kysely, PostgresDialect, MysqlDialect } from 'kysely';
 import { Pool as PgPool } from 'pg';
 import { createPool } from 'mysql2';
 import type { DB } from './types/db.js';
+import { createMssqlDialect } from './dialects/mssql.js';
 
-export type DbDriver = 'postgres' | 'mysql';
+export type DbDriver = 'postgres' | 'mysql' | 'mssql';
 
 /**
  * Resolve which Kysely dialect to use. `DB_DRIVER` always wins when set;
@@ -15,9 +16,11 @@ export type DbDriver = 'postgres' | 'mysql';
 export function getDriver(dbUrl?: string): DbDriver {
   const fromEnv = process.env.DB_DRIVER?.toLowerCase();
   if (fromEnv === 'mysql') return 'mysql';
+  if (fromEnv === 'mssql' || fromEnv === 'sqlserver') return 'mssql';
   if (fromEnv === 'postgres') return 'postgres';
   if (dbUrl) {
     if (dbUrl.startsWith('mysql://') || dbUrl.startsWith('mysql2://')) return 'mysql';
+    if (dbUrl.startsWith('mssql://') || dbUrl.startsWith('sqlserver://')) return 'mssql';
     return 'postgres';
   }
   return 'postgres';
@@ -26,7 +29,12 @@ export function getDriver(dbUrl?: string): DbDriver {
 export function createDb(dbUrl?: string): Kysely<DB> {
   const driver = getDriver(dbUrl);
   const url =
-    dbUrl ?? (driver === 'mysql' ? process.env.DATABASE_URL_MYSQL : process.env.DATABASE_URL);
+    dbUrl ??
+    (driver === 'mysql'
+      ? process.env.DATABASE_URL_MYSQL
+      : driver === 'mssql'
+        ? process.env.DATABASE_URL_MSSQL
+        : process.env.DATABASE_URL);
 
   if (!url) {
     throw new Error(`Database URL not configured for driver: ${driver}`);
@@ -44,6 +52,12 @@ export function createDb(dbUrl?: string): Kysely<DB> {
           database: parsed.pathname.replace(/^\//, ''),
         }),
       }),
+    });
+  }
+
+  if (driver === 'mssql') {
+    return new Kysely<DB>({
+      dialect: createMssqlDialect(url),
     });
   }
 

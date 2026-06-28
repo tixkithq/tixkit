@@ -153,8 +153,8 @@ async function setupUploadApp(db: Database, routes = uploadRoutes, principal = m
   app.addHook('onRequest', async (request) => {
     request.principal = principal;
   });
-  await app.register(routes);
   registerErrorHandler(app);
+  await app.register(routes);
   return app;
 }
 
@@ -163,6 +163,8 @@ describe('upload artifact service', () => {
     signedUrlInputs.length = 0;
     s3Send.mockReset();
     delete process.env.UPLOAD_MALWARE_SCANNER;
+    delete process.env.CLAMAV_HOST;
+    delete process.env.CLAMAV_PORT;
   });
 
   it('creates scoped presigned PUT artifacts without storing the public completion token', async () => {
@@ -233,6 +235,66 @@ describe('upload artifact service', () => {
       }),
     ).rejects.toThrow('Upload exceeds');
     expect(tables.upload_artifacts).toHaveLength(0);
+  });
+
+  it('rejects upload ticket creation in production before signing URLs when scanner is unavailable', async () => {
+    const originalEnv = process.env.NODE_ENV;
+    process.env.NODE_ENV = 'production';
+    try {
+      const { db, tables } = createMockDb();
+
+      await expect(
+        createUploadArtifact(db, {
+          tenantId: 'tnt_1',
+          organizationId: 'org_1',
+          brandId: 'brd_1',
+          eventId: 'evt_1',
+          purpose: 'checkout_answer',
+          fileName: 'waiver.pdf',
+          contentType: 'application/pdf',
+          sizeBytes: 1024,
+          metadata: { questionId: 'q_file' },
+          publicComplete: true,
+        }),
+      ).rejects.toMatchObject({
+        code: 'SERVICE_UNAVAILABLE',
+        statusCode: 503,
+        message: 'Upload malware scanner is unavailable',
+      });
+
+      expect(tables.upload_artifacts).toHaveLength(0);
+      expect(signedUrlInputs).toHaveLength(0);
+      expect(s3Send).not.toHaveBeenCalled();
+
+      process.env.UPLOAD_MALWARE_SCANNER = 'eicar';
+      await expect(
+        createUploadArtifact(db, {
+          tenantId: 'tnt_1',
+          purpose: 'checkout_answer',
+          fileName: 'waiver.pdf',
+          contentType: 'application/pdf',
+          sizeBytes: 1024,
+        }),
+      ).rejects.toThrow('Upload malware scanner is unavailable');
+
+      process.env.UPLOAD_MALWARE_SCANNER = 'clamav';
+      process.env.CLAMAV_HOST = '127.0.0.1';
+      await expect(
+        createUploadArtifact(db, {
+          tenantId: 'tnt_1',
+          purpose: 'checkout_answer',
+          fileName: 'waiver.pdf',
+          contentType: 'application/pdf',
+          sizeBytes: 1024,
+        }),
+      ).resolves.toMatchObject({
+        uploadHeaders: { 'Content-Type': 'application/pdf' },
+      });
+    } finally {
+      process.env.NODE_ENV = originalEnv;
+      delete process.env.UPLOAD_MALWARE_SCANNER;
+      delete process.env.CLAMAV_HOST;
+    }
   });
 
   it('cleans expired pending staging objects opportunistically before creating new artifacts', async () => {
@@ -508,10 +570,15 @@ describe('upload artifact service', () => {
     process.env.NODE_ENV = 'production';
     try {
       await expect(scanUploadBuffer(Buffer.from('clean'))).rejects.toThrow(
-        'UPLOAD_MALWARE_SCANNER must be configured',
+        'Upload malware scanner is unavailable',
+      );
+      process.env.UPLOAD_MALWARE_SCANNER = 'eicar';
+      await expect(scanUploadBuffer(Buffer.from('clean'))).rejects.toThrow(
+        'Upload malware scanner is unavailable',
       );
     } finally {
       process.env.NODE_ENV = originalEnv;
+      delete process.env.UPLOAD_MALWARE_SCANNER;
     }
   });
 
@@ -696,6 +763,8 @@ describe('upload artifact routes', () => {
   beforeEach(() => {
     signedUrlInputs.length = 0;
     s3Send.mockReset();
+    delete process.env.UPLOAD_MALWARE_SCANNER;
+    delete process.env.CLAMAV_HOST;
   });
 
   it('rejects public completion with an invalid token before touching storage', async () => {
@@ -731,6 +800,50 @@ describe('upload artifact routes', () => {
     expect(complete.statusCode).toBe(404);
     expect(s3Send).not.toHaveBeenCalled();
     await app.close();
+  });
+
+  it('returns 503 before issuing public upload tickets when production scanner is unavailable', async () => {
+    const originalEnv = process.env.NODE_ENV;
+    process.env.NODE_ENV = 'production';
+    try {
+      const { db, tables } = createMockDb({
+        events: [
+          {
+            id: 'evt_1',
+            tenant_id: 'tnt_1',
+            organization_id: 'org_1',
+            brand_id: 'brd_1',
+            status: 'published',
+          },
+        ],
+      });
+      const app = await setupUploadApp(db, publicUploadRoutes);
+      const response = await app.inject({
+        method: 'POST',
+        url: '/public/events/evt_1/upload-artifacts',
+        payload: {
+          fileName: 'waiver.pdf',
+          contentType: 'application/pdf',
+          sizeBytes: 12,
+          questionId: 'q_file',
+        },
+      });
+
+      expect(response.statusCode).toBe(503);
+      expect(response.json()).toMatchObject({
+        error: {
+          code: 'SERVICE_UNAVAILABLE',
+          message: 'Upload malware scanner is unavailable',
+        },
+      });
+      expect(tables.upload_artifacts).toHaveLength(0);
+      expect(signedUrlInputs).toHaveLength(0);
+      await app.close();
+    } finally {
+      process.env.NODE_ENV = originalEnv;
+      delete process.env.UPLOAD_MALWARE_SCANNER;
+      delete process.env.CLAMAV_HOST;
+    }
   });
 
   it('requires settings.write for authenticated brand-logo uploads', async () => {

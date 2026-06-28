@@ -254,6 +254,8 @@ export async function seedPaidCheckoutEvent(
   request: APIRequestContext,
   suffix: string,
 ): Promise<SeededPaidCheckoutEvent> {
+  await seedTicketIssueNotificationPrerequisites(suffix);
+
   const eventTitle = `E2E Paid Checkout ${suffix}`;
   const event = (await expectJsonResponse(
     await request.post(`${apiBaseUrl}/v1/events`, {
@@ -306,6 +308,92 @@ export async function seedPaidCheckoutEvent(
   );
 
   return { event, ticketType, inventoryPool };
+}
+
+async function seedTicketIssueNotificationPrerequisites(suffix: string): Promise<void> {
+  const now = new Date();
+  const safeSuffix = safeIdPart(suffix);
+  const templateId = `ntf_tix_${safeSuffix}`.slice(0, 32);
+  const templateVersionId = `ntv_tix_${safeSuffix}`.slice(0, 32);
+  const providerRouteId = `epr_tix_${safeSuffix}`.slice(0, 32);
+
+  await withE2eDb(async (db) => {
+    const existingTemplate = await db
+      .selectFrom('notification_templates')
+      .select(['id'])
+      .where('tenant_id', '=', devTenantId)
+      .where('brand_id', '=', devBrandId)
+      .where('key', '=', 'tickets-issued')
+      .executeTakeFirst();
+
+    if (!existingTemplate) {
+      await db
+        .insertInto('notification_templates')
+        .values({
+          id: templateId,
+          tenant_id: devTenantId,
+          brand_id: devBrandId,
+          key: 'tickets-issued',
+          name: `E2E tickets issued ${safeSuffix}`,
+          description: 'Seeded by Playwright for paid checkout ticket delivery coverage.',
+          category: 'transactional',
+          variables: JSON.stringify(['orderId', 'orderNumber', 'ticketCount', 'attachments']),
+          current_version_id: templateVersionId,
+          created_at: now,
+          updated_at: now,
+        })
+        .execute();
+
+      await db
+        .insertInto('notification_template_versions')
+        .values({
+          id: templateVersionId,
+          template_id: templateId,
+          version: 1,
+          subject_template: 'Your Tixkit tickets',
+          html_template: '<p>Your tickets for {{orderNumber}} are attached.</p>',
+          text_template: 'Your tickets for {{orderNumber}} are attached.',
+          locale: 'en',
+          is_default: true,
+          published_at: now,
+          created_at: now,
+          updated_at: now,
+        })
+        .execute();
+    }
+
+    const existingRoute = await db
+      .selectFrom('email_provider_routes')
+      .select(['id'])
+      .where('tenant_id', '=', devTenantId)
+      .where('brand_id', '=', devBrandId)
+      .where('provider_type', '=', 'capture')
+      .where('status', '=', 'active')
+      .where('smoke_send_verified', '=', true)
+      .executeTakeFirst();
+
+    if (!existingRoute) {
+      await db
+        .insertInto('email_provider_routes')
+        .values({
+          id: providerRouteId,
+          tenant_id: devTenantId,
+          brand_id: devBrandId,
+          provider_type: 'capture',
+          credentials_ref: 'capture',
+          sender_domain: 'example.com',
+          priority: 0,
+          is_fallback: false,
+          rate_limit_per_hour: null,
+          allowed_categories: JSON.stringify(['transactional']),
+          status: 'active',
+          smoke_send_verified: true,
+          created_at: now,
+          updated_at: now,
+        })
+        .execute();
+    }
+  });
 }
 
 export async function seedPaidPromoCheckoutEvent(

@@ -1,4 +1,5 @@
 import { OrdersTable } from '@/features/orders/orders-table';
+import { PaymentCompensationsPanel } from '@/features/orders/payment-compensations-panel';
 
 export default function Page() {
   return (
@@ -11,6 +12,7 @@ export default function Page() {
           </p>
         </div>
       </div>
+      <PaymentCompensationsPanel />
       <OrdersTable />
     </div>
   );

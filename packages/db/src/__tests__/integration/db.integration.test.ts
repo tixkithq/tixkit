@@ -12,7 +12,7 @@ import {
 } from '../../repositories/index.js';
 
 type DriverCase = {
-  driver: 'postgres' | 'mysql';
+  driver: 'postgres' | 'mysql' | 'mssql';
   url: string;
 };
 
@@ -28,6 +28,10 @@ const allDriverCases: DriverCase[] = [
   {
     driver: 'mysql',
     url: process.env.DATABASE_URL_MYSQL ?? '',
+  },
+  {
+    driver: 'mssql',
+    url: process.env.DATABASE_URL_MSSQL ?? '',
   },
 ];
 

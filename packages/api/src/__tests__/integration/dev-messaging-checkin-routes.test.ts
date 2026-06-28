@@ -3117,6 +3117,84 @@ describe('checkout confirm', () => {
     await app.close();
   });
 
+  it('POST /checkout/sessions/:sessionId/confirm requires retry when pending workflow failed with stale payment details', async () => {
+    const startCheckoutSession = vi.fn();
+    const getCheckoutState = vi.fn(async () => ({
+      status: 'failed',
+      paymentIntentId: 'pi_stale_1',
+      clientSecret: 'cs_stale_1',
+      error: 'Payment was cancelled and must be retried.',
+    }));
+    const tables = {
+      checkout_sessions: [
+        {
+          id: 'cs_1',
+          tenant_id: 'tnt_1',
+          event_id: 'evt_1',
+          brand_id: 'brd_1',
+          status: 'pending_payment',
+          currency: 'USD',
+          quote: JSON.stringify({
+            totalCents: 2500,
+            subtotalCents: 2500,
+            discountCents: 0,
+            taxCents: 0,
+            feeCents: 0,
+          }),
+          buyer: JSON.stringify({ email: 'buyer@test.com' }),
+          cart: JSON.stringify({ items: [{ ticketTypeId: 'tt_1', quantity: 1 }] }),
+          expires_at: new Date(Date.now() + 60000),
+          hold_id: 'hld_1',
+          order_id: null,
+          client_token: 'tok_1',
+          success_url: null,
+          cancel_url: null,
+          idempotency_key: 'key_1',
+        },
+      ],
+      events: [
+        {
+          id: 'evt_1',
+          tenant_id: 'tnt_1',
+          organization_id: 'org_1',
+          brand_id: 'brd_1',
+          status: 'published',
+          slug: 'evt',
+          title: 'Event',
+          timezone: 'UTC',
+          starts_at: new Date(),
+          visibility: 'public',
+          seo: '{}',
+        },
+      ],
+      idempotency_records: [],
+    };
+    const app = await setupApp(checkoutRoutes, makePrincipal(), tables, {
+      temporalClient: {
+        startCheckoutSession,
+        getCheckoutState,
+      },
+    });
+    const res = await app.inject({
+      method: 'POST',
+      url: '/checkout/sessions/cs_1/confirm',
+      headers: { 'idempotency-key': 'key-2', 'x-checkout-session-token': 'tok_1' },
+      payload: {},
+    });
+
+    expect(res.statusCode).toBe(402);
+    const body = res.json();
+    expect(body).not.toHaveProperty('paymentIntentId');
+    expect(body).not.toHaveProperty('clientSecret');
+    expect(body.error).toMatchObject({
+      code: 'PAYMENT_RETRY_REQUIRED',
+      message: 'Payment was cancelled and must be retried.',
+    });
+    expect(getCheckoutState).toHaveBeenCalledWith('checkout-session:cs_1');
+    expect(startCheckoutSession).not.toHaveBeenCalled();
+    await app.close();
+  });
+
   it('POST /checkout/sessions/:sessionId/confirm finalizes local capture intents server-side', async () => {
     const startCheckoutSession = vi.fn(async () => ({
       workflowId: 'checkout-session:cs_1',
@@ -3782,6 +3860,7 @@ describe('checkout question validation', () => {
           id: 'upl_clean',
           tenant_id: 'tnt_1',
           event_id: 'evt_1',
+          purpose: 'checkout_answer',
           status: 'uploaded',
           scan_status: 'clean',
           metadata: JSON.stringify({ questionId: 'q_file' }),
@@ -3828,6 +3907,7 @@ describe('checkout question validation', () => {
           id: 'upl_mismatch',
           tenant_id: 'tnt_1',
           event_id: 'evt_1',
+          purpose: 'checkout_answer',
           status: 'uploaded',
           scan_status: 'clean',
           metadata: JSON.stringify({ questionId: 'q_other' }),

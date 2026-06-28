@@ -258,7 +258,8 @@ Starts (or resumes) the checkout workflow. Requires `Idempotency-Key` and `X-Che
 
 - For **free orders** (`quote.totalCents === 0`), the workflow finalizes the order synchronously and returns `{ order, sessionId, status: "completed" }`.
 - For **paid orders**, returns `{ sessionId, status: "pending_payment", paymentIntentId, clientSecret, totalCents, currency }`. The client uses `clientSecret` to confirm payment with Stripe Elements.
-- After payment, Stripe's `payment_intent.succeeded` webhook signals the checkout workflow, which finalizes the order, issues tickets, sends confirmation email, and emits the `order.paid` webhook.
+- After payment, Stripe's `payment_intent.succeeded` webhook signals the checkout workflow. When the session, hold, and order path can be safely finalized, Tixkit issues tickets, sends confirmation email, and emits the `order.paid` webhook.
+- If payment succeeds but the session, hold, or order path cannot be safely finalized, Tixkit treats the payment as orphaned, cancels/voids or refunds it idempotently, does not issue tickets or emit `order.paid`, and requires the buyer to retry from a fresh checkout session.
 - Retrying confirm on a `pending_payment` session returns the same active PaymentIntent.
 
 ## Admin & Integration Routes

@@ -14,6 +14,7 @@ const mockState = vi.hoisted(() => ({
     }),
   },
   paymentIntent: undefined as Record<string, unknown> | undefined,
+  checkoutSession: undefined as Record<string, unknown> | undefined,
   order: undefined as Record<string, unknown> | undefined,
   refunds: [] as Record<string, unknown>[],
   createdRefunds: [] as Record<string, unknown>[],
@@ -31,6 +32,11 @@ vi.mock('../activities/checkout.js', () => ({
 
 vi.mock('@tixkit/db', () => ({
   createDb: () => mockState.db,
+  CheckoutSessionRepository: class {
+    async findById() {
+      return mockState.checkoutSession;
+    }
+  },
   PaymentIntentRepository: class {
     async findByProviderAndIntentId() {
       return mockState.paymentIntent;
@@ -48,7 +54,7 @@ vi.mock('@tixkit/db', () => ({
 
     async update(id: string, input: Record<string, unknown>) {
       mockState.updates.push({ table: 'orders', id, input });
-      mockState.order = { ...(mockState.order ?? {}), ...input };
+      mockState.order = { ...mockState.order, ...input };
       return mockState.order;
     }
 
@@ -89,6 +95,7 @@ describe('reconcilePaymentActivity', () => {
       order_id: 'ord_1',
       status: 'requires_payment_method',
     };
+    mockState.checkoutSession = undefined;
     mockState.order = {
       id: 'ord_1',
       tenant_id: 'tnt_1',
@@ -135,7 +142,7 @@ describe('reconcilePaymentActivity', () => {
 
   it('marks an order paid for a succeeded payment intent', async () => {
     mockState.order = {
-      ...(mockState.order ?? {}),
+      ...mockState.order,
       status: 'pending_payment',
     };
 
@@ -168,7 +175,7 @@ describe('reconcilePaymentActivity', () => {
     'does not move a %s order back to paid for a succeeded payment intent',
     async (status) => {
       mockState.order = {
-        ...(mockState.order ?? {}),
+        ...mockState.order,
         status,
         paid_at: new Date('2026-01-01T00:00:00.000Z'),
       };
@@ -196,7 +203,7 @@ describe('reconcilePaymentActivity', () => {
 
   it('does not add a duplicate paid timeline entry for an already paid order', async () => {
     mockState.order = {
-      ...(mockState.order ?? {}),
+      ...mockState.order,
       status: 'paid',
       paid_at: new Date('2026-01-01T00:00:00.000Z'),
     };
@@ -259,6 +266,79 @@ describe('reconcilePaymentActivity', () => {
       source: 'payment_reconciliation',
     });
   });
+
+  it('does not compensate an in-flight pending_payment checkout with no order attached', async () => {
+    mockState.paymentIntent = {
+      id: 'pi_db_1',
+      tenant_id: 'tnt_1',
+      order_id: null,
+      checkout_session_id: 'cs_1',
+      provider: 'stripe',
+      provider_intent_id: 'pi_provider_1',
+      amount_cents: 10000,
+      currency: 'USD',
+      status: 'requires_payment_method',
+    };
+    mockState.checkoutSession = {
+      id: 'cs_1',
+      status: 'pending_payment',
+      expires_at: new Date(Date.now() + 60_000),
+    };
+
+    const result = await reconcilePaymentActivity({
+      providerEventId: 'evt_in_flight_success',
+      provider: 'stripe',
+      eventType: 'payment_intent.succeeded',
+      data: { id: 'pi_provider_1', status: 'succeeded' },
+    });
+
+    expect(result).toMatchObject({
+      ok: false,
+      errorCode: 'ORDER_NOT_FINALIZED_YET',
+      retryable: true,
+    });
+    expect(mockState.compensations).toEqual([]);
+  });
+
+  it.each(['expired', 'cancelled', 'failed'])(
+    'compensates a succeeded no-order payment intent when checkout session is %s',
+    async (status) => {
+      mockState.paymentIntent = {
+        id: 'pi_db_1',
+        tenant_id: 'tnt_1',
+        order_id: null,
+        checkout_session_id: 'cs_1',
+        provider: 'stripe',
+        provider_intent_id: 'pi_provider_1',
+        amount_cents: 10000,
+        currency: 'USD',
+        status: 'requires_payment_method',
+      };
+      mockState.checkoutSession = {
+        id: 'cs_1',
+        status,
+        expires_at: new Date(Date.now() + 60_000),
+      };
+
+      const result = await reconcilePaymentActivity({
+        providerEventId: `evt_terminal_${status}`,
+        provider: 'stripe',
+        eventType: 'payment_intent.succeeded',
+        data: { id: 'pi_provider_1', status: 'succeeded' },
+      });
+
+      expect(result).toMatchObject({
+        ok: true,
+        value: { orderId: undefined, status: 'compensated:succeeded' },
+      });
+      expect(mockState.compensations).toHaveLength(1);
+      expect(mockState.compensations[0]).toMatchObject({
+        checkoutSessionId: 'cs_1',
+        providerIntentId: 'pi_provider_1',
+        providerEventId: `evt_terminal_${status}`,
+      });
+    },
+  );
 });
 
 describe('reconcileRefundActivity', () => {

@@ -29,6 +29,41 @@ All four apps share these core variables. See `.env.local.example` for the full 
 | `STRIPE_WEBHOOK_SECRET` | Yes (prod) | Stripe webhook signing secret |
 | `PORT` | No | API port (default: 4000) |
 
+Auth provider selection:
+
+| Variable | Required | Description |
+| --- | --- | --- |
+| `AUTH_PROVIDER` | No | `clerk`, `dev`, or `oidc`. Defaults to `clerk` outside development. |
+| `OIDC_ISSUER_URL` | OIDC only | Issuer URL for self-hosted OIDC auth. |
+| `OIDC_AUDIENCE` | OIDC only | Expected API audience for OIDC JWTs. |
+
+Database target selection:
+
+| Variable | Required | Description |
+| --- | --- | --- |
+| `DB_DRIVER` | No | `postgres`, `mysql`, or `mssql`. Defaults from the configured database URL. |
+| `DATABASE_URL_MSSQL` | MSSQL only | SQL Server connection string for `DB_DRIVER=mssql`. |
+
+## Docker Images
+
+Root Dockerfiles are provided for the four deployable processes:
+
+| Process | Dockerfile | Default start command |
+| --- | --- | --- |
+| API | `Dockerfile.api` | `bun run --filter @tixkit/api start` |
+| Worker | `Dockerfile.worker` | `bun run --filter @tixkit/workflows start:worker` |
+| Checkout | `Dockerfile.checkout` | `bun run --filter @tixkit/checkout start` |
+| Admin | `Dockerfile.admin` | `bun run --filter @tixkit/admin-dashboard start` |
+
+Each image uses `oven/bun:1.3`, installs workspace dependencies with the frozen lockfile, builds the workspace, and starts the target app. Validate syntax locally with:
+
+```bash
+docker build --check -f Dockerfile.api .
+docker build --check -f Dockerfile.worker .
+docker build --check -f Dockerfile.checkout .
+docker build --check -f Dockerfile.admin .
+```
+
 ## Railway
 
 Railway supports monorepo deployments via Nixpacks. Each app gets its own service.

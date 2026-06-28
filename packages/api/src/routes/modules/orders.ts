@@ -1,6 +1,6 @@
 import type { FastifyPluginAsync } from 'fastify';
 import { ClerkAuthService } from '../../auth/clerk.js';
-import { OrderRepository, AuditLogRepository } from '@tixkit/db';
+import { OrderRepository, AuditLogRepository, PaymentCompensationRepository } from '@tixkit/db';
 import { NotFoundError, ValidationError } from '@tixkit/domain';
 import { writeAuditLog } from '../../auth/audit.js';
 import { withIdempotency, hashRequest } from '../../services/idempotency.js';
@@ -18,8 +18,70 @@ import {
 } from '../../http/contracts.js';
 import { refundSchema, parseBody } from '../../http/schemas.js';
 
+function serializePaymentCompensation(row: {
+  id: string;
+  tenant_id: string;
+  checkout_session_id: string;
+  payment_intent_id: string | null;
+  provider: string;
+  provider_intent_id: string;
+  amount_cents: number;
+  currency: string;
+  action: string;
+  status: string;
+  provider_compensation_id: string | null;
+  attempts: number;
+  reason: string;
+  last_error: string | null;
+  metadata: string;
+  created_at: Date | string;
+  updated_at: Date | string;
+}) {
+  return {
+    id: row.id,
+    tenantId: row.tenant_id,
+    checkoutSessionId: row.checkout_session_id,
+    paymentIntentId: row.payment_intent_id,
+    provider: row.provider,
+    providerIntentId: row.provider_intent_id,
+    amountCents: row.amount_cents,
+    currency: row.currency,
+    action: row.action,
+    status: row.status,
+    providerCompensationId: row.provider_compensation_id,
+    attempts: row.attempts,
+    reason: row.reason,
+    lastError: row.last_error,
+    metadata: parseJsonValue<Record<string, unknown>>(row.metadata, {}),
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  };
+}
+
 export const orderRoutes: FastifyPluginAsync = async (app) => {
   const db = app.context.db;
+
+  app.get('/payment-compensations', async (request) => {
+    const principal = request.principal!;
+    ClerkAuthService.requirePermission(principal, 'orders.read');
+    const pagination = parsePagination(request.query);
+    const { status, checkoutSessionId } = request.query as {
+      status?: string;
+      checkoutSessionId?: string;
+    };
+    const repo = new PaymentCompensationRepository(db);
+    const rows = await repo.listForTenant({
+      tenantId: principal.tenantId,
+      status,
+      checkoutSessionId,
+      limit: pagination.limit,
+      cursor: pagination.cursor,
+    });
+    return pageEnvelope(
+      rows.map((row) => serializePaymentCompensation(row)),
+      pagination.limit,
+    );
+  });
 
   app.get('/orders', async (request) => {
     const principal = request.principal!;

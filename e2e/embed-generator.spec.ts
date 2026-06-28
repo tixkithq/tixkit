@@ -12,12 +12,12 @@ function readFixture(name: string): string {
 const mockWidgetScript = `
   class TixkitWidget extends HTMLElement {
     connectedCallback() {
-      this.dispatchEvent(new CustomEvent('loaded', { detail: { eventId: this.getAttribute('event') } }));
+      setTimeout(() => this.dispatchEvent(new CustomEvent('loaded', { detail: { eventId: this.getAttribute('event') } })), 0);
     }
   }
   class TixkitButton extends HTMLElement {
     connectedCallback() {
-      this.dispatchEvent(new CustomEvent('loaded', { detail: { eventId: this.getAttribute('event') } }));
+      setTimeout(() => this.dispatchEvent(new CustomEvent('loaded', { detail: { eventId: this.getAttribute('event') } })), 0);
     }
   }
   customElements.define('tixkit-widget', TixkitWidget);

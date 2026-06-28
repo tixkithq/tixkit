@@ -7,7 +7,7 @@
     "build": "astro build",
     "dev": "astro dev",
     "preview": "astro preview",
-    "typecheck": "astro check",
+    "typecheck": "astro sync && astro-check",
     "clean": "rm -rf dist .astro"
   },
   "dependencies": {
@@ -15,6 +15,7 @@
     "astro": "^5.0.0"
   },
   "devDependencies": {
+    "@astrojs/check": "^0.9.4",
     "typescript": "5.9.3"
   }
 }

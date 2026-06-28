@@ -12,9 +12,12 @@ export type AppConfig = {
   temporalAddress: string;
   temporalNamespace: string;
   temporalTaskQueue: string;
+  authProvider: 'clerk' | 'dev' | 'oidc';
   clerkSecretKey: string;
   clerkPublishableKey: string;
   clerkWebhookSecret: string;
+  oidcIssuerUrl: string;
+  oidcAudience: string;
   stripeSecretKey: string;
   stripeWebhookSecret: string;
   s3Endpoint: string;
@@ -72,6 +75,13 @@ export function parseTrustProxy(value: string | undefined): TrustProxyConfig {
 
 export function loadConfig(): AppConfig {
   const nodeEnv = process.env.NODE_ENV ?? 'development';
+  const trustProxy = parseTrustProxy(process.env.TRUST_PROXY);
+
+  if (nodeEnv === 'production' && trustProxy === true) {
+    throw new Error(
+      'TRUST_PROXY=true is not allowed in production. Set TRUST_PROXY to a numeric hop count or an explicit proxy CIDR/list.',
+    );
+  }
 
   return {
     port: parseInt(process.env.PORT ?? '4000', 10),
@@ -83,9 +93,12 @@ export function loadConfig(): AppConfig {
     temporalAddress: process.env.TEMPORAL_ADDRESS ?? 'localhost:7233',
     temporalNamespace: process.env.TEMPORAL_NAMESPACE ?? 'default',
     temporalTaskQueue: process.env.TEMPORAL_TASK_QUEUE ?? 'tixkit',
+    authProvider: parseAuthProvider(process.env.AUTH_PROVIDER, nodeEnv),
     clerkSecretKey: process.env.CLERK_SECRET_KEY ?? '',
     clerkPublishableKey: process.env.CLERK_PUBLISHABLE_KEY ?? '',
     clerkWebhookSecret: process.env.CLERK_WEBHOOK_SECRET ?? '',
+    oidcIssuerUrl: process.env.OIDC_ISSUER_URL ?? '',
+    oidcAudience: process.env.OIDC_AUDIENCE ?? '',
     stripeSecretKey: process.env.STRIPE_SECRET_KEY ?? '',
     stripeWebhookSecret: process.env.STRIPE_WEBHOOK_SECRET ?? '',
     s3Endpoint: process.env.S3_ENDPOINT ?? 'http://localhost:9000',
@@ -101,8 +114,17 @@ export function loadConfig(): AppConfig {
       10,
     ),
     rateLimitTimeWindow: process.env.RATE_LIMIT_TIME_WINDOW ?? '1 minute',
-    trustProxy: parseTrustProxy(process.env.TRUST_PROXY),
+    trustProxy,
   };
+}
+
+function parseAuthProvider(
+  value: string | undefined,
+  nodeEnv: string,
+): 'clerk' | 'dev' | 'oidc' {
+  const provider = (value ?? (nodeEnv === 'development' ? 'dev' : 'clerk')).toLowerCase();
+  if (provider === 'clerk' || provider === 'dev' || provider === 'oidc') return provider;
+  throw new Error(`Unsupported AUTH_PROVIDER: ${value}`);
 }
 
 export const config = loadConfig();

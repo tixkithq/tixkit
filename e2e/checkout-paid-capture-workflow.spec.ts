@@ -24,6 +24,16 @@ async function attachScreenshot(page: Page, testInfo: TestInfo, name: string): P
   });
 }
 
+function utf16BePdfHex(value: string): string {
+  return Buffer.from(`\uFEFF${value}`, 'utf16le').swap16().toString('hex').toUpperCase();
+}
+
+function expectPdfToReference(pdfText: string, value: string): void {
+  expect(
+    pdfText.includes(value) || pdfText.toUpperCase().includes(utf16BePdfHex(value)),
+  ).toBe(true);
+}
+
 test.describe('paid checkout capture workflow', () => {
   test('completes a paid order through the API, Temporal workflow, and local capture provider', async ({
     page,
@@ -106,10 +116,11 @@ test.describe('paid checkout capture workflow', () => {
     });
     expect(ticketPdf.filename).toMatch(/^ticket-.+\.pdf$/);
     const pdfBytes = Buffer.from(ticketPdf.content, 'base64');
+    const pdfText = pdfBytes.toString('latin1');
     expect(pdfBytes.subarray(0, 5).toString('utf8')).toBe('%PDF-');
-    expect(pdfBytes.toString('latin1')).toContain('%%EOF');
-    expect(pdfBytes.toString('latin1')).toContain(event.title);
-    expect(pdfBytes.toString('latin1')).toContain(state.ticketIds[0]);
+    expect(pdfText).toContain('%%EOF');
+    expectPdfToReference(pdfText, event.title);
+    expectPdfToReference(pdfText, state.ticketIds[0]);
   });
 
   test('completes a paid order through hosted checkout UI in local capture mode', async ({

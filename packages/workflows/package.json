@@ -12,8 +12,8 @@
     "lint": "oxlint src",
     "typecheck": "tsc --noEmit",
     "test:unit": "vitest run --exclude \"src/**/*.integration.test.ts\"",
-    "test:integration": "vitest run src/**/*.integration.test.ts",
-    "test:mysql-tier1": "DB_INTEGRATION_DRIVER=mysql vitest run src/__tests__/mysql-tier1-parity.integration.test.ts",
+    "test:integration": "vitest run src/**/*.integration.test.ts --maxWorkers=1",
+    "test:mysql-tier1": "DB_INTEGRATION_DRIVER=mysql vitest run src/__tests__/mysql-tier1-parity.integration.test.ts --maxWorkers=1",
     "test:provider:stripe": "vitest run src/__tests__/stripe-provider.integration.test.ts",
     "clean": "rm -rf dist"
   },
