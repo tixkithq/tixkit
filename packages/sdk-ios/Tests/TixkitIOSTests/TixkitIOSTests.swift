@@ -109,6 +109,46 @@ final class TixkitIOSTests: XCTestCase {
     XCTAssertEqual(restored.offlineScanCount, 1)
   }
 
+  func testSyncReportsConflictsAndKeepsDuplicateScansPending() async throws {
+    let storage = TixkitMemorySecureStorage()
+    let payload = "signed-ticket-payload"
+    let manifest = signedManifest(ticketStatus: "valid", payload: payload)
+    let conflicts = ConflictRecorder()
+    let duplicateHash = tixkitQRHash(forPayload: payload)
+    URLProtocolStub.handler = { request in
+      XCTAssertEqual(request.url?.path, "/v1/check-ins/sync")
+      let responseBody = try JSONSerialization.data(withJSONObject: [
+        "accepted": 0,
+        "duplicates": 1,
+        "invalid": 0,
+        "results": [["qrHash": duplicateHash, "outcome": "duplicate"]],
+      ])
+      return (HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!, responseBody)
+    }
+    defer { URLProtocolStub.handler = nil }
+    let configuration = URLSessionConfiguration.ephemeral
+    configuration.protocolClasses = [URLProtocolStub.self]
+    let session = URLSession(configuration: configuration)
+    let client = TixkitScannerClient(
+      deviceId: "sd_public_1",
+      deviceSecret: "scanner-secret",
+      manifestSigningKey: manifestSigningKey,
+      storage: storage,
+      onSyncConflict: { qrHash, outcome in conflicts.append("\(qrHash):\(outcome)") },
+      urlSession: session
+    )
+
+    client.setManifest(manifest)
+    XCTAssertEqual(client.scanOffline(payload, now: scanDate).outcome, .accepted)
+
+    let result = try await client.syncScans()
+
+    XCTAssertEqual(result.duplicates, 1)
+    XCTAssertEqual(conflicts.values.count, 1)
+    XCTAssertTrue(conflicts.values[0].hasSuffix(":duplicate"))
+    XCTAssertEqual(client.offlineScanCount, 1)
+  }
+
   private let manifestSigningKey = "manifest-signing-key"
   private let generatedAt = Date(timeIntervalSince1970: 1_780_272_000)
   private let expiresAt = Date(timeIntervalSince1970: 1_811_808_000)
@@ -146,6 +186,45 @@ final class TixkitIOSTests: XCTestCase {
       tickets: unsigned.tickets
     )
   }
+}
+
+private final class ConflictRecorder: @unchecked Sendable {
+  private let lock = NSLock()
+  private var storage: [String] = []
+
+  var values: [String] {
+    lock.withLock { storage }
+  }
+
+  func append(_ value: String) {
+    lock.withLock { storage.append(value) }
+  }
+}
+
+private final class URLProtocolStub: URLProtocol {
+  static var handler: ((URLRequest) throws -> (HTTPURLResponse, Data))?
+
+  override class func canInit(with request: URLRequest) -> Bool {
+    true
+  }
+
+  override class func canonicalRequest(for request: URLRequest) -> URLRequest {
+    request
+  }
+
+  override func startLoading() {
+    do {
+      let handler = try XCTUnwrap(URLProtocolStub.handler)
+      let (response, data) = try handler(request)
+      client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
+      client?.urlProtocol(self, didLoad: data)
+      client?.urlProtocolDidFinishLoading(self)
+    } catch {
+      client?.urlProtocol(self, didFailWithError: error)
+    }
+  }
+
+  override func stopLoading() {}
 }
 
 private extension TixkitScannerClient {

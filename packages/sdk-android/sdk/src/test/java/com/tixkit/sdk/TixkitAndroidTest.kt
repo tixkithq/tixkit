@@ -76,7 +76,7 @@ class TixkitAndroidTest {
   }
 
   @Test
-  fun syncRemovesAcceptedAndDuplicateScansAndReportsConflicts() {
+  fun syncRemovesAcceptedScansAndKeepsDuplicateConflictsPending() {
     val client = TixkitAndroid.scannerClient(storage = TixkitMemorySecureStorage(), clock = clock)
     client.scanOffline("ticket:evt_123:tkt_demo_001", signedManifest())
     client.scanOffline("ticket:evt_123:tkt_other", signedManifest())
@@ -100,7 +100,7 @@ class TixkitAndroidTest {
     assertEquals(1, result.accepted)
     assertEquals(1, result.duplicates)
     assertTrue(conflicts.single().endsWith(":duplicate"))
-    assertEquals(emptyList(), client.pendingOfflineScanHashes())
+    assertEquals(listOf(tixkitQrHashForPayload("ticket:evt_123:tkt_other")), client.pendingOfflineScanHashes())
   }
 
   @Test

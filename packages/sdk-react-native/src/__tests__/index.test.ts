@@ -287,6 +287,20 @@ describe('TixkitScannerClient', () => {
             headers: { 'Content-Type': 'application/json' },
           },
         ),
+      )
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            accepted: 0,
+            duplicates: 1,
+            invalid: 0,
+            results: [{ qrHash: 'hash_1', outcome: 'duplicate' }],
+          }),
+          {
+            status: 200,
+            headers: { 'Content-Type': 'application/json' },
+          },
+        ),
       );
     const client = new TixkitScannerClient({
       deviceId: 'sd_public_1',
@@ -299,8 +313,10 @@ describe('TixkitScannerClient', () => {
     await client.downloadManifest('evt_1', 'cil_1');
     client.scanOffline('hash_1');
     await client.syncScans();
+    await client.syncScans();
 
-    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+    expect(conflict).toHaveBeenCalledTimes(2);
     expect(conflict).toHaveBeenCalledWith({ qrHash: 'hash_1', outcome: 'duplicate' });
   });
 

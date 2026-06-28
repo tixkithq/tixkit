@@ -297,8 +297,8 @@ class TixkitScannerClient(
       return TixkitSyncResult(accepted = 0, duplicates = 0, invalid = 0, results = emptyList())
     }
     val result = uploader(pending)
-    val acceptedOrDuplicate = result.results
-      .filter { it["outcome"] == TixkitScanOutcome.ACCEPTED.wireValue || it["outcome"] == TixkitScanOutcome.DUPLICATE.wireValue }
+    val accepted = result.results
+      .filter { it["outcome"] == TixkitScanOutcome.ACCEPTED.wireValue }
       .mapNotNull { it["qrHash"] }
       .toSet()
     result.results
@@ -308,7 +308,7 @@ class TixkitScannerClient(
         val outcome = item["outcome"]
         if (qrHash != null && outcome != null) onConflict?.invoke(qrHash, outcome)
       }
-    offlineScans.removeAll(acceptedOrDuplicate)
+    offlineScans.removeAll(accepted)
     persistOfflineScans()
     return result
   }
