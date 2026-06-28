@@ -4916,6 +4916,79 @@ export const openApiSpec = {
         },
       },
     },
+    '/events/{eventId}/messages/render-preview': {
+      post: {
+        summary: 'Render a message template with a sample merge-tag context (admin live preview)',
+        security: [{ BearerAuth: [] }],
+        requestBody: {
+          required: true,
+          content: {
+            'application/json': {
+              schema: {
+                type: 'object',
+                properties: {
+                  channel: { type: 'string', enum: ['email', 'sms'] },
+                  subjectTemplate: { type: 'string' },
+                  htmlTemplate: { type: 'string' },
+                  textTemplate: { type: 'string' },
+                  context: {
+                    type: 'object',
+                    description: 'Sample merge-tag context for preview rendering',
+                    additionalProperties: true,
+                  },
+                  optOutToken: { type: 'string' },
+                },
+              },
+            },
+          },
+        },
+        responses: {
+          '200': {
+            description: 'Rendered template preview with SMS segment accounting and validation',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  properties: {
+                    channel: { type: 'string', enum: ['email', 'sms'] },
+                    subject: { type: 'string' },
+                    html: { type: 'string' },
+                    text: { type: 'string' },
+                    segments: {
+                      type: 'object',
+                      properties: {
+                        segments: { type: 'integer' },
+                        encoding: { type: 'string', enum: ['gsm', 'unicode'] },
+                        charsPerSegment: { type: 'integer' },
+                        unitsUsed: { type: 'integer' },
+                        remaining: { type: 'integer' },
+                      },
+                    },
+                    validation: {
+                      type: 'object',
+                      properties: {
+                        valid: { type: 'boolean' },
+                        unknownTags: { type: 'array', items: { type: 'string' } },
+                      },
+                      required: ['valid', 'unknownTags'],
+                    },
+                  },
+                  required: ['channel', 'subject', 'html', 'validation'],
+                },
+              },
+            },
+          },
+          '401': {
+            description: 'Unauthorized',
+            content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } },
+          },
+          '403': {
+            description: 'Forbidden',
+            content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } },
+          },
+        },
+      },
+    },
     '/events/{eventId}/messages/{campaignId}': {
       get: {
         summary: 'Get message campaign detail',

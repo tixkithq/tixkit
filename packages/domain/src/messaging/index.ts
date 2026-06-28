@@ -1,5 +1,7 @@
 import type { BaseEntity, ISO8601Date, TenantScopedEntity, Ulid } from '../shared/index.js';
 
+export * from './merge-tags.js';
+
 export type EmailTransportStatus =
   | 'accepted'
   | 'queued'

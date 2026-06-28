@@ -4497,3 +4497,88 @@ describe('checkout question validation', () => {
     expect(tables.checkout_sessions).toHaveLength(0);
   });
 });
+
+describe('POST /events/:eventId/messages/render-preview (C-076/C-077 merge-tag preview)', () => {
+  const event = {
+    id: 'evt_1',
+    tenant_id: 'tnt_1',
+    slug: 'event',
+    title: 'Summer Showcase',
+    description: null,
+    status: 'published',
+    timezone: 'America/New_York',
+    starts_at: new Date('2026-07-04T19:00:00.000Z'),
+    ends_at: null,
+    venue: null,
+    brand_id: 'br_1',
+  };
+
+  const sampleContext = {
+    recipient: { name: 'Jordan Lee' },
+    event: { title: 'Summer Showcase', venueCity: 'Brooklyn' },
+    ticket: { type: 'General Admission', code: 'TKT-ABC123' },
+    brand: { name: 'Acme Events' },
+  };
+
+  it('renders email templates with HTML-escaped merge tags and reports unknown tags', async () => {
+    const app = await setupApp(messagingRoutes, makePrincipal(), { events: [event] });
+    const res = await app.inject({
+      method: 'POST',
+      url: '/events/evt_1/messages/render-preview',
+      payload: {
+        channel: 'email',
+        subjectTemplate: 'Hi {{recipient.name}}, your ticket is ready',
+        htmlTemplate: '<p>Welcome {{recipient.name}} to {{event.title}}! {{bogus.tag}}</p>',
+        context: {
+          ...sampleContext,
+          recipient: { name: '<script>alert(1)</script>' },
+        },
+      },
+    });
+    expect(res.statusCode).toBe(200);
+    const json = res.json();
+    expect(json.channel).toBe('email');
+    expect(json.subject).toBe('Hi <script>alert(1)</script>, your ticket is ready');
+    expect(json.html).toContain('&lt;script&gt;alert(1)&lt;/script&gt;');
+    expect(json.html).toContain('Summer Showcase');
+    expect(json.validation.valid).toBe(false);
+    expect(json.validation.unknownTags).toEqual(['bogus.tag']);
+    await app.close();
+  });
+
+  it('renders SMS templates, injects opt-out token, and counts segments', async () => {
+    const app = await setupApp(messagingRoutes, makePrincipal(), { events: [event] });
+    const res = await app.inject({
+      method: 'POST',
+      url: '/events/evt_1/messages/render-preview',
+      payload: {
+        channel: 'sms',
+        subjectTemplate: 'Hi {{recipient.name}}, ticket {{ticket.code}} ready',
+        textTemplate: 'Hi {{recipient.name}}, ticket {{ticket.code}} ready',
+        context: sampleContext,
+        optOutToken: 'Reply STOP to opt out',
+      },
+    });
+    expect(res.statusCode).toBe(200);
+    const json = res.json();
+    expect(json.text).toBe('Hi Jordan Lee, ticket TKT-ABC123 ready. Reply STOP to opt out');
+    expect(json.segments).toMatchObject({ encoding: 'gsm' });
+    expect(json.segments.segments).toBeGreaterThanOrEqual(1);
+    await app.close();
+  });
+
+  it('rejects requests without messages.write permission', async () => {
+    const app = await setupApp(
+      messagingRoutes,
+      makePrincipal({ scopes: ['events.read'] }),
+      { events: [event] },
+    );
+    const res = await app.inject({
+      method: 'POST',
+      url: '/events/evt_1/messages/render-preview',
+      payload: { channel: 'email', htmlTemplate: '<p>Hi {{recipient.name}}</p>' },
+    });
+    expect(res.statusCode).toBe(403);
+    await app.close();
+  });
+});

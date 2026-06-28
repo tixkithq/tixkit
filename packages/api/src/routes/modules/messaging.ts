@@ -17,6 +17,14 @@ import {
 } from '@tixkit/db';
 import { ClerkAuthService } from '../../auth/clerk.js';
 import { type Principal, ValidationError } from '@tixkit/domain';
+import {
+  renderMergeTags,
+  validateMergeTags,
+  countSmsSegments,
+  injectOptOutToken,
+  type MergeTagContext,
+  type MergeTagChannel,
+} from '@tixkit/domain/messaging';
 import { sendMessageSchema } from '../../http/schemas.js';
 import { hashRequest, withIdempotency } from '../../services/idempotency.js';
 
@@ -305,6 +313,67 @@ export const messagingRoutes: FastifyPluginAsync = async (app) => {
         phone: attendee.phone ?? undefined,
         status: attendee.status,
       })),
+    };
+  });
+
+  // C-076/C-077: render a template body with a sample merge-tag context for admin live preview.
+  app.post('/events/:eventId/messages/render-preview', async (request) => {
+    const principal = request.principal!;
+    ClerkAuthService.requirePermission(principal, 'messages.write');
+    const { eventId } = request.params as { eventId: string };
+    const body = request.body as {
+      channel?: MergeTagChannel;
+      subjectTemplate?: string;
+      htmlTemplate?: string;
+      textTemplate?: string;
+      context?: MergeTagContext;
+      optOutToken?: string;
+    };
+    const channel: MergeTagChannel = body.channel === 'sms' ? 'sms' : 'email';
+    const context: MergeTagContext = body.context ?? {};
+    const subjectTemplate = body.subjectTemplate ?? '';
+    const htmlTemplate = body.htmlTemplate ?? '';
+    const textTemplate = body.textTemplate ?? '';
+
+    const subjectValidation = validateMergeTags(subjectTemplate);
+    const htmlValidation = validateMergeTags(htmlTemplate);
+    const textValidation = validateMergeTags(textTemplate);
+    const unknownTags = [
+      ...subjectValidation.unknownTags,
+      ...htmlValidation.unknownTags,
+      ...textValidation.unknownTags,
+    ];
+
+    await loadAuthorizedEvent(eventId, principal, db);
+
+    const subject = renderMergeTags(subjectTemplate, context, { channel: 'email', escape: 'plain' });
+    const html = renderMergeTags(htmlTemplate, context, { channel: 'email', escape: 'html' });
+    const text = textTemplate
+      ? renderMergeTags(textTemplate, context, {
+          channel: 'sms',
+          escape: 'plain',
+          optOutToken: body.optOutToken,
+        })
+      : undefined;
+
+    const smsBody = channel === 'sms' ? text ?? subject : text;
+    const segments =
+      channel === 'sms' && smsBody
+        ? countSmsSegments(
+            body.optOutToken ? injectOptOutToken(smsBody, body.optOutToken) : smsBody,
+          )
+        : undefined;
+
+    return {
+      channel,
+      subject,
+      html,
+      text,
+      segments,
+      validation: {
+        valid: unknownTags.length === 0,
+        unknownTags: [...new Set(unknownTags)],
+      },
     };
   });
 
