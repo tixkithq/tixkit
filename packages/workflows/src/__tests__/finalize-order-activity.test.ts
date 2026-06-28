@@ -470,6 +470,44 @@ describe('createPaymentIntentActivity capture mode', () => {
     expect(dbState.destroy).toHaveBeenCalledTimes(2);
   });
 
+  it('blocks attach failure when created payment intent compensation needs manual review', async () => {
+    process.env.STRIPE_SECRET_KEY = 'sk_test_1';
+    dbState.tables.checkout_sessions.cs_1.status = 'expired';
+    stripeMock.paymentIntentsRetrieve.mockResolvedValueOnce({
+      id: 'pi_provider_1',
+      status: 'requires_source_action',
+      amount: 2500,
+      amount_received: 0,
+    });
+
+    const result = await checkoutActivities.createPaymentIntentActivity({
+      checkoutSessionId: 'cs_1',
+      tenantId: 'tnt_1',
+      brandId: 'brd_1',
+      amountCents: 2500,
+      currency: 'USD',
+      description: 'Expired checkout with blocked compensation',
+      feeCents: 125,
+    });
+
+    expect(result).toMatchObject({
+      ok: false,
+      errorCode: 'PAYMENT_INTENT_COMPENSATION_BLOCKED',
+      retryable: false,
+    });
+    expect(dbState.tables.payment_compensations.pcmp_1).toMatchObject({
+      checkout_session_id: 'cs_1',
+      payment_intent_id: 'pi_1',
+      provider: 'stripe',
+      provider_intent_id: 'pi_provider_1',
+      action: 'refund',
+      status: 'manual_review',
+      attempts: 1,
+    });
+    expect(stripeMock.paymentIntentsCancel).not.toHaveBeenCalled();
+    expect(stripeMock.refundsCreate).not.toHaveBeenCalled();
+  });
+
   it('fails closed when the checkout session already points at a different payment intent', async () => {
     dbState.tables.checkout_sessions.cs_1.payment_intent_id = 'pi_other';
 

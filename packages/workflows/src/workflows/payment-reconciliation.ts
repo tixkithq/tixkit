@@ -1,4 +1,4 @@
-import { proxyActivities } from '@temporalio/workflow';
+import { proxyActivities, sleep } from '@temporalio/workflow';
 import type { WorkflowActivityResult } from '../shared/types.js';
 
 const {
@@ -50,32 +50,72 @@ export type PaymentReconciliationWorkflowInput = {
   data: Record<string, unknown>;
 };
 
-export async function paymentReconciliationWorkflow(
-  input: PaymentReconciliationWorkflowInput,
-): Promise<{ status: string }> {
-  let result;
+type ReconciliationResult = WorkflowActivityResult<{ orderId?: string; status: string }>;
 
+const PAYMENT_RECONCILIATION_BOUNDED_RETRY_VERSION = 2;
+const RECONCILIATION_MAX_ATTEMPTS = 5;
+const RECONCILIATION_RETRY_DELAY = '5 seconds';
+const CLOSEABLE_COMPENSATION_STATUSES = new Set(['compensated:succeeded', 'compensated:already_ordered']);
+
+async function runReconciliationActivity(
+  input: PaymentReconciliationWorkflowInput,
+): Promise<ReconciliationResult> {
   if (input.eventType.includes('refund')) {
-    result = await reconcileRefundActivity({
-      providerEventId: input.providerEventId,
-      provider: input.provider,
-      eventType: input.eventType,
-      data: input.data,
-    });
-  } else if (input.eventType.includes('dispute')) {
-    result = await reconcileDisputeActivity({
-      providerEventId: input.providerEventId,
-      provider: input.provider,
-      data: input.data,
-    });
-  } else {
-    result = await reconcilePaymentActivity({
+    return reconcileRefundActivity({
       providerEventId: input.providerEventId,
       provider: input.provider,
       eventType: input.eventType,
       data: input.data,
     });
   }
+
+  if (input.eventType.includes('dispute')) {
+    return reconcileDisputeActivity({
+      providerEventId: input.providerEventId,
+      provider: input.provider,
+      data: input.data,
+    });
+  }
+
+  return reconcilePaymentActivity({
+    providerEventId: input.providerEventId,
+    provider: input.provider,
+    eventType: input.eventType,
+    data: input.data,
+  });
+}
+
+async function reconcileWithBoundedRetry(
+  input: PaymentReconciliationWorkflowInput,
+): Promise<ReconciliationResult> {
+  let attempt = 1;
+
+  while (true) {
+    // eslint-disable-next-line no-await-in-loop -- retries must be sequential and durable.
+    const result = await runReconciliationActivity(input);
+    if (result.ok || !result.retryable) {
+      return result;
+    }
+
+    if (attempt >= RECONCILIATION_MAX_ATTEMPTS) {
+      throw new Error(
+        `Payment reconciliation failed (${result.errorCode}): ${result.message} (attempts exhausted after ${attempt} attempts)`,
+      );
+    }
+
+    // eslint-disable-next-line no-await-in-loop -- Temporal sleep records the retry boundary.
+    await sleep(RECONCILIATION_RETRY_DELAY);
+    attempt += 1;
+  }
+}
+
+export async function paymentReconciliationWorkflow(
+  input: PaymentReconciliationWorkflowInput,
+): Promise<{ status: string }> {
+  const result =
+    input.version >= PAYMENT_RECONCILIATION_BOUNDED_RETRY_VERSION
+      ? await reconcileWithBoundedRetry(input)
+      : await runReconciliationActivity(input);
 
   if (!result.ok) {
     if (result.retryable) {
@@ -84,6 +124,10 @@ export async function paymentReconciliationWorkflow(
       );
     }
     return { status: 'failed' };
+  }
+
+  if (result.value.status.startsWith('compensated:') && !CLOSEABLE_COMPENSATION_STATUSES.has(result.value.status)) {
+    throw new Error(`Payment reconciliation compensation blocked with status ${result.value.status}`);
   }
 
   // Emit domain event if order was affected

@@ -77,6 +77,38 @@ const marketingIntegrationSchema = z
     }
   });
 
+const mssqlDuplicateInsertErrorNumbers = new Set([2601, 2627]);
+
+function getErrorNumber(value: unknown): number | undefined {
+  if (typeof value === 'number') return value;
+  if (typeof value !== 'string' || value.trim() === '') return undefined;
+  const parsed = Number(value);
+  return Number.isInteger(parsed) ? parsed : undefined;
+}
+
+function isDuplicateInsert(error: unknown): boolean {
+  if (!error || typeof error !== 'object') return false;
+  const record = error as {
+    code?: string;
+    errno?: string | number;
+    message?: string;
+    number?: string | number;
+    originalError?: { number?: string | number };
+  };
+  const mssqlNumber =
+    getErrorNumber(record.number) ?? getErrorNumber(record.originalError?.number);
+  return (
+    record.code === '23505' ||
+    record.code === 'ER_DUP_ENTRY' ||
+    record.errno === 1062 ||
+    record.errno === '1062' ||
+    (record.code === 'EREQUEST' &&
+      mssqlNumber !== undefined &&
+      mssqlDuplicateInsertErrorNumbers.has(mssqlNumber)) ||
+    /duplicate|unique/i.test(record.message ?? '')
+  );
+}
+
 export const eventRoutes: FastifyPluginAsync = async (app) => {
   const db = app.context.db;
   const audit = () => new AuditLogRepository(db);
@@ -97,6 +129,9 @@ export const eventRoutes: FastifyPluginAsync = async (app) => {
     }
 
     const repo = new EventRepository(db);
+    if (!(await repo.isSlugAvailable(body.brandId, body.slug))) {
+      throw new ValidationError('Event slug is already in use');
+    }
     const event = await repo.create({
       tenantId: principal.tenantId,
       organizationId: body.organizationId,
@@ -284,6 +319,12 @@ export const eventRoutes: FastifyPluginAsync = async (app) => {
 
     const updateData: Record<string, unknown> = {};
     if (body.title !== undefined) updateData.title = body.title;
+    if (body.slug !== undefined) {
+      if (!(await repo.isSlugAvailable(existing.brand_id, body.slug, eventId))) {
+        throw new ValidationError('Event slug is already in use');
+      }
+      updateData.slug = body.slug;
+    }
     if (body.description !== undefined) updateData.description = body.description;
     if (body.currency !== undefined) updateData.currency = body.currency;
     if (body.timezone !== undefined) updateData.timezone = body.timezone;
@@ -346,46 +387,70 @@ export const eventRoutes: FastifyPluginAsync = async (app) => {
       .executeTakeFirst();
     const now = new Date();
     if (existing) {
+      const updated = {
+        ...existing,
+        config: JSON.stringify(body.config),
+        consent_required: body.consentRequired,
+        status: body.status,
+        updated_at: now,
+      };
       await db
         .updateTable('marketing_integrations')
         .set({
-          config: JSON.stringify(body.config),
-          consent_required: body.consentRequired,
-          status: body.status,
+          config: updated.config,
+          consent_required: updated.consent_required,
+          status: updated.status,
           updated_at: now,
         })
         .where('id', '=', existing.id)
         .execute();
-      const updated = await db
-        .selectFrom('marketing_integrations')
-        .selectAll()
-        .where('id', '=', existing.id)
-        .executeTakeFirstOrThrow();
       return serializeMarketingIntegration(updated);
     }
-    await db
-      .insertInto('marketing_integrations')
-      .values({
-        id: `mkt_${ulid()}`,
-        tenant_id: event.tenant_id,
-        organization_id: event.organization_id,
-        brand_id: event.brand_id,
-        event_id: eventId,
-        provider: body.provider,
+    const values = {
+      id: `mkt_${ulid()}`,
+      tenant_id: event.tenant_id,
+      organization_id: event.organization_id,
+      brand_id: event.brand_id,
+      event_id: eventId,
+      provider: body.provider,
+      config: JSON.stringify(body.config),
+      consent_required: body.consentRequired,
+      status: body.status,
+      created_at: now,
+      updated_at: now,
+    };
+    try {
+      await db.insertInto('marketing_integrations').values(values).execute();
+      return serializeMarketingIntegration(values);
+    } catch (error) {
+      if (!isDuplicateInsert(error)) throw error;
+      const concurrent = await db
+        .selectFrom('marketing_integrations')
+        .selectAll()
+        .where('event_id', '=', eventId)
+        .where('provider', '=', body.provider)
+        .executeTakeFirst();
+      if (!concurrent) throw error;
+      const recoveredAt = new Date();
+      const recovered = {
+        ...concurrent,
         config: JSON.stringify(body.config),
         consent_required: body.consentRequired,
         status: body.status,
-        created_at: now,
-        updated_at: now,
-      })
-      .execute();
-    const created = await db
-      .selectFrom('marketing_integrations')
-      .selectAll()
-      .where('event_id', '=', eventId)
-      .where('provider', '=', body.provider)
-      .executeTakeFirstOrThrow();
-    return serializeMarketingIntegration(created);
+        updated_at: recoveredAt,
+      };
+      await db
+        .updateTable('marketing_integrations')
+        .set({
+          config: recovered.config,
+          consent_required: recovered.consent_required,
+          status: recovered.status,
+          updated_at: recoveredAt,
+        })
+        .where('id', '=', concurrent.id)
+        .execute();
+      return serializeMarketingIntegration(recovered);
+    }
   });
 
   app.post('/events/:eventId/publish', async (request) => {

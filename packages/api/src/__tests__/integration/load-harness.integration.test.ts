@@ -1,5 +1,6 @@
 import { expect, it, beforeAll, afterAll, beforeEach } from 'vitest';
 import { performance } from 'node:perf_hooks';
+import Fastify, { type FastifyInstance } from 'fastify';
 import { createDb, type Database } from '@tixkit/db';
 import {
   PaymentEventRepository,
@@ -7,6 +8,9 @@ import {
   AttendeeRepository,
   OrderRepository,
 } from '@tixkit/db';
+import type { Principal } from '@tixkit/domain';
+import type { AppContext } from '../../app.js';
+import { eventRoutes } from '../../routes/modules/events.js';
 import { InventoryService } from '../../services/inventory.js';
 import { hashRequest, withIdempotency } from '../../services/idempotency.js';
 import { ulid } from 'ulid';
@@ -37,6 +41,7 @@ let paymentEventRepo: PaymentEventRepository;
 let ticketRepo: TicketRepository;
 let attendeeRepo: AttendeeRepository;
 let orderRepo: OrderRepository;
+let app: FastifyInstance;
 let previousDbDriver: string | undefined;
 
 const RUN_ID = ulid().slice(-10);
@@ -119,6 +124,7 @@ async function seedTenantGraph(trx: Database): Promise<void> {
 
 async function cleanupAll(database: Database): Promise<void> {
   // Clean up load-harness data in reverse FK order.
+  await database.deleteFrom('marketing_integrations').where('event_id', '=', EVENT_ID).execute();
   await database.deleteFrom('scan_logs').where('tenant_id', '=', TENANT_ID).execute();
   await database.deleteFrom('tickets').where('event_id', '=', EVENT_ID).execute();
   await database.deleteFrom('attendees').where('event_id', '=', EVENT_ID).execute();
@@ -344,6 +350,35 @@ function expectSloAtOrBelow(metric: string, actual: number, threshold: number): 
   );
 }
 
+function makePrincipal(): Principal {
+  return {
+    type: 'user',
+    id: `usr_load_${RUN_ID}`,
+    tenantId: TENANT_ID,
+    organizationIds: [ORG_ID],
+    brandIds: [BRAND_ID],
+    eventIds: [EVENT_ID],
+    scopes: ['events.read', 'events.write'],
+  };
+}
+
+async function setupEventRouteApp(database: Database): Promise<FastifyInstance> {
+  const routeApp = Fastify();
+  routeApp.decorate('context', {
+    db: database,
+    pricingEngine: {},
+    inventoryService: {},
+    qrService: {},
+    authService: {},
+    temporalClient: {},
+  } as unknown as AppContext);
+  routeApp.addHook('onRequest', async (request) => {
+    request.principal = makePrincipal();
+  });
+  await routeApp.register(eventRoutes);
+  return routeApp;
+}
+
 describeWithIntegrationDatabase('Load and concurrency harnesses', () => {
   beforeAll(async () => {
     previousDbDriver = setIntegrationDatabaseDriver();
@@ -354,9 +389,11 @@ describeWithIntegrationDatabase('Load and concurrency harnesses', () => {
     attendeeRepo = new AttendeeRepository(db);
     orderRepo = new OrderRepository(db);
     await seedTenantGraph(db);
+    app = await setupEventRouteApp(db);
   });
 
   afterAll(async () => {
+    await app.close();
     await cleanupAll(db);
     await db.destroy();
     restoreDatabaseDriver(previousDbDriver);
@@ -366,6 +403,7 @@ describeWithIntegrationDatabase('Load and concurrency harnesses', () => {
     // Reset per-test mutation targets scoped to this run. Order matters because
     // of FK constraints: tickets/attendees reference orders, orders reference
     // checkout_sessions.
+    await db.deleteFrom('marketing_integrations').where('event_id', '=', EVENT_ID).execute();
     await db.deleteFrom('scan_logs').where('tenant_id', '=', TENANT_ID).execute();
     await db.deleteFrom('tickets').where('event_id', '=', EVENT_ID).execute();
     await db.deleteFrom('attendees').where('event_id', '=', EVENT_ID).execute();
@@ -380,6 +418,61 @@ describeWithIntegrationDatabase('Load and concurrency harnesses', () => {
     await db.deleteFrom('checkout_sessions').where('id', 'like', 'cs_load_%').execute();
     await db.deleteFrom('ticket_types').where('event_id', '=', EVENT_ID).execute();
     await db.deleteFrom('inventory_pools').where('event_id', '=', EVENT_ID).execute();
+  });
+
+  it('upserts one GA4 marketing integration when concurrent first-create requests target the same event/provider', async () => {
+    const CONCURRENT_CLIENTS = 32;
+    const payload = {
+      config: {
+        measurementId: `G-${RUN_ID}`,
+        sendPageView: true,
+      },
+      consentRequired: false,
+      status: 'active',
+    };
+
+    const responses = await Promise.all(
+      Array.from({ length: CONCURRENT_CLIENTS }, () =>
+        app.inject({
+          method: 'PUT',
+          url: `/events/${EVENT_ID}/marketing-integrations/ga4`,
+          payload,
+        }),
+      ),
+    );
+
+    const statusCodes = responses.map((response) => response.statusCode);
+    expect(statusCodes.every((statusCode) => statusCode < 500), statusCodes.join(',')).toBe(true);
+    expect(statusCodes).toEqual(Array(CONCURRENT_CLIENTS).fill(200));
+
+    for (const response of responses) {
+      const body = response.json();
+      expect(body).toMatchObject({
+        tenantId: TENANT_ID,
+        organizationId: ORG_ID,
+        brandId: BRAND_ID,
+        eventId: EVENT_ID,
+        provider: 'ga4',
+        config: payload.config,
+        consentRequired: payload.consentRequired,
+        status: payload.status,
+      });
+    }
+
+    const rows = await db
+      .selectFrom('marketing_integrations')
+      .select(['event_id', 'provider', 'config', 'consent_required', 'status'])
+      .where('event_id', '=', EVENT_ID)
+      .where('provider', '=', 'ga4')
+      .execute();
+
+    expect(rows).toHaveLength(1);
+    const row = rows[0];
+    const persistedConfig =
+      typeof row.config === 'string' ? (JSON.parse(row.config) as unknown) : row.config;
+    expect(persistedConfig).toEqual(payload.config);
+    expect(row.consent_required).toBe(payload.consentRequired);
+    expect(row.status).toBe(payload.status);
   });
 
   it('prevents oversell when 120 concurrent checkout reservations target a 25-capacity pool', async () => {

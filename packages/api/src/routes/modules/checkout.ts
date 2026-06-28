@@ -468,6 +468,9 @@ export const checkoutRoutes: FastifyPluginAsync = async (app) => {
     if (event.status !== 'published') {
       throw new ValidationError('Event is not published');
     }
+    if (event.visibility === 'private') {
+      throw new NotFoundError('Event', body.eventId);
+    }
 
     const result = await withIdempotency(
       db,

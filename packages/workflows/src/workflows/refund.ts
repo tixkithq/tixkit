@@ -65,6 +65,17 @@ export type RefundWorkflowInput = {
   nonce: string;
 };
 
+function handleRequiredActivityFailure(
+  activityContext: string,
+  result: Extract<WorkflowActivityResult<unknown>, { ok: false }>,
+): { status: 'failed' } {
+  if (result.retryable) {
+    throw new Error(`${activityContext} failed (${result.errorCode}): ${result.message}`);
+  }
+
+  return { status: 'failed' };
+}
+
 export async function refundWorkflow(input: RefundWorkflowInput): Promise<{ status: string }> {
   // Determine if this is a full refund (amount covers remaining refundable balance).
   const orderTotal = input.orderTotalCents;
@@ -82,15 +93,18 @@ export async function refundWorkflow(input: RefundWorkflowInput): Promise<{ stat
   });
 
   if (!refundResult.ok) {
-    return { status: 'failed' };
+    return handleRequiredActivityFailure('Refund processing', refundResult);
   }
 
   // Step 2: Update ledger
-  await updateLedgerActivity({
+  const ledgerResult = await updateLedgerActivity({
     orderId: input.orderId,
     refundAmountCents: input.amountCents,
     providerRefundId: refundResult.value.providerRefundId,
   });
+  if (!ledgerResult.ok) {
+    return handleRequiredActivityFailure('Refund ledger update', ledgerResult);
+  }
 
   // Step 3: Void tickets if configured (proportional to refund amount)
   let voidedTicketIds: string[] = [];
@@ -101,30 +115,37 @@ export async function refundWorkflow(input: RefundWorkflowInput): Promise<{ stat
       isFullRefund,
       providerRefundId: refundResult.value.providerRefundId,
     });
-    if (voidResult.ok) {
-      voidedTicketIds = voidResult.value.voidedTicketIds;
+    if (!voidResult.ok) {
+      return handleRequiredActivityFailure('Refund ticket voiding', voidResult);
     }
+    voidedTicketIds = voidResult.value.voidedTicketIds;
   }
 
   // Step 3b: Restore inventory only when explicitly configured (proportional)
   if (input.restoreInventory) {
-    await restoreInventoryActivity({
+    const restoreResult = await restoreInventoryActivity({
       orderId: input.orderId,
       amountCents: input.amountCents,
       isFullRefund,
       providerRefundId: refundResult.value.providerRefundId,
       voidedTicketIds,
     });
+    if (!restoreResult.ok) {
+      return handleRequiredActivityFailure('Refund inventory restore', restoreResult);
+    }
   }
 
   // Step 4: Notify buyer
-  await notifyRefundActivity({
+  const notifyResult = await notifyRefundActivity({
     orderId: input.orderId,
     toEmail: input.buyerEmail,
     tenantId: input.tenantId ?? '',
     brandId: input.brandId ?? '',
     providerRefundId: refundResult.ok ? refundResult.value.providerRefundId : undefined,
   });
+  if (!notifyResult.ok) {
+    return handleRequiredActivityFailure('Refund notification', notifyResult);
+  }
 
   return { status: 'completed' };
 }

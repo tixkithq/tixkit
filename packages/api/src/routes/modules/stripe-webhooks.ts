@@ -210,6 +210,7 @@ async function resolveStripeEventTenantId(
     const paymentAccount = await db
       .selectFrom('payment_accounts')
       .select(['tenant_id'])
+      .where('provider', '=', 'stripe_connect')
       .where('provider_account_id', '=', connectedAccountId)
       .executeTakeFirst();
     if (paymentAccount?.tenant_id) return paymentAccount.tenant_id;

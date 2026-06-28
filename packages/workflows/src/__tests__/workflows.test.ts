@@ -43,7 +43,14 @@ import { holdExpirationWorkflow } from '../workflows/hold-expiration.js';
 import { paymentReconciliationWorkflow } from '../workflows/payment-reconciliation.js';
 import { clerkIdentitySyncWorkflow } from '../workflows/clerk-identity-sync.js';
 import { privacyRequestWorkflow } from '../workflows/privacy.js';
-import { okResult, errResult, privacyRequestWorkflowId, webhookDeliveryWorkflowId, webhookDeliveryReplayWorkflowId } from '../shared/types.js';
+import {
+  PAYMENT_RECONCILIATION_WORKFLOW_VERSION,
+  okResult,
+  errResult,
+  privacyRequestWorkflowId,
+  webhookDeliveryWorkflowId,
+  webhookDeliveryReplayWorkflowId,
+} from '../shared/types.js';
 
 function setActivity(name: string, impl: (...args: any[]) => any) {
   mockState.activities[name] = impl;
@@ -109,7 +116,7 @@ function makeWebhookDeliveryInput(overrides: Record<string, unknown> = {}) {
 
 function makePaymentReconciliationInput(overrides: Record<string, unknown> = {}) {
   return {
-    version: 1,
+    version: PAYMENT_RECONCILIATION_WORKFLOW_VERSION,
     providerEventId: 'evt_stripe_1',
     provider: 'stripe',
     eventType: 'payment_intent.succeeded',
@@ -444,6 +451,61 @@ describe('checkoutSessionWorkflow', () => {
     expect(webhookCalled).toBe(false);
   });
 
+  it('does not silently close when finalize-failure compensation returns manual_review', async () => {
+    let releaseCalled = false;
+    let emailCalled = false;
+    let issueTicketsCalled = false;
+    let webhookCalled = false;
+
+    setActivity('finalizeOrderActivity', async () => errResult('HOLD_EXPIRED', 'Checkout hold hld_1 has expired', false));
+    setActivity('compensateOrphanPaymentActivity', async () =>
+      okResult({ status: 'manual_review', action: 'refund', compensationId: 'pcmp_1' }),
+    );
+    setActivity('releaseHoldActivity', async () => {
+      releaseCalled = true;
+      return okResult({ released: true });
+    });
+    setActivity('sendConfirmationEmailActivity', async () => {
+      emailCalled = true;
+      return okResult({ jobId: 'emj_1', status: 'queued' });
+    });
+    setActivity('issueTicketsActivity', async () => {
+      issueTicketsCalled = true;
+      return okResult({ issued: 2, jobId: 'emj_2' });
+    });
+    setActivity('emitWebhookEventActivity', async () => {
+      webhookCalled = true;
+      return okResult({ eventId: 'evt_1', deliveries: [] });
+    });
+
+    await expect(checkoutSessionWorkflow(makeCheckoutInput({ isFreeOrder: false }))).rejects.toThrow(
+      'Orphan payment compensation blocked with status manual_review',
+    );
+    expect(releaseCalled).toBe(false);
+    expect(emailCalled).toBe(false);
+    expect(issueTicketsCalled).toBe(false);
+    expect(webhookCalled).toBe(false);
+  });
+
+  it('preserves v1 checkout histories when manual-review compensation was already recorded', async () => {
+    mockState.patchedResult = false;
+    let releaseCalled = false;
+
+    setActivity('finalizeOrderActivity', async () => errResult('HOLD_EXPIRED', 'Checkout hold hld_1 has expired', false));
+    setActivity('compensateOrphanPaymentActivity', async () =>
+      okResult({ status: 'manual_review', action: 'refund', compensationId: 'pcmp_1' }),
+    );
+    setActivity('releaseHoldActivity', async () => {
+      releaseCalled = true;
+      return okResult({ released: true });
+    });
+
+    const result = await checkoutSessionWorkflow(makeCheckoutInput({ isFreeOrder: false }));
+
+    expect(result).toEqual({ status: 'failed' });
+    expect(releaseCalled).toBe(true);
+  });
+
   it('does not silently close when timeout compensation returns a retryable error', async () => {
     mockState.conditionResult = false;
     setActivity('compensateOrphanPaymentActivity', async () => errResult('PAYMENT_COMPENSATION_FAILED', 'Stripe cancel failed', true));
@@ -497,10 +559,92 @@ describe('refundWorkflow', () => {
     expect(restoreCalled).toBe(false);
   });
 
-  it('fails when refund processing fails', async () => {
-    setActivity('processRefundActivity', async () => errResult('REFUND_FAILED', 'Provider error', true));
+  it('throws when refund processing returns a retryable error', async () => {
+    setActivity('processRefundActivity', async () => errResult('REFUND_RETRYABLE', 'Provider timeout', true));
+
+    await expect(refundWorkflow(makeRefundInput())).rejects.toThrow(
+      'Refund processing failed (REFUND_RETRYABLE): Provider timeout',
+    );
+  });
+
+  it('fails when refund processing returns a non-retryable provider error', async () => {
+    setActivity('processRefundActivity', async () => errResult('REFUND_FAILED', 'Provider rejected refund', false));
+
     const result = await refundWorkflow(makeRefundInput());
+
     expect(result.status).toBe('failed');
+  });
+
+  it('throws when ledger update returns a retryable error', async () => {
+    setActivity('updateLedgerActivity', async () => errResult('LEDGER_RETRYABLE', 'Database unavailable', true));
+
+    await expect(refundWorkflow(makeRefundInput())).rejects.toThrow(
+      'Refund ledger update failed (LEDGER_RETRYABLE): Database unavailable',
+    );
+  });
+
+  it('fails when ledger update returns a non-retryable error', async () => {
+    setActivity('updateLedgerActivity', async () => errResult('LEDGER_INVALID', 'Invalid ledger state', false));
+
+    const result = await refundWorkflow(makeRefundInput());
+
+    expect(result.status).toBe('failed');
+  });
+
+  it('throws when ticket voiding returns a retryable error', async () => {
+    setActivity('voidTicketsActivity', async () => errResult('VOID_RETRYABLE', 'Ticket service unavailable', true));
+
+    await expect(refundWorkflow(makeRefundInput({ voidTickets: true }))).rejects.toThrow(
+      'Refund ticket voiding failed (VOID_RETRYABLE): Ticket service unavailable',
+    );
+  });
+
+  it('fails when ticket voiding returns a non-retryable error', async () => {
+    setActivity('voidTicketsActivity', async () => errResult('VOID_INVALID', 'Tickets already transferred', false));
+
+    const result = await refundWorkflow(makeRefundInput({ voidTickets: true }));
+
+    expect(result.status).toBe('failed');
+  });
+
+  it('throws when inventory restore returns a retryable error', async () => {
+    setActivity('restoreInventoryActivity', async () => errResult('INVENTORY_RETRYABLE', 'Inventory lock timeout', true));
+
+    await expect(refundWorkflow(makeRefundInput({ restoreInventory: true }))).rejects.toThrow(
+      'Refund inventory restore failed (INVENTORY_RETRYABLE): Inventory lock timeout',
+    );
+  });
+
+  it('fails when inventory restore returns a non-retryable error', async () => {
+    setActivity('restoreInventoryActivity', async () => errResult('INVENTORY_INVALID', 'Inventory already restored', false));
+
+    const result = await refundWorkflow(makeRefundInput({ restoreInventory: true }));
+
+    expect(result.status).toBe('failed');
+  });
+
+  it('throws when refund notification returns a retryable error', async () => {
+    setActivity('notifyRefundActivity', async () => errResult('NOTIFY_RETRYABLE', 'Email queue unavailable', true));
+
+    await expect(refundWorkflow(makeRefundInput())).rejects.toThrow(
+      'Refund notification failed (NOTIFY_RETRYABLE): Email queue unavailable',
+    );
+  });
+
+  it('fails when refund notification returns a non-retryable error', async () => {
+    setActivity('notifyRefundActivity', async () => errResult('NOTIFY_INVALID', 'Invalid recipient', false));
+
+    const result = await refundWorkflow(makeRefundInput());
+
+    expect(result.status).toBe('failed');
+  });
+
+  it('completes when refund notification is gracefully skipped', async () => {
+    setActivity('notifyRefundActivity', async () => okResult({ notified: false }));
+
+    const result = await refundWorkflow(makeRefundInput());
+
+    expect(result.status).toBe('completed');
   });
 
   it('always notifies buyer regardless of void/restore config', async () => {
@@ -538,39 +682,104 @@ describe('paymentReconciliationWorkflow', () => {
     expect(markInput).toEqual({ provider: 'stripe', providerEventId: 'evt_stripe_1' });
   });
 
-  it('throws retryable reconciliation failures without marking the provider event processed', async () => {
+  it('retries retryable payment reconciliation before emitting and marking processed', async () => {
+    let reconcileCalls = 0;
+    let domainEventInput: Record<string, unknown> | undefined;
+    let markInput: Record<string, unknown> | undefined;
+
+    setActivity('reconcilePaymentActivity', async () => {
+      reconcileCalls += 1;
+      if (reconcileCalls === 1) {
+        return errResult(
+          'ORDER_NOT_FINALIZED_YET',
+          'Checkout session is still finalizing for this successful payment',
+          true,
+        );
+      }
+      return okResult({ orderId: 'ord_1', status: 'paid' });
+    });
+    setActivity('emitDomainEventActivity', async (input) => {
+      domainEventInput = input;
+      return okResult({ emitted: true });
+    });
+    setActivity('markProviderEventProcessedActivity', async (input) => {
+      markInput = input;
+      return okResult({ processed: true });
+    });
+
+    const result = await paymentReconciliationWorkflow(makePaymentReconciliationInput());
+
+    expect(result).toEqual({ status: 'paid' });
+    expect(reconcileCalls).toBe(2);
+    expect(mockState.sleeps).toEqual(['5 seconds']);
+    expect(domainEventInput).toEqual({ orderId: 'ord_1', eventType: 'payment_intent.succeeded' });
+    expect(markInput).toEqual({ provider: 'stripe', providerEventId: 'evt_stripe_1' });
+  });
+
+  it('keeps v1 retryable reconciliation failures as immediate workflow retries without marking processed', async () => {
+    let reconcileCalls = 0;
     let marked = false;
 
-    setActivity('reconcilePaymentActivity', async () => errResult('PAYMENT_RECONCILE_FAILED', 'database unavailable', true));
+    setActivity('reconcilePaymentActivity', async () => {
+      reconcileCalls += 1;
+      return errResult('PAYMENT_RECONCILE_FAILED', 'database unavailable', true);
+    });
     setActivity('markProviderEventProcessedActivity', async () => {
       marked = true;
       return okResult({ processed: true });
     });
 
-    await expect(paymentReconciliationWorkflow(makePaymentReconciliationInput())).rejects.toThrow(
+    await expect(paymentReconciliationWorkflow(makePaymentReconciliationInput({ version: 1 }))).rejects.toThrow(
       'Payment reconciliation failed (PAYMENT_RECONCILE_FAILED): database unavailable',
     );
+    expect(reconcileCalls).toBe(1);
+    expect(mockState.sleeps).toEqual([]);
     expect(marked).toBe(false);
   });
 
-  it('does not mark the provider event processed when checkout finalization is still retryable', async () => {
+  it('exhausts retryable checkout finalization attempts without marking the provider event processed', async () => {
+    let reconcileCalls = 0;
     let marked = false;
 
-    setActivity('reconcilePaymentActivity', async () =>
-      errResult(
+    setActivity('reconcilePaymentActivity', async () => {
+      reconcileCalls += 1;
+      return errResult(
         'ORDER_NOT_FINALIZED_YET',
         'Checkout session is still finalizing for this successful payment',
         true,
-      ),
-    );
+      );
+    });
     setActivity('markProviderEventProcessedActivity', async () => {
       marked = true;
       return okResult({ processed: true });
     });
 
     await expect(paymentReconciliationWorkflow(makePaymentReconciliationInput())).rejects.toThrow(
-      'Payment reconciliation failed (ORDER_NOT_FINALIZED_YET): Checkout session is still finalizing for this successful payment',
+      'Payment reconciliation failed (ORDER_NOT_FINALIZED_YET): Checkout session is still finalizing for this successful payment (attempts exhausted after 5 attempts)',
     );
+    expect(reconcileCalls).toBe(5);
+    expect(mockState.sleeps).toEqual(['5 seconds', '5 seconds', '5 seconds', '5 seconds']);
+    expect(marked).toBe(false);
+  });
+
+  it('does not mark provider events processed when orphan compensation needs manual review', async () => {
+    let emitted = false;
+    let marked = false;
+
+    setActivity('reconcilePaymentActivity', async () => okResult({ orderId: undefined, status: 'compensated:manual_review' }));
+    setActivity('emitDomainEventActivity', async () => {
+      emitted = true;
+      return okResult({ emitted: true });
+    });
+    setActivity('markProviderEventProcessedActivity', async () => {
+      marked = true;
+      return okResult({ processed: true });
+    });
+
+    await expect(paymentReconciliationWorkflow(makePaymentReconciliationInput())).rejects.toThrow(
+      'Payment reconciliation compensation blocked with status compensated:manual_review',
+    );
+    expect(emitted).toBe(false);
     expect(marked).toBe(false);
   });
 });
@@ -864,5 +1073,19 @@ describe('webhookDeliveryWorkflow', () => {
     expect(attempts.map((attempt) => attempt.attempt)).toEqual([1, 2, 3]);
     expect(attempts.map((attempt) => attempt.finalAttempt)).toEqual([false, false, true]);
     expect(mockState.sleeps).toEqual(['5 seconds', '10 seconds']);
+  });
+
+  it('dead-letters non-retryable delivery failures without sleeping for retries', async () => {
+    const attempts: Array<Record<string, unknown>> = [];
+    setActivity('deliverWebhookActivity', async (input) => {
+      attempts.push(input);
+      return errResult('ENDPOINT_INACTIVE', 'Webhook endpoint is not active', false);
+    });
+
+    const result = await webhookDeliveryWorkflow(makeWebhookDeliveryInput());
+
+    expect(result.status).toBe('dead_lettered');
+    expect(attempts.map((attempt) => attempt.attempt)).toEqual([1]);
+    expect(mockState.sleeps).toEqual([]);
   });
 });

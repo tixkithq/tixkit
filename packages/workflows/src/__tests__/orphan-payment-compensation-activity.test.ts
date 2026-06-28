@@ -282,6 +282,43 @@ describe('compensateOrphanPaymentActivity', () => {
     );
   });
 
+  it('reverses transfers and application fees for orphaned Stripe Connect destination charges', async () => {
+    process.env.STRIPE_SECRET_KEY = 'sk_test_1';
+    mockState.paymentIntent = {
+      ...mockState.paymentIntent,
+      provider: 'stripe_connect',
+      provider_intent_id: 'pi_provider_1',
+    };
+    mockState.stripeRetrieve.mockResolvedValue({
+      id: 'pi_provider_1',
+      status: 'succeeded',
+      amount: 2500,
+      amount_received: 2500,
+    });
+    mockState.stripeRefundCreate.mockResolvedValue({ id: 're_1', status: 'succeeded' });
+
+    const result = await compensateOrphanPaymentActivity({
+      checkoutSessionId: 'cs_1',
+      tenantId: 'tnt_1',
+      provider: 'stripe_connect',
+      providerIntentId: 'pi_provider_1',
+      amountCents: 2500,
+      currency: 'USD',
+      reason: 'test orphan',
+    });
+
+    expect(result).toMatchObject({ ok: true, value: { status: 'succeeded', action: 'refund' } });
+    expect(mockState.stripeRefundCreate).toHaveBeenCalledWith(
+      {
+        payment_intent: 'pi_provider_1',
+        amount: 2500,
+        reverse_transfer: true,
+        refund_application_fee: true,
+      },
+      { idempotencyKey: 'orphan-payment:refund:stripe_connect:pi_provider_1:cs_1' },
+    );
+  });
+
   it('cancels uncaptured Stripe payments with a stable orphan idempotency key', async () => {
     process.env.STRIPE_SECRET_KEY = 'sk_test_1';
     mockState.paymentIntent = {

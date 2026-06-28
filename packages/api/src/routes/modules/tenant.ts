@@ -111,6 +111,38 @@ function stripeAccountLinkType(status: string): 'account_onboarding' | 'account_
   return status === 'active' ? 'account_update' : 'account_onboarding';
 }
 
+const mssqlDuplicateInsertErrorNumbers = new Set([2601, 2627]);
+
+function getErrorNumber(value: unknown): number | undefined {
+  if (typeof value === 'number') return value;
+  if (typeof value !== 'string' || value.trim() === '') return undefined;
+  const parsed = Number(value);
+  return Number.isInteger(parsed) ? parsed : undefined;
+}
+
+function isDuplicateInsert(error: unknown): boolean {
+  if (!error || typeof error !== 'object') return false;
+  const record = error as {
+    code?: string;
+    errno?: string | number;
+    message?: string;
+    number?: string | number;
+    originalError?: { number?: string | number };
+  };
+  const mssqlNumber =
+    getErrorNumber(record.number) ?? getErrorNumber(record.originalError?.number);
+  return (
+    record.code === '23505' ||
+    record.code === 'ER_DUP_ENTRY' ||
+    record.errno === 1062 ||
+    record.errno === '1062' ||
+    (record.code === 'EREQUEST' &&
+      mssqlNumber !== undefined &&
+      mssqlDuplicateInsertErrorNumbers.has(mssqlNumber)) ||
+    /duplicate|unique/i.test(record.message ?? '')
+  );
+}
+
 function stripeClientFromContext(
   context: unknown,
 ): Pick<Stripe, 'accounts' | 'accountLinks'> | null {
@@ -468,6 +500,7 @@ export const tenantRoutes: FastifyPluginAsync = async (app) => {
       }
 
       let account = activeStripe;
+      let wasCreated = false;
       if (!account) {
         const stripeAccount = await stripe.accounts.create({
           type: 'express',
@@ -481,30 +514,45 @@ export const tenantRoutes: FastifyPluginAsync = async (app) => {
           },
         });
         const stripeState = stripeAccountState(stripeAccount);
-        account = await paymentAccounts.create({
-          tenantId: organization.tenant_id,
-          organizationId,
-          provider: 'stripe_connect',
-          providerAccountId: stripeAccount.id,
-          status: stripeState.status,
-          defaultCurrency: stripeState.defaultCurrency,
-          detailsSubmitted: stripeState.detailsSubmitted,
-          chargesEnabled: stripeState.chargesEnabled,
-          payoutsEnabled: stripeState.payoutsEnabled,
-          requirements: stripeState.requirements,
-          disabledReason: stripeState.disabledReason,
-        });
-        await writeAuditLog(audit(), request, principal, {
-          action: 'payment_account.created',
-          organizationId,
-          resourceType: 'PaymentAccount',
-          resourceId: account.id,
-          diffSummary: {
+        try {
+          account = await paymentAccounts.create({
+            tenantId: organization.tenant_id,
+            organizationId,
             provider: 'stripe_connect',
             providerAccountId: stripeAccount.id,
+            status: stripeState.status,
+            defaultCurrency: stripeState.defaultCurrency,
+            detailsSubmitted: stripeState.detailsSubmitted,
+            chargesEnabled: stripeState.chargesEnabled,
+            payoutsEnabled: stripeState.payoutsEnabled,
+            requirements: stripeState.requirements,
+            disabledReason: stripeState.disabledReason,
+          });
+          wasCreated = true;
+        } catch (error) {
+          if (!isDuplicateInsert(error)) throw error;
+          account = await db
+            .selectFrom('payment_accounts')
+            .selectAll()
+            .where('organization_id', '=', organizationId)
+            .where('provider', '=', 'stripe_connect')
+            .executeTakeFirst();
+          if (!account) throw error;
+        }
+
+        if (wasCreated) {
+          await writeAuditLog(audit(), request, principal, {
+            action: 'payment_account.created',
             organizationId,
-          },
-        });
+            resourceType: 'PaymentAccount',
+            resourceId: account.id,
+            diffSummary: {
+              provider: 'stripe_connect',
+              providerAccountId: stripeAccount.id,
+              organizationId,
+            },
+          });
+        }
       }
 
       const accountLink = await stripe.accountLinks.create({
@@ -515,7 +563,7 @@ export const tenantRoutes: FastifyPluginAsync = async (app) => {
       });
 
       return reply
-        .status(activeStripe ? 200 : 201)
+        .status(wasCreated ? 201 : 200)
         .send(serializePaymentAccount(account, accountLink.url));
     },
   );

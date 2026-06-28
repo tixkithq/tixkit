@@ -5,6 +5,7 @@ import {
   condition,
   proxyActivities,
   startChild,
+  patched,
 } from '@temporalio/workflow';
 import type { WorkflowActivityResult } from '../shared/types.js';
 import { WEBHOOK_DELIVERY_WORKFLOW_VERSION } from '../shared/types.js';
@@ -177,6 +178,12 @@ export async function checkoutSessionWorkflow(
     });
     if (!compensationResult.ok) {
       throw new Error(`Orphan payment compensation failed (${compensationResult.errorCode}): ${compensationResult.message}`);
+    }
+    if (
+      !['succeeded', 'already_ordered'].includes(compensationResult.value.status) &&
+      patched('checkout-block-incomplete-orphan-compensation-v1')
+    ) {
+      throw new Error(`Orphan payment compensation blocked with status ${compensationResult.value.status}`);
     }
   }
 

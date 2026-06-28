@@ -30,6 +30,31 @@ function checkoutSessionCanStillFinalize(session: { status: string; expires_at: 
   return new Date(session.expires_at).getTime() > Date.now();
 }
 
+function stringRecord(value: unknown): Record<string, string> | undefined {
+  if (!value || typeof value !== 'object') return undefined;
+  const result: Record<string, string> = {};
+  for (const [key, entry] of Object.entries(value)) {
+    if (typeof entry === 'string') result[key] = entry;
+  }
+  return result;
+}
+
+function objectId(value: unknown): string | undefined {
+  if (typeof value === 'string' && value.trim()) return value;
+  if (value && typeof value === 'object' && typeof (value as { id?: unknown }).id === 'string') {
+    return (value as { id: string }).id;
+  }
+  return undefined;
+}
+
+function providerIntentIdForPaymentEvent(
+  eventType: string,
+  payload: { id?: unknown; payment_intent?: unknown },
+): string | undefined {
+  if (eventType.startsWith('charge.')) return objectId(payload.payment_intent);
+  return objectId(payload.id);
+}
+
 export async function reconcilePaymentActivity(input: {
   providerEventId: string;
   provider: string;
@@ -39,18 +64,75 @@ export async function reconcilePaymentActivity(input: {
   const db = createDb();
   try {
     const paymentIntent = input.data as {
-      id: string;
+      id?: string;
+      payment_intent?: unknown;
       status: string;
       amount?: number;
+      amount_received?: number;
+      currency?: string;
       metadata?: Record<string, string>;
     };
-    const providerIntentId = paymentIntent.id;
+    const providerIntentId = providerIntentIdForPaymentEvent(input.eventType, paymentIntent);
+    const successfulPaymentEvent = isSuccessfulPaymentEvent(input.eventType, paymentIntent.status);
+    if (!providerIntentId) {
+      return errResult(
+        'PAYMENT_INTENT_ID_MISSING',
+        `Provider event ${input.providerEventId} did not include a payment intent id`,
+        false,
+      );
+    }
 
     const piRepo = new PaymentIntentRepository(db);
     const orderRepo = new OrderRepository(db);
     const checkoutSessionRepo = new CheckoutSessionRepository(db);
     const dbPi = await findPaymentIntentForProviderEvent(piRepo, input.provider, providerIntentId);
     if (!dbPi) {
+      if (successfulPaymentEvent) {
+        const metadata = stringRecord(paymentIntent.metadata);
+        const checkoutSessionId = metadata?.checkoutSessionId;
+        if (!checkoutSessionId) {
+          return errResult(
+            'PAYMENT_INTENT_NOT_FOUND',
+            `No local payment intent found for successful provider event ${input.providerEventId}`,
+            false,
+          );
+        }
+
+        const checkoutSession = await checkoutSessionRepo.findById(checkoutSessionId);
+        if (checkoutSession && checkoutSessionCanStillFinalize(checkoutSession)) {
+          return errResult(
+            'ORDER_NOT_FINALIZED_YET',
+            'Checkout session is still finalizing for this successful payment',
+            true,
+          );
+        }
+        if (!checkoutSession) {
+          return errResult(
+            'CHECKOUT_SESSION_NOT_FOUND',
+            `Checkout session ${checkoutSessionId} was not found for successful provider event ${input.providerEventId}`,
+            false,
+          );
+        }
+
+        const compensation = await compensateOrphanPaymentActivity({
+          checkoutSessionId,
+          tenantId: checkoutSession.tenant_id,
+          provider: input.provider,
+          providerIntentId,
+          amountCents: Number(paymentIntent.amount_received ?? paymentIntent.amount ?? 0),
+          currency: String(paymentIntent.currency ?? checkoutSession.currency ?? 'USD').toUpperCase(),
+          reason: 'Successful provider payment has no durable local payment intent attached',
+          providerEventId: input.providerEventId,
+          eventType: input.eventType,
+          providerStatus: paymentIntent.status,
+          source: 'payment_reconciliation_missing_payment_intent',
+          metadata: { checkoutSessionId },
+        });
+        if (!compensation.ok) {
+          return errResult(compensation.errorCode, compensation.message, compensation.retryable);
+        }
+        return okResult({ orderId: undefined, status: `compensated:${compensation.value.status}` });
+      }
       return okResult({ orderId: undefined, status: 'noop' });
     }
 
@@ -81,7 +163,7 @@ export async function reconcilePaymentActivity(input: {
       return okResult({ orderId: dbPi.order_id, status: paymentIntent.status });
     }
 
-    if (isSuccessfulPaymentEvent(input.eventType, paymentIntent.status)) {
+    if (successfulPaymentEvent) {
       const checkoutSession = dbPi.checkout_session_id
         ? await checkoutSessionRepo.findById(dbPi.checkout_session_id)
         : undefined;

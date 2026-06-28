@@ -708,6 +708,17 @@ describe('cross-tenant denial', () => {
     await app.close();
   });
 
+  it('GET /events/:eventId/marketing-integrations returns 404 for event in another tenant', async () => {
+    const tables: Tables = { events: [eventRow({ tenant_id: 'tnt_other' })] };
+    const app = await setupApp(eventRoutes, principal, tables);
+    const res = await app.inject({
+      method: 'GET',
+      url: '/events/evt_1/marketing-integrations',
+    });
+    expect(res.statusCode).toBe(404);
+    await app.close();
+  });
+
   it('GET /events/:eventId/waitlist returns 404 for event in another tenant', async () => {
     const tables: Tables = { events: [eventRow({ tenant_id: 'tnt_other' })] };
     const app = await setupApp(
@@ -1029,6 +1040,24 @@ describe('cross-organization denial (same tenant)', () => {
       method: 'PATCH',
       url: '/events/evt_1',
       payload: { title: 'Hijacked' },
+    });
+    expect(res.statusCode).toBe(404);
+    await app.close();
+  });
+
+  it('PUT /events/:eventId/marketing-integrations/:provider returns 404 for event in another organization', async () => {
+    const tables: Tables = {
+      events: [eventRow({ tenant_id: 'tnt_1', organization_id: 'org_B' })],
+    };
+    const app = await setupApp(eventRoutes, principal, tables);
+    const res = await app.inject({
+      method: 'PUT',
+      url: '/events/evt_1/marketing-integrations/ga4',
+      payload: {
+        config: { measurementId: 'G-CROSSORG' },
+        consentRequired: false,
+        status: 'active',
+      },
     });
     expect(res.statusCode).toBe(404);
     await app.close();
@@ -1501,6 +1530,23 @@ describe('brand and event scope denial', () => {
     await app.close();
   });
 
+  it('GET /events/:eventId/marketing-integrations returns 404 for brand-scoped key accessing other brand event', async () => {
+    const principal = makePrincipal({
+      type: 'api_key',
+      id: 'ak_scoped',
+      brandIds: ['brd_A'],
+      scopes: ['events.read'],
+    });
+    const tables: Tables = { events: [eventRow({ tenant_id: 'tnt_1', brand_id: 'brd_B' })] };
+    const app = await setupApp(eventRoutes, principal, tables);
+    const res = await app.inject({
+      method: 'GET',
+      url: '/events/evt_1/marketing-integrations',
+    });
+    expect(res.statusCode).toBe(404);
+    await app.close();
+  });
+
   it('GET /events/:eventId returns 404 for event-scoped key accessing other event', async () => {
     const principal = makePrincipal({
       type: 'api_key',
@@ -1528,6 +1574,28 @@ describe('brand and event scope denial', () => {
       method: 'PATCH',
       url: '/events/evt_B/waitlist/settings',
       payload: { autoOfferEnabled: false, offerTtlMinutes: 45 },
+    });
+    expect(res.statusCode).toBe(404);
+    await app.close();
+  });
+
+  it('PUT /events/:eventId/marketing-integrations/:provider returns 404 for event-scoped key accessing other event', async () => {
+    const principal = makePrincipal({
+      type: 'api_key',
+      id: 'ak_scoped',
+      eventIds: ['evt_A'],
+      scopes: ['events.write'],
+    });
+    const tables: Tables = { events: [eventRow({ id: 'evt_B', tenant_id: 'tnt_1' })] };
+    const app = await setupApp(eventRoutes, principal, tables);
+    const res = await app.inject({
+      method: 'PUT',
+      url: '/events/evt_B/marketing-integrations/ga4',
+      payload: {
+        config: { measurementId: 'G-EVENTSCOPE' },
+        consentRequired: false,
+        status: 'active',
+      },
     });
     expect(res.statusCode).toBe(404);
     await app.close();
@@ -1620,6 +1688,36 @@ describe('brand and event scope denial', () => {
 // ===========================================================================
 
 describe('API key scope enforcement', () => {
+  it('POST /events returns 403 for principal without events.write', async () => {
+    const principal = makePrincipal({ scopes: ['events.read'] });
+    const app = await setupApp(eventRoutes, principal, {});
+    const res = await app.inject({
+      method: 'POST',
+      url: '/events',
+      payload: {},
+    });
+    expect(res.statusCode).toBe(403);
+    await app.close();
+  });
+
+  it('PUT /events/:eventId/marketing-integrations/:provider returns 403 without events.write', async () => {
+    const principal = makePrincipal({ scopes: ['events.read'] });
+    const app = await setupApp(eventRoutes, principal, {
+      events: [eventRow({ tenant_id: 'tnt_1' })],
+    });
+    const res = await app.inject({
+      method: 'PUT',
+      url: '/events/evt_1/marketing-integrations/ga4',
+      payload: {
+        config: { measurementId: 'G-NOWRITE' },
+        consentRequired: false,
+        status: 'active',
+      },
+    });
+    expect(res.statusCode).toBe(403);
+    await app.close();
+  });
+
   it('GET /events/:eventId/waitlist returns 403 without events.read', async () => {
     const principal = makePrincipal({ scopes: ['tickets.write'] });
     const app = await setupApp(waitlistRoutes, principal, {
@@ -1639,18 +1737,6 @@ describe('API key scope enforcement', () => {
       method: 'PATCH',
       url: '/events/evt_1/waitlist/settings',
       payload: { autoOfferEnabled: true, offerTtlMinutes: 60 },
-    });
-    expect(res.statusCode).toBe(403);
-    await app.close();
-  });
-
-  it('POST /events returns 403 for principal without events.write', async () => {
-    const principal = makePrincipal({ scopes: ['events.read'] });
-    const app = await setupApp(eventRoutes, principal, {});
-    const res = await app.inject({
-      method: 'POST',
-      url: '/events',
-      payload: {},
     });
     expect(res.statusCode).toBe(403);
     await app.close();

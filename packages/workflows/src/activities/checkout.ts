@@ -163,6 +163,22 @@ function stripePaymentIntentIsCancelable(status: string): boolean {
   ].includes(status);
 }
 
+function stripeOrphanRefundParams(input: {
+  provider: string;
+  providerIntentId: string;
+  amount: number;
+}): Stripe.RefundCreateParams {
+  const params: Stripe.RefundCreateParams = {
+    payment_intent: input.providerIntentId,
+    amount: input.amount,
+  };
+  if (input.provider === 'stripe_connect') {
+    params.reverse_transfer = true;
+    params.refund_application_fee = true;
+  }
+  return params;
+}
+
 function providerIntentMetadata(input: {
   reason: string;
   providerEventId?: string;
@@ -495,7 +511,17 @@ async function compensateCreatedPaymentIntentAfterAttachFailure(input: {
     metadata: { brandId: input.brandId, paymentIntentRowId: input.paymentIntentRowId },
   });
 
-  if (compensationResult.ok) return undefined;
+  if (compensationResult.ok) {
+    if (['succeeded', 'already_ordered'].includes(compensationResult.value.status)) {
+      return undefined;
+    }
+
+    return errResult(
+      'PAYMENT_INTENT_COMPENSATION_BLOCKED',
+      `Created payment intent ${input.providerIntentId} compensation blocked with status ${compensationResult.value.status}`,
+      false,
+    );
+  }
 
   return errResult(
     'PAYMENT_INTENT_COMPENSATION_FAILED',
@@ -947,7 +973,7 @@ export async function compensateOrphanPaymentActivity(input: {
         },
         async (span) => {
           const created = await stripe.refunds.create(
-            { payment_intent: providerIntentId, amount: refundAmount },
+            stripeOrphanRefundParams({ provider, providerIntentId, amount: refundAmount }),
             { idempotencyKey },
           );
           span.setAttribute('tixkit.provider.refund_id', created.id);

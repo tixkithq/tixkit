@@ -19,6 +19,7 @@ const mockState = vi.hoisted(() => ({
   refunds: [] as Record<string, unknown>[],
   createdRefunds: [] as Record<string, unknown>[],
   compensations: [] as Record<string, unknown>[],
+  paymentIntentLookups: [] as Array<{ provider: string; providerIntentId: string }>,
   updates: [] as Array<{ table: string; id: string; input: Record<string, unknown> }>,
   timeline: [] as Array<{ orderId: string; type: string; description: string }>,
 }));
@@ -38,7 +39,8 @@ vi.mock('@tixkit/db', () => ({
     }
   },
   PaymentIntentRepository: class {
-    async findByProviderAndIntentId() {
+    async findByProviderAndIntentId(provider: string, providerIntentId: string) {
+      mockState.paymentIntentLookups.push({ provider, providerIntentId });
       return mockState.paymentIntent;
     }
 
@@ -107,6 +109,7 @@ describe('reconcilePaymentActivity', () => {
     mockState.refunds = [];
     mockState.createdRefunds = [];
     mockState.compensations = [];
+    mockState.paymentIntentLookups = [];
     mockState.updates = [];
     mockState.timeline = [];
   });
@@ -168,6 +171,30 @@ describe('reconcilePaymentActivity', () => {
       orderId: 'ord_1',
       type: 'order.paid',
       description: 'Payment confirmed via Stripe',
+    });
+  });
+
+  it('uses the payment_intent id when reconciling a successful Stripe charge event', async () => {
+    const result = await reconcilePaymentActivity({
+      providerEventId: 'evt_charge_success',
+      provider: 'stripe',
+      eventType: 'charge.succeeded',
+      data: {
+        id: 'ch_provider_1',
+        payment_intent: 'pi_provider_1',
+        status: 'succeeded',
+      },
+    });
+
+    expect(result).toMatchObject({ ok: true, value: { orderId: 'ord_1', status: 'paid' } });
+    expect(mockState.paymentIntentLookups[0]).toEqual({
+      provider: 'stripe',
+      providerIntentId: 'pi_provider_1',
+    });
+    expect(mockState.updates).toContainEqual({
+      table: 'orders',
+      id: 'ord_1',
+      input: { status: 'paid', paid_at: expect.any(Date) },
     });
   });
 
@@ -265,6 +292,67 @@ describe('reconcilePaymentActivity', () => {
       providerStatus: 'succeeded',
       source: 'payment_reconciliation',
     });
+  });
+
+  it('compensates a successful provider event with trusted checkout metadata but no local payment intent', async () => {
+    mockState.paymentIntent = undefined;
+    mockState.checkoutSession = {
+      id: 'cs_1',
+      tenant_id: 'tnt_1',
+      currency: 'USD',
+      status: 'expired',
+      expires_at: new Date(Date.now() - 60_000),
+    };
+
+    const result = await reconcilePaymentActivity({
+      providerEventId: 'evt_missing_pi_success',
+      provider: 'stripe',
+      eventType: 'payment_intent.succeeded',
+      data: {
+        id: 'pi_provider_1',
+        status: 'succeeded',
+        amount_received: 10000,
+        currency: 'usd',
+        metadata: { checkoutSessionId: 'cs_1' },
+      },
+    });
+
+    expect(result).toMatchObject({
+      ok: true,
+      value: { orderId: undefined, status: 'compensated:succeeded' },
+    });
+    expect(mockState.compensations).toContainEqual({
+      checkoutSessionId: 'cs_1',
+      tenantId: 'tnt_1',
+      provider: 'stripe',
+      providerIntentId: 'pi_provider_1',
+      amountCents: 10000,
+      currency: 'USD',
+      reason: 'Successful provider payment has no durable local payment intent attached',
+      providerEventId: 'evt_missing_pi_success',
+      eventType: 'payment_intent.succeeded',
+      providerStatus: 'succeeded',
+      source: 'payment_reconciliation_missing_payment_intent',
+      metadata: { checkoutSessionId: 'cs_1' },
+    });
+  });
+
+  it('does not process a successful provider event without a local payment intent or trusted checkout metadata', async () => {
+    mockState.paymentIntent = undefined;
+
+    const result = await reconcilePaymentActivity({
+      providerEventId: 'evt_untrusted_success',
+      provider: 'stripe',
+      eventType: 'payment_intent.succeeded',
+      data: { id: 'pi_provider_1', status: 'succeeded' },
+    });
+
+    expect(result).toMatchObject({
+      ok: false,
+      errorCode: 'PAYMENT_INTENT_NOT_FOUND',
+      retryable: false,
+    });
+    expect(mockState.compensations).toEqual([]);
   });
 
   it('does not compensate an in-flight pending_payment checkout with no order attached', async () => {
