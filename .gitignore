@@ -12,6 +12,12 @@ out/
 **/out/
 .next/
 **/.next/
+.astro/
+**/.astro/
+.nuxt/
+**/.nuxt/
+.output/
+**/.output/
 .svelte-kit/
 **/.svelte-kit/
 .vercel/

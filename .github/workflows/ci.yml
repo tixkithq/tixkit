@@ -19,6 +19,7 @@ jobs:
         with:
           node-version: 22
       - run: bun install --frozen-lockfile
+      - run: bun run audit
       - run: bun run format:check
       - run: bun run lint
       - run: bun run typecheck

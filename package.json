@@ -27,6 +27,7 @@
     "export:oss": "node scripts/export-oss.mjs",
     "format": "oxfmt . --write",
     "format:check": "oxfmt . --check",
+    "audit": "bun audit",
     "lint": "turbo run lint",
     "typecheck": "turbo run typecheck",
     "test": "turbo run test:unit test:integration",
