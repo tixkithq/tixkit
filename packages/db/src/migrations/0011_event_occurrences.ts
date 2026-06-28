@@ -130,28 +130,32 @@ export const EventOccurrencesMigration: Migration = {
   },
 
   async down(db): Promise<void> {
-    await db.schema.dropIndex('idx_check_in_lists_occurrence').ifExists().execute();
+    await db.schema.dropIndex('idx_check_in_lists_occurrence').on('check_in_lists').ifExists().execute();
     await db.schema
       .alterTable('check_in_lists')
       .dropConstraint('check_in_lists_event_occurrence_fk')
       .execute();
     await db.schema.alterTable('check_in_lists').dropColumn('event_occurrence_id').execute();
-    await db.schema.dropIndex('idx_tickets_occurrence').ifExists().execute();
+    await db.schema.dropIndex('idx_tickets_occurrence').on('tickets').ifExists().execute();
     await db.schema.alterTable('tickets').dropConstraint('tickets_event_occurrence_fk').execute();
     await db.schema.alterTable('tickets').dropColumn('event_occurrence_id').execute();
-    await db.schema.dropIndex('idx_attendees_occurrence').ifExists().execute();
+    await db.schema.dropIndex('idx_attendees_occurrence').on('attendees').ifExists().execute();
     await db.schema
       .alterTable('attendees')
       .dropConstraint('attendees_event_occurrence_fk')
       .execute();
     await db.schema.alterTable('attendees').dropColumn('event_occurrence_id').execute();
-    await db.schema.dropIndex('idx_order_line_items_occurrence').ifExists().execute();
+    await db.schema
+      .dropIndex('idx_order_line_items_occurrence')
+      .on('order_line_items')
+      .ifExists()
+      .execute();
     await db.schema
       .alterTable('order_line_items')
       .dropConstraint('order_line_items_event_occurrence_fk')
       .execute();
     await db.schema.alterTable('order_line_items').dropColumn('event_occurrence_id').execute();
-    await db.schema.dropIndex('idx_ticket_types_occurrence').ifExists().execute();
+    await db.schema.dropIndex('idx_ticket_types_occurrence').on('ticket_types').ifExists().execute();
     await db.schema
       .alterTable('ticket_types')
       .dropConstraint('ticket_types_event_occurrence_fk')

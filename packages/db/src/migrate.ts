@@ -21,6 +21,11 @@ import { PaymentAccountCapabilitiesMigration } from './migrations/0017_payment_a
 import { PrivacyRequestsMigration } from './migrations/0018_privacy_requests.js';
 import { DeliverabilityFeedbackMigration } from './migrations/0019_deliverability_feedback.js';
 import { RefundRequestIdentityMigration } from './migrations/0020_refund_request_identity.js';
+import { EventsGlobalSlugUniqueMigration } from './migrations/0021_events_global_slug_unique.js';
+import { NullableWebhookDeliveryEndpointMigration } from './migrations/0022_nullable_webhook_delivery_endpoint.js';
+import { EventsBrandSlugScopeMigration } from './migrations/0023_events_brand_slug_scope.js';
+import { WebhookDeliveryEndpointHistoryIndexMigration } from './migrations/0024_webhook_delivery_endpoint_history_index.js';
+import { PaymentAccountsUniqueMigration } from './migrations/0025_payment_accounts_unique.js';
 
 const INITIAL_MIGRATION_NAME = '0001_initial';
 const MIGRATION_TABLE = 'kysely_migration';
@@ -112,6 +117,14 @@ const ALL_SCHEMA_TABLES = [
   'email_provider_events',
 ] as const;
 
+function quoteMssqlIdentifier(identifier: string): string {
+  return `[${identifier.replaceAll(']', ']]')}]`;
+}
+
+function quoteMssqlStringLiteral(value: string): string {
+  return `N'${value.replaceAll("'", "''")}'`;
+}
+
 function buildMigrationFailureMessage(error: unknown): string {
   const detail = error instanceof Error ? `${error.name}: ${error.message}` : String(error);
   return [
@@ -147,28 +160,48 @@ class TixkitMigrationProvider implements MigrationProvider {
       '0018_privacy_requests': PrivacyRequestsMigration,
       '0019_deliverability_feedback': DeliverabilityFeedbackMigration,
       '0020_refund_request_identity': RefundRequestIdentityMigration,
+      '0021_events_global_slug_unique': EventsGlobalSlugUniqueMigration,
+      '0022_nullable_webhook_delivery_endpoint': NullableWebhookDeliveryEndpointMigration,
+      '0023_events_brand_slug_scope': EventsBrandSlugScopeMigration,
+      '0024_webhook_delivery_endpoint_history_index': WebhookDeliveryEndpointHistoryIndexMigration,
+      '0025_payment_accounts_unique': PaymentAccountsUniqueMigration,
     };
   }
 }
 
 async function tableExists(db: Database, tableName: string): Promise<boolean> {
   const driver = getDriver();
-  const result =
-    driver === 'mysql'
-      ? await sql<{ table_name: string }>`
-          select table_name
-          from information_schema.tables
-          where table_schema = database()
-            and table_name = ${tableName}
-          limit 1
-        `.execute(db)
-      : await sql<{ table_name: string }>`
-          select table_name
-          from information_schema.tables
-          where table_schema = current_schema()
-            and table_name = ${tableName}
-          limit 1
-        `.execute(db);
+
+  if (driver === 'mysql') {
+    const result = await sql<{ table_name: string }>`
+      select table_name
+      from information_schema.tables
+      where table_schema = database()
+        and table_name = ${tableName}
+      limit 1
+    `.execute(db);
+
+    return result.rows.length > 0;
+  }
+
+  if (driver === 'mssql') {
+    const result = await sql<{ table_name: string }>`
+      select top 1 table_name
+      from information_schema.tables
+      where table_schema = schema_name()
+        and table_name = ${tableName}
+    `.execute(db);
+
+    return result.rows.length > 0;
+  }
+
+  const result = await sql<{ table_name: string }>`
+    select table_name
+    from information_schema.tables
+    where table_schema = current_schema()
+      and table_name = ${tableName}
+    limit 1
+  `.execute(db);
 
   return result.rows.length > 0;
 }
@@ -184,9 +217,24 @@ async function ensureMigrationTable(db: Database): Promise<void> {
 
 async function recordInitialMigration(db: Database): Promise<void> {
   const timestamp = new Date().toISOString();
-  if (getDriver() === 'mysql') {
+  const driver = getDriver();
+
+  if (driver === 'mysql') {
     await sql`
       insert ignore into kysely_migration (name, timestamp)
+      values (${INITIAL_MIGRATION_NAME}, ${timestamp})
+    `.execute(db);
+    return;
+  }
+
+  if (driver === 'mssql') {
+    await sql`
+      if not exists (
+        select 1
+        from [kysely_migration]
+        where [name] = ${INITIAL_MIGRATION_NAME}
+      )
+      insert into [kysely_migration] ([name], [timestamp])
       values (${INITIAL_MIGRATION_NAME}, ${timestamp})
     `.execute(db);
     return;
@@ -265,6 +313,45 @@ export async function dropAllTables(db: Database): Promise<void> {
     return;
   }
 
+  if (driver === 'mssql') {
+    const tableNames = [...ALL_SCHEMA_TABLES, MIGRATION_TABLE];
+    const tableNameList = tableNames.map(quoteMssqlStringLiteral).join(', ');
+
+    await sql.raw(`
+      declare @sql nvarchar(max) = N'';
+
+      select @sql = @sql
+        + N'alter table '
+        + quotename(object_schema_name(parent_object_id))
+        + N'.'
+        + quotename(object_name(parent_object_id))
+        + N' drop constraint '
+        + quotename(name)
+        + N';'
+      from sys.foreign_keys
+      where (
+          object_schema_name(parent_object_id) = schema_name()
+          and object_name(parent_object_id) in (${tableNameList})
+        )
+        or (
+          object_schema_name(referenced_object_id) = schema_name()
+          and object_name(referenced_object_id) in (${tableNameList})
+        );
+
+      if len(@sql) > 0
+        exec sp_executesql @sql;
+    `).execute(db).catch(() => undefined);
+
+    for (const table of tableNames) {
+      // eslint-disable-next-line no-await-in-loop -- reset cleanup tolerates missing tables and keeps destructive drops ordered for diagnostics.
+      await sql
+        .raw(`DROP TABLE IF EXISTS ${quoteMssqlIdentifier(table)}`)
+        .execute(db)
+        .catch(() => undefined);
+    }
+    return;
+  }
+
   // PostgreSQL: use CASCADE so a single DROP per table removes dependent
   // constraints without needing strict FK ordering.
   for (const table of ALL_SCHEMA_TABLES) {
@@ -282,8 +369,8 @@ export async function dropAllTables(db: Database): Promise<void> {
  * share the same migrated database without one suite's `dropTable` destroying
  * another's concurrent queries.
  *
- * Uses `TRUNCATE ... CASCADE` on PostgreSQL and FK-check-disabled `TRUNCATE`
- * on MySQL for speed and to reset any auto-increment/identity counters.
+ * Uses each driver's compatible bulk cleanup syntax while resetting
+ * auto-increment/identity counters where the database supports it.
  */
 export async function truncateAllData(db: Database): Promise<void> {
   const driver = getDriver();
@@ -296,6 +383,39 @@ export async function truncateAllData(db: Database): Promise<void> {
       await sql`TRUNCATE TABLE ${sql.raw(table)}`.execute(db).catch(() => undefined);
     }
     await sql`SET FOREIGN_KEY_CHECKS = 1`.execute(db);
+    return;
+  }
+
+  if (driver === 'mssql') {
+    for (const table of ALL_SCHEMA_TABLES) {
+      // eslint-disable-next-line no-await-in-loop -- constraints must be disabled table-by-table before deleting across FK relationships.
+      await sql
+        .raw(`ALTER TABLE ${quoteMssqlIdentifier(table)} NOCHECK CONSTRAINT ALL`)
+        .execute(db)
+        .catch(() => undefined);
+    }
+
+    // eslint-disable-next-line unicorn/no-array-reverse -- ES2023 toReversed is not available in this package's TS lib target.
+    for (const table of [...ALL_SCHEMA_TABLES].reverse()) {
+      // eslint-disable-next-line no-await-in-loop -- test cleanup deletes in reverse dependency order for stable diagnostics.
+      await sql
+        .raw(`DELETE FROM ${quoteMssqlIdentifier(table)}`)
+        .execute(db)
+        .catch(() => undefined);
+      // eslint-disable-next-line no-await-in-loop -- not every table has an identity column, so failed reseeds are ignored.
+      await sql
+        .raw(`DBCC CHECKIDENT (${quoteMssqlStringLiteral(table)}, RESEED, 0) WITH NO_INFOMSGS`)
+        .execute(db)
+        .catch(() => undefined);
+    }
+
+    for (const table of ALL_SCHEMA_TABLES) {
+      // eslint-disable-next-line no-await-in-loop -- constraints are re-enabled after all table deletes complete.
+      await sql
+        .raw(`ALTER TABLE ${quoteMssqlIdentifier(table)} WITH CHECK CHECK CONSTRAINT ALL`)
+        .execute(db)
+        .catch(() => undefined);
+    }
     return;
   }
 

@@ -108,11 +108,19 @@ export const TaxInvoicesMigration: Migration = {
   },
 
   async down(db): Promise<void> {
-    await db.schema.dropIndex('idx_invoices_event').ifExists().execute();
-    await db.schema.dropIndex('idx_invoices_tenant').ifExists().execute();
+    await db.schema.dropIndex('idx_invoices_event').on('invoices').ifExists().execute();
+    await db.schema.dropIndex('idx_invoices_tenant').on('invoices').ifExists().execute();
     await db.schema.dropTable('invoices').ifExists().execute();
-    await db.schema.dropIndex('idx_order_tax_snapshots_event').ifExists().execute();
-    await db.schema.dropIndex('idx_order_tax_snapshots_order').ifExists().execute();
+    await db.schema
+      .dropIndex('idx_order_tax_snapshots_event')
+      .on('order_tax_snapshots')
+      .ifExists()
+      .execute();
+    await db.schema
+      .dropIndex('idx_order_tax_snapshots_order')
+      .on('order_tax_snapshots')
+      .ifExists()
+      .execute();
     await db.schema.dropTable('order_tax_snapshots').ifExists().execute();
   },
 };

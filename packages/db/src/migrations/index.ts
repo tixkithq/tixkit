@@ -18,3 +18,8 @@ export { PaymentAccountCapabilitiesMigration } from './0017_payment_account_capa
 export { PrivacyRequestsMigration } from './0018_privacy_requests.js';
 export { DeliverabilityFeedbackMigration } from './0019_deliverability_feedback.js';
 export { RefundRequestIdentityMigration } from './0020_refund_request_identity.js';
+export { EventsGlobalSlugUniqueMigration } from './0021_events_global_slug_unique.js';
+export { NullableWebhookDeliveryEndpointMigration } from './0022_nullable_webhook_delivery_endpoint.js';
+export { EventsBrandSlugScopeMigration } from './0023_events_brand_slug_scope.js';
+export { WebhookDeliveryEndpointHistoryIndexMigration } from './0024_webhook_delivery_endpoint_history_index.js';
+export { PaymentAccountsUniqueMigration } from './0025_payment_accounts_unique.js';

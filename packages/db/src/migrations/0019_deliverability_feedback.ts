@@ -51,7 +51,11 @@ export const DeliverabilityFeedbackMigration: Migration = {
   },
 
   async down(db): Promise<void> {
-    await db.schema.dropIndex('idx_email_provider_events_message').ifExists().execute();
+    await db.schema
+      .dropIndex('idx_email_provider_events_message')
+      .on('email_provider_events')
+      .ifExists()
+      .execute();
     await db.schema.dropTable('email_provider_events').ifExists().execute();
   },
 };

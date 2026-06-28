@@ -107,11 +107,15 @@ export const OAuthGrantsMigration: Migration = {
   },
 
   async down(db): Promise<void> {
-    await db.schema.dropIndex('idx_oauth_access_app').ifExists().execute();
+    await db.schema.dropIndex('idx_oauth_access_app').on('oauth_access_tokens').ifExists().execute();
     await db.schema.dropTable('oauth_access_tokens').ifExists().execute();
-    await db.schema.dropIndex('idx_oauth_refresh_app').ifExists().execute();
+    await db.schema.dropIndex('idx_oauth_refresh_app').on('oauth_refresh_tokens').ifExists().execute();
     await db.schema.dropTable('oauth_refresh_tokens').ifExists().execute();
-    await db.schema.dropIndex('idx_oauth_codes_app').ifExists().execute();
+    await db.schema
+      .dropIndex('idx_oauth_codes_app')
+      .on('oauth_authorization_codes')
+      .ifExists()
+      .execute();
     await db.schema.dropTable('oauth_authorization_codes').ifExists().execute();
   },
 };
