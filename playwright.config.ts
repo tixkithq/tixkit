@@ -38,7 +38,7 @@ const walletPassEnv = useWalletPasses ? createWalletPassEnv(apiUrl) : {};
 const localApiEnv = {
   NODE_ENV: 'development',
   PORT: apiPort,
-  DATABASE_URL: 'postgres://tixkit:tixkit@localhost:5432/tixkit',
+  DATABASE_URL: '***************************************/tixkit',
   REDIS_URL: 'redis://localhost:6379',
   TEMPORAL_ADDRESS: 'localhost:7233',
   TEMPORAL_NAMESPACE: 'default',
@@ -49,6 +49,16 @@ const localApiEnv = {
   STRIPE_SECRET_KEY: stripeSecretKey,
   STRIPE_WEBHOOK_SECRET: stripeWebhookSecret,
   NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY: stripePublishableKey,
+  OTEL_SDK_DISABLED: 'true',
+  QR_SIGNING_SECRET: process.env.QR_SIGNING_SECRET ?? 'ci-qr-signing-secret',
+  OFFLINE_MANIFEST_SIGNING_KEY:
+    process.env.OFFLINE_MANIFEST_SIGNING_KEY ?? 'ci-offline-manifest-signing-key',
+  OFFLINE_MANIFEST_KEY_ID: process.env.OFFLINE_MANIFEST_KEY_ID ?? 'manifest:ci',
+  S3_ENDPOINT: process.env.S3_ENDPOINT ?? 'http://localhost:9000',
+  S3_BUCKET: process.env.S3_BUCKET ?? 'tixkit',
+  S3_ACCESS_KEY_ID: process.env.S3_ACCESS_KEY_ID ?? 'minioadmin',
+  S3_SECRET_ACCESS_KEY: process.env.S3_SECRET_ACCESS_KEY ?? 'minioadmin',
+  S3_REGION: process.env.S3_REGION ?? 'us-east-1',
   ...walletPassEnv,
   CORS_ALLOWED_ORIGINS: [
     checkoutUrl,
@@ -61,13 +71,14 @@ const localApiEnv = {
 };
 const localWorkerEnv = {
   NODE_ENV: 'development',
-  DATABASE_URL: 'postgres://tixkit:tixkit@localhost:5432/tixkit',
+  DATABASE_URL: '***************************************/tixkit',
   REDIS_URL: 'redis://localhost:6379',
   TEMPORAL_ADDRESS: 'localhost:7233',
   TEMPORAL_NAMESPACE: 'default',
   TEMPORAL_TASK_QUEUE: temporalTaskQueue,
   STRIPE_SECRET_KEY: stripeSecretKey,
   NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY: stripePublishableKey,
+  OTEL_SDK_DISABLED: 'true',
   ...walletPassEnv,
 };
 const checkoutPublicEnv = {
