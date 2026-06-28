@@ -1359,7 +1359,7 @@ export async function seedCompensatedOrphanPaymentForSession(input: {
   providerIntentId?: string;
 }): Promise<{ paymentIntentId: string; providerIntentId: string; compensationId: string }> {
   const now = new Date();
-  const idPart = compactIdPart(input.sessionId, 24);
+  const idPart = compactIdPart(input.sessionId, 19);
   const paymentIntentId = `pi_orphan_${idPart}`;
   const providerIntentId = input.providerIntentId ?? `pi_capture_${input.sessionId}`;
   const compensationId = `pcmp_orphan_${idPart}`;

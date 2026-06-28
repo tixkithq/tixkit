@@ -322,7 +322,7 @@ test.describe('paid checkout capture workflow', () => {
       `${checkoutBaseUrl}/checkout/confirmation?sessionId=${session.id}&redirect_status=succeeded`,
     );
 
-    await expect(page.getByRole('heading', { name: 'Checkout expired' })).toBeVisible();
+    await expect(page.getByRole('heading', { level: 1, name: 'Checkout expired' })).toBeVisible();
     await expect(page.getByText('This payment was closed without issuing tickets.')).toBeVisible();
     await expect(page.getByRole('heading', { name: 'Order confirmed' })).toHaveCount(0);
     await expect(page.getByText('Thank you. Your tickets are on the way.')).toHaveCount(0);
