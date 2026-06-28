@@ -64,6 +64,12 @@ describe('BrandingPage', () => {
 
     render(<BrandingPage />);
 
+    expect(
+      await screen.findByText(
+        'Set the primary color for checkout pages, widgets, and wallet passes.',
+      ),
+    ).toBeInTheDocument();
+
     const nameInput = await screen.findByLabelText('Brand Name');
     fireEvent.change(nameInput, { target: { value: 'Festival Ops' } });
     fireEvent.change(screen.getByLabelText('Hex value'), { target: { value: '#123456' } });

@@ -7,6 +7,7 @@ import { join } from 'node:path';
 import { expectNoAxeViolations } from './helpers/axe';
 import { apiBaseUrl, checkoutBaseUrl } from './helpers/env';
 import {
+  devOrganizationId,
   readPromoCheckoutCaptureState,
   readPaidCheckoutCaptureState,
   readWalletPassState,
@@ -85,6 +86,21 @@ function passFieldGroup(passJson: Record<string, unknown>, group: string): unkno
   const eventTicket = passJson.eventTicket;
   if (!eventTicket || typeof eventTicket !== 'object') return undefined;
   return (eventTicket as Record<string, unknown>)[group];
+}
+
+function decodeGoogleWalletPayload(saveUrl: string): {
+  eventTicketClasses: Array<{ issuerName?: string }>;
+  eventTicketObjects: Array<{ hexBackgroundColor?: string }>;
+} {
+  const token = saveUrl.replace('https://pay.google.com/gp/v/save/', '');
+  const [, payload] = token.split('.');
+  const claims = JSON.parse(Buffer.from(payload, 'base64url').toString('utf8')) as {
+    payload: {
+      eventTicketClasses: Array<{ issuerName?: string }>;
+      eventTicketObjects: Array<{ hexBackgroundColor?: string }>;
+    };
+  };
+  return claims.payload;
 }
 
 test.describe('paid checkout capture workflow', () => {
@@ -236,7 +252,36 @@ test.describe('paid checkout capture workflow', () => {
     await requireReachable(page, checkoutBaseUrl, 'checkout app');
 
     const suffix = `wallet-ui-${testInfo.workerIndex}-${Date.now()}`;
-    const { event, ticketType, inventoryPool } = await seedPaidCheckoutEvent(request, suffix);
+    const initialBrand = (await expectJsonResponse(
+      await request.post(`${apiBaseUrl}/v1/brands`, {
+        data: {
+          organizationId: devOrganizationId,
+          name: `Wallet Initial ${suffix}`,
+          slug: `wallet-initial-${suffix}`,
+          theme: { primaryColor: '#222222' },
+          whiteLabel: true,
+        },
+      }),
+      201,
+    )) as { id: string };
+    const configuredBrand = (await expectJsonResponse(
+      await request.patch(`${apiBaseUrl}/v1/brands/${initialBrand.id}`, {
+        data: {
+          name: `Wallet Brand ${suffix}`,
+          theme: { primaryColor: '#0f766e' },
+        },
+      }),
+      200,
+    )) as { id: string; name: string; theme: { primaryColor: string } };
+    expect(configuredBrand).toMatchObject({
+      id: initialBrand.id,
+      name: `Wallet Brand ${suffix}`,
+      theme: { primaryColor: '#0f766e' },
+    });
+
+    const { event, ticketType, inventoryPool } = await seedPaidCheckoutEvent(request, suffix, {
+      brandId: configuredBrand.id,
+    });
 
     await page.goto(`${checkoutBaseUrl}/checkout?eventId=${event.id}`);
     await expect(page.getByRole('heading', { name: event.title })).toBeVisible();
@@ -308,8 +353,8 @@ test.describe('paid checkout capture workflow', () => {
     expect(manifest['pass.json']).toBe(createHash('sha1').update(passJsonBytes).digest('hex'));
     expect(passJson).toMatchObject({
       description: `${event.title} ticket`,
-      organizationName: 'Tixkit E2E',
-      backgroundColor: 'rgb(99, 102, 241)',
+      organizationName: configuredBrand.name,
+      backgroundColor: 'rgb(15, 118, 110)',
     });
     expect(passFieldGroup(passJson, 'primaryFields')).toEqual(
       expect.arrayContaining([expect.objectContaining({ key: 'event', value: event.title })]),
@@ -320,6 +365,13 @@ test.describe('paid checkout capture workflow', () => {
     expect(passFieldGroup(passJson, 'auxiliaryFields')).toEqual(
       expect.arrayContaining([expect.objectContaining({ key: 'holder', value: 'Wallet Buyer' })]),
     );
+    const googlePayload = decodeGoogleWalletPayload(googleHref!);
+    expect(googlePayload.eventTicketClasses[0]).toMatchObject({
+      issuerName: configuredBrand.name,
+    });
+    expect(googlePayload.eventTicketObjects[0]).toMatchObject({
+      hexBackgroundColor: configuredBrand.theme.primaryColor,
+    });
   });
 
   test('applies a hosted promo code and persists discount redemption in local capture mode', async ({

@@ -197,7 +197,7 @@ export function createAppleWalletPass(
     {
       description: `${input.eventTitle} ticket`,
       formatVersion: 1,
-      organizationName: config.organizationName,
+      organizationName: input.brandName || config.organizationName,
       passTypeIdentifier: config.passTypeIdentifier,
       serialNumber: input.ticketId,
       teamIdentifier: config.teamIdentifier,

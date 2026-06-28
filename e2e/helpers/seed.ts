@@ -3,8 +3,8 @@ import { createDb, type Database } from '../../packages/db/src/client';
 import { apiBaseUrl } from './env';
 
 const devTenantId = 'tnt_dev_local';
-const devOrganizationId = 'org_dev_local';
-const devBrandId = 'brd_dev_local';
+export const devOrganizationId = 'org_dev_local';
+export const devBrandId = 'brd_dev_local';
 
 export type SeededCheckoutEvent = {
   event: { id: string; title: string };
@@ -265,6 +265,7 @@ export async function seedFreeCheckoutEvent(
 export async function seedPaidCheckoutEvent(
   request: APIRequestContext,
   suffix: string,
+  options: { brandId?: string } = {},
 ): Promise<SeededPaidCheckoutEvent> {
   await seedTicketIssueNotificationPrerequisites(suffix);
 
@@ -273,7 +274,7 @@ export async function seedPaidCheckoutEvent(
     await request.post(`${apiBaseUrl}/v1/events`, {
       data: {
         organizationId: devOrganizationId,
-        brandId: devBrandId,
+        brandId: options.brandId ?? devBrandId,
         slug: `e2e-paid-checkout-${suffix}`,
         title: eventTitle,
         description: 'Seeded by Playwright for paid checkout capture-mode coverage.',

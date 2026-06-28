@@ -254,7 +254,7 @@ export default function BrandingPage() {
             <CardHeader>
               <CardTitle>Brand Colors</CardTitle>
               <CardDescription>
-                Set the primary color for your checkout pages and widgets.
+                Set the primary color for checkout pages, widgets, and wallet passes.
               </CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">

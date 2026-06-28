@@ -80,10 +80,14 @@ describe('wallet pass generation', () => {
     expect(raw.signature.byteLength).toBeGreaterThan(64);
 
     const passJson = JSON.parse(raw['pass.json'].toString('utf8')) as {
+      backgroundColor: string;
+      organizationName: string;
       serialNumber: string;
       barcodes: Array<{ format: string; message: string; altText: string }>;
     };
     expect(passJson.serialNumber).toBe('tkt_test');
+    expect(passJson.organizationName).toBe('Northstar Events');
+    expect(passJson.backgroundColor).toBe('rgb(31, 111, 235)');
     expect(passJson.barcodes[0]).toMatchObject({
       format: 'PKBarcodeFormatQR',
       message: 'tixkit:signed:qr',
@@ -121,8 +125,12 @@ describe('wallet pass generation', () => {
       typ: string;
       payload: {
         eventTicketObjects: Array<{
+          hexBackgroundColor: string;
           barcode: { type: string; value: string; alternateText: string };
           ticketNumber: string;
+        }>;
+        eventTicketClasses: Array<{
+          issuerName: string;
         }>;
       };
     };
@@ -137,6 +145,12 @@ describe('wallet pass generation', () => {
       type: 'QR_CODE',
       value: 'tixkit:signed:qr',
       alternateText: 'TK-TEST',
+    });
+    expect(claims.payload.eventTicketClasses[0]).toMatchObject({
+      issuerName: 'Northstar Events',
+    });
+    expect(claims.payload.eventTicketObjects[0]).toMatchObject({
+      hexBackgroundColor: '#1f6feb',
     });
   });
 });
