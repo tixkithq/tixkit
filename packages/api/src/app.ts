@@ -3,7 +3,7 @@ import cors from '@fastify/cors';
 import helmet from '@fastify/helmet';
 import rateLimit from '@fastify/rate-limit';
 import { createDb, type Database } from '@tixkit/db';
-import { pinoRedactionPaths } from '@tixkit/shared';
+import { pinoRedactionPaths, redactErrorFields, redactString } from '@tixkit/shared';
 import { config } from './config/index.js';
 import { ClerkAuthService, createAuthMiddleware } from './auth/clerk.js';
 import { createAuthProvider } from './auth/providers.js';
@@ -73,13 +73,13 @@ export function registerErrorHandler(app: FastifyInstance): void {
       return reply.status(statusCode).send({
         error: {
           code: err.code ?? (statusCode >= 500 ? 'SERVICE_UNAVAILABLE' : 'VALIDATION_ERROR'),
-          message: err.message,
+          message: redactString(err.message),
           requestId,
         },
       });
     }
 
-    request.log.error({ err: error, requestId }, 'Unhandled error');
+    request.log.error({ err: redactErrorFields(error), requestId }, 'Unhandled error');
     return reply.status(500).send({
       error: {
         code: 'INTERNAL_ERROR',
@@ -88,6 +88,18 @@ export function registerErrorHandler(app: FastifyInstance): void {
       },
     });
   });
+}
+
+export function registerHealthRoute(app: FastifyInstance): void {
+  app.get(
+    '/health',
+    {
+      config: {
+        rateLimit: false,
+      },
+    },
+    async () => ({ status: 'ok', timestamp: new Date().toISOString() }),
+  );
 }
 
 export async function buildApp(): Promise<FastifyInstance> {
@@ -157,7 +169,7 @@ export async function buildApp(): Promise<FastifyInstance> {
   registerErrorHandler(app);
 
   // Health check
-  app.get('/health', async () => ({ status: 'ok', timestamp: new Date().toISOString() }));
+  registerHealthRoute(app);
   registerMetricsRoute(app, observability, () => db);
 
   // Public webhook routes (no auth, signature-verified)

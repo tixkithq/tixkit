@@ -3,6 +3,7 @@ import {
   createTixkitMetrics,
   createTelemetryResource,
   redactObject,
+  redactString,
   sanitizeSpanAttributes,
   startOpenTelemetry,
 } from '../observability.js';
@@ -54,6 +55,14 @@ describe('observability redaction', () => {
       'url.full':
         'https://checkout.example.test/return?payment_intent_client_secret=[REDACTED]&state=safe&code=[REDACTED]#token=[REDACTED]&client_secret=[REDACTED]',
     });
+  });
+
+  it('redacts sensitive values from exception strings', () => {
+    expect(
+      redactString(
+        'failed for buyer@example.com with Bearer tk_live_secret and client_secret=pi_secret',
+      ),
+    ).toBe('failed for [REDACTED] with Bearer [REDACTED] and client_secret=[REDACTED]');
   });
 });
 

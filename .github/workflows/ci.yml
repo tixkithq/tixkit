@@ -217,6 +217,7 @@ jobs:
           echo "Temporal did not become ready" >&2
           exit 1
       - run: bun run db:migrate
+      - run: bunx turbo run build --filter=@tixkit/db
       - run: bun run test:integration
 
   integration-tests-mysql:
@@ -281,6 +282,7 @@ jobs:
           echo "Temporal did not become ready" >&2
           exit 1
       - run: bun run db:migrate:mysql
+      - run: bunx turbo run build --filter=@tixkit/db
       - name: MySQL Tier 1 correctness suites
         run: |
           cd packages/api

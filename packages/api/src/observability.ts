@@ -4,6 +4,7 @@ import type { Database } from '@tixkit/db';
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import {
   createTixkitMetrics,
+  redactError,
   sanitizeSpanAttributes,
   startOpenTelemetry,
   type TixkitMetrics,
@@ -57,8 +58,12 @@ export function registerObservability(app: FastifyInstance, observability: ApiOb
   });
 
   app.addHook('onError', (request, _reply, error, done) => {
-    request.observability?.span.recordException(error);
-    request.observability?.span.setStatus({ code: SpanStatusCode.ERROR, message: error.message });
+    const sanitizedError = redactError(error);
+    request.observability?.span.recordException(sanitizedError);
+    request.observability?.span.setStatus({
+      code: SpanStatusCode.ERROR,
+      message: sanitizedError.message,
+    });
     done();
   });
 
@@ -79,21 +84,29 @@ export function registerMetricsRoute(
   const requireBearerToken =
     options.requireBearerToken ?? (!isLocalMetricsEnvironment || bearerToken.length > 0);
 
-  app.get('/metrics', async (request, reply) => {
-    if (requireBearerToken && !isAuthorizedMetricsRequest(request, bearerToken)) {
-      return reply.status(401).send({
-        error: {
-          code: 'UNAUTHORIZED',
-          message: 'Unauthorized',
-          requestId: request.id,
-        },
-      });
-    }
+  app.get(
+    '/metrics',
+    {
+      config: {
+        rateLimit: false,
+      },
+    },
+    async (request, reply) => {
+      if (requireBearerToken && !isAuthorizedMetricsRequest(request, bearerToken)) {
+        return reply.status(401).send({
+          error: {
+            code: 'UNAUTHORIZED',
+            message: 'Unauthorized',
+            requestId: request.id,
+          },
+        });
+      }
 
-    await refreshInventoryHoldGauge(observability.metrics, dbProvider());
-    const body = await observability.metrics.registry.metrics();
-    return reply.header('Content-Type', observability.metrics.contentType).send(body);
-  });
+      await refreshInventoryHoldGauge(observability.metrics, dbProvider());
+      const body = await observability.metrics.registry.metrics();
+      return reply.header('Content-Type', observability.metrics.contentType).send(body);
+    },
+  );
 }
 
 function isAuthorizedMetricsRequest(request: FastifyRequest, bearerToken: string): boolean {

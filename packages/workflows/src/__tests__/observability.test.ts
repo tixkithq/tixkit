@@ -3,9 +3,19 @@ import { SpanKind, SpanStatusCode } from '@opentelemetry/api';
 import type { ReadableSpan, SpanExporter } from '@opentelemetry/sdk-trace-base';
 import { createTixkitMetrics } from '@tixkit/shared';
 import { resourceFromAttributes } from '@opentelemetry/resources';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { TixkitActivityMetricsInterceptor } from '../observability.js';
 import { createWorkflowExporterSink } from '../otel-workflow-exporter.js';
+
+vi.mock('@temporalio/interceptors-opentelemetry', () => ({
+  OpenTelemetryActivityInboundInterceptor: function OpenTelemetryActivityInboundInterceptor() {},
+  OpenTelemetryWorkflowInboundInterceptor: function OpenTelemetryWorkflowInboundInterceptor() {},
+}));
+
+vi.mock('@tixkit/shared', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@tixkit/shared')>();
+  return { ...actual, startOpenTelemetry: () => ({ shutdown: async () => undefined }) };
+});
 
 function activityContext(activityType: string): ActivityContext {
   return {

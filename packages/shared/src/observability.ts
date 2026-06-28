@@ -26,7 +26,7 @@ const EMAIL_PATTERN = /[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/gi;
 const SECRET_VALUE_PATTERN =
   /(bearer\s+)[A-Za-z0-9._~+/=-]+|(sk|pk|rk|tk|whsec|telnyx)_[A-Za-z0-9._~+/=-]+/gi;
 const SENSITIVE_QUERY_PARAM_PATTERN =
-  /(^|[?&#])((?:payment_intent_)?client_secret|code|token)=([^&#\s]*)/gi;
+  /(^|[?&#\s])((?:payment_intent_)?client_secret|code|token)=([^&#\s]*)/gi;
 
 let sdk: NodeSDK | undefined;
 
@@ -116,10 +116,11 @@ export async function withSpan<T>(
       span.setStatus({ code: SpanStatusCode.OK });
       return result;
     } catch (error) {
-      span.recordException(error as Error);
+      const sanitizedError = redactError(error);
+      span.recordException(sanitizedError);
       span.setStatus({
         code: SpanStatusCode.ERROR,
-        message: error instanceof Error ? error.message : 'Unknown error',
+        message: sanitizedError.message,
       });
       throw error;
     } finally {
@@ -147,6 +148,31 @@ export function redactObject<T>(value: T, depth = 0): T {
     redacted[key] = shouldRedactKey(key) ? REDACTED : redactObject(entry, depth + 1);
   }
   return redacted as T;
+}
+
+export function redactError(error: unknown): Error {
+  if (!(error instanceof Error)) return new Error(redactString(String(error)));
+
+  const sanitized = new Error(redactString(error.message));
+  sanitized.name = redactString(error.name);
+  sanitized.stack = error.stack ? redactString(error.stack) : undefined;
+  return sanitized;
+}
+
+export function redactErrorFields(error: unknown): Record<string, unknown> {
+  if (!(error instanceof Error)) return { message: redactString(String(error)) };
+
+  const record = error as Error & {
+    code?: unknown;
+    statusCode?: unknown;
+  };
+  return {
+    type: redactString(error.name),
+    message: redactString(error.message),
+    stack: error.stack ? redactString(error.stack) : undefined,
+    code: typeof record.code === 'string' ? redactString(record.code) : redactObject(record.code),
+    statusCode: redactObject(record.statusCode),
+  };
 }
 
 export function createTixkitMetrics(serviceName: string) {
@@ -304,7 +330,7 @@ function redactAttributeValue(
   return String(value);
 }
 
-function redactString(value: string): string {
+export function redactString(value: string): string {
   return value
     .replace(EMAIL_PATTERN, REDACTED)
     .replace(SENSITIVE_QUERY_PARAM_PATTERN, (_match, prefix: string, name: string) => {

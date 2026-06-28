@@ -1,4 +1,5 @@
 import Fastify from 'fastify';
+import rateLimit from '@fastify/rate-limit';
 import { trace, type Span, type SpanAttributes, type Tracer } from '@opentelemetry/api';
 import { createTixkitMetrics } from '@tixkit/shared';
 import type { Database } from '@tixkit/db';
@@ -96,6 +97,54 @@ describe('API observability', () => {
     }
   });
 
+  it('redacts error messages recorded on request spans', async () => {
+    const recordedExceptions: unknown[] = [];
+    const recordedStatuses: unknown[] = [];
+    const span = {
+      setAttributes: vi.fn(() => span as unknown as Span),
+      setStatus: vi.fn((status: unknown) => {
+        recordedStatuses.push(status);
+        return span as unknown as Span;
+      }),
+      recordException: vi.fn((error: unknown) => {
+        recordedExceptions.push(error);
+        return span as unknown as Span;
+      }),
+      end: vi.fn(),
+    };
+    const startSpan: Tracer['startSpan'] = vi.fn(() => span as unknown as Span);
+    const getTracerSpy = vi.spyOn(trace, 'getTracer').mockReturnValue({
+      startSpan,
+    } as Tracer);
+    const app = Fastify({ logger: false, genReqId: () => 'req_secret_error' });
+    const observability: ApiObservability = {
+      metrics: createTixkitMetrics('test-api-secret-error'),
+    };
+
+    try {
+      registerObservability(app, observability);
+      app.get('/boom', async () => {
+        throw new Error('provider failed for buyer@example.com with Bearer tk_live_secret');
+      });
+
+      const response = await app.inject({ method: 'GET', url: '/boom' });
+      const recordedError = recordedExceptions[0] as Error;
+      const serializedTelemetry = JSON.stringify({
+        exceptionMessage: recordedError.message,
+        exceptionStack: recordedError.stack,
+        recordedStatuses,
+      });
+
+      expect(response.statusCode).toBe(500);
+      expect(serializedTelemetry).not.toContain('buyer@example.com');
+      expect(serializedTelemetry).not.toContain('tk_live_secret');
+      expect(serializedTelemetry).toContain('[REDACTED]');
+    } finally {
+      getTracerSpy.mockRestore();
+      await app.close();
+    }
+  });
+
   it('refreshes active inventory hold gauge before metrics are scraped', async () => {
     const app = Fastify({ logger: false });
     const observability: ApiObservability = { metrics: createTixkitMetrics('test-api-metrics') };
@@ -155,6 +204,40 @@ describe('API observability', () => {
     );
     expect(dbProvider).toHaveBeenCalledTimes(1);
 
+    await app.close();
+  });
+
+  it('exempts authorized metrics scrapes from global rate limiting', async () => {
+    const app = Fastify({ logger: false, genReqId: () => 'req_metrics_rate_limit' });
+    await app.register(rateLimit, { max: 1, timeWindow: '1 minute' });
+    const observability: ApiObservability = {
+      metrics: createTixkitMetrics('test-api-metrics-rate-limit'),
+    };
+    const dbProvider = vi.fn(() => createHoldDb([{ quantity: 7 }]));
+    registerMetricsRoute(app, observability, dbProvider, {
+      bearerToken: 'metrics-token',
+      requireBearerToken: true,
+    });
+    app.get('/normal', async () => ({ ok: true }));
+
+    const firstMetrics = await app.inject({
+      method: 'GET',
+      url: '/metrics',
+      headers: { authorization: 'Bearer metrics-token' },
+    });
+    const secondMetrics = await app.inject({
+      method: 'GET',
+      url: '/metrics',
+      headers: { authorization: 'Bearer metrics-token' },
+    });
+    const firstNormal = await app.inject({ method: 'GET', url: '/normal' });
+    const secondNormal = await app.inject({ method: 'GET', url: '/normal' });
+
+    expect(firstMetrics.statusCode).toBe(200);
+    expect(secondMetrics.statusCode).toBe(200);
+    expect(firstNormal.statusCode).toBe(200);
+    expect(secondNormal.statusCode).toBe(429);
+    expect(dbProvider).toHaveBeenCalledTimes(2);
     await app.close();
   });
 

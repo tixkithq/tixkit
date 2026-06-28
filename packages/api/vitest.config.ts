@@ -14,5 +14,6 @@ export default defineConfig({
     environment: 'node',
     include: ['src/__tests__/**/*.test.{ts,tsx}'],
     globalSetup: ['./src/__tests__/integration/migration-setup.ts'],
+    setupFiles: ['./src/__tests__/integration/otel-interop-fix.ts'],
   },
 });

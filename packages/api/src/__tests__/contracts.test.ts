@@ -1,7 +1,8 @@
 import Fastify from 'fastify';
+import rateLimit from '@fastify/rate-limit';
 import { describe, expect, it } from 'vitest';
 import { ValidationError } from '@tixkit/domain';
-import { registerErrorHandler } from '../app.js';
+import { registerErrorHandler, registerHealthRoute } from '../app.js';
 import { pageEnvelope, parsePagination } from '../http/contracts.js';
 
 describe('API contract helpers', () => {
@@ -59,6 +60,23 @@ describe('API error envelope', () => {
     await app.close();
   });
 
+  it('redacts exposed exception messages in the error envelope', async () => {
+    const app = Fastify({ logger: false, genReqId: () => 'req_contract' });
+    registerErrorHandler(app);
+    app.get('/validation', async () => {
+      throw new ValidationError('buyer buyer@example.com used token=tk_live_secret');
+    });
+
+    const response = await app.inject({ method: 'GET', url: '/validation' });
+    const body = response.json();
+
+    expect(response.statusCode).toBe(400);
+    expect(body.error.message).toBe('buyer [REDACTED] used token=[REDACTED]');
+    expect(JSON.stringify(body)).not.toContain('buyer@example.com');
+    expect(JSON.stringify(body)).not.toContain('tk_live_secret');
+    await app.close();
+  });
+
   it('serializes unhandled errors without leaking details', async () => {
     const app = Fastify({ logger: false, genReqId: () => 'req_contract' });
     registerErrorHandler(app);
@@ -76,6 +94,49 @@ describe('API error envelope', () => {
         requestId: 'req_contract',
       },
     });
+    await app.close();
+  });
+
+  it('logs sanitized unhandled error details', async () => {
+    const logs: string[] = [];
+    const app = Fastify({
+      logger: {
+        stream: {
+          write: (message) => logs.push(message),
+        },
+      },
+      genReqId: () => 'req_contract',
+    });
+    registerErrorHandler(app);
+    app.get('/internal', async () => {
+      throw new Error('provider failed for buyer@example.com with Bearer tk_live_secret');
+    });
+
+    const response = await app.inject({ method: 'GET', url: '/internal' });
+    const serializedLogs = logs.join('');
+
+    expect(response.statusCode).toBe(500);
+    expect(serializedLogs).not.toContain('buyer@example.com');
+    expect(serializedLogs).not.toContain('tk_live_secret');
+    expect(serializedLogs).toContain('[REDACTED]');
+    await app.close();
+  });
+
+  it('exempts health checks from global rate limiting', async () => {
+    const app = Fastify({ logger: false });
+    await app.register(rateLimit, { max: 1, timeWindow: '1 minute' });
+    registerHealthRoute(app);
+    app.get('/normal', async () => ({ ok: true }));
+
+    const firstHealth = await app.inject({ method: 'GET', url: '/health' });
+    const secondHealth = await app.inject({ method: 'GET', url: '/health' });
+    const firstNormal = await app.inject({ method: 'GET', url: '/normal' });
+    const secondNormal = await app.inject({ method: 'GET', url: '/normal' });
+
+    expect(firstHealth.statusCode).toBe(200);
+    expect(secondHealth.statusCode).toBe(200);
+    expect(firstNormal.statusCode).toBe(200);
+    expect(secondNormal.statusCode).toBe(429);
     await app.close();
   });
 });
