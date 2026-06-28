@@ -1198,6 +1198,28 @@ describe('webhookDeliveryWorkflow', () => {
     expect(mockState.sleeps).toEqual(['5 seconds', '10 seconds']);
   });
 
+  it('passes replay nonce through to delivery activities', async () => {
+    const attempts: Array<Record<string, unknown>> = [];
+    setActivity('deliverWebhookActivity', async (input) => {
+      attempts.push(input);
+      return okResult({ statusCode: 204, response: '' });
+    });
+
+    const result = await webhookDeliveryWorkflow(
+      makeWebhookDeliveryInput({ replayNonce: 'rpl_1' }),
+    );
+
+    expect(result.status).toBe('delivered');
+    expect(attempts).toEqual([
+      expect.objectContaining({
+        endpointId: 'wh_1',
+        eventId: 'whe_1',
+        replayNonce: 'rpl_1',
+        attempt: 1,
+      }),
+    ]);
+  });
+
   it('dead-letters non-retryable delivery failures without sleeping for retries', async () => {
     const attempts: Array<Record<string, unknown>> = [];
     setActivity('deliverWebhookActivity', async (input) => {

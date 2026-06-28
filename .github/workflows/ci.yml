@@ -192,11 +192,6 @@ jobs:
           POSTGRES_SEEDS: postgres
           POSTGRES_USER: tixkit
           POSTGRES_PWD: tixkit
-        options: >-
-          --health-cmd "bash -c 'cat < /dev/null > /dev/tcp/localhost/7233'"
-          --health-interval 5s
-          --health-timeout 3s
-          --health-retries 30
     env:
       DATABASE_URL: postgres://tixkit:tixkit@localhost:5432/tixkit
       REDIS_URL: redis://localhost:6379
@@ -210,6 +205,17 @@ jobs:
         with:
           node-version: 22
       - run: bun install --frozen-lockfile
+      - name: Wait for Temporal
+        run: |
+          for i in $(seq 1 60); do
+            if nc -z localhost 7233 2>/dev/null; then
+              echo "Temporal ready"
+              exit 0
+            fi
+            echo "Waiting for Temporal... ($i)"; sleep 5
+          done
+          echo "Temporal did not become ready" >&2
+          exit 1
       - run: bun run db:migrate
       - run: bun run test:integration
 
@@ -248,13 +254,8 @@ jobs:
           DB: mysql8
           DB_PORT: 3306
           MYSQL_SEEDS: mysql
-          MYSQL_USER: tixkit
+          MYSQL_USER: root
           MYSQL_PWD: tixkit
-        options: >-
-          --health-cmd "bash -c 'cat < /dev/null > /dev/tcp/localhost/7233'"
-          --health-interval 5s
-          --health-timeout 3s
-          --health-retries 30
     env:
       DATABASE_URL_MYSQL: mysql://tixkit:tixkit@localhost:3306/tixkit
       REDIS_URL: redis://localhost:6379
@@ -268,6 +269,17 @@ jobs:
         with:
           node-version: 22
       - run: bun install --frozen-lockfile
+      - name: Wait for Temporal
+        run: |
+          for i in $(seq 1 60); do
+            if nc -z localhost 7233 2>/dev/null; then
+              echo "Temporal ready"
+              exit 0
+            fi
+            echo "Waiting for Temporal... ($i)"; sleep 5
+          done
+          echo "Temporal did not become ready" >&2
+          exit 1
       - run: bun run db:migrate:mysql
       - name: MySQL Tier 1 correctness suites
         run: |

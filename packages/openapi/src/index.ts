@@ -5410,6 +5410,7 @@ export const openApiSpec = {
                           deliveryId: { type: 'string' },
                           endpointId: { type: ['string', 'null'] },
                           requestedEndpointId: { type: 'string' },
+                          deliveryKey: { type: 'string' },
                           eventType: { type: 'string' },
                           status: { type: 'string' },
                           statusCode: { type: 'integer' },

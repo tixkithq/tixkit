@@ -1,0 +1,45 @@
+<!doctype html>
+<html>
+  <head>
+    <base href="$FLUTTER_BASE_HREF" />
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Tixkit Flutter Demo</title>
+    <script>
+      var serviceWorkerVersion = null;
+      var scriptLoaded = false;
+      function loadMainDartJs() {
+        if (scriptLoaded) return;
+        scriptLoaded = true;
+        var scriptTag = document.createElement('script');
+        scriptTag.src = 'main.dart.js';
+        scriptTag.type = 'application/javascript';
+        document.body.append(scriptTag);
+      }
+      if ('serviceWorker' in navigator) {
+        window.addEventListener('load', function () {
+          navigator.serviceWorker.register('flutter_service_worker.js');
+          navigator.serviceWorker.getRegistration().then(function (registration) {
+            if (registration) {
+              registration.addEventListener('updatefound', function () {
+                var installingWorker = registration.installing;
+                installingWorker.addEventListener('statechange', function () {
+                  if (
+                    installingWorker.state === 'installed' &&
+                    !navigator.serviceWorker.controller
+                  ) {
+                    loadMainDartJs();
+                  }
+                });
+              });
+            }
+          });
+          setTimeout(loadMainDartJs, 3000);
+        });
+      } else {
+        loadMainDartJs();
+      }
+    </script>
+  </head>
+  <body></body>
+</html>

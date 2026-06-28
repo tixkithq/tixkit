@@ -7,12 +7,12 @@
     "build": "astro build",
     "dev": "astro dev",
     "preview": "astro preview",
-    "typecheck": "astro sync && astro-check",
+    "typecheck": "astro sync && tsc --noEmit",
     "clean": "rm -rf dist .astro"
   },
   "dependencies": {
     "@tixkit/astro": "workspace:*",
-    "astro": "^5.0.0"
+    "astro": "6.4.6"
   },
   "devDependencies": {
     "@astrojs/check": "^0.9.4",

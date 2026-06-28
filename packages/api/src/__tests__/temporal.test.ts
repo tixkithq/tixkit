@@ -119,6 +119,7 @@ describe('TemporalClient webhook delivery', () => {
       unknown,
       { args: unknown[] },
     ];
+    expect(startOptions.args[0]).toMatchObject({ replayNonce: 'rpl_1' });
     expect(startOptions.args[0]).not.toHaveProperty('secret');
   });
 });

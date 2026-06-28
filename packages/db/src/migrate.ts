@@ -27,6 +27,7 @@ import { EventsBrandSlugScopeMigration } from './migrations/0023_events_brand_sl
 import { WebhookDeliveryEndpointHistoryIndexMigration } from './migrations/0024_webhook_delivery_endpoint_history_index.js';
 import { PaymentAccountsUniqueMigration } from './migrations/0025_payment_accounts_unique.js';
 import { WebhookDeliveryAttemptIdentityMigration } from './migrations/0026_webhook_delivery_attempt_identity.js';
+import { WebhookDeliveryReplayIdentityMigration } from './migrations/0027_webhook_delivery_replay_identity.js';
 
 const INITIAL_MIGRATION_NAME = '0001_initial';
 const MIGRATION_TABLE = 'kysely_migration';
@@ -167,6 +168,7 @@ class TixkitMigrationProvider implements MigrationProvider {
       '0024_webhook_delivery_endpoint_history_index': WebhookDeliveryEndpointHistoryIndexMigration,
       '0025_payment_accounts_unique': PaymentAccountsUniqueMigration,
       '0026_webhook_delivery_attempt_identity': WebhookDeliveryAttemptIdentityMigration,
+      '0027_webhook_delivery_replay_identity': WebhookDeliveryReplayIdentityMigration,
     };
   }
 }

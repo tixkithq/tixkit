@@ -97,6 +97,7 @@ export class WebhookDeliveryRepository extends BaseRepository {
   async create(input: {
     endpointId: string | null;
     requestedEndpointId?: string;
+    deliveryKey?: string;
     eventId: string;
     attempt: number;
     status?: string;
@@ -106,6 +107,7 @@ export class WebhookDeliveryRepository extends BaseRepository {
     nextRetryAt?: Date | null;
   }) {
     const requestedEndpointId = input.requestedEndpointId ?? input.endpointId;
+    const deliveryKey = input.deliveryKey ?? 'live';
     if (!requestedEndpointId) {
       throw new Error('Webhook delivery requires a requested endpoint id');
     }
@@ -113,6 +115,7 @@ export class WebhookDeliveryRepository extends BaseRepository {
     const existingDelivery = await this.findByAttempt({
       eventId: input.eventId,
       requestedEndpointId,
+      deliveryKey,
       attempt: input.attempt,
     });
     if (existingDelivery) {
@@ -128,6 +131,7 @@ export class WebhookDeliveryRepository extends BaseRepository {
           id,
           endpoint_id: input.endpointId,
           requested_endpoint_id: requestedEndpointId,
+          delivery_key: deliveryKey,
           event_id: input.eventId,
           attempt: input.attempt,
           status_code: input.statusCode ?? null,
@@ -147,6 +151,7 @@ export class WebhookDeliveryRepository extends BaseRepository {
       const delivery = await this.findByAttempt({
         eventId: input.eventId,
         requestedEndpointId,
+        deliveryKey,
         attempt: input.attempt,
       });
       if (!delivery) {
@@ -164,11 +169,13 @@ export class WebhookDeliveryRepository extends BaseRepository {
   async claimAttempt(input: {
     endpointId: string | null;
     requestedEndpointId?: string;
+    deliveryKey?: string;
     eventId: string;
     attempt: number;
     leaseExpiresAt: Date;
   }) {
     const requestedEndpointId = input.requestedEndpointId ?? input.endpointId;
+    const deliveryKey = input.deliveryKey ?? 'live';
     if (!requestedEndpointId) {
       throw new Error('Webhook delivery claim requires a requested endpoint id');
     }
@@ -176,6 +183,7 @@ export class WebhookDeliveryRepository extends BaseRepository {
     const delivery = await this.create({
       endpointId: input.endpointId,
       requestedEndpointId,
+      deliveryKey,
       eventId: input.eventId,
       attempt: input.attempt,
     });
@@ -207,18 +215,25 @@ export class WebhookDeliveryRepository extends BaseRepository {
       (await this.findByAttempt({
         eventId: input.eventId,
         requestedEndpointId,
+        deliveryKey,
         attempt: input.attempt,
       })) ?? delivery;
 
     return { claimed, delivery: currentDelivery };
   }
 
-  async findByAttempt(input: { eventId: string; requestedEndpointId: string; attempt: number }) {
+  async findByAttempt(input: {
+    eventId: string;
+    requestedEndpointId: string;
+    deliveryKey?: string;
+    attempt: number;
+  }) {
     return this.db
       .selectFrom('webhook_deliveries')
       .selectAll()
       .where('event_id', '=', input.eventId)
       .where('requested_endpoint_id', '=', input.requestedEndpointId)
+      .where('delivery_key', '=', input.deliveryKey ?? 'live')
       .where('attempt', '=', input.attempt)
       .executeTakeFirst();
   }

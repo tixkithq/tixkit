@@ -28,6 +28,10 @@ const webhookDeliveryAttemptIdentityMigrationPath = resolve(
   migrationDir,
   '0026_webhook_delivery_attempt_identity.ts',
 );
+const webhookDeliveryReplayIdentityMigrationPath = resolve(
+  migrationDir,
+  '0027_webhook_delivery_replay_identity.ts',
+);
 const originalDbDriver = process.env.DB_DRIVER;
 
 type MarketingIntegrationSeedRow = {
@@ -45,10 +49,21 @@ type PaymentAccountSeedRow = {
   updated_at: string;
 };
 
+type BrandSeedRow = {
+  id: string;
+  payment_account_id: string | null;
+};
+
+type PaymentIntentSeedRow = {
+  id: string;
+  payment_account_id: string | null;
+};
+
 type WebhookDeliverySeedRow = {
   id: string;
   event_id: string;
   requested_endpoint_id: string;
+  delivery_key?: string;
   attempt: number;
   status: string;
   created_at: string;
@@ -99,9 +114,19 @@ class FakeCreateIndexBuilder {
 class FakePaymentAccountsDb {
   readonly createdIndexes: CreatedIndex[] = [];
   readonly rawSqlStatements: string[] = [];
+  brands: BrandSeedRow[];
+  paymentIntents: PaymentIntentSeedRow[];
   rows: PaymentAccountSeedRow[];
   readonly schema = {
     createIndex: (indexName: string) => new FakeCreateIndexBuilder(this, indexName),
+    alterTable: (_tableName: string) => ({
+      addColumn: (_columnName: string, _dataType: string, _callback: unknown) => ({
+        execute: async () => undefined,
+      }),
+      dropColumn: (_columnName: string) => ({
+        execute: async () => undefined,
+      }),
+    }),
     dropIndex: (indexName: string) => ({
       on: (tableName: string) => ({
         ifExists: () => ({
@@ -118,15 +143,35 @@ class FakePaymentAccountsDb {
     }),
   };
 
-  constructor(rows: PaymentAccountSeedRow[]) {
+  constructor(
+    rows: PaymentAccountSeedRow[],
+    options: {
+      brands?: BrandSeedRow[];
+      paymentIntents?: PaymentIntentSeedRow[];
+    } = {},
+  ) {
     this.rows = [...rows];
+    this.brands = [...(options.brands ?? [])];
+    this.paymentIntents = [...(options.paymentIntents ?? [])];
   }
 
   executeRawSql(statement: string): void {
     this.rawSqlStatements.push(statement);
 
-    if (statement.includes('ranked_payment_accounts')) {
-      this.dedupePaymentAccounts();
+    const duplicateKey = this.paymentAccountDuplicateKey(statement);
+    if (!duplicateKey) {
+      return;
+    }
+
+    if (statement.includes('update brands')) {
+      this.remapBrandsFromDuplicatePaymentAccounts(duplicateKey);
+    }
+
+    if (
+      statement.includes('delete payment_accounts') ||
+      statement.includes('delete from payment_accounts')
+    ) {
+      this.deleteDuplicatePaymentAccounts(duplicateKey);
     }
   }
 
@@ -150,31 +195,84 @@ class FakePaymentAccountsDb {
     this.createdIndexes.push(createdIndex);
   }
 
-  private dedupePaymentAccounts(): void {
-    const canonicalIds = new Set<string>();
-    const rowsByOrganizationProvider = new Map<string, PaymentAccountSeedRow[]>();
-
-    for (const row of this.rows) {
-      const key = JSON.stringify([row.organization_id, row.provider]);
-      const rows = rowsByOrganizationProvider.get(key) ?? [];
-      rows.push(row);
-      rowsByOrganizationProvider.set(key, rows);
+  private paymentAccountDuplicateKey(
+    statement: string,
+  ): 'organization-provider' | 'provider-account' | null {
+    if (statement.includes('partition by provider, provider_account_id')) {
+      return 'provider-account';
     }
 
-    for (const rows of rowsByOrganizationProvider.values()) {
+    if (statement.includes('partition by organization_id, provider')) {
+      return 'organization-provider';
+    }
+
+    return null;
+  }
+
+  private remapBrandsFromDuplicatePaymentAccounts(
+    duplicateKey: 'organization-provider' | 'provider-account',
+  ): void {
+    const canonicalIdsByDuplicateId = this.canonicalIdsByDuplicateId(duplicateKey);
+
+    this.brands = this.brands.map((brand) => ({
+      ...brand,
+      payment_account_id:
+        brand.payment_account_id === null
+          ? null
+          : (canonicalIdsByDuplicateId.get(brand.payment_account_id) ?? brand.payment_account_id),
+    }));
+  }
+
+  private deleteDuplicatePaymentAccounts(
+    duplicateKey: 'organization-provider' | 'provider-account',
+  ): void {
+    const canonicalIdsByDuplicateId = this.canonicalIdsByDuplicateId(duplicateKey);
+
+    this.rows = this.rows.filter(
+      (row) => !canonicalIdsByDuplicateId.has(row.id) || this.hasPaymentIntent(row.id),
+    );
+  }
+
+  private canonicalIdsByDuplicateId(
+    duplicateKey: 'organization-provider' | 'provider-account',
+  ): Map<string, string> {
+    const canonicalIdsByDuplicateId = new Map<string, string>();
+    const rowsByDuplicateKey = new Map<string, PaymentAccountSeedRow[]>();
+
+    for (const row of this.rows) {
+      const key =
+        duplicateKey === 'provider-account'
+          ? JSON.stringify([row.provider, row.provider_account_id])
+          : JSON.stringify([row.organization_id, row.provider]);
+      const rows = rowsByDuplicateKey.get(key) ?? [];
+      rows.push(row);
+      rowsByDuplicateKey.set(key, rows);
+    }
+
+    for (const rows of rowsByDuplicateKey.values()) {
       // eslint-disable-next-line unicorn/no-array-sort -- ES2023 toSorted is not available in this package's TS lib target.
       const [canonicalRow] = [...rows].sort((a, b) => {
+        const paymentIntentReferenceDifference =
+          Number(this.hasPaymentIntent(b.id)) - Number(this.hasPaymentIntent(a.id));
+        if (paymentIntentReferenceDifference !== 0) return paymentIntentReferenceDifference;
+
         const updatedAtDifference = Date.parse(b.updated_at) - Date.parse(a.updated_at);
 
         return updatedAtDifference === 0 ? b.id.localeCompare(a.id) : updatedAtDifference;
       });
 
-      if (canonicalRow) {
-        canonicalIds.add(canonicalRow.id);
+      for (const row of rows) {
+        if (canonicalRow && row.id !== canonicalRow.id) {
+          canonicalIdsByDuplicateId.set(row.id, canonicalRow.id);
+        }
       }
     }
 
-    this.rows = this.rows.filter((row) => canonicalIds.has(row.id));
+    return canonicalIdsByDuplicateId;
+  }
+
+  private hasPaymentIntent(paymentAccountId: string): boolean {
+    return this.paymentIntents.some((intent) => intent.payment_account_id === paymentAccountId);
   }
 
   private assertUniqueOrganizationProvider(): void {
@@ -294,6 +392,14 @@ class FakeWebhookDeliveriesDb {
   rows: WebhookDeliverySeedRow[];
   readonly schema = {
     createIndex: (indexName: string) => new FakeCreateIndexBuilder(this, indexName),
+    alterTable: (_tableName: string) => ({
+      addColumn: (_columnName: string, _dataType: string, _callback: unknown) => ({
+        execute: async () => undefined,
+      }),
+      dropColumn: (_columnName: string) => ({
+        execute: async () => undefined,
+      }),
+    }),
     dropIndex: (indexName: string) => ({
       on: (tableName: string) => ({
         ifExists: () => ({
@@ -314,6 +420,35 @@ class FakeWebhookDeliveriesDb {
     this.rows = [...rows];
   }
 
+  selectFrom(tableName: string) {
+    expect(tableName).toBe('webhook_deliveries');
+    let includeReplayRows = false;
+    const rows = this.rows;
+    const query = {
+      select(columnName: string) {
+        expect(columnName).toBe('id');
+        return query;
+      },
+      where(columnName: string, operator: string, value: string) {
+        expect(columnName).toBe('delivery_key');
+        expect(operator).toBe('!=');
+        expect(value).toBe('live');
+        includeReplayRows = true;
+        return query;
+      },
+      limit(limit: number) {
+        expect(limit).toBe(1);
+        return query;
+      },
+      async executeTakeFirst() {
+        return includeReplayRows
+          ? rows.find((row) => (row.delivery_key ?? 'live') !== 'live')
+          : rows[0];
+      },
+    };
+    return query;
+  }
+
   executeRawSql(statement: string): void {
     this.rawSqlStatements.push(statement);
 
@@ -329,6 +464,14 @@ class FakeWebhookDeliveriesDb {
       createdIndex.columns.join('|') === 'event_id|requested_endpoint_id|attempt'
     ) {
       this.assertUniqueDeliveryAttempts();
+    }
+
+    if (
+      createdIndex.unique &&
+      createdIndex.tableName === 'webhook_deliveries' &&
+      createdIndex.columns.join('|') === 'event_id|requested_endpoint_id|attempt|delivery_key'
+    ) {
+      this.assertUniqueDeliveryKeys();
     }
 
     this.createdIndexes.push(createdIndex);
@@ -371,6 +514,25 @@ class FakeWebhookDeliveriesDb {
 
       if (seenKeys.has(key)) {
         throw new Error(`duplicate webhook delivery survived for ${key}`);
+      }
+
+      seenKeys.add(key);
+    }
+  }
+
+  private assertUniqueDeliveryKeys(): void {
+    const seenKeys = new Set<string>();
+
+    for (const row of this.rows) {
+      const key = JSON.stringify([
+        row.event_id,
+        row.requested_endpoint_id,
+        row.attempt,
+        row.delivery_key ?? 'live',
+      ]);
+
+      if (seenKeys.has(key)) {
+        throw new Error(`duplicate webhook delivery key survived for ${key}`);
       }
 
       seenKeys.add(key);
@@ -812,6 +974,108 @@ describe('webhook delivery attempt identity migration safety', () => {
   });
 });
 
+describe('webhook delivery replay identity migration safety', () => {
+  it('rebuilds delivery uniqueness around delivery_key so replays can redeliver attempt 1', async () => {
+    const { WebhookDeliveryReplayIdentityMigration } =
+      await import('../../migrations/0027_webhook_delivery_replay_identity.js');
+    const db = new FakeWebhookDeliveriesDb([
+      {
+        id: 'whd_live',
+        event_id: 'whe_1',
+        requested_endpoint_id: 'wh_1',
+        delivery_key: 'live',
+        attempt: 1,
+        status: 'delivered',
+        created_at: '2026-01-01T00:00:00.000Z',
+      },
+      {
+        id: 'whd_replay',
+        event_id: 'whe_1',
+        requested_endpoint_id: 'wh_1',
+        delivery_key: 'replay:rpl_1',
+        attempt: 1,
+        status: 'pending',
+        created_at: '2026-01-02T00:00:00.000Z',
+      },
+    ]);
+
+    await WebhookDeliveryReplayIdentityMigration.up(db as never);
+
+    expect(db.createdIndexes).toContainEqual({
+      indexName: 'uniq_webhook_deliveries_delivery_identity',
+      tableName: 'webhook_deliveries',
+      columns: ['event_id', 'requested_endpoint_id', 'attempt', 'delivery_key'],
+      unique: true,
+    });
+  });
+
+  it('keeps replay identity migration rollback table-qualified and source-visible', () => {
+    const source = readFileSync(webhookDeliveryReplayIdentityMigrationPath, 'utf8');
+    const upSource = migrationMethodSource(source, 'up');
+    const downSource = migrationMethodSource(source, 'down');
+
+    expect(upSource).toContain("dropIndex('uniq_webhook_deliveries_attempt_identity')");
+    expect(upSource).toContain(".on('webhook_deliveries')");
+    expect(upSource).toContain("addColumn('delivery_key', 'varchar(128)'");
+    expect(upSource).toContain("defaultTo('live')");
+    expect(upSource).toContain("createIndex('uniq_webhook_deliveries_delivery_identity')");
+    expect(upSource).toContain(
+      "columns(['event_id', 'requested_endpoint_id', 'attempt', 'delivery_key'])",
+    );
+    expectSourceOrder(
+      upSource,
+      "addColumn('delivery_key'",
+      "createIndex('uniq_webhook_deliveries_delivery_identity')",
+    );
+    expectSourceOrder(
+      upSource,
+      "createIndex('uniq_webhook_deliveries_delivery_identity')",
+      "dropIndex('uniq_webhook_deliveries_attempt_identity')",
+    );
+    expect(downSource).toContain("selectFrom('webhook_deliveries')");
+    expect(downSource).toContain("where('delivery_key', '!=', 'live')");
+    expect(downSource).toContain("dropIndex('uniq_webhook_deliveries_delivery_identity')");
+    expect(downSource).toContain("dropColumn('delivery_key')");
+    expect(downSource).toContain("createIndex('uniq_webhook_deliveries_attempt_identity')");
+    expectSourceOrder(
+      downSource,
+      "selectFrom('webhook_deliveries')",
+      "dropIndex('uniq_webhook_deliveries_delivery_identity')",
+    );
+    expectSourceOrder(downSource, ".on('webhook_deliveries')", '.ifExists()');
+  });
+
+  it('refuses rollback before destructive schema changes when replay rows exist', async () => {
+    const { WebhookDeliveryReplayIdentityMigration } =
+      await import('../../migrations/0027_webhook_delivery_replay_identity.js');
+    const db = new FakeWebhookDeliveriesDb([
+      {
+        id: 'whd_live',
+        event_id: 'whe_1',
+        requested_endpoint_id: 'wh_1',
+        delivery_key: 'live',
+        attempt: 1,
+        status: 'delivered',
+        created_at: '2026-01-01T00:00:00.000Z',
+      },
+      {
+        id: 'whd_replay',
+        event_id: 'whe_1',
+        requested_endpoint_id: 'wh_1',
+        delivery_key: 'replay:rpl_1',
+        attempt: 1,
+        status: 'failed',
+        created_at: '2026-01-02T00:00:00.000Z',
+      },
+    ]);
+
+    await expect(WebhookDeliveryReplayIdentityMigration.down!(db as never)).rejects.toThrow(
+      'Cannot roll back webhook delivery replay identity while replay deliveries exist',
+    );
+    expect(db.createdIndexes).toEqual([]);
+  });
+});
+
 describe('marketing integrations base migration dialect safety', () => {
   it('uses explicit SQL Server-compatible types and defaults instead of PostgreSQL fallthroughs', () => {
     const source = readFileSync(marketingIntegrationsMigrationPath, 'utf8');
@@ -1002,8 +1266,10 @@ describe('payment accounts unique migration safety', () => {
 
     // eslint-disable-next-line unicorn/no-array-sort -- ES2023 toSorted is not available in this package's TS lib target.
     expect(db.rows.map((row) => row.id).sort()).toEqual(['pa_new_z', 'pa_other_org', 'pa_stripe']);
-    expect(db.rawSqlStatements).toHaveLength(1);
-    expect(db.rawSqlStatements[0]).toContain('ranked_payment_accounts');
+    expect(db.rawSqlStatements).toHaveLength(4);
+    expect(
+      db.rawSqlStatements.every((statement) => statement.includes('ranked_payment_accounts')),
+    ).toBe(true);
     expect(db.createdIndexes).toEqual([
       {
         indexName: 'uniq_payment_accounts_organization_provider',
@@ -1020,6 +1286,115 @@ describe('payment accounts unique migration safety', () => {
     ]);
   });
 
+  it('dedupes duplicate provider accounts across organizations before indexing', async () => {
+    delete process.env.DB_DRIVER;
+    vi.doMock('kysely', async (importOriginal) => {
+      const actual = await importOriginal<typeof import('kysely')>();
+
+      return { ...actual, sql: fakeSql };
+    });
+    const { PaymentAccountsUniqueMigration } =
+      await import('../../migrations/0025_payment_accounts_unique.js');
+    const db = new FakePaymentAccountsDb([
+      {
+        id: 'pa_org_1',
+        organization_id: 'org_1',
+        provider: 'stripe_connect',
+        provider_account_id: 'acct_shared',
+        updated_at: '2026-01-01T00:00:00.000Z',
+      },
+      {
+        id: 'pa_org_2',
+        organization_id: 'org_2',
+        provider: 'stripe_connect',
+        provider_account_id: 'acct_shared',
+        updated_at: '2026-01-02T00:00:00.000Z',
+      },
+    ]);
+
+    await PaymentAccountsUniqueMigration.up(db as never);
+
+    expect(db.rows.map((row) => row.id)).toEqual(['pa_org_2']);
+    expect(db.createdIndexes.map((index) => index.indexName)).toEqual([
+      'uniq_payment_accounts_organization_provider',
+      'uniq_payment_accounts_provider_account',
+    ]);
+  });
+
+  it('remaps brand payment-account references before deleting duplicate losers', async () => {
+    delete process.env.DB_DRIVER;
+    vi.doMock('kysely', async (importOriginal) => {
+      const actual = await importOriginal<typeof import('kysely')>();
+
+      return { ...actual, sql: fakeSql };
+    });
+    const { PaymentAccountsUniqueMigration } =
+      await import('../../migrations/0025_payment_accounts_unique.js');
+    const db = new FakePaymentAccountsDb(
+      [
+        {
+          id: 'pa_loser',
+          organization_id: 'org_1',
+          provider: 'stripe_connect',
+          provider_account_id: 'acct_old',
+          updated_at: '2026-01-01T00:00:00.000Z',
+        },
+        {
+          id: 'pa_canonical',
+          organization_id: 'org_1',
+          provider: 'stripe_connect',
+          provider_account_id: 'acct_new',
+          updated_at: '2026-01-02T00:00:00.000Z',
+        },
+      ],
+      {
+        brands: [{ id: 'brand_1', payment_account_id: 'pa_loser' }],
+      },
+    );
+
+    await PaymentAccountsUniqueMigration.up(db as never);
+
+    expect(db.rows.map((row) => row.id)).toEqual(['pa_canonical']);
+    expect(db.brands).toEqual([{ id: 'brand_1', payment_account_id: 'pa_canonical' }]);
+  });
+
+  it('keeps payment-intent referenced duplicate rows by making them canonical', async () => {
+    delete process.env.DB_DRIVER;
+    vi.doMock('kysely', async (importOriginal) => {
+      const actual = await importOriginal<typeof import('kysely')>();
+
+      return { ...actual, sql: fakeSql };
+    });
+    const { PaymentAccountsUniqueMigration } =
+      await import('../../migrations/0025_payment_accounts_unique.js');
+    const db = new FakePaymentAccountsDb(
+      [
+        {
+          id: 'pa_intent_referenced',
+          organization_id: 'org_1',
+          provider: 'stripe_connect',
+          provider_account_id: 'acct_old',
+          updated_at: '2026-01-01T00:00:00.000Z',
+        },
+        {
+          id: 'pa_newer',
+          organization_id: 'org_1',
+          provider: 'stripe_connect',
+          provider_account_id: 'acct_new',
+          updated_at: '2026-01-02T00:00:00.000Z',
+        },
+      ],
+      {
+        paymentIntents: [{ id: 'pi_1', payment_account_id: 'pa_intent_referenced' }],
+      },
+    );
+
+    await PaymentAccountsUniqueMigration.up(db as never);
+
+    expect(db.rows.map((row) => row.id)).toEqual(['pa_intent_referenced']);
+    expect(db.paymentIntents).toEqual([{ id: 'pi_1', payment_account_id: 'pa_intent_referenced' }]);
+  });
+
   it('keeps dialect-specific duplicate cleanup before payment-account indexes', () => {
     const source = readFileSync(paymentAccountsUniqueMigrationPath, 'utf8');
     const upSource = migrationMethodSource(source, 'up');
@@ -1027,8 +1402,11 @@ describe('payment accounts unique migration safety', () => {
     expect(source).toContain("process.env.DB_DRIVER === 'mysql'");
     expect(source).toContain("process.env.DB_DRIVER === 'mssql'");
     expect(source).toContain('delete payment_accounts');
-    expect(source).toContain('delete from ranked_payment_accounts');
     expect(source).toContain('delete from payment_accounts');
+    expect(source).toContain('update brands');
+    expect(source).toContain('payment_intents');
+    expect(source).toContain('partition by provider, provider_account_id');
+    expect(source).toContain('partition by organization_id, provider');
     expectSourceOrder(
       upSource,
       'dedupePaymentAccounts(db)',

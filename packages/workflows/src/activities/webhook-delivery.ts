@@ -58,6 +58,7 @@ export async function deliverWebhookActivity(input: {
   endpointId: string;
   eventId: string;
   eventType?: string;
+  replayNonce?: string;
   payload: string;
   attempt: number;
   finalAttempt?: boolean;
@@ -67,9 +68,11 @@ export async function deliverWebhookActivity(input: {
   try {
     const endpointRepo = new WebhookEndpointRepository(db);
     const deliveryRepo = new WebhookDeliveryRepository(db);
+    const deliveryKey = input.replayNonce ? `replay:${input.replayNonce}` : 'live';
     let delivery = await deliveryRepo.findByAttempt({
       eventId: input.eventId,
       requestedEndpointId: input.endpointId,
+      deliveryKey,
       attempt: input.attempt,
     });
     const terminalResult = resultForTerminalDelivery(delivery);
@@ -84,6 +87,7 @@ export async function deliverWebhookActivity(input: {
         (await deliveryRepo.create({
           endpointId: null,
           requestedEndpointId: input.endpointId,
+          deliveryKey,
           eventId: input.eventId,
           attempt: input.attempt,
           status: 'dead_lettered',
@@ -112,6 +116,7 @@ export async function deliverWebhookActivity(input: {
       delivery ??
       (await deliveryRepo.create({
         endpointId: input.endpointId,
+        deliveryKey,
         eventId: input.eventId,
         attempt: input.attempt,
         status: inactiveEndpoint ? 'dead_lettered' : undefined,
@@ -141,6 +146,7 @@ export async function deliverWebhookActivity(input: {
 
     const claim = await deliveryRepo.claimAttempt({
       endpointId: input.endpointId,
+      deliveryKey,
       eventId: input.eventId,
       attempt: input.attempt,
       leaseExpiresAt: new Date(Date.now() + WEBHOOK_DELIVERY_CLAIM_LEASE_MS),
@@ -154,6 +160,7 @@ export async function deliverWebhookActivity(input: {
       const currentDelivery = await deliveryRepo.findByAttempt({
         eventId: input.eventId,
         requestedEndpointId: input.endpointId,
+        deliveryKey,
         attempt: input.attempt,
       });
       const currentTerminalResult = resultForTerminalDelivery(currentDelivery);

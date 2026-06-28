@@ -25,6 +25,7 @@ type DeliveryRow = {
   id: string;
   endpoint_id: string | null;
   requested_endpoint_id: string;
+  delivery_key: string;
   event_id: string;
   attempt: number;
   status_code: number | null;
@@ -92,11 +93,17 @@ vi.mock('@tixkit/db', () => {
   }
 
   class WebhookDeliveryRepository {
-    async findByAttempt(input: { eventId: string; requestedEndpointId: string; attempt: number }) {
+    async findByAttempt(input: {
+      eventId: string;
+      requestedEndpointId: string;
+      deliveryKey?: string;
+      attempt: number;
+    }) {
       return dbState.deliveries.find(
         (delivery) =>
           delivery.event_id === input.eventId &&
           delivery.requested_endpoint_id === input.requestedEndpointId &&
+          delivery.delivery_key === (input.deliveryKey ?? 'live') &&
           delivery.attempt === input.attempt,
       );
     }
@@ -104,6 +111,7 @@ vi.mock('@tixkit/db', () => {
     async create(input: {
       endpointId: string | null;
       requestedEndpointId?: string;
+      deliveryKey?: string;
       eventId: string;
       attempt: number;
       status?: string;
@@ -113,12 +121,14 @@ vi.mock('@tixkit/db', () => {
       nextRetryAt?: Date | null;
     }) {
       const requestedEndpointId = input.requestedEndpointId ?? input.endpointId;
+      const deliveryKey = input.deliveryKey ?? 'live';
       if (!requestedEndpointId)
         throw new Error('Webhook delivery requires a requested endpoint id');
 
       const existingDelivery = await this.findByAttempt({
         eventId: input.eventId,
         requestedEndpointId,
+        deliveryKey,
         attempt: input.attempt,
       });
       if (existingDelivery) return existingDelivery;
@@ -127,6 +137,7 @@ vi.mock('@tixkit/db', () => {
         id: `whd_${dbState.deliveries.length + 1}`,
         endpoint_id: input.endpointId,
         requested_endpoint_id: requestedEndpointId,
+        delivery_key: deliveryKey,
         event_id: input.eventId,
         attempt: input.attempt,
         status_code: input.statusCode ?? null,
@@ -151,16 +162,19 @@ vi.mock('@tixkit/db', () => {
     async claimAttempt(input: {
       endpointId: string | null;
       requestedEndpointId?: string;
+      deliveryKey?: string;
       eventId: string;
       attempt: number;
       leaseExpiresAt: Date;
     }) {
       const requestedEndpointId = input.requestedEndpointId ?? input.endpointId;
+      const deliveryKey = input.deliveryKey ?? 'live';
       if (!requestedEndpointId)
         throw new Error('Webhook delivery claim requires a requested endpoint id');
       const delivery = await this.create({
         endpointId: input.endpointId,
         requestedEndpointId,
+        deliveryKey,
         eventId: input.eventId,
         attempt: input.attempt,
       });
@@ -498,6 +512,7 @@ describe('deliverWebhookActivity', () => {
       id: 'whd_1',
       endpoint_id: 'wh_1',
       requested_endpoint_id: 'wh_1',
+      delivery_key: 'live',
       event_id: 'whe_1',
       attempt: 1,
       status_code: 204,
@@ -520,6 +535,47 @@ describe('deliverWebhookActivity', () => {
     expect(httpsState.request).not.toHaveBeenCalled();
     expect(dbState.deliveries).toHaveLength(1);
     expect(dbState.updateCalls).toBe(0);
+    expect(dbState.destroy).toHaveBeenCalledTimes(1);
+  });
+
+  it('replays a delivered attempt with a replay-scoped delivery key', async () => {
+    dbState.deliveries.push({
+      id: 'whd_live',
+      endpoint_id: 'wh_1',
+      requested_endpoint_id: 'wh_1',
+      delivery_key: 'live',
+      event_id: 'whe_1',
+      attempt: 1,
+      status_code: 204,
+      response: '',
+      status: 'delivered',
+      delivered_at: new Date(),
+      next_retry_at: null,
+      created_at: new Date(),
+    });
+
+    const result = await deliverWebhookActivity({
+      endpointId: 'wh_1',
+      eventId: 'whe_1',
+      replayNonce: 'rpl_1',
+      payload: JSON.stringify({ orderId: 'ord_1' }),
+      attempt: 1,
+      finalAttempt: false,
+    });
+
+    expect(result).toMatchObject({ ok: true, value: { statusCode: 204, response: '' } });
+    expect(httpsState.request).toHaveBeenCalledTimes(1);
+    expect(dbState.deliveries).toHaveLength(2);
+    expect(dbState.deliveries[1]).toMatchObject({
+      id: 'whd_2',
+      endpoint_id: 'wh_1',
+      requested_endpoint_id: 'wh_1',
+      delivery_key: 'replay:rpl_1',
+      event_id: 'whe_1',
+      attempt: 1,
+      status: 'delivered',
+      status_code: 204,
+    });
     expect(dbState.destroy).toHaveBeenCalledTimes(1);
   });
 

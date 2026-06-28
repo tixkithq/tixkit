@@ -969,6 +969,7 @@ describe('TixkitClient new resource methods', () => {
           deliveryId: 'whd_deleted',
           endpointId: null,
           requestedEndpointId: 'wh_deleted',
+          deliveryKey: 'live',
           eventType: 'order.paid',
           status: 'dead_lettered',
           attemptCount: 1,

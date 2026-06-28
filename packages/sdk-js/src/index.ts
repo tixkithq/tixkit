@@ -940,6 +940,7 @@ export type WebhookEvent = {
   deliveryId: string;
   endpointId: string | null;
   requestedEndpointId: string;
+  deliveryKey: string;
   eventType: string;
   status: string;
   attemptCount: number;

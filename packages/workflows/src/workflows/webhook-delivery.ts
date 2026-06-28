@@ -7,6 +7,7 @@ const { deliverWebhookActivity } = proxyActivities<{
     endpointId: string;
     eventId: string;
     eventType?: string;
+    replayNonce?: string;
     payload: string;
     attempt: number;
     finalAttempt: boolean;
@@ -43,6 +44,7 @@ export async function webhookDeliveryWorkflow(
       endpointId: input.endpointId,
       eventId: input.eventId,
       eventType: input.eventType,
+      ...(input.replayNonce ? { replayNonce: input.replayNonce } : {}),
       payload: payloadStr,
       attempt,
       finalAttempt: attempt === input.maxAttempts,

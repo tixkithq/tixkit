@@ -29,6 +29,7 @@ import {
   privacyRequestWorkflowId,
   clerkIdentitySyncWorkflowId,
   webhookDeliveryWorkflowId,
+  webhookDeliveryReplayWorkflowId,
   exportWorkflowId,
   notificationWorkflowId,
   smsDeliveryWorkflowId,
@@ -174,7 +175,7 @@ export class TemporalClient {
   ) {
     const baseWorkflowId = webhookDeliveryWorkflowId(input.eventId, input.endpointId);
     const workflowId = input.replayNonce
-      ? `${baseWorkflowId}:replay:${input.replayNonce}`
+      ? webhookDeliveryReplayWorkflowId(input.eventId, input.endpointId, input.replayNonce)
       : baseWorkflowId;
     return this.client.workflow.start(webhookDeliveryWorkflow, {
       taskQueue: config.temporalTaskQueue,

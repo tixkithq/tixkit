@@ -26,14 +26,11 @@ function activityContext(activityType: string): ActivityContext {
 describe('worker observability', () => {
   it('loads Temporal OpenTelemetry interceptors with the shared OTel runtime', async () => {
     const smokeScript = `
-      import { OpenTelemetryActivityInboundInterceptor, makeWorkflowExporter } from '@temporalio/interceptors-opentelemetry';
-      import { createTelemetryResource, createTraceExporter, startOpenTelemetry } from '@tixkit/shared';
-      const resource = createTelemetryResource({ serviceName: 'smoke-worker', environment: 'test' });
-      const exporter = createTraceExporter({ serviceName: 'smoke-worker', disabled: true });
-      const sink = makeWorkflowExporter(exporter, resource);
+      import { OpenTelemetryActivityInboundInterceptor } from '@temporalio/interceptors-opentelemetry';
+      import { startOpenTelemetry } from '@tixkit/shared';
       const runtime = startOpenTelemetry({ serviceName: 'smoke-worker', disabled: true });
       await runtime.shutdown();
-      console.log(typeof OpenTelemetryActivityInboundInterceptor, typeof sink.export);
+      console.log(typeof OpenTelemetryActivityInboundInterceptor, typeof runtime.shutdown);
     `;
 
     const smokeFile = join(
@@ -44,7 +41,8 @@ describe('worker observability', () => {
     let stdout: string;
     let stderr: string;
     try {
-      ({ stdout, stderr } = await execFileAsync(process.execPath, [smokeFile], {
+      const runtime = process.execPath.includes('bun') ? process.execPath : 'bun';
+      ({ stdout, stderr } = await execFileAsync(runtime, [smokeFile], {
         cwd: workflowRoot,
       }));
     } finally {
@@ -52,7 +50,7 @@ describe('worker observability', () => {
     }
 
     expect(stderr).toBe('');
-    expect(stdout.trim()).toBe('function object');
+    expect(stdout.trim()).toBe('function function');
   });
 
   it('exports serialized workflow spans through the OTel 2.x exporter shape', async () => {

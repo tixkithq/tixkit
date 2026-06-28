@@ -809,6 +809,7 @@ export type AdminWebhookEvent = {
   deliveryId: string;
   endpointId: string | null;
   requestedEndpointId: string;
+  deliveryKey: string;
   eventType: string;
   status: WebhookDeliveryStatus;
   statusCode?: number;
@@ -2558,6 +2559,7 @@ const fixtureWebhookEvents: AdminWebhookEvent[] = [
     deliveryId: 'whd_001',
     endpointId: 'wh_001',
     requestedEndpointId: 'wh_001',
+    deliveryKey: 'live',
     eventType: 'order.created',
     status: 'delivered',
     statusCode: 200,
@@ -2571,6 +2573,7 @@ const fixtureWebhookEvents: AdminWebhookEvent[] = [
     deliveryId: 'whd_002',
     endpointId: 'wh_001',
     requestedEndpointId: 'wh_001',
+    deliveryKey: 'live',
     eventType: 'order.paid',
     status: 'delivered',
     statusCode: 200,
@@ -2584,6 +2587,7 @@ const fixtureWebhookEvents: AdminWebhookEvent[] = [
     deliveryId: 'whd_003',
     endpointId: 'wh_001',
     requestedEndpointId: 'wh_001',
+    deliveryKey: 'live',
     eventType: 'order.refunded',
     status: 'dead_lettered',
     statusCode: 500,
@@ -2597,6 +2601,7 @@ const fixtureWebhookEvents: AdminWebhookEvent[] = [
     deliveryId: 'whd_004',
     endpointId: 'wh_002',
     requestedEndpointId: 'wh_002',
+    deliveryKey: 'live',
     eventType: 'ticket.issued',
     status: 'delivered',
     statusCode: 200,
