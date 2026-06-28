@@ -22,7 +22,9 @@ async function attachScreenshot(page: Page, testInfo: TestInfo, name: string): P
 }
 
 test.describe('admin settings validation', () => {
-  test('settings primary routes render across desktop and mobile without accessibility regressions', async ({ page }, testInfo) => {
+  test('settings primary routes render across desktop and mobile without accessibility regressions', async ({
+    page,
+  }, testInfo) => {
     test.slow();
     await requireReachable(page, adminBaseUrl, 'admin dashboard');
 
@@ -30,7 +32,9 @@ test.describe('admin settings validation', () => {
     for (const route of settingsRoutes) {
       await page.goto(`${adminBaseUrl}${route.path}`);
       await expect(page.getByRole('heading', { name: route.heading })).toBeVisible();
-      await expect(page.getByRole('navigation').getByRole('link', { name: 'Workspace' })).toBeVisible();
+      await expect(
+        page.getByRole('navigation').getByRole('link', { name: 'Workspace' }),
+      ).toBeVisible();
       await attachScreenshot(page, testInfo, `settings-${route.name}-desktop`);
       await expectNoAxeViolations(page, testInfo);
     }
@@ -64,7 +68,9 @@ test.describe('admin settings validation', () => {
     await expectNoAxeViolations(page, testInfo);
   });
 
-  test('billing invoice action is not exposed as an enabled fake success path', async ({ page }, testInfo) => {
+  test('billing invoice action is not exposed as an enabled fake success path', async ({
+    page,
+  }, testInfo) => {
     await requireReachable(page, adminBaseUrl, 'admin dashboard');
 
     await page.goto(`${adminBaseUrl}/settings/billing`);

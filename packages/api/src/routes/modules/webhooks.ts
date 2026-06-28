@@ -10,7 +10,11 @@ import {
   serializeWebhookEndpoint,
   serializeWebhookEvent,
 } from '../../http/contracts.js';
-import { createWebhookEndpointSchema, updateWebhookEndpointSchema, parseBody } from '../../http/schemas.js';
+import {
+  createWebhookEndpointSchema,
+  updateWebhookEndpointSchema,
+  parseBody,
+} from '../../http/schemas.js';
 
 export const webhookRoutes: FastifyPluginAsync = async (app) => {
   const db = app.context.db;
@@ -85,7 +89,10 @@ export const webhookRoutes: FastifyPluginAsync = async (app) => {
       query = query.where('organization_id', 'in', ['__none__']);
     }
     const rows = await query.execute();
-    return pageEnvelope(rows.map((row) => serializeWebhookEndpoint(row)), pagination.limit);
+    return pageEnvelope(
+      rows.map((row) => serializeWebhookEndpoint(row)),
+      pagination.limit,
+    );
   });
 
   app.get('/webhook-endpoints/:endpointId/events', async (request) => {
@@ -99,7 +106,9 @@ export const webhookRoutes: FastifyPluginAsync = async (app) => {
     if (!endpoint) throw new NotFoundError('WebhookEndpoint', endpointId);
     ClerkAuthService.requireResourceTenant(principal, endpoint, 'WebhookEndpoint', endpointId);
     ClerkAuthService.requireOrganizationScope(principal, endpoint.organization_id);
-    const cursor = pagination.cursor ? parseWebhookDeliveryEventCursor(pagination.cursor) : undefined;
+    const cursor = pagination.cursor
+      ? parseWebhookDeliveryEventCursor(pagination.cursor)
+      : undefined;
 
     let query = db
       .selectFrom('webhook_deliveries')
@@ -149,7 +158,10 @@ export const webhookRoutes: FastifyPluginAsync = async (app) => {
     ClerkAuthService.requireOrganizationScope(principal, event.organization_id);
 
     const endpointRepo = new WebhookEndpointRepository(db);
-    const endpoints = await endpointRepo.findActiveByEvent(event.organization_id, event.type as string);
+    const endpoints = await endpointRepo.findActiveByEvent(
+      event.organization_id,
+      event.type as string,
+    );
 
     const payload = serializeWebhookEvent(event).payload as Record<string, unknown>;
     await Promise.all(
@@ -161,7 +173,6 @@ export const webhookRoutes: FastifyPluginAsync = async (app) => {
           eventType: event.type as string,
           replayNonce: randomUUID(),
           payload,
-          secret: endpoint.secret as string,
           maxAttempts: 5,
         }),
       ),
@@ -178,7 +189,10 @@ type WebhookDeliveryEventCursor = {
 
 function parseWebhookDeliveryEventCursor(cursor: string): WebhookDeliveryEventCursor {
   try {
-    const parsed = JSON.parse(Buffer.from(cursor, 'base64url').toString('utf8')) as Record<string, unknown>;
+    const parsed = JSON.parse(Buffer.from(cursor, 'base64url').toString('utf8')) as Record<
+      string,
+      unknown
+    >;
     const deliveryId = typeof parsed.deliveryId === 'string' ? parsed.deliveryId : undefined;
     const createdAtValue = typeof parsed.createdAt === 'string' ? parsed.createdAt : undefined;
     const createdAt = createdAtValue ? new Date(createdAtValue) : undefined;
@@ -192,12 +206,16 @@ function parseWebhookDeliveryEventCursor(cursor: string): WebhookDeliveryEventCu
 }
 
 function encodeWebhookDeliveryEventCursor(row: Record<string, unknown>): string {
-  const createdAt = row.created_at instanceof Date ? row.created_at : new Date(String(row.created_at));
+  const createdAt =
+    row.created_at instanceof Date ? row.created_at : new Date(String(row.created_at));
   const deliveryId = typeof row.delivery_id === 'string' ? row.delivery_id : undefined;
   if (!deliveryId || Number.isNaN(createdAt.getTime())) {
     throw new ValidationError('Invalid webhook delivery cursor row');
   }
-  return Buffer.from(JSON.stringify({ createdAt: createdAt.toISOString(), deliveryId }), 'utf8').toString('base64url');
+  return Buffer.from(
+    JSON.stringify({ createdAt: createdAt.toISOString(), deliveryId }),
+    'utf8',
+  ).toString('base64url');
 }
 
 function webhookDeliveryEventPageEnvelope(rows: Record<string, unknown>[], limit: number) {
@@ -219,7 +237,10 @@ function serializeWebhookDeliveryEvent(row: Record<string, unknown>) {
     status: row.status,
     statusCode: row.status_code ?? undefined,
     attemptCount: row.attempt_count,
-    deliveredAt: row.delivered_at instanceof Date ? row.delivered_at.toISOString() : row.delivered_at ?? undefined,
+    deliveredAt:
+      row.delivered_at instanceof Date
+        ? row.delivered_at.toISOString()
+        : (row.delivered_at ?? undefined),
     createdAt: row.created_at instanceof Date ? row.created_at.toISOString() : row.created_at,
   };
 }

@@ -83,7 +83,9 @@ describe('ClerkAuthService static helpers', () => {
 
     it('throws ForbiddenError when principal lacks the permission', () => {
       const principal = makePrincipal();
-      expect(() => ClerkAuthService.requirePermission(principal, 'billing.write')).toThrow(ForbiddenError);
+      expect(() => ClerkAuthService.requirePermission(principal, 'billing.write')).toThrow(
+        ForbiddenError,
+      );
     });
   });
 
@@ -112,12 +114,16 @@ describe('ClerkAuthService static helpers', () => {
 
     it('throws NotFoundError when organization is not in scope', () => {
       const principal = makePrincipal({ organizationIds: ['org_1'] });
-      expect(() => ClerkAuthService.requireOrganizationScope(principal, 'org_other')).toThrow(NotFoundError);
+      expect(() => ClerkAuthService.requireOrganizationScope(principal, 'org_other')).toThrow(
+        NotFoundError,
+      );
     });
 
     it('throws NotFoundError when principal has no organizations (fail-closed)', () => {
       const principal = makePrincipal({ organizationIds: [] });
-      expect(() => ClerkAuthService.requireOrganizationScope(principal, 'org_any')).toThrow(NotFoundError);
+      expect(() => ClerkAuthService.requireOrganizationScope(principal, 'org_any')).toThrow(
+        NotFoundError,
+      );
     });
 
     it('does not throw for system principal with no organizations', () => {
@@ -139,7 +145,9 @@ describe('ClerkAuthService static helpers', () => {
 
     it('throws NotFoundError when brand is not in scope', () => {
       const principal = makePrincipal({ brandIds: ['brd_1'] });
-      expect(() => ClerkAuthService.requireBrandScope(principal, 'brd_other')).toThrow(NotFoundError);
+      expect(() => ClerkAuthService.requireBrandScope(principal, 'brd_other')).toThrow(
+        NotFoundError,
+      );
     });
 
     it('does not throw when principal has no brand restrictions', () => {
@@ -161,7 +169,9 @@ describe('ClerkAuthService static helpers', () => {
 
     it('throws NotFoundError when event is not in scope', () => {
       const principal = makePrincipal({ eventIds: ['evt_1'] });
-      expect(() => ClerkAuthService.requireEventScope(principal, 'evt_other')).toThrow(NotFoundError);
+      expect(() => ClerkAuthService.requireEventScope(principal, 'evt_other')).toThrow(
+        NotFoundError,
+      );
     });
   });
 
@@ -199,7 +209,9 @@ describe('ClerkAuthService static helpers', () => {
 
     it('rejects API key creation with escalated scopes', () => {
       const principal = makePrincipal({ scopes: ['events.read'] });
-      expect(() => requireAssignableScopes(principal, ['events.read', 'refunds.write'])).toThrow(ForbiddenError);
+      expect(() => requireAssignableScopes(principal, ['events.read', 'refunds.write'])).toThrow(
+        ForbiddenError,
+      );
     });
   });
 });

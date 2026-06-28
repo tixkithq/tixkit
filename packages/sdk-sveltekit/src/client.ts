@@ -115,11 +115,14 @@ export function isTixkitCheckoutEvent(value: unknown): value is TixkitCheckoutEv
   return typeof value === 'string' && CHECKOUT_EVENTS.has(value as TixkitCheckoutEvent);
 }
 
-export function tixkitWidgetIframeAttributes(config: TixkitWidgetIframeConfig): TixkitWidgetIframeAttributes {
+export function tixkitWidgetIframeAttributes(
+  config: TixkitWidgetIframeConfig,
+): TixkitWidgetIframeAttributes {
   return {
     src: checkoutWidgetUrl(config),
     title: config.title ?? 'Tixkit checkout',
-    sandbox: 'allow-forms allow-modals allow-popups allow-popups-to-escape-sandbox allow-scripts allow-same-origin',
+    sandbox:
+      'allow-forms allow-modals allow-popups allow-popups-to-escape-sandbox allow-scripts allow-same-origin',
     allow: 'payment *',
     referrerPolicy: 'strict-origin-when-cross-origin',
   };

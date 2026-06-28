@@ -100,7 +100,10 @@ describe('Tixkit Prometheus metrics', () => {
     metrics.metrics.exportEvents.inc({ operation: 'api', outcome: 'ok' });
     metrics.metrics.scanEvents.inc({ operation: 'api', outcome: 'ok' });
     metrics.metrics.inventoryActiveHolds.set({ scope: 'global' }, 2);
-    metrics.metrics.temporalActivityEvents.inc({ activity: 'finalizeOrderActivity', outcome: 'ok' });
+    metrics.metrics.temporalActivityEvents.inc({
+      activity: 'finalizeOrderActivity',
+      outcome: 'ok',
+    });
 
     const output = await metrics.registry.metrics();
 

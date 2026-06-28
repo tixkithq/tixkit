@@ -1,7 +1,7 @@
 global:
   imageRegistry: ghcr.io/your-org/tixkit
   imagePullPolicy: IfNotPresent
-  imageTag: "0.1.0"
+  imageTag: '0.1.0'
   environment: production
   apiBaseUrl: https://api.example.com
   checkoutUrl: https://checkout.example.com
@@ -14,42 +14,42 @@ secrets:
   create: true
   name: tixkit-secrets
   databaseUrl: postgres://tixkit:tixkit@tixkit-postgres:5432/tixkit
-  databaseUrlMysql: ""
+  databaseUrlMysql: ''
   redisUrl: redis://tixkit-redis:6379
   temporalAddress: tixkit-temporal:7233
   temporalNamespace: default
-  clerkSecretKey: ""
-  clerkPublishableKey: ""
-  clerkWebhookSecret: ""
-  stripeSecretKey: ""
-  stripeWebhookSecret: ""
-  stripePublishableKey: ""
-  stripeConnectClientId: ""
-  telnyxApiKey: ""
-  telnyxWebhookPublicKey: ""
-  qrSigningSecret: ""
-  offlineManifestSigningKey: ""
+  clerkSecretKey: ''
+  clerkPublishableKey: ''
+  clerkWebhookSecret: ''
+  stripeSecretKey: ''
+  stripeWebhookSecret: ''
+  stripePublishableKey: ''
+  stripeConnectClientId: ''
+  telnyxApiKey: ''
+  telnyxWebhookPublicKey: ''
+  qrSigningSecret: ''
+  offlineManifestSigningKey: ''
   offlineManifestKeyId: manifest:production
   s3Endpoint: http://tixkit-minio:9000
   s3Bucket: tixkit
   s3AccessKeyId: minioadmin
   s3SecretAccessKey: minioadmin
   s3Region: us-east-1
-  otelExporterOtlpEndpoint: ""
-  prometheusPushgatewayUrl: ""
-  metricsBearerToken: ""
+  otelExporterOtlpEndpoint: ''
+  prometheusPushgatewayUrl: ''
+  metricsBearerToken: ''
 
 api:
   replicas: 2
   image: api
   port: 4000
-  trustProxy: "10.0.0.0/8,172.16.0.0/12,192.168.0.0/16"
+  trustProxy: '10.0.0.0/8,172.16.0.0/12,192.168.0.0/16'
   resources:
     requests:
       cpu: 250m
       memory: 512Mi
     limits:
-      cpu: "1"
+      cpu: '1'
       memory: 1Gi
 
 worker:
@@ -60,7 +60,7 @@ worker:
       cpu: 250m
       memory: 512Mi
     limits:
-      cpu: "1"
+      cpu: '1'
       memory: 1Gi
 
 checkout:
@@ -72,7 +72,7 @@ checkout:
       cpu: 200m
       memory: 384Mi
     limits:
-      cpu: "1"
+      cpu: '1'
       memory: 768Mi
 
 admin:
@@ -84,7 +84,7 @@ admin:
       cpu: 200m
       memory: 384Mi
     limits:
-      cpu: "1"
+      cpu: '1'
       memory: 768Mi
 
 migrations:

@@ -5,7 +5,7 @@
  * This is the single source of truth for confirmation state derivation;
  * `confirmation-client.tsx` re-exports it.
  */
-import type { CheckoutSession } from '@/lib/api'
+import type { CheckoutSession } from '@/lib/api';
 
 export type ConfirmationState =
   | 'loading'
@@ -15,22 +15,22 @@ export type ConfirmationState =
   | 'cancelled'
   | 'failed'
   | 'error'
-  | 'unknown'
+  | 'unknown';
 
 export function deriveState(
   session: CheckoutSession | null,
   redirectStatus: string | null,
 ): ConfirmationState {
-  if (redirectStatus === 'failed') return 'failed'
-  if (redirectStatus === 'succeeded') return 'confirmed'
-  if (!session) return 'unknown'
-  const status = session.status
-  if (status === 'completed') return 'confirmed'
-  if (status === 'pending_payment') return 'pending'
-  if (status === 'expired') return 'expired'
-  if (status === 'cancelled') return 'cancelled'
-  if (status === 'failed') return 'failed'
+  if (redirectStatus === 'failed') return 'failed';
+  if (redirectStatus === 'succeeded') return 'confirmed';
+  if (!session) return 'unknown';
+  const status = session.status;
+  if (status === 'completed') return 'confirmed';
+  if (status === 'pending_payment') return 'pending';
+  if (status === 'expired') return 'expired';
+  if (status === 'cancelled') return 'cancelled';
+  if (status === 'failed') return 'failed';
   // Paid orders have session status "completed" but the order status may be "paid".
-  if (status === 'open') return 'pending'
-  return 'unknown'
+  if (status === 'open') return 'pending';
+  return 'unknown';
 }

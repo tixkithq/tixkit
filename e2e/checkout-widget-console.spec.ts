@@ -92,10 +92,16 @@ test.describe('checkout and widget console gates', () => {
       request,
       `console-widget-${testInfo.workerIndex}-${Date.now()}`,
     );
-    test.skip(!fs.existsSync(widgetBundlePath), `Widget bundle not found at ${widgetBundlePath}; run bun --filter @tixkit/widget build.`);
+    test.skip(
+      !fs.existsSync(widgetBundlePath),
+      `Widget bundle not found at ${widgetBundlePath}; run bun --filter @tixkit/widget build.`,
+    );
     await requireReachable(page, checkoutBaseUrl, 'checkout app');
 
-    await loadWidgetHostPage(page, '/__e2e_widget_shell', `
+    await loadWidgetHostPage(
+      page,
+      '/__e2e_widget_shell',
+      `
       <!doctype html>
       <html lang="en">
         <head>
@@ -115,7 +121,8 @@ test.describe('checkout and widget console gates', () => {
           </main>
         </body>
       </html>
-    `);
+    `,
+    );
 
     await page.addScriptTag({ path: widgetBundlePath, type: 'module' });
     await page.waitForFunction(() => customElements.get('tixkit-widget'));
@@ -135,10 +142,16 @@ test.describe('checkout and widget console gates', () => {
       request,
       `widget-lifecycle-${testInfo.workerIndex}-${Date.now()}`,
     );
-    test.skip(!fs.existsSync(widgetBundlePath), `Widget bundle not found at ${widgetBundlePath}; run bun --filter @tixkit/widget build.`);
+    test.skip(
+      !fs.existsSync(widgetBundlePath),
+      `Widget bundle not found at ${widgetBundlePath}; run bun --filter @tixkit/widget build.`,
+    );
     await requireReachable(page, checkoutBaseUrl, 'checkout app');
 
-    await loadWidgetHostPage(page, '/__e2e_widget_lifecycle', `
+    await loadWidgetHostPage(
+      page,
+      '/__e2e_widget_lifecycle',
+      `
       <!doctype html>
       <html lang="en">
         <head>
@@ -185,7 +198,8 @@ test.describe('checkout and widget console gates', () => {
           </main>
         </body>
       </html>
-    `);
+    `,
+    );
 
     await page.evaluate(() => {
       const lifecycleEvents = [
@@ -197,7 +211,11 @@ test.describe('checkout and widget console gates', () => {
         'order_completed',
         'error',
       ];
-      (window as unknown as { __gkWidgetEvents: Array<{ id: string; type: string; detail: unknown }> }).__gkWidgetEvents = [];
+      (
+        window as unknown as {
+          __gkWidgetEvents: Array<{ id: string; type: string; detail: unknown }>;
+        }
+      ).__gkWidgetEvents = [];
       (window as unknown as { __gkOpenedUrls: unknown[] }).__gkOpenedUrls = [];
       window.open = ((...args: unknown[]) => {
         (window as unknown as { __gkOpenedUrls: unknown[] }).__gkOpenedUrls.push(args);
@@ -206,7 +224,11 @@ test.describe('checkout and widget console gates', () => {
       for (const element of document.querySelectorAll('tixkit-widget, tixkit-button')) {
         for (const type of lifecycleEvents) {
           element.addEventListener(type, (event) => {
-            (window as unknown as { __gkWidgetEvents: Array<{ id: string; type: string; detail: unknown }> }).__gkWidgetEvents.push({
+            (
+              window as unknown as {
+                __gkWidgetEvents: Array<{ id: string; type: string; detail: unknown }>;
+              }
+            ).__gkWidgetEvents.push({
               id: element.id,
               type,
               detail: event instanceof CustomEvent ? event.detail : null,
@@ -217,22 +239,27 @@ test.describe('checkout and widget console gates', () => {
     });
 
     await page.addScriptTag({ path: widgetBundlePath, type: 'module' });
-    await page.waitForFunction(() => customElements.get('tixkit-widget') && customElements.get('tixkit-button'));
+    await page.waitForFunction(
+      () => customElements.get('tixkit-widget') && customElements.get('tixkit-button'),
+    );
 
-    await expect.poll(async () =>
-      page.evaluate(() =>
-        (window as unknown as { __gkWidgetEvents: Array<{ id: string; type: string }> }).__gkWidgetEvents
-          .filter((event) => event.type === 'loaded')
-          .map((event) => event.id)
-          .sort(),
-      ),
-    ).toEqual(['inline-widget', 'modal-button', 'modal-widget', 'redirect-widget']);
+    await expect
+      .poll(async () =>
+        page.evaluate(() =>
+          (
+            window as unknown as { __gkWidgetEvents: Array<{ id: string; type: string }> }
+          ).__gkWidgetEvents
+            .filter((event) => event.type === 'loaded')
+            .map((event) => event.id)
+            .sort(),
+        ),
+      )
+      .toEqual(['inline-widget', 'modal-button', 'modal-widget', 'redirect-widget']);
 
     const inlineFrame = await page.evaluate(() => {
       const iframe = document
         .querySelector<HTMLElement>('#inline-widget')
-        ?.shadowRoot
-        ?.querySelector('iframe');
+        ?.shadowRoot?.querySelector('iframe');
       return {
         src: iframe?.getAttribute('src') ?? '',
         sandbox: iframe?.getAttribute('sandbox') ?? '',
@@ -244,58 +271,87 @@ test.describe('checkout and widget console gates', () => {
     expect(inlineFrame.sandbox).toContain('allow-scripts');
     expect(inlineFrame.sandbox).toContain('allow-forms');
     expect(inlineFrame.allow).toContain('payment');
-    await expect.poll(async () =>
-      page.evaluate(() =>
-        (window as unknown as { __gkWidgetEvents: Array<{ id: string; type: string }> }).__gkWidgetEvents
-          .some((event) => event.id === 'inline-widget' && event.type === 'loading'),
-      ),
-    ).toBe(true);
+    await expect
+      .poll(async () =>
+        page.evaluate(() =>
+          (
+            window as unknown as { __gkWidgetEvents: Array<{ id: string; type: string }> }
+          ).__gkWidgetEvents.some(
+            (event) => event.id === 'inline-widget' && event.type === 'loading',
+          ),
+        ),
+      )
+      .toBe(true);
 
-    await page.evaluate(({ eventIdForMessage, checkoutOrigin }) => {
-      window.dispatchEvent(new MessageEvent('message', {
-        origin: checkoutOrigin,
-        data: {
-          source: 'tixkit-checkout',
-          event: 'checkout_started',
-          eventId: eventIdForMessage,
-          sessionId: 'cs_widget_e2e',
-        },
-      }));
-      window.dispatchEvent(new MessageEvent('message', {
-        origin: checkoutOrigin,
-        data: {
-          source: 'tixkit-checkout',
-          event: 'order_completed',
-          eventId: eventIdForMessage,
-          sessionId: 'cs_widget_e2e',
-          orderId: 'ord_widget_e2e',
-        },
-      }));
-      window.dispatchEvent(new MessageEvent('message', {
-        origin: 'https://evil.example.com',
-        data: {
-          source: 'tixkit-checkout',
-          event: 'checkout_started',
-          eventId: eventIdForMessage,
-          sessionId: 'cs_evil',
-        },
-      }));
-    }, { eventIdForMessage: eventId, checkoutOrigin: new URL(checkoutBaseUrl).origin });
+    await page.evaluate(
+      ({ eventIdForMessage, checkoutOrigin }) => {
+        window.dispatchEvent(
+          new MessageEvent('message', {
+            origin: checkoutOrigin,
+            data: {
+              source: 'tixkit-checkout',
+              event: 'checkout_started',
+              eventId: eventIdForMessage,
+              sessionId: 'cs_widget_e2e',
+            },
+          }),
+        );
+        window.dispatchEvent(
+          new MessageEvent('message', {
+            origin: checkoutOrigin,
+            data: {
+              source: 'tixkit-checkout',
+              event: 'order_completed',
+              eventId: eventIdForMessage,
+              sessionId: 'cs_widget_e2e',
+              orderId: 'ord_widget_e2e',
+            },
+          }),
+        );
+        window.dispatchEvent(
+          new MessageEvent('message', {
+            origin: 'https://evil.example.com',
+            data: {
+              source: 'tixkit-checkout',
+              event: 'checkout_started',
+              eventId: eventIdForMessage,
+              sessionId: 'cs_evil',
+            },
+          }),
+        );
+      },
+      { eventIdForMessage: eventId, checkoutOrigin: new URL(checkoutBaseUrl).origin },
+    );
 
-    await expect.poll(async () =>
-      page.evaluate(() =>
-        (window as unknown as { __gkWidgetEvents: Array<{ id: string; type: string; detail: Record<string, string> }> }).__gkWidgetEvents
-          .filter((event) => event.id === 'inline-widget' && (event.type === 'checkout_started' || event.type === 'order_completed'))
-          .map((event) => ({ type: event.type, sessionId: event.detail.sessionId, orderId: event.detail.orderId })),
-      ),
-    ).toEqual([
-      { type: 'checkout_started', sessionId: 'cs_widget_e2e', orderId: undefined },
-      { type: 'order_completed', sessionId: 'cs_widget_e2e', orderId: 'ord_widget_e2e' },
-    ]);
-    const evilSessionCount = await page.evaluate(() =>
-      (window as unknown as { __gkWidgetEvents: Array<{ detail: Record<string, string> }> }).__gkWidgetEvents
-        .filter((event) => event.detail?.sessionId === 'cs_evil')
-        .length,
+    await expect
+      .poll(async () =>
+        page.evaluate(() =>
+          (
+            window as unknown as {
+              __gkWidgetEvents: Array<{ id: string; type: string; detail: Record<string, string> }>;
+            }
+          ).__gkWidgetEvents
+            .filter(
+              (event) =>
+                event.id === 'inline-widget' &&
+                (event.type === 'checkout_started' || event.type === 'order_completed'),
+            )
+            .map((event) => ({
+              type: event.type,
+              sessionId: event.detail.sessionId,
+              orderId: event.detail.orderId,
+            })),
+        ),
+      )
+      .toEqual([
+        { type: 'checkout_started', sessionId: 'cs_widget_e2e', orderId: undefined },
+        { type: 'order_completed', sessionId: 'cs_widget_e2e', orderId: 'ord_widget_e2e' },
+      ]);
+    const evilSessionCount = await page.evaluate(
+      () =>
+        (
+          window as unknown as { __gkWidgetEvents: Array<{ detail: Record<string, string> }> }
+        ).__gkWidgetEvents.filter((event) => event.detail?.sessionId === 'cs_evil').length,
     );
     expect(evilSessionCount).toBe(0);
 
@@ -303,75 +359,107 @@ test.describe('checkout and widget console gates', () => {
       const modalWidget = document.querySelector<HTMLElement>('#modal-widget');
       modalWidget?.shadowRoot?.querySelector<HTMLButtonElement>('button')?.click();
     });
-    await expect.poll(async () =>
-      page.evaluate(() =>
-        Boolean(document
-          .querySelector<HTMLElement>('#modal-widget')
-          ?.shadowRoot
-        ?.querySelector('iframe.tk-modal-frame')),
-      ),
-    ).toBe(true);
-    await expect.poll(async () =>
-      page.evaluate(() =>
-        (window as unknown as { __gkWidgetEvents: Array<{ id: string; type: string }> }).__gkWidgetEvents
-          .some((event) => event.id === 'modal-widget' && event.type === 'opened'),
-      ),
-    ).toBe(true);
-    await expectNoAxeViolations(page, testInfo, 'body', ['iframe'], [
-      'landmark-unique',
-      'landmark-one-main',
-      'page-has-heading-one',
-    ]);
+    await expect
+      .poll(async () =>
+        page.evaluate(() =>
+          Boolean(
+            document
+              .querySelector<HTMLElement>('#modal-widget')
+              ?.shadowRoot?.querySelector('iframe.tk-modal-frame'),
+          ),
+        ),
+      )
+      .toBe(true);
+    await expect
+      .poll(async () =>
+        page.evaluate(() =>
+          (
+            window as unknown as { __gkWidgetEvents: Array<{ id: string; type: string }> }
+          ).__gkWidgetEvents.some(
+            (event) => event.id === 'modal-widget' && event.type === 'opened',
+          ),
+        ),
+      )
+      .toBe(true);
+    await expectNoAxeViolations(
+      page,
+      testInfo,
+      'body',
+      ['iframe'],
+      ['landmark-unique', 'landmark-one-main', 'page-has-heading-one'],
+    );
     await page.evaluate(() => {
       document
         .querySelector<HTMLElement>('#modal-widget')
-        ?.shadowRoot
-        ?.querySelector<HTMLButtonElement>('button.tk-modal-close')
+        ?.shadowRoot?.querySelector<HTMLButtonElement>('button.tk-modal-close')
         ?.click();
     });
-    await expect.poll(async () =>
-      page.evaluate(() => {
-        const events = (window as unknown as { __gkWidgetEvents: Array<{ id: string; type: string }> }).__gkWidgetEvents
-          .filter((event) => event.id === 'modal-widget' && (event.type === 'opened' || event.type === 'closed'))
-          .map((event) => event.type);
-        return events.includes('opened') && events.at(-1) === 'closed';
-      }),
-    ).toBe(true);
+    await expect
+      .poll(async () =>
+        page.evaluate(() => {
+          const events = (
+            window as unknown as { __gkWidgetEvents: Array<{ id: string; type: string }> }
+          ).__gkWidgetEvents
+            .filter(
+              (event) =>
+                event.id === 'modal-widget' && (event.type === 'opened' || event.type === 'closed'),
+            )
+            .map((event) => event.type);
+          return events.includes('opened') && events.at(-1) === 'closed';
+        }),
+      )
+      .toBe(true);
 
     await page.evaluate(() => {
-      document.querySelector<HTMLElement>('#redirect-widget')?.shadowRoot?.querySelector<HTMLButtonElement>('button')?.click();
+      document
+        .querySelector<HTMLElement>('#redirect-widget')
+        ?.shadowRoot?.querySelector<HTMLButtonElement>('button')
+        ?.click();
     });
-    await expect.poll(async () =>
-      page.evaluate(() =>
-        (window as unknown as { __gkOpenedUrls: unknown[] }).__gkOpenedUrls.length,
-      ),
-    ).toBe(1);
+    await expect
+      .poll(async () =>
+        page.evaluate(
+          () => (window as unknown as { __gkOpenedUrls: unknown[] }).__gkOpenedUrls.length,
+        ),
+      )
+      .toBe(1);
 
     await page.evaluate(() => {
       const modalButton = document.querySelector<HTMLElement>('#modal-button');
       modalButton?.shadowRoot?.querySelector<HTMLButtonElement>('button')?.click();
     });
-    await expect.poll(async () =>
-      page.evaluate(() =>
-        (window as unknown as { __gkWidgetEvents: Array<{ id: string; type: string }> }).__gkWidgetEvents
-          .some((event) => event.id === 'modal-button' && event.type === 'opened'),
-      ),
-    ).toBe(true);
+    await expect
+      .poll(async () =>
+        page.evaluate(() =>
+          (
+            window as unknown as { __gkWidgetEvents: Array<{ id: string; type: string }> }
+          ).__gkWidgetEvents.some(
+            (event) => event.id === 'modal-button' && event.type === 'opened',
+          ),
+        ),
+      )
+      .toBe(true);
     await page.evaluate(() => {
       document
         .querySelector<HTMLElement>('#modal-button')
-        ?.shadowRoot
-        ?.querySelector<HTMLButtonElement>('button.tk-modal-close')
+        ?.shadowRoot?.querySelector<HTMLButtonElement>('button.tk-modal-close')
         ?.click();
     });
-    await expect.poll(async () =>
-      page.evaluate(() => {
-        const events = (window as unknown as { __gkWidgetEvents: Array<{ id: string; type: string }> }).__gkWidgetEvents
-          .filter((event) => event.id === 'modal-button' && (event.type === 'opened' || event.type === 'closed'))
-          .map((event) => event.type);
-        return events.includes('opened') && events.at(-1) === 'closed';
-      }),
-    ).toBe(true);
+    await expect
+      .poll(async () =>
+        page.evaluate(() => {
+          const events = (
+            window as unknown as { __gkWidgetEvents: Array<{ id: string; type: string }> }
+          ).__gkWidgetEvents
+            .filter(
+              (event) =>
+                event.id === 'modal-button' && (event.type === 'opened' || event.type === 'closed'),
+            )
+            .map((event) => event.type);
+          return events.includes('opened') && events.at(-1) === 'closed';
+        }),
+      )
+      .toBe(true);
 
     await testInfo.attach('widget-lifecycle', {
       body: await page.screenshot({ fullPage: true }),

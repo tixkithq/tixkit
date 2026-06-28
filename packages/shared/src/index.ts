@@ -67,7 +67,11 @@ export function verifyWebhookSignature(
   return a.equals(b);
 }
 
-export function paginate<T>(items: T[], limit: number, cursor?: string): {
+export function paginate<T>(
+  items: T[],
+  limit: number,
+  cursor?: string,
+): {
   items: T[];
   nextCursor: string | null;
   hasMore: boolean;

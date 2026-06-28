@@ -22,8 +22,11 @@ const mockState = vi.hoisted(() => ({
 }));
 
 vi.mock('@tixkit/shared', () => ({
-  withSpan: async (_name: string, _attrs: Record<string, unknown>, fn: (span: { setAttribute: () => void }) => Promise<unknown>) =>
-    fn({ setAttribute: () => undefined }),
+  withSpan: async (
+    _name: string,
+    _attrs: Record<string, unknown>,
+    fn: (span: { setAttribute: () => void }) => Promise<unknown>,
+  ) => fn({ setAttribute: () => undefined }),
 }));
 
 vi.mock('stripe', () => {
@@ -90,12 +93,16 @@ vi.mock('@tixkit/db', () => {
     createDb: () => db,
     PaymentIntentRepository: class {
       async findByProviderAndIntentId(provider: string, providerIntentId: string) {
-        return mockState.paymentIntent?.provider === provider && mockState.paymentIntent.provider_intent_id === providerIntentId
+        return mockState.paymentIntent?.provider === provider &&
+          mockState.paymentIntent.provider_intent_id === providerIntentId
           ? mockState.paymentIntent
           : undefined;
       }
 
-      async findByCheckoutSessionAndProviderIntentId(checkoutSessionId: string, providerIntentId: string) {
+      async findByCheckoutSessionAndProviderIntentId(
+        checkoutSessionId: string,
+        providerIntentId: string,
+      ) {
         return mockState.paymentIntent?.checkout_session_id === checkoutSessionId &&
           mockState.paymentIntent.provider_intent_id === providerIntentId
           ? mockState.paymentIntent
@@ -103,7 +110,9 @@ vi.mock('@tixkit/db', () => {
       }
 
       async findLatestByCheckoutSession(checkoutSessionId: string) {
-        return mockState.paymentIntent?.checkout_session_id === checkoutSessionId ? mockState.paymentIntent : undefined;
+        return mockState.paymentIntent?.checkout_session_id === checkoutSessionId
+          ? mockState.paymentIntent
+          : undefined;
       }
 
       async update(_id: string, input: Record<string, unknown>) {
@@ -113,7 +122,11 @@ vi.mock('@tixkit/db', () => {
       }
     },
     PaymentCompensationRepository: class {
-      async findByProviderIntent(provider: string, providerIntentId: string, checkoutSessionId: string) {
+      async findByProviderIntent(
+        provider: string,
+        providerIntentId: string,
+        checkoutSessionId: string,
+      ) {
         if (
           mockState.compensation?.provider === provider &&
           mockState.compensation.provider_intent_id === providerIntentId &&
@@ -175,7 +188,12 @@ describe('compensateOrphanPaymentActivity', () => {
       currency: 'USD',
       status: 'succeeded',
     };
-    mockState.checkoutSession = { id: 'cs_1', tenant_id: 'tnt_1', currency: 'USD', status: 'pending_payment' };
+    mockState.checkoutSession = {
+      id: 'cs_1',
+      tenant_id: 'tnt_1',
+      currency: 'USD',
+      status: 'pending_payment',
+    };
     mockState.order = undefined;
     mockState.compensation = undefined;
     mockState.createdCompensations = [];
@@ -217,7 +235,10 @@ describe('compensateOrphanPaymentActivity', () => {
     });
 
     expect(first).toMatchObject({ ok: true, value: { status: 'succeeded', action: 'local_noop' } });
-    expect(second).toMatchObject({ ok: true, value: { status: 'succeeded', action: 'local_noop' } });
+    expect(second).toMatchObject({
+      ok: true,
+      value: { status: 'succeeded', action: 'local_noop' },
+    });
     expect(mockState.createdCompensations).toHaveLength(1);
     expect(mockState.compensation).toMatchObject({
       status: 'succeeded',

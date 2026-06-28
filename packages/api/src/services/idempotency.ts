@@ -20,7 +20,9 @@ type IdempotencyRecord = {
 };
 
 export function hashRequest(payload: unknown): string {
-  return createHash('sha256').update(stableStringify(payload ?? null)).digest('hex');
+  return createHash('sha256')
+    .update(stableStringify(payload ?? null))
+    .digest('hex');
 }
 
 function stableStringify(value: unknown): string {
@@ -131,7 +133,11 @@ export async function withIdempotency(
   try {
     result = await handler();
   } catch (err) {
-    const error = err as Error & { statusCode?: number; code?: string; details?: Record<string, unknown> };
+    const error = err as Error & {
+      statusCode?: number;
+      code?: string;
+      details?: Record<string, unknown>;
+    };
     if ((error.statusCode ?? 500) >= 500) {
       await deleteRecord(db, recordId);
       throw err;
@@ -171,7 +177,11 @@ export async function withIdempotency(
   return result;
 }
 
-async function findRecord(db: Database, key: string, tenantId: string): Promise<IdempotencyRecord | undefined> {
+async function findRecord(
+  db: Database,
+  key: string,
+  tenantId: string,
+): Promise<IdempotencyRecord | undefined> {
   return db
     .selectFrom('idempotency_records')
     .selectAll()
@@ -186,8 +196,9 @@ async function deleteRecord(db: Database, recordId: string): Promise<void> {
 
 function isExpired(record: IdempotencyRecord): boolean {
   if (!record.expires_at) return false;
-  const expiresAt = record.expires_at instanceof Date
-    ? record.expires_at.getTime()
-    : new Date(record.expires_at).getTime();
+  const expiresAt =
+    record.expires_at instanceof Date
+      ? record.expires_at.getTime()
+      : new Date(record.expires_at).getTime();
   return Number.isFinite(expiresAt) && expiresAt <= Date.now();
 }

@@ -1,24 +1,24 @@
 function pad(value: number): string {
-  return String(value).padStart(2, '0')
+  return String(value).padStart(2, '0');
 }
 
 function parseDatetimeInput(value: string): {
-  year: number
-  month: number
-  day: number
-  hour: number
-  minute: number
+  year: number;
+  month: number;
+  day: number;
+  hour: number;
+  minute: number;
 } | null {
-  const match = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})$/.exec(value)
-  if (!match) return null
-  const [, year, month, day, hour, minute] = match
+  const match = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})$/.exec(value);
+  if (!match) return null;
+  const [, year, month, day, hour, minute] = match;
   return {
     year: Number(year),
     month: Number(month),
     day: Number(day),
     hour: Number(hour),
     minute: Number(minute),
-  }
+  };
 }
 
 function getTimeZoneParts(date: Date, timeZone: string) {
@@ -30,28 +30,28 @@ function getTimeZoneParts(date: Date, timeZone: string) {
     hour: '2-digit',
     minute: '2-digit',
     hour12: false,
-  })
+  });
   const parts = Object.fromEntries(
     formatter.formatToParts(date).map((part) => [part.type, part.value]),
-  )
-  const hour = Number(parts.hour) === 24 ? 0 : Number(parts.hour)
+  );
+  const hour = Number(parts.hour) === 24 ? 0 : Number(parts.hour);
   return {
     year: Number(parts.year),
     month: Number(parts.month),
     day: Number(parts.day),
     hour,
     minute: Number(parts.minute),
-  }
+  };
 }
 
 function partsToUtcMinutes(parts: ReturnType<typeof getTimeZoneParts>): number {
-  return Date.UTC(parts.year, parts.month - 1, parts.day, parts.hour, parts.minute) / 60000
+  return Date.UTC(parts.year, parts.month - 1, parts.day, parts.hour, parts.minute) / 60000;
 }
 
 export function isoToLocalDatetimeInput(value: string | undefined | null): string {
-  if (!value) return ''
-  const date = new Date(value)
-  if (Number.isNaN(date.getTime())) return ''
+  if (!value) return '';
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return '';
   return [
     date.getFullYear(),
     '-',
@@ -62,26 +62,26 @@ export function isoToLocalDatetimeInput(value: string | undefined | null): strin
     pad(date.getHours()),
     ':',
     pad(date.getMinutes()),
-  ].join('')
+  ].join('');
 }
 
 export function localDatetimeInputToIso(value: string | undefined | null): string | undefined {
-  const trimmed = value?.trim()
-  if (!trimmed) return undefined
-  const date = new Date(trimmed)
-  if (Number.isNaN(date.getTime())) return undefined
-  return date.toISOString()
+  const trimmed = value?.trim();
+  if (!trimmed) return undefined;
+  const date = new Date(trimmed);
+  if (Number.isNaN(date.getTime())) return undefined;
+  return date.toISOString();
 }
 
 export function isoToTimezoneDatetimeInput(
   value: string | undefined | null,
   timeZone: string,
 ): string {
-  if (!value) return ''
-  const date = new Date(value)
-  if (Number.isNaN(date.getTime())) return ''
+  if (!value) return '';
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return '';
   try {
-    const parts = getTimeZoneParts(date, timeZone)
+    const parts = getTimeZoneParts(date, timeZone);
     return [
       parts.year,
       '-',
@@ -92,9 +92,9 @@ export function isoToTimezoneDatetimeInput(
       pad(parts.hour),
       ':',
       pad(parts.minute),
-    ].join('')
+    ].join('');
   } catch {
-    return isoToLocalDatetimeInput(value)
+    return isoToLocalDatetimeInput(value);
   }
 }
 
@@ -102,30 +102,25 @@ export function timezoneDatetimeInputToIso(
   value: string | undefined | null,
   timeZone: string,
 ): string | undefined {
-  const trimmed = value?.trim()
-  if (!trimmed) return undefined
-  const parts = parseDatetimeInput(trimmed)
-  if (!parts) return undefined
+  const trimmed = value?.trim();
+  if (!trimmed) return undefined;
+  const parts = parseDatetimeInput(trimmed);
+  if (!parts) return undefined;
 
   try {
-    const wallClockMinutes = Date.UTC(
-      parts.year,
-      parts.month - 1,
-      parts.day,
-      parts.hour,
-      parts.minute,
-    ) / 60000
-    let utcMinutes = wallClockMinutes
+    const wallClockMinutes =
+      Date.UTC(parts.year, parts.month - 1, parts.day, parts.hour, parts.minute) / 60000;
+    let utcMinutes = wallClockMinutes;
     for (let index = 0; index < 3; index += 1) {
-      const zonedParts = getTimeZoneParts(new Date(utcMinutes * 60000), timeZone)
-      const zonedMinutes = partsToUtcMinutes(zonedParts)
-      const delta = wallClockMinutes - zonedMinutes
-      if (delta === 0) break
-      utcMinutes += delta
+      const zonedParts = getTimeZoneParts(new Date(utcMinutes * 60000), timeZone);
+      const zonedMinutes = partsToUtcMinutes(zonedParts);
+      const delta = wallClockMinutes - zonedMinutes;
+      if (delta === 0) break;
+      utcMinutes += delta;
     }
-    const date = new Date(utcMinutes * 60000)
-    return Number.isNaN(date.getTime()) ? undefined : date.toISOString()
+    const date = new Date(utcMinutes * 60000);
+    return Number.isNaN(date.getTime()) ? undefined : date.toISOString();
   } catch {
-    return localDatetimeInputToIso(value)
+    return localDatetimeInputToIso(value);
   }
 }

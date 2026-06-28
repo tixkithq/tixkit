@@ -97,9 +97,12 @@ function createMockDb(state: StripeWebhookTestState): unknown {
           throw new Error(`Simulated ${table} lookup failure`);
         }
         if (table === 'payment_events') return findPaymentEvent(filters);
-        if (table === 'checkout_sessions') return rowMatches(state.checkoutSession, filters) ? state.checkoutSession : undefined;
-        if (table === 'payment_intents') return rowMatches(state.paymentIntent, filters) ? state.paymentIntent : undefined;
-        if (table === 'payment_accounts') return rowMatches(state.paymentAccount, filters) ? state.paymentAccount : undefined;
+        if (table === 'checkout_sessions')
+          return rowMatches(state.checkoutSession, filters) ? state.checkoutSession : undefined;
+        if (table === 'payment_intents')
+          return rowMatches(state.paymentIntent, filters) ? state.paymentIntent : undefined;
+        if (table === 'payment_accounts')
+          return rowMatches(state.paymentAccount, filters) ? state.paymentAccount : undefined;
         return undefined;
       },
       async executeTakeFirstOrThrow() {
@@ -268,7 +271,7 @@ describe('Stripe webhook route', () => {
     else process.env.STRIPE_SECRET_KEY = originalStripeSecret;
   });
 
-  it('stores the provider event before starting reconciliation and marking it processed', async () => {
+  it('stores the provider event before starting reconciliation without marking it processed', async () => {
     const state: StripeWebhookTestState = {
       events: [],
       checkoutSession: { id: 'cs_1', tenant_id: 'tnt_1' },
@@ -309,12 +312,12 @@ describe('Stripe webhook route', () => {
       provider: 'stripe',
       provider_event_id: 'evt_stripe_1',
       event_type: 'payment_intent.succeeded',
+      processed_at: null,
     });
     expect(state.operations).toEqual([
       'insert:payment_events',
       'start:payment-reconciliation',
       'signal:payment-succeeded',
-      'update:payment_events',
     ]);
     expect(temporalClient.startPaymentReconciliation).toHaveBeenCalledWith({
       providerEventId: 'evt_stripe_1',
@@ -488,9 +491,8 @@ describe('Stripe webhook route', () => {
     expect(state.operations).toEqual([
       'start:payment-reconciliation',
       'signal:payment-succeeded',
-      'update:payment_events',
     ]);
-    expect(state.events[0].processed_at).toBeInstanceOf(Date);
+    expect(state.events[0].processed_at).toBeNull();
 
     await app.close();
   });
@@ -545,12 +547,11 @@ describe('Stripe webhook route', () => {
     expect(res.json()).toEqual({ received: true, duplicate: false });
     expect(state.events).toHaveLength(1);
     expect(state.events[0]?.id).toBe('pevt_raced');
-    expect(state.events[0]?.processed_at).toBeInstanceOf(Date);
+    expect(state.events[0]?.processed_at).toBeNull();
     expect(state.operations).toEqual([
       'insert-conflict:payment_events',
       'start:payment-reconciliation',
       'signal:payment-succeeded',
-      'update:payment_events',
     ]);
     expect(temporalClient.startPaymentReconciliation).toHaveBeenCalledOnce();
     expect(temporalClient.signalPaymentSucceeded).toHaveBeenCalledOnce();
@@ -596,8 +597,8 @@ describe('Stripe webhook route', () => {
     expect(state.operations).toEqual([
       'insert:payment_events',
       'start:payment-reconciliation',
-      'update:payment_events',
     ]);
+    expect(state.events[0]?.processed_at).toBeNull();
     expect(temporalClient.startPaymentReconciliation).toHaveBeenCalledOnce();
     expect(temporalClient.signalPaymentSucceeded).not.toHaveBeenCalled();
 
@@ -641,10 +642,7 @@ describe('Stripe webhook route', () => {
     expect(res.statusCode).toBe(500);
     expect(state.events).toHaveLength(1);
     expect(state.events[0]?.processed_at).toBeNull();
-    expect(state.operations).toEqual([
-      'insert:payment_events',
-      'start:payment-reconciliation',
-    ]);
+    expect(state.operations).toEqual(['insert:payment_events', 'start:payment-reconciliation']);
     expect(temporalClient.startPaymentReconciliation).toHaveBeenCalledOnce();
     expect(temporalClient.signalPaymentSucceeded).not.toHaveBeenCalled();
 

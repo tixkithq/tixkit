@@ -1,65 +1,61 @@
-'use client'
+'use client';
 
-import { createContext, useCallback, useContext, useMemo, useState } from 'react'
-import { getCookie, setCookie } from '@/lib/cookies'
+import { createContext, useCallback, useContext, useMemo, useState } from 'react';
+import { getCookie, setCookie } from '@/lib/cookies';
 
-export type Collapsible = 'offcanvas' | 'icon' | 'none'
-export type SidebarVariant = 'inset' | 'sidebar' | 'floating'
+export type Collapsible = 'offcanvas' | 'icon' | 'none';
+export type SidebarVariant = 'inset' | 'sidebar' | 'floating';
 
-const LAYOUT_COLLAPSIBLE_COOKIE_NAME = 'layout_collapsible'
-const LAYOUT_VARIANT_COOKIE_NAME = 'layout_variant'
-const LAYOUT_COOKIE_MAX_AGE = 60 * 60 * 24 * 7 // 7 days
+const LAYOUT_COLLAPSIBLE_COOKIE_NAME = 'layout_collapsible';
+const LAYOUT_VARIANT_COOKIE_NAME = 'layout_variant';
+const LAYOUT_COOKIE_MAX_AGE = 60 * 60 * 24 * 7; // 7 days
 
-const DEFAULT_VARIANT: SidebarVariant = 'inset'
-const DEFAULT_COLLAPSIBLE: Collapsible = 'icon'
+const DEFAULT_VARIANT: SidebarVariant = 'inset';
+const DEFAULT_COLLAPSIBLE: Collapsible = 'icon';
 
 type LayoutContextType = {
-  resetLayout: () => void
+  resetLayout: () => void;
 
-  defaultCollapsible: Collapsible
-  collapsible: Collapsible
-  setCollapsible: (collapsible: Collapsible) => void
+  defaultCollapsible: Collapsible;
+  collapsible: Collapsible;
+  setCollapsible: (collapsible: Collapsible) => void;
 
-  defaultVariant: SidebarVariant
-  variant: SidebarVariant
-  setVariant: (variant: SidebarVariant) => void
-}
+  defaultVariant: SidebarVariant;
+  variant: SidebarVariant;
+  setVariant: (variant: SidebarVariant) => void;
+};
 
-const LayoutContext = createContext<LayoutContextType | null>(null)
+const LayoutContext = createContext<LayoutContextType | null>(null);
 
 type LayoutProviderProps = {
-  children: React.ReactNode
-}
+  children: React.ReactNode;
+};
 
 export function LayoutProvider({ children }: LayoutProviderProps) {
   const [collapsible, _setCollapsible] = useState<Collapsible>(() => {
-    const saved = getCookie(LAYOUT_COLLAPSIBLE_COOKIE_NAME)
-    return (saved as Collapsible) || DEFAULT_COLLAPSIBLE
-  })
+    const saved = getCookie(LAYOUT_COLLAPSIBLE_COOKIE_NAME);
+    return (saved as Collapsible) || DEFAULT_COLLAPSIBLE;
+  });
 
   const [variant, _setVariant] = useState<SidebarVariant>(() => {
-    const saved = getCookie(LAYOUT_VARIANT_COOKIE_NAME)
-    return (saved as SidebarVariant) || DEFAULT_VARIANT
-  })
+    const saved = getCookie(LAYOUT_VARIANT_COOKIE_NAME);
+    return (saved as SidebarVariant) || DEFAULT_VARIANT;
+  });
 
   const setCollapsible = useCallback((newCollapsible: Collapsible) => {
-    _setCollapsible(newCollapsible)
-    setCookie(
-      LAYOUT_COLLAPSIBLE_COOKIE_NAME,
-      newCollapsible,
-      LAYOUT_COOKIE_MAX_AGE
-    )
-  }, [])
+    _setCollapsible(newCollapsible);
+    setCookie(LAYOUT_COLLAPSIBLE_COOKIE_NAME, newCollapsible, LAYOUT_COOKIE_MAX_AGE);
+  }, []);
 
   const setVariant = useCallback((newVariant: SidebarVariant) => {
-    _setVariant(newVariant)
-    setCookie(LAYOUT_VARIANT_COOKIE_NAME, newVariant, LAYOUT_COOKIE_MAX_AGE)
-  }, [])
+    _setVariant(newVariant);
+    setCookie(LAYOUT_VARIANT_COOKIE_NAME, newVariant, LAYOUT_COOKIE_MAX_AGE);
+  }, []);
 
   const resetLayout = useCallback(() => {
-    setCollapsible(DEFAULT_COLLAPSIBLE)
-    setVariant(DEFAULT_VARIANT)
-  }, [setCollapsible, setVariant])
+    setCollapsible(DEFAULT_COLLAPSIBLE);
+    setVariant(DEFAULT_VARIANT);
+  }, [setCollapsible, setVariant]);
 
   const contextValue = useMemo<LayoutContextType>(
     () => ({
@@ -71,16 +67,16 @@ export function LayoutProvider({ children }: LayoutProviderProps) {
       variant,
       setVariant,
     }),
-    [collapsible, resetLayout, setCollapsible, setVariant, variant]
-  )
+    [collapsible, resetLayout, setCollapsible, setVariant, variant],
+  );
 
-  return <LayoutContext value={contextValue}>{children}</LayoutContext>
+  return <LayoutContext value={contextValue}>{children}</LayoutContext>;
 }
 
 export function useLayout() {
-  const context = useContext(LayoutContext)
+  const context = useContext(LayoutContext);
   if (!context) {
-    throw new Error('useLayout must be used within a LayoutProvider')
+    throw new Error('useLayout must be used within a LayoutProvider');
   }
-  return context
+  return context;
 }

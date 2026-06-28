@@ -31,7 +31,11 @@ import { questionRoutes } from './routes/modules/questions.js';
 import { authRoutes } from './routes/modules/auth.js';
 import { publicUploadRoutes, uploadRoutes } from './routes/modules/uploads.js';
 import { publicWaitlistRoutes, waitlistRoutes } from './routes/modules/waitlist.js';
-import { createApiObservability, registerMetricsRoute, registerObservability } from './observability.js';
+import {
+  createApiObservability,
+  registerMetricsRoute,
+  registerObservability,
+} from './observability.js';
 import type Stripe from 'stripe';
 
 type CorsOriginCallback = (error: Error | null, allow: boolean) => void;
@@ -124,7 +128,14 @@ export async function buildApp(): Promise<FastifyInstance> {
   // This ensures the admin dashboard has minimum context to create events.
   await authService.ensureDevSeed();
 
-  const ctx: AppContext = { db, pricingEngine, inventoryService, qrService, authService, temporalClient };
+  const ctx: AppContext = {
+    db,
+    pricingEngine,
+    inventoryService,
+    qrService,
+    authService,
+    temporalClient,
+  };
   app.decorate('context', ctx);
 
   // Health check
@@ -135,6 +146,7 @@ export async function buildApp(): Promise<FastifyInstance> {
   await app.register(clerkWebhookRoutes, { prefix: '/v1/webhooks/clerk' });
   await app.register(stripeWebhookRoutes, { prefix: '/v1/webhooks/stripe' });
   await app.register(telnyxWebhookRoutes, { prefix: '/v1/webhooks/telnyx' });
+  await app.register(emailWebhookRoutes, { prefix: '/v1/webhooks/email' });
 
   // Public buyer-facing routes (no admin auth). Checkout is intentionally public:
   // buyers are anonymous and tenancy is resolved from the published event.
@@ -146,7 +158,6 @@ export async function buildApp(): Promise<FastifyInstance> {
     await publicGroup.register(oauthTokenRoutes, { prefix: '/v1' });
   });
 
-  await app.register(emailWebhookRoutes, { prefix: '/v1/webhooks/email' });
   // Authenticated admin/integration routes (Clerk user, API key, or scanner device)
   await app.register(async (authenticated) => {
     authenticated.addHook('onRequest', createAuthMiddleware(authService));

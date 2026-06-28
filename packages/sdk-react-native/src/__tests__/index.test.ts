@@ -50,11 +50,13 @@ function createMemoryStorage(initial: Record<string, string> = {}) {
 
 function createReactNativeRuntime() {
   return {
-    createElement: vi.fn((type: unknown, props: Record<string, unknown> | null, ...children: unknown[]) => ({
-      type,
-      props,
-      children,
-    })),
+    createElement: vi.fn(
+      (type: unknown, props: Record<string, unknown> | null, ...children: unknown[]) => ({
+        type,
+        props,
+        children,
+      }),
+    ),
     View: 'View',
     Text: 'Text',
     Pressable: 'Pressable',
@@ -273,15 +275,18 @@ describe('TixkitScannerClient', () => {
         }),
       )
       .mockResolvedValueOnce(
-        new Response(JSON.stringify({
-          accepted: 0,
-          duplicates: 1,
-          invalid: 0,
-          results: [{ qrHash: 'hash_1', outcome: 'duplicate' }],
-        }), {
-          status: 200,
-          headers: { 'Content-Type': 'application/json' },
-        }),
+        new Response(
+          JSON.stringify({
+            accepted: 0,
+            duplicates: 1,
+            invalid: 0,
+            results: [{ qrHash: 'hash_1', outcome: 'duplicate' }],
+          }),
+          {
+            status: 200,
+            headers: { 'Content-Type': 'application/json' },
+          },
+        ),
       );
     const client = new TixkitScannerClient({
       deviceId: 'sd_public_1',
@@ -360,7 +365,9 @@ describe('TixkitScannerClient', () => {
         openURL,
       }),
     ).resolves.toBe('https://checkout.example.test/checkout?eventId=evt_1&items=tt_1%3D1');
-    expect(openURL).toHaveBeenCalledWith('https://checkout.example.test/checkout?eventId=evt_1&items=tt_1%3D1');
+    expect(openURL).toHaveBeenCalledWith(
+      'https://checkout.example.test/checkout?eventId=evt_1&items=tt_1%3D1',
+    );
   });
 
   it('hashes scanned QR payloads with the same SHA-256 contract as offline manifests', () => {
@@ -374,14 +381,18 @@ describe('TixkitScannerClient', () => {
     expect(extractBarcodePayload(' signed ')).toBe('signed');
     expect(extractBarcodePayload({ data: 'camera-data' })).toBe('camera-data');
     expect(extractBarcodePayload({ rawValue: 'raw-value' })).toBe('raw-value');
-    expect(extractBarcodePayload({ nativeEvent: { codeStringValue: 'ios-code' } })).toBe('ios-code');
+    expect(extractBarcodePayload({ nativeEvent: { codeStringValue: 'ios-code' } })).toBe(
+      'ios-code',
+    );
     expect(extractBarcodePayload({ nativeEvent: { data: 'native-data' } })).toBe('native-data');
     expect(extractBarcodePayload({ data: '   ' })).toBeNull();
   });
 
   it('routes scan payloads online by default', async () => {
     const client = makeClient();
-    const scanOnline = vi.spyOn(client, 'scanOnline').mockResolvedValue({ outcome: 'accepted', message: 'ok' });
+    const scanOnline = vi
+      .spyOn(client, 'scanOnline')
+      .mockResolvedValue({ outcome: 'accepted', message: 'ok' });
     const scanOffline = vi.spyOn(client, 'scanOffline');
 
     await expect(
@@ -398,7 +409,9 @@ describe('TixkitScannerClient', () => {
 
   it('routes scan payloads offline using QR hashes', async () => {
     const client = makeClient();
-    const scanOffline = vi.spyOn(client, 'scanOffline').mockReturnValue({ outcome: 'accepted', message: 'offline' });
+    const scanOffline = vi
+      .spyOn(client, 'scanOffline')
+      .mockReturnValue({ outcome: 'accepted', message: 'offline' });
 
     await expect(
       scanBarcodePayload({
@@ -416,7 +429,9 @@ describe('TixkitScannerClient', () => {
   it('falls back to offline scans in auto mode when online scan fails', async () => {
     const client = makeClient();
     vi.spyOn(client, 'scanOnline').mockRejectedValue(new Error('network unavailable'));
-    const scanOffline = vi.spyOn(client, 'scanOffline').mockReturnValue({ outcome: 'accepted', message: 'offline' });
+    const scanOffline = vi
+      .spyOn(client, 'scanOffline')
+      .mockReturnValue({ outcome: 'accepted', message: 'offline' });
 
     await expect(
       scanBarcodePayload({
@@ -450,7 +465,10 @@ describe('Tixkit secure storage helpers', () => {
     expect(await storage.getItem('scanner:manifest')).toBe('encrypted-manifest-json');
     await storage.removeItem('scanner:manifest');
 
-    expect(adapter.setItem).toHaveBeenCalledWith('tixkit-secure:scanner:manifest', 'encrypted-manifest-json');
+    expect(adapter.setItem).toHaveBeenCalledWith(
+      'tixkit-secure:scanner:manifest',
+      'encrypted-manifest-json',
+    );
     expect(adapter.getItem).toHaveBeenCalledWith('tixkit-secure:scanner:manifest');
     expect(adapter.deleteItem).toHaveBeenCalledWith('tixkit-secure:scanner:manifest');
     expect(secureStore.has('tixkit-secure:scanner:manifest')).toBe(false);
@@ -505,7 +523,13 @@ describe('Tixkit React Native component adapters', () => {
 
     expect(card.type).toBe('Pressable');
     expect(card.props).toMatchObject({ testID: 'ticket-card' });
-    expect(textValues(card)).toEqual(['Admission', 'Ada Lovelace', 'Ticket tkt_1', 'Type vip', 'Checked In']);
+    expect(textValues(card)).toEqual([
+      'Admission',
+      'Ada Lovelace',
+      'Ticket tkt_1',
+      'Type vip',
+      'Checked In',
+    ]);
 
     const cardProps = card.props;
     expect(cardProps?.onPress).toEqual(expect.any(Function));
@@ -525,7 +549,11 @@ describe('Tixkit React Native component adapters', () => {
 
     const status = components.TixkitScannerStatus({
       testID: 'scanner-status',
-      result: { outcome: 'wrong_event', ticketId: 'tkt_2', message: 'Ticket belongs to another event' },
+      result: {
+        outcome: 'wrong_event',
+        ticketId: 'tkt_2',
+        message: 'Ticket belongs to another event',
+      },
       manifest: {
         eventId: 'evt_1',
         checkInListId: 'cil_1',
@@ -548,7 +576,9 @@ describe('Tixkit React Native component adapters', () => {
     ]);
 
     const syncAction = status.children.find((child) => {
-      return Boolean(child && typeof child === 'object' && (child as RenderNode).props?.key === 'sync');
+      return Boolean(
+        child && typeof child === 'object' && (child as RenderNode).props?.key === 'sync',
+      );
     }) as RenderNode | undefined;
     expect(syncAction).toBeDefined();
     expect(syncAction?.type).toBe('Pressable');
@@ -562,7 +592,9 @@ describe('Tixkit React Native component adapters', () => {
     const components = createTixkitReactNativeComponents(runtime);
     const client = makeClient();
     const onResult = vi.fn();
-    const scanOnline = vi.spyOn(client, 'scanOnline').mockResolvedValue({ outcome: 'accepted', message: 'ok' });
+    const scanOnline = vi
+      .spyOn(client, 'scanOnline')
+      .mockResolvedValue({ outcome: 'accepted', message: 'ok' });
 
     const scanner = components.TixkitCameraScanner({
       client,
@@ -572,7 +604,9 @@ describe('Tixkit React Native component adapters', () => {
       onResult,
     }) as RenderNode;
     const camera = scanner.children.find((child) => {
-      return Boolean(child && typeof child === 'object' && (child as RenderNode).type === 'CameraView');
+      return Boolean(
+        child && typeof child === 'object' && (child as RenderNode).type === 'CameraView',
+      );
     }) as RenderNode | undefined;
 
     expect(scanner.type).toBe('View');
@@ -582,7 +616,9 @@ describe('Tixkit React Native component adapters', () => {
       barcodeScannerSettings: { barcodeTypes: ['qr'] },
     });
 
-    await (camera!.props!.onBarcodeScanned as (event: unknown) => Promise<void>)({ data: 'signed-ticket-payload' });
+    await (camera!.props!.onBarcodeScanned as (event: unknown) => Promise<void>)({
+      data: 'signed-ticket-payload',
+    });
 
     expect(scanOnline).toHaveBeenCalledWith('cil_1', 'signed-ticket-payload');
     expect(onResult).toHaveBeenCalledWith({ outcome: 'accepted', message: 'ok' });
@@ -592,7 +628,9 @@ describe('Tixkit React Native component adapters', () => {
     const runtime = createReactNativeRuntime();
     const components = createTixkitReactNativeComponents(runtime);
     const client = makeClient();
-    const scanOnline = vi.spyOn(client, 'scanOnline').mockResolvedValue({ outcome: 'accepted', message: 'ok' });
+    const scanOnline = vi
+      .spyOn(client, 'scanOnline')
+      .mockResolvedValue({ outcome: 'accepted', message: 'ok' });
     let now = 1_000;
 
     const scanner = components.TixkitCameraScanner({
@@ -603,7 +641,9 @@ describe('Tixkit React Native component adapters', () => {
       now: () => now,
     }) as RenderNode;
     const camera = scanner.children.find((child) => {
-      return Boolean(child && typeof child === 'object' && (child as RenderNode).type === 'CameraView');
+      return Boolean(
+        child && typeof child === 'object' && (child as RenderNode).type === 'CameraView',
+      );
     }) as RenderNode;
     const onBarcodeScanned = camera.props!.onBarcodeScanned as (event: unknown) => Promise<void>;
 
@@ -632,7 +672,11 @@ describe('Tixkit React Native component adapters', () => {
     expect(scanner.type).toBe('View');
     expect(textValues(scanner)).toEqual(['Camera permission denied', 'Allow camera']);
     const action = scanner.children.find((child) => {
-      return Boolean(child && typeof child === 'object' && (child as RenderNode).props?.key === 'permissionAction');
+      return Boolean(
+        child &&
+        typeof child === 'object' &&
+        (child as RenderNode).props?.key === 'permissionAction',
+      );
     }) as RenderNode | undefined;
     expect(action?.type).toBe('Pressable');
     (action!.props!.onPress as () => void)();
@@ -653,13 +697,20 @@ describe('Tixkit React Native component adapters', () => {
       onSyncResult,
     }) as RenderNode;
     const syncAction = scanner.children.find((child) => {
-      return Boolean(child && typeof child === 'object' && (child as RenderNode).props?.key === 'sync');
+      return Boolean(
+        child && typeof child === 'object' && (child as RenderNode).props?.key === 'sync',
+      );
     }) as RenderNode | undefined;
 
     await (syncAction!.props!.onPress as () => Promise<void>)();
 
     expect(onSync).toHaveBeenCalledWith({ checkInListId: 'cil_1', trigger: 'manual' });
-    expect(onSyncResult).toHaveBeenCalledWith({ accepted: 1, duplicates: 0, invalid: 0, results: [] });
+    expect(onSyncResult).toHaveBeenCalledWith({
+      accepted: 1,
+      duplicates: 0,
+      invalid: 0,
+      results: [],
+    });
   });
 });
 
@@ -711,7 +762,13 @@ describe('Pure-JS HMAC-SHA256 known-answer tests', () => {
       expiresAt: '2027-06-02T00:00:00.000Z',
       keyId: 'manifest:v1',
       tickets: [
-        { ticketId: 'tkt_1', ticketTypeId: 'tt_1', attendeeName: 'Ada Lovelace', qrHash: 'hash_1', status: 'valid' },
+        {
+          ticketId: 'tkt_1',
+          ticketTypeId: 'tt_1',
+          attendeeName: 'Ada Lovelace',
+          qrHash: 'hash_1',
+          status: 'valid',
+        },
       ],
     });
     const expected = createHmac('sha256', key).update(payload).digest();

@@ -160,7 +160,9 @@ export class QrService {
     const code = `TK-${randomBytes(6).toString('hex').toUpperCase()}`;
     const signedPayload = JSON.stringify({ ticketId, code, ts: Date.now() });
     const signature = createHmac('sha256', this.key).update(signedPayload).digest('hex');
-    const payload = Buffer.from(JSON.stringify({ p: signedPayload, s: signature })).toString('base64url');
+    const payload = Buffer.from(JSON.stringify({ p: signedPayload, s: signature })).toString(
+      'base64url',
+    );
     const hash = this.hashPayload(payload);
 
     return { ticketId, code, payload, hash };

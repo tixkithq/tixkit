@@ -191,8 +191,19 @@ async function seedProviderCheckout(db: Database, ids: ProviderSeedIds) {
         hold_id: ids.holdId,
         currency: 'USD',
         cart: JSON.stringify({ items: [{ ticketTypeId: ids.ticketTypeId, quantity: 1 }] }),
-        buyer: JSON.stringify({ email: `stripe-provider+${ids.suffix}@example.com`, firstName: 'Stripe', lastName: 'Buyer' }),
-        quote: JSON.stringify({ subtotalCents: 100, discountCents: 0, taxCents: 0, feeCents: 0, totalCents: 100, currency: 'USD' }),
+        buyer: JSON.stringify({
+          email: `stripe-provider+${ids.suffix}@example.com`,
+          firstName: 'Stripe',
+          lastName: 'Buyer',
+        }),
+        quote: JSON.stringify({
+          subtotalCents: 100,
+          discountCents: 0,
+          taxCents: 0,
+          feeCents: 0,
+          totalCents: 100,
+          currency: 'USD',
+        }),
         payment_intent_id: null,
         order_id: null,
         success_url: null,
@@ -207,7 +218,11 @@ async function seedProviderCheckout(db: Database, ids: ProviderSeedIds) {
   });
 }
 
-async function createPaidOrderForProviderIntent(db: Database, ids: ProviderSeedIds, paymentIntentId: string) {
+async function createPaidOrderForProviderIntent(
+  db: Database,
+  ids: ProviderSeedIds,
+  paymentIntentId: string,
+) {
   const now = new Date();
   await db.transaction().execute(async (trx) => {
     await trx
@@ -259,7 +274,10 @@ async function createPaidOrderForProviderIntent(db: Database, ids: ProviderSeedI
 async function cleanupProviderRows(db: Database, ids: ProviderSeedIds) {
   await db.deleteFrom('order_timeline_events').where('order_id', '=', ids.orderId).execute();
   await db.deleteFrom('refunds').where('order_id', '=', ids.orderId).execute();
-  await db.deleteFrom('payment_intents').where('checkout_session_id', '=', ids.checkoutSessionId).execute();
+  await db
+    .deleteFrom('payment_intents')
+    .where('checkout_session_id', '=', ids.checkoutSessionId)
+    .execute();
   await db.deleteFrom('orders').where('id', '=', ids.orderId).execute();
   await db.deleteFrom('checkout_sessions').where('id', '=', ids.checkoutSessionId).execute();
   await db.deleteFrom('checkout_holds').where('id', '=', ids.holdId).execute();
@@ -331,7 +349,14 @@ describeProvider('Stripe provider validation', () => {
 
     const paymentIntentRow = await db
       .selectFrom('payment_intents')
-      .select(['id', 'provider', 'provider_intent_id', 'amount_cents', 'currency', 'payment_account_id'])
+      .select([
+        'id',
+        'provider',
+        'provider_intent_id',
+        'amount_cents',
+        'currency',
+        'payment_account_id',
+      ])
       .where('checkout_session_id', '=', ids.checkoutSessionId)
       .executeTakeFirstOrThrow();
     expect(paymentIntentRow).toMatchObject({

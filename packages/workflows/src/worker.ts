@@ -49,7 +49,10 @@ async function runWorker(): Promise<void> {
   // This is a long-running workflow that periodically expires stale holds.
   try {
     const clientConnection = await Connection.connect({ address: config.temporalAddress });
-    const client = new Client({ connection: clientConnection, namespace: config.temporalNamespace });
+    const client = new Client({
+      connection: clientConnection,
+      namespace: config.temporalNamespace,
+    });
     const workflowId = holdExpirationWorkflowId();
     try {
       await client.workflow.start(holdExpirationWorkflow, {
@@ -59,7 +62,13 @@ async function runWorker(): Promise<void> {
       });
     } catch (err) {
       // Already running is fine.
-      if (!(err instanceof Error && (err.name === 'WorkflowExecutionAlreadyStartedError' || err.message.includes('already started')))) {
+      if (
+        !(
+          err instanceof Error &&
+          (err.name === 'WorkflowExecutionAlreadyStartedError' ||
+            err.message.includes('already started'))
+        )
+      ) {
         throw err;
       }
     }

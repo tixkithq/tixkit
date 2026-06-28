@@ -1,35 +1,41 @@
 import type { FastifyPluginAsync } from 'fastify';
-import type { Database } from '@tixkit/db';
+import { getDriver, type Database } from '@tixkit/db';
 import { createHash, randomBytes } from 'node:crypto';
 import { z } from 'zod';
 import { ulid } from 'ulid';
 import { ClerkAuthService } from '../../auth/clerk.js';
 import { parseJsonValue } from '../../http/contracts.js';
-import { parseBody } from '../../http/schemas.js';
+import { oauthRedirectUrlSchema, parseBody } from '../../http/schemas.js';
 import { ForbiddenError, UnauthorizedError, ValidationError } from '@tixkit/domain';
 
-const authorizeQuerySchema = z.object({
-  response_type: z.literal('code'),
-  client_id: z.string().min(1),
-  redirect_uri: z.string().url(),
-  scope: z.string().optional(),
-  state: z.string().optional(),
-}).strict();
+const authorizeQuerySchema = z
+  .object({
+    response_type: z.literal('code'),
+    client_id: z.string().min(1),
+    redirect_uri: oauthRedirectUrlSchema,
+    scope: z.string().optional(),
+    state: z.string().optional(),
+  })
+  .strict();
 
-const tokenSchema = z.object({
-  grant_type: z.enum(['authorization_code', 'refresh_token']),
-  client_id: z.string().min(1),
-  client_secret: z.string().min(1),
-  code: z.string().optional(),
-  redirect_uri: z.string().url().optional(),
-  refresh_token: z.string().optional(),
-}).strict();
+const tokenSchema = z
+  .object({
+    grant_type: z.enum(['authorization_code', 'refresh_token']),
+    client_id: z.string().min(1),
+    client_secret: z.string().min(1),
+    code: z.string().optional(),
+    redirect_uri: oauthRedirectUrlSchema.optional(),
+    refresh_token: z.string().optional(),
+  })
+  .strict();
 
-const revokeSchema = z.object({
-  client_id: z.string().min(1),
-  client_secret: z.string().min(1),
-  token: z.string().min(1),
-}).strict();
+const revokeSchema = z
+  .object({
+    client_id: z.string().min(1),
+    client_secret: z.string().min(1),
+    token: z.string().min(1),
+  })
+  .strict();
 
 function hashSecret(value: string): string {
   return createHash('sha256').update(value).digest('hex');
@@ -40,7 +46,8 @@ function newSecret(prefix: string): string {
 }
 
 function parseStringArray(value: unknown): string[] {
-  if (Array.isArray(value)) return value.filter((entry): entry is string => typeof entry === 'string');
+  if (Array.isArray(value))
+    return value.filter((entry): entry is string => typeof entry === 'string');
   return parseJsonValue<string[]>(value, []);
 }
 
@@ -58,7 +65,11 @@ async function loadClient(db: Database, clientId: string, clientSecret?: string)
   return app;
 }
 
-function assertScopesAllowed(requestedScopes: string[], allowedScopes: string[], principalScopes?: string[]) {
+function assertScopesAllowed(
+  requestedScopes: string[],
+  allowedScopes: string[],
+  principalScopes?: string[],
+) {
   const requested = requestedScopes.length > 0 ? requestedScopes : allowedScopes;
   const allowed = new Set(allowedScopes);
   const principalAllowed = principalScopes ? new Set(principalScopes) : undefined;
@@ -70,6 +81,17 @@ function assertScopesAllowed(requestedScopes: string[], allowedScopes: string[],
   return requested;
 }
 
+function assertPrincipalCanAuthorizeOrganizationWideOAuth(principal: {
+  brandIds?: string[];
+  eventIds?: string[];
+}) {
+  if ((principal.brandIds?.length ?? 0) > 0 || (principal.eventIds?.length ?? 0) > 0) {
+    throw new ForbiddenError(
+      'Scoped principals cannot authorize organization-wide OAuth applications',
+    );
+  }
+}
+
 export const oauthAuthorizeRoutes: FastifyPluginAsync = async (app) => {
   const db = app.context.db;
 
@@ -79,6 +101,7 @@ export const oauthAuthorizeRoutes: FastifyPluginAsync = async (app) => {
     const oauthApp = await loadClient(db, query.client_id);
     ClerkAuthService.requireResourceTenant(principal, oauthApp, 'OAuthApplication', oauthApp.id);
     ClerkAuthService.requireOrganizationScope(principal, oauthApp.organization_id);
+    assertPrincipalCanAuthorizeOrganizationWideOAuth(principal);
 
     const redirectUris = parseStringArray(oauthApp.redirect_uris);
     if (!redirectUris.includes(query.redirect_uri)) {
@@ -90,19 +113,22 @@ export const oauthAuthorizeRoutes: FastifyPluginAsync = async (app) => {
       principal.scopes,
     );
     const code = newSecret('tk_oac');
-    await db.insertInto('oauth_authorization_codes').values({
-      id: `oac_${ulid()}`,
-      oauth_application_id: oauthApp.id,
-      tenant_id: oauthApp.tenant_id,
-      organization_id: oauthApp.organization_id,
-      user_id: principal.type === 'user' ? principal.id : null,
-      code_hash: hashSecret(code),
-      redirect_uri: query.redirect_uri,
-      scopes: JSON.stringify(scopes),
-      expires_at: new Date(Date.now() + 10 * 60 * 1000),
-      consumed_at: null,
-      created_at: new Date(),
-    }).execute();
+    await db
+      .insertInto('oauth_authorization_codes')
+      .values({
+        id: `oac_${ulid()}`,
+        oauth_application_id: oauthApp.id,
+        tenant_id: oauthApp.tenant_id,
+        organization_id: oauthApp.organization_id,
+        user_id: principal.type === 'user' ? principal.id : null,
+        code_hash: hashSecret(code),
+        redirect_uri: query.redirect_uri,
+        scopes: JSON.stringify(scopes),
+        expires_at: new Date(Date.now() + 10 * 60 * 1000),
+        consumed_at: null,
+        created_at: new Date(),
+      })
+      .execute();
 
     const redirectUrl = new URL(query.redirect_uri);
     redirectUrl.searchParams.set('code', code);
@@ -120,21 +146,42 @@ export const oauthTokenRoutes: FastifyPluginAsync = async (app) => {
     const now = new Date();
 
     if (body.grant_type === 'authorization_code') {
-      if (!body.code || !body.redirect_uri) throw new ValidationError('code and redirect_uri are required');
+      if (!body.code || !body.redirect_uri)
+        throw new ValidationError('code and redirect_uri are required');
       const code = await db
         .selectFrom('oauth_authorization_codes')
         .selectAll()
         .where('code_hash', '=', hashSecret(body.code))
         .where('oauth_application_id', '=', oauthApp.id)
         .executeTakeFirst();
-      if (!code || code.consumed_at || new Date(code.expires_at) <= now || code.redirect_uri !== body.redirect_uri) {
+      if (
+        !code ||
+        code.consumed_at ||
+        new Date(code.expires_at) <= now ||
+        code.redirect_uri !== body.redirect_uri
+      ) {
         throw new UnauthorizedError('Invalid or expired authorization code');
       }
-      await db.updateTable('oauth_authorization_codes').set({ consumed_at: now }).where('id', '=', code.id).execute();
+      const consumeQuery = db
+        .updateTable('oauth_authorization_codes')
+        .set({ consumed_at: now })
+        .where('id', '=', code.id)
+        .where('consumed_at', 'is', null)
+        .where('expires_at', '>', now);
+      const consumedCode =
+        getDriver() === 'postgres'
+          ? await consumeQuery.returningAll().executeTakeFirst()
+          : await consumeQuery.executeTakeFirst().then((result) => {
+              const updatedRows = Number(result?.numUpdatedRows ?? 0);
+              return updatedRows === 1 ? { ...code, consumed_at: now } : undefined;
+            });
+      if (!consumedCode) {
+        throw new UnauthorizedError('Invalid or expired authorization code');
+      }
       return issueTokens({
         db,
         oauthApp,
-        scopes: parseStringArray(code.scopes),
+        scopes: parseStringArray(consumedCode.scopes),
         now,
       });
     }
@@ -163,8 +210,18 @@ export const oauthTokenRoutes: FastifyPluginAsync = async (app) => {
     const oauthApp = await loadClient(db, body.client_id, body.client_secret);
     const tokenHash = hashSecret(body.token);
     const now = new Date();
-    await db.updateTable('oauth_access_tokens').set({ revoked_at: now, updated_at: now }).where('oauth_application_id', '=', oauthApp.id).where('token_hash', '=', tokenHash).execute();
-    await db.updateTable('oauth_refresh_tokens').set({ revoked_at: now, updated_at: now }).where('oauth_application_id', '=', oauthApp.id).where('token_hash', '=', tokenHash).execute();
+    await db
+      .updateTable('oauth_access_tokens')
+      .set({ revoked_at: now, updated_at: now })
+      .where('oauth_application_id', '=', oauthApp.id)
+      .where('token_hash', '=', tokenHash)
+      .execute();
+    await db
+      .updateTable('oauth_refresh_tokens')
+      .set({ revoked_at: now, updated_at: now })
+      .where('oauth_application_id', '=', oauthApp.id)
+      .where('token_hash', '=', tokenHash)
+      .execute();
     return reply.status(200).send({ revoked: true });
   });
 };
@@ -177,18 +234,21 @@ async function issueTokens(input: {
 }) {
   const refreshToken = newSecret('tk_ort');
   const refreshId = `ort_${ulid()}`;
-  await input.db.insertInto('oauth_refresh_tokens').values({
-    id: refreshId,
-    oauth_application_id: input.oauthApp.id,
-    tenant_id: input.oauthApp.tenant_id,
-    organization_id: input.oauthApp.organization_id,
-    token_hash: hashSecret(refreshToken),
-    scopes: JSON.stringify(input.scopes),
-    expires_at: new Date(input.now.getTime() + 30 * 24 * 60 * 60 * 1000),
-    revoked_at: null,
-    created_at: input.now,
-    updated_at: input.now,
-  }).execute();
+  await input.db
+    .insertInto('oauth_refresh_tokens')
+    .values({
+      id: refreshId,
+      oauth_application_id: input.oauthApp.id,
+      tenant_id: input.oauthApp.tenant_id,
+      organization_id: input.oauthApp.organization_id,
+      token_hash: hashSecret(refreshToken),
+      scopes: JSON.stringify(input.scopes),
+      expires_at: new Date(input.now.getTime() + 30 * 24 * 60 * 60 * 1000),
+      revoked_at: null,
+      created_at: input.now,
+      updated_at: input.now,
+    })
+    .execute();
   return {
     ...(await issueAccessToken({ ...input, refreshTokenId: refreshId })),
     refresh_token: refreshToken,
@@ -204,19 +264,22 @@ async function issueAccessToken(input: {
 }) {
   const accessToken = newSecret('tk_oat');
   const expiresIn = 3600;
-  await input.db.insertInto('oauth_access_tokens').values({
-    id: `oat_${ulid()}`,
-    oauth_application_id: input.oauthApp.id,
-    refresh_token_id: input.refreshTokenId,
-    tenant_id: input.oauthApp.tenant_id,
-    organization_id: input.oauthApp.organization_id,
-    token_hash: hashSecret(accessToken),
-    scopes: JSON.stringify(input.scopes),
-    expires_at: new Date(input.now.getTime() + expiresIn * 1000),
-    revoked_at: null,
-    created_at: input.now,
-    updated_at: input.now,
-  }).execute();
+  await input.db
+    .insertInto('oauth_access_tokens')
+    .values({
+      id: `oat_${ulid()}`,
+      oauth_application_id: input.oauthApp.id,
+      refresh_token_id: input.refreshTokenId,
+      tenant_id: input.oauthApp.tenant_id,
+      organization_id: input.oauthApp.organization_id,
+      token_hash: hashSecret(accessToken),
+      scopes: JSON.stringify(input.scopes),
+      expires_at: new Date(input.now.getTime() + expiresIn * 1000),
+      revoked_at: null,
+      created_at: input.now,
+      updated_at: input.now,
+    })
+    .execute();
   return {
     access_token: accessToken,
     token_type: 'Bearer',

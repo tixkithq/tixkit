@@ -140,7 +140,9 @@ describe('OpenCoreEmailSdkTransport', () => {
 describe('validateProviderFields', () => {
   it('should validate supported fields', () => {
     const input = baseInput({
-      attachments: [{ filename: 'ticket.pdf', contentType: 'application/pdf', content: 'base64data' }],
+      attachments: [
+        { filename: 'ticket.pdf', contentType: 'application/pdf', content: 'base64data' },
+      ],
     });
     const result = validateProviderFields(input, 'ses');
     expect(result.valid).toBe(true);
@@ -149,7 +151,9 @@ describe('validateProviderFields', () => {
 
   it('should flag unsupported attachment field for providers without attachment support', () => {
     const input = baseInput({
-      attachments: [{ filename: 'ticket.pdf', contentType: 'application/pdf', content: 'base64data' }],
+      attachments: [
+        { filename: 'ticket.pdf', contentType: 'application/pdf', content: 'base64data' },
+      ],
       metadata: { notificationType: 'transactional' },
     });
     // smtp supports attachments but not metadata/tags

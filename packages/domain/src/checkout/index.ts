@@ -1,7 +1,18 @@
-import type { BaseEntity, CurrencyCode, IdempotencyKey, ISO8601Date, Ulid } from '../shared/index.js';
+import type {
+  BaseEntity,
+  CurrencyCode,
+  IdempotencyKey,
+  ISO8601Date,
+  Ulid,
+} from '../shared/index.js';
 import type { PriceQuote, CartInput } from '../pricing/index.js';
 
-export type CheckoutSessionStatus = 'open' | 'pending_payment' | 'completed' | 'expired' | 'cancelled';
+export type CheckoutSessionStatus =
+  | 'open'
+  | 'pending_payment'
+  | 'completed'
+  | 'expired'
+  | 'cancelled';
 
 export type BuyerInfo = {
   email?: string;
@@ -125,7 +136,9 @@ export type CreateCheckoutSessionInput = {
   idempotencyKey: IdempotencyKey;
 };
 
-export type UpdateCheckoutSessionInput = Partial<Pick<CheckoutSession, 'buyer' | 'successUrl' | 'cancelUrl'>>;
+export type UpdateCheckoutSessionInput = Partial<
+  Pick<CheckoutSession, 'buyer' | 'successUrl' | 'cancelUrl'>
+>;
 
 export type ConfirmCheckoutInput = {
   sessionId: Ulid;

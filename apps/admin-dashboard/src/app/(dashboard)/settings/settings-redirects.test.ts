@@ -1,19 +1,19 @@
-import { redirect } from 'next/navigation'
-import { describe, expect, it, vi } from 'vitest'
+import { redirect } from 'next/navigation';
+import { describe, expect, it, vi } from 'vitest';
 
-import OrganizationSettingsRedirect from './organization/page'
-import TeamSettingsRedirect from './team/page'
+import OrganizationSettingsRedirect from './organization/page';
+import TeamSettingsRedirect from './team/page';
 
 describe('settings legacy route redirects', () => {
   it('redirects old organization settings URL to workspace settings', () => {
-    OrganizationSettingsRedirect()
+    OrganizationSettingsRedirect();
 
-    expect(vi.mocked(redirect)).toHaveBeenCalledWith('/settings/workspace')
-  })
+    expect(vi.mocked(redirect)).toHaveBeenCalledWith('/settings/workspace');
+  });
 
   it('redirects old team settings URL to members settings', () => {
-    TeamSettingsRedirect()
+    TeamSettingsRedirect();
 
-    expect(vi.mocked(redirect)).toHaveBeenCalledWith('/settings/members')
-  })
-})
+    expect(vi.mocked(redirect)).toHaveBeenCalledWith('/settings/members');
+  });
+});

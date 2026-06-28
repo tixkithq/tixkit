@@ -1,8 +1,8 @@
-'use client'
+'use client';
 
-import * as React from 'react'
-import { Loader2 } from 'lucide-react'
-import { cn } from '@/lib/utils'
+import * as React from 'react';
+import { Loader2 } from 'lucide-react';
+import { cn } from '@/lib/utils';
 import {
   AlertDialog,
   AlertDialogCancel,
@@ -11,22 +11,22 @@ import {
   AlertDialogFooter,
   AlertDialogHeader,
   AlertDialogTitle,
-} from '@/components/ui/alert-dialog'
-import { Button } from '@/components/ui/button'
+} from '@/components/ui/alert-dialog';
+import { Button } from '@/components/ui/button';
 
 type ConfirmDialogProps = {
-  open: boolean
-  onOpenChange: (open: boolean) => void
-  title: React.ReactNode
-  description?: React.ReactNode
-  confirmText?: string
-  cancelText?: string
-  variant?: 'default' | 'destructive'
-  pending?: boolean
-  onConfirm: () => void | Promise<void>
-  className?: string
-  children?: React.ReactNode
-}
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  title: React.ReactNode;
+  description?: React.ReactNode;
+  confirmText?: string;
+  cancelText?: string;
+  variant?: 'default' | 'destructive';
+  pending?: boolean;
+  onConfirm: () => void | Promise<void>;
+  className?: string;
+  children?: React.ReactNode;
+};
 
 export function ConfirmDialog({
   open,
@@ -41,25 +41,25 @@ export function ConfirmDialog({
   className,
   children,
 }: ConfirmDialogProps) {
-  const [internalPending, setInternalPending] = React.useState(false)
-  const isLoading = pending || internalPending
+  const [internalPending, setInternalPending] = React.useState(false);
+  const isLoading = pending || internalPending;
 
   const handleConfirm = React.useCallback(async () => {
-    const result = onConfirm()
+    const result = onConfirm();
     if (result instanceof Promise) {
-      setInternalPending(true)
+      setInternalPending(true);
       try {
-        await result
+        await result;
       } finally {
-        setInternalPending(false)
+        setInternalPending(false);
       }
     }
-  }, [onConfirm])
+  }, [onConfirm]);
 
   return (
     <AlertDialog open={open} onOpenChange={onOpenChange}>
       <AlertDialogContent className={cn(className)}>
-        <AlertDialogHeader className='text-start'>
+        <AlertDialogHeader className="text-start">
           <AlertDialogTitle>{title}</AlertDialogTitle>
           {description && (
             <AlertDialogDescription asChild>
@@ -69,20 +69,18 @@ export function ConfirmDialog({
         </AlertDialogHeader>
         {children}
         <AlertDialogFooter>
-          <AlertDialogCancel disabled={isLoading}>
-            {cancelText}
-          </AlertDialogCancel>
+          <AlertDialogCancel disabled={isLoading}>{cancelText}</AlertDialogCancel>
           <Button
-            type='button'
+            type="button"
             variant={variant === 'destructive' ? 'destructive' : 'default'}
             disabled={isLoading}
             onClick={handleConfirm}
           >
-            {isLoading && <Loader2 className='size-4 animate-spin' />}
+            {isLoading && <Loader2 className="size-4 animate-spin" />}
             {confirmText}
           </Button>
         </AlertDialogFooter>
       </AlertDialogContent>
     </AlertDialog>
-  )
+  );
 }

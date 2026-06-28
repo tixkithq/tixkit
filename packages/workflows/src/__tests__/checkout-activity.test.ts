@@ -39,12 +39,14 @@ const dbState = vi.hoisted(() => ({
   },
   tickets: [] as Record<string, unknown>[],
   ticketTypes: [{ id: 'tt_1', name: 'General Admission' }] as Record<string, unknown>[],
-  attendees: [{
-    id: 'att_1',
-    email: 'ada@example.com',
-    first_name: 'Ada',
-    last_name: 'Lovelace',
-  }] as Record<string, unknown>[],
+  attendees: [
+    {
+      id: 'att_1',
+      email: 'ada@example.com',
+      first_name: 'Ada',
+      last_name: 'Lovelace',
+    },
+  ] as Record<string, unknown>[],
   destroy: vi.fn(),
 }));
 
@@ -114,7 +116,8 @@ vi.mock('@tixkit/db', () => {
   };
 });
 
-const { sendConfirmationEmailActivity, issueTicketsActivity } = await import('../activities/checkout.js');
+const { sendConfirmationEmailActivity, issueTicketsActivity } =
+  await import('../activities/checkout.js');
 
 describe('sendConfirmationEmailActivity', () => {
   beforeEach(() => {
@@ -124,12 +127,14 @@ describe('sendConfirmationEmailActivity', () => {
     dbState.createdJobs = [];
     dbState.tickets = [];
     dbState.ticketTypes = [{ id: 'tt_1', name: 'General Admission' }];
-    dbState.attendees = [{
-      id: 'att_1',
-      email: 'ada@example.com',
-      first_name: 'Ada',
-      last_name: 'Lovelace',
-    }];
+    dbState.attendees = [
+      {
+        id: 'att_1',
+        email: 'ada@example.com',
+        first_name: 'Ada',
+        last_name: 'Lovelace',
+      },
+    ];
     dbState.destroy.mockClear();
   });
 
@@ -175,14 +180,16 @@ describe('issueTicketsActivity', () => {
     dbState.providerRoute = { id: 'epr_1' };
     dbState.templateVersion = { id: 'ntv_default' };
     dbState.createdJobs = [];
-    dbState.tickets = [{
-      id: 'tkt_1',
-      order_id: 'ord_1',
-      attendee_id: 'att_1',
-      ticket_type_id: 'tt_1',
-      code: 'TK-ABC123',
-      qr_payload: 'signed_qr_payload_1',
-    }];
+    dbState.tickets = [
+      {
+        id: 'tkt_1',
+        order_id: 'ord_1',
+        attendee_id: 'att_1',
+        ticket_type_id: 'tt_1',
+        code: 'TK-ABC123',
+        qr_payload: 'signed_qr_payload_1',
+      },
+    ];
     dbState.destroy.mockClear();
   });
 
@@ -198,7 +205,12 @@ describe('issueTicketsActivity', () => {
     expect(dbState.createdJobs).toHaveLength(1);
 
     const variables = dbState.createdJobs[0].variables as {
-      attachments: { filename: string; contentType: string; content: string; contentEncoding: 'base64' }[];
+      attachments: {
+        filename: string;
+        contentType: string;
+        content: string;
+        contentEncoding: 'base64';
+      }[];
     };
     expect(variables.attachments).toHaveLength(1);
     expect(variables.attachments[0]).toMatchObject({

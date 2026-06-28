@@ -1,63 +1,63 @@
-import { render, screen } from '@testing-library/react'
-import '@testing-library/jest-dom/vitest'
-import * as React from 'react'
-import { JSDOM } from 'jsdom'
-import { beforeEach, describe, expect, it, vi } from 'vitest'
-import type { AdminOrderDetail } from '@/lib/api'
-import { OrderDetailView, attendeeDisplayName } from './order-detail-view'
+import { render, screen } from '@testing-library/react';
+import '@testing-library/jest-dom/vitest';
+import * as React from 'react';
+import { JSDOM } from 'jsdom';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
+import type { AdminOrderDetail } from '@/lib/api';
+import { OrderDetailView, attendeeDisplayName } from './order-detail-view';
 
 const orderState = vi.hoisted(() => ({
   data: undefined as unknown,
   loading: false,
   error: null as Error | null,
   refetch: vi.fn(),
-}))
+}));
 
 if (typeof window === 'undefined') {
-  const dom = new JSDOM('<!doctype html><html><body></body></html>')
+  const dom = new JSDOM('<!doctype html><html><body></body></html>');
   Object.assign(globalThis, {
     window: dom.window,
     document: dom.window.document,
     HTMLElement: dom.window.HTMLElement,
     Node: dom.window.Node,
     navigator: dom.window.navigator,
-  })
+  });
 }
 
 vi.mock('next/link', () => ({
   default: ({ href, children }: { href: string; children: React.ReactNode }) =>
     React.createElement('a', { href }, children),
-}))
+}));
 
 vi.mock('sonner', () => ({
   toast: {
     success: vi.fn(),
     error: vi.fn(),
   },
-}))
+}));
 
 vi.mock('@/hooks/use-admin-data', () => ({
   useAdminData: () => orderState,
-}))
+}));
 
 vi.mock('@/components/confirm-dialog', () => ({
   ConfirmDialog: () => null,
-}))
+}));
 
 vi.mock('./refund-dialog', () => ({
   RefundDialog: () => null,
-}))
+}));
 
 vi.mock('@/lib/api', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('@/lib/api')>()
+  const actual = await importOriginal<typeof import('@/lib/api')>();
   return {
     ...actual,
     adminApi: {
       getOrder: vi.fn(),
       cancelOrder: vi.fn(),
     },
-  }
-})
+  };
+});
 
 function makeOrder(overrides: Partial<AdminOrderDetail> = {}): AdminOrderDetail {
   return {
@@ -162,66 +162,82 @@ function makeOrder(overrides: Partial<AdminOrderDetail> = {}): AdminOrderDetail 
       tickets: 'issued',
     },
     ...overrides,
-  }
+  };
 }
 
 beforeEach(() => {
-  document.body.innerHTML = ''
-  orderState.data = undefined
-  orderState.loading = false
-  orderState.error = null
-  orderState.refetch.mockClear()
-})
+  document.body.innerHTML = '';
+  orderState.data = undefined;
+  orderState.loading = false;
+  orderState.error = null;
+  orderState.refetch.mockClear();
+});
 
 describe('attendeeDisplayName', () => {
   it('uses a non-empty explicit attendee name', () => {
-    expect(attendeeDisplayName({ id: 'att_1', name: ' Ada Lovelace ', email: 'ada@example.test' })).toBe('Ada Lovelace')
-  })
+    expect(
+      attendeeDisplayName({ id: 'att_1', name: ' Ada Lovelace ', email: 'ada@example.test' }),
+    ).toBe('Ada Lovelace');
+  });
 
   it('falls back from empty names to first and last name', () => {
-    expect(attendeeDisplayName({
-      id: 'att_1',
-      name: '',
-      firstName: ' Grace ',
-      lastName: ' Hopper ',
-      email: 'grace@example.test',
-    })).toBe('Grace Hopper')
-  })
+    expect(
+      attendeeDisplayName({
+        id: 'att_1',
+        name: '',
+        firstName: ' Grace ',
+        lastName: ' Hopper ',
+        email: 'grace@example.test',
+      }),
+    ).toBe('Grace Hopper');
+  });
 
   it('falls back from empty name parts to email and then id', () => {
-    expect(attendeeDisplayName({ id: 'att_1', name: '', firstName: '', lastName: '', email: ' buyer@example.test ' })).toBe('buyer@example.test')
-    expect(attendeeDisplayName({ id: 'att_2', name: '', firstName: '', lastName: '', email: '' })).toBe('att_2')
-  })
-})
+    expect(
+      attendeeDisplayName({
+        id: 'att_1',
+        name: '',
+        firstName: '',
+        lastName: '',
+        email: ' buyer@example.test ',
+      }),
+    ).toBe('buyer@example.test');
+    expect(
+      attendeeDisplayName({ id: 'att_2', name: '', firstName: '', lastName: '', email: '' }),
+    ).toBe('att_2');
+  });
+});
 
 describe('OrderDetailView', () => {
   it('renders buyer, attendee, line item, answer, consent, refund, delivery, and timeline panels', () => {
-    orderState.data = makeOrder()
+    orderState.data = makeOrder();
 
-    render(React.createElement(OrderDetailView, { orderId: 'ord_1' }))
+    render(React.createElement(OrderDetailView, { orderId: 'ord_1' }));
 
-    expect(screen.getByText('Alice Buyer')).toBeInTheDocument()
-    expect(screen.getByText('alice@example.test')).toBeInTheDocument()
-    expect(screen.getByText('fallback@example.test')).toBeInTheDocument()
-    expect(screen.getByText('Grace Hopper')).toBeInTheDocument()
-    expect(screen.getByText('VIP Ticket')).toBeInTheDocument()
-    expect(screen.getByText(/Qty 2/)).toBeInTheDocument()
-    expect(screen.getByText(/Discount/)).toBeInTheDocument()
-    expect(screen.getByText('Company')).toBeInTheDocument()
-    expect(screen.getByText('Analytical Engine LLC')).toBeInTheDocument()
-    expect(screen.getByText('Meal preference')).toBeInTheDocument()
-    expect(screen.getByText('["Vegetarian","Gluten free"]')).toBeInTheDocument()
-    expect(screen.getByText('Photography')).toBeInTheDocument()
-    expect(screen.getByText('{"consentText":"I agree to event photography.","consentVersion":"v2"}')).toBeInTheDocument()
-    expect(screen.getByText('partial refund')).toBeInTheDocument()
-    expect(screen.getByText('succeeded')).toBeInTheDocument()
-    expect(screen.getByText('Email')).toBeInTheDocument()
-    expect(screen.getByText('sent')).toBeInTheDocument()
-    expect(screen.getByText('Tickets')).toBeInTheDocument()
-    expect(screen.getByText('issued')).toBeInTheDocument()
-    expect(screen.getByText('Payment captured')).toBeInTheDocument()
-    expect(screen.getByText('Refund Processed')).toBeInTheDocument()
-  })
+    expect(screen.getByText('Alice Buyer')).toBeInTheDocument();
+    expect(screen.getByText('alice@example.test')).toBeInTheDocument();
+    expect(screen.getByText('fallback@example.test')).toBeInTheDocument();
+    expect(screen.getByText('Grace Hopper')).toBeInTheDocument();
+    expect(screen.getByText('VIP Ticket')).toBeInTheDocument();
+    expect(screen.getByText(/Qty 2/)).toBeInTheDocument();
+    expect(screen.getByText(/Discount/)).toBeInTheDocument();
+    expect(screen.getByText('Company')).toBeInTheDocument();
+    expect(screen.getByText('Analytical Engine LLC')).toBeInTheDocument();
+    expect(screen.getByText('Meal preference')).toBeInTheDocument();
+    expect(screen.getByText('["Vegetarian","Gluten free"]')).toBeInTheDocument();
+    expect(screen.getByText('Photography')).toBeInTheDocument();
+    expect(
+      screen.getByText('{"consentText":"I agree to event photography.","consentVersion":"v2"}'),
+    ).toBeInTheDocument();
+    expect(screen.getByText('partial refund')).toBeInTheDocument();
+    expect(screen.getByText('succeeded')).toBeInTheDocument();
+    expect(screen.getByText('Email')).toBeInTheDocument();
+    expect(screen.getByText('sent')).toBeInTheDocument();
+    expect(screen.getByText('Tickets')).toBeInTheDocument();
+    expect(screen.getByText('issued')).toBeInTheDocument();
+    expect(screen.getByText('Payment captured')).toBeInTheDocument();
+    expect(screen.getByText('Refund Processed')).toBeInTheDocument();
+  });
 
   it('renders empty-state fallbacks for sparse order details', () => {
     orderState.data = makeOrder({
@@ -239,18 +255,18 @@ describe('OrderDetailView', () => {
         email: 'not_applicable',
         tickets: 'pending',
       },
-    })
+    });
 
-    render(React.createElement(OrderDetailView, { orderId: 'ord_1' }))
+    render(React.createElement(OrderDetailView, { orderId: 'ord_1' }));
 
-    expect(screen.getByText('Unknown')).toBeInTheDocument()
-    expect(screen.getByText('No attendee details available.')).toBeInTheDocument()
-    expect(screen.getByText('No line items available.')).toBeInTheDocument()
-    expect(screen.getAllByText('No answers captured.')).toHaveLength(2)
-    expect(screen.getByText('No consent snapshots captured.')).toBeInTheDocument()
-    expect(screen.getByText('No refunds recorded.')).toBeInTheDocument()
-    expect(screen.getByText('not applicable')).toBeInTheDocument()
-    expect(screen.getByText('pending')).toBeInTheDocument()
-    expect(screen.getByText('Order Created')).toBeInTheDocument()
-  })
-})
+    expect(screen.getByText('Unknown')).toBeInTheDocument();
+    expect(screen.getByText('No attendee details available.')).toBeInTheDocument();
+    expect(screen.getByText('No line items available.')).toBeInTheDocument();
+    expect(screen.getAllByText('No answers captured.')).toHaveLength(2);
+    expect(screen.getByText('No consent snapshots captured.')).toBeInTheDocument();
+    expect(screen.getByText('No refunds recorded.')).toBeInTheDocument();
+    expect(screen.getByText('not applicable')).toBeInTheDocument();
+    expect(screen.getByText('pending')).toBeInTheDocument();
+    expect(screen.getByText('Order Created')).toBeInTheDocument();
+  });
+});

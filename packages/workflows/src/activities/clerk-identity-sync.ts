@@ -34,7 +34,11 @@ export async function syncUserActivity(input: {
     });
     return okResult({ userId: record.id, created: true });
   } catch (err) {
-    return errResult('USER_SYNC_FAILED', err instanceof Error ? err.message : 'Unknown error', true);
+    return errResult(
+      'USER_SYNC_FAILED',
+      err instanceof Error ? err.message : 'Unknown error',
+      true,
+    );
   } finally {
     await db.destroy();
   }
@@ -85,7 +89,11 @@ export async function deleteUserActivity(input: {
     );
     return okResult({ suspended: profiles.length > 0 });
   } catch (err) {
-    return errResult('USER_DELETE_FAILED', err instanceof Error ? err.message : 'Unknown error', true);
+    return errResult(
+      'USER_DELETE_FAILED',
+      err instanceof Error ? err.message : 'Unknown error',
+      true,
+    );
   } finally {
     await db.destroy();
   }

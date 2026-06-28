@@ -1,5 +1,5 @@
-import { TeamView } from '@/features/team/team-view'
+import { TeamView } from '@/features/team/team-view';
 
 export default function Page() {
-  return <TeamView />
+  return <TeamView />;
 }

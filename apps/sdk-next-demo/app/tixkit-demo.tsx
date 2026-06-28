@@ -22,7 +22,10 @@ export function TixkitDemo() {
       <main style={{ display: 'grid', gap: 24, margin: '0 auto', maxWidth: 960, padding: 32 }}>
         <section>
           <h1>Tixkit Next SDK Demo</h1>
-          <p>External App Router demo for checkout buttons, widgets, lifecycle callbacks, and route handlers.</p>
+          <p>
+            External App Router demo for checkout buttons, widgets, lifecycle callbacks, and route
+            handlers.
+          </p>
         </section>
 
         <section aria-label="Inline checkout button">

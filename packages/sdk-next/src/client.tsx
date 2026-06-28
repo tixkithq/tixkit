@@ -13,7 +13,13 @@ const TixkitContext = createContext<TixkitClientConfig | null>(null);
 const CHECKOUT_IFRAME_SANDBOX =
   'allow-scripts allow-same-origin allow-forms allow-popups allow-popups-to-escape-sandbox';
 
-export function TixkitProvider({ children, config }: { children: ReactNode; config: TixkitClientConfig }) {
+export function TixkitProvider({
+  children,
+  config,
+}: {
+  children: ReactNode;
+  config: TixkitClientConfig;
+}) {
   return <TixkitContext.Provider value={config}>{children}</TixkitContext.Provider>;
 }
 
@@ -119,7 +125,13 @@ export function TixkitCheckoutButton({
 
   const handleClick = () => {
     const checkoutUrl = buildCheckoutUrl(base, {
-      eventId, items, brand, products, discountCode, trackingId, mode: checkoutMode,
+      eventId,
+      items,
+      brand,
+      products,
+      discountCode,
+      trackingId,
+      mode: checkoutMode,
     });
     if (checkoutMode === 'modal') {
       modalRef.current = window.open(checkoutUrl, 'tixkit-checkout', 'width=600,height=700');
@@ -136,7 +148,15 @@ export function TixkitCheckoutButton({
     return (
       <div style={{ position: 'relative', width: '100%', minHeight: '600px' }}>
         <iframe
-          src={buildCheckoutUrl(base, { eventId, items, brand, products, discountCode, trackingId, mode: 'inline' })}
+          src={buildCheckoutUrl(base, {
+            eventId,
+            items,
+            brand,
+            products,
+            discountCode,
+            trackingId,
+            mode: 'inline',
+          })}
           style={{ border: 'none', width: '100%', minHeight: '600px' }}
           title="Tixkit Checkout"
           loading="lazy"
@@ -144,7 +164,10 @@ export function TixkitCheckoutButton({
           allow="payment; publickey-credentials-create *; publickey-credentials-get *"
         />
         <button
-          onClick={() => { setInlineOpen(false); if (onEvent) onEvent('closed', {}); }}
+          onClick={() => {
+            setInlineOpen(false);
+            if (onEvent) onEvent('closed', {});
+          }}
           style={{ position: 'absolute', top: 8, right: 8, zIndex: 1 }}
           aria-label="Close checkout"
         >

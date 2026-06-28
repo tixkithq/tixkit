@@ -82,9 +82,12 @@ function toSpanAttributes(value: object): Attributes {
 }
 
 function isAttributeValue(value: unknown): value is AttributeValue {
-  if (typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean') return true;
+  if (typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean')
+    return true;
   if (!Array.isArray(value)) return false;
-  return value.every((entry) => typeof entry === 'string' || typeof entry === 'number' || typeof entry === 'boolean');
+  return value.every(
+    (entry) => typeof entry === 'string' || typeof entry === 'number' || typeof entry === 'boolean',
+  );
 }
 
 function toReadableSpan(serialized: SerializableWorkflowSpan, resource: Resource): ReadableSpan {
@@ -114,7 +117,9 @@ function toReadableSpan(serialized: SerializableWorkflowSpan, resource: Resource
     ended: serialized.ended,
     resource,
     instrumentationScope:
-      serialized.instrumentationScope ?? serialized.instrumentationLibrary ?? TEMPORAL_WORKFLOW_SCOPE,
+      serialized.instrumentationScope ??
+      serialized.instrumentationLibrary ??
+      TEMPORAL_WORKFLOW_SCOPE,
     droppedAttributesCount: serialized.droppedAttributesCount,
     droppedEventsCount: serialized.droppedEventsCount,
     droppedLinksCount: serialized.droppedLinksCount,

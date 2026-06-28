@@ -34,9 +34,12 @@ test.describe('browser security headers', () => {
   test('hosted checkout sends embeddable CSP for widget iframe usage', async ({ page }) => {
     await requireReachable(page, checkoutBaseUrl, 'checkout app');
 
-    const response = await page.request.get(`${checkoutBaseUrl}/checkout?eventId=evt_security_headers`, {
-      failOnStatusCode: false,
-    });
+    const response = await page.request.get(
+      `${checkoutBaseUrl}/checkout?eventId=evt_security_headers`,
+      {
+        failOnStatusCode: false,
+      },
+    );
 
     expect(response.status()).toBeLessThan(500);
     expectCspDirectives(response.headers()['content-security-policy'] ?? null, [

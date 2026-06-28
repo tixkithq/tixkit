@@ -48,7 +48,8 @@ vi.mock('@tixkit/db', () => ({
 
     async update(id: string, input: Record<string, unknown>) {
       mockState.updates.push({ table: 'orders', id, input });
-      return { ...mockState.order, ...input };
+      mockState.order = { ...(mockState.order ?? {}), ...input };
+      return mockState.order;
     }
 
     async addTimelineEvent(orderId: string, type: string, description: string) {
@@ -67,7 +68,7 @@ vi.mock('@tixkit/db', () => ({
         order_id: input.orderId,
         provider_refund_id: input.providerRefundId,
         amount_cents: input.amountCents,
-        status: 'succeeded',
+        status: input.status ?? 'pending',
         reason: input.reason,
       };
       mockState.refunds.push(refund);
@@ -76,7 +77,10 @@ vi.mock('@tixkit/db', () => ({
   },
 }));
 
-import { reconcilePaymentActivity, reconcileRefundActivity } from '../activities/payment-reconciliation.js';
+import {
+  reconcilePaymentActivity,
+  reconcileRefundActivity,
+} from '../activities/payment-reconciliation.js';
 
 describe('reconcilePaymentActivity', () => {
   beforeEach(() => {
@@ -108,13 +112,20 @@ describe('reconcilePaymentActivity', () => {
       data: { id: 'pi_provider_1', status: 'requires_payment_method' },
     });
 
-    expect(result).toMatchObject({ ok: true, value: { orderId: 'ord_1', status: 'requires_payment_method' } });
+    expect(result).toMatchObject({
+      ok: true,
+      value: { orderId: 'ord_1', status: 'requires_payment_method' },
+    });
     expect(mockState.updates).toContainEqual({
       table: 'payment_intents',
       id: 'pi_db_1',
       input: { status: 'requires_payment_method' },
     });
-    expect(mockState.updates.some((update) => update.table === 'orders' && update.input.status === 'paid')).toBe(false);
+    expect(
+      mockState.updates.some(
+        (update) => update.table === 'orders' && update.input.status === 'paid',
+      ),
+    ).toBe(false);
     expect(mockState.timeline).toContainEqual({
       orderId: 'ord_1',
       type: 'payment.failed',
@@ -123,6 +134,11 @@ describe('reconcilePaymentActivity', () => {
   });
 
   it('marks an order paid for a succeeded payment intent', async () => {
+    mockState.order = {
+      ...(mockState.order ?? {}),
+      status: 'pending_payment',
+    };
+
     const result = await reconcilePaymentActivity({
       providerEventId: 'evt_success',
       provider: 'stripe',
@@ -131,12 +147,78 @@ describe('reconcilePaymentActivity', () => {
     });
 
     expect(result).toMatchObject({ ok: true, value: { orderId: 'ord_1', status: 'paid' } });
-    expect(mockState.updates.some((update) => update.table === 'orders' && update.input.status === 'paid')).toBe(true);
+    expect(
+      mockState.updates.some(
+        (update) => update.table === 'orders' && update.input.status === 'paid',
+      ),
+    ).toBe(true);
+    expect(mockState.updates).toContainEqual({
+      table: 'orders',
+      id: 'ord_1',
+      input: { status: 'paid', paid_at: expect.any(Date) },
+    });
     expect(mockState.timeline).toContainEqual({
       orderId: 'ord_1',
       type: 'order.paid',
       description: 'Payment confirmed via Stripe',
     });
+  });
+
+  it.each(['refunded', 'partially_refunded', 'cancelled', 'expired', 'disputed'])(
+    'does not move a %s order back to paid for a succeeded payment intent',
+    async (status) => {
+      mockState.order = {
+        ...(mockState.order ?? {}),
+        status,
+        paid_at: new Date('2026-01-01T00:00:00.000Z'),
+      };
+
+      const result = await reconcilePaymentActivity({
+        providerEventId: `evt_success_${status}`,
+        provider: 'stripe',
+        eventType: 'payment_intent.succeeded',
+        data: { id: 'pi_provider_1', status: 'succeeded' },
+      });
+
+      expect(result).toMatchObject({
+        ok: true,
+        value: { orderId: 'ord_1', status: 'succeeded' },
+      });
+      expect(mockState.updates).toContainEqual({
+        table: 'payment_intents',
+        id: 'pi_db_1',
+        input: { status: 'succeeded' },
+      });
+      expect(mockState.updates.some((update) => update.table === 'orders')).toBe(false);
+      expect(mockState.timeline.some((event) => event.type === 'order.paid')).toBe(false);
+    },
+  );
+
+  it('does not add a duplicate paid timeline entry for an already paid order', async () => {
+    mockState.order = {
+      ...(mockState.order ?? {}),
+      status: 'paid',
+      paid_at: new Date('2026-01-01T00:00:00.000Z'),
+    };
+
+    const result = await reconcilePaymentActivity({
+      providerEventId: 'evt_success_paid',
+      provider: 'stripe',
+      eventType: 'payment_intent.succeeded',
+      data: { id: 'pi_provider_1', status: 'succeeded' },
+    });
+
+    expect(result).toMatchObject({
+      ok: true,
+      value: { orderId: 'ord_1', status: 'succeeded' },
+    });
+    expect(mockState.updates).toContainEqual({
+      table: 'payment_intents',
+      id: 'pi_db_1',
+      input: { status: 'succeeded' },
+    });
+    expect(mockState.updates.some((update) => update.table === 'orders')).toBe(false);
+    expect(mockState.timeline.some((event) => event.type === 'order.paid')).toBe(false);
   });
 
   it('compensates a succeeded payment intent when no order is attached', async () => {
@@ -159,7 +241,10 @@ describe('reconcilePaymentActivity', () => {
       data: { id: 'pi_provider_1', status: 'succeeded' },
     });
 
-    expect(result).toMatchObject({ ok: true, value: { orderId: undefined, status: 'compensated:succeeded' } });
+    expect(result).toMatchObject({
+      ok: true,
+      value: { orderId: undefined, status: 'compensated:succeeded' },
+    });
     expect(mockState.compensations).toContainEqual({
       checkoutSessionId: 'cs_1',
       tenantId: 'tnt_1',
@@ -216,7 +301,10 @@ describe('reconcileRefundActivity', () => {
       data: { id: 're_1', payment_intent: 'pi_provider_1', amount: 5000 },
     });
 
-    expect(result).toMatchObject({ ok: true, value: { orderId: 'ord_1', status: 'partially_refunded' } });
+    expect(result).toMatchObject({
+      ok: true,
+      value: { orderId: 'ord_1', status: 'partially_refunded' },
+    });
     expect(mockState.createdRefunds).toHaveLength(0);
     expect(mockState.updates).toContainEqual({
       table: 'orders',
@@ -230,6 +318,31 @@ describe('reconcileRefundActivity', () => {
     });
     expect(mockState.timeline).toHaveLength(0);
   });
+
+  it.each(['failed', 'pending'])(
+    'does not record a %s refund payload as a successful refund',
+    async (status) => {
+      const result = await reconcileRefundActivity({
+        providerEventId: `evt_refund_${status}`,
+        provider: 'stripe',
+        data: { id: `re_${status}`, payment_intent: 'pi_provider_1', amount: 5000, status },
+      });
+
+      expect(result).toMatchObject({
+        ok: true,
+        value: { orderId: 'ord_1', status: 'paid' },
+      });
+      expect(mockState.createdRefunds).toHaveLength(0);
+      expect(
+        mockState.updates.some(
+          (update) =>
+            update.table === 'orders' && 'refunded_cents' in update.input,
+        ),
+      ).toBe(false);
+      expect(mockState.updates.some((update) => update.table === 'invoices')).toBe(false);
+      expect(mockState.timeline.some((event) => event.type === 'order.refunded')).toBe(false);
+    },
+  );
 
   it('repairs cumulative charge refund replay when no new refund delta remains', async () => {
     mockState.refunds = [
@@ -248,7 +361,10 @@ describe('reconcileRefundActivity', () => {
       data: { id: 'ch_1', payment_intent: 'pi_provider_1', amount_refunded: 5000 },
     });
 
-    expect(result).toMatchObject({ ok: true, value: { orderId: 'ord_1', status: 'partially_refunded' } });
+    expect(result).toMatchObject({
+      ok: true,
+      value: { orderId: 'ord_1', status: 'partially_refunded' },
+    });
     expect(mockState.createdRefunds).toHaveLength(0);
     expect(mockState.updates).toContainEqual({
       table: 'orders',
@@ -261,5 +377,64 @@ describe('reconcileRefundActivity', () => {
       input: expect.objectContaining({ refunded_cents: 5000 }),
     });
     expect(mockState.timeline).toHaveLength(0);
+  });
+
+  it('does not double count a refund object after a cumulative charge refund event', async () => {
+    const chargeResult = await reconcileRefundActivity({
+      providerEventId: 'evt_charge_refunded_first',
+      provider: 'stripe',
+      data: { id: 'ch_1', payment_intent: 'pi_provider_1', amount_refunded: 5000 },
+    });
+
+    expect(chargeResult).toMatchObject({
+      ok: true,
+      value: { orderId: 'ord_1', status: 'partially_refunded' },
+    });
+    expect(mockState.createdRefunds).toHaveLength(0);
+    expect(mockState.refunds).toHaveLength(0);
+    expect(mockState.updates).toContainEqual({
+      table: 'orders',
+      id: 'ord_1',
+      input: expect.objectContaining({ refunded_cents: 5000, status: 'partially_refunded' }),
+    });
+    expect(mockState.updates).toContainEqual({
+      table: 'invoices',
+      id: 'ord_1',
+      input: expect.objectContaining({ refunded_cents: 5000 }),
+    });
+
+    const refundResult = await reconcileRefundActivity({
+      providerEventId: 'evt_refund_object_after_charge',
+      provider: 'stripe',
+      data: { id: 're_1', payment_intent: 'pi_provider_1', amount: 5000, status: 'succeeded' },
+    });
+
+    expect(refundResult).toMatchObject({
+      ok: true,
+      value: { orderId: 'ord_1', status: 'partially_refunded' },
+    });
+    expect(mockState.createdRefunds).toHaveLength(1);
+    expect(mockState.createdRefunds).toContainEqual(
+      expect.objectContaining({
+        providerRefundId: 're_1',
+        amountCents: 5000,
+        status: 'succeeded',
+      }),
+    );
+    expect(mockState.refunds).toHaveLength(1);
+    expect(mockState.order).toMatchObject({
+      refunded_cents: 5000,
+      status: 'partially_refunded',
+    });
+    expect(
+      mockState.updates
+        .filter((update) => update.table === 'orders')
+        .map((update) => update.input.refunded_cents),
+    ).not.toContain(10000);
+    expect(mockState.timeline).toContainEqual({
+      orderId: 'ord_1',
+      type: 'order.refunded',
+      description: 'Refunded 5000 cents via Stripe',
+    });
   });
 });

@@ -1,7 +1,13 @@
 import { proxyActivities } from '@temporalio/workflow';
 import type { WorkflowActivityResult } from '../shared/types.js';
 
-const { sendEmailActivity, sendSmsActivity, checkSuppressionActivity, checkConsentActivity, renderTemplateActivity } = proxyActivities<{
+const {
+  sendEmailActivity,
+  sendSmsActivity,
+  checkSuppressionActivity,
+  checkConsentActivity,
+  renderTemplateActivity,
+} = proxyActivities<{
   sendEmailActivity(input: {
     jobId: string;
     providerRouteId: string;
@@ -14,8 +20,15 @@ const { sendEmailActivity, sendSmsActivity, checkSuppressionActivity, checkConse
     providerRouteId: string;
     notificationType: 'transactional' | 'bulk' | 'staff' | 'system';
   }): Promise<WorkflowActivityResult<{ deliveryId: string; provider: string }>>;
-  checkSuppressionActivity(input: { email: string; tenantId: string }): Promise<WorkflowActivityResult<{ suppressed: boolean }>>;
-  checkConsentActivity(input: { email: string; tenantId: string; notificationType: string }): Promise<WorkflowActivityResult<{ allowed: boolean }>>;
+  checkSuppressionActivity(input: {
+    email: string;
+    tenantId: string;
+  }): Promise<WorkflowActivityResult<{ suppressed: boolean }>>;
+  checkConsentActivity(input: {
+    email: string;
+    tenantId: string;
+    notificationType: string;
+  }): Promise<WorkflowActivityResult<{ allowed: boolean }>>;
   renderTemplateActivity(input: {
     templateKey: string;
     templateVersionId: string;
@@ -53,7 +66,9 @@ export type SmsDeliveryWorkflowInput = {
   notificationType: 'transactional' | 'bulk' | 'staff' | 'system';
 };
 
-export async function notificationDeliveryWorkflow(input: NotificationDeliveryWorkflowInput): Promise<{ status: string }> {
+export async function notificationDeliveryWorkflow(
+  input: NotificationDeliveryWorkflowInput,
+): Promise<{ status: string }> {
   // Step 1: Check suppression
   const suppressionResult = await checkSuppressionActivity({
     email: input.toEmail,
@@ -113,7 +128,9 @@ export async function notificationDeliveryWorkflow(input: NotificationDeliveryWo
   return { status: 'sent' };
 }
 
-export async function smsDeliveryWorkflow(input: SmsDeliveryWorkflowInput): Promise<{ status: string }> {
+export async function smsDeliveryWorkflow(
+  input: SmsDeliveryWorkflowInput,
+): Promise<{ status: string }> {
   const sendResult = await sendSmsActivity({
     jobId: input.jobId,
     providerRouteId: input.providerRouteId,

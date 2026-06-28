@@ -33,14 +33,19 @@ describe('openApiSpec', () => {
     expect(openApiSpec.paths['/api-keys']).toBeDefined();
     expect(openApiSpec.paths['/scanner-devices']).toBeDefined();
     expect(openApiSpec.paths['/scanner-devices/{deviceId}/revoke']).toBeDefined();
-    expect(openApiSpec.paths['/scanner-devices/{deviceId}/revoke'].post.responses).toHaveProperty('200');
-    expect(openApiSpec.paths['/scanner-devices/{deviceId}/revoke'].post.responses).not.toHaveProperty('204');
+    expect(openApiSpec.paths['/scanner-devices/{deviceId}/revoke'].post.responses).toHaveProperty(
+      '200',
+    );
+    expect(
+      openApiSpec.paths['/scanner-devices/{deviceId}/revoke'].post.responses,
+    ).not.toHaveProperty('204');
     expect(openApiSpec.paths).not.toHaveProperty('/developer/api-keys');
   });
 
   it('documents one-time webhook signing secrets on endpoint creation', () => {
     expect(
-      openApiSpec.paths['/webhook-endpoints'].post.responses['201'].content['application/json'].schema,
+      openApiSpec.paths['/webhook-endpoints'].post.responses['201'].content['application/json']
+        .schema,
     ).toEqual({ $ref: '#/components/schemas/WebhookEndpointCreated' });
     expect(openApiSpec.components.schemas.WebhookEndpointCreated).toMatchObject({
       allOf: expect.arrayContaining([
@@ -53,23 +58,37 @@ describe('openApiSpec', () => {
 
   it('documents brand payment account binding on response schemas', () => {
     expect(openApiSpec.components.schemas.Brand.properties).toHaveProperty('paymentAccountId');
-    expect(openApiSpec.paths['/brands/{brandId}'].patch.requestBody.content['application/json'].schema.properties).toHaveProperty(
-      'paymentAccountId',
-    );
+    expect(
+      openApiSpec.paths['/brands/{brandId}'].patch.requestBody.content['application/json'].schema
+        .properties,
+    ).toHaveProperty('paymentAccountId');
   });
 
   it('documents Stripe Connect onboarding URL responses', () => {
-    expect(openApiSpec.components.schemas.PaymentAccount.properties).toHaveProperty('onboardingUrl');
-    expect(openApiSpec.components.schemas.PaymentAccount.properties).toHaveProperty('detailsSubmitted');
-    expect(openApiSpec.components.schemas.PaymentAccount.properties).toHaveProperty('chargesEnabled');
-    expect(openApiSpec.components.schemas.PaymentAccount.properties).toHaveProperty('payoutsEnabled');
+    expect(openApiSpec.components.schemas.PaymentAccount.properties).toHaveProperty(
+      'onboardingUrl',
+    );
+    expect(openApiSpec.components.schemas.PaymentAccount.properties).toHaveProperty(
+      'detailsSubmitted',
+    );
+    expect(openApiSpec.components.schemas.PaymentAccount.properties).toHaveProperty(
+      'chargesEnabled',
+    );
+    expect(openApiSpec.components.schemas.PaymentAccount.properties).toHaveProperty(
+      'payoutsEnabled',
+    );
     expect(openApiSpec.components.schemas.PaymentAccount.properties).toHaveProperty('requirements');
-    expect(openApiSpec.components.schemas.PaymentAccount.properties).toHaveProperty('disabledReason');
+    expect(openApiSpec.components.schemas.PaymentAccount.properties).toHaveProperty(
+      'disabledReason',
+    );
     expect(
-      openApiSpec.paths['/organizations/{organizationId}/payment-accounts/stripe-connect'].post.responses,
+      openApiSpec.paths['/organizations/{organizationId}/payment-accounts/stripe-connect'].post
+        .responses,
     ).toHaveProperty('201');
     expect(
-      openApiSpec.paths['/organizations/{organizationId}/payment-accounts/{paymentAccountId}/stripe-connect/refresh'].post.responses,
+      openApiSpec.paths[
+        '/organizations/{organizationId}/payment-accounts/{paymentAccountId}/stripe-connect/refresh'
+      ].post.responses,
     ).toHaveProperty('200');
   });
 
@@ -87,11 +106,14 @@ describe('openApiSpec', () => {
   it('documents scanner manifest and check-in list contracts', () => {
     expect(openApiSpec.paths['/events/{eventId}/check-in-lists']).toBeDefined();
     expect(
-      openApiSpec.paths['/events/{eventId}/check-in-lists'].get.responses['200'].content['application/json'].schema,
+      openApiSpec.paths['/events/{eventId}/check-in-lists'].get.responses['200'].content[
+        'application/json'
+      ].schema,
     ).toEqual({ $ref: '#/components/schemas/CheckInListPage' });
     expect(
-      openApiSpec.paths['/events/{eventId}/check-in-lists/{checkInListId}/manifest'].get.responses['200']
-        .content['application/json'].schema,
+      openApiSpec.paths['/events/{eventId}/check-in-lists/{checkInListId}/manifest'].get.responses[
+        '200'
+      ].content['application/json'].schema,
     ).toEqual({ $ref: '#/components/schemas/OfflineManifest' });
     expect(openApiSpec.components.schemas.OfflineManifest.required).toContain('tickets');
     expect(openApiSpec.paths['/check-ins/sync'].post.parameters).toContainEqual({
@@ -118,7 +140,10 @@ describe('openApiSpec', () => {
     expect(openApiSpec.paths['/events/{eventId}/messages']).toBeDefined();
     expect(openApiSpec.paths['/events/{eventId}/messages/preview']).toBeDefined();
     expect(openApiSpec.paths['/webhook-events/{eventId}/replay']).toBeDefined();
-    expect(openApiSpec.components.schemas.TicketTypeBatchResult.required).toEqual(['ticketType', 'accessRules']);
+    expect(openApiSpec.components.schemas.TicketTypeBatchResult.required).toEqual([
+      'ticketType',
+      'accessRules',
+    ]);
     expect(openApiSpec.components.schemas.CreateTicketTypeBatch.required).toContain('ticketType');
   });
 
@@ -131,7 +156,9 @@ describe('openApiSpec', () => {
 
   it('documents conversion widget impressions as persisted counts', () => {
     const schema =
-      openApiSpec.paths['/events/{eventId}/reports/conversion'].get.responses['200'].content['application/json'].schema;
+      openApiSpec.paths['/events/{eventId}/reports/conversion'].get.responses['200'].content[
+        'application/json'
+      ].schema;
     expect(schema.required).toContain('widgetViews');
     expect(schema.properties.widgetViews).toEqual({ type: 'number' });
   });
@@ -151,10 +178,13 @@ describe('openApiSpec', () => {
       'generic_tag',
     ]);
     expect(
-      openApiSpec.paths['/events/{eventId}/marketing-integrations'].get.responses['200']
-        .content['application/json'].schema,
+      openApiSpec.paths['/events/{eventId}/marketing-integrations'].get.responses['200'].content[
+        'application/json'
+      ].schema,
     ).toEqual({ $ref: '#/components/schemas/MarketingIntegrationPage' });
-    expect(openApiSpec.paths['/events/{eventId}/marketing-integrations/{provider}'].put).toBeDefined();
+    expect(
+      openApiSpec.paths['/events/{eventId}/marketing-integrations/{provider}'].put,
+    ).toBeDefined();
     expect(
       openApiSpec.paths['/public/events/{eventId}/marketing-integrations'].get.responses['200']
         .content['application/json'].schema,
@@ -170,14 +200,22 @@ describe('openApiSpec', () => {
     });
 
     expect(
-      openApiSpec.paths['/public/upload-artifacts/{artifactId}/complete'].post.requestBody.content['application/json'].schema,
+      openApiSpec.paths['/public/upload-artifacts/{artifactId}/complete'].post.requestBody.content[
+        'application/json'
+      ].schema,
     ).toEqual({ $ref: '#/components/schemas/PublicCompleteUploadArtifact' });
     expect(
-      openApiSpec.paths['/upload-artifacts/{artifactId}/complete'].post.requestBody.content['application/json'].schema,
+      openApiSpec.paths['/upload-artifacts/{artifactId}/complete'].post.requestBody.content[
+        'application/json'
+      ].schema,
     ).toEqual({ $ref: '#/components/schemas/CompleteUploadArtifact' });
     expect(openApiSpec.components.schemas.CompleteUploadArtifact).not.toHaveProperty('required');
-    expect(openApiSpec.components.schemas.CompleteUploadArtifact.properties).not.toHaveProperty('token');
-    expect(openApiSpec.paths['/upload-artifacts/{artifactId}/complete'].post.requestBody.required).toBe(false);
+    expect(openApiSpec.components.schemas.CompleteUploadArtifact.properties).not.toHaveProperty(
+      'token',
+    );
+    expect(
+      openApiSpec.paths['/upload-artifacts/{artifactId}/complete'].post.requestBody.required,
+    ).toBe(false);
   });
 
   it('documents the atomic checkout-question reorder contract', () => {
@@ -226,11 +264,13 @@ describe('openApiSpec', () => {
     expect(eventSchema.required).toContain('currency');
     expect(eventSchema.properties).toHaveProperty('currency');
 
-    const createSchema = openApiSpec.paths['/events'].post.requestBody.content['application/json'].schema;
+    const createSchema =
+      openApiSpec.paths['/events'].post.requestBody.content['application/json'].schema;
     expect(createSchema.required).toContain('currency');
     expect(createSchema.properties).toHaveProperty('currency');
 
-    const updateSchema = openApiSpec.paths['/events/{eventId}'].patch.requestBody.content['application/json'].schema;
+    const updateSchema =
+      openApiSpec.paths['/events/{eventId}'].patch.requestBody.content['application/json'].schema;
     expect(updateSchema.properties).toHaveProperty('currency');
     expect(updateSchema.properties).toHaveProperty('status');
   });

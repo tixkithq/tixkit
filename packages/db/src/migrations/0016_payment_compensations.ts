@@ -50,8 +50,18 @@ export const PaymentCompensationsMigration: Migration = {
       ])
       .addCheckConstraint('payment_compensations_amount_nonnegative', sql`amount_cents >= 0`)
       .addForeignKeyConstraint('payment_compensations_tenant_fk', ['tenant_id'], 'tenants', ['id'])
-      .addForeignKeyConstraint('payment_compensations_session_fk', ['checkout_session_id'], 'checkout_sessions', ['id'])
-      .addForeignKeyConstraint('payment_compensations_pi_fk', ['payment_intent_id'], 'payment_intents', ['id'])
+      .addForeignKeyConstraint(
+        'payment_compensations_session_fk',
+        ['checkout_session_id'],
+        'checkout_sessions',
+        ['id'],
+      )
+      .addForeignKeyConstraint(
+        'payment_compensations_pi_fk',
+        ['payment_intent_id'],
+        'payment_intents',
+        ['id'],
+      )
       .execute();
 
     await db.schema

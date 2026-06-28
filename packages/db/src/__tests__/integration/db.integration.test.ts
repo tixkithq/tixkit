@@ -32,9 +32,10 @@ const allDriverCases: DriverCase[] = [
 ];
 
 const requestedDriver = process.env.DB_INTEGRATION_DRIVER;
-const driverCases = (requestedDriver
-  ? allDriverCases.filter((driverCase) => driverCase.driver === requestedDriver)
-  : allDriverCases
+const driverCases = (
+  requestedDriver
+    ? allDriverCases.filter((driverCase) => driverCase.driver === requestedDriver)
+    : allDriverCases
 ).filter((driverCase) => driverCase.url.length > 0);
 
 async function createCatalog(db: Database) {
@@ -120,7 +121,9 @@ describe.each(driverCases)('database integration: $driver', ({ driver, url }) =>
       name: 'Integration Tenant',
     });
     await expect(new OrganizationRepository(db).findByTenant(tenant.id)).resolves.toHaveLength(1);
-    await expect(new BrandRepository(db).findByOrganization(organization.id)).resolves.toHaveLength(1);
+    await expect(new BrandRepository(db).findByOrganization(organization.id)).resolves.toHaveLength(
+      1,
+    );
     await expect(new EventRepository(db).findByTenant(tenant.id)).resolves.toHaveLength(1);
     await expect(new InventoryPoolRepository(db).findByEvent(event.id)).resolves.toMatchObject([
       {
@@ -233,11 +236,11 @@ describe.each(driverCases)('database integration: $driver', ({ driver, url }) =>
       ]),
     );
     await expect(ttRepo.findPublicOrRequestedByEvent(event.id, [])).resolves.not.toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({ id: hiddenTicketType.id }),
-      ]),
+      expect.arrayContaining([expect.objectContaining({ id: hiddenTicketType.id })]),
     );
-    await expect(ttRepo.findPublicOrRequestedByEvent(event.id, [hiddenTicketType.id])).resolves.toEqual(
+    await expect(
+      ttRepo.findPublicOrRequestedByEvent(event.id, [hiddenTicketType.id]),
+    ).resolves.toEqual(
       expect.arrayContaining([
         expect.objectContaining({ id: ticketType.id, visibility: 'public' }),
         expect.objectContaining({ id: hiddenTicketType.id, visibility: 'hidden' }),
@@ -350,7 +353,7 @@ describe.each(driverCases)('database integration: $driver', ({ driver, url }) =>
           created_at: new Date(),
           updated_at: new Date(),
         })
-      .execute(),
+        .execute(),
     ).rejects.toThrow();
   });
 

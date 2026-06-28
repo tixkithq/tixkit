@@ -11,31 +11,31 @@
  * page can resolve a session after a Stripe redirect without the token in the URL.
  */
 
-const STORAGE_PREFIX = 'tk:session:'
+const STORAGE_PREFIX = 'tk:session:';
 
 export function storeSessionToken(sessionId: string, token: string): void {
-  if (typeof window === 'undefined') return
+  if (typeof window === 'undefined') return;
   try {
-    window.sessionStorage.setItem(STORAGE_PREFIX + sessionId, token)
+    window.sessionStorage.setItem(STORAGE_PREFIX + sessionId, token);
   } catch {
     // sessionStorage may be unavailable in private browsing; fail silently.
   }
 }
 
 export function getSessionToken(sessionId: string): string | undefined {
-  if (typeof window === 'undefined') return undefined
+  if (typeof window === 'undefined') return undefined;
   try {
-    const token = window.sessionStorage.getItem(STORAGE_PREFIX + sessionId)
-    return token ?? undefined
+    const token = window.sessionStorage.getItem(STORAGE_PREFIX + sessionId);
+    return token ?? undefined;
   } catch {
-    return undefined
+    return undefined;
   }
 }
 
 export function clearSessionToken(sessionId: string): void {
-  if (typeof window === 'undefined') return
+  if (typeof window === 'undefined') return;
   try {
-    window.sessionStorage.removeItem(STORAGE_PREFIX + sessionId)
+    window.sessionStorage.removeItem(STORAGE_PREFIX + sessionId);
   } catch {
     // ignore
   }

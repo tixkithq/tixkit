@@ -465,6 +465,38 @@ async function validateFinalizePaymentIntent(input: {
   };
 }
 
+async function compensateCreatedPaymentIntentAfterAttachFailure(input: {
+  checkoutSessionId: string;
+  tenantId: string;
+  brandId: string;
+  provider: string;
+  providerIntentId: string;
+  paymentIntentRowId: string;
+  amountCents: number;
+  currency: string;
+}): Promise<WorkflowActivityResult<never> | undefined> {
+  const reason = `Checkout session ${input.checkoutSessionId} cannot accept payment intent ${input.paymentIntentRowId}`;
+  const compensationResult = await compensateOrphanPaymentActivity({
+    checkoutSessionId: input.checkoutSessionId,
+    tenantId: input.tenantId,
+    provider: input.provider,
+    providerIntentId: input.providerIntentId,
+    amountCents: input.amountCents,
+    currency: input.currency,
+    reason,
+    source: 'checkout_payment_intent_attach_failed',
+    metadata: { brandId: input.brandId, paymentIntentRowId: input.paymentIntentRowId },
+  });
+
+  if (compensationResult.ok) return undefined;
+
+  return errResult(
+    'PAYMENT_INTENT_COMPENSATION_FAILED',
+    `Created payment intent ${input.providerIntentId} could not be compensated after checkout session attachment failed: ${compensationResult.message}`,
+    compensationResult.retryable,
+  );
+}
+
 // Activity: Create payment intent via Stripe
 export async function createPaymentIntentActivity(input: {
   checkoutSessionId: string;
@@ -537,6 +569,18 @@ export async function createPaymentIntentActivity(input: {
 
       const attached = await pointCheckoutSessionAtPaymentIntent(db, input.checkoutSessionId, createdPaymentIntent.id);
       if (!attached) {
+        const compensationError = await compensateCreatedPaymentIntentAfterAttachFailure({
+          checkoutSessionId: input.checkoutSessionId,
+          tenantId: input.tenantId,
+          brandId: input.brandId,
+          provider,
+          providerIntentId,
+          paymentIntentRowId: createdPaymentIntent.id,
+          amountCents: input.amountCents,
+          currency: input.currency,
+        });
+        if (compensationError) return compensationError;
+
         return errResult(
           'CHECKOUT_SESSION_NOT_PAYABLE',
           `Checkout session ${input.checkoutSessionId} cannot accept payment intent ${createdPaymentIntent.id}`,
@@ -662,6 +706,18 @@ export async function createPaymentIntentActivity(input: {
 
     const attached = await pointCheckoutSessionAtPaymentIntent(db, input.checkoutSessionId, createdPaymentIntent.id);
     if (!attached) {
+      const compensationError = await compensateCreatedPaymentIntentAfterAttachFailure({
+        checkoutSessionId: input.checkoutSessionId,
+        tenantId: input.tenantId,
+        brandId: input.brandId,
+        provider,
+        providerIntentId: paymentIntent.id,
+        paymentIntentRowId: createdPaymentIntent.id,
+        amountCents: input.amountCents,
+        currency: input.currency,
+      });
+      if (compensationError) return compensationError;
+
       return errResult(
         'CHECKOUT_SESSION_NOT_PAYABLE',
         `Checkout session ${input.checkoutSessionId} cannot accept payment intent ${createdPaymentIntent.id}`,

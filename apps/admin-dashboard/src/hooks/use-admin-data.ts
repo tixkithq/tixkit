@@ -1,14 +1,14 @@
-'use client'
+'use client';
 
-import * as React from 'react'
-import { type ApiResult, type AdminApiError } from '@/lib/api'
+import * as React from 'react';
+import { type ApiResult, type AdminApiError } from '@/lib/api';
 
 type UseAdminDataResult<T> = {
-  data: T | undefined
-  loading: boolean
-  error: AdminApiError | undefined
-  refetch: () => void
-}
+  data: T | undefined;
+  loading: boolean;
+  error: AdminApiError | undefined;
+  refetch: () => void;
+};
 
 /**
  * Generic hook for fetching admin API data in client components.
@@ -16,43 +16,43 @@ type UseAdminDataResult<T> = {
  */
 export function useAdminData<T>(
   fetcher: () => Promise<ApiResult<T>>,
-  deps: React.DependencyList = []
+  deps: React.DependencyList = [],
 ): UseAdminDataResult<T> {
-  const [data, setData] = React.useState<T | undefined>(undefined)
-  const [loading, setLoading] = React.useState(true)
-  const [error, setError] = React.useState<AdminApiError | undefined>(undefined)
-  const [nonce, setNonce] = React.useState(0)
+  const [data, setData] = React.useState<T | undefined>(undefined);
+  const [loading, setLoading] = React.useState(true);
+  const [error, setError] = React.useState<AdminApiError | undefined>(undefined);
+  const [nonce, setNonce] = React.useState(0);
 
   React.useEffect(() => {
-    let cancelled = false
-    setLoading(true)
-    setError(undefined)
+    let cancelled = false;
+    setLoading(true);
+    setError(undefined);
     fetcher()
       .then((result) => {
-        if (cancelled) return
+        if (cancelled) return;
         if (result.ok) {
-          setData(result.data)
+          setData(result.data);
         } else {
-          setError(result.error)
+          setError(result.error);
         }
       })
       .catch((e: unknown) => {
-        if (cancelled) return
+        if (cancelled) return;
         setError({
           code: 'fetch_error',
           message: e instanceof Error ? e.message : 'Failed to fetch data',
-        })
+        });
       })
       .finally(() => {
-        if (!cancelled) setLoading(false)
-      })
+        if (!cancelled) setLoading(false);
+      });
     return () => {
-      cancelled = true
-    }
+      cancelled = true;
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [nonce, ...deps])
+  }, [nonce, ...deps]);
 
-  const refetch = React.useCallback(() => setNonce((n) => n + 1), [])
+  const refetch = React.useCallback(() => setNonce((n) => n + 1), []);
 
-  return { data, loading, error, refetch }
+  return { data, loading, error, refetch };
 }

@@ -74,7 +74,9 @@ describe('wallet pass generation', () => {
     });
     const raw = pass.getAsRaw();
 
-    expect(Object.keys(raw)).toEqual(expect.arrayContaining(['pass.json', 'manifest.json', 'signature']));
+    expect(Object.keys(raw)).toEqual(
+      expect.arrayContaining(['pass.json', 'manifest.json', 'signature']),
+    );
     expect(raw.signature.byteLength).toBeGreaterThan(64);
 
     const passJson = JSON.parse(raw['pass.json'].toString('utf8')) as {

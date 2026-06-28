@@ -13,14 +13,9 @@ export type TixkitPermission =
   | 'reports.read'
   | 'settings.write'
   | 'developers.write'
-  | 'billing.write'
+  | 'billing.write';
 
-export type NavBadgeTone =
-  | 'default'
-  | 'muted'
-  | 'success'
-  | 'warning'
-  | 'destructive'
+export type NavBadgeTone = 'default' | 'muted' | 'success' | 'warning' | 'destructive';
 
 /**
  * All permissions granted to the local-dev user when Clerk is unavailable.
@@ -42,7 +37,7 @@ export const LOCAL_DEV_PERMISSIONS: TixkitPermission[] = [
   'settings.write',
   'developers.write',
   'billing.write',
-]
+];
 
 /**
  * Check whether a set of permissions satisfies a required permission.
@@ -50,9 +45,9 @@ export const LOCAL_DEV_PERMISSIONS: TixkitPermission[] = [
  */
 export function hasPermission(
   granted: TixkitPermission[] | undefined,
-  required: TixkitPermission | undefined
+  required: TixkitPermission | undefined,
 ): boolean {
-  if (!required) return true
-  if (!granted) return false
-  return granted.includes(required)
+  if (!required) return true;
+  if (!granted) return false;
+  return granted.includes(required);
 }

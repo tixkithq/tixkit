@@ -56,9 +56,7 @@ export function ScopeSelector({ className }: ScopeSelectorProps) {
 
   if (organizations.length === 0) {
     return (
-      <div className={cn('text-xs text-muted-foreground', className)}>
-        No workspaces available
-      </div>
+      <div className={cn('text-xs text-muted-foreground', className)}>No workspaces available</div>
     );
   }
 
@@ -75,10 +73,7 @@ export function ScopeSelector({ className }: ScopeSelectorProps) {
   const showBrandScope = canSwitchBrands || !brandMatchesWorkspace;
 
   return (
-    <nav
-      aria-label="Workspace scope"
-      className={cn('flex min-w-0 flex-col gap-1', className)}
-    >
+    <nav aria-label="Workspace scope" className={cn('flex min-w-0 flex-col gap-1', className)}>
       {canSwitchOrganizations ? (
         <Select value={organizationId} onValueChange={setOrganizationId}>
           <SelectTrigger
@@ -115,9 +110,7 @@ export function ScopeSelector({ className }: ScopeSelectorProps) {
           >
             <Store className="size-4 text-sidebar-foreground/70" />
             <span className="text-xs font-medium text-sidebar-foreground/70">Brand</span>
-            <SelectValue
-              placeholder={organizationId ? 'Select brand' : 'Select workspace first'}
-            />
+            <SelectValue placeholder={organizationId ? 'Select brand' : 'Select workspace first'} />
           </SelectTrigger>
           <SelectContent>
             {availableBrands.map((brand) => (
@@ -127,9 +120,9 @@ export function ScopeSelector({ className }: ScopeSelectorProps) {
             ))}
           </SelectContent>
         </Select>
-      ) : (
-        showBrandScope ? <ScopePill icon={Store} label="Brand" value={selectedBrand?.name} /> : null
-      )}
+      ) : showBrandScope ? (
+        <ScopePill icon={Store} label="Brand" value={selectedBrand?.name} />
+      ) : null}
     </nav>
   );
 }

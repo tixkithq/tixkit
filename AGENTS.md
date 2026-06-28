@@ -5,6 +5,7 @@ This project has a knowledge graph at graphify-out/ with god nodes, community st
 When the user types `/graphify`, invoke the `skill` tool with `skill: "graphify"` before doing anything else.
 
 Rules:
+
 - Use `docs/graphify-usage.md` as the repo-specific playbook for query construction, recovery, examples, and limitations.
 - For codebase questions, first run `graphify query "<anchored query>"` when graphify-out/graph.json exists. Use `graphify path "<A>" "<B>"` for known endpoint relationships and `graphify explain "<concept>"` for focused symbols. These return a scoped subgraph, usually much smaller than GRAPH_REPORT.md or raw grep output.
 - Make every Graphify query repo-specific. Include at least three concrete anchors from this stack: package/app path, exact file path, exported symbol, runtime surface, and test file.
@@ -30,6 +31,7 @@ Rules:
 This project has Serena configuration and memories under `.serena/`.
 
 Rules:
+
 - Activate Serena as `tixkit` or `/Users/itsnk/Desktop/Coding/tixkit`.
 - Read `mem:core` for durable project orientation, then follow its links to topic memories only when relevant.
 - Use Graphify first for cross-file/cross-package navigation, then Serena for precise symbol-level inspection.

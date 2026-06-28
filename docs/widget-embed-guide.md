@@ -2,6 +2,8 @@
 
 This guide covers the browser-only Tixkit widget package. The widget is safe to load in public pages: it does not accept or embed secret API keys, payment provider secrets, session tokens, or admin credentials.
 
+Phase 4 embed generator (C-060): Use `bun run embed:generate --event-id <id> --brand-id <id> --platform webflow` to produce a validated, copy-paste snippet with CSP guidance and placement instructions. An interactive HTML generator is at `docs/embed-generator.html`. The manual examples below remain useful for custom integrations.
+
 ## Script Loading
 
 Load the widget script once per page, then mount one or more custom elements.
@@ -34,18 +36,18 @@ Use `tixkit-widget` when tickets should render directly inside the page.
 
 Supported attributes:
 
-| Attribute | Required | Description |
-| --- | --- | --- |
-| `brand` | yes | Brand or white-label context allowed to sell the event. |
-| `event` | yes | Event ID to render. |
-| `checkout-mode` | no | `inline`, `modal`, or `redirect`. Defaults to `inline` for `tixkit-widget`. |
-| `products` | no | Comma-separated ticket/product IDs to show or direct-link, including hidden tickets. |
-| `discount-code` | no | Promo or access code to prefill. Server validation remains authoritative. |
-| `tracking-id` | no | Non-PII attribution value persisted with checkout. Affiliate/referral attribution is separate and must use an explicit affiliate code parameter. |
-| `locale` | no | Locale hint forwarded to hosted checkout. |
-| `theme` | no | `auto`, `light`, or `dark`. |
-| `api-base-url` | no | Checkout origin. Defaults to `https://checkout.tixkit.com`. |
-| `reporting-api-url` | no | API origin for persisted widget impressions. Defaults to `https://api.tixkit.com`, or `localhost:4000` when checkout runs on localhost. |
+| Attribute           | Required | Description                                                                                                                                      |
+| ------------------- | -------- | ------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `brand`             | yes      | Brand or white-label context allowed to sell the event.                                                                                          |
+| `event`             | yes      | Event ID to render.                                                                                                                              |
+| `checkout-mode`     | no       | `inline`, `modal`, or `redirect`. Defaults to `inline` for `tixkit-widget`.                                                                      |
+| `products`          | no       | Comma-separated ticket/product IDs to show or direct-link, including hidden tickets.                                                             |
+| `discount-code`     | no       | Promo or access code to prefill. Server validation remains authoritative.                                                                        |
+| `tracking-id`       | no       | Non-PII attribution value persisted with checkout. Affiliate/referral attribution is separate and must use an explicit affiliate code parameter. |
+| `locale`            | no       | Locale hint forwarded to hosted checkout.                                                                                                        |
+| `theme`             | no       | `auto`, `light`, or `dark`.                                                                                                                      |
+| `api-base-url`      | no       | Checkout origin. Defaults to `https://checkout.tixkit.com`.                                                                                      |
+| `reporting-api-url` | no       | API origin for persisted widget impressions. Defaults to `https://api.tixkit.com`, or `localhost:4000` when checkout runs on localhost.          |
 
 ## Button Embeds
 
@@ -69,11 +71,11 @@ Use `tixkit-button` when a page should open checkout from a button. The button d
 
 ## Checkout Modes
 
-| Mode | Element | Behavior |
-| --- | --- | --- |
-| `inline` | `tixkit-widget` | Renders a sandboxed iframe in the host page and emits `opened` after the iframe loads. |
-| `modal` | `tixkit-widget`, `tixkit-button` | Opens a sandboxed iframe in a shadow-DOM modal. Buyers can close it with the close button, backdrop, or Escape. |
-| `redirect` | `tixkit-widget`, `tixkit-button` | Emits `opened` and `checkout_started`, then navigates the current page to hosted checkout. |
+| Mode       | Element                          | Behavior                                                                                                        |
+| ---------- | -------------------------------- | --------------------------------------------------------------------------------------------------------------- |
+| `inline`   | `tixkit-widget`                  | Renders a sandboxed iframe in the host page and emits `opened` after the iframe loads.                          |
+| `modal`    | `tixkit-widget`, `tixkit-button` | Opens a sandboxed iframe in a shadow-DOM modal. Buyers can close it with the close button, backdrop, or Escape. |
+| `redirect` | `tixkit-widget`, `tixkit-button` | Emits `opened` and `checkout_started`, then navigates the current page to hosted checkout.                      |
 
 For `tixkit-button checkout-mode="inline"`, the runtime opens checkout in a new tab as a safe fallback because a button has no inline container.
 
@@ -105,15 +107,15 @@ Lifecycle events are dispatched from the host custom element. Attach listeners t
 
 Event detail fields:
 
-| Event | Detail |
-| --- | --- |
-| `loaded` | `{ event, eventId }` after the element is initialized. |
-| `loading` | `{ event, eventId }` while an inline iframe is loading. |
-| `opened` | `{ event, eventId }` after an inline/modal iframe loads, or immediately before redirect navigation. |
-| `closed` | `{ event, eventId }` when a modal closes, the element disconnects, or the host page unloads. |
-| `checkout_started` | `{ event, eventId, sessionId? }` from hosted checkout or immediately before redirect navigation. |
-| `order_completed` | `{ event, eventId, sessionId?, orderId? }` from hosted checkout or the confirmation page. |
-| `error` | `{ event, eventId, message }` for widget configuration or load failures. |
+| Event              | Detail                                                                                              |
+| ------------------ | --------------------------------------------------------------------------------------------------- |
+| `loaded`           | `{ event, eventId }` after the element is initialized.                                              |
+| `loading`          | `{ event, eventId }` while an inline iframe is loading.                                             |
+| `opened`           | `{ event, eventId }` after an inline/modal iframe loads, or immediately before redirect navigation. |
+| `closed`           | `{ event, eventId }` when a modal closes, the element disconnects, or the host page unloads.        |
+| `checkout_started` | `{ event, eventId, sessionId? }` from hosted checkout or immediately before redirect navigation.    |
+| `order_completed`  | `{ event, eventId, sessionId?, orderId? }` from hosted checkout or the confirmation page.           |
+| `error`            | `{ event, eventId, message }` for widget configuration or load failures.                            |
 
 `event` and `eventId` are both present for compatibility. New integrations should read `eventId`.
 
@@ -123,11 +125,11 @@ Event marketing integrations are configured in the admin event detail page or th
 
 Hosted checkout/event pages and widget host flows emit these ecommerce events:
 
-| Tixkit event | GA4 | Meta Pixel | Generic pixel parameter |
-| --- | --- | --- | --- |
-| Event page or widget view | `view_item` | `PageView` | `tk_event=view_item` |
-| Checkout session created | `begin_checkout` | `InitiateCheckout` | `tk_event=begin_checkout` |
-| Order completed | `purchase` | `Purchase` | `tk_event=purchase` |
+| Tixkit event              | GA4              | Meta Pixel         | Generic pixel parameter   |
+| ------------------------- | ---------------- | ------------------ | ------------------------- |
+| Event page or widget view | `view_item`      | `PageView`         | `tk_event=view_item`      |
+| Checkout session created  | `begin_checkout` | `InitiateCheckout` | `tk_event=begin_checkout` |
+| Order completed           | `purchase`       | `Purchase`         | `tk_event=purchase`       |
 
 Payloads include event ID, session/order IDs when present, currency/value when known, and item IDs/names/quantities when known. Buyer email, name, phone, address, and attendee answers are never sent.
 

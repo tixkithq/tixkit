@@ -3,7 +3,12 @@ import { describe, expect, it, vi } from 'vitest';
 import type { Principal } from '@tixkit/domain';
 import type { Database } from '@tixkit/db';
 import type { AppContext } from '../app.js';
-import { buildOfflineManifest, checkInRoutes, processScan, verifyOfflineManifestSignature } from '../routes/modules/checkin.js';
+import {
+  buildOfflineManifest,
+  checkInRoutes,
+  processScan,
+  verifyOfflineManifestSignature,
+} from '../routes/modules/checkin.js';
 
 const list = {
   id: 'cil_1',
@@ -39,35 +44,55 @@ type OfflineSyncMockOverrides = {
 };
 
 function buildOfflineSyncMockDb(overrides: OfflineSyncMockOverrides = {}) {
-  const checkInList = overrides.list !== undefined ? overrides.list : {
-    id: 'cil_1',
-    event_id: 'evt_1',
-    ticket_type_ids: JSON.stringify(['tt_allowed']),
-    status: 'active',
-  };
+  const inserts: Array<{ table: string; values: Record<string, unknown> }> = [];
+  const updates: Array<{ table: string; values: Record<string, unknown> }> = [];
+  const checkInList =
+    overrides.list !== undefined
+      ? overrides.list
+      : {
+          id: 'cil_1',
+          event_id: 'evt_1',
+          ticket_type_ids: JSON.stringify(['tt_allowed']),
+          status: 'active',
+        };
   const event = overrides.event ?? {
     id: 'evt_1',
     tenant_id: 'tnt_1',
     brand_id: 'brd_1',
     organization_id: 'org_1',
   };
-  const ticketRow = overrides.ticket !== undefined ? overrides.ticket : {
-    id: 'tkt_1',
-    event_id: 'evt_1',
-    ticket_type_id: 'tt_allowed',
-    qr_hash: 'hash_1',
-    status: 'valid',
-  };
+  const ticketRow =
+    overrides.ticket !== undefined
+      ? overrides.ticket
+      : {
+          id: 'tkt_1',
+          event_id: 'evt_1',
+          ticket_type_id: 'tt_allowed',
+          qr_hash: 'hash_1',
+          status: 'valid',
+        };
 
   // Table-aware query builder: returns the right mock data per table.
   function makeQuery(table: string) {
     const q = {
-      innerJoin() { return q; },
-      select() { return q; },
-      selectAll() { return q; },
-      where() { return q; },
-      orderBy() { return q; },
-      limit() { return q; },
+      innerJoin() {
+        return q;
+      },
+      select() {
+        return q;
+      },
+      selectAll() {
+        return q;
+      },
+      where() {
+        return q;
+      },
+      orderBy() {
+        return q;
+      },
+      limit() {
+        return q;
+      },
       async executeTakeFirst() {
         if (table === 'check_in_lists') return checkInList;
         if (table === 'events') return event;
@@ -91,20 +116,33 @@ function buildOfflineSyncMockDb(overrides: OfflineSyncMockOverrides = {}) {
 
   const db = {
     selectFrom: vi.fn((table: string) => makeQuery(table)),
-    insertInto: vi.fn(() => ({
-      values: () => ({
+    insertInto: vi.fn((table: string) => ({
+      values: (values: Record<string, unknown>) => ({
         returningAll: () => ({
-          executeTakeFirstOrThrow: vi.fn(async () => ({ id: 'slog_1' })),
+          executeTakeFirstOrThrow: vi.fn(async () => {
+            inserts.push({ table, values });
+            return { id: 'slog_1', ...values };
+          }),
         }),
-        execute: vi.fn(async () => []),
+        execute: vi.fn(async () => {
+          inserts.push({ table, values });
+          return [];
+        }),
       }),
     })),
-    updateTable: vi.fn(() => {
+    updateTable: vi.fn((table: string) => {
       const updateChain = {
-        set: () => updateChain,
+        set: (values: Record<string, unknown>) => {
+          updates.push({ table, values });
+          return updateChain;
+        },
         where: () => updateChain,
-        async executeTakeFirst() { return { numUpdatedRows: 1n }; },
-        async execute() { return []; },
+        async executeTakeFirst() {
+          return { numUpdatedRows: 1n };
+        },
+        async execute() {
+          return [];
+        },
       };
       return updateChain;
     }),
@@ -119,7 +157,7 @@ function buildOfflineSyncMockDb(overrides: OfflineSyncMockOverrides = {}) {
     destroy: vi.fn(async () => {}),
   };
 
-  return { db };
+  return { db, inserts, updates };
 }
 
 describe('processScan', () => {
@@ -185,7 +223,11 @@ describe('processScan', () => {
     });
 
     expect(result.outcome).toBe('accepted');
-    expect(ticketRepo.checkInIfValid).toHaveBeenCalledWith('tkt_1', 'sd_1', new Date('2026-06-01T00:00:00Z'));
+    expect(ticketRepo.checkInIfValid).toHaveBeenCalledWith(
+      'tkt_1',
+      'sd_1',
+      new Date('2026-06-01T00:00:00Z'),
+    );
   });
 
   it('returns duplicate when another scan already claimed the ticket', async () => {
@@ -350,13 +392,13 @@ describe('offline sync endpoint', () => {
   it('processes offline scans and returns accepted/duplicate/invalid counts', async () => {
     const principal: Principal = {
       type: 'mobile_device',
-      id: 'sd_1',
+      id: 'sd_public',
       tenantId: 'tnt_1',
       organizationIds: ['org_1'],
       scopes: ['checkins.write'],
       eventIds: ['evt_1'],
     };
-    const { db } = buildOfflineSyncMockDb();
+    const { db, inserts, updates } = buildOfflineSyncMockDb();
     const app = Fastify();
     app.decorate('context', {
       db,
@@ -377,9 +419,8 @@ describe('offline sync endpoint', () => {
       headers: { 'Idempotency-Key': 'idem_sync_1' },
       payload: {
         checkInListId: 'cil_1',
-        scans: [
-          { qrHash: 'hash_1', scannedAt: '2026-06-01T12:00:00.000Z', offline: true },
-        ],
+        deviceId: 'sd_public',
+        scans: [{ qrHash: 'hash_1', scannedAt: '2026-06-01T12:00:00.000Z', offline: true }],
       },
     });
 
@@ -391,6 +432,72 @@ describe('offline sync endpoint', () => {
     expect(body.results).toHaveLength(1);
     expect(body.results[0].qrHash).toBe('hash_1');
     expect(body.results[0].outcome).toBe('accepted');
+    expect(updates).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          table: 'tickets',
+          values: expect.objectContaining({ checked_in_by_device_id: 'sd_public' }),
+        }),
+        expect.objectContaining({
+          table: 'attendees',
+          values: expect.objectContaining({ check_in_device_id: 'sd_public' }),
+        }),
+      ]),
+    );
+    expect(inserts).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          table: 'scan_logs',
+          values: expect.objectContaining({ device_id: 'sd_public' }),
+        }),
+      ]),
+    );
+
+    await app.close();
+  });
+
+  it('rejects a mobile scanner submitting scans for another device', async () => {
+    const principal: Principal = {
+      type: 'mobile_device',
+      id: 'sd_public',
+      tenantId: 'tnt_1',
+      organizationIds: ['org_1'],
+      scopes: ['checkins.write'],
+      eventIds: ['evt_1'],
+    };
+    const { db, inserts, updates } = buildOfflineSyncMockDb();
+    const app = Fastify();
+    app.decorate('context', {
+      db,
+      pricingEngine: {},
+      inventoryService: {},
+      qrService: {},
+      authService: {},
+      temporalClient: {},
+    } as unknown as AppContext);
+    app.addHook('onRequest', async (request) => {
+      request.principal = principal;
+    });
+    await app.register(checkInRoutes);
+
+    const response = await app.inject({
+      method: 'POST',
+      url: '/check-ins/sync',
+      headers: { 'Idempotency-Key': 'idem_sync_other_device' },
+      payload: {
+        checkInListId: 'cil_1',
+        deviceId: 'sd_other',
+        scans: [{ qrHash: 'hash_1', scannedAt: '2026-06-01T12:00:00.000Z', offline: true }],
+      },
+    });
+
+    expect(response.statusCode).toBe(400);
+    expect(response.json()).toMatchObject({
+      code: 'VALIDATION_ERROR',
+      message: 'Scanner device cannot submit scans for another device',
+    });
+    expect(updates).toHaveLength(0);
+    expect(inserts).toHaveLength(0);
 
     await app.close();
   });
@@ -416,7 +523,9 @@ describe('offline sync endpoint', () => {
           checkInCallCount++;
           return { numUpdatedRows: checkInCallCount === 1 ? 1n : 0n };
         },
-        async execute() { return []; },
+        async execute() {
+          return [];
+        },
       };
       return updateChain;
     });

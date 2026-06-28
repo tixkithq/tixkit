@@ -25,7 +25,11 @@ export type TixkitWebhookRouteHandlerOptions = {
   onEvent?: (
     event: unknown,
     context: { request: Request; body: string },
-  ) => Response | Record<string, unknown> | void | Promise<Response | Record<string, unknown> | void>;
+  ) =>
+    | Response
+    | Record<string, unknown>
+    | void
+    | Promise<Response | Record<string, unknown> | void>;
 };
 
 export type TixkitCheckoutSessionRouteHandlerOptions = TixkitNextClientConfig & {
@@ -49,7 +53,9 @@ export function verifyTixkitWebhook(input: {
       input.signature
         .split(',')
         .map((part) => part.trim().split('='))
-        .filter((part): part is [string, string] => part.length === 2 && part[0] !== '' && part[1] !== ''),
+        .filter(
+          (part): part is [string, string] => part.length === 2 && part[0] !== '' && part[1] !== '',
+        ),
     );
     const timestamp = Number(parts.get('t'));
     const received = parts.get('v1');
@@ -59,7 +65,9 @@ export function verifyTixkitWebhook(input: {
     const ageSeconds = Math.abs(Math.floor(Date.now() / 1000) - timestamp);
     if (ageSeconds > toleranceSeconds) return false;
 
-    const expected = createHmac('sha256', input.secret).update(`${timestamp}.${input.body}`).digest('hex');
+    const expected = createHmac('sha256', input.secret)
+      .update(`${timestamp}.${input.body}`)
+      .digest('hex');
     const a = Buffer.from(expected, 'hex');
     const b = Buffer.from(received, 'hex');
     if (a.length !== b.length) return false;
@@ -69,7 +77,10 @@ export function verifyTixkitWebhook(input: {
   }
 }
 
-function headerValue(headers: Headers | Record<string, HeaderValue>, name: string): string | undefined {
+function headerValue(
+  headers: Headers | Record<string, HeaderValue>,
+  name: string,
+): string | undefined {
   if (headers instanceof Headers) return headers.get(name) ?? undefined;
   const direct = headers[name] ?? headers[name.toLowerCase()];
   if (Array.isArray(direct)) return direct[0];
@@ -106,12 +117,15 @@ export function createTixkitWebhookRouteHandler(options: TixkitWebhookRouteHandl
     const body = await request.text();
     const signature = headerValue(request.headers, signatureHeader);
 
-    if (!signature || !verifyTixkitWebhook({
-      body,
-      signature,
-      secret: options.secret,
-      toleranceSeconds: options.toleranceSeconds,
-    })) {
+    if (
+      !signature ||
+      !verifyTixkitWebhook({
+        body,
+        signature,
+        secret: options.secret,
+        toleranceSeconds: options.toleranceSeconds,
+      })
+    ) {
       return jsonResponse({ error: 'Invalid signature' }, { status: 401 });
     }
 
@@ -130,7 +144,9 @@ export function createTixkitWebhookRouteHandler(options: TixkitWebhookRouteHandl
   };
 }
 
-export function createCheckoutSessionRouteHandler(options: TixkitCheckoutSessionRouteHandlerOptions) {
+export function createCheckoutSessionRouteHandler(
+  options: TixkitCheckoutSessionRouteHandlerOptions,
+) {
   const client = createTixkitClient(options);
   const idempotencyHeader = options.idempotencyHeader ?? 'idempotency-key';
 
@@ -138,9 +154,10 @@ export function createCheckoutSessionRouteHandler(options: TixkitCheckoutSession
     let input: Record<string, unknown>;
     try {
       const parsed = parseJsonBody(await request.text());
-      input = parsed && typeof parsed === 'object' && !Array.isArray(parsed)
-        ? parsed as Record<string, unknown>
-        : {};
+      input =
+        parsed && typeof parsed === 'object' && !Array.isArray(parsed)
+          ? (parsed as Record<string, unknown>)
+          : {};
     } catch {
       return jsonResponse({ error: 'Invalid JSON body' }, { status: 400 });
     }
@@ -159,9 +176,10 @@ export function createCheckoutSessionRouteHandler(options: TixkitCheckoutSession
       } as Parameters<typeof client.checkout.create>[0]);
       return jsonResponse(session, { status: 201 });
     } catch (err) {
-      const status = typeof (err as { statusCode?: unknown }).statusCode === 'number'
-        ? (err as { statusCode: number }).statusCode
-        : 502;
+      const status =
+        typeof (err as { statusCode?: unknown }).statusCode === 'number'
+          ? (err as { statusCode: number }).statusCode
+          : 502;
       const message = err instanceof Error ? err.message : 'Checkout session creation failed';
       return jsonResponse({ error: message }, { status });
     }

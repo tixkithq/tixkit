@@ -24,7 +24,9 @@ process.env.TIXKIT_API_URL ??= apiUrl;
 process.env.CHECKOUT_URL ??= checkoutUrl;
 const stripeSecretKey = useStripeProvider ? (process.env.STRIPE_SECRET_KEY ?? '') : '';
 const stripeWebhookSecret = useStripeProvider ? (process.env.STRIPE_WEBHOOK_SECRET ?? '') : '';
-const stripePublishableKey = useStripeProvider ? (process.env.NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY ?? '') : '';
+const stripePublishableKey = useStripeProvider
+  ? (process.env.NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY ?? '')
+  : '';
 const localApiEnv = {
   NODE_ENV: 'development',
   PORT: apiPort,
@@ -39,7 +41,12 @@ const localApiEnv = {
   STRIPE_SECRET_KEY: stripeSecretKey,
   STRIPE_WEBHOOK_SECRET: stripeWebhookSecret,
   NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY: stripePublishableKey,
-  CORS_ALLOWED_ORIGINS: [checkoutUrl, adminUrl, 'http://localhost:3000', 'http://localhost:3001'].join(','),
+  CORS_ALLOWED_ORIGINS: [
+    checkoutUrl,
+    adminUrl,
+    'http://localhost:3000',
+    'http://localhost:3001',
+  ].join(','),
   RATE_LIMIT_MAX: '100000',
   RATE_LIMIT_TIME_WINDOW: '1 minute',
 };
@@ -98,7 +105,7 @@ export default defineConfig({
   ],
 
   webServer: useWebServer
-      ? [
+    ? [
         {
           command: 'bun run --filter @tixkit/api build && bun run --filter @tixkit/api start',
           env: localApiEnv,
@@ -107,7 +114,8 @@ export default defineConfig({
           reuseExistingServer: !isCI,
         },
         {
-          command: 'bun run --filter @tixkit/workflows build && bun run --filter @tixkit/workflows start',
+          command:
+            'bun run --filter @tixkit/workflows build && bun run --filter @tixkit/workflows start',
           env: localWorkerEnv,
           timeout: 120_000,
           reuseExistingServer: !isCI,

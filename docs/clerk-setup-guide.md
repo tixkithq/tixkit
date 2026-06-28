@@ -4,6 +4,8 @@ Tixkit uses [Clerk](https://clerk.com) for admin dashboard authentication, organ
 
 The Clerk integration lives in `packages/api/src/auth/clerk.ts` and the webhook handler in `packages/api/src/routes/modules/clerk-webhooks.ts`. The admin dashboard uses `@clerk/nextjs` (see `apps/admin-dashboard`).
 
+Phase 4 self-hosting gap (C-053): Clerk is currently the default and only production auth provider. The planned work is to introduce an `AuthProvider` boundary with Clerk as the default adapter plus at least one supported non-Clerk self-host path. Until C-053 lands, do not document non-Clerk auth as supported.
+
 ## Local Development Without Clerk
 
 The admin dashboard renders without Clerk keys using a deterministic local-dev principal. Leave these env vars empty in `.env.local` to enable local dev mode:
@@ -87,11 +89,11 @@ Clerk metadata has a 4 KB limit per object. Keep Tixkit-related metadata minimal
 
 Clerk webhooks are delivered by Svix. The handler verifies the signature using these headers:
 
-| Header | Purpose |
-| --- | --- |
-| `svix-id` | Unique message ID (used for dedupe) |
+| Header           | Purpose                                               |
+| ---------------- | ----------------------------------------------------- |
+| `svix-id`        | Unique message ID (used for dedupe)                   |
 | `svix-timestamp` | Unix seconds; must be within 5 minutes of server time |
-| `svix-signature` | Space-delimited `v1,<base64>` candidates |
+| `svix-signature` | Space-delimited `v1,<base64>` candidates              |
 
 The verifier (`verifySvixSignature` in `packages/api/src/routes/modules/clerk-webhooks.ts`):
 

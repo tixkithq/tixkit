@@ -41,10 +41,19 @@ export type UploadArtifactResponse = {
 const EICAR_SIGNATURE = 'X5O!P%@AP[4\\PZX54(P^)7CC)7}$EICAR-STANDARD-ANTIVIRUS-TEST-FILE!$H+H*';
 const UPLOAD_TTL_SECONDS = 15 * 60;
 
-const PURPOSE_LIMITS: Record<UploadPurpose, { maxSizeBytes: number; contentTypes: Set<string>; prefix: string }> = {
+const PURPOSE_LIMITS: Record<
+  UploadPurpose,
+  { maxSizeBytes: number; contentTypes: Set<string>; prefix: string }
+> = {
   checkout_answer: {
     maxSizeBytes: 10 * 1024 * 1024,
-    contentTypes: new Set(['application/pdf', 'image/jpeg', 'image/png', 'image/webp', 'text/plain']),
+    contentTypes: new Set([
+      'application/pdf',
+      'image/jpeg',
+      'image/png',
+      'image/webp',
+      'text/plain',
+    ]),
     prefix: 'checkout-answers',
   },
   brand_logo: {
@@ -71,7 +80,10 @@ export function uploadTokenMatches(expectedHash: string | null, token: string): 
 }
 
 function safeFileName(name: string): string {
-  const trimmed = name.trim().replaceAll(/[/\\]/g, '-').replaceAll(/[^\w .@-]/g, '_');
+  const trimmed = name
+    .trim()
+    .replaceAll(/[/\\]/g, '-')
+    .replaceAll(/[^\w .@-]/g, '_');
   return trimmed.length > 0 ? trimmed.slice(0, 180) : 'upload';
 }
 
@@ -80,12 +92,18 @@ function extension(name: string): string {
   return match ? match[0].toLowerCase() : '';
 }
 
-function assertUploadAllowed(input: Pick<CreateUploadInput, 'purpose' | 'contentType' | 'sizeBytes'>): void {
+function assertUploadAllowed(
+  input: Pick<CreateUploadInput, 'purpose' | 'contentType' | 'sizeBytes'>,
+): void {
   const limits = PURPOSE_LIMITS[input.purpose];
   if (!limits.contentTypes.has(input.contentType)) {
     throw new ValidationError(`Unsupported upload content type: ${input.contentType}`);
   }
-  if (!Number.isSafeInteger(input.sizeBytes) || input.sizeBytes <= 0 || input.sizeBytes > limits.maxSizeBytes) {
+  if (
+    !Number.isSafeInteger(input.sizeBytes) ||
+    input.sizeBytes <= 0 ||
+    input.sizeBytes > limits.maxSizeBytes
+  ) {
     throw new ValidationError(`Upload exceeds ${limits.maxSizeBytes} byte limit`);
   }
 }
@@ -108,10 +126,15 @@ function createS3Client(): S3Client {
 }
 
 async function bodyToBuffer(body: unknown): Promise<Buffer> {
-  if (!body || typeof (body as { transformToByteArray?: unknown }).transformToByteArray !== 'function') {
+  if (
+    !body ||
+    typeof (body as { transformToByteArray?: unknown }).transformToByteArray !== 'function'
+  ) {
     return Buffer.alloc(0);
   }
-  const bytes = await (body as { transformToByteArray(): Promise<Uint8Array> }).transformToByteArray();
+  const bytes = await (
+    body as { transformToByteArray(): Promise<Uint8Array> }
+  ).transformToByteArray();
   return Buffer.from(bytes);
 }
 
@@ -155,7 +178,11 @@ async function scanWithClamAv(buffer: Buffer): Promise<{ clean: boolean; result:
 
 function isMissingS3ObjectError(error: unknown): boolean {
   if (!error || typeof error !== 'object') return false;
-  const candidate = error as { name?: unknown; Code?: unknown; $metadata?: { httpStatusCode?: unknown } };
+  const candidate = error as {
+    name?: unknown;
+    Code?: unknown;
+    $metadata?: { httpStatusCode?: unknown };
+  };
   return (
     candidate.name === 'NotFound' ||
     candidate.name === 'NoSuchKey' ||
@@ -164,13 +191,21 @@ function isMissingS3ObjectError(error: unknown): boolean {
   );
 }
 
-async function markUploadArtifactRejected(db: Database, artifactId: string, result: string): Promise<void> {
-  await db.updateTable('upload_artifacts').set({
-    status: 'rejected',
-    scan_status: 'blocked',
-    scan_result: result,
-    updated_at: new Date(),
-  }).where('id', '=', artifactId).execute();
+async function markUploadArtifactRejected(
+  db: Database,
+  artifactId: string,
+  result: string,
+): Promise<void> {
+  await db
+    .updateTable('upload_artifacts')
+    .set({
+      status: 'rejected',
+      scan_status: 'blocked',
+      scan_result: result,
+      updated_at: new Date(),
+    })
+    .where('id', '=', artifactId)
+    .execute();
 }
 
 async function tryDeleteUploadObject(s3: S3Client, bucket: string, key: string): Promise<void> {
@@ -181,7 +216,11 @@ async function tryDeleteUploadObject(s3: S3Client, bucket: string, key: string):
   }
 }
 
-export async function cleanupExpiredUploadArtifacts(db: Database, now = new Date(), limit = 100): Promise<number> {
+export async function cleanupExpiredUploadArtifacts(
+  db: Database,
+  now = new Date(),
+  limit = 100,
+): Promise<number> {
   const rows = await db
     .selectFrom('upload_artifacts')
     .select(['id', 'status', 'scan_result', 'bucket', 'object_key'])
@@ -194,25 +233,30 @@ export async function cleanupExpiredUploadArtifacts(db: Database, now = new Date
   if (rows.length === 0) return 0;
 
   const s3 = createS3Client();
-  await Promise.all(rows.map(async (row) => {
-    await tryDeleteUploadObject(s3, row.bucket, row.object_key);
-    await db
-      .updateTable('upload_artifacts')
-      .set({
-        status: 'rejected',
-        scan_status: 'blocked',
-        scan_result: row.scan_result ?? 'Upload artifact expired before completion',
-        updated_at: now,
-      })
-      .where('id', '=', row.id)
-      .execute();
-  }));
+  await Promise.all(
+    rows.map(async (row) => {
+      await tryDeleteUploadObject(s3, row.bucket, row.object_key);
+      await db
+        .updateTable('upload_artifacts')
+        .set({
+          status: 'rejected',
+          scan_status: 'blocked',
+          scan_result: row.scan_result ?? 'Upload artifact expired before completion',
+          updated_at: now,
+        })
+        .where('id', '=', row.id)
+        .execute();
+    }),
+  );
 
   return rows.length;
 }
 
-export async function scanUploadBuffer(buffer: Buffer): Promise<{ clean: boolean; result: string }> {
-  const mode = process.env.UPLOAD_MALWARE_SCANNER ?? (process.env.NODE_ENV === 'production' ? '' : 'eicar');
+export async function scanUploadBuffer(
+  buffer: Buffer,
+): Promise<{ clean: boolean; result: string }> {
+  const mode =
+    process.env.UPLOAD_MALWARE_SCANNER ?? (process.env.NODE_ENV === 'production' ? '' : 'eicar');
   if (mode === 'clamav') return scanWithClamAv(buffer);
   if (mode === 'eicar') {
     const text = buffer.toString('utf8');
@@ -223,7 +267,10 @@ export async function scanUploadBuffer(buffer: Buffer): Promise<{ clean: boolean
   throw new Error('UPLOAD_MALWARE_SCANNER must be configured in production');
 }
 
-export async function createUploadArtifact(db: Database, input: CreateUploadInput): Promise<UploadArtifactResponse> {
+export async function createUploadArtifact(
+  db: Database,
+  input: CreateUploadInput,
+): Promise<UploadArtifactResponse> {
   assertUploadAllowed(input);
   const id = `upl_${ulid()}`;
   const now = new Date();
@@ -256,42 +303,54 @@ export async function createUploadArtifact(db: Database, input: CreateUploadInpu
     { expiresIn: UPLOAD_TTL_SECONDS, signableHeaders: new Set(['content-type', 'content-length']) },
   );
 
-  await db.insertInto('upload_artifacts').values({
-    id,
-    tenant_id: input.tenantId,
-    organization_id: input.organizationId ?? null,
-    brand_id: input.brandId ?? null,
-    event_id: input.eventId ?? null,
-    created_by_user_id: input.createdByUserId ?? null,
-    purpose: input.purpose,
-    status: 'pending',
-    scan_status: 'pending',
-    scan_result: null,
-    bucket: config.s3Bucket,
-    object_key: objectKey,
-    file_name: fileName,
-    content_type: input.contentType,
-    size_bytes: input.sizeBytes,
-    checksum_sha256: null,
-    client_token_hash: completeToken ? tokenHash(completeToken) : null,
-    metadata: JSON.stringify(input.metadata ?? {}),
-    expires_at: expiresAt,
-    created_at: now,
-    updated_at: now,
-  }).execute();
+  await db
+    .insertInto('upload_artifacts')
+    .values({
+      id,
+      tenant_id: input.tenantId,
+      organization_id: input.organizationId ?? null,
+      brand_id: input.brandId ?? null,
+      event_id: input.eventId ?? null,
+      created_by_user_id: input.createdByUserId ?? null,
+      purpose: input.purpose,
+      status: 'pending',
+      scan_status: 'pending',
+      scan_result: null,
+      bucket: config.s3Bucket,
+      object_key: objectKey,
+      file_name: fileName,
+      content_type: input.contentType,
+      size_bytes: input.sizeBytes,
+      checksum_sha256: null,
+      client_token_hash: completeToken ? tokenHash(completeToken) : null,
+      metadata: JSON.stringify(input.metadata ?? {}),
+      expires_at: expiresAt,
+      created_at: now,
+      updated_at: now,
+    })
+    .execute();
 
   return {
     artifactId: id,
     uploadUrl,
     uploadHeaders,
-    completeUrl: input.publicComplete ? `/v1/public/upload-artifacts/${id}/complete` : `/v1/upload-artifacts/${id}/complete`,
+    completeUrl: input.publicComplete
+      ? `/v1/public/upload-artifacts/${id}/complete`
+      : `/v1/upload-artifacts/${id}/complete`,
     completeToken,
     expiresAt: expiresAt.toISOString(),
   };
 }
 
-export async function completeUploadArtifact(db: Database, artifactId: string): Promise<{ artifactId: string; status: string; scanStatus: string }> {
-  const artifact = await db.selectFrom('upload_artifacts').selectAll().where('id', '=', artifactId).executeTakeFirst();
+export async function completeUploadArtifact(
+  db: Database,
+  artifactId: string,
+): Promise<{ artifactId: string; status: string; scanStatus: string }> {
+  const artifact = await db
+    .selectFrom('upload_artifacts')
+    .selectAll()
+    .where('id', '=', artifactId)
+    .executeTakeFirst();
   if (!artifact) throw new NotFoundError('UploadArtifact', artifactId);
   if (artifact.status === 'uploaded' && artifact.scan_status === 'clean') {
     return { artifactId, status: artifact.status, scanStatus: artifact.scan_status };
@@ -318,7 +377,11 @@ export async function completeUploadArtifact(db: Database, artifactId: string): 
   const actualSize = Number(head.ContentLength ?? 0);
   const actualType = typeof head.ContentType === 'string' ? head.ContentType : '';
   try {
-    assertUploadAllowed({ purpose: artifact.purpose as UploadPurpose, contentType: actualType, sizeBytes: actualSize });
+    assertUploadAllowed({
+      purpose: artifact.purpose as UploadPurpose,
+      contentType: actualType,
+      sizeBytes: actualSize,
+    });
   } catch (error) {
     if (!(error instanceof ValidationError)) throw error;
     const result = `Uploaded object metadata is invalid: ${error.message}`;
@@ -339,9 +402,12 @@ export async function completeUploadArtifact(db: Database, artifactId: string): 
     throw new ValidationError(result);
   }
 
-  const object = await s3.send(new GetObjectCommand({ Bucket: artifact.bucket, Key: stagingObjectKey }));
+  const object = await s3.send(
+    new GetObjectCommand({ Bucket: artifact.bucket, Key: stagingObjectKey }),
+  );
   const buffer = await bodyToBuffer(object.Body);
-  const objectContentType = typeof object.ContentType === 'string' ? object.ContentType : actualType;
+  const objectContentType =
+    typeof object.ContentType === 'string' ? object.ContentType : actualType;
   if (buffer.length !== artifact.size_bytes) {
     const result = `Uploaded object size does not match declared size: expected ${artifact.size_bytes} bytes, received ${buffer.length} bytes`;
     await markUploadArtifactRejected(db, artifact.id, result);
@@ -358,40 +424,57 @@ export async function completeUploadArtifact(db: Database, artifactId: string): 
   const checksum = createHash('sha256').update(buffer).digest('hex');
   const now = new Date();
   if (!scan.clean) {
-    await db.updateTable('upload_artifacts').set({
-      status: 'rejected',
-      scan_status: 'blocked',
-      scan_result: scan.result,
-      checksum_sha256: checksum,
-      updated_at: now,
-    }).where('id', '=', artifact.id).execute();
+    await db
+      .updateTable('upload_artifacts')
+      .set({
+        status: 'rejected',
+        scan_status: 'blocked',
+        scan_result: scan.result,
+        checksum_sha256: checksum,
+        updated_at: now,
+      })
+      .where('id', '=', artifact.id)
+      .execute();
     await tryDeleteUploadObject(s3, artifact.bucket, stagingObjectKey);
     throw new ValidationError('Uploaded file failed malware scan');
   }
 
   const finalObjectKey = finalObjectKeyFromStaging(stagingObjectKey);
-  await s3.send(new PutObjectCommand({
-    Bucket: artifact.bucket,
-    Key: finalObjectKey,
-    Body: buffer,
-    ContentType: artifact.content_type,
-    ContentLength: buffer.length,
-  }));
-  await db.updateTable('upload_artifacts').set({
-    status: 'uploaded',
-    scan_status: 'clean',
-    scan_result: scan.result,
-    checksum_sha256: checksum,
-    object_key: finalObjectKey,
-    updated_at: now,
-  }).where('id', '=', artifact.id).execute();
+  await s3.send(
+    new PutObjectCommand({
+      Bucket: artifact.bucket,
+      Key: finalObjectKey,
+      Body: buffer,
+      ContentType: artifact.content_type,
+      ContentLength: buffer.length,
+    }),
+  );
+  await db
+    .updateTable('upload_artifacts')
+    .set({
+      status: 'uploaded',
+      scan_status: 'clean',
+      scan_result: scan.result,
+      checksum_sha256: checksum,
+      object_key: finalObjectKey,
+      updated_at: now,
+    })
+    .where('id', '=', artifact.id)
+    .execute();
   await tryDeleteUploadObject(s3, artifact.bucket, stagingObjectKey);
 
   return { artifactId, status: 'uploaded', scanStatus: 'clean' };
 }
 
-export async function getUploadArtifactDownloadUrl(db: Database, artifactId: string): Promise<string> {
-  const artifact = await db.selectFrom('upload_artifacts').selectAll().where('id', '=', artifactId).executeTakeFirst();
+export async function getUploadArtifactDownloadUrl(
+  db: Database,
+  artifactId: string,
+): Promise<string> {
+  const artifact = await db
+    .selectFrom('upload_artifacts')
+    .selectAll()
+    .where('id', '=', artifactId)
+    .executeTakeFirst();
   if (!artifact || artifact.status !== 'uploaded' || artifact.scan_status !== 'clean') {
     throw new NotFoundError('UploadArtifact', artifactId);
   }
@@ -412,9 +495,9 @@ function uploadArtifactAnswerEntries(answers: Record<string, unknown>): Array<[s
     .filter((entry): entry is [string, { artifactId: string }] =>
       Boolean(
         entry[1] &&
-          typeof entry[1] === 'object' &&
-          !Array.isArray(entry[1]) &&
-          typeof (entry[1] as { artifactId?: unknown }).artifactId === 'string',
+        typeof entry[1] === 'object' &&
+        !Array.isArray(entry[1]) &&
+        typeof (entry[1] as { artifactId?: unknown }).artifactId === 'string',
       ),
     )
     .map(([questionId, answer]) => [questionId, answer.artifactId]);
@@ -452,15 +535,20 @@ export async function assertCompletedUploadArtifacts(
 
   const rows = await db
     .selectFrom('upload_artifacts')
-    .select(['id', 'status', 'scan_status', 'metadata'])
+    .select(['id', 'purpose', 'status', 'scan_status', 'metadata'])
     .where('tenant_id', '=', tenantId)
     .where('event_id', '=', eventId)
     .where('id', 'in', artifactIds)
     .execute();
   const valid = new Set<string>();
+  const invalidPurpose = new Set<string>();
   const mismatched = new Set<string>();
   const missingQuestionMetadata = new Set<string>();
   for (const row of rows) {
+    if (row.purpose !== 'checkout_answer') {
+      invalidPurpose.add(row.id);
+      continue;
+    }
     if (row.status !== 'uploaded' || row.scan_status !== 'clean') continue;
 
     const artifactQuestionId = metadataQuestionId(row.metadata);
@@ -469,7 +557,10 @@ export async function assertCompletedUploadArtifacts(
       missingQuestionMetadata.add(row.id);
       continue;
     }
-    if (!answerQuestionIds || [...answerQuestionIds].some((questionId) => questionId !== artifactQuestionId)) {
+    if (
+      !answerQuestionIds ||
+      [...answerQuestionIds].some((questionId) => questionId !== artifactQuestionId)
+    ) {
       mismatched.add(row.id);
       continue;
     }
@@ -477,20 +568,38 @@ export async function assertCompletedUploadArtifacts(
     valid.add(row.id);
   }
 
+  if (invalidPurpose.size > 0) {
+    throw new ValidationError(
+      'File answer references an upload artifact that is not a checkout answer upload',
+      {
+        artifactIds: [...invalidPurpose],
+      },
+    );
+  }
+
   if (mismatched.size > 0) {
-    throw new ValidationError('File answer references an upload artifact for a different question', {
-      artifactIds: [...mismatched],
-    });
+    throw new ValidationError(
+      'File answer references an upload artifact for a different question',
+      {
+        artifactIds: [...mismatched],
+      },
+    );
   }
 
   if (missingQuestionMetadata.size > 0) {
-    throw new ValidationError('File answer references an upload artifact without question metadata', {
-      artifactIds: [...missingQuestionMetadata],
-    });
+    throw new ValidationError(
+      'File answer references an upload artifact without question metadata',
+      {
+        artifactIds: [...missingQuestionMetadata],
+      },
+    );
   }
 
   const missing = artifactIds.filter((artifactId) => !valid.has(artifactId));
   if (missing.length > 0) {
-    throw new ValidationError('File answer references an upload artifact that is not completed and clean', { artifactIds: missing });
+    throw new ValidationError(
+      'File answer references an upload artifact that is not completed and clean',
+      { artifactIds: missing },
+    );
   }
 }

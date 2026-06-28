@@ -44,8 +44,8 @@ export const clerkWebhookRoutes: FastifyPluginAsync = async (app) => {
     }
 
     if (!verifySvixSignature(rawBody, msgId, timestamp, signature, webhookSecret)) {
-        throw new WebhookSignatureError('Invalid signature');
-      }
+      throw new WebhookSignatureError('Invalid signature');
+    }
 
     const event = request.body as { type: string; data: ClerkWebhookData };
 
@@ -79,6 +79,7 @@ export const clerkWebhookRoutes: FastifyPluginAsync = async (app) => {
 
     const isOrgEvent = event.type.startsWith('organization');
     await temporalClient.startClerkIdentitySync({
+      providerEventId: msgId,
       eventType: event.type,
       clerkUserId: isOrgEvent ? undefined : event.data.id,
       email: event.data.email_addresses?.[0]?.email_address,
@@ -88,10 +89,6 @@ export const clerkWebhookRoutes: FastifyPluginAsync = async (app) => {
       clerkOrgId: isOrgEvent ? event.data.id : undefined,
       orgName: isOrgEvent ? event.data.name : undefined,
     });
-
-    // Mark only after durable sync has been accepted. Clerk can safely replay
-    // unprocessed rows if this final update fails.
-    await eventRepo.markProcessed(storedEvent.id);
 
     return reply.status(200).send({ received: true });
   });

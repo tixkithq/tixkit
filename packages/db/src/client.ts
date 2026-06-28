@@ -25,7 +25,8 @@ export function getDriver(dbUrl?: string): DbDriver {
 
 export function createDb(dbUrl?: string): Kysely<DB> {
   const driver = getDriver(dbUrl);
-  const url = dbUrl ?? (driver === 'mysql' ? process.env.DATABASE_URL_MYSQL : process.env.DATABASE_URL);
+  const url =
+    dbUrl ?? (driver === 'mysql' ? process.env.DATABASE_URL_MYSQL : process.env.DATABASE_URL);
 
   if (!url) {
     throw new Error(`Database URL not configured for driver: ${driver}`);

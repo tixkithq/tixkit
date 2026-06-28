@@ -6,6 +6,16 @@ import { okResult, errResult } from '../shared/types.js';
 
 const exportEventChannel = (exportId: string) => `tixkit:export-job:${exportId}:events`;
 
+function isValidExportFileUrl(value: unknown): value is string {
+  if (typeof value !== 'string') return false;
+  try {
+    const url = new URL(value);
+    return url.protocol === 'https:';
+  } catch {
+    return false;
+  }
+}
+
 type ExportJobStatus = 'pending' | 'processing' | 'completed' | 'failed';
 
 type ExportJobEventPayload = {
@@ -32,9 +42,8 @@ function serializeExportJobEventPayload(
   reason?: string,
 ): ExportJobEventPayload {
   const status = String(row.status) as ExportJobStatus;
-  const fileUrl = typeof row.file_url === 'string' && status === 'completed'
-    ? row.file_url
-    : undefined;
+  const fileUrl =
+    status === 'completed' && isValidExportFileUrl(row.file_url) ? row.file_url : undefined;
   return {
     exportId: String(row.id),
     eventId: typeof row.event_id === 'string' ? row.event_id : undefined,
@@ -95,9 +104,7 @@ async function recordExportJobStatus(
       status: input.status,
       file_url: input.fileUrl ?? current.file_url,
       completed_at:
-        input.status === 'completed' || input.status === 'failed'
-          ? now
-          : current.completed_at,
+        input.status === 'completed' || input.status === 'failed' ? now : current.completed_at,
     } as Record<string, unknown>;
 
     if (input.status === 'completed') {
@@ -215,12 +222,12 @@ type ConsentAnswerSnapshot = {
 function isConsentAnswerSnapshot(value: unknown): value is ConsentAnswerSnapshot {
   return Boolean(
     value &&
-      typeof value === 'object' &&
-      !Array.isArray(value) &&
-      (value as { accepted?: unknown }).accepted === true &&
-      typeof (value as { consentText?: unknown }).consentText === 'string' &&
-      typeof (value as { consentVersion?: unknown }).consentVersion === 'string' &&
-      typeof (value as { consentedAt?: unknown }).consentedAt === 'string',
+    typeof value === 'object' &&
+    !Array.isArray(value) &&
+    (value as { accepted?: unknown }).accepted === true &&
+    typeof (value as { consentText?: unknown }).consentText === 'string' &&
+    typeof (value as { consentVersion?: unknown }).consentVersion === 'string' &&
+    typeof (value as { consentedAt?: unknown }).consentedAt === 'string',
   );
 }
 
@@ -265,9 +272,7 @@ function buildQuestionColumns(questions: ExportQuestion[]): {
   valuesFor: (customAnswers: string | null) => Record<string, string>;
 } {
   // eslint-disable-next-line unicorn/no-array-sort -- sorting a copied question list keeps export columns deterministic.
-  const sorted = [...questions].sort(
-    (a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0),
-  );
+  const sorted = [...questions].sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0));
   const headers: string[] = [];
   const accessors: Array<(answers: Record<string, unknown>) => string> = [];
 
@@ -322,11 +327,7 @@ function buildQuestionColumns(questions: ExportQuestion[]): {
 
 function parseDateFilterBoundary(value: string, boundary: 'start' | 'end'): Date {
   if (/^\d{4}-\d{2}-\d{2}$/.test(value)) {
-    return new Date(
-      boundary === 'start'
-        ? `${value}T00:00:00.000Z`
-        : `${value}T23:59:59.999Z`,
-    );
+    return new Date(boundary === 'start' ? `${value}T00:00:00.000Z` : `${value}T23:59:59.999Z`);
   }
 
   return new Date(value);
@@ -362,17 +363,13 @@ export async function generateExportActivity(input: {
     const tenantId = String(exportJob.tenant_id);
     const eventId = typeof exportJob.event_id === 'string' ? exportJob.event_id : undefined;
 
-    const filters: ExportFilters = typeof exportJob.filters === 'string'
-      ? JSON.parse(exportJob.filters)
-      : {};
+    const filters: ExportFilters =
+      typeof exportJob.filters === 'string' ? JSON.parse(exportJob.filters) : {};
 
     let rows: Record<string, unknown>[] = [];
 
     if (input.type === 'attendees') {
-      let query = db
-        .selectFrom('attendees')
-        .selectAll()
-        .where('tenant_id', '=', tenantId);
+      let query = db.selectFrom('attendees').selectAll().where('tenant_id', '=', tenantId);
 
       if (eventId) {
         query = query.where('event_id', '=', eventId) as typeof query;
@@ -425,7 +422,7 @@ export async function generateExportActivity(input: {
       // configured questions. This preserves historical consent text/version
       // snapshots for auditability (C6).
       if (eventId) {
-        const questions = await db
+        const questions = (await db
           .selectFrom('questions')
           .select([
             'id',
@@ -438,31 +435,31 @@ export async function generateExportActivity(input: {
             'sort_order',
           ])
           .where('event_id', '=', eventId)
-          .execute() as ExportQuestion[];
+          .execute()) as ExportQuestion[];
 
         if (questions.length > 0) {
           const { valuesFor } = buildQuestionColumns(questions);
           rows = attendees.map((a) =>
-            Object.assign({
-              id: a.id,
-              email: a.email,
-              firstName: a.first_name,
-              lastName: a.last_name,
-              phone: a.phone,
-              status: a.status,
-              eventId: a.event_id,
-              orderId: a.order_id,
-              checkedInAt: a.checked_in_at,
-              createdAt: a.created_at,
-            }, valuesFor(a.custom_answers as string | null)),
+            Object.assign(
+              {
+                id: a.id,
+                email: a.email,
+                firstName: a.first_name,
+                lastName: a.last_name,
+                phone: a.phone,
+                status: a.status,
+                eventId: a.event_id,
+                orderId: a.order_id,
+                checkedInAt: a.checked_in_at,
+                createdAt: a.created_at,
+              },
+              valuesFor(a.custom_answers as string | null),
+            ),
           );
         }
       }
     } else if (input.type === 'orders') {
-      let query = db
-        .selectFrom('orders')
-        .selectAll()
-        .where('tenant_id', '=', tenantId);
+      let query = db.selectFrom('orders').selectAll().where('tenant_id', '=', tenantId);
 
       if (eventId) {
         query = query.where('event_id', '=', eventId) as typeof query;
@@ -490,10 +487,7 @@ export async function generateExportActivity(input: {
         createdAt: o.created_at,
       }));
     } else if (input.type === 'tickets') {
-      let query = db
-        .selectFrom('tickets')
-        .selectAll()
-        .where('tenant_id', '=', tenantId);
+      let query = db.selectFrom('tickets').selectAll().where('tenant_id', '=', tenantId);
 
       if (eventId) {
         query = query.where('event_id', '=', eventId) as typeof query;
@@ -522,10 +516,7 @@ export async function generateExportActivity(input: {
         createdAt: t.created_at,
       }));
     } else if (input.type === 'scan_logs') {
-      let query = db
-        .selectFrom('scan_logs')
-        .selectAll()
-        .where('tenant_id', '=', tenantId);
+      let query = db.selectFrom('scan_logs').selectAll().where('tenant_id', '=', tenantId);
 
       if (eventId) {
         query = query
@@ -710,6 +701,10 @@ export async function notifyExportCompleteActivity(input: {
   requestedBy: string;
   tenantId?: string;
 }): Promise<WorkflowActivityResult<{ notified: boolean }>> {
+  if (!isValidExportFileUrl(input.fileUrl)) {
+    return errResult('INVALID_EXPORT_FILE_URL', 'Export file URL must use HTTPS');
+  }
+
   const db = createDb();
   try {
     await recordExportJobStatus(db, {
@@ -740,7 +735,11 @@ export async function notifyExportCompleteActivity(input: {
 
         const templateVersion = await db
           .selectFrom('notification_templates as template')
-          .innerJoin('notification_template_versions as version', 'version.template_id', 'template.id')
+          .innerJoin(
+            'notification_template_versions as version',
+            'version.template_id',
+            'template.id',
+          )
           .select(['version.id'])
           .where('template.tenant_id', '=', user.tenant_id)
           .where('template.key', '=', 'staff-order-notification')
@@ -769,7 +768,8 @@ export async function notifyExportCompleteActivity(input: {
           try {
             const { Connection, Client } = await import('@temporalio/client');
             const { notificationDeliveryWorkflow } = await import('../workflows/notification.js');
-            const { notificationWorkflowId, NOTIFICATION_WORKFLOW_VERSION } = await import('../shared/types.js');
+            const { notificationWorkflowId, NOTIFICATION_WORKFLOW_VERSION } =
+              await import('../shared/types.js');
             const temporalAddress = process.env.TEMPORAL_ADDRESS ?? 'localhost:7233';
             const temporalNamespace = process.env.TEMPORAL_NAMESPACE ?? 'default';
             const temporalTaskQueue = process.env.TEMPORAL_TASK_QUEUE ?? 'tixkit';
@@ -780,25 +780,33 @@ export async function notifyExportCompleteActivity(input: {
               await client.workflow.start(notificationDeliveryWorkflow, {
                 taskQueue: temporalTaskQueue,
                 workflowId,
-                args: [{
-                  version: NOTIFICATION_WORKFLOW_VERSION,
-                  jobId: job.id,
-                  tenantId: user.tenant_id,
-                  brandId: route.brand_id,
-                  templateKey: 'staff-order-notification',
-                  templateVersionId: templateVersion.id,
-                  toEmail: user.email,
-                  variables: {
-                    exportId: input.exportId,
-                    fileUrl: input.fileUrl,
+                args: [
+                  {
+                    version: NOTIFICATION_WORKFLOW_VERSION,
+                    jobId: job.id,
+                    tenantId: user.tenant_id,
+                    brandId: route.brand_id,
+                    templateKey: 'staff-order-notification',
+                    templateVersionId: templateVersion.id,
+                    toEmail: user.email,
+                    variables: {
+                      exportId: input.exportId,
+                      fileUrl: input.fileUrl,
+                      notificationType: 'staff',
+                    },
+                    providerRouteId: route.id,
                     notificationType: 'staff',
                   },
-                  providerRouteId: route.id,
-                  notificationType: 'staff',
-                }],
+                ],
               });
             } catch (err) {
-              if (!(err instanceof Error && (err.name === 'WorkflowExecutionAlreadyStartedError' || err.message.includes('already started')))) {
+              if (
+                !(
+                  err instanceof Error &&
+                  (err.name === 'WorkflowExecutionAlreadyStartedError' ||
+                    err.message.includes('already started'))
+                )
+              ) {
                 throw err;
               }
             }

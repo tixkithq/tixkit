@@ -1,7 +1,7 @@
-'use client'
+'use client';
 
-import React from 'react'
-import { useRouter } from 'next/navigation'
+import React from 'react';
+import { useRouter } from 'next/navigation';
 import {
   ArrowRight,
   Laptop,
@@ -19,12 +19,12 @@ import {
   CreditCard,
   Wallet,
   User,
-} from 'lucide-react'
-import { useSearch } from '@/context/search-provider'
-import { useTheme } from '@/context/theme-provider'
-import { usePermissions } from '@/context/permission-provider'
-import { type TixkitPermission } from '@/lib/permissions'
-import { routes } from '@/lib/routes'
+} from 'lucide-react';
+import { useSearch } from '@/context/search-provider';
+import { useTheme } from '@/context/theme-provider';
+import { usePermissions } from '@/context/permission-provider';
+import { type TixkitPermission } from '@/lib/permissions';
+import { routes } from '@/lib/routes';
 import {
   CommandDialog,
   CommandEmpty,
@@ -33,37 +33,37 @@ import {
   CommandItem,
   CommandList,
   CommandSeparator,
-} from '@/components/ui/command'
-import { sidebarData } from '@/config/nav'
-import { ScrollArea } from './ui/scroll-area'
+} from '@/components/ui/command';
+import { sidebarData } from '@/config/nav';
+import { ScrollArea } from './ui/scroll-area';
 
 type CommandMenuItem = {
-  id: string
-  title: string
-  subtitle?: string
-  href?: string
-  icon?: React.ElementType
-  keywords?: string[]
-  action?: () => void
-  requiredPermission?: TixkitPermission
-}
+  id: string;
+  title: string;
+  subtitle?: string;
+  href?: string;
+  icon?: React.ElementType;
+  keywords?: string[];
+  action?: () => void;
+  requiredPermission?: TixkitPermission;
+};
 
 export function CommandMenu() {
-  const router = useRouter()
-  const { setTheme } = useTheme()
-  const { open, setOpen } = useSearch()
-  const { can } = usePermissions()
+  const router = useRouter();
+  const { setTheme } = useTheme();
+  const { open, setOpen } = useSearch();
+  const { can } = usePermissions();
 
   const runCommand = React.useCallback(
     (command: () => unknown) => {
-      setOpen(false)
-      command()
+      setOpen(false);
+      command();
     },
-    [setOpen]
-  )
+    [setOpen],
+  );
 
   // Build navigation items from sidebar data, filtered by permission
-  const navItems: CommandMenuItem[] = []
+  const navItems: CommandMenuItem[] = [];
   for (const group of sidebarData.navGroups) {
     for (const item of group.items) {
       if (item.url) {
@@ -74,7 +74,7 @@ export function CommandMenu() {
             href: item.url,
             icon: item.icon,
             requiredPermission: item.requiredPermission,
-          })
+          });
         }
       } else if (item.items) {
         for (const sub of item.items) {
@@ -86,7 +86,7 @@ export function CommandMenu() {
               href: sub.url,
               icon: item.icon,
               requiredPermission: sub.requiredPermission ?? item.requiredPermission,
-            })
+            });
           }
         }
       }
@@ -111,7 +111,7 @@ export function CommandMenu() {
       keywords: ['events', 'list'],
       requiredPermission: 'events.read',
     },
-  ]
+  ];
 
   const reportingActions: CommandMenuItem[] = [
     {
@@ -138,7 +138,7 @@ export function CommandMenu() {
       keywords: ['attendees', 'guests'],
       requiredPermission: 'attendees.read',
     },
-  ]
+  ];
 
   const developerActions: CommandMenuItem[] = [
     {
@@ -157,17 +157,63 @@ export function CommandMenu() {
       keywords: ['webhooks', 'endpoints', 'developer'],
       requiredPermission: 'developers.write',
     },
-  ]
+  ];
 
   const settingsItems: CommandMenuItem[] = [
-    { id: 'settings-profile', title: 'Profile Settings', href: routes.settingsProfile, icon: User, keywords: ['profile', 'account'] },
-    { id: 'settings-workspace', title: 'Workspace Settings', href: routes.settingsWorkspace, icon: Building2, keywords: ['workspace', 'organization', 'tenant'] },
-    { id: 'settings-appearance', title: 'Appearance Settings', href: routes.settingsAppearance, icon: Palette, keywords: ['theme', 'appearance', 'dark', 'light'] },
-    { id: 'settings-members', title: 'Members Settings', href: routes.settingsMembers, icon: Users, keywords: ['members', 'users', 'team', 'roles'], requiredPermission: 'settings.write' },
-    { id: 'settings-billing', title: 'Billing Settings', href: routes.settingsBilling, icon: CreditCard, keywords: ['billing', 'plan', 'invoices'], requiredPermission: 'billing.write' },
-    { id: 'settings-payments', title: 'Payment Settings', href: routes.settingsPayments, icon: Wallet, keywords: ['payments', 'stripe', 'connect'], requiredPermission: 'billing.write' },
-    { id: 'settings-branding', title: 'Branding Settings', href: routes.settingsBranding, icon: Palette, keywords: ['branding', 'logo', 'colors', 'domains'], requiredPermission: 'settings.write' },
-  ]
+    {
+      id: 'settings-profile',
+      title: 'Profile Settings',
+      href: routes.settingsProfile,
+      icon: User,
+      keywords: ['profile', 'account'],
+    },
+    {
+      id: 'settings-workspace',
+      title: 'Workspace Settings',
+      href: routes.settingsWorkspace,
+      icon: Building2,
+      keywords: ['workspace', 'organization', 'tenant'],
+    },
+    {
+      id: 'settings-appearance',
+      title: 'Appearance Settings',
+      href: routes.settingsAppearance,
+      icon: Palette,
+      keywords: ['theme', 'appearance', 'dark', 'light'],
+    },
+    {
+      id: 'settings-members',
+      title: 'Members Settings',
+      href: routes.settingsMembers,
+      icon: Users,
+      keywords: ['members', 'users', 'team', 'roles'],
+      requiredPermission: 'settings.write',
+    },
+    {
+      id: 'settings-billing',
+      title: 'Billing Settings',
+      href: routes.settingsBilling,
+      icon: CreditCard,
+      keywords: ['billing', 'plan', 'invoices'],
+      requiredPermission: 'billing.write',
+    },
+    {
+      id: 'settings-payments',
+      title: 'Payment Settings',
+      href: routes.settingsPayments,
+      icon: Wallet,
+      keywords: ['payments', 'stripe', 'connect'],
+      requiredPermission: 'billing.write',
+    },
+    {
+      id: 'settings-branding',
+      title: 'Branding Settings',
+      href: routes.settingsBranding,
+      icon: Palette,
+      keywords: ['branding', 'logo', 'colors', 'domains'],
+      requiredPermission: 'settings.write',
+    },
+  ];
 
   const checkInAction: CommandMenuItem = {
     id: 'check-in',
@@ -176,72 +222,60 @@ export function CommandMenu() {
     icon: QrCode,
     keywords: ['check-in', 'scan', 'qr'],
     requiredPermission: 'attendees.write',
-  }
+  };
 
   const renderItem = (item: CommandMenuItem) => {
-    if (!can(item.requiredPermission)) return null
+    if (!can(item.requiredPermission)) return null;
     return (
       <CommandItem
         key={item.id}
         value={`${item.title} ${item.keywords?.join(' ') ?? ''}`}
         onSelect={() => {
           if (item.action) {
-            runCommand(item.action)
+            runCommand(item.action);
           } else if (item.href) {
-            runCommand(() => router.push(item.href!))
+            runCommand(() => router.push(item.href!));
           }
         }}
       >
-        <div className='flex size-4 items-center justify-center'>
+        <div className="flex size-4 items-center justify-center">
           {item.icon ? (
-            <item.icon className='size-4 text-muted-foreground' />
+            <item.icon className="size-4 text-muted-foreground" />
           ) : (
-            <ArrowRight className='size-2 text-muted-foreground/80' />
+            <ArrowRight className="size-2 text-muted-foreground/80" />
           )}
         </div>
         <span>{item.title}</span>
-        {item.subtitle && (
-          <span className='text-xs text-muted-foreground'>
-            {item.subtitle}
-          </span>
-        )}
+        {item.subtitle && <span className="text-xs text-muted-foreground">{item.subtitle}</span>}
       </CommandItem>
-    )
-  }
+    );
+  };
 
   return (
     <CommandDialog modal open={open} onOpenChange={setOpen}>
-      <CommandInput placeholder='Type a command or search...' />
+      <CommandInput placeholder="Type a command or search..." />
       <CommandList>
-        <ScrollArea type='hover' className='h-72 pe-1'>
+        <ScrollArea type="hover" className="h-72 pe-1">
           <CommandEmpty>No results found.</CommandEmpty>
-          <CommandGroup heading='Navigation'>
-            {navItems.map(renderItem)}
-          </CommandGroup>
+          <CommandGroup heading="Navigation">{navItems.map(renderItem)}</CommandGroup>
           <CommandSeparator />
-          <CommandGroup heading='Event Actions'>
+          <CommandGroup heading="Event Actions">
             {eventActions.map(renderItem)}
             {renderItem(checkInAction)}
           </CommandGroup>
           <CommandSeparator />
-          <CommandGroup heading='Reporting'>
-            {reportingActions.map(renderItem)}
-          </CommandGroup>
+          <CommandGroup heading="Reporting">{reportingActions.map(renderItem)}</CommandGroup>
           <CommandSeparator />
-          <CommandGroup heading='Developer'>
-            {developerActions.map(renderItem)}
-          </CommandGroup>
+          <CommandGroup heading="Developer">{developerActions.map(renderItem)}</CommandGroup>
           <CommandSeparator />
-          <CommandGroup heading='Settings'>
-            {settingsItems.map(renderItem)}
-          </CommandGroup>
+          <CommandGroup heading="Settings">{settingsItems.map(renderItem)}</CommandGroup>
           <CommandSeparator />
-          <CommandGroup heading='Theme'>
+          <CommandGroup heading="Theme">
             <CommandItem onSelect={() => runCommand(() => setTheme('light'))}>
               <Sun /> <span>Light</span>
             </CommandItem>
             <CommandItem onSelect={() => runCommand(() => setTheme('dark'))}>
-              <Moon className='scale-90' />
+              <Moon className="scale-90" />
               <span>Dark</span>
             </CommandItem>
             <CommandItem onSelect={() => runCommand(() => setTheme('system'))}>
@@ -252,5 +286,5 @@ export function CommandMenu() {
         </ScrollArea>
       </CommandList>
     </CommandDialog>
-  )
+  );
 }

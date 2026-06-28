@@ -135,17 +135,17 @@ class TixkitMigrationProvider implements MigrationProvider {
       '0007_wallet_passes': WalletPassesMigration,
       '0008_upload_artifacts': UploadArtifactsMigration,
       '0009_widget_impressions': WidgetImpressionsMigration,
-    '0010_waitlists': WaitlistsMigration,
-    '0011_event_occurrences': EventOccurrencesMigration,
-    '0012_tax_invoices': TaxInvoicesMigration,
-    '0013_oauth_grants': OAuthGrantsMigration,
-    '0014_marketing_integrations': MarketingIntegrationsMigration,
-    '0015_marketing_integrations_unique': MarketingIntegrationsUniqueMigration,
-    '0016_payment_compensations': PaymentCompensationsMigration,
-    '0017_payment_account_capabilities': PaymentAccountCapabilitiesMigration,
-    '0018_privacy_requests': PrivacyRequestsMigration,
-    '0019_deliverability_feedback': DeliverabilityFeedbackMigration,
-  };
+      '0010_waitlists': WaitlistsMigration,
+      '0011_event_occurrences': EventOccurrencesMigration,
+      '0012_tax_invoices': TaxInvoicesMigration,
+      '0013_oauth_grants': OAuthGrantsMigration,
+      '0014_marketing_integrations': MarketingIntegrationsMigration,
+      '0015_marketing_integrations_unique': MarketingIntegrationsUniqueMigration,
+      '0016_payment_compensations': PaymentCompensationsMigration,
+      '0017_payment_account_capabilities': PaymentAccountCapabilitiesMigration,
+      '0018_privacy_requests': PrivacyRequestsMigration,
+      '0019_deliverability_feedback': DeliverabilityFeedbackMigration,
+    };
   }
 }
 
@@ -248,9 +248,17 @@ export async function dropAllTables(db: Database): Promise<void> {
     await sql`SET FOREIGN_KEY_CHECKS = 0`.execute(db);
     for (const table of ALL_SCHEMA_TABLES) {
       // eslint-disable-next-line no-await-in-loop -- reset drops schema objects serially while FK checks are disabled for deterministic cleanup.
-      await db.schema.dropTable(table).ifExists().execute().catch(() => undefined);
+      await db.schema
+        .dropTable(table)
+        .ifExists()
+        .execute()
+        .catch(() => undefined);
     }
-    await db.schema.dropTable(MIGRATION_TABLE).ifExists().execute().catch(() => undefined);
+    await db.schema
+      .dropTable(MIGRATION_TABLE)
+      .ifExists()
+      .execute()
+      .catch(() => undefined);
     await sql`SET FOREIGN_KEY_CHECKS = 1`.execute(db);
     return;
   }
@@ -261,7 +269,9 @@ export async function dropAllTables(db: Database): Promise<void> {
     // eslint-disable-next-line no-await-in-loop -- reset cleanup tolerates missing tables and keeps destructive drops ordered for diagnostics.
     await sql`DROP TABLE IF EXISTS ${sql.raw(table)} CASCADE`.execute(db).catch(() => undefined);
   }
-  await sql`DROP TABLE IF EXISTS ${sql.raw(MIGRATION_TABLE)} CASCADE`.execute(db).catch(() => undefined);
+  await sql`DROP TABLE IF EXISTS ${sql.raw(MIGRATION_TABLE)} CASCADE`
+    .execute(db)
+    .catch(() => undefined);
 }
 
 /**
@@ -360,7 +370,8 @@ async function main(): Promise<void> {
 }
 
 // Run when invoked as a script, not when imported.
-const isMainModule = process.argv[1]?.endsWith('migrate.ts') || process.argv[1]?.endsWith('migrate.js');
+const isMainModule =
+  process.argv[1]?.endsWith('migrate.ts') || process.argv[1]?.endsWith('migrate.js');
 if (isMainModule) {
   main();
 }

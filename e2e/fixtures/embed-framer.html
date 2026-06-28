@@ -1,0 +1,43 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Framer Embed Fixture</title>
+  <!-- Simulates a Framer Code Component / Embed layer -->
+</head>
+<body>
+  <div id="root">
+    <h1>Framer Demo Page</h1>
+    <p>This page simulates a Framer site with a Tixkit embed.</p>
+
+    <!-- Tixkit embed: framer -->
+    <tixkit-widget
+      id="tixkit-modal-evt_demo"
+      brand="brd_demo"
+      event="evt_demo"
+      checkout-mode="modal"
+      theme="dark"
+      locale="en"
+      tracking-id="framer_test"
+      api-base-url="http://localhost:3201"
+    ></tixkit-widget>
+  </div>
+
+  <!-- Framer Site Settings > End of body placement -->
+  <script type="module" src="http://localhost:3201/tixkit-widget.js"></script>
+  <script type="module">
+    const widget = document.getElementById('tixkit-modal-evt_demo');
+
+    function onTixkitEvent(name, detail) {
+      console.log('Tixkit:', name, detail);
+    }
+
+    if (widget) {
+      for (const name of ['loaded', 'opened', 'closed', 'checkout_started', 'order_completed', 'error']) {
+        widget.addEventListener(name, (e) => onTixkitEvent(name, e.detail));
+      }
+    }
+  </script>
+</body>
+</html>

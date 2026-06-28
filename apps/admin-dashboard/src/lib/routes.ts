@@ -37,6 +37,6 @@ export const routes = {
   auditLog: '/audit-log',
   signIn: '/sign-in',
   signUp: '/sign-up',
-} as const
+} as const;
 
-export type RouteKey = keyof typeof routes
+export type RouteKey = keyof typeof routes;

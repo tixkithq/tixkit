@@ -113,7 +113,21 @@ export type CreateTicketTypeInput = {
 export type UpdateTicketTypeInput = Partial<
   Pick<
     TicketType,
-    'name' | 'description' | 'kind' | 'status' | 'visibility' | 'currency' | 'priceCents' | 'minimumPriceCents' | 'salesStartAt' | 'salesEndAt' | 'minPerOrder' | 'maxPerOrder' | 'requiresAccessCode' | 'accessCodeHint' | 'sortOrder'
+    | 'name'
+    | 'description'
+    | 'kind'
+    | 'status'
+    | 'visibility'
+    | 'currency'
+    | 'priceCents'
+    | 'minimumPriceCents'
+    | 'salesStartAt'
+    | 'salesEndAt'
+    | 'minPerOrder'
+    | 'maxPerOrder'
+    | 'requiresAccessCode'
+    | 'accessCodeHint'
+    | 'sortOrder'
   >
 >;
 
@@ -212,9 +226,7 @@ export function validateTicketPurchase(input: ValidateTicketPurchaseInput): void
       throw new ValidationError(`Donation ticket ${tt.id} requires an amount`);
     }
     if (input.unitAmountCents < minimum) {
-      throw new ValidationError(
-        `Donation ticket ${tt.id} requires at least ${minimum} cents`,
-      );
+      throw new ValidationError(`Donation ticket ${tt.id} requires at least ${minimum} cents`);
     }
   }
 
@@ -229,7 +241,9 @@ export function validateTicketPurchase(input: ValidateTicketPurchaseInput): void
       if (expiresAt && now > expiresAt) return false;
       if (rule.maxUses != null && rule.usesCount >= rule.maxUses) return false;
       if (rule.type === 'allowlist') {
-        return Boolean(input.buyerEmail) && rule.value.toLowerCase() === input.buyerEmail!.toLowerCase();
+        return (
+          Boolean(input.buyerEmail) && rule.value.toLowerCase() === input.buyerEmail!.toLowerCase()
+        );
       }
       return Boolean(input.accessCode) && rule.value === input.accessCode;
     });

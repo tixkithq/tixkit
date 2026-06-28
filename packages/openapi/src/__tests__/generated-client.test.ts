@@ -12,7 +12,10 @@ import { openApiSpec } from '../index.js';
  */
 
 async function generateTypes(): Promise<string> {
-  const tmpDir = join(import.meta.dirname, `.tmp-gen-${Date.now()}-${Math.random().toString(36).slice(2)}`);
+  const tmpDir = join(
+    import.meta.dirname,
+    `.tmp-gen-${Date.now()}-${Math.random().toString(36).slice(2)}`,
+  );
   const specPath = join(tmpDir, 'spec.json');
   if (!existsSync(tmpDir)) mkdirSync(tmpDir, { recursive: true });
   writeFileSync(specPath, JSON.stringify(openApiSpec));

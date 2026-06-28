@@ -33,7 +33,11 @@ export const EventOccurrencesMigration: Migration = {
       .addForeignKeyConstraint('event_occurrences_event_fk', ['event_id'], 'events', ['id'])
       .execute();
 
-    await db.schema.createIndex('idx_event_occurrences_event').on('event_occurrences').columns(['event_id', 'starts_at']).execute();
+    await db.schema
+      .createIndex('idx_event_occurrences_event')
+      .on('event_occurrences')
+      .columns(['event_id', 'starts_at'])
+      .execute();
 
     await db.schema
       .alterTable('ticket_types')
@@ -41,9 +45,18 @@ export const EventOccurrencesMigration: Migration = {
       .execute();
     await db.schema
       .alterTable('ticket_types')
-      .addForeignKeyConstraint('ticket_types_event_occurrence_fk', ['event_occurrence_id'], 'event_occurrences', ['id'])
+      .addForeignKeyConstraint(
+        'ticket_types_event_occurrence_fk',
+        ['event_occurrence_id'],
+        'event_occurrences',
+        ['id'],
+      )
       .execute();
-    await db.schema.createIndex('idx_ticket_types_occurrence').on('ticket_types').column('event_occurrence_id').execute();
+    await db.schema
+      .createIndex('idx_ticket_types_occurrence')
+      .on('ticket_types')
+      .column('event_occurrence_id')
+      .execute();
 
     await db.schema
       .alterTable('order_line_items')
@@ -51,29 +64,50 @@ export const EventOccurrencesMigration: Migration = {
       .execute();
     await db.schema
       .alterTable('order_line_items')
-      .addForeignKeyConstraint('order_line_items_event_occurrence_fk', ['event_occurrence_id'], 'event_occurrences', ['id'])
+      .addForeignKeyConstraint(
+        'order_line_items_event_occurrence_fk',
+        ['event_occurrence_id'],
+        'event_occurrences',
+        ['id'],
+      )
       .execute();
-    await db.schema.createIndex('idx_order_line_items_occurrence').on('order_line_items').column('event_occurrence_id').execute();
+    await db.schema
+      .createIndex('idx_order_line_items_occurrence')
+      .on('order_line_items')
+      .column('event_occurrence_id')
+      .execute();
 
+    await db.schema.alterTable('attendees').addColumn('event_occurrence_id', varchar(32)).execute();
     await db.schema
       .alterTable('attendees')
-      .addColumn('event_occurrence_id', varchar(32))
+      .addForeignKeyConstraint(
+        'attendees_event_occurrence_fk',
+        ['event_occurrence_id'],
+        'event_occurrences',
+        ['id'],
+      )
       .execute();
     await db.schema
-      .alterTable('attendees')
-      .addForeignKeyConstraint('attendees_event_occurrence_fk', ['event_occurrence_id'], 'event_occurrences', ['id'])
+      .createIndex('idx_attendees_occurrence')
+      .on('attendees')
+      .column('event_occurrence_id')
       .execute();
-    await db.schema.createIndex('idx_attendees_occurrence').on('attendees').column('event_occurrence_id').execute();
 
+    await db.schema.alterTable('tickets').addColumn('event_occurrence_id', varchar(32)).execute();
     await db.schema
       .alterTable('tickets')
-      .addColumn('event_occurrence_id', varchar(32))
+      .addForeignKeyConstraint(
+        'tickets_event_occurrence_fk',
+        ['event_occurrence_id'],
+        'event_occurrences',
+        ['id'],
+      )
       .execute();
     await db.schema
-      .alterTable('tickets')
-      .addForeignKeyConstraint('tickets_event_occurrence_fk', ['event_occurrence_id'], 'event_occurrences', ['id'])
+      .createIndex('idx_tickets_occurrence')
+      .on('tickets')
+      .column('event_occurrence_id')
       .execute();
-    await db.schema.createIndex('idx_tickets_occurrence').on('tickets').column('event_occurrence_id').execute();
 
     await db.schema
       .alterTable('check_in_lists')
@@ -81,26 +115,47 @@ export const EventOccurrencesMigration: Migration = {
       .execute();
     await db.schema
       .alterTable('check_in_lists')
-      .addForeignKeyConstraint('check_in_lists_event_occurrence_fk', ['event_occurrence_id'], 'event_occurrences', ['id'])
+      .addForeignKeyConstraint(
+        'check_in_lists_event_occurrence_fk',
+        ['event_occurrence_id'],
+        'event_occurrences',
+        ['id'],
+      )
       .execute();
-    await db.schema.createIndex('idx_check_in_lists_occurrence').on('check_in_lists').column('event_occurrence_id').execute();
+    await db.schema
+      .createIndex('idx_check_in_lists_occurrence')
+      .on('check_in_lists')
+      .column('event_occurrence_id')
+      .execute();
   },
 
   async down(db): Promise<void> {
     await db.schema.dropIndex('idx_check_in_lists_occurrence').ifExists().execute();
-    await db.schema.alterTable('check_in_lists').dropConstraint('check_in_lists_event_occurrence_fk').execute();
+    await db.schema
+      .alterTable('check_in_lists')
+      .dropConstraint('check_in_lists_event_occurrence_fk')
+      .execute();
     await db.schema.alterTable('check_in_lists').dropColumn('event_occurrence_id').execute();
     await db.schema.dropIndex('idx_tickets_occurrence').ifExists().execute();
     await db.schema.alterTable('tickets').dropConstraint('tickets_event_occurrence_fk').execute();
     await db.schema.alterTable('tickets').dropColumn('event_occurrence_id').execute();
     await db.schema.dropIndex('idx_attendees_occurrence').ifExists().execute();
-    await db.schema.alterTable('attendees').dropConstraint('attendees_event_occurrence_fk').execute();
+    await db.schema
+      .alterTable('attendees')
+      .dropConstraint('attendees_event_occurrence_fk')
+      .execute();
     await db.schema.alterTable('attendees').dropColumn('event_occurrence_id').execute();
     await db.schema.dropIndex('idx_order_line_items_occurrence').ifExists().execute();
-    await db.schema.alterTable('order_line_items').dropConstraint('order_line_items_event_occurrence_fk').execute();
+    await db.schema
+      .alterTable('order_line_items')
+      .dropConstraint('order_line_items_event_occurrence_fk')
+      .execute();
     await db.schema.alterTable('order_line_items').dropColumn('event_occurrence_id').execute();
     await db.schema.dropIndex('idx_ticket_types_occurrence').ifExists().execute();
-    await db.schema.alterTable('ticket_types').dropConstraint('ticket_types_event_occurrence_fk').execute();
+    await db.schema
+      .alterTable('ticket_types')
+      .dropConstraint('ticket_types_event_occurrence_fk')
+      .execute();
     await db.schema.alterTable('ticket_types').dropColumn('event_occurrence_id').execute();
     await db.schema.dropTable('event_occurrences').ifExists().execute();
   },

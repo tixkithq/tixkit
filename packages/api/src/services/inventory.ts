@@ -44,7 +44,9 @@ export class InventoryService {
     const itemsByPool = new Map<string, CartReservationItem[]>();
     for (const item of input.items) {
       if (item.quantity <= 0) {
-        throw new ValidationError(`Reservation quantity must be positive for ticket type ${item.ticketTypeId}`);
+        throw new ValidationError(
+          `Reservation quantity must be positive for ticket type ${item.ticketTypeId}`,
+        );
       }
       perPool.set(item.inventoryPoolId, (perPool.get(item.inventoryPoolId) ?? 0) + item.quantity);
       const poolItems = itemsByPool.get(item.inventoryPoolId) ?? [];
@@ -152,7 +154,9 @@ export class InventoryService {
       // Match reserveCart lock ordering: inventory pools first, sorted, then
       // checkout holds. This avoids MySQL deadlocks during reserve/finalize races.
       // eslint-disable-next-line unicorn/no-array-sort -- sorting a fresh array gives deterministic lock order without mutating shared input.
-      const poolIds = [...new Set(candidateHolds.map((hold) => hold.inventory_pool_id as string))].sort();
+      const poolIds = [
+        ...new Set(candidateHolds.map((hold) => hold.inventory_pool_id as string)),
+      ].sort();
       for (const poolId of poolIds) {
         // eslint-disable-next-line no-await-in-loop -- deterministic sequential pool locking prevents deadlocks across dialects.
         await trx
@@ -171,7 +175,9 @@ export class InventoryService {
         .execute();
 
       const expiredHold = holds.find(
-        (hold) => hold.status === 'expired' || (hold.status === 'active' && new Date(hold.expires_at) <= now),
+        (hold) =>
+          hold.status === 'expired' ||
+          (hold.status === 'active' && new Date(hold.expires_at) <= now),
       );
       if (expiredHold) {
         await trx
@@ -231,7 +237,9 @@ export class InventoryService {
     holdTtlSeconds?: number;
   }): Promise<HoldResult> {
     if (input.quantity <= 0) {
-      throw new ValidationError(`Reservation quantity must be positive for ticket type ${input.ticketTypeId}`);
+      throw new ValidationError(
+        `Reservation quantity must be positive for ticket type ${input.ticketTypeId}`,
+      );
     }
 
     return this.db.transaction().execute(async (trx) => {

@@ -597,7 +597,12 @@ export type TaxReport = {
   eventId: string;
   currency: string;
   totalTaxCollectedCents: number;
-  breakdown: { taxRuleName: string; rate: number; taxableAmountCents: number; taxCollectedCents: number }[];
+  breakdown: {
+    taxRuleName: string;
+    rate: number;
+    taxableAmountCents: number;
+    taxCollectedCents: number;
+  }[];
 };
 
 export type AttendanceReport = {
@@ -1130,26 +1135,28 @@ function paginationParams(
 class CheckoutResource {
   constructor(private client: TixkitClient) {}
 
-  async create(input: {
-    eventId: string;
-    items: {
-      ticketTypeId?: string;
-      occurrenceId?: string;
-      productId?: string;
-      quantity: number;
-      unitAmountCents?: number;
-      attendeeFields?: Record<string, unknown>[];
-    }[];
-    discountCode?: string;
-    affiliateCode?: string;
-    trackingId?: string;
-    buyerFields?: Record<string, unknown>;
-    buyer?: { email?: string; firstName?: string; lastName?: string; phone?: string };
-    successUrl?: string;
-    cancelUrl?: string;
-    accessCode?: string;
-    waitlistClaimToken?: string;
-  } & IdempotencyOptions): Promise<CheckoutSession> {
+  async create(
+    input: {
+      eventId: string;
+      items: {
+        ticketTypeId?: string;
+        occurrenceId?: string;
+        productId?: string;
+        quantity: number;
+        unitAmountCents?: number;
+        attendeeFields?: Record<string, unknown>[];
+      }[];
+      discountCode?: string;
+      affiliateCode?: string;
+      trackingId?: string;
+      buyerFields?: Record<string, unknown>;
+      buyer?: { email?: string; firstName?: string; lastName?: string; phone?: string };
+      successUrl?: string;
+      cancelUrl?: string;
+      accessCode?: string;
+      waitlistClaimToken?: string;
+    } & IdempotencyOptions,
+  ): Promise<CheckoutSession> {
     const { idempotencyKey, ...body } = input;
     return this.client.request('POST', '/checkout/sessions', {
       body,
@@ -1169,12 +1176,15 @@ class CheckoutResource {
     });
   }
 
-  async update(sessionId: string, input: {
-    clientToken: string;
-    buyer?: { email?: string; firstName?: string; lastName?: string; phone?: string };
-    successUrl?: string;
-    cancelUrl?: string;
-  }): Promise<CheckoutSession> {
+  async update(
+    sessionId: string,
+    input: {
+      clientToken: string;
+      buyer?: { email?: string; firstName?: string; lastName?: string; phone?: string };
+      successUrl?: string;
+      cancelUrl?: string;
+    },
+  ): Promise<CheckoutSession> {
     const { clientToken, ...body } = input;
     return this.client.request('PATCH', `/checkout/sessions/${sessionId}`, {
       body,
@@ -1240,7 +1250,27 @@ class EventResource {
     return this.client.request('POST', `/events/${eventId}/publish`);
   }
 
-  async update(eventId: string, input: Partial<Pick<Event, 'title' | 'description' | 'currency' | 'status' | 'timezone' | 'startsAt' | 'endsAt' | 'visibility' | 'capacity' | 'coverImageUrl' | 'externalUrl' | 'venue' | 'seo'>>): Promise<Event> {
+  async update(
+    eventId: string,
+    input: Partial<
+      Pick<
+        Event,
+        | 'title'
+        | 'description'
+        | 'currency'
+        | 'status'
+        | 'timezone'
+        | 'startsAt'
+        | 'endsAt'
+        | 'visibility'
+        | 'capacity'
+        | 'coverImageUrl'
+        | 'externalUrl'
+        | 'venue'
+        | 'seo'
+      >
+    >,
+  ): Promise<Event> {
     return this.client.request('PATCH', `/events/${eventId}`, { body: input });
   }
 
@@ -1252,16 +1282,8 @@ class EventResource {
     return this.client.request('POST', `/events/${eventId}/archive`);
   }
 
-  async getAvailability(eventId: string): Promise<PageResult<{
-    ticketTypeId: string;
-    eventOccurrenceId?: string;
-    available: number;
-    total: number;
-    reserved: number;
-    sold: number;
-    status: string;
-  }>> {
-    return this.client.request<PageResult<{
+  async getAvailability(eventId: string): Promise<
+    PageResult<{
       ticketTypeId: string;
       eventOccurrenceId?: string;
       available: number;
@@ -1269,61 +1291,100 @@ class EventResource {
       reserved: number;
       sold: number;
       status: string;
-    }>>('GET', `/events/${eventId}/availability`);
+    }>
+  > {
+    return this.client.request<
+      PageResult<{
+        ticketTypeId: string;
+        eventOccurrenceId?: string;
+        available: number;
+        total: number;
+        reserved: number;
+        sold: number;
+        status: string;
+      }>
+    >('GET', `/events/${eventId}/availability`);
   }
 
   async listOccurrences(eventId: string): Promise<PageResult<EventOccurrence>> {
     return this.client.request('GET', `/events/${eventId}/occurrences`);
   }
 
-  async createOccurrence(eventId: string, input: {
-    title: string;
-    startsAt: string;
-    endsAt: string;
-    timezone: string;
-    venue?: Record<string, unknown> | null;
-    capacity?: number | null;
-    sortOrder?: number;
-    status?: EventOccurrence['status'];
-  }): Promise<EventOccurrence> {
+  async createOccurrence(
+    eventId: string,
+    input: {
+      title: string;
+      startsAt: string;
+      endsAt: string;
+      timezone: string;
+      venue?: Record<string, unknown> | null;
+      capacity?: number | null;
+      sortOrder?: number;
+      status?: EventOccurrence['status'];
+    },
+  ): Promise<EventOccurrence> {
     return this.client.request('POST', `/events/${eventId}/occurrences`, { body: input });
   }
 
-  async updateOccurrence(eventId: string, occurrenceId: string, input: Partial<{
-    title: string;
-    startsAt: string;
-    endsAt: string;
-    timezone: string;
-    venue: Record<string, unknown> | null;
-    capacity: number | null;
-    sortOrder: number;
-    status: EventOccurrence['status'];
-  }>): Promise<EventOccurrence> {
-    return this.client.request('PATCH', `/events/${eventId}/occurrences/${occurrenceId}`, { body: input });
+  async updateOccurrence(
+    eventId: string,
+    occurrenceId: string,
+    input: Partial<{
+      title: string;
+      startsAt: string;
+      endsAt: string;
+      timezone: string;
+      venue: Record<string, unknown> | null;
+      capacity: number | null;
+      sortOrder: number;
+      status: EventOccurrence['status'];
+    }>,
+  ): Promise<EventOccurrence> {
+    return this.client.request('PATCH', `/events/${eventId}/occurrences/${occurrenceId}`, {
+      body: input,
+    });
   }
 
   async listMarketingIntegrations(eventId: string): Promise<PageResult<MarketingIntegration>> {
     return this.client.request('GET', `/events/${eventId}/marketing-integrations`);
   }
 
-  async upsertMarketingIntegration(eventId: string, input: {
-    provider: MarketingIntegration['provider'];
-    config: Record<string, unknown>;
-    consentRequired?: boolean;
-    status?: 'active' | 'disabled';
-  }): Promise<MarketingIntegration> {
-    return this.client.request('PUT', `/events/${eventId}/marketing-integrations/${input.provider}`, { body: input });
+  async upsertMarketingIntegration(
+    eventId: string,
+    input: {
+      provider: MarketingIntegration['provider'];
+      config: Record<string, unknown>;
+      consentRequired?: boolean;
+      status?: 'active' | 'disabled';
+    },
+  ): Promise<MarketingIntegration> {
+    return this.client.request(
+      'PUT',
+      `/events/${eventId}/marketing-integrations/${input.provider}`,
+      { body: input },
+    );
   }
 
-  async listWaitlist(eventId: string): Promise<{ items: WaitlistEntry[]; settings: WaitlistSettings }> {
+  async listWaitlist(
+    eventId: string,
+  ): Promise<{ items: WaitlistEntry[]; settings: WaitlistSettings }> {
     return this.client.request('GET', `/events/${eventId}/waitlist`);
   }
 
-  async offerWaitlistEntry(eventId: string, entryId: string, input?: { expiresInMinutes?: number }): Promise<WaitlistOffer> {
-    return this.client.request('POST', `/events/${eventId}/waitlist/${entryId}/offer`, { body: input ?? {} });
+  async offerWaitlistEntry(
+    eventId: string,
+    entryId: string,
+    input?: { expiresInMinutes?: number },
+  ): Promise<WaitlistOffer> {
+    return this.client.request('POST', `/events/${eventId}/waitlist/${entryId}/offer`, {
+      body: input ?? {},
+    });
   }
 
-  async updateWaitlistSettings(eventId: string, input: WaitlistSettings): Promise<WaitlistSettings> {
+  async updateWaitlistSettings(
+    eventId: string,
+    input: WaitlistSettings,
+  ): Promise<WaitlistSettings> {
     return this.client.request('PATCH', `/events/${eventId}/waitlist/settings`, { body: input });
   }
 }
@@ -1335,7 +1396,14 @@ class OrderResource {
     return this.client.request('GET', '/orders', { params: paginationParams(params) });
   }
 
-  async get(orderId: string): Promise<Order & { lineItems: OrderLineItem[]; timeline: OrderTimelineEvent[]; invoice?: Invoice; taxSnapshots?: TaxSnapshot[] }> {
+  async get(orderId: string): Promise<
+    Order & {
+      lineItems: OrderLineItem[];
+      timeline: OrderTimelineEvent[];
+      invoice?: Invoice;
+      taxSnapshots?: TaxSnapshot[];
+    }
+  > {
     return this.client.request('GET', `/orders/${orderId}`);
   }
 
@@ -1351,7 +1419,10 @@ class OrderResource {
     return this.client.request('POST', `/orders/${orderId}/cancel`);
   }
 
-  async refund(orderId: string, input: { amountCents?: number; reason: string } & IdempotencyOptions): Promise<unknown> {
+  async refund(
+    orderId: string,
+    input: { amountCents?: number; reason: string } & IdempotencyOptions,
+  ): Promise<unknown> {
     const { idempotencyKey, ...body } = input;
     return this.client.request('POST', `/orders/${orderId}/refunds`, {
       body,
@@ -1363,7 +1434,10 @@ class OrderResource {
 class TicketResource {
   constructor(private client: TixkitClient) {}
 
-  async transfer(ticketId: string, input: { toEmail: string } & IdempotencyOptions): Promise<Ticket> {
+  async transfer(
+    ticketId: string,
+    input: { toEmail: string } & IdempotencyOptions,
+  ): Promise<Ticket> {
     const { idempotencyKey, toEmail } = input;
     return this.client.request('POST', `/tickets/${ticketId}/transfer`, {
       body: { toEmail },
@@ -1377,10 +1451,17 @@ class OrganizationResource {
   async list(params?: PaginationParams): Promise<PageResult<Organization>> {
     return this.client.request('GET', '/organizations', { params: paginationParams(params) });
   }
-  async create(input: { name: string; slug: string; clerkOrganizationId?: string }): Promise<Organization> {
+  async create(input: {
+    name: string;
+    slug: string;
+    clerkOrganizationId?: string;
+  }): Promise<Organization> {
     return this.client.request('POST', '/organizations', { body: input });
   }
-  async update(organizationId: string, input: Partial<Pick<Organization, 'name' | 'slug' | 'status'>>): Promise<Organization> {
+  async update(
+    organizationId: string,
+    input: Partial<Pick<Organization, 'name' | 'slug' | 'status'>>,
+  ): Promise<Organization> {
     return this.client.request('PATCH', `/organizations/${organizationId}`, { body: input });
   }
 }
@@ -1390,18 +1471,29 @@ class BrandResource {
   async list(params?: PaginationParams): Promise<PageResult<Brand>> {
     return this.client.request('GET', '/brands', { params: paginationParams(params) });
   }
-  async create(input: { organizationId: string; name: string; slug: string; theme?: Record<string, unknown>; whiteLabel?: boolean }): Promise<Brand> {
+  async create(input: {
+    organizationId: string;
+    name: string;
+    slug: string;
+    theme?: Record<string, unknown>;
+    whiteLabel?: boolean;
+  }): Promise<Brand> {
     return this.client.request('POST', '/brands', { body: input });
   }
   async update(
     brandId: string,
-    input: Partial<Pick<Brand, 'name' | 'slug' | 'status' | 'theme' | 'supportUrl' | 'legalUrls' | 'whiteLabel'>> & {
+    input: Partial<
+      Pick<Brand, 'name' | 'slug' | 'status' | 'theme' | 'supportUrl' | 'legalUrls' | 'whiteLabel'>
+    > & {
       paymentAccountId?: string | null;
     },
   ): Promise<Brand> {
     return this.client.request('PATCH', `/brands/${brandId}`, { body: input });
   }
-  async addDomain(brandId: string, input: { domain: string; isPrimary?: boolean }): Promise<BrandDomain> {
+  async addDomain(
+    brandId: string,
+    input: { domain: string; isPrimary?: boolean },
+  ): Promise<BrandDomain> {
     return this.client.request('POST', `/brands/${brandId}/domains`, { body: input });
   }
 }
@@ -1409,7 +1501,9 @@ class BrandResource {
 class TicketTypeResource {
   constructor(private client: TixkitClient) {}
   async list(eventId: string, params?: PaginationParams): Promise<PageResult<TicketType>> {
-    return this.client.request('GET', `/events/${eventId}/ticket-types`, { params: paginationParams(params) });
+    return this.client.request('GET', `/events/${eventId}/ticket-types`, {
+      params: paginationParams(params),
+    });
   }
   async create(eventId: string, input: Record<string, unknown>): Promise<TicketType> {
     return this.client.request('POST', `/events/${eventId}/ticket-types`, { body: input });
@@ -1417,17 +1511,25 @@ class TicketTypeResource {
   async update(ticketTypeId: string, input: Record<string, unknown>): Promise<TicketType> {
     return this.client.request('PATCH', `/ticket-types/${ticketTypeId}`, { body: input });
   }
-  async createBatch(eventId: string, input: CreateTicketTypeBatchInput): Promise<TicketTypeBatchResult> {
+  async createBatch(
+    eventId: string,
+    input: CreateTicketTypeBatchInput,
+  ): Promise<TicketTypeBatchResult> {
     return this.client.request('POST', `/events/${eventId}/ticket-types/batch`, { body: input });
   }
-  async updateBatch(ticketTypeId: string, input: UpdateTicketTypeBatchInput): Promise<TicketTypeBatchResult> {
+  async updateBatch(
+    ticketTypeId: string,
+    input: UpdateTicketTypeBatchInput,
+  ): Promise<TicketTypeBatchResult> {
     return this.client.request('PATCH', `/ticket-types/${ticketTypeId}/batch`, { body: input });
   }
   async listAccessRules(ticketTypeId: string): Promise<PageResult<AccessRule>> {
     return this.client.request('GET', `/ticket-types/${ticketTypeId}/access-rules`);
   }
   async createAccessRule(ticketTypeId: string, input: CreateAccessRuleInput): Promise<AccessRule> {
-    return this.client.request('POST', `/ticket-types/${ticketTypeId}/access-rules`, { body: input });
+    return this.client.request('POST', `/ticket-types/${ticketTypeId}/access-rules`, {
+      body: input,
+    });
   }
   async deleteAccessRule(accessRuleId: string): Promise<void> {
     return this.client.request('DELETE', `/access-rules/${accessRuleId}`);
@@ -1444,40 +1546,56 @@ class InventoryPoolResource {
 class ProductResource {
   constructor(private client: TixkitClient) {}
   async list(eventId: string, params?: PaginationParams): Promise<PageResult<Product>> {
-    return this.client.request('GET', `/events/${eventId}/products`, { params: paginationParams(params) });
+    return this.client.request('GET', `/events/${eventId}/products`, {
+      params: paginationParams(params),
+    });
   }
-  async create(eventId: string, input: {
-    name: string;
-    description?: string;
-    priceCents: number;
-    currency: string;
-    categoryId?: string;
-    maxPerOrder?: number;
-    availableFrom?: string;
-    availableUntil?: string;
-    status?: Product['status'];
-    sortOrder?: number;
-  }): Promise<Product> {
+  async create(
+    eventId: string,
+    input: {
+      name: string;
+      description?: string;
+      priceCents: number;
+      currency: string;
+      categoryId?: string;
+      maxPerOrder?: number;
+      availableFrom?: string;
+      availableUntil?: string;
+      status?: Product['status'];
+      sortOrder?: number;
+    },
+  ): Promise<Product> {
     return this.client.request('POST', `/events/${eventId}/products`, { body: input });
   }
-  async update(productId: string, input: Partial<{
-    name: string;
-    description: string | null;
-    priceCents: number;
-    currency: string;
-    categoryId: string | null;
-    maxPerOrder: number;
-    availableFrom: string | null;
-    availableUntil: string | null;
-    status: Product['status'];
-    sortOrder: number;
-  }>): Promise<Product> {
+  async update(
+    productId: string,
+    input: Partial<{
+      name: string;
+      description: string | null;
+      priceCents: number;
+      currency: string;
+      categoryId: string | null;
+      maxPerOrder: number;
+      availableFrom: string | null;
+      availableUntil: string | null;
+      status: Product['status'];
+      sortOrder: number;
+    }>,
+  ): Promise<Product> {
     return this.client.request('PATCH', `/products/${productId}`, { body: input });
   }
-  async listCategories(eventId: string, params?: PaginationParams): Promise<PageResult<ProductCategory>> {
-    return this.client.request('GET', `/events/${eventId}/product-categories`, { params: paginationParams(params) });
+  async listCategories(
+    eventId: string,
+    params?: PaginationParams,
+  ): Promise<PageResult<ProductCategory>> {
+    return this.client.request('GET', `/events/${eventId}/product-categories`, {
+      params: paginationParams(params),
+    });
   }
-  async createCategory(eventId: string, input: { name: string; sortOrder?: number }): Promise<ProductCategory> {
+  async createCategory(
+    eventId: string,
+    input: { name: string; sortOrder?: number },
+  ): Promise<ProductCategory> {
     return this.client.request('POST', `/events/${eventId}/product-categories`, { body: input });
   }
 }
@@ -1485,17 +1603,26 @@ class ProductResource {
 class AttendeeResource {
   constructor(private client: TixkitClient) {}
   async list(eventId: string, params?: PaginationParams): Promise<PageResult<Attendee>> {
-    return this.client.request('GET', `/events/${eventId}/attendees`, { params: paginationParams(params) });
+    return this.client.request('GET', `/events/${eventId}/attendees`, {
+      params: paginationParams(params),
+    });
   }
-  async listAll(params?: PaginationParams & { eventId?: string; status?: string }): Promise<PageResult<Attendee>> {
+  async listAll(
+    params?: PaginationParams & { eventId?: string; status?: string },
+  ): Promise<PageResult<Attendee>> {
     const query: Record<string, string> = {};
     if (params?.cursor) query.cursor = params.cursor;
     if (params?.limit !== undefined) query.limit = String(params.limit);
     if (params?.eventId) query.eventId = params.eventId;
     if (params?.status) query.status = params.status;
-    return this.client.request('GET', '/attendees', { params: Object.keys(query).length > 0 ? query : undefined });
+    return this.client.request('GET', '/attendees', {
+      params: Object.keys(query).length > 0 ? query : undefined,
+    });
   }
-  async update(attendeeId: string, input: Partial<Pick<Attendee, 'firstName' | 'lastName' | 'email' | 'phone' | 'status'>>): Promise<Attendee> {
+  async update(
+    attendeeId: string,
+    input: Partial<Pick<Attendee, 'firstName' | 'lastName' | 'email' | 'phone' | 'status'>>,
+  ): Promise<Attendee> {
     return this.client.request('PATCH', `/attendees/${attendeeId}`, { body: input });
   }
 }
@@ -1503,20 +1630,39 @@ class AttendeeResource {
 class CheckInListResource {
   constructor(private client: TixkitClient) {}
   async list(eventId: string, params?: PaginationParams): Promise<PageResult<CheckInList>> {
-    return this.client.request('GET', `/events/${eventId}/check-in-lists`, { params: paginationParams(params) });
+    return this.client.request('GET', `/events/${eventId}/check-in-lists`, {
+      params: paginationParams(params),
+    });
   }
-  async getManifest(eventId: string, checkInListId: string, headers: Record<string, string>): Promise<OfflineManifest> {
-    return this.client.request('GET', `/events/${eventId}/check-in-lists/${checkInListId}/manifest`, { headers });
+  async getManifest(
+    eventId: string,
+    checkInListId: string,
+    headers: Record<string, string>,
+  ): Promise<OfflineManifest> {
+    return this.client.request(
+      'GET',
+      `/events/${eventId}/check-in-lists/${checkInListId}/manifest`,
+      { headers },
+    );
   }
 }
 
 class CheckInResource {
   constructor(private client: TixkitClient) {}
-  async scan(input: { checkInListId: string; qrPayload: string; scannedAt: string; offline?: boolean } & { headers: Record<string, string> }): Promise<ScanResult> {
+  async scan(
+    input: { checkInListId: string; qrPayload: string; scannedAt: string; offline?: boolean } & {
+      headers: Record<string, string>;
+    },
+  ): Promise<ScanResult> {
     const { headers, ...body } = input;
     return this.client.request('POST', '/check-ins/scan', { body, headers });
   }
-  async sync(input: { checkInListId: string; scans: { qrHash: string; scannedAt: string; offline: boolean }[] } & IdempotencyOptions & { headers: Record<string, string> }): Promise<SyncScanResult> {
+  async sync(
+    input: {
+      checkInListId: string;
+      scans: { qrHash: string; scannedAt: string; offline: boolean }[];
+    } & IdempotencyOptions & { headers: Record<string, string> },
+  ): Promise<SyncScanResult> {
     const { idempotencyKey, headers, ...body } = input;
     return this.client.request('POST', '/check-ins/sync', { body, idempotencyKey, headers });
   }
@@ -1527,7 +1673,14 @@ class ApiKeyResource {
   async list(params?: PaginationParams): Promise<PageResult<ApiKey>> {
     return this.client.request('GET', '/api-keys', { params: paginationParams(params) });
   }
-  async create(input: { organizationId: string; name: string; scopes: string[]; brandIds?: string[]; eventIds?: string[]; expiresAt?: string }): Promise<ApiKey> {
+  async create(input: {
+    organizationId: string;
+    name: string;
+    scopes: string[];
+    brandIds?: string[];
+    eventIds?: string[];
+    expiresAt?: string;
+  }): Promise<ApiKey> {
     return this.client.request('POST', '/api-keys', { body: input });
   }
   async revoke(keyId: string): Promise<void> {
@@ -1540,7 +1693,11 @@ class ScannerDeviceResource {
   async list(params?: PaginationParams): Promise<PageResult<ScannerDevice>> {
     return this.client.request('GET', '/scanner-devices', { params: paginationParams(params) });
   }
-  async create(input: { organizationId: string; name: string; eventIds: string[] }): Promise<ScannerDevice> {
+  async create(input: {
+    organizationId: string;
+    name: string;
+    eventIds: string[];
+  }): Promise<ScannerDevice> {
     return this.client.request('POST', '/scanner-devices', { body: input });
   }
   async revoke(deviceId: string): Promise<{ deviceId: string; status: string }> {
@@ -1554,7 +1711,9 @@ class ReportResource {
     const query: Record<string, string> = {};
     if (params?.from) query.from = params.from;
     if (params?.to) query.to = params.to;
-    return this.client.request('GET', `/events/${eventId}/reports/sales`, { params: Object.keys(query).length > 0 ? query : undefined });
+    return this.client.request('GET', `/events/${eventId}/reports/sales`, {
+      params: Object.keys(query).length > 0 ? query : undefined,
+    });
   }
   async tax(eventId: string): Promise<TaxReport> {
     return this.client.request('GET', `/events/${eventId}/reports/tax`);
@@ -1575,7 +1734,14 @@ class ReportResource {
 
 class ExportResource {
   constructor(private client: TixkitClient) {}
-  async create(input: { eventId?: string; type: string; format: string; filters?: Record<string, unknown> } & IdempotencyOptions): Promise<ExportJobQueued> {
+  async create(
+    input: {
+      eventId?: string;
+      type: string;
+      format: string;
+      filters?: Record<string, unknown>;
+    } & IdempotencyOptions,
+  ): Promise<ExportJobQueued> {
     const { idempotencyKey, ...body } = input;
     return this.client.request('POST', '/exports', { body, idempotencyKey });
   }
@@ -1635,36 +1801,91 @@ class PrivacyResource {
 
 class MessageResource {
   constructor(private client: TixkitClient) {}
-  async send(eventId: string, input: { templateKey: string; audience: string; attendeeIds?: string[]; variables?: Record<string, unknown>; channel: string } & IdempotencyOptions): Promise<MessageQueued> {
+  async send(
+    eventId: string,
+    input: {
+      templateKey: string;
+      audience: string;
+      attendeeIds?: string[];
+      variables?: Record<string, unknown>;
+      channel: string;
+    } & IdempotencyOptions,
+  ): Promise<MessageQueued> {
     const { idempotencyKey, ...body } = input;
     return this.client.request('POST', `/events/${eventId}/messages`, { body, idempotencyKey });
   }
-  async previewRecipients(eventId: string, input: { templateKey: string; audience: string; attendeeIds?: string[]; channel: string }): Promise<MessageRecipientPreview> {
+  async previewRecipients(
+    eventId: string,
+    input: { templateKey: string; audience: string; attendeeIds?: string[]; channel: string },
+  ): Promise<MessageRecipientPreview> {
     return this.client.request('POST', `/events/${eventId}/messages/preview`, { body: input });
   }
   async list(eventId: string, params?: PaginationParams): Promise<PageResult<MessageCampaign>> {
-    return this.client.request('GET', `/events/${eventId}/messages`, { params: paginationParams(params) });
+    return this.client.request('GET', `/events/${eventId}/messages`, {
+      params: paginationParams(params),
+    });
   }
   async getCampaign(eventId: string, campaignId: string): Promise<MessageCampaign> {
     return this.client.request('GET', `/events/${eventId}/messages/${campaignId}`);
   }
-  async jobs(eventId: string, campaignId: string, params?: PaginationParams): Promise<PageResult<MessageJob>> {
-    return this.client.request('GET', `/events/${eventId}/messages/${campaignId}/jobs`, { params: paginationParams(params) });
+  async jobs(
+    eventId: string,
+    campaignId: string,
+    params?: PaginationParams,
+  ): Promise<PageResult<MessageJob>> {
+    return this.client.request('GET', `/events/${eventId}/messages/${campaignId}/jobs`, {
+      params: paginationParams(params),
+    });
   }
-  async job(eventId: string, campaignId: string, channel: string, jobId: string): Promise<MessageJob> {
-    return this.client.request('GET', `/events/${eventId}/messages/${campaignId}/jobs/${channel}/${jobId}`);
+  async job(
+    eventId: string,
+    campaignId: string,
+    channel: string,
+    jobId: string,
+  ): Promise<MessageJob> {
+    return this.client.request(
+      'GET',
+      `/events/${eventId}/messages/${campaignId}/jobs/${channel}/${jobId}`,
+    );
   }
-  async deliveryLogs(eventId: string, campaignId: string, params?: PaginationParams): Promise<PageResult<MessageDeliveryLog>> {
-    return this.client.request('GET', `/events/${eventId}/messages/${campaignId}/delivery-logs`, { params: paginationParams(params) });
+  async deliveryLogs(
+    eventId: string,
+    campaignId: string,
+    params?: PaginationParams,
+  ): Promise<PageResult<MessageDeliveryLog>> {
+    return this.client.request('GET', `/events/${eventId}/messages/${campaignId}/delivery-logs`, {
+      params: paginationParams(params),
+    });
   }
-  async deliveryLog(eventId: string, campaignId: string, channel: string, deliveryId: string): Promise<MessageDeliveryLog> {
-    return this.client.request('GET', `/events/${eventId}/messages/${campaignId}/delivery-logs/${channel}/${deliveryId}`);
+  async deliveryLog(
+    eventId: string,
+    campaignId: string,
+    channel: string,
+    deliveryId: string,
+  ): Promise<MessageDeliveryLog> {
+    return this.client.request(
+      'GET',
+      `/events/${eventId}/messages/${campaignId}/delivery-logs/${channel}/${deliveryId}`,
+    );
   }
-  async providerEvents(eventId: string, campaignId: string, params?: PaginationParams): Promise<PageResult<MessageProviderEvent>> {
-    return this.client.request('GET', `/events/${eventId}/messages/${campaignId}/provider-events`, { params: paginationParams(params) });
+  async providerEvents(
+    eventId: string,
+    campaignId: string,
+    params?: PaginationParams,
+  ): Promise<PageResult<MessageProviderEvent>> {
+    return this.client.request('GET', `/events/${eventId}/messages/${campaignId}/provider-events`, {
+      params: paginationParams(params),
+    });
   }
-  async providerEvent(eventId: string, campaignId: string, providerEventId: string): Promise<MessageProviderEvent> {
-    return this.client.request('GET', `/events/${eventId}/messages/${campaignId}/provider-events/${providerEventId}`);
+  async providerEvent(
+    eventId: string,
+    campaignId: string,
+    providerEventId: string,
+  ): Promise<MessageProviderEvent> {
+    return this.client.request(
+      'GET',
+      `/events/${eventId}/messages/${campaignId}/provider-events/${providerEventId}`,
+    );
   }
 }
 
@@ -1673,14 +1894,27 @@ class WebhookEndpointResource {
   async list(params?: PaginationParams): Promise<PageResult<WebhookEndpoint>> {
     return this.client.request('GET', '/webhook-endpoints', { params: paginationParams(params) });
   }
-  async create(input: { organizationId: string; url: string; events: string[]; description?: string }): Promise<WebhookEndpoint> {
+  async create(input: {
+    organizationId: string;
+    url: string;
+    events: string[];
+    description?: string;
+  }): Promise<WebhookEndpoint> {
     return this.client.request('POST', '/webhook-endpoints', { body: input });
   }
-  async update(endpointId: string, input: Partial<Pick<WebhookEndpoint, 'url' | 'events' | 'status' | 'description'>>): Promise<WebhookEndpoint> {
+  async update(
+    endpointId: string,
+    input: Partial<Pick<WebhookEndpoint, 'url' | 'events' | 'status' | 'description'>>,
+  ): Promise<WebhookEndpoint> {
     return this.client.request('PATCH', `/webhook-endpoints/${endpointId}`, { body: input });
   }
-  async listEvents(endpointId: string, params?: PaginationParams): Promise<PageResult<WebhookEvent>> {
-    return this.client.request('GET', `/webhook-endpoints/${endpointId}/events`, { params: paginationParams(params) });
+  async listEvents(
+    endpointId: string,
+    params?: PaginationParams,
+  ): Promise<PageResult<WebhookEvent>> {
+    return this.client.request('GET', `/webhook-endpoints/${endpointId}/events`, {
+      params: paginationParams(params),
+    });
   }
   async replay(eventId: string): Promise<{ message: string; eventId: string; endpoints: number }> {
     return this.client.request('POST', `/webhook-events/${eventId}/replay`);
@@ -1689,14 +1923,28 @@ class WebhookEndpointResource {
 
 class PaymentAccountResource {
   constructor(private client: TixkitClient) {}
-  async list(organizationId: string, params?: PaginationParams): Promise<PageResult<PaymentAccount>> {
-    return this.client.request('GET', `/organizations/${organizationId}/payment-accounts`, { params: paginationParams(params) });
+  async list(
+    organizationId: string,
+    params?: PaginationParams,
+  ): Promise<PageResult<PaymentAccount>> {
+    return this.client.request('GET', `/organizations/${organizationId}/payment-accounts`, {
+      params: paginationParams(params),
+    });
   }
   async createStripeConnect(organizationId: string): Promise<PaymentAccount> {
-    return this.client.request('POST', `/organizations/${organizationId}/payment-accounts/stripe-connect`);
+    return this.client.request(
+      'POST',
+      `/organizations/${organizationId}/payment-accounts/stripe-connect`,
+    );
   }
-  async refreshStripeConnect(organizationId: string, paymentAccountId: string): Promise<PaymentAccount> {
-    return this.client.request('POST', `/organizations/${organizationId}/payment-accounts/${paymentAccountId}/stripe-connect/refresh`);
+  async refreshStripeConnect(
+    organizationId: string,
+    paymentAccountId: string,
+  ): Promise<PaymentAccount> {
+    return this.client.request(
+      'POST',
+      `/organizations/${organizationId}/payment-accounts/${paymentAccountId}/stripe-connect/refresh`,
+    );
   }
 }
 
@@ -1726,7 +1974,12 @@ class OAuthApplicationResource {
   async list(params?: PaginationParams): Promise<PageResult<OAuthApplication>> {
     return this.client.request('GET', '/oauth-applications', { params: paginationParams(params) });
   }
-  async create(input: { organizationId: string; name: string; redirectUris: string[]; scopes: string[] }): Promise<OAuthApplication> {
+  async create(input: {
+    organizationId: string;
+    name: string;
+    redirectUris: string[];
+    scopes: string[];
+  }): Promise<OAuthApplication> {
     return this.client.request('POST', '/oauth-applications', { body: input });
   }
   async delete(appId: string): Promise<void> {
@@ -1753,7 +2006,11 @@ class OAuthApplicationResource {
     });
   }
 
-  async revoke(input: { clientId: string; clientSecret: string; token: string }): Promise<{ revoked: boolean }> {
+  async revoke(input: {
+    clientId: string;
+    clientSecret: string;
+    token: string;
+  }): Promise<{ revoked: boolean }> {
     return this.client.request('POST', '/oauth/revoke', {
       body: {
         client_id: input.clientId,
@@ -1776,43 +2033,56 @@ class PublicResource {
    * Fetches ticket availability for a published event. Pass `products` to
    * filter/reveal hidden ticket types for direct-link or widget purchase flows.
    */
-  async getAvailability(eventId: string, products?: string[]): Promise<Array<{
-    ticketTypeId: string;
-    eventOccurrenceId?: string;
-    name?: string;
-    kind?: string;
-    priceCents: number;
-    currency: string;
-    minimumPriceCents?: number;
-    available: number;
-    status: string;
-    requiresAccessCode?: boolean;
-    accessCodeHint?: string;
-    description?: string;
-    salesStartAt?: string;
-    salesEndAt?: string;
-    maxPerOrder?: number;
-  }>> {
+  async getAvailability(
+    eventId: string,
+    products?: string[],
+  ): Promise<
+    Array<{
+      ticketTypeId: string;
+      eventOccurrenceId?: string;
+      name?: string;
+      kind?: string;
+      priceCents: number;
+      currency: string;
+      minimumPriceCents?: number;
+      available: number;
+      status: string;
+      requiresAccessCode?: boolean;
+      accessCodeHint?: string;
+      description?: string;
+      salesStartAt?: string;
+      salesEndAt?: string;
+      maxPerOrder?: number;
+    }>
+  > {
     const query = products?.length ? `?products=${products.join(',')}` : '';
     return this.client.request('GET', `/public/events/${eventId}/availability${query}`);
   }
   async listOccurrences(eventId: string): Promise<EventOccurrence[]> {
-    const response = await this.client.request<PageResult<EventOccurrence> | EventOccurrence[]>('GET', `/public/events/${eventId}/occurrences`);
+    const response = await this.client.request<PageResult<EventOccurrence> | EventOccurrence[]>(
+      'GET',
+      `/public/events/${eventId}/occurrences`,
+    );
     return Array.isArray(response) ? response : response.items;
   }
   async listMarketingIntegrations(eventId: string): Promise<MarketingIntegration[]> {
-    const response = await this.client.request<PageResult<MarketingIntegration> | MarketingIntegration[]>('GET', `/public/events/${eventId}/marketing-integrations`);
+    const response = await this.client.request<
+      PageResult<MarketingIntegration> | MarketingIntegration[]
+    >('GET', `/public/events/${eventId}/marketing-integrations`);
     return Array.isArray(response) ? response : response.items;
   }
   /**
    * Validates an access code or buyer email against locked ticket types.
    * The API requires `ticketTypeIds` and at least `accessCode` or `buyerEmail`.
    */
-  async validateAccessCode(eventId: string, input: {
-    ticketTypeIds: string[];
-    accessCode?: string;
-    buyerEmail?: string;
-  }): Promise<{ valid: boolean; ticketTypeIds?: string[] }> {
+  async validateAccessCode(
+    eventId: string,
+    input: {
+      ticketTypeIds: string[];
+      accessCode?: string;
+      buyerEmail?: string;
+    },
+  ): Promise<{ valid: boolean; ticketTypeIds?: string[] }> {
     return this.client.request('POST', `/public/events/${eventId}/access-code`, { body: input });
   }
   /**
@@ -1825,14 +2095,29 @@ class PublicResource {
   }> {
     return this.client.request('GET', `/public/events/${eventId}/questions`);
   }
-  async createUploadArtifact(eventId: string, input: PublicCreateUploadArtifactInput): Promise<UploadArtifactTicket> {
-    return this.client.request('POST', `/public/events/${eventId}/upload-artifacts`, { body: input });
+  async createUploadArtifact(
+    eventId: string,
+    input: PublicCreateUploadArtifactInput,
+  ): Promise<UploadArtifactTicket> {
+    return this.client.request('POST', `/public/events/${eventId}/upload-artifacts`, {
+      body: input,
+    });
   }
-  async completeUploadArtifact(artifactId: string, token: string): Promise<CompletedUploadArtifact> {
-    return this.client.request('POST', `/public/upload-artifacts/${artifactId}/complete`, { body: { token } });
+  async completeUploadArtifact(
+    artifactId: string,
+    token: string,
+  ): Promise<CompletedUploadArtifact> {
+    return this.client.request('POST', `/public/upload-artifacts/${artifactId}/complete`, {
+      body: { token },
+    });
   }
-  async recordWidgetImpression(eventId: string, input: WidgetImpressionInput): Promise<WidgetImpressionResult> {
-    return this.client.request('POST', `/public/events/${eventId}/widget-impressions`, { body: input });
+  async recordWidgetImpression(
+    eventId: string,
+    input: WidgetImpressionInput,
+  ): Promise<WidgetImpressionResult> {
+    return this.client.request('POST', `/public/events/${eventId}/widget-impressions`, {
+      body: input,
+    });
   }
   async joinWaitlist(eventId: string, input: JoinWaitlistInput): Promise<WaitlistEntry> {
     return this.client.request('POST', `/public/events/${eventId}/waitlist`, { body: input });

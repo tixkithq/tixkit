@@ -44,8 +44,10 @@ function createWebhookDb(tables: Record<string, Record<string, unknown>[]>) {
   const resolveColumn = (row: Record<string, unknown>, column: string) => {
     const event = row['__event'] as Record<string, unknown> | undefined;
     const delivery = row['__delivery'] as Record<string, unknown> | undefined;
-    if (column.startsWith('webhook_events.')) return event?.[column.slice('webhook_events.'.length)];
-    if (column.startsWith('webhook_deliveries.')) return delivery?.[column.slice('webhook_deliveries.'.length)];
+    if (column.startsWith('webhook_events.'))
+      return event?.[column.slice('webhook_events.'.length)];
+    if (column.startsWith('webhook_deliveries.'))
+      return delivery?.[column.slice('webhook_deliveries.'.length)];
     return row[column];
   };
   // eslint-disable-next-line unicorn/consistent-function-scoping -- comparison semantics are specific to this mock DB.
@@ -72,7 +74,8 @@ function createWebhookDb(tables: Record<string, Record<string, unknown>[]>) {
   };
   const makeExpressionBuilder = (): ExpressionBuilder => {
     const eb = ((column: string, operator: string, value: unknown) => {
-      return (row: Record<string, unknown>) => compareValues(resolveColumn(row, column), operator, value);
+      return (row: Record<string, unknown>) =>
+        compareValues(resolveColumn(row, column), operator, value);
     }) as ExpressionBuilder;
     eb.and = (predicates) => (row) => predicates.every((predicate) => predicate(row));
     eb.or = (predicates) => (row) => predicates.some((predicate) => predicate(row));
@@ -94,7 +97,9 @@ function createWebhookDb(tables: Record<string, Record<string, unknown>[]>) {
   const baseRows = (table: string) => {
     if (table !== 'webhook_deliveries') return [...(tables[table] ?? [])];
     return (tables.webhook_deliveries ?? []).flatMap((delivery) => {
-      const event = (tables.webhook_events ?? []).find((candidate) => candidate.id === delivery.event_id);
+      const event = (tables.webhook_events ?? []).find(
+        (candidate) => candidate.id === delivery.event_id,
+      );
       return event ? [{ __delivery: delivery, __event: event }] : [];
     });
   };
@@ -125,7 +130,9 @@ function createWebhookDb(tables: Record<string, Record<string, unknown>[]>) {
           if (typeof columnOrBuilder === 'function') {
             predicates.push(columnOrBuilder(makeExpressionBuilder()));
           } else if (operator) {
-            predicates.push((row) => compareValues(resolveColumn(row, columnOrBuilder), operator, value));
+            predicates.push((row) =>
+              compareValues(resolveColumn(row, columnOrBuilder), operator, value),
+            );
           }
           return query;
         },
@@ -146,7 +153,8 @@ function createWebhookDb(tables: Record<string, Record<string, unknown>[]>) {
                 const leftValue = comparable(resolveColumn(left, order.column));
                 const rightValue = comparable(resolveColumn(right, order.column));
                 if (leftValue === rightValue) continue;
-                const result = (leftValue as string | number) < (rightValue as string | number) ? -1 : 1;
+                const result =
+                  (leftValue as string | number) < (rightValue as string | number) ? -1 : 1;
                 return order.direction === 'asc' ? result : -result;
               }
               return 0;
@@ -192,6 +200,40 @@ function createWebhookEndpointListDb(rows: Record<string, unknown>[]) {
       return query;
     },
   };
+}
+
+const scopedOAuthAppManagementMessage =
+  'Scoped principals cannot manage organization-wide OAuth applications';
+
+function createOAuthApplicationAccessGuardDb() {
+  return {
+    insertInto: vi.fn(() => {
+      throw new Error('OAuth application insert must not run for scoped principals');
+    }),
+    selectFrom: vi.fn(() => {
+      throw new Error('OAuth application select must not run for scoped principals');
+    }),
+    updateTable: vi.fn(() => {
+      throw new Error('OAuth application update must not run for scoped principals');
+    }),
+  };
+}
+
+async function setupDeveloperRouteApp(principal: Principal, db: unknown) {
+  const app = Fastify();
+  app.decorate('context', {
+    db: db as Database,
+    pricingEngine: {},
+    inventoryService: {},
+    qrService: {},
+    authService: {},
+    temporalClient: {},
+  } as unknown as AppContext);
+  app.addHook('onRequest', async (request) => {
+    request.principal = principal;
+  });
+  await app.register(developerRoutes);
+  return app;
 }
 
 describe('developer routes integration', () => {
@@ -393,6 +435,90 @@ describe('developer routes integration', () => {
       code: 'FORBIDDEN',
       message: 'Scoped principals must bind scanner devices to explicit events',
     });
+
+    await app.close();
+  });
+
+  it('blocks event-scoped principals from creating organization-wide OAuth applications before insert', async () => {
+    const principal: Principal = {
+      type: 'api_key',
+      id: 'key_parent',
+      tenantId: 'tnt_1',
+      organizationIds: ['org_1'],
+      scopes: ['developers.write'],
+      eventIds: ['evt_1'],
+    };
+    const db = createOAuthApplicationAccessGuardDb();
+    const app = await setupDeveloperRouteApp(principal, db);
+
+    const response = await app.inject({
+      method: 'POST',
+      url: '/oauth-applications',
+      payload: {
+        organizationId: 'org_1',
+        name: 'Scoped OAuth app',
+        redirectUris: ['https://example.com/oauth/callback'],
+        scopes: ['events.read'],
+      },
+    });
+
+    expect(response.statusCode).toBe(403);
+    expect(response.json()).toMatchObject({
+      code: 'FORBIDDEN',
+      message: scopedOAuthAppManagementMessage,
+    });
+    expect(db.insertInto).not.toHaveBeenCalled();
+
+    await app.close();
+  });
+
+  it('blocks brand-scoped principals from listing organization-wide OAuth applications before exposure', async () => {
+    const principal: Principal = {
+      type: 'api_key',
+      id: 'key_parent',
+      tenantId: 'tnt_1',
+      organizationIds: ['org_1'],
+      scopes: ['developers.write'],
+      brandIds: ['brd_1'],
+    };
+    const db = createOAuthApplicationAccessGuardDb();
+    const app = await setupDeveloperRouteApp(principal, db);
+
+    const response = await app.inject({ method: 'GET', url: '/oauth-applications' });
+
+    expect(response.statusCode).toBe(403);
+    expect(response.json()).toMatchObject({
+      code: 'FORBIDDEN',
+      message: scopedOAuthAppManagementMessage,
+    });
+    expect(db.selectFrom).not.toHaveBeenCalled();
+
+    await app.close();
+  });
+
+  it('blocks scoped principals from revoking organization-wide OAuth applications before update', async () => {
+    const principal: Principal = {
+      type: 'api_key',
+      id: 'key_parent',
+      tenantId: 'tnt_1',
+      organizationIds: ['org_1'],
+      scopes: ['developers.write'],
+      eventIds: ['evt_1'],
+    };
+    const db = createOAuthApplicationAccessGuardDb();
+    const app = await setupDeveloperRouteApp(principal, db);
+
+    const response = await app.inject({
+      method: 'DELETE',
+      url: '/oauth-applications/oapp_1',
+    });
+
+    expect(response.statusCode).toBe(403);
+    expect(response.json()).toMatchObject({
+      code: 'FORBIDDEN',
+      message: scopedOAuthAppManagementMessage,
+    });
+    expect(db.updateTable).not.toHaveBeenCalled();
 
     await app.close();
   });
@@ -650,16 +776,21 @@ describe('developer routes integration', () => {
     expect(response.statusCode).toBe(202);
     expect(response.json()).toMatchObject({ queued: true, eventId: 'whe_1', endpoints: 1 });
     expect(startWebhookDelivery).toHaveBeenCalledTimes(1);
-    expect(startWebhookDelivery).toHaveBeenCalledWith(expect.objectContaining({
-      apiVersion: '2026-01-01',
-      endpointId: 'wh_1',
-      eventId: 'whe_1',
-      eventType: 'order.paid',
-      maxAttempts: 5,
-      payload: { orderId: 'ord_1' },
-      replayNonce: expect.any(String),
-      secret: 'secret',
-    }));
+    expect(startWebhookDelivery).toHaveBeenCalledWith(
+      expect.objectContaining({
+        apiVersion: '2026-01-01',
+        endpointId: 'wh_1',
+        eventId: 'whe_1',
+        eventType: 'order.paid',
+        maxAttempts: 5,
+        payload: { orderId: 'ord_1' },
+        replayNonce: expect.any(String),
+      }),
+    );
+    const [replayInput] = startWebhookDelivery.mock.calls[0] as unknown as [
+      Record<string, unknown>,
+    ];
+    expect(replayInput).not.toHaveProperty('secret');
 
     await app.close();
   });

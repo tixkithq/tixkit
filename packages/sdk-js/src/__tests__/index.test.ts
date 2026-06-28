@@ -9,13 +9,11 @@ import { TixkitClient, TixkitApiError } from '../index.js';
 function mockFetch(status: number, body: unknown) {
   const init: ResponseInit = { status, headers: { 'Content-Type': 'application/json' } };
   if (status !== 204) {
-    return vi.spyOn(globalThis, 'fetch').mockImplementation(async () =>
-      new Response(JSON.stringify(body), init),
-    );
+    return vi
+      .spyOn(globalThis, 'fetch')
+      .mockImplementation(async () => new Response(JSON.stringify(body), init));
   }
-  return vi.spyOn(globalThis, 'fetch').mockImplementation(async () =>
-    new Response(null, init),
-  );
+  return vi.spyOn(globalThis, 'fetch').mockImplementation(async () => new Response(null, init));
 }
 
 function getCall(fetchMock: ReturnType<typeof vi.spyOn>, index = 0) {
@@ -67,7 +65,9 @@ describe('TixkitClient', () => {
   });
 
   it('TixkitApiError should have correct properties', () => {
-    const error = new TixkitApiError('NOT_FOUND', 'Resource not found', 404, 'req_123', { resource: 'event' });
+    const error = new TixkitApiError('NOT_FOUND', 'Resource not found', 404, 'req_123', {
+      resource: 'event',
+    });
     expect(error.code).toBe('NOT_FOUND');
     expect(error.message).toBe('Resource not found');
     expect(error.statusCode).toBe(404);
@@ -78,13 +78,27 @@ describe('TixkitClient', () => {
 
   it('sends caller supplied checkout idempotency key only as a header', async () => {
     const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue(
-      new Response(JSON.stringify({ id: 'cs_1', eventId: 'evt_1', status: 'open', currency: 'USD', quote: {}, expiresAt: '2026-01-01T00:00:00.000Z' }), {
-        status: 201,
-        headers: { 'Content-Type': 'application/json' },
-      }),
+      new Response(
+        JSON.stringify({
+          id: 'cs_1',
+          eventId: 'evt_1',
+          status: 'open',
+          currency: 'USD',
+          quote: {},
+          expiresAt: '2026-01-01T00:00:00.000Z',
+        }),
+        {
+          status: 201,
+          headers: { 'Content-Type': 'application/json' },
+        },
+      ),
     );
 
-    const client = new TixkitClient({ apiKey: 'tk_test_123', apiBaseUrl: 'https://api.test', maxRetries: 0 });
+    const client = new TixkitClient({
+      apiKey: 'tk_test_123',
+      apiBaseUrl: 'https://api.test',
+      maxRetries: 0,
+    });
     await client.checkout.create({
       idempotencyKey: 'idem_checkout_1',
       eventId: 'evt_1',
@@ -102,13 +116,27 @@ describe('TixkitClient', () => {
 
   it('sends checkout tracking separately from affiliate attribution', async () => {
     const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue(
-      new Response(JSON.stringify({ id: 'cs_1', eventId: 'evt_1', status: 'open', currency: 'USD', quote: {}, expiresAt: '2026-01-01T00:00:00.000Z' }), {
-        status: 201,
-        headers: { 'Content-Type': 'application/json' },
-      }),
+      new Response(
+        JSON.stringify({
+          id: 'cs_1',
+          eventId: 'evt_1',
+          status: 'open',
+          currency: 'USD',
+          quote: {},
+          expiresAt: '2026-01-01T00:00:00.000Z',
+        }),
+        {
+          status: 201,
+          headers: { 'Content-Type': 'application/json' },
+        },
+      ),
     );
 
-    const client = new TixkitClient({ apiKey: 'tk_test_123', apiBaseUrl: 'https://api.test', maxRetries: 0 });
+    const client = new TixkitClient({
+      apiKey: 'tk_test_123',
+      apiBaseUrl: 'https://api.test',
+      maxRetries: 0,
+    });
     await client.checkout.create({
       idempotencyKey: 'idem_checkout_tracking',
       eventId: 'evt_1',
@@ -126,13 +154,27 @@ describe('TixkitClient', () => {
 
   it('sends product checkout line items', async () => {
     const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue(
-      new Response(JSON.stringify({ id: 'cs_1', eventId: 'evt_1', status: 'open', currency: 'USD', quote: {}, expiresAt: '2026-01-01T00:00:00.000Z' }), {
-        status: 201,
-        headers: { 'Content-Type': 'application/json' },
-      }),
+      new Response(
+        JSON.stringify({
+          id: 'cs_1',
+          eventId: 'evt_1',
+          status: 'open',
+          currency: 'USD',
+          quote: {},
+          expiresAt: '2026-01-01T00:00:00.000Z',
+        }),
+        {
+          status: 201,
+          headers: { 'Content-Type': 'application/json' },
+        },
+      ),
     );
 
-    const client = new TixkitClient({ apiKey: 'tk_test_123', apiBaseUrl: 'https://api.test', maxRetries: 0 });
+    const client = new TixkitClient({
+      apiKey: 'tk_test_123',
+      apiBaseUrl: 'https://api.test',
+      maxRetries: 0,
+    });
     await client.checkout.create({
       idempotencyKey: 'idem_checkout_products',
       eventId: 'evt_1',
@@ -153,13 +195,27 @@ describe('TixkitClient', () => {
 
   it('passes waitlist claim tokens through checkout create', async () => {
     const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue(
-      new Response(JSON.stringify({ id: 'cs_1', eventId: 'evt_1', status: 'open', currency: 'USD', quote: {}, expiresAt: '2026-01-01T00:00:00.000Z' }), {
-        status: 201,
-        headers: { 'Content-Type': 'application/json' },
-      }),
+      new Response(
+        JSON.stringify({
+          id: 'cs_1',
+          eventId: 'evt_1',
+          status: 'open',
+          currency: 'USD',
+          quote: {},
+          expiresAt: '2026-01-01T00:00:00.000Z',
+        }),
+        {
+          status: 201,
+          headers: { 'Content-Type': 'application/json' },
+        },
+      ),
     );
 
-    const client = new TixkitClient({ apiKey: 'tk_test_123', apiBaseUrl: 'https://api.test', maxRetries: 0 });
+    const client = new TixkitClient({
+      apiKey: 'tk_test_123',
+      apiBaseUrl: 'https://api.test',
+      maxRetries: 0,
+    });
     await client.checkout.create({
       idempotencyKey: 'idem_checkout_waitlist',
       eventId: 'evt_1',
@@ -177,10 +233,16 @@ describe('TixkitClient', () => {
     const fetchMock = vi
       .spyOn(globalThis, 'fetch')
       .mockResolvedValueOnce(
-        new Response(JSON.stringify({ items: [], settings: { autoOfferEnabled: true, offerTtlMinutes: 1440 } }), {
-          status: 200,
-          headers: { 'Content-Type': 'application/json' },
-        }),
+        new Response(
+          JSON.stringify({
+            items: [],
+            settings: { autoOfferEnabled: true, offerTtlMinutes: 1440 },
+          }),
+          {
+            status: 200,
+            headers: { 'Content-Type': 'application/json' },
+          },
+        ),
       )
       .mockResolvedValueOnce(
         new Response(JSON.stringify({ entry: { id: 'wl_1' }, claimToken: 'claim_token_123' }), {
@@ -195,7 +257,11 @@ describe('TixkitClient', () => {
         }),
       );
 
-    const client = new TixkitClient({ apiKey: 'tk_test_123', apiBaseUrl: 'https://api.test', maxRetries: 0 });
+    const client = new TixkitClient({
+      apiKey: 'tk_test_123',
+      apiBaseUrl: 'https://api.test',
+      maxRetries: 0,
+    });
     await client.events.listWaitlist('evt_1');
     await client.events.offerWaitlistEntry('evt_1', 'wl_1', { expiresInMinutes: 30 });
     await client.events.updateWaitlistSettings('evt_1', {
@@ -223,16 +289,36 @@ describe('TixkitClient', () => {
     const fetchMock = vi
       .spyOn(globalThis, 'fetch')
       .mockResolvedValueOnce(
-        new Response(JSON.stringify({ id: 'wl_1', eventId: 'evt_1', ticketTypeId: 'tt_1', email: 'buyer@example.com', quantity: 1, status: 'joined' }), {
-          status: 201,
-          headers: { 'Content-Type': 'application/json' },
-        }),
+        new Response(
+          JSON.stringify({
+            id: 'wl_1',
+            eventId: 'evt_1',
+            ticketTypeId: 'tt_1',
+            email: 'buyer@example.com',
+            quantity: 1,
+            status: 'joined',
+          }),
+          {
+            status: 201,
+            headers: { 'Content-Type': 'application/json' },
+          },
+        ),
       )
       .mockResolvedValueOnce(
-        new Response(JSON.stringify({ id: 'wl_1', eventId: 'evt_1', ticketTypeId: 'tt_1', email: 'buyer@example.com', quantity: 1, status: 'offered' }), {
-          status: 200,
-          headers: { 'Content-Type': 'application/json' },
-        }),
+        new Response(
+          JSON.stringify({
+            id: 'wl_1',
+            eventId: 'evt_1',
+            ticketTypeId: 'tt_1',
+            email: 'buyer@example.com',
+            quantity: 1,
+            status: 'offered',
+          }),
+          {
+            status: 200,
+            headers: { 'Content-Type': 'application/json' },
+          },
+        ),
       );
 
     const client = new TixkitClient({ apiBaseUrl: 'https://api.test', maxRetries: 0 });
@@ -270,7 +356,11 @@ describe('TixkitClient', () => {
         }),
       );
 
-    const client = new TixkitClient({ apiKey: 'tk_test_123', apiBaseUrl: 'https://api.test', maxRetries: 0 });
+    const client = new TixkitClient({
+      apiKey: 'tk_test_123',
+      apiBaseUrl: 'https://api.test',
+      maxRetries: 0,
+    });
     await client.events.listMarketingIntegrations('evt_1');
     await client.events.upsertMarketingIntegration('evt_1', {
       provider: 'ga4',
@@ -329,15 +419,22 @@ describe('TixkitClient', () => {
     expect(headers.Authorization).toBeUndefined();
   });
 
-	  it('sends caller supplied confirm idempotency key only as a header', async () => {
+  it('sends caller supplied confirm idempotency key only as a header', async () => {
     const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue(
-      new Response(JSON.stringify({ sessionId: 'cs_1', status: 'pending_payment', totalCents: 5000 }), {
-        status: 200,
-        headers: { 'Content-Type': 'application/json' },
-      }),
+      new Response(
+        JSON.stringify({ sessionId: 'cs_1', status: 'pending_payment', totalCents: 5000 }),
+        {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        },
+      ),
     );
 
-    const client = new TixkitClient({ apiKey: 'tk_test_123', apiBaseUrl: 'https://api.test', maxRetries: 0 });
+    const client = new TixkitClient({
+      apiKey: 'tk_test_123',
+      apiBaseUrl: 'https://api.test',
+      maxRetries: 0,
+    });
     await client.checkout.confirm('cs_1', {
       idempotencyKey: 'idem_confirm_1',
       clientToken: 'cstok_1',
@@ -350,70 +447,84 @@ describe('TixkitClient', () => {
 
     expect(String(url)).toBe('https://api.test/v1/checkout/sessions/cs_1/confirm');
     expect(headers['Idempotency-Key']).toBe('idem_confirm_1');
-	    expect(headers['X-Checkout-Session-Token']).toBe('cstok_1');
-	    expect(body).toEqual({ paymentMethodId: 'pm_1' });
-	  });
+    expect(headers['X-Checkout-Session-Token']).toBe('cstok_1');
+    expect(body).toEqual({ paymentMethodId: 'pm_1' });
+  });
 
-	  it('does not retry unsafe mutations without an idempotency key', async () => {
-	    const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue(
-	      new Response(
-	        JSON.stringify({
-	          error: { code: 'SERVICE_UNAVAILABLE', message: 'try later', requestId: 'req_1' },
-	        }),
-	        { status: 503, headers: { 'Content-Type': 'application/json' } },
-	      ),
-	    );
+  it('does not retry unsafe mutations without an idempotency key', async () => {
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          error: { code: 'SERVICE_UNAVAILABLE', message: 'try later', requestId: 'req_1' },
+        }),
+        { status: 503, headers: { 'Content-Type': 'application/json' } },
+      ),
+    );
 
-	    const client = new TixkitClient({ apiKey: 'tk_test_123', apiBaseUrl: 'https://api.test', maxRetries: 2 });
-	    await expect(
-	      client.events.create({
-	        organizationId: 'org_1',
-	        brandId: 'brd_1',
-	        slug: 'launch',
-	        title: 'Launch',
-	        currency: 'USD',
-	        timezone: 'America/New_York',
-	        startsAt: '2026-07-01T00:00:00.000Z',
-	      }),
-	    ).rejects.toMatchObject({ code: 'SERVICE_UNAVAILABLE' });
+    const client = new TixkitClient({
+      apiKey: 'tk_test_123',
+      apiBaseUrl: 'https://api.test',
+      maxRetries: 2,
+    });
+    await expect(
+      client.events.create({
+        organizationId: 'org_1',
+        brandId: 'brd_1',
+        slug: 'launch',
+        title: 'Launch',
+        currency: 'USD',
+        timezone: 'America/New_York',
+        startsAt: '2026-07-01T00:00:00.000Z',
+      }),
+    ).rejects.toMatchObject({ code: 'SERVICE_UNAVAILABLE' });
 
-	    expect(fetchMock).toHaveBeenCalledTimes(1);
-	  });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
 
-	  it('retries idempotent mutations when an idempotency key is supplied', async () => {
-	    const fetchMock = vi
-	      .spyOn(globalThis, 'fetch')
-	      .mockResolvedValueOnce(
-	        new Response(
-	          JSON.stringify({
-	            error: { code: 'SERVICE_UNAVAILABLE', message: 'try later', requestId: 'req_1' },
-	          }),
-	          { status: 503, headers: { 'Content-Type': 'application/json' } },
-	        ),
-	      )
-	      .mockResolvedValueOnce(
-	        new Response(
-	          JSON.stringify({
-	            id: 'cs_1',
-	            eventId: 'evt_1',
-	            status: 'open',
-	            currency: 'USD',
-	            quote: { totalCents: 1000, subtotalCents: 1000, discountCents: 0, taxCents: 0, feeCents: 0 },
-	            expiresAt: '2026-07-01T00:10:00.000Z',
-	          }),
-	          { status: 201, headers: { 'Content-Type': 'application/json' } },
-	        ),
-	      );
+  it('retries idempotent mutations when an idempotency key is supplied', async () => {
+    const fetchMock = vi
+      .spyOn(globalThis, 'fetch')
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            error: { code: 'SERVICE_UNAVAILABLE', message: 'try later', requestId: 'req_1' },
+          }),
+          { status: 503, headers: { 'Content-Type': 'application/json' } },
+        ),
+      )
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            id: 'cs_1',
+            eventId: 'evt_1',
+            status: 'open',
+            currency: 'USD',
+            quote: {
+              totalCents: 1000,
+              subtotalCents: 1000,
+              discountCents: 0,
+              taxCents: 0,
+              feeCents: 0,
+            },
+            expiresAt: '2026-07-01T00:10:00.000Z',
+          }),
+          { status: 201, headers: { 'Content-Type': 'application/json' } },
+        ),
+      );
 
-	    const client = new TixkitClient({ apiKey: 'tk_test_123', apiBaseUrl: 'https://api.test', maxRetries: 2 });
-	    await client.checkout.create({
-	      idempotencyKey: 'idem_checkout_retry',
-	      eventId: 'evt_1',
-	      items: [{ ticketTypeId: 'tt_1', quantity: 1 }],
-	    });
+    const client = new TixkitClient({
+      apiKey: 'tk_test_123',
+      apiBaseUrl: 'https://api.test',
+      maxRetries: 2,
+    });
+    await client.checkout.create({
+      idempotencyKey: 'idem_checkout_retry',
+      eventId: 'evt_1',
+      items: [{ ticketTypeId: 'tt_1', quantity: 1 }],
+    });
 
-	    expect(fetchMock).toHaveBeenCalledTimes(2);
-	  });
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
 
   it('browser-target bundle does not contain bundled secret credentials', () => {
     const tempDir = mkdtempSync(path.join(tmpdir(), 'tixkit-js-bundle-'));
@@ -444,8 +555,7 @@ describe('TixkitClient', () => {
       rmSync(tempDir, { force: true, recursive: true });
     }
   });
-
-	});
+});
 
 describe('TixkitClient new resource methods', () => {
   afterEach(() => {
@@ -454,7 +564,11 @@ describe('TixkitClient new resource methods', () => {
 
   it('events.update sends PATCH with body', async () => {
     const fm = mockFetch(200, { id: 'evt_1', title: 'Updated' });
-    const c = new TixkitClient({ apiKey: '***********', apiBaseUrl: 'https://api.test', maxRetries: 0 });
+    const c = new TixkitClient({
+      apiKey: '***********',
+      apiBaseUrl: 'https://api.test',
+      maxRetries: 0,
+    });
     await c.events.update('evt_1', { title: 'Updated' });
     const call = getCall(fm);
     expect(call.url).toBe('https://api.test/v1/events/evt_1');
@@ -464,7 +578,11 @@ describe('TixkitClient new resource methods', () => {
 
   it('events.create includes required currency in the request body', async () => {
     const fm = mockFetch(201, { id: 'evt_1', title: 'Launch', currency: 'EUR' });
-    const c = new TixkitClient({ apiKey: '***********', apiBaseUrl: 'https://api.test', maxRetries: 0 });
+    const c = new TixkitClient({
+      apiKey: '***********',
+      apiBaseUrl: 'https://api.test',
+      maxRetries: 0,
+    });
     await c.events.create({
       organizationId: 'org_1',
       brandId: 'brd_1',
@@ -482,7 +600,11 @@ describe('TixkitClient new resource methods', () => {
 
   it('events.update sends status and currency when supplied', async () => {
     const fm = mockFetch(200, { id: 'evt_1', status: 'paused', currency: 'GBP' });
-    const c = new TixkitClient({ apiKey: '***********', apiBaseUrl: 'https://api.test', maxRetries: 0 });
+    const c = new TixkitClient({
+      apiKey: '***********',
+      apiBaseUrl: 'https://api.test',
+      maxRetries: 0,
+    });
     await c.events.update('evt_1', { status: 'paused', currency: 'GBP' });
     const call = getCall(fm);
     expect(JSON.parse(call.body)).toEqual({ status: 'paused', currency: 'GBP' });
@@ -490,7 +612,11 @@ describe('TixkitClient new resource methods', () => {
 
   it('events.pause sends POST', async () => {
     const fm = mockFetch(200, { id: 'evt_1', status: 'paused' });
-    const c = new TixkitClient({ apiKey: '***********', apiBaseUrl: 'https://api.test', maxRetries: 0 });
+    const c = new TixkitClient({
+      apiKey: '***********',
+      apiBaseUrl: 'https://api.test',
+      maxRetries: 0,
+    });
     await c.events.pause('evt_1');
     const call = getCall(fm);
     expect(call.url).toBe('https://api.test/v1/events/evt_1/pause');
@@ -499,7 +625,11 @@ describe('TixkitClient new resource methods', () => {
 
   it('events.archive sends POST', async () => {
     const fm = mockFetch(200, { id: 'evt_1', status: 'archived' });
-    const c = new TixkitClient({ apiKey: '***********', apiBaseUrl: 'https://api.test', maxRetries: 0 });
+    const c = new TixkitClient({
+      apiKey: '***********',
+      apiBaseUrl: 'https://api.test',
+      maxRetries: 0,
+    });
     await c.events.archive('evt_1');
     const call = getCall(fm);
     expect(call.url).toBe('https://api.test/v1/events/evt_1/archive');
@@ -508,7 +638,11 @@ describe('TixkitClient new resource methods', () => {
 
   it('organizations.update sends PATCH', async () => {
     const fm = mockFetch(200, { id: 'org_1', name: 'Updated' });
-    const c = new TixkitClient({ apiKey: '***********', apiBaseUrl: 'https://api.test', maxRetries: 0 });
+    const c = new TixkitClient({
+      apiKey: '***********',
+      apiBaseUrl: 'https://api.test',
+      maxRetries: 0,
+    });
     await c.organizations.update('org_1', { name: 'Updated' });
     const call = getCall(fm);
     expect(call.url).toBe('https://api.test/v1/organizations/org_1');
@@ -517,7 +651,11 @@ describe('TixkitClient new resource methods', () => {
 
   it('attendees.listAll sends GET to /attendees with query params', async () => {
     const fm = mockFetch(200, { items: [], nextCursor: null, hasMore: false });
-    const c = new TixkitClient({ apiKey: '***********', apiBaseUrl: 'https://api.test', maxRetries: 0 });
+    const c = new TixkitClient({
+      apiKey: '***********',
+      apiBaseUrl: 'https://api.test',
+      maxRetries: 0,
+    });
     await c.attendees.listAll({ eventId: 'evt_1', status: 'checked_in', limit: 50 });
     const call = getCall(fm);
     expect(call.url).toBe('https://api.test/v1/attendees?limit=50&eventId=evt_1&status=checked_in');
@@ -526,7 +664,11 @@ describe('TixkitClient new resource methods', () => {
 
   it('exports.get sends GET', async () => {
     const fm = mockFetch(200, { exportId: 'exp_1', status: 'completed' });
-    const c = new TixkitClient({ apiKey: '***********', apiBaseUrl: 'https://api.test', maxRetries: 0 });
+    const c = new TixkitClient({
+      apiKey: '***********',
+      apiBaseUrl: 'https://api.test',
+      maxRetries: 0,
+    });
     await c.exports.get('exp_1');
     const call = getCall(fm);
     expect(call.url).toBe('https://api.test/v1/exports/exp_1');
@@ -534,8 +676,15 @@ describe('TixkitClient new resource methods', () => {
   });
 
   it('exports.download sends GET', async () => {
-    const fm = mockFetch(200, { downloadUrl: 'https://s3.example/file.csv', expiresAt: '2026-01-01' });
-    const c = new TixkitClient({ apiKey: '***********', apiBaseUrl: 'https://api.test', maxRetries: 0 });
+    const fm = mockFetch(200, {
+      downloadUrl: 'https://s3.example/file.csv',
+      expiresAt: '2026-01-01',
+    });
+    const c = new TixkitClient({
+      apiKey: '***********',
+      apiBaseUrl: 'https://api.test',
+      maxRetries: 0,
+    });
     await c.exports.download('exp_1');
     const call = getCall(fm);
     expect(call.url).toBe('https://api.test/v1/exports/exp_1/download');
@@ -549,7 +698,11 @@ describe('TixkitClient new resource methods', () => {
       checkoutCompleted: 6,
       conversionRate: 0.5,
     });
-    const c = new TixkitClient({ apiKey: '***********', apiBaseUrl: 'https://api.test', maxRetries: 0 });
+    const c = new TixkitClient({
+      apiKey: '***********',
+      apiBaseUrl: 'https://api.test',
+      maxRetries: 0,
+    });
     const report = await c.reports.conversion('evt_1');
     const call = getCall(fm);
     expect(call.url).toBe('https://api.test/v1/events/evt_1/reports/conversion');
@@ -567,7 +720,11 @@ describe('TixkitClient new resource methods', () => {
       status: 'active',
       sortOrder: 1,
     });
-    const c = new TixkitClient({ apiKey: '***********', apiBaseUrl: 'https://api.test', maxRetries: 0 });
+    const c = new TixkitClient({
+      apiKey: '***********',
+      apiBaseUrl: 'https://api.test',
+      maxRetries: 0,
+    });
 
     await c.products.createCategory('evt_1', { name: 'Merch', sortOrder: 1 });
     expect(getCall(fm).url).toBe('https://api.test/v1/events/evt_1/product-categories');
@@ -583,7 +740,10 @@ describe('TixkitClient new resource methods', () => {
       sortOrder: 1,
     });
     expect(getCall(fm, 1).url).toBe('https://api.test/v1/events/evt_1/products');
-    expect(JSON.parse(getCall(fm, 1).body)).toMatchObject({ name: 'T-shirt', categoryId: 'pcat_1' });
+    expect(JSON.parse(getCall(fm, 1).body)).toMatchObject({
+      name: 'T-shirt',
+      categoryId: 'pcat_1',
+    });
 
     await c.products.update('prd_1', { description: null, status: 'inactive' });
     expect(getCall(fm, 2).url).toBe('https://api.test/v1/products/prd_1');
@@ -593,7 +753,11 @@ describe('TixkitClient new resource methods', () => {
 
   it('messages.list sends GET with pagination', async () => {
     const fm = mockFetch(200, { items: [], nextCursor: null, hasMore: false });
-    const c = new TixkitClient({ apiKey: '***********', apiBaseUrl: 'https://api.test', maxRetries: 0 });
+    const c = new TixkitClient({
+      apiKey: '***********',
+      apiBaseUrl: 'https://api.test',
+      maxRetries: 0,
+    });
     await c.messages.list('evt_1', { limit: 10 });
     const call = getCall(fm);
     expect(call.url).toBe('https://api.test/v1/events/evt_1/messages?limit=10');
@@ -609,7 +773,11 @@ describe('TixkitClient new resource methods', () => {
       skippedRecipients: 1,
       recipients: [],
     });
-    const c = new TixkitClient({ apiKey: '***********', apiBaseUrl: 'https://api.test', maxRetries: 0 });
+    const c = new TixkitClient({
+      apiKey: '***********',
+      apiBaseUrl: 'https://api.test',
+      maxRetries: 0,
+    });
     await c.messages.previewRecipients('evt_1', {
       templateKey: 'admin-campaign',
       audience: 'checked_in',
@@ -645,7 +813,11 @@ describe('TixkitClient new resource methods', () => {
       createdAt: '2026-01-01T00:00:00.000Z',
       updatedAt: '2026-01-01T00:00:00.000Z',
     });
-    const c = new TixkitClient({ apiKey: '***********', apiBaseUrl: 'https://api.test', maxRetries: 0 });
+    const c = new TixkitClient({
+      apiKey: '***********',
+      apiBaseUrl: 'https://api.test',
+      maxRetries: 0,
+    });
     const campaign = await c.messages.getCampaign('evt_1', 'cmp_1');
     const call = getCall(fm);
     expect(call.url).toBe('https://api.test/v1/events/evt_1/messages/cmp_1');
@@ -668,7 +840,11 @@ describe('TixkitClient new resource methods', () => {
       value: 'VIP123',
       usesCount: 0,
     });
-    const c = new TixkitClient({ apiKey: '***********', apiBaseUrl: 'https://api.test', maxRetries: 0 });
+    const c = new TixkitClient({
+      apiKey: '***********',
+      apiBaseUrl: 'https://api.test',
+      maxRetries: 0,
+    });
     await c.ticketTypes.createAccessRule('tt_1', { type: 'code', value: 'VIP123', maxUses: 5 });
     const call = getCall(fm);
     expect(call.url).toBe('https://api.test/v1/ticket-types/tt_1/access-rules');
@@ -679,9 +855,15 @@ describe('TixkitClient new resource methods', () => {
   it('ticketTypes batch methods send atomic ticket and access-rule requests', async () => {
     const fm = mockFetch(201, {
       ticketType: { id: 'tt_1', name: 'VIP', kind: 'paid', currency: 'USD', priceCents: 5000 },
-      accessRules: [{ id: 'acr_1', ticketTypeId: 'tt_1', type: 'code', value: 'VIP123', usesCount: 0 }],
+      accessRules: [
+        { id: 'acr_1', ticketTypeId: 'tt_1', type: 'code', value: 'VIP123', usesCount: 0 },
+      ],
     });
-    const c = new TixkitClient({ apiKey: '***********', apiBaseUrl: 'https://api.test', maxRetries: 0 });
+    const c = new TixkitClient({
+      apiKey: '***********',
+      apiBaseUrl: 'https://api.test',
+      maxRetries: 0,
+    });
     await c.ticketTypes.createBatch('evt_1', {
       ticketType: { name: 'VIP', kind: 'paid', currency: 'USD', priceCents: 5000 },
       inventoryPool: { name: 'VIP Pool', totalCapacity: 25 },
@@ -710,7 +892,11 @@ describe('TixkitClient new resource methods', () => {
 
   it('webhookEndpoints.listEvents sends GET', async () => {
     const fm = mockFetch(200, { items: [], nextCursor: null, hasMore: false });
-    const c = new TixkitClient({ apiKey: '***********', apiBaseUrl: 'https://api.test', maxRetries: 0 });
+    const c = new TixkitClient({
+      apiKey: '***********',
+      apiBaseUrl: 'https://api.test',
+      maxRetries: 0,
+    });
     await c.webhookEndpoints.listEvents('ep_1');
     const call = getCall(fm);
     expect(call.url).toBe('https://api.test/v1/webhook-endpoints/ep_1/events');
@@ -718,15 +904,30 @@ describe('TixkitClient new resource methods', () => {
 
   it('questions.list sends GET', async () => {
     const fm = mockFetch(200, { items: [], nextCursor: null, hasMore: false });
-    const c = new TixkitClient({ apiKey: '***********', apiBaseUrl: 'https://api.test', maxRetries: 0 });
+    const c = new TixkitClient({
+      apiKey: '***********',
+      apiBaseUrl: 'https://api.test',
+      maxRetries: 0,
+    });
     await c.questions.list('evt_1');
     const call = getCall(fm);
     expect(call.url).toBe('https://api.test/v1/events/evt_1/questions');
   });
 
   it('questions.create sends POST with body', async () => {
-    const fm = mockFetch(201, { id: 'q_1', label: 'Name', type: 'text', required: true, appliesTo: 'buyer', isConsentField: false });
-    const c = new TixkitClient({ apiKey: '***********', apiBaseUrl: 'https://api.test', maxRetries: 0 });
+    const fm = mockFetch(201, {
+      id: 'q_1',
+      label: 'Name',
+      type: 'text',
+      required: true,
+      appliesTo: 'buyer',
+      isConsentField: false,
+    });
+    const c = new TixkitClient({
+      apiKey: '***********',
+      apiBaseUrl: 'https://api.test',
+      maxRetries: 0,
+    });
     await c.questions.create('evt_1', {
       label: 'Name',
       type: 'text',
@@ -754,7 +955,11 @@ describe('TixkitClient new resource methods', () => {
 
   it('questions.update sends PATCH', async () => {
     const fm = mockFetch(200, { id: 'q_1', label: 'Updated' });
-    const c = new TixkitClient({ apiKey: '***********', apiBaseUrl: 'https://api.test', maxRetries: 0 });
+    const c = new TixkitClient({
+      apiKey: '***********',
+      apiBaseUrl: 'https://api.test',
+      maxRetries: 0,
+    });
     await c.questions.update('q_1', { label: 'Updated' });
     const call = getCall(fm);
     expect(call.url).toBe('https://api.test/v1/questions/q_1');
@@ -763,7 +968,11 @@ describe('TixkitClient new resource methods', () => {
 
   it('questions.reorder sends POST to the event-scoped reorder endpoint', async () => {
     const fm = mockFetch(200, { items: [], nextCursor: null, hasMore: false });
-    const c = new TixkitClient({ apiKey: '***********', apiBaseUrl: 'https://api.test', maxRetries: 0 });
+    const c = new TixkitClient({
+      apiKey: '***********',
+      apiBaseUrl: 'https://api.test',
+      maxRetries: 0,
+    });
     await c.questions.reorder('evt_1', [
       { id: 'q_second', sortOrder: 0 },
       { id: 'q_first', sortOrder: 1 },
@@ -781,7 +990,11 @@ describe('TixkitClient new resource methods', () => {
 
   it('questions.delete sends DELETE', async () => {
     const fm = mockFetch(204, null);
-    const c = new TixkitClient({ apiKey: '***********', apiBaseUrl: 'https://api.test', maxRetries: 0 });
+    const c = new TixkitClient({
+      apiKey: '***********',
+      apiBaseUrl: 'https://api.test',
+      maxRetries: 0,
+    });
     await c.questions.delete('q_1');
     const call = getCall(fm);
     expect(call.url).toBe('https://api.test/v1/questions/q_1');
@@ -790,7 +1003,11 @@ describe('TixkitClient new resource methods', () => {
 
   it('oauthApplications.list sends GET', async () => {
     const fm = mockFetch(200, { items: [], nextCursor: null, hasMore: false });
-    const c = new TixkitClient({ apiKey: '***********', apiBaseUrl: 'https://api.test', maxRetries: 0 });
+    const c = new TixkitClient({
+      apiKey: '***********',
+      apiBaseUrl: 'https://api.test',
+      maxRetries: 0,
+    });
     await c.oauthApplications.list();
     const call = getCall(fm);
     expect(call.url).toBe('https://api.test/v1/oauth-applications');
@@ -798,16 +1015,34 @@ describe('TixkitClient new resource methods', () => {
 
   it('oauthApplications.create sends POST with body', async () => {
     const fm = mockFetch(201, { id: 'app_1', name: 'Test', clientId: 'cli_1' });
-    const c = new TixkitClient({ apiKey: '***********', apiBaseUrl: 'https://api.test', maxRetries: 0 });
-    await c.oauthApplications.create({ organizationId: 'org_1', name: 'Test', redirectUris: ['https://example.com/cb'], scopes: ['read'] });
+    const c = new TixkitClient({
+      apiKey: '***********',
+      apiBaseUrl: 'https://api.test',
+      maxRetries: 0,
+    });
+    await c.oauthApplications.create({
+      organizationId: 'org_1',
+      name: 'Test',
+      redirectUris: ['https://example.com/cb'],
+      scopes: ['read'],
+    });
     const call = getCall(fm);
     expect(call.method).toBe('POST');
-    expect(JSON.parse(call.body)).toEqual({ organizationId: 'org_1', name: 'Test', redirectUris: ['https://example.com/cb'], scopes: ['read'] });
+    expect(JSON.parse(call.body)).toEqual({
+      organizationId: 'org_1',
+      name: 'Test',
+      redirectUris: ['https://example.com/cb'],
+      scopes: ['read'],
+    });
   });
 
   it('oauthApplications.delete sends DELETE', async () => {
     const fm = mockFetch(204, null);
-    const c = new TixkitClient({ apiKey: '***********', apiBaseUrl: 'https://api.test', maxRetries: 0 });
+    const c = new TixkitClient({
+      apiKey: '***********',
+      apiBaseUrl: 'https://api.test',
+      maxRetries: 0,
+    });
     await c.oauthApplications.delete('app_1');
     const call = getCall(fm);
     expect(call.url).toBe('https://api.test/v1/oauth-applications/app_1');
@@ -815,8 +1050,18 @@ describe('TixkitClient new resource methods', () => {
   });
 
   it('oauthApplications.token exchanges authorization codes', async () => {
-    const fm = mockFetch(200, { access_token: 'tk_oat_test', token_type: 'Bearer', expires_in: 3600, scope: 'events.read', refresh_token: 'tk_ort_test' });
-    const c = new TixkitClient({ apiKey: '***********', apiBaseUrl: 'https://api.test', maxRetries: 0 });
+    const fm = mockFetch(200, {
+      access_token: 'tk_oat_test',
+      token_type: 'Bearer',
+      expires_in: 3600,
+      scope: 'events.read',
+      refresh_token: 'tk_ort_test',
+    });
+    const c = new TixkitClient({
+      apiKey: '***********',
+      apiBaseUrl: 'https://api.test',
+      maxRetries: 0,
+    });
     await c.oauthApplications.token({
       grantType: 'authorization_code',
       clientId: 'client_1',
@@ -837,8 +1082,16 @@ describe('TixkitClient new resource methods', () => {
 
   it('oauthApplications.revoke sends token revocation body', async () => {
     const fm = mockFetch(200, { revoked: true });
-    const c = new TixkitClient({ apiKey: '***********', apiBaseUrl: 'https://api.test', maxRetries: 0 });
-    await c.oauthApplications.revoke({ clientId: 'client_1', clientSecret: 'secret_1', token: 'tk_oat_test' });
+    const c = new TixkitClient({
+      apiKey: '***********',
+      apiBaseUrl: 'https://api.test',
+      maxRetries: 0,
+    });
+    await c.oauthApplications.revoke({
+      clientId: 'client_1',
+      clientSecret: 'secret_1',
+      token: 'tk_oat_test',
+    });
     const call = getCall(fm);
     expect(call.url).toBe('https://api.test/v1/oauth/revoke');
     expect(JSON.parse(call.body)).toEqual({
@@ -849,11 +1102,21 @@ describe('TixkitClient new resource methods', () => {
   });
 
   it('paymentAccounts.refreshStripeConnect sends POST to the account refresh endpoint', async () => {
-    const fm = mockFetch(200, { id: 'pa_1', status: 'active', onboardingUrl: 'https://connect.stripe.test/update' });
-    const c = new TixkitClient({ apiKey: '***********', apiBaseUrl: 'https://api.test', maxRetries: 0 });
+    const fm = mockFetch(200, {
+      id: 'pa_1',
+      status: 'active',
+      onboardingUrl: 'https://connect.stripe.test/update',
+    });
+    const c = new TixkitClient({
+      apiKey: '***********',
+      apiBaseUrl: 'https://api.test',
+      maxRetries: 0,
+    });
     await c.paymentAccounts.refreshStripeConnect('org_1', 'pa_1');
     const call = getCall(fm);
-    expect(call.url).toBe('https://api.test/v1/organizations/org_1/payment-accounts/pa_1/stripe-connect/refresh');
+    expect(call.url).toBe(
+      'https://api.test/v1/organizations/org_1/payment-accounts/pa_1/stripe-connect/refresh',
+    );
     expect(call.method).toBe('POST');
   });
 
@@ -883,7 +1146,11 @@ describe('TixkitClient new resource methods', () => {
       completeUrl: '/v1/upload-artifacts/upl_1/complete',
       expiresAt: '2026-01-01T00:15:00.000Z',
     });
-    const c = new TixkitClient({ apiKey: 'tk_test_123', apiBaseUrl: 'https://api.test', maxRetries: 0 });
+    const c = new TixkitClient({
+      apiKey: 'tk_test_123',
+      apiBaseUrl: 'https://api.test',
+      maxRetries: 0,
+    });
     await c.uploads.create({
       purpose: 'brand_logo',
       fileName: 'logo.png',
@@ -904,20 +1171,31 @@ describe('TixkitClient new resource methods', () => {
   });
 
   it('public upload helpers create and complete checkout upload artifacts', async () => {
-    const fm = vi.spyOn(globalThis, 'fetch')
-      .mockResolvedValueOnce(new Response(JSON.stringify({
-        artifactId: 'upl_1',
-        uploadUrl: 'https://s3.test/upload',
-        uploadHeaders: { 'Content-Type': 'application/pdf' },
-        completeUrl: '/v1/public/upload-artifacts/upl_1/complete',
-        completeToken: 'complete-token',
-        expiresAt: '2026-01-01T00:15:00.000Z',
-      }), { status: 201, headers: { 'Content-Type': 'application/json' } }))
-      .mockResolvedValueOnce(new Response(JSON.stringify({
-        artifactId: 'upl_1',
-        status: 'uploaded',
-        scanStatus: 'clean',
-      }), { status: 200, headers: { 'Content-Type': 'application/json' } }));
+    const fm = vi
+      .spyOn(globalThis, 'fetch')
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            artifactId: 'upl_1',
+            uploadUrl: 'https://s3.test/upload',
+            uploadHeaders: { 'Content-Type': 'application/pdf' },
+            completeUrl: '/v1/public/upload-artifacts/upl_1/complete',
+            completeToken: 'complete-token',
+            expiresAt: '2026-01-01T00:15:00.000Z',
+          }),
+          { status: 201, headers: { 'Content-Type': 'application/json' } },
+        ),
+      )
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            artifactId: 'upl_1',
+            status: 'uploaded',
+            scanStatus: 'clean',
+          }),
+          { status: 200, headers: { 'Content-Type': 'application/json' } },
+        ),
+      );
     const c = new TixkitClient({ apiBaseUrl: 'https://api.test', maxRetries: 0 });
 
     await c.public.createUploadArtifact('evt_1', {
@@ -959,7 +1237,11 @@ describe('TixkitClient new resource methods', () => {
 
   it('auth.me sends GET to /me', async () => {
     const fm = mockFetch(200, { userId: 'u_1', email: 'test@example.com' });
-    const c = new TixkitClient({ apiKey: '***********', apiBaseUrl: 'https://api.test', maxRetries: 0 });
+    const c = new TixkitClient({
+      apiKey: '***********',
+      apiBaseUrl: 'https://api.test',
+      maxRetries: 0,
+    });
     await c.auth.me();
     const call = getCall(fm);
     expect(call.url).toBe('https://api.test/v1/me');

@@ -30,6 +30,11 @@ playwright-report/
 # TypeScript
 *.tsbuildinfo
 
+# Dart / Flutter generated state
+**/.dart_tool/
+packages/sdk-flutter/pubspec.lock
+packages/sdk-flutter/example/pubspec.lock
+
 # Logs
 *.log
 npm-debug.log*

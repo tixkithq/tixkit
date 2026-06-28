@@ -50,59 +50,71 @@ const WEBHOOK_CATCHUP_SLO_MS = 300_000;
 const PAYMENT_SUCCESS_RATE_SLO = 0.98;
 
 async function seedTenantGraph(trx: Database): Promise<void> {
-  await trx.insertInto('tenants').values({
-    id: TENANT_ID,
-    name: 'Load Harness Tenant',
-    status: 'active',
-    plan: 'test',
-    created_at: new Date(),
-    updated_at: new Date(),
-  }).execute();
-  await trx.insertInto('organizations').values({
-    id: ORG_ID,
-    tenant_id: TENANT_ID,
-    name: 'Load Harness Org',
-    slug: `load-${RUN_ID}`,
-    clerk_organization_id: null,
-    status: 'active',
-    created_at: new Date(),
-    updated_at: new Date(),
-  }).execute();
-  await trx.insertInto('brands').values({
-    id: BRAND_ID,
-    tenant_id: TENANT_ID,
-    organization_id: ORG_ID,
-    name: 'Load Harness Brand',
-    slug: `load-${RUN_ID}`,
-    status: 'active',
-    theme: JSON.stringify({}),
-    legal_urls: JSON.stringify({}),
-    white_label: false,
-    payment_account_id: null,
-    created_at: new Date(),
-    updated_at: new Date(),
-  }).execute();
-  await trx.insertInto('events').values({
-    id: EVENT_ID,
-    tenant_id: TENANT_ID,
-    organization_id: ORG_ID,
-    brand_id: BRAND_ID,
-    slug: `load-${RUN_ID}`,
-    title: 'Load Harness Event',
-    description: null,
-    status: 'published',
-    currency: 'USD',
-    timezone: 'UTC',
-    starts_at: new Date(Date.now() + 86400000),
-    ends_at: null,
-    visibility: 'public',
-    seo: JSON.stringify({}),
-    capacity: null,
-    cover_image_url: null,
-    external_url: null,
-    created_at: new Date(),
-    updated_at: new Date(),
-  }).execute();
+  await trx
+    .insertInto('tenants')
+    .values({
+      id: TENANT_ID,
+      name: 'Load Harness Tenant',
+      status: 'active',
+      plan: 'test',
+      created_at: new Date(),
+      updated_at: new Date(),
+    })
+    .execute();
+  await trx
+    .insertInto('organizations')
+    .values({
+      id: ORG_ID,
+      tenant_id: TENANT_ID,
+      name: 'Load Harness Org',
+      slug: `load-${RUN_ID}`,
+      clerk_organization_id: null,
+      status: 'active',
+      created_at: new Date(),
+      updated_at: new Date(),
+    })
+    .execute();
+  await trx
+    .insertInto('brands')
+    .values({
+      id: BRAND_ID,
+      tenant_id: TENANT_ID,
+      organization_id: ORG_ID,
+      name: 'Load Harness Brand',
+      slug: `load-${RUN_ID}`,
+      status: 'active',
+      theme: JSON.stringify({}),
+      legal_urls: JSON.stringify({}),
+      white_label: false,
+      payment_account_id: null,
+      created_at: new Date(),
+      updated_at: new Date(),
+    })
+    .execute();
+  await trx
+    .insertInto('events')
+    .values({
+      id: EVENT_ID,
+      tenant_id: TENANT_ID,
+      organization_id: ORG_ID,
+      brand_id: BRAND_ID,
+      slug: `load-${RUN_ID}`,
+      title: 'Load Harness Event',
+      description: null,
+      status: 'published',
+      currency: 'USD',
+      timezone: 'UTC',
+      starts_at: new Date(Date.now() + 86400000),
+      ends_at: null,
+      visibility: 'public',
+      seo: JSON.stringify({}),
+      capacity: null,
+      cover_image_url: null,
+      external_url: null,
+      created_at: new Date(),
+      updated_at: new Date(),
+    })
+    .execute();
 }
 
 async function cleanupAll(database: Database): Promise<void> {
@@ -114,7 +126,10 @@ async function cleanupAll(database: Database): Promise<void> {
   await database.deleteFrom('export_job_events').where('tenant_id', '=', TENANT_ID).execute();
   await database.deleteFrom('export_jobs').where('tenant_id', '=', TENANT_ID).execute();
   await database.deleteFrom('payment_events').where('tenant_id', '=', TENANT_ID).execute();
-  await database.deleteFrom('checkout_holds').where('checkout_session_id', 'like', 'cs_load_%').execute();
+  await database
+    .deleteFrom('checkout_holds')
+    .where('checkout_session_id', 'like', 'cs_load_%')
+    .execute();
   await database.deleteFrom('checkout_sessions').where('id', 'like', 'cs_load_%').execute();
   await database.deleteFrom('ticket_types').where('event_id', '=', EVENT_ID).execute();
   await database.deleteFrom('inventory_pools').where('event_id', '=', EVENT_ID).execute();
@@ -126,70 +141,85 @@ async function cleanupAll(database: Database): Promise<void> {
 
 async function createPool(database: Database, capacity: number, ttl = 300): Promise<string> {
   const poolId = `pool_load_${ulid().slice(-10)}`;
-  await database.insertInto('inventory_pools').values({
-    id: poolId,
-    event_id: EVENT_ID,
-    name: `Load Pool ${poolId}`,
-    total_capacity: capacity,
-    reserved_count: 0,
-    sold_count: 0,
-    hold_ttl_seconds: ttl,
-    created_at: new Date(),
-    updated_at: new Date(),
-  }).execute();
+  await database
+    .insertInto('inventory_pools')
+    .values({
+      id: poolId,
+      event_id: EVENT_ID,
+      name: `Load Pool ${poolId}`,
+      total_capacity: capacity,
+      reserved_count: 0,
+      sold_count: 0,
+      hold_ttl_seconds: ttl,
+      created_at: new Date(),
+      updated_at: new Date(),
+    })
+    .execute();
   return poolId;
 }
 
 async function createTicketType(database: Database, poolId: string): Promise<string> {
   const ticketTypeId = `tt_load_${ulid().slice(-10)}`;
-  await database.insertInto('ticket_types').values({
-    id: ticketTypeId,
-    event_id: EVENT_ID,
-    name: `Load Ticket ${ticketTypeId}`,
-    description: null,
-    kind: 'paid',
-    status: 'active',
-    visibility: 'public',
-    currency: 'USD',
-    price_cents: 1000,
-    minimum_price_cents: null,
-    sales_start_at: null,
-    sales_end_at: null,
-    min_per_order: 1,
-    max_per_order: 10,
-    inventory_pool_id: poolId,
-    sort_order: 0,
-    requires_access_code: false,
-    access_code_hint: null,
-    created_at: new Date(),
-    updated_at: new Date(),
-  }).execute();
+  await database
+    .insertInto('ticket_types')
+    .values({
+      id: ticketTypeId,
+      event_id: EVENT_ID,
+      name: `Load Ticket ${ticketTypeId}`,
+      description: null,
+      kind: 'paid',
+      status: 'active',
+      visibility: 'public',
+      currency: 'USD',
+      price_cents: 1000,
+      minimum_price_cents: null,
+      sales_start_at: null,
+      sales_end_at: null,
+      min_per_order: 1,
+      max_per_order: 10,
+      inventory_pool_id: poolId,
+      sort_order: 0,
+      requires_access_code: false,
+      access_code_hint: null,
+      created_at: new Date(),
+      updated_at: new Date(),
+    })
+    .execute();
   return ticketTypeId;
 }
 
 async function createCheckoutSession(database: Database, ticketTypeId: string): Promise<string> {
   const sessionId = `cs_load_${ulid().slice(-10)}`;
-  await database.insertInto('checkout_sessions').values({
-    id: sessionId,
-    tenant_id: TENANT_ID,
-    event_id: EVENT_ID,
-    brand_id: BRAND_ID,
-    status: 'open',
-    hold_id: `hld_${ulid()}`,
-    currency: 'USD',
-    cart: JSON.stringify({ items: [{ ticketTypeId, quantity: 1 }] }),
-    buyer: JSON.stringify({ email: 'load@example.com' }),
-    quote: JSON.stringify({ totalCents: 1000, feeCents: 0, subtotalCents: 1000, discountCents: 0, taxCents: 0 }),
-    expires_at: new Date(Date.now() + 300000),
-    idempotency_key: `ik_load_${ulid()}`,
-    success_url: null,
-    cancel_url: null,
-    order_id: null,
-    client_token: ulid(),
-    payment_intent_id: null,
-    created_at: new Date(),
-    updated_at: new Date(),
-  }).execute();
+  await database
+    .insertInto('checkout_sessions')
+    .values({
+      id: sessionId,
+      tenant_id: TENANT_ID,
+      event_id: EVENT_ID,
+      brand_id: BRAND_ID,
+      status: 'open',
+      hold_id: `hld_${ulid()}`,
+      currency: 'USD',
+      cart: JSON.stringify({ items: [{ ticketTypeId, quantity: 1 }] }),
+      buyer: JSON.stringify({ email: 'load@example.com' }),
+      quote: JSON.stringify({
+        totalCents: 1000,
+        feeCents: 0,
+        subtotalCents: 1000,
+        discountCents: 0,
+        taxCents: 0,
+      }),
+      expires_at: new Date(Date.now() + 300000),
+      idempotency_key: `ik_load_${ulid()}`,
+      success_url: null,
+      cancel_url: null,
+      order_id: null,
+      client_token: ulid(),
+      payment_intent_id: null,
+      created_at: new Date(),
+      updated_at: new Date(),
+    })
+    .execute();
   return sessionId;
 }
 
@@ -197,27 +227,36 @@ async function createOrder(): Promise<string> {
   // orders.checkout_session_id has a FK to checkout_sessions.id, so we must
   // create a real checkout session row before inserting the order.
   const sessionId = `cs_load_${ulid().slice(-10)}`;
-  await db.insertInto('checkout_sessions').values({
-    id: sessionId,
-    tenant_id: TENANT_ID,
-    event_id: EVENT_ID,
-    brand_id: BRAND_ID,
-    status: 'open',
-    hold_id: `hld_${ulid()}`,
-    currency: 'USD',
-    cart: JSON.stringify({ items: [] }),
-    buyer: JSON.stringify({ email: 'load-buyer@example.com' }),
-    quote: JSON.stringify({ totalCents: 1000, feeCents: 0, subtotalCents: 1000, discountCents: 0, taxCents: 0 }),
-    expires_at: new Date(Date.now() + 300000),
-    idempotency_key: `ik_load_${ulid()}`,
-    success_url: null,
-    cancel_url: null,
-    order_id: null,
-    client_token: ulid(),
-    payment_intent_id: null,
-    created_at: new Date(),
-    updated_at: new Date(),
-  }).execute();
+  await db
+    .insertInto('checkout_sessions')
+    .values({
+      id: sessionId,
+      tenant_id: TENANT_ID,
+      event_id: EVENT_ID,
+      brand_id: BRAND_ID,
+      status: 'open',
+      hold_id: `hld_${ulid()}`,
+      currency: 'USD',
+      cart: JSON.stringify({ items: [] }),
+      buyer: JSON.stringify({ email: 'load-buyer@example.com' }),
+      quote: JSON.stringify({
+        totalCents: 1000,
+        feeCents: 0,
+        subtotalCents: 1000,
+        discountCents: 0,
+        taxCents: 0,
+      }),
+      expires_at: new Date(Date.now() + 300000),
+      idempotency_key: `ik_load_${ulid()}`,
+      success_url: null,
+      cancel_url: null,
+      order_id: null,
+      client_token: ulid(),
+      payment_intent_id: null,
+      created_at: new Date(),
+      updated_at: new Date(),
+    })
+    .execute();
 
   const order = await orderRepo.create({
     tenantId: TENANT_ID,
@@ -300,10 +339,9 @@ function percentile(values: number[], percentileValue: number): number {
 }
 
 function expectSloAtOrBelow(metric: string, actual: number, threshold: number): void {
-  expect(
-    actual,
-    `${metric} expected <= ${threshold}ms, got ${actual.toFixed(2)}ms`,
-  ).toBeLessThanOrEqual(threshold);
+  expect(actual, `${metric} expected <= ${threshold}ms, got ${actual.toFixed(2)}ms`).toBeLessThanOrEqual(
+    threshold,
+  );
 }
 
 describeWithIntegrationDatabase('Load and concurrency harnesses', () => {
@@ -335,7 +373,10 @@ describeWithIntegrationDatabase('Load and concurrency harnesses', () => {
     await db.deleteFrom('export_job_events').where('tenant_id', '=', TENANT_ID).execute();
     await db.deleteFrom('export_jobs').where('tenant_id', '=', TENANT_ID).execute();
     await db.deleteFrom('payment_events').where('tenant_id', '=', TENANT_ID).execute();
-    await db.deleteFrom('checkout_holds').where('checkout_session_id', 'like', 'cs_load_%').execute();
+    await db
+      .deleteFrom('checkout_holds')
+      .where('checkout_session_id', 'like', 'cs_load_%')
+      .execute();
     await db.deleteFrom('checkout_sessions').where('id', 'like', 'cs_load_%').execute();
     await db.deleteFrom('ticket_types').where('event_id', '=', EVENT_ID).execute();
     await db.deleteFrom('inventory_pools').where('event_id', '=', EVENT_ID).execute();
@@ -365,7 +406,10 @@ describeWithIntegrationDatabase('Load and concurrency harnesses', () => {
       ),
     );
     const results = measuredResults.map((entry) => entry.outcome);
-    const checkoutP95 = percentile(measuredResults.map((entry) => entry.durationMs), 0.95);
+    const checkoutP95 = percentile(
+      measuredResults.map((entry) => entry.durationMs),
+      0.95,
+    );
 
     const succeeded = results.filter((r) => r.status === 'fulfilled').length;
     const failed = results.filter((r) => r.status === 'rejected').length;
@@ -423,7 +467,9 @@ describeWithIntegrationDatabase('Load and concurrency harnesses', () => {
       }
     };
 
-    const measured = await measure(() => Promise.all(Array.from({ length: BURST }, () => deliver())));
+    const measured = await measure(() =>
+      Promise.all(Array.from({ length: BURST }, () => deliver())),
+    );
     const outcomes = measured.value;
 
     const created = outcomes.filter((o) => o === 'created').length;
@@ -522,7 +568,10 @@ describeWithIntegrationDatabase('Load and concurrency harnesses', () => {
       ),
     );
     const outcomes = measuredOutcomes.map((entry) => entry.value);
-    const scanP95 = percentile(measuredOutcomes.map((entry) => entry.durationMs), 0.95);
+    const scanP95 = percentile(
+      measuredOutcomes.map((entry) => entry.durationMs),
+      0.95,
+    );
 
     const accepted = outcomes.filter(Boolean).length;
     const duplicates = outcomes.filter((v) => !v).length;
@@ -575,7 +624,8 @@ describeWithIntegrationDatabase('Load and concurrency harnesses', () => {
     // every exported attendee to it.
     const orderId = await createOrder();
 
-    const createdAttendees: { id: string; email: string; firstName: string; lastName: string }[] = [];
+    const createdAttendees: { id: string; email: string; firstName: string; lastName: string }[] =
+      [];
     for (let i = 0; i < ATTENDEE_COUNT; i++) {
       // eslint-disable-next-line no-await-in-loop -- export load setup persists deterministic attendee rows before measuring the scoped read.
       const row = await attendeeRepo.create({
@@ -623,7 +673,9 @@ describeWithIntegrationDatabase('Load and concurrency harnesses', () => {
 
     // Header + one row per attendee.
     expect(csvLines).toHaveLength(ATTENDEE_COUNT + 1);
-    expect(csvLines[0]).toBe('id,email,firstName,lastName,phone,status,eventId,orderId,checkedInAt,createdAt');
+    expect(csvLines[0]).toBe(
+      'id,email,firstName,lastName,phone,status,eventId,orderId,checkedInAt,createdAt',
+    );
 
     // Spot-check first and last seeded attendee appear in the export.
     const firstAttendee = createdAttendees[0];

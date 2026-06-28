@@ -55,7 +55,8 @@ type MarketingIntegration = {
 
 type MarketingEventName = 'view_item' | 'begin_checkout' | 'purchase';
 
-const IFRAME_SANDBOX = 'allow-scripts allow-same-origin allow-forms allow-popups allow-popups-to-escape-sandbox';
+const IFRAME_SANDBOX =
+  'allow-scripts allow-same-origin allow-forms allow-popups allow-popups-to-escape-sandbox';
 const IFRAME_ALLOW = 'payment; publickey-credentials-create *; publickey-credentials-get *';
 
 const STYLES = `
@@ -219,7 +220,9 @@ function widgetVisitorId(): string {
   try {
     const existing = window.localStorage.getItem(key);
     if (existing) return existing;
-    const generated = globalThis.crypto?.randomUUID?.() ?? `visitor_${Math.random().toString(36).slice(2)}${Date.now().toString(36)}`;
+    const generated =
+      globalThis.crypto?.randomUUID?.() ??
+      `visitor_${Math.random().toString(36).slice(2)}${Date.now().toString(36)}`;
     window.localStorage.setItem(key, generated);
     return generated;
   } catch {
@@ -241,13 +244,16 @@ function recordWidgetImpression(
     pageUrl: window.location.href || undefined,
     referrer: document.referrer || undefined,
   };
-  void fetch(`${reportingApiBase(element)}/v1/public/events/${encodeURIComponent(input.eventId)}/widget-impressions`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(body),
-    keepalive: true,
-    credentials: 'omit',
-  }).catch(() => {
+  void fetch(
+    `${reportingApiBase(element)}/v1/public/events/${encodeURIComponent(input.eventId)}/widget-impressions`,
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+      keepalive: true,
+      credentials: 'omit',
+    },
+  ).catch(() => {
     // Analytics must never block checkout rendering.
   });
 }
@@ -278,14 +284,20 @@ function ensureMarketingScript(id: string, src: string): void {
   document.head.appendChild(script);
 }
 
-function trackGa4(integration: MarketingIntegration, name: MarketingEventName, eventId: string): void {
+function trackGa4(
+  integration: MarketingIntegration,
+  name: MarketingEventName,
+  eventId: string,
+): void {
   const measurementId = marketingConfigString(integration.config, 'measurementId');
   if (!measurementId) return;
   const win = window as Window & { dataLayer?: unknown[]; gtag?: (...args: unknown[]) => void };
   win.dataLayer = win.dataLayer ?? [];
-  win.gtag = win.gtag ?? ((...args: unknown[]) => {
-    win.dataLayer?.push(args);
-  });
+  win.gtag =
+    win.gtag ??
+    ((...args: unknown[]) => {
+      win.dataLayer?.push(args);
+    });
   ensureMarketingScript(
     `tixkit-ga4-${measurementId.replace(/[^a-zA-Z0-9_-]/g, '')}`,
     `https://www.googletagmanager.com/gtag/js?id=${encodeURIComponent(measurementId)}`,
@@ -295,7 +307,11 @@ function trackGa4(integration: MarketingIntegration, name: MarketingEventName, e
   win.gtag('event', name, { event_id: eventId, items: [{ item_id: eventId }] });
 }
 
-function trackMeta(integration: MarketingIntegration, name: MarketingEventName, eventId: string): void {
+function trackMeta(
+  integration: MarketingIntegration,
+  name: MarketingEventName,
+  eventId: string,
+): void {
   const pixelId = marketingConfigString(integration.config, 'pixelId');
   if (!pixelId) return;
   const win = window as Window & { fbq?: (...args: unknown[]) => void };
@@ -311,13 +327,21 @@ function trackMeta(integration: MarketingIntegration, name: MarketingEventName, 
     ensureMarketingScript('tixkit-meta-pixel', 'https://connect.facebook.net/en_US/fbevents.js');
   }
   win.fbq('init', pixelId);
-  win.fbq('track', name === 'view_item' ? 'PageView' : name === 'begin_checkout' ? 'InitiateCheckout' : 'Purchase', {
-    content_type: 'event',
-    content_ids: [eventId],
-  });
+  win.fbq(
+    'track',
+    name === 'view_item' ? 'PageView' : name === 'begin_checkout' ? 'InitiateCheckout' : 'Purchase',
+    {
+      content_type: 'event',
+      content_ids: [eventId],
+    },
+  );
 }
 
-function trackGeneric(integration: MarketingIntegration, name: MarketingEventName, eventId: string): void {
+function trackGeneric(
+  integration: MarketingIntegration,
+  name: MarketingEventName,
+  eventId: string,
+): void {
   const pixelUrl = marketingConfigString(integration.config, 'pixelUrl');
   if (!pixelUrl) return;
   try {
@@ -333,25 +357,37 @@ function trackGeneric(integration: MarketingIntegration, name: MarketingEventNam
   }
 }
 
-function fetchMarketingIntegrations(element: HTMLElement, eventId: string): Promise<MarketingIntegration[]> {
+function fetchMarketingIntegrations(
+  element: HTMLElement,
+  eventId: string,
+): Promise<MarketingIntegration[]> {
   if (!eventId || typeof fetch !== 'function') return Promise.resolve([]);
   const cacheKey = `${reportingApiBase(element)}:${eventId}`;
   const existing = marketingCache.get(cacheKey);
   if (existing) return existing;
-  const request = fetch(`${reportingApiBase(element)}/v1/public/events/${encodeURIComponent(eventId)}/marketing-integrations`, {
-    credentials: 'omit',
-  })
+  const request = fetch(
+    `${reportingApiBase(element)}/v1/public/events/${encodeURIComponent(eventId)}/marketing-integrations`,
+    {
+      credentials: 'omit',
+    },
+  )
     .then(async (response) => {
       if (!response.ok) return [];
-      const body = await response.json() as { items?: MarketingIntegration[] } | MarketingIntegration[];
-      return Array.isArray(body) ? body : body.items ?? [];
+      const body = (await response.json()) as
+        | { items?: MarketingIntegration[] }
+        | MarketingIntegration[];
+      return Array.isArray(body) ? body : (body.items ?? []);
     })
     .catch(() => []);
   marketingCache.set(cacheKey, request);
   return request;
 }
 
-function trackWidgetMarketingEvent(element: HTMLElement, eventId: string, name: MarketingEventName): void {
+function trackWidgetMarketingEvent(
+  element: HTMLElement,
+  eventId: string,
+  name: MarketingEventName,
+): void {
   void fetchMarketingIntegrations(element, eventId).then((integrations) => {
     for (const integration of integrations) {
       if (integration.status !== 'active' || !marketingConsentGranted(integration)) continue;
@@ -521,7 +557,12 @@ class TixkitWidget extends HTMLElement {
         this.config.event,
         name === 'checkout_started' ? 'begin_checkout' : 'purchase',
       );
-      dispatchLifecycle(this, name, this.config.event, checkoutMessageDetail(this.config.event, data));
+      dispatchLifecycle(
+        this,
+        name,
+        this.config.event,
+        checkoutMessageDetail(this.config.event, data),
+      );
     };
     window.addEventListener('message', this.messageHandler);
   }
@@ -952,7 +993,9 @@ class TixkitButton extends HTMLElement {
   private handleClick(): void {
     if (!this.eventId) {
       this.dispatchEvent(
-        new CustomEvent('error', { detail: { message: 'Missing event attribute', event: '', eventId: '' } }),
+        new CustomEvent('error', {
+          detail: { message: 'Missing event attribute', event: '', eventId: '' },
+        }),
       );
       return;
     }

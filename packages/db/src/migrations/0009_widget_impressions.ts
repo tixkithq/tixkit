@@ -33,7 +33,9 @@ export const WidgetImpressionsMigration: Migration = {
       .addColumn('referrer', varchar(2048))
       .addColumn('created_at', timestampType(), (col) => col.notNull().defaultTo(nowDefault()))
       .addForeignKeyConstraint('widget_impressions_tenant_fk', ['tenant_id'], 'tenants', ['id'])
-      .addForeignKeyConstraint('widget_impressions_org_fk', ['organization_id'], 'organizations', ['id'])
+      .addForeignKeyConstraint('widget_impressions_org_fk', ['organization_id'], 'organizations', [
+        'id',
+      ])
       .addForeignKeyConstraint('widget_impressions_brand_fk', ['brand_id'], 'brands', ['id'])
       .addForeignKeyConstraint('widget_impressions_event_fk', ['event_id'], 'events', ['id'])
       .execute();
@@ -44,8 +46,16 @@ export const WidgetImpressionsMigration: Migration = {
       .columns(['event_id', 'visitor_hash', 'impression_date'])
       .unique()
       .execute();
-    await db.schema.createIndex('idx_widget_impressions_event_created').on('widget_impressions').columns(['event_id', 'created_at']).execute();
-    await db.schema.createIndex('idx_widget_impressions_tenant').on('widget_impressions').columns(['tenant_id']).execute();
+    await db.schema
+      .createIndex('idx_widget_impressions_event_created')
+      .on('widget_impressions')
+      .columns(['event_id', 'created_at'])
+      .execute();
+    await db.schema
+      .createIndex('idx_widget_impressions_tenant')
+      .on('widget_impressions')
+      .columns(['tenant_id'])
+      .execute();
   },
 
   async down(db): Promise<void> {

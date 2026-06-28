@@ -3,7 +3,10 @@ import { createDb, type Database } from '@tixkit/db';
 import { runMigrations } from '@tixkit/db/migrate';
 import { OrderRepository, PaymentIntentRepository, RefundRepository } from '@tixkit/db';
 import { ulid } from 'ulid';
-import { reconcilePaymentActivity, reconcileRefundActivity } from '../activities/payment-reconciliation.js';
+import {
+  reconcilePaymentActivity,
+  reconcileRefundActivity,
+} from '../activities/payment-reconciliation.js';
 import { processRefundActivity, updateLedgerActivity } from '../activities/refund.js';
 
 type IntegrationDriver = 'postgres' | 'mysql';
@@ -19,8 +22,10 @@ type SeedIds = {
   providerIntentId: string;
 };
 
-const driver: IntegrationDriver = process.env.DB_INTEGRATION_DRIVER === 'mysql' ? 'mysql' : 'postgres';
-const databaseUrl = driver === 'mysql' ? process.env.DATABASE_URL_MYSQL ?? '' : process.env.DATABASE_URL ?? '';
+const driver: IntegrationDriver =
+  process.env.DB_INTEGRATION_DRIVER === 'mysql' ? 'mysql' : 'postgres';
+const databaseUrl =
+  driver === 'mysql' ? (process.env.DATABASE_URL_MYSQL ?? '') : (process.env.DATABASE_URL ?? '');
 const describeWithDatabase = databaseUrl ? describe : describe.skip;
 
 function idSuffix(): string {
@@ -48,126 +53,147 @@ function parseMetadata(value: unknown): Record<string, unknown> {
   return JSON.parse(value) as Record<string, unknown>;
 }
 
-async function seedPaidOrder(db: Database, input: { status?: string; totalCents?: number } = {}): Promise<SeedIds> {
+async function seedPaidOrder(
+  db: Database,
+  input: { status?: string; totalCents?: number } = {},
+): Promise<SeedIds> {
   const ids = seedIds();
   const now = new Date();
   const totalCents = input.totalCents ?? 10_000;
   const orderStatus = input.status ?? 'paid';
 
   await db.transaction().execute(async (trx) => {
-    await trx.insertInto('tenants').values({
-      id: ids.tenantId,
-      name: `MySQL parity ${ids.suffix}`,
-      status: 'active',
-      plan: 'test',
-      created_at: now,
-      updated_at: now,
-    }).execute();
+    await trx
+      .insertInto('tenants')
+      .values({
+        id: ids.tenantId,
+        name: `MySQL parity ${ids.suffix}`,
+        status: 'active',
+        plan: 'test',
+        created_at: now,
+        updated_at: now,
+      })
+      .execute();
 
-    await trx.insertInto('organizations').values({
-      id: ids.organizationId,
-      tenant_id: ids.tenantId,
-      name: `MySQL parity ${ids.suffix}`,
-      slug: `mysql-parity-${ids.suffix}`,
-      clerk_organization_id: null,
-      status: 'active',
-      created_at: now,
-      updated_at: now,
-    }).execute();
+    await trx
+      .insertInto('organizations')
+      .values({
+        id: ids.organizationId,
+        tenant_id: ids.tenantId,
+        name: `MySQL parity ${ids.suffix}`,
+        slug: `mysql-parity-${ids.suffix}`,
+        clerk_organization_id: null,
+        status: 'active',
+        created_at: now,
+        updated_at: now,
+      })
+      .execute();
 
-    await trx.insertInto('brands').values({
-      id: ids.brandId,
-      tenant_id: ids.tenantId,
-      organization_id: ids.organizationId,
-      name: `MySQL parity ${ids.suffix}`,
-      slug: `mysql-parity-${ids.suffix}`,
-      status: 'active',
-      theme: JSON.stringify({}),
-      legal_urls: JSON.stringify({}),
-      white_label: false,
-      payment_account_id: null,
-      created_at: now,
-      updated_at: now,
-    }).execute();
+    await trx
+      .insertInto('brands')
+      .values({
+        id: ids.brandId,
+        tenant_id: ids.tenantId,
+        organization_id: ids.organizationId,
+        name: `MySQL parity ${ids.suffix}`,
+        slug: `mysql-parity-${ids.suffix}`,
+        status: 'active',
+        theme: JSON.stringify({}),
+        legal_urls: JSON.stringify({}),
+        white_label: false,
+        payment_account_id: null,
+        created_at: now,
+        updated_at: now,
+      })
+      .execute();
 
-    await trx.insertInto('events').values({
-      id: ids.eventId,
-      tenant_id: ids.tenantId,
-      organization_id: ids.organizationId,
-      brand_id: ids.brandId,
-      slug: `mysql-parity-${ids.suffix}`,
-      title: 'MySQL parity event',
-      description: null,
-      status: 'published',
-      currency: 'USD',
-      timezone: 'UTC',
-      starts_at: new Date(now.getTime() + 86_400_000),
-      ends_at: null,
-      visibility: 'public',
-      seo: JSON.stringify({}),
-      capacity: null,
-      cover_image_url: null,
-      external_url: null,
-      created_at: now,
-      updated_at: now,
-    }).execute();
+    await trx
+      .insertInto('events')
+      .values({
+        id: ids.eventId,
+        tenant_id: ids.tenantId,
+        organization_id: ids.organizationId,
+        brand_id: ids.brandId,
+        slug: `mysql-parity-${ids.suffix}`,
+        title: 'MySQL parity event',
+        description: null,
+        status: 'published',
+        currency: 'USD',
+        timezone: 'UTC',
+        starts_at: new Date(now.getTime() + 86_400_000),
+        ends_at: null,
+        visibility: 'public',
+        seo: JSON.stringify({}),
+        capacity: null,
+        cover_image_url: null,
+        external_url: null,
+        created_at: now,
+        updated_at: now,
+      })
+      .execute();
 
-    await trx.insertInto('checkout_sessions').values({
-      id: ids.checkoutSessionId,
-      tenant_id: ids.tenantId,
-      event_id: ids.eventId,
-      brand_id: ids.brandId,
-      status: 'completed',
-      hold_id: `hld_mp_${ids.suffix}`,
-      currency: 'USD',
-      cart: JSON.stringify({ items: [] }),
-      buyer: JSON.stringify({ email: `buyer-${ids.suffix}@example.com` }),
-      quote: JSON.stringify({
-        subtotalCents: totalCents,
-        discountCents: 0,
-        taxCents: 700,
-        feeCents: 300,
-        totalCents,
-      }),
-      expires_at: new Date(now.getTime() + 300_000),
-      idempotency_key: `ik_mp_${ids.suffix}`,
-      success_url: null,
-      cancel_url: null,
-      order_id: null,
-      client_token: `tok_mp_${ids.suffix}`,
-      payment_intent_id: null,
-      created_at: now,
-      updated_at: now,
-    }).execute();
+    await trx
+      .insertInto('checkout_sessions')
+      .values({
+        id: ids.checkoutSessionId,
+        tenant_id: ids.tenantId,
+        event_id: ids.eventId,
+        brand_id: ids.brandId,
+        status: 'completed',
+        hold_id: `hld_mp_${ids.suffix}`,
+        currency: 'USD',
+        cart: JSON.stringify({ items: [] }),
+        buyer: JSON.stringify({ email: `buyer-${ids.suffix}@example.com` }),
+        quote: JSON.stringify({
+          subtotalCents: totalCents,
+          discountCents: 0,
+          taxCents: 700,
+          feeCents: 300,
+          totalCents,
+        }),
+        expires_at: new Date(now.getTime() + 300_000),
+        idempotency_key: `ik_mp_${ids.suffix}`,
+        success_url: null,
+        cancel_url: null,
+        order_id: null,
+        client_token: `tok_mp_${ids.suffix}`,
+        payment_intent_id: null,
+        created_at: now,
+        updated_at: now,
+      })
+      .execute();
 
-    await trx.insertInto('orders').values({
-      id: ids.orderId,
-      tenant_id: ids.tenantId,
-      organization_id: ids.organizationId,
-      brand_id: ids.brandId,
-      event_id: ids.eventId,
-      checkout_session_id: ids.checkoutSessionId,
-      order_number: `TK-MP-${ids.suffix}`,
-      status: orderStatus,
-      currency: 'USD',
-      subtotal_cents: totalCents - 1_000,
-      discount_cents: 0,
-      tax_cents: 700,
-      fee_cents: 300,
-      total_cents: totalCents,
-      refunded_cents: 0,
-      buyer_email: `buyer-${ids.suffix}@example.com`,
-      buyer_first_name: 'MySQL',
-      buyer_last_name: 'Parity',
-      buyer_phone: null,
-      payment_intent_id: null,
-      payment_provider: 'stripe',
-      paid_at: orderStatus === 'paid' ? now : null,
-      refunded_at: null,
-      cancelled_at: null,
-      created_at: now,
-      updated_at: now,
-    }).execute();
+    await trx
+      .insertInto('orders')
+      .values({
+        id: ids.orderId,
+        tenant_id: ids.tenantId,
+        organization_id: ids.organizationId,
+        brand_id: ids.brandId,
+        event_id: ids.eventId,
+        checkout_session_id: ids.checkoutSessionId,
+        order_number: `TK-MP-${ids.suffix}`,
+        status: orderStatus,
+        currency: 'USD',
+        subtotal_cents: totalCents - 1_000,
+        discount_cents: 0,
+        tax_cents: 700,
+        fee_cents: 300,
+        total_cents: totalCents,
+        refunded_cents: 0,
+        buyer_email: `buyer-${ids.suffix}@example.com`,
+        buyer_first_name: 'MySQL',
+        buyer_last_name: 'Parity',
+        buyer_phone: null,
+        payment_intent_id: null,
+        payment_provider: 'stripe',
+        paid_at: orderStatus === 'paid' ? now : null,
+        refunded_at: null,
+        cancelled_at: null,
+        created_at: now,
+        updated_at: now,
+      })
+      .execute();
   });
 
   const paymentIntent = await new PaymentIntentRepository(db).create({
@@ -181,7 +207,11 @@ async function seedPaidOrder(db: Database, input: { status?: string; totalCents?
     orderId: ids.orderId,
   });
 
-  await db.updateTable('orders').set({ payment_intent_id: paymentIntent.id }).where('id', '=', ids.orderId).execute();
+  await db
+    .updateTable('orders')
+    .set({ payment_intent_id: paymentIntent.id })
+    .where('id', '=', ids.orderId)
+    .execute();
   await db
     .updateTable('checkout_sessions')
     .set({ payment_intent_id: paymentIntent.id, order_id: ids.orderId })
@@ -192,7 +222,11 @@ async function seedPaidOrder(db: Database, input: { status?: string; totalCents?
 }
 
 async function cleanupTenant(db: Database, tenantId: string): Promise<void> {
-  const orders = await db.selectFrom('orders').select('id').where('tenant_id', '=', tenantId).execute();
+  const orders = await db
+    .selectFrom('orders')
+    .select('id')
+    .where('tenant_id', '=', tenantId)
+    .execute();
   const orderIds = orders.map((order) => order.id);
 
   if (orderIds.length > 0) {
@@ -260,11 +294,19 @@ describeWithDatabase(`workflow payment/refund Tier 1 parity (real ${driver})`, (
       data: { id: ids.providerIntentId, status: 'succeeded' },
     });
 
-    expect(firstResult).toMatchObject({ ok: true, value: { orderId: ids.orderId, status: 'paid' } });
-    expect(replayResult).toMatchObject({ ok: true, value: { orderId: ids.orderId, status: 'succeeded' } });
+    expect(firstResult).toMatchObject({
+      ok: true,
+      value: { orderId: ids.orderId, status: 'paid' },
+    });
+    expect(replayResult).toMatchObject({
+      ok: true,
+      value: { orderId: ids.orderId, status: 'succeeded' },
+    });
 
     const order = await new OrderRepository(db).findById(ids.orderId);
-    const paymentIntent = await new PaymentIntentRepository(db).findByProviderIntentId(ids.providerIntentId);
+    const paymentIntent = await new PaymentIntentRepository(db).findByProviderIntentId(
+      ids.providerIntentId,
+    );
     const timeline = await new OrderRepository(db).getTimeline(ids.orderId);
 
     expect(order?.status).toBe('paid');
@@ -288,8 +330,14 @@ describeWithDatabase(`workflow payment/refund Tier 1 parity (real ${driver})`, (
       data: { id: providerRefundId, payment_intent: ids.providerIntentId, amount: 3_000 },
     });
 
-    expect(firstResult).toMatchObject({ ok: true, value: { orderId: ids.orderId, status: 'partially_refunded' } });
-    expect(replayResult).toMatchObject({ ok: true, value: { orderId: ids.orderId, status: 'partially_refunded' } });
+    expect(firstResult).toMatchObject({
+      ok: true,
+      value: { orderId: ids.orderId, status: 'partially_refunded' },
+    });
+    expect(replayResult).toMatchObject({
+      ok: true,
+      value: { orderId: ids.orderId, status: 'partially_refunded' },
+    });
 
     const order = await new OrderRepository(db).findById(ids.orderId);
     const refunds = await new RefundRepository(db).findByOrder(ids.orderId);

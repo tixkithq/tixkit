@@ -1,10 +1,7 @@
 import type { APIResponse, APIRequestContext, Page, TestInfo } from '@playwright/test';
 import { expectNoAxeViolations } from './helpers/axe';
 import { apiBaseUrl, checkoutBaseUrl } from './helpers/env';
-import {
-  readCheckoutOrderState,
-  seedTicketVariantCheckoutEvent,
-} from './helpers/seed';
+import { readCheckoutOrderState, seedTicketVariantCheckoutEvent } from './helpers/seed';
 import { expect, requireReachable, test } from './fixtures/validation-test';
 
 type CheckoutSessionResponse = {
@@ -104,7 +101,9 @@ test.describe('checkout ticket variant workflows', () => {
     const directIds = new Set(directAvailability.map((item) => item.ticketTypeId).filter(Boolean));
     expect(directIds.has(seeded.tickets.hidden.id)).toBe(true);
     expect(directIds.has(seeded.tickets.locked.id)).toBe(true);
-    expect(directAvailability.find((item) => item.ticketTypeId === seeded.tickets.locked.id)).toMatchObject({
+    expect(
+      directAvailability.find((item) => item.ticketTypeId === seeded.tickets.locked.id),
+    ).toMatchObject({
       requiresAccessCode: true,
       accessCodeHint: 'Use the invited buyer code',
     });
@@ -135,13 +134,16 @@ test.describe('checkout ticket variant workflows', () => {
     expect(lockedWithoutCode.status()).toBe(403);
     expect(JSON.stringify(await lockedWithoutCode.json())).toContain('ACCESS_CODE_REQUIRED');
 
-    const invalidCode = await request.post(`${apiBaseUrl}/v1/public/events/${seeded.event.id}/access-code`, {
-      data: {
-        ticketTypeIds: [seeded.tickets.locked.id],
-        accessCode: 'WRONG-CODE',
-        buyerEmail: `locked+${suffix}@example.com`,
+    const invalidCode = await request.post(
+      `${apiBaseUrl}/v1/public/events/${seeded.event.id}/access-code`,
+      {
+        data: {
+          ticketTypeIds: [seeded.tickets.locked.id],
+          accessCode: 'WRONG-CODE',
+          buyerEmail: `locked+${suffix}@example.com`,
+        },
       },
-    });
+    );
     expect(invalidCode.status()).toBe(400);
 
     const validCode = await expectJsonResponse(
@@ -181,7 +183,9 @@ test.describe('checkout ticket variant workflows', () => {
       },
     });
     expect(belowMinimumDonation.status()).toBe(400);
-    expect(JSON.stringify(await belowMinimumDonation.json())).toContain('requires at least 500 cents');
+    expect(JSON.stringify(await belowMinimumDonation.json())).toContain(
+      'requires at least 500 cents',
+    );
 
     const donationSession = await createCheckoutSession(request, {
       suffix,
@@ -191,7 +195,9 @@ test.describe('checkout ticket variant workflows', () => {
     });
     expect(donationSession.quote).toMatchObject({ totalCents: 500, currency: 'USD' });
     await confirmCheckoutSession(request, { suffix, label: 'donation', session: donationSession });
-    expect(await readCheckoutOrderState(donationSession.id, seeded.pools.donation.id)).toMatchObject({
+    expect(
+      await readCheckoutOrderState(donationSession.id, seeded.pools.donation.id),
+    ).toMatchObject({
       session: { status: 'completed' },
       order: { status: 'paid', totalCents: 500 },
       holds: [{ ticketTypeId: seeded.tickets.donation.id, status: 'converted', quantity: 1 }],
@@ -242,15 +248,31 @@ test.describe('checkout ticket variant workflows', () => {
     await expect(page.getByText(seeded.tickets.hidden.name)).toHaveCount(0);
     await expect(page.getByText(seeded.tickets.locked.name)).toHaveCount(0);
 
-    const soldOutQuantity = page.getByRole('group', { name: `${seeded.tickets.soldOut.name} quantity` });
-    await expect(soldOutQuantity.getByRole('button', { name: `Increase ${seeded.tickets.soldOut.name} quantity` })).toBeDisabled();
+    const soldOutQuantity = page.getByRole('group', {
+      name: `${seeded.tickets.soldOut.name} quantity`,
+    });
+    await expect(
+      soldOutQuantity.getByRole('button', {
+        name: `Increase ${seeded.tickets.soldOut.name} quantity`,
+      }),
+    ).toBeDisabled();
     await expect(page.getByText('Sold out', { exact: true })).toBeVisible();
 
-    const minimumPairQuantity = page.getByRole('group', { name: `${seeded.tickets.minimumPair.name} quantity` });
-    await minimumPairQuantity.getByRole('button', { name: `Increase ${seeded.tickets.minimumPair.name} quantity` }).click();
+    const minimumPairQuantity = page.getByRole('group', {
+      name: `${seeded.tickets.minimumPair.name} quantity`,
+    });
+    await minimumPairQuantity
+      .getByRole('button', { name: `Increase ${seeded.tickets.minimumPair.name} quantity` })
+      .click();
     await expect(minimumPairQuantity.locator('output')).toHaveText('2');
-    await expect(minimumPairQuantity.getByRole('button', { name: `Increase ${seeded.tickets.minimumPair.name} quantity` })).toBeDisabled();
-    await minimumPairQuantity.getByRole('button', { name: `Decrease ${seeded.tickets.minimumPair.name} quantity` }).click();
+    await expect(
+      minimumPairQuantity.getByRole('button', {
+        name: `Increase ${seeded.tickets.minimumPair.name} quantity`,
+      }),
+    ).toBeDisabled();
+    await minimumPairQuantity
+      .getByRole('button', { name: `Decrease ${seeded.tickets.minimumPair.name} quantity` })
+      .click();
     await expect(minimumPairQuantity.locator('output')).toHaveText('0');
 
     await page.getByLabel(`Donation amount for ${seeded.tickets.donation.name}`).fill('4.99');
@@ -260,10 +282,18 @@ test.describe('checkout ticket variant workflows', () => {
     await attachScreenshot(page, testInfo, 'checkout-ticket-variants-public');
     await expectNoAxeViolations(page, testInfo);
 
-    const sharedAQuantity = page.getByRole('group', { name: `${seeded.tickets.sharedA.name} quantity` });
-    const sharedBQuantity = page.getByRole('group', { name: `${seeded.tickets.sharedB.name} quantity` });
-    await sharedAQuantity.getByRole('button', { name: `Increase ${seeded.tickets.sharedA.name} quantity` }).click();
-    await sharedBQuantity.getByRole('button', { name: `Increase ${seeded.tickets.sharedB.name} quantity` }).click();
+    const sharedAQuantity = page.getByRole('group', {
+      name: `${seeded.tickets.sharedA.name} quantity`,
+    });
+    const sharedBQuantity = page.getByRole('group', {
+      name: `${seeded.tickets.sharedB.name} quantity`,
+    });
+    await sharedAQuantity
+      .getByRole('button', { name: `Increase ${seeded.tickets.sharedA.name} quantity` })
+      .click();
+    await sharedBQuantity
+      .getByRole('button', { name: `Increase ${seeded.tickets.sharedB.name} quantity` })
+      .click();
     await page.getByLabel('Email').fill(`variants-shared+${suffix}@example.com`);
     await page.getByLabel('First name').fill('Shared');
     await page.getByLabel('Last name').fill('Buyer');
@@ -280,16 +310,28 @@ test.describe('checkout ticket variant workflows', () => {
     await expect(page.getByText('Access code required')).toBeVisible();
     await expect(page.getByText('Use the invited buyer code')).toBeVisible();
 
-    const lockedQuantity = page.getByRole('group', { name: `${seeded.tickets.locked.name} quantity` });
-    await expect(lockedQuantity.getByRole('button', { name: `Increase ${seeded.tickets.locked.name} quantity` })).toBeDisabled();
+    const lockedQuantity = page.getByRole('group', {
+      name: `${seeded.tickets.locked.name} quantity`,
+    });
+    await expect(
+      lockedQuantity.getByRole('button', {
+        name: `Increase ${seeded.tickets.locked.name} quantity`,
+      }),
+    ).toBeDisabled();
     await page.getByLabel('Access code').fill(seeded.accessCode);
     await page.getByRole('button', { name: 'Apply' }).first().click();
     await expect(page.getByText('Access code verified')).toBeVisible();
-    await lockedQuantity.getByRole('button', { name: `Increase ${seeded.tickets.locked.name} quantity` }).click();
+    await lockedQuantity
+      .getByRole('button', { name: `Increase ${seeded.tickets.locked.name} quantity` })
+      .click();
     await expect(lockedQuantity.locator('output')).toHaveText('1');
 
-    const hiddenQuantity = page.getByRole('group', { name: `${seeded.tickets.hidden.name} quantity` });
-    await hiddenQuantity.getByRole('button', { name: `Increase ${seeded.tickets.hidden.name} quantity` }).click();
+    const hiddenQuantity = page.getByRole('group', {
+      name: `${seeded.tickets.hidden.name} quantity`,
+    });
+    await hiddenQuantity
+      .getByRole('button', { name: `Increase ${seeded.tickets.hidden.name} quantity` })
+      .click();
     await expect(hiddenQuantity.locator('output')).toHaveText('1');
     await page.getByLabel('Email').fill(`variants-ui+${suffix}@example.com`);
     await page.getByLabel('First name').fill('Variant');

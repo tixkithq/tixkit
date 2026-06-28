@@ -110,7 +110,10 @@ function constantTimeEquals(actual: string, expected: string): boolean {
   return timingSafeEqual(actualHash, expectedHash);
 }
 
-export async function refreshInventoryHoldGauge(metrics: TixkitMetrics, db: Database): Promise<void> {
+export async function refreshInventoryHoldGauge(
+  metrics: TixkitMetrics,
+  db: Database,
+): Promise<void> {
   const rows = await db
     .selectFrom('checkout_holds')
     .select(['quantity'])
@@ -123,7 +126,11 @@ export async function refreshInventoryHoldGauge(metrics: TixkitMetrics, db: Data
   );
 }
 
-function finishRequestObservability(metrics: TixkitMetrics, request: FastifyRequest, reply: FastifyReply): void {
+function finishRequestObservability(
+  metrics: TixkitMetrics,
+  request: FastifyRequest,
+  reply: FastifyReply,
+): void {
   const state = request.observability;
   if (!state) return;
 

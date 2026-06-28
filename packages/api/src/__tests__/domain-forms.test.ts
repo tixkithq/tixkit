@@ -63,29 +63,39 @@ describe('validateAnswers', () => {
   });
 
   it('validates select option membership', () => {
-    const questions = [makeQuestion({ id: 'q_1', type: 'select', options: ['A', 'B'], required: true })];
+    const questions = [
+      makeQuestion({ id: 'q_1', type: 'select', options: ['A', 'B'], required: true }),
+    ];
     expect(validateAnswers(questions, { q_1: 'C' }).valid).toBe(false);
     expect(validateAnswers(questions, { q_1: 'A' }).valid).toBe(true);
   });
 
   it('rejects select object answers', () => {
-    const questions = [makeQuestion({ id: 'q_1', type: 'select', options: ['A', 'B'], required: true })];
+    const questions = [
+      makeQuestion({ id: 'q_1', type: 'select', options: ['A', 'B'], required: true }),
+    ];
     expect(validateAnswers(questions, { q_1: { value: 'A' } }).valid).toBe(false);
   });
 
   it('validates multiselect option membership', () => {
-    const questions = [makeQuestion({ id: 'q_1', type: 'multiselect', options: ['A', 'B', 'C'], required: true })];
+    const questions = [
+      makeQuestion({ id: 'q_1', type: 'multiselect', options: ['A', 'B', 'C'], required: true }),
+    ];
     expect(validateAnswers(questions, { q_1: ['A', 'D'] }).valid).toBe(false);
     expect(validateAnswers(questions, { q_1: ['A', 'B'] }).valid).toBe(true);
   });
 
   it('rejects multiselect string answers', () => {
-    const questions = [makeQuestion({ id: 'q_1', type: 'multiselect', options: ['A', 'B', 'C'], required: true })];
+    const questions = [
+      makeQuestion({ id: 'q_1', type: 'multiselect', options: ['A', 'B', 'C'], required: true }),
+    ];
     expect(validateAnswers(questions, { q_1: 'A' }).valid).toBe(false);
   });
 
   it('validates consent/waiver fields require true', () => {
-    const questions = [makeQuestion({ id: 'q_1', type: 'waiver', isConsentField: true, required: true })];
+    const questions = [
+      makeQuestion({ id: 'q_1', type: 'waiver', isConsentField: true, required: true }),
+    ];
     expect(validateAnswers(questions, { q_1: false }).valid).toBe(false);
     expect(validateAnswers(questions, { q_1: true }).valid).toBe(true);
   });
@@ -112,14 +122,22 @@ describe('validateAnswers', () => {
   });
 
   it('validates regex pattern', () => {
-    const questions = [makeQuestion({ id: 'q_1', type: 'text', validationPattern: '^\\d{4}$', required: true })];
+    const questions = [
+      makeQuestion({ id: 'q_1', type: 'text', validationPattern: '^\\d{4}$', required: true }),
+    ];
     expect(validateAnswers(questions, { q_1: 'abc' }).valid).toBe(false);
     expect(validateAnswers(questions, { q_1: '1234' }).valid).toBe(true);
   });
 
   it('skips required conditional questions when the condition is not met', () => {
     const questions = [
-      makeQuestion({ id: 'q_parent', label: 'Bring guest?', type: 'select', options: ['yes', 'no'], required: true }),
+      makeQuestion({
+        id: 'q_parent',
+        label: 'Bring guest?',
+        type: 'select',
+        options: ['yes', 'no'],
+        required: true,
+      }),
       makeQuestion({
         id: 'q_guest',
         label: 'Guest name',
@@ -168,12 +186,16 @@ describe('validateAnswers', () => {
 
 describe('validateQuestionDefinition', () => {
   it('requires options for select and multiselect questions', () => {
-    expect(validateQuestionDefinition({ type: 'select' })).toContain('select questions require at least one option');
+    expect(validateQuestionDefinition({ type: 'select' })).toContain(
+      'select questions require at least one option',
+    );
     expect(validateQuestionDefinition({ type: 'multiselect', options: ['A'] })).toEqual([]);
   });
 
   it('rejects options on non-option question types', () => {
-    expect(validateQuestionDefinition({ type: 'text', options: ['A'] })).toContain('text questions cannot define selectable options');
+    expect(validateQuestionDefinition({ type: 'text', options: ['A'] })).toContain(
+      'text questions cannot define selectable options',
+    );
   });
 
   it('rejects empty and duplicate options', () => {

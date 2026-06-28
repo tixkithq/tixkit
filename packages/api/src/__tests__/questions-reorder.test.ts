@@ -68,7 +68,9 @@ function createQuestionReorderDb(rows: QuestionRow[], failOnQuestionId?: string)
       orderBy: () => query,
       async executeTakeFirst() {
         if (table !== 'events') return undefined;
-        return whereCalls.some((call) => call[0] === 'id' && call[2] === event.id) ? event : undefined;
+        return whereCalls.some((call) => call[0] === 'id' && call[2] === event.id)
+          ? event
+          : undefined;
       },
       async execute() {
         if (table !== 'questions') return [];
@@ -177,7 +179,9 @@ describe('question reorder route', () => {
     });
 
     expect(res.statusCode).toBe(200);
-    expect(res.json().items.map((item: { id: string; sortOrder: number }) => [item.id, item.sortOrder])).toEqual([
+    expect(
+      res.json().items.map((item: { id: string; sortOrder: number }) => [item.id, item.sortOrder]),
+    ).toEqual([
       ['q_second', 0],
       ['q_first', 1],
     ]);
@@ -191,7 +195,9 @@ describe('question reorder route', () => {
 
   it('rolls back all sort-order changes if an update fails mid-transaction', async () => {
     const rows = [question('q_first', 0), question('q_second', 1)];
-    const app = await buildQuestionApp(createQuestionReorderDb(rows, 'q_second') as unknown as Database);
+    const app = await buildQuestionApp(
+      createQuestionReorderDb(rows, 'q_second') as unknown as Database,
+    );
 
     const res = await app.inject({
       method: 'POST',

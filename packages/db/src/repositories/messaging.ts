@@ -33,7 +33,11 @@ export class NotificationTemplateRepository extends BaseRepository {
   }
 
   async findById(id: string) {
-    return this.db.selectFrom('notification_templates').selectAll().where('id', '=', id).executeTakeFirst();
+    return this.db
+      .selectFrom('notification_templates')
+      .selectAll()
+      .where('id', '=', id)
+      .executeTakeFirst();
   }
 
   async findByKey(tenantId: string, key: string) {
@@ -91,7 +95,11 @@ export class NotificationTemplateVersionRepository extends BaseRepository {
   }
 
   async findById(id: string) {
-    return this.db.selectFrom('notification_template_versions').selectAll().where('id', '=', id).executeTakeFirst();
+    return this.db
+      .selectFrom('notification_template_versions')
+      .selectAll()
+      .where('id', '=', id)
+      .executeTakeFirst();
   }
 
   async findByTemplate(templateId: string) {
@@ -149,7 +157,11 @@ export class EmailProviderRouteRepository extends BaseRepository {
   }
 
   async findById(id: string) {
-    return this.db.selectFrom('email_provider_routes').selectAll().where('id', '=', id).executeTakeFirst();
+    return this.db
+      .selectFrom('email_provider_routes')
+      .selectAll()
+      .where('id', '=', id)
+      .executeTakeFirst();
   }
 
   async findByBrand(brandId: string) {
@@ -363,7 +375,6 @@ export class EmailDeliveryRepository extends BaseRepository {
   }
 }
 
-
 export class EmailProviderEventRepository extends BaseRepository {
   async findByProviderEventId(provider: string, providerEventId: string) {
     return this.db
@@ -412,6 +423,7 @@ export class EmailProviderEventRepository extends BaseRepository {
     );
   }
 }
+
 export class EmailSuppressionRepository extends BaseRepository {
   async findByEmail(tenantId: string, email: string) {
     return this.db
@@ -444,8 +456,6 @@ export class EmailSuppressionRepository extends BaseRepository {
       id,
     );
   }
-}
-
 
   async findOrCreate(input: {
     tenantId: string;
@@ -458,6 +468,8 @@ export class EmailSuppressionRepository extends BaseRepository {
     if (existing) return existing;
     return this.create(input);
   }
+}
+
 export class SmsSenderIdentityRepository extends BaseRepository {
   async create(input: {
     tenantId: string;
@@ -489,7 +501,11 @@ export class SmsSenderIdentityRepository extends BaseRepository {
   }
 
   async findById(id: string) {
-    return this.db.selectFrom('sms_sender_identities').selectAll().where('id', '=', id).executeTakeFirst();
+    return this.db
+      .selectFrom('sms_sender_identities')
+      .selectAll()
+      .where('id', '=', id)
+      .executeTakeFirst();
   }
 
   async findVerifiedByBrand(brandId: string) {
@@ -541,7 +557,11 @@ export class SmsProviderRouteRepository extends BaseRepository {
   }
 
   async findById(id: string) {
-    return this.db.selectFrom('sms_provider_routes').selectAll().where('id', '=', id).executeTakeFirst();
+    return this.db
+      .selectFrom('sms_provider_routes')
+      .selectAll()
+      .where('id', '=', id)
+      .executeTakeFirst();
   }
 
   async findActiveByBrand(brandId: string) {
@@ -550,10 +570,10 @@ export class SmsProviderRouteRepository extends BaseRepository {
       .selectAll()
       .where('brand_id', '=', brandId)
       .where('status', '=', 'active')
+      .where('smoke_send_verified', '=', true)
       .execute();
   }
 }
-      .where('smoke_send_verified', '=', true)
 
 export class SmsJobRepository extends BaseRepository {
   async create(input: {
@@ -654,7 +674,10 @@ export class SmsDeliveryRepository extends BaseRepository {
         status: input.status,
         attempted_providers: JSON.stringify(input.attemptedProviders),
         accepted_provider: input.acceptedProvider ?? null,
-        sent_at: input.status === 'accepted' || input.status === 'queued' || input.status === 'sent' ? now : null,
+        sent_at:
+          input.status === 'accepted' || input.status === 'queued' || input.status === 'sent'
+            ? now
+            : null,
         delivered_at: input.status === 'delivered' ? now : null,
         failed_at: input.status === 'failed' ? now : null,
         failure_reason: input.failureReason ?? null,
@@ -702,9 +725,6 @@ export class MessageConsentRepository extends BaseRepository {
       .orderBy('consented_at', 'desc')
       .execute();
   }
-}
-
-export class SmsProviderEventRepository extends BaseRepository {
 
   async revokeEmailOptInByEmail(input: { tenantId: string; email: string; revokedAt?: Date }) {
     const revokedAt = input.revokedAt ?? new Date();
@@ -729,6 +749,9 @@ export class SmsProviderEventRepository extends BaseRepository {
       .where('revoked_at', 'is', null)
       .execute();
   }
+}
+
+export class SmsProviderEventRepository extends BaseRepository {
   async findByProviderEventId(provider: string, providerEventId: string) {
     return this.db
       .selectFrom('sms_provider_events')

@@ -149,22 +149,33 @@ export class TemporalClient {
   }
 
   async startClerkIdentitySync(input: Omit<ClerkIdentitySyncWorkflowInput, 'version'>) {
-    const workflowId = clerkIdentitySyncWorkflowId(input.clerkUserId ?? input.clerkOrgId ?? 'unknown');
-    return this.client.workflow.start(clerkIdentitySyncWorkflow, {
-      taskQueue: config.temporalTaskQueue,
-      workflowId,
-      args: [
-        {
-          version: CLERK_IDENTITY_SYNC_WORKFLOW_VERSION,
-          ...input,
-        } satisfies ClerkIdentitySyncWorkflowInput,
-      ],
-    });
+    const workflowId = clerkIdentitySyncWorkflowId(input.providerEventId);
+    try {
+      return await this.client.workflow.start(clerkIdentitySyncWorkflow, {
+        taskQueue: config.temporalTaskQueue,
+        workflowId,
+        args: [
+          {
+            version: CLERK_IDENTITY_SYNC_WORKFLOW_VERSION,
+            ...input,
+          } satisfies ClerkIdentitySyncWorkflowInput,
+        ],
+      });
+    } catch (err) {
+      if (isWorkflowAlreadyStartedError(err)) {
+        return this.client.workflow.getHandle(workflowId);
+      }
+      throw err;
+    }
   }
 
-  async startWebhookDelivery(input: Omit<WebhookDeliveryWorkflowInput, 'version'> & { replayNonce?: string }) {
+  async startWebhookDelivery(
+    input: Omit<WebhookDeliveryWorkflowInput, 'version'> & { replayNonce?: string },
+  ) {
     const baseWorkflowId = webhookDeliveryWorkflowId(input.eventId, input.endpointId);
-    const workflowId = input.replayNonce ? `${baseWorkflowId}:replay:${input.replayNonce}` : baseWorkflowId;
+    const workflowId = input.replayNonce
+      ? `${baseWorkflowId}:replay:${input.replayNonce}`
+      : baseWorkflowId;
     return this.client.workflow.start(webhookDeliveryWorkflow, {
       taskQueue: config.temporalTaskQueue,
       workflowId,
@@ -278,5 +289,8 @@ export class TemporalClient {
 
 function isWorkflowAlreadyStartedError(err: unknown): boolean {
   if (!(err instanceof Error)) return false;
-  return err.name === 'WorkflowExecutionAlreadyStartedError' || err.message.includes('Workflow execution already started');
+  return (
+    err.name === 'WorkflowExecutionAlreadyStartedError' ||
+    err.message.includes('Workflow execution already started')
+  );
 }

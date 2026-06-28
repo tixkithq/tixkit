@@ -1,30 +1,29 @@
-import { Suspense } from 'react'
-import CheckoutFlowClient from './checkout-flow-client'
+import { Suspense } from 'react';
+import CheckoutFlowClient from './checkout-flow-client';
 
-type SearchParams = Record<string, string | string[] | undefined>
+type SearchParams = Record<string, string | string[] | undefined>;
 
 function firstParam(value: string | string[] | undefined): string {
-  return Array.isArray(value) ? (value[0] ?? '') : value ?? ''
+  return Array.isArray(value) ? (value[0] ?? '') : (value ?? '');
 }
 
 export default async function CheckoutPage({
   searchParams,
 }: {
-  searchParams: Promise<SearchParams>
+  searchParams: Promise<SearchParams>;
 }) {
-  const params = await searchParams
+  const params = await searchParams;
 
   // Accept both `eventId` and `event` (fallback) so all SDK/widget entry
   // points converge. The backend worker is fixing sdk-next/sdk-sveltekit to
   // emit `eventId`; this makes checkout robust to both.
-  const eventId =
-    firstParam(params.eventId) || firstParam(params.event)
+  const eventId = firstParam(params.eventId) || firstParam(params.event);
 
   return (
     <Suspense
       fallback={
-        <div className='flex min-h-svh items-center justify-center p-6'>
-          <div className='size-6 animate-spin rounded-full border-2 border-muted border-t-foreground' />
+        <div className="flex min-h-svh items-center justify-center p-6">
+          <div className="size-6 animate-spin rounded-full border-2 border-muted border-t-foreground" />
         </div>
       }
     >
@@ -49,5 +48,5 @@ export default async function CheckoutPage({
         productFilterParam={firstParam(params.products)}
       />
     </Suspense>
-  )
+  );
 }

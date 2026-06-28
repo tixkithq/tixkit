@@ -98,7 +98,7 @@ export function loadConfig(): AppConfig {
     metricsBearerToken: process.env.METRICS_BEARER_TOKEN?.trim() ?? '',
     rateLimitMax: parseInt(
       process.env.RATE_LIMIT_MAX ?? (process.env.NODE_ENV === 'production' ? '100' : '1000'),
-      10
+      10,
     ),
     rateLimitTimeWindow: process.env.RATE_LIMIT_TIME_WINDOW ?? '1 minute',
     trustProxy: parseTrustProxy(process.env.TRUST_PROXY),

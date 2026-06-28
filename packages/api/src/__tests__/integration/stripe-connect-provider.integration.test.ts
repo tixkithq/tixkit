@@ -29,7 +29,10 @@ function makePrincipal(tenantId: string, organizationId: string): Principal {
   };
 }
 
-async function seedOrganization(db: Database, ids: { tenantId: string; organizationId: string; suffix: string }): Promise<void> {
+async function seedOrganization(
+  db: Database,
+  ids: { tenantId: string; organizationId: string; suffix: string },
+): Promise<void> {
   const now = new Date();
   await db.transaction().execute(async (trx) => {
     await trx
@@ -60,9 +63,15 @@ async function seedOrganization(db: Database, ids: { tenantId: string; organizat
   });
 }
 
-async function cleanupRows(db: Database, ids: { tenantId: string; organizationId: string }): Promise<void> {
+async function cleanupRows(
+  db: Database,
+  ids: { tenantId: string; organizationId: string },
+): Promise<void> {
   await db.deleteFrom('audit_logs').where('tenant_id', '=', ids.tenantId).execute();
-  await db.deleteFrom('payment_accounts').where('organization_id', '=', ids.organizationId).execute();
+  await db
+    .deleteFrom('payment_accounts')
+    .where('organization_id', '=', ids.organizationId)
+    .execute();
   await db.deleteFrom('organizations').where('id', '=', ids.organizationId).execute();
   await db.deleteFrom('tenants').where('id', '=', ids.tenantId).execute();
 }
@@ -139,11 +148,21 @@ describeStripeConnect('Stripe Connect onboarding/status validation (real Stripe 
         defaultCurrency: 'USD',
       });
       expect(['active', 'pending', 'restricted']).toContain(created.status);
-      expect(created.onboardingUrl).toEqual(expect.stringMatching(/^https:\/\/connect\.stripe\.com\//));
+      expect(created.onboardingUrl).toEqual(
+        expect.stringMatching(/^https:\/\/connect\.stripe\.com\//),
+      );
 
       const persisted = await db
         .selectFrom('payment_accounts')
-        .select(['id', 'tenant_id', 'organization_id', 'provider', 'provider_account_id', 'status', 'default_currency'])
+        .select([
+          'id',
+          'tenant_id',
+          'organization_id',
+          'provider',
+          'provider_account_id',
+          'status',
+          'default_currency',
+        ])
         .where('id', '=', created.id)
         .executeTakeFirstOrThrow();
       expect(persisted).toMatchObject({
@@ -180,7 +199,9 @@ describeStripeConnect('Stripe Connect onboarding/status validation (real Stripe 
       });
       expect(['active', 'pending', 'restricted']).toContain(refreshed.status);
       expect(refreshed.defaultCurrency).toEqual(expect.stringMatching(/^[A-Z]{3}$/));
-      expect(refreshed.onboardingUrl).toEqual(expect.stringMatching(/^https:\/\/connect\.stripe\.com\//));
+      expect(refreshed.onboardingUrl).toEqual(
+        expect.stringMatching(/^https:\/\/connect\.stripe\.com\//),
+      );
 
       const refreshedRow = await db
         .selectFrom('payment_accounts')

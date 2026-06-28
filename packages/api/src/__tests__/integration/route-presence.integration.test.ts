@@ -16,6 +16,8 @@ import { publicRoutes } from '../../routes/modules/public.js';
 import { questionRoutes } from '../../routes/modules/questions.js';
 import { authRoutes } from '../../routes/modules/auth.js';
 import { publicUploadRoutes, uploadRoutes } from '../../routes/modules/uploads.js';
+import { publicWaitlistRoutes, waitlistRoutes } from '../../routes/modules/waitlist.js';
+import { oauthAuthorizeRoutes, oauthTokenRoutes } from '../../routes/modules/oauth.js';
 import { clerkWebhookRoutes } from '../../routes/modules/clerk-webhooks.js';
 import { stripeWebhookRoutes } from '../../routes/modules/stripe-webhooks.js';
 import { telnyxWebhookRoutes } from '../../routes/modules/telnyx-webhooks.js';
@@ -77,8 +79,10 @@ async function buildRouteManifest(): Promise<CapturedRoute[]> {
   // Public routes.
   await app.register(async (publicGroup) => {
     await publicGroup.register(publicRoutes, { prefix: '/v1' });
-    await publicGroup.register(publicUploadRoutes, { prefix: '/v1' });
     await publicGroup.register(checkoutRoutes, { prefix: '/v1' });
+    await publicGroup.register(publicUploadRoutes, { prefix: '/v1' });
+    await publicGroup.register(publicWaitlistRoutes, { prefix: '/v1' });
+    await publicGroup.register(oauthTokenRoutes, { prefix: '/v1' });
   });
 
   // Authenticated routes.
@@ -90,12 +94,14 @@ async function buildRouteManifest(): Promise<CapturedRoute[]> {
     await authenticated.register(checkInRoutes, { prefix: '/v1' });
     await authenticated.register(webhookRoutes, { prefix: '/v1' });
     await authenticated.register(developerRoutes, { prefix: '/v1' });
+    await authenticated.register(oauthAuthorizeRoutes, { prefix: '/v1' });
     await authenticated.register(messagingRoutes, { prefix: '/v1' });
     await authenticated.register(reportingRoutes, { prefix: '/v1' });
     await authenticated.register(privacyRoutes, { prefix: '/v1' });
     await authenticated.register(questionRoutes, { prefix: '/v1' });
     await authenticated.register(authRoutes, { prefix: '/v1' });
     await authenticated.register(uploadRoutes, { prefix: '/v1' });
+    await authenticated.register(waitlistRoutes, { prefix: '/v1' });
   });
 
   await app.ready();
@@ -137,12 +143,16 @@ describe('Route-presence contract (T33)', () => {
       const normalizedPath = stripPrefix(normalizeUrl(route.url));
       const specEntry = openApiPaths[normalizedPath];
       if (!specEntry) {
-        missingFromSpec.push(`${route.method} ${route.url} -> OpenAPI path "${normalizedPath}" not found`);
+        missingFromSpec.push(
+          `${route.method} ${route.url} -> OpenAPI path "${normalizedPath}" not found`,
+        );
         continue;
       }
       const methodLower = route.method.toLowerCase();
       if (!specEntry[methodLower]) {
-        missingFromSpec.push(`${route.method} ${route.url} -> OpenAPI path "${normalizedPath}" has no ${methodLower} method`);
+        missingFromSpec.push(
+          `${route.method} ${route.url} -> OpenAPI path "${normalizedPath}" has no ${methodLower} method`,
+        );
       }
     }
 
@@ -161,9 +171,7 @@ describe('Route-presence contract (T33)', () => {
         // Convert OpenAPI path ({param}) to Fastify path (:param) with /v1 prefix.
         const fastifyPath = `/v1${path === '/' ? '' : path}`.replace(/\{(\w+)\}/g, ':$1');
 
-        const found = manifest.some(
-          (r) => r.method === methodUpper && r.url === fastifyPath,
-        );
+        const found = manifest.some((r) => r.method === methodUpper && r.url === fastifyPath);
 
         if (!found && path !== '/health') {
           missingFromRoutes.push(`${methodUpper} ${path} -> no matching Fastify route`);

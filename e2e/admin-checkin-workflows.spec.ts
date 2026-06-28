@@ -86,7 +86,9 @@ test.describe('admin check-in workflows', () => {
     expect(checkInList.tickets).toHaveLength(2);
 
     const manifest = (await expectJsonResponse(
-      await request.get(`${apiBaseUrl}/v1/events/${event.id}/check-in-lists/${checkInList.id}/manifest`),
+      await request.get(
+        `${apiBaseUrl}/v1/events/${event.id}/check-in-lists/${checkInList.id}/manifest`,
+      ),
       200,
     )) as {
       eventId: string;

@@ -1,5 +1,9 @@
 import type { Context as ActivityContext } from '@temporalio/activity';
-import type { ActivityExecuteInput, ActivityInboundCallsInterceptor, Next } from '@temporalio/worker';
+import type {
+  ActivityExecuteInput,
+  ActivityInboundCallsInterceptor,
+  Next,
+} from '@temporalio/worker';
 import {
   createTixkitMetrics,
   observeTemporalActivity,
@@ -27,7 +31,10 @@ export function startWorkerObservability(): WorkerObservability {
 }
 
 export class TixkitActivityMetricsInterceptor implements ActivityInboundCallsInterceptor {
-  constructor(private readonly ctx: ActivityContext, private readonly metrics: TixkitMetrics) {}
+  constructor(
+    private readonly ctx: ActivityContext,
+    private readonly metrics: TixkitMetrics,
+  ) {}
 
   async execute(
     input: ActivityExecuteInput,
@@ -61,8 +68,8 @@ export class TixkitActivityMetricsInterceptor implements ActivityInboundCallsInt
 function isWorkflowActivityErrorResult(result: unknown): boolean {
   return Boolean(
     result &&
-      typeof result === 'object' &&
-      !Array.isArray(result) &&
-      (result as { ok?: unknown }).ok === false,
+    typeof result === 'object' &&
+    !Array.isArray(result) &&
+    (result as { ok?: unknown }).ok === false,
   );
 }

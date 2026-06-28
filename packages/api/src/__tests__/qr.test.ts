@@ -38,7 +38,9 @@ describe('QrService', () => {
     };
     const parsed = JSON.parse(decoded.p) as Record<string, unknown>;
     parsed.ticketId = 'tkt_attacker';
-    const tampered = Buffer.from(JSON.stringify({ p: JSON.stringify(parsed), s: decoded.s })).toString('base64url');
+    const tampered = Buffer.from(
+      JSON.stringify({ p: JSON.stringify(parsed), s: decoded.s }),
+    ).toString('base64url');
     const result = qrService.getQrPayload(tampered);
     expect(result.valid).toBe(false);
   });

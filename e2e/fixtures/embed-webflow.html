@@ -1,0 +1,55 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Webflow Embed Fixture</title>
+  <!-- Simulates a Webflow custom code footer placement -->
+</head>
+<body>
+  <div id="content">
+    <h1>Demo Event Page</h1>
+    <p>This page simulates a Webflow site with a Tixkit embed.</p>
+
+    <!-- Tixkit embed: webflow -->
+    <tixkit-widget
+      id="tixkit-inline-evt_demo"
+      brand="brd_demo"
+      event="evt_demo"
+      checkout-mode="inline"
+      tracking-id="webflow_test"
+      api-base-url="http://localhost:3201"
+    ></tixkit-widget>
+
+    <!-- Tixkit button embed -->
+    <tixkit-button
+      id="tixkit-button-evt_demo"
+      brand="brd_demo"
+      event="evt_demo"
+      checkout-mode="modal"
+      items="tt_general=2"
+      api-base-url="http://localhost:3201"
+    >
+      Buy tickets
+    </tixkit-button>
+  </div>
+
+  <!-- Webflow footer code placement -->
+  <script type="module" src="http://localhost:3201/tixkit-widget.js"></script>
+  <script type="module">
+    const widget = document.getElementById('tixkit-inline-evt_demo');
+    const button = document.getElementById('tixkit-button-evt_demo');
+
+    function onTixkitEvent(name, detail) {
+      console.log('Tixkit:', name, detail);
+    }
+
+    for (const el of [widget, button]) {
+      if (!el) continue;
+      for (const name of ['loaded', 'opened', 'closed', 'checkout_started', 'order_completed', 'error']) {
+        el.addEventListener(name, (e) => onTixkitEvent(name, e.detail));
+      }
+    }
+  </script>
+</body>
+</html>

@@ -38,8 +38,16 @@ export const MarketingIntegrationsMigration: Migration = {
       .addForeignKeyConstraint('marketing_integrations_event_fk', ['event_id'], 'events', ['id'])
       .execute();
 
-    await db.schema.createIndex('idx_marketing_integrations_event').on('marketing_integrations').columns(['event_id', 'status']).execute();
-    await db.schema.createIndex('idx_marketing_integrations_brand').on('marketing_integrations').columns(['brand_id', 'status']).execute();
+    await db.schema
+      .createIndex('idx_marketing_integrations_event')
+      .on('marketing_integrations')
+      .columns(['event_id', 'status'])
+      .execute();
+    await db.schema
+      .createIndex('idx_marketing_integrations_brand')
+      .on('marketing_integrations')
+      .columns(['brand_id', 'status'])
+      .execute();
   },
 
   async down(db): Promise<void> {

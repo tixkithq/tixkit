@@ -25,8 +25,7 @@ function rotr(n: number, x: number): number {
 
 function sha256(data: Uint8Array): Uint8Array {
   const h = new Uint32Array([
-    0x6a09e667, 0xbb67ae85, 0x3c6ef372, 0xa54ff53a,
-    0x510e527f, 0x9b05688c, 0x1f83d9ab, 0x5be0cd19,
+    0x6a09e667, 0xbb67ae85, 0x3c6ef372, 0xa54ff53a, 0x510e527f, 0x9b05688c, 0x1f83d9ab, 0x5be0cd19,
   ]);
 
   // Pre-processing: padding
@@ -52,7 +51,14 @@ function sha256(data: Uint8Array): Uint8Array {
       w[i] = (w[i - 16] + s0 + w[i - 7] + s1) >>> 0;
     }
 
-    let a = h[0], b = h[1], c = h[2], d = h[3], e = h[4], f = h[5], g = h[6], hh = h[7];
+    let a = h[0],
+      b = h[1],
+      c = h[2],
+      d = h[3],
+      e = h[4],
+      f = h[5],
+      g = h[6],
+      hh = h[7];
 
     for (let i = 0; i < 64; i++) {
       const S1 = rotr(6, e) ^ rotr(11, e) ^ rotr(25, e);
@@ -61,8 +67,14 @@ function sha256(data: Uint8Array): Uint8Array {
       const S0 = rotr(2, a) ^ rotr(13, a) ^ rotr(22, a);
       const maj = (a & b) ^ (a & c) ^ (b & c);
       const temp2 = (S0 + maj) >>> 0;
-      hh = g; g = f; f = e; e = (d + temp1) >>> 0;
-      d = c; c = b; b = a; a = (temp1 + temp2) >>> 0;
+      hh = g;
+      g = f;
+      f = e;
+      e = (d + temp1) >>> 0;
+      d = c;
+      c = b;
+      b = a;
+      a = (temp1 + temp2) >>> 0;
     }
 
     h[0] = (h[0] + a) >>> 0;
@@ -118,8 +130,6 @@ function hmacSha256(key: string | Uint8Array, message: string | Uint8Array): Uin
   return sha256(outer);
 }
 
-
-
 function hexToBytes(hex: string): Uint8Array {
   const bytes = new Uint8Array(hex.length / 2);
   for (let i = 0; i < bytes.length; i++) {
@@ -164,7 +174,14 @@ export type OfflineManifest = {
 };
 
 export type ScanResult = {
-  outcome: 'accepted' | 'duplicate' | 'invalid' | 'revoked' | 'not_found' | 'wrong_event' | 'wrong_list';
+  outcome:
+    | 'accepted'
+    | 'duplicate'
+    | 'invalid'
+    | 'revoked'
+    | 'not_found'
+    | 'wrong_event'
+    | 'wrong_list';
   ticketId?: string;
   message: string;
 };
@@ -381,7 +398,8 @@ function assertScannerCredentials(value: unknown): TixkitScannerCredentials | nu
     deviceSecret: credentials.deviceSecret,
     manifestSigningKey: credentials.manifestSigningKey,
     apiBaseUrl: typeof credentials.apiBaseUrl === 'string' ? credentials.apiBaseUrl : undefined,
-    checkoutBaseUrl: typeof credentials.checkoutBaseUrl === 'string' ? credentials.checkoutBaseUrl : undefined,
+    checkoutBaseUrl:
+      typeof credentials.checkoutBaseUrl === 'string' ? credentials.checkoutBaseUrl : undefined,
   };
 }
 
@@ -414,11 +432,13 @@ export async function clearScannerCredentials(
 }
 
 function statusLabel(status: string): string {
-  return status
-    .split('_')
-    .filter(Boolean)
-    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
-    .join(' ') || 'Unknown';
+  return (
+    status
+      .split('_')
+      .filter(Boolean)
+      .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+      .join(' ') || 'Unknown'
+  );
 }
 
 export function extractBarcodePayload(event: TixkitBarcodeScanEvent): string | null {
@@ -439,14 +459,18 @@ export function extractBarcodePayload(event: TixkitBarcodeScanEvent): string | n
 export async function scanBarcodePayload(options: TixkitBarcodeScanOptions): Promise<ScanResult> {
   const mode = options.mode ?? 'online';
   if (mode === 'offline') {
-    return options.client.scanOffline((options.qrHashFromPayload ?? qrHashForPayload)(options.qrPayload));
+    return options.client.scanOffline(
+      (options.qrHashFromPayload ?? qrHashForPayload)(options.qrPayload),
+    );
   }
 
   try {
     return await options.client.scanOnline(options.checkInListId, options.qrPayload);
   } catch (error) {
     if (mode !== 'auto') throw error;
-    return options.client.scanOffline((options.qrHashFromPayload ?? qrHashForPayload)(options.qrPayload));
+    return options.client.scanOffline(
+      (options.qrHashFromPayload ?? qrHashForPayload)(options.qrPayload),
+    );
   }
 }
 
@@ -495,7 +519,9 @@ export function createTixkitReactNativeComponents(
       body.push(text(`Offline scans ${props.offlineScanCount}`, 'offlineScanCount'));
     }
     if (props.onSync && Pressable) {
-      body.push(createElement(Pressable, { key: 'sync', onPress: props.onSync }, text('Sync', 'syncText')));
+      body.push(
+        createElement(Pressable, { key: 'sync', onPress: props.onSync }, text('Sync', 'syncText')),
+      );
     }
     return createElement(View, { testID: props.testID }, ...body);
   }
@@ -552,7 +578,10 @@ export function createTixkitReactNativeComponents(
 
     if (permission !== 'granted') {
       const body = [
-        text(permission === 'denied' ? 'Camera permission denied' : 'Camera permission required', 'permission'),
+        text(
+          permission === 'denied' ? 'Camera permission denied' : 'Camera permission required',
+          'permission',
+        ),
       ];
       if (props.onRequestPermission && Pressable) {
         body.push(
@@ -581,17 +610,20 @@ export function createTixkitReactNativeComponents(
       barcodeScannerSettings: { barcodeTypes },
       onBarcodeScanned: disabled ? undefined : onBarcodeScanned,
     });
-    const body = [
-      camera,
-      text(disabled ? 'Scanner paused' : `Scanner ready (${mode})`, 'status'),
-    ];
+    const body = [camera, text(disabled ? 'Scanner paused' : `Scanner ready (${mode})`, 'status')];
     if (disabled && ActivityIndicator) {
       body.push(createElement(ActivityIndicator, { key: 'activity', animating: false }));
     }
     const overlay = props.renderOverlay?.({ disabled, mode, permission });
     if (overlay !== undefined && overlay !== null) body.push(overlay);
     if (props.onSync && Pressable) {
-      body.push(createElement(Pressable, { key: 'sync', onPress: () => sync('manual') }, text('Sync', 'syncText')));
+      body.push(
+        createElement(
+          Pressable,
+          { key: 'sync', onPress: () => sync('manual') },
+          text('Sync', 'syncText'),
+        ),
+      );
     }
     return createElement(View, { testID: props.testID }, ...body);
   }
@@ -712,17 +744,29 @@ export class TixkitScannerClient {
       return { outcome: 'not_found', message: 'Ticket not in manifest' };
     }
 
-    if (ticket.status === 'void' || ticket.status === 'refunded' || ticket.status === 'transferred') {
+    if (
+      ticket.status === 'void' ||
+      ticket.status === 'refunded' ||
+      ticket.status === 'transferred'
+    ) {
       return { outcome: 'revoked', message: 'Ticket is voided, refunded, or transferred' };
     }
 
     if (this.offlineScans.has(qrHash)) {
-      return { outcome: 'duplicate', message: 'Ticket already checked in', ticketId: ticket.ticketId };
+      return {
+        outcome: 'duplicate',
+        message: 'Ticket already checked in',
+        ticketId: ticket.ticketId,
+      };
     }
 
     this.offlineScans.set(qrHash, new Date().toISOString());
     void this.persistOfflineScans();
-    return { outcome: 'accepted', message: 'Check-in successful (offline)', ticketId: ticket.ticketId };
+    return {
+      outcome: 'accepted',
+      message: 'Check-in successful (offline)',
+      ticketId: ticket.ticketId,
+    };
   }
 
   /**
@@ -766,10 +810,9 @@ export class TixkitScannerClient {
     if (!raw) return;
     const parsed = JSON.parse(raw) as Array<[string, string]>;
     this.offlineScans = new Map(
-      parsed.filter((entry): entry is [string, string] =>
-        Array.isArray(entry) &&
-        typeof entry[0] === 'string' &&
-        typeof entry[1] === 'string',
+      parsed.filter(
+        (entry): entry is [string, string] =>
+          Array.isArray(entry) && typeof entry[0] === 'string' && typeof entry[1] === 'string',
       ),
     );
   }
@@ -818,8 +861,10 @@ export class TixkitScannerClient {
     let firstTimestamp = 'none';
     let lastTimestamp = 'none';
     for (const scan of scans) {
-      if (firstTimestamp === 'none' || scan.scannedAt < firstTimestamp) firstTimestamp = scan.scannedAt;
-      if (lastTimestamp === 'none' || scan.scannedAt > lastTimestamp) lastTimestamp = scan.scannedAt;
+      if (firstTimestamp === 'none' || scan.scannedAt < firstTimestamp)
+        firstTimestamp = scan.scannedAt;
+      if (lastTimestamp === 'none' || scan.scannedAt > lastTimestamp)
+        lastTimestamp = scan.scannedAt;
     }
     return [
       'scanner-sync',

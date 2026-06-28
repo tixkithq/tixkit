@@ -131,7 +131,11 @@ export class EventOccurrenceRepository extends BaseRepository {
   }
 
   async findById(id: string) {
-    return this.db.selectFrom('event_occurrences').selectAll().where('id', '=', id).executeTakeFirst();
+    return this.db
+      .selectFrom('event_occurrences')
+      .selectAll()
+      .where('id', '=', id)
+      .executeTakeFirst();
   }
 
   async findByEvent(eventId: string) {
@@ -235,12 +239,7 @@ export class TicketTypeRepository extends BaseRepository {
 
     query =
       requested.length > 0
-        ? query.where((eb) =>
-          eb.or([
-            eb('visibility', '=', 'public'),
-            eb('id', 'in', requested),
-          ]),
-        )
+        ? query.where((eb) => eb.or([eb('visibility', '=', 'public'), eb('id', 'in', requested)]))
         : query.where('visibility', '=', 'public');
 
     return query.orderBy('sort_order', 'asc').orderBy('id', 'asc').execute();
@@ -357,19 +356,12 @@ export class AccessRuleRepository extends BaseRepository {
   }
 
   async delete(id: string) {
-    return this.db
-      .deleteFrom('access_rules')
-      .where('id', '=', id)
-      .executeTakeFirst();
+    return this.db.deleteFrom('access_rules').where('id', '=', id).executeTakeFirst();
   }
 }
 
 export class ProductCategoryRepository extends BaseRepository {
-  async create(input: {
-    eventId: string;
-    name: string;
-    sortOrder?: number;
-  }) {
+  async create(input: { eventId: string; name: string; sortOrder?: number }) {
     const id = `pcat_${ulid()}`;
     const now = new Date();
     return this.insertReturning(
@@ -445,11 +437,7 @@ export class ProductRepository extends BaseRepository {
   }
 
   async findById(id: string) {
-    return this.db
-      .selectFrom('products')
-      .selectAll()
-      .where('id', '=', id)
-      .executeTakeFirst();
+    return this.db.selectFrom('products').selectAll().where('id', '=', id).executeTakeFirst();
   }
 
   async findByEvent(eventId: string, limit?: number, cursor?: string) {

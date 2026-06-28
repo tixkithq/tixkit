@@ -45,9 +45,21 @@ export const WalletPassesMigration: Migration = {
       .addForeignKeyConstraint('wallet_passes_ticket_fk', ['ticket_id'], 'tickets', ['id'])
       .execute();
 
-    await db.schema.createIndex('idx_wallet_passes_tenant').on('wallet_passes').columns(['tenant_id']).execute();
-    await db.schema.createIndex('idx_wallet_passes_ticket').on('wallet_passes').columns(['ticket_id']).execute();
-    await db.schema.createIndex('idx_wallet_passes_status').on('wallet_passes').columns(['status']).execute();
+    await db.schema
+      .createIndex('idx_wallet_passes_tenant')
+      .on('wallet_passes')
+      .columns(['tenant_id'])
+      .execute();
+    await db.schema
+      .createIndex('idx_wallet_passes_ticket')
+      .on('wallet_passes')
+      .columns(['ticket_id'])
+      .execute();
+    await db.schema
+      .createIndex('idx_wallet_passes_status')
+      .on('wallet_passes')
+      .columns(['status'])
+      .execute();
   },
 
   async down(db): Promise<void> {

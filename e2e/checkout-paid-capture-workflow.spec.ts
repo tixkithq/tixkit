@@ -168,7 +168,10 @@ test.describe('paid checkout capture workflow', () => {
     await requireReachable(page, checkoutBaseUrl, 'checkout app');
 
     const suffix = `paid-promo-ui-${testInfo.workerIndex}-${Date.now()}`;
-    const { event, ticketType, inventoryPool, discountCode } = await seedPaidPromoCheckoutEvent(request, suffix);
+    const { event, ticketType, inventoryPool, discountCode } = await seedPaidPromoCheckoutEvent(
+      request,
+      suffix,
+    );
 
     await page.goto(`${checkoutBaseUrl}/checkout?eventId=${event.id}`);
     await expect(page.getByRole('heading', { name: event.title })).toBeVisible();
@@ -196,7 +199,11 @@ test.describe('paid checkout capture workflow', () => {
     expect(orderId).toEqual(expect.any(String));
     await attachScreenshot(page, testInfo, 'hosted-paid-promo-checkout-confirmed');
 
-    const state = await readPromoCheckoutCaptureState(sessionId!, inventoryPool.id, discountCode.id);
+    const state = await readPromoCheckoutCaptureState(
+      sessionId!,
+      inventoryPool.id,
+      discountCode.id,
+    );
     expect(state.session).toMatchObject({
       status: 'completed',
       orderId,

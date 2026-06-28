@@ -1,16 +1,21 @@
-'use client'
+'use client';
 
-import * as React from 'react'
-import { useForm } from 'react-hook-form'
-import { zodResolver } from '@hookform/resolvers/zod'
-import { z } from 'zod'
-import { type AdminWebhookEndpoint, type CreateWebhookEndpointInput, type UpdateWebhookEndpointInput, adminApi } from '@/lib/api'
-import { useBootstrap } from '@/context/bootstrap-provider'
-import { Button } from '@/components/ui/button'
-import { Input } from '@/components/ui/input'
-import { Textarea } from '@/components/ui/textarea'
-import { Checkbox } from '@/components/ui/checkbox'
-import { Label } from '@/components/ui/label'
+import * as React from 'react';
+import { useForm } from 'react-hook-form';
+import { zodResolver } from '@hookform/resolvers/zod';
+import { z } from 'zod';
+import {
+  type AdminWebhookEndpoint,
+  type CreateWebhookEndpointInput,
+  type UpdateWebhookEndpointInput,
+  adminApi,
+} from '@/lib/api';
+import { useBootstrap } from '@/context/bootstrap-provider';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { Textarea } from '@/components/ui/textarea';
+import { Checkbox } from '@/components/ui/checkbox';
+import { Label } from '@/components/ui/label';
 import {
   Form,
   FormControl,
@@ -19,7 +24,7 @@ import {
   FormItem,
   FormLabel,
   FormMessage,
-} from '@/components/ui/form'
+} from '@/components/ui/form';
 import {
   Sheet,
   SheetContent,
@@ -27,8 +32,8 @@ import {
   SheetFooter,
   SheetHeader,
   SheetTitle,
-} from '@/components/ui/sheet'
-import { toast } from 'sonner'
+} from '@/components/ui/sheet';
+import { toast } from 'sonner';
 
 const webhookEvents = [
   'order.created',
@@ -39,22 +44,22 @@ const webhookEvents = [
   'attendee.updated',
   'event.published',
   'event.cancelled',
-]
+];
 
 const webhookSchema = z.object({
   url: z.string().url('Enter a valid URL'),
   description: z.string().optional(),
   events: z.array(z.string()).min(1, 'Select at least one event'),
-})
+});
 
-type WebhookFormValues = z.infer<typeof webhookSchema>
+type WebhookFormValues = z.infer<typeof webhookSchema>;
 
 type WebhookFormDrawerProps = {
-  open: boolean
-  onOpenChange: (open: boolean) => void
-  endpoint?: AdminWebhookEndpoint
-  onSuccess?: () => void
-}
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  endpoint?: AdminWebhookEndpoint;
+  onSuccess?: () => void;
+};
 
 export function WebhookFormDrawer({
   open,
@@ -62,8 +67,8 @@ export function WebhookFormDrawer({
   endpoint,
   onSuccess,
 }: WebhookFormDrawerProps) {
-  const [submitting, setSubmitting] = React.useState(false)
-  const { organizationId } = useBootstrap()
+  const [submitting, setSubmitting] = React.useState(false);
+  const { organizationId } = useBootstrap();
 
   const form = useForm<WebhookFormValues>({
     resolver: zodResolver(webhookSchema),
@@ -72,7 +77,7 @@ export function WebhookFormDrawer({
       description: endpoint?.description ?? '',
       events: endpoint?.events ?? [],
     },
-  })
+  });
 
   React.useEffect(() => {
     if (open) {
@@ -80,70 +85,65 @@ export function WebhookFormDrawer({
         url: endpoint?.url ?? '',
         description: endpoint?.description ?? '',
         events: endpoint?.events ?? [],
-      })
+      });
     }
-  }, [open, endpoint, form])
+  }, [open, endpoint, form]);
 
-  const watchedEvents = form.watch('events')
+  const watchedEvents = form.watch('events');
 
   const toggleEvent = (event: string) => {
-    const current = form.getValues('events')
+    const current = form.getValues('events');
     const updated = current.includes(event)
       ? current.filter((e) => e !== event)
-      : [...current, event]
-    form.setValue('events', updated)
-  }
+      : [...current, event];
+    form.setValue('events', updated);
+  };
 
   const onSubmit = async (values: WebhookFormValues) => {
     if (!endpoint && !organizationId) {
-      toast.error('Workspace context is required to create a webhook endpoint.')
-      return
+      toast.error('Workspace context is required to create a webhook endpoint.');
+      return;
     }
-    setSubmitting(true)
+    setSubmitting(true);
     const input: CreateWebhookEndpointInput = {
       organizationId: organizationId,
       url: values.url,
       description: values.description || undefined,
       events: values.events,
-    }
+    };
     const result = endpoint
       ? await adminApi.updateWebhookEndpoint(endpoint.id, input as UpdateWebhookEndpointInput)
-      : await adminApi.createWebhookEndpoint(input)
-    setSubmitting(false)
+      : await adminApi.createWebhookEndpoint(input);
+    setSubmitting(false);
     if (result.ok) {
-      toast.success(endpoint ? 'Webhook updated' : 'Webhook created')
-      onOpenChange(false)
-      onSuccess?.()
+      toast.success(endpoint ? 'Webhook updated' : 'Webhook created');
+      onOpenChange(false);
+      onSuccess?.();
     } else {
-      toast.error(result.error.message)
+      toast.error(result.error.message);
     }
-  }
+  };
 
   return (
     <Sheet open={open} onOpenChange={onOpenChange}>
-      <SheetContent side='right' className='w-full overflow-y-auto sm:max-w-lg'>
+      <SheetContent side="right" className="w-full overflow-y-auto sm:max-w-lg">
         <SheetHeader>
-          <SheetTitle>
-            {endpoint ? 'Edit Endpoint' : 'Add Endpoint'}
-          </SheetTitle>
+          <SheetTitle>{endpoint ? 'Edit Endpoint' : 'Add Endpoint'}</SheetTitle>
           <SheetDescription>
             Register a webhook endpoint to receive event notifications.
           </SheetDescription>
         </SheetHeader>
-        <div className='px-4 pb-4'>
+        <div className="px-4 pb-4">
           <Form {...form}>
-            <form onSubmit={form.handleSubmit(onSubmit)} className='space-y-4'>
+            <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-4">
               <FormField
                 control={form.control}
-                name='url'
+                name="url"
                 render={({ field }) => (
                   <FormItem>
                     <FormLabel>URL</FormLabel>
                     <FormControl>
-                      <Input
-                        placeholder='https://example.com/webhooks/tixkit'
-                        {...field}
-                      />
+                      <Input placeholder="https://example.com/webhooks/tixkit" {...field} />
                     </FormControl>
                     <FormMessage />
                   </FormItem>
@@ -151,14 +151,14 @@ export function WebhookFormDrawer({
               />
               <FormField
                 control={form.control}
-                name='description'
+                name="description"
                 render={({ field }) => (
                   <FormItem>
                     <FormLabel>Description</FormLabel>
                     <FormControl>
                       <Textarea
-                        placeholder='What is this endpoint used for?'
-                        className='resize-none'
+                        placeholder="What is this endpoint used for?"
+                        className="resize-none"
                         {...field}
                       />
                     </FormControl>
@@ -168,19 +168,14 @@ export function WebhookFormDrawer({
               />
               <FormField
                 control={form.control}
-                name='events'
+                name="events"
                 render={() => (
                   <FormItem>
                     <FormLabel>Events</FormLabel>
-                    <FormDescription>
-                      Select which events to subscribe to
-                    </FormDescription>
-                    <div className='grid gap-2 sm:grid-cols-2'>
+                    <FormDescription>Select which events to subscribe to</FormDescription>
+                    <div className="grid gap-2 sm:grid-cols-2">
                       {webhookEvents.map((event) => (
-                        <div
-                          key={event}
-                          className='flex items-center gap-2 rounded-md border p-2'
-                        >
+                        <div key={event} className="flex items-center gap-2 rounded-md border p-2">
                           <Checkbox
                             id={`evt-${event}`}
                             checked={watchedEvents.includes(event)}
@@ -188,7 +183,7 @@ export function WebhookFormDrawer({
                           />
                           <Label
                             htmlFor={`evt-${event}`}
-                            className='text-sm font-normal cursor-pointer'
+                            className="text-sm font-normal cursor-pointer"
                           >
                             {event}
                           </Label>
@@ -200,19 +195,11 @@ export function WebhookFormDrawer({
                 )}
               />
               <SheetFooter>
-                <Button
-                  type='button'
-                  variant='outline'
-                  onClick={() => onOpenChange(false)}
-                >
+                <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>
                   Cancel
                 </Button>
-                <Button type='submit' disabled={submitting}>
-                  {submitting
-                    ? 'Saving...'
-                    : endpoint
-                      ? 'Save Changes'
-                      : 'Add Endpoint'}
+                <Button type="submit" disabled={submitting}>
+                  {submitting ? 'Saving...' : endpoint ? 'Save Changes' : 'Add Endpoint'}
                 </Button>
               </SheetFooter>
             </form>
@@ -220,5 +207,5 @@ export function WebhookFormDrawer({
         </div>
       </SheetContent>
     </Sheet>
-  )
+  );
 }

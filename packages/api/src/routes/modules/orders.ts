@@ -1,4 +1,3 @@
-
 import type { FastifyPluginAsync } from 'fastify';
 import { ClerkAuthService } from '../../auth/clerk.js';
 import { OrderRepository, AuditLogRepository } from '@tixkit/db';
@@ -36,7 +35,10 @@ export const orderRoutes: FastifyPluginAsync = async (app) => {
       .orderBy('id', 'asc')
       .limit(pagination.limit + 1);
 
-    const { organizationId, eventId } = request.query as { organizationId?: string; eventId?: string };
+    const { organizationId, eventId } = request.query as {
+      organizationId?: string;
+      eventId?: string;
+    };
     if (organizationId) {
       ClerkAuthService.requireOrganizationScope(principal, organizationId);
       query = query.where('organization_id', '=', organizationId);
@@ -55,7 +57,10 @@ export const orderRoutes: FastifyPluginAsync = async (app) => {
       query = query.where('organization_id', 'in', principal.organizationIds);
     }
     const rows = await query.execute();
-    return pageEnvelope(rows.map((row) => serializeOrder(row)), pagination.limit);
+    return pageEnvelope(
+      rows.map((row) => serializeOrder(row)),
+      pagination.limit,
+    );
   });
 
   app.get('/orders/:orderId', async (request) => {
@@ -70,31 +75,43 @@ export const orderRoutes: FastifyPluginAsync = async (app) => {
     ClerkAuthService.requireBrandScope(principal, order.brand_id);
     ClerkAuthService.requireEventScope(principal, order.event_id);
 
-    const [lineItems, timeline, attendees, refunds, checkoutSession, invoice, taxSnapshots] = await Promise.all([
-      repo.getLineItems(orderId),
-      repo.getTimeline(orderId),
-      db.selectFrom('attendees').selectAll().where('order_id', '=', orderId).execute(),
-      db.selectFrom('refunds').selectAll().where('order_id', '=', orderId).orderBy('created_at', 'asc').execute(),
-      order.checkout_session_id
-        ? db.selectFrom('checkout_sessions').selectAll().where('id', '=', order.checkout_session_id).executeTakeFirst()
-        : Promise.resolve(undefined),
-      db.selectFrom('invoices').selectAll().where('order_id', '=', orderId).executeTakeFirst(),
-      db.selectFrom('order_tax_snapshots').selectAll().where('order_id', '=', orderId).execute(),
-    ]);
+    const [lineItems, timeline, attendees, refunds, checkoutSession, invoice, taxSnapshots] =
+      await Promise.all([
+        repo.getLineItems(orderId),
+        repo.getTimeline(orderId),
+        db.selectFrom('attendees').selectAll().where('order_id', '=', orderId).execute(),
+        db
+          .selectFrom('refunds')
+          .selectAll()
+          .where('order_id', '=', orderId)
+          .orderBy('created_at', 'asc')
+          .execute(),
+        order.checkout_session_id
+          ? db
+              .selectFrom('checkout_sessions')
+              .selectAll()
+              .where('id', '=', order.checkout_session_id)
+              .executeTakeFirst()
+          : Promise.resolve(undefined),
+        db.selectFrom('invoices').selectAll().where('order_id', '=', orderId).executeTakeFirst(),
+        db.selectFrom('order_tax_snapshots').selectAll().where('order_id', '=', orderId).execute(),
+      ]);
     const cart = parseJsonValue(checkoutSession?.cart, {}) as Record<string, unknown>;
-    const buyerFields = cart.buyerFields && typeof cart.buyerFields === 'object'
-      ? (cart.buyerFields as Record<string, unknown>)
-      : {};
-    const attendeeFields = cart.attendeeFields && typeof cart.attendeeFields === 'object'
-      ? (cart.attendeeFields as Record<string, unknown>)
-      : {};
+    const buyerFields =
+      cart.buyerFields && typeof cart.buyerFields === 'object'
+        ? (cart.buyerFields as Record<string, unknown>)
+        : {};
+    const attendeeFields =
+      cart.attendeeFields && typeof cart.attendeeFields === 'object'
+        ? (cart.attendeeFields as Record<string, unknown>)
+        : {};
     const consentSnapshots = Object.fromEntries(
       Object.entries(buyerFields).filter(([, answer]) => {
         return Boolean(
           answer &&
-            typeof answer === 'object' &&
-            'consentText' in answer &&
-            'consentVersion' in answer,
+          typeof answer === 'object' &&
+          'consentText' in answer &&
+          'consentVersion' in answer,
         );
       }),
     );
@@ -190,7 +207,13 @@ export const orderRoutes: FastifyPluginAsync = async (app) => {
     }
 
     const updated = await repo.update(orderId, { status: 'cancelled', cancelled_at: new Date() });
-    await repo.addTimelineEvent(orderId, 'order.cancelled', 'Order cancelled', undefined, principal.id);
+    await repo.addTimelineEvent(
+      orderId,
+      'order.cancelled',
+      'Order cancelled',
+      undefined,
+      principal.id,
+    );
     await writeAuditLog(new AuditLogRepository(db), request, principal, {
       action: 'order.cancelled',
       organizationId: order.organization_id,
@@ -227,7 +250,8 @@ export const orderRoutes: FastifyPluginAsync = async (app) => {
       throw new ValidationError('Order is not in a refundable state');
     }
 
-    const refundAmount = body.amountCents ?? Number(order.total_cents) - Number(order.refunded_cents);
+    const refundAmount =
+      body.amountCents ?? Number(order.total_cents) - Number(order.refunded_cents);
     const alreadyRefunded = Number(order.refunded_cents);
 
     if (refundAmount <= 0) {

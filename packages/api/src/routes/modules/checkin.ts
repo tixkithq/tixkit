@@ -20,7 +20,13 @@ import {
   serializeCheckInList,
   serializeTicket,
 } from '../../http/contracts.js';
-import { scanSchema, syncScanSchema, updateAttendeeSchema, transferTicketSchema, parseBody } from '../../http/schemas.js';
+import {
+  scanSchema,
+  syncScanSchema,
+  updateAttendeeSchema,
+  transferTicketSchema,
+  parseBody,
+} from '../../http/schemas.js';
 
 type Principal = NonNullable<FastifyRequest['principal']>;
 
@@ -59,7 +65,10 @@ export const checkInRoutes: FastifyPluginAsync = async (app) => {
     if (eventOccurrenceId) query = query.where('event_occurrence_id', '=', eventOccurrenceId);
     if (pagination.cursor) query = query.where('id', '>', pagination.cursor);
     const rows = await query.execute();
-    return pageEnvelope(rows.map((row) => serializeAttendee(row)), pagination.limit);
+    return pageEnvelope(
+      rows.map((row) => serializeAttendee(row)),
+      pagination.limit,
+    );
   });
 
   app.get('/attendees', async (request) => {
@@ -86,10 +95,14 @@ export const checkInRoutes: FastifyPluginAsync = async (app) => {
       query = query.where('attendees.event_id', 'in', principal.eventIds);
     }
     const { eventOccurrenceId } = request.query as { eventOccurrenceId?: string };
-    if (eventOccurrenceId) query = query.where('attendees.event_occurrence_id', '=', eventOccurrenceId);
+    if (eventOccurrenceId)
+      query = query.where('attendees.event_occurrence_id', '=', eventOccurrenceId);
     if (pagination.cursor) query = query.where('id', '>', pagination.cursor);
     const rows = await query.execute();
-    return pageEnvelope(rows.map((row) => serializeAttendee(row)), pagination.limit);
+    return pageEnvelope(
+      rows.map((row) => serializeAttendee(row)),
+      pagination.limit,
+    );
   });
 
   app.patch('/attendees/:attendeeId', async (request) => {
@@ -103,10 +116,14 @@ export const checkInRoutes: FastifyPluginAsync = async (app) => {
     const event = await loadEvent(existing.event_id);
     ClerkAuthService.requireResourceTenant(principal, existing, 'Attendee', attendeeId);
     requireEventAccess(principal, event, existing.event_id);
-    const updateData = pickAllowedFields(body, ['firstName', 'lastName', 'email', 'phone', 'status'], {
-      firstName: 'first_name',
-      lastName: 'last_name',
-    });
+    const updateData = pickAllowedFields(
+      body,
+      ['firstName', 'lastName', 'email', 'phone', 'status'],
+      {
+        firstName: 'first_name',
+        lastName: 'last_name',
+      },
+    );
     return serializeAttendee(await repo.update(attendeeId, updateData));
   });
 
@@ -150,9 +167,13 @@ export const checkInRoutes: FastifyPluginAsync = async (app) => {
       },
     );
 
-    return reply.status(result.status).send(
-      result.status === 200 ? serializeTicket(result.body as Record<string, unknown>) : result.body,
-    );
+    return reply
+      .status(result.status)
+      .send(
+        result.status === 200
+          ? serializeTicket(result.body as Record<string, unknown>)
+          : result.body,
+      );
   });
 
   app.get('/events/:eventId/check-in-lists', async (request) => {
@@ -164,7 +185,10 @@ export const checkInRoutes: FastifyPluginAsync = async (app) => {
     requireEventAccess(principal, event, eventId);
     const repo = new CheckInListRepository(db);
     const rows = await repo.findByEvent(eventId, pagination.limit + 1, pagination.cursor);
-    return pageEnvelope(rows.map((row) => serializeCheckInList(row)), pagination.limit);
+    return pageEnvelope(
+      rows.map((row) => serializeCheckInList(row)),
+      pagination.limit,
+    );
   });
 
   app.get('/events/:eventId/check-in-lists/:checkInListId/manifest', async (request) => {
@@ -264,7 +288,8 @@ export const checkInRoutes: FastifyPluginAsync = async (app) => {
         body: {
           outcome: result.outcome,
           ticketId: result.ticketId,
-          message: result.outcome === 'accepted' ? 'Check-in successful' : `Check-in ${result.outcome}`,
+          message:
+            result.outcome === 'accepted' ? 'Check-in successful' : `Check-in ${result.outcome}`,
         },
       };
     };
@@ -414,7 +439,10 @@ export async function processScan(input: {
 }> {
   const allowedTicketTypeIds = new Set(parseJsonValue<string[]>(input.list.ticket_type_ids, []));
 
-  if (input.requireVerifiedTicketId && (!input.verification?.valid || !input.verification.ticketId)) {
+  if (
+    input.requireVerifiedTicketId &&
+    (!input.verification?.valid || !input.verification.ticketId)
+  ) {
     return { outcome: 'invalid', qrHash: input.qrHash, metadata: { reason: 'signature_invalid' } };
   }
 
@@ -426,7 +454,12 @@ export async function processScan(input: {
     return { outcome: 'not_found', qrHash: input.qrHash };
   }
   if (ticket.qr_hash !== input.qrHash) {
-    return { outcome: 'invalid', ticketId: ticket.id, qrHash: input.qrHash, metadata: { reason: 'hash_mismatch' } };
+    return {
+      outcome: 'invalid',
+      ticketId: ticket.id,
+      qrHash: input.qrHash,
+      metadata: { reason: 'hash_mismatch' },
+    };
   }
   if (ticket.event_id !== input.list.event_id) {
     return { outcome: 'wrong_event', ticketId: ticket.id, qrHash: input.qrHash };

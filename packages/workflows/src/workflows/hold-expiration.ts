@@ -1,22 +1,25 @@
 import { proxyActivities, sleep } from '@temporalio/workflow';
 import type { WorkflowActivityResult } from '../shared/types.js';
 
-const { expireStaleHoldsActivity, expireStaleSessionsActivity, processWaitlistOffersActivity } = proxyActivities<{
-  expireStaleHoldsActivity(): Promise<WorkflowActivityResult<{ expiredCount: number }>>;
-  expireStaleSessionsActivity(): Promise<WorkflowActivityResult<{ expiredCount: number }>>;
-  processWaitlistOffersActivity(): Promise<WorkflowActivityResult<{
-    expiredCount: number;
-    offeredCount: number;
-    queuedEmailCount: number;
-  }>>;
-}>({
-  startToCloseTimeout: '60 seconds',
-  retry: {
-    maximumAttempts: 3,
-    initialInterval: '5 seconds',
-    backoffCoefficient: 2,
-  },
-});
+const { expireStaleHoldsActivity, expireStaleSessionsActivity, processWaitlistOffersActivity } =
+  proxyActivities<{
+    expireStaleHoldsActivity(): Promise<WorkflowActivityResult<{ expiredCount: number }>>;
+    expireStaleSessionsActivity(): Promise<WorkflowActivityResult<{ expiredCount: number }>>;
+    processWaitlistOffersActivity(): Promise<
+      WorkflowActivityResult<{
+        expiredCount: number;
+        offeredCount: number;
+        queuedEmailCount: number;
+      }>
+    >;
+  }>({
+    startToCloseTimeout: '60 seconds',
+    retry: {
+      maximumAttempts: 3,
+      initialInterval: '5 seconds',
+      backoffCoefficient: 2,
+    },
+  });
 
 export type HoldExpirationWorkflowInput = {
   version?: number;

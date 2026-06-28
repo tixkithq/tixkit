@@ -2,10 +2,7 @@ import { type Page, type Response as PlaywrightResponse, type TestInfo } from '@
 import { test, expect, requireReachable } from './fixtures/validation-test';
 import { expectNoAxeViolations } from './helpers/axe';
 import { adminBaseUrl, apiBaseUrl } from './helpers/env';
-import {
-  readRefundWorkflowState,
-  seedPaidRefundableOrder,
-} from './helpers/seed';
+import { readRefundWorkflowState, seedPaidRefundableOrder } from './helpers/seed';
 
 async function attachScreenshot(page: Page, testInfo: TestInfo, name: string): Promise<void> {
   await testInfo.attach(name, {
@@ -42,41 +39,48 @@ test.describe('admin refund workflow coverage', () => {
     await expect(page.getByText('$100.00', { exact: true }).first()).toBeVisible();
 
     await page.getByRole('button', { name: 'Refund' }).click();
-    await expect(page.getByRole('heading', { name: `Refund order ${seeded.order.id}` })).toBeVisible();
+    await expect(
+      page.getByRole('heading', { name: `Refund order ${seeded.order.id}` }),
+    ).toBeVisible();
     await page.getByRole('combobox').first().click();
     await page.getByRole('option', { name: 'Partial refund' }).click();
     await page.getByLabel('Amount (USD)').fill('50.00');
-    await page.getByPlaceholder('Describe the refund reason (required)').fill('E2E partial refund validation');
+    await page
+      .getByPlaceholder('Describe the refund reason (required)')
+      .fill('E2E partial refund validation');
     await page.getByLabel('Restore inventory').click();
 
-    const refundResponse = page.waitForResponse((response) => (
-      response.url() === `${apiBaseUrl}/v1/orders/${seeded.order.id}/refunds` &&
-      response.request().method() === 'POST'
-    ));
+    const refundResponse = page.waitForResponse(
+      (response) =>
+        response.url() === `${apiBaseUrl}/v1/orders/${seeded.order.id}/refunds` &&
+        response.request().method() === 'POST',
+    );
     await page.getByRole('button', { name: 'Refund $50.00' }).click();
     expect((await refundResponse).status()).toBe(202);
 
-    await expect.poll(
-      async () => {
-        const state = await readRefundWorkflowState(
-          seeded.order.id,
-          seeded.inventoryPool.id,
-          seeded.ticketIds,
-        );
-        return [
-          state.order.status,
-          state.order.refundedCents,
-          state.refunds.length,
-          state.refunds[0]?.amountCents ?? 0,
-          state.tickets.filter((ticket) => ticket.status === 'void').length,
-          state.inventoryPool.soldCount,
-          state.timelineTypes.includes('ledger.refund'),
-          state.timelineTypes.includes('tickets.voided'),
-          state.emailJobs.length,
-        ].join(':');
-      },
-      { timeout: 60_000 },
-    ).toBe('partially_refunded:5000:1:5000:1:1:true:true:1');
+    await expect
+      .poll(
+        async () => {
+          const state = await readRefundWorkflowState(
+            seeded.order.id,
+            seeded.inventoryPool.id,
+            seeded.ticketIds,
+          );
+          return [
+            state.order.status,
+            state.order.refundedCents,
+            state.refunds.length,
+            state.refunds[0]?.amountCents ?? 0,
+            state.tickets.filter((ticket) => ticket.status === 'void').length,
+            state.inventoryPool.soldCount,
+            state.timelineTypes.includes('ledger.refund'),
+            state.timelineTypes.includes('tickets.voided'),
+            state.emailJobs.length,
+          ].join(':');
+        },
+        { timeout: 60_000 },
+      )
+      .toBe('partially_refunded:5000:1:5000:1:1:true:true:1');
 
     await page.reload();
     await expect(page.getByText('Partially Refunded', { exact: true })).toBeVisible();
@@ -137,38 +141,45 @@ test.describe('admin refund workflow coverage', () => {
     await expect(page.getByText('$100.00', { exact: true }).first()).toBeVisible();
 
     await page.getByRole('button', { name: 'Refund' }).click();
-    await expect(page.getByRole('heading', { name: `Refund order ${seeded.order.id}` })).toBeVisible();
-    await page.getByPlaceholder('Describe the refund reason (required)').fill('E2E full refund validation');
+    await expect(
+      page.getByRole('heading', { name: `Refund order ${seeded.order.id}` }),
+    ).toBeVisible();
+    await page
+      .getByPlaceholder('Describe the refund reason (required)')
+      .fill('E2E full refund validation');
     await page.getByLabel('Restore inventory').click();
 
-    const refundResponse = page.waitForResponse((response) => (
-      response.url() === `${apiBaseUrl}/v1/orders/${seeded.order.id}/refunds` &&
-      response.request().method() === 'POST'
-    ));
+    const refundResponse = page.waitForResponse(
+      (response) =>
+        response.url() === `${apiBaseUrl}/v1/orders/${seeded.order.id}/refunds` &&
+        response.request().method() === 'POST',
+    );
     await page.getByRole('button', { name: 'Refund $100.00' }).click();
     expect((await refundResponse).status()).toBe(202);
 
-    await expect.poll(
-      async () => {
-        const state = await readRefundWorkflowState(
-          seeded.order.id,
-          seeded.inventoryPool.id,
-          seeded.ticketIds,
-        );
-        return [
-          state.order.status,
-          state.order.refundedCents,
-          state.refunds.length,
-          state.refunds[0]?.amountCents ?? 0,
-          state.tickets.filter((ticket) => ticket.status === 'void').length,
-          state.inventoryPool.soldCount,
-          state.timelineTypes.includes('ledger.refund'),
-          state.timelineTypes.includes('tickets.voided'),
-          state.emailJobs.length,
-        ].join(':');
-      },
-      { timeout: 60_000 },
-    ).toBe('refunded:10000:1:10000:2:0:true:true:1');
+    await expect
+      .poll(
+        async () => {
+          const state = await readRefundWorkflowState(
+            seeded.order.id,
+            seeded.inventoryPool.id,
+            seeded.ticketIds,
+          );
+          return [
+            state.order.status,
+            state.order.refundedCents,
+            state.refunds.length,
+            state.refunds[0]?.amountCents ?? 0,
+            state.tickets.filter((ticket) => ticket.status === 'void').length,
+            state.inventoryPool.soldCount,
+            state.timelineTypes.includes('ledger.refund'),
+            state.timelineTypes.includes('tickets.voided'),
+            state.emailJobs.length,
+          ].join(':');
+        },
+        { timeout: 60_000 },
+      )
+      .toBe('refunded:10000:1:10000:2:0:true:true:1');
 
     await page.reload();
     await expect(page.getByText('Refunded', { exact: true }).first()).toBeVisible();

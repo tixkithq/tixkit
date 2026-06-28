@@ -64,7 +64,10 @@ export class PaymentIntentRepository extends BaseRepository {
       .executeTakeFirst();
   }
 
-  async findByCheckoutSessionAndProviderIntentId(checkoutSessionId: string, providerIntentId: string) {
+  async findByCheckoutSessionAndProviderIntentId(
+    checkoutSessionId: string,
+    providerIntentId: string,
+  ) {
     return this.db
       .selectFrom('payment_intents')
       .selectAll()
@@ -131,7 +134,11 @@ export class PaymentCompensationRepository extends BaseRepository {
     );
   }
 
-  async findByProviderIntent(provider: string, providerIntentId: string, checkoutSessionId: string) {
+  async findByProviderIntent(
+    provider: string,
+    providerIntentId: string,
+    checkoutSessionId: string,
+  ) {
     return this.db
       .selectFrom('payment_compensations')
       .selectAll()
@@ -234,5 +241,13 @@ export class PaymentEventRepository extends BaseRepository {
 
   async markProcessed(id: string) {
     return this.updateReturning('payment_events', id, { processed_at: new Date() });
+  }
+
+  async markProcessedByProviderEventId(provider: string, providerEventId: string) {
+    const event = await this.findByProviderEventId(provider, providerEventId);
+    if (!event) {
+      throw new Error(`Payment event not found for provider event ${provider}:${providerEventId}`);
+    }
+    return this.markProcessed(event.id);
   }
 }

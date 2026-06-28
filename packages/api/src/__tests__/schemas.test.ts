@@ -166,8 +166,59 @@ describe('API mutation schema drift guards', () => {
   });
 
   it('accepts paymentAccountId on brand updates', () => {
-    expect(parseBody(updateBrandSchema, { paymentAccountId: 'pa_1' }).paymentAccountId).toBe('pa_1');
+    expect(parseBody(updateBrandSchema, { paymentAccountId: 'pa_1' }).paymentAccountId).toBe(
+      'pa_1',
+    );
     expect(parseBody(updateBrandSchema, { paymentAccountId: null }).paymentAccountId).toBeNull();
+  });
+
+  it('accepts safe brand support and legal urls', () => {
+    const parsed = parseBody(updateBrandSchema, {
+      supportUrl: 'http://help.example.test',
+      legalUrls: {
+        terms: 'https://example.test/terms',
+        privacy: 'http://example.test/privacy',
+        refundPolicy: 'https://example.test/refunds',
+      },
+    });
+
+    expect(parsed.supportUrl).toBe('http://help.example.test');
+    expect(parsed.legalUrls).toEqual({
+      terms: 'https://example.test/terms',
+      privacy: 'http://example.test/privacy',
+      refundPolicy: 'https://example.test/refunds',
+    });
+  });
+
+  it('rejects unsafe brand support and legal urls', () => {
+    expect(() =>
+      parseBody(updateBrandSchema, {
+        supportUrl: 'javascript:alert(1)',
+      }),
+    ).toThrow(ValidationError);
+
+    expect(() =>
+      parseBody(updateBrandSchema, {
+        legalUrls: { terms: 'data:text/html,<script>alert(1)</script>' },
+      }),
+    ).toThrow(ValidationError);
+
+    expect(() =>
+      parseBody(updateBrandSchema, {
+        legalUrls: { privacy: 'file:///etc/passwd' },
+      }),
+    ).toThrow(ValidationError);
+  });
+
+  it('rejects unknown brand legal url keys', () => {
+    expect(() =>
+      parseBody(updateBrandSchema, {
+        legalUrls: {
+          terms: 'https://example.test/terms',
+          imprint: 'https://example.test/imprint',
+        },
+      }),
+    ).toThrow(ValidationError);
   });
 
   it('accepts full editable event detail fields on event updates', () => {
@@ -200,7 +251,9 @@ describe('API mutation schema drift guards', () => {
       expiresAt: '2026-08-01T00:00:00.000Z',
     });
     expect(parsed.value).toBe('VIP123');
-    expect(() => parseBody(createAccessRuleSchema, { type: 'code', value: '' })).toThrow(ValidationError);
+    expect(() => parseBody(createAccessRuleSchema, { type: 'code', value: '' })).toThrow(
+      ValidationError,
+    );
   });
 
   it('validates atomic ticket type batch payloads', () => {
@@ -217,9 +270,7 @@ describe('API mutation schema drift guards', () => {
         name: 'VIP pool',
         totalCapacity: 50,
       },
-      accessRules: [
-        { type: 'code', value: 'VIP123' },
-      ],
+      accessRules: [{ type: 'code', value: 'VIP123' }],
     });
     expect(create.inventoryPool?.totalCapacity).toBe(50);
     expect(create.accessRules?.[0]?.value).toBe('VIP123');
@@ -229,9 +280,7 @@ describe('API mutation schema drift guards', () => {
         status: 'active',
         visibility: 'locked',
       },
-      accessRules: [
-        { type: 'code', value: 'VIP456', maxUses: 10 },
-      ],
+      accessRules: [{ type: 'code', value: 'VIP456', maxUses: 10 }],
     });
     expect(update.ticketType.status).toBe('active');
     expect(update.accessRules?.[0]?.maxUses).toBe(10);
@@ -276,7 +325,9 @@ describe('API mutation schema drift guards', () => {
     expect(update.categoryId).toBeNull();
     expect(update.availableUntil).toBeNull();
 
-    expect(() => parseBody(createProductSchema, { name: 'Bad', priceCents: -1, currency: 'USD' })).toThrow(ValidationError);
+    expect(() =>
+      parseBody(createProductSchema, { name: 'Bad', priceCents: -1, currency: 'USD' }),
+    ).toThrow(ValidationError);
     expect(() => parseBody(updateProductSchema, { status: 'archived' })).toThrow(ValidationError);
   });
 });
@@ -310,9 +361,9 @@ describe('webhook and OAuth URL policy', () => {
   });
 
   it('applies webhook URL policy to updates', () => {
-    expect(() => parseBody(updateWebhookEndpointSchema, { url: 'https://127.0.0.1/tixkit' })).toThrow(
-      ValidationError,
-    );
+    expect(() =>
+      parseBody(updateWebhookEndpointSchema, { url: 'https://127.0.0.1/tixkit' }),
+    ).toThrow(ValidationError);
   });
 
   it('allows localhost http OAuth redirects in test/dev only', () => {
@@ -345,9 +396,9 @@ describe('webhook and OAuth URL policy', () => {
 
 describe('parseBody strict mode', () => {
   it('rejects unknown fields in refundSchema', () => {
-    expect(() =>
-      parseBody(refundSchema, { reason: 'test', unknownField: 'bad' }),
-    ).toThrow(ValidationError);
+    expect(() => parseBody(refundSchema, { reason: 'test', unknownField: 'bad' })).toThrow(
+      ValidationError,
+    );
   });
 
   it('accepts valid refund body', () => {

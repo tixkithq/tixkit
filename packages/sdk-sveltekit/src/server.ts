@@ -51,7 +51,9 @@ export function verifyTixkitWebhook(input: {
       input.signature
         .split(',')
         .map((part) => part.trim().split('='))
-        .filter((part): part is [string, string] => part.length === 2 && part[0] !== '' && part[1] !== ''),
+        .filter(
+          (part): part is [string, string] => part.length === 2 && part[0] !== '' && part[1] !== '',
+        ),
     );
     const timestamp = Number(parts.get('t'));
     const received = parts.get('v1');
@@ -61,7 +63,9 @@ export function verifyTixkitWebhook(input: {
     const ageSeconds = Math.abs(Math.floor(Date.now() / 1000) - timestamp);
     if (ageSeconds > toleranceSeconds) return false;
 
-    const expected = createHmac('sha256', input.secret).update(`${timestamp}.${input.body}`).digest('hex');
+    const expected = createHmac('sha256', input.secret)
+      .update(`${timestamp}.${input.body}`)
+      .digest('hex');
     const a = Buffer.from(expected, 'hex');
     const b = Buffer.from(received, 'hex');
     if (a.length !== b.length) return false;
@@ -142,7 +146,8 @@ function parseCheckoutItems(formData: FormData): {
       if (!ticketTypeId) continue;
       const quantity = rawQuantity ? parsePositiveIntegerString(rawQuantity) : null;
       if (!quantity) {
-        fieldErrors.items = 'Encoded items must use ticketTypeId=quantity pairs with positive integer quantities.';
+        fieldErrors.items =
+          'Encoded items must use ticketTypeId=quantity pairs with positive integer quantities.';
         continue;
       }
       items.push({ ticketTypeId, quantity });
@@ -160,7 +165,9 @@ export function createCheckoutFormAction(
   client: TixkitClient,
   defaults: { successUrl?: string; cancelUrl?: string } = {},
 ) {
-  return async function checkoutFormAction(event: CheckoutFormActionRequest): Promise<CheckoutFormActionResult> {
+  return async function checkoutFormAction(
+    event: CheckoutFormActionRequest,
+  ): Promise<CheckoutFormActionResult> {
     const formData = await event.request.formData();
     const eventId = optionalString(formData.get('eventId'));
     const idempotencyKey = optionalString(formData.get('idempotencyKey'));

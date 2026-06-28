@@ -30,7 +30,9 @@ describe('buildStartupFailureMessage', () => {
   it('redacts database credentials from the original error detail', () => {
     const databaseUrl = 'postgres://user:supersecret@db.example/prod';
     const message = buildStartupFailureMessage(
-      new Error(`password authentication failed for user "user" while connecting to ${databaseUrl}`),
+      new Error(
+        `password authentication failed for user "user" while connecting to ${databaseUrl}`,
+      ),
       {
         service: 'API',
         databaseUrl,

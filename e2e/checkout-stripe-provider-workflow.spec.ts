@@ -320,10 +320,7 @@ test.describe('Stripe provider hosted checkout workflow', () => {
         response.url().endsWith('/confirm'),
     );
     await page.getByRole('button', { name: 'Pay $25.00' }).click();
-    const pendingPayment = (await expectJsonResponse(
-      await pendingPaymentResponsePromise,
-      200,
-    )) as {
+    const pendingPayment = (await expectJsonResponse(await pendingPaymentResponsePromise, 200)) as {
       sessionId: string;
       status: string;
       paymentIntentId: string;
@@ -354,10 +351,7 @@ test.describe('Stripe provider hosted checkout workflow', () => {
     const confirmationUrl = new URL(`${checkoutBaseUrl}/checkout/confirmation`);
     confirmationUrl.searchParams.set('sessionId', pendingPayment.sessionId);
     confirmationUrl.searchParams.set('payment_intent', pendingPayment.paymentIntentId);
-    confirmationUrl.searchParams.set(
-      'payment_intent_client_secret',
-      pendingPayment.clientSecret,
-    );
+    confirmationUrl.searchParams.set('payment_intent_client_secret', pendingPayment.clientSecret);
     confirmationUrl.searchParams.set('redirect_status', 'succeeded');
     await page.goto(confirmationUrl.toString());
     await expect(page).toHaveURL(/\/checkout\/confirmation\?/);
@@ -443,18 +437,25 @@ test.describe('Stripe provider hosted checkout workflow', () => {
 
     await page.goto(`${adminBaseUrl}/orders/${state!.order.id}`);
     await expect(page.getByRole('heading', { name: state!.order.id })).toBeVisible();
-    await expect(page.getByText(`stripe-ui+${suffix}@example.com`, { exact: true }).first()).toBeVisible();
+    await expect(
+      page.getByText(`stripe-ui+${suffix}@example.com`, { exact: true }).first(),
+    ).toBeVisible();
     await expect(page.getByText('$25.00', { exact: true }).first()).toBeVisible();
 
     await page.getByRole('button', { name: 'Refund' }).click();
-    await expect(page.getByRole('heading', { name: `Refund order ${state!.order.id}` })).toBeVisible();
-    await page.getByPlaceholder('Describe the refund reason (required)').fill('E2E Stripe provider refund validation');
+    await expect(
+      page.getByRole('heading', { name: `Refund order ${state!.order.id}` }),
+    ).toBeVisible();
+    await page
+      .getByPlaceholder('Describe the refund reason (required)')
+      .fill('E2E Stripe provider refund validation');
     await page.getByLabel('Restore inventory').click();
 
-    const refundResponse = page.waitForResponse((response) => (
-      response.url() === `${apiBaseUrl}/v1/orders/${state!.order.id}/refunds` &&
-      response.request().method() === 'POST'
-    ));
+    const refundResponse = page.waitForResponse(
+      (response) =>
+        response.url() === `${apiBaseUrl}/v1/orders/${state!.order.id}/refunds` &&
+        response.request().method() === 'POST',
+    );
     await page.getByRole('button', { name: 'Refund $25.00' }).click();
     await expectJsonResponse(await refundResponse, 202);
 
@@ -487,7 +488,9 @@ test.describe('Stripe provider hosted checkout workflow', () => {
     await page.reload();
     await expect(page.getByText('Refunded', { exact: true }).first()).toBeVisible();
     await expect(page.getByText('-$25.00', { exact: true }).first()).toBeVisible();
-    await expect(page.getByText('E2E Stripe provider refund validation', { exact: true })).toBeVisible();
+    await expect(
+      page.getByText('E2E Stripe provider refund validation', { exact: true }),
+    ).toBeVisible();
     await attachScreenshot(page, testInfo, 'stripe-provider-admin-refund');
     await expectNoAxeViolations(page, testInfo);
   });

@@ -69,11 +69,13 @@ describe('Next server webhook helpers', () => {
     const onEvent = vi.fn(async () => ({ ok: true }));
     const POST = createTixkitWebhookRouteHandler({ secret, onEvent });
 
-    const response = await POST(new Request('https://example.com/api/tixkit/webhooks', {
-      method: 'POST',
-      body,
-      headers: { 'x-tixkit-signature': signature(body, secret, timestamp) },
-    }));
+    const response = await POST(
+      new Request('https://example.com/api/tixkit/webhooks', {
+        method: 'POST',
+        body,
+        headers: { 'x-tixkit-signature': signature(body, secret, timestamp) },
+      }),
+    );
 
     expect(response.status).toBe(200);
     await expect(response.json()).resolves.toEqual({ ok: true });
@@ -86,20 +88,24 @@ describe('Next server webhook helpers', () => {
   it('rejects webhook route handlers with invalid signatures', async () => {
     const POST = createTixkitWebhookRouteHandler({ secret: 'whsec_test' });
 
-    const response = await POST(new Request('https://example.com/api/tixkit/webhooks', {
-      method: 'POST',
-      body: JSON.stringify({ id: 'wevt_1' }),
-      headers: { 'x-tixkit-signature': 't=1,v1=bad' },
-    }));
+    const response = await POST(
+      new Request('https://example.com/api/tixkit/webhooks', {
+        method: 'POST',
+        body: JSON.stringify({ id: 'wevt_1' }),
+        headers: { 'x-tixkit-signature': 't=1,v1=bad' },
+      }),
+    );
 
     expect(response.status).toBe(401);
     await expect(response.json()).resolves.toEqual({ error: 'Invalid signature' });
   });
 
   it('creates checkout sessions from App Router-compatible route handlers', async () => {
-    const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue(
-      new Response(JSON.stringify({ id: 'cs_1', status: 'open' }), { status: 201 }),
-    );
+    const fetchMock = vi
+      .spyOn(globalThis, 'fetch')
+      .mockResolvedValue(
+        new Response(JSON.stringify({ id: 'cs_1', status: 'open' }), { status: 201 }),
+      );
     const POST = createCheckoutSessionRouteHandler({
       apiKey: 'tk_test_123',
       apiBaseUrl: 'https://api.example.test',
@@ -107,15 +113,17 @@ describe('Next server webhook helpers', () => {
       defaultCancelUrl: 'https://app.example.test/cancel',
     });
 
-    const response = await POST(new Request('https://app.example.test/api/checkout', {
-      method: 'POST',
-      body: JSON.stringify({
-        eventId: 'evt_1',
-        items: [{ ticketTypeId: 'tt_1', quantity: 1 }],
-        buyer: { email: 'buyer@example.test' },
+    const response = await POST(
+      new Request('https://app.example.test/api/checkout', {
+        method: 'POST',
+        body: JSON.stringify({
+          eventId: 'evt_1',
+          items: [{ ticketTypeId: 'tt_1', quantity: 1 }],
+          buyer: { email: 'buyer@example.test' },
+        }),
+        headers: { 'idempotency-key': 'idem_1' },
       }),
-      headers: { 'idempotency-key': 'idem_1' },
-    }));
+    );
 
     expect(response.status).toBe(201);
     await expect(response.json()).resolves.toEqual({ id: 'cs_1', status: 'open' });
@@ -144,10 +152,12 @@ describe('Next server webhook helpers', () => {
       apiBaseUrl: 'https://api.example.test',
     });
 
-    const response = await POST(new Request('https://app.example.test/api/checkout', {
-      method: 'POST',
-      body: JSON.stringify({ eventId: 'evt_1', items: [] }),
-    }));
+    const response = await POST(
+      new Request('https://app.example.test/api/checkout', {
+        method: 'POST',
+        body: JSON.stringify({ eventId: 'evt_1', items: [] }),
+      }),
+    );
 
     expect(response.status).toBe(400);
     await expect(response.json()).resolves.toEqual({ error: 'Missing idempotency key' });

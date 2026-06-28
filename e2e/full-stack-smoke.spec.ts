@@ -39,12 +39,8 @@ test.describe('full-stack smoke', () => {
     await expect(page.getByText(product.name, { exact: true })).toBeVisible();
     await expect(page.getByText('Free', { exact: true })).toBeVisible();
 
-    await page
-      .getByRole('button', { name: `Increase ${ticketType.name} quantity` })
-      .click();
-    await page
-      .getByRole('button', { name: `Increase ${product.name} quantity` })
-      .click();
+    await page.getByRole('button', { name: `Increase ${ticketType.name} quantity` }).click();
+    await page.getByRole('button', { name: `Increase ${product.name} quantity` }).click();
     await page.getByLabel('Email').fill(`buyer+${suffix}@example.com`);
     await page.getByLabel('First name').fill('Playwright');
     await page.getByLabel('Last name').fill('Buyer');
@@ -52,9 +48,7 @@ test.describe('full-stack smoke', () => {
 
     await expect(page.getByRole('button', { name: 'Edit order' })).toBeVisible();
     await expect(page.getByText(product.name, { exact: true })).toBeVisible();
-    await expect(
-      page.getByRole('button', { name: 'Place free order' }),
-    ).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Place free order' })).toBeVisible();
     await expect(page.getByText(/Session reserved until/)).toBeVisible();
 
     await page.getByRole('button', { name: 'Place free order' }).click();

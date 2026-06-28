@@ -28,8 +28,14 @@ describe('QrService verification', () => {
       const payload = JSON.stringify({ ticketId: 'tkt_abc', code: 'TK-123456', ts: Date.now() });
       const signature = createHmac('sha256', SIGNING_KEY).update(payload).digest('hex');
 
-      const tamperedPayload = JSON.stringify({ ticketId: 'tkt_hacked', code: 'TK-123456', ts: Date.now() });
-      const qrPayload = Buffer.from(JSON.stringify({ p: tamperedPayload, s: signature })).toString('base64url');
+      const tamperedPayload = JSON.stringify({
+        ticketId: 'tkt_hacked',
+        code: 'TK-123456',
+        ts: Date.now(),
+      });
+      const qrPayload = Buffer.from(JSON.stringify({ p: tamperedPayload, s: signature })).toString(
+        'base64url',
+      );
 
       const result = qrService.getQrPayload(qrPayload);
       expect(result.valid).toBe(false);
@@ -38,7 +44,9 @@ describe('QrService verification', () => {
     it('rejects tampered signature', () => {
       const payload = JSON.stringify({ ticketId: 'tkt_abc', code: 'TK-123456', ts: Date.now() });
       const fakeSignature = 'a'.repeat(64);
-      const qrPayload = Buffer.from(JSON.stringify({ p: payload, s: fakeSignature })).toString('base64url');
+      const qrPayload = Buffer.from(JSON.stringify({ p: payload, s: fakeSignature })).toString(
+        'base64url',
+      );
 
       const result = qrService.getQrPayload(qrPayload);
       expect(result.valid).toBe(false);

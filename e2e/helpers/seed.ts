@@ -75,14 +75,24 @@ export type PaidCheckoutCaptureState = {
     paymentProvider: string | null;
     paymentIntentId: string | null;
   };
-  paymentIntent: { provider: string; providerIntentId: string; status: string; orderId: string | null };
+  paymentIntent: {
+    provider: string;
+    providerIntentId: string;
+    status: string;
+    orderId: string | null;
+  };
   hold: { status: string; quantity: number };
   inventoryPool: { soldCount: number };
   ticketCount: number;
   ticketIds: string[];
   ticketEmailJob: {
     templateKey: string;
-    attachments: Array<{ filename: string; contentType: string; content: string; contentEncoding?: 'base64' }>;
+    attachments: Array<{
+      filename: string;
+      contentType: string;
+      content: string;
+      contentEncoding?: 'base64';
+    }>;
   } | null;
 };
 
@@ -352,7 +362,8 @@ export async function seedTicketVariantCheckoutEvent(
         brandId: devBrandId,
         slug: `e2e-ticket-variants-${suffix}`,
         title: eventTitle,
-        description: 'Seeded by Playwright for hidden, locked, donation, and shared-pool checkout coverage.',
+        description:
+          'Seeded by Playwright for hidden, locked, donation, and shared-pool checkout coverage.',
         currency: 'USD',
         timezone: 'America/New_York',
         startsAt: '2026-10-20T23:00:00.000Z',
@@ -883,7 +894,9 @@ export async function seedPaidRefundableOrder(
   };
 }
 
-export async function seedMessagingPrerequisites(suffix: string): Promise<SeededMessagingPrerequisites> {
+export async function seedMessagingPrerequisites(
+  suffix: string,
+): Promise<SeededMessagingPrerequisites> {
   const now = new Date();
   const safeSuffix = safeIdPart(suffix);
   const templateId = `ntf_e2e_${safeSuffix}`.slice(0, 32);
@@ -1106,7 +1119,15 @@ export async function readPaidCheckoutCaptureState(
     const [order, paymentIntent, hold, inventoryPool, tickets, ticketEmailJob] = await Promise.all([
       db
         .selectFrom('orders')
-        .select(['id', 'status', 'subtotal_cents', 'discount_cents', 'total_cents', 'payment_provider', 'payment_intent_id'])
+        .select([
+          'id',
+          'status',
+          'subtotal_cents',
+          'discount_cents',
+          'total_cents',
+          'payment_provider',
+          'payment_intent_id',
+        ])
         .where('id', '=', session.order_id)
         .executeTakeFirstOrThrow(),
       db
@@ -1124,11 +1145,7 @@ export async function readPaidCheckoutCaptureState(
         .select(['sold_count'])
         .where('id', '=', inventoryPoolId)
         .executeTakeFirstOrThrow(),
-      db
-        .selectFrom('tickets')
-        .select(['id'])
-        .where('order_id', '=', session.order_id)
-        .execute(),
+      db.selectFrom('tickets').select(['id']).where('order_id', '=', session.order_id).execute(),
       db
         .selectFrom('email_jobs')
         .select(['template_key', 'variables'])
@@ -1137,19 +1154,23 @@ export async function readPaidCheckoutCaptureState(
     ]);
     const ticketEmailVariables = parseJsonRecord(ticketEmailJob?.variables);
     const attachments = Array.isArray(ticketEmailVariables.attachments)
-      ? ticketEmailVariables.attachments.filter((attachment): attachment is {
-          filename: string;
-          contentType: string;
-          content: string;
-          contentEncoding?: 'base64';
-        } => {
-          const candidate = attachment as Record<string, unknown>;
-          return (
-            typeof candidate.filename === 'string' &&
-            typeof candidate.contentType === 'string' &&
-            typeof candidate.content === 'string'
-          );
-        })
+      ? ticketEmailVariables.attachments.filter(
+          (
+            attachment,
+          ): attachment is {
+            filename: string;
+            contentType: string;
+            content: string;
+            contentEncoding?: 'base64';
+          } => {
+            const candidate = attachment as Record<string, unknown>;
+            return (
+              typeof candidate.filename === 'string' &&
+              typeof candidate.contentType === 'string' &&
+              typeof candidate.content === 'string'
+            );
+          },
+        )
       : [];
 
     return {
@@ -1198,7 +1219,7 @@ function parseJsonRecord(value: unknown): Record<string, unknown> {
   if (typeof value !== 'string') return {};
   try {
     const parsed = JSON.parse(value);
-    return parsed && typeof parsed === 'object' ? parsed as Record<string, unknown> : {};
+    return parsed && typeof parsed === 'object' ? (parsed as Record<string, unknown>) : {};
   } catch {
     return {};
   }
@@ -1294,15 +1315,13 @@ export async function seedAffiliateAttributionForOrder(
   return { affiliate, attribution };
 }
 
-export async function seedTaxSnapshotForOrder(
-  input: {
-    eventId: string;
-    orderId: string;
-    suffix: string;
-    taxableAmountCents?: number;
-    taxCollectedCents?: number;
-  },
-): Promise<SeededTaxSnapshot> {
+export async function seedTaxSnapshotForOrder(input: {
+  eventId: string;
+  orderId: string;
+  suffix: string;
+  taxableAmountCents?: number;
+  taxCollectedCents?: number;
+}): Promise<SeededTaxSnapshot> {
   const safeSuffix = compactIdPart(input.suffix);
   const taxRule = {
     id: `tax_e2e_${safeSuffix}`.slice(0, 32),
@@ -1397,11 +1416,7 @@ export async function readCheckoutOrderState(
         .select(['sold_count'])
         .where('id', '=', inventoryPoolId)
         .executeTakeFirstOrThrow(),
-      db
-        .selectFrom('tickets')
-        .select(['id'])
-        .where('order_id', '=', session.order_id)
-        .execute(),
+      db.selectFrom('tickets').select(['id']).where('order_id', '=', session.order_id).execute(),
     ]);
 
     return {
@@ -1427,9 +1442,11 @@ export async function readCheckoutOrderState(
   });
 }
 
-export async function seedCheckInListForOrder(
-  input: { eventId: string; orderId: string; suffix: string },
-): Promise<SeededCheckInList> {
+export async function seedCheckInListForOrder(input: {
+  eventId: string;
+  orderId: string;
+  suffix: string;
+}): Promise<SeededCheckInList> {
   return withE2eDb(async (db) => {
     const tickets = await db
       .selectFrom('tickets')
@@ -1451,7 +1468,9 @@ export async function seedCheckInListForOrder(
         id: checkInListId,
         event_id: input.eventId,
         name: checkInListName,
-        ticket_type_ids: JSON.stringify([...new Set(tickets.map((ticket) => ticket.ticket_type_id))]),
+        ticket_type_ids: JSON.stringify([
+          ...new Set(tickets.map((ticket) => ticket.ticket_type_id)),
+        ]),
         status: 'active',
         created_at: now,
         updated_at: now,
@@ -1472,9 +1491,10 @@ export async function seedCheckInListForOrder(
   });
 }
 
-export async function readCheckInWorkflowState(
-  input: { checkInListId: string; ticketIds: string[] },
-): Promise<CheckInWorkflowState> {
+export async function readCheckInWorkflowState(input: {
+  checkInListId: string;
+  ticketIds: string[];
+}): Promise<CheckInWorkflowState> {
   return withE2eDb(async (db) => {
     const [tickets, scanLogs] = await Promise.all([
       db

@@ -8,11 +8,38 @@ const {
   restoreInventoryActivity,
   notifyRefundActivity,
 } = proxyActivities<{
-  processRefundActivity(input: { orderId: string; amountCents: number; reason: string; idempotencyKey?: string; nonce: string }): Promise<WorkflowActivityResult<{ providerRefundId: string; status: string }>>;
-  updateLedgerActivity(input: { orderId: string; refundAmountCents: number; providerRefundId: string }): Promise<WorkflowActivityResult<{ balanced: boolean }>>;
-  voidTicketsActivity(input: { orderId: string; amountCents: number; isFullRefund: boolean; providerRefundId?: string }): Promise<WorkflowActivityResult<{ voidedCount: number; voidedTicketIds: string[] }>>;
-  restoreInventoryActivity(input: { orderId: string; amountCents: number; isFullRefund: boolean; providerRefundId?: string; voidedTicketIds?: string[] }): Promise<WorkflowActivityResult<{ restored: number }>>;
-  notifyRefundActivity(input: { orderId: string; toEmail: string; tenantId: string; brandId: string; providerRefundId?: string }): Promise<WorkflowActivityResult<{ notified: boolean; jobId?: string }>>;
+  processRefundActivity(input: {
+    orderId: string;
+    amountCents: number;
+    reason: string;
+    idempotencyKey?: string;
+    nonce: string;
+  }): Promise<WorkflowActivityResult<{ providerRefundId: string; status: string }>>;
+  updateLedgerActivity(input: {
+    orderId: string;
+    refundAmountCents: number;
+    providerRefundId: string;
+  }): Promise<WorkflowActivityResult<{ balanced: boolean }>>;
+  voidTicketsActivity(input: {
+    orderId: string;
+    amountCents: number;
+    isFullRefund: boolean;
+    providerRefundId?: string;
+  }): Promise<WorkflowActivityResult<{ voidedCount: number; voidedTicketIds: string[] }>>;
+  restoreInventoryActivity(input: {
+    orderId: string;
+    amountCents: number;
+    isFullRefund: boolean;
+    providerRefundId?: string;
+    voidedTicketIds?: string[];
+  }): Promise<WorkflowActivityResult<{ restored: number }>>;
+  notifyRefundActivity(input: {
+    orderId: string;
+    toEmail: string;
+    tenantId: string;
+    brandId: string;
+    providerRefundId?: string;
+  }): Promise<WorkflowActivityResult<{ notified: boolean; jobId?: string }>>;
 }>({
   startToCloseTimeout: '30 seconds',
   retry: {

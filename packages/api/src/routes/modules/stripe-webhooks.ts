@@ -20,7 +20,12 @@ export const stripeWebhookRoutes: FastifyPluginAsync = async (app) => {
     }
     const rawBody = (request as unknown as { rawBody?: string }).rawBody;
     if (!rawBody) {
-      return reply.status(400).send({ error: { code: 'MISSING_RAW_BODY', message: 'Raw body is required for signature verification' } });
+      return reply.status(400).send({
+        error: {
+          code: 'MISSING_RAW_BODY',
+          message: 'Raw body is required for signature verification',
+        },
+      });
     }
     const signature = request.headers['stripe-signature'] as string;
 
@@ -69,6 +74,7 @@ export const stripeWebhookRoutes: FastifyPluginAsync = async (app) => {
 
     if (event.type === 'account.updated') {
       await syncStripeConnectAccount(db, event.data.object as Stripe.Account);
+      await eventRepo.markProcessed(storedEvent.id);
     } else {
       // Start the durable reconciliation workflow; never process payment state in
       // the request handler. Reconciliation expects the inner Stripe object
@@ -82,17 +88,28 @@ export const stripeWebhookRoutes: FastifyPluginAsync = async (app) => {
     }
 
     // Signal the checkout workflow for payment lifecycle events so it can finalize or fail.
-    if (event.type === 'payment_intent.succeeded' || event.type === 'payment_intent.payment_failed') {
+    if (
+      event.type === 'payment_intent.succeeded' ||
+      event.type === 'payment_intent.payment_failed'
+    ) {
       const paymentIntent = event.data.object as Stripe.PaymentIntent;
       const checkoutSessionId = paymentIntent.metadata?.checkoutSessionId;
       if (checkoutSessionId) {
-        const isTrustedCheckoutPaymentIntent = await validateStripeCheckoutPaymentIntent(db, event, paymentIntent, checkoutSessionId);
+        const isTrustedCheckoutPaymentIntent = await validateStripeCheckoutPaymentIntent(
+          db,
+          event,
+          paymentIntent,
+          checkoutSessionId,
+        );
         if (isTrustedCheckoutPaymentIntent) {
           try {
             if (event.type === 'payment_intent.succeeded') {
               await temporalClient.signalPaymentSucceeded(checkoutSessionId, paymentIntent.id);
             } else {
-              await temporalClient.signalPaymentFailed(checkoutSessionId, paymentIntent.last_payment_error?.message ?? 'Payment failed');
+              await temporalClient.signalPaymentFailed(
+                checkoutSessionId,
+                paymentIntent.last_payment_error?.message ?? 'Payment failed',
+              );
             }
           } catch {
             // If the checkout workflow is no longer running, reconciliation still owns provider state convergence.
@@ -100,10 +117,6 @@ export const stripeWebhookRoutes: FastifyPluginAsync = async (app) => {
         }
       }
     }
-
-    // Mark only after durable reconciliation has been accepted. Stripe can
-    // safely replay unprocessed rows if this final update fails.
-    await eventRepo.markProcessed(storedEvent.id);
 
     return reply.status(200).send({ received: true, duplicate: false });
   });
@@ -115,7 +128,11 @@ async function validateStripeCheckoutPaymentIntent(
   paymentIntent: Stripe.PaymentIntent,
   checkoutSessionId: string,
 ): Promise<boolean> {
-  if (!paymentIntent.id || typeof paymentIntent.amount !== 'number' || typeof paymentIntent.currency !== 'string') {
+  if (
+    !paymentIntent.id ||
+    typeof paymentIntent.amount !== 'number' ||
+    typeof paymentIntent.currency !== 'string'
+  ) {
     return false;
   }
 
@@ -186,7 +203,8 @@ async function resolveStripeEventTenantId(
 
   // Resolve tenant via the connected account (Stripe Connect).
   const stripeAccount = (event as unknown as { account?: string }).account;
-  const accountObjectId = event.type === 'account.updated' && typeof object.id === 'string' ? object.id : undefined;
+  const accountObjectId =
+    event.type === 'account.updated' && typeof object.id === 'string' ? object.id : undefined;
   const connectedAccountId = stripeAccount ?? accountObjectId;
   if (connectedAccountId) {
     const paymentAccount = await db

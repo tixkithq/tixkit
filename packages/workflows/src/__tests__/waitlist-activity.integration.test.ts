@@ -104,95 +104,113 @@ describe('processWaitlistOffersActivity', () => {
 });
 
 async function seedBaseRows(db: Database) {
-  await db.insertInto('tenants').values({
-    id: TENANT_ID,
-    name: 'Waitlist Activity Tenant',
-    status: 'active',
-    plan: 'test',
-    created_at: new Date(),
-    updated_at: new Date(),
-  }).execute();
-  await db.insertInto('organizations').values({
-    id: ORG_ID,
-    tenant_id: TENANT_ID,
-    name: 'Waitlist Activity Org',
-    slug: `waitlist-${RUN_ID}`,
-    clerk_organization_id: null,
-    status: 'active',
-    created_at: new Date(),
-    updated_at: new Date(),
-  }).execute();
-  await db.insertInto('brands').values({
-    id: BRAND_ID,
-    tenant_id: TENANT_ID,
-    organization_id: ORG_ID,
-    name: 'Waitlist Activity Brand',
-    slug: `waitlist-${RUN_ID}`,
-    status: 'active',
-    theme: JSON.stringify({}),
-    legal_urls: JSON.stringify({}),
-    white_label: false,
-    payment_account_id: null,
-    created_at: new Date(),
-    updated_at: new Date(),
-  }).execute();
-  await db.insertInto('events').values({
-    id: EVENT_ID,
-    tenant_id: TENANT_ID,
-    organization_id: ORG_ID,
-    brand_id: BRAND_ID,
-    slug: `waitlist-${RUN_ID}`,
-    title: 'Waitlist Activity Event',
-    description: null,
-    status: 'published',
-    currency: 'USD',
-    timezone: 'UTC',
-    starts_at: new Date(Date.now() + 86_400_000),
-    ends_at: null,
-    venue: null,
-    visibility: 'public',
-    seo: JSON.stringify({}),
-    capacity: null,
-    cover_image_url: null,
-    external_url: null,
-    waitlist_auto_offer_enabled: true,
-    waitlist_offer_ttl_minutes: 30,
-    created_at: new Date(),
-    updated_at: new Date(),
-  }).execute();
-  await db.insertInto('inventory_pools').values({
-    id: POOL_ID,
-    event_id: EVENT_ID,
-    name: 'Waitlist Pool',
-    total_capacity: 1,
-    reserved_count: 0,
-    sold_count: 0,
-    hold_ttl_seconds: 300,
-    created_at: new Date(),
-    updated_at: new Date(),
-  }).execute();
-  await db.insertInto('ticket_types').values({
-    id: TICKET_TYPE_ID,
-    event_id: EVENT_ID,
-    name: 'Waitlist Ticket',
-    description: null,
-    kind: 'paid',
-    status: 'sold_out',
-    visibility: 'public',
-    currency: 'USD',
-    price_cents: 1000,
-    minimum_price_cents: null,
-    sales_start_at: null,
-    sales_end_at: null,
-    min_per_order: 1,
-    max_per_order: 10,
-    inventory_pool_id: POOL_ID,
-    sort_order: 0,
-    requires_access_code: false,
-    access_code_hint: null,
-    created_at: new Date(),
-    updated_at: new Date(),
-  }).execute();
+  await db
+    .insertInto('tenants')
+    .values({
+      id: TENANT_ID,
+      name: 'Waitlist Activity Tenant',
+      status: 'active',
+      plan: 'test',
+      created_at: new Date(),
+      updated_at: new Date(),
+    })
+    .execute();
+  await db
+    .insertInto('organizations')
+    .values({
+      id: ORG_ID,
+      tenant_id: TENANT_ID,
+      name: 'Waitlist Activity Org',
+      slug: `waitlist-${RUN_ID}`,
+      clerk_organization_id: null,
+      status: 'active',
+      created_at: new Date(),
+      updated_at: new Date(),
+    })
+    .execute();
+  await db
+    .insertInto('brands')
+    .values({
+      id: BRAND_ID,
+      tenant_id: TENANT_ID,
+      organization_id: ORG_ID,
+      name: 'Waitlist Activity Brand',
+      slug: `waitlist-${RUN_ID}`,
+      status: 'active',
+      theme: JSON.stringify({}),
+      legal_urls: JSON.stringify({}),
+      white_label: false,
+      payment_account_id: null,
+      created_at: new Date(),
+      updated_at: new Date(),
+    })
+    .execute();
+  await db
+    .insertInto('events')
+    .values({
+      id: EVENT_ID,
+      tenant_id: TENANT_ID,
+      organization_id: ORG_ID,
+      brand_id: BRAND_ID,
+      slug: `waitlist-${RUN_ID}`,
+      title: 'Waitlist Activity Event',
+      description: null,
+      status: 'published',
+      currency: 'USD',
+      timezone: 'UTC',
+      starts_at: new Date(Date.now() + 86_400_000),
+      ends_at: null,
+      venue: null,
+      visibility: 'public',
+      seo: JSON.stringify({}),
+      capacity: null,
+      cover_image_url: null,
+      external_url: null,
+      waitlist_auto_offer_enabled: true,
+      waitlist_offer_ttl_minutes: 30,
+      created_at: new Date(),
+      updated_at: new Date(),
+    })
+    .execute();
+  await db
+    .insertInto('inventory_pools')
+    .values({
+      id: POOL_ID,
+      event_id: EVENT_ID,
+      name: 'Waitlist Pool',
+      total_capacity: 1,
+      reserved_count: 0,
+      sold_count: 0,
+      hold_ttl_seconds: 300,
+      created_at: new Date(),
+      updated_at: new Date(),
+    })
+    .execute();
+  await db
+    .insertInto('ticket_types')
+    .values({
+      id: TICKET_TYPE_ID,
+      event_id: EVENT_ID,
+      name: 'Waitlist Ticket',
+      description: null,
+      kind: 'paid',
+      status: 'sold_out',
+      visibility: 'public',
+      currency: 'USD',
+      price_cents: 1000,
+      minimum_price_cents: null,
+      sales_start_at: null,
+      sales_end_at: null,
+      min_per_order: 1,
+      max_per_order: 10,
+      inventory_pool_id: POOL_ID,
+      sort_order: 0,
+      requires_access_code: false,
+      access_code_hint: null,
+      created_at: new Date(),
+      updated_at: new Date(),
+    })
+    .execute();
 }
 
 async function cleanupRows(db: Database) {
@@ -219,26 +237,29 @@ async function createWaitlistEntry(
 ) {
   const now = new Date();
   const id = `wle_${ulid()}`;
-  await db.insertInto('waitlist_entries').values({
-    id,
-    tenant_id: TENANT_ID,
-    organization_id: ORG_ID,
-    brand_id: BRAND_ID,
-    event_id: EVENT_ID,
-    ticket_type_id: TICKET_TYPE_ID,
-    buyer_email: email,
-    buyer_first_name: null,
-    buyer_last_name: null,
-    buyer_phone: null,
-    quantity: 1,
-    status: options.status ?? 'joined',
-    offer_expires_at: options.offerExpiresAt ?? null,
-    claim_token_hash: options.claimTokenHash ?? null,
-    offered_at: options.status === 'offered' ? now : null,
-    claimed_at: null,
-    cancelled_at: null,
-    created_at: options.createdAt ?? now,
-    updated_at: now,
-  }).execute();
+  await db
+    .insertInto('waitlist_entries')
+    .values({
+      id,
+      tenant_id: TENANT_ID,
+      organization_id: ORG_ID,
+      brand_id: BRAND_ID,
+      event_id: EVENT_ID,
+      ticket_type_id: TICKET_TYPE_ID,
+      buyer_email: email,
+      buyer_first_name: null,
+      buyer_last_name: null,
+      buyer_phone: null,
+      quantity: 1,
+      status: options.status ?? 'joined',
+      offer_expires_at: options.offerExpiresAt ?? null,
+      claim_token_hash: options.claimTokenHash ?? null,
+      offered_at: options.status === 'offered' ? now : null,
+      claimed_at: null,
+      cancelled_at: null,
+      created_at: options.createdAt ?? now,
+      updated_at: now,
+    })
+    .execute();
   return id;
 }

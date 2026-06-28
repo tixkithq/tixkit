@@ -4,7 +4,12 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { createCorsOriginValidator } from '../app.js';
 import { loadConfig, parseTrustProxy, resolveCorsAllowedOrigins } from '../config/index.js';
 
-const ENV_KEYS = ['CORS_ALLOWED_ORIGINS', 'METRICS_BEARER_TOKEN', 'NODE_ENV', 'TRUST_PROXY'] as const;
+const ENV_KEYS = [
+  'CORS_ALLOWED_ORIGINS',
+  'METRICS_BEARER_TOKEN',
+  'NODE_ENV',
+  'TRUST_PROXY',
+] as const;
 
 const originalEnv = Object.fromEntries(ENV_KEYS.map((key) => [key, process.env[key]]));
 

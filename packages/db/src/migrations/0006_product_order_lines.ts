@@ -10,7 +10,11 @@ function isMysql() {
   return process.env.DB_DRIVER === 'mysql';
 }
 
-async function columnExists(db: Kysely<Record<string, unknown>>, tableName: string, columnName: string): Promise<boolean> {
+async function columnExists(
+  db: Kysely<Record<string, unknown>>,
+  tableName: string,
+  columnName: string,
+): Promise<boolean> {
   const result = isMysql()
     ? await sql<{ column_name: string }>`
         select column_name
@@ -65,12 +69,17 @@ export const ProductOrderLinesMigration: Migration = {
       .execute();
 
     if (await columnExists(db, 'order_line_items', 'product_id')) {
-      await db.schema.alterTable('order_line_items').dropConstraint('order_line_items_product_fk').execute();
+      await db.schema
+        .alterTable('order_line_items')
+        .dropConstraint('order_line_items_product_fk')
+        .execute();
       await db.schema.alterTable('order_line_items').dropColumn('product_id').execute();
     }
 
     if (isMysql()) {
-      await sql`alter table order_line_items modify ticket_type_id varchar(32) not null`.execute(db);
+      await sql`alter table order_line_items modify ticket_type_id varchar(32) not null`.execute(
+        db,
+      );
       await sql`alter table checkout_sessions modify hold_id varchar(32) not null`.execute(db);
     } else {
       await sql`alter table order_line_items alter column ticket_type_id set not null`.execute(db);

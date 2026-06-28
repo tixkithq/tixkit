@@ -11,7 +11,8 @@
  */
 export async function setup(): Promise<void> {
   const driver = process.env.DB_INTEGRATION_DRIVER === 'mysql' ? 'mysql' : 'postgres';
-  const databaseUrl = driver === 'mysql' ? process.env.DATABASE_URL_MYSQL : process.env.DATABASE_URL;
+  const databaseUrl =
+    driver === 'mysql' ? process.env.DATABASE_URL_MYSQL : process.env.DATABASE_URL;
 
   if (!databaseUrl) {
     // No DB configured; DB-backed suites will skip. Nothing to do.

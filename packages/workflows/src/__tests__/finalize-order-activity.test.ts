@@ -17,11 +17,30 @@ const stripeMock = {
     status: 'requires_payment_method',
     client_secret: 'pi_provider_1_secret',
   })),
+  paymentIntentsRetrieve: vi.fn(async () => ({
+    id: 'pi_provider_1',
+    status: 'requires_payment_method',
+    amount: 2500,
+    amount_received: 0,
+  })),
+  paymentIntentsCancel: vi.fn(async () => ({
+    id: 'pi_provider_1',
+    status: 'canceled',
+  })),
+  refundsCreate: vi.fn(async () => ({
+    id: 're_1',
+    status: 'succeeded',
+  })),
 };
 
 vi.mock('stripe', () => {
   class MockStripe {
-    paymentIntents = { create: stripeMock.paymentIntentsCreate };
+    paymentIntents = {
+      create: stripeMock.paymentIntentsCreate,
+      retrieve: stripeMock.paymentIntentsRetrieve,
+      cancel: stripeMock.paymentIntentsCancel,
+    };
+    refunds = { create: stripeMock.refundsCreate };
   }
   return { default: MockStripe, Stripe: MockStripe };
 });
@@ -157,6 +176,20 @@ vi.mock('@tixkit/db', () => {
     EmailJobRepository,
     OrderRepository,
     PaymentIntentRepository: class {
+      async findByProviderAndIntentId(provider: string, providerIntentId: string) {
+        return Object.values(rowsFor('payment_intents')).find((row) => row.provider === provider && row.provider_intent_id === providerIntentId);
+      }
+
+      async findByCheckoutSessionAndProviderIntentId(checkoutSessionId: string, providerIntentId: string) {
+        return Object.values(rowsFor('payment_intents')).find((row) => row.checkout_session_id === checkoutSessionId && row.provider_intent_id === providerIntentId);
+      }
+
+      async findLatestByCheckoutSession(checkoutSessionId: string) {
+        return Object.values(rowsFor('payment_intents'))
+          .filter((row) => row.checkout_session_id === checkoutSessionId)
+          .sort((left, right) => new Date(right.created_at).getTime() - new Date(left.created_at).getTime())[0];
+      }
+
       async create(input: Record<string, unknown>) {
         const id = `pi_${Object.keys(rowsFor('payment_intents')).length + 1}`;
         const row = {
@@ -178,6 +211,52 @@ vi.mock('@tixkit/db', () => {
         rowsFor('payment_intents')[id] = row;
         return row;
       }
+
+      async update(id: string, input: Record<string, unknown>) {
+        const row = rowsFor('payment_intents')[id];
+        if (!row) return undefined;
+        Object.assign(row, input);
+        return row;
+      }
+    },
+    PaymentCompensationRepository: class {
+      async findByProviderIntent(provider: string, providerIntentId: string, checkoutSessionId: string) {
+        return Object.values(rowsFor('payment_compensations')).find(
+          (row) => row.provider === provider && row.provider_intent_id === providerIntentId && row.checkout_session_id === checkoutSessionId,
+        );
+      }
+
+      async create(input: Record<string, unknown>) {
+        const id = `pcmp_${Object.keys(rowsFor('payment_compensations')).length + 1}`;
+        const row = {
+          id,
+          tenant_id: input.tenantId,
+          checkout_session_id: input.checkoutSessionId,
+          payment_intent_id: input.paymentIntentId ?? null,
+          provider: input.provider,
+          provider_intent_id: input.providerIntentId,
+          amount_cents: input.amountCents,
+          currency: input.currency,
+          action: input.action,
+          status: input.status ?? 'pending',
+          provider_compensation_id: input.providerCompensationId ?? null,
+          attempts: input.attempts ?? 0,
+          reason: input.reason,
+          last_error: input.lastError ?? null,
+          metadata: JSON.stringify(input.metadata ?? {}),
+          created_at: new Date(),
+          updated_at: new Date(),
+        };
+        rowsFor('payment_compensations')[id] = row;
+        return row;
+      }
+
+      async update(id: string, input: Record<string, unknown>) {
+        const row = rowsFor('payment_compensations')[id];
+        if (!row) return undefined;
+        Object.assign(row, input, { updated_at: new Date() });
+        return row;
+      }
     },
   };
 });
@@ -194,6 +273,9 @@ describe('createPaymentIntentActivity capture mode', () => {
     dbState.locks = [];
     dbState.destroy.mockClear();
     stripeMock.paymentIntentsCreate.mockClear();
+    stripeMock.paymentIntentsRetrieve.mockClear();
+    stripeMock.paymentIntentsCancel.mockClear();
+    stripeMock.refundsCreate.mockClear();
     seedCheckout({ holdExpiresAt: new Date(Date.now() + 60_000) });
     delete process.env.STRIPE_SECRET_KEY;
     process.env.NODE_ENV = 'development';
@@ -337,6 +419,7 @@ describe('createPaymentIntentActivity capture mode', () => {
   });
 
   it('fails closed when attaching a payment intent to an expired checkout session', async () => {
+    process.env.STRIPE_SECRET_KEY = 'sk_test_1';
     dbState.tables.checkout_sessions.cs_1.status = 'expired';
 
     const result = await checkoutActivities.createPaymentIntentActivity({
@@ -358,9 +441,32 @@ describe('createPaymentIntentActivity capture mode', () => {
     expect(dbState.tables.checkout_sessions.cs_1.payment_intent_id).toBeUndefined();
     expect(dbState.tables.payment_intents.pi_1).toMatchObject({
       checkout_session_id: 'cs_1',
-      provider_intent_id: 'pi_capture_cs_1',
+      provider: 'stripe',
+      provider_intent_id: 'pi_provider_1',
+      status: 'requires_payment_method',
     });
-    expect(dbState.destroy).toHaveBeenCalledTimes(1);
+    expect(stripeMock.paymentIntentsRetrieve).toHaveBeenCalledWith('pi_provider_1');
+    expect(stripeMock.paymentIntentsCancel).toHaveBeenCalledWith(
+      'pi_provider_1',
+      {},
+      { idempotencyKey: 'orphan-payment:cancel:stripe:pi_provider_1:cs_1' },
+    );
+    expect(dbState.tables.payment_compensations.pcmp_1).toMatchObject({
+      checkout_session_id: 'cs_1',
+      payment_intent_id: 'pi_1',
+      provider: 'stripe',
+      provider_intent_id: 'pi_provider_1',
+      action: 'cancel',
+      status: 'succeeded',
+      provider_compensation_id: 'pi_provider_1',
+      attempts: 1,
+    });
+    expect(JSON.parse(dbState.tables.payment_compensations.pcmp_1.metadata)).toMatchObject({
+      brandId: 'brd_1',
+      paymentIntentRowId: 'pi_1',
+      source: 'checkout_payment_intent_attach_failed',
+    });
+    expect(dbState.destroy).toHaveBeenCalledTimes(2);
   });
 
   it('fails closed when the checkout session already points at a different payment intent', async () => {
@@ -381,9 +487,19 @@ describe('createPaymentIntentActivity capture mode', () => {
       errorCode: 'CHECKOUT_SESSION_NOT_PAYABLE',
       retryable: false,
     });
-    expect(dbState.tables.checkout_sessions.cs_1.status).toBe('open');
+    expect(dbState.tables.checkout_sessions.cs_1.status).toBe('expired');
     expect(dbState.tables.checkout_sessions.cs_1.payment_intent_id).toBe('pi_other');
-    expect(dbState.destroy).toHaveBeenCalledTimes(1);
+    expect(dbState.tables.payment_compensations.pcmp_1).toMatchObject({
+      checkout_session_id: 'cs_1',
+      payment_intent_id: 'pi_1',
+      provider: 'stripe_capture',
+      provider_intent_id: 'pi_capture_cs_1',
+      action: 'local_noop',
+      status: 'succeeded',
+      provider_compensation_id: 'local:pi_capture_cs_1',
+      attempts: 1,
+    });
+    expect(dbState.destroy).toHaveBeenCalledTimes(2);
   });
 
   it('fails closed in production when Stripe is not configured', async () => {

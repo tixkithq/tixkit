@@ -29,8 +29,20 @@ describe('ProviderRouteSelector', () => {
     const primary = new MockEmailTransport('primary');
     const secondary = new MockEmailTransport('secondary');
     const selector = new ProviderRouteSelector([
-      { id: 'r2', transport: secondary, priority: 2, isFallback: false, allowedCategories: ['transactional'] },
-      { id: 'r1', transport: primary, priority: 1, isFallback: false, allowedCategories: ['transactional'] },
+      {
+        id: 'r2',
+        transport: secondary,
+        priority: 2,
+        isFallback: false,
+        allowedCategories: ['transactional'],
+      },
+      {
+        id: 'r1',
+        transport: primary,
+        priority: 1,
+        isFallback: false,
+        allowedCategories: ['transactional'],
+      },
     ]);
     const selected = selector.select('transactional');
     expect(selected).toBe(primary);
@@ -48,8 +60,20 @@ describe('ProviderRouteSelector', () => {
     const fb1 = new MockEmailTransport('fb1');
     const fb2 = new MockEmailTransport('fb2');
     const selector = new ProviderRouteSelector([
-      { id: 'fb2', transport: fb2, priority: 2, isFallback: true, allowedCategories: ['transactional'] },
-      { id: 'fb1', transport: fb1, priority: 1, isFallback: true, allowedCategories: ['transactional'] },
+      {
+        id: 'fb2',
+        transport: fb2,
+        priority: 2,
+        isFallback: true,
+        allowedCategories: ['transactional'],
+      },
+      {
+        id: 'fb1',
+        transport: fb1,
+        priority: 1,
+        isFallback: true,
+        allowedCategories: ['transactional'],
+      },
     ]);
     const fallbacks = selector.getFallbacks('transactional');
     expect(fallbacks[0]).toBe(fb1);

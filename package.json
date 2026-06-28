@@ -21,6 +21,7 @@
     "quickstart": "bun run --env-file=.env.local --filter @tixkit/cli quickstart",
     "seed:sample-data": "bun run --env-file=.env.local --filter @tixkit/cli seed:sample-data",
     "init": "bun run --filter @tixkit/cli init",
+    "embed:generate": "bun run --filter @tixkit/cli embed:generate",
     "setup:check": "bun run --env-file=.env.local --filter @tixkit/cli setup:check",
     "dev:webhooks": "bun run --env-file=.env.local --filter @tixkit/cli dev:webhooks",
     "format": "oxfmt . --write",

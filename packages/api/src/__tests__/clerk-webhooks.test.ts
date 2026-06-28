@@ -211,6 +211,46 @@ describe('Clerk webhook route', () => {
     else process.env.CLERK_WEBHOOK_SECRET = originalWebhookSecret;
   });
 
+  it('stores the provider event before starting identity sync without marking it processed', async () => {
+    const state: ClerkWebhookTestState = {
+      events: [],
+      operations: [],
+    };
+    const temporalClient = {
+      startClerkIdentitySync: vi.fn(async () => {
+        state.operations.push('start:clerk-identity-sync');
+      }),
+    };
+    const app = await setupClerkWebhookApp(createMockDb(state) as Database, temporalClient);
+
+    const res = await injectSignedClerkWebhook(app, createClerkUserEvent());
+
+    expect(res.statusCode).toBe(200);
+    expect(res.json()).toEqual({ received: true });
+    expect(state.events).toHaveLength(1);
+    expect(state.events[0]).toMatchObject({
+      tenant_id: 'system',
+      provider: 'clerk',
+      provider_event_id: 'msg_clerk_1',
+      event_type: 'user.created',
+      processed_at: null,
+    });
+    expect(state.operations).toEqual(['insert:payment_events', 'start:clerk-identity-sync']);
+    expect(temporalClient.startClerkIdentitySync).toHaveBeenCalledWith({
+      providerEventId: 'msg_clerk_1',
+      eventType: 'user.created',
+      clerkUserId: 'user_1',
+      email: 'user@example.com',
+      firstName: 'Ada',
+      lastName: 'Lovelace',
+      avatarUrl: 'https://example.com/avatar.png',
+      clerkOrgId: undefined,
+      orgName: undefined,
+    });
+
+    await app.close();
+  });
+
   it('returns duplicate and skips sync for a processed provider event', async () => {
     const state: ClerkWebhookTestState = {
       events: [
@@ -274,14 +314,14 @@ describe('Clerk webhook route', () => {
     expect(res.json()).toEqual({ received: true });
     expect(state.events).toHaveLength(1);
     expect(state.events[0]?.id).toBe('pevt_raced');
-    expect(state.events[0]?.processed_at).toBeInstanceOf(Date);
+    expect(state.events[0]?.processed_at).toBeNull();
     expect(state.operations).toEqual([
       'insert-conflict:payment_events',
       'start:clerk-identity-sync',
-      'update:payment_events',
     ]);
     expect(temporalClient.startClerkIdentitySync).toHaveBeenCalledOnce();
     expect(temporalClient.startClerkIdentitySync).toHaveBeenCalledWith({
+      providerEventId: 'msg_clerk_1',
       eventType: 'user.created',
       clerkUserId: 'user_1',
       email: 'user@example.com',

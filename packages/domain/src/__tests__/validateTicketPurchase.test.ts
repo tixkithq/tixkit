@@ -1,5 +1,9 @@
 import { describe, it, expect } from 'vitest';
-import { validateTicketPurchase, type PurchasableTicketType, type AccessRuleRecord } from '../ticketing/index.js';
+import {
+  validateTicketPurchase,
+  type PurchasableTicketType,
+  type AccessRuleRecord,
+} from '../ticketing/index.js';
 import { ValidationError, AccessCodeRequiredError } from '../errors/index.js';
 
 function makeTicketType(overrides: Partial<PurchasableTicketType> = {}): PurchasableTicketType {
@@ -233,7 +237,13 @@ describe('validateTicketPurchase', () => {
 
     it('rejects expired access code', () => {
       const rules: AccessRuleRecord[] = [
-        { type: 'access_code', value: 'SECRET123', usesCount: 0, maxUses: 10, expiresAt: '2026-01-01T00:00:00Z' },
+        {
+          type: 'access_code',
+          value: 'SECRET123',
+          usesCount: 0,
+          maxUses: 10,
+          expiresAt: '2026-01-01T00:00:00Z',
+        },
       ];
       expect(() =>
         validateTicketPurchase({

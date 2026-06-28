@@ -3,11 +3,7 @@
   "compilerOptions": {
     "outDir": "./.next/types",
     "jsx": "preserve",
-    "lib": [
-      "ES2022",
-      "DOM",
-      "DOM.Iterable"
-    ],
+    "lib": ["ES2022", "DOM", "DOM.Iterable"],
     "moduleResolution": "bundler",
     "module": "esnext",
     "plugins": [
@@ -16,20 +12,12 @@
       }
     ],
     "paths": {
-      "@/*": [
-        "./src/*"
-      ]
+      "@/*": ["./src/*"]
     },
     "allowJs": true,
     "noEmit": true,
     "incremental": true
   },
-  "include": [
-    "next-env.d.ts",
-    "src/**/*",
-    ".next/types/**/*.ts"
-  ],
-  "exclude": [
-    "node_modules"
-  ]
+  "include": ["next-env.d.ts", "src/**/*", ".next/types/**/*.ts"],
+  "exclude": ["node_modules"]
 }

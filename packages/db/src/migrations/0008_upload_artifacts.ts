@@ -48,16 +48,38 @@ export const UploadArtifactsMigration: Migration = {
       .addColumn('created_at', timestampType(), (col) => col.notNull().defaultTo(nowDefault()))
       .addColumn('updated_at', timestampType(), (col) => col.notNull().defaultTo(nowDefault()))
       .addForeignKeyConstraint('upload_artifacts_tenant_fk', ['tenant_id'], 'tenants', ['id'])
-      .addForeignKeyConstraint('upload_artifacts_org_fk', ['organization_id'], 'organizations', ['id'])
+      .addForeignKeyConstraint('upload_artifacts_org_fk', ['organization_id'], 'organizations', [
+        'id',
+      ])
       .addForeignKeyConstraint('upload_artifacts_brand_fk', ['brand_id'], 'brands', ['id'])
       .addForeignKeyConstraint('upload_artifacts_event_fk', ['event_id'], 'events', ['id'])
       .execute();
 
-    await db.schema.createIndex('idx_upload_artifacts_tenant').on('upload_artifacts').columns(['tenant_id']).execute();
-    await db.schema.createIndex('idx_upload_artifacts_event').on('upload_artifacts').columns(['event_id']).execute();
-    await db.schema.createIndex('idx_upload_artifacts_brand').on('upload_artifacts').columns(['brand_id']).execute();
-    await db.schema.createIndex('idx_upload_artifacts_status').on('upload_artifacts').columns(['status']).execute();
-    await db.schema.createIndex('idx_upload_artifacts_status_expires').on('upload_artifacts').columns(['status', 'expires_at']).execute();
+    await db.schema
+      .createIndex('idx_upload_artifacts_tenant')
+      .on('upload_artifacts')
+      .columns(['tenant_id'])
+      .execute();
+    await db.schema
+      .createIndex('idx_upload_artifacts_event')
+      .on('upload_artifacts')
+      .columns(['event_id'])
+      .execute();
+    await db.schema
+      .createIndex('idx_upload_artifacts_brand')
+      .on('upload_artifacts')
+      .columns(['brand_id'])
+      .execute();
+    await db.schema
+      .createIndex('idx_upload_artifacts_status')
+      .on('upload_artifacts')
+      .columns(['status'])
+      .execute();
+    await db.schema
+      .createIndex('idx_upload_artifacts_status_expires')
+      .on('upload_artifacts')
+      .columns(['status', 'expires_at'])
+      .execute();
   },
 
   async down(db): Promise<void> {

@@ -45,13 +45,10 @@ describe('SvelteKit server helpers', () => {
 
   it('creates checkout sessions from validated form actions', async () => {
     const checkoutCreate = vi.fn(async (input: unknown) => ({ id: 'cs_1', status: 'open', input }));
-    const action = createCheckoutFormAction(
-      { checkout: { create: checkoutCreate } } as never,
-      {
-        successUrl: 'https://app.example.test/success',
-        cancelUrl: 'https://app.example.test/cancel',
-      },
-    );
+    const action = createCheckoutFormAction({ checkout: { create: checkoutCreate } } as never, {
+      successUrl: 'https://app.example.test/success',
+      cancelUrl: 'https://app.example.test/cancel',
+    });
     const formData = new FormData();
     formData.set('eventId', 'evt_1');
     formData.set('idempotencyKey', 'idem_1');
@@ -179,7 +176,8 @@ describe('SvelteKit client helpers', () => {
     expect(attributes).toEqual({
       src: 'https://checkout.example.test/checkout?eventId=evt_1&brand=brd_1&mode=inline',
       title: 'Event checkout',
-      sandbox: 'allow-forms allow-modals allow-popups allow-popups-to-escape-sandbox allow-scripts allow-same-origin',
+      sandbox:
+        'allow-forms allow-modals allow-popups allow-popups-to-escape-sandbox allow-scripts allow-same-origin',
       allow: 'payment *',
       referrerPolicy: 'strict-origin-when-cross-origin',
     });

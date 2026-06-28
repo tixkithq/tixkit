@@ -1,9 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import {
-  CaptureSmsTransport,
-  FallbackSmsTransport,
-  TelnyxSmsTransport,
-} from './index.js';
+import { CaptureSmsTransport, FallbackSmsTransport, TelnyxSmsTransport } from './index.js';
 import type { SendSmsInput, SendSmsResult, SmsTransport } from '@tixkit/domain/messaging';
 
 const smsInput: SendSmsInput = {

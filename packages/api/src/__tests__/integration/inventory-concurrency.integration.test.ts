@@ -26,64 +26,79 @@ const BRAND_ID = `brd_conc_${ulid().slice(-10)}`;
 const EVENT_ID = `evt_conc_${ulid().slice(-10)}`;
 
 async function seedEvent(trx: Database): Promise<void> {
-  await trx.insertInto('tenants').values({
-    id: TENANT_ID,
-    name: 'Concurrency Test Tenant',
-    status: 'active',
-    plan: 'test',
-    created_at: new Date(),
-    updated_at: new Date(),
-  }).execute();
-  await trx.insertInto('organizations').values({
-    id: ORG_ID,
-    tenant_id: TENANT_ID,
-    name: 'Concurrency Test Org',
-    slug: `conc-${Date.now()}`,
-    clerk_organization_id: null,
-    status: 'active',
-    created_at: new Date(),
-    updated_at: new Date(),
-  }).execute();
-  await trx.insertInto('brands').values({
-    id: BRAND_ID,
-    tenant_id: TENANT_ID,
-    organization_id: ORG_ID,
-    name: 'Concurrency Test Brand',
-    slug: `conc-${Date.now()}`,
-    status: 'active',
-    theme: JSON.stringify({}),
-    legal_urls: JSON.stringify({}),
-    white_label: false,
-    payment_account_id: null,
-    created_at: new Date(),
-    updated_at: new Date(),
-  }).execute();
-  await trx.insertInto('events').values({
-    id: EVENT_ID,
-    tenant_id: TENANT_ID,
-    organization_id: ORG_ID,
-    brand_id: BRAND_ID,
-    slug: `conc-${Date.now()}`,
-    title: 'Concurrency Test Event',
-    description: null,
-    status: 'published',
-    currency: 'USD',
-    timezone: 'UTC',
-    starts_at: new Date(Date.now() + 86400000),
-    ends_at: null,
-    visibility: 'public',
-    seo: JSON.stringify({}),
-    capacity: null,
-    cover_image_url: null,
-    external_url: null,
-    created_at: new Date(),
-    updated_at: new Date(),
-  }).execute();
+  await trx
+    .insertInto('tenants')
+    .values({
+      id: TENANT_ID,
+      name: 'Concurrency Test Tenant',
+      status: 'active',
+      plan: 'test',
+      created_at: new Date(),
+      updated_at: new Date(),
+    })
+    .execute();
+  await trx
+    .insertInto('organizations')
+    .values({
+      id: ORG_ID,
+      tenant_id: TENANT_ID,
+      name: 'Concurrency Test Org',
+      slug: `conc-${Date.now()}`,
+      clerk_organization_id: null,
+      status: 'active',
+      created_at: new Date(),
+      updated_at: new Date(),
+    })
+    .execute();
+  await trx
+    .insertInto('brands')
+    .values({
+      id: BRAND_ID,
+      tenant_id: TENANT_ID,
+      organization_id: ORG_ID,
+      name: 'Concurrency Test Brand',
+      slug: `conc-${Date.now()}`,
+      status: 'active',
+      theme: JSON.stringify({}),
+      legal_urls: JSON.stringify({}),
+      white_label: false,
+      payment_account_id: null,
+      created_at: new Date(),
+      updated_at: new Date(),
+    })
+    .execute();
+  await trx
+    .insertInto('events')
+    .values({
+      id: EVENT_ID,
+      tenant_id: TENANT_ID,
+      organization_id: ORG_ID,
+      brand_id: BRAND_ID,
+      slug: `conc-${Date.now()}`,
+      title: 'Concurrency Test Event',
+      description: null,
+      status: 'published',
+      currency: 'USD',
+      timezone: 'UTC',
+      starts_at: new Date(Date.now() + 86400000),
+      ends_at: null,
+      visibility: 'public',
+      seo: JSON.stringify({}),
+      capacity: null,
+      cover_image_url: null,
+      external_url: null,
+      created_at: new Date(),
+      updated_at: new Date(),
+    })
+    .execute();
 }
 
 async function cleanupEvent(database: Database): Promise<void> {
   // Clean up in reverse FK order
-  await database.deleteFrom('checkout_holds').where('checkout_session_id', 'like', 'cs_conc_%').execute();
+  await database
+    .deleteFrom('checkout_holds')
+    .where('checkout_session_id', 'like', 'cs_conc_%')
+    .execute();
   await database.deleteFrom('checkout_sessions').where('id', 'like', 'cs_conc_%').execute();
   await database.deleteFrom('ticket_types').where('event_id', '=', EVENT_ID).execute();
   await database.deleteFrom('inventory_pools').where('event_id', '=', EVENT_ID).execute();
@@ -95,70 +110,89 @@ async function cleanupEvent(database: Database): Promise<void> {
 
 async function createPool(database: Database, capacity: number, ttl = 300): Promise<string> {
   const poolId = `pool_conc_${ulid().slice(-10)}`;
-  await database.insertInto('inventory_pools').values({
-    id: poolId,
-    event_id: EVENT_ID,
-    name: `Concurrency Pool ${poolId}`,
-    total_capacity: capacity,
-    reserved_count: 0,
-    sold_count: 0,
-    hold_ttl_seconds: ttl,
-    created_at: new Date(),
-    updated_at: new Date(),
-  }).execute();
+  await database
+    .insertInto('inventory_pools')
+    .values({
+      id: poolId,
+      event_id: EVENT_ID,
+      name: `Concurrency Pool ${poolId}`,
+      total_capacity: capacity,
+      reserved_count: 0,
+      sold_count: 0,
+      hold_ttl_seconds: ttl,
+      created_at: new Date(),
+      updated_at: new Date(),
+    })
+    .execute();
   return poolId;
 }
 
 async function createTicketType(database: Database, poolId: string): Promise<string> {
   const ticketTypeId = `tt_conc_${ulid().slice(-10)}`;
-  await database.insertInto('ticket_types').values({
-    id: ticketTypeId,
-    event_id: EVENT_ID,
-    name: `Concurrency Ticket ${ticketTypeId}`,
-    description: null,
-    kind: 'paid',
-    status: 'active',
-    visibility: 'public',
-    currency: 'USD',
-    price_cents: 1000,
-    minimum_price_cents: null,
-    sales_start_at: null,
-    sales_end_at: null,
-    min_per_order: 1,
-    max_per_order: 10,
-    inventory_pool_id: poolId,
-    sort_order: 0,
-    requires_access_code: false,
-    access_code_hint: null,
-    created_at: new Date(),
-    updated_at: new Date(),
-  }).execute();
+  await database
+    .insertInto('ticket_types')
+    .values({
+      id: ticketTypeId,
+      event_id: EVENT_ID,
+      name: `Concurrency Ticket ${ticketTypeId}`,
+      description: null,
+      kind: 'paid',
+      status: 'active',
+      visibility: 'public',
+      currency: 'USD',
+      price_cents: 1000,
+      minimum_price_cents: null,
+      sales_start_at: null,
+      sales_end_at: null,
+      min_per_order: 1,
+      max_per_order: 10,
+      inventory_pool_id: poolId,
+      sort_order: 0,
+      requires_access_code: false,
+      access_code_hint: null,
+      created_at: new Date(),
+      updated_at: new Date(),
+    })
+    .execute();
   return ticketTypeId;
 }
 
-async function createCheckoutSession(database: Database, _poolId: string, ticketTypeId: string): Promise<string> {
+async function createCheckoutSession(
+  database: Database,
+  _poolId: string,
+  ticketTypeId: string,
+): Promise<string> {
   const sessionId = `cs_conc_${ulid().slice(-10)}`;
-  await database.insertInto('checkout_sessions').values({
-    id: sessionId,
-    tenant_id: TENANT_ID,
-    event_id: EVENT_ID,
-    brand_id: BRAND_ID,
-    status: 'open',
-    hold_id: `hld_${ulid()}`,
-    currency: 'USD',
-    cart: JSON.stringify({ items: [{ ticketTypeId, quantity: 1 }] }),
-    buyer: JSON.stringify({ email: 'test@example.com' }),
-    quote: JSON.stringify({ totalCents: 1000, feeCents: 0, subtotalCents: 1000, discountCents: 0, taxCents: 0 }),
-    expires_at: new Date(Date.now() + 300000),
-    idempotency_key: `ik_${ulid()}`,
-    success_url: null,
-    cancel_url: null,
-    order_id: null,
-    client_token: ulid(),
-    payment_intent_id: null,
-    created_at: new Date(),
-    updated_at: new Date(),
-  }).execute();
+  await database
+    .insertInto('checkout_sessions')
+    .values({
+      id: sessionId,
+      tenant_id: TENANT_ID,
+      event_id: EVENT_ID,
+      brand_id: BRAND_ID,
+      status: 'open',
+      hold_id: `hld_${ulid()}`,
+      currency: 'USD',
+      cart: JSON.stringify({ items: [{ ticketTypeId, quantity: 1 }] }),
+      buyer: JSON.stringify({ email: 'test@example.com' }),
+      quote: JSON.stringify({
+        totalCents: 1000,
+        feeCents: 0,
+        subtotalCents: 1000,
+        discountCents: 0,
+        taxCents: 0,
+      }),
+      expires_at: new Date(Date.now() + 300000),
+      idempotency_key: `ik_${ulid()}`,
+      success_url: null,
+      cancel_url: null,
+      order_id: null,
+      client_token: ulid(),
+      payment_intent_id: null,
+      created_at: new Date(),
+      updated_at: new Date(),
+    })
+    .execute();
   return sessionId;
 }
 
@@ -178,7 +212,10 @@ describeWithIntegrationDatabase('InventoryService concurrency', () => {
 
   beforeEach(async () => {
     // Clean up any leftover pools/sessions from previous tests
-    await db.deleteFrom('checkout_holds').where('checkout_session_id', 'like', 'cs_conc_%').execute();
+    await db
+      .deleteFrom('checkout_holds')
+      .where('checkout_session_id', 'like', 'cs_conc_%')
+      .execute();
     await db.deleteFrom('checkout_sessions').where('id', 'like', 'cs_conc_%').execute();
     await db.deleteFrom('ticket_types').where('event_id', '=', EVENT_ID).execute();
     await db.deleteFrom('inventory_pools').where('event_id', '=', EVENT_ID).execute();
@@ -294,7 +331,9 @@ describeWithIntegrationDatabase('InventoryService concurrency', () => {
     await new Promise((resolve) => setTimeout(resolve, 1500));
 
     // Attempt to convert expired hold
-    await expect(inventoryService.convertHoldsForSession(sessionId)).rejects.toThrow(HoldExpiredError);
+    await expect(inventoryService.convertHoldsForSession(sessionId)).rejects.toThrow(
+      HoldExpiredError,
+    );
 
     const pool = await db
       .selectFrom('inventory_pools')

@@ -42,12 +42,25 @@ export const TaxInvoicesMigration: Migration = {
       .addColumn('metadata', jsonType())
       .addColumn('created_at', timestampType(), (col) => col.notNull().defaultTo(nowDefault()))
       .addForeignKeyConstraint('order_tax_snapshots_order_fk', ['order_id'], 'orders', ['id'])
-      .addForeignKeyConstraint('order_tax_snapshots_line_fk', ['order_line_item_id'], 'order_line_items', ['id'])
+      .addForeignKeyConstraint(
+        'order_tax_snapshots_line_fk',
+        ['order_line_item_id'],
+        'order_line_items',
+        ['id'],
+      )
       .addForeignKeyConstraint('order_tax_snapshots_event_fk', ['event_id'], 'events', ['id'])
       .execute();
 
-    await db.schema.createIndex('idx_order_tax_snapshots_order').on('order_tax_snapshots').column('order_id').execute();
-    await db.schema.createIndex('idx_order_tax_snapshots_event').on('order_tax_snapshots').columns(['event_id', 'created_at']).execute();
+    await db.schema
+      .createIndex('idx_order_tax_snapshots_order')
+      .on('order_tax_snapshots')
+      .column('order_id')
+      .execute();
+    await db.schema
+      .createIndex('idx_order_tax_snapshots_event')
+      .on('order_tax_snapshots')
+      .columns(['event_id', 'created_at'])
+      .execute();
 
     await db.schema
       .createTable('invoices')
@@ -82,8 +95,16 @@ export const TaxInvoicesMigration: Migration = {
       .addForeignKeyConstraint('invoices_event_fk', ['event_id'], 'events', ['id'])
       .execute();
 
-    await db.schema.createIndex('idx_invoices_tenant').on('invoices').columns(['tenant_id', 'issued_at']).execute();
-    await db.schema.createIndex('idx_invoices_event').on('invoices').columns(['event_id', 'issued_at']).execute();
+    await db.schema
+      .createIndex('idx_invoices_tenant')
+      .on('invoices')
+      .columns(['tenant_id', 'issued_at'])
+      .execute();
+    await db.schema
+      .createIndex('idx_invoices_event')
+      .on('invoices')
+      .columns(['event_id', 'issued_at'])
+      .execute();
   },
 
   async down(db): Promise<void> {

@@ -94,7 +94,9 @@ export type CreateBrandInput = {
   whiteLabel?: boolean;
 };
 
-export type UpdateBrandInput = Partial<Pick<Brand, 'name' | 'slug' | 'status' | 'theme' | 'supportUrl' | 'legalUrls' | 'whiteLabel'>>;
+export type UpdateBrandInput = Partial<
+  Pick<Brand, 'name' | 'slug' | 'status' | 'theme' | 'supportUrl' | 'legalUrls' | 'whiteLabel'>
+>;
 
 export type CreateOrganizationInput = {
   name: string;

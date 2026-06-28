@@ -1,13 +1,5 @@
-import type {
-  EmailTransport,
-  SendEmailInput,
-  SendEmailResult,
-} from '@tixkit/domain';
-import type {
-  SmsTransport,
-  SendSmsInput,
-  SendSmsResult,
-} from '@tixkit/domain/messaging';
+import type { EmailTransport, SendEmailInput, SendEmailResult } from '@tixkit/domain';
+import type { SmsTransport, SendSmsInput, SendSmsResult } from '@tixkit/domain/messaging';
 import { ulid } from 'ulid';
 
 /**
@@ -317,7 +309,8 @@ export class VonageSmsTransport implements SmsTransport {
     return {
       deliveryId: input.deliveryId,
       provider: 'vonage',
-      providerMessageId: typeof first?.['message-id'] === 'string' ? first['message-id'] : undefined,
+      providerMessageId:
+        typeof first?.['message-id'] === 'string' ? first['message-id'] : undefined,
       status: first?.status === '0' ? 'queued' : 'failed',
       attemptedFallbackProviders: [],
       sentAt: new Date().toISOString(),
@@ -430,8 +423,7 @@ export class ProviderRouteSelector {
   ) {}
 
   select(category: 'transactional' | 'bulk' | 'staff' | 'system'): EmailTransport | null {
-    const eligible = this.routes
-      .filter((r) => r.allowedCategories.includes(category));
+    const eligible = this.routes.filter((r) => r.allowedCategories.includes(category));
 
     // eslint-disable-next-line unicorn/no-array-sort -- sorting a fresh filtered array preserves configured route priority without mutating selector input.
     eligible.sort((a, b) => {
@@ -443,8 +435,9 @@ export class ProviderRouteSelector {
   }
 
   getFallbacks(category: 'transactional' | 'bulk' | 'staff' | 'system'): EmailTransport[] {
-    const eligibleFallbacks = this.routes
-      .filter((r) => r.isFallback && r.allowedCategories.includes(category));
+    const eligibleFallbacks = this.routes.filter(
+      (r) => r.isFallback && r.allowedCategories.includes(category),
+    );
 
     // eslint-disable-next-line unicorn/no-array-sort -- sorting a fresh filtered array preserves configured fallback priority without mutating selector input.
     eligibleFallbacks.sort((a, b) => a.priority - b.priority);

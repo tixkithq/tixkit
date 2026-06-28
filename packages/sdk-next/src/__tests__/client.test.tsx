@@ -97,7 +97,9 @@ describe('TixkitCheckoutButton', () => {
       writable: true,
       value: {
         ...window.location,
-        set href(url: string) { hrefSetter(url); },
+        set href(url: string) {
+          hrefSetter(url);
+        },
       },
     });
 
@@ -143,8 +145,12 @@ describe('TixkitTicketWidget', () => {
 
     const iframe = container.querySelector('iframe');
     expect(iframe).not.toBeNull();
-    expect(iframe!.getAttribute('sandbox')).toBe('allow-scripts allow-same-origin allow-forms allow-popups allow-popups-to-escape-sandbox');
-    expect(iframe!.getAttribute('allow')).toBe('payment; publickey-credentials-create *; publickey-credentials-get *');
+    expect(iframe!.getAttribute('sandbox')).toBe(
+      'allow-scripts allow-same-origin allow-forms allow-popups allow-popups-to-escape-sandbox',
+    );
+    expect(iframe!.getAttribute('allow')).toBe(
+      'payment; publickey-credentials-create *; publickey-credentials-get *',
+    );
 
     unmount();
   });

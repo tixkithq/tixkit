@@ -1,9 +1,6 @@
 import type { Principal, Permission } from '@tixkit/domain';
 import { ForbiddenError, ValidationError } from '@tixkit/domain';
-export {
-  signWebhookPayload,
-  verifyWebhookSignature,
-} from '@tixkit/domain/developer';
+export { signWebhookPayload, verifyWebhookSignature } from '@tixkit/domain/developer';
 
 export type PageEnvelope<T> = {
   items: T[];
@@ -18,6 +15,7 @@ export type PaginationInput = {
 
 const DEFAULT_LIMIT = 50;
 const MAX_LIMIT = 100;
+const INTEGER_STRING = /^\d+$/;
 export function parseJsonValue<T>(value: unknown, fallback: T): T {
   if (value == null) return fallback;
   if (typeof value !== 'string') return value as T;
@@ -39,10 +37,12 @@ export function parsePagination(query: unknown): PaginationInput {
     typeof raw.limit === 'number'
       ? raw.limit
       : typeof raw.limit === 'string'
-        ? Number.parseInt(raw.limit, 10)
+        ? INTEGER_STRING.test(raw.limit)
+          ? Number(raw.limit)
+          : Number.NaN
         : DEFAULT_LIMIT;
 
-  if (!Number.isFinite(parsedLimit) || parsedLimit < 1) {
+  if (!Number.isSafeInteger(parsedLimit) || parsedLimit < 1) {
     throw new ValidationError('limit must be a positive integer');
   }
 
@@ -70,7 +70,9 @@ export function pickAllowedFields(
   const allowed = new Set(allowedFields);
   const unknownFields = Object.keys(body).filter((field) => !allowed.has(field));
   if (unknownFields.length > 0) {
-    throw new ValidationError('Request body contains unsupported fields', { fields: unknownFields });
+    throw new ValidationError('Request body contains unsupported fields', {
+      fields: unknownFields,
+    });
   }
 
   const result: Record<string, unknown> = {};
@@ -132,7 +134,10 @@ export function serializeEventOccurrence(row: Record<string, unknown>) {
   };
 }
 
-export function serializeMarketingIntegration(row: Record<string, unknown>, options: { public?: boolean } = {}) {
+export function serializeMarketingIntegration(
+  row: Record<string, unknown>,
+  options: { public?: boolean } = {},
+) {
   const base = {
     provider: row.provider,
     config: parseJsonValue(row.config, {}),
@@ -163,7 +168,8 @@ export function serializeTicketType(row: Record<string, unknown>) {
     visibility: row.visibility,
     currency: row.currency,
     priceCents: Number(row.price_cents),
-    minimumPriceCents: row.minimum_price_cents == null ? undefined : Number(row.minimum_price_cents),
+    minimumPriceCents:
+      row.minimum_price_cents == null ? undefined : Number(row.minimum_price_cents),
     salesStartAt: toIso(row.sales_start_at as Date | string | null),
     salesEndAt: toIso(row.sales_end_at as Date | string | null),
     minPerOrder: row.min_per_order,

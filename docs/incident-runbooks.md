@@ -15,12 +15,12 @@ Step-by-step recovery procedures for common Tixkit production incidents. Each ru
 
 Tixkit's production recovery targets are:
 
-| Store | RPO | RTO | Primary restore path |
-| --- | --- | --- | --- |
-| Postgres | 5 minutes | 30 minutes | Managed PITR or `bun run dr:restore:postgres` from the latest verified dump |
-| MySQL Tier-1 deployment | 5 minutes | 30 minutes | Managed PITR/snapshot restore |
-| Object storage | 15 minutes | 60 minutes | Bucket versioning/replication or `bun run dr:restore:object-storage` |
-| Temporal | 15 minutes | 60 minutes | Temporal Cloud recovery or backing-store restore |
+| Store                   | RPO        | RTO        | Primary restore path                                                        |
+| ----------------------- | ---------- | ---------- | --------------------------------------------------------------------------- |
+| Postgres                | 5 minutes  | 30 minutes | Managed PITR or `bun run dr:restore:postgres` from the latest verified dump |
+| MySQL Tier-1 deployment | 5 minutes  | 30 minutes | Managed PITR/snapshot restore                                               |
+| Object storage          | 15 minutes | 60 minutes | Bucket versioning/replication or `bun run dr:restore:object-storage`        |
+| Temporal                | 15 minutes | 60 minutes | Temporal Cloud recovery or backing-store restore                            |
 
 Before every schema-changing release, create a Postgres backup with:
 
@@ -40,25 +40,25 @@ Rollback from a failed migration means restoring the pre-migration database back
 
 Production dashboards must include these panels:
 
-| Panel | Prometheus query |
-| --- | --- |
-| Checkout p95 latency | `histogram_quantile(0.95, sum(rate(tixkit_http_request_duration_seconds_bucket{route=~".*checkout.*"}[5m])) by (le))` |
-| Webhook catch-up failures | `sum(rate(tixkit_webhook_events_total{outcome!="ok"}[5m]))` |
-| Scan p95 latency | <code>histogram_quantile(0.95, sum(rate(tixkit_http_request_duration_seconds_bucket{route=~".*(check-in&#124;scan).*"}[5m])) by (le))</code> |
-| Payment success rate | `sum(rate(tixkit_payment_events_total{outcome="ok"}[15m])) / clamp_min(sum(rate(tixkit_payment_events_total[15m])), 1)` |
-| Temporal activity failures | `sum(rate(tixkit_temporal_activity_events_total{outcome!="ok"}[5m])) by (activity)` |
-| Active inventory holds | `tixkit_inventory_active_holds{scope="global"}` |
+| Panel                      | Prometheus query                                                                                                             |
+| -------------------------- | ---------------------------------------------------------------------------------------------------------------------------- |
+| Checkout p95 latency       | `histogram_quantile(0.95, sum(rate(tixkit_http_request_duration_seconds_bucket{route=~".*checkout.*"}[5m])) by (le))`        |
+| Webhook catch-up failures  | `sum(rate(tixkit_webhook_events_total{outcome!="ok"}[5m]))`                                                                  |
+| Scan p95 latency           | <code>histogram_quantile(0.95, sum(rate(tixkit_http_request_duration_seconds_bucket{route=~".*(check-in&#124;scan).*"}[5m])) by (le))</code> |
+| Payment success rate       | `sum(rate(tixkit_payment_events_total{outcome="ok"}[15m])) / clamp_min(sum(rate(tixkit_payment_events_total[15m])), 1)`      |
+| Temporal activity failures | `sum(rate(tixkit_temporal_activity_events_total{outcome!="ok"}[5m])) by (activity)`                                          |
+| Active inventory holds     | `tixkit_inventory_active_holds{scope="global"}`                                                                              |
 
 Alert rules:
 
-| Alert | Threshold | Page |
-| --- | --- | --- |
-| CheckoutLatencyHigh | checkout p95 > 2s for 10m | yes |
-| WebhookCatchupFailing | webhook non-ok rate > 0.05/s for 10m or any dead-lettered delivery in 5m | yes |
-| ScanLatencyHigh | scan p95 > 500ms for 10m | yes |
-| PaymentSuccessRateLow | payment success rate < 98% for 15m with at least 20 attempts | yes |
-| TemporalActivityFailureSpike | any critical activity non-ok rate > 0.02/s for 10m | yes |
-| MetricsMissing | no `up` sample for API or worker Pushgateway job for 5m | yes |
+| Alert                        | Threshold                                                                | Page |
+| ---------------------------- | ------------------------------------------------------------------------ | ---- |
+| CheckoutLatencyHigh          | checkout p95 > 2s for 10m                                                | yes  |
+| WebhookCatchupFailing        | webhook non-ok rate > 0.05/s for 10m or any dead-lettered delivery in 5m | yes  |
+| ScanLatencyHigh              | scan p95 > 500ms for 10m                                                 | yes  |
+| PaymentSuccessRateLow        | payment success rate < 98% for 15m with at least 20 attempts             | yes  |
+| TemporalActivityFailureSpike | any critical activity non-ok rate > 0.02/s for 10m                       | yes  |
+| MetricsMissing               | no `up` sample for API or worker Pushgateway job for 5m                  | yes  |
 
 SLO targets:
 

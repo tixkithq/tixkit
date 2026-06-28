@@ -11,12 +11,16 @@ describe('API contract helpers', () => {
       cursor: 'evt_01',
       limit: 25,
     });
+    expect(parsePagination({ limit: '001' })).toEqual({ cursor: undefined, limit: 1 });
     expect(parsePagination({ limit: '500' })).toEqual({ cursor: undefined, limit: 100 });
   });
 
   it('rejects invalid pagination limits with the shared validation error', () => {
     expect(() => parsePagination({ limit: '0' })).toThrow(ValidationError);
     expect(() => parsePagination({ limit: 'not-a-number' })).toThrow(ValidationError);
+    expect(() => parsePagination({ limit: '1abc' })).toThrow(ValidationError);
+    expect(() => parsePagination({ limit: '1.9' })).toThrow(ValidationError);
+    expect(() => parsePagination({ limit: 1.9 })).toThrow(ValidationError);
   });
 
   it('returns the documented page envelope and cursor from the last emitted item', () => {

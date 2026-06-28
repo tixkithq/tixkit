@@ -43,10 +43,24 @@ function tixkitSignature(body: string): string {
 }
 
 test.beforeAll(async () => {
-  startServer('bun', ['run', '--filter', '@tixkit/sdk-next-demo', 'start', '--', '-p', '3310'], process.cwd());
   startServer(
     'bun',
-    ['run', '--filter', '@tixkit/sdk-sveltekit-demo', 'preview', '--', '--host', '127.0.0.1', '--port', '3311'],
+    ['run', '--filter', '@tixkit/sdk-next-demo', 'start', '--', '-p', '3310'],
+    process.cwd(),
+  );
+  startServer(
+    'bun',
+    [
+      'run',
+      '--filter',
+      '@tixkit/sdk-sveltekit-demo',
+      'preview',
+      '--',
+      '--host',
+      '127.0.0.1',
+      '--port',
+      '3311',
+    ],
     process.cwd(),
   );
   await Promise.all([waitForHttp(NEXT_DEMO_URL), waitForHttp(SVELTEKIT_DEMO_URL)]);
@@ -72,7 +86,10 @@ test.afterAll(async () => {
   );
 });
 
-test('external Next.js demo renders SDK widgets and handles webhook route', async ({ page, request }) => {
+test('external Next.js demo renders SDK widgets and handles webhook route', async ({
+  page,
+  request,
+}) => {
   await page.goto(NEXT_DEMO_URL);
   await expect(page.getByRole('heading', { name: 'Tixkit Next SDK Demo' })).toBeVisible();
   const widget = page.locator('iframe[title="Tixkit Ticket Widget"]');
@@ -105,7 +122,10 @@ test('external Next.js demo renders SDK widgets and handles webhook route', asyn
   await expect(await response.json()).toMatchObject({ received: true, handledBy: 'sdk-next-demo' });
 });
 
-test('external SvelteKit demo renders SDK widget component and handles webhook route', async ({ page, request }) => {
+test('external SvelteKit demo renders SDK widget component and handles webhook route', async ({
+  page,
+  request,
+}) => {
   await page.goto(SVELTEKIT_DEMO_URL);
   await expect(page.getByRole('heading', { name: 'Tixkit SvelteKit SDK Demo' })).toBeVisible();
   const widget = page.locator('iframe[title="Tixkit checkout"]');
@@ -134,5 +154,8 @@ test('external SvelteKit demo renders SDK widget component and handles webhook r
     },
   });
   await expect(response).toBeOK();
-  await expect(await response.json()).toMatchObject({ received: true, handledBy: 'sdk-sveltekit-demo' });
+  await expect(await response.json()).toMatchObject({
+    received: true,
+    handledBy: 'sdk-sveltekit-demo',
+  });
 });

@@ -44,16 +44,40 @@ export const WaitlistsMigration: Migration = {
       .addColumn('created_at', timestampType(), (col) => col.notNull().defaultTo(nowDefault()))
       .addColumn('updated_at', timestampType(), (col) => col.notNull().defaultTo(nowDefault()))
       .addForeignKeyConstraint('waitlist_entries_tenant_fk', ['tenant_id'], 'tenants', ['id'])
-      .addForeignKeyConstraint('waitlist_entries_org_fk', ['organization_id'], 'organizations', ['id'])
+      .addForeignKeyConstraint('waitlist_entries_org_fk', ['organization_id'], 'organizations', [
+        'id',
+      ])
       .addForeignKeyConstraint('waitlist_entries_brand_fk', ['brand_id'], 'brands', ['id'])
       .addForeignKeyConstraint('waitlist_entries_event_fk', ['event_id'], 'events', ['id'])
-      .addForeignKeyConstraint('waitlist_entries_ticket_type_fk', ['ticket_type_id'], 'ticket_types', ['id'])
+      .addForeignKeyConstraint(
+        'waitlist_entries_ticket_type_fk',
+        ['ticket_type_id'],
+        'ticket_types',
+        ['id'],
+      )
       .execute();
 
-    await db.schema.createIndex('idx_waitlist_entries_event').on('waitlist_entries').columns(['event_id', 'created_at']).execute();
-    await db.schema.createIndex('idx_waitlist_entries_ticket_status').on('waitlist_entries').columns(['ticket_type_id', 'status', 'created_at']).execute();
-    await db.schema.createIndex('idx_waitlist_entries_claim_token').on('waitlist_entries').column('claim_token_hash').unique().execute();
-    await db.schema.createIndex('idx_waitlist_entries_buyer').on('waitlist_entries').columns(['ticket_type_id', 'buyer_email', 'status']).execute();
+    await db.schema
+      .createIndex('idx_waitlist_entries_event')
+      .on('waitlist_entries')
+      .columns(['event_id', 'created_at'])
+      .execute();
+    await db.schema
+      .createIndex('idx_waitlist_entries_ticket_status')
+      .on('waitlist_entries')
+      .columns(['ticket_type_id', 'status', 'created_at'])
+      .execute();
+    await db.schema
+      .createIndex('idx_waitlist_entries_claim_token')
+      .on('waitlist_entries')
+      .column('claim_token_hash')
+      .unique()
+      .execute();
+    await db.schema
+      .createIndex('idx_waitlist_entries_buyer')
+      .on('waitlist_entries')
+      .columns(['ticket_type_id', 'buyer_email', 'status'])
+      .execute();
   },
 
   async down(db): Promise<void> {

@@ -103,7 +103,10 @@ export class CheckoutExpiredError extends DomainError {
 
 export class DiscountInvalidError extends DomainError {
   constructor(code: string, reason: string) {
-    super('DISCOUNT_INVALID', `Discount code "${code}" is invalid: ${reason}`, 400, { code, reason });
+    super('DISCOUNT_INVALID', `Discount code "${code}" is invalid: ${reason}`, 400, {
+      code,
+      reason,
+    });
     this.name = 'DiscountInvalidError';
   }
 }
@@ -147,9 +150,14 @@ export class WebhookSignatureError extends DomainError {
 
 export class IdempotencyConflictError extends DomainError {
   constructor(key: string) {
-    super('IDEMPOTENCY_CONFLICT', `Idempotency key ${key} was used with a different request body`, 409, {
-      key,
-    });
+    super(
+      'IDEMPOTENCY_CONFLICT',
+      `Idempotency key ${key} was used with a different request body`,
+      409,
+      {
+        key,
+      },
+    );
     this.name = 'IdempotencyConflictError';
   }
 }

@@ -60,7 +60,10 @@ function requireCheckoutSessionToken(request: FastifyRequest): string {
   return clientToken;
 }
 
-function assertCheckoutSessionToken(session: { id: string; client_token: string }, clientToken: string) {
+function assertCheckoutSessionToken(
+  session: { id: string; client_token: string },
+  clientToken: string,
+) {
   if (session.client_token !== clientToken) {
     throw new NotFoundError('CheckoutSession', session.id);
   }
@@ -74,7 +77,10 @@ function tokenHashMatches(expected: string | null, candidate: string): boolean {
   if (!expected) return false;
   const expectedBuffer = Buffer.from(expected, 'hex');
   const candidateBuffer = Buffer.from(walletPassTokenHash(candidate), 'hex');
-  return expectedBuffer.length === candidateBuffer.length && timingSafeEqual(expectedBuffer, candidateBuffer);
+  return (
+    expectedBuffer.length === candidateBuffer.length &&
+    timingSafeEqual(expectedBuffer, candidateBuffer)
+  );
 }
 
 function publicCheckoutSession(session: {
@@ -107,7 +113,10 @@ function publicCheckoutSession(session: {
 
 function normalizeCartItems(
   items: CreateCheckoutSessionInput['items'],
-  ticketTypes: Map<string, { kind: string; price_cents: number; event_occurrence_id?: string | null }>,
+  ticketTypes: Map<
+    string,
+    { kind: string; price_cents: number; event_occurrence_id?: string | null }
+  >,
   products: Map<string, { price_cents: number }>,
 ): CartInput['items'] {
   const normalized = new Map<
@@ -127,7 +136,9 @@ function normalizeCartItems(
       const ticketType = ticketTypes.get(item.ticketTypeId);
       if (!ticketType) throw new NotFoundError('TicketType', item.ticketTypeId);
       if (ticketType.kind !== 'donation' && item.unitAmountCents !== undefined) {
-        throw new ValidationError(`unitAmountCents is only accepted for donation ticket ${item.ticketTypeId}`);
+        throw new ValidationError(
+          `unitAmountCents is only accepted for donation ticket ${item.ticketTypeId}`,
+        );
       }
 
       const occurrenceId = item.occurrenceId ?? ticketType.event_occurrence_id ?? undefined;
@@ -136,7 +147,9 @@ function normalizeCartItems(
       const unitAmountCents = ticketType.kind === 'donation' ? item.unitAmountCents : undefined;
       if (existing) {
         if (existing.unitAmountCents !== unitAmountCents) {
-          throw new ValidationError(`Duplicate donation lines for ${item.ticketTypeId} must use the same amount`);
+          throw new ValidationError(
+            `Duplicate donation lines for ${item.ticketTypeId} must use the same amount`,
+          );
         }
         existing.quantity += item.quantity;
         if (item.attendeeFields) {
@@ -239,7 +252,11 @@ function applicableQuestions(
   });
 }
 
-function assertValidAnswers(questions: Question[], answers: Record<string, unknown>, context: string): void {
+function assertValidAnswers(
+  questions: Question[],
+  answers: Record<string, unknown>,
+  context: string,
+): void {
   const result = validateAnswers(questions, answers);
   if (!result.valid) {
     throw new ValidationError(
@@ -258,18 +275,21 @@ function normalizeValidAnswers(
   return normalizeQuestionAnswers(questions, answers, answeredAt);
 }
 
-function assertWaitlistOfferUsable(entry: {
-  status: string;
-  offer_expires_at: Date | string | null;
-  event_id: string;
-  ticket_type_id: string;
-  quantity: number;
-  buyer_email: string;
-}, input: {
-  eventId: string;
-  items: { ticketTypeId?: string; quantity: number }[];
-  buyerEmail?: string;
-}): void {
+function assertWaitlistOfferUsable(
+  entry: {
+    status: string;
+    offer_expires_at: Date | string | null;
+    event_id: string;
+    ticket_type_id: string;
+    quantity: number;
+    buyer_email: string;
+  },
+  input: {
+    eventId: string;
+    items: { ticketTypeId?: string; quantity: number }[];
+    buyerEmail?: string;
+  },
+): void {
   if (entry.event_id !== input.eventId) {
     throw new ValidationError('Waitlist offer does not belong to this event');
   }
@@ -439,11 +459,18 @@ export const checkoutRoutes: FastifyPluginAsync = async (app) => {
         ]);
         const ttById = new Map(ticketTypes.map((t) => [t.id, t]));
         const productById = new Map(products.map((product) => [product.id, product]));
-        const occurrenceIds = [...new Set(body.items.map((item) => item.occurrenceId).filter((id): id is string => Boolean(id)))];
-        const occurrenceRows = occurrenceIds.length > 0
-          ? await new EventOccurrenceRepository(db).findByEvent(body.eventId)
-          : [];
-        const occurrenceById = new Map(occurrenceRows.map((occurrence) => [occurrence.id, occurrence]));
+        const occurrenceIds = [
+          ...new Set(
+            body.items.map((item) => item.occurrenceId).filter((id): id is string => Boolean(id)),
+          ),
+        ];
+        const occurrenceRows =
+          occurrenceIds.length > 0
+            ? await new EventOccurrenceRepository(db).findByEvent(body.eventId)
+            : [];
+        const occurrenceById = new Map(
+          occurrenceRows.map((occurrence) => [occurrence.id, occurrence]),
+        );
         for (const item of body.items) {
           if (!item.ticketTypeId) continue;
           const ticketType = ttById.get(item.ticketTypeId);
@@ -451,8 +478,14 @@ export const checkoutRoutes: FastifyPluginAsync = async (app) => {
           if (item.occurrenceId && !occurrenceById.has(item.occurrenceId)) {
             throw new NotFoundError('EventOccurrence', item.occurrenceId);
           }
-          if (ticketType.event_occurrence_id && item.occurrenceId && ticketType.event_occurrence_id !== item.occurrenceId) {
-            throw new ValidationError('Ticket type does not belong to the requested event occurrence');
+          if (
+            ticketType.event_occurrence_id &&
+            item.occurrenceId &&
+            ticketType.event_occurrence_id !== item.occurrenceId
+          ) {
+            throw new ValidationError(
+              'Ticket type does not belong to the requested event occurrence',
+            );
           }
         }
         const waitlistEntry = body.waitlistClaimToken
@@ -500,13 +533,14 @@ export const checkoutRoutes: FastifyPluginAsync = async (app) => {
           if (itemQuestions.length > 0) {
             for (let attendeeIndex = 0; attendeeIndex < item.quantity; attendeeIndex++) {
               const attendeeAnswers = item.attendeeFields?.[attendeeIndex] ?? {};
-              assertValidAnswers(
-                itemQuestions,
-                attendeeAnswers,
-                'Attendee question',
-              );
+              assertValidAnswers(itemQuestions, attendeeAnswers, 'Attendee question');
               // eslint-disable-next-line no-await-in-loop -- each attendee answer set is validated against scoped upload artifacts before session persistence.
-              await assertCompletedUploadArtifacts(db, event.tenant_id, body.eventId, attendeeAnswers);
+              await assertCompletedUploadArtifacts(
+                db,
+                event.tenant_id,
+                body.eventId,
+                attendeeAnswers,
+              );
             }
           }
         }
@@ -541,10 +575,13 @@ export const checkoutRoutes: FastifyPluginAsync = async (app) => {
 
         // Load access rules for the requested ticket types only.
         const accessRuleRepo = new AccessRuleRepository(db);
-        const ticketItems = normalizedItems.filter((item): item is CartInput['items'][number] & { ticketTypeId: string } =>
-          Boolean(item.ticketTypeId),
+        const ticketItems = normalizedItems.filter(
+          (item): item is CartInput['items'][number] & { ticketTypeId: string } =>
+            Boolean(item.ticketTypeId),
         );
-        const accessRulesRows = await accessRuleRepo.findByTicketTypes(ticketItems.map((i) => i.ticketTypeId));
+        const accessRulesRows = await accessRuleRepo.findByTicketTypes(
+          ticketItems.map((i) => i.ticketTypeId),
+        );
         const rulesByTicket = new Map<string, AccessRuleRecord[]>();
         for (const row of accessRulesRows) {
           const list = rulesByTicket.get(row.ticket_type_id) ?? [];
@@ -608,7 +645,11 @@ export const checkoutRoutes: FastifyPluginAsync = async (app) => {
           const itemQuestions = applicableQuestions(eventQuestions, 'attendee', item.ticketTypeId);
           if (itemQuestions.length > 0) {
             const fields = Array.from({ length: item.quantity }, (_, attendeeIndex) =>
-              normalizeQuestionAnswers(itemQuestions, item.attendeeFields?.[attendeeIndex] ?? {}, answeredAt),
+              normalizeQuestionAnswers(
+                itemQuestions,
+                item.attendeeFields?.[attendeeIndex] ?? {},
+                answeredAt,
+              ),
             );
             if (fields.some((fieldSet) => Object.keys(fieldSet).length > 0)) {
               attendeeFieldsByTicketType[item.ticketTypeId] = fields;
@@ -634,8 +675,8 @@ export const checkoutRoutes: FastifyPluginAsync = async (app) => {
 
         const firstItem = normalizedItems[0];
         const currency = firstItem.ticketTypeId
-          ? ttById.get(firstItem.ticketTypeId)?.currency ?? 'USD'
-          : productById.get(firstItem.productId!)?.currency ?? 'USD';
+          ? (ttById.get(firstItem.ticketTypeId)?.currency ?? 'USD')
+          : (productById.get(firstItem.productId!)?.currency ?? 'USD');
         const quote = pricingEngine.calculate({
           currency,
           cart,
@@ -649,12 +690,13 @@ export const checkoutRoutes: FastifyPluginAsync = async (app) => {
         // Reserve inventory across every pool the cart draws from.
         const sessionRepo = new CheckoutSessionRepository(db);
         const sessionId = `cs_${ulid()}`;
-        const reservation = reservationItems.length > 0
-          ? await inventoryService.reserveCart({
-              items: reservationItems,
-              checkoutSessionId: sessionId,
-            })
-          : { primaryHoldId: null, expiresAt: new Date(Date.now() + 10 * 60 * 1000) };
+        const reservation =
+          reservationItems.length > 0
+            ? await inventoryService.reserveCart({
+                items: reservationItems,
+                checkoutSessionId: sessionId,
+              })
+            : { primaryHoldId: null, expiresAt: new Date(Date.now() + 10 * 60 * 1000) };
 
         const session = await sessionRepo.create({
           id: sessionId,
@@ -755,12 +797,15 @@ export const checkoutRoutes: FastifyPluginAsync = async (app) => {
       .orderBy('tickets.id', 'asc')
       .execute();
 
-    const tickets = new Map<string, {
-      ticketId: string;
-      ticketCode: string;
-      appleUrl?: string;
-      googleUrl?: string;
-    }>();
+    const tickets = new Map<
+      string,
+      {
+        ticketId: string;
+        ticketCode: string;
+        appleUrl?: string;
+        googleUrl?: string;
+      }
+    >();
     for (const row of rows) {
       const current = tickets.get(row.ticket_id) ?? {
         ticketId: row.ticket_id,
@@ -787,7 +832,12 @@ export const checkoutRoutes: FastifyPluginAsync = async (app) => {
       .where('id', '=', passId)
       .where('provider', '=', 'apple')
       .executeTakeFirst();
-    if (!pass || pass.status !== 'active' || !tokenHashMatches(pass.access_token_hash, token) || !pass.artifact_base64) {
+    if (
+      !pass ||
+      pass.status !== 'active' ||
+      !tokenHashMatches(pass.access_token_hash, token) ||
+      !pass.artifact_base64
+    ) {
       throw new NotFoundError('WalletPass', passId);
     }
 
@@ -813,10 +863,14 @@ export const checkoutRoutes: FastifyPluginAsync = async (app) => {
     if (session.payment_intent_id) {
       throw new ValidationError('Checkout session is not editable: payment is in progress');
     }
-    const updateData = pickAllowedFields(body as Record<string, unknown>, ['buyer', 'successUrl', 'cancelUrl'], {
-      successUrl: 'success_url',
-      cancelUrl: 'cancel_url',
-    });
+    const updateData = pickAllowedFields(
+      body as Record<string, unknown>,
+      ['buyer', 'successUrl', 'cancelUrl'],
+      {
+        successUrl: 'success_url',
+        cancelUrl: 'cancel_url',
+      },
+    );
     if (updateData.buyer) updateData.buyer = JSON.stringify(updateData.buyer);
     const updated = await repo.update(sessionId, updateData);
     return publicCheckoutSession(updated);

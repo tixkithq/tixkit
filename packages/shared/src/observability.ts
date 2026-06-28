@@ -1,9 +1,23 @@
-import { context, SpanKind, SpanStatusCode, trace, type Span, type SpanAttributes } from '@opentelemetry/api';
+import {
+  context,
+  SpanKind,
+  SpanStatusCode,
+  trace,
+  type Span,
+  type SpanAttributes,
+} from '@opentelemetry/api';
 import { OTLPTraceExporter } from '@opentelemetry/exporter-trace-otlp-http';
 import { resourceFromAttributes, type Resource } from '@opentelemetry/resources';
 import { NodeSDK } from '@opentelemetry/sdk-node';
 import { BatchSpanProcessor, type SpanExporter } from '@opentelemetry/sdk-trace-base';
-import { collectDefaultMetrics, Counter, Gauge, Histogram, Pushgateway, Registry } from 'prom-client';
+import {
+  collectDefaultMetrics,
+  Counter,
+  Gauge,
+  Histogram,
+  Pushgateway,
+  Registry,
+} from 'prom-client';
 
 const REDACTED = '[REDACTED]';
 const SENSITIVE_KEY_PATTERN =
@@ -61,7 +75,9 @@ export function createTraceExporter(config: ObservabilityRuntimeConfig): SpanExp
   return new OTLPTraceExporter(traceEndpoint ? { url: traceEndpoint } : undefined);
 }
 
-export function startOpenTelemetry(config: ObservabilityRuntimeConfig): { shutdown: () => Promise<void> } {
+export function startOpenTelemetry(config: ObservabilityRuntimeConfig): {
+  shutdown: () => Promise<void>;
+} {
   if (config.disabled || process.env.OTEL_SDK_DISABLED === 'true') {
     return { shutdown: async () => undefined };
   }
@@ -88,7 +104,10 @@ export async function withSpan<T>(
   fn: (span: Span) => Promise<T>,
 ): Promise<T> {
   const tracer = trace.getTracer('tixkit');
-  const span = tracer.startSpan(spanName, { kind: SpanKind.INTERNAL, attributes: sanitizeSpanAttributes(attributes) });
+  const span = tracer.startSpan(spanName, {
+    kind: SpanKind.INTERNAL,
+    attributes: sanitizeSpanAttributes(attributes),
+  });
   return context.with(trace.setSpan(context.active(), span), async () => {
     try {
       const result = await fn(span);
@@ -96,7 +115,10 @@ export async function withSpan<T>(
       return result;
     } catch (error) {
       span.recordException(error as Error);
-      span.setStatus({ code: SpanStatusCode.ERROR, message: error instanceof Error ? error.message : 'Unknown error' });
+      span.setStatus({
+        code: SpanStatusCode.ERROR,
+        message: error instanceof Error ? error.message : 'Unknown error',
+      });
       throw error;
     } finally {
       span.end();
@@ -263,7 +285,9 @@ function redactScalar(value: unknown): unknown {
   return redactString(value);
 }
 
-function redactAttributeValue(value: unknown): string | number | boolean | string[] | number[] | boolean[] {
+function redactAttributeValue(
+  value: unknown,
+): string | number | boolean | string[] | number[] | boolean[] {
   if (typeof value === 'string') return redactString(value);
   if (typeof value === 'number' || typeof value === 'boolean') return value;
   if (Array.isArray(value)) {
@@ -279,7 +303,9 @@ function redactAttributeValue(value: unknown): string | number | boolean | strin
 }
 
 function redactString(value: string): string {
-  return value.replace(EMAIL_PATTERN, REDACTED).replace(SECRET_VALUE_PATTERN, (_match, bearerPrefix: string | undefined) =>
-    bearerPrefix ? `${bearerPrefix}${REDACTED}` : REDACTED,
-  );
+  return value
+    .replace(EMAIL_PATTERN, REDACTED)
+    .replace(SECRET_VALUE_PATTERN, (_match, bearerPrefix: string | undefined) =>
+      bearerPrefix ? `${bearerPrefix}${REDACTED}` : REDACTED,
+    );
 }

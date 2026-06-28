@@ -8,7 +8,6 @@ const { deliverWebhookActivity } = proxyActivities<{
     eventId: string;
     eventType?: string;
     payload: string;
-    secret: string;
     attempt: number;
     finalAttempt: boolean;
   }): Promise<WorkflowActivityResult<{ statusCode: number; response: string }>>;
@@ -29,11 +28,12 @@ export type WebhookDeliveryWorkflowInput = {
   eventType?: string;
   replayNonce?: string;
   payload: Record<string, unknown>;
-  secret: string;
   maxAttempts: number;
 };
 
-export async function webhookDeliveryWorkflow(input: WebhookDeliveryWorkflowInput): Promise<{ status: string }> {
+export async function webhookDeliveryWorkflow(
+  input: WebhookDeliveryWorkflowInput,
+): Promise<{ status: string }> {
   const payloadStr = JSON.stringify(input.payload);
 
   for (let attempt = 1; attempt <= input.maxAttempts; attempt++) {
@@ -44,7 +44,6 @@ export async function webhookDeliveryWorkflow(input: WebhookDeliveryWorkflowInpu
       eventId: input.eventId,
       eventType: input.eventType,
       payload: payloadStr,
-      secret: input.secret,
       attempt,
       finalAttempt: attempt === input.maxAttempts,
     });

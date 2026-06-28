@@ -59,7 +59,9 @@ export type CreateWebhookEndpointInput = {
   description?: string;
 };
 
-export type UpdateWebhookEndpointInput = Partial<Pick<WebhookEndpoint, 'url' | 'events' | 'status' | 'description'>>;
+export type UpdateWebhookEndpointInput = Partial<
+  Pick<WebhookEndpoint, 'url' | 'events' | 'status' | 'description'>
+>;
 
 export type SandboxMode = {
   enabled: boolean;

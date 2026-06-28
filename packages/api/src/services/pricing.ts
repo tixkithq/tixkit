@@ -9,10 +9,7 @@ import type {
   Ulid,
 } from '@tixkit/domain';
 import { ulid } from 'ulid';
-import {
-  DiscountInvalidError,
-  ValidationError,
-} from '@tixkit/domain';
+import { DiscountInvalidError, ValidationError } from '@tixkit/domain';
 
 export type TicketTypeForPricing = {
   id: string;
@@ -75,7 +72,9 @@ export class PricingEngine {
           throw new DiscountInvalidError(item.ticketTypeId, 'ticket type not found');
         }
         if (tt.currency !== currency) {
-          throw new ValidationError(`Ticket type ${tt.id} currency ${tt.currency} does not match cart currency ${currency}`);
+          throw new ValidationError(
+            `Ticket type ${tt.id} currency ${tt.currency} does not match cart currency ${currency}`,
+          );
         }
 
         const quantity = item.quantity;
@@ -140,7 +139,12 @@ export class PricingEngine {
 
     let appliedDiscount: DiscountCode | null = null;
     if (cart.discountCode) {
-      appliedDiscount = this.findDiscount(discountCodes, cart.discountCode, subtotalCents, currency);
+      appliedDiscount = this.findDiscount(
+        discountCodes,
+        cart.discountCode,
+        subtotalCents,
+        currency,
+      );
     }
 
     let remainingDiscountCap = appliedDiscount?.maxDiscountCents ?? Number.POSITIVE_INFINITY;
@@ -162,9 +166,12 @@ export class PricingEngine {
       let lineFee = 0;
       for (const feeRule of feeRules) {
         if (feeRule.appliedTo === 'per_ticket') {
-          const feeAmount = feeRule.type === 'percentage'
-            ? Math.round(((line.subtotalCents - lineDiscount) * feeRule.value) / 10000 / line.quantity)
-            : feeRule.value;
+          const feeAmount =
+            feeRule.type === 'percentage'
+              ? Math.round(
+                  ((line.subtotalCents - lineDiscount) * feeRule.value) / 10000 / line.quantity,
+                )
+              : feeRule.value;
           lineFee += feeAmount * line.quantity;
         } else if (feeRule.appliedTo === 'per_order') {
           continue;
@@ -175,9 +182,10 @@ export class PricingEngine {
       const taxBreakdown: NonNullable<PriceLineItem['taxBreakdown']> = [];
       for (const taxRule of taxRules) {
         if (!this.taxApplies(taxRule, input.buyerCountry, input.buyerRegion)) continue;
-        const taxableBase = taxRule.appliedTo === 'ticket' || taxRule.appliedTo === 'all'
-          ? line.subtotalCents - lineDiscount
-          : 0;
+        const taxableBase =
+          taxRule.appliedTo === 'ticket' || taxRule.appliedTo === 'all'
+            ? line.subtotalCents - lineDiscount
+            : 0;
         const feeTaxable = taxRule.appliedTo === 'fee' || taxRule.appliedTo === 'all' ? lineFee : 0;
         const totalTaxable = taxableBase + feeTaxable;
         if (totalTaxable <= 0) continue;
@@ -203,7 +211,9 @@ export class PricingEngine {
         });
       }
 
-      const hasInclusiveTax = taxRules.some((r) => r.type === 'inclusive' && this.taxApplies(r, input.buyerCountry, input.buyerRegion));
+      const hasInclusiveTax = taxRules.some(
+        (r) => r.type === 'inclusive' && this.taxApplies(r, input.buyerCountry, input.buyerRegion),
+      );
       const lineTotal = hasInclusiveTax
         ? line.subtotalCents - lineDiscount + lineFee
         : line.subtotalCents - lineDiscount + lineFee + lineTax;
@@ -231,14 +241,17 @@ export class PricingEngine {
 
     for (const feeRule of feeRules) {
       if (feeRule.appliedTo === 'per_order') {
-        const feeAmount = feeRule.type === 'percentage'
-          ? Math.round(((subtotalCents - discountCents) * feeRule.value) / 10000)
-          : feeRule.value;
+        const feeAmount =
+          feeRule.type === 'percentage'
+            ? Math.round(((subtotalCents - discountCents) * feeRule.value) / 10000)
+            : feeRule.value;
         feeCents += feeAmount;
       }
     }
 
-    const hasInclusiveTax = taxRules.some((r) => r.type === 'inclusive' && this.taxApplies(r, input.buyerCountry, input.buyerRegion));
+    const hasInclusiveTax = taxRules.some(
+      (r) => r.type === 'inclusive' && this.taxApplies(r, input.buyerCountry, input.buyerRegion),
+    );
     const totalCents = hasInclusiveTax
       ? subtotalCents - discountCents + feeCents
       : subtotalCents - discountCents + taxCents + feeCents;
@@ -265,9 +278,16 @@ export class PricingEngine {
     return requestedUnitAmountCents;
   }
 
-  private validateProduct(product: ProductForPricing, quantity: number, currency: CurrencyCode, now: Date): void {
+  private validateProduct(
+    product: ProductForPricing,
+    quantity: number,
+    currency: CurrencyCode,
+    now: Date,
+  ): void {
     if (product.currency !== currency) {
-      throw new ValidationError(`Product ${product.id} currency ${product.currency} does not match cart currency ${currency}`);
+      throw new ValidationError(
+        `Product ${product.id} currency ${product.currency} does not match cart currency ${currency}`,
+      );
     }
     if (quantity < 1 || quantity > product.maxPerOrder) {
       throw new DiscountInvalidError(
@@ -313,7 +333,10 @@ export class PricingEngine {
       throw new DiscountInvalidError(code, 'max uses reached');
     }
     if (discount.currency !== currency) {
-      throw new DiscountInvalidError(code, `currency ${discount.currency} does not match ${currency}`);
+      throw new DiscountInvalidError(
+        code,
+        `currency ${discount.currency} does not match ${currency}`,
+      );
     }
     if (discount.minOrderCents != null && subtotalCents < discount.minOrderCents) {
       throw new DiscountInvalidError(code, `minimum order is ${discount.minOrderCents} cents`);
@@ -322,7 +345,11 @@ export class PricingEngine {
     return discount;
   }
 
-  private calculateDiscountForLine(discount: DiscountCode, lineSubtotal: number, quantity: number): number {
+  private calculateDiscountForLine(
+    discount: DiscountCode,
+    lineSubtotal: number,
+    quantity: number,
+  ): number {
     switch (discount.type) {
       case 'percentage':
         return Math.round((lineSubtotal * discount.value) / 10000);

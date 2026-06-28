@@ -8,8 +8,8 @@ export function integrationDatabaseDriver(): IntegrationDatabaseDriver {
 
 export function integrationDatabaseUrl(): string {
   return integrationDatabaseDriver() === 'mysql'
-    ? process.env.DATABASE_URL_MYSQL ?? ''
-    : process.env.DATABASE_URL ?? '';
+    ? (process.env.DATABASE_URL_MYSQL ?? '')
+    : (process.env.DATABASE_URL ?? '');
 }
 
 export function describeWithIntegrationDatabase(name: string, fn: () => void): void {

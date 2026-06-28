@@ -28,9 +28,7 @@ type Hold = {
 };
 
 class MockTable {
-  constructor(
-    private rows: Map<string, any>,
-  ) {}
+  constructor(private rows: Map<string, any>) {}
 
   private matches(row: any, conds: Array<{ col: string; val: any }>): boolean {
     return conds.every((c) => {
@@ -92,7 +90,10 @@ class MockTable {
     let setFn: ((eb: any) => Record<string, unknown>) | Record<string, unknown> = {};
 
     const chain: any = {
-      set: (values: any) => { setFn = values; return chain; },
+      set: (values: any) => {
+        setFn = values;
+        return chain;
+      },
       where: (col: string, _op: string, val: any) => {
         conds.push({ col, val });
         return chain;
@@ -123,7 +124,10 @@ class MockTable {
   insertInto() {
     let vals: Record<string, unknown> = {};
     const chain: any = {
-      values: (v: Record<string, unknown>) => { vals = v; return chain; },
+      values: (v: Record<string, unknown>) => {
+        vals = v;
+        return chain;
+      },
       execute: async () => {
         this.rows.set(vals.id as string, vals as any);
       },
@@ -145,7 +149,9 @@ function createMockDb() {
     updateTable: (table: string) =>
       table === 'inventory_pools' ? poolTable.updateTable() : holdTable.updateTable(),
     insertInto: (table: string) =>
-      table === 'checkout_holds' ? holdTable.insertInto() : { values: () => ({ execute: () => Promise.resolve() }) },
+      table === 'checkout_holds'
+        ? holdTable.insertInto()
+        : { values: () => ({ execute: () => Promise.resolve() }) },
     fn: {
       sum: (col: string) => ({ sumColumn: col, as: () => ({ sumColumn: col }) }),
     },
@@ -254,9 +260,9 @@ describe('InventoryService', () => {
     });
 
     it('throws on empty cart', async () => {
-      await expect(
-        service.reserveCart({ items: [], checkoutSessionId: 'cs_1' }),
-      ).rejects.toThrow(InventoryExhaustedError);
+      await expect(service.reserveCart({ items: [], checkoutSessionId: 'cs_1' })).rejects.toThrow(
+        InventoryExhaustedError,
+      );
     });
 
     it('rejects non-positive quantities before creating holds', async () => {

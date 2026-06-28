@@ -156,7 +156,8 @@ export function loadWalletPassConfig(env: NodeJS.ProcessEnv = process.env): Wall
       ? {
           passTypeIdentifier: env.APPLE_WALLET_PASS_TYPE_ID!,
           teamIdentifier: env.APPLE_WALLET_TEAM_ID!,
-          organizationName: env.APPLE_WALLET_ORGANIZATION_NAME ?? env.GOOGLE_WALLET_ISSUER_NAME ?? 'Tixkit',
+          organizationName:
+            env.APPLE_WALLET_ORGANIZATION_NAME ?? env.GOOGLE_WALLET_ISSUER_NAME ?? 'Tixkit',
           signerCert: normalizePem(env.APPLE_WALLET_SIGNER_CERT!),
           signerKey: normalizePem(env.APPLE_WALLET_SIGNER_KEY!),
           signerKeyPassphrase: env.APPLE_WALLET_SIGNER_KEY_PASSPHRASE,
@@ -169,13 +170,19 @@ export function loadWalletPassConfig(env: NodeJS.ProcessEnv = process.env): Wall
           classSuffix: sanitizeGoogleSuffix(env.GOOGLE_WALLET_CLASS_SUFFIX!),
           serviceAccountEmail: env.GOOGLE_WALLET_SERVICE_ACCOUNT_EMAIL!,
           privateKey: normalizePem(env.GOOGLE_WALLET_PRIVATE_KEY!),
-          origins: env.GOOGLE_WALLET_ORIGIN!.split(',').map((origin) => origin.trim()).filter(Boolean),
+          origins: env
+            .GOOGLE_WALLET_ORIGIN!.split(',')
+            .map((origin) => origin.trim())
+            .filter(Boolean),
         }
       : undefined,
   };
 }
 
-export function createAppleWalletPass(input: WalletPassTicketInput, config: AppleWalletConfig): PKPass {
+export function createAppleWalletPass(
+  input: WalletPassTicketInput,
+  config: AppleWalletConfig,
+): PKPass {
   const pass = new PKPass(
     {
       'icon.png': ONE_PIXEL_PNG,

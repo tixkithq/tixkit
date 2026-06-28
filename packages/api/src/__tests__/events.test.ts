@@ -62,7 +62,9 @@ function baseEventRow(overrides: Record<string, unknown> = {}) {
   };
 }
 
-function createEventMutationDb(seed: { event?: Record<string, unknown>; brand?: Record<string, unknown> } = {}) {
+function createEventMutationDb(
+  seed: { event?: Record<string, unknown>; brand?: Record<string, unknown> } = {},
+) {
   const rows: Record<string, Record<string, unknown>[]> = {
     events: seed.event ? [seed.event] : [],
     brands: [
@@ -351,7 +353,9 @@ describe('event routes', () => {
   });
 
   it('upserts GA4 marketing integrations for an event', async () => {
-    const { db, inserted } = createEventMutationDb({ event: baseEventRow({ status: 'published' }) });
+    const { db, inserted } = createEventMutationDb({
+      event: baseEventRow({ status: 'published' }),
+    });
     const app = await setupEventApp(db, writePrincipal);
 
     const response = await app.inject({

@@ -1,27 +1,27 @@
-'use client'
+'use client';
 
-import { useEffect, useState } from 'react'
-import { cn } from '@/lib/utils'
+import { useEffect, useState } from 'react';
+import { cn } from '@/lib/utils';
 
 type HeaderProps = React.HTMLAttributes<HTMLElement> & {
-  fixed?: boolean
-  ref?: React.Ref<HTMLElement>
-}
+  fixed?: boolean;
+  ref?: React.Ref<HTMLElement>;
+};
 
 export function Header({ className, fixed, children, ...props }: HeaderProps) {
-  const [offset, setOffset] = useState(0)
+  const [offset, setOffset] = useState(0);
 
   useEffect(() => {
     const onScroll = () => {
-      setOffset(document.body.scrollTop || document.documentElement.scrollTop)
-    }
+      setOffset(document.body.scrollTop || document.documentElement.scrollTop);
+    };
 
     // Add scroll listener to the body
-    document.addEventListener('scroll', onScroll, { passive: true })
+    document.addEventListener('scroll', onScroll, { passive: true });
 
     // Clean up the event listener on unmount
-    return () => document.removeEventListener('scroll', onScroll)
-  }, [])
+    return () => document.removeEventListener('scroll', onScroll);
+  }, []);
 
   return (
     <header
@@ -29,7 +29,7 @@ export function Header({ className, fixed, children, ...props }: HeaderProps) {
         'z-50 h-16',
         fixed && 'header-fixed peer/header sticky top-0 w-[inherit]',
         offset > 10 && fixed ? 'shadow' : 'shadow-none',
-        className
+        className,
       )}
       {...props}
     >
@@ -38,13 +38,13 @@ export function Header({ className, fixed, children, ...props }: HeaderProps) {
           'relative flex h-full items-center px-4 py-4',
           offset > 10 &&
             fixed &&
-            'after:absolute after:inset-0 after:-z-10 after:bg-background/20 after:backdrop-blur-lg'
+            'after:absolute after:inset-0 after:-z-10 after:bg-background/20 after:backdrop-blur-lg',
         )}
       >
-        <div className='flex min-w-0 flex-1 items-center justify-end gap-3 sm:gap-4'>
+        <div className="flex min-w-0 flex-1 items-center justify-end gap-3 sm:gap-4">
           {children}
         </div>
       </div>
     </header>
-  )
+  );
 }

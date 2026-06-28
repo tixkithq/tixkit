@@ -24,7 +24,11 @@ export abstract class BaseRepository {
       return (await qb.returningAll().executeTakeFirstOrThrow()) as unknown as Selectable<DB[T]>;
     }
     await qb.execute();
-    return (await dbAny.selectFrom(table).selectAll().where('id', '=', id).executeTakeFirstOrThrow()) as unknown as Selectable<DB[T]>;
+    return (await dbAny
+      .selectFrom(table)
+      .selectAll()
+      .where('id', '=', id)
+      .executeTakeFirstOrThrow()) as unknown as Selectable<DB[T]>;
   }
 
   protected async updateReturning<T extends keyof DB>(
@@ -38,7 +42,11 @@ export abstract class BaseRepository {
       return (await qb.returningAll().executeTakeFirstOrThrow()) as unknown as Selectable<DB[T]>;
     }
     await qb.execute();
-    return (await dbAny.selectFrom(table).selectAll().where('id', '=', id).executeTakeFirstOrThrow()) as unknown as Selectable<DB[T]>;
+    return (await dbAny
+      .selectFrom(table)
+      .selectAll()
+      .where('id', '=', id)
+      .executeTakeFirstOrThrow()) as unknown as Selectable<DB[T]>;
   }
 }
 
@@ -54,7 +62,11 @@ export async function insertReturning<T extends keyof DB>(
     return (await qb.returningAll().executeTakeFirstOrThrow()) as unknown as Selectable<DB[T]>;
   }
   await qb.execute();
-  return (await dbAny.selectFrom(table).selectAll().where('id', '=', id).executeTakeFirstOrThrow()) as unknown as Selectable<DB[T]>;
+  return (await dbAny
+    .selectFrom(table)
+    .selectAll()
+    .where('id', '=', id)
+    .executeTakeFirstOrThrow()) as unknown as Selectable<DB[T]>;
 }
 
 export async function updateReturning<T extends keyof DB>(
@@ -69,5 +81,9 @@ export async function updateReturning<T extends keyof DB>(
     return (await qb.returningAll().executeTakeFirstOrThrow()) as unknown as Selectable<DB[T]>;
   }
   await qb.execute();
-  return (await dbAny.selectFrom(table).selectAll().where('id', '=', id).executeTakeFirstOrThrow()) as unknown as Selectable<DB[T]>;
+  return (await dbAny
+    .selectFrom(table)
+    .selectAll()
+    .where('id', '=', id)
+    .executeTakeFirstOrThrow()) as unknown as Selectable<DB[T]>;
 }

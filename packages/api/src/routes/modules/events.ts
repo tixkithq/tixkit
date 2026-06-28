@@ -2,7 +2,12 @@ import type { FastifyPluginAsync } from 'fastify';
 import { z } from 'zod';
 import { ulid } from 'ulid';
 import { ClerkAuthService } from '../../auth/clerk.js';
-import { BrandRepository, EventRepository, EventOccurrenceRepository, AuditLogRepository } from '@tixkit/db';
+import {
+  BrandRepository,
+  EventRepository,
+  EventOccurrenceRepository,
+  AuditLogRepository,
+} from '@tixkit/db';
 import { NotFoundError, ValidationError } from '@tixkit/domain';
 import { writeAuditLog } from '../../auth/audit.js';
 import {
@@ -20,34 +25,57 @@ import {
   updateEventSchema,
 } from '../../http/schemas.js';
 
-const marketingIntegrationSchema = z.object({
-  provider: z.enum(['ga4', 'meta_pixel', 'generic_tag']),
-  config: z.record(z.string(), z.unknown()),
-  consentRequired: z.boolean().default(true),
-  status: z.enum(['active', 'disabled']).default('active'),
-}).strict().superRefine((value, ctx) => {
-  if (value.provider === 'ga4' && typeof value.config.measurementId !== 'string') {
-    ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['config', 'measurementId'], message: 'measurementId is required for GA4 integrations' });
-  }
-  if (value.provider === 'meta_pixel' && typeof value.config.pixelId !== 'string') {
-    ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['config', 'pixelId'], message: 'pixelId is required for Meta Pixel integrations' });
-  }
-  if (value.provider === 'generic_tag') {
-    const pixelUrl = value.config.pixelUrl;
-    if (typeof pixelUrl !== 'string') {
-      ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['config', 'pixelUrl'], message: 'pixelUrl is required for generic tag integrations' });
-      return;
+const marketingIntegrationSchema = z
+  .object({
+    provider: z.enum(['ga4', 'meta_pixel', 'generic_tag']),
+    config: z.record(z.string(), z.unknown()),
+    consentRequired: z.boolean().default(true),
+    status: z.enum(['active', 'disabled']).default('active'),
+  })
+  .strict()
+  .superRefine((value, ctx) => {
+    if (value.provider === 'ga4' && typeof value.config.measurementId !== 'string') {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['config', 'measurementId'],
+        message: 'measurementId is required for GA4 integrations',
+      });
     }
-    try {
-      const parsed = new URL(pixelUrl);
-      if (parsed.protocol !== 'https:') {
-        ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['config', 'pixelUrl'], message: 'pixelUrl must use https' });
+    if (value.provider === 'meta_pixel' && typeof value.config.pixelId !== 'string') {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['config', 'pixelId'],
+        message: 'pixelId is required for Meta Pixel integrations',
+      });
+    }
+    if (value.provider === 'generic_tag') {
+      const pixelUrl = value.config.pixelUrl;
+      if (typeof pixelUrl !== 'string') {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ['config', 'pixelUrl'],
+          message: 'pixelUrl is required for generic tag integrations',
+        });
+        return;
       }
-    } catch {
-      ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['config', 'pixelUrl'], message: 'pixelUrl must be a valid URL' });
+      try {
+        const parsed = new URL(pixelUrl);
+        if (parsed.protocol !== 'https:') {
+          ctx.addIssue({
+            code: z.ZodIssueCode.custom,
+            path: ['config', 'pixelUrl'],
+            message: 'pixelUrl must use https',
+          });
+        }
+      } catch {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ['config', 'pixelUrl'],
+          message: 'pixelUrl must be a valid URL',
+        });
+      }
     }
-  }
-});
+  });
 
 export const eventRoutes: FastifyPluginAsync = async (app) => {
   const db = app.context.db;
@@ -58,17 +86,17 @@ export const eventRoutes: FastifyPluginAsync = async (app) => {
     ClerkAuthService.requirePermission(principal, 'events.write');
     const body = parseBody(createEventSchema, request.body);
 
-	    ClerkAuthService.requireOrganizationScope(principal, body.organizationId);
-	    ClerkAuthService.requireBrandScope(principal, body.brandId);
-	    const brand = await new BrandRepository(db).findById(body.brandId);
-	    if (!brand) throw new NotFoundError('Brand', body.brandId);
-	    ClerkAuthService.requireResourceTenant(principal, brand, 'Brand', body.brandId);
-	    ClerkAuthService.requireOrganizationScope(principal, brand.organization_id);
-	    if (brand.organization_id !== body.organizationId) {
-	      throw new NotFoundError('Brand', body.brandId);
-	    }
+    ClerkAuthService.requireOrganizationScope(principal, body.organizationId);
+    ClerkAuthService.requireBrandScope(principal, body.brandId);
+    const brand = await new BrandRepository(db).findById(body.brandId);
+    if (!brand) throw new NotFoundError('Brand', body.brandId);
+    ClerkAuthService.requireResourceTenant(principal, brand, 'Brand', body.brandId);
+    ClerkAuthService.requireOrganizationScope(principal, brand.organization_id);
+    if (brand.organization_id !== body.organizationId) {
+      throw new NotFoundError('Brand', body.brandId);
+    }
 
-	    const repo = new EventRepository(db);
+    const repo = new EventRepository(db);
     const event = await repo.create({
       tenantId: principal.tenantId,
       organizationId: body.organizationId,
@@ -107,31 +135,34 @@ export const eventRoutes: FastifyPluginAsync = async (app) => {
     if (principal.type !== 'system' && principal.organizationIds.length === 0) {
       return pageEnvelope([], pagination.limit);
     }
-	    let query = db
-	      .selectFrom('events')
-	      .selectAll()
-	      .where('tenant_id', '=', principal.tenantId)
-	      .orderBy('id', 'asc')
-	      .limit(pagination.limit + 1);
+    let query = db
+      .selectFrom('events')
+      .selectAll()
+      .where('tenant_id', '=', principal.tenantId)
+      .orderBy('id', 'asc')
+      .limit(pagination.limit + 1);
 
-      const { organizationId } = request.query as { organizationId?: string };
-      if (organizationId) {
-        ClerkAuthService.requireOrganizationScope(principal, organizationId);
-        query = query.where('organization_id', '=', organizationId);
-      }
-	    if (pagination.cursor) query = query.where('id', '>', pagination.cursor);
-	    if (principal.brandIds && principal.brandIds.length > 0) {
-	      query = query.where('brand_id', 'in', principal.brandIds);
-	    }
-	    if (principal.eventIds && principal.eventIds.length > 0) {
-	      query = query.where('id', 'in', principal.eventIds);
-	    }
-	    if (principal.type !== 'system') {
-	      query = query.where('organization_id', 'in', principal.organizationIds);
-	    }
-	    const rows = await query.execute();
-	    return pageEnvelope(rows.map((row) => serializeEvent(row)), pagination.limit);
-	  });
+    const { organizationId } = request.query as { organizationId?: string };
+    if (organizationId) {
+      ClerkAuthService.requireOrganizationScope(principal, organizationId);
+      query = query.where('organization_id', '=', organizationId);
+    }
+    if (pagination.cursor) query = query.where('id', '>', pagination.cursor);
+    if (principal.brandIds && principal.brandIds.length > 0) {
+      query = query.where('brand_id', 'in', principal.brandIds);
+    }
+    if (principal.eventIds && principal.eventIds.length > 0) {
+      query = query.where('id', 'in', principal.eventIds);
+    }
+    if (principal.type !== 'system') {
+      query = query.where('organization_id', 'in', principal.organizationIds);
+    }
+    const rows = await query.execute();
+    return pageEnvelope(
+      rows.map((row) => serializeEvent(row)),
+      pagination.limit,
+    );
+  });
 
   app.get('/events/:eventId', async (request) => {
     const principal = request.principal!;
@@ -215,7 +246,8 @@ export const eventRoutes: FastifyPluginAsync = async (app) => {
 
     const repo = new EventOccurrenceRepository(db);
     const existing = await repo.findById(occurrenceId);
-    if (!existing || existing.event_id !== eventId) throw new NotFoundError('EventOccurrence', occurrenceId);
+    if (!existing || existing.event_id !== eventId)
+      throw new NotFoundError('EventOccurrence', occurrenceId);
 
     const startsAt = body.startsAt ? new Date(body.startsAt) : new Date(existing.starts_at);
     const endsAt = body.endsAt ? new Date(body.endsAt) : new Date(existing.ends_at);
@@ -284,14 +316,21 @@ export const eventRoutes: FastifyPluginAsync = async (app) => {
       .selectAll()
       .where('event_id', '=', eventId)
       .execute();
-    return { items: rows.map((row) => serializeMarketingIntegration(row)), nextCursor: null, hasMore: false };
+    return {
+      items: rows.map((row) => serializeMarketingIntegration(row)),
+      nextCursor: null,
+      hasMore: false,
+    };
   });
 
   app.put('/events/:eventId/marketing-integrations/:provider', async (request) => {
     const principal = request.principal!;
     ClerkAuthService.requirePermission(principal, 'events.write');
     const { eventId, provider } = request.params as { eventId: string; provider: string };
-    const body = parseBody(marketingIntegrationSchema, { ...(request.body as Record<string, unknown>), provider });
+    const body = parseBody(marketingIntegrationSchema, {
+      ...(request.body as Record<string, unknown>),
+      provider,
+    });
     const event = await new EventRepository(db).findById(eventId);
     if (!event) throw new NotFoundError('Event', eventId);
     ClerkAuthService.requireResourceTenant(principal, event, 'Event', eventId);
@@ -324,20 +363,28 @@ export const eventRoutes: FastifyPluginAsync = async (app) => {
         .executeTakeFirstOrThrow();
       return serializeMarketingIntegration(updated);
     }
-    await db.insertInto('marketing_integrations').values({
-      id: `mkt_${ulid()}`,
-      tenant_id: event.tenant_id,
-      organization_id: event.organization_id,
-      brand_id: event.brand_id,
-      event_id: eventId,
-      provider: body.provider,
-      config: JSON.stringify(body.config),
-      consent_required: body.consentRequired,
-      status: body.status,
-      created_at: now,
-      updated_at: now,
-    }).execute();
-    const created = await db.selectFrom('marketing_integrations').selectAll().where('event_id', '=', eventId).where('provider', '=', body.provider).executeTakeFirstOrThrow();
+    await db
+      .insertInto('marketing_integrations')
+      .values({
+        id: `mkt_${ulid()}`,
+        tenant_id: event.tenant_id,
+        organization_id: event.organization_id,
+        brand_id: event.brand_id,
+        event_id: eventId,
+        provider: body.provider,
+        config: JSON.stringify(body.config),
+        consent_required: body.consentRequired,
+        status: body.status,
+        created_at: now,
+        updated_at: now,
+      })
+      .execute();
+    const created = await db
+      .selectFrom('marketing_integrations')
+      .selectAll()
+      .where('event_id', '=', eventId)
+      .where('provider', '=', body.provider)
+      .executeTakeFirstOrThrow();
     return serializeMarketingIntegration(created);
   });
 

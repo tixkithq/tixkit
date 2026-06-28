@@ -7,23 +7,38 @@ import { NotFoundError, ValidationError } from '@tixkit/domain';
 import { ClerkAuthService } from '../../auth/clerk.js';
 import { parseBody } from '../../http/schemas.js';
 
-const joinWaitlistSchema = z.object({
-  ticketTypeId: z.string().min(1),
-  email: z.string().email(),
-  firstName: z.string().min(1).max(128).optional(),
-  lastName: z.string().min(1).max(128).optional(),
-  phone: z.string().min(1).max(64).optional(),
-  quantity: z.number().int().min(1).max(20).default(1),
-}).strict();
+const joinWaitlistSchema = z
+  .object({
+    ticketTypeId: z.string().min(1),
+    email: z.string().email(),
+    firstName: z.string().min(1).max(128).optional(),
+    lastName: z.string().min(1).max(128).optional(),
+    phone: z.string().min(1).max(64).optional(),
+    quantity: z.number().int().min(1).max(20).default(1),
+  })
+  .strict();
 
-const offerWaitlistSchema = z.object({
-  expiresInMinutes: z.number().int().min(5).max(60 * 24 * 14).default(60 * 24),
-}).strict();
+const offerWaitlistSchema = z
+  .object({
+    expiresInMinutes: z
+      .number()
+      .int()
+      .min(5)
+      .max(60 * 24 * 14)
+      .default(60 * 24),
+  })
+  .strict();
 
-const waitlistSettingsSchema = z.object({
-  autoOfferEnabled: z.boolean(),
-  offerTtlMinutes: z.number().int().min(5).max(60 * 24 * 14),
-}).strict();
+const waitlistSettingsSchema = z
+  .object({
+    autoOfferEnabled: z.boolean(),
+    offerTtlMinutes: z
+      .number()
+      .int()
+      .min(5)
+      .max(60 * 24 * 14),
+  })
+  .strict();
 
 export function hashWaitlistClaimToken(token: string): string {
   return createHash('sha256').update(token).digest('hex');
@@ -69,7 +84,10 @@ function publicSettings(event: {
   };
 }
 
-function assertOfferUsable(entry: { status: string; offer_expires_at: Date | string | null }): void {
+function assertOfferUsable(entry: {
+  status: string;
+  offer_expires_at: Date | string | null;
+}): void {
   if (entry.status !== 'offered') {
     throw new ValidationError('Waitlist offer is not available');
   }
@@ -79,7 +97,11 @@ function assertOfferUsable(entry: { status: string; offer_expires_at: Date | str
 }
 
 async function loadWaitlistEntry(db: Database, id: string) {
-  return db.selectFrom('waitlist_entries').selectAll().where('id', '=', id).executeTakeFirstOrThrow();
+  return db
+    .selectFrom('waitlist_entries')
+    .selectAll()
+    .where('id', '=', id)
+    .executeTakeFirstOrThrow();
 }
 
 export const publicWaitlistRoutes: FastifyPluginAsync = async (app) => {
@@ -102,7 +124,9 @@ export const publicWaitlistRoutes: FastifyPluginAsync = async (app) => {
       throw new ValidationError('Waitlist is only available for active or sold-out ticket types');
     }
 
-    const availability = await app.context.inventoryService.getAvailability(ticketType.inventory_pool_id);
+    const availability = await app.context.inventoryService.getAvailability(
+      ticketType.inventory_pool_id,
+    );
     if (availability.available > 0 && ticketType.status !== 'sold_out') {
       throw new ValidationError('Waitlist is only available after the ticket type is sold out');
     }
@@ -122,32 +146,31 @@ export const publicWaitlistRoutes: FastifyPluginAsync = async (app) => {
 
     const now = new Date();
     const entryId = `wle_${ulid()}`;
-    const insertQuery = db
-      .insertInto('waitlist_entries')
-      .values({
-        id: entryId,
-        tenant_id: event.tenant_id,
-        organization_id: event.organization_id,
-        brand_id: event.brand_id,
-        event_id: event.id,
-        ticket_type_id: ticketType.id,
-        buyer_email: normalizedEmail,
-        buyer_first_name: body.firstName ?? null,
-        buyer_last_name: body.lastName ?? null,
-        buyer_phone: body.phone ?? null,
-        quantity: body.quantity,
-        status: 'joined',
-        offer_expires_at: null,
-        claim_token_hash: null,
-        offered_at: null,
-        claimed_at: null,
-        cancelled_at: null,
-        created_at: now,
-        updated_at: now,
-      });
-    const entry = getDriver() === 'postgres'
-      ? await insertQuery.returningAll().executeTakeFirstOrThrow()
-      : await insertQuery.execute().then(() => loadWaitlistEntry(db, entryId));
+    const insertQuery = db.insertInto('waitlist_entries').values({
+      id: entryId,
+      tenant_id: event.tenant_id,
+      organization_id: event.organization_id,
+      brand_id: event.brand_id,
+      event_id: event.id,
+      ticket_type_id: ticketType.id,
+      buyer_email: normalizedEmail,
+      buyer_first_name: body.firstName ?? null,
+      buyer_last_name: body.lastName ?? null,
+      buyer_phone: body.phone ?? null,
+      quantity: body.quantity,
+      status: 'joined',
+      offer_expires_at: null,
+      claim_token_hash: null,
+      offered_at: null,
+      claimed_at: null,
+      cancelled_at: null,
+      created_at: now,
+      updated_at: now,
+    });
+    const entry =
+      getDriver() === 'postgres'
+        ? await insertQuery.returningAll().executeTakeFirstOrThrow()
+        : await insertQuery.execute().then(() => loadWaitlistEntry(db, entryId));
 
     return reply.status(201).send(publicEntry(entry));
   });
@@ -209,15 +232,20 @@ export const waitlistRoutes: FastifyPluginAsync = async (app) => {
         updated_at: new Date(),
       })
       .where('id', '=', eventId);
-    const updated = getDriver() === 'postgres'
-      ? await updateQuery.returning(['waitlist_auto_offer_enabled', 'waitlist_offer_ttl_minutes']).executeTakeFirst()
-      : await updateQuery.execute().then(() =>
-        db
-          .selectFrom('events')
-          .select(['waitlist_auto_offer_enabled', 'waitlist_offer_ttl_minutes'])
-          .where('id', '=', eventId)
-          .executeTakeFirst(),
-      );
+    const updated =
+      getDriver() === 'postgres'
+        ? await updateQuery
+            .returning(['waitlist_auto_offer_enabled', 'waitlist_offer_ttl_minutes'])
+            .executeTakeFirst()
+        : await updateQuery
+            .execute()
+            .then(() =>
+              db
+                .selectFrom('events')
+                .select(['waitlist_auto_offer_enabled', 'waitlist_offer_ttl_minutes'])
+                .where('id', '=', eventId)
+                .executeTakeFirst(),
+            );
 
     if (!updated) {
       return publicSettings({
@@ -247,21 +275,25 @@ export const waitlistRoutes: FastifyPluginAsync = async (app) => {
       .where('event_id', '=', eventId)
       .executeTakeFirst();
     if (!entry) throw new NotFoundError('WaitlistEntry', entryId);
-    if (entry.status !== 'joined') throw new ValidationError('Only joined waitlist entries can be offered');
+    if (entry.status !== 'joined')
+      throw new ValidationError('Only joined waitlist entries can be offered');
 
     const ticketType = await db
       .selectFrom('ticket_types')
       .selectAll()
       .where('id', '=', entry.ticket_type_id)
       .executeTakeFirstOrThrow();
-    const availability = await app.context.inventoryService.getAvailability(ticketType.inventory_pool_id);
+    const availability = await app.context.inventoryService.getAvailability(
+      ticketType.inventory_pool_id,
+    );
     if (availability.available < entry.quantity) {
       throw new ValidationError('Not enough freed capacity to issue this waitlist offer');
     }
 
     const token = randomBytes(24).toString('base64url');
     const now = new Date();
-    const expiresInMinutes = body.expiresInMinutes ?? Number(event.waitlist_offer_ttl_minutes ?? 60 * 24);
+    const expiresInMinutes =
+      body.expiresInMinutes ?? Number(event.waitlist_offer_ttl_minutes ?? 60 * 24);
     const offerExpiresAt = new Date(now.getTime() + expiresInMinutes * 60_000);
     const updateQuery = db
       .updateTable('waitlist_entries')
@@ -273,9 +305,10 @@ export const waitlistRoutes: FastifyPluginAsync = async (app) => {
         updated_at: now,
       })
       .where('id', '=', entryId);
-    const updated = getDriver() === 'postgres'
-      ? await updateQuery.returningAll().executeTakeFirstOrThrow()
-      : await updateQuery.execute().then(() => loadWaitlistEntry(db, entryId));
+    const updated =
+      getDriver() === 'postgres'
+        ? await updateQuery.returningAll().executeTakeFirstOrThrow()
+        : await updateQuery.execute().then(() => loadWaitlistEntry(db, entryId));
 
     return { entry: publicEntry(updated), claimToken: token };
   });

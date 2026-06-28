@@ -14,26 +14,36 @@ import { parseBody } from '../../http/schemas.js';
 
 const uploadPurposeSchema = z.enum(['checkout_answer', 'brand_logo', 'user_avatar']);
 
-const createUploadSchema = z.object({
-  purpose: uploadPurposeSchema,
-  fileName: z.string().min(1).max(255),
-  contentType: z.string().min(1).max(255),
-  sizeBytes: z.number().int().positive(),
-  brandId: z.string().optional(),
-  eventId: z.string().optional(),
-  metadata: z.record(z.string(), z.unknown()).optional(),
-}).strict();
+const createUploadSchema = z
+  .object({
+    purpose: uploadPurposeSchema,
+    fileName: z.string().min(1).max(255),
+    contentType: z.string().min(1).max(255),
+    sizeBytes: z.number().int().positive(),
+    brandId: z.string().optional(),
+    eventId: z.string().optional(),
+    metadata: z.record(z.string(), z.unknown()).optional(),
+  })
+  .strict();
 
-const publicCreateUploadSchema = z.object({
-  fileName: z.string().min(1).max(255),
-  contentType: z.string().min(1).max(255),
-  sizeBytes: z.number().int().positive(),
-  questionId: z.string().optional(),
-}).strict();
+const publicCreateUploadSchema = z
+  .object({
+    fileName: z.string().min(1).max(255),
+    contentType: z.string().min(1).max(255),
+    sizeBytes: z.number().int().positive(),
+    questionId: z.string().optional(),
+  })
+  .strict();
 
-const publicCompleteSchema = z.object({
-  token: z.string().min(1),
-}).strict();
+const publicCompleteSchema = z
+  .object({
+    token: z.string().min(1),
+  })
+  .strict();
+
+function hasCheckoutQuestionMetadata(metadata: Record<string, unknown> | undefined): boolean {
+  return metadata !== undefined && Object.prototype.hasOwnProperty.call(metadata, 'questionId');
+}
 
 type ScopedUploadArtifact = {
   organization_id?: string | null;
@@ -75,8 +85,16 @@ export const publicUploadRoutes: FastifyPluginAsync = async (app) => {
   app.post('/public/upload-artifacts/:artifactId/complete', async (request) => {
     const { artifactId } = request.params as { artifactId: string };
     const body = parseBody(publicCompleteSchema, request.body);
-    const artifact = await db.selectFrom('upload_artifacts').selectAll().where('id', '=', artifactId).executeTakeFirst();
-    if (!artifact || artifact.purpose !== 'checkout_answer' || !uploadTokenMatches(artifact.client_token_hash, body.token)) {
+    const artifact = await db
+      .selectFrom('upload_artifacts')
+      .selectAll()
+      .where('id', '=', artifactId)
+      .executeTakeFirst();
+    if (
+      !artifact ||
+      artifact.purpose !== 'checkout_answer' ||
+      !uploadTokenMatches(artifact.client_token_hash, body.token)
+    ) {
       throw new NotFoundError('UploadArtifact', artifactId);
     }
     return completeUploadArtifact(db, artifactId);
@@ -95,6 +113,10 @@ export const uploadRoutes: FastifyPluginAsync = async (app) => {
 
     if (body.purpose === 'brand_logo') {
       ClerkAuthService.requirePermission(principal, 'settings.write');
+      if (eventId) throw new ValidationError('eventId is not allowed for brand logo uploads');
+      if (hasCheckoutQuestionMetadata(body.metadata)) {
+        throw new ValidationError('metadata.questionId is not allowed for brand logo uploads');
+      }
       if (!brandId) throw new ValidationError('brandId is required for brand logo uploads');
       const brand = await new BrandRepository(db).findById(brandId);
       if (!brand) throw new NotFoundError('Brand', brandId);
@@ -116,6 +138,12 @@ export const uploadRoutes: FastifyPluginAsync = async (app) => {
       tenantId = event.tenant_id;
       organizationId = event.organization_id;
       brandId = event.brand_id;
+    } else if (body.purpose === 'user_avatar') {
+      if (brandId) throw new ValidationError('brandId is not allowed for user avatar uploads');
+      if (eventId) throw new ValidationError('eventId is not allowed for user avatar uploads');
+      if (hasCheckoutQuestionMetadata(body.metadata)) {
+        throw new ValidationError('metadata.questionId is not allowed for user avatar uploads');
+      }
     }
 
     const result = await createUploadArtifact(db, {
@@ -136,7 +164,11 @@ export const uploadRoutes: FastifyPluginAsync = async (app) => {
   app.post('/upload-artifacts/:artifactId/complete', async (request) => {
     const principal = request.principal!;
     const { artifactId } = request.params as { artifactId: string };
-    const artifact = await db.selectFrom('upload_artifacts').selectAll().where('id', '=', artifactId).executeTakeFirst();
+    const artifact = await db
+      .selectFrom('upload_artifacts')
+      .selectAll()
+      .where('id', '=', artifactId)
+      .executeTakeFirst();
     if (!artifact) throw new NotFoundError('UploadArtifact', artifactId);
     ClerkAuthService.requireResourceTenant(principal, artifact, 'UploadArtifact', artifactId);
     requireUploadArtifactScope(principal, artifact);
@@ -146,7 +178,11 @@ export const uploadRoutes: FastifyPluginAsync = async (app) => {
   app.get('/upload-artifacts/:artifactId/download', async (request) => {
     const principal = request.principal!;
     const { artifactId } = request.params as { artifactId: string };
-    const artifact = await db.selectFrom('upload_artifacts').selectAll().where('id', '=', artifactId).executeTakeFirst();
+    const artifact = await db
+      .selectFrom('upload_artifacts')
+      .selectAll()
+      .where('id', '=', artifactId)
+      .executeTakeFirst();
     if (!artifact) throw new NotFoundError('UploadArtifact', artifactId);
     ClerkAuthService.requireResourceTenant(principal, artifact, 'UploadArtifact', artifactId);
     requireUploadArtifactScope(principal, artifact);

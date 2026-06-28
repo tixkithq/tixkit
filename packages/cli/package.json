@@ -12,6 +12,7 @@
     "typecheck": "tsc --noEmit",
     "test:unit": "vitest run src/__tests__",
     "init": "bun run src/index.ts init",
+    "embed:generate": "bun run src/index.ts embed:generate",
     "quickstart": "bun run src/index.ts quickstart",
     "seed:sample-data": "bun run src/index.ts seed:sample-data",
     "setup:check": "bun run src/index.ts setup:check",

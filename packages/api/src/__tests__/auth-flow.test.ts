@@ -191,9 +191,7 @@ describe('ClerkAuthService signed-in user auth', () => {
           permission: 'orders.read',
         },
       ],
-      organization_members: [
-        { user_id: 'usr_1', organization_id: 'org_1' },
-      ],
+      organization_members: [{ user_id: 'usr_1', organization_id: 'org_1' }],
     });
 
     const service = new ClerkAuthService('sk_test_auth', db as never);
@@ -306,9 +304,7 @@ describe('ClerkAuthService signed-in user auth', () => {
           permission: 'settings.write',
         },
       ],
-      organization_members: [
-        { user_id: 'usr_2', organization_id: 'org_2' },
-      ],
+      organization_members: [{ user_id: 'usr_2', organization_id: 'org_2' }],
     });
 
     const service = new ClerkAuthService('sk_test_auth', db as never);
@@ -350,9 +346,7 @@ describe('ClerkAuthService signed-in user auth', () => {
           permission: 'reports.read',
         },
       ],
-      organization_members: [
-        { user_id: 'usr_2', organization_id: 'org_2' },
-      ],
+      organization_members: [{ user_id: 'usr_2', organization_id: 'org_2' }],
     });
 
     const service = new ClerkAuthService('sk_test_auth', db as never);
@@ -429,6 +423,30 @@ describe('ClerkAuthService signed-in user auth', () => {
     ).rejects.toThrow('Active organization does not map to a Tixkit tenant');
   });
 
+  it('rejects single-tenant users when the active Clerk org does not map to a Tixkit tenant', async () => {
+    vi.mocked(verifyToken).mockResolvedValue({
+      sub: 'clerk_user_1',
+      org_id: 'clerk_org_unknown',
+    } as never);
+    const { db } = createAuthDb({
+      user_profiles: [
+        {
+          id: 'usr_1',
+          tenant_id: 'tnt_1',
+          clerk_user_id: 'clerk_user_1',
+          status: 'active',
+        },
+      ],
+      organizations: [],
+    });
+
+    const service = new ClerkAuthService('sk_test_auth', db as never);
+
+    await expect(
+      service.authenticateRequest(request({ authorization: 'Bearer clerk_session_token' })),
+    ).rejects.toThrow('Active organization does not map to a Tixkit tenant');
+  });
+
   it('rejects suspended Tixkit users after successful Clerk verification', async () => {
     vi.mocked(verifyToken).mockResolvedValue({ sub: 'clerk_user_1' } as never);
     const { db } = createAuthDb({
@@ -480,9 +498,7 @@ describe('ClerkAuthService API key auth', () => {
     });
 
     const service = new ClerkAuthService('sk_test_auth', db as never);
-    const result = await service.authenticateApiKey(
-      request({ authorization: `Bearer ${rawKey}` }),
-    );
+    const result = await service.authenticateApiKey(request({ authorization: `Bearer ${rawKey}` }));
 
     expect(result.principal).toMatchObject({
       type: 'api_key',
@@ -571,13 +587,13 @@ describe('ClerkAuthService API key auth', () => {
 
 describe('ClerkAuthService scanner device auth', () => {
   it('authenticates active scanner devices and records last seen', async () => {
-    const { db, tables } = createAuthDb({
+    const { db, tables, updates } = createAuthDb({
       scanner_devices: [
         {
-          id: 'sd_1',
+          id: 'sd_internal',
           tenant_id: 'tnt_1',
           organization_id: 'org_1',
-          device_id: 'device_1',
+          device_id: 'sd_public',
           hashed_secret: hash('scanner_secret'),
           status: 'active',
           event_ids: JSON.stringify(['evt_1']),
@@ -588,20 +604,27 @@ describe('ClerkAuthService scanner device auth', () => {
     const service = new ClerkAuthService('sk_test_auth', db as never);
     const result = await service.authenticateScannerDevice(
       request({
-        'x-device-id': 'device_1',
+        'x-device-id': 'sd_public',
         'x-device-secret': 'scanner_secret',
       }),
     );
 
     expect(result.principal).toMatchObject({
       type: 'mobile_device',
-      id: 'sd_1',
+      id: 'sd_public',
       tenantId: 'tnt_1',
       organizationIds: ['org_1'],
       scopes: ['checkins.read', 'checkins.write'],
       eventIds: ['evt_1'],
     });
     expect(tables.scanner_devices[0].last_seen_at).toBeInstanceOf(Date);
+    expect(updates).toEqual([
+      {
+        table: 'scanner_devices',
+        values: { last_seen_at: tables.scanner_devices[0].last_seen_at },
+        ids: ['sd_internal'],
+      },
+    ]);
   });
 
   it('rejects missing, invalid, and revoked scanner devices', async () => {

@@ -10,7 +10,10 @@ function isMysql() {
   return process.env.DB_DRIVER === 'mysql';
 }
 
-async function columnExists(db: Kysely<Record<string, unknown>>, columnName: string): Promise<boolean> {
+async function columnExists(
+  db: Kysely<Record<string, unknown>>,
+  columnName: string,
+): Promise<boolean> {
   const result = isMysql()
     ? await sql<{ column_name: string }>`
         select column_name

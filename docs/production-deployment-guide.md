@@ -8,22 +8,26 @@ The local development contract is defined in `.env.local.example`, `package.json
 
 ## Required Services
 
-| Service | Purpose | Local equivalent | Production recommendation |
-| --- | --- | --- | --- |
-| PostgreSQL 16 | Primary database (tixkit schema) | `infra/docker-compose.yml` `postgres` | Managed Postgres (RDS, Cloud SQL, Aurora) with backups and PITR |
-| MySQL 8.4 | Tier-1 secondary DB tested in CI | `infra/docker-compose.yml` `mysql` | Optional; only required if you deploy against MySQL |
-| Redis 7 | Rate-limit backing, export SSE fanout | `infra/docker-compose.yml` `redis` | Managed Redis (ElastiCache, Memorystore) |
-| Temporal 1.24 | Workflow engine | `infra/docker-compose.yml` `temporal` | Temporal Cloud or self-hosted Temporal with managed Postgres |
-| Temporal UI (optional) | Workflow inspection | `infra/docker-compose.yml` `temporal-ui` | Internal-only UI behind auth |
-| S3-compatible object storage | Export files, upload artifacts, branding assets, avatar assets | `infra/docker-compose.yml` `minio` | S3, GCS via S3 API, R2 |
-| Clerk | Admin auth and identity sync | dev mode (no keys) | Clerk production instance |
-| Stripe | Payments (Stripe Connect) | capture/mock mode | Stripe live keys + Connect, connected-account webhooks, and at least one onboarded charges-enabled test account for release validation |
-| Telnyx | SMS transport | capture/mock mode | Telnyx production keys |
-| Email transport | Transactional + bulk email | capture adapter | Provider route in `email_provider_routes` |
-| OpenTelemetry collector | Trace collection | OTLP endpoint on `localhost:4318` if configured | Managed collector or vendor OTLP ingest |
-| Prometheus | Metrics scrape | Internal API `GET /metrics`; optional Pushgateway for worker metrics | Prometheus-compatible scrape and alerting |
+| Service                      | Purpose                                                        | Local equivalent                                                     | Production recommendation                                                                                                              |
+| ---------------------------- | -------------------------------------------------------------- | -------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------- |
+| PostgreSQL 16                | Primary database (tixkit schema)                               | `infra/docker-compose.yml` `postgres`                                | Managed Postgres (RDS, Cloud SQL, Aurora) with backups and PITR                                                                        |
+| MySQL 8.4                    | Tier-1 secondary DB tested in CI                               | `infra/docker-compose.yml` `mysql`                                   | Optional; only required if you deploy against MySQL                                                                                    |
+| Redis 7                      | Rate-limit backing, export SSE fanout                          | `infra/docker-compose.yml` `redis`                                   | Managed Redis (ElastiCache, Memorystore)                                                                                               |
+| Temporal 1.24                | Workflow engine                                                | `infra/docker-compose.yml` `temporal`                                | Temporal Cloud or self-hosted Temporal with managed Postgres                                                                           |
+| Temporal UI (optional)       | Workflow inspection                                            | `infra/docker-compose.yml` `temporal-ui`                             | Internal-only UI behind auth                                                                                                           |
+| S3-compatible object storage | Export files, upload artifacts, branding assets, avatar assets | `infra/docker-compose.yml` `minio`                                   | S3, GCS via S3 API, R2                                                                                                                 |
+| Clerk                        | Admin auth and identity sync                                   | dev mode (no keys)                                                   | Clerk production instance                                                                                                              |
+| Stripe                       | Payments (Stripe Connect)                                      | capture/mock mode                                                    | Stripe live keys + Connect, connected-account webhooks, and at least one onboarded charges-enabled test account for release validation |
+| Telnyx                       | SMS transport                                                  | capture/mock mode                                                    | Telnyx production keys                                                                                                                 |
+| Email transport              | Transactional + bulk email                                     | capture adapter                                                      | Provider route in `email_provider_routes`                                                                                              |
+| OpenTelemetry collector      | Trace collection                                               | OTLP endpoint on `localhost:4318` if configured                      | Managed collector or vendor OTLP ingest                                                                                                |
+| Prometheus                   | Metrics scrape                                                 | Internal API `GET /metrics`; optional Pushgateway for worker metrics | Prometheus-compatible scrape and alerting                                                                                              |
 
 The API, worker, checkout app, and admin dashboard are the four deployable Tixkit processes. They can be co-located or deployed independently behind a load balancer.
+
+## Managed Deploy Path Status
+
+Phase 4 adoption gap (C-054): Tixkit does not yet ship a packaged "Tixkit Cloud" path or one-click deploy templates. The target state is either a documented managed offering or deploy templates for at least two providers such as Railway, Render, or Fly.io. Those templates must provision or connect the four Tixkit processes, run migrations, configure secrets, and include a smoke validation step.
 
 ## Infrastructure-As-Code
 
@@ -71,64 +75,72 @@ Copy `.env.local.example` as the starting point. Required-for-production variabl
 
 ### Core
 
-| Variable | Required | Description |
-| --- | --- | --- |
-| `NODE_ENV` | yes | `production` |
-| `PORT` | yes (API) | API listen port, default `4000` |
-| `LOG_LEVEL` | no | `info` recommended |
-| `OTEL_EXPORTER_OTLP_ENDPOINT` | yes | OTLP HTTP collector base URL, e.g. `https://otel.example.com` |
-| `OTEL_EXPORTER_OTLP_TRACES_ENDPOINT` | no | Explicit trace endpoint; overrides `<OTEL_EXPORTER_OTLP_ENDPOINT>/v1/traces` |
-| `OTEL_SDK_DISABLED` | no | Set `true` only for local debugging |
-| `PROMETHEUS_PUSHGATEWAY_URL` | no | Optional Pushgateway URL for worker activity metrics when workers cannot be scraped |
-| `METRICS_BEARER_TOKEN` | yes | Bearer token required for API `GET /metrics` in production. Prometheus must send `Authorization: Bearer <token>`. |
-| `API_BASE_URL` | yes | Public API origin, e.g. `https://api.example.com` |
-| `NEXT_PUBLIC_TIXKIT_API_BASE_URL` | yes (checkout) | Public API origin with `/v1` suffix |
-| `NEXT_PUBLIC_ADMIN_API_BASE_URL` | yes (admin) | Public API origin |
-| `CORS_ALLOWED_ORIGINS` | yes | Comma-separated browser origins allowed to make credentialed API requests, e.g. checkout and admin origins |
-| `TRUST_PROXY` | yes (behind ingress) | Fastify trusted proxy setting for `X-Forwarded-For`; use ingress/controller CIDRs or trusted hop count |
+| Variable                             | Required             | Description                                                                                                       |
+| ------------------------------------ | -------------------- | ----------------------------------------------------------------------------------------------------------------- |
+| `NODE_ENV`                           | yes                  | `production`                                                                                                      |
+| `PORT`                               | yes (API)            | API listen port, default `4000`                                                                                   |
+| `LOG_LEVEL`                          | no                   | `info` recommended                                                                                                |
+| `OTEL_EXPORTER_OTLP_ENDPOINT`        | yes                  | OTLP HTTP collector base URL, e.g. `https://otel.example.com`                                                     |
+| `OTEL_EXPORTER_OTLP_TRACES_ENDPOINT` | no                   | Explicit trace endpoint; overrides `<OTEL_EXPORTER_OTLP_ENDPOINT>/v1/traces`                                      |
+| `OTEL_SDK_DISABLED`                  | no                   | Set `true` only for local debugging                                                                               |
+| `PROMETHEUS_PUSHGATEWAY_URL`         | no                   | Optional Pushgateway URL for worker activity metrics when workers cannot be scraped                               |
+| `METRICS_BEARER_TOKEN`               | yes                  | Bearer token required for API `GET /metrics` in production. Prometheus must send `Authorization: Bearer <token>`. |
+| `API_BASE_URL`                       | yes                  | Public API origin, e.g. `https://api.example.com`                                                                 |
+| `NEXT_PUBLIC_TIXKIT_API_BASE_URL`    | yes (checkout)       | Public API origin with `/v1` suffix                                                                               |
+| `NEXT_PUBLIC_ADMIN_API_BASE_URL`     | yes (admin)          | Public API origin                                                                                                 |
+| `CORS_ALLOWED_ORIGINS`               | yes                  | Comma-separated browser origins allowed to make credentialed API requests, e.g. checkout and admin origins        |
+| `TRUST_PROXY`                        | yes (behind ingress) | Fastify trusted proxy setting for `X-Forwarded-For`; use ingress/controller CIDRs or trusted hop count            |
 
 ### Datastores
 
-| Variable | Required | Description |
-| --- | --- | --- |
-| `DATABASE_URL` | yes | Postgres connection string |
-| `DATABASE_URL_MYSQL` | no | MySQL connection string (Tier-1 deployments) |
-| `REDIS_URL` | yes | Redis connection string |
-
+| Variable             | Required | Description                                  |
+| -------------------- | -------- | -------------------------------------------- |
+| `DATABASE_URL`       | yes      | Postgres connection string                   |
+| `DATABASE_URL_MYSQL` | no       | MySQL connection string (Tier-1 deployments) |
+| `REDIS_URL`          | yes      | Redis connection string                      |
 
 ### Signing And Hashing
 
-| Variable | Required | Description |
-| --- | --- | --- |
-| `QR_SIGNING_SECRET` | yes | HMAC secret for ticket QR payloads |
-| `OFFLINE_MANIFEST_SIGNING_KEY` | yes | HMAC key for offline scanner manifests |
-| `OFFLINE_MANIFEST_KEY_ID` | yes | Key identifier embedded in offline scanner manifests |
-| `WIDGET_IMPRESSION_HASH_SECRET` | yes | Hash salt for pseudonymizing widget-impression visitor IDs |
+| Variable                         | Required | Description                                                   |
+| -------------------------------- | -------- | ------------------------------------------------------------- |
+| `QR_SIGNING_SECRET`              | yes      | HMAC secret for ticket QR payloads                            |
+| `OFFLINE_MANIFEST_SIGNING_KEY`   | yes      | HMAC key for offline scanner manifests                        |
+| `OFFLINE_MANIFEST_KEY_ID`        | yes      | Key identifier embedded in offline scanner manifests          |
+| `WIDGET_IMPRESSION_HASH_SECRET`  | yes      | Hash salt for pseudonymizing widget-impression visitor IDs    |
+
+### Managed Database Compatibility
+
+Phase 4 compatibility gap (C-056): managed Postgres/MySQL compatibility needs formal validation and docs. Current expectation:
+
+- Neon and Supabase should work as managed Postgres targets through `DATABASE_URL`, subject to connection pooling, migration, and long-running transaction behavior being validated.
+- Aurora Serverless v2 should work for managed Postgres or MySQL targets through standard connection strings, subject to cold-scaling and connection-limit validation.
+- PlanetScale requires special caution: it does not enforce foreign keys, while Tixkit's schema is FK-heavy. Do not list PlanetScale as fully supported unless C-056 adds an approved compatibility mode or compensating application-level validation.
+- MSSQL is not currently supported. C-055 tracks SQL Server support through Kysely's MSSQL dialect, including migration/reset/upsert branches and SQL Server lock semantics.
 
 ### Temporal
 
-| Variable | Required | Description |
-| --- | --- | --- |
-| `TEMPORAL_ADDRESS` | yes | Temporal cluster address, e.g. `mycluster.tmprl.cloud:7233` |
-| `TEMPORAL_NAMESPACE` | yes | Temporal namespace, e.g. `mytenant.production` |
+| Variable             | Required | Description                                                 |
+| -------------------- | -------- | ----------------------------------------------------------- |
+| `TEMPORAL_ADDRESS`   | yes      | Temporal cluster address, e.g. `mycluster.tmprl.cloud:7233` |
+| `TEMPORAL_NAMESPACE` | yes      | Temporal namespace, e.g. `mytenant.production`              |
 
 ### Auth (Clerk)
 
 See [Clerk Setup Guide](./clerk-setup-guide.md). Required in production:
 
-| Variable | Required | Description |
-| --- | --- | --- |
-| `CLERK_SECRET_KEY` | yes | Clerk backend secret key |
-| `CLERK_PUBLISHABLE_KEY` | yes | Clerk publishable key |
+| Variable                            | Required    | Description                              |
+| ----------------------------------- | ----------- | ---------------------------------------- |
+| `CLERK_SECRET_KEY`                  | yes         | Clerk backend secret key                 |
+| `CLERK_PUBLISHABLE_KEY`             | yes         | Clerk publishable key                    |
 | `NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY` | yes (admin) | Same publishable key, exposed to browser |
-| `CLERK_WEBHOOK_SECRET` | yes | Svix signing secret for Clerk webhooks |
+| `CLERK_WEBHOOK_SECRET`              | yes         | Svix signing secret for Clerk webhooks   |
 
 ### Payments (Stripe)
 
-| Variable | Required | Description |
-| --- | --- | --- |
-| `STRIPE_SECRET_KEY` | yes | Stripe secret key (live or test) |
-| `STRIPE_WEBHOOK_SECRET` | yes | Stripe webhook signing secret |
+| Variable                             | Required       | Description                         |
+| ------------------------------------ | -------------- | ----------------------------------- |
+| `STRIPE_SECRET_KEY`                  | yes            | Stripe secret key (live or test)    |
+| `STRIPE_WEBHOOK_SECRET`              | yes            | Stripe webhook signing secret       |
 | `NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY` | yes (checkout) | Stripe publishable key for Elements |
 
 Leave Stripe keys empty to run in capture/mock mode (no real provider calls). This is useful for staging without Stripe credentials.
@@ -137,53 +149,53 @@ Leave Stripe keys empty to run in capture/mock mode (no real provider calls). Th
 
 Development skips wallet pass generation unless a provider is fully configured. Production fails closed for each enabled provider when signing keys are incomplete.
 
-| Variable | Required | Description |
-| --- | --- | --- |
-| `APPLE_WALLET_ENABLED` | no | Set `false` only to intentionally disable Apple Wallet generation. Production defaults to enabled. |
-| `APPLE_WALLET_PASS_TYPE_ID` | yes (Apple enabled) | Apple pass type identifier, e.g. `pass.com.example.tickets` |
-| `APPLE_WALLET_TEAM_ID` | yes (Apple enabled) | Apple developer team identifier |
-| `APPLE_WALLET_ORGANIZATION_NAME` | yes (Apple enabled) | Organization name shown in Apple Wallet |
-| `APPLE_WALLET_SIGNER_CERT` | yes (Apple enabled) | PEM signer certificate; escaped `\n` is accepted |
-| `APPLE_WALLET_SIGNER_KEY` | yes (Apple enabled) | PEM private key; escaped `\n` is accepted |
-| `APPLE_WALLET_SIGNER_KEY_PASSPHRASE` | no | Private-key passphrase when the signer key is encrypted |
-| `APPLE_WALLET_WWDR_CERT` | yes (Apple enabled) | Apple WWDR certificate PEM |
-| `GOOGLE_WALLET_ENABLED` | no | Set `false` only to intentionally disable Google Wallet generation. Production defaults to enabled. |
-| `GOOGLE_WALLET_ISSUER_ID` | yes (Google enabled) | Google Wallet issuer ID |
-| `GOOGLE_WALLET_CLASS_SUFFIX` | yes (Google enabled) | Event ticket class suffix, e.g. `tixkit_event` |
-| `GOOGLE_WALLET_SERVICE_ACCOUNT_EMAIL` | yes (Google enabled) | Service account email used as JWT issuer |
-| `GOOGLE_WALLET_PRIVATE_KEY` | yes (Google enabled) | Service account RSA private key PEM; escaped `\n` is accepted |
-| `GOOGLE_WALLET_ORIGIN` | yes (Google enabled) | Allowed save-link origin(s), comma-separated |
+| Variable                              | Required             | Description                                                                                         |
+| ------------------------------------- | -------------------- | --------------------------------------------------------------------------------------------------- |
+| `APPLE_WALLET_ENABLED`                | no                   | Set `false` only to intentionally disable Apple Wallet generation. Production defaults to enabled.  |
+| `APPLE_WALLET_PASS_TYPE_ID`           | yes (Apple enabled)  | Apple pass type identifier, e.g. `pass.com.example.tickets`                                         |
+| `APPLE_WALLET_TEAM_ID`                | yes (Apple enabled)  | Apple developer team identifier                                                                     |
+| `APPLE_WALLET_ORGANIZATION_NAME`      | yes (Apple enabled)  | Organization name shown in Apple Wallet                                                             |
+| `APPLE_WALLET_SIGNER_CERT`            | yes (Apple enabled)  | PEM signer certificate; escaped `\n` is accepted                                                    |
+| `APPLE_WALLET_SIGNER_KEY`             | yes (Apple enabled)  | PEM private key; escaped `\n` is accepted                                                           |
+| `APPLE_WALLET_SIGNER_KEY_PASSPHRASE`  | no                   | Private-key passphrase when the signer key is encrypted                                             |
+| `APPLE_WALLET_WWDR_CERT`              | yes (Apple enabled)  | Apple WWDR certificate PEM                                                                          |
+| `GOOGLE_WALLET_ENABLED`               | no                   | Set `false` only to intentionally disable Google Wallet generation. Production defaults to enabled. |
+| `GOOGLE_WALLET_ISSUER_ID`             | yes (Google enabled) | Google Wallet issuer ID                                                                             |
+| `GOOGLE_WALLET_CLASS_SUFFIX`          | yes (Google enabled) | Event ticket class suffix, e.g. `tixkit_event`                                                      |
+| `GOOGLE_WALLET_SERVICE_ACCOUNT_EMAIL` | yes (Google enabled) | Service account email used as JWT issuer                                                            |
+| `GOOGLE_WALLET_PRIVATE_KEY`           | yes (Google enabled) | Service account RSA private key PEM; escaped `\n` is accepted                                       |
+| `GOOGLE_WALLET_ORIGIN`                | yes (Google enabled) | Allowed save-link origin(s), comma-separated                                                        |
 
 ### SMS (Telnyx)
 
-| Variable | Required | Description |
-| --- | --- | --- |
-| `TELNYX_API_KEY` | no | Telnyx API key for outbound SMS |
+| Variable                    | Required   | Description                                                                                   |
+| --------------------------- | ---------- | --------------------------------------------------------------------------------------------- |
+| `TELNYX_API_KEY`            | no         | Telnyx API key for outbound SMS                                                               |
 | `TELNYX_WEBHOOK_PUBLIC_KEY` | yes (prod) | Telnyx Ed25519 public key for webhook verification. In production, missing key returns `503`. |
 
 See `docs/telnyx-sms-local.md` for fallback providers (Twilio, Vonage, Plivo) and capture testing.
 
 ### Email Feedback
 
-| Variable | Required | Description |
-| --- | --- | --- |
-| `EMAIL_WEBHOOK_SECRET` | yes (prod) | Shared HMAC SHA-256 secret for `/v1/webhooks/email/:provider` feedback. Missing in production returns `503`. |
-| `EMAIL_WEBHOOK_ALLOW_UNSIGNED` | no | Test-only unsigned feedback toggle. Ignored outside `NODE_ENV=test`. |
+| Variable                       | Required   | Description                                                                                                  |
+| ------------------------------ | ---------- | ------------------------------------------------------------------------------------------------------------ |
+| `EMAIL_WEBHOOK_SECRET`         | yes (prod) | Shared HMAC SHA-256 secret for `/v1/webhooks/email/:provider` feedback. Missing in production returns `503`. |
+| `EMAIL_WEBHOOK_ALLOW_UNSIGNED` | no         | Test-only unsigned feedback toggle. Ignored outside `NODE_ENV=test`.                                         |
 
 Active `email_provider_routes` and `sms_provider_routes` require `smoke_send_verified = true` before workers use them. Email routes also require a verified `brand_sender_identities.email` on the route sender domain; SMS routes require a verified `sms_sender_identities` row.
 
 ### Object Storage
 
-| Variable | Required | Description |
-| --- | --- | --- |
-| `S3_ENDPOINT` | yes | S3-compatible endpoint |
-| `S3_BUCKET` | yes | Bucket name |
-| `S3_ACCESS_KEY_ID` | yes | Access key |
-| `S3_SECRET_ACCESS_KEY` | yes | Secret key |
-| `S3_REGION` | yes | Region, e.g. `us-east-1` |
-| `UPLOAD_MALWARE_SCANNER` | yes | `clamav` in production; `eicar` is only for local/test validation |
-| `CLAMAV_HOST` | yes when `UPLOAD_MALWARE_SCANNER=clamav` | ClamAV TCP host |
-| `CLAMAV_PORT` | no | ClamAV TCP port, defaults to `3310` |
+| Variable                 | Required                                 | Description                                                       |
+| ------------------------ | ---------------------------------------- | ----------------------------------------------------------------- |
+| `S3_ENDPOINT`            | yes                                      | S3-compatible endpoint                                            |
+| `S3_BUCKET`              | yes                                      | Bucket name                                                       |
+| `S3_ACCESS_KEY_ID`       | yes                                      | Access key                                                        |
+| `S3_SECRET_ACCESS_KEY`   | yes                                      | Secret key                                                        |
+| `S3_REGION`              | yes                                      | Region, e.g. `us-east-1`                                          |
+| `UPLOAD_MALWARE_SCANNER` | yes                                      | `clamav` in production; `eicar` is only for local/test validation |
+| `CLAMAV_HOST`            | yes when `UPLOAD_MALWARE_SCANNER=clamav` | ClamAV TCP host                                                   |
+| `CLAMAV_PORT`            | no                                       | ClamAV TCP port, defaults to `3310`                               |
 
 ## Migrations
 
@@ -230,12 +242,12 @@ After buyer traffic has reached the new schema, rollback by database restore is 
 
 ### RPO/RTO Targets
 
-| Data store | RPO target | RTO target | Mechanism |
-| --- | --- | --- | --- |
-| Postgres | 5 minutes | 30 minutes | Managed PITR plus `infra/scripts/backup-postgres.sh` before releases |
-| MySQL Tier-1 deployment | 5 minutes | 30 minutes | Managed PITR/snapshot before releases |
-| Object storage | 15 minutes | 60 minutes | Bucket versioning/replication plus `infra/scripts/backup-object-storage.sh` |
-| Temporal visibility/history | 15 minutes | 60 minutes | Temporal Cloud managed retention or backing-store snapshots |
+| Data store                  | RPO target | RTO target | Mechanism                                                                   |
+| --------------------------- | ---------- | ---------- | --------------------------------------------------------------------------- |
+| Postgres                    | 5 minutes  | 30 minutes | Managed PITR plus `infra/scripts/backup-postgres.sh` before releases        |
+| MySQL Tier-1 deployment     | 5 minutes  | 30 minutes | Managed PITR/snapshot before releases                                       |
+| Object storage              | 15 minutes | 60 minutes | Bucket versioning/replication plus `infra/scripts/backup-object-storage.sh` |
+| Temporal visibility/history | 15 minutes | 60 minutes | Temporal Cloud managed retention or backing-store snapshots                 |
 
 Postgres backup:
 
@@ -318,12 +330,12 @@ kubectl -n tixkit run metrics-smoke --rm -i --restart=Never --image=curlimages/c
 
 ## Process Topology
 
-| Process | Command (local) | Port | Purpose |
-| --- | --- | --- | --- |
-| API | `bun run dev:api` | `4000` | REST API, inbound webhooks |
-| Worker | `bun run dev:worker` | n/a | Temporal worker on `tixkit` task queue |
-| Checkout | `bun run dev:checkout` | `3000` | Hosted checkout + widget assets |
-| Admin | `bun run dev:admin` | `3001` | Admin dashboard |
+| Process  | Command (local)        | Port   | Purpose                                |
+| -------- | ---------------------- | ------ | -------------------------------------- |
+| API      | `bun run dev:api`      | `4000` | REST API, inbound webhooks             |
+| Worker   | `bun run dev:worker`   | n/a    | Temporal worker on `tixkit` task queue |
+| Checkout | `bun run dev:checkout` | `3000` | Hosted checkout + widget assets        |
+| Admin    | `bun run dev:admin`    | `3001` | Admin dashboard                        |
 
 In production, run the API and worker as separate processes so they can scale and roll independently. The checkout and admin apps are static Next.js builds served by your CDN or Node server.
 
@@ -337,19 +349,19 @@ Tixkit emits three production signals:
 
 Required Prometheus series:
 
-| Series | Purpose |
-| --- | --- |
-| `tixkit_http_request_duration_seconds` | HTTP latency by method, route, and status code |
-| `tixkit_http_request_errors_total` | HTTP 5xx responses |
-| `tixkit_checkout_events_total` | Checkout API/workflow events |
-| `tixkit_payment_events_total` | Payment provider/API events |
-| `tixkit_refund_events_total` | Refund provider/API events |
-| `tixkit_webhook_events_total` | Inbound and outbound webhook events |
-| `tixkit_export_events_total` | Export API/workflow events |
-| `tixkit_scan_events_total` | Check-in and scanner events |
-| `tixkit_inventory_active_holds` | Active, non-expired inventory hold quantity |
-| `tixkit_temporal_activity_events_total` | Temporal activity completions by activity and outcome |
-| `tixkit_temporal_activity_duration_seconds` | Temporal activity latency by activity and outcome |
+| Series                                      | Purpose                                               |
+| ------------------------------------------- | ----------------------------------------------------- |
+| `tixkit_http_request_duration_seconds`      | HTTP latency by method, route, and status code        |
+| `tixkit_http_request_errors_total`          | HTTP 5xx responses                                    |
+| `tixkit_checkout_events_total`              | Checkout API/workflow events                          |
+| `tixkit_payment_events_total`               | Payment provider/API events                           |
+| `tixkit_refund_events_total`                | Refund provider/API events                            |
+| `tixkit_webhook_events_total`               | Inbound and outbound webhook events                   |
+| `tixkit_export_events_total`                | Export API/workflow events                            |
+| `tixkit_scan_events_total`                  | Check-in and scanner events                           |
+| `tixkit_inventory_active_holds`             | Active, non-expired inventory hold quantity           |
+| `tixkit_temporal_activity_events_total`     | Temporal activity completions by activity and outcome |
+| `tixkit_temporal_activity_duration_seconds` | Temporal activity latency by activity and outcome     |
 
 ### Worker deploy checklist
 
@@ -365,12 +377,12 @@ See [Temporal Operations Guide](./temporal-operations-guide.md) for versioning a
 
 Configure provider webhooks to point at the API:
 
-| Provider | URL | Signature header |
-| --- | --- | --- |
-| Clerk | `https://api.example.com/v1/webhooks/clerk` | Svix `svix-signature` |
-| Stripe | `https://api.example.com/v1/webhooks/stripe` | `stripe-signature` |
-| Telnyx | `https://api.example.com/v1/webhooks/telnyx/sms` | `telnyx-signature-ed25519` |
-| Email | `https://api.example.com/v1/webhooks/email/{provider}` | `tixkit-signature` |
+| Provider | URL                                              | Signature header           |
+| -------- | ------------------------------------------------ | -------------------------- |
+| Clerk    | `https://api.example.com/v1/webhooks/clerk`      | Svix `svix-signature`      |
+| Stripe   | `https://api.example.com/v1/webhooks/stripe`     | `stripe-signature`         |
+| Telnyx   | `https://api.example.com/v1/webhooks/telnyx/sms` | `telnyx-signature-ed25519` |
+| Email    | `https://api.example.com/v1/webhooks/email/{provider}` | `tixkit-signature` |
 
 Handlers store the provider event before processing and skip duplicates by provider event ID. Email bounce/complaint/failure feedback updates delivery state, creates tenant email suppressions, and revokes active email opt-in; Telnyx delivery failures revoke active SMS opt-in. If the API is down, the provider's own retry policy will redeliver; Tixkit's idempotency handles the replay.
 
@@ -384,16 +396,16 @@ Handlers store the provider event before processing and skip duplicates by provi
 
 Recommended alerts:
 
-| Signal | Source | Action |
-| --- | --- | --- |
-| `GET /health` non-200 | uptime probe | Page on-call |
-| API 5xx rate | Fastify logs / APM | Investigate `requestId` |
-| Worker startup failure | process exit / logs | Check Temporal + DB reachability |
-| `workflow_failed` | Temporal metrics | Inspect failing workflow type in UI |
-| `activity_failed` rate | Temporal metrics | Inspect activity + downstream provider |
-| Dead-lettered webhook deliveries | `webhook_deliveries.status = 'dead_lettered'` | Triage endpoint and replay |
-| Stripe webhook signature failures | API logs | Verify `STRIPE_WEBHOOK_SECRET` rotation |
-| Idempotency conflicts | API logs | Investigate client retry behavior |
+| Signal                            | Source                                        | Action                                  |
+| --------------------------------- | --------------------------------------------- | --------------------------------------- |
+| `GET /health` non-200             | uptime probe                                  | Page on-call                            |
+| API 5xx rate                      | Fastify logs / APM                            | Investigate `requestId`                 |
+| Worker startup failure            | process exit / logs                           | Check Temporal + DB reachability        |
+| `workflow_failed`                 | Temporal metrics                              | Inspect failing workflow type in UI     |
+| `activity_failed` rate            | Temporal metrics                              | Inspect activity + downstream provider  |
+| Dead-lettered webhook deliveries  | `webhook_deliveries.status = 'dead_lettered'` | Triage endpoint and replay              |
+| Stripe webhook signature failures | API logs                                      | Verify `STRIPE_WEBHOOK_SECRET` rotation |
+| Idempotency conflicts             | API logs                                      | Investigate client retry behavior       |
 
 Tail Fastify logs with `pino-pretty` in dev and structured JSON in production. Each request log includes `requestId` for tracing across services.
 

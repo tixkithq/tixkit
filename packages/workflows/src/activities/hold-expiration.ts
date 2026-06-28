@@ -3,7 +3,8 @@ import { createDb, EmailJobRepository } from '@tixkit/db';
 import type { WorkflowActivityResult } from '../shared/types.js';
 import { okResult, errResult } from '../shared/types.js';
 
-const CHECKOUT_BASE_URL = process.env.CHECKOUT_URL ?? process.env.NEXT_PUBLIC_CHECKOUT_URL ?? 'https://checkout.tixkit.com';
+const CHECKOUT_BASE_URL =
+  process.env.CHECKOUT_URL ?? process.env.NEXT_PUBLIC_CHECKOUT_URL ?? 'https://checkout.tixkit.com';
 
 function hashWaitlistClaimToken(token: string): string {
   return createHash('sha256').update(token).digest('hex');
@@ -15,7 +16,9 @@ function waitlistClaimUrl(token: string): string {
   return url.toString();
 }
 
-export async function expireStaleHoldsActivity(): Promise<WorkflowActivityResult<{ expiredCount: number }>> {
+export async function expireStaleHoldsActivity(): Promise<
+  WorkflowActivityResult<{ expiredCount: number }>
+> {
   const db = createDb();
   try {
     const result = await db
@@ -24,15 +27,25 @@ export async function expireStaleHoldsActivity(): Promise<WorkflowActivityResult
       .where('status', '=', 'active')
       .where('expires_at', '<', new Date())
       .execute();
-    return okResult({ expiredCount: Number((result[0] as { numUpdatedRows?: bigint } | undefined)?.numUpdatedRows ?? 0) });
+    return okResult({
+      expiredCount: Number(
+        (result[0] as { numUpdatedRows?: bigint } | undefined)?.numUpdatedRows ?? 0,
+      ),
+    });
   } catch (err) {
-    return errResult('EXPIRE_HOLDS_FAILED', err instanceof Error ? err.message : 'Unknown error', true);
+    return errResult(
+      'EXPIRE_HOLDS_FAILED',
+      err instanceof Error ? err.message : 'Unknown error',
+      true,
+    );
   } finally {
     await db.destroy();
   }
 }
 
-export async function expireStaleSessionsActivity(): Promise<WorkflowActivityResult<{ expiredCount: number }>> {
+export async function expireStaleSessionsActivity(): Promise<
+  WorkflowActivityResult<{ expiredCount: number }>
+> {
   const db = createDb();
   try {
     const result = await db
@@ -42,19 +55,29 @@ export async function expireStaleSessionsActivity(): Promise<WorkflowActivityRes
       .where('expires_at', '<', new Date())
       .where('payment_intent_id', 'is', null)
       .execute();
-    return okResult({ expiredCount: Number((result[0] as { numUpdatedRows?: bigint } | undefined)?.numUpdatedRows ?? 0) });
+    return okResult({
+      expiredCount: Number(
+        (result[0] as { numUpdatedRows?: bigint } | undefined)?.numUpdatedRows ?? 0,
+      ),
+    });
   } catch (err) {
-    return errResult('EXPIRE_SESSIONS_FAILED', err instanceof Error ? err.message : 'Unknown error', true);
+    return errResult(
+      'EXPIRE_SESSIONS_FAILED',
+      err instanceof Error ? err.message : 'Unknown error',
+      true,
+    );
   } finally {
     await db.destroy();
   }
 }
 
-export async function processWaitlistOffersActivity(): Promise<WorkflowActivityResult<{
-  expiredCount: number;
-  offeredCount: number;
-  queuedEmailCount: number;
-}>> {
+export async function processWaitlistOffersActivity(): Promise<
+  WorkflowActivityResult<{
+    expiredCount: number;
+    offeredCount: number;
+    queuedEmailCount: number;
+  }>
+> {
   const db = createDb();
   try {
     const now = new Date();
@@ -155,7 +178,11 @@ export async function processWaitlistOffersActivity(): Promise<WorkflowActivityR
       // eslint-disable-next-line no-await-in-loop -- template lookup must match the route and brand for the current offer.
       const templateVersion = await db
         .selectFrom('notification_templates as template')
-        .innerJoin('notification_template_versions as version', 'version.template_id', 'template.id')
+        .innerJoin(
+          'notification_template_versions as version',
+          'version.template_id',
+          'template.id',
+        )
         .select(['version.id'])
         .where('template.tenant_id', '=', candidate.tenant_id)
         .where('template.brand_id', '=', candidate.brand_id)
@@ -180,7 +207,9 @@ export async function processWaitlistOffersActivity(): Promise<WorkflowActivityR
         templateKey: 'waitlist-offer',
         templateVersionId: templateVersion.id,
         toEmail: candidate.buyer_email,
-        toName: [candidate.buyer_first_name, candidate.buyer_last_name].filter(Boolean).join(' ') || undefined,
+        toName:
+          [candidate.buyer_first_name, candidate.buyer_last_name].filter(Boolean).join(' ') ||
+          undefined,
         variables: {
           eventId: candidate.event_id,
           eventTitle: candidate.event_title,
@@ -199,12 +228,18 @@ export async function processWaitlistOffersActivity(): Promise<WorkflowActivityR
     }
 
     return okResult({
-      expiredCount: Number((expired[0] as { numUpdatedRows?: bigint } | undefined)?.numUpdatedRows ?? 0),
+      expiredCount: Number(
+        (expired[0] as { numUpdatedRows?: bigint } | undefined)?.numUpdatedRows ?? 0,
+      ),
       offeredCount,
       queuedEmailCount,
     });
   } catch (err) {
-    return errResult('WAITLIST_MAINTENANCE_FAILED', err instanceof Error ? err.message : 'Unknown error', true);
+    return errResult(
+      'WAITLIST_MAINTENANCE_FAILED',
+      err instanceof Error ? err.message : 'Unknown error',
+      true,
+    );
   } finally {
     await db.destroy();
   }

@@ -12,8 +12,8 @@ import {
   ShoppingCart,
   Ticket,
   Users,
-} from 'lucide-react'
-import { type SidebarData } from '@/components/layout/types'
+} from 'lucide-react';
+import { type SidebarData } from '@/components/layout/types';
 
 export const sidebarData: SidebarData = {
   user: {
@@ -119,9 +119,7 @@ export const sidebarData: SidebarData = {
     },
     {
       title: 'Support',
-      items: [
-        { title: 'Help', url: '/help', icon: HelpCircle },
-      ],
+      items: [{ title: 'Help', url: '/help', icon: HelpCircle }],
     },
   ],
-}
+};

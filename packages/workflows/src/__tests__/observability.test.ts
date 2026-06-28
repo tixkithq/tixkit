@@ -56,33 +56,30 @@ describe('worker observability', () => {
       resourceFromAttributes({ 'service.name': 'test-workflow-exporter' }),
     );
 
-    await sink.export.fn(
-      { workflowType: 'checkoutSessionWorkflow' } as never,
-      [
-        {
-          name: 'RunWorkflow:checkoutSessionWorkflow',
-          kind: SpanKind.INTERNAL,
-          spanContext: {
-            traceId: '0af7651916cd43dd8448eb211c80319c',
-            spanId: 'b7ad6b7169203331',
-            traceFlags: 1,
-            traceState: 'vendor=value',
-          },
-          startTime: [0, 1],
-          endTime: [0, 2],
-          status: { code: SpanStatusCode.OK },
-          attributes: { 'temporal.workflow_id': 'wf_1' },
-          links: [],
-          events: [],
-          duration: [0, 1],
-          ended: true,
-          droppedAttributesCount: 0,
-          droppedEventsCount: 0,
-          droppedLinksCount: 0,
-          instrumentationLibrary: { name: '@temporalio/interceptor-workflow' },
+    await sink.export.fn({ workflowType: 'checkoutSessionWorkflow' } as never, [
+      {
+        name: 'RunWorkflow:checkoutSessionWorkflow',
+        kind: SpanKind.INTERNAL,
+        spanContext: {
+          traceId: '0af7651916cd43dd8448eb211c80319c',
+          spanId: 'b7ad6b7169203331',
+          traceFlags: 1,
+          traceState: 'vendor=value',
         },
-      ],
-    );
+        startTime: [0, 1],
+        endTime: [0, 2],
+        status: { code: SpanStatusCode.OK },
+        attributes: { 'temporal.workflow_id': 'wf_1' },
+        links: [],
+        events: [],
+        duration: [0, 1],
+        ended: true,
+        droppedAttributesCount: 0,
+        droppedEventsCount: 0,
+        droppedLinksCount: 0,
+        instrumentationLibrary: { name: '@temporalio/interceptor-workflow' },
+      },
+    ]);
 
     expect(exported).toHaveLength(1);
     expect(exported[0]?.[0]?.resource.attributes).toMatchObject({
@@ -94,7 +91,10 @@ describe('worker observability', () => {
 
   it('records successful Temporal activity outcomes', async () => {
     const metrics = createTixkitMetrics('test-worker');
-    const interceptor = new TixkitActivityMetricsInterceptor(activityContext('finalizeOrderActivity'), metrics);
+    const interceptor = new TixkitActivityMetricsInterceptor(
+      activityContext('finalizeOrderActivity'),
+      metrics,
+    );
 
     await interceptor.execute({ args: [], headers: {} as never }, async () => ({ ok: true }));
 
@@ -107,7 +107,10 @@ describe('worker observability', () => {
 
   it('records failed activity result envelopes as errors', async () => {
     const metrics = createTixkitMetrics('test-worker-error');
-    const interceptor = new TixkitActivityMetricsInterceptor(activityContext('processRefundActivity'), metrics);
+    const interceptor = new TixkitActivityMetricsInterceptor(
+      activityContext('processRefundActivity'),
+      metrics,
+    );
 
     await interceptor.execute({ args: [], headers: {} as never }, async () => ({ ok: false }));
 

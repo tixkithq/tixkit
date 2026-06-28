@@ -53,17 +53,17 @@ Tixkit uses a single task queue named `tixkit` for all workflows and activities.
 
 ## Workflows
 
-| Workflow | ID convention | Purpose |
-| --- | --- | --- |
-| `checkoutSessionWorkflow` | `checkout-session:<sessionId>` | Hold → payment intent → wait for signal → finalize → issue tickets → email → emit webhook |
-| `paymentReconciliationWorkflow` | `payment-reconciliation:<providerEventId>` | Reconcile Stripe payment/refund/dispute events |
-| `refundWorkflow` | `order-refund:<orderId>:<nonce>` | Process refund, update ledger, void tickets, restore inventory, notify |
-| `notificationDeliveryWorkflow` | `notification:<jobId>` | Check suppression/consent → render → send email |
-| `smsDeliveryWorkflow` | `sms-delivery:<jobId>` | Send SMS (consent-gated) |
-| `webhookDeliveryWorkflow` | `webhook-delivery:<eventId>:<endpointId>` | Deliver outbound webhook with retries |
-| `exportWorkflow` | `export:<exportId>` | Generate → upload → notify |
-| `holdExpirationWorkflow` | `hold-expiration:scheduled` | Long-running loop: expire stale holds and sessions every 60s |
-| `clerkIdentitySyncWorkflow` | `clerk-identity-sync:<clerkUserIdOrOrgId>` | Sync user/org from Clerk webhook |
+| Workflow                        | ID convention                              | Purpose                                                                                   |
+| ------------------------------- | ------------------------------------------ | ----------------------------------------------------------------------------------------- |
+| `checkoutSessionWorkflow`       | `checkout-session:<sessionId>`             | Hold → payment intent → wait for signal → finalize → issue tickets → email → emit webhook |
+| `paymentReconciliationWorkflow` | `payment-reconciliation:<providerEventId>` | Reconcile Stripe payment/refund/dispute events                                            |
+| `refundWorkflow`                | `order-refund:<orderId>:<nonce>`           | Process refund, update ledger, void tickets, restore inventory, notify                    |
+| `notificationDeliveryWorkflow`  | `notification:<jobId>`                     | Check suppression/consent → render → send email                                           |
+| `smsDeliveryWorkflow`           | `sms-delivery:<jobId>`                     | Send SMS (consent-gated)                                                                  |
+| `webhookDeliveryWorkflow`       | `webhook-delivery:<eventId>:<endpointId>`  | Deliver outbound webhook with retries                                                     |
+| `exportWorkflow`                | `export:<exportId>`                        | Generate → upload → notify                                                                |
+| `holdExpirationWorkflow`        | `hold-expiration:scheduled`                | Long-running loop: expire stale holds and sessions every 60s                              |
+| `clerkIdentitySyncWorkflow`     | `clerk-identity-sync:<clerkUserIdOrOrgId>` | Sync user/org from Clerk webhook                                                          |
 
 Workflow IDs are deterministic. Re-using the same ID returns the existing handle, which makes API retries and webhook replays idempotent.
 
@@ -94,16 +94,16 @@ Workflows persist across deploys, so any change to the workflow body must be bac
 
 Activity defaults (set via `proxyActivities` in each workflow):
 
-| Workflow | `startToCloseTimeout` | `maximumAttempts` | `initialInterval` | `backoffCoefficient` |
-| --- | --- | --- | --- | --- |
-| checkout | 30s | 3 | 1s | 2 |
-| payment-reconciliation | 30s | 5 | 2s | 2 |
-| refund | 30s | 3 | 2s | 2 |
-| notification / sms | 30s | 5 | 2s | 2 |
-| webhook-delivery | 30s | 5 | 5s | 2 |
-| export | 5 minutes | 3 | 10s | 2 |
-| hold-expiration | 60s | 3 | 5s | 2 |
-| clerk-identity-sync | 30s | 3 | 2s | 2 |
+| Workflow               | `startToCloseTimeout` | `maximumAttempts` | `initialInterval` | `backoffCoefficient` |
+| ---------------------- | --------------------- | ----------------- | ----------------- | -------------------- |
+| checkout               | 30s                   | 3                 | 1s                | 2                    |
+| payment-reconciliation | 30s                   | 5                 | 2s                | 2                    |
+| refund                 | 30s                   | 3                 | 2s                | 2                    |
+| notification / sms     | 30s                   | 5                 | 2s                | 2                    |
+| webhook-delivery       | 30s                   | 5                 | 5s                | 2                    |
+| export                 | 5 minutes             | 3                 | 10s               | 2                    |
+| hold-expiration        | 60s                   | 3                 | 5s                | 2                    |
+| clerk-identity-sync    | 30s                   | 3                 | 2s                | 2                    |
 
 Activities return a `WorkflowActivityResult<T>` discriminated union (`{ ok: true, value }` or `{ ok: false, errorCode, retryable, message }`). Non-retryable activity errors should return `{ ok: false, retryable: false }` so the workflow can branch instead of burning retries. Retryable errors propagate to Temporal's retry policy.
 

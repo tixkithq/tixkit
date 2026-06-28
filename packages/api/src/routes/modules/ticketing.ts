@@ -185,7 +185,9 @@ export const ticketingRoutes: FastifyPluginAsync = async (app) => {
         visibility: body.ticketType.visibility,
         description: body.ticketType.description,
         minimumPriceCents: body.ticketType.minimumPriceCents ?? undefined,
-        salesStartAt: body.ticketType.salesStartAt ? new Date(body.ticketType.salesStartAt) : undefined,
+        salesStartAt: body.ticketType.salesStartAt
+          ? new Date(body.ticketType.salesStartAt)
+          : undefined,
         salesEndAt: body.ticketType.salesEndAt ? new Date(body.ticketType.salesEndAt) : undefined,
         minPerOrder: body.ticketType.minPerOrder,
         maxPerOrder: body.ticketType.maxPerOrder,
@@ -198,13 +200,15 @@ export const ticketingRoutes: FastifyPluginAsync = async (app) => {
       const createdRules = [];
       for (const rule of accessRules) {
         // eslint-disable-next-line no-await-in-loop -- access rules are created sequentially inside the ticket-type transaction for deterministic rollback behavior.
-        createdRules.push(await accessRuleRepo.create({
-          ticketTypeId: ticketType.id,
-          type: rule.type,
-          value: rule.value,
-          maxUses: rule.maxUses ?? undefined,
-          expiresAt: rule.expiresAt ? new Date(rule.expiresAt) : undefined,
-        }));
+        createdRules.push(
+          await accessRuleRepo.create({
+            ticketTypeId: ticketType.id,
+            type: rule.type,
+            value: rule.value,
+            maxUses: rule.maxUses ?? undefined,
+            expiresAt: rule.expiresAt ? new Date(rule.expiresAt) : undefined,
+          }),
+        );
       }
 
       return { ticketType, accessRules: createdRules };
@@ -261,16 +265,23 @@ export const ticketingRoutes: FastifyPluginAsync = async (app) => {
         sortOrder: 'sort_order',
       },
     );
-    if (updateData.sales_start_at) updateData.sales_start_at = new Date(updateData.sales_start_at as string);
-    if (updateData.sales_end_at) updateData.sales_end_at = new Date(updateData.sales_end_at as string);
+    if (updateData.sales_start_at)
+      updateData.sales_start_at = new Date(updateData.sales_start_at as string);
+    if (updateData.sales_end_at)
+      updateData.sales_end_at = new Date(updateData.sales_end_at as string);
     if (updateData.inventory_pool_id) {
-      const pool = await new InventoryPoolRepository(db).findById(updateData.inventory_pool_id as string);
+      const pool = await new InventoryPoolRepository(db).findById(
+        updateData.inventory_pool_id as string,
+      );
       if (!pool || pool.event_id !== existing.event_id) {
         throw new NotFoundError('InventoryPool', updateData.inventory_pool_id as string);
       }
     }
     if ('event_occurrence_id' in updateData) {
-      await validateEventOccurrence(existing.event_id, updateData.event_occurrence_id as string | null);
+      await validateEventOccurrence(
+        existing.event_id,
+        updateData.event_occurrence_id as string | null,
+      );
     }
     return serializeTicketType(await repo.update(ticketTypeId, updateData));
   });
@@ -335,15 +346,21 @@ export const ticketingRoutes: FastifyPluginAsync = async (app) => {
           sortOrder: 'sort_order',
         },
       );
-      if (updateData.sales_start_at) updateData.sales_start_at = new Date(updateData.sales_start_at as string);
-      if (updateData.sales_end_at) updateData.sales_end_at = new Date(updateData.sales_end_at as string);
+      if (updateData.sales_start_at)
+        updateData.sales_start_at = new Date(updateData.sales_start_at as string);
+      if (updateData.sales_end_at)
+        updateData.sales_end_at = new Date(updateData.sales_end_at as string);
       if ('event_occurrence_id' in updateData) {
-        await validateEventOccurrence(existing.event_id, updateData.event_occurrence_id as string | null);
+        await validateEventOccurrence(
+          existing.event_id,
+          updateData.event_occurrence_id as string | null,
+        );
       }
 
-      const ticketType = Object.keys(updateData).length > 0
-        ? await new TicketTypeRepository(txDb).update(ticketTypeId, updateData)
-        : existing;
+      const ticketType =
+        Object.keys(updateData).length > 0
+          ? await new TicketTypeRepository(txDb).update(ticketTypeId, updateData)
+          : existing;
       for (const rule of accessRules) {
         // eslint-disable-next-line no-await-in-loop -- access-rule additions stay sequential in the same update transaction.
         await accessRuleRepo.create({
@@ -373,7 +390,10 @@ export const ticketingRoutes: FastifyPluginAsync = async (app) => {
     requireEventAccess(principal, event, eventId);
     const repo = new TicketTypeRepository(db);
     const rows = await repo.findByEvent(eventId, pagination.limit + 1, pagination.cursor);
-    return pageEnvelope(rows.map((row) => serializeTicketType(row)), pagination.limit);
+    return pageEnvelope(
+      rows.map((row) => serializeTicketType(row)),
+      pagination.limit,
+    );
   });
 
   app.get('/ticket-types/:ticketTypeId/access-rules', async (request) => {
@@ -418,10 +438,7 @@ export const ticketingRoutes: FastifyPluginAsync = async (app) => {
     const rule = await db
       .selectFrom('access_rules')
       .innerJoin('ticket_types', 'ticket_types.id', 'access_rules.ticket_type_id')
-      .select([
-        'access_rules.id as id',
-        'ticket_types.event_id as event_id',
-      ])
+      .select(['access_rules.id as id', 'ticket_types.event_id as event_id'])
       .where('access_rules.id', '=', accessRuleId)
       .executeTakeFirst();
     if (!rule) throw new NotFoundError('AccessRule', accessRuleId);
@@ -463,7 +480,10 @@ export const ticketingRoutes: FastifyPluginAsync = async (app) => {
 
     const repo = new InventoryPoolRepository(db);
     const rows = await repo.findByEvent(eventId, pagination.limit + 1, pagination.cursor);
-    return pageEnvelope(rows.map((row) => serializeInventoryPool(row)), pagination.limit);
+    return pageEnvelope(
+      rows.map((row) => serializeInventoryPool(row)),
+      pagination.limit,
+    );
   });
 
   app.get('/events/:eventId/product-categories', async (request) => {
@@ -475,8 +495,15 @@ export const ticketingRoutes: FastifyPluginAsync = async (app) => {
     const event = await loadEvent(eventId);
     requireEventAccess(principal, event, eventId);
 
-    const rows = await new ProductCategoryRepository(db).findByEvent(eventId, pagination.limit + 1, pagination.cursor);
-    return pageEnvelope(rows.map((row) => serializeProductCategory(row)), pagination.limit);
+    const rows = await new ProductCategoryRepository(db).findByEvent(
+      eventId,
+      pagination.limit + 1,
+      pagination.cursor,
+    );
+    return pageEnvelope(
+      rows.map((row) => serializeProductCategory(row)),
+      pagination.limit,
+    );
   });
 
   app.post('/events/:eventId/product-categories', async (request, reply) => {
@@ -506,8 +533,15 @@ export const ticketingRoutes: FastifyPluginAsync = async (app) => {
     const event = await loadEvent(eventId);
     requireEventAccess(principal, event, eventId);
 
-    const rows = await new ProductRepository(db).findByEvent(eventId, pagination.limit + 1, pagination.cursor);
-    return pageEnvelope(rows.map((row) => serializeProduct(row)), pagination.limit);
+    const rows = await new ProductRepository(db).findByEvent(
+      eventId,
+      pagination.limit + 1,
+      pagination.cursor,
+    );
+    return pageEnvelope(
+      rows.map((row) => serializeProduct(row)),
+      pagination.limit,
+    );
   });
 
   app.post('/events/:eventId/products', async (request, reply) => {
@@ -585,8 +619,10 @@ export const ticketingRoutes: FastifyPluginAsync = async (app) => {
         sortOrder: 'sort_order',
       },
     );
-    if (updateData.available_from) updateData.available_from = new Date(updateData.available_from as string);
-    if (updateData.available_until) updateData.available_until = new Date(updateData.available_until as string);
+    if (updateData.available_from)
+      updateData.available_from = new Date(updateData.available_from as string);
+    if (updateData.available_until)
+      updateData.available_until = new Date(updateData.available_until as string);
 
     return serializeProduct(await repo.update(productId, updateData));
   });
@@ -601,18 +637,20 @@ export const ticketingRoutes: FastifyPluginAsync = async (app) => {
     const ttRepo = new TicketTypeRepository(db);
     const ticketTypes = await ttRepo.findByEvent(eventId);
 
-    const results = await Promise.all(ticketTypes.map(async (tt) => {
-      const availability = await inventoryService.getAvailability(tt.inventory_pool_id);
-      return {
-        ticketTypeId: tt.id,
-        eventOccurrenceId: tt.event_occurrence_id ?? undefined,
-        available: availability.available,
-        total: availability.total,
-        reserved: availability.reserved,
-        sold: availability.sold,
-        status: tt.status,
-      };
-    }));
+    const results = await Promise.all(
+      ticketTypes.map(async (tt) => {
+        const availability = await inventoryService.getAvailability(tt.inventory_pool_id);
+        return {
+          ticketTypeId: tt.id,
+          eventOccurrenceId: tt.event_occurrence_id ?? undefined,
+          available: availability.available,
+          total: availability.total,
+          reserved: availability.reserved,
+          sold: availability.sold,
+          status: tt.status,
+        };
+      }),
+    );
 
     return { items: results, nextCursor: null, hasMore: false };
   });

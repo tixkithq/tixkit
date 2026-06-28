@@ -131,7 +131,9 @@ async function firstOrderIdForEvent(page: Page, eventId: string): Promise<string
 }
 
 test.describe('admin product workflow coverage', () => {
-  test('admin can create an event and validate publish, pause, and archive status gates', async ({ page }, testInfo) => {
+  test('admin can create an event and validate publish, pause, and archive status gates', async ({
+    page,
+  }, testInfo) => {
     await requireReachable(page, adminBaseUrl, 'admin dashboard');
     await requireReachable(page, `${apiBaseUrl}/health`, 'api');
 
@@ -167,7 +169,9 @@ test.describe('admin product workflow coverage', () => {
     await page.getByRole('button', { name: 'Edit' }).click();
     await expect(page.getByRole('heading', { name: 'Edit Event' })).toBeVisible();
     await page.getByRole('textbox', { name: 'Title', exact: true }).fill(updatedTitle);
-    await page.getByRole('textbox', { name: 'Description', exact: true }).fill('Updated browser edit description.');
+    await page
+      .getByRole('textbox', { name: 'Description', exact: true })
+      .fill('Updated browser edit description.');
     await page.getByRole('combobox', { name: 'Visibility' }).click();
     await page.getByRole('option', { name: 'Unlisted' }).click();
     await page.getByLabel('Capacity', { exact: true }).fill('250');
@@ -178,14 +182,25 @@ test.describe('admin product workflow coverage', () => {
     await page.getByLabel('Postal Code', { exact: true }).fill('78701');
     await expect(page.getByLabel('Postal Code', { exact: true })).toHaveValue('78701');
     await page.getByLabel('Country', { exact: true }).fill('US');
-    await page.getByLabel('Cover Image URL', { exact: true }).fill('https://cdn.example.test/e2e-cover.jpg');
-    await page.getByLabel('External URL', { exact: true }).fill('https://tickets.example.test/e2e-edited');
+    await page
+      .getByLabel('Cover Image URL', { exact: true })
+      .fill('https://cdn.example.test/e2e-cover.jpg');
+    await page
+      .getByLabel('External URL', { exact: true })
+      .fill('https://tickets.example.test/e2e-edited');
     await page.getByLabel('SEO Title', { exact: true }).fill('Edited admin lifecycle SEO');
-    await page.getByLabel('SEO Description', { exact: true }).fill('Edited SEO description from Playwright.');
-    await page.getByLabel('SEO Image URL', { exact: true }).fill('https://cdn.example.test/e2e-seo.jpg');
+    await page
+      .getByLabel('SEO Description', { exact: true })
+      .fill('Edited SEO description from Playwright.');
+    await page
+      .getByLabel('SEO Image URL', { exact: true })
+      .fill('https://cdn.example.test/e2e-seo.jpg');
 
     const updateResponsePromise = page.waitForResponse((response) => {
-      return response.url() === `${apiBaseUrl}/v1/events/${createdEvent.id}` && response.request().method() === 'PATCH';
+      return (
+        response.url() === `${apiBaseUrl}/v1/events/${createdEvent.id}` &&
+        response.request().method() === 'PATCH'
+      );
     });
     await page.getByRole('button', { name: 'Save Changes' }).click();
     const editedEvent = await expectJsonStatus<{

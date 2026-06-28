@@ -57,9 +57,12 @@ function redactDatabaseUrlDetail(detail: string, databaseUrl?: string): string {
   try {
     const url = new URL(databaseUrl);
     const tokens = new Set(
-      [url.username, decodeUrlComponent(url.username), url.password, decodeUrlComponent(url.password)].filter(
-        Boolean,
-      ) as string[],
+      [
+        url.username,
+        decodeUrlComponent(url.username),
+        url.password,
+        decodeUrlComponent(url.password),
+      ].filter(Boolean) as string[],
     );
 
     for (const token of tokens) {
@@ -80,11 +83,19 @@ export function buildStartupFailureMessage(error: unknown, input: DiagnosticInpu
     hints.push('Start local infrastructure with `bun run infra:up`.');
   }
 
-  if (input.databaseUrl && matchesAny(detail, ['postgres', 'mysql', 'database', 'pool', 'password authentication'])) {
-    hints.push(`Verify DATABASE_URL points at the local database${databaseUrlContext(input.databaseUrl)}.`);
+  if (
+    input.databaseUrl &&
+    matchesAny(detail, ['postgres', 'mysql', 'database', 'pool', 'password authentication'])
+  ) {
+    hints.push(
+      `Verify DATABASE_URL points at the local database${databaseUrlContext(input.databaseUrl)}.`,
+    );
   }
 
-  if (input.temporalAddress && matchesAny(detail, ['temporal', 'transport error', '14 unavailable', 'nativeconnection'])) {
+  if (
+    input.temporalAddress &&
+    matchesAny(detail, ['temporal', 'transport error', '14 unavailable', 'nativeconnection'])
+  ) {
     hints.push(`Verify Temporal is reachable at ${input.temporalAddress}.`);
   }
 

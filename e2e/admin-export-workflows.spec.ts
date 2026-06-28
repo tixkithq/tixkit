@@ -128,7 +128,9 @@ test.describe('admin export workflow coverage', () => {
 
     await page.goto(`${adminBaseUrl}/events/${event.id}/reports`);
     await expect(page.getByRole('heading', { name: 'Reports' })).toBeVisible();
-    await expect(page.getByText('Sales, tax, and attendance analytics for this event')).toBeVisible();
+    await expect(
+      page.getByText('Sales, tax, and attendance analytics for this event'),
+    ).toBeVisible();
 
     const salesReport = await expectJsonStatus<{
       eventId: string;
@@ -161,15 +163,17 @@ test.describe('admin export workflow coverage', () => {
     expect(conversionReport.checkoutCompleted).toBeGreaterThanOrEqual(1);
 
     await page.getByRole('tab', { name: 'Conversion' }).click();
-    await expect(page.getByText('Widget impressions are not tracked for this event yet.')).toBeVisible();
+    await expect(
+      page.getByText('Widget impressions are not tracked for this event yet.'),
+    ).toBeVisible();
     await expect(page.getByText('Untracked')).toBeVisible();
     await attachScreenshot(page, testInfo, 'admin-conversion-untracked-desktop');
 
     for (const exportCase of exportCases) {
-      const createExportResponse = page.waitForResponse((response) => (
-        response.url() === `${apiBaseUrl}/v1/exports` &&
-        response.request().method() === 'POST'
-      ));
+      const createExportResponse = page.waitForResponse(
+        (response) =>
+          response.url() === `${apiBaseUrl}/v1/exports` && response.request().method() === 'POST',
+      );
       await page.getByRole('button', { name: exportCase.buttonName }).click();
 
       const queuedExport = await expectJsonStatus<{
@@ -178,9 +182,9 @@ test.describe('admin export workflow coverage', () => {
       }>(await createExportResponse, 202);
       expect(queuedExport.status).toBe('pending');
 
-      await expect(
-        page.getByText(`Export ${queuedExport.exportId} is completed.`),
-      ).toBeVisible({ timeout: 60_000 });
+      await expect(page.getByText(`Export ${queuedExport.exportId} is completed.`)).toBeVisible({
+        timeout: 60_000,
+      });
 
       const downloadLink = page.getByRole('link', { name: 'Download' });
       await expect(downloadLink).toBeVisible();
@@ -210,7 +214,9 @@ test.describe('admin export workflow coverage', () => {
 
       const redirectResponse = await fetch(href!, { redirect: 'manual' });
       expect(redirectResponse.status).toBe(302);
-      expect(redirectResponse.headers.get('location')).toContain(`/exports/${queuedExport.exportId}.csv`);
+      expect(redirectResponse.headers.get('location')).toContain(
+        `/exports/${queuedExport.exportId}.csv`,
+      );
     }
 
     await attachScreenshot(page, testInfo, 'admin-export-completed-desktop');
@@ -226,7 +232,10 @@ test.describe('admin export workflow coverage', () => {
     await requireReachable(page, `${apiBaseUrl}/health`, 'api');
 
     const suffix = `report-edge-${testInfo.workerIndex}-${Date.now()}`;
-    const { event, ticketType, inventoryPool, discountCode } = await seedPaidPromoCheckoutEvent(request, suffix);
+    const { event, ticketType, inventoryPool, discountCode } = await seedPaidPromoCheckoutEvent(
+      request,
+      suffix,
+    );
     const buyerEmail = `report-edge+${suffix}@example.com`;
 
     const completed = await completeSeededPromoCheckout(
@@ -308,14 +317,20 @@ test.describe('admin export workflow coverage', () => {
     );
 
     await page.getByRole('tab', { name: 'Affiliate' }).click();
-    await expect(page.getByText('Choose an organization before loading affiliate reporting.')).toBeVisible();
+    await expect(
+      page.getByText('Choose an organization before loading affiliate reporting.'),
+    ).toBeVisible();
     await page.getByRole('combobox', { name: 'Select report scope' }).click();
     await page.getByRole('option', { name: 'Tixkit Dev' }).click();
     await expect(page.getByText(affiliate.affiliate.name)).toBeVisible();
     await expect(page.getByText(affiliate.affiliate.code)).toBeVisible();
-    await expect(page.getByRole('row', {
-      name: new RegExp(`${affiliate.affiliate.name} ${affiliate.affiliate.code} 1 \\$20\\.00 \\$2\\.00`),
-    })).toBeVisible();
+    await expect(
+      page.getByRole('row', {
+        name: new RegExp(
+          `${affiliate.affiliate.name} ${affiliate.affiliate.code} 1 \\$20\\.00 \\$2\\.00`,
+        ),
+      }),
+    ).toBeVisible();
     await attachScreenshot(page, testInfo, 'admin-affiliate-report-edge-state');
     await expectNoAxeViolations(page, testInfo);
   });
@@ -395,9 +410,11 @@ test.describe('admin export workflow coverage', () => {
 
     await page.getByRole('tab', { name: 'Tax' }).click();
     await expect(page.getByText(taxSnapshot.taxRule.name)).toBeVisible();
-    await expect(page.getByRole('row', {
-      name: new RegExp(`${taxSnapshot.taxRule.name} 8\\.3% \\$40\\.00 \\$3\\.30`),
-    })).toBeVisible();
+    await expect(
+      page.getByRole('row', {
+        name: new RegExp(`${taxSnapshot.taxRule.name} 8\\.3% \\$40\\.00 \\$3\\.30`),
+      }),
+    ).toBeVisible();
     await attachScreenshot(page, testInfo, 'admin-tax-report-edge-state');
 
     const attendanceReport = await expectJsonStatus<{
@@ -434,17 +451,16 @@ test.describe('admin export workflow coverage', () => {
 
     await page.getByRole('tab', { name: 'Attendance' }).click();
     await expect(page.getByText('Check-in Rate')).toBeVisible();
-    await expect(page.getByRole('row', {
-      name: new RegExp(`${ticketType.name} 1 1 100%`),
-    })).toBeVisible();
+    await expect(
+      page.getByRole('row', {
+        name: new RegExp(`${ticketType.name} 1 1 100%`),
+      }),
+    ).toBeVisible();
     await attachScreenshot(page, testInfo, 'admin-attendance-report-edge-state');
     await expectNoAxeViolations(page, testInfo);
   });
 
-  test('admin reports stay usable on mobile viewport', async ({
-    page,
-    request,
-  }, testInfo) => {
+  test('admin reports stay usable on mobile viewport', async ({ page, request }, testInfo) => {
     await requireReachable(page, adminBaseUrl, 'admin dashboard');
     await requireReachable(page, checkoutBaseUrl, 'checkout app');
     await requireReachable(page, `${apiBaseUrl}/health`, 'api');
@@ -489,7 +505,9 @@ test.describe('admin export workflow coverage', () => {
 
     await page.goto(`${adminBaseUrl}/events/${event.id}/reports`);
     await expect(page.getByRole('heading', { name: 'Reports' })).toBeVisible();
-    await expect(page.getByText('Sales, tax, and attendance analytics for this event')).toBeVisible();
+    await expect(
+      page.getByText('Sales, tax, and attendance analytics for this event'),
+    ).toBeVisible();
     await expect(page.getByRole('tablist')).toBeVisible();
 
     await page.getByRole('tab', { name: 'Sales' }).click();
@@ -499,20 +517,26 @@ test.describe('admin export workflow coverage', () => {
 
     await page.getByRole('tab', { name: 'Tax' }).click();
     await expect(page.getByText(taxSnapshot.taxRule.name)).toBeVisible();
-    await expect(page.getByRole('row', {
-      name: new RegExp(`${taxSnapshot.taxRule.name} 8\\.3% \\$40\\.00 \\$3\\.30`),
-    })).toBeVisible();
+    await expect(
+      page.getByRole('row', {
+        name: new RegExp(`${taxSnapshot.taxRule.name} 8\\.3% \\$40\\.00 \\$3\\.30`),
+      }),
+    ).toBeVisible();
     await attachScreenshot(page, testInfo, 'admin-reports-mobile-tax');
 
     await page.getByRole('tab', { name: 'Attendance' }).click();
     await expect(page.getByText('Check-in Rate')).toBeVisible();
-    await expect(page.getByRole('row', {
-      name: new RegExp(`${ticketType.name} 1 1 100%`),
-    })).toBeVisible();
+    await expect(
+      page.getByRole('row', {
+        name: new RegExp(`${ticketType.name} 1 1 100%`),
+      }),
+    ).toBeVisible();
     await attachScreenshot(page, testInfo, 'admin-reports-mobile-attendance');
 
     await page.getByRole('tab', { name: 'Conversion' }).click();
-    await expect(page.getByText('Widget impressions are not tracked for this event yet.')).toBeVisible();
+    await expect(
+      page.getByText('Widget impressions are not tracked for this event yet.'),
+    ).toBeVisible();
     await expect(page.getByText('Untracked')).toBeVisible();
     await attachScreenshot(page, testInfo, 'admin-reports-mobile-conversion');
 

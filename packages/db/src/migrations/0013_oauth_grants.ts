@@ -29,11 +29,20 @@ export const OAuthGrantsMigration: Migration = {
       .addColumn('expires_at', timestampType(), (col) => col.notNull())
       .addColumn('consumed_at', timestampType())
       .addColumn('created_at', timestampType(), (col) => col.notNull().defaultTo(nowDefault()))
-      .addForeignKeyConstraint('oauth_codes_app_fk', ['oauth_application_id'], 'oauth_applications', ['id'])
+      .addForeignKeyConstraint(
+        'oauth_codes_app_fk',
+        ['oauth_application_id'],
+        'oauth_applications',
+        ['id'],
+      )
       .addForeignKeyConstraint('oauth_codes_tenant_fk', ['tenant_id'], 'tenants', ['id'])
       .execute();
 
-    await db.schema.createIndex('idx_oauth_codes_app').on('oauth_authorization_codes').column('oauth_application_id').execute();
+    await db.schema
+      .createIndex('idx_oauth_codes_app')
+      .on('oauth_authorization_codes')
+      .column('oauth_application_id')
+      .execute();
 
     await db.schema
       .createTable('oauth_refresh_tokens')
@@ -47,11 +56,20 @@ export const OAuthGrantsMigration: Migration = {
       .addColumn('revoked_at', timestampType())
       .addColumn('created_at', timestampType(), (col) => col.notNull().defaultTo(nowDefault()))
       .addColumn('updated_at', timestampType(), (col) => col.notNull().defaultTo(nowDefault()))
-      .addForeignKeyConstraint('oauth_refresh_app_fk', ['oauth_application_id'], 'oauth_applications', ['id'])
+      .addForeignKeyConstraint(
+        'oauth_refresh_app_fk',
+        ['oauth_application_id'],
+        'oauth_applications',
+        ['id'],
+      )
       .addForeignKeyConstraint('oauth_refresh_tenant_fk', ['tenant_id'], 'tenants', ['id'])
       .execute();
 
-    await db.schema.createIndex('idx_oauth_refresh_app').on('oauth_refresh_tokens').column('oauth_application_id').execute();
+    await db.schema
+      .createIndex('idx_oauth_refresh_app')
+      .on('oauth_refresh_tokens')
+      .column('oauth_application_id')
+      .execute();
 
     await db.schema
       .createTable('oauth_access_tokens')
@@ -66,12 +84,26 @@ export const OAuthGrantsMigration: Migration = {
       .addColumn('revoked_at', timestampType())
       .addColumn('created_at', timestampType(), (col) => col.notNull().defaultTo(nowDefault()))
       .addColumn('updated_at', timestampType(), (col) => col.notNull().defaultTo(nowDefault()))
-      .addForeignKeyConstraint('oauth_access_app_fk', ['oauth_application_id'], 'oauth_applications', ['id'])
-      .addForeignKeyConstraint('oauth_access_refresh_fk', ['refresh_token_id'], 'oauth_refresh_tokens', ['id'])
+      .addForeignKeyConstraint(
+        'oauth_access_app_fk',
+        ['oauth_application_id'],
+        'oauth_applications',
+        ['id'],
+      )
+      .addForeignKeyConstraint(
+        'oauth_access_refresh_fk',
+        ['refresh_token_id'],
+        'oauth_refresh_tokens',
+        ['id'],
+      )
       .addForeignKeyConstraint('oauth_access_tenant_fk', ['tenant_id'], 'tenants', ['id'])
       .execute();
 
-    await db.schema.createIndex('idx_oauth_access_app').on('oauth_access_tokens').column('oauth_application_id').execute();
+    await db.schema
+      .createIndex('idx_oauth_access_app')
+      .on('oauth_access_tokens')
+      .column('oauth_application_id')
+      .execute();
   },
 
   async down(db): Promise<void> {

@@ -34,7 +34,10 @@ import { hashRequest } from '../../services/idempotency.js';
 type Row = Record<string, unknown>;
 type Tables = Record<string, Row[]>;
 
-function matchesWheres(row: Row, wheres: Array<{ column: string; op: string; value: unknown }>): boolean {
+function matchesWheres(
+  row: Row,
+  wheres: Array<{ column: string; op: string; value: unknown }>,
+): boolean {
   for (const w of wheres) {
     const val = row[w.column];
     if (w.op === '=') {
@@ -496,11 +499,9 @@ async function setupApp(
 
 describe('tenant settings list permission gates', () => {
   it('GET /organizations rejects principals without settings.write', async () => {
-    const app = await setupApp(
-      tenantRoutes,
-      makePrincipal({ scopes: ['events.read'] }),
-      { organizations: [organizationRow()] },
-    );
+    const app = await setupApp(tenantRoutes, makePrincipal({ scopes: ['events.read'] }), {
+      organizations: [organizationRow()],
+    });
     const res = await app.inject({ method: 'GET', url: '/organizations' });
     expect(res.statusCode).toBe(403);
     expect(res.json().message).toContain('settings.write');
@@ -508,11 +509,9 @@ describe('tenant settings list permission gates', () => {
   });
 
   it('GET /brands rejects principals without settings.write', async () => {
-    const app = await setupApp(
-      tenantRoutes,
-      makePrincipal({ scopes: ['events.read'] }),
-      { brands: [brandRow()] },
-    );
+    const app = await setupApp(tenantRoutes, makePrincipal({ scopes: ['events.read'] }), {
+      brands: [brandRow()],
+    });
     const res = await app.inject({ method: 'GET', url: '/brands' });
     expect(res.statusCode).toBe(403);
     expect(res.json().message).toContain('settings.write');
@@ -524,10 +523,7 @@ describe('tenant settings list permission gates', () => {
       tenantRoutes,
       makePrincipal({ organizationIds: ['org_1'], scopes: ['settings.write'] }),
       {
-        organizations: [
-          organizationRow({ id: 'org_1' }),
-          organizationRow({ id: 'org_other' }),
-        ],
+        organizations: [organizationRow({ id: 'org_1' }), organizationRow({ id: 'org_other' })],
       },
     );
     const res = await app.inject({ method: 'GET', url: '/organizations' });
@@ -662,7 +658,9 @@ describe('cross-tenant denial', () => {
 
   it('POST /check-ins/scan returns 404 before revealing inactive list state in another tenant', async () => {
     const tables: Tables = {
-      check_in_lists: [checkInListRow({ tenant_id: 'tnt_other', event_id: 'evt_other', status: 'inactive' })],
+      check_in_lists: [
+        checkInListRow({ tenant_id: 'tnt_other', event_id: 'evt_other', status: 'inactive' }),
+      ],
       events: [eventRow({ id: 'evt_other', tenant_id: 'tnt_other' })],
     };
     const app = await setupApp(checkInRoutes, principal, tables);
@@ -707,17 +705,19 @@ describe('cross-tenant denial', () => {
   it('PATCH /brands/:brandId rejects payment account from another tenant', async () => {
     const tables: Tables = {
       brands: [brandRow()],
-      payment_accounts: [{
-        id: 'pa_1',
-        tenant_id: 'tnt_other',
-        organization_id: 'org_1',
-        provider: 'stripe_connect',
-        provider_account_id: 'acct_1',
-        status: 'active',
-        default_currency: 'USD',
-        created_at: new Date(),
-        updated_at: new Date(),
-      }],
+      payment_accounts: [
+        {
+          id: 'pa_1',
+          tenant_id: 'tnt_other',
+          organization_id: 'org_1',
+          provider: 'stripe_connect',
+          provider_account_id: 'acct_1',
+          status: 'active',
+          default_currency: 'USD',
+          created_at: new Date(),
+          updated_at: new Date(),
+        },
+      ],
     };
     const app = await setupApp(tenantRoutes, principal, tables);
     const res = await app.inject({
@@ -732,17 +732,19 @@ describe('cross-tenant denial', () => {
   it('PATCH /brands/:brandId rejects payment account from another organization', async () => {
     const tables: Tables = {
       brands: [brandRow({ organization_id: 'org_1' })],
-      payment_accounts: [{
-        id: 'pa_1',
-        tenant_id: 'tnt_1',
-        organization_id: 'org_other',
-        provider: 'stripe_connect',
-        provider_account_id: 'acct_1',
-        status: 'active',
-        default_currency: 'USD',
-        created_at: new Date(),
-        updated_at: new Date(),
-      }],
+      payment_accounts: [
+        {
+          id: 'pa_1',
+          tenant_id: 'tnt_1',
+          organization_id: 'org_other',
+          provider: 'stripe_connect',
+          provider_account_id: 'acct_1',
+          status: 'active',
+          default_currency: 'USD',
+          created_at: new Date(),
+          updated_at: new Date(),
+        },
+      ],
     };
     const app = await setupApp(tenantRoutes, principal, tables);
     const res = await app.inject({
@@ -954,7 +956,9 @@ describe('cross-organization denial (same tenant)', () => {
 
   it('POST /check-ins/sync returns 404 before revealing inactive list state in another organization', async () => {
     const tables: Tables = {
-      check_in_lists: [checkInListRow({ tenant_id: 'tnt_1', event_id: 'evt_B', status: 'inactive' })],
+      check_in_lists: [
+        checkInListRow({ tenant_id: 'tnt_1', event_id: 'evt_B', status: 'inactive' }),
+      ],
       events: [eventRow({ id: 'evt_B', tenant_id: 'tnt_1', organization_id: 'org_B' })],
     };
     const app = await setupApp(checkInRoutes, principal, tables);
@@ -976,15 +980,17 @@ describe('cross-organization denial (same tenant)', () => {
     const payload = { templateKey: 'attendee-message', audience: 'all', channel: 'sms' };
     const tables: Tables = {
       events: [eventRow({ id: 'evt_1', tenant_id: 'tnt_1', organization_id: 'org_B' })],
-      idempotency_records: [{
-        id: 'idm_msg_1',
-        key: 'key-cross-org-message',
-        tenant_id: 'tnt_1',
-        request_hash: hashRequest({ eventId: 'evt_1', body: payload }),
-        response_status: 202,
-        response_body: JSON.stringify({ campaignId: 'cached', status: 'sent' }),
-        status: 'completed',
-      }],
+      idempotency_records: [
+        {
+          id: 'idm_msg_1',
+          key: 'key-cross-org-message',
+          tenant_id: 'tnt_1',
+          request_hash: hashRequest({ eventId: 'evt_1', body: payload }),
+          response_status: 202,
+          response_body: JSON.stringify({ campaignId: 'cached', status: 'sent' }),
+          status: 'completed',
+        },
+      ],
     };
     const app = await setupApp(messagingRoutes, principal, tables);
     const res = await app.inject({
@@ -999,7 +1005,9 @@ describe('cross-organization denial (same tenant)', () => {
   });
 
   it('DELETE /api-keys/:keyId returns 404 for key in another organization', async () => {
-    const tables: Tables = { api_keys: [apiKeyRow({ tenant_id: 'tnt_1', organization_id: 'org_B' })] };
+    const tables: Tables = {
+      api_keys: [apiKeyRow({ tenant_id: 'tnt_1', organization_id: 'org_B' })],
+    };
     const app = await setupApp(developerRoutes, principal, tables);
     const res = await app.inject({ method: 'DELETE', url: '/api-keys/ak_1' });
     expect(res.statusCode).toBe(404);
@@ -1008,7 +1016,9 @@ describe('cross-organization denial (same tenant)', () => {
 
   it('POST /scanner-devices/:deviceId/revoke returns 404 for device in another organization', async () => {
     const tables: Tables = {
-      scanner_devices: [scannerDeviceRow({ tenant_id: 'tnt_1', organization_id: 'org_B', device_id: 'dev_B' })],
+      scanner_devices: [
+        scannerDeviceRow({ tenant_id: 'tnt_1', organization_id: 'org_B', device_id: 'dev_B' }),
+      ],
     };
     const app = await setupApp(developerRoutes, principal, tables);
     const res = await app.inject({ method: 'POST', url: '/scanner-devices/dev_B/revoke' });
@@ -1087,11 +1097,95 @@ describe('empty organization principal fail-closed lists', () => {
   });
 
   it('GET /oauth-applications returns no rows for a non-system principal with no organizations', async () => {
-    const tables: Tables = { oauth_applications: [oauthApplicationRow({ organization_id: 'org_1' })] };
+    const tables: Tables = {
+      oauth_applications: [oauthApplicationRow({ organization_id: 'org_1' })],
+    };
     const app = await setupApp(developerRoutes, principal, tables);
     const res = await app.inject({ method: 'GET', url: '/oauth-applications' });
     expect(res.statusCode).toBe(200);
     expect(res.json().items).toHaveLength(0);
+    await app.close();
+  });
+});
+
+describe('developer credential resource scope containment', () => {
+  it('GET /api-keys exposes only same-event keys and DELETE hides other-event or org-wide keys from event-scoped principals', async () => {
+    const principal = makePrincipal({
+      type: 'api_key',
+      id: 'ak_parent',
+      eventIds: ['evt_1'],
+      brandIds: ['brd_1'],
+      scopes: ['developers.write'],
+    });
+    const tables: Tables = {
+      api_keys: [
+        apiKeyRow({ id: 'ak_evt_1', event_ids: JSON.stringify(['evt_1']) }),
+        apiKeyRow({ id: 'ak_evt_2', event_ids: JSON.stringify(['evt_2']) }),
+        apiKeyRow({ id: 'ak_org', event_ids: null, brand_ids: null }),
+        apiKeyRow({ id: 'ak_brand', event_ids: null, brand_ids: JSON.stringify(['brd_1']) }),
+      ],
+    };
+    const app = await setupApp(developerRoutes, principal, tables);
+
+    const listRes = await app.inject({ method: 'GET', url: '/api-keys' });
+    expect(listRes.statusCode).toBe(200);
+    expect(listRes.json().items.map((item: { id: string }) => item.id)).toEqual(['ak_evt_1']);
+
+    const otherEventRes = await app.inject({ method: 'DELETE', url: '/api-keys/ak_evt_2' });
+    expect(otherEventRes.statusCode).toBe(404);
+
+    const orgWideRes = await app.inject({ method: 'DELETE', url: '/api-keys/ak_org' });
+    expect(orgWideRes.statusCode).toBe(404);
+
+    await app.close();
+  });
+
+  it('GET /scanner-devices and revoke hide other-brand event and org-wide devices from brand-scoped principals', async () => {
+    const principal = makePrincipal({
+      type: 'api_key',
+      id: 'ak_parent',
+      brandIds: ['brd_1'],
+      scopes: ['developers.write'],
+    });
+    const tables: Tables = {
+      events: [
+        eventRow({ id: 'evt_1', brand_id: 'brd_1' }),
+        eventRow({ id: 'evt_2', brand_id: 'brd_2' }),
+      ],
+      scanner_devices: [
+        scannerDeviceRow({
+          id: 'sd_1',
+          device_id: 'dev_1',
+          event_ids: JSON.stringify(['evt_1']),
+        }),
+        scannerDeviceRow({
+          id: 'sd_2',
+          device_id: 'dev_2',
+          event_ids: JSON.stringify(['evt_2']),
+        }),
+        scannerDeviceRow({ id: 'sd_org', device_id: 'dev_org', event_ids: null }),
+      ],
+    };
+    const app = await setupApp(developerRoutes, principal, tables);
+
+    const listRes = await app.inject({ method: 'GET', url: '/scanner-devices' });
+    expect(listRes.statusCode).toBe(200);
+    expect(listRes.json().items.map((item: { deviceId: string }) => item.deviceId)).toEqual([
+      'dev_1',
+    ]);
+
+    const otherBrandRes = await app.inject({
+      method: 'POST',
+      url: '/scanner-devices/dev_2/revoke',
+    });
+    expect(otherBrandRes.statusCode).toBe(404);
+
+    const orgWideRes = await app.inject({
+      method: 'POST',
+      url: '/scanner-devices/dev_org/revoke',
+    });
+    expect(orgWideRes.statusCode).toBe(404);
+
     await app.close();
   });
 });
@@ -1215,6 +1309,62 @@ describe('brand and event scope denial', () => {
       },
     });
     expect(res.statusCode).toBe(404);
+    await app.close();
+  });
+
+  it('GET /exports/:exportId returns 404 for same-tenant null-event export to event-scoped API key', async () => {
+    const principal = makePrincipal({
+      type: 'api_key',
+      id: 'ak_event_scoped',
+      eventIds: ['evt_A'],
+      scopes: ['reports.read'],
+    });
+    const tables: Tables = { export_jobs: [exportJobRow({ event_id: null })] };
+    const app = await setupApp(reportingRoutes, principal, tables);
+    const res = await app.inject({ method: 'GET', url: '/exports/exp_1' });
+
+    expect(res.statusCode).toBe(404);
+    await app.close();
+  });
+
+  it('GET /exports/:exportId/download returns 404 for same-tenant null-event export to brand-scoped API key', async () => {
+    const principal = makePrincipal({
+      type: 'api_key',
+      id: 'ak_brand_scoped',
+      brandIds: ['brd_A'],
+      scopes: ['reports.read'],
+    });
+    const tables: Tables = { export_jobs: [exportJobRow({ event_id: null })] };
+    const app = await setupApp(reportingRoutes, principal, tables);
+    const res = await app.inject({ method: 'GET', url: '/exports/exp_1/download' });
+
+    expect(res.statusCode).toBe(404);
+    await app.close();
+  });
+
+  it('GET /exports/:exportId/events returns 404 for same-tenant null-event export to event-scoped API key', async () => {
+    const principal = makePrincipal({
+      type: 'api_key',
+      id: 'ak_event_scoped',
+      eventIds: ['evt_A'],
+      scopes: ['reports.read'],
+    });
+    const tables: Tables = { export_jobs: [exportJobRow({ event_id: null })] };
+    const app = await setupApp(reportingRoutes, principal, tables);
+    const res = await app.inject({ method: 'GET', url: '/exports/exp_1/events' });
+
+    expect(res.statusCode).toBe(404);
+    await app.close();
+  });
+
+  it('GET /exports/:exportId/download allows system principals to access null-event exports', async () => {
+    const principal = makePrincipal({ type: 'system', id: 'sys_1' });
+    const tables: Tables = { export_jobs: [exportJobRow({ event_id: null })] };
+    const app = await setupApp(reportingRoutes, principal, tables);
+    const res = await app.inject({ method: 'GET', url: '/exports/exp_1/download' });
+
+    expect(res.statusCode).toBe(302);
+    expect(res.headers.location).toBe('https://exports.example.test/exp_1.csv');
     await app.close();
   });
 });

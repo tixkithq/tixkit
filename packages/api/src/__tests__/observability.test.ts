@@ -78,7 +78,9 @@ describe('API observability', () => {
 
   it('requires a metrics bearer token before querying inventory holds', async () => {
     const app = Fastify({ logger: false, genReqId: () => 'req_metrics_auth' });
-    const observability: ApiObservability = { metrics: createTixkitMetrics('test-api-metrics-auth') };
+    const observability: ApiObservability = {
+      metrics: createTixkitMetrics('test-api-metrics-auth'),
+    };
     const dbProvider = vi.fn(() => createHoldDb([{ quantity: 7 }]));
     registerMetricsRoute(app, observability, dbProvider, {
       bearerToken: 'metrics-token',
@@ -104,7 +106,9 @@ describe('API observability', () => {
 
     expect(correctToken.statusCode).toBe(200);
     expect(correctToken.body).toContain('tixkit_inventory_active_holds');
-    expect(correctToken.body).toMatch(/tixkit_inventory_active_holds\{[^}]*scope="global"[^}]*\} 7/);
+    expect(correctToken.body).toMatch(
+      /tixkit_inventory_active_holds\{[^}]*scope="global"[^}]*\} 7/,
+    );
     expect(dbProvider).toHaveBeenCalledTimes(1);
 
     await app.close();

@@ -1,10 +1,10 @@
-import '@testing-library/jest-dom/vitest'
-import { afterEach, vi } from 'vitest'
-import { cleanup } from '@testing-library/react'
+import '@testing-library/jest-dom/vitest';
+import { afterEach, vi } from 'vitest';
+import { cleanup } from '@testing-library/react';
 
 afterEach(() => {
-  cleanup()
-})
+  cleanup();
+});
 
 Object.defineProperty(window, 'matchMedia', {
   writable: true,
@@ -18,7 +18,7 @@ Object.defineProperty(window, 'matchMedia', {
     removeListener: vi.fn(),
     dispatchEvent: vi.fn(),
   })),
-})
+});
 
 // Mock next/navigation hooks
 vi.mock('next/navigation', () => ({
@@ -33,7 +33,7 @@ vi.mock('next/navigation', () => ({
     prefetch: vi.fn(),
   }),
   redirect: vi.fn(),
-}))
+}));
 
 // Mock next-themes
 vi.mock('next-themes', () => ({
@@ -43,4 +43,4 @@ vi.mock('next-themes', () => ({
     resolvedTheme: 'light',
   }),
   ThemeProvider: ({ children }: { children: React.ReactNode }) => children,
-}))
+}));

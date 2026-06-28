@@ -83,7 +83,16 @@ export type QuestionDefinitionValidationInput = {
 };
 
 export type ValidationRule = {
-  type: 'required' | 'pattern' | 'minLength' | 'maxLength' | 'email' | 'phone' | 'date' | 'fileSize' | 'fileType';
+  type:
+    | 'required'
+    | 'pattern'
+    | 'minLength'
+    | 'maxLength'
+    | 'email'
+    | 'phone'
+    | 'date'
+    | 'fileSize'
+    | 'fileType';
   value?: string | number;
   message: string;
 };
@@ -100,10 +109,7 @@ function answerValues(answer: unknown): string[] {
   return [String(answer)];
 }
 
-export function isQuestionVisible(
-  question: Question,
-  answers: Record<string, unknown>,
-): boolean {
+export function isQuestionVisible(question: Question, answers: Record<string, unknown>): boolean {
   const condition = question.conditionalVisibility;
   if (!condition) return true;
 
@@ -118,8 +124,12 @@ export function isQuestionVisible(
 }
 
 function isAnswerEmpty(answer: unknown): boolean {
-  return answer === undefined || answer === null || answer === '' ||
-    (Array.isArray(answer) && answer.length === 0);
+  return (
+    answer === undefined ||
+    answer === null ||
+    answer === '' ||
+    (Array.isArray(answer) && answer.length === 0)
+  );
 }
 
 const OPTION_BEARING_TYPES = new Set<QuestionType>(['select', 'multiselect']);
@@ -186,12 +196,12 @@ export function validateQuestionDefinition(input: QuestionDefinitionValidationIn
 export function isConsentAnswerSnapshot(answer: unknown): answer is ConsentAnswerSnapshot {
   return Boolean(
     answer &&
-      typeof answer === 'object' &&
-      !Array.isArray(answer) &&
-      (answer as { accepted?: unknown }).accepted === true &&
-      typeof (answer as { consentText?: unknown }).consentText === 'string' &&
-      typeof (answer as { consentVersion?: unknown }).consentVersion === 'string' &&
-      typeof (answer as { consentedAt?: unknown }).consentedAt === 'string',
+    typeof answer === 'object' &&
+    !Array.isArray(answer) &&
+    (answer as { accepted?: unknown }).accepted === true &&
+    typeof (answer as { consentText?: unknown }).consentText === 'string' &&
+    typeof (answer as { consentVersion?: unknown }).consentVersion === 'string' &&
+    typeof (answer as { consentedAt?: unknown }).consentedAt === 'string',
   );
 }
 
@@ -202,10 +212,10 @@ export function isConsentAccepted(answer: unknown): boolean {
 export function isUploadArtifactAnswer(answer: unknown): answer is UploadArtifactAnswer {
   return Boolean(
     answer &&
-      typeof answer === 'object' &&
-      !Array.isArray(answer) &&
-      typeof (answer as { artifactId?: unknown }).artifactId === 'string' &&
-      (answer as { artifactId: string }).artifactId.startsWith('upl_'),
+    typeof answer === 'object' &&
+    !Array.isArray(answer) &&
+    typeof (answer as { artifactId?: unknown }).artifactId === 'string' &&
+    (answer as { artifactId: string }).artifactId.startsWith('upl_'),
   );
 }
 
@@ -277,26 +287,44 @@ export function validateAnswers(
     switch (question.type) {
       case 'email':
         if (typeof answer !== 'string' || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(answer)) {
-          errors.push({ questionId: question.id, message: `${question.label} must be a valid email` });
+          errors.push({
+            questionId: question.id,
+            message: `${question.label} must be a valid email`,
+          });
         }
         break;
       case 'phone':
         if (typeof answer !== 'string' || !/^[+\d\s()-]{7,}$/.test(answer)) {
-          errors.push({ questionId: question.id, message: `${question.label} must be a valid phone number` });
+          errors.push({
+            questionId: question.id,
+            message: `${question.label} must be a valid phone number`,
+          });
         }
         break;
       case 'select':
-        if (typeof answer !== 'string' || (question.options && !question.options.includes(answer))) {
-          errors.push({ questionId: question.id, message: `${question.label} has an invalid option` });
+        if (
+          typeof answer !== 'string' ||
+          (question.options && !question.options.includes(answer))
+        ) {
+          errors.push({
+            questionId: question.id,
+            message: `${question.label} has an invalid option`,
+          });
         }
         break;
       case 'multiselect':
         if (!Array.isArray(answer)) {
-          errors.push({ questionId: question.id, message: `${question.label} has an invalid option` });
+          errors.push({
+            questionId: question.id,
+            message: `${question.label} has an invalid option`,
+          });
         } else if (question.options) {
           for (const val of answer) {
             if (typeof val !== 'string' || !question.options.includes(val)) {
-              errors.push({ questionId: question.id, message: `${question.label} has an invalid option` });
+              errors.push({
+                questionId: question.id,
+                message: `${question.label} has an invalid option`,
+              });
               break;
             }
           }

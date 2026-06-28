@@ -16,19 +16,34 @@ import {
   serializeApiKey,
   serializeScannerDevice,
 } from '../../http/contracts.js';
-import { createApiKeySchema, createScannerDeviceSchema, parseBody, createOAuthAppSchema } from '../../http/schemas.js';
+import {
+  createApiKeySchema,
+  createScannerDeviceSchema,
+  parseBody,
+  createOAuthAppSchema,
+} from '../../http/schemas.js';
 
 const SENSITIVE_API_KEY_FIELDS = ['hashed_key'] as const;
 const SENSITIVE_DEVICE_FIELDS = ['hashed_secret'] as const;
 type Principal = NonNullable<FastifyRequest['principal']>;
+type ScopedCredentialRow = {
+  brand_ids?: unknown;
+  event_ids?: unknown;
+};
 
-function sanitize<T extends Record<string, unknown>>(record: T, fields: readonly string[]): Partial<T> {
+function sanitize<T extends Record<string, unknown>>(
+  record: T,
+  fields: readonly string[],
+): Partial<T> {
   const copy: Record<string, unknown> = { ...record };
   for (const field of fields) delete copy[field];
   return copy as Partial<T>;
 }
 
-function requireAssignableResourceScope(principal: Principal, input: { brandIds?: string[]; eventIds?: string[] }) {
+function requireAssignableResourceScope(
+  principal: Principal,
+  input: { brandIds?: string[]; eventIds?: string[] },
+) {
   const principalHasBrandScope = Boolean(principal.brandIds?.length);
   const principalHasEventScope = Boolean(principal.eventIds?.length);
   const requestedBrandScope = Boolean(input.brandIds?.length);
@@ -42,42 +57,164 @@ function requireAssignableResourceScope(principal: Principal, input: { brandIds?
       throw new ForbiddenError('Event-scoped principals must create event-scoped credentials');
     }
   } else if (principalHasBrandScope && !requestedBrandScope && !requestedEventScope) {
-    throw new ForbiddenError('Brand-scoped principals must create brand- or event-scoped credentials');
+    throw new ForbiddenError(
+      'Brand-scoped principals must create brand- or event-scoped credentials',
+    );
   }
 }
 
 function requireAssignableScannerScope(principal: Principal, eventIds?: string[]) {
-  if ((principal.brandIds?.length || principal.eventIds?.length) && (!eventIds || eventIds.length === 0)) {
+  if (
+    (principal.brandIds?.length || principal.eventIds?.length) &&
+    (!eventIds || eventIds.length === 0)
+  ) {
     throw new ForbiddenError('Scoped principals must bind scanner devices to explicit events');
   }
+}
+
+function requireOrganizationWideOAuthApplicationPrincipal(principal: Principal) {
+  if (principal.brandIds?.length || principal.eventIds?.length) {
+    throw new ForbiddenError(
+      'Scoped principals cannot manage organization-wide OAuth applications',
+    );
+  }
+}
+
+function parseStringArray(value: unknown): string[] {
+  if (Array.isArray(value)) {
+    return value.filter((item): item is string => typeof item === 'string');
+  }
+  if (typeof value !== 'string' || value.length === 0) {
+    return [];
+  }
+  try {
+    const parsed = JSON.parse(value);
+    return Array.isArray(parsed)
+      ? parsed.filter((item): item is string => typeof item === 'string')
+      : [];
+  } catch {
+    return [];
+  }
+}
+
+function hasScopedResourceBounds(principal: Principal) {
+  return (
+    principal.type !== 'system' && Boolean(principal.eventIds?.length || principal.brandIds?.length)
+  );
+}
+
+function isContained(values: string[], allowedValues: readonly string[]) {
+  const allowed = new Set<string>(allowedValues);
+  return values.length > 0 && values.every((value) => allowed.has(value));
 }
 
 export const developerRoutes: FastifyPluginAsync = async (app) => {
   const db = app.context.db;
 
+  async function loadEventBrandIds(principal: Principal, eventIds: string[]) {
+    const uniqueEventIds = [...new Set(eventIds)];
+    if (uniqueEventIds.length === 0) return new Map<string, string>();
+    const organizationIds = new Set<string>(principal.organizationIds);
+
+    const events = await db
+      .selectFrom('events')
+      .select(['id', 'tenant_id', 'organization_id', 'brand_id'])
+      .where('id', 'in', uniqueEventIds)
+      .execute();
+
+    const eventBrandIds = new Map<string, string>();
+    for (const event of events) {
+      if (
+        event.tenant_id === principal.tenantId &&
+        (principal.type === 'system' || organizationIds.has(String(event.organization_id))) &&
+        typeof event.id === 'string' &&
+        typeof event.brand_id === 'string'
+      ) {
+        eventBrandIds.set(event.id, event.brand_id);
+      }
+    }
+    return eventBrandIds;
+  }
+
+  function canManageScopedCredentialRow(
+    principal: Principal,
+    row: ScopedCredentialRow,
+    eventBrandIds: Map<string, string>,
+  ) {
+    const eventIds = parseStringArray(row.event_ids);
+
+    if (principal.eventIds?.length) {
+      return (
+        parseStringArray(row.brand_ids).length === 0 &&
+        isContained(eventIds, principal.eventIds)
+      );
+    }
+
+    if (!principal.brandIds?.length) {
+      return true;
+    }
+
+    const brandIds = parseStringArray(row.brand_ids);
+    if (brandIds.length === 0 && eventIds.length === 0) {
+      return false;
+    }
+    if (brandIds.length > 0 && !isContained(brandIds, principal.brandIds)) {
+      return false;
+    }
+    if (eventIds.length > 0) {
+      const principalBrandIds = new Set<string>(principal.brandIds);
+      return eventIds.every((eventId) => {
+        const brandId = eventBrandIds.get(eventId);
+        return Boolean(brandId && principalBrandIds.has(brandId));
+      });
+    }
+    return true;
+  }
+
+  async function filterManageableScopedCredentialRows<T extends ScopedCredentialRow>(
+    principal: Principal,
+    rows: T[],
+  ) {
+    if (!hasScopedResourceBounds(principal)) {
+      return rows;
+    }
+    const eventBrandIds =
+      principal.eventIds?.length
+        ? new Map<string, string>()
+        : await loadEventBrandIds(
+            principal,
+            rows.flatMap((row) => parseStringArray(row.event_ids)),
+          );
+    return rows.filter((row) => canManageScopedCredentialRow(principal, row, eventBrandIds));
+  }
+
   async function assertBrandIds(principal: Principal, brandIds?: string[]) {
     if (!brandIds) return;
     const repo = new BrandRepository(db);
-    await Promise.all(brandIds.map(async (brandId) => {
-      const brand = await repo.findById(brandId);
-      if (!brand) throw new NotFoundError('Brand', brandId);
-      ClerkAuthService.requireResourceTenant(principal, brand, 'Brand', brandId);
-      ClerkAuthService.requireOrganizationScope(principal, brand.organization_id);
-      ClerkAuthService.requireBrandScope(principal, brandId);
-    }));
+    await Promise.all(
+      brandIds.map(async (brandId) => {
+        const brand = await repo.findById(brandId);
+        if (!brand) throw new NotFoundError('Brand', brandId);
+        ClerkAuthService.requireResourceTenant(principal, brand, 'Brand', brandId);
+        ClerkAuthService.requireOrganizationScope(principal, brand.organization_id);
+        ClerkAuthService.requireBrandScope(principal, brandId);
+      }),
+    );
   }
 
   async function assertEventIds(principal: Principal, eventIds?: string[]) {
     if (!eventIds) return;
     const repo = new EventRepository(db);
-    await Promise.all(eventIds.map(async (eventId) => {
-      const event = await repo.findById(eventId);
-      if (!event) throw new NotFoundError('Event', eventId);
-      ClerkAuthService.requireResourceTenant(principal, event, 'Event', eventId);
-      ClerkAuthService.requireOrganizationScope(principal, event.organization_id);
-      ClerkAuthService.requireBrandScope(principal, event.brand_id);
-      ClerkAuthService.requireEventScope(principal, eventId);
-    }));
+    await Promise.all(
+      eventIds.map(async (eventId) => {
+        const event = await repo.findById(eventId);
+        if (!event) throw new NotFoundError('Event', eventId);
+        ClerkAuthService.requireResourceTenant(principal, event, 'Event', eventId);
+        ClerkAuthService.requireOrganizationScope(principal, event.organization_id);
+        ClerkAuthService.requireBrandScope(principal, event.brand_id);
+        ClerkAuthService.requireEventScope(principal, eventId);
+      }),
+    );
   }
 
   app.post('/api-keys', async (request, reply) => {
@@ -115,7 +252,9 @@ export const developerRoutes: FastifyPluginAsync = async (app) => {
 
     // The raw `apiKey` is returned exactly once at creation. The persisted
     // record never exposes the hashed key material.
-    return reply.status(201).send({ ...serializeApiKey(sanitize(record, SENSITIVE_API_KEY_FIELDS)), apiKey });
+    return reply
+      .status(201)
+      .send({ ...serializeApiKey(sanitize(record, SENSITIVE_API_KEY_FIELDS)), apiKey });
   });
 
   app.get('/api-keys', async (request) => {
@@ -140,8 +279,7 @@ export const developerRoutes: FastifyPluginAsync = async (app) => {
         'updated_at',
       ])
       .where('tenant_id', '=', principal.tenantId)
-      .orderBy('id', 'asc')
-      .limit(pagination.limit + 1);
+      .orderBy('id', 'asc');
     // Filter by principal's organizations to prevent cross-org data exposure
     // within the same tenant. System principals bypass this filter.
     // Fail closed: a non-system principal with no org memberships sees nothing.
@@ -152,9 +290,14 @@ export const developerRoutes: FastifyPluginAsync = async (app) => {
       query = query.where('organization_id', 'in', principal.organizationIds);
     }
     if (pagination.cursor) query = query.where('id', '>', pagination.cursor);
+    if (!hasScopedResourceBounds(principal)) query = query.limit(pagination.limit + 1);
     const keys = await query.execute();
+    const authorizedKeys = await filterManageableScopedCredentialRows(principal, keys);
 
-    return pageEnvelope(keys.map((row) => serializeApiKey(row)), pagination.limit);
+    return pageEnvelope(
+      authorizedKeys.map((row) => serializeApiKey(row)),
+      pagination.limit,
+    );
   });
 
   app.delete('/api-keys/:keyId', async (request, reply) => {
@@ -162,10 +305,16 @@ export const developerRoutes: FastifyPluginAsync = async (app) => {
     ClerkAuthService.requirePermission(principal, 'developers.write');
     const { keyId } = request.params as { keyId: string };
     const repo = new ApiKeyRepository(db);
-    const key = await db.selectFrom('api_keys').selectAll().where('id', '=', keyId).executeTakeFirst();
+    const key = await db
+      .selectFrom('api_keys')
+      .selectAll()
+      .where('id', '=', keyId)
+      .executeTakeFirst();
     if (!key) throw new NotFoundError('ApiKey', keyId);
     ClerkAuthService.requireResourceTenant(principal, key, 'ApiKey', keyId);
     ClerkAuthService.requireOrganizationScope(principal, key.organization_id);
+    const [authorizedKey] = await filterManageableScopedCredentialRows(principal, [key]);
+    if (!authorizedKey) throw new NotFoundError('ApiKey', keyId);
     await repo.revoke(keyId);
     await writeAuditLog(new AuditLogRepository(db), request, principal, {
       action: 'api_key.revoked',
@@ -232,14 +381,18 @@ export const developerRoutes: FastifyPluginAsync = async (app) => {
         'updated_at',
       ])
       .where('tenant_id', '=', principal.tenantId)
-      .orderBy('id', 'asc')
-      .limit(pagination.limit + 1);
+      .orderBy('id', 'asc');
     if (pagination.cursor) query = query.where('id', '>', pagination.cursor);
     if (principal.type !== 'system') {
       query = query.where('organization_id', 'in', principal.organizationIds);
     }
+    if (!hasScopedResourceBounds(principal)) query = query.limit(pagination.limit + 1);
     const rows = await query.execute();
-    return pageEnvelope(rows.map((row) => serializeScannerDevice(row)), pagination.limit);
+    const authorizedRows = await filterManageableScopedCredentialRows(principal, rows);
+    return pageEnvelope(
+      authorizedRows.map((row) => serializeScannerDevice(row)),
+      pagination.limit,
+    );
   });
 
   app.post('/scanner-devices/:deviceId/revoke', async (request, reply) => {
@@ -259,6 +412,12 @@ export const developerRoutes: FastifyPluginAsync = async (app) => {
     }
     ClerkAuthService.requireResourceTenant(principal, device, 'ScannerDevice', deviceId);
     ClerkAuthService.requireOrganizationScope(principal, device.organization_id);
+    const [authorizedDevice] = await filterManageableScopedCredentialRows(principal, [device]);
+    if (!authorizedDevice) {
+      return reply.status(404).send({
+        error: { code: 'NOT_FOUND', message: 'Scanner device not found', requestId: request.id },
+      });
+    }
     await repo.revoke(device.id);
     await writeAuditLog(new AuditLogRepository(db), request, principal, {
       action: 'scanner_device.revoked',
@@ -273,6 +432,7 @@ export const developerRoutes: FastifyPluginAsync = async (app) => {
   app.post('/oauth-applications', async (request, reply) => {
     const principal = request.principal!;
     ClerkAuthService.requirePermission(principal, 'developers.write');
+    requireOrganizationWideOAuthApplicationPrincipal(principal);
     const body = parseBody(createOAuthAppSchema, request.body);
 
     ClerkAuthService.requireOrganizationScope(principal, body.organizationId);
@@ -329,13 +489,25 @@ export const developerRoutes: FastifyPluginAsync = async (app) => {
   app.get('/oauth-applications', async (request) => {
     const principal = request.principal!;
     ClerkAuthService.requirePermission(principal, 'developers.write');
+    requireOrganizationWideOAuthApplicationPrincipal(principal);
     const pagination = parsePagination(request.query);
     if (principal.type !== 'system' && principal.organizationIds.length === 0) {
       return pageEnvelope([], pagination.limit);
     }
     let query = db
       .selectFrom('oauth_applications')
-      .select(['id', 'tenant_id', 'organization_id', 'name', 'client_id', 'redirect_uris', 'scopes', 'status', 'created_at', 'updated_at'])
+      .select([
+        'id',
+        'tenant_id',
+        'organization_id',
+        'name',
+        'client_id',
+        'redirect_uris',
+        'scopes',
+        'status',
+        'created_at',
+        'updated_at',
+      ])
       .where('tenant_id', '=', principal.tenantId)
       .orderBy('id', 'asc')
       .limit(pagination.limit + 1);
@@ -364,13 +536,22 @@ export const developerRoutes: FastifyPluginAsync = async (app) => {
   app.delete('/oauth-applications/:appId', async (request, reply) => {
     const principal = request.principal!;
     ClerkAuthService.requirePermission(principal, 'developers.write');
+    requireOrganizationWideOAuthApplicationPrincipal(principal);
     const { appId } = request.params as { appId: string };
-    const oauthApp = await db.selectFrom('oauth_applications').selectAll().where('id', '=', appId).executeTakeFirst();
+    const oauthApp = await db
+      .selectFrom('oauth_applications')
+      .selectAll()
+      .where('id', '=', appId)
+      .executeTakeFirst();
     if (!oauthApp) throw new NotFoundError('OAuthApplication', appId);
     ClerkAuthService.requireResourceTenant(principal, oauthApp, 'OAuthApplication', appId);
     ClerkAuthService.requireOrganizationScope(principal, oauthApp.organization_id);
 
-    await db.updateTable('oauth_applications').set({ status: 'revoked', updated_at: new Date() }).where('id', '=', appId).execute();
+    await db
+      .updateTable('oauth_applications')
+      .set({ status: 'revoked', updated_at: new Date() })
+      .where('id', '=', appId)
+      .execute();
     await writeAuditLog(new AuditLogRepository(db), request, principal, {
       action: 'oauth_app.revoked',
       organizationId: oauthApp.organization_id,

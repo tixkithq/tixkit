@@ -6,7 +6,11 @@ export function okResult<T>(value: T): WorkflowActivityResult<T> {
   return { ok: true, value };
 }
 
-export function errResult(errorCode: string, message: string, retryable = false): WorkflowActivityResult<never> {
+export function errResult(
+  errorCode: string,
+  message: string,
+  retryable = false,
+): WorkflowActivityResult<never> {
   return { ok: false, errorCode, message, retryable };
 }
 
@@ -35,7 +39,11 @@ export function webhookDeliveryWorkflowId(eventId: string, endpointId: string): 
   return `webhook-delivery:${eventId}:${endpointId}`;
 }
 
-export function webhookDeliveryReplayWorkflowId(eventId: string, endpointId: string, replayNonce: string): string {
+export function webhookDeliveryReplayWorkflowId(
+  eventId: string,
+  endpointId: string,
+  replayNonce: string,
+): string {
   return `webhook-delivery:${eventId}:${endpointId}:replay:${replayNonce}`;
 }
 
@@ -55,8 +63,8 @@ export function holdExpirationWorkflowId(): string {
   return `hold-expiration:scheduled`;
 }
 
-export function clerkIdentitySyncWorkflowId(clerkUserId: string): string {
-  return `clerk-identity-sync:${clerkUserId}`;
+export function clerkIdentitySyncWorkflowId(providerEventId: string): string {
+  return `clerk-identity-sync:${providerEventId}`;
 }
 
 export function paymentReconciliationWorkflowId(providerEventId: string): string {
