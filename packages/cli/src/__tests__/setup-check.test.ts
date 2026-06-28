@@ -31,6 +31,7 @@ function makeCompleteEnv(extra: Record<string, string> = {}): string {
     STRIPE_SECRET_KEY: '',
     STRIPE_WEBHOOK_SECRET: '',
     NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY: '',
+    EMAIL_WEBHOOK_SECRET: '',
     S3_ENDPOINT: 'http://localhost:9000',
     S3_BUCKET: 'tixkit',
     S3_ACCESS_KEY_ID: 'minioadmin',
@@ -93,6 +94,7 @@ describe('validateEnvFile', () => {
         NODE_ENV: 'production',
         QR_SIGNING_SECRET: '',
         OFFLINE_MANIFEST_SIGNING_KEY: '',
+        EMAIL_WEBHOOK_SECRET: '',
       }),
     );
     const result = await validateEnvFile(path, 'production');
@@ -100,6 +102,7 @@ describe('validateEnvFile', () => {
     const variables = result.issues.map((issue) => issue.variable);
     expect(variables).toContain('QR_SIGNING_SECRET');
     expect(variables).toContain('OFFLINE_MANIFEST_SIGNING_KEY');
+    expect(variables).toContain('EMAIL_WEBHOOK_SECRET');
   });
 
   it('auto-detects provider mode when a real provider key is present', async () => {

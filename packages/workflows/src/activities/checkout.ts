@@ -1579,6 +1579,7 @@ export async function sendConfirmationEmailActivity(input: {
       .where('tenant_id', '=', input.tenantId)
       .where('brand_id', '=', input.brandId)
       .where('status', '=', 'active')
+      .where('smoke_send_verified', '=', true)
       .orderBy('priority', 'asc')
       .executeTakeFirst();
 
@@ -1784,6 +1785,7 @@ export async function issueTicketsActivity(input: {
       .where('tenant_id', '=', input.tenantId)
       .where('brand_id', '=', input.brandId)
       .where('status', '=', 'active')
+      .where('smoke_send_verified', '=', true)
       .orderBy('priority', 'asc')
       .executeTakeFirst();
 

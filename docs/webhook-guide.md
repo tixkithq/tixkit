@@ -2,7 +2,7 @@
 
 Tixkit delivers outbound webhooks to customer-configured endpoints when domain events happen (order paid, ticket issued, attendee updated, etc.). This guide covers the envelope, headers, signing, retries, replay, and testing.
 
-For inbound provider webhooks (Clerk, Stripe, Telnyx) see [Clerk Setup Guide](./clerk-setup-guide.md), [Production Deployment Guide](./production-deployment-guide.md), and `docs/telnyx-sms-local.md`.
+For inbound provider webhooks (Clerk, Stripe, Telnyx, and email feedback) see [Clerk Setup Guide](./clerk-setup-guide.md), [Production Deployment Guide](./production-deployment-guide.md), [Email/SMS Deliverability Runbook](./email-sms-deliverability-runbook.md), and `docs/telnyx-sms-local.md`.
 
 ## Local Stripe webhook forwarding (C-052)
 

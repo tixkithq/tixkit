@@ -11,6 +11,7 @@ import { webhookRoutes } from '../../routes/modules/webhooks.js';
 import { developerRoutes } from '../../routes/modules/developer.js';
 import { messagingRoutes } from '../../routes/modules/messaging.js';
 import { reportingRoutes } from '../../routes/modules/reporting.js';
+import { privacyRoutes } from '../../routes/modules/privacy.js';
 import { publicRoutes } from '../../routes/modules/public.js';
 import { questionRoutes } from '../../routes/modules/questions.js';
 import { authRoutes } from '../../routes/modules/auth.js';
@@ -18,6 +19,7 @@ import { publicUploadRoutes, uploadRoutes } from '../../routes/modules/uploads.j
 import { clerkWebhookRoutes } from '../../routes/modules/clerk-webhooks.js';
 import { stripeWebhookRoutes } from '../../routes/modules/stripe-webhooks.js';
 import { telnyxWebhookRoutes } from '../../routes/modules/telnyx-webhooks.js';
+import { emailWebhookRoutes } from '../../routes/modules/email-webhooks.js';
 import type { AppContext } from '../../app.js';
 
 /**
@@ -70,6 +72,7 @@ async function buildRouteManifest(): Promise<CapturedRoute[]> {
   await app.register(clerkWebhookRoutes, { prefix: '/v1/webhooks/clerk' });
   await app.register(stripeWebhookRoutes, { prefix: '/v1/webhooks/stripe' });
   await app.register(telnyxWebhookRoutes, { prefix: '/v1/webhooks/telnyx' });
+  await app.register(emailWebhookRoutes, { prefix: '/v1/webhooks/email' });
 
   // Public routes.
   await app.register(async (publicGroup) => {
@@ -89,6 +92,7 @@ async function buildRouteManifest(): Promise<CapturedRoute[]> {
     await authenticated.register(developerRoutes, { prefix: '/v1' });
     await authenticated.register(messagingRoutes, { prefix: '/v1' });
     await authenticated.register(reportingRoutes, { prefix: '/v1' });
+    await authenticated.register(privacyRoutes, { prefix: '/v1' });
     await authenticated.register(questionRoutes, { prefix: '/v1' });
     await authenticated.register(authRoutes, { prefix: '/v1' });
     await authenticated.register(uploadRoutes, { prefix: '/v1' });

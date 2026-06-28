@@ -8,7 +8,9 @@ import {
   verifyTelnyxWebhookRequest,
 } from '../routes/modules/telnyx-webhooks.js';
 
-function publicKeyRawBase64(publicKey: ReturnType<typeof generateKeyPairSync>['publicKey']): string {
+function publicKeyRawBase64(
+  publicKey: ReturnType<typeof generateKeyPairSync>['publicKey'],
+): string {
   const der = publicKey.export({ format: 'der', type: 'spki' }) as Buffer;
   return der.subarray(-32).toString('base64');
 }
@@ -18,14 +20,18 @@ function createSignature(input: {
   timestamp: string;
   rawBody: string;
 }): string {
-  return sign(null, Buffer.from(`${input.timestamp}|${input.rawBody}`), input.privateKey).toString('base64');
+  return sign(null, Buffer.from(`${input.timestamp}|${input.rawBody}`), input.privateKey).toString(
+    'base64',
+  );
 }
 
 type TelnyxWebhookTestState = {
   existingEvent?: Record<string, unknown>;
   delivery?: Record<string, unknown>;
+  job?: Record<string, unknown>;
   insertedEvents: Record<string, unknown>[];
   deliveryUpdates: Record<string, unknown>[];
+  consentUpdates?: Record<string, unknown>[];
   failInsertOnce?: boolean;
   failDeliveryUpdateOnce?: boolean;
   eventOnFailedInsert?: Record<string, unknown>;
@@ -65,7 +71,11 @@ function createMockDb(state: TelnyxWebhookTestState): unknown {
   type QueryFilter = { column: string; value: unknown };
 
   // eslint-disable-next-line unicorn/consistent-function-scoping -- keep provider-event lookup beside the mocked DB query builder.
-  function findProviderEvent(target: TelnyxWebhookTestState, filters: QueryFilter[], includeRacedEvent: boolean) {
+  function findProviderEvent(
+    target: TelnyxWebhookTestState,
+    filters: QueryFilter[],
+    includeRacedEvent: boolean,
+  ) {
     const events = [
       target.existingEvent,
       ...target.insertedEvents,
@@ -90,8 +100,10 @@ function createMockDb(state: TelnyxWebhookTestState): unknown {
         return query;
       },
       async executeTakeFirst() {
-        if (table === 'sms_provider_events') return findProviderEvent(target, filters, includeRacedEvent);
+        if (table === 'sms_provider_events')
+          return findProviderEvent(target, filters, includeRacedEvent);
         if (table === 'sms_deliveries') return target.delivery;
+        if (table === 'sms_jobs') return target.job;
         return undefined;
       },
     };
@@ -99,24 +111,32 @@ function createMockDb(state: TelnyxWebhookTestState): unknown {
   }
 
   function createUpdate(target: TelnyxWebhookTestState, table: string) {
+    const applyUpdate = async (values: Record<string, unknown>) => {
+      if (table === 'sms_deliveries') {
+        if (state.failDeliveryUpdateOnce) {
+          state.failDeliveryUpdateOnce = false;
+          throw new Error('delivery update failed');
+        }
+        target.deliveryUpdates.push(values);
+        if (target.delivery) Object.assign(target.delivery, values);
+      }
+      if (table === 'message_consents') {
+        target.consentUpdates?.push(values);
+      }
+      return { id: 'updated', ...values };
+    };
+
     return {
-      set: (values: Record<string, unknown>) => ({
-        where: () => ({
+      set: (values: Record<string, unknown>) => {
+        const query = {
+          where: () => query,
+          execute: async () => applyUpdate(values),
           returningAll: () => ({
-            executeTakeFirstOrThrow: async () => {
-              if (table === 'sms_deliveries') {
-                if (state.failDeliveryUpdateOnce) {
-                  state.failDeliveryUpdateOnce = false;
-                  throw new Error('delivery update failed');
-                }
-                target.deliveryUpdates.push(values);
-                if (target.delivery) Object.assign(target.delivery, values);
-              }
-              return { id: 'updated', ...values };
-            },
+            executeTakeFirstOrThrow: async () => applyUpdate(values),
           }),
-        }),
-      }),
+        };
+        return query;
+      },
     };
   }
 
@@ -149,21 +169,30 @@ function createMockDb(state: TelnyxWebhookTestState): unknown {
           const txState: TelnyxWebhookTestState = {
             existingEvent: target.existingEvent ? { ...target.existingEvent } : undefined,
             delivery: target.delivery ? { ...target.delivery } : undefined,
+            job: target.job ? { ...target.job } : undefined,
             insertedEvents: target.insertedEvents.map((event) => ({ ...event })),
             deliveryUpdates: target.deliveryUpdates.map((update) => ({ ...update })),
+            consentUpdates: target.consentUpdates?.map((update) => ({ ...update })),
             failInsertOnce: target.failInsertOnce,
             failDeliveryUpdateOnce: target.failDeliveryUpdateOnce,
-            eventOnFailedInsert: target.eventOnFailedInsert ? { ...target.eventOnFailedInsert } : undefined,
+            eventOnFailedInsert: target.eventOnFailedInsert
+              ? { ...target.eventOnFailedInsert }
+              : undefined,
           };
 
           const result = await callback(createDbFacade(txState, false));
 
           target.existingEvent = txState.existingEvent;
           target.delivery = txState.delivery;
+          target.job = txState.job;
           target.insertedEvents.length = 0;
           target.insertedEvents.push(...txState.insertedEvents);
           target.deliveryUpdates.length = 0;
           target.deliveryUpdates.push(...txState.deliveryUpdates);
+          if (target.consentUpdates && txState.consentUpdates) {
+            target.consentUpdates.length = 0;
+            target.consentUpdates.push(...txState.consentUpdates);
+          }
           target.failInsertOnce = txState.failInsertOnce;
           target.failDeliveryUpdateOnce = txState.failDeliveryUpdateOnce;
           return result;
@@ -177,6 +206,11 @@ function createMockDb(state: TelnyxWebhookTestState): unknown {
 
 async function setupTelnyxApp(db: Database) {
   const app = Fastify();
+  app.setErrorHandler((error, _request, reply) => {
+    reply.status(500).send({
+      error: { message: error instanceof Error ? error.message : String(error) },
+    });
+  });
   app.addContentTypeParser('application/json', { parseAs: 'string' }, (request, body, done) => {
     (request as unknown as { rawBody: string }).rawBody = body as string;
     done(null, JSON.parse(body as string));
@@ -359,7 +393,7 @@ describe('Telnyx SMS webhook route', () => {
       }),
     );
 
-    expect(res.statusCode).toBe(200);
+    expect(res.statusCode, res.body).toBe(200);
     expect(state.deliveryUpdates[0]).toMatchObject({ status: 'delivered' });
     expect(state.insertedEvents[0]).toMatchObject({
       tenant_id: 'tnt_1',
@@ -367,6 +401,189 @@ describe('Telnyx SMS webhook route', () => {
       provider_event_id: 'telnyx_evt_1',
       provider_message_id: 'telnyx_msg_1',
     });
+
+    await app.close();
+  });
+
+  it('revokes SMS consent when Telnyx finalizes a delivery failure', async () => {
+    const state: TelnyxWebhookTestState = {
+      delivery: {
+        id: 'smd_1',
+        tenant_id: 'tnt_1',
+        job_id: 'smj_1',
+        provider: 'telnyx',
+        provider_message_id: 'telnyx_msg_1',
+        status: 'accepted',
+      },
+      job: {
+        id: 'smj_1',
+        tenant_id: 'tnt_1',
+        to_phone: '+15550000001',
+      },
+      insertedEvents: [],
+      deliveryUpdates: [],
+      consentUpdates: [],
+    };
+    const app = await setupTelnyxApp(createMockDb(state) as Database);
+
+    const res = await app.inject(
+      signedTelnyxSmsRequest(routePrivateKey, {
+        data: {
+          id: 'telnyx_evt_failure',
+          event_type: 'message.finalized',
+          payload: {
+            id: 'telnyx_msg_1',
+            errors: [{ title: 'Rejected', detail: 'Carrier rejected recipient' }],
+            to: [{ status: 'failed' }],
+          },
+        },
+      }),
+    );
+
+    expect(res.statusCode).toBe(200);
+    expect(state.deliveryUpdates[0]).toMatchObject({
+      status: 'failed',
+      failure_reason: 'Carrier rejected recipient',
+    });
+    expect(state.consentUpdates).toHaveLength(1);
+    expect(state.consentUpdates?.[0]).toMatchObject({ sms_opt_in: false });
+    expect(state.insertedEvents[0]).toMatchObject({
+      provider_event_id: 'telnyx_evt_failure',
+      provider_message_id: 'telnyx_msg_1',
+    });
+
+    await app.close();
+  });
+
+  it('returns a retryable error without storing a status event when delivery is not ready', async () => {
+    const state = {
+      insertedEvents: [] as Record<string, unknown>[],
+      deliveryUpdates: [] as Record<string, unknown>[],
+    };
+    const app = await setupTelnyxApp(createMockDb(state) as Database);
+
+    const res = await app.inject(
+      signedTelnyxSmsRequest(routePrivateKey, {
+        data: {
+          id: 'telnyx_evt_1',
+          event_type: 'message.finalized',
+          payload: {
+            id: 'telnyx_msg_1',
+            to: [{ status: 'delivered' }],
+          },
+        },
+      }),
+    );
+
+    expect(res.statusCode).toBe(503);
+    expect(res.headers['retry-after']).toBe('5');
+    expect(res.json()).toMatchObject({
+      error: { code: 'TELNYX_DELIVERY_NOT_READY' },
+    });
+    expect(state.insertedEvents).toHaveLength(0);
+    expect(state.deliveryUpdates).toHaveLength(0);
+
+    await app.close();
+  });
+
+  it('processes a retried status event once the delivery exists', async () => {
+    const state: TelnyxWebhookTestState = {
+      insertedEvents: [],
+      deliveryUpdates: [],
+    };
+    const app = await setupTelnyxApp(createMockDb(state) as Database);
+    const payload = {
+      data: {
+        id: 'telnyx_evt_1',
+        event_type: 'message.sent',
+        payload: { id: 'telnyx_msg_1' },
+      },
+    };
+
+    const missingDelivery = await app.inject(signedTelnyxSmsRequest(routePrivateKey, payload));
+
+    expect(missingDelivery.statusCode).toBe(503);
+    expect(state.insertedEvents).toHaveLength(0);
+    expect(state.deliveryUpdates).toHaveLength(0);
+
+    state.delivery = {
+      id: 'smd_1',
+      tenant_id: 'tnt_1',
+      provider: 'telnyx',
+      provider_message_id: 'telnyx_msg_1',
+      status: 'accepted',
+    };
+
+    const retried = await app.inject(signedTelnyxSmsRequest(routePrivateKey, payload));
+
+    expect(retried.statusCode).toBe(200);
+    expect(retried.json()).toEqual({ received: true });
+    expect(state.deliveryUpdates).toHaveLength(1);
+    expect(state.deliveryUpdates[0]).toMatchObject({ status: 'sent' });
+    expect(state.delivery).toMatchObject({ status: 'sent' });
+    expect(state.insertedEvents).toHaveLength(1);
+    expect(state.insertedEvents[0]).toMatchObject({
+      tenant_id: 'tnt_1',
+      provider: 'telnyx',
+      provider_event_id: 'telnyx_evt_1',
+      provider_message_id: 'telnyx_msg_1',
+    });
+
+    await app.close();
+  });
+
+  it('repairs an already-stored status event on duplicate retry once the delivery exists', async () => {
+    const payload = {
+      data: {
+        id: 'telnyx_evt_1',
+        event_type: 'message.finalized',
+        payload: {
+          id: 'telnyx_msg_1',
+          to: [{ status: 'delivered' }],
+        },
+      },
+    };
+    const state: TelnyxWebhookTestState = {
+      existingEvent: {
+        id: 'spe_1',
+        tenant_id: null,
+        provider: 'telnyx',
+        provider_event_id: 'telnyx_evt_1',
+        event_type: 'message.finalized',
+        provider_message_id: 'telnyx_msg_1',
+        raw_payload: JSON.stringify(payload),
+      },
+      insertedEvents: [],
+      deliveryUpdates: [],
+    };
+    const app = await setupTelnyxApp(createMockDb(state) as Database);
+
+    const missingDelivery = await app.inject(signedTelnyxSmsRequest(routePrivateKey, payload));
+
+    expect(missingDelivery.statusCode).toBe(503);
+    expect(missingDelivery.headers['retry-after']).toBe('5');
+    expect(missingDelivery.json()).toMatchObject({
+      error: { code: 'TELNYX_DELIVERY_NOT_READY' },
+    });
+    expect(state.insertedEvents).toHaveLength(0);
+    expect(state.deliveryUpdates).toHaveLength(0);
+
+    state.delivery = {
+      id: 'smd_1',
+      tenant_id: 'tnt_1',
+      provider: 'telnyx',
+      provider_message_id: 'telnyx_msg_1',
+      status: 'accepted',
+    };
+
+    const repaired = await app.inject(signedTelnyxSmsRequest(routePrivateKey, payload));
+
+    expect(repaired.statusCode).toBe(200);
+    expect(repaired.json()).toEqual({ received: true, duplicate: true });
+    expect(state.insertedEvents).toHaveLength(0);
+    expect(state.deliveryUpdates).toHaveLength(1);
+    expect(state.deliveryUpdates[0]).toMatchObject({ status: 'delivered' });
+    expect(state.delivery).toMatchObject({ status: 'delivered' });
 
     await app.close();
   });

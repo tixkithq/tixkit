@@ -734,6 +734,7 @@ export async function notifyExportCompleteActivity(input: {
           .select(['id', 'brand_id'])
           .where('tenant_id', '=', user.tenant_id)
           .where('status', '=', 'active')
+          .where('smoke_send_verified', '=', true)
           .orderBy('priority', 'asc')
           .executeTakeFirst();
 

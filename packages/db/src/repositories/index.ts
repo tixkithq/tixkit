@@ -44,6 +44,7 @@ export {
   BrandSenderIdentityRepository,
   EmailJobRepository,
   EmailDeliveryRepository,
+  EmailProviderEventRepository,
   EmailSuppressionRepository,
   SmsSenderIdentityRepository,
   SmsProviderRouteRepository,

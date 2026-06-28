@@ -149,6 +149,7 @@ export async function processWaitlistOffersActivity(): Promise<WorkflowActivityR
         .where('tenant_id', '=', candidate.tenant_id)
         .where('brand_id', '=', candidate.brand_id)
         .where('status', '=', 'active')
+        .where('smoke_send_verified', '=', true)
         .orderBy('priority', 'asc')
         .executeTakeFirst();
       // eslint-disable-next-line no-await-in-loop -- template lookup must match the route and brand for the current offer.

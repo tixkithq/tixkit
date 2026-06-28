@@ -51,7 +51,11 @@ export async function checkSuppressionActivity(input: {
       .executeTakeFirst();
     return okResult({ suppressed: !!suppression });
   } catch (err) {
-    return errResult('SUPPRESSION_CHECK_FAILED', err instanceof Error ? err.message : 'Unknown error', true);
+    return errResult(
+      'SUPPRESSION_CHECK_FAILED',
+      err instanceof Error ? err.message : 'Unknown error',
+      true,
+    );
   } finally {
     await db.destroy();
   }
@@ -95,7 +99,11 @@ export async function checkConsentActivity(input: {
 
     return okResult({ allowed: true });
   } catch (err) {
-    return errResult('CONSENT_CHECK_FAILED', err instanceof Error ? err.message : 'Unknown error', true);
+    return errResult(
+      'CONSENT_CHECK_FAILED',
+      err instanceof Error ? err.message : 'Unknown error',
+      true,
+    );
   } finally {
     await db.destroy();
   }
@@ -126,7 +134,11 @@ export async function checkSmsConsentActivity(input: {
 
     return okResult({ allowed: consent.sms_opt_in === true });
   } catch (err) {
-    return errResult('SMS_CONSENT_CHECK_FAILED', err instanceof Error ? err.message : 'Unknown error', true);
+    return errResult(
+      'SMS_CONSENT_CHECK_FAILED',
+      err instanceof Error ? err.message : 'Unknown error',
+      true,
+    );
   } finally {
     await db.destroy();
   }
@@ -169,7 +181,11 @@ export async function renderTemplateActivity(input: {
   }
 }
 
-function buildTransport(providerType: string, credentialsRef: string, senderDomain: string): EmailTransport {
+function buildTransport(
+  providerType: string,
+  credentialsRef: string,
+  senderDomain: string,
+): EmailTransport {
   switch (providerType) {
     case 'opencore_email_sdk':
       return new OpenCoreEmailSdkTransport(credentialsRef, senderDomain);
@@ -218,16 +234,31 @@ export async function sendEmailActivity(input: {
     }
 
     const variables = JSON.parse(job.variables as string) as Record<string, unknown>;
-    const notificationType = (variables.notificationType as 'transactional' | 'bulk' | 'staff' | 'system') ?? 'transactional';
+    const notificationType =
+      (variables.notificationType as 'transactional' | 'bulk' | 'staff' | 'system') ??
+      'transactional';
     const attachments = variables.attachments as
-      | { filename: string; contentType: string; content: string | Uint8Array; contentEncoding?: 'base64' }[]
+      | {
+          filename: string;
+          contentType: string;
+          content: string | Uint8Array;
+          contentEncoding?: 'base64';
+        }[]
       | undefined;
 
     const routeRepo = new EmailProviderRouteRepository(db);
     const senderRepo = new BrandSenderIdentityRepository(db);
     const deliveryRepo = new EmailDeliveryRepository(db);
 
+    const configuredRoutes = await routeRepo.findByBrand(job.brand_id);
     const routes = await routeRepo.findActiveByBrand(job.brand_id);
+    if (configuredRoutes.length > 0 && routes.length === 0) {
+      return errResult(
+        'EMAIL_PROVIDER_ROUTE_NOT_VERIFIED',
+        'Email provider route requires active status, verified sender identity, and smoke-send evidence',
+        false,
+      );
+    }
     if (routes.length === 0) {
       const senderDomain = process.env.EMAIL_SENDER_DOMAIN ?? 'tixkit.com';
       const transport = new OpenCoreEmailSdkTransport(
@@ -266,14 +297,35 @@ export async function sendEmailActivity(input: {
       return okResult({ deliveryId: result.deliveryId, provider: result.provider });
     }
 
-    const senderIdentity = await senderRepo.findVerifiedByBrand(job.brand_id);
-    const fromEmail = senderIdentity?.email ?? `noreply@${routes[0].sender_domain}`;
-    const fromName = senderIdentity?.name ?? 'Tixkit';
-    const replyTo = senderIdentity?.reply_to_email
-      ? { email: senderIdentity.reply_to_email, name: fromName }
+    const routeSenderPairs = await Promise.all(
+      routes.map(async (route) => {
+        const senderIdentity = await senderRepo.findVerifiedByBrandAndDomain(
+          job.brand_id,
+          route.sender_domain,
+        );
+        if (!senderIdentity) return undefined;
+        return { route, senderIdentity };
+      }),
+    );
+    const deliverableRoutePairs = routeSenderPairs.filter(
+      (pair): pair is NonNullable<(typeof routeSenderPairs)[number]> => Boolean(pair),
+    );
+    if (deliverableRoutePairs.length === 0) {
+      return errResult(
+        'EMAIL_SENDER_NOT_VERIFIED',
+        'Email provider route requires a verified sender identity for its sender domain',
+        false,
+      );
+    }
+
+    const firstSenderIdentity = deliverableRoutePairs[0].senderIdentity;
+    const fromEmail = firstSenderIdentity.email;
+    const fromName = firstSenderIdentity.name;
+    const replyTo = firstSenderIdentity.reply_to_email
+      ? { email: firstSenderIdentity.reply_to_email, name: fromName }
       : undefined;
 
-    const selectorRoutes = routes.map((route) => ({
+    const selectorRoutes = deliverableRoutePairs.map(({ route }) => ({
       id: route.id,
       transport: buildTransport(route.provider_type, route.credentials_ref, route.sender_domain),
       priority: route.priority,
@@ -287,12 +339,19 @@ export async function sendEmailActivity(input: {
     const fallbackTransports = selector.getFallbacks(notificationType);
 
     if (!primaryTransport) {
-      return errResult('NO_PROVIDER_ROUTE', 'No active provider route for this notification type', false);
+      return errResult(
+        'NO_PROVIDER_ROUTE',
+        'No active provider route for this notification type',
+        false,
+      );
     }
 
     const transport =
       fallbackTransports.length > 0
-        ? new FallbackEmailTransport(primaryTransport, fallbackTransports as Array<EmailTransport & { providerName?: string }>)
+        ? new FallbackEmailTransport(
+            primaryTransport,
+            fallbackTransports as Array<EmailTransport & { providerName?: string }>,
+          )
         : primaryTransport;
 
     const deliveryId = `emd_${ulid()}`;
@@ -315,7 +374,7 @@ export async function sendEmailActivity(input: {
       metadata: { notificationType },
     };
 
-    const validation = validateProviderFields(sendInput, routes[0].provider_type);
+    const validation = validateProviderFields(sendInput, deliverableRoutePairs[0].route.provider_type);
     if (!validation.valid) {
       return errResult(
         'PROVIDER_FIELD_VALIDATION_FAILED',
@@ -333,7 +392,8 @@ export async function sendEmailActivity(input: {
       providerMessageId: result.providerMessageId,
       status: result.status,
       attemptedProviders: result.attemptedFallbackProviders,
-      acceptedProvider: result.status === 'accepted' || result.status === 'sent' ? result.provider : undefined,
+      acceptedProvider:
+        result.status === 'accepted' || result.status === 'sent' ? result.provider : undefined,
       metadata: { attemptedProviders: result.attemptedFallbackProviders },
     });
 
@@ -347,7 +407,11 @@ export async function sendEmailActivity(input: {
 
     return okResult({ deliveryId: result.deliveryId, provider: result.provider });
   } catch (err) {
-    return errResult('EMAIL_SEND_FAILED', err instanceof Error ? err.message : 'Unknown error', true);
+    return errResult(
+      'EMAIL_SEND_FAILED',
+      err instanceof Error ? err.message : 'Unknown error',
+      true,
+    );
   } finally {
     await db.destroy();
   }
@@ -387,24 +451,32 @@ export async function sendSmsActivity(input: {
     const routes = await routeRepo.findActiveByBrand(job.brand_id);
 
     if (routes.length === 0) {
-      return errResult('NO_SMS_PROVIDER_ROUTE', 'No active SMS provider route for this brand', false);
+      return errResult(
+        'NO_SMS_PROVIDER_ROUTE',
+        'No active SMS provider route for this brand',
+        false,
+      );
     }
 
-    const selectorRouteCandidates = await Promise.all(routes.map(async (route) => {
-      const sender = await senderRepo.findById(route.sender_identity_id);
-      if (!sender || !sender.verified) return undefined;
-      return {
-        id: route.id,
-        transport: buildSmsTransport(route.provider_type, route.credentials_ref),
-        priority: route.priority,
-        isFallback: route.is_fallback,
-        allowedCategories: JSON.parse(route.allowed_categories as string) as string[],
-        rateLimitPerHour: route.rate_limit_per_hour ?? undefined,
-        sender: sender.sender,
-        webhookUrl: route.webhook_url ?? undefined,
-      };
-    }));
-    const selectorRoutes = selectorRouteCandidates.filter((route): route is NonNullable<(typeof selectorRouteCandidates)[number]> => Boolean(route));
+    const selectorRouteCandidates = await Promise.all(
+      routes.map(async (route) => {
+        const sender = await senderRepo.findById(route.sender_identity_id);
+        if (!sender || !sender.verified) return undefined;
+        return {
+          id: route.id,
+          transport: buildSmsTransport(route.provider_type, route.credentials_ref),
+          priority: route.priority,
+          isFallback: route.is_fallback,
+          allowedCategories: JSON.parse(route.allowed_categories as string) as string[],
+          rateLimitPerHour: route.rate_limit_per_hour ?? undefined,
+          sender: sender.sender,
+          webhookUrl: route.webhook_url ?? undefined,
+        };
+      }),
+    );
+    const selectorRoutes = selectorRouteCandidates.filter(
+      (route): route is NonNullable<(typeof selectorRouteCandidates)[number]> => Boolean(route),
+    );
 
     const eligibleRoutes = selectorRoutes
       .filter((route) => route.allowedCategories.includes(input.notificationType))
@@ -416,13 +488,22 @@ export async function sendSmsActivity(input: {
 
     const primaryRoute = eligibleRoutes.find((route) => !route.isFallback) ?? eligibleRoutes[0];
     if (!primaryRoute) {
-      return errResult('NO_SMS_PROVIDER_ROUTE', 'No active SMS provider route for this notification type', false);
+      return errResult(
+        'NO_SMS_PROVIDER_ROUTE',
+        'No active SMS provider route for this notification type',
+        false,
+      );
     }
 
-    const fallbackRoutes = eligibleRoutes.filter((route) => route.isFallback && route.id !== primaryRoute.id);
+    const fallbackRoutes = eligibleRoutes.filter(
+      (route) => route.isFallback && route.id !== primaryRoute.id,
+    );
     const transport =
       fallbackRoutes.length > 0
-        ? new FallbackSmsTransport(primaryRoute.transport, fallbackRoutes.map((route) => route.transport))
+        ? new FallbackSmsTransport(
+            primaryRoute.transport,
+            fallbackRoutes.map((route) => route.transport),
+          )
         : primaryRoute.transport;
 
     const deliveryId = `smd_${ulid()}`;

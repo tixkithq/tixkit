@@ -3546,6 +3546,25 @@ export const openApiSpec = {
         },
       },
     },
+    '/webhooks/email/{provider}': {
+      post: {
+        summary: 'Email provider feedback webhook (HMAC SHA-256 signature verified)',
+        parameters: [
+          {
+            name: 'provider',
+            in: 'path',
+            required: true,
+            schema: { type: 'string' },
+            description: 'Email provider key, for example postmark, sendgrid, ses, mailgun, or smtp',
+          },
+        ],
+        responses: {
+          '200': { description: 'Webhook received' },
+          '400': { description: 'Invalid webhook or signature', content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } } },
+          '503': { description: 'Webhook verification or delivery reconciliation not ready', content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } } },
+        },
+      },
+    },
   },
 } as const;
 

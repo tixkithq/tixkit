@@ -16,3 +16,4 @@ export { MarketingIntegrationsUniqueMigration } from './0015_marketing_integrati
 export { PaymentCompensationsMigration } from './0016_payment_compensations.js';
 export { PaymentAccountCapabilitiesMigration } from './0017_payment_account_capabilities.js';
 export { PrivacyRequestsMigration } from './0018_privacy_requests.js';
+export { DeliverabilityFeedbackMigration } from './0019_deliverability_feedback.js';

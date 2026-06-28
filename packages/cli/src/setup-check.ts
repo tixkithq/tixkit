@@ -207,6 +207,12 @@ export const ENV_RULES: EnvRule[] = [
     message: 'Telnyx webhook public key is required to verify Telnyx SMS webhooks.',
   },
   {
+    variable: 'EMAIL_WEBHOOK_SECRET',
+    requiredFor: ['production'],
+    message: 'Email webhook secret is required in production to verify bounce/complaint/failure feedback.',
+    guide: GUIDES.webhook,
+  },
+  {
     variable: 'OTEL_EXPORTER_OTLP_ENDPOINT',
     requiredFor: ['local', 'provider', 'production'],
     message:

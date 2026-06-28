@@ -891,6 +891,19 @@ export interface EmailSuppressionTable {
   created_at: Timestamp;
 }
 
+export interface EmailProviderEventTable {
+  id: string;
+  tenant_id: string | null;
+  provider: string;
+  provider_event_id: string;
+  event_type: string;
+  provider_message_id: string | null;
+  email: string | null;
+  raw_payload: string;
+  processed_at: Timestamp | null;
+  created_at: Timestamp;
+}
+
 export interface EmailProviderRouteTable {
   id: string;
   tenant_id: string;
@@ -1205,6 +1218,7 @@ export interface DB {
   notification_template_versions: NotificationTemplateVersionTable;
   email_jobs: EmailJobTable;
   email_deliveries: EmailDeliveryTable;
+  email_provider_events: EmailProviderEventTable;
   email_suppressions: EmailSuppressionTable;
   email_provider_routes: EmailProviderRouteTable;
   brand_sender_identities: BrandSenderIdentityTable;

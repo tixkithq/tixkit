@@ -153,6 +153,15 @@ Development skips wallet pass generation unless a provider is fully configured. 
 
 See `docs/telnyx-sms-local.md` for fallback providers (Twilio, Vonage, Plivo) and capture testing.
 
+### Email Feedback
+
+| Variable | Required | Description |
+| --- | --- | --- |
+| `EMAIL_WEBHOOK_SECRET` | yes (prod) | Shared HMAC SHA-256 secret for `/v1/webhooks/email/:provider` feedback. Missing in production returns `503`. |
+| `EMAIL_WEBHOOK_ALLOW_UNSIGNED` | no | Test-only unsigned feedback toggle. Ignored outside `NODE_ENV=test`. |
+
+Active `email_provider_routes` and `sms_provider_routes` require `smoke_send_verified = true` before workers use them. Email routes also require a verified `brand_sender_identities.email` on the route sender domain; SMS routes require a verified `sms_sender_identities` row.
+
 ### Object Storage
 
 | Variable | Required | Description |
@@ -351,8 +360,9 @@ Configure provider webhooks to point at the API:
 | Clerk | `https://api.example.com/v1/webhooks/clerk` | Svix `svix-signature` |
 | Stripe | `https://api.example.com/v1/webhooks/stripe` | `stripe-signature` |
 | Telnyx | `https://api.example.com/v1/webhooks/telnyx/sms` | `telnyx-signature-ed25519` |
+| Email | `https://api.example.com/v1/webhooks/email/{provider}` | `tixkit-signature` |
 
-All three handlers store the provider event before processing and skip duplicates by provider event ID. If the API is down, the provider's own retry policy will redeliver; Tixkit's idempotency handles the replay.
+Handlers store the provider event before processing and skip duplicates by provider event ID. Email bounce/complaint/failure feedback updates delivery state, creates tenant email suppressions, and revokes active email opt-in; Telnyx delivery failures revoke active SMS opt-in. If the API is down, the provider's own retry policy will redeliver; Tixkit's idempotency handles the replay.
 
 ## Health Checks
 

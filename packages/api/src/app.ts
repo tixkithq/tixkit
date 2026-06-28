@@ -25,6 +25,7 @@ import { privacyRoutes } from './routes/modules/privacy.js';
 import { clerkWebhookRoutes } from './routes/modules/clerk-webhooks.js';
 import { stripeWebhookRoutes } from './routes/modules/stripe-webhooks.js';
 import { telnyxWebhookRoutes } from './routes/modules/telnyx-webhooks.js';
+import { emailWebhookRoutes } from './routes/modules/email-webhooks.js';
 import { publicRoutes } from './routes/modules/public.js';
 import { questionRoutes } from './routes/modules/questions.js';
 import { authRoutes } from './routes/modules/auth.js';
@@ -145,6 +146,7 @@ export async function buildApp(): Promise<FastifyInstance> {
     await publicGroup.register(oauthTokenRoutes, { prefix: '/v1' });
   });
 
+  await app.register(emailWebhookRoutes, { prefix: '/v1/webhooks/email' });
   // Authenticated admin/integration routes (Clerk user, API key, or scanner device)
   await app.register(async (authenticated) => {
     authenticated.addHook('onRequest', createAuthMiddleware(authService));

@@ -424,6 +424,7 @@ These are unauthenticated but signature-verified. See [Webhook Guide](./webhook-
 | `POST` | `/v1/webhooks/clerk` | Svix `svix-signature` / `svix-timestamp` / `svix-id` HMAC-SHA256, 5 minute tolerance |
 | `POST` | `/v1/webhooks/stripe` | Stripe `stripe-signature` header |
 | `POST` | `/v1/webhooks/telnyx/sms` | Telnyx Ed25519 `telnyx-signature-ed25519` / `telnyx-timestamp` (optional in dev) |
+| `POST` | `/v1/webhooks/email/:provider` | HMAC SHA-256 `tixkit-signature: sha256=<hex>` using `EMAIL_WEBHOOK_SECRET` |
 
 ## Rate Limits
 

@@ -1,6 +1,12 @@
 import type { FastifyPluginAsync } from 'fastify';
 import { createPublicKey, verify as verifySignature } from 'node:crypto';
-import { SmsDeliveryRepository, SmsProviderEventRepository } from '@tixkit/db';
+import {
+  type Database,
+  MessageConsentRepository,
+  SmsDeliveryRepository,
+  SmsJobRepository,
+  SmsProviderEventRepository,
+} from '@tixkit/db';
 
 type TelnyxWebhookData = {
   id?: string;
@@ -22,6 +28,7 @@ type TelnyxWebhookBody = {
 const RAW_ED25519_PUBLIC_KEY_DER_PREFIX = Buffer.from('302a300506032b6570032100', 'hex');
 const TELNYX_WEBHOOK_TIMESTAMP_TOLERANCE_SECONDS = 5 * 60;
 const TERMINAL_DELIVERY_STATUSES = new Set(['delivered', 'failed']);
+const DELIVERY_STATUS_EVENT_TYPES = new Set(['message.sent', 'message.finalized']);
 
 export const telnyxWebhookRoutes: FastifyPluginAsync = async (app) => {
   const db = app.context.db;
@@ -79,13 +86,39 @@ export const telnyxWebhookRoutes: FastifyPluginAsync = async (app) => {
         const eventRepo = new SmsProviderEventRepository(txDb);
         const existingEvent = await eventRepo.findByProviderEventId('telnyx', providerEventId);
         if (existingEvent) {
-          return { duplicate: true };
+          const existingStatusEvent = storedTelnyxStatusEvent(existingEvent, data);
+          if (existingStatusEvent) {
+            const deliveryRepo = new SmsDeliveryRepository(txDb);
+            const delivery = await deliveryRepo.findByProviderMessageId(
+              'telnyx',
+              existingStatusEvent.providerMessageId,
+            );
+
+            if (!delivery) {
+              return { duplicate: true, retryMissingDelivery: true };
+            }
+
+            const update = telnyxDeliveryUpdate(
+              existingStatusEvent.eventType,
+              existingStatusEvent.payload,
+            );
+            if (shouldApplyTelnyxDeliveryUpdate(delivery.status, update)) {
+              await deliveryRepo.update(delivery.id, update);
+            }
+            await applyTelnyxConsentUpdate(txDb, delivery, update);
+          }
+
+          return { duplicate: true, retryMissingDelivery: false };
         }
 
         const deliveryRepo = new SmsDeliveryRepository(txDb);
         const delivery = providerMessageId
           ? await deliveryRepo.findByProviderMessageId('telnyx', providerMessageId)
           : undefined;
+
+        if (shouldRetryUntilDeliveryExists(eventType, providerMessageId, delivery)) {
+          return { duplicate: false, retryMissingDelivery: true };
+        }
 
         await eventRepo.create({
           tenantId: delivery?.tenant_id ?? null,
@@ -101,11 +134,24 @@ export const telnyxWebhookRoutes: FastifyPluginAsync = async (app) => {
           if (shouldApplyTelnyxDeliveryUpdate(delivery.status, update)) {
             await deliveryRepo.update(delivery.id, update);
           }
+          await applyTelnyxConsentUpdate(txDb, delivery, update);
         }
 
-        return { duplicate: false };
+        return { duplicate: false, retryMissingDelivery: false };
       });
 
+      if (result.retryMissingDelivery) {
+        return reply
+          .status(503)
+          .header('retry-after', '5')
+          .send({
+            error: {
+              code: 'TELNYX_DELIVERY_NOT_READY',
+              message: 'SMS delivery is not ready to process this Telnyx status webhook',
+              requestId: request.id,
+            },
+          });
+      }
       if (result.duplicate) {
         return reply.status(200).send({ received: true, duplicate: true });
       }
@@ -121,6 +167,86 @@ export const telnyxWebhookRoutes: FastifyPluginAsync = async (app) => {
     return reply.status(200).send({ received: true });
   });
 };
+
+function shouldRetryUntilDeliveryExists(
+  eventType: string,
+  providerMessageId: string | undefined,
+  delivery: unknown,
+): boolean {
+  return Boolean(providerMessageId && DELIVERY_STATUS_EVENT_TYPES.has(eventType) && !delivery);
+}
+
+async function applyTelnyxConsentUpdate(
+  db: Database,
+  delivery: Record<string, unknown>,
+  update: Record<string, unknown>,
+) {
+  if (update.status !== 'failed') return;
+  const jobId = typeof delivery.job_id === 'string' ? delivery.job_id : undefined;
+  const tenantId = typeof delivery.tenant_id === 'string' ? delivery.tenant_id : undefined;
+  if (!jobId || !tenantId) return;
+
+  const job = await new SmsJobRepository(db).findById(jobId);
+  if (!job?.to_phone) return;
+
+  await new MessageConsentRepository(db).revokeSmsOptInByPhone({
+    tenantId,
+    phone: job.to_phone,
+  });
+}
+
+function storedTelnyxStatusEvent(
+  event: Record<string, unknown>,
+  currentData: TelnyxWebhookData | undefined,
+):
+  | {
+      eventType: string;
+      providerMessageId: string;
+      payload: TelnyxWebhookData['payload'];
+    }
+  | undefined {
+  const rawData = telnyxDataFromRawPayload(event.raw_payload);
+  const eventType =
+    typeof event.event_type === 'string'
+      ? event.event_type
+      : typeof rawData?.event_type === 'string'
+        ? rawData.event_type
+        : undefined;
+  const providerMessageId =
+    typeof event.provider_message_id === 'string'
+      ? event.provider_message_id
+      : typeof rawData?.payload?.id === 'string'
+        ? rawData.payload.id
+        : undefined;
+
+  if (!eventType || !providerMessageId || !DELIVERY_STATUS_EVENT_TYPES.has(eventType)) {
+    return undefined;
+  }
+
+  return {
+    eventType,
+    providerMessageId,
+    payload: rawData?.payload ?? currentData?.payload,
+  };
+}
+
+function telnyxDataFromRawPayload(rawPayload: unknown): TelnyxWebhookData | undefined {
+  let payload = rawPayload;
+  if (typeof rawPayload === 'string') {
+    try {
+      payload = JSON.parse(rawPayload);
+    } catch {
+      return undefined;
+    }
+  }
+
+  if (!isRecord(payload) || !isRecord(payload.data)) return undefined;
+  return payload.data as TelnyxWebhookData;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
 
 export function verifyTelnyxWebhookRequest(input: {
   rawBody: string;
@@ -251,7 +377,10 @@ function telnyxDeliveryUpdate(
   }
 
   const failureReason =
-    payload?.errors?.[0]?.detail ?? payload?.errors?.[0]?.title ?? recipientStatus ?? 'Delivery failed';
+    payload?.errors?.[0]?.detail ??
+    payload?.errors?.[0]?.title ??
+    recipientStatus ??
+    'Delivery failed';
   return {
     status: 'failed',
     failed_at: new Date(),
@@ -259,11 +388,16 @@ function telnyxDeliveryUpdate(
   };
 }
 
-function shouldApplyTelnyxDeliveryUpdate(currentStatus: unknown, update: Record<string, unknown>): boolean {
+function shouldApplyTelnyxDeliveryUpdate(
+  currentStatus: unknown,
+  update: Record<string, unknown>,
+): boolean {
   if (Object.keys(update).length === 0) return false;
 
   const nextStatus = update.status;
   if (typeof currentStatus !== 'string' || typeof nextStatus !== 'string') return true;
 
-  return !(TERMINAL_DELIVERY_STATUSES.has(currentStatus) && !TERMINAL_DELIVERY_STATUSES.has(nextStatus));
+  return !(
+    TERMINAL_DELIVERY_STATUSES.has(currentStatus) && !TERMINAL_DELIVERY_STATUSES.has(nextStatus)
+  );
 }
