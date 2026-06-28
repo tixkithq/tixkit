@@ -38,6 +38,34 @@ jobs:
       - run: bun install --frozen-lockfile
       - run: bunx turbo run build --force
 
+  oss-export:
+    name: OSS Export
+    runs-on: ubuntu-latest
+    needs: lint-typecheck
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.3.14
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: bun install --frozen-lockfile
+      - name: Generate sanitized public export
+        run: bun run export:oss -- --out /tmp/tixkit-oss-export
+      - name: Validate exported tree
+        working-directory: /tmp/tixkit-oss-export
+        run: |
+          bun install --frozen-lockfile
+          bun run format:check
+          bun run lint --force
+          bun run typecheck --force
+          env -u DATABASE_URL -u DATABASE_URL_MYSQL bun run test:unit --force
+          bun run build
+          git init -q
+          git add .
+          git diff --cached --check
+
   unit-tests:
     name: Unit Tests
     runs-on: ubuntu-latest

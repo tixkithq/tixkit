@@ -48,7 +48,7 @@ describe('Astro server helpers', () => {
   });
 
   it('createTixkitClient returns a client instance', () => {
-    const client = createTixkitClient({ apiKey: 'sk_test_1' });
+    const client = createTixkitClient({ apiKey: 'tk_test_placeholder' });
     expect(client).toBeDefined();
     expect(typeof client.checkout.create).toBe('function');
   });

@@ -4,7 +4,7 @@ import { createTixkitClient, verifyTixkitWebhook } from '../server.js';
 
 describe('Remix server helpers', () => {
   it('creates a server-side Tixkit client', () => {
-    expect(createTixkitClient({ apiKey: '***********' })).toBeInstanceOf(TixkitClient);
+    expect(createTixkitClient({ apiKey: 'tk_test_placeholder' })).toBeInstanceOf(TixkitClient);
   });
 
   it('returns false for an invalid webhook signature', () => {
