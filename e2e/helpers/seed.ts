@@ -97,6 +97,17 @@ export type PaidCheckoutCaptureState = {
   } | null;
 };
 
+export type WalletPassState = {
+  ticketId: string;
+  ticketCode: string;
+  provider: string;
+  status: string;
+  passUrl: string;
+  accessTokenHash: string | null;
+  contentType: string | null;
+  artifactBase64: string | null;
+};
+
 export type PromoCheckoutCaptureState = PaidCheckoutCaptureState & {
   discountCode: { id: string; code: string; usesCount: number };
   redemption: {
@@ -1313,6 +1324,49 @@ export async function readPaidCheckoutCaptureState(
           }
         : null,
     };
+  });
+}
+
+export async function readWalletPassState(sessionId: string): Promise<WalletPassState[]> {
+  return withE2eDb(async (db) => {
+    const session = await db
+      .selectFrom('checkout_sessions')
+      .select(['tenant_id', 'order_id'])
+      .where('id', '=', sessionId)
+      .executeTakeFirstOrThrow();
+
+    if (!session.order_id) {
+      throw new Error(`Checkout session ${sessionId} did not create an order`);
+    }
+
+    const rows = await db
+      .selectFrom('wallet_passes')
+      .innerJoin('tickets', 'tickets.id', 'wallet_passes.ticket_id')
+      .select([
+        'wallet_passes.ticket_id as ticket_id',
+        'tickets.code as ticket_code',
+        'wallet_passes.provider as provider',
+        'wallet_passes.status as status',
+        'wallet_passes.pass_url as pass_url',
+        'wallet_passes.access_token_hash as access_token_hash',
+        'wallet_passes.content_type as content_type',
+        'wallet_passes.artifact_base64 as artifact_base64',
+      ])
+      .where('wallet_passes.tenant_id', '=', session.tenant_id)
+      .where('tickets.order_id', '=', session.order_id)
+      .orderBy('wallet_passes.provider', 'asc')
+      .execute();
+
+    return rows.map((row) => ({
+      ticketId: row.ticket_id,
+      ticketCode: row.ticket_code,
+      provider: row.provider,
+      status: row.status,
+      passUrl: row.pass_url,
+      accessTokenHash: row.access_token_hash,
+      contentType: row.content_type,
+      artifactBase64: row.artifact_base64,
+    }));
   });
 }
 
