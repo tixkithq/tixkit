@@ -8,9 +8,11 @@ import { expectNoAxeViolations } from './helpers/axe';
 import { apiBaseUrl, checkoutBaseUrl } from './helpers/env';
 import {
   devOrganizationId,
+  readOrphanPaymentCompensationState,
   readPromoCheckoutCaptureState,
   readPaidCheckoutCaptureState,
   readWalletPassState,
+  seedCompensatedOrphanPaymentForSession,
   seedPaidCheckoutEvent,
   seedPaidPromoCheckoutEvent,
 } from './helpers/seed';
@@ -238,6 +240,122 @@ test.describe('paid checkout capture workflow', () => {
     expect(state.hold).toMatchObject({ status: 'converted', quantity: 1 });
     expect(state.inventoryPool.soldCount).toBe(1);
     expect(state.ticketCount).toBe(1);
+  });
+
+  test('shows compensated orphan payments as expired with no tickets or wallet actions', async ({
+    page,
+    request,
+  }, testInfo) => {
+    await requireReachable(page, `${apiBaseUrl}/health`, 'api');
+    await requireReachable(page, checkoutBaseUrl, 'checkout app');
+
+    const suffix = `orphan-payment-${testInfo.workerIndex}-${Date.now()}`;
+    const { event, ticketType, inventoryPool } = await seedPaidCheckoutEvent(request, suffix);
+
+    const session = (await expectJsonResponse(
+      await request.post(`${apiBaseUrl}/v1/checkout/sessions`, {
+        headers: { 'idempotency-key': `orphan-payment-session-${suffix}` },
+        data: {
+          eventId: event.id,
+          items: [{ ticketTypeId: ticketType.id, quantity: 1 }],
+          buyer: {
+            email: `orphan-payment+${suffix}@example.com`,
+            firstName: 'Orphan',
+            lastName: 'Buyer',
+          },
+        },
+      }),
+      201,
+    )) as {
+      id: string;
+      clientToken: string;
+      quote: { totalCents: number; currency: string };
+      status: string;
+    };
+
+    expect(session).toMatchObject({
+      status: 'open',
+      quote: { totalCents: 2_500, currency: 'USD' },
+    });
+
+    const seeded = await seedCompensatedOrphanPaymentForSession({
+      sessionId: session.id,
+      amountCents: session.quote.totalCents,
+      currency: session.quote.currency,
+    });
+
+    const publicSession = (await expectJsonResponse(
+      await request.get(`${apiBaseUrl}/v1/checkout/sessions/${session.id}`, {
+        headers: { 'x-checkout-session-token': session.clientToken },
+      }),
+      200,
+    )) as {
+      status: string;
+      orderId: string | null;
+      paymentCompensation: {
+        status: string;
+        action: string;
+        provider: string;
+        providerIntentId: string;
+        providerCompensationId: string;
+      };
+    };
+    expect(publicSession).toMatchObject({
+      status: 'expired',
+      orderId: null,
+      paymentCompensation: {
+        status: 'succeeded',
+        action: 'local_noop',
+        provider: 'stripe_capture',
+        providerIntentId: seeded.providerIntentId,
+        providerCompensationId: `local:${seeded.providerIntentId}`,
+      },
+    });
+
+    await page.addInitScript(
+      ({ checkoutSessionId, clientToken }) => {
+        window.sessionStorage.setItem(`tk:session:${checkoutSessionId}`, clientToken);
+      },
+      { checkoutSessionId: session.id, clientToken: session.clientToken },
+    );
+    await page.goto(
+      `${checkoutBaseUrl}/checkout/confirmation?sessionId=${session.id}&redirect_status=succeeded`,
+    );
+
+    await expect(page.getByRole('heading', { name: 'Checkout expired' })).toBeVisible();
+    await expect(page.getByText('This payment was closed without issuing tickets.')).toBeVisible();
+    await expect(page.getByRole('heading', { name: 'Order confirmed' })).toHaveCount(0);
+    await expect(page.getByText('Thank you. Your tickets are on the way.')).toHaveCount(0);
+    await expect(page.getByText('Add to Wallet')).toHaveCount(0);
+    await attachScreenshot(page, testInfo, 'hosted-orphan-payment-compensated');
+    await expectNoAxeViolations(page, testInfo);
+
+    const state = await readOrphanPaymentCompensationState(session.id, inventoryPool.id);
+    expect(state.session).toMatchObject({
+      status: 'expired',
+      orderId: null,
+      paymentIntentId: seeded.paymentIntentId,
+    });
+    expect(state.paymentIntent).toMatchObject({
+      id: seeded.paymentIntentId,
+      provider: 'stripe_capture',
+      providerIntentId: seeded.providerIntentId,
+      status: 'succeeded',
+      orderId: null,
+    });
+    expect(state.compensation).toMatchObject({
+      status: 'succeeded',
+      action: 'local_noop',
+      provider: 'stripe_capture',
+      providerIntentId: seeded.providerIntentId,
+      providerCompensationId: `local:${seeded.providerIntentId}`,
+      amountCents: 2_500,
+      currency: 'USD',
+    });
+    expect(state.hold).toMatchObject({ status: 'released', quantity: 1 });
+    expect(state.inventoryPool.soldCount).toBe(0);
+    expect(state.ticketCount).toBe(0);
+    expect(state.walletPassCount).toBe(0);
   });
 
   test('renders Apple and Google Wallet actions backed by signed pass artifacts', async ({

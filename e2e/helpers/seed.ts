@@ -97,6 +97,30 @@ export type PaidCheckoutCaptureState = {
   } | null;
 };
 
+export type OrphanPaymentCompensationState = {
+  session: { status: string; orderId: string | null; paymentIntentId: string | null };
+  paymentIntent: {
+    id: string;
+    provider: string;
+    providerIntentId: string;
+    status: string;
+    orderId: string | null;
+  };
+  compensation: {
+    status: string;
+    action: string;
+    provider: string;
+    providerIntentId: string;
+    providerCompensationId: string | null;
+    amountCents: number;
+    currency: string;
+  };
+  hold: { status: string; quantity: number };
+  inventoryPool: { soldCount: number };
+  ticketCount: number;
+  walletPassCount: number;
+};
+
 export type WalletPassState = {
   ticketId: string;
   ticketCode: string;
@@ -1324,6 +1348,194 @@ export async function readPaidCheckoutCaptureState(
             attachments,
           }
         : null,
+    };
+  });
+}
+
+export async function seedCompensatedOrphanPaymentForSession(input: {
+  sessionId: string;
+  amountCents: number;
+  currency: string;
+  providerIntentId?: string;
+}): Promise<{ paymentIntentId: string; providerIntentId: string; compensationId: string }> {
+  const now = new Date();
+  const idPart = compactIdPart(input.sessionId, 24);
+  const paymentIntentId = `pi_orphan_${idPart}`;
+  const providerIntentId = input.providerIntentId ?? `pi_capture_${input.sessionId}`;
+  const compensationId = `pcmp_orphan_${idPart}`;
+
+  await withE2eDb(async (db) => {
+    const session = await db
+      .selectFrom('checkout_sessions')
+      .select(['tenant_id'])
+      .where('id', '=', input.sessionId)
+      .executeTakeFirstOrThrow();
+
+    await db.transaction().execute(async (trx) => {
+      await trx
+        .insertInto('payment_intents')
+        .values({
+          id: paymentIntentId,
+          tenant_id: session.tenant_id,
+          order_id: null,
+          checkout_session_id: input.sessionId,
+          provider: 'stripe_capture',
+          provider_intent_id: providerIntentId,
+          amount_cents: input.amountCents,
+          currency: input.currency,
+          status: 'succeeded',
+          client_secret: `cs_secret_orphan_${idPart}`,
+          metadata: JSON.stringify({
+            source: 'e2e_orphan_payment_compensation',
+            checkoutSessionId: input.sessionId,
+          }),
+          payment_account_id: null,
+          created_at: now,
+          updated_at: now,
+        })
+        .execute();
+
+      await trx
+        .updateTable('checkout_holds')
+        .set({ status: 'released', updated_at: now })
+        .where('checkout_session_id', '=', input.sessionId)
+        .where('status', '=', 'active')
+        .execute();
+
+      await trx
+        .updateTable('checkout_sessions')
+        .set({
+          status: 'expired',
+          payment_intent_id: paymentIntentId,
+          order_id: null,
+          updated_at: now,
+        })
+        .where('id', '=', input.sessionId)
+        .execute();
+
+      await trx
+        .insertInto('payment_compensations')
+        .values({
+          id: compensationId,
+          tenant_id: session.tenant_id,
+          checkout_session_id: input.sessionId,
+          payment_intent_id: paymentIntentId,
+          provider: 'stripe_capture',
+          provider_intent_id: providerIntentId,
+          amount_cents: input.amountCents,
+          currency: input.currency,
+          action: 'local_noop',
+          status: 'succeeded',
+          provider_compensation_id: `local:${providerIntentId}`,
+          attempts: 1,
+          reason: 'E2E orphan payment finalization failure',
+          last_error: null,
+          metadata: JSON.stringify({
+            source: 'checkout_finalize_failed',
+            e2e: true,
+          }),
+          created_at: now,
+          updated_at: now,
+        })
+        .execute();
+    });
+  });
+
+  return { paymentIntentId, providerIntentId, compensationId };
+}
+
+export async function readOrphanPaymentCompensationState(
+  sessionId: string,
+  inventoryPoolId: string,
+): Promise<OrphanPaymentCompensationState> {
+  return withE2eDb(async (db) => {
+    const session = await db
+      .selectFrom('checkout_sessions')
+      .select(['status', 'order_id', 'payment_intent_id'])
+      .where('id', '=', sessionId)
+      .executeTakeFirstOrThrow();
+
+    if (!session.payment_intent_id) {
+      throw new Error(`Checkout session ${sessionId} did not record an orphan payment intent`);
+    }
+
+    const [paymentIntent, compensation, hold, inventoryPool, orders] = await Promise.all([
+      db
+        .selectFrom('payment_intents')
+        .select(['id', 'provider', 'provider_intent_id', 'status', 'order_id'])
+        .where('id', '=', session.payment_intent_id)
+        .executeTakeFirstOrThrow(),
+      db
+        .selectFrom('payment_compensations')
+        .select([
+          'status',
+          'action',
+          'provider',
+          'provider_intent_id',
+          'provider_compensation_id',
+          'amount_cents',
+          'currency',
+        ])
+        .where('checkout_session_id', '=', sessionId)
+        .orderBy('created_at', 'desc')
+        .executeTakeFirstOrThrow(),
+      db
+        .selectFrom('checkout_holds')
+        .select(['status', 'quantity'])
+        .where('checkout_session_id', '=', sessionId)
+        .executeTakeFirstOrThrow(),
+      db
+        .selectFrom('inventory_pools')
+        .select(['sold_count'])
+        .where('id', '=', inventoryPoolId)
+        .executeTakeFirstOrThrow(),
+      db.selectFrom('orders').select(['id']).where('checkout_session_id', '=', sessionId).execute(),
+    ]);
+    const orderIds = orders.map((order) => order.id);
+    const [tickets, walletPasses] =
+      orderIds.length > 0
+        ? await Promise.all([
+            db.selectFrom('tickets').select(['id']).where('order_id', 'in', orderIds).execute(),
+            db
+              .selectFrom('wallet_passes')
+              .innerJoin('tickets', 'tickets.id', 'wallet_passes.ticket_id')
+              .select(['wallet_passes.id'])
+              .where('tickets.order_id', 'in', orderIds)
+              .execute(),
+          ])
+        : [[], []];
+
+    return {
+      session: {
+        status: session.status,
+        orderId: session.order_id,
+        paymentIntentId: session.payment_intent_id,
+      },
+      paymentIntent: {
+        id: paymentIntent.id,
+        provider: paymentIntent.provider,
+        providerIntentId: paymentIntent.provider_intent_id,
+        status: paymentIntent.status,
+        orderId: paymentIntent.order_id,
+      },
+      compensation: {
+        status: compensation.status,
+        action: compensation.action,
+        provider: compensation.provider,
+        providerIntentId: compensation.provider_intent_id,
+        providerCompensationId: compensation.provider_compensation_id,
+        amountCents: Number(compensation.amount_cents),
+        currency: compensation.currency,
+      },
+      hold: {
+        status: hold.status,
+        quantity: Number(hold.quantity),
+      },
+      inventoryPool: {
+        soldCount: Number(inventoryPool.sold_count),
+      },
+      ticketCount: tickets.length,
+      walletPassCount: walletPasses.length,
     };
   });
 }

@@ -26,6 +26,7 @@ import {
   checkoutApi,
   publicApi,
   userFacingMessage,
+  type CheckoutPaymentCompensation,
   type CheckoutSession,
   type CheckoutWalletPassTicket,
   type PublicEvent,
@@ -213,6 +214,7 @@ export default function ConfirmationClient() {
   const total = session?.quote.totalCents ?? 0;
   const currency = session?.currency ?? 'USD';
   const startsAt = event ? formatDateTime(event.startsAt, event.timezone) : null;
+  const compensationMessage = paymentCompensationMessage(session?.paymentCompensation);
 
   if (loading) {
     return (
@@ -269,6 +271,9 @@ export default function ConfirmationClient() {
               <p className="text-sm text-muted-foreground">
                 Your checkout session has expired. Please start a new order.
               </p>
+              {compensationMessage ? (
+                <p className="text-sm font-medium text-foreground">{compensationMessage}</p>
+              ) : null}
               <Button asChild variant="outline" className="gap-1.5">
                 <a href={event ? `/e/${event.id}` : '/'}>
                   <RefreshCwIcon className="size-4" />
@@ -305,6 +310,9 @@ export default function ConfirmationClient() {
               <p className="text-sm text-muted-foreground">
                 Your payment could not be processed. Please try again or contact support.
               </p>
+              {compensationMessage ? (
+                <p className="text-sm font-medium text-foreground">{compensationMessage}</p>
+              ) : null}
               <div className="flex flex-col gap-2 sm:flex-row">
                 <Button asChild variant="outline" className="gap-1.5">
                   <a href={event ? `/e/${event.id}` : '/'}>
@@ -430,6 +438,37 @@ export default function ConfirmationClient() {
       </main>
     </Surface>
   );
+}
+
+function paymentCompensationMessage(compensation?: CheckoutPaymentCompensation): string | null {
+  if (!compensation) return null;
+
+  if (compensation.status === 'succeeded') {
+    if (compensation.action === 'cancel') {
+      return 'Any pending payment authorization was automatically cancelled.';
+    }
+    if (compensation.action === 'refund') {
+      return 'Any captured payment was automatically refunded.';
+    }
+    if (compensation.action === 'local_noop') {
+      return 'This payment was closed without issuing tickets.';
+    }
+    return 'This payment was compensated without issuing tickets.';
+  }
+
+  if (compensation.status === 'manual_review') {
+    return 'Your payment is under review and no tickets were issued.';
+  }
+
+  if (compensation.status === 'pending') {
+    return 'We are reversing this payment and no tickets were issued.';
+  }
+
+  if (compensation.status === 'failed') {
+    return 'No tickets were issued. Contact support if a payment appears on your statement.';
+  }
+
+  return null;
 }
 
 function ConfirmationHeader({ state }: { state: ConfirmationState }) {
