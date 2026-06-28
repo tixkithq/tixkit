@@ -532,7 +532,7 @@ jobs:
         run: bun run --env-file=.env.local db:migrate
       - name: Build dependencies
         if: steps.provider-secrets.outputs.available == 'true'
-        run: bunx turbo run build --filter=@tixkit/db --filter=@tixkit/shared --filter=@tixkit/workflows
+        run: bunx turbo run build --filter=@tixkit/db --filter=@tixkit/shared --filter=@tixkit/workflows --filter=@tixkit/openapi
       - name: Run direct Stripe provider workflow test
         if: steps.provider-secrets.outputs.available == 'true'
         run: RUN_STRIPE_PROVIDER_TESTS=1 bun run --env-file=.env.local --filter @tixkit/workflows test:provider:stripe
