@@ -1,0 +1,76 @@
+---
+import { checkoutUrl } from '@tixkit/astro';
+
+const handoffUrl = checkoutUrl({
+  event: 'evt_demo',
+  brand: 'brd_demo',
+  items: [{ ticketTypeId: 'tt_demo_general', quantity: 2 }],
+  checkoutBaseUrl: 'http://localhost:3000',
+});
+---
+
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Tixkit Astro Demo</title>
+  <script type="module" src="http://localhost:3000/tixkit-widget.js"></script>
+</head>
+<body>
+  <div style="font-family: system-ui, sans-serif; max-width: 960px; margin: 0 auto; padding: 32px;">
+    <h1>Tixkit Astro Demo</h1>
+    <p>Demonstrates the @tixkit/astro SDK: widget, checkout handoff, and lifecycle events.</p>
+
+    <section style="margin-top: 24px;">
+      <h2>Inline Widget</h2>
+      <tixkit-widget
+        id="tixkit-widget-demo"
+        brand="brd_demo"
+        event="evt_demo"
+        checkout-mode="inline"
+        api-base-url="http://localhost:3000"
+      ></tixkit-widget>
+    </section>
+
+    <section style="margin-top: 24px;">
+      <h2>Checkout Button</h2>
+      <tixkit-button
+        id="tixkit-button-demo"
+        brand="brd_demo"
+        event="evt_demo"
+        checkout-mode="modal"
+        items="tt_demo_general=2"
+        api-base-url="http://localhost:3000"
+      >
+        Buy tickets
+      </tixkit-button>
+    </section>
+
+    <section style="margin-top: 24px;">
+      <h2>Checkout Handoff URL</h2>
+      <code>{handoffUrl}</code>
+    </section>
+
+    <section style="margin-top: 24px;">
+      <h2>Lifecycle Events</h2>
+      <output id="events">No events yet</output>
+    </section>
+  </div>
+
+  <script>
+    const events = [];
+    const output = document.getElementById('events');
+
+    for (const id of ['tixkit-widget-demo', 'tixkit-button-demo']) {
+      const el = document.getElementById(id);
+      if (!el) continue;
+      for (const name of ['loaded', 'opened', 'closed', 'checkout_started', 'order_completed', 'error']) {
+        el.addEventListener(name, () => {
+          events.push(name);
+          if (output) output.textContent = events.join(', ');
+        });
+      }
+    }
+  </script>
+</body>
+</html>
