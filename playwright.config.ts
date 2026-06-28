@@ -19,9 +19,11 @@ const useWebServer = process.env.USE_WEBSERVER !== 'false';
 const adminUrl = process.env.ADMIN_DASHBOARD_URL ?? 'http://localhost:3202';
 const apiUrl = process.env.TIXKIT_API_URL ?? 'http://localhost:4200';
 const checkoutUrl = process.env.CHECKOUT_URL ?? 'http://localhost:3201';
+const workerHealthUrl = process.env.WORKER_HEALTH_URL ?? 'http://127.0.0.1:4299';
 const adminPort = new URL(adminUrl).port || '3202';
 const apiPort = new URL(apiUrl).port || '4200';
 const checkoutPort = new URL(checkoutUrl).port || '3201';
+const workerHealthPort = new URL(workerHealthUrl).port || '4299';
 const temporalTaskQueue = process.env.TEMPORAL_TASK_QUEUE ?? 'tixkit-e2e';
 const useStripeProvider = process.env.E2E_STRIPE_PROVIDER === '1';
 const useWalletPasses = process.env.E2E_WALLET_PASSES === '1' || isCI;
@@ -78,6 +80,7 @@ const localWorkerEnv = {
   TEMPORAL_ADDRESS: 'localhost:7233',
   TEMPORAL_NAMESPACE: 'default',
   TEMPORAL_TASK_QUEUE: temporalTaskQueue,
+  WORKER_HEALTH_PORT: workerHealthPort,
   STRIPE_SECRET_KEY: stripeSecretKey,
   NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY: stripePublishableKey,
   OTEL_SDK_DISABLED: 'true',
@@ -186,9 +189,9 @@ export default defineConfig({
           stderr: 'pipe',
         },
         {
-          command:
-            'bun run --filter @tixkit/workflows build && bun run --filter @tixkit/workflows start',
+          command: 'node scripts/playwright-worker-webserver.mjs',
           env: localWorkerEnv,
+          url: workerHealthUrl,
           timeout: 120_000,
           reuseExistingServer: !isCI && !useWalletPasses,
           stdout: 'pipe',

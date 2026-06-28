@@ -45,6 +45,9 @@ async function runWorker(): Promise<void> {
     },
   });
 
+  const workerRun = worker.run();
+  console.log(`TIXKIT_WORKER_READY taskQueue=${config.temporalTaskQueue}`);
+
   // Start the hold-expiration workflow on worker boot if not already running.
   // This is a long-running workflow that periodically expires stale holds.
   try {
@@ -76,7 +79,7 @@ async function runWorker(): Promise<void> {
     // Non-fatal: hold expiration also runs via lazy cleanup in checkout activities.
   }
 
-  await worker.run();
+  await workerRun;
 }
 
 runWorker().catch((err) => {
