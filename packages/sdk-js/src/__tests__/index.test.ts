@@ -4,7 +4,7 @@ import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
-import { TixkitClient, TixkitApiError } from '../index.js';
+import { TixkitClient, TixkitApiError, type WebhookEvent } from '../index.js';
 
 function mockFetch(status: number, body: unknown) {
   const init: ResponseInit = { status, headers: { 'Content-Type': 'application/json' } };
@@ -362,8 +362,7 @@ describe('TixkitClient', () => {
       maxRetries: 0,
     });
     await client.events.listMarketingIntegrations('evt_1');
-    await client.events.upsertMarketingIntegration('evt_1', {
-      provider: 'ga4',
+    await client.events.upsertMarketingIntegration('evt_1', 'ga4', {
       config: { measurementId: 'G-TEST123' },
       consentRequired: true,
       status: 'active',
@@ -377,7 +376,6 @@ describe('TixkitClient', () => {
       url: 'https://api.test/v1/events/evt_1/marketing-integrations/ga4',
       method: 'PUT',
       body: JSON.stringify({
-        provider: 'ga4',
         config: { measurementId: 'G-TEST123' },
         consentRequired: true,
         status: 'active',
@@ -944,6 +942,57 @@ describe('TixkitClient new resource methods', () => {
     await c.webhookEndpoints.listEvents('ep_1');
     const call = getCall(fm);
     expect(call.url).toBe('https://api.test/v1/webhook-endpoints/ep_1/events');
+  });
+
+  it('webhookEndpoints.replayEvent sends POST to the endpoint-scoped replay route', async () => {
+    const fm = mockFetch(202, { queued: true, eventId: 'whe_1', endpointId: 'ep_1' });
+    const c = new TixkitClient({
+      apiKey: '***********',
+      apiBaseUrl: 'https://api.test',
+      maxRetries: 0,
+    });
+
+    const result = await c.webhookEndpoints.replayEvent('ep_1', 'whe_1');
+    const call = getCall(fm);
+
+    expect(result).toEqual({ queued: true, eventId: 'whe_1', endpointId: 'ep_1' });
+    expect(call.method).toBe('POST');
+    expect(call.url).toBe('https://api.test/v1/webhook-endpoints/ep_1/events/whe_1/replay');
+  });
+
+  it('webhookEndpoints.listEvents supports missing-endpoint dead letters', async () => {
+    mockFetch(200, {
+      items: [
+        {
+          id: 'whe_1',
+          eventId: 'whe_1',
+          deliveryId: 'whd_deleted',
+          endpointId: null,
+          requestedEndpointId: 'wh_deleted',
+          eventType: 'order.paid',
+          status: 'dead_lettered',
+          attemptCount: 1,
+          createdAt: '2026-06-01T00:00:00.000Z',
+        },
+      ],
+      nextCursor: null,
+      hasMore: false,
+    });
+    const c = new TixkitClient({
+      apiKey: '***********',
+      apiBaseUrl: 'https://api.test',
+      maxRetries: 0,
+    });
+
+    const result = await c.webhookEndpoints.listEvents('wh_deleted');
+    const event: WebhookEvent = result.items[0]!;
+    const endpointId: string | null = event.endpointId;
+
+    expect(endpointId).toBeNull();
+    expect(event.deliveryId).toBe('whd_deleted');
+    expect(event.eventId).toBe(event.id);
+    expect(event.requestedEndpointId).toBe('wh_deleted');
+    expect(event.statusCode).toBeUndefined();
   });
 
   it('questions.list sends GET', async () => {

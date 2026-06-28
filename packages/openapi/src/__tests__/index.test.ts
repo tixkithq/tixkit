@@ -144,6 +144,9 @@ describe('openApiSpec', () => {
     expect(openApiSpec.paths['/events/{eventId}/messages']).toBeDefined();
     expect(openApiSpec.paths['/events/{eventId}/messages/preview']).toBeDefined();
     expect(openApiSpec.paths['/webhook-events/{eventId}/replay']).toBeDefined();
+    expect(
+      openApiSpec.paths['/webhook-endpoints/{endpointId}/events/{eventId}/replay'],
+    ).toBeDefined();
     expect(openApiSpec.components.schemas.TicketTypeBatchResult.required).toEqual([
       'ticketType',
       'accessRules',
@@ -213,8 +216,35 @@ describe('openApiSpec', () => {
       ].schema,
     ).toEqual({ $ref: '#/components/schemas/MarketingIntegrationPage' });
     expect(
-      openApiSpec.paths['/events/{eventId}/marketing-integrations/{provider}'].put,
-    ).toBeDefined();
+      openApiSpec.paths['/events/{eventId}/marketing-integrations'].get.parameters,
+    ).toEqual([
+      {
+        name: 'eventId',
+        in: 'path',
+        required: true,
+        schema: { type: 'string' },
+      },
+    ]);
+
+    const upsertOperation =
+      openApiSpec.paths['/events/{eventId}/marketing-integrations/{provider}'].put;
+    expect(upsertOperation.parameters).toEqual([
+      {
+        name: 'eventId',
+        in: 'path',
+        required: true,
+        schema: { type: 'string' },
+      },
+      {
+        name: 'provider',
+        in: 'path',
+        required: true,
+        schema: { type: 'string', enum: ['ga4', 'meta_pixel', 'generic_tag'] },
+      },
+    ]);
+    const upsertBody = upsertOperation.requestBody.content['application/json'].schema;
+    expect(upsertBody.required).toEqual(['config']);
+    expect(Object.hasOwn(upsertBody.properties, 'provider')).toBe(false);
     expect(
       openApiSpec.paths['/public/events/{eventId}/marketing-integrations'].get.responses['200']
         .content['application/json'].schema,

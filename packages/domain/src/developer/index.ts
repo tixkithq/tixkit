@@ -33,7 +33,8 @@ export type WebhookEnvelope = {
 };
 
 export type WebhookDelivery = BaseEntity & {
-  endpointId: Ulid;
+  endpointId: Ulid | null;
+  requestedEndpointId: Ulid;
   eventId: Ulid;
   attempt: number;
   statusCode?: number;

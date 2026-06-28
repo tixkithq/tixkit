@@ -103,9 +103,10 @@ export const webhookRoutes: FastifyPluginAsync = async (app) => {
 
     const endpointRepo = new WebhookEndpointRepository(db);
     const endpoint = await endpointRepo.findById(endpointId);
-    if (!endpoint) throw new NotFoundError('WebhookEndpoint', endpointId);
-    ClerkAuthService.requireResourceTenant(principal, endpoint, 'WebhookEndpoint', endpointId);
-    ClerkAuthService.requireOrganizationScope(principal, endpoint.organization_id);
+    if (endpoint) {
+      ClerkAuthService.requireResourceTenant(principal, endpoint, 'WebhookEndpoint', endpointId);
+      ClerkAuthService.requireOrganizationScope(principal, endpoint.organization_id);
+    }
     const cursor = pagination.cursor
       ? parseWebhookDeliveryEventCursor(pagination.cursor)
       : undefined;
@@ -117,6 +118,7 @@ export const webhookRoutes: FastifyPluginAsync = async (app) => {
         'webhook_events.id as id',
         'webhook_deliveries.id as delivery_id',
         'webhook_deliveries.endpoint_id as endpoint_id',
+        'webhook_deliveries.requested_endpoint_id as requested_endpoint_id',
         'webhook_events.type as event_type',
         'webhook_deliveries.status as status',
         'webhook_deliveries.status_code as status_code',
@@ -125,11 +127,18 @@ export const webhookRoutes: FastifyPluginAsync = async (app) => {
         'webhook_deliveries.created_at as created_at',
       ])
       .where('webhook_events.tenant_id', '=', principal.tenantId)
-      .where('webhook_events.organization_id', '=', endpoint.organization_id)
-      .where('webhook_deliveries.endpoint_id', '=', endpointId)
+      .where('webhook_deliveries.requested_endpoint_id', '=', endpointId)
       .orderBy('webhook_deliveries.created_at', 'desc')
       .orderBy('webhook_deliveries.id', 'desc')
       .limit(pagination.limit + 1);
+    if (endpoint) {
+      query = query.where('webhook_events.organization_id', '=', endpoint.organization_id);
+    } else if (principal.organizationIds.length > 0) {
+      query = query.where('webhook_events.organization_id', 'in', principal.organizationIds);
+    } else {
+      // Fail-closed: without an endpoint row, org scope can only come from the joined event.
+      query = query.where('webhook_events.organization_id', 'in', ['__none__']);
+    }
     if (cursor) {
       query = query.where((eb) =>
         eb.or([
@@ -179,6 +188,54 @@ export const webhookRoutes: FastifyPluginAsync = async (app) => {
     );
 
     return reply.status(202).send({ queued: true, eventId, endpoints: endpoints.length });
+  });
+
+  app.post('/webhook-endpoints/:endpointId/events/:eventId/replay', async (request, reply) => {
+    const principal = request.principal!;
+    ClerkAuthService.requirePermission(principal, 'developers.write');
+    const { endpointId, eventId } = request.params as { endpointId: string; eventId: string };
+
+    const endpointRepo = new WebhookEndpointRepository(db);
+    const endpoint = await endpointRepo.findById(endpointId);
+    if (!endpoint) throw new NotFoundError('WebhookEndpoint', endpointId);
+    ClerkAuthService.requireResourceTenant(principal, endpoint, 'WebhookEndpoint', endpointId);
+    ClerkAuthService.requireOrganizationScope(principal, endpoint.organization_id);
+
+    const eventRepo = new WebhookEventRepository(db);
+    const event = await eventRepo.findById(eventId);
+    if (!event) throw new NotFoundError('WebhookEvent', eventId);
+    ClerkAuthService.requireResourceTenant(principal, event, 'WebhookEvent', eventId);
+    ClerkAuthService.requireOrganizationScope(principal, event.organization_id);
+
+    if (endpoint.organization_id !== event.organization_id) {
+      throw new NotFoundError('WebhookEvent', eventId);
+    }
+    if (endpoint.status !== 'active') {
+      throw new ValidationError('Webhook endpoint is not active', { endpointId });
+    }
+
+    const eventType = event.type as string;
+    const subscribedEvents = parseWebhookEndpointEvents(endpoint.events);
+    if (!subscribedEvents.includes(eventType)) {
+      throw new ValidationError('Webhook endpoint is not subscribed to this event type', {
+        endpointId,
+        eventId,
+        eventType,
+      });
+    }
+
+    const payload = serializeWebhookEvent(event).payload as Record<string, unknown>;
+    await temporalClient.startWebhookDelivery({
+      apiVersion: '2026-01-01',
+      endpointId,
+      eventId,
+      eventType,
+      replayNonce: randomUUID(),
+      payload,
+      maxAttempts: 5,
+    });
+
+    return reply.status(202).send({ queued: true, eventId, endpointId });
   });
 };
 
@@ -232,7 +289,10 @@ function webhookDeliveryEventPageEnvelope(rows: Record<string, unknown>[], limit
 function serializeWebhookDeliveryEvent(row: Record<string, unknown>) {
   return {
     id: row.id,
+    eventId: row.id,
+    deliveryId: row.delivery_id,
     endpointId: row.endpoint_id,
+    requestedEndpointId: row.requested_endpoint_id,
     eventType: row.event_type,
     status: row.status,
     statusCode: row.status_code ?? undefined,
@@ -243,4 +303,19 @@ function serializeWebhookDeliveryEvent(row: Record<string, unknown>) {
         : (row.delivered_at ?? undefined),
     createdAt: row.created_at instanceof Date ? row.created_at.toISOString() : row.created_at,
   };
+}
+
+function parseWebhookEndpointEvents(value: unknown): string[] {
+  if (Array.isArray(value)) {
+    return value.filter((event): event is string => typeof event === 'string');
+  }
+  if (typeof value !== 'string') return [];
+  try {
+    const parsed = JSON.parse(value) as unknown;
+    return Array.isArray(parsed)
+      ? parsed.filter((event): event is string => typeof event === 'string')
+      : [];
+  } catch {
+    return [];
+  }
 }

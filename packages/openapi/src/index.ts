@@ -1430,6 +1430,15 @@ export const openApiSpec = {
         },
         required: ['message', 'eventId', 'endpoints'],
       },
+      WebhookEndpointReplayQueued: {
+        type: 'object',
+        properties: {
+          queued: { type: 'boolean' },
+          eventId: { type: 'string' },
+          endpointId: { type: 'string' },
+        },
+        required: ['queued', 'eventId', 'endpointId'],
+      },
       PaymentAccount: {
         type: 'object',
         properties: {
@@ -2098,6 +2107,14 @@ export const openApiSpec = {
       get: {
         summary: 'List event marketing integrations',
         security: [{ BearerAuth: [] }],
+        parameters: [
+          {
+            name: 'eventId',
+            in: 'path',
+            required: true,
+            schema: { type: 'string' },
+          },
+        ],
         responses: {
           '200': {
             description: 'Event marketing integrations',
@@ -2116,6 +2133,12 @@ export const openApiSpec = {
         security: [{ BearerAuth: [] }],
         parameters: [
           {
+            name: 'eventId',
+            in: 'path',
+            required: true,
+            schema: { type: 'string' },
+          },
+          {
             name: 'provider',
             in: 'path',
             required: true,
@@ -2129,12 +2152,11 @@ export const openApiSpec = {
               schema: {
                 type: 'object',
                 properties: {
-                  provider: { type: 'string', enum: ['ga4', 'meta_pixel', 'generic_tag'] },
                   config: { type: 'object', additionalProperties: true },
                   consentRequired: { type: 'boolean', default: true },
                   status: { type: 'string', enum: ['active', 'disabled'], default: 'active' },
                 },
-                required: ['provider', 'config'],
+                required: ['config'],
               },
             },
           },
@@ -2579,6 +2601,33 @@ export const openApiSpec = {
             description: 'Event details (hidden ticket types excluded)',
             content: { 'application/json': { schema: { $ref: '#/components/schemas/Event' } } },
           },
+        },
+      },
+    },
+    '/public/events/by-slug/{slug}': {
+      get: {
+        summary: 'Get public event details by slug for a verified custom domain (no auth)',
+        parameters: [
+          {
+            name: 'slug',
+            in: 'path',
+            required: true,
+            schema: { type: 'string' },
+          },
+          {
+            name: 'host',
+            in: 'query',
+            required: true,
+            schema: { type: 'string' },
+            description: 'Verified custom-domain hostname for the event brand',
+          },
+        ],
+        responses: {
+          '200': {
+            description: 'Event details for the verified custom-domain slug',
+            content: { 'application/json': { schema: { $ref: '#/components/schemas/Event' } } },
+          },
+          '404': { description: 'No matching published event for the custom domain' },
         },
       },
     },
@@ -5357,7 +5406,10 @@ export const openApiSpec = {
                         type: 'object',
                         properties: {
                           id: { type: 'string' },
-                          endpointId: { type: 'string' },
+                          eventId: { type: 'string' },
+                          deliveryId: { type: 'string' },
+                          endpointId: { type: ['string', 'null'] },
+                          requestedEndpointId: { type: 'string' },
                           eventType: { type: 'string' },
                           status: { type: 'string' },
                           statusCode: { type: 'integer' },
@@ -5385,6 +5437,54 @@ export const openApiSpec = {
           },
           '404': {
             description: 'Endpoint not found',
+            content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } },
+          },
+        },
+      },
+    },
+    '/webhook-endpoints/{endpointId}/events/{eventId}/replay': {
+      post: {
+        summary: 'Replay webhook event to one endpoint',
+        description:
+          'Queues one webhook delivery for the selected endpoint when the endpoint is active and subscribed to the event type.',
+        security: [{ BearerAuth: [] }],
+        parameters: [
+          {
+            name: 'endpointId',
+            in: 'path',
+            required: true,
+            schema: { type: 'string' },
+          },
+          {
+            name: 'eventId',
+            in: 'path',
+            required: true,
+            schema: { type: 'string' },
+          },
+        ],
+        responses: {
+          '202': {
+            description: 'Endpoint webhook replay queued',
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/WebhookEndpointReplayQueued' },
+              },
+            },
+          },
+          '400': {
+            description: 'Endpoint inactive or not subscribed to this event type',
+            content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } },
+          },
+          '401': {
+            description: 'Unauthorized',
+            content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } },
+          },
+          '403': {
+            description: 'Forbidden',
+            content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } },
+          },
+          '404': {
+            description: 'Endpoint or event not found',
             content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } },
           },
         },

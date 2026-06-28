@@ -23,7 +23,8 @@ type MockHttpsRequest = {
 
 type DeliveryRow = {
   id: string;
-  endpoint_id: string;
+  endpoint_id: string | null;
+  requested_endpoint_id: string;
   event_id: string;
   attempt: number;
   status_code: number | null;
@@ -65,6 +66,7 @@ const dbState = vi.hoisted(() => ({
     status: 'active',
   } as { id: string; url: string; secret: string; status: string } | null,
   deliveries: [] as DeliveryRow[],
+  updateCalls: 0,
   destroy: vi.fn(),
 }));
 
@@ -87,17 +89,31 @@ vi.mock('@tixkit/db', () => {
   }
 
   class WebhookDeliveryRepository {
-    async create(input: { endpointId: string; eventId: string; attempt: number }) {
+    async create(input: {
+      endpointId: string | null;
+      requestedEndpointId?: string;
+      eventId: string;
+      attempt: number;
+      status?: string;
+      statusCode?: number | null;
+      response?: string | null;
+      deliveredAt?: Date | null;
+      nextRetryAt?: Date | null;
+    }) {
+      const requestedEndpointId = input.requestedEndpointId ?? input.endpointId;
+      if (!requestedEndpointId) throw new Error('Webhook delivery requires a requested endpoint id');
+
       const delivery: DeliveryRow = {
         id: `whd_${dbState.deliveries.length + 1}`,
         endpoint_id: input.endpointId,
+        requested_endpoint_id: requestedEndpointId,
         event_id: input.eventId,
         attempt: input.attempt,
-        status_code: null,
-        response: null,
-        status: 'pending',
-        delivered_at: null,
-        next_retry_at: new Date(),
+        status_code: input.statusCode ?? null,
+        response: input.response ?? null,
+        status: input.status ?? 'pending',
+        delivered_at: input.deliveredAt ?? null,
+        next_retry_at: input.nextRetryAt === undefined ? new Date() : input.nextRetryAt,
         created_at: new Date(),
       };
       dbState.deliveries.push(delivery);
@@ -105,6 +121,7 @@ vi.mock('@tixkit/db', () => {
     }
 
     async update(id: string, input: Partial<DeliveryRow>) {
+      dbState.updateCalls += 1;
       const delivery = dbState.deliveries.find((row) => row.id === id);
       if (!delivery) throw new Error(`Delivery ${id} not found`);
       Object.assign(delivery, input);
@@ -138,6 +155,7 @@ describe('deliverWebhookActivity', () => {
       status: 'active',
     };
     dbState.deliveries = [];
+    dbState.updateCalls = 0;
     dbState.destroy.mockClear();
     dnsState.lookup.mockReset();
     dnsState.lookup.mockImplementation(
@@ -308,6 +326,77 @@ describe('deliverWebhookActivity', () => {
     expect(dbState.destroy).toHaveBeenCalledTimes(1);
   });
 
+  it('dead-letters inactive endpoints without sending a request', async () => {
+    dbState.endpoint = {
+      id: 'wh_1',
+      url: 'https://example.test/webhook',
+      secret: 'secret_1',
+      status: 'disabled',
+    };
+
+    const result = await deliverWebhookActivity({
+      endpointId: 'wh_1',
+      eventId: 'whe_1',
+      payload: JSON.stringify({ orderId: 'ord_1' }),
+      attempt: 1,
+      finalAttempt: false,
+    });
+
+    expect(result).toMatchObject({
+      ok: false,
+      errorCode: 'ENDPOINT_INACTIVE',
+      retryable: false,
+      message: 'Webhook endpoint is not active',
+    });
+    expect(httpsState.request).not.toHaveBeenCalled();
+    expect(dbState.deliveries).toHaveLength(1);
+    expect(dbState.deliveries[0]).toMatchObject({
+      requested_endpoint_id: 'wh_1',
+      attempt: 1,
+      status: 'dead_lettered',
+      status_code: null,
+      response: 'Webhook endpoint is not active',
+      delivered_at: null,
+      next_retry_at: null,
+    });
+    expect(dbState.updateCalls).toBe(0);
+    expect(dbState.destroy).toHaveBeenCalledTimes(1);
+  });
+
+  it('dead-letters missing endpoints without sending a request', async () => {
+    dbState.endpoint = null;
+
+    const result = await deliverWebhookActivity({
+      endpointId: 'wh_missing',
+      eventId: 'whe_1',
+      payload: JSON.stringify({ orderId: 'ord_1' }),
+      attempt: 1,
+      finalAttempt: false,
+    });
+
+    expect(result).toMatchObject({
+      ok: false,
+      errorCode: 'ENDPOINT_NOT_FOUND',
+      retryable: false,
+      message: 'Webhook endpoint not found',
+    });
+    expect(httpsState.request).not.toHaveBeenCalled();
+    expect(dbState.deliveries).toHaveLength(1);
+    expect(dbState.deliveries[0]).toMatchObject({
+      endpoint_id: null,
+      requested_endpoint_id: 'wh_missing',
+      event_id: 'whe_1',
+      attempt: 1,
+      status: 'dead_lettered',
+      status_code: null,
+      response: 'Webhook endpoint not found',
+      delivered_at: null,
+      next_retry_at: null,
+    });
+    expect(dbState.updateCalls).toBe(0);
+    expect(dbState.destroy).toHaveBeenCalledTimes(1);
+  });
+
   it('does not follow redirects and dead-letters a final redirect response', async () => {
     httpsState.nextResponse = { statusCode: 302, body: 'redirect' };
 
@@ -437,7 +526,7 @@ describe('deliverWebhookActivity', () => {
     expect(result).toMatchObject({
       ok: false,
       errorCode: 'WEBHOOK_DELIVERY_FAILED',
-      retryable: true,
+      retryable: false,
       message: 'connection refused',
     });
     expect(dbState.deliveries).toHaveLength(1);

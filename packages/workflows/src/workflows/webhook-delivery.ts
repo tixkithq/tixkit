@@ -52,6 +52,10 @@ export async function webhookDeliveryWorkflow(
       return { status: 'delivered' };
     }
 
+    if (!result.ok && !result.retryable) {
+      return { status: 'dead_lettered' };
+    }
+
     if (attempt < input.maxAttempts) {
       // Exponential backoff: 5s, 10s, 20s, 40s...
       // eslint-disable-next-line no-await-in-loop -- retry backoff is intentionally sequential in workflow history.

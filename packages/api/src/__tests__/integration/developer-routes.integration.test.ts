@@ -572,6 +572,15 @@ describe('developer routes integration', () => {
             status: 'pending',
             created_at: new Date('2026-06-01T00:00:04Z'),
           },
+          {
+            id: 'whe_wrong_requested_endpoint',
+            tenant_id: 'tnt_1',
+            organization_id: 'org_1',
+            type: 'order.paid',
+            payload: JSON.stringify({ orderId: 'ord_wrong_requested_endpoint' }),
+            status: 'pending',
+            created_at: new Date('2026-06-01T00:00:05Z'),
+          },
         ],
         webhook_endpoints: [
           {
@@ -591,8 +600,9 @@ describe('developer routes integration', () => {
           {
             id: 'whd_1',
             endpoint_id: 'wh_1',
+            requested_endpoint_id: 'wh_1',
             event_id: 'whe_z_new',
-            status: 'succeeded',
+            status: 'delivered',
             status_code: 200,
             attempt: 1,
             delivered_at: new Date('2026-06-01T00:10:10Z'),
@@ -601,6 +611,18 @@ describe('developer routes integration', () => {
           {
             id: 'whd_2',
             endpoint_id: 'wh_1',
+            requested_endpoint_id: 'wh_1',
+            event_id: 'whe_z_new',
+            status: 'failed',
+            status_code: 502,
+            attempt: 2,
+            delivered_at: new Date('2026-06-01T00:10:30Z'),
+            created_at: new Date('2026-06-01T00:10:30Z'),
+          },
+          {
+            id: 'whd_3',
+            endpoint_id: 'wh_1',
+            requested_endpoint_id: 'wh_1',
             event_id: 'whe_a_middle',
             status: 'failed',
             status_code: 500,
@@ -609,8 +631,9 @@ describe('developer routes integration', () => {
             created_at: new Date('2026-06-01T00:09:00Z'),
           },
           {
-            id: 'whd_3',
+            id: 'whd_4',
             endpoint_id: 'wh_1',
+            requested_endpoint_id: 'wh_1',
             event_id: 'whe_m_old',
             status: 'pending',
             status_code: null,
@@ -619,14 +642,26 @@ describe('developer routes integration', () => {
             created_at: new Date('2026-06-01T00:09:00Z'),
           },
           {
-            id: 'whd_4',
+            id: 'whd_5',
             endpoint_id: 'wh_1',
+            requested_endpoint_id: 'wh_1',
             event_id: 'whe_b_oldest',
             status: 'pending',
             status_code: null,
             attempt: 1,
             delivered_at: null,
             created_at: new Date('2026-06-01T00:08:00Z'),
+          },
+          {
+            id: 'whd_wrong_requested_endpoint',
+            endpoint_id: 'wh_1',
+            requested_endpoint_id: 'wh_2',
+            event_id: 'whe_wrong_requested_endpoint',
+            status: 'pending',
+            status_code: null,
+            attempt: 1,
+            delivered_at: null,
+            created_at: new Date('2026-06-01T00:11:00Z'),
           },
         ],
       }) as unknown as Database,
@@ -643,7 +678,10 @@ describe('developer routes integration', () => {
 
     const returnedItems: Array<{
       id: string;
-      endpointId: string;
+      eventId: string;
+      deliveryId: string;
+      endpointId: string | null;
+      requestedEndpointId: string;
       eventType: string;
       status: string;
       statusCode?: number;
@@ -674,16 +712,42 @@ describe('developer routes integration', () => {
     }
 
     const returnedIds = returnedItems.map((item) => item.id);
-    expect(returnedIds).toEqual(['whe_z_new', 'whe_m_old', 'whe_a_middle', 'whe_b_oldest']);
-    expect(new Set(returnedIds).size).toBe(4);
-    expect(cursors).toHaveLength(3);
-    expect(cursors.some((value) => returnedIds.includes(value))).toBe(false);
+    const returnedEventIds = returnedItems.map((item) => item.eventId);
+    const returnedDeliveryIds = returnedItems.map((item) => item.deliveryId);
+    expect(returnedIds).toEqual([
+      'whe_z_new',
+      'whe_z_new',
+      'whe_m_old',
+      'whe_a_middle',
+      'whe_b_oldest',
+    ]);
+    expect(returnedEventIds).toEqual(returnedIds);
+    expect(returnedDeliveryIds).toEqual(['whd_2', 'whd_1', 'whd_4', 'whd_3', 'whd_5']);
+    expect(new Set(returnedDeliveryIds).size).toBe(5);
+    expect(cursors).toHaveLength(4);
+    expect(cursors.some((value) => returnedDeliveryIds.includes(value))).toBe(false);
     expect(returnedItems).toEqual([
       {
         id: 'whe_z_new',
+        eventId: 'whe_z_new',
+        deliveryId: 'whd_2',
         endpointId: 'wh_1',
+        requestedEndpointId: 'wh_1',
         eventType: 'order.paid',
-        status: 'succeeded',
+        status: 'failed',
+        statusCode: 502,
+        attemptCount: 2,
+        deliveredAt: '2026-06-01T00:10:30.000Z',
+        createdAt: '2026-06-01T00:10:30.000Z',
+      },
+      {
+        id: 'whe_z_new',
+        eventId: 'whe_z_new',
+        deliveryId: 'whd_1',
+        endpointId: 'wh_1',
+        requestedEndpointId: 'wh_1',
+        eventType: 'order.paid',
+        status: 'delivered',
         statusCode: 200,
         attemptCount: 1,
         deliveredAt: '2026-06-01T00:10:10.000Z',
@@ -691,7 +755,10 @@ describe('developer routes integration', () => {
       },
       {
         id: 'whe_m_old',
+        eventId: 'whe_m_old',
+        deliveryId: 'whd_4',
         endpointId: 'wh_1',
+        requestedEndpointId: 'wh_1',
         eventType: 'order.paid',
         status: 'pending',
         attemptCount: 1,
@@ -699,7 +766,10 @@ describe('developer routes integration', () => {
       },
       {
         id: 'whe_a_middle',
+        eventId: 'whe_a_middle',
+        deliveryId: 'whd_3',
         endpointId: 'wh_1',
+        requestedEndpointId: 'wh_1',
         eventType: 'order.paid',
         status: 'failed',
         statusCode: 500,
@@ -709,7 +779,10 @@ describe('developer routes integration', () => {
       },
       {
         id: 'whe_b_oldest',
+        eventId: 'whe_b_oldest',
+        deliveryId: 'whd_5',
         endpointId: 'wh_1',
+        requestedEndpointId: 'wh_1',
         eventType: 'order.paid',
         status: 'pending',
         attemptCount: 1,
@@ -717,6 +790,101 @@ describe('developer routes integration', () => {
       },
     ]);
     expect(cursor).toBeNull();
+
+    await app.close();
+  });
+
+  it('returns missing-endpoint dead letters by requested endpoint id', async () => {
+    const principal: Principal = {
+      type: 'user',
+      id: 'usr_1',
+      tenantId: 'tnt_1',
+      organizationIds: ['org_1'],
+      scopes: ['developers.write'],
+    };
+    const app = Fastify();
+    app.decorate('context', {
+      db: createWebhookDb({
+        webhook_events: [
+          {
+            id: 'whe_missing_endpoint',
+            tenant_id: 'tnt_1',
+            organization_id: 'org_1',
+            type: 'order.paid',
+            payload: JSON.stringify({ orderId: 'ord_missing_endpoint' }),
+            status: 'pending',
+            created_at: new Date('2026-06-01T00:00:01Z'),
+          },
+          {
+            id: 'whe_other_org',
+            tenant_id: 'tnt_1',
+            organization_id: 'org_other',
+            type: 'order.paid',
+            payload: JSON.stringify({ orderId: 'ord_other' }),
+            status: 'pending',
+            created_at: new Date('2026-06-01T00:00:02Z'),
+          },
+        ],
+        webhook_endpoints: [],
+        webhook_deliveries: [
+          {
+            id: 'whd_missing',
+            endpoint_id: null,
+            requested_endpoint_id: 'wh_1',
+            event_id: 'whe_missing_endpoint',
+            status: 'dead_lettered',
+            status_code: null,
+            attempt: 1,
+            delivered_at: null,
+            created_at: new Date('2026-06-01T00:10:00Z'),
+          },
+          {
+            id: 'whd_other_org',
+            endpoint_id: null,
+            requested_endpoint_id: 'wh_1',
+            event_id: 'whe_other_org',
+            status: 'dead_lettered',
+            status_code: null,
+            attempt: 1,
+            delivered_at: null,
+            created_at: new Date('2026-06-01T00:11:00Z'),
+          },
+        ],
+      }) as unknown as Database,
+      pricingEngine: {},
+      inventoryService: {},
+      qrService: {},
+      authService: {},
+      temporalClient: {},
+    } as unknown as AppContext);
+    app.addHook('onRequest', async (request) => {
+      request.principal = principal;
+    });
+    await app.register(webhookRoutes);
+
+    const response = await app.inject({
+      method: 'GET',
+      url: '/webhook-endpoints/wh_1/events?limit=10',
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toMatchObject({
+      items: [
+        {
+          id: 'whe_missing_endpoint',
+          eventId: 'whe_missing_endpoint',
+          deliveryId: 'whd_missing',
+          endpointId: null,
+          requestedEndpointId: 'wh_1',
+          eventType: 'order.paid',
+          status: 'dead_lettered',
+          attemptCount: 1,
+          createdAt: '2026-06-01T00:10:00.000Z',
+        },
+      ],
+      hasMore: false,
+      nextCursor: null,
+    });
 
     await app.close();
   });
@@ -791,6 +959,106 @@ describe('developer routes integration', () => {
       Record<string, unknown>,
     ];
     expect(replayInput).not.toHaveProperty('secret');
+
+    await app.close();
+  });
+
+  it('queues only the requested endpoint for endpoint-scoped webhook replay', async () => {
+    const principal: Principal = {
+      type: 'user',
+      id: 'usr_1',
+      tenantId: 'tnt_1',
+      organizationIds: ['org_1'],
+      scopes: ['developers.write'],
+    };
+    const startWebhookDelivery = vi.fn(async () => undefined);
+    const createdAt = new Date('2026-06-01T00:00:00Z');
+    const app = Fastify();
+    app.decorate('context', {
+      db: createWebhookDb({
+        webhook_events: [
+          {
+            id: 'whe_1',
+            tenant_id: 'tnt_1',
+            organization_id: 'org_1',
+            type: 'order.paid',
+            payload: JSON.stringify({ orderId: 'ord_1' }),
+            status: 'pending',
+            created_at: createdAt,
+          },
+        ],
+        webhook_endpoints: [
+          {
+            id: 'wh_1',
+            tenant_id: 'tnt_1',
+            organization_id: 'org_1',
+            url: 'https://primary.example.com/webhooks',
+            secret: 'secret_1',
+            events: JSON.stringify(['order.paid']),
+            status: 'active',
+            description: null,
+            created_at: createdAt,
+            updated_at: createdAt,
+          },
+          {
+            id: 'wh_2',
+            tenant_id: 'tnt_1',
+            organization_id: 'org_1',
+            url: 'https://secondary.example.com/webhooks',
+            secret: 'secret_2',
+            events: JSON.stringify(['order.paid']),
+            status: 'active',
+            description: null,
+            created_at: createdAt,
+            updated_at: createdAt,
+          },
+        ],
+        webhook_deliveries: [
+          {
+            id: 'whd_dead_lettered',
+            endpoint_id: null,
+            requested_endpoint_id: 'wh_1',
+            event_id: 'whe_1',
+            attempt: 3,
+            status_code: 500,
+            response: 'gone',
+            status: 'dead_lettered',
+            delivered_at: null,
+            next_retry_at: null,
+            created_at: new Date('2026-06-01T00:10:00Z'),
+          },
+        ],
+      }) as unknown as Database,
+      pricingEngine: {},
+      inventoryService: {},
+      qrService: {},
+      authService: {},
+      temporalClient: { startWebhookDelivery },
+    } as unknown as AppContext);
+    app.addHook('onRequest', async (request) => {
+      request.principal = principal;
+    });
+    await app.register(webhookRoutes);
+
+    const response = await app.inject({
+      method: 'POST',
+      url: '/webhook-endpoints/wh_1/events/whe_1/replay',
+    });
+
+    expect(response.statusCode).toBe(202);
+    expect(response.json()).toMatchObject({ queued: true, eventId: 'whe_1', endpointId: 'wh_1' });
+    expect(startWebhookDelivery).toHaveBeenCalledTimes(1);
+    expect(startWebhookDelivery).toHaveBeenCalledWith(
+      expect.objectContaining({
+        apiVersion: '2026-01-01',
+        endpointId: 'wh_1',
+        eventId: 'whe_1',
+        eventType: 'order.paid',
+        maxAttempts: 5,
+        payload: { orderId: 'ord_1' },
+        replayNonce: expect.any(String),
+      }),
+    );
 
     await app.close();
   });

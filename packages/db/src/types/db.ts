@@ -773,7 +773,8 @@ export interface WebhookEventTable {
 
 export interface WebhookDeliveryTable {
   id: string;
-  endpoint_id: string;
+  endpoint_id: string | null;
+  requested_endpoint_id: string;
   event_id: string;
   attempt: number;
   status_code: number | null;

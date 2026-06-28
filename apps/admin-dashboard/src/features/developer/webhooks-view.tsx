@@ -49,8 +49,8 @@ import { toast } from 'sonner';
 const deliveryStatusTone = (
   status: AdminWebhookEvent['status'],
 ): 'default' | 'secondary' | 'destructive' => {
-  if (status === 'succeeded') return 'default';
-  if (status === 'failed') return 'destructive';
+  if (status === 'delivered') return 'default';
+  if (status === 'failed' || status === 'dead_lettered') return 'destructive';
   return 'secondary';
 };
 
@@ -63,7 +63,7 @@ export function WebhooksView() {
   const [replayEndpoint, setReplayEndpoint] = React.useState<AdminWebhookEndpoint | null>(null);
   const [replayEvents, setReplayEvents] = React.useState<AdminWebhookEvent[]>([]);
   const [replayLoading, setReplayLoading] = React.useState(false);
-  const [replayingEventId, setReplayingEventId] = React.useState<string | null>(null);
+  const [replayingDeliveryId, setReplayingDeliveryId] = React.useState<string | null>(null);
   const { data, loading, error, refetch } = useAdminData(() => adminApi.listWebhookEndpoints());
 
   const endpoints = data ?? [];
@@ -93,10 +93,14 @@ export function WebhooksView() {
   };
 
   const handleReplayEvent = async (event: AdminWebhookEvent) => {
-    setReplayingEventId(event.id);
-    // Replay targets the webhook EVENT id, not the endpoint id.
-    const result = await adminApi.replayWebhookEvent(event.id);
-    setReplayingEventId(null);
+    if (!replayEndpoint) {
+      toast.error('Select a webhook endpoint before replaying an event.');
+      return;
+    }
+
+    setReplayingDeliveryId(event.deliveryId);
+    const result = await adminApi.replayWebhookEvent(replayEndpoint.id, event.eventId);
+    setReplayingDeliveryId(null);
     if (result.ok) {
       toast.success(`Replay queued for ${event.eventType}`);
     } else {
@@ -105,12 +109,12 @@ export function WebhooksView() {
   };
 
   const handleTogglePause = async (endpoint: AdminWebhookEndpoint) => {
-    const newStatus = endpoint.status === 'active' ? 'paused' : 'active';
+    const newStatus = endpoint.status === 'active' ? 'disabled' : 'active';
     const result = await adminApi.updateWebhookEndpoint(endpoint.id, {
       status: newStatus,
     });
     if (result.ok) {
-      toast.success(`Endpoint ${newStatus === 'paused' ? 'paused' : 'resumed'}`);
+      toast.success(`Endpoint ${newStatus === 'disabled' ? 'disabled' : 'resumed'}`);
       refetch();
     } else {
       toast.error(result.error.message);
@@ -212,7 +216,7 @@ export function WebhooksView() {
                     variant={
                       endpoint.status === 'active'
                         ? 'default'
-                        : endpoint.status === 'paused'
+                        : endpoint.status === 'disabled'
                           ? 'secondary'
                           : 'destructive'
                     }
@@ -317,7 +321,7 @@ export function WebhooksView() {
             <div className="max-h-80 space-y-2 overflow-y-auto">
               {replayEvents.map((event) => (
                 <div
-                  key={event.id}
+                  key={event.deliveryId}
                   className="flex items-center justify-between rounded-lg border p-3"
                 >
                   <div className="min-w-0 space-y-1">
@@ -335,9 +339,9 @@ export function WebhooksView() {
                     size="sm"
                     variant="outline"
                     onClick={() => handleReplayEvent(event)}
-                    disabled={replayingEventId === event.id}
+                    disabled={replayingDeliveryId === event.deliveryId}
                   >
-                    {replayingEventId === event.id ? (
+                    {replayingDeliveryId === event.deliveryId ? (
                       <LoaderCircle className="size-4 animate-spin" />
                     ) : (
                       <RotateCcw className="size-4" />

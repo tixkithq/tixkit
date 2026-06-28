@@ -64,20 +64,34 @@ export async function deliverWebhookActivity(input: {
   try {
     const endpointRepo = new WebhookEndpointRepository(db);
     const endpoint = await endpointRepo.findById(input.endpointId);
+    const deliveryRepo = new WebhookDeliveryRepository(db);
     if (!endpoint) {
+      await deliveryRepo.create({
+        endpointId: null,
+        requestedEndpointId: input.endpointId,
+        eventId: input.eventId,
+        attempt: input.attempt,
+        status: 'dead_lettered',
+        response: 'Webhook endpoint not found',
+        nextRetryAt: null,
+      });
       return errResult('ENDPOINT_NOT_FOUND', 'Webhook endpoint not found', false);
     }
-    if (endpoint.status !== 'active') {
-      return errResult('ENDPOINT_INACTIVE', 'Webhook endpoint is not active', false);
-    }
 
-    const deliveryRepo = new WebhookDeliveryRepository(db);
+    const inactiveEndpoint = endpoint.status !== 'active';
     const delivery = await deliveryRepo.create({
       endpointId: input.endpointId,
       eventId: input.eventId,
       attempt: input.attempt,
+      status: inactiveEndpoint ? 'dead_lettered' : undefined,
+      response: inactiveEndpoint ? 'Webhook endpoint is not active' : undefined,
+      nextRetryAt: inactiveEndpoint ? null : undefined,
     });
     deliveryId = delivery.id;
+    if (inactiveEndpoint) {
+      return errResult('ENDPOINT_INACTIVE', 'Webhook endpoint is not active', false);
+    }
+
     const signature = signWebhookPayload({ payload: input.payload, secret: endpoint.secret as string });
     const eventType = input.eventType ?? parseWebhookEventType(input.payload);
     const response = await withSpan(
@@ -143,7 +157,7 @@ export async function deliverWebhookActivity(input: {
     return errResult(
       'WEBHOOK_DELIVERY_FAILED',
       err instanceof Error ? err.message : 'Unknown error',
-      true,
+      input.finalAttempt !== true,
     );
   } finally {
     await db.destroy();

@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { adminApi } from '@/lib/api';
 
 describe('Webhook create/update', () => {
@@ -38,19 +38,19 @@ describe('Webhook create/update', () => {
 
     const webhookId = createResult.data.id;
     const updateResult = await adminApi.updateWebhookEndpoint(webhookId, {
-      status: 'paused',
+      status: 'disabled',
       description: 'Updated description',
     });
     expect(updateResult.ok).toBe(true);
     if (updateResult.ok) {
-      expect(updateResult.data.status).toBe('paused');
+      expect(updateResult.data.status).toBe('disabled');
       expect(updateResult.data.description).toBe('Updated description');
     }
   });
 
   it('updateWebhookEndpoint returns error for nonexistent endpoint', async () => {
     const result = await adminApi.updateWebhookEndpoint('nonexistent_wh', {
-      status: 'paused',
+      status: 'disabled',
     });
     expect(result.ok).toBe(false);
     if (!result.ok) {
@@ -65,10 +65,36 @@ describe('Webhook create/update', () => {
     if (!events.ok) return;
     expect(events.data.length).toBeGreaterThan(0);
     const eventId = events.data[0].id;
-    const result = await adminApi.replayWebhookEvent(eventId);
+    const result = await adminApi.replayWebhookEvent('wh_001', eventId);
     expect(result.ok).toBe(true);
     if (result.ok) {
       expect(result.data.queued).toBe(true);
+    }
+  });
+
+  it('replayWebhookEvent posts to the endpoint-scoped replay URL', async () => {
+    vi.resetModules();
+    const requestMock = vi.fn(async () => ({ ok: true as const, data: { queued: true as const } }));
+    vi.doMock('@/lib/api-http', () => ({
+      getAdminApiBaseUrl: vi.fn(() => 'https://api.test'),
+      getAdminApiAuthHeaders: vi.fn(async () => ({})),
+      request: requestMock,
+      withFixture: async (call: () => Promise<unknown>) => call(),
+    }));
+
+    try {
+      const { adminApi: isolatedAdminApi } = await import('@/lib/api');
+
+      const result = await isolatedAdminApi.replayWebhookEvent('wh_001', 'whe_001');
+
+      expect(result.ok).toBe(true);
+      expect(requestMock).toHaveBeenCalledWith(
+        '/v1/webhook-endpoints/wh_001/events/whe_001/replay',
+        { method: 'POST' },
+      );
+    } finally {
+      vi.doUnmock('@/lib/api-http');
+      vi.resetModules();
     }
   });
 
@@ -77,6 +103,10 @@ describe('Webhook create/update', () => {
     expect(result.ok).toBe(true);
     if (result.ok) {
       expect(result.data.every((e) => e.endpointId === 'wh_001')).toBe(true);
+      expect(result.data.every((e) => e.deliveryId.startsWith('whd_'))).toBe(true);
+      expect(result.data.every((e) => e.eventId === e.id)).toBe(true);
+      expect(result.data.map((e) => e.status)).toContain('delivered');
+      expect(result.data.map((e) => e.status)).toContain('dead_lettered');
     }
   });
 

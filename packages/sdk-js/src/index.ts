@@ -936,13 +936,16 @@ export type MessageProviderEvent = {
 
 export type WebhookEvent = {
   id: string;
-  endpointId: string;
+  eventId: string;
+  deliveryId: string;
+  endpointId: string | null;
+  requestedEndpointId: string;
   eventType: string;
   status: string;
   attemptCount: number;
   createdAt: string;
   deliveredAt?: string;
-  responseStatus?: number;
+  statusCode?: number;
 };
 
 export type PageResult<T> = {
@@ -1392,8 +1395,8 @@ class EventResource {
 
   async upsertMarketingIntegration(
     eventId: string,
+    provider: MarketingIntegration['provider'],
     input: {
-      provider: MarketingIntegration['provider'];
       config: Record<string, unknown>;
       consentRequired?: boolean;
       status?: 'active' | 'disabled';
@@ -1401,7 +1404,7 @@ class EventResource {
   ): Promise<MarketingIntegration> {
     return this.client.request(
       'PUT',
-      `/events/${eventId}/marketing-integrations/${input.provider}`,
+      `/events/${eventId}/marketing-integrations/${provider}`,
       { body: input },
     );
   }
@@ -1964,6 +1967,15 @@ class WebhookEndpointResource {
     return this.client.request('GET', `/webhook-endpoints/${endpointId}/events`, {
       params: paginationParams(params),
     });
+  }
+  async replayEvent(
+    endpointId: string,
+    eventId: string,
+  ): Promise<{ queued: true; eventId: string; endpointId: string }> {
+    return this.client.request(
+      'POST',
+      `/webhook-endpoints/${endpointId}/events/${eventId}/replay`,
+    );
   }
   async replay(eventId: string): Promise<{ message: string; eventId: string; endpoints: number }> {
     return this.client.request('POST', `/webhook-events/${eventId}/replay`);

@@ -94,7 +94,22 @@ export class WebhookEventRepository extends BaseRepository {
 }
 
 export class WebhookDeliveryRepository extends BaseRepository {
-  async create(input: { endpointId: string; eventId: string; attempt: number }) {
+  async create(input: {
+    endpointId: string | null;
+    requestedEndpointId?: string;
+    eventId: string;
+    attempt: number;
+    status?: string;
+    statusCode?: number | null;
+    response?: string | null;
+    deliveredAt?: Date | null;
+    nextRetryAt?: Date | null;
+  }) {
+    const requestedEndpointId = input.requestedEndpointId ?? input.endpointId;
+    if (!requestedEndpointId) {
+      throw new Error('Webhook delivery requires a requested endpoint id');
+    }
+
     const id = `whd_${ulid()}`;
     const now = new Date();
     return this.insertReturning(
@@ -102,13 +117,14 @@ export class WebhookDeliveryRepository extends BaseRepository {
       {
         id,
         endpoint_id: input.endpointId,
+        requested_endpoint_id: requestedEndpointId,
         event_id: input.eventId,
         attempt: input.attempt,
-        status_code: null,
-        response: null,
-        status: 'pending',
-        delivered_at: null,
-        next_retry_at: now,
+        status_code: input.statusCode ?? null,
+        response: input.response ?? null,
+        status: input.status ?? 'pending',
+        delivered_at: input.deliveredAt ?? null,
+        next_retry_at: input.nextRetryAt === undefined ? now : input.nextRetryAt,
         created_at: now,
       },
       id,
