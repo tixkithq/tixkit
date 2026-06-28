@@ -136,7 +136,6 @@ export async function withIdempotency(
     const error = err as Error & {
       statusCode?: number;
       code?: string;
-      details?: Record<string, unknown>;
     };
     if ((error.statusCode ?? 500) >= 500) {
       await deleteRecord(db, recordId);
@@ -148,9 +147,8 @@ export async function withIdempotency(
         response_status: error.statusCode ?? 500,
         response_body: JSON.stringify({
           error: {
-            code: error.code ?? 'INTERNAL_ERROR',
+            code: error.code ?? 'VALIDATION_ERROR',
             message: error.message,
-            details: error.details,
           },
         }),
         status: 'completed',

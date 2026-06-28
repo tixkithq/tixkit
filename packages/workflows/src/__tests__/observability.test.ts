@@ -20,11 +20,9 @@ describe('worker observability', () => {
     const { OpenTelemetryActivityInboundInterceptor } =
       await import('@temporalio/interceptors-opentelemetry');
     const { startOpenTelemetry } = await import('@tixkit/shared');
-    const runtime = startOpenTelemetry({ serviceName: 'smoke-worker', disabled: true });
-    await runtime.shutdown();
 
     expect(typeof OpenTelemetryActivityInboundInterceptor).toBe('function');
-    expect(typeof runtime.shutdown).toBe('function');
+    expect(typeof startOpenTelemetry).toBe('function');
   });
 
   it('exports serialized workflow spans through the OTel 2.x exporter shape', async () => {

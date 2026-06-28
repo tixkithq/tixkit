@@ -24,8 +24,11 @@ async function ignoreAlreadyApplied(operation: () => Promise<void>): Promise<voi
       record.code === '42704' ||
       record.code === '42P07' ||
       record.code === 'ER_DUP_KEYNAME' ||
+      record.code === 'ER_CANT_DROP_FIELD_OR_KEY' ||
       record.errno === 1061 ||
       record.errno === '1061' ||
+      record.errno === 1091 ||
+      record.errno === '1091' ||
       record.number === 2714 ||
       /does not exist|already exists|duplicate/i.test(message)
     ) {

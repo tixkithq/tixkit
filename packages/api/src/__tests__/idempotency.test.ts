@@ -451,11 +451,19 @@ describe('withIdempotency', () => {
       const error = new Error('Refund already processed') as Error & {
         statusCode: number;
         code: string;
+        details: Record<string, unknown>;
+        internalReason: string;
       };
       error.statusCode = 409;
       error.code = 'REFUND_CONFLICT';
+      error.details = {
+        providerError: 'refund_already_exists',
+        paymentIntentId: 'pi_internal_123',
+      };
+      error.internalReason = 'stripe_refund_duplicate';
       throw error;
     });
+    const requestHash = hashRequest({ refund: true });
 
     await expect(
       withIdempotency(
@@ -463,7 +471,7 @@ describe('withIdempotency', () => {
         {
           key: 'idem-failure',
           tenantId: 'tnt_1',
-          requestHash: hashRequest({ refund: true }),
+          requestHash,
         },
         handler,
       ),
@@ -477,6 +485,31 @@ describe('withIdempotency', () => {
         message: 'Refund already processed',
       },
     });
+    expect(records[0]?.response_body).not.toContain('providerError');
+    expect(records[0]?.response_body).not.toContain('paymentIntentId');
+    expect(records[0]?.response_body).not.toContain('internalReason');
+
+    const replayHandler = vi.fn(async () => ({ status: 201, body: { ok: true } }));
+    const replayed = await withIdempotency(
+      db,
+      {
+        key: 'idem-failure',
+        tenantId: 'tnt_1',
+        requestHash,
+      },
+      replayHandler,
+    );
+
+    expect(replayed).toEqual({
+      status: 409,
+      body: {
+        error: {
+          code: 'REFUND_CONFLICT',
+          message: 'Refund already processed',
+        },
+      },
+    });
+    expect(replayHandler).not.toHaveBeenCalled();
   });
 
   it('does not persist transient 5xx handler failures', async () => {

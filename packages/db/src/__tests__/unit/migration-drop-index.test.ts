@@ -838,6 +838,7 @@ describe('events brand slug migration safety', () => {
     expect(source).toContain('events_brand_slug_unique');
     expect(source).toContain("process.env.DB_DRIVER === 'mysql'");
     expect(source).toContain("process.env.DB_DRIVER === 'mssql'");
+    expect(source).toContain('ER_CANT_DROP_FIELD_OR_KEY');
     expectSourceOrder(upSource, 'events_slug_global_unique', 'addBrandSlugConstraint(db)');
     expectSourceOrder(upSource, 'events_slug_tenant_unique', 'addBrandSlugConstraint(db)');
     expectSourceOrder(downSource, 'events_brand_slug_unique', 'addTenantSlugConstraint(db)');
@@ -976,6 +977,7 @@ describe('webhook delivery attempt identity migration safety', () => {
 
 describe('webhook delivery replay identity migration safety', () => {
   it('rebuilds delivery uniqueness around delivery_key so replays can redeliver attempt 1', async () => {
+    process.env.DB_DRIVER = 'mssql';
     const { WebhookDeliveryReplayIdentityMigration } =
       await import('../../migrations/0027_webhook_delivery_replay_identity.js');
     const db = new FakeWebhookDeliveriesDb([
@@ -1014,8 +1016,13 @@ describe('webhook delivery replay identity migration safety', () => {
     const upSource = migrationMethodSource(source, 'up');
     const downSource = migrationMethodSource(source, 'down');
 
-    expect(upSource).toContain("dropIndex('uniq_webhook_deliveries_attempt_identity')");
-    expect(upSource).toContain(".on('webhook_deliveries')");
+    expect(source).toContain('alter table webhook_deliveries drop index');
+    expect(source).toContain("dropIndex(indexName).on('webhook_deliveries').ifExists()");
+    expect(source).toContain('ER_CANT_DROP_FIELD_OR_KEY');
+    expect(source).toContain('drop index if exists');
+    expect(upSource).toContain(
+      "dropWebhookDeliveriesIndex(db, 'uniq_webhook_deliveries_attempt_identity')",
+    );
     expect(upSource).toContain("addColumn('delivery_key', 'varchar(128)'");
     expect(upSource).toContain("defaultTo('live')");
     expect(upSource).toContain("createIndex('uniq_webhook_deliveries_delivery_identity')");
@@ -1030,19 +1037,20 @@ describe('webhook delivery replay identity migration safety', () => {
     expectSourceOrder(
       upSource,
       "createIndex('uniq_webhook_deliveries_delivery_identity')",
-      "dropIndex('uniq_webhook_deliveries_attempt_identity')",
+      "dropWebhookDeliveriesIndex(db, 'uniq_webhook_deliveries_attempt_identity')",
     );
     expect(downSource).toContain("selectFrom('webhook_deliveries')");
     expect(downSource).toContain("where('delivery_key', '!=', 'live')");
-    expect(downSource).toContain("dropIndex('uniq_webhook_deliveries_delivery_identity')");
+    expect(downSource).toContain(
+      "dropWebhookDeliveriesIndex(db, 'uniq_webhook_deliveries_delivery_identity')",
+    );
     expect(downSource).toContain("dropColumn('delivery_key')");
     expect(downSource).toContain("createIndex('uniq_webhook_deliveries_attempt_identity')");
     expectSourceOrder(
       downSource,
       "selectFrom('webhook_deliveries')",
-      "dropIndex('uniq_webhook_deliveries_delivery_identity')",
+      "dropWebhookDeliveriesIndex(db, 'uniq_webhook_deliveries_delivery_identity')",
     );
-    expectSourceOrder(downSource, ".on('webhook_deliveries')", '.ifExists()');
   });
 
   it('refuses rollback before destructive schema changes when replay rows exist', async () => {
