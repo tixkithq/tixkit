@@ -475,7 +475,7 @@ describeWithIntegrationDatabase('Load and concurrency harnesses', () => {
     const persistedConfig =
       typeof row.config === 'string' ? (JSON.parse(row.config) as unknown) : row.config;
     expect(persistedConfig).toEqual(payload.config);
-    expect(row.consent_required).toBe(payload.consentRequired);
+    expect(Boolean(row.consent_required)).toBe(payload.consentRequired);
     expect(row.status).toBe(payload.status);
   });
 
