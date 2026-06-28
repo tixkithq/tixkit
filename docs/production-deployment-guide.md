@@ -95,6 +95,16 @@ Copy `.env.local.example` as the starting point. Required-for-production variabl
 | `DATABASE_URL_MYSQL` | no | MySQL connection string (Tier-1 deployments) |
 | `REDIS_URL` | yes | Redis connection string |
 
+
+### Signing And Hashing
+
+| Variable | Required | Description |
+| --- | --- | --- |
+| `QR_SIGNING_SECRET` | yes | HMAC secret for ticket QR payloads |
+| `OFFLINE_MANIFEST_SIGNING_KEY` | yes | HMAC key for offline scanner manifests |
+| `OFFLINE_MANIFEST_KEY_ID` | yes | Key identifier embedded in offline scanner manifests |
+| `WIDGET_IMPRESSION_HASH_SECRET` | yes | Hash salt for pseudonymizing widget-impression visitor IDs |
+
 ### Temporal
 
 | Variable | Required | Description |

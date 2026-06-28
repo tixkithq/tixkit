@@ -1,4 +1,5 @@
 import { expect, it, beforeAll, afterAll, beforeEach } from 'vitest';
+import { performance } from 'node:perf_hooks';
 import { createDb, type Database } from '@tixkit/db';
 import {
   PaymentEventRepository,
@@ -43,6 +44,10 @@ const TENANT_ID = `tnt_load_${RUN_ID}`;
 const ORG_ID = `org_load_${RUN_ID}`;
 const BRAND_ID = `brd_load_${RUN_ID}`;
 const EVENT_ID = `evt_load_${RUN_ID}`;
+const CHECKOUT_P95_SLO_MS = 2_000;
+const SCAN_P95_SLO_MS = 500;
+const WEBHOOK_CATCHUP_SLO_MS = 300_000;
+const PAYMENT_SUCCESS_RATE_SLO = 0.98;
 
 async function seedTenantGraph(trx: Database): Promise<void> {
   await trx.insertInto('tenants').values({
@@ -256,6 +261,51 @@ function escapeCsv(val: unknown): string {
   return str;
 }
 
+async function measure<T>(operation: () => Promise<T>): Promise<{ durationMs: number; value: T }> {
+  const startedAt = performance.now();
+  const value = await operation();
+  return {
+    durationMs: performance.now() - startedAt,
+    value,
+  };
+}
+
+async function measureSettled<T>(
+  operation: () => Promise<T>,
+): Promise<{ durationMs: number; outcome: PromiseSettledResult<T> }> {
+  const startedAt = performance.now();
+  try {
+    return {
+      durationMs: performance.now() - startedAt,
+      outcome: { status: 'fulfilled', value: await operation() },
+    };
+  } catch (reason) {
+    return {
+      durationMs: performance.now() - startedAt,
+      outcome: { status: 'rejected', reason },
+    };
+  }
+}
+
+function percentile(values: number[], percentileValue: number): number {
+  if (values.length === 0) return 0;
+  const sorted: number[] = [];
+  for (const value of values) {
+    const index = sorted.findIndex((existing) => existing > value);
+    if (index === -1) sorted.push(value);
+    else sorted.splice(index, 0, value);
+  }
+  const index = Math.ceil(percentileValue * sorted.length) - 1;
+  return sorted[Math.min(Math.max(index, 0), sorted.length - 1)];
+}
+
+function expectSloAtOrBelow(metric: string, actual: number, threshold: number): void {
+  expect(
+    actual,
+    `${metric} expected <= ${threshold}ms, got ${actual.toFixed(2)}ms`,
+  ).toBeLessThanOrEqual(threshold);
+}
+
 describeWithIntegrationDatabase('Load and concurrency harnesses', () => {
   beforeAll(async () => {
     previousDbDriver = setIntegrationDatabaseDriver();
@@ -304,20 +354,25 @@ describeWithIntegrationDatabase('Load and concurrency harnesses', () => {
       sessionIds.push(await createCheckoutSession(db, ticketTypeId));
     }
 
-    const results = await Promise.allSettled(
+    const measuredResults = await Promise.all(
       sessionIds.map((sessionId) =>
-        inventoryService.reserveCart({
-          items: [{ inventoryPoolId: poolId, ticketTypeId, quantity: 1 }],
-          checkoutSessionId: sessionId,
-        }),
+        measureSettled(() =>
+          inventoryService.reserveCart({
+            items: [{ inventoryPoolId: poolId, ticketTypeId, quantity: 1 }],
+            checkoutSessionId: sessionId,
+          }),
+        ),
       ),
     );
+    const results = measuredResults.map((entry) => entry.outcome);
+    const checkoutP95 = percentile(measuredResults.map((entry) => entry.durationMs), 0.95);
 
     const succeeded = results.filter((r) => r.status === 'fulfilled').length;
     const failed = results.filter((r) => r.status === 'rejected').length;
 
     expect(succeeded).toBe(CAPACITY);
     expect(failed).toBe(CONCURRENT_CLIENTS - CAPACITY);
+    expectSloAtOrBelow('checkout reservation p95', checkoutP95, CHECKOUT_P95_SLO_MS);
 
     const pool = await db
       .selectFrom('inventory_pools')
@@ -368,13 +423,15 @@ describeWithIntegrationDatabase('Load and concurrency harnesses', () => {
       }
     };
 
-    const outcomes = await Promise.all(Array.from({ length: BURST }, () => deliver()));
+    const measured = await measure(() => Promise.all(Array.from({ length: BURST }, () => deliver())));
+    const outcomes = measured.value;
 
     const created = outcomes.filter((o) => o === 'created').length;
     const duplicates = outcomes.filter((o) => o === 'duplicate').length;
 
     expect(created).toBe(1);
     expect(duplicates).toBe(BURST - 1);
+    expectSloAtOrBelow('webhook burst catch-up', measured.durationMs, WEBHOOK_CATCHUP_SLO_MS);
 
     const rows = await db
       .selectFrom('payment_events')
@@ -459,19 +516,56 @@ describeWithIntegrationDatabase('Load and concurrency harnesses', () => {
     });
 
     const scannedAt = new Date();
-    const outcomes = await Promise.all(
-      Array.from({ length: BURST }, () => ticketRepo.checkInIfValid(ticket.id, deviceId, scannedAt)),
+    const measuredOutcomes = await Promise.all(
+      Array.from({ length: BURST }, () =>
+        measure(() => ticketRepo.checkInIfValid(ticket.id, deviceId, scannedAt)),
+      ),
     );
+    const outcomes = measuredOutcomes.map((entry) => entry.value);
+    const scanP95 = percentile(measuredOutcomes.map((entry) => entry.durationMs), 0.95);
 
     const accepted = outcomes.filter(Boolean).length;
     const duplicates = outcomes.filter((v) => !v).length;
 
     expect(accepted).toBe(1);
     expect(duplicates).toBe(BURST - 1);
+    expectSloAtOrBelow('scanner check-in p95', scanP95, SCAN_P95_SLO_MS);
 
     const refreshed = await ticketRepo.findById(ticket.id);
     expect(refreshed?.status).toBe('checked_in');
     expect(refreshed?.checked_in_by_device_id).toBe(deviceId);
+  });
+
+  it('payment success SLO: provider success events process above the production threshold', async () => {
+    const ATTEMPTS = 100;
+    const outcomes = await Promise.all(
+      Array.from({ length: ATTEMPTS }, async (_, index) => {
+        const providerEventId = `evt_payment_slo_${ulid()}`;
+        const stored = await paymentEventRepo.create({
+          tenantId: TENANT_ID,
+          provider: 'stripe',
+          providerEventId,
+          eventType: 'payment_intent.succeeded',
+          rawPayload: { id: providerEventId, index, type: 'payment_intent.succeeded' },
+          idempotencyKey: providerEventId,
+        });
+        await paymentEventRepo.markProcessed(stored.id);
+        return stored.id;
+      }),
+    );
+
+    const processed = await db
+      .selectFrom('payment_events')
+      .select(({ fn }) => fn.countAll<number>().as('count'))
+      .where('tenant_id', '=', TENANT_ID)
+      .where('provider', '=', 'stripe')
+      .where('event_type', '=', 'payment_intent.succeeded')
+      .where('processed_at', 'is not', null)
+      .executeTakeFirstOrThrow();
+
+    const successRate = Number(processed.count) / ATTEMPTS;
+    expect(outcomes).toHaveLength(ATTEMPTS);
+    expect(successRate).toBeGreaterThanOrEqual(PAYMENT_SUCCESS_RATE_SLO);
   });
 
   it('large export: 100+ attendees are exported correctly into CSV', async () => {

@@ -44,7 +44,7 @@ Production dashboards must include these panels:
 | --- | --- |
 | Checkout p95 latency | `histogram_quantile(0.95, sum(rate(tixkit_http_request_duration_seconds_bucket{route=~".*checkout.*"}[5m])) by (le))` |
 | Webhook catch-up failures | `sum(rate(tixkit_webhook_events_total{outcome!="ok"}[5m]))` |
-| Scan p95 latency | `histogram_quantile(0.95, sum(rate(tixkit_http_request_duration_seconds_bucket{route=~".*(check-in|scan).*"}[5m])) by (le))` |
+| Scan p95 latency | <code>histogram_quantile(0.95, sum(rate(tixkit_http_request_duration_seconds_bucket{route=~".*(check-in&#124;scan).*"}[5m])) by (le))</code> |
 | Payment success rate | `sum(rate(tixkit_payment_events_total{outcome="ok"}[15m])) / clamp_min(sum(rate(tixkit_payment_events_total[15m])), 1)` |
 | Temporal activity failures | `sum(rate(tixkit_temporal_activity_events_total{outcome!="ok"}[5m])) by (activity)` |
 | Active inventory holds | `tixkit_inventory_active_holds{scope="global"}` |

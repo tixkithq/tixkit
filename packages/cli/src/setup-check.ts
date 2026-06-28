@@ -150,6 +150,13 @@ export const ENV_RULES: EnvRule[] = [
     message: 'Offline manifest key ID is required in production.',
   },
   {
+    variable: 'WIDGET_IMPRESSION_HASH_SECRET',
+    requiredFor: ['production'],
+    message:
+      'Widget impression hash secret is required in production to pseudonymize visitor IDs.',
+    guide: GUIDES.deploy,
+  },
+  {
     variable: 'CLERK_SECRET_KEY',
     requiredFor: ['production'],
     message:

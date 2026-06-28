@@ -22,6 +22,7 @@ function makeCompleteEnv(extra: Record<string, string> = {}): string {
     QR_SIGNING_SECRET: 'qr-local-secret',
     OFFLINE_MANIFEST_SIGNING_KEY: 'offline-local-key',
     OFFLINE_MANIFEST_KEY_ID: 'manifest:v1',
+    WIDGET_IMPRESSION_HASH_SECRET: 'widget-hash-local-secret',
     TEMPORAL_ADDRESS: 'localhost:7233',
     TEMPORAL_NAMESPACE: 'default',
     CLERK_SECRET_KEY: '',
@@ -94,6 +95,7 @@ describe('validateEnvFile', () => {
         NODE_ENV: 'production',
         QR_SIGNING_SECRET: '',
         OFFLINE_MANIFEST_SIGNING_KEY: '',
+        WIDGET_IMPRESSION_HASH_SECRET: '',
         EMAIL_WEBHOOK_SECRET: '',
       }),
     );
@@ -102,6 +104,7 @@ describe('validateEnvFile', () => {
     const variables = result.issues.map((issue) => issue.variable);
     expect(variables).toContain('QR_SIGNING_SECRET');
     expect(variables).toContain('OFFLINE_MANIFEST_SIGNING_KEY');
+    expect(variables).toContain('WIDGET_IMPRESSION_HASH_SECRET');
     expect(variables).toContain('EMAIL_WEBHOOK_SECRET');
   });
 

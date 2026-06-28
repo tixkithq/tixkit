@@ -47,10 +47,10 @@ function toDate(value?: Date | string | null): Date | undefined {
 }
 
 function hashWidgetVisitor(input: { eventId: string; visitorId?: string; ip?: string; userAgent?: string; date: string }): string {
-  const secret = process.env.WIDGET_IMPRESSION_HASH_SECRET ?? 'local-widget-impression-secret';
+  const secret = process.env.WIDGET_IMPRESSION_HASH_SECRET?.trim();
   const visitorMaterial = input.visitorId ?? `${input.ip ?? 'unknown'}|${input.userAgent ?? 'unknown'}`;
   return createHash('sha256')
-    .update([secret, input.eventId, input.date, visitorMaterial].join('|'))
+    .update([secret ?? 'local-widget-impression-secret', input.eventId, input.date, visitorMaterial].join('|'))
     .digest('hex');
 }
 
@@ -160,6 +160,14 @@ export const publicRoutes: FastifyPluginAsync = async (app) => {
     const body = parseBody(widgetImpressionSchema, request.body);
     const event = await new EventRepository(db).findById(eventId);
     if (!event || event.status !== 'published') throw new NotFoundError('Event', eventId);
+    if (!process.env.WIDGET_IMPRESSION_HASH_SECRET?.trim() && process.env.NODE_ENV === 'production') {
+      return reply.status(503).send({
+        error: {
+          code: 'WIDGET_IMPRESSION_HASH_NOT_CONFIGURED',
+          message: 'Widget impression hashing is not configured',
+        },
+      });
+    }
 
     const impressionDate = new Date().toISOString().slice(0, 10);
     const forwardedFor = firstQueryParam(request.headers['x-forwarded-for']).split(',')[0]?.trim();

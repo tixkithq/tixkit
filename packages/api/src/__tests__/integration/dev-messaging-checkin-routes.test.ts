@@ -771,6 +771,56 @@ describe('public access code validation', () => {
     await app.close();
   });
 
+  it('fails closed for widget impressions in production without a hash secret', async () => {
+    const previousNodeEnv = process.env.NODE_ENV;
+    const previousHashSecret = process.env.WIDGET_IMPRESSION_HASH_SECRET;
+    process.env.NODE_ENV = 'production';
+    delete process.env.WIDGET_IMPRESSION_HASH_SECRET;
+
+    const tables = {
+      events: [{
+        id: 'evt_1',
+        tenant_id: 'tnt_1',
+        organization_id: 'org_1',
+        brand_id: 'br_1',
+        slug: 'event',
+        title: 'Event',
+        description: null,
+        status: 'published',
+        timezone: 'America/New_York',
+        starts_at: new Date('2026-06-01T00:00:00.000Z'),
+        ends_at: null,
+        venue: null,
+      }],
+      widget_impressions: [],
+    };
+    const app = await setupApp(publicRoutes, makePrincipal(), tables);
+
+    try {
+      const res = await app.inject({
+        method: 'POST',
+        url: '/public/events/evt_1/widget-impressions',
+        headers: { 'user-agent': 'vitest' },
+        payload: { visitorId: 'visitor_123456' },
+      });
+
+      expect(res.statusCode).toBe(503);
+      expect(res.json()).toEqual({
+        error: {
+          code: 'WIDGET_IMPRESSION_HASH_NOT_CONFIGURED',
+          message: 'Widget impression hashing is not configured',
+        },
+      });
+      expect(tables.widget_impressions).toHaveLength(0);
+    } finally {
+      await app.close();
+      if (previousNodeEnv === undefined) delete process.env.NODE_ENV;
+      else process.env.NODE_ENV = previousNodeEnv;
+      if (previousHashSecret === undefined) delete process.env.WIDGET_IMPRESSION_HASH_SECRET;
+      else process.env.WIDGET_IMPRESSION_HASH_SECRET = previousHashSecret;
+    }
+  });
+
   it('accepts a valid access code for a published locked ticket', async () => {
     const now = new Date('2026-06-01T00:00:00.000Z');
     const app = await setupApp(publicRoutes, makePrincipal(), {
