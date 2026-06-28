@@ -10,6 +10,7 @@ const BRAND_ID = `brd_wl_${RUN_ID}`;
 const EVENT_ID = `evt_wl_${RUN_ID}`;
 const POOL_ID = `pool_wl_${RUN_ID}`;
 const TICKET_TYPE_ID = `tt_wl_${RUN_ID}`;
+const SHARED_POOL_TICKET_TYPE_ID = `tt_wl_shared_${RUN_ID}`;
 
 describe('processWaitlistOffersActivity', () => {
   let db: Database;
@@ -101,6 +102,100 @@ describe('processWaitlistOffersActivity', () => {
     expect(entry.status).toBe('joined');
     expect(entry.claim_token_hash).toBeNull();
   });
+
+  it('processes burst waitlist load in FIFO order without exceeding freed capacity', async () => {
+    const baseTime = Date.now() - 10 * 60_000;
+    await db
+      .updateTable('inventory_pools')
+      .set({ total_capacity: 25, sold_count: 0, updated_at: new Date() })
+      .where('id', '=', POOL_ID)
+      .execute();
+    await db
+      .insertInto('checkout_holds')
+      .values({
+        id: `hold_wl_${RUN_ID}`,
+        inventory_pool_id: POOL_ID,
+        checkout_session_id: `cs_wl_${RUN_ID}`,
+        ticket_type_id: TICKET_TYPE_ID,
+        quantity: 3,
+        expires_at: new Date(Date.now() + 10 * 60_000),
+        status: 'active',
+        created_at: new Date(),
+        updated_at: new Date(),
+      })
+      .execute();
+
+    const entryIds = await Promise.all(
+      Array.from({ length: 60 }, (_, i) =>
+        createWaitlistEntry(db, `burst-${i}@example.com`, {
+          createdAt: new Date(baseTime + i * 1000),
+        }),
+      ),
+    );
+
+    const result = await processWaitlistOffersActivity();
+
+    expect(result).toMatchObject({
+      ok: true,
+      value: { expiredCount: 0, offeredCount: 22 },
+    });
+    const rows = await db
+      .selectFrom('waitlist_entries')
+      .select(['id', 'status', 'claim_token_hash'])
+      .where('id', 'in', entryIds)
+      .orderBy('created_at', 'asc')
+      .execute();
+    expect(rows).toHaveLength(60);
+    expect(rows.slice(0, 22).every((row) => row.status === 'offered')).toBe(true);
+    expect(rows.slice(0, 22).every((row) => /^[a-f0-9]{64}$/.test(row.claim_token_hash ?? ''))).toBe(
+      true,
+    );
+    expect(rows.slice(22).every((row) => row.status === 'joined')).toBe(true);
+    expect(rows.slice(22).every((row) => row.claim_token_hash === null)).toBe(true);
+
+    const replayResult = await processWaitlistOffersActivity();
+
+    expect(replayResult).toMatchObject({
+      ok: true,
+      value: { expiredCount: 0, offeredCount: 0 },
+    });
+    const replayRows = await db
+      .selectFrom('waitlist_entries')
+      .select(['id', 'status'])
+      .where('id', 'in', entryIds)
+      .orderBy('created_at', 'asc')
+      .execute();
+    expect(replayRows.filter((row) => row.status === 'offered')).toHaveLength(22);
+    expect(replayRows.filter((row) => row.status === 'joined')).toHaveLength(38);
+  });
+
+  it('counts existing active offers across ticket types sharing an inventory pool', async () => {
+    await createWaitlistEntry(db, 'shared-active@example.com', {
+      status: 'offered',
+      offerExpiresAt: new Date(Date.now() + 10 * 60_000),
+      offeredAt: new Date(Date.now() - 60_000),
+      claimTokenHash: 'shared_active_hash',
+      ticketTypeId: SHARED_POOL_TICKET_TYPE_ID,
+      createdAt: new Date(Date.now() - 120_000),
+    });
+    const candidateId = await createWaitlistEntry(db, 'shared-candidate@example.com', {
+      createdAt: new Date(Date.now() - 30_000),
+    });
+
+    const result = await processWaitlistOffersActivity();
+
+    expect(result).toMatchObject({
+      ok: true,
+      value: { expiredCount: 0, offeredCount: 0 },
+    });
+    const candidate = await db
+      .selectFrom('waitlist_entries')
+      .select(['status', 'claim_token_hash'])
+      .where('id', '=', candidateId)
+      .executeTakeFirstOrThrow();
+    expect(candidate.status).toBe('joined');
+    expect(candidate.claim_token_hash).toBeNull();
+  });
 });
 
 async function seedBaseRows(db: Database) {
@@ -188,28 +283,52 @@ async function seedBaseRows(db: Database) {
     .execute();
   await db
     .insertInto('ticket_types')
-    .values({
-      id: TICKET_TYPE_ID,
-      event_id: EVENT_ID,
-      name: 'Waitlist Ticket',
-      description: null,
-      kind: 'paid',
-      status: 'sold_out',
-      visibility: 'public',
-      currency: 'USD',
-      price_cents: 1000,
-      minimum_price_cents: null,
-      sales_start_at: null,
-      sales_end_at: null,
-      min_per_order: 1,
-      max_per_order: 10,
-      inventory_pool_id: POOL_ID,
-      sort_order: 0,
-      requires_access_code: false,
-      access_code_hint: null,
-      created_at: new Date(),
-      updated_at: new Date(),
-    })
+    .values([
+      {
+        id: TICKET_TYPE_ID,
+        event_id: EVENT_ID,
+        name: 'Waitlist Ticket',
+        description: null,
+        kind: 'paid',
+        status: 'sold_out',
+        visibility: 'public',
+        currency: 'USD',
+        price_cents: 1000,
+        minimum_price_cents: null,
+        sales_start_at: null,
+        sales_end_at: null,
+        min_per_order: 1,
+        max_per_order: 10,
+        inventory_pool_id: POOL_ID,
+        sort_order: 0,
+        requires_access_code: false,
+        access_code_hint: null,
+        created_at: new Date(),
+        updated_at: new Date(),
+      },
+      {
+        id: SHARED_POOL_TICKET_TYPE_ID,
+        event_id: EVENT_ID,
+        name: 'Shared Pool Waitlist Ticket',
+        description: null,
+        kind: 'paid',
+        status: 'sold_out',
+        visibility: 'public',
+        currency: 'USD',
+        price_cents: 1000,
+        minimum_price_cents: null,
+        sales_start_at: null,
+        sales_end_at: null,
+        min_per_order: 1,
+        max_per_order: 10,
+        inventory_pool_id: POOL_ID,
+        sort_order: 1,
+        requires_access_code: false,
+        access_code_hint: null,
+        created_at: new Date(),
+        updated_at: new Date(),
+      },
+    ])
     .execute();
 }
 
@@ -231,8 +350,10 @@ async function createWaitlistEntry(
   options: {
     status?: string;
     offerExpiresAt?: Date;
+    offeredAt?: Date;
     claimTokenHash?: string | null;
     createdAt?: Date;
+    ticketTypeId?: string;
   } = {},
 ) {
   const now = new Date();
@@ -245,7 +366,7 @@ async function createWaitlistEntry(
       organization_id: ORG_ID,
       brand_id: BRAND_ID,
       event_id: EVENT_ID,
-      ticket_type_id: TICKET_TYPE_ID,
+      ticket_type_id: options.ticketTypeId ?? TICKET_TYPE_ID,
       buyer_email: email,
       buyer_first_name: null,
       buyer_last_name: null,
@@ -254,7 +375,7 @@ async function createWaitlistEntry(
       status: options.status ?? 'joined',
       offer_expires_at: options.offerExpiresAt ?? null,
       claim_token_hash: options.claimTokenHash ?? null,
-      offered_at: options.status === 'offered' ? now : null,
+      offered_at: options.offeredAt ?? (options.status === 'offered' ? now : null),
       claimed_at: null,
       cancelled_at: null,
       created_at: options.createdAt ?? now,

@@ -135,11 +135,26 @@ export async function processWaitlistOffersActivity(): Promise<
         .where('status', '=', 'active')
         .where('expires_at', '>', now)
         .executeTakeFirst();
+      // eslint-disable-next-line no-await-in-loop -- existing unexpired offers consume capacity before later candidates can be offered.
+      const activeOffers = await db
+        .selectFrom('waitlist_entries as active_entry')
+        .innerJoin(
+          'ticket_types as active_ticket_type',
+          'active_ticket_type.id',
+          'active_entry.ticket_type_id',
+        )
+        .select(({ fn }) => fn.sum<number>('active_entry.quantity').as('quantity'))
+        .where('active_ticket_type.inventory_pool_id', '=', inventoryPoolId)
+        .where('active_entry.status', '=', 'offered')
+        .where('active_entry.offer_expires_at', '>', now)
+        .where('active_entry.offered_at', '<', now)
+        .executeTakeFirst();
       const alreadyOffered = reservedByPool.get(inventoryPoolId) ?? 0;
       const available =
         Number(pool.total_capacity) -
         Number(pool.sold_count) -
         Number(activeHolds?.quantity ?? 0) -
+        Number(activeOffers?.quantity ?? 0) -
         alreadyOffered;
       if (available < Number(candidate.quantity)) continue;
 

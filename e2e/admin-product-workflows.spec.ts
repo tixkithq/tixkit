@@ -2,7 +2,8 @@ import { type Page, type Response as PlaywrightResponse, type TestInfo } from '@
 import { test, expect, requireReachable } from './fixtures/validation-test';
 import { expectNoAxeViolations } from './helpers/axe';
 import { adminBaseUrl, apiBaseUrl, checkoutBaseUrl } from './helpers/env';
-import { seedFreeCheckoutEvent } from './helpers/seed';
+import { seedFreeCheckoutEvent, seedTicketVariantCheckoutEvent } from './helpers/seed';
+import { createDb } from '../packages/db/src/client';
 
 const desktopViewport = { width: 1440, height: 1000 } as const;
 const mobileViewport = { width: 390, height: 844 } as const;
@@ -128,6 +129,19 @@ async function firstOrderIdForEvent(page: Page, eventId: string): Promise<string
   expect(response.status(), JSON.stringify(body, null, 2)).toBe(200);
   expect(body.items?.length, JSON.stringify(body, null, 2)).toBeGreaterThan(0);
   return String(body.items[0].id);
+}
+
+async function setInventoryPoolCapacity(poolId: string, totalCapacity: number): Promise<void> {
+  const db = createDb(process.env.DATABASE_URL ?? 'postgres://tixkit:tixkit@localhost:5432/tixkit');
+  try {
+    await db
+      .updateTable('inventory_pools')
+      .set({ total_capacity: totalCapacity, updated_at: new Date() })
+      .where('id', '=', poolId)
+      .execute();
+  } finally {
+    await db.destroy();
+  }
 }
 
 test.describe('admin product workflow coverage', () => {
@@ -348,6 +362,146 @@ test.describe('admin product workflow coverage', () => {
     await expectNoAxeViolations(page, testInfo);
 
     await expectAdminPrimaryRouteMatrix(page, testInfo);
+  });
+
+  test('admin can manage waitlist settings and issue a manual offer', async ({
+    page,
+    request,
+  }, testInfo) => {
+    await requireReachable(page, adminBaseUrl, 'admin dashboard');
+    await requireReachable(page, checkoutBaseUrl, 'checkout app');
+    await requireReachable(page, `${apiBaseUrl}/health`, 'api');
+
+    const suffix = `${testInfo.workerIndex}-${Date.now()}`;
+    const seeded = await seedTicketVariantCheckoutEvent(request, `waitlist-${suffix}`);
+    const buyerEmail = `waitlist-${suffix}@example.com`;
+    const laterBuyerEmail = `waitlist-later-${suffix}@example.com`;
+    const joinedEntry = await expectJsonStatus<{
+      id: string;
+      email: string;
+      status: string;
+      ticketTypeId: string;
+    }>(
+      await request.post(`${apiBaseUrl}/v1/public/events/${seeded.event.id}/waitlist`, {
+        data: {
+          ticketTypeId: seeded.tickets.soldOut.id,
+          email: buyerEmail,
+          firstName: 'Waitlist',
+          lastName: 'Buyer',
+          quantity: 1,
+        },
+        failOnStatusCode: false,
+      }),
+      201,
+    );
+    expect(joinedEntry).toMatchObject({
+      email: buyerEmail,
+      status: 'joined',
+      ticketTypeId: seeded.tickets.soldOut.id,
+    });
+    const laterJoinedEntry = await expectJsonStatus<{
+      id: string;
+      email: string;
+      status: string;
+      ticketTypeId: string;
+    }>(
+      await request.post(`${apiBaseUrl}/v1/public/events/${seeded.event.id}/waitlist`, {
+        data: {
+          ticketTypeId: seeded.tickets.soldOut.id,
+          email: laterBuyerEmail,
+          firstName: 'Later',
+          lastName: 'Buyer',
+          quantity: 1,
+        },
+        failOnStatusCode: false,
+      }),
+      201,
+    );
+    expect(laterJoinedEntry).toMatchObject({
+      email: laterBuyerEmail,
+      status: 'joined',
+      ticketTypeId: seeded.tickets.soldOut.id,
+    });
+
+    await setInventoryPoolCapacity(seeded.pools.soldOut.id, 2);
+
+    await page.goto(`${adminBaseUrl}/events/${seeded.event.id}/tickets`);
+    await expect(page.getByRole('heading', { name: 'Ticket Types' })).toBeVisible();
+    await expect(page.getByRole('heading', { name: 'Waitlist' })).toBeVisible();
+
+    const waitlistRow = page.getByRole('row').filter({ hasText: buyerEmail });
+    const laterWaitlistRow = page.getByRole('row').filter({ hasText: laterBuyerEmail });
+    await expect(waitlistRow).toBeVisible();
+    await expect(laterWaitlistRow).toBeVisible();
+    await expect(waitlistRow.getByText('Sold Out Admission')).toBeVisible();
+    await expect(waitlistRow.getByText('joined')).toBeVisible();
+    await expect(laterWaitlistRow.getByText('joined')).toBeVisible();
+
+    const autoOfferSwitch = page.getByRole('switch', { name: 'Auto-offers' });
+    await expect(autoOfferSwitch).toBeChecked();
+    await autoOfferSwitch.click();
+    await page.getByLabel('Claim window').fill('45');
+
+    const settingsResponsePromise = page.waitForResponse((response) => {
+      return (
+        response.url() === `${apiBaseUrl}/v1/events/${seeded.event.id}/waitlist/settings` &&
+        response.request().method() === 'PATCH'
+      );
+    });
+    await page.getByRole('button', { name: 'Save' }).click();
+    const settings = await expectJsonStatus<{ autoOfferEnabled: boolean; offerTtlMinutes: number }>(
+      await settingsResponsePromise,
+      200,
+    );
+    expect(settings).toEqual({ autoOfferEnabled: false, offerTtlMinutes: 45 });
+
+    const offerResponsePromise = page.waitForResponse((response) => {
+      return (
+        response.url() ===
+          `${apiBaseUrl}/v1/events/${seeded.event.id}/waitlist/${joinedEntry.id}/offer` &&
+        response.request().method() === 'POST'
+      );
+    });
+    await waitlistRow.getByRole('button', { name: 'Offer' }).click();
+    const offer = await expectJsonStatus<{
+      entry: { id: string; status: string; offerExpiresAt?: string };
+      claimToken: string;
+    }>(await offerResponsePromise, 200);
+    expect(offer.entry).toMatchObject({ id: joinedEntry.id, status: 'offered' });
+    expect(offer.entry.offerExpiresAt).toBeTruthy();
+    expect(offer.claimToken).toHaveLength(32);
+
+    await expect(waitlistRow.getByText('offered')).toBeVisible();
+
+    const persistedWaitlist = await expectJsonStatus<{
+      items: Array<{ id: string; status: string; offerExpiresAt?: string }>;
+      settings: { autoOfferEnabled: boolean; offerTtlMinutes: number };
+    }>(
+      await page.request.get(`${apiBaseUrl}/v1/events/${seeded.event.id}/waitlist`, {
+        failOnStatusCode: false,
+      }),
+      200,
+    );
+    expect(persistedWaitlist.settings).toEqual({
+      autoOfferEnabled: false,
+      offerTtlMinutes: 45,
+    });
+    expect(persistedWaitlist.items).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          id: joinedEntry.id,
+          status: 'offered',
+          offerExpiresAt: expect.any(String),
+        }),
+        expect.objectContaining({
+          id: laterJoinedEntry.id,
+          status: 'joined',
+        }),
+      ]),
+    );
+
+    await attachScreenshot(page, testInfo, 'admin-waitlist-offer-desktop');
+    await expectNoAxeViolations(page, testInfo);
   });
 
   test('admin can configure multi-session event occurrences from the tickets workspace', async ({

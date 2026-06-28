@@ -13,6 +13,7 @@ import { webhookRoutes } from '../../routes/modules/webhooks.js';
 import { developerRoutes } from '../../routes/modules/developer.js';
 import { reportingRoutes } from '../../routes/modules/reporting.js';
 import { messagingRoutes } from '../../routes/modules/messaging.js';
+import { waitlistRoutes } from '../../routes/modules/waitlist.js';
 import { hashRequest } from '../../services/idempotency.js';
 
 /**
@@ -703,6 +704,30 @@ describe('cross-tenant denial', () => {
     const tables: Tables = { events: [eventRow({ tenant_id: 'tnt_other' })] };
     const app = await setupApp(eventRoutes, principal, tables);
     const res = await app.inject({ method: 'POST', url: '/events/evt_1/publish' });
+    expect(res.statusCode).toBe(404);
+    await app.close();
+  });
+
+  it('GET /events/:eventId/waitlist returns 404 for event in another tenant', async () => {
+    const tables: Tables = { events: [eventRow({ tenant_id: 'tnt_other' })] };
+    const app = await setupApp(
+      waitlistRoutes,
+      makePrincipal({ scopes: ['events.read'] }),
+      tables,
+    );
+    const res = await app.inject({ method: 'GET', url: '/events/evt_1/waitlist' });
+    expect(res.statusCode).toBe(404);
+    await app.close();
+  });
+
+  it('POST /events/:eventId/waitlist/:entryId/offer returns 404 for event in another tenant', async () => {
+    const tables: Tables = { events: [eventRow({ tenant_id: 'tnt_other' })] };
+    const app = await setupApp(waitlistRoutes, makePrincipal({ scopes: ['tickets.write'] }), tables);
+    const res = await app.inject({
+      method: 'POST',
+      url: '/events/evt_1/waitlist/wle_1/offer',
+      payload: {},
+    });
     expect(res.statusCode).toBe(404);
     await app.close();
   });
@@ -1462,6 +1487,20 @@ describe('brand and event scope denial', () => {
     await app.close();
   });
 
+  it('GET /events/:eventId/waitlist returns 404 for brand-scoped key accessing other brand event', async () => {
+    const principal = makePrincipal({
+      type: 'api_key',
+      id: 'ak_scoped',
+      brandIds: ['brd_A'],
+      scopes: ['events.read'],
+    });
+    const tables: Tables = { events: [eventRow({ tenant_id: 'tnt_1', brand_id: 'brd_B' })] };
+    const app = await setupApp(waitlistRoutes, principal, tables);
+    const res = await app.inject({ method: 'GET', url: '/events/evt_1/waitlist' });
+    expect(res.statusCode).toBe(404);
+    await app.close();
+  });
+
   it('GET /events/:eventId returns 404 for event-scoped key accessing other event', async () => {
     const principal = makePrincipal({
       type: 'api_key',
@@ -1472,6 +1511,24 @@ describe('brand and event scope denial', () => {
     const tables: Tables = { events: [eventRow({ id: 'evt_B', tenant_id: 'tnt_1' })] };
     const app = await setupApp(eventRoutes, principal, tables);
     const res = await app.inject({ method: 'GET', url: '/events/evt_B' });
+    expect(res.statusCode).toBe(404);
+    await app.close();
+  });
+
+  it('PATCH /events/:eventId/waitlist/settings returns 404 for event-scoped key accessing other event', async () => {
+    const principal = makePrincipal({
+      type: 'api_key',
+      id: 'ak_scoped',
+      eventIds: ['evt_A'],
+      scopes: ['tickets.write'],
+    });
+    const tables: Tables = { events: [eventRow({ id: 'evt_B', tenant_id: 'tnt_1' })] };
+    const app = await setupApp(waitlistRoutes, principal, tables);
+    const res = await app.inject({
+      method: 'PATCH',
+      url: '/events/evt_B/waitlist/settings',
+      payload: { autoOfferEnabled: false, offerTtlMinutes: 45 },
+    });
     expect(res.statusCode).toBe(404);
     await app.close();
   });
@@ -1563,6 +1620,30 @@ describe('brand and event scope denial', () => {
 // ===========================================================================
 
 describe('API key scope enforcement', () => {
+  it('GET /events/:eventId/waitlist returns 403 without events.read', async () => {
+    const principal = makePrincipal({ scopes: ['tickets.write'] });
+    const app = await setupApp(waitlistRoutes, principal, {
+      events: [eventRow({ tenant_id: 'tnt_1' })],
+    });
+    const res = await app.inject({ method: 'GET', url: '/events/evt_1/waitlist' });
+    expect(res.statusCode).toBe(403);
+    await app.close();
+  });
+
+  it('PATCH /events/:eventId/waitlist/settings returns 403 without tickets.write', async () => {
+    const principal = makePrincipal({ scopes: ['events.read'] });
+    const app = await setupApp(waitlistRoutes, principal, {
+      events: [eventRow({ tenant_id: 'tnt_1' })],
+    });
+    const res = await app.inject({
+      method: 'PATCH',
+      url: '/events/evt_1/waitlist/settings',
+      payload: { autoOfferEnabled: true, offerTtlMinutes: 60 },
+    });
+    expect(res.statusCode).toBe(403);
+    await app.close();
+  });
+
   it('POST /events returns 403 for principal without events.write', async () => {
     const principal = makePrincipal({ scopes: ['events.read'] });
     const app = await setupApp(eventRoutes, principal, {});

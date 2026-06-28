@@ -598,7 +598,9 @@ function WaitlistTable({
                 <TableHead>Qty</TableHead>
                 <TableHead>Status</TableHead>
                 <TableHead>Offer</TableHead>
-                <TableHead className="w-[120px]" />
+                <TableHead className="w-[120px]">
+                  <span className="sr-only">Actions</span>
+                </TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>

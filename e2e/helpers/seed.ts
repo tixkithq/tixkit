@@ -39,6 +39,7 @@ export type SeededTicketVariantCheckoutEvent = {
     hidden: { id: string };
     locked: { id: string };
     donation: { id: string };
+    soldOut: { id: string };
     shared: { id: string };
   };
 };
@@ -616,6 +617,7 @@ export async function seedTicketVariantCheckoutEvent(
       hidden: hiddenPool,
       locked: lockedPool,
       donation: donationPool,
+      soldOut: soldOutPool,
       shared: sharedPool,
     },
   };
