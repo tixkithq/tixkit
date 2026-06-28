@@ -5,6 +5,7 @@ import { verifyToken } from '@clerk/backend';
 import { jwtVerify } from 'jose';
 import type { FastifyRequest } from 'fastify';
 import type { Principal, Permission } from '@tixkit/domain';
+import type { AuthProvider } from '@tixkit/shared';
 import { ForbiddenError, UnauthorizedError } from '@tixkit/domain';
 import {
   ClerkAuthService,
@@ -12,7 +13,7 @@ import {
   DEV_ORG_ID,
   DEV_TENANT_ID,
 } from '../auth/clerk.js';
-import { OIDCAdapter } from '../auth/providers.js';
+import { createAuthProvider, OIDCAdapter } from '../auth/providers.js';
 import { authRoutes } from '../routes/modules/auth.js';
 
 vi.mock('@clerk/backend', () => ({
@@ -151,7 +152,7 @@ function createAuthDb(initialTables: Tables) {
   };
 }
 
-async function setupAuthRouteApp(authService: ClerkAuthService) {
+async function setupAuthRouteApp(authService: ClerkAuthService | AuthProvider<FastifyRequest>) {
   const app = Fastify({ logger: false });
   app.addHook('onRequest', createAuthMiddleware(authService));
   await app.register(authRoutes, { prefix: '/v1' });
@@ -827,6 +828,27 @@ describe('ClerkAuthService scanner device auth', () => {
 });
 
 describe('authenticated /v1/me route dispatch', () => {
+  it.each([
+    ['staging', 'staging'],
+    ['test', 'test'],
+    ['preview', 'preview'],
+    ['unset', undefined],
+    ['production', 'production'],
+  ])('rejects AUTH_PROVIDER=dev when nodeEnv is %s', (_, nodeEnv) => {
+    const { db } = createAuthDb({});
+
+    expect(() =>
+      createAuthProvider(
+        {
+          provider: 'dev',
+          nodeEnv: nodeEnv as string,
+          clerkSecretKey: '',
+        },
+        db as never,
+      ),
+    ).toThrow('AUTH_PROVIDER=dev is only allowed when NODE_ENV=development');
+  });
+
   it('returns 401 when no supported credentials are present outside local dev mode', async () => {
     const { db } = createAuthDb({});
     const service = new ClerkAuthService('sk_test_auth', db as never);
@@ -837,6 +859,35 @@ describe('authenticated /v1/me route dispatch', () => {
     expect(response.statusCode).toBe(401);
     expect(response.json().error.code).toBe('UNAUTHORIZED');
     await app.close();
+  });
+
+  it('returns 401 outside development even if AUTH_PROVIDER=dev is set', async () => {
+    const { db } = createAuthDb({});
+    const service = new ClerkAuthService('', db as never);
+    const originalNodeEnv = process.env.NODE_ENV;
+    const originalAuthProvider = process.env.AUTH_PROVIDER;
+    process.env.NODE_ENV = 'test';
+    process.env.AUTH_PROVIDER = 'dev';
+    const app = await setupAuthRouteApp(service);
+
+    try {
+      const response = await app.inject({ method: 'GET', url: '/v1/me' });
+
+      expect(response.statusCode).toBe(401);
+      expect(response.json().error.code).toBe('UNAUTHORIZED');
+    } finally {
+      if (originalNodeEnv === undefined) {
+        delete process.env.NODE_ENV;
+      } else {
+        process.env.NODE_ENV = originalNodeEnv;
+      }
+      if (originalAuthProvider === undefined) {
+        delete process.env.AUTH_PROVIDER;
+      } else {
+        process.env.AUTH_PROVIDER = originalAuthProvider;
+      }
+      await app.close();
+    }
   });
 
   it('rejects cookie-only browser requests so admin mutations are not cookie-CSRF authenticated', async () => {
@@ -893,6 +944,33 @@ describe('authenticated /v1/me route dispatch', () => {
       } else {
         process.env.NODE_ENV = originalNodeEnv;
       }
+      await app.close();
+    }
+  });
+
+  it('returns the deterministic principal with AUTH_PROVIDER=dev even when Clerk keys are configured', async () => {
+    const { db } = createAuthDb({});
+    const service = createAuthProvider(
+      {
+        provider: 'dev',
+        nodeEnv: 'development',
+        clerkSecretKey: 'sk_test_auth',
+      },
+      db as never,
+    );
+    const app = await setupAuthRouteApp(service);
+
+    try {
+      const response = await app.inject({ method: 'GET', url: '/v1/me' });
+
+      expect(response.statusCode).toBe(200);
+      expect(response.json()).toMatchObject({
+        id: 'usr_dev_local',
+        tenantId: DEV_TENANT_ID,
+        organizationIds: [DEV_ORG_ID],
+      });
+      expect(response.json().permissions).toContain('billing.write');
+    } finally {
       await app.close();
     }
   });

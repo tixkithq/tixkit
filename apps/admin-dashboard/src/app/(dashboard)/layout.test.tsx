@@ -65,13 +65,19 @@ import DashboardLayout from './layout';
 
 const originalClerkPublishableKey = process.env.CLERK_PUBLISHABLE_KEY;
 const originalNextPublicClerkPublishableKey = process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY;
+const originalAuthProvider = process.env.AUTH_PROVIDER;
+const originalNextPublicAuthProvider = process.env.NEXT_PUBLIC_AUTH_PROVIDER;
 
 function enableClerk() {
+  process.env.AUTH_PROVIDER = 'clerk';
+  process.env.NEXT_PUBLIC_AUTH_PROVIDER = 'clerk';
   process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY = 'pk_test_valid';
   delete process.env.CLERK_PUBLISHABLE_KEY;
 }
 
 function disableClerk() {
+  delete process.env.AUTH_PROVIDER;
+  delete process.env.NEXT_PUBLIC_AUTH_PROVIDER;
   delete process.env.CLERK_PUBLISHABLE_KEY;
   delete process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY;
 }
@@ -87,6 +93,18 @@ function restoreClerkEnv() {
     delete process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY;
   } else {
     process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY = originalNextPublicClerkPublishableKey;
+  }
+
+  if (originalAuthProvider === undefined) {
+    delete process.env.AUTH_PROVIDER;
+  } else {
+    process.env.AUTH_PROVIDER = originalAuthProvider;
+  }
+
+  if (originalNextPublicAuthProvider === undefined) {
+    delete process.env.NEXT_PUBLIC_AUTH_PROVIDER;
+  } else {
+    process.env.NEXT_PUBLIC_AUTH_PROVIDER = originalNextPublicAuthProvider;
   }
 }
 

@@ -17,11 +17,15 @@ function usePermissionsHook() {
 
 afterEach(() => {
   resetPrincipalCache();
+  delete process.env.AUTH_PROVIDER;
+  delete process.env.NEXT_PUBLIC_AUTH_PROVIDER;
   delete process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY;
 });
 
 describe('PermissionProvider (local dev, no Clerk key)', () => {
   beforeEach(() => {
+    delete process.env.AUTH_PROVIDER;
+    delete process.env.NEXT_PUBLIC_AUTH_PROVIDER;
     delete process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY;
   });
 
@@ -36,6 +40,8 @@ describe('PermissionProvider (local dev, no Clerk key)', () => {
 
 describe('PermissionProvider (production, Clerk key present)', () => {
   beforeEach(() => {
+    process.env.AUTH_PROVIDER = 'clerk';
+    process.env.NEXT_PUBLIC_AUTH_PROVIDER = 'clerk';
     process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY = 'pk_test_123';
   });
 

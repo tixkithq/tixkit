@@ -35,7 +35,7 @@ export const DEV_TENANT_ID = 'tnt_dev_local';
 export const DEV_ORG_ID = 'org_dev_local';
 export const DEV_BRAND_ID = 'brd_dev_local';
 
-const ALL_PERMISSIONS: Permission[] = [
+export const ALL_PERMISSIONS: Permission[] = [
   'events.read',
   'events.write',
   'tickets.write',
@@ -101,16 +101,7 @@ export class ClerkAuthService {
       throw new UnauthorizedError('Local dev mode is not active');
     }
 
-    const principal: Principal = {
-      type: 'user',
-      id: 'usr_dev_local',
-      clerkUserId: undefined,
-      tenantId: DEV_TENANT_ID,
-      organizationIds: [DEV_ORG_ID],
-      scopes: ALL_PERMISSIONS,
-    };
-
-    return { principal };
+    return { principal: createLocalDevPrincipal() };
   }
 
   /**
@@ -665,6 +656,17 @@ export class ClerkAuthService {
       throw new NotFoundError(resourceName, resourceId);
     }
   }
+}
+
+export function createLocalDevPrincipal(): Principal {
+  return {
+    type: 'user',
+    id: 'usr_dev_local',
+    clerkUserId: undefined,
+    tenantId: DEV_TENANT_ID,
+    organizationIds: [DEV_ORG_ID],
+    scopes: ALL_PERMISSIONS,
+  };
 }
 
 type AuthMiddlewareProvider =

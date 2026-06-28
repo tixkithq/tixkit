@@ -788,7 +788,7 @@ export type AdminApiKey = {
   scopes?: string[];
 };
 
-export type WebhookEndpointStatus = 'active' | 'paused' | 'disabled';
+export type WebhookEndpointStatus = 'active' | 'disabled';
 
 export type AdminWebhookEndpoint = {
   id: string;
@@ -801,11 +801,14 @@ export type AdminWebhookEndpoint = {
   createdAt: string;
 };
 
-export type WebhookDeliveryStatus = 'succeeded' | 'failed' | 'pending' | 'retrying';
+export type WebhookDeliveryStatus = 'delivered' | 'failed' | 'pending' | 'dead_lettered';
 
 export type AdminWebhookEvent = {
   id: string;
-  endpointId: string;
+  eventId: string;
+  deliveryId: string;
+  endpointId: string | null;
+  requestedEndpointId: string;
   eventType: string;
   status: WebhookDeliveryStatus;
   statusCode?: number;
@@ -1447,7 +1450,7 @@ export type AdminApi = {
   ): Promise<ApiResult<AdminWebhookEndpoint>>;
   /** Lists recent webhook delivery events for an endpoint. */
   listWebhookEvents(endpointId: string): Promise<ApiResult<AdminWebhookEvent[]>>;
-  replayWebhookEvent(eventId: string): Promise<ApiResult<{ queued: true }>>;
+  replayWebhookEvent(endpointId: string, eventId: string): Promise<ApiResult<{ queued: true }>>;
 };
 
 function unwrapPage<T>(value: PageResult<T> | T[]): PageResult<T> {
@@ -2541,7 +2544,7 @@ const fixtureWebhooks: AdminWebhookEndpoint[] = [
     url: 'https://staging.example.com/hooks',
     description: 'Staging webhook handler',
     events: ['ticket.issued', 'ticket.checked_in'],
-    status: 'paused',
+    status: 'disabled',
     failureCount: 3,
     lastDeliveryAt: iso(-604_800_000),
     createdAt: iso(-1_296_000_000),
@@ -2551,9 +2554,12 @@ const fixtureWebhooks: AdminWebhookEndpoint[] = [
 const fixtureWebhookEvents: AdminWebhookEvent[] = [
   {
     id: 'whe_001',
+    eventId: 'whe_001',
+    deliveryId: 'whd_001',
     endpointId: 'wh_001',
+    requestedEndpointId: 'wh_001',
     eventType: 'order.created',
-    status: 'succeeded',
+    status: 'delivered',
     statusCode: 200,
     attemptCount: 1,
     deliveredAt: iso(-3_600_000),
@@ -2561,9 +2567,12 @@ const fixtureWebhookEvents: AdminWebhookEvent[] = [
   },
   {
     id: 'whe_002',
+    eventId: 'whe_002',
+    deliveryId: 'whd_002',
     endpointId: 'wh_001',
+    requestedEndpointId: 'wh_001',
     eventType: 'order.paid',
-    status: 'succeeded',
+    status: 'delivered',
     statusCode: 200,
     attemptCount: 1,
     deliveredAt: iso(-7_200_000),
@@ -2571,9 +2580,12 @@ const fixtureWebhookEvents: AdminWebhookEvent[] = [
   },
   {
     id: 'whe_003',
+    eventId: 'whe_003',
+    deliveryId: 'whd_003',
     endpointId: 'wh_001',
+    requestedEndpointId: 'wh_001',
     eventType: 'order.refunded',
-    status: 'failed',
+    status: 'dead_lettered',
     statusCode: 500,
     attemptCount: 3,
     deliveredAt: iso(-10_800_000),
@@ -2581,9 +2593,12 @@ const fixtureWebhookEvents: AdminWebhookEvent[] = [
   },
   {
     id: 'whe_004',
+    eventId: 'whe_004',
+    deliveryId: 'whd_004',
     endpointId: 'wh_002',
+    requestedEndpointId: 'wh_002',
     eventType: 'ticket.issued',
-    status: 'succeeded',
+    status: 'delivered',
     statusCode: 200,
     attemptCount: 1,
     deliveredAt: iso(-604_800_000),
@@ -4947,13 +4962,17 @@ export const adminApi: AdminApi = {
         );
         return result.ok ? ok(unwrapItems(result.data)) : result;
       },
-      () => ok(fixtureWebhookEvents.filter((e) => e.endpointId === endpointId)),
+      () => ok(fixtureWebhookEvents.filter((e) => e.requestedEndpointId === endpointId)),
     );
   },
 
-  async replayWebhookEvent(eventId) {
+  async replayWebhookEvent(endpointId, eventId) {
     return withFixture(
-      () => request<{ queued: true }>(`/v1/webhook-events/${eventId}/replay`, { method: 'POST' }),
+      () =>
+        request<{ queued: true }>(
+          `/v1/webhook-endpoints/${endpointId}/events/${eventId}/replay`,
+          { method: 'POST' },
+        ),
       () => ok({ queued: true as const }),
     );
   },

@@ -3,8 +3,11 @@
   "globalDependencies": ["tsconfig.base.json", ".env"],
   "globalEnv": [
     "NODE_ENV",
+    "AUTH_PROVIDER",
+    "NEXT_PUBLIC_AUTH_PROVIDER",
     "DATABASE_URL",
     "DATABASE_URL_MYSQL",
+    "DATABASE_URL_MSSQL",
     "DB_DRIVER",
     "DB_INTEGRATION_DRIVER",
     "REDIS_URL",

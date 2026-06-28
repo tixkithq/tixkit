@@ -4,7 +4,7 @@ import type { AuthProvider, AuthProviderName, AuthProviderResult } from '@tixkit
 import type { Database } from '@tixkit/db';
 import type { Permission, Principal, Ulid } from '@tixkit/domain';
 import { ForbiddenError, UnauthorizedError } from '@tixkit/domain';
-import { ClerkAuthService } from './clerk.js';
+import { ClerkAuthService, createLocalDevPrincipal } from './clerk.js';
 
 export type AuthProviderConfig = {
   provider: AuthProviderName;
@@ -71,8 +71,8 @@ export class DevAdapter extends ClerkAdapter {
 
   constructor(clerk: ClerkAuthService, nodeEnv: string) {
     super(clerk);
-    if (nodeEnv === 'production') {
-      throw new Error('AUTH_PROVIDER=dev is not allowed in production');
+    if (nodeEnv !== 'development') {
+      throw new Error('AUTH_PROVIDER=dev is only allowed when NODE_ENV=development');
     }
   }
 
@@ -82,6 +82,10 @@ export class DevAdapter extends ClerkAdapter {
 
   override authenticateUser(): Promise<AuthProviderResult> {
     return this.authenticateLocalDev();
+  }
+
+  override async authenticateLocalDev(): Promise<AuthProviderResult> {
+    return { principal: createLocalDevPrincipal() };
   }
 }
 

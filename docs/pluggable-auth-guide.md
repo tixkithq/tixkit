@@ -14,6 +14,12 @@ Set `AUTH_PROVIDER` to one of:
 
 When `AUTH_PROVIDER` is unset, development defaults to `dev`; every other environment defaults to `clerk`.
 
+The hosted admin frontend also reads `NEXT_PUBLIC_AUTH_PROVIDER`. Keep it aligned
+with `AUTH_PROVIDER` whenever Clerk or another hosted provider is enabled, because
+browser bundles cannot rely on server-only environment variables. A valid
+`NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY` also selects Clerk when the public provider
+flag is omitted, but deployments should set both variables explicitly.
+
 ## Shared Interface
 
 The shared contract lives at `packages/shared/src/auth-provider.ts`.
@@ -40,7 +46,9 @@ Required production variables:
 
 ```bash
 AUTH_PROVIDER=clerk
+NEXT_PUBLIC_AUTH_PROVIDER=clerk
 CLERK_SECRET_KEY=<clerk-secret-key>
+NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY=<clerk-publishable-key>
 CLERK_WEBHOOK_SECRET=<clerk-webhook-secret>
 ```
 
@@ -51,6 +59,7 @@ CLERK_WEBHOOK_SECRET=<clerk-webhook-secret>
 ```bash
 NODE_ENV=development
 AUTH_PROVIDER=dev
+NEXT_PUBLIC_AUTH_PROVIDER=dev
 ```
 
 ## OIDC
