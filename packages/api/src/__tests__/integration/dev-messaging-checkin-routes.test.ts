@@ -3653,6 +3653,104 @@ describe('checkout confirm', () => {
     await app.close();
   });
 
+  it('POST /checkout/sessions/:sessionId/confirm falls back to attached PaymentIntent when Temporal query is transiently unavailable', async () => {
+    const tables = {
+      checkout_sessions: [
+        {
+          id: 'cs_1',
+          tenant_id: 'tnt_1',
+          event_id: 'evt_1',
+          brand_id: 'brd_1',
+          status: 'open',
+          currency: 'USD',
+          quote: JSON.stringify({
+            totalCents: 2500,
+            subtotalCents: 2500,
+            discountCents: 0,
+            taxCents: 0,
+            feeCents: 0,
+          }),
+          buyer: JSON.stringify({ email: 'buyer@test.com' }),
+          cart: JSON.stringify({ items: [{ ticketTypeId: 'tt_1', quantity: 1 }] }),
+          expires_at: new Date(Date.now() + 60000),
+          hold_id: 'hld_1',
+          order_id: null,
+          payment_intent_id: null,
+          client_token: 'tok_1',
+          success_url: null,
+          cancel_url: null,
+          idempotency_key: 'key_1',
+        },
+      ],
+      events: [
+        {
+          id: 'evt_1',
+          tenant_id: 'tnt_1',
+          organization_id: 'org_1',
+          brand_id: 'brd_1',
+          status: 'published',
+          slug: 'evt',
+          title: 'Event',
+          timezone: 'UTC',
+          starts_at: new Date(),
+          visibility: 'public',
+          seo: '{}',
+        },
+      ],
+      payment_intents: [
+        {
+          id: 'pi_db_1',
+          tenant_id: 'tnt_1',
+          checkout_session_id: 'cs_1',
+          provider_intent_id: 'pi_provider_1',
+          amount_cents: 2500,
+          currency: 'USD',
+          status: 'requires_payment_method',
+          client_secret: 'pi_provider_1_secret_123',
+        },
+      ],
+      idempotency_records: [],
+    };
+    const startCheckoutSession = vi.fn(async () => {
+      Object.assign((tables.checkout_sessions as Array<Record<string, unknown>>)[0], {
+        status: 'pending_payment',
+        payment_intent_id: 'pi_db_1',
+      });
+      return {
+        workflowId: 'checkout-session:cs_1',
+        result: async () => ({ status: 'completed', orderId: 'ord_1' }),
+      };
+    });
+    const getCheckoutState = vi.fn(async () => {
+      throw new Error('Failed to query Workflow');
+    });
+    const app = await setupApp(checkoutRoutes, makePrincipal(), tables, {
+      temporalClient: {
+        startCheckoutSession,
+        getCheckoutState,
+      },
+    });
+    const res = await app.inject({
+      method: 'POST',
+      url: '/checkout/sessions/cs_1/confirm',
+      headers: { 'idempotency-key': 'key-2', 'x-checkout-session-token': 'tok_1' },
+      payload: {},
+    });
+
+    expect(res.statusCode).toBe(200);
+    expect(res.json()).toMatchObject({
+      sessionId: 'cs_1',
+      status: 'pending_payment',
+      paymentIntentId: 'pi_provider_1',
+      clientSecret: 'pi_provider_1_secret_123',
+      totalCents: 2500,
+      currency: 'USD',
+    });
+    expect(startCheckoutSession).toHaveBeenCalledOnce();
+    expect(getCheckoutState).toHaveBeenCalledWith('checkout-session:cs_1');
+    await app.close();
+  });
+
   it('POST /checkout/sessions/:sessionId/confirm finalizes local capture intents server-side', async () => {
     const startCheckoutSession = vi.fn(async () => ({
       workflowId: 'checkout-session:cs_1',

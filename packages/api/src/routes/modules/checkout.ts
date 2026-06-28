@@ -453,6 +453,47 @@ export const checkoutRoutes: FastifyPluginAsync = async (app) => {
   const inventoryService = app.context.inventoryService;
   const temporalClient = app.context.temporalClient;
 
+  async function readDurablePendingPayment(input: {
+    sessionId: string;
+    tenantId: string;
+    totalCents: number;
+    currency: string;
+  }) {
+    const refreshedSession = await db
+      .selectFrom('checkout_sessions')
+      .select(['payment_intent_id', 'status'])
+      .where('id', '=', input.sessionId)
+      .where('tenant_id', '=', input.tenantId)
+      .executeTakeFirst();
+
+    if (!refreshedSession?.payment_intent_id || refreshedSession.status !== 'pending_payment') {
+      return undefined;
+    }
+
+    const paymentIntent = await db
+      .selectFrom('payment_intents')
+      .select(['provider_intent_id', 'amount_cents', 'currency', 'client_secret'])
+      .where('id', '=', refreshedSession.payment_intent_id)
+      .where('checkout_session_id', '=', input.sessionId)
+      .where('tenant_id', '=', input.tenantId)
+      .executeTakeFirst();
+
+    if (!paymentIntent?.provider_intent_id) return undefined;
+    if (Number(paymentIntent.amount_cents) !== input.totalCents) return undefined;
+    if (String(paymentIntent.currency).toUpperCase() !== input.currency.toUpperCase()) {
+      return undefined;
+    }
+
+    return {
+      sessionId: input.sessionId,
+      status: 'pending_payment' as const,
+      paymentIntentId: paymentIntent.provider_intent_id,
+      clientSecret: paymentIntent.client_secret ?? undefined,
+      totalCents: input.totalCents,
+      currency: input.currency,
+    };
+  }
+
   // Public buyer-facing checkout. No admin principal is required; tenancy is
   // resolved from the (published) event being purchased. Session IDs are
   // unguessable ULIDs, so retrieval/confirmation by ID is safe to expose.
@@ -967,7 +1008,31 @@ export const checkoutRoutes: FastifyPluginAsync = async (app) => {
 
         if (session.status === 'pending_payment') {
           const workflowId = `checkout-session:${sessionId}`;
-          const state = await temporalClient.getCheckoutState(workflowId);
+          let state: CheckoutState;
+          try {
+            state = await temporalClient.getCheckoutState(workflowId);
+          } catch (err) {
+            const durablePendingPayment = await readDurablePendingPayment({
+              sessionId,
+              tenantId: session.tenant_id,
+              totalCents: quote.totalCents,
+              currency: session.currency,
+            });
+            if (durablePendingPayment) {
+              return { status: 200, body: durablePendingPayment };
+            }
+
+            return {
+              status: 503,
+              body: {
+                error: {
+                  code: 'SERVICE_UNAVAILABLE',
+                  message: err instanceof Error ? err.message : 'Payment intent is being created',
+                  requestId: request.id,
+                },
+              },
+            };
+          }
           if (state.status === 'completed' && state.orderId) {
             const order = await orderRepo.findById(state.orderId);
             if (!order) throw new NotFoundError('Order', state.orderId);
@@ -1063,6 +1128,15 @@ export const checkoutRoutes: FastifyPluginAsync = async (app) => {
             }
           } catch (err) {
             lastError = err instanceof Error ? err : new Error(String(err));
+            const durablePendingPayment = await readDurablePendingPayment({
+              sessionId,
+              tenantId: session.tenant_id,
+              totalCents: quote.totalCents,
+              currency: session.currency,
+            });
+            if (durablePendingPayment) {
+              return { status: 200, body: durablePendingPayment };
+            }
           }
           // eslint-disable-next-line no-await-in-loop -- retry delay intentionally spaces Temporal state reads until the payment intent appears or the deadline expires.
           await new Promise((resolve) => setTimeout(resolve, 100));
