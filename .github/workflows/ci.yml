@@ -93,7 +93,7 @@ jobs:
 
   ios-sdk:
     name: iOS SDK
-    runs-on: macos-15
+    runs-on: macos-latest
     steps:
       - uses: actions/checkout@v7
       - name: Build Swift package
@@ -392,6 +392,8 @@ jobs:
           bun run --env-file=.env.local db:migrate:mysql
       - name: Build widget bundle
         run: bun run --filter @tixkit/widget build
+      - name: Build service dependencies
+        run: bunx turbo run build --filter=@tixkit/db --filter=@tixkit/shared --filter=@tixkit/domain --filter=@tixkit/workflows
       - name: Run Playwright ${{ matrix.browser }}
         run: bun run test:e2e -- --project=${{ matrix.browser }}
       - name: Upload Playwright report
@@ -528,6 +530,9 @@ jobs:
       - name: Run database migrations
         if: steps.provider-secrets.outputs.available == 'true'
         run: bun run --env-file=.env.local db:migrate
+      - name: Build dependencies
+        if: steps.provider-secrets.outputs.available == 'true'
+        run: bunx turbo run build --filter=@tixkit/db --filter=@tixkit/shared
       - name: Run direct Stripe provider workflow test
         if: steps.provider-secrets.outputs.available == 'true'
         run: RUN_STRIPE_PROVIDER_TESTS=1 bun run --env-file=.env.local --filter @tixkit/workflows test:provider:stripe

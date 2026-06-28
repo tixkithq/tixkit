@@ -83,7 +83,7 @@ jobs:
 
   ios-sdk-dry-run:
     name: iOS SDK Dry Run
-    runs-on: macos-15
+    runs-on: macos-latest
     steps:
       - uses: actions/checkout@v7
       - name: Build and test Swift package
