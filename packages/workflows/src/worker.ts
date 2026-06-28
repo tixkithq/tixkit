@@ -1,6 +1,5 @@
-import { Worker, NativeConnection } from '@temporalio/worker';
+import { Worker, NativeConnection, type ActivityInterceptorsFactory } from '@temporalio/worker';
 import { Connection, Client } from '@temporalio/client';
-import { OpenTelemetryActivityInboundInterceptor } from '@temporalio/interceptors-opentelemetry';
 import { createTelemetryResource, createTraceExporter } from '@tixkit/shared';
 import { createRequire } from 'node:module';
 import { config } from './config.js';
@@ -18,13 +17,28 @@ async function runWorker(): Promise<void> {
   const connection = await NativeConnection.connect({
     address: config.temporalAddress,
   });
-  const telemetryResource = await createTelemetryResource({
-    serviceName: 'tixkit-worker',
-    serviceVersion: process.env.npm_package_version,
-    environment: process.env.NODE_ENV ?? 'development',
-    otlpEndpoint: process.env.OTEL_EXPORTER_OTLP_ENDPOINT,
-  });
-  const workflowTraceExporter = await createTraceExporter({ serviceName: 'tixkit-worker' });
+  const tracingDisabled = process.env.OTEL_SDK_DISABLED === 'true';
+  const telemetryResource = tracingDisabled
+    ? undefined
+    : await createTelemetryResource({
+        serviceName: 'tixkit-worker',
+        serviceVersion: process.env.npm_package_version,
+        environment: process.env.NODE_ENV ?? 'development',
+        otlpEndpoint: process.env.OTEL_EXPORTER_OTLP_ENDPOINT,
+      });
+  const workflowTraceExporter = tracingDisabled
+    ? undefined
+    : await createTraceExporter({ serviceName: 'tixkit-worker' });
+  const activityInterceptors: ActivityInterceptorsFactory[] = [
+    (ctx) => ({ inbound: new TixkitActivityMetricsInterceptor(ctx, observability.metrics) }),
+  ];
+  if (!tracingDisabled) {
+    const { OpenTelemetryActivityInboundInterceptor } =
+      await import('@temporalio/interceptors-opentelemetry');
+    activityInterceptors.unshift((ctx) => ({
+      inbound: new OpenTelemetryActivityInboundInterceptor(ctx),
+    }));
+  }
 
   const worker = await Worker.create({
     connection,
@@ -32,16 +46,19 @@ async function runWorker(): Promise<void> {
     taskQueue: config.temporalTaskQueue,
     workflowsPath: require.resolve('./workflows/index.js'),
     activities: allActivities,
-    enableSDKTracing: true,
-    sinks: {
-      exporter: createWorkflowExporterSink(workflowTraceExporter, telemetryResource),
-    },
+    enableSDKTracing: !tracingDisabled,
+    ...(workflowTraceExporter && telemetryResource
+      ? {
+          sinks: {
+            exporter: createWorkflowExporterSink(workflowTraceExporter, telemetryResource),
+          },
+        }
+      : {}),
     interceptors: {
-      workflowModules: [require.resolve('./workflows/otel-interceptors.js')],
-      activity: [
-        (ctx) => ({ inbound: new OpenTelemetryActivityInboundInterceptor(ctx) }),
-        (ctx) => ({ inbound: new TixkitActivityMetricsInterceptor(ctx, observability.metrics) }),
-      ],
+      ...(tracingDisabled
+        ? {}
+        : { workflowModules: [require.resolve('./workflows/otel-interceptors.js')] }),
+      activity: activityInterceptors,
     },
   });
 
