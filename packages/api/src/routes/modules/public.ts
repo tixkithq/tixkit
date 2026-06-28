@@ -23,6 +23,29 @@ function firstQueryParam(value: unknown): string {
   return Array.isArray(value) ? String(value[0] ?? '') : typeof value === 'string' ? value : '';
 }
 
+function normalizeHost(value: unknown): string {
+  const host = firstQueryParam(value).trim();
+  if (!host) return '';
+  if (host.includes('://') || /[\s,/?#]/.test(host)) return '';
+  try {
+    const url = new URL(`https://${host}`);
+    if (url.port || url.username || url.password || url.pathname !== '/' || url.search || url.hash) {
+      return '';
+    }
+    return url.hostname.toLowerCase().replace(/\.$/, '');
+  } catch {
+    return '';
+  }
+}
+
+function isPubliclyReadableEvent(event: { status: string; visibility?: string | null }): boolean {
+  return event.status === 'published' && event.visibility !== 'private';
+}
+
+function boolValue(value: unknown): boolean {
+  return value === true || value === 1;
+}
+
 function parseRequestedProducts(value: unknown): string[] {
   return firstQueryParam(value)
     .split(',')
@@ -111,7 +134,7 @@ export const publicRoutes: FastifyPluginAsync = async (app) => {
   app.get('/public/events/:eventId', async (request) => {
     const { eventId } = request.params as { eventId: string };
     const event = await new EventRepository(db).findById(eventId);
-    if (!event || event.status !== 'published') throw new NotFoundError('Event', eventId);
+    if (!event || !isPubliclyReadableEvent(event)) throw new NotFoundError('Event', eventId);
     const marketingIntegrations = await db
       .selectFrom('marketing_integrations')
       .selectAll()
@@ -135,10 +158,70 @@ export const publicRoutes: FastifyPluginAsync = async (app) => {
     };
   });
 
+  app.get('/public/events/by-slug/:slug', async (request) => {
+    const { slug } = request.params as { slug: string };
+    const host = normalizeHost((request.query as { host?: unknown }).host);
+    if (!host) throw new NotFoundError('Event', slug);
+
+    const brandDomain = await db
+      .selectFrom('brand_domains')
+      .selectAll()
+      .where('domain', '=', host)
+      .where('is_verified', '=', true)
+      .where('ssl_status', '=', 'active')
+      .executeTakeFirst();
+    if (
+      !brandDomain ||
+      !boolValue(brandDomain.is_verified) ||
+      brandDomain.ssl_status !== 'active'
+    ) {
+      throw new NotFoundError('Event', slug);
+    }
+
+    const brand = await db
+      .selectFrom('brands')
+      .selectAll()
+      .where('id', '=', brandDomain.brand_id)
+      .executeTakeFirst();
+    if (!brand || !boolValue(brand.white_label)) throw new NotFoundError('Event', slug);
+
+    const event = await new EventRepository(db).findByBrandSlug(brandDomain.brand_id as string, slug);
+    if (!event || !isPubliclyReadableEvent(event)) throw new NotFoundError('Event', slug);
+
+    const tenant = await db
+      .selectFrom('tenants')
+      .selectAll()
+      .where('id', '=', event.tenant_id)
+      .executeTakeFirst();
+    if (!tenant || tenant.plan === 'free') throw new NotFoundError('Event', slug);
+
+    const marketingIntegrations = await db
+      .selectFrom('marketing_integrations')
+      .selectAll()
+      .where('event_id', '=', event.id)
+      .where('status', '=', 'active')
+      .execute();
+    return {
+      id: event.id,
+      slug: event.slug,
+      title: event.title,
+      description: event.description,
+      status: event.status,
+      timezone: event.timezone,
+      startsAt: event.starts_at,
+      endsAt: event.ends_at,
+      venue: parseJsonValue(event.venue, null),
+      brandId: event.brand_id,
+      marketingIntegrations: marketingIntegrations.map((row) =>
+        serializeMarketingIntegration(row, { public: true }),
+      ),
+    };
+  });
+
   app.get('/public/events/:eventId/marketing-integrations', async (request) => {
     const { eventId } = request.params as { eventId: string };
     const event = await new EventRepository(db).findById(eventId);
-    if (!event || event.status !== 'published') throw new NotFoundError('Event', eventId);
+    if (!event || !isPubliclyReadableEvent(event)) throw new NotFoundError('Event', eventId);
     const rows = await db
       .selectFrom('marketing_integrations')
       .selectAll()
@@ -155,7 +238,7 @@ export const publicRoutes: FastifyPluginAsync = async (app) => {
   app.get('/public/events/:eventId/occurrences', async (request) => {
     const { eventId } = request.params as { eventId: string };
     const event = await new EventRepository(db).findById(eventId);
-    if (!event || event.status !== 'published') throw new NotFoundError('Event', eventId);
+    if (!event || !isPubliclyReadableEvent(event)) throw new NotFoundError('Event', eventId);
 
     const occurrences = await new EventOccurrenceRepository(db).findByEvent(eventId);
     return {
@@ -187,7 +270,7 @@ export const publicRoutes: FastifyPluginAsync = async (app) => {
     const { eventId } = request.params as { eventId: string };
     const body = parseBody(widgetImpressionSchema, request.body);
     const event = await new EventRepository(db).findById(eventId);
-    if (!event || event.status !== 'published') throw new NotFoundError('Event', eventId);
+    if (!event || !isPubliclyReadableEvent(event)) throw new NotFoundError('Event', eventId);
     if (
       !process.env.WIDGET_IMPRESSION_HASH_SECRET?.trim() &&
       process.env.NODE_ENV === 'production'
@@ -259,7 +342,7 @@ export const publicRoutes: FastifyPluginAsync = async (app) => {
       (request.query as { products?: unknown }).products,
     );
     const event = await new EventRepository(db).findById(eventId);
-    if (!event || event.status !== 'published') throw new NotFoundError('Event', eventId);
+    if (!event || !isPubliclyReadableEvent(event)) throw new NotFoundError('Event', eventId);
 
     const ttRepo = new TicketTypeRepository(db);
     // Public listings include public ticket types. Explicit product filters may
@@ -352,7 +435,7 @@ export const publicRoutes: FastifyPluginAsync = async (app) => {
       }
 
       const event = await new EventRepository(db).findById(eventId);
-      if (!event || event.status !== 'published') throw new NotFoundError('Event', eventId);
+      if (!event || !isPubliclyReadableEvent(event)) throw new NotFoundError('Event', eventId);
 
       const ticketTypes = await db
         .selectFrom('ticket_types')
@@ -398,7 +481,7 @@ export const publicRoutes: FastifyPluginAsync = async (app) => {
   app.get('/public/events/:eventId/questions', async (request) => {
     const { eventId } = request.params as { eventId: string };
     const event = await new EventRepository(db).findById(eventId);
-    if (!event || event.status !== 'published') throw new NotFoundError('Event', eventId);
+    if (!event || !isPubliclyReadableEvent(event)) throw new NotFoundError('Event', eventId);
 
     const questions = await db
       .selectFrom('questions')

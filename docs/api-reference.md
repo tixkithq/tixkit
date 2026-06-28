@@ -287,6 +287,8 @@ All routes below require authentication. Most mutations are tenant-scoped and ad
 
 Payment account responses include Connect lifecycle fields: `detailsSubmitted`, `chargesEnabled`, `payoutsEnabled`, `requirements`, `disabledReason`, and optional `onboardingUrl`.
 
+Custom domains are a paid white-label feature. A domain must be verified and have active SSL before checkout resolves `https://{domain}/{eventSlug}`. Pending or unverified domains do not resolve event root slugs.
+
 ### Events
 
 | Method  | Path                          | Scope          | Description                                         |
@@ -298,6 +300,20 @@ Payment account responses include Connect lifecycle fields: `detailsSubmitted`, 
 | `POST`  | `/v1/events/:eventId/publish` | `events.write` | Set status `published`                              |
 | `POST`  | `/v1/events/:eventId/pause`   | `events.write` | Set status `paused`                                 |
 | `POST`  | `/v1/events/:eventId/archive` | `events.write` | Set status `archived`                               |
+
+Event slug contract:
+
+- `events.slug` is unique per brand.
+- Shared hosted links use event IDs: `https://<checkout-domain>/e/{eventId}`.
+- Verified paid custom domains may resolve root slugs: `https://{customer-domain}/{eventSlug}`.
+- The shared checkout domain does not resolve root slugs.
+
+### Public Event Routes
+
+| Method | Path                                 | Auth | Description                                                                    |
+| ------ | ------------------------------------ | ---- | ------------------------------------------------------------------------------ |
+| `GET`  | `/v1/public/events/:eventId`         | none | Get a published public/unlisted event by ID for shared hosted checkout pages    |
+| `GET`  | `/v1/public/events/by-slug/:slug`    | none | Get a published public/unlisted event by slug for verified custom-domain pages |
 
 ### Ticketing & Inventory
 

@@ -538,14 +538,136 @@ describe('tenant settings list permission gates', () => {
       makePrincipal({ organizationIds: ['org_1'], scopes: ['settings.write'] }),
       {
         brands: [
-          brandRow({ id: 'brd_1', organization_id: 'org_1' }),
+          brandRow({ id: 'brd_1', organization_id: 'org_1', white_label: 1 }),
           brandRow({ id: 'brd_other', organization_id: 'org_other' }),
+        ],
+        brand_domains: [
+          {
+            id: 'bdom_1',
+            brand_id: 'brd_1',
+            domain: 'tickets.example.test',
+            is_primary: 1,
+            is_verified: 0,
+            ssl_status: 'pending',
+            created_at: new Date('2026-06-01T00:00:00.000Z'),
+            updated_at: new Date('2026-06-01T00:00:00.000Z'),
+          },
+          {
+            id: 'bdom_other',
+            brand_id: 'brd_other',
+            domain: 'other.example.test',
+            is_primary: true,
+            is_verified: false,
+            ssl_status: 'pending',
+            created_at: new Date('2026-06-01T00:00:00.000Z'),
+            updated_at: new Date('2026-06-01T00:00:00.000Z'),
+          },
         ],
       },
     );
     const res = await app.inject({ method: 'GET', url: '/brands' });
     expect(res.statusCode).toBe(200);
-    expect(res.json().map((brand: { id: string }) => brand.id)).toEqual(['brd_1']);
+    expect(res.json()).toEqual([
+      expect.objectContaining({
+        id: 'brd_1',
+        whiteLabel: true,
+        domains: [
+          expect.objectContaining({
+            brandId: 'brd_1',
+            domain: 'tickets.example.test',
+            isPrimary: true,
+            isVerified: false,
+            sslStatus: 'pending',
+          }),
+        ],
+      }),
+    ]);
+    await app.close();
+  });
+
+  it('POST /brands returns the serialized brand contract', async () => {
+    const app = await setupApp(
+      tenantRoutes,
+      makePrincipal({ organizationIds: ['org_1'], scopes: ['settings.write'] }),
+      { organizations: [organizationRow({ id: 'org_1' })] },
+    );
+    const res = await app.inject({
+      method: 'POST',
+      url: '/brands',
+      payload: {
+        organizationId: 'org_1',
+        name: 'Serialized Brand',
+        slug: 'serialized-brand',
+        theme: { primaryColor: '#1d4ed8' },
+        whiteLabel: true,
+      },
+    });
+    expect(res.statusCode).toBe(201);
+    expect(res.json()).toEqual(
+      expect.objectContaining({
+        tenantId: 'tnt_1',
+        organizationId: 'org_1',
+        name: 'Serialized Brand',
+        slug: 'serialized-brand',
+        theme: { primaryColor: '#1d4ed8' },
+        whiteLabel: true,
+      }),
+    );
+    expect(res.json()).not.toHaveProperty('tenant_id');
+    expect(res.json()).not.toHaveProperty('organization_id');
+    expect(res.json()).not.toHaveProperty('white_label');
+    await app.close();
+  });
+
+  it('PATCH /brands/:brandId and POST /brands/:brandId/domains return serialized contracts', async () => {
+    const app = await setupApp(
+      tenantRoutes,
+      makePrincipal({ organizationIds: ['org_1'], scopes: ['settings.write'] }),
+      { brands: [brandRow({ id: 'brd_1', organization_id: 'org_1' })] },
+    );
+
+    const patchRes = await app.inject({
+      method: 'PATCH',
+      url: '/brands/brd_1',
+      payload: {
+        name: 'Updated Brand',
+        theme: { primaryColor: '#0f766e' },
+        whiteLabel: true,
+      },
+    });
+    expect(patchRes.statusCode).toBe(200);
+    expect(patchRes.json()).toEqual(
+      expect.objectContaining({
+        id: 'brd_1',
+        tenantId: 'tnt_1',
+        organizationId: 'org_1',
+        name: 'Updated Brand',
+        theme: { primaryColor: '#0f766e' },
+        whiteLabel: true,
+      }),
+    );
+    expect(patchRes.json()).not.toHaveProperty('tenant_id');
+    expect(patchRes.json()).not.toHaveProperty('organization_id');
+    expect(patchRes.json()).not.toHaveProperty('white_label');
+
+    const domainRes = await app.inject({
+      method: 'POST',
+      url: '/brands/brd_1/domains',
+      payload: { domain: 'tickets.example.test', isPrimary: true },
+    });
+    expect(domainRes.statusCode).toBe(201);
+    expect(domainRes.json()).toEqual(
+      expect.objectContaining({
+        brandId: 'brd_1',
+        domain: 'tickets.example.test',
+        isPrimary: true,
+        isVerified: false,
+        sslStatus: 'pending',
+      }),
+    );
+    expect(domainRes.json()).not.toHaveProperty('brand_id');
+    expect(domainRes.json()).not.toHaveProperty('is_primary');
+    expect(domainRes.json()).not.toHaveProperty('ssl_status');
     await app.close();
   });
 });

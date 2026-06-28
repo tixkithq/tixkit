@@ -10,11 +10,11 @@ import {
 import type {
   CreateOrganizationInput,
   CreateBrandInput,
-  AddBrandDomainInput,
 } from '@tixkit/domain';
 import { ValidationError } from '@tixkit/domain';
 import { writeAuditLog } from '../../auth/audit.js';
-import { parseBody, updateBrandSchema } from '../../http/schemas.js';
+import { addBrandDomainSchema, parseBody, updateBrandSchema } from '../../http/schemas.js';
+import { serializeBrand, serializeBrandDomain } from '../../http/contracts.js';
 import Stripe from 'stripe';
 
 type PaymentAccountRow = {
@@ -292,7 +292,7 @@ export const tenantRoutes: FastifyPluginAsync = async (app) => {
       diffSummary: { name: body.name, slug: body.slug, organizationId: body.organizationId },
     });
 
-    return reply.status(201).send(brand);
+    return reply.status(201).send(serializeBrand(brand));
   });
 
   app.patch('/brands/:brandId', async (request) => {
@@ -357,14 +357,14 @@ export const tenantRoutes: FastifyPluginAsync = async (app) => {
           : {}),
       },
     });
-    return updated;
+    return serializeBrand(updated);
   });
 
   app.post('/brands/:brandId/domains', async (request, reply) => {
     const principal = request.principal!;
     ClerkAuthService.requirePermission(principal, 'settings.write');
     const { brandId } = request.params as { brandId: string };
-    const body = request.body as AddBrandDomainInput;
+    const body = parseBody(addBrandDomainSchema, request.body);
 
     const brandRepo = new BrandRepository(db);
     const brand = await brandRepo.findById(brandId);
@@ -381,7 +381,7 @@ export const tenantRoutes: FastifyPluginAsync = async (app) => {
       resourceId: brandId,
       diffSummary: { domain: body.domain, isPrimary: body.isPrimary },
     });
-    return reply.status(201).send(domain);
+    return reply.status(201).send(serializeBrandDomain(domain));
   });
 
   app.get('/brands', async (request) => {
@@ -391,13 +391,37 @@ export const tenantRoutes: FastifyPluginAsync = async (app) => {
     const brands = await brandRepo.findByTenant(principal.tenantId);
     // Filter by principal's organizations to prevent cross-org data exposure.
     // System principals see all brands.
-    if (principal.type === 'system') return brands;
-    return brands.filter(
-      (brand) =>
-        principal.organizationIds.includes(brand.organization_id) &&
-        (!principal.brandIds ||
-          principal.brandIds.length === 0 ||
-          principal.brandIds.includes(brand.id)),
+    const scopedBrands =
+      principal.type === 'system'
+        ? brands
+        : brands.filter(
+            (brand) =>
+              principal.organizationIds.includes(brand.organization_id) &&
+              (!principal.brandIds ||
+                principal.brandIds.length === 0 ||
+                principal.brandIds.includes(brand.id)),
+          );
+    const brandIds = scopedBrands.map((brand) => String(brand.id));
+    const domains =
+      brandIds.length > 0
+        ? await db
+            .selectFrom('brand_domains')
+            .selectAll()
+            .where('brand_id', 'in', brandIds)
+            .execute()
+        : [];
+    const domainsByBrandId = new Map<string, Array<Record<string, unknown>>>();
+    for (const domain of domains) {
+      const brandId = String(domain.brand_id);
+      const current = domainsByBrandId.get(brandId) ?? [];
+      current.push(domain);
+      domainsByBrandId.set(brandId, current);
+    }
+
+    return scopedBrands.map((brand) =>
+      Object.assign(serializeBrand(brand), {
+        domains: (domainsByBrandId.get(String(brand.id)) ?? []).map(serializeBrandDomain),
+      }),
     );
   });
 

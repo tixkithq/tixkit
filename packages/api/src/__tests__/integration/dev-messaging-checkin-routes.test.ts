@@ -14,37 +14,53 @@ import { authRoutes } from '../../routes/modules/auth.js';
 import { publicRoutes } from '../../routes/modules/public.js';
 import { PricingEngine } from '../../services/pricing.js';
 
+const getMockColumnValue = (row: Record<string, unknown>, column: string) =>
+  row[column] ?? row[column.split('.').at(-1) ?? column];
+
+const mockValuesEqual = (rowValue: unknown, filterValue: unknown): boolean => {
+  if (typeof filterValue === 'boolean' && typeof rowValue === 'number') {
+    return rowValue === (filterValue ? 1 : 0);
+  }
+  return rowValue === filterValue;
+};
+
 function createMockDb(tables: Record<string, unknown> = {}): unknown {
   const getRows = (table: string): Record<string, unknown>[] => {
     if (table in tables) return tables[table] as Record<string, unknown>[];
     return [];
   };
-  const getRow = (table: string): Record<string, unknown> | undefined => {
-    const rows = getRows(table);
-    return rows[0];
-  };
-
   function createQuery(table: string) {
+    const filters: Array<[string, unknown]> = [];
     const query = {
       select: () => query,
       selectAll: () => query,
       innerJoin: () => query,
-      where: () => query,
+      where: (...args: unknown[]) => {
+        if (typeof args[0] === 'string' && args[1] === '=') {
+          filters.push([args[0], args[2]]);
+        }
+        return query;
+      },
       orderBy: () => query,
       limit: () => query,
       forUpdate: () => query,
       fn: { sum: () => 'sum', countAll: () => 'count' },
+      rows() {
+        return getRows(table).filter((row) =>
+          filters.every(([column, value]) => mockValuesEqual(getMockColumnValue(row, column), value)),
+        );
+      },
       async executeTakeFirst() {
         if (table === 'idempotency_records') return undefined;
-        return getRow(table);
+        return query.rows()[0];
       },
       async executeTakeFirstOrThrow() {
-        const row = getRow(table);
+        const row = query.rows()[0];
         if (!row) throw new Error(`No mock for ${table}`);
         return row;
       },
       async execute() {
-        return getRows(table);
+        return query.rows();
       },
     };
     return query;
@@ -398,11 +414,47 @@ describe('brand domain creation', () => {
     const res = await app.inject({
       method: 'POST',
       url: '/brands/brd_1/domains',
-      payload: { domain: 'example.com', isPrimary: true },
+      payload: { domain: 'Example.com.', isPrimary: true },
     });
     expect(res.statusCode).toBe(201);
     const body = res.json();
     expect(body.domain).toBe('example.com');
+    await app.close();
+  });
+
+  it('POST /brands/:brandId/domains rejects malformed domains', async () => {
+    const tables = {
+      brands: [
+        {
+          id: 'brd_1',
+          tenant_id: 'tnt_1',
+          organization_id: 'org_1',
+          name: 'Brand1',
+          slug: 'brand1',
+          status: 'active',
+          theme: '{}',
+          white_label: false,
+          legal_urls: '{}',
+          created_at: new Date(),
+          updated_at: new Date(),
+        },
+      ],
+    };
+    const app = await setupApp(tenantRoutes, makePrincipal(), tables);
+
+    const schemeRes = await app.inject({
+      method: 'POST',
+      url: '/brands/brd_1/domains',
+      payload: { domain: 'https://events.example.com/path', isPrimary: true },
+    });
+    const missingRes = await app.inject({
+      method: 'POST',
+      url: '/brands/brd_1/domains',
+      payload: { isPrimary: true },
+    });
+
+    expect(schemeRes.statusCode).toBe(400);
+    expect(missingRes.statusCode).toBe(400);
     await app.close();
   });
 
@@ -784,6 +836,7 @@ describe('brand domain creation', () => {
 describe('public checkout questions', () => {
   const publishedEvent = {
     id: 'evt_1',
+    tenant_id: 'tnt_1',
     slug: 'event',
     title: 'Event',
     description: null,
@@ -794,6 +847,161 @@ describe('public checkout questions', () => {
     venue: null,
     brand_id: 'br_1',
   };
+
+  it('resolves published custom-domain events by brand-scoped slug', async () => {
+    const app = await setupApp(publicRoutes, makePrincipal(), {
+      events: [
+        {
+          ...publishedEvent,
+          id: 'evt_other',
+          tenant_id: 'tnt_2',
+          brand_id: 'br_other',
+          slug: 'event',
+        },
+        publishedEvent,
+      ],
+      tenants: [
+        { id: 'tnt_1', plan: 'pro' },
+        { id: 'tnt_2', plan: 'pro' },
+      ],
+      brands: [
+        { id: 'br_1', name: 'Brand', slug: 'brand', white_label: 1 },
+        { id: 'br_other', name: 'Other Brand', slug: 'other-brand', white_label: 1 },
+      ],
+      brand_domains: [
+        {
+          id: 'bdom_1',
+          brand_id: 'br_1',
+          domain: 'events.example.com',
+          is_primary: true,
+          is_verified: 1,
+          ssl_status: 'active',
+        },
+      ],
+      marketing_integrations: [],
+    });
+
+    const res = await app.inject({
+      method: 'GET',
+      url: '/public/events/by-slug/event?host=events.example.com',
+    });
+
+    expect(res.statusCode).toBe(200);
+    expect(res.json()).toMatchObject({
+      id: 'evt_1',
+      slug: 'event',
+      brandId: 'br_1',
+    });
+    await app.close();
+  });
+
+  it('does not resolve root slugs for brands without white-label enabled', async () => {
+    const app = await setupApp(publicRoutes, makePrincipal(), {
+      events: [publishedEvent],
+      tenants: [{ id: 'tnt_1', plan: 'pro' }],
+      brands: [{ id: 'br_1', name: 'Brand', slug: 'brand', white_label: 0 }],
+      brand_domains: [
+        {
+          id: 'bdom_1',
+          brand_id: 'br_1',
+          domain: 'events.example.com',
+          is_primary: true,
+          is_verified: 1,
+          ssl_status: 'active',
+        },
+      ],
+      marketing_integrations: [],
+    });
+
+    const res = await app.inject({
+      method: 'GET',
+      url: '/public/events/by-slug/event?host=events.example.com',
+    });
+
+    expect(res.statusCode).toBe(404);
+    await app.close();
+  });
+
+  it('does not resolve root slugs for unverified custom domains', async () => {
+    const app = await setupApp(publicRoutes, makePrincipal(), {
+      events: [publishedEvent],
+      tenants: [{ id: 'tnt_1', plan: 'pro' }],
+      brands: [{ id: 'br_1', name: 'Brand', slug: 'brand', white_label: true }],
+      brand_domains: [
+        {
+          id: 'bdom_1',
+          brand_id: 'br_1',
+          domain: 'events.example.com',
+          is_primary: true,
+          is_verified: false,
+          ssl_status: 'pending',
+        },
+      ],
+      marketing_integrations: [],
+    });
+
+    const res = await app.inject({
+      method: 'GET',
+      url: '/public/events/by-slug/event?host=events.example.com',
+    });
+
+    expect(res.statusCode).toBe(404);
+    await app.close();
+  });
+
+  it('does not resolve root slugs for free-plan tenants', async () => {
+    const app = await setupApp(publicRoutes, makePrincipal(), {
+      events: [publishedEvent],
+      tenants: [{ id: 'tnt_1', plan: 'free' }],
+      brands: [{ id: 'br_1', name: 'Brand', slug: 'brand', white_label: true }],
+      brand_domains: [
+        {
+          id: 'bdom_1',
+          brand_id: 'br_1',
+          domain: 'events.example.com',
+          is_primary: true,
+          is_verified: true,
+          ssl_status: 'active',
+        },
+      ],
+      marketing_integrations: [],
+    });
+
+    const res = await app.inject({
+      method: 'GET',
+      url: '/public/events/by-slug/event?host=events.example.com',
+    });
+
+    expect(res.statusCode).toBe(404);
+    await app.close();
+  });
+
+  it('does not resolve root slugs for malformed host values', async () => {
+    const app = await setupApp(publicRoutes, makePrincipal(), {
+      events: [publishedEvent],
+      tenants: [{ id: 'tnt_1', plan: 'pro' }],
+      brands: [{ id: 'br_1', name: 'Brand', slug: 'brand', white_label: true }],
+      brand_domains: [
+        {
+          id: 'bdom_1',
+          brand_id: 'br_1',
+          domain: 'events.example.com',
+          is_primary: true,
+          is_verified: true,
+          ssl_status: 'active',
+        },
+      ],
+      marketing_integrations: [],
+    });
+
+    const res = await app.inject({
+      method: 'GET',
+      url: '/public/events/by-slug/event?host=events.example.com%3Abad',
+    });
+
+    expect(res.statusCode).toBe(404);
+    await app.close();
+  });
 
   it('serializes conditionalVisibility for buyer and attendee questions', async () => {
     const app = await setupApp(publicRoutes, makePrincipal(), {

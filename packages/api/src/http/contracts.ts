@@ -31,6 +31,10 @@ export function toIso(value: Date | string | null | undefined): string | undefin
   return value instanceof Date ? value.toISOString() : new Date(value).toISOString();
 }
 
+function boolValue(value: unknown): boolean {
+  return value === true || value === 1;
+}
+
 export function parsePagination(query: unknown): PaginationInput {
   const raw = (query ?? {}) as Record<string, unknown>;
   const parsedLimit =
@@ -470,7 +474,7 @@ export function serializeBrand(row: Record<string, unknown>) {
     paymentAccountId: row.payment_account_id ?? undefined,
     supportUrl: row.support_url ?? undefined,
     legalUrls: parseJsonValue(row.legal_urls, {}),
-    whiteLabel: row.white_label,
+    whiteLabel: boolValue(row.white_label),
     createdAt: toIso(row.created_at as Date | string),
     updatedAt: toIso(row.updated_at as Date | string),
   };
@@ -481,8 +485,8 @@ export function serializeBrandDomain(row: Record<string, unknown>) {
     id: row.id,
     brandId: row.brand_id,
     domain: row.domain,
-    isPrimary: row.is_primary,
-    isVerified: row.is_verified,
+    isPrimary: boolValue(row.is_primary),
+    isVerified: boolValue(row.is_verified),
     verificationToken: row.verification_token ?? undefined,
     sslStatus: row.ssl_status,
     createdAt: toIso(row.created_at as Date | string),
