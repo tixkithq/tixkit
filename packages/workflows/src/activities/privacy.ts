@@ -30,6 +30,36 @@ function normalizeJson(value: unknown): unknown {
   }
 }
 
+function redactJsonValue(value: unknown, replacementEmail: string): unknown {
+  const parsed = normalizeJson(value);
+  if (Array.isArray(parsed)) {
+    return parsed.map((entry) => redactJsonValue(entry, replacementEmail));
+  }
+  if (!parsed || typeof parsed !== 'object') return parsed;
+
+  const redacted: Record<string, unknown> = {};
+  for (const [key, entry] of Object.entries(parsed)) {
+    const normalizedKey = key.toLowerCase();
+    if (normalizedKey.includes('email')) {
+      redacted[key] = replacementEmail;
+    } else if (
+      normalizedKey.includes('phone') ||
+      normalizedKey.includes('name') ||
+      normalizedKey.includes('taxid') ||
+      normalizedKey.includes('tax_id')
+    ) {
+      redacted[key] = null;
+    } else {
+      redacted[key] = redactJsonValue(entry, replacementEmail);
+    }
+  }
+  return redacted;
+}
+
+function countUpdatedRows(results: Array<{ numUpdatedRows?: bigint | number }>): number {
+  return results.reduce((count, result) => count + Number(result.numUpdatedRows ?? 0), 0);
+}
+
 function baseOrderQuery(db: Database, request: PrivacyRequestRow) {
   let query = db
     .selectFrom('orders')
@@ -157,6 +187,7 @@ async function erasePrivacyData(db: Database, request: PrivacyRequestRow) {
   const now = new Date();
   const orderIds = orders.map((order) => String(order.id));
   const attendeeIds = attendees.map((attendee) => String(attendee.id));
+  const redactedSubjectEmail = erasedEmail(request.subject_email, `privacy:${request.id}`);
 
   await Promise.all(
     orders.map(async (order) => {
@@ -187,6 +218,29 @@ async function erasePrivacyData(db: Database, request: PrivacyRequestRow) {
     }),
   );
 
+  if (orderIds.length > 0) {
+    const sessions = await db
+      .selectFrom('checkout_sessions')
+      .select(['id', 'buyer'])
+      .where('tenant_id', '=', request.tenant_id)
+      .where('order_id', 'in', orderIds)
+      .execute();
+
+    await Promise.all(
+      sessions.map((session) =>
+        db
+          .updateTable('checkout_sessions')
+          .set({
+            buyer: JSON.stringify(redactJsonValue(session.buyer, redactedSubjectEmail)),
+            updated_at: now,
+          })
+          .where('id', '=', session.id)
+          .where('tenant_id', '=', request.tenant_id)
+          .execute(),
+      ),
+    );
+  }
+
   await Promise.all(
     attendees.map((attendee) =>
       db
@@ -205,20 +259,43 @@ async function erasePrivacyData(db: Database, request: PrivacyRequestRow) {
     ),
   );
 
-  if (attendeeIds.length > 0) {
-    await db
-      .updateTable('tickets')
-      .set({ transferred_to_email: null, updated_at: now })
-      .where('tenant_id', '=', request.tenant_id)
-      .where('attendee_id', 'in', attendeeIds)
-      .execute();
-  }
+  const ticketsTouched =
+    attendeeIds.length === 0
+      ? 0
+      : countUpdatedRows(
+          await db
+            .updateTable('tickets')
+            .set({ transferred_to_email: null, updated_at: now })
+            .where('tenant_id', '=', request.tenant_id)
+            .where('attendee_id', 'in', attendeeIds)
+            .execute(),
+        );
+
+  await db
+    .updateTable('audit_logs')
+    .set({
+      diff_summary: JSON.stringify({
+        subjectEmail: redactedSubjectEmail,
+        redactedAt: now.toISOString(),
+      }),
+    })
+    .where('tenant_id', '=', request.tenant_id)
+    .where('resource_type', '=', 'privacy_request')
+    .where('resource_id', '=', request.id)
+    .execute();
+
+  await db
+    .updateTable('privacy_requests')
+    .set({ subject_email: redactedSubjectEmail })
+    .where('id', '=', request.id)
+    .where('tenant_id', '=', request.tenant_id)
+    .execute();
 
   return {
     erasedAt: now.toISOString(),
     ordersRedacted: orderIds.length,
     attendeesRedacted: attendeeIds.length,
-    ticketsTouched: attendeeIds.length,
+    ticketsTouched,
   };
 }
 
