@@ -1,5 +1,4 @@
 import { Connection, Client } from '@temporalio/client';
-import type { OpenTelemetryWorkflowClientInterceptor as _OTelInterceptor } from '@temporalio/interceptors-opentelemetry';
 import {
   checkoutSessionWorkflow,
   paymentReconciliationWorkflow,
@@ -58,17 +57,20 @@ export class TemporalClient {
   }
 
   static async connect(): Promise<TemporalClient> {
-    const { OpenTelemetryWorkflowClientInterceptor } =
-      await import('@temporalio/interceptors-opentelemetry');
     const connection = await Connection.connect({
       address: config.temporalAddress,
     });
+    const workflowInterceptors = await createWorkflowClientInterceptors();
     const client = new Client({
       connection,
       namespace: config.temporalNamespace,
-      interceptors: {
-        workflow: [new OpenTelemetryWorkflowClientInterceptor()],
-      },
+      ...(workflowInterceptors.length > 0
+        ? {
+            interceptors: {
+              workflow: workflowInterceptors,
+            },
+          }
+        : {}),
     });
     return new TemporalClient(client);
   }
@@ -94,7 +96,7 @@ export class TemporalClient {
     }
   }
 
-  async getCheckoutState(workflowId: string) {
+  async getCheckoutState(workflowId: string): Promise<CheckoutState> {
     const handle = this.client.workflow.getHandle(workflowId);
     return handle.query(getCheckoutStateQuery);
   }
@@ -288,6 +290,16 @@ export class TemporalClient {
       throw err;
     }
   }
+}
+
+async function createWorkflowClientInterceptors() {
+  if (process.env.OTEL_SDK_DISABLED === 'true') {
+    return [];
+  }
+
+  const { OpenTelemetryWorkflowClientInterceptor } =
+    await import('@temporalio/interceptors-opentelemetry');
+  return [new OpenTelemetryWorkflowClientInterceptor()];
 }
 
 function isWorkflowAlreadyStartedError(err: unknown): boolean {

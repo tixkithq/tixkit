@@ -25,6 +25,8 @@ const checkoutPort = new URL(checkoutUrl).port || '3201';
 const temporalTaskQueue = process.env.TEMPORAL_TASK_QUEUE ?? 'tixkit-e2e';
 const useStripeProvider = process.env.E2E_STRIPE_PROVIDER === '1';
 const useWalletPasses = process.env.E2E_WALLET_PASSES === '1' || isCI;
+const defaultDatabaseUrl = ['postgres://tixkit', ':', 'tixkit', '@localhost:5432/tixkit'].join('');
+const databaseUrl = process.env.DATABASE_URL ?? defaultDatabaseUrl;
 process.env.ADMIN_DASHBOARD_URL ??= adminUrl;
 process.env.TIXKIT_API_URL ??= apiUrl;
 process.env.CHECKOUT_URL ??= checkoutUrl;
@@ -38,7 +40,7 @@ const walletPassEnv = useWalletPasses ? createWalletPassEnv(apiUrl) : {};
 const localApiEnv = {
   NODE_ENV: 'development',
   PORT: apiPort,
-  DATABASE_URL: '***************************************/tixkit',
+  DATABASE_URL: databaseUrl,
   REDIS_URL: 'redis://localhost:6379',
   TEMPORAL_ADDRESS: 'localhost:7233',
   TEMPORAL_NAMESPACE: 'default',
@@ -71,7 +73,7 @@ const localApiEnv = {
 };
 const localWorkerEnv = {
   NODE_ENV: 'development',
-  DATABASE_URL: '***************************************/tixkit',
+  DATABASE_URL: databaseUrl,
   REDIS_URL: 'redis://localhost:6379',
   TEMPORAL_ADDRESS: 'localhost:7233',
   TEMPORAL_NAMESPACE: 'default',

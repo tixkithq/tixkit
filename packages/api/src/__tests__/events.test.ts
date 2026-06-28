@@ -69,6 +69,7 @@ function createEventMutationDb(
     concurrentMarketingIntegration?: Record<string, unknown>;
     concurrentMarketingIntegrationError?: unknown;
     concurrentMarketingIntegrationSystemTimeAfterInsert?: Date;
+    marketingIntegrations?: Record<string, unknown>[];
     marketingIntegrationAfterRecoveryUpdate?: Record<string, unknown>;
   } = {},
 ) {
@@ -84,7 +85,7 @@ function createEventMutationDb(
       },
     ],
     audit_logs: [],
-    marketing_integrations: [],
+    marketing_integrations: seed.marketingIntegrations ? [...seed.marketingIntegrations] : [],
   };
   const inserted: Record<string, unknown>[] = [];
   const updates: Record<string, unknown>[] = [];
@@ -110,6 +111,13 @@ function createEventMutationDb(
           conditions.every(([column, value]) => row[column] === value),
         );
         return Promise.resolve(found);
+      },
+      execute() {
+        return Promise.resolve(
+          (rows[table] ?? []).filter((row) =>
+            conditions.every(([column, value]) => row[column] === value),
+          ),
+        );
       },
       executeTakeFirstOrThrow() {
         return query.executeTakeFirst().then((row) => {
@@ -159,31 +167,40 @@ function createEventMutationDb(
   function updateTable(table: string) {
     return {
       set(values: Record<string, unknown>) {
-        return {
-          where(_column: string, _op: string, id: unknown) {
-            const row = (rows[table] ?? []).find((entry) => entry.id === id);
-            const updated = { ...(row ?? { id }), ...values };
-            return {
-              returningAll: () => ({
-                executeTakeFirstOrThrow: async () => {
-                  if (row) Object.assign(row, values);
-                  updates.push(values);
-                  return updated;
-                },
-              }),
-              execute: async () => {
-                if (row) Object.assign(row, values);
-                updates.push(values);
-                if (
-                  table === 'marketing_integrations' &&
-                  seed.marketingIntegrationAfterRecoveryUpdate
-                ) {
-                  Object.assign(row ?? {}, seed.marketingIntegrationAfterRecoveryUpdate);
-                }
-              },
-            };
+        const conditions: Array<[string, unknown]> = [];
+        const updateQuery = {
+          where(column: string, _op: string, value: unknown) {
+            conditions.push([column, value]);
+            return updateQuery;
+          },
+          returningAll: () => ({
+            executeTakeFirstOrThrow: async () => {
+              const row = (rows[table] ?? []).find((entry) =>
+                conditions.every(([column, value]) => entry[column] === value),
+              );
+              if (!row) throw new Error(`No mock row for ${table} update`);
+              Object.assign(row, values);
+              updates.push(values);
+              return { ...row };
+            },
+          }),
+          execute: async () => {
+            const row = (rows[table] ?? []).find((entry) =>
+              conditions.every(([column, value]) => entry[column] === value),
+            );
+            if (!row) return { numUpdatedRows: BigInt(0) };
+            Object.assign(row, values);
+            updates.push(values);
+            if (
+              table === 'marketing_integrations' &&
+              seed.marketingIntegrationAfterRecoveryUpdate
+            ) {
+              Object.assign(row, seed.marketingIntegrationAfterRecoveryUpdate);
+            }
+            return { numUpdatedRows: BigInt(1) };
           },
         };
+        return updateQuery;
       },
     };
   }
@@ -475,31 +492,146 @@ describe('event routes', () => {
     await app.close();
   });
 
+  it('lists only marketing integrations that match the authorized event scope', async () => {
+    const scopedIntegration = {
+      id: 'mkt_scoped',
+      tenant_id: 'tnt_1',
+      organization_id: 'org_1',
+      brand_id: 'brd_1',
+      event_id: 'evt_1',
+      provider: 'ga4',
+      config: JSON.stringify({ measurementId: 'G-SCOPED' }),
+      consent_required: true,
+      status: 'active',
+      created_at: new Date('2026-06-01T00:00:01.000Z'),
+      updated_at: new Date('2026-06-01T00:00:01.000Z'),
+    };
+    const mismatchedIntegration = {
+      ...scopedIntegration,
+      id: 'mkt_mismatched',
+      tenant_id: 'tnt_other',
+      config: JSON.stringify({ measurementId: 'G-OTHER' }),
+    };
+    const { db } = createEventMutationDb({
+      event: baseEventRow({ status: 'published' }),
+      marketingIntegrations: [scopedIntegration, mismatchedIntegration],
+    });
+    const app = await setupEventApp(db, writePrincipal);
+
+    const response = await app.inject({
+      method: 'GET',
+      url: '/events/evt_1/marketing-integrations',
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toMatchObject({
+      items: [
+        {
+          id: 'mkt_scoped',
+          provider: 'ga4',
+          config: { measurementId: 'G-SCOPED' },
+        },
+      ],
+    });
+    await app.close();
+  });
+
+  it('does not update an existing marketing integration outside the event scope', async () => {
+    const mismatchedIntegration = {
+      id: 'mkt_mismatched',
+      tenant_id: 'tnt_other',
+      organization_id: 'org_1',
+      brand_id: 'brd_1',
+      event_id: 'evt_1',
+      provider: 'ga4',
+      config: JSON.stringify({ measurementId: 'G-OTHER' }),
+      consent_required: true,
+      status: 'disabled',
+      created_at: new Date('2026-06-01T00:00:01.000Z'),
+      updated_at: new Date('2026-06-01T00:00:01.000Z'),
+    };
+    const { db, inserted, updates } = createEventMutationDb({
+      event: baseEventRow({ status: 'published' }),
+      marketingIntegrations: [mismatchedIntegration],
+    });
+    const app = await setupEventApp(db, writePrincipal);
+
+    const response = await app.inject({
+      method: 'PUT',
+      url: '/events/evt_1/marketing-integrations/ga4',
+      payload: {
+        config: { measurementId: 'G-SCOPED' },
+        consentRequired: false,
+        status: 'active',
+      },
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(updates).toHaveLength(0);
+    expect(inserted).toContainEqual(
+      expect.objectContaining({
+        tenant_id: 'tnt_1',
+        organization_id: 'org_1',
+        brand_id: 'brd_1',
+        event_id: 'evt_1',
+        provider: 'ga4',
+        config: JSON.stringify({ measurementId: 'G-SCOPED' }),
+      }),
+    );
+    expect(mismatchedIntegration).toMatchObject({
+      tenant_id: 'tnt_other',
+      config: JSON.stringify({ measurementId: 'G-OTHER' }),
+      status: 'disabled',
+    });
+    await app.close();
+  });
+
   it.each([
     [
       'PostgreSQL unique error',
-      Object.assign(new Error('duplicate key value violates unique constraint'), {
-        code: '23505',
-      }),
+      Object.assign(
+        new Error(
+          'duplicate key value violates unique constraint "uniq_marketing_integrations_event_provider"',
+        ),
+        {
+          code: '23505',
+          constraint: 'uniq_marketing_integrations_event_provider',
+        },
+      ),
     ],
     [
       'MSSQL original error number',
-      Object.assign(new Error('Request failed'), {
-        code: 'EREQUEST',
-        originalError: { number: 2627 },
-      }),
+      Object.assign(
+        new Error(
+          "Cannot insert duplicate key row in object 'marketing_integrations' with unique index 'uniq_marketing_integrations_event_provider'",
+        ),
+        {
+          code: 'EREQUEST',
+          originalError: { number: 2627 },
+        },
+      ),
     ],
     [
       'MySQL duplicate entry code',
-      Object.assign(new Error('Duplicate entry'), {
-        code: 'ER_DUP_ENTRY',
-      }),
+      Object.assign(
+        new Error(
+          "Duplicate entry 'evt_1-ga4' for key 'uniq_marketing_integrations_event_provider'",
+        ),
+        {
+          code: 'ER_DUP_ENTRY',
+        },
+      ),
     ],
     [
       'MySQL duplicate entry errno',
-      Object.assign(new Error('Duplicate entry'), {
-        errno: 1062,
-      }),
+      Object.assign(
+        new Error(
+          "Duplicate entry 'evt_1-ga4' for key 'uniq_marketing_integrations_event_provider'",
+        ),
+        {
+          errno: 1062,
+        },
+      ),
     ],
     [
       'SQLite unique constraint error',
@@ -570,6 +702,121 @@ describe('event routes', () => {
         config: { measurementId: 'G-RACED' },
         consentRequired: false,
         status: 'active',
+      });
+      await app.close();
+    },
+  );
+
+  it('does not recover unrelated duplicate errors while upserting marketing integrations', async () => {
+    const existing = {
+      id: 'mkt_existing',
+      tenant_id: 'tnt_1',
+      organization_id: 'org_1',
+      brand_id: 'brd_1',
+      event_id: 'evt_1',
+      provider: 'ga4',
+      config: JSON.stringify({ measurementId: 'G-OLD' }),
+      consent_required: true,
+      status: 'disabled',
+      created_at: new Date('2026-06-01T00:00:01.000Z'),
+      updated_at: new Date('2026-06-01T00:00:01.000Z'),
+    };
+    const { db, updates } = createEventMutationDb({
+      event: baseEventRow({ status: 'published' }),
+      concurrentMarketingIntegration: existing,
+      concurrentMarketingIntegrationError: Object.assign(
+        new Error('duplicate key value violates unique constraint "marketing_integrations_pkey"'),
+        {
+          code: '23505',
+          constraint: 'marketing_integrations_pkey',
+        },
+      ),
+    });
+    const app = await setupEventApp(db, writePrincipal);
+
+    const response = await app.inject({
+      method: 'PUT',
+      url: '/events/evt_1/marketing-integrations/ga4',
+      payload: {
+        config: { measurementId: 'G-RACED' },
+        consentRequired: false,
+        status: 'active',
+      },
+    });
+
+    expect(response.statusCode).toBe(500);
+    expect(updates).toHaveLength(0);
+    expect(existing).toMatchObject({
+      config: JSON.stringify({ measurementId: 'G-OLD' }),
+      status: 'disabled',
+    });
+    await app.close();
+  });
+
+  it.each([
+    [
+      'PostgreSQL bare unique error',
+      Object.assign(new Error('duplicate key value violates unique constraint'), {
+        code: '23505',
+      }),
+    ],
+    [
+      'MSSQL bare original error number',
+      Object.assign(new Error('Request failed'), {
+        code: 'EREQUEST',
+        originalError: { number: 2627 },
+      }),
+    ],
+    [
+      'MySQL bare duplicate entry code',
+      Object.assign(new Error('Duplicate entry'), {
+        code: 'ER_DUP_ENTRY',
+      }),
+    ],
+    [
+      'MySQL bare duplicate entry errno',
+      Object.assign(new Error('Duplicate entry'), {
+        errno: 1062,
+      }),
+    ],
+  ])(
+    'does not recover ambiguous duplicate errors while upserting marketing integrations with %s',
+    async (_label, concurrentMarketingIntegrationError) => {
+      const existing = {
+        id: 'mkt_existing',
+        tenant_id: 'tnt_1',
+        organization_id: 'org_1',
+        brand_id: 'brd_1',
+        event_id: 'evt_1',
+        provider: 'ga4',
+        config: JSON.stringify({ measurementId: 'G-OLD' }),
+        consent_required: true,
+        status: 'disabled',
+        created_at: new Date('2026-06-01T00:00:01.000Z'),
+        updated_at: new Date('2026-06-01T00:00:01.000Z'),
+      };
+      const { db, updates } = createEventMutationDb({
+        event: baseEventRow({ status: 'published' }),
+        concurrentMarketingIntegration: existing,
+        concurrentMarketingIntegrationError,
+      });
+      const app = await setupEventApp(db, writePrincipal);
+
+      const response = await app.inject({
+        method: 'PUT',
+        url: '/events/evt_1/marketing-integrations/ga4',
+        payload: {
+          config: { measurementId: 'G-RACED' },
+          consentRequired: false,
+          status: 'active',
+        },
+      });
+
+      expect(response.statusCode).toBe(500);
+      expect(updates).toHaveLength(0);
+      expect(existing).toMatchObject({
+        config: JSON.stringify({ measurementId: 'G-OLD' }),
+        status: 'disabled',
       });
       await app.close();
     },

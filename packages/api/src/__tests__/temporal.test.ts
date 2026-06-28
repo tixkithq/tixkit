@@ -1,5 +1,38 @@
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { TemporalClient } from '../services/temporal.js';
+
+const temporalClientMocks = vi.hoisted(() => ({
+  connect: vi.fn(async () => ({ connection: 'temporal' })),
+  client: vi.fn(),
+}));
+
+vi.mock('@temporalio/client', () => ({
+  Connection: { connect: temporalClientMocks.connect },
+  Client: temporalClientMocks.client,
+}));
+
+afterEach(() => {
+  vi.unstubAllEnvs();
+  temporalClientMocks.connect.mockClear();
+  temporalClientMocks.client.mockClear();
+});
+
+describe('TemporalClient connection', () => {
+  it('does not create OpenTelemetry workflow interceptors when tracing is disabled', async () => {
+    vi.stubEnv('OTEL_SDK_DISABLED', 'true');
+
+    await TemporalClient.connect();
+
+    expect(temporalClientMocks.connect).toHaveBeenCalledWith({
+      address: 'localhost:7233',
+    });
+    expect(temporalClientMocks.client).toHaveBeenCalledWith(
+      expect.not.objectContaining({
+        interceptors: expect.anything(),
+      }),
+    );
+  });
+});
 
 describe('TemporalClient payment reconciliation', () => {
   it('returns the existing workflow handle when reconciliation was already started', async () => {

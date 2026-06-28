@@ -78,6 +78,9 @@ const marketingIntegrationSchema = z
   });
 
 const mssqlDuplicateInsertErrorNumbers = new Set([2601, 2627]);
+const marketingIntegrationEventProviderConstraint = 'uniq_marketing_integrations_event_provider';
+const marketingIntegrationEventProviderSqliteColumns =
+  'marketing_integrations.event_id, marketing_integrations.provider';
 
 function getErrorNumber(value: unknown): number | undefined {
   if (typeof value === 'number') return value;
@@ -86,26 +89,42 @@ function getErrorNumber(value: unknown): number | undefined {
   return Number.isInteger(parsed) ? parsed : undefined;
 }
 
-function isDuplicateInsert(error: unknown): boolean {
+function isMarketingIntegrationEventProviderDuplicateInsert(error: unknown): boolean {
   if (!error || typeof error !== 'object') return false;
   const record = error as {
     code?: string;
+    constraint?: string;
     errno?: string | number;
+    index?: string;
     message?: string;
     number?: string | number;
     originalError?: { number?: string | number };
   };
   const mssqlNumber = getErrorNumber(record.number) ?? getErrorNumber(record.originalError?.number);
-  return (
-    record.code === '23505' ||
-    record.code === 'ER_DUP_ENTRY' ||
-    record.errno === 1062 ||
-    record.errno === '1062' ||
-    (record.code === 'EREQUEST' &&
-      mssqlNumber !== undefined &&
-      mssqlDuplicateInsertErrorNumbers.has(mssqlNumber)) ||
-    /duplicate|unique/i.test(record.message ?? '')
-  );
+  const message = record.message ?? '';
+  const namesEventProviderConstraint =
+    record.constraint === marketingIntegrationEventProviderConstraint ||
+    record.index === marketingIntegrationEventProviderConstraint ||
+    message.includes(marketingIntegrationEventProviderConstraint);
+  const namesSqliteEventProviderColumns =
+    message.includes(marketingIntegrationEventProviderSqliteColumns) ||
+    (message.includes('marketing_integrations') &&
+      message.includes('event_id') &&
+      message.includes('provider'));
+
+  if (record.code === 'SQLITE_CONSTRAINT_UNIQUE') return namesSqliteEventProviderColumns;
+  if (record.code === '23505') return namesEventProviderConstraint;
+  if (record.code === 'ER_DUP_ENTRY' || record.errno === 1062 || record.errno === '1062') {
+    return namesEventProviderConstraint;
+  }
+  if (
+    record.code === 'EREQUEST' &&
+    mssqlNumber !== undefined &&
+    mssqlDuplicateInsertErrorNumbers.has(mssqlNumber)
+  ) {
+    return namesEventProviderConstraint;
+  }
+  return false;
 }
 
 export const eventRoutes: FastifyPluginAsync = async (app) => {
@@ -354,6 +373,9 @@ export const eventRoutes: FastifyPluginAsync = async (app) => {
     const rows = await db
       .selectFrom('marketing_integrations')
       .selectAll()
+      .where('tenant_id', '=', event.tenant_id)
+      .where('organization_id', '=', event.organization_id)
+      .where('brand_id', '=', event.brand_id)
       .where('event_id', '=', eventId)
       .execute();
     return {
@@ -381,6 +403,9 @@ export const eventRoutes: FastifyPluginAsync = async (app) => {
     const existing = await db
       .selectFrom('marketing_integrations')
       .selectAll()
+      .where('tenant_id', '=', event.tenant_id)
+      .where('organization_id', '=', event.organization_id)
+      .where('brand_id', '=', event.brand_id)
       .where('event_id', '=', eventId)
       .where('provider', '=', body.provider)
       .executeTakeFirst();
@@ -402,6 +427,11 @@ export const eventRoutes: FastifyPluginAsync = async (app) => {
           updated_at: now,
         })
         .where('id', '=', existing.id)
+        .where('tenant_id', '=', event.tenant_id)
+        .where('organization_id', '=', event.organization_id)
+        .where('brand_id', '=', event.brand_id)
+        .where('event_id', '=', eventId)
+        .where('provider', '=', body.provider)
         .execute();
       return serializeMarketingIntegration(updated);
     }
@@ -422,10 +452,13 @@ export const eventRoutes: FastifyPluginAsync = async (app) => {
       await db.insertInto('marketing_integrations').values(values).execute();
       return serializeMarketingIntegration(values);
     } catch (error) {
-      if (!isDuplicateInsert(error)) throw error;
+      if (!isMarketingIntegrationEventProviderDuplicateInsert(error)) throw error;
       const concurrent = await db
         .selectFrom('marketing_integrations')
         .selectAll()
+        .where('tenant_id', '=', event.tenant_id)
+        .where('organization_id', '=', event.organization_id)
+        .where('brand_id', '=', event.brand_id)
         .where('event_id', '=', eventId)
         .where('provider', '=', body.provider)
         .executeTakeFirst();
@@ -447,6 +480,11 @@ export const eventRoutes: FastifyPluginAsync = async (app) => {
           updated_at: recoveredAt,
         })
         .where('id', '=', concurrent.id)
+        .where('tenant_id', '=', event.tenant_id)
+        .where('organization_id', '=', event.organization_id)
+        .where('brand_id', '=', event.brand_id)
+        .where('event_id', '=', eventId)
+        .where('provider', '=', body.provider)
         .execute();
       return serializeMarketingIntegration(recovered);
     }
