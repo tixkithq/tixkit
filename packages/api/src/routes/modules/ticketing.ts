@@ -126,13 +126,13 @@ export const ticketingRoutes: FastifyPluginAsync = async (app) => {
       inventoryPoolId: body.inventoryPoolId,
       visibility: body.visibility,
       description: body.description,
-      minimumPriceCents: body.minimumPriceCents,
+      minimumPriceCents: body.minimumPriceCents ?? undefined,
       salesStartAt: body.salesStartAt ? new Date(body.salesStartAt) : undefined,
       salesEndAt: body.salesEndAt ? new Date(body.salesEndAt) : undefined,
       minPerOrder: body.minPerOrder,
       maxPerOrder: body.maxPerOrder,
       requiresAccessCode: body.requiresAccessCode,
-      accessCodeHint: body.accessCodeHint,
+      accessCodeHint: body.accessCodeHint ?? undefined,
       eventOccurrenceId: body.eventOccurrenceId,
     });
 
@@ -192,7 +192,7 @@ export const ticketingRoutes: FastifyPluginAsync = async (app) => {
         minPerOrder: body.ticketType.minPerOrder,
         maxPerOrder: body.ticketType.maxPerOrder,
         requiresAccessCode: body.ticketType.requiresAccessCode,
-        accessCodeHint: body.ticketType.accessCodeHint,
+        accessCodeHint: body.ticketType.accessCodeHint ?? undefined,
         eventOccurrenceId: body.ticketType.eventOccurrenceId,
       });
 

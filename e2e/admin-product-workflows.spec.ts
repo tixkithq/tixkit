@@ -409,4 +409,89 @@ test.describe('admin product workflow coverage', () => {
     await attachScreenshot(page, testInfo, 'admin-event-occurrences-desktop');
     await expectNoAxeViolations(page, testInfo);
   });
+
+  test('admin can create a locked ticket type with access-code rules', async ({
+    page,
+    request,
+  }, testInfo) => {
+    await requireReachable(page, adminBaseUrl, 'admin dashboard');
+    await requireReachable(page, `${apiBaseUrl}/health`, 'api');
+
+    const suffix = `${testInfo.workerIndex}-${Date.now()}`;
+    const { event } = await seedFreeCheckoutEvent(request, suffix);
+    const ticketName = `Invite Only ${suffix}`;
+    const accessCode = `VIP-${suffix}`;
+
+    await page.goto(`${adminBaseUrl}/events/${event.id}/tickets`);
+    await expect(page.getByRole('heading', { name: 'Ticket Types' })).toBeVisible();
+    await page.getByRole('button', { name: 'Create ticket type' }).click();
+    await expect(page.getByRole('heading', { name: 'Create Ticket Type' })).toBeVisible();
+
+    await page.getByRole('textbox', { name: 'Name', exact: true }).fill(ticketName);
+    await page.getByLabel('Price (cents)').fill('0');
+    await page.getByLabel('Quantity (optional)').fill('12');
+    await page.getByLabel('Pool Name').fill(`${ticketName} Pool`);
+    await page.getByLabel('Pool Capacity').fill('12');
+    await page.getByRole('combobox', { name: 'Visibility' }).click();
+    await page.getByRole('option', { name: 'Locked' }).click();
+    await expect(page.getByLabel('Requires Access Code')).toBeChecked();
+    await page.getByLabel('Access Codes').fill(`${accessCode}\nVIP-DUPLICATE-${suffix}`);
+
+    const createResponsePromise = page.waitForResponse((response) => {
+      return (
+        response.url() === `${apiBaseUrl}/v1/events/${event.id}/ticket-types/batch` &&
+        response.request().method() === 'POST'
+      );
+    });
+    await page.getByRole('button', { name: 'Create Ticket Type' }).click();
+    const created = await expectJsonStatus<{
+      ticketType: {
+        id: string;
+        name: string;
+        visibility: string;
+        requiresAccessCode: boolean;
+      };
+      accessRules: Array<{ type: string; value: string; usesCount: number }>;
+    }>(await createResponsePromise, 201);
+    expect(created.ticketType).toMatchObject({
+      name: ticketName,
+      visibility: 'locked',
+      requiresAccessCode: true,
+    });
+    expect(created.accessRules).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ type: 'code', value: accessCode, usesCount: 0 }),
+      ]),
+    );
+
+    const accessRulesResponse = await page.request.get(
+      `${apiBaseUrl}/v1/ticket-types/${created.ticketType.id}/access-rules`,
+      { failOnStatusCode: false },
+    );
+    const accessRules = await expectJsonStatus<{
+      items: Array<{ ticketTypeId: string; type: string; value: string; usesCount: number }>;
+    }>(accessRulesResponse, 200);
+    expect(accessRules.items).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          ticketTypeId: created.ticketType.id,
+          type: 'code',
+          value: accessCode,
+          usesCount: 0,
+        }),
+      ]),
+    );
+
+    const ticketRow = page.getByRole('row').filter({ hasText: ticketName });
+    await expect(ticketRow).toBeVisible();
+    await expect(ticketRow.getByText('Required', { exact: true })).toBeVisible();
+
+    await page.reload();
+    await expect(page.getByRole('heading', { name: 'Ticket Types' })).toBeVisible();
+    const persistedTicketRow = page.getByRole('row').filter({ hasText: ticketName });
+    await expect(persistedTicketRow).toBeVisible();
+    await expect(persistedTicketRow.getByText('Required', { exact: true })).toBeVisible();
+    await attachScreenshot(page, testInfo, 'admin-locked-ticket-access-code-desktop');
+    await expectNoAxeViolations(page, testInfo);
+  });
 });

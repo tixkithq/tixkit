@@ -263,8 +263,10 @@ describe('API mutation schema drift guards', () => {
         kind: 'paid',
         visibility: 'locked',
         priceCents: 7500,
+        minimumPriceCents: null,
         currency: 'USD',
         requiresAccessCode: true,
+        accessCodeHint: null,
       },
       inventoryPool: {
         name: 'VIP pool',
@@ -273,6 +275,8 @@ describe('API mutation schema drift guards', () => {
       accessRules: [{ type: 'code', value: 'VIP123' }],
     });
     expect(create.inventoryPool?.totalCapacity).toBe(50);
+    expect(create.ticketType.minimumPriceCents).toBeNull();
+    expect(create.ticketType.accessCodeHint).toBeNull();
     expect(create.accessRules?.[0]?.value).toBe('VIP123');
 
     const update = parseBody(updateTicketTypeBatchSchema, {

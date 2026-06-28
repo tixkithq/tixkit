@@ -321,7 +321,7 @@ export const createTicketTypeSchema = z
     visibility: z.enum(['public', 'hidden', 'locked']).optional(),
     currency: currencySchema,
     priceCents: z.number().int().min(0),
-    minimumPriceCents: z.number().int().min(0).optional(),
+    minimumPriceCents: z.number().int().min(0).nullable().optional(),
     salesStartAt: iso8601Schema.optional(),
     salesEndAt: iso8601Schema.optional(),
     minPerOrder: z.number().int().min(1).optional(),
@@ -329,7 +329,7 @@ export const createTicketTypeSchema = z
     inventoryPoolId: ulidSchema,
     eventOccurrenceId: ulidSchema.nullable().optional(),
     requiresAccessCode: z.boolean().optional(),
-    accessCodeHint: z.string().optional(),
+    accessCodeHint: z.string().nullable().optional(),
   })
   .strict();
 

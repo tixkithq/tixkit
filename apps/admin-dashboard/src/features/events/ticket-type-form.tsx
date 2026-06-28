@@ -268,7 +268,6 @@ export function TicketTypeFormDrawer({
       priceCents: values.kind === 'free' ? 0 : values.priceCents,
       minimumPriceCents: values.kind === 'donation' ? (values.minimumPriceCents ?? 0) : null,
       currency: values.currency,
-      quantityTotal: values.quantityTotal || undefined,
       ...buildTicketSalesWindowPayload(values),
       minPerOrder: values.minPerOrder,
       maxPerOrder: values.maxPerOrder,
