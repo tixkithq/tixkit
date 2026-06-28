@@ -2,15 +2,15 @@ services:
   postgres:
     image: postgres:16-alpine
     environment:
-      POSTGRES_USER: gatekit
-      POSTGRES_PASSWORD: gatekit
-      POSTGRES_DB: gatekit
+      POSTGRES_USER: tixkit
+      POSTGRES_PASSWORD: tixkit
+      POSTGRES_DB: tixkit
     ports:
-      - "5432:5432"
+      - '5432:5432'
     volumes:
       - pgdata:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U gatekit"]
+      test: ['CMD-SHELL', 'pg_isready -U tixkit']
       interval: 5s
       timeout: 3s
       retries: 10
@@ -18,16 +18,16 @@ services:
   mysql:
     image: mysql:8.4
     environment:
-      MYSQL_ROOT_PASSWORD: gatekit
-      MYSQL_DATABASE: gatekit
-      MYSQL_USER: gatekit
-      MYSQL_PASSWORD: gatekit
+      MYSQL_ROOT_PASSWORD: tixkit
+      MYSQL_DATABASE: tixkit
+      MYSQL_USER: tixkit
+      MYSQL_PASSWORD: tixkit
     ports:
-      - "3306:3306"
+      - '3306:3306'
     volumes:
       - mysqldata:/var/lib/mysql
     healthcheck:
-      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "gatekit", "-pgatekit"]
+      test: ['CMD', 'mysqladmin', 'ping', '-h', 'localhost', '-u', 'tixkit', '-ptixkit']
       interval: 5s
       timeout: 3s
       retries: 10
@@ -35,9 +35,9 @@ services:
   redis:
     image: redis:7-alpine
     ports:
-      - "6379:6379"
+      - '6379:6379'
     healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
+      test: ['CMD', 'redis-cli', 'ping']
       interval: 5s
       timeout: 3s
       retries: 10
@@ -45,7 +45,7 @@ services:
   temporal:
     image: temporalio/auto-setup:1.24
     ports:
-      - "7233:7233"
+      - '7233:7233'
     environment:
       DB: postgres12
       DB_PORT: 5432
@@ -64,12 +64,12 @@ services:
       POSTGRES_USER: temporal
       POSTGRES_PASSWORD: temporal
     ports:
-      - "5433:5432"
+      - '5433:5432'
 
   temporal-ui:
     image: temporalio/ui:2.32.0
     ports:
-      - "8080:8080"
+      - '8080:8080'
     environment:
       TEMPORAL_ADDRESS: temporal:7233
       TEMPORAL_CORS_ORIGINS: http://localhost:8080
@@ -80,15 +80,30 @@ services:
     image: minio/minio:latest
     command: server /data --console-address ":9001"
     ports:
-      - "9000:9000"
-      - "9001:9001"
+      - '9000:9000'
+      - '9001:9001'
     environment:
       MINIO_ROOT_USER: minioadmin
       MINIO_ROOT_PASSWORD: minioadmin
     volumes:
       - miniodata:/data
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      test: ['CMD', 'curl', '-f', 'http://localhost:9000/minio/health/live']
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  otel-collector:
+    image: otel/opentelemetry-collector-contrib:0.116.1
+    command: ['--config=/etc/otel-collector.yml']
+    ports:
+      - '4317:4317'
+      - '4318:4318'
+      - '13133:13133'
+    volumes:
+      - ./otel-collector.yml:/etc/otel-collector.yml:ro
+    healthcheck:
+      test: ['CMD', '/otelcol-contrib', '--version']
       interval: 10s
       timeout: 5s
       retries: 5

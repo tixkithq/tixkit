@@ -6,10 +6,17 @@ export async function expectNoAxeViolations(
   page: Page,
   testInfo: TestInfo,
   context?: string,
+  excludeContexts: string[] = [],
+  disabledRules: string[] = [],
 ): Promise<void> {
-  const result = await new AxeBuilder({ page })
-    .include(context ?? 'body')
-    .analyze();
+  const builder = new AxeBuilder({ page }).include(context ?? 'body');
+  for (const excludeContext of excludeContexts) {
+    builder.exclude(excludeContext);
+  }
+  if (disabledRules.length > 0) {
+    builder.disableRules(disabledRules);
+  }
+  const result = await builder.analyze();
 
   if (result.violations.length > 0) {
     await testInfo.attach('axe-violations', {

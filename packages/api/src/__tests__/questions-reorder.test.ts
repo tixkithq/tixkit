@@ -1,7 +1,7 @@
 import Fastify from 'fastify';
 import { describe, expect, it } from 'vitest';
-import type { Principal } from '@gatekit/domain';
-import type { Database } from '@gatekit/db';
+import type { Principal } from '@tixkit/domain';
+import type { Database } from '@tixkit/db';
 import type { AppContext } from '../app.js';
 import { questionRoutes } from '../routes/modules/questions.js';
 
@@ -68,7 +68,9 @@ function createQuestionReorderDb(rows: QuestionRow[], failOnQuestionId?: string)
       orderBy: () => query,
       async executeTakeFirst() {
         if (table !== 'events') return undefined;
-        return whereCalls.some((call) => call[0] === 'id' && call[2] === event.id) ? event : undefined;
+        return whereCalls.some((call) => call[0] === 'id' && call[2] === event.id)
+          ? event
+          : undefined;
       },
       async execute() {
         if (table !== 'questions') return [];
@@ -82,6 +84,7 @@ function createQuestionReorderDb(rows: QuestionRow[], failOnQuestionId?: string)
             result = result.filter((row) => value.includes(row.id));
           }
         }
+        // eslint-disable-next-line unicorn/no-array-sort -- the mock query orders a fresh result array to match repository ordering.
         return result.sort((a, b) => a.sort_order - b.sort_order || a.id.localeCompare(b.id));
       },
     };
@@ -176,7 +179,9 @@ describe('question reorder route', () => {
     });
 
     expect(res.statusCode).toBe(200);
-    expect(res.json().items.map((item: { id: string; sortOrder: number }) => [item.id, item.sortOrder])).toEqual([
+    expect(
+      res.json().items.map((item: { id: string; sortOrder: number }) => [item.id, item.sortOrder]),
+    ).toEqual([
       ['q_second', 0],
       ['q_first', 1],
     ]);
@@ -190,7 +195,9 @@ describe('question reorder route', () => {
 
   it('rolls back all sort-order changes if an update fails mid-transaction', async () => {
     const rows = [question('q_first', 0), question('q_second', 1)];
-    const app = await buildQuestionApp(createQuestionReorderDb(rows, 'q_second') as unknown as Database);
+    const app = await buildQuestionApp(
+      createQuestionReorderDb(rows, 'q_second') as unknown as Database,
+    );
 
     const res = await app.inject({
       method: 'POST',

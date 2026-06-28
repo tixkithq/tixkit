@@ -1,7 +1,7 @@
 history.archivalState:
-  - value: "enabled"
+  - value: 'enabled'
 history.archivalProvider:
   - value:
       filestore:
-        fileMode: "dir"
-        dirPath: "/tmp/temporal-archival"
+        fileMode: 'dir'
+        dirPath: '/tmp/temporal-archival'

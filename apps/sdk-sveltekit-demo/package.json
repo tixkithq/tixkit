@@ -1,0 +1,23 @@
+{
+  "name": "@tixkit/sdk-sveltekit-demo",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "vite build",
+    "dev": "vite dev",
+    "preview": "vite preview",
+    "typecheck": "svelte-kit sync && tsc --noEmit -p tsconfig.json",
+    "clean": "rm -rf .svelte-kit build"
+  },
+  "dependencies": {
+    "@tixkit/sveltekit": "workspace:*",
+    "@sveltejs/adapter-node": "^5.3.3",
+    "@sveltejs/kit": "^2.49.0",
+    "svelte": "^5.43.3",
+    "vite": "^8.1.0"
+  },
+  "devDependencies": {
+    "typescript": "5.9.3"
+  }
+}

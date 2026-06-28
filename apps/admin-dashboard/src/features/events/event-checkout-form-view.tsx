@@ -1,29 +1,21 @@
-'use client'
+'use client';
 
-import * as React from 'react'
-import { useForm } from 'react-hook-form'
-import { zodResolver } from '@hookform/resolvers/zod'
-import { z } from 'zod'
-import {
-  ArrowDown,
-  ArrowUp,
-  Copy,
-  FileX2,
-  Pencil,
-  Plus,
-  Trash2,
-} from 'lucide-react'
+import * as React from 'react';
+import { useForm } from 'react-hook-form';
+import { zodResolver } from '@hookform/resolvers/zod';
+import { z } from 'zod';
+import { ArrowDown, ArrowUp, Copy, Pencil, Plus, Trash2 } from 'lucide-react';
 import {
   type AdminCheckoutQuestion,
   type AdminQuestionType,
   type CreateCheckoutQuestionInput,
   adminApi,
-} from '@/lib/api'
-import { Button } from '@/components/ui/button'
-import { Badge } from '@/components/ui/badge'
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
-import { Checkbox } from '@/components/ui/checkbox'
-import { ConfirmDialog } from '@/components/confirm-dialog'
+} from '@/lib/api';
+import { Button } from '@/components/ui/button';
+import { Badge } from '@/components/ui/badge';
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Checkbox } from '@/components/ui/checkbox';
+import { ConfirmDialog } from '@/components/confirm-dialog';
 import {
   Form,
   FormControl,
@@ -32,15 +24,15 @@ import {
   FormItem,
   FormLabel,
   FormMessage,
-} from '@/components/ui/form'
-import { Input } from '@/components/ui/input'
+} from '@/components/ui/form';
+import { Input } from '@/components/ui/input';
 import {
   Select,
   SelectContent,
   SelectItem,
   SelectTrigger,
   SelectValue,
-} from '@/components/ui/select'
+} from '@/components/ui/select';
 import {
   Sheet,
   SheetContent,
@@ -48,14 +40,14 @@ import {
   SheetFooter,
   SheetHeader,
   SheetTitle,
-} from '@/components/ui/sheet'
-import { Skeleton } from '@/components/ui/skeleton'
-import { Textarea } from '@/components/ui/textarea'
-import { useAdminData } from '@/hooks/use-admin-data'
-import { toast } from 'sonner'
+} from '@/components/ui/sheet';
+import { Skeleton } from '@/components/ui/skeleton';
+import { Textarea } from '@/components/ui/textarea';
+import { useAdminData } from '@/hooks/use-admin-data';
+import { toast } from 'sonner';
 
-const allTicketsValue = '__all__'
-const noneValue = '__none__'
+const allTicketsValue = '__all__';
+const noneValue = '__none__';
 
 const fieldTypes = [
   { value: 'text', label: 'Short text' },
@@ -66,8 +58,9 @@ const fieldTypes = [
   { value: 'multiselect', label: 'Multiple choice' },
   { value: 'checkbox', label: 'Checkbox' },
   { value: 'date', label: 'Date' },
+  { value: 'file', label: 'File upload' },
   { value: 'waiver', label: 'Waiver / consent' },
-] satisfies { value: Exclude<AdminQuestionType, 'file'>; label: string }[]
+] satisfies { value: AdminQuestionType; label: string }[];
 
 export const questionFormSchema = z
   .object({
@@ -80,6 +73,7 @@ export const questionFormSchema = z
       'multiselect',
       'checkbox',
       'date',
+      'file',
       'waiver',
     ]),
     label: z.string().trim().min(1, 'Label is required'),
@@ -99,13 +93,13 @@ export const questionFormSchema = z
     consentVersion: z.string().trim().optional(),
   })
   .superRefine((data, ctx) => {
-    const options = parseOptions(data.optionsText)
+    const options = parseOptions(data.optionsText);
     if ((data.type === 'select' || data.type === 'multiselect') && options.length < 1) {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
         path: ['optionsText'],
         message: 'At least one option is required',
-      })
+      });
     }
 
     if (data.conditionalField !== noneValue && !data.conditionalValue) {
@@ -113,7 +107,7 @@ export const questionFormSchema = z
         code: z.ZodIssueCode.custom,
         path: ['conditionalValue'],
         message: 'Condition value is required',
-      })
+      });
     }
 
     if (data.isConsentField && data.type !== 'checkbox' && data.type !== 'waiver') {
@@ -121,7 +115,7 @@ export const questionFormSchema = z
         code: z.ZodIssueCode.custom,
         path: ['isConsentField'],
         message: 'Consent snapshots require checkbox or waiver fields',
-      })
+      });
     }
 
     if (data.isConsentField || data.type === 'waiver') {
@@ -130,19 +124,19 @@ export const questionFormSchema = z
           code: z.ZodIssueCode.custom,
           path: ['consentText'],
           message: 'Consent text is required',
-        })
+        });
       }
       if (!data.consentVersion) {
         ctx.addIssue({
           code: z.ZodIssueCode.custom,
           path: ['consentVersion'],
           message: 'Consent version is required',
-        })
+        });
       }
     }
-  })
+  });
 
-export type CheckoutQuestionFormValues = z.infer<typeof questionFormSchema>
+export type CheckoutQuestionFormValues = z.infer<typeof questionFormSchema>;
 
 function parseOptions(value?: string): string[] {
   return Array.from(
@@ -150,56 +144,62 @@ function parseOptions(value?: string): string[] {
       (value ?? '')
         .split('\n')
         .map((option) => option.trim())
-        .filter(Boolean)
-    )
-  )
+        .filter(Boolean),
+    ),
+  );
 }
 
 function nextSortOrder(questions: AdminCheckoutQuestion[]): number {
-  if (questions.length === 0) return 10
-  return Math.max(...questions.map((question) => question.sortOrder)) + 10
+  if (questions.length === 0) return 10;
+  return Math.max(...questions.map((question) => question.sortOrder)) + 10;
 }
 
 function formatScope(question: AdminCheckoutQuestion): string {
-  if (question.appliesTo === 'both') return 'Buyer and attendee'
-  return question.appliesTo === 'buyer' ? 'Buyer' : 'Attendee'
+  if (question.appliesTo === 'both') return 'Buyer and attendee';
+  return question.appliesTo === 'buyer' ? 'Buyer' : 'Attendee';
 }
 
 function formatType(type: AdminQuestionType): string {
-  return fieldTypes.find((fieldType) => fieldType.value === type)?.label ?? 'Unsupported'
+  return fieldTypes.find((fieldType) => fieldType.value === type)?.label ?? 'Unsupported';
 }
 
-function dependencyLabel(question: AdminCheckoutQuestion, questions: AdminCheckoutQuestion[]): string {
-  const field = question.conditionalVisibility?.field
-  if (!field) return ''
-  return questions.find((item) => item.id === field)?.label ?? field
+function dependencyLabel(
+  question: AdminCheckoutQuestion,
+  questions: AdminCheckoutQuestion[],
+): string {
+  const field = question.conditionalVisibility?.field;
+  if (!field) return '';
+  return questions.find((item) => item.id === field)?.label ?? field;
 }
 
 function answerValues(answer: unknown): string[] {
   if (Array.isArray(answer)) {
-    return answer.filter((value): value is string => typeof value === 'string')
+    return answer.filter((value): value is string => typeof value === 'string');
   }
-  if (typeof answer === 'string') return answer ? [answer] : []
-  if (typeof answer === 'boolean') return [answer ? 'true' : 'false']
-  return []
+  if (typeof answer === 'string') return answer ? [answer] : [];
+  if (typeof answer === 'boolean') return [answer ? 'true' : 'false'];
+  return [];
 }
 
-export function conditionMatches(question: AdminCheckoutQuestion, answers: Record<string, unknown>) {
-  const condition = question.conditionalVisibility
-  if (!condition) return true
-  const values = answerValues(answers[condition.field])
-  const matches = values.includes(condition.value)
-  if (condition.operator === 'equals') return matches
-  if (condition.operator === 'not_equals') return !matches
-  return values.some((value) => value.includes(condition.value))
+export function conditionMatches(
+  question: AdminCheckoutQuestion,
+  answers: Record<string, unknown>,
+) {
+  const condition = question.conditionalVisibility;
+  if (!condition) return true;
+  const values = answerValues(answers[condition.field]);
+  const matches = values.includes(condition.value);
+  if (condition.operator === 'equals') return matches;
+  if (condition.operator === 'not_equals') return !matches;
+  return values.some((value) => value.includes(condition.value));
 }
 
 function questionToValues(
   question: AdminCheckoutQuestion | undefined,
-  questions: AdminCheckoutQuestion[]
+  questions: AdminCheckoutQuestion[],
 ): CheckoutQuestionFormValues {
   return {
-    type: question?.type === 'file' ? 'text' : question?.type ?? 'text',
+    type: question?.type ?? 'text',
     label: question?.label ?? '',
     description: question?.description ?? '',
     required: question?.required ?? false,
@@ -215,13 +215,13 @@ function questionToValues(
     isConsentField: question?.isConsentField ?? question?.type === 'waiver',
     consentText: question?.consentText ?? '',
     consentVersion: question?.consentVersion ?? '1',
-  }
+  };
 }
 
 function valuesToInput(values: CheckoutQuestionFormValues): CreateCheckoutQuestionInput {
-  const options = parseOptions(values.optionsText)
+  const options = parseOptions(values.optionsText);
   const isConsentField =
-    values.type === 'waiver' || (values.type === 'checkbox' && values.isConsentField)
+    values.type === 'waiver' || (values.type === 'checkbox' && values.isConsentField);
   return {
     type: values.type,
     label: values.label.trim(),
@@ -244,7 +244,7 @@ function valuesToInput(values: CheckoutQuestionFormValues): CreateCheckoutQuesti
     isConsentField,
     consentText: isConsentField ? values.consentText?.trim() : undefined,
     consentVersion: isConsentField ? values.consentVersion?.trim() || '1' : undefined,
-  }
+  };
 }
 
 export function EventCheckoutFormView({ eventId }: { eventId: string }) {
@@ -253,49 +253,47 @@ export function EventCheckoutFormView({ eventId }: { eventId: string }) {
     loading,
     error,
     refetch,
-  } = useAdminData(() => adminApi.listCheckoutQuestions(eventId), [eventId])
-  const { data: ticketTypes } = useAdminData(
-    () => adminApi.listTicketTypes(eventId),
-    [eventId]
-  )
-  const [drawerOpen, setDrawerOpen] = React.useState(false)
-  const [editingQuestion, setEditingQuestion] = React.useState<AdminCheckoutQuestion>()
-  const [deleteTarget, setDeleteTarget] = React.useState<AdminCheckoutQuestion>()
-  const [submittingId, setSubmittingId] = React.useState<string>()
-  const [selectedPreviewTicketId, setSelectedPreviewTicketId] = React.useState(allTicketsValue)
-  const [previewAnswers, setPreviewAnswers] = React.useState<Record<string, unknown>>({})
+  } = useAdminData(() => adminApi.listCheckoutQuestions(eventId), [eventId]);
+  const { data: ticketTypes } = useAdminData(() => adminApi.listTicketTypes(eventId), [eventId]);
+  const [drawerOpen, setDrawerOpen] = React.useState(false);
+  const [editingQuestion, setEditingQuestion] = React.useState<AdminCheckoutQuestion>();
+  const [deleteTarget, setDeleteTarget] = React.useState<AdminCheckoutQuestion>();
+  const [submittingId, setSubmittingId] = React.useState<string>();
+  const [selectedPreviewTicketId, setSelectedPreviewTicketId] = React.useState(allTicketsValue);
+  const [previewAnswers, setPreviewAnswers] = React.useState<Record<string, unknown>>({});
 
   const orderedQuestions = React.useMemo(
     // eslint-disable-next-line unicorn/no-array-sort -- creates a new array via spread
-    () => [...(questions ?? [])].sort((a, b) => a.sortOrder - b.sortOrder || a.id.localeCompare(b.id)),
-    [questions]
-  )
+    () =>
+      [...(questions ?? [])].sort((a, b) => a.sortOrder - b.sortOrder || a.id.localeCompare(b.id)),
+    [questions],
+  );
 
   const openCreate = () => {
-    setEditingQuestion(undefined)
-    setDrawerOpen(true)
-  }
+    setEditingQuestion(undefined);
+    setDrawerOpen(true);
+  };
 
   const openEdit = (question: AdminCheckoutQuestion) => {
-    setEditingQuestion(question)
-    setDrawerOpen(true)
-  }
+    setEditingQuestion(question);
+    setDrawerOpen(true);
+  };
 
   const deleteQuestion = async (question: AdminCheckoutQuestion) => {
-    setSubmittingId(question.id)
-    const result = await adminApi.deleteCheckoutQuestion(question.id)
-    setSubmittingId(undefined)
+    setSubmittingId(question.id);
+    const result = await adminApi.deleteCheckoutQuestion(question.id);
+    setSubmittingId(undefined);
     if (result.ok) {
-      toast.success('Checkout field removed or hidden')
-      setDeleteTarget(undefined)
-      await refetch()
+      toast.success('Checkout field removed or hidden');
+      setDeleteTarget(undefined);
+      await refetch();
     } else {
-      toast.error(result.error.message)
+      toast.error(result.error.message);
     }
-  }
+  };
 
   const duplicateQuestion = async (question: AdminCheckoutQuestion) => {
-    setSubmittingId(question.id)
+    setSubmittingId(question.id);
     const result = await adminApi.createCheckoutQuestion(eventId, {
       ticketTypeId: question.ticketTypeId,
       type: question.type,
@@ -311,36 +309,36 @@ export function EventCheckoutFormView({ eventId }: { eventId: string }) {
       isConsentField: question.isConsentField,
       consentText: question.consentText,
       consentVersion: question.consentVersion,
-    })
-    setSubmittingId(undefined)
+    });
+    setSubmittingId(undefined);
     if (result.ok) {
-      toast.success('Checkout field duplicated')
-      await refetch()
+      toast.success('Checkout field duplicated');
+      await refetch();
     } else {
-      toast.error(result.error.message)
+      toast.error(result.error.message);
     }
-  }
+  };
 
   const moveQuestion = async (question: AdminCheckoutQuestion, direction: -1 | 1) => {
-    const index = orderedQuestions.findIndex((item) => item.id === question.id)
-    const swapWith = orderedQuestions[index + direction]
-    if (!swapWith) return
+    const index = orderedQuestions.findIndex((item) => item.id === question.id);
+    const swapWith = orderedQuestions[index + direction];
+    if (!swapWith) return;
 
-    setSubmittingId(question.id)
+    setSubmittingId(question.id);
     const nextQuestions = orderedQuestions.map((item) => {
-      if (item.id === question.id) return { id: item.id, sortOrder: swapWith.sortOrder }
-      if (item.id === swapWith.id) return { id: item.id, sortOrder: question.sortOrder }
-      return { id: item.id, sortOrder: item.sortOrder }
-    })
-    const result = await adminApi.reorderCheckoutQuestions(eventId, nextQuestions)
-    setSubmittingId(undefined)
+      if (item.id === question.id) return { id: item.id, sortOrder: swapWith.sortOrder };
+      if (item.id === swapWith.id) return { id: item.id, sortOrder: question.sortOrder };
+      return { id: item.id, sortOrder: item.sortOrder };
+    });
+    const result = await adminApi.reorderCheckoutQuestions(eventId, nextQuestions);
+    setSubmittingId(undefined);
     if (result.ok) {
-      await refetch()
+      await refetch();
     } else {
-      setSubmittingId(undefined)
-      toast.error(`Reorder failed: ${result.error.message}`)
+      setSubmittingId(undefined);
+      toast.error(`Reorder failed: ${result.error.message}`);
     }
-  }
+  };
 
   const previewQuestions = React.useMemo(
     () =>
@@ -348,148 +346,144 @@ export function EventCheckoutFormView({ eventId }: { eventId: string }) {
         const ticketMatches =
           selectedPreviewTicketId === allTicketsValue ||
           !question.ticketTypeId ||
-          question.ticketTypeId === selectedPreviewTicketId
-        return ticketMatches && conditionMatches(question, previewAnswers)
+          question.ticketTypeId === selectedPreviewTicketId;
+        return ticketMatches && conditionMatches(question, previewAnswers);
       }),
-    [orderedQuestions, previewAnswers, selectedPreviewTicketId]
-  )
+    [orderedQuestions, previewAnswers, selectedPreviewTicketId],
+  );
 
   if (loading) {
     return (
-      <div className='space-y-4'>
-        <Skeleton className='h-32 w-full' />
-        <Skeleton className='h-48 w-full' />
+      <div className="space-y-4">
+        <Skeleton className="h-32 w-full" />
+        <Skeleton className="h-48 w-full" />
       </div>
-    )
+    );
   }
 
   return (
-    <div className='grid gap-6 xl:grid-cols-[minmax(0,1fr)_360px]'>
-      <div className='space-y-4'>
-        <div className='flex flex-wrap items-center justify-between gap-3'>
-          <div className='space-y-1'>
-            <h2 className='text-lg font-semibold'>Fields</h2>
-            <p className='text-sm text-muted-foreground'>
-              {orderedQuestions.length} configured
-            </p>
+    <div className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_360px]">
+      <div className="space-y-4">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div className="space-y-1">
+            <h2 className="text-lg font-semibold">Fields</h2>
+            <p className="text-sm text-muted-foreground">{orderedQuestions.length} configured</p>
           </div>
           <Button onClick={openCreate}>
-            <Plus className='size-4' />
+            <Plus className="size-4" />
             Add Field
           </Button>
         </div>
 
         {error && (
-          <div className='rounded-md border border-destructive/30 bg-destructive/10 p-3 text-sm text-destructive'>
+          <div className="rounded-md border border-destructive/30 bg-destructive/10 p-3 text-sm text-destructive">
             {error.message}
           </div>
         )}
 
         {orderedQuestions.length === 0 ? (
           <Card>
-            <CardContent className='flex min-h-40 items-center justify-center text-sm text-muted-foreground'>
+            <CardContent className="flex min-h-40 items-center justify-center text-sm text-muted-foreground">
               No checkout fields configured.
             </CardContent>
           </Card>
         ) : (
-          <div className='space-y-3'>
+          <div className="space-y-3">
             {orderedQuestions.map((question, index) => {
               const ticketName = question.ticketTypeId
-                ? ticketTypes?.find((ticketType) => ticketType.id === question.ticketTypeId)?.name ?? 'Ticket scoped'
-                : 'All tickets'
+                ? (ticketTypes?.find((ticketType) => ticketType.id === question.ticketTypeId)
+                    ?.name ?? 'Ticket scoped')
+                : 'All tickets';
               return (
                 <Card key={question.id}>
-                  <CardContent className='flex flex-col gap-4 p-4 lg:flex-row lg:items-center lg:justify-between'>
-                    <div className='min-w-0 space-y-2'>
-                      <div className='flex flex-wrap items-center gap-2'>
-                        <h3 className='truncate font-medium'>{question.label}</h3>
-                        {question.required && <Badge variant='secondary'>Required</Badge>}
-                        {question.isConsentField && <Badge variant='outline'>Consent</Badge>}
-                        {question.type === 'file' && (
-                          <Badge variant='destructive'>Unsupported</Badge>
-                        )}
+                  <CardContent className="flex flex-col gap-4 p-4 lg:flex-row lg:items-center lg:justify-between">
+                    <div className="min-w-0 space-y-2">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <h3 className="truncate font-medium">{question.label}</h3>
+                        {question.required && <Badge variant="secondary">Required</Badge>}
+                        {question.isConsentField && <Badge variant="outline">Consent</Badge>}
                       </div>
-                      <div className='flex flex-wrap gap-2 text-xs text-muted-foreground'>
+                      <div className="flex flex-wrap gap-2 text-xs text-muted-foreground">
                         <span>{formatType(question.type)}</span>
                         <span>{formatScope(question)}</span>
                         <span>{ticketName}</span>
                         {question.conditionalVisibility && (
-                          <span>
-                            Conditional on {dependencyLabel(question, orderedQuestions)}
-                          </span>
+                          <span>Conditional on {dependencyLabel(question, orderedQuestions)}</span>
                         )}
                       </div>
                       {question.description && (
-                        <p className='line-clamp-2 text-sm text-muted-foreground'>
+                        <p className="line-clamp-2 text-sm text-muted-foreground">
                           {question.description}
                         </p>
                       )}
                     </div>
-                    <div className='flex shrink-0 flex-wrap gap-2'>
+                    <div className="flex shrink-0 flex-wrap gap-2">
                       <Button
-                        type='button'
-                        variant='outline'
-                        size='icon'
+                        type="button"
+                        variant="outline"
+                        size="icon"
                         disabled={index === 0 || submittingId === question.id}
                         onClick={() => moveQuestion(question, -1)}
-                        aria-label='Move field up'
+                        aria-label="Move field up"
                       >
-                        <ArrowUp className='size-4' />
+                        <ArrowUp className="size-4" />
                       </Button>
                       <Button
-                        type='button'
-                        variant='outline'
-                        size='icon'
-                        disabled={index === orderedQuestions.length - 1 || submittingId === question.id}
+                        type="button"
+                        variant="outline"
+                        size="icon"
+                        disabled={
+                          index === orderedQuestions.length - 1 || submittingId === question.id
+                        }
                         onClick={() => moveQuestion(question, 1)}
-                        aria-label='Move field down'
+                        aria-label="Move field down"
                       >
-                        <ArrowDown className='size-4' />
+                        <ArrowDown className="size-4" />
                       </Button>
                       <Button
-                        type='button'
-                        variant='outline'
-                        size='icon'
+                        type="button"
+                        variant="outline"
+                        size="icon"
                         disabled={submittingId === question.id}
                         onClick={() => duplicateQuestion(question)}
-                        aria-label='Duplicate field'
+                        aria-label="Duplicate field"
                       >
-                        <Copy className='size-4' />
+                        <Copy className="size-4" />
                       </Button>
                       <Button
-                        type='button'
-                        variant='outline'
-                        size='icon'
-                        disabled={submittingId === question.id || question.type === 'file'}
+                        type="button"
+                        variant="outline"
+                        size="icon"
+                        disabled={submittingId === question.id}
                         onClick={() => openEdit(question)}
-                        aria-label='Edit field'
+                        aria-label="Edit field"
                       >
-                        <Pencil className='size-4' />
+                        <Pencil className="size-4" />
                       </Button>
                       <Button
-                        type='button'
-                        variant='outline'
-                        size='icon'
+                        type="button"
+                        variant="outline"
+                        size="icon"
                         disabled={submittingId === question.id}
                         onClick={() => setDeleteTarget(question)}
-                        aria-label='Delete field'
+                        aria-label="Delete field"
                       >
-                        <Trash2 className='size-4' />
+                        <Trash2 className="size-4" />
                       </Button>
                     </div>
                   </CardContent>
                 </Card>
-              )
+              );
             })}
           </div>
         )}
       </div>
 
-      <Card className='h-fit'>
+      <Card className="h-fit">
         <CardHeader>
           <CardTitle>Preview</CardTitle>
         </CardHeader>
-        <CardContent className='space-y-4'>
+        <CardContent className="space-y-4">
           <Select value={selectedPreviewTicketId} onValueChange={setSelectedPreviewTicketId}>
             <SelectTrigger>
               <SelectValue />
@@ -504,23 +498,23 @@ export function EventCheckoutFormView({ eventId }: { eventId: string }) {
             </SelectContent>
           </Select>
           {orderedQuestions.length === 0 ? (
-            <p className='text-sm text-muted-foreground'>No fields to preview.</p>
+            <p className="text-sm text-muted-foreground">No fields to preview.</p>
           ) : previewQuestions.length === 0 ? (
-            <p className='text-sm text-muted-foreground'>No fields match this ticket and conditional state.</p>
+            <p className="text-sm text-muted-foreground">
+              No fields match this ticket and conditional state.
+            </p>
           ) : (
             previewQuestions.map((question) => (
               <PreviewField
                 key={question.id}
                 question={question}
                 value={previewAnswers[question.id]}
-                onChange={(value) => setPreviewAnswers((answers) => ({ ...answers, [question.id]: value }))}
+                onChange={(value) =>
+                  setPreviewAnswers((answers) => ({ ...answers, [question.id]: value }))
+                }
               />
             ))
           )}
-          <div className='rounded-md border border-dashed p-3 text-sm text-muted-foreground'>
-            <FileX2 className='mb-2 size-4' />
-            File upload fields are blocked until upload storage and validation are available.
-          </div>
         </CardContent>
       </Card>
 
@@ -536,19 +530,19 @@ export function EventCheckoutFormView({ eventId }: { eventId: string }) {
       <ConfirmDialog
         open={Boolean(deleteTarget)}
         onOpenChange={(open) => {
-          if (!open) setDeleteTarget(undefined)
+          if (!open) setDeleteTarget(undefined);
         }}
-        title='Remove checkout field'
-        description='Fields with historical answers are hidden instead of hard-deleted so existing order answers and consent snapshots remain auditable.'
-        confirmText='Remove field'
-        variant='destructive'
+        title="Remove checkout field"
+        description="Fields with historical answers are hidden instead of hard-deleted so existing order answers and consent snapshots remain auditable."
+        confirmText="Remove field"
+        variant="destructive"
         pending={Boolean(deleteTarget && submittingId === deleteTarget.id)}
         onConfirm={() => {
-          if (deleteTarget) void deleteQuestion(deleteTarget)
+          if (deleteTarget) void deleteQuestion(deleteTarget);
         }}
       />
     </div>
-  )
+  );
 }
 
 function PreviewField({
@@ -556,53 +550,60 @@ function PreviewField({
   value,
   onChange,
 }: {
-  question: AdminCheckoutQuestion
-  value: unknown
-  onChange: (value: unknown) => void
+  question: AdminCheckoutQuestion;
+  value: unknown;
+  onChange: (value: unknown) => void;
 }) {
-  const stringValue = typeof value === 'string' ? value : ''
+  const stringValue = typeof value === 'string' ? value : '';
   const selectedValues = Array.isArray(value)
     ? value.filter((item): item is string => typeof item === 'string')
-    : []
+    : [];
   const label = (
-    <label className='text-sm font-medium'>
+    <label className="text-sm font-medium">
       {question.label}
-      {question.required && <span className='text-destructive'> *</span>}
+      {question.required && <span className="text-destructive"> *</span>}
     </label>
-  )
+  );
 
   if (question.type === 'checkbox' || question.type === 'waiver') {
     return (
-      <div className='space-y-2'>
-        <div className='flex items-start gap-2'>
-          <Checkbox checked={value === 'true'} onCheckedChange={(checked) => onChange(checked ? 'true' : 'false')} />
-          <div className='space-y-1'>
+      <div className="space-y-2">
+        <div className="flex items-start gap-2">
+          <Checkbox
+            checked={value === 'true'}
+            onCheckedChange={(checked) => onChange(checked ? 'true' : 'false')}
+          />
+          <div className="space-y-1">
             {label}
             {question.consentText && (
-              <p className='text-xs text-muted-foreground'>{question.consentText}</p>
+              <p className="text-xs text-muted-foreground">{question.consentText}</p>
             )}
           </div>
         </div>
       </div>
-    )
+    );
   }
 
   return (
-    <div className='space-y-2'>
+    <div className="space-y-2">
       {label}
       {question.type === 'textarea' ? (
-        <Textarea value={stringValue} onChange={(event) => onChange(event.target.value)} placeholder={question.placeholder} />
+        <Textarea
+          value={stringValue}
+          onChange={(event) => onChange(event.target.value)}
+          placeholder={question.placeholder}
+        />
       ) : question.type === 'multiselect' ? (
-        <div className='space-y-2 rounded-md border p-3'>
+        <div className="space-y-2 rounded-md border p-3">
           {(question.options ?? []).map((option) => (
-            <label key={option} className='flex items-center gap-2 text-sm'>
+            <label key={option} className="flex items-center gap-2 text-sm">
               <Checkbox
                 checked={selectedValues.includes(option)}
                 onCheckedChange={(checked) => {
                   const next = checked
                     ? [...selectedValues, option]
-                    : selectedValues.filter((value) => value !== option)
-                  onChange(next)
+                    : selectedValues.filter((selectedValue) => selectedValue !== option);
+                  onChange(next);
                 }}
               />
               <span>{option}</span>
@@ -622,6 +623,8 @@ function PreviewField({
             ))}
           </SelectContent>
         </Select>
+      ) : question.type === 'file' ? (
+        <Input type="file" onChange={(event) => onChange(event.target.files?.[0]?.name ?? '')} />
       ) : (
         <Input
           value={stringValue}
@@ -631,10 +634,10 @@ function PreviewField({
         />
       )}
       {question.description && (
-        <p className='text-xs text-muted-foreground'>{question.description}</p>
+        <p className="text-xs text-muted-foreground">{question.description}</p>
       )}
     </div>
-  )
+  );
 }
 
 function QuestionFormDrawer({
@@ -646,64 +649,65 @@ function QuestionFormDrawer({
   ticketTypes,
   onSuccess,
 }: {
-  eventId: string
-  open: boolean
-  onOpenChange: (open: boolean) => void
-  question?: AdminCheckoutQuestion
-  questions: AdminCheckoutQuestion[]
-  ticketTypes: { id: string; name: string }[]
-  onSuccess: () => void | Promise<void>
+  eventId: string;
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  question?: AdminCheckoutQuestion;
+  questions: AdminCheckoutQuestion[];
+  ticketTypes: { id: string; name: string }[];
+  onSuccess: () => void | Promise<void>;
 }) {
-  const [submitting, setSubmitting] = React.useState(false)
-  const isEditing = Boolean(question)
+  const [submitting, setSubmitting] = React.useState(false);
+  const isEditing = Boolean(question);
   const form = useForm<CheckoutQuestionFormValues>({
     resolver: zodResolver(questionFormSchema),
     defaultValues: questionToValues(undefined, questions),
-  })
+  });
 
   React.useEffect(() => {
     if (open) {
-      form.reset(questionToValues(question, questions))
+      form.reset(questionToValues(question, questions));
     }
-  }, [form, open, question, questions])
+  }, [form, open, question, questions]);
 
-  const selectedType = form.watch('type')
-  const conditionOptions = questions.filter((item) => item.id !== question?.id)
-  const isConsentType = selectedType === 'waiver' || form.watch('isConsentField')
+  const selectedType = form.watch('type');
+  const conditionOptions = questions.filter((item) => item.id !== question?.id);
+  const isConsentType = selectedType === 'waiver' || form.watch('isConsentField');
 
   const onSubmit = async (values: CheckoutQuestionFormValues) => {
-    setSubmitting(true)
-    const input = valuesToInput(values)
-    const result = isEditing && question
-      ? await adminApi.updateCheckoutQuestion(question.id, input)
-      : await adminApi.createCheckoutQuestion(eventId, input)
-    setSubmitting(false)
+    setSubmitting(true);
+    const input = valuesToInput(values);
+    const result =
+      isEditing && question
+        ? await adminApi.updateCheckoutQuestion(question.id, input)
+        : await adminApi.createCheckoutQuestion(eventId, input);
+    setSubmitting(false);
 
     if (result.ok) {
-      toast.success(isEditing ? 'Checkout field updated' : 'Checkout field created')
-      onOpenChange(false)
-      await onSuccess()
+      toast.success(isEditing ? 'Checkout field updated' : 'Checkout field created');
+      onOpenChange(false);
+      await onSuccess();
     } else {
-      toast.error(result.error.message)
+      toast.error(result.error.message);
     }
-  }
+  };
 
   return (
     <Sheet open={open} onOpenChange={onOpenChange}>
-      <SheetContent side='right' className='w-full overflow-y-auto sm:max-w-xl'>
+      <SheetContent side="right" className="w-full overflow-y-auto sm:max-w-xl">
         <SheetHeader>
           <SheetTitle>{isEditing ? 'Edit Checkout Field' : 'Add Checkout Field'}</SheetTitle>
           <SheetDescription>
             Event-level fields render in hosted checkout and embedded checkout.
           </SheetDescription>
         </SheetHeader>
-        <div className='px-4 pb-4'>
+        <div className="px-4 pb-4">
           <Form {...form}>
-            <form onSubmit={form.handleSubmit(onSubmit)} className='space-y-5'>
-              <div className='grid gap-4 sm:grid-cols-2'>
+            <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-5">
+              <div className="grid gap-4 sm:grid-cols-2">
                 <FormField
                   control={form.control}
-                  name='type'
+                  name="type"
                   render={({ field }) => (
                     <FormItem>
                       <FormLabel>Type</FormLabel>
@@ -727,7 +731,7 @@ function QuestionFormDrawer({
                 />
                 <FormField
                   control={form.control}
-                  name='appliesTo'
+                  name="appliesTo"
                   render={({ field }) => (
                     <FormItem>
                       <FormLabel>Scope</FormLabel>
@@ -738,9 +742,9 @@ function QuestionFormDrawer({
                           </SelectTrigger>
                         </FormControl>
                         <SelectContent>
-                          <SelectItem value='buyer'>Buyer</SelectItem>
-                          <SelectItem value='attendee'>Attendee</SelectItem>
-                          <SelectItem value='both'>Both</SelectItem>
+                          <SelectItem value="buyer">Buyer</SelectItem>
+                          <SelectItem value="attendee">Attendee</SelectItem>
+                          <SelectItem value="both">Both</SelectItem>
                         </SelectContent>
                       </Select>
                       <FormMessage />
@@ -751,12 +755,12 @@ function QuestionFormDrawer({
 
               <FormField
                 control={form.control}
-                name='label'
+                name="label"
                 render={({ field }) => (
                   <FormItem>
                     <FormLabel>Label</FormLabel>
                     <FormControl>
-                      <Input placeholder='Dietary requirements' {...field} />
+                      <Input placeholder="Dietary requirements" {...field} />
                     </FormControl>
                     <FormMessage />
                   </FormItem>
@@ -765,22 +769,22 @@ function QuestionFormDrawer({
 
               <FormField
                 control={form.control}
-                name='description'
+                name="description"
                 render={({ field }) => (
                   <FormItem>
                     <FormLabel>Description</FormLabel>
                     <FormControl>
-                      <Textarea className='resize-none' {...field} />
+                      <Textarea className="resize-none" {...field} />
                     </FormControl>
                     <FormMessage />
                   </FormItem>
                 )}
               />
 
-              <div className='grid gap-4 sm:grid-cols-2'>
+              <div className="grid gap-4 sm:grid-cols-2">
                 <FormField
                   control={form.control}
-                  name='ticketTypeId'
+                  name="ticketTypeId"
                   render={({ field }) => (
                     <FormItem>
                       <FormLabel>Ticket Scope</FormLabel>
@@ -805,13 +809,13 @@ function QuestionFormDrawer({
                 />
                 <FormField
                   control={form.control}
-                  name='sortOrder'
+                  name="sortOrder"
                   render={({ field }) => (
                     <FormItem>
                       <FormLabel>Sort Order</FormLabel>
                       <FormControl>
                         <Input
-                          type='number'
+                          type="number"
                           value={field.value}
                           onChange={(event) => field.onChange(Number(event.target.value))}
                         />
@@ -825,12 +829,12 @@ function QuestionFormDrawer({
               {(selectedType === 'select' || selectedType === 'multiselect') && (
                 <FormField
                   control={form.control}
-                  name='optionsText'
+                  name="optionsText"
                   render={({ field }) => (
                     <FormItem>
                       <FormLabel>Options</FormLabel>
                       <FormControl>
-                        <Textarea className='min-h-28 resize-none' {...field} />
+                        <Textarea className="min-h-28 resize-none" {...field} />
                       </FormControl>
                       <FormDescription>One option per line.</FormDescription>
                       <FormMessage />
@@ -842,7 +846,7 @@ function QuestionFormDrawer({
               {selectedType !== 'checkbox' && selectedType !== 'waiver' && (
                 <FormField
                   control={form.control}
-                  name='placeholder'
+                  name="placeholder"
                   render={({ field }) => (
                     <FormItem>
                       <FormLabel>Placeholder</FormLabel>
@@ -855,24 +859,24 @@ function QuestionFormDrawer({
                 />
               )}
 
-              <div className='grid gap-4 sm:grid-cols-2'>
+              <div className="grid gap-4 sm:grid-cols-2">
                 <FormField
                   control={form.control}
-                  name='required'
+                  name="required"
                   render={({ field }) => (
-                    <FormItem className='flex items-center gap-2 rounded-md border p-3'>
+                    <FormItem className="flex items-center gap-2 rounded-md border p-3">
                       <FormControl>
                         <Checkbox checked={field.value} onCheckedChange={field.onChange} />
                       </FormControl>
-                      <FormLabel className='m-0'>Required</FormLabel>
+                      <FormLabel className="m-0">Required</FormLabel>
                     </FormItem>
                   )}
                 />
                 <FormField
                   control={form.control}
-                  name='isConsentField'
+                  name="isConsentField"
                   render={({ field }) => (
-                    <FormItem className='flex items-center gap-2 rounded-md border p-3'>
+                    <FormItem className="flex items-center gap-2 rounded-md border p-3">
                       <FormControl>
                         <Checkbox
                           checked={selectedType === 'waiver' || field.value}
@@ -880,22 +884,22 @@ function QuestionFormDrawer({
                           onCheckedChange={field.onChange}
                         />
                       </FormControl>
-                      <FormLabel className='m-0'>Consent snapshot</FormLabel>
+                      <FormLabel className="m-0">Consent snapshot</FormLabel>
                     </FormItem>
                   )}
                 />
               </div>
 
               {isConsentType && (
-                <div className='space-y-4 rounded-md border p-3'>
+                <div className="space-y-4 rounded-md border p-3">
                   <FormField
                     control={form.control}
-                    name='consentText'
+                    name="consentText"
                     render={({ field }) => (
                       <FormItem>
                         <FormLabel>Consent Text</FormLabel>
                         <FormControl>
-                          <Textarea className='resize-none' {...field} />
+                          <Textarea className="resize-none" {...field} />
                         </FormControl>
                         <FormMessage />
                       </FormItem>
@@ -903,7 +907,7 @@ function QuestionFormDrawer({
                   />
                   <FormField
                     control={form.control}
-                    name='consentVersion'
+                    name="consentVersion"
                     render={({ field }) => (
                       <FormItem>
                         <FormLabel>Consent Version</FormLabel>
@@ -917,10 +921,10 @@ function QuestionFormDrawer({
                 </div>
               )}
 
-              <div className='space-y-4 rounded-md border p-3'>
+              <div className="space-y-4 rounded-md border p-3">
                 <FormField
                   control={form.control}
-                  name='conditionalField'
+                  name="conditionalField"
                   render={({ field }) => (
                     <FormItem>
                       <FormLabel>Conditional Field</FormLabel>
@@ -944,10 +948,10 @@ function QuestionFormDrawer({
                   )}
                 />
                 {form.watch('conditionalField') !== noneValue && (
-                  <div className='grid gap-4 sm:grid-cols-2'>
+                  <div className="grid gap-4 sm:grid-cols-2">
                     <FormField
                       control={form.control}
-                      name='conditionalOperator'
+                      name="conditionalOperator"
                       render={({ field }) => (
                         <FormItem>
                           <FormLabel>Operator</FormLabel>
@@ -958,9 +962,9 @@ function QuestionFormDrawer({
                               </SelectTrigger>
                             </FormControl>
                             <SelectContent>
-                              <SelectItem value='equals'>Equals</SelectItem>
-                              <SelectItem value='not_equals'>Does not equal</SelectItem>
-                              <SelectItem value='contains'>Contains</SelectItem>
+                              <SelectItem value="equals">Equals</SelectItem>
+                              <SelectItem value="not_equals">Does not equal</SelectItem>
+                              <SelectItem value="contains">Contains</SelectItem>
                             </SelectContent>
                           </Select>
                           <FormMessage />
@@ -969,7 +973,7 @@ function QuestionFormDrawer({
                     />
                     <FormField
                       control={form.control}
-                      name='conditionalValue'
+                      name="conditionalValue"
                       render={({ field }) => (
                         <FormItem>
                           <FormLabel>Value</FormLabel>
@@ -985,10 +989,10 @@ function QuestionFormDrawer({
               </div>
 
               <SheetFooter>
-                <Button type='button' variant='outline' onClick={() => onOpenChange(false)}>
+                <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>
                   Cancel
                 </Button>
-                <Button type='submit' disabled={submitting}>
+                <Button type="submit" disabled={submitting}>
                   {submitting ? 'Saving...' : 'Save Field'}
                 </Button>
               </SheetFooter>
@@ -997,5 +1001,5 @@ function QuestionFormDrawer({
         </div>
       </SheetContent>
     </Sheet>
-  )
+  );
 }

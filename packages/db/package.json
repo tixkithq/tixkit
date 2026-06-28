@@ -1,5 +1,5 @@
 {
-  "name": "@gatekit/db",
+  "name": "@tixkit/db",
   "version": "0.1.0",
   "private": true,
   "type": "module",
@@ -37,7 +37,7 @@
     "clean": "rm -rf dist"
   },
   "dependencies": {
-    "@gatekit/domain": "workspace:*",
+    "@tixkit/domain": "workspace:*",
     "kysely": "^0.29.0",
     "pg": "^8.22.0",
     "mysql2": "^3.22.0",

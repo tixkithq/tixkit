@@ -1,14 +1,71 @@
 # Incident Runbooks
 
-Step-by-step recovery procedures for common GateKit production incidents. Each runbook lists symptoms, root-cause checks, and recovery actions. When in doubt, consult the Temporal UI (`http://localhost:8080` locally) and the API logs (search by `requestId`).
+Step-by-step recovery procedures for common Tixkit production incidents. Each runbook lists symptoms, root-cause checks, and recovery actions. When in doubt, consult the Temporal UI (`http://localhost:8080` locally) and the API logs (search by `requestId`).
 
 ## General Triage
 
 1. Check `GET /health` on the API.
-2. Check the worker process is running and connected to Temporal.
-3. Open Temporal UI and filter by the failing workflow type.
-4. Correlate API logs by `requestId` and worker logs by workflow ID.
-5. Identify whether the failure is provider-side (Stripe/Telnyx/Clerk), DB-side, or code-side before applying a runbook.
+2. Check `GET /metrics` through the internal API service with the configured `METRICS_BEARER_TOKEN` and confirm Prometheus is scraping fresh samples. Do not use the public API ingress for metrics.
+3. Check the worker process is running, connected to Temporal, and exporting spans to the OpenTelemetry collector.
+4. Open Temporal UI and filter by the failing workflow type.
+5. Correlate API logs by `requestId`, worker logs by workflow ID, and traces by `tixkit.request_id` or Temporal workflow ID.
+6. Identify whether the failure is provider-side (Stripe/Telnyx/Clerk), DB-side, or code-side before applying a runbook.
+
+## Disaster Recovery Baseline
+
+Tixkit's production recovery targets are:
+
+| Store                   | RPO        | RTO        | Primary restore path                                                        |
+| ----------------------- | ---------- | ---------- | --------------------------------------------------------------------------- |
+| Postgres                | 5 minutes  | 30 minutes | Managed PITR or `bun run dr:restore:postgres` from the latest verified dump |
+| MySQL Tier-1 deployment | 5 minutes  | 30 minutes | Managed PITR/snapshot restore                                               |
+| Object storage          | 15 minutes | 60 minutes | Bucket versioning/replication or `bun run dr:restore:object-storage`        |
+| Temporal                | 15 minutes | 60 minutes | Temporal Cloud recovery or backing-store restore                            |
+
+Before every schema-changing release, create a Postgres backup with:
+
+```bash
+DATABASE_URL=<postgres-url> BACKUP_DIR=backups/release bun run dr:backup:postgres
+```
+
+Run migration rehearsal with:
+
+```bash
+DATABASE_URL=<postgres-url> DATABASE_URL_MYSQL=<mysql-url> bun run dr:migration-rehearsal
+```
+
+Rollback from a failed migration means restoring the pre-migration database backup and redeploying the last known-good image. Do not run ad hoc down SQL against payment, refund, inventory, webhook, or audit tables.
+
+## SLOs, Dashboards, And Alerts
+
+Production dashboards must include these panels:
+
+| Panel                      | Prometheus query                                                                                                             |
+| -------------------------- | ---------------------------------------------------------------------------------------------------------------------------- |
+| Checkout p95 latency       | `histogram_quantile(0.95, sum(rate(tixkit_http_request_duration_seconds_bucket{route=~".*checkout.*"}[5m])) by (le))`        |
+| Webhook catch-up failures  | `sum(rate(tixkit_webhook_events_total{outcome!="ok"}[5m]))`                                                                  |
+| Scan p95 latency           | <code>histogram_quantile(0.95, sum(rate(tixkit_http_request_duration_seconds_bucket{route=~".*(check-in&#124;scan).*"}[5m])) by (le))</code> |
+| Payment success rate       | `sum(rate(tixkit_payment_events_total{outcome="ok"}[15m])) / clamp_min(sum(rate(tixkit_payment_events_total[15m])), 1)`      |
+| Temporal activity failures | `sum(rate(tixkit_temporal_activity_events_total{outcome!="ok"}[5m])) by (activity)`                                          |
+| Active inventory holds     | `tixkit_inventory_active_holds{scope="global"}`                                                                              |
+
+Alert rules:
+
+| Alert                        | Threshold                                                                | Page |
+| ---------------------------- | ------------------------------------------------------------------------ | ---- |
+| CheckoutLatencyHigh          | checkout p95 > 2s for 10m                                                | yes  |
+| WebhookCatchupFailing        | webhook non-ok rate > 0.05/s for 10m or any dead-lettered delivery in 5m | yes  |
+| ScanLatencyHigh              | scan p95 > 500ms for 10m                                                 | yes  |
+| PaymentSuccessRateLow        | payment success rate < 98% for 15m with at least 20 attempts             | yes  |
+| TemporalActivityFailureSpike | any critical activity non-ok rate > 0.02/s for 10m                       | yes  |
+| MetricsMissing               | no `up` sample for API or worker Pushgateway job for 5m                  | yes  |
+
+SLO targets:
+
+- Checkout p95 API latency: under 2 seconds over rolling 30 days.
+- Webhook catch-up: 99% of delivery retries either delivered or dead-lettered within 5 minutes.
+- Scan/check-in p95 API latency: under 500 ms over rolling 30 days.
+- Payment provider success rate: at least 98% for non-declined provider attempts.
 
 ---
 
@@ -55,7 +112,7 @@ Confirm `payment_events.processed_at` is set and Temporal shows the reconciliati
 ### Symptoms
 
 - Refund requested in admin but order `refunded_cents` did not update.
-- Stripe shows a successful refund but GateKit order still reports `paid` or stale `refunded_cents`.
+- Stripe shows a successful refund but Tixkit order still reports `paid` or stale `refunded_cents`.
 - Refund workflow status `failed` in Temporal UI.
 - Tickets not voided after a full refund.
 - Inventory not restored after a refund with `restoreInventory: true`.
@@ -115,18 +172,18 @@ Replay the event to all active endpoints subscribed to its type:
 
 ```bash
 curl -X POST https://api.example.com/v1/webhook-events/wevt_01HN.../replay \
-  -H "Authorization: Bearer gk_..."
+  -H "Authorization: Bearer tk_..."
 ```
 
 Response `202 { "queued": true, "eventId": "...", "endpoints": N }`. Each endpoint gets a fresh `webhookDeliveryWorkflow` with the full 5-attempt retry schedule.
 
-Replay is idempotent only if the customer's handler is idempotent. Remind customers to deduplicate by `X-GateKit-Event-Id`. For endpoints that remain down, the new delivery will also dead-letter; fix the endpoint before replaying.
+Replay is idempotent only if the customer's handler is idempotent. Remind customers to deduplicate by `X-Tixkit-Event-Id`. For endpoints that remain down, the new delivery will also dead-letter; fix the endpoint before replaying.
 
 ### Verification
 
 ```bash
 curl https://api.example.com/v1/webhook-endpoints/whk_.../events?limit=10 \
-  -H "Authorization: Bearer gk_..."
+  -H "Authorization: Bearer tk_..."
 ```
 
 Confirm the new delivery row shows `status = 'delivered'` and `deliveredAt` is set.
@@ -161,7 +218,8 @@ Confirm the new delivery row shows `status = 'delivered'` and `deliveredAt` is s
   ```
   The hold will be released by the hold-expiration loop, or you can call `releaseHoldActivity` manually if urgent.
 - **Payment intent created but client never confirmed**: the workflow waits 10 minutes, then releases the hold. The session will be marked `expired` by `expireStaleSessionsActivity`. No refund is needed because no capture happened.
-- **Finalize failed after payment succeeded**: do NOT terminate the workflow. Fix the finalize activity's downstream issue (DB, inventory) and reset to the failed event so the workflow resumes from `finalizeOrderActivity`. The payment is already captured; terminating without finalizing would lose the order.
+- **Finalize failed after payment succeeded while the hold is still valid and no order was partially created**: do NOT terminate the workflow. Fix the finalize activity's downstream issue (DB, inventory) and reset to the failed event so the workflow resumes from `finalizeOrderActivity`.
+- **Payment succeeded after hold expiry, or finalization cannot create a valid order**: do not attempt late fulfillment. Treat the payment as orphaned, persist the compensation state, mark the checkout session failed/expired, release any remaining hold, cancel/void the authorization if uncaptured or refund captured funds, and require the buyer to retry from a fresh checkout session. Escalate only if provider compensation fails after retries.
 
 ### Verification
 
@@ -175,7 +233,7 @@ FROM orders
 WHERE checkout_session_id = '<sessionId>';
 ```
 
-Confirm `checkout_sessions.status = 'completed'` and `orders.status = 'paid'`. The `order.paid` webhook should be delivered (R3 if not).
+For a recovered valid checkout, confirm `checkout_sessions.status = 'completed'` and `orders.status = 'paid'`. The `order.paid` webhook should be delivered (R3 if not). For an orphan-payment compensation case, confirm there is no order/ticket issuance, the checkout session is failed/expired, and the provider payment is canceled/voided or refunded.
 
 ---
 
@@ -228,7 +286,7 @@ Confirm `status = 'completed'` and `file_url` is set. The download endpoint `GET
 If the worker is down, workflows started by the API will be pending until the worker recovers. Temporal retains the workflow start event; no data is lost. Recovery:
 
 1. Fix the worker (check `TEMPORAL_ADDRESS`, `DATABASE_URL`, `REDIS_URL`).
-2. Start the worker; it picks up the `gatekit` task queue and resumes pending workflows.
+2. Start the worker; it picks up the `tixkit` task queue and resumes pending workflows.
 3. The `hold-expiration:scheduled` workflow auto-restarts on boot if not already running.
 4. Monitor Temporal UI for backlog drain; alert if `pending_activities` grows unbounded.
 

@@ -1,5 +1,7 @@
-import { TeamView } from '@/features/team/team-view'
+import { redirect } from 'next/navigation';
 
-export default function Page() {
-  return <TeamView />
+import { routes } from '@/lib/routes';
+
+export default function TeamSettingsRedirect() {
+  redirect(routes.settingsMembers);
 }

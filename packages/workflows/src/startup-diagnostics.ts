@@ -8,7 +8,7 @@ function errorText(error: unknown): string {
 export function buildWorkerStartupFailureMessage(error: unknown): string {
   const detail = errorText(error);
   return [
-    'GateKit worker failed to start.',
+    'Tixkit worker failed to start.',
     '- Start local infrastructure with `bun run infra:up`.',
     `- Verify Temporal is reachable at ${config.temporalAddress}.`,
     '- Run `bun run db:migrate` before starting worker activities that touch storage.',

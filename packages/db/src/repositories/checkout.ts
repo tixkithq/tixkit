@@ -82,7 +82,7 @@ export class CheckoutSessionRepository extends BaseRepository {
     tenantId: string;
     eventId: string;
     brandId: string;
-    holdId: string;
+    holdId?: string;
     currency: string;
     cart: Record<string, unknown>;
     buyer: Record<string, unknown>;
@@ -103,7 +103,7 @@ export class CheckoutSessionRepository extends BaseRepository {
         event_id: input.eventId,
         brand_id: input.brandId,
         status: 'open',
-        hold_id: input.holdId,
+        hold_id: input.holdId ?? null,
         currency: input.currency,
         cart: JSON.stringify(input.cart),
         buyer: JSON.stringify(input.buyer),
@@ -263,7 +263,9 @@ export class OrderRepository extends BaseRepository {
 
   async createLineItem(input: {
     orderId: string;
-    ticketTypeId: string;
+    ticketTypeId?: string;
+    eventOccurrenceId?: string;
+    productId?: string;
     attendeeId?: string;
     description: string;
     quantity: number;
@@ -282,7 +284,9 @@ export class OrderRepository extends BaseRepository {
       {
         id,
         order_id: input.orderId,
-        ticket_type_id: input.ticketTypeId,
+        ticket_type_id: input.ticketTypeId ?? null,
+        event_occurrence_id: input.eventOccurrenceId ?? null,
+        product_id: input.productId ?? null,
         attendee_id: input.attendeeId ?? null,
         description: input.description,
         quantity: input.quantity,
@@ -315,6 +319,7 @@ export class AttendeeRepository extends BaseRepository {
     orderId: string;
     eventId: string;
     ticketTypeId: string;
+    eventOccurrenceId?: string;
     email: string;
     firstName?: string;
     lastName?: string;
@@ -331,6 +336,7 @@ export class AttendeeRepository extends BaseRepository {
         order_id: input.orderId,
         event_id: input.eventId,
         ticket_type_id: input.ticketTypeId,
+        event_occurrence_id: input.eventOccurrenceId ?? null,
         ticket_id: null,
         first_name: input.firstName ?? null,
         last_name: input.lastName ?? null,

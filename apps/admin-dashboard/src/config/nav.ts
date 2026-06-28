@@ -12,8 +12,8 @@ import {
   ShoppingCart,
   Ticket,
   Users,
-} from 'lucide-react'
-import { type SidebarData } from '@/components/layout/types'
+} from 'lucide-react';
+import { type SidebarData } from '@/components/layout/types';
 
 export const sidebarData: SidebarData = {
   user: {
@@ -72,8 +72,8 @@ export const sidebarData: SidebarData = {
       title: 'Configure',
       items: [
         {
-          title: 'Organization',
-          url: '/settings/organization',
+          title: 'Workspace',
+          url: '/settings/workspace',
           icon: Building2,
           requiredPermission: 'settings.write',
         },
@@ -90,8 +90,8 @@ export const sidebarData: SidebarData = {
           requiredPermission: 'billing.write',
         },
         {
-          title: 'Team',
-          url: '/settings/team',
+          title: 'Members',
+          url: '/settings/members',
           icon: Users,
           requiredPermission: 'settings.write',
         },
@@ -119,9 +119,7 @@ export const sidebarData: SidebarData = {
     },
     {
       title: 'Support',
-      items: [
-        { title: 'Help', url: '/help', icon: HelpCircle },
-      ],
+      items: [{ title: 'Help', url: '/help', icon: HelpCircle }],
     },
   ],
-}
+};

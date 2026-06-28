@@ -31,7 +31,12 @@ export const DiscountRedemptionsMigration: Migration = {
       .addColumn('tenant_id', varchar(32))
       .addColumn('created_at', timestampType(), (col) => col.notNull().defaultTo(nowDefault()))
       .addUniqueConstraint('discount_redemptions_session_unique', ['checkout_session_id'])
-      .addForeignKeyConstraint('discount_redemptions_code_fk', ['discount_code_id'], 'discount_codes', ['id'])
+      .addForeignKeyConstraint(
+        'discount_redemptions_code_fk',
+        ['discount_code_id'],
+        'discount_codes',
+        ['id'],
+      )
       .addForeignKeyConstraint('discount_redemptions_event_fk', ['event_id'], 'events', ['id'])
       .execute();
   },

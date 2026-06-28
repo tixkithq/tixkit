@@ -28,7 +28,11 @@ export const test = base.extend<ValidationFixtures>({
 
       page.on('console', (message) => {
         if (message.type() !== 'error') return;
-        const text = `[console.error] ${message.text()}`;
+        const location = message.location();
+        const source = location.url
+          ? ` (${location.url}:${location.lineNumber}:${location.columnNumber})`
+          : '';
+        const text = `[console.error] ${message.text()}${source}`;
         if (!isIgnoredConsoleError(text)) errors.push(text);
       });
 
@@ -48,13 +52,19 @@ export const test = base.extend<ValidationFixtures>({
 export { expect };
 
 export async function canReach(page: Page, url: string): Promise<boolean> {
-  const response = await page.request.get(url, {
-    failOnStatusCode: false,
-    timeout: 5_000,
-  }).catch(() => null);
+  const response = await page.request
+    .get(url, {
+      failOnStatusCode: false,
+      timeout: 5_000,
+    })
+    .catch(() => null);
   return Boolean(response && response.status() < 500);
 }
 
-export async function requireReachable(page: Page, url: string, serviceName: string): Promise<void> {
+export async function requireReachable(
+  page: Page,
+  url: string,
+  serviceName: string,
+): Promise<void> {
   test.skip(!(await canReach(page, url)), `${serviceName} is not reachable at ${url}`);
 }

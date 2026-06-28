@@ -1,5 +1,5 @@
 {
-  "name": "@gatekit/sveltekit",
+  "name": "@tixkit/sveltekit",
   "version": "0.1.0",
   "type": "module",
   "main": "./dist/index.js",
@@ -16,6 +16,11 @@
     "./client": {
       "types": "./dist/client.d.ts",
       "import": "./dist/client.js"
+    },
+    "./TixkitWidget.svelte": {
+      "types": "./src/TixkitWidget.svelte.d.ts",
+      "svelte": "./src/TixkitWidget.svelte",
+      "default": "./src/TixkitWidget.svelte"
     }
   },
   "scripts": {
@@ -26,7 +31,7 @@
     "clean": "rm -rf dist"
   },
   "dependencies": {
-    "@gatekit/js": "workspace:*"
+    "@tixkit/js": "workspace:*"
   },
   "devDependencies": {
     "typescript": "5.9.3",

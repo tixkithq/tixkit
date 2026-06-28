@@ -95,12 +95,7 @@ export class OrganizationMemberRepository extends BaseRepository {
       .execute();
   }
 
-  async invite(input: {
-    tenantId: string;
-    organizationId: string;
-    email: string;
-    role: string;
-  }) {
+  async invite(input: { tenantId: string; organizationId: string; email: string; role: string }) {
     const userId = `usr_${ulid()}`;
     const memberId = `mem_${ulid()}`;
     const now = new Date();
@@ -112,23 +107,25 @@ export class OrganizationMemberRepository extends BaseRepository {
       .where('email', '=', normalizedEmail)
       .executeTakeFirst();
 
-    const user = existingUser ?? await this.insertReturning(
-      'user_profiles',
-      {
-        id: userId,
-        tenant_id: input.tenantId,
-        clerk_user_id: `invited:${normalizedEmail}`,
-        email: normalizedEmail,
-        first_name: null,
-        last_name: null,
-        avatar_url: null,
-        status: 'invited',
-        last_seen_at: null,
-        created_at: now,
-        updated_at: now,
-      },
-      userId,
-    );
+    const user =
+      existingUser ??
+      (await this.insertReturning(
+        'user_profiles',
+        {
+          id: userId,
+          tenant_id: input.tenantId,
+          clerk_user_id: `invited:${normalizedEmail}`,
+          email: normalizedEmail,
+          first_name: null,
+          last_name: null,
+          avatar_url: null,
+          status: 'invited',
+          last_seen_at: null,
+          created_at: now,
+          updated_at: now,
+        },
+        userId,
+      ));
 
     return this.insertReturning(
       'organization_members',
@@ -238,6 +235,11 @@ export class PaymentAccountRepository extends BaseRepository {
     providerAccountId: string;
     status?: string;
     defaultCurrency?: string;
+    detailsSubmitted?: boolean;
+    chargesEnabled?: boolean;
+    payoutsEnabled?: boolean;
+    requirements?: Record<string, unknown>;
+    disabledReason?: string | null;
   }) {
     const id = `pa_${ulid()}`;
     const now = new Date();
@@ -251,6 +253,11 @@ export class PaymentAccountRepository extends BaseRepository {
         provider_account_id: input.providerAccountId,
         status: input.status ?? 'pending',
         default_currency: input.defaultCurrency ?? 'USD',
+        details_submitted: input.detailsSubmitted ?? false,
+        charges_enabled: input.chargesEnabled ?? false,
+        payouts_enabled: input.payoutsEnabled ?? false,
+        requirements: JSON.stringify(input.requirements ?? {}),
+        disabled_reason: input.disabledReason ?? null,
         created_at: now,
         updated_at: now,
       },
@@ -259,11 +266,19 @@ export class PaymentAccountRepository extends BaseRepository {
   }
 
   async findById(id: string) {
-    return this.db.selectFrom('payment_accounts').selectAll().where('id', '=', id).executeTakeFirst();
+    return this.db
+      .selectFrom('payment_accounts')
+      .selectAll()
+      .where('id', '=', id)
+      .executeTakeFirst();
   }
 
   async findByOrganization(orgId: string) {
-    return this.db.selectFrom('payment_accounts').selectAll().where('organization_id', '=', orgId).execute();
+    return this.db
+      .selectFrom('payment_accounts')
+      .selectAll()
+      .where('organization_id', '=', orgId)
+      .execute();
   }
 
   async findByProviderAccountId(providerAccountId: string) {

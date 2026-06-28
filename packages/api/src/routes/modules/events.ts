@@ -1,10 +1,81 @@
 import type { FastifyPluginAsync } from 'fastify';
+import { z } from 'zod';
+import { ulid } from 'ulid';
 import { ClerkAuthService } from '../../auth/clerk.js';
-import { BrandRepository, EventRepository, AuditLogRepository } from '@gatekit/db';
-import { NotFoundError } from '@gatekit/domain';
+import {
+  BrandRepository,
+  EventRepository,
+  EventOccurrenceRepository,
+  AuditLogRepository,
+} from '@tixkit/db';
+import { NotFoundError, ValidationError } from '@tixkit/domain';
 import { writeAuditLog } from '../../auth/audit.js';
-import { pageEnvelope, parsePagination, serializeEvent } from '../../http/contracts.js';
-import { createEventSchema, updateEventSchema, parseBody } from '../../http/schemas.js';
+import {
+  pageEnvelope,
+  parsePagination,
+  serializeEvent,
+  serializeEventOccurrence,
+  serializeMarketingIntegration,
+} from '../../http/contracts.js';
+import {
+  createEventOccurrenceSchema,
+  createEventSchema,
+  parseBody,
+  updateEventOccurrenceSchema,
+  updateEventSchema,
+} from '../../http/schemas.js';
+
+const marketingIntegrationSchema = z
+  .object({
+    provider: z.enum(['ga4', 'meta_pixel', 'generic_tag']),
+    config: z.record(z.string(), z.unknown()),
+    consentRequired: z.boolean().default(true),
+    status: z.enum(['active', 'disabled']).default('active'),
+  })
+  .strict()
+  .superRefine((value, ctx) => {
+    if (value.provider === 'ga4' && typeof value.config.measurementId !== 'string') {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['config', 'measurementId'],
+        message: 'measurementId is required for GA4 integrations',
+      });
+    }
+    if (value.provider === 'meta_pixel' && typeof value.config.pixelId !== 'string') {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['config', 'pixelId'],
+        message: 'pixelId is required for Meta Pixel integrations',
+      });
+    }
+    if (value.provider === 'generic_tag') {
+      const pixelUrl = value.config.pixelUrl;
+      if (typeof pixelUrl !== 'string') {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ['config', 'pixelUrl'],
+          message: 'pixelUrl is required for generic tag integrations',
+        });
+        return;
+      }
+      try {
+        const parsed = new URL(pixelUrl);
+        if (parsed.protocol !== 'https:') {
+          ctx.addIssue({
+            code: z.ZodIssueCode.custom,
+            path: ['config', 'pixelUrl'],
+            message: 'pixelUrl must use https',
+          });
+        }
+      } catch {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ['config', 'pixelUrl'],
+          message: 'pixelUrl must be a valid URL',
+        });
+      }
+    }
+  });
 
 export const eventRoutes: FastifyPluginAsync = async (app) => {
   const db = app.context.db;
@@ -15,17 +86,17 @@ export const eventRoutes: FastifyPluginAsync = async (app) => {
     ClerkAuthService.requirePermission(principal, 'events.write');
     const body = parseBody(createEventSchema, request.body);
 
-	    ClerkAuthService.requireOrganizationScope(principal, body.organizationId);
-	    ClerkAuthService.requireBrandScope(principal, body.brandId);
-	    const brand = await new BrandRepository(db).findById(body.brandId);
-	    if (!brand) throw new NotFoundError('Brand', body.brandId);
-	    ClerkAuthService.requireResourceTenant(principal, brand, 'Brand', body.brandId);
-	    ClerkAuthService.requireOrganizationScope(principal, brand.organization_id);
-	    if (brand.organization_id !== body.organizationId) {
-	      throw new NotFoundError('Brand', body.brandId);
-	    }
+    ClerkAuthService.requireOrganizationScope(principal, body.organizationId);
+    ClerkAuthService.requireBrandScope(principal, body.brandId);
+    const brand = await new BrandRepository(db).findById(body.brandId);
+    if (!brand) throw new NotFoundError('Brand', body.brandId);
+    ClerkAuthService.requireResourceTenant(principal, brand, 'Brand', body.brandId);
+    ClerkAuthService.requireOrganizationScope(principal, brand.organization_id);
+    if (brand.organization_id !== body.organizationId) {
+      throw new NotFoundError('Brand', body.brandId);
+    }
 
-	    const repo = new EventRepository(db);
+    const repo = new EventRepository(db);
     const event = await repo.create({
       tenantId: principal.tenantId,
       organizationId: body.organizationId,
@@ -47,6 +118,8 @@ export const eventRoutes: FastifyPluginAsync = async (app) => {
 
     await writeAuditLog(audit(), request, principal, {
       action: 'event.created',
+      organizationId: body.organizationId,
+      brandId: body.brandId,
       resourceType: 'Event',
       resourceId: event.id,
       diffSummary: { slug: body.slug, title: body.title },
@@ -62,31 +135,34 @@ export const eventRoutes: FastifyPluginAsync = async (app) => {
     if (principal.type !== 'system' && principal.organizationIds.length === 0) {
       return pageEnvelope([], pagination.limit);
     }
-	    let query = db
-	      .selectFrom('events')
-	      .selectAll()
-	      .where('tenant_id', '=', principal.tenantId)
-	      .orderBy('id', 'asc')
-	      .limit(pagination.limit + 1);
+    let query = db
+      .selectFrom('events')
+      .selectAll()
+      .where('tenant_id', '=', principal.tenantId)
+      .orderBy('id', 'asc')
+      .limit(pagination.limit + 1);
 
-      const { organizationId } = request.query as { organizationId?: string };
-      if (organizationId) {
-        ClerkAuthService.requireOrganizationScope(principal, organizationId);
-        query = query.where('organization_id', '=', organizationId);
-      }
-	    if (pagination.cursor) query = query.where('id', '>', pagination.cursor);
-	    if (principal.brandIds && principal.brandIds.length > 0) {
-	      query = query.where('brand_id', 'in', principal.brandIds);
-	    }
-	    if (principal.eventIds && principal.eventIds.length > 0) {
-	      query = query.where('id', 'in', principal.eventIds);
-	    }
-	    if (principal.type !== 'system') {
-	      query = query.where('organization_id', 'in', principal.organizationIds);
-	    }
-	    const rows = await query.execute();
-	    return pageEnvelope(rows.map((row) => serializeEvent(row)), pagination.limit);
-	  });
+    const { organizationId } = request.query as { organizationId?: string };
+    if (organizationId) {
+      ClerkAuthService.requireOrganizationScope(principal, organizationId);
+      query = query.where('organization_id', '=', organizationId);
+    }
+    if (pagination.cursor) query = query.where('id', '>', pagination.cursor);
+    if (principal.brandIds && principal.brandIds.length > 0) {
+      query = query.where('brand_id', 'in', principal.brandIds);
+    }
+    if (principal.eventIds && principal.eventIds.length > 0) {
+      query = query.where('id', 'in', principal.eventIds);
+    }
+    if (principal.type !== 'system') {
+      query = query.where('organization_id', 'in', principal.organizationIds);
+    }
+    const rows = await query.execute();
+    return pageEnvelope(
+      rows.map((row) => serializeEvent(row)),
+      pagination.limit,
+    );
+  });
 
   app.get('/events/:eventId', async (request) => {
     const principal = request.principal!;
@@ -100,6 +176,96 @@ export const eventRoutes: FastifyPluginAsync = async (app) => {
     ClerkAuthService.requireBrandScope(principal, event.brand_id);
     ClerkAuthService.requireEventScope(principal, eventId);
     return serializeEvent(event);
+  });
+
+  app.get('/events/:eventId/occurrences', async (request) => {
+    const principal = request.principal!;
+    ClerkAuthService.requirePermission(principal, 'events.read');
+    const { eventId } = request.params as { eventId: string };
+    const event = await new EventRepository(db).findById(eventId);
+    if (!event) throw new NotFoundError('Event', eventId);
+    ClerkAuthService.requireResourceTenant(principal, event, 'Event', eventId);
+    ClerkAuthService.requireOrganizationScope(principal, event.organization_id);
+    ClerkAuthService.requireBrandScope(principal, event.brand_id);
+    ClerkAuthService.requireEventScope(principal, eventId);
+
+    const rows = await new EventOccurrenceRepository(db).findByEvent(eventId);
+    return { items: rows.map(serializeEventOccurrence) };
+  });
+
+  app.post('/events/:eventId/occurrences', async (request, reply) => {
+    const principal = request.principal!;
+    ClerkAuthService.requirePermission(principal, 'events.write');
+    const { eventId } = request.params as { eventId: string };
+    const body = parseBody(createEventOccurrenceSchema, request.body);
+    const startsAt = new Date(body.startsAt);
+    const endsAt = new Date(body.endsAt);
+    if (endsAt <= startsAt) {
+      throw new ValidationError('Occurrence end time must be after start time');
+    }
+    const event = await new EventRepository(db).findById(eventId);
+    if (!event) throw new NotFoundError('Event', eventId);
+    ClerkAuthService.requireResourceTenant(principal, event, 'Event', eventId);
+    ClerkAuthService.requireOrganizationScope(principal, event.organization_id);
+    ClerkAuthService.requireBrandScope(principal, event.brand_id);
+    ClerkAuthService.requireEventScope(principal, eventId);
+
+    const occurrence = await new EventOccurrenceRepository(db).create({
+      eventId,
+      title: body.title,
+      startsAt,
+      endsAt,
+      timezone: body.timezone,
+      venue: body.venue as Record<string, unknown> | null | undefined,
+      capacity: body.capacity,
+      sortOrder: body.sortOrder,
+      status: body.status,
+    });
+    await writeAuditLog(audit(), request, principal, {
+      action: 'event_occurrence.created',
+      organizationId: event.organization_id,
+      brandId: event.brand_id,
+      resourceType: 'EventOccurrence',
+      resourceId: occurrence.id,
+      diffSummary: { eventId, title: body.title },
+    });
+    return reply.status(201).send(serializeEventOccurrence(occurrence));
+  });
+
+  app.patch('/events/:eventId/occurrences/:occurrenceId', async (request) => {
+    const principal = request.principal!;
+    ClerkAuthService.requirePermission(principal, 'events.write');
+    const { eventId, occurrenceId } = request.params as { eventId: string; occurrenceId: string };
+    const body = parseBody(updateEventOccurrenceSchema, request.body);
+    const event = await new EventRepository(db).findById(eventId);
+    if (!event) throw new NotFoundError('Event', eventId);
+    ClerkAuthService.requireResourceTenant(principal, event, 'Event', eventId);
+    ClerkAuthService.requireOrganizationScope(principal, event.organization_id);
+    ClerkAuthService.requireBrandScope(principal, event.brand_id);
+    ClerkAuthService.requireEventScope(principal, eventId);
+
+    const repo = new EventOccurrenceRepository(db);
+    const existing = await repo.findById(occurrenceId);
+    if (!existing || existing.event_id !== eventId)
+      throw new NotFoundError('EventOccurrence', occurrenceId);
+
+    const startsAt = body.startsAt ? new Date(body.startsAt) : new Date(existing.starts_at);
+    const endsAt = body.endsAt ? new Date(body.endsAt) : new Date(existing.ends_at);
+    if (endsAt <= startsAt) {
+      throw new ValidationError('Occurrence end time must be after start time');
+    }
+
+    const updateData: Record<string, unknown> = {};
+    if (body.title !== undefined) updateData.title = body.title;
+    if (body.startsAt !== undefined) updateData.starts_at = startsAt;
+    if (body.endsAt !== undefined) updateData.ends_at = endsAt;
+    if (body.timezone !== undefined) updateData.timezone = body.timezone;
+    if (body.venue !== undefined) updateData.venue = body.venue ? JSON.stringify(body.venue) : null;
+    if (body.capacity !== undefined) updateData.capacity = body.capacity;
+    if (body.sortOrder !== undefined) updateData.sort_order = body.sortOrder;
+    if (body.status !== undefined) updateData.status = body.status;
+
+    return serializeEventOccurrence(await repo.update(occurrenceId, updateData));
   });
 
   app.patch('/events/:eventId', async (request) => {
@@ -134,6 +300,94 @@ export const eventRoutes: FastifyPluginAsync = async (app) => {
     return serializeEvent(await repo.update(eventId, updateData));
   });
 
+  app.get('/events/:eventId/marketing-integrations', async (request) => {
+    const principal = request.principal!;
+    ClerkAuthService.requirePermission(principal, 'events.read');
+    const { eventId } = request.params as { eventId: string };
+    const event = await new EventRepository(db).findById(eventId);
+    if (!event) throw new NotFoundError('Event', eventId);
+    ClerkAuthService.requireResourceTenant(principal, event, 'Event', eventId);
+    ClerkAuthService.requireOrganizationScope(principal, event.organization_id);
+    ClerkAuthService.requireBrandScope(principal, event.brand_id);
+    ClerkAuthService.requireEventScope(principal, eventId);
+
+    const rows = await db
+      .selectFrom('marketing_integrations')
+      .selectAll()
+      .where('event_id', '=', eventId)
+      .execute();
+    return {
+      items: rows.map((row) => serializeMarketingIntegration(row)),
+      nextCursor: null,
+      hasMore: false,
+    };
+  });
+
+  app.put('/events/:eventId/marketing-integrations/:provider', async (request) => {
+    const principal = request.principal!;
+    ClerkAuthService.requirePermission(principal, 'events.write');
+    const { eventId, provider } = request.params as { eventId: string; provider: string };
+    const body = parseBody(marketingIntegrationSchema, {
+      ...(request.body as Record<string, unknown>),
+      provider,
+    });
+    const event = await new EventRepository(db).findById(eventId);
+    if (!event) throw new NotFoundError('Event', eventId);
+    ClerkAuthService.requireResourceTenant(principal, event, 'Event', eventId);
+    ClerkAuthService.requireOrganizationScope(principal, event.organization_id);
+    ClerkAuthService.requireBrandScope(principal, event.brand_id);
+    ClerkAuthService.requireEventScope(principal, eventId);
+
+    const existing = await db
+      .selectFrom('marketing_integrations')
+      .selectAll()
+      .where('event_id', '=', eventId)
+      .where('provider', '=', body.provider)
+      .executeTakeFirst();
+    const now = new Date();
+    if (existing) {
+      await db
+        .updateTable('marketing_integrations')
+        .set({
+          config: JSON.stringify(body.config),
+          consent_required: body.consentRequired,
+          status: body.status,
+          updated_at: now,
+        })
+        .where('id', '=', existing.id)
+        .execute();
+      const updated = await db
+        .selectFrom('marketing_integrations')
+        .selectAll()
+        .where('id', '=', existing.id)
+        .executeTakeFirstOrThrow();
+      return serializeMarketingIntegration(updated);
+    }
+    await db
+      .insertInto('marketing_integrations')
+      .values({
+        id: `mkt_${ulid()}`,
+        tenant_id: event.tenant_id,
+        organization_id: event.organization_id,
+        brand_id: event.brand_id,
+        event_id: eventId,
+        provider: body.provider,
+        config: JSON.stringify(body.config),
+        consent_required: body.consentRequired,
+        status: body.status,
+        created_at: now,
+        updated_at: now,
+      })
+      .execute();
+    const created = await db
+      .selectFrom('marketing_integrations')
+      .selectAll()
+      .where('event_id', '=', eventId)
+      .where('provider', '=', body.provider)
+      .executeTakeFirstOrThrow();
+    return serializeMarketingIntegration(created);
+  });
+
   app.post('/events/:eventId/publish', async (request) => {
     const principal = request.principal!;
     ClerkAuthService.requirePermission(principal, 'events.write');
@@ -148,6 +402,8 @@ export const eventRoutes: FastifyPluginAsync = async (app) => {
     const result = await repo.updateStatus(eventId, 'published');
     await writeAuditLog(audit(), request, principal, {
       action: 'event.published',
+      organizationId: existing.organization_id,
+      brandId: existing.brand_id,
       resourceType: 'Event',
       resourceId: eventId,
     });
@@ -168,6 +424,8 @@ export const eventRoutes: FastifyPluginAsync = async (app) => {
     const result = await repo.updateStatus(eventId, 'paused');
     await writeAuditLog(audit(), request, principal, {
       action: 'event.paused',
+      organizationId: existing.organization_id,
+      brandId: existing.brand_id,
       resourceType: 'Event',
       resourceId: eventId,
     });
@@ -188,6 +446,8 @@ export const eventRoutes: FastifyPluginAsync = async (app) => {
     const result = await repo.updateStatus(eventId, 'archived');
     await writeAuditLog(audit(), request, principal, {
       action: 'event.archived',
+      organizationId: existing.organization_id,
+      brandId: existing.brand_id,
       resourceType: 'Event',
       resourceId: eventId,
     });

@@ -1,4 +1,12 @@
-import type { BaseEntity, ISO8601Date, Locale, Slug, TenantOrgScopedEntity, Timezone, Ulid } from '../shared/index.js';
+import type {
+  BaseEntity,
+  ISO8601Date,
+  Locale,
+  Slug,
+  TenantOrgScopedEntity,
+  Timezone,
+  Ulid,
+} from '../shared/index.js';
 
 export type EventStatus = 'draft' | 'published' | 'paused' | 'ended' | 'archived';
 export type EventVisibility = 'public' | 'unlisted' | 'private';
@@ -88,6 +96,18 @@ export type CreateEventInput = {
 export type UpdateEventInput = Partial<
   Pick<
     Event,
-    'slug' | 'title' | 'description' | 'status' | 'timezone' | 'startsAt' | 'endsAt' | 'venue' | 'visibility' | 'seo' | 'capacity' | 'coverImageUrl' | 'externalUrl'
+    | 'slug'
+    | 'title'
+    | 'description'
+    | 'status'
+    | 'timezone'
+    | 'startsAt'
+    | 'endsAt'
+    | 'venue'
+    | 'visibility'
+    | 'seo'
+    | 'capacity'
+    | 'coverImageUrl'
+    | 'externalUrl'
   >
 >;

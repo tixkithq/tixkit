@@ -1,27 +1,38 @@
 import { createContext, useContext, useEffect, useRef, useState, type ReactNode } from 'react';
 
-type GateKitClientConfig = {
+type TixkitClientConfig = {
   apiBaseUrl?: string;
   checkoutBaseUrl?: string;
   widgetBaseUrl?: string;
 };
 
-const GateKitContext = createContext<GateKitClientConfig | null>(null);
+const TixkitContext = createContext<TixkitClientConfig | null>(null);
 
-export function GateKitProvider({ children, config }: { children: ReactNode; config: GateKitClientConfig }) {
-  return <GateKitContext.Provider value={config}>{children}</GateKitContext.Provider>;
+// Hosted checkout needs same-origin iframe behavior for storage and lifecycle
+// postMessage events. Callers still validate message origin and eventId.
+const CHECKOUT_IFRAME_SANDBOX =
+  'allow-scripts allow-same-origin allow-forms allow-popups allow-popups-to-escape-sandbox';
+
+export function TixkitProvider({
+  children,
+  config,
+}: {
+  children: ReactNode;
+  config: TixkitClientConfig;
+}) {
+  return <TixkitContext.Provider value={config}>{children}</TixkitContext.Provider>;
 }
 
-export function useGateKit(): GateKitClientConfig {
-  const ctx = useContext(GateKitContext);
-  if (!ctx) throw new Error('useGateKit must be used within GateKitProvider');
+export function useTixkit(): TixkitClientConfig {
+  const ctx = useContext(TixkitContext);
+  if (!ctx) throw new Error('useTixkit must be used within TixkitProvider');
   return ctx;
 }
 
 /**
- * Lifecycle events emitted by GateKit checkout widgets and buttons.
+ * Lifecycle events emitted by Tixkit checkout widgets and buttons.
  */
-export type GateKitCheckoutEvent =
+export type TixkitCheckoutEvent =
   | 'loaded'
   | 'loading'
   | 'error'
@@ -30,8 +41,8 @@ export type GateKitCheckoutEvent =
   | 'checkout_started'
   | 'order_completed';
 
-export type GateKitCheckoutEventCallback = (
-  event: GateKitCheckoutEvent,
+export type TixkitCheckoutEventCallback = (
+  event: TixkitCheckoutEvent,
   detail: Record<string, unknown>,
 ) => void;
 
@@ -69,7 +80,7 @@ function buildCheckoutUrl(
   return `${base}/checkout?${search.toString()}`;
 }
 
-export function GateKitCheckoutButton({
+export function TixkitCheckoutButton({
   eventId,
   items,
   brand,
@@ -87,13 +98,13 @@ export function GateKitCheckoutButton({
   discountCode?: string;
   trackingId?: string;
   checkoutMode?: 'inline' | 'modal' | 'redirect';
-  onEvent?: GateKitCheckoutEventCallback;
+  onEvent?: TixkitCheckoutEventCallback;
   children: ReactNode;
 }) {
-  const config = useGateKit();
+  const config = useTixkit();
   const modalRef = useRef<Window | null>(null);
   const [inlineOpen, setInlineOpen] = useState(false);
-  const base = config.checkoutBaseUrl ?? 'https://checkout.gatekit.com';
+  const base = config.checkoutBaseUrl ?? 'https://checkout.tixkit.com';
   const origin = expectedOrigin(base);
 
   useEffect(() => {
@@ -102,10 +113,10 @@ export function GateKitCheckoutButton({
     function handler(e: MessageEvent) {
       // Validate origin to prevent untrusted frames from triggering events.
       if (origin && e.origin !== origin) return;
-      if (e.data?.source !== 'gatekit-checkout') return;
+      if (e.data?.source !== 'tixkit-checkout') return;
       // Match eventId to ensure the message is for this checkout instance.
       if (e.data?.eventId && e.data.eventId !== eventId) return;
-      const evt = e.data.event as GateKitCheckoutEvent;
+      const evt = e.data.event as TixkitCheckoutEvent;
       if (evt) callback(evt, e.data);
     }
     window.addEventListener('message', handler);
@@ -114,10 +125,16 @@ export function GateKitCheckoutButton({
 
   const handleClick = () => {
     const checkoutUrl = buildCheckoutUrl(base, {
-      eventId, items, brand, products, discountCode, trackingId, mode: checkoutMode,
+      eventId,
+      items,
+      brand,
+      products,
+      discountCode,
+      trackingId,
+      mode: checkoutMode,
     });
     if (checkoutMode === 'modal') {
-      modalRef.current = window.open(checkoutUrl, 'gatekit-checkout', 'width=600,height=700');
+      modalRef.current = window.open(checkoutUrl, 'tixkit-checkout', 'width=600,height=700');
       if (onEvent) onEvent('opened', { mode: 'modal' });
     } else if (checkoutMode === 'inline') {
       setInlineOpen(true);
@@ -131,15 +148,26 @@ export function GateKitCheckoutButton({
     return (
       <div style={{ position: 'relative', width: '100%', minHeight: '600px' }}>
         <iframe
-          src={buildCheckoutUrl(base, { eventId, items, brand, products, discountCode, trackingId, mode: 'inline' })}
+          src={buildCheckoutUrl(base, {
+            eventId,
+            items,
+            brand,
+            products,
+            discountCode,
+            trackingId,
+            mode: 'inline',
+          })}
           style={{ border: 'none', width: '100%', minHeight: '600px' }}
-          title="GateKit Checkout"
+          title="Tixkit Checkout"
           loading="lazy"
-          sandbox="allow-scripts allow-same-origin allow-forms allow-popups allow-popups-to-escape-sandbox"
+          sandbox={CHECKOUT_IFRAME_SANDBOX}
           allow="payment; publickey-credentials-create *; publickey-credentials-get *"
         />
         <button
-          onClick={() => { setInlineOpen(false); if (onEvent) onEvent('closed', {}); }}
+          onClick={() => {
+            setInlineOpen(false);
+            if (onEvent) onEvent('closed', {});
+          }}
           style={{ position: 'absolute', top: 8, right: 8, zIndex: 1 }}
           aria-label="Close checkout"
         >
@@ -152,7 +180,7 @@ export function GateKitCheckoutButton({
   return <button onClick={handleClick}>{children}</button>;
 }
 
-export function GateKitTicketWidget({
+export function TixkitTicketWidget({
   brand,
   event: eventId,
   locale = 'en-US',
@@ -171,11 +199,11 @@ export function GateKitTicketWidget({
   discountCode?: string;
   trackingId?: string;
   checkoutMode?: 'inline' | 'modal' | 'redirect';
-  onEvent?: GateKitCheckoutEventCallback;
+  onEvent?: TixkitCheckoutEventCallback;
 }) {
-  const config = useGateKit();
+  const config = useTixkit();
   const iframeRef = useRef<HTMLIFrameElement>(null);
-  const base = config.checkoutBaseUrl ?? config.widgetBaseUrl ?? 'https://checkout.gatekit.com';
+  const base = config.checkoutBaseUrl ?? config.widgetBaseUrl ?? 'https://checkout.tixkit.com';
   const origin = expectedOrigin(base);
 
   useEffect(() => {
@@ -184,10 +212,10 @@ export function GateKitTicketWidget({
     function handler(e: MessageEvent) {
       // Validate origin to prevent untrusted frames from triggering events.
       if (origin && e.origin !== origin) return;
-      if (e.data?.source !== 'gatekit-checkout') return;
+      if (e.data?.source !== 'tixkit-checkout') return;
       // Match eventId to ensure the message is for this widget instance.
       if (e.data?.eventId && e.data.eventId !== eventId) return;
-      const evt = e.data.event as GateKitCheckoutEvent;
+      const evt = e.data.event as TixkitCheckoutEvent;
       if (evt) callback(evt, e.data);
     }
     window.addEventListener('message', handler);
@@ -209,9 +237,9 @@ export function GateKitTicketWidget({
       ref={iframeRef}
       src={widgetUrl}
       style={{ border: 'none', width: '100%', minHeight: '400px' }}
-      title="GateKit Ticket Widget"
+      title="Tixkit Ticket Widget"
       loading="lazy"
-      sandbox="allow-scripts allow-same-origin allow-forms allow-popups allow-popups-to-escape-sandbox"
+      sandbox={CHECKOUT_IFRAME_SANDBOX}
       allow="payment; publickey-credentials-create *; publickey-credentials-get *"
     />
   );

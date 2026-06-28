@@ -1,8 +1,10 @@
-// GateKit JavaScript SDK
+// Tixkit JavaScript SDK
 // Works in Node.js and browsers with separate entry points.
 // Never exposes secret API keys in browser bundles.
 
-export type GateKitConfig = {
+export const TIXKIT_API_VERSION = '2026-01-01';
+
+export type TixkitConfig = {
   apiKey?: string;
   apiBaseUrl?: string;
   apiVersion?: string;
@@ -10,7 +12,7 @@ export type GateKitConfig = {
   maxRetries?: number;
 };
 
-export type GateKitError = {
+export type TixkitError = {
   error: {
     code: string;
     message: string;
@@ -19,7 +21,7 @@ export type GateKitError = {
   };
 };
 
-export class GateKitApiError extends Error {
+export class TixkitApiError extends Error {
   constructor(
     public readonly code: string,
     message: string,
@@ -28,7 +30,7 @@ export class GateKitApiError extends Error {
     public readonly details?: Record<string, unknown>,
   ) {
     super(message);
-    this.name = 'GateKitApiError';
+    this.name = 'TixkitApiError';
   }
 }
 
@@ -59,6 +61,7 @@ export type Event = {
 export type TicketType = {
   id: string;
   eventId: string;
+  eventOccurrenceId?: string;
   name: string;
   description?: string;
   kind: 'free' | 'paid' | 'donation';
@@ -77,6 +80,35 @@ export type TicketType = {
   accessCodeHint?: string;
   createdAt: string;
   updatedAt: string;
+};
+
+export type EventOccurrence = {
+  id: string;
+  eventId: string;
+  title: string;
+  startsAt: string;
+  endsAt: string;
+  timezone: string;
+  venue?: Record<string, unknown> | null;
+  capacity?: number | null;
+  sortOrder: number;
+  status: 'scheduled' | 'cancelled' | 'completed' | string;
+  createdAt?: string;
+  updatedAt?: string;
+};
+
+export type MarketingIntegration = {
+  id?: string;
+  tenantId?: string;
+  organizationId?: string;
+  brandId?: string;
+  eventId?: string;
+  provider: 'ga4' | 'meta_pixel' | 'generic_tag';
+  config: Record<string, unknown>;
+  consentRequired: boolean;
+  status: 'active' | 'disabled' | string;
+  createdAt?: string;
+  updatedAt?: string;
 };
 
 export type AccessRule = {
@@ -179,6 +211,104 @@ export type CheckoutSession = {
   expiresAt: string;
 };
 
+export type CheckoutWalletPassTicket = {
+  ticketId: string;
+  ticketCode: string;
+  appleUrl?: string;
+  googleUrl?: string;
+};
+
+export type CheckoutWalletPasses = {
+  tickets: CheckoutWalletPassTicket[];
+};
+
+export type UploadPurpose = 'checkout_answer' | 'brand_logo' | 'user_avatar';
+
+export type CreateUploadArtifactInput = {
+  purpose: UploadPurpose;
+  fileName: string;
+  contentType: string;
+  sizeBytes: number;
+  brandId?: string;
+  eventId?: string;
+  metadata?: Record<string, unknown>;
+};
+
+export type PublicCreateUploadArtifactInput = {
+  fileName: string;
+  contentType: string;
+  sizeBytes: number;
+  questionId?: string;
+};
+
+export type UploadArtifactTicket = {
+  artifactId: string;
+  uploadUrl: string;
+  uploadHeaders: Record<string, string>;
+  completeUrl: string;
+  completeToken?: string;
+  expiresAt: string;
+};
+
+export type CompletedUploadArtifact = {
+  artifactId: string;
+  status: string;
+  scanStatus: string;
+};
+
+export type UploadArtifactDownload = {
+  downloadUrl: string;
+};
+
+export type WidgetImpressionInput = {
+  visitorId?: string;
+  instanceId?: string;
+  trackingId?: string;
+  affiliateCode?: string;
+  host?: string;
+  pageUrl?: string;
+  referrer?: string;
+};
+
+export type WidgetImpressionResult = {
+  tracked: boolean;
+  deduped: boolean;
+};
+
+export type WaitlistEntry = {
+  id: string;
+  eventId: string;
+  ticketTypeId: string;
+  email: string;
+  firstName?: string;
+  lastName?: string;
+  phone?: string;
+  quantity: number;
+  status: 'joined' | 'offered' | 'claimed' | 'expired' | 'cancelled' | string;
+  offerExpiresAt?: string;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type JoinWaitlistInput = {
+  ticketTypeId: string;
+  email: string;
+  firstName?: string;
+  lastName?: string;
+  phone?: string;
+  quantity?: number;
+};
+
+export type WaitlistSettings = {
+  autoOfferEnabled: boolean;
+  offerTtlMinutes: number;
+};
+
+export type WaitlistOffer = {
+  entry: WaitlistEntry;
+  claimToken: string;
+};
+
 export type CheckoutConfirmCompleted = {
   order: Order;
   sessionId: string;
@@ -224,13 +354,17 @@ export type Order = {
   createdAt: string;
   updatedAt: string;
   lineItems?: OrderLineItem[];
+  invoice?: Invoice;
+  taxSnapshots?: TaxSnapshot[];
   timeline?: OrderTimelineEvent[];
 };
 
 export type OrderLineItem = {
   id: string;
   orderId: string;
-  ticketTypeId: string;
+  ticketTypeId?: string;
+  eventOccurrenceId?: string;
+  productId?: string;
   attendeeId?: string;
   description: string;
   quantity: number;
@@ -243,6 +377,52 @@ export type OrderLineItem = {
   currency: string;
   createdAt: string;
   updatedAt: string;
+};
+
+export type TaxSnapshot = {
+  id: string;
+  orderId: string;
+  orderLineItemId: string;
+  eventId: string;
+  taxRuleId?: string;
+  taxRuleName: string;
+  rate: number;
+  type: string;
+  appliedTo: string;
+  taxableAmountCents: number;
+  taxCents: number;
+  currency: string;
+  inclusive: boolean;
+  provider: string;
+  createdAt: string;
+};
+
+export type Invoice = {
+  id: string;
+  orderId: string;
+  invoiceNumber: string;
+  status: string;
+  currency: string;
+  subtotalCents: number;
+  discountCents: number;
+  taxCents: number;
+  feeCents: number;
+  totalCents: number;
+  refundedCents: number;
+  buyerEmail: string;
+  buyerName?: string;
+  buyerTaxId?: string;
+  sellerName: string;
+  sellerTaxId?: string;
+  reverseCharge: boolean;
+  issuedAt: string;
+};
+
+export type InvoiceDocument = {
+  invoice: Invoice;
+  order: Order;
+  lineItems: OrderLineItem[];
+  taxSnapshots: TaxSnapshot[];
 };
 
 export type OrderTimelineEvent = {
@@ -417,7 +597,12 @@ export type TaxReport = {
   eventId: string;
   currency: string;
   totalTaxCollectedCents: number;
-  breakdown: { taxRuleName: string; rate: number; taxableAmountCents: number; taxCollectedCents: number }[];
+  breakdown: {
+    taxRuleName: string;
+    rate: number;
+    taxableAmountCents: number;
+    taxCollectedCents: number;
+  }[];
 };
 
 export type AttendanceReport = {
@@ -446,7 +631,7 @@ export type PromoReport = {
 
 export type ConversionReport = {
   eventId: string;
-  widgetViews: number | null;
+  widgetViews: number;
   checkoutStarted: number;
   checkoutCompleted: number;
   conversionRate: number;
@@ -513,6 +698,12 @@ export type PaymentAccount = {
   providerAccountId: string;
   status: string;
   defaultCurrency: string;
+  detailsSubmitted: boolean;
+  chargesEnabled: boolean;
+  payoutsEnabled: boolean;
+  requirements: Record<string, unknown>;
+  disabledReason: string | null;
+  onboardingUrl?: string;
   createdAt: string;
   updatedAt: string;
 };
@@ -588,6 +779,14 @@ export type OAuthApplication = {
   updatedAt: string;
 };
 
+export type OAuthTokenResponse = {
+  access_token: string;
+  token_type: 'Bearer';
+  expires_in: number;
+  scope: string;
+  refresh_token?: string;
+};
+
 export type AuthMe = {
   userId: string;
   email: string;
@@ -609,6 +808,48 @@ export type ExportJob = {
   error?: string;
 };
 
+export type AuditLog = {
+  id: string;
+  tenantId: string;
+  organizationId: string | null;
+  brandId: string | null;
+  actorType: string;
+  actorId: string;
+  action: string;
+  resourceType: string;
+  resourceId: string;
+  diffSummary: Record<string, unknown> | null;
+  requestId: string | null;
+  ip: string | null;
+  userAgent: string | null;
+  createdAt: string;
+};
+
+export type PrivacyRequest = {
+  id: string;
+  tenantId: string;
+  organizationId: string;
+  brandId: string | null;
+  requestType: 'export' | 'erasure' | string;
+  subjectType: 'buyer' | 'attendee' | string;
+  subjectId: string | null;
+  subjectEmail: string | null;
+  status: 'pending' | 'processing' | 'completed' | 'failed' | string;
+  requestedBy: string;
+  result: Record<string, unknown> | null;
+  error: string | null;
+  createdAt: string;
+  completedAt: string | null;
+};
+
+export type PrivacyRequestInput = {
+  organizationId: string;
+  brandId?: string;
+  subjectType: 'buyer' | 'attendee';
+  subjectId?: string;
+  subjectEmail?: string;
+};
+
 export type MessageCampaign = {
   id: string;
   eventId: string;
@@ -618,6 +859,9 @@ export type MessageCampaign = {
   channel: string;
   status: string;
   audience?: string;
+  audienceKey?: 'all' | 'checked_in' | 'not_checked_in' | 'specific';
+  audienceAttendeeIds?: string[];
+  audienceLabel?: string;
   audienceCount: number;
   queuedEmailJobs: number;
   queuedSmsJobs: number;
@@ -695,7 +939,7 @@ export type IdempotencyOptions = {
   idempotencyKey: string;
 };
 
-export class GateKitClient {
+export class TixkitClient {
   private readonly apiKey?: string;
   private readonly apiBaseUrl: string;
   private readonly apiVersion: string;
@@ -723,17 +967,19 @@ export class GateKitClient {
   readonly paymentAccounts: PaymentAccountResource;
   readonly questions: QuestionResource;
   readonly oauthApplications: OAuthApplicationResource;
+  readonly uploads: UploadResource;
+  readonly privacy: PrivacyResource;
   readonly public: PublicResource;
   readonly auth: AuthResource;
 
-  constructor(config: GateKitConfig) {
+  constructor(config: TixkitConfig) {
     if (isBrowserRuntime() && config.apiKey && looksLikeSecretApiKey(config.apiKey)) {
-      throw new Error('Secret GateKit API keys are server-only and cannot be used in browser SDKs');
+      throw new Error('Secret Tixkit API keys are server-only and cannot be used in browser SDKs');
     }
 
     this.apiKey = config.apiKey;
-    this.apiBaseUrl = config.apiBaseUrl ?? 'https://api.gatekit.com';
-    this.apiVersion = config.apiVersion ?? '2026-01-01';
+    this.apiBaseUrl = config.apiBaseUrl ?? 'https://api.tixkit.com';
+    this.apiVersion = config.apiVersion ?? TIXKIT_API_VERSION;
     this.timeout = config.timeout ?? 30000;
     this.maxRetries = config.maxRetries ?? 3;
 
@@ -758,6 +1004,8 @@ export class GateKitClient {
     this.paymentAccounts = new PaymentAccountResource(this);
     this.questions = new QuestionResource(this);
     this.oauthApplications = new OAuthApplicationResource(this);
+    this.uploads = new UploadResource(this);
+    this.privacy = new PrivacyResource(this);
     this.public = new PublicResource(this);
     this.auth = new AuthResource(this);
   }
@@ -782,7 +1030,7 @@ export class GateKitClient {
 
     const headers: Record<string, string> = {
       'Content-Type': 'application/json',
-      'X-GateKit-Version': this.apiVersion,
+      'X-Tixkit-Version': this.apiVersion,
     };
 
     if (this.apiKey) {
@@ -795,15 +1043,16 @@ export class GateKitClient {
       Object.assign(headers, options.headers);
     }
 
-	    let lastError: Error | null = null;
-	    const attempts = this.maxRetries + 1;
-	    const retryableRequest = isSafeMethod(method) || Boolean(options?.idempotencyKey);
+    let lastError: Error | null = null;
+    const attempts = this.maxRetries + 1;
+    const retryableRequest = isSafeMethod(method) || Boolean(options?.idempotencyKey);
 
     for (let attempt = 0; attempt < attempts; attempt++) {
       try {
         const controller = new AbortController();
         const timeoutId = setTimeout(() => controller.abort(), this.timeout);
 
+        // eslint-disable-next-line no-await-in-loop -- retries must run sequentially so backoff and previous response state are respected.
         const response = await fetch(url.toString(), {
           method,
           headers,
@@ -813,12 +1062,13 @@ export class GateKitClient {
 
         clearTimeout(timeoutId);
 
+        // eslint-disable-next-line no-await-in-loop -- each retry attempt must consume its own response before deciding whether to retry.
         const responseText = await response.text();
         const data = responseText ? JSON.parse(responseText) : null;
 
         if (!response.ok) {
-          const error = data as GateKitError;
-          throw new GateKitApiError(
+          const error = data as TixkitError;
+          throw new TixkitApiError(
             error.error.code,
             error.error.message,
             response.status,
@@ -831,20 +1081,21 @@ export class GateKitClient {
       } catch (err) {
         lastError = err instanceof Error ? err : new Error(String(err));
 
-	        if (!retryableRequest) {
-	          throw err;
-	        }
+        if (!retryableRequest) {
+          throw err;
+        }
 
-	        // Retry safe/idempotent operations on network failures and 5xx errors.
-	        if (err instanceof GateKitApiError) {
-	          if (err.statusCode >= 400 && err.statusCode < 500) {
-	            throw err; // Don't retry client errors
+        // Retry safe/idempotent operations on network failures and 5xx errors.
+        if (err instanceof TixkitApiError) {
+          if (err.statusCode >= 400 && err.statusCode < 500) {
+            throw err; // Don't retry client errors
           }
         }
 
         if (attempt < attempts - 1) {
           // Exponential backoff
           const delay = Math.min(1000 * Math.pow(2, attempt), 10000);
+          // eslint-disable-next-line no-await-in-loop -- retry backoff is intentionally sequential between attempts.
           await new Promise((resolve) => setTimeout(resolve, delay));
         }
       }
@@ -860,41 +1111,52 @@ function isBrowserRuntime(): boolean {
 }
 
 function looksLikeSecretApiKey(value: string): boolean {
-  return value.startsWith('gk_');
+  return value.startsWith('tk_');
 }
 
 function isSafeMethod(method: string): boolean {
   return method === 'GET' || method === 'HEAD' || method === 'OPTIONS';
 }
 
-function paginationParams(input?: PaginationParams): Record<string, string> | undefined {
-  if (!input?.cursor && input?.limit === undefined) return undefined;
+function paginationParams(
+  input?: PaginationParams & Record<string, string | number | boolean | undefined>,
+): Record<string, string> | undefined {
+  if (!input) return undefined;
   const params: Record<string, string> = {};
   if (input.cursor) params.cursor = input.cursor;
   if (input.limit !== undefined) params.limit = String(input.limit);
-  return params;
+  for (const [key, value] of Object.entries(input)) {
+    if (key === 'cursor' || key === 'limit' || value === undefined) continue;
+    params[key] = String(value);
+  }
+  return Object.keys(params).length === 0 ? undefined : params;
 }
 
 class CheckoutResource {
-  constructor(private client: GateKitClient) {}
+  constructor(private client: TixkitClient) {}
 
-  async create(input: {
-    eventId: string;
-    items: {
-      ticketTypeId: string;
-      quantity: number;
-      unitAmountCents?: number;
-      attendeeFields?: Record<string, unknown>[];
-    }[];
-    discountCode?: string;
-    affiliateCode?: string;
-    trackingId?: string;
-    buyerFields?: Record<string, unknown>;
-    buyer?: { email?: string; firstName?: string; lastName?: string; phone?: string };
-    successUrl?: string;
-    cancelUrl?: string;
-    accessCode?: string;
-  } & IdempotencyOptions): Promise<CheckoutSession> {
+  async create(
+    input: {
+      eventId: string;
+      items: {
+        ticketTypeId?: string;
+        occurrenceId?: string;
+        productId?: string;
+        quantity: number;
+        unitAmountCents?: number;
+        attendeeFields?: Record<string, unknown>[];
+      }[];
+      discountCode?: string;
+      affiliateCode?: string;
+      trackingId?: string;
+      buyerFields?: Record<string, unknown>;
+      buyer?: { email?: string; firstName?: string; lastName?: string; phone?: string };
+      successUrl?: string;
+      cancelUrl?: string;
+      accessCode?: string;
+      waitlistClaimToken?: string;
+    } & IdempotencyOptions,
+  ): Promise<CheckoutSession> {
     const { idempotencyKey, ...body } = input;
     return this.client.request('POST', '/checkout/sessions', {
       body,
@@ -908,12 +1170,21 @@ class CheckoutResource {
     });
   }
 
-  async update(sessionId: string, input: {
-    clientToken: string;
-    buyer?: { email?: string; firstName?: string; lastName?: string; phone?: string };
-    successUrl?: string;
-    cancelUrl?: string;
-  }): Promise<CheckoutSession> {
+  async walletPasses(sessionId: string, clientToken?: string): Promise<CheckoutWalletPasses> {
+    return this.client.request('GET', `/checkout/sessions/${sessionId}/wallet-passes`, {
+      headers: clientToken ? { 'X-Checkout-Session-Token': clientToken } : undefined,
+    });
+  }
+
+  async update(
+    sessionId: string,
+    input: {
+      clientToken: string;
+      buyer?: { email?: string; firstName?: string; lastName?: string; phone?: string };
+      successUrl?: string;
+      cancelUrl?: string;
+    },
+  ): Promise<CheckoutSession> {
     const { clientToken, ...body } = input;
     return this.client.request('PATCH', `/checkout/sessions/${sessionId}`, {
       body,
@@ -934,8 +1205,24 @@ class CheckoutResource {
   }
 }
 
+class UploadResource {
+  constructor(private client: TixkitClient) {}
+
+  async create(input: CreateUploadArtifactInput): Promise<UploadArtifactTicket> {
+    return this.client.request('POST', '/upload-artifacts', { body: input });
+  }
+
+  async complete(artifactId: string): Promise<CompletedUploadArtifact> {
+    return this.client.request('POST', `/upload-artifacts/${artifactId}/complete`, { body: {} });
+  }
+
+  async download(artifactId: string): Promise<UploadArtifactDownload> {
+    return this.client.request('GET', `/upload-artifacts/${artifactId}/download`);
+  }
+}
+
 class EventResource {
-  constructor(private client: GateKitClient) {}
+  constructor(private client: TixkitClient) {}
 
   async list(params?: PaginationParams): Promise<PageResult<Event>> {
     return this.client.request('GET', '/events', { params: paginationParams(params) });
@@ -963,7 +1250,27 @@ class EventResource {
     return this.client.request('POST', `/events/${eventId}/publish`);
   }
 
-  async update(eventId: string, input: Partial<Pick<Event, 'title' | 'description' | 'currency' | 'status' | 'timezone' | 'startsAt' | 'endsAt' | 'visibility' | 'capacity' | 'coverImageUrl' | 'externalUrl' | 'venue' | 'seo'>>): Promise<Event> {
+  async update(
+    eventId: string,
+    input: Partial<
+      Pick<
+        Event,
+        | 'title'
+        | 'description'
+        | 'currency'
+        | 'status'
+        | 'timezone'
+        | 'startsAt'
+        | 'endsAt'
+        | 'visibility'
+        | 'capacity'
+        | 'coverImageUrl'
+        | 'externalUrl'
+        | 'venue'
+        | 'seo'
+      >
+    >,
+  ): Promise<Event> {
     return this.client.request('PATCH', `/events/${eventId}`, { body: input });
   }
 
@@ -975,41 +1282,147 @@ class EventResource {
     return this.client.request('POST', `/events/${eventId}/archive`);
   }
 
-  async getAvailability(eventId: string): Promise<PageResult<{
-    ticketTypeId: string;
-    available: number;
-    total: number;
-    reserved: number;
-    sold: number;
-    status: string;
-  }>> {
-    return this.client.request<PageResult<{
+  async getAvailability(eventId: string): Promise<
+    PageResult<{
       ticketTypeId: string;
+      eventOccurrenceId?: string;
       available: number;
       total: number;
       reserved: number;
       sold: number;
       status: string;
-    }>>('GET', `/events/${eventId}/availability`);
+    }>
+  > {
+    return this.client.request<
+      PageResult<{
+        ticketTypeId: string;
+        eventOccurrenceId?: string;
+        available: number;
+        total: number;
+        reserved: number;
+        sold: number;
+        status: string;
+      }>
+    >('GET', `/events/${eventId}/availability`);
+  }
+
+  async listOccurrences(eventId: string): Promise<PageResult<EventOccurrence>> {
+    return this.client.request('GET', `/events/${eventId}/occurrences`);
+  }
+
+  async createOccurrence(
+    eventId: string,
+    input: {
+      title: string;
+      startsAt: string;
+      endsAt: string;
+      timezone: string;
+      venue?: Record<string, unknown> | null;
+      capacity?: number | null;
+      sortOrder?: number;
+      status?: EventOccurrence['status'];
+    },
+  ): Promise<EventOccurrence> {
+    return this.client.request('POST', `/events/${eventId}/occurrences`, { body: input });
+  }
+
+  async updateOccurrence(
+    eventId: string,
+    occurrenceId: string,
+    input: Partial<{
+      title: string;
+      startsAt: string;
+      endsAt: string;
+      timezone: string;
+      venue: Record<string, unknown> | null;
+      capacity: number | null;
+      sortOrder: number;
+      status: EventOccurrence['status'];
+    }>,
+  ): Promise<EventOccurrence> {
+    return this.client.request('PATCH', `/events/${eventId}/occurrences/${occurrenceId}`, {
+      body: input,
+    });
+  }
+
+  async listMarketingIntegrations(eventId: string): Promise<PageResult<MarketingIntegration>> {
+    return this.client.request('GET', `/events/${eventId}/marketing-integrations`);
+  }
+
+  async upsertMarketingIntegration(
+    eventId: string,
+    input: {
+      provider: MarketingIntegration['provider'];
+      config: Record<string, unknown>;
+      consentRequired?: boolean;
+      status?: 'active' | 'disabled';
+    },
+  ): Promise<MarketingIntegration> {
+    return this.client.request(
+      'PUT',
+      `/events/${eventId}/marketing-integrations/${input.provider}`,
+      { body: input },
+    );
+  }
+
+  async listWaitlist(
+    eventId: string,
+  ): Promise<{ items: WaitlistEntry[]; settings: WaitlistSettings }> {
+    return this.client.request('GET', `/events/${eventId}/waitlist`);
+  }
+
+  async offerWaitlistEntry(
+    eventId: string,
+    entryId: string,
+    input?: { expiresInMinutes?: number },
+  ): Promise<WaitlistOffer> {
+    return this.client.request('POST', `/events/${eventId}/waitlist/${entryId}/offer`, {
+      body: input ?? {},
+    });
+  }
+
+  async updateWaitlistSettings(
+    eventId: string,
+    input: WaitlistSettings,
+  ): Promise<WaitlistSettings> {
+    return this.client.request('PATCH', `/events/${eventId}/waitlist/settings`, { body: input });
   }
 }
 
 class OrderResource {
-  constructor(private client: GateKitClient) {}
+  constructor(private client: TixkitClient) {}
 
   async list(params?: PaginationParams): Promise<PageResult<Order>> {
     return this.client.request('GET', '/orders', { params: paginationParams(params) });
   }
 
-  async get(orderId: string): Promise<Order & { lineItems: unknown[]; timeline: unknown[] }> {
+  async get(orderId: string): Promise<
+    Order & {
+      lineItems: OrderLineItem[];
+      timeline: OrderTimelineEvent[];
+      invoice?: Invoice;
+      taxSnapshots?: TaxSnapshot[];
+    }
+  > {
     return this.client.request('GET', `/orders/${orderId}`);
+  }
+
+  async invoice(orderId: string): Promise<InvoiceDocument> {
+    return this.client.request('GET', `/orders/${orderId}/invoice`);
+  }
+
+  async downloadInvoice(orderId: string): Promise<InvoiceDocument> {
+    return this.client.request('GET', `/orders/${orderId}/invoice/download`);
   }
 
   async cancel(orderId: string): Promise<Order> {
     return this.client.request('POST', `/orders/${orderId}/cancel`);
   }
 
-  async refund(orderId: string, input: { amountCents?: number; reason: string } & IdempotencyOptions): Promise<unknown> {
+  async refund(
+    orderId: string,
+    input: { amountCents?: number; reason: string } & IdempotencyOptions,
+  ): Promise<unknown> {
     const { idempotencyKey, ...body } = input;
     return this.client.request('POST', `/orders/${orderId}/refunds`, {
       body,
@@ -1019,9 +1432,12 @@ class OrderResource {
 }
 
 class TicketResource {
-  constructor(private client: GateKitClient) {}
+  constructor(private client: TixkitClient) {}
 
-  async transfer(ticketId: string, input: { toEmail: string } & IdempotencyOptions): Promise<Ticket> {
+  async transfer(
+    ticketId: string,
+    input: { toEmail: string } & IdempotencyOptions,
+  ): Promise<Ticket> {
     const { idempotencyKey, toEmail } = input;
     return this.client.request('POST', `/tickets/${ticketId}/transfer`, {
       body: { toEmail },
@@ -1031,43 +1447,63 @@ class TicketResource {
 }
 
 class OrganizationResource {
-  constructor(private client: GateKitClient) {}
+  constructor(private client: TixkitClient) {}
   async list(params?: PaginationParams): Promise<PageResult<Organization>> {
     return this.client.request('GET', '/organizations', { params: paginationParams(params) });
   }
-  async create(input: { name: string; slug: string; clerkOrganizationId?: string }): Promise<Organization> {
+  async create(input: {
+    name: string;
+    slug: string;
+    clerkOrganizationId?: string;
+  }): Promise<Organization> {
     return this.client.request('POST', '/organizations', { body: input });
   }
-  async update(organizationId: string, input: Partial<Pick<Organization, 'name' | 'slug' | 'status'>>): Promise<Organization> {
+  async update(
+    organizationId: string,
+    input: Partial<Pick<Organization, 'name' | 'slug' | 'status'>>,
+  ): Promise<Organization> {
     return this.client.request('PATCH', `/organizations/${organizationId}`, { body: input });
   }
 }
 
 class BrandResource {
-  constructor(private client: GateKitClient) {}
+  constructor(private client: TixkitClient) {}
   async list(params?: PaginationParams): Promise<PageResult<Brand>> {
     return this.client.request('GET', '/brands', { params: paginationParams(params) });
   }
-  async create(input: { organizationId: string; name: string; slug: string; theme?: Record<string, unknown>; whiteLabel?: boolean }): Promise<Brand> {
+  async create(input: {
+    organizationId: string;
+    name: string;
+    slug: string;
+    theme?: Record<string, unknown>;
+    whiteLabel?: boolean;
+  }): Promise<Brand> {
     return this.client.request('POST', '/brands', { body: input });
   }
   async update(
     brandId: string,
-    input: Partial<Pick<Brand, 'name' | 'slug' | 'status' | 'theme' | 'supportUrl' | 'legalUrls' | 'whiteLabel'>> & {
+    input: Partial<
+      Pick<Brand, 'name' | 'slug' | 'status' | 'theme' | 'supportUrl' | 'legalUrls' | 'whiteLabel'>
+    > & {
       paymentAccountId?: string | null;
     },
   ): Promise<Brand> {
     return this.client.request('PATCH', `/brands/${brandId}`, { body: input });
   }
-  async addDomain(brandId: string, input: { domain: string; isPrimary?: boolean }): Promise<BrandDomain> {
+  async addDomain(
+    brandId: string,
+    input: { domain: string; isPrimary?: boolean },
+  ): Promise<BrandDomain> {
     return this.client.request('POST', `/brands/${brandId}/domains`, { body: input });
   }
 }
 
 class TicketTypeResource {
-  constructor(private client: GateKitClient) {}
+  constructor(private client: TixkitClient) {}
   async list(eventId: string, params?: PaginationParams): Promise<PageResult<TicketType>> {
-    return this.client.request('GET', `/events/${eventId}/ticket-types`, { params: paginationParams(params) });
+    return this.client.request('GET', `/events/${eventId}/ticket-types`, {
+      params: paginationParams(params),
+    });
   }
   async create(eventId: string, input: Record<string, unknown>): Promise<TicketType> {
     return this.client.request('POST', `/events/${eventId}/ticket-types`, { body: input });
@@ -1075,17 +1511,25 @@ class TicketTypeResource {
   async update(ticketTypeId: string, input: Record<string, unknown>): Promise<TicketType> {
     return this.client.request('PATCH', `/ticket-types/${ticketTypeId}`, { body: input });
   }
-  async createBatch(eventId: string, input: CreateTicketTypeBatchInput): Promise<TicketTypeBatchResult> {
+  async createBatch(
+    eventId: string,
+    input: CreateTicketTypeBatchInput,
+  ): Promise<TicketTypeBatchResult> {
     return this.client.request('POST', `/events/${eventId}/ticket-types/batch`, { body: input });
   }
-  async updateBatch(ticketTypeId: string, input: UpdateTicketTypeBatchInput): Promise<TicketTypeBatchResult> {
+  async updateBatch(
+    ticketTypeId: string,
+    input: UpdateTicketTypeBatchInput,
+  ): Promise<TicketTypeBatchResult> {
     return this.client.request('PATCH', `/ticket-types/${ticketTypeId}/batch`, { body: input });
   }
   async listAccessRules(ticketTypeId: string): Promise<PageResult<AccessRule>> {
     return this.client.request('GET', `/ticket-types/${ticketTypeId}/access-rules`);
   }
   async createAccessRule(ticketTypeId: string, input: CreateAccessRuleInput): Promise<AccessRule> {
-    return this.client.request('POST', `/ticket-types/${ticketTypeId}/access-rules`, { body: input });
+    return this.client.request('POST', `/ticket-types/${ticketTypeId}/access-rules`, {
+      body: input,
+    });
   }
   async deleteAccessRule(accessRuleId: string): Promise<void> {
     return this.client.request('DELETE', `/access-rules/${accessRuleId}`);
@@ -1093,99 +1537,150 @@ class TicketTypeResource {
 }
 
 class InventoryPoolResource {
-  constructor(private client: GateKitClient) {}
+  constructor(private client: TixkitClient) {}
   async create(eventId: string, input: CreateInventoryPoolInput): Promise<InventoryPool> {
     return this.client.request('POST', `/events/${eventId}/inventory-pools`, { body: input });
   }
 }
 
 class ProductResource {
-  constructor(private client: GateKitClient) {}
+  constructor(private client: TixkitClient) {}
   async list(eventId: string, params?: PaginationParams): Promise<PageResult<Product>> {
-    return this.client.request('GET', `/events/${eventId}/products`, { params: paginationParams(params) });
+    return this.client.request('GET', `/events/${eventId}/products`, {
+      params: paginationParams(params),
+    });
   }
-  async create(eventId: string, input: {
-    name: string;
-    description?: string;
-    priceCents: number;
-    currency: string;
-    categoryId?: string;
-    maxPerOrder?: number;
-    availableFrom?: string;
-    availableUntil?: string;
-    status?: Product['status'];
-    sortOrder?: number;
-  }): Promise<Product> {
+  async create(
+    eventId: string,
+    input: {
+      name: string;
+      description?: string;
+      priceCents: number;
+      currency: string;
+      categoryId?: string;
+      maxPerOrder?: number;
+      availableFrom?: string;
+      availableUntil?: string;
+      status?: Product['status'];
+      sortOrder?: number;
+    },
+  ): Promise<Product> {
     return this.client.request('POST', `/events/${eventId}/products`, { body: input });
   }
-  async update(productId: string, input: Partial<{
-    name: string;
-    description: string | null;
-    priceCents: number;
-    currency: string;
-    categoryId: string | null;
-    maxPerOrder: number;
-    availableFrom: string | null;
-    availableUntil: string | null;
-    status: Product['status'];
-    sortOrder: number;
-  }>): Promise<Product> {
+  async update(
+    productId: string,
+    input: Partial<{
+      name: string;
+      description: string | null;
+      priceCents: number;
+      currency: string;
+      categoryId: string | null;
+      maxPerOrder: number;
+      availableFrom: string | null;
+      availableUntil: string | null;
+      status: Product['status'];
+      sortOrder: number;
+    }>,
+  ): Promise<Product> {
     return this.client.request('PATCH', `/products/${productId}`, { body: input });
   }
-  async listCategories(eventId: string, params?: PaginationParams): Promise<PageResult<ProductCategory>> {
-    return this.client.request('GET', `/events/${eventId}/product-categories`, { params: paginationParams(params) });
+  async listCategories(
+    eventId: string,
+    params?: PaginationParams,
+  ): Promise<PageResult<ProductCategory>> {
+    return this.client.request('GET', `/events/${eventId}/product-categories`, {
+      params: paginationParams(params),
+    });
   }
-  async createCategory(eventId: string, input: { name: string; sortOrder?: number }): Promise<ProductCategory> {
+  async createCategory(
+    eventId: string,
+    input: { name: string; sortOrder?: number },
+  ): Promise<ProductCategory> {
     return this.client.request('POST', `/events/${eventId}/product-categories`, { body: input });
   }
 }
 
 class AttendeeResource {
-  constructor(private client: GateKitClient) {}
+  constructor(private client: TixkitClient) {}
   async list(eventId: string, params?: PaginationParams): Promise<PageResult<Attendee>> {
-    return this.client.request('GET', `/events/${eventId}/attendees`, { params: paginationParams(params) });
+    return this.client.request('GET', `/events/${eventId}/attendees`, {
+      params: paginationParams(params),
+    });
   }
-  async listAll(params?: PaginationParams & { eventId?: string; status?: string }): Promise<PageResult<Attendee>> {
+  async listAll(
+    params?: PaginationParams & { eventId?: string; status?: string },
+  ): Promise<PageResult<Attendee>> {
     const query: Record<string, string> = {};
     if (params?.cursor) query.cursor = params.cursor;
     if (params?.limit !== undefined) query.limit = String(params.limit);
     if (params?.eventId) query.eventId = params.eventId;
     if (params?.status) query.status = params.status;
-    return this.client.request('GET', '/attendees', { params: Object.keys(query).length > 0 ? query : undefined });
+    return this.client.request('GET', '/attendees', {
+      params: Object.keys(query).length > 0 ? query : undefined,
+    });
   }
-  async update(attendeeId: string, input: Partial<Pick<Attendee, 'firstName' | 'lastName' | 'email' | 'phone' | 'status'>>): Promise<Attendee> {
+  async update(
+    attendeeId: string,
+    input: Partial<Pick<Attendee, 'firstName' | 'lastName' | 'email' | 'phone' | 'status'>>,
+  ): Promise<Attendee> {
     return this.client.request('PATCH', `/attendees/${attendeeId}`, { body: input });
   }
 }
 
 class CheckInListResource {
-  constructor(private client: GateKitClient) {}
+  constructor(private client: TixkitClient) {}
   async list(eventId: string, params?: PaginationParams): Promise<PageResult<CheckInList>> {
-    return this.client.request('GET', `/events/${eventId}/check-in-lists`, { params: paginationParams(params) });
+    return this.client.request('GET', `/events/${eventId}/check-in-lists`, {
+      params: paginationParams(params),
+    });
   }
-  async getManifest(eventId: string, checkInListId: string, headers: Record<string, string>): Promise<OfflineManifest> {
-    return this.client.request('GET', `/events/${eventId}/check-in-lists/${checkInListId}/manifest`, { headers });
+  async getManifest(
+    eventId: string,
+    checkInListId: string,
+    headers: Record<string, string>,
+  ): Promise<OfflineManifest> {
+    return this.client.request(
+      'GET',
+      `/events/${eventId}/check-in-lists/${checkInListId}/manifest`,
+      { headers },
+    );
   }
 }
 
 class CheckInResource {
-  constructor(private client: GateKitClient) {}
-  async scan(input: { checkInListId: string; qrPayload: string; scannedAt: string; offline?: boolean } & { headers: Record<string, string> }): Promise<ScanResult> {
+  constructor(private client: TixkitClient) {}
+  async scan(
+    input: { checkInListId: string; qrPayload: string; scannedAt: string; offline?: boolean } & {
+      headers: Record<string, string>;
+    },
+  ): Promise<ScanResult> {
     const { headers, ...body } = input;
     return this.client.request('POST', '/check-ins/scan', { body, headers });
   }
-  async sync(input: { checkInListId: string; scans: { qrHash: string; scannedAt: string; offline: boolean }[] } & IdempotencyOptions & { headers: Record<string, string> }): Promise<SyncScanResult> {
+  async sync(
+    input: {
+      checkInListId: string;
+      scans: { qrHash: string; scannedAt: string; offline: boolean }[];
+    } & IdempotencyOptions & { headers: Record<string, string> },
+  ): Promise<SyncScanResult> {
     const { idempotencyKey, headers, ...body } = input;
     return this.client.request('POST', '/check-ins/sync', { body, idempotencyKey, headers });
   }
 }
 
 class ApiKeyResource {
-  constructor(private client: GateKitClient) {}
+  constructor(private client: TixkitClient) {}
   async list(params?: PaginationParams): Promise<PageResult<ApiKey>> {
     return this.client.request('GET', '/api-keys', { params: paginationParams(params) });
   }
-  async create(input: { organizationId: string; name: string; scopes: string[]; brandIds?: string[]; eventIds?: string[]; expiresAt?: string }): Promise<ApiKey> {
+  async create(input: {
+    organizationId: string;
+    name: string;
+    scopes: string[];
+    brandIds?: string[];
+    eventIds?: string[];
+    expiresAt?: string;
+  }): Promise<ApiKey> {
     return this.client.request('POST', '/api-keys', { body: input });
   }
   async revoke(keyId: string): Promise<void> {
@@ -1194,11 +1689,15 @@ class ApiKeyResource {
 }
 
 class ScannerDeviceResource {
-  constructor(private client: GateKitClient) {}
+  constructor(private client: TixkitClient) {}
   async list(params?: PaginationParams): Promise<PageResult<ScannerDevice>> {
     return this.client.request('GET', '/scanner-devices', { params: paginationParams(params) });
   }
-  async create(input: { organizationId: string; name: string; eventIds: string[] }): Promise<ScannerDevice> {
+  async create(input: {
+    organizationId: string;
+    name: string;
+    eventIds: string[];
+  }): Promise<ScannerDevice> {
     return this.client.request('POST', '/scanner-devices', { body: input });
   }
   async revoke(deviceId: string): Promise<{ deviceId: string; status: string }> {
@@ -1207,12 +1706,14 @@ class ScannerDeviceResource {
 }
 
 class ReportResource {
-  constructor(private client: GateKitClient) {}
+  constructor(private client: TixkitClient) {}
   async sales(eventId: string, params?: { from?: string; to?: string }): Promise<SalesReport> {
     const query: Record<string, string> = {};
     if (params?.from) query.from = params.from;
     if (params?.to) query.to = params.to;
-    return this.client.request('GET', `/events/${eventId}/reports/sales`, { params: Object.keys(query).length > 0 ? query : undefined });
+    return this.client.request('GET', `/events/${eventId}/reports/sales`, {
+      params: Object.keys(query).length > 0 ? query : undefined,
+    });
   }
   async tax(eventId: string): Promise<TaxReport> {
     return this.client.request('GET', `/events/${eventId}/reports/tax`);
@@ -1232,8 +1733,15 @@ class ReportResource {
 }
 
 class ExportResource {
-  constructor(private client: GateKitClient) {}
-  async create(input: { eventId?: string; type: string; format: string; filters?: Record<string, unknown> } & IdempotencyOptions): Promise<ExportJobQueued> {
+  constructor(private client: TixkitClient) {}
+  async create(
+    input: {
+      eventId?: string;
+      type: string;
+      format: string;
+      filters?: Record<string, unknown>;
+    } & IdempotencyOptions,
+  ): Promise<ExportJobQueued> {
     const { idempotencyKey, ...body } = input;
     return this.client.request('POST', '/exports', { body, idempotencyKey });
   }
@@ -1248,54 +1756,165 @@ class ExportResource {
   }
 }
 
+class PrivacyResource {
+  constructor(private client: TixkitClient) {}
+
+  async listAuditLogs(
+    params?: PaginationParams & {
+      organizationId?: string;
+      brandId?: string;
+      action?: string;
+      resourceType?: string;
+      actorId?: string;
+    },
+  ): Promise<PageResult<AuditLog>> {
+    return this.client.request('GET', '/audit-logs', { params: paginationParams(params) });
+  }
+
+  async listRequests(
+    params?: PaginationParams & {
+      organizationId?: string;
+      brandId?: string;
+      requestType?: 'export' | 'erasure';
+      status?: 'pending' | 'processing' | 'completed' | 'failed';
+    },
+  ): Promise<PageResult<PrivacyRequest>> {
+    return this.client.request('GET', '/privacy/requests', { params: paginationParams(params) });
+  }
+
+  async getRequest(requestId: string): Promise<PrivacyRequest> {
+    return this.client.request('GET', `/privacy/requests/${requestId}`);
+  }
+
+  async createDataExport(
+    input: PrivacyRequestInput & IdempotencyOptions,
+  ): Promise<PrivacyRequest> {
+    const { idempotencyKey, ...body } = input;
+    return this.client.request('POST', '/privacy/data-exports', { body, idempotencyKey });
+  }
+
+  async createErasure(input: PrivacyRequestInput & IdempotencyOptions): Promise<PrivacyRequest> {
+    const { idempotencyKey, ...body } = input;
+    return this.client.request('POST', '/privacy/erasures', { body, idempotencyKey });
+  }
+}
+
 class MessageResource {
-  constructor(private client: GateKitClient) {}
-  async send(eventId: string, input: { templateKey: string; audience: string; attendeeIds?: string[]; variables?: Record<string, unknown>; channel: string } & IdempotencyOptions): Promise<MessageQueued> {
+  constructor(private client: TixkitClient) {}
+  async send(
+    eventId: string,
+    input: {
+      templateKey: string;
+      audience: string;
+      attendeeIds?: string[];
+      variables?: Record<string, unknown>;
+      channel: string;
+    } & IdempotencyOptions,
+  ): Promise<MessageQueued> {
     const { idempotencyKey, ...body } = input;
     return this.client.request('POST', `/events/${eventId}/messages`, { body, idempotencyKey });
   }
-  async previewRecipients(eventId: string, input: { templateKey: string; audience: string; attendeeIds?: string[]; channel: string }): Promise<MessageRecipientPreview> {
+  async previewRecipients(
+    eventId: string,
+    input: { templateKey: string; audience: string; attendeeIds?: string[]; channel: string },
+  ): Promise<MessageRecipientPreview> {
     return this.client.request('POST', `/events/${eventId}/messages/preview`, { body: input });
   }
   async list(eventId: string, params?: PaginationParams): Promise<PageResult<MessageCampaign>> {
-    return this.client.request('GET', `/events/${eventId}/messages`, { params: paginationParams(params) });
+    return this.client.request('GET', `/events/${eventId}/messages`, {
+      params: paginationParams(params),
+    });
   }
   async getCampaign(eventId: string, campaignId: string): Promise<MessageCampaign> {
     return this.client.request('GET', `/events/${eventId}/messages/${campaignId}`);
   }
-  async jobs(eventId: string, campaignId: string, params?: PaginationParams): Promise<PageResult<MessageJob>> {
-    return this.client.request('GET', `/events/${eventId}/messages/${campaignId}/jobs`, { params: paginationParams(params) });
+  async jobs(
+    eventId: string,
+    campaignId: string,
+    params?: PaginationParams,
+  ): Promise<PageResult<MessageJob>> {
+    return this.client.request('GET', `/events/${eventId}/messages/${campaignId}/jobs`, {
+      params: paginationParams(params),
+    });
   }
-  async job(eventId: string, campaignId: string, channel: string, jobId: string): Promise<MessageJob> {
-    return this.client.request('GET', `/events/${eventId}/messages/${campaignId}/jobs/${channel}/${jobId}`);
+  async job(
+    eventId: string,
+    campaignId: string,
+    channel: string,
+    jobId: string,
+  ): Promise<MessageJob> {
+    return this.client.request(
+      'GET',
+      `/events/${eventId}/messages/${campaignId}/jobs/${channel}/${jobId}`,
+    );
   }
-  async deliveryLogs(eventId: string, campaignId: string, params?: PaginationParams): Promise<PageResult<MessageDeliveryLog>> {
-    return this.client.request('GET', `/events/${eventId}/messages/${campaignId}/delivery-logs`, { params: paginationParams(params) });
+  async deliveryLogs(
+    eventId: string,
+    campaignId: string,
+    params?: PaginationParams,
+  ): Promise<PageResult<MessageDeliveryLog>> {
+    return this.client.request('GET', `/events/${eventId}/messages/${campaignId}/delivery-logs`, {
+      params: paginationParams(params),
+    });
   }
-  async deliveryLog(eventId: string, campaignId: string, channel: string, deliveryId: string): Promise<MessageDeliveryLog> {
-    return this.client.request('GET', `/events/${eventId}/messages/${campaignId}/delivery-logs/${channel}/${deliveryId}`);
+  async deliveryLog(
+    eventId: string,
+    campaignId: string,
+    channel: string,
+    deliveryId: string,
+  ): Promise<MessageDeliveryLog> {
+    return this.client.request(
+      'GET',
+      `/events/${eventId}/messages/${campaignId}/delivery-logs/${channel}/${deliveryId}`,
+    );
   }
-  async providerEvents(eventId: string, campaignId: string, params?: PaginationParams): Promise<PageResult<MessageProviderEvent>> {
-    return this.client.request('GET', `/events/${eventId}/messages/${campaignId}/provider-events`, { params: paginationParams(params) });
+  async providerEvents(
+    eventId: string,
+    campaignId: string,
+    params?: PaginationParams,
+  ): Promise<PageResult<MessageProviderEvent>> {
+    return this.client.request('GET', `/events/${eventId}/messages/${campaignId}/provider-events`, {
+      params: paginationParams(params),
+    });
   }
-  async providerEvent(eventId: string, campaignId: string, providerEventId: string): Promise<MessageProviderEvent> {
-    return this.client.request('GET', `/events/${eventId}/messages/${campaignId}/provider-events/${providerEventId}`);
+  async providerEvent(
+    eventId: string,
+    campaignId: string,
+    providerEventId: string,
+  ): Promise<MessageProviderEvent> {
+    return this.client.request(
+      'GET',
+      `/events/${eventId}/messages/${campaignId}/provider-events/${providerEventId}`,
+    );
   }
 }
 
 class WebhookEndpointResource {
-  constructor(private client: GateKitClient) {}
+  constructor(private client: TixkitClient) {}
   async list(params?: PaginationParams): Promise<PageResult<WebhookEndpoint>> {
     return this.client.request('GET', '/webhook-endpoints', { params: paginationParams(params) });
   }
-  async create(input: { organizationId: string; url: string; events: string[]; description?: string }): Promise<WebhookEndpoint> {
+  async create(input: {
+    organizationId: string;
+    url: string;
+    events: string[];
+    description?: string;
+  }): Promise<WebhookEndpoint> {
     return this.client.request('POST', '/webhook-endpoints', { body: input });
   }
-  async update(endpointId: string, input: Partial<Pick<WebhookEndpoint, 'url' | 'events' | 'status' | 'description'>>): Promise<WebhookEndpoint> {
+  async update(
+    endpointId: string,
+    input: Partial<Pick<WebhookEndpoint, 'url' | 'events' | 'status' | 'description'>>,
+  ): Promise<WebhookEndpoint> {
     return this.client.request('PATCH', `/webhook-endpoints/${endpointId}`, { body: input });
   }
-  async listEvents(endpointId: string, params?: PaginationParams): Promise<PageResult<WebhookEvent>> {
-    return this.client.request('GET', `/webhook-endpoints/${endpointId}/events`, { params: paginationParams(params) });
+  async listEvents(
+    endpointId: string,
+    params?: PaginationParams,
+  ): Promise<PageResult<WebhookEvent>> {
+    return this.client.request('GET', `/webhook-endpoints/${endpointId}/events`, {
+      params: paginationParams(params),
+    });
   }
   async replay(eventId: string): Promise<{ message: string; eventId: string; endpoints: number }> {
     return this.client.request('POST', `/webhook-events/${eventId}/replay`);
@@ -1303,17 +1922,34 @@ class WebhookEndpointResource {
 }
 
 class PaymentAccountResource {
-  constructor(private client: GateKitClient) {}
-  async list(organizationId: string, params?: PaginationParams): Promise<PageResult<PaymentAccount>> {
-    return this.client.request('GET', `/organizations/${organizationId}/payment-accounts`, { params: paginationParams(params) });
+  constructor(private client: TixkitClient) {}
+  async list(
+    organizationId: string,
+    params?: PaginationParams,
+  ): Promise<PageResult<PaymentAccount>> {
+    return this.client.request('GET', `/organizations/${organizationId}/payment-accounts`, {
+      params: paginationParams(params),
+    });
   }
   async createStripeConnect(organizationId: string): Promise<PaymentAccount> {
-    return this.client.request('POST', `/organizations/${organizationId}/payment-accounts/stripe-connect`);
+    return this.client.request(
+      'POST',
+      `/organizations/${organizationId}/payment-accounts/stripe-connect`,
+    );
+  }
+  async refreshStripeConnect(
+    organizationId: string,
+    paymentAccountId: string,
+  ): Promise<PaymentAccount> {
+    return this.client.request(
+      'POST',
+      `/organizations/${organizationId}/payment-accounts/${paymentAccountId}/stripe-connect/refresh`,
+    );
   }
 }
 
 class QuestionResource {
-  constructor(private client: GateKitClient) {}
+  constructor(private client: TixkitClient) {}
   async list(eventId: string): Promise<PageResult<Question>> {
     return this.client.request('GET', `/events/${eventId}/questions`);
   }
@@ -1334,20 +1970,59 @@ class QuestionResource {
 }
 
 class OAuthApplicationResource {
-  constructor(private client: GateKitClient) {}
+  constructor(private client: TixkitClient) {}
   async list(params?: PaginationParams): Promise<PageResult<OAuthApplication>> {
     return this.client.request('GET', '/oauth-applications', { params: paginationParams(params) });
   }
-  async create(input: { organizationId: string; name: string; redirectUris: string[]; scopes: string[] }): Promise<OAuthApplication> {
+  async create(input: {
+    organizationId: string;
+    name: string;
+    redirectUris: string[];
+    scopes: string[];
+  }): Promise<OAuthApplication> {
     return this.client.request('POST', '/oauth-applications', { body: input });
   }
   async delete(appId: string): Promise<void> {
     return this.client.request('DELETE', `/oauth-applications/${appId}`);
   }
+
+  async token(input: {
+    grantType: 'authorization_code' | 'refresh_token';
+    clientId: string;
+    clientSecret: string;
+    code?: string;
+    redirectUri?: string;
+    refreshToken?: string;
+  }): Promise<OAuthTokenResponse> {
+    return this.client.request('POST', '/oauth/token', {
+      body: {
+        grant_type: input.grantType,
+        client_id: input.clientId,
+        client_secret: input.clientSecret,
+        code: input.code,
+        redirect_uri: input.redirectUri,
+        refresh_token: input.refreshToken,
+      },
+    });
+  }
+
+  async revoke(input: {
+    clientId: string;
+    clientSecret: string;
+    token: string;
+  }): Promise<{ revoked: boolean }> {
+    return this.client.request('POST', '/oauth/revoke', {
+      body: {
+        client_id: input.clientId,
+        client_secret: input.clientSecret,
+        token: input.token,
+      },
+    });
+  }
 }
 
 class PublicResource {
-  constructor(private client: GateKitClient) {}
+  constructor(private client: TixkitClient) {}
   async getEvent(eventId: string): Promise<Event> {
     return this.client.request('GET', `/public/events/${eventId}`);
   }
@@ -1358,34 +2033,56 @@ class PublicResource {
    * Fetches ticket availability for a published event. Pass `products` to
    * filter/reveal hidden ticket types for direct-link or widget purchase flows.
    */
-  async getAvailability(eventId: string, products?: string[]): Promise<Array<{
-    ticketTypeId: string;
-    name?: string;
-    kind?: string;
-    priceCents: number;
-    currency: string;
-    minimumPriceCents?: number;
-    available: number;
-    status: string;
-    requiresAccessCode?: boolean;
-    accessCodeHint?: string;
-    description?: string;
-    salesStartAt?: string;
-    salesEndAt?: string;
-    maxPerOrder?: number;
-  }>> {
+  async getAvailability(
+    eventId: string,
+    products?: string[],
+  ): Promise<
+    Array<{
+      ticketTypeId: string;
+      eventOccurrenceId?: string;
+      name?: string;
+      kind?: string;
+      priceCents: number;
+      currency: string;
+      minimumPriceCents?: number;
+      available: number;
+      status: string;
+      requiresAccessCode?: boolean;
+      accessCodeHint?: string;
+      description?: string;
+      salesStartAt?: string;
+      salesEndAt?: string;
+      maxPerOrder?: number;
+    }>
+  > {
     const query = products?.length ? `?products=${products.join(',')}` : '';
     return this.client.request('GET', `/public/events/${eventId}/availability${query}`);
+  }
+  async listOccurrences(eventId: string): Promise<EventOccurrence[]> {
+    const response = await this.client.request<PageResult<EventOccurrence> | EventOccurrence[]>(
+      'GET',
+      `/public/events/${eventId}/occurrences`,
+    );
+    return Array.isArray(response) ? response : response.items;
+  }
+  async listMarketingIntegrations(eventId: string): Promise<MarketingIntegration[]> {
+    const response = await this.client.request<
+      PageResult<MarketingIntegration> | MarketingIntegration[]
+    >('GET', `/public/events/${eventId}/marketing-integrations`);
+    return Array.isArray(response) ? response : response.items;
   }
   /**
    * Validates an access code or buyer email against locked ticket types.
    * The API requires `ticketTypeIds` and at least `accessCode` or `buyerEmail`.
    */
-  async validateAccessCode(eventId: string, input: {
-    ticketTypeIds: string[];
-    accessCode?: string;
-    buyerEmail?: string;
-  }): Promise<{ valid: boolean; ticketTypeIds?: string[] }> {
+  async validateAccessCode(
+    eventId: string,
+    input: {
+      ticketTypeIds: string[];
+      accessCode?: string;
+      buyerEmail?: string;
+    },
+  ): Promise<{ valid: boolean; ticketTypeIds?: string[] }> {
     return this.client.request('POST', `/public/events/${eventId}/access-code`, { body: input });
   }
   /**
@@ -1398,14 +2095,44 @@ class PublicResource {
   }> {
     return this.client.request('GET', `/public/events/${eventId}/questions`);
   }
+  async createUploadArtifact(
+    eventId: string,
+    input: PublicCreateUploadArtifactInput,
+  ): Promise<UploadArtifactTicket> {
+    return this.client.request('POST', `/public/events/${eventId}/upload-artifacts`, {
+      body: input,
+    });
+  }
+  async completeUploadArtifact(
+    artifactId: string,
+    token: string,
+  ): Promise<CompletedUploadArtifact> {
+    return this.client.request('POST', `/public/upload-artifacts/${artifactId}/complete`, {
+      body: { token },
+    });
+  }
+  async recordWidgetImpression(
+    eventId: string,
+    input: WidgetImpressionInput,
+  ): Promise<WidgetImpressionResult> {
+    return this.client.request('POST', `/public/events/${eventId}/widget-impressions`, {
+      body: input,
+    });
+  }
+  async joinWaitlist(eventId: string, input: JoinWaitlistInput): Promise<WaitlistEntry> {
+    return this.client.request('POST', `/public/events/${eventId}/waitlist`, { body: input });
+  }
+  async getWaitlistClaim(token: string): Promise<WaitlistEntry> {
+    return this.client.request('GET', `/public/waitlist/claims/${encodeURIComponent(token)}`);
+  }
 }
 
 class AuthResource {
-  constructor(private client: GateKitClient) {}
+  constructor(private client: TixkitClient) {}
   async me(): Promise<AuthMe> {
     return this.client.request('GET', '/me');
   }
 }
 
 // Default export
-export default GateKitClient;
+export default TixkitClient;

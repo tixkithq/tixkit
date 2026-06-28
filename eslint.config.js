@@ -12,5 +12,5 @@ export default tseslint.config(
   },
   {
     ignores: ['**/dist/**', '**/.next/**', '**/.turbo/**', '**/node_modules/**', '**/coverage/**'],
-  }
+  },
 );

@@ -69,9 +69,9 @@ export interface UserProfileTable {
 export interface ClerkIdentityLinkTable {
   id: string;
   clerk_user_id: string;
-  gatekit_user_id: string;
+  tixkit_user_id: string;
   clerk_organization_id: string | null;
-  gatekit_organization_id: string | null;
+  tixkit_organization_id: string | null;
   last_synced_at: Timestamp;
   created_at: Timestamp;
   updated_at: Timestamp;
@@ -145,15 +145,35 @@ export interface ScannerDeviceTable {
 export interface AuditLogTable {
   id: string;
   tenant_id: string;
+  organization_id: string | null;
+  brand_id: string | null;
   actor_type: string;
   actor_id: string;
   action: string;
   resource_type: string;
   resource_id: string;
   diff_summary: string | null;
+  request_id: string | null;
   ip: string | null;
   user_agent: string | null;
   created_at: Timestamp;
+}
+
+export interface PrivacyRequestTable {
+  id: string;
+  tenant_id: string;
+  organization_id: string;
+  brand_id: string | null;
+  request_type: string;
+  subject_type: string;
+  subject_id: string | null;
+  subject_email: string | null;
+  status: string;
+  requested_by: string;
+  result: string | null;
+  error: string | null;
+  created_at: Timestamp;
+  completed_at: Timestamp | null;
 }
 
 export interface EventTable {
@@ -175,6 +195,8 @@ export interface EventTable {
   capacity: number | null;
   cover_image_url: string | null;
   external_url: string | null;
+  waitlist_auto_offer_enabled: Generated<boolean>;
+  waitlist_offer_ttl_minutes: Generated<number>;
   created_at: Timestamp;
   updated_at: Timestamp;
 }
@@ -187,6 +209,21 @@ export interface EventPageTable {
   description: string | null;
   content_html: string | null;
   is_default: boolean;
+  created_at: Timestamp;
+  updated_at: Timestamp;
+}
+
+export interface EventOccurrenceTable {
+  id: string;
+  event_id: string;
+  title: string;
+  starts_at: Timestamp;
+  ends_at: Timestamp;
+  timezone: string;
+  venue: string | null;
+  capacity: number | null;
+  sort_order: number;
+  status: string;
   created_at: Timestamp;
   updated_at: Timestamp;
 }
@@ -210,6 +247,7 @@ export interface TicketTypeTable {
   sort_order: number;
   requires_access_code: boolean;
   access_code_hint: string | null;
+  event_occurrence_id: string | null;
   created_at: Timestamp;
   updated_at: Timestamp;
 }
@@ -244,7 +282,7 @@ export interface CheckoutSessionTable {
   event_id: string;
   brand_id: string;
   status: string;
-  hold_id: string;
+  hold_id: string | null;
   currency: string;
   cart: string;
   buyer: string;
@@ -292,7 +330,9 @@ export interface OrderTable {
 export interface OrderLineItemTable {
   id: string;
   order_id: string;
-  ticket_type_id: string;
+  ticket_type_id: string | null;
+  product_id: string | null;
+  event_occurrence_id: string | null;
   attendee_id: string | null;
   description: string;
   quantity: number;
@@ -307,11 +347,63 @@ export interface OrderLineItemTable {
   updated_at: Timestamp;
 }
 
+export interface OrderTaxSnapshotTable {
+  id: string;
+  order_id: string;
+  order_line_item_id: string;
+  event_id: string;
+  tax_rule_id: string | null;
+  tax_rule_name: string;
+  rate: number;
+  type: string;
+  applied_to: string;
+  jurisdiction_country: string | null;
+  jurisdiction_region: string | null;
+  taxable_amount_cents: number;
+  tax_cents: number;
+  currency: string;
+  inclusive: Generated<boolean>;
+  provider: Generated<string>;
+  provider_calculation_id: string | null;
+  metadata: string | null;
+  created_at: Timestamp;
+}
+
+export interface InvoiceTable {
+  id: string;
+  order_id: string;
+  tenant_id: string;
+  organization_id: string;
+  brand_id: string;
+  event_id: string;
+  invoice_number: string;
+  status: string;
+  currency: string;
+  subtotal_cents: number;
+  discount_cents: number;
+  tax_cents: number;
+  fee_cents: number;
+  total_cents: number;
+  refunded_cents: Generated<number>;
+  buyer_email: string;
+  buyer_name: string | null;
+  buyer_tax_id: string | null;
+  seller_name: string;
+  seller_tax_id: string | null;
+  reverse_charge: Generated<boolean>;
+  issued_at: Timestamp;
+  voided_at: Timestamp | null;
+  metadata: string | null;
+  created_at: Timestamp;
+  updated_at: Timestamp;
+}
+
 export interface AttendeeTable {
   id: string;
   tenant_id: string;
   order_id: string;
   event_id: string;
+  event_occurrence_id: string | null;
   ticket_type_id: string;
   ticket_id: string | null;
   first_name: string | null;
@@ -342,6 +434,7 @@ export interface TicketTable {
   order_id: string;
   attendee_id: string;
   event_id: string;
+  event_occurrence_id: string | null;
   ticket_type_id: string;
   status: string;
   code: string;
@@ -352,6 +445,86 @@ export interface TicketTable {
   checked_in_at: Timestamp | null;
   checked_in_by_device_id: string | null;
   wallet_pass_id: string | null;
+  created_at: Timestamp;
+  updated_at: Timestamp;
+}
+
+export interface WalletPassTable {
+  id: string;
+  tenant_id: string;
+  ticket_id: string;
+  provider: string;
+  status: string;
+  serial_number: string;
+  pass_url: string;
+  access_token_hash: string | null;
+  content_type: string | null;
+  artifact_base64: string | null;
+  metadata: string;
+  revoked_at: Timestamp | null;
+  created_at: Timestamp;
+  updated_at: Timestamp;
+}
+
+export interface UploadArtifactTable {
+  id: string;
+  tenant_id: string;
+  organization_id: string | null;
+  brand_id: string | null;
+  event_id: string | null;
+  created_by_user_id: string | null;
+  purpose: string;
+  status: string;
+  scan_status: string;
+  scan_result: string | null;
+  bucket: string;
+  object_key: string;
+  file_name: string;
+  content_type: string;
+  size_bytes: number;
+  checksum_sha256: string | null;
+  client_token_hash: string | null;
+  metadata: string;
+  expires_at: Timestamp;
+  created_at: Timestamp;
+  updated_at: Timestamp;
+}
+
+export interface WidgetImpressionTable {
+  id: string;
+  tenant_id: string;
+  organization_id: string;
+  brand_id: string;
+  event_id: string;
+  visitor_hash: string;
+  impression_date: string;
+  source: string;
+  tracking_id: string | null;
+  affiliate_code: string | null;
+  host: string | null;
+  page_url: string | null;
+  referrer: string | null;
+  created_at: Timestamp;
+}
+
+export interface WaitlistEntryTable {
+  id: string;
+  tenant_id: string;
+  organization_id: string;
+  brand_id: string;
+  event_id: string;
+  ticket_type_id: string;
+  buyer_email: string;
+  buyer_first_name: string | null;
+  buyer_last_name: string | null;
+  buyer_phone: string | null;
+  quantity: number;
+  status: string;
+  offer_expires_at: Timestamp | null;
+  claim_token_hash: string | null;
+  offered_at: Timestamp | null;
+  claimed_at: Timestamp | null;
+  cancelled_at: Timestamp | null;
   created_at: Timestamp;
   updated_at: Timestamp;
 }
@@ -368,6 +541,7 @@ export interface TicketSecretTable {
 export interface CheckInListTable {
   id: string;
   event_id: string;
+  event_occurrence_id: string | null;
   name: string;
   ticket_type_ids: string;
   status: string;
@@ -418,6 +592,26 @@ export interface RefundTable {
   currency: string;
   status: string;
   reason: string;
+  metadata: string;
+  created_at: Timestamp;
+  updated_at: Timestamp;
+}
+
+export interface PaymentCompensationTable {
+  id: string;
+  tenant_id: string;
+  checkout_session_id: string;
+  payment_intent_id: string | null;
+  provider: string;
+  provider_intent_id: string;
+  amount_cents: number;
+  currency: string;
+  action: string;
+  status: string;
+  provider_compensation_id: string | null;
+  attempts: number;
+  reason: string;
+  last_error: string | null;
   metadata: string;
   created_at: Timestamp;
   updated_at: Timestamp;
@@ -697,6 +891,19 @@ export interface EmailSuppressionTable {
   created_at: Timestamp;
 }
 
+export interface EmailProviderEventTable {
+  id: string;
+  tenant_id: string | null;
+  provider: string;
+  provider_event_id: string;
+  event_type: string;
+  provider_message_id: string | null;
+  email: string | null;
+  raw_payload: string;
+  processed_at: Timestamp | null;
+  created_at: Timestamp;
+}
+
 export interface EmailProviderRouteTable {
   id: string;
   tenant_id: string;
@@ -853,6 +1060,11 @@ export interface PaymentAccountTable {
   provider_account_id: string;
   status: string;
   default_currency: string;
+  details_submitted: boolean;
+  charges_enabled: boolean;
+  payouts_enabled: boolean;
+  requirements: string | null;
+  disabled_reason: string | null;
   created_at: Timestamp;
   updated_at: Timestamp;
 }
@@ -894,6 +1106,61 @@ export interface OAuthApplicationTable {
   updated_at: Timestamp;
 }
 
+export interface OAuthAuthorizationCodeTable {
+  id: string;
+  oauth_application_id: string;
+  tenant_id: string;
+  organization_id: string;
+  user_id: string | null;
+  code_hash: string;
+  redirect_uri: string;
+  scopes: string;
+  expires_at: Timestamp;
+  consumed_at: Timestamp | null;
+  created_at: Timestamp;
+}
+
+export interface OAuthRefreshTokenTable {
+  id: string;
+  oauth_application_id: string;
+  tenant_id: string;
+  organization_id: string;
+  token_hash: string;
+  scopes: string;
+  expires_at: Timestamp;
+  revoked_at: Timestamp | null;
+  created_at: Timestamp;
+  updated_at: Timestamp;
+}
+
+export interface OAuthAccessTokenTable {
+  id: string;
+  oauth_application_id: string;
+  refresh_token_id: string | null;
+  tenant_id: string;
+  organization_id: string;
+  token_hash: string;
+  scopes: string;
+  expires_at: Timestamp;
+  revoked_at: Timestamp | null;
+  created_at: Timestamp;
+  updated_at: Timestamp;
+}
+
+export interface MarketingIntegrationTable {
+  id: string;
+  tenant_id: string;
+  organization_id: string;
+  brand_id: string;
+  event_id: string | null;
+  provider: string;
+  config: string;
+  consent_required: boolean;
+  status: string;
+  created_at: Timestamp;
+  updated_at: Timestamp;
+}
+
 export interface DB {
   tenants: TenantTable;
   organizations: OrganizationTable;
@@ -907,22 +1174,31 @@ export interface DB {
   api_keys: ApiKeyTable;
   scanner_devices: ScannerDeviceTable;
   audit_logs: AuditLogTable;
+  privacy_requests: PrivacyRequestTable;
   events: EventTable;
   event_pages: EventPageTable;
+  event_occurrences: EventOccurrenceTable;
   ticket_types: TicketTypeTable;
   inventory_pools: InventoryPoolTable;
   checkout_holds: CheckoutHoldTable;
   checkout_sessions: CheckoutSessionTable;
   orders: OrderTable;
   order_line_items: OrderLineItemTable;
+  order_tax_snapshots: OrderTaxSnapshotTable;
+  invoices: InvoiceTable;
   attendees: AttendeeTable;
   order_timeline_events: OrderTimelineEventTable;
   tickets: TicketTable;
+  wallet_passes: WalletPassTable;
+  upload_artifacts: UploadArtifactTable;
+  widget_impressions: WidgetImpressionTable;
+  waitlist_entries: WaitlistEntryTable;
   ticket_secrets: TicketSecretTable;
   check_in_lists: CheckInListTable;
   scan_logs: ScanLogTable;
   payment_intents: PaymentIntentTable;
   refunds: RefundTable;
+  payment_compensations: PaymentCompensationTable;
   payment_events: PaymentEventTable;
   discount_codes: DiscountCodeTable;
   discount_redemptions: DiscountRedemptionTable;
@@ -942,6 +1218,7 @@ export interface DB {
   notification_template_versions: NotificationTemplateVersionTable;
   email_jobs: EmailJobTable;
   email_deliveries: EmailDeliveryTable;
+  email_provider_events: EmailProviderEventTable;
   email_suppressions: EmailSuppressionTable;
   email_provider_routes: EmailProviderRouteTable;
   brand_sender_identities: BrandSenderIdentityTable;
@@ -957,4 +1234,8 @@ export interface DB {
   sender_identities: SenderIdentityTable;
   feature_flags: FeatureFlagTable;
   oauth_applications: OAuthApplicationTable;
+  oauth_authorization_codes: OAuthAuthorizationCodeTable;
+  oauth_refresh_tokens: OAuthRefreshTokenTable;
+  oauth_access_tokens: OAuthAccessTokenTable;
+  marketing_integrations: MarketingIntegrationTable;
 }

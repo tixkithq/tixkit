@@ -1,6 +1,13 @@
 import type { BaseEntity, ISO8601Date, TenantScopedEntity, Ulid } from '../shared/index.js';
 
-export type EmailTransportStatus = 'accepted' | 'queued' | 'sent' | 'delivered' | 'bounced' | 'failed' | 'complained';
+export type EmailTransportStatus =
+  | 'accepted'
+  | 'queued'
+  | 'sent'
+  | 'delivered'
+  | 'bounced'
+  | 'failed'
+  | 'complained';
 
 export interface EmailTransport {
   send(input: SendEmailInput): Promise<SendEmailResult>;
@@ -115,7 +122,14 @@ export type BrandSenderIdentity = TenantScopedEntity & {
 
 export type EmailProviderRoute = TenantScopedEntity & {
   brandId: Ulid;
-  providerType: 'opencore_email_sdk' | 'resend' | 'postmark' | 'ses' | 'sendgrid' | 'mailgun' | 'smtp';
+  providerType:
+    | 'opencore_email_sdk'
+    | 'resend'
+    | 'postmark'
+    | 'ses'
+    | 'sendgrid'
+    | 'mailgun'
+    | 'smtp';
   credentialsRef: string;
   senderDomain: string;
   priority: number;
@@ -247,7 +261,13 @@ export type MessageConsent = TenantScopedEntity & {
 };
 
 export type MessageCampaignChannel = 'email' | 'sms' | 'both';
-export type MessageCampaignStatus = 'queued' | 'processing' | 'sent' | 'failed' | 'suppressed' | 'no_recipients';
+export type MessageCampaignStatus =
+  | 'queued'
+  | 'processing'
+  | 'sent'
+  | 'failed'
+  | 'suppressed'
+  | 'no_recipients';
 
 export type MessageCampaignSummary = {
   id: string;
@@ -257,6 +277,10 @@ export type MessageCampaignSummary = {
   templateKey: TemplateKey | string;
   channel: MessageCampaignChannel;
   status: MessageCampaignStatus;
+  audience?: 'all_attendees' | 'checked_in' | 'not_checked_in' | 'custom';
+  audienceKey?: 'all' | 'checked_in' | 'not_checked_in' | 'specific';
+  audienceAttendeeIds?: Ulid[];
+  audienceLabel?: string;
   audienceCount: number;
   queuedEmailJobs: number;
   queuedSmsJobs: number;

@@ -1,7 +1,28 @@
-import { createDb } from '@gatekit/db';
-import { PaymentIntentRepository, OrderRepository, RefundRepository } from '@gatekit/db';
+import { createDb } from '@tixkit/db';
+import {
+  PaymentIntentRepository,
+  OrderRepository,
+  RefundRepository,
+  PaymentEventRepository,
+} from '@tixkit/db';
 import type { WorkflowActivityResult } from '../shared/types.js';
 import { okResult, errResult } from '../shared/types.js';
+import { compensateOrphanPaymentActivity } from './checkout.js';
+
+async function findPaymentIntentForProviderEvent(
+  repo: PaymentIntentRepository,
+  provider: string,
+  providerIntentId: string,
+) {
+  const exact = await repo.findByProviderAndIntentId(provider, providerIntentId);
+  if (exact) return exact;
+
+  if (provider === 'stripe') {
+    return repo.findByProviderAndIntentId('stripe_connect', providerIntentId);
+  }
+
+  return undefined;
+}
 
 export async function reconcilePaymentActivity(input: {
   providerEventId: string;
@@ -21,33 +42,69 @@ export async function reconcilePaymentActivity(input: {
 
     const piRepo = new PaymentIntentRepository(db);
     const orderRepo = new OrderRepository(db);
-    const dbPi = await piRepo.findByProviderIntentId(providerIntentId);
+    const dbPi = await findPaymentIntentForProviderEvent(piRepo, input.provider, providerIntentId);
     if (!dbPi) {
       return okResult({ orderId: undefined, status: 'noop' });
     }
 
-	    await piRepo.update(dbPi.id, { status: paymentIntent.status });
+    await piRepo.update(dbPi.id, { status: paymentIntent.status });
 
-	    if (dbPi.order_id) {
-	      const order = await orderRepo.findById(dbPi.order_id);
-	      if (order && isSuccessfulPaymentEvent(input.eventType, paymentIntent.status) && order.status !== 'paid') {
-	        await orderRepo.update(dbPi.order_id, { status: 'paid', paid_at: new Date() });
-	        await orderRepo.addTimelineEvent(dbPi.order_id, 'order.paid', 'Payment confirmed via Stripe');
-	        return okResult({ orderId: dbPi.order_id, status: 'paid' });
-	      }
-	      if (order && isFailedPaymentEvent(input.eventType, paymentIntent.status)) {
-	        await orderRepo.addTimelineEvent(dbPi.order_id, 'payment.failed', 'Payment failed via Stripe');
-	      }
-	      return okResult({ orderId: dbPi.order_id, status: paymentIntent.status });
-	    }
+    if (dbPi.order_id) {
+      const order = await orderRepo.findById(dbPi.order_id);
+      if (
+        order &&
+        isSuccessfulPaymentEvent(input.eventType, paymentIntent.status) &&
+        isPayableOrderStatus(String(order.status))
+      ) {
+        await orderRepo.update(dbPi.order_id, { status: 'paid', paid_at: new Date() });
+        await orderRepo.addTimelineEvent(
+          dbPi.order_id,
+          'order.paid',
+          'Payment confirmed via Stripe',
+        );
+        return okResult({ orderId: dbPi.order_id, status: 'paid' });
+      }
+      if (order && isFailedPaymentEvent(input.eventType, paymentIntent.status)) {
+        await orderRepo.addTimelineEvent(
+          dbPi.order_id,
+          'payment.failed',
+          'Payment failed via Stripe',
+        );
+      }
+      return okResult({ orderId: dbPi.order_id, status: paymentIntent.status });
+    }
+
+    if (isSuccessfulPaymentEvent(input.eventType, paymentIntent.status)) {
+      const compensation = await compensateOrphanPaymentActivity({
+        checkoutSessionId: dbPi.checkout_session_id,
+        tenantId: dbPi.tenant_id,
+        provider: dbPi.provider,
+        providerIntentId: dbPi.provider_intent_id,
+        amountCents: Number(dbPi.amount_cents),
+        currency: dbPi.currency,
+        reason: 'Successful provider payment has no durable order attached',
+        providerEventId: input.providerEventId,
+        eventType: input.eventType,
+        providerStatus: paymentIntent.status,
+        source: 'payment_reconciliation',
+      });
+      if (!compensation.ok) {
+        return errResult(compensation.errorCode, compensation.message, compensation.retryable);
+      }
+      return okResult({ orderId: undefined, status: `compensated:${compensation.value.status}` });
+    }
 
     return okResult({ orderId: undefined, status: paymentIntent.status });
   } catch (err) {
-    return errResult('PAYMENT_RECONCILE_FAILED', err instanceof Error ? err.message : 'Unknown error', true);
-	  } finally {
-	    await db.destroy();
-	  }
-	}
+    return errResult(
+      'PAYMENT_RECONCILE_FAILED',
+      err instanceof Error ? err.message : 'Unknown error',
+      true,
+    );
+  } finally {
+    await db.destroy();
+  }
+}
 
 function isSuccessfulPaymentEvent(eventType: string, status: string): boolean {
   return (
@@ -55,6 +112,10 @@ function isSuccessfulPaymentEvent(eventType: string, status: string): boolean {
     eventType === 'charge.succeeded' ||
     status === 'succeeded'
   );
+}
+
+function isPayableOrderStatus(status: string): boolean {
+  return status === 'pending_payment';
 }
 
 function isFailedPaymentEvent(eventType: string, status: string): boolean {
@@ -66,9 +127,55 @@ function isFailedPaymentEvent(eventType: string, status: string): boolean {
   );
 }
 
+function isSuccessfulRefundEvent(eventType: string, status: string | undefined): boolean {
+  if (
+    eventType.includes('refund') &&
+    (eventType.includes('failed') ||
+      eventType.includes('canceled') ||
+      eventType.includes('cancelled'))
+  ) {
+    return false;
+  }
+  return status === undefined || status === 'succeeded';
+}
+
+function sumSucceededRefunds(
+  refunds: Array<{ amount_cents: number | string | bigint; status?: string }>,
+): number {
+  return refunds.reduce(
+    (sum, refund) => (refund.status === 'succeeded' ? sum + Number(refund.amount_cents) : sum),
+    0,
+  );
+}
+
+async function updateRefundReconciliationState(
+  db: ReturnType<typeof createDb>,
+  orderRepo: InstanceType<typeof OrderRepository>,
+  order: { id: string; total_cents: number | string | bigint },
+  refundedCents: number,
+): Promise<string> {
+  const reconciledRefunded = Math.min(Number(order.total_cents), refundedCents);
+  const reconciledStatus =
+    reconciledRefunded >= Number(order.total_cents) ? 'refunded' : 'partially_refunded';
+
+  await orderRepo.update(order.id, {
+    refunded_cents: reconciledRefunded,
+    status: reconciledStatus,
+    refunded_at: new Date(),
+  });
+  await db
+    .updateTable('invoices')
+    .set({ refunded_cents: reconciledRefunded, updated_at: new Date() })
+    .where('order_id', '=', order.id)
+    .execute();
+
+  return reconciledStatus;
+}
+
 export async function reconcileRefundActivity(input: {
   providerEventId: string;
   provider: string;
+  eventType: string;
   data: Record<string, unknown>;
 }): Promise<WorkflowActivityResult<{ orderId?: string; status: string }>> {
   const db = createDb();
@@ -79,6 +186,7 @@ export async function reconcileRefundActivity(input: {
       amount?: number;
       amount_refunded?: number;
       refund_id?: string;
+      status?: string;
     };
 
     const piRepo = new PaymentIntentRepository(db);
@@ -93,7 +201,7 @@ export async function reconcileRefundActivity(input: {
       return okResult({ orderId: undefined, status: 'noop' });
     }
 
-    const dbPi = await piRepo.findByProviderIntentId(providerIntentId);
+    const dbPi = await findPaymentIntentForProviderEvent(piRepo, input.provider, providerIntentId);
     if (!dbPi?.order_id) {
       return okResult({ orderId: undefined, status: 'noop' });
     }
@@ -106,27 +214,51 @@ export async function reconcileRefundActivity(input: {
     const existingRefunds = await refundRepo.findByOrder(order.id);
     const isCumulativeChargeRefund =
       refundOrCharge.amount === undefined && refundOrCharge.amount_refunded !== undefined;
-    const existingRefunded = existingRefunds.reduce((sum, refund) => sum + Number(refund.amount_cents), 0);
-    const refundAmount = isCumulativeChargeRefund
-      ? Math.max(0, (refundOrCharge.amount_refunded ?? 0) - existingRefunded)
-      : refundOrCharge.amount ?? 0;
-    if (refundAmount <= 0) {
-      const reconciledRefunded = Math.min(Number(order.total_cents), existingRefunded);
-      if (reconciledRefunded > 0 && reconciledRefunded !== Number(order.refunded_cents)) {
-        const reconciledStatus =
-          reconciledRefunded >= Number(order.total_cents) ? 'refunded' : 'partially_refunded';
-        await orderRepo.update(order.id, {
-          refunded_cents: reconciledRefunded,
-          status: reconciledStatus,
-          refunded_at: new Date(),
-        });
-        return okResult({ orderId: order.id, status: reconciledStatus });
+    if (isCumulativeChargeRefund) {
+      const aggregateRefunded = Math.max(0, refundOrCharge.amount_refunded ?? 0);
+      const reconciledRefunded = Math.min(Number(order.total_cents), aggregateRefunded);
+      const reconciledStatus =
+        reconciledRefunded >= Number(order.total_cents) ? 'refunded' : 'partially_refunded';
+      if (
+        reconciledRefunded > 0 &&
+        (reconciledRefunded !== Number(order.refunded_cents) || reconciledStatus !== order.status)
+      ) {
+        const status = await updateRefundReconciliationState(
+          db,
+          orderRepo,
+          order,
+          reconciledRefunded,
+        );
+        return okResult({ orderId: order.id, status });
       }
       return okResult({ orderId: order.id, status: order.status });
     }
-    const providerRefundId = isCumulativeChargeRefund
-      ? `${refundOrCharge.id}:${refundOrCharge.amount_refunded}`
-      : refundOrCharge.refund_id ?? refundOrCharge.id;
+
+    if (!isSuccessfulRefundEvent(input.eventType, refundOrCharge.status)) {
+      return okResult({ orderId: order.id, status: order.status });
+    }
+
+    const existingRefunded = sumSucceededRefunds(existingRefunds);
+    const refundAmount = refundOrCharge.amount ?? 0;
+    if (refundAmount <= 0) {
+      const reconciledRefunded = Math.min(Number(order.total_cents), existingRefunded);
+      const reconciledStatus =
+        reconciledRefunded >= Number(order.total_cents) ? 'refunded' : 'partially_refunded';
+      if (
+        reconciledRefunded > 0 &&
+        (reconciledRefunded !== Number(order.refunded_cents) || reconciledStatus !== order.status)
+      ) {
+        const status = await updateRefundReconciliationState(
+          db,
+          orderRepo,
+          order,
+          reconciledRefunded,
+        );
+        return okResult({ orderId: order.id, status });
+      }
+      return okResult({ orderId: order.id, status: order.status });
+    }
+    const providerRefundId = refundOrCharge.refund_id ?? refundOrCharge.id;
     let createdRefund = false;
     if (!existingRefunds.some((r) => r.provider_refund_id === providerRefundId)) {
       await refundRepo.create({
@@ -138,6 +270,7 @@ export async function reconcileRefundActivity(input: {
         amountCents: refundAmount,
         currency: order.currency,
         reason: 'Stripe webhook',
+        status: 'succeeded',
       });
       createdRefund = true;
     }
@@ -145,21 +278,24 @@ export async function reconcileRefundActivity(input: {
     const allRefunds = await refundRepo.findByOrder(order.id);
     const newRefunded = Math.min(
       Number(order.total_cents),
-      allRefunds.reduce((sum, refund) => sum + Number(refund.amount_cents), 0),
+      sumSucceededRefunds(allRefunds),
     );
-    const newStatus = newRefunded >= Number(order.total_cents) ? 'refunded' : 'partially_refunded';
-    await orderRepo.update(order.id, {
-      refunded_cents: newRefunded,
-      status: newStatus,
-      refunded_at: new Date(),
-    });
+    const newStatus = await updateRefundReconciliationState(db, orderRepo, order, newRefunded);
     if (createdRefund) {
-      await orderRepo.addTimelineEvent(order.id, 'order.refunded', `Refunded ${refundAmount} cents via Stripe`);
+      await orderRepo.addTimelineEvent(
+        order.id,
+        'order.refunded',
+        `Refunded ${refundAmount} cents via Stripe`,
+      );
     }
 
     return okResult({ orderId: order.id, status: newStatus });
   } catch (err) {
-    return errResult('REFUND_RECONCILE_FAILED', err instanceof Error ? err.message : 'Unknown error', true);
+    return errResult(
+      'REFUND_RECONCILE_FAILED',
+      err instanceof Error ? err.message : 'Unknown error',
+      true,
+    );
   } finally {
     await db.destroy();
   }
@@ -190,7 +326,7 @@ export async function reconcileDisputeActivity(input: {
 
     const piRepo = new PaymentIntentRepository(db);
     const orderRepo = new OrderRepository(db);
-    const dbPi = await piRepo.findByProviderIntentId(providerIntentId);
+    const dbPi = await findPaymentIntentForProviderEvent(piRepo, input.provider, providerIntentId);
     if (!dbPi?.order_id) {
       return okResult({ orderId: undefined, status: 'noop' });
     }
@@ -211,7 +347,11 @@ export async function reconcileDisputeActivity(input: {
 
     return okResult({ orderId: order.id, status: 'disputed' });
   } catch (err) {
-    return errResult('DISPUTE_RECONCILE_FAILED', err instanceof Error ? err.message : 'Unknown error', true);
+    return errResult(
+      'DISPUTE_RECONCILE_FAILED',
+      err instanceof Error ? err.message : 'Unknown error',
+      true,
+    );
   } finally {
     await db.destroy();
   }
@@ -227,4 +367,24 @@ export async function emitDomainEventActivity(input: {
   // is handled at the workflow orchestration layer.
   void input;
   return okResult({ emitted: true });
+}
+
+export async function markProviderEventProcessedActivity(input: {
+  provider: string;
+  providerEventId: string;
+}): Promise<WorkflowActivityResult<{ processed: boolean }>> {
+  const db = createDb();
+  try {
+    const eventRepo = new PaymentEventRepository(db);
+    await eventRepo.markProcessedByProviderEventId(input.provider, input.providerEventId);
+    return okResult({ processed: true });
+  } catch (err) {
+    return errResult(
+      'PROVIDER_EVENT_MARK_PROCESSED_FAILED',
+      err instanceof Error ? err.message : 'Unknown error',
+      true,
+    );
+  } finally {
+    await db.destroy();
+  }
 }

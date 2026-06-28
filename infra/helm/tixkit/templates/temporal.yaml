@@ -1,0 +1,121 @@
+{{- if .Values.temporal.enabled }}
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ include "tixkit.fullname" . }}-temporal-postgres
+  labels:
+    {{- include "tixkit.labels" . | nindent 4 }}
+    app.kubernetes.io/component: temporal-postgres
+spec:
+  accessModes: ["ReadWriteOnce"]
+  resources:
+    requests:
+      storage: {{ .Values.temporal.postgresqlStorageSize }}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "tixkit.fullname" . }}-temporal-postgres
+  labels:
+    {{- include "tixkit.labels" . | nindent 4 }}
+    app.kubernetes.io/component: temporal-postgres
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      {{- include "tixkit.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: temporal-postgres
+  template:
+    metadata:
+      labels:
+        {{- include "tixkit.selectorLabels" . | nindent 8 }}
+        app.kubernetes.io/component: temporal-postgres
+    spec:
+      containers:
+        - name: postgres
+          image: {{ .Values.temporal.postgresqlImage }}
+          env:
+            - name: POSTGRES_USER
+              value: temporal
+            - name: POSTGRES_PASSWORD
+              value: temporal
+          ports:
+            - name: postgres
+              containerPort: 5432
+          volumeMounts:
+            - name: data
+              mountPath: /var/lib/postgresql/data
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: {{ include "tixkit.fullname" . }}-temporal-postgres
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: tixkit-temporal-postgres
+  labels:
+    {{- include "tixkit.labels" . | nindent 4 }}
+    app.kubernetes.io/component: temporal-postgres
+spec:
+  selector:
+    {{- include "tixkit.selectorLabels" . | nindent 4 }}
+    app.kubernetes.io/component: temporal-postgres
+  ports:
+    - name: postgres
+      port: 5432
+      targetPort: postgres
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "tixkit.fullname" . }}-temporal
+  labels:
+    {{- include "tixkit.labels" . | nindent 4 }}
+    app.kubernetes.io/component: temporal
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      {{- include "tixkit.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: temporal
+  template:
+    metadata:
+      labels:
+        {{- include "tixkit.selectorLabels" . | nindent 8 }}
+        app.kubernetes.io/component: temporal
+    spec:
+      containers:
+        - name: temporal
+          image: {{ .Values.temporal.image }}
+          env:
+            - name: DB
+              value: postgres12
+            - name: DB_PORT
+              value: "5432"
+            - name: POSTGRES_SEEDS
+              value: tixkit-temporal-postgres
+            - name: POSTGRES_USER
+              value: temporal
+            - name: POSTGRES_PWD
+              value: temporal
+          ports:
+            - name: temporal
+              containerPort: 7233
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: tixkit-temporal
+  labels:
+    {{- include "tixkit.labels" . | nindent 4 }}
+    app.kubernetes.io/component: temporal
+spec:
+  selector:
+    {{- include "tixkit.selectorLabels" . | nindent 4 }}
+    app.kubernetes.io/component: temporal
+  ports:
+    - name: temporal
+      port: 7233
+      targetPort: temporal
+{{- end }}

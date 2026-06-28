@@ -1,34 +1,34 @@
-import { describe, expect, it, vi, beforeEach } from 'vitest'
-import { render, screen, waitFor } from '@testing-library/react'
+import { describe, expect, it, vi, beforeEach } from 'vitest';
+import { render, screen, waitFor } from '@testing-library/react';
 
 // Mock adminApi before importing DashboardView
-const mockListEvents = vi.fn()
-const mockListOrders = vi.fn()
+const mockListEvents = vi.fn();
+const mockListOrders = vi.fn();
 
 vi.mock('@/lib/api', () => ({
   adminApi: {
     listEvents: (...args: unknown[]) => mockListEvents(...args),
     listOrders: (...args: unknown[]) => mockListOrders(...args),
   },
-}))
+}));
 
 vi.mock('@/lib/auth', () => ({
   hasClerkKey: () => false,
   LOCAL_DEV_USER: { name: 'Dev', email: 'dev@localhost', imageUrl: null },
-}))
+}));
 
 vi.mock('next/navigation', () => ({
   useRouter: () => ({ push: vi.fn(), replace: vi.fn() }),
   useSearchParams: () => new URLSearchParams(),
   usePathname: () => '/',
-}))
+}));
 
 // Mock the lazy-loaded CreateEventDrawer to avoid dynamic import issues
 vi.mock('@/features/events/create-event-drawer', () => ({
   CreateEventDrawer: () => null,
-}))
+}));
 
-import { DashboardView } from './dashboard-view'
+import { DashboardView } from './dashboard-view';
 
 function makeEvents() {
   return {
@@ -55,7 +55,7 @@ function makeEvents() {
       ],
       total: 1,
     },
-  }
+  };
 }
 
 function makeOrders() {
@@ -80,107 +80,117 @@ function makeOrders() {
       ],
       total: 1,
     },
-  }
+  };
 }
 
 function makeError(status: number, code: string, message: string) {
   return {
     ok: false as const,
     error: { code, message, status },
-  }
+  };
 }
 
 function makeEmpty() {
   return {
     ok: true as const,
     data: { items: [], total: 0 },
-  }
+  };
 }
 
 describe('DashboardView error states', () => {
   beforeEach(() => {
-    vi.clearAllMocks()
-  })
+    vi.clearAllMocks();
+  });
 
   it('shows error state on 401', async () => {
-    mockListEvents.mockResolvedValue(makeError(401, 'UNAUTHORIZED', 'Missing or invalid authorization header'))
-    mockListOrders.mockResolvedValue(makeError(401, 'UNAUTHORIZED', 'Missing or invalid authorization header'))
+    mockListEvents.mockResolvedValue(
+      makeError(401, 'UNAUTHORIZED', 'Missing or invalid authorization header'),
+    );
+    mockListOrders.mockResolvedValue(
+      makeError(401, 'UNAUTHORIZED', 'Missing or invalid authorization header'),
+    );
 
-    render(<DashboardView />)
+    render(<DashboardView />);
 
     await waitFor(() => {
-      expect(screen.getAllByText(/authentication required/i).length).toBeGreaterThan(0)
-    })
-  })
+      expect(screen.getAllByText(/authentication required/i).length).toBeGreaterThan(0);
+    });
+  });
 
   it('shows error state on 403', async () => {
-    mockListEvents.mockResolvedValue(makeError(403, 'FORBIDDEN', 'User account is suspended'))
-    mockListOrders.mockResolvedValue(makeError(403, 'FORBIDDEN', 'User account is suspended'))
+    mockListEvents.mockResolvedValue(makeError(403, 'FORBIDDEN', 'User account is suspended'));
+    mockListOrders.mockResolvedValue(makeError(403, 'FORBIDDEN', 'User account is suspended'));
 
-    render(<DashboardView />)
+    render(<DashboardView />);
 
     await waitFor(() => {
-      expect(screen.getAllByText(/authentication required/i).length).toBeGreaterThan(0)
-    })
-  })
+      expect(screen.getAllByText(/authentication required/i).length).toBeGreaterThan(0);
+    });
+  });
 
   it('shows error state on 500', async () => {
-    mockListEvents.mockResolvedValue(makeError(500, 'INTERNAL_ERROR', 'An internal error occurred'))
-    mockListOrders.mockResolvedValue(makeError(500, 'INTERNAL_ERROR', 'An internal error occurred'))
+    mockListEvents.mockResolvedValue(
+      makeError(500, 'INTERNAL_ERROR', 'An internal error occurred'),
+    );
+    mockListOrders.mockResolvedValue(
+      makeError(500, 'INTERNAL_ERROR', 'An internal error occurred'),
+    );
 
-    render(<DashboardView />)
+    render(<DashboardView />);
 
     await waitFor(() => {
-      expect(screen.getAllByText(/server error/i).length).toBeGreaterThan(0)
-    })
-  })
+      expect(screen.getAllByText(/server error/i).length).toBeGreaterThan(0);
+    });
+  });
 
   it('shows loading state initially', async () => {
-    mockListEvents.mockReturnValue(new Promise(() => {})) // never resolves
-    mockListOrders.mockReturnValue(new Promise(() => {}))
+    mockListEvents.mockReturnValue(new Promise(() => {})); // never resolves
+    mockListOrders.mockReturnValue(new Promise(() => {}));
 
-    const { container } = render(<DashboardView />)
+    const { container } = render(<DashboardView />);
 
     await waitFor(() => {
       // Skeletons are rendered as divs with animate-pulse.
-      expect(container.querySelectorAll('[class*="animate"]').length).toBeGreaterThan(0)
-    })
-  })
+      expect(container.querySelectorAll('[class*="animate"]').length).toBeGreaterThan(0);
+    });
+  });
 
   it('shows empty state when API returns no events', async () => {
-    mockListEvents.mockResolvedValue(makeEmpty())
-    mockListOrders.mockResolvedValue(makeEmpty())
+    mockListEvents.mockResolvedValue(makeEmpty());
+    mockListOrders.mockResolvedValue(makeEmpty());
 
-    render(<DashboardView />)
+    render(<DashboardView />);
 
     await waitFor(() => {
-      expect(screen.getByText(/no events yet/i)).toBeInTheDocument()
-    })
-    expect(screen.getByText(/no orders yet/i)).toBeInTheDocument()
-  })
+      expect(screen.getByText(/no events yet/i)).toBeInTheDocument();
+    });
+    expect(screen.getByText(/no orders yet/i)).toBeInTheDocument();
+  });
 
   it('shows populated data when API returns events and orders', async () => {
-    mockListEvents.mockResolvedValue(makeEvents())
-    mockListOrders.mockResolvedValue(makeOrders())
+    mockListEvents.mockResolvedValue(makeEvents());
+    mockListOrders.mockResolvedValue(makeOrders());
 
-    render(<DashboardView />)
+    render(<DashboardView />);
 
     await waitFor(() => {
-      expect(screen.getByText('Test Event')).toBeInTheDocument()
-    })
-    expect(screen.getByText('Alice')).toBeInTheDocument()
-  })
+      expect(screen.getByText('Test Event')).toBeInTheDocument();
+    });
+    expect(screen.getByText('Alice')).toBeInTheDocument();
+  });
 
   it('shows error state for events but populated orders', async () => {
-    mockListEvents.mockResolvedValue(makeError(500, 'INTERNAL_ERROR', 'An internal error occurred'))
-    mockListOrders.mockResolvedValue(makeOrders())
+    mockListEvents.mockResolvedValue(
+      makeError(500, 'INTERNAL_ERROR', 'An internal error occurred'),
+    );
+    mockListOrders.mockResolvedValue(makeOrders());
 
-    render(<DashboardView />)
+    render(<DashboardView />);
 
     await waitFor(() => {
-      expect(screen.getAllByText(/server error/i).length).toBeGreaterThan(0)
-    })
+      expect(screen.getAllByText(/server error/i).length).toBeGreaterThan(0);
+    });
     // Orders should still show
-    expect(screen.getByText('Alice')).toBeInTheDocument()
-  })
-})
+    expect(screen.getByText('Alice')).toBeInTheDocument();
+  });
+});

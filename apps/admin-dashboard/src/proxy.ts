@@ -1,25 +1,23 @@
-import { clerkMiddleware } from '@clerk/nextjs/server'
-import { NextResponse, type NextFetchEvent, type NextRequest } from 'next/server'
+import { clerkMiddleware } from '@clerk/nextjs/server';
+import { NextResponse, type NextFetchEvent, type NextRequest } from 'next/server';
 
 function hasUsableClerkPublishableKey(): boolean {
-  const key =
-    process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY ??
-    process.env.CLERK_PUBLISHABLE_KEY
+  const key = process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY ?? process.env.CLERK_PUBLISHABLE_KEY;
   return Boolean(
     key &&
-      key !== 'pk_test_' &&
-      key !== 'pk_live_' &&
-      (key.startsWith('pk_test_') || key.startsWith('pk_live_')),
-  )
+    key !== 'pk_test_' &&
+    key !== 'pk_live_' &&
+    (key.startsWith('pk_test_') || key.startsWith('pk_live_')),
+  );
 }
 
-const clerkProxy = clerkMiddleware()
+const clerkProxy = clerkMiddleware();
 
 export default function proxy(request: NextRequest, event: NextFetchEvent) {
   if (!hasUsableClerkPublishableKey()) {
-    return NextResponse.next()
+    return NextResponse.next();
   }
-  return clerkProxy(request, event)
+  return clerkProxy(request, event);
 }
 
 export const config = {
@@ -28,4 +26,4 @@ export const config = {
     '/(api|trpc)(.*)',
     '/__clerk/(.*)',
   ],
-}
+};

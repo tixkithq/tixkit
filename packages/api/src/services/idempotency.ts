@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto';
 import { ulid } from 'ulid';
-import type { Database } from '@gatekit/db';
-import { IdempotencyConflictError } from '@gatekit/domain';
+import type { Database } from '@tixkit/db';
+import { IdempotencyConflictError } from '@tixkit/domain';
 
 export type IdempotentResponse = {
   status: number;
@@ -15,11 +15,14 @@ type IdempotencyRecord = {
   request_hash: string;
   response_status: number;
   response_body: string;
+  expires_at?: Date | string | null;
   status?: string;
 };
 
 export function hashRequest(payload: unknown): string {
-  return createHash('sha256').update(stableStringify(payload ?? null)).digest('hex');
+  return createHash('sha256')
+    .update(stableStringify(payload ?? null))
+    .digest('hex');
 }
 
 function stableStringify(value: unknown): string {
@@ -37,6 +40,7 @@ function stableStringify(value: unknown): string {
 
   const record = value as Record<string, unknown>;
   return `{${Object.keys(record)
+    // eslint-disable-next-line unicorn/no-array-sort -- Object.keys creates a fresh array and sorting is required for stable idempotency hashes.
     .sort()
     .map((key) => `${JSON.stringify(key)}:${stableStringify(record[key])}`)
     .join(',')}}`;
@@ -67,14 +71,21 @@ export async function withIdempotency(
     const deadline = Date.now() + 10_000;
 
     while (Date.now() < deadline) {
+      // eslint-disable-next-line no-await-in-loop -- idempotency replay must poll sequentially until the winning request commits its response.
       const existing = await findRecord(db, input.key, input.tenantId);
       if (!existing) return null;
+      if (isExpired(existing)) {
+        // eslint-disable-next-line no-await-in-loop -- expired records must be removed before this key can be reserved again.
+        await deleteRecord(db, existing.id);
+        return null;
+      }
       if (existing.request_hash !== input.requestHash) {
         throw new IdempotencyConflictError(input.key);
       }
       if ((existing.status ?? 'completed') === 'completed') {
         return { status: existing.response_status, body: JSON.parse(existing.response_body) };
       }
+      // eslint-disable-next-line no-await-in-loop -- backoff is intentionally sequential between replay polling attempts.
       await new Promise((resolve) => setTimeout(resolve, 50));
     }
 
@@ -84,26 +95,37 @@ export async function withIdempotency(
   const replayed = await replayExisting();
   if (replayed) return replayed;
 
-  const recordId = `idm_${ulid()}`;
+  let recordId = `idm_${ulid()}`;
+  let reserved = false;
 
-  try {
-    await db
-      .insertInto('idempotency_records')
-      .values({
-        id: recordId,
-        key: input.key,
-        tenant_id: input.tenantId,
-        request_hash: input.requestHash,
-        response_status: 0,
-        response_body: 'null',
-        status: 'in_progress',
-        created_at: new Date(),
-        expires_at: new Date(Date.now() + (input.ttlSeconds ?? 86400) * 1000),
-      })
-      .execute();
-  } catch {
-    const winner = await replayExisting();
-    if (winner) return winner;
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    try {
+      // eslint-disable-next-line no-await-in-loop -- reservation retries must observe the winning idempotency record before trying a new id.
+      await db
+        .insertInto('idempotency_records')
+        .values({
+          id: recordId,
+          key: input.key,
+          tenant_id: input.tenantId,
+          request_hash: input.requestHash,
+          response_status: 0,
+          response_body: 'null',
+          status: 'in_progress',
+          created_at: new Date(),
+          expires_at: new Date(Date.now() + (input.ttlSeconds ?? 86400) * 1000),
+        })
+        .execute();
+      reserved = true;
+      break;
+    } catch {
+      // eslint-disable-next-line no-await-in-loop -- duplicate-key races must replay the committed winner before generating a replacement id.
+      const winner = await replayExisting();
+      if (winner) return winner;
+      recordId = `idm_${ulid()}`;
+    }
+  }
+
+  if (!reserved) {
     throw new Error('Unable to reserve idempotency key');
   }
 
@@ -111,7 +133,11 @@ export async function withIdempotency(
   try {
     result = await handler();
   } catch (err) {
-    const error = err as Error & { statusCode?: number; code?: string; details?: Record<string, unknown> };
+    const error = err as Error & {
+      statusCode?: number;
+      code?: string;
+      details?: Record<string, unknown>;
+    };
     if ((error.statusCode ?? 500) >= 500) {
       await deleteRecord(db, recordId);
       throw err;
@@ -151,7 +177,11 @@ export async function withIdempotency(
   return result;
 }
 
-async function findRecord(db: Database, key: string, tenantId: string): Promise<IdempotencyRecord | undefined> {
+async function findRecord(
+  db: Database,
+  key: string,
+  tenantId: string,
+): Promise<IdempotencyRecord | undefined> {
   return db
     .selectFrom('idempotency_records')
     .selectAll()
@@ -162,4 +192,13 @@ async function findRecord(db: Database, key: string, tenantId: string): Promise<
 
 async function deleteRecord(db: Database, recordId: string): Promise<void> {
   await db.deleteFrom('idempotency_records').where('id', '=', recordId).execute();
+}
+
+function isExpired(record: IdempotencyRecord): boolean {
+  if (!record.expires_at) return false;
+  const expiresAt =
+    record.expires_at instanceof Date
+      ? record.expires_at.getTime()
+      : new Date(record.expires_at).getTime();
+  return Number.isFinite(expiresAt) && expiresAt <= Date.now();
 }

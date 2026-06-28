@@ -58,7 +58,7 @@ describe('Shared Utilities', () => {
   describe('generateApiKey', () => {
     it('should generate a valid API key', () => {
       const { key, hashedKey, keyPrefix } = generateApiKey();
-      expect(key).toMatch(/^gk_[a-f0-9]+$/);
+      expect(key).toMatch(/^tk_[a-f0-9]+$/);
       expect(keyPrefix).toHaveLength(12);
       expect(hashedKey).toHaveLength(64);
       expect(hashString(key)).toBe(hashedKey);
@@ -117,13 +117,13 @@ describe('Shared Utilities', () => {
 
   describe('maskApiKey', () => {
     it('should mask API key middle section', () => {
-      const masked = maskApiKey('gk_1234567890abcdefghijklmno');
-      expect(masked).toMatch(/^gk_123456789\*+lmno$/);
+      const masked = maskApiKey('tk_1234567890abcdefghijklmno');
+      expect(masked).toMatch(/^tk_123456789\*+lmno$/);
       expect(masked).toContain('*');
     });
 
     it('should not mask short keys', () => {
-      expect(maskApiKey('gk_short')).toBe('gk_short');
+      expect(maskApiKey('tk_short')).toBe('tk_short');
     });
   });
 });

@@ -9,7 +9,14 @@ export type PaymentIntent = BaseEntity & {
   providerIntentId: string;
   amountCents: number;
   currency: CurrencyCode;
-  status: 'requires_payment_method' | 'requires_confirmation' | 'requires_action' | 'processing' | 'succeeded' | 'canceled' | 'failed';
+  status:
+    | 'requires_payment_method'
+    | 'requires_confirmation'
+    | 'requires_action'
+    | 'processing'
+    | 'succeeded'
+    | 'canceled'
+    | 'failed';
   clientSecret?: string;
   metadata: Record<string, string>;
 };

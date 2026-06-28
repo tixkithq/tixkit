@@ -1,0 +1,34 @@
+# __TITLE__
+
+Generated with `create-tixkit-app`.
+
+## Getting started
+
+1. Copy the environment template and fill in your Tixkit API key and webhook secret:
+
+   ```bash
+   cp .env.local.example .env.local
+   # edit .env.local
+   ```
+
+2. Start the Tixkit backend and checkout app (see the main Tixkit repo).
+
+3. Run the dev server:
+
+   ```bash
+   bun run dev
+   ```
+
+4. Open `http://localhost:__PORT__` and try the checkout button and ticket widget.
+
+## Files of note
+
+- `app/tixkit-demo.tsx` — demo page with `TixkitCheckoutButton` and `TixkitTicketWidget`.
+- `app/api/tixkit/checkout/route.ts` — server route that creates checkout sessions via the Tixkit API.
+- `app/api/tixkit/webhook/route.ts` — verified webhook receiver using `createTixkitWebhookRouteHandler`.
+
+## Next steps
+
+- Replace the demo `__BRAND_ID__`, `__EVENT_ID__`, and `__TICKET_TYPE_ID__` values in `app/tixkit-demo.tsx` with real identifiers from your Tixkit dashboard.
+- Use `TIXKIT_API_KEY` from a live API key in your Tixkit dashboard.
+- Run `bun run typecheck` and `bun run build` to verify the generated app.

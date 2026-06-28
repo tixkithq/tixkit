@@ -11,8 +11,8 @@ describe('Next.js SDK bundle isolation', () => {
     expect(clientSource).not.toContain('node:crypto');
     expect(clientSource).not.toContain('createHmac');
     expect(clientSource).not.toContain('timingSafeEqual');
-    expect(clientSource).not.toContain('verifyGateKitWebhook');
-    expect(clientSource).not.toContain('createGateKitClient');
+    expect(clientSource).not.toContain('verifyTixkitWebhook');
+    expect(clientSource).not.toContain('createTixkitClient');
     expect(clientSource).not.toContain("from './server'");
   });
 

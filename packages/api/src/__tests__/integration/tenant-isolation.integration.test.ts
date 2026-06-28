@@ -1,8 +1,8 @@
 import Fastify from 'fastify';
 import { createHash } from 'node:crypto';
 import { describe, expect, it, vi } from 'vitest';
-import type { Principal } from '@gatekit/domain';
-import type { Database } from '@gatekit/db';
+import type { Principal } from '@tixkit/domain';
+import type { Database } from '@tixkit/db';
 import type { AppContext } from '../../app.js';
 import { ClerkAuthService } from '../../auth/clerk.js';
 import { eventRoutes } from '../../routes/modules/events.js';
@@ -34,27 +34,38 @@ import { hashRequest } from '../../services/idempotency.js';
 type Row = Record<string, unknown>;
 type Tables = Record<string, Row[]>;
 
-function createMockDb(tables: Tables = {}): unknown {
-  function matchesWheres(row: Row, wheres: Array<{ column: string; op: string; value: unknown }>): boolean {
-    for (const w of wheres) {
-      const val = row[w.column];
-      if (w.op === '=') {
-        if (val !== w.value) return false;
-      } else if (w.op === 'in') {
-        if (!Array.isArray(w.value) || !w.value.includes(val)) return false;
-      } else if (w.op === '>') {
-        if (val == null || !(String(val) > String(w.value))) return false;
-      } else if (w.op === 'is') {
-        // `is null` semantics
-        if (w.value === null) {
-          if (val !== null && val !== undefined) return false;
-        }
+function matchesWheres(
+  row: Row,
+  wheres: Array<{ column: string; op: string; value: unknown }>,
+): boolean {
+  for (const w of wheres) {
+    const val = row[w.column];
+    if (w.op === '=') {
+      if (val !== w.value) return false;
+    } else if (w.op === 'in') {
+      if (!Array.isArray(w.value) || !w.value.includes(val)) return false;
+    } else if (w.op === '>') {
+      if (val == null || !(String(val) > String(w.value))) return false;
+    } else if (w.op === 'is') {
+      // `is null` semantics
+      if (w.value === null) {
+        if (val !== null && val !== undefined) return false;
       }
-      // Other operators (like, >=, <=) are not needed for these denial tests.
     }
-    return true;
+    // Other operators (like, >=, <=) are not needed for these denial tests.
   }
+  return true;
+}
 
+function createDelete(_table: string) {
+  return {
+    where() {
+      return { execute: async () => {} };
+    },
+  };
+}
+
+function createMockDb(tables: Tables = {}): unknown {
   function createQuery(table: string) {
     const wheres: Array<{ column: string; op: string; value: unknown }> = [];
     const q = {
@@ -85,13 +96,12 @@ function createMockDb(tables: Tables = {}): unknown {
         countAll: () => 'count',
       },
       async executeTakeFirst() {
-        const rows = (tables[table] ?? []).filter((r) => matchesWheres(r, wheres));
-        return rows[0];
+        return (tables[table] ?? []).find((row) => matchesWheres(row, wheres));
       },
       async executeTakeFirstOrThrow() {
-        const rows = (tables[table] ?? []).filter((r) => matchesWheres(r, wheres));
-        if (!rows[0]) throw new Error(`No mock row for ${table}`);
-        return rows[0];
+        const row = (tables[table] ?? []).find((candidate) => matchesWheres(candidate, wheres));
+        if (!row) throw new Error(`No mock row for ${table}`);
+        return row;
       },
       async execute() {
         return (tables[table] ?? []).filter((r) => matchesWheres(r, wheres));
@@ -138,14 +148,6 @@ function createMockDb(tables: Tables = {}): unknown {
             (tables[table] ??= []).push(row);
           },
         };
-      },
-    };
-  }
-
-  function createDelete(_table: string) {
-    return {
-      where() {
-        return { execute: async () => {} };
       },
     };
   }
@@ -224,7 +226,7 @@ function orderRow(overrides: Row = {}): Row {
     brand_id: 'brd_1',
     event_id: 'evt_1',
     checkout_session_id: 'cs_1',
-    order_number: 'GK-1001',
+    order_number: 'TK-1001',
     status: 'paid',
     currency: 'USD',
     subtotal_cents: 10000,
@@ -351,7 +353,7 @@ function apiKeyRow(overrides: Row = {}): Row {
     tenant_id: 'tnt_1',
     organization_id: 'org_1',
     name: 'Server key',
-    key_prefix: 'gk_1234',
+    key_prefix: 'tk_1234',
     hashed_key: 'hash',
     scopes: JSON.stringify(['events.read']),
     brand_ids: null,
@@ -417,7 +419,7 @@ function oauthApplicationRow(overrides: Row = {}): Row {
     tenant_id: 'tnt_1',
     organization_id: 'org_1',
     name: 'OAuth app',
-    client_id: 'gk_oauth_1',
+    client_id: 'tk_oauth_1',
     client_secret_hash: 'hash',
     redirect_uris: JSON.stringify(['https://example.com/callback']),
     scopes: JSON.stringify(['events.read']),
@@ -490,6 +492,63 @@ async function setupApp(
   await app.register(routes);
   return app;
 }
+
+// ===========================================================================
+// 0. Explicit permission gates on tenant settings list routes
+// ===========================================================================
+
+describe('tenant settings list permission gates', () => {
+  it('GET /organizations rejects principals without settings.write', async () => {
+    const app = await setupApp(tenantRoutes, makePrincipal({ scopes: ['events.read'] }), {
+      organizations: [organizationRow()],
+    });
+    const res = await app.inject({ method: 'GET', url: '/organizations' });
+    expect(res.statusCode).toBe(403);
+    expect(res.json().message).toContain('settings.write');
+    await app.close();
+  });
+
+  it('GET /brands rejects principals without settings.write', async () => {
+    const app = await setupApp(tenantRoutes, makePrincipal({ scopes: ['events.read'] }), {
+      brands: [brandRow()],
+    });
+    const res = await app.inject({ method: 'GET', url: '/brands' });
+    expect(res.statusCode).toBe(403);
+    expect(res.json().message).toContain('settings.write');
+    await app.close();
+  });
+
+  it('GET /organizations remains scoped for principals with settings.write', async () => {
+    const app = await setupApp(
+      tenantRoutes,
+      makePrincipal({ organizationIds: ['org_1'], scopes: ['settings.write'] }),
+      {
+        organizations: [organizationRow({ id: 'org_1' }), organizationRow({ id: 'org_other' })],
+      },
+    );
+    const res = await app.inject({ method: 'GET', url: '/organizations' });
+    expect(res.statusCode).toBe(200);
+    expect(res.json().map((org: { id: string }) => org.id)).toEqual(['org_1']);
+    await app.close();
+  });
+
+  it('GET /brands remains scoped for principals with settings.write', async () => {
+    const app = await setupApp(
+      tenantRoutes,
+      makePrincipal({ organizationIds: ['org_1'], scopes: ['settings.write'] }),
+      {
+        brands: [
+          brandRow({ id: 'brd_1', organization_id: 'org_1' }),
+          brandRow({ id: 'brd_other', organization_id: 'org_other' }),
+        ],
+      },
+    );
+    const res = await app.inject({ method: 'GET', url: '/brands' });
+    expect(res.statusCode).toBe(200);
+    expect(res.json().map((brand: { id: string }) => brand.id)).toEqual(['brd_1']);
+    await app.close();
+  });
+});
 
 // ===========================================================================
 // 1. Cross-tenant denial (principal in tnt_1 cannot touch tnt_other resources)
@@ -599,7 +658,9 @@ describe('cross-tenant denial', () => {
 
   it('POST /check-ins/scan returns 404 before revealing inactive list state in another tenant', async () => {
     const tables: Tables = {
-      check_in_lists: [checkInListRow({ tenant_id: 'tnt_other', event_id: 'evt_other', status: 'inactive' })],
+      check_in_lists: [
+        checkInListRow({ tenant_id: 'tnt_other', event_id: 'evt_other', status: 'inactive' }),
+      ],
       events: [eventRow({ id: 'evt_other', tenant_id: 'tnt_other' })],
     };
     const app = await setupApp(checkInRoutes, principal, tables);
@@ -644,17 +705,19 @@ describe('cross-tenant denial', () => {
   it('PATCH /brands/:brandId rejects payment account from another tenant', async () => {
     const tables: Tables = {
       brands: [brandRow()],
-      payment_accounts: [{
-        id: 'pa_1',
-        tenant_id: 'tnt_other',
-        organization_id: 'org_1',
-        provider: 'stripe_connect',
-        provider_account_id: 'acct_1',
-        status: 'active',
-        default_currency: 'USD',
-        created_at: new Date(),
-        updated_at: new Date(),
-      }],
+      payment_accounts: [
+        {
+          id: 'pa_1',
+          tenant_id: 'tnt_other',
+          organization_id: 'org_1',
+          provider: 'stripe_connect',
+          provider_account_id: 'acct_1',
+          status: 'active',
+          default_currency: 'USD',
+          created_at: new Date(),
+          updated_at: new Date(),
+        },
+      ],
     };
     const app = await setupApp(tenantRoutes, principal, tables);
     const res = await app.inject({
@@ -669,17 +732,19 @@ describe('cross-tenant denial', () => {
   it('PATCH /brands/:brandId rejects payment account from another organization', async () => {
     const tables: Tables = {
       brands: [brandRow({ organization_id: 'org_1' })],
-      payment_accounts: [{
-        id: 'pa_1',
-        tenant_id: 'tnt_1',
-        organization_id: 'org_other',
-        provider: 'stripe_connect',
-        provider_account_id: 'acct_1',
-        status: 'active',
-        default_currency: 'USD',
-        created_at: new Date(),
-        updated_at: new Date(),
-      }],
+      payment_accounts: [
+        {
+          id: 'pa_1',
+          tenant_id: 'tnt_1',
+          organization_id: 'org_other',
+          provider: 'stripe_connect',
+          provider_account_id: 'acct_1',
+          status: 'active',
+          default_currency: 'USD',
+          created_at: new Date(),
+          updated_at: new Date(),
+        },
+      ],
     };
     const app = await setupApp(tenantRoutes, principal, tables);
     const res = await app.inject({
@@ -891,7 +956,9 @@ describe('cross-organization denial (same tenant)', () => {
 
   it('POST /check-ins/sync returns 404 before revealing inactive list state in another organization', async () => {
     const tables: Tables = {
-      check_in_lists: [checkInListRow({ tenant_id: 'tnt_1', event_id: 'evt_B', status: 'inactive' })],
+      check_in_lists: [
+        checkInListRow({ tenant_id: 'tnt_1', event_id: 'evt_B', status: 'inactive' }),
+      ],
       events: [eventRow({ id: 'evt_B', tenant_id: 'tnt_1', organization_id: 'org_B' })],
     };
     const app = await setupApp(checkInRoutes, principal, tables);
@@ -913,15 +980,17 @@ describe('cross-organization denial (same tenant)', () => {
     const payload = { templateKey: 'attendee-message', audience: 'all', channel: 'sms' };
     const tables: Tables = {
       events: [eventRow({ id: 'evt_1', tenant_id: 'tnt_1', organization_id: 'org_B' })],
-      idempotency_records: [{
-        id: 'idm_msg_1',
-        key: 'key-cross-org-message',
-        tenant_id: 'tnt_1',
-        request_hash: hashRequest({ eventId: 'evt_1', body: payload }),
-        response_status: 202,
-        response_body: JSON.stringify({ campaignId: 'cached', status: 'sent' }),
-        status: 'completed',
-      }],
+      idempotency_records: [
+        {
+          id: 'idm_msg_1',
+          key: 'key-cross-org-message',
+          tenant_id: 'tnt_1',
+          request_hash: hashRequest({ eventId: 'evt_1', body: payload }),
+          response_status: 202,
+          response_body: JSON.stringify({ campaignId: 'cached', status: 'sent' }),
+          status: 'completed',
+        },
+      ],
     };
     const app = await setupApp(messagingRoutes, principal, tables);
     const res = await app.inject({
@@ -936,7 +1005,9 @@ describe('cross-organization denial (same tenant)', () => {
   });
 
   it('DELETE /api-keys/:keyId returns 404 for key in another organization', async () => {
-    const tables: Tables = { api_keys: [apiKeyRow({ tenant_id: 'tnt_1', organization_id: 'org_B' })] };
+    const tables: Tables = {
+      api_keys: [apiKeyRow({ tenant_id: 'tnt_1', organization_id: 'org_B' })],
+    };
     const app = await setupApp(developerRoutes, principal, tables);
     const res = await app.inject({ method: 'DELETE', url: '/api-keys/ak_1' });
     expect(res.statusCode).toBe(404);
@@ -945,7 +1016,9 @@ describe('cross-organization denial (same tenant)', () => {
 
   it('POST /scanner-devices/:deviceId/revoke returns 404 for device in another organization', async () => {
     const tables: Tables = {
-      scanner_devices: [scannerDeviceRow({ tenant_id: 'tnt_1', organization_id: 'org_B', device_id: 'dev_B' })],
+      scanner_devices: [
+        scannerDeviceRow({ tenant_id: 'tnt_1', organization_id: 'org_B', device_id: 'dev_B' }),
+      ],
     };
     const app = await setupApp(developerRoutes, principal, tables);
     const res = await app.inject({ method: 'POST', url: '/scanner-devices/dev_B/revoke' });
@@ -1024,11 +1097,95 @@ describe('empty organization principal fail-closed lists', () => {
   });
 
   it('GET /oauth-applications returns no rows for a non-system principal with no organizations', async () => {
-    const tables: Tables = { oauth_applications: [oauthApplicationRow({ organization_id: 'org_1' })] };
+    const tables: Tables = {
+      oauth_applications: [oauthApplicationRow({ organization_id: 'org_1' })],
+    };
     const app = await setupApp(developerRoutes, principal, tables);
     const res = await app.inject({ method: 'GET', url: '/oauth-applications' });
     expect(res.statusCode).toBe(200);
     expect(res.json().items).toHaveLength(0);
+    await app.close();
+  });
+});
+
+describe('developer credential resource scope containment', () => {
+  it('GET /api-keys exposes only same-event keys and DELETE hides other-event or org-wide keys from event-scoped principals', async () => {
+    const principal = makePrincipal({
+      type: 'api_key',
+      id: 'ak_parent',
+      eventIds: ['evt_1'],
+      brandIds: ['brd_1'],
+      scopes: ['developers.write'],
+    });
+    const tables: Tables = {
+      api_keys: [
+        apiKeyRow({ id: 'ak_evt_1', event_ids: JSON.stringify(['evt_1']) }),
+        apiKeyRow({ id: 'ak_evt_2', event_ids: JSON.stringify(['evt_2']) }),
+        apiKeyRow({ id: 'ak_org', event_ids: null, brand_ids: null }),
+        apiKeyRow({ id: 'ak_brand', event_ids: null, brand_ids: JSON.stringify(['brd_1']) }),
+      ],
+    };
+    const app = await setupApp(developerRoutes, principal, tables);
+
+    const listRes = await app.inject({ method: 'GET', url: '/api-keys' });
+    expect(listRes.statusCode).toBe(200);
+    expect(listRes.json().items.map((item: { id: string }) => item.id)).toEqual(['ak_evt_1']);
+
+    const otherEventRes = await app.inject({ method: 'DELETE', url: '/api-keys/ak_evt_2' });
+    expect(otherEventRes.statusCode).toBe(404);
+
+    const orgWideRes = await app.inject({ method: 'DELETE', url: '/api-keys/ak_org' });
+    expect(orgWideRes.statusCode).toBe(404);
+
+    await app.close();
+  });
+
+  it('GET /scanner-devices and revoke hide other-brand event and org-wide devices from brand-scoped principals', async () => {
+    const principal = makePrincipal({
+      type: 'api_key',
+      id: 'ak_parent',
+      brandIds: ['brd_1'],
+      scopes: ['developers.write'],
+    });
+    const tables: Tables = {
+      events: [
+        eventRow({ id: 'evt_1', brand_id: 'brd_1' }),
+        eventRow({ id: 'evt_2', brand_id: 'brd_2' }),
+      ],
+      scanner_devices: [
+        scannerDeviceRow({
+          id: 'sd_1',
+          device_id: 'dev_1',
+          event_ids: JSON.stringify(['evt_1']),
+        }),
+        scannerDeviceRow({
+          id: 'sd_2',
+          device_id: 'dev_2',
+          event_ids: JSON.stringify(['evt_2']),
+        }),
+        scannerDeviceRow({ id: 'sd_org', device_id: 'dev_org', event_ids: null }),
+      ],
+    };
+    const app = await setupApp(developerRoutes, principal, tables);
+
+    const listRes = await app.inject({ method: 'GET', url: '/scanner-devices' });
+    expect(listRes.statusCode).toBe(200);
+    expect(listRes.json().items.map((item: { deviceId: string }) => item.deviceId)).toEqual([
+      'dev_1',
+    ]);
+
+    const otherBrandRes = await app.inject({
+      method: 'POST',
+      url: '/scanner-devices/dev_2/revoke',
+    });
+    expect(otherBrandRes.statusCode).toBe(404);
+
+    const orgWideRes = await app.inject({
+      method: 'POST',
+      url: '/scanner-devices/dev_org/revoke',
+    });
+    expect(orgWideRes.statusCode).toBe(404);
+
     await app.close();
   });
 });
@@ -1038,6 +1195,70 @@ describe('empty organization principal fail-closed lists', () => {
 // ===========================================================================
 
 describe('brand and event scope denial', () => {
+  it('GET /attendees only returns permitted event attendees for event-scoped keys', async () => {
+    const principal = makePrincipal({
+      type: 'api_key',
+      id: 'ak_event_scoped',
+      eventIds: ['evt_A'],
+      scopes: ['attendees.read'],
+    });
+    const tables: Tables = {
+      attendees: [
+        attendeeRow({
+          id: 'att_A',
+          event_id: 'evt_A',
+          'attendees.tenant_id': 'tnt_1',
+          'attendees.event_id': 'evt_A',
+          'events.organization_id': 'org_1',
+        }),
+        attendeeRow({
+          id: 'att_B',
+          event_id: 'evt_B',
+          'attendees.tenant_id': 'tnt_1',
+          'attendees.event_id': 'evt_B',
+          'events.organization_id': 'org_1',
+        }),
+      ],
+    };
+    const app = await setupApp(checkInRoutes, principal, tables);
+    const res = await app.inject({ method: 'GET', url: '/attendees' });
+    expect(res.statusCode).toBe(200);
+    expect(res.json().items.map((attendee: { id: string }) => attendee.id)).toEqual(['att_A']);
+    await app.close();
+  });
+
+  it('GET /attendees only returns permitted brand attendees for brand-scoped keys', async () => {
+    const principal = makePrincipal({
+      type: 'api_key',
+      id: 'ak_brand_scoped',
+      brandIds: ['brd_A'],
+      scopes: ['attendees.read'],
+    });
+    const tables: Tables = {
+      attendees: [
+        attendeeRow({
+          id: 'att_A',
+          event_id: 'evt_A',
+          'attendees.tenant_id': 'tnt_1',
+          'events.organization_id': 'org_1',
+          'events.brand_id': 'brd_A',
+        }),
+        attendeeRow({
+          id: 'att_B',
+          event_id: 'evt_B',
+          'attendees.tenant_id': 'tnt_1',
+          'events.organization_id': 'org_1',
+          'events.brand_id': 'brd_B',
+        }),
+      ],
+    };
+    const app = await setupApp(checkInRoutes, principal, tables);
+    const res = await app.inject({ method: 'GET', url: '/attendees' });
+    expect(res.statusCode).toBe(200);
+    expect(res.json().items.map((attendee: { id: string }) => attendee.id)).toEqual(['att_A']);
+    await app.close();
+  });
+
   it('GET /events/:eventId returns 404 for brand-scoped key accessing other brand event', async () => {
     const principal = makePrincipal({
       type: 'api_key',
@@ -1090,6 +1311,62 @@ describe('brand and event scope denial', () => {
     expect(res.statusCode).toBe(404);
     await app.close();
   });
+
+  it('GET /exports/:exportId returns 404 for same-tenant null-event export to event-scoped API key', async () => {
+    const principal = makePrincipal({
+      type: 'api_key',
+      id: 'ak_event_scoped',
+      eventIds: ['evt_A'],
+      scopes: ['reports.read'],
+    });
+    const tables: Tables = { export_jobs: [exportJobRow({ event_id: null })] };
+    const app = await setupApp(reportingRoutes, principal, tables);
+    const res = await app.inject({ method: 'GET', url: '/exports/exp_1' });
+
+    expect(res.statusCode).toBe(404);
+    await app.close();
+  });
+
+  it('GET /exports/:exportId/download returns 404 for same-tenant null-event export to brand-scoped API key', async () => {
+    const principal = makePrincipal({
+      type: 'api_key',
+      id: 'ak_brand_scoped',
+      brandIds: ['brd_A'],
+      scopes: ['reports.read'],
+    });
+    const tables: Tables = { export_jobs: [exportJobRow({ event_id: null })] };
+    const app = await setupApp(reportingRoutes, principal, tables);
+    const res = await app.inject({ method: 'GET', url: '/exports/exp_1/download' });
+
+    expect(res.statusCode).toBe(404);
+    await app.close();
+  });
+
+  it('GET /exports/:exportId/events returns 404 for same-tenant null-event export to event-scoped API key', async () => {
+    const principal = makePrincipal({
+      type: 'api_key',
+      id: 'ak_event_scoped',
+      eventIds: ['evt_A'],
+      scopes: ['reports.read'],
+    });
+    const tables: Tables = { export_jobs: [exportJobRow({ event_id: null })] };
+    const app = await setupApp(reportingRoutes, principal, tables);
+    const res = await app.inject({ method: 'GET', url: '/exports/exp_1/events' });
+
+    expect(res.statusCode).toBe(404);
+    await app.close();
+  });
+
+  it('GET /exports/:exportId/download allows system principals to access null-event exports', async () => {
+    const principal = makePrincipal({ type: 'system', id: 'sys_1' });
+    const tables: Tables = { export_jobs: [exportJobRow({ event_id: null })] };
+    const app = await setupApp(reportingRoutes, principal, tables);
+    const res = await app.inject({ method: 'GET', url: '/exports/exp_1/download' });
+
+    expect(res.statusCode).toBe(302);
+    expect(res.headers.location).toBe('https://exports.example.test/exp_1.csv');
+    await app.close();
+  });
 });
 
 // ===========================================================================
@@ -1129,7 +1406,7 @@ describe('API key scope enforcement', () => {
   });
 
   it('authenticates a valid API key and maps tenant/scopes', async () => {
-    const rawKey = 'gk_testkeyvalid';
+    const rawKey = 'tk_testkeyvalid';
     const hashedKey = createHash('sha256').update(rawKey).digest('hex');
     const tables: Tables = {
       api_keys: [
@@ -1156,7 +1433,7 @@ describe('API key scope enforcement', () => {
   });
 
   it('rejects a revoked API key with 401 Unauthorized', async () => {
-    const rawKey = 'gk_testkeyrevoked';
+    const rawKey = 'tk_testkeyrevoked';
     const hashedKey = createHash('sha256').update(rawKey).digest('hex');
     const tables: Tables = {
       api_keys: [
@@ -1179,7 +1456,7 @@ describe('API key scope enforcement', () => {
   });
 
   it('rejects an expired API key with 401 Unauthorized', async () => {
-    const rawKey = 'gk_testkeyexpired';
+    const rawKey = 'tk_testkeyexpired';
     const hashedKey = createHash('sha256').update(rawKey).digest('hex');
     const tables: Tables = {
       api_keys: [
@@ -1203,7 +1480,7 @@ describe('API key scope enforcement', () => {
   });
 
   it('rejects an API key with an unknown hash (no row)', async () => {
-    const rawKey = 'gk_testkeyunknown';
+    const rawKey = 'tk_testkeyunknown';
     const tables: Tables = { api_keys: [] };
     const db = createMockDb(tables) as unknown as Database;
     const service = new ClerkAuthService('test-secret', db);

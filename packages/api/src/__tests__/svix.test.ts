@@ -23,12 +23,22 @@ describe('verifySvixSignature', () => {
 
   it('rejects tampered body', () => {
     const signature = sign(body, msgId, validTimestamp, SECRET);
-    expect(verifySvixSignature('{"type":"user.deleted","data":{}}', msgId, String(validTimestamp), signature, SECRET)).toBe(false);
+    expect(
+      verifySvixSignature(
+        '{"type":"user.deleted","data":{}}',
+        msgId,
+        String(validTimestamp),
+        signature,
+        SECRET,
+      ),
+    ).toBe(false);
   });
 
   it('rejects wrong message ID', () => {
     const signature = sign(body, msgId, validTimestamp, SECRET);
-    expect(verifySvixSignature(body, 'msg_wrong', String(validTimestamp), signature, SECRET)).toBe(false);
+    expect(verifySvixSignature(body, 'msg_wrong', String(validTimestamp), signature, SECRET)).toBe(
+      false,
+    );
   });
 
   it('rejects expired timestamp (outside tolerance)', () => {
@@ -40,7 +50,9 @@ describe('verifySvixSignature', () => {
   it('rejects future timestamp (outside tolerance)', () => {
     const futureTimestamp = Math.floor(Date.now() / 1000) + 600; // 10 minutes ahead
     const signature = sign(body, msgId, futureTimestamp, SECRET);
-    expect(verifySvixSignature(body, msgId, String(futureTimestamp), signature, SECRET)).toBe(false);
+    expect(verifySvixSignature(body, msgId, String(futureTimestamp), signature, SECRET)).toBe(
+      false,
+    );
   });
 
   it('rejects signature from wrong secret', () => {
@@ -49,7 +61,9 @@ describe('verifySvixSignature', () => {
   });
 
   it('rejects malformed signature header', () => {
-    expect(verifySvixSignature(body, msgId, String(validTimestamp), 'not-a-valid-signature', SECRET)).toBe(false);
+    expect(
+      verifySvixSignature(body, msgId, String(validTimestamp), 'not-a-valid-signature', SECRET),
+    ).toBe(false);
   });
 
   it('rejects empty signature header', () => {
@@ -77,6 +91,8 @@ describe('verifySvixSignature', () => {
   it('handles secret without whsec_ prefix', () => {
     const rawSecret = SECRET.replace(/^whsec_/, '');
     const signature = sign(body, msgId, validTimestamp, SECRET);
-    expect(verifySvixSignature(body, msgId, String(validTimestamp), signature, rawSecret)).toBe(true);
+    expect(verifySvixSignature(body, msgId, String(validTimestamp), signature, rawSecret)).toBe(
+      true,
+    );
   });
 });

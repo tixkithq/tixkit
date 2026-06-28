@@ -1,5 +1,5 @@
 {
-  "name": "@gatekit/react-native",
+  "name": "@tixkit/react-native",
   "version": "0.1.0",
   "type": "module",
   "main": "./dist/index.js",
@@ -30,7 +30,7 @@
     "clean": "rm -rf dist"
   },
   "dependencies": {
-    "@gatekit/js": "workspace:*"
+    "@tixkit/js": "workspace:*"
   },
   "devDependencies": {
     "typescript": "5.9.3",

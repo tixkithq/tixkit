@@ -8,6 +8,7 @@ export const routes = {
   events: '/events',
   eventDetail: (eventId: string) => `/events/${eventId}`,
   eventTickets: (eventId: string) => `/events/${eventId}/tickets`,
+  eventProducts: (eventId: string) => `/events/${eventId}/products`,
   eventCheckoutForm: (eventId: string) => `/events/${eventId}/checkout-form`,
   eventAttendees: (eventId: string) => `/events/${eventId}/attendees`,
   eventCheckIn: (eventId: string) => `/events/${eventId}/check-in`,
@@ -24,8 +25,10 @@ export const routes = {
   developerWebhooks: '/developer/webhooks',
   settings: '/settings',
   settingsProfile: '/settings/profile',
+  settingsWorkspace: '/settings/workspace',
   settingsOrganization: '/settings/organization',
   settingsAppearance: '/settings/appearance',
+  settingsMembers: '/settings/members',
   settingsTeam: '/settings/team',
   settingsBilling: '/settings/billing',
   settingsPayments: '/settings/payments',
@@ -34,6 +37,6 @@ export const routes = {
   auditLog: '/audit-log',
   signIn: '/sign-in',
   signUp: '/sign-up',
-} as const
+} as const;
 
-export type RouteKey = keyof typeof routes
+export type RouteKey = keyof typeof routes;

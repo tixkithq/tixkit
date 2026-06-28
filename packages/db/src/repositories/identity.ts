@@ -90,7 +90,7 @@ export class ApiKeyRepository extends BaseRepository {
     expiresAt?: Date;
   }): Promise<{ apiKey: string; record: Record<string, unknown> }> {
     const id = `key_${ulid()}`;
-    const rawKey = `gk_${randomBytes(32).toString('hex')}`;
+    const rawKey = `tk_${randomBytes(32).toString('hex')}`;
     const keyPrefix = rawKey.substring(0, 12);
     const hashedKey = createHash('sha256').update(rawKey).digest('hex');
     const now = new Date();
@@ -196,12 +196,15 @@ export class ScannerDeviceRepository extends BaseRepository {
 export class AuditLogRepository extends BaseRepository {
   async create(input: {
     tenantId: string;
+    organizationId?: string | null;
+    brandId?: string | null;
     actorType: string;
     actorId: string;
     action: string;
     resourceType: string;
     resourceId: string;
     diffSummary?: Record<string, unknown>;
+    requestId?: string;
     ip?: string;
     userAgent?: string;
   }) {
@@ -211,12 +214,15 @@ export class AuditLogRepository extends BaseRepository {
       {
         id,
         tenant_id: input.tenantId,
+        organization_id: input.organizationId ?? null,
+        brand_id: input.brandId ?? null,
         actor_type: input.actorType,
         actor_id: input.actorId,
         action: input.action,
         resource_type: input.resourceType,
         resource_id: input.resourceId,
         diff_summary: input.diffSummary ? JSON.stringify(input.diffSummary) : null,
+        request_id: input.requestId ?? null,
         ip: input.ip ?? null,
         user_agent: input.userAgent ?? null,
         created_at: new Date(),
@@ -242,6 +248,141 @@ export class AuditLogRepository extends BaseRepository {
       .where('resource_id', '=', resourceId)
       .orderBy('created_at', 'desc')
       .execute();
+  }
+
+  async listByTenant(
+    tenantId: string,
+    filters: {
+      organizationIds?: string[];
+      organizationId?: string;
+      brandId?: string;
+      action?: string;
+      resourceType?: string;
+      actorId?: string;
+      limit?: number;
+      cursor?: string;
+    } = {},
+  ) {
+    const limit = Math.min(Math.max(filters.limit ?? 50, 1), 100);
+    let query = this.db
+      .selectFrom('audit_logs')
+      .selectAll()
+      .where('tenant_id', '=', tenantId)
+      .orderBy('id', 'desc')
+      .limit(limit + 1);
+
+    if (filters.cursor) query = query.where('id', '<', filters.cursor);
+    if (filters.organizationId) query = query.where('organization_id', '=', filters.organizationId);
+    if (filters.brandId) query = query.where('brand_id', '=', filters.brandId);
+    if (filters.action) query = query.where('action', '=', filters.action);
+    if (filters.resourceType) query = query.where('resource_type', '=', filters.resourceType);
+    if (filters.actorId) query = query.where('actor_id', '=', filters.actorId);
+    if (filters.organizationIds && filters.organizationIds.length > 0) {
+      query = query.where((eb) =>
+        eb.or([
+          eb('organization_id', 'in', filters.organizationIds!),
+          eb('organization_id', 'is', null),
+        ]),
+      );
+    }
+
+    return query.execute();
+  }
+}
+
+export class PrivacyRequestRepository extends BaseRepository {
+  async create(input: {
+    tenantId: string;
+    organizationId: string;
+    brandId?: string | null;
+    requestType: 'export' | 'erasure';
+    subjectType: 'buyer' | 'attendee';
+    subjectId?: string | null;
+    subjectEmail?: string | null;
+    requestedBy: string;
+  }) {
+    const id = `prv_${ulid()}`;
+    return this.insertReturning(
+      'privacy_requests',
+      {
+        id,
+        tenant_id: input.tenantId,
+        organization_id: input.organizationId,
+        brand_id: input.brandId ?? null,
+        request_type: input.requestType,
+        subject_type: input.subjectType,
+        subject_id: input.subjectId ?? null,
+        subject_email: input.subjectEmail?.toLowerCase() ?? null,
+        status: 'pending',
+        requested_by: input.requestedBy,
+        result: null,
+        error: null,
+        created_at: new Date(),
+        completed_at: null,
+      },
+      id,
+    );
+  }
+
+  async findById(id: string) {
+    return this.db.selectFrom('privacy_requests').selectAll().where('id', '=', id).executeTakeFirst();
+  }
+
+  async listByTenant(
+    tenantId: string,
+    filters: {
+      organizationIds?: string[];
+      organizationId?: string;
+      brandId?: string;
+      requestType?: string;
+      status?: string;
+      limit?: number;
+      cursor?: string;
+    } = {},
+  ) {
+    const limit = Math.min(Math.max(filters.limit ?? 50, 1), 100);
+    let query = this.db
+      .selectFrom('privacy_requests')
+      .selectAll()
+      .where('tenant_id', '=', tenantId)
+      .orderBy('id', 'desc')
+      .limit(limit + 1);
+
+    if (filters.cursor) query = query.where('id', '<', filters.cursor);
+    if (filters.organizationId) query = query.where('organization_id', '=', filters.organizationId);
+    if (filters.brandId) query = query.where('brand_id', '=', filters.brandId);
+    if (filters.requestType) query = query.where('request_type', '=', filters.requestType);
+    if (filters.status) query = query.where('status', '=', filters.status);
+    if (filters.organizationIds && filters.organizationIds.length > 0) {
+      query = query.where('organization_id', 'in', filters.organizationIds);
+    }
+
+    return query.execute();
+  }
+
+  async markProcessing(id: string) {
+    return this.db
+      .updateTable('privacy_requests')
+      .set({ status: 'processing' })
+      .where('id', '=', id)
+      .execute();
+  }
+
+  async markCompleted(id: string, result: Record<string, unknown>) {
+    return this.updateReturning('privacy_requests', id, {
+      status: 'completed',
+      result: JSON.stringify(result),
+      error: null,
+      completed_at: new Date(),
+    });
+  }
+
+  async markFailed(id: string, error: string) {
+    return this.updateReturning('privacy_requests', id, {
+      status: 'failed',
+      error,
+      completed_at: new Date(),
+    });
   }
 }
 

@@ -1,0 +1,8 @@
+import { createCheckoutSessionRouteHandler } from '@tixkit/next/server';
+
+export const POST = createCheckoutSessionRouteHandler({
+  apiKey: process.env.TIXKIT_API_KEY ?? '',
+  apiBaseUrl: process.env.TIXKIT_API_URL,
+  defaultSuccessUrl: `${process.env.NEXT_PUBLIC_APP_URL}/thanks`,
+  defaultCancelUrl: `${process.env.NEXT_PUBLIC_APP_URL}/`,
+});

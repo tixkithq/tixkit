@@ -33,7 +33,11 @@ export class NotificationTemplateRepository extends BaseRepository {
   }
 
   async findById(id: string) {
-    return this.db.selectFrom('notification_templates').selectAll().where('id', '=', id).executeTakeFirst();
+    return this.db
+      .selectFrom('notification_templates')
+      .selectAll()
+      .where('id', '=', id)
+      .executeTakeFirst();
   }
 
   async findByKey(tenantId: string, key: string) {
@@ -91,7 +95,11 @@ export class NotificationTemplateVersionRepository extends BaseRepository {
   }
 
   async findById(id: string) {
-    return this.db.selectFrom('notification_template_versions').selectAll().where('id', '=', id).executeTakeFirst();
+    return this.db
+      .selectFrom('notification_template_versions')
+      .selectAll()
+      .where('id', '=', id)
+      .executeTakeFirst();
   }
 
   async findByTemplate(templateId: string) {
@@ -149,7 +157,11 @@ export class EmailProviderRouteRepository extends BaseRepository {
   }
 
   async findById(id: string) {
-    return this.db.selectFrom('email_provider_routes').selectAll().where('id', '=', id).executeTakeFirst();
+    return this.db
+      .selectFrom('email_provider_routes')
+      .selectAll()
+      .where('id', '=', id)
+      .executeTakeFirst();
   }
 
   async findByBrand(brandId: string) {
@@ -166,6 +178,7 @@ export class EmailProviderRouteRepository extends BaseRepository {
       .selectAll()
       .where('brand_id', '=', brandId)
       .where('status', '=', 'active')
+      .where('smoke_send_verified', '=', true)
       .execute();
   }
 }
@@ -212,6 +225,16 @@ export class BrandSenderIdentityRepository extends BaseRepository {
       .selectAll()
       .where('brand_id', '=', brandId)
       .where('verified', '=', true)
+      .executeTakeFirst();
+  }
+
+  async findVerifiedByBrandAndDomain(brandId: string, senderDomain: string) {
+    return this.db
+      .selectFrom('brand_sender_identities')
+      .selectAll()
+      .where('brand_id', '=', brandId)
+      .where('verified', '=', true)
+      .where('email', 'like', `%@${senderDomain}`)
       .executeTakeFirst();
   }
 }
@@ -329,7 +352,16 @@ export class EmailDeliveryRepository extends BaseRepository {
   }
 
   async update(id: string, input: Record<string, unknown>) {
-    return this.updateReturning('email_deliveries', id, input);
+    return this.updateReturning('email_deliveries', id, { ...input, updated_at: new Date() });
+  }
+
+  async findByProviderMessageId(provider: string, providerMessageId: string) {
+    return this.db
+      .selectFrom('email_deliveries')
+      .selectAll()
+      .where('provider', '=', provider)
+      .where('provider_message_id', '=', providerMessageId)
+      .executeTakeFirst();
   }
 
   async findByJobIds(tenantId: string, jobIds: string[]) {
@@ -340,6 +372,55 @@ export class EmailDeliveryRepository extends BaseRepository {
       .where('tenant_id', '=', tenantId)
       .where('job_id', 'in', jobIds)
       .execute();
+  }
+}
+
+export class EmailProviderEventRepository extends BaseRepository {
+  async findByProviderEventId(provider: string, providerEventId: string) {
+    return this.db
+      .selectFrom('email_provider_events')
+      .selectAll()
+      .where('provider', '=', provider)
+      .where('provider_event_id', '=', providerEventId)
+      .executeTakeFirst();
+  }
+
+  async findByProviderMessageIds(tenantId: string, providerMessageIds: string[]) {
+    if (providerMessageIds.length === 0) return [];
+    return this.db
+      .selectFrom('email_provider_events')
+      .selectAll()
+      .where('tenant_id', '=', tenantId)
+      .where('provider_message_id', 'in', providerMessageIds)
+      .execute();
+  }
+
+  async create(input: {
+    tenantId?: string | null;
+    provider: string;
+    providerEventId: string;
+    eventType: string;
+    providerMessageId?: string;
+    email?: string;
+    rawPayload: Record<string, unknown>;
+  }) {
+    const id = `epe_${ulid()}`;
+    return this.insertReturning(
+      'email_provider_events',
+      {
+        id,
+        tenant_id: input.tenantId ?? null,
+        provider: input.provider,
+        provider_event_id: input.providerEventId,
+        event_type: input.eventType,
+        provider_message_id: input.providerMessageId ?? null,
+        email: input.email ?? null,
+        raw_payload: JSON.stringify(input.rawPayload),
+        processed_at: new Date(),
+        created_at: new Date(),
+      },
+      id,
+    );
   }
 }
 
@@ -375,6 +456,18 @@ export class EmailSuppressionRepository extends BaseRepository {
       id,
     );
   }
+
+  async findOrCreate(input: {
+    tenantId: string;
+    email: string;
+    reason: string;
+    bounceType?: string;
+    source: string;
+  }) {
+    const existing = await this.findByEmail(input.tenantId, input.email);
+    if (existing) return existing;
+    return this.create(input);
+  }
 }
 
 export class SmsSenderIdentityRepository extends BaseRepository {
@@ -408,7 +501,11 @@ export class SmsSenderIdentityRepository extends BaseRepository {
   }
 
   async findById(id: string) {
-    return this.db.selectFrom('sms_sender_identities').selectAll().where('id', '=', id).executeTakeFirst();
+    return this.db
+      .selectFrom('sms_sender_identities')
+      .selectAll()
+      .where('id', '=', id)
+      .executeTakeFirst();
   }
 
   async findVerifiedByBrand(brandId: string) {
@@ -460,7 +557,11 @@ export class SmsProviderRouteRepository extends BaseRepository {
   }
 
   async findById(id: string) {
-    return this.db.selectFrom('sms_provider_routes').selectAll().where('id', '=', id).executeTakeFirst();
+    return this.db
+      .selectFrom('sms_provider_routes')
+      .selectAll()
+      .where('id', '=', id)
+      .executeTakeFirst();
   }
 
   async findActiveByBrand(brandId: string) {
@@ -469,6 +570,7 @@ export class SmsProviderRouteRepository extends BaseRepository {
       .selectAll()
       .where('brand_id', '=', brandId)
       .where('status', '=', 'active')
+      .where('smoke_send_verified', '=', true)
       .execute();
   }
 }
@@ -572,7 +674,10 @@ export class SmsDeliveryRepository extends BaseRepository {
         status: input.status,
         attempted_providers: JSON.stringify(input.attemptedProviders),
         accepted_provider: input.acceptedProvider ?? null,
-        sent_at: input.status === 'accepted' || input.status === 'queued' || input.status === 'sent' ? now : null,
+        sent_at:
+          input.status === 'accepted' || input.status === 'queued' || input.status === 'sent'
+            ? now
+            : null,
         delivered_at: input.status === 'delivered' ? now : null,
         failed_at: input.status === 'failed' ? now : null,
         failure_reason: input.failureReason ?? null,
@@ -618,6 +723,30 @@ export class MessageConsentRepository extends BaseRepository {
       .where('attendee_id', 'in', attendeeIds)
       .where('revoked_at', 'is', null)
       .orderBy('consented_at', 'desc')
+      .execute();
+  }
+
+  async revokeEmailOptInByEmail(input: { tenantId: string; email: string; revokedAt?: Date }) {
+    const revokedAt = input.revokedAt ?? new Date();
+    return this.db
+      .updateTable('message_consents')
+      .set({ email_opt_in: false, revoked_at: revokedAt })
+      .where('tenant_id', '=', input.tenantId)
+      .where('email', '=', input.email)
+      .where('email_opt_in', '=', true)
+      .where('revoked_at', 'is', null)
+      .execute();
+  }
+
+  async revokeSmsOptInByPhone(input: { tenantId: string; phone: string; revokedAt?: Date }) {
+    const revokedAt = input.revokedAt ?? new Date();
+    return this.db
+      .updateTable('message_consents')
+      .set({ sms_opt_in: false, revoked_at: revokedAt })
+      .where('tenant_id', '=', input.tenantId)
+      .where('phone', '=', input.phone)
+      .where('sms_opt_in', '=', true)
+      .where('revoked_at', 'is', null)
       .execute();
   }
 }

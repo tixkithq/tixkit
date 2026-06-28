@@ -6,7 +6,11 @@ export function okResult<T>(value: T): WorkflowActivityResult<T> {
   return { ok: true, value };
 }
 
-export function errResult(errorCode: string, message: string, retryable = false): WorkflowActivityResult<never> {
+export function errResult(
+  errorCode: string,
+  message: string,
+  retryable = false,
+): WorkflowActivityResult<never> {
   return { ok: false, errorCode, message, retryable };
 }
 
@@ -20,6 +24,7 @@ export const HOLD_EXPIRATION_WORKFLOW_VERSION = 1;
 export const EXPORT_WORKFLOW_VERSION = 1;
 export const CLERK_IDENTITY_SYNC_WORKFLOW_VERSION = 1;
 export const PAYMENT_RECONCILIATION_WORKFLOW_VERSION = 1;
+export const PRIVACY_REQUEST_WORKFLOW_VERSION = 1;
 
 // Workflow ID conventions
 export function checkoutWorkflowId(sessionId: string): string {
@@ -32,6 +37,14 @@ export function refundWorkflowId(orderId: string, nonce: string): string {
 
 export function webhookDeliveryWorkflowId(eventId: string, endpointId: string): string {
   return `webhook-delivery:${eventId}:${endpointId}`;
+}
+
+export function webhookDeliveryReplayWorkflowId(
+  eventId: string,
+  endpointId: string,
+  replayNonce: string,
+): string {
+  return `webhook-delivery:${eventId}:${endpointId}:replay:${replayNonce}`;
 }
 
 export function notificationWorkflowId(jobId: string): string {
@@ -50,10 +63,14 @@ export function holdExpirationWorkflowId(): string {
   return `hold-expiration:scheduled`;
 }
 
-export function clerkIdentitySyncWorkflowId(clerkUserId: string): string {
-  return `clerk-identity-sync:${clerkUserId}`;
+export function clerkIdentitySyncWorkflowId(providerEventId: string): string {
+  return `clerk-identity-sync:${providerEventId}`;
 }
 
 export function paymentReconciliationWorkflowId(providerEventId: string): string {
   return `payment-reconciliation:${providerEventId}`;
+}
+
+export function privacyRequestWorkflowId(requestId: string): string {
+  return `privacy-request:${requestId}`;
 }

@@ -1,7 +1,7 @@
 import type { FastifyPluginAsync } from 'fastify';
 import { ulid } from 'ulid';
 import { ClerkAuthService } from '../../auth/clerk.js';
-import { EventRepository, type Database } from '@gatekit/db';
+import { EventRepository, type Database } from '@tixkit/db';
 import {
   ConflictError,
   NotFoundError,
@@ -9,9 +9,44 @@ import {
   validateQuestionDefinition,
   type Principal,
   type QuestionType,
-} from '@gatekit/domain';
+} from '@tixkit/domain';
 import { parseJsonValue, parsePagination, pageEnvelope } from '../../http/contracts.js';
-import { createQuestionSchema, reorderQuestionsSchema, updateQuestionSchema, parseBody } from '../../http/schemas.js';
+import {
+  createQuestionSchema,
+  reorderQuestionsSchema,
+  updateQuestionSchema,
+  parseBody,
+} from '../../http/schemas.js';
+
+type QuestionDefinitionInput = {
+  id?: string;
+  type: QuestionType;
+  options?: string[] | null;
+  validationPattern?: string | null;
+  conditionalVisibility?: {
+    field: string;
+    operator: 'equals' | 'not_equals' | 'contains';
+    value: string;
+  } | null;
+  sortOrder?: number;
+  isConsentField?: boolean;
+  consentText?: string | null;
+  consentVersion?: string | null;
+};
+
+function requireEventAccess(principal: Principal, event: Record<string, unknown>, eventId: string) {
+  ClerkAuthService.requireResourceTenant(principal, event, 'Event', eventId);
+  ClerkAuthService.requireOrganizationScope(principal, event.organization_id as string | undefined);
+  ClerkAuthService.requireBrandScope(principal, event.brand_id as string | undefined);
+  ClerkAuthService.requireEventScope(principal, eventId);
+}
+
+function assertQuestionDefinition(input: QuestionDefinitionInput) {
+  const errors = validateQuestionDefinition(input);
+  if (errors.length > 0) {
+    throw new ValidationError(errors[0], { errors });
+  }
+}
 
 export const questionRoutes: FastifyPluginAsync = async (app) => {
   const db = app.context.db;
@@ -21,13 +56,6 @@ export const questionRoutes: FastifyPluginAsync = async (app) => {
     const event = await eventRepo.findById(eventId);
     if (!event) throw new NotFoundError('Event', eventId);
     return event;
-  };
-
-  const requireEventAccess = (principal: Principal, event: Record<string, unknown>, eventId: string) => {
-    ClerkAuthService.requireResourceTenant(principal, event, 'Event', eventId);
-    ClerkAuthService.requireOrganizationScope(principal, event.organization_id as string | undefined);
-    ClerkAuthService.requireBrandScope(principal, event.brand_id as string | undefined);
-    ClerkAuthService.requireEventScope(principal, eventId);
   };
 
   const loadScopedTicketType = async (eventId: string, ticketTypeId?: string | null) => {
@@ -54,23 +82,6 @@ export const questionRoutes: FastifyPluginAsync = async (app) => {
       .executeTakeFirst();
     if (!source || source.event_id !== eventId) {
       throw new ValidationError('Conditional visibility source question must belong to this event');
-    }
-  };
-
-  const assertQuestionDefinition = (input: {
-    id?: string;
-    type: QuestionType;
-    options?: string[] | null;
-    validationPattern?: string | null;
-    conditionalVisibility?: { field: string; operator: 'equals' | 'not_equals' | 'contains'; value: string } | null;
-    sortOrder?: number;
-    isConsentField?: boolean;
-    consentText?: string | null;
-    consentVersion?: string | null;
-  }) => {
-    const errors = validateQuestionDefinition(input);
-    if (errors.length > 0) {
-      throw new ValidationError(errors[0], { errors });
     }
   };
 
@@ -115,7 +126,9 @@ export const questionRoutes: FastifyPluginAsync = async (app) => {
         options: options ? JSON.stringify(options) : null,
         placeholder: body.placeholder ?? null,
         validation_pattern: body.validationPattern ?? null,
-        conditional_visibility: body.conditionalVisibility ? JSON.stringify(body.conditionalVisibility) : null,
+        conditional_visibility: body.conditionalVisibility
+          ? JSON.stringify(body.conditionalVisibility)
+          : null,
         sort_order: body.sortOrder ?? 0,
         is_consent_field: isConsentField,
         consent_text: body.consentText ?? null,
@@ -146,7 +159,10 @@ export const questionRoutes: FastifyPluginAsync = async (app) => {
       .limit(pagination.limit + 1);
     if (pagination.cursor) query = query.where('id', '>', pagination.cursor);
     const rows = await query.execute();
-    return pageEnvelope(rows.filter((row) => !isHiddenQuestion(row)).map((row) => serializeQuestion(row)), pagination.limit);
+    return pageEnvelope(
+      rows.filter((row) => !isHiddenQuestion(row)).map((row) => serializeQuestion(row)),
+      pagination.limit,
+    );
   });
 
   app.post('/events/:eventId/questions/reorder', async (request) => {
@@ -170,11 +186,15 @@ export const questionRoutes: FastifyPluginAsync = async (app) => {
       .where('id', 'in', questionIds)
       .execute();
     if (existing.length !== questionIds.length) {
-      throw new NotFoundError('Question', questionIds.find((id) => !existing.some((question) => question.id === id)) ?? eventId);
+      throw new NotFoundError(
+        'Question',
+        questionIds.find((id) => !existing.some((question) => question.id === id)) ?? eventId,
+      );
     }
 
     await db.transaction().execute(async (trx) => {
       for (const question of body.questions) {
+        // eslint-disable-next-line no-await-in-loop -- reorder updates run sequentially on one transaction connection for deterministic rollback behavior.
         await trx
           .updateTable('questions')
           .set({ sort_order: question.sortOrder, updated_at: new Date() })
@@ -193,7 +213,10 @@ export const questionRoutes: FastifyPluginAsync = async (app) => {
       .orderBy('id', 'asc')
       .execute();
 
-    return pageEnvelope(rows.filter((row) => !isHiddenQuestion(row)).map((row) => serializeQuestion(row)), rows.length);
+    return pageEnvelope(
+      rows.filter((row) => !isHiddenQuestion(row)).map((row) => serializeQuestion(row)),
+      rows.length,
+    );
   });
 
   app.patch('/questions/:questionId', async (request) => {
@@ -202,7 +225,11 @@ export const questionRoutes: FastifyPluginAsync = async (app) => {
     const { questionId } = request.params as { questionId: string };
     const body = parseBody(updateQuestionSchema, request.body);
 
-    const question = await db.selectFrom('questions').selectAll().where('id', '=', questionId).executeTakeFirst();
+    const question = await db
+      .selectFrom('questions')
+      .selectAll()
+      .where('id', '=', questionId)
+      .executeTakeFirst();
     if (!question) throw new NotFoundError('Question', questionId);
     const event = await loadEvent(question.event_id);
     requireEventAccess(principal, event, question.event_id);
@@ -215,15 +242,23 @@ export const questionRoutes: FastifyPluginAsync = async (app) => {
           ? undefined
           : normalizeOptions(body.options)
         : existingOptions;
-    if (body.type !== undefined && !isOptionBearingQuestionType(finalType) && body.options === undefined) {
+    if (
+      body.type !== undefined &&
+      !isOptionBearingQuestionType(finalType) &&
+      body.options === undefined
+    ) {
       finalOptions = undefined;
     }
 
     const finalConditionalVisibility =
       body.conditionalVisibility !== undefined
         ? body.conditionalVisibility
-        : parseJsonValue<typeof body.conditionalVisibility | undefined>(question.conditional_visibility, undefined);
-    const finalTicketTypeId = body.ticketTypeId !== undefined ? body.ticketTypeId : question.ticket_type_id;
+        : parseJsonValue<typeof body.conditionalVisibility | undefined>(
+            question.conditional_visibility,
+            undefined,
+          );
+    const finalTicketTypeId =
+      body.ticketTypeId !== undefined ? body.ticketTypeId : question.ticket_type_id;
     const finalIsConsentField = body.isConsentField ?? question.is_consent_field;
     const finalConsentText =
       body.consentText !== undefined ? body.consentText : question.consent_text;
@@ -248,7 +283,8 @@ export const questionRoutes: FastifyPluginAsync = async (app) => {
       id: questionId,
       type: finalType,
       options: finalOptions,
-      validationPattern: body.validationPattern !== undefined ? body.validationPattern : question.validation_pattern,
+      validationPattern:
+        body.validationPattern !== undefined ? body.validationPattern : question.validation_pattern,
       conditionalVisibility: finalConditionalVisibility,
       sortOrder: body.sortOrder ?? question.sort_order,
       isConsentField: finalIsConsentField,
@@ -263,13 +299,19 @@ export const questionRoutes: FastifyPluginAsync = async (app) => {
     if (body.description !== undefined) updateData.description = body.description;
     if (body.required !== undefined) updateData.required = body.required;
     if (body.appliesTo !== undefined) updateData.applies_to = body.appliesTo;
-    if (body.options !== undefined || (body.type !== undefined && !isOptionBearingQuestionType(finalType))) {
+    if (
+      body.options !== undefined ||
+      (body.type !== undefined && !isOptionBearingQuestionType(finalType))
+    ) {
       updateData.options = finalOptions ? JSON.stringify(finalOptions) : null;
     }
     if (body.placeholder !== undefined) updateData.placeholder = body.placeholder;
-    if (body.validationPattern !== undefined) updateData.validation_pattern = body.validationPattern;
+    if (body.validationPattern !== undefined)
+      updateData.validation_pattern = body.validationPattern;
     if (body.conditionalVisibility !== undefined) {
-      updateData.conditional_visibility = body.conditionalVisibility ? JSON.stringify(body.conditionalVisibility) : null;
+      updateData.conditional_visibility = body.conditionalVisibility
+        ? JSON.stringify(body.conditionalVisibility)
+        : null;
     }
     if (body.sortOrder !== undefined) updateData.sort_order = body.sortOrder;
     if (body.isConsentField !== undefined) {
@@ -296,16 +338,26 @@ export const questionRoutes: FastifyPluginAsync = async (app) => {
     const principal = request.principal!;
     ClerkAuthService.requirePermission(principal, 'events.write');
     const { questionId } = request.params as { questionId: string };
-    const question = await db.selectFrom('questions').selectAll().where('id', '=', questionId).executeTakeFirst();
+    const question = await db
+      .selectFrom('questions')
+      .selectAll()
+      .where('id', '=', questionId)
+      .executeTakeFirst();
     if (!question) throw new NotFoundError('Question', questionId);
     const event = await loadEvent(question.event_id);
     requireEventAccess(principal, event, question.event_id);
 
-    const hasHistoricalAnswers = await questionHasHistoricalAnswers(db, question.event_id, questionId);
+    const hasHistoricalAnswers = await questionHasHistoricalAnswers(
+      db,
+      question.event_id,
+      questionId,
+    );
     if (hasHistoricalAnswers) {
       const softDeleteData = softDeleteQuestionData(question);
       if (!softDeleteData) {
-        throw new ConflictError('Question has historical answers and cannot be hard deleted until question hiding is supported by the schema');
+        throw new ConflictError(
+          'Question has historical answers and cannot be hard deleted until question hiding is supported by the schema',
+        );
       }
       await db.updateTable('questions').set(softDeleteData).where('id', '=', questionId).execute();
       return reply.status(204).send();
@@ -326,11 +378,13 @@ function isOptionBearingQuestionType(type: QuestionType): boolean {
 }
 
 function isHiddenQuestion(row: Record<string, unknown>): boolean {
-  return row.status === 'hidden' ||
+  return (
+    row.status === 'hidden' ||
     row.status === 'deleted' ||
     row.is_hidden === true ||
     row.hidden_at != null ||
-    row.deleted_at != null;
+    row.deleted_at != null
+  );
 }
 
 function softDeleteQuestionData(row: Record<string, unknown>): Record<string, unknown> | null {
@@ -352,7 +406,13 @@ async function questionHasHistoricalAnswers(
     .selectAll()
     .where('event_id', '=', eventId)
     .execute();
-  if (attendees.some((attendee) => attendee.event_id === eventId && containsQuestionAnswer(attendee.custom_answers, questionId))) {
+  if (
+    attendees.some(
+      (attendee) =>
+        attendee.event_id === eventId &&
+        containsQuestionAnswer(attendee.custom_answers, questionId),
+    )
+  ) {
     return true;
   }
 
@@ -361,7 +421,9 @@ async function questionHasHistoricalAnswers(
     .selectAll()
     .where('event_id', '=', eventId)
     .execute();
-  return checkoutSessions.some((session) => session.event_id === eventId && containsQuestionAnswer(session.cart, questionId));
+  return checkoutSessions.some(
+    (session) => session.event_id === eventId && containsQuestionAnswer(session.cart, questionId),
+  );
 }
 
 function containsQuestionAnswer(value: unknown, questionId: string): boolean {

@@ -1,17 +1,17 @@
-import EventPageClient from './event-page-client'
+import EventPageClient from './event-page-client';
 
 type PageProps = {
-  params: Promise<{ eventId: string }>
-  searchParams: Promise<Record<string, string | string[] | undefined>>
-}
+  params: Promise<{ eventId: string }>;
+  searchParams: Promise<Record<string, string | string[] | undefined>>;
+};
 
 function firstParam(value: string | string[] | undefined): string {
-  return Array.isArray(value) ? (value[0] ?? '') : value ?? ''
+  return Array.isArray(value) ? (value[0] ?? '') : (value ?? '');
 }
 
 export default async function EventPage({ params, searchParams }: PageProps) {
-  const { eventId } = await params
-  const query = await searchParams
+  const { eventId } = await params;
+  const query = await searchParams;
 
   return (
     <EventPageClient
@@ -25,5 +25,5 @@ export default async function EventPage({ params, searchParams }: PageProps) {
       trackingId={firstParam(query.tracking)}
       affiliateCode={firstParam(query.affiliateCode) || firstParam(query.affiliate)}
     />
-  )
+  );
 }

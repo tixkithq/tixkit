@@ -7,9 +7,9 @@ import {
   CheckInListRepository,
   ScanLogRepository,
   AttendeeRepository,
-} from '@gatekit/db';
-import { NotFoundError, ValidationError } from '@gatekit/domain';
-import type { ScanRequest, SyncScanInput } from '@gatekit/domain';
+} from '@tixkit/db';
+import { NotFoundError, ValidationError } from '@tixkit/domain';
+import type { ScanRequest, SyncScanInput } from '@tixkit/domain';
 import { withIdempotency, hashRequest } from '../../services/idempotency.js';
 import {
   pageEnvelope,
@@ -20,7 +20,22 @@ import {
   serializeCheckInList,
   serializeTicket,
 } from '../../http/contracts.js';
-import { scanSchema, syncScanSchema, updateAttendeeSchema, transferTicketSchema, parseBody } from '../../http/schemas.js';
+import {
+  scanSchema,
+  syncScanSchema,
+  updateAttendeeSchema,
+  transferTicketSchema,
+  parseBody,
+} from '../../http/schemas.js';
+
+type Principal = NonNullable<FastifyRequest['principal']>;
+
+function requireEventAccess(principal: Principal, event: Record<string, unknown>, eventId: string) {
+  ClerkAuthService.requireResourceTenant(principal, event, 'Event', eventId);
+  ClerkAuthService.requireOrganizationScope(principal, event.organization_id as string | undefined);
+  ClerkAuthService.requireBrandScope(principal, event.brand_id as string | undefined);
+  ClerkAuthService.requireEventScope(principal, eventId);
+}
 
 export const checkInRoutes: FastifyPluginAsync = async (app) => {
   const db = app.context.db;
@@ -32,23 +47,28 @@ export const checkInRoutes: FastifyPluginAsync = async (app) => {
     return event;
   };
 
-  const requireEventAccess = (principal: NonNullable<FastifyRequest['principal']>, event: Record<string, unknown>, eventId: string) => {
-    ClerkAuthService.requireResourceTenant(principal, event, 'Event', eventId);
-    ClerkAuthService.requireOrganizationScope(principal, event.organization_id as string | undefined);
-    ClerkAuthService.requireBrandScope(principal, event.brand_id as string | undefined);
-    ClerkAuthService.requireEventScope(principal, eventId);
-  };
-
   app.get('/events/:eventId/attendees', async (request) => {
     const principal = request.principal!;
     ClerkAuthService.requirePermission(principal, 'attendees.read');
     const { eventId } = request.params as { eventId: string };
+    const { eventOccurrenceId } = request.query as { eventOccurrenceId?: string };
     const pagination = parsePagination(request.query);
     const event = await loadEvent(eventId);
     requireEventAccess(principal, event, eventId);
-    const repo = new AttendeeRepository(db);
-    const rows = await repo.findByEvent(eventId, pagination.limit + 1, pagination.cursor, principal.tenantId);
-    return pageEnvelope(rows.map((row) => serializeAttendee(row)), pagination.limit);
+    let query = db
+      .selectFrom('attendees')
+      .selectAll()
+      .where('event_id', '=', eventId)
+      .where('tenant_id', '=', principal.tenantId)
+      .orderBy('id', 'asc')
+      .limit(pagination.limit + 1);
+    if (eventOccurrenceId) query = query.where('event_occurrence_id', '=', eventOccurrenceId);
+    if (pagination.cursor) query = query.where('id', '>', pagination.cursor);
+    const rows = await query.execute();
+    return pageEnvelope(
+      rows.map((row) => serializeAttendee(row)),
+      pagination.limit,
+    );
   });
 
   app.get('/attendees', async (request) => {
@@ -68,9 +88,21 @@ export const checkInRoutes: FastifyPluginAsync = async (app) => {
       }
       query = query.where('events.organization_id', 'in', principal.organizationIds);
     }
+    if (principal.brandIds && principal.brandIds.length > 0) {
+      query = query.where('events.brand_id', 'in', principal.brandIds);
+    }
+    if (principal.eventIds && principal.eventIds.length > 0) {
+      query = query.where('attendees.event_id', 'in', principal.eventIds);
+    }
+    const { eventOccurrenceId } = request.query as { eventOccurrenceId?: string };
+    if (eventOccurrenceId)
+      query = query.where('attendees.event_occurrence_id', '=', eventOccurrenceId);
     if (pagination.cursor) query = query.where('id', '>', pagination.cursor);
     const rows = await query.execute();
-    return pageEnvelope(rows.map((row) => serializeAttendee(row)), pagination.limit);
+    return pageEnvelope(
+      rows.map((row) => serializeAttendee(row)),
+      pagination.limit,
+    );
   });
 
   app.patch('/attendees/:attendeeId', async (request) => {
@@ -84,10 +116,14 @@ export const checkInRoutes: FastifyPluginAsync = async (app) => {
     const event = await loadEvent(existing.event_id);
     ClerkAuthService.requireResourceTenant(principal, existing, 'Attendee', attendeeId);
     requireEventAccess(principal, event, existing.event_id);
-    const updateData = pickAllowedFields(body, ['firstName', 'lastName', 'email', 'phone', 'status'], {
-      firstName: 'first_name',
-      lastName: 'last_name',
-    });
+    const updateData = pickAllowedFields(
+      body,
+      ['firstName', 'lastName', 'email', 'phone', 'status'],
+      {
+        firstName: 'first_name',
+        lastName: 'last_name',
+      },
+    );
     return serializeAttendee(await repo.update(attendeeId, updateData));
   });
 
@@ -131,9 +167,13 @@ export const checkInRoutes: FastifyPluginAsync = async (app) => {
       },
     );
 
-    return reply.status(result.status).send(
-      result.status === 200 ? serializeTicket(result.body as Record<string, unknown>) : result.body,
-    );
+    return reply
+      .status(result.status)
+      .send(
+        result.status === 200
+          ? serializeTicket(result.body as Record<string, unknown>)
+          : result.body,
+      );
   });
 
   app.get('/events/:eventId/check-in-lists', async (request) => {
@@ -145,7 +185,10 @@ export const checkInRoutes: FastifyPluginAsync = async (app) => {
     requireEventAccess(principal, event, eventId);
     const repo = new CheckInListRepository(db);
     const rows = await repo.findByEvent(eventId, pagination.limit + 1, pagination.cursor);
-    return pageEnvelope(rows.map((row) => serializeCheckInList(row)), pagination.limit);
+    return pageEnvelope(
+      rows.map((row) => serializeCheckInList(row)),
+      pagination.limit,
+    );
   });
 
   app.get('/events/:eventId/check-in-lists/:checkInListId/manifest', async (request) => {
@@ -167,6 +210,7 @@ export const checkInRoutes: FastifyPluginAsync = async (app) => {
       .select([
         'tickets.id as ticket_id',
         'tickets.ticket_type_id as ticket_type_id',
+        'tickets.event_occurrence_id as event_occurrence_id',
         'tickets.qr_hash as qr_hash',
         'tickets.status as status',
         'attendees.first_name as first_name',
@@ -178,6 +222,9 @@ export const checkInRoutes: FastifyPluginAsync = async (app) => {
       .orderBy('tickets.id', 'asc');
     if (allowedTicketTypeIds.length > 0) {
       ticketQuery = ticketQuery.where('tickets.ticket_type_id', 'in', allowedTicketTypeIds);
+    }
+    if (list.event_occurrence_id) {
+      ticketQuery = ticketQuery.where('tickets.event_occurrence_id', '=', list.event_occurrence_id);
     }
 
     const rows = await ticketQuery.execute();
@@ -241,7 +288,8 @@ export const checkInRoutes: FastifyPluginAsync = async (app) => {
         body: {
           outcome: result.outcome,
           ticketId: result.ticketId,
-          message: result.outcome === 'accepted' ? 'Check-in successful' : `Check-in ${result.outcome}`,
+          message:
+            result.outcome === 'accepted' ? 'Check-in successful' : `Check-in ${result.outcome}`,
         },
       };
     };
@@ -288,6 +336,7 @@ export const checkInRoutes: FastifyPluginAsync = async (app) => {
     // offline scan wins the check-in; later scans for the same ticket become
     // duplicates. The idempotency guard below prevents replayed batches from
     // writing duplicate scan logs.
+    // eslint-disable-next-line unicorn/no-array-sort -- sorting a fresh array preserves deterministic offline conflict ordering.
     const sortedScans = [...body.scans].sort(
       (a, b) => new Date(a.scannedAt).getTime() - new Date(b.scannedAt).getTime(),
     );
@@ -323,6 +372,7 @@ export const checkInRoutes: FastifyPluginAsync = async (app) => {
         let invalid = 0;
 
         for (const scan of sortedScans) {
+          // eslint-disable-next-line no-await-in-loop -- sorted offline scans must be processed sequentially so the earliest scan wins.
           const scanResult = await processScan({
             ticketRepo,
             list,
@@ -336,6 +386,7 @@ export const checkInRoutes: FastifyPluginAsync = async (app) => {
           else if (scanResult.outcome === 'duplicate') duplicates++;
           else invalid++;
 
+          // eslint-disable-next-line no-await-in-loop -- each scan log records the outcome produced by the immediately preceding scan.
           await scanRepo.create({
             tenantId: principal.tenantId,
             checkInListId: body.checkInListId,
@@ -388,7 +439,10 @@ export async function processScan(input: {
 }> {
   const allowedTicketTypeIds = new Set(parseJsonValue<string[]>(input.list.ticket_type_ids, []));
 
-  if (input.requireVerifiedTicketId && (!input.verification?.valid || !input.verification.ticketId)) {
+  if (
+    input.requireVerifiedTicketId &&
+    (!input.verification?.valid || !input.verification.ticketId)
+  ) {
     return { outcome: 'invalid', qrHash: input.qrHash, metadata: { reason: 'signature_invalid' } };
   }
 
@@ -400,7 +454,12 @@ export async function processScan(input: {
     return { outcome: 'not_found', qrHash: input.qrHash };
   }
   if (ticket.qr_hash !== input.qrHash) {
-    return { outcome: 'invalid', ticketId: ticket.id, qrHash: input.qrHash, metadata: { reason: 'hash_mismatch' } };
+    return {
+      outcome: 'invalid',
+      ticketId: ticket.id,
+      qrHash: input.qrHash,
+      metadata: { reason: 'hash_mismatch' },
+    };
   }
   if (ticket.event_id !== input.list.event_id) {
     return { outcome: 'wrong_event', ticketId: ticket.id, qrHash: input.qrHash };
@@ -421,6 +480,7 @@ export async function processScan(input: {
 type OfflineManifestTicketRow = {
   ticket_id: string;
   ticket_type_id: string;
+  event_occurrence_id?: string | null;
   qr_hash: string;
   status: string;
   first_name: string | null;
@@ -438,6 +498,7 @@ type SignedOfflineManifest = {
   tickets: {
     ticketId: string;
     ticketTypeId: string;
+    eventOccurrenceId?: string;
     attendeeName: string;
     qrHash: string;
     status: string;
@@ -445,7 +506,11 @@ type SignedOfflineManifest = {
 };
 
 function getManifestSigningKey(): string {
-  return process.env.OFFLINE_MANIFEST_SIGNING_KEY ?? process.env.QR_SIGNING_SECRET ?? 'gatekit-manifest-secret-dev-only';
+  const configuredKey = process.env.OFFLINE_MANIFEST_SIGNING_KEY ?? process.env.QR_SIGNING_SECRET;
+  if (!configuredKey && process.env.NODE_ENV === 'production') {
+    throw new Error('OFFLINE_MANIFEST_SIGNING_KEY or QR_SIGNING_SECRET is required in production');
+  }
+  return configuredKey ?? 'tixkit-manifest-secret-dev-only';
 }
 
 function getManifestKeyId(): string {
@@ -471,6 +536,7 @@ export function buildOfflineManifest(input: {
     return {
       ticketId: row.ticket_id,
       ticketTypeId: row.ticket_type_id,
+      eventOccurrenceId: row.event_occurrence_id ?? undefined,
       attendeeName,
       qrHash: row.qr_hash,
       status: row.status,

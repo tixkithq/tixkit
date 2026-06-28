@@ -1,8 +1,7 @@
-
 import type { FastifyPluginAsync } from 'fastify';
 import { ClerkAuthService } from '../../auth/clerk.js';
-import { OrderRepository, AuditLogRepository } from '@gatekit/db';
-import { NotFoundError, ValidationError } from '@gatekit/domain';
+import { OrderRepository, AuditLogRepository } from '@tixkit/db';
+import { NotFoundError, ValidationError } from '@tixkit/domain';
 import { writeAuditLog } from '../../auth/audit.js';
 import { withIdempotency, hashRequest } from '../../services/idempotency.js';
 import {
@@ -12,6 +11,8 @@ import {
   serializeOrderLineItem,
   serializeAttendee,
   serializeRefund,
+  serializeInvoice,
+  serializeTaxSnapshot,
   serializeTimelineEvent,
   parseJsonValue,
 } from '../../http/contracts.js';
@@ -34,7 +35,10 @@ export const orderRoutes: FastifyPluginAsync = async (app) => {
       .orderBy('id', 'asc')
       .limit(pagination.limit + 1);
 
-    const { organizationId, eventId } = request.query as { organizationId?: string; eventId?: string };
+    const { organizationId, eventId } = request.query as {
+      organizationId?: string;
+      eventId?: string;
+    };
     if (organizationId) {
       ClerkAuthService.requireOrganizationScope(principal, organizationId);
       query = query.where('organization_id', '=', organizationId);
@@ -53,7 +57,10 @@ export const orderRoutes: FastifyPluginAsync = async (app) => {
       query = query.where('organization_id', 'in', principal.organizationIds);
     }
     const rows = await query.execute();
-    return pageEnvelope(rows.map((row) => serializeOrder(row)), pagination.limit);
+    return pageEnvelope(
+      rows.map((row) => serializeOrder(row)),
+      pagination.limit,
+    );
   });
 
   app.get('/orders/:orderId', async (request) => {
@@ -68,29 +75,43 @@ export const orderRoutes: FastifyPluginAsync = async (app) => {
     ClerkAuthService.requireBrandScope(principal, order.brand_id);
     ClerkAuthService.requireEventScope(principal, order.event_id);
 
-    const [lineItems, timeline, attendees, refunds, checkoutSession] = await Promise.all([
-      repo.getLineItems(orderId),
-      repo.getTimeline(orderId),
-      db.selectFrom('attendees').selectAll().where('order_id', '=', orderId).execute(),
-      db.selectFrom('refunds').selectAll().where('order_id', '=', orderId).orderBy('created_at', 'asc').execute(),
-      order.checkout_session_id
-        ? db.selectFrom('checkout_sessions').selectAll().where('id', '=', order.checkout_session_id).executeTakeFirst()
-        : Promise.resolve(undefined),
-    ]);
+    const [lineItems, timeline, attendees, refunds, checkoutSession, invoice, taxSnapshots] =
+      await Promise.all([
+        repo.getLineItems(orderId),
+        repo.getTimeline(orderId),
+        db.selectFrom('attendees').selectAll().where('order_id', '=', orderId).execute(),
+        db
+          .selectFrom('refunds')
+          .selectAll()
+          .where('order_id', '=', orderId)
+          .orderBy('created_at', 'asc')
+          .execute(),
+        order.checkout_session_id
+          ? db
+              .selectFrom('checkout_sessions')
+              .selectAll()
+              .where('id', '=', order.checkout_session_id)
+              .executeTakeFirst()
+          : Promise.resolve(undefined),
+        db.selectFrom('invoices').selectAll().where('order_id', '=', orderId).executeTakeFirst(),
+        db.selectFrom('order_tax_snapshots').selectAll().where('order_id', '=', orderId).execute(),
+      ]);
     const cart = parseJsonValue(checkoutSession?.cart, {}) as Record<string, unknown>;
-    const buyerFields = cart.buyerFields && typeof cart.buyerFields === 'object'
-      ? (cart.buyerFields as Record<string, unknown>)
-      : {};
-    const attendeeFields = cart.attendeeFields && typeof cart.attendeeFields === 'object'
-      ? (cart.attendeeFields as Record<string, unknown>)
-      : {};
+    const buyerFields =
+      cart.buyerFields && typeof cart.buyerFields === 'object'
+        ? (cart.buyerFields as Record<string, unknown>)
+        : {};
+    const attendeeFields =
+      cart.attendeeFields && typeof cart.attendeeFields === 'object'
+        ? (cart.attendeeFields as Record<string, unknown>)
+        : {};
     const consentSnapshots = Object.fromEntries(
       Object.entries(buyerFields).filter(([, answer]) => {
         return Boolean(
           answer &&
-            typeof answer === 'object' &&
-            'consentText' in answer &&
-            'consentVersion' in answer,
+          typeof answer === 'object' &&
+          'consentText' in answer &&
+          'consentVersion' in answer,
         );
       }),
     );
@@ -99,6 +120,8 @@ export const orderRoutes: FastifyPluginAsync = async (app) => {
       ...serializeOrder(order),
       lineItems: lineItems.map((row) => serializeOrderLineItem(row)),
       attendees: attendees.map((row) => serializeAttendee(row)),
+      invoice: invoice ? serializeInvoice(invoice) : undefined,
+      taxSnapshots: taxSnapshots.map((row) => serializeTaxSnapshot(row)),
       checkoutAnswers: {
         buyerFields,
         attendeeFields,
@@ -111,6 +134,60 @@ export const orderRoutes: FastifyPluginAsync = async (app) => {
         tickets: attendees.length > 0 ? 'issued' : 'not_issued',
       },
     };
+  });
+
+  app.get('/orders/:orderId/invoice', async (request) => {
+    const principal = request.principal!;
+    ClerkAuthService.requirePermission(principal, 'orders.read');
+    const { orderId } = request.params as { orderId: string };
+    const order = await new OrderRepository(db).findById(orderId);
+    if (!order) throw new NotFoundError('Order', orderId);
+    ClerkAuthService.requireResourceTenant(principal, order, 'Order', orderId);
+    ClerkAuthService.requireOrganizationScope(principal, order.organization_id);
+    ClerkAuthService.requireBrandScope(principal, order.brand_id);
+    ClerkAuthService.requireEventScope(principal, order.event_id);
+
+    const [invoice, lineItems, taxSnapshots] = await Promise.all([
+      db.selectFrom('invoices').selectAll().where('order_id', '=', orderId).executeTakeFirst(),
+      db.selectFrom('order_line_items').selectAll().where('order_id', '=', orderId).execute(),
+      db.selectFrom('order_tax_snapshots').selectAll().where('order_id', '=', orderId).execute(),
+    ]);
+    if (!invoice) throw new NotFoundError('Invoice', orderId);
+    return {
+      invoice: serializeInvoice(invoice),
+      order: serializeOrder(order),
+      lineItems: lineItems.map((row) => serializeOrderLineItem(row)),
+      taxSnapshots: taxSnapshots.map((row) => serializeTaxSnapshot(row)),
+    };
+  });
+
+  app.get('/orders/:orderId/invoice/download', async (request, reply) => {
+    const principal = request.principal!;
+    ClerkAuthService.requirePermission(principal, 'orders.read');
+    const { orderId } = request.params as { orderId: string };
+    const order = await new OrderRepository(db).findById(orderId);
+    if (!order) throw new NotFoundError('Order', orderId);
+    ClerkAuthService.requireResourceTenant(principal, order, 'Order', orderId);
+    ClerkAuthService.requireOrganizationScope(principal, order.organization_id);
+    ClerkAuthService.requireBrandScope(principal, order.brand_id);
+    ClerkAuthService.requireEventScope(principal, order.event_id);
+    const [invoice, lineItems, taxSnapshots] = await Promise.all([
+      db.selectFrom('invoices').selectAll().where('order_id', '=', orderId).executeTakeFirst(),
+      db.selectFrom('order_line_items').selectAll().where('order_id', '=', orderId).execute(),
+      db.selectFrom('order_tax_snapshots').selectAll().where('order_id', '=', orderId).execute(),
+    ]);
+    if (!invoice) throw new NotFoundError('Invoice', orderId);
+    const body = {
+      invoice: serializeInvoice(invoice),
+      order: serializeOrder(order),
+      lineItems: lineItems.map((row) => serializeOrderLineItem(row)),
+      taxSnapshots: taxSnapshots.map((row) => serializeTaxSnapshot(row)),
+    };
+    const filename = `${invoice.invoice_number}.json`;
+    return reply
+      .header('content-type', 'application/json')
+      .header('content-disposition', `attachment; filename="${filename}"`)
+      .send(JSON.stringify(body));
   });
 
   app.post('/orders/:orderId/cancel', async (request) => {
@@ -130,9 +207,17 @@ export const orderRoutes: FastifyPluginAsync = async (app) => {
     }
 
     const updated = await repo.update(orderId, { status: 'cancelled', cancelled_at: new Date() });
-    await repo.addTimelineEvent(orderId, 'order.cancelled', 'Order cancelled', undefined, principal.id);
+    await repo.addTimelineEvent(
+      orderId,
+      'order.cancelled',
+      'Order cancelled',
+      undefined,
+      principal.id,
+    );
     await writeAuditLog(new AuditLogRepository(db), request, principal, {
       action: 'order.cancelled',
+      organizationId: order.organization_id,
+      brandId: order.brand_id,
       resourceType: 'Order',
       resourceId: orderId,
     });
@@ -165,7 +250,8 @@ export const orderRoutes: FastifyPluginAsync = async (app) => {
       throw new ValidationError('Order is not in a refundable state');
     }
 
-    const refundAmount = body.amountCents ?? Number(order.total_cents) - Number(order.refunded_cents);
+    const refundAmount =
+      body.amountCents ?? Number(order.total_cents) - Number(order.refunded_cents);
     const alreadyRefunded = Number(order.refunded_cents);
 
     if (refundAmount <= 0) {
@@ -206,6 +292,8 @@ export const orderRoutes: FastifyPluginAsync = async (app) => {
 
         await writeAuditLog(new AuditLogRepository(db), request, principal, {
           action: 'order.refund.requested',
+          organizationId: order.organization_id,
+          brandId: order.brand_id,
           resourceType: 'Order',
           resourceId: orderId,
           diffSummary: { amountCents: refundAmount, reason: body.reason },

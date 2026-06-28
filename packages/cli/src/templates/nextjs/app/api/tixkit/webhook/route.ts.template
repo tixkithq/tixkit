@@ -1,0 +1,10 @@
+import { createTixkitWebhookRouteHandler } from '@tixkit/next/server';
+
+export const POST = createTixkitWebhookRouteHandler({
+  secret: process.env.TIXKIT_WEBHOOK_SECRET ?? '',
+  onEvent: (event, { request }) => {
+    // eslint-disable-next-line no-console
+    console.log('Tixkit webhook received', event, 'from', request.url);
+    return { received: true };
+  },
+});

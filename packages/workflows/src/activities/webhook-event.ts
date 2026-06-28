@@ -1,5 +1,5 @@
-import { createDb } from '@gatekit/db';
-import { WebhookEventRepository, WebhookEndpointRepository } from '@gatekit/db';
+import { createDb } from '@tixkit/db';
+import { WebhookEventRepository, WebhookEndpointRepository } from '@tixkit/db';
 import type { WorkflowActivityResult } from '../shared/types.js';
 import { okResult, errResult } from '../shared/types.js';
 
@@ -11,7 +11,7 @@ export async function emitWebhookEventActivity(input: {
 }): Promise<
   WorkflowActivityResult<{
     eventId: string;
-    deliveries: { endpointId: string; eventId: string; secret: string; url: string }[];
+    deliveries: { endpointId: string; eventId: string; url: string }[];
   }>
 > {
   const db = createDb();
@@ -30,7 +30,6 @@ export async function emitWebhookEventActivity(input: {
     const deliveries = endpoints.map((endpoint) => ({
       endpointId: endpoint.id,
       eventId: event.id,
-      secret: endpoint.secret as string,
       url: endpoint.url as string,
     }));
 

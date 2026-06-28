@@ -45,7 +45,7 @@ const dbState = vi.hoisted(() => ({
   orders: [
     {
       id: 'ord_1',
-      order_number: 'GK-1001',
+      order_number: 'TK-1001',
       status: 'paid',
       total_cents: 10000,
       refunded_cents: 0,
@@ -67,7 +67,7 @@ const dbState = vi.hoisted(() => ({
   destroy: vi.fn(),
 }));
 
-vi.mock('@gatekit/db', () => {
+vi.mock('@tixkit/db', () => {
   class EmailJobRepository {
     async create(input: Record<string, unknown>) {
       dbState.createdJobs.push(input);
@@ -77,11 +77,21 @@ vi.mock('@gatekit/db', () => {
 
   function createQuery(table: string) {
     const query = {
-      innerJoin() { return query; },
-      select() { return query; },
-      selectAll() { return query; },
-      where() { return query; },
-      orderBy() { return query; },
+      innerJoin() {
+        return query;
+      },
+      select() {
+        return query;
+      },
+      selectAll() {
+        return query;
+      },
+      where() {
+        return query;
+      },
+      orderBy() {
+        return query;
+      },
       async executeTakeFirst() {
         if (table === 'export_jobs') return dbState.exportJob;
         if (table === 'user_profiles') return dbState.user;
@@ -100,7 +110,16 @@ vi.mock('@gatekit/db', () => {
         if (table === 'attendees') return dbState.attendees;
         if (table === 'orders') return dbState.orders;
         if (table === 'questions') return dbState.questions;
-        if (table === 'scan_logs') return [{ id: 'slog_1', outcome: 'accepted', qr_hash: 'hash_1', tenant_id: 'tnt_1', created_at: new Date('2026-06-01') }];
+        if (table === 'scan_logs')
+          return [
+            {
+              id: 'slog_1',
+              outcome: 'accepted',
+              qr_hash: 'hash_1',
+              tenant_id: 'tnt_1',
+              created_at: new Date('2026-06-01'),
+            },
+          ];
         if (table === 'tickets') return [{ attendee_id: 'att_1' }];
         return [];
       },
@@ -148,7 +167,12 @@ vi.mock('@gatekit/db', () => {
   };
 });
 
-const { generateExportActivity, uploadFileActivity, markExportFailedActivity, notifyExportCompleteActivity } = await import('../activities/export.js');
+const {
+  generateExportActivity,
+  uploadFileActivity,
+  markExportFailedActivity,
+  notifyExportCompleteActivity,
+} = await import('../activities/export.js');
 
 describe('generateExportActivity', () => {
   beforeEach(() => {
@@ -186,7 +210,7 @@ describe('generateExportActivity', () => {
     dbState.orders = [
       {
         id: 'ord_1',
-        order_number: 'GK-1001',
+        order_number: 'TK-1001',
         status: 'paid',
         total_cents: 10000,
         refunded_cents: 0,
@@ -354,6 +378,24 @@ describe('notifyExportCompleteActivity', () => {
       status: 'completed',
     });
     expect(String(dbState.exportEvents[0].payload)).toContain('/v1/exports/exp_1/download');
+  });
+
+  it('rejects unsafe completed export file URLs before persistence', async () => {
+    const result = await notifyExportCompleteActivity({
+      exportId: 'exp_1',
+      fileUrl: 'javascript:alert(1)',
+      requestedBy: 'usr_1',
+      tenantId: 'tnt_1',
+    });
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.errorCode).toBe('INVALID_EXPORT_FILE_URL');
+      expect(result.retryable).toBe(false);
+    }
+    expect(dbState.updateCalls).toHaveLength(0);
+    expect(dbState.exportEvents).toHaveLength(0);
+    expect(dbState.createdJobs).toHaveLength(0);
   });
 
   it('queues an admin notification email with the file URL', async () => {
@@ -550,6 +592,25 @@ describe('T30 export content validation - attendee CSV', () => {
     }
   });
 
+  it('includes rows through the end of a date-only to filter', async () => {
+    dbState.exportJob = {
+      ...dbState.exportJob,
+      filters: JSON.stringify({ from: '2026-06-01', to: '2026-06-01' }),
+    };
+
+    const result = await generateExportActivity({
+      exportId: 'exp_1',
+      type: 'attendees',
+      format: 'csv',
+    });
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.value.rowCount).toBe(2);
+    const rows = parseCsv(result.value.data);
+    expect(rows.map((row) => row[1])).toEqual(['email', 'ada@test.com', 'grace@test.com']);
+  });
+
   it('includes attendee field values in the correct columns', async () => {
     const result = await generateExportActivity({
       exportId: 'exp_1',
@@ -613,7 +674,7 @@ describe('T30 export content validation - sales report CSV', () => {
     dbState.orders = [
       {
         id: 'ord_1',
-        order_number: 'GK-1001',
+        order_number: 'TK-1001',
         status: 'paid',
         total_cents: 10000,
         refunded_cents: 0,
@@ -627,7 +688,7 @@ describe('T30 export content validation - sales report CSV', () => {
       },
       {
         id: 'ord_2',
-        order_number: 'GK-1002',
+        order_number: 'TK-1002',
         status: 'partially_refunded',
         total_cents: 5000,
         refunded_cents: 1500,

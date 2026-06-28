@@ -13,6 +13,7 @@ import { webhookDeliveryWorkflow } from './webhook-delivery.js';
 const {
   createPaymentIntentActivity,
   finalizeOrderActivity,
+  compensateOrphanPaymentActivity,
   sendConfirmationEmailActivity,
   issueTicketsActivity,
   releaseHoldActivity,
@@ -26,13 +27,31 @@ const {
     currency: string;
     description?: string;
     feeCents?: number;
-  }): Promise<WorkflowActivityResult<{ providerIntentId: string; clientSecret?: string }>>;
+  }): Promise<WorkflowActivityResult<{ providerIntentId: string; clientSecret?: string; provider?: string }>>;
   finalizeOrderActivity(input: {
     checkoutSessionId: string;
     tenantId: string;
     paymentIntentId?: string;
     affiliateCode?: string;
   }): Promise<WorkflowActivityResult<{ orderId: string }>>;
+  compensateOrphanPaymentActivity(input: {
+    checkoutSessionId: string;
+    tenantId: string;
+    provider?: string;
+    providerIntentId?: string;
+    amountCents?: number;
+    currency?: string;
+    reason: string;
+    source?: string;
+    metadata?: Record<string, unknown>;
+  }): Promise<
+    WorkflowActivityResult<{
+      status: 'succeeded' | 'failed' | 'manual_review' | 'already_ordered';
+      action: 'cancel' | 'refund' | 'local_noop';
+      compensationId?: string;
+      providerCompensationId?: string;
+    }>
+  >;
   sendConfirmationEmailActivity(input: {
     orderId: string;
     toEmail: string;
@@ -45,7 +64,11 @@ const {
     tenantId: string;
     brandId: string;
   }): Promise<WorkflowActivityResult<{ issued: number; jobId?: string }>>;
-  releaseHoldActivity(input: { holdId?: string; checkoutSessionId?: string }): Promise<WorkflowActivityResult<{ released: boolean }>>;
+  releaseHoldActivity(input: {
+    holdId?: string;
+    checkoutSessionId?: string;
+    checkoutSessionStatus?: 'cancelled' | 'expired';
+  }): Promise<WorkflowActivityResult<{ released: boolean }>>;
   emitWebhookEventActivity(input: {
     tenantId: string;
     organizationId: string;
@@ -54,7 +77,7 @@ const {
   }): Promise<
     WorkflowActivityResult<{
       eventId: string;
-      deliveries: { endpointId: string; eventId: string; secret: string; url: string }[];
+      deliveries: { endpointId: string; eventId: string; url: string }[];
     }>
   >;
 }>({
@@ -88,7 +111,7 @@ export type CheckoutSessionWorkflowInput = {
   organizationId: string;
   eventId: string;
   brandId: string;
-  holdId: string;
+  holdId?: string;
   currency: string;
   amountCents: number;
   feeCents: number;
@@ -102,6 +125,7 @@ export async function checkoutSessionWorkflow(
 ): Promise<{ orderId?: string; status: string }> {
   let state: CheckoutState = { status: 'hold_placed', holdId: input.holdId };
   let paymentIntentId: string | undefined;
+  let paymentProvider: string | undefined;
   let paymentSucceeded = false;
   let paymentError: string | undefined;
   let cancelled = false;
@@ -124,13 +148,46 @@ export async function checkoutSessionWorkflow(
                 endpointId: delivery.endpointId,
                 eventId: delivery.eventId,
                 payload: { orderId, eventId: input.eventId, checkoutSessionId: input.checkoutSessionId },
-                secret: delivery.secret,
                 maxAttempts: 5,
               },
             ],
           }),
         ),
       );
+    }
+  }
+
+  async function compensateOrphanPayment(compensationInput: {
+    provider?: string;
+    providerIntentId?: string;
+    reason: string;
+    source: string;
+    metadata?: Record<string, unknown>;
+  }) {
+    const compensationResult = await compensateOrphanPaymentActivity({
+      checkoutSessionId: input.checkoutSessionId,
+      tenantId: input.tenantId,
+      provider: compensationInput.provider,
+      providerIntentId: compensationInput.providerIntentId,
+      amountCents: input.amountCents,
+      currency: input.currency,
+      reason: compensationInput.reason,
+      source: compensationInput.source,
+      metadata: compensationInput.metadata,
+    });
+    if (!compensationResult.ok) {
+      throw new Error(`Orphan payment compensation failed (${compensationResult.errorCode}): ${compensationResult.message}`);
+    }
+  }
+
+  async function releaseCheckoutHold(releaseInput: {
+    holdId?: string;
+    checkoutSessionId?: string;
+    checkoutSessionStatus?: 'cancelled' | 'expired';
+  }) {
+    const releaseResult = await releaseHoldActivity(releaseInput);
+    if (!releaseResult.ok) {
+      throw new Error(`Checkout hold release failed (${releaseResult.errorCode}): ${releaseResult.message}`);
     }
   }
 
@@ -150,7 +207,7 @@ export async function checkoutSessionWorkflow(
   setHandler(getCheckoutStateQuery, () => state);
 
   if (cancelled) {
-    await releaseHoldActivity({ checkoutSessionId: input.checkoutSessionId });
+    await releaseCheckoutHold({ checkoutSessionId: input.checkoutSessionId });
     state = { status: 'cancelled', holdId: input.holdId };
     return { status: 'cancelled' };
   }
@@ -163,7 +220,7 @@ export async function checkoutSessionWorkflow(
     });
 
     if (!finalizeResult.ok) {
-      await releaseHoldActivity({ checkoutSessionId: input.checkoutSessionId });
+      await releaseCheckoutHold({ checkoutSessionId: input.checkoutSessionId });
       state = { status: 'failed', holdId: input.holdId, error: finalizeResult.message };
       return { status: 'failed' };
     }
@@ -199,14 +256,18 @@ export async function checkoutSessionWorkflow(
   });
 
   if (!paymentResult.ok) {
-    await releaseHoldActivity({ checkoutSessionId: input.checkoutSessionId });
+    await releaseCheckoutHold({ checkoutSessionId: input.checkoutSessionId, checkoutSessionStatus: 'expired' });
     state = { status: 'failed', holdId: input.holdId, error: paymentResult.message };
     return { status: 'failed' };
   }
 
   paymentIntentId = paymentResult.value.providerIntentId;
+  paymentProvider = paymentResult.value.provider;
   const clientSecret = paymentResult.value.clientSecret;
   state = { status: 'payment_pending', holdId: input.holdId, paymentIntentId, clientSecret };
+  if (paymentIntentId.startsWith('pi_capture_')) {
+    paymentSucceeded = true;
+  }
 
   const paymentTimeout = '10 minutes';
   const gotPayment = await condition(
@@ -215,19 +276,40 @@ export async function checkoutSessionWorkflow(
   );
 
   if (cancelled) {
-    await releaseHoldActivity({ checkoutSessionId: input.checkoutSessionId });
+    await compensateOrphanPayment({
+      provider: paymentProvider,
+      providerIntentId: paymentIntentId,
+      reason: 'Checkout was cancelled before payment completion',
+      source: 'checkout_cancelled',
+      metadata: { eventId: input.eventId, brandId: input.brandId },
+    });
+    await releaseCheckoutHold({ checkoutSessionId: input.checkoutSessionId, checkoutSessionStatus: 'cancelled' });
     state = { status: 'cancelled', holdId: input.holdId, paymentIntentId, clientSecret };
     return { status: 'cancelled' };
   }
 
   if (paymentError) {
-    await releaseHoldActivity({ checkoutSessionId: input.checkoutSessionId });
+    await compensateOrphanPayment({
+      provider: paymentProvider,
+      providerIntentId: paymentIntentId,
+      reason: paymentError,
+      source: 'checkout_payment_failed',
+      metadata: { eventId: input.eventId, brandId: input.brandId },
+    });
+    await releaseCheckoutHold({ checkoutSessionId: input.checkoutSessionId, checkoutSessionStatus: 'expired' });
     state = { status: 'failed', holdId: input.holdId, paymentIntentId, clientSecret, error: paymentError };
     return { status: 'failed' };
   }
 
   if (!gotPayment) {
-    await releaseHoldActivity({ checkoutSessionId: input.checkoutSessionId });
+    await compensateOrphanPayment({
+      provider: paymentProvider,
+      providerIntentId: paymentIntentId,
+      reason: paymentSucceeded ? 'Payment succeeded after checkout timeout' : 'Payment timed out before checkout completion',
+      source: paymentSucceeded ? 'checkout_timeout_race' : 'checkout_payment_timeout',
+      metadata: { eventId: input.eventId, brandId: input.brandId },
+    });
+    await releaseCheckoutHold({ checkoutSessionId: input.checkoutSessionId, checkoutSessionStatus: 'expired' });
     state = { status: 'failed', holdId: input.holdId, paymentIntentId, clientSecret, error: 'Payment timeout' };
     return { status: 'failed' };
   }
@@ -240,6 +322,14 @@ export async function checkoutSessionWorkflow(
   });
 
   if (!finalizeResult.ok) {
+    await compensateOrphanPayment({
+      provider: paymentProvider,
+      providerIntentId: paymentIntentId,
+      reason: finalizeResult.message,
+      source: 'checkout_finalize_failed',
+      metadata: { eventId: input.eventId, brandId: input.brandId, errorCode: finalizeResult.errorCode },
+    });
+    await releaseCheckoutHold({ checkoutSessionId: input.checkoutSessionId, checkoutSessionStatus: 'expired' });
     state = { status: 'failed', holdId: input.holdId, paymentIntentId, clientSecret, error: finalizeResult.message };
     return { status: 'failed' };
   }

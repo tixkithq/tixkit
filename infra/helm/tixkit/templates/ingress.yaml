@@ -1,0 +1,54 @@
+{{- if .Values.ingress.enabled }}
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: {{ include "tixkit.fullname" . }}
+  labels:
+    {{- include "tixkit.labels" . | nindent 4 }}
+  annotations:
+    kubernetes.io/ingress.class: {{ .Values.ingress.className | quote }}
+    {{- if .Values.ingress.blockPublicMetrics }}
+    nginx.ingress.kubernetes.io/server-snippet: |
+      location = /metrics {
+        return 404;
+      }
+    {{- end }}
+spec:
+  tls:
+    - secretName: {{ .Values.ingress.tlsSecretName }}
+      hosts:
+        - {{ .Values.ingress.apiHost }}
+        - {{ .Values.ingress.checkoutHost }}
+        - {{ .Values.ingress.adminHost }}
+  rules:
+    - host: {{ .Values.ingress.apiHost }}
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: {{ include "tixkit.fullname" . }}-api
+                port:
+                  number: 80
+    - host: {{ .Values.ingress.checkoutHost }}
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: {{ include "tixkit.fullname" . }}-checkout
+                port:
+                  number: 80
+    - host: {{ .Values.ingress.adminHost }}
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: {{ include "tixkit.fullname" . }}-admin
+                port:
+                  number: 80
+{{- end }}

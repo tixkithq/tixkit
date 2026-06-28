@@ -8,6 +8,7 @@ export class TicketRepository extends BaseRepository {
     attendeeId: string;
     eventId: string;
     ticketTypeId: string;
+    eventOccurrenceId?: string;
     code: string;
     qrPayload: string;
     qrHash: string;
@@ -23,6 +24,7 @@ export class TicketRepository extends BaseRepository {
         attendee_id: input.attendeeId,
         event_id: input.eventId,
         ticket_type_id: input.ticketTypeId,
+        event_occurrence_id: input.eventOccurrenceId ?? null,
         status: 'valid',
         code: input.code,
         qr_payload: input.qrPayload,

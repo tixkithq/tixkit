@@ -3,8 +3,8 @@ import { createHash } from 'node:crypto';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { verifyToken } from '@clerk/backend';
 import type { FastifyRequest } from 'fastify';
-import type { Principal, Permission } from '@gatekit/domain';
-import { ForbiddenError, UnauthorizedError } from '@gatekit/domain';
+import type { Principal, Permission } from '@tixkit/domain';
+import { ForbiddenError, UnauthorizedError } from '@tixkit/domain';
 import {
   ClerkAuthService,
   createAuthMiddleware,
@@ -40,6 +40,10 @@ function hash(value: string): string {
   return createHash('sha256').update(value).digest('hex');
 }
 
+function columnKey(column: string): string {
+  return column.split('.').at(-1) ?? column;
+}
+
 function createAuthDb(initialTables: Tables) {
   const tables = initialTables;
   const updates: Array<{ table: string; values: Row; ids: string[] }> = [];
@@ -48,8 +52,6 @@ function createAuthDb(initialTables: Tables) {
     if (!tables[table]) tables[table] = [];
     return tables[table];
   };
-
-  const columnKey = (column: string): string => column.split('.').at(-1) ?? column;
 
   const matches = (
     row: Row,
@@ -164,7 +166,7 @@ describe('ClerkAuthService signed-in user auth', () => {
     }
   });
 
-  it('maps a signed-in Clerk user to a GateKit principal with permissions and org membership', async () => {
+  it('maps a signed-in Clerk user to a Tixkit principal with permissions and org membership', async () => {
     vi.mocked(verifyToken).mockResolvedValue({ sub: 'clerk_user_1' } as never);
     const { db } = createAuthDb({
       user_profiles: [
@@ -189,9 +191,7 @@ describe('ClerkAuthService signed-in user auth', () => {
           permission: 'orders.read',
         },
       ],
-      organization_members: [
-        { user_id: 'usr_1', organization_id: 'org_1' },
-      ],
+      organization_members: [{ user_id: 'usr_1', organization_id: 'org_1' }],
     });
 
     const service = new ClerkAuthService('sk_test_auth', db as never);
@@ -212,7 +212,7 @@ describe('ClerkAuthService signed-in user auth', () => {
     });
   });
 
-  it('fails closed when Clerk login succeeds but the GateKit user profile has not synced', async () => {
+  it('fails closed when Clerk login succeeds but the Tixkit user profile has not synced', async () => {
     vi.mocked(verifyToken).mockResolvedValue({ sub: 'clerk_missing' } as never);
     const { db } = createAuthDb({
       user_profiles: [],
@@ -304,9 +304,7 @@ describe('ClerkAuthService signed-in user auth', () => {
           permission: 'settings.write',
         },
       ],
-      organization_members: [
-        { user_id: 'usr_2', organization_id: 'org_2' },
-      ],
+      organization_members: [{ user_id: 'usr_2', organization_id: 'org_2' }],
     });
 
     const service = new ClerkAuthService('sk_test_auth', db as never);
@@ -348,9 +346,7 @@ describe('ClerkAuthService signed-in user auth', () => {
           permission: 'reports.read',
         },
       ],
-      organization_members: [
-        { user_id: 'usr_2', organization_id: 'org_2' },
-      ],
+      organization_members: [{ user_id: 'usr_2', organization_id: 'org_2' }],
     });
 
     const service = new ClerkAuthService('sk_test_auth', db as never);
@@ -397,7 +393,7 @@ describe('ClerkAuthService signed-in user auth', () => {
     );
   });
 
-  it('rejects multi-tenant users when the active Clerk org does not map to a GateKit tenant', async () => {
+  it('rejects multi-tenant users when the active Clerk org does not map to a Tixkit tenant', async () => {
     vi.mocked(verifyToken).mockResolvedValue({
       sub: 'clerk_user_1',
       org_id: 'clerk_org_unknown',
@@ -424,10 +420,34 @@ describe('ClerkAuthService signed-in user auth', () => {
 
     await expect(
       service.authenticateRequest(request({ authorization: 'Bearer clerk_session_token' })),
-    ).rejects.toThrow('Active organization does not map to a GateKit tenant');
+    ).rejects.toThrow('Active organization does not map to a Tixkit tenant');
   });
 
-  it('rejects suspended GateKit users after successful Clerk verification', async () => {
+  it('rejects single-tenant users when the active Clerk org does not map to a Tixkit tenant', async () => {
+    vi.mocked(verifyToken).mockResolvedValue({
+      sub: 'clerk_user_1',
+      org_id: 'clerk_org_unknown',
+    } as never);
+    const { db } = createAuthDb({
+      user_profiles: [
+        {
+          id: 'usr_1',
+          tenant_id: 'tnt_1',
+          clerk_user_id: 'clerk_user_1',
+          status: 'active',
+        },
+      ],
+      organizations: [],
+    });
+
+    const service = new ClerkAuthService('sk_test_auth', db as never);
+
+    await expect(
+      service.authenticateRequest(request({ authorization: 'Bearer clerk_session_token' })),
+    ).rejects.toThrow('Active organization does not map to a Tixkit tenant');
+  });
+
+  it('rejects suspended Tixkit users after successful Clerk verification', async () => {
     vi.mocked(verifyToken).mockResolvedValue({ sub: 'clerk_user_1' } as never);
     const { db } = createAuthDb({
       user_profiles: [
@@ -460,7 +480,7 @@ describe('ClerkAuthService signed-in user auth', () => {
 
 describe('ClerkAuthService API key auth', () => {
   it('authenticates valid API keys, scopes them, and records last use', async () => {
-    const rawKey = 'gk_valid_key';
+    const rawKey = 'tk_valid_key';
     const { db, tables } = createAuthDb({
       api_keys: [
         {
@@ -478,9 +498,7 @@ describe('ClerkAuthService API key auth', () => {
     });
 
     const service = new ClerkAuthService('sk_test_auth', db as never);
-    const result = await service.authenticateApiKey(
-      request({ authorization: `Bearer ${rawKey}` }),
-    );
+    const result = await service.authenticateApiKey(request({ authorization: `Bearer ${rawKey}` }));
 
     expect(result.principal).toMatchObject({
       type: 'api_key',
@@ -494,19 +512,56 @@ describe('ClerkAuthService API key auth', () => {
     expect(tables.api_keys[0].last_used_at).toBeInstanceOf(Date);
   });
 
+  it('rejects a previously valid API key immediately after revocation', async () => {
+    const rawKey = 'tk_revoke_after_use';
+    const { db, tables } = createAuthDb({
+      api_keys: [
+        {
+          id: 'key_1',
+          tenant_id: 'tnt_1',
+          organization_id: 'org_1',
+          hashed_key: hash(rawKey),
+          scopes: JSON.stringify(['events.read']),
+          brand_ids: null,
+          event_ids: null,
+          expires_at: null,
+          revoked_at: null,
+        },
+      ],
+    });
+
+    const service = new ClerkAuthService('sk_test_auth', db as never);
+
+    await expect(
+      service.authenticateApiKey(request({ authorization: `Bearer ${rawKey}` })),
+    ).resolves.toMatchObject({
+      principal: {
+        type: 'api_key',
+        id: 'key_1',
+        scopes: ['events.read'],
+      },
+    });
+
+    tables.api_keys[0].revoked_at = new Date();
+
+    await expect(
+      service.authenticateApiKey(request({ authorization: `Bearer ${rawKey}` })),
+    ).rejects.toThrow('Invalid or revoked API key');
+  });
+
   it('rejects missing, revoked, and expired API keys', async () => {
     const { db } = createAuthDb({
       api_keys: [
         {
           id: 'key_revoked',
-          hashed_key: hash('gk_revoked'),
+          hashed_key: hash('tk_revoked'),
           revoked_at: new Date(),
           expires_at: null,
           scopes: '[]',
         },
         {
           id: 'key_expired',
-          hashed_key: hash('gk_expired'),
+          hashed_key: hash('tk_expired'),
           revoked_at: null,
           expires_at: new Date(Date.now() - 60_000),
           scopes: '[]',
@@ -519,26 +574,26 @@ describe('ClerkAuthService API key auth', () => {
       service.authenticateApiKey(request({ authorization: 'Bearer bad_key' })),
     ).rejects.toThrow('Missing or invalid API key');
     await expect(
-      service.authenticateApiKey(request({ authorization: 'Bearer gk_missing' })),
+      service.authenticateApiKey(request({ authorization: 'Bearer tk_missing' })),
     ).rejects.toThrow('Invalid or revoked API key');
     await expect(
-      service.authenticateApiKey(request({ authorization: 'Bearer gk_revoked' })),
+      service.authenticateApiKey(request({ authorization: 'Bearer tk_revoked' })),
     ).rejects.toThrow('Invalid or revoked API key');
     await expect(
-      service.authenticateApiKey(request({ authorization: 'Bearer gk_expired' })),
+      service.authenticateApiKey(request({ authorization: 'Bearer tk_expired' })),
     ).rejects.toThrow('API key has expired');
   });
 });
 
 describe('ClerkAuthService scanner device auth', () => {
   it('authenticates active scanner devices and records last seen', async () => {
-    const { db, tables } = createAuthDb({
+    const { db, tables, updates } = createAuthDb({
       scanner_devices: [
         {
-          id: 'sd_1',
+          id: 'sd_internal',
           tenant_id: 'tnt_1',
           organization_id: 'org_1',
-          device_id: 'device_1',
+          device_id: 'sd_public',
           hashed_secret: hash('scanner_secret'),
           status: 'active',
           event_ids: JSON.stringify(['evt_1']),
@@ -549,20 +604,27 @@ describe('ClerkAuthService scanner device auth', () => {
     const service = new ClerkAuthService('sk_test_auth', db as never);
     const result = await service.authenticateScannerDevice(
       request({
-        'x-device-id': 'device_1',
+        'x-device-id': 'sd_public',
         'x-device-secret': 'scanner_secret',
       }),
     );
 
     expect(result.principal).toMatchObject({
       type: 'mobile_device',
-      id: 'sd_1',
+      id: 'sd_public',
       tenantId: 'tnt_1',
       organizationIds: ['org_1'],
       scopes: ['checkins.read', 'checkins.write'],
       eventIds: ['evt_1'],
     });
     expect(tables.scanner_devices[0].last_seen_at).toBeInstanceOf(Date);
+    expect(updates).toEqual([
+      {
+        table: 'scanner_devices',
+        values: { last_seen_at: tables.scanner_devices[0].last_seen_at },
+        ids: ['sd_internal'],
+      },
+    ]);
   });
 
   it('rejects missing, invalid, and revoked scanner devices', async () => {
@@ -615,6 +677,37 @@ describe('authenticated /v1/me route dispatch', () => {
 
     expect(response.statusCode).toBe(401);
     expect(response.json().error.code).toBe('UNAUTHORIZED');
+    await app.close();
+  });
+
+  it('rejects cookie-only browser requests so admin mutations are not cookie-CSRF authenticated', async () => {
+    const authService = {
+      isLocalDevMode: vi.fn(() => false),
+      authenticateLocalDev: vi.fn(),
+      authenticateRequest: vi.fn(),
+      authenticateApiKey: vi.fn(),
+      authenticateScannerDevice: vi.fn(),
+    } as unknown as ClerkAuthService;
+    const app = await setupAuthRouteApp(authService);
+
+    const response = await app.inject({
+      method: 'GET',
+      url: '/v1/me',
+      headers: {
+        cookie: '__session=clerk_session_cookie; tixkit_csrf=csrf_cookie',
+        origin: 'https://attacker.example.test',
+      },
+    });
+
+    expect(response.statusCode).toBe(401);
+    expect(response.json().error).toMatchObject({
+      code: 'UNAUTHORIZED',
+      message: 'Authentication required',
+    });
+    expect(authService.authenticateRequest).not.toHaveBeenCalled();
+    expect(authService.authenticateApiKey).not.toHaveBeenCalled();
+    expect(authService.authenticateScannerDevice).not.toHaveBeenCalled();
+    expect(authService.authenticateLocalDev).not.toHaveBeenCalled();
     await app.close();
   });
 
@@ -673,7 +766,7 @@ describe('authenticated /v1/me route dispatch', () => {
     const apiKey = await app.inject({
       method: 'GET',
       url: '/v1/me',
-      headers: { authorization: 'Bearer gk_raw_key' },
+      headers: { authorization: 'Bearer tk_raw_key' },
     });
     const scanner = await app.inject({
       method: 'GET',

@@ -96,6 +96,63 @@ export class EventRepository extends BaseRepository {
   }
 }
 
+export class EventOccurrenceRepository extends BaseRepository {
+  async create(input: {
+    eventId: string;
+    title: string;
+    startsAt: Date;
+    endsAt: Date;
+    timezone: string;
+    venue?: Record<string, unknown> | null;
+    capacity?: number | null;
+    sortOrder?: number;
+    status?: string;
+  }) {
+    const id = `occ_${ulid()}`;
+    const now = new Date();
+    return this.insertReturning(
+      'event_occurrences',
+      {
+        id,
+        event_id: input.eventId,
+        title: input.title,
+        starts_at: input.startsAt,
+        ends_at: input.endsAt,
+        timezone: input.timezone,
+        venue: input.venue ? JSON.stringify(input.venue) : null,
+        capacity: input.capacity ?? null,
+        sort_order: input.sortOrder ?? 0,
+        status: input.status ?? 'active',
+        created_at: now,
+        updated_at: now,
+      },
+      id,
+    );
+  }
+
+  async findById(id: string) {
+    return this.db
+      .selectFrom('event_occurrences')
+      .selectAll()
+      .where('id', '=', id)
+      .executeTakeFirst();
+  }
+
+  async findByEvent(eventId: string) {
+    return this.db
+      .selectFrom('event_occurrences')
+      .selectAll()
+      .where('event_id', '=', eventId)
+      .orderBy('starts_at', 'asc')
+      .orderBy('sort_order', 'asc')
+      .execute();
+  }
+
+  async update(id: string, input: Record<string, unknown>) {
+    return this.updateReturning('event_occurrences', id, { ...input, updated_at: new Date() });
+  }
+}
+
 export class TicketTypeRepository extends BaseRepository {
   async create(input: {
     eventId: string;
@@ -114,6 +171,7 @@ export class TicketTypeRepository extends BaseRepository {
     maxPerOrder?: number;
     requiresAccessCode?: boolean;
     accessCodeHint?: string;
+    eventOccurrenceId?: string | null;
   }) {
     const id = `tt_${ulid()}`;
     const now = new Date();
@@ -138,6 +196,7 @@ export class TicketTypeRepository extends BaseRepository {
         sort_order: 0,
         requires_access_code: input.requiresAccessCode ?? false,
         access_code_hint: input.accessCodeHint ?? null,
+        event_occurrence_id: input.eventOccurrenceId ?? null,
         created_at: now,
         updated_at: now,
       },
@@ -180,12 +239,7 @@ export class TicketTypeRepository extends BaseRepository {
 
     query =
       requested.length > 0
-        ? query.where((eb) =>
-          eb.or([
-            eb('visibility', '=', 'public'),
-            eb('id', 'in', requested),
-          ]),
-        )
+        ? query.where((eb) => eb.or([eb('visibility', '=', 'public'), eb('id', 'in', requested)]))
         : query.where('visibility', '=', 'public');
 
     return query.orderBy('sort_order', 'asc').orderBy('id', 'asc').execute();
@@ -302,19 +356,12 @@ export class AccessRuleRepository extends BaseRepository {
   }
 
   async delete(id: string) {
-    return this.db
-      .deleteFrom('access_rules')
-      .where('id', '=', id)
-      .executeTakeFirst();
+    return this.db.deleteFrom('access_rules').where('id', '=', id).executeTakeFirst();
   }
 }
 
 export class ProductCategoryRepository extends BaseRepository {
-  async create(input: {
-    eventId: string;
-    name: string;
-    sortOrder?: number;
-  }) {
+  async create(input: { eventId: string; name: string; sortOrder?: number }) {
     const id = `pcat_${ulid()}`;
     const now = new Date();
     return this.insertReturning(
@@ -390,11 +437,7 @@ export class ProductRepository extends BaseRepository {
   }
 
   async findById(id: string) {
-    return this.db
-      .selectFrom('products')
-      .selectAll()
-      .where('id', '=', id)
-      .executeTakeFirst();
+    return this.db.selectFrom('products').selectAll().where('id', '=', id).executeTakeFirst();
   }
 
   async findByEvent(eventId: string, limit?: number, cursor?: string) {

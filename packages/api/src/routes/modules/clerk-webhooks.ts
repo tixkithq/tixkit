@@ -1,7 +1,7 @@
 import type { FastifyPluginAsync } from 'fastify';
 import { createHmac, timingSafeEqual } from 'node:crypto';
-import { WebhookSignatureError } from '@gatekit/domain';
-import { PaymentEventRepository } from '@gatekit/db';
+import { WebhookSignatureError } from '@tixkit/domain';
+import { PaymentEventRepository } from '@tixkit/db';
 
 const SVIX_TOLERANCE_SECONDS = 5 * 60;
 
@@ -44,8 +44,8 @@ export const clerkWebhookRoutes: FastifyPluginAsync = async (app) => {
     }
 
     if (!verifySvixSignature(rawBody, msgId, timestamp, signature, webhookSecret)) {
-        throw new WebhookSignatureError('Invalid signature');
-      }
+      throw new WebhookSignatureError('Invalid signature');
+    }
 
     const event = request.body as { type: string; data: ClerkWebhookData };
 
@@ -59,18 +59,27 @@ export const clerkWebhookRoutes: FastifyPluginAsync = async (app) => {
       return reply.status(200).send({ received: true, duplicate: true });
     }
     if (!storedEvent) {
-      storedEvent = await eventRepo.create({
-        tenantId: 'system',
-        provider: 'clerk',
-        providerEventId: msgId,
-        eventType: event.type,
-        rawPayload: event as unknown as Record<string, unknown>,
-        idempotencyKey: `${msgId}-${timestamp}`,
-      });
+      try {
+        storedEvent = await eventRepo.create({
+          tenantId: 'system',
+          provider: 'clerk',
+          providerEventId: msgId,
+          eventType: event.type,
+          rawPayload: event as unknown as Record<string, unknown>,
+          idempotencyKey: `${msgId}-${timestamp}`,
+        });
+      } catch (err) {
+        storedEvent = await eventRepo.findByProviderEventId('clerk', msgId);
+        if (!storedEvent) throw err;
+        if (storedEvent.processed_at) {
+          return reply.status(200).send({ received: true, duplicate: true });
+        }
+      }
     }
 
     const isOrgEvent = event.type.startsWith('organization');
     await temporalClient.startClerkIdentitySync({
+      providerEventId: msgId,
       eventType: event.type,
       clerkUserId: isOrgEvent ? undefined : event.data.id,
       email: event.data.email_addresses?.[0]?.email_address,
@@ -80,10 +89,6 @@ export const clerkWebhookRoutes: FastifyPluginAsync = async (app) => {
       clerkOrgId: isOrgEvent ? event.data.id : undefined,
       orgName: isOrgEvent ? event.data.name : undefined,
     });
-
-    // Mark only after durable sync has been accepted. Clerk can safely replay
-    // unprocessed rows if this final update fails.
-    await eventRepo.markProcessed(storedEvent.id);
 
     return reply.status(200).send({ received: true });
   });

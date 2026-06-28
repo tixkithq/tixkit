@@ -6,6 +6,20 @@ import { DiscountRedemptionsMigration } from './migrations/0002_discount_redempt
 import { EventCurrencyMigration } from './migrations/0003_event_currency.js';
 import { QuestionVisibilityMigration } from './migrations/0004_question_visibility.js';
 import { AffiliateTenantScopeMigration } from './migrations/0005_affiliate_tenant_scope.js';
+import { ProductOrderLinesMigration } from './migrations/0006_product_order_lines.js';
+import { WalletPassesMigration } from './migrations/0007_wallet_passes.js';
+import { UploadArtifactsMigration } from './migrations/0008_upload_artifacts.js';
+import { WidgetImpressionsMigration } from './migrations/0009_widget_impressions.js';
+import { WaitlistsMigration } from './migrations/0010_waitlists.js';
+import { EventOccurrencesMigration } from './migrations/0011_event_occurrences.js';
+import { TaxInvoicesMigration } from './migrations/0012_tax_invoices.js';
+import { OAuthGrantsMigration } from './migrations/0013_oauth_grants.js';
+import { MarketingIntegrationsMigration } from './migrations/0014_marketing_integrations.js';
+import { MarketingIntegrationsUniqueMigration } from './migrations/0015_marketing_integrations_unique.js';
+import { PaymentCompensationsMigration } from './migrations/0016_payment_compensations.js';
+import { PaymentAccountCapabilitiesMigration } from './migrations/0017_payment_account_capabilities.js';
+import { PrivacyRequestsMigration } from './migrations/0018_privacy_requests.js';
+import { DeliverabilityFeedbackMigration } from './migrations/0019_deliverability_feedback.js';
 
 const INITIAL_MIGRATION_NAME = '0001_initial';
 const MIGRATION_TABLE = 'kysely_migration';
@@ -81,12 +95,26 @@ const INITIAL_SCHEMA_TABLES = [
 const ALL_SCHEMA_TABLES = [
   ...INITIAL_SCHEMA_TABLES,
   'discount_redemptions',
+  'wallet_passes',
+  'upload_artifacts',
+  'widget_impressions',
+  'waitlist_entries',
+  'event_occurrences',
+  'order_tax_snapshots',
+  'invoices',
+  'oauth_authorization_codes',
+  'oauth_refresh_tokens',
+  'oauth_access_tokens',
+  'marketing_integrations',
+  'payment_compensations',
+  'privacy_requests',
+  'email_provider_events',
 ] as const;
 
 function buildMigrationFailureMessage(error: unknown): string {
   const detail = error instanceof Error ? `${error.name}: ${error.message}` : String(error);
   return [
-    'GateKit migration failed.',
+    'Tixkit migration failed.',
     '- Start local infrastructure with `bun run infra:up`.',
     '- Verify DATABASE_URL points at the local database from `.env.local`.',
     '- Retry with `bun run db:migrate`.',
@@ -95,7 +123,7 @@ function buildMigrationFailureMessage(error: unknown): string {
   ].join('\n');
 }
 
-class GateKitMigrationProvider implements MigrationProvider {
+class TixkitMigrationProvider implements MigrationProvider {
   async getMigrations(): Promise<Record<string, Migration>> {
     return {
       [INITIAL_MIGRATION_NAME]: InitialMigration,
@@ -103,6 +131,20 @@ class GateKitMigrationProvider implements MigrationProvider {
       '0003_event_currency': EventCurrencyMigration,
       '0004_question_visibility': QuestionVisibilityMigration,
       '0005_affiliate_tenant_scope': AffiliateTenantScopeMigration,
+      '0006_product_order_lines': ProductOrderLinesMigration,
+      '0007_wallet_passes': WalletPassesMigration,
+      '0008_upload_artifacts': UploadArtifactsMigration,
+      '0009_widget_impressions': WidgetImpressionsMigration,
+      '0010_waitlists': WaitlistsMigration,
+      '0011_event_occurrences': EventOccurrencesMigration,
+      '0012_tax_invoices': TaxInvoicesMigration,
+      '0013_oauth_grants': OAuthGrantsMigration,
+      '0014_marketing_integrations': MarketingIntegrationsMigration,
+      '0015_marketing_integrations_unique': MarketingIntegrationsUniqueMigration,
+      '0016_payment_compensations': PaymentCompensationsMigration,
+      '0017_payment_account_capabilities': PaymentAccountCapabilitiesMigration,
+      '0018_privacy_requests': PrivacyRequestsMigration,
+      '0019_deliverability_feedback': DeliverabilityFeedbackMigration,
     };
   }
 }
@@ -171,7 +213,7 @@ async function adoptExistingInitialSchema(db: Database): Promise<void> {
   if (missingTables.length > 0) {
     throw new Error(
       [
-        'Existing partial GateKit schema detected before migrations could run.',
+        'Existing partial Tixkit schema detected before migrations could run.',
         `Present tables: ${existingTables.join(', ')}`,
         `Missing tables: ${missingTables.join(', ')}`,
         'Use a clean local database or restore a complete schema before retrying `bun run db:migrate`.',
@@ -182,7 +224,7 @@ async function adoptExistingInitialSchema(db: Database): Promise<void> {
 
   if (!migrationTableExists) {
     console.warn(
-      `Detected a complete existing GateKit schema without ${MIGRATION_TABLE}; recording ${INITIAL_MIGRATION_NAME} as applied.`,
+      `Detected a complete existing Tixkit schema without ${MIGRATION_TABLE}; recording ${INITIAL_MIGRATION_NAME} as applied.`,
     );
   }
 
@@ -191,7 +233,7 @@ async function adoptExistingInitialSchema(db: Database): Promise<void> {
 }
 
 /**
- * Drop all GateKit tables and the migration tracking table so that the next
+ * Drop all Tixkit tables and the migration tracking table so that the next
  * `runMigrations` call starts from a clean schema. This is destructive and
  * intended for local development and CI setup only.
  *
@@ -205,9 +247,18 @@ export async function dropAllTables(db: Database): Promise<void> {
     // Disable FK checks so TRUNCATE/DROP ignores dependency ordering.
     await sql`SET FOREIGN_KEY_CHECKS = 0`.execute(db);
     for (const table of ALL_SCHEMA_TABLES) {
-      await db.schema.dropTable(table).ifExists().execute().catch(() => undefined);
+      // eslint-disable-next-line no-await-in-loop -- reset drops schema objects serially while FK checks are disabled for deterministic cleanup.
+      await db.schema
+        .dropTable(table)
+        .ifExists()
+        .execute()
+        .catch(() => undefined);
     }
-    await db.schema.dropTable(MIGRATION_TABLE).ifExists().execute().catch(() => undefined);
+    await db.schema
+      .dropTable(MIGRATION_TABLE)
+      .ifExists()
+      .execute()
+      .catch(() => undefined);
     await sql`SET FOREIGN_KEY_CHECKS = 1`.execute(db);
     return;
   }
@@ -215,13 +266,16 @@ export async function dropAllTables(db: Database): Promise<void> {
   // PostgreSQL: use CASCADE so a single DROP per table removes dependent
   // constraints without needing strict FK ordering.
   for (const table of ALL_SCHEMA_TABLES) {
+    // eslint-disable-next-line no-await-in-loop -- reset cleanup tolerates missing tables and keeps destructive drops ordered for diagnostics.
     await sql`DROP TABLE IF EXISTS ${sql.raw(table)} CASCADE`.execute(db).catch(() => undefined);
   }
-  await sql`DROP TABLE IF EXISTS ${sql.raw(MIGRATION_TABLE)} CASCADE`.execute(db).catch(() => undefined);
+  await sql`DROP TABLE IF EXISTS ${sql.raw(MIGRATION_TABLE)} CASCADE`
+    .execute(db)
+    .catch(() => undefined);
 }
 
 /**
- * Remove all rows from all GateKit tables without dropping the schema.
+ * Remove all rows from all Tixkit tables without dropping the schema.
  * Intended for test `beforeEach` cleanup so that multiple test suites can
  * share the same migrated database without one suite's `dropTable` destroying
  * another's concurrent queries.
@@ -236,6 +290,7 @@ export async function truncateAllData(db: Database): Promise<void> {
   if (driver === 'mysql') {
     await sql`SET FOREIGN_KEY_CHECKS = 0`.execute(db);
     for (const table of ALL_SCHEMA_TABLES) {
+      // eslint-disable-next-line no-await-in-loop -- test cleanup truncates each table serially while FK checks are disabled.
       await sql`TRUNCATE TABLE ${sql.raw(table)}`.execute(db).catch(() => undefined);
     }
     await sql`SET FOREIGN_KEY_CHECKS = 1`.execute(db);
@@ -261,7 +316,7 @@ export async function runMigrations(dbUrl?: string): Promise<void> {
 
     const migrator = new Migrator({
       db,
-      provider: new GateKitMigrationProvider(),
+      provider: new TixkitMigrationProvider(),
     });
 
     const { error, results } = await migrator.migrateToLatest();
@@ -315,7 +370,8 @@ async function main(): Promise<void> {
 }
 
 // Run when invoked as a script, not when imported.
-const isMainModule = process.argv[1]?.endsWith('migrate.ts') || process.argv[1]?.endsWith('migrate.js');
+const isMainModule =
+  process.argv[1]?.endsWith('migrate.ts') || process.argv[1]?.endsWith('migrate.js');
 if (isMainModule) {
   main();
 }

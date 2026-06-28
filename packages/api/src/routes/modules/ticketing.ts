@@ -2,13 +2,14 @@ import type { FastifyPluginAsync, FastifyRequest } from 'fastify';
 import { ClerkAuthService } from '../../auth/clerk.js';
 import {
   AccessRuleRepository,
+  EventOccurrenceRepository,
   EventRepository,
   TicketTypeRepository,
   InventoryPoolRepository,
   ProductCategoryRepository,
   ProductRepository,
-} from '@gatekit/db';
-import { NotFoundError, ValidationError } from '@gatekit/domain';
+} from '@tixkit/db';
+import { NotFoundError, ValidationError } from '@tixkit/domain';
 import {
   pageEnvelope,
   parsePagination,
@@ -32,6 +33,56 @@ import {
   parseBody,
 } from '../../http/schemas.js';
 
+type Principal = NonNullable<FastifyRequest['principal']>;
+type AccessRuleInput = {
+  type: 'code' | 'email_domain';
+  value: string;
+  maxUses?: number | null;
+  expiresAt?: string | null;
+};
+type NormalizedAccessRule = AccessRuleInput & { value: string };
+
+function requireEventAccess(principal: Principal, event: Record<string, unknown>, eventId: string) {
+  ClerkAuthService.requireResourceTenant(principal, event, 'Event', eventId);
+  ClerkAuthService.requireOrganizationScope(principal, event.organization_id as string | undefined);
+  ClerkAuthService.requireBrandScope(principal, event.brand_id as string | undefined);
+  ClerkAuthService.requireEventScope(principal, eventId);
+}
+
+function normalizeAccessRules(rules: AccessRuleInput[] = []): NormalizedAccessRule[] {
+  const normalized = rules.map((rule) => ({
+    ...rule,
+    value: rule.value.trim(),
+  }));
+  const keys = new Set<string>();
+  for (const rule of normalized) {
+    const key = `${rule.type}:${rule.value.toLowerCase()}`;
+    if (keys.has(key)) {
+      throw new ValidationError(`Duplicate access rule value: ${rule.value}`);
+    }
+    keys.add(key);
+  }
+  return normalized;
+}
+
+async function assertNoExistingAccessRuleDuplicates(
+  ticketTypeId: string,
+  rules: NormalizedAccessRule[],
+  accessRuleRepo: AccessRuleRepository,
+) {
+  if (rules.length === 0) return;
+  const existing = await accessRuleRepo.findByTicketType(ticketTypeId);
+  const existingKeys = new Set(
+    existing.map((rule) => `${rule.type}:${String(rule.value).trim().toLowerCase()}`),
+  );
+  const duplicate = rules.find((rule) =>
+    existingKeys.has(`${rule.type}:${rule.value.toLowerCase()}`),
+  );
+  if (duplicate) {
+    throw new ValidationError(`Access rule already exists: ${duplicate.value}`);
+  }
+}
+
 export const ticketingRoutes: FastifyPluginAsync = async (app) => {
   const db = app.context.db;
   const inventoryService = app.context.inventoryService;
@@ -43,49 +94,11 @@ export const ticketingRoutes: FastifyPluginAsync = async (app) => {
     return event;
   };
 
-  const requireEventAccess = (principal: NonNullable<FastifyRequest['principal']>, event: Record<string, unknown>, eventId: string) => {
-    ClerkAuthService.requireResourceTenant(principal, event, 'Event', eventId);
-    ClerkAuthService.requireOrganizationScope(principal, event.organization_id as string | undefined);
-    ClerkAuthService.requireBrandScope(principal, event.brand_id as string | undefined);
-    ClerkAuthService.requireEventScope(principal, eventId);
-  };
-
-  const normalizeAccessRules = (rules: Array<{
-    type: 'code' | 'email_domain';
-    value: string;
-    maxUses?: number | null;
-    expiresAt?: string | null;
-  }> = []) => {
-    const normalized = rules.map((rule) => ({
-      ...rule,
-      value: rule.value.trim(),
-    }));
-    const keys = new Set<string>();
-    for (const rule of normalized) {
-      const key = `${rule.type}:${rule.value.toLowerCase()}`;
-      if (keys.has(key)) {
-        throw new ValidationError(`Duplicate access rule value: ${rule.value}`);
-      }
-      keys.add(key);
-    }
-    return normalized;
-  };
-
-  const assertNoExistingAccessRuleDuplicates = async (
-    ticketTypeId: string,
-    rules: ReturnType<typeof normalizeAccessRules>,
-    accessRuleRepo: AccessRuleRepository,
-  ) => {
-    if (rules.length === 0) return;
-    const existing = await accessRuleRepo.findByTicketType(ticketTypeId);
-    const existingKeys = new Set(
-      existing.map((rule) => `${rule.type}:${String(rule.value).trim().toLowerCase()}`),
-    );
-    const duplicate = rules.find((rule) =>
-      existingKeys.has(`${rule.type}:${rule.value.toLowerCase()}`),
-    );
-    if (duplicate) {
-      throw new ValidationError(`Access rule already exists: ${duplicate.value}`);
+  const validateEventOccurrence = async (eventId: string, occurrenceId?: string | null) => {
+    if (!occurrenceId) return;
+    const occurrence = await new EventOccurrenceRepository(db).findById(occurrenceId);
+    if (!occurrence || occurrence.event_id !== eventId) {
+      throw new NotFoundError('EventOccurrence', occurrenceId);
     }
   };
 
@@ -103,6 +116,7 @@ export const ticketingRoutes: FastifyPluginAsync = async (app) => {
     if (!pool || pool.event_id !== eventId) {
       throw new NotFoundError('InventoryPool', body.inventoryPoolId);
     }
+    await validateEventOccurrence(eventId, body.eventOccurrenceId);
     const ticketType = await repo.create({
       eventId,
       name: body.name,
@@ -119,6 +133,7 @@ export const ticketingRoutes: FastifyPluginAsync = async (app) => {
       maxPerOrder: body.maxPerOrder,
       requiresAccessCode: body.requiresAccessCode,
       accessCodeHint: body.accessCodeHint,
+      eventOccurrenceId: body.eventOccurrenceId,
     });
 
     return reply.status(201).send(serializeTicketType(ticketType));
@@ -158,6 +173,7 @@ export const ticketingRoutes: FastifyPluginAsync = async (app) => {
       if (!inventoryPoolId) {
         throw new ValidationError('Provide inventoryPoolId or inventoryPool');
       }
+      await validateEventOccurrence(eventId, body.ticketType.eventOccurrenceId);
 
       const ticketType = await new TicketTypeRepository(txDb).create({
         eventId,
@@ -169,24 +185,30 @@ export const ticketingRoutes: FastifyPluginAsync = async (app) => {
         visibility: body.ticketType.visibility,
         description: body.ticketType.description,
         minimumPriceCents: body.ticketType.minimumPriceCents ?? undefined,
-        salesStartAt: body.ticketType.salesStartAt ? new Date(body.ticketType.salesStartAt) : undefined,
+        salesStartAt: body.ticketType.salesStartAt
+          ? new Date(body.ticketType.salesStartAt)
+          : undefined,
         salesEndAt: body.ticketType.salesEndAt ? new Date(body.ticketType.salesEndAt) : undefined,
         minPerOrder: body.ticketType.minPerOrder,
         maxPerOrder: body.ticketType.maxPerOrder,
         requiresAccessCode: body.ticketType.requiresAccessCode,
         accessCodeHint: body.ticketType.accessCodeHint,
+        eventOccurrenceId: body.ticketType.eventOccurrenceId,
       });
 
       const accessRuleRepo = new AccessRuleRepository(txDb);
       const createdRules = [];
       for (const rule of accessRules) {
-        createdRules.push(await accessRuleRepo.create({
-          ticketTypeId: ticketType.id,
-          type: rule.type,
-          value: rule.value,
-          maxUses: rule.maxUses ?? undefined,
-          expiresAt: rule.expiresAt ? new Date(rule.expiresAt) : undefined,
-        }));
+        // eslint-disable-next-line no-await-in-loop -- access rules are created sequentially inside the ticket-type transaction for deterministic rollback behavior.
+        createdRules.push(
+          await accessRuleRepo.create({
+            ticketTypeId: ticketType.id,
+            type: rule.type,
+            value: rule.value,
+            maxUses: rule.maxUses ?? undefined,
+            expiresAt: rule.expiresAt ? new Date(rule.expiresAt) : undefined,
+          }),
+        );
       }
 
       return { ticketType, accessRules: createdRules };
@@ -224,6 +246,7 @@ export const ticketingRoutes: FastifyPluginAsync = async (app) => {
         'minPerOrder',
         'maxPerOrder',
         'inventoryPoolId',
+        'eventOccurrenceId',
         'requiresAccessCode',
         'accessCodeHint',
         'sortOrder',
@@ -236,18 +259,29 @@ export const ticketingRoutes: FastifyPluginAsync = async (app) => {
         minPerOrder: 'min_per_order',
         maxPerOrder: 'max_per_order',
         inventoryPoolId: 'inventory_pool_id',
+        eventOccurrenceId: 'event_occurrence_id',
         requiresAccessCode: 'requires_access_code',
         accessCodeHint: 'access_code_hint',
         sortOrder: 'sort_order',
       },
     );
-    if (updateData.sales_start_at) updateData.sales_start_at = new Date(updateData.sales_start_at as string);
-    if (updateData.sales_end_at) updateData.sales_end_at = new Date(updateData.sales_end_at as string);
+    if (updateData.sales_start_at)
+      updateData.sales_start_at = new Date(updateData.sales_start_at as string);
+    if (updateData.sales_end_at)
+      updateData.sales_end_at = new Date(updateData.sales_end_at as string);
     if (updateData.inventory_pool_id) {
-      const pool = await new InventoryPoolRepository(db).findById(updateData.inventory_pool_id as string);
+      const pool = await new InventoryPoolRepository(db).findById(
+        updateData.inventory_pool_id as string,
+      );
       if (!pool || pool.event_id !== existing.event_id) {
         throw new NotFoundError('InventoryPool', updateData.inventory_pool_id as string);
       }
+    }
+    if ('event_occurrence_id' in updateData) {
+      await validateEventOccurrence(
+        existing.event_id,
+        updateData.event_occurrence_id as string | null,
+      );
     }
     return serializeTicketType(await repo.update(ticketTypeId, updateData));
   });
@@ -270,6 +304,7 @@ export const ticketingRoutes: FastifyPluginAsync = async (app) => {
         throw new NotFoundError('InventoryPool', body.ticketType.inventoryPoolId);
       }
     }
+    await validateEventOccurrence(existing.event_id, body.ticketType.eventOccurrenceId);
 
     const result = await db.transaction().execute(async (trx) => {
       const txDb = trx as typeof db;
@@ -292,6 +327,7 @@ export const ticketingRoutes: FastifyPluginAsync = async (app) => {
           'minPerOrder',
           'maxPerOrder',
           'inventoryPoolId',
+          'eventOccurrenceId',
           'requiresAccessCode',
           'accessCodeHint',
           'sortOrder',
@@ -304,18 +340,29 @@ export const ticketingRoutes: FastifyPluginAsync = async (app) => {
           minPerOrder: 'min_per_order',
           maxPerOrder: 'max_per_order',
           inventoryPoolId: 'inventory_pool_id',
+          eventOccurrenceId: 'event_occurrence_id',
           requiresAccessCode: 'requires_access_code',
           accessCodeHint: 'access_code_hint',
           sortOrder: 'sort_order',
         },
       );
-      if (updateData.sales_start_at) updateData.sales_start_at = new Date(updateData.sales_start_at as string);
-      if (updateData.sales_end_at) updateData.sales_end_at = new Date(updateData.sales_end_at as string);
+      if (updateData.sales_start_at)
+        updateData.sales_start_at = new Date(updateData.sales_start_at as string);
+      if (updateData.sales_end_at)
+        updateData.sales_end_at = new Date(updateData.sales_end_at as string);
+      if ('event_occurrence_id' in updateData) {
+        await validateEventOccurrence(
+          existing.event_id,
+          updateData.event_occurrence_id as string | null,
+        );
+      }
 
-      const ticketType = Object.keys(updateData).length > 0
-        ? await new TicketTypeRepository(txDb).update(ticketTypeId, updateData)
-        : existing;
+      const ticketType =
+        Object.keys(updateData).length > 0
+          ? await new TicketTypeRepository(txDb).update(ticketTypeId, updateData)
+          : existing;
       for (const rule of accessRules) {
+        // eslint-disable-next-line no-await-in-loop -- access-rule additions stay sequential in the same update transaction.
         await accessRuleRepo.create({
           ticketTypeId,
           type: rule.type,
@@ -343,7 +390,10 @@ export const ticketingRoutes: FastifyPluginAsync = async (app) => {
     requireEventAccess(principal, event, eventId);
     const repo = new TicketTypeRepository(db);
     const rows = await repo.findByEvent(eventId, pagination.limit + 1, pagination.cursor);
-    return pageEnvelope(rows.map((row) => serializeTicketType(row)), pagination.limit);
+    return pageEnvelope(
+      rows.map((row) => serializeTicketType(row)),
+      pagination.limit,
+    );
   });
 
   app.get('/ticket-types/:ticketTypeId/access-rules', async (request) => {
@@ -388,10 +438,7 @@ export const ticketingRoutes: FastifyPluginAsync = async (app) => {
     const rule = await db
       .selectFrom('access_rules')
       .innerJoin('ticket_types', 'ticket_types.id', 'access_rules.ticket_type_id')
-      .select([
-        'access_rules.id as id',
-        'ticket_types.event_id as event_id',
-      ])
+      .select(['access_rules.id as id', 'ticket_types.event_id as event_id'])
       .where('access_rules.id', '=', accessRuleId)
       .executeTakeFirst();
     if (!rule) throw new NotFoundError('AccessRule', accessRuleId);
@@ -433,7 +480,10 @@ export const ticketingRoutes: FastifyPluginAsync = async (app) => {
 
     const repo = new InventoryPoolRepository(db);
     const rows = await repo.findByEvent(eventId, pagination.limit + 1, pagination.cursor);
-    return pageEnvelope(rows.map((row) => serializeInventoryPool(row)), pagination.limit);
+    return pageEnvelope(
+      rows.map((row) => serializeInventoryPool(row)),
+      pagination.limit,
+    );
   });
 
   app.get('/events/:eventId/product-categories', async (request) => {
@@ -445,8 +495,15 @@ export const ticketingRoutes: FastifyPluginAsync = async (app) => {
     const event = await loadEvent(eventId);
     requireEventAccess(principal, event, eventId);
 
-    const rows = await new ProductCategoryRepository(db).findByEvent(eventId, pagination.limit + 1, pagination.cursor);
-    return pageEnvelope(rows.map((row) => serializeProductCategory(row)), pagination.limit);
+    const rows = await new ProductCategoryRepository(db).findByEvent(
+      eventId,
+      pagination.limit + 1,
+      pagination.cursor,
+    );
+    return pageEnvelope(
+      rows.map((row) => serializeProductCategory(row)),
+      pagination.limit,
+    );
   });
 
   app.post('/events/:eventId/product-categories', async (request, reply) => {
@@ -476,8 +533,15 @@ export const ticketingRoutes: FastifyPluginAsync = async (app) => {
     const event = await loadEvent(eventId);
     requireEventAccess(principal, event, eventId);
 
-    const rows = await new ProductRepository(db).findByEvent(eventId, pagination.limit + 1, pagination.cursor);
-    return pageEnvelope(rows.map((row) => serializeProduct(row)), pagination.limit);
+    const rows = await new ProductRepository(db).findByEvent(
+      eventId,
+      pagination.limit + 1,
+      pagination.cursor,
+    );
+    return pageEnvelope(
+      rows.map((row) => serializeProduct(row)),
+      pagination.limit,
+    );
   });
 
   app.post('/events/:eventId/products', async (request, reply) => {
@@ -555,8 +619,10 @@ export const ticketingRoutes: FastifyPluginAsync = async (app) => {
         sortOrder: 'sort_order',
       },
     );
-    if (updateData.available_from) updateData.available_from = new Date(updateData.available_from as string);
-    if (updateData.available_until) updateData.available_until = new Date(updateData.available_until as string);
+    if (updateData.available_from)
+      updateData.available_from = new Date(updateData.available_from as string);
+    if (updateData.available_until)
+      updateData.available_until = new Date(updateData.available_until as string);
 
     return serializeProduct(await repo.update(productId, updateData));
   });
@@ -571,18 +637,20 @@ export const ticketingRoutes: FastifyPluginAsync = async (app) => {
     const ttRepo = new TicketTypeRepository(db);
     const ticketTypes = await ttRepo.findByEvent(eventId);
 
-    const results = [];
-    for (const tt of ticketTypes) {
-      const availability = await inventoryService.getAvailability(tt.inventory_pool_id);
-      results.push({
-        ticketTypeId: tt.id,
-        available: availability.available,
-        total: availability.total,
-        reserved: availability.reserved,
-        sold: availability.sold,
-        status: tt.status,
-      });
-    }
+    const results = await Promise.all(
+      ticketTypes.map(async (tt) => {
+        const availability = await inventoryService.getAvailability(tt.inventory_pool_id);
+        return {
+          ticketTypeId: tt.id,
+          eventOccurrenceId: tt.event_occurrence_id ?? undefined,
+          available: availability.available,
+          total: availability.total,
+          reserved: availability.reserved,
+          sold: availability.sold,
+          status: tt.status,
+        };
+      }),
+    );
 
     return { items: results, nextCursor: null, hasMore: false };
   });

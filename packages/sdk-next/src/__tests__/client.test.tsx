@@ -3,7 +3,7 @@ import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest';
 import React from 'react';
 import { createRoot } from 'react-dom/client';
 import { flushSync } from 'react-dom';
-import { GateKitProvider, GateKitCheckoutButton, GateKitTicketWidget } from '../client.js';
+import { TixkitProvider, TixkitCheckoutButton, TixkitTicketWidget } from '../client.js';
 
 function render(jsx: React.ReactElement): { container: HTMLElement; unmount: () => void } {
   const container = document.createElement('div');
@@ -19,7 +19,7 @@ function render(jsx: React.ReactElement): { container: HTMLElement; unmount: () 
   };
 }
 
-describe('GateKitCheckoutButton', () => {
+describe('TixkitCheckoutButton', () => {
   let originalOpen: typeof window.open;
 
   beforeEach(() => {
@@ -35,15 +35,15 @@ describe('GateKitCheckoutButton', () => {
     window.open = mockOpen;
 
     const { container, unmount } = render(
-      <GateKitProvider config={{ checkoutBaseUrl: 'https://checkout.gatekit.com' }}>
-        <GateKitCheckoutButton
+      <TixkitProvider config={{ checkoutBaseUrl: 'https://checkout.tixkit.com' }}>
+        <TixkitCheckoutButton
           eventId="evt_123"
           items={[{ ticketTypeId: 'tt_1', quantity: 2 }]}
           checkoutMode="modal"
         >
           Buy Tickets
-        </GateKitCheckoutButton>
-      </GateKitProvider>,
+        </TixkitCheckoutButton>
+      </TixkitProvider>,
     );
 
     const button = container.querySelector('button');
@@ -64,8 +64,8 @@ describe('GateKitCheckoutButton', () => {
     window.open = mockOpen;
 
     const { container, unmount } = render(
-      <GateKitProvider config={{ checkoutBaseUrl: 'https://checkout.gatekit.com' }}>
-        <GateKitCheckoutButton
+      <TixkitProvider config={{ checkoutBaseUrl: 'https://checkout.tixkit.com' }}>
+        <TixkitCheckoutButton
           eventId="evt_123"
           items={[{ ticketTypeId: 'tt_1', quantity: 2 }]}
           brand="brd_1"
@@ -75,8 +75,8 @@ describe('GateKitCheckoutButton', () => {
           checkoutMode="modal"
         >
           Buy Tickets
-        </GateKitCheckoutButton>
-      </GateKitProvider>,
+        </TixkitCheckoutButton>
+      </TixkitProvider>,
     );
 
     const button = container.querySelector('button');
@@ -97,20 +97,22 @@ describe('GateKitCheckoutButton', () => {
       writable: true,
       value: {
         ...window.location,
-        set href(url: string) { hrefSetter(url); },
+        set href(url: string) {
+          hrefSetter(url);
+        },
       },
     });
 
     const { unmount } = render(
-      <GateKitProvider config={{ checkoutBaseUrl: 'https://checkout.gatekit.com' }}>
-        <GateKitCheckoutButton
+      <TixkitProvider config={{ checkoutBaseUrl: 'https://checkout.tixkit.com' }}>
+        <TixkitCheckoutButton
           eventId="evt_456"
           items={[{ ticketTypeId: 'tt_1', quantity: 1 }]}
           checkoutMode="redirect"
         >
           Buy
-        </GateKitCheckoutButton>
-      </GateKitProvider>,
+        </TixkitCheckoutButton>
+      </TixkitProvider>,
     );
 
     // Can't easily test redirect mode without full DOM; just verify button renders
@@ -118,12 +120,12 @@ describe('GateKitCheckoutButton', () => {
   });
 });
 
-describe('GateKitTicketWidget', () => {
+describe('TixkitTicketWidget', () => {
   it('iframe src points at /checkout?eventId= route', () => {
     const { container, unmount } = render(
-      <GateKitProvider config={{ widgetBaseUrl: 'https://widget.gatekit.com' }}>
-        <GateKitTicketWidget brand="brd_1" event="evt_456" />
-      </GateKitProvider>,
+      <TixkitProvider config={{ widgetBaseUrl: 'https://widget.tixkit.com' }}>
+        <TixkitTicketWidget brand="brd_1" event="evt_456" />
+      </TixkitProvider>,
     );
 
     const iframe = container.querySelector('iframe');
@@ -136,15 +138,19 @@ describe('GateKitTicketWidget', () => {
 
   it('iframe has sandbox and allow attributes', () => {
     const { container, unmount } = render(
-      <GateKitProvider config={{ widgetBaseUrl: 'https://widget.gatekit.com' }}>
-        <GateKitTicketWidget brand="brd_1" event="evt_456" />
-      </GateKitProvider>,
+      <TixkitProvider config={{ widgetBaseUrl: 'https://widget.tixkit.com' }}>
+        <TixkitTicketWidget brand="brd_1" event="evt_456" />
+      </TixkitProvider>,
     );
 
     const iframe = container.querySelector('iframe');
     expect(iframe).not.toBeNull();
-    expect(iframe!.getAttribute('sandbox')).toBe('allow-scripts allow-same-origin allow-forms allow-popups allow-popups-to-escape-sandbox');
-    expect(iframe!.getAttribute('allow')).toBe('payment; publickey-credentials-create *; publickey-credentials-get *');
+    expect(iframe!.getAttribute('sandbox')).toBe(
+      'allow-scripts allow-same-origin allow-forms allow-popups allow-popups-to-escape-sandbox',
+    );
+    expect(iframe!.getAttribute('allow')).toBe(
+      'payment; publickey-credentials-create *; publickey-credentials-get *',
+    );
 
     unmount();
   });

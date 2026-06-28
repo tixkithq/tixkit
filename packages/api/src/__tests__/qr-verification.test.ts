@@ -25,20 +25,28 @@ describe('QrService verification', () => {
     });
 
     it('rejects tampered payload (modified ticketId)', () => {
-      const payload = JSON.stringify({ ticketId: 'tkt_abc', code: 'GK-123456', ts: Date.now() });
+      const payload = JSON.stringify({ ticketId: 'tkt_abc', code: 'TK-123456', ts: Date.now() });
       const signature = createHmac('sha256', SIGNING_KEY).update(payload).digest('hex');
 
-      const tamperedPayload = JSON.stringify({ ticketId: 'tkt_hacked', code: 'GK-123456', ts: Date.now() });
-      const qrPayload = Buffer.from(JSON.stringify({ p: tamperedPayload, s: signature })).toString('base64url');
+      const tamperedPayload = JSON.stringify({
+        ticketId: 'tkt_hacked',
+        code: 'TK-123456',
+        ts: Date.now(),
+      });
+      const qrPayload = Buffer.from(JSON.stringify({ p: tamperedPayload, s: signature })).toString(
+        'base64url',
+      );
 
       const result = qrService.getQrPayload(qrPayload);
       expect(result.valid).toBe(false);
     });
 
     it('rejects tampered signature', () => {
-      const payload = JSON.stringify({ ticketId: 'tkt_abc', code: 'GK-123456', ts: Date.now() });
+      const payload = JSON.stringify({ ticketId: 'tkt_abc', code: 'TK-123456', ts: Date.now() });
       const fakeSignature = 'a'.repeat(64);
-      const qrPayload = Buffer.from(JSON.stringify({ p: payload, s: fakeSignature })).toString('base64url');
+      const qrPayload = Buffer.from(JSON.stringify({ p: payload, s: fakeSignature })).toString(
+        'base64url',
+      );
 
       const result = qrService.getQrPayload(qrPayload);
       expect(result.valid).toBe(false);
@@ -56,14 +64,14 @@ describe('QrService verification', () => {
     });
 
     it('rejects payload signed with wrong key', () => {
-      const qrPayload = makeSignedPayload('tkt_abc', 'GK-123456', 'wrong-key');
+      const qrPayload = makeSignedPayload('tkt_abc', 'TK-123456', 'wrong-key');
 
       const result = qrService.getQrPayload(qrPayload);
       expect(result.valid).toBe(false);
     });
 
     it('rejects payload with missing signature field', () => {
-      const payload = JSON.stringify({ ticketId: 'tkt_abc', code: 'GK-123456', ts: Date.now() });
+      const payload = JSON.stringify({ ticketId: 'tkt_abc', code: 'TK-123456', ts: Date.now() });
       const qrPayload = Buffer.from(JSON.stringify({ p: payload })).toString('base64url');
 
       const result = qrService.getQrPayload(qrPayload);
@@ -93,9 +101,9 @@ describe('QrService verification', () => {
   });
 
   describe('generate', () => {
-    it('produces a code matching GK- format', () => {
+    it('produces a code matching TK- format', () => {
       const result = qrService.generate('tkt_1');
-      expect(result.code).toMatch(/^GK-[A-F0-9]+$/);
+      expect(result.code).toMatch(/^TK-[A-F0-9]+$/);
     });
 
     it('produces unique codes for different ticket IDs', () => {

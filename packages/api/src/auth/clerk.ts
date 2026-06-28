@@ -1,8 +1,8 @@
 import type { FastifyRequest, FastifyReply } from 'fastify';
 import { verifyToken } from '@clerk/backend';
-import type { Principal, Permission, Ulid } from '@gatekit/domain';
-import { UnauthorizedError, ForbiddenError, NotFoundError } from '@gatekit/domain';
-import type { Database } from '@gatekit/db';
+import type { Principal, Permission, Ulid } from '@tixkit/domain';
+import { UnauthorizedError, ForbiddenError, NotFoundError } from '@tixkit/domain';
+import type { Database } from '@tixkit/db';
 import { createHash, timingSafeEqual } from 'node:crypto';
 
 export type AuthResult = {
@@ -73,10 +73,7 @@ export class ClerkAuthService {
    * require real authentication.
    */
   isLocalDevMode(): boolean {
-    return (
-      this.isDevelopmentMode() &&
-      !this.config.secretKey
-    );
+    return this.isDevelopmentMode() && !this.config.secretKey;
   }
 
   /**
@@ -116,14 +113,17 @@ export class ClerkAuthService {
 
     if (!existingTenant) {
       const now = new Date();
-      await this.db.insertInto('tenants').values({
-        id: DEV_TENANT_ID,
-        name: 'Local Development',
-        status: 'active',
-        plan: 'free',
-        created_at: now,
-        updated_at: now,
-      }).execute();
+      await this.db
+        .insertInto('tenants')
+        .values({
+          id: DEV_TENANT_ID,
+          name: 'Local Development',
+          status: 'active',
+          plan: 'free',
+          created_at: now,
+          updated_at: now,
+        })
+        .execute();
     }
 
     const existingOrg = await this.db
@@ -134,16 +134,19 @@ export class ClerkAuthService {
 
     if (!existingOrg) {
       const now = new Date();
-      await this.db.insertInto('organizations').values({
-        id: DEV_ORG_ID,
-        tenant_id: DEV_TENANT_ID,
-        name: 'GateKit Dev',
-        slug: 'gatekit-dev',
-        clerk_organization_id: null,
-        status: 'active',
-        created_at: now,
-        updated_at: now,
-      }).execute();
+      await this.db
+        .insertInto('organizations')
+        .values({
+          id: DEV_ORG_ID,
+          tenant_id: DEV_TENANT_ID,
+          name: 'Tixkit Dev',
+          slug: 'tixkit-dev',
+          clerk_organization_id: null,
+          status: 'active',
+          created_at: now,
+          updated_at: now,
+        })
+        .execute();
     }
 
     const existingBrand = await this.db
@@ -154,26 +157,29 @@ export class ClerkAuthService {
 
     if (!existingBrand) {
       const now = new Date();
-      await this.db.insertInto('brands').values({
-        id: DEV_BRAND_ID,
-        tenant_id: DEV_TENANT_ID,
-        organization_id: DEV_ORG_ID,
-        name: 'GateKit Dev',
-        slug: 'gatekit-dev',
-        status: 'active',
-        theme: JSON.stringify({ primaryColor: '#6366f1' }),
-        legal_urls: JSON.stringify({}),
-        white_label: false,
-        created_at: now,
-        updated_at: now,
-      }).execute();
+      await this.db
+        .insertInto('brands')
+        .values({
+          id: DEV_BRAND_ID,
+          tenant_id: DEV_TENANT_ID,
+          organization_id: DEV_ORG_ID,
+          name: 'Tixkit Dev',
+          slug: 'tixkit-dev',
+          status: 'active',
+          theme: JSON.stringify({ primaryColor: '#6366f1' }),
+          legal_urls: JSON.stringify({}),
+          white_label: false,
+          created_at: now,
+          updated_at: now,
+        })
+        .execute();
     }
   }
 
   /**
    * In local development with Clerk enabled, webhooks are often not configured.
    * If Clerk has already verified the session, auto-provision a deterministic
-   * GateKit profile so the dashboard does not depend on external webhook
+   * Tixkit profile so the dashboard does not depend on external webhook
    * delivery. Production still fails closed when identity sync is missing.
    */
   private async ensureDevelopmentClerkProfile(claims: ClerkSessionClaims) {
@@ -201,49 +207,60 @@ export class ClerkAuthService {
       claims.email_address ??
       `${claims.sub.replace(/[^a-zA-Z0-9._-]/g, '-')}@clerk.local`;
 
-    await this.db.insertInto('user_profiles').values({
-      id: userId,
-      tenant_id: DEV_TENANT_ID,
-      clerk_user_id: claims.sub,
-      email,
-      first_name: claims.first_name ?? claims.given_name ?? null,
-      last_name: claims.last_name ?? claims.family_name ?? null,
-      avatar_url: null,
-      status: 'active',
-      last_seen_at: now,
-      created_at: now,
-      updated_at: now,
-    }).execute();
-
-    await this.db.insertInto('organization_members').values({
-      id: `mem_dev_${suffix}`,
-      tenant_id: DEV_TENANT_ID,
-      organization_id: DEV_ORG_ID,
-      user_id: userId,
-      role: 'owner',
-      invited_at: now,
-      accepted_at: now,
-      created_at: now,
-      updated_at: now,
-    }).execute();
-
-    for (const permission of ALL_PERMISSIONS) {
-      const grantSuffix = createHash('sha256')
-        .update(`${userId}:${permission}`)
-        .digest('hex')
-        .slice(0, 20);
-      await this.db.insertInto('permission_grants').values({
-        id: `pgr_${grantSuffix}`,
+    await this.db
+      .insertInto('user_profiles')
+      .values({
+        id: userId,
         tenant_id: DEV_TENANT_ID,
-        principal_type: 'user',
-        principal_id: userId,
-        permission,
-        scope_type: 'organization',
-        scope_id: DEV_ORG_ID,
+        clerk_user_id: claims.sub,
+        email,
+        first_name: claims.first_name ?? claims.given_name ?? null,
+        last_name: claims.last_name ?? claims.family_name ?? null,
+        avatar_url: null,
+        status: 'active',
+        last_seen_at: now,
         created_at: now,
         updated_at: now,
-      }).execute();
-    }
+      })
+      .execute();
+
+    await this.db
+      .insertInto('organization_members')
+      .values({
+        id: `mem_dev_${suffix}`,
+        tenant_id: DEV_TENANT_ID,
+        organization_id: DEV_ORG_ID,
+        user_id: userId,
+        role: 'owner',
+        invited_at: now,
+        accepted_at: now,
+        created_at: now,
+        updated_at: now,
+      })
+      .execute();
+
+    await Promise.all(
+      ALL_PERMISSIONS.map((permission) => {
+        const grantSuffix = createHash('sha256')
+          .update(`${userId}:${permission}`)
+          .digest('hex')
+          .slice(0, 20);
+        return this.db
+          .insertInto('permission_grants')
+          .values({
+            id: `pgr_${grantSuffix}`,
+            tenant_id: DEV_TENANT_ID,
+            principal_type: 'user',
+            principal_id: userId,
+            permission,
+            scope_type: 'organization',
+            scope_id: DEV_ORG_ID,
+            created_at: now,
+            updated_at: now,
+          })
+          .execute();
+      }),
+    );
 
     return this.db
       .selectFrom('user_profiles')
@@ -253,7 +270,7 @@ export class ClerkAuthService {
   }
 
   /**
-   * Verifies a Clerk session JWT and maps it to a GateKit Principal.
+   * Verifies a Clerk session JWT and maps it to a Tixkit Principal.
    */
   async authenticateRequest(request: FastifyRequest): Promise<AuthResult> {
     const authHeader = request.headers.authorization;
@@ -296,8 +313,8 @@ export class ClerkAuthService {
         const match = org ? profiles.find((p) => p.tenant_id === org.tenant_id) : undefined;
         if (match) {
           userProfile = match;
-        } else if (profiles.length > 1) {
-          throw new UnauthorizedError('Active organization does not map to a GateKit tenant');
+        } else {
+          throw new UnauthorizedError('Active organization does not map to a Tixkit tenant');
         }
       } else if (profiles.length > 1) {
         const headerTenant = request.headers['x-tenant-id'];
@@ -380,11 +397,11 @@ export class ClerkAuthService {
   }
 
   /**
-   * Authenticates an API key and maps it to a GateKit Principal.
+   * Authenticates an API key and maps it to a Tixkit Principal.
    */
   async authenticateApiKey(request: FastifyRequest): Promise<AuthResult> {
     const authHeader = request.headers.authorization;
-    if (!authHeader?.startsWith('Bearer gk_')) {
+    if (!authHeader?.startsWith('Bearer tk_')) {
       throw new UnauthorizedError('Missing or invalid API key');
     }
 
@@ -414,8 +431,12 @@ export class ClerkAuthService {
       .execute();
 
     const scopes = JSON.parse(apiKey.scopes as string) as Permission[];
-    const brandIds = apiKey.brand_ids ? (JSON.parse(apiKey.brand_ids as string) as Ulid[]) : undefined;
-    const eventIds = apiKey.event_ids ? (JSON.parse(apiKey.event_ids as string) as Ulid[]) : undefined;
+    const brandIds = apiKey.brand_ids
+      ? (JSON.parse(apiKey.brand_ids as string) as Ulid[])
+      : undefined;
+    const eventIds = apiKey.event_ids
+      ? (JSON.parse(apiKey.event_ids as string) as Ulid[])
+      : undefined;
 
     const principal: Principal = {
       type: 'api_key',
@@ -428,6 +449,58 @@ export class ClerkAuthService {
     };
 
     return { principal };
+  }
+
+  async authenticateOAuthAccessToken(request: FastifyRequest): Promise<AuthResult> {
+    const authHeader = request.headers.authorization;
+    if (!authHeader?.startsWith('Bearer tk_oat_')) {
+      throw new UnauthorizedError('Missing or invalid OAuth access token');
+    }
+
+    const rawToken = authHeader.substring(7);
+    const tokenHash = createHash('sha256').update(rawToken).digest('hex');
+    const accessToken = await this.db
+      .selectFrom('oauth_access_tokens')
+      .innerJoin(
+        'oauth_applications',
+        'oauth_applications.id',
+        'oauth_access_tokens.oauth_application_id',
+      )
+      .select([
+        'oauth_access_tokens.id as token_id',
+        'oauth_access_tokens.tenant_id as tenant_id',
+        'oauth_access_tokens.organization_id as organization_id',
+        'oauth_access_tokens.scopes as scopes',
+        'oauth_access_tokens.expires_at as expires_at',
+        'oauth_access_tokens.revoked_at as revoked_at',
+        'oauth_applications.status as app_status',
+      ])
+      .where('oauth_access_tokens.token_hash', '=', tokenHash)
+      .executeTakeFirst();
+
+    if (!accessToken || accessToken.revoked_at || accessToken.app_status !== 'active') {
+      throw new UnauthorizedError('Invalid or revoked OAuth access token');
+    }
+    if (new Date(accessToken.expires_at) <= new Date()) {
+      throw new UnauthorizedError('OAuth access token has expired');
+    }
+
+    await this.db
+      .updateTable('oauth_access_tokens')
+      .set({ updated_at: new Date() })
+      .where('id', '=', accessToken.token_id)
+      .execute();
+
+    const scopes = JSON.parse(accessToken.scopes as string) as Permission[];
+    return {
+      principal: {
+        type: 'api_key',
+        id: accessToken.token_id,
+        tenantId: accessToken.tenant_id,
+        organizationIds: [accessToken.organization_id],
+        scopes,
+      },
+    };
   }
 
   /**
@@ -475,7 +548,7 @@ export class ClerkAuthService {
 
     const principal: Principal = {
       type: 'mobile_device',
-      id: device.id,
+      id: device.device_id,
       tenantId: device.tenant_id,
       organizationIds: [device.organization_id],
       scopes: ['checkins.read', 'checkins.write'],
@@ -536,7 +609,11 @@ export class ClerkAuthService {
    */
   static requireBrandScope(principal: Principal, brandId?: string): void {
     if (!brandId) return;
-    if (principal.brandIds && principal.brandIds.length > 0 && !principal.brandIds.includes(brandId as Ulid)) {
+    if (
+      principal.brandIds &&
+      principal.brandIds.length > 0 &&
+      !principal.brandIds.includes(brandId as Ulid)
+    ) {
       throw new NotFoundError('Brand', brandId);
     }
   }
@@ -546,7 +623,11 @@ export class ClerkAuthService {
    */
   static requireEventScope(principal: Principal, eventId?: string): void {
     if (!eventId) return;
-    if (principal.eventIds && principal.eventIds.length > 0 && !principal.eventIds.includes(eventId as Ulid)) {
+    if (
+      principal.eventIds &&
+      principal.eventIds.length > 0 &&
+      !principal.eventIds.includes(eventId as Ulid)
+    ) {
       throw new NotFoundError('Event', eventId);
     }
   }
@@ -554,7 +635,12 @@ export class ClerkAuthService {
   /**
    * Verifies that a loaded resource belongs to the principal's tenant.
    */
-  static requireResourceTenant(principal: Principal, resource: { tenant_id?: string | null }, resourceName: string, resourceId: string): void {
+  static requireResourceTenant(
+    principal: Principal,
+    resource: { tenant_id?: string | null },
+    resourceName: string,
+    resourceId: string,
+  ): void {
     if (!resource.tenant_id || resource.tenant_id !== principal.tenantId) {
       throw new NotFoundError(resourceName, resourceId);
     }
@@ -569,7 +655,10 @@ export function createAuthMiddleware(authService: ClerkAuthService) {
       if (request.headers['x-device-id']) {
         const result = await authService.authenticateScannerDevice(request);
         request.principal = result.principal;
-      } else if (authHeader?.startsWith('Bearer gk_')) {
+      } else if (authHeader?.startsWith('Bearer tk_oat_')) {
+        const result = await authService.authenticateOAuthAccessToken(request);
+        request.principal = result.principal;
+      } else if (authHeader?.startsWith('Bearer tk_')) {
         const result = await authService.authenticateApiKey(request);
         request.principal = result.principal;
       } else if (authHeader?.startsWith('Bearer ')) {

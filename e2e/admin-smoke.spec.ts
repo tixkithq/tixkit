@@ -15,7 +15,7 @@ test.describe('Admin dashboard smoke', () => {
     // The page should render without errors.
     // When Clerk is configured, the Clerk sign-in component appears.
     // When not configured, the page still loads.
-    await expect(page).toHaveTitle(/GateKit/);
+    await expect(page).toHaveTitle(/Tixkit/);
   });
 
   test('root redirects or renders', async ({ page }) => {

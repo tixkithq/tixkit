@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import Fastify from 'fastify';
-import { openApiSpec } from '@gatekit/openapi';
+import { openApiSpec } from '@tixkit/openapi';
 import { tenantRoutes } from '../../routes/modules/tenant.js';
 import { eventRoutes } from '../../routes/modules/events.js';
 import { ticketingRoutes } from '../../routes/modules/ticketing.js';
@@ -11,9 +11,17 @@ import { webhookRoutes } from '../../routes/modules/webhooks.js';
 import { developerRoutes } from '../../routes/modules/developer.js';
 import { messagingRoutes } from '../../routes/modules/messaging.js';
 import { reportingRoutes } from '../../routes/modules/reporting.js';
+import { privacyRoutes } from '../../routes/modules/privacy.js';
 import { publicRoutes } from '../../routes/modules/public.js';
 import { questionRoutes } from '../../routes/modules/questions.js';
 import { authRoutes } from '../../routes/modules/auth.js';
+import { publicUploadRoutes, uploadRoutes } from '../../routes/modules/uploads.js';
+import { publicWaitlistRoutes, waitlistRoutes } from '../../routes/modules/waitlist.js';
+import { oauthAuthorizeRoutes, oauthTokenRoutes } from '../../routes/modules/oauth.js';
+import { clerkWebhookRoutes } from '../../routes/modules/clerk-webhooks.js';
+import { stripeWebhookRoutes } from '../../routes/modules/stripe-webhooks.js';
+import { telnyxWebhookRoutes } from '../../routes/modules/telnyx-webhooks.js';
+import { emailWebhookRoutes } from '../../routes/modules/email-webhooks.js';
 import type { AppContext } from '../../app.js';
 
 /**
@@ -24,8 +32,8 @@ import type { AppContext } from '../../app.js';
  * registered route table, and compares it against the OpenAPI spec paths.
  *
  * This prevents drift between the API implementation and the OpenAPI spec:
- * - Every registered route (except webhook receivers and /health) must have a
- *   matching OpenAPI path+method.
+ * - Every registered route (except /health) must have a matching OpenAPI
+ *   path+method.
  * - Every OpenAPI path+method must have a matching registered route.
  */
 
@@ -62,10 +70,19 @@ async function buildRouteManifest(): Promise<CapturedRoute[]> {
   // Health check (outside /v1 prefix, documented separately in OpenAPI).
   app.get('/health', async () => ({ status: 'ok' }));
 
+  // Public webhook routes (no auth, signature-verified).
+  await app.register(clerkWebhookRoutes, { prefix: '/v1/webhooks/clerk' });
+  await app.register(stripeWebhookRoutes, { prefix: '/v1/webhooks/stripe' });
+  await app.register(telnyxWebhookRoutes, { prefix: '/v1/webhooks/telnyx' });
+  await app.register(emailWebhookRoutes, { prefix: '/v1/webhooks/email' });
+
   // Public routes.
   await app.register(async (publicGroup) => {
     await publicGroup.register(publicRoutes, { prefix: '/v1' });
     await publicGroup.register(checkoutRoutes, { prefix: '/v1' });
+    await publicGroup.register(publicUploadRoutes, { prefix: '/v1' });
+    await publicGroup.register(publicWaitlistRoutes, { prefix: '/v1' });
+    await publicGroup.register(oauthTokenRoutes, { prefix: '/v1' });
   });
 
   // Authenticated routes.
@@ -77,10 +94,14 @@ async function buildRouteManifest(): Promise<CapturedRoute[]> {
     await authenticated.register(checkInRoutes, { prefix: '/v1' });
     await authenticated.register(webhookRoutes, { prefix: '/v1' });
     await authenticated.register(developerRoutes, { prefix: '/v1' });
+    await authenticated.register(oauthAuthorizeRoutes, { prefix: '/v1' });
     await authenticated.register(messagingRoutes, { prefix: '/v1' });
     await authenticated.register(reportingRoutes, { prefix: '/v1' });
+    await authenticated.register(privacyRoutes, { prefix: '/v1' });
     await authenticated.register(questionRoutes, { prefix: '/v1' });
     await authenticated.register(authRoutes, { prefix: '/v1' });
+    await authenticated.register(uploadRoutes, { prefix: '/v1' });
+    await authenticated.register(waitlistRoutes, { prefix: '/v1' });
   });
 
   await app.ready();
@@ -88,30 +109,6 @@ async function buildRouteManifest(): Promise<CapturedRoute[]> {
 
   return routes;
 }
-
-/**
- * Routes that are intentionally NOT in the OpenAPI spec:
- * - Webhook receiver endpoints (Clerk, Stripe, Telnyx) are inbound webhooks,
- *   not part of the public API surface.
- */
-const EXCLUDED_ROUTE_PREFIXES = [
-  '/v1/webhooks/clerk',
-  '/v1/webhooks/stripe',
-  '/v1/webhooks/telnyx',
-];
-
-/**
- * OpenAPI paths that are intentionally not registered as Fastify routes in
- * this test:
- * - Webhook receiver endpoints (Clerk, Stripe, Telnyx) are inbound webhooks
- *   registered with separate prefixes in the app and are not part of the
- *   public API surface for SDK consumers.
- */
-const EXCLUDED_OPENAPI_PATHS = [
-  '/webhooks/clerk',
-  '/webhooks/stripe',
-  '/webhooks/telnyx/sms',
-];
 
 function normalizeUrl(url: string): string {
   // Fastify route URLs use :param syntax; OpenAPI uses {param}.
@@ -135,37 +132,38 @@ describe('Route-presence contract (T33)', () => {
     expect(manifest.length).toBeGreaterThan(0);
   });
 
-  it('every registered route (except webhook receivers) has a matching OpenAPI path+method', () => {
+  it('every registered route has a matching OpenAPI path+method', () => {
     const openApiPaths = openApiSpec.paths as Record<string, Record<string, unknown>>;
 
     const missingFromSpec: string[] = [];
     for (const route of manifest) {
       if (route.url === '/health') continue; // documented separately
       if (route.method === 'HEAD') continue; // Fastify auto-generates HEAD for GET
-      if (EXCLUDED_ROUTE_PREFIXES.some((prefix) => route.url.startsWith(prefix))) continue;
 
       const normalizedPath = stripPrefix(normalizeUrl(route.url));
       const specEntry = openApiPaths[normalizedPath];
       if (!specEntry) {
-        missingFromSpec.push(`${route.method} ${route.url} -> OpenAPI path "${normalizedPath}" not found`);
+        missingFromSpec.push(
+          `${route.method} ${route.url} -> OpenAPI path "${normalizedPath}" not found`,
+        );
         continue;
       }
       const methodLower = route.method.toLowerCase();
       if (!specEntry[methodLower]) {
-        missingFromSpec.push(`${route.method} ${route.url} -> OpenAPI path "${normalizedPath}" has no ${methodLower} method`);
+        missingFromSpec.push(
+          `${route.method} ${route.url} -> OpenAPI path "${normalizedPath}" has no ${methodLower} method`,
+        );
       }
     }
 
     expect(missingFromSpec).toEqual([]);
   });
 
-  it('every OpenAPI path+method has a matching registered route (except documented exclusions)', () => {
+  it('every OpenAPI path+method has a matching registered route', () => {
     const openApiPaths = openApiSpec.paths as Record<string, Record<string, unknown>>;
 
     const missingFromRoutes: string[] = [];
     for (const [path, methods] of Object.entries(openApiPaths)) {
-      if (EXCLUDED_OPENAPI_PATHS.includes(path)) continue;
-
       for (const method of Object.keys(methods)) {
         if (method === 'parameters') continue; // OpenAPI path-level parameters
         const methodUpper = method.toUpperCase();
@@ -173,9 +171,7 @@ describe('Route-presence contract (T33)', () => {
         // Convert OpenAPI path ({param}) to Fastify path (:param) with /v1 prefix.
         const fastifyPath = `/v1${path === '/' ? '' : path}`.replace(/\{(\w+)\}/g, ':$1');
 
-        const found = manifest.some(
-          (r) => r.method === methodUpper && r.url === fastifyPath,
-        );
+        const found = manifest.some((r) => r.method === methodUpper && r.url === fastifyPath);
 
         if (!found && path !== '/health') {
           missingFromRoutes.push(`${methodUpper} ${path} -> no matching Fastify route`);

@@ -1,12 +1,12 @@
-'use client'
+'use client';
 
-import * as React from 'react'
-import { useForm } from 'react-hook-form'
-import { zodResolver } from '@hookform/resolvers/zod'
-import { z } from 'zod'
-import { type AdminAttendeeListItem, type UpdateAttendeeInput, adminApi } from '@/lib/api'
-import { Button } from '@/components/ui/button'
-import { Input } from '@/components/ui/input'
+import * as React from 'react';
+import { useForm } from 'react-hook-form';
+import { zodResolver } from '@hookform/resolvers/zod';
+import { z } from 'zod';
+import { type AdminAttendeeListItem, type UpdateAttendeeInput, adminApi } from '@/lib/api';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
 import {
   Form,
   FormControl,
@@ -14,14 +14,14 @@ import {
   FormItem,
   FormLabel,
   FormMessage,
-} from '@/components/ui/form'
+} from '@/components/ui/form';
 import {
   Select,
   SelectContent,
   SelectItem,
   SelectTrigger,
   SelectValue,
-} from '@/components/ui/select'
+} from '@/components/ui/select';
 import {
   Dialog,
   DialogContent,
@@ -29,23 +29,23 @@ import {
   DialogFooter,
   DialogHeader,
   DialogTitle,
-} from '@/components/ui/dialog'
-import { toast } from 'sonner'
+} from '@/components/ui/dialog';
+import { toast } from 'sonner';
 
 const attendeeSchema = z.object({
   name: z.string().min(1, 'Name is required'),
   email: z.string().email('Invalid email').optional().or(z.literal('')),
   status: z.enum(['active', 'cancelled', 'refunded', 'transferred']),
-})
+});
 
-type AttendeeFormValues = z.infer<typeof attendeeSchema>
+type AttendeeFormValues = z.infer<typeof attendeeSchema>;
 
 type AttendeeFormDialogProps = {
-  attendee: AdminAttendeeListItem | null
-  open: boolean
-  onOpenChange: (open: boolean) => void
-  onSuccess?: () => void
-}
+  attendee: AdminAttendeeListItem | null;
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  onSuccess?: () => void;
+};
 
 export function AttendeeFormDialog({
   attendee,
@@ -53,7 +53,7 @@ export function AttendeeFormDialog({
   onOpenChange,
   onSuccess,
 }: AttendeeFormDialogProps) {
-  const [submitting, setSubmitting] = React.useState(false)
+  const [submitting, setSubmitting] = React.useState(false);
 
   const form = useForm<AttendeeFormValues>({
     resolver: zodResolver(attendeeSchema),
@@ -62,7 +62,7 @@ export function AttendeeFormDialog({
       email: attendee?.email ?? '',
       status: attendee?.status ?? 'active',
     },
-  })
+  });
 
   React.useEffect(() => {
     if (open && attendee) {
@@ -70,43 +70,41 @@ export function AttendeeFormDialog({
         name: attendee.name,
         email: attendee.email ?? '',
         status: attendee.status,
-      })
+      });
     }
-  }, [open, attendee, form])
+  }, [open, attendee, form]);
 
   const onSubmit = async (values: AttendeeFormValues) => {
-    if (!attendee) return
-    setSubmitting(true)
+    if (!attendee) return;
+    setSubmitting(true);
     const input: UpdateAttendeeInput = {
       name: values.name,
       email: values.email || undefined,
       status: values.status,
-    }
-    const result = await adminApi.updateAttendee(attendee.id, input)
-    setSubmitting(false)
+    };
+    const result = await adminApi.updateAttendee(attendee.id, input);
+    setSubmitting(false);
     if (result.ok) {
-      toast.success('Attendee updated')
-      onOpenChange(false)
-      onSuccess?.()
+      toast.success('Attendee updated');
+      onOpenChange(false);
+      onSuccess?.();
     } else {
-      toast.error(result.error.message)
+      toast.error(result.error.message);
     }
-  }
+  };
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent>
         <DialogHeader>
           <DialogTitle>Edit Attendee</DialogTitle>
-          <DialogDescription>
-            Update attendee details for {attendee?.name}
-          </DialogDescription>
+          <DialogDescription>Update attendee details for {attendee?.name}</DialogDescription>
         </DialogHeader>
         <Form {...form}>
-          <form onSubmit={form.handleSubmit(onSubmit)} className='space-y-4'>
+          <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-4">
             <FormField
               control={form.control}
-              name='name'
+              name="name"
               render={({ field }) => (
                 <FormItem>
                   <FormLabel>Name</FormLabel>
@@ -119,12 +117,12 @@ export function AttendeeFormDialog({
             />
             <FormField
               control={form.control}
-              name='email'
+              name="email"
               render={({ field }) => (
                 <FormItem>
                   <FormLabel>Email</FormLabel>
                   <FormControl>
-                    <Input type='email' {...field} />
+                    <Input type="email" {...field} />
                   </FormControl>
                   <FormMessage />
                 </FormItem>
@@ -132,21 +130,21 @@ export function AttendeeFormDialog({
             />
             <FormField
               control={form.control}
-              name='status'
+              name="status"
               render={({ field }) => (
                 <FormItem>
                   <FormLabel>Status</FormLabel>
                   <Select onValueChange={field.onChange} defaultValue={field.value}>
                     <FormControl>
                       <SelectTrigger>
-                        <SelectValue placeholder='Select status' />
+                        <SelectValue placeholder="Select status" />
                       </SelectTrigger>
                     </FormControl>
                     <SelectContent>
-                      <SelectItem value='active'>Active</SelectItem>
-                      <SelectItem value='cancelled'>Cancelled</SelectItem>
-                      <SelectItem value='refunded'>Refunded</SelectItem>
-                      <SelectItem value='transferred'>Transferred</SelectItem>
+                      <SelectItem value="active">Active</SelectItem>
+                      <SelectItem value="cancelled">Cancelled</SelectItem>
+                      <SelectItem value="refunded">Refunded</SelectItem>
+                      <SelectItem value="transferred">Transferred</SelectItem>
                     </SelectContent>
                   </Select>
                   <FormMessage />
@@ -154,14 +152,10 @@ export function AttendeeFormDialog({
               )}
             />
             <DialogFooter>
-              <Button
-                type='button'
-                variant='outline'
-                onClick={() => onOpenChange(false)}
-              >
+              <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>
                 Cancel
               </Button>
-              <Button type='submit' disabled={submitting}>
+              <Button type="submit" disabled={submitting}>
                 {submitting ? 'Saving...' : 'Save'}
               </Button>
             </DialogFooter>
@@ -169,5 +163,5 @@ export function AttendeeFormDialog({
         </Form>
       </DialogContent>
     </Dialog>
-  )
+  );
 }

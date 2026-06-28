@@ -1,6 +1,10 @@
 import { describe, it, expect } from 'vitest';
-import { PricingEngine, type TicketTypeForPricing } from '../services/pricing.js';
-import { DiscountInvalidError, ValidationError } from '@gatekit/domain';
+import {
+  PricingEngine,
+  type ProductForPricing,
+  type TicketTypeForPricing,
+} from '../services/pricing.js';
+import { DiscountInvalidError, ValidationError } from '@tixkit/domain';
 
 describe('PricingEngine', () => {
   const pricingEngine = new PricingEngine();
@@ -42,6 +46,17 @@ describe('PricingEngine', () => {
     ['tt_donation', donationTicket],
   ]);
 
+  const parkingPass: ProductForPricing = {
+    id: 'prd_parking',
+    name: 'Parking pass',
+    priceCents: 1500,
+    currency: 'USD',
+    maxPerOrder: 2,
+    status: 'active',
+  };
+
+  const products = new Map([['prd_parking', parkingPass]]);
+
   it('should calculate free order correctly', () => {
     const quote = pricingEngine.calculate({
       currency: 'USD',
@@ -74,6 +89,87 @@ describe('PricingEngine', () => {
     expect(quote.subtotalCents).toBe(30000);
     expect(quote.totalCents).toBe(30000);
     expect(quote.lineItems[0].unitPriceCents).toBe(10000);
+  });
+
+  it('emits persisted tax breakdown data for tax snapshots', () => {
+    const quote = pricingEngine.calculate({
+      currency: 'USD',
+      cart: { items: [{ ticketTypeId: 'tt_paid', quantity: 1 }] },
+      ticketTypes,
+      taxRules: [
+        {
+          id: 'tax_vat',
+          eventId: 'evt_1',
+          name: 'VAT',
+          rate: 2000,
+          type: 'exclusive',
+          appliedTo: 'ticket',
+          countries: ['GB'],
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+        },
+      ],
+      feeRules: [],
+      discountCodes: [],
+      buyerCountry: 'GB',
+    });
+
+    expect(quote.taxCents).toBe(2000);
+    expect(quote.lineItems[0].taxBreakdown).toEqual([
+      expect.objectContaining({
+        taxRuleId: 'tax_vat',
+        taxRuleName: 'VAT',
+        rate: 2000,
+        type: 'exclusive',
+        appliedTo: 'ticket',
+        taxableAmountCents: 10000,
+        taxCents: 2000,
+        jurisdictionCountry: 'GB',
+        provider: 'tixkit_rules',
+      }),
+    ]);
+  });
+
+  it('calculates mixed ticket and product orders', () => {
+    const quote = pricingEngine.calculate({
+      currency: 'USD',
+      cart: {
+        items: [
+          { ticketTypeId: 'tt_paid', quantity: 1 },
+          { productId: 'prd_parking', quantity: 2 },
+        ],
+      },
+      ticketTypes,
+      products,
+      taxRules: [],
+      feeRules: [],
+      discountCodes: [],
+    });
+
+    expect(quote.subtotalCents).toBe(13000);
+    expect(quote.totalCents).toBe(13000);
+    expect(quote.lineItems).toEqual([
+      expect.objectContaining({ type: 'ticket', ticketTypeId: 'tt_paid', productId: undefined }),
+      expect.objectContaining({
+        type: 'product',
+        productId: 'prd_parking',
+        ticketTypeId: undefined,
+      }),
+    ]);
+  });
+
+  it('rejects unavailable products', () => {
+    expect(() =>
+      pricingEngine.calculate({
+        currency: 'USD',
+        cart: { items: [{ productId: 'prd_parking', quantity: 1 }] },
+        ticketTypes,
+        products: new Map([['prd_parking', { ...parkingPass, status: 'paused' }]]),
+        taxRules: [],
+        feeRules: [],
+        discountCodes: [],
+      }),
+    ).toThrow(DiscountInvalidError);
   });
 
   it('uses server ticket price for paid tickets even when client supplies unitAmountCents', () => {
@@ -468,27 +564,31 @@ describe('PricingEngine', () => {
       currency: 'USD' as const,
       cart: { items: [{ ticketTypeId: 'tt_paid', quantity: 2 }] },
       ticketTypes,
-      taxRules: [{
-        id: 'tax_1',
-        eventId: 'evt_1',
-        name: 'VAT',
-        rate: 1000,
-        type: 'exclusive' as const,
-        appliedTo: 'ticket' as const,
-        createdAt: new Date().toISOString(),
-        updatedAt: new Date().toISOString(),
-      }],
-      feeRules: [{
-        id: 'fee_1',
-        eventId: 'evt_1',
-        name: 'Service Fee',
-        type: 'percentage' as const,
-        value: 500,
-        appliedTo: 'per_ticket' as const,
-        absorbIntoPrice: false,
-        createdAt: new Date().toISOString(),
-        updatedAt: new Date().toISOString(),
-      }],
+      taxRules: [
+        {
+          id: 'tax_1',
+          eventId: 'evt_1',
+          name: 'VAT',
+          rate: 1000,
+          type: 'exclusive' as const,
+          appliedTo: 'ticket' as const,
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+        },
+      ],
+      feeRules: [
+        {
+          id: 'fee_1',
+          eventId: 'evt_1',
+          name: 'Service Fee',
+          type: 'percentage' as const,
+          value: 500,
+          appliedTo: 'per_ticket' as const,
+          absorbIntoPrice: false,
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+        },
+      ],
       discountCodes: [],
     };
 

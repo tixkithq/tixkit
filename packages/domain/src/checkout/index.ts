@@ -1,7 +1,18 @@
-import type { BaseEntity, CurrencyCode, IdempotencyKey, ISO8601Date, Ulid } from '../shared/index.js';
+import type {
+  BaseEntity,
+  CurrencyCode,
+  IdempotencyKey,
+  ISO8601Date,
+  Ulid,
+} from '../shared/index.js';
 import type { PriceQuote, CartInput } from '../pricing/index.js';
 
-export type CheckoutSessionStatus = 'open' | 'pending_payment' | 'completed' | 'expired' | 'cancelled';
+export type CheckoutSessionStatus =
+  | 'open'
+  | 'pending_payment'
+  | 'completed'
+  | 'expired'
+  | 'cancelled';
 
 export type BuyerInfo = {
   email?: string;
@@ -40,6 +51,7 @@ export type OrderStatus =
 export type OrderLineItem = BaseEntity & {
   orderId: Ulid;
   ticketTypeId: Ulid;
+  eventOccurrenceId?: Ulid;
   attendeeId?: Ulid;
   description: string;
   quantity: number;
@@ -82,6 +94,7 @@ export type Attendee = BaseEntity & {
   orderId: Ulid;
   eventId: Ulid;
   ticketTypeId: Ulid;
+  eventOccurrenceId?: Ulid;
   ticketId?: Ulid;
   firstName?: string;
   lastName?: string;
@@ -103,7 +116,14 @@ export type OrderTimelineEvent = BaseEntity & {
 
 export type CreateCheckoutSessionInput = {
   eventId: Ulid;
-  items: { ticketTypeId: Ulid; quantity: number; unitAmountCents?: number; attendeeFields?: Record<string, unknown>[] }[];
+  items: {
+    ticketTypeId?: Ulid;
+    occurrenceId?: Ulid;
+    productId?: Ulid;
+    quantity: number;
+    unitAmountCents?: number;
+    attendeeFields?: Record<string, unknown>[];
+  }[];
   discountCode?: string;
   affiliateCode?: string;
   trackingId?: string;
@@ -112,10 +132,13 @@ export type CreateCheckoutSessionInput = {
   successUrl?: string;
   cancelUrl?: string;
   accessCode?: string;
+  waitlistClaimToken?: string;
   idempotencyKey: IdempotencyKey;
 };
 
-export type UpdateCheckoutSessionInput = Partial<Pick<CheckoutSession, 'buyer' | 'successUrl' | 'cancelUrl'>>;
+export type UpdateCheckoutSessionInput = Partial<
+  Pick<CheckoutSession, 'buyer' | 'successUrl' | 'cancelUrl'>
+>;
 
 export type ConfirmCheckoutInput = {
   sessionId: Ulid;

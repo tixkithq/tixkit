@@ -1,6 +1,6 @@
-'use client'
+'use client';
 
-import * as React from 'react'
+import * as React from 'react';
 import {
   type ColumnDef,
   type ColumnFiltersState,
@@ -15,7 +15,7 @@ import {
   getPaginationRowModel,
   getSortedRowModel,
   useReactTable,
-} from '@tanstack/react-table'
+} from '@tanstack/react-table';
 import {
   Table,
   TableBody,
@@ -23,27 +23,24 @@ import {
   TableHead,
   TableHeader,
   TableRow,
-} from '@/components/ui/table'
-import { DataTablePagination } from './pagination'
-import {
-  DataTableToolbar,
-  type DataTableFilter,
-} from './toolbar'
+} from '@/components/ui/table';
+import { DataTablePagination } from './pagination';
+import { DataTableToolbar, type DataTableFilter } from './toolbar';
 
 type DataTableProps<TData, TValue> = {
-  columns: ColumnDef<TData, TValue>[]
-  data: TData[]
-  searchPlaceholder?: string
-  searchKey?: string
-  filters?: DataTableFilter[]
-  toolbarActions?: React.ReactNode
-  emptyState?: React.ReactNode
-  getRowId?: (row: TData) => string
+  columns: ColumnDef<TData, TValue>[];
+  data: TData[];
+  searchPlaceholder?: string;
+  searchKey?: string;
+  filters?: DataTableFilter[];
+  toolbarActions?: React.ReactNode;
+  emptyState?: React.ReactNode;
+  getRowId?: (row: TData) => string;
   /** When provided, the external toolbar/pagination are used instead of the built-in ones. */
-  renderToolbar?: (table: TanstackTable<TData>) => React.ReactNode
-  renderPagination?: (table: TanstackTable<TData>) => React.ReactNode
-  showPagination?: boolean
-}
+  renderToolbar?: (table: TanstackTable<TData>) => React.ReactNode;
+  renderPagination?: (table: TanstackTable<TData>) => React.ReactNode;
+  showPagination?: boolean;
+};
 
 export function DataTable<TData, TValue>({
   columns,
@@ -58,13 +55,10 @@ export function DataTable<TData, TValue>({
   renderPagination,
   showPagination = true,
 }: DataTableProps<TData, TValue>) {
-  const [rowSelection, setRowSelection] = React.useState({})
-  const [columnVisibility, setColumnVisibility] =
-    React.useState<VisibilityState>({})
-  const [columnFilters, setColumnFilters] = React.useState<ColumnFiltersState>(
-    []
-  )
-  const [sorting, setSorting] = React.useState<SortingState>([])
+  const [rowSelection, setRowSelection] = React.useState({});
+  const [columnVisibility, setColumnVisibility] = React.useState<VisibilityState>({});
+  const [columnFilters, setColumnFilters] = React.useState<ColumnFiltersState>([]);
+  const [sorting, setSorting] = React.useState<SortingState>([]);
 
   const table = useReactTable({
     data,
@@ -87,13 +81,13 @@ export function DataTable<TData, TValue>({
     getSortedRowModel: getSortedRowModel(),
     getFacetedRowModel: getFacetedRowModel(),
     getFacetedUniqueValues: getFacetedUniqueValues(),
-  })
+  });
 
   const showToolbar =
-    renderToolbar || searchKey || (filters && filters.length > 0) || toolbarActions
+    renderToolbar || searchKey || (filters && filters.length > 0) || toolbarActions;
 
   return (
-    <div className='space-y-4'>
+    <div className="space-y-4">
       {showToolbar &&
         (renderToolbar ? (
           renderToolbar(table)
@@ -107,22 +101,43 @@ export function DataTable<TData, TValue>({
             {toolbarActions}
           </DataTableToolbar>
         ))}
-      <div className='rounded-md border'>
+      <div className="rounded-md border">
         <Table>
           <TableHeader>
             {table.getHeaderGroups().map((headerGroup) => (
-              <TableRow key={headerGroup.id} className='hover:bg-transparent'>
+              <TableRow key={headerGroup.id} className="hover:bg-transparent">
                 {headerGroup.headers.map((header) => {
+                  const headerDefinition = header.column.columnDef.header;
+                  const hasFallbackHeader =
+                    header.isPlaceholder ||
+                    headerDefinition === null ||
+                    headerDefinition === undefined ||
+                    headerDefinition === '';
+                  const headerContent = header.isPlaceholder
+                    ? null
+                    : flexRender(headerDefinition, header.getContext());
+                  const needsFallbackHeader =
+                    hasFallbackHeader ||
+                    headerContent === null ||
+                    headerContent === undefined ||
+                    headerContent === false ||
+                    headerContent === '';
+                  const fallbackHeader =
+                    header.column.id === 'actions' ? 'Actions' : header.column.id;
+
                   return (
-                    <TableHead key={header.id} colSpan={header.colSpan}>
-                      {header.isPlaceholder
-                        ? null
-                        : flexRender(
-                            header.column.columnDef.header,
-                            header.getContext()
-                          )}
+                    <TableHead
+                      key={header.id}
+                      colSpan={header.colSpan}
+                      aria-label={needsFallbackHeader ? fallbackHeader : undefined}
+                    >
+                      {needsFallbackHeader ? (
+                        <span className="sr-only">{fallbackHeader}</span>
+                      ) : (
+                        headerContent
+                      )}
                     </TableHead>
-                  )
+                  );
                 })}
               </TableRow>
             ))}
@@ -130,26 +145,17 @@ export function DataTable<TData, TValue>({
           <TableBody>
             {table.getRowModel().rows?.length ? (
               table.getRowModel().rows.map((row) => (
-                <TableRow
-                  key={row.id}
-                  data-state={row.getIsSelected() && 'selected'}
-                >
+                <TableRow key={row.id} data-state={row.getIsSelected() && 'selected'}>
                   {row.getVisibleCells().map((cell) => (
                     <TableCell key={cell.id}>
-                      {flexRender(
-                        cell.column.columnDef.cell,
-                        cell.getContext()
-                      )}
+                      {flexRender(cell.column.columnDef.cell, cell.getContext())}
                     </TableCell>
                   ))}
                 </TableRow>
               ))
             ) : (
-              <TableRow className='hover:bg-transparent'>
-                <TableCell
-                  colSpan={columns.length}
-                  className='h-24 text-center'
-                >
+              <TableRow className="hover:bg-transparent">
+                <TableCell colSpan={columns.length} className="h-24 text-center">
                   {emptyState ?? 'No results.'}
                 </TableCell>
               </TableRow>
@@ -158,13 +164,9 @@ export function DataTable<TData, TValue>({
         </Table>
       </div>
       {showPagination &&
-        (renderPagination ? (
-          renderPagination(table)
-        ) : (
-          <DataTablePagination table={table} />
-        ))}
+        (renderPagination ? renderPagination(table) : <DataTablePagination table={table} />)}
     </div>
-  )
+  );
 }
 
-export type { TanstackTable }
+export type { TanstackTable };

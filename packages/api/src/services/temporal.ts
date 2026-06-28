@@ -1,7 +1,9 @@
 import { Connection, Client } from '@temporalio/client';
+import { OpenTelemetryWorkflowClientInterceptor } from '@temporalio/interceptors-opentelemetry';
 import {
   checkoutSessionWorkflow,
   paymentReconciliationWorkflow,
+  privacyRequestWorkflow,
   refundWorkflow,
   clerkIdentitySyncWorkflow,
   webhookDeliveryWorkflow,
@@ -17,12 +19,14 @@ import {
   NOTIFICATION_WORKFLOW_VERSION,
   SMS_DELIVERY_WORKFLOW_VERSION,
   PAYMENT_RECONCILIATION_WORKFLOW_VERSION,
+  PRIVACY_REQUEST_WORKFLOW_VERSION,
   CLERK_IDENTITY_SYNC_WORKFLOW_VERSION,
   WEBHOOK_DELIVERY_WORKFLOW_VERSION,
   EXPORT_WORKFLOW_VERSION,
   checkoutWorkflowId,
   refundWorkflowId,
   paymentReconciliationWorkflowId,
+  privacyRequestWorkflowId,
   clerkIdentitySyncWorkflowId,
   webhookDeliveryWorkflowId,
   exportWorkflowId,
@@ -32,6 +36,7 @@ import {
   HOLD_EXPIRATION_WORKFLOW_VERSION,
   type CheckoutSessionWorkflowInput,
   type PaymentReconciliationWorkflowInput,
+  type PrivacyRequestWorkflowInput,
   type RefundWorkflowInput,
   type ClerkIdentitySyncWorkflowInput,
   type WebhookDeliveryWorkflowInput,
@@ -39,7 +44,7 @@ import {
   type NotificationDeliveryWorkflowInput,
   type SmsDeliveryWorkflowInput,
   type CheckoutState,
-} from '@gatekit/workflows';
+} from '@tixkit/workflows';
 import { config } from '../config/index.js';
 
 export type { CheckoutState };
@@ -58,15 +63,18 @@ export class TemporalClient {
     const client = new Client({
       connection,
       namespace: config.temporalNamespace,
+      interceptors: {
+        workflow: [new OpenTelemetryWorkflowClientInterceptor()],
+      },
     });
     return new TemporalClient(client);
   }
 
-  async startCheckoutSession(input: Omit<CheckoutSessionWorkflowInput, 'version'> & { holdId: string }) {
+  async startCheckoutSession(input: Omit<CheckoutSessionWorkflowInput, 'version'>) {
     const workflowId = checkoutWorkflowId(input.checkoutSessionId);
     try {
       return await this.client.workflow.start(checkoutSessionWorkflow, {
-        taskQueue: 'gatekit',
+        taskQueue: config.temporalTaskQueue,
         workflowId,
         args: [
           {
@@ -102,7 +110,7 @@ export class TemporalClient {
     const workflowId = refundWorkflowId(input.orderId, input.nonce);
     try {
       return await this.client.workflow.start(refundWorkflow, {
-        taskQueue: 'gatekit',
+        taskQueue: config.temporalTaskQueue,
         workflowId,
         args: [
           {
@@ -123,7 +131,7 @@ export class TemporalClient {
     const workflowId = paymentReconciliationWorkflowId(input.providerEventId);
     try {
       return await this.client.workflow.start(paymentReconciliationWorkflow, {
-        taskQueue: 'gatekit',
+        taskQueue: config.temporalTaskQueue,
         workflowId,
         args: [
           {
@@ -141,23 +149,35 @@ export class TemporalClient {
   }
 
   async startClerkIdentitySync(input: Omit<ClerkIdentitySyncWorkflowInput, 'version'>) {
-    const workflowId = clerkIdentitySyncWorkflowId(input.clerkUserId ?? input.clerkOrgId ?? 'unknown');
-    return this.client.workflow.start(clerkIdentitySyncWorkflow, {
-      taskQueue: 'gatekit',
-      workflowId,
-      args: [
-        {
-          version: CLERK_IDENTITY_SYNC_WORKFLOW_VERSION,
-          ...input,
-        } satisfies ClerkIdentitySyncWorkflowInput,
-      ],
-    });
+    const workflowId = clerkIdentitySyncWorkflowId(input.providerEventId);
+    try {
+      return await this.client.workflow.start(clerkIdentitySyncWorkflow, {
+        taskQueue: config.temporalTaskQueue,
+        workflowId,
+        args: [
+          {
+            version: CLERK_IDENTITY_SYNC_WORKFLOW_VERSION,
+            ...input,
+          } satisfies ClerkIdentitySyncWorkflowInput,
+        ],
+      });
+    } catch (err) {
+      if (isWorkflowAlreadyStartedError(err)) {
+        return this.client.workflow.getHandle(workflowId);
+      }
+      throw err;
+    }
   }
 
-  async startWebhookDelivery(input: Omit<WebhookDeliveryWorkflowInput, 'version'>) {
-    const workflowId = webhookDeliveryWorkflowId(input.eventId, input.endpointId);
+  async startWebhookDelivery(
+    input: Omit<WebhookDeliveryWorkflowInput, 'version'> & { replayNonce?: string },
+  ) {
+    const baseWorkflowId = webhookDeliveryWorkflowId(input.eventId, input.endpointId);
+    const workflowId = input.replayNonce
+      ? `${baseWorkflowId}:replay:${input.replayNonce}`
+      : baseWorkflowId;
     return this.client.workflow.start(webhookDeliveryWorkflow, {
-      taskQueue: 'gatekit',
+      taskQueue: config.temporalTaskQueue,
       workflowId,
       args: [
         {
@@ -171,7 +191,7 @@ export class TemporalClient {
   async startExport(input: Omit<ExportWorkflowInput, 'version'>) {
     const workflowId = exportWorkflowId(input.exportId);
     return this.client.workflow.start(exportWorkflow, {
-      taskQueue: 'gatekit',
+      taskQueue: config.temporalTaskQueue,
       workflowId,
       args: [
         {
@@ -187,11 +207,32 @@ export class TemporalClient {
     return handle.result();
   }
 
+  async startPrivacyRequest(input: Omit<PrivacyRequestWorkflowInput, 'version'>) {
+    const workflowId = privacyRequestWorkflowId(input.requestId);
+    try {
+      return await this.client.workflow.start(privacyRequestWorkflow, {
+        taskQueue: config.temporalTaskQueue,
+        workflowId,
+        args: [
+          {
+            version: PRIVACY_REQUEST_WORKFLOW_VERSION,
+            ...input,
+          } satisfies PrivacyRequestWorkflowInput,
+        ],
+      });
+    } catch (err) {
+      if (isWorkflowAlreadyStartedError(err)) {
+        return this.client.workflow.getHandle(workflowId);
+      }
+      throw err;
+    }
+  }
+
   async startNotificationDelivery(input: Omit<NotificationDeliveryWorkflowInput, 'version'>) {
     const workflowId = notificationWorkflowId(input.jobId);
     try {
       return await this.client.workflow.start(notificationDeliveryWorkflow, {
-        taskQueue: 'gatekit',
+        taskQueue: config.temporalTaskQueue,
         workflowId,
         args: [
           {
@@ -212,7 +253,7 @@ export class TemporalClient {
     const workflowId = smsDeliveryWorkflowId(input.jobId);
     try {
       return await this.client.workflow.start(smsDeliveryWorkflow, {
-        taskQueue: 'gatekit',
+        taskQueue: config.temporalTaskQueue,
         workflowId,
         args: [
           {
@@ -233,7 +274,7 @@ export class TemporalClient {
     const workflowId = holdExpirationWorkflowId();
     try {
       return await this.client.workflow.start(holdExpirationWorkflow, {
-        taskQueue: 'gatekit',
+        taskQueue: config.temporalTaskQueue,
         workflowId,
         args: [{ version: HOLD_EXPIRATION_WORKFLOW_VERSION }],
       });
@@ -248,5 +289,8 @@ export class TemporalClient {
 
 function isWorkflowAlreadyStartedError(err: unknown): boolean {
   if (!(err instanceof Error)) return false;
-  return err.name === 'WorkflowExecutionAlreadyStartedError' || err.message.includes('Workflow execution already started');
+  return (
+    err.name === 'WorkflowExecutionAlreadyStartedError' ||
+    err.message.includes('Workflow execution already started')
+  );
 }

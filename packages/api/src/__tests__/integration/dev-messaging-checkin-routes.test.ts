@@ -1,8 +1,8 @@
 import Fastify from 'fastify';
 import rateLimit from '@fastify/rate-limit';
 import { describe, expect, it, vi } from 'vitest';
-import type { Principal } from '@gatekit/domain';
-import type { Database } from '@gatekit/db';
+import type { Principal } from '@tixkit/domain';
+import type { Database } from '@tixkit/db';
 import type { AppContext } from '../../app.js';
 import { developerRoutes } from '../../routes/modules/developer.js';
 import { tenantRoutes } from '../../routes/modules/tenant.js';
@@ -70,25 +70,39 @@ function createMockDb(tables: Record<string, unknown> = {}): unknown {
   function createInsert(table: string) {
     return {
       values: (vals: Record<string, unknown>) => {
-        const row = { id: String(vals.id ?? 'new_1'), ...vals };
+        const row: Record<string, unknown> = { id: String(vals.id ?? 'new_1'), ...vals };
+        const insertRow = async () => {
+          const rows = getRows(table);
+          const duplicateWidgetImpression =
+            table === 'widget_impressions' &&
+            rows.some((existing) => {
+              const record = existing as Record<string, unknown>;
+              return (
+                record.event_id === row.event_id &&
+                record.visitor_hash === row.visitor_hash &&
+                record.impression_date === row.impression_date
+              );
+            });
+          if (duplicateWidgetImpression) {
+            throw Object.assign(
+              new Error(
+                'duplicate key value violates unique constraint "idx_widget_impressions_event_visitor_date"',
+              ),
+              { code: '23505' },
+            );
+          }
+          rows.push(row);
+          return row;
+        };
         return {
           returningAll: () => ({
-            executeTakeFirstOrThrow: async () => {
-              getRows(table).push(row);
-              return row;
-            },
+            executeTakeFirstOrThrow: insertRow,
           }),
           execute: async () => {
-            getRows(table).push(row);
+            await insertRow();
           },
         };
       },
-    };
-  }
-
-  function createDelete(_table: string) {
-    return {
-      where: () => ({ execute: async () => {} }),
     };
   }
 
@@ -104,13 +118,59 @@ function createMockDb(tables: Record<string, unknown> = {}): unknown {
   };
 }
 
+function createDelete(_table: string) {
+  return {
+    where: () => ({ execute: async () => {} }),
+  };
+}
+
 function makePrincipal(overrides: Partial<Principal> = {}): Principal {
   return {
     type: 'user',
     id: 'usr_1',
     tenantId: 'tnt_1',
     organizationIds: ['org_1'],
-    scopes: ['developers.write', 'events.read', 'events.write', 'messages.write', 'attendees.read', 'attendees.write', 'checkins.read', 'checkins.write', 'settings.write', 'billing.write', 'reports.read'],
+    scopes: [
+      'developers.write',
+      'events.read',
+      'events.write',
+      'messages.write',
+      'attendees.read',
+      'attendees.write',
+      'checkins.read',
+      'checkins.write',
+      'settings.write',
+      'billing.write',
+      'reports.read',
+    ],
+    ...overrides,
+  };
+}
+
+function checkoutQuestion(overrides: Record<string, unknown>) {
+  return {
+    id: 'q_1',
+    event_id: 'evt_1',
+    ticket_type_id: null,
+    type: 'text',
+    label: 'Question',
+    description: null,
+    required: true,
+    applies_to: 'buyer',
+    options: null,
+    placeholder: null,
+    validation_pattern: null,
+    conditional_visibility: null,
+    status: 'active',
+    is_hidden: false,
+    hidden_at: null,
+    deleted_at: null,
+    sort_order: 0,
+    is_consent_field: false,
+    consent_text: null,
+    consent_version: null,
+    created_at: new Date(),
+    updated_at: new Date(),
     ...overrides,
   };
 }
@@ -131,18 +191,38 @@ async function setupApp(
   }
   const context = {
     db: createMockDb(tables) as unknown as Database,
-    pricingEngine: { calculate: () => ({ currency: 'USD', totalCents: 0, subtotalCents: 0, discountCents: 0, taxCents: 0, feeCents: 0, lineItems: [] }) },
+    pricingEngine: {
+      calculate: () => ({
+        currency: 'USD',
+        totalCents: 0,
+        subtotalCents: 0,
+        discountCents: 0,
+        taxCents: 0,
+        feeCents: 0,
+        lineItems: [],
+      }),
+    },
     inventoryService: { reserveCart: () => ({ primaryHoldId: 'hld_1', expiresAt: new Date() }) },
-    qrService: { hashPayload: () => 'hash_1', getQrPayload: () => ({ valid: true, ticketId: 'tkt_1' }) },
+    qrService: {
+      hashPayload: () => 'hash_1',
+      getQrPayload: () => ({ valid: true, ticketId: 'tkt_1' }),
+    },
     authService: {},
     temporalClient: {
       startRefund: vi.fn(),
       startExport: vi.fn(),
       startNotificationDelivery: vi.fn(),
       startSmsDelivery: vi.fn(),
-      startCheckoutSession: vi.fn(async () => ({ workflowId: 'wf_1', result: async () => ({ status: 'completed', orderId: 'ord_1' }) })),
+      startCheckoutSession: vi.fn(async () => ({
+        workflowId: 'wf_1',
+        result: async () => ({ status: 'completed', orderId: 'ord_1' }),
+      })),
       startWebhookDelivery: vi.fn(),
-      getCheckoutState: vi.fn(async () => ({ paymentIntentId: 'pi_1', clientSecret: 'cs_1', status: 'pending_payment' })),
+      getCheckoutState: vi.fn(async () => ({
+        paymentIntentId: 'pi_1',
+        clientSecret: 'cs_1',
+        status: 'pending_payment',
+      })),
     },
     ...contextOverrides,
   };
@@ -184,7 +264,10 @@ function customQuestionRow(overrides: Record<string, unknown> = {}) {
 
 describe('OAuth application CRUD', () => {
   it('GET /me returns admin-compatible permissions and legacy scopes', async () => {
-    const app = await setupApp(authRoutes, makePrincipal({ scopes: ['events.read', 'orders.read'] }));
+    const app = await setupApp(
+      authRoutes,
+      makePrincipal({ scopes: ['events.read', 'orders.read'] }),
+    );
     const res = await app.inject({ method: 'GET', url: '/me' });
     expect(res.statusCode).toBe(200);
     const body = res.json();
@@ -207,8 +290,8 @@ describe('OAuth application CRUD', () => {
     });
     expect(res.statusCode).toBe(201);
     const body = res.json();
-    expect(body.clientId).toMatch(/^gk_oauth_/);
-    expect(body.clientSecret).toMatch(/^gk_secret_/);
+    expect(body.clientId).toMatch(/^tk_oauth_/);
+    expect(body.clientSecret).toMatch(/^tk_secret_/);
     expect(body.status).toBe('active');
     expect(body.organizationId).toBe('org_1');
     expect(body.tenantId).toBe('tnt_1');
@@ -217,12 +300,20 @@ describe('OAuth application CRUD', () => {
 
   it('GET /oauth-applications lists apps with tenantId, organizationId, updatedAt', async () => {
     const tables = {
-      oauth_applications: [{
-        id: 'oapp_1', tenant_id: 'tnt_1', organization_id: 'org_1', name: 'App1',
-        client_id: 'gk_oauth_1', redirect_uris: JSON.stringify(['https://example.com']),
-        scopes: JSON.stringify(['events.read']), status: 'active',
-        created_at: new Date(), updated_at: new Date(),
-      }],
+      oauth_applications: [
+        {
+          id: 'oapp_1',
+          tenant_id: 'tnt_1',
+          organization_id: 'org_1',
+          name: 'App1',
+          client_id: 'tk_oauth_1',
+          redirect_uris: JSON.stringify(['https://example.com']),
+          scopes: JSON.stringify(['events.read']),
+          status: 'active',
+          created_at: new Date(),
+          updated_at: new Date(),
+        },
+      ],
     };
     const app = await setupApp(developerRoutes, makePrincipal(), tables);
     const res = await app.inject({ method: 'GET', url: '/oauth-applications' });
@@ -236,11 +327,20 @@ describe('OAuth application CRUD', () => {
 
   it('DELETE /oauth-applications/:appId revokes the app', async () => {
     const tables = {
-      oauth_applications: [{
-        id: 'oapp_1', tenant_id: 'tnt_1', organization_id: 'org_1', name: 'App1',
-        client_id: 'gk_oauth_1', redirect_uris: '[]', scopes: '[]', status: 'active',
-        created_at: new Date(), updated_at: new Date(),
-      }],
+      oauth_applications: [
+        {
+          id: 'oapp_1',
+          tenant_id: 'tnt_1',
+          organization_id: 'org_1',
+          name: 'App1',
+          client_id: 'tk_oauth_1',
+          redirect_uris: '[]',
+          scopes: '[]',
+          status: 'active',
+          created_at: new Date(),
+          updated_at: new Date(),
+        },
+      ],
     };
     const app = await setupApp(developerRoutes, makePrincipal(), tables);
     const res = await app.inject({ method: 'DELETE', url: '/oauth-applications/oapp_1' });
@@ -252,16 +352,18 @@ describe('OAuth application CRUD', () => {
 describe('brand domain creation', () => {
   it('PATCH /organizations/:organizationId updates organization settings', async () => {
     const tables = {
-      organizations: [{
-        id: 'org_1',
-        tenant_id: 'tnt_1',
-        name: 'Old Org',
-        slug: 'old-org',
-        clerk_organization_id: null,
-        status: 'active',
-        created_at: new Date(),
-        updated_at: new Date(),
-      }],
+      organizations: [
+        {
+          id: 'org_1',
+          tenant_id: 'tnt_1',
+          name: 'Old Org',
+          slug: 'old-org',
+          clerk_organization_id: null,
+          status: 'active',
+          created_at: new Date(),
+          updated_at: new Date(),
+        },
+      ],
     };
     const app = await setupApp(tenantRoutes, makePrincipal(), tables);
     const res = await app.inject({
@@ -276,11 +378,21 @@ describe('brand domain creation', () => {
 
   it('POST /brands/:brandId/domains creates a domain', async () => {
     const tables = {
-      brands: [{
-        id: 'brd_1', tenant_id: 'tnt_1', organization_id: 'org_1', name: 'Brand1',
-        slug: 'brand1', status: 'active', theme: '{}', white_label: false,
-        legal_urls: '{}', created_at: new Date(), updated_at: new Date(),
-      }],
+      brands: [
+        {
+          id: 'brd_1',
+          tenant_id: 'tnt_1',
+          organization_id: 'org_1',
+          name: 'Brand1',
+          slug: 'brand1',
+          status: 'active',
+          theme: '{}',
+          white_label: false,
+          legal_urls: '{}',
+          created_at: new Date(),
+          updated_at: new Date(),
+        },
+      ],
     };
     const app = await setupApp(tenantRoutes, makePrincipal(), tables);
     const res = await app.inject({
@@ -296,16 +408,18 @@ describe('brand domain creation', () => {
 
   it('POST /brands rejects organizations outside the principal tenant', async () => {
     const tables = {
-      organizations: [{
-        id: 'org_other',
-        tenant_id: 'tnt_other',
-        name: 'Other Org',
-        slug: 'other',
-        clerk_organization_id: null,
-        status: 'active',
-        created_at: new Date(),
-        updated_at: new Date(),
-      }],
+      organizations: [
+        {
+          id: 'org_other',
+          tenant_id: 'tnt_other',
+          name: 'Other Org',
+          slug: 'other',
+          clerk_organization_id: null,
+          status: 'active',
+          created_at: new Date(),
+          updated_at: new Date(),
+        },
+      ],
     };
     const app = await setupApp(tenantRoutes, makePrincipal(), tables);
     const res = await app.inject({
@@ -319,16 +433,18 @@ describe('brand domain creation', () => {
 
   it('POST /organizations/:organizationId/members/invitations persists an invited member', async () => {
     const tables = {
-      organizations: [{
-        id: 'org_1',
-        tenant_id: 'tnt_1',
-        name: 'Org',
-        slug: 'org',
-        clerk_organization_id: null,
-        status: 'active',
-        created_at: new Date(),
-        updated_at: new Date(),
-      }],
+      organizations: [
+        {
+          id: 'org_1',
+          tenant_id: 'tnt_1',
+          name: 'Org',
+          slug: 'org',
+          clerk_organization_id: null,
+          status: 'active',
+          created_at: new Date(),
+          updated_at: new Date(),
+        },
+      ],
       user_profiles: [],
       organization_members: [],
     };
@@ -352,48 +468,63 @@ describe('brand domain creation', () => {
 
   it('GET /organizations/:organizationId/payment-accounts returns accounts for the organization', async () => {
     const tables = {
-      organizations: [{
-        id: 'org_1',
-        tenant_id: 'tnt_1',
-        name: 'Org',
-        slug: 'org',
-        clerk_organization_id: null,
-        status: 'active',
-        created_at: new Date(),
-        updated_at: new Date(),
-      }],
-      payment_accounts: [{
-        id: 'pa_1',
-        tenant_id: 'tnt_1',
-        organization_id: 'org_1',
-        provider: 'stripe_connect',
-        provider_account_id: 'acct_1',
-        status: 'active',
-        default_currency: 'USD',
-        created_at: new Date(),
-        updated_at: new Date(),
-      }],
+      organizations: [
+        {
+          id: 'org_1',
+          tenant_id: 'tnt_1',
+          name: 'Org',
+          slug: 'org',
+          clerk_organization_id: null,
+          status: 'active',
+          created_at: new Date(),
+          updated_at: new Date(),
+        },
+      ],
+      payment_accounts: [
+        {
+          id: 'pa_1',
+          tenant_id: 'tnt_1',
+          organization_id: 'org_1',
+          provider: 'stripe_connect',
+          provider_account_id: 'acct_1',
+          status: 'active',
+          default_currency: 'USD',
+          created_at: new Date(),
+          updated_at: new Date(),
+        },
+      ],
     };
     const app = await setupApp(tenantRoutes, makePrincipal(), tables);
     const res = await app.inject({ method: 'GET', url: '/organizations/org_1/payment-accounts' });
     expect(res.statusCode).toBe(200);
-    expect(res.json()[0]).toMatchObject({ id: 'pa_1', provider_account_id: 'acct_1' });
+    expect(res.json()[0]).toMatchObject({ id: 'pa_1', providerAccountId: 'acct_1' });
     await app.close();
   });
 
   it('GET /organizations/:organizationId/billing returns tenant-backed billing overview', async () => {
     const tables = {
-      tenants: [{ id: 'tnt_1', name: 'Tenant', status: 'active', plan: 'pro', created_at: new Date(), updated_at: new Date() }],
-      organizations: [{
-        id: 'org_1',
-        tenant_id: 'tnt_1',
-        name: 'Org',
-        slug: 'org',
-        clerk_organization_id: null,
-        status: 'active',
-        created_at: new Date(),
-        updated_at: new Date(),
-      }],
+      tenants: [
+        {
+          id: 'tnt_1',
+          name: 'Tenant',
+          status: 'active',
+          plan: 'pro',
+          created_at: new Date(),
+          updated_at: new Date(),
+        },
+      ],
+      organizations: [
+        {
+          id: 'org_1',
+          tenant_id: 'tnt_1',
+          name: 'Org',
+          slug: 'org',
+          clerk_organization_id: null,
+          status: 'active',
+          created_at: new Date(),
+          updated_at: new Date(),
+        },
+      ],
       tickets: [{ id: 'tkt_1', tenant_id: 'tnt_1' }],
     };
     const app = await setupApp(tenantRoutes, makePrincipal(), tables);
@@ -408,26 +539,244 @@ describe('brand domain creation', () => {
   });
 
   it('POST /organizations/:organizationId/payment-accounts/stripe-connect does not fake onboarding', async () => {
+    const originalStripeSecretKey = process.env.STRIPE_SECRET_KEY;
+    const originalStripeConnectClientId = process.env.STRIPE_CONNECT_CLIENT_ID;
+    delete process.env.STRIPE_SECRET_KEY;
+    delete process.env.STRIPE_CONNECT_CLIENT_ID;
     const tables = {
-      organizations: [{
-        id: 'org_1',
-        tenant_id: 'tnt_1',
-        name: 'Org',
-        slug: 'org',
-        clerk_organization_id: null,
-        status: 'active',
-        created_at: new Date(),
-        updated_at: new Date(),
-      }],
+      organizations: [
+        {
+          id: 'org_1',
+          tenant_id: 'tnt_1',
+          name: 'Org',
+          slug: 'org',
+          clerk_organization_id: null,
+          status: 'active',
+          created_at: new Date(),
+          updated_at: new Date(),
+        },
+      ],
       payment_accounts: [],
     };
     const app = await setupApp(tenantRoutes, makePrincipal(), tables);
+    try {
+      const res = await app.inject({
+        method: 'POST',
+        url: '/organizations/org_1/payment-accounts/stripe-connect',
+      });
+      expect(res.statusCode).toBe(400);
+      expect(tables.payment_accounts).toHaveLength(0);
+    } finally {
+      if (originalStripeSecretKey === undefined) {
+        delete process.env.STRIPE_SECRET_KEY;
+      } else {
+        process.env.STRIPE_SECRET_KEY = originalStripeSecretKey;
+      }
+      if (originalStripeConnectClientId === undefined) {
+        delete process.env.STRIPE_CONNECT_CLIENT_ID;
+      } else {
+        process.env.STRIPE_CONNECT_CLIENT_ID = originalStripeConnectClientId;
+      }
+      await app.close();
+    }
+  });
+
+  it('POST /organizations/:organizationId/payment-accounts/stripe-connect creates a Stripe account and onboarding link when configured', async () => {
+    const tables = {
+      organizations: [
+        {
+          id: 'org_1',
+          tenant_id: 'tnt_1',
+          name: 'Org',
+          slug: 'org',
+          clerk_organization_id: null,
+          status: 'active',
+          created_at: new Date(),
+          updated_at: new Date(),
+        },
+      ],
+      payment_accounts: [],
+      audit_logs: [],
+    };
+    const stripe = {
+      accounts: {
+        create: vi.fn(async () => ({
+          id: 'acct_created_1',
+          charges_enabled: false,
+          payouts_enabled: false,
+          details_submitted: false,
+          default_currency: 'usd',
+          requirements: {
+            currently_due: ['business_profile.url'],
+            pending_verification: [],
+            disabled_reason: null,
+          },
+        })),
+      },
+      accountLinks: {
+        create: vi.fn(async () => ({ url: 'https://connect.stripe.test/onboard/acct_created_1' })),
+      },
+    };
+    const app = await setupApp(tenantRoutes, makePrincipal(), tables, { stripe });
     const res = await app.inject({
       method: 'POST',
       url: '/organizations/org_1/payment-accounts/stripe-connect',
     });
-    expect(res.statusCode).toBe(400);
-    expect(tables.payment_accounts).toHaveLength(0);
+
+    expect(res.statusCode).toBe(201);
+    expect(res.json()).toMatchObject({
+      provider: 'stripe_connect',
+      providerAccountId: 'acct_created_1',
+      status: 'pending',
+      defaultCurrency: 'USD',
+      detailsSubmitted: false,
+      chargesEnabled: false,
+      payoutsEnabled: false,
+      requirements: {
+        currently_due: ['business_profile.url'],
+        pending_verification: [],
+        disabled_reason: null,
+      },
+      disabledReason: null,
+      onboardingUrl: 'https://connect.stripe.test/onboard/acct_created_1',
+    });
+    expect(tables.payment_accounts).toHaveLength(1);
+    expect(tables.payment_accounts[0]).toMatchObject({
+      tenant_id: 'tnt_1',
+      organization_id: 'org_1',
+      provider: 'stripe_connect',
+      provider_account_id: 'acct_created_1',
+      status: 'pending',
+      default_currency: 'USD',
+      details_submitted: false,
+      charges_enabled: false,
+      payouts_enabled: false,
+      disabled_reason: null,
+    });
+    expect(
+      JSON.parse(
+        String((tables.payment_accounts as Array<Record<string, unknown>>)[0].requirements),
+      ),
+    ).toMatchObject({
+      currently_due: ['business_profile.url'],
+    });
+    expect(stripe.accounts.create).toHaveBeenCalledWith({
+      type: 'express',
+      country: 'US',
+      business_profile: { name: 'Org' },
+      metadata: {
+        tenantId: 'tnt_1',
+        organizationId: 'org_1',
+      },
+    });
+    expect(stripe.accountLinks.create).toHaveBeenCalledWith({
+      account: 'acct_created_1',
+      type: 'account_onboarding',
+      refresh_url: expect.stringContaining(
+        '/settings/payments?organizationId=org_1&stripeConnect=refresh',
+      ),
+      return_url: expect.stringContaining(
+        '/settings/payments?organizationId=org_1&stripeConnect=return',
+      ),
+    });
+    await app.close();
+  });
+
+  it('POST /organizations/:organizationId/payment-accounts/:paymentAccountId/stripe-connect/refresh syncs status from Stripe', async () => {
+    const tables = {
+      organizations: [
+        {
+          id: 'org_1',
+          tenant_id: 'tnt_1',
+          name: 'Org',
+          slug: 'org',
+          clerk_organization_id: null,
+          status: 'active',
+          created_at: new Date(),
+          updated_at: new Date(),
+        },
+      ],
+      payment_accounts: [
+        {
+          id: 'pa_1',
+          tenant_id: 'tnt_1',
+          organization_id: 'org_1',
+          provider: 'stripe_connect',
+          provider_account_id: 'acct_refresh_1',
+          status: 'pending',
+          default_currency: 'USD',
+          details_submitted: false,
+          charges_enabled: false,
+          payouts_enabled: false,
+          requirements: null,
+          disabled_reason: null,
+          created_at: new Date(),
+          updated_at: new Date(),
+        },
+      ],
+      audit_logs: [],
+    };
+    const stripe = {
+      accounts: {
+        retrieve: vi.fn(async () => ({
+          id: 'acct_refresh_1',
+          charges_enabled: true,
+          payouts_enabled: true,
+          details_submitted: true,
+          default_currency: 'cad',
+          requirements: { disabled_reason: null },
+        })),
+      },
+      accountLinks: {
+        create: vi.fn(async () => ({ url: 'https://connect.stripe.test/update/acct_refresh_1' })),
+      },
+    };
+    const app = await setupApp(tenantRoutes, makePrincipal(), tables, { stripe });
+    const res = await app.inject({
+      method: 'POST',
+      url: '/organizations/org_1/payment-accounts/pa_1/stripe-connect/refresh',
+    });
+
+    expect(res.statusCode).toBe(200);
+    expect(res.json()).toMatchObject({
+      id: 'pa_1',
+      providerAccountId: 'acct_refresh_1',
+      status: 'active',
+      defaultCurrency: 'CAD',
+      detailsSubmitted: true,
+      chargesEnabled: true,
+      payoutsEnabled: true,
+      requirements: { disabled_reason: null },
+      disabledReason: null,
+      onboardingUrl: 'https://connect.stripe.test/update/acct_refresh_1',
+    });
+    expect(tables.payment_accounts[0]).toMatchObject({
+      status: 'active',
+      default_currency: 'CAD',
+      details_submitted: true,
+      charges_enabled: true,
+      payouts_enabled: true,
+      disabled_reason: null,
+    });
+    expect(
+      JSON.parse(
+        String((tables.payment_accounts as Array<Record<string, unknown>>)[0].requirements),
+      ),
+    ).toMatchObject({
+      disabled_reason: null,
+    });
+    expect(tables.audit_logs).toHaveLength(1);
+    expect(stripe.accounts.retrieve).toHaveBeenCalledWith('acct_refresh_1');
+    expect(stripe.accountLinks.create).toHaveBeenCalledWith({
+      account: 'acct_refresh_1',
+      type: 'account_update',
+      refresh_url: expect.stringContaining(
+        '/settings/payments?organizationId=org_1&stripeConnect=refresh',
+      ),
+      return_url: expect.stringContaining(
+        '/settings/payments?organizationId=org_1&stripeConnect=return',
+      ),
+    });
     await app.close();
   });
 });
@@ -504,56 +853,220 @@ describe('public checkout questions', () => {
 
     const res = await app.inject({ method: 'GET', url: '/public/events/evt_1/questions' });
     expect(res.statusCode).toBe(200);
-    expect(res.json().buyerQuestions.map((question: { id: string }) => question.id)).toEqual(['q_visible']);
+    expect(res.json().buyerQuestions.map((question: { id: string }) => question.id)).toEqual([
+      'q_visible',
+    ]);
     await app.close();
   });
 });
 
 describe('public access code validation', () => {
+  it('records deduped widget impressions without storing raw visitor identifiers', async () => {
+    const now = new Date('2026-06-01T00:00:00.000Z');
+    const tables = {
+      events: [
+        {
+          id: 'evt_1',
+          tenant_id: 'tnt_1',
+          organization_id: 'org_1',
+          brand_id: 'br_1',
+          slug: 'event',
+          title: 'Event',
+          description: null,
+          status: 'published',
+          timezone: 'America/New_York',
+          starts_at: now,
+          ends_at: null,
+          venue: null,
+        },
+      ],
+      widget_impressions: [],
+    };
+    const app = await setupApp(publicRoutes, makePrincipal(), tables);
+
+    const res = await app.inject({
+      method: 'POST',
+      url: '/public/events/evt_1/widget-impressions',
+      headers: { 'user-agent': 'vitest' },
+      payload: {
+        visitorId: 'visitor_123456',
+        trackingId: 'utm-widget',
+        affiliateCode: 'AFF123',
+        host: 'example.test',
+      },
+    });
+
+    expect(res.statusCode).toBe(201);
+    expect(res.json()).toEqual({ tracked: true, deduped: false });
+    const row = (tables.widget_impressions as Array<Record<string, unknown>>)[0];
+    expect(row.event_id).toBe('evt_1');
+    expect(row.tenant_id).toBe('tnt_1');
+    expect(row.organization_id).toBe('org_1');
+    expect(row.brand_id).toBe('br_1');
+    expect(row.visitor_hash).toEqual(expect.any(String));
+    expect(row.visitor_hash).not.toBe('visitor_123456');
+    expect(row.tracking_id).toBe('utm-widget');
+    expect(row.affiliate_code).toBe('AFF123');
+    await app.close();
+  });
+
+  it('fails closed for widget impressions in production without a hash secret', async () => {
+    const previousNodeEnv = process.env.NODE_ENV;
+    const previousHashSecret = process.env.WIDGET_IMPRESSION_HASH_SECRET;
+    process.env.NODE_ENV = 'production';
+    delete process.env.WIDGET_IMPRESSION_HASH_SECRET;
+
+    const tables = {
+      events: [
+        {
+          id: 'evt_1',
+          tenant_id: 'tnt_1',
+          organization_id: 'org_1',
+          brand_id: 'br_1',
+          slug: 'event',
+          title: 'Event',
+          description: null,
+          status: 'published',
+          timezone: 'America/New_York',
+          starts_at: new Date('2026-06-01T00:00:00.000Z'),
+          ends_at: null,
+          venue: null,
+        },
+      ],
+      widget_impressions: [],
+    };
+    const app = await setupApp(publicRoutes, makePrincipal(), tables);
+
+    try {
+      const res = await app.inject({
+        method: 'POST',
+        url: '/public/events/evt_1/widget-impressions',
+        headers: { 'user-agent': 'vitest' },
+        payload: { visitorId: 'visitor_123456' },
+      });
+
+      expect(res.statusCode).toBe(503);
+      expect(res.json()).toEqual({
+        error: {
+          code: 'WIDGET_IMPRESSION_HASH_NOT_CONFIGURED',
+          message: 'Widget impression hashing is not configured',
+        },
+      });
+      expect(tables.widget_impressions).toHaveLength(0);
+    } finally {
+      await app.close();
+      if (previousNodeEnv === undefined) delete process.env.NODE_ENV;
+      else process.env.NODE_ENV = previousNodeEnv;
+      if (previousHashSecret === undefined) delete process.env.WIDGET_IMPRESSION_HASH_SECRET;
+      else process.env.WIDGET_IMPRESSION_HASH_SECRET = previousHashSecret;
+    }
+  });
+
+  it('dedupes widget impressions with different X-Forwarded-For values when trustProxy is disabled', async () => {
+    const now = new Date('2026-06-01T00:00:00.000Z');
+    const tables = {
+      events: [
+        {
+          id: 'evt_1',
+          tenant_id: 'tnt_1',
+          organization_id: 'org_1',
+          brand_id: 'br_1',
+          slug: 'event',
+          title: 'Event',
+          description: null,
+          status: 'published',
+          timezone: 'America/New_York',
+          starts_at: now,
+          ends_at: null,
+          venue: null,
+        },
+      ],
+      widget_impressions: [],
+    };
+    const app = await setupApp(publicRoutes, makePrincipal(), tables);
+    const payload = {
+      trackingId: 'utm-widget',
+      affiliateCode: 'AFF123',
+      host: 'example.test',
+    };
+
+    const first = await app.inject({
+      method: 'POST',
+      url: '/public/events/evt_1/widget-impressions',
+      headers: {
+        'user-agent': 'vitest',
+        'x-forwarded-for': '203.0.113.10',
+      },
+      payload,
+    });
+    const second = await app.inject({
+      method: 'POST',
+      url: '/public/events/evt_1/widget-impressions',
+      headers: {
+        'user-agent': 'vitest',
+        'x-forwarded-for': '203.0.113.11',
+      },
+      payload,
+    });
+
+    expect(first.statusCode).toBe(201);
+    expect(first.json()).toEqual({ tracked: true, deduped: false });
+    expect(second.statusCode).toBe(200);
+    expect(second.json()).toEqual({ tracked: false, deduped: true });
+    expect(tables.widget_impressions).toHaveLength(1);
+    await app.close();
+  });
+
   it('accepts a valid access code for a published locked ticket', async () => {
     const now = new Date('2026-06-01T00:00:00.000Z');
     const app = await setupApp(publicRoutes, makePrincipal(), {
-      events: [{
-        id: 'evt_1',
-        slug: 'event',
-        title: 'Event',
-        description: null,
-        status: 'published',
-        timezone: 'America/New_York',
-        starts_at: now,
-        ends_at: null,
-        venue: null,
-        brand_id: 'br_1',
-      }],
-      ticket_types: [{
-        id: 'tt_locked',
-        event_id: 'evt_1',
-        name: 'VIP',
-        description: null,
-        kind: 'paid',
-        status: 'active',
-        visibility: 'locked',
-        currency: 'USD',
-        price_cents: 5000,
-        minimum_price_cents: null,
-        sales_start_at: null,
-        sales_end_at: null,
-        min_per_order: 1,
-        max_per_order: 4,
-        inventory_pool_id: 'inv_1',
-        sort_order: 1,
-        requires_access_code: true,
-        access_code_hint: null,
-      }],
-      access_rules: [{
-        id: 'acr_1',
-        ticket_type_id: 'tt_locked',
-        type: 'access_code',
-        value: 'VIP123',
-        max_uses: null,
-        uses_count: 0,
-        expires_at: null,
-      }],
+      events: [
+        {
+          id: 'evt_1',
+          slug: 'event',
+          title: 'Event',
+          description: null,
+          status: 'published',
+          timezone: 'America/New_York',
+          starts_at: now,
+          ends_at: null,
+          venue: null,
+          brand_id: 'br_1',
+        },
+      ],
+      ticket_types: [
+        {
+          id: 'tt_locked',
+          event_id: 'evt_1',
+          name: 'VIP',
+          description: null,
+          kind: 'paid',
+          status: 'active',
+          visibility: 'locked',
+          currency: 'USD',
+          price_cents: 5000,
+          minimum_price_cents: null,
+          sales_start_at: null,
+          sales_end_at: null,
+          min_per_order: 1,
+          max_per_order: 4,
+          inventory_pool_id: 'inv_1',
+          sort_order: 1,
+          requires_access_code: true,
+          access_code_hint: null,
+        },
+      ],
+      access_rules: [
+        {
+          id: 'acr_1',
+          ticket_type_id: 'tt_locked',
+          type: 'access_code',
+          value: 'VIP123',
+          max_uses: null,
+          uses_count: 0,
+          expires_at: null,
+        },
+      ],
     });
 
     const res = await app.inject({
@@ -573,47 +1086,53 @@ describe('public access code validation', () => {
   it('rejects an invalid access code for a locked ticket', async () => {
     const now = new Date('2026-06-01T00:00:00.000Z');
     const app = await setupApp(publicRoutes, makePrincipal(), {
-      events: [{
-        id: 'evt_1',
-        slug: 'event',
-        title: 'Event',
-        description: null,
-        status: 'published',
-        timezone: 'America/New_York',
-        starts_at: now,
-        ends_at: null,
-        venue: null,
-        brand_id: 'br_1',
-      }],
-      ticket_types: [{
-        id: 'tt_locked',
-        event_id: 'evt_1',
-        name: 'VIP',
-        description: null,
-        kind: 'paid',
-        status: 'active',
-        visibility: 'locked',
-        currency: 'USD',
-        price_cents: 5000,
-        minimum_price_cents: null,
-        sales_start_at: null,
-        sales_end_at: null,
-        min_per_order: 1,
-        max_per_order: 4,
-        inventory_pool_id: 'inv_1',
-        sort_order: 1,
-        requires_access_code: true,
-        access_code_hint: null,
-      }],
-      access_rules: [{
-        id: 'acr_1',
-        ticket_type_id: 'tt_locked',
-        type: 'access_code',
-        value: 'VIP123',
-        max_uses: null,
-        uses_count: 0,
-        expires_at: null,
-      }],
+      events: [
+        {
+          id: 'evt_1',
+          slug: 'event',
+          title: 'Event',
+          description: null,
+          status: 'published',
+          timezone: 'America/New_York',
+          starts_at: now,
+          ends_at: null,
+          venue: null,
+          brand_id: 'br_1',
+        },
+      ],
+      ticket_types: [
+        {
+          id: 'tt_locked',
+          event_id: 'evt_1',
+          name: 'VIP',
+          description: null,
+          kind: 'paid',
+          status: 'active',
+          visibility: 'locked',
+          currency: 'USD',
+          price_cents: 5000,
+          minimum_price_cents: null,
+          sales_start_at: null,
+          sales_end_at: null,
+          min_per_order: 1,
+          max_per_order: 4,
+          inventory_pool_id: 'inv_1',
+          sort_order: 1,
+          requires_access_code: true,
+          access_code_hint: null,
+        },
+      ],
+      access_rules: [
+        {
+          id: 'acr_1',
+          ticket_type_id: 'tt_locked',
+          type: 'access_code',
+          value: 'VIP123',
+          max_uses: null,
+          uses_count: 0,
+          expires_at: null,
+        },
+      ],
     });
 
     const res = await app.inject({
@@ -632,49 +1151,61 @@ describe('public access code validation', () => {
 
   it('throttles repeated access-code validation attempts per event', async () => {
     const now = new Date('2026-06-01T00:00:00.000Z');
-    const app = await setupApp(publicRoutes, makePrincipal(), {
-      events: [{
-        id: 'evt_1',
-        slug: 'event',
-        title: 'Event',
-        description: null,
-        status: 'published',
-        timezone: 'America/New_York',
-        starts_at: now,
-        ends_at: null,
-        venue: null,
-        brand_id: 'br_1',
-      }],
-      ticket_types: [{
-        id: 'tt_locked',
-        event_id: 'evt_1',
-        name: 'VIP',
-        description: null,
-        kind: 'paid',
-        status: 'active',
-        visibility: 'locked',
-        currency: 'USD',
-        price_cents: 5000,
-        minimum_price_cents: null,
-        sales_start_at: null,
-        sales_end_at: null,
-        min_per_order: 1,
-        max_per_order: 4,
-        inventory_pool_id: 'inv_1',
-        sort_order: 1,
-        requires_access_code: true,
-        access_code_hint: null,
-      }],
-      access_rules: [{
-        id: 'acr_1',
-        ticket_type_id: 'tt_locked',
-        type: 'access_code',
-        value: 'VIP123',
-        max_uses: null,
-        uses_count: 0,
-        expires_at: null,
-      }],
-    }, {}, { rateLimit: true });
+    const app = await setupApp(
+      publicRoutes,
+      makePrincipal(),
+      {
+        events: [
+          {
+            id: 'evt_1',
+            slug: 'event',
+            title: 'Event',
+            description: null,
+            status: 'published',
+            timezone: 'America/New_York',
+            starts_at: now,
+            ends_at: null,
+            venue: null,
+            brand_id: 'br_1',
+          },
+        ],
+        ticket_types: [
+          {
+            id: 'tt_locked',
+            event_id: 'evt_1',
+            name: 'VIP',
+            description: null,
+            kind: 'paid',
+            status: 'active',
+            visibility: 'locked',
+            currency: 'USD',
+            price_cents: 5000,
+            minimum_price_cents: null,
+            sales_start_at: null,
+            sales_end_at: null,
+            min_per_order: 1,
+            max_per_order: 4,
+            inventory_pool_id: 'inv_1',
+            sort_order: 1,
+            requires_access_code: true,
+            access_code_hint: null,
+          },
+        ],
+        access_rules: [
+          {
+            id: 'acr_1',
+            ticket_type_id: 'tt_locked',
+            type: 'access_code',
+            value: 'VIP123',
+            max_uses: null,
+            uses_count: 0,
+            expires_at: null,
+          },
+        ],
+      },
+      {},
+      { rateLimit: true },
+    );
 
     let lastStatus = 0;
     for (let attempt = 0; attempt < 11; attempt++) {
@@ -698,18 +1229,20 @@ describe('public access code validation', () => {
   it('returns only locked ticket IDs unlocked by the supplied access code', async () => {
     const now = new Date('2026-06-01T00:00:00.000Z');
     const app = await setupApp(publicRoutes, makePrincipal(), {
-      events: [{
-        id: 'evt_1',
-        slug: 'event',
-        title: 'Event',
-        description: null,
-        status: 'published',
-        timezone: 'America/New_York',
-        starts_at: now,
-        ends_at: null,
-        venue: null,
-        brand_id: 'br_1',
-      }],
+      events: [
+        {
+          id: 'evt_1',
+          slug: 'event',
+          title: 'Event',
+          description: null,
+          status: 'published',
+          timezone: 'America/New_York',
+          starts_at: now,
+          ends_at: null,
+          venue: null,
+          brand_id: 'br_1',
+        },
+      ],
       ticket_types: [
         {
           id: 'tt_vip',
@@ -792,10 +1325,76 @@ describe('public access code validation', () => {
 describe('messaging endpoint', () => {
   it('POST /events/:eventId/messages queues real SMS jobs and starts delivery workflows', async () => {
     const tables = {
-      events: [{ id: 'evt_1', tenant_id: 'tnt_1', organization_id: 'org_1', brand_id: 'brd_1', status: 'published', slug: 'evt', title: 'Event', timezone: 'UTC', starts_at: new Date(), visibility: 'public', seo: '{}' }],
-      attendees: [{ id: 'att_1', tenant_id: 'tnt_1', order_id: 'ord_1', event_id: 'evt_1', ticket_type_id: 'tt_1', ticket_id: 'tkt_1', first_name: 'Ada', last_name: 'Lovelace', email: 'ada@test.com', phone: '+15550000002', status: 'confirmed', custom_answers: null, checked_in_at: null, check_in_device_id: null, created_at: new Date(), updated_at: new Date() }],
-      message_consents: [{ id: 'msc_1', tenant_id: 'tnt_1', attendee_id: 'att_1', email: 'ada@test.com', phone: '+15550000002', email_opt_in: true, sms_opt_in: true, consent_text: 'Updates', consent_version: 'v1', consented_at: new Date(), revoked_at: null, created_at: new Date() }],
-      sms_provider_routes: [{ id: 'spr_1', tenant_id: 'tnt_1', brand_id: 'brd_1', provider_type: 'capture', credentials_ref: 'capture', sender_identity_id: 'ssi_1', priority: 0, is_fallback: false, rate_limit_per_hour: null, allowed_categories: JSON.stringify(['bulk']), status: 'active', smoke_send_verified: true, webhook_url: null, created_at: new Date(), updated_at: new Date() }],
+      events: [
+        {
+          id: 'evt_1',
+          tenant_id: 'tnt_1',
+          organization_id: 'org_1',
+          brand_id: 'brd_1',
+          status: 'published',
+          slug: 'evt',
+          title: 'Event',
+          timezone: 'UTC',
+          starts_at: new Date(),
+          visibility: 'public',
+          seo: '{}',
+        },
+      ],
+      attendees: [
+        {
+          id: 'att_1',
+          tenant_id: 'tnt_1',
+          order_id: 'ord_1',
+          event_id: 'evt_1',
+          ticket_type_id: 'tt_1',
+          ticket_id: 'tkt_1',
+          first_name: 'Ada',
+          last_name: 'Lovelace',
+          email: 'ada@test.com',
+          phone: '+15550000002',
+          status: 'confirmed',
+          custom_answers: null,
+          checked_in_at: null,
+          check_in_device_id: null,
+          created_at: new Date(),
+          updated_at: new Date(),
+        },
+      ],
+      message_consents: [
+        {
+          id: 'msc_1',
+          tenant_id: 'tnt_1',
+          attendee_id: 'att_1',
+          email: 'ada@test.com',
+          phone: '+15550000002',
+          email_opt_in: true,
+          sms_opt_in: true,
+          consent_text: 'Updates',
+          consent_version: 'v1',
+          consented_at: new Date(),
+          revoked_at: null,
+          created_at: new Date(),
+        },
+      ],
+      sms_provider_routes: [
+        {
+          id: 'spr_1',
+          tenant_id: 'tnt_1',
+          brand_id: 'brd_1',
+          provider_type: 'capture',
+          credentials_ref: 'capture',
+          sender_identity_id: 'ssi_1',
+          priority: 0,
+          is_fallback: false,
+          rate_limit_per_hour: null,
+          allowed_categories: JSON.stringify(['bulk']),
+          status: 'active',
+          smoke_send_verified: true,
+          webhook_url: null,
+          created_at: new Date(),
+          updated_at: new Date(),
+        },
+      ],
     };
     const app = await setupApp(messagingRoutes, makePrincipal(), tables);
     const res = await app.inject({
@@ -815,10 +1414,76 @@ describe('messaging endpoint', () => {
 
   it('POST /events/:eventId/messages persists consent exclusions without starting delivery workflows', async () => {
     const tables = {
-      events: [{ id: 'evt_1', tenant_id: 'tnt_1', organization_id: 'org_1', brand_id: 'brd_1', status: 'published', slug: 'evt', title: 'Event', timezone: 'UTC', starts_at: new Date(), visibility: 'public', seo: '{}' }],
-      attendees: [{ id: 'att_1', tenant_id: 'tnt_1', order_id: 'ord_1', event_id: 'evt_1', ticket_type_id: 'tt_1', ticket_id: 'tkt_1', first_name: 'Ada', last_name: 'Lovelace', email: 'ada@test.com', phone: '+15550000002', status: 'confirmed', custom_answers: null, checked_in_at: null, check_in_device_id: null, created_at: new Date(), updated_at: new Date() }],
-      message_consents: [{ id: 'msc_1', tenant_id: 'tnt_1', attendee_id: 'att_1', email: 'ada@test.com', phone: '+15550000002', email_opt_in: true, sms_opt_in: false, consent_text: 'Updates', consent_version: 'v1', consented_at: new Date(), revoked_at: null, created_at: new Date() }],
-      sms_provider_routes: [{ id: 'spr_1', tenant_id: 'tnt_1', brand_id: 'brd_1', provider_type: 'capture', credentials_ref: 'capture', sender_identity_id: 'ssi_1', priority: 0, is_fallback: false, rate_limit_per_hour: null, allowed_categories: JSON.stringify(['bulk']), status: 'active', smoke_send_verified: true, webhook_url: null, created_at: new Date(), updated_at: new Date() }],
+      events: [
+        {
+          id: 'evt_1',
+          tenant_id: 'tnt_1',
+          organization_id: 'org_1',
+          brand_id: 'brd_1',
+          status: 'published',
+          slug: 'evt',
+          title: 'Event',
+          timezone: 'UTC',
+          starts_at: new Date(),
+          visibility: 'public',
+          seo: '{}',
+        },
+      ],
+      attendees: [
+        {
+          id: 'att_1',
+          tenant_id: 'tnt_1',
+          order_id: 'ord_1',
+          event_id: 'evt_1',
+          ticket_type_id: 'tt_1',
+          ticket_id: 'tkt_1',
+          first_name: 'Ada',
+          last_name: 'Lovelace',
+          email: 'ada@test.com',
+          phone: '+15550000002',
+          status: 'confirmed',
+          custom_answers: null,
+          checked_in_at: null,
+          check_in_device_id: null,
+          created_at: new Date(),
+          updated_at: new Date(),
+        },
+      ],
+      message_consents: [
+        {
+          id: 'msc_1',
+          tenant_id: 'tnt_1',
+          attendee_id: 'att_1',
+          email: 'ada@test.com',
+          phone: '+15550000002',
+          email_opt_in: true,
+          sms_opt_in: false,
+          consent_text: 'Updates',
+          consent_version: 'v1',
+          consented_at: new Date(),
+          revoked_at: null,
+          created_at: new Date(),
+        },
+      ],
+      sms_provider_routes: [
+        {
+          id: 'spr_1',
+          tenant_id: 'tnt_1',
+          brand_id: 'brd_1',
+          provider_type: 'capture',
+          credentials_ref: 'capture',
+          sender_identity_id: 'ssi_1',
+          priority: 0,
+          is_fallback: false,
+          rate_limit_per_hour: null,
+          allowed_categories: JSON.stringify(['bulk']),
+          status: 'active',
+          smoke_send_verified: true,
+          webhook_url: null,
+          created_at: new Date(),
+          updated_at: new Date(),
+        },
+      ],
       sms_jobs: [],
     };
     const app = await setupApp(messagingRoutes, makePrincipal(), tables);
@@ -838,7 +1503,9 @@ describe('messaging endpoint', () => {
     const smsJobs = tables.sms_jobs as Array<{ status: string }>;
     expect(tables.sms_jobs).toHaveLength(1);
     expect(smsJobs[0].status).toBe('suppressed');
-    expect((app.context.temporalClient.startSmsDelivery as ReturnType<typeof vi.fn>)).not.toHaveBeenCalled();
+    expect(
+      app.context.temporalClient.startSmsDelivery as ReturnType<typeof vi.fn>,
+    ).not.toHaveBeenCalled();
     await app.close();
   });
 
@@ -863,7 +1530,21 @@ describe('messaging endpoint', () => {
       updated_at: now,
     }));
     const tables = {
-      events: [{ id: 'evt_1', tenant_id: 'tnt_1', organization_id: 'org_1', brand_id: 'brd_1', status: 'published', slug: 'evt', title: 'Event', timezone: 'UTC', starts_at: now, visibility: 'public', seo: '{}' }],
+      events: [
+        {
+          id: 'evt_1',
+          tenant_id: 'tnt_1',
+          organization_id: 'org_1',
+          brand_id: 'brd_1',
+          status: 'published',
+          slug: 'evt',
+          title: 'Event',
+          timezone: 'UTC',
+          starts_at: now,
+          visibility: 'public',
+          seo: '{}',
+        },
+      ],
       attendees,
       message_consents: attendees.map((attendee) => ({
         id: `msc_${attendee.id}`,
@@ -901,42 +1582,204 @@ describe('messaging endpoint', () => {
   it('POST /events/:eventId/messages/preview applies check-in and specific-recipient audiences', async () => {
     const now = new Date();
     const attendees = [
-      { id: 'att_checked', tenant_id: 'tnt_1', order_id: 'ord_1', event_id: 'evt_1', ticket_type_id: 'tt_1', ticket_id: 'tkt_1', first_name: 'Checked', last_name: 'Guest', email: 'checked@test.com', phone: '+15550000001', status: 'checked_in', custom_answers: null, checked_in_at: now, check_in_device_id: null, created_at: now, updated_at: now },
-      { id: 'att_waiting', tenant_id: 'tnt_1', order_id: 'ord_2', event_id: 'evt_1', ticket_type_id: 'tt_1', ticket_id: 'tkt_2', first_name: 'Waiting', last_name: 'Guest', email: 'waiting@test.com', phone: '+15550000002', status: 'confirmed', custom_answers: null, checked_in_at: null, check_in_device_id: null, created_at: now, updated_at: now },
-      { id: 'att_other_event', tenant_id: 'tnt_1', order_id: 'ord_3', event_id: 'evt_other', ticket_type_id: 'tt_1', ticket_id: 'tkt_3', first_name: 'Other', last_name: 'Event', email: 'other@test.com', phone: '+15550000003', status: 'confirmed', custom_answers: null, checked_in_at: null, check_in_device_id: null, created_at: now, updated_at: now },
+      {
+        id: 'att_checked',
+        tenant_id: 'tnt_1',
+        order_id: 'ord_1',
+        event_id: 'evt_1',
+        ticket_type_id: 'tt_1',
+        ticket_id: 'tkt_1',
+        first_name: 'Checked',
+        last_name: 'Guest',
+        email: 'checked@test.com',
+        phone: '+15550000001',
+        status: 'checked_in',
+        custom_answers: null,
+        checked_in_at: now,
+        check_in_device_id: null,
+        created_at: now,
+        updated_at: now,
+      },
+      {
+        id: 'att_waiting',
+        tenant_id: 'tnt_1',
+        order_id: 'ord_2',
+        event_id: 'evt_1',
+        ticket_type_id: 'tt_1',
+        ticket_id: 'tkt_2',
+        first_name: 'Waiting',
+        last_name: 'Guest',
+        email: 'waiting@test.com',
+        phone: '+15550000002',
+        status: 'confirmed',
+        custom_answers: null,
+        checked_in_at: null,
+        check_in_device_id: null,
+        created_at: now,
+        updated_at: now,
+      },
+      {
+        id: 'att_other_event',
+        tenant_id: 'tnt_1',
+        order_id: 'ord_3',
+        event_id: 'evt_other',
+        ticket_type_id: 'tt_1',
+        ticket_id: 'tkt_3',
+        first_name: 'Other',
+        last_name: 'Event',
+        email: 'other@test.com',
+        phone: '+15550000003',
+        status: 'confirmed',
+        custom_answers: null,
+        checked_in_at: null,
+        check_in_device_id: null,
+        created_at: now,
+        updated_at: now,
+      },
     ];
     const tables = {
-      events: [{ id: 'evt_1', tenant_id: 'tnt_1', organization_id: 'org_1', brand_id: 'brd_1', status: 'published', slug: 'evt', title: 'Event', timezone: 'UTC', starts_at: now, visibility: 'public', seo: '{}' }],
+      events: [
+        {
+          id: 'evt_1',
+          tenant_id: 'tnt_1',
+          organization_id: 'org_1',
+          brand_id: 'brd_1',
+          status: 'published',
+          slug: 'evt',
+          title: 'Event',
+          timezone: 'UTC',
+          starts_at: now,
+          visibility: 'public',
+          seo: '{}',
+        },
+      ],
       attendees,
-      message_consents: attendees.map((attendee) => ({ id: `msc_${attendee.id}`, tenant_id: 'tnt_1', attendee_id: attendee.id, email: attendee.email, phone: attendee.phone, email_opt_in: true, sms_opt_in: true, consent_text: 'Updates', consent_version: 'v1', consented_at: now, revoked_at: null, created_at: now })),
+      message_consents: attendees.map((attendee) => ({
+        id: `msc_${attendee.id}`,
+        tenant_id: 'tnt_1',
+        attendee_id: attendee.id,
+        email: attendee.email,
+        phone: attendee.phone,
+        email_opt_in: true,
+        sms_opt_in: true,
+        consent_text: 'Updates',
+        consent_version: 'v1',
+        consented_at: now,
+        revoked_at: null,
+        created_at: now,
+      })),
     };
     const app = await setupApp(messagingRoutes, makePrincipal(), tables);
 
-    const checkedIn = await app.inject({ method: 'POST', url: '/events/evt_1/messages/preview', payload: { templateKey: 'attendee-message', audience: 'checked_in', channel: 'sms' } });
+    const checkedIn = await app.inject({
+      method: 'POST',
+      url: '/events/evt_1/messages/preview',
+      payload: { templateKey: 'attendee-message', audience: 'checked_in', channel: 'sms' },
+    });
     expect(checkedIn.statusCode).toBe(200);
-    expect(checkedIn.json().recipients.map((recipient: { id: string }) => recipient.id)).toEqual(['att_checked']);
+    expect(checkedIn.json().recipients.map((recipient: { id: string }) => recipient.id)).toEqual([
+      'att_checked',
+    ]);
 
-    const notCheckedIn = await app.inject({ method: 'POST', url: '/events/evt_1/messages/preview', payload: { templateKey: 'attendee-message', audience: 'not_checked_in', channel: 'sms' } });
+    const notCheckedIn = await app.inject({
+      method: 'POST',
+      url: '/events/evt_1/messages/preview',
+      payload: { templateKey: 'attendee-message', audience: 'not_checked_in', channel: 'sms' },
+    });
     expect(notCheckedIn.statusCode).toBe(200);
-    expect(notCheckedIn.json().recipients.map((recipient: { id: string }) => recipient.id)).toEqual(['att_waiting']);
+    expect(notCheckedIn.json().recipients.map((recipient: { id: string }) => recipient.id)).toEqual(
+      ['att_waiting'],
+    );
 
-    const specific = await app.inject({ method: 'POST', url: '/events/evt_1/messages/preview', payload: { templateKey: 'attendee-message', audience: 'specific', attendeeIds: ['att_waiting', 'att_other_event'], channel: 'sms' } });
+    const specific = await app.inject({
+      method: 'POST',
+      url: '/events/evt_1/messages/preview',
+      payload: {
+        templateKey: 'attendee-message',
+        audience: 'specific',
+        attendeeIds: ['att_waiting', 'att_other_event'],
+        channel: 'sms',
+      },
+    });
     expect(specific.statusCode).toBe(200);
-    expect(specific.json().recipients.map((recipient: { id: string }) => recipient.id)).toEqual(['att_waiting']);
+    expect(specific.json().recipients.map((recipient: { id: string }) => recipient.id)).toEqual([
+      'att_waiting',
+    ]);
     await app.close();
   });
 
   it('POST /events/:eventId/messages/preview reports suppression and consent exclusions', async () => {
     const now = new Date();
-    const attendee = { id: 'att_1', tenant_id: 'tnt_1', order_id: 'ord_1', event_id: 'evt_1', ticket_type_id: 'tt_1', ticket_id: 'tkt_1', first_name: 'Ada', last_name: 'Lovelace', email: 'ada@test.com', phone: '+15550000002', status: 'confirmed', custom_answers: null, checked_in_at: null, check_in_device_id: null, created_at: now, updated_at: now };
+    const attendee = {
+      id: 'att_1',
+      tenant_id: 'tnt_1',
+      order_id: 'ord_1',
+      event_id: 'evt_1',
+      ticket_type_id: 'tt_1',
+      ticket_id: 'tkt_1',
+      first_name: 'Ada',
+      last_name: 'Lovelace',
+      email: 'ada@test.com',
+      phone: '+15550000002',
+      status: 'confirmed',
+      custom_answers: null,
+      checked_in_at: null,
+      check_in_device_id: null,
+      created_at: now,
+      updated_at: now,
+    };
     const tables = {
-      events: [{ id: 'evt_1', tenant_id: 'tnt_1', organization_id: 'org_1', brand_id: 'brd_1', status: 'published', slug: 'evt', title: 'Event', timezone: 'UTC', starts_at: now, visibility: 'public', seo: '{}' }],
+      events: [
+        {
+          id: 'evt_1',
+          tenant_id: 'tnt_1',
+          organization_id: 'org_1',
+          brand_id: 'brd_1',
+          status: 'published',
+          slug: 'evt',
+          title: 'Event',
+          timezone: 'UTC',
+          starts_at: now,
+          visibility: 'public',
+          seo: '{}',
+        },
+      ],
       attendees: [attendee],
-      message_consents: [{ id: 'msc_1', tenant_id: 'tnt_1', attendee_id: 'att_1', email: 'ada@test.com', phone: '+15550000002', email_opt_in: false, sms_opt_in: true, consent_text: 'Updates', consent_version: 'v1', consented_at: now, revoked_at: null, created_at: now }],
-      email_suppressions: [{ id: 'esu_1', tenant_id: 'tnt_1', email: 'ada@test.com', reason: 'bounce', bounce_type: 'hard', source: 'provider', created_at: now, updated_at: now }],
+      message_consents: [
+        {
+          id: 'msc_1',
+          tenant_id: 'tnt_1',
+          attendee_id: 'att_1',
+          email: 'ada@test.com',
+          phone: '+15550000002',
+          email_opt_in: false,
+          sms_opt_in: true,
+          consent_text: 'Updates',
+          consent_version: 'v1',
+          consented_at: now,
+          revoked_at: null,
+          created_at: now,
+        },
+      ],
+      email_suppressions: [
+        {
+          id: 'esu_1',
+          tenant_id: 'tnt_1',
+          email: 'ada@test.com',
+          reason: 'bounce',
+          bounce_type: 'hard',
+          source: 'provider',
+          created_at: now,
+          updated_at: now,
+        },
+      ],
     };
     const app = await setupApp(messagingRoutes, makePrincipal(), tables);
-    const res = await app.inject({ method: 'POST', url: '/events/evt_1/messages/preview', payload: { templateKey: 'attendee-message', audience: 'all', channel: 'email' } });
+    const res = await app.inject({
+      method: 'POST',
+      url: '/events/evt_1/messages/preview',
+      payload: { templateKey: 'attendee-message', audience: 'all', channel: 'email' },
+    });
     expect(res.statusCode).toBe(200);
     expect(res.json()).toMatchObject({
       audienceCount: 1,
@@ -947,27 +1790,292 @@ describe('messaging endpoint', () => {
     await app.close();
   });
 
+  it('POST /events/:eventId/messages/preview reports missing channel contacts as skipped', async () => {
+    const now = new Date();
+    const tables = {
+      events: [
+        {
+          id: 'evt_1',
+          tenant_id: 'tnt_1',
+          organization_id: 'org_1',
+          brand_id: 'brd_1',
+          status: 'published',
+          slug: 'evt',
+          title: 'Event',
+          timezone: 'UTC',
+          starts_at: now,
+          visibility: 'public',
+          seo: '{}',
+        },
+      ],
+      attendees: [
+        {
+          id: 'att_1',
+          tenant_id: 'tnt_1',
+          order_id: 'ord_1',
+          event_id: 'evt_1',
+          ticket_type_id: 'tt_1',
+          ticket_id: 'tkt_1',
+          first_name: 'Ada',
+          last_name: 'Lovelace',
+          email: null,
+          phone: '+15550000002',
+          status: 'confirmed',
+          custom_answers: null,
+          checked_in_at: null,
+          check_in_device_id: null,
+          created_at: now,
+          updated_at: now,
+        },
+      ],
+      message_consents: [
+        {
+          id: 'msc_1',
+          tenant_id: 'tnt_1',
+          attendee_id: 'att_1',
+          email: '',
+          phone: '+15550000002',
+          email_opt_in: true,
+          sms_opt_in: true,
+          consent_text: 'Updates',
+          consent_version: 'v1',
+          consented_at: now,
+          revoked_at: null,
+          created_at: now,
+        },
+      ],
+    };
+    const app = await setupApp(messagingRoutes, makePrincipal(), tables);
+    const res = await app.inject({
+      method: 'POST',
+      url: '/events/evt_1/messages/preview',
+      payload: { templateKey: 'attendee-message', audience: 'all', channel: 'email' },
+    });
+    expect(res.statusCode).toBe(200);
+    expect(res.json()).toMatchObject({
+      audienceCount: 1,
+      eligibleCount: 0,
+      suppressedRecipients: 0,
+      consentExclusions: 0,
+      skippedRecipients: 1,
+      recipients: [],
+    });
+    await app.close();
+  });
+
+  it('POST /events/:eventId/messages/preview and send share mixed-channel eligibility decisions', async () => {
+    const now = new Date();
+    const tables = {
+      events: [
+        {
+          id: 'evt_1',
+          tenant_id: 'tnt_1',
+          organization_id: 'org_1',
+          brand_id: 'brd_1',
+          status: 'published',
+          slug: 'evt',
+          title: 'Event',
+          timezone: 'UTC',
+          starts_at: now,
+          visibility: 'public',
+          seo: '{}',
+        },
+      ],
+      attendees: [
+        {
+          id: 'att_1',
+          tenant_id: 'tnt_1',
+          order_id: 'ord_1',
+          event_id: 'evt_1',
+          ticket_type_id: 'tt_1',
+          ticket_id: 'tkt_1',
+          first_name: 'Ada',
+          last_name: 'Lovelace',
+          email: 'ada@test.com',
+          phone: '+15550000002',
+          status: 'confirmed',
+          custom_answers: null,
+          checked_in_at: null,
+          check_in_device_id: null,
+          created_at: now,
+          updated_at: now,
+        },
+      ],
+      message_consents: [
+        {
+          id: 'msc_1',
+          tenant_id: 'tnt_1',
+          attendee_id: 'att_1',
+          email: 'ada@test.com',
+          phone: '+15550000002',
+          email_opt_in: true,
+          sms_opt_in: false,
+          consent_text: 'Updates',
+          consent_version: 'v1',
+          consented_at: now,
+          revoked_at: null,
+          created_at: now,
+        },
+      ],
+      notification_templates: [
+        {
+          id: 'ntf_1',
+          tenant_id: 'tnt_1',
+          brand_id: 'brd_1',
+          key: 'attendee-message',
+          name: 'Attendee message',
+          description: null,
+          category: 'bulk',
+          variables: '[]',
+          current_version_id: 'ntv_1',
+          created_at: now,
+          updated_at: now,
+        },
+      ],
+      notification_template_versions: [
+        {
+          id: 'ntv_1',
+          template_id: 'ntf_1',
+          version: 1,
+          subject_template: 'Update',
+          html_template: '<p>Update</p>',
+          text_template: 'Update',
+          locale: 'en',
+          is_default: true,
+          published_at: now,
+          created_at: now,
+          updated_at: now,
+        },
+      ],
+      email_provider_routes: [
+        {
+          id: 'epr_1',
+          tenant_id: 'tnt_1',
+          brand_id: 'brd_1',
+          provider_type: 'capture',
+          credentials_ref: 'capture',
+          sender_domain: 'example.com',
+          priority: 0,
+          is_fallback: false,
+          rate_limit_per_hour: null,
+          allowed_categories: JSON.stringify(['bulk']),
+          status: 'active',
+          smoke_send_verified: true,
+          created_at: now,
+          updated_at: now,
+        },
+      ],
+      sms_provider_routes: [
+        {
+          id: 'spr_1',
+          tenant_id: 'tnt_1',
+          brand_id: 'brd_1',
+          provider_type: 'capture',
+          credentials_ref: 'capture',
+          sender_identity_id: 'ssi_1',
+          priority: 0,
+          is_fallback: false,
+          rate_limit_per_hour: null,
+          allowed_categories: JSON.stringify(['bulk']),
+          status: 'active',
+          smoke_send_verified: true,
+          webhook_url: null,
+          created_at: now,
+          updated_at: now,
+        },
+      ],
+      email_jobs: [],
+      sms_jobs: [],
+    };
+    const app = await setupApp(messagingRoutes, makePrincipal(), tables);
+    const payload = { templateKey: 'attendee-message', audience: 'all', channel: 'both' };
+
+    const preview = await app.inject({
+      method: 'POST',
+      url: '/events/evt_1/messages/preview',
+      payload,
+    });
+    expect(preview.statusCode).toBe(200);
+    expect(preview.json()).toMatchObject({
+      audienceCount: 1,
+      eligibleCount: 1,
+      suppressedRecipients: 1,
+      consentExclusions: 1,
+      skippedRecipients: 0,
+      recipients: [{ id: 'att_1' }],
+    });
+
+    const send = await app.inject({
+      method: 'POST',
+      url: '/events/evt_1/messages',
+      headers: { 'Idempotency-Key': 'msg_preview_parity' },
+      payload,
+    });
+    expect(send.statusCode).toBe(202);
+    expect(send.json()).toMatchObject({
+      audienceCount: preview.json().audienceCount,
+      suppressedRecipients: preview.json().suppressedRecipients,
+      consentExclusions: preview.json().consentExclusions,
+      skippedRecipients: preview.json().skippedRecipients,
+      queuedEmailJobs: 1,
+      queuedSmsJobs: 0,
+    });
+    expect(tables.email_jobs).toHaveLength(1);
+    expect(tables.sms_jobs).toHaveLength(1);
+    expect(
+      JSON.parse((tables.email_jobs as Array<{ variables: string }>)[0].variables),
+    ).toMatchObject({
+      campaignAudience: 'all',
+      campaignAudienceAttendeeIds: [],
+      campaignAudienceCount: 1,
+    });
+    expect((tables.sms_jobs as Array<{ status: string }>)[0].status).toBe('suppressed');
+    await app.close();
+  });
+
   it('GET /events/:eventId/messages returns persisted campaign summaries', async () => {
     const now = new Date();
     const tables = {
-      events: [{ id: 'evt_1', tenant_id: 'tnt_1', organization_id: 'org_1', brand_id: 'brd_1', status: 'published', slug: 'evt', title: 'Event', timezone: 'UTC', starts_at: now, visibility: 'public', seo: '{}' }],
-      sms_jobs: [{
-        id: 'smj_1',
-        tenant_id: 'tnt_1',
-        brand_id: 'brd_1',
-        to_phone: '+15550000002',
-        body: 'Update',
-        template_key: 'attendee-message',
-        variables: JSON.stringify({ eventId: 'evt_1', attendeeId: 'att_1', notificationType: 'bulk', campaignAudience: 'checked_in' }),
-        provider_route_id: 'spr_1',
-        status: 'queued',
-        priority: 'low',
-        scheduled_at: null,
-        idempotency_key: 'msg_campaign:sms:att_1',
-        workflow_id: null,
-        created_at: now,
-        updated_at: now,
-      }],
+      events: [
+        {
+          id: 'evt_1',
+          tenant_id: 'tnt_1',
+          organization_id: 'org_1',
+          brand_id: 'brd_1',
+          status: 'published',
+          slug: 'evt',
+          title: 'Event',
+          timezone: 'UTC',
+          starts_at: now,
+          visibility: 'public',
+          seo: '{}',
+        },
+      ],
+      sms_jobs: [
+        {
+          id: 'smj_1',
+          tenant_id: 'tnt_1',
+          brand_id: 'brd_1',
+          to_phone: '+15550000002',
+          body: 'Update',
+          template_key: 'attendee-message',
+          variables: JSON.stringify({
+            eventId: 'evt_1',
+            attendeeId: 'att_1',
+            notificationType: 'bulk',
+            campaignAudience: 'checked_in',
+            campaignAudienceCount: 7,
+          }),
+          provider_route_id: 'spr_1',
+          status: 'queued',
+          priority: 'low',
+          scheduled_at: null,
+          idempotency_key: 'msg_campaign:sms:att_1',
+          workflow_id: null,
+          created_at: now,
+          updated_at: now,
+        },
+      ],
     };
     const app = await setupApp(messagingRoutes, makePrincipal(), tables);
     const res = await app.inject({ method: 'GET', url: '/events/evt_1/messages' });
@@ -978,7 +2086,70 @@ describe('messaging endpoint', () => {
       channel: 'sms',
       status: 'queued',
       audience: 'checked_in',
+      audienceKey: 'checked_in',
+      audienceLabel: 'Checked in',
+      audienceAttendeeIds: [],
+      audienceCount: 7,
       queuedSmsJobs: 1,
+    });
+    await app.close();
+  });
+
+  it('GET /events/:eventId/messages serializes specific-audience metadata for reload labels', async () => {
+    const now = new Date();
+    const tables = {
+      events: [
+        {
+          id: 'evt_1',
+          tenant_id: 'tnt_1',
+          organization_id: 'org_1',
+          brand_id: 'brd_1',
+          status: 'published',
+          slug: 'evt',
+          title: 'Event',
+          timezone: 'UTC',
+          starts_at: now,
+          visibility: 'public',
+          seo: '{}',
+        },
+      ],
+      sms_jobs: [
+        {
+          id: 'smj_1',
+          tenant_id: 'tnt_1',
+          brand_id: 'brd_1',
+          to_phone: '+15550000002',
+          body: 'Update',
+          template_key: 'attendee-message',
+          variables: JSON.stringify({
+            eventId: 'evt_1',
+            attendeeId: 'att_1',
+            notificationType: 'bulk',
+            campaignAudience: 'specific',
+            campaignAudienceAttendeeIds: ['att_1', 'att_2'],
+            campaignAudienceCount: 2,
+          }),
+          provider_route_id: 'spr_1',
+          status: 'queued',
+          priority: 'low',
+          scheduled_at: null,
+          idempotency_key: 'msg_specific:sms:att_1',
+          workflow_id: null,
+          created_at: now,
+          updated_at: now,
+        },
+      ],
+    };
+    const app = await setupApp(messagingRoutes, makePrincipal(), tables);
+    const res = await app.inject({ method: 'GET', url: '/events/evt_1/messages' });
+    expect(res.statusCode).toBe(200);
+    expect(res.json().items[0]).toMatchObject({
+      id: 'msg_specific',
+      audience: 'custom',
+      audienceKey: 'specific',
+      audienceLabel: 'Custom (2 attendees)',
+      audienceAttendeeIds: ['att_1', 'att_2'],
+      audienceCount: 2,
     });
     await app.close();
   });
@@ -986,41 +2157,63 @@ describe('messaging endpoint', () => {
   it('GET /events/:eventId/messages/:campaignId returns jobs and deliveries', async () => {
     const now = new Date();
     const tables = {
-      events: [{ id: 'evt_1', tenant_id: 'tnt_1', organization_id: 'org_1', brand_id: 'brd_1', status: 'published', slug: 'evt', title: 'Event', timezone: 'UTC', starts_at: now, visibility: 'public', seo: '{}' }],
-      sms_jobs: [{
-        id: 'smj_1',
-        tenant_id: 'tnt_1',
-        brand_id: 'brd_1',
-        to_phone: '+15550000002',
-        body: 'Update',
-        template_key: 'attendee-message',
-        variables: JSON.stringify({ eventId: 'evt_1', attendeeId: 'att_1', notificationType: 'bulk' }),
-        provider_route_id: 'spr_1',
-        status: 'sent',
-        priority: 'low',
-        scheduled_at: null,
-        idempotency_key: 'msg_detail:sms:att_1',
-        workflow_id: null,
-        created_at: now,
-        updated_at: now,
-      }],
-      sms_deliveries: [{
-        id: 'smd_1',
-        tenant_id: 'tnt_1',
-        job_id: 'smj_1',
-        provider: 'capture',
-        provider_message_id: 'provider_1',
-        status: 'sent',
-        attempted_providers: JSON.stringify(['capture']),
-        accepted_provider: 'capture',
-        sent_at: now,
-        delivered_at: null,
-        failed_at: null,
-        failure_reason: null,
-        metadata: '{}',
-        created_at: now,
-        updated_at: now,
-      }],
+      events: [
+        {
+          id: 'evt_1',
+          tenant_id: 'tnt_1',
+          organization_id: 'org_1',
+          brand_id: 'brd_1',
+          status: 'published',
+          slug: 'evt',
+          title: 'Event',
+          timezone: 'UTC',
+          starts_at: now,
+          visibility: 'public',
+          seo: '{}',
+        },
+      ],
+      sms_jobs: [
+        {
+          id: 'smj_1',
+          tenant_id: 'tnt_1',
+          brand_id: 'brd_1',
+          to_phone: '+15550000002',
+          body: 'Update',
+          template_key: 'attendee-message',
+          variables: JSON.stringify({
+            eventId: 'evt_1',
+            attendeeId: 'att_1',
+            notificationType: 'bulk',
+          }),
+          provider_route_id: 'spr_1',
+          status: 'sent',
+          priority: 'low',
+          scheduled_at: null,
+          idempotency_key: 'msg_detail:sms:att_1',
+          workflow_id: null,
+          created_at: now,
+          updated_at: now,
+        },
+      ],
+      sms_deliveries: [
+        {
+          id: 'smd_1',
+          tenant_id: 'tnt_1',
+          job_id: 'smj_1',
+          provider: 'capture',
+          provider_message_id: 'provider_1',
+          status: 'sent',
+          attempted_providers: JSON.stringify(['capture']),
+          accepted_provider: 'capture',
+          sent_at: now,
+          delivered_at: null,
+          failed_at: null,
+          failure_reason: null,
+          metadata: '{}',
+          created_at: now,
+          updated_at: now,
+        },
+      ],
     };
     const app = await setupApp(messagingRoutes, makePrincipal(), tables);
     const res = await app.inject({ method: 'GET', url: '/events/evt_1/messages/msg_detail' });
@@ -1037,57 +2230,106 @@ describe('messaging endpoint', () => {
   it('GET /events/:eventId/messages/:campaignId/jobs lists and details persisted campaign jobs', async () => {
     const now = new Date();
     const tables = {
-      events: [{ id: 'evt_1', tenant_id: 'tnt_1', organization_id: 'org_1', brand_id: 'brd_1', status: 'published', slug: 'evt', title: 'Event', timezone: 'UTC', starts_at: now, visibility: 'public', seo: '{}' }],
-      sms_jobs: [{
-        id: 'smj_1',
-        tenant_id: 'tnt_1',
-        brand_id: 'brd_1',
-        to_phone: '+15550000002',
-        body: 'Update',
-        template_key: 'attendee-message',
-        variables: JSON.stringify({ eventId: 'evt_1', attendeeId: 'att_1', notificationType: 'bulk' }),
-        provider_route_id: 'spr_1',
-        status: 'queued',
-        priority: 'low',
-        scheduled_at: null,
-        idempotency_key: 'msg_jobs:sms:att_1',
-        workflow_id: null,
-        created_at: now,
-        updated_at: now,
-      }],
+      events: [
+        {
+          id: 'evt_1',
+          tenant_id: 'tnt_1',
+          organization_id: 'org_1',
+          brand_id: 'brd_1',
+          status: 'published',
+          slug: 'evt',
+          title: 'Event',
+          timezone: 'UTC',
+          starts_at: now,
+          visibility: 'public',
+          seo: '{}',
+        },
+      ],
+      sms_jobs: [
+        {
+          id: 'smj_1',
+          tenant_id: 'tnt_1',
+          brand_id: 'brd_1',
+          to_phone: '+15550000002',
+          body: 'Update',
+          template_key: 'attendee-message',
+          variables: JSON.stringify({
+            eventId: 'evt_1',
+            attendeeId: 'att_1',
+            notificationType: 'bulk',
+          }),
+          provider_route_id: 'spr_1',
+          status: 'queued',
+          priority: 'low',
+          scheduled_at: null,
+          idempotency_key: 'msg_jobs:sms:att_1',
+          workflow_id: null,
+          created_at: now,
+          updated_at: now,
+        },
+      ],
     };
     const app = await setupApp(messagingRoutes, makePrincipal(), tables);
     const list = await app.inject({ method: 'GET', url: '/events/evt_1/messages/msg_jobs/jobs' });
     expect(list.statusCode).toBe(200);
-    expect(list.json().items).toMatchObject([{ channel: 'sms', campaignId: 'msg_jobs', job: { id: 'smj_1' } }]);
+    expect(list.json().items).toMatchObject([
+      { channel: 'sms', campaignId: 'msg_jobs', job: { id: 'smj_1' } },
+    ]);
 
-    const detail = await app.inject({ method: 'GET', url: '/events/evt_1/messages/msg_jobs/jobs/sms/smj_1' });
+    const detail = await app.inject({
+      method: 'GET',
+      url: '/events/evt_1/messages/msg_jobs/jobs/sms/smj_1',
+    });
     expect(detail.statusCode).toBe(200);
-    expect(detail.json()).toMatchObject({ channel: 'sms', campaignId: 'msg_jobs', job: { id: 'smj_1' } });
+    expect(detail.json()).toMatchObject({
+      channel: 'sms',
+      campaignId: 'msg_jobs',
+      job: { id: 'smj_1' },
+    });
     await app.close();
   });
 
   it('GET /events/:eventId/messages/:campaignId/delivery-logs scopes list and detail to campaign deliveries', async () => {
     const now = new Date();
     const tables = {
-      events: [{ id: 'evt_1', tenant_id: 'tnt_1', organization_id: 'org_1', brand_id: 'brd_1', status: 'published', slug: 'evt', title: 'Event', timezone: 'UTC', starts_at: now, visibility: 'public', seo: '{}' }],
-      sms_jobs: [{
-        id: 'smj_1',
-        tenant_id: 'tnt_1',
-        brand_id: 'brd_1',
-        to_phone: '+15550000002',
-        body: 'Update',
-        template_key: 'attendee-message',
-        variables: JSON.stringify({ eventId: 'evt_1', attendeeId: 'att_1', notificationType: 'bulk' }),
-        provider_route_id: 'spr_1',
-        status: 'sent',
-        priority: 'low',
-        scheduled_at: null,
-        idempotency_key: 'msg_logs:sms:att_1',
-        workflow_id: null,
-        created_at: now,
-        updated_at: now,
-      }],
+      events: [
+        {
+          id: 'evt_1',
+          tenant_id: 'tnt_1',
+          organization_id: 'org_1',
+          brand_id: 'brd_1',
+          status: 'published',
+          slug: 'evt',
+          title: 'Event',
+          timezone: 'UTC',
+          starts_at: now,
+          visibility: 'public',
+          seo: '{}',
+        },
+      ],
+      sms_jobs: [
+        {
+          id: 'smj_1',
+          tenant_id: 'tnt_1',
+          brand_id: 'brd_1',
+          to_phone: '+15550000002',
+          body: 'Update',
+          template_key: 'attendee-message',
+          variables: JSON.stringify({
+            eventId: 'evt_1',
+            attendeeId: 'att_1',
+            notificationType: 'bulk',
+          }),
+          provider_route_id: 'spr_1',
+          status: 'sent',
+          priority: 'low',
+          scheduled_at: null,
+          idempotency_key: 'msg_logs:sms:att_1',
+          workflow_id: null,
+          created_at: now,
+          updated_at: now,
+        },
+      ],
       sms_deliveries: [
         {
           id: 'smd_1',
@@ -1126,81 +2368,139 @@ describe('messaging endpoint', () => {
       ],
     };
     const app = await setupApp(messagingRoutes, makePrincipal(), tables);
-    const list = await app.inject({ method: 'GET', url: '/events/evt_1/messages/msg_logs/delivery-logs' });
+    const list = await app.inject({
+      method: 'GET',
+      url: '/events/evt_1/messages/msg_logs/delivery-logs',
+    });
     expect(list.statusCode).toBe(200);
     expect(list.json().items).toHaveLength(1);
     expect(list.json().items[0]).toMatchObject({ channel: 'sms', delivery: { id: 'smd_1' } });
 
-    const detail = await app.inject({ method: 'GET', url: '/events/evt_1/messages/msg_logs/delivery-logs/sms/smd_1' });
+    const detail = await app.inject({
+      method: 'GET',
+      url: '/events/evt_1/messages/msg_logs/delivery-logs/sms/smd_1',
+    });
     expect(detail.statusCode).toBe(200);
-    expect(detail.json()).toMatchObject({ channel: 'sms', delivery: { id: 'smd_1', status: 'delivered' } });
+    expect(detail.json()).toMatchObject({
+      channel: 'sms',
+      delivery: { id: 'smd_1', status: 'delivered' },
+    });
     await app.close();
   });
 
   it('GET /events/:eventId/messages/:campaignId/provider-events lists and details persisted SMS provider events', async () => {
     const now = new Date();
     const tables = {
-      events: [{ id: 'evt_1', tenant_id: 'tnt_1', organization_id: 'org_1', brand_id: 'brd_1', status: 'published', slug: 'evt', title: 'Event', timezone: 'UTC', starts_at: now, visibility: 'public', seo: '{}' }],
-      sms_jobs: [{
-        id: 'smj_1',
-        tenant_id: 'tnt_1',
-        brand_id: 'brd_1',
-        to_phone: '+15550000002',
-        body: 'Update',
-        template_key: 'attendee-message',
-        variables: JSON.stringify({ eventId: 'evt_1', attendeeId: 'att_1', notificationType: 'bulk' }),
-        provider_route_id: 'spr_1',
-        status: 'sent',
-        priority: 'low',
-        scheduled_at: null,
-        idempotency_key: 'msg_events:sms:att_1',
-        workflow_id: null,
-        created_at: now,
-        updated_at: now,
-      }],
-      sms_deliveries: [{
-        id: 'smd_1',
-        tenant_id: 'tnt_1',
-        job_id: 'smj_1',
-        provider: 'telnyx',
-        provider_message_id: 'provider_1',
-        status: 'sent',
-        attempted_providers: JSON.stringify(['telnyx']),
-        accepted_provider: 'telnyx',
-        sent_at: now,
-        delivered_at: null,
-        failed_at: null,
-        failure_reason: null,
-        metadata: '{}',
-        created_at: now,
-        updated_at: now,
-      }],
-      sms_provider_events: [{
-        id: 'spe_1',
-        tenant_id: 'tnt_1',
-        provider: 'telnyx',
-        provider_event_id: 'evt_provider_1',
-        event_type: 'message.sent',
-        provider_message_id: 'provider_1',
-        raw_payload: JSON.stringify({ data: { id: 'evt_provider_1' } }),
-        processed_at: now,
-        created_at: now,
-      }],
+      events: [
+        {
+          id: 'evt_1',
+          tenant_id: 'tnt_1',
+          organization_id: 'org_1',
+          brand_id: 'brd_1',
+          status: 'published',
+          slug: 'evt',
+          title: 'Event',
+          timezone: 'UTC',
+          starts_at: now,
+          visibility: 'public',
+          seo: '{}',
+        },
+      ],
+      sms_jobs: [
+        {
+          id: 'smj_1',
+          tenant_id: 'tnt_1',
+          brand_id: 'brd_1',
+          to_phone: '+15550000002',
+          body: 'Update',
+          template_key: 'attendee-message',
+          variables: JSON.stringify({
+            eventId: 'evt_1',
+            attendeeId: 'att_1',
+            notificationType: 'bulk',
+          }),
+          provider_route_id: 'spr_1',
+          status: 'sent',
+          priority: 'low',
+          scheduled_at: null,
+          idempotency_key: 'msg_events:sms:att_1',
+          workflow_id: null,
+          created_at: now,
+          updated_at: now,
+        },
+      ],
+      sms_deliveries: [
+        {
+          id: 'smd_1',
+          tenant_id: 'tnt_1',
+          job_id: 'smj_1',
+          provider: 'telnyx',
+          provider_message_id: 'provider_1',
+          status: 'sent',
+          attempted_providers: JSON.stringify(['telnyx']),
+          accepted_provider: 'telnyx',
+          sent_at: now,
+          delivered_at: null,
+          failed_at: null,
+          failure_reason: null,
+          metadata: '{}',
+          created_at: now,
+          updated_at: now,
+        },
+      ],
+      sms_provider_events: [
+        {
+          id: 'spe_1',
+          tenant_id: 'tnt_1',
+          provider: 'telnyx',
+          provider_event_id: 'evt_provider_1',
+          event_type: 'message.sent',
+          provider_message_id: 'provider_1',
+          raw_payload: JSON.stringify({ data: { id: 'evt_provider_1' } }),
+          processed_at: now,
+          created_at: now,
+        },
+      ],
     };
     const app = await setupApp(messagingRoutes, makePrincipal(), tables);
-    const list = await app.inject({ method: 'GET', url: '/events/evt_1/messages/msg_events/provider-events' });
+    const list = await app.inject({
+      method: 'GET',
+      url: '/events/evt_1/messages/msg_events/provider-events',
+    });
     expect(list.statusCode).toBe(200);
-    expect(list.json().items).toMatchObject([{ channel: 'sms', event: { id: 'spe_1', event_type: 'message.sent' } }]);
+    expect(list.json().items).toMatchObject([
+      { channel: 'sms', event: { id: 'spe_1', event_type: 'message.sent' } },
+    ]);
 
-    const detail = await app.inject({ method: 'GET', url: '/events/evt_1/messages/msg_events/provider-events/spe_1' });
+    const detail = await app.inject({
+      method: 'GET',
+      url: '/events/evt_1/messages/msg_events/provider-events/spe_1',
+    });
     expect(detail.statusCode).toBe(200);
-    expect(detail.json()).toMatchObject({ channel: 'sms', event: { id: 'spe_1', provider_event_id: 'evt_provider_1' } });
+    expect(detail.json()).toMatchObject({
+      channel: 'sms',
+      event: { id: 'spe_1', provider_event_id: 'evt_provider_1' },
+    });
     await app.close();
   });
 
   it('POST /events/:eventId/messages requires attendeeIds for specific audience', async () => {
     const tables = {
-      events: [{ id: 'evt_1', tenant_id: 'tnt_1', organization_id: 'org_1', brand_id: 'brd_1', status: 'published', slug: 'evt', title: 'Event', timezone: 'UTC', starts_at: new Date(), visibility: 'public', seo: '{}' }],
+      events: [
+        {
+          id: 'evt_1',
+          tenant_id: 'tnt_1',
+          organization_id: 'org_1',
+          brand_id: 'brd_1',
+          status: 'published',
+          slug: 'evt',
+          title: 'Event',
+          timezone: 'UTC',
+          starts_at: new Date(),
+          visibility: 'public',
+          seo: '{}',
+        },
+      ],
     };
     const app = await setupApp(messagingRoutes, makePrincipal(), tables);
     const res = await app.inject({
@@ -1215,7 +2515,21 @@ describe('messaging endpoint', () => {
 
   it('POST /events/:eventId/messages requires Idempotency-Key', async () => {
     const tables = {
-      events: [{ id: 'evt_1', tenant_id: 'tnt_1', organization_id: 'org_1', brand_id: 'brd_1', status: 'published', slug: 'evt', title: 'Event', timezone: 'UTC', starts_at: new Date(), visibility: 'public', seo: '{}' }],
+      events: [
+        {
+          id: 'evt_1',
+          tenant_id: 'tnt_1',
+          organization_id: 'org_1',
+          brand_id: 'brd_1',
+          status: 'published',
+          slug: 'evt',
+          title: 'Event',
+          timezone: 'UTC',
+          starts_at: new Date(),
+          visibility: 'public',
+          seo: '{}',
+        },
+      ],
     };
     const app = await setupApp(messagingRoutes, makePrincipal(), tables);
     const res = await app.inject({
@@ -1229,9 +2543,41 @@ describe('messaging endpoint', () => {
 
   it('POST /events/:eventId/messages rejects no-recipient campaigns without fake success', async () => {
     const tables = {
-      events: [{ id: 'evt_1', tenant_id: 'tnt_1', organization_id: 'org_1', brand_id: 'brd_1', status: 'published', slug: 'evt', title: 'Event', timezone: 'UTC', starts_at: new Date(), visibility: 'public', seo: '{}' }],
+      events: [
+        {
+          id: 'evt_1',
+          tenant_id: 'tnt_1',
+          organization_id: 'org_1',
+          brand_id: 'brd_1',
+          status: 'published',
+          slug: 'evt',
+          title: 'Event',
+          timezone: 'UTC',
+          starts_at: new Date(),
+          visibility: 'public',
+          seo: '{}',
+        },
+      ],
       attendees: [],
-      sms_provider_routes: [{ id: 'spr_1', tenant_id: 'tnt_1', brand_id: 'brd_1', provider_type: 'capture', credentials_ref: 'capture', sender_identity_id: 'ssi_1', priority: 0, is_fallback: false, rate_limit_per_hour: null, allowed_categories: JSON.stringify(['bulk']), status: 'active', smoke_send_verified: true, webhook_url: null, created_at: new Date(), updated_at: new Date() }],
+      sms_provider_routes: [
+        {
+          id: 'spr_1',
+          tenant_id: 'tnt_1',
+          brand_id: 'brd_1',
+          provider_type: 'capture',
+          credentials_ref: 'capture',
+          sender_identity_id: 'ssi_1',
+          priority: 0,
+          is_fallback: false,
+          rate_limit_per_hour: null,
+          allowed_categories: JSON.stringify(['bulk']),
+          status: 'active',
+          smoke_send_verified: true,
+          webhook_url: null,
+          created_at: new Date(),
+          updated_at: new Date(),
+        },
+      ],
     };
     const app = await setupApp(messagingRoutes, makePrincipal(), tables);
     const res = await app.inject({
@@ -1283,8 +2629,35 @@ describe('ticket transfer and attendee update', () => {
 
   it('POST /tickets/:ticketId/transfer requires Idempotency-Key', async () => {
     const tables = {
-      tickets: [{ id: 'tkt_1', tenant_id: 'tnt_1', order_id: 'ord_1', attendee_id: 'att_1', event_id: 'evt_1', ticket_type_id: 'tt_1', status: 'valid', code: 'CODE', qr_payload: 'payload', qr_hash: 'hash' }],
-      events: [{ id: 'evt_1', tenant_id: 'tnt_1', organization_id: 'org_1', brand_id: 'brd_1', status: 'published', slug: 'evt', title: 'Event', timezone: 'UTC', starts_at: new Date(), visibility: 'public', seo: '{}' }],
+      tickets: [
+        {
+          id: 'tkt_1',
+          tenant_id: 'tnt_1',
+          order_id: 'ord_1',
+          attendee_id: 'att_1',
+          event_id: 'evt_1',
+          ticket_type_id: 'tt_1',
+          status: 'valid',
+          code: 'CODE',
+          qr_payload: 'payload',
+          qr_hash: 'hash',
+        },
+      ],
+      events: [
+        {
+          id: 'evt_1',
+          tenant_id: 'tnt_1',
+          organization_id: 'org_1',
+          brand_id: 'brd_1',
+          status: 'published',
+          slug: 'evt',
+          title: 'Event',
+          timezone: 'UTC',
+          starts_at: new Date(),
+          visibility: 'public',
+          seo: '{}',
+        },
+      ],
     };
     const app = await setupApp(checkInRoutes, makePrincipal(), tables);
     const res = await app.inject({
@@ -1298,8 +2671,41 @@ describe('ticket transfer and attendee update', () => {
 
   it('PATCH /attendees/:attendeeId updates attendee fields', async () => {
     const tables = {
-      attendees: [{ id: 'att_1', tenant_id: 'tnt_1', order_id: 'ord_1', event_id: 'evt_1', ticket_type_id: 'tt_1', ticket_id: 'tkt_1', first_name: 'Ada', last_name: 'Lovelace', email: 'ada@test.com', status: 'confirmed', phone: null, custom_answers: null, checked_in_at: null, check_in_device_id: null, created_at: new Date(), updated_at: new Date() }],
-      events: [{ id: 'evt_1', tenant_id: 'tnt_1', organization_id: 'org_1', brand_id: 'brd_1', status: 'published', slug: 'evt', title: 'Event', timezone: 'UTC', starts_at: new Date(), visibility: 'public', seo: '{}' }],
+      attendees: [
+        {
+          id: 'att_1',
+          tenant_id: 'tnt_1',
+          order_id: 'ord_1',
+          event_id: 'evt_1',
+          ticket_type_id: 'tt_1',
+          ticket_id: 'tkt_1',
+          first_name: 'Ada',
+          last_name: 'Lovelace',
+          email: 'ada@test.com',
+          status: 'confirmed',
+          phone: null,
+          custom_answers: null,
+          checked_in_at: null,
+          check_in_device_id: null,
+          created_at: new Date(),
+          updated_at: new Date(),
+        },
+      ],
+      events: [
+        {
+          id: 'evt_1',
+          tenant_id: 'tnt_1',
+          organization_id: 'org_1',
+          brand_id: 'brd_1',
+          status: 'published',
+          slug: 'evt',
+          title: 'Event',
+          timezone: 'UTC',
+          starts_at: new Date(),
+          visibility: 'public',
+          seo: '{}',
+        },
+      ],
     };
     const app = await setupApp(checkInRoutes, makePrincipal(), tables);
     const res = await app.inject({
@@ -1346,15 +2752,19 @@ describe('custom questions CRUD', () => {
     await app.close();
   });
 
-  it('POST /events/:eventId/questions rejects unsupported file questions', async () => {
+  it('POST /events/:eventId/questions creates file questions', async () => {
     const app = await setupApp(questionRoutes, makePrincipal(), { events: [event] });
     const res = await app.inject({
       method: 'POST',
       url: '/events/evt_1/questions',
       payload: { type: 'file', label: 'Upload waiver', appliesTo: 'buyer' },
     });
-    expect(res.statusCode).toBe(400);
-    expect(res.json().message).toContain('File questions are not supported');
+    expect(res.statusCode).toBe(201);
+    expect(res.json()).toMatchObject({
+      type: 'file',
+      label: 'Upload waiver',
+      appliesTo: 'buyer',
+    });
     await app.close();
   });
 
@@ -1374,7 +2784,9 @@ describe('custom questions CRUD', () => {
       payload: { type: 'text', label: 'Nickname', options: ['VIP'] },
     });
     expect(invalidOptions.statusCode).toBe(400);
-    expect(invalidOptions.json().message).toContain('text questions cannot define selectable options');
+    expect(invalidOptions.json().message).toContain(
+      'text questions cannot define selectable options',
+    );
     await app.close();
   });
 
@@ -1437,13 +2849,15 @@ describe('custom questions CRUD', () => {
 
   it('PATCH /questions/:questionId requires a new consent version when consent text changes', async () => {
     const tables = {
-      questions: [customQuestionRow({
-        type: 'waiver',
-        label: 'Waiver',
-        is_consent_field: true,
-        consent_text: 'Version one text',
-        consent_version: 'v1',
-      })],
+      questions: [
+        customQuestionRow({
+          type: 'waiver',
+          label: 'Waiver',
+          is_consent_field: true,
+          consent_text: 'Version one text',
+          consent_version: 'v1',
+        }),
+      ],
       events: [event],
     };
     const app = await setupApp(questionRoutes, makePrincipal(), tables);
@@ -1469,11 +2883,13 @@ describe('custom questions CRUD', () => {
     const tables = {
       questions: [customQuestionRow({ status: 'active' })],
       events: [event],
-      attendees: [{
-        id: 'att_1',
-        event_id: 'evt_1',
-        custom_answers: JSON.stringify({ q_1: 'Ada Lovelace' }),
-      }],
+      attendees: [
+        {
+          id: 'att_1',
+          event_id: 'evt_1',
+          custom_answers: JSON.stringify({ q_1: 'Ada Lovelace' }),
+        },
+      ],
     };
     const app = await setupApp(questionRoutes, makePrincipal(), tables);
     const res = await app.inject({ method: 'DELETE', url: '/questions/q_1' });
@@ -1495,15 +2911,70 @@ describe('custom questions CRUD', () => {
 });
 
 describe('checkout confirm', () => {
+  it('PATCH /checkout/sessions/:sessionId rejects open sessions that already have a payment intent', async () => {
+    const session = {
+      id: 'cs_1',
+      tenant_id: 'tnt_1',
+      event_id: 'evt_1',
+      brand_id: 'brd_1',
+      status: 'open',
+      currency: 'USD',
+      quote: { totalCents: 2500, subtotalCents: 2500, discountCents: 0, taxCents: 0, feeCents: 0 },
+      buyer: { email: 'buyer@test.com' },
+      cart: { items: [{ ticketTypeId: 'tt_1', quantity: 1 }] },
+      expires_at: new Date(Date.now() + 60000),
+      hold_id: 'hld_1',
+      order_id: null,
+      client_token: 'tok_1',
+      success_url: null,
+      cancel_url: null,
+      idempotency_key: 'key_1',
+      payment_intent_id: 'pi_1',
+    };
+    const tables = {
+      checkout_sessions: [session],
+    };
+    const app = await setupApp(checkoutRoutes, makePrincipal(), tables);
+    const res = await app.inject({
+      method: 'PATCH',
+      url: '/checkout/sessions/cs_1',
+      headers: { 'x-checkout-session-token': 'tok_1' },
+      payload: { buyer: { email: 'updated@test.com' } },
+    });
+    expect(res.statusCode).toBe(400);
+    expect(res.json().message).toContain('payment is in progress');
+    expect(session.buyer).toEqual({ email: 'buyer@test.com' });
+    await app.close();
+  });
+
   it('GET /checkout/sessions/:sessionId accepts native JSON session columns', async () => {
     const tables = {
-      checkout_sessions: [{
-        id: 'cs_1', tenant_id: 'tnt_1', event_id: 'evt_1', brand_id: 'brd_1', status: 'open',
-        currency: 'USD', quote: { totalCents: 2500, subtotalCents: 2500, discountCents: 0, taxCents: 0, feeCents: 0 },
-        buyer: { email: 'buyer@test.com' }, cart: { items: [{ ticketTypeId: 'tt_1', quantity: 1 }] },
-        expires_at: new Date(Date.now() + 60000), hold_id: 'hld_1', order_id: null, client_token: 'tok_1',
-        success_url: null, cancel_url: null, idempotency_key: 'key_1',
-      }],
+      checkout_sessions: [
+        {
+          id: 'cs_1',
+          tenant_id: 'tnt_1',
+          event_id: 'evt_1',
+          brand_id: 'brd_1',
+          status: 'open',
+          currency: 'USD',
+          quote: {
+            totalCents: 2500,
+            subtotalCents: 2500,
+            discountCents: 0,
+            taxCents: 0,
+            feeCents: 0,
+          },
+          buyer: { email: 'buyer@test.com' },
+          cart: { items: [{ ticketTypeId: 'tt_1', quantity: 1 }] },
+          expires_at: new Date(Date.now() + 60000),
+          hold_id: 'hld_1',
+          order_id: null,
+          client_token: 'tok_1',
+          success_url: null,
+          cancel_url: null,
+          idempotency_key: 'key_1',
+        },
+      ],
     };
     const app = await setupApp(checkoutRoutes, makePrincipal(), tables);
     const res = await app.inject({
@@ -1520,18 +2991,39 @@ describe('checkout confirm', () => {
 
   it('GET /checkout/sessions/:sessionId accepts matching Stripe client secret for pending confirmation', async () => {
     const tables = {
-      checkout_sessions: [{
-        id: 'cs_1', tenant_id: 'tnt_1', event_id: 'evt_1', brand_id: 'brd_1', status: 'pending_payment',
-        currency: 'USD', quote: { totalCents: 2500, subtotalCents: 2500, discountCents: 0, taxCents: 0, feeCents: 0 },
-        buyer: { email: 'buyer@test.com' }, cart: { items: [{ ticketTypeId: 'tt_1', quantity: 1 }] },
-        expires_at: new Date(Date.now() + 60000), hold_id: 'hld_1', order_id: null, client_token: 'tok_1',
-        success_url: null, cancel_url: null, idempotency_key: 'key_1',
-      }],
-      payment_intents: [{
-        id: 'pi_db_1',
-        checkout_session_id: 'cs_1',
-        client_secret: 'pi_secret_123',
-      }],
+      checkout_sessions: [
+        {
+          id: 'cs_1',
+          tenant_id: 'tnt_1',
+          event_id: 'evt_1',
+          brand_id: 'brd_1',
+          status: 'pending_payment',
+          currency: 'USD',
+          quote: {
+            totalCents: 2500,
+            subtotalCents: 2500,
+            discountCents: 0,
+            taxCents: 0,
+            feeCents: 0,
+          },
+          buyer: { email: 'buyer@test.com' },
+          cart: { items: [{ ticketTypeId: 'tt_1', quantity: 1 }] },
+          expires_at: new Date(Date.now() + 60000),
+          hold_id: 'hld_1',
+          order_id: null,
+          client_token: 'tok_1',
+          success_url: null,
+          cancel_url: null,
+          idempotency_key: 'key_1',
+        },
+      ],
+      payment_intents: [
+        {
+          id: 'pi_db_1',
+          checkout_session_id: 'cs_1',
+          client_secret: 'pi_secret_123',
+        },
+      ],
     };
     const app = await setupApp(checkoutRoutes, makePrincipal(), tables);
     const res = await app.inject({
@@ -1547,15 +3039,68 @@ describe('checkout confirm', () => {
 
   it('POST /checkout/sessions/:sessionId/confirm handles duplicate completed session', async () => {
     const tables = {
-      checkout_sessions: [{
-        id: 'cs_1', tenant_id: 'tnt_1', event_id: 'evt_1', brand_id: 'brd_1', status: 'completed',
-        currency: 'USD', quote: JSON.stringify({ totalCents: 0, subtotalCents: 0, discountCents: 0, taxCents: 0, feeCents: 0 }),
-        buyer: JSON.stringify({ email: 'buyer@test.com' }), cart: JSON.stringify({ items: [] }),
-        expires_at: new Date(Date.now() + 60000), hold_id: 'hld_1', order_id: 'ord_1', client_token: 'tok_1',
-        success_url: null, cancel_url: null, idempotency_key: 'key_1',
-      }],
-      events: [{ id: 'evt_1', tenant_id: 'tnt_1', organization_id: 'org_1', brand_id: 'brd_1', status: 'published', slug: 'evt', title: 'Event', timezone: 'UTC', starts_at: new Date(), visibility: 'public', seo: '{}' }],
-      orders: [{ id: 'ord_1', tenant_id: 'tnt_1', organization_id: 'org_1', brand_id: 'brd_1', event_id: 'evt_1', order_number: 'GK-1', status: 'paid', currency: 'USD', total_cents: 0, subtotal_cents: 0, discount_cents: 0, tax_cents: 0, fee_cents: 0, refunded_cents: 0, buyer_email: 'buyer@test.com', created_at: new Date(), updated_at: new Date() }],
+      checkout_sessions: [
+        {
+          id: 'cs_1',
+          tenant_id: 'tnt_1',
+          event_id: 'evt_1',
+          brand_id: 'brd_1',
+          status: 'completed',
+          currency: 'USD',
+          quote: JSON.stringify({
+            totalCents: 0,
+            subtotalCents: 0,
+            discountCents: 0,
+            taxCents: 0,
+            feeCents: 0,
+          }),
+          buyer: JSON.stringify({ email: 'buyer@test.com' }),
+          cart: JSON.stringify({ items: [] }),
+          expires_at: new Date(Date.now() + 60000),
+          hold_id: 'hld_1',
+          order_id: 'ord_1',
+          client_token: 'tok_1',
+          success_url: null,
+          cancel_url: null,
+          idempotency_key: 'key_1',
+        },
+      ],
+      events: [
+        {
+          id: 'evt_1',
+          tenant_id: 'tnt_1',
+          organization_id: 'org_1',
+          brand_id: 'brd_1',
+          status: 'published',
+          slug: 'evt',
+          title: 'Event',
+          timezone: 'UTC',
+          starts_at: new Date(),
+          visibility: 'public',
+          seo: '{}',
+        },
+      ],
+      orders: [
+        {
+          id: 'ord_1',
+          tenant_id: 'tnt_1',
+          organization_id: 'org_1',
+          brand_id: 'brd_1',
+          event_id: 'evt_1',
+          order_number: 'TK-1',
+          status: 'paid',
+          currency: 'USD',
+          total_cents: 0,
+          subtotal_cents: 0,
+          discount_cents: 0,
+          tax_cents: 0,
+          fee_cents: 0,
+          refunded_cents: 0,
+          buyer_email: 'buyer@test.com',
+          created_at: new Date(),
+          updated_at: new Date(),
+        },
+      ],
     };
     const app = await setupApp(checkoutRoutes, makePrincipal(), tables);
     const res = await app.inject({
@@ -1569,6 +3114,103 @@ describe('checkout confirm', () => {
     const body = res.json();
     expect(body.status).toBe('completed');
     expect(body.order.id).toBe('ord_1');
+    await app.close();
+  });
+
+  it('POST /checkout/sessions/:sessionId/confirm finalizes local capture intents server-side', async () => {
+    const startCheckoutSession = vi.fn(async () => ({
+      workflowId: 'checkout-session:cs_1',
+      result: async () => ({ status: 'completed', orderId: 'ord_1' }),
+    }));
+    const tables = {
+      checkout_sessions: [
+        {
+          id: 'cs_1',
+          tenant_id: 'tnt_1',
+          event_id: 'evt_1',
+          brand_id: 'brd_1',
+          status: 'open',
+          currency: 'USD',
+          quote: JSON.stringify({
+            totalCents: 2500,
+            subtotalCents: 2500,
+            discountCents: 0,
+            taxCents: 0,
+            feeCents: 0,
+          }),
+          buyer: JSON.stringify({ email: 'buyer@test.com' }),
+          cart: JSON.stringify({ items: [{ ticketTypeId: 'tt_1', quantity: 1 }] }),
+          expires_at: new Date(Date.now() + 60000),
+          hold_id: 'hld_1',
+          order_id: null,
+          client_token: 'tok_1',
+          success_url: null,
+          cancel_url: null,
+          idempotency_key: 'key_1',
+        },
+      ],
+      events: [
+        {
+          id: 'evt_1',
+          tenant_id: 'tnt_1',
+          organization_id: 'org_1',
+          brand_id: 'brd_1',
+          status: 'published',
+          slug: 'evt',
+          title: 'Event',
+          timezone: 'UTC',
+          starts_at: new Date(),
+          visibility: 'public',
+          seo: '{}',
+        },
+      ],
+      orders: [
+        {
+          id: 'ord_1',
+          tenant_id: 'tnt_1',
+          organization_id: 'org_1',
+          brand_id: 'brd_1',
+          event_id: 'evt_1',
+          order_number: 'TK-1',
+          status: 'paid',
+          currency: 'USD',
+          total_cents: 2500,
+          subtotal_cents: 2500,
+          discount_cents: 0,
+          tax_cents: 0,
+          fee_cents: 0,
+          refunded_cents: 0,
+          buyer_email: 'buyer@test.com',
+          created_at: new Date(),
+          updated_at: new Date(),
+        },
+      ],
+      idempotency_records: [],
+    };
+    const app = await setupApp(checkoutRoutes, makePrincipal(), tables, {
+      temporalClient: {
+        startCheckoutSession,
+        getCheckoutState: vi.fn(async () => ({
+          paymentIntentId: 'pi_capture_cs_1',
+          clientSecret: 'pi_capture_cs_1_secret',
+          status: 'payment_pending',
+        })),
+      },
+    });
+    const res = await app.inject({
+      method: 'POST',
+      url: '/checkout/sessions/cs_1/confirm',
+      headers: { 'idempotency-key': 'key-2', 'x-checkout-session-token': 'tok_1' },
+      payload: {},
+    });
+
+    expect(res.statusCode).toBe(200);
+    expect(res.json()).toMatchObject({
+      sessionId: 'cs_1',
+      status: 'completed',
+      order: { id: 'ord_1', status: 'paid' },
+    });
+    expect(startCheckoutSession).toHaveBeenCalledTimes(1);
     await app.close();
   });
 });
@@ -1723,7 +3365,9 @@ describe('checkout pricing tamper resistance', () => {
     });
 
     expect(res.statusCode).toBe(400);
-    expect(res.json().message).toContain('unitAmountCents is only accepted for donation ticket tt_paid');
+    expect(res.json().message).toContain(
+      'unitAmountCents is only accepted for donation ticket tt_paid',
+    );
   });
 
   it('rejects client-supplied monetary totals during checkout session creation', async () => {
@@ -1745,27 +3389,32 @@ describe('checkout pricing tamper resistance', () => {
       result: async () => ({ status: 'completed', orderId: 'ord_1' }),
     }));
     const tables = {
-      checkout_sessions: [{
-        id: 'cs_pricing',
-        tenant_id: 'tnt_1',
-        event_id: 'evt_pricing',
-        brand_id: 'brd_1',
-        status: 'open',
-        hold_id: 'hld_1',
-        currency: 'USD',
-        cart: JSON.stringify({ items: [{ ticketTypeId: 'tt_paid', quantity: 2 }], affiliateCode: 'AFF1' }),
-        buyer: JSON.stringify({ email: 'buyer@test.com' }),
-        quote: JSON.stringify({ totalCents: 16800, feeCents: 300 }),
-        payment_intent_id: null,
-        order_id: null,
-        success_url: null,
-        cancel_url: null,
-        expires_at: new Date(Date.now() + 600_000),
-        idempotency_key: 'create_key',
-        client_token: 'tok_pricing',
-        created_at: new Date(),
-        updated_at: new Date(),
-      }],
+      checkout_sessions: [
+        {
+          id: 'cs_pricing',
+          tenant_id: 'tnt_1',
+          event_id: 'evt_pricing',
+          brand_id: 'brd_1',
+          status: 'open',
+          hold_id: 'hld_1',
+          currency: 'USD',
+          cart: JSON.stringify({
+            items: [{ ticketTypeId: 'tt_paid', quantity: 2 }],
+            affiliateCode: 'AFF1',
+          }),
+          buyer: JSON.stringify({ email: 'buyer@test.com' }),
+          quote: JSON.stringify({ totalCents: 16800, feeCents: 300 }),
+          payment_intent_id: null,
+          order_id: null,
+          success_url: null,
+          cancel_url: null,
+          expires_at: new Date(Date.now() + 600_000),
+          idempotency_key: 'create_key',
+          client_token: 'tok_pricing',
+          created_at: new Date(),
+          updated_at: new Date(),
+        },
+      ],
       events: [baseEvent],
       orders: [],
       idempotency_records: [],
@@ -1773,14 +3422,21 @@ describe('checkout pricing tamper resistance', () => {
     const app = await setupApp(checkoutRoutes, makePrincipal(), tables, {
       temporalClient: {
         startCheckoutSession,
-        getCheckoutState: vi.fn(async () => ({ paymentIntentId: 'pi_1', clientSecret: 'cs_1', status: 'pending_payment' })),
+        getCheckoutState: vi.fn(async () => ({
+          paymentIntentId: 'pi_1',
+          clientSecret: 'cs_1',
+          status: 'pending_payment',
+        })),
       },
     });
 
     const res = await app.inject({
       method: 'POST',
       url: '/checkout/sessions/cs_pricing/confirm',
-      headers: { 'idempotency-key': 'confirm_tampered_totals', 'x-checkout-session-token': 'tok_pricing' },
+      headers: {
+        'idempotency-key': 'confirm_tampered_totals',
+        'x-checkout-session-token': 'tok_pricing',
+      },
       payload: {
         paymentMethodId: 'pm_card_visa',
         amountCents: 1,
@@ -1801,27 +3457,32 @@ describe('checkout pricing tamper resistance', () => {
       result: async () => ({ status: 'completed', orderId: 'ord_1' }),
     }));
     const tables = {
-      checkout_sessions: [{
-        id: 'cs_pricing',
-        tenant_id: 'tnt_1',
-        event_id: 'evt_pricing',
-        brand_id: 'brd_1',
-        status: 'open',
-        hold_id: 'hld_1',
-        currency: 'USD',
-        cart: JSON.stringify({ items: [{ ticketTypeId: 'tt_paid', quantity: 2 }], affiliateCode: 'AFF1' }),
-        buyer: JSON.stringify({ email: 'buyer@test.com' }),
-        quote: JSON.stringify({ totalCents: 16800, feeCents: 300 }),
-        payment_intent_id: null,
-        order_id: null,
-        success_url: null,
-        cancel_url: null,
-        expires_at: new Date(Date.now() + 600_000),
-        idempotency_key: 'create_key',
-        client_token: 'tok_pricing',
-        created_at: new Date(),
-        updated_at: new Date(),
-      }],
+      checkout_sessions: [
+        {
+          id: 'cs_pricing',
+          tenant_id: 'tnt_1',
+          event_id: 'evt_pricing',
+          brand_id: 'brd_1',
+          status: 'open',
+          hold_id: 'hld_1',
+          currency: 'USD',
+          cart: JSON.stringify({
+            items: [{ ticketTypeId: 'tt_paid', quantity: 2 }],
+            affiliateCode: 'AFF1',
+          }),
+          buyer: JSON.stringify({ email: 'buyer@test.com' }),
+          quote: JSON.stringify({ totalCents: 16800, feeCents: 300 }),
+          payment_intent_id: null,
+          order_id: null,
+          success_url: null,
+          cancel_url: null,
+          expires_at: new Date(Date.now() + 600_000),
+          idempotency_key: 'create_key',
+          client_token: 'tok_pricing',
+          created_at: new Date(),
+          updated_at: new Date(),
+        },
+      ],
       events: [baseEvent],
       orders: [],
       idempotency_records: [],
@@ -1829,14 +3490,21 @@ describe('checkout pricing tamper resistance', () => {
     const app = await setupApp(checkoutRoutes, makePrincipal(), tables, {
       temporalClient: {
         startCheckoutSession,
-        getCheckoutState: vi.fn(async () => ({ paymentIntentId: 'pi_1', clientSecret: 'cs_1', status: 'pending_payment' })),
+        getCheckoutState: vi.fn(async () => ({
+          paymentIntentId: 'pi_1',
+          clientSecret: 'cs_1',
+          status: 'pending_payment',
+        })),
       },
     });
 
     const res = await app.inject({
       method: 'POST',
       url: '/checkout/sessions/cs_pricing/confirm',
-      headers: { 'idempotency-key': 'confirm_authoritative_quote', 'x-checkout-session-token': 'tok_pricing' },
+      headers: {
+        'idempotency-key': 'confirm_authoritative_quote',
+        'x-checkout-session-token': 'tok_pricing',
+      },
       payload: { paymentMethodId: 'pm_card_visa' },
     });
 
@@ -1847,12 +3515,14 @@ describe('checkout pricing tamper resistance', () => {
       totalCents: 16800,
       currency: 'USD',
     });
-    expect(startCheckoutSession).toHaveBeenCalledWith(expect.objectContaining({
-      checkoutSessionId: 'cs_pricing',
-      amountCents: 16800,
-      feeCents: 300,
-      affiliateCode: 'AFF1',
-    }));
+    expect(startCheckoutSession).toHaveBeenCalledWith(
+      expect.objectContaining({
+        checkoutSessionId: 'cs_pricing',
+        amountCents: 16800,
+        feeCents: 300,
+        affiliateCode: 'AFF1',
+      }),
+    );
     await app.close();
   });
 });
@@ -1895,35 +3565,10 @@ describe('checkout question validation', () => {
     updated_at: new Date(),
   };
 
-  function question(overrides: Record<string, unknown>) {
-    return {
-      id: 'q_1',
-      event_id: 'evt_1',
-      ticket_type_id: null,
-      type: 'text',
-      label: 'Question',
-      description: null,
-      required: true,
-      applies_to: 'buyer',
-      options: null,
-      placeholder: null,
-      validation_pattern: null,
-      conditional_visibility: null,
-      status: 'active',
-      is_hidden: false,
-      hidden_at: null,
-      deleted_at: null,
-      sort_order: 0,
-      is_consent_field: false,
-      consent_text: null,
-      consent_version: null,
-      created_at: new Date(),
-      updated_at: new Date(),
-      ...overrides,
-    };
-  }
-
-  async function postCheckoutSession(tables: Record<string, unknown>, payload: Record<string, unknown>) {
+  async function postCheckoutSession(
+    tables: Record<string, unknown>,
+    payload: Record<string, unknown>,
+  ) {
     const app = await setupApp(checkoutRoutes, makePrincipal(), tables);
     const res = await app.inject({
       method: 'POST',
@@ -1947,20 +3592,24 @@ describe('checkout question validation', () => {
       checkout_sessions: [],
       idempotency_records: [],
       questions: [
-        question({
+        checkoutQuestion({
           id: 'q_parent',
           type: 'select',
           label: 'Bring a guest?',
           options: JSON.stringify(['yes', 'no']),
           applies_to: 'buyer',
         }),
-        question({
+        checkoutQuestion({
           id: 'q_guest',
           label: 'Guest name',
           applies_to: 'buyer',
-          conditional_visibility: JSON.stringify({ field: 'q_parent', operator: 'equals', value: 'yes' }),
+          conditional_visibility: JSON.stringify({
+            field: 'q_parent',
+            operator: 'equals',
+            value: 'yes',
+          }),
         }),
-        question({
+        checkoutQuestion({
           id: 'q_consent',
           type: 'waiver',
           label: 'Updates consent',
@@ -1995,18 +3644,22 @@ describe('checkout question validation', () => {
       checkout_sessions: [],
       idempotency_records: [],
       questions: [
-        question({
+        checkoutQuestion({
           id: 'q_parent',
           type: 'select',
           label: 'Bring a guest?',
           options: JSON.stringify(['yes', 'no']),
           applies_to: 'buyer',
         }),
-        question({
+        checkoutQuestion({
           id: 'q_guest',
           label: 'Guest name',
           applies_to: 'buyer',
-          conditional_visibility: JSON.stringify({ field: 'q_parent', operator: 'equals', value: 'yes' }),
+          conditional_visibility: JSON.stringify({
+            field: 'q_parent',
+            operator: 'equals',
+            value: 'yes',
+          }),
         }),
       ],
     };
@@ -2026,8 +3679,13 @@ describe('checkout question validation', () => {
       checkout_sessions: [],
       idempotency_records: [],
       questions: [
-        question({ id: 'q_hidden', label: 'Hidden required', status: 'hidden', is_hidden: true }),
-        question({ id: 'q_deleted', label: 'Deleted required', deleted_at: new Date() }),
+        checkoutQuestion({
+          id: 'q_hidden',
+          label: 'Hidden required',
+          status: 'hidden',
+          is_hidden: true,
+        }),
+        checkoutQuestion({ id: 'q_deleted', label: 'Deleted required', deleted_at: new Date() }),
       ],
     };
 
@@ -2060,7 +3718,9 @@ describe('checkout question validation', () => {
       ticket_types: [baseTicketType],
       checkout_sessions: [],
       idempotency_records: [],
-      questions: [question({ id: 'q_attendee_name', label: 'Attendee name', applies_to: 'attendee' })],
+      questions: [
+        checkoutQuestion({ id: 'q_attendee_name', label: 'Attendee name', applies_to: 'attendee' }),
+      ],
     };
 
     const res = await postCheckoutSession(tables, {
@@ -2077,13 +3737,21 @@ describe('checkout question validation', () => {
     expect(res.json().message).toContain('Attendee name is required');
   });
 
-  it('rejects file question answers during checkout session creation', async () => {
+  it('rejects raw file question answers during checkout session creation', async () => {
     const tables = {
       events: [baseEvent],
       ticket_types: [baseTicketType],
       checkout_sessions: [],
       idempotency_records: [],
-      questions: [question({ id: 'q_file', type: 'file', label: 'Upload waiver', applies_to: 'buyer', required: false })],
+      questions: [
+        checkoutQuestion({
+          id: 'q_file',
+          type: 'file',
+          label: 'Upload waiver',
+          applies_to: 'buyer',
+          required: false,
+        }),
+      ],
     };
 
     const res = await postCheckoutSession(tables, {
@@ -2091,6 +3759,95 @@ describe('checkout question validation', () => {
     });
 
     expect(res.statusCode).toBe(400);
-    expect(res.json().message).toContain('file uploads are not supported');
+    expect(res.json().message).toContain('must reference a completed upload artifact');
+  });
+
+  it('accepts completed clean file upload artifact answers during checkout session creation', async () => {
+    const tables = {
+      events: [baseEvent],
+      ticket_types: [baseTicketType],
+      checkout_sessions: [],
+      idempotency_records: [],
+      questions: [
+        checkoutQuestion({
+          id: 'q_file',
+          type: 'file',
+          label: 'Upload waiver',
+          applies_to: 'buyer',
+          required: true,
+        }),
+      ],
+      upload_artifacts: [
+        {
+          id: 'upl_clean',
+          tenant_id: 'tnt_1',
+          event_id: 'evt_1',
+          status: 'uploaded',
+          scan_status: 'clean',
+          metadata: JSON.stringify({ questionId: 'q_file' }),
+        },
+      ],
+    };
+
+    const res = await postCheckoutSession(tables, {
+      buyerFields: {
+        q_file: {
+          artifactId: 'upl_clean',
+          fileName: 'waiver.pdf',
+          contentType: 'application/pdf',
+          sizeBytes: 1024,
+        },
+      },
+    });
+
+    expect(res.statusCode).toBe(201);
+    const storedSession = (tables.checkout_sessions as Array<{ cart: string }>)[0];
+    const cart = JSON.parse(storedSession.cart) as {
+      buyerFields: Record<string, { artifactId: string }>;
+    };
+    expect(cart.buyerFields.q_file.artifactId).toBe('upl_clean');
+  });
+
+  it('rejects required file question artifacts uploaded for another question during checkout session creation', async () => {
+    const tables = {
+      events: [baseEvent],
+      ticket_types: [baseTicketType],
+      checkout_sessions: [],
+      idempotency_records: [],
+      questions: [
+        checkoutQuestion({
+          id: 'q_file',
+          type: 'file',
+          label: 'Upload waiver',
+          applies_to: 'buyer',
+          required: true,
+        }),
+      ],
+      upload_artifacts: [
+        {
+          id: 'upl_mismatch',
+          tenant_id: 'tnt_1',
+          event_id: 'evt_1',
+          status: 'uploaded',
+          scan_status: 'clean',
+          metadata: JSON.stringify({ questionId: 'q_other' }),
+        },
+      ],
+    };
+
+    const res = await postCheckoutSession(tables, {
+      buyerFields: {
+        q_file: {
+          artifactId: 'upl_mismatch',
+          fileName: 'waiver.pdf',
+          contentType: 'application/pdf',
+          sizeBytes: 1024,
+        },
+      },
+    });
+
+    expect(res.statusCode).toBe(400);
+    expect(res.json().message).toContain('different question');
+    expect(tables.checkout_sessions).toHaveLength(0);
   });
 });

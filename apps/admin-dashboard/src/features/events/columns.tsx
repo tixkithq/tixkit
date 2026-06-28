@@ -1,14 +1,14 @@
-'use client'
+'use client';
 
-import * as React from 'react'
-import Link from 'next/link'
-import { type ColumnDef } from '@tanstack/react-table'
-import { MoreHorizontal, Eye, Pencil, Globe, Pause, Archive, Play } from 'lucide-react'
-import { type AdminEventListItem, type EventStatus, adminApi } from '@/lib/api'
-import { routes } from '@/lib/routes'
-import { formatCurrency, formatDate, formatNumber } from '@/lib/format'
-import { Button } from '@/components/ui/button'
-import { Checkbox } from '@/components/ui/checkbox'
+import * as React from 'react';
+import Link from 'next/link';
+import { type ColumnDef } from '@tanstack/react-table';
+import { MoreHorizontal, Eye, Pencil, Globe, Pause, Archive, Play } from 'lucide-react';
+import { type AdminEventListItem, type EventStatus, adminApi } from '@/lib/api';
+import { routes } from '@/lib/routes';
+import { formatCurrency, formatDate, formatNumber } from '@/lib/format';
+import { Button } from '@/components/ui/button';
+import { Checkbox } from '@/components/ui/checkbox';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -16,20 +16,20 @@ import {
   DropdownMenuLabel,
   DropdownMenuSeparator,
   DropdownMenuTrigger,
-} from '@/components/ui/dropdown-menu'
-import { DataTableColumnHeader } from '@/components/data-table/column-header'
-import { EventStatusBadge } from './event-status-badge'
-import { ConfirmDialog } from '@/components/confirm-dialog'
-import { toast } from 'sonner'
+} from '@/components/ui/dropdown-menu';
+import { DataTableColumnHeader } from '@/components/data-table/column-header';
+import { EventStatusBadge } from './event-status-badge';
+import { ConfirmDialog } from '@/components/confirm-dialog';
+import { toast } from 'sonner';
 
 export type EventAction = {
-  type: 'publish' | 'pause' | 'archive'
-  eventId: string
-}
+  type: 'publish' | 'pause' | 'archive';
+  eventId: string;
+};
 
 export function getEventColumns(
   onEdit?: (event: AdminEventListItem) => void,
-  onAction?: (action: EventAction) => void
+  onAction?: (action: EventAction) => void,
 ): ColumnDef<AdminEventListItem>[] {
   return [
     {
@@ -40,17 +40,15 @@ export function getEventColumns(
             table.getIsAllPageRowsSelected() ||
             (table.getIsSomePageRowsSelected() && 'indeterminate')
           }
-          onCheckedChange={(value) =>
-            table.toggleAllPageRowsSelected(!!value)
-          }
-          aria-label='Select all'
+          onCheckedChange={(value) => table.toggleAllPageRowsSelected(!!value)}
+          aria-label="Select all"
         />
       ),
       cell: ({ row }) => (
         <Checkbox
           checked={row.getIsSelected()}
           onCheckedChange={(value) => row.toggleSelected(!!value)}
-          aria-label='Select row'
+          aria-label="Select row"
         />
       ),
       enableSorting: false,
@@ -58,114 +56,103 @@ export function getEventColumns(
     },
     {
       accessorKey: 'title',
-      header: ({ column }) => (
-        <DataTableColumnHeader column={column} title='Event' />
-      ),
+      header: ({ column }) => <DataTableColumnHeader column={column} title="Event" />,
       cell: ({ row }) => {
-        const event = row.original
+        const event = row.original;
         return (
           <Link
             href={routes.eventDetail(event.id)}
-            className='font-medium hover:underline'
+            prefetch={false}
+            className="font-medium hover:underline"
           >
             {event.title}
           </Link>
-        )
+        );
       },
       meta: { title: 'Event' },
     },
     {
       accessorKey: 'status',
-      header: ({ column }) => (
-        <DataTableColumnHeader column={column} title='Status' />
-      ),
+      header: ({ column }) => <DataTableColumnHeader column={column} title="Status" />,
       cell: ({ row }) => <EventStatusBadge status={row.original.status} />,
       meta: { title: 'Status' },
     },
     {
       accessorKey: 'startsAt',
-      header: ({ column }) => (
-        <DataTableColumnHeader column={column} title='Start Date' />
-      ),
+      header: ({ column }) => <DataTableColumnHeader column={column} title="Start Date" />,
       cell: ({ row }) => formatDate(row.original.startsAt),
       meta: { title: 'Start Date' },
     },
     {
       accessorKey: 'venueName',
-      header: ({ column }) => (
-        <DataTableColumnHeader column={column} title='Venue' />
-      ),
+      header: ({ column }) => <DataTableColumnHeader column={column} title="Venue" />,
       cell: ({ row }) => row.original.venueName ?? '—',
       meta: { title: 'Venue' },
     },
     {
       accessorKey: 'ticketsSold',
-      header: ({ column }) => (
-        <DataTableColumnHeader column={column} title='Tickets' />
-      ),
+      header: ({ column }) => <DataTableColumnHeader column={column} title="Tickets" />,
       cell: ({ row }) => {
-        const { ticketsSold, capacity } = row.original
+        const { ticketsSold, capacity } = row.original;
         return capacity
           ? `${formatNumber(ticketsSold)} / ${formatNumber(capacity)}`
-          : formatNumber(ticketsSold)
+          : formatNumber(ticketsSold);
       },
       meta: { title: 'Tickets' },
     },
     {
       accessorKey: 'grossSalesCents',
-      header: ({ column }) => (
-        <DataTableColumnHeader column={column} title='Gross Sales' />
-      ),
-      cell: ({ row }) =>
-        formatCurrency(row.original.grossSalesCents, row.original.currency),
+      header: ({ column }) => <DataTableColumnHeader column={column} title="Gross Sales" />,
+      cell: ({ row }) => formatCurrency(row.original.grossSalesCents, row.original.currency),
       meta: { title: 'Gross Sales' },
     },
     {
       id: 'actions',
+      header: () => <span className="sr-only">Actions</span>,
       enableHiding: false,
       cell: function EventRowActions({ row }) {
-        const event = row.original
-        const [confirmOpen, setConfirmOpen] = React.useState(false)
-        const [pending, setPending] = React.useState(false)
-        const [actionType, setActionType] = React.useState<EventAction['type']>('publish')
+        const event = row.original;
+        const [confirmOpen, setConfirmOpen] = React.useState(false);
+        const [pending, setPending] = React.useState(false);
+        const [actionType, setActionType] = React.useState<EventAction['type']>('publish');
 
         const handleAction = async () => {
-          setPending(true)
-          let result
-          if (actionType === 'publish') result = await adminApi.publishEvent(event.id)
-          else if (actionType === 'pause') result = await adminApi.pauseEvent(event.id)
-          else result = await adminApi.archiveEvent(event.id)
-          setPending(false)
-          setConfirmOpen(false)
+          setPending(true);
+          let result;
+          if (actionType === 'publish') result = await adminApi.publishEvent(event.id);
+          else if (actionType === 'pause') result = await adminApi.pauseEvent(event.id);
+          else result = await adminApi.archiveEvent(event.id);
+          setPending(false);
+          setConfirmOpen(false);
           if (result.ok) {
-            toast.success(`Event ${actionType}d successfully`)
-            onAction?.({ type: actionType, eventId: event.id })
+            toast.success(`Event ${actionType}d successfully`);
+            onAction?.({ type: actionType, eventId: event.id });
           } else {
-            toast.error(result.error.message)
+            toast.error(result.error.message);
           }
-        }
+        };
 
-        const statusActions = getAvailableStatusActions(event.status)
+        const statusActions = getAvailableStatusActions(event.status);
 
         return (
           <>
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
-                <Button variant='ghost' size='icon' className='size-8'>
-                  <MoreHorizontal className='size-4' />
-                  <span className='sr-only'>Open menu</span>
+                <Button variant="ghost" size="icon" className="size-8">
+                  <MoreHorizontal className="size-4" />
+                  <span className="sr-only">Open menu</span>
                 </Button>
               </DropdownMenuTrigger>
-              <DropdownMenuContent align='end'>
+              <DropdownMenuContent align="end">
                 <DropdownMenuLabel>Actions</DropdownMenuLabel>
                 <DropdownMenuItem asChild>
-                  <Link href={routes.eventDetail(event.id)}>
-                    <Eye className='size-4' />
+                  <Link href={routes.eventDetail(event.id)} prefetch={false}>
+                    <Eye className="size-4" />
                     View
                   </Link>
                 </DropdownMenuItem>
                 <DropdownMenuItem onClick={() => onEdit?.(event)}>
-                  <Pencil className='size-4' />
+                  <Pencil className="size-4" />
                   Edit
                 </DropdownMenuItem>
                 <DropdownMenuSeparator />
@@ -173,8 +160,8 @@ export function getEventColumns(
                   <DropdownMenuItem
                     key={action.type}
                     onClick={() => {
-                      setActionType(action.type)
-                      setConfirmOpen(true)
+                      setActionType(action.type);
+                      setConfirmOpen(true);
                     }}
                   >
                     {action.icon}
@@ -194,26 +181,26 @@ export function getEventColumns(
               onConfirm={handleAction}
             />
           </>
-        )
+        );
       },
     },
-  ]
+  ];
 }
 
 function getAvailableStatusActions(
-  status: EventStatus
+  status: EventStatus,
 ): Array<{ type: EventAction['type']; label: string; icon: React.ReactNode }> {
-  const actions: Array<{ type: EventAction['type']; label: string; icon: React.ReactNode }> = []
+  const actions: Array<{ type: EventAction['type']; label: string; icon: React.ReactNode }> = [];
   if (status === 'draft' || status === 'paused') {
-    actions.push({ type: 'publish', label: 'Publish', icon: <Globe className='size-4' /> })
+    actions.push({ type: 'publish', label: 'Publish', icon: <Globe className="size-4" /> });
   }
   if (status === 'published') {
-    actions.push({ type: 'pause', label: 'Pause', icon: <Pause className='size-4' /> })
+    actions.push({ type: 'pause', label: 'Pause', icon: <Pause className="size-4" /> });
   }
   if (status !== 'archived') {
-    actions.push({ type: 'archive', label: 'Archive', icon: <Archive className='size-4' /> })
+    actions.push({ type: 'archive', label: 'Archive', icon: <Archive className="size-4" /> });
   }
-  return actions
+  return actions;
 }
 
-export { Play }
+export { Play };

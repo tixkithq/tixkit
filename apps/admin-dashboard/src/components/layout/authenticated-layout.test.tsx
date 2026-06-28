@@ -1,14 +1,10 @@
-import { render, screen } from '@testing-library/react'
-import { describe, expect, it, vi } from 'vitest'
-import { ThemeProvider } from '@/context/theme-provider'
+import { render, screen } from '@testing-library/react';
+import { describe, expect, it, vi } from 'vitest';
+import { ThemeProvider } from '@/context/theme-provider';
 
 vi.mock('@/components/layout/app-sidebar', () => ({
-  AppSidebar: () => <aside aria-label='App sidebar' />,
-}))
-
-vi.mock('@/components/layout/scope-selector', () => ({
-  ScopeSelector: () => <div aria-label='Scope selector' />,
-}))
+  AppSidebar: () => <aside aria-label="App sidebar" />,
+}));
 
 vi.mock('@/context/permission-provider', () => ({
   PermissionProvider: ({ children }: { children: React.ReactNode }) => <>{children}</>,
@@ -18,28 +14,38 @@ vi.mock('@/context/permission-provider', () => ({
     loading: false,
     error: null,
   }),
-}))
+}));
 
 vi.mock('@/context/bootstrap-provider', () => ({
   BootstrapProvider: ({ children }: { children: React.ReactNode }) => <>{children}</>,
-}))
+}));
 
-import { AuthenticatedLayout } from './authenticated-layout'
+import { AuthenticatedLayout } from './authenticated-layout';
 
 function renderLayout() {
   return render(
     <ThemeProvider>
-      <AuthenticatedLayout>
+      <AuthenticatedLayout headerActions={<button type="button">Header action</button>}>
         <main>Dashboard content</main>
       </AuthenticatedLayout>
-    </ThemeProvider>
-  )
+    </ThemeProvider>,
+  );
 }
 
 describe('AuthenticatedLayout', () => {
   it('renders dashboard content with command menu inside permission context', () => {
-    renderLayout()
+    renderLayout();
 
-    expect(screen.getByText('Dashboard content')).toBeInTheDocument()
-  })
-})
+    expect(screen.getByText('Dashboard content')).toBeInTheDocument();
+  });
+
+  it('keeps header actions in the top header and workspace scope in the sidebar', () => {
+    renderLayout();
+
+    const header = screen.getByRole('banner');
+    expect(header).toContainElement(screen.getByRole('button', { name: 'Toggle Sidebar' }));
+    expect(header).toContainElement(screen.getByRole('button', { name: 'Header action' }));
+    expect(header).not.toContainElement(screen.getByRole('complementary', { name: 'App sidebar' }));
+    expect(screen.getByRole('complementary', { name: 'App sidebar' })).toBeInTheDocument();
+  });
+});

@@ -81,7 +81,9 @@ export const InitialMigration: Migration = {
       .addColumn('updated_at', timestampType(), (col) => col.notNull().defaultTo(nowDefault()))
       .addUniqueConstraint('brands_slug_tenant_unique', ['tenant_id', 'slug'])
       .addForeignKeyConstraint('brands_tenant_fk', ['tenant_id'], 'tenants', ['id'])
-      .addForeignKeyConstraint('brands_organization_fk', ['organization_id'], 'organizations', ['id'])
+      .addForeignKeyConstraint('brands_organization_fk', ['organization_id'], 'organizations', [
+        'id',
+      ])
       .execute();
 
     // Brand Domains
@@ -123,9 +125,9 @@ export const InitialMigration: Migration = {
       .createTable('clerk_identity_links')
       .addColumn('id', varchar(32), (col) => col.primaryKey())
       .addColumn('clerk_user_id', varchar(255), (col) => col.notNull())
-      .addColumn('gatekit_user_id', varchar(32), (col) => col.notNull())
+      .addColumn('tixkit_user_id', varchar(32), (col) => col.notNull())
       .addColumn('clerk_organization_id', varchar(255))
-      .addColumn('gatekit_organization_id', varchar(32))
+      .addColumn('tixkit_organization_id', varchar(32))
       .addColumn('last_synced_at', timestampType(), (col) => col.notNull().defaultTo(nowDefault()))
       .addColumn('created_at', timestampType(), (col) => col.notNull().defaultTo(nowDefault()))
       .addColumn('updated_at', timestampType(), (col) => col.notNull().defaultTo(nowDefault()))
@@ -145,7 +147,12 @@ export const InitialMigration: Migration = {
       .addColumn('created_at', timestampType(), (col) => col.notNull().defaultTo(nowDefault()))
       .addColumn('updated_at', timestampType(), (col) => col.notNull().defaultTo(nowDefault()))
       .addForeignKeyConstraint('organization_members_tenant_fk', ['tenant_id'], 'tenants', ['id'])
-      .addForeignKeyConstraint('organization_members_org_fk', ['organization_id'], 'organizations', ['id'])
+      .addForeignKeyConstraint(
+        'organization_members_org_fk',
+        ['organization_id'],
+        'organizations',
+        ['id'],
+      )
       .addForeignKeyConstraint('organization_members_user_fk', ['user_id'], 'user_profiles', ['id'])
       .execute();
 
@@ -213,7 +220,9 @@ export const InitialMigration: Migration = {
       .addColumn('updated_at', timestampType(), (col) => col.notNull().defaultTo(nowDefault()))
       .addUniqueConstraint('scanner_devices_device_id_unique', ['device_id'])
       .addForeignKeyConstraint('scanner_devices_tenant_fk', ['tenant_id'], 'tenants', ['id'])
-      .addForeignKeyConstraint('scanner_devices_org_fk', ['organization_id'], 'organizations', ['id'])
+      .addForeignKeyConstraint('scanner_devices_org_fk', ['organization_id'], 'organizations', [
+        'id',
+      ])
       .execute();
 
     // Audit Logs
@@ -258,7 +267,9 @@ export const InitialMigration: Migration = {
       .addColumn('updated_at', timestampType(), (col) => col.notNull().defaultTo(nowDefault()))
       .addUniqueConstraint('events_slug_tenant_unique', ['tenant_id', 'slug'])
       .addForeignKeyConstraint('events_tenant_fk', ['tenant_id'], 'tenants', ['id'])
-      .addForeignKeyConstraint('events_organization_fk', ['organization_id'], 'organizations', ['id'])
+      .addForeignKeyConstraint('events_organization_fk', ['organization_id'], 'organizations', [
+        'id',
+      ])
       .addForeignKeyConstraint('events_brand_fk', ['brand_id'], 'brands', ['id'])
       .execute();
 
@@ -290,8 +301,14 @@ export const InitialMigration: Migration = {
       .addColumn('created_at', timestampType(), (col) => col.notNull().defaultTo(nowDefault()))
       .addColumn('updated_at', timestampType(), (col) => col.notNull().defaultTo(nowDefault()))
       .addCheckConstraint('inventory_pools_capacity_nonnegative', sql`total_capacity >= 0`)
-      .addCheckConstraint('inventory_pools_counts_nonnegative', sql`reserved_count >= 0 and sold_count >= 0`)
-      .addCheckConstraint('inventory_pools_counts_within_capacity', sql`reserved_count <= total_capacity and sold_count <= total_capacity`)
+      .addCheckConstraint(
+        'inventory_pools_counts_nonnegative',
+        sql`reserved_count >= 0 and sold_count >= 0`,
+      )
+      .addCheckConstraint(
+        'inventory_pools_counts_within_capacity',
+        sql`reserved_count <= total_capacity and sold_count <= total_capacity`,
+      )
       .addForeignKeyConstraint('inventory_pools_event_fk', ['event_id'], 'events', ['id'])
       .execute();
 
@@ -319,9 +336,17 @@ export const InitialMigration: Migration = {
       .addColumn('created_at', timestampType(), (col) => col.notNull().defaultTo(nowDefault()))
       .addColumn('updated_at', timestampType(), (col) => col.notNull().defaultTo(nowDefault()))
       .addCheckConstraint('ticket_types_price_nonnegative', sql`price_cents >= 0`)
-      .addCheckConstraint('ticket_types_order_bounds_valid', sql`min_per_order >= 1 and max_per_order >= min_per_order`)
+      .addCheckConstraint(
+        'ticket_types_order_bounds_valid',
+        sql`min_per_order >= 1 and max_per_order >= min_per_order`,
+      )
       .addForeignKeyConstraint('ticket_types_event_fk', ['event_id'], 'events', ['id'])
-      .addForeignKeyConstraint('ticket_types_inventory_pool_fk', ['inventory_pool_id'], 'inventory_pools', ['id'])
+      .addForeignKeyConstraint(
+        'ticket_types_inventory_pool_fk',
+        ['inventory_pool_id'],
+        'inventory_pools',
+        ['id'],
+      )
       .execute();
 
     // Checkout Holds
@@ -337,8 +362,15 @@ export const InitialMigration: Migration = {
       .addColumn('created_at', timestampType(), (col) => col.notNull().defaultTo(nowDefault()))
       .addColumn('updated_at', timestampType(), (col) => col.notNull().defaultTo(nowDefault()))
       .addCheckConstraint('checkout_holds_quantity_positive', sql`quantity > 0`)
-      .addForeignKeyConstraint('checkout_holds_pool_fk', ['inventory_pool_id'], 'inventory_pools', ['id'])
-      .addForeignKeyConstraint('checkout_holds_ticket_type_fk', ['ticket_type_id'], 'ticket_types', ['id'])
+      .addForeignKeyConstraint('checkout_holds_pool_fk', ['inventory_pool_id'], 'inventory_pools', [
+        'id',
+      ])
+      .addForeignKeyConstraint(
+        'checkout_holds_ticket_type_fk',
+        ['ticket_type_id'],
+        'ticket_types',
+        ['id'],
+      )
       .execute();
 
     // Checkout Sessions
@@ -403,9 +435,14 @@ export const InitialMigration: Migration = {
       // One order per checkout session: the backstop that makes order
       // finalization idempotent under activity retries / duplicate webhooks.
       .addUniqueConstraint('orders_checkout_session_unique', ['checkout_session_id'])
-      .addCheckConstraint('orders_money_nonnegative', sql`subtotal_cents >= 0 and discount_cents >= 0 and tax_cents >= 0 and fee_cents >= 0 and total_cents >= 0 and refunded_cents >= 0`)
+      .addCheckConstraint(
+        'orders_money_nonnegative',
+        sql`subtotal_cents >= 0 and discount_cents >= 0 and tax_cents >= 0 and fee_cents >= 0 and total_cents >= 0 and refunded_cents >= 0`,
+      )
       .addForeignKeyConstraint('orders_tenant_fk', ['tenant_id'], 'tenants', ['id'])
-      .addForeignKeyConstraint('orders_organization_fk', ['organization_id'], 'organizations', ['id'])
+      .addForeignKeyConstraint('orders_organization_fk', ['organization_id'], 'organizations', [
+        'id',
+      ])
       .addForeignKeyConstraint('orders_brand_fk', ['brand_id'], 'brands', ['id'])
       .addForeignKeyConstraint('orders_event_fk', ['event_id'], 'events', ['id'])
       .addForeignKeyConstraint(
@@ -437,8 +474,16 @@ export const InitialMigration: Migration = {
       .addColumn('created_at', timestampType(), (col) => col.notNull().defaultTo(nowDefault()))
       .addColumn('updated_at', timestampType(), (col) => col.notNull().defaultTo(nowDefault()))
       .addCheckConstraint('order_line_items_quantity_positive', sql`quantity > 0`)
-      .addCheckConstraint('order_line_items_money_nonnegative', sql`unit_price_cents >= 0 and subtotal_cents >= 0 and discount_cents >= 0 and tax_cents >= 0 and fee_cents >= 0 and total_cents >= 0`)
-      .addForeignKeyConstraint('order_line_items_ticket_type_fk', ['ticket_type_id'], 'ticket_types', ['id'])
+      .addCheckConstraint(
+        'order_line_items_money_nonnegative',
+        sql`unit_price_cents >= 0 and subtotal_cents >= 0 and discount_cents >= 0 and tax_cents >= 0 and fee_cents >= 0 and total_cents >= 0`,
+      )
+      .addForeignKeyConstraint(
+        'order_line_items_ticket_type_fk',
+        ['ticket_type_id'],
+        'ticket_types',
+        ['id'],
+      )
       .execute();
 
     // Attendees
@@ -464,7 +509,9 @@ export const InitialMigration: Migration = {
       .addColumn('updated_at', timestampType(), (col) => col.notNull().defaultTo(nowDefault()))
       .addForeignKeyConstraint('attendees_tenant_fk', ['tenant_id'], 'tenants', ['id'])
       .addForeignKeyConstraint('attendees_event_fk', ['event_id'], 'events', ['id'])
-      .addForeignKeyConstraint('attendees_ticket_type_fk', ['ticket_type_id'], 'ticket_types', ['id'])
+      .addForeignKeyConstraint('attendees_ticket_type_fk', ['ticket_type_id'], 'ticket_types', [
+        'id',
+      ])
       .execute();
 
     // Order Timeline Events
@@ -570,10 +617,18 @@ export const InitialMigration: Migration = {
       .addColumn('payment_account_id', varchar(32))
       .addColumn('created_at', timestampType(), (col) => col.notNull().defaultTo(nowDefault()))
       .addColumn('updated_at', timestampType(), (col) => col.notNull().defaultTo(nowDefault()))
-      .addUniqueConstraint('payment_intents_provider_intent_unique', ['provider', 'provider_intent_id'])
+      .addUniqueConstraint('payment_intents_provider_intent_unique', [
+        'provider',
+        'provider_intent_id',
+      ])
       .addCheckConstraint('payment_intents_amount_nonnegative', sql`amount_cents >= 0`)
       .addForeignKeyConstraint('payment_intents_tenant_fk', ['tenant_id'], 'tenants', ['id'])
-      .addForeignKeyConstraint('payment_intents_session_fk', ['checkout_session_id'], 'checkout_sessions', ['id'])
+      .addForeignKeyConstraint(
+        'payment_intents_session_fk',
+        ['checkout_session_id'],
+        'checkout_sessions',
+        ['id'],
+      )
       .addForeignKeyConstraint('payment_intents_order_fk', ['order_id'], 'orders', ['id'])
       .execute();
 
@@ -612,7 +667,10 @@ export const InitialMigration: Migration = {
       .addColumn('processed_at', timestampType())
       .addColumn('idempotency_key', varchar(255), (col) => col.notNull())
       .addColumn('created_at', timestampType(), (col) => col.notNull().defaultTo(nowDefault()))
-      .addUniqueConstraint('payment_events_provider_event_unique', ['provider', 'provider_event_id'])
+      .addUniqueConstraint('payment_events_provider_event_unique', [
+        'provider',
+        'provider_event_id',
+      ])
       .addForeignKeyConstraint('payment_events_tenant_fk', ['tenant_id'], 'tenants', ['id'])
       .execute();
 
@@ -637,8 +695,14 @@ export const InitialMigration: Migration = {
       .addColumn('updated_at', timestampType(), (col) => col.notNull().defaultTo(nowDefault()))
       .addUniqueConstraint('discount_codes_event_code_unique', ['event_id', 'code'])
       .addCheckConstraint('discount_codes_value_nonnegative', sql`value >= 0`)
-      .addCheckConstraint('discount_codes_usage_bounds_valid', sql`max_uses >= 0 and uses_count >= 0 and uses_count <= max_uses`)
-      .addCheckConstraint('discount_codes_order_bounds_nonnegative', sql`(min_order_cents is null or min_order_cents >= 0) and (max_discount_cents is null or max_discount_cents >= 0)`)
+      .addCheckConstraint(
+        'discount_codes_usage_bounds_valid',
+        sql`max_uses >= 0 and uses_count >= 0 and uses_count <= max_uses`,
+      )
+      .addCheckConstraint(
+        'discount_codes_order_bounds_nonnegative',
+        sql`(min_order_cents is null or min_order_cents >= 0) and (max_discount_cents is null or max_discount_cents >= 0)`,
+      )
       .addForeignKeyConstraint('discount_codes_event_fk', ['event_id'], 'events', ['id'])
       .execute();
 
@@ -707,7 +771,9 @@ export const InitialMigration: Migration = {
       .addCheckConstraint('products_price_nonnegative', sql`price_cents >= 0`)
       .addCheckConstraint('products_max_per_order_positive', sql`max_per_order >= 1`)
       .addForeignKeyConstraint('products_event_fk', ['event_id'], 'events', ['id'])
-      .addForeignKeyConstraint('products_category_fk', ['category_id'], 'product_categories', ['id'])
+      .addForeignKeyConstraint('products_category_fk', ['category_id'], 'product_categories', [
+        'id',
+      ])
       .execute();
 
     // Access Rules
@@ -722,8 +788,13 @@ export const InitialMigration: Migration = {
       .addColumn('expires_at', timestampType())
       .addColumn('created_at', timestampType(), (col) => col.notNull().defaultTo(nowDefault()))
       .addColumn('updated_at', timestampType(), (col) => col.notNull().defaultTo(nowDefault()))
-      .addCheckConstraint('access_rules_usage_bounds_valid', sql`uses_count >= 0 and (max_uses is null or (max_uses >= 0 and uses_count <= max_uses))`)
-      .addForeignKeyConstraint('access_rules_ticket_type_fk', ['ticket_type_id'], 'ticket_types', ['id'])
+      .addCheckConstraint(
+        'access_rules_usage_bounds_valid',
+        sql`uses_count >= 0 and (max_uses is null or (max_uses >= 0 and uses_count <= max_uses))`,
+      )
+      .addForeignKeyConstraint('access_rules_ticket_type_fk', ['ticket_type_id'], 'ticket_types', [
+        'id',
+      ])
       .execute();
 
     // Questions
@@ -752,7 +823,9 @@ export const InitialMigration: Migration = {
       .addColumn('created_at', timestampType(), (col) => col.notNull().defaultTo(nowDefault()))
       .addColumn('updated_at', timestampType(), (col) => col.notNull().defaultTo(nowDefault()))
       .addForeignKeyConstraint('questions_event_fk', ['event_id'], 'events', ['id'])
-      .addForeignKeyConstraint('questions_ticket_type_fk', ['ticket_type_id'], 'ticket_types', ['id'])
+      .addForeignKeyConstraint('questions_ticket_type_fk', ['ticket_type_id'], 'ticket_types', [
+        'id',
+      ])
       .execute();
 
     // Webhook Endpoints
@@ -769,7 +842,9 @@ export const InitialMigration: Migration = {
       .addColumn('created_at', timestampType(), (col) => col.notNull().defaultTo(nowDefault()))
       .addColumn('updated_at', timestampType(), (col) => col.notNull().defaultTo(nowDefault()))
       .addForeignKeyConstraint('webhook_endpoints_tenant_fk', ['tenant_id'], 'tenants', ['id'])
-      .addForeignKeyConstraint('webhook_endpoints_org_fk', ['organization_id'], 'organizations', ['id'])
+      .addForeignKeyConstraint('webhook_endpoints_org_fk', ['organization_id'], 'organizations', [
+        'id',
+      ])
       .execute();
 
     // Webhook Events
@@ -783,7 +858,9 @@ export const InitialMigration: Migration = {
       .addColumn('status', varchar(50), (col) => col.notNull().defaultTo('pending'))
       .addColumn('created_at', timestampType(), (col) => col.notNull().defaultTo(nowDefault()))
       .addForeignKeyConstraint('webhook_events_tenant_fk', ['tenant_id'], 'tenants', ['id'])
-      .addForeignKeyConstraint('webhook_events_org_fk', ['organization_id'], 'organizations', ['id'])
+      .addForeignKeyConstraint('webhook_events_org_fk', ['organization_id'], 'organizations', [
+        'id',
+      ])
       .execute();
 
     // Webhook Deliveries
@@ -799,8 +876,15 @@ export const InitialMigration: Migration = {
       .addColumn('delivered_at', timestampType())
       .addColumn('next_retry_at', timestampType())
       .addColumn('created_at', timestampType(), (col) => col.notNull().defaultTo(nowDefault()))
-      .addForeignKeyConstraint('webhook_deliveries_endpoint_fk', ['endpoint_id'], 'webhook_endpoints', ['id'])
-      .addForeignKeyConstraint('webhook_deliveries_event_fk', ['event_id'], 'webhook_events', ['id'])
+      .addForeignKeyConstraint(
+        'webhook_deliveries_endpoint_fk',
+        ['endpoint_id'],
+        'webhook_endpoints',
+        ['id'],
+      )
+      .addForeignKeyConstraint('webhook_deliveries_event_fk', ['event_id'], 'webhook_events', [
+        'id',
+      ])
       .execute();
 
     // Idempotency Records
@@ -876,7 +960,12 @@ export const InitialMigration: Migration = {
       .addColumn('published_at', timestampType())
       .addColumn('created_at', timestampType(), (col) => col.notNull().defaultTo(nowDefault()))
       .addColumn('updated_at', timestampType(), (col) => col.notNull().defaultTo(nowDefault()))
-      .addForeignKeyConstraint('notification_template_versions_template_fk', ['template_id'], 'notification_templates', ['id'])
+      .addForeignKeyConstraint(
+        'notification_template_versions_template_fk',
+        ['template_id'],
+        'notification_templates',
+        ['id'],
+      )
       .execute();
 
     // Email Jobs
@@ -901,7 +990,12 @@ export const InitialMigration: Migration = {
       .addUniqueConstraint('email_jobs_idempotency_unique', ['tenant_id', 'idempotency_key'])
       .addForeignKeyConstraint('email_jobs_tenant_fk', ['tenant_id'], 'tenants', ['id'])
       .addForeignKeyConstraint('email_jobs_brand_fk', ['brand_id'], 'brands', ['id'])
-      .addForeignKeyConstraint('email_jobs_template_version_fk', ['template_version_id'], 'notification_template_versions', ['id'])
+      .addForeignKeyConstraint(
+        'email_jobs_template_version_fk',
+        ['template_version_id'],
+        'notification_template_versions',
+        ['id'],
+      )
       .execute();
 
     // Email Deliveries
@@ -1013,7 +1107,12 @@ export const InitialMigration: Migration = {
       .addColumn('updated_at', timestampType(), (col) => col.notNull().defaultTo(nowDefault()))
       .addForeignKeyConstraint('sms_provider_routes_tenant_fk', ['tenant_id'], 'tenants', ['id'])
       .addForeignKeyConstraint('sms_provider_routes_brand_fk', ['brand_id'], 'brands', ['id'])
-      .addForeignKeyConstraint('sms_provider_routes_sender_fk', ['sender_identity_id'], 'sms_sender_identities', ['id'])
+      .addForeignKeyConstraint(
+        'sms_provider_routes_sender_fk',
+        ['sender_identity_id'],
+        'sms_sender_identities',
+        ['id'],
+      )
       .execute();
 
     // SMS Jobs
@@ -1037,7 +1136,12 @@ export const InitialMigration: Migration = {
       .addUniqueConstraint('sms_jobs_idempotency_unique', ['tenant_id', 'idempotency_key'])
       .addForeignKeyConstraint('sms_jobs_tenant_fk', ['tenant_id'], 'tenants', ['id'])
       .addForeignKeyConstraint('sms_jobs_brand_fk', ['brand_id'], 'brands', ['id'])
-      .addForeignKeyConstraint('sms_jobs_provider_route_fk', ['provider_route_id'], 'sms_provider_routes', ['id'])
+      .addForeignKeyConstraint(
+        'sms_jobs_provider_route_fk',
+        ['provider_route_id'],
+        'sms_provider_routes',
+        ['id'],
+      )
       .execute();
 
     // SMS Deliveries
@@ -1074,7 +1178,10 @@ export const InitialMigration: Migration = {
       .addColumn('raw_payload', jsonType(), (col) => col.notNull())
       .addColumn('processed_at', timestampType())
       .addColumn('created_at', timestampType(), (col) => col.notNull().defaultTo(nowDefault()))
-      .addUniqueConstraint('sms_provider_events_provider_event_unique', ['provider', 'provider_event_id'])
+      .addUniqueConstraint('sms_provider_events_provider_event_unique', [
+        'provider',
+        'provider_event_id',
+      ])
       .addForeignKeyConstraint('sms_provider_events_tenant_fk', ['tenant_id'], 'tenants', ['id'])
       .execute();
 
@@ -1133,6 +1240,11 @@ export const InitialMigration: Migration = {
       .addColumn('provider_account_id', varchar(255), (col) => col.notNull())
       .addColumn('status', varchar(50), (col) => col.notNull().defaultTo('pending'))
       .addColumn('default_currency', varchar(3), (col) => col.notNull().defaultTo('USD'))
+      .addColumn('details_submitted', booleanType(), (col) => col.notNull().defaultTo(false))
+      .addColumn('charges_enabled', booleanType(), (col) => col.notNull().defaultTo(false))
+      .addColumn('payouts_enabled', booleanType(), (col) => col.notNull().defaultTo(false))
+      .addColumn('requirements', jsonType())
+      .addColumn('disabled_reason', varchar(255))
       .addColumn('created_at', timestampType(), (col) => col.notNull().defaultTo(nowDefault()))
       .addColumn('updated_at', timestampType(), (col) => col.notNull().defaultTo(nowDefault()))
       .execute();
@@ -1144,7 +1256,12 @@ export const InitialMigration: Migration = {
     // Referential integrity is enforced via payment_intents.order_id.
     await db.schema
       .alterTable('payment_intents')
-      .addForeignKeyConstraint('payment_intents_payment_account_fk', ['payment_account_id'], 'payment_accounts', ['id'])
+      .addForeignKeyConstraint(
+        'payment_intents_payment_account_fk',
+        ['payment_account_id'],
+        'payment_accounts',
+        ['id'],
+      )
       .execute();
 
     // Sender Identities
@@ -1176,34 +1293,110 @@ export const InitialMigration: Migration = {
       .execute();
 
     // Create indexes
-    await db.schema.createIndex('idx_organizations_tenant').on('organizations').columns(['tenant_id']).execute();
+    await db.schema
+      .createIndex('idx_organizations_tenant')
+      .on('organizations')
+      .columns(['tenant_id'])
+      .execute();
     await db.schema.createIndex('idx_brands_tenant').on('brands').columns(['tenant_id']).execute();
-    await db.schema.createIndex('idx_brands_org').on('brands').columns(['organization_id']).execute();
+    await db.schema
+      .createIndex('idx_brands_org')
+      .on('brands')
+      .columns(['organization_id'])
+      .execute();
     await db.schema.createIndex('idx_events_tenant').on('events').columns(['tenant_id']).execute();
-    await db.schema.createIndex('idx_events_org').on('events').columns(['organization_id']).execute();
+    await db.schema
+      .createIndex('idx_events_org')
+      .on('events')
+      .columns(['organization_id'])
+      .execute();
     await db.schema.createIndex('idx_events_brand').on('events').columns(['brand_id']).execute();
     await db.schema.createIndex('idx_events_status').on('events').columns(['status']).execute();
-    await db.schema.createIndex('idx_ticket_types_event').on('ticket_types').columns(['event_id']).execute();
-    await db.schema.createIndex('idx_inventory_pools_event').on('inventory_pools').columns(['event_id']).execute();
-    await db.schema.createIndex('idx_checkout_sessions_event').on('checkout_sessions').columns(['event_id']).execute();
-    await db.schema.createIndex('idx_checkout_sessions_status').on('checkout_sessions').columns(['status']).execute();
+    await db.schema
+      .createIndex('idx_ticket_types_event')
+      .on('ticket_types')
+      .columns(['event_id'])
+      .execute();
+    await db.schema
+      .createIndex('idx_inventory_pools_event')
+      .on('inventory_pools')
+      .columns(['event_id'])
+      .execute();
+    await db.schema
+      .createIndex('idx_checkout_sessions_event')
+      .on('checkout_sessions')
+      .columns(['event_id'])
+      .execute();
+    await db.schema
+      .createIndex('idx_checkout_sessions_status')
+      .on('checkout_sessions')
+      .columns(['status'])
+      .execute();
     await db.schema.createIndex('idx_orders_event').on('orders').columns(['event_id']).execute();
     await db.schema.createIndex('idx_orders_status').on('orders').columns(['status']).execute();
     await db.schema.createIndex('idx_orders_tenant').on('orders').columns(['tenant_id']).execute();
-    await db.schema.createIndex('idx_attendees_event').on('attendees').columns(['event_id']).execute();
-    await db.schema.createIndex('idx_attendees_order').on('attendees').columns(['order_id']).execute();
+    await db.schema
+      .createIndex('idx_attendees_event')
+      .on('attendees')
+      .columns(['event_id'])
+      .execute();
+    await db.schema
+      .createIndex('idx_attendees_order')
+      .on('attendees')
+      .columns(['order_id'])
+      .execute();
     await db.schema.createIndex('idx_tickets_event').on('tickets').columns(['event_id']).execute();
     await db.schema.createIndex('idx_tickets_order').on('tickets').columns(['order_id']).execute();
-    await db.schema.createIndex('idx_tickets_attendee').on('tickets').columns(['attendee_id']).execute();
-    await db.schema.createIndex('idx_checkout_holds_pool').on('checkout_holds').columns(['inventory_pool_id']).execute();
-    await db.schema.createIndex('idx_checkout_holds_status').on('checkout_holds').columns(['status']).execute();
-    await db.schema.createIndex('idx_checkout_holds_expires').on('checkout_holds').columns(['expires_at']).execute();
-    await db.schema.createIndex('idx_scan_logs_list').on('scan_logs').columns(['check_in_list_id']).execute();
-    await db.schema.createIndex('idx_payment_events_idem').on('payment_events').columns(['idempotency_key']).execute();
-    await db.schema.createIndex('idx_audit_logs_tenant').on('audit_logs').columns(['tenant_id']).execute();
-    await db.schema.createIndex('idx_audit_logs_resource').on('audit_logs').columns(['resource_id']).execute();
-    await db.schema.createIndex('idx_export_jobs_tenant').on('export_jobs').columns(['tenant_id']).execute();
-    await db.schema.createIndex('idx_export_job_events_replay').on('export_job_events').columns(['tenant_id', 'export_job_id', 'id']).execute();
+    await db.schema
+      .createIndex('idx_tickets_attendee')
+      .on('tickets')
+      .columns(['attendee_id'])
+      .execute();
+    await db.schema
+      .createIndex('idx_checkout_holds_pool')
+      .on('checkout_holds')
+      .columns(['inventory_pool_id'])
+      .execute();
+    await db.schema
+      .createIndex('idx_checkout_holds_status')
+      .on('checkout_holds')
+      .columns(['status'])
+      .execute();
+    await db.schema
+      .createIndex('idx_checkout_holds_expires')
+      .on('checkout_holds')
+      .columns(['expires_at'])
+      .execute();
+    await db.schema
+      .createIndex('idx_scan_logs_list')
+      .on('scan_logs')
+      .columns(['check_in_list_id'])
+      .execute();
+    await db.schema
+      .createIndex('idx_payment_events_idem')
+      .on('payment_events')
+      .columns(['idempotency_key'])
+      .execute();
+    await db.schema
+      .createIndex('idx_audit_logs_tenant')
+      .on('audit_logs')
+      .columns(['tenant_id'])
+      .execute();
+    await db.schema
+      .createIndex('idx_audit_logs_resource')
+      .on('audit_logs')
+      .columns(['resource_id'])
+      .execute();
+    await db.schema
+      .createIndex('idx_export_jobs_tenant')
+      .on('export_jobs')
+      .columns(['tenant_id'])
+      .execute();
+    await db.schema
+      .createIndex('idx_export_job_events_replay')
+      .on('export_job_events')
+      .columns(['tenant_id', 'export_job_id', 'id'])
+      .execute();
 
     // OAuth Applications
     await db.schema
@@ -1221,7 +1414,9 @@ export const InitialMigration: Migration = {
       .addColumn('updated_at', timestampType(), (col) => col.notNull().defaultTo(nowDefault()))
       .addUniqueConstraint('oauth_applications_client_id_unique', ['client_id'])
       .addForeignKeyConstraint('oauth_applications_tenant_fk', ['tenant_id'], 'tenants', ['id'])
-      .addForeignKeyConstraint('oauth_applications_org_fk', ['organization_id'], 'organizations', ['id'])
+      .addForeignKeyConstraint('oauth_applications_org_fk', ['organization_id'], 'organizations', [
+        'id',
+      ])
       .execute();
   },
 
@@ -1301,6 +1496,7 @@ export const InitialMigration: Migration = {
       const next: string[] = [];
       for (const table of remaining) {
         try {
+          // eslint-disable-next-line no-await-in-loop -- down migration retries ordered drops so FK-dependent tables can be removed in later passes.
           await db.schema.dropTable(table).ifExists().execute();
         } catch {
           next.push(table);

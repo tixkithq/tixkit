@@ -1,101 +1,84 @@
-import type { ReactNode } from 'react'
-import { auth } from '@clerk/nextjs/server'
-import { redirect } from 'next/navigation'
-import { AuthenticatedLayout } from '@/components/layout/authenticated-layout'
-import { Header } from '@/components/layout/header'
-import { Main } from '@/components/layout/main'
-import { Search } from '@/components/search'
-import { ThemeSwitch } from '@/components/theme-switch'
-import { ConfigDrawer } from '@/components/config-drawer'
-import { ProfileDropdown } from '@/components/profile-dropdown'
-import { NavigationProgress } from '@/components/navigation-progress'
-import { hasClerkKey } from '@/lib/auth'
+import type { ReactNode } from 'react';
+import { auth } from '@clerk/nextjs/server';
+import { redirect } from 'next/navigation';
+import { AuthenticatedLayout } from '@/components/layout/authenticated-layout';
+import { Main } from '@/components/layout/main';
+import { Search } from '@/components/search';
+import { ThemeSwitch } from '@/components/theme-switch';
+import { ConfigDrawer } from '@/components/config-drawer';
+import { ProfileDropdown } from '@/components/profile-dropdown';
+import { NavigationProgress } from '@/components/navigation-progress';
+import { hasClerkKey } from '@/lib/auth';
 
 type PrincipalError = {
-  code: string
-  message: string
-  status?: number
-}
+  code: string;
+  message: string;
+  status?: number;
+};
 
 function isApiUnavailable(error: PrincipalError): boolean {
   return (
     error.status === undefined &&
-    (error.code === 'network_error' ||
-      error.code === 'timeout' ||
-      error.code === 'unknown')
-  )
+    (error.code === 'network_error' || error.code === 'timeout' || error.code === 'unknown')
+  );
 }
 
-function ApiUnavailableState({
-  apiBaseUrl,
-  message,
-}: {
-  apiBaseUrl: string
-  message: string
-}) {
+function ApiUnavailableState({ apiBaseUrl, message }: { apiBaseUrl: string; message: string }) {
   return (
-    <div className='flex min-h-svh items-center justify-center bg-background p-6'>
-      <div className='w-full max-w-lg space-y-4 rounded-lg border bg-card p-6 text-card-foreground shadow-sm'>
-        <div className='space-y-2'>
-          <p className='text-sm font-medium text-muted-foreground'>
-            GateKit API unavailable
-          </p>
-          <h1 className='text-2xl font-semibold tracking-tight'>
+    <div className="flex min-h-svh items-center justify-center bg-background p-6">
+      <div className="w-full max-w-lg space-y-4 rounded-lg border bg-card p-6 text-card-foreground shadow-sm">
+        <div className="space-y-2">
+          <p className="text-sm font-medium text-muted-foreground">Tixkit API unavailable</p>
+          <h1 className="text-2xl font-semibold tracking-tight">
             Dashboard cannot reach the local API
           </h1>
-          <p className='text-sm text-muted-foreground'>
+          <p className="text-sm text-muted-foreground">
             The admin session is signed in, but the API health check failed at{' '}
-            <code className='rounded bg-muted px-1.5 py-0.5 text-xs'>
-              {apiBaseUrl}
-            </code>
-            .
+            <code className="rounded bg-muted px-1.5 py-0.5 text-xs">{apiBaseUrl}</code>.
           </p>
         </div>
-        <p className='rounded-md border bg-muted/40 p-3 text-sm text-muted-foreground'>
-          {message}
-        </p>
+        <p className="rounded-md border bg-muted/40 p-3 text-sm text-muted-foreground">{message}</p>
       </div>
     </div>
-  )
+  );
 }
 
-export default async function DashboardLayout({
-  children,
-}: {
-  children: ReactNode
-}) {
+export default async function DashboardLayout({ children }: { children: ReactNode }) {
   if (hasClerkKey()) {
-    const { userId, getToken } = await auth()
-    if (!userId) redirect('/sign-in')
+    const { userId, getToken } = await auth();
+    if (!userId) redirect('/sign-in');
 
-    const token = await getToken()
-    const { adminApi, getAdminApiBaseUrl } = await import('@/lib/api')
-    const principalRes = await adminApi.getPrincipal(token ?? undefined)
+    const token = await getToken();
+    const { adminApi, getAdminApiBaseUrl } = await import('@/lib/api');
+    const principalRes = await adminApi.getPrincipal(token ?? undefined);
 
     if (!principalRes.ok) {
-      console.error('Failed to fetch GateKit principal:', principalRes.error)
+      console.error('Failed to fetch Tixkit principal:', principalRes.error);
       if (isApiUnavailable(principalRes.error)) {
         return (
           <ApiUnavailableState
             apiBaseUrl={getAdminApiBaseUrl()}
             message={principalRes.error.message}
           />
-        )
+        );
       }
-      redirect('/sign-in?error=unauthorized')
+      redirect('/sign-in?error=unauthorized');
     }
   }
 
   return (
-    <AuthenticatedLayout>
+    <AuthenticatedLayout
+      headerActions={
+        <>
+          <Search />
+          <ThemeSwitch />
+          <ConfigDrawer />
+          <ProfileDropdown />
+        </>
+      }
+    >
       <NavigationProgress />
-      <Header fixed>
-        <Search />
-        <ThemeSwitch />
-        <ConfigDrawer />
-        <ProfileDropdown />
-      </Header>
-      <Main id='content'>{children}</Main>
+      <Main id="content">{children}</Main>
     </AuthenticatedLayout>
-  )
+  );
 }

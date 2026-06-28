@@ -8,6 +8,7 @@ export {
 } from './tenant.js';
 export {
   EventRepository,
+  EventOccurrenceRepository,
   TicketTypeRepository,
   InventoryPoolRepository,
   AccessRuleRepository,
@@ -21,12 +22,18 @@ export {
   AttendeeRepository,
 } from './checkout.js';
 export { TicketRepository, CheckInListRepository, ScanLogRepository } from './ticket.js';
-export { PaymentIntentRepository, RefundRepository, PaymentEventRepository } from './payment.js';
+export {
+  PaymentIntentRepository,
+  PaymentCompensationRepository,
+  RefundRepository,
+  PaymentEventRepository,
+} from './payment.js';
 export {
   UserProfileRepository,
   ApiKeyRepository,
   ScannerDeviceRepository,
   AuditLogRepository,
+  PrivacyRequestRepository,
   PermissionGrantRepository,
 } from './identity.js';
 export { DiscountCodeRepository, TaxRuleRepository, FeeRuleRepository } from './pricing.js';
@@ -42,6 +49,7 @@ export {
   BrandSenderIdentityRepository,
   EmailJobRepository,
   EmailDeliveryRepository,
+  EmailProviderEventRepository,
   EmailSuppressionRepository,
   SmsSenderIdentityRepository,
   SmsProviderRouteRepository,

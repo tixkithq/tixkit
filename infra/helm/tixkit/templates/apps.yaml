@@ -1,0 +1,99 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "tixkit.fullname" . }}-checkout
+  labels:
+    {{- include "tixkit.labels" . | nindent 4 }}
+    app.kubernetes.io/component: checkout
+spec:
+  replicas: {{ .Values.checkout.replicas }}
+  selector:
+    matchLabels:
+      {{- include "tixkit.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: checkout
+  template:
+    metadata:
+      labels:
+        {{- include "tixkit.selectorLabels" . | nindent 8 }}
+        app.kubernetes.io/component: checkout
+    spec:
+      containers:
+        - name: checkout
+          image: {{ include "tixkit.image" (dict "Values" .Values "image" .Values.checkout.image) }}
+          imagePullPolicy: {{ .Values.global.imagePullPolicy }}
+          ports:
+            - name: http
+              containerPort: {{ .Values.checkout.port }}
+          envFrom:
+            - configMapRef:
+                name: {{ include "tixkit.fullname" . }}-config
+            - secretRef:
+                name: {{ .Values.secrets.name }}
+          resources:
+            {{- toYaml .Values.checkout.resources | nindent 12 }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "tixkit.fullname" . }}-checkout
+  labels:
+    {{- include "tixkit.labels" . | nindent 4 }}
+    app.kubernetes.io/component: checkout
+spec:
+  selector:
+    {{- include "tixkit.selectorLabels" . | nindent 4 }}
+    app.kubernetes.io/component: checkout
+  ports:
+    - name: http
+      port: 80
+      targetPort: http
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "tixkit.fullname" . }}-admin
+  labels:
+    {{- include "tixkit.labels" . | nindent 4 }}
+    app.kubernetes.io/component: admin
+spec:
+  replicas: {{ .Values.admin.replicas }}
+  selector:
+    matchLabels:
+      {{- include "tixkit.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: admin
+  template:
+    metadata:
+      labels:
+        {{- include "tixkit.selectorLabels" . | nindent 8 }}
+        app.kubernetes.io/component: admin
+    spec:
+      containers:
+        - name: admin
+          image: {{ include "tixkit.image" (dict "Values" .Values "image" .Values.admin.image) }}
+          imagePullPolicy: {{ .Values.global.imagePullPolicy }}
+          ports:
+            - name: http
+              containerPort: {{ .Values.admin.port }}
+          envFrom:
+            - configMapRef:
+                name: {{ include "tixkit.fullname" . }}-config
+            - secretRef:
+                name: {{ .Values.secrets.name }}
+          resources:
+            {{- toYaml .Values.admin.resources | nindent 12 }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "tixkit.fullname" . }}-admin
+  labels:
+    {{- include "tixkit.labels" . | nindent 4 }}
+    app.kubernetes.io/component: admin
+spec:
+  selector:
+    {{- include "tixkit.selectorLabels" . | nindent 4 }}
+    app.kubernetes.io/component: admin
+  ports:
+    - name: http
+      port: 80
+      targetPort: http

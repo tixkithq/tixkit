@@ -16,7 +16,7 @@ const dbState = vi.hoisted(() => ({
     refunded_cents: 0,
     currency: 'USD',
     status: 'paid',
-    order_number: 'GK-1001',
+    order_number: 'TK-1001',
     event_id: 'evt_1',
     brand_id: 'brd_1',
     buyer_email: 'buyer@test.com',
@@ -26,19 +26,45 @@ const dbState = vi.hoisted(() => ({
   tickets: [] as Record<string, unknown>[],
   refunds: [] as Record<string, unknown>[],
   timeline: [] as Record<string, unknown>[],
-  paymentIntent: { id: 'pi_db_1', provider_intent_id: 'pi_stripe_1', payment_account_id: null } as Record<string, unknown> | null,
+  paymentIntent: {
+    id: 'pi_db_1',
+    provider_intent_id: 'pi_stripe_1',
+    payment_account_id: null,
+  } as Record<string, unknown> | null,
   paymentAccount: { provider_account_id: 'acct_connect_1' } as Record<string, unknown> | null,
   updatedTickets: [] as Record<string, unknown>[],
   createdRefunds: [] as Record<string, unknown>[],
   stripeRefunds: [] as Record<string, unknown>[],
+  transactionQueue: Promise.resolve() as Promise<void>,
   destroy: vi.fn(),
 }));
 
-vi.mock('@gatekit/db', () => {
+function matches(
+  row: Record<string, unknown>,
+  filters: Array<{ col: string; op: string; val: unknown }>,
+): boolean {
+  return filters.every((filter) => {
+    const value = row[filter.col];
+    if (filter.op === 'in') return Array.isArray(filter.val) && filter.val.includes(value);
+    return value === filter.val;
+  });
+}
+
+vi.mock('@tixkit/db', () => {
   class OrderRepository {
-    async findById(id: string) { return { ...dbState.order, id }; }
-    async update(id: string, data: Record<string, unknown>) { Object.assign(dbState.order, data); return { ...dbState.order, id }; }
-    async addTimelineEvent(orderId: string, type: string, description: string, metadata?: Record<string, unknown>) {
+    async findById(id: string) {
+      return { ...dbState.order, id };
+    }
+    async update(id: string, data: Record<string, unknown>) {
+      Object.assign(dbState.order, data);
+      return { ...dbState.order, id };
+    }
+    async addTimelineEvent(
+      orderId: string,
+      type: string,
+      description: string,
+      metadata?: Record<string, unknown>,
+    ) {
       dbState.timeline.push({
         order_id: orderId,
         type,
@@ -46,11 +72,17 @@ vi.mock('@gatekit/db', () => {
         metadata: metadata ? JSON.stringify(metadata) : null,
       });
     }
-    async getTimeline() { return dbState.timeline; }
-    async getLineItems() { return dbState.lineItems; }
+    async getTimeline() {
+      return dbState.timeline;
+    }
+    async getLineItems() {
+      return dbState.lineItems;
+    }
   }
   class PaymentIntentRepository {
-    async findById() { return dbState.paymentIntent; }
+    async findById() {
+      return dbState.paymentIntent;
+    }
   }
   class RefundRepository {
     async create(input: Record<string, unknown>) {
@@ -67,24 +99,43 @@ vi.mock('@gatekit/db', () => {
       dbState.refunds.push(record);
       return record;
     }
-    async findByOrder() { return dbState.refunds; }
+    async findByOrder() {
+      return dbState.refunds;
+    }
   }
   class EmailJobRepository {
-    async create(input: Record<string, unknown>) { return { id: 'emj_1', ...input }; }
+    async create(input: Record<string, unknown>) {
+      return { id: 'emj_1', ...input };
+    }
   }
 
   function createQuery(table: string) {
+    const filters: Array<{ col: string; op: string; val: unknown }> = [];
     const query = {
-      innerJoin() { return query; },
-      select() { return query; },
-      selectAll() { return query; },
-      where() { return query; },
-      orderBy() { return query; },
-      forUpdate() { return query; },
+      innerJoin() {
+        return query;
+      },
+      select() {
+        return query;
+      },
+      selectAll() {
+        return query;
+      },
+      where(col: string, op: string, val: unknown) {
+        filters.push({ col, op, val });
+        return query;
+      },
+      orderBy() {
+        return query;
+      },
+      forUpdate() {
+        return query;
+      },
       async executeTakeFirst() {
         if (table === 'email_jobs') return undefined;
         if (table === 'email_provider_routes') return { id: 'epr_1' };
         if (table === 'notification_templates as template') return { id: 'ntv_1' };
+        if (table === 'orders') return matches(dbState.order, filters) ? dbState.order : undefined;
         if (table === 'payment_accounts') return dbState.paymentAccount;
         if (table === 'payment_intents') return dbState.paymentIntent;
         return undefined;
@@ -94,7 +145,8 @@ vi.mock('@gatekit/db', () => {
         throw new Error(`No mock for ${table}`);
       },
       async execute() {
-        if (table === 'tickets') return dbState.tickets;
+        if (table === 'tickets') return dbState.tickets.filter((row) => matches(row, filters));
+        if (table === 'refunds') return dbState.refunds.filter((row) => matches(row, filters));
         if (table === 'checkout_holds') return [];
         return [];
       },
@@ -110,15 +162,16 @@ vi.mock('@gatekit/db', () => {
     return {
       set: (values: Record<string, unknown>) => {
         dbState.updatedTickets.push({ table, ...values });
-        return {
-          where: () => ({
-            execute: async () => [],
-          }),
+        const query = {
+          where: () => query,
+          execute: async () => [],
         };
+        return query;
       },
     };
   }
 
+  // eslint-disable-next-line unicorn/consistent-function-scoping -- this helper must stay inside the hoisted vi.mock factory.
   function createInsert(_table: string) {
     return {
       values: (vals: Record<string, unknown>) => ({
@@ -136,7 +189,24 @@ vi.mock('@gatekit/db', () => {
       updateTable: createUpdate,
       insertInto: createInsert,
       transaction: () => ({
-        execute: async (fn: (trx: unknown) => Promise<unknown>) => fn({}),
+        execute: async (fn: (trx: unknown) => Promise<unknown>) => {
+          const db = {
+            selectFrom: createQuery,
+            updateTable: createUpdate,
+            insertInto: createInsert,
+          };
+          const previous = dbState.transactionQueue;
+          let release!: () => void;
+          dbState.transactionQueue = new Promise<void>((resolve) => {
+            release = resolve;
+          });
+          await previous;
+          try {
+            return await fn(db);
+          } finally {
+            release();
+          }
+        },
       }),
       destroy: dbState.destroy,
     }),
@@ -165,11 +235,36 @@ vi.mock('stripe', () => {
   return { default: MockStripe, Stripe: MockStripe };
 });
 
-const { processRefundActivity, updateLedgerActivity, voidTicketsActivity, notifyRefundActivity } = await import('../activities/refund.js');
+const { processRefundActivity, updateLedgerActivity, voidTicketsActivity, notifyRefundActivity } =
+  await import('../activities/refund.js');
+
+beforeEach(() => {
+  dbState.transactionQueue = Promise.resolve();
+  dbState.destroy.mockClear();
+  stripeMock.refundsCreate.mockReset();
+  stripeMock.refundsCreate.mockImplementation(
+    async (opts: Record<string, unknown>, opts2: Record<string, unknown>) => {
+      dbState.stripeRefunds.push({ opts, opts2 });
+      return { id: 're_stripe_1', status: 'succeeded' };
+    },
+  );
+});
 
 describe('voidTicketsActivity', () => {
   beforeEach(() => {
-    dbState.order = { id: 'ord_1', tenant_id: 'tnt_1', total_cents: 10000, refunded_cents: 0, currency: 'USD', status: 'paid', order_number: 'GK-1001', event_id: 'evt_1', brand_id: 'brd_1', buyer_email: 'buyer@test.com', payment_intent_id: 'pi_1' };
+    dbState.order = {
+      id: 'ord_1',
+      tenant_id: 'tnt_1',
+      total_cents: 10000,
+      refunded_cents: 0,
+      currency: 'USD',
+      status: 'paid',
+      order_number: 'TK-1001',
+      event_id: 'evt_1',
+      brand_id: 'brd_1',
+      buyer_email: 'buyer@test.com',
+      payment_intent_id: 'pi_1',
+    };
     dbState.updatedTickets = [];
   });
 
@@ -184,11 +279,21 @@ describe('voidTicketsActivity', () => {
       { ticket_type_id: 'tt_2', unit_price_cents: 2000, quantity: 1 },
     ];
 
-    const result = await voidTicketsActivity({ orderId: 'ord_1', amountCents: 10000, isFullRefund: true });
+    const result = await voidTicketsActivity({
+      orderId: 'ord_1',
+      amountCents: 10000,
+      isFullRefund: true,
+    });
     expect(result.ok).toBe(true);
     if (result.ok) {
       expect(result.value.voidedCount).toBe(3);
     }
+    expect(dbState.updatedTickets).toContainEqual(
+      expect.objectContaining({
+        table: 'wallet_passes',
+        status: 'revoked',
+      }),
+    );
   });
 
   it('voids proportionally using per-line-item prices for partial refund (multi-ticket-type)', async () => {
@@ -204,7 +309,11 @@ describe('voidTicketsActivity', () => {
       { ticket_type_id: 'tt_2', unit_price_cents: 2000, quantity: 1 },
     ];
 
-    const result = await voidTicketsActivity({ orderId: 'ord_1', amountCents: 5000, isFullRefund: false });
+    const result = await voidTicketsActivity({
+      orderId: 'ord_1',
+      amountCents: 5000,
+      isFullRefund: false,
+    });
     expect(result.ok).toBe(true);
     if (result.ok) {
       expect(result.value.voidedCount).toBe(1);
@@ -223,7 +332,11 @@ describe('voidTicketsActivity', () => {
       { ticket_type_id: 'tt_2', unit_price_cents: 2000, quantity: 1 },
     ];
 
-    const result = await voidTicketsActivity({ orderId: 'ord_1', amountCents: 2000, isFullRefund: false });
+    const result = await voidTicketsActivity({
+      orderId: 'ord_1',
+      amountCents: 2000,
+      isFullRefund: false,
+    });
     expect(result.ok).toBe(true);
     if (result.ok) {
       // $50 tickets first: floor(2000/5000) = 0, then $20: floor(2000/2000) = 1
@@ -237,11 +350,13 @@ describe('voidTicketsActivity', () => {
       { id: 'tkt_1', order_id: 'ord_1', ticket_type_id: 'tt_1', status: 'void' },
       { id: 'tkt_2', order_id: 'ord_1', ticket_type_id: 'tt_1', status: 'valid' },
     ];
-    dbState.lineItems = [
-      { ticket_type_id: 'tt_1', unit_price_cents: 5000, quantity: 2 },
-    ];
+    dbState.lineItems = [{ ticket_type_id: 'tt_1', unit_price_cents: 5000, quantity: 2 }];
 
-    const result = await voidTicketsActivity({ orderId: 'ord_1', amountCents: 5000, isFullRefund: false });
+    const result = await voidTicketsActivity({
+      orderId: 'ord_1',
+      amountCents: 5000,
+      isFullRefund: false,
+    });
     expect(result.ok).toBe(true);
     if (result.ok) {
       expect(result.value.voidedCount).toBe(1);
@@ -252,13 +367,29 @@ describe('voidTicketsActivity', () => {
 
 describe('processRefundActivity - idempotency / dedup', () => {
   beforeEach(() => {
-    dbState.order = { id: 'ord_1', tenant_id: 'tnt_1', total_cents: 10000, refunded_cents: 0, currency: 'USD', status: 'paid', order_number: 'GK-1001', event_id: 'evt_1', brand_id: 'brd_1', buyer_email: 'buyer@test.com', payment_intent_id: 'pi_1' };
+    dbState.order = {
+      id: 'ord_1',
+      tenant_id: 'tnt_1',
+      total_cents: 10000,
+      refunded_cents: 0,
+      currency: 'USD',
+      status: 'paid',
+      order_number: 'TK-1001',
+      event_id: 'evt_1',
+      brand_id: 'brd_1',
+      buyer_email: 'buyer@test.com',
+      payment_intent_id: 'pi_1',
+    };
     dbState.refunds = [];
     dbState.createdRefunds = [];
     dbState.stripeRefunds = [];
     dbState.timeline = [];
     dbState.paymentAccount = null;
-    dbState.paymentIntent = { id: 'pi_db_1', provider_intent_id: 'pi_stripe_1', payment_account_id: null };
+    dbState.paymentIntent = {
+      id: 'pi_db_1',
+      provider_intent_id: 'pi_stripe_1',
+      payment_account_id: null,
+    };
     process.env.STRIPE_SECRET_KEY = 'sk_test_1';
   });
 
@@ -270,10 +401,24 @@ describe('processRefundActivity - idempotency / dedup', () => {
     // Simulate a replay: the refund already exists with the same provider_refund_id.
     // The Stripe mock returns { id: 're_stripe_1' }, matching the existing refund.
     dbState.refunds = [
-      { id: 'rfd_existing', order_id: 'ord_1', provider_refund_id: 're_stripe_1', amount_cents: 5000, currency: 'USD', status: 'succeeded', reason: 'test' },
+      {
+        id: 'rfd_existing',
+        order_id: 'ord_1',
+        provider_refund_id: 're_stripe_1',
+        amount_cents: 5000,
+        currency: 'USD',
+        status: 'succeeded',
+        reason: 'test',
+      },
     ];
 
-    const result = await processRefundActivity({ orderId: 'ord_1', amountCents: 5000, reason: 'test', idempotencyKey: 'key_1', nonce: 'refund_nonce_1' });
+    const result = await processRefundActivity({
+      orderId: 'ord_1',
+      amountCents: 5000,
+      reason: 'test',
+      idempotencyKey: 'key_1',
+      nonce: 'refund_nonce_1',
+    });
     expect(result.ok).toBe(true);
     // Should not create a duplicate refund record
     expect(dbState.createdRefunds).toHaveLength(0);
@@ -300,7 +445,13 @@ describe('processRefundActivity - idempotency / dedup', () => {
       },
     ];
 
-    const result = await processRefundActivity({ orderId: 'ord_1', amountCents: 5000, reason: 'test', idempotencyKey: 'key_1', nonce: 'refund_nonce_1' });
+    const result = await processRefundActivity({
+      orderId: 'ord_1',
+      amountCents: 5000,
+      reason: 'test',
+      idempotencyKey: 'key_1',
+      nonce: 'refund_nonce_1',
+    });
 
     expect(result.ok).toBe(true);
     if (result.ok) {
@@ -316,10 +467,23 @@ describe('processRefundActivity - idempotency / dedup', () => {
   it('recomputes status as refunded when total is reached', async () => {
     // Existing refunds total 5000, adding 5000 more reaches the 10000 total.
     dbState.refunds = [
-      { id: 'rfd_1', order_id: 'ord_1', provider_refund_id: 're_old_1', amount_cents: 5000, currency: 'USD', status: 'succeeded', reason: 'test' },
+      {
+        id: 'rfd_1',
+        order_id: 'ord_1',
+        provider_refund_id: 're_old_1',
+        amount_cents: 5000,
+        currency: 'USD',
+        status: 'succeeded',
+        reason: 'test',
+      },
     ];
 
-    const result = await processRefundActivity({ orderId: 'ord_1', amountCents: 5000, reason: 'test', nonce: 'refund_nonce_2' });
+    const result = await processRefundActivity({
+      orderId: 'ord_1',
+      amountCents: 5000,
+      reason: 'test',
+      nonce: 'refund_nonce_2',
+    });
     expect(result.ok).toBe(true);
     if (result.ok) {
       // The Stripe mock returns 're_stripe_1' which doesn't match 're_old_1', so a new refund is created.
@@ -328,16 +492,76 @@ describe('processRefundActivity - idempotency / dedup', () => {
       expect(dbState.order.status).toBe('refunded');
     }
   });
+
+  it('allows only one concurrent refund when two requests would exceed the order total', async () => {
+    let refundSequence = 0;
+    stripeMock.refundsCreate.mockImplementation(
+      async (opts: Record<string, unknown>, opts2: Record<string, unknown>) => {
+        dbState.stripeRefunds.push({ opts, opts2 });
+        await new Promise((resolve) => setTimeout(resolve, 10));
+        refundSequence += 1;
+        return { id: `re_stripe_${refundSequence}`, status: 'succeeded' };
+      },
+    );
+
+    const results = await Promise.all([
+      processRefundActivity({
+        orderId: 'ord_1',
+        amountCents: 7000,
+        reason: 'first refund',
+        idempotencyKey: 'key_a',
+        nonce: 'refund_nonce_a',
+      }),
+      processRefundActivity({
+        orderId: 'ord_1',
+        amountCents: 7000,
+        reason: 'second refund',
+        idempotencyKey: 'key_b',
+        nonce: 'refund_nonce_b',
+      }),
+    ]);
+
+    const successes = results.filter((result) => result.ok);
+    const failures = results.filter((result) => !result.ok);
+
+    expect(successes).toHaveLength(1);
+    expect(failures).toHaveLength(1);
+    expect(failures[0]).toMatchObject({
+      ok: false,
+      errorCode: 'REFUND_EXCEEDS_TOTAL',
+      retryable: false,
+    });
+    expect(dbState.createdRefunds).toHaveLength(1);
+    expect(dbState.stripeRefunds).toHaveLength(1);
+    expect(dbState.order.refunded_cents).toBe(7000);
+    expect(dbState.order.status).toBe('partially_refunded');
+  });
 });
 
 describe('processRefundActivity - Stripe Connect', () => {
   beforeEach(() => {
-    dbState.order = { id: 'ord_1', tenant_id: 'tnt_1', total_cents: 10000, refunded_cents: 0, currency: 'USD', status: 'paid', order_number: 'GK-1001', event_id: 'evt_1', brand_id: 'brd_1', buyer_email: 'buyer@test.com', payment_intent_id: 'pi_1' };
+    dbState.order = {
+      id: 'ord_1',
+      tenant_id: 'tnt_1',
+      total_cents: 10000,
+      refunded_cents: 0,
+      currency: 'USD',
+      status: 'paid',
+      order_number: 'TK-1001',
+      event_id: 'evt_1',
+      brand_id: 'brd_1',
+      buyer_email: 'buyer@test.com',
+      payment_intent_id: 'pi_1',
+    };
     dbState.refunds = [];
     dbState.createdRefunds = [];
     dbState.stripeRefunds = [];
-    dbState.paymentIntent = { id: 'pi_db_1', provider_intent_id: 'pi_stripe_1', payment_account_id: 'pa_1' };
-    dbState.paymentAccount = { provider_account_id: 'acct_connect_1' };
+    dbState.paymentIntent = {
+      id: 'pi_db_1',
+      provider_intent_id: 'pi_stripe_1',
+      payment_account_id: 'pa_1',
+    };
+    dbState.paymentAccount = { provider: 'stripe_connect', provider_account_id: 'acct_connect_1' };
     process.env.STRIPE_SECRET_KEY = 'sk_test_1';
   });
 
@@ -346,12 +570,24 @@ describe('processRefundActivity - Stripe Connect', () => {
   });
 
   it('refunds destination charges from the platform account', async () => {
-    const result = await processRefundActivity({ orderId: 'ord_1', amountCents: 5000, reason: 'test', nonce: 'refund_nonce_3' });
+    const result = await processRefundActivity({
+      orderId: 'ord_1',
+      amountCents: 5000,
+      reason: 'test',
+      nonce: 'refund_nonce_3',
+    });
     expect(result.ok).toBe(true);
     if (result.ok) {
       expect(dbState.stripeRefunds).toHaveLength(1);
-      expect(dbState.stripeRefunds[0].opts2).toEqual({ idempotencyKey: 'refund-ord_1:refund_nonce_3' });
-      expect(dbState.stripeRefunds[0].opts).toMatchObject({ payment_intent: 'pi_stripe_1', amount: 5000 });
+      expect(dbState.stripeRefunds[0].opts2).toEqual({
+        idempotencyKey: 'refund-ord_1:refund_nonce_3',
+      });
+      expect(dbState.stripeRefunds[0].opts).toMatchObject({
+        payment_intent: 'pi_stripe_1',
+        amount: 5000,
+        reverse_transfer: true,
+        refund_application_fee: true,
+      });
     }
   });
 });
@@ -368,7 +604,7 @@ describe('updateLedgerActivity', () => {
       refunded_cents: 5000,
       currency: 'USD',
       status: 'partially_refunded',
-      order_number: 'GK-1001',
+      order_number: 'TK-1001',
       event_id: 'evt_1',
       brand_id: 'brd_1',
       buyer_email: 'buyer@test.com',
@@ -417,7 +653,19 @@ describe('updateLedgerActivity', () => {
 
 describe('notifyRefundActivity - idempotency key includes providerRefundId', () => {
   beforeEach(() => {
-    dbState.order = { id: 'ord_1', tenant_id: 'tnt_1', total_cents: 10000, refunded_cents: 5000, currency: 'USD', status: 'partially_refunded', order_number: 'GK-1001', event_id: 'evt_1', brand_id: 'brd_1', buyer_email: 'buyer@test.com', payment_intent_id: 'pi_1' };
+    dbState.order = {
+      id: 'ord_1',
+      tenant_id: 'tnt_1',
+      total_cents: 10000,
+      refunded_cents: 5000,
+      currency: 'USD',
+      status: 'partially_refunded',
+      order_number: 'TK-1001',
+      event_id: 'evt_1',
+      brand_id: 'brd_1',
+      buyer_email: 'buyer@test.com',
+      payment_intent_id: 'pi_1',
+    };
   });
 
   it('uses providerRefundId in the idempotency key so partial refunds get separate notifications', async () => {
