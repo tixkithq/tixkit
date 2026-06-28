@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
+import React from 'react';
 import { AttendeeForm, type AttendeeAnswers } from '@/components/checkout/attendee-form';
 import { publicApi, type Buyer, type CheckoutQuestion } from '@/lib/api';
 
@@ -16,6 +17,17 @@ vi.mock('@/lib/api', async (importOriginal) => {
 
 const buyer: Buyer = { email: 'a@b.com', firstName: '', lastName: '', phone: '' };
 
+type AttendeeFormProps = React.ComponentProps<typeof AttendeeForm>;
+
+function createAttendeeForm(props: Omit<AttendeeFormProps, 'buyer' | 'onChange' | 'disabled'>) {
+  return React.createElement(AttendeeForm, {
+    buyer,
+    onChange: () => {},
+    disabled: false,
+    ...props,
+  });
+}
+
 describe('AttendeeForm dynamic question types', () => {
   it('renders a multi-checkbox group for multiselect questions', () => {
     const question: CheckoutQuestion = {
@@ -30,14 +42,11 @@ describe('AttendeeForm dynamic question types', () => {
     const onChange = vi.fn();
 
     render(
-      <AttendeeForm
-        buyer={buyer}
-        onChange={() => {}}
-        disabled={false}
-        buyerQuestions={[question]}
-        buyerAnswers={answers}
-        onBuyerAnswersChange={onChange}
-      />,
+      createAttendeeForm({
+        buyerQuestions: [question],
+        buyerAnswers: answers,
+        onBuyerAnswersChange: onChange,
+      }),
     );
 
     // Each option renders its own checkbox labelled with the option text.
@@ -74,27 +83,21 @@ describe('AttendeeForm dynamic question types', () => {
       },
     ];
     const { rerender } = render(
-      <AttendeeForm
-        buyer={buyer}
-        onChange={() => {}}
-        disabled={false}
-        buyerQuestions={questions}
-        buyerAnswers={{ q_parent: 'no' }}
-        onBuyerAnswersChange={() => {}}
-      />,
+      createAttendeeForm({
+        buyerQuestions: questions,
+        buyerAnswers: { q_parent: 'no' },
+        onBuyerAnswersChange: () => {},
+      }),
     );
 
     expect(screen.queryByLabelText(/Guest name/)).toBeNull();
 
     rerender(
-      <AttendeeForm
-        buyer={buyer}
-        onChange={() => {}}
-        disabled={false}
-        buyerQuestions={questions}
-        buyerAnswers={{ q_parent: 'yes' }}
-        onBuyerAnswersChange={() => {}}
-      />,
+      createAttendeeForm({
+        buyerQuestions: questions,
+        buyerAnswers: { q_parent: 'yes' },
+        onBuyerAnswersChange: () => {},
+      }),
     );
 
     expect(screen.getByLabelText(/Guest name/)).toBeInTheDocument();
@@ -111,15 +114,12 @@ describe('AttendeeForm dynamic question types', () => {
     const onChange = vi.fn();
 
     render(
-      <AttendeeForm
-        buyer={buyer}
-        onChange={() => {}}
-        disabled={false}
-        eventId="evt_1"
-        buyerQuestions={[question]}
-        buyerAnswers={{}}
-        onBuyerAnswersChange={onChange}
-      />,
+      createAttendeeForm({
+        eventId: 'evt_1',
+        buyerQuestions: [question],
+        buyerAnswers: {},
+        onBuyerAnswersChange: onChange,
+      }),
     );
 
     vi.mocked(publicApi.uploadCheckoutArtifact).mockResolvedValueOnce({
@@ -157,14 +157,11 @@ describe('AttendeeForm dynamic question types', () => {
       options: ['None', 'Vegan'],
     };
     render(
-      <AttendeeForm
-        buyer={buyer}
-        onChange={() => {}}
-        disabled={false}
-        buyerQuestions={[question]}
-        buyerAnswers={{}}
-        onBuyerAnswersChange={() => {}}
-      />,
+      createAttendeeForm({
+        buyerQuestions: [question],
+        buyerAnswers: {},
+        onBuyerAnswersChange: () => {},
+      }),
     );
     expect(screen.getByText('None')).toBeInTheDocument();
   });
@@ -190,14 +187,11 @@ describe('AttendeeForm dynamic question types', () => {
     ];
 
     const { container } = render(
-      <AttendeeForm
-        buyer={buyer}
-        onChange={() => {}}
-        disabled={false}
-        buyerQuestions={questions}
-        buyerAnswers={{}}
-        onBuyerAnswersChange={() => {}}
-      />,
+      createAttendeeForm({
+        buyerQuestions: questions,
+        buyerAnswers: {},
+        onBuyerAnswersChange: () => {},
+      }),
     );
 
     expect(screen.getByText('<img src=x onerror=alert(1)>')).toBeInTheDocument();

@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { render, screen, waitFor } from '@testing-library/react';
+import React from 'react';
 import EventPageClient from '@/app/e/[eventId]/event-page-client';
 import { publicApi, type AvailabilityItem, type PublicEvent } from '@/lib/api';
 
@@ -54,7 +55,7 @@ describe('EventPageClient escaping', () => {
     vi.mocked(publicApi.getAvailability).mockResolvedValue(availability);
     vi.mocked(publicApi.getBrand).mockRejectedValue(new Error('brand unavailable'));
 
-    const { container } = render(<EventPageClient eventId="evt_xss" />);
+    const { container } = render(React.createElement(EventPageClient, { eventId: 'evt_xss' }));
 
     await waitFor(() => {
       expect(screen.getByText('<img src=x onerror=alert(1)>')).toBeInTheDocument();

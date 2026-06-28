@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { render, screen, waitFor } from '@testing-library/react';
 import { loadStripe } from '@stripe/stripe-js';
+import React from 'react';
 import { PaymentHandoff } from '@/components/checkout/payment-handoff';
 
 vi.mock('@stripe/stripe-js', () => ({
@@ -17,13 +18,13 @@ describe('PaymentHandoff local capture mode', () => {
     process.env.NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY = 'pk_test_present';
 
     render(
-      <PaymentHandoff
-        clientSecret="pi_capture_cs_1_secret"
-        currency="USD"
-        totalCents={2500}
-        returnUrl="http://localhost:3000/checkout/complete"
-        onError={() => {}}
-      />,
+      React.createElement(PaymentHandoff, {
+        clientSecret: 'pi_capture_cs_1_secret',
+        currency: 'USD',
+        totalCents: 2500,
+        returnUrl: 'http://localhost:3000/checkout/complete',
+        onError: () => {},
+      }),
     );
 
     await screen.findByText('Payment is ready for local capture');
