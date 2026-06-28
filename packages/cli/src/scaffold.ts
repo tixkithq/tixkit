@@ -142,15 +142,6 @@ export async function scaffold(options: ScaffoldOptions): Promise<{ ok: boolean;
       await writeFile(destination, rendered, 'utf8');
     }
 
-    if (!options.skipGit) {
-      try {
-        await execFileAsync('git', ['init'], { cwd: options.targetDir });
-        await execFileAsync('git', ['checkout', '-b', 'main'], { cwd: options.targetDir });
-      } catch {
-        // git may not be available; ignore
-      }
-    }
-
     if (options.install) {
       try {
         await execFileAsync('bun', ['install'], { cwd: options.targetDir });

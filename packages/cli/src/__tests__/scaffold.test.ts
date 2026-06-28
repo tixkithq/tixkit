@@ -117,7 +117,7 @@ describe('scaffold inside repo', () => {
     expect(demo).toContain('evt_custom');
     expect(demo).toContain('tt_custom');
     expect(demo).toContain('NEXT_PUBLIC_TIXKIT_CHECKOUT_URL');
-    expect(demo).toContain('http://localhost:3201');
+    expect(demo).toContain('http://localhost:3000');
 
     const envExample = await readFile(path.join(targetDir, '.env.local.example'), 'utf8');
     expect(envExample).toContain('NEXT_PUBLIC_APP_URL=http://localhost:3400');

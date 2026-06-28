@@ -8,8 +8,8 @@ import {
   type TixkitCheckoutEventCallback,
 } from '@tixkit/next/client';
 
-const checkoutBaseUrl = process.env.NEXT_PUBLIC_TIXKIT_CHECKOUT_URL ?? 'http://localhost:3201';
-const widgetBaseUrl = process.env.NEXT_PUBLIC_TIXKIT_WIDGET_URL ?? 'http://localhost:3201';
+const checkoutBaseUrl = process.env.NEXT_PUBLIC_TIXKIT_CHECKOUT_URL ?? 'http://localhost:3000';
+const widgetBaseUrl = process.env.NEXT_PUBLIC_TIXKIT_WIDGET_URL ?? 'http://localhost:3000';
 
 export function TixkitDemo() {
   const [events, setEvents] = useState<string[]>([]);
