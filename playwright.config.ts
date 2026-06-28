@@ -180,6 +180,8 @@ export default defineConfig({
           url: `${apiUrl}/health`,
           timeout: 120_000,
           reuseExistingServer: !isCI && !useWalletPasses,
+          stdout: 'pipe',
+          stderr: 'pipe',
         },
         {
           command:
@@ -187,6 +189,8 @@ export default defineConfig({
           env: localWorkerEnv,
           timeout: 120_000,
           reuseExistingServer: !isCI && !useWalletPasses,
+          stdout: 'pipe',
+          stderr: 'pipe',
         },
         {
           command: `bun run --filter @tixkit/checkout build && bun run --filter @tixkit/checkout start -- -p ${checkoutPort}`,
@@ -194,6 +198,8 @@ export default defineConfig({
           url: checkoutUrl,
           timeout: 120_000,
           reuseExistingServer: !isCI,
+          stdout: 'pipe',
+          stderr: 'pipe',
         },
         {
           command: `bun run --filter @tixkit/admin-dashboard build && bun run --filter @tixkit/admin-dashboard start -- -p ${adminPort}`,
@@ -201,6 +207,8 @@ export default defineConfig({
           url: adminUrl,
           timeout: 120_000,
           reuseExistingServer: !isCI,
+          stdout: 'pipe',
+          stderr: 'pipe',
         },
       ]
     : undefined,
