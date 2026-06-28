@@ -1018,6 +1018,38 @@ describe('upload artifact routes', () => {
     await app.close();
   });
 
+  it('requires events.write to complete checkout answer artifacts', async () => {
+    const { db } = createMockDb({
+      upload_artifacts: [
+        {
+          id: 'upl_evt_1_pending',
+          tenant_id: 'tnt_1',
+          organization_id: 'org_1',
+          brand_id: 'brd_1',
+          event_id: 'evt_1',
+          purpose: 'checkout_answer',
+          status: 'pending',
+          scan_status: 'pending',
+          bucket: 'tixkit',
+          object_key: 'uploads/tnt_1/checkout-answers/evt_1/staging/upl_evt_1_pending.txt',
+          content_type: 'text/plain',
+          size_bytes: 5,
+          expires_at: new Date(Date.now() + 60_000),
+        },
+      ],
+    });
+    const app = await setupUploadApp(db, uploadRoutes, makePrincipal({ scopes: ['events.read'] }));
+
+    const res = await app.inject({
+      method: 'POST',
+      url: '/upload-artifacts/upl_evt_1_pending/complete',
+    });
+
+    expect(res.statusCode).toBe(403);
+    expect(s3Send).not.toHaveBeenCalled();
+    await app.close();
+  });
+
   it('prevents event-scoped principals from downloading another event upload artifact', async () => {
     const { db } = createMockDb({
       upload_artifacts: [
@@ -1046,6 +1078,37 @@ describe('upload artifact routes', () => {
 
     expect(res.statusCode).toBe(404);
     expect(signedUrlInputs).toHaveLength(0);
+    await app.close();
+  });
+
+  it('allows events.read principals to download scoped checkout answer artifacts', async () => {
+    const { db } = createMockDb({
+      upload_artifacts: [
+        {
+          id: 'upl_evt_1_clean',
+          tenant_id: 'tnt_1',
+          organization_id: 'org_1',
+          brand_id: 'brd_1',
+          event_id: 'evt_1',
+          purpose: 'checkout_answer',
+          status: 'uploaded',
+          scan_status: 'clean',
+          bucket: 'tixkit',
+          object_key: 'uploads/tnt_1/checkout-answers/evt_1/final/upl_evt_1_clean.txt',
+          content_type: 'text/plain',
+          file_name: 'answer.txt',
+        },
+      ],
+    });
+    const app = await setupUploadApp(db, uploadRoutes, makePrincipal({ scopes: ['events.read'] }));
+
+    const res = await app.inject({
+      method: 'GET',
+      url: '/upload-artifacts/upl_evt_1_clean/download',
+    });
+
+    expect(res.statusCode).toBe(200);
+    expect(signedUrlInputs).toHaveLength(1);
     await app.close();
   });
 
@@ -1109,6 +1172,71 @@ describe('upload artifact routes', () => {
     const res = await app.inject({
       method: 'GET',
       url: '/upload-artifacts/upl_org_2_clean/download',
+    });
+
+    expect(res.statusCode).toBe(404);
+    expect(signedUrlInputs).toHaveLength(0);
+    await app.close();
+  });
+
+  it('prevents principals from completing another user avatar upload artifact', async () => {
+    const { db } = createMockDb({
+      upload_artifacts: [
+        {
+          id: 'upl_avatar_other_pending',
+          tenant_id: 'tnt_1',
+          organization_id: null,
+          brand_id: null,
+          event_id: null,
+          created_by_user_id: 'usr_2',
+          purpose: 'user_avatar',
+          status: 'pending',
+          scan_status: 'pending',
+          bucket: 'tixkit',
+          object_key: 'uploads/tnt_1/avatars/usr_2/staging/upl_avatar_other_pending.png',
+          content_type: 'image/png',
+          size_bytes: 12,
+          expires_at: new Date(Date.now() + 60_000),
+        },
+      ],
+    });
+    const app = await setupUploadApp(db);
+
+    const res = await app.inject({
+      method: 'POST',
+      url: '/upload-artifacts/upl_avatar_other_pending/complete',
+    });
+
+    expect(res.statusCode).toBe(404);
+    expect(s3Send).not.toHaveBeenCalled();
+    await app.close();
+  });
+
+  it('prevents principals from downloading another user avatar upload artifact', async () => {
+    const { db } = createMockDb({
+      upload_artifacts: [
+        {
+          id: 'upl_avatar_other_clean',
+          tenant_id: 'tnt_1',
+          organization_id: null,
+          brand_id: null,
+          event_id: null,
+          created_by_user_id: 'usr_2',
+          purpose: 'user_avatar',
+          status: 'uploaded',
+          scan_status: 'clean',
+          bucket: 'tixkit',
+          object_key: 'uploads/tnt_1/avatars/usr_2/final/upl_avatar_other_clean.png',
+          content_type: 'image/png',
+          file_name: 'avatar.png',
+        },
+      ],
+    });
+    const app = await setupUploadApp(db);
+
+    const res = await app.inject({
+      method: 'GET',
+      url: '/upload-artifacts/upl_avatar_other_clean/download',
     });
 
     expect(res.statusCode).toBe(404);

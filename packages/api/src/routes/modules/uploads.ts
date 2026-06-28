@@ -2,7 +2,13 @@ import type { FastifyPluginAsync } from 'fastify';
 import { z } from 'zod';
 import { BrandRepository, EventRepository } from '@tixkit/db';
 import { ClerkAuthService } from '../../auth/clerk.js';
-import { NotFoundError, ValidationError, type Principal } from '@tixkit/domain';
+import {
+  ForbiddenError,
+  NotFoundError,
+  ValidationError,
+  type Permission,
+  type Principal,
+} from '@tixkit/domain';
 import {
   completeUploadArtifact,
   createUploadArtifact,
@@ -49,12 +55,48 @@ type ScopedUploadArtifact = {
   organization_id?: string | null;
   brand_id?: string | null;
   event_id?: string | null;
+  created_by_user_id?: string | null;
+  purpose?: string | null;
 };
 
 function requireUploadArtifactScope(principal: Principal, artifact: ScopedUploadArtifact): void {
   ClerkAuthService.requireOrganizationScope(principal, artifact.organization_id ?? undefined);
   ClerkAuthService.requireBrandScope(principal, artifact.brand_id ?? undefined);
   ClerkAuthService.requireEventScope(principal, artifact.event_id ?? undefined);
+}
+
+function requireAnyPermission(principal: Principal, permissions: Permission[]): void {
+  if (!permissions.some((permission) => ClerkAuthService.hasPermission(principal, permission))) {
+    throw new ForbiddenError(`Missing required permission: ${permissions.join(' or ')}`);
+  }
+}
+
+function requireUploadArtifactAccess(
+  principal: Principal,
+  artifact: ScopedUploadArtifact,
+  operation: 'complete' | 'download',
+): void {
+  requireUploadArtifactScope(principal, artifact);
+
+  if (artifact.purpose === 'checkout_answer') {
+    if (operation === 'complete') {
+      ClerkAuthService.requirePermission(principal, 'events.write');
+      return;
+    }
+    requireAnyPermission(principal, ['events.read', 'events.write']);
+    return;
+  }
+
+  if (artifact.purpose === 'brand_logo') {
+    ClerkAuthService.requirePermission(principal, 'settings.write');
+    return;
+  }
+
+  if (artifact.purpose === 'user_avatar') {
+    if (!artifact.created_by_user_id || artifact.created_by_user_id !== principal.id) {
+      throw new NotFoundError('UploadArtifact', 'scoped');
+    }
+  }
 }
 
 export const publicUploadRoutes: FastifyPluginAsync = async (app) => {
@@ -171,7 +213,7 @@ export const uploadRoutes: FastifyPluginAsync = async (app) => {
       .executeTakeFirst();
     if (!artifact) throw new NotFoundError('UploadArtifact', artifactId);
     ClerkAuthService.requireResourceTenant(principal, artifact, 'UploadArtifact', artifactId);
-    requireUploadArtifactScope(principal, artifact);
+    requireUploadArtifactAccess(principal, artifact, 'complete');
     return completeUploadArtifact(db, artifactId);
   });
 
@@ -185,7 +227,7 @@ export const uploadRoutes: FastifyPluginAsync = async (app) => {
       .executeTakeFirst();
     if (!artifact) throw new NotFoundError('UploadArtifact', artifactId);
     ClerkAuthService.requireResourceTenant(principal, artifact, 'UploadArtifact', artifactId);
-    requireUploadArtifactScope(principal, artifact);
+    requireUploadArtifactAccess(principal, artifact, 'download');
     const downloadUrl = await getUploadArtifactDownloadUrl(db, artifactId);
     return { downloadUrl };
   });

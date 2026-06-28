@@ -1,37 +1,15 @@
-type CjsModule = Record<string, unknown>;
+import { vi } from 'vitest';
 
-async function patchModule(cjsName: string, esmName: string, sentinel: string): Promise<void> {
-  let cjs: CjsModule;
-  try {
-    cjs = require(cjsName) as CjsModule;
-  } catch {
-    return;
-  }
-  if (cjs[sentinel]) return;
-
-  let esm: CjsModule;
-  try {
-    esm = (await import(esmName)) as CjsModule;
-  } catch {
-    return;
-  }
-
-  for (const key of Object.keys(esm)) {
-    if (cjs[key] === undefined) {
-      try {
-        cjs[key] = esm[key];
-      } catch {
-        // Skip read-only properties
-      }
-    }
-  }
-}
-
-await Promise.all([
-  patchModule('@opentelemetry/core', '@opentelemetry/core', 'TracesSamplerValues'),
-  patchModule(
-    '@opentelemetry/sdk-trace-base',
-    '@opentelemetry/sdk-trace-base',
-    'BasicTracerProvider',
-  ),
-]);
+vi.mock('@opentelemetry/core', async (importOriginal) => {
+  const actual = (await importOriginal()) as Record<string, unknown>;
+  return {
+    ...actual,
+    TracesSamplerValues: actual.TracesSamplerValues ?? {
+      AlwaysOn: 'always_on',
+      AlwaysOff: 'always_off',
+      TraceIdRatioBased: 'traceidratiobased',
+    },
+    DEFAULT_ENVIRONMENT: actual.DEFAULT_ENVIRONMENT ?? {},
+    parseEnvironment: actual.parseEnvironment ?? (() => ({})),
+  };
+});
