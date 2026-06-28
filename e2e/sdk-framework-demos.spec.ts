@@ -49,26 +49,16 @@ function tixkitSignature(body: string, secret: string): string {
 test.describe.configure({ mode: 'serial' });
 
 test.beforeAll(async () => {
-  startServer(
-    'node',
-    ['apps/sdk-nuxt-demo/.output/server/index.mjs'],
-    REPO_ROOT,
-    {
-      PORT: '3312',
-      NUXT_PUBLIC_TIXKIT_CHECKOUT_URL: CHECKOUT_ORIGIN,
-      TIXKIT_WEBHOOK_SECRET: WEBHOOK_SECRET,
-    },
-  );
-  startServer(
-    'node',
-    ['apps/sdk-astro-demo/dist/server/entry.mjs'],
-    REPO_ROOT,
-    {
-      PORT: '3313',
-      HOST: '127.0.0.1',
-      TIXKIT_WEBHOOK_SECRET: WEBHOOK_SECRET,
-    },
-  );
+  startServer('node', ['apps/sdk-nuxt-demo/.output/server/index.mjs'], REPO_ROOT, {
+    PORT: '3312',
+    NUXT_PUBLIC_TIXKIT_CHECKOUT_URL: CHECKOUT_ORIGIN,
+    TIXKIT_WEBHOOK_SECRET: WEBHOOK_SECRET,
+  });
+  startServer('node', ['apps/sdk-astro-demo/dist/server/entry.mjs'], REPO_ROOT, {
+    PORT: '3313',
+    HOST: '127.0.0.1',
+    TIXKIT_WEBHOOK_SECRET: WEBHOOK_SECRET,
+  });
   startServer(
     'bunx',
     ['remix-serve', './build/server/index.js'],
@@ -79,7 +69,11 @@ test.beforeAll(async () => {
       TIXKIT_WEBHOOK_SECRET: WEBHOOK_SECRET,
     },
   );
-  await Promise.all([waitForHttp(NUXT_DEMO_URL), waitForHttp(ASTRO_DEMO_URL), waitForHttp(REMIX_DEMO_URL)]);
+  await Promise.all([
+    waitForHttp(NUXT_DEMO_URL),
+    waitForHttp(ASTRO_DEMO_URL),
+    waitForHttp(REMIX_DEMO_URL),
+  ]);
 });
 
 test.afterAll(async () => {
@@ -157,7 +151,10 @@ test('Nuxt demo renders widget iframe, checkout handoff, lifecycle, and verifies
   expect(badResponse.status()).toBe(401);
 
   await expectNoAxeViolations(page, testInfo, 'body', ['iframe#tixkit-widget-demo']);
-  await testInfo.attach('sdk-nuxt-demo', { body: await page.screenshot(), contentType: 'image/png' });
+  await testInfo.attach('sdk-nuxt-demo', {
+    body: await page.screenshot(),
+    contentType: 'image/png',
+  });
 });
 
 test('Astro demo renders widget iframe, checkout handoff, lifecycle, and verifies webhook', async ({
@@ -194,7 +191,10 @@ test('Astro demo renders widget iframe, checkout handoff, lifecycle, and verifie
     },
   });
   await expect(response).toBeOK();
-  await expect(await response.json()).toMatchObject({ received: true, handledBy: 'sdk-astro-demo' });
+  await expect(await response.json()).toMatchObject({
+    received: true,
+    handledBy: 'sdk-astro-demo',
+  });
 
   const badResponse = await request.post(`${ASTRO_DEMO_URL}/api/tixkit/webhook`, {
     data: body,
@@ -203,7 +203,10 @@ test('Astro demo renders widget iframe, checkout handoff, lifecycle, and verifie
   expect(badResponse.status()).toBe(401);
 
   await expectNoAxeViolations(page, testInfo, 'body', ['iframe#tixkit-widget-demo']);
-  await testInfo.attach('sdk-astro-demo', { body: await page.screenshot(), contentType: 'image/png' });
+  await testInfo.attach('sdk-astro-demo', {
+    body: await page.screenshot(),
+    contentType: 'image/png',
+  });
 });
 
 test('Remix demo renders widget iframe, checkout handoff, lifecycle, and verifies webhook', async ({
@@ -240,7 +243,10 @@ test('Remix demo renders widget iframe, checkout handoff, lifecycle, and verifie
     },
   });
   await expect(response).toBeOK();
-  await expect(await response.json()).toMatchObject({ received: true, handledBy: 'sdk-remix-demo' });
+  await expect(await response.json()).toMatchObject({
+    received: true,
+    handledBy: 'sdk-remix-demo',
+  });
 
   const badResponse = await request.post(`${REMIX_DEMO_URL}/api/tixkit-webhook`, {
     data: body,
@@ -249,5 +255,8 @@ test('Remix demo renders widget iframe, checkout handoff, lifecycle, and verifie
   expect(badResponse.status()).toBe(401);
 
   await expectNoAxeViolations(page, testInfo, 'body', ['iframe#tixkit-widget-demo']);
-  await testInfo.attach('sdk-remix-demo', { body: await page.screenshot(), contentType: 'image/png' });
+  await testInfo.attach('sdk-remix-demo', {
+    body: await page.screenshot(),
+    contentType: 'image/png',
+  });
 });

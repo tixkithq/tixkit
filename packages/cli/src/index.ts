@@ -3,7 +3,12 @@ import { validateEnvFile, formatValidationResult } from './setup-check.js';
 import { runDevWebhooks, formatWebhookResult } from './dev-webhooks.js';
 import { seedSampleData } from './seed-sample-data.js';
 import { runQuickstart } from './quickstart.js';
-import { scaffold, SCAFFOLD_TEMPLATES, normalizeProjectName, type ScaffoldTemplate } from './scaffold.js';
+import {
+  scaffold,
+  SCAFFOLD_TEMPLATES,
+  normalizeProjectName,
+  type ScaffoldTemplate,
+} from './scaffold.js';
 import {
   generateEmbed,
   EMBED_MODES,

@@ -23,7 +23,9 @@
 
     <section style="margin-top: 24px">
       <h2>Lifecycle Events</h2>
-      <output aria-label="Tixkit lifecycle events">{{ events.join(', ') || 'No events yet' }}</output>
+      <output aria-label="Tixkit lifecycle events">{{
+        events.join(', ') || 'No events yet'
+      }}</output>
     </section>
   </main>
 </template>

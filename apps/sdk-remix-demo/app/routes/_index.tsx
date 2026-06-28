@@ -45,7 +45,9 @@ export default function Index() {
       style={{ fontFamily: 'system-ui, sans-serif', maxWidth: 960, margin: '0 auto', padding: 32 }}
     >
       <h1>Tixkit Remix Demo</h1>
-      <p>Demonstrates the @tixkit/remix SDK: widget iframe, checkout handoff, and lifecycle events.</p>
+      <p>
+        Demonstrates the @tixkit/remix SDK: widget iframe, checkout handoff, and lifecycle events.
+      </p>
 
       <section style={{ marginTop: 24 }}>
         <h2>Inline Widget</h2>
