@@ -302,11 +302,11 @@ function SurfaceShell({
   children: React.ReactNode
 }) {
   return (
-    <div
+    <main
       className='min-h-svh bg-background text-foreground'
       style={brandThemeStyle(brand)}
     >
       {children}
-    </div>
+    </main>
   )
 }

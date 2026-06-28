@@ -156,9 +156,14 @@ const STYLES = `
     justify-content: space-between;
     padding: 12px 16px;
     border-bottom: 1px solid rgba(23, 23, 23, 0.1);
+    background: var(--tk-bg);
     color: var(--tk-fg);
   }
-  .tk-modal-title { font-weight: 600; }
+  .tk-modal-title {
+    background: #ffffff;
+    color: #171717;
+    font-weight: 600;
+  }
   .tk-modal-close {
     border: 0;
     background: transparent;
@@ -416,6 +421,7 @@ class TixkitWidget extends HTMLElement {
   private stateEl: HTMLDivElement | null = null;
   private errored = false;
   private modal: HTMLDivElement | null = null;
+  private modalRestoreFocus: HTMLElement | null = null;
   private messageHandler: ((event: MessageEvent) => void) | null = null;
   private unloadHandler: (() => void) | null = null;
   private modalKeyHandler: ((event: KeyboardEvent) => void) | null = null;
@@ -680,6 +686,12 @@ class TixkitWidget extends HTMLElement {
 
   private openModal(url: string): void {
     this.closeModal();
+    this.modalRestoreFocus =
+      this.shadow.activeElement instanceof HTMLElement
+        ? this.shadow.activeElement
+        : document.activeElement instanceof HTMLElement
+          ? document.activeElement
+          : null;
     const backdrop = document.createElement('div');
     backdrop.className = 'tk-modal-backdrop';
     backdrop.addEventListener('click', (e) => {
@@ -688,10 +700,15 @@ class TixkitWidget extends HTMLElement {
 
     const modal = document.createElement('div');
     modal.className = 'tk-modal';
+    modal.setAttribute('role', 'dialog');
+    modal.setAttribute('aria-modal', 'true');
+    modal.setAttribute('aria-labelledby', 'tk-widget-modal-title');
+    modal.tabIndex = -1;
 
     const head = document.createElement('div');
     head.className = 'tk-modal-head';
     const title = document.createElement('span');
+    title.id = 'tk-widget-modal-title';
     title.className = 'tk-modal-title';
     title.textContent = 'Checkout';
     const close = document.createElement('button');
@@ -723,9 +740,27 @@ class TixkitWidget extends HTMLElement {
     this.modalKeyHandler = (e: KeyboardEvent) => {
       if (e.key === 'Escape') {
         this.closeModal();
+        return;
+      }
+      if (e.key !== 'Tab' || !this.modal) return;
+      const focusable = Array.from(
+        this.modal.querySelectorAll<HTMLElement>(
+          'button, iframe, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])',
+        ),
+      ).filter((element) => !element.hasAttribute('disabled') && element.tabIndex >= 0);
+      if (focusable.length === 0) return;
+      const first = focusable[0];
+      const last = focusable.at(-1) ?? first;
+      if (e.shiftKey && document.activeElement === first) {
+        last.focus();
+        e.preventDefault();
+      } else if (!e.shiftKey && document.activeElement === last) {
+        first.focus();
+        e.preventDefault();
       }
     };
     document.addEventListener('keydown', this.modalKeyHandler);
+    close.focus();
   }
 
   private closeModal(emit = true): void {
@@ -738,6 +773,10 @@ class TixkitWidget extends HTMLElement {
       this.modal = null;
       if (emit) dispatchLifecycle(this, 'closed', this.config.event);
     }
+    if (emit && this.modalRestoreFocus?.isConnected) {
+      this.modalRestoreFocus.focus();
+    }
+    this.modalRestoreFocus = null;
   }
 
   // Public methods for programmatic control.
@@ -771,6 +810,7 @@ class TixkitButton extends HTMLElement {
   private affiliateCode = '';
   private checkoutMode: CheckoutMode = 'modal';
   private modal: HTMLDivElement | null = null;
+  private modalRestoreFocus: HTMLElement | null = null;
   private messageHandler: ((event: MessageEvent) => void) | null = null;
   private unloadHandler: (() => void) | null = null;
   private modalKeyHandler: ((event: KeyboardEvent) => void) | null = null;
@@ -935,6 +975,12 @@ class TixkitButton extends HTMLElement {
 
   private openModal(url: string): void {
     this.closeModal();
+    this.modalRestoreFocus =
+      this.shadow.activeElement instanceof HTMLElement
+        ? this.shadow.activeElement
+        : document.activeElement instanceof HTMLElement
+          ? document.activeElement
+          : null;
     const backdrop = document.createElement('div');
     backdrop.className = 'tk-modal-backdrop';
     backdrop.addEventListener('click', (e) => {
@@ -943,10 +989,15 @@ class TixkitButton extends HTMLElement {
 
     const modal = document.createElement('div');
     modal.className = 'tk-modal';
+    modal.setAttribute('role', 'dialog');
+    modal.setAttribute('aria-modal', 'true');
+    modal.setAttribute('aria-labelledby', 'tk-button-modal-title');
+    modal.tabIndex = -1;
 
     const head = document.createElement('div');
     head.className = 'tk-modal-head';
     const title = document.createElement('span');
+    title.id = 'tk-button-modal-title';
     title.className = 'tk-modal-title';
     title.textContent = 'Checkout';
     const close = document.createElement('button');
@@ -977,9 +1028,27 @@ class TixkitButton extends HTMLElement {
     this.modalKeyHandler = (e: KeyboardEvent) => {
       if (e.key === 'Escape') {
         this.closeModal();
+        return;
+      }
+      if (e.key !== 'Tab' || !this.modal) return;
+      const focusable = Array.from(
+        this.modal.querySelectorAll<HTMLElement>(
+          'button, iframe, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])',
+        ),
+      ).filter((element) => !element.hasAttribute('disabled') && element.tabIndex >= 0);
+      if (focusable.length === 0) return;
+      const first = focusable[0];
+      const last = focusable.at(-1) ?? first;
+      if (e.shiftKey && document.activeElement === first) {
+        last.focus();
+        e.preventDefault();
+      } else if (!e.shiftKey && document.activeElement === last) {
+        first.focus();
+        e.preventDefault();
       }
     };
     document.addEventListener('keydown', this.modalKeyHandler);
+    close.focus();
   }
 
   private closeModal(emit = true): void {
@@ -992,6 +1061,10 @@ class TixkitButton extends HTMLElement {
       this.modal = null;
       if (emit) dispatchLifecycle(this, 'closed', this.eventId);
     }
+    if (emit && this.modalRestoreFocus?.isConnected) {
+      this.modalRestoreFocus.focus();
+    }
+    this.modalRestoreFocus = null;
   }
 }
 
