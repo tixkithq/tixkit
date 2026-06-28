@@ -58,16 +58,6 @@ services:
         condition: service_healthy
     volumes:
       - ./dynamicconfig:/etc/temporal/config/dynamicconfig
-    healthcheck:
-      test:
-        [
-          'CMD-SHELL',
-          'tctl --address localhost:7233 operator namespace describe default >/dev/null 2>&1',
-        ]
-      interval: 5s
-      timeout: 5s
-      retries: 20
-      start_period: 15s
 
   temporal-postgresql:
     image: postgres:16-alpine
