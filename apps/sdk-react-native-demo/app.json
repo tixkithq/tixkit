@@ -1,0 +1,22 @@
+{
+  "expo": {
+    "name": "Tixkit RN Demo",
+    "slug": "tixkit-rn-demo",
+    "version": "0.1.0",
+    "orientation": "portrait",
+    "userInterfaceStyle": "light",
+    "splash": {
+      "backgroundColor": "#0F766E"
+    },
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "com.tixkit.rndemo"
+    },
+    "android": {
+      "package": "com.tixkit.rndemo"
+    },
+    "web": {
+      "output": "static"
+    }
+  }
+}
