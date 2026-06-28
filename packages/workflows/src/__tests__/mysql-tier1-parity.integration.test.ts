@@ -322,11 +322,13 @@ describeWithDatabase(`workflow payment/refund Tier 1 parity (real ${driver})`, (
     const firstResult = await reconcileRefundActivity({
       providerEventId: `evt_ref_${ids.suffix}`,
       provider: 'stripe',
+      eventType: 'refund.created',
       data: { id: providerRefundId, payment_intent: ids.providerIntentId, amount: 3_000 },
     });
     const replayResult = await reconcileRefundActivity({
       providerEventId: `evt_ref_replay_${ids.suffix}`,
       provider: 'stripe',
+      eventType: 'refund.created',
       data: { id: providerRefundId, payment_intent: ids.providerIntentId, amount: 3_000 },
     });
 

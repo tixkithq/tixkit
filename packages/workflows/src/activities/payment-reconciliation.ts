@@ -128,13 +128,20 @@ function isFailedPaymentEvent(eventType: string, status: string): boolean {
 }
 
 function isSuccessfulRefundEvent(eventType: string, status: string | undefined): boolean {
-  if (eventType.includes('refund') && (eventType.includes('failed') || eventType.includes('canceled'))) {
+  if (
+    eventType.includes('refund') &&
+    (eventType.includes('failed') ||
+      eventType.includes('canceled') ||
+      eventType.includes('cancelled'))
+  ) {
     return false;
   }
   return status === undefined || status === 'succeeded';
 }
 
-function sumSucceededRefunds(refunds: Array<{ amount_cents: number | string | bigint; status?: string }>): number {
+function sumSucceededRefunds(
+  refunds: Array<{ amount_cents: number | string | bigint; status?: string }>,
+): number {
   return refunds.reduce(
     (sum, refund) => (refund.status === 'succeeded' ? sum + Number(refund.amount_cents) : sum),
     0,

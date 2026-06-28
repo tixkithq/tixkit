@@ -298,6 +298,7 @@ describe('reconcileRefundActivity', () => {
     const result = await reconcileRefundActivity({
       providerEventId: 'evt_refund_1',
       provider: 'stripe',
+      eventType: 'refund.created',
       data: { id: 're_1', payment_intent: 'pi_provider_1', amount: 5000 },
     });
 
@@ -325,6 +326,7 @@ describe('reconcileRefundActivity', () => {
       const result = await reconcileRefundActivity({
         providerEventId: `evt_refund_${status}`,
         provider: 'stripe',
+        eventType: 'refund.updated',
         data: { id: `re_${status}`, payment_intent: 'pi_provider_1', amount: 5000, status },
       });
 
@@ -344,6 +346,28 @@ describe('reconcileRefundActivity', () => {
     },
   );
 
+  it('does not record a failed refund event with no payload status as a successful refund', async () => {
+    const result = await reconcileRefundActivity({
+      providerEventId: 'evt_refund_failed_no_status',
+      provider: 'stripe',
+      eventType: 'refund.failed',
+      data: { id: 're_failed_no_status', payment_intent: 'pi_provider_1', amount: 5000 },
+    });
+
+    expect(result).toMatchObject({
+      ok: true,
+      value: { orderId: 'ord_1', status: 'paid' },
+    });
+    expect(mockState.createdRefunds).toHaveLength(0);
+    expect(
+      mockState.updates.some(
+        (update) => update.table === 'orders' && 'refunded_cents' in update.input,
+      ),
+    ).toBe(false);
+    expect(mockState.updates.some((update) => update.table === 'invoices')).toBe(false);
+    expect(mockState.timeline.some((event) => event.type === 'order.refunded')).toBe(false);
+  });
+
   it('repairs cumulative charge refund replay when no new refund delta remains', async () => {
     mockState.refunds = [
       {
@@ -358,6 +382,7 @@ describe('reconcileRefundActivity', () => {
     const result = await reconcileRefundActivity({
       providerEventId: 'evt_charge_refunded_1',
       provider: 'stripe',
+      eventType: 'charge.refunded',
       data: { id: 'ch_1', payment_intent: 'pi_provider_1', amount_refunded: 5000 },
     });
 
@@ -383,6 +408,7 @@ describe('reconcileRefundActivity', () => {
     const chargeResult = await reconcileRefundActivity({
       providerEventId: 'evt_charge_refunded_first',
       provider: 'stripe',
+      eventType: 'charge.refunded',
       data: { id: 'ch_1', payment_intent: 'pi_provider_1', amount_refunded: 5000 },
     });
 
@@ -406,6 +432,7 @@ describe('reconcileRefundActivity', () => {
     const refundResult = await reconcileRefundActivity({
       providerEventId: 'evt_refund_object_after_charge',
       provider: 'stripe',
+      eventType: 'refund.created',
       data: { id: 're_1', payment_intent: 'pi_provider_1', amount: 5000, status: 'succeeded' },
     });
 
