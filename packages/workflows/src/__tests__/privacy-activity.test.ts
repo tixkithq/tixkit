@@ -5,6 +5,7 @@ type Filter = { column: string; operator: string; value: unknown };
 
 const dbState = vi.hoisted(() => ({
   privacyRequests: [] as Row[],
+  brands: [] as Row[],
   orders: [] as Row[],
   attendees: [] as Row[],
   tickets: [] as Row[],
@@ -30,12 +31,26 @@ function matchesFilters(row: Row, filters: Filter[]): boolean {
     if (filter.operator === 'in') {
       return Array.isArray(filter.value) && filter.value.includes(value);
     }
+    if (filter.operator === 'is not') {
+      return value !== filter.value;
+    }
+    if (filter.operator === 'not like') {
+      if (typeof value !== 'string' || typeof filter.value !== 'string') return true;
+      const pattern = new RegExp(`^${filter.value.replaceAll('%', '.*')}$`);
+      return !pattern.test(value);
+    }
+    if (filter.operator === 'like') {
+      if (typeof value !== 'string' || typeof filter.value !== 'string') return false;
+      const pattern = new RegExp(`^${filter.value.replaceAll('%', '.*')}$`);
+      return pattern.test(value);
+    }
     return value === filter.value;
   });
 }
 
 function rowsFor(table: string): Row[] {
   if (table === 'privacy_requests') return dbState.privacyRequests;
+  if (table === 'brands') return dbState.brands;
   if (table === 'orders') return dbState.orders;
   if (table === 'attendees') return dbState.attendees;
   if (table === 'tickets') return dbState.tickets;
@@ -64,6 +79,7 @@ function queryRowsFor(table: string, joins: Set<string>): Row[] {
 function createQuery(table: string) {
   const filters: Filter[] = [];
   const joins = new Set<string>();
+  let limitCount: number | undefined;
   const query = {
     innerJoin(joinTable: string) {
       joins.add(joinTable);
@@ -79,8 +95,16 @@ function createQuery(table: string) {
       filters.push({ column, operator, value });
       return query;
     },
+    orderBy() {
+      return query;
+    },
+    limit(count: number) {
+      limitCount = count;
+      return query;
+    },
     async execute() {
-      return queryRowsFor(table, joins).filter((row) => matchesFilters(row, filters));
+      const rows = queryRowsFor(table, joins).filter((row) => matchesFilters(row, filters));
+      return limitCount === undefined ? rows : rows.slice(0, limitCount);
     },
     async executeTakeFirst() {
       return queryRowsFor(table, joins).find((row) => matchesFilters(row, filters));
@@ -158,13 +182,27 @@ vi.mock('@tixkit/db', () => {
   };
 });
 
-const { processPrivacyRequestActivity } = await import('../activities/privacy.js');
+const { enforcePrivacyRetentionActivity, processPrivacyRequestActivity } = await import(
+  '../activities/privacy.js'
+);
 
 describe('processPrivacyRequestActivity', () => {
   beforeEach(() => {
     dbState.destroy.mockClear();
     dbState.updates = [];
     dbState.repositoryCalls = [];
+    dbState.brands = [
+      {
+        id: 'brd_1',
+        tenant_id: 'tnt_1',
+        organization_id: 'org_1',
+      },
+      {
+        id: 'brd_other',
+        tenant_id: 'tnt_1',
+        organization_id: 'org_other',
+      },
+    ];
     dbState.privacyRequests = [
       {
         id: 'prv_erase_1',
@@ -366,6 +404,7 @@ describe('processPrivacyRequestActivity', () => {
       {
         id: 'cs_1',
         tenant_id: 'tnt_1',
+        brand_id: 'brd_1',
         order_id: 'ord_1',
         buyer: JSON.stringify({
           email: 'buyer@test.com',
@@ -514,6 +553,393 @@ describe('processPrivacyRequestActivity', () => {
       email: 'buyer@test.com',
       first_name: 'Ada',
       custom_answers: JSON.stringify({ company: '<script>alert(1)</script>' }),
+    });
+    expect(dbState.destroy).toHaveBeenCalledTimes(1);
+  });
+
+  it('repairs legacy completed erasures from the scheduled retention activity', async () => {
+    const replayFixture = dbState.privacyRequests.find((row) => row.id === 'prv_completed_1');
+    if (replayFixture) {
+      replayFixture.subject_email = 'erased+fedcba9876543210@privacy.tixkit.invalid';
+    }
+    dbState.privacyRequests.push(
+      {
+        id: 'prv_legacy_1',
+        tenant_id: 'tnt_1',
+        organization_id: 'org_1',
+        brand_id: 'brd_1',
+        request_type: 'erasure',
+        subject_type: 'buyer',
+        subject_id: null,
+        subject_email: 'legacy@test.com',
+        status: 'completed',
+        result: JSON.stringify({ legacy: true }),
+        error: null,
+        completed_at: new Date('2026-06-20T12:00:00.000Z'),
+        created_at: new Date('2026-06-20T11:00:00.000Z'),
+      },
+      {
+        id: 'prv_already_redacted_1',
+        tenant_id: 'tnt_1',
+        organization_id: 'org_1',
+        brand_id: 'brd_1',
+        request_type: 'erasure',
+        subject_type: 'buyer',
+        subject_id: null,
+        subject_email: 'erased+0123456789abcdef@privacy.tixkit.invalid',
+        status: 'completed',
+        result: JSON.stringify({ already: true }),
+        error: null,
+        completed_at: new Date('2026-06-20T12:00:00.000Z'),
+        created_at: new Date('2026-06-20T11:00:00.000Z'),
+      },
+    );
+    dbState.orders.push({
+      id: 'ord_legacy',
+      tenant_id: 'tnt_1',
+      organization_id: 'org_1',
+      brand_id: 'brd_1',
+      event_id: 'evt_1',
+      status: 'paid',
+      currency: 'USD',
+      total_cents: 5000,
+      refunded_cents: 0,
+      buyer_email: 'legacy@test.com',
+      buyer_first_name: 'Legacy',
+      buyer_last_name: 'Buyer',
+      buyer_phone: '+15550000003',
+      paid_at: new Date('2026-06-01T10:00:00.000Z'),
+      refunded_at: null,
+      created_at: new Date('2026-06-01T09:00:00.000Z'),
+      updated_at: new Date('2026-06-01T09:00:00.000Z'),
+    });
+    dbState.attendees.push({
+      id: 'att_legacy',
+      tenant_id: 'tnt_1',
+      organization_id: 'org_1',
+      brand_id: null,
+      order_id: 'ord_legacy',
+      event_id: 'evt_1',
+      event_occurrence_id: null,
+      ticket_type_id: 'tt_1',
+      ticket_id: 'tkt_legacy',
+      first_name: 'Legacy',
+      last_name: 'Buyer',
+      email: 'legacy@test.com',
+      phone: '+15550000003',
+      status: 'registered',
+      custom_answers: JSON.stringify({ raw: true }),
+      checked_in_at: null,
+      created_at: new Date('2026-06-01T09:00:00.000Z'),
+      updated_at: new Date('2026-06-01T09:00:00.000Z'),
+    });
+    dbState.tickets.push({
+      id: 'tkt_legacy',
+      tenant_id: 'tnt_1',
+      order_id: 'ord_legacy',
+      attendee_id: 'att_legacy',
+      event_id: 'evt_1',
+      ticket_type_id: 'tt_1',
+      status: 'issued',
+      transferred_to_email: 'legacy@test.com',
+      transferred_at: null,
+      checked_in_at: null,
+      created_at: new Date('2026-06-01T09:00:00.000Z'),
+      updated_at: new Date('2026-06-01T09:00:00.000Z'),
+    });
+    dbState.invoices.push({
+      id: 'inv_legacy',
+      tenant_id: 'tnt_1',
+      order_id: 'ord_legacy',
+      total_cents: 5000,
+      tax_cents: 0,
+      buyer_email: 'legacy@test.com',
+      buyer_name: 'Legacy Buyer',
+      buyer_tax_id: 'US-LEGACY',
+      updated_at: new Date('2026-06-01T09:00:00.000Z'),
+    });
+    dbState.auditLogs.push({
+      id: 'aud_legacy',
+      tenant_id: 'tnt_1',
+      organization_id: 'org_1',
+      action: 'privacy.erasure.requested',
+      resource_type: 'privacy_request',
+      resource_id: 'prv_legacy_1',
+      diff_summary: JSON.stringify({ subjectEmail: 'legacy@test.com' }),
+    });
+    dbState.checkoutSessions.push({
+      id: 'cs_legacy',
+      tenant_id: 'tnt_1',
+      brand_id: 'brd_1',
+      order_id: 'ord_legacy',
+      buyer: JSON.stringify({
+        email: 'legacy@test.com',
+        firstName: 'Legacy',
+        lastName: 'Buyer',
+        phone: '+15550000003',
+      }),
+      updated_at: new Date('2026-06-01T09:00:00.000Z'),
+    });
+
+    const result = await enforcePrivacyRetentionActivity({ batchSize: 10 });
+
+    expect(result).toMatchObject({
+      ok: true,
+      value: { inspectedCount: 1, repairedCount: 1, skippedCount: 0 },
+    });
+    expect(dbState.orders.find((row) => row.id === 'ord_legacy')).toMatchObject({
+      buyer_first_name: null,
+      buyer_last_name: null,
+      buyer_phone: null,
+    });
+    expect(String(dbState.orders.find((row) => row.id === 'ord_legacy')?.buyer_email)).toMatch(
+      /^erased\+[a-f0-9]{16}@privacy\.tixkit\.invalid$/,
+    );
+    expect(dbState.attendees.find((row) => row.id === 'att_legacy')).toMatchObject({
+      first_name: null,
+      last_name: null,
+      phone: null,
+      custom_answers: null,
+    });
+    expect(String(dbState.attendees.find((row) => row.id === 'att_legacy')?.email)).toMatch(
+      /^erased\+[a-f0-9]{16}@privacy\.tixkit\.invalid$/,
+    );
+    expect(dbState.tickets.find((row) => row.id === 'tkt_legacy')).toMatchObject({
+      transferred_to_email: null,
+    });
+    expect(dbState.invoices.find((row) => row.id === 'inv_legacy')).toMatchObject({
+      buyer_name: null,
+      buyer_tax_id: null,
+    });
+    expect(String(dbState.invoices.find((row) => row.id === 'inv_legacy')?.buyer_email)).toMatch(
+      /^erased\+[a-f0-9]{16}@privacy\.tixkit\.invalid$/,
+    );
+    const legacyCheckoutBuyer = JSON.parse(
+      String(dbState.checkoutSessions.find((row) => row.id === 'cs_legacy')?.buyer),
+    );
+    expect(legacyCheckoutBuyer).toMatchObject({
+      email: expect.stringMatching(/^erased\+[a-f0-9]{16}@privacy\.tixkit\.invalid$/),
+      firstName: null,
+      lastName: null,
+      phone: null,
+    });
+    const legacyAuditSummary = JSON.parse(
+      String(dbState.auditLogs.find((row) => row.id === 'aud_legacy')?.diff_summary),
+    );
+    expect(legacyAuditSummary.subjectEmail).toMatch(
+      /^erased\+[a-f0-9]{16}@privacy\.tixkit\.invalid$/,
+    );
+    expect(dbState.privacyRequests.find((row) => row.id === 'prv_legacy_1')).toMatchObject({
+      status: 'completed',
+      error: null,
+    });
+    expect(
+      String(dbState.privacyRequests.find((row) => row.id === 'prv_legacy_1')?.subject_email),
+    ).toMatch(/^erased\+[a-f0-9]{16}@privacy\.tixkit\.invalid$/);
+    expect(dbState.privacyRequests.find((row) => row.id === 'prv_already_redacted_1')).toMatchObject(
+      {
+        result: JSON.stringify({ already: true }),
+      },
+    );
+    expect(dbState.destroy).toHaveBeenCalledTimes(1);
+  });
+
+  it('repairs retained ledgers when commerce rows were already pseudonymized', async () => {
+    const replayFixture = dbState.privacyRequests.find((row) => row.id === 'prv_completed_1');
+    if (replayFixture) {
+      replayFixture.subject_email = 'erased+fedcba9876543210@privacy.tixkit.invalid';
+    }
+    dbState.privacyRequests.push({
+      id: 'prv_partial_legacy_1',
+      tenant_id: 'tnt_1',
+      organization_id: 'org_1',
+      brand_id: null,
+      request_type: 'erasure',
+      subject_type: 'buyer',
+      subject_id: 'ord_partial',
+      subject_email: 'partial@test.com',
+      status: 'completed',
+      result: JSON.stringify({ legacy: true }),
+      error: null,
+      completed_at: new Date('2026-06-20T12:00:00.000Z'),
+      created_at: new Date('2026-06-20T11:00:00.000Z'),
+    });
+    dbState.orders.push({
+      id: 'ord_partial',
+      tenant_id: 'tnt_1',
+      organization_id: 'org_1',
+      brand_id: 'brd_1',
+      event_id: 'evt_1',
+      status: 'paid',
+      currency: 'USD',
+      total_cents: 5000,
+      refunded_cents: 0,
+      buyer_email: 'erased+aaaaaaaaaaaaaaaa@privacy.tixkit.invalid',
+      buyer_first_name: null,
+      buyer_last_name: null,
+      buyer_phone: null,
+      paid_at: new Date('2026-06-01T10:00:00.000Z'),
+      refunded_at: null,
+      created_at: new Date('2026-06-01T09:00:00.000Z'),
+      updated_at: new Date('2026-06-01T09:00:00.000Z'),
+    });
+    dbState.attendees.push({
+      id: 'att_partial',
+      tenant_id: 'tnt_1',
+      organization_id: 'org_1',
+      brand_id: 'brd_1',
+      order_id: 'ord_partial',
+      event_id: 'evt_1',
+      event_occurrence_id: null,
+      ticket_type_id: 'tt_1',
+      ticket_id: 'tkt_partial',
+      first_name: null,
+      last_name: null,
+      email: 'erased+bbbbbbbbbbbbbbbb@privacy.tixkit.invalid',
+      phone: null,
+      status: 'registered',
+      custom_answers: null,
+      checked_in_at: null,
+      created_at: new Date('2026-06-01T09:00:00.000Z'),
+      updated_at: new Date('2026-06-01T09:00:00.000Z'),
+    });
+    dbState.invoices.push({
+      id: 'inv_partial',
+      tenant_id: 'tnt_1',
+      organization_id: 'org_1',
+      brand_id: 'brd_1',
+      order_id: 'ord_partial',
+      total_cents: 5000,
+      tax_cents: 0,
+      buyer_email: 'erased+cccccccccccccccc@privacy.tixkit.invalid',
+      buyer_name: 'Partial Buyer',
+      buyer_tax_id: 'US-PARTIAL',
+      updated_at: new Date('2026-06-01T09:00:00.000Z'),
+    }, {
+      id: 'inv_partial_same_email',
+      tenant_id: 'tnt_1',
+      organization_id: 'org_1',
+      brand_id: 'brd_1',
+      order_id: 'ord_partial_same_email',
+      total_cents: 7000,
+      tax_cents: 0,
+      buyer_email: 'partial@test.com',
+      buyer_name: 'Same Email Buyer',
+      buyer_tax_id: 'US-SAME',
+      updated_at: new Date('2026-06-01T09:00:00.000Z'),
+    });
+    dbState.auditLogs.push({
+      id: 'aud_partial',
+      tenant_id: 'tnt_1',
+      organization_id: 'org_1',
+      action: 'privacy.erasure.requested',
+      resource_type: 'privacy_request',
+      resource_id: 'prv_partial_legacy_1',
+      diff_summary: JSON.stringify({ subjectEmail: 'partial@test.com' }),
+    });
+    dbState.checkoutSessions.push({
+      id: 'cs_partial',
+      tenant_id: 'tnt_1',
+      brand_id: 'brd_1',
+      order_id: 'ord_partial',
+      buyer: JSON.stringify({
+        email: 'erased+dddddddddddddddd@privacy.tixkit.invalid',
+        firstName: 'Partial',
+        lastName: 'Buyer',
+        phone: '+15550000004',
+      }),
+      updated_at: new Date('2026-06-01T09:00:00.000Z'),
+    }, {
+      id: 'cs_partial_same_email',
+      tenant_id: 'tnt_1',
+      brand_id: 'brd_1',
+      order_id: 'ord_partial_same_email',
+      buyer: JSON.stringify({
+        email: 'partial@test.com',
+        firstName: 'Same',
+        lastName: 'Email',
+        phone: '+15550000006',
+      }),
+      updated_at: new Date('2026-06-01T09:00:00.000Z'),
+    }, {
+      id: 'cs_partial_other_org',
+      tenant_id: 'tnt_1',
+      brand_id: 'brd_other',
+      order_id: 'ord_partial_other_org',
+      buyer: JSON.stringify({
+        email: 'partial@test.com',
+        firstName: 'Other',
+        lastName: 'Org',
+        phone: '+15550000005',
+      }),
+      updated_at: new Date('2026-06-01T09:00:00.000Z'),
+    });
+
+    const result = await enforcePrivacyRetentionActivity({ batchSize: 10 });
+
+    expect(result).toMatchObject({
+      ok: true,
+      value: { inspectedCount: 1, repairedCount: 1, skippedCount: 0 },
+    });
+    expect(dbState.orders.find((row) => row.id === 'ord_partial')).toMatchObject({
+      buyer_email: 'erased+aaaaaaaaaaaaaaaa@privacy.tixkit.invalid',
+      buyer_first_name: null,
+      buyer_last_name: null,
+      buyer_phone: null,
+    });
+    expect(dbState.attendees.find((row) => row.id === 'att_partial')).toMatchObject({
+      email: 'erased+bbbbbbbbbbbbbbbb@privacy.tixkit.invalid',
+      first_name: null,
+      last_name: null,
+      phone: null,
+      custom_answers: null,
+    });
+    expect(dbState.invoices.find((row) => row.id === 'inv_partial')).toMatchObject({
+      buyer_name: null,
+      buyer_tax_id: null,
+    });
+    expect(String(dbState.invoices.find((row) => row.id === 'inv_partial')?.buyer_email)).toMatch(
+      /^erased\+[a-f0-9]{16}@privacy\.tixkit\.invalid$/,
+    );
+    expect(dbState.invoices.find((row) => row.id === 'inv_partial_same_email')).toMatchObject({
+      buyer_email: 'partial@test.com',
+      buyer_name: 'Same Email Buyer',
+      buyer_tax_id: 'US-SAME',
+    });
+    const checkoutBuyer = JSON.parse(
+      String(dbState.checkoutSessions.find((row) => row.id === 'cs_partial')?.buyer),
+    );
+    expect(checkoutBuyer).toMatchObject({
+      email: expect.stringMatching(/^erased\+[a-f0-9]{16}@privacy\.tixkit\.invalid$/),
+      firstName: null,
+      lastName: null,
+      phone: null,
+    });
+    expect(JSON.parse(String(dbState.checkoutSessions.find((row) => row.id === 'cs_partial_same_email')?.buyer))).toMatchObject({
+      email: 'partial@test.com',
+      firstName: 'Same',
+      lastName: 'Email',
+      phone: '+15550000006',
+    });
+    expect(JSON.parse(String(dbState.checkoutSessions.find((row) => row.id === 'cs_partial_other_org')?.buyer))).toMatchObject({
+      email: 'partial@test.com',
+      firstName: 'Other',
+      lastName: 'Org',
+      phone: '+15550000005',
+    });
+    const auditSummary = JSON.parse(
+      String(dbState.auditLogs.find((row) => row.id === 'aud_partial')?.diff_summary),
+    );
+    expect(auditSummary.subjectEmail).toMatch(
+      /^erased\+[a-f0-9]{16}@privacy\.tixkit\.invalid$/,
+    );
+    expect(String(dbState.privacyRequests.find((row) => row.id === 'prv_partial_legacy_1')?.subject_email)).toMatch(
+      /^erased\+[a-f0-9]{16}@privacy\.tixkit\.invalid$/,
+    );
+    expect(JSON.parse(String(dbState.privacyRequests.find((row) => row.id === 'prv_partial_legacy_1')?.result))).toMatchObject({
+      ordersRedacted: 0,
+      attendeesRedacted: 0,
+      ticketsTouched: 0,
     });
     expect(dbState.destroy).toHaveBeenCalledTimes(1);
   });

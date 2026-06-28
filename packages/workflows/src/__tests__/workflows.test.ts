@@ -4,6 +4,7 @@ const mockState = vi.hoisted(() => ({
   activities: {} as Record<string, (...args: any[]) => any>,
   signals: {} as Record<string, (...args: any[]) => void>,
   conditionResult: true as boolean,
+  patchedResult: true as boolean,
   sleeps: [] as string[],
   childStarts: [] as Array<{ workflow: unknown; options: Record<string, unknown> }>,
 }));
@@ -24,6 +25,7 @@ vi.mock('@temporalio/workflow', () => ({
     mockState.signals[signal] = handler;
   },
   condition: async (fn: () => boolean, _timeout?: string) => fn() || mockState.conditionResult,
+  patched: () => mockState.patchedResult,
   sleep: async (duration: string) => {
     mockState.sleeps.push(duration);
   },
@@ -51,6 +53,7 @@ function resetState() {
   for (const key of Object.keys(mockState.activities)) delete mockState.activities[key];
   for (const key of Object.keys(mockState.signals)) delete mockState.signals[key];
   mockState.conditionResult = true;
+  mockState.patchedResult = true;
   mockState.sleeps = [];
   mockState.childStarts = [];
 }
@@ -151,6 +154,7 @@ const defaultActivities = {
   expireStaleHoldsActivity: async () => okResult({ expiredCount: 0 }),
   expireStaleSessionsActivity: async () => okResult({ expiredCount: 0 }),
   processWaitlistOffersActivity: async () => okResult({ expiredCount: 0, offeredCount: 0, queuedEmailCount: 0 }),
+  enforcePrivacyRetentionActivity: async () => okResult({ inspectedCount: 0, repairedCount: 0, skippedCount: 0 }),
   reconcilePaymentActivity: async () => okResult({ orderId: 'ord_1', status: 'paid' }),
   reconcileRefundActivity: async () => okResult({ orderId: 'ord_1', status: 'refunded' }),
   reconcileDisputeActivity: async () => okResult({ orderId: 'ord_1', status: 'disputed' }),
@@ -760,11 +764,59 @@ describe('holdExpirationWorkflow', () => {
       calls.push('waitlist');
       return okResult({ expiredCount: 1, offeredCount: 1, queuedEmailCount: 1 });
     });
+    setActivity('enforcePrivacyRetentionActivity', async () => {
+      calls.push('privacy');
+      return okResult({ inspectedCount: 1, repairedCount: 1, skippedCount: 0 });
+    });
 
     await holdExpirationWorkflow({ maxIterations: 2, tickIntervalSeconds: 15 });
 
-    expect(calls).toEqual(['holds', 'sessions', 'waitlist', 'holds', 'sessions', 'waitlist']);
+    expect(calls).toEqual([
+      'holds',
+      'sessions',
+      'waitlist',
+      'privacy',
+      'holds',
+      'sessions',
+      'waitlist',
+      'privacy',
+    ]);
     expect(mockState.sleeps).toEqual(['15 seconds']);
+  });
+
+  it('skips privacy retention on pre-patch replay histories', async () => {
+    const calls: string[] = [];
+    mockState.patchedResult = false;
+    setActivity('expireStaleHoldsActivity', async () => {
+      calls.push('holds');
+      return okResult({ expiredCount: 1 });
+    });
+    setActivity('expireStaleSessionsActivity', async () => {
+      calls.push('sessions');
+      return okResult({ expiredCount: 1 });
+    });
+    setActivity('processWaitlistOffersActivity', async () => {
+      calls.push('waitlist');
+      return okResult({ expiredCount: 1, offeredCount: 1, queuedEmailCount: 1 });
+    });
+    setActivity('enforcePrivacyRetentionActivity', async () => {
+      calls.push('privacy');
+      return okResult({ inspectedCount: 1, repairedCount: 1, skippedCount: 0 });
+    });
+
+    await holdExpirationWorkflow({ maxIterations: 1 });
+
+    expect(calls).toEqual(['holds', 'sessions', 'waitlist']);
+  });
+
+  it('throws retryable privacy retention failures', async () => {
+    setActivity('enforcePrivacyRetentionActivity', async () =>
+      errResult('privacy_retention_failed', 'database unavailable', true),
+    );
+
+    await expect(holdExpirationWorkflow({ maxIterations: 1 })).rejects.toThrow(
+      'Privacy retention repair failed (privacy_retention_failed): database unavailable',
+    );
   });
 });
 

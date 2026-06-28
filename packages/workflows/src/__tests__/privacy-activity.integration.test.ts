@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
 import { createDb, type Database } from '@tixkit/db';
 import { runMigrations } from '@tixkit/db/migrate';
-import { processPrivacyRequestActivity } from '../activities/privacy.js';
+import { enforcePrivacyRetentionActivity, processPrivacyRequestActivity } from '../activities/privacy.js';
 
 type DriverCase = {
   driver: 'postgres' | 'mysql';
@@ -832,6 +832,146 @@ describe.each(driverCases)('privacy retention activity integration: $driver', ({
     expect(parseJsonColumn(otherCheckoutSession.buyer)).toMatchObject({
       email: 'buyer@test.com',
       firstName: 'Other',
+    });
+  });
+
+  it('repairs legacy completed erasures from the scheduled retention activity', async () => {
+    const suffix = `${driver}_${randomUUID().replaceAll('-', '').slice(0, 6)}`;
+    const ids = buildPrivacyRetentionIds(suffix);
+    seededFixtures.add(ids);
+    await cleanupPrivacyRetentionFixture(db, ids);
+    await seedPrivacyRetentionFixture(db, ids, suffix);
+    await db
+      .updateTable('privacy_requests')
+      .set({
+        status: 'completed',
+        brand_id: null,
+        subject_id: ids.orderId,
+        result: JSON.stringify({ legacy: true }),
+        completed_at: new Date('2026-06-20T12:00:00.000Z'),
+        created_at: new Date('2000-01-01T00:00:00.000Z'),
+      })
+      .where('id', '=', ids.requestId)
+      .execute();
+    await db
+      .updateTable('orders')
+      .set({
+        buyer_email: 'erased+aaaaaaaaaaaaaaaa@privacy.tixkit.invalid',
+        buyer_first_name: null,
+        buyer_last_name: null,
+        buyer_phone: null,
+      })
+      .where('id', '=', ids.orderId)
+      .execute();
+    await db
+      .updateTable('attendees')
+      .set({
+        email: 'erased+bbbbbbbbbbbbbbbb@privacy.tixkit.invalid',
+        first_name: null,
+        last_name: null,
+        phone: null,
+        custom_answers: null,
+      })
+      .where('id', 'in', [ids.attendeeId, ids.secondAttendeeId])
+      .execute();
+    await db
+      .updateTable('tickets')
+      .set({ transferred_to_email: null })
+      .where('id', '=', ids.ticketId)
+      .execute();
+    await db
+      .updateTable('invoices')
+      .set({
+        buyer_email: 'erased+cccccccccccccccc@privacy.tixkit.invalid',
+        buyer_name: 'Ada Lovelace',
+        buyer_tax_id: 'US-123',
+      })
+      .where('id', '=', ids.invoiceId)
+      .execute();
+    await db
+      .updateTable('checkout_sessions')
+      .set({
+        buyer: JSON.stringify({
+          email: 'erased+dddddddddddddddd@privacy.tixkit.invalid',
+          firstName: 'Ada',
+          lastName: 'Lovelace',
+          phone: '+15550000001',
+        }),
+      })
+      .where('id', '=', ids.checkoutSessionId)
+      .execute();
+
+    const result = await enforcePrivacyRetentionActivity({ batchSize: 1, requestId: ids.requestId });
+
+    expect(result).toMatchObject({
+      ok: true,
+      value: { inspectedCount: 1, repairedCount: 1, skippedCount: 0 },
+    });
+
+    const [order, attendee, ticket, invoice, checkoutSession, auditLog, privacyRequest, otherOrder] =
+      await Promise.all([
+        db.selectFrom('orders').selectAll().where('id', '=', ids.orderId).executeTakeFirstOrThrow(),
+        db.selectFrom('attendees').selectAll().where('id', '=', ids.attendeeId).executeTakeFirstOrThrow(),
+        db.selectFrom('tickets').selectAll().where('id', '=', ids.ticketId).executeTakeFirstOrThrow(),
+        db.selectFrom('invoices').selectAll().where('id', '=', ids.invoiceId).executeTakeFirstOrThrow(),
+        db
+          .selectFrom('checkout_sessions')
+          .selectAll()
+          .where('id', '=', ids.checkoutSessionId)
+          .executeTakeFirstOrThrow(),
+        db.selectFrom('audit_logs').selectAll().where('id', '=', ids.auditLogId).executeTakeFirstOrThrow(),
+        db
+          .selectFrom('privacy_requests')
+          .selectAll()
+          .where('id', '=', ids.requestId)
+          .executeTakeFirstOrThrow(),
+        db.selectFrom('orders').selectAll().where('id', '=', ids.otherOrderId).executeTakeFirstOrThrow(),
+      ]);
+
+    expect(order).toMatchObject({
+      id: ids.orderId,
+      buyer_email: 'erased+aaaaaaaaaaaaaaaa@privacy.tixkit.invalid',
+      buyer_first_name: null,
+      buyer_last_name: null,
+      buyer_phone: null,
+    });
+    expect(attendee).toMatchObject({
+      id: ids.attendeeId,
+      email: 'erased+bbbbbbbbbbbbbbbb@privacy.tixkit.invalid',
+      first_name: null,
+      last_name: null,
+      phone: null,
+      custom_answers: null,
+    });
+    expect(ticket).toMatchObject({ id: ids.ticketId, transferred_to_email: null });
+    expect(invoice).toMatchObject({
+      id: ids.invoiceId,
+      buyer_name: null,
+      buyer_tax_id: null,
+    });
+    expect(String(invoice.buyer_email)).toMatch(/^erased\+[a-f0-9]{16}@privacy\.tixkit\.invalid$/);
+    expect(parseJsonColumn(checkoutSession.buyer)).toMatchObject({
+      email: expect.stringMatching(/^erased\+[a-f0-9]{16}@privacy\.tixkit\.invalid$/),
+      firstName: null,
+      lastName: null,
+      phone: null,
+    });
+    expect(parseJsonColumn(auditLog.diff_summary)).toMatchObject({
+      subjectEmail: expect.stringMatching(/^erased\+[a-f0-9]{16}@privacy\.tixkit\.invalid$/),
+    });
+    expect(privacyRequest).toMatchObject({ id: ids.requestId, status: 'completed', error: null });
+    expect(String(privacyRequest.subject_email)).toMatch(
+      /^erased\+[a-f0-9]{16}@privacy\.tixkit\.invalid$/,
+    );
+    expect(parseJsonColumn(privacyRequest.result)).toMatchObject({
+      ordersRedacted: 0,
+      attendeesRedacted: 0,
+      ticketsTouched: 0,
+    });
+    expect(otherOrder).toMatchObject({
+      id: ids.otherOrderId,
+      buyer_email: 'buyer@test.com',
+      buyer_first_name: 'Other',
     });
   });
 });

@@ -15,6 +15,19 @@ type PrivacyRequestRow = {
   status: string;
 };
 
+type CheckoutSessionPrivacyRow = {
+  id: string;
+  buyer: unknown;
+};
+
+type BrandPrivacyRow = {
+  id: string;
+};
+
+function isErasedPrivacyEmail(value: string | null | undefined): boolean {
+  return /^erased\+[a-f0-9]{16}@privacy\.tixkit\.invalid$/.test(value ?? '');
+}
+
 function erasedEmail(input: string | null | undefined, fallback: string): string {
   const source = input && input.length > 0 ? input.toLowerCase() : fallback;
   const digest = createHash('sha256').update(source).digest('hex').slice(0, 16);
@@ -54,6 +67,14 @@ function redactJsonValue(value: unknown, replacementEmail: string): unknown {
     }
   }
   return redacted;
+}
+
+function jsonContainsString(value: unknown, needle: string): boolean {
+  const parsed = normalizeJson(value);
+  if (typeof parsed === 'string') return parsed === needle;
+  if (Array.isArray(parsed)) return parsed.some((entry) => jsonContainsString(entry, needle));
+  if (!parsed || typeof parsed !== 'object') return false;
+  return Object.values(parsed).some((entry) => jsonContainsString(entry, needle));
 }
 
 function countUpdatedRows(results: Array<{ numUpdatedRows?: bigint | number }>): number {
@@ -188,6 +209,17 @@ async function erasePrivacyData(db: Database, request: PrivacyRequestRow) {
   const orderIds = orders.map((order) => String(order.id));
   const attendeeIds = attendees.map((attendee) => String(attendee.id));
   const redactedSubjectEmail = erasedEmail(request.subject_email, `privacy:${request.id}`);
+  const buyerOrderId = request.subject_type === 'buyer' ? request.subject_id : null;
+  const scopedBrandIds = request.brand_id
+    ? [request.brand_id]
+    : (
+        (await db
+          .selectFrom('brands')
+          .select(['id'])
+          .where('tenant_id', '=', request.tenant_id)
+          .where('organization_id', '=', request.organization_id)
+          .execute()) as BrandPrivacyRow[]
+      ).map((brand) => brand.id);
 
   await Promise.all(
     orders.map(async (order) => {
@@ -218,6 +250,26 @@ async function erasePrivacyData(db: Database, request: PrivacyRequestRow) {
     }),
   );
 
+  if (request.subject_email && (!request.subject_id || buyerOrderId)) {
+    let invoiceQuery = db
+      .updateTable('invoices')
+      .set({
+        buyer_email: erasedEmail(request.subject_email, `invoice:${request.id}`),
+        buyer_name: null,
+        buyer_tax_id: null,
+        updated_at: now,
+      })
+      .where('tenant_id', '=', request.tenant_id)
+      .where('organization_id', '=', request.organization_id);
+    if (request.brand_id) invoiceQuery = invoiceQuery.where('brand_id', '=', request.brand_id);
+    if (buyerOrderId) {
+      invoiceQuery = invoiceQuery.where('order_id', '=', buyerOrderId);
+    } else {
+      invoiceQuery = invoiceQuery.where('buyer_email', '=', request.subject_email);
+    }
+    await invoiceQuery.execute();
+  }
+
   if (orderIds.length > 0) {
     const sessions = await db
       .selectFrom('checkout_sessions')
@@ -238,6 +290,32 @@ async function erasePrivacyData(db: Database, request: PrivacyRequestRow) {
           .where('tenant_id', '=', request.tenant_id)
           .execute(),
       ),
+    );
+  }
+
+  if (request.subject_email && (!request.subject_id || buyerOrderId) && scopedBrandIds.length > 0) {
+    let retainedSessionQuery = db
+      .selectFrom('checkout_sessions')
+      .select(['id', 'buyer'])
+      .where('tenant_id', '=', request.tenant_id)
+      .where('brand_id', 'in', scopedBrandIds);
+    if (buyerOrderId) retainedSessionQuery = retainedSessionQuery.where('order_id', '=', buyerOrderId);
+    const retainedSessions = (await retainedSessionQuery.execute()) as CheckoutSessionPrivacyRow[];
+
+    await Promise.all(
+      retainedSessions
+        .filter((session) => buyerOrderId || jsonContainsString(session.buyer, String(request.subject_email)))
+        .map((session) =>
+          db
+            .updateTable('checkout_sessions')
+            .set({
+              buyer: JSON.stringify(redactJsonValue(session.buyer, redactedSubjectEmail)),
+              updated_at: now,
+            })
+            .where('id', '=', session.id)
+            .where('tenant_id', '=', request.tenant_id)
+            .execute(),
+        ),
     );
   }
 
@@ -324,6 +402,59 @@ export async function processPrivacyRequestActivity(input: {
     const message = error instanceof Error ? error.message : 'Unknown privacy request failure';
     await repo.markFailed(input.requestId, message).catch(() => undefined);
     return errResult('privacy_request_failed', message, false);
+  } finally {
+    await db.destroy();
+  }
+}
+
+export async function enforcePrivacyRetentionActivity(input: {
+  batchSize?: number;
+  requestId?: string;
+} = {}): Promise<
+  WorkflowActivityResult<{ inspectedCount: number; repairedCount: number; skippedCount: number }>
+> {
+  const db = createDb(process.env.DATABASE_URL ?? '');
+  const repo = new PrivacyRequestRepository(db);
+  const batchSize = Math.min(Math.max(input.batchSize ?? 50, 1), 250);
+  try {
+    let requestQuery = db
+      .selectFrom('privacy_requests')
+      .selectAll()
+      .where('request_type', '=', 'erasure')
+      .where('status', '=', 'completed')
+      .where('subject_email', 'is not', null)
+      .where('subject_email', 'not like', 'erased+%@privacy.tixkit.invalid');
+    if (input.requestId) requestQuery = requestQuery.where('id', '=', input.requestId);
+    const requests = (await requestQuery
+      .orderBy('created_at', 'asc')
+      .limit(batchSize)
+      .execute()) as PrivacyRequestRow[];
+
+    const repairOutcomes = await Promise.all(
+      requests.map(async (request) => {
+        if (!request.subject_email || isErasedPrivacyEmail(request.subject_email)) {
+          return 'skipped' as const;
+        }
+
+        const result = await erasePrivacyData(db, request);
+        await repo.markCompleted(request.id, result);
+        return 'repaired' as const;
+      }),
+    );
+    const repairedCount = repairOutcomes.filter((outcome) => outcome === 'repaired').length;
+    const skippedCount = repairOutcomes.filter((outcome) => outcome === 'skipped').length;
+
+    return okResult({
+      inspectedCount: requests.length,
+      repairedCount,
+      skippedCount,
+    });
+  } catch (error) {
+    return errResult(
+      'privacy_retention_failed',
+      error instanceof Error ? error.message : 'Unknown privacy retention failure',
+      true,
+    );
   } finally {
     await db.destroy();
   }
