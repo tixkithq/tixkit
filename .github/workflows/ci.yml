@@ -392,8 +392,8 @@ jobs:
           bun run --env-file=.env.local db:migrate:mysql
       - name: Build widget bundle
         run: bun run --filter @tixkit/widget build
-      - name: Build service dependencies
-        run: bunx turbo run build --filter=@tixkit/db --filter=@tixkit/shared --filter=@tixkit/domain --filter=@tixkit/workflows
+      - name: Build all packages
+        run: bunx turbo run build
       - name: Run Playwright ${{ matrix.browser }}
         run: bun run test:e2e -- --project=${{ matrix.browser }}
       - name: Upload Playwright report

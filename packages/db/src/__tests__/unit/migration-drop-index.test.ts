@@ -61,6 +61,7 @@ type PaymentIntentSeedRow = {
 
 type WebhookDeliverySeedRow = {
   id: string;
+  endpoint_id?: string | null;
   event_id: string;
   requested_endpoint_id: string;
   delivery_key?: string;
@@ -439,17 +440,24 @@ class FakeWebhookDeliveriesDb {
   selectFrom(tableName: string) {
     expect(tableName).toBe('webhook_deliveries');
     let includeReplayRows = false;
+    let includeNullEndpointRows = false;
     const rows = this.rows;
     const query = {
       select(columnName: string) {
         expect(columnName).toBe('id');
         return query;
       },
-      where(columnName: string, operator: string, value: string) {
-        expect(columnName).toBe('delivery_key');
-        expect(operator).toBe('!=');
-        expect(value).toBe('live');
-        includeReplayRows = true;
+      where(columnName: string, operator: string, value: string | null) {
+        if (columnName === 'delivery_key') {
+          expect(operator).toBe('!=');
+          expect(value).toBe('live');
+          includeReplayRows = true;
+          return query;
+        }
+        expect(columnName).toBe('endpoint_id');
+        expect(operator).toBe('is');
+        expect(value).toBeNull();
+        includeNullEndpointRows = true;
         return query;
       },
       limit(limit: number) {
@@ -457,6 +465,7 @@ class FakeWebhookDeliveriesDb {
         return query;
       },
       async executeTakeFirst() {
+        if (includeNullEndpointRows) return rows.find((row) => row.endpoint_id === null);
         return includeReplayRows
           ? rows.find((row) => (row.delivery_key ?? 'live') !== 'live')
           : rows[0];
@@ -840,6 +849,29 @@ describe('nullable webhook delivery endpoint migration dialect safety', () => {
       'add constraint webhook_deliveries_endpoint_fk',
       'alter table webhook_deliveries drop column requested_endpoint_id',
     );
+  });
+
+  it('refuses rollback before deleting missing-endpoint delivery history', async () => {
+    const { NullableWebhookDeliveryEndpointMigration } =
+      await import('../../migrations/0022_nullable_webhook_delivery_endpoint.js');
+    const db = new FakeWebhookDeliveriesDb([
+      {
+        id: 'whd_missing',
+        endpoint_id: null,
+        event_id: 'whe_1',
+        requested_endpoint_id: 'wh_missing',
+        delivery_key: 'live',
+        attempt: 1,
+        status: 'dead_lettered',
+        created_at: '2026-01-01T00:00:00.000Z',
+      },
+    ]);
+
+    await expect(NullableWebhookDeliveryEndpointMigration.down!(db as never)).rejects.toThrow(
+      'Cannot roll back nullable webhook delivery endpoints while missing-endpoint deliveries exist',
+    );
+    expect(db.rawSqlStatements).toEqual([]);
+    expect(db.createdIndexes).toEqual([]);
   });
 });
 

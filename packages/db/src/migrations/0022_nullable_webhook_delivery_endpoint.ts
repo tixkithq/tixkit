@@ -66,7 +66,17 @@ export const NullableWebhookDeliveryEndpointMigration: Migration = {
   },
 
   async down(db): Promise<void> {
-    await db.deleteFrom('webhook_deliveries').where('endpoint_id', 'is', null).execute();
+    const nullEndpointDelivery = await db
+      .selectFrom('webhook_deliveries')
+      .select('id')
+      .where('endpoint_id', 'is', null)
+      .limit(1)
+      .executeTakeFirst();
+    if (nullEndpointDelivery) {
+      throw new Error(
+        'Cannot roll back nullable webhook delivery endpoints while missing-endpoint deliveries exist',
+      );
+    }
 
     if (isMysql()) {
       await sql`alter table webhook_deliveries drop foreign key webhook_deliveries_endpoint_fk`.execute(
