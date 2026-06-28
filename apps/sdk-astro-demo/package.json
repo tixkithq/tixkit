@@ -4,7 +4,7 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "build": "npx astro build",
+    "build": "bunx astro build",
     "dev": "astro dev",
     "preview": "astro preview",
     "typecheck": "tsc --noEmit",
