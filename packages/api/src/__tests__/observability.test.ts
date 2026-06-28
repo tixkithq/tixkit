@@ -1,4 +1,5 @@
 import Fastify from 'fastify';
+import { trace, type Span, type SpanAttributes, type Tracer } from '@opentelemetry/api';
 import { createTixkitMetrics } from '@tixkit/shared';
 import type { Database } from '@tixkit/db';
 import { describe, expect, it, vi } from 'vitest';
@@ -51,6 +52,46 @@ describe('API observability', () => {
     expect(output).toContain('outcome="ok"');
 
     await app.close();
+  });
+
+  it('records request span url.path without query secrets', async () => {
+    const recordedAttributes: SpanAttributes = {};
+    const span = {
+      setAttributes: vi.fn((attributes: SpanAttributes) => {
+        Object.assign(recordedAttributes, attributes);
+        return span as unknown as Span;
+      }),
+      setStatus: vi.fn(() => span as unknown as Span),
+      recordException: vi.fn(),
+      end: vi.fn(),
+    };
+    const startSpan: Tracer['startSpan'] = vi.fn((_name, options) => {
+      Object.assign(recordedAttributes, options?.attributes);
+      return span as unknown as Span;
+    });
+    const getTracerSpy = vi.spyOn(trace, 'getTracer').mockReturnValue({
+      startSpan,
+    } as Tracer);
+    const app = Fastify({ logger: false, genReqId: () => 'req_secret_path' });
+    const observability: ApiObservability = { metrics: createTixkitMetrics('test-api-secret-path') };
+
+    try {
+      registerObservability(app, observability);
+      app.get('/v1/checkout/:sessionId', async () => ({ ok: true }));
+
+      const response = await app.inject({
+        method: 'GET',
+        url: '/v1/checkout/cs_1?payment_intent_client_secret=testvalue&state=ok#token=fragment-token',
+      });
+
+      expect(response.statusCode).toBe(200);
+      expect(recordedAttributes['url.path']).toBe('/v1/checkout/cs_1');
+      expect(JSON.stringify(recordedAttributes)).not.toContain('payment_intent_client_secret');
+      expect(JSON.stringify(recordedAttributes)).not.toContain('pi_123_secret_leak');
+    } finally {
+      getTracerSpy.mockRestore();
+      await app.close();
+    }
   });
 
   it('refreshes active inventory hold gauge before metrics are scraped', async () => {

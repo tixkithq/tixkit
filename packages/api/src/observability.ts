@@ -43,7 +43,7 @@ export function registerObservability(app: FastifyInstance, observability: ApiOb
       kind: SpanKind.SERVER,
       attributes: sanitizeSpanAttributes({
         'http.request.method': request.method,
-        'url.path': request.url,
+        'url.path': getRequestPathname(request.url),
         'tixkit.request_id': request.id,
       }),
     });
@@ -196,7 +196,19 @@ function recordDomainMetrics(metrics: TixkitMetrics, route: string, statusCode: 
 }
 
 function getRouteLabel(request: FastifyRequest): string {
-  return request.routeOptions.url ?? request.routerPath ?? request.url.split('?')[0] ?? 'unknown';
+  return request.routeOptions.url ?? request.routerPath ?? getRequestPathname(request.url);
+}
+
+function getRequestPathname(rawUrl: string): string {
+  try {
+    return new URL(rawUrl, 'http://tixkit.local').pathname || '/';
+  } catch {
+    const queryIndex = rawUrl.indexOf('?');
+    const fragmentIndex = rawUrl.indexOf('#');
+    const endIndexes = [queryIndex, fragmentIndex].filter((index) => index >= 0);
+    const endIndex = endIndexes.length > 0 ? Math.min(...endIndexes) : rawUrl.length;
+    return rawUrl.slice(0, endIndex) || '/';
+  }
 }
 
 declare module 'fastify' {

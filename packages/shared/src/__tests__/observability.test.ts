@@ -44,11 +44,15 @@ describe('observability redaction', () => {
         'tixkit.tenant_id': 'tnt_1',
         'http.request.header.authorization': 'Bearer sk_test_secret',
         'tixkit.buyer_email': 'buyer@example.com',
+        'url.full':
+          'https://checkout.example.test/return?payment_intent_client_secret=testvalue&state=safe&code=oauth-code#token=fragment-token&client_secret=client-secret',
       }),
     ).toEqual({
       'tixkit.tenant_id': 'tnt_1',
       'http.request.header.authorization': '[REDACTED]',
       'tixkit.buyer_email': '[REDACTED]',
+      'url.full':
+        'https://checkout.example.test/return?payment_intent_client_secret=[REDACTED]&state=safe&code=[REDACTED]#token=[REDACTED]&client_secret=[REDACTED]',
     });
   });
 });

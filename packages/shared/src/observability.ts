@@ -25,6 +25,8 @@ const SENSITIVE_KEY_PATTERN =
 const EMAIL_PATTERN = /[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/gi;
 const SECRET_VALUE_PATTERN =
   /(bearer\s+)[A-Za-z0-9._~+/=-]+|(sk|pk|rk|tk|whsec|telnyx)_[A-Za-z0-9._~+/=-]+/gi;
+const SENSITIVE_QUERY_PARAM_PATTERN =
+  /(^|[?&#])((?:payment_intent_)?client_secret|code|token)=([^&#\s]*)/gi;
 
 let sdk: NodeSDK | undefined;
 
@@ -305,6 +307,9 @@ function redactAttributeValue(
 function redactString(value: string): string {
   return value
     .replace(EMAIL_PATTERN, REDACTED)
+    .replace(SENSITIVE_QUERY_PARAM_PATTERN, (_match, prefix: string, name: string) => {
+      return `${prefix}${name}=${REDACTED}`;
+    })
     .replace(SECRET_VALUE_PATTERN, (_match, bearerPrefix: string | undefined) =>
       bearerPrefix ? `${bearerPrefix}${REDACTED}` : REDACTED,
     );
