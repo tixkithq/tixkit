@@ -1202,8 +1202,7 @@ class CheckoutResource {
     sessionId: string,
     options?: string | CheckoutSessionGetOptions,
   ): Promise<CheckoutSession> {
-    const recovery =
-      typeof options === 'string' ? { clientToken: options } : (options ?? {});
+    const recovery = typeof options === 'string' ? { clientToken: options } : (options ?? {});
     return this.client.request('GET', `/checkout/sessions/${sessionId}`, {
       headers: recovery.clientToken
         ? { 'X-Checkout-Session-Token': recovery.clientToken }
@@ -1402,11 +1401,9 @@ class EventResource {
       status?: 'active' | 'disabled';
     },
   ): Promise<MarketingIntegration> {
-    return this.client.request(
-      'PUT',
-      `/events/${eventId}/marketing-integrations/${provider}`,
-      { body: input },
-    );
+    return this.client.request('PUT', `/events/${eventId}/marketing-integrations/${provider}`, {
+      body: input,
+    });
   }
 
   async listWaitlist(
@@ -1838,9 +1835,7 @@ class PrivacyResource {
     return this.client.request('GET', `/privacy/requests/${requestId}`);
   }
 
-  async createDataExport(
-    input: PrivacyRequestInput & IdempotencyOptions,
-  ): Promise<PrivacyRequest> {
+  async createDataExport(input: PrivacyRequestInput & IdempotencyOptions): Promise<PrivacyRequest> {
     const { idempotencyKey, ...body } = input;
     return this.client.request('POST', '/privacy/data-exports', { body, idempotencyKey });
   }
@@ -1972,10 +1967,7 @@ class WebhookEndpointResource {
     endpointId: string,
     eventId: string,
   ): Promise<{ queued: true; eventId: string; endpointId: string }> {
-    return this.client.request(
-      'POST',
-      `/webhook-endpoints/${endpointId}/events/${eventId}/replay`,
-    );
+    return this.client.request('POST', `/webhook-endpoints/${endpointId}/events/${eventId}/replay`);
   }
   async replay(eventId: string): Promise<{ message: string; eventId: string; endpoints: number }> {
     return this.client.request('POST', `/webhook-events/${eventId}/replay`);

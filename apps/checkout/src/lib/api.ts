@@ -358,11 +358,7 @@ export const publicApi = {
     return apiRequest<PublicEvent>(`/public/events/${encodeURIComponent(eventId)}`, { signal });
   },
 
-  async getEventBySlug(
-    slug: string,
-    host: string,
-    signal?: AbortSignal,
-  ): Promise<PublicEvent> {
+  async getEventBySlug(slug: string, host: string, signal?: AbortSignal): Promise<PublicEvent> {
     const params = new URLSearchParams({ host });
     return apiRequest<PublicEvent>(
       `/public/events/by-slug/${encodeURIComponent(slug)}?${params.toString()}`,

@@ -126,7 +126,7 @@ export async function findRepoRoot(startDir: string): Promise<string> {
       };
       const workspaces = Array.isArray(manifest.workspaces)
         ? manifest.workspaces
-        : manifest.workspaces?.packages ?? [];
+        : (manifest.workspaces?.packages ?? []);
       if (workspaces.includes('packages/*') && workspaces.includes('apps/*')) {
         return current;
       }
@@ -135,7 +135,9 @@ export async function findRepoRoot(startDir: string): Promise<string> {
     }
     const parent = path.dirname(current);
     if (parent === current) {
-      throw new Error('Could not locate Tixkit monorepo root (no package.json with packages/* and apps/* workspaces)');
+      throw new Error(
+        'Could not locate Tixkit monorepo root (no package.json with packages/* and apps/* workspaces)',
+      );
     }
     current = parent;
   }

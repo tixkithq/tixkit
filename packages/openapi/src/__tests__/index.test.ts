@@ -215,9 +215,7 @@ describe('openApiSpec', () => {
         'application/json'
       ].schema,
     ).toEqual({ $ref: '#/components/schemas/MarketingIntegrationPage' });
-    expect(
-      openApiSpec.paths['/events/{eventId}/marketing-integrations'].get.parameters,
-    ).toEqual([
+    expect(openApiSpec.paths['/events/{eventId}/marketing-integrations'].get.parameters).toEqual([
       {
         name: 'eventId',
         in: 'path',
@@ -296,13 +294,17 @@ describe('openApiSpec', () => {
   });
 
   it('documents audit logging and GDPR privacy request routes', () => {
-    expect(openApiSpec.paths['/audit-logs'].get.responses['200'].content['application/json'].schema).toEqual({
+    expect(
+      openApiSpec.paths['/audit-logs'].get.responses['200'].content['application/json'].schema,
+    ).toEqual({
       $ref: '#/components/schemas/AuditLogPage',
     });
     expect(openApiSpec.paths['/privacy/data-exports'].post.parameters).toContainEqual({
       $ref: '#/components/parameters/RequiredIdempotencyKey',
     });
-    expect(openApiSpec.paths['/privacy/erasures'].post.requestBody.content['application/json'].schema).toEqual({
+    expect(
+      openApiSpec.paths['/privacy/erasures'].post.requestBody.content['application/json'].schema,
+    ).toEqual({
       $ref: '#/components/schemas/PrivacyRequestInput',
     });
   });

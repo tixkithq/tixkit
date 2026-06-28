@@ -1345,9 +1345,7 @@ describe('public access code validation', () => {
     expect(row.host).toBe('tickets.example.test');
     expect(row.page_url).toBe('https://tickets.example.test/events/evt_1');
     expect(row.referrer).toBe('https://partner.example.test/campaigns/summer');
-    expect(String(row.page_url)).not.toMatch(
-      /[?#]|buyer@example\.test|checkout-token|userinfo@/,
-    );
+    expect(String(row.page_url)).not.toMatch(/[?#]|buyer@example\.test|checkout-token|userinfo@/);
     expect(String(row.referrer)).not.toMatch(/[?#]|referrer@example\.test|ref-token/);
 
     const invalidRes = await app.inject({

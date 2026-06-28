@@ -77,8 +77,16 @@ export const PrivacyRequestsMigration: Migration = {
   },
 
   async down(db): Promise<void> {
-    await db.schema.dropIndex('idx_privacy_requests_subject').on('privacy_requests').ifExists().execute();
-    await db.schema.dropIndex('idx_privacy_requests_scope').on('privacy_requests').ifExists().execute();
+    await db.schema
+      .dropIndex('idx_privacy_requests_subject')
+      .on('privacy_requests')
+      .ifExists()
+      .execute();
+    await db.schema
+      .dropIndex('idx_privacy_requests_scope')
+      .on('privacy_requests')
+      .ifExists()
+      .execute();
     await db.schema.dropTable('privacy_requests').ifExists().execute();
     await db.schema.dropIndex('idx_audit_logs_scope').on('audit_logs').ifExists().execute();
     await db.schema.alterTable('audit_logs').dropColumn('request_id').execute();

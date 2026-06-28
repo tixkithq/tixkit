@@ -1,11 +1,5 @@
 import React, { useState, useCallback } from 'react';
-import {
-  View,
-  Text,
-  Pressable,
-  ScrollView,
-  StyleSheet,
-} from 'react-native';
+import { View, Text, Pressable, ScrollView, StyleSheet } from 'react-native';
 import {
   TixkitScannerClient,
   createTixkitReactNativeComponents,
@@ -44,13 +38,19 @@ const client = new TixkitScannerClient({
 // --- Create SDK UI components ---
 // The SDK components return `unknown` (runtime-agnostic); cast to React FC for JSX.
 const components = createTixkitReactNativeComponents({
-  createElement: React.createElement as unknown as (type: unknown, props: Record<string, unknown> | null, ...children: unknown[]) => unknown,
+  createElement: React.createElement as unknown as (
+    type: unknown,
+    props: Record<string, unknown> | null,
+    ...children: unknown[]
+  ) => unknown,
   View,
   Text,
   Pressable,
 });
-const TixkitTicketCard = components.TixkitTicketCard as unknown as React.FC<TixkitTicketDisplayProps>;
-const TixkitScannerStatus = components.TixkitScannerStatus as unknown as React.FC<TixkitScannerStatusProps>;
+const TixkitTicketCard =
+  components.TixkitTicketCard as unknown as React.FC<TixkitTicketDisplayProps>;
+const TixkitScannerStatus =
+  components.TixkitScannerStatus as unknown as React.FC<TixkitScannerStatusProps>;
 
 type Tab = 'checkout' | 'tickets' | 'scanner' | 'sync';
 
@@ -66,7 +66,11 @@ export default function App() {
         {tab === 'sync' && <SyncTab />}
       </ScrollView>
       <View style={styles.nav}>
-        <NavButton label="Checkout" active={tab === 'checkout'} onPress={() => setTab('checkout')} />
+        <NavButton
+          label="Checkout"
+          active={tab === 'checkout'}
+          onPress={() => setTab('checkout')}
+        />
         <NavButton label="Tickets" active={tab === 'tickets'} onPress={() => setTab('tickets')} />
         <NavButton label="Scanner" active={tab === 'scanner'} onPress={() => setTab('scanner')} />
         <NavButton label="Sync" active={tab === 'sync'} onPress={() => setTab('sync')} />
@@ -75,7 +79,15 @@ export default function App() {
   );
 }
 
-function NavButton({ label, active, onPress }: { label: string; active: boolean; onPress: () => void }) {
+function NavButton({
+  label,
+  active,
+  onPress,
+}: {
+  label: string;
+  active: boolean;
+  onPress: () => void;
+}) {
   return (
     <Pressable onPress={onPress} style={[styles.navButton, active && styles.navButtonActive]}>
       <Text style={[styles.navText, active && styles.navTextActive]}>{label}</Text>
@@ -114,15 +126,29 @@ function TicketsTab() {
     <View style={styles.section}>
       <Text style={styles.heading}>Ticket display</Text>
       <TixkitTicketCard
-        ticket={{ ticketId: 'tkt_demo_001', ticketTypeId: 'tt_demo_general', attendeeName: 'Ada Lovelace', status: 'valid' }}
+        ticket={{
+          ticketId: 'tkt_demo_001',
+          ticketTypeId: 'tt_demo_general',
+          attendeeName: 'Ada Lovelace',
+          status: 'valid',
+        }}
         testID="ticket-1"
       />
       <TixkitTicketCard
-        ticket={{ ticketId: 'tkt_demo_002', ticketTypeId: 'tt_demo_vip', attendeeName: 'Grace Hopper', status: 'checked_in' }}
+        ticket={{
+          ticketId: 'tkt_demo_002',
+          ticketTypeId: 'tt_demo_vip',
+          attendeeName: 'Grace Hopper',
+          status: 'checked_in',
+        }}
         testID="ticket-2"
       />
       <TixkitTicketCard
-        ticket={{ ticketId: 'tkt_demo_003', attendeeName: 'Katherine Johnson', status: 'transferred' }}
+        ticket={{
+          ticketId: 'tkt_demo_003',
+          attendeeName: 'Katherine Johnson',
+          status: 'transferred',
+        }}
         testID="ticket-3"
       />
     </View>
@@ -174,7 +200,9 @@ function SyncTab() {
     setStatus('Downloading manifest...');
     try {
       const manifest: OfflineManifest = await client.downloadManifest('evt_demo', 'cil_demo');
-      setStatus(`Manifest downloaded: ${manifest.tickets.length} tickets, expires ${manifest.expiresAt}`);
+      setStatus(
+        `Manifest downloaded: ${manifest.tickets.length} tickets, expires ${manifest.expiresAt}`,
+      );
     } catch (e) {
       setStatus(`Download failed: ${String(e)}`);
     } finally {
@@ -187,7 +215,9 @@ function SyncTab() {
     setStatus('Syncing offline scans...');
     try {
       const result = await client.syncScans('cil_demo');
-      setStatus(`Sync complete: ${result.accepted} accepted, ${result.duplicates} duplicates, ${result.invalid} invalid`);
+      setStatus(
+        `Sync complete: ${result.accepted} accepted, ${result.duplicates} duplicates, ${result.invalid} invalid`,
+      );
     } catch (e) {
       setStatus(`Sync failed: ${String(e)}`);
     } finally {

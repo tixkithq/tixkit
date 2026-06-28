@@ -14,46 +14,46 @@ Tixkit is a monorepo with four runtime apps (API, worker, checkout, admin-dashbo
 
 All four apps share these core variables. See `.env.local.example` for the full list.
 
-| Variable | Required | Description |
-| --- | --- | --- |
-| `DATABASE_URL` | Yes | PostgreSQL connection string |
-| `REDIS_URL` | Yes | Redis connection string |
-| `TEMPORAL_ADDRESS` | Yes | Temporal cluster address |
-| `TEMPORAL_NAMESPACE` | Yes | Temporal namespace (default: `default`) |
-| `S3_ENDPOINT` | Yes | S3-compatible storage endpoint |
-| `S3_BUCKET` | Yes | S3 bucket name |
-| `S3_ACCESS_KEY_ID` | Yes | S3 access key |
-| `S3_SECRET_ACCESS_KEY` | Yes | S3 secret key |
-| `CLERK_SECRET_KEY` | Yes (prod) | Clerk secret key |
-| `STRIPE_SECRET_KEY` | Yes (prod) | Stripe secret key |
-| `STRIPE_WEBHOOK_SECRET` | Yes (prod) | Stripe webhook signing secret |
-| `PORT` | No | API port (default: 4000) |
+| Variable                | Required   | Description                             |
+| ----------------------- | ---------- | --------------------------------------- |
+| `DATABASE_URL`          | Yes        | PostgreSQL connection string            |
+| `REDIS_URL`             | Yes        | Redis connection string                 |
+| `TEMPORAL_ADDRESS`      | Yes        | Temporal cluster address                |
+| `TEMPORAL_NAMESPACE`    | Yes        | Temporal namespace (default: `default`) |
+| `S3_ENDPOINT`           | Yes        | S3-compatible storage endpoint          |
+| `S3_BUCKET`             | Yes        | S3 bucket name                          |
+| `S3_ACCESS_KEY_ID`      | Yes        | S3 access key                           |
+| `S3_SECRET_ACCESS_KEY`  | Yes        | S3 secret key                           |
+| `CLERK_SECRET_KEY`      | Yes (prod) | Clerk secret key                        |
+| `STRIPE_SECRET_KEY`     | Yes (prod) | Stripe secret key                       |
+| `STRIPE_WEBHOOK_SECRET` | Yes (prod) | Stripe webhook signing secret           |
+| `PORT`                  | No         | API port (default: 4000)                |
 
 Auth provider selection:
 
-| Variable | Required | Description |
-| --- | --- | --- |
-| `AUTH_PROVIDER` | No | `clerk`, `dev`, or `oidc`. Defaults to `clerk` outside development. |
-| `OIDC_ISSUER_URL` | OIDC only | Issuer URL for self-hosted OIDC auth. |
-| `OIDC_AUDIENCE` | OIDC only | Expected API audience for OIDC JWTs. |
+| Variable          | Required  | Description                                                         |
+| ----------------- | --------- | ------------------------------------------------------------------- |
+| `AUTH_PROVIDER`   | No        | `clerk`, `dev`, or `oidc`. Defaults to `clerk` outside development. |
+| `OIDC_ISSUER_URL` | OIDC only | Issuer URL for self-hosted OIDC auth.                               |
+| `OIDC_AUDIENCE`   | OIDC only | Expected API audience for OIDC JWTs.                                |
 
 Database target selection:
 
-| Variable | Required | Description |
-| --- | --- | --- |
-| `DB_DRIVER` | No | `postgres`, `mysql`, or `mssql`. Defaults from the configured database URL. |
-| `DATABASE_URL_MSSQL` | MSSQL only | SQL Server connection string for `DB_DRIVER=mssql`. |
+| Variable             | Required   | Description                                                                 |
+| -------------------- | ---------- | --------------------------------------------------------------------------- |
+| `DB_DRIVER`          | No         | `postgres`, `mysql`, or `mssql`. Defaults from the configured database URL. |
+| `DATABASE_URL_MSSQL` | MSSQL only | SQL Server connection string for `DB_DRIVER=mssql`.                         |
 
 ## Docker Images
 
 Root Dockerfiles are provided for the four deployable processes:
 
-| Process | Dockerfile | Default start command |
-| --- | --- | --- |
-| API | `Dockerfile.api` | `bun run --filter @tixkit/api start` |
-| Worker | `Dockerfile.worker` | `bun run --filter @tixkit/workflows start:worker` |
-| Checkout | `Dockerfile.checkout` | `bun run --filter @tixkit/checkout start` |
-| Admin | `Dockerfile.admin` | `bun run --filter @tixkit/admin-dashboard start` |
+| Process  | Dockerfile            | Default start command                             |
+| -------- | --------------------- | ------------------------------------------------- |
+| API      | `Dockerfile.api`      | `bun run --filter @tixkit/api start`              |
+| Worker   | `Dockerfile.worker`   | `bun run --filter @tixkit/workflows start:worker` |
+| Checkout | `Dockerfile.checkout` | `bun run --filter @tixkit/checkout start`         |
+| Admin    | `Dockerfile.admin`    | `bun run --filter @tixkit/admin-dashboard start`  |
 
 Each image uses `oven/bun:1.3`, installs workspace dependencies with the frozen lockfile, builds the workspace, and starts the target app. Validate syntax locally with:
 
@@ -128,18 +128,22 @@ After deploying, verify:
 ## Managed Services
 
 ### PostgreSQL
+
 See [Managed Database Compatibility](./managed-database-compatibility.md) for supported providers and caveats.
 
 ### Redis
+
 - **Upstash**: Serverless Redis, TLS-enabled, compatible with `REDIS_URL=rediss://...`
 - **Redis Cloud**: Managed Redis with auto-scaling
 - **Self-hosted**: Use the Docker Compose Redis for development
 
 ### Temporal
+
 - **Temporal Cloud**: Managed Temporal service
 - **Self-hosted**: Deploy Temporal via Docker or Kubernetes using the official Helm chart
 
 ### S3-Compatible Storage
+
 - **AWS S3**: Standard S3 with IAM credentials
 - **Cloudflare R2**: S3-compatible, no egress fees
 - **MinIO**: Self-hosted S3-compatible storage

@@ -182,9 +182,8 @@ vi.mock('@tixkit/db', () => {
   };
 });
 
-const { enforcePrivacyRetentionActivity, processPrivacyRequestActivity } = await import(
-  '../activities/privacy.js'
-);
+const { enforcePrivacyRetentionActivity, processPrivacyRequestActivity } =
+  await import('../activities/privacy.js');
 
 describe('processPrivacyRequestActivity', () => {
   beforeEach(() => {
@@ -502,9 +501,7 @@ describe('processPrivacyRequestActivity', () => {
     });
     expect(dbState.auditLogs).toHaveLength(1);
     const auditSummary = JSON.parse(String(dbState.auditLogs[0].diff_summary));
-    expect(auditSummary.subjectEmail).toMatch(
-      /^erased\+[a-f0-9]{16}@privacy\.tixkit\.invalid$/,
-    );
+    expect(auditSummary.subjectEmail).toMatch(/^erased\+[a-f0-9]{16}@privacy\.tixkit\.invalid$/);
     expect(dbState.checkoutSessions).toHaveLength(1);
     const checkoutBuyer = JSON.parse(String(dbState.checkoutSessions[0].buyer));
     expect(checkoutBuyer).toMatchObject({
@@ -736,11 +733,11 @@ describe('processPrivacyRequestActivity', () => {
     expect(
       String(dbState.privacyRequests.find((row) => row.id === 'prv_legacy_1')?.subject_email),
     ).toMatch(/^erased\+[a-f0-9]{16}@privacy\.tixkit\.invalid$/);
-    expect(dbState.privacyRequests.find((row) => row.id === 'prv_already_redacted_1')).toMatchObject(
-      {
-        result: JSON.stringify({ already: true }),
-      },
-    );
+    expect(
+      dbState.privacyRequests.find((row) => row.id === 'prv_already_redacted_1'),
+    ).toMatchObject({
+      result: JSON.stringify({ already: true }),
+    });
     expect(dbState.destroy).toHaveBeenCalledTimes(1);
   });
 
@@ -803,31 +800,34 @@ describe('processPrivacyRequestActivity', () => {
       created_at: new Date('2026-06-01T09:00:00.000Z'),
       updated_at: new Date('2026-06-01T09:00:00.000Z'),
     });
-    dbState.invoices.push({
-      id: 'inv_partial',
-      tenant_id: 'tnt_1',
-      organization_id: 'org_1',
-      brand_id: 'brd_1',
-      order_id: 'ord_partial',
-      total_cents: 5000,
-      tax_cents: 0,
-      buyer_email: 'erased+cccccccccccccccc@privacy.tixkit.invalid',
-      buyer_name: 'Partial Buyer',
-      buyer_tax_id: 'US-PARTIAL',
-      updated_at: new Date('2026-06-01T09:00:00.000Z'),
-    }, {
-      id: 'inv_partial_same_email',
-      tenant_id: 'tnt_1',
-      organization_id: 'org_1',
-      brand_id: 'brd_1',
-      order_id: 'ord_partial_same_email',
-      total_cents: 7000,
-      tax_cents: 0,
-      buyer_email: 'partial@test.com',
-      buyer_name: 'Same Email Buyer',
-      buyer_tax_id: 'US-SAME',
-      updated_at: new Date('2026-06-01T09:00:00.000Z'),
-    });
+    dbState.invoices.push(
+      {
+        id: 'inv_partial',
+        tenant_id: 'tnt_1',
+        organization_id: 'org_1',
+        brand_id: 'brd_1',
+        order_id: 'ord_partial',
+        total_cents: 5000,
+        tax_cents: 0,
+        buyer_email: 'erased+cccccccccccccccc@privacy.tixkit.invalid',
+        buyer_name: 'Partial Buyer',
+        buyer_tax_id: 'US-PARTIAL',
+        updated_at: new Date('2026-06-01T09:00:00.000Z'),
+      },
+      {
+        id: 'inv_partial_same_email',
+        tenant_id: 'tnt_1',
+        organization_id: 'org_1',
+        brand_id: 'brd_1',
+        order_id: 'ord_partial_same_email',
+        total_cents: 7000,
+        tax_cents: 0,
+        buyer_email: 'partial@test.com',
+        buyer_name: 'Same Email Buyer',
+        buyer_tax_id: 'US-SAME',
+        updated_at: new Date('2026-06-01T09:00:00.000Z'),
+      },
+    );
     dbState.auditLogs.push({
       id: 'aud_partial',
       tenant_id: 'tnt_1',
@@ -837,43 +837,47 @@ describe('processPrivacyRequestActivity', () => {
       resource_id: 'prv_partial_legacy_1',
       diff_summary: JSON.stringify({ subjectEmail: 'partial@test.com' }),
     });
-    dbState.checkoutSessions.push({
-      id: 'cs_partial',
-      tenant_id: 'tnt_1',
-      brand_id: 'brd_1',
-      order_id: 'ord_partial',
-      buyer: JSON.stringify({
-        email: 'erased+dddddddddddddddd@privacy.tixkit.invalid',
-        firstName: 'Partial',
-        lastName: 'Buyer',
-        phone: '+15550000004',
-      }),
-      updated_at: new Date('2026-06-01T09:00:00.000Z'),
-    }, {
-      id: 'cs_partial_same_email',
-      tenant_id: 'tnt_1',
-      brand_id: 'brd_1',
-      order_id: 'ord_partial_same_email',
-      buyer: JSON.stringify({
-        email: 'partial@test.com',
-        firstName: 'Same',
-        lastName: 'Email',
-        phone: '+15550000006',
-      }),
-      updated_at: new Date('2026-06-01T09:00:00.000Z'),
-    }, {
-      id: 'cs_partial_other_org',
-      tenant_id: 'tnt_1',
-      brand_id: 'brd_other',
-      order_id: 'ord_partial_other_org',
-      buyer: JSON.stringify({
-        email: 'partial@test.com',
-        firstName: 'Other',
-        lastName: 'Org',
-        phone: '+15550000005',
-      }),
-      updated_at: new Date('2026-06-01T09:00:00.000Z'),
-    });
+    dbState.checkoutSessions.push(
+      {
+        id: 'cs_partial',
+        tenant_id: 'tnt_1',
+        brand_id: 'brd_1',
+        order_id: 'ord_partial',
+        buyer: JSON.stringify({
+          email: 'erased+dddddddddddddddd@privacy.tixkit.invalid',
+          firstName: 'Partial',
+          lastName: 'Buyer',
+          phone: '+15550000004',
+        }),
+        updated_at: new Date('2026-06-01T09:00:00.000Z'),
+      },
+      {
+        id: 'cs_partial_same_email',
+        tenant_id: 'tnt_1',
+        brand_id: 'brd_1',
+        order_id: 'ord_partial_same_email',
+        buyer: JSON.stringify({
+          email: 'partial@test.com',
+          firstName: 'Same',
+          lastName: 'Email',
+          phone: '+15550000006',
+        }),
+        updated_at: new Date('2026-06-01T09:00:00.000Z'),
+      },
+      {
+        id: 'cs_partial_other_org',
+        tenant_id: 'tnt_1',
+        brand_id: 'brd_other',
+        order_id: 'ord_partial_other_org',
+        buyer: JSON.stringify({
+          email: 'partial@test.com',
+          firstName: 'Other',
+          lastName: 'Org',
+          phone: '+15550000005',
+        }),
+        updated_at: new Date('2026-06-01T09:00:00.000Z'),
+      },
+    );
 
     const result = await enforcePrivacyRetentionActivity({ batchSize: 10 });
 
@@ -915,13 +919,21 @@ describe('processPrivacyRequestActivity', () => {
       lastName: null,
       phone: null,
     });
-    expect(JSON.parse(String(dbState.checkoutSessions.find((row) => row.id === 'cs_partial_same_email')?.buyer))).toMatchObject({
+    expect(
+      JSON.parse(
+        String(dbState.checkoutSessions.find((row) => row.id === 'cs_partial_same_email')?.buyer),
+      ),
+    ).toMatchObject({
       email: 'partial@test.com',
       firstName: 'Same',
       lastName: 'Email',
       phone: '+15550000006',
     });
-    expect(JSON.parse(String(dbState.checkoutSessions.find((row) => row.id === 'cs_partial_other_org')?.buyer))).toMatchObject({
+    expect(
+      JSON.parse(
+        String(dbState.checkoutSessions.find((row) => row.id === 'cs_partial_other_org')?.buyer),
+      ),
+    ).toMatchObject({
       email: 'partial@test.com',
       firstName: 'Other',
       lastName: 'Org',
@@ -930,13 +942,17 @@ describe('processPrivacyRequestActivity', () => {
     const auditSummary = JSON.parse(
       String(dbState.auditLogs.find((row) => row.id === 'aud_partial')?.diff_summary),
     );
-    expect(auditSummary.subjectEmail).toMatch(
-      /^erased\+[a-f0-9]{16}@privacy\.tixkit\.invalid$/,
-    );
-    expect(String(dbState.privacyRequests.find((row) => row.id === 'prv_partial_legacy_1')?.subject_email)).toMatch(
-      /^erased\+[a-f0-9]{16}@privacy\.tixkit\.invalid$/,
-    );
-    expect(JSON.parse(String(dbState.privacyRequests.find((row) => row.id === 'prv_partial_legacy_1')?.result))).toMatchObject({
+    expect(auditSummary.subjectEmail).toMatch(/^erased\+[a-f0-9]{16}@privacy\.tixkit\.invalid$/);
+    expect(
+      String(
+        dbState.privacyRequests.find((row) => row.id === 'prv_partial_legacy_1')?.subject_email,
+      ),
+    ).toMatch(/^erased\+[a-f0-9]{16}@privacy\.tixkit\.invalid$/);
+    expect(
+      JSON.parse(
+        String(dbState.privacyRequests.find((row) => row.id === 'prv_partial_legacy_1')?.result),
+      ),
+    ).toMatchObject({
       ordersRedacted: 0,
       attendeesRedacted: 0,
       ticketsTouched: 0,

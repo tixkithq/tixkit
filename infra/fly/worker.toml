@@ -2,7 +2,7 @@ app = "tixkit-worker"
 primary_region = "iad"
 
 [build]
-  dockerfile = "Dockerfile.worker"
+dockerfile = "Dockerfile.worker"
 
 [env]
-  NODE_ENV = "production"
+NODE_ENV = "production"

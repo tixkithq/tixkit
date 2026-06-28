@@ -510,72 +510,70 @@ describe('event routes', () => {
         { code: 'SQLITE_CONSTRAINT_UNIQUE' },
       ),
     ],
-  ])('recovers when a concurrent marketing integration create wins the unique race with %s', async (
-    _label,
-    concurrentMarketingIntegrationError,
-  ) => {
-    vi.useFakeTimers({ toFake: ['Date'] });
-    vi.setSystemTime(new Date('2026-06-01T00:00:00.000Z'));
-    const existing = {
-      id: 'mkt_existing',
-      tenant_id: 'tnt_1',
-      organization_id: 'org_1',
-      brand_id: 'brd_1',
-      event_id: 'evt_1',
-      provider: 'ga4',
-      config: JSON.stringify({ measurementId: 'G-OLD' }),
-      consent_required: true,
-      status: 'disabled',
-      created_at: new Date('2026-06-01T00:00:01.000Z'),
-      updated_at: new Date('2026-06-01T00:00:01.000Z'),
-    };
-    const existingUpdatedAt = existing.updated_at;
-    const { db, updates } = createEventMutationDb({
-      event: baseEventRow({ status: 'published' }),
-      concurrentMarketingIntegration: existing,
-      concurrentMarketingIntegrationError,
-      concurrentMarketingIntegrationSystemTimeAfterInsert: new Date(
-        '2026-06-01T00:00:02.000Z',
-      ),
-      marketingIntegrationAfterRecoveryUpdate: {
-        config: JSON.stringify({ measurementId: 'G-LATER' }),
+  ])(
+    'recovers when a concurrent marketing integration create wins the unique race with %s',
+    async (_label, concurrentMarketingIntegrationError) => {
+      vi.useFakeTimers({ toFake: ['Date'] });
+      vi.setSystemTime(new Date('2026-06-01T00:00:00.000Z'));
+      const existing = {
+        id: 'mkt_existing',
+        tenant_id: 'tnt_1',
+        organization_id: 'org_1',
+        brand_id: 'brd_1',
+        event_id: 'evt_1',
+        provider: 'ga4',
+        config: JSON.stringify({ measurementId: 'G-OLD' }),
         consent_required: true,
         status: 'disabled',
-        updated_at: new Date('2026-06-01T00:00:03.000Z'),
-      },
-    });
-    const app = await setupEventApp(db, writePrincipal);
+        created_at: new Date('2026-06-01T00:00:01.000Z'),
+        updated_at: new Date('2026-06-01T00:00:01.000Z'),
+      };
+      const existingUpdatedAt = existing.updated_at;
+      const { db, updates } = createEventMutationDb({
+        event: baseEventRow({ status: 'published' }),
+        concurrentMarketingIntegration: existing,
+        concurrentMarketingIntegrationError,
+        concurrentMarketingIntegrationSystemTimeAfterInsert: new Date('2026-06-01T00:00:02.000Z'),
+        marketingIntegrationAfterRecoveryUpdate: {
+          config: JSON.stringify({ measurementId: 'G-LATER' }),
+          consent_required: true,
+          status: 'disabled',
+          updated_at: new Date('2026-06-01T00:00:03.000Z'),
+        },
+      });
+      const app = await setupEventApp(db, writePrincipal);
 
-    const response = await app.inject({
-      method: 'PUT',
-      url: '/events/evt_1/marketing-integrations/ga4',
-      payload: {
+      const response = await app.inject({
+        method: 'PUT',
+        url: '/events/evt_1/marketing-integrations/ga4',
+        payload: {
+          config: { measurementId: 'G-RACED' },
+          consentRequired: false,
+          status: 'active',
+        },
+      });
+
+      expect(response.statusCode).toBe(200);
+      expect(updates).toContainEqual(
+        expect.objectContaining({
+          config: JSON.stringify({ measurementId: 'G-RACED' }),
+          consent_required: false,
+          status: 'active',
+        }),
+      );
+      const updatedAt = updates.find((update) => update.status === 'active')?.updated_at;
+      expect(updatedAt).toBeInstanceOf(Date);
+      expect((updatedAt as Date).getTime()).toBeGreaterThanOrEqual(existingUpdatedAt.getTime());
+      expect(response.json()).toMatchObject({
+        id: 'mkt_existing',
+        provider: 'ga4',
         config: { measurementId: 'G-RACED' },
         consentRequired: false,
         status: 'active',
-      },
-    });
-
-    expect(response.statusCode).toBe(200);
-    expect(updates).toContainEqual(
-      expect.objectContaining({
-        config: JSON.stringify({ measurementId: 'G-RACED' }),
-        consent_required: false,
-        status: 'active',
-      }),
-    );
-    const updatedAt = updates.find((update) => update.status === 'active')?.updated_at;
-    expect(updatedAt).toBeInstanceOf(Date);
-    expect((updatedAt as Date).getTime()).toBeGreaterThanOrEqual(existingUpdatedAt.getTime());
-    expect(response.json()).toMatchObject({
-      id: 'mkt_existing',
-      provider: 'ga4',
-      config: { measurementId: 'G-RACED' },
-      consentRequired: false,
-      status: 'active',
-    });
-    await app.close();
-  });
+      });
+      await app.close();
+    },
+  );
 
   it('rejects non-HTTPS generic marketing pixels', async () => {
     const { db } = createEventMutationDb({ event: baseEventRow({ status: 'published' }) });

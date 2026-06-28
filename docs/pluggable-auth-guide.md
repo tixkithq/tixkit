@@ -6,11 +6,11 @@ Tixkit authenticates API requests through an `AuthProvider` boundary. Clerk rema
 
 Set `AUTH_PROVIDER` to one of:
 
-| Value | Use case |
-| --- | --- |
+| Value   | Use case                                                                                                                                                       |
+| ------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `clerk` | Hosted production default. Wraps existing Clerk token verification plus existing API key, OAuth access token, scanner-device, and local-dev fallback behavior. |
-| `dev` | Local development only. Returns the deterministic local dev principal and refuses to start in production. |
-| `oidc` | Self-hosted OIDC. Verifies bearer JWTs against the issuer JWKS and maps the OIDC subject to a Tixkit user profile. |
+| `dev`   | Local development only. Returns the deterministic local dev principal and refuses to start in production.                                                      |
+| `oidc`  | Self-hosted OIDC. Verifies bearer JWTs against the issuer JWKS and maps the OIDC subject to a Tixkit user profile.                                             |
 
 When `AUTH_PROVIDER` is unset, development defaults to `dev`; every other environment defaults to `clerk`.
 
@@ -82,12 +82,12 @@ OIDC_AUDIENCE=tixkit-api
 
 Recommended token claims:
 
-| Claim | Purpose |
-| --- | --- |
-| `sub` | Stable provider subject. Required. |
-| `email` | Auditing and operator visibility. |
-| `org_id` or `organization_id` | Optional organization selection. |
-| `tenant_id` | Optional tenant hint. The database grant remains authoritative. |
+| Claim                         | Purpose                                                         |
+| ----------------------------- | --------------------------------------------------------------- |
+| `sub`                         | Stable provider subject. Required.                              |
+| `email`                       | Auditing and operator visibility.                               |
+| `org_id` or `organization_id` | Optional organization selection.                                |
+| `tenant_id`                   | Optional tenant hint. The database grant remains authoritative. |
 
 ## Validation
 

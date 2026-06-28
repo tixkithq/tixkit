@@ -145,8 +145,7 @@ export const developerRoutes: FastifyPluginAsync = async (app) => {
 
     if (principal.eventIds?.length) {
       return (
-        parseStringArray(row.brand_ids).length === 0 &&
-        isContained(eventIds, principal.eventIds)
+        parseStringArray(row.brand_ids).length === 0 && isContained(eventIds, principal.eventIds)
       );
     }
 
@@ -178,13 +177,12 @@ export const developerRoutes: FastifyPluginAsync = async (app) => {
     if (!hasScopedResourceBounds(principal)) {
       return rows;
     }
-    const eventBrandIds =
-      principal.eventIds?.length
-        ? new Map<string, string>()
-        : await loadEventBrandIds(
-            principal,
-            rows.flatMap((row) => parseStringArray(row.event_ids)),
-          );
+    const eventBrandIds = principal.eventIds?.length
+      ? new Map<string, string>()
+      : await loadEventBrandIds(
+          principal,
+          rows.flatMap((row) => parseStringArray(row.event_ids)),
+        );
     return rows.filter((row) => canManageScopedCredentialRow(principal, row, eventBrandIds));
   }
 

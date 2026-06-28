@@ -23,49 +23,43 @@ describe('publicEventUrl', () => {
 
   it('uses clean root slugs for active verified custom domains', () => {
     expect(
-      publicEventUrl(
-        { id: 'evt_1', slug: 'launch', brandId: 'brd_1' },
-        [
-          {
-            ...brand,
-            whiteLabel: true,
-            domains: [
-              {
-                id: 'bdom_1',
-                brandId: 'brd_1',
-                domain: 'events.example.com',
-                isPrimary: true,
-                isVerified: true,
-                sslStatus: 'active',
-              },
-            ],
-          },
-        ],
-      ),
+      publicEventUrl({ id: 'evt_1', slug: 'launch', brandId: 'brd_1' }, [
+        {
+          ...brand,
+          whiteLabel: true,
+          domains: [
+            {
+              id: 'bdom_1',
+              brandId: 'brd_1',
+              domain: 'events.example.com',
+              isPrimary: true,
+              isVerified: true,
+              sslStatus: 'active',
+            },
+          ],
+        },
+      ]),
     ).toBe('https://events.example.com/launch');
   });
 
   it('falls back when a verified domain is not white-label enabled', () => {
     expect(
-      publicEventUrl(
-        { id: 'evt_1', slug: 'launch', brandId: 'brd_1' },
-        [
-          {
-            ...brand,
-            whiteLabel: false,
-            domains: [
-              {
-                id: 'bdom_1',
-                brandId: 'brd_1',
-                domain: 'events.example.com',
-                isPrimary: true,
-                isVerified: true,
-                sslStatus: 'active',
-              },
-            ],
-          },
-        ],
-      ),
+      publicEventUrl({ id: 'evt_1', slug: 'launch', brandId: 'brd_1' }, [
+        {
+          ...brand,
+          whiteLabel: false,
+          domains: [
+            {
+              id: 'bdom_1',
+              brandId: 'brd_1',
+              domain: 'events.example.com',
+              isPrimary: true,
+              isVerified: true,
+              sslStatus: 'active',
+            },
+          ],
+        },
+      ]),
     ).toBe('http://localhost:3000/e/evt_1');
   });
 });

@@ -345,9 +345,10 @@ function percentile(values: number[], percentileValue: number): number {
 }
 
 function expectSloAtOrBelow(metric: string, actual: number, threshold: number): void {
-  expect(actual, `${metric} expected <= ${threshold}ms, got ${actual.toFixed(2)}ms`).toBeLessThanOrEqual(
-    threshold,
-  );
+  expect(
+    actual,
+    `${metric} expected <= ${threshold}ms, got ${actual.toFixed(2)}ms`,
+  ).toBeLessThanOrEqual(threshold);
 }
 
 function makePrincipal(): Principal {
@@ -442,7 +443,10 @@ describeWithIntegrationDatabase('Load and concurrency harnesses', () => {
     );
 
     const statusCodes = responses.map((response) => response.statusCode);
-    expect(statusCodes.every((statusCode) => statusCode < 500), statusCodes.join(',')).toBe(true);
+    expect(
+      statusCodes.every((statusCode) => statusCode < 500),
+      statusCodes.join(','),
+    ).toBe(true);
     expect(statusCodes).toEqual(Array(CONCURRENT_CLIENTS).fill(200));
 
     for (const response of responses) {

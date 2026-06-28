@@ -28,7 +28,9 @@ const {
     currency: string;
     description?: string;
     feeCents?: number;
-  }): Promise<WorkflowActivityResult<{ providerIntentId: string; clientSecret?: string; provider?: string }>>;
+  }): Promise<
+    WorkflowActivityResult<{ providerIntentId: string; clientSecret?: string; provider?: string }>
+  >;
   finalizeOrderActivity(input: {
     checkoutSessionId: string;
     tenantId: string;
@@ -148,7 +150,11 @@ export async function checkoutSessionWorkflow(
                 version: WEBHOOK_DELIVERY_WORKFLOW_VERSION,
                 endpointId: delivery.endpointId,
                 eventId: delivery.eventId,
-                payload: { orderId, eventId: input.eventId, checkoutSessionId: input.checkoutSessionId },
+                payload: {
+                  orderId,
+                  eventId: input.eventId,
+                  checkoutSessionId: input.checkoutSessionId,
+                },
                 maxAttempts: 5,
               },
             ],
@@ -177,13 +183,17 @@ export async function checkoutSessionWorkflow(
       metadata: compensationInput.metadata,
     });
     if (!compensationResult.ok) {
-      throw new Error(`Orphan payment compensation failed (${compensationResult.errorCode}): ${compensationResult.message}`);
+      throw new Error(
+        `Orphan payment compensation failed (${compensationResult.errorCode}): ${compensationResult.message}`,
+      );
     }
     if (
       !['succeeded', 'already_ordered'].includes(compensationResult.value.status) &&
       patched('checkout-block-incomplete-orphan-compensation-v1')
     ) {
-      throw new Error(`Orphan payment compensation blocked with status ${compensationResult.value.status}`);
+      throw new Error(
+        `Orphan payment compensation blocked with status ${compensationResult.value.status}`,
+      );
     }
   }
 
@@ -194,7 +204,9 @@ export async function checkoutSessionWorkflow(
   }) {
     const releaseResult = await releaseHoldActivity(releaseInput);
     if (!releaseResult.ok) {
-      throw new Error(`Checkout hold release failed (${releaseResult.errorCode}): ${releaseResult.message}`);
+      throw new Error(
+        `Checkout hold release failed (${releaseResult.errorCode}): ${releaseResult.message}`,
+      );
     }
   }
 
@@ -263,7 +275,10 @@ export async function checkoutSessionWorkflow(
   });
 
   if (!paymentResult.ok) {
-    await releaseCheckoutHold({ checkoutSessionId: input.checkoutSessionId, checkoutSessionStatus: 'expired' });
+    await releaseCheckoutHold({
+      checkoutSessionId: input.checkoutSessionId,
+      checkoutSessionStatus: 'expired',
+    });
     state = { status: 'failed', holdId: input.holdId, error: paymentResult.message };
     return { status: 'failed' };
   }
@@ -290,7 +305,10 @@ export async function checkoutSessionWorkflow(
       source: 'checkout_cancelled',
       metadata: { eventId: input.eventId, brandId: input.brandId },
     });
-    await releaseCheckoutHold({ checkoutSessionId: input.checkoutSessionId, checkoutSessionStatus: 'cancelled' });
+    await releaseCheckoutHold({
+      checkoutSessionId: input.checkoutSessionId,
+      checkoutSessionStatus: 'cancelled',
+    });
     state = { status: 'cancelled', holdId: input.holdId, paymentIntentId, clientSecret };
     return { status: 'cancelled' };
   }
@@ -303,8 +321,17 @@ export async function checkoutSessionWorkflow(
       source: 'checkout_payment_failed',
       metadata: { eventId: input.eventId, brandId: input.brandId },
     });
-    await releaseCheckoutHold({ checkoutSessionId: input.checkoutSessionId, checkoutSessionStatus: 'expired' });
-    state = { status: 'failed', holdId: input.holdId, paymentIntentId, clientSecret, error: paymentError };
+    await releaseCheckoutHold({
+      checkoutSessionId: input.checkoutSessionId,
+      checkoutSessionStatus: 'expired',
+    });
+    state = {
+      status: 'failed',
+      holdId: input.holdId,
+      paymentIntentId,
+      clientSecret,
+      error: paymentError,
+    };
     return { status: 'failed' };
   }
 
@@ -312,12 +339,23 @@ export async function checkoutSessionWorkflow(
     await compensateOrphanPayment({
       provider: paymentProvider,
       providerIntentId: paymentIntentId,
-      reason: paymentSucceeded ? 'Payment succeeded after checkout timeout' : 'Payment timed out before checkout completion',
+      reason: paymentSucceeded
+        ? 'Payment succeeded after checkout timeout'
+        : 'Payment timed out before checkout completion',
       source: paymentSucceeded ? 'checkout_timeout_race' : 'checkout_payment_timeout',
       metadata: { eventId: input.eventId, brandId: input.brandId },
     });
-    await releaseCheckoutHold({ checkoutSessionId: input.checkoutSessionId, checkoutSessionStatus: 'expired' });
-    state = { status: 'failed', holdId: input.holdId, paymentIntentId, clientSecret, error: 'Payment timeout' };
+    await releaseCheckoutHold({
+      checkoutSessionId: input.checkoutSessionId,
+      checkoutSessionStatus: 'expired',
+    });
+    state = {
+      status: 'failed',
+      holdId: input.holdId,
+      paymentIntentId,
+      clientSecret,
+      error: 'Payment timeout',
+    };
     return { status: 'failed' };
   }
 
@@ -334,10 +372,23 @@ export async function checkoutSessionWorkflow(
       providerIntentId: paymentIntentId,
       reason: finalizeResult.message,
       source: 'checkout_finalize_failed',
-      metadata: { eventId: input.eventId, brandId: input.brandId, errorCode: finalizeResult.errorCode },
+      metadata: {
+        eventId: input.eventId,
+        brandId: input.brandId,
+        errorCode: finalizeResult.errorCode,
+      },
     });
-    await releaseCheckoutHold({ checkoutSessionId: input.checkoutSessionId, checkoutSessionStatus: 'expired' });
-    state = { status: 'failed', holdId: input.holdId, paymentIntentId, clientSecret, error: finalizeResult.message };
+    await releaseCheckoutHold({
+      checkoutSessionId: input.checkoutSessionId,
+      checkoutSessionStatus: 'expired',
+    });
+    state = {
+      status: 'failed',
+      holdId: input.holdId,
+      paymentIntentId,
+      clientSecret,
+      error: finalizeResult.message,
+    };
     return { status: 'failed' };
   }
 

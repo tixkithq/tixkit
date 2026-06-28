@@ -3,11 +3,7 @@
 import * as React from 'react';
 import { Download, Eraser, RefreshCw, ScrollText } from 'lucide-react';
 import { toast } from 'sonner';
-import {
-  type AdminAuditLog,
-  type AdminPrivacyRequest,
-  adminApi,
-} from '@/lib/api';
+import { type AdminAuditLog, type AdminPrivacyRequest, adminApi } from '@/lib/api';
 import { ApiErrorState } from '@/components/api-error-state';
 import { EmptyState } from '@/components/empty-state';
 import { Badge } from '@/components/ui/badge';

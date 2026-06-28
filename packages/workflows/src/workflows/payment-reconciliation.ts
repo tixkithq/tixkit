@@ -55,7 +55,10 @@ type ReconciliationResult = WorkflowActivityResult<{ orderId?: string; status: s
 const PAYMENT_RECONCILIATION_BOUNDED_RETRY_VERSION = 2;
 const RECONCILIATION_MAX_ATTEMPTS = 5;
 const RECONCILIATION_RETRY_DELAY = '5 seconds';
-const CLOSEABLE_COMPENSATION_STATUSES = new Set(['compensated:succeeded', 'compensated:already_ordered']);
+const CLOSEABLE_COMPENSATION_STATUSES = new Set([
+  'compensated:succeeded',
+  'compensated:already_ordered',
+]);
 
 async function runReconciliationActivity(
   input: PaymentReconciliationWorkflowInput,
@@ -119,15 +122,18 @@ export async function paymentReconciliationWorkflow(
 
   if (!result.ok) {
     if (result.retryable) {
-      throw new Error(
-        `Payment reconciliation failed (${result.errorCode}): ${result.message}`,
-      );
+      throw new Error(`Payment reconciliation failed (${result.errorCode}): ${result.message}`);
     }
     return { status: 'failed' };
   }
 
-  if (result.value.status.startsWith('compensated:') && !CLOSEABLE_COMPENSATION_STATUSES.has(result.value.status)) {
-    throw new Error(`Payment reconciliation compensation blocked with status ${result.value.status}`);
+  if (
+    result.value.status.startsWith('compensated:') &&
+    !CLOSEABLE_COMPENSATION_STATUSES.has(result.value.status)
+  ) {
+    throw new Error(
+      `Payment reconciliation compensation blocked with status ${result.value.status}`,
+    );
   }
 
   // Emit domain event if order was affected

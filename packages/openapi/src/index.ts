@@ -5541,7 +5541,8 @@ export const openApiSpec = {
             in: 'path',
             required: true,
             schema: { type: 'string' },
-            description: 'Email provider key, for example postmark, sendgrid, ses, mailgun, or smtp',
+            description:
+              'Email provider key, for example postmark, sendgrid, ses, mailgun, or smtp',
           },
         ],
         responses: {

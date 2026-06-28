@@ -187,7 +187,9 @@ export default function CheckoutFlow({
     () =>
       visibleAvailability.some(
         (item) =>
-          item.requiresAccessCode && item.ticketTypeId && (quantities[availabilityItemId(item)] ?? 0) > 0,
+          item.requiresAccessCode &&
+          item.ticketTypeId &&
+          (quantities[availabilityItemId(item)] ?? 0) > 0,
       ),
     [visibleAvailability, quantities],
   );

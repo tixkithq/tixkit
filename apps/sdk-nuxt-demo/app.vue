@@ -1,9 +1,9 @@
 <template>
-  <div style="font-family: system-ui, sans-serif; max-width: 960px; margin: 0 auto; padding: 32px;">
+  <div style="font-family: system-ui, sans-serif; max-width: 960px; margin: 0 auto; padding: 32px">
     <h1>Tixkit Nuxt Demo</h1>
     <p>Demonstrates the @tixkit/vue SDK: widget, checkout handoff, and lifecycle events.</p>
 
-    <section style="margin-top: 24px;">
+    <section style="margin-top: 24px">
       <h2>Inline Widget</h2>
       <tixkit-widget
         id="tixkit-widget-demo"
@@ -14,7 +14,7 @@
       ></tixkit-widget>
     </section>
 
-    <section style="margin-top: 24px;">
+    <section style="margin-top: 24px">
       <h2>Checkout Button</h2>
       <tixkit-button
         id="tixkit-button-demo"
@@ -28,12 +28,12 @@
       </tixkit-button>
     </section>
 
-    <section style="margin-top: 24px;">
+    <section style="margin-top: 24px">
       <h2>Checkout Handoff URL</h2>
       <code>{{ checkoutHandoffUrl }}</code>
     </section>
 
-    <section style="margin-top: 24px;">
+    <section style="margin-top: 24px">
       <h2>Lifecycle Events</h2>
       <output>{{ events.join(', ') || 'No events yet' }}</output>
     </section>
@@ -65,7 +65,14 @@ onMounted(() => {
 
   for (const el of [widget, button]) {
     if (!el) continue;
-    for (const name of ['loaded', 'opened', 'closed', 'checkout_started', 'order_completed', 'error']) {
+    for (const name of [
+      'loaded',
+      'opened',
+      'closed',
+      'checkout_started',
+      'order_completed',
+      'error',
+    ]) {
       el.addEventListener(name, (e: Event) => {
         events.value.push(`${name}`);
       });

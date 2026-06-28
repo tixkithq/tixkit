@@ -90,7 +90,8 @@ function baseOrderQuery(db: Database, request: PrivacyRequestRow) {
 
   if (request.brand_id) query = query.where('brand_id', '=', request.brand_id);
   if (request.subject_email) query = query.where('buyer_email', '=', request.subject_email);
-  if (request.subject_id && request.subject_type === 'buyer') query = query.where('id', '=', request.subject_id);
+  if (request.subject_id && request.subject_type === 'buyer')
+    query = query.where('id', '=', request.subject_id);
 
   return query;
 }
@@ -158,7 +159,8 @@ async function buildPrivacyExport(db: Database, request: PrivacyRequestRow) {
 
   return {
     generatedAt: new Date().toISOString(),
-    retentionPolicy: 'Financial ledgers, audit logs, invoices, tax snapshots, and fraud-prevention records are retained; buyer and attendee contact fields are exportable and erasable.',
+    retentionPolicy:
+      'Financial ledgers, audit logs, invoices, tax snapshots, and fraud-prevention records are retained; buyer and attendee contact fields are exportable and erasable.',
     subject: {
       type: request.subject_type,
       id: request.subject_id,
@@ -299,12 +301,16 @@ async function erasePrivacyData(db: Database, request: PrivacyRequestRow) {
       .select(['id', 'buyer'])
       .where('tenant_id', '=', request.tenant_id)
       .where('brand_id', 'in', scopedBrandIds);
-    if (buyerOrderId) retainedSessionQuery = retainedSessionQuery.where('order_id', '=', buyerOrderId);
+    if (buyerOrderId)
+      retainedSessionQuery = retainedSessionQuery.where('order_id', '=', buyerOrderId);
     const retainedSessions = (await retainedSessionQuery.execute()) as CheckoutSessionPrivacyRow[];
 
     await Promise.all(
       retainedSessions
-        .filter((session) => buyerOrderId || jsonContainsString(session.buyer, String(request.subject_email)))
+        .filter(
+          (session) =>
+            buyerOrderId || jsonContainsString(session.buyer, String(request.subject_email)),
+        )
         .map((session) =>
           db
             .updateTable('checkout_sessions')
@@ -385,7 +391,10 @@ export async function processPrivacyRequestActivity(input: {
   try {
     const request = (await repo.findById(input.requestId)) as PrivacyRequestRow | undefined;
     if (!request) {
-      return errResult('privacy_request_not_found', `Privacy request not found: ${input.requestId}`);
+      return errResult(
+        'privacy_request_not_found',
+        `Privacy request not found: ${input.requestId}`,
+      );
     }
     if (request.status === 'completed') {
       return okResult({ requestId: input.requestId, status: 'completed' });
@@ -407,10 +416,12 @@ export async function processPrivacyRequestActivity(input: {
   }
 }
 
-export async function enforcePrivacyRetentionActivity(input: {
-  batchSize?: number;
-  requestId?: string;
-} = {}): Promise<
+export async function enforcePrivacyRetentionActivity(
+  input: {
+    batchSize?: number;
+    requestId?: string;
+  } = {},
+): Promise<
   WorkflowActivityResult<{ inspectedCount: number; repairedCount: number; skippedCount: number }>
 > {
   const db = createDb(process.env.DATABASE_URL ?? '');

@@ -260,7 +260,11 @@ export function createCheckoutRemixAction(
       });
       return { success: true, session };
     } catch (err) {
-      return { success: false, status: 502, error: err instanceof Error ? err.message : 'Checkout session creation failed.' };
+      return {
+        success: false,
+        status: 502,
+        error: err instanceof Error ? err.message : 'Checkout session creation failed.',
+      };
     }
   };
 }

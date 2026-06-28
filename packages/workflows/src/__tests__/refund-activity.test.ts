@@ -168,7 +168,8 @@ vi.mock('@tixkit/db', () => {
       async execute() {
         if (table === 'tickets') return dbState.tickets.filter((row) => matches(row, filters));
         if (table === 'refunds') return dbState.refunds.filter((row) => matches(row, filters));
-        if (table === 'checkout_holds') return dbState.checkoutHolds.filter((row) => matches(row, filters));
+        if (table === 'checkout_holds')
+          return dbState.checkoutHolds.filter((row) => matches(row, filters));
         return [];
       },
       fn: {

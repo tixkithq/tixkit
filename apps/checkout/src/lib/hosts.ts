@@ -4,7 +4,14 @@ export function normalizeHost(value: string | undefined): string {
   if (host.includes('://') || /[\s,/?#]/.test(host)) return '';
   try {
     const url = new URL(`https://${host}`);
-    if (url.port || url.username || url.password || url.pathname !== '/' || url.search || url.hash) {
+    if (
+      url.port ||
+      url.username ||
+      url.password ||
+      url.pathname !== '/' ||
+      url.search ||
+      url.hash
+    ) {
       return '';
     }
     return url.hostname.toLowerCase().replace(/\.$/, '');

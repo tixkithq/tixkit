@@ -19,12 +19,12 @@ flutter build web --release
 
 ## Tabs
 
-| Tab       | SDK surface                                                                 |
-| --------- | --------------------------------------------------------------------------- |
-| Checkout  | `tixkitCheckoutHandoffUri` / `TixkitScannerClient.checkoutUrl`             |
-| Tickets   | `TixkitTicketCard`                                                          |
-| Scanner   | `TixkitCameraScanner` (adapter-based) + `TixkitScannerStatus`              |
-| Sync      | `TixkitScannerClient.downloadManifest` + `TixkitScannerClient.syncScans`   |
+| Tab      | SDK surface                                                              |
+| -------- | ------------------------------------------------------------------------ |
+| Checkout | `tixkitCheckoutHandoffUri` / `TixkitScannerClient.checkoutUrl`           |
+| Tickets  | `TixkitTicketCard`                                                       |
+| Scanner  | `TixkitCameraScanner` (adapter-based) + `TixkitScannerStatus`            |
+| Sync     | `TixkitScannerClient.downloadManifest` + `TixkitScannerClient.syncScans` |
 
 ## Configuration
 

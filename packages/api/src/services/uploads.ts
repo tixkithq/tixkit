@@ -121,7 +121,9 @@ class UploadScannerUnavailableError extends Error {
 }
 
 function uploadScannerMode(): string {
-  return process.env.UPLOAD_MALWARE_SCANNER ?? (process.env.NODE_ENV === 'production' ? '' : 'eicar');
+  return (
+    process.env.UPLOAD_MALWARE_SCANNER ?? (process.env.NODE_ENV === 'production' ? '' : 'eicar')
+  );
 }
 
 function assertProductionUploadScannerConfigured(mode: string): void {

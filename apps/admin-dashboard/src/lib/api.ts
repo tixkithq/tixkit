@@ -4706,9 +4706,12 @@ export const adminApi: AdminApi = {
   async listAuditLogs(input) {
     return withFixture(
       async () => {
-        const result = await request<PageResult<AdminAuditLog>>(`/v1/audit-logs${buildQuery(input)}`, {
-          method: 'GET',
-        });
+        const result = await request<PageResult<AdminAuditLog>>(
+          `/v1/audit-logs${buildQuery(input)}`,
+          {
+            method: 'GET',
+          },
+        );
         return result.ok
           ? ok({ ...result.data, items: result.data.items.map(normalizeAuditLog) })
           : result;
@@ -4743,9 +4746,7 @@ export const adminApi: AdminApi = {
       () => {
         const item = fixturePrivacyRequests.find((entry) => entry.id === requestId);
         if (!item) {
-          return err<AdminPrivacyRequest>(
-            apiError('not_found', 'Privacy request not found', 404),
-          );
+          return err<AdminPrivacyRequest>(apiError('not_found', 'Privacy request not found', 404));
         }
         return ok(item);
       },
@@ -4969,10 +4970,9 @@ export const adminApi: AdminApi = {
   async replayWebhookEvent(endpointId, eventId) {
     return withFixture(
       () =>
-        request<{ queued: true }>(
-          `/v1/webhook-endpoints/${endpointId}/events/${eventId}/replay`,
-          { method: 'POST' },
-        ),
+        request<{ queued: true }>(`/v1/webhook-endpoints/${endpointId}/events/${eventId}/replay`, {
+          method: 'POST',
+        }),
       () => ok({ queued: true as const }),
     );
   },

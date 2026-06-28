@@ -185,9 +185,7 @@ export async function processRefundActivity(input: {
         refundMatchesRequest(refund, stripeIdempotencyKey, input.nonce),
       );
 
-      const repairAndReturn = async (
-        providerRefundId: string,
-      ): Promise<RefundReservation> => {
+      const repairAndReturn = async (providerRefundId: string): Promise<RefundReservation> => {
         const allRefunds = (await trx
           .selectFrom('refunds')
           .selectAll()

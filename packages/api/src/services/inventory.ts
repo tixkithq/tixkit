@@ -153,9 +153,7 @@ export class InventoryService {
 
       // Match reserveCart lock ordering: inventory pools first, sorted, then
       // checkout holds. This avoids MySQL deadlocks during reserve/finalize races.
-      const poolIds = [
-        ...new Set(candidateHolds.map((hold) => hold.inventory_pool_id as string)),
-      ];
+      const poolIds = [...new Set(candidateHolds.map((hold) => hold.inventory_pool_id as string))];
       // oxlint-disable-next-line unicorn/no-array-sort -- sorts a fresh array for deterministic lock order under ES2022.
       poolIds.sort();
       for (const poolId of poolIds) {

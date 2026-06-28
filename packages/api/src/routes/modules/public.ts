@@ -29,7 +29,14 @@ function normalizeHost(value: unknown): string {
   if (host.includes('://') || /[\s,/?#]/.test(host)) return '';
   try {
     const url = new URL(`https://${host}`);
-    if (url.port || url.username || url.password || url.pathname !== '/' || url.search || url.hash) {
+    if (
+      url.port ||
+      url.username ||
+      url.password ||
+      url.pathname !== '/' ||
+      url.search ||
+      url.hash
+    ) {
       return '';
     }
     return url.hostname.toLowerCase().replace(/\.$/, '');
@@ -196,7 +203,10 @@ export const publicRoutes: FastifyPluginAsync = async (app) => {
       .executeTakeFirst();
     if (!brand || !boolValue(brand.white_label)) throw new NotFoundError('Event', slug);
 
-    const event = await new EventRepository(db).findByBrandSlug(brandDomain.brand_id as string, slug);
+    const event = await new EventRepository(db).findByBrandSlug(
+      brandDomain.brand_id as string,
+      slug,
+    );
     if (!event || !isPubliclyReadableEvent(event)) throw new NotFoundError('Event', slug);
 
     const tenant = await db
@@ -253,25 +263,24 @@ export const publicRoutes: FastifyPluginAsync = async (app) => {
 
     const occurrences = await new EventOccurrenceRepository(db).findByEvent(eventId);
     return {
-      items: occurrences
-        .flatMap((occurrence) => {
-          const status = serializeEventOccurrenceStatus(occurrence.status);
-          if (status !== 'scheduled') return [];
-          return [
-            {
-              id: occurrence.id,
-              eventId: occurrence.event_id,
-              title: occurrence.title,
-              startsAt: occurrence.starts_at,
-              endsAt: occurrence.ends_at,
-              timezone: occurrence.timezone,
-              venue: parseJsonValue(occurrence.venue, null),
-              capacity: occurrence.capacity,
-              sortOrder: occurrence.sort_order,
-              status,
-            },
-          ];
-        }),
+      items: occurrences.flatMap((occurrence) => {
+        const status = serializeEventOccurrenceStatus(occurrence.status);
+        if (status !== 'scheduled') return [];
+        return [
+          {
+            id: occurrence.id,
+            eventId: occurrence.event_id,
+            title: occurrence.title,
+            startsAt: occurrence.starts_at,
+            endsAt: occurrence.ends_at,
+            timezone: occurrence.timezone,
+            venue: parseJsonValue(occurrence.venue, null),
+            capacity: occurrence.capacity,
+            sortOrder: occurrence.sort_order,
+            status,
+          },
+        ];
+      }),
       nextCursor: null,
       hasMore: false,
     };

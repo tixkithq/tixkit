@@ -84,30 +84,33 @@ function tokenHashMatches(expected: string | null, candidate: string): boolean {
   );
 }
 
-function publicCheckoutSession(session: {
-  id: string;
-  event_id: string;
-  brand_id: string;
-  status: string;
-  currency: string;
-  quote: unknown;
-  expires_at: Date | string;
-  success_url: string | null;
-  cancel_url: string | null;
-  order_id: string | null;
-  client_token: string;
-}, compensation?: {
-  id: string;
-  status: string;
-  action: string;
-  provider: string;
-  provider_intent_id: string;
-  provider_compensation_id: string | null;
-  attempts: number;
-  reason: string;
-  last_error: string | null;
-  updated_at: Date | string;
-}) {
+function publicCheckoutSession(
+  session: {
+    id: string;
+    event_id: string;
+    brand_id: string;
+    status: string;
+    currency: string;
+    quote: unknown;
+    expires_at: Date | string;
+    success_url: string | null;
+    cancel_url: string | null;
+    order_id: string | null;
+    client_token: string;
+  },
+  compensation?: {
+    id: string;
+    status: string;
+    action: string;
+    provider: string;
+    provider_intent_id: string;
+    provider_compensation_id: string | null;
+    attempts: number;
+    reason: string;
+    last_error: string | null;
+    updated_at: Date | string;
+  },
+) {
   return {
     id: session.id,
     eventId: session.event_id,
@@ -781,7 +784,9 @@ export const checkoutRoutes: FastifyPluginAsync = async (app) => {
       throw new ValidationError('X-Checkout-Session-Token header is required');
     }
 
-    const compensation = await new PaymentCompensationRepository(db).findLatestByCheckoutSession(sessionId);
+    const compensation = await new PaymentCompensationRepository(db).findLatestByCheckoutSession(
+      sessionId,
+    );
     return publicCheckoutSession(session, compensation);
   });
 

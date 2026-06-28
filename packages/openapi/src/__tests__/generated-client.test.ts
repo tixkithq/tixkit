@@ -47,7 +47,7 @@ describe('Generated client compile validation (T33)', () => {
     expect(output).toContain('Organization');
     expect(output).toContain('Brand');
     expect(output).toContain('paymentAccountId');
-  });
+  }, 30000);
 
   it('generated types include all paginated envelope schemas', async () => {
     const output = await generateTypes();

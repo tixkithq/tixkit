@@ -2,7 +2,10 @@ import { randomUUID } from 'node:crypto';
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
 import { createDb, type Database } from '@tixkit/db';
 import { runMigrations } from '@tixkit/db/migrate';
-import { enforcePrivacyRetentionActivity, processPrivacyRequestActivity } from '../activities/privacy.js';
+import {
+  enforcePrivacyRetentionActivity,
+  processPrivacyRequestActivity,
+} from '../activities/privacy.js';
 
 type DriverCase = {
   driver: 'postgres' | 'mysql';
@@ -597,7 +600,6 @@ async function seedPrivacyRetentionFixture(db: Database, ids: FixtureIds, suffix
       completed_at: null,
     })
     .execute();
-
 }
 
 async function cleanupPrivacyRetentionFixture(db: Database, ids: FixtureIds) {
@@ -618,10 +620,7 @@ async function cleanupPrivacyRetentionFixture(db: Database, ids: FixtureIds) {
     .deleteFrom('ticket_types')
     .where('id', 'in', [ids.ticketTypeId, ids.otherTicketTypeId])
     .execute();
-  await db
-    .deleteFrom('inventory_pools')
-    .where('id', 'in', [ids.poolId, ids.otherPoolId])
-    .execute();
+  await db.deleteFrom('inventory_pools').where('id', 'in', [ids.poolId, ids.otherPoolId]).execute();
   await db.deleteFrom('events').where('id', 'in', [ids.eventId, ids.otherEventId]).execute();
   await db.deleteFrom('brands').where('id', 'in', [ids.brandId, ids.otherBrandId]).execute();
   await db
@@ -693,33 +692,57 @@ describe.each(driverCases)('privacy retention activity integration: $driver', ({
       otherCheckoutSession,
     ] = await Promise.all([
       db.selectFrom('orders').selectAll().where('id', '=', ids.orderId).executeTakeFirstOrThrow(),
-      db.selectFrom('attendees').selectAll().where('id', '=', ids.attendeeId).executeTakeFirstOrThrow(),
+      db
+        .selectFrom('attendees')
+        .selectAll()
+        .where('id', '=', ids.attendeeId)
+        .executeTakeFirstOrThrow(),
       db
         .selectFrom('attendees')
         .selectAll()
         .where('id', '=', ids.secondAttendeeId)
         .executeTakeFirstOrThrow(),
       db.selectFrom('tickets').selectAll().where('id', '=', ids.ticketId).executeTakeFirstOrThrow(),
-      db.selectFrom('invoices').selectAll().where('id', '=', ids.invoiceId).executeTakeFirstOrThrow(),
+      db
+        .selectFrom('invoices')
+        .selectAll()
+        .where('id', '=', ids.invoiceId)
+        .executeTakeFirstOrThrow(),
       db
         .selectFrom('checkout_sessions')
         .selectAll()
         .where('id', '=', ids.checkoutSessionId)
         .executeTakeFirstOrThrow(),
-      db.selectFrom('audit_logs').selectAll().where('id', '=', ids.auditLogId).executeTakeFirstOrThrow(),
+      db
+        .selectFrom('audit_logs')
+        .selectAll()
+        .where('id', '=', ids.auditLogId)
+        .executeTakeFirstOrThrow(),
       db
         .selectFrom('privacy_requests')
         .selectAll()
         .where('id', '=', ids.requestId)
         .executeTakeFirstOrThrow(),
-      db.selectFrom('orders').selectAll().where('id', '=', ids.otherOrderId).executeTakeFirstOrThrow(),
+      db
+        .selectFrom('orders')
+        .selectAll()
+        .where('id', '=', ids.otherOrderId)
+        .executeTakeFirstOrThrow(),
       db
         .selectFrom('attendees')
         .selectAll()
         .where('id', '=', ids.otherAttendeeId)
         .executeTakeFirstOrThrow(),
-      db.selectFrom('tickets').selectAll().where('id', '=', ids.otherTicketId).executeTakeFirstOrThrow(),
-      db.selectFrom('invoices').selectAll().where('id', '=', ids.otherInvoiceId).executeTakeFirstOrThrow(),
+      db
+        .selectFrom('tickets')
+        .selectAll()
+        .where('id', '=', ids.otherTicketId)
+        .executeTakeFirstOrThrow(),
+      db
+        .selectFrom('invoices')
+        .selectAll()
+        .where('id', '=', ids.otherInvoiceId)
+        .executeTakeFirstOrThrow(),
       db
         .selectFrom('checkout_sessions')
         .selectAll()
@@ -758,9 +781,7 @@ describe.each(driverCases)('privacy retention activity integration: $driver', ({
       custom_answers: null,
       status: 'registered',
     });
-    expect(String(secondAttendee.email)).toMatch(
-      /^erased\+[a-f0-9]{16}@privacy\.tixkit\.invalid$/,
-    );
+    expect(String(secondAttendee.email)).toMatch(/^erased\+[a-f0-9]{16}@privacy\.tixkit\.invalid$/);
 
     expect(ticket).toMatchObject({
       id: ids.ticketId,
@@ -901,32 +922,59 @@ describe.each(driverCases)('privacy retention activity integration: $driver', ({
       .where('id', '=', ids.checkoutSessionId)
       .execute();
 
-    const result = await enforcePrivacyRetentionActivity({ batchSize: 1, requestId: ids.requestId });
+    const result = await enforcePrivacyRetentionActivity({
+      batchSize: 1,
+      requestId: ids.requestId,
+    });
 
     expect(result).toMatchObject({
       ok: true,
       value: { inspectedCount: 1, repairedCount: 1, skippedCount: 0 },
     });
 
-    const [order, attendee, ticket, invoice, checkoutSession, auditLog, privacyRequest, otherOrder] =
-      await Promise.all([
-        db.selectFrom('orders').selectAll().where('id', '=', ids.orderId).executeTakeFirstOrThrow(),
-        db.selectFrom('attendees').selectAll().where('id', '=', ids.attendeeId).executeTakeFirstOrThrow(),
-        db.selectFrom('tickets').selectAll().where('id', '=', ids.ticketId).executeTakeFirstOrThrow(),
-        db.selectFrom('invoices').selectAll().where('id', '=', ids.invoiceId).executeTakeFirstOrThrow(),
-        db
-          .selectFrom('checkout_sessions')
-          .selectAll()
-          .where('id', '=', ids.checkoutSessionId)
-          .executeTakeFirstOrThrow(),
-        db.selectFrom('audit_logs').selectAll().where('id', '=', ids.auditLogId).executeTakeFirstOrThrow(),
-        db
-          .selectFrom('privacy_requests')
-          .selectAll()
-          .where('id', '=', ids.requestId)
-          .executeTakeFirstOrThrow(),
-        db.selectFrom('orders').selectAll().where('id', '=', ids.otherOrderId).executeTakeFirstOrThrow(),
-      ]);
+    const [
+      order,
+      attendee,
+      ticket,
+      invoice,
+      checkoutSession,
+      auditLog,
+      privacyRequest,
+      otherOrder,
+    ] = await Promise.all([
+      db.selectFrom('orders').selectAll().where('id', '=', ids.orderId).executeTakeFirstOrThrow(),
+      db
+        .selectFrom('attendees')
+        .selectAll()
+        .where('id', '=', ids.attendeeId)
+        .executeTakeFirstOrThrow(),
+      db.selectFrom('tickets').selectAll().where('id', '=', ids.ticketId).executeTakeFirstOrThrow(),
+      db
+        .selectFrom('invoices')
+        .selectAll()
+        .where('id', '=', ids.invoiceId)
+        .executeTakeFirstOrThrow(),
+      db
+        .selectFrom('checkout_sessions')
+        .selectAll()
+        .where('id', '=', ids.checkoutSessionId)
+        .executeTakeFirstOrThrow(),
+      db
+        .selectFrom('audit_logs')
+        .selectAll()
+        .where('id', '=', ids.auditLogId)
+        .executeTakeFirstOrThrow(),
+      db
+        .selectFrom('privacy_requests')
+        .selectAll()
+        .where('id', '=', ids.requestId)
+        .executeTakeFirstOrThrow(),
+      db
+        .selectFrom('orders')
+        .selectAll()
+        .where('id', '=', ids.otherOrderId)
+        .executeTakeFirstOrThrow(),
+    ]);
 
     expect(order).toMatchObject({
       id: ids.orderId,

@@ -692,8 +692,11 @@ export function createAuthMiddleware(authService: AuthMiddlewareProvider) {
       } else if (authHeader?.startsWith('Bearer ')) {
         const authenticateUser =
           authService.authenticateUser ??
-          (authService as unknown as { authenticateRequest: AuthProvider<FastifyRequest>['authenticateUser'] })
-            .authenticateRequest;
+          (
+            authService as unknown as {
+              authenticateRequest: AuthProvider<FastifyRequest>['authenticateUser'];
+            }
+          ).authenticateRequest;
         const result = await authenticateUser.call(authService, request);
         request.principal = result.principal;
       } else if (authService.isLocalDevMode()) {

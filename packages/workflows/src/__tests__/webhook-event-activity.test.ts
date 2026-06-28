@@ -29,7 +29,11 @@ vi.mock('@tixkit/db', () => {
     async findActiveByEvent(orgId: string, eventType: string) {
       return dbState.endpoints.filter((endpoint) => {
         const events = JSON.parse(endpoint.events) as string[];
-        return endpoint.organization_id === orgId && endpoint.status === 'active' && events.includes(eventType);
+        return (
+          endpoint.organization_id === orgId &&
+          endpoint.status === 'active' &&
+          events.includes(eventType)
+        );
       });
     }
   }

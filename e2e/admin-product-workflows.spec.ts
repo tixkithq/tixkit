@@ -557,7 +557,9 @@ test.describe('admin product workflow coverage', () => {
       200,
     );
     expect(listBody.items).toEqual(
-      expect.arrayContaining([expect.objectContaining({ id: occurrence.id, title: occurrenceTitle })]),
+      expect.arrayContaining([
+        expect.objectContaining({ id: occurrence.id, title: occurrenceTitle }),
+      ]),
     );
 
     await attachScreenshot(page, testInfo, 'admin-event-occurrences-desktop');

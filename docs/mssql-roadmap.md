@@ -19,15 +19,15 @@ The MSSQL support code lives in `packages/db/src/dialects/mssql.ts`.
 
 Implemented helpers:
 
-| Helper | Purpose |
-| --- | --- |
-| `parseMssqlConnectionUrl` | Parses SQL Server URLs into tedious-compatible connection settings. |
-| `createMssqlDialect` | Creates a Kysely MSSQL dialect backed by `tedious`. |
-| `mssqlObjectIdExists` | Generates `OBJECT_ID()` existence checks for migration helpers. |
-| `mssqlDropTableIfExists` | Generates SQL Server-safe conditional table drops. |
-| `buildMssqlMergeUpsert` | Generates `MERGE` SQL for upsert semantics. |
-| `mssqlForUpdateTable` | Produces `WITH (UPDLOCK, HOLDLOCK)` table hints for row-locking reads. |
-| `executeMssqlForUpdate` | Executes a raw locked read through Kysely. |
+| Helper                    | Purpose                                                                |
+| ------------------------- | ---------------------------------------------------------------------- |
+| `parseMssqlConnectionUrl` | Parses SQL Server URLs into tedious-compatible connection settings.    |
+| `createMssqlDialect`      | Creates a Kysely MSSQL dialect backed by `tedious`.                    |
+| `mssqlObjectIdExists`     | Generates `OBJECT_ID()` existence checks for migration helpers.        |
+| `mssqlDropTableIfExists`  | Generates SQL Server-safe conditional table drops.                     |
+| `buildMssqlMergeUpsert`   | Generates `MERGE` SQL for upsert semantics.                            |
+| `mssqlForUpdateTable`     | Produces `WITH (UPDLOCK, HOLDLOCK)` table hints for row-locking reads. |
+| `executeMssqlForUpdate`   | Executes a raw locked read through Kysely.                             |
 
 `packages/db/src/client.ts` recognizes:
 

@@ -19,9 +19,9 @@ export const LOCAL_DEV_USER: AdminUser = {
 function isUsableClerkPublishableKey(key: string | undefined): boolean {
   return Boolean(
     key &&
-      key !== 'pk_test_' &&
-      key !== 'pk_live_' &&
-      (key.startsWith('pk_test_') || key.startsWith('pk_live_')),
+    key !== 'pk_test_' &&
+    key !== 'pk_live_' &&
+    (key.startsWith('pk_test_') || key.startsWith('pk_live_')),
   );
 }
 

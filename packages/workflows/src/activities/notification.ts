@@ -374,7 +374,10 @@ export async function sendEmailActivity(input: {
       metadata: { notificationType },
     };
 
-    const validation = validateProviderFields(sendInput, deliverableRoutePairs[0].route.provider_type);
+    const validation = validateProviderFields(
+      sendInput,
+      deliverableRoutePairs[0].route.provider_type,
+    );
     if (!validation.valid) {
       return errResult(
         'PROVIDER_FIELD_VALIDATION_FAILED',

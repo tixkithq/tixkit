@@ -95,8 +95,7 @@ function isDuplicateInsert(error: unknown): boolean {
     number?: string | number;
     originalError?: { number?: string | number };
   };
-  const mssqlNumber =
-    getErrorNumber(record.number) ?? getErrorNumber(record.originalError?.number);
+  const mssqlNumber = getErrorNumber(record.number) ?? getErrorNumber(record.originalError?.number);
   return (
     record.code === '23505' ||
     record.code === 'ER_DUP_ENTRY' ||

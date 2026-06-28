@@ -35,7 +35,11 @@ export type HoldExpirationWorkflowInput = {
 };
 
 function throwIfPrivacyRetentionFailed(
-  result: WorkflowActivityResult<{ inspectedCount: number; repairedCount: number; skippedCount: number }>,
+  result: WorkflowActivityResult<{
+    inspectedCount: number;
+    repairedCount: number;
+    skippedCount: number;
+  }>,
 ) {
   if (!result.ok && result.retryable) {
     throw new Error(`Privacy retention repair failed (${result.errorCode}): ${result.message}`);

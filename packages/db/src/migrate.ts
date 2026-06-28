@@ -319,7 +319,8 @@ export async function dropAllTables(db: Database): Promise<void> {
     const tableNames = [...ALL_SCHEMA_TABLES, MIGRATION_TABLE];
     const tableNameList = tableNames.map(quoteMssqlStringLiteral).join(', ');
 
-    await sql.raw(`
+    await sql
+      .raw(`
       declare @sql nvarchar(max) = N'';
 
       select @sql = @sql
@@ -342,7 +343,9 @@ export async function dropAllTables(db: Database): Promise<void> {
 
       if len(@sql) > 0
         exec sp_executesql @sql;
-    `).execute(db).catch(() => undefined);
+    `)
+      .execute(db)
+      .catch(() => undefined);
 
     for (const table of tableNames) {
       // eslint-disable-next-line no-await-in-loop -- reset cleanup tolerates missing tables and keeps destructive drops ordered for diagnostics.

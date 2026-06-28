@@ -147,9 +147,9 @@ describe('processWaitlistOffersActivity', () => {
       .execute();
     expect(rows).toHaveLength(60);
     expect(rows.slice(0, 22).every((row) => row.status === 'offered')).toBe(true);
-    expect(rows.slice(0, 22).every((row) => /^[a-f0-9]{64}$/.test(row.claim_token_hash ?? ''))).toBe(
-      true,
-    );
+    expect(
+      rows.slice(0, 22).every((row) => /^[a-f0-9]{64}$/.test(row.claim_token_hash ?? '')),
+    ).toBe(true);
     expect(rows.slice(22).every((row) => row.status === 'joined')).toBe(true);
     expect(rows.slice(22).every((row) => row.claim_token_hash === null)).toBe(true);
 

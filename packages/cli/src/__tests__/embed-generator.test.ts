@@ -81,7 +81,7 @@ describe('generateEmbedSnippet', () => {
       lifecycleCallbackName: 'handleTixkit',
     });
     expect(snippet).toContain('handleTixkit');
-    expect(snippet).toContain("addEventListener");
+    expect(snippet).toContain('addEventListener');
     expect(snippet).toContain('order_completed');
   });
 

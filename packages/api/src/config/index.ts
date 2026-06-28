@@ -118,10 +118,7 @@ export function loadConfig(): AppConfig {
   };
 }
 
-function parseAuthProvider(
-  value: string | undefined,
-  nodeEnv: string,
-): 'clerk' | 'dev' | 'oidc' {
+function parseAuthProvider(value: string | undefined, nodeEnv: string): 'clerk' | 'dev' | 'oidc' {
   const provider = (value ?? (nodeEnv === 'development' ? 'dev' : 'clerk')).toLowerCase();
   if (provider === 'clerk' || provider === 'dev' || provider === 'oidc') return provider;
   throw new Error(`Unsupported AUTH_PROVIDER: ${value}`);

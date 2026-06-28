@@ -6,13 +6,13 @@ Tixkit supports PostgreSQL (reference), MySQL (Tier 1), and an initial MSSQL tar
 
 ### Supported Providers
 
-| Provider | Format | Caveats |
-| --- | --- | --- |
-| Neon | `postgres://` + `<user>:<password>@<host>/db?sslmode=require` | Serverless compute; use pooled connection endpoint for API/worker |
-| Supabase | `postgresql://` + `<user>:<password>@<host>:6543/db?sslmode=require` | Use connection pooler port 6543 for API/worker |
-| Aurora Serverless v2 | `postgres://` + `<user>:<password>@<cluster-host>:5432/db` | Enable Data API for serverless; standard JDBC/PG for persistent |
-| Google Cloud SQL | `postgres://` + `<user>:<password>@<host>:5432/db?sslmode=require` | Use Cloud SQL Auth Proxy for local dev |
-| Azure Database for PostgreSQL | `postgres://` + `<user>:<password>@<host>:5432/db?sslmode=require` | Flexible server recommended |
+| Provider                      | Format                                                               | Caveats                                                           |
+| ----------------------------- | -------------------------------------------------------------------- | ----------------------------------------------------------------- |
+| Neon                          | `postgres://` + `<user>:<password>@<host>/db?sslmode=require`        | Serverless compute; use pooled connection endpoint for API/worker |
+| Supabase                      | `postgresql://` + `<user>:<password>@<host>:6543/db?sslmode=require` | Use connection pooler port 6543 for API/worker                    |
+| Aurora Serverless v2          | `postgres://` + `<user>:<password>@<cluster-host>:5432/db`           | Enable Data API for serverless; standard JDBC/PG for persistent   |
+| Google Cloud SQL              | `postgres://` + `<user>:<password>@<host>:5432/db?sslmode=require`   | Use Cloud SQL Auth Proxy for local dev                            |
+| Azure Database for PostgreSQL | `postgres://` + `<user>:<password>@<host>:5432/db?sslmode=require`   | Flexible server recommended                                       |
 
 ### Configuration
 
@@ -26,12 +26,12 @@ Use PgBouncer or the provider's built-in pooler (Neon pooled endpoint, Supabase 
 
 ### Supported Providers
 
-| Provider | Format | Caveats |
-| --- | --- | --- |
-| PlanetScale | `mysql://` + `<user>:<password>@<host>/db` | **Does not enforce foreign keys** — see caveat below |
-| Aurora Serverless v2 MySQL | `mysql://` + `<user>:<password>@<cluster-host>:3306/db` | Enable HTTP proxy for serverless |
-| Google Cloud SQL for MySQL | `mysql://` + `<user>:<password>@<host>:3306/db` | Use Cloud SQL Auth Proxy for local dev |
-| Azure Database for MySQL | `mysql://` + `<user>:<password>@<host>:3306/db` | Flexible server recommended |
+| Provider                   | Format                                                  | Caveats                                              |
+| -------------------------- | ------------------------------------------------------- | ---------------------------------------------------- |
+| PlanetScale                | `mysql://` + `<user>:<password>@<host>/db`              | **Does not enforce foreign keys** — see caveat below |
+| Aurora Serverless v2 MySQL | `mysql://` + `<user>:<password>@<cluster-host>:3306/db` | Enable HTTP proxy for serverless                     |
+| Google Cloud SQL for MySQL | `mysql://` + `<user>:<password>@<host>:3306/db`         | Use Cloud SQL Auth Proxy for local dev               |
+| Azure Database for MySQL   | `mysql://` + `<user>:<password>@<host>:3306/db`         | Flexible server recommended                          |
 
 ### Configuration
 
@@ -47,11 +47,11 @@ PlanetScale does not enforce foreign key constraints by default. Tixkit's schema
 
 ### Supported Providers
 
-| Provider | Format | Caveats |
-| --- | --- | --- |
-| Azure SQL Database | `sqlserver://` + `<user>:<password>@<server>:1433/db?encrypt=true` | Recommended managed SQL Server target |
-| Amazon RDS for SQL Server | `sqlserver://` + `<user>:<password>@<host>:1433/db?encrypt=true` | Confirm edition-specific feature limits before production |
-| SQL Server on VM | `mssql://` + `<user>:<password>@<host>:1433/db?encrypt=true` | Operator owns patching, backups, and high availability |
+| Provider                  | Format                                                             | Caveats                                                   |
+| ------------------------- | ------------------------------------------------------------------ | --------------------------------------------------------- |
+| Azure SQL Database        | `sqlserver://` + `<user>:<password>@<server>:1433/db?encrypt=true` | Recommended managed SQL Server target                     |
+| Amazon RDS for SQL Server | `sqlserver://` + `<user>:<password>@<host>:1433/db?encrypt=true`   | Confirm edition-specific feature limits before production |
+| SQL Server on VM          | `mssql://` + `<user>:<password>@<host>:1433/db?encrypt=true`       | Operator owns patching, backups, and high availability    |
 
 ### Configuration
 
@@ -64,16 +64,17 @@ Managed databases typically require SSL/TLS connections. Set `sslmode=require` i
 ## Migration Guidance
 
 Run `bun run db:migrate` with the managed database connection string. For zero-downtime migrations on managed databases:
+
 - Use online schema changes where supported (Neon, Aurora)
 - Test migrations on a staging instance first
 - For MySQL, use `pt-online-schema-change` or `gh-ost` for large tables
 
 ## Environment Variables
 
-| Variable | Description | Default |
-| --- | --- | --- |
-| `DATABASE_URL` | PostgreSQL connection string | Local dev default uses localhost |
-| `DATABASE_URL_MYSQL` | MySQL connection string (required when `DB_DRIVER=mysql`) | Local dev default uses localhost |
-| `DATABASE_URL_MSSQL` | MSSQL connection string (required when `DB_DRIVER=mssql`) | none |
-| `DB_DRIVER` | Primary database driver: `postgres`, `mysql`, or `mssql` | `postgres` |
-| `DB_INTEGRATION_DRIVER` | Integration test database driver | `postgres` |
+| Variable                | Description                                               | Default                          |
+| ----------------------- | --------------------------------------------------------- | -------------------------------- |
+| `DATABASE_URL`          | PostgreSQL connection string                              | Local dev default uses localhost |
+| `DATABASE_URL_MYSQL`    | MySQL connection string (required when `DB_DRIVER=mysql`) | Local dev default uses localhost |
+| `DATABASE_URL_MSSQL`    | MSSQL connection string (required when `DB_DRIVER=mssql`) | none                             |
+| `DB_DRIVER`             | Primary database driver: `postgres`, `mysql`, or `mssql`  | `postgres`                       |
+| `DB_INTEGRATION_DRIVER` | Integration test database driver                          | `postgres`                       |

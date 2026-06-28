@@ -58,10 +58,7 @@ export function titleCase(input: string): string {
     .join(' ');
 }
 
-export async function* walkTemplates(
-  root: string,
-  current = root,
-): AsyncGenerator<TemplateEntry> {
+export async function* walkTemplates(root: string, current = root): AsyncGenerator<TemplateEntry> {
   const entries = await readdir(current, { withFileTypes: true });
   for (const entry of entries) {
     const source = path.join(current, entry.name);
@@ -100,7 +97,9 @@ export async function renderTemplate(
 
 const VALID_PROJECT_NAME = /^[a-z0-9]+(-[a-z0-9]+)*$/;
 
-export async function scaffold(options: ScaffoldOptions): Promise<{ ok: boolean; message: string }> {
+export async function scaffold(
+  options: ScaffoldOptions,
+): Promise<{ ok: boolean; message: string }> {
   try {
     if (!VALID_PROJECT_NAME.test(options.projectName)) {
       return {

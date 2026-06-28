@@ -154,10 +154,14 @@ describe('EventTicketsView occurrences', () => {
     expect(view.getByText('Saturday matinee')).toBeInTheDocument();
     const fridayTicketRow = view.getByText('Friday GA').closest('tr');
     expect(fridayTicketRow).not.toBeNull();
-    expect(within(fridayTicketRow as HTMLTableRowElement).getByText('Friday evening')).toBeInTheDocument();
+    expect(
+      within(fridayTicketRow as HTMLTableRowElement).getByText('Friday evening'),
+    ).toBeInTheDocument();
     const weekendTicketRow = view.getByText('Weekend pass').closest('tr');
     expect(weekendTicketRow).not.toBeNull();
-    expect(within(weekendTicketRow as HTMLTableRowElement).getByText('All occurrences')).toBeInTheDocument();
+    expect(
+      within(weekendTicketRow as HTMLTableRowElement).getByText('All occurrences'),
+    ).toBeInTheDocument();
   });
 
   it('creates an occurrence through the admin API and refetches occurrences', async () => {

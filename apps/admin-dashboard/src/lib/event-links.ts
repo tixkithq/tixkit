@@ -4,14 +4,17 @@ function checkoutBaseUrl(): string {
   const configured =
     process.env.NEXT_PUBLIC_CHECKOUT_URL ?? process.env.NEXT_PUBLIC_TIXKIT_CHECKOUT_URL;
   if (configured?.trim()) return configured.trim().replace(/\/+$/, '');
-  return process.env.NODE_ENV === 'production' ? 'https://checkout.tixkit.com' : 'http://localhost:3000';
+  return process.env.NODE_ENV === 'production'
+    ? 'https://checkout.tixkit.com'
+    : 'http://localhost:3000';
 }
 
 function activePrimaryDomain(brand: AdminBrand | undefined): string | undefined {
   if (!brand?.whiteLabel) return undefined;
   const domain =
-    brand?.domains.find((item) => item.isPrimary && item.isVerified && item.sslStatus === 'active') ??
-    brand?.domains.find((item) => item.isVerified && item.sslStatus === 'active');
+    brand?.domains.find(
+      (item) => item.isPrimary && item.isVerified && item.sslStatus === 'active',
+    ) ?? brand?.domains.find((item) => item.isVerified && item.sslStatus === 'active');
   return domain?.domain.replace(/^https?:\/\//, '').replace(/\/+$/, '');
 }
 

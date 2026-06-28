@@ -131,8 +131,7 @@ function createMockDb(): unknown {
         if (table === 'orders') {
           if (query.wheres.some((where) => where.column === 'id' || where.column === 'orders.id')) {
             return (
-              dbState.orders.find((order) => rowMatchesWheres(order, query.wheres)) ??
-              dbState.order
+              dbState.orders.find((order) => rowMatchesWheres(order, query.wheres)) ?? dbState.order
             );
           }
           return {
@@ -625,10 +624,7 @@ describe('order routes', () => {
         event_id: 'evt_1',
       },
     ];
-    const app = await setupApp(
-      orderRoutes,
-      makePrincipal({ organizationIds: ['org_1', 'org_2'] }),
-    );
+    const app = await setupApp(orderRoutes, makePrincipal({ organizationIds: ['org_1', 'org_2'] }));
 
     const res = await app.inject({
       method: 'GET',

@@ -505,8 +505,7 @@ describe('reconcileRefundActivity', () => {
       expect(mockState.createdRefunds).toHaveLength(0);
       expect(
         mockState.updates.some(
-          (update) =>
-            update.table === 'orders' && 'refunded_cents' in update.input,
+          (update) => update.table === 'orders' && 'refunded_cents' in update.input,
         ),
       ).toBe(false);
       expect(mockState.updates.some((update) => update.table === 'invoices')).toBe(false);

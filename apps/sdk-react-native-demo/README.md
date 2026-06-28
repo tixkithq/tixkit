@@ -18,12 +18,12 @@ bun run start
 
 ## Tabs
 
-| Tab       | SDK surface                                                                          |
-| --------- | ----------------------------------------------------------------------------------- |
-| Checkout  | `checkoutHandoffUrl` / `TixkitScannerClient.openCheckout`                          |
-| Tickets   | `TixkitTicketCard` (via `createTixkitReactNativeComponents`)                        |
-| Scanner   | `scanBarcodePayload` + `TixkitScannerClient.scanOnline/scanOffline` + `TixkitScannerStatus` |
-| Sync      | `TixkitScannerClient.downloadManifest` + `TixkitScannerClient.syncScans`           |
+| Tab      | SDK surface                                                                                 |
+| -------- | ------------------------------------------------------------------------------------------- |
+| Checkout | `checkoutHandoffUrl` / `TixkitScannerClient.openCheckout`                                   |
+| Tickets  | `TixkitTicketCard` (via `createTixkitReactNativeComponents`)                                |
+| Scanner  | `scanBarcodePayload` + `TixkitScannerClient.scanOnline/scanOffline` + `TixkitScannerStatus` |
+| Sync     | `TixkitScannerClient.downloadManifest` + `TixkitScannerClient.syncScans`                    |
 
 ## Camera integration
 
@@ -34,7 +34,10 @@ import { CameraView } from 'expo-camera';
 
 const { TixkitCameraScanner } = createTixkitReactNativeComponents({
   createElement: React.createElement,
-  View, Text, Pressable, CameraView,
+  View,
+  Text,
+  Pressable,
+  CameraView,
 });
 ```
 

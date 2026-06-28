@@ -1222,9 +1222,7 @@ describe('TixkitClient new resource methods', () => {
     });
     await c.orders.list({ limit: 50, organizationId: 'org_1', eventId: 'evt_1' });
     const call = getCall(fm);
-    expect(call.url).toBe(
-      'https://api.test/v1/orders?limit=50&organizationId=org_1&eventId=evt_1',
-    );
+    expect(call.url).toBe('https://api.test/v1/orders?limit=50&organizationId=org_1&eventId=evt_1');
   });
 
   it('public.getEvent sends GET without auth', async () => {

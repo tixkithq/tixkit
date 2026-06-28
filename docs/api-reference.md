@@ -310,10 +310,10 @@ Event slug contract:
 
 ### Public Event Routes
 
-| Method | Path                                 | Auth | Description                                                                    |
-| ------ | ------------------------------------ | ---- | ------------------------------------------------------------------------------ |
-| `GET`  | `/v1/public/events/:eventId`         | none | Get a published public/unlisted event by ID for shared hosted checkout pages    |
-| `GET`  | `/v1/public/events/by-slug/:slug`    | none | Get a published public/unlisted event by slug for verified custom-domain pages |
+| Method | Path                              | Auth | Description                                                                    |
+| ------ | --------------------------------- | ---- | ------------------------------------------------------------------------------ |
+| `GET`  | `/v1/public/events/:eventId`      | none | Get a published public/unlisted event by ID for shared hosted checkout pages   |
+| `GET`  | `/v1/public/events/by-slug/:slug` | none | Get a published public/unlisted event by slug for verified custom-domain pages |
 
 ### Ticketing & Inventory
 
@@ -444,12 +444,12 @@ Privacy requests accept `organizationId`, optional `brandId`, `subjectType` (`bu
 
 These are unauthenticated but signature-verified. See [Webhook Guide](./webhook-guide.md) and [Clerk Setup Guide](./clerk-setup-guide.md) for signing details.
 
-| Method | Path                      | Verifier                                                                             |
-| ------ | ------------------------- | ------------------------------------------------------------------------------------ |
-| `POST` | `/v1/webhooks/clerk`      | Svix `svix-signature` / `svix-timestamp` / `svix-id` HMAC-SHA256, 5 minute tolerance |
-| `POST` | `/v1/webhooks/stripe`     | Stripe `stripe-signature` header                                                     |
-| `POST` | `/v1/webhooks/telnyx/sms` | Telnyx Ed25519 `telnyx-signature-ed25519` / `telnyx-timestamp` (optional in dev)     |
-| `POST` | `/v1/webhooks/email/:provider` | HMAC SHA-256 `tixkit-signature: sha256=<hex>` using `EMAIL_WEBHOOK_SECRET`      |
+| Method | Path                           | Verifier                                                                             |
+| ------ | ------------------------------ | ------------------------------------------------------------------------------------ |
+| `POST` | `/v1/webhooks/clerk`           | Svix `svix-signature` / `svix-timestamp` / `svix-id` HMAC-SHA256, 5 minute tolerance |
+| `POST` | `/v1/webhooks/stripe`          | Stripe `stripe-signature` header                                                     |
+| `POST` | `/v1/webhooks/telnyx/sms`      | Telnyx Ed25519 `telnyx-signature-ed25519` / `telnyx-timestamp` (optional in dev)     |
+| `POST` | `/v1/webhooks/email/:provider` | HMAC SHA-256 `tixkit-signature: sha256=<hex>` using `EMAIL_WEBHOOK_SECRET`           |
 
 ## Rate Limits
 

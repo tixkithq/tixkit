@@ -25,7 +25,10 @@ async function findPaymentIntentForProviderEvent(
   return undefined;
 }
 
-function checkoutSessionCanStillFinalize(session: { status: string; expires_at: Date | string }): boolean {
+function checkoutSessionCanStillFinalize(session: {
+  status: string;
+  expires_at: Date | string;
+}): boolean {
   if (!['open', 'pending_payment'].includes(session.status)) return false;
   return new Date(session.expires_at).getTime() > Date.now();
 }
@@ -120,7 +123,9 @@ export async function reconcilePaymentActivity(input: {
           provider: input.provider,
           providerIntentId,
           amountCents: Number(paymentIntent.amount_received ?? paymentIntent.amount ?? 0),
-          currency: String(paymentIntent.currency ?? checkoutSession.currency ?? 'USD').toUpperCase(),
+          currency: String(
+            paymentIntent.currency ?? checkoutSession.currency ?? 'USD',
+          ).toUpperCase(),
           reason: 'Successful provider payment has no durable local payment intent attached',
           providerEventId: input.providerEventId,
           eventType: input.eventType,
@@ -376,10 +381,7 @@ export async function reconcileRefundActivity(input: {
     }
 
     const allRefunds = await refundRepo.findByOrder(order.id);
-    const newRefunded = Math.min(
-      Number(order.total_cents),
-      sumSucceededRefunds(allRefunds),
-    );
+    const newRefunded = Math.min(Number(order.total_cents), sumSucceededRefunds(allRefunds));
     const newStatus = await updateRefundReconciliationState(db, orderRepo, order, newRefunded);
     if (createdRefund) {
       await orderRepo.addTimelineEvent(

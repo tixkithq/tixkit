@@ -128,10 +128,11 @@ export function generateEmbedSnippet(options: EmbedGeneratorOptions): string {
     snippet += '\n\n<script type="module">\n';
     snippet += `  const el = document.getElementById('${elementId}');\n`;
     snippet += `  function ${cbName}(name, detail) {\n`;
-    snippet += '    console.log(\'Tixkit:\', name, detail);\n';
+    snippet += "    console.log('Tixkit:', name, detail);\n";
     snippet += '    // Handle: loaded, opened, closed, checkout_started, order_completed, error\n';
     snippet += '  }\n';
-    snippet += '  for (const name of [\'loaded\', \'opened\', \'closed\', \'checkout_started\', \'order_completed\', \'error\']) {\n';
+    snippet +=
+      "  for (const name of ['loaded', 'opened', 'closed', 'checkout_started', 'order_completed', 'error']) {\n";
     snippet += '    el.addEventListener(name, (e) => ';
     snippet += `${cbName}(name, e.detail));\n`;
     snippet += '  }\n';

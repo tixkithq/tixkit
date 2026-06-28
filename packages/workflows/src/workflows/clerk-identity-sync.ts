@@ -74,7 +74,9 @@ export async function clerkIdentitySyncWorkflow(
     case 'user.created':
     case 'user.updated': {
       if (!input.clerkUserId || !input.email) {
-        return (await markClerkProviderEventProcessed(input.providerEventId)) ?? { status: 'skipped' };
+        return (
+          (await markClerkProviderEventProcessed(input.providerEventId)) ?? { status: 'skipped' }
+        );
       }
       const result = await syncUserActivity({
         clerkUserId: input.clerkUserId,
@@ -91,7 +93,9 @@ export async function clerkIdentitySyncWorkflow(
     }
     case 'user.deleted': {
       if (!input.clerkUserId) {
-        return (await markClerkProviderEventProcessed(input.providerEventId)) ?? { status: 'skipped' };
+        return (
+          (await markClerkProviderEventProcessed(input.providerEventId)) ?? { status: 'skipped' }
+        );
       }
       const result = await deleteUserActivity({ clerkUserId: input.clerkUserId });
       if (!result.ok) {
@@ -103,7 +107,9 @@ export async function clerkIdentitySyncWorkflow(
     case 'organization.created':
     case 'organization.updated': {
       if (!input.clerkOrgId || !input.orgName) {
-        return (await markClerkProviderEventProcessed(input.providerEventId)) ?? { status: 'skipped' };
+        return (
+          (await markClerkProviderEventProcessed(input.providerEventId)) ?? { status: 'skipped' }
+        );
       }
       const result = await syncOrganizationActivity({
         clerkOrgId: input.clerkOrgId,
@@ -116,8 +122,10 @@ export async function clerkIdentitySyncWorkflow(
       return (await markClerkProviderEventProcessed(input.providerEventId)) ?? { status: 'synced' };
     }
     default:
-      return (await markClerkProviderEventProcessed(input.providerEventId)) ?? {
-        status: 'unhandled',
-      };
+      return (
+        (await markClerkProviderEventProcessed(input.providerEventId)) ?? {
+          status: 'unhandled',
+        }
+      );
   }
 }

@@ -130,7 +130,11 @@ export const EventOccurrencesMigration: Migration = {
   },
 
   async down(db): Promise<void> {
-    await db.schema.dropIndex('idx_check_in_lists_occurrence').on('check_in_lists').ifExists().execute();
+    await db.schema
+      .dropIndex('idx_check_in_lists_occurrence')
+      .on('check_in_lists')
+      .ifExists()
+      .execute();
     await db.schema
       .alterTable('check_in_lists')
       .dropConstraint('check_in_lists_event_occurrence_fk')
@@ -155,7 +159,11 @@ export const EventOccurrencesMigration: Migration = {
       .dropConstraint('order_line_items_event_occurrence_fk')
       .execute();
     await db.schema.alterTable('order_line_items').dropColumn('event_occurrence_id').execute();
-    await db.schema.dropIndex('idx_ticket_types_occurrence').on('ticket_types').ifExists().execute();
+    await db.schema
+      .dropIndex('idx_ticket_types_occurrence')
+      .on('ticket_types')
+      .ifExists()
+      .execute();
     await db.schema
       .alterTable('ticket_types')
       .dropConstraint('ticket_types_event_occurrence_fk')

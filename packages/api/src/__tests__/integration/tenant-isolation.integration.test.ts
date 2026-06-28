@@ -721,11 +721,7 @@ describe('cross-tenant denial', () => {
 
   it('GET /events/:eventId/waitlist returns 404 for event in another tenant', async () => {
     const tables: Tables = { events: [eventRow({ tenant_id: 'tnt_other' })] };
-    const app = await setupApp(
-      waitlistRoutes,
-      makePrincipal({ scopes: ['events.read'] }),
-      tables,
-    );
+    const app = await setupApp(waitlistRoutes, makePrincipal({ scopes: ['events.read'] }), tables);
     const res = await app.inject({ method: 'GET', url: '/events/evt_1/waitlist' });
     expect(res.statusCode).toBe(404);
     await app.close();
@@ -733,7 +729,11 @@ describe('cross-tenant denial', () => {
 
   it('POST /events/:eventId/waitlist/:entryId/offer returns 404 for event in another tenant', async () => {
     const tables: Tables = { events: [eventRow({ tenant_id: 'tnt_other' })] };
-    const app = await setupApp(waitlistRoutes, makePrincipal({ scopes: ['tickets.write'] }), tables);
+    const app = await setupApp(
+      waitlistRoutes,
+      makePrincipal({ scopes: ['tickets.write'] }),
+      tables,
+    );
     const res = await app.inject({
       method: 'POST',
       url: '/events/evt_1/waitlist/wle_1/offer',

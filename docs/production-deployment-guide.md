@@ -101,12 +101,12 @@ Copy `.env.local.example` as the starting point. Required-for-production variabl
 
 ### Signing And Hashing
 
-| Variable                         | Required | Description                                                   |
-| -------------------------------- | -------- | ------------------------------------------------------------- |
-| `QR_SIGNING_SECRET`              | yes      | HMAC secret for ticket QR payloads                            |
-| `OFFLINE_MANIFEST_SIGNING_KEY`   | yes      | HMAC key for offline scanner manifests                        |
-| `OFFLINE_MANIFEST_KEY_ID`        | yes      | Key identifier embedded in offline scanner manifests          |
-| `WIDGET_IMPRESSION_HASH_SECRET`  | yes      | Hash salt for pseudonymizing widget-impression visitor IDs    |
+| Variable                        | Required | Description                                                |
+| ------------------------------- | -------- | ---------------------------------------------------------- |
+| `QR_SIGNING_SECRET`             | yes      | HMAC secret for ticket QR payloads                         |
+| `OFFLINE_MANIFEST_SIGNING_KEY`  | yes      | HMAC key for offline scanner manifests                     |
+| `OFFLINE_MANIFEST_KEY_ID`       | yes      | Key identifier embedded in offline scanner manifests       |
+| `WIDGET_IMPRESSION_HASH_SECRET` | yes      | Hash salt for pseudonymizing widget-impression visitor IDs |
 
 ### Managed Database Compatibility
 
@@ -377,12 +377,12 @@ See [Temporal Operations Guide](./temporal-operations-guide.md) for versioning a
 
 Configure provider webhooks to point at the API:
 
-| Provider | URL                                              | Signature header           |
-| -------- | ------------------------------------------------ | -------------------------- |
-| Clerk    | `https://api.example.com/v1/webhooks/clerk`      | Svix `svix-signature`      |
-| Stripe   | `https://api.example.com/v1/webhooks/stripe`     | `stripe-signature`         |
-| Telnyx   | `https://api.example.com/v1/webhooks/telnyx/sms` | `telnyx-signature-ed25519` |
-| Email    | `https://api.example.com/v1/webhooks/email/{provider}` | `tixkit-signature` |
+| Provider | URL                                                    | Signature header           |
+| -------- | ------------------------------------------------------ | -------------------------- |
+| Clerk    | `https://api.example.com/v1/webhooks/clerk`            | Svix `svix-signature`      |
+| Stripe   | `https://api.example.com/v1/webhooks/stripe`           | `stripe-signature`         |
+| Telnyx   | `https://api.example.com/v1/webhooks/telnyx/sms`       | `telnyx-signature-ed25519` |
+| Email    | `https://api.example.com/v1/webhooks/email/{provider}` | `tixkit-signature`         |
 
 Handlers store the provider event before processing and skip duplicates by provider event ID. Email bounce/complaint/failure feedback updates delivery state, creates tenant email suppressions, and revokes active email opt-in; Telnyx delivery failures revoke active SMS opt-in. If the API is down, the provider's own retry policy will redeliver; Tixkit's idempotency handles the replay.
 

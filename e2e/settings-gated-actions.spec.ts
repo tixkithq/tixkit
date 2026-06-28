@@ -110,13 +110,16 @@ test.describe('admin settings validation', () => {
     expect(createdBrand.name).toBe(initialName);
     expect(createdBrand.theme?.primaryColor).toBe('#222222');
 
-    await page.addInitScript((selection) => {
-      window.localStorage.setItem('tixkit:selected-organization-id', selection.organizationId);
-      window.localStorage.setItem('tixkit:selected-brand-id', selection.brandId);
-    }, {
-      organizationId: devOrganizationId,
-      brandId: createdBrand.id,
-    });
+    await page.addInitScript(
+      (selection) => {
+        window.localStorage.setItem('tixkit:selected-organization-id', selection.organizationId);
+        window.localStorage.setItem('tixkit:selected-brand-id', selection.brandId);
+      },
+      {
+        organizationId: devOrganizationId,
+        brandId: createdBrand.id,
+      },
+    );
 
     await page.goto(`${adminBaseUrl}/settings/branding`);
     await expect(page.getByRole('heading', { name: 'Brand' })).toBeVisible();

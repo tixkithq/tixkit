@@ -13,7 +13,12 @@ async function ignoreAlreadyApplied(operation: () => Promise<void>): Promise<voi
   try {
     await operation();
   } catch (error) {
-    const record = error as { code?: string; errno?: number | string; message?: string; number?: number };
+    const record = error as {
+      code?: string;
+      errno?: number | string;
+      message?: string;
+      number?: number;
+    };
     const message = record.message ?? '';
     if (
       record.code === '42704' ||
@@ -32,7 +37,9 @@ async function ignoreAlreadyApplied(operation: () => Promise<void>): Promise<voi
 
 async function dropConstraintOrIndex(db: Kysely<unknown>, name: string): Promise<void> {
   if (isMysql()) {
-    await ignoreAlreadyApplied(() => sql`alter table events drop index ${sql.id(name)}`.execute(db).then(() => undefined));
+    await ignoreAlreadyApplied(() =>
+      sql`alter table events drop index ${sql.id(name)}`.execute(db).then(() => undefined),
+    );
     return;
   }
 

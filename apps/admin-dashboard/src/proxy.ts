@@ -5,9 +5,9 @@ function hasUsableClerkPublishableKey(): boolean {
   const key = process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY ?? process.env.CLERK_PUBLISHABLE_KEY;
   const hasKey = Boolean(
     key &&
-      key !== 'pk_test_' &&
-      key !== 'pk_live_' &&
-      (key.startsWith('pk_test_') || key.startsWith('pk_live_')),
+    key !== 'pk_test_' &&
+    key !== 'pk_live_' &&
+    (key.startsWith('pk_test_') || key.startsWith('pk_live_')),
   );
   const provider = (
     process.env.NEXT_PUBLIC_AUTH_PROVIDER ??

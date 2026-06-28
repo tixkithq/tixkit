@@ -11,14 +11,18 @@ const mockState = vi.hoisted(() => ({
 
 vi.mock('@temporalio/workflow', () => ({
   proxyActivities: () =>
-    new Proxy({}, {
-      get: (_t, prop: string) =>
-        async (...args: any[]) => {
-          const fn = mockState.activities[prop];
-          if (fn) return fn(...args);
-          return { ok: true, value: {} };
-        },
-    }),
+    new Proxy(
+      {},
+      {
+        get:
+          (_t, prop: string) =>
+          async (...args: any[]) => {
+            const fn = mockState.activities[prop];
+            if (fn) return fn(...args);
+            return { ok: true, value: {} };
+          },
+      },
+    ),
   defineSignal: (name: string) => name,
   defineQuery: (name: string) => name,
   setHandler: (signal: string, handler: (...args: any[]) => void) => {
@@ -140,16 +144,19 @@ function makeClerkIdentitySyncInput(overrides: Record<string, unknown> = {}) {
 }
 
 const defaultActivities = {
-  createPaymentIntentActivity: async () => okResult({ providerIntentId: 'pi_test_1', clientSecret: 'cs_test_1', provider: 'stripe' }),
+  createPaymentIntentActivity: async () =>
+    okResult({ providerIntentId: 'pi_test_1', clientSecret: 'cs_test_1', provider: 'stripe' }),
   finalizeOrderActivity: async () => okResult({ orderId: 'ord_test_1' }),
-  compensateOrphanPaymentActivity: async () => okResult({ status: 'succeeded', action: 'refund', compensationId: 'pcmp_1' }),
+  compensateOrphanPaymentActivity: async () =>
+    okResult({ status: 'succeeded', action: 'refund', compensationId: 'pcmp_1' }),
   sendConfirmationEmailActivity: async () => okResult({ jobId: 'emj_1', status: 'queued' }),
   issueTicketsActivity: async () => okResult({ issued: 2, jobId: 'emj_2' }),
   releaseHoldActivity: async () => okResult({ released: true }),
   emitWebhookEventActivity: async () => okResult({ eventId: 'evt_1', deliveries: [] }),
   processRefundActivity: async () => okResult({ providerRefundId: 'rfd_1', status: 'succeeded' }),
   updateLedgerActivity: async () => okResult({ balanced: true }),
-  voidTicketsActivity: async () => okResult({ voidedCount: 2, voidedTicketIds: ['tkt_1', 'tkt_2'] }),
+  voidTicketsActivity: async () =>
+    okResult({ voidedCount: 2, voidedTicketIds: ['tkt_1', 'tkt_2'] }),
   restoreInventoryActivity: async () => okResult({ restored: 2 }),
   notifyRefundActivity: async () => okResult({ notified: true, jobId: 'emj_3' }),
   generateExportActivity: async () => okResult({ data: 'id\n1', rowCount: 1 }),
@@ -160,8 +167,10 @@ const defaultActivities = {
   deliverWebhookActivity: async () => okResult({ statusCode: 200, response: 'ok' }),
   expireStaleHoldsActivity: async () => okResult({ expiredCount: 0 }),
   expireStaleSessionsActivity: async () => okResult({ expiredCount: 0 }),
-  processWaitlistOffersActivity: async () => okResult({ expiredCount: 0, offeredCount: 0, queuedEmailCount: 0 }),
-  enforcePrivacyRetentionActivity: async () => okResult({ inspectedCount: 0, repairedCount: 0, skippedCount: 0 }),
+  processWaitlistOffersActivity: async () =>
+    okResult({ expiredCount: 0, offeredCount: 0, queuedEmailCount: 0 }),
+  enforcePrivacyRetentionActivity: async () =>
+    okResult({ inspectedCount: 0, repairedCount: 0, skippedCount: 0 }),
   reconcilePaymentActivity: async () => okResult({ orderId: 'ord_1', status: 'paid' }),
   reconcileRefundActivity: async () => okResult({ orderId: 'ord_1', status: 'refunded' }),
   reconcileDisputeActivity: async () => okResult({ orderId: 'ord_1', status: 'disputed' }),
@@ -186,8 +195,13 @@ describe('checkoutSessionWorkflow', () => {
 
   it('fails when finalize fails for free order and releases hold', async () => {
     let released = false;
-    setActivity('finalizeOrderActivity', async () => errResult('FINALIZE_FAILED', 'Already exists', false));
-    setActivity('releaseHoldActivity', async () => { released = true; return okResult({ released: true }); });
+    setActivity('finalizeOrderActivity', async () =>
+      errResult('FINALIZE_FAILED', 'Already exists', false),
+    );
+    setActivity('releaseHoldActivity', async () => {
+      released = true;
+      return okResult({ released: true });
+    });
     const result = await checkoutSessionWorkflow(makeCheckoutInput({ isFreeOrder: true }));
     expect(result.status).toBe('failed');
     expect(released).toBe(true);
@@ -204,10 +218,16 @@ describe('checkoutSessionWorkflow', () => {
     let paymentInput: Record<string, unknown> | undefined;
     setActivity('createPaymentIntentActivity', async (input) => {
       paymentInput = input;
-      return okResult({ providerIntentId: 'pi_test_1', clientSecret: 'cs_test_1', provider: 'stripe' });
+      return okResult({
+        providerIntentId: 'pi_test_1',
+        clientSecret: 'cs_test_1',
+        provider: 'stripe',
+      });
     });
 
-    const result = await checkoutSessionWorkflow(makeCheckoutInput({ isFreeOrder: false, feeCents: 725 }));
+    const result = await checkoutSessionWorkflow(
+      makeCheckoutInput({ isFreeOrder: false, feeCents: 725 }),
+    );
 
     expect(result.status).toBe('completed');
     expect(paymentInput).toMatchObject({
@@ -221,7 +241,10 @@ describe('checkoutSessionWorkflow', () => {
   it('auto-completes local capture paid checkout without an external payment signal', async () => {
     mockState.conditionResult = false;
     setActivity('createPaymentIntentActivity', async () =>
-      okResult({ providerIntentId: 'pi_capture_cs_test_1', clientSecret: 'pi_capture_cs_test_1_secret' }),
+      okResult({
+        providerIntentId: 'pi_capture_cs_test_1',
+        clientSecret: 'pi_capture_cs_test_1_secret',
+      }),
     );
 
     const result = await checkoutSessionWorkflow(makeCheckoutInput({ isFreeOrder: false }));
@@ -259,23 +282,32 @@ describe('checkoutSessionWorkflow', () => {
 
   it('fails when payment intent creation fails and releases hold', async () => {
     let releaseInput: Record<string, unknown> | undefined;
-    setActivity('createPaymentIntentActivity', async () => errResult('PAYMENT_FAILED', 'Stripe error', false));
+    setActivity('createPaymentIntentActivity', async () =>
+      errResult('PAYMENT_FAILED', 'Stripe error', false),
+    );
     setActivity('releaseHoldActivity', async (input) => {
       releaseInput = input;
       return okResult({ released: true });
     });
     const result = await checkoutSessionWorkflow(makeCheckoutInput({ isFreeOrder: false }));
     expect(result.status).toBe('failed');
-    expect(releaseInput).toEqual({ checkoutSessionId: 'cs_test_1', checkoutSessionStatus: 'expired' });
+    expect(releaseInput).toEqual({
+      checkoutSessionId: 'cs_test_1',
+      checkoutSessionStatus: 'expired',
+    });
   });
 
   it('rejects when releasing a terminal checkout hold returns an error result', async () => {
-    setActivity('createPaymentIntentActivity', async () => errResult('PAYMENT_FAILED', 'Stripe error', false));
-    setActivity('releaseHoldActivity', async () => errResult('HOLD_RELEASE_FAILED', 'database write failed', true));
-
-    await expect(checkoutSessionWorkflow(makeCheckoutInput({ isFreeOrder: false }))).rejects.toThrow(
-      'Checkout hold release failed (HOLD_RELEASE_FAILED): database write failed',
+    setActivity('createPaymentIntentActivity', async () =>
+      errResult('PAYMENT_FAILED', 'Stripe error', false),
     );
+    setActivity('releaseHoldActivity', async () =>
+      errResult('HOLD_RELEASE_FAILED', 'database write failed', true),
+    );
+
+    await expect(
+      checkoutSessionWorkflow(makeCheckoutInput({ isFreeOrder: false })),
+    ).rejects.toThrow('Checkout hold release failed (HOLD_RELEASE_FAILED): database write failed');
   });
 
   it('compensates and releases on payment timeout after payment intent creation', async () => {
@@ -303,7 +335,10 @@ describe('checkoutSessionWorkflow', () => {
       source: 'checkout_payment_timeout',
       metadata: { eventId: 'evt_1', brandId: 'brd_1' },
     });
-    expect(releaseInput).toEqual({ checkoutSessionId: 'cs_test_1', checkoutSessionStatus: 'expired' });
+    expect(releaseInput).toEqual({
+      checkoutSessionId: 'cs_test_1',
+      checkoutSessionStatus: 'expired',
+    });
   });
 
   it('compensates and releases when checkout is cancelled after payment intent creation', async () => {
@@ -312,7 +347,11 @@ describe('checkoutSessionWorkflow', () => {
 
     setActivity('createPaymentIntentActivity', async () => {
       mockState.signals.cancelCheckout?.();
-      return okResult({ providerIntentId: 'pi_test_1', clientSecret: 'cs_test_1', provider: 'stripe' });
+      return okResult({
+        providerIntentId: 'pi_test_1',
+        clientSecret: 'cs_test_1',
+        provider: 'stripe',
+      });
     });
     setActivity('releaseHoldActivity', async (input) => {
       releaseInput = input;
@@ -337,7 +376,10 @@ describe('checkoutSessionWorkflow', () => {
       source: 'checkout_cancelled',
       metadata: { eventId: 'evt_1', brandId: 'brd_1' },
     });
-    expect(releaseInput).toEqual({ checkoutSessionId: 'cs_test_1', checkoutSessionStatus: 'cancelled' });
+    expect(releaseInput).toEqual({
+      checkoutSessionId: 'cs_test_1',
+      checkoutSessionStatus: 'cancelled',
+    });
   });
 
   it('compensates and releases when the provider reports payment failure', async () => {
@@ -346,7 +388,11 @@ describe('checkoutSessionWorkflow', () => {
 
     setActivity('createPaymentIntentActivity', async () => {
       mockState.signals.paymentFailed?.('card_declined');
-      return okResult({ providerIntentId: 'pi_test_1', clientSecret: 'cs_test_1', provider: 'stripe' });
+      return okResult({
+        providerIntentId: 'pi_test_1',
+        clientSecret: 'cs_test_1',
+        provider: 'stripe',
+      });
     });
     setActivity('releaseHoldActivity', async (input) => {
       releaseInput = input;
@@ -371,7 +417,10 @@ describe('checkoutSessionWorkflow', () => {
       source: 'checkout_payment_failed',
       metadata: { eventId: 'evt_1', brandId: 'brd_1' },
     });
-    expect(releaseInput).toEqual({ checkoutSessionId: 'cs_test_1', checkoutSessionStatus: 'expired' });
+    expect(releaseInput).toEqual({
+      checkoutSessionId: 'cs_test_1',
+      checkoutSessionStatus: 'expired',
+    });
   });
 
   it('compensates paid checkout when finalize fails after payment success', async () => {
@@ -381,7 +430,9 @@ describe('checkoutSessionWorkflow', () => {
     let issueTicketsCalled = false;
     let webhookCalled = false;
 
-    setActivity('finalizeOrderActivity', async () => errResult('HOLD_EXPIRED', 'Checkout hold hld_1 has expired', false));
+    setActivity('finalizeOrderActivity', async () =>
+      errResult('HOLD_EXPIRED', 'Checkout hold hld_1 has expired', false),
+    );
     setActivity('releaseHoldActivity', async (input) => {
       releaseInput = input;
       return okResult({ released: true });
@@ -406,7 +457,10 @@ describe('checkoutSessionWorkflow', () => {
     const result = await checkoutSessionWorkflow(makeCheckoutInput({ isFreeOrder: false }));
 
     expect(result.status).toBe('failed');
-    expect(releaseInput).toEqual({ checkoutSessionId: 'cs_test_1', checkoutSessionStatus: 'expired' });
+    expect(releaseInput).toEqual({
+      checkoutSessionId: 'cs_test_1',
+      checkoutSessionStatus: 'expired',
+    });
     expect(compensationInput).toMatchObject({
       checkoutSessionId: 'cs_test_1',
       tenantId: 'tnt_1',
@@ -428,8 +482,12 @@ describe('checkoutSessionWorkflow', () => {
     let issueTicketsCalled = false;
     let webhookCalled = false;
 
-    setActivity('finalizeOrderActivity', async () => errResult('HOLD_EXPIRED', 'Checkout hold hld_1 has expired', false));
-    setActivity('compensateOrphanPaymentActivity', async () => errResult('PAYMENT_COMPENSATION_FAILED', 'Stripe refund failed', true));
+    setActivity('finalizeOrderActivity', async () =>
+      errResult('HOLD_EXPIRED', 'Checkout hold hld_1 has expired', false),
+    );
+    setActivity('compensateOrphanPaymentActivity', async () =>
+      errResult('PAYMENT_COMPENSATION_FAILED', 'Stripe refund failed', true),
+    );
     setActivity('sendConfirmationEmailActivity', async () => {
       emailCalled = true;
       return okResult({ jobId: 'emj_1', status: 'queued' });
@@ -443,7 +501,9 @@ describe('checkoutSessionWorkflow', () => {
       return okResult({ eventId: 'evt_1', deliveries: [] });
     });
 
-    await expect(checkoutSessionWorkflow(makeCheckoutInput({ isFreeOrder: false }))).rejects.toThrow(
+    await expect(
+      checkoutSessionWorkflow(makeCheckoutInput({ isFreeOrder: false })),
+    ).rejects.toThrow(
       'Orphan payment compensation failed (PAYMENT_COMPENSATION_FAILED): Stripe refund failed',
     );
     expect(emailCalled).toBe(false);
@@ -457,7 +517,9 @@ describe('checkoutSessionWorkflow', () => {
     let issueTicketsCalled = false;
     let webhookCalled = false;
 
-    setActivity('finalizeOrderActivity', async () => errResult('HOLD_EXPIRED', 'Checkout hold hld_1 has expired', false));
+    setActivity('finalizeOrderActivity', async () =>
+      errResult('HOLD_EXPIRED', 'Checkout hold hld_1 has expired', false),
+    );
     setActivity('compensateOrphanPaymentActivity', async () =>
       okResult({ status: 'manual_review', action: 'refund', compensationId: 'pcmp_1' }),
     );
@@ -478,9 +540,9 @@ describe('checkoutSessionWorkflow', () => {
       return okResult({ eventId: 'evt_1', deliveries: [] });
     });
 
-    await expect(checkoutSessionWorkflow(makeCheckoutInput({ isFreeOrder: false }))).rejects.toThrow(
-      'Orphan payment compensation blocked with status manual_review',
-    );
+    await expect(
+      checkoutSessionWorkflow(makeCheckoutInput({ isFreeOrder: false })),
+    ).rejects.toThrow('Orphan payment compensation blocked with status manual_review');
     expect(releaseCalled).toBe(false);
     expect(emailCalled).toBe(false);
     expect(issueTicketsCalled).toBe(false);
@@ -491,7 +553,9 @@ describe('checkoutSessionWorkflow', () => {
     mockState.patchedResult = false;
     let releaseCalled = false;
 
-    setActivity('finalizeOrderActivity', async () => errResult('HOLD_EXPIRED', 'Checkout hold hld_1 has expired', false));
+    setActivity('finalizeOrderActivity', async () =>
+      errResult('HOLD_EXPIRED', 'Checkout hold hld_1 has expired', false),
+    );
     setActivity('compensateOrphanPaymentActivity', async () =>
       okResult({ status: 'manual_review', action: 'refund', compensationId: 'pcmp_1' }),
     );
@@ -508,9 +572,13 @@ describe('checkoutSessionWorkflow', () => {
 
   it('does not silently close when timeout compensation returns a retryable error', async () => {
     mockState.conditionResult = false;
-    setActivity('compensateOrphanPaymentActivity', async () => errResult('PAYMENT_COMPENSATION_FAILED', 'Stripe cancel failed', true));
+    setActivity('compensateOrphanPaymentActivity', async () =>
+      errResult('PAYMENT_COMPENSATION_FAILED', 'Stripe cancel failed', true),
+    );
 
-    await expect(checkoutSessionWorkflow(makeCheckoutInput({ isFreeOrder: false }))).rejects.toThrow(
+    await expect(
+      checkoutSessionWorkflow(makeCheckoutInput({ isFreeOrder: false })),
+    ).rejects.toThrow(
       'Orphan payment compensation failed (PAYMENT_COMPENSATION_FAILED): Stripe cancel failed',
     );
   });
@@ -529,7 +597,10 @@ describe('refundWorkflow', () => {
 
   it('voids tickets when configured', async () => {
     let voidCalled = false;
-    setActivity('voidTicketsActivity', async () => { voidCalled = true; return okResult({ voidedCount: 3 }); });
+    setActivity('voidTicketsActivity', async () => {
+      voidCalled = true;
+      return okResult({ voidedCount: 3 });
+    });
     const result = await refundWorkflow(makeRefundInput({ voidTickets: true }));
     expect(result.status).toBe('completed');
     expect(voidCalled).toBe(true);
@@ -537,7 +608,10 @@ describe('refundWorkflow', () => {
 
   it('does not void tickets when voidTickets is false', async () => {
     let voidCalled = false;
-    setActivity('voidTicketsActivity', async () => { voidCalled = true; return okResult({ voidedCount: 0 }); });
+    setActivity('voidTicketsActivity', async () => {
+      voidCalled = true;
+      return okResult({ voidedCount: 0 });
+    });
     const result = await refundWorkflow(makeRefundInput({ voidTickets: false }));
     expect(result.status).toBe('completed');
     expect(voidCalled).toBe(false);
@@ -545,7 +619,10 @@ describe('refundWorkflow', () => {
 
   it('restores inventory when configured', async () => {
     let restoreCalled = false;
-    setActivity('restoreInventoryActivity', async () => { restoreCalled = true; return okResult({ restored: 2 }); });
+    setActivity('restoreInventoryActivity', async () => {
+      restoreCalled = true;
+      return okResult({ restored: 2 });
+    });
     const result = await refundWorkflow(makeRefundInput({ restoreInventory: true }));
     expect(result.status).toBe('completed');
     expect(restoreCalled).toBe(true);
@@ -553,14 +630,19 @@ describe('refundWorkflow', () => {
 
   it('does not restore inventory when not configured', async () => {
     let restoreCalled = false;
-    setActivity('restoreInventoryActivity', async () => { restoreCalled = true; return okResult({ restored: 2 }); });
+    setActivity('restoreInventoryActivity', async () => {
+      restoreCalled = true;
+      return okResult({ restored: 2 });
+    });
     const result = await refundWorkflow(makeRefundInput({ restoreInventory: false }));
     expect(result.status).toBe('completed');
     expect(restoreCalled).toBe(false);
   });
 
   it('throws when refund processing returns a retryable error', async () => {
-    setActivity('processRefundActivity', async () => errResult('REFUND_RETRYABLE', 'Provider timeout', true));
+    setActivity('processRefundActivity', async () =>
+      errResult('REFUND_RETRYABLE', 'Provider timeout', true),
+    );
 
     await expect(refundWorkflow(makeRefundInput())).rejects.toThrow(
       'Refund processing failed (REFUND_RETRYABLE): Provider timeout',
@@ -568,7 +650,9 @@ describe('refundWorkflow', () => {
   });
 
   it('fails when refund processing returns a non-retryable provider error', async () => {
-    setActivity('processRefundActivity', async () => errResult('REFUND_FAILED', 'Provider rejected refund', false));
+    setActivity('processRefundActivity', async () =>
+      errResult('REFUND_FAILED', 'Provider rejected refund', false),
+    );
 
     const result = await refundWorkflow(makeRefundInput());
 
@@ -576,7 +660,9 @@ describe('refundWorkflow', () => {
   });
 
   it('throws when ledger update returns a retryable error', async () => {
-    setActivity('updateLedgerActivity', async () => errResult('LEDGER_RETRYABLE', 'Database unavailable', true));
+    setActivity('updateLedgerActivity', async () =>
+      errResult('LEDGER_RETRYABLE', 'Database unavailable', true),
+    );
 
     await expect(refundWorkflow(makeRefundInput())).rejects.toThrow(
       'Refund ledger update failed (LEDGER_RETRYABLE): Database unavailable',
@@ -584,7 +670,9 @@ describe('refundWorkflow', () => {
   });
 
   it('fails when ledger update returns a non-retryable error', async () => {
-    setActivity('updateLedgerActivity', async () => errResult('LEDGER_INVALID', 'Invalid ledger state', false));
+    setActivity('updateLedgerActivity', async () =>
+      errResult('LEDGER_INVALID', 'Invalid ledger state', false),
+    );
 
     const result = await refundWorkflow(makeRefundInput());
 
@@ -592,7 +680,9 @@ describe('refundWorkflow', () => {
   });
 
   it('throws when ticket voiding returns a retryable error', async () => {
-    setActivity('voidTicketsActivity', async () => errResult('VOID_RETRYABLE', 'Ticket service unavailable', true));
+    setActivity('voidTicketsActivity', async () =>
+      errResult('VOID_RETRYABLE', 'Ticket service unavailable', true),
+    );
 
     await expect(refundWorkflow(makeRefundInput({ voidTickets: true }))).rejects.toThrow(
       'Refund ticket voiding failed (VOID_RETRYABLE): Ticket service unavailable',
@@ -600,7 +690,9 @@ describe('refundWorkflow', () => {
   });
 
   it('fails when ticket voiding returns a non-retryable error', async () => {
-    setActivity('voidTicketsActivity', async () => errResult('VOID_INVALID', 'Tickets already transferred', false));
+    setActivity('voidTicketsActivity', async () =>
+      errResult('VOID_INVALID', 'Tickets already transferred', false),
+    );
 
     const result = await refundWorkflow(makeRefundInput({ voidTickets: true }));
 
@@ -608,7 +700,9 @@ describe('refundWorkflow', () => {
   });
 
   it('throws when inventory restore returns a retryable error', async () => {
-    setActivity('restoreInventoryActivity', async () => errResult('INVENTORY_RETRYABLE', 'Inventory lock timeout', true));
+    setActivity('restoreInventoryActivity', async () =>
+      errResult('INVENTORY_RETRYABLE', 'Inventory lock timeout', true),
+    );
 
     await expect(refundWorkflow(makeRefundInput({ restoreInventory: true }))).rejects.toThrow(
       'Refund inventory restore failed (INVENTORY_RETRYABLE): Inventory lock timeout',
@@ -616,7 +710,9 @@ describe('refundWorkflow', () => {
   });
 
   it('fails when inventory restore returns a non-retryable error', async () => {
-    setActivity('restoreInventoryActivity', async () => errResult('INVENTORY_INVALID', 'Inventory already restored', false));
+    setActivity('restoreInventoryActivity', async () =>
+      errResult('INVENTORY_INVALID', 'Inventory already restored', false),
+    );
 
     const result = await refundWorkflow(makeRefundInput({ restoreInventory: true }));
 
@@ -624,7 +720,9 @@ describe('refundWorkflow', () => {
   });
 
   it('throws when refund notification returns a retryable error', async () => {
-    setActivity('notifyRefundActivity', async () => errResult('NOTIFY_RETRYABLE', 'Email queue unavailable', true));
+    setActivity('notifyRefundActivity', async () =>
+      errResult('NOTIFY_RETRYABLE', 'Email queue unavailable', true),
+    );
 
     await expect(refundWorkflow(makeRefundInput())).rejects.toThrow(
       'Refund notification failed (NOTIFY_RETRYABLE): Email queue unavailable',
@@ -632,7 +730,9 @@ describe('refundWorkflow', () => {
   });
 
   it('fails when refund notification returns a non-retryable error', async () => {
-    setActivity('notifyRefundActivity', async () => errResult('NOTIFY_INVALID', 'Invalid recipient', false));
+    setActivity('notifyRefundActivity', async () =>
+      errResult('NOTIFY_INVALID', 'Invalid recipient', false),
+    );
 
     const result = await refundWorkflow(makeRefundInput());
 
@@ -649,7 +749,10 @@ describe('refundWorkflow', () => {
 
   it('always notifies buyer regardless of void/restore config', async () => {
     let notifyCalled = false;
-    setActivity('notifyRefundActivity', async () => { notifyCalled = true; return okResult({ notified: true }); });
+    setActivity('notifyRefundActivity', async () => {
+      notifyCalled = true;
+      return okResult({ notified: true });
+    });
     await refundWorkflow(makeRefundInput({ voidTickets: true, restoreInventory: true }));
     expect(notifyCalled).toBe(true);
   });
@@ -665,7 +768,9 @@ describe('paymentReconciliationWorkflow', () => {
     let domainEventInput: Record<string, unknown> | undefined;
     let markInput: Record<string, unknown> | undefined;
 
-    setActivity('reconcilePaymentActivity', async () => okResult({ orderId: 'ord_1', status: 'paid' }));
+    setActivity('reconcilePaymentActivity', async () =>
+      okResult({ orderId: 'ord_1', status: 'paid' }),
+    );
     setActivity('emitDomainEventActivity', async (input) => {
       domainEventInput = input;
       return okResult({ emitted: true });
@@ -729,7 +834,9 @@ describe('paymentReconciliationWorkflow', () => {
       return okResult({ processed: true });
     });
 
-    await expect(paymentReconciliationWorkflow(makePaymentReconciliationInput({ version: 1 }))).rejects.toThrow(
+    await expect(
+      paymentReconciliationWorkflow(makePaymentReconciliationInput({ version: 1 })),
+    ).rejects.toThrow(
       'Payment reconciliation failed (PAYMENT_RECONCILE_FAILED): database unavailable',
     );
     expect(reconcileCalls).toBe(1);
@@ -766,7 +873,9 @@ describe('paymentReconciliationWorkflow', () => {
     let emitted = false;
     let marked = false;
 
-    setActivity('reconcilePaymentActivity', async () => okResult({ orderId: undefined, status: 'compensated:manual_review' }));
+    setActivity('reconcilePaymentActivity', async () =>
+      okResult({ orderId: undefined, status: 'compensated:manual_review' }),
+    );
     setActivity('emitDomainEventActivity', async () => {
       emitted = true;
       return okResult({ emitted: true });
@@ -823,7 +932,9 @@ describe('clerkIdentitySyncWorkflow', () => {
       return okResult({ processed: true });
     });
 
-    const result = await clerkIdentitySyncWorkflow(makeClerkIdentitySyncInput({ email: undefined }));
+    const result = await clerkIdentitySyncWorkflow(
+      makeClerkIdentitySyncInput({ email: undefined }),
+    );
 
     expect(result).toEqual({ status: 'skipped' });
     expect(syncCalled).toBe(false);
@@ -838,7 +949,9 @@ describe('clerkIdentitySyncWorkflow', () => {
       return okResult({ processed: true });
     });
 
-    const result = await clerkIdentitySyncWorkflow(makeClerkIdentitySyncInput({ eventType: 'session.created' }));
+    const result = await clerkIdentitySyncWorkflow(
+      makeClerkIdentitySyncInput({ eventType: 'session.created' }),
+    );
 
     expect(result).toEqual({ status: 'unhandled' });
     expect(markInput).toEqual({ provider: 'clerk', providerEventId: 'msg_clerk_1' });
@@ -847,7 +960,9 @@ describe('clerkIdentitySyncWorkflow', () => {
   it('throws retryable sync failures without marking the provider event processed', async () => {
     let marked = false;
 
-    setActivity('syncUserActivity', async () => errResult('USER_SYNC_FAILED', 'database unavailable', true));
+    setActivity('syncUserActivity', async () =>
+      errResult('USER_SYNC_FAILED', 'database unavailable', true),
+    );
     setActivity('markProviderEventProcessedActivity', async () => {
       marked = true;
       return okResult({ processed: true });
@@ -885,7 +1000,9 @@ describe('exportWorkflow', () => {
 
   it('marks the export failed when generation fails', async () => {
     let failedInput: Record<string, unknown> | undefined;
-    setActivity('generateExportActivity', async () => errResult('EXPORT_FAILED', 'Generation failed', true));
+    setActivity('generateExportActivity', async () =>
+      errResult('EXPORT_FAILED', 'Generation failed', true),
+    );
     setActivity('markExportFailedActivity', async (activityInput: Record<string, unknown>) => {
       failedInput = activityInput;
       return okResult({ failed: true });
@@ -902,7 +1019,9 @@ describe('exportWorkflow', () => {
 
   it('marks the export failed when upload fails', async () => {
     let failedInput: Record<string, unknown> | undefined;
-    setActivity('uploadFileActivity', async () => errResult('UPLOAD_FAILED', 'Upload failed', true));
+    setActivity('uploadFileActivity', async () =>
+      errResult('UPLOAD_FAILED', 'Upload failed', true),
+    );
     setActivity('markExportFailedActivity', async (activityInput: Record<string, unknown>) => {
       failedInput = activityInput;
       return okResult({ failed: true });
@@ -931,7 +1050,9 @@ describe('privacyRequestWorkflow', () => {
   });
 
   it('returns failed when the privacy activity fails', async () => {
-    setActivity('processPrivacyRequestActivity', async () => errResult('privacy_request_failed', 'database unavailable', false));
+    setActivity('processPrivacyRequestActivity', async () =>
+      errResult('privacy_request_failed', 'database unavailable', false),
+    );
 
     const result = await privacyRequestWorkflow({ version: 1, requestId: 'prv_1' });
 
@@ -945,7 +1066,9 @@ describe('workflow id conventions', () => {
   });
 
   it('scopes webhook replay workflows by event, endpoint, and replay nonce', () => {
-    expect(webhookDeliveryReplayWorkflowId('whe_1', 'wh_1', 'rpl_1')).toBe('webhook-delivery:whe_1:wh_1:replay:rpl_1');
+    expect(webhookDeliveryReplayWorkflowId('whe_1', 'wh_1', 'rpl_1')).toBe(
+      'webhook-delivery:whe_1:wh_1:replay:rpl_1',
+    );
   });
 
   it('scopes GDPR privacy request workflows by request id', () => {

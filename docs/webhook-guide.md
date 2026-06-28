@@ -29,7 +29,6 @@ bun run dev:webhooks --dry-run
 
 If the Stripe CLI is missing, the command prints an install link. If it is installed but not authenticated, run `stripe login` and retry.
 
-
 ## Endpoint Management
 
 Webhook endpoints are scoped to an organization. Create one via the API (or the admin Developer settings):

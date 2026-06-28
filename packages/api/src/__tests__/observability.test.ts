@@ -73,7 +73,9 @@ describe('API observability', () => {
       startSpan,
     } as Tracer);
     const app = Fastify({ logger: false, genReqId: () => 'req_secret_path' });
-    const observability: ApiObservability = { metrics: createTixkitMetrics('test-api-secret-path') };
+    const observability: ApiObservability = {
+      metrics: createTixkitMetrics('test-api-secret-path'),
+    };
 
     try {
       registerObservability(app, observability);

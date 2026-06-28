@@ -52,9 +52,7 @@ export const MarketingIntegrationsMigration: Migration = {
       .addColumn('event_id', varchar(32))
       .addColumn('provider', varchar(32), (col) => col.notNull())
       .addColumn('config', jsonType(), (col) => col.notNull())
-      .addColumn('consent_required', booleanType(), (col) =>
-        col.notNull().defaultTo(trueDefault()),
-      )
+      .addColumn('consent_required', booleanType(), (col) => col.notNull().defaultTo(trueDefault()))
       .addColumn('status', varchar(32), (col) => col.notNull().defaultTo('active'))
       .addColumn('created_at', timestampType(), (col) => col.notNull().defaultTo(nowDefault()))
       .addColumn('updated_at', timestampType(), (col) => col.notNull().defaultTo(nowDefault()))

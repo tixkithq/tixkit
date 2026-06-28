@@ -57,11 +57,8 @@ function compare(row: Record<string, any>, col: string, op: string, val: any): b
 }
 
 function expressionBuilder() {
-  const eb = ((col: string, op: string, val: any) => (row: Record<string, any>) => compare(row, col, op, val)) as ((
-    col: string,
-    op: string,
-    val: any,
-  ) => RowPredicate) & {
+  const eb = ((col: string, op: string, val: any) => (row: Record<string, any>) =>
+    compare(row, col, op, val)) as ((col: string, op: string, val: any) => RowPredicate) & {
     or: (predicates: RowPredicate[]) => RowPredicate;
     and: (predicates: RowPredicate[]) => RowPredicate;
   };
@@ -92,8 +89,16 @@ vi.mock('@tixkit/db', () => {
       select() {
         return query;
       },
-      where(col: string | ((eb: ReturnType<typeof expressionBuilder>) => RowPredicate), op?: string, val?: any) {
-        filters.push(typeof col === 'function' ? col(expressionBuilder()) : (row) => compare(row, col, op!, val));
+      where(
+        col: string | ((eb: ReturnType<typeof expressionBuilder>) => RowPredicate),
+        op?: string,
+        val?: any,
+      ) {
+        filters.push(
+          typeof col === 'function'
+            ? col(expressionBuilder())
+            : (row) => compare(row, col, op!, val),
+        );
         return query;
       },
       forUpdate() {
@@ -117,14 +122,25 @@ vi.mock('@tixkit/db', () => {
 
   function updateQuery(table: string) {
     const filters: RowPredicate[] = [];
-    let updates: Record<string, unknown> | ((eb: (col: string, op: string, value: unknown) => unknown) => Record<string, unknown>) = {};
+    let updates:
+      | Record<string, unknown>
+      | ((eb: (col: string, op: string, value: unknown) => unknown) => Record<string, unknown>) =
+      {};
     const query = {
       set(values: typeof updates) {
         updates = values;
         return query;
       },
-      where(col: string | ((eb: ReturnType<typeof expressionBuilder>) => RowPredicate), op?: string, val?: any) {
-        filters.push(typeof col === 'function' ? col(expressionBuilder()) : (row) => compare(row, col, op!, val));
+      where(
+        col: string | ((eb: ReturnType<typeof expressionBuilder>) => RowPredicate),
+        op?: string,
+        val?: any,
+      ) {
+        filters.push(
+          typeof col === 'function'
+            ? col(expressionBuilder())
+            : (row) => compare(row, col, op!, val),
+        );
         return query;
       },
       async execute() {
@@ -177,18 +193,32 @@ vi.mock('@tixkit/db', () => {
     OrderRepository,
     PaymentIntentRepository: class {
       async findByProviderAndIntentId(provider: string, providerIntentId: string) {
-        return Object.values(rowsFor('payment_intents')).find((row) => row.provider === provider && row.provider_intent_id === providerIntentId);
+        return Object.values(rowsFor('payment_intents')).find(
+          (row) => row.provider === provider && row.provider_intent_id === providerIntentId,
+        );
       }
 
-      async findByCheckoutSessionAndProviderIntentId(checkoutSessionId: string, providerIntentId: string) {
-        return Object.values(rowsFor('payment_intents')).find((row) => row.checkout_session_id === checkoutSessionId && row.provider_intent_id === providerIntentId);
+      async findByCheckoutSessionAndProviderIntentId(
+        checkoutSessionId: string,
+        providerIntentId: string,
+      ) {
+        return Object.values(rowsFor('payment_intents')).find(
+          (row) =>
+            row.checkout_session_id === checkoutSessionId &&
+            row.provider_intent_id === providerIntentId,
+        );
       }
 
       async findLatestByCheckoutSession(checkoutSessionId: string) {
-        return Object.values(rowsFor('payment_intents'))
-          .filter((row) => row.checkout_session_id === checkoutSessionId)
-          // oxlint-disable-next-line unicorn/no-array-sort -- sorts a fresh test array under ES2022.
-          .sort((left, right) => new Date(right.created_at).getTime() - new Date(left.created_at).getTime())[0];
+        return (
+          Object.values(rowsFor('payment_intents'))
+            .filter((row) => row.checkout_session_id === checkoutSessionId)
+            // oxlint-disable-next-line unicorn/no-array-sort -- sorts a fresh test array under ES2022.
+            .sort(
+              (left, right) =>
+                new Date(right.created_at).getTime() - new Date(left.created_at).getTime(),
+            )[0]
+        );
       }
 
       async create(input: Record<string, unknown>) {
@@ -221,9 +251,16 @@ vi.mock('@tixkit/db', () => {
       }
     },
     PaymentCompensationRepository: class {
-      async findByProviderIntent(provider: string, providerIntentId: string, checkoutSessionId: string) {
+      async findByProviderIntent(
+        provider: string,
+        providerIntentId: string,
+        checkoutSessionId: string,
+      ) {
         return Object.values(rowsFor('payment_compensations')).find(
-          (row) => row.provider === provider && row.provider_intent_id === providerIntentId && row.checkout_session_id === checkoutSessionId,
+          (row) =>
+            row.provider === provider &&
+            row.provider_intent_id === providerIntentId &&
+            row.checkout_session_id === checkoutSessionId,
         );
       }
 
@@ -913,7 +950,11 @@ function seedCheckout(input: { holdExpiresAt: Date }) {
           buyerFields: {},
           attendeeFields: {},
         }),
-        buyer: JSON.stringify({ email: 'buyer@example.test', firstName: 'Ada', lastName: 'Lovelace' }),
+        buyer: JSON.stringify({
+          email: 'buyer@example.test',
+          firstName: 'Ada',
+          lastName: 'Lovelace',
+        }),
       },
     },
     events: {
@@ -945,7 +986,9 @@ function seedCheckout(input: { holdExpiresAt: Date }) {
   };
 }
 
-function seedTrustedPaymentIntent(input: { amountCents?: number; currency?: string; providerIntentId?: string } = {}) {
+function seedTrustedPaymentIntent(
+  input: { amountCents?: number; currency?: string; providerIntentId?: string } = {},
+) {
   dbState.tables.payment_intents ??= {};
   dbState.tables.payment_intents.pi_1 = {
     id: 'pi_1',
@@ -975,14 +1018,16 @@ function makeCheckoutFree() {
     taxCents: 0,
     feeCents: 0,
     totalCents: 0,
-    lineItems: quote.lineItems.map((line: Record<string, unknown>) => Object.assign({}, line, {
-      unitPriceCents: 0,
-      subtotalCents: 0,
-      discountCents: 0,
-      taxCents: 0,
-      feeCents: 0,
-      totalCents: 0,
-    })),
+    lineItems: quote.lineItems.map((line: Record<string, unknown>) =>
+      Object.assign({}, line, {
+        unitPriceCents: 0,
+        subtotalCents: 0,
+        discountCents: 0,
+        taxCents: 0,
+        feeCents: 0,
+        totalCents: 0,
+      }),
+    ),
   });
 }
 
@@ -1036,7 +1081,11 @@ function seedCheckoutWithDiscount(input: {
           attendeeFields: {},
           discountCode: input.discountCode,
         }),
-        buyer: JSON.stringify({ email: 'buyer@example.test', firstName: 'Ada', lastName: 'Lovelace' }),
+        buyer: JSON.stringify({
+          email: 'buyer@example.test',
+          firstName: 'Ada',
+          lastName: 'Lovelace',
+        }),
       },
     },
     events: {

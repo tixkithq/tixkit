@@ -87,7 +87,9 @@ export const emailWebhookRoutes: FastifyPluginAsync = async (app) => {
           return { duplicate: false, retryMissingDelivery: true };
         }
 
-        const job = delivery ? await new EmailJobRepository(txDb).findById(delivery.job_id) : undefined;
+        const job = delivery
+          ? await new EmailJobRepository(txDb).findById(delivery.job_id)
+          : undefined;
         const tenantId = delivery?.tenant_id ?? job?.tenant_id ?? extractTrustedTenantId(body);
         const email = recipientEmail ?? job?.to_email;
 
@@ -157,9 +159,7 @@ export function verifyEmailFeedbackWebhookRequest(input: {
   secret?: string;
   allowUnsigned?: string;
   nodeEnv?: string;
-}):
-  | { ok: true }
-  | { ok: false; status: number; code: string; message: string } {
+}): { ok: true } | { ok: false; status: number; code: string; message: string } {
   if (!input.secret) {
     if (input.allowUnsigned === 'true' && input.nodeEnv === 'test') return { ok: true };
     return {
@@ -200,7 +200,11 @@ export function verifyEmailFeedbackWebhookRequest(input: {
 }
 
 function normalizeProvider(provider: string): string {
-  return provider.trim().toLowerCase().replaceAll(/[^a-z0-9_-]/g, '_').slice(0, 50);
+  return provider
+    .trim()
+    .toLowerCase()
+    .replaceAll(/[^a-z0-9_-]/g, '_')
+    .slice(0, 50);
 }
 
 function normalizeEmailFeedbackType(value: string | undefined): string | undefined {
@@ -219,10 +223,7 @@ function normalizeEmailFeedbackType(value: string | undefined): string | undefin
   return undefined;
 }
 
-function emailDeliveryUpdate(
-  eventType: string,
-  body: EmailFeedbackBody,
-): Record<string, unknown> {
+function emailDeliveryUpdate(eventType: string, body: EmailFeedbackBody): Record<string, unknown> {
   const reason =
     readString(body, ['reason', 'description', 'error', 'failure_reason']) ??
     readString(readRecord(body.error), ['message', 'reason']) ??
@@ -254,8 +255,7 @@ function normalizeBounceType(body: EmailFeedbackBody): string {
 function extractTrustedTenantId(body: EmailFeedbackBody): string | undefined {
   const metadata = readRecord(body.metadata) ?? readRecord(body.meta);
   return (
-    readString(metadata, ['tenantId', 'tenant_id']) ??
-    readString(body, ['tenantId', 'tenant_id'])
+    readString(metadata, ['tenantId', 'tenant_id']) ?? readString(body, ['tenantId', 'tenant_id'])
   );
 }
 

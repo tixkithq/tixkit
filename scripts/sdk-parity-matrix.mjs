@@ -172,4 +172,6 @@ if (failures.length > 0) {
   process.exit(1);
 }
 
-console.log(`SDK parity matrix passed for ${checks.length} platforms at API version ${apiVersion}.`);
+console.log(
+  `SDK parity matrix passed for ${checks.length} platforms at API version ${apiVersion}.`,
+);

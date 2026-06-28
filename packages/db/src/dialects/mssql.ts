@@ -86,7 +86,9 @@ export function mssqlDropTableIfExists(tableName: string): string {
 
 export function mssqlForUpdateTable(tableName: string, alias?: string): string {
   const table = quoteMssqlIdentifierPath(tableName);
-  return alias ? `${table} AS ${quoteMssqlIdentifier(alias)} WITH (UPDLOCK, HOLDLOCK)` : `${table} WITH (UPDLOCK, HOLDLOCK)`;
+  return alias
+    ? `${table} AS ${quoteMssqlIdentifier(alias)} WITH (UPDLOCK, HOLDLOCK)`
+    : `${table} WITH (UPDLOCK, HOLDLOCK)`;
 }
 
 export function buildMssqlMergeUpsert(input: MssqlUpsertInput): string {
@@ -102,7 +104,10 @@ export function buildMssqlMergeUpsert(input: MssqlUpsertInput): string {
   const target = quoteMssqlIdentifier(targetAlias);
   const source = quoteMssqlIdentifier(sourceAlias);
   const keyPredicate = input.keyColumns
-    .map((column) => `${target}.${quoteMssqlIdentifier(column)} = ${source}.${quoteMssqlIdentifier(column)}`)
+    .map(
+      (column) =>
+        `${target}.${quoteMssqlIdentifier(column)} = ${source}.${quoteMssqlIdentifier(column)}`,
+    )
     .join(' AND ');
   const updateSet = input.updateColumns
     .map((column) => `${quoteMssqlIdentifier(column)} = ${source}.${quoteMssqlIdentifier(column)}`)
@@ -128,7 +133,10 @@ export async function executeMssqlForUpdate<T>(
   tableName: string,
   whereSql: string,
 ): Promise<T[]> {
-  const result = await sql<T>`SELECT * FROM ${sql.raw(mssqlForUpdateTable(tableName))} WHERE ${sql.raw(whereSql)}`.execute(db);
+  const result =
+    await sql<T>`SELECT * FROM ${sql.raw(mssqlForUpdateTable(tableName))} WHERE ${sql.raw(whereSql)}`.execute(
+      db,
+    );
   return result.rows;
 }
 

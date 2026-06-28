@@ -488,10 +488,7 @@ describe('Stripe webhook route', () => {
 
     expect(res.statusCode).toBe(200);
     expect(res.json()).toEqual({ received: true, duplicate: false });
-    expect(state.operations).toEqual([
-      'start:payment-reconciliation',
-      'signal:payment-succeeded',
-    ]);
+    expect(state.operations).toEqual(['start:payment-reconciliation', 'signal:payment-succeeded']);
     expect(state.events[0].processed_at).toBeNull();
 
     await app.close();
@@ -594,10 +591,7 @@ describe('Stripe webhook route', () => {
 
     expect(res.statusCode).toBe(200);
     expect(res.json()).toEqual({ received: true, duplicate: false });
-    expect(state.operations).toEqual([
-      'insert:payment_events',
-      'start:payment-reconciliation',
-    ]);
+    expect(state.operations).toEqual(['insert:payment_events', 'start:payment-reconciliation']);
     expect(state.events[0]?.processed_at).toBeNull();
     expect(temporalClient.startPaymentReconciliation).toHaveBeenCalledOnce();
     expect(temporalClient.signalPaymentSucceeded).not.toHaveBeenCalled();

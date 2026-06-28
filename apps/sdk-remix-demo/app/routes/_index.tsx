@@ -22,7 +22,14 @@ export default function Index() {
 
     for (const el of [widget, button]) {
       if (!el) continue;
-      for (const name of ['loaded', 'opened', 'closed', 'checkout_started', 'order_completed', 'error']) {
+      for (const name of [
+        'loaded',
+        'opened',
+        'closed',
+        'checkout_started',
+        'order_completed',
+        'error',
+      ]) {
         el.addEventListener(name, () => {
           setEvents((prev) => [...prev, name]);
         });
@@ -31,7 +38,9 @@ export default function Index() {
   }, []);
 
   return (
-    <div style={{ fontFamily: 'system-ui, sans-serif', maxWidth: 960, margin: '0 auto', padding: 32 }}>
+    <div
+      style={{ fontFamily: 'system-ui, sans-serif', maxWidth: 960, margin: '0 auto', padding: 32 }}
+    >
       <h1>Tixkit Remix Demo</h1>
       <p>Demonstrates the @tixkit/remix SDK: widget, checkout handoff, and lifecycle events.</p>
 

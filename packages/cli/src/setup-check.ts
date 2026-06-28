@@ -152,8 +152,7 @@ export const ENV_RULES: EnvRule[] = [
   {
     variable: 'WIDGET_IMPRESSION_HASH_SECRET',
     requiredFor: ['production'],
-    message:
-      'Widget impression hash secret is required in production to pseudonymize visitor IDs.',
+    message: 'Widget impression hash secret is required in production to pseudonymize visitor IDs.',
     guide: GUIDES.deploy,
   },
   {
@@ -216,7 +215,8 @@ export const ENV_RULES: EnvRule[] = [
   {
     variable: 'EMAIL_WEBHOOK_SECRET',
     requiredFor: ['production'],
-    message: 'Email webhook secret is required in production to verify bounce/complaint/failure feedback.',
+    message:
+      'Email webhook secret is required in production to verify bounce/complaint/failure feedback.',
     guide: GUIDES.webhook,
   },
   {
