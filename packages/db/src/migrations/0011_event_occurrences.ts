@@ -27,7 +27,7 @@ export const EventOccurrencesMigration: Migration = {
       .addColumn('venue', 'json')
       .addColumn('capacity', 'integer')
       .addColumn('sort_order', 'integer', (col) => col.notNull().defaultTo(0))
-      .addColumn('status', varchar(32), (col) => col.notNull().defaultTo('active'))
+      .addColumn('status', varchar(32), (col) => col.notNull().defaultTo('scheduled'))
       .addColumn('created_at', timestampType(), (col) => col.notNull().defaultTo(nowDefault()))
       .addColumn('updated_at', timestampType(), (col) => col.notNull().defaultTo(nowDefault()))
       .addForeignKeyConstraint('event_occurrences_event_fk', ['event_id'], 'events', ['id'])

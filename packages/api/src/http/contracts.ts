@@ -128,10 +128,16 @@ export function serializeEventOccurrence(row: Record<string, unknown>) {
     venue: parseJsonValue(row.venue, null),
     capacity: row.capacity ?? undefined,
     sortOrder: row.sort_order,
-    status: row.status,
+    status: serializeEventOccurrenceStatus(row.status) ?? 'cancelled',
     createdAt: toIso(row.created_at as Date | string),
     updatedAt: toIso(row.updated_at as Date | string),
   };
+}
+
+export function serializeEventOccurrenceStatus(status: unknown) {
+  if (status === 'scheduled' || status === 'active') return 'scheduled';
+  if (status === 'cancelled' || status === 'completed') return status;
+  return null;
 }
 
 export function serializeMarketingIntegration(

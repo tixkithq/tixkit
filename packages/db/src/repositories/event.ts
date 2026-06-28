@@ -122,7 +122,7 @@ export class EventOccurrenceRepository extends BaseRepository {
         venue: input.venue ? JSON.stringify(input.venue) : null,
         capacity: input.capacity ?? null,
         sort_order: input.sortOrder ?? 0,
-        status: input.status ?? 'active',
+        status: input.status ?? 'scheduled',
         created_at: now,
         updated_at: now,
       },

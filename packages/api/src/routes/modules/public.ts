@@ -11,7 +11,11 @@ import {
 } from '@tixkit/db';
 import { NotFoundError, ValidationError } from '@tixkit/domain';
 import type { AccessRuleRecord } from '@tixkit/domain';
-import { parseJsonValue, serializeMarketingIntegration } from '../../http/contracts.js';
+import {
+  parseJsonValue,
+  serializeEventOccurrenceStatus,
+  serializeMarketingIntegration,
+} from '../../http/contracts.js';
 import { parseBody } from '../../http/schemas.js';
 import { ulid } from 'ulid';
 
@@ -156,19 +160,24 @@ export const publicRoutes: FastifyPluginAsync = async (app) => {
     const occurrences = await new EventOccurrenceRepository(db).findByEvent(eventId);
     return {
       items: occurrences
-        .filter((occurrence) => occurrence.status === 'scheduled')
-        .map((occurrence) => ({
-          id: occurrence.id,
-          eventId: occurrence.event_id,
-          title: occurrence.title,
-          startsAt: occurrence.starts_at,
-          endsAt: occurrence.ends_at,
-          timezone: occurrence.timezone,
-          venue: parseJsonValue(occurrence.venue, null),
-          capacity: occurrence.capacity,
-          sortOrder: occurrence.sort_order,
-          status: occurrence.status,
-        })),
+        .flatMap((occurrence) => {
+          const status = serializeEventOccurrenceStatus(occurrence.status);
+          if (status !== 'scheduled') return [];
+          return [
+            {
+              id: occurrence.id,
+              eventId: occurrence.event_id,
+              title: occurrence.title,
+              startsAt: occurrence.starts_at,
+              endsAt: occurrence.ends_at,
+              timezone: occurrence.timezone,
+              venue: parseJsonValue(occurrence.venue, null),
+              capacity: occurrence.capacity,
+              sortOrder: occurrence.sort_order,
+              status,
+            },
+          ];
+        }),
       nextCursor: null,
       hasMore: false,
     };

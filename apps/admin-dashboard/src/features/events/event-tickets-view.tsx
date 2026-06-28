@@ -246,7 +246,9 @@ export function EventTicketsView({ eventId }: { eventId: string }) {
               <TableHead>Sold</TableHead>
               <TableHead>Sales Window</TableHead>
               <TableHead>Access Code</TableHead>
-              <TableHead className="w-[50px]" />
+              <TableHead className="w-[50px]">
+                <span className="sr-only">Actions</span>
+              </TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
@@ -280,7 +282,12 @@ export function EventTicketsView({ eventId }: { eventId: string }) {
                 <TableCell>
                   <DropdownMenu>
                     <DropdownMenuTrigger asChild>
-                      <Button variant="ghost" size="icon" className="size-8">
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="size-8"
+                        aria-label={`Open actions for ${tt.name}`}
+                      >
                         <MoreHorizontal className="size-4" />
                       </Button>
                     </DropdownMenuTrigger>

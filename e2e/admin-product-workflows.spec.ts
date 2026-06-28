@@ -349,4 +349,64 @@ test.describe('admin product workflow coverage', () => {
 
     await expectAdminPrimaryRouteMatrix(page, testInfo);
   });
+
+  test('admin can configure multi-session event occurrences from the tickets workspace', async ({
+    page,
+    request,
+  }, testInfo) => {
+    await requireReachable(page, adminBaseUrl, 'admin dashboard');
+    await requireReachable(page, `${apiBaseUrl}/health`, 'api');
+
+    const suffix = `${testInfo.workerIndex}-${Date.now()}`;
+    const { event } = await seedFreeCheckoutEvent(request, suffix);
+    const occurrenceTitle = `Friday session ${suffix}`;
+
+    await page.goto(`${adminBaseUrl}/events/${event.id}/tickets`);
+    await expect(page.getByRole('heading', { name: 'Ticket Types' })).toBeVisible();
+    await expect(page.getByRole('heading', { name: 'Occurrences' })).toBeVisible();
+
+    await page.getByLabel('Title').fill(occurrenceTitle);
+    await page.getByLabel('Starts').fill('2026-08-21T19:00');
+    await page.getByLabel('Ends').fill('2026-08-21T22:00');
+    await page.getByLabel('Timezone').fill('America/New_York');
+
+    const createResponsePromise = page.waitForResponse((response) => {
+      return (
+        response.url() === `${apiBaseUrl}/v1/events/${event.id}/occurrences` &&
+        response.request().method() === 'POST'
+      );
+    });
+    await page.getByRole('button', { name: 'Add' }).click();
+    const occurrence = await expectJsonStatus<{
+      id: string;
+      title: string;
+      timezone: string;
+    }>(await createResponsePromise, 201);
+    expect(occurrence).toMatchObject({
+      title: occurrenceTitle,
+      timezone: 'America/New_York',
+    });
+
+    const occurrenceRow = page.getByRole('row').filter({ hasText: occurrenceTitle });
+    await expect(occurrenceRow).toBeVisible();
+    await expect(occurrenceRow.getByText('scheduled', { exact: true })).toBeVisible();
+
+    await page.reload();
+    await expect(page.getByRole('heading', { name: 'Occurrences' })).toBeVisible();
+    await expect(page.getByRole('row').filter({ hasText: occurrenceTitle })).toBeVisible();
+
+    const listResponse = await page.request.get(`${apiBaseUrl}/v1/events/${event.id}/occurrences`, {
+      failOnStatusCode: false,
+    });
+    const listBody = await expectJsonStatus<{ items: Array<{ id: string; title: string }> }>(
+      listResponse,
+      200,
+    );
+    expect(listBody.items).toEqual(
+      expect.arrayContaining([expect.objectContaining({ id: occurrence.id, title: occurrenceTitle })]),
+    );
+
+    await attachScreenshot(page, testInfo, 'admin-event-occurrences-desktop');
+    await expectNoAxeViolations(page, testInfo);
+  });
 });

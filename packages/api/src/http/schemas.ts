@@ -267,7 +267,7 @@ export const createEventOccurrenceSchema = z
     venue: z.record(z.string(), z.unknown()).nullable().optional(),
     capacity: z.number().int().positive().nullable().optional(),
     sortOrder: z.number().int().min(0).optional(),
-    status: z.enum(['active', 'paused', 'cancelled']).optional(),
+    status: z.enum(['scheduled', 'cancelled', 'completed']).optional(),
   })
   .strict();
 
