@@ -46,6 +46,21 @@ function postCheckoutMessage(
   );
 }
 
+function setDocumentReferrer(value: string): void {
+  Object.defineProperty(document, 'referrer', {
+    configurable: true,
+    value,
+  });
+}
+
+function readWidgetImpressionBody(): Record<string, unknown> {
+  const call = vi
+    .mocked(globalThis.fetch)
+    .mock.calls.find(([requestUrl]) => String(requestUrl).includes('/widget-impressions'));
+  expect(call).toBeDefined();
+  return JSON.parse(String(call?.[1]?.body)) as Record<string, unknown>;
+}
+
 beforeEach(() => {
   window.localStorage.clear();
   vi.stubGlobal(
@@ -67,6 +82,8 @@ afterEach(() => {
   while (mountedElements.length > 0) {
     mountedElements.pop()?.disconnectedCallback();
   }
+  window.history.replaceState({}, '', '/');
+  setDocumentReferrer('');
   vi.unstubAllGlobals();
 });
 
@@ -86,6 +103,17 @@ describe('widget lifecycle events (runtime)', () => {
   });
 
   it('records one persisted widget impression when loaded', () => {
+    window.history.replaceState(
+      {},
+      '',
+      '/events/evt_demo?email=buyer@example.test&token=checkout-token#payment',
+    );
+    const referrerWithUserinfo = new URL('https://partner.example.test/campaigns/summer');
+    referrerWithUserinfo.username = 'userinfo';
+    referrerWithUserinfo.searchParams.set('email', 'referrer@example.test');
+    referrerWithUserinfo.searchParams.set('token', 'ref-token');
+    referrerWithUserinfo.hash = 'cta';
+    setDocumentReferrer(referrerWithUserinfo.toString());
     const el = createWidget({
       'reporting-api-url': 'https://api.test',
       'tracking-id': 'utm-widget',
@@ -104,6 +132,25 @@ describe('widget lifecycle events (runtime)', () => {
     expect(body.visitorId).toEqual(expect.any(String));
     expect(body.trackingId).toBe('utm-widget');
     expect(body.affiliateCode).toBe('AFF123');
+    expect(body.pageUrl).toBe(`${window.location.origin}/events/evt_demo`);
+    expect(body.referrer).toBe('https://partner.example.test/campaigns/summer');
+    expect(String(init?.body)).not.toMatch(
+      /[?#]|buyer@example\.test|checkout-token|userinfo@|referrer@example\.test|ref-token/,
+    );
+  });
+
+  it('does not send raw invalid widget impression referrers', () => {
+    window.history.replaceState({}, '', '/events/evt_demo?token=checkout-token#payment');
+    setDocumentReferrer('not a url with token=ref-token');
+    const el = createWidget({ 'reporting-api-url': 'https://api.test' });
+
+    el.connectedCallback();
+
+    const body = readWidgetImpressionBody();
+    expect(body.pageUrl).toBe(`${window.location.origin}/events/evt_demo`);
+    expect(body.referrer).toBeUndefined();
+    expect(JSON.stringify(body)).not.toContain('not a url with token=ref-token');
+    expect(JSON.stringify(body)).not.toContain('ref-token');
   });
 
   it('does not record duplicate impressions across repeated connectedCallback calls for one element', () => {

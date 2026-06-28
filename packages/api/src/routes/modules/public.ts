@@ -317,7 +317,7 @@ export const publicRoutes: FastifyPluginAsync = async (app) => {
           source: 'widget',
           tracking_id: body.trackingId ?? null,
           affiliate_code: body.affiliateCode ?? null,
-          host: body.host ?? null,
+          host: normalizeHost(body.host) || null,
           page_url: normalizeAnalyticsUrl(body.pageUrl),
           referrer: normalizeAnalyticsUrl(body.referrer),
           created_at: new Date(),

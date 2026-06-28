@@ -75,6 +75,9 @@ const dnsState = vi.hoisted(() => ({
 }));
 
 const httpsState = vi.hoisted(() => ({
+  heldResponses: [] as Array<ReturnType<typeof createMockResponse>>,
+  holdResponses: false,
+  onRequest: null as (() => void) | null,
   nextError: null as Error | null,
   nextResponse: { statusCode: 204, body: '' },
   request: vi.fn(),
@@ -89,6 +92,15 @@ vi.mock('@tixkit/db', () => {
   }
 
   class WebhookDeliveryRepository {
+    async findByAttempt(input: { eventId: string; requestedEndpointId: string; attempt: number }) {
+      return dbState.deliveries.find(
+        (delivery) =>
+          delivery.event_id === input.eventId &&
+          delivery.requested_endpoint_id === input.requestedEndpointId &&
+          delivery.attempt === input.attempt,
+      );
+    }
+
     async create(input: {
       endpointId: string | null;
       requestedEndpointId?: string;
@@ -101,7 +113,15 @@ vi.mock('@tixkit/db', () => {
       nextRetryAt?: Date | null;
     }) {
       const requestedEndpointId = input.requestedEndpointId ?? input.endpointId;
-      if (!requestedEndpointId) throw new Error('Webhook delivery requires a requested endpoint id');
+      if (!requestedEndpointId)
+        throw new Error('Webhook delivery requires a requested endpoint id');
+
+      const existingDelivery = await this.findByAttempt({
+        eventId: input.eventId,
+        requestedEndpointId,
+        attempt: input.attempt,
+      });
+      if (existingDelivery) return existingDelivery;
 
       const delivery: DeliveryRow = {
         id: `whd_${dbState.deliveries.length + 1}`,
@@ -126,6 +146,40 @@ vi.mock('@tixkit/db', () => {
       if (!delivery) throw new Error(`Delivery ${id} not found`);
       Object.assign(delivery, input);
       return delivery;
+    }
+
+    async claimAttempt(input: {
+      endpointId: string | null;
+      requestedEndpointId?: string;
+      eventId: string;
+      attempt: number;
+      leaseExpiresAt: Date;
+    }) {
+      const requestedEndpointId = input.requestedEndpointId ?? input.endpointId;
+      if (!requestedEndpointId)
+        throw new Error('Webhook delivery claim requires a requested endpoint id');
+      const delivery = await this.create({
+        endpointId: input.endpointId,
+        requestedEndpointId,
+        eventId: input.eventId,
+        attempt: input.attempt,
+      });
+      const now = new Date();
+      const canClaim =
+        delivery.status === 'failed' ||
+        (delivery.status === 'pending' &&
+          (delivery.next_retry_at === null || delivery.next_retry_at.getTime() <= now.getTime()));
+
+      if (!canClaim) {
+        return { claimed: false, delivery };
+      }
+
+      delivery.endpoint_id = input.endpointId;
+      delivery.status_code = null;
+      delivery.response = null;
+      delivery.delivered_at = null;
+      delivery.next_retry_at = input.leaseExpiresAt;
+      return { claimed: true, delivery };
     }
   }
 
@@ -162,13 +216,19 @@ describe('deliverWebhookActivity', () => {
       (
         _hostname: string,
         _options: { all: true },
-        callback: (error: Error | null, addresses: Array<{ address: string; family: number }>) => void,
+        callback: (
+          error: Error | null,
+          addresses: Array<{ address: string; family: number }>,
+        ) => void,
       ) => {
         callback(null, [{ address: '93.184.216.34', family: 4 }]);
       },
     );
     httpsState.nextError = null;
     httpsState.nextResponse = { statusCode: 204, body: '' };
+    httpsState.holdResponses = false;
+    httpsState.heldResponses = [];
+    httpsState.onRequest = null;
     httpsState.requests = [];
     httpsState.request.mockReset();
     httpsState.request.mockImplementation(
@@ -196,7 +256,11 @@ describe('deliverWebhookActivity', () => {
                 httpsState.nextResponse.body,
               );
               callback(response);
-              queueMicrotask(() => response.emitBody());
+              if (httpsState.holdResponses) {
+                httpsState.heldResponses.push(response);
+              } else {
+                queueMicrotask(() => response.emitBody());
+              }
             };
 
             if (options.lookup && options.hostname) {
@@ -226,6 +290,7 @@ describe('deliverWebhookActivity', () => {
           }),
         };
         httpsState.requests.push(requestRecord);
+        httpsState.onRequest?.();
         return request;
       },
     );
@@ -323,6 +388,138 @@ describe('deliverWebhookActivity', () => {
       delivered_at: null,
       next_retry_at: null,
     });
+    expect(dbState.destroy).toHaveBeenCalledTimes(1);
+  });
+
+  it('reuses the existing delivery row and stable header when the same attempt is retried', async () => {
+    httpsState.nextError = new Error('network down');
+
+    const firstResult = await deliverWebhookActivity({
+      endpointId: 'wh_1',
+      eventId: 'whe_1',
+      payload: JSON.stringify({ orderId: 'ord_1' }),
+      attempt: 2,
+      finalAttempt: false,
+    });
+
+    expect(firstResult).toMatchObject({
+      ok: false,
+      errorCode: 'WEBHOOK_DELIVERY_FAILED',
+      retryable: true,
+      message: 'network down',
+    });
+    httpsState.nextError = null;
+    httpsState.nextResponse = { statusCode: 204, body: '' };
+
+    const secondResult = await deliverWebhookActivity({
+      endpointId: 'wh_1',
+      eventId: 'whe_1',
+      payload: JSON.stringify({ orderId: 'ord_1' }),
+      attempt: 2,
+      finalAttempt: false,
+    });
+
+    expect(secondResult).toMatchObject({ ok: true, value: { statusCode: 204, response: '' } });
+    expect(dbState.deliveries).toHaveLength(1);
+    expect(dbState.deliveries[0]).toMatchObject({
+      id: 'whd_1',
+      attempt: 2,
+      status: 'delivered',
+      status_code: 204,
+    });
+    expect(httpsState.requests).toHaveLength(2);
+    expect(httpsState.requests[0]?.options.headers).toMatchObject({
+      'X-Tixkit-Delivery': 'whd_1',
+    });
+    expect(httpsState.requests[1]?.options.headers).toMatchObject({
+      'X-Tixkit-Delivery': 'whd_1',
+    });
+    expect(dbState.destroy).toHaveBeenCalledTimes(2);
+  });
+
+  it('does not send a duplicate request while the same attempt is already in progress', async () => {
+    httpsState.holdResponses = true;
+    const firstRequestStarted = new Promise<void>((resolve) => {
+      httpsState.onRequest = resolve;
+    });
+
+    const firstResultPromise = deliverWebhookActivity({
+      endpointId: 'wh_1',
+      eventId: 'whe_1',
+      payload: JSON.stringify({ orderId: 'ord_1' }),
+      attempt: 2,
+      finalAttempt: false,
+    });
+    await firstRequestStarted;
+
+    const secondResult = await deliverWebhookActivity({
+      endpointId: 'wh_1',
+      eventId: 'whe_1',
+      payload: JSON.stringify({ orderId: 'ord_1' }),
+      attempt: 2,
+      finalAttempt: false,
+    });
+
+    expect(secondResult).toMatchObject({
+      ok: false,
+      errorCode: 'WEBHOOK_DELIVERY_IN_PROGRESS',
+      retryable: true,
+      message: 'Webhook delivery attempt is already in progress',
+    });
+    expect(httpsState.request).toHaveBeenCalledTimes(1);
+    expect(httpsState.requests).toHaveLength(1);
+    expect(dbState.deliveries).toHaveLength(1);
+    expect(dbState.deliveries[0]).toMatchObject({
+      id: 'whd_1',
+      attempt: 2,
+      status: 'pending',
+      status_code: null,
+      response: null,
+      delivered_at: null,
+    });
+    expect(dbState.deliveries[0]?.next_retry_at).toBeInstanceOf(Date);
+
+    httpsState.holdResponses = false;
+    httpsState.heldResponses.shift()?.emitBody();
+    const firstResult = await firstResultPromise;
+
+    expect(firstResult).toMatchObject({ ok: true, value: { statusCode: 204, response: '' } });
+    expect(dbState.deliveries[0]).toMatchObject({
+      id: 'whd_1',
+      attempt: 2,
+      status: 'delivered',
+      status_code: 204,
+    });
+    expect(dbState.destroy).toHaveBeenCalledTimes(2);
+  });
+
+  it('returns terminal delivered attempts without creating a second row or sending again', async () => {
+    dbState.deliveries.push({
+      id: 'whd_1',
+      endpoint_id: 'wh_1',
+      requested_endpoint_id: 'wh_1',
+      event_id: 'whe_1',
+      attempt: 1,
+      status_code: 204,
+      response: '',
+      status: 'delivered',
+      delivered_at: new Date(),
+      next_retry_at: null,
+      created_at: new Date(),
+    });
+
+    const result = await deliverWebhookActivity({
+      endpointId: 'wh_1',
+      eventId: 'whe_1',
+      payload: JSON.stringify({ orderId: 'ord_1' }),
+      attempt: 1,
+      finalAttempt: false,
+    });
+
+    expect(result).toMatchObject({ ok: true, value: { statusCode: 204, response: '' } });
+    expect(httpsState.request).not.toHaveBeenCalled();
+    expect(dbState.deliveries).toHaveLength(1);
+    expect(dbState.updateCalls).toBe(0);
     expect(dbState.destroy).toHaveBeenCalledTimes(1);
   });
 

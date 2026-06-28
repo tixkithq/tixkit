@@ -230,6 +230,17 @@ function widgetVisitorId(): string {
   }
 }
 
+function normalizeAnalyticsUrl(value?: string): string | undefined {
+  if (!value) return undefined;
+  try {
+    const url = new URL(value);
+    if (url.protocol !== 'http:' && url.protocol !== 'https:') return undefined;
+    return `${url.origin}${url.pathname}`;
+  } catch {
+    return undefined;
+  }
+}
+
 function recordWidgetImpression(
   element: HTMLElement,
   input: { eventId: string; trackingId?: string; affiliateCode?: string },
@@ -241,8 +252,8 @@ function recordWidgetImpression(
     trackingId: input.trackingId || undefined,
     affiliateCode: input.affiliateCode || undefined,
     host: window.location.host || undefined,
-    pageUrl: window.location.href || undefined,
-    referrer: document.referrer || undefined,
+    pageUrl: normalizeAnalyticsUrl(window.location.href),
+    referrer: normalizeAnalyticsUrl(document.referrer),
   };
   void fetch(
     `${reportingApiBase(element)}/v1/public/events/${encodeURIComponent(input.eventId)}/widget-impressions`,

@@ -538,6 +538,16 @@ export const tenantRoutes: FastifyPluginAsync = async (app) => {
             .where('provider', '=', 'stripe_connect')
             .executeTakeFirst();
           if (!account) throw error;
+          void stripe.accounts.del(stripeAccount.id).catch((cleanupError) => {
+            request.log.warn(
+              {
+                err: cleanupError,
+                organizationId,
+                stripeAccountId: stripeAccount.id,
+              },
+              'Failed to clean up duplicate Stripe Connect account after concurrent payment-account creation',
+            );
+          });
         }
 
         if (wasCreated) {

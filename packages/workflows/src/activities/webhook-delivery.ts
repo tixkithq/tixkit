@@ -12,6 +12,7 @@ import { okResult, errResult } from '../shared/types.js';
 
 const WEBHOOK_API_VERSION = '2026-01-01';
 const WEBHOOK_USER_AGENT = 'Tixkit-Webhook/1.0';
+const WEBHOOK_DELIVERY_CLAIM_LEASE_MS = 10 * 60 * 1000;
 const IPV4_BLOCKED_RANGES: Array<[number, number]> = [
   [ipv4ToInt('0.0.0.0'), ipv4ToInt('0.255.255.255')],
   [ipv4ToInt('10.0.0.0'), ipv4ToInt('10.255.255.255')],
@@ -34,6 +35,8 @@ type WebhookHttpResponse = {
   status: number;
   response: string;
 };
+
+type WebhookDeliveryAttempt = Awaited<ReturnType<WebhookDeliveryRepository['findByAttempt']>>;
 const IPV6_BLOCKED_RANGES: Array<[bigint, number]> = [
   [ipv6ToBigInt('::'), 128],
   [ipv6ToBigInt('::1'), 128],
@@ -60,39 +63,115 @@ export async function deliverWebhookActivity(input: {
   finalAttempt?: boolean;
 }): Promise<WorkflowActivityResult<{ statusCode: number; response: string }>> {
   const db = createDb();
-  let deliveryId: string | undefined;
+  let claimedDeliveryId: string | undefined;
   try {
     const endpointRepo = new WebhookEndpointRepository(db);
-    const endpoint = await endpointRepo.findById(input.endpointId);
     const deliveryRepo = new WebhookDeliveryRepository(db);
+    let delivery = await deliveryRepo.findByAttempt({
+      eventId: input.eventId,
+      requestedEndpointId: input.endpointId,
+      attempt: input.attempt,
+    });
+    const terminalResult = resultForTerminalDelivery(delivery);
+    if (terminalResult) {
+      return terminalResult;
+    }
+
+    const endpoint = await endpointRepo.findById(input.endpointId);
     if (!endpoint) {
-      await deliveryRepo.create({
-        endpointId: null,
-        requestedEndpointId: input.endpointId,
-        eventId: input.eventId,
-        attempt: input.attempt,
-        status: 'dead_lettered',
-        response: 'Webhook endpoint not found',
-        nextRetryAt: null,
-      });
+      delivery =
+        delivery ??
+        (await deliveryRepo.create({
+          endpointId: null,
+          requestedEndpointId: input.endpointId,
+          eventId: input.eventId,
+          attempt: input.attempt,
+          status: 'dead_lettered',
+          response: 'Webhook endpoint not found',
+          nextRetryAt: null,
+        }));
+      const racedTerminalResult = resultForTerminalDelivery(delivery, 'Webhook endpoint not found');
+      if (racedTerminalResult) {
+        return racedTerminalResult;
+      }
+      if (delivery.status !== 'dead_lettered') {
+        await deliveryRepo.update(delivery.id, {
+          endpoint_id: null,
+          status_code: null,
+          response: 'Webhook endpoint not found',
+          status: 'dead_lettered',
+          delivered_at: null,
+          next_retry_at: null,
+        });
+      }
       return errResult('ENDPOINT_NOT_FOUND', 'Webhook endpoint not found', false);
     }
 
     const inactiveEndpoint = endpoint.status !== 'active';
-    const delivery = await deliveryRepo.create({
-      endpointId: input.endpointId,
-      eventId: input.eventId,
-      attempt: input.attempt,
-      status: inactiveEndpoint ? 'dead_lettered' : undefined,
-      response: inactiveEndpoint ? 'Webhook endpoint is not active' : undefined,
-      nextRetryAt: inactiveEndpoint ? null : undefined,
-    });
-    deliveryId = delivery.id;
+    delivery =
+      delivery ??
+      (await deliveryRepo.create({
+        endpointId: input.endpointId,
+        eventId: input.eventId,
+        attempt: input.attempt,
+        status: inactiveEndpoint ? 'dead_lettered' : undefined,
+        response: inactiveEndpoint ? 'Webhook endpoint is not active' : undefined,
+        nextRetryAt: inactiveEndpoint ? null : undefined,
+      }));
+    const racedTerminalResult = resultForTerminalDelivery(
+      delivery,
+      inactiveEndpoint ? 'Webhook endpoint is not active' : undefined,
+    );
+    if (racedTerminalResult) {
+      return racedTerminalResult;
+    }
     if (inactiveEndpoint) {
+      if (delivery.status !== 'dead_lettered') {
+        await deliveryRepo.update(delivery.id, {
+          endpoint_id: input.endpointId,
+          status_code: null,
+          response: 'Webhook endpoint is not active',
+          status: 'dead_lettered',
+          delivered_at: null,
+          next_retry_at: null,
+        });
+      }
       return errResult('ENDPOINT_INACTIVE', 'Webhook endpoint is not active', false);
     }
 
-    const signature = signWebhookPayload({ payload: input.payload, secret: endpoint.secret as string });
+    const claim = await deliveryRepo.claimAttempt({
+      endpointId: input.endpointId,
+      eventId: input.eventId,
+      attempt: input.attempt,
+      leaseExpiresAt: new Date(Date.now() + WEBHOOK_DELIVERY_CLAIM_LEASE_MS),
+    });
+    delivery = claim.delivery;
+    const claimedTerminalResult = resultForTerminalDelivery(delivery);
+    if (claimedTerminalResult) {
+      return claimedTerminalResult;
+    }
+    if (!claim.claimed) {
+      const currentDelivery = await deliveryRepo.findByAttempt({
+        eventId: input.eventId,
+        requestedEndpointId: input.endpointId,
+        attempt: input.attempt,
+      });
+      const currentTerminalResult = resultForTerminalDelivery(currentDelivery);
+      if (currentTerminalResult) {
+        return currentTerminalResult;
+      }
+      return errResult(
+        'WEBHOOK_DELIVERY_IN_PROGRESS',
+        'Webhook delivery attempt is already in progress',
+        true,
+      );
+    }
+    claimedDeliveryId = delivery.id;
+
+    const signature = signWebhookPayload({
+      payload: input.payload,
+      secret: endpoint.secret as string,
+    });
     const eventType = input.eventType ?? parseWebhookEventType(input.payload);
     const response = await withSpan(
       'provider.webhook.deliver',
@@ -136,10 +215,10 @@ export async function deliverWebhookActivity(input: {
     });
     return okResult({ statusCode: response.status, response: responseText });
   } catch (err) {
-    if (deliveryId) {
+    if (claimedDeliveryId) {
       try {
         const deliveryRepo = new WebhookDeliveryRepository(db);
-        await deliveryRepo.update(deliveryId, {
+        await deliveryRepo.update(claimedDeliveryId, {
           status_code: null,
           response: err instanceof Error ? err.message : 'Unknown error',
           status: input.finalAttempt === true ? 'dead_lettered' : 'failed',
@@ -162,6 +241,36 @@ export async function deliverWebhookActivity(input: {
   } finally {
     await db.destroy();
   }
+}
+
+function resultForTerminalDelivery(
+  delivery: WebhookDeliveryAttempt,
+  expectedDeadLetterResponse?: string,
+): WorkflowActivityResult<{ statusCode: number; response: string }> | null {
+  if (!delivery) {
+    return null;
+  }
+
+  if (delivery.status === 'delivered') {
+    return okResult({
+      statusCode: delivery.status_code ?? 204,
+      response: delivery.response ?? '',
+    });
+  }
+
+  if (delivery.status === 'dead_lettered') {
+    if (expectedDeadLetterResponse && delivery.response === expectedDeadLetterResponse) {
+      return null;
+    }
+
+    return errResult(
+      'WEBHOOK_DELIVERY_ALREADY_TERMINAL',
+      delivery.response ?? 'Webhook delivery is already terminal',
+      false,
+    );
+  }
+
+  return null;
 }
 
 function postWebhook(
@@ -315,7 +424,10 @@ function createBlockedHostError(message: string): NodeJS.ErrnoException {
 }
 
 function normalizeHostname(hostname: string): string {
-  return hostname.toLowerCase().replace(/^\[|\]$/g, '').replace(/\.$/, '');
+  return hostname
+    .toLowerCase()
+    .replace(/^\[|\]$/g, '')
+    .replace(/\.$/, '');
 }
 
 function isPrivateHostname(hostname: string): boolean {
@@ -352,10 +464,7 @@ function ipv4ToInt(address: string): number {
     throw new Error(`Invalid IPv4 address: ${address}`);
   }
 
-  return (
-    (parts[0] * 256 ** 3 + parts[1] * 256 ** 2 + parts[2] * 256 + parts[3]) >>>
-    0
-  );
+  return (parts[0] * 256 ** 3 + parts[1] * 256 ** 2 + parts[2] * 256 + parts[3]) >>> 0;
 }
 
 function ipv6ToBigInt(address: string): bigint {

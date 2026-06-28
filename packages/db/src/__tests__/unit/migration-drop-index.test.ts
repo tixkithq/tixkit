@@ -5,11 +5,11 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 
 const migrationDir = resolve(dirname(fileURLToPath(import.meta.url)), '../../migrations');
 const migrateSourcePath = resolve(dirname(fileURLToPath(import.meta.url)), '../../migrate.ts');
-const turboConfigPath = resolve(dirname(fileURLToPath(import.meta.url)), '../../../../../turbo.json');
-const marketingIntegrationsMigrationPath = resolve(
-  migrationDir,
-  '0014_marketing_integrations.ts',
+const turboConfigPath = resolve(
+  dirname(fileURLToPath(import.meta.url)),
+  '../../../../../turbo.json',
 );
+const marketingIntegrationsMigrationPath = resolve(migrationDir, '0014_marketing_integrations.ts');
 const marketingIntegrationsUniqueMigrationPath = resolve(
   migrationDir,
   '0015_marketing_integrations_unique.ts',
@@ -18,17 +18,15 @@ const nullableWebhookDeliveryEndpointMigrationPath = resolve(
   migrationDir,
   '0022_nullable_webhook_delivery_endpoint.ts',
 );
-const eventsBrandSlugScopeMigrationPath = resolve(
-  migrationDir,
-  '0023_events_brand_slug_scope.ts',
-);
+const eventsBrandSlugScopeMigrationPath = resolve(migrationDir, '0023_events_brand_slug_scope.ts');
 const webhookDeliveryEndpointHistoryIndexMigrationPath = resolve(
   migrationDir,
   '0024_webhook_delivery_endpoint_history_index.ts',
 );
-const paymentAccountsUniqueMigrationPath = resolve(
+const paymentAccountsUniqueMigrationPath = resolve(migrationDir, '0025_payment_accounts_unique.ts');
+const webhookDeliveryAttemptIdentityMigrationPath = resolve(
   migrationDir,
-  '0025_payment_accounts_unique.ts',
+  '0026_webhook_delivery_attempt_identity.ts',
 );
 const originalDbDriver = process.env.DB_DRIVER;
 
@@ -45,6 +43,15 @@ type PaymentAccountSeedRow = {
   provider: string;
   provider_account_id: string;
   updated_at: string;
+};
+
+type WebhookDeliverySeedRow = {
+  id: string;
+  event_id: string;
+  requested_endpoint_id: string;
+  attempt: number;
+  status: string;
+  created_at: string;
 };
 
 type CreatedIndex = {
@@ -217,9 +224,7 @@ class FakeMarketingIntegrationsDb {
     if (statement.includes('ranked_marketing_integrations')) {
       this.dedupeMarketingIntegrations();
     }
-    if (
-      statement.includes('create unique index uniq_marketing_integrations_event_provider')
-    ) {
+    if (statement.includes('create unique index uniq_marketing_integrations_event_provider')) {
       this.assertUniqueMarketingIntegrations();
     }
   }
@@ -281,6 +286,103 @@ class FakeMarketingIntegrationsDb {
       seenKeys.add(key);
     }
   }
+}
+
+class FakeWebhookDeliveriesDb {
+  readonly createdIndexes: CreatedIndex[] = [];
+  readonly rawSqlStatements: string[] = [];
+  rows: WebhookDeliverySeedRow[];
+  readonly schema = {
+    createIndex: (indexName: string) => new FakeCreateIndexBuilder(this, indexName),
+    dropIndex: (indexName: string) => ({
+      on: (tableName: string) => ({
+        ifExists: () => ({
+          execute: async () => {
+            this.createdIndexes.push({
+              indexName,
+              tableName,
+              columns: [],
+              unique: false,
+            });
+          },
+        }),
+      }),
+    }),
+  };
+
+  constructor(rows: WebhookDeliverySeedRow[]) {
+    this.rows = [...rows];
+  }
+
+  executeRawSql(statement: string): void {
+    this.rawSqlStatements.push(statement);
+
+    if (statement.includes('ranked_webhook_deliveries')) {
+      this.dedupeWebhookDeliveries();
+    }
+  }
+
+  createIndex(createdIndex: CreatedIndex): void {
+    if (
+      createdIndex.unique &&
+      createdIndex.tableName === 'webhook_deliveries' &&
+      createdIndex.columns.join('|') === 'event_id|requested_endpoint_id|attempt'
+    ) {
+      this.assertUniqueDeliveryAttempts();
+    }
+
+    this.createdIndexes.push(createdIndex);
+  }
+
+  private dedupeWebhookDeliveries(): void {
+    const canonicalIds = new Set<string>();
+    const rowsByAttempt = new Map<string, WebhookDeliverySeedRow[]>();
+
+    for (const row of this.rows) {
+      const key = JSON.stringify([row.event_id, row.requested_endpoint_id, row.attempt]);
+      const rows = rowsByAttempt.get(key) ?? [];
+      rows.push(row);
+      rowsByAttempt.set(key, rows);
+    }
+
+    for (const rows of rowsByAttempt.values()) {
+      // eslint-disable-next-line unicorn/no-array-sort -- ES2023 toSorted is not available in this package's TS lib target.
+      const [canonicalRow] = [...rows].sort((a, b) => {
+        const statusPriorityDifference = statusPriority(b.status) - statusPriority(a.status);
+        if (statusPriorityDifference !== 0) return statusPriorityDifference;
+
+        const createdAtDifference = Date.parse(b.created_at) - Date.parse(a.created_at);
+        return createdAtDifference === 0 ? b.id.localeCompare(a.id) : createdAtDifference;
+      });
+
+      if (canonicalRow) {
+        canonicalIds.add(canonicalRow.id);
+      }
+    }
+
+    this.rows = this.rows.filter((row) => canonicalIds.has(row.id));
+  }
+
+  private assertUniqueDeliveryAttempts(): void {
+    const seenKeys = new Set<string>();
+
+    for (const row of this.rows) {
+      const key = JSON.stringify([row.event_id, row.requested_endpoint_id, row.attempt]);
+
+      if (seenKeys.has(key)) {
+        throw new Error(`duplicate webhook delivery survived for ${key}`);
+      }
+
+      seenKeys.add(key);
+    }
+  }
+}
+
+function statusPriority(status: string): number {
+  if (status === 'delivered') return 4;
+  if (status === 'dead_lettered') return 3;
+  if (status === 'failed') return 2;
+  return 1;
 }
 
 function fakeSql(strings: TemplateStringsArray, ...values: unknown[]) {
@@ -411,16 +513,8 @@ describe('migration helper MSSQL dialect safety', () => {
     expect(truncateAllDataSource).toContain('DELETE FROM');
     expect(truncateAllDataSource).toContain('DBCC CHECKIDENT');
     expect(truncateAllDataSource).toContain('WITH CHECK CHECK CONSTRAINT ALL');
-    expectSourceOrder(
-      truncateAllDataSource,
-      'NOCHECK CONSTRAINT ALL',
-      'DELETE FROM',
-    );
-    expectSourceOrder(
-      truncateAllDataSource,
-      'DELETE FROM',
-      'WITH CHECK CHECK CONSTRAINT ALL',
-    );
+    expectSourceOrder(truncateAllDataSource, 'NOCHECK CONSTRAINT ALL', 'DELETE FROM');
+    expectSourceOrder(truncateAllDataSource, 'DELETE FROM', 'WITH CHECK CHECK CONSTRAINT ALL');
   });
 });
 
@@ -518,11 +612,7 @@ describe('nullable webhook delivery endpoint migration dialect safety', () => {
       'alter table webhook_deliveries alter column endpoint_id varchar(32) null',
       'add constraint webhook_deliveries_endpoint_fk',
     );
-    expectSourceOrder(
-      upMssqlSource,
-      'add constraint webhook_deliveries_endpoint_fk',
-      'return',
-    );
+    expectSourceOrder(upMssqlSource, 'add constraint webhook_deliveries_endpoint_fk', 'return');
     expectSourceOrder(
       downMssqlSource,
       'drop constraint webhook_deliveries_endpoint_fk',
@@ -615,16 +705,109 @@ describe('webhook delivery endpoint history index migration safety', () => {
     const upSource = migrationMethodSource(source, 'up');
     const downSource = migrationMethodSource(source, 'down');
 
-    expect(upSource).toContain(
-      "createIndex('idx_webhook_deliveries_requested_endpoint_history')",
+    expect(upSource).toContain("createIndex('idx_webhook_deliveries_requested_endpoint_history')");
+    expect(upSource).toContain(".on('webhook_deliveries')");
+    expect(upSource).toContain("columns(['requested_endpoint_id', 'created_at', 'id'])");
+    expect(downSource).toContain("dropIndex('idx_webhook_deliveries_requested_endpoint_history')");
+    expectSourceOrder(downSource, ".on('webhook_deliveries')", '.ifExists()');
+  });
+});
+
+describe('webhook delivery attempt identity migration safety', () => {
+  it('dedupes existing event/requested-endpoint/attempt rows before creating the unique index', async () => {
+    delete process.env.DB_DRIVER;
+    vi.doMock('kysely', async (importOriginal) => {
+      const actual = await importOriginal<typeof import('kysely')>();
+
+      return { ...actual, sql: fakeSql };
+    });
+    const { WebhookDeliveryAttemptIdentityMigration } =
+      await import('../../migrations/0026_webhook_delivery_attempt_identity.js');
+    const db = new FakeWebhookDeliveriesDb([
+      {
+        id: 'whd_pending',
+        event_id: 'whe_1',
+        requested_endpoint_id: 'wh_1',
+        attempt: 1,
+        status: 'pending',
+        created_at: '2026-01-01T00:00:00.000Z',
+      },
+      {
+        id: 'whd_failed',
+        event_id: 'whe_1',
+        requested_endpoint_id: 'wh_1',
+        attempt: 1,
+        status: 'failed',
+        created_at: '2026-01-02T00:00:00.000Z',
+      },
+      {
+        id: 'whd_delivered',
+        event_id: 'whe_1',
+        requested_endpoint_id: 'wh_1',
+        attempt: 1,
+        status: 'delivered',
+        created_at: '2026-01-01T00:00:00.000Z',
+      },
+      {
+        id: 'whd_other_attempt',
+        event_id: 'whe_1',
+        requested_endpoint_id: 'wh_1',
+        attempt: 2,
+        status: 'failed',
+        created_at: '2026-01-01T00:00:00.000Z',
+      },
+      {
+        id: 'whd_other_endpoint',
+        event_id: 'whe_1',
+        requested_endpoint_id: 'wh_2',
+        attempt: 1,
+        status: 'pending',
+        created_at: '2026-01-01T00:00:00.000Z',
+      },
+    ]);
+
+    await WebhookDeliveryAttemptIdentityMigration.up(db as never);
+
+    // eslint-disable-next-line unicorn/no-array-sort -- ES2023 toSorted is not available in this package's TS lib target.
+    expect(db.rows.map((row) => row.id).sort()).toEqual([
+      'whd_delivered',
+      'whd_other_attempt',
+      'whd_other_endpoint',
+    ]);
+    expect(db.rawSqlStatements).toHaveLength(1);
+    expect(db.rawSqlStatements[0]).toContain('ranked_webhook_deliveries');
+    expect(db.rawSqlStatements[0]).toContain(
+      'partition by event_id, requested_endpoint_id, attempt',
+    );
+    expect(db.createdIndexes).toEqual([
+      {
+        indexName: 'uniq_webhook_deliveries_attempt_identity',
+        tableName: 'webhook_deliveries',
+        columns: ['event_id', 'requested_endpoint_id', 'attempt'],
+        unique: true,
+      },
+    ]);
+  });
+
+  it('keeps duplicate cleanup before the attempt identity index and rollback table-qualified', () => {
+    const source = readFileSync(webhookDeliveryAttemptIdentityMigrationPath, 'utf8');
+    const upSource = migrationMethodSource(source, 'up');
+    const downSource = migrationMethodSource(source, 'down');
+
+    expect(source).toContain("process.env.DB_DRIVER === 'mysql'");
+    expect(source).toContain("process.env.DB_DRIVER === 'mssql'");
+    expect(source).toContain('delete webhook_deliveries');
+    expect(source).toContain('delete from ranked_webhook_deliveries');
+    expect(source).toContain('delete from webhook_deliveries');
+    expectSourceOrder(
+      upSource,
+      'dedupeWebhookDeliveries(db)',
+      "createIndex('uniq_webhook_deliveries_attempt_identity')",
     );
     expect(upSource).toContain(".on('webhook_deliveries')");
-    expect(upSource).toContain(
-      "columns(['requested_endpoint_id', 'created_at', 'id'])",
-    );
-    expect(downSource).toContain(
-      "dropIndex('idx_webhook_deliveries_requested_endpoint_history')",
-    );
+    expect(upSource).toContain("columns(['event_id', 'requested_endpoint_id', 'attempt'])");
+    expect(upSource).toContain('.unique()');
+    expect(downSource).toContain("dropIndex('uniq_webhook_deliveries_attempt_identity')");
     expectSourceOrder(downSource, ".on('webhook_deliveries')", '.ifExists()');
   });
 });
@@ -639,21 +822,9 @@ describe('marketing integrations base migration dialect safety', () => {
       'function timestampType',
       'function jsonType',
     );
-    const jsonTypeSource = sourceBetween(
-      source,
-      'function jsonType',
-      'function booleanType',
-    );
-    const booleanTypeSource = sourceBetween(
-      source,
-      'function booleanType',
-      'function nowDefault',
-    );
-    const nowDefaultSource = sourceBetween(
-      source,
-      'function nowDefault',
-      'function trueDefault',
-    );
+    const jsonTypeSource = sourceBetween(source, 'function jsonType', 'function booleanType');
+    const booleanTypeSource = sourceBetween(source, 'function booleanType', 'function nowDefault');
+    const nowDefaultSource = sourceBetween(source, 'function nowDefault', 'function trueDefault');
     const trueDefaultSource = sourceBetween(
       source,
       'function trueDefault',
@@ -662,12 +833,8 @@ describe('marketing integrations base migration dialect safety', () => {
 
     expect(source).toContain("process.env.DB_DRIVER === 'mysql'");
     expect(source).toContain("process.env.DB_DRIVER === 'mssql'");
-    expect(source).not.toContain(
-      "process.env.DB_DRIVER === 'mysql' ? 'datetime' : 'timestamptz'",
-    );
-    expect(source).not.toContain(
-      "process.env.DB_DRIVER === 'mysql' ? 'json' : 'jsonb'",
-    );
+    expect(source).not.toContain("process.env.DB_DRIVER === 'mysql' ? 'datetime' : 'timestamptz'");
+    expect(source).not.toContain("process.env.DB_DRIVER === 'mysql' ? 'json' : 'jsonb'");
     expect(source).not.toContain(
       "process.env.DB_DRIVER === 'mysql' ? sql`CURRENT_TIMESTAMP` : sql`now()`",
     );
@@ -690,13 +857,9 @@ describe('marketing integrations base migration dialect safety', () => {
       "if (isMssql()) return 'datetime2'",
       "return 'timestamptz'",
     );
-    expectSourceOrder(
-      jsonTypeSource,
-      "if (isMssql()) return 'nvarchar(max)'",
-      "return 'jsonb'",
-    );
+    expectSourceOrder(jsonTypeSource, "if (isMssql()) return 'nvarchar(max)'", "return 'jsonb'");
     expectSourceOrder(downSource, ".on('marketing_integrations')", '.ifExists()');
-    expectSourceOrder(downSource, ".ifExists()", "dropTable('marketing_integrations')");
+    expectSourceOrder(downSource, '.ifExists()', "dropTable('marketing_integrations')");
   });
 });
 
@@ -838,11 +1001,7 @@ describe('payment accounts unique migration safety', () => {
     await PaymentAccountsUniqueMigration.up(db as never);
 
     // eslint-disable-next-line unicorn/no-array-sort -- ES2023 toSorted is not available in this package's TS lib target.
-    expect(db.rows.map((row) => row.id).sort()).toEqual([
-      'pa_new_z',
-      'pa_other_org',
-      'pa_stripe',
-    ]);
+    expect(db.rows.map((row) => row.id).sort()).toEqual(['pa_new_z', 'pa_other_org', 'pa_stripe']);
     expect(db.rawSqlStatements).toHaveLength(1);
     expect(db.rawSqlStatements[0]).toContain('ranked_payment_accounts');
     expect(db.createdIndexes).toEqual([

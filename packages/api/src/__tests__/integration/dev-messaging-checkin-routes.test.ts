@@ -25,6 +25,7 @@ const mockValuesEqual = (rowValue: unknown, filterValue: unknown): boolean => {
 };
 
 function createMockDb(tables: Record<string, unknown> = {}): unknown {
+  const tableState = tables as Record<string, unknown>;
   const getRows = (table: string): Record<string, unknown>[] => {
     if (table in tables) return tables[table] as Record<string, unknown>[];
     return [];
@@ -47,7 +48,9 @@ function createMockDb(tables: Record<string, unknown> = {}): unknown {
       fn: { sum: () => 'sum', countAll: () => 'count' },
       rows() {
         return getRows(table).filter((row) =>
-          filters.every(([column, value]) => mockValuesEqual(getMockColumnValue(row, column), value)),
+          filters.every(([column, value]) =>
+            mockValuesEqual(getMockColumnValue(row, column), value),
+          ),
         );
       },
       async executeTakeFirst() {
@@ -89,6 +92,16 @@ function createMockDb(tables: Record<string, unknown> = {}): unknown {
         const row: Record<string, unknown> = { id: String(vals.id ?? 'new_1'), ...vals };
         const insertRow = async () => {
           const rows = getRows(table);
+          if (table === 'payment_accounts' && tableState.paymentAccountInsertConflictRow) {
+            rows.push(tableState.paymentAccountInsertConflictRow as Record<string, unknown>);
+            tableState.paymentAccountInsertConflictRow = undefined;
+            throw Object.assign(
+              new Error(
+                'duplicate key value violates unique constraint "uniq_payment_accounts_organization_provider"',
+              ),
+              { code: '23505' },
+            );
+          }
           const duplicateWidgetImpression =
             table === 'widget_impressions' &&
             rows.some((existing) => {
@@ -734,6 +747,173 @@ describe('brand domain creation', () => {
     await app.close();
   });
 
+  it('POST /organizations/:organizationId/payment-accounts/stripe-connect recovers when concurrent first-create wins', async () => {
+    const tables = {
+      organizations: [
+        {
+          id: 'org_1',
+          tenant_id: 'tnt_1',
+          name: 'Org',
+          slug: 'org',
+          clerk_organization_id: null,
+          status: 'active',
+          created_at: new Date(),
+          updated_at: new Date(),
+        },
+      ],
+      payment_accounts: [],
+      audit_logs: [],
+      paymentAccountInsertConflictRow: {
+        id: 'pa_winner',
+        tenant_id: 'tnt_1',
+        organization_id: 'org_1',
+        provider: 'stripe_connect',
+        provider_account_id: 'acct_winner',
+        status: 'pending',
+        default_currency: 'USD',
+        details_submitted: false,
+        charges_enabled: false,
+        payouts_enabled: false,
+        requirements: JSON.stringify({ currently_due: ['business_profile.url'] }),
+        disabled_reason: null,
+        created_at: new Date(),
+        updated_at: new Date(),
+      },
+    };
+    const stripe = {
+      accounts: {
+        create: vi.fn(async () => ({
+          id: 'acct_loser',
+          charges_enabled: false,
+          payouts_enabled: false,
+          details_submitted: false,
+          default_currency: 'usd',
+          requirements: {
+            currently_due: [],
+            pending_verification: [],
+            disabled_reason: null,
+          },
+        })),
+        del: vi.fn(async () => {
+          throw new Error('Stripe cleanup unavailable');
+        }),
+      },
+      accountLinks: {
+        create: vi.fn(async () => ({ url: 'https://connect.stripe.test/onboard/acct_winner' })),
+      },
+    };
+    const app = await setupApp(tenantRoutes, makePrincipal(), tables, { stripe });
+    const res = await app.inject({
+      method: 'POST',
+      url: '/organizations/org_1/payment-accounts/stripe-connect',
+    });
+
+    expect(res.statusCode).toBe(200);
+    expect(res.json()).toMatchObject({
+      id: 'pa_winner',
+      provider: 'stripe_connect',
+      providerAccountId: 'acct_winner',
+      onboardingUrl: 'https://connect.stripe.test/onboard/acct_winner',
+    });
+    expect(tables.payment_accounts).toHaveLength(1);
+    expect(tables.audit_logs).toHaveLength(0);
+    expect(stripe.accounts.create).toHaveBeenCalledTimes(1);
+    expect(stripe.accounts.del).toHaveBeenCalledWith('acct_loser');
+    expect(stripe.accountLinks.create).toHaveBeenCalledWith({
+      account: 'acct_winner',
+      type: 'account_onboarding',
+      refresh_url: expect.stringContaining(
+        '/settings/payments?organizationId=org_1&stripeConnect=refresh',
+      ),
+      return_url: expect.stringContaining(
+        '/settings/payments?organizationId=org_1&stripeConnect=return',
+      ),
+    });
+    await app.close();
+  });
+
+  it('POST /organizations/:organizationId/payment-accounts/stripe-connect returns the winner without waiting for loser cleanup', async () => {
+    const tables = {
+      organizations: [
+        {
+          id: 'org_1',
+          tenant_id: 'tnt_1',
+          name: 'Org',
+          slug: 'org',
+          clerk_organization_id: null,
+          status: 'active',
+          created_at: new Date(),
+          updated_at: new Date(),
+        },
+      ],
+      payment_accounts: [],
+      audit_logs: [],
+      paymentAccountInsertConflictRow: {
+        id: 'pa_winner',
+        tenant_id: 'tnt_1',
+        organization_id: 'org_1',
+        provider: 'stripe_connect',
+        provider_account_id: 'acct_winner',
+        status: 'pending',
+        default_currency: 'USD',
+        details_submitted: false,
+        charges_enabled: false,
+        payouts_enabled: false,
+        requirements: JSON.stringify({ currently_due: [] }),
+        disabled_reason: null,
+        created_at: new Date(),
+        updated_at: new Date(),
+      },
+    };
+    const cleanupPromise = new Promise<never>(() => undefined);
+    const stripe = {
+      accounts: {
+        create: vi.fn(async () => ({
+          id: 'acct_loser',
+          charges_enabled: false,
+          payouts_enabled: false,
+          details_submitted: false,
+          default_currency: 'usd',
+          requirements: {
+            currently_due: [],
+            pending_verification: [],
+            disabled_reason: null,
+          },
+        })),
+        del: vi.fn(() => cleanupPromise),
+      },
+      accountLinks: {
+        create: vi.fn(async () => ({ url: 'https://connect.stripe.test/onboard/acct_winner' })),
+      },
+    };
+    const app = await setupApp(tenantRoutes, makePrincipal(), tables, { stripe });
+    const startedAt = Date.now();
+    const res = await app.inject({
+      method: 'POST',
+      url: '/organizations/org_1/payment-accounts/stripe-connect',
+    });
+
+    expect(Date.now() - startedAt).toBeLessThan(1000);
+    expect(res.statusCode).toBe(200);
+    expect(res.json()).toMatchObject({
+      id: 'pa_winner',
+      providerAccountId: 'acct_winner',
+      onboardingUrl: 'https://connect.stripe.test/onboard/acct_winner',
+    });
+    expect(stripe.accounts.del).toHaveBeenCalledWith('acct_loser');
+    expect(stripe.accountLinks.create).toHaveBeenCalledWith({
+      account: 'acct_winner',
+      type: 'account_onboarding',
+      refresh_url: expect.stringContaining(
+        '/settings/payments?organizationId=org_1&stripeConnect=refresh',
+      ),
+      return_url: expect.stringContaining(
+        '/settings/payments?organizationId=org_1&stripeConnect=return',
+      ),
+    });
+    await app.close();
+  });
+
   it('POST /organizations/:organizationId/payment-accounts/:paymentAccountId/stripe-connect/refresh syncs status from Stripe', async () => {
     const tables = {
       organizations: [
@@ -1115,6 +1295,78 @@ describe('public access code validation', () => {
     expect(row.visitor_hash).not.toBe('visitor_123456');
     expect(row.tracking_id).toBe('utm-widget');
     expect(row.affiliate_code).toBe('AFF123');
+    await app.close();
+  });
+
+  it('normalizes widget impression analytics URLs before persistence', async () => {
+    const now = new Date('2026-06-01T00:00:00.000Z');
+    const tables = {
+      events: [
+        {
+          id: 'evt_1',
+          tenant_id: 'tnt_1',
+          organization_id: 'org_1',
+          brand_id: 'br_1',
+          slug: 'event',
+          title: 'Event',
+          description: null,
+          status: 'published',
+          timezone: 'America/New_York',
+          starts_at: now,
+          ends_at: null,
+          venue: null,
+        },
+      ],
+      widget_impressions: [],
+    };
+    const app = await setupApp(publicRoutes, makePrincipal(), tables);
+
+    const pageUrlWithUserinfo = new URL('https://tickets.example.test/events/evt_1');
+    pageUrlWithUserinfo.username = 'userinfo';
+    pageUrlWithUserinfo.searchParams.set('email', 'buyer@example.test');
+    pageUrlWithUserinfo.searchParams.set('token', 'checkout-token');
+    pageUrlWithUserinfo.hash = 'payment';
+
+    const res = await app.inject({
+      method: 'POST',
+      url: '/public/events/evt_1/widget-impressions',
+      headers: { 'user-agent': 'vitest' },
+      payload: {
+        visitorId: 'visitor_123456',
+        host: 'Tickets.Example.Test.',
+        pageUrl: pageUrlWithUserinfo.toString(),
+        referrer:
+          'https://partner.example.test/campaigns/summer?email=referrer@example.test&token=ref-token#cta',
+      },
+    });
+
+    expect(res.statusCode).toBe(201);
+    const row = (tables.widget_impressions as Array<Record<string, unknown>>)[0];
+    expect(row.host).toBe('tickets.example.test');
+    expect(row.page_url).toBe('https://tickets.example.test/events/evt_1');
+    expect(row.referrer).toBe('https://partner.example.test/campaigns/summer');
+    expect(String(row.page_url)).not.toMatch(
+      /[?#]|buyer@example\.test|checkout-token|userinfo@/,
+    );
+    expect(String(row.referrer)).not.toMatch(/[?#]|referrer@example\.test|ref-token/);
+
+    const invalidRes = await app.inject({
+      method: 'POST',
+      url: '/public/events/evt_1/widget-impressions',
+      headers: { 'user-agent': 'vitest' },
+      payload: {
+        visitorId: 'visitor_abcdef',
+        host: 'https://tickets.example.test/path?email=buyer@example.test&token=checkout-token#payment',
+        pageUrl: 'javascript:alert("buyer@example.test")',
+        referrer: 'not a url with token=ref-token',
+      },
+    });
+
+    expect(invalidRes.statusCode).toBe(201);
+    const invalidRow = (tables.widget_impressions as Array<Record<string, unknown>>)[1];
+    expect(invalidRow.host).toBeNull();
+    expect(invalidRow.page_url).toBeNull();
+    expect(invalidRow.referrer).toBeNull();
     await app.close();
   });
 
@@ -3643,6 +3895,16 @@ describe('checkout pricing tamper resistance', () => {
       feeCents: 300,
       totalCents: 16800,
     });
+  });
+
+  it('rejects checkout session creation for private published events without reserving inventory', async () => {
+    const tables = pricingTables({
+      events: [{ ...baseEvent, visibility: 'private' }],
+    });
+    const res = await postPricingCheckoutSession({}, tables);
+
+    expect(res.statusCode).toBe(404);
+    expect(tables.checkout_sessions).toEqual([]);
   });
 
   it('rejects client-supplied unit amounts for paid tickets', async () => {
