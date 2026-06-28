@@ -8,8 +8,8 @@ import { TixkitActivityMetricsInterceptor } from '../observability.js';
 import { createWorkflowExporterSink } from '../otel-workflow-exporter.js';
 
 vi.mock('@temporalio/interceptors-opentelemetry', () => ({
-  OpenTelemetryActivityInboundInterceptor: function OpenTelemetryActivityInboundInterceptor() {},
-  OpenTelemetryWorkflowInboundInterceptor: function OpenTelemetryWorkflowInboundInterceptor() {},
+  OpenTelemetryActivityInboundInterceptor: vi.fn(),
+  OpenTelemetryWorkflowInboundInterceptor: vi.fn(),
 }));
 
 vi.mock('@tixkit/shared', async (importOriginal) => {
