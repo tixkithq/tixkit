@@ -67,8 +67,8 @@ describe('observability redaction', () => {
 });
 
 describe('OpenTelemetry runtime', () => {
-  it('creates telemetry resources with service metadata', () => {
-    const resource = createTelemetryResource({
+  it('creates telemetry resources with service metadata', async () => {
+    const resource = await createTelemetryResource({
       serviceName: 'test-service',
       serviceVersion: '1.2.3',
       environment: 'test',
@@ -84,7 +84,7 @@ describe('OpenTelemetry runtime', () => {
   it('does not start the SDK when OTEL_SDK_DISABLED is true', async () => {
     process.env.OTEL_SDK_DISABLED = 'true';
 
-    const runtime = startOpenTelemetry({ serviceName: 'disabled-service' });
+    const runtime = await startOpenTelemetry({ serviceName: 'disabled-service' });
 
     await expect(runtime.shutdown()).resolves.toBeUndefined();
   });
@@ -92,7 +92,7 @@ describe('OpenTelemetry runtime', () => {
   it('starts and shuts down the SDK when enabled', async () => {
     delete process.env.OTEL_SDK_DISABLED;
 
-    const runtime = startOpenTelemetry({ serviceName: 'enabled-service', disabled: false });
+    const runtime = await startOpenTelemetry({ serviceName: 'enabled-service', disabled: false });
 
     await expect(runtime.shutdown()).resolves.toBeUndefined();
   });

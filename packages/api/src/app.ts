@@ -111,7 +111,7 @@ export async function buildApp(): Promise<FastifyInstance> {
     },
     genReqId: () => `req_${Date.now().toString(36)}${Math.random().toString(36).substring(2, 8)}`,
   });
-  const observability = createApiObservability();
+  const observability = await createApiObservability();
   registerObservability(app, observability);
 
   // Plugins

@@ -72,7 +72,7 @@ async function buildRouteManifest(): Promise<CapturedRoute[]> {
 
   // Health check (outside /v1 prefix, documented separately in OpenAPI).
   app.get('/health', async () => ({ status: 'ok' }));
-  registerMetricsRoute(app, createApiObservability(), () => mockContext.db, {
+  registerMetricsRoute(app, await createApiObservability(), () => mockContext.db, {
     requireBearerToken: false,
   });
 

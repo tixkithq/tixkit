@@ -14,17 +14,17 @@ import { createWorkflowExporterSink } from './otel-workflow-exporter.js';
 const require = createRequire(import.meta.url);
 
 async function runWorker(): Promise<void> {
-  const observability = startWorkerObservability();
+  const observability = await startWorkerObservability();
   const connection = await NativeConnection.connect({
     address: config.temporalAddress,
   });
-  const telemetryResource = createTelemetryResource({
+  const telemetryResource = await createTelemetryResource({
     serviceName: 'tixkit-worker',
     serviceVersion: process.env.npm_package_version,
     environment: process.env.NODE_ENV ?? 'development',
     otlpEndpoint: process.env.OTEL_EXPORTER_OTLP_ENDPOINT,
   });
-  const workflowTraceExporter = createTraceExporter({ serviceName: 'tixkit-worker' });
+  const workflowTraceExporter = await createTraceExporter({ serviceName: 'tixkit-worker' });
 
   const worker = await Worker.create({
     connection,

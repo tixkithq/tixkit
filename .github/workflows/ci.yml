@@ -46,7 +46,7 @@ jobs:
           bun run format:check
           bun run lint
           bun run typecheck
-          bunx turbo run build --filter=@tixkit/db
+          bunx turbo run build --filter=@tixkit/db --filter=@tixkit/shared
           env -u DATABASE_URL -u DATABASE_URL_MYSQL bun run test:unit
           bun run build
           git init -q
@@ -191,7 +191,7 @@ jobs:
           echo "Temporal did not become ready" >&2
           exit 1
       - run: bun run db:migrate
-      - run: bunx turbo run build --filter=@tixkit/db
+      - run: bunx turbo run build --filter=@tixkit/db --filter=@tixkit/shared
       - run: bun run test:integration
 
   integration-tests-mysql:
@@ -251,7 +251,7 @@ jobs:
           echo "Temporal did not become ready" >&2
           exit 1
       - run: bun run db:migrate:mysql
-      - run: bunx turbo run build --filter=@tixkit/db
+      - run: bunx turbo run build --filter=@tixkit/db --filter=@tixkit/shared
       - name: MySQL Tier 1 correctness suites
         run: |
           cd packages/api

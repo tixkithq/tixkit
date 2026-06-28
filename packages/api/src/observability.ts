@@ -25,8 +25,8 @@ export type ApiObservability = {
   metrics: TixkitMetrics;
 };
 
-export function createApiObservability(): ApiObservability {
-  startOpenTelemetry({
+export async function createApiObservability(): Promise<ApiObservability> {
+  await startOpenTelemetry({
     serviceName: 'tixkit-api',
     serviceVersion: process.env.npm_package_version,
     environment: config.nodeEnv,

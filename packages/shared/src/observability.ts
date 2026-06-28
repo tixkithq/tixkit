@@ -6,10 +6,9 @@ import {
   type Span,
   type SpanAttributes,
 } from '@opentelemetry/api';
-import { OTLPTraceExporter } from '@opentelemetry/exporter-trace-otlp-http';
-import { resourceFromAttributes, type Resource } from '@opentelemetry/resources';
-import { NodeSDK } from '@opentelemetry/sdk-node';
-import { BatchSpanProcessor, type SpanExporter } from '@opentelemetry/sdk-trace-base';
+import type { Resource } from '@opentelemetry/resources';
+import type { NodeSDK } from '@opentelemetry/sdk-node';
+import type { SpanExporter } from '@opentelemetry/sdk-trace-base';
 import {
   collectDefaultMetrics,
   Counter,
@@ -62,7 +61,10 @@ export const pinoRedactionPaths = [
   '*.phone',
 ];
 
-export function createTelemetryResource(config: ObservabilityRuntimeConfig): Resource {
+export async function createTelemetryResource(
+  config: ObservabilityRuntimeConfig,
+): Promise<Resource> {
+  const { resourceFromAttributes } = await import('@opentelemetry/resources');
   return resourceFromAttributes({
     'service.name': config.serviceName,
     ...(config.serviceVersion ? { 'service.version': config.serviceVersion } : {}),
@@ -70,24 +72,32 @@ export function createTelemetryResource(config: ObservabilityRuntimeConfig): Res
   });
 }
 
-export function createTraceExporter(config: ObservabilityRuntimeConfig): SpanExporter {
+export async function createTraceExporter(
+  config: ObservabilityRuntimeConfig,
+): Promise<SpanExporter> {
+  const { OTLPTraceExporter: _OTLPTraceExporter } =
+    await import('@opentelemetry/exporter-trace-otlp-http');
   const traceEndpoint =
     process.env.OTEL_EXPORTER_OTLP_TRACES_ENDPOINT ??
     formatOtlpTraceEndpoint(config.otlpEndpoint ?? process.env.OTEL_EXPORTER_OTLP_ENDPOINT);
-  return new OTLPTraceExporter(traceEndpoint ? { url: traceEndpoint } : undefined);
+  return new _OTLPTraceExporter(traceEndpoint ? { url: traceEndpoint } : undefined);
 }
 
-export function startOpenTelemetry(config: ObservabilityRuntimeConfig): {
-  shutdown: () => Promise<void>;
-} {
+export async function startOpenTelemetry(
+  config: ObservabilityRuntimeConfig,
+): Promise<{ shutdown: () => Promise<void> }> {
   if (config.disabled || process.env.OTEL_SDK_DISABLED === 'true') {
     return { shutdown: async () => undefined };
   }
 
   if (!sdk) {
-    sdk = new NodeSDK({
-      resource: createTelemetryResource(config),
-      spanProcessor: new BatchSpanProcessor(createTraceExporter(config)),
+    const [{ NodeSDK: _NodeSDK }, { BatchSpanProcessor: _BatchSpanProcessor }] = await Promise.all([
+      import('@opentelemetry/sdk-node'),
+      import('@opentelemetry/sdk-trace-base'),
+    ]);
+    sdk = new _NodeSDK({
+      resource: await createTelemetryResource(config),
+      spanProcessor: new _BatchSpanProcessor(await createTraceExporter(config)),
     });
     sdk.start();
   }

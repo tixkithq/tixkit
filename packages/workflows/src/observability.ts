@@ -18,8 +18,8 @@ export type WorkerObservability = {
 
 let observability: WorkerObservability | undefined;
 
-export function startWorkerObservability(): WorkerObservability {
-  startOpenTelemetry({
+export async function startWorkerObservability(): Promise<WorkerObservability> {
+  await startOpenTelemetry({
     serviceName: 'tixkit-worker',
     serviceVersion: process.env.npm_package_version,
     environment: process.env.NODE_ENV ?? 'development',
