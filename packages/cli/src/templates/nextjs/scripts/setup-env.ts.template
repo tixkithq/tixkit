@@ -1,0 +1,33 @@
+import { readFile, writeFile } from 'node:fs/promises';
+import path from 'node:path';
+
+// Safe env bootstrap: copies the placeholder template to .env.local if it does not exist.
+async function main() {
+  const root = process.cwd();
+  const envPath = path.join(root, '.env.local');
+  try {
+    await readFile(envPath);
+    console.log('.env.local already exists; skipped.');
+    return;
+  } catch {
+    // File does not exist; create it from the template.
+  }
+
+  const template = await readFile(path.join(root, '.env.local.template'), 'utf8');
+  await writeFile(
+    envPath,
+    template
+      .replace(/__CHECKOUT_URL__/g, 'http://localhost:3201')
+      .replace(/__WIDGET_URL__/g, 'http://localhost:3201')
+      .replace(/__API_URL__/g, 'http://localhost:3101')
+      .replace(/__API_KEY__/g, 'tk_your_api_key_here')
+      .replace(/__WEBHOOK_SECRET__/g, 'whsec_your_webhook_secret_here')
+      .replace(/__APP_URL__/g, 'http://localhost:__PORT__'),
+  );
+  console.log('Created .env.local from template. Edit it before running the app.');
+}
+
+main().catch((err) => {
+  console.error(err);
+  process.exit(1);
+});

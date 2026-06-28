@@ -20,6 +20,7 @@
     "dev:all": "sh -c 'bun run dev:api & bun run dev:worker & bun run dev:checkout & bun run dev:admin & wait'",
     "quickstart": "bun run --env-file=.env.local --filter @tixkit/cli quickstart",
     "seed:sample-data": "bun run --env-file=.env.local --filter @tixkit/cli seed:sample-data",
+    "init": "bun run --filter @tixkit/cli init",
     "setup:check": "bun run --env-file=.env.local --filter @tixkit/cli setup:check",
     "dev:webhooks": "bun run --env-file=.env.local --filter @tixkit/cli dev:webhooks",
     "format": "oxfmt . --write",

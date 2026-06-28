@@ -1,3 +1,6 @@
+import { access, readFile } from 'node:fs/promises';
+import path from 'node:path';
+
 /**
  * Minimal `.env` file parser that preserves comments, blank lines, and
  * unquoted/quoted values. It does not expand variable references; it returns the
@@ -104,4 +107,36 @@ export function isPlaceholderValue(value: string): boolean {
   if (trimmed === '***************************************') return true;
   if (trimmed === '************************************') return true;
   return false;
+}
+
+export async function findRepoRoot(startDir: string): Promise<string> {
+  let current = path.resolve(startDir);
+  // We must walk parents sequentially: once we find the root we stop.
+  // eslint-disable-next-line no-await-in-loop
+  while (true) {
+    const pkgPath = path.join(current, 'package.json');
+    try {
+      // eslint-disable-next-line no-await-in-loop
+      await access(pkgPath);
+      // eslint-disable-next-line no-await-in-loop
+      const content = await readFile(pkgPath, 'utf8');
+      const manifest = JSON.parse(content) as {
+        name?: string;
+        workspaces?: string[] | { packages?: string[] };
+      };
+      const workspaces = Array.isArray(manifest.workspaces)
+        ? manifest.workspaces
+        : manifest.workspaces?.packages ?? [];
+      if (workspaces.includes('packages/*') && workspaces.includes('apps/*')) {
+        return current;
+      }
+    } catch {
+      // Keep walking upward.
+    }
+    const parent = path.dirname(current);
+    if (parent === current) {
+      throw new Error('Could not locate Tixkit monorepo root (no package.json with packages/* and apps/* workspaces)');
+    }
+    current = parent;
+  }
 }

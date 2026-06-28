@@ -1,0 +1,14 @@
+import type { ReactNode } from 'react';
+
+export const metadata = {
+  title: '__TITLE__',
+  description: 'Tixkit-powered event app created with create-tixkit-app.',
+};
+
+export default function RootLayout({ children }: { children: ReactNode }) {
+  return (
+    <html lang="en">
+      <body>{children}</body>
+    </html>
+  );
+}

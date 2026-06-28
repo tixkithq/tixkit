@@ -1,7 +1,9 @@
+import path from 'node:path';
 import { validateEnvFile, formatValidationResult } from './setup-check.js';
 import { runDevWebhooks, formatWebhookResult } from './dev-webhooks.js';
 import { seedSampleData } from './seed-sample-data.js';
 import { runQuickstart } from './quickstart.js';
+import { scaffold, SCAFFOLD_TEMPLATES, normalizeProjectName } from './scaffold.js';
 
 const args = process.argv.slice(2);
 const command = args[0];
@@ -11,10 +13,22 @@ function help(): string {
     'tixkit CLI — local developer experience helpers',
     '',
     'Commands:',
+    '  init                 Scaffold a new app using a Tixkit SDK template',
     '  setup:check          Validate .env.local for required and mode-specific values',
     '  dev:webhooks         Start Stripe CLI webhook forwarding for local development',
     '  seed:sample-data     Seed idempotent sample tenant / event / order data',
     '  quickstart           Start local infrastructure, apps, and sample data',
+    '',
+    'Options for init:',
+    '  <dir>                Target directory (required)',
+    '  --template <name>    Template to use (default: nextjs)',
+    '  --project-name <name> Package name (default: directory name)',
+    '  --port <number>      Dev server port (default: 3000)',
+    '  --brand-id <id>      Demo brand identifier',
+    '  --event-id <id>      Demo event identifier',
+    '  --ticket-type-id <id> Demo ticket type identifier',
+    '  --install            Run bun install after scaffolding',
+    '  --skip-git           Skip git init in the target directory',
     '',
     'Options for setup:check:',
     '  --env-file <path>    Path to env file (default: .env.local)',
@@ -43,6 +57,40 @@ function hasFlag(name: string): boolean {
 
 async function main(): Promise<void> {
   switch (command) {
+    case 'init': {
+      const targetDir = args[1];
+      if (!targetDir) {
+        console.log('Usage: tixkit init <dir> [options]');
+        process.exit(1);
+      }
+      const template = parseArg<'nextjs'>('--template', 'nextjs');
+      if (!SCAFFOLD_TEMPLATES.includes(template)) {
+        console.log(`Unknown template "${template}". Available: ${SCAFFOLD_TEMPLATES.join(', ')}`);
+        process.exit(1);
+      }
+      const rawProjectName = parseArg('--project-name', path.basename(targetDir));
+      const projectName = normalizeProjectName(rawProjectName);
+      const port = Number(parseArg('--port', '3000'));
+      const brandId = parseArg('--brand-id', 'brd_demo');
+      const eventId = parseArg('--event-id', 'evt_demo');
+      const ticketTypeId = parseArg('--ticket-type-id', 'tt_demo_general');
+      const install = hasFlag('--install');
+      const skipGit = hasFlag('--skip-git');
+      const result = await scaffold({
+        targetDir,
+        template,
+        projectName,
+        port,
+        brandId,
+        eventId,
+        ticketTypeId,
+        install,
+        skipGit,
+      });
+      console.log(result.message);
+      process.exit(result.ok ? 0 : 1);
+    }
+
     case 'setup:check': {
       const envFile = parseArg('--env-file', '.env.local');
       const mode = parseArg('--mode', 'local') as 'local' | 'provider' | 'production';

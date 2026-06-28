@@ -1,0 +1,68 @@
+'use client';
+
+import { useState } from 'react';
+import {
+  TixkitCheckoutButton,
+  TixkitProvider,
+  TixkitTicketWidget,
+  type TixkitCheckoutEventCallback,
+} from '@tixkit/next/client';
+
+const checkoutBaseUrl = process.env.NEXT_PUBLIC_TIXKIT_CHECKOUT_URL ?? 'http://localhost:3201';
+const widgetBaseUrl = process.env.NEXT_PUBLIC_TIXKIT_WIDGET_URL ?? 'http://localhost:3201';
+
+export function TixkitDemo() {
+  const [events, setEvents] = useState<string[]>([]);
+  const onEvent: TixkitCheckoutEventCallback = (event, detail) => {
+    const mode = typeof detail.mode === 'string' ? `:${detail.mode}` : '';
+    setEvents((current) => [...current, `${event}${mode}`]);
+  };
+
+  return (
+    <TixkitProvider config={{ checkoutBaseUrl, widgetBaseUrl }}>
+      <main
+        style={{
+          display: 'grid',
+          gap: 24,
+          margin: '0 auto',
+          maxWidth: 960,
+          padding: 32,
+          fontFamily: 'system-ui, sans-serif',
+        }}
+      >
+        <section>
+          <h1>__TITLE__</h1>
+          <p>
+            Tixkit-powered event app. Replace the demo event IDs below with your own brand/event
+            identifiers.
+          </p>
+        </section>
+
+        <section aria-label="Inline checkout button">
+          <TixkitCheckoutButton
+            eventId="__EVENT_ID__"
+            brand="__BRAND_ID__"
+            checkoutMode="inline"
+            items={[{ ticketTypeId: '__TICKET_TYPE_ID__', quantity: 1 }]}
+            trackingId="__NAME__-checkout"
+            onEvent={onEvent}
+          >
+            Buy tickets
+          </TixkitCheckoutButton>
+        </section>
+
+        <section aria-label="Embedded ticket widget">
+          <TixkitTicketWidget
+            brand="__BRAND_ID__"
+            event="__EVENT_ID__"
+            checkoutMode="inline"
+            trackingId="__NAME__-widget"
+            onEvent={onEvent}
+          />
+        </section>
+
+        <output aria-label="Tixkit lifecycle events">{events.join(', ') || 'No events yet'}</output>
+      </main>
+    </TixkitProvider>
+  );
+}
