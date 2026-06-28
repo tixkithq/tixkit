@@ -167,6 +167,10 @@ class FakePaymentAccountsDb {
       this.remapBrandsFromDuplicatePaymentAccounts(duplicateKey);
     }
 
+    if (statement.includes('update payment_intents')) {
+      this.remapPaymentIntentsFromDuplicatePaymentAccounts(duplicateKey);
+    }
+
     if (
       statement.includes('delete payment_accounts') ||
       statement.includes('delete from payment_accounts')
@@ -223,14 +227,26 @@ class FakePaymentAccountsDb {
     }));
   }
 
+  private remapPaymentIntentsFromDuplicatePaymentAccounts(
+    duplicateKey: 'organization-provider' | 'provider-account',
+  ): void {
+    const canonicalIdsByDuplicateId = this.canonicalIdsByDuplicateId(duplicateKey);
+
+    this.paymentIntents = this.paymentIntents.map((intent) => ({
+      ...intent,
+      payment_account_id:
+        intent.payment_account_id === null
+          ? null
+          : (canonicalIdsByDuplicateId.get(intent.payment_account_id) ?? intent.payment_account_id),
+    }));
+  }
+
   private deleteDuplicatePaymentAccounts(
     duplicateKey: 'organization-provider' | 'provider-account',
   ): void {
     const canonicalIdsByDuplicateId = this.canonicalIdsByDuplicateId(duplicateKey);
 
-    this.rows = this.rows.filter(
-      (row) => !canonicalIdsByDuplicateId.has(row.id) || this.hasPaymentIntent(row.id),
-    );
+    this.rows = this.rows.filter((row) => !canonicalIdsByDuplicateId.has(row.id));
   }
 
   private canonicalIdsByDuplicateId(
@@ -1274,7 +1290,7 @@ describe('payment accounts unique migration safety', () => {
 
     // eslint-disable-next-line unicorn/no-array-sort -- ES2023 toSorted is not available in this package's TS lib target.
     expect(db.rows.map((row) => row.id).sort()).toEqual(['pa_new_z', 'pa_other_org', 'pa_stripe']);
-    expect(db.rawSqlStatements).toHaveLength(4);
+    expect(db.rawSqlStatements).toHaveLength(6);
     expect(
       db.rawSqlStatements.every((statement) => statement.includes('ranked_payment_accounts')),
     ).toBe(true);
@@ -1366,7 +1382,7 @@ describe('payment accounts unique migration safety', () => {
     expect(db.brands).toEqual([{ id: 'brand_1', payment_account_id: 'pa_canonical' }]);
   });
 
-  it('keeps payment-intent referenced duplicate rows by making them canonical', async () => {
+  it('repoints payment-intent references before deleting duplicate losers', async () => {
     delete process.env.DB_DRIVER;
     vi.doMock('kysely', async (importOriginal) => {
       const actual = await importOriginal<typeof import('kysely')>();
@@ -1403,6 +1419,49 @@ describe('payment accounts unique migration safety', () => {
     expect(db.paymentIntents).toEqual([{ id: 'pi_1', payment_account_id: 'pa_intent_referenced' }]);
   });
 
+  it('repoints payment intents when every duplicate row has historical intents', async () => {
+    delete process.env.DB_DRIVER;
+    vi.doMock('kysely', async (importOriginal) => {
+      const actual = await importOriginal<typeof import('kysely')>();
+
+      return { ...actual, sql: fakeSql };
+    });
+    const { PaymentAccountsUniqueMigration } =
+      await import('../../migrations/0025_payment_accounts_unique.js');
+    const db = new FakePaymentAccountsDb(
+      [
+        {
+          id: 'pa_old',
+          organization_id: 'org_1',
+          provider: 'stripe_connect',
+          provider_account_id: 'acct_shared',
+          updated_at: '2026-01-01T00:00:00.000Z',
+        },
+        {
+          id: 'pa_new',
+          organization_id: 'org_1',
+          provider: 'stripe_connect',
+          provider_account_id: 'acct_shared',
+          updated_at: '2026-01-02T00:00:00.000Z',
+        },
+      ],
+      {
+        paymentIntents: [
+          { id: 'pi_old', payment_account_id: 'pa_old' },
+          { id: 'pi_new', payment_account_id: 'pa_new' },
+        ],
+      },
+    );
+
+    await PaymentAccountsUniqueMigration.up(db as never);
+
+    expect(db.rows.map((row) => row.id)).toEqual(['pa_new']);
+    expect(db.paymentIntents).toEqual([
+      { id: 'pi_old', payment_account_id: 'pa_new' },
+      { id: 'pi_new', payment_account_id: 'pa_new' },
+    ]);
+  });
+
   it('keeps dialect-specific duplicate cleanup before payment-account indexes', () => {
     const source = readFileSync(paymentAccountsUniqueMigrationPath, 'utf8');
     const upSource = migrationMethodSource(source, 'up');
@@ -1412,6 +1471,7 @@ describe('payment accounts unique migration safety', () => {
     expect(source).toContain('delete payment_accounts');
     expect(source).toContain('delete from payment_accounts');
     expect(source).toContain('update brands');
+    expect(source).toContain('update payment_intents');
     expect(source).toContain('payment_intents');
     expect(source).toContain('partition by provider, provider_account_id');
     expect(source).toContain('partition by organization_id, provider');
