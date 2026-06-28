@@ -56,9 +56,13 @@ describe('renderMergeTags - email', () => {
   });
 
   it('escapes quotes and ampersands', () => {
-    const out = renderMergeTags('{{brand.name}}', { brand: { name: 'A & B "Co"' } }, {
-      channel: 'email',
-    });
+    const out = renderMergeTags(
+      '{{brand.name}}',
+      { brand: { name: 'A & B "Co"' } },
+      {
+        channel: 'email',
+      },
+    );
     expect(out).toBe('A &amp; B &quot;Co&quot;');
   });
 
@@ -68,10 +72,14 @@ describe('renderMergeTags - email', () => {
   });
 
   it('uses a custom fallback for missing variables', () => {
-    const out = renderMergeTags('Hi {{event.venueCity}}!', { event: {} }, {
-      channel: 'email',
-      fallback: '—',
-    });
+    const out = renderMergeTags(
+      'Hi {{event.venueCity}}!',
+      { event: {} },
+      {
+        channel: 'email',
+        fallback: '—',
+      },
+    );
     expect(out).toBe('Hi —!');
   });
 
@@ -84,10 +92,18 @@ describe('renderMergeTags - email', () => {
 
   it('renders attendee check-in status', () => {
     expect(
-      renderMergeTags('Status: {{attendee.checkedIn}}', { attendee: { checkedIn: true } }, { channel: 'email' }),
+      renderMergeTags(
+        'Status: {{attendee.checkedIn}}',
+        { attendee: { checkedIn: true } },
+        { channel: 'email' },
+      ),
     ).toBe('Status: checked in');
     expect(
-      renderMergeTags('Status: {{attendee.checkedIn}}', { attendee: { checkedIn: false } }, { channel: 'email' }),
+      renderMergeTags(
+        'Status: {{attendee.checkedIn}}',
+        { attendee: { checkedIn: false } },
+        { channel: 'email' },
+      ),
     ).toBe('Status: not checked in');
   });
 });
@@ -108,7 +124,10 @@ describe('renderMergeTags - unknown tags', () => {
 
   it('throws on unknown tags when configured to error', () => {
     expect(() =>
-      renderMergeTags('Hi {{unknown.tag}}!', baseContext, { channel: 'email', unknownTagBehavior: 'error' }),
+      renderMergeTags('Hi {{unknown.tag}}!', baseContext, {
+        channel: 'email',
+        unknownTagBehavior: 'error',
+      }),
     ).toThrow(MergeTagError);
   });
 });
@@ -125,7 +144,10 @@ describe('renderMergeTags - sms', () => {
 
   it('does not duplicate an already-present opt-out token', () => {
     const body = 'Hi {{recipient.name}}. Reply STOP to opt out';
-    const out = renderMergeTags(body, baseContext, { channel: 'sms', optOutToken: 'Reply STOP to opt out' });
+    const out = renderMergeTags(body, baseContext, {
+      channel: 'sms',
+      optOutToken: 'Reply STOP to opt out',
+    });
     expect(out).toBe('Hi Jordan Lee. Reply STOP to opt out');
   });
 
@@ -228,7 +250,23 @@ function seededRandom(seed: number): () => number {
   };
 }
 
-const HOSTILE_CHARS = ['<', '>', '"', "'", '&', '{', '}', '\\', '/', ' ', '\n', 'é', '👍', 'a', '1'];
+const HOSTILE_CHARS = [
+  '<',
+  '>',
+  '"',
+  "'",
+  '&',
+  '{',
+  '}',
+  '\\',
+  '/',
+  ' ',
+  '\n',
+  'é',
+  '👍',
+  'a',
+  '1',
+];
 
 describe('merge-tag fuzz/property tests', () => {
   it('email rendering never emits unescaped <, >, or & from variable values', () => {
@@ -239,9 +277,13 @@ describe('merge-tag fuzz/property tests', () => {
       for (let j = 0; j < len; j += 1) {
         hostile += HOSTILE_CHARS[Math.floor(rand() * HOSTILE_CHARS.length)];
       }
-      const out = renderMergeTags('Hi {{recipient.name}}', { recipient: { name: hostile } }, {
-        channel: 'email',
-      });
+      const out = renderMergeTags(
+        'Hi {{recipient.name}}',
+        { recipient: { name: hostile } },
+        {
+          channel: 'email',
+        },
+      );
       // No raw angle brackets or unescaped ampersand from the value.
       expect(out).not.toContain('<');
       expect(out).not.toContain('>');
@@ -255,8 +297,16 @@ describe('merge-tag fuzz/property tests', () => {
     const rand = seededRandom(7);
     for (let i = 0; i < 1000; i += 1) {
       const safe = `Hello ${Math.floor(rand() * 1000)}`;
-      const once = renderMergeTags(`{{recipient.name}}`, { recipient: { name: safe } }, { channel: 'email' });
-      const twice = renderMergeTags(`{{recipient.name}}`, { recipient: { name: once } }, { channel: 'email' });
+      const once = renderMergeTags(
+        `{{recipient.name}}`,
+        { recipient: { name: safe } },
+        { channel: 'email' },
+      );
+      const twice = renderMergeTags(
+        `{{recipient.name}}`,
+        { recipient: { name: once } },
+        { channel: 'email' },
+      );
       // Escaping is idempotent: escaping an already-escaped & does produce &amp;amp;,
       // so we assert the second pass only differs by ampersand re-escaping and never
       // introduces raw angle brackets.
