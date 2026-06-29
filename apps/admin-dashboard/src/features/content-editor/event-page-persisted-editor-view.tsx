@@ -261,6 +261,7 @@ export function EventPagePersistedEditorView({ eventId }: { eventId: string }) {
   const [autosave, setAutosave] = React.useState<ContentEditorAutosaveState>('idle');
   const [loading, setLoading] = React.useState(true);
   const [error, setError] = React.useState<string>();
+  const [actionError, setActionError] = React.useState<string>();
   const [notice, setNotice] = React.useState<string>();
   const operationIdRef = React.useRef(0);
 
@@ -276,12 +277,14 @@ export function EventPagePersistedEditorView({ eventId }: { eventId: string }) {
   function markDraftDirty() {
     nextOperationId();
     setAutosave('idle');
+    setActionError(undefined);
     setNotice(undefined);
   }
 
   const load = React.useCallback(async () => {
     setLoading(true);
     setError(undefined);
+    setActionError(undefined);
     setNotice(undefined);
 
     const eventResult = await adminApi.getEvent(eventId);
@@ -393,13 +396,14 @@ export function EventPagePersistedEditorView({ eventId }: { eventId: string }) {
     if (!isCurrentOperation(operationId)) return undefined;
     if (!result.ok) {
       setAutosave('error');
-      setError(resultMessage(result.error, 'Unable to save event-page draft'));
+      setActionError(resultMessage(result.error, 'Unable to save event-page draft'));
       return undefined;
     }
     setDraft(result.data);
     setVersions((current) => [result.data, ...current.filter((version) => version.id !== result.data.id)]);
     setPreview({ label: 'TipTap event-page preview', format: 'html', output: rendered.text || rendered.html });
     setAutosave('saved');
+    setActionError(undefined);
     setNotice(`Saved draft v${result.data.versionNumber}`);
     return result.data;
   }
@@ -420,10 +424,11 @@ export function EventPagePersistedEditorView({ eventId }: { eventId: string }) {
     if (!isCurrentOperation(operationId)) return;
     if (!result.ok) {
       setAutosave('error');
-      setError(resultMessage(result.error, 'Unable to preview event-page draft'));
+      setActionError(resultMessage(result.error, 'Unable to preview event-page draft'));
       return;
     }
     setPreview(previewFromApiOutput(result.data.output));
+    setActionError(undefined);
     setNotice('Preview rendered from the saved content version');
   }
 
@@ -436,7 +441,7 @@ export function EventPagePersistedEditorView({ eventId }: { eventId: string }) {
     if (!isCurrentOperation(operationId)) return;
     if (!result.ok) {
       setAutosave('error');
-      setError(resultMessage(result.error, 'Unable to publish event page'));
+      setActionError(resultMessage(result.error, 'Unable to publish event page'));
       return;
     }
     setDocument(result.data.document);
@@ -445,6 +450,7 @@ export function EventPagePersistedEditorView({ eventId }: { eventId: string }) {
       result.data.version,
       ...current.filter((version) => version.id !== result.data.version.id),
     ]);
+    setActionError(undefined);
     setNotice(`Published v${result.data.version.versionNumber}`);
     toast.success('Event page published');
   }
@@ -456,10 +462,11 @@ export function EventPagePersistedEditorView({ eventId }: { eventId: string }) {
     if (!isCurrentOperation(operationId)) return;
     if (!result.ok) {
       setAutosave('error');
-      setError(resultMessage(result.error, 'Unable to archive event page'));
+      setActionError(resultMessage(result.error, 'Unable to archive event page'));
       return;
     }
     setDocument(result.data);
+    setActionError(undefined);
     setNotice('Archived event page');
     toast.success('Event page archived');
   }
@@ -491,6 +498,11 @@ export function EventPagePersistedEditorView({ eventId }: { eventId: string }) {
         </div>
         {notice && <p className="text-sm text-emerald-700">{notice}</p>}
       </div>
+      {actionError && (
+        <p className="rounded-md border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive">
+          {actionError}
+        </p>
+      )}
 
       <section className="grid gap-3 lg:grid-cols-[minmax(0,1fr)_18rem]">
         <div className="grid gap-3">

@@ -307,6 +307,38 @@ describe('EmailPersistedEditorView', () => {
     );
   });
 
+  it('keeps the email editor editable after save failure and allows retry', async () => {
+    adminApiMock.saveContentVersion
+      .mockResolvedValueOnce({
+        ok: false,
+        error: { message: 'Injected email save outage' },
+      })
+      .mockResolvedValue(ok(savedVersion));
+
+    render(React.createElement(EmailPersistedEditorView, { eventId: 'evt_1' }));
+
+    const subject = await screen.findByLabelText('Subject');
+    fireEvent.change(subject, { target: { value: 'Retryable email subject' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Save draft' }));
+
+    expect(await screen.findByText('Injected email save outage')).toBeInTheDocument();
+    expect(screen.getByText('Save failed')).toBeInTheDocument();
+    expect(screen.getByLabelText('Subject')).toHaveValue('Retryable email subject');
+
+    fireEvent.change(subject, { target: { value: 'Recovered email subject' } });
+    expect(screen.queryByText('Injected email save outage')).not.toBeInTheDocument();
+    expect(screen.getByText('Ready')).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Save draft' }));
+    await waitFor(() => {
+      expect(screen.getByText('Saved draft v2')).toBeInTheDocument();
+    });
+    expect(adminApiMock.saveContentVersion).toHaveBeenLastCalledWith(
+      'cdoc_email',
+      expect.objectContaining({ subject: 'Recovered email subject' }),
+    );
+  });
+
   it('fails closed when the saved draft is not canonical React Email JSON', async () => {
     adminApiMock.listContentVersions.mockResolvedValue(
       ok({

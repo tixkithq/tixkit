@@ -217,6 +217,7 @@ export function EmailPersistedEditorView({ eventId }: { eventId: string }) {
   const [autosave, setAutosave] = React.useState<ContentEditorAutosaveState>('idle');
   const [loading, setLoading] = React.useState(true);
   const [error, setError] = React.useState<string>();
+  const [actionError, setActionError] = React.useState<string>();
   const [notice, setNotice] = React.useState<string>();
   const operationIdRef = React.useRef(0);
 
@@ -232,12 +233,14 @@ export function EmailPersistedEditorView({ eventId }: { eventId: string }) {
   function markDraftDirty() {
     nextOperationId();
     setAutosave('idle');
+    setActionError(undefined);
     setNotice(undefined);
   }
 
   const load = React.useCallback(async () => {
     setLoading(true);
     setError(undefined);
+    setActionError(undefined);
     setNotice(undefined);
 
     const eventResult = await adminApi.getEvent(eventId);
@@ -349,13 +352,14 @@ export function EmailPersistedEditorView({ eventId }: { eventId: string }) {
     if (!isCurrentOperation(operationId)) return undefined;
     if (!result.ok) {
       setAutosave('error');
-      setError(resultMessage(result.error, 'Unable to save email draft'));
+      setActionError(resultMessage(result.error, 'Unable to save email draft'));
       return undefined;
     }
     setDraft(result.data);
     setVersions((current) => [result.data, ...current.filter((version) => version.id !== result.data.id)]);
     setPreview(previewFromEmailOutput('React Email preview', rendered));
     setAutosave('saved');
+    setActionError(undefined);
     setNotice(`Saved draft v${result.data.versionNumber}`);
     return result.data;
   }
@@ -376,10 +380,11 @@ export function EmailPersistedEditorView({ eventId }: { eventId: string }) {
     if (!isCurrentOperation(operationId)) return;
     if (!result.ok) {
       setAutosave('error');
-      setError(resultMessage(result.error, 'Unable to preview email draft'));
+      setActionError(resultMessage(result.error, 'Unable to preview email draft'));
       return;
     }
     setPreview(previewFromEmailOutput('Saved email preview', result.data.output));
+    setActionError(undefined);
     setNotice('Preview rendered from the saved content version');
   }
 
@@ -392,7 +397,7 @@ export function EmailPersistedEditorView({ eventId }: { eventId: string }) {
     if (!isCurrentOperation(operationId)) return;
     if (!result.ok) {
       setAutosave('error');
-      setError(resultMessage(result.error, 'Unable to publish email draft'));
+      setActionError(resultMessage(result.error, 'Unable to publish email draft'));
       return;
     }
     setDocument(result.data.document);
@@ -401,6 +406,7 @@ export function EmailPersistedEditorView({ eventId }: { eventId: string }) {
       result.data.version,
       ...current.filter((version) => version.id !== result.data.version.id),
     ]);
+    setActionError(undefined);
     setNotice(`Published v${result.data.version.versionNumber}`);
     toast.success('Email template published');
   }
@@ -418,9 +424,10 @@ export function EmailPersistedEditorView({ eventId }: { eventId: string }) {
     if (!isCurrentOperation(operationId)) return;
     if (!result.ok) {
       setAutosave('error');
-      setError(resultMessage(result.error, 'Unable to capture email test send'));
+      setActionError(resultMessage(result.error, 'Unable to capture email test send'));
       return;
     }
+    setActionError(undefined);
     setNotice(`Captured test send to ${result.data.testSend.recipient}`);
     toast.success('Email test send captured');
   }
@@ -432,10 +439,11 @@ export function EmailPersistedEditorView({ eventId }: { eventId: string }) {
     if (!isCurrentOperation(operationId)) return;
     if (!result.ok) {
       setAutosave('error');
-      setError(resultMessage(result.error, 'Unable to archive email template'));
+      setActionError(resultMessage(result.error, 'Unable to archive email template'));
       return;
     }
     setDocument(result.data);
+    setActionError(undefined);
     setNotice('Archived email template');
     toast.success('Email template archived');
   }
@@ -467,6 +475,11 @@ export function EmailPersistedEditorView({ eventId }: { eventId: string }) {
         </div>
         {notice && <p className="text-sm text-emerald-700">{notice}</p>}
       </div>
+      {actionError && (
+        <p className="rounded-md border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive">
+          {actionError}
+        </p>
+      )}
 
       <section className="grid gap-3 lg:grid-cols-[minmax(0,1fr)_18rem]">
         <div className="grid gap-3">

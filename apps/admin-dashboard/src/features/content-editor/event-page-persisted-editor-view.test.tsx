@@ -264,6 +264,38 @@ describe('EventPagePersistedEditorView', () => {
     );
   });
 
+  it('keeps the event-page editor editable after save failure and allows retry', async () => {
+    adminApiMock.saveContentVersion
+      .mockResolvedValueOnce({
+        ok: false,
+        error: { message: 'Injected event-page save outage' },
+      })
+      .mockResolvedValue(ok(savedVersion));
+
+    render(React.createElement(EventPagePersistedEditorView, { eventId: 'evt_1' }));
+
+    const headline = await screen.findByLabelText('Page headline');
+    fireEvent.change(headline, { target: { value: 'Retryable hosted page' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Save draft' }));
+
+    expect(await screen.findByText('Injected event-page save outage')).toBeInTheDocument();
+    expect(screen.getByText('Save failed')).toBeInTheDocument();
+    expect(screen.getByLabelText('Page headline')).toHaveValue('Retryable hosted page');
+
+    fireEvent.change(headline, { target: { value: 'Recovered hosted page' } });
+    expect(screen.queryByText('Injected event-page save outage')).not.toBeInTheDocument();
+    expect(screen.getByText('Ready')).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Save draft' }));
+    await waitFor(() => {
+      expect(screen.getByText('Saved draft v2')).toBeInTheDocument();
+    });
+    expect(adminApiMock.saveContentVersion).toHaveBeenLastCalledWith(
+      'cdoc_event_page',
+      expect.objectContaining({ subject: 'Recovered hosted page' }),
+    );
+  });
+
   it('fails closed when the saved draft is not canonical TipTap event-page JSON', async () => {
     adminApiMock.listContentVersions.mockResolvedValue(
       ok({

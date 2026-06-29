@@ -260,4 +260,36 @@ describe('SmsPersistedEditorView', () => {
       }),
     );
   });
+
+  it('keeps the SMS editor editable after save failure and allows retry', async () => {
+    adminApiMock.saveContentVersion
+      .mockResolvedValueOnce({
+        ok: false,
+        error: { message: 'Injected SMS save outage' },
+      })
+      .mockResolvedValue(ok(savedVersion));
+
+    render(React.createElement(SmsPersistedEditorView, { eventId: 'evt_1' }));
+
+    const body = await screen.findByLabelText('SMS body');
+    fireEvent.change(body, { target: { value: 'Retryable SMS body.' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Save draft' }));
+
+    expect(await screen.findByText('Injected SMS save outage')).toBeInTheDocument();
+    expect(screen.getByText('Save failed')).toBeInTheDocument();
+    expect(screen.getByLabelText('SMS body')).toHaveValue('Retryable SMS body.');
+
+    fireEvent.change(body, { target: { value: 'Recovered SMS body.' } });
+    expect(screen.queryByText('Injected SMS save outage')).not.toBeInTheDocument();
+    expect(screen.getByText('Ready')).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Save draft' }));
+    await waitFor(() => {
+      expect(screen.getByText('Saved draft v2')).toBeInTheDocument();
+    });
+    expect(adminApiMock.saveContentVersion).toHaveBeenLastCalledWith(
+      'cdoc_sms',
+      expect.objectContaining({ renderedText: 'Recovered SMS body.' }),
+    );
+  });
 });
