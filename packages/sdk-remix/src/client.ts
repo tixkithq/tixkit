@@ -1,11 +1,11 @@
 /**
- * Browser-safe entrypoint for @tixkit/sveltekit.
+ * Browser-safe entrypoint for @tixkit/remix.
  *
- * This module is safe to import from client-side SvelteKit code.
+ * This module is safe to import from client-side Remix code.
  * It contains no server-only dependencies.
  *
  * ```ts
- * import { checkoutWidgetUrl, checkoutUrl } from '@tixkit/sveltekit/client';
+ * import { checkoutWidgetUrl, checkoutUrl } from '@tixkit/remix/client';
  * ```
  */
 

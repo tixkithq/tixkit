@@ -25,7 +25,12 @@ function mockFetch(status: number, body: unknown) {
 
 function getCall(fetchMock: ReturnType<typeof vi.spyOn>, index = 0) {
   const [url, init] = fetchMock.mock.calls[index]!;
-  return { url: String(url), method: init?.method, body: init?.body as string };
+  return {
+    url: String(url),
+    method: init?.method,
+    body: init?.body as string,
+    headers: init?.headers as Record<string, string>,
+  };
 }
 
 describe('TixkitClient', () => {
@@ -480,6 +485,20 @@ describe('TixkitClient', () => {
     const headers = init?.headers as Record<string, string>;
     expect(String(url)).toBe('https://api.test/v1/events?limit=10');
     expect(headers.Authorization).toBeUndefined();
+    expect(headers['Content-Type']).toBeUndefined();
+  });
+
+  it('sends Content-Type only when a JSON body is present', async () => {
+    const fetchMock = mockFetch(200, { id: 'evt_1', title: 'Updated' });
+    const client = new TixkitClient({
+      apiKey: 'tk_test_123',
+      apiBaseUrl: 'https://api.test',
+      maxRetries: 0,
+    });
+
+    await client.events.update('evt_1', { title: 'Updated' });
+
+    expect(getCall(fetchMock).headers['Content-Type']).toBe('application/json');
   });
 
   it('sends caller supplied confirm idempotency key only as a header', async () => {
@@ -811,6 +830,143 @@ describe('TixkitClient new resource methods', () => {
     expect(call.method).toBe('GET');
   });
 
+  it('checkIns.syncBacklog uses the synchronous route when the whole backlog fits', async () => {
+    const fm = mockFetch(200, {
+      accepted: 1,
+      duplicates: 0,
+      invalid: 0,
+      results: [{ qrHash: 'hash_1', outcome: 'accepted' }],
+    });
+    const c = new TixkitClient({
+      apiKey: '***********',
+      apiBaseUrl: 'https://api.test',
+      maxRetries: 0,
+    });
+
+    const result = await c.checkIns.syncBacklog({
+      idempotencyKey: 'idem_sync_backlog',
+      headers: { 'X-Scanner-Device-Secret': 'secret' },
+      checkInListId: 'cil_1',
+      scans: [{ qrHash: 'hash_1', scannedAt: '2026-06-01T12:00:00.000Z', offline: true }],
+    });
+
+    const call = getCall(fm);
+    expect(result.mode).toBe('sync');
+    expect(fm).toHaveBeenCalledTimes(1);
+    expect(call.url).toBe('https://api.test/v1/check-ins/sync');
+    expect(call.method).toBe('POST');
+    expect(call.headers['Idempotency-Key']).toBe('idem_sync_backlog');
+    expect(JSON.parse(call.body)).toEqual({
+      checkInListId: 'cil_1',
+      scans: [{ qrHash: 'hash_1', scannedAt: '2026-06-01T12:00:00.000Z', offline: true }],
+    });
+  });
+
+  it('checkIns.syncBacklog creates one async job, uploads chunks, and polls with backoff', async () => {
+    const job = {
+      id: 'bcs_1',
+      tenantId: 'tnt_1',
+      eventId: 'evt_1',
+      checkInListId: 'cil_1',
+      deviceId: 'sd_1',
+      totalChunks: 2,
+      totalScans: 3,
+      chunksReceived: 0,
+      chunksProcessed: 0,
+      status: 'receiving',
+      attemptCount: 0,
+      accepted: 0,
+      duplicates: 0,
+      invalid: 0,
+      processingMetrics: {
+        processingDurationMs: 0,
+        transactionDurationMs: 0,
+        lockWaitMs: 0,
+        scanLogInsertDurationMs: 0,
+        ticketUpdateDurationMs: 0,
+        attendeeUpdateDurationMs: 0,
+        rowsProcessed: 0,
+        clockWarnings: 0,
+      },
+      sampleErrors: [],
+      createdAt: '2026-06-01T12:00:00.000Z',
+      updatedAt: '2026-06-01T12:00:00.000Z',
+      completedAt: null,
+    };
+    const completedJob = {
+      ...job,
+      status: 'completed',
+      chunksReceived: 2,
+      chunksProcessed: 2,
+      accepted: 3,
+      processingMetrics: { ...job.processingMetrics, rowsProcessed: 3 },
+      completedAt: '2026-06-01T12:01:00.000Z',
+    };
+    const fm = vi
+      .spyOn(globalThis, 'fetch')
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify(job), {
+          status: 202,
+          headers: { 'Content-Type': 'application/json' },
+        }),
+      )
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ id: 'bch_1', jobId: 'bcs_1', sequence: 1 }), {
+          status: 202,
+          headers: { 'Content-Type': 'application/json' },
+        }),
+      )
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ id: 'bch_2', jobId: 'bcs_1', sequence: 2 }), {
+          status: 202,
+          headers: { 'Content-Type': 'application/json' },
+        }),
+      )
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ ...job, status: 'processing', chunksReceived: 2 }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        }),
+      )
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify(completedJob), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        }),
+      );
+    const c = new TixkitClient({
+      apiKey: '***********',
+      apiBaseUrl: 'https://api.test',
+      maxRetries: 0,
+    });
+
+    const result = await c.checkIns.syncBacklog({
+      idempotencyKey: 'idem_bulk_backlog',
+      headers: { 'X-Scanner-Device-Secret': 'secret' },
+      checkInListId: 'cil_1',
+      scans: [
+        { qrHash: 'hash_1', scannedAt: '2026-06-01T12:00:00.000Z', offline: true },
+        { qrHash: 'hash_2', scannedAt: '2026-06-01T12:00:01.000Z', offline: true },
+        { qrHash: 'hash_3', scannedAt: '2026-06-01T12:00:02.000Z', offline: true },
+      ],
+      forceAsync: true,
+      chunkSize: 2,
+      pollInitialDelayMs: 0,
+      pollMaxDelayMs: 0,
+    });
+
+    expect(result).toMatchObject({ mode: 'async', job: { status: 'completed', accepted: 3 } });
+    expect(fm).toHaveBeenCalledTimes(5);
+    expect(getCall(fm, 0).url).toBe('https://api.test/v1/check-ins/bulk-sync-jobs');
+    expect(getCall(fm, 0).method).toBe('POST');
+    expect(getCall(fm, 0).headers['Idempotency-Key']).toBe('idem_bulk_backlog:job');
+    expect(getCall(fm, 1).url).toBe('https://api.test/v1/check-ins/bulk-sync-jobs/bcs_1/chunks/1');
+    expect(getCall(fm, 1).headers['Idempotency-Key']).toBe('idem_bulk_backlog:chunk:1');
+    expect(getCall(fm, 2).url).toBe('https://api.test/v1/check-ins/bulk-sync-jobs/bcs_1/chunks/2');
+    expect(getCall(fm, 3).url).toBe('https://api.test/v1/check-ins/bulk-sync-jobs/bcs_1');
+    expect(getCall(fm, 3).method).toBe('GET');
+  });
+
   it('exports.get sends GET', async () => {
     const fm = mockFetch(200, { exportId: 'exp_1', status: 'completed' });
     const c = new TixkitClient({
@@ -959,7 +1115,6 @@ describe('TixkitClient new resource methods', () => {
       maxRetries: 0,
     });
     await c.messages.previewRecipients('evt_1', {
-      templateKey: 'admin-campaign',
       audience: 'checked_in',
       channel: 'email',
     });
@@ -967,9 +1122,51 @@ describe('TixkitClient new resource methods', () => {
     expect(call.url).toBe('https://api.test/v1/events/evt_1/messages/preview');
     expect(call.method).toBe('POST');
     expect(JSON.parse(call.body)).toEqual({
-      templateKey: 'admin-campaign',
       audience: 'checked_in',
       channel: 'email',
+    });
+  });
+
+  it('messages.send sends split template keys with idempotency', async () => {
+    const fm = mockFetch(202, {
+      campaignId: 'cmp_1',
+      eventId: 'evt_1',
+      emailTemplateKey: 'door-reminder-email',
+      smsTemplateKey: 'door-reminder-sms',
+      channel: 'both',
+      status: 'queued',
+      audienceCount: 2,
+      queuedEmailJobs: 2,
+      queuedSmsJobs: 2,
+      suppressedRecipients: 0,
+      consentExclusions: 0,
+      skippedRecipients: 0,
+      emailJobIds: ['email_1', 'email_2'],
+      smsJobIds: ['sms_1', 'sms_2'],
+    });
+    const c = new TixkitClient({
+      apiKey: '***********',
+      apiBaseUrl: 'https://api.test',
+      maxRetries: 0,
+    });
+
+    await c.messages.send('evt_1', {
+      emailTemplateKey: 'door-reminder-email',
+      smsTemplateKey: 'door-reminder-sms',
+      audience: 'all',
+      channel: 'both',
+      idempotencyKey: 'idem_msg_1',
+    });
+
+    const call = getCall(fm);
+    expect(call.url).toBe('https://api.test/v1/events/evt_1/messages');
+    expect(call.method).toBe('POST');
+    expect(call.headers).toMatchObject({ 'Idempotency-Key': 'idem_msg_1' });
+    expect(JSON.parse(call.body)).toEqual({
+      emailTemplateKey: 'door-reminder-email',
+      smsTemplateKey: 'door-reminder-sms',
+      audience: 'all',
+      channel: 'both',
     });
   });
 
@@ -1016,9 +1213,7 @@ describe('TixkitClient new resource methods', () => {
       name: 'Order confirmed copy',
     });
     const duplicateCall = getCall(fm, 1);
-    expect(duplicateCall.url).toBe(
-      'https://api.test/v1/content-documents/cdoc_1/duplicate',
-    );
+    expect(duplicateCall.url).toBe('https://api.test/v1/content-documents/cdoc_1/duplicate');
     expect(duplicateCall.method).toBe('POST');
     expect(JSON.parse(duplicateCall.body)).toEqual({
       key: 'order-confirmed-copy',
@@ -1079,9 +1274,7 @@ describe('TixkitClient new resource methods', () => {
     );
 
     await c.public.getEventDiscoveryCard('evt_1');
-    expect(getCall(fm, 4).url).toBe(
-      'https://api.test/v1/public/events/evt_1/discovery-card',
-    );
+    expect(getCall(fm, 4).url).toBe('https://api.test/v1/public/events/evt_1/discovery-card');
   });
 
   it('content preview sends canonical React Email document JSON without narrowing to generic objects', async () => {
@@ -1287,8 +1480,9 @@ describe('TixkitClient new resource methods', () => {
     const fm = mockFetch(200, {
       id: 'cmp_1',
       eventId: 'evt_1',
-      templateKey: 'admin-campaign',
-      channel: 'email',
+      emailTemplateKey: 'door-reminder-email',
+      smsTemplateKey: 'door-reminder-sms',
+      channel: 'both',
       status: 'sent',
       audience: 'custom',
       audienceKey: 'specific',
@@ -1312,6 +1506,8 @@ describe('TixkitClient new resource methods', () => {
     const call = getCall(fm);
     expect(call.url).toBe('https://api.test/v1/events/evt_1/messages/cmp_1');
     expect(campaign).toMatchObject({
+      emailTemplateKey: 'door-reminder-email',
+      smsTemplateKey: 'door-reminder-sms',
       queuedEmailJobs: 1,
       suppressedRecipients: 0,
       audience: 'custom',

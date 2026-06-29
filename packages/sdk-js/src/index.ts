@@ -3,6 +3,8 @@
 // Never exposes secret API keys in browser bundles.
 
 export const TIXKIT_API_VERSION = '2026-01-01';
+export const MAX_OFFLINE_SYNC_SCANS = 100_000;
+export const MAX_BULK_OFFLINE_SYNC_CHUNK_SCANS = 50_000;
 
 export type TixkitConfig = {
   apiKey?: string;
@@ -885,6 +887,81 @@ export type SyncScanResult = {
   results: { qrHash: string; outcome: string }[];
 };
 
+export type OfflineSyncScan = { qrHash: string; scannedAt: string; offline: boolean };
+
+export type BulkSyncErrorSample = {
+  sequence: number;
+  scanIndex: number;
+  outcome: string;
+  metadata?: Record<string, unknown>;
+};
+
+export type BulkSyncProcessingMetrics = {
+  processingDurationMs: number;
+  transactionDurationMs: number;
+  lockWaitMs: number;
+  scanLogInsertDurationMs: number;
+  ticketUpdateDurationMs: number;
+  attendeeUpdateDurationMs: number;
+  rowsProcessed: number;
+  clockWarnings: number;
+};
+
+export type BulkSyncJob = {
+  id: string;
+  tenantId: string;
+  eventId: string;
+  checkInListId: string;
+  deviceId: string;
+  totalChunks: number;
+  totalScans: number | null;
+  chunksReceived: number;
+  chunksProcessed: number;
+  status: 'pending' | 'receiving' | 'processing' | 'completed' | 'failed' | string;
+  attemptCount: number;
+  nextAttemptAt?: string | null;
+  leasedUntil?: string | null;
+  lastAttemptedAt?: string | null;
+  processingStartedAt?: string | null;
+  processingCompletedAt?: string | null;
+  accepted: number;
+  duplicates: number;
+  invalid: number;
+  processingMetrics: BulkSyncProcessingMetrics;
+  sampleErrors: BulkSyncErrorSample[];
+  failureMessage?: string | null;
+  createdAt: string;
+  updatedAt: string;
+  completedAt?: string | null;
+};
+
+export type BulkSyncChunk = {
+  id: string;
+  jobId: string;
+  sequence: number;
+  scanCount: number;
+  status: 'uploaded' | 'processing' | 'processed' | 'failed' | string;
+  accepted: number;
+  duplicates: number;
+  invalid: number;
+  clockWarnings: number;
+  sampleErrors: BulkSyncErrorSample[];
+  attemptCount: number;
+  failureMessage?: string | null;
+  createdAt: string;
+  updatedAt: string;
+  processedAt?: string | null;
+};
+
+export type BulkSyncChunkList = {
+  items: BulkSyncChunk[];
+  total: number;
+};
+
+export type BulkSyncBacklogResult =
+  | { mode: 'sync'; result: SyncScanResult }
+  | { mode: 'async'; job: BulkSyncJob; chunks: BulkSyncChunk[] };
+
 export type SalesReport = {
   eventId: string;
   currency: string;
@@ -968,7 +1045,8 @@ export type ExportJobQueued = {
 export type MessageQueued = {
   campaignId: string;
   eventId: string;
-  templateKey: string;
+  emailTemplateKey?: string;
+  smsTemplateKey?: string;
   channel: string;
   status: string;
   audienceCount: number;
@@ -1166,7 +1244,9 @@ export type MessageCampaign = {
   eventId: string;
   tenantId?: string;
   brandId?: string;
-  templateKey: string;
+  templateKey?: string;
+  emailTemplateKey?: string;
+  smsTemplateKey?: string;
   channel: string;
   status: string;
   audience?: string;
@@ -1203,11 +1283,48 @@ export type MessageRecipientPreview = {
   }>;
 };
 
+export type SendMessageAudience = 'all' | 'checked_in' | 'not_checked_in' | 'specific';
+export type SendMessageBaseInput = {
+  audience: SendMessageAudience;
+  attendeeIds?: string[];
+  variables?: Record<string, unknown>;
+} & IdempotencyOptions;
+export type SendEmailMessageInput = SendMessageBaseInput & {
+  channel: 'email';
+  emailTemplateKey: string;
+};
+export type SendSmsMessageInput = SendMessageBaseInput & {
+  channel: 'sms';
+  smsTemplateKey: string;
+};
+export type SendBothMessageInput = SendMessageBaseInput & {
+  channel: 'both';
+  emailTemplateKey: string;
+  smsTemplateKey: string;
+};
+export type SendMessageInput = SendEmailMessageInput | SendSmsMessageInput | SendBothMessageInput;
+
+export type MessageJobRecord = {
+  id: string;
+  tenant_id?: string;
+  brand_id?: string;
+  template_key?: string;
+  template_version_id?: string;
+  provider_route_id?: string;
+  status: string;
+  priority?: string;
+  scheduled_at?: string | null;
+  workflow_id?: string | null;
+  recipient?: string;
+  created_at?: string;
+  updated_at?: string;
+};
+
 export type MessageJob = {
   channel: string;
   campaignId: string;
   eventId: string;
-  job: Record<string, unknown>;
+  job: MessageJobRecord;
 };
 
 export type MessageDeliveryLog = {
@@ -1221,7 +1338,16 @@ export type MessageProviderEvent = {
   channel: string;
   campaignId: string;
   eventId: string;
-  event: Record<string, unknown>;
+  event: {
+    id: string;
+    tenant_id?: string | null;
+    provider?: string;
+    provider_event_id?: string;
+    event_type?: string;
+    provider_message_id?: string | null;
+    processed_at?: string | null;
+    created_at?: string;
+  };
 };
 
 export type WebhookEvent = {
@@ -1355,13 +1481,16 @@ export class TixkitClient {
       }
     }
 
+    const hasBody = options?.body !== undefined;
     const headers: Record<string, string> = {
-      'Content-Type': 'application/json',
       'X-Tixkit-Version': this.apiVersion,
     };
 
     if (this.apiKey) {
       headers.Authorization = `Bearer ${this.apiKey}`;
+    }
+    if (hasBody) {
+      headers['Content-Type'] = 'application/json';
     }
     if (options?.idempotencyKey) {
       headers['Idempotency-Key'] = options.idempotencyKey;
@@ -1386,7 +1515,7 @@ export class TixkitClient {
           response = await fetch(url.toString(), {
             method,
             headers,
-            body: options?.body === undefined ? undefined : JSON.stringify(options.body),
+            body: hasBody ? JSON.stringify(options.body) : undefined,
             signal: controller.signal,
           });
 
@@ -1485,6 +1614,26 @@ function paginationParams(
     params[key] = String(value);
   }
   return Object.keys(params).length === 0 ? undefined : params;
+}
+
+function clampChunkSize(value: number | undefined): number {
+  if (value === undefined) return MAX_BULK_OFFLINE_SYNC_CHUNK_SCANS;
+  if (!Number.isInteger(value) || value < 1 || value > MAX_BULK_OFFLINE_SYNC_CHUNK_SCANS) {
+    throw new Error(
+      `chunkSize must be an integer between 1 and ${MAX_BULK_OFFLINE_SYNC_CHUNK_SCANS}`,
+    );
+  }
+  return value;
+}
+
+function delay(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function randomIdempotencyKey(prefix: string): string {
+  const cryptoApi = globalThis.crypto as Crypto | undefined;
+  if (cryptoApi?.randomUUID) return `${prefix}-${cryptoApi.randomUUID()}`;
+  return `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2)}`;
 }
 
 class CheckoutResource {
@@ -2041,11 +2190,155 @@ class CheckInResource {
   async sync(
     input: {
       checkInListId: string;
-      scans: { qrHash: string; scannedAt: string; offline: boolean }[];
+      scans: OfflineSyncScan[];
     } & IdempotencyOptions & { headers: Record<string, string> },
   ): Promise<SyncScanResult> {
     const { idempotencyKey, headers, ...body } = input;
     return this.client.request('POST', '/check-ins/sync', { body, idempotencyKey, headers });
+  }
+
+  async createBulkSyncJob(
+    input: {
+      checkInListId: string;
+      deviceId?: string;
+      totalChunks: number;
+      totalScans?: number;
+    } & IdempotencyOptions & { headers: Record<string, string> },
+  ): Promise<BulkSyncJob> {
+    const { idempotencyKey, headers, ...body } = input;
+    return this.client.request('POST', '/check-ins/bulk-sync-jobs', {
+      body,
+      idempotencyKey,
+      headers,
+    });
+  }
+
+  async uploadBulkSyncChunk(
+    jobId: string,
+    sequence: number,
+    input: { scans: OfflineSyncScan[] } & IdempotencyOptions & { headers: Record<string, string> },
+  ): Promise<BulkSyncChunk> {
+    const { idempotencyKey, headers, ...body } = input;
+    return this.client.request('PUT', `/check-ins/bulk-sync-jobs/${jobId}/chunks/${sequence}`, {
+      body,
+      idempotencyKey,
+      headers,
+    });
+  }
+
+  async getBulkSyncJob(
+    jobId: string,
+    input: { headers: Record<string, string> },
+  ): Promise<BulkSyncJob> {
+    return this.client.request('GET', `/check-ins/bulk-sync-jobs/${jobId}`, {
+      headers: input.headers,
+    });
+  }
+
+  async listBulkSyncChunks(
+    jobId: string,
+    input: { headers: Record<string, string> },
+  ): Promise<BulkSyncChunkList> {
+    return this.client.request('GET', `/check-ins/bulk-sync-jobs/${jobId}/chunks`, {
+      headers: input.headers,
+    });
+  }
+
+  async pollBulkSyncJob(
+    jobId: string,
+    input: {
+      headers: Record<string, string>;
+      initialDelayMs?: number;
+      maxDelayMs?: number;
+      timeoutMs?: number;
+    },
+  ): Promise<BulkSyncJob> {
+    const startedAt = Date.now();
+    let delayMs = input.initialDelayMs ?? 500;
+    const maxDelayMs = input.maxDelayMs ?? 10_000;
+    const timeoutMs = input.timeoutMs ?? 10 * 60 * 1000;
+
+    while (true) {
+      const job = await this.getBulkSyncJob(jobId, { headers: input.headers });
+      if (job.status === 'completed' || job.status === 'failed') return job;
+      if (Date.now() - startedAt > timeoutMs) {
+        throw new Error(`Timed out waiting for bulk sync job ${jobId}`);
+      }
+      // eslint-disable-next-line no-await-in-loop -- polling must wait between status checks.
+      await delay(delayMs);
+      delayMs = Math.min(delayMs * 2, maxDelayMs);
+    }
+  }
+
+  async syncBacklog(
+    input: {
+      checkInListId: string;
+      deviceId?: string;
+      scans: OfflineSyncScan[];
+      forceAsync?: boolean;
+      chunkSize?: number;
+      poll?: boolean;
+      pollInitialDelayMs?: number;
+      pollMaxDelayMs?: number;
+      pollTimeoutMs?: number;
+    } & IdempotencyOptions & { headers: Record<string, string> },
+  ): Promise<BulkSyncBacklogResult> {
+    const {
+      idempotencyKey,
+      headers,
+      checkInListId,
+      deviceId,
+      scans,
+      forceAsync,
+      chunkSize,
+      poll,
+      pollInitialDelayMs,
+      pollMaxDelayMs,
+      pollTimeoutMs,
+    } = input;
+
+    if (!forceAsync && scans.length <= MAX_OFFLINE_SYNC_SCANS) {
+      return {
+        mode: 'sync',
+        result: await this.sync({ checkInListId, scans, idempotencyKey, headers }),
+      };
+    }
+
+    const safeChunkSize = clampChunkSize(chunkSize);
+    const totalChunks = Math.ceil(scans.length / safeChunkSize);
+    const baseIdempotencyKey = idempotencyKey ?? randomIdempotencyKey(`bulk-sync-${checkInListId}`);
+    const job = await this.createBulkSyncJob({
+      checkInListId,
+      deviceId,
+      totalChunks,
+      totalScans: scans.length,
+      idempotencyKey: `${baseIdempotencyKey}:job`,
+      headers,
+    });
+    const chunks: BulkSyncChunk[] = [];
+    for (let offset = 0; offset < scans.length; offset += safeChunkSize) {
+      const sequence = Math.floor(offset / safeChunkSize) + 1;
+      const chunkScans = scans.slice(offset, offset + safeChunkSize);
+      // eslint-disable-next-line no-await-in-loop -- chunk uploads are sequential to keep device replay state simple and bounded.
+      const chunk = await this.uploadBulkSyncChunk(job.id, sequence, {
+        scans: chunkScans,
+        idempotencyKey: `${baseIdempotencyKey}:chunk:${sequence}`,
+        headers,
+      });
+      chunks.push(chunk);
+    }
+
+    const finalJob =
+      poll === false
+        ? job
+        : await this.pollBulkSyncJob(job.id, {
+            headers,
+            initialDelayMs: pollInitialDelayMs,
+            maxDelayMs: pollMaxDelayMs,
+            timeoutMs: pollTimeoutMs,
+          });
+
+    return { mode: 'async', job: finalJob, chunks };
   }
 }
 
@@ -2271,22 +2564,13 @@ class ContentResource {
 
 class MessageResource {
   constructor(private client: TixkitClient) {}
-  async send(
-    eventId: string,
-    input: {
-      templateKey: string;
-      audience: string;
-      attendeeIds?: string[];
-      variables?: Record<string, unknown>;
-      channel: string;
-    } & IdempotencyOptions,
-  ): Promise<MessageQueued> {
+  async send(eventId: string, input: SendMessageInput): Promise<MessageQueued> {
     const { idempotencyKey, ...body } = input;
     return this.client.request('POST', `/events/${eventId}/messages`, { body, idempotencyKey });
   }
   async previewRecipients(
     eventId: string,
-    input: { templateKey: string; audience: string; attendeeIds?: string[]; channel: string },
+    input: { audience: string; attendeeIds?: string[]; channel: string },
   ): Promise<MessageRecipientPreview> {
     return this.client.request('POST', `/events/${eventId}/messages/preview`, { body: input });
   }
@@ -2502,18 +2786,12 @@ class PublicResource {
   async getEvent(eventId: string): Promise<Event> {
     return this.client.request('GET', `/public/events/${eventId}`);
   }
-  async getEventPage(
-    eventId: string,
-    params?: { locale?: string },
-  ): Promise<PublicContentPage> {
+  async getEventPage(eventId: string, params?: { locale?: string }): Promise<PublicContentPage> {
     return this.client.request('GET', `/public/events/${eventId}/page`, {
       params: params?.locale ? { locale: params.locale } : undefined,
     });
   }
-  async getContentPage(
-    eventId: string,
-    params?: { locale?: string },
-  ): Promise<PublicContentPage> {
+  async getContentPage(eventId: string, params?: { locale?: string }): Promise<PublicContentPage> {
     return this.client.request('GET', `/public/events/${eventId}/content-page`, {
       params: params?.locale ? { locale: params.locale } : undefined,
     });
