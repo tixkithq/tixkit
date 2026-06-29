@@ -76,6 +76,7 @@ export type ContentEditorShellProps = {
   versions: ContentEditorVersionSummary[];
   preview: ContentEditorPreview;
   actionsUnavailableReason?: string;
+  testSendUnavailableReason?: string;
   unavailableReason?: string;
   onPublish?: () => void;
   onPreview?: () => void;
@@ -95,6 +96,7 @@ export function ContentEditorShell({
   versions,
   preview,
   actionsUnavailableReason,
+  testSendUnavailableReason,
   unavailableReason,
   onPublish,
   onPreview,
@@ -124,6 +126,7 @@ export function ContentEditorShell({
         publishBlocked={publishBlocked || Boolean(unavailableReason)}
         actionsUnavailableReason={actionsUnavailableReason}
         previewOpen={previewOpen}
+        testSendUnavailableReason={testSendUnavailableReason}
         unavailableReason={unavailableReason}
         onArchive={onArchive}
         onInspectorToggle={() => setInspectorOpen((current) => !current)}
@@ -176,6 +179,7 @@ function EditorTopBar({
   previewOpen,
   publishBlocked,
   actionsUnavailableReason,
+  testSendUnavailableReason,
   unavailableReason,
   onArchive,
   onInspectorToggle,
@@ -192,6 +196,7 @@ function EditorTopBar({
   previewOpen: boolean;
   publishBlocked: boolean;
   actionsUnavailableReason?: string;
+  testSendUnavailableReason?: string;
   unavailableReason?: string;
   onArchive?: () => void;
   onInspectorToggle: () => void;
@@ -222,8 +227,12 @@ function EditorTopBar({
           <Eye className="size-4" />
         </IconButton>
         <IconButton
-          disabled={Boolean(actionsUnavailableReason)}
-          label={actionsUnavailableReason ? 'Test send unavailable' : 'Send test'}
+          disabled={Boolean(actionsUnavailableReason || testSendUnavailableReason)}
+          label={
+            actionsUnavailableReason || testSendUnavailableReason
+              ? 'Test send unavailable'
+              : 'Send test'
+          }
           onClick={onTestSend}
         >
           <Send className="size-4" />
