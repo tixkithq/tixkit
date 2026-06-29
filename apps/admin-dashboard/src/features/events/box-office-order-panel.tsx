@@ -492,7 +492,7 @@ export function BoxOfficeOrderPanel({
             <Button
               type="submit"
               disabled={submitting}
-              className="disabled:bg-muted disabled:text-foreground disabled:opacity-100"
+              className="disabled:bg-slate-950 disabled:text-white disabled:opacity-100 dark:disabled:bg-white dark:disabled:text-slate-950"
             >
               <ReceiptText className="size-4" />
               {submitting ? 'Issuing...' : 'Issue door order'}

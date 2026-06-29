@@ -94,6 +94,61 @@ test.describe('admin box-office POS workflows', () => {
     await attachScreenshot(page, testInfo, 'admin-box-office-door-order-mobile');
   });
 
+  test('operator creates a cash door order across the browser matrix', async ({
+    page,
+    request,
+  }, testInfo) => {
+    await requireReachable(page, adminBaseUrl, 'admin dashboard');
+    await requireReachable(page, `${apiBaseUrl}/health`, 'api');
+
+    const suffix = `box-office-cash-${testInfo.project.name}-${testInfo.workerIndex}-${Date.now()}`;
+    const { event } = await seedPaidCheckoutEvent(request, suffix);
+
+    await page.setViewportSize(desktopViewport);
+    await page.goto(`${adminBaseUrl}/events/${event.id}/tickets`);
+    await expect(page.getByRole('heading', { name: 'Sell at door' })).toBeVisible();
+    await fillDoorOrderForm(page, 'cash');
+
+    const orderResponsePromise = page.waitForResponse(
+      (response) =>
+        response.url() === `${apiBaseUrl}/v1/events/${event.id}/box-office/orders` &&
+        response.request().method() === 'POST',
+    );
+    await page.getByRole('button', { name: 'Issue door order' }).click();
+    const orderResponse = await orderResponsePromise;
+    const orderBody = await orderResponse.json();
+    expect(orderResponse.status(), JSON.stringify(orderBody, null, 2)).toBe(201);
+    expect(orderBody.order.salesChannel).toBe('box_office');
+    expect(orderBody.order.tenderType).toBe('cash');
+    expect(orderBody.order.totalCents).toBe(2500);
+
+    const issuedOrderAlert = page.getByRole('alert').filter({ hasText: 'Order issued' });
+    await expect(issuedOrderAlert).toBeVisible();
+    await expect(issuedOrderAlert.getByText(`Order: ${orderBody.order.id}`)).toBeVisible();
+    await expectNoAxeViolations(page, testInfo);
+    await attachScreenshot(page, testInfo, 'admin-box-office-cash-order-desktop');
+
+    const orders = await request.get(`${apiBaseUrl}/v1/orders?eventId=${event.id}`, {
+      failOnStatusCode: false,
+    });
+    const ordersBody = await orders.json();
+    expect(orders.status(), JSON.stringify(ordersBody, null, 2)).toBe(200);
+    expect(
+      ordersBody.items.some(
+        (order: { id: string; salesChannel?: string; tenderType?: string }) =>
+          order.id === orderBody.order.id &&
+          order.salesChannel === 'box_office' &&
+          order.tenderType === 'cash',
+      ),
+    ).toBe(true);
+
+    await page.setViewportSize(mobileViewport);
+    await expect(page.getByRole('heading', { name: 'Sell at door' })).toBeVisible();
+    await expect(issuedOrderAlert.getByText(`Order: ${orderBody.order.id}`)).toBeVisible();
+    await expectNoAxeViolations(page, testInfo);
+    await attachScreenshot(page, testInfo, 'admin-box-office-cash-order-mobile');
+  });
+
   test('Sell at door panel exposes Chromium CDP layout metrics after issue', async ({
     browserName,
     page,
