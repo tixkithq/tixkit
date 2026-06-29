@@ -7,11 +7,13 @@ const mockState = vi.hoisted(() => ({
   patchedResult: true as boolean,
   sleeps: [] as string[],
   childStarts: [] as Array<{ workflow: unknown; options: Record<string, unknown> }>,
+  proxyActivityOptions: [] as Array<Record<string, unknown>>,
 }));
 
 vi.mock('@temporalio/workflow', () => ({
-  proxyActivities: () =>
-    new Proxy(
+  proxyActivities: (options: Record<string, unknown>) => {
+    mockState.proxyActivityOptions.push(options);
+    return new Proxy(
       {},
       {
         get:
@@ -22,7 +24,8 @@ vi.mock('@temporalio/workflow', () => ({
             return { ok: true, value: {} };
           },
       },
-    ),
+    );
+  },
   defineSignal: (name: string) => name,
   defineQuery: (name: string) => name,
   setHandler: (signal: string, handler: (...args: any[]) => void) => {
@@ -1158,6 +1161,15 @@ describe('webhookDeliveryWorkflow', () => {
     Object.entries(defaultActivities).forEach(([name, impl]) => setActivity(name, impl));
   });
 
+  it('disables automatic activity retries for side-effecting webhook posts', () => {
+    expect(mockState.proxyActivityOptions).toContainEqual(
+      expect.objectContaining({
+        startToCloseTimeout: '30 seconds',
+        retry: { maximumAttempts: 1 },
+      }),
+    );
+  });
+
   it('delivers successfully on the first attempt', async () => {
     const attempts: Array<Record<string, unknown>> = [];
     setActivity('deliverWebhookActivity', async (input) => {
@@ -1232,5 +1244,81 @@ describe('webhookDeliveryWorkflow', () => {
     expect(result.status).toBe('dead_lettered');
     expect(attempts.map((attempt) => attempt.attempt)).toEqual([1]);
     expect(mockState.sleeps).toEqual([]);
+  });
+
+  it('propagates delivery persistence failures instead of marking the workflow dead-lettered', async () => {
+    const attempts: Array<Record<string, unknown>> = [];
+    setActivity('deliverWebhookActivity', async (input) => {
+      attempts.push(input);
+      throw new Error('Failed to persist webhook dead-letter delivery: database unavailable');
+    });
+
+    await expect(webhookDeliveryWorkflow(makeWebhookDeliveryInput())).rejects.toThrow(
+      'Failed to persist webhook dead-letter delivery: database unavailable',
+    );
+
+    expect(attempts.map((attempt) => attempt.attempt)).toEqual([1]);
+    expect(mockState.sleeps).toEqual([]);
+  });
+
+  it('rechecks in-progress final attempts without marking dead-lettered', async () => {
+    const attempts: Array<Record<string, unknown>> = [];
+    setActivity('deliverWebhookActivity', async (input) => {
+      attempts.push(input);
+      return attempts.length === 1
+        ? errResult(
+            'WEBHOOK_DELIVERY_IN_PROGRESS',
+            'Webhook delivery attempt is already in progress',
+            true,
+          )
+        : okResult({ statusCode: 204, response: '' });
+    });
+
+    const result = await webhookDeliveryWorkflow(makeWebhookDeliveryInput({ maxAttempts: 1 }));
+
+    expect(result.status).toBe('delivered');
+    expect(attempts.map((attempt) => attempt.attempt)).toEqual([1, 1]);
+    expect(attempts.map((attempt) => attempt.finalAttempt)).toEqual([true, true]);
+    expect(mockState.sleeps).toEqual(['5 seconds']);
+  });
+
+  it('does not advance to a new logical attempt while the same webhook attempt is in progress', async () => {
+    const attempts: Array<Record<string, unknown>> = [];
+    setActivity('deliverWebhookActivity', async (input) => {
+      attempts.push(input);
+      return attempts.length === 1
+        ? errResult(
+            'WEBHOOK_DELIVERY_IN_PROGRESS',
+            'Webhook delivery attempt is already in progress',
+            true,
+          )
+        : okResult({ statusCode: 204, response: '' });
+    });
+
+    const result = await webhookDeliveryWorkflow(makeWebhookDeliveryInput());
+
+    expect(result.status).toBe('delivered');
+    expect(attempts.map((attempt) => attempt.attempt)).toEqual([1, 1]);
+    expect(attempts.map((attempt) => attempt.finalAttempt)).toEqual([false, false]);
+    expect(mockState.sleeps).toEqual(['5 seconds']);
+  });
+
+  it('fails after bounded in-progress rechecks', async () => {
+    const attempts: Array<Record<string, unknown>> = [];
+    setActivity('deliverWebhookActivity', async (input) => {
+      attempts.push(input);
+      return errResult(
+        'WEBHOOK_DELIVERY_IN_PROGRESS',
+        'Webhook delivery attempt is already in progress',
+        true,
+      );
+    });
+
+    await expect(webhookDeliveryWorkflow(makeWebhookDeliveryInput())).rejects.toThrow(
+      'Webhook delivery attempt remained in progress (WEBHOOK_DELIVERY_IN_PROGRESS): Webhook delivery attempt is already in progress',
+    );
+
+    expect(attempts.map((attempt) => attempt.attempt)).toEqual(Array.from({ length: 13 }, () => 1));
+    expect(mockState.sleeps).toEqual(Array.from({ length: 12 }, () => '5 seconds'));
   });
 });
