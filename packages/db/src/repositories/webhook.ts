@@ -166,6 +166,45 @@ export class WebhookDeliveryRepository extends BaseRepository {
     return this.updateReturning('webhook_deliveries', id, input);
   }
 
+  async deadLetterAttempt(id: string, input: Record<string, unknown>) {
+    const now = new Date();
+    const result = await this.db
+      .updateTable('webhook_deliveries')
+      .set(input)
+      .where('id', '=', id)
+      .where('status', 'not in', ['delivered', 'dead_lettered'])
+      .where((eb) =>
+        eb.or([
+          eb('status', '!=', 'pending'),
+          eb('next_retry_at', 'is', null),
+          eb('next_retry_at', '<=', now),
+        ]),
+      )
+      .executeTakeFirst();
+    const delivery = await this.findById(id);
+    if (!delivery) {
+      throw new Error(`Webhook delivery ${id} not found`);
+    }
+
+    return { updated: Number(result.numUpdatedRows ?? 0) === 1, delivery };
+  }
+
+  async completeClaimedAttempt(id: string, leaseExpiresAt: Date, input: Record<string, unknown>) {
+    const result = await this.db
+      .updateTable('webhook_deliveries')
+      .set(input)
+      .where('id', '=', id)
+      .where('status', '=', 'pending')
+      .where('next_retry_at', '=', leaseExpiresAt)
+      .executeTakeFirst();
+    const delivery = await this.findById(id);
+    if (!delivery) {
+      throw new Error(`Webhook delivery ${id} not found`);
+    }
+
+    return { updated: Number(result.numUpdatedRows ?? 0) === 1, delivery };
+  }
+
   async claimAttempt(input: {
     endpointId: string | null;
     requestedEndpointId?: string;
@@ -194,6 +233,7 @@ export class WebhookDeliveryRepository extends BaseRepository {
       .updateTable('webhook_deliveries')
       .set({
         endpoint_id: input.endpointId,
+        status: 'pending',
         status_code: null,
         response: null,
         delivered_at: null,
@@ -201,12 +241,9 @@ export class WebhookDeliveryRepository extends BaseRepository {
       })
       .where('id', '=', delivery.id)
       .where((eb) =>
-        eb.or([
-          eb.and([
-            eb('status', '=', 'pending'),
-            eb.or([eb('next_retry_at', 'is', null), eb('next_retry_at', '<=', now)]),
-          ]),
-          eb('status', '=', 'failed'),
+        eb.and([
+          eb('status', 'in', ['pending', 'failed']),
+          eb.or([eb('next_retry_at', 'is', null), eb('next_retry_at', '<=', now)]),
         ]),
       )
       .executeTakeFirst();
@@ -235,6 +272,14 @@ export class WebhookDeliveryRepository extends BaseRepository {
       .where('requested_endpoint_id', '=', input.requestedEndpointId)
       .where('delivery_key', '=', input.deliveryKey ?? 'live')
       .where('attempt', '=', input.attempt)
+      .executeTakeFirst();
+  }
+
+  async findById(id: string) {
+    return this.db
+      .selectFrom('webhook_deliveries')
+      .selectAll()
+      .where('id', '=', id)
       .executeTakeFirst();
   }
 
