@@ -4,6 +4,16 @@ import path from 'node:path';
 
 export default defineConfig({
   plugins: [react()],
+  esbuild: {
+    jsx: 'automatic',
+    tsconfigRaw: {
+      compilerOptions: {
+        jsx: 'react-jsx',
+        jsxImportSource: 'react',
+      },
+    },
+  },
+  oxc: false,
   test: {
     globals: true,
     environment: 'jsdom',
