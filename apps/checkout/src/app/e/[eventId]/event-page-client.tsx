@@ -91,9 +91,13 @@ export default function EventPageClient({
         const loadedEvent = eventId
           ? await publicApi.getEvent(eventId, controller.signal)
           : await publicApi.getEventBySlug(eventSlug!, customDomainHost!, controller.signal);
+        const loadContentPage =
+          eventSlug && customDomainHost
+            ? () => publicApi.getEventPageBySlug(eventSlug, customDomainHost, controller.signal)
+            : () => publicApi.getEventPage(loadedEvent.id, controller.signal);
         const [loadedAvailability, loadedContentPage] = await Promise.all([
           publicApi.getAvailability(loadedEvent.id, controller.signal),
-          publicApi.getEventPage(loadedEvent.id, controller.signal).catch((err) => {
+          loadContentPage().catch((err) => {
             if (err instanceof CheckoutApiError && err.status === 404) return null;
             throw err;
           }),
@@ -311,15 +315,78 @@ export default function EventPageClient({
 
 function sanitizePublishedEventPageHtml(html: string): string {
   return html
-    .replace(/<script[\s\S]*?>[\s\S]*?<\/script>/gi, '')
+    .replace(
+      /<iframe\b(?=[^>]*\ssrcdoc\b)[\s\S]*?<\/iframe>/gi,
+      '',
+    )
+    .replace(
+      /<(script|object|embed|form|svg|math|base|link|meta|style|template)\b[\s\S]*?<\/\1>/gi,
+      '',
+    )
+    .replace(
+      /<(script|object|embed|form|svg|math|base|link|meta|style|template)\b[^>]*\/?>/gi,
+      '',
+    )
     .replace(
       /\s+on[a-z][\w:-]*(?:\s*=\s*(?:"[^"]*"|'[^']*'|`[^`]*`|[^\s"'`=<>]+))?/gi,
       '',
     )
     .replace(
-      /\s+(href|src)\s*=\s*(?:"[\s\u0000-\u001f]*(?:javascript|data|file):[^"]*"|'[\s\u0000-\u001f]*(?:javascript|data|file):[^']*'|`[\s\u0000-\u001f]*(?:javascript|data|file):[^`]*`|[\s\u0000-\u001f]*(?:javascript|data|file):[^\s"'`=<>]*)/gi,
+      /\s+(srcdoc|style)\s*=\s*("[^"]*"|'[^']*'|`[^`]*`|[^\s"'`=<>]*)/gi,
       '',
+    )
+    .replace(
+      /\s+(href|src|data|action|formaction|xlink:href)\s*=\s*("[^"]*"|'[^']*'|`[^`]*`|[^\s"'`=<>]*)/gi,
+      (attribute: string, _name: string, rawValue: string) =>
+        hasUnsafeHtmlUrlScheme(rawValue) ? '' : attribute,
     );
+}
+
+function hasUnsafeHtmlUrlScheme(rawValue: string): boolean {
+  const value = stripAttributeQuotes(rawValue)
+    .replace(/&(?:#x([0-9a-f]+)|#([0-9]+)|([a-z][a-z0-9]+));?/gi, (_entity, hex, decimal, named) => {
+      if (hex) return htmlCodePointEntity(hex, 16);
+      if (decimal) return htmlCodePointEntity(decimal, 10);
+      return namedHtmlEntity(named);
+    })
+    .split('')
+    .filter((char) => {
+      const code = char.codePointAt(0) ?? 0;
+      return code > 0x20 && code !== 0x7f;
+    })
+    .join('')
+    .trim()
+    .toLowerCase();
+  return /^(?:javascript|data|file):/.test(value);
+}
+
+function stripAttributeQuotes(rawValue: string): string {
+  const first = rawValue[0];
+  const last = rawValue[rawValue.length - 1];
+  return (first === '"' || first === "'" || first === '`') && first === last
+    ? rawValue.slice(1, -1)
+    : rawValue;
+}
+
+function htmlCodePointEntity(value: string, radix: number): string {
+  const codePoint = Number.parseInt(value, radix);
+  if (!Number.isFinite(codePoint) || codePoint < 0 || codePoint > 0x10ffff) {
+    return '';
+  }
+  return String.fromCodePoint(codePoint);
+}
+
+function namedHtmlEntity(name: string): string {
+  const normalized = name.toLowerCase();
+  if (normalized === 'colon') return ':';
+  if (normalized === 'tab') return '\t';
+  if (normalized === 'newline') return '\n';
+  if (normalized === 'amp') return '&';
+  if (normalized === 'lt') return '<';
+  if (normalized === 'gt') return '>';
+  if (normalized === 'quot') return '"';
+  if (normalized === 'apos') return "'";
+  return `&${name};`;
 }
 
 function SurfaceShell({ brand, children }: { brand: ResolvedBrand; children: React.ReactNode }) {

@@ -1,7 +1,7 @@
 import { type APIResponse, type Page, type TestInfo } from '@playwright/test';
 import { test, expect, requireReachable } from './fixtures/validation-test';
 import { expectNoAxeViolations } from './helpers/axe';
-import { adminBaseUrl, apiBaseUrl } from './helpers/env';
+import { adminBaseUrl, apiBaseUrl, checkoutBaseUrl } from './helpers/env';
 import { devBrandId, devOrganizationId } from './helpers/seed';
 
 const desktopViewport = { width: 1440, height: 1000 } as const;
@@ -159,9 +159,11 @@ async function expectPersistedEventPageEditorRegions(page: Page): Promise<void> 
 
 test.describe('persisted admin event-page content editor', () => {
   test('saves, previews, publishes, renders publicly, and reloads a canonical event page', async ({
+    browserName,
     page,
   }, testInfo) => {
     await requireReachable(page, adminBaseUrl, 'admin dashboard');
+    await requireReachable(page, checkoutBaseUrl, 'checkout app');
     await requireReachable(page, `${apiBaseUrl}/health`, 'api');
 
     const suffix = `${testInfo.workerIndex}-${Date.now()}`;
@@ -228,6 +230,50 @@ test.describe('persisted admin event-page content editor', () => {
       publicPage.page.headless.some((block) => block.type === 'hero' && block.title === headline),
     ).toBe(true);
 
+    await page.goto(`${checkoutBaseUrl}/e/${encodeURIComponent(event.id)}`);
+    await expect(page.getByRole('heading', { name: event.title })).toBeVisible();
+    await expect(page.getByTestId('published-event-page')).toContainText(headline);
+    await expect(page.getByTestId('published-event-page')).toContainText(summary);
+    await expect(page.getByTestId('published-event-page')).toContainText(ctaLabel);
+    await attachScreenshot(page, testInfo, 'checkout-event-page-published-content-desktop');
+    await expectNoAxeViolations(page, testInfo);
+
+    if (browserName === 'chromium') {
+      const client = await page.context().newCDPSession(page);
+      const { root } = await client.send('DOM.getDocument', { depth: -1, pierce: true });
+      const hostedSelectors = {
+        main: 'main',
+        publishedArticle: '[data-testid="published-event-page"]',
+        contentCta: '[data-testid="published-event-page"] .tk-ep-button',
+      } as const;
+      const hostedBoxes: Record<string, unknown> = {};
+      for (const [name, selector] of Object.entries(hostedSelectors)) {
+        const node = await client.send('DOM.querySelector', {
+          nodeId: root.nodeId,
+          selector,
+        });
+        expect(node.nodeId).toBeGreaterThan(0);
+        const box = await client.send('DOM.getBoxModel', { nodeId: node.nodeId });
+        expect(widthOf(box.model.content)).toBeGreaterThan(name === 'contentCta' ? 60 : 300);
+        expect(heightOf(box.model.content)).toBeGreaterThan(name === 'contentCta' ? 20 : 40);
+        hostedBoxes[name] = box;
+      }
+      await testInfo.attach('cdp-layout-boxes-checkout-event-page-published', {
+        body: JSON.stringify(hostedBoxes, null, 2),
+        contentType: 'application/json',
+      });
+      await client.detach();
+    }
+
+    await page.setViewportSize(mobileViewport);
+    await page.goto(`${checkoutBaseUrl}/e/${encodeURIComponent(event.id)}`);
+    await expect(page.getByTestId('published-event-page')).toContainText(headline);
+    await attachScreenshot(page, testInfo, 'checkout-event-page-published-content-mobile');
+    await expectNoAxeViolations(page, testInfo);
+
+    await page.setViewportSize(desktopViewport);
+    await page.goto(`${adminBaseUrl}/events/${event.id}/content/event-page`);
+    await expectPersistedEventPageEditorRegions(page);
     await attachScreenshot(page, testInfo, 'admin-content-event-page-persisted-desktop');
     await expectNoAxeViolations(page, testInfo);
 
