@@ -197,6 +197,7 @@ export interface EventTable {
   external_url: string | null;
   waitlist_auto_offer_enabled: Generated<boolean>;
   waitlist_offer_ttl_minutes: Generated<number>;
+  code_format: string | null;
   created_at: Timestamp;
   updated_at: Timestamp;
 }

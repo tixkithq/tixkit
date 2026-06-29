@@ -26,3 +26,4 @@ export { PaymentAccountsUniqueMigration } from './0025_payment_accounts_unique.j
 export { WebhookDeliveryAttemptIdentityMigration } from './0026_webhook_delivery_attempt_identity.js';
 export { WebhookDeliveryReplayIdentityMigration } from './0027_webhook_delivery_replay_identity.js';
 export { ShortLinksMigration } from './0028_short_links.js';
+export { EventCodeFormatMigration } from './0029_event_code_format.js';

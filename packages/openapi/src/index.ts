@@ -2036,6 +2036,129 @@ export const openApiSpec = {
         },
       },
     },
+    '/events/{eventId}/code-format': {
+      get: {
+        summary: 'Get the scanning-code format config and scanner contract version (C-079)',
+        security: [{ BearerAuth: [] }],
+        parameters: [
+          { name: 'eventId', in: 'path', required: true, schema: { type: 'string' } },
+        ],
+        responses: {
+          '200': {
+            description: 'Code-format config and scanner contract version',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  properties: {
+                    eventId: { type: 'string' },
+                    codeFormat: {
+                      type: 'object',
+                      properties: {
+                        symbology: {
+                          type: 'string',
+                          enum: ['qr', 'code128', 'pdf417', 'aztec', 'data_matrix'],
+                        },
+                        payloadFormat: { type: 'string', enum: ['signed_v1', 'compact_v2'] },
+                        rotating: {
+                          type: 'object',
+                          properties: {
+                            timeStepSeconds: { type: 'integer' },
+                            toleranceWindows: { type: 'integer' },
+                            digits: { type: 'integer' },
+                          },
+                        },
+                      },
+                      required: ['symbology', 'payloadFormat'],
+                    },
+                    scannerContractVersion: { type: 'string' },
+                  },
+                  required: ['eventId', 'codeFormat', 'scannerContractVersion'],
+                },
+              },
+            },
+          },
+          '401': {
+            description: 'Unauthorized',
+            content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } },
+          },
+          '403': {
+            description: 'Forbidden',
+            content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } },
+          },
+          '404': {
+            description: 'Event not found',
+            content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } },
+          },
+        },
+      },
+      put: {
+        summary: 'Set the scanning-code format config for an event (C-079)',
+        security: [{ BearerAuth: [] }],
+        parameters: [
+          { name: 'eventId', in: 'path', required: true, schema: { type: 'string' } },
+        ],
+        requestBody: {
+          required: true,
+          content: {
+            'application/json': {
+              schema: {
+                type: 'object',
+                properties: {
+                  symbology: {
+                    type: 'string',
+                    enum: ['qr', 'code128', 'pdf417', 'aztec', 'data_matrix'],
+                  },
+                  payloadFormat: { type: 'string', enum: ['signed_v1', 'compact_v2'] },
+                  rotating: {
+                    type: 'object',
+                    properties: {
+                      timeStepSeconds: { type: 'integer' },
+                      toleranceWindows: { type: 'integer' },
+                      digits: { type: 'integer' },
+                    },
+                  },
+                },
+              },
+            },
+          },
+        },
+        responses: {
+          '200': {
+            description: 'Updated code-format config',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  properties: {
+                    eventId: { type: 'string' },
+                    codeFormat: { type: 'object', additionalProperties: true },
+                    scannerContractVersion: { type: 'string' },
+                  },
+                  required: ['eventId', 'codeFormat', 'scannerContractVersion'],
+                },
+              },
+            },
+          },
+          '400': {
+            description: 'Validation error',
+            content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } },
+          },
+          '401': {
+            description: 'Unauthorized',
+            content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } },
+          },
+          '403': {
+            description: 'Forbidden',
+            content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } },
+          },
+          '404': {
+            description: 'Event not found',
+            content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } },
+          },
+        },
+      },
+    },
     '/events/{eventId}/occurrences': {
       get: {
         summary: 'List event occurrences',

@@ -9,6 +9,8 @@ import {
   AuditLogRepository,
 } from '@tixkit/db';
 import { NotFoundError, ValidationError } from '@tixkit/domain';
+import { SCANNER_CONTRACT_VERSION, DEFAULT_CODE_FORMAT } from '@tixkit/domain';
+import type { CodeFormat } from '@tixkit/domain';
 import { writeAuditLog } from '../../auth/audit.js';
 import {
   pageEnvelope,
@@ -554,5 +556,71 @@ export const eventRoutes: FastifyPluginAsync = async (app) => {
       resourceId: eventId,
     });
     return serializeEvent(result);
+  });
+
+  // C-079: configurable scanning-code format + scanner contract version.
+  app.get('/events/:eventId/code-format', async (request) => {
+    const principal = request.principal!;
+    ClerkAuthService.requirePermission(principal, 'events.read');
+    const { eventId } = request.params as { eventId: string };
+    const repo = new EventRepository(db);
+    const existing = await repo.findById(eventId);
+    if (!existing) throw new NotFoundError('Event', eventId);
+    ClerkAuthService.requireResourceTenant(principal, existing, 'Event', eventId);
+    const config = existing.code_format
+      ? (JSON.parse(existing.code_format) as CodeFormat)
+      : DEFAULT_CODE_FORMAT;
+    return { eventId, codeFormat: config, scannerContractVersion: SCANNER_CONTRACT_VERSION };
+  });
+
+  app.put('/events/:eventId/code-format', async (request) => {
+    const principal = request.principal!;
+    ClerkAuthService.requirePermission(principal, 'events.write');
+    const { eventId } = request.params as { eventId: string };
+    const body = request.body as { symbology?: string; payloadFormat?: string; rotating?: unknown };
+    const symbology = body.symbology ?? DEFAULT_CODE_FORMAT.symbology;
+    const payloadFormat = body.payloadFormat ?? DEFAULT_CODE_FORMAT.payloadFormat;
+    const validSymbologies = ['qr', 'code128', 'pdf417', 'aztec', 'data_matrix'];
+    const validFormats = ['signed_v1', 'compact_v2'];
+    if (!validSymbologies.includes(symbology)) {
+      throw new ValidationError('Invalid symbology', { field: 'symbology' });
+    }
+    if (!validFormats.includes(payloadFormat)) {
+      throw new ValidationError('Invalid payloadFormat', { field: 'payloadFormat' });
+    }
+    const config: CodeFormat = {
+      symbology: symbology as CodeFormat['symbology'],
+      payloadFormat: payloadFormat as CodeFormat['payloadFormat'],
+    };
+    if (body.rotating && typeof body.rotating === 'object') {
+      const r = body.rotating as { timeStepSeconds?: number; toleranceWindows?: number; digits?: number };
+      if (typeof r.timeStepSeconds !== 'number' || r.timeStepSeconds < 5) {
+        throw new ValidationError('rotating.timeStepSeconds must be >= 5', { field: 'rotating' });
+      }
+      if (typeof r.toleranceWindows !== 'number' || r.toleranceWindows < 0) {
+        throw new ValidationError('rotating.toleranceWindows must be >= 0', { field: 'rotating' });
+      }
+      config.rotating = {
+        timeStepSeconds: r.timeStepSeconds,
+        toleranceWindows: r.toleranceWindows,
+        digits: r.digits,
+      };
+    }
+    const repo = new EventRepository(db);
+    const existing = await repo.findById(eventId);
+    if (!existing) throw new NotFoundError('Event', eventId);
+    ClerkAuthService.requireResourceTenant(principal, existing, 'Event', eventId);
+    ClerkAuthService.requireOrganizationScope(principal, existing.organization_id);
+    ClerkAuthService.requireBrandScope(principal, existing.brand_id);
+    ClerkAuthService.requireEventScope(principal, eventId);
+    await repo.update(eventId, { code_format: JSON.stringify(config) } as Record<string, unknown>);
+    await writeAuditLog(audit(), request, principal, {
+      action: 'event.code_format_updated',
+      organizationId: existing.organization_id,
+      brandId: existing.brand_id,
+      resourceType: 'Event',
+      resourceId: eventId,
+    });
+    return { eventId, codeFormat: config, scannerContractVersion: SCANNER_CONTRACT_VERSION };
   });
 };

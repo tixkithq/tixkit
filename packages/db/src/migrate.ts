@@ -29,6 +29,7 @@ import { PaymentAccountsUniqueMigration } from './migrations/0025_payment_accoun
 import { WebhookDeliveryAttemptIdentityMigration } from './migrations/0026_webhook_delivery_attempt_identity.js';
 import { WebhookDeliveryReplayIdentityMigration } from './migrations/0027_webhook_delivery_replay_identity.js';
 import { ShortLinksMigration } from './migrations/0028_short_links.js';
+import { EventCodeFormatMigration } from './migrations/0029_event_code_format.js';
 
 const INITIAL_MIGRATION_NAME = '0001_initial';
 const MIGRATION_TABLE = 'kysely_migration';
@@ -173,6 +174,7 @@ class TixkitMigrationProvider implements MigrationProvider {
       '0026_webhook_delivery_attempt_identity': WebhookDeliveryAttemptIdentityMigration,
       '0027_webhook_delivery_replay_identity': WebhookDeliveryReplayIdentityMigration,
       '0028_short_links': ShortLinksMigration,
+      '0029_event_code_format': EventCodeFormatMigration,
     };
   }
 }
