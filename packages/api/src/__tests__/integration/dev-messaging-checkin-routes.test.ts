@@ -10,6 +10,7 @@ import { tenantRoutes } from '../../routes/modules/tenant.js';
 import { messagingRoutes } from '../../routes/modules/messaging.js';
 import { checkInRoutes } from '../../routes/modules/checkin.js';
 import { checkoutRoutes } from '../../routes/modules/checkout.js';
+import { ticketingRoutes } from '../../routes/modules/ticketing.js';
 import { questionRoutes } from '../../routes/modules/questions.js';
 import { authRoutes } from '../../routes/modules/auth.js';
 import { publicRoutes } from '../../routes/modules/public.js';
@@ -49,8 +50,8 @@ const likePatternMatches = (rowValue: unknown, pattern: unknown): boolean => {
 function createMockDb(tables: Record<string, unknown> = {}): unknown {
   const tableState = tables as Record<string, unknown>;
   const getRows = (table: string): Record<string, unknown>[] => {
-    if (table in tables) return tables[table] as Record<string, unknown>[];
-    return [];
+    if (!(table in tableState)) tableState[table] = [];
+    return tableState[table] as Record<string, unknown>[];
   };
   function createQuery(table: string) {
     const filters: Array<[string, string, unknown]> = [];
@@ -81,7 +82,6 @@ function createMockDb(tables: Record<string, unknown> = {}): unknown {
         );
       },
       async executeTakeFirst() {
-        if (table === 'idempotency_records') return undefined;
         return query.rows()[0];
       },
       async executeTakeFirstOrThrow() {
@@ -100,15 +100,41 @@ function createMockDb(tables: Record<string, unknown> = {}): unknown {
     return {
       set: (values: Record<string, unknown>) => {
         const rows = getRows(table);
-        if (rows[0]) Object.assign(rows[0], values);
-        return {
-          where: () => ({
-            returningAll: () => ({
-              executeTakeFirstOrThrow: async () => rows[0] ?? { id: 'updated', ...values },
-            }),
-            execute: async () => [],
+        const filters: Array<[string, string, unknown]> = [];
+        const query = {
+          where: (...args: unknown[]) => {
+            if (typeof args[0] === 'string' && typeof args[1] === 'string') {
+              filters.push([args[0], args[1], args[2]]);
+            }
+            return query;
+          },
+          returningAll: () => ({
+            executeTakeFirstOrThrow: async () => {
+              const updated = applyUpdate();
+              if (!updated[0]) throw new Error(`No mock update row for ${table}`);
+              return updated[0];
+            },
           }),
+          executeTakeFirst: async () => ({ numUpdatedRows: BigInt(applyUpdate().length) }),
+          execute: async () => {
+            applyUpdate();
+            return [];
+          },
         };
+        const applyUpdate = () => {
+          const matching = rows.filter((row) =>
+            filters.every(([column, op, value]) => {
+              const rowValue = getMockColumnValue(row, column);
+              if (op === '=') return mockValuesEqual(rowValue, value);
+              if (op === 'is') return value === null ? rowValue === null : rowValue === value;
+              if (op === 'is not') return value === null ? rowValue !== null : rowValue !== value;
+              return true;
+            }),
+          );
+          for (const row of matching) Object.assign(row, values);
+          return matching;
+        };
+        return query;
       },
     };
   }
@@ -3851,6 +3877,196 @@ describe('ticket transfer and attendee update', () => {
     expect(res.statusCode).toBe(200);
     const body = res.json();
     expect(body.firstName).toBe('Updated');
+    await app.close();
+  });
+});
+
+describe('resale listing routes', () => {
+  const principal = () => makePrincipal({ scopes: [...makePrincipal().scopes, 'tickets.write'] });
+  const now = new Date('2026-01-01T00:00:00.000Z');
+  const event = {
+    id: 'evt_1',
+    tenant_id: 'tnt_1',
+    organization_id: 'org_1',
+    brand_id: 'brd_1',
+    status: 'published',
+    slug: 'evt',
+    title: 'Event',
+    currency: 'USD',
+    timezone: 'UTC',
+    starts_at: now,
+    ends_at: null,
+    visibility: 'public',
+    seo: '{}',
+    resale_enabled: true,
+    resale_max_multiplier: 1.2,
+    resale_max_absolute_cents: null,
+    created_at: now,
+    updated_at: now,
+  };
+  const ticketType = {
+    id: 'tt_1',
+    event_id: 'evt_1',
+    name: 'GA',
+    kind: 'paid',
+    status: 'active',
+    visibility: 'public',
+    currency: 'USD',
+    price_cents: 5000,
+    inventory_pool_id: 'pool_1',
+    min_per_order: 1,
+    max_per_order: 10,
+    sort_order: 0,
+    requires_access_code: false,
+    created_at: now,
+    updated_at: now,
+  };
+  const ticket = {
+    id: 'tkt_1',
+    tenant_id: 'tnt_1',
+    order_id: 'ord_1',
+    attendee_id: 'att_1',
+    event_id: 'evt_1',
+    ticket_type_id: 'tt_1',
+    event_occurrence_id: null,
+    status: 'valid',
+    code: 'CODE',
+    qr_payload: 'payload',
+    qr_hash: 'hash',
+    transferred_to_email: null,
+    transferred_at: null,
+    checked_in_at: null,
+    checked_in_by_device_id: null,
+    wallet_pass_id: null,
+    created_at: now,
+    updated_at: now,
+  };
+
+  it('reads and updates persisted event resale policy', async () => {
+    const tables = { events: [{ ...event, resale_enabled: false, resale_max_multiplier: 1 }] };
+    const app = await setupApp(ticketingRoutes, principal(), tables);
+
+    const read = await app.inject({ method: 'GET', url: '/events/evt_1/resale-policy' });
+    expect(read.statusCode).toBe(200);
+    expect(read.json()).toEqual({ enabled: false, maxMultiplier: 1 });
+
+    const update = await app.inject({
+      method: 'PUT',
+      url: '/events/evt_1/resale-policy',
+      payload: { enabled: true, maxMultiplier: 1.1, maxAbsoluteCents: 5500 },
+    });
+    expect(update.statusCode).toBe(200);
+    expect(update.json()).toEqual({
+      enabled: true,
+      maxMultiplier: 1.1,
+      maxAbsoluteCents: 5500,
+    });
+    expect((tables.events[0] as Record<string, unknown>).resale_enabled).toBe(true);
+    await app.close();
+  });
+
+  it('creates a resale listing once and replays the same idempotency key', async () => {
+    const tables = {
+      events: [event],
+      tickets: [ticket],
+      ticket_types: [ticketType],
+      ticket_listings: [] as Record<string, unknown>[],
+    };
+    const app = await setupApp(ticketingRoutes, principal(), tables);
+
+    const first = await app.inject({
+      method: 'POST',
+      url: '/tickets/tkt_1/resale-listings',
+      headers: { 'Idempotency-Key': 'resale_idem_1' },
+      payload: { priceCents: 5500 },
+    });
+    expect(first.statusCode).toBe(201);
+    const firstBody = first.json();
+    expect(firstBody).toMatchObject({
+      eventId: 'evt_1',
+      ticketId: 'tkt_1',
+      sellerId: 'usr_1',
+      status: 'listed',
+      priceCents: 5500,
+      faceValueCents: 5000,
+    });
+
+    const replay = await app.inject({
+      method: 'POST',
+      url: '/tickets/tkt_1/resale-listings',
+      headers: { 'Idempotency-Key': 'resale_idem_1' },
+      payload: { priceCents: 5500 },
+    });
+    expect(replay.statusCode).toBe(201);
+    expect(replay.json().id).toBe(firstBody.id);
+    expect(tables.ticket_listings).toHaveLength(1);
+    await app.close();
+  });
+
+  it('rejects resale listings without idempotency or above the event cap', async () => {
+    const tables = {
+      events: [event],
+      tickets: [ticket],
+      ticket_types: [ticketType],
+      ticket_listings: [] as Record<string, unknown>[],
+    };
+    const app = await setupApp(ticketingRoutes, principal(), tables);
+
+    const missingKey = await app.inject({
+      method: 'POST',
+      url: '/tickets/tkt_1/resale-listings',
+      payload: { priceCents: 5500 },
+    });
+    expect(missingKey.statusCode).toBe(400);
+
+    const capped = await app.inject({
+      method: 'POST',
+      url: '/tickets/tkt_1/resale-listings',
+      headers: { 'Idempotency-Key': 'resale_cap_1' },
+      payload: { priceCents: 6001 },
+    });
+    expect(capped.statusCode).toBe(400);
+    expect(tables.ticket_listings).toHaveLength(0);
+    await app.close();
+  });
+
+  it('lists and delists active resale listings', async () => {
+    const listing = {
+      id: 'lst_1',
+      tenant_id: 'tnt_1',
+      event_id: 'evt_1',
+      ticket_id: 'tkt_1',
+      seller_id: 'usr_1',
+      status: 'listed',
+      price_cents: 5500,
+      currency: 'USD',
+      face_value_cents: 5000,
+      sold_to_id: null,
+      active_listing_key: 'tkt_1',
+      expires_at: null,
+      sold_at: null,
+      created_at: now,
+      updated_at: now,
+    };
+    const tables = {
+      events: [event],
+      ticket_listings: [listing],
+    };
+    const app = await setupApp(ticketingRoutes, principal(), tables);
+
+    const list = await app.inject({ method: 'GET', url: '/events/evt_1/resale-listings' });
+    expect(list.statusCode).toBe(200);
+    expect(list.json().items).toHaveLength(1);
+    expect(list.json().items[0].id).toBe('lst_1');
+
+    const delist = await app.inject({
+      method: 'POST',
+      url: '/ticket-listings/lst_1/delist',
+      headers: { 'Idempotency-Key': 'resale_delist_1' },
+    });
+    expect(delist.statusCode).toBe(200);
+    expect(delist.json()).toMatchObject({ id: 'lst_1', status: 'delisted' });
+    expect(listing.active_listing_key).toBe('lst_1');
     await app.close();
   });
 });

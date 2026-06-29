@@ -198,6 +198,10 @@ describe('openApiSpec', () => {
     expect(openApiSpec.paths['/events/{eventId}/attendees']).toBeDefined();
     expect(openApiSpec.paths['/attendees/{attendeeId}']).toBeDefined();
     expect(openApiSpec.paths['/tickets/{ticketId}/transfer']).toBeDefined();
+    expect(openApiSpec.paths['/events/{eventId}/resale-policy']).toBeDefined();
+    expect(openApiSpec.paths['/events/{eventId}/resale-listings']).toBeDefined();
+    expect(openApiSpec.paths['/tickets/{ticketId}/resale-listings']).toBeDefined();
+    expect(openApiSpec.paths['/ticket-listings/{listingId}/delist']).toBeDefined();
     expect(openApiSpec.paths['/events/{eventId}/inventory-pools']).toBeDefined();
     expect(openApiSpec.paths['/events/{eventId}/product-categories']).toBeDefined();
     expect(openApiSpec.paths['/events/{eventId}/products']).toBeDefined();

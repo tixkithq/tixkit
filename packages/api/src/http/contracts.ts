@@ -167,8 +167,21 @@ export function serializeEvent(row: Record<string, unknown>) {
     capacity: row.capacity ?? undefined,
     coverImageUrl: row.cover_image_url ?? undefined,
     externalUrl: row.external_url ?? undefined,
+    resalePolicy: serializeResalePolicy(row),
     createdAt: toIso(row.created_at as Date | string),
     updatedAt: toIso(row.updated_at as Date | string),
+  };
+}
+
+export function serializeResalePolicy(row: Record<string, unknown>) {
+  const maxAbsoluteCents = row.resale_max_absolute_cents;
+  return {
+    enabled: Boolean(row.resale_enabled),
+    maxMultiplier: Number(row.resale_max_multiplier ?? 1),
+    maxAbsoluteCents:
+      maxAbsoluteCents === null || maxAbsoluteCents === undefined
+        ? undefined
+        : Number(maxAbsoluteCents),
   };
 }
 
@@ -484,6 +497,25 @@ export function serializeTicket(row: Record<string, unknown>) {
     checkedInAt: toIso(row.checked_in_at as Date | string | null),
     checkedInByDeviceId: row.checked_in_by_device_id ?? undefined,
     walletPassId: row.wallet_pass_id ?? undefined,
+    createdAt: toIso(row.created_at as Date | string),
+    updatedAt: toIso(row.updated_at as Date | string),
+  };
+}
+
+export function serializeTicketListing(row: Record<string, unknown>) {
+  return {
+    id: row.id,
+    tenantId: row.tenant_id,
+    eventId: row.event_id,
+    ticketId: row.ticket_id,
+    sellerId: row.seller_id,
+    status: row.status,
+    priceCents: Number(row.price_cents),
+    currency: row.currency,
+    faceValueCents: Number(row.face_value_cents),
+    soldToId: row.sold_to_id ?? undefined,
+    expiresAt: toIso(row.expires_at as Date | string | null),
+    soldAt: toIso(row.sold_at as Date | string | null),
     createdAt: toIso(row.created_at as Date | string),
     updatedAt: toIso(row.updated_at as Date | string),
   };

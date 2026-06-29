@@ -206,6 +206,9 @@ export interface EventTable {
   external_url: string | null;
   waitlist_auto_offer_enabled: Generated<boolean>;
   waitlist_offer_ttl_minutes: Generated<number>;
+  resale_enabled: Generated<boolean>;
+  resale_max_multiplier: Generated<number>;
+  resale_max_absolute_cents: number | null;
   code_format: string | null;
   created_at: Timestamp;
   updated_at: Timestamp;

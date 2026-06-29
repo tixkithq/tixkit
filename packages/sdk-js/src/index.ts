@@ -56,8 +56,15 @@ export type Event = {
   capacity?: number;
   coverImageUrl?: string;
   externalUrl?: string;
+  resalePolicy: ResalePolicy;
   createdAt: string;
   updatedAt: string;
+};
+
+export type ResalePolicy = {
+  enabled: boolean;
+  maxMultiplier: number;
+  maxAbsoluteCents?: number;
 };
 
 export type TicketType = {
@@ -1087,6 +1094,23 @@ export type Ticket = {
   updatedAt: string;
 };
 
+export type TicketListing = {
+  id: string;
+  tenantId: string;
+  eventId: string;
+  ticketId: string;
+  sellerId: string;
+  status: 'listed' | 'delisted' | 'sold' | 'expired' | string;
+  priceCents: number;
+  currency: string;
+  faceValueCents: number;
+  soldToId?: string;
+  expiresAt?: string;
+  soldAt?: string;
+  createdAt: string;
+  updatedAt: string;
+};
+
 export type PaymentAccount = {
   id: string;
   tenantId: string;
@@ -1814,6 +1838,23 @@ class EventResource {
     return this.client.request('POST', `/events/${eventId}/archive`);
   }
 
+  async getResalePolicy(eventId: string): Promise<ResalePolicy> {
+    return this.client.request('GET', `/events/${eventId}/resale-policy`);
+  }
+
+  async updateResalePolicy(eventId: string, input: ResalePolicy): Promise<ResalePolicy> {
+    return this.client.request('PUT', `/events/${eventId}/resale-policy`, { body: input });
+  }
+
+  async listResaleListings(
+    eventId: string,
+    params?: PaginationParams,
+  ): Promise<PageResult<TicketListing>> {
+    return this.client.request('GET', `/events/${eventId}/resale-listings`, {
+      params: paginationParams(params),
+    });
+  }
+
   async getAvailability(eventId: string): Promise<
     PageResult<{
       ticketTypeId: string;
@@ -1980,6 +2021,24 @@ class TicketResource {
     return this.client.request('POST', `/tickets/${ticketId}/transfer`, {
       body: { toEmail },
       idempotencyKey,
+    });
+  }
+
+  async createResaleListing(
+    ticketId: string,
+    input: { priceCents: number; expiresAt?: string } & IdempotencyOptions,
+  ): Promise<TicketListing> {
+    const { idempotencyKey, ...body } = input;
+    return this.client.request('POST', `/tickets/${ticketId}/resale-listings`, {
+      body,
+      idempotencyKey,
+    });
+  }
+
+  async delistResaleListing(listingId: string, input: IdempotencyOptions): Promise<TicketListing> {
+    return this.client.request('POST', `/ticket-listings/${listingId}/delist`, {
+      body: {},
+      idempotencyKey: input.idempotencyKey,
     });
   }
 }

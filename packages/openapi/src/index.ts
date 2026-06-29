@@ -694,8 +694,27 @@ export const openApiSpec = {
           seo: { type: 'object' },
           coverImageUrl: { type: 'string', format: 'uri' },
           externalUrl: { type: 'string', format: 'uri' },
+          resalePolicy: { $ref: '#/components/schemas/ResalePolicy' },
         },
-        required: ['id', 'title', 'slug', 'status', 'currency', 'startsAt', 'timezone'],
+        required: [
+          'id',
+          'title',
+          'slug',
+          'status',
+          'currency',
+          'startsAt',
+          'timezone',
+          'resalePolicy',
+        ],
+      },
+      ResalePolicy: {
+        type: 'object',
+        properties: {
+          enabled: { type: 'boolean' },
+          maxMultiplier: { type: 'number', minimum: 0 },
+          maxAbsoluteCents: { type: 'integer', minimum: 0 },
+        },
+        required: ['enabled', 'maxMultiplier'],
       },
       EventPage: {
         type: 'object',
@@ -1758,6 +1777,47 @@ export const openApiSpec = {
           'qrPayload',
           'qrHash',
         ],
+      },
+      TicketListing: {
+        type: 'object',
+        properties: {
+          id: { type: 'string' },
+          tenantId: { type: 'string' },
+          eventId: { type: 'string' },
+          ticketId: { type: 'string' },
+          sellerId: { type: 'string' },
+          status: { type: 'string', enum: ['listed', 'delisted', 'sold', 'expired'] },
+          priceCents: { type: 'integer', minimum: 0 },
+          currency: { type: 'string', minLength: 3, maxLength: 3 },
+          faceValueCents: { type: 'integer', minimum: 0 },
+          soldToId: { type: 'string' },
+          expiresAt: { type: 'string', format: 'date-time' },
+          soldAt: { type: 'string', format: 'date-time' },
+          createdAt: { type: 'string', format: 'date-time' },
+          updatedAt: { type: 'string', format: 'date-time' },
+        },
+        required: [
+          'id',
+          'tenantId',
+          'eventId',
+          'ticketId',
+          'sellerId',
+          'status',
+          'priceCents',
+          'currency',
+          'faceValueCents',
+          'createdAt',
+          'updatedAt',
+        ],
+      },
+      TicketListingPage: {
+        type: 'object',
+        properties: {
+          items: { type: 'array', items: { $ref: '#/components/schemas/TicketListing' } },
+          nextCursor: { type: ['string', 'null'] },
+          hasMore: { type: 'boolean' },
+        },
+        required: ['items', 'nextCursor', 'hasMore'],
       },
       CheckInList: {
         type: 'object',
@@ -4436,6 +4496,101 @@ export const openApiSpec = {
           '200': {
             description: 'Ticket transferred',
             content: { 'application/json': { schema: { $ref: '#/components/schemas/Ticket' } } },
+          },
+        },
+      },
+    },
+    '/events/{eventId}/resale-policy': {
+      get: {
+        summary: 'Get event resale policy',
+        security: [{ BearerAuth: [] }],
+        responses: {
+          '200': {
+            description: 'Event resale policy',
+            content: {
+              'application/json': { schema: { $ref: '#/components/schemas/ResalePolicy' } },
+            },
+          },
+        },
+      },
+      put: {
+        summary: 'Update event resale policy',
+        security: [{ BearerAuth: [] }],
+        requestBody: {
+          required: true,
+          content: {
+            'application/json': { schema: { $ref: '#/components/schemas/ResalePolicy' } },
+          },
+        },
+        responses: {
+          '200': {
+            description: 'Event resale policy updated',
+            content: {
+              'application/json': { schema: { $ref: '#/components/schemas/ResalePolicy' } },
+            },
+          },
+        },
+      },
+    },
+    '/events/{eventId}/resale-listings': {
+      get: {
+        summary: 'List event resale listings',
+        security: [{ BearerAuth: [] }],
+        parameters: [
+          { $ref: '#/components/parameters/Cursor' },
+          { $ref: '#/components/parameters/Limit' },
+        ],
+        responses: {
+          '200': {
+            description: 'Page of resale listings',
+            content: {
+              'application/json': { schema: { $ref: '#/components/schemas/TicketListingPage' } },
+            },
+          },
+        },
+      },
+    },
+    '/tickets/{ticketId}/resale-listings': {
+      post: {
+        summary: 'Create resale listing for a ticket',
+        security: [{ BearerAuth: [] }],
+        parameters: [{ $ref: '#/components/parameters/RequiredIdempotencyKey' }],
+        requestBody: {
+          required: true,
+          content: {
+            'application/json': {
+              schema: {
+                type: 'object',
+                properties: {
+                  priceCents: { type: 'integer', minimum: 0 },
+                  expiresAt: { type: 'string', format: 'date-time' },
+                },
+                required: ['priceCents'],
+              },
+            },
+          },
+        },
+        responses: {
+          '201': {
+            description: 'Resale listing created',
+            content: {
+              'application/json': { schema: { $ref: '#/components/schemas/TicketListing' } },
+            },
+          },
+        },
+      },
+    },
+    '/ticket-listings/{listingId}/delist': {
+      post: {
+        summary: 'Delist a resale listing',
+        security: [{ BearerAuth: [] }],
+        parameters: [{ $ref: '#/components/parameters/RequiredIdempotencyKey' }],
+        responses: {
+          '200': {
+            description: 'Resale listing delisted',
+            content: {
+              'application/json': { schema: { $ref: '#/components/schemas/TicketListing' } },
+            },
           },
         },
       },

@@ -96,6 +96,12 @@ export type AdminEventVenue = {
   country?: string;
 };
 
+export type AdminResalePolicy = {
+  enabled: boolean;
+  maxMultiplier: number;
+  maxAbsoluteCents?: number;
+};
+
 export type AdminEventListItem = {
   id: string;
   title: string;
@@ -116,6 +122,7 @@ export type AdminEventListItem = {
   capacity?: number | null;
   coverImageUrl?: string | null;
   externalUrl?: string | null;
+  resalePolicy: AdminResalePolicy;
   checkIns: number;
   updatedAt: string;
 };
@@ -140,6 +147,23 @@ export type AdminEventOccurrence = {
   status: 'scheduled' | 'cancelled' | 'completed';
   createdAt?: string;
   updatedAt?: string;
+};
+
+export type AdminTicketListing = {
+  id: string;
+  tenantId: string;
+  eventId: string;
+  ticketId: string;
+  sellerId: string;
+  status: 'listed' | 'delisted' | 'sold' | 'expired' | string;
+  priceCents: number;
+  currency: string;
+  faceValueCents: number;
+  soldToId?: string;
+  expiresAt?: string;
+  soldAt?: string;
+  createdAt: string;
+  updatedAt: string;
 };
 
 export type AdminMarketingIntegrationProvider = 'ga4' | 'meta_pixel' | 'generic_tag';
@@ -1480,6 +1504,23 @@ export type AdminApi = {
   publishEvent(eventId: string): Promise<ApiResult<AdminEventDetail>>;
   pauseEvent(eventId: string): Promise<ApiResult<AdminEventDetail>>;
   archiveEvent(eventId: string): Promise<ApiResult<AdminEventDetail>>;
+  getResalePolicy(eventId: string): Promise<ApiResult<AdminResalePolicy>>;
+  updateResalePolicy(
+    eventId: string,
+    input: AdminResalePolicy,
+  ): Promise<ApiResult<AdminResalePolicy>>;
+  listResaleListings(
+    eventId: string,
+    input?: PageCursor,
+  ): Promise<ApiResult<PageResult<AdminTicketListing>>>;
+  createResaleListing(
+    ticketId: string,
+    input: { priceCents: number; expiresAt?: string; idempotencyKey?: string },
+  ): Promise<ApiResult<AdminTicketListing>>;
+  delistResaleListing(
+    listingId: string,
+    input?: { idempotencyKey?: string },
+  ): Promise<ApiResult<AdminTicketListing>>;
   listEventOccurrences(eventId: string): Promise<ApiResult<AdminEventOccurrence[]>>;
   createEventOccurrence(
     eventId: string,
@@ -1984,6 +2025,7 @@ function normalizeEvent(
 ): AdminEventDetail {
   const venue = asRecord(value.venue);
   const seo = asRecord(value.seo);
+  const resalePolicy = normalizeResalePolicy(value.resalePolicy ?? value.resale_policy);
   const visibility =
     value.visibility === 'unlisted' || value.visibility === 'private' ? value.visibility : 'public';
   return {
@@ -2033,9 +2075,54 @@ function normalizeEvent(
     capacity: value.capacity == null ? undefined : finiteNumber(value.capacity),
     coverImageUrl: stringValue(value.coverImageUrl ?? value.cover_image_url, undefined),
     externalUrl: stringValue(value.externalUrl ?? value.external_url, undefined),
+    resalePolicy,
     checkIns: finiteNumber(value.checkIns),
     createdAt: stringValue(value.createdAt ?? value.created_at, undefined),
     updatedAt: String(value.updatedAt ?? value.createdAt ?? new Date(0).toISOString()),
+  };
+}
+
+function normalizeResalePolicy(value: unknown): AdminResalePolicy {
+  const record = asRecord(value);
+  if (!record) return { enabled: false, maxMultiplier: 1 };
+  return {
+    enabled: record.enabled === true,
+    maxMultiplier: finiteNumber(record.maxMultiplier ?? record.max_multiplier, 1),
+    maxAbsoluteCents:
+      record.maxAbsoluteCents == null && record.max_absolute_cents == null
+        ? undefined
+        : finiteNumber(record.maxAbsoluteCents ?? record.max_absolute_cents),
+  };
+}
+
+function normalizeTicketListing(
+  value: Partial<AdminTicketListing> & Record<string, unknown>,
+): AdminTicketListing {
+  return {
+    id: String(value.id),
+    tenantId: String(value.tenantId ?? value.tenant_id),
+    eventId: String(value.eventId ?? value.event_id),
+    ticketId: String(value.ticketId ?? value.ticket_id),
+    sellerId: String(value.sellerId ?? value.seller_id),
+    status: String(value.status ?? 'listed'),
+    priceCents: finiteNumber(value.priceCents ?? value.price_cents),
+    currency: String(value.currency ?? 'USD'),
+    faceValueCents: finiteNumber(value.faceValueCents ?? value.face_value_cents),
+    soldToId: stringValue(value.soldToId ?? value.sold_to_id, undefined),
+    expiresAt: stringValue(value.expiresAt ?? value.expires_at, undefined),
+    soldAt: stringValue(value.soldAt ?? value.sold_at, undefined),
+    createdAt: String(value.createdAt ?? value.created_at ?? new Date(0).toISOString()),
+    updatedAt: String(value.updatedAt ?? value.updated_at ?? new Date(0).toISOString()),
+  };
+}
+
+function normalizeTicketListingPage(
+  value: PageResult<AdminTicketListing> | AdminTicketListing[],
+): PageResult<AdminTicketListing> {
+  const page = unwrapPage(value);
+  return {
+    ...page,
+    items: page.items.map((item) => normalizeTicketListing(item)),
   };
 }
 
@@ -2451,6 +2538,7 @@ const fixtureEvents: AdminEventDetail[] = [
     capacity: 500,
     coverImageUrl: 'https://cdn.example.test/events/summer-festival.jpg',
     externalUrl: 'https://tickets.example.test/summer-music-festival-2026',
+    resalePolicy: { enabled: false, maxMultiplier: 1 },
     checkIns: 0,
     updatedAt: iso(-3_600_000),
   },
@@ -2478,6 +2566,7 @@ const fixtureEvents: AdminEventDetail[] = [
     grossSalesCents: 1_240_000,
     ticketsSold: 248,
     capacity: 800,
+    resalePolicy: { enabled: false, maxMultiplier: 1 },
     checkIns: 0,
     updatedAt: iso(-7_200_000),
   },
@@ -2502,6 +2591,7 @@ const fixtureEvents: AdminEventDetail[] = [
     grossSalesCents: 0,
     ticketsSold: 0,
     capacity: 120,
+    resalePolicy: { enabled: false, maxMultiplier: 1 },
     checkIns: 0,
     updatedAt: iso(-86_400_000),
   },
@@ -2527,6 +2617,7 @@ const fixtureEvents: AdminEventDetail[] = [
     grossSalesCents: 340_000,
     ticketsSold: 85,
     capacity: 200,
+    resalePolicy: { enabled: false, maxMultiplier: 1 },
     checkIns: 78,
     updatedAt: iso(-172_800_000),
   },
@@ -2553,6 +2644,7 @@ const fixtureEvents: AdminEventDetail[] = [
     grossSalesCents: 875_000,
     ticketsSold: 350,
     capacity: 400,
+    resalePolicy: { enabled: false, maxMultiplier: 1 },
     checkIns: 342,
     updatedAt: iso(-7_776_000_000),
   },
@@ -3629,6 +3721,7 @@ export const adminApi: AdminApi = {
           capacity: input.capacity ?? undefined,
           coverImageUrl: input.coverImageUrl ?? undefined,
           externalUrl: input.externalUrl ?? undefined,
+          resalePolicy: { enabled: false, maxMultiplier: 1 },
           checkIns: 0,
           updatedAt: iso(0),
         };
@@ -3734,6 +3827,129 @@ export const adminApi: AdminApi = {
         event.updatedAt = iso(0);
         return ok(event);
       },
+    );
+  },
+
+  async getResalePolicy(eventId) {
+    return withFixture(
+      async () => {
+        const result = await request<AdminResalePolicy>(`/v1/events/${eventId}/resale-policy`, {
+          method: 'GET',
+        });
+        return result.ok ? ok(normalizeResalePolicy(result.data)) : result;
+      },
+      () => {
+        const event = fixtureEvents.find((e) => e.id === eventId);
+        if (!event) return err<AdminResalePolicy>(apiError('not_found', 'Event not found', 404));
+        return ok(event.resalePolicy);
+      },
+    );
+  },
+
+  async updateResalePolicy(eventId, input) {
+    return withFixture(
+      async () => {
+        const result = await request<AdminResalePolicy>(`/v1/events/${eventId}/resale-policy`, {
+          method: 'PUT',
+          body: JSON.stringify(input),
+        });
+        return result.ok ? ok(normalizeResalePolicy(result.data)) : result;
+      },
+      () => {
+        const event = fixtureEvents.find((e) => e.id === eventId);
+        if (!event) return err<AdminResalePolicy>(apiError('not_found', 'Event not found', 404));
+        event.resalePolicy = normalizeResalePolicy(input);
+        return ok(event.resalePolicy);
+      },
+    );
+  },
+
+  async listResaleListings(eventId, input) {
+    return withFixture(
+      async () => {
+        const params = new URLSearchParams();
+        if (input?.cursor) params.set('cursor', input.cursor);
+        if (input?.limit) params.set('limit', String(input.limit));
+        const query = params.toString();
+        const result = await request<PageResult<AdminTicketListing> | AdminTicketListing[]>(
+          `/v1/events/${eventId}/resale-listings${query ? `?${query}` : ''}`,
+          { method: 'GET' },
+        );
+        return result.ok ? ok(normalizeTicketListingPage(result.data)) : result;
+      },
+      () => ok({ items: [], nextCursor: undefined, hasMore: false }),
+    );
+  },
+
+  async createResaleListing(ticketId, input) {
+    return withFixture(
+      async () => {
+        const result = await request<AdminTicketListing>(
+          `/v1/tickets/${ticketId}/resale-listings`,
+          {
+            method: 'POST',
+            headers: {
+              'Idempotency-Key': input.idempotencyKey ?? adminIdempotencyKey(`resale_${ticketId}`),
+            },
+            body: JSON.stringify({
+              priceCents: input.priceCents,
+              expiresAt: input.expiresAt,
+            }),
+          },
+        );
+        return result.ok ? ok(normalizeTicketListing(result.data)) : result;
+      },
+      () =>
+        ok(
+          normalizeTicketListing({
+            id: `lst_${ticketId}`,
+            tenantId: 'tnt_demo',
+            eventId: 'evt_demo_001',
+            ticketId,
+            sellerId: 'usr_demo',
+            status: 'listed',
+            priceCents: input.priceCents,
+            currency: 'USD',
+            faceValueCents: input.priceCents,
+            expiresAt: input.expiresAt,
+            createdAt: iso(0),
+            updatedAt: iso(0),
+          }),
+        ),
+    );
+  },
+
+  async delistResaleListing(listingId, input) {
+    return withFixture(
+      async () => {
+        const result = await request<AdminTicketListing>(
+          `/v1/ticket-listings/${listingId}/delist`,
+          {
+            method: 'POST',
+            headers: {
+              'Idempotency-Key':
+                input?.idempotencyKey ?? adminIdempotencyKey(`delist_${listingId}`),
+            },
+          },
+        );
+        return result.ok ? ok(normalizeTicketListing(result.data)) : result;
+      },
+      () =>
+        ok(
+          normalizeTicketListing({
+            id: listingId,
+            tenantId: 'tnt_demo',
+            eventId: 'evt_demo_001',
+            ticketId: 'tkt_demo',
+            sellerId: 'usr_demo',
+            status: 'delisted',
+            priceCents: 0,
+            currency: 'USD',
+            faceValueCents: 0,
+            createdAt: iso(0),
+            updatedAt: iso(0),
+          }),
+        ),
     );
   },
 

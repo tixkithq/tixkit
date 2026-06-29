@@ -5,15 +5,20 @@ import {
   EventOccurrenceRepository,
   EventRepository,
   TicketTypeRepository,
+  TicketRepository,
+  TicketListingRepository,
   InventoryPoolRepository,
   ProductCategoryRepository,
   ProductRepository,
 } from '@tixkit/db';
-import { NotFoundError, ValidationError } from '@tixkit/domain';
+import { NotFoundError, ResaleError, ValidationError, validateResalePrice } from '@tixkit/domain';
+import { withIdempotency, hashRequest } from '../../services/idempotency.js';
 import {
   pageEnvelope,
   parsePagination,
   pickAllowedFields,
+  serializeResalePolicy,
+  serializeTicketListing,
   serializeInventoryPool,
   serializeAccessRule,
   serializeProduct,
@@ -30,6 +35,8 @@ import {
   updateTicketTypeSchema,
   createInventoryPoolSchema,
   updateProductSchema,
+  resalePolicySchema,
+  createResaleListingSchema,
   parseBody,
 } from '../../http/schemas.js';
 
@@ -83,6 +90,28 @@ async function assertNoExistingAccessRuleDuplicates(
   }
 }
 
+function isUniqueViolation(error: unknown): boolean {
+  const record = error as {
+    code?: unknown;
+    errno?: unknown;
+    message?: unknown;
+  };
+  return (
+    record.code === '23505' ||
+    record.code === 'ER_DUP_ENTRY' ||
+    record.errno === 1062 ||
+    record.errno === '1062' ||
+    /duplicate|unique/i.test(String(record.message ?? ''))
+  );
+}
+
+function toResaleValidationError(error: unknown): never {
+  if (error instanceof ResaleError) {
+    throw new ValidationError(error.message);
+  }
+  throw error;
+}
+
 export const ticketingRoutes: FastifyPluginAsync = async (app) => {
   const db = app.context.db;
   const inventoryService = app.context.inventoryService;
@@ -101,6 +130,156 @@ export const ticketingRoutes: FastifyPluginAsync = async (app) => {
       throw new NotFoundError('EventOccurrence', occurrenceId);
     }
   };
+
+  app.get('/events/:eventId/resale-policy', async (request) => {
+    const principal = request.principal!;
+    ClerkAuthService.requirePermission(principal, 'events.read');
+    const { eventId } = request.params as { eventId: string };
+    const event = await loadEvent(eventId);
+    requireEventAccess(principal, event, eventId);
+    return serializeResalePolicy(event);
+  });
+
+  app.put('/events/:eventId/resale-policy', async (request) => {
+    const principal = request.principal!;
+    ClerkAuthService.requirePermission(principal, 'tickets.write');
+    const { eventId } = request.params as { eventId: string };
+    const body = parseBody(resalePolicySchema, request.body);
+
+    const eventRepo = new EventRepository(db);
+    const event = await loadEvent(eventId);
+    requireEventAccess(principal, event, eventId);
+    const updated = await eventRepo.update(eventId, {
+      resale_enabled: body.enabled,
+      resale_max_multiplier: body.maxMultiplier,
+      resale_max_absolute_cents: body.maxAbsoluteCents ?? null,
+    });
+    return serializeResalePolicy(updated);
+  });
+
+  app.get('/events/:eventId/resale-listings', async (request) => {
+    const principal = request.principal!;
+    ClerkAuthService.requirePermission(principal, 'events.read');
+    const { eventId } = request.params as { eventId: string };
+    const pagination = parsePagination(request.query);
+    const event = await loadEvent(eventId);
+    requireEventAccess(principal, event, eventId);
+    const listings = await new TicketListingRepository(db).findByEvent(
+      eventId,
+      pagination.limit + 1,
+      pagination.cursor,
+    );
+    return pageEnvelope(listings.map(serializeTicketListing), pagination.limit);
+  });
+
+  app.post('/tickets/:ticketId/resale-listings', async (request, reply) => {
+    const principal = request.principal!;
+    ClerkAuthService.requirePermission(principal, 'tickets.write');
+    const { ticketId } = request.params as { ticketId: string };
+    const body = parseBody(createResaleListingSchema, request.body);
+    const idempotencyKey = request.headers['idempotency-key'];
+    if (typeof idempotencyKey !== 'string' || idempotencyKey.length === 0) {
+      throw new ValidationError('Idempotency-Key header is required for resale listings');
+    }
+
+    const ticketRepo = new TicketRepository(db);
+    const ticket = await ticketRepo.findById(ticketId);
+    if (!ticket) throw new NotFoundError('Ticket', ticketId);
+    if (ticket.tenant_id !== principal.tenantId) throw new NotFoundError('Ticket', ticketId);
+    const event = await loadEvent(ticket.event_id as string);
+    requireEventAccess(principal, event, ticket.event_id as string);
+    if (ticket.status !== 'valid') {
+      throw new ValidationError(`Ticket status is ${ticket.status}, cannot list for resale`);
+    }
+    const ticketType = await new TicketTypeRepository(db).findById(ticket.ticket_type_id as string);
+    if (!ticketType || ticketType.event_id !== ticket.event_id) {
+      throw new NotFoundError('TicketType', ticket.ticket_type_id as string);
+    }
+
+    const tenantId = principal.tenantId;
+    const requestHash = hashRequest({
+      ticketId,
+      priceCents: body.priceCents,
+      expiresAt: body.expiresAt ?? null,
+    });
+
+    const result = await withIdempotency(
+      db,
+      { key: idempotencyKey, tenantId, requestHash },
+      async () => {
+        const listingRepo = new TicketListingRepository(db);
+        const active = await listingRepo.findActiveByTicket(tenantId, ticketId);
+        if (active) {
+          throw new ValidationError(`Ticket ${ticketId} already has an active resale listing`);
+        }
+        const faceValueCents = Number(ticketType.price_cents);
+        try {
+          validateResalePrice(body.priceCents, faceValueCents, serializeResalePolicy(event));
+        } catch (error) {
+          toResaleValidationError(error);
+        }
+        try {
+          const listing = await listingRepo.create({
+            tenantId,
+            eventId: ticket.event_id as string,
+            ticketId,
+            sellerId: principal.id,
+            priceCents: body.priceCents,
+            currency: String(ticketType.currency),
+            faceValueCents,
+            expiresAt: body.expiresAt ? new Date(body.expiresAt) : undefined,
+          });
+          return { status: 201, body: serializeTicketListing(listing) };
+        } catch (error) {
+          if (isUniqueViolation(error)) {
+            throw new ValidationError(`Ticket ${ticketId} already has an active resale listing`);
+          }
+          throw error;
+        }
+      },
+    );
+    return reply.status(result.status).send(result.body);
+  });
+
+  app.post('/ticket-listings/:listingId/delist', async (request, reply) => {
+    const principal = request.principal!;
+    ClerkAuthService.requirePermission(principal, 'tickets.write');
+    const { listingId } = request.params as { listingId: string };
+    const idempotencyKey = request.headers['idempotency-key'];
+    if (typeof idempotencyKey !== 'string' || idempotencyKey.length === 0) {
+      throw new ValidationError('Idempotency-Key header is required for resale delisting');
+    }
+
+    const listingRepo = new TicketListingRepository(db);
+    const listing = await listingRepo.findById(listingId);
+    if (!listing) throw new NotFoundError('TicketListing', listingId);
+    if (listing.tenant_id !== principal.tenantId) {
+      throw new NotFoundError('TicketListing', listingId);
+    }
+    const event = await loadEvent(listing.event_id as string);
+    requireEventAccess(principal, event, listing.event_id as string);
+
+    const result = await withIdempotency(
+      db,
+      {
+        key: idempotencyKey,
+        tenantId: principal.tenantId,
+        requestHash: hashRequest({ listingId, action: 'delist' }),
+      },
+      async () => {
+        try {
+          const delisted = await listingRepo.delist(listingId);
+          return { status: 200, body: serializeTicketListing(delisted) };
+        } catch (error) {
+          if (error instanceof Error && /not listed/i.test(error.message)) {
+            throw new ValidationError(`Ticket listing ${listingId} is not listed`);
+          }
+          throw error;
+        }
+      },
+    );
+    return reply.status(result.status).send(result.body);
+  });
 
   app.post('/events/:eventId/ticket-types', async (request, reply) => {
     const principal = request.principal!;

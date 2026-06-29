@@ -804,6 +804,49 @@ describe('TixkitClient new resource methods', () => {
     expect(call.method).toBe('POST');
   });
 
+  it('events exposes resale policy and listing reads', async () => {
+    const fm = mockFetch(200, { enabled: true, maxMultiplier: 1.1 });
+    const c = new TixkitClient({
+      apiKey: '***********',
+      apiBaseUrl: 'https://api.test',
+      maxRetries: 0,
+    });
+    await c.events.updateResalePolicy('evt_1', { enabled: true, maxMultiplier: 1.1 });
+    expect(getCall(fm).url).toBe('https://api.test/v1/events/evt_1/resale-policy');
+    expect(getCall(fm).method).toBe('PUT');
+    expect(JSON.parse(getCall(fm).body)).toEqual({ enabled: true, maxMultiplier: 1.1 });
+
+    fm.mockClear();
+    await c.events.listResaleListings('evt_1', { limit: 25, cursor: 'lst_1' });
+    expect(getCall(fm).url).toBe(
+      'https://api.test/v1/events/evt_1/resale-listings?cursor=lst_1&limit=25',
+    );
+    expect(getCall(fm).method).toBe('GET');
+  });
+
+  it('tickets creates and delists resale listings with idempotency keys', async () => {
+    const fm = mockFetch(201, { id: 'lst_1', status: 'listed' });
+    const c = new TixkitClient({
+      apiKey: '***********',
+      apiBaseUrl: 'https://api.test',
+      maxRetries: 0,
+    });
+    await c.tickets.createResaleListing('tkt_1', {
+      priceCents: 5500,
+      idempotencyKey: 'resale_1',
+    });
+    expect(getCall(fm).url).toBe('https://api.test/v1/tickets/tkt_1/resale-listings');
+    expect(getCall(fm).method).toBe('POST');
+    expect(getCall(fm).headers['Idempotency-Key']).toBe('resale_1');
+    expect(JSON.parse(getCall(fm).body)).toEqual({ priceCents: 5500 });
+
+    fm.mockClear();
+    await c.tickets.delistResaleListing('lst_1', { idempotencyKey: 'delist_1' });
+    expect(getCall(fm).url).toBe('https://api.test/v1/ticket-listings/lst_1/delist');
+    expect(getCall(fm).method).toBe('POST');
+    expect(getCall(fm).headers['Idempotency-Key']).toBe('delist_1');
+  });
+
   it('organizations.update sends PATCH', async () => {
     const fm = mockFetch(200, { id: 'org_1', name: 'Updated' });
     const c = new TixkitClient({

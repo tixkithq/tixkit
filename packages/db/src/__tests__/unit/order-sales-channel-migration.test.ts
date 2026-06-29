@@ -9,6 +9,7 @@ import { OfflineCheckInBulkSyncMigration } from '../../migrations/0034_offline_c
 import { OfflineCheckInBulkSyncHardeningMigration } from '../../migrations/0035_offline_check_in_bulk_sync_hardening.js';
 import { OrganizationBoxOfficeSettingsMigration } from '../../migrations/0036_organization_box_office_settings.js';
 import { TicketListingsMigration } from '../../migrations/0037_ticket_listings.js';
+import { EventResalePolicyMigration } from '../../migrations/0038_event_resale_policy.js';
 
 const offlineCheckInBulkSyncMigrationPath = new URL(
   '../../migrations/0034_offline_check_in_bulk_sync.ts',
@@ -24,6 +25,10 @@ const organizationBoxOfficeSettingsMigrationPath = new URL(
 );
 const ticketListingsMigrationPath = new URL(
   '../../migrations/0037_ticket_listings.ts',
+  import.meta.url,
+);
+const eventResalePolicyMigrationPath = new URL(
+  '../../migrations/0038_event_resale_policy.ts',
   import.meta.url,
 );
 
@@ -171,7 +176,7 @@ describe('OrderSalesChannelMigration', () => {
   it('is registered with the production migrator provider', async () => {
     const migrations = await new TixkitMigrationProvider().getMigrations();
 
-    expect(Object.keys(migrations).at(-1)).toBe('0037_ticket_listings');
+    expect(Object.keys(migrations).at(-1)).toBe('0038_event_resale_policy');
     expect(migrations['0031_order_sales_channel']).toBe(OrderSalesChannelMigration);
     expect(migrations['0032_scan_logs_ticket_index']).toBe(ScanLogsTicketIndexMigration);
     expect(migrations['0033_email_jobs_template_version_fk']).toBe(
@@ -185,6 +190,20 @@ describe('OrderSalesChannelMigration', () => {
       OrganizationBoxOfficeSettingsMigration,
     );
     expect(migrations['0037_ticket_listings']).toBe(TicketListingsMigration);
+    expect(migrations['0038_event_resale_policy']).toBe(EventResalePolicyMigration);
+  });
+
+  it('keeps event resale policy columns portable across supported SQL drivers', () => {
+    const source = readFileSync(eventResalePolicyMigrationPath, 'utf8');
+
+    expect(source).toContain("process.env.DB_DRIVER === 'mysql'");
+    expect(source).toContain("process.env.DB_DRIVER === 'mssql'");
+    expect(source).toContain('resale_enabled');
+    expect(source).toContain('resale_max_multiplier');
+    expect(source).toContain('resale_max_absolute_cents');
+    expect(source).toContain('double precision not null default 1');
+    expect(source).toContain('double not null default 1');
+    expect(source).toContain('float not null');
   });
 
   it('keeps ticket listings portable with a cross-database active listing key', () => {

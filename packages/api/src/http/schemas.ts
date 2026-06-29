@@ -712,6 +712,21 @@ export const transferTicketSchema = z
   })
   .strict();
 
+export const resalePolicySchema = z
+  .object({
+    enabled: z.boolean(),
+    maxMultiplier: z.number().finite().min(0),
+    maxAbsoluteCents: z.number().int().nonnegative().nullable().optional(),
+  })
+  .strict();
+
+export const createResaleListingSchema = z
+  .object({
+    priceCents: z.number().int().nonnegative(),
+    expiresAt: iso8601Schema.optional(),
+  })
+  .strict();
+
 // Export schema
 export const createExportSchema = z
   .object({
