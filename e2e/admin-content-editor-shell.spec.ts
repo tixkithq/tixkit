@@ -42,12 +42,6 @@ test.describe('admin content editor shell', () => {
         name: 'email',
       },
       {
-        path: `/events/${fixtureEventId}/content/sms`,
-        heading: 'SMS template editor',
-        preview: 'SMS compliance preview',
-        name: 'sms',
-      },
-      {
         path: `/events/${fixtureEventId}/content/imessage`,
         heading: 'iMessage template unavailable',
         preview: 'Unavailable preview',
@@ -91,7 +85,6 @@ test.describe('admin content editor shell', () => {
         minCanvasWidth: 500,
       },
       { path: `/events/${fixtureEventId}/content/email`, name: 'email', minCanvasWidth: 360 },
-      { path: `/events/${fixtureEventId}/content/sms`, name: 'sms', minCanvasWidth: 320 },
       {
         path: `/events/${fixtureEventId}/content/imessage`,
         name: 'imessage',
