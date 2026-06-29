@@ -1,6 +1,9 @@
 import type { BaseEntity, CurrencyCode, ISO8601Date, Ulid } from '../shared/index.js';
 import { AccessCodeRequiredError, ValidationError } from '../errors/index.js';
 
+export * from './box-office.js';
+export * from './resale.js';
+
 export type TicketTypeKind = 'free' | 'paid' | 'donation';
 export type TicketTypeStatus = 'draft' | 'active' | 'paused' | 'sold_out' | 'ended';
 export type TicketVisibility = 'public' | 'hidden' | 'locked';
