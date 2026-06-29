@@ -68,24 +68,24 @@ The Phase 6 content-studio foundation stores event pages, email templates, SMS t
 
 Authenticated routes:
 
-| Method | Path | Purpose |
-| ------ | ---- | ------- |
-| `GET` | `/v1/content-documents` | List scoped content documents. Optional filters: `channel`, `brandId`, `eventId`, `limit`. |
-| `POST` | `/v1/content-documents` | Create a document for `event_page`, `email`, or `sms`. Stubbed future channels such as `imessage` and `social_invite` fail closed with `VALIDATION_ERROR`. |
-| `GET` | `/v1/content-documents/:documentId` | Fetch a scoped content document. |
-| `GET` | `/v1/content-documents/:documentId/versions` | List saved versions. |
-| `POST` | `/v1/content-documents/:documentId/versions` | Save a draft version and persist validation issues. |
-| `POST` | `/v1/content-documents/:documentId/preview` | Render a preview through the shared renderer. |
-| `POST` | `/v1/content-documents/:documentId/versions/:versionId/publish` | Publish a valid version. Invalid versions return publish blockers. |
-| `POST` | `/v1/content-documents/:documentId/duplicate` | Duplicate a scoped document as an unpublished draft copy with fresh version IDs. |
-| `POST` | `/v1/content-documents/:documentId/archive` | Archive a document. |
-| `POST` | `/v1/content-documents/:documentId/test-sends` | Capture a renderer-backed test send without faking provider delivery. |
+| Method | Path                                                            | Purpose                                                                                                                                                    |
+| ------ | --------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `GET`  | `/v1/content-documents`                                         | List scoped content documents. Optional filters: `channel`, `brandId`, `eventId`, `limit`.                                                                 |
+| `POST` | `/v1/content-documents`                                         | Create a document for `event_page`, `email`, or `sms`. Stubbed future channels such as `imessage` and `social_invite` fail closed with `VALIDATION_ERROR`. |
+| `GET`  | `/v1/content-documents/:documentId`                             | Fetch a scoped content document.                                                                                                                           |
+| `GET`  | `/v1/content-documents/:documentId/versions`                    | List saved versions.                                                                                                                                       |
+| `POST` | `/v1/content-documents/:documentId/versions`                    | Save a draft version and persist validation issues.                                                                                                        |
+| `POST` | `/v1/content-documents/:documentId/preview`                     | Render a preview through the shared renderer.                                                                                                              |
+| `POST` | `/v1/content-documents/:documentId/versions/:versionId/publish` | Publish a valid version. Invalid versions return publish blockers.                                                                                         |
+| `POST` | `/v1/content-documents/:documentId/duplicate`                   | Duplicate a scoped document as an unpublished draft copy with fresh version IDs.                                                                           |
+| `POST` | `/v1/content-documents/:documentId/archive`                     | Archive a document.                                                                                                                                        |
+| `POST` | `/v1/content-documents/:documentId/test-sends`                  | Capture a renderer-backed test send without faking provider delivery.                                                                                      |
 
 Public route:
 
-| Method | Path | Purpose |
-| ------ | ---- | ------- |
-| `GET` | `/v1/public/events/:eventId/content-page` | Fetch allowlisted published event-page content for a published event. Optional `locale`; response excludes tenant, organization, brand, draft, validation, variable, and creator metadata. |
+| Method | Path                                      | Purpose                                                                                                                                                                                    |
+| ------ | ----------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `GET`  | `/v1/public/events/:eventId/content-page` | Fetch allowlisted published event-page content for a published event. Optional `locale`; response excludes tenant, organization, brand, draft, validation, variable, and creator metadata. |
 
 Permission rules follow the existing product scopes: event pages use `events.read`/`events.write`, while email and SMS templates use `messages.write`.
 
@@ -163,7 +163,7 @@ Required on these endpoints:
 - `POST /v1/events/:eventId/box-office/orders`
 - `POST /v1/orders/:orderId/refunds`
 - `POST /v1/tickets/:ticketId/transfer`
-- `POST /v1/check-ins/scan` (recommended) and required for `POST /v1/check-ins/sync`
+- `POST /v1/check-ins/scan` (recommended), required for `POST /v1/check-ins/sync`, `POST /v1/check-ins/bulk-sync-jobs`, and `PUT /v1/check-ins/bulk-sync-jobs/:jobId/chunks/:sequence`
 - `POST /v1/events/:eventId/messages`
 - `POST /v1/exports`
 
@@ -403,30 +403,36 @@ Supported purposes are `checkout_answer`, `brand_logo`, and `user_avatar`. The A
 
 ### Orders & Refunds
 
-| Method | Path                          | Scope           | Description                                         |
-| ------ | ----------------------------- | --------------- | --------------------------------------------------- |
-| `GET`  | `/v1/orders`                  | `orders.read`   | List orders (filter by `organizationId`, `eventId`) |
-| `GET`  | `/v1/orders/:orderId`         | `orders.read`   | Get order with line items and timeline              |
+| Method | Path                                    | Scope           | Description                                            |
+| ------ | --------------------------------------- | --------------- | ------------------------------------------------------ |
+| `GET`  | `/v1/orders`                            | `orders.read`   | List orders (filter by `organizationId`, `eventId`)    |
+| `GET`  | `/v1/orders/:orderId`                   | `orders.read`   | Get order with line items and timeline                 |
 | `POST` | `/v1/events/:eventId/box-office/orders` | `orders.write`  | Create a box-office order (requires `Idempotency-Key`) |
-| `POST` | `/v1/orders/:orderId/cancel`  | `orders.write`  | Cancel unpaid order                                 |
-| `POST` | `/v1/orders/:orderId/refunds` | `refunds.write` | Start refund workflow (requires `Idempotency-Key`)  |
+| `POST` | `/v1/orders/:orderId/cancel`            | `orders.write`  | Cancel unpaid order                                    |
+| `POST` | `/v1/orders/:orderId/refunds`           | `refunds.write` | Start refund workflow (requires `Idempotency-Key`)     |
 
 Refund body: `{ "amountCents"?, "reason", "voidTickets"?, "restoreInventory"? }`. If `amountCents` is omitted, refunds the remaining refundable balance. The workflow processes the provider refund, updates the ledger, voids tickets (if `voidTickets`), optionally restores inventory, and notifies the buyer. Returns `202` with `{ status: "pending" }`.
 
 ### Attendees & Check-in
 
-| Method  | Path                                                         | Scope             | Description                                               |
-| ------- | ------------------------------------------------------------ | ----------------- | --------------------------------------------------------- |
-| `GET`   | `/v1/events/:eventId/attendees`                              | `attendees.read`  | List attendees for an event                               |
-| `GET`   | `/v1/attendees`                                              | `attendees.read`  | List attendees across tenant                              |
-| `PATCH` | `/v1/attendees/:attendeeId`                                  | `attendees.write` | Update attendee fields                                    |
-| `POST`  | `/v1/tickets/:ticketId/transfer`                             | `attendees.write` | Transfer ticket to new email (requires `Idempotency-Key`) |
-| `GET`   | `/v1/events/:eventId/check-in-lists`                         | `checkins.read`   | List check-in lists                                       |
-| `GET`   | `/v1/events/:eventId/check-in-lists/:checkInListId/manifest` | `checkins.read`   | Download offline manifest (ticket QR hashes)              |
-| `POST`  | `/v1/check-ins/scan`                                         | `checkins.write`  | Online scan (recommended `Idempotency-Key`)               |
-| `POST`  | `/v1/check-ins/sync`                                         | `checkins.write`  | Offline scan sync (requires `Idempotency-Key`)            |
+| Method  | Path                                                         | Scope             | Description                                                  |
+| ------- | ------------------------------------------------------------ | ----------------- | ------------------------------------------------------------ |
+| `GET`   | `/v1/events/:eventId/attendees`                              | `attendees.read`  | List attendees for an event                                  |
+| `GET`   | `/v1/attendees`                                              | `attendees.read`  | List attendees across tenant                                 |
+| `PATCH` | `/v1/attendees/:attendeeId`                                  | `attendees.write` | Update attendee fields                                       |
+| `POST`  | `/v1/tickets/:ticketId/transfer`                             | `attendees.write` | Transfer ticket to new email (requires `Idempotency-Key`)    |
+| `GET`   | `/v1/events/:eventId/check-in-lists`                         | `checkins.read`   | List check-in lists                                          |
+| `GET`   | `/v1/events/:eventId/check-in-lists/:checkInListId/manifest` | `checkins.read`   | Download offline manifest (ticket QR hashes)                 |
+| `POST`  | `/v1/check-ins/scan`                                         | `checkins.write`  | Online scan (recommended `Idempotency-Key`)                  |
+| `POST`  | `/v1/check-ins/sync`                                         | `checkins.write`  | Offline scan sync (requires `Idempotency-Key`)               |
+| `POST`  | `/v1/check-ins/bulk-sync-jobs`                               | `checkins.write`  | Create async offline sync job (requires `Idempotency-Key`)   |
+| `PUT`   | `/v1/check-ins/bulk-sync-jobs/:jobId/chunks/:sequence`       | `checkins.write`  | Upload async offline sync chunk (requires `Idempotency-Key`) |
+| `GET`   | `/v1/check-ins/bulk-sync-jobs/:jobId`                        | `checkins.read`   | Poll async offline sync job status                           |
+| `GET`   | `/v1/check-ins/bulk-sync-jobs/:jobId/chunks`                 | `checkins.read`   | List async offline sync chunk summaries                      |
 
-Offline sync accepts up to 500 scans per request. Scan outcomes: `accepted`, `duplicate`, `not_found`, `already_checked_in`, `invalid_list`, `wrong_event`. Scan logs are persisted with `deviceId`, `scannedAt`, `qrHash`, and `metadata`.
+Offline sync accepts up to 100,000 scans per request. Scan outcomes: `accepted`, `duplicate`, `not_found`, `already_checked_in`, `invalid_list`, `wrong_event`. Scan logs are persisted with `deviceId`, `scannedAt`, `qrHash`, and `metadata`.
+
+Async bulk sync is for larger offline backlogs. Jobs accept `totalChunks` and optional `totalScans` up to 250,000, chunk uploads accept up to 50,000 scans each, and job/chunk responses return aggregate counters plus bounded redacted error samples rather than per-scan result arrays. Processing waits until every declared chunk is uploaded, then applies the full job in submitted `scannedAt` order with sequence/index tie-breakers. Re-uploading the same chunk with the same payload replays stored chunk state; reusing the sequence with a different payload is rejected.
 
 ### Messaging
 
@@ -442,22 +448,24 @@ Offline sync accepts up to 500 scans per request. Scan outcomes: `accepted`, `du
 | `GET`  | `/v1/events/:eventId/messages/:campaignId/provider-events/:providerEventId`   | `messages.write` | Provider event detail                              |
 | `POST` | `/v1/events/:eventId/messages`                                                | `messages.write` | Send attendee message (requires `Idempotency-Key`) |
 
+Message sends require a channel-specific published content template: `emailTemplateKey` for `email`, `smsTemplateKey` for `sms`, and both keys for `both`. Recipient previews only require `audience`, optional `attendeeIds`, and `channel`.
+
 Bulk marketing and event-update SMS require active `smsOptIn`. Suppression and consent are checked in the notification workflow before any provider send.
 
 ### Reporting & Exports
 
-| Method | Path                                                  | Scope          | Description                                                      |
-| ------ | ----------------------------------------------------- | -------------- | ---------------------------------------------------------------- |
+| Method | Path                                                  | Scope          | Description                                                                    |
+| ------ | ----------------------------------------------------- | -------------- | ------------------------------------------------------------------------------ |
 | `GET`  | `/v1/events/:eventId/reports/sales`                   | `reports.read` | Gross/net sales, sales by channel, refunds, fees, tax, tickets sold, check-ins |
-| `GET`  | `/v1/events/:eventId/reports/tax`                     | `reports.read` | Tax breakdown                                                    |
-| `GET`  | `/v1/events/:eventId/reports/attendance`              | `reports.read` | Attendance/check-in stats                                        |
-| `GET`  | `/v1/events/:eventId/reports/promo`                   | `reports.read` | Promo/discount usage                                             |
-| `GET`  | `/v1/events/:eventId/reports/conversion`              | `reports.read` | Conversion funnel                                                |
-| `GET`  | `/v1/organizations/:organizationId/reports/affiliate` | `reports.read` | Affiliate/referral attribution                                   |
-| `POST` | `/v1/exports`                                         | `reports.read` | Start async export (requires `Idempotency-Key`)                  |
-| `GET`  | `/v1/exports/:exportId`                               | `reports.read` | Export job status                                                |
-| `GET`  | `/v1/exports/:exportId/events`                        | `reports.read` | SSE stream of export job events (reconnect with `Last-Event-ID`) |
-| `GET`  | `/v1/exports/:exportId/download`                      | `reports.read` | Scoped download URL for completed export                         |
+| `GET`  | `/v1/events/:eventId/reports/tax`                     | `reports.read` | Tax breakdown                                                                  |
+| `GET`  | `/v1/events/:eventId/reports/attendance`              | `reports.read` | Attendance/check-in stats                                                      |
+| `GET`  | `/v1/events/:eventId/reports/promo`                   | `reports.read` | Promo/discount usage                                                           |
+| `GET`  | `/v1/events/:eventId/reports/conversion`              | `reports.read` | Conversion funnel                                                              |
+| `GET`  | `/v1/organizations/:organizationId/reports/affiliate` | `reports.read` | Affiliate/referral attribution                                                 |
+| `POST` | `/v1/exports`                                         | `reports.read` | Start async export (requires `Idempotency-Key`)                                |
+| `GET`  | `/v1/exports/:exportId`                               | `reports.read` | Export job status                                                              |
+| `GET`  | `/v1/exports/:exportId/events`                        | `reports.read` | SSE stream of export job events (reconnect with `Last-Event-ID`)               |
+| `GET`  | `/v1/exports/:exportId/download`                      | `reports.read` | Scoped download URL for completed export                                       |
 
 Sales metrics account for refunded/voided tickets and persisted financial snapshots. Exports run as Temporal workflows; the SSE stream replays durable `export_job_events` on reconnect.
 
