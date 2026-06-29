@@ -206,6 +206,26 @@ describe.each(driverCases)('database integration: $driver', ({ driver, url }) =>
     await expect(repo.listVersions(duplicate.document.id)).resolves.toMatchObject([
       { id: duplicate.versions[0]?.id, status: 'draft' },
     ]);
+
+    const artifact = await repo.recordRenderArtifact({
+      tenantId: tenant.id,
+      documentId: document.id,
+      versionId: version.id,
+      channel: 'email',
+      outputType: 'preview',
+      artifactRef: `content-preview:${document.id}:${version.id}:integration`,
+      checksum: 'b'.repeat(64),
+    });
+
+    expect(artifact).toMatchObject({
+      tenantId: tenant.id,
+      documentId: document.id,
+      versionId: version.id,
+      channel: 'email',
+      outputType: 'preview',
+      checksum: 'b'.repeat(64),
+    });
+    expect(artifact.artifactRef).toBe(`content-preview:${document.id}:${version.id}:integration`);
   });
 
   it('enforces tenant-scoped unique slugs', async () => {

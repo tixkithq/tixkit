@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import type { FastifyPluginAsync } from 'fastify';
 import { z } from 'zod';
 import {
@@ -301,6 +302,32 @@ function renderDocumentPreview(
   return { output, validation };
 }
 
+function normalizeForChecksum(value: unknown): unknown {
+  if (Array.isArray(value)) {
+    return value.map((item) => normalizeForChecksum(item));
+  }
+  if (value && typeof value === 'object') {
+    const object = value as Record<string, unknown>;
+    const keys: string[] = [];
+    for (const key of Object.keys(object)) {
+      const index = keys.findIndex((candidate) => key.localeCompare(candidate) < 0);
+      if (index === -1) {
+        keys.push(key);
+      } else {
+        keys.splice(index, 0, key);
+      }
+    }
+    return Object.fromEntries(keys.map((key) => [key, normalizeForChecksum(object[key])]));
+  }
+  return value;
+}
+
+function checksumRenderOutput(output: RenderOutput): string {
+  return createHash('sha256')
+    .update(JSON.stringify(normalizeForChecksum(output)))
+    .digest('hex');
+}
+
 function toPublicContentPage(input: {
   document: ContentDocument;
   version: ContentDocumentVersion;
@@ -566,7 +593,18 @@ export const contentRoutes: FastifyPluginAsync = async (app) => {
       body.context,
       body.optOutToken,
     );
-    return { channel: document.channel, output, validation };
+    if (!version) return { channel: document.channel, output, validation };
+    const checksum = checksumRenderOutput(output);
+    const renderArtifact = await repo().recordRenderArtifact({
+      tenantId: principalTenant(request.principal!),
+      documentId,
+      versionId: version.id,
+      channel: document.channel,
+      outputType: 'preview',
+      artifactRef: `content-preview:${documentId}:${version.id}:${checksum}`,
+      checksum,
+    });
+    return { channel: document.channel, output, validation, renderArtifact };
   });
 
   app.post('/content-documents/:documentId/versions/:versionId/publish', async (request) => {
@@ -622,7 +660,17 @@ export const contentRoutes: FastifyPluginAsync = async (app) => {
       renderedHtml: output.html,
       renderedText: output.text,
     });
-    return reply.status(202).send({ testSend: send, output });
+    const checksum = checksumRenderOutput(output);
+    const renderArtifact = await repo().recordRenderArtifact({
+      tenantId: principalTenant(request.principal!),
+      documentId,
+      versionId: version.id,
+      channel: document.channel,
+      outputType: 'test_send',
+      artifactRef: `content-test-send:${send.id}`,
+      checksum,
+    });
+    return reply.status(202).send({ testSend: send, output, renderArtifact });
   });
 };
 

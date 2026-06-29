@@ -255,10 +255,11 @@ describe('content routes', () => {
   });
 
   it('renders previews through the shared content renderer', async () => {
-    const { db } = createContentDb({
+    const { db, inserted } = createContentDb({
       brands: [{ id: 'brd_1', tenant_id: 'tnt_1', organization_id: 'org_1' }],
       content_documents: [documentRow()],
       content_document_versions: [versionRow()],
+      content_render_artifacts: [],
     });
     const app = await setupContentApp(db, principal);
 
@@ -280,7 +281,28 @@ describe('content routes', () => {
         text: 'Hi Ada',
       },
       validation: { valid: true },
+      renderArtifact: {
+        tenantId: 'tnt_1',
+        documentId: 'cdoc_1',
+        versionId: 'cver_1',
+        channel: 'email',
+        outputType: 'preview',
+      },
     });
+    expect(response.json().renderArtifact.checksum).toMatch(/^[a-f0-9]{64}$/);
+    expect(response.json().renderArtifact.artifactRef).toContain(
+      `content-preview:cdoc_1:cver_1:${response.json().renderArtifact.checksum}`,
+    );
+    expect(inserted).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          document_id: 'cdoc_1',
+          version_id: 'cver_1',
+          output_type: 'preview',
+          checksum: response.json().renderArtifact.checksum,
+        }),
+      ]),
+    );
   });
 
   it('duplicates authorized content documents as draft-only copies with fresh versions', async () => {
@@ -399,6 +421,7 @@ describe('content routes', () => {
       ],
       content_document_versions: [],
       content_test_sends: [],
+      content_render_artifacts: [],
     });
     const app = await setupContentApp(db, principal);
 
@@ -438,7 +461,14 @@ describe('content routes', () => {
         segments: 1,
       },
       validation: { valid: true },
+      renderArtifact: {
+        documentId: 'cdoc_sms',
+        versionId: save.json().id,
+        channel: 'sms',
+        outputType: 'preview',
+      },
     });
+    expect(preview.json().renderArtifact.checksum).toMatch(/^[a-f0-9]{64}$/);
 
     const capture = await app.inject({
       method: 'POST',
@@ -461,7 +491,18 @@ describe('content routes', () => {
         status: 'captured',
         renderedText: 'Hi Ada, All Access starts 2026-07-17 19:00. Reply STOP to opt out',
       },
+      output: preview.json().output,
+      renderArtifact: {
+        documentId: 'cdoc_sms',
+        versionId: save.json().id,
+        channel: 'sms',
+        outputType: 'test_send',
+      },
     });
+    expect(capture.json().renderArtifact.checksum).toBe(preview.json().renderArtifact.checksum);
+    expect(capture.json().renderArtifact.artifactRef).toBe(
+      `content-test-send:${capture.json().testSend.id}`,
+    );
     expect(inserted).toEqual(
       expect.arrayContaining([
         expect.objectContaining({ document_id: 'cdoc_sms', rendered_text: smsDocument.editor.body }),
@@ -469,6 +510,16 @@ describe('content routes', () => {
           channel: 'sms',
           recipient: '+15550000001',
           status: 'captured',
+        }),
+        expect.objectContaining({
+          document_id: 'cdoc_sms',
+          output_type: 'preview',
+          checksum: preview.json().renderArtifact.checksum,
+        }),
+        expect.objectContaining({
+          document_id: 'cdoc_sms',
+          output_type: 'test_send',
+          checksum: capture.json().renderArtifact.checksum,
         }),
       ]),
     );

@@ -15,6 +15,7 @@ import { BaseRepository } from './base.js';
 import type {
   ContentDocumentTable,
   ContentDocumentVersionTable,
+  ContentRenderArtifactTable,
   ContentTestSendTable,
 } from '../types/db.js';
 import type { Database as TixkitDatabase } from '../client.js';
@@ -59,6 +60,18 @@ export type ContentTestSendRecord = {
   renderedHtml?: string;
   renderedText?: string;
   error?: string;
+  createdAt: string;
+};
+
+export type ContentRenderArtifactRecord = {
+  id: string;
+  tenantId: string;
+  documentId: string;
+  versionId: string;
+  channel: ContentChannel;
+  outputType: 'preview' | 'test_send';
+  artifactRef: string;
+  checksum: string;
   createdAt: string;
 };
 
@@ -435,6 +448,34 @@ export class ContentRepository extends BaseRepository {
     return this.toTestSend(row);
   }
 
+  async recordRenderArtifact(input: {
+    tenantId: string;
+    documentId: string;
+    versionId: string;
+    channel: ContentChannel;
+    outputType: 'preview' | 'test_send';
+    artifactRef: string;
+    checksum: string;
+  }): Promise<ContentRenderArtifactRecord> {
+    const id = `cra_${ulid()}`;
+    const row = await this.insertReturning(
+      'content_render_artifacts',
+      {
+        id,
+        tenant_id: input.tenantId,
+        document_id: input.documentId,
+        version_id: input.versionId,
+        channel: input.channel,
+        output_type: input.outputType,
+        artifact_ref: input.artifactRef,
+        checksum: input.checksum,
+        created_at: new Date(),
+      },
+      id,
+    );
+    return this.toRenderArtifact(row);
+  }
+
   private async findPublishedContentByScope(input: {
     tenantId: string;
     brandId: string;
@@ -536,6 +577,22 @@ export class ContentRepository extends BaseRepository {
       renderedHtml: row.rendered_html ?? undefined,
       renderedText: row.rendered_text ?? undefined,
       error: row.error ?? undefined,
+      createdAt: iso(row.created_at),
+    };
+  }
+
+  private toRenderArtifact(
+    row: Selectable<ContentRenderArtifactTable>,
+  ): ContentRenderArtifactRecord {
+    return {
+      id: row.id,
+      tenantId: row.tenant_id,
+      documentId: row.document_id,
+      versionId: row.version_id,
+      channel: row.channel as ContentChannel,
+      outputType: row.output_type === 'test_send' ? 'test_send' : 'preview',
+      artifactRef: row.artifact_ref,
+      checksum: row.checksum,
       createdAt: iso(row.created_at),
     };
   }

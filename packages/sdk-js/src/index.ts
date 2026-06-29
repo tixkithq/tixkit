@@ -410,6 +410,19 @@ export type ContentPreview = {
   channel: ContentChannel;
   output: ContentRenderOutput;
   validation: ContentValidationResult;
+  renderArtifact?: ContentRenderArtifact;
+};
+
+export type ContentRenderArtifact = {
+  id: string;
+  tenantId: string;
+  documentId: string;
+  versionId: string;
+  channel: ContentChannel;
+  outputType: 'preview' | 'test_send';
+  artifactRef: string;
+  checksum: string;
+  createdAt: string;
 };
 
 export type PublicContentPage = {
@@ -2126,7 +2139,11 @@ class ContentResource {
       context?: Record<string, unknown>;
       optOutToken?: string;
     },
-  ): Promise<{ testSend: ContentTestSend; output: ContentRenderOutput }> {
+  ): Promise<{
+    testSend: ContentTestSend;
+    output: ContentRenderOutput;
+    renderArtifact: ContentRenderArtifact;
+  }> {
     return this.client.request('POST', `/content-documents/${documentId}/test-sends`, {
       body: input,
     });
