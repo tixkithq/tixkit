@@ -8,6 +8,7 @@ import {
   TixkitClient,
   TixkitApiError,
   type EmailTemplateDocument,
+  type SmsTemplateDocument,
   type WebhookEvent,
 } from '../index.js';
 
@@ -1150,6 +1151,69 @@ describe('TixkitClient new resource methods', () => {
       versionId: 'cver_email',
       contentJson,
       context: { recipient: { name: 'Ada Lovelace' } },
+    });
+  });
+
+  it('content preview sends canonical SMS document JSON without narrowing to generic objects', async () => {
+    const fm = mockFetch(200, {
+      channel: 'sms',
+      output: {
+        text: 'Hi Ada, All Access starts 2026-07-17 19:00. Reply STOP to opt out',
+        segments: 1,
+        estimatedCostCents: 4,
+      },
+      validation: { valid: true, severity: 'warning', issues: [] },
+    });
+    const c = new TixkitClient({
+      apiKey: '***********',
+      apiBaseUrl: 'https://api.test',
+      maxRetries: 0,
+    });
+    const contentJson: SmsTemplateDocument = {
+      schemaVersion: 1,
+      editor: {
+        provider: '@tixkit/content-message/sms-composer',
+        body: 'Hi {{recipient.name}}, {{event.title}} starts {{event.startsAt}}.',
+      },
+      settings: {
+        templateKey: 'event-reminder-sms',
+        locale: 'en',
+        category: 'bulk',
+        consentCategory: 'marketing',
+        segmentLimit: 2,
+        estimatedCostPerSegmentCents: 4,
+        optOutText: 'Reply STOP to opt out',
+      },
+      shortLinks: [
+        {
+          originalUrl: '{{event.checkoutUrl}}',
+          reason: 'long_url',
+          field: 'editor.body',
+        },
+      ],
+    };
+
+    await c.content.preview('cdoc_sms', {
+      versionId: 'cver_sms',
+      contentJson,
+      context: {
+        event: { title: 'All Access', startsAt: '2026-07-17 19:00' },
+        recipient: { name: 'Ada' },
+      },
+      optOutToken: 'Reply STOP to opt out',
+    });
+
+    const call = getCall(fm);
+    expect(call.url).toBe('https://api.test/v1/content-documents/cdoc_sms/preview');
+    expect(call.method).toBe('POST');
+    expect(JSON.parse(call.body)).toEqual({
+      versionId: 'cver_sms',
+      contentJson,
+      context: {
+        event: { title: 'All Access', startsAt: '2026-07-17 19:00' },
+        recipient: { name: 'Ada' },
+      },
+      optOutToken: 'Reply STOP to opt out',
     });
   });
 

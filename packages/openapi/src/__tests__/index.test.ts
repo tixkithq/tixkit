@@ -240,6 +240,26 @@ describe('openApiSpec', () => {
     expect(openApiSpec.components.schemas.SmsTemplateDocument.properties.editor.properties.provider.enum).toEqual([
       '@tixkit/content-message/sms-composer',
     ]);
+    expect(openApiSpec.components.schemas.SmsTemplateDocument.example).toMatchObject({
+      schemaVersion: 1,
+      editor: {
+        provider: '@tixkit/content-message/sms-composer',
+        body: expect.stringContaining('{{event.title}}'),
+      },
+      settings: {
+        templateKey: 'event-reminder-sms',
+        category: 'bulk',
+        consentCategory: 'marketing',
+        optOutText: 'Reply STOP to opt out',
+      },
+      shortLinks: [
+        {
+          originalUrl: '{{event.checkoutUrl}}',
+          reason: 'long_url',
+          field: 'editor.body',
+        },
+      ],
+    });
     expect(
       openApiSpec.paths['/content-documents/{documentId}/versions'].post.requestBody.content[
         'application/json'

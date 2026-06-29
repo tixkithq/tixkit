@@ -469,6 +469,29 @@ export const openApiSpec = {
           },
         },
         required: ['schemaVersion', 'editor', 'settings', 'shortLinks'],
+        example: {
+          schemaVersion: 1,
+          editor: {
+            provider: '@tixkit/content-message/sms-composer',
+            body: 'Hi {{recipient.name}}, {{event.title}} starts {{event.startsAt}}. {{event.checkoutUrl}}',
+          },
+          settings: {
+            templateKey: 'event-reminder-sms',
+            locale: 'en',
+            category: 'bulk',
+            consentCategory: 'marketing',
+            segmentLimit: 2,
+            estimatedCostPerSegmentCents: 4,
+            optOutText: 'Reply STOP to opt out',
+          },
+          shortLinks: [
+            {
+              originalUrl: '{{event.checkoutUrl}}',
+              reason: 'long_url',
+              field: 'editor.body',
+            },
+          ],
+        },
       },
       PublicContentPage: {
         type: 'object',
