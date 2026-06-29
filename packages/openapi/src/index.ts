@@ -1004,6 +1004,80 @@ export const openApiSpec = {
         },
         required: ['sessionId', 'status', 'paymentIntentId', 'totalCents', 'currency'],
       },
+      CreateBoxOfficeOrderRequest: {
+        type: 'object',
+        properties: {
+          tenderType: { type: 'string', enum: ['comp', 'cash', 'manual_card'] },
+          amountCents: { type: 'integer', minimum: 0 },
+          accessCode: { type: 'string' },
+          notes: { type: 'string', maxLength: 2000 },
+          buyer: {
+            type: 'object',
+            properties: {
+              email: { type: 'string', format: 'email' },
+              firstName: { type: 'string' },
+              lastName: { type: 'string' },
+              phone: { type: 'string' },
+            },
+            additionalProperties: false,
+          },
+          items: {
+            type: 'array',
+            minItems: 1,
+            maxItems: 50,
+            items: {
+              type: 'object',
+              properties: {
+                ticketTypeId: { type: 'string' },
+                quantity: { type: 'integer', minimum: 1, maximum: 100 },
+                attendees: {
+                  type: 'array',
+                  items: {
+                    type: 'object',
+                    properties: {
+                      email: { type: 'string', format: 'email' },
+                      firstName: { type: 'string' },
+                      lastName: { type: 'string' },
+                      phone: { type: 'string' },
+                    },
+                    additionalProperties: false,
+                  },
+                },
+              },
+              required: ['ticketTypeId', 'quantity'],
+              additionalProperties: false,
+            },
+          },
+        },
+        required: ['tenderType', 'items'],
+        additionalProperties: false,
+      },
+      BoxOfficeOrderResult: {
+        type: 'object',
+        properties: {
+          order: {
+            allOf: [
+              { $ref: '#/components/schemas/Order' },
+              {
+                type: 'object',
+                properties: {
+                  lineItems: {
+                    type: 'array',
+                    items: { $ref: '#/components/schemas/OrderLineItem' },
+                  },
+                  attendees: {
+                    type: 'array',
+                    items: { $ref: '#/components/schemas/Attendee' },
+                  },
+                },
+                required: ['lineItems', 'attendees'],
+              },
+            ],
+          },
+          tickets: { type: 'array', items: { $ref: '#/components/schemas/Ticket' } },
+        },
+        required: ['order', 'tickets'],
+      },
       Order: {
         type: 'object',
         properties: {
@@ -3686,6 +3760,52 @@ export const openApiSpec = {
           '200': {
             description: 'Page of orders',
             content: { 'application/json': { schema: { $ref: '#/components/schemas/OrderPage' } } },
+          },
+        },
+      },
+    },
+    '/events/{eventId}/box-office/orders': {
+      post: {
+        summary: 'Create a box-office order',
+        description:
+          'Authenticated point-of-sale order creation for comp, cash, and manual card-not-present tender. The authenticated principal is recorded as the operator; Idempotency-Key is required for replay-safe retries.',
+        security: [{ BearerAuth: [] }],
+        parameters: [
+          { name: 'eventId', in: 'path', required: true, schema: { type: 'string' } },
+          { $ref: '#/components/parameters/RequiredIdempotencyKey' },
+        ],
+        requestBody: {
+          required: true,
+          content: {
+            'application/json': {
+              schema: { $ref: '#/components/schemas/CreateBoxOfficeOrderRequest' },
+            },
+          },
+        },
+        responses: {
+          '201': {
+            description: 'Box-office order created and tickets issued',
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/BoxOfficeOrderResult' },
+              },
+            },
+          },
+          '400': {
+            description: 'Validation error',
+            content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } },
+          },
+          '403': {
+            description: 'Insufficient permission or scope',
+            content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } },
+          },
+          '404': {
+            description: 'Event or ticket type not found',
+            content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } },
+          },
+          '409': {
+            description: 'Idempotency key conflict or inventory exhausted',
+            content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } },
           },
         },
       },

@@ -555,6 +555,9 @@ export type Order = {
   buyerPhone?: string;
   paymentIntentId?: string;
   paymentProvider?: string;
+  salesChannel?: 'online' | 'box_office';
+  operatorId?: string;
+  tenderType?: 'comp' | 'cash' | 'manual_card';
   paidAt?: string;
   refundedAt?: string;
   cancelledAt?: string;
@@ -564,6 +567,39 @@ export type Order = {
   invoice?: Invoice;
   taxSnapshots?: TaxSnapshot[];
   timeline?: OrderTimelineEvent[];
+};
+
+export type BoxOfficeTenderType = 'comp' | 'cash' | 'manual_card';
+
+export type CreateBoxOfficeOrderInput = {
+  tenderType: BoxOfficeTenderType;
+  amountCents?: number;
+  accessCode?: string;
+  notes?: string;
+  buyer?: {
+    email?: string;
+    firstName?: string;
+    lastName?: string;
+    phone?: string;
+  };
+  items: Array<{
+    ticketTypeId: string;
+    quantity: number;
+    attendees?: Array<{
+      email?: string;
+      firstName?: string;
+      lastName?: string;
+      phone?: string;
+    }>;
+  }>;
+};
+
+export type BoxOfficeOrderResult = {
+  order: Order & {
+    lineItems: OrderLineItem[];
+    attendees: Attendee[];
+  };
+  tickets: Ticket[];
 };
 
 export type OrderLineItem = {
@@ -1656,6 +1692,17 @@ class OrderResource {
 
   async list(params?: OrderListParams): Promise<PageResult<Order>> {
     return this.client.request('GET', '/orders', { params: paginationParams(params) });
+  }
+
+  async createBoxOfficeOrder(
+    eventId: string,
+    input: CreateBoxOfficeOrderInput & IdempotencyOptions,
+  ): Promise<BoxOfficeOrderResult> {
+    const { idempotencyKey, ...body } = input;
+    return this.client.request('POST', `/events/${eventId}/box-office/orders`, {
+      body,
+      idempotencyKey,
+    });
   }
 
   async get(orderId: string): Promise<

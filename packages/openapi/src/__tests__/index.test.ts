@@ -91,6 +91,29 @@ describe('openApiSpec', () => {
     );
   });
 
+  it('documents authenticated box-office order creation with idempotency', () => {
+    const route = openApiSpec.paths['/events/{eventId}/box-office/orders'].post;
+    expect(route.parameters).toContainEqual({
+      $ref: '#/components/parameters/RequiredIdempotencyKey',
+    });
+    expect(route.requestBody.content['application/json'].schema).toEqual({
+      $ref: '#/components/schemas/CreateBoxOfficeOrderRequest',
+    });
+    expect(route.responses['201'].content['application/json'].schema).toEqual({
+      $ref: '#/components/schemas/BoxOfficeOrderResult',
+    });
+    expect(openApiSpec.components.schemas.CreateBoxOfficeOrderRequest.properties.tenderType).toEqual(
+      {
+        type: 'string',
+        enum: ['comp', 'cash', 'manual_card'],
+      },
+    );
+    expect(openApiSpec.components.schemas.BoxOfficeOrderResult.required).toEqual([
+      'order',
+      'tickets',
+    ]);
+  });
+
   it('documents Stripe Connect onboarding URL responses', () => {
     expect(openApiSpec.components.schemas.PaymentAccount.properties).toHaveProperty(
       'onboardingUrl',

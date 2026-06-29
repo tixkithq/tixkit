@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  createBoxOfficeOrderSchema,
   createCheckoutSessionSchema,
   updateCheckoutSessionSchema,
   parseBody,
@@ -130,6 +131,33 @@ describe('safeRedirectUrl / successUrl / cancelUrl validation', () => {
       parseBody(createCheckoutSessionSchema(false), {
         eventId: 'evt_1',
         items: [{ ticketTypeId: 'tt_1', productId: 'prd_1', quantity: 1 }],
+      }),
+    ).toThrow(ValidationError);
+  });
+
+  it('accepts strict box-office order payloads for cash tender', () => {
+    const body = parseBody(createBoxOfficeOrderSchema, {
+      tenderType: 'cash',
+      amountCents: 2500,
+      buyer: { email: 'door@example.test', firstName: 'Door' },
+      items: [
+        {
+          ticketTypeId: 'tt_1',
+          quantity: 1,
+          attendees: [{ email: 'guest@example.test', firstName: 'Guest' }],
+        },
+      ],
+    });
+    expect(body.tenderType).toBe('cash');
+    expect(body.items[0]?.attendees).toHaveLength(1);
+  });
+
+  it('rejects box-office attendee counts that do not match quantity', () => {
+    expect(() =>
+      parseBody(createBoxOfficeOrderSchema, {
+        tenderType: 'cash',
+        amountCents: 5000,
+        items: [{ ticketTypeId: 'tt_1', quantity: 2, attendees: [{ email: 'one@example.test' }] }],
       }),
     ).toThrow(ValidationError);
   });

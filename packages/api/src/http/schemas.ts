@@ -249,6 +249,57 @@ export const confirmCheckoutSchema = z
   .strict();
 
 // Order/refund schemas
+const boxOfficeBuyerSchema = z
+  .object({
+    email: z.string().email().optional(),
+    firstName: z.string().min(1).max(120).optional(),
+    lastName: z.string().min(1).max(120).optional(),
+    phone: z.string().min(3).max(40).optional(),
+  })
+  .strict();
+
+const boxOfficeAttendeeSchema = z
+  .object({
+    email: z.string().email().optional(),
+    firstName: z.string().min(1).max(120).optional(),
+    lastName: z.string().min(1).max(120).optional(),
+    phone: z.string().min(3).max(40).optional(),
+  })
+  .strict();
+
+export const createBoxOfficeOrderSchema = z
+  .object({
+    tenderType: z.enum(['comp', 'cash', 'manual_card']),
+    amountCents: z.number().int().min(0).optional(),
+    accessCode: z.string().min(1).max(128).optional(),
+    notes: z.string().max(2000).optional(),
+    buyer: boxOfficeBuyerSchema.optional(),
+    items: z
+      .array(
+        z
+          .object({
+            ticketTypeId: ulidSchema,
+            quantity: z.number().int().min(1).max(100),
+            attendees: z.array(boxOfficeAttendeeSchema).optional(),
+          })
+          .strict(),
+      )
+      .min(1)
+      .max(50),
+  })
+  .strict()
+  .superRefine((value, ctx) => {
+    for (const [index, item] of value.items.entries()) {
+      if (item.attendees && item.attendees.length !== item.quantity) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ['items', index, 'attendees'],
+          message: 'attendees length must match quantity when provided',
+        });
+      }
+    }
+  });
+
 export const refundSchema = z
   .object({
     amountCents: z.number().int().positive().optional(),

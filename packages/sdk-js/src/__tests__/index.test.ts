@@ -1478,6 +1478,48 @@ describe('TixkitClient new resource methods', () => {
     expect(call.url).toBe('https://api.test/v1/orders?limit=50&organizationId=org_1&eventId=evt_1');
   });
 
+  it('orders.createBoxOfficeOrder sends tender payload with idempotency', async () => {
+    const fm = mockFetch(201, {
+      order: {
+        id: 'ord_pos',
+        orderNumber: 'TK-POS',
+        status: 'paid',
+        salesChannel: 'box_office',
+        operatorId: 'usr_operator',
+        tenderType: 'cash',
+        lineItems: [],
+        attendees: [],
+      },
+      tickets: [],
+    });
+    const c = new TixkitClient({
+      apiKey: 'tk_test_123',
+      apiBaseUrl: 'https://api.test',
+      maxRetries: 0,
+    });
+
+    await c.orders.createBoxOfficeOrder('evt_1', {
+      tenderType: 'cash',
+      amountCents: 2500,
+      buyer: { email: 'door@example.test', firstName: 'Door' },
+      items: [{ ticketTypeId: 'tt_1', quantity: 1 }],
+      idempotencyKey: 'idem_pos_1',
+    });
+
+    const call = getCall(fm);
+    const [, init] = fm.mock.calls[0]!;
+    const headers = init?.headers as Record<string, string>;
+    expect(call.url).toBe('https://api.test/v1/events/evt_1/box-office/orders');
+    expect(call.method).toBe('POST');
+    expect(headers['Idempotency-Key']).toBe('idem_pos_1');
+    expect(JSON.parse(call.body)).toEqual({
+      tenderType: 'cash',
+      amountCents: 2500,
+      buyer: { email: 'door@example.test', firstName: 'Door' },
+      items: [{ ticketTypeId: 'tt_1', quantity: 1 }],
+    });
+  });
+
   it('public.getEvent sends GET without auth', async () => {
     const fm = mockFetch(200, { id: 'evt_1', title: 'Event' });
     const c = new TixkitClient({ apiBaseUrl: 'https://api.test', maxRetries: 0 });
