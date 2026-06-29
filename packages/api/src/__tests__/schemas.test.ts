@@ -18,6 +18,8 @@ import {
   updateBrandSchema,
   updateProductSchema,
   updateTicketTypeBatchSchema,
+  MAX_OFFLINE_SYNC_SCANS,
+  syncScanSchema,
 } from '../http/schemas.js';
 import { ValidationError } from '@tixkit/domain';
 
@@ -409,5 +411,19 @@ describe('parseBody strict mode', () => {
     const body = parseBody(refundSchema, { reason: 'Customer requested', amountCents: 5000 });
     expect(body.reason).toBe('Customer requested');
     expect(body.amountCents).toBe(5000);
+  });
+});
+
+describe('check-in scan schemas', () => {
+  it('caps offline sync batches before repository work', () => {
+    const scans = Array.from({ length: MAX_OFFLINE_SYNC_SCANS + 1 }, (_, index) => ({
+      qrHash: `hash_${index}`,
+      scannedAt: '2026-06-01T12:00:00.000Z',
+      offline: true,
+    }));
+
+    expect(() => parseBody(syncScanSchema, { checkInListId: 'cil_1', scans })).toThrow(
+      ValidationError,
+    );
   });
 });

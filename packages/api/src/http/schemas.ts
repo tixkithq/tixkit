@@ -5,6 +5,7 @@ import { ValidationError } from '@tixkit/domain';
 const ulidSchema = z.string().min(1);
 const currencySchema = z.string().length(3);
 const iso8601Schema = z.string().datetime();
+export const MAX_OFFLINE_SYNC_SCANS = 500;
 const eventSlugSchema = z
   .string()
   .min(1)
@@ -540,13 +541,15 @@ export const syncScanSchema = z
   .object({
     checkInListId: ulidSchema,
     deviceId: z.string().optional(),
-    scans: z.array(
-      z.object({
-        qrHash: z.string().min(1),
-        scannedAt: iso8601Schema,
-        offline: z.boolean(),
-      }),
-    ),
+    scans: z
+      .array(
+        z.object({
+          qrHash: z.string().min(1),
+          scannedAt: iso8601Schema,
+          offline: z.boolean(),
+        }),
+      )
+      .max(MAX_OFFLINE_SYNC_SCANS),
   })
   .strict();
 

@@ -123,6 +123,10 @@ describe('openApiSpec', () => {
     expect(openApiSpec.paths['/check-ins/sync'].post.parameters).toContainEqual({
       $ref: '#/components/parameters/RequiredIdempotencyKey',
     });
+    expect(
+      openApiSpec.paths['/check-ins/sync'].post.requestBody.content['application/json'].schema
+        .properties.scans.maxItems,
+    ).toBe(500);
   });
 
   it('documents remaining implemented backend route groups', () => {
