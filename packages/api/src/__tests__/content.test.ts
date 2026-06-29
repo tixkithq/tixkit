@@ -120,10 +120,23 @@ function createContentDb(seed: Record<string, Record<string, unknown>[]>) {
     };
   }
 
+  const db = {
+    selectFrom,
+    insertInto,
+    updateTable,
+    transaction() {
+      return {
+        execute(callback: (trx: Database) => Promise<unknown>) {
+          return callback(db as unknown as Database);
+        },
+      };
+    },
+  } as unknown as Database;
+
   return {
     inserted,
     updated,
-    db: { selectFrom, insertInto, updateTable } as unknown as Database,
+    db,
   };
 }
 
@@ -268,6 +281,105 @@ describe('content routes', () => {
       },
       validation: { valid: true },
     });
+  });
+
+  it('duplicates authorized content documents as draft-only copies with fresh versions', async () => {
+    const { db, inserted, updated } = createContentDb({
+      brands: [{ id: 'brd_1', tenant_id: 'tnt_1', organization_id: 'org_1' }],
+      content_documents: [
+        documentRow({
+          status: 'published',
+          current_draft_version_id: null,
+          published_version_id: 'cver_1',
+        }),
+      ],
+      content_document_versions: [
+        versionRow({
+          status: 'published',
+          published_at: new Date('2026-06-02T00:00:00.000Z'),
+        }),
+      ],
+    });
+    const app = await setupContentApp(db, principal);
+
+    const response = await app.inject({
+      method: 'POST',
+      url: '/content-documents/cdoc_1/duplicate',
+      payload: {
+        key: 'order-confirmed-copy',
+        name: 'Order confirmed copy',
+      },
+    });
+
+    expect(response.statusCode, response.body).toBe(201);
+    const body = response.json();
+    expect(body).toMatchObject({
+      document: {
+        tenantId: 'tnt_1',
+        organizationId: 'org_1',
+        brandId: 'brd_1',
+        channel: 'email',
+        key: 'order-confirmed-copy',
+        name: 'Order confirmed copy',
+        status: 'draft',
+      },
+      versions: [
+        {
+          documentId: body.document.id,
+          versionNumber: 1,
+          status: 'draft',
+          subject: 'Hi {{recipient.name}}',
+        },
+      ],
+    });
+    expect(body.document).not.toHaveProperty('publishedVersionId');
+    expect(body.versions[0]).not.toHaveProperty('publishedAt');
+    expect(body.document.id).not.toBe('cdoc_1');
+    expect(body.versions[0].id).not.toBe('cver_1');
+    expect(inserted).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          key: 'order-confirmed-copy',
+          status: 'draft',
+          published_version_id: null,
+        }),
+        expect.objectContaining({
+          document_id: body.document.id,
+          status: 'draft',
+          published_at: null,
+        }),
+      ]),
+    );
+    expect(updated).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ current_draft_version_id: body.versions[0].id }),
+      ]),
+    );
+  });
+
+  it('does not duplicate content documents across tenant boundaries', async () => {
+    const { db, inserted } = createContentDb({
+      brands: [{ id: 'brd_other', tenant_id: 'tnt_other', organization_id: 'org_other' }],
+      content_documents: [
+        documentRow({
+          id: 'cdoc_other',
+          tenant_id: 'tnt_other',
+          organization_id: 'org_other',
+          brand_id: 'brd_other',
+        }),
+      ],
+      content_document_versions: [versionRow({ document_id: 'cdoc_other' })],
+    });
+    const app = await setupContentApp(db, principal);
+
+    const response = await app.inject({
+      method: 'POST',
+      url: '/content-documents/cdoc_other/duplicate',
+      payload: { key: 'stolen-copy' },
+    });
+
+    expect(response.statusCode).toBe(404);
+    expect(inserted).toHaveLength(0);
   });
 
   it('saves, previews, and captures canonical SMS template test sends', async () => {

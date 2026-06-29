@@ -485,6 +485,11 @@ export type CreateContentDocumentInput = {
   locale?: string;
 };
 
+export type DuplicateContentDocumentInput = {
+  key?: string;
+  name?: string;
+};
+
 export type SaveContentVersionInput = {
   subject?: string;
   previewText?: string;
@@ -2062,6 +2067,15 @@ class ContentResource {
 
   async get(documentId: string): Promise<ContentDocument> {
     return this.client.request('GET', `/content-documents/${documentId}`);
+  }
+
+  async duplicate(
+    documentId: string,
+    input: DuplicateContentDocumentInput = {},
+  ): Promise<{ document: ContentDocument; versions: ContentDocumentVersion[] }> {
+    return this.client.request('POST', `/content-documents/${documentId}/duplicate`, {
+      body: input,
+    });
   }
 
   async versions(documentId: string): Promise<PageResult<ContentDocumentVersion>> {

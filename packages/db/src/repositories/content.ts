@@ -17,6 +17,7 @@ import type {
   ContentDocumentVersionTable,
   ContentTestSendTable,
 } from '../types/db.js';
+import type { Database as TixkitDatabase } from '../client.js';
 
 function parseJson<T>(value: string, fallback: T): T {
   try {
@@ -28,6 +29,17 @@ function parseJson<T>(value: string, fallback: T): T {
 
 function iso(value: Date | string): string {
   return value instanceof Date ? value.toISOString() : new Date(value).toISOString();
+}
+
+function duplicateKey(sourceKey: string): string {
+  const suffix = `copy-${ulid().toLowerCase().slice(0, 10)}`;
+  const maxPrefixLength = 128 - suffix.length - 1;
+  return `${sourceKey.slice(0, maxPrefixLength)}-${suffix}`;
+}
+
+function duplicateName(sourceName: string): string {
+  const suffix = ' copy';
+  return `${sourceName.slice(0, 160 - suffix.length)}${suffix}`;
 }
 
 export type ContentDocumentRecord = ContentDocument & {
@@ -84,6 +96,60 @@ export class ContentRepository extends BaseRepository {
       id,
     );
     return this.toDocument(row);
+  }
+
+  async duplicateDocument(input: {
+    documentId: string;
+    tenantId: string;
+    key?: string;
+    name?: string;
+    createdBy: string;
+  }): Promise<{ document: ContentDocumentRecord; versions: ContentDocumentVersion[] }> {
+    return this.db.transaction().execute(async (trx: TixkitDatabase) => {
+      const txRepo = new ContentRepository(trx);
+      const source = await txRepo.findDocumentById(input.documentId);
+      if (!source) throw new Error(`Content document not found: ${input.documentId}`);
+      if (source.tenantId !== input.tenantId) {
+        throw new Error(`Content document not found: ${input.documentId}`);
+      }
+
+      const duplicate = await txRepo.createDocument({
+        tenantId: source.tenantId,
+        organizationId: source.organizationId,
+        brandId: source.brandId,
+        eventId: source.eventId,
+        channel: source.channel,
+        key: input.key ?? duplicateKey(source.key),
+        name: input.name ?? duplicateName(source.name),
+        locale: source.locale,
+      });
+
+      // eslint-disable-next-line unicorn/no-array-sort
+      const sourceVersions = [...(await txRepo.listVersions(source.id))].sort(
+        (left, right) => left.versionNumber - right.versionNumber,
+      );
+      const versions: ContentDocumentVersion[] = [];
+      for (const sourceVersion of sourceVersions) {
+        // Version numbers are assigned from current repository state, so copies must be sequential.
+        // eslint-disable-next-line no-await-in-loop
+        const copiedVersion = await txRepo.createVersion({
+          documentId: duplicate.id,
+          subject: sourceVersion.subject,
+          previewText: sourceVersion.previewText,
+          contentJson: sourceVersion.contentJson,
+          renderedHtml: sourceVersion.renderedHtml,
+          renderedText: sourceVersion.renderedText,
+          variables: sourceVersion.variables,
+          validation: sourceVersion.validation,
+          createdBy: input.createdBy,
+        });
+        versions.push(copiedVersion);
+      }
+
+      const document = await txRepo.findDocumentById(duplicate.id);
+      if (!document) throw new Error(`Duplicated content document not found: ${duplicate.id}`);
+      return { document, versions };
+    });
   }
 
   async listDocuments(input: {

@@ -100,6 +100,13 @@ const testSendSchema = z
   })
   .strict();
 
+const duplicateDocumentSchema = z
+  .object({
+    key: z.string().min(1).max(128).regex(/^[a-z0-9][a-z0-9._-]*$/).optional(),
+    name: z.string().min(1).max(160).optional(),
+  })
+  .strict();
+
 function parseBody<T>(schema: z.ZodType<T>, body: unknown): T {
   const parsed = schema.safeParse(body);
   if (!parsed.success) {
@@ -491,6 +498,21 @@ export const contentRoutes: FastifyPluginAsync = async (app) => {
   app.get('/content-documents/:documentId', async (request) => {
     const { documentId } = request.params as { documentId: string };
     return loadAuthorizedDocument(repo(), db, request.principal!, documentId, 'read');
+  });
+
+  app.post('/content-documents/:documentId/duplicate', async (request, reply) => {
+    const { documentId } = request.params as { documentId: string };
+    const document = await loadAuthorizedDocument(repo(), db, request.principal!, documentId, 'write');
+    assertChannelAvailable(document.channel);
+    const body = parseBody(duplicateDocumentSchema, request.body ?? {});
+    const duplicated = await repo().duplicateDocument({
+      documentId,
+      tenantId: request.principal!.tenantId,
+      key: body.key,
+      name: body.name,
+      createdBy: request.principal!.id,
+    });
+    return reply.status(201).send(duplicated);
   });
 
   app.get('/content-documents/:documentId/versions', async (request) => {

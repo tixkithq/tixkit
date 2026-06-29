@@ -917,6 +917,20 @@ describe('TixkitClient new resource methods', () => {
       channel: 'email',
       key: 'order-confirmed',
     });
+
+    await c.content.duplicate('cdoc_1', {
+      key: 'order-confirmed-copy',
+      name: 'Order confirmed copy',
+    });
+    const duplicateCall = getCall(fm, 1);
+    expect(duplicateCall.url).toBe(
+      'https://api.test/v1/content-documents/cdoc_1/duplicate',
+    );
+    expect(duplicateCall.method).toBe('POST');
+    expect(JSON.parse(duplicateCall.body)).toEqual({
+      key: 'order-confirmed-copy',
+      name: 'Order confirmed copy',
+    });
   });
 
   it('content preview and public content page use documented paths', async () => {

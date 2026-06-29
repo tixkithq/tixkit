@@ -83,6 +83,113 @@ function createContentLookupDb(input: {
   };
 }
 
+function createContentMutationDb(input: {
+  documents: Row[];
+  versions: Row[];
+}) {
+  const inserted: Record<string, Row[]> = {
+    content_documents: [],
+    content_document_versions: [],
+  };
+  const updated: Record<string, Row[]> = {
+    content_documents: [],
+    content_document_versions: [],
+  };
+
+  function rows(table: string) {
+    if (table === 'content_documents') return input.documents;
+    if (table === 'content_document_versions') return input.versions;
+    return [];
+  }
+
+  const db = {
+    selectFrom(table: string) {
+      const calls: WhereCall[] = [];
+      const query = {
+        select() {
+          return query;
+        },
+        selectAll() {
+          return query;
+        },
+        where(column: string, op: string, value?: unknown) {
+          calls.push([column, op, value]);
+          return query;
+        },
+        orderBy() {
+          return query;
+        },
+        limit() {
+          return query;
+        },
+        execute() {
+          return Promise.resolve(rows(table).filter((row) => rowMatchesWhereCalls(row, calls)));
+        },
+        async executeTakeFirst() {
+          return (await query.execute())[0];
+        },
+        async executeTakeFirstOrThrow() {
+          const row = await query.executeTakeFirst();
+          if (!row) throw new Error(`No row for ${table}`);
+          return row;
+        },
+      };
+      return query;
+    },
+    insertInto(table: 'content_documents' | 'content_document_versions') {
+      return {
+        values(value: Row) {
+          const row = { ...value };
+          return {
+            returningAll: () => ({
+              executeTakeFirstOrThrow: async () => {
+                rows(table).push(row);
+                inserted[table].push(row);
+                return row;
+              },
+            }),
+            execute: async () => {
+              rows(table).push(row);
+              inserted[table].push(row);
+            },
+          };
+        },
+      };
+    },
+    updateTable(table: 'content_documents' | 'content_document_versions') {
+      return {
+        set(value: Row) {
+          const calls: WhereCall[] = [];
+          const query = {
+            where(column: string, op: string, comparison?: unknown) {
+              calls.push([column, op, comparison]);
+              return query;
+            },
+            execute: async () => {
+              for (const row of rows(table)) {
+                if (rowMatchesWhereCalls(row, calls)) {
+                  Object.assign(row, value);
+                  updated[table].push(value);
+                }
+              }
+            },
+          };
+          return query;
+        },
+      };
+    },
+    transaction() {
+      return {
+        execute(callback: (trx: Database) => Promise<unknown>) {
+          return callback(db as unknown as Database);
+        },
+      };
+    },
+  } as unknown as Database;
+
+  return { db, inserted, updated };
+}
+
 const publishedDocument = (overrides: Row = {}): Row => ({
   id: 'cdoc_brand',
   tenant_id: 'tnt_1',
@@ -143,6 +250,84 @@ describe('ContentRepository', () => {
       ['brand_id', '=', 'brd_1'],
       ['event_id', '=', 'evt_1'],
     ]);
+  });
+
+  it('duplicates documents as fresh draft versions without carrying published state', async () => {
+    const { db, inserted, updated } = createContentMutationDb({
+      documents: [
+        publishedDocument({
+          current_draft_version_id: null,
+          published_version_id: 'cver_brand',
+        }),
+      ],
+      versions: [
+        publishedVersion({
+          status: 'published',
+          published_at: new Date('2026-06-02T00:00:00.000Z'),
+        }),
+      ],
+    });
+
+    const result = await new ContentRepository(db).duplicateDocument({
+      documentId: 'cdoc_brand',
+      tenantId: 'tnt_1',
+      key: 'event-update-copy',
+      name: 'Event update copy',
+      createdBy: 'usr_copy',
+    });
+
+    expect(result.document).toMatchObject({
+      key: 'event-update-copy',
+      name: 'Event update copy',
+      status: 'draft',
+      publishedVersionId: undefined,
+    });
+    expect(result.document.id).not.toBe('cdoc_brand');
+    expect(result.versions).toHaveLength(1);
+    expect(result.versions[0]).toMatchObject({
+      documentId: result.document.id,
+      status: 'draft',
+      versionNumber: 1,
+      createdBy: 'usr_copy',
+      publishedAt: undefined,
+    });
+    expect(result.versions[0]?.id).not.toBe('cver_brand');
+    expect(inserted.content_documents).toEqual([
+      expect.objectContaining({
+        key: 'event-update-copy',
+        status: 'draft',
+        published_version_id: null,
+      }),
+    ]);
+    expect(inserted.content_document_versions).toEqual([
+      expect.objectContaining({
+        document_id: result.document.id,
+        status: 'draft',
+        published_at: null,
+      }),
+    ]);
+    expect(updated.content_documents).toEqual([
+      expect.objectContaining({ current_draft_version_id: result.versions[0]?.id }),
+    ]);
+  });
+
+  it('refuses to duplicate documents outside the requested tenant', async () => {
+    const { db, inserted } = createContentMutationDb({
+      documents: [publishedDocument({ tenant_id: 'tnt_other' })],
+      versions: [publishedVersion()],
+    });
+
+    await expect(
+      new ContentRepository(db).duplicateDocument({
+        documentId: 'cdoc_brand',
+        tenantId: 'tnt_1',
+        key: 'event-update-copy',
+        name: 'Event update copy',
+        createdBy: 'usr_copy',
+      }),
+    ).rejects.toThrow('Content document not found: cdoc_brand');
+    expect(inserted.content_documents).toHaveLength(0);
+    expect(inserted.content_document_versions).toHaveLength(0);
   });
 
   it('prefers an event-scoped published email template over brand fallback', async () => {
