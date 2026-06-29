@@ -215,18 +215,35 @@ function reportingApiBase(element: HTMLElement): string {
   return 'https://api.tixkit.com';
 }
 
+function newWidgetVisitorId(): string {
+  const randomUUID = globalThis.crypto?.randomUUID?.();
+  if (randomUUID) return randomUUID;
+
+  try {
+    const getRandomValues = globalThis.crypto?.getRandomValues?.bind(globalThis.crypto);
+    if (getRandomValues) {
+      const bytes = new Uint8Array(16);
+      getRandomValues(bytes);
+      const token = Array.from(bytes, (byte) => byte.toString(16).padStart(2, '0')).join('');
+      return `visitor_${token}`;
+    }
+  } catch {
+    // Fall through to the compatibility path for older or restricted browser contexts.
+  }
+
+  return `visitor_${Math.random().toString(36).slice(2)}${Date.now().toString(36)}`;
+}
+
 function widgetVisitorId(): string {
   const key = 'tixkit:visitor-id';
   try {
     const existing = window.localStorage.getItem(key);
     if (existing) return existing;
-    const generated =
-      globalThis.crypto?.randomUUID?.() ??
-      `visitor_${Math.random().toString(36).slice(2)}${Date.now().toString(36)}`;
+    const generated = newWidgetVisitorId();
     window.localStorage.setItem(key, generated);
     return generated;
   } catch {
-    return `visitor_${Math.random().toString(36).slice(2)}${Date.now().toString(36)}`;
+    return newWidgetVisitorId();
   }
 }
 
