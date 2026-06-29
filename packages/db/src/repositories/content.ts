@@ -426,7 +426,7 @@ export class ContentRepository extends BaseRepository {
     renderedText?: string;
     error?: string;
   }): Promise<ContentTestSendRecord> {
-    const id = `ctsend_${ulid()}`;
+    const id = `cts_${ulid()}`;
     const row = await this.insertReturning(
       'content_test_sends',
       {

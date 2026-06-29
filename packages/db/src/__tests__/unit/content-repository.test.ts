@@ -87,22 +87,26 @@ function createContentMutationDb(input: {
   documents: Row[];
   versions: Row[];
   renderArtifacts?: Row[];
+  testSends?: Row[];
 }) {
   const inserted: Record<string, Row[]> = {
     content_documents: [],
     content_document_versions: [],
     content_render_artifacts: [],
+    content_test_sends: [],
   };
   const updated: Record<string, Row[]> = {
     content_documents: [],
     content_document_versions: [],
     content_render_artifacts: [],
+    content_test_sends: [],
   };
 
   function rows(table: string) {
     if (table === 'content_documents') return input.documents;
     if (table === 'content_document_versions') return input.versions;
     if (table === 'content_render_artifacts') return input.renderArtifacts ?? [];
+    if (table === 'content_test_sends') return input.testSends ?? [];
     return [];
   }
 
@@ -140,7 +144,13 @@ function createContentMutationDb(input: {
       };
       return query;
     },
-    insertInto(table: 'content_documents' | 'content_document_versions' | 'content_render_artifacts') {
+    insertInto(
+      table:
+        | 'content_documents'
+        | 'content_document_versions'
+        | 'content_render_artifacts'
+        | 'content_test_sends',
+    ) {
       return {
         values(value: Row) {
           const row = { ...value };
@@ -160,7 +170,13 @@ function createContentMutationDb(input: {
         },
       };
     },
-    updateTable(table: 'content_documents' | 'content_document_versions' | 'content_render_artifacts') {
+    updateTable(
+      table:
+        | 'content_documents'
+        | 'content_document_versions'
+        | 'content_render_artifacts'
+        | 'content_test_sends',
+    ) {
       return {
         set(value: Row) {
           const calls: WhereCall[] = [];
@@ -370,6 +386,39 @@ describe('ContentRepository', () => {
         output_type: 'test_send',
         artifact_ref: 'content-test-send:ctsend_1',
         checksum: 'a'.repeat(64),
+      }),
+    ]);
+  });
+
+  it('records test sends with IDs that fit the schema', async () => {
+    const { db, inserted } = createContentMutationDb({
+      documents: [],
+      versions: [],
+      testSends: [],
+    });
+
+    const send = await new ContentRepository(db).recordTestSend({
+      tenantId: 'tnt_1',
+      documentId: 'cdoc_1',
+      versionId: 'cver_1',
+      channel: 'sms',
+      recipient: '+15550000001',
+      status: 'captured',
+      renderedText: 'Hi Ada',
+    });
+
+    expect(send.id).toMatch(/^cts_/);
+    expect(send.id.length).toBeLessThanOrEqual(32);
+    expect(inserted.content_test_sends).toEqual([
+      expect.objectContaining({
+        id: send.id,
+        tenant_id: 'tnt_1',
+        document_id: 'cdoc_1',
+        version_id: 'cver_1',
+        channel: 'sms',
+        recipient: '+15550000001',
+        status: 'captured',
+        rendered_text: 'Hi Ada',
       }),
     ]);
   });

@@ -104,6 +104,23 @@ export function registerHealthRoute(app: FastifyInstance): void {
   );
 }
 
+export function registerJsonBodyParser(app: FastifyInstance): void {
+  app.addContentTypeParser('application/json', { parseAs: 'string' }, (request, body, done) => {
+    const rawBody = body as string;
+    (request as unknown as { rawBody: string }).rawBody = rawBody;
+    if (rawBody.trim().length === 0) {
+      done(null, undefined);
+      return;
+    }
+    try {
+      const json = JSON.parse(rawBody);
+      done(null, json);
+    } catch (err) {
+      done(err as Error, undefined);
+    }
+  });
+}
+
 export async function buildApp(): Promise<FastifyInstance> {
   const app = Fastify({
     trustProxy: config.trustProxy,
@@ -128,15 +145,7 @@ export async function buildApp(): Promise<FastifyInstance> {
   });
 
   // Capture raw body for webhook signature verification while still parsing JSON for all routes
-  app.addContentTypeParser('application/json', { parseAs: 'string' }, (request, body, done) => {
-    (request as unknown as { rawBody: string }).rawBody = body as string;
-    try {
-      const json = JSON.parse(body as string);
-      done(null, json);
-    } catch (err) {
-      done(err as Error, undefined);
-    }
-  });
+  registerJsonBodyParser(app);
 
   // Initialize services
   const db = createDb(config.databaseUrl);

@@ -2,7 +2,7 @@ import Fastify from 'fastify';
 import rateLimit from '@fastify/rate-limit';
 import { describe, expect, it } from 'vitest';
 import { ValidationError } from '@tixkit/domain';
-import { registerErrorHandler, registerHealthRoute } from '../app.js';
+import { registerErrorHandler, registerHealthRoute, registerJsonBodyParser } from '../app.js';
 import { pageEnvelope, parsePagination } from '../http/contracts.js';
 
 describe('API contract helpers', () => {
@@ -40,6 +40,26 @@ describe('API contract helpers', () => {
 });
 
 describe('API error envelope', () => {
+  it('accepts empty JSON POST bodies without throwing parser errors', async () => {
+    const app = Fastify({ logger: false });
+    registerJsonBodyParser(app);
+    app.post('/empty', async (request) => ({
+      body: request.body ?? null,
+      rawBody: (request as unknown as { rawBody: string }).rawBody,
+    }));
+
+    const response = await app.inject({
+      method: 'POST',
+      url: '/empty',
+      headers: { 'content-type': 'application/json' },
+      payload: '',
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toEqual({ body: null, rawBody: '' });
+    await app.close();
+  });
+
   it('serializes domain errors with code, message, and requestId', async () => {
     const app = Fastify({ logger: false, genReqId: () => 'req_contract' });
     registerErrorHandler(app);
