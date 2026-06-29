@@ -38,7 +38,7 @@ test.describe('admin content editor shell', () => {
       {
         path: `/events/${fixtureEventId}/content/email`,
         heading: 'Email template editor',
-        preview: 'Inbox preview',
+        preview: 'React Email preview',
         name: 'email',
       },
       {
@@ -72,40 +72,51 @@ test.describe('admin content editor shell', () => {
     test.skip(browserName !== 'chromium', 'CDP layout inspection is Chromium-only.');
     await requireReachable(page, adminBaseUrl, 'admin dashboard');
 
-    await page.setViewportSize(desktopViewport);
-    await page.goto(`${adminBaseUrl}/events/${fixtureEventId}/content/event-page`);
-    await expectShellRegions(page);
+    for (const route of [
+      {
+        path: `/events/${fixtureEventId}/content/event-page`,
+        name: 'event-page',
+        minCanvasWidth: 500,
+      },
+      { path: `/events/${fixtureEventId}/content/email`, name: 'email', minCanvasWidth: 360 },
+      { path: `/events/${fixtureEventId}/content/sms`, name: 'sms', minCanvasWidth: 320 },
+    ] as const) {
+      await page.setViewportSize(desktopViewport);
+      await page.goto(`${adminBaseUrl}${route.path}`);
+      await expectShellRegions(page);
 
-    const client = await page.context().newCDPSession(page);
-    const { root } = await client.send('DOM.getDocument', { depth: -1, pierce: true });
-    const shell = await client.send('DOM.querySelector', {
-      nodeId: root.nodeId,
-      selector: '[data-testid="content-editor-shell"]',
-    });
-    const canvas = await client.send('DOM.querySelector', {
-      nodeId: root.nodeId,
-      selector: '[data-testid="editor-canvas"]',
-    });
-    const rail = await client.send('DOM.querySelector', {
-      nodeId: root.nodeId,
-      selector: '[aria-label="Insert blocks"]',
-    });
+      const client = await page.context().newCDPSession(page);
+      const { root } = await client.send('DOM.getDocument', { depth: -1, pierce: true });
+      const shell = await client.send('DOM.querySelector', {
+        nodeId: root.nodeId,
+        selector: '[data-testid="content-editor-shell"]',
+      });
+      const canvas = await client.send('DOM.querySelector', {
+        nodeId: root.nodeId,
+        selector: '[data-testid="editor-canvas"]',
+      });
+      const rail = await client.send('DOM.querySelector', {
+        nodeId: root.nodeId,
+        selector: '[aria-label="Insert blocks"]',
+      });
 
-    const shellBox = await client.send('DOM.getBoxModel', { nodeId: shell.nodeId });
-    const canvasBox = await client.send('DOM.getBoxModel', { nodeId: canvas.nodeId });
-    const railBox = await client.send('DOM.getBoxModel', { nodeId: rail.nodeId });
+      const shellBox = await client.send('DOM.getBoxModel', { nodeId: shell.nodeId });
+      const canvasBox = await client.send('DOM.getBoxModel', { nodeId: canvas.nodeId });
+      const railBox = await client.send('DOM.getBoxModel', { nodeId: rail.nodeId });
 
-    await testInfo.attach('cdp-layout-boxes', {
-      body: JSON.stringify({ shellBox, canvasBox, railBox }, null, 2),
-      contentType: 'application/json',
-    });
+      await testInfo.attach(`cdp-layout-boxes-${route.name}`, {
+        body: JSON.stringify({ shellBox, canvasBox, railBox }, null, 2),
+        contentType: 'application/json',
+      });
 
-    expect(shell.nodeId).toBeGreaterThan(0);
-    expect(canvas.nodeId).toBeGreaterThan(0);
-    expect(rail.nodeId).toBeGreaterThan(0);
-    expect(widthOf(shellBox.model.content)).toBeGreaterThan(900);
-    expect(widthOf(canvasBox.model.content)).toBeGreaterThan(500);
-    expect(widthOf(railBox.model.content)).toBeGreaterThan(40);
+      expect(shell.nodeId).toBeGreaterThan(0);
+      expect(canvas.nodeId).toBeGreaterThan(0);
+      expect(rail.nodeId).toBeGreaterThan(0);
+      expect(widthOf(shellBox.model.content)).toBeGreaterThan(900);
+      expect(widthOf(canvasBox.model.content)).toBeGreaterThan(route.minCanvasWidth);
+      expect(widthOf(railBox.model.content)).toBeGreaterThan(40);
+      await client.detach();
+    }
   });
 });
 

@@ -33,6 +33,36 @@ const dbState = vi.hoisted(() => ({
   smsDeliveries: [] as Record<string, unknown>[],
   emailJobUpdates: [] as Record<string, unknown>[],
   smsJobUpdates: [] as Record<string, unknown>[],
+  contentDocument: {
+    id: 'cdoc_1',
+    tenantId: 'tnt_1',
+    organizationId: 'org_1',
+    brandId: 'brd_1',
+    channel: 'email',
+    key: 'event-update',
+    name: 'Event update',
+    status: 'published',
+    locale: 'en',
+    publishedVersionId: 'cver_1',
+    createdAt: '2026-06-01T00:00:00.000Z',
+    updatedAt: '2026-06-01T00:00:00.000Z',
+  } as Record<string, unknown> | undefined,
+  contentVersion: {
+    id: 'cver_1',
+    documentId: 'cdoc_1',
+    versionNumber: 1,
+    status: 'published',
+    schemaVersion: 1,
+    subject: 'Update for {{event.title}}',
+    renderedHtml: '<p>Hello {{recipient.name}}</p>',
+    renderedText: 'Hello {{recipient.name}}',
+    contentJson: {},
+    variables: [],
+    validation: { valid: true, severity: 'warning', issues: [] },
+    createdBy: 'usr_1',
+    createdAt: '2026-06-01T00:00:00.000Z',
+    publishedAt: '2026-06-01T00:00:00.000Z',
+  } as Record<string, unknown> | undefined,
   destroy: vi.fn(),
 }));
 
@@ -121,13 +151,30 @@ vi.mock('@tixkit/db', () => {
     }
   }
 
+  class ContentRepository {
+    async findPublishedVersionById(input: {
+      tenantId: string;
+      brandId?: string;
+      versionId: string;
+      channel?: string;
+    }) {
+      const version = dbState.contentVersion;
+      const document = dbState.contentDocument;
+      if (!version || !document) return undefined;
+      if (version.id !== input.versionId) return undefined;
+      if (document.tenantId !== input.tenantId) return undefined;
+      if (input.brandId && document.brandId !== input.brandId) return undefined;
+      if (input.channel && document.channel !== input.channel) return undefined;
+      if (document.status !== 'published') return undefined;
+      if (version.status !== 'published') return undefined;
+      if (document.publishedVersionId !== version.id) return undefined;
+      return { document, version };
+    }
+  }
+
   return {
     createDb: () => db,
-    NotificationTemplateVersionRepository: class {
-      async findDefault() {
-        return undefined;
-      }
-    },
+    ContentRepository,
     EmailProviderRouteRepository,
     BrandSenderIdentityRepository,
     EmailJobRepository,
@@ -139,7 +186,9 @@ vi.mock('@tixkit/db', () => {
   };
 });
 
-const { sendEmailActivity, sendSmsActivity } = await import('../activities/notification.js');
+const { renderTemplateActivity, sendEmailActivity, sendSmsActivity } = await import(
+  '../activities/notification.js'
+);
 
 function activeEmailRoute(overrides: Record<string, unknown> = {}) {
   return {
@@ -189,7 +238,94 @@ describe('notification activity deliverability gating', () => {
     dbState.smsDeliveries = [];
     dbState.emailJobUpdates = [];
     dbState.smsJobUpdates = [];
+    dbState.contentDocument = {
+      id: 'cdoc_1',
+      tenantId: 'tnt_1',
+      organizationId: 'org_1',
+      brandId: 'brd_1',
+      channel: 'email',
+      key: 'event-update',
+      name: 'Event update',
+      status: 'published',
+      locale: 'en',
+      publishedVersionId: 'cver_1',
+      createdAt: '2026-06-01T00:00:00.000Z',
+      updatedAt: '2026-06-01T00:00:00.000Z',
+    };
+    dbState.contentVersion = {
+      id: 'cver_1',
+      documentId: 'cdoc_1',
+      versionNumber: 1,
+      status: 'published',
+      schemaVersion: 1,
+      subject: 'Update for {{event.title}}',
+      renderedHtml: '<p>Hello {{recipient.name}}</p>',
+      renderedText: 'Hello {{recipient.name}}',
+      contentJson: {},
+      variables: [],
+      validation: { valid: true, severity: 'warning', issues: [] },
+      createdBy: 'usr_1',
+      createdAt: '2026-06-01T00:00:00.000Z',
+      publishedAt: '2026-06-01T00:00:00.000Z',
+    };
     dbState.destroy.mockClear();
+  });
+
+  it('renders published content email versions through the shared renderer', async () => {
+    const result = await renderTemplateActivity({
+      tenantId: 'tnt_1',
+      brandId: 'brd_1',
+      templateKey: 'event-update',
+      templateVersionId: 'cver_1',
+      variables: {
+        event: { title: 'All Access' },
+        recipient: { name: '<script>alert(1)</script>' },
+      },
+    });
+
+    expect(result).toMatchObject({
+      ok: true,
+      value: {
+        subject: 'Update for All Access',
+        html: '<p>Hello &lt;script&gt;alert(1)&lt;/script&gt;</p>',
+        text: 'Hello <script>alert(1)</script>',
+      },
+    });
+  });
+
+  it('fails closed for stale content email versions', async () => {
+    dbState.contentDocument = {
+      ...dbState.contentDocument!,
+      publishedVersionId: 'cver_other',
+    };
+
+    const result = await renderTemplateActivity({
+      tenantId: 'tnt_1',
+      brandId: 'brd_1',
+      templateKey: 'event-update',
+      templateVersionId: 'cver_1',
+      variables: {},
+    });
+
+    expect(result).toMatchObject({
+      ok: false,
+      errorCode: 'CONTENT_TEMPLATE_NOT_PUBLISHED',
+      retryable: false,
+    });
+  });
+
+  it('fails closed when template rendering is requested without tenant scope', async () => {
+    const result = await renderTemplateActivity({
+      templateKey: 'event-update',
+      templateVersionId: 'ntv_1',
+      variables: {},
+    });
+
+    expect(result).toMatchObject({
+      ok: false,
+      errorCode: 'CONTENT_TEMPLATE_SCOPE_REQUIRED',
+      retryable: false,
+    });
   });
 
   it('fails closed when configured email routes lack smoke-send evidence', async () => {

@@ -1,6 +1,6 @@
 import { createDb } from '@tixkit/db';
 import {
-  NotificationTemplateVersionRepository,
+  ContentRepository,
   EmailProviderRouteRepository,
   BrandSenderIdentityRepository,
   EmailJobRepository,
@@ -23,25 +23,12 @@ import {
   ProviderRouteSelector,
   validateProviderFields,
 } from '@tixkit/email-transport';
+import { RENDER_CONTRACTS, renderContent } from '@tixkit/content-core';
 import type { EmailTransport } from '@tixkit/domain';
 import type { SmsTransport } from '@tixkit/domain/messaging';
-import { htmlEscape, plainTextEscape } from '@tixkit/domain/messaging';
 import { ulid } from 'ulid';
 import type { WorkflowActivityResult } from '../shared/types.js';
 import { okResult, errResult } from '../shared/types.js';
-
-function renderTemplateString(
-  template: string,
-  variables: Record<string, unknown>,
-  escape: 'html' | 'plain' = 'plain',
-): string {
-  const escaper = escape === 'html' ? htmlEscape : plainTextEscape;
-  return template.replace(/\{\{(\w+)\}\}/g, (_match, key: string) => {
-    const value = variables[key];
-    if (value === undefined || value === null) return '';
-    return escaper(String(value));
-  });
-}
 
 export async function checkSuppressionActivity(input: {
   email: string;
@@ -151,30 +138,46 @@ export async function checkSmsConsentActivity(input: {
 }
 
 export async function renderTemplateActivity(input: {
+  tenantId?: string;
+  brandId?: string;
   templateKey: string;
   templateVersionId: string;
   variables: Record<string, unknown>;
 }): Promise<WorkflowActivityResult<{ subject: string; html: string; text?: string }>> {
   const db = createDb();
   try {
-    const versionRepo = new NotificationTemplateVersionRepository(db);
-
-    const version = await versionRepo.findById(input.templateVersionId);
-
-    if (!version) {
-      return okResult({
-        subject: renderTemplateString('Tixkit Notification', input.variables, 'plain'),
-        html: renderTemplateString('<p>You have a new notification.</p>', input.variables, 'html'),
-        text: 'You have a new notification.',
-      });
+    if (!input.tenantId) {
+      return errResult(
+        'CONTENT_TEMPLATE_SCOPE_REQUIRED',
+        'Tenant scope is required to render a content template version',
+        false,
+      );
     }
-
+    const contentVersion = await new ContentRepository(db).findPublishedVersionById({
+      tenantId: input.tenantId,
+      brandId: input.brandId,
+      versionId: input.templateVersionId,
+      channel: 'email',
+    });
+    if (!contentVersion) {
+      return errResult(
+        'CONTENT_TEMPLATE_NOT_PUBLISHED',
+        `Published email content version not found: ${input.templateVersionId}`,
+        false,
+      );
+    }
+    const rendered = renderContent({
+      channel: 'email',
+      contract: RENDER_CONTRACTS.email,
+      subject: contentVersion.version.subject,
+      html: contentVersion.version.renderedHtml,
+      text: contentVersion.version.renderedText,
+      context: input.variables,
+    });
     return okResult({
-      subject: renderTemplateString(version.subject_template, input.variables, 'plain'),
-      html: renderTemplateString(version.html_template, input.variables, 'html'),
-      text: version.text_template
-        ? renderTemplateString(version.text_template, input.variables, 'plain')
-        : undefined,
+      subject: rendered.subject ?? '',
+      html: rendered.html ?? '',
+      text: rendered.text,
     });
   } catch (err) {
     return errResult(

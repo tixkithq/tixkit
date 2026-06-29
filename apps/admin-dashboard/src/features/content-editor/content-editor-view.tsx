@@ -3,20 +3,30 @@
 import * as React from 'react';
 import { toast } from 'sonner';
 import { ContentEditorShell } from '@tixkit/content-editor-shell';
+import type { ContentEditorPreview } from '@tixkit/content-editor-shell';
 import {
   createContentEditorRouteFixture,
   type ContentEditorRouteKind,
 } from './fixture-adapters';
 
 export function ContentEditorView({
+  actionsUnavailableReason,
   eventId,
   kind,
+  preview,
 }: {
+  actionsUnavailableReason?: string;
   eventId: string;
   kind: ContentEditorRouteKind;
+  preview?: ContentEditorPreview;
 }) {
   const [autosave, setAutosave] = React.useState<'saved' | 'saving' | 'error'>('saved');
-  const fixture = createContentEditorRouteFixture(kind, { eventId, autosave });
+  const fixture = createContentEditorRouteFixture(kind, {
+    actionsUnavailableReason,
+    eventId,
+    autosave,
+    preview,
+  });
 
   const unavailable = () => {
     setAutosave('error');

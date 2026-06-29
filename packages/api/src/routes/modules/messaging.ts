@@ -1,6 +1,7 @@
 import type { FastifyPluginAsync } from 'fastify';
 import {
   type Database,
+  ContentRepository,
   EmailDeliveryRepository,
   EmailJobRepository,
   EmailProviderEventRepository,
@@ -8,8 +9,6 @@ import {
   EmailSuppressionRepository,
   EventRepository,
   MessageConsentRepository,
-  NotificationTemplateRepository,
-  NotificationTemplateVersionRepository,
   SmsDeliveryRepository,
   SmsJobRepository,
   SmsProviderEventRepository,
@@ -441,19 +440,19 @@ export const messagingRoutes: FastifyPluginAsync = async (app) => {
         let queuedEmailJobs: QueuedEmailJob[] = [];
         const queuedSmsJobIds: string[] = [];
         if (body.channel === 'email' || body.channel === 'both') {
-          const template = await new NotificationTemplateRepository(db).findByKeyForBrand(
-            principal.tenantId,
-            body.templateKey,
-            event.brand_id,
+          const publishedContentTemplate = await new ContentRepository(db).findPublishedEmailTemplate(
+            {
+              tenantId: principal.tenantId,
+              brandId: event.brand_id,
+              eventId,
+              key: body.templateKey,
+            },
           );
-          if (!template) {
-            throw new ValidationError(`Notification template not found: ${body.templateKey}`);
-          }
-          const templateVersion = await new NotificationTemplateVersionRepository(db).findDefault(
-            template.id,
-          );
-          if (!templateVersion) {
-            throw new ValidationError(`Default template version not found: ${body.templateKey}`);
+          const templateVersionId = publishedContentTemplate?.version.id;
+          if (!templateVersionId) {
+            throw new ValidationError(
+              `Published email content template not found: ${body.templateKey}`,
+            );
           }
           const emailRoutes = await new EmailProviderRouteRepository(db).findActiveByBrand(
             event.brand_id,
@@ -483,7 +482,7 @@ export const messagingRoutes: FastifyPluginAsync = async (app) => {
                       tenantId: principal.tenantId,
                       brandId: event.brand_id,
                       templateKey: body.templateKey,
-                      templateVersionId: templateVersion.id,
+                      templateVersionId,
                       toEmail: attendee.email,
                       toName: attendeeName(attendee),
                       variables: {
@@ -512,7 +511,7 @@ export const messagingRoutes: FastifyPluginAsync = async (app) => {
                     tenantId: principal.tenantId,
                     brandId: event.brand_id,
                     templateKey: body.templateKey,
-                    templateVersionId: templateVersion.id,
+                    templateVersionId,
                     toEmail: attendee.email,
                     toName:
                       [attendee.first_name, attendee.last_name].filter(Boolean).join(' ') ||
@@ -532,7 +531,7 @@ export const messagingRoutes: FastifyPluginAsync = async (app) => {
                     jobId: job.id,
                     toEmail: attendee.email,
                     toName: attendeeName(attendee),
-                    templateVersionId: templateVersion.id,
+                    templateVersionId,
                     providerRouteId: emailRoute.id,
                     variables: {
                       ...variables,

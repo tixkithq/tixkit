@@ -18,6 +18,7 @@
     "react-dom": "^19.2.0",
     "@clerk/nextjs": "^7.5.0",
     "@tixkit/content-core": "workspace:*",
+    "@tixkit/content-email": "workspace:*",
     "@tixkit/content-editor-shell": "workspace:*",
     "@tixkit/js": "workspace:*",
     "@tixkit/next": "workspace:*",

@@ -18,6 +18,7 @@
     "clean": "rm -rf dist"
   },
   "dependencies": {
+    "@tixkit/content-core": "workspace:*",
     "@tixkit/db": "workspace:*",
     "@tixkit/domain": "workspace:*",
     "@tixkit/email-transport": "workspace:*",

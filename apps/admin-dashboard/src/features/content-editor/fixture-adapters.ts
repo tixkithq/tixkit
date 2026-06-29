@@ -2,6 +2,7 @@ import {
   createContentEditorFixture,
   fixtureChannelLabel,
   type ContentEditorAutosaveState,
+  type ContentEditorPreview,
 } from '@tixkit/content-editor-shell';
 import type { ContentChannel } from '@tixkit/content-core';
 
@@ -27,7 +28,12 @@ export function contentChannelFromRoute(kind: ContentEditorRouteKind): ContentCh
 
 export function createContentEditorRouteFixture(
   kind: ContentEditorRouteKind,
-  options: { eventId: string; autosave?: ContentEditorAutosaveState } = { eventId: 'evt_demo_001' },
+  options: {
+    eventId: string;
+    autosave?: ContentEditorAutosaveState;
+    preview?: ContentEditorPreview;
+    actionsUnavailableReason?: string;
+  } = { eventId: 'evt_demo_001' },
 ): ContentEditorFixtureAdapter {
   const channel = contentChannelFromRoute(kind);
   const fixture = createContentEditorFixture({
@@ -38,10 +44,13 @@ export function createContentEditorRouteFixture(
 
   return {
     ...fixture,
+    preview: options.preview ?? fixture.preview,
     channelLabel: fixtureChannelLabel(channel),
     routeTitle: titleForKind(kind),
     routeDescription: descriptionForKind(kind),
-    actionsUnavailableReason: 'Fixture editor: publish and test-send connect when channel adapters land.',
+    actionsUnavailableReason:
+      options.actionsUnavailableReason ??
+      'Fixture editor: publish and test-send connect when channel adapters land.',
   };
 }
 
@@ -61,7 +70,7 @@ function descriptionForKind(kind: ContentEditorRouteKind): string {
     case 'event-page':
       return 'Build the hosted event page shell with canvas, inserts, preview, and blockers.';
     case 'email':
-      return 'Build the email authoring shell before the React Email adapter lands.';
+      return 'Author email templates with React Email export and Tixkit publish blockers.';
     case 'sms':
       return 'Build the SMS authoring shell before compliance and segment adapters land.';
   }
