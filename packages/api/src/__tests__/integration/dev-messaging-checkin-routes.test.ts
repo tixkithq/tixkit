@@ -3,6 +3,7 @@ import rateLimit from '@fastify/rate-limit';
 import { describe, expect, it, vi } from 'vitest';
 import type { Principal } from '@tixkit/domain';
 import type { Database } from '@tixkit/db';
+import { createDefaultSmsTemplate } from '@tixkit/content-message';
 import type { AppContext } from '../../app.js';
 import { developerRoutes } from '../../routes/modules/developer.js';
 import { tenantRoutes } from '../../routes/modules/tenant.js';
@@ -177,6 +178,55 @@ function makePrincipal(overrides: Partial<Principal> = {}): Principal {
       'reports.read',
     ],
     ...overrides,
+  };
+}
+
+function publishedSmsContentRows(now: Date) {
+  return {
+    document: {
+      id: 'cdoc_sms_1',
+      tenant_id: 'tnt_1',
+      organization_id: 'org_1',
+      brand_id: 'brd_1',
+      event_id: 'evt_1',
+      channel: 'sms',
+      key: 'attendee-message',
+      name: 'Attendee SMS',
+      status: 'published',
+      locale: 'en',
+      current_draft_version_id: null,
+      published_version_id: 'cver_sms_1',
+      created_at: now,
+      updated_at: now,
+    },
+    version: {
+      id: 'cver_sms_1',
+      document_id: 'cdoc_sms_1',
+      version_number: 1,
+      status: 'published',
+      schema_version: 1,
+      subject: null,
+      preview_text: null,
+      content_json: JSON.stringify(
+        createDefaultSmsTemplate({
+          editor: { body: 'Hi {{recipient.name}}, {{event.title}} starts {{event.startsAt}}.' },
+          settings: {
+            templateKey: 'attendee-message',
+            category: 'bulk',
+            consentCategory: 'marketing',
+            segmentLimit: 3,
+            optOutText: 'Reply STOP to opt out',
+          },
+        }),
+      ),
+      rendered_html: null,
+      rendered_text: 'Hi {{recipient.name}}, {{event.title}} starts {{event.startsAt}}.',
+      variables: '[]',
+      validation: '{"valid":true,"severity":"warning","issues":[]}',
+      created_by: 'usr_1',
+      created_at: now,
+      published_at: now,
+    },
   };
 }
 
@@ -1786,6 +1836,8 @@ describe('public access code validation', () => {
 
 describe('messaging endpoint', () => {
   it('POST /events/:eventId/messages queues real SMS jobs and starts delivery workflows', async () => {
+    const now = new Date();
+    const smsContent = publishedSmsContentRows(now);
     const tables = {
       events: [
         {
@@ -1857,13 +1909,21 @@ describe('messaging endpoint', () => {
           updated_at: new Date(),
         },
       ],
+      content_documents: [smsContent.document],
+      content_document_versions: [smsContent.version],
+      sms_jobs: [],
     };
     const app = await setupApp(messagingRoutes, makePrincipal(), tables);
     const res = await app.inject({
       method: 'POST',
       url: '/events/evt_1/messages',
       headers: { 'Idempotency-Key': 'msg_test_1' },
-      payload: { templateKey: 'attendee-message', audience: 'all', channel: 'sms' },
+      payload: {
+        templateKey: 'attendee-message',
+        audience: 'all',
+        channel: 'sms',
+        variables: { body: 'Update' },
+      },
     });
     expect(res.statusCode).toBe(202);
     expect(res.json()).toMatchObject({
@@ -1871,10 +1931,13 @@ describe('messaging endpoint', () => {
       queuedSmsJobs: 1,
       queuedEmailJobs: 0,
     });
+    expect((tables.sms_jobs as Array<{ body: string }>)[0].body).toContain('Hi Ada Lovelace, Event starts');
     await app.close();
   });
 
   it('POST /events/:eventId/messages persists consent exclusions without starting delivery workflows', async () => {
+    const now = new Date();
+    const smsContent = publishedSmsContentRows(now);
     const tables = {
       events: [
         {
@@ -1947,6 +2010,8 @@ describe('messaging endpoint', () => {
         },
       ],
       sms_jobs: [],
+      content_documents: [smsContent.document],
+      content_document_versions: [smsContent.version],
     };
     const app = await setupApp(messagingRoutes, makePrincipal(), tables);
     const res = await app.inject({
@@ -2327,6 +2392,7 @@ describe('messaging endpoint', () => {
 
   it('POST /events/:eventId/messages/preview and send share mixed-channel eligibility decisions', async () => {
     const now = new Date();
+    const smsContent = publishedSmsContentRows(now);
     const tables = {
       events: [
         {
@@ -2396,6 +2462,7 @@ describe('messaging endpoint', () => {
           created_at: now,
           updated_at: now,
         },
+        smsContent.document,
       ],
       content_document_versions: [
         {
@@ -2415,6 +2482,7 @@ describe('messaging endpoint', () => {
           created_at: now,
           published_at: now,
         },
+        smsContent.version,
       ],
       email_provider_routes: [
         {

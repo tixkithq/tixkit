@@ -214,6 +214,63 @@ export const openApiSpec = {
           'createdAt',
         ],
       },
+      SmsTemplateDocument: {
+        type: 'object',
+        description: 'Canonical SMS template JSON for sms content document versions.',
+        properties: {
+          schemaVersion: { type: 'integer', enum: [1] },
+          editor: {
+            type: 'object',
+            properties: {
+              provider: {
+                type: 'string',
+                enum: ['@tixkit/content-message/sms-composer'],
+              },
+              body: { type: 'string' },
+            },
+            required: ['provider', 'body'],
+          },
+          settings: {
+            type: 'object',
+            properties: {
+              templateKey: { type: 'string' },
+              locale: { type: 'string' },
+              category: {
+                type: 'string',
+                enum: ['transactional', 'bulk', 'staff', 'system'],
+              },
+              consentCategory: {
+                type: 'string',
+                enum: ['transactional', 'marketing', 'staff', 'system'],
+              },
+              segmentLimit: { type: 'integer', minimum: 1 },
+              estimatedCostPerSegmentCents: { type: 'integer', minimum: 0 },
+              optOutText: { type: 'string' },
+            },
+            required: [
+              'templateKey',
+              'locale',
+              'category',
+              'consentCategory',
+              'segmentLimit',
+              'estimatedCostPerSegmentCents',
+            ],
+          },
+          shortLinks: {
+            type: 'array',
+            items: {
+              type: 'object',
+              properties: {
+                originalUrl: { type: 'string' },
+                reason: { type: 'string', enum: ['long_url', 'unsafe_url'] },
+                field: { type: 'string' },
+              },
+              required: ['originalUrl', 'reason', 'field'],
+            },
+          },
+        },
+        required: ['schemaVersion', 'editor', 'settings', 'shortLinks'],
+      },
       PublicContentPage: {
         type: 'object',
         properties: {
@@ -322,16 +379,7 @@ export const openApiSpec = {
           subject: { type: 'string' },
           html: { type: 'string' },
           text: { type: 'string' },
-          segments: {
-            type: 'object',
-            properties: {
-              segments: { type: 'integer' },
-              encoding: { type: 'string' },
-              charsPerSegment: { type: 'integer' },
-              unitsUsed: { type: 'integer' },
-              remaining: { type: 'integer' },
-            },
-          },
+          segments: { type: 'integer', description: 'SMS segment count when channel is sms.' },
         },
       },
       ContentPreview: {
@@ -5415,7 +5463,12 @@ export const openApiSpec = {
                 properties: {
                   subject: { type: 'string' },
                   previewText: { type: 'string' },
-                  contentJson: { type: 'object', additionalProperties: true },
+                  contentJson: {
+                    oneOf: [
+                      { $ref: '#/components/schemas/SmsTemplateDocument' },
+                      { type: 'object', additionalProperties: true },
+                    ],
+                  },
                   renderedHtml: { type: 'string' },
                   renderedText: { type: 'string' },
                 },
@@ -5451,7 +5504,12 @@ export const openApiSpec = {
                   subject: { type: 'string' },
                   renderedHtml: { type: 'string' },
                   renderedText: { type: 'string' },
-                  contentJson: { type: 'object', additionalProperties: true },
+                  contentJson: {
+                    oneOf: [
+                      { $ref: '#/components/schemas/SmsTemplateDocument' },
+                      { type: 'object', additionalProperties: true },
+                    ],
+                  },
                   context: { type: 'object', additionalProperties: true },
                   optOutToken: { type: 'string' },
                 },

@@ -178,6 +178,28 @@ export class ContentRepository extends BaseRepository {
     );
   }
 
+  async findPublishedSmsTemplate(input: {
+    tenantId: string;
+    brandId: string;
+    key: string;
+    eventId?: string;
+    locale?: string;
+  }): Promise<
+    | {
+        document: ContentDocumentRecord;
+        version: ContentDocumentVersion;
+      }
+    | undefined
+  > {
+    const eventScoped = input.eventId
+      ? await this.findPublishedContentByScope({ ...input, channel: 'sms', eventId: input.eventId })
+      : undefined;
+    return (
+      eventScoped ??
+      (await this.findPublishedContentByScope({ ...input, channel: 'sms', eventId: undefined }))
+    );
+  }
+
   async findPublishedVersionById(input: {
     tenantId: string;
     versionId: string;

@@ -403,13 +403,7 @@ export type ContentRenderOutput = {
   subject?: string;
   html?: string;
   text?: string;
-  segments?: {
-    segments: number;
-    encoding: string;
-    charsPerSegment: number;
-    unitsUsed: number;
-    remaining: number;
-  };
+  segments?: number;
 };
 
 export type ContentPreview = {
@@ -494,9 +488,31 @@ export type CreateContentDocumentInput = {
 export type SaveContentVersionInput = {
   subject?: string;
   previewText?: string;
-  contentJson?: unknown;
+  contentJson?: unknown | SmsTemplateDocument;
   renderedHtml?: string;
   renderedText?: string;
+};
+
+export type SmsTemplateDocument = {
+  schemaVersion: 1;
+  editor: {
+    provider: '@tixkit/content-message/sms-composer';
+    body: string;
+  };
+  settings: {
+    templateKey: string;
+    locale: string;
+    category: 'transactional' | 'bulk' | 'staff' | 'system';
+    consentCategory: 'transactional' | 'marketing' | 'staff' | 'system';
+    segmentLimit: number;
+    estimatedCostPerSegmentCents: number;
+    optOutText?: string;
+  };
+  shortLinks: Array<{
+    originalUrl: string;
+    reason: 'long_url' | 'unsafe_url';
+    field: string;
+  }>;
 };
 
 export type Order = {
@@ -1241,31 +1257,28 @@ export class TixkitClient {
         const controller = new AbortController();
         const timeoutId = setTimeout(() => controller.abort(), this.timeout);
 
-        // eslint-disable-next-line no-await-in-loop -- retries must run sequentially so backoff and previous response state are respected.
-        const response = await fetch(url.toString(), {
-          method,
-          headers,
-          body: options?.body ? JSON.stringify(options.body) : undefined,
-          signal: controller.signal,
-        });
+        let response: Response;
+        let responseText: string;
+        try {
+          // eslint-disable-next-line no-await-in-loop -- retries must run sequentially so backoff and previous response state are respected.
+          response = await fetch(url.toString(), {
+            method,
+            headers,
+            body: options?.body === undefined ? undefined : JSON.stringify(options.body),
+            signal: controller.signal,
+          });
 
-        clearTimeout(timeoutId);
-
-        // eslint-disable-next-line no-await-in-loop -- each retry attempt must consume its own response before deciding whether to retry.
-        const responseText = await response.text();
-        const data = responseText ? JSON.parse(responseText) : null;
-
-        if (!response.ok) {
-          const error = data as TixkitError;
-          throw new TixkitApiError(
-            error.error.code,
-            error.error.message,
-            response.status,
-            error.error.requestId,
-            error.error.details,
-          );
+          // eslint-disable-next-line no-await-in-loop -- each retry attempt must consume its own response before deciding whether to retry.
+          responseText = await response.text();
+        } finally {
+          clearTimeout(timeoutId);
         }
 
+        if (!response.ok) {
+          throw createApiErrorFromResponse(response.status, parseErrorResponse(responseText));
+        }
+
+        const data = responseText ? JSON.parse(responseText) : null;
         return data as T;
       } catch (err) {
         lastError = err instanceof Error ? err : new Error(String(err));
@@ -1305,6 +1318,33 @@ function looksLikeSecretApiKey(value: string): boolean {
 
 function isSafeMethod(method: string): boolean {
   return method === 'GET' || method === 'HEAD' || method === 'OPTIONS';
+}
+
+function parseErrorResponse(responseText: string): unknown {
+  if (!responseText) return null;
+
+  try {
+    return JSON.parse(responseText);
+  } catch {
+    return null;
+  }
+}
+
+function createApiErrorFromResponse(statusCode: number, data: unknown): TixkitApiError {
+  const error = isRecord(data) && isRecord(data.error) ? data.error : undefined;
+  const code = typeof error?.code === 'string' && error.code ? error.code : `HTTP_${statusCode}`;
+  const message =
+    typeof error?.message === 'string' && error.message
+      ? error.message
+      : `Request failed with status ${statusCode}`;
+  const requestId = typeof error?.requestId === 'string' ? error.requestId : '';
+  const details = isRecord(error?.details) ? error.details : undefined;
+
+  return new TixkitApiError(code, message, statusCode, requestId, details);
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
 function paginationParams(

@@ -21,6 +21,7 @@
     "@tixkit/content-email": "workspace:*",
     "@tixkit/content-event-page": "workspace:*",
     "@tixkit/content-editor-shell": "workspace:*",
+    "@tixkit/content-message": "workspace:*",
     "@tixkit/js": "workspace:*",
     "@tixkit/next": "workspace:*",
     "@hookform/resolvers": "^5.2.2",

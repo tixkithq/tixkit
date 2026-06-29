@@ -44,7 +44,7 @@ test.describe('admin content editor shell', () => {
       {
         path: `/events/${fixtureEventId}/content/sms`,
         heading: 'SMS template editor',
-        preview: 'Sample SMS',
+        preview: 'SMS compliance preview',
         name: 'sms',
       },
     ] as const;

@@ -172,6 +172,20 @@ describe('openApiSpec', () => {
     expect(openApiSpec.components.schemas.ContentDocumentVersion.properties.validation).toEqual({
       $ref: '#/components/schemas/ContentValidationResult',
     });
+    expect(openApiSpec.components.schemas.ContentRenderOutput.properties.segments).toMatchObject({
+      type: 'integer',
+    });
+    expect(openApiSpec.components.schemas.SmsTemplateDocument.properties.editor.properties.provider.enum).toEqual([
+      '@tixkit/content-message/sms-composer',
+    ]);
+    expect(
+      openApiSpec.paths['/content-documents/{documentId}/versions'].post.requestBody.content[
+        'application/json'
+      ].schema.properties.contentJson.oneOf,
+    ).toEqual([
+      { $ref: '#/components/schemas/SmsTemplateDocument' },
+      { type: 'object', additionalProperties: true },
+    ]);
     expect(
       openApiSpec.paths['/content-documents'].post.responses['400'].description,
     ).toContain('unavailable');

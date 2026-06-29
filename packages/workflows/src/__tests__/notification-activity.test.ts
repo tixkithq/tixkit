@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { createDefaultSmsTemplate } from '@tixkit/content-message';
 
 const dbState = vi.hoisted(() => ({
   emailJob: {
@@ -289,6 +290,51 @@ describe('notification activity deliverability gating', () => {
         subject: 'Update for All Access',
         html: '<p>Hello &lt;script&gt;alert(1)&lt;/script&gt;</p>',
         text: 'Hello <script>alert(1)</script>',
+      },
+    });
+  });
+
+  it('renders published content SMS versions through the SMS adapter', async () => {
+    dbState.contentDocument = {
+      ...dbState.contentDocument!,
+      channel: 'sms',
+    };
+    dbState.contentVersion = {
+      ...dbState.contentVersion!,
+      subject: null,
+      renderedHtml: null,
+      renderedText: 'Hi {{recipient.name}}, {{event.title}} starts {{event.startsAt}}.',
+      contentJson: createDefaultSmsTemplate({
+        editor: { body: 'Hi {{recipient.name}}, {{event.title}} starts {{event.startsAt}}.' },
+        settings: {
+          templateKey: 'event-update',
+          category: 'bulk',
+          consentCategory: 'marketing',
+          segmentLimit: 2,
+          optOutText: 'Reply STOP to opt out',
+        },
+      }),
+    };
+
+    const result = await renderTemplateActivity({
+      tenantId: 'tnt_1',
+      brandId: 'brd_1',
+      channel: 'sms',
+      templateKey: 'event-update',
+      templateVersionId: 'cver_1',
+      variables: {
+        event: { title: 'All Access', startsAt: '2026-07-17 19:00' },
+        recipient: { name: 'Ada' },
+      },
+    });
+
+    expect(result).toMatchObject({
+      ok: true,
+      value: {
+        subject: '',
+        html: '',
+        text: 'Hi Ada, All Access starts 2026-07-17 19:00. Reply STOP to opt out',
+        segments: 1,
       },
     });
   });

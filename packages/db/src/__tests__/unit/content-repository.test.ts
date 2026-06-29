@@ -195,6 +195,36 @@ describe('ContentRepository', () => {
     expect(whereCalls.content_documents).toContainEqual(['event_id', 'is', null]);
   });
 
+  it('resolves event-scoped published SMS templates without using email content', async () => {
+    const { db, whereCalls } = createContentLookupDb({
+      documents: [
+        publishedDocument(),
+        publishedDocument({
+          id: 'cdoc_sms',
+          event_id: 'evt_1',
+          channel: 'sms',
+          published_version_id: 'cver_sms',
+        }),
+      ],
+      versions: [
+        publishedVersion(),
+        publishedVersion({ id: 'cver_sms', document_id: 'cdoc_sms', rendered_text: 'SMS update' }),
+      ],
+    });
+
+    const result = await new ContentRepository(db).findPublishedSmsTemplate({
+      tenantId: 'tnt_1',
+      brandId: 'brd_1',
+      eventId: 'evt_1',
+      key: 'event-update',
+    });
+
+    expect(result?.document.id).toBe('cdoc_sms');
+    expect(result?.version.id).toBe('cver_sms');
+    expect(whereCalls.content_documents).toContainEqual(['channel', '=', 'sms']);
+    expect(whereCalls.content_documents).not.toContainEqual(['channel', '=', 'email']);
+  });
+
   it('rejects draft or stale content versions at render lookup time', async () => {
     const { db } = createContentLookupDb({
       documents: [publishedDocument({ published_version_id: 'cver_current' })],

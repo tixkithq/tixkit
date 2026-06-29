@@ -48,6 +48,7 @@
         "@tixkit/content-editor-shell": "workspace:*",
         "@tixkit/content-email": "workspace:*",
         "@tixkit/content-event-page": "workspace:*",
+        "@tixkit/content-message": "workspace:*",
         "@tixkit/js": "workspace:*",
         "@tixkit/next": "workspace:*",
         "class-variance-authority": "^0.7.1",
@@ -225,6 +226,7 @@
         "@temporalio/interceptors-opentelemetry": "^1.18.1",
         "@tixkit/content-core": "workspace:*",
         "@tixkit/content-event-page": "workspace:*",
+        "@tixkit/content-message": "workspace:*",
         "@tixkit/db": "workspace:*",
         "@tixkit/domain": "workspace:*",
         "@tixkit/shared": "workspace:*",
@@ -321,6 +323,18 @@
       "devDependencies": {
         "typescript": "6.0.3",
         "vitest": "^4.1.0",
+      },
+    },
+    "packages/content-message": {
+      "name": "@tixkit/content-message",
+      "version": "0.1.0",
+      "dependencies": {
+        "@tixkit/content-core": "workspace:*",
+        "@tixkit/domain": "workspace:*",
+      },
+      "devDependencies": {
+        "typescript": "6.0.3",
+        "vitest": "^4.1.9",
       },
     },
     "packages/db": {
@@ -507,6 +521,7 @@
         "@temporalio/worker": "^1.18.0",
         "@temporalio/workflow": "^1.18.0",
         "@tixkit/content-core": "workspace:*",
+        "@tixkit/content-message": "workspace:*",
         "@tixkit/db": "workspace:*",
         "@tixkit/domain": "workspace:*",
         "@tixkit/email-transport": "workspace:*",
@@ -2217,6 +2232,8 @@
     "@tixkit/content-email": ["@tixkit/content-email@workspace:packages/content-email"],
 
     "@tixkit/content-event-page": ["@tixkit/content-event-page@workspace:packages/content-event-page"],
+
+    "@tixkit/content-message": ["@tixkit/content-message@workspace:packages/content-message"],
 
     "@tixkit/db": ["@tixkit/db@workspace:packages/db"],
 

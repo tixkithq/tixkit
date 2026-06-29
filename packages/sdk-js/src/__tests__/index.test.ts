@@ -76,6 +76,51 @@ describe('TixkitClient', () => {
     expect(error.name).toBe('TixkitApiError');
   });
 
+  it('wraps empty API error responses with HTTP status details', async () => {
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+      new Response(null, {
+        status: 502,
+        headers: { 'Content-Type': 'application/json' },
+      }),
+    );
+
+    const client = new TixkitClient({
+      apiBaseUrl: 'https://api.test',
+      maxRetries: 0,
+    });
+
+    await expect(client.events.list()).rejects.toMatchObject({
+      name: 'TixkitApiError',
+      code: 'HTTP_502',
+      message: 'Request failed with status 502',
+      statusCode: 502,
+      requestId: '',
+    });
+  });
+
+  it('wraps malformed API error responses without losing client-error status', async () => {
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+      new Response('upstream gateway error', {
+        status: 400,
+        headers: { 'Content-Type': 'text/plain' },
+      }),
+    );
+
+    const client = new TixkitClient({
+      apiBaseUrl: 'https://api.test',
+      maxRetries: 3,
+    });
+
+    await expect(client.events.list()).rejects.toMatchObject({
+      name: 'TixkitApiError',
+      code: 'HTTP_400',
+      message: 'Request failed with status 400',
+      statusCode: 400,
+      requestId: '',
+    });
+    expect(globalThis.fetch).toHaveBeenCalledTimes(1);
+  });
+
   it('sends caller supplied checkout idempotency key only as a header', async () => {
     const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue(
       new Response(
@@ -876,8 +921,8 @@ describe('TixkitClient new resource methods', () => {
 
   it('content preview and public content page use documented paths', async () => {
     const fm = mockFetch(200, {
-      channel: 'email',
-      output: { subject: 'Hi Ada' },
+      channel: 'sms',
+      output: { text: 'Hi Ada', segments: 1 },
       validation: { valid: true, severity: 'warning', issues: [] },
     });
     const c = new TixkitClient({
@@ -888,6 +933,23 @@ describe('TixkitClient new resource methods', () => {
 
     await c.content.preview('cdoc_1', {
       versionId: 'cver_1',
+      contentJson: {
+        schemaVersion: 1,
+        editor: {
+          provider: '@tixkit/content-message/sms-composer',
+          body: 'Hi {{recipient.name}}',
+        },
+        settings: {
+          templateKey: 'attendee-message',
+          locale: 'en',
+          category: 'bulk',
+          consentCategory: 'marketing',
+          segmentLimit: 3,
+          estimatedCostPerSegmentCents: 2,
+          optOutText: 'Reply STOP to opt out',
+        },
+        shortLinks: [],
+      },
       context: { buyer: { first_name: 'Ada' } },
     });
     expect(getCall(fm, 0).url).toBe('https://api.test/v1/content-documents/cdoc_1/preview');
