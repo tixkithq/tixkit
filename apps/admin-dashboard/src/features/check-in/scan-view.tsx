@@ -5,6 +5,7 @@ import { QrCode, Search, CheckCircle2, XCircle, AlertCircle } from 'lucide-react
 import { type AdminCheckInList, type CheckInScanResult, adminApi } from '@/lib/api';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { EmptyState } from '@/components/empty-state';
 import { ApiErrorState } from '@/components/api-error-state';
@@ -28,6 +29,9 @@ export function CheckInView() {
   const [scanning, setScanning] = React.useState(false);
   const [lastResult, setLastResult] = React.useState<CheckInScanResult | null>(null);
   const [manualSearch, setManualSearch] = React.useState('');
+  const eventSelectLabelId = React.useId();
+  const checkInListLabelId = React.useId();
+  const ticketInputId = React.useId();
 
   const {
     data: eventsData,
@@ -56,10 +60,16 @@ export function CheckInView() {
   );
 
   const checkInLists = checkInListsData ?? EMPTY_CHECK_IN_LISTS;
+  const trimmedQrPayload = qrPayload.trim();
+  const canScan =
+    Boolean(selectedEventId && selectedCheckInListId && trimmedQrPayload) && !scanning;
 
   // Reset the selected check-in list whenever the event changes.
   React.useEffect(() => {
     setSelectedCheckInListId('');
+    setQrPayload('');
+    setLastResult(null);
+    setManualSearch('');
   }, [selectedEventId]);
 
   // Auto-select the only active check-in list when one is available.
@@ -70,24 +80,33 @@ export function CheckInView() {
   }, [checkInLists, selectedCheckInListId]);
 
   const handleScan = async () => {
-    if (!selectedEventId || !selectedCheckInListId || !qrPayload) return;
+    if (!selectedEventId || !selectedCheckInListId || !trimmedQrPayload || scanning) return;
     setScanning(true);
-    const result = await adminApi.scanTicket({
-      eventId: selectedEventId,
-      checkInListId: selectedCheckInListId,
-      qrPayload,
-      scannedAt: new Date().toISOString(),
-    });
-    setScanning(false);
-    if (result.ok) {
-      setLastResult(result.data);
-      setQrPayload('');
-    } else {
-      setLastResult({
-        status: 'invalid',
-        message: result.error.message,
+    try {
+      const result = await adminApi.scanTicket({
+        eventId: selectedEventId,
+        checkInListId: selectedCheckInListId,
+        qrPayload: trimmedQrPayload,
         scannedAt: new Date().toISOString(),
       });
+      if (result.ok) {
+        setLastResult(result.data);
+        setQrPayload('');
+      } else {
+        setLastResult({
+          status: 'invalid',
+          message: result.error.message,
+          scannedAt: new Date().toISOString(),
+        });
+      }
+    } catch (error) {
+      setLastResult({
+        status: 'invalid',
+        message: error instanceof Error ? error.message : 'Unable to scan this ticket.',
+        scannedAt: new Date().toISOString(),
+      });
+    } finally {
+      setScanning(false);
     }
   };
 
@@ -117,9 +136,9 @@ export function CheckInView() {
   return (
     <div className="space-y-6">
       <div className="flex flex-col gap-2">
-        <span className="text-sm font-medium">Select Event</span>
+        <Label id={eventSelectLabelId}>Select Event</Label>
         <Select value={selectedEventId} onValueChange={setSelectedEventId}>
-          <SelectTrigger className="w-full max-w-xs" aria-label="Event">
+          <SelectTrigger className="w-full max-w-xs" aria-labelledby={eventSelectLabelId}>
             <SelectValue placeholder="Choose an event" />
           </SelectTrigger>
           <SelectContent>
@@ -134,7 +153,7 @@ export function CheckInView() {
 
       {selectedEventId && (
         <div className="flex flex-col gap-2">
-          <span className="text-sm font-medium">Check-in List</span>
+          <Label id={checkInListLabelId}>Check-in List</Label>
           {checkInListsLoading ? (
             <Skeleton className="h-10 w-full max-w-xs" />
           ) : checkInListsError ? (
@@ -149,7 +168,7 @@ export function CheckInView() {
             </p>
           ) : (
             <Select value={selectedCheckInListId} onValueChange={setSelectedCheckInListId}>
-              <SelectTrigger className="w-full max-w-xs" aria-label="Check-in list">
+              <SelectTrigger className="w-full max-w-xs" aria-labelledby={checkInListLabelId}>
                 <SelectValue placeholder="Choose a check-in list" />
               </SelectTrigger>
               <SelectContent>
@@ -174,22 +193,28 @@ export function CheckInView() {
               </CardTitle>
             </CardHeader>
             <CardContent className="space-y-4">
-              <div className="flex gap-2">
+              <form
+                className="flex flex-col gap-2 sm:flex-row"
+                onSubmit={(submitEvent) => {
+                  submitEvent.preventDefault();
+                  void handleScan();
+                }}
+              >
+                <Label htmlFor={ticketInputId} className="sr-only">
+                  Ticket QR or ID
+                </Label>
                 <Input
+                  id={ticketInputId}
+                  autoComplete="off"
+                  inputMode="text"
                   placeholder="Enter QR code or ticket ID"
                   value={qrPayload}
                   onChange={(e) => setQrPayload(e.target.value)}
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter') handleScan();
-                  }}
                 />
-                <Button
-                  onClick={handleScan}
-                  disabled={scanning || !qrPayload || !selectedCheckInListId}
-                >
+                <Button type="submit" disabled={!canScan} aria-busy={scanning}>
                   {scanning ? 'Scanning...' : 'Scan'}
                 </Button>
-              </div>
+              </form>
               {lastResult && <ScanResult result={lastResult} />}
             </CardContent>
           </Card>
@@ -261,29 +286,37 @@ function ScanResult({ result }: { result: CheckInScanResult }) {
       icon: AlertCircle,
       className: 'border-amber-500/30 bg-amber-500/10 text-amber-700 dark:text-amber-400',
     },
+    wrong_list: {
+      icon: AlertCircle,
+      className: 'border-amber-500/30 bg-amber-500/10 text-amber-700 dark:text-amber-400',
+    },
   };
 
   const { icon: Icon, className } = config[result.status];
 
   return (
-    <div className={cn('flex items-start gap-3 rounded-lg border p-4', className)}>
-      <Icon className="mt-0.5 size-5 shrink-0" />
-      <div className="space-y-1">
-        <p className="font-medium capitalize">{result.status.replace('_', ' ')}</p>
-        <p className="text-sm">
+    <output
+      aria-live="polite"
+      aria-atomic="true"
+      className={cn('flex items-start gap-3 rounded-lg border p-4', className)}
+    >
+      <Icon aria-hidden="true" className="mt-0.5 size-5 shrink-0" />
+      <span className="space-y-1">
+        <span className="block font-medium capitalize">{result.status.replace(/_/g, ' ')}</span>
+        <span className="block text-sm">
           {result.status === 'accepted'
             ? result.attendee
               ? `${result.attendee.name} has been checked in.`
               : (result.message ?? 'Check-in successful')
             : result.message}
-        </p>
+        </span>
         {result.attendee && result.status !== 'accepted' && (
-          <p className="text-xs text-muted-foreground">
+          <span className="block text-xs text-muted-foreground">
             Attendee: {result.attendee.name} ({result.attendee.ticketTypeName})
-          </p>
+          </span>
         )}
-      </div>
-    </div>
+      </span>
+    </output>
   );
 }
 
@@ -296,18 +329,20 @@ function ManualLookup({
   search: string;
   onSearchChange: (value: string) => void;
 }) {
+  const manualSearchId = React.useId();
   const { data, loading, error } = useAdminData(
     () => adminApi.listAttendees({ eventId }),
     [eventId],
   );
 
   const attendees = data?.items ?? [];
-  const filtered = search
+  const normalizedSearch = search.trim().toLowerCase();
+  const filtered = normalizedSearch
     ? attendees.filter(
         (a) =>
-          a.name.toLowerCase().includes(search.toLowerCase()) ||
-          a.email?.toLowerCase().includes(search.toLowerCase()) ||
-          a.ticketId.includes(search),
+          a.name.toLowerCase().includes(normalizedSearch) ||
+          a.email?.toLowerCase().includes(normalizedSearch) ||
+          a.ticketId.toLowerCase().includes(normalizedSearch),
       )
     : attendees.slice(0, 10);
 
@@ -316,27 +351,36 @@ function ManualLookup({
 
   return (
     <div className="space-y-3">
+      <Label htmlFor={manualSearchId} className="sr-only">
+        Search attendees
+      </Label>
       <Input
+        id={manualSearchId}
+        type="search"
+        autoComplete="off"
         placeholder="Search by name, email, or ticket ID"
         value={search}
         onChange={(e) => onSearchChange(e.target.value)}
       />
-      <div className="space-y-1 max-h-64 overflow-y-auto">
-        {filtered.length === 0 ? (
-          <p className="py-4 text-center text-sm text-muted-foreground">No attendees found</p>
-        ) : (
-          filtered.map((attendee) => (
-            <div
+      {filtered.length === 0 ? (
+        <p className="py-4 text-center text-sm text-muted-foreground">No attendees found</p>
+      ) : (
+        <ul
+          aria-label={normalizedSearch ? 'Matching attendees' : 'Recent attendees'}
+          className="max-h-64 space-y-1 overflow-y-auto"
+        >
+          {filtered.map((attendee) => (
+            <li
               key={attendee.id}
-              className="flex items-center justify-between rounded-md border p-2 text-sm"
+              className="flex flex-col gap-1 rounded-md border p-2 text-sm sm:flex-row sm:items-center sm:justify-between"
             >
-              <div>
-                <p className="font-medium">{attendee.name}</p>
+              <div className="min-w-0">
+                <p className="font-medium break-words">{attendee.name}</p>
                 <p className="text-xs text-muted-foreground">{attendee.ticketTypeName}</p>
               </div>
               <span
                 className={cn(
-                  'text-xs',
+                  'text-xs sm:shrink-0',
                   attendee.checkInStatus === 'checked_in'
                     ? 'text-emerald-600 dark:text-emerald-400'
                     : 'text-muted-foreground',
@@ -344,10 +388,10 @@ function ManualLookup({
               >
                 {attendee.checkInStatus === 'checked_in' ? 'Checked in' : 'Pending'}
               </span>
-            </div>
-          ))
-        )}
-      </div>
+            </li>
+          ))}
+        </ul>
+      )}
     </div>
   );
 }
