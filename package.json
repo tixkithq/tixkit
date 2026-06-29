@@ -59,14 +59,14 @@
   "devDependencies": {
     "@axe-core/playwright": "^4.12.1",
     "@playwright/test": "^1.61.1",
-    "@types/node": "^22.20.0",
-    "@vitest/coverage-v8": "^4.1.0",
+    "@types/node": "^26.0.1",
+    "@vitest/coverage-v8": "^4.1.9",
     "oxfmt": "0.56.0",
     "oxlint": "^1.71.0",
-    "turbo": "^2.9.0",
+    "turbo": "^2.10.0",
     "typescript": "6.0.3",
     "typescript-tsgo": "npm:typescript@7.0.1-rc",
-    "vitest": "^4.1.0"
+    "vitest": "^4.1.9"
   },
   "engines": {
     "node": ">=20.0.0",
