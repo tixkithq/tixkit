@@ -246,6 +246,51 @@ function normalizeCartItems(
   return [...normalized.values()];
 }
 
+function cartItemWithoutAttendeeFields(item: CartInput['items'][number]): CartInput['items'][number] {
+  return {
+    ticketTypeId: item.ticketTypeId,
+    occurrenceId: item.occurrenceId,
+    productId: item.productId,
+    quantity: item.quantity,
+    unitAmountCents: item.unitAmountCents,
+  };
+}
+
+function normalizeAttendeeFieldsForCartItems(
+  items: CartInput['items'],
+  eventQuestions: Question[],
+  answeredAt: string,
+): { items: CartInput['items']; attendeeFieldsByTicketType: Record<string, unknown[]> } {
+  const attendeeFieldsByTicketType: Record<string, unknown[]> = {};
+  const normalizedItems = items.map((item) => {
+    if (!item.ticketTypeId) return item;
+
+    const itemQuestions = applicableQuestions(eventQuestions, 'attendee', item.ticketTypeId);
+    if (itemQuestions.length === 0) {
+      return cartItemWithoutAttendeeFields(item);
+    }
+
+    const fields = Array.from({ length: item.quantity }, (_, attendeeIndex) =>
+      normalizeQuestionAnswers(
+        itemQuestions,
+        item.attendeeFields?.[attendeeIndex] ?? {},
+        answeredAt,
+      ),
+    );
+    if (!fields.some((fieldSet) => Object.keys(fieldSet).length > 0)) {
+      return cartItemWithoutAttendeeFields(item);
+    }
+
+    attendeeFieldsByTicketType[item.ticketTypeId] = [
+      ...(attendeeFieldsByTicketType[item.ticketTypeId] ?? []),
+      ...fields,
+    ];
+    return { ...item, attendeeFields: fields };
+  });
+
+  return { items: normalizedItems, attendeeFieldsByTicketType };
+}
+
 type QuestionRow = {
   id: string;
   event_id: string;
@@ -275,6 +320,42 @@ function isVisibleCheckoutQuestion(q: QuestionRow): boolean {
   return q.status !== 'hidden' && !q.is_hidden && !q.hidden_at && !q.deleted_at;
 }
 
+function parseQuestionOptions(q: QuestionRow): string[] | undefined {
+  const options = parseStringArray(q.options);
+  if (options) return options;
+  if ((q.type === 'select' || q.type === 'multiselect') && q.options) return [];
+  return undefined;
+}
+
+function parseQuestionConditionalVisibility(
+  value: string | null,
+): Question['conditionalVisibility'] | undefined {
+  const parsed = parseJsonValue<unknown>(value, undefined);
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return undefined;
+
+  const condition = parsed as Record<string, unknown>;
+  if (
+    typeof condition.field !== 'string' ||
+    typeof condition.operator !== 'string' ||
+    typeof condition.value !== 'string'
+  ) {
+    return undefined;
+  }
+  if (
+    condition.operator !== 'equals' &&
+    condition.operator !== 'not_equals' &&
+    condition.operator !== 'contains'
+  ) {
+    return undefined;
+  }
+
+  return {
+    field: condition.field,
+    operator: condition.operator,
+    value: condition.value,
+  };
+}
+
 function toDomainQuestion(q: QuestionRow): Question {
   return {
     id: q.id,
@@ -287,12 +368,10 @@ function toDomainQuestion(q: QuestionRow): Question {
     description: q.description ?? undefined,
     required: q.required,
     appliesTo: q.applies_to as Question['appliesTo'],
-    options: q.options ? (JSON.parse(q.options) as string[]) : undefined,
+    options: parseQuestionOptions(q),
     placeholder: q.placeholder ?? undefined,
     validationPattern: q.validation_pattern ?? undefined,
-    conditionalVisibility: q.conditional_visibility
-      ? (JSON.parse(q.conditional_visibility) as Question['conditionalVisibility'])
-      : undefined,
+    conditionalVisibility: parseQuestionConditionalVisibility(q.conditional_visibility),
     sortOrder: q.sort_order,
     isConsentField: q.is_consent_field,
     consentText: q.consent_text ?? undefined,
@@ -694,34 +773,20 @@ export const checkoutRoutes: FastifyPluginAsync = async (app) => {
             new TaxRuleRepository(db).findByEvent(eventId),
             new FeeRuleRepository(db).findByEvent(eventId),
           ]);
-          const attendeeFieldsByTicketType: Record<string, unknown[]> = {};
-          for (const item of body.items) {
-            const itemQuestions = applicableQuestions(
-              eventQuestions,
-              'attendee',
-              item.ticketTypeId,
-            );
-            if (itemQuestions.length === 0) continue;
-            const fields = Array.from({ length: item.quantity }, (_, attendeeIndex) =>
-              normalizeQuestionAnswers(
-                itemQuestions,
-                item.attendeeFields?.[attendeeIndex] ?? {},
-                answeredAt,
-              ),
-            );
-            if (fields.some((fieldSet) => Object.keys(fieldSet).length > 0)) {
-              attendeeFieldsByTicketType[item.ticketTypeId] = fields;
-            }
-          }
+          const attendeeFields = normalizeAttendeeFieldsForCartItems(
+            normalizedItems,
+            eventQuestions,
+            answeredAt,
+          );
           const cart: CartInput = {
-            items: normalizedItems.map((item) => ({
+            items: attendeeFields.items.map((item) => ({
               ticketTypeId: item.ticketTypeId,
               occurrenceId: item.occurrenceId,
               quantity: item.quantity,
               attendeeFields: item.attendeeFields,
             })),
             buyerFields,
-            attendeeFields: attendeeFieldsByTicketType,
+            attendeeFields: attendeeFields.attendeeFieldsByTicketType,
           };
           const baseQuote = pricingEngine.calculate({
             currency: event.currency,
@@ -1025,27 +1090,14 @@ export const checkoutRoutes: FastifyPluginAsync = async (app) => {
           feeRepo.findByEvent(body.eventId),
         ]);
 
-        // Build a map of ticketTypeId → attendeeFields for persistence.
-        const attendeeFieldsByTicketType: Record<string, unknown[]> = {};
-        for (const item of body.items) {
-          if (!item.ticketTypeId) continue;
-          const itemQuestions = applicableQuestions(eventQuestions, 'attendee', item.ticketTypeId);
-          if (itemQuestions.length > 0) {
-            const fields = Array.from({ length: item.quantity }, (_, attendeeIndex) =>
-              normalizeQuestionAnswers(
-                itemQuestions,
-                item.attendeeFields?.[attendeeIndex] ?? {},
-                answeredAt,
-              ),
-            );
-            if (fields.some((fieldSet) => Object.keys(fieldSet).length > 0)) {
-              attendeeFieldsByTicketType[item.ticketTypeId] = fields;
-            }
-          }
-        }
+        const attendeeFields = normalizeAttendeeFieldsForCartItems(
+          normalizedItems,
+          eventQuestions,
+          answeredAt,
+        );
 
         const cart: CartInput = {
-          items: normalizedItems.map((i) => ({
+          items: attendeeFields.items.map((i) => ({
             ticketTypeId: i.ticketTypeId,
             occurrenceId: i.occurrenceId,
             productId: i.productId,
@@ -1057,7 +1109,7 @@ export const checkoutRoutes: FastifyPluginAsync = async (app) => {
           affiliateCode: body.affiliateCode,
           trackingId: body.trackingId,
           buyerFields,
-          attendeeFields: attendeeFieldsByTicketType,
+          attendeeFields: attendeeFields.attendeeFieldsByTicketType,
           waitlistEntryId: waitlistEntry?.id,
         };
 

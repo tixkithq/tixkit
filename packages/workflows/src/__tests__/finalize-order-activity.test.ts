@@ -629,6 +629,107 @@ describe('finalizeOrderActivity inventory holds', () => {
     expect(dbState.destroy).toHaveBeenCalledTimes(1);
   });
 
+  it('finalizes attendee records from sanitized cart item answers before legacy ticket-type answers', async () => {
+    dbState.tables.checkout_sessions.cs_1.cart = JSON.stringify({
+      items: [
+        {
+          ticketTypeId: 'tt_1',
+          quantity: 1,
+          attendeeFields: [
+            { q_visible: { value: 'Ada Lovelace', answeredAt: '2026-06-01T12:00:00.000Z' } },
+          ],
+        },
+      ],
+      buyerFields: {},
+      attendeeFields: {
+        tt_1: [{ q_visible: 'legacy stale value', q_hidden: 'should not persist' }],
+      },
+    });
+
+    const result = await finalizeOrderActivity({
+      checkoutSessionId: 'cs_1',
+      tenantId: 'tnt_1',
+      paymentIntentId: 'pi_provider_1',
+    });
+
+    expect(result.ok).toBe(true);
+    const attendees = Object.values(dbState.tables.attendees) as Array<{ custom_answers: string }>;
+    expect(attendees).toHaveLength(1);
+    expect(JSON.parse(attendees[0].custom_answers)).toEqual({
+      q_visible: { value: 'Ada Lovelace', answeredAt: '2026-06-01T12:00:00.000Z' },
+    });
+    expect(attendees[0].custom_answers).not.toContain('q_hidden');
+    expect(attendees[0].custom_answers).not.toContain('legacy stale value');
+    expect(dbState.destroy).toHaveBeenCalledTimes(1);
+  });
+
+  it('finalizes distinct attendee answers for repeated ticket types on separate cart lines', async () => {
+    dbState.tables.checkout_sessions.cs_1.quote = JSON.stringify({
+      subtotalCents: 2000,
+      discountCents: 0,
+      taxCents: 0,
+      feeCents: 0,
+      totalCents: 2000,
+      lineItems: [
+        {
+          ticketTypeId: 'tt_1',
+          name: 'General Admission',
+          quantity: 2,
+          unitPriceCents: 1000,
+          subtotalCents: 2000,
+          discountCents: 0,
+          taxCents: 0,
+          feeCents: 0,
+          totalCents: 2000,
+        },
+      ],
+    });
+    dbState.tables.checkout_sessions.cs_1.cart = JSON.stringify({
+      items: [
+        {
+          ticketTypeId: 'tt_1',
+          occurrenceId: 'occ_morning',
+          quantity: 1,
+          attendeeFields: [{ q_name: 'Morning buyer' }],
+        },
+        {
+          ticketTypeId: 'tt_1',
+          occurrenceId: 'occ_evening',
+          quantity: 1,
+          attendeeFields: [{ q_name: 'Evening buyer' }],
+        },
+      ],
+      buyerFields: {},
+      attendeeFields: {
+        tt_1: [{ q_name: 'legacy first' }, { q_name: 'legacy second' }],
+      },
+    });
+    dbState.tables.checkout_holds.hld_1.quantity = 2;
+    dbState.tables.payment_intents.pi_1.amount_cents = 2000;
+
+    const result = await finalizeOrderActivity({
+      checkoutSessionId: 'cs_1',
+      tenantId: 'tnt_1',
+      paymentIntentId: 'pi_provider_1',
+    });
+
+    expect(result.ok).toBe(true);
+    const attendees = Object.values(dbState.tables.attendees) as Array<{
+      custom_answers: string;
+      event_occurrence_id: string;
+    }>;
+    expect(attendees).toHaveLength(2);
+    expect(attendees.map((attendee) => JSON.parse(attendee.custom_answers))).toEqual([
+      { q_name: 'Morning buyer' },
+      { q_name: 'Evening buyer' },
+    ]);
+    expect(attendees.map((attendee) => attendee.event_occurrence_id)).toEqual([
+      'occ_morning',
+      'occ_evening',
+    ]);
+    expect(dbState.destroy).toHaveBeenCalledTimes(1);
+  });
+
   it('expires stale holds and fails before creating an order', async () => {
     seedCheckout({ holdExpiresAt: new Date(Date.now() - 60_000) });
     seedTrustedPaymentIntent();
@@ -668,6 +769,53 @@ describe('finalizeOrderActivity inventory holds', () => {
     expect(Object.values(dbState.tables.orders)).toHaveLength(0);
     expect(dbState.tables.checkout_holds.hld_1.status).toBe('active');
     expect(dbState.tables.inventory_pools.pool_1.sold_count).toBe(0);
+    expect(dbState.destroy).toHaveBeenCalledTimes(1);
+  });
+
+  it('fails closed for a paid online checkout without a provider intent', async () => {
+    seedCheckout({ holdExpiresAt: new Date(Date.now() + 60_000) });
+
+    const result = await finalizeOrderActivity({
+      checkoutSessionId: 'cs_1',
+      tenantId: 'tnt_1',
+    });
+
+    expect(result).toMatchObject({
+      ok: false,
+      errorCode: 'PAYMENT_INTENT_UNTRUSTED',
+      retryable: false,
+    });
+    expect(Object.values(dbState.tables.orders)).toHaveLength(0);
+    expect(dbState.tables.checkout_holds.hld_1.status).toBe('active');
+    expect(dbState.tables.inventory_pools.pool_1.sold_count).toBe(0);
+    expect(dbState.destroy).toHaveBeenCalledTimes(1);
+  });
+
+  it('allows a paid offline box-office tender without a provider intent', async () => {
+    seedCheckout({ holdExpiresAt: new Date(Date.now() + 60_000) });
+
+    const result = await finalizeOrderActivity({
+      checkoutSessionId: 'cs_1',
+      tenantId: 'tnt_1',
+      paymentMode: 'offline',
+      salesChannel: 'box_office',
+      operatorId: 'usr_box',
+      tenderType: 'cash',
+    });
+
+    expect(result.ok).toBe(true);
+    expect(Object.values(dbState.tables.orders)).toHaveLength(1);
+    expect(Object.values(dbState.tables.orders)[0]).toMatchObject({
+      total_cents: 1000,
+      payment_intent_id: null,
+      payment_provider: null,
+      sales_channel: 'box_office',
+      operator_id: 'usr_box',
+      tender_type: 'cash',
+    });
+    expect(dbState.tables.checkout_holds.hld_1.status).toBe('converted');
+    expect(dbState.tables.inventory_pools.pool_1.sold_count).toBe(1);
+    expect(dbState.tables.checkout_sessions.cs_1.status).toBe('completed');
     expect(dbState.destroy).toHaveBeenCalledTimes(1);
   });
 
