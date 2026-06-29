@@ -507,6 +507,48 @@ describe('TixkitClient', () => {
     expect(body).toEqual({ paymentMethodId: 'pm_1' });
   });
 
+  it('checkout.createBoxOfficeOrder sends POS tender body with idempotency', async () => {
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          order: { id: 'ord_box', salesChannel: 'box_office', tenderType: 'cash' },
+          sessionId: 'cs_box',
+          status: 'completed',
+        }),
+        {
+          status: 201,
+          headers: { 'Content-Type': 'application/json' },
+        },
+      ),
+    );
+
+    const client = new TixkitClient({
+      apiKey: 'tk_test_123',
+      apiBaseUrl: 'https://api.test',
+      maxRetries: 0,
+    });
+    await client.checkout.createBoxOfficeOrder('evt_box', {
+      idempotencyKey: 'box_cash_1',
+      tenderType: 'cash',
+      amountCents: 2500,
+      buyer: { email: 'door@example.com' },
+      items: [{ ticketTypeId: 'tt_ga', quantity: 1 }],
+    });
+
+    const [url, init] = fetchMock.mock.calls[0]!;
+    const headers = init?.headers as Record<string, string>;
+    const body = JSON.parse(init?.body as string) as Record<string, unknown>;
+
+    expect(String(url)).toBe('https://api.test/v1/events/evt_box/box-office/orders');
+    expect(headers['Idempotency-Key']).toBe('box_cash_1');
+    expect(body).toEqual({
+      tenderType: 'cash',
+      amountCents: 2500,
+      buyer: { email: 'door@example.com' },
+      items: [{ ticketTypeId: 'tt_ga', quantity: 1 }],
+    });
+  });
+
   it('checkout.get can recover pending sessions with a payment intent client secret', async () => {
     const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue(
       new Response(JSON.stringify({ id: 'cs_1', status: 'pending_payment' }), {

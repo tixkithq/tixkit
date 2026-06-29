@@ -7,6 +7,7 @@ import {
 } from '@tixkit/db';
 import { ulid } from 'ulid';
 import { QrService } from '@tixkit/domain/tickets';
+import type { BoxOfficeTenderType, SalesChannel } from '@tixkit/domain';
 import { isConsentAccepted, isConsentAnswerSnapshot } from '@tixkit/domain';
 import { withSpan } from '@tixkit/shared';
 import Stripe from 'stripe';
@@ -478,12 +479,21 @@ async function validateFinalizePaymentIntent(input: {
   checkoutSessionId: string;
   tenantId: string;
   providerIntentId?: string;
+  paymentMode?: 'online' | 'offline' | 'free';
+  salesChannel?: SalesChannel;
+  tenderType?: BoxOfficeTenderType;
   amountCents: number;
   currency: string;
 }): Promise<FinalizePaymentIntentValidationResult> {
   if (input.amountCents <= 0) return { ok: true };
 
   if (!input.providerIntentId) {
+    const isTrustedOfflineBoxOfficeTender =
+      input.paymentMode === 'offline' &&
+      input.salesChannel === 'box_office' &&
+      (input.tenderType === 'cash' || input.tenderType === 'manual_card');
+    if (isTrustedOfflineBoxOfficeTender) return { ok: true };
+
     return {
       ok: false,
       errorCode: 'PAYMENT_INTENT_UNTRUSTED',
@@ -1198,7 +1208,11 @@ export async function finalizeOrderActivity(input: {
   checkoutSessionId: string;
   tenantId: string;
   paymentIntentId?: string;
+  paymentMode?: 'online' | 'offline' | 'free';
   affiliateCode?: string;
+  salesChannel?: SalesChannel;
+  operatorId?: string;
+  tenderType?: BoxOfficeTenderType;
 }): Promise<WorkflowActivityResult<{ orderId: string }>> {
   const db = createDb();
   try {
@@ -1285,6 +1299,9 @@ export async function finalizeOrderActivity(input: {
       checkoutSessionId: input.checkoutSessionId,
       tenantId: input.tenantId,
       providerIntentId: input.paymentIntentId,
+      paymentMode: input.paymentMode,
+      salesChannel: input.salesChannel,
+      tenderType: input.tenderType,
       amountCents: quote.totalCents,
       currency: session.currency,
     });
@@ -1516,6 +1533,9 @@ export async function finalizeOrderActivity(input: {
             buyer_phone: buyer.phone ?? null,
             payment_intent_id: paymentIntent?.id ?? null,
             payment_provider: paymentIntent?.provider ?? null,
+            sales_channel: input.salesChannel ?? 'online',
+            operator_id: input.operatorId ?? null,
+            tender_type: input.tenderType ?? null,
             paid_at: now,
             created_at: now,
             updated_at: now,

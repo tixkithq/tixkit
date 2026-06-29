@@ -248,6 +248,35 @@ export const confirmCheckoutSchema = z
   })
   .strict();
 
+export const createBoxOfficeOrderSchema = z
+  .object({
+    tenderType: z.enum(['comp', 'cash', 'manual_card']),
+    amountCents: z.number().int().min(0),
+    items: z
+      .array(
+        z
+          .object({
+            ticketTypeId: ulidSchema,
+            occurrenceId: ulidSchema.optional(),
+            quantity: z.number().int().min(1),
+            attendeeFields: z.array(z.record(z.string(), z.unknown())).optional(),
+          })
+          .strict(),
+      )
+      .min(1),
+    buyer: z
+      .object({
+        email: z.string().email().optional(),
+        firstName: z.string().optional(),
+        lastName: z.string().optional(),
+        phone: z.string().optional(),
+      })
+      .optional(),
+    buyerFields: z.record(z.string(), z.unknown()).optional(),
+    notes: z.string().max(2000).optional(),
+  })
+  .strict();
+
 // Order/refund schemas
 export const refundSchema = z
   .object({

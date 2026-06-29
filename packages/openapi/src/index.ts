@@ -1004,6 +1004,48 @@ export const openApiSpec = {
         },
         required: ['sessionId', 'status', 'paymentIntentId', 'totalCents', 'currency'],
       },
+      BoxOfficeOrderInput: {
+        type: 'object',
+        properties: {
+          tenderType: { type: 'string', enum: ['comp', 'cash', 'manual_card'] },
+          amountCents: { type: 'integer', minimum: 0 },
+          items: {
+            type: 'array',
+            minItems: 1,
+            items: {
+              type: 'object',
+              properties: {
+                ticketTypeId: { type: 'string' },
+                occurrenceId: { type: 'string' },
+                quantity: { type: 'integer', minimum: 1 },
+                attendeeFields: { type: 'array', items: { type: 'object' } },
+              },
+              required: ['ticketTypeId', 'quantity'],
+            },
+          },
+          buyer: {
+            type: 'object',
+            properties: {
+              email: { type: 'string', format: 'email' },
+              firstName: { type: 'string' },
+              lastName: { type: 'string' },
+              phone: { type: 'string' },
+            },
+          },
+          buyerFields: { type: 'object', additionalProperties: true },
+          notes: { type: 'string', maxLength: 2000 },
+        },
+        required: ['tenderType', 'amountCents', 'items'],
+      },
+      BoxOfficeOrderResult: {
+        type: 'object',
+        properties: {
+          order: { $ref: '#/components/schemas/Order' },
+          sessionId: { type: 'string' },
+          status: { type: 'string', enum: ['completed'] },
+        },
+        required: ['order', 'sessionId', 'status'],
+      },
       Order: {
         type: 'object',
         properties: {
@@ -3345,6 +3387,54 @@ export const openApiSpec = {
           },
           '404': {
             description: 'Upload artifact not found',
+            content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } },
+          },
+        },
+      },
+    },
+    '/events/{eventId}/box-office/orders': {
+      post: {
+        summary: 'Create a box-office order (admin, Idempotency-Key required)',
+        security: [{ BearerAuth: [] }, { ApiKey: [] }],
+        parameters: [
+          { name: 'eventId', in: 'path', required: true, schema: { type: 'string' } },
+          { $ref: '#/components/parameters/RequiredIdempotencyKey' },
+        ],
+        requestBody: {
+          required: true,
+          content: {
+            'application/json': {
+              schema: { $ref: '#/components/schemas/BoxOfficeOrderInput' },
+            },
+          },
+        },
+        responses: {
+          '201': {
+            description: 'Box-office order completed and tickets issued',
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/BoxOfficeOrderResult' },
+              },
+            },
+          },
+          '400': {
+            description: 'Validation error',
+            content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } },
+          },
+          '401': {
+            description: 'Unauthorized',
+            content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } },
+          },
+          '403': {
+            description: 'Forbidden',
+            content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } },
+          },
+          '404': {
+            description: 'Event or scoped resource not found',
+            content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } },
+          },
+          '409': {
+            description: 'Inventory or finalization conflict',
             content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } },
           },
         },

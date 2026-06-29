@@ -281,6 +281,24 @@ describe('openApiSpec', () => {
     expect(checkoutSessionBody.properties.trackingId).toEqual({ type: 'string' });
   });
 
+  it('documents box-office order creation as an idempotent admin mutation', () => {
+    const route = openApiSpec.paths['/events/{eventId}/box-office/orders'].post;
+    expect(route.security).toEqual([{ BearerAuth: [] }, { ApiKey: [] }]);
+    expect(route.parameters).toContainEqual({
+      $ref: '#/components/parameters/RequiredIdempotencyKey',
+    });
+    expect(route.requestBody.content['application/json'].schema).toEqual({
+      $ref: '#/components/schemas/BoxOfficeOrderInput',
+    });
+    expect(route.responses['201'].content['application/json'].schema).toEqual({
+      $ref: '#/components/schemas/BoxOfficeOrderResult',
+    });
+    expect(openApiSpec.components.schemas.BoxOfficeOrderInput.properties.tenderType).toEqual({
+      type: 'string',
+      enum: ['comp', 'cash', 'manual_card'],
+    });
+  });
+
   it('documents checkout session recovery through token header or payment intent client secret', () => {
     expect(openApiSpec.components.parameters.OptionalCheckoutSessionToken).toMatchObject({
       name: 'X-Checkout-Session-Token',

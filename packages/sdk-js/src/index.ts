@@ -327,6 +327,26 @@ export type CheckoutConfirmPending = {
 
 export type CheckoutConfirmResult = CheckoutConfirmCompleted | CheckoutConfirmPending;
 
+export type BoxOfficeOrderInput = {
+  tenderType: 'comp' | 'cash' | 'manual_card';
+  amountCents: number;
+  items: {
+    ticketTypeId: string;
+    occurrenceId?: string;
+    quantity: number;
+    attendeeFields?: Record<string, unknown>[];
+  }[];
+  buyer?: { email?: string; firstName?: string; lastName?: string; phone?: string };
+  buyerFields?: Record<string, unknown>;
+  notes?: string;
+} & IdempotencyOptions;
+
+export type BoxOfficeOrderResult = {
+  order: Order;
+  sessionId: string;
+  status: 'completed';
+};
+
 export type PaymentCompensation = {
   id: string;
   tenantId?: string;
@@ -555,6 +575,9 @@ export type Order = {
   buyerPhone?: string;
   paymentIntentId?: string;
   paymentProvider?: string;
+  salesChannel?: 'online' | 'box_office';
+  operatorId?: string;
+  tenderType?: 'comp' | 'cash' | 'manual_card';
   paidAt?: string;
   refundedAt?: string;
   cancelledAt?: string;
@@ -1465,6 +1488,17 @@ class CheckoutResource {
       body,
       idempotencyKey,
       headers: { 'X-Checkout-Session-Token': clientToken },
+    });
+  }
+
+  async createBoxOfficeOrder(
+    eventId: string,
+    input: BoxOfficeOrderInput,
+  ): Promise<BoxOfficeOrderResult> {
+    const { idempotencyKey, ...body } = input;
+    return this.client.request('POST', `/events/${eventId}/box-office/orders`, {
+      body,
+      idempotencyKey,
     });
   }
 }

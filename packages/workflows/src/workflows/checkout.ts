@@ -7,6 +7,7 @@ import {
   startChild,
   patched,
 } from '@temporalio/workflow';
+import type { BoxOfficeTenderType, SalesChannel } from '@tixkit/domain';
 import type { WorkflowActivityResult } from '../shared/types.js';
 import { WEBHOOK_DELIVERY_WORKFLOW_VERSION } from '../shared/types.js';
 import { webhookDeliveryWorkflow } from './webhook-delivery.js';
@@ -35,7 +36,11 @@ const {
     checkoutSessionId: string;
     tenantId: string;
     paymentIntentId?: string;
+    paymentMode?: 'online' | 'offline' | 'free';
     affiliateCode?: string;
+    salesChannel?: SalesChannel;
+    operatorId?: string;
+    tenderType?: BoxOfficeTenderType;
   }): Promise<WorkflowActivityResult<{ orderId: string }>>;
   compensateOrphanPaymentActivity(input: {
     checkoutSessionId: string;
@@ -120,7 +125,11 @@ export type CheckoutSessionWorkflowInput = {
   feeCents: number;
   buyerEmail: string;
   isFreeOrder: boolean;
+  paymentMode?: 'online' | 'offline' | 'free';
   affiliateCode?: string;
+  salesChannel?: SalesChannel;
+  operatorId?: string;
+  tenderType?: BoxOfficeTenderType;
 };
 
 export async function checkoutSessionWorkflow(
@@ -231,11 +240,15 @@ export async function checkoutSessionWorkflow(
     return { status: 'cancelled' };
   }
 
-  if (input.isFreeOrder) {
+  if (input.isFreeOrder || input.paymentMode === 'offline' || input.paymentMode === 'free') {
     const finalizeResult = await finalizeOrderActivity({
       checkoutSessionId: input.checkoutSessionId,
       tenantId: input.tenantId,
+      paymentMode: input.paymentMode,
       affiliateCode: input.affiliateCode,
+      salesChannel: input.salesChannel,
+      operatorId: input.operatorId,
+      tenderType: input.tenderType,
     });
 
     if (!finalizeResult.ok) {

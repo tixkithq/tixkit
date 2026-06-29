@@ -14,6 +14,7 @@ import {
   EventOccurrenceRepository,
   PaymentCompensationRepository,
 } from '@tixkit/db';
+import { ClerkAuthService } from '../../auth/clerk.js';
 import type { ProductForPricing, TicketTypeForPricing } from '../../services/pricing.js';
 import type { CartReservationItem } from '../../services/inventory.js';
 import { withIdempotency, hashRequest } from '../../services/idempotency.js';
@@ -34,11 +35,14 @@ import {
   validateTicketPurchase,
   validateAnswers,
   normalizeQuestionAnswers,
+  validateBoxOfficeOrder,
+  BoxOfficeError,
 } from '@tixkit/domain';
 import type { Question } from '@tixkit/domain';
-import { parseJsonValue, pickAllowedFields } from '../../http/contracts.js';
+import { parseJsonValue, pickAllowedFields, serializeOrder } from '../../http/contracts.js';
 import {
   createCheckoutSessionSchema,
+  createBoxOfficeOrderSchema,
   updateCheckoutSessionSchema,
   confirmCheckoutSchema,
   parseBody,
@@ -137,6 +141,33 @@ function publicCheckoutSession(
           updatedAt: compensation.updated_at,
         }
       : undefined,
+  };
+}
+
+function zeroCompQuote<T extends { lineItems?: Array<Record<string, unknown>> }>(
+  quote: T & {
+    subtotalCents: number;
+    discountCents: number;
+    taxCents: number;
+    feeCents: number;
+    totalCents: number;
+  },
+) {
+  return {
+    ...quote,
+    discountCents: quote.subtotalCents,
+    taxCents: 0,
+    feeCents: 0,
+    totalCents: 0,
+    lineItems: quote.lineItems?.map((line) => ({
+      ...line,
+      discountCents:
+        typeof line.subtotalCents === 'number' ? line.subtotalCents : (line.discountCents ?? 0),
+      taxCents: 0,
+      feeCents: 0,
+      totalCents: 0,
+      taxBreakdown: [],
+    })),
   };
 }
 
@@ -493,6 +524,274 @@ export const checkoutRoutes: FastifyPluginAsync = async (app) => {
       currency: input.currency,
     };
   }
+
+  app.post('/events/:eventId/box-office/orders', async (request, reply) => {
+    const principal = request.principal!;
+    ClerkAuthService.requirePermission(principal, 'orders.write');
+    const { eventId } = request.params as { eventId: string };
+    const body = parseBody(createBoxOfficeOrderSchema, request.body);
+    const idempotencyKey = requireIdempotencyKey(request);
+
+    const eventRepo = new EventRepository(db);
+    const event = await eventRepo.findById(eventId);
+    if (!event) throw new NotFoundError('Event', eventId);
+    ClerkAuthService.requireResourceTenant(principal, event, 'Event', eventId);
+    ClerkAuthService.requireOrganizationScope(principal, event.organization_id);
+    ClerkAuthService.requireBrandScope(principal, event.brand_id);
+    ClerkAuthService.requireEventScope(principal, event.id);
+    if (event.status !== 'published') {
+      throw new ValidationError('Box-office sales require a published event');
+    }
+
+    try {
+      validateBoxOfficeOrder({
+        eventId,
+        tenantId: event.tenant_id,
+        operatorId: principal.id,
+        tenderType: body.tenderType,
+        items: body.items.map((item) => ({
+          ticketTypeId: item.ticketTypeId,
+          quantity: item.quantity,
+        })),
+        buyerEmail: body.buyer?.email,
+        amountCents: body.amountCents,
+        currency: event.currency,
+        notes: body.notes,
+      });
+    } catch (err) {
+      if (err instanceof BoxOfficeError) {
+        throw new ValidationError(err.message);
+      }
+      throw err;
+    }
+
+    const result = await withIdempotency(
+      db,
+      {
+        key: idempotencyKey,
+        tenantId: event.tenant_id,
+        requestHash: hashRequest({ eventId, ...body, operatorId: principal.id }),
+      },
+      async () => {
+        const ttRepo = new TicketTypeRepository(db);
+        const ticketTypes = await ttRepo.findByEvent(eventId);
+        const ttById = new Map(ticketTypes.map((ticketType) => [ticketType.id, ticketType]));
+        const occurrenceIds = [
+          ...new Set(
+            body.items.map((item) => item.occurrenceId).filter((id): id is string => Boolean(id)),
+          ),
+        ];
+        const occurrenceRows =
+          occurrenceIds.length > 0 ? await new EventOccurrenceRepository(db).findByEvent(eventId) : [];
+        const occurrenceById = new Map(
+          occurrenceRows.map((occurrence) => [occurrence.id, occurrence]),
+        );
+        const eventQuestions: Question[] = (
+          (await db
+            .selectFrom('questions')
+            .selectAll()
+            .where('event_id', '=', eventId)
+            .execute()) as QuestionRow[]
+        )
+          .filter(isVisibleCheckoutQuestion)
+          .map((question) => toDomainQuestion(question));
+        const answeredAt = new Date().toISOString();
+        const buyerFields = normalizeValidAnswers(
+          applicableQuestions(eventQuestions, 'buyer'),
+          body.buyerFields ?? {},
+          'Buyer question',
+          answeredAt,
+        );
+        await assertCompletedUploadArtifacts(db, event.tenant_id, eventId, buyerFields);
+
+        for (const item of body.items) {
+          const ticketType = ttById.get(item.ticketTypeId);
+          if (!ticketType) throw new NotFoundError('TicketType', item.ticketTypeId);
+          if (item.occurrenceId && !occurrenceById.has(item.occurrenceId)) {
+            throw new NotFoundError('EventOccurrence', item.occurrenceId);
+          }
+          if (
+            ticketType.event_occurrence_id &&
+            item.occurrenceId &&
+            ticketType.event_occurrence_id !== item.occurrenceId
+          ) {
+            throw new ValidationError(
+              'Ticket type does not belong to the requested event occurrence',
+            );
+          }
+          const itemQuestions = applicableQuestions(eventQuestions, 'attendee', item.ticketTypeId);
+          if (itemQuestions.length === 0) continue;
+          for (let attendeeIndex = 0; attendeeIndex < item.quantity; attendeeIndex++) {
+            const attendeeAnswers = item.attendeeFields?.[attendeeIndex] ?? {};
+            assertValidAnswers(itemQuestions, attendeeAnswers, 'Attendee question');
+            // eslint-disable-next-line no-await-in-loop -- each attendee answer set is validated against scoped upload artifacts before session persistence.
+            await assertCompletedUploadArtifacts(db, event.tenant_id, eventId, attendeeAnswers);
+          }
+        }
+
+        const normalizedItems = normalizeCartItems(body.items, ttById, new Map());
+        const ticketItems = normalizedItems.filter(
+          (item): item is CartInput['items'][number] & { ticketTypeId: string } =>
+            Boolean(item.ticketTypeId),
+        );
+        const reservationItems: CartReservationItem[] = [];
+        const ttMap = new Map<string, TicketTypeForPricing>();
+        for (const ticketType of ticketTypes) {
+          ttMap.set(ticketType.id, {
+            id: ticketType.id,
+            name: ticketType.name,
+            kind: ticketType.kind as 'free' | 'paid' | 'donation',
+            priceCents: Number(ticketType.price_cents),
+            minimumPriceCents: ticketType.minimum_price_cents
+              ? Number(ticketType.minimum_price_cents)
+              : undefined,
+            currency: ticketType.currency,
+            minPerOrder: ticketType.min_per_order,
+            maxPerOrder: ticketType.max_per_order,
+          });
+        }
+        for (const item of ticketItems) {
+          const ttRecord = ttById.get(item.ticketTypeId);
+          if (!ttRecord) throw new NotFoundError('TicketType', item.ticketTypeId);
+          validateTicketPurchase({
+            ticketType: {
+              id: ttRecord.id,
+              kind: ttRecord.kind as 'free' | 'paid' | 'donation',
+              status: ttRecord.status as 'draft' | 'active' | 'paused' | 'sold_out' | 'ended',
+              visibility: 'public',
+              priceCents: Number(ttRecord.price_cents),
+              minimumPriceCents: ttRecord.minimum_price_cents
+                ? Number(ttRecord.minimum_price_cents)
+                : null,
+              salesStartAt: ttRecord.sales_start_at,
+              salesEndAt: ttRecord.sales_end_at,
+              minPerOrder: ttRecord.min_per_order,
+              maxPerOrder: ttRecord.max_per_order,
+              requiresAccessCode: false,
+            },
+            quantity: item.quantity,
+            unitAmountCents: item.unitAmountCents,
+          });
+          reservationItems.push({
+            inventoryPoolId: ttRecord.inventory_pool_id,
+            ticketTypeId: ttRecord.id,
+            quantity: item.quantity,
+          });
+        }
+
+        const [discounts, taxRules, feeRules] = await Promise.all([
+          new DiscountCodeRepository(db).findByEvent(eventId),
+          new TaxRuleRepository(db).findByEvent(eventId),
+          new FeeRuleRepository(db).findByEvent(eventId),
+        ]);
+        const attendeeFieldsByTicketType: Record<string, unknown[]> = {};
+        for (const item of body.items) {
+          const itemQuestions = applicableQuestions(eventQuestions, 'attendee', item.ticketTypeId);
+          if (itemQuestions.length === 0) continue;
+          const fields = Array.from({ length: item.quantity }, (_, attendeeIndex) =>
+            normalizeQuestionAnswers(
+              itemQuestions,
+              item.attendeeFields?.[attendeeIndex] ?? {},
+              answeredAt,
+            ),
+          );
+          if (fields.some((fieldSet) => Object.keys(fieldSet).length > 0)) {
+            attendeeFieldsByTicketType[item.ticketTypeId] = fields;
+          }
+        }
+        const cart: CartInput = {
+          items: normalizedItems.map((item) => ({
+            ticketTypeId: item.ticketTypeId,
+            occurrenceId: item.occurrenceId,
+            quantity: item.quantity,
+            attendeeFields: item.attendeeFields,
+          })),
+          buyerFields,
+          attendeeFields: attendeeFieldsByTicketType,
+        };
+        const baseQuote = pricingEngine.calculate({
+          currency: event.currency,
+          cart,
+          ticketTypes: ttMap,
+          products: new Map<string, ProductForPricing>(),
+          taxRules: (taxRules as TaxRuleRow[]).map(toDomainTaxRule),
+          feeRules: (feeRules as FeeRuleRow[]).map(toDomainFeeRule),
+          discountCodes: (discounts as DiscountCodeRow[]).map(toDomainDiscountCode),
+        });
+        const quote = body.tenderType === 'comp' ? zeroCompQuote(baseQuote) : baseQuote;
+        if (body.amountCents !== quote.totalCents) {
+          throw new ValidationError(
+            `Box-office tender amount ${body.amountCents} does not match server total ${quote.totalCents}`,
+          );
+        }
+
+        const sessionRepo = new CheckoutSessionRepository(db);
+        const sessionId = `cs_${ulid()}`;
+        const reservation = await inventoryService.reserveCart({
+          items: reservationItems,
+          checkoutSessionId: sessionId,
+        });
+        const session = await sessionRepo.create({
+          id: sessionId,
+          tenantId: event.tenant_id,
+          eventId,
+          brandId: event.brand_id,
+          holdId: reservation.primaryHoldId,
+          currency: quote.currency,
+          cart: cart as Record<string, unknown>,
+          buyer: (body.buyer as Record<string, unknown>) ?? {},
+          quote: quote as Record<string, unknown>,
+          expiresAt: reservation.expiresAt,
+          idempotencyKey,
+          successUrl: undefined,
+          cancelUrl: undefined,
+        });
+
+        const handle = await temporalClient.startCheckoutSession({
+          checkoutSessionId: session.id,
+          tenantId: event.tenant_id,
+          organizationId: event.organization_id,
+          eventId,
+          brandId: event.brand_id,
+          holdId: session.hold_id ?? undefined,
+          currency: session.currency,
+          amountCents: quote.totalCents,
+          feeCents: quote.feeCents,
+          buyerEmail: body.buyer?.email ?? '',
+          isFreeOrder: quote.totalCents === 0,
+          paymentMode: body.tenderType === 'comp' ? 'free' : 'offline',
+          salesChannel: 'box_office',
+          operatorId: principal.id,
+          tenderType: body.tenderType,
+        });
+        const workflowResult = await handle.result();
+        if (workflowResult.status !== 'completed' || !workflowResult.orderId) {
+          return {
+            status: 409,
+            body: {
+              error: {
+                code: 'BOX_OFFICE_ORDER_FAILED',
+                message: 'Box-office order could not be finalized',
+                requestId: request.id,
+              },
+            },
+          };
+        }
+        const order = await new OrderRepository(db).findById(workflowResult.orderId);
+        if (!order) throw new NotFoundError('Order', workflowResult.orderId);
+        return {
+          status: 201,
+          body: {
+            order: serializeOrder(order),
+            sessionId: session.id,
+            status: workflowResult.status,
+          },
+        };
+      },
+    );
+
+    return reply.status(result.status).send(result.body);
+  });
 
   // Public buyer-facing checkout. No admin principal is required; tenancy is
   // resolved from the (published) event being purchased. Session IDs are

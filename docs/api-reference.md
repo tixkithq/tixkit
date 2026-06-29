@@ -160,6 +160,7 @@ Required on these endpoints:
 
 - `POST /v1/checkout/sessions`
 - `POST /v1/checkout/sessions/:sessionId/confirm`
+- `POST /v1/events/:eventId/box-office/orders`
 - `POST /v1/orders/:orderId/refunds`
 - `POST /v1/tickets/:ticketId/transfer`
 - `POST /v1/check-ins/scan` (recommended) and required for `POST /v1/check-ins/sync`
@@ -289,6 +290,31 @@ Starts (or resumes) the checkout workflow. Requires `Idempotency-Key` and `X-Che
 - If payment succeeds but the session, hold, or order path cannot be safely finalized, Tixkit treats the payment as orphaned, cancels/voids or refunds it idempotently, does not issue tickets or emit `order.paid`, and requires the buyer to retry from a fresh checkout session.
 - Retrying confirm on a `pending_payment` session returns the same active PaymentIntent.
 
+### `POST /v1/events/:eventId/box-office/orders`
+
+Creates an authenticated box-office order for comp, cash, or manual card-not-present tender. Requires `orders.write` and `Idempotency-Key`; tenant, organization, brand, and event scope are checked before inventory is reserved.
+
+The server recalculates the ticket total from the event configuration. `cash` and `manual_card` requests must send an `amountCents` matching that server total. `comp` requests must send `amountCents: 0`; the order is finalized through the same checkout workflow with a zero-total quote. Successful orders store `salesChannel: "box_office"`, the authenticated operator ID, and the tender type.
+
+```json
+{
+  "tenderType": "cash",
+  "amountCents": 2500,
+  "buyer": { "email": "door@example.com", "firstName": "Door" },
+  "items": [{ "ticketTypeId": "tt_general", "quantity": 1 }]
+}
+```
+
+Response `201`:
+
+```json
+{
+  "order": { "id": "ord_...", "salesChannel": "box_office", "tenderType": "cash" },
+  "sessionId": "cs_...",
+  "status": "completed"
+}
+```
+
 ## Admin & Integration Routes
 
 All routes below require authentication. Most mutations are tenant-scoped and additionally enforce organization/brand/event scope based on the principal.
@@ -381,6 +407,7 @@ Supported purposes are `checkout_answer`, `brand_logo`, and `user_avatar`. The A
 | ------ | ----------------------------- | --------------- | --------------------------------------------------- |
 | `GET`  | `/v1/orders`                  | `orders.read`   | List orders (filter by `organizationId`, `eventId`) |
 | `GET`  | `/v1/orders/:orderId`         | `orders.read`   | Get order with line items and timeline              |
+| `POST` | `/v1/events/:eventId/box-office/orders` | `orders.write`  | Create a box-office order (requires `Idempotency-Key`) |
 | `POST` | `/v1/orders/:orderId/cancel`  | `orders.write`  | Cancel unpaid order                                 |
 | `POST` | `/v1/orders/:orderId/refunds` | `refunds.write` | Start refund workflow (requires `Idempotency-Key`)  |
 

@@ -196,6 +196,37 @@ describe('checkoutSessionWorkflow', () => {
     expect(result.orderId).toBe('ord_test_1');
   });
 
+  it('completes an offline box-office order without creating a payment intent', async () => {
+    let finalizeInput: Record<string, unknown> | undefined;
+    setActivity('createPaymentIntentActivity', async () => {
+      throw new Error('offline orders must not create payment intents');
+    });
+    setActivity('finalizeOrderActivity', async (input) => {
+      finalizeInput = input;
+      return okResult({ orderId: 'ord_box' });
+    });
+
+    const result = await checkoutSessionWorkflow(
+      makeCheckoutInput({
+        isFreeOrder: false,
+        paymentMode: 'offline',
+        salesChannel: 'box_office',
+        operatorId: 'usr_box',
+        tenderType: 'cash',
+      }),
+    );
+
+    expect(result).toEqual({ orderId: 'ord_box', status: 'completed' });
+    expect(finalizeInput).toMatchObject({
+      checkoutSessionId: 'cs_test_1',
+      tenantId: 'tnt_1',
+      paymentMode: 'offline',
+      salesChannel: 'box_office',
+      operatorId: 'usr_box',
+      tenderType: 'cash',
+    });
+  });
+
   it('fails when finalize fails for free order and releases hold', async () => {
     let released = false;
     setActivity('finalizeOrderActivity', async () =>
