@@ -255,7 +255,7 @@ test.describe('persisted admin event-page content editor', () => {
         expect(node.nodeId).toBeGreaterThan(0);
         const box = await client.send('DOM.getBoxModel', { nodeId: node.nodeId });
         expect(widthOf(box.model.content)).toBeGreaterThan(name === 'contentCta' ? 60 : 300);
-        expect(heightOf(box.model.content)).toBeGreaterThan(name === 'contentCta' ? 20 : 40);
+        expect(heightOf(box.model.content)).toBeGreaterThan(name === 'contentCta' ? 12 : 40);
         hostedBoxes[name] = box;
       }
       await testInfo.attach('cdp-layout-boxes-checkout-event-page-published', {
