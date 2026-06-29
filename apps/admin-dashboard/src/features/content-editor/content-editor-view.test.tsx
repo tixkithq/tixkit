@@ -50,6 +50,27 @@ describe('ContentEditorView', () => {
     expect(screen.getByText('Mobile canvas')).toBeInTheDocument();
   });
 
+  it('renders server-provided SMS compliance preview output', () => {
+    render(
+      React.createElement(ContentEditorView, {
+        eventId: 'evt_1',
+        kind: 'sms',
+        preview: {
+          label: 'SMS compliance preview',
+          output: 'Hi Ada, All Access starts 2026-07-17 19:00.\n\nSegments: 1 (gsm)',
+          format: 'text',
+        },
+        actionsUnavailableReason:
+          'SMS compliance adapter preview is active; publish waits for persisted content wiring.',
+      }),
+    );
+
+    expect(screen.getByText('SMS compliance adapter preview is active; publish waits for persisted content wiring.')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Open preview' }));
+    expect(screen.getByTestId('preview-drawer')).toHaveTextContent('SMS compliance preview');
+    expect(screen.getByTestId('preview-drawer')).toHaveTextContent('Segments: 1 (gsm)');
+  });
+
   it('renders server-provided email adapter preview output', () => {
     render(
       React.createElement(ContentEditorView, {

@@ -24,6 +24,7 @@ import {
   validateProviderFields,
 } from '@tixkit/email-transport';
 import { RENDER_CONTRACTS, renderContent } from '@tixkit/content-core';
+import { normalizeSmsTemplateDocument, renderSmsTemplate } from '@tixkit/content-message';
 import type { EmailTransport } from '@tixkit/domain';
 import type { SmsTransport } from '@tixkit/domain/messaging';
 import { ulid } from 'ulid';
@@ -140,10 +141,12 @@ export async function checkSmsConsentActivity(input: {
 export async function renderTemplateActivity(input: {
   tenantId?: string;
   brandId?: string;
+  channel?: 'email' | 'sms';
   templateKey: string;
   templateVersionId: string;
   variables: Record<string, unknown>;
-}): Promise<WorkflowActivityResult<{ subject: string; html: string; text?: string }>> {
+  optOutToken?: string;
+}): Promise<WorkflowActivityResult<{ subject: string; html: string; text?: string; segments?: number }>> {
   const db = createDb();
   try {
     if (!input.tenantId) {
@@ -153,18 +156,45 @@ export async function renderTemplateActivity(input: {
         false,
       );
     }
+    const channel = input.channel ?? 'email';
     const contentVersion = await new ContentRepository(db).findPublishedVersionById({
       tenantId: input.tenantId,
       brandId: input.brandId,
       versionId: input.templateVersionId,
-      channel: 'email',
+      channel,
     });
     if (!contentVersion) {
       return errResult(
         'CONTENT_TEMPLATE_NOT_PUBLISHED',
-        `Published email content version not found: ${input.templateVersionId}`,
+        `Published ${channel} content version not found: ${input.templateVersionId}`,
         false,
       );
+    }
+    if (channel === 'sms') {
+      const document = normalizeSmsTemplateDocument(contentVersion.version.contentJson);
+      if (!document) {
+        return errResult(
+          'SMS_TEMPLATE_INVALID',
+          'Published SMS content version is not canonical SMS template JSON',
+          false,
+        );
+      }
+      const rendered = renderSmsTemplate(document, input.variables, {
+        optOutToken: input.optOutToken,
+      });
+      if (!rendered.validation.valid) {
+        return errResult(
+          'SMS_TEMPLATE_RENDER_BLOCKED',
+          'Published SMS content version has render blockers',
+          false,
+        );
+      }
+      return okResult({
+        subject: '',
+        html: '',
+        text: rendered.text,
+        segments: rendered.segments,
+      });
     }
     const rendered = renderContent({
       channel: 'email',

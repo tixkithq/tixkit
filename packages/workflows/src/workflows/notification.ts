@@ -32,10 +32,12 @@ const {
   renderTemplateActivity(input: {
     tenantId?: string;
     brandId?: string;
+    channel?: 'email' | 'sms';
     templateKey: string;
     templateVersionId: string;
     variables: Record<string, unknown>;
-  }): Promise<WorkflowActivityResult<{ subject: string; html: string; text?: string }>>;
+    optOutToken?: string;
+  }): Promise<WorkflowActivityResult<{ subject: string; html: string; text?: string; segments?: number }>>;
 }>({
   startToCloseTimeout: '30 seconds',
   retry: {

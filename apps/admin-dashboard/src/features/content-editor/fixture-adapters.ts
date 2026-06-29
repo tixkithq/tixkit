@@ -72,6 +72,6 @@ function descriptionForKind(kind: ContentEditorRouteKind): string {
     case 'email':
       return 'Author email templates with React Email export and Tixkit publish blockers.';
     case 'sms':
-      return 'Build the SMS authoring shell before compliance and segment adapters land.';
+      return 'Author SMS templates with segment accounting, opt-out checks, and preview guardrails.';
   }
 }

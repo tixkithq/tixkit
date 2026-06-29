@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 import type { Principal } from '@tixkit/domain';
 import type { Database } from '@tixkit/db';
 import { createDefaultEventPageDocument } from '@tixkit/content-event-page';
+import { createDefaultSmsTemplate } from '@tixkit/content-message';
 import type { AppContext } from '../app.js';
 import { contentRoutes, publicContentRoutes } from '../routes/modules/content.js';
 
@@ -269,6 +270,131 @@ describe('content routes', () => {
     });
   });
 
+  it('saves, previews, and captures canonical SMS template test sends', async () => {
+    const smsDocument = createDefaultSmsTemplate({
+      editor: { body: 'Hi {{recipient.name}}, {{event.title}} starts {{event.startsAt}}.' },
+      settings: { templateKey: 'event-update', segmentLimit: 2, estimatedCostPerSegmentCents: 4 },
+    });
+    const { db, inserted } = createContentDb({
+      brands: [{ id: 'brd_1', tenant_id: 'tnt_1', organization_id: 'org_1' }],
+      content_documents: [
+        documentRow({
+          id: 'cdoc_sms',
+          channel: 'sms',
+          key: 'event-update',
+          name: 'Event SMS',
+        }),
+      ],
+      content_document_versions: [],
+      content_test_sends: [],
+    });
+    const app = await setupContentApp(db, principal);
+
+    const save = await app.inject({
+      method: 'POST',
+      url: '/content-documents/cdoc_sms/versions',
+      payload: {
+        contentJson: smsDocument,
+        renderedText: 'this stored fallback must not win',
+      },
+    });
+
+    expect(save.statusCode).toBe(201);
+    expect(save.json()).toMatchObject({
+      documentId: 'cdoc_sms',
+      renderedText: smsDocument.editor.body,
+      validation: { valid: true },
+    });
+
+    const preview = await app.inject({
+      method: 'POST',
+      url: '/content-documents/cdoc_sms/preview',
+      payload: {
+        versionId: save.json().id,
+        context: {
+          event: { title: 'All Access', startsAt: '2026-07-17 19:00' },
+          recipient: { name: 'Ada' },
+        },
+      },
+    });
+
+    expect(preview.statusCode).toBe(200);
+    expect(preview.json()).toMatchObject({
+      channel: 'sms',
+      output: {
+        text: 'Hi Ada, All Access starts 2026-07-17 19:00. Reply STOP to opt out',
+        segments: 1,
+      },
+      validation: { valid: true },
+    });
+
+    const capture = await app.inject({
+      method: 'POST',
+      url: `/content-documents/cdoc_sms/test-sends`,
+      payload: {
+        versionId: save.json().id,
+        recipient: '+15550000001',
+        context: {
+          event: { title: 'All Access', startsAt: '2026-07-17 19:00' },
+          recipient: { name: 'Ada' },
+        },
+      },
+    });
+
+    expect(capture.statusCode).toBe(202);
+    expect(capture.json()).toMatchObject({
+      testSend: {
+        channel: 'sms',
+        recipient: '+15550000001',
+        status: 'captured',
+        renderedText: 'Hi Ada, All Access starts 2026-07-17 19:00. Reply STOP to opt out',
+      },
+    });
+    expect(inserted).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ document_id: 'cdoc_sms', rendered_text: smsDocument.editor.body }),
+        expect.objectContaining({
+          channel: 'sms',
+          recipient: '+15550000001',
+          status: 'captured',
+        }),
+      ]),
+    );
+  });
+
+  it('fails closed for malformed SMS template previews', async () => {
+    const { db } = createContentDb({
+      brands: [{ id: 'brd_1', tenant_id: 'tnt_1', organization_id: 'org_1' }],
+      content_documents: [
+        documentRow({
+          id: 'cdoc_sms',
+          channel: 'sms',
+          key: 'event-update',
+          name: 'Event SMS',
+        }),
+      ],
+      content_document_versions: [
+        versionRow({
+          id: 'cver_sms_bad',
+          document_id: 'cdoc_sms',
+          content_json: JSON.stringify({ editor: { provider: 'legacy', body: 'Hi' } }),
+          rendered_text: 'Hi {{recipient.name}}',
+          validation: JSON.stringify({ valid: false, severity: 'error', issues: [] }),
+        }),
+      ],
+    });
+    const app = await setupContentApp(db, principal);
+
+    const response = await app.inject({
+      method: 'POST',
+      url: '/content-documents/cdoc_sms/preview',
+      payload: { versionId: 'cver_sms_bad', context: { recipient: { name: 'Ada' } } },
+    });
+
+    expect(response.statusCode).toBe(400);
+    expect(response.json().message ?? response.json().error?.message).toContain('canonical SMS');
+  });
+
   it('returns a rendered public event page from canonical content JSON without lifecycle fields', async () => {
     const { db } = createContentDb({
       events: [
@@ -435,7 +561,18 @@ describe('content routes', () => {
           document_id: 'cdoc_public',
           version_number: 1,
           status: 'published',
-          content_json: JSON.stringify(eventPageJson()),
+          content_json: JSON.stringify(
+            eventPageJson({
+              eventId: 'evt_1',
+              eventTitle: 'Published page',
+              eventDescription: 'Preview copy',
+              startsAt: '2026-07-17T19:00:00.000Z',
+              timezone: 'America/Chicago',
+              venue: { name: 'The Salt Shed', city: 'Chicago' },
+              publicUrl: '{{event.publicUrl}}',
+              checkoutUrl: '{{event.checkoutUrl}}',
+            }),
+          ),
           validation: JSON.stringify({ valid: true, severity: 'warning', issues: [] }),
           published_at: new Date('2026-06-02T00:00:00.000Z'),
         }),
@@ -454,6 +591,10 @@ describe('content routes', () => {
 
     expect(page.statusCode).toBe(200);
     expect(page.json().document.eventId).toBe('evt_1');
+    expect(page.json().version.renderedHtml).toContain(
+      'href="https://events.example.com/checkout?eventId=evt_1"',
+    );
+    expect(page.json().page.discovery.publicPath).toBe('https://events.example.com/published-page');
     expect(card.statusCode).toBe(200);
     expect(card.json()).toMatchObject({
       title: 'Published page',

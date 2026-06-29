@@ -17,10 +17,14 @@ import {
 import { ClerkAuthService } from '../../auth/clerk.js';
 import { type Principal, ValidationError } from '@tixkit/domain';
 import {
+  normalizeSmsTemplateDocument,
+  renderSmsTemplate,
+  type SmsTemplateDocument,
+} from '@tixkit/content-message';
+import {
   renderMergeTags,
   validateMergeTags,
   countSmsSegments,
-  injectOptOutToken,
   type MergeTagContext,
   type MergeTagChannel,
 } from '@tixkit/domain/messaging';
@@ -361,9 +365,7 @@ export const messagingRoutes: FastifyPluginAsync = async (app) => {
     const smsBody = channel === 'sms' ? (text ?? subject) : text;
     const segments =
       channel === 'sms' && smsBody
-        ? countSmsSegments(
-            body.optOutToken ? injectOptOutToken(smsBody, body.optOutToken) : smsBody,
-          )
+        ? countSmsSegments(smsBody)
         : undefined;
 
     return {
@@ -549,6 +551,23 @@ export const messagingRoutes: FastifyPluginAsync = async (app) => {
         }
 
         if (body.channel === 'sms' || body.channel === 'both') {
+          const publishedSmsTemplate = await new ContentRepository(db).findPublishedSmsTemplate({
+            tenantId: principal.tenantId,
+            brandId: event.brand_id,
+            eventId,
+            key: body.templateKey,
+          });
+          if (!publishedSmsTemplate) {
+            throw new ValidationError(
+              `Published SMS content template not found: ${body.templateKey}`,
+            );
+          }
+          const smsTemplate = normalizeSmsTemplateDocument(publishedSmsTemplate.version.contentJson);
+          if (!smsTemplate) {
+            throw new ValidationError('Published SMS content template is not canonical SMS JSON', {
+              templateKey: body.templateKey,
+            });
+          }
           const smsRoutes = await new SmsProviderRouteRepository(db).findActiveByBrand(
             event.brand_id,
           );
@@ -560,10 +579,6 @@ export const messagingRoutes: FastifyPluginAsync = async (app) => {
             throw new ValidationError('No active SMS provider route for this brand');
           }
 
-          const smsBody =
-            typeof variables.body === 'string' && variables.body.trim().length > 0
-              ? variables.body
-              : body.templateKey;
           const smsRepo = new SmsJobRepository(db);
           const smsJobResults = await Promise.all(
             audienceResolution.smsDecisions.map(async (decision) => {
@@ -580,7 +595,7 @@ export const messagingRoutes: FastifyPluginAsync = async (app) => {
                     tenantId: principal.tenantId,
                     brandId: event.brand_id,
                     toPhone: attendee.phone,
-                    body: smsBody,
+                    body: renderCampaignSmsBody(smsTemplate, event, attendee, variables),
                     templateKey: body.templateKey,
                     variables: {
                       ...variables,
@@ -606,7 +621,7 @@ export const messagingRoutes: FastifyPluginAsync = async (app) => {
                   tenantId: principal.tenantId,
                   brandId: event.brand_id,
                   toPhone: attendee.phone,
-                  body: smsBody,
+                  body: renderCampaignSmsBody(smsTemplate, event, attendee, variables),
                   templateKey: body.templateKey,
                   variables: {
                     ...variables,
@@ -1061,6 +1076,48 @@ function attendeeName(attendee: { first_name: string | null; last_name: string |
   return [attendee.first_name, attendee.last_name].filter(Boolean).join(' ') || undefined;
 }
 
+function renderCampaignSmsBody(
+  document: SmsTemplateDocument,
+  event: {
+    title?: string | null;
+    starts_at?: Date | string | null;
+    ends_at?: Date | string | null;
+    timezone?: string | null;
+  },
+  attendee: MessageAttendee,
+  variables: Record<string, unknown>,
+): string {
+  const rendered = renderSmsTemplate(document, {
+    ...variables,
+    event: {
+      ...recordValue(variables.event),
+      title: event.title ?? undefined,
+      startsAt: optionalIso(event.starts_at),
+      endsAt: optionalIso(event.ends_at),
+      timezone: event.timezone ?? undefined,
+    },
+    recipient: {
+      ...recordValue(variables.recipient),
+      name: attendeeName(attendee),
+      email: attendee.email ?? undefined,
+      phone: attendee.phone ?? undefined,
+    },
+    attendee: {
+      ...recordValue(variables.attendee),
+      name: attendeeName(attendee),
+      checkedIn: attendee.status === 'checked_in',
+    },
+  });
+  if (!rendered.validation.valid) {
+    throw new ValidationError('Published SMS content template has render blockers', {
+      issues: rendered.validation.issues,
+      templateKey: document.settings.templateKey,
+      attendeeId: attendee.id,
+    });
+  }
+  return rendered.text;
+}
+
 function safeJson(value: unknown): Record<string, unknown> {
   if (!value) return {};
   if (typeof value === 'object') return value as Record<string, unknown>;
@@ -1069,6 +1126,20 @@ function safeJson(value: unknown): Record<string, unknown> {
   } catch {
     return {};
   }
+}
+
+function recordValue(value: unknown): Record<string, unknown> {
+  return value && typeof value === 'object' && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : {};
+}
+
+function optionalIso(value: unknown): string | undefined {
+  if (!value) return undefined;
+  if (value instanceof Date) return value.toISOString();
+  if (typeof value !== 'string') return undefined;
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? value : date.toISOString();
 }
 
 function safeArray(value: unknown): unknown[] {

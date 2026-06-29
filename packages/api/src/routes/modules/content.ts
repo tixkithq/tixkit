@@ -27,6 +27,11 @@ import {
   type EventPageHeadlessBlock,
   type EventPageRenderContext,
 } from '@tixkit/content-event-page';
+import {
+  normalizeSmsTemplateDocument,
+  renderSmsTemplate,
+  validateSmsTemplate,
+} from '@tixkit/content-message';
 import { ClerkAuthService } from '../../auth/clerk.js';
 
 const contentChannelSchema = z.enum(['event_page', 'email', 'sms', 'imessage', 'social_invite']);
@@ -187,11 +192,19 @@ async function loadAuthorizedDocument(
   return document;
 }
 
-function contentFromVersion(version: ContentDocumentVersion) {
+type PreviewContent = {
+  subject?: string;
+  html?: string;
+  text?: string;
+  contentJson: unknown;
+};
+
+function contentFromVersion(version: ContentDocumentVersion): PreviewContent {
   return {
     subject: version.subject,
     html: version.renderedHtml,
     text: version.renderedText,
+    contentJson: version.contentJson,
   };
 }
 
@@ -214,10 +227,11 @@ function validationFor(channel: ContentChannel, body: z.infer<typeof saveVersion
     }
     return validateEventPageDocument(document);
   }
-  const preview =
-    channel === 'sms' && body.renderedText
-      ? renderPreview(channel, RENDER_CONTRACTS[channel], { text: body.renderedText }, {})
-      : undefined;
+  if (channel === 'sms') {
+    const document = normalizeSmsTemplateDocument(body.contentJson);
+    if (!document) return invalidSmsTemplateValidation();
+    return validateSmsTemplate(document);
+  }
   return validateContentVersion(
     {
       subject: body.subject,
@@ -227,17 +241,57 @@ function validationFor(channel: ContentChannel, body: z.infer<typeof saveVersion
       renderedText: body.renderedText,
     },
     channel,
-    { smsSegmentCount: preview?.segments },
   );
+}
+
+function invalidSmsTemplateValidation() {
+  return {
+    valid: false,
+    severity: 'error' as const,
+    issues: [
+      {
+        code: 'invalid_sms_template_document',
+        message: 'SMS versions must store canonical Tixkit SMS template JSON',
+        severity: 'error' as const,
+        field: 'contentJson',
+      },
+    ],
+  };
 }
 
 function renderDocumentPreview(
   channel: ContentChannel,
-  content: { subject?: string; html?: string; text?: string },
+  content: PreviewContent,
   context: Record<string, unknown>,
   optOutToken?: string,
-): RenderOutput {
-  return renderPreview(channel, RENDER_CONTRACTS[channel], content, context, optOutToken);
+): { output: RenderOutput; validation: ReturnType<typeof validateContentVersion> } {
+  if (channel === 'sms') {
+    const document = normalizeSmsTemplateDocument(content.contentJson);
+    if (!document) {
+      throw new ValidationError('SMS preview requires canonical SMS template JSON', {
+        code: 'invalid_sms_template_document',
+      });
+    }
+    const rendered = renderSmsTemplate(document, context, { optOutToken });
+    return {
+      output: {
+        text: rendered.text,
+        segments: rendered.segments,
+      },
+      validation: rendered.validation,
+    };
+  }
+  const output = renderPreview(channel, RENDER_CONTRACTS[channel], content, context, optOutToken);
+  const validation = validateContentVersion(
+    {
+      subject: content.subject,
+      contentJson: content.contentJson,
+      renderedHtml: content.html,
+      renderedText: content.text,
+    },
+    channel,
+  );
+  return { output, validation };
 }
 
 function toPublicContentPage(input: {
@@ -337,17 +391,19 @@ function isPubliclyReadableEvent(event: { status: string; visibility?: string | 
   return event.status === 'published' && event.visibility !== 'private';
 }
 
-function publicEventUrl(eventId: string): string {
+function publicEventUrl(event: { id: string; slug?: string | null }, host?: string): string {
+  if (host && event.slug) return `https://${host}/${encodeURIComponent(event.slug)}`;
   const base = process.env.PUBLIC_CHECKOUT_URL?.trim() || process.env.CHECKOUT_PUBLIC_URL?.trim();
-  if (!base) return `https://checkout.tixkit.com/e/${encodeURIComponent(eventId)}`;
+  if (!base) return `https://checkout.tixkit.com/e/${encodeURIComponent(event.id)}`;
   try {
-    return new URL(`/e/${encodeURIComponent(eventId)}`, base).toString();
+    return new URL(`/e/${encodeURIComponent(event.id)}`, base).toString();
   } catch {
-    return `https://checkout.tixkit.com/e/${encodeURIComponent(eventId)}`;
+    return `https://checkout.tixkit.com/e/${encodeURIComponent(event.id)}`;
   }
 }
 
-function checkoutUrl(eventId: string): string {
+function checkoutUrl(eventId: string, host?: string): string {
+  if (host) return `https://${host}/checkout?eventId=${encodeURIComponent(eventId)}`;
   const base = process.env.PUBLIC_CHECKOUT_URL?.trim() || process.env.CHECKOUT_PUBLIC_URL?.trim();
   if (!base) return `https://checkout.tixkit.com/checkout?eventId=${encodeURIComponent(eventId)}`;
   try {
@@ -449,13 +505,15 @@ export const contentRoutes: FastifyPluginAsync = async (app) => {
     assertChannelAvailable(document.channel);
     const body = parseBody(saveVersionSchema, request.body);
     const validation = validationFor(document.channel, body);
+    const smsDocument =
+      document.channel === 'sms' ? normalizeSmsTemplateDocument(body.contentJson) : undefined;
     const version = await repo().createVersion({
       documentId,
       subject: body.subject,
       previewText: body.previewText,
       contentJson: body.contentJson,
       renderedHtml: body.renderedHtml,
-      renderedText: body.renderedText,
+      renderedText: smsDocument ? smsDocument.editor.body : body.renderedText,
       variables: variableDefinitionsForChannel(document.channel),
       validation,
       createdBy: request.principal!.id,
@@ -474,17 +532,17 @@ export const contentRoutes: FastifyPluginAsync = async (app) => {
     }
     const content = version
       ? contentFromVersion(version)
-      : { subject: body.subject, html: body.renderedHtml, text: body.renderedText };
-    const output = renderDocumentPreview(document.channel, content, body.context, body.optOutToken);
-    const validation = validateContentVersion(
-      {
-        subject: content.subject,
-        contentJson: version?.contentJson ?? body.contentJson,
-        renderedHtml: content.html,
-        renderedText: content.text,
-      },
+      : {
+          subject: body.subject,
+          html: body.renderedHtml,
+          text: body.renderedText,
+          contentJson: body.contentJson,
+        };
+    const { output, validation } = renderDocumentPreview(
       document.channel,
-      { smsSegmentCount: output.segments },
+      content,
+      body.context,
+      body.optOutToken,
     );
     return { channel: document.channel, output, validation };
   });
@@ -520,12 +578,17 @@ export const contentRoutes: FastifyPluginAsync = async (app) => {
     if (!version || version.documentId !== documentId) {
       throw new NotFoundError('ContentDocumentVersion', body.versionId);
     }
-    const output = renderDocumentPreview(
+    const { output, validation } = renderDocumentPreview(
       document.channel,
       contentFromVersion(version),
       body.context,
       body.optOutToken,
     );
+    if (document.channel === 'sms' && !validation.valid) {
+      throw new ValidationError('SMS test send has render blockers', {
+        issues: validation.issues,
+      });
+    }
     const send = await repo().recordTestSend({
       tenantId: principalTenant(request.principal!),
       documentId,
@@ -550,12 +613,13 @@ export const publicContentRoutes: FastifyPluginAsync = async (app) => {
 
   async function contextForEvent(event: {
     id: string;
+    slug?: string | null;
     title: string;
     starts_at?: Date | string | null;
     ends_at?: Date | string | null;
     timezone?: string | null;
     venue?: unknown;
-  }): Promise<EventPageRenderContext> {
+  }, host?: string): Promise<EventPageRenderContext> {
     const venue = venueContext(event.venue);
     const tickets = await new TicketTypeRepository(db).findPublicByEvent(event.id);
     return {
@@ -566,8 +630,8 @@ export const publicContentRoutes: FastifyPluginAsync = async (app) => {
         timezone: event.timezone ?? undefined,
         venueName: venue.name,
         venueCity: venue.city,
-        publicUrl: publicEventUrl(event.id),
-        checkoutUrl: checkoutUrl(event.id),
+        publicUrl: publicEventUrl(event, host),
+        checkoutUrl: checkoutUrl(event.id, host),
       },
       tickets: tickets.map((ticket) => ({
         id: ticket.id,
@@ -579,7 +643,7 @@ export const publicContentRoutes: FastifyPluginAsync = async (app) => {
     };
   }
 
-  async function loadPublicPage(eventId: string, locale?: string): Promise<PublicContentPage> {
+  async function loadPublicPage(eventId: string, locale?: string, host?: string): Promise<PublicContentPage> {
     const event = await new EventRepository(db).findById(eventId);
     if (!event || !isPubliclyReadableEvent(event)) throw new NotFoundError('Event', eventId);
     const result = await new ContentRepository(db).findPublishedEventPage({
@@ -588,10 +652,10 @@ export const publicContentRoutes: FastifyPluginAsync = async (app) => {
       locale,
     });
     if (!result) throw new NotFoundError('ContentDocument', eventId);
-    return toPublicContentPage({ ...result, context: await contextForEvent(event) });
+    return toPublicContentPage({ ...result, context: await contextForEvent(event, host) });
   }
 
-  async function resolveEventIdBySlug(slug: string, host: unknown): Promise<string> {
+  async function resolveEventBySlug(slug: string, host: unknown): Promise<{ id: string; host: string }> {
     const normalizedHost = normalizeHost(host);
     if (!normalizedHost) throw new NotFoundError('Event', slug);
     const brandDomain = await db
@@ -622,7 +686,7 @@ export const publicContentRoutes: FastifyPluginAsync = async (app) => {
       .where('id', '=', event.tenant_id)
       .executeTakeFirst();
     if (!tenant || tenant.plan === 'free') throw new NotFoundError('Event', slug);
-    return event.id;
+    return { id: event.id, host: normalizedHost };
   }
 
   app.get('/public/events/:eventId/page', async (request) => {
@@ -640,8 +704,8 @@ export const publicContentRoutes: FastifyPluginAsync = async (app) => {
   app.get('/public/events/by-slug/:slug/page', async (request) => {
     const { slug } = request.params as { slug: string };
     const query = request.query as { host?: unknown; locale?: string };
-    const eventId = await resolveEventIdBySlug(slug, query.host);
-    return loadPublicPage(eventId, query.locale);
+    const event = await resolveEventBySlug(slug, query.host);
+    return loadPublicPage(event.id, query.locale, event.host);
   });
 
   app.get('/public/events/:eventId/discovery-card', async (request) => {
