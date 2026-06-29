@@ -262,10 +262,7 @@ function JobTable({
         id: stringField(row.job, 'id'),
         channel: row.channel,
         status: stringField(row.job, 'status'),
-        subject:
-          stringField(row.job, 'to_email') ||
-          stringField(row.job, 'to_phone') ||
-          stringField(row.job, 'template_key'),
+        subject: stringField(row.job, 'recipient') || stringField(row.job, 'template_key'),
         updatedAt: stringField(row.job, 'updated_at'),
       }))}
     />

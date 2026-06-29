@@ -1,4 +1,4 @@
-import { render, waitFor } from '@testing-library/react';
+import { fireEvent, render, waitFor } from '@testing-library/react';
 import '@testing-library/jest-dom/vitest';
 import * as React from 'react';
 import { JSDOM } from 'jsdom';
@@ -34,10 +34,14 @@ Object.defineProperty(window, 'matchMedia', {
 
 afterEach(() => {
   document.body.innerHTML = '';
-  vi.clearAllMocks();
+  for (const mock of Object.values(adminApiMock)) {
+    mock.mockReset();
+  }
 });
 
 type MessagesAdminApiMock = {
+  getEvent: ReturnType<typeof vi.fn>;
+  listContentDocuments: ReturnType<typeof vi.fn>;
   listMessages: ReturnType<typeof vi.fn>;
   previewMessageRecipients: ReturnType<typeof vi.fn>;
   sendMessage: ReturnType<typeof vi.fn>;
@@ -52,6 +56,8 @@ function getAdminApiMock(): MessagesAdminApiMock {
     messagesAdminApiMock?: MessagesAdminApiMock;
   };
   globalWithMock.messagesAdminApiMock ??= {
+    getEvent: vi.fn(),
+    listContentDocuments: vi.fn(),
     listMessages: vi.fn(),
     previewMessageRecipients: vi.fn(),
     sendMessage: vi.fn(),
@@ -68,6 +74,49 @@ vi.mock('@/lib/api', () => ({
 }));
 
 const adminApiMock = getAdminApiMock();
+
+vi.mock('next/link', () => ({
+  default: ({ href, children, ...props }: { href: string; children: React.ReactNode }) => (
+    <a href={href} {...props}>
+      {children}
+    </a>
+  ),
+}));
+
+vi.mock('@/components/ui/select', () => ({
+  Select: ({
+    value,
+    defaultValue,
+    onValueChange,
+    disabled,
+    children,
+  }: {
+    value?: string;
+    defaultValue?: string;
+    onValueChange?: (value: string) => void;
+    disabled?: boolean;
+    children: React.ReactNode;
+  }) => (
+    <select
+      value={value ?? defaultValue}
+      disabled={disabled}
+      onChange={(event) => onValueChange?.(event.currentTarget.value)}
+    >
+      {children}
+    </select>
+  ),
+  SelectTrigger: ({ children }: { children: React.ReactNode }) => <>{children}</>,
+  SelectValue: ({ placeholder }: { placeholder?: string }) =>
+    placeholder ? (
+      <option value="" disabled>
+        {placeholder}
+      </option>
+    ) : null,
+  SelectContent: ({ children }: { children: React.ReactNode }) => <>{children}</>,
+  SelectItem: ({ value, children }: { value: string; children: React.ReactNode }) => (
+    <option value={value}>{children}</option>
+  ),
+}));
 
 vi.mock('@/components/ui/dialog', () => ({
   Dialog: ({ open, children }: { open?: boolean; children: React.ReactNode }) =>
@@ -86,8 +135,72 @@ vi.mock('sonner', () => ({
   },
 }));
 
+function contentDocument(
+  overrides: Partial<{
+    id: string;
+    channel: 'email' | 'sms';
+    key: string;
+    name: string;
+    eventId?: string;
+    status: 'draft' | 'published' | 'archived';
+    publishedVersionId?: string;
+  }> = {},
+) {
+  const channel = overrides.channel ?? 'email';
+  const id = overrides.id ?? `cdoc_${channel}`;
+  return {
+    id,
+    tenantId: 'tnt_1',
+    organizationId: 'org_1',
+    brandId: 'brd_1',
+    eventId: overrides.eventId ?? 'evt_1',
+    channel,
+    key: overrides.key ?? `${channel}-reminder`,
+    name: overrides.name ?? `${channel === 'email' ? 'Email' : 'SMS'} reminder`,
+    status: overrides.status ?? 'published',
+    locale: 'en',
+    publishedVersionId: overrides.publishedVersionId ?? `cver_${channel}`,
+    createdAt: '2026-01-01T00:00:00.000Z',
+    updatedAt: '2026-01-01T00:00:00.000Z',
+  };
+}
+
+function mockContentDocuments(input?: {
+  email?: ReturnType<typeof contentDocument>[];
+  sms?: ReturnType<typeof contentDocument>[];
+  brandEmail?: ReturnType<typeof contentDocument>[];
+  brandSms?: ReturnType<typeof contentDocument>[];
+}) {
+  const email = input?.email ?? [
+    contentDocument({ channel: 'email', key: 'door-reminder-email', name: 'Door reminder email' }),
+  ];
+  const sms = input?.sms ?? [
+    contentDocument({ channel: 'sms', key: 'door-reminder-sms', name: 'Door reminder SMS' }),
+  ];
+  const brandEmail = input?.brandEmail ?? [];
+  const brandSms = input?.brandSms ?? [];
+  adminApiMock.getEvent.mockResolvedValue({
+    ok: true,
+    data: { id: 'evt_1', title: 'Demo Event', brandId: 'brd_1' },
+  });
+  adminApiMock.listContentDocuments.mockImplementation(
+    (request?: { channel?: 'email' | 'sms'; eventId?: string; brandId?: string }) => {
+      const items =
+        request?.channel === 'sms'
+          ? request.eventId
+            ? sms
+            : brandSms
+          : request?.eventId
+            ? email
+            : brandEmail;
+      return Promise.resolve({ ok: true, data: { items, nextCursor: null, hasMore: false } });
+    },
+  );
+}
+
 describe('MessageFormDialog', () => {
   it('renders an API-backed recipient preview before send', async () => {
+    mockContentDocuments();
     adminApiMock.previewMessageRecipients.mockResolvedValue({
       ok: true,
       data: {
@@ -116,11 +229,145 @@ describe('MessageFormDialog', () => {
     expect(adminApiMock.previewMessageRecipients).toHaveBeenCalledWith('evt_1', {
       audience: 'all',
       channel: 'email',
-      templateKey: 'admin-campaign',
     });
     expect(view.getByText(/Alice Buyer/)).toBeInTheDocument();
     expect(view.getByText(/\+100 more eligible/)).toBeInTheDocument();
     expect(view.getByText(/1 suppressed/)).toBeInTheDocument();
+  });
+
+  it('blocks sending when the recipient preview has no eligible recipients', async () => {
+    mockContentDocuments();
+    adminApiMock.previewMessageRecipients.mockResolvedValue({
+      ok: true,
+      data: {
+        audience: 'not_checked_in',
+        audienceCount: 3,
+        eligibleCount: 0,
+        suppressedRecipients: 2,
+        consentExclusions: 2,
+        skippedRecipients: 1,
+        recipients: [],
+      },
+    });
+
+    const view = render(<MessageFormDialog eventId="evt_1" open onOpenChange={() => undefined} />);
+
+    await waitFor(() => {
+      expect(
+        view.getByText('No eligible recipients match this channel and audience.'),
+      ).toBeInTheDocument();
+    });
+    const sendButton = view.getByRole('button', { name: 'Send Campaign' });
+    expect(sendButton).toBeDisabled();
+
+    fireEvent.change(view.getByLabelText('Message'), { target: { value: 'Doors open at 7.' } });
+    fireEvent.submit(sendButton.closest('form')!);
+
+    expect(adminApiMock.sendMessage).not.toHaveBeenCalled();
+  });
+
+  it('recovers from recipient preview transport failures without leaving send enabled', async () => {
+    mockContentDocuments();
+    adminApiMock.previewMessageRecipients.mockRejectedValue(new Error('Preview network failed'));
+
+    const view = render(<MessageFormDialog eventId="evt_1" open onOpenChange={() => undefined} />);
+
+    await waitFor(() => {
+      expect(view.getByText('Preview network failed')).toBeInTheDocument();
+    });
+    expect(view.getByText('Unavailable')).toBeInTheDocument();
+    expect(view.getByRole('button', { name: 'Send Campaign' })).toBeDisabled();
+  });
+
+  it('sends the selected published email template key', async () => {
+    mockContentDocuments();
+    adminApiMock.previewMessageRecipients.mockResolvedValue({
+      ok: true,
+      data: {
+        audience: 'all_attendees',
+        audienceCount: 2,
+        eligibleCount: 2,
+        suppressedRecipients: 0,
+        consentExclusions: 0,
+        skippedRecipients: 0,
+        recipients: [],
+      },
+    });
+    adminApiMock.sendMessage.mockResolvedValue({
+      ok: true,
+      data: {
+        id: 'msg_1',
+        eventId: 'evt_1',
+        name: 'door-reminder-email',
+        emailTemplateKey: 'door-reminder-email',
+        channel: 'email',
+        status: 'queued',
+        audience: 'all_attendees',
+        audienceKey: 'all',
+        audienceAttendeeIds: [],
+        audienceLabel: 'All attendees',
+        queuedCount: 2,
+        sentCount: 0,
+        deliveredCount: 0,
+        failedCount: 0,
+        suppressedCount: 0,
+        createdAt: '2026-01-01T00:00:00.000Z',
+      },
+    });
+
+    const view = render(<MessageFormDialog eventId="evt_1" open onOpenChange={() => undefined} />);
+
+    await waitFor(() => {
+      expect(view.getByText('2 recipients')).toBeInTheDocument();
+    });
+    await waitFor(() => {
+      expect(adminApiMock.listContentDocuments).toHaveBeenCalled();
+    });
+
+    fireEvent.change(view.getByLabelText('Message'), { target: { value: 'Doors open at 7.' } });
+    fireEvent.submit(view.getByRole('button', { name: 'Send Campaign' }).closest('form')!);
+
+    await waitFor(() => {
+      expect(adminApiMock.sendMessage).toHaveBeenCalledWith('evt_1', {
+        channel: 'email',
+        emailTemplateKey: 'door-reminder-email',
+        smsTemplateKey: undefined,
+        audience: 'all',
+        variables: { body: 'Doors open at 7.' },
+      });
+    });
+  });
+
+  it('disables send and links to the email editor when no published email template exists', async () => {
+    mockContentDocuments({ email: [], sms: [] });
+    adminApiMock.previewMessageRecipients.mockResolvedValue({
+      ok: true,
+      data: {
+        audience: 'all_attendees',
+        audienceCount: 2,
+        eligibleCount: 2,
+        suppressedRecipients: 0,
+        consentExclusions: 0,
+        skippedRecipients: 0,
+        recipients: [],
+      },
+    });
+
+    const view = render(<MessageFormDialog eventId="evt_1" open onOpenChange={() => undefined} />);
+
+    await waitFor(() => {
+      expect(
+        view.getAllByText('Publish an email template before sending email campaigns.')[0],
+      ).toBeInTheDocument();
+    });
+    expect(view.getByRole('link', { name: 'Create/edit email template' })).toHaveAttribute(
+      'href',
+      '/events/evt_1/content/email',
+    );
+
+    fireEvent.change(view.getByLabelText('Message'), { target: { value: 'Doors open at 7.' } });
+    expect(view.getByRole('button', { name: 'Send Campaign' })).toBeDisabled();
+    expect(adminApiMock.sendMessage).not.toHaveBeenCalled();
   });
 });
 
@@ -200,7 +447,7 @@ describe('MessageCampaignDetailPanel', () => {
           job: {
             id: 'emj_1',
             status: 'sent',
-            to_email: 'alice@example.test',
+            recipient: 'a***@example.test',
             updated_at: '2026-01-01T00:00:00.000Z',
           },
         },

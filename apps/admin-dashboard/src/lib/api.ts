@@ -689,6 +689,9 @@ export type AdminMessageCampaign = {
   id: string;
   eventId: string;
   name: string;
+  templateKey?: string;
+  emailTemplateKey?: string;
+  smsTemplateKey?: string;
   channel: MessageChannel;
   status: MessageStatus;
   audience: 'all_attendees' | 'checked_in' | 'not_checked_in' | 'ticket_type' | 'custom';
@@ -722,7 +725,6 @@ export type MessageRecipientPreview = {
 
 export type AdminMessageCampaignDetail = AdminMessageCampaign & {
   updatedAt?: string;
-  templateKey: string;
   queuedEmailJobs: number;
   queuedSmsJobs: number;
   suppressedRecipients: number;
@@ -759,6 +761,8 @@ type BackendMessageCampaign = {
   id: string;
   eventId: string;
   templateKey?: string;
+  emailTemplateKey?: string;
+  smsTemplateKey?: string;
   channel: MessageChannel;
   status: MessageStatus;
   audience?: AdminMessageCampaign['audience'];
@@ -811,10 +815,20 @@ function normalizeMessageCampaign(campaign: BackendMessageCampaign): AdminMessag
   const suppressedCount = Number(campaign.suppressedRecipients ?? 0);
   const audience = campaign.audience ?? 'all_attendees';
   const audienceAttendeeIds = campaign.audienceAttendeeIds ?? [];
+  const templateName =
+    campaign.templateKey ??
+    (campaign.emailTemplateKey && campaign.smsTemplateKey
+      ? campaign.emailTemplateKey === campaign.smsTemplateKey
+        ? campaign.emailTemplateKey
+        : `${campaign.emailTemplateKey} + ${campaign.smsTemplateKey}`
+      : (campaign.emailTemplateKey ?? campaign.smsTemplateKey ?? campaign.id));
   return {
     id: campaign.id,
     eventId: campaign.eventId,
-    name: campaign.templateKey ?? campaign.id,
+    name: templateName,
+    templateKey: campaign.templateKey,
+    emailTemplateKey: campaign.emailTemplateKey,
+    smsTemplateKey: campaign.smsTemplateKey,
     channel: campaign.channel,
     status: campaign.status,
     audience,
@@ -836,7 +850,6 @@ function normalizeMessageCampaignDetail(
   return {
     ...normalizeMessageCampaign(campaign),
     updatedAt: campaign.updatedAt,
-    templateKey: campaign.templateKey ?? campaign.id,
     queuedEmailJobs: Number(campaign.queuedEmailJobs ?? 0),
     queuedSmsJobs: Number(campaign.queuedSmsJobs ?? 0),
     suppressedRecipients: Number(campaign.suppressedRecipients ?? 0),
@@ -1303,14 +1316,27 @@ export type ScanTicketInput = {
   deviceId?: string;
 };
 
-export type SendMessageInput = {
-  channel: 'email' | 'sms' | 'both';
-  templateKey: string;
-  audience: 'all' | 'checked_in' | 'not_checked_in' | 'specific';
+type SendMessageAudience = 'all' | 'checked_in' | 'not_checked_in' | 'specific';
+type SendMessageBaseInput = {
+  audience: SendMessageAudience;
   attendeeIds?: string[];
   variables?: Record<string, unknown>;
 };
 
+export type SendMessageInput =
+  | (SendMessageBaseInput & {
+      channel: 'email';
+      emailTemplateKey: string;
+    })
+  | (SendMessageBaseInput & {
+      channel: 'sms';
+      smsTemplateKey: string;
+    })
+  | (SendMessageBaseInput & {
+      channel: 'both';
+      emailTemplateKey: string;
+      smsTemplateKey: string;
+    });
 export type CreateContentDocumentInput = {
   organizationId: string;
   brandId: string;
@@ -1598,7 +1624,7 @@ export type AdminApi = {
 
   previewMessageRecipients(
     eventId: string,
-    input: Pick<SendMessageInput, 'audience' | 'attendeeIds' | 'channel' | 'templateKey'>,
+    input: Pick<SendMessageInput, 'audience' | 'attendeeIds' | 'channel'>,
   ): Promise<ApiResult<MessageRecipientPreview>>;
   sendMessage(eventId: string, input: SendMessageInput): Promise<ApiResult<AdminMessageCampaign>>;
   listMessages(eventId: string): Promise<ApiResult<AdminMessageCampaign[]>>;
@@ -4777,21 +4803,16 @@ export const adminApi: AdminApi = {
           testSend: AdminContentTestSend;
           output: AdminContentRenderOutput;
           renderArtifact?: AdminContentRenderArtifact;
-        }>(
-          `/v1/content-documents/${documentId}/test-sends`,
-          {
-            method: 'POST',
-            body: JSON.stringify(input),
-          },
-        ),
+        }>(`/v1/content-documents/${documentId}/test-sends`, {
+          method: 'POST',
+          body: JSON.stringify(input),
+        }),
       () =>
         err<{
           testSend: AdminContentTestSend;
           output: AdminContentRenderOutput;
           renderArtifact?: AdminContentRenderArtifact;
-        }>(
-          apiError('fixture_unavailable', 'Content test sends require the live API', 503),
-        ),
+        }>(apiError('fixture_unavailable', 'Content test sends require the live API', 503)),
     );
   },
 
@@ -4862,11 +4883,25 @@ export const adminApi: AdminApi = {
         return ok(normalizeMessageCampaign(result.data));
       },
       () => {
+        const emailTemplateKey =
+          input.channel === 'email' || input.channel === 'both'
+            ? input.emailTemplateKey
+            : undefined;
+        const smsTemplateKey =
+          input.channel === 'sms' || input.channel === 'both' ? input.smsTemplateKey : undefined;
+        const templateName =
+          emailTemplateKey && smsTemplateKey
+            ? emailTemplateKey === smsTemplateKey
+              ? emailTemplateKey
+              : `${emailTemplateKey} + ${smsTemplateKey}`
+            : (emailTemplateKey ?? smsTemplateKey ?? 'message-campaign');
         const campaign: AdminMessageCampaign = {
           id: newFixtureId('msg'),
           eventId,
-          name: input.templateKey,
-          channel: input.channel === 'both' ? 'email' : input.channel,
+          name: templateName,
+          emailTemplateKey,
+          smsTemplateKey,
+          channel: input.channel,
           status: 'sent',
           audience:
             input.audience === 'all'
@@ -4912,7 +4947,6 @@ export const adminApi: AdminApi = {
         if (!campaign) return err(apiError('not_found', 'Message campaign not found', 404));
         return ok({
           ...campaign,
-          templateKey: campaign.name,
           queuedEmailJobs: campaign.channel === 'email' ? campaign.queuedCount : 0,
           queuedSmsJobs: campaign.channel === 'sms' ? campaign.queuedCount : 0,
           suppressedRecipients: campaign.suppressedCount,
