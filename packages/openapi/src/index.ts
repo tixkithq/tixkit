@@ -5632,6 +5632,158 @@ export const openApiSpec = {
         },
       },
     },
+    '/short-links': {
+      post: {
+        summary: 'Create a short link (C-078)',
+        security: [{ BearerAuth: [] }],
+        requestBody: {
+          required: true,
+          content: {
+            'application/json': {
+              schema: {
+                type: 'object',
+                properties: {
+                  destinationUrl: { type: 'string' },
+                  slug: { type: 'string' },
+                  brandId: { type: 'string' },
+                  utmParams: { type: 'object', additionalProperties: { type: 'string' } },
+                  expiresAt: { type: 'string', format: 'date-time' },
+                },
+                required: ['destinationUrl'],
+              },
+            },
+          },
+        },
+        responses: {
+          '200': {
+            description: 'Created short link',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  properties: {
+                    id: { type: 'string' },
+                    slug: { type: 'string' },
+                    destinationUrl: { type: 'string' },
+                    utmParams: { type: 'object', additionalProperties: { type: 'string' } },
+                    clicks: { type: 'integer' },
+                    createdAt: { type: 'string' },
+                  },
+                  required: ['id', 'slug', 'destinationUrl', 'clicks'],
+                },
+              },
+            },
+          },
+          '400': {
+            description: 'Validation error',
+            content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } },
+          },
+          '401': {
+            description: 'Unauthorized',
+            content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } },
+          },
+          '403': {
+            description: 'Forbidden',
+            content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } },
+          },
+        },
+      },
+      get: {
+        summary: 'List short links for the tenant (C-078)',
+        security: [{ BearerAuth: [] }],
+        responses: {
+          '200': {
+            description: 'Short links',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  properties: {
+                    links: {
+                      type: 'array',
+                      items: {
+                        type: 'object',
+                        properties: {
+                          id: { type: 'string' },
+                          slug: { type: 'string' },
+                          destinationUrl: { type: 'string' },
+                          clicks: { type: 'integer' },
+                          createdAt: { type: 'string' },
+                        },
+                        required: ['id', 'slug', 'destinationUrl', 'clicks'],
+                      },
+                    },
+                  },
+                  required: ['links'],
+                },
+              },
+            },
+          },
+          '401': {
+            description: 'Unauthorized',
+            content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } },
+          },
+          '403': {
+            description: 'Forbidden',
+            content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } },
+          },
+        },
+      },
+    },
+    '/short-links/{id}/clicks': {
+      get: {
+        summary: 'Get privacy-safe click aggregates for a short link (C-078)',
+        security: [{ BearerAuth: [] }],
+        parameters: [
+          { name: 'id', in: 'path', required: true, schema: { type: 'string' } },
+        ],
+        responses: {
+          '200': {
+            description: 'Click aggregate',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  properties: {
+                    id: { type: 'string' },
+                    totalClicks: { type: 'integer' },
+                    byDay: { type: 'object', additionalProperties: { type: 'integer' } },
+                  },
+                  required: ['id', 'totalClicks', 'byDay'],
+                },
+              },
+            },
+          },
+          '401': {
+            description: 'Unauthorized',
+            content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } },
+          },
+          '403': {
+            description: 'Forbidden',
+            content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } },
+          },
+        },
+      },
+    },
+    '/s/{slug}': {
+      get: {
+        summary: 'Resolve a short link and redirect (C-078)',
+        parameters: [
+          { name: 'slug', in: 'path', required: true, schema: { type: 'string' } },
+        ],
+        responses: {
+          '302': { description: 'Redirect to the destination URL' },
+          '404': {
+            description: 'Short link not found',
+            content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } },
+          },
+          '410': {
+            description: 'Short link has expired',
+            content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } },
+          },
+        },
+      },
+    },
   },
 } as const;
 

@@ -1165,6 +1165,27 @@ export interface MarketingIntegrationTable {
   updated_at: Timestamp;
 }
 
+export interface ShortLinkTable {
+  id: string;
+  tenant_id: string;
+  brand_id: string | null;
+  slug: string;
+  destination_url: string;
+  utm_params: string | null;
+  clicks: number;
+  expires_at: Timestamp | null;
+  created_at: Timestamp;
+  updated_at: Timestamp;
+}
+
+export interface LinkClickTable {
+  id: string;
+  short_link_id: string;
+  tenant_id: string;
+  day_bucket: string;
+  created_at: Timestamp;
+}
+
 export interface DB {
   tenants: TenantTable;
   organizations: OrganizationTable;
@@ -1242,4 +1263,6 @@ export interface DB {
   oauth_refresh_tokens: OAuthRefreshTokenTable;
   oauth_access_tokens: OAuthAccessTokenTable;
   marketing_integrations: MarketingIntegrationTable;
+  short_links: ShortLinkTable;
+  link_clicks: LinkClickTable;
 }

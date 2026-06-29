@@ -22,6 +22,7 @@ import { webhookRoutes } from './routes/modules/webhooks.js';
 import { developerRoutes } from './routes/modules/developer.js';
 import { oauthAuthorizeRoutes, oauthTokenRoutes } from './routes/modules/oauth.js';
 import { messagingRoutes } from './routes/modules/messaging.js';
+import { shortLinkRoutes, shortLinkRedirectRoutes } from './routes/modules/short-links.js';
 import { reportingRoutes } from './routes/modules/reporting.js';
 import { privacyRoutes } from './routes/modules/privacy.js';
 import { clerkWebhookRoutes } from './routes/modules/clerk-webhooks.js';
@@ -186,6 +187,7 @@ export async function buildApp(): Promise<FastifyInstance> {
     await publicGroup.register(publicUploadRoutes, { prefix: '/v1' });
     await publicGroup.register(publicWaitlistRoutes, { prefix: '/v1' });
     await publicGroup.register(oauthTokenRoutes, { prefix: '/v1' });
+    await publicGroup.register(shortLinkRedirectRoutes, { prefix: '/v1' });
   });
 
   // Authenticated admin/integration routes (Clerk user, API key, or scanner device)
@@ -201,6 +203,7 @@ export async function buildApp(): Promise<FastifyInstance> {
     await authenticated.register(developerRoutes, { prefix: '/v1' });
     await authenticated.register(oauthAuthorizeRoutes, { prefix: '/v1' });
     await authenticated.register(messagingRoutes, { prefix: '/v1' });
+    await authenticated.register(shortLinkRoutes, { prefix: '/v1' });
     await authenticated.register(reportingRoutes, { prefix: '/v1' });
     await authenticated.register(privacyRoutes, { prefix: '/v1' });
     await authenticated.register(questionRoutes, { prefix: '/v1' });

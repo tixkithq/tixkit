@@ -25,3 +25,4 @@ export { WebhookDeliveryEndpointHistoryIndexMigration } from './0024_webhook_del
 export { PaymentAccountsUniqueMigration } from './0025_payment_accounts_unique.js';
 export { WebhookDeliveryAttemptIdentityMigration } from './0026_webhook_delivery_attempt_identity.js';
 export { WebhookDeliveryReplayIdentityMigration } from './0027_webhook_delivery_replay_identity.js';
+export { ShortLinksMigration } from './0028_short_links.js';
