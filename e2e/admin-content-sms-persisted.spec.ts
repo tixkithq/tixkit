@@ -2,7 +2,7 @@ import { type APIResponse, type Page, type TestInfo } from '@playwright/test';
 import { test, expect, requireReachable } from './fixtures/validation-test';
 import { expectNoAxeViolations } from './helpers/axe';
 import { adminBaseUrl, apiBaseUrl } from './helpers/env';
-import { devBrandId, devOrganizationId } from './helpers/seed';
+import { devBrandId, devOrganizationId, seedSmsCaptureProviderRoute } from './helpers/seed';
 
 const desktopViewport = { width: 1440, height: 1000 } as const;
 const mobileViewport = { width: 390, height: 844 } as const;
@@ -109,6 +109,7 @@ test.describe('persisted admin SMS content editor', () => {
   }, testInfo) => {
     await requireReachable(page, adminBaseUrl, 'admin dashboard');
     await requireReachable(page, `${apiBaseUrl}/health`, 'api');
+    await seedSmsCaptureProviderRoute();
 
     const suffix = `${testInfo.workerIndex}-${Date.now()}`;
     const event = await seedContentEvent(page, suffix);

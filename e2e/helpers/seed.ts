@@ -48,6 +48,54 @@ export type SeededMessagingPrerequisites = {
   templateKey: string;
 };
 
+export async function seedSmsCaptureProviderRoute(): Promise<void> {
+  const now = new Date();
+  const senderIdentityId = 'ssi_content_sms_e2e';
+  const providerRouteId = 'spr_content_sms_e2e';
+
+  await withE2eDb(async (db) => {
+    await db
+      .insertInto('sms_sender_identities')
+      .values({
+        id: senderIdentityId,
+        tenant_id: devTenantId,
+        brand_id: devBrandId,
+        sender: '+15550000001',
+        kind: 'phone_number',
+        provider_type: 'capture',
+        provider_sender_id: 'capture-sender',
+        verified: true,
+        verified_at: now,
+        created_at: now,
+        updated_at: now,
+      })
+      .onConflict((oc) => oc.column('id').doNothing())
+      .execute();
+
+    await db
+      .insertInto('sms_provider_routes')
+      .values({
+        id: providerRouteId,
+        tenant_id: devTenantId,
+        brand_id: devBrandId,
+        provider_type: 'capture',
+        credentials_ref: 'capture',
+        sender_identity_id: senderIdentityId,
+        priority: 0,
+        is_fallback: false,
+        rate_limit_per_hour: null,
+        allowed_categories: JSON.stringify(['bulk']),
+        status: 'active',
+        smoke_send_verified: true,
+        webhook_url: null,
+        created_at: now,
+        updated_at: now,
+      })
+      .onConflict((oc) => oc.column('id').doNothing())
+      .execute();
+  });
+}
+
 export type SeededPaidRefundableOrder = {
   event: { id: string; title: string };
   ticketType: { id: string; name: string };
