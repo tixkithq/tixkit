@@ -8,7 +8,6 @@ import { routes } from '@/lib/routes';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Skeleton } from '@/components/ui/skeleton';
-import { Badge } from '@/components/ui/badge';
 import { useAdminData } from '@/hooks/use-admin-data';
 import { ApiErrorState } from '@/components/api-error-state';
 
@@ -112,17 +111,21 @@ export function DeveloperOverview() {
           </CardTitle>
         </CardHeader>
         <CardContent className="space-y-3">
-          <div className="flex items-center justify-between rounded-lg border p-3">
+          <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border p-3">
             <div className="flex items-center gap-3">
               <Code2 className="size-5 text-muted-foreground" />
               <div>
                 <p className="font-medium">API Reference</p>
-                <p className="text-sm text-muted-foreground">Full REST API documentation</p>
+                <p className="text-sm text-muted-foreground">
+                  Keys, scopes, idempotency, and server-side integration steps
+                </p>
               </div>
             </div>
-            <Badge variant="outline">Coming soon</Badge>
+            <Button variant="outline" size="sm" asChild>
+              <Link href={`${routes.help}#developer-api`}>Open guide</Link>
+            </Button>
           </div>
-          <div className="flex items-center justify-between rounded-lg border p-3">
+          <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border p-3">
             <div className="flex items-center gap-3">
               <Webhook className="size-5 text-muted-foreground" />
               <div>
@@ -132,7 +135,9 @@ export function DeveloperOverview() {
                 </p>
               </div>
             </div>
-            <Badge variant="outline">Coming soon</Badge>
+            <Button variant="outline" size="sm" asChild>
+              <Link href={`${routes.help}#developer-api`}>Open guide</Link>
+            </Button>
           </div>
         </CardContent>
       </Card>

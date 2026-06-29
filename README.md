@@ -289,6 +289,7 @@ End-to-end suites run across three browsers and include accessibility assertions
 ## Documentation
 
 - [API reference](docs/api-reference.md)
+- [Admin dashboard user guide](docs/admin-dashboard-user-guide.md)
 - [SDK guides](docs/sdk-guides/README.md)
 - [Widget embed guide](docs/widget-embed-guide.md)
 - [Webhook guide](docs/webhook-guide.md)
