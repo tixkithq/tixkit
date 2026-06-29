@@ -139,6 +139,24 @@ describe('widget lifecycle events (runtime)', () => {
     );
   });
 
+  it('uses crypto byte generation for widget visitor IDs when randomUUID is unavailable', () => {
+    vi.stubGlobal('crypto', {
+      getRandomValues: vi.fn((bytes: Uint8Array) => {
+        bytes.forEach((_, index) => {
+          bytes[index] = index;
+        });
+        return bytes;
+      }),
+    });
+    const el = createWidget({ 'reporting-api-url': 'https://api.test' });
+
+    el.connectedCallback();
+
+    const body = readWidgetImpressionBody();
+    expect(body.visitorId).toBe('visitor_000102030405060708090a0b0c0d0e0f');
+    expect(window.localStorage.getItem('tixkit:visitor-id')).toBe(body.visitorId);
+  });
+
   it('does not send raw invalid widget impression referrers', () => {
     window.history.replaceState({}, '', '/events/evt_demo?token=checkout-token#payment');
     setDocumentReferrer('not a url with token=ref-token');

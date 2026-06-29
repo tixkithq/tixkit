@@ -64,6 +64,16 @@ describe('observability redaction', () => {
       ),
     ).toBe('failed for [REDACTED] with Bearer [REDACTED] and client_secret=[REDACTED]');
   });
+
+  it('redacts common sensitive query parameter aliases from strings', () => {
+    expect(
+      redactString(
+        'https://checkout.example.test/callback?access_token=access-123&refresh_token=refresh-123&id_token=id-123&api_key=key-123&password=pass-123&email=buyer@example.com&phone=15551234567&safe=value',
+      ),
+    ).toBe(
+      'https://checkout.example.test/callback?access_token=[REDACTED]&refresh_token=[REDACTED]&id_token=[REDACTED]&api_key=[REDACTED]&password=[REDACTED]&email=[REDACTED]&phone=[REDACTED]&safe=value',
+    );
+  });
 });
 
 describe('OpenTelemetry runtime', () => {

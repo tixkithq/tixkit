@@ -25,7 +25,7 @@ const EMAIL_PATTERN = /[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/gi;
 const SECRET_VALUE_PATTERN =
   /(bearer\s+)[A-Za-z0-9._~+/=-]+|(sk|pk|rk|tk|whsec|telnyx)_[A-Za-z0-9._~+/=-]+/gi;
 const SENSITIVE_QUERY_PARAM_PATTERN =
-  /(^|[?&#\s])((?:payment_intent_)?client_secret|code|token)=([^&#\s]*)/gi;
+  /(^|[?&#\s])((?:payment_intent_)?client_secret|access_token|refresh_token|id_token|api[_-]?key|password|email|phone|code|token)=([^&#\s]*)/gi;
 
 let sdk: NodeSDK | undefined;
 
