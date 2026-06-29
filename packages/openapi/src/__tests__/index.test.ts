@@ -149,7 +149,24 @@ describe('openApiSpec', () => {
     expect(
       openApiSpec.paths['/check-ins/sync'].post.requestBody.content['application/json'].schema
         .properties.scans.maxItems,
-    ).toBe(500);
+    ).toBe(100_000);
+    expect(openApiSpec.paths['/check-ins/bulk-sync-jobs'].post.parameters).toContainEqual({
+      $ref: '#/components/parameters/RequiredIdempotencyKey',
+    });
+    expect(
+      openApiSpec.paths['/check-ins/bulk-sync-jobs'].post.requestBody.content['application/json']
+        .schema.properties.totalScans.maximum,
+    ).toBe(250_000);
+    expect(
+      openApiSpec.paths['/check-ins/bulk-sync-jobs/{jobId}/chunks/{sequence}'].put.requestBody
+        .content['application/json'].schema.properties.scans.maxItems,
+    ).toBe(50_000);
+    expect(openApiSpec.components.schemas.BulkSyncJob.properties).not.toHaveProperty('results');
+    expect(openApiSpec.components.schemas.BulkSyncJob.properties.sampleErrors.maxItems).toBe(25);
+    expect(openApiSpec.components.schemas.BulkSyncErrorSample.properties).not.toHaveProperty(
+      'qrHash',
+    );
+    expect(openApiSpec.components.schemas.BulkSyncErrorSample.required).not.toContain('qrHash');
   });
 
   it('documents remaining implemented backend route groups', () => {
@@ -189,6 +206,65 @@ describe('openApiSpec', () => {
     expect(openApiSpec.components.schemas.CreateTicketTypeBatch.required).toContain('ticketType');
   });
 
+  it('documents split-key message campaign request and response contracts', () => {
+    const messagePost = openApiSpec.paths['/events/{eventId}/messages'].post;
+    const requestSchema = messagePost.requestBody.content['application/json'].schema;
+    expect(messagePost.parameters).toContainEqual({
+      $ref: '#/components/parameters/RequiredIdempotencyKey',
+    });
+    expect(requestSchema.oneOf).toHaveLength(3);
+    expect(requestSchema.oneOf.map((schema) => [...schema.required])).toEqual([
+      ['emailTemplateKey', 'audience', 'channel'],
+      ['smsTemplateKey', 'audience', 'channel'],
+      ['emailTemplateKey', 'smsTemplateKey', 'audience', 'channel'],
+    ]);
+    expect(requestSchema.oneOf[0].properties).not.toHaveProperty('templateKey');
+    expect(requestSchema.oneOf[0].properties.emailTemplateKey.maxLength).toBe(128);
+    expect(requestSchema.oneOf[1].properties.smsTemplateKey.maxLength).toBe(128);
+    expect(messagePost.responses['202'].content['application/json'].schema).toEqual({
+      $ref: '#/components/schemas/MessageQueued',
+    });
+
+    const messageQueued = openApiSpec.components.schemas.MessageQueued;
+    expect(messageQueued.properties).toMatchObject({
+      campaignId: { type: 'string' },
+      eventId: { type: 'string' },
+      emailTemplateKey: { type: 'string' },
+      smsTemplateKey: { type: 'string' },
+      status: { type: 'string' },
+      queuedEmailJobs: { type: 'integer' },
+      queuedSmsJobs: { type: 'integer' },
+    });
+    expect(messageQueued.required).toEqual(
+      expect.arrayContaining([
+        'campaignId',
+        'eventId',
+        'channel',
+        'status',
+        'audienceCount',
+        'queuedEmailJobs',
+        'queuedSmsJobs',
+        'emailJobIds',
+        'smsJobIds',
+      ]),
+    );
+    expect(messageQueued.properties).not.toHaveProperty('queued');
+    expect(messageQueued.properties).not.toHaveProperty('jobIds');
+    expect(openApiSpec.components.schemas.MessageJob.properties).not.toHaveProperty('to_email');
+    expect(openApiSpec.components.schemas.MessageJob.properties).not.toHaveProperty('to_phone');
+    expect(openApiSpec.components.schemas.MessageJob.properties).not.toHaveProperty('body');
+    expect(openApiSpec.components.schemas.MessageJob.properties).not.toHaveProperty('variables');
+    expect(openApiSpec.components.schemas.MessageProviderEvent.properties).not.toHaveProperty(
+      'raw_payload',
+    );
+
+    const renderPreviewPost = openApiSpec.paths['/events/{eventId}/messages/render-preview'].post;
+    expect(
+      renderPreviewPost.requestBody.content['application/json'].schema.additionalProperties,
+    ).toBe(false);
+    expect(renderPreviewPost.responses).toHaveProperty('400');
+  });
+
   it('documents content-studio document lifecycle contracts', () => {
     expect(openApiSpec.components.schemas.ContentDocument.properties.channel.enum).toEqual([
       'event_page',
@@ -221,7 +297,8 @@ describe('openApiSpec', () => {
       'createdAt',
     ]);
     expect(
-      openApiSpec.components.schemas.EmailTemplateDocument.properties.editor.properties.provider.enum,
+      openApiSpec.components.schemas.EmailTemplateDocument.properties.editor.properties.provider
+        .enum,
     ).toEqual(['@react-email/editor']);
     expect(openApiSpec.components.schemas.EmailTemplateDocument.example).toMatchObject({
       schemaVersion: 1,
@@ -240,9 +317,9 @@ describe('openApiSpec', () => {
         expect.objectContaining({ type: 'unsubscribe_footer' }),
       ]),
     });
-    expect(openApiSpec.components.schemas.SmsTemplateDocument.properties.editor.properties.provider.enum).toEqual([
-      '@tixkit/content-message/sms-composer',
-    ]);
+    expect(
+      openApiSpec.components.schemas.SmsTemplateDocument.properties.editor.properties.provider.enum,
+    ).toEqual(['@tixkit/content-message/sms-composer']);
     expect(openApiSpec.components.schemas.SmsTemplateDocument.example).toMatchObject({
       schemaVersion: 1,
       editor: {
@@ -281,9 +358,9 @@ describe('openApiSpec', () => {
       { $ref: '#/components/schemas/SmsTemplateDocument' },
       { type: 'object', additionalProperties: true },
     ]);
-    expect(
-      openApiSpec.paths['/content-documents'].post.responses['400'].description,
-    ).toContain('unavailable');
+    expect(openApiSpec.paths['/content-documents'].post.responses['400'].description).toContain(
+      'unavailable',
+    );
     expect(
       openApiSpec.paths['/content-documents/{documentId}/versions/{versionId}/publish'].post
         .responses['200'].content['application/json'].schema.required,
@@ -313,12 +390,12 @@ describe('openApiSpec', () => {
         'application/json'
       ].schema,
     ).toEqual({ $ref: '#/components/schemas/PublicEventDiscoveryCard' });
-    expect(openApiSpec.components.schemas.PublicContentPage.properties.document.properties).not.toHaveProperty(
-      'tenantId',
-    );
-    expect(openApiSpec.components.schemas.PublicContentPage.properties.version.properties).not.toHaveProperty(
-      'contentJson',
-    );
+    expect(
+      openApiSpec.components.schemas.PublicContentPage.properties.document.properties,
+    ).not.toHaveProperty('tenantId');
+    expect(
+      openApiSpec.components.schemas.PublicContentPage.properties.version.properties,
+    ).not.toHaveProperty('contentJson');
     expect(openApiSpec.components.schemas.PublicContentPage.properties.page.required).toEqual([
       'html',
       'text',

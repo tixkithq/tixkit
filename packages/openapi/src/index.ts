@@ -231,7 +231,8 @@ export const openApiSpec = {
               provider: { type: 'string', enum: ['@react-email/editor'] },
               contentHtml: {
                 type: 'string',
-                description: 'React Email editor export HTML used for round-tripping authoring state.',
+                description:
+                  'React Email editor export HTML used for round-tripping authoring state.',
               },
             },
             required: ['provider', 'contentHtml'],
@@ -664,7 +665,16 @@ export const openApiSpec = {
           error: { type: 'string' },
           createdAt: { type: 'string', format: 'date-time' },
         },
-        required: ['id', 'tenantId', 'documentId', 'versionId', 'channel', 'recipient', 'status', 'createdAt'],
+        required: [
+          'id',
+          'tenantId',
+          'documentId',
+          'versionId',
+          'channel',
+          'recipient',
+          'status',
+          'createdAt',
+        ],
       },
       Event: {
         type: 'object',
@@ -1830,6 +1840,138 @@ export const openApiSpec = {
         },
         required: ['accepted', 'duplicates', 'invalid', 'results'],
       },
+      BulkSyncErrorSample: {
+        type: 'object',
+        properties: {
+          sequence: { type: 'integer' },
+          scanIndex: { type: 'integer' },
+          outcome: { type: 'string' },
+          metadata: { type: 'object', additionalProperties: true },
+        },
+        required: ['sequence', 'scanIndex', 'outcome'],
+      },
+      BulkSyncJob: {
+        type: 'object',
+        properties: {
+          id: { type: 'string' },
+          tenantId: { type: 'string' },
+          eventId: { type: 'string' },
+          checkInListId: { type: 'string' },
+          deviceId: { type: 'string' },
+          totalChunks: { type: 'integer' },
+          totalScans: { type: ['integer', 'null'] },
+          chunksReceived: { type: 'integer' },
+          chunksProcessed: { type: 'integer' },
+          status: {
+            type: 'string',
+            enum: ['pending', 'receiving', 'processing', 'completed', 'failed'],
+          },
+          attemptCount: { type: 'integer' },
+          nextAttemptAt: { type: ['string', 'null'], format: 'date-time' },
+          leasedUntil: { type: ['string', 'null'], format: 'date-time' },
+          lastAttemptedAt: { type: ['string', 'null'], format: 'date-time' },
+          processingStartedAt: { type: ['string', 'null'], format: 'date-time' },
+          processingCompletedAt: { type: ['string', 'null'], format: 'date-time' },
+          accepted: { type: 'integer' },
+          duplicates: { type: 'integer' },
+          invalid: { type: 'integer' },
+          processingMetrics: {
+            type: 'object',
+            properties: {
+              processingDurationMs: { type: 'integer' },
+              transactionDurationMs: { type: 'integer' },
+              lockWaitMs: { type: 'integer' },
+              scanLogInsertDurationMs: { type: 'integer' },
+              ticketUpdateDurationMs: { type: 'integer' },
+              attendeeUpdateDurationMs: { type: 'integer' },
+              rowsProcessed: { type: 'integer' },
+              clockWarnings: { type: 'integer' },
+            },
+            required: [
+              'processingDurationMs',
+              'transactionDurationMs',
+              'lockWaitMs',
+              'scanLogInsertDurationMs',
+              'ticketUpdateDurationMs',
+              'attendeeUpdateDurationMs',
+              'rowsProcessed',
+              'clockWarnings',
+            ],
+          },
+          sampleErrors: {
+            type: 'array',
+            maxItems: 25,
+            items: { $ref: '#/components/schemas/BulkSyncErrorSample' },
+          },
+          failureMessage: { type: ['string', 'null'] },
+          createdAt: { type: 'string', format: 'date-time' },
+          updatedAt: { type: 'string', format: 'date-time' },
+          completedAt: { type: ['string', 'null'], format: 'date-time' },
+        },
+        required: [
+          'id',
+          'tenantId',
+          'eventId',
+          'checkInListId',
+          'deviceId',
+          'totalChunks',
+          'totalScans',
+          'chunksReceived',
+          'chunksProcessed',
+          'status',
+          'attemptCount',
+          'accepted',
+          'duplicates',
+          'invalid',
+          'processingMetrics',
+          'sampleErrors',
+        ],
+      },
+      BulkSyncChunk: {
+        type: 'object',
+        properties: {
+          id: { type: 'string' },
+          jobId: { type: 'string' },
+          sequence: { type: 'integer' },
+          scanCount: { type: 'integer' },
+          status: { type: 'string', enum: ['uploaded', 'processing', 'processed', 'failed'] },
+          accepted: { type: 'integer' },
+          duplicates: { type: 'integer' },
+          invalid: { type: 'integer' },
+          clockWarnings: { type: 'integer' },
+          sampleErrors: {
+            type: 'array',
+            maxItems: 25,
+            items: { $ref: '#/components/schemas/BulkSyncErrorSample' },
+          },
+          attemptCount: { type: 'integer' },
+          failureMessage: { type: ['string', 'null'] },
+          createdAt: { type: 'string', format: 'date-time' },
+          updatedAt: { type: 'string', format: 'date-time' },
+          processedAt: { type: ['string', 'null'], format: 'date-time' },
+        },
+        required: [
+          'id',
+          'jobId',
+          'sequence',
+          'scanCount',
+          'status',
+          'accepted',
+          'duplicates',
+          'invalid',
+          'clockWarnings',
+          'sampleErrors',
+          'attemptCount',
+        ],
+      },
+      BulkSyncChunkList: {
+        type: 'object',
+        properties: {
+          items: { type: 'array', items: { $ref: '#/components/schemas/BulkSyncChunk' } },
+          total: { type: 'integer' },
+        },
+        required: ['items', 'total'],
+      },
       AuditLog: {
         type: 'object',
         properties: {
@@ -2018,14 +2160,91 @@ export const openApiSpec = {
       MessageQueued: {
         type: 'object',
         properties: {
-          message: { type: 'string' },
+          campaignId: { type: 'string' },
           eventId: { type: 'string' },
-          templateKey: { type: 'string' },
-          channel: { type: 'string', enum: ['email'] },
-          queued: { type: 'integer' },
-          jobIds: { type: 'array', items: { type: 'string' } },
+          emailTemplateKey: { type: 'string' },
+          smsTemplateKey: { type: 'string' },
+          channel: { type: 'string', enum: ['email', 'sms', 'both'] },
+          status: { type: 'string' },
+          audienceCount: { type: 'integer' },
+          queuedEmailJobs: { type: 'integer' },
+          queuedSmsJobs: { type: 'integer' },
+          suppressedRecipients: { type: 'integer' },
+          consentExclusions: { type: 'integer' },
+          skippedRecipients: { type: 'integer' },
+          emailJobIds: { type: 'array', items: { type: 'string' } },
+          smsJobIds: { type: 'array', items: { type: 'string' } },
         },
-        required: ['message', 'eventId', 'templateKey', 'channel', 'queued', 'jobIds'],
+        required: [
+          'campaignId',
+          'eventId',
+          'channel',
+          'status',
+          'audienceCount',
+          'queuedEmailJobs',
+          'queuedSmsJobs',
+          'suppressedRecipients',
+          'consentExclusions',
+          'skippedRecipients',
+          'emailJobIds',
+          'smsJobIds',
+        ],
+      },
+      MessageJob: {
+        type: 'object',
+        properties: {
+          id: { type: 'string' },
+          tenant_id: { type: 'string' },
+          brand_id: { type: 'string' },
+          template_key: { type: 'string' },
+          template_version_id: { type: 'string' },
+          provider_route_id: { type: 'string' },
+          status: { type: 'string' },
+          priority: { type: 'string' },
+          scheduled_at: { type: ['string', 'null'], format: 'date-time' },
+          workflow_id: { type: ['string', 'null'] },
+          recipient: {
+            type: 'string',
+            description: 'Masked recipient contact, never the raw email address or phone number.',
+          },
+          created_at: { type: 'string', format: 'date-time' },
+          updated_at: { type: 'string', format: 'date-time' },
+        },
+        required: ['id', 'status'],
+      },
+      MessageJobEnvelope: {
+        type: 'object',
+        properties: {
+          channel: { type: 'string', enum: ['email', 'sms'] },
+          campaignId: { type: 'string' },
+          eventId: { type: 'string' },
+          job: { $ref: '#/components/schemas/MessageJob' },
+        },
+        required: ['channel', 'campaignId', 'eventId', 'job'],
+      },
+      MessageProviderEvent: {
+        type: 'object',
+        properties: {
+          id: { type: 'string' },
+          tenant_id: { type: ['string', 'null'] },
+          provider: { type: 'string' },
+          provider_event_id: { type: 'string' },
+          event_type: { type: 'string' },
+          provider_message_id: { type: ['string', 'null'] },
+          processed_at: { type: ['string', 'null'], format: 'date-time' },
+          created_at: { type: 'string', format: 'date-time' },
+        },
+        required: ['id', 'provider', 'provider_event_id', 'event_type', 'created_at'],
+      },
+      MessageProviderEventEnvelope: {
+        type: 'object',
+        properties: {
+          channel: { type: 'string', enum: ['email', 'sms'] },
+          campaignId: { type: 'string' },
+          eventId: { type: 'string' },
+          event: { $ref: '#/components/schemas/MessageProviderEvent' },
+        },
+        required: ['channel', 'campaignId', 'eventId', 'event'],
       },
       WebhookReplayQueued: {
         type: 'object',
@@ -2646,9 +2865,7 @@ export const openApiSpec = {
       get: {
         summary: 'Get the scanning-code format config and scanner contract version (C-079)',
         security: [{ BearerAuth: [] }],
-        parameters: [
-          { name: 'eventId', in: 'path', required: true, schema: { type: 'string' } },
-        ],
+        parameters: [{ name: 'eventId', in: 'path', required: true, schema: { type: 'string' } }],
         responses: {
           '200': {
             description: 'Code-format config and scanner contract version',
@@ -2701,9 +2918,7 @@ export const openApiSpec = {
       put: {
         summary: 'Set the scanning-code format config for an event (C-079)',
         security: [{ BearerAuth: [] }],
-        parameters: [
-          { name: 'eventId', in: 'path', required: true, schema: { type: 'string' } },
-        ],
+        parameters: [{ name: 'eventId', in: 'path', required: true, schema: { type: 'string' } }],
         requestBody: {
           required: true,
           content: {
@@ -4296,12 +4511,17 @@ export const openApiSpec = {
                   checkInListId: { type: 'string' },
                   scans: {
                     type: 'array',
-                    maxItems: 500,
+                    maxItems: 100_000,
                     items: {
                       type: 'object',
                       properties: {
                         qrHash: { type: 'string' },
-                        scannedAt: { type: 'string', format: 'date-time' },
+                        scannedAt: {
+                          type: 'string',
+                          format: 'date-time',
+                          description:
+                            'Client-captured scan time used for offline ordering. Values more than 24 hours in the future are rejected; stale or moderately future values are processed with clock drift warnings.',
+                        },
                         offline: { type: 'boolean' },
                       },
                       required: ['qrHash', 'scannedAt', 'offline'],
@@ -4318,6 +4538,129 @@ export const openApiSpec = {
             description: 'Sync results',
             content: {
               'application/json': { schema: { $ref: '#/components/schemas/SyncScanResult' } },
+            },
+          },
+        },
+      },
+    },
+    '/check-ins/bulk-sync-jobs': {
+      post: {
+        summary: 'Create an async bulk offline check-in sync job',
+        security: [{ ScannerDeviceAuth: [] }, { BearerAuth: [] }],
+        parameters: [
+          { $ref: '#/components/parameters/ScannerDeviceSecret' },
+          { $ref: '#/components/parameters/RequiredIdempotencyKey' },
+        ],
+        requestBody: {
+          required: true,
+          content: {
+            'application/json': {
+              schema: {
+                type: 'object',
+                properties: {
+                  checkInListId: { type: 'string' },
+                  deviceId: { type: 'string' },
+                  totalChunks: { type: 'integer', minimum: 1, maximum: 1_000 },
+                  totalScans: { type: 'integer', minimum: 1, maximum: 250_000 },
+                },
+                required: ['checkInListId', 'totalChunks'],
+              },
+            },
+          },
+        },
+        responses: {
+          '202': {
+            description: 'Bulk sync job created',
+            content: {
+              'application/json': { schema: { $ref: '#/components/schemas/BulkSyncJob' } },
+            },
+          },
+        },
+      },
+    },
+    '/check-ins/bulk-sync-jobs/{jobId}/chunks/{sequence}': {
+      put: {
+        summary: 'Upload a bounded async bulk sync chunk',
+        security: [{ ScannerDeviceAuth: [] }, { BearerAuth: [] }],
+        parameters: [
+          { name: 'jobId', in: 'path', required: true, schema: { type: 'string' } },
+          { name: 'sequence', in: 'path', required: true, schema: { type: 'integer' } },
+          { $ref: '#/components/parameters/ScannerDeviceSecret' },
+          { $ref: '#/components/parameters/RequiredIdempotencyKey' },
+        ],
+        requestBody: {
+          required: true,
+          content: {
+            'application/json': {
+              schema: {
+                type: 'object',
+                properties: {
+                  scans: {
+                    type: 'array',
+                    minItems: 1,
+                    maxItems: 50_000,
+                    items: {
+                      type: 'object',
+                      properties: {
+                        qrHash: { type: 'string' },
+                        scannedAt: {
+                          type: 'string',
+                          format: 'date-time',
+                          description:
+                            'Client-captured scan time used for global async ordering. Values more than 24 hours in the future are rejected; stale or moderately future values are processed with clock drift warnings.',
+                        },
+                        offline: { type: 'boolean' },
+                      },
+                      required: ['qrHash', 'scannedAt', 'offline'],
+                    },
+                  },
+                },
+                required: ['scans'],
+              },
+            },
+          },
+        },
+        responses: {
+          '202': {
+            description: 'Chunk accepted or replayed',
+            content: {
+              'application/json': { schema: { $ref: '#/components/schemas/BulkSyncChunk' } },
+            },
+          },
+        },
+      },
+    },
+    '/check-ins/bulk-sync-jobs/{jobId}': {
+      get: {
+        summary: 'Get async bulk sync job status',
+        security: [{ ScannerDeviceAuth: [] }, { BearerAuth: [] }],
+        parameters: [
+          { name: 'jobId', in: 'path', required: true, schema: { type: 'string' } },
+          { $ref: '#/components/parameters/ScannerDeviceSecret' },
+        ],
+        responses: {
+          '200': {
+            description: 'Bulk sync job status',
+            content: {
+              'application/json': { schema: { $ref: '#/components/schemas/BulkSyncJob' } },
+            },
+          },
+        },
+      },
+    },
+    '/check-ins/bulk-sync-jobs/{jobId}/chunks': {
+      get: {
+        summary: 'List async bulk sync chunk summaries',
+        security: [{ ScannerDeviceAuth: [] }, { BearerAuth: [] }],
+        parameters: [
+          { name: 'jobId', in: 'path', required: true, schema: { type: 'string' } },
+          { $ref: '#/components/parameters/ScannerDeviceSecret' },
+        ],
+        responses: {
+          '200': {
+            description: 'Bounded chunk summaries',
+            content: {
+              'application/json': { schema: { $ref: '#/components/schemas/BulkSyncChunkList' } },
             },
           },
         },
@@ -5384,6 +5727,8 @@ export const openApiSpec = {
                           tenantId: { type: 'string' },
                           brandId: { type: 'string' },
                           templateKey: { type: 'string' },
+                          emailTemplateKey: { type: 'string' },
+                          smsTemplateKey: { type: 'string' },
                           channel: { type: 'string', enum: ['email', 'sms', 'both'] },
                           status: { type: 'string' },
                           audience: {
@@ -5424,35 +5769,107 @@ export const openApiSpec = {
         },
       },
       post: {
-        summary: 'Queue event email message',
+        summary: 'Queue event message campaign',
         security: [{ BearerAuth: [] }],
-        parameters: [{ $ref: '#/components/parameters/IdempotencyKey' }],
+        parameters: [{ $ref: '#/components/parameters/RequiredIdempotencyKey' }],
         requestBody: {
           required: true,
           content: {
             'application/json': {
               schema: {
-                type: 'object',
-                properties: {
-                  eventId: { type: 'string' },
-                  templateKey: { type: 'string' },
-                  audience: {
-                    type: 'string',
-                    enum: ['all', 'checked_in', 'not_checked_in', 'specific'],
+                oneOf: [
+                  {
+                    type: 'object',
+                    additionalProperties: false,
+                    properties: {
+                      eventId: { type: 'string' },
+                      emailTemplateKey: {
+                        type: 'string',
+                        minLength: 1,
+                        maxLength: 128,
+                        pattern: '^[A-Za-z0-9][A-Za-z0-9._:-]*$',
+                      },
+                      audience: {
+                        type: 'string',
+                        enum: ['all', 'checked_in', 'not_checked_in', 'specific'],
+                      },
+                      attendeeIds: { type: 'array', maxItems: 5_000, items: { type: 'string' } },
+                      variables: {
+                        type: 'object',
+                        additionalProperties: true,
+                        maxProperties: 128,
+                      },
+                      channel: { type: 'string', enum: ['email'] },
+                    },
+                    required: ['emailTemplateKey', 'audience', 'channel'],
                   },
-                  attendeeIds: { type: 'array', items: { type: 'string' } },
-                  variables: { type: 'object' },
-                  channel: { type: 'string', enum: ['email', 'sms', 'both'] },
-                },
-                required: ['templateKey', 'audience', 'channel'],
+                  {
+                    type: 'object',
+                    additionalProperties: false,
+                    properties: {
+                      eventId: { type: 'string' },
+                      smsTemplateKey: {
+                        type: 'string',
+                        minLength: 1,
+                        maxLength: 128,
+                        pattern: '^[A-Za-z0-9][A-Za-z0-9._:-]*$',
+                      },
+                      audience: {
+                        type: 'string',
+                        enum: ['all', 'checked_in', 'not_checked_in', 'specific'],
+                      },
+                      attendeeIds: { type: 'array', maxItems: 5_000, items: { type: 'string' } },
+                      variables: {
+                        type: 'object',
+                        additionalProperties: true,
+                        maxProperties: 128,
+                      },
+                      channel: { type: 'string', enum: ['sms'] },
+                    },
+                    required: ['smsTemplateKey', 'audience', 'channel'],
+                  },
+                  {
+                    type: 'object',
+                    additionalProperties: false,
+                    properties: {
+                      eventId: { type: 'string' },
+                      emailTemplateKey: {
+                        type: 'string',
+                        minLength: 1,
+                        maxLength: 128,
+                        pattern: '^[A-Za-z0-9][A-Za-z0-9._:-]*$',
+                      },
+                      smsTemplateKey: {
+                        type: 'string',
+                        minLength: 1,
+                        maxLength: 128,
+                        pattern: '^[A-Za-z0-9][A-Za-z0-9._:-]*$',
+                      },
+                      audience: {
+                        type: 'string',
+                        enum: ['all', 'checked_in', 'not_checked_in', 'specific'],
+                      },
+                      attendeeIds: { type: 'array', maxItems: 5_000, items: { type: 'string' } },
+                      variables: {
+                        type: 'object',
+                        additionalProperties: true,
+                        maxProperties: 128,
+                      },
+                      channel: { type: 'string', enum: ['both'] },
+                    },
+                    required: ['emailTemplateKey', 'smsTemplateKey', 'audience', 'channel'],
+                  },
+                ],
               },
             },
           },
         },
         responses: {
-          '501': {
-            description: 'Email campaign delivery is not wired yet',
-            content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } },
+          '202': {
+            description: 'Message campaign queued',
+            content: {
+              'application/json': { schema: { $ref: '#/components/schemas/MessageQueued' } },
+            },
           },
           '400': {
             description: 'Validation error',
@@ -5621,7 +6038,6 @@ export const openApiSpec = {
               schema: {
                 type: 'object',
                 properties: {
-                  templateKey: { type: 'string' },
                   audience: {
                     type: 'string',
                     enum: ['all', 'checked_in', 'not_checked_in', 'specific'],
@@ -5629,7 +6045,7 @@ export const openApiSpec = {
                   attendeeIds: { type: 'array', items: { type: 'string' } },
                   channel: { type: 'string', enum: ['email', 'sms', 'both'] },
                 },
-                required: ['templateKey', 'audience', 'channel'],
+                required: ['audience', 'channel'],
               },
             },
           },
@@ -5773,7 +6189,9 @@ export const openApiSpec = {
       get: {
         summary: 'Get a content document',
         security: [{ BearerAuth: [] }],
-        parameters: [{ name: 'documentId', in: 'path', required: true, schema: { type: 'string' } }],
+        parameters: [
+          { name: 'documentId', in: 'path', required: true, schema: { type: 'string' } },
+        ],
         responses: {
           '200': {
             description: 'Content document',
@@ -5792,7 +6210,9 @@ export const openApiSpec = {
       post: {
         summary: 'Duplicate a content document as an unpublished draft copy',
         security: [{ BearerAuth: [] }],
-        parameters: [{ name: 'documentId', in: 'path', required: true, schema: { type: 'string' } }],
+        parameters: [
+          { name: 'documentId', in: 'path', required: true, schema: { type: 'string' } },
+        ],
         requestBody: {
           required: false,
           content: {
@@ -5842,7 +6262,9 @@ export const openApiSpec = {
       get: {
         summary: 'List content document versions',
         security: [{ BearerAuth: [] }],
-        parameters: [{ name: 'documentId', in: 'path', required: true, schema: { type: 'string' } }],
+        parameters: [
+          { name: 'documentId', in: 'path', required: true, schema: { type: 'string' } },
+        ],
         responses: {
           '200': {
             description: 'Content document versions',
@@ -5857,7 +6279,9 @@ export const openApiSpec = {
       post: {
         summary: 'Save a content document draft version',
         security: [{ BearerAuth: [] }],
-        parameters: [{ name: 'documentId', in: 'path', required: true, schema: { type: 'string' } }],
+        parameters: [
+          { name: 'documentId', in: 'path', required: true, schema: { type: 'string' } },
+        ],
         requestBody: {
           required: true,
           content: {
@@ -5897,7 +6321,9 @@ export const openApiSpec = {
       post: {
         summary: 'Render a content document preview',
         security: [{ BearerAuth: [] }],
-        parameters: [{ name: 'documentId', in: 'path', required: true, schema: { type: 'string' } }],
+        parameters: [
+          { name: 'documentId', in: 'path', required: true, schema: { type: 'string' } },
+        ],
         requestBody: {
           required: true,
           content: {
@@ -5968,7 +6394,9 @@ export const openApiSpec = {
       post: {
         summary: 'Archive a content document',
         security: [{ BearerAuth: [] }],
-        parameters: [{ name: 'documentId', in: 'path', required: true, schema: { type: 'string' } }],
+        parameters: [
+          { name: 'documentId', in: 'path', required: true, schema: { type: 'string' } },
+        ],
         responses: {
           '200': {
             description: 'Archived document',
@@ -5983,7 +6411,9 @@ export const openApiSpec = {
       post: {
         summary: 'Capture a content test send through the shared renderer',
         security: [{ BearerAuth: [] }],
-        parameters: [{ name: 'documentId', in: 'path', required: true, schema: { type: 'string' } }],
+        parameters: [
+          { name: 'documentId', in: 'path', required: true, schema: { type: 'string' } },
+        ],
         requestBody: {
           required: true,
           content: {
@@ -6136,6 +6566,7 @@ export const openApiSpec = {
                   },
                   optOutToken: { type: 'string' },
                 },
+                additionalProperties: false,
               },
             },
           },
@@ -6175,6 +6606,10 @@ export const openApiSpec = {
                 },
               },
             },
+          },
+          '400': {
+            description: 'Validation error',
+            content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } },
           },
           '401': {
             description: 'Unauthorized',
@@ -6222,7 +6657,12 @@ export const openApiSpec = {
               'application/json': {
                 schema: {
                   type: 'object',
-                  properties: { items: { type: 'array', items: { type: 'object' } } },
+                  properties: {
+                    items: {
+                      type: 'array',
+                      items: { $ref: '#/components/schemas/MessageJobEnvelope' },
+                    },
+                  },
                   required: ['items'],
                 },
               },
@@ -6250,7 +6690,11 @@ export const openApiSpec = {
         responses: {
           '200': {
             description: 'Message job detail',
-            content: { 'application/json': { schema: { type: 'object' } } },
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/MessageJobEnvelope' },
+              },
+            },
           },
           '401': {
             description: 'Unauthorized',
@@ -6278,7 +6722,12 @@ export const openApiSpec = {
               'application/json': {
                 schema: {
                   type: 'object',
-                  properties: { items: { type: 'array', items: { type: 'object' } } },
+                  properties: {
+                    items: {
+                      type: 'array',
+                      items: { $ref: '#/components/schemas/MessageProviderEventEnvelope' },
+                    },
+                  },
                   required: ['items'],
                 },
               },
@@ -6362,7 +6811,11 @@ export const openApiSpec = {
         responses: {
           '200': {
             description: 'Provider event detail',
-            content: { 'application/json': { schema: { type: 'object' } } },
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/MessageProviderEventEnvelope' },
+              },
+            },
           },
           '401': {
             description: 'Unauthorized',
@@ -6932,9 +7385,7 @@ export const openApiSpec = {
       get: {
         summary: 'Get privacy-safe click aggregates for a short link (C-078)',
         security: [{ BearerAuth: [] }],
-        parameters: [
-          { name: 'id', in: 'path', required: true, schema: { type: 'string' } },
-        ],
+        parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'string' } }],
         responses: {
           '200': {
             description: 'Click aggregate',
@@ -6966,9 +7417,7 @@ export const openApiSpec = {
     '/s/{slug}': {
       get: {
         summary: 'Resolve a short link and redirect (C-078)',
-        parameters: [
-          { name: 'slug', in: 'path', required: true, schema: { type: 'string' } },
-        ],
+        parameters: [{ name: 'slug', in: 'path', required: true, schema: { type: 'string' } }],
         responses: {
           '302': { description: 'Redirect to the destination URL' },
           '404': {
