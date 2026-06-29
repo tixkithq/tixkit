@@ -19,6 +19,8 @@ describe('content editor fixture adapters', () => {
     expect(contentChannelFromRoute('event-page')).toBe('event_page');
     expect(contentChannelFromRoute('email')).toBe('email');
     expect(contentChannelFromRoute('sms')).toBe('sms');
+    expect(contentChannelFromRoute('imessage')).toBe('imessage');
+    expect(contentChannelFromRoute('social-invite')).toBe('social_invite');
   });
 
   it('keeps fixture actions unavailable instead of faking persistence', () => {
@@ -90,5 +92,26 @@ describe('ContentEditorView', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Open preview' }));
     expect(screen.getByTestId('preview-drawer')).toHaveTextContent('React Email preview');
     expect(screen.getByTestId('preview-drawer')).toHaveTextContent('Your All Access Chicago tickets are ready');
+  });
+
+  it('renders future-channel unavailable states without fake insert actions', () => {
+    render(
+      React.createElement(ContentEditorView, {
+        eventId: 'evt_1',
+        kind: 'imessage',
+        actionsUnavailableReason:
+          'iMessage is registered as a future channel and cannot publish or send tests yet.',
+      }),
+    );
+
+    expect(screen.getByRole('heading', { name: 'iMessage template unavailable' })).toBeInTheDocument();
+    expect(screen.getByTestId('content-editor-shell')).toHaveAttribute('data-channel', 'imessage');
+    expect(screen.getByText('Channel unavailable')).toBeInTheDocument();
+    expect(screen.getAllByText('iMessage template is not enabled for this workspace.')).toHaveLength(
+      2,
+    );
+    expect(screen.getByRole('button', { name: 'Publish unavailable' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Test send unavailable' })).toBeDisabled();
+    expect(screen.queryByRole('button', { name: 'Hero' })).not.toBeInTheDocument();
   });
 });

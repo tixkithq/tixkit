@@ -527,11 +527,11 @@ function BlockerPanel({ issues }: { issues: ContentValidationIssue[] }) {
         <ul className="mt-3 space-y-2">
           {issues.map((issue) => (
             <li
-              className="rounded-md border border-destructive/30 bg-destructive/10 p-2 text-sm"
+              className="rounded-md border border-destructive/40 bg-background p-2 text-sm"
               key={`${issue.code}-${issue.field ?? issue.message}`}
             >
               <div className="font-medium text-destructive">{issue.code}</div>
-              <p className="mt-1 text-muted-foreground">{issue.message}</p>
+              <p className="mt-1 text-foreground">{issue.message}</p>
             </li>
           ))}
         </ul>
