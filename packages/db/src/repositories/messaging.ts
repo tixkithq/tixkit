@@ -1,6 +1,14 @@
 import { BaseRepository } from './base.js';
 import { ulid } from 'ulid';
 
+function escapeLikePattern(value: string): string {
+  return value.replace(/[\\%_]/g, (character) => `\\${character}`);
+}
+
+function hasCampaignPrefix(idempotencyKey: string, campaignKey: string): boolean {
+  return idempotencyKey.startsWith(`${campaignKey}:`);
+}
+
 export class NotificationTemplateRepository extends BaseRepository {
   async create(input: {
     tenantId: string;
@@ -293,12 +301,13 @@ export class EmailJobRepository extends BaseRepository {
   }
 
   async findByCampaignKey(tenantId: string, campaignKey: string) {
-    return this.db
+    const jobs = await this.db
       .selectFrom('email_jobs')
       .selectAll()
       .where('tenant_id', '=', tenantId)
-      .where('idempotency_key', 'like', `${campaignKey}:%`)
+      .where('idempotency_key', 'like', `${escapeLikePattern(campaignKey)}:%`)
       .execute();
+    return jobs.filter((job) => hasCampaignPrefix(job.idempotency_key, campaignKey));
   }
 
   async findByBrand(tenantId: string, brandId: string) {
@@ -627,12 +636,13 @@ export class SmsJobRepository extends BaseRepository {
   }
 
   async findByCampaignKey(tenantId: string, campaignKey: string) {
-    return this.db
+    const jobs = await this.db
       .selectFrom('sms_jobs')
       .selectAll()
       .where('tenant_id', '=', tenantId)
-      .where('idempotency_key', 'like', `${campaignKey}:%`)
+      .where('idempotency_key', 'like', `${escapeLikePattern(campaignKey)}:%`)
       .execute();
+    return jobs.filter((job) => hasCampaignPrefix(job.idempotency_key, campaignKey));
   }
 
   async findByBrand(tenantId: string, brandId: string) {

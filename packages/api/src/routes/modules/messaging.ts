@@ -28,7 +28,7 @@ import {
   type MergeTagContext,
   type MergeTagChannel,
 } from '@tixkit/domain/messaging';
-import { sendMessageSchema } from '../../http/schemas.js';
+import { renderMessagePreviewSchema, sendMessageSchema } from '../../http/schemas.js';
 import { hashRequest, withIdempotency } from '../../services/idempotency.js';
 
 type MessageAudience = 'all' | 'checked_in' | 'not_checked_in' | 'specific';
@@ -125,8 +125,8 @@ export const messagingRoutes: FastifyPluginAsync = async (app) => {
 
     return {
       ...summary,
-      emailJobs: campaignEmailJobs,
-      smsJobs: campaignSmsJobs,
+      emailJobs: campaignEmailJobs.map((job) => sanitizeMessageJob('email', job)),
+      smsJobs: campaignSmsJobs.map((job) => sanitizeMessageJob('sms', job)),
       emailDeliveries: campaignEmailDeliveries,
       smsDeliveries: campaignSmsDeliveries,
     };
@@ -272,7 +272,6 @@ export const messagingRoutes: FastifyPluginAsync = async (app) => {
         audience: true,
         attendeeIds: true,
         channel: true,
-        templateKey: true,
       })
       .safeParse(request.body);
     if (!parsed.success) {
@@ -324,14 +323,16 @@ export const messagingRoutes: FastifyPluginAsync = async (app) => {
     const principal = request.principal!;
     ClerkAuthService.requirePermission(principal, 'messages.write');
     const { eventId } = request.params as { eventId: string };
-    const body = request.body as {
-      channel?: MergeTagChannel;
-      subjectTemplate?: string;
-      htmlTemplate?: string;
-      textTemplate?: string;
-      context?: MergeTagContext;
-      optOutToken?: string;
-    };
+    const parsed = renderMessagePreviewSchema.safeParse(request.body);
+    if (!parsed.success) {
+      throw new ValidationError('Invalid message render preview request', {
+        issues: parsed.error.issues.map((issue) => ({
+          path: issue.path.join('.'),
+          message: issue.message,
+        })),
+      });
+    }
+    const body = parsed.data;
     const channel: MergeTagChannel = body.channel === 'sms' ? 'sms' : 'email';
     const context: MergeTagContext = body.context ?? {};
     const subjectTemplate = body.subjectTemplate ?? '';
@@ -363,10 +364,7 @@ export const messagingRoutes: FastifyPluginAsync = async (app) => {
       : undefined;
 
     const smsBody = channel === 'sms' ? (text ?? subject) : text;
-    const segments =
-      channel === 'sms' && smsBody
-        ? countSmsSegments(smsBody)
-        : undefined;
+    const segments = channel === 'sms' && smsBody ? countSmsSegments(smsBody) : undefined;
 
     return {
       channel,
@@ -407,6 +405,7 @@ export const messagingRoutes: FastifyPluginAsync = async (app) => {
         field: 'attendeeIds',
       });
     }
+    const templateKeys = resolveCampaignTemplateKeys(body);
 
     const campaignId = idempotencyKey.trim();
     await loadAuthorizedEvent(eventId, principal, db);
@@ -431,29 +430,48 @@ export const messagingRoutes: FastifyPluginAsync = async (app) => {
         if (audienceResolution.attendees.length === 0) {
           throw new ValidationError('No matching recipients for this message campaign');
         }
+        if (audienceResolution.eligibleRecipients.length === 0) {
+          throw new ValidationError('No eligible recipients for this message campaign', {
+            audienceCount: audienceResolution.attendees.length,
+            suppressedRecipients: audienceResolution.suppressedRecipients,
+            consentExclusions: audienceResolution.consentExclusions,
+            skippedRecipients: audienceResolution.skippedRecipients,
+          });
+        }
 
         const notificationType = 'bulk' as const;
         const variables: Record<string, unknown> = {
           ...body.variables,
+          campaignEmailTemplateKey: templateKeys.emailTemplateKey,
+          campaignSmsTemplateKey: templateKeys.smsTemplateKey,
           campaignAudience: body.audience,
           campaignAudienceAttendeeIds: body.audience === 'specific' ? (body.attendeeIds ?? []) : [],
           campaignAudienceCount: audienceResolution.attendees.length,
+          campaignSuppressedRecipients: audienceResolution.suppressedRecipients,
+          campaignConsentExclusions: audienceResolution.consentExclusions,
+          campaignSkippedRecipients: audienceResolution.skippedRecipients,
         };
         let queuedEmailJobs: QueuedEmailJob[] = [];
         const queuedSmsJobIds: string[] = [];
         if (body.channel === 'email' || body.channel === 'both') {
-          const publishedContentTemplate = await new ContentRepository(db).findPublishedEmailTemplate(
-            {
-              tenantId: principal.tenantId,
-              brandId: event.brand_id,
-              eventId,
-              key: body.templateKey,
-            },
-          );
+          const emailTemplateKey = templateKeys.emailTemplateKey;
+          if (!emailTemplateKey) {
+            throw new ValidationError('emailTemplateKey is required for email message campaigns', {
+              field: 'emailTemplateKey',
+            });
+          }
+          const publishedContentTemplate = await new ContentRepository(
+            db,
+          ).findPublishedEmailTemplate({
+            tenantId: principal.tenantId,
+            brandId: event.brand_id,
+            eventId,
+            key: emailTemplateKey,
+          });
           const templateVersionId = publishedContentTemplate?.version.id;
           if (!templateVersionId) {
             throw new ValidationError(
-              `Published email content template not found: ${body.templateKey}`,
+              `Published email content template not found: ${emailTemplateKey}`,
             );
           }
           const emailRoutes = await new EmailProviderRouteRepository(db).findActiveByBrand(
@@ -476,35 +494,9 @@ export const messagingRoutes: FastifyPluginAsync = async (app) => {
                   return undefined;
                 }
                 if (decision.status === 'suppressed') {
-                  const jobKey = `${campaignId}:email:${attendee.id}`;
-                  const existing = await emailRepo.findByIdempotencyKey(principal.tenantId, jobKey);
-                  const job =
-                    existing ??
-                    (await emailRepo.create({
-                      tenantId: principal.tenantId,
-                      brandId: event.brand_id,
-                      templateKey: body.templateKey,
-                      templateVersionId,
-                      toEmail: attendee.email,
-                      toName: attendeeName(attendee),
-                      variables: {
-                        ...variables,
-                        attendeeId: attendee.id,
-                        eventId,
-                        notificationType,
-                        consentExcluded: decision.consentExcluded,
-                        suppressionExcluded: decision.suppressionExcluded,
-                      },
-                      providerRouteId: emailRoute.id,
-                      priority: 'low',
-                      idempotencyKey: jobKey,
-                      status: 'suppressed',
-                    }));
-                  if (job.status !== 'suppressed') {
-                    await emailRepo.update(job.id, { status: 'suppressed' });
-                  }
                   return undefined;
                 }
+                const recipientVariables = campaignRecipientVariables(variables, event, attendee);
                 const jobKey = `${campaignId}:email:${attendee.id}`;
                 const existing = await emailRepo.findByIdempotencyKey(principal.tenantId, jobKey);
                 const job =
@@ -512,14 +504,14 @@ export const messagingRoutes: FastifyPluginAsync = async (app) => {
                   (await emailRepo.create({
                     tenantId: principal.tenantId,
                     brandId: event.brand_id,
-                    templateKey: body.templateKey,
+                    templateKey: emailTemplateKey,
                     templateVersionId,
                     toEmail: attendee.email,
                     toName:
                       [attendee.first_name, attendee.last_name].filter(Boolean).join(' ') ||
                       undefined,
                     variables: {
-                      ...variables,
+                      ...recipientVariables,
                       attendeeId: attendee.id,
                       eventId,
                       notificationType,
@@ -536,7 +528,7 @@ export const messagingRoutes: FastifyPluginAsync = async (app) => {
                     templateVersionId,
                     providerRouteId: emailRoute.id,
                     variables: {
-                      ...variables,
+                      ...recipientVariables,
                       attendeeId: attendee.id,
                       eventId,
                       notificationType,
@@ -551,21 +543,29 @@ export const messagingRoutes: FastifyPluginAsync = async (app) => {
         }
 
         if (body.channel === 'sms' || body.channel === 'both') {
+          const smsTemplateKey = templateKeys.smsTemplateKey;
+          if (!smsTemplateKey) {
+            throw new ValidationError('smsTemplateKey is required for SMS message campaigns', {
+              field: 'smsTemplateKey',
+            });
+          }
           const publishedSmsTemplate = await new ContentRepository(db).findPublishedSmsTemplate({
             tenantId: principal.tenantId,
             brandId: event.brand_id,
             eventId,
-            key: body.templateKey,
+            key: smsTemplateKey,
           });
           if (!publishedSmsTemplate) {
             throw new ValidationError(
-              `Published SMS content template not found: ${body.templateKey}`,
+              `Published SMS content template not found: ${smsTemplateKey}`,
             );
           }
-          const smsTemplate = normalizeSmsTemplateDocument(publishedSmsTemplate.version.contentJson);
+          const smsTemplate = normalizeSmsTemplateDocument(
+            publishedSmsTemplate.version.contentJson,
+          );
           if (!smsTemplate) {
             throw new ValidationError('Published SMS content template is not canonical SMS JSON', {
-              templateKey: body.templateKey,
+              templateKey: smsTemplateKey,
             });
           }
           const smsRoutes = await new SmsProviderRouteRepository(db).findActiveByBrand(
@@ -588,31 +588,6 @@ export const messagingRoutes: FastifyPluginAsync = async (app) => {
               }
               const jobKey = `${campaignId}:sms:${attendee.id}`;
               if (decision.status === 'suppressed') {
-                const existing = await smsRepo.findByIdempotencyKey(principal.tenantId, jobKey);
-                const job =
-                  existing ??
-                  (await smsRepo.create({
-                    tenantId: principal.tenantId,
-                    brandId: event.brand_id,
-                    toPhone: attendee.phone,
-                    body: renderCampaignSmsBody(smsTemplate, event, attendee, variables),
-                    templateKey: body.templateKey,
-                    variables: {
-                      ...variables,
-                      contentVersionId: publishedSmsTemplate.version.id,
-                      attendeeId: attendee.id,
-                      eventId,
-                      notificationType,
-                      consentExcluded: true,
-                    },
-                    providerRouteId: smsRoute.id,
-                    priority: 'low',
-                    idempotencyKey: jobKey,
-                    status: 'suppressed',
-                  }));
-                if (job.status !== 'suppressed') {
-                  await smsRepo.update(job.id, { status: 'suppressed' });
-                }
                 return undefined;
               }
               const existing = await smsRepo.findByIdempotencyKey(principal.tenantId, jobKey);
@@ -623,7 +598,7 @@ export const messagingRoutes: FastifyPluginAsync = async (app) => {
                   brandId: event.brand_id,
                   toPhone: attendee.phone,
                   body: renderCampaignSmsBody(smsTemplate, event, attendee, variables),
-                  templateKey: body.templateKey,
+                  templateKey: smsTemplateKey,
                   variables: {
                     ...variables,
                     contentVersionId: publishedSmsTemplate.version.id,
@@ -646,22 +621,30 @@ export const messagingRoutes: FastifyPluginAsync = async (app) => {
           );
         }
 
-        await Promise.all(
-          queuedEmailJobs.map((job) =>
-            app.context.temporalClient.startNotificationDelivery({
-              jobId: job.jobId,
-              tenantId: principal.tenantId,
-              brandId: event.brand_id,
-              templateKey: body.templateKey,
-              templateVersionId: job.templateVersionId,
-              toEmail: job.toEmail,
-              toName: job.toName,
-              variables: job.variables,
-              providerRouteId: job.providerRouteId,
-              notificationType,
-            }),
-          ),
-        );
+        if (queuedEmailJobs.length > 0) {
+          const emailTemplateKey = templateKeys.emailTemplateKey;
+          if (!emailTemplateKey) {
+            throw new ValidationError('emailTemplateKey is required for email message campaigns', {
+              field: 'emailTemplateKey',
+            });
+          }
+          await Promise.all(
+            queuedEmailJobs.map((job) =>
+              app.context.temporalClient.startNotificationDelivery({
+                jobId: job.jobId,
+                tenantId: principal.tenantId,
+                brandId: event.brand_id,
+                templateKey: emailTemplateKey,
+                templateVersionId: job.templateVersionId,
+                toEmail: job.toEmail,
+                toName: job.toName,
+                variables: job.variables,
+                providerRouteId: job.providerRouteId,
+                notificationType,
+              }),
+            ),
+          );
+        }
 
         if (body.channel === 'sms' || body.channel === 'both') {
           const smsRouteId = await getSmsProviderRouteId(db, event.brand_id, notificationType);
@@ -683,7 +666,8 @@ export const messagingRoutes: FastifyPluginAsync = async (app) => {
           body: {
             campaignId,
             eventId,
-            templateKey: body.templateKey,
+            emailTemplateKey: templateKeys.emailTemplateKey,
+            smsTemplateKey: templateKeys.smsTemplateKey,
             channel: body.channel,
             status: queuedEmailJobs.length + queuedSmsJobIds.length > 0 ? 'queued' : 'suppressed',
             audienceCount: audienceResolution.attendees.length,
@@ -722,6 +706,41 @@ function audienceToResponse(audience: MessageAudience) {
   return audience;
 }
 
+function normalizedTemplateKey(value: unknown): string | undefined {
+  return typeof value === 'string' && value.trim().length > 0 ? value.trim() : undefined;
+}
+
+function resolveCampaignTemplateKeys(input: {
+  channel: MessageChannel;
+  emailTemplateKey?: string;
+  smsTemplateKey?: string;
+}) {
+  const emailTemplateKey =
+    input.channel === 'email' || input.channel === 'both'
+      ? normalizedTemplateKey(input.emailTemplateKey)
+      : undefined;
+  const smsTemplateKey =
+    input.channel === 'sms' || input.channel === 'both'
+      ? normalizedTemplateKey(input.smsTemplateKey)
+      : undefined;
+
+  if ((input.channel === 'email' || input.channel === 'both') && !emailTemplateKey) {
+    throw new ValidationError('emailTemplateKey is required for email message campaigns', {
+      field: 'emailTemplateKey',
+    });
+  }
+  if ((input.channel === 'sms' || input.channel === 'both') && !smsTemplateKey) {
+    throw new ValidationError('smsTemplateKey is required for SMS message campaigns', {
+      field: 'smsTemplateKey',
+    });
+  }
+
+  return {
+    emailTemplateKey,
+    smsTemplateKey,
+  };
+}
+
 function rawAudienceFromVariables(variables: Record<string, unknown>): MessageAudience | undefined {
   const audience = variables.campaignAudience;
   if (
@@ -737,13 +756,15 @@ function rawAudienceFromVariables(variables: Record<string, unknown>): MessageAu
 
 async function loadMessageAudienceAttendees(input: {
   db: Database;
+  tenantId: string;
   eventId: string;
   audience: MessageAudience;
   attendeeIds?: string[];
 }) {
   let attendeeQuery = input.db
     .selectFrom('attendees')
-    .select(['id', 'event_id', 'first_name', 'last_name', 'email', 'phone', 'status'])
+    .select(['id', 'tenant_id', 'event_id', 'first_name', 'last_name', 'email', 'phone', 'status'])
+    .where('tenant_id', '=', input.tenantId)
     .where('event_id', '=', input.eventId)
     .where('status', 'in', ['confirmed', 'checked_in']);
 
@@ -761,6 +782,7 @@ async function loadMessageAudienceAttendees(input: {
     .filter(
       (attendee) =>
         typeof attendee.id === 'string' &&
+        (typeof attendee.tenant_id !== 'string' || attendee.tenant_id === input.tenantId) &&
         (typeof attendee.event_id !== 'string' || attendee.event_id === input.eventId) &&
         (attendee.status === 'confirmed' || attendee.status === 'checked_in') &&
         (input.audience !== 'specific' || requested.has(attendee.id)) &&
@@ -910,10 +932,16 @@ async function loadAuthorizedCampaign(
     new SmsJobRepository(db).findByCampaignKey(principal.tenantId, campaignId),
   ]);
   const campaignEmailJobs = emailJobs.filter(
-    (job) => job.brand_id === event.brand_id && jobVariables(job).eventId === eventId,
+    (job) =>
+      job.brand_id === event.brand_id &&
+      jobVariables(job).eventId === eventId &&
+      jobBelongsToCampaign(job, campaignId),
   );
   const campaignSmsJobs = smsJobs.filter(
-    (job) => job.brand_id === event.brand_id && jobVariables(job).eventId === eventId,
+    (job) =>
+      job.brand_id === event.brand_id &&
+      jobVariables(job).eventId === eventId &&
+      jobBelongsToCampaign(job, campaignId),
   );
 
   if (campaignEmailJobs.length === 0 && campaignSmsJobs.length === 0) {
@@ -939,17 +967,62 @@ function buildJobItems(
         channel: 'email' as const,
         campaignId,
         eventId,
-        job,
+        job: sanitizeMessageJob('email', job),
       })),
       ...smsJobs.map((job) => ({
         channel: 'sms' as const,
         campaignId,
         eventId,
-        job,
+        job: sanitizeMessageJob('sms', job),
       })),
     ],
     (item) => item.job.created_at,
   );
+}
+
+function maskEmail(value: unknown): string | undefined {
+  if (typeof value !== 'string' || value.trim().length === 0) return undefined;
+  const [localPart, domain] = value.trim().split('@');
+  if (!localPart || !domain) return '***';
+  return `${localPart.slice(0, 1)}***@${domain}`;
+}
+
+function maskPhone(value: unknown): string | undefined {
+  if (typeof value !== 'string' || value.trim().length === 0) return undefined;
+  const digits = value.replace(/\D/g, '');
+  if (digits.length <= 4) return '***';
+  return `***${digits.slice(-4)}`;
+}
+
+function sanitizeMessageJob(channel: 'email' | 'sms', job: Record<string, unknown>) {
+  return {
+    id: job.id,
+    tenant_id: job.tenant_id,
+    brand_id: job.brand_id,
+    template_key: job.template_key,
+    template_version_id: job.template_version_id,
+    provider_route_id: job.provider_route_id,
+    status: job.status,
+    priority: job.priority,
+    scheduled_at: job.scheduled_at,
+    workflow_id: job.workflow_id,
+    recipient: channel === 'email' ? maskEmail(job.to_email) : maskPhone(job.to_phone),
+    created_at: job.created_at,
+    updated_at: job.updated_at,
+  };
+}
+
+function sanitizeProviderEvent(event: Record<string, unknown>) {
+  return {
+    id: event.id,
+    tenant_id: event.tenant_id,
+    provider: event.provider,
+    provider_event_id: event.provider_event_id,
+    event_type: event.event_type,
+    provider_message_id: event.provider_message_id,
+    processed_at: event.processed_at,
+    created_at: event.created_at,
+  };
 }
 
 function buildDeliveryLogItems(
@@ -1054,7 +1127,7 @@ async function loadCampaignProviderEventItems(
           channel: 'email' as const,
           campaignId,
           eventId,
-          event,
+          event: sanitizeProviderEvent(event),
         })),
       ...smsProviderEvents
         .filter(
@@ -1067,7 +1140,7 @@ async function loadCampaignProviderEventItems(
           channel: 'sms' as const,
           campaignId,
           eventId,
-          event,
+          event: sanitizeProviderEvent(event),
         })),
     ],
     (item) => item.event.created_at,
@@ -1120,6 +1193,39 @@ function renderCampaignSmsBody(
   return rendered.text;
 }
 
+function campaignRecipientVariables(
+  variables: Record<string, unknown>,
+  event: {
+    title?: string | null;
+    starts_at?: Date | string | null;
+    ends_at?: Date | string | null;
+    timezone?: string | null;
+  },
+  attendee: MessageAttendee,
+): Record<string, unknown> {
+  return {
+    ...variables,
+    event: {
+      ...recordValue(variables.event),
+      title: event.title ?? undefined,
+      startsAt: optionalIso(event.starts_at),
+      endsAt: optionalIso(event.ends_at),
+      timezone: event.timezone ?? undefined,
+    },
+    recipient: {
+      ...recordValue(variables.recipient),
+      name: attendeeName(attendee),
+      email: attendee.email ?? undefined,
+      phone: attendee.phone ?? undefined,
+    },
+    attendee: {
+      ...recordValue(variables.attendee),
+      name: attendeeName(attendee),
+      checkedIn: attendee.status === 'checked_in',
+    },
+  };
+}
+
 function safeJson(value: unknown): Record<string, unknown> {
   if (!value) return {};
   if (typeof value === 'object') return value as Record<string, unknown>;
@@ -1164,6 +1270,10 @@ function campaignKey(idempotencyKey: string) {
   const smsIndex = idempotencyKey.lastIndexOf(':sms:');
   const markerIndex = Math.max(emailIndex, smsIndex);
   return markerIndex > -1 ? idempotencyKey.slice(0, markerIndex) : idempotencyKey;
+}
+
+function jobBelongsToCampaign(job: { idempotency_key?: unknown }, campaignId: string) {
+  return typeof job.idempotency_key === 'string' && campaignKey(job.idempotency_key) === campaignId;
 }
 
 function toIso(value: unknown) {
@@ -1247,13 +1357,33 @@ function buildCampaignSummaries(input: {
       const firstJob = jobs[0] ?? {};
       const variables = jobVariables(firstJob);
       const audienceMetadata = campaignAudienceMetadata(jobs);
+      const exclusionMetadata = campaignExclusionMetadata(jobs);
       const statuses = jobs.map((job) => String(job.status));
-      const suppressedRecipients = statuses.filter((status) => status === 'suppressed').length;
-      const consentExclusions = jobs.filter(
-        (job) => jobVariables(job).consentExcluded === true,
-      ).length;
+      const suppressedRecipients =
+        exclusionMetadata.suppressedRecipients ??
+        statuses.filter((status) => status === 'suppressed').length;
+      const consentExclusions =
+        exclusionMetadata.consentExclusions ??
+        jobs.filter((job) => jobVariables(job).consentExcluded === true).length;
+      const skippedRecipients = exclusionMetadata.skippedRecipients ?? 0;
       const emailQueued = group.emailJobs.filter((job) => job.status !== 'suppressed').length;
       const smsQueued = group.smsJobs.filter((job) => job.status !== 'suppressed').length;
+      const emailTemplateKey = group.emailJobs
+        .map((job) => String(job.template_key ?? ''))
+        .find((key) => key.length > 0);
+      const smsTemplateKey = group.smsJobs
+        .map((job) => String(job.template_key ?? ''))
+        .find((key) => key.length > 0);
+      const templateKey =
+        emailTemplateKey && smsTemplateKey && emailTemplateKey !== smsTemplateKey
+          ? `${emailTemplateKey} + ${smsTemplateKey}`
+          : (emailTemplateKey ??
+            smsTemplateKey ??
+            String(
+              variables.campaignEmailTemplateKey ??
+                variables.campaignSmsTemplateKey ??
+                'message-campaign',
+            ));
       const createdAt = jobs.reduce((earliest, job) => {
         const created = new Date(String(job.created_at)).getTime();
         return Number.isFinite(created) && created < earliest ? created : earliest;
@@ -1268,7 +1398,9 @@ function buildCampaignSummaries(input: {
         eventId: input.eventId,
         tenantId: String(firstJob.tenant_id),
         brandId: String(firstJob.brand_id),
-        templateKey: String(firstJob.template_key ?? variables.templateKey ?? 'attendee-message'),
+        templateKey,
+        emailTemplateKey,
+        smsTemplateKey,
         channel:
           group.emailJobs.length > 0 && group.smsJobs.length > 0
             ? 'both'
@@ -1285,13 +1417,27 @@ function buildCampaignSummaries(input: {
         queuedSmsJobs: smsQueued,
         suppressedRecipients,
         consentExclusions,
-        skippedRecipients: 0,
+        skippedRecipients,
         createdAt: toIso(Number.isFinite(createdAt) ? new Date(createdAt) : firstJob.created_at),
         updatedAt: toIso(updatedAt > 0 ? new Date(updatedAt) : firstJob.updated_at),
       };
     }),
     (summary) => summary.createdAt,
   );
+}
+
+function campaignExclusionMetadata(jobs: Array<Record<string, unknown>>) {
+  const variablesByJob = jobs.map(jobVariables);
+  const suppressedRecipients = variablesByJob
+    .map((variables) => Number(variables.campaignSuppressedRecipients))
+    .find((count) => Number.isInteger(count) && count >= 0);
+  const consentExclusions = variablesByJob
+    .map((variables) => Number(variables.campaignConsentExclusions))
+    .find((count) => Number.isInteger(count) && count >= 0);
+  const skippedRecipients = variablesByJob
+    .map((variables) => Number(variables.campaignSkippedRecipients))
+    .find((count) => Number.isInteger(count) && count >= 0);
+  return { suppressedRecipients, consentExclusions, skippedRecipients };
 }
 
 function sortNewestFirst<T>(items: T[], createdAt: (item: T) => unknown) {
