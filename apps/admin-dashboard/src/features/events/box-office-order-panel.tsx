@@ -250,7 +250,6 @@ export function BoxOfficeOrderPanel({
     }
 
     setResult(response.data);
-    toast.success('Door order issued');
     onOrderCreated?.();
   };
 

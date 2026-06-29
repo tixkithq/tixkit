@@ -111,7 +111,7 @@ test.describe('admin box-office POS workflows', () => {
     await expect(page.getByRole('heading', { name: 'Sell at door' })).toBeVisible();
     await fillDoorOrderForm(page, 'cash');
     await page.getByRole('button', { name: 'Issue door order' }).click();
-    await expect(page.getByText('Order issued')).toBeVisible();
+    await expect(page.getByRole('alert').getByText('Order issued', { exact: true })).toBeVisible();
     await expectNoAxeViolations(page, testInfo);
     await attachScreenshot(page, testInfo, 'admin-box-office-cdp');
 
