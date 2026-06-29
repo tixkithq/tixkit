@@ -91,6 +91,8 @@ class ApiCaptureSmsTransport implements SmsTransport {
   }
 }
 
+export const API_JSON_BODY_LIMIT_BYTES = 2 * 1024 * 1024;
+
 export function createCorsOriginValidator(allowedOrigins: readonly string[]) {
   const allowed = new Set(allowedOrigins);
   return (origin: string | undefined, callback: CorsOriginCallback): void => {
@@ -160,6 +162,7 @@ export function registerJsonBodyParser(app: FastifyInstance): void {
 
 export async function buildApp(): Promise<FastifyInstance> {
   const app = Fastify({
+    bodyLimit: API_JSON_BODY_LIMIT_BYTES,
     trustProxy: config.trustProxy,
     logger: {
       level: config.logLevel,

@@ -19,9 +19,20 @@ import {
   updateProductSchema,
   updateTicketTypeBatchSchema,
   MAX_OFFLINE_SYNC_SCANS,
+  MAX_MESSAGE_TEMPLATE_HTML_LENGTH,
+  MAX_MESSAGE_VARIABLES_BYTES,
+  renderMessagePreviewSchema,
+  sendMessageSchema,
   syncScanSchema,
 } from '../http/schemas.js';
 import { ValidationError } from '@tixkit/domain';
+
+const makeOfflineScans = (count: number) =>
+  Array.from({ length: count }, (_, index) => ({
+    qrHash: `hash_${index}`,
+    scannedAt: '2026-06-01T12:00:00.000Z',
+    offline: true,
+  }));
 
 describe('safeRedirectUrl / successUrl / cancelUrl validation', () => {
   it('rejects javascript: scheme in successUrl', () => {
@@ -400,6 +411,44 @@ describe('webhook and OAuth URL policy', () => {
   });
 });
 
+describe('messaging schemas', () => {
+  it('rejects unsafe template keys and oversized variables', () => {
+    expect(() =>
+      parseBody(sendMessageSchema, {
+        channel: 'sms',
+        audience: 'all',
+        smsTemplateKey: '../attendee-message',
+      }),
+    ).toThrow(ValidationError);
+
+    expect(() =>
+      parseBody(sendMessageSchema, {
+        channel: 'sms',
+        audience: 'all',
+        smsTemplateKey: 'attendee-message',
+        variables: { body: 'x'.repeat(MAX_MESSAGE_VARIABLES_BYTES + 1) },
+      }),
+    ).toThrow(ValidationError);
+  });
+
+  it('rejects oversized render-preview templates and context', () => {
+    expect(() =>
+      parseBody(renderMessagePreviewSchema, {
+        channel: 'email',
+        htmlTemplate: 'x'.repeat(MAX_MESSAGE_TEMPLATE_HTML_LENGTH + 1),
+      }),
+    ).toThrow(ValidationError);
+
+    expect(() =>
+      parseBody(renderMessagePreviewSchema, {
+        channel: 'sms',
+        textTemplate: 'Hello {{recipient.name}}',
+        context: { body: 'x'.repeat(MAX_MESSAGE_VARIABLES_BYTES + 1) },
+      }),
+    ).toThrow(ValidationError);
+  });
+});
+
 describe('parseBody strict mode', () => {
   it('rejects unknown fields in refundSchema', () => {
     expect(() => parseBody(refundSchema, { reason: 'test', unknownField: 'bad' })).toThrow(
@@ -415,12 +464,15 @@ describe('parseBody strict mode', () => {
 });
 
 describe('check-in scan schemas', () => {
+  it('accepts the production offline sync batch ceiling', () => {
+    const scans = makeOfflineScans(MAX_OFFLINE_SYNC_SCANS);
+    const body = parseBody(syncScanSchema, { checkInListId: 'cil_1', scans });
+
+    expect(body.scans).toHaveLength(MAX_OFFLINE_SYNC_SCANS);
+  });
+
   it('caps offline sync batches before repository work', () => {
-    const scans = Array.from({ length: MAX_OFFLINE_SYNC_SCANS + 1 }, (_, index) => ({
-      qrHash: `hash_${index}`,
-      scannedAt: '2026-06-01T12:00:00.000Z',
-      offline: true,
-    }));
+    const scans = makeOfflineScans(MAX_OFFLINE_SYNC_SCANS + 1);
 
     expect(() => parseBody(syncScanSchema, { checkInListId: 'cil_1', scans })).toThrow(
       ValidationError,

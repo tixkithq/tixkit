@@ -1,6 +1,6 @@
 import { describe, it, expect, vi } from 'vitest';
 import { hashRequest, withIdempotency } from '../services/idempotency.js';
-import { IdempotencyConflictError } from '@tixkit/domain';
+import { IdempotencyConflictError, IdempotencyInProgressError } from '@tixkit/domain';
 
 describe('hashRequest', () => {
   it('produces a deterministic hash for the same payload', () => {
@@ -336,6 +336,42 @@ describe('withIdempotency', () => {
         handler,
       ),
     ).rejects.toThrow(IdempotencyConflictError);
+
+    expect(handler).not.toHaveBeenCalled();
+  });
+
+  it('throws a retryable in-progress error when the winning request has not completed within the replay window', async () => {
+    const requestHash = hashRequest({ operation: 'offline-sync', batch: 'large' });
+    const { db } = createMockDb([
+      {
+        id: 'idm_in_progress',
+        key: 'idem-in-progress',
+        tenant_id: 'tnt_1',
+        request_hash: requestHash,
+        response_status: 0,
+        response_body: 'null',
+        status: 'in_progress',
+        expires_at: new Date(Date.now() + 60_000),
+      },
+    ]);
+    const handler = vi.fn(async () => ({ status: 200, body: { ok: true } }));
+
+    await expect(
+      withIdempotency(
+        db,
+        {
+          key: 'idem-in-progress',
+          tenantId: 'tnt_1',
+          requestHash,
+          inProgressWaitMs: 0,
+        },
+        handler,
+      ),
+    ).rejects.toMatchObject({
+      name: 'IdempotencyInProgressError',
+      code: 'IDEMPOTENCY_IN_PROGRESS',
+      statusCode: 409,
+    } satisfies Partial<IdempotencyInProgressError>);
 
     expect(handler).not.toHaveBeenCalled();
   });

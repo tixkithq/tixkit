@@ -2,8 +2,14 @@ import Fastify from 'fastify';
 import rateLimit from '@fastify/rate-limit';
 import { describe, expect, it } from 'vitest';
 import { ValidationError } from '@tixkit/domain';
-import { registerErrorHandler, registerHealthRoute, registerJsonBodyParser } from '../app.js';
+import {
+  API_JSON_BODY_LIMIT_BYTES,
+  registerErrorHandler,
+  registerHealthRoute,
+  registerJsonBodyParser,
+} from '../app.js';
 import { pageEnvelope, parsePagination, serializeOrder } from '../http/contracts.js';
+import { MAX_OFFLINE_SYNC_SCANS, OFFLINE_SYNC_JSON_BODY_LIMIT_BYTES } from '../http/schemas.js';
 
 describe('API contract helpers', () => {
   it('parses cursor pagination with documented defaults and max limit', () => {
@@ -120,6 +126,42 @@ describe('API contract helpers', () => {
 });
 
 describe('API error envelope', () => {
+  it('accepts the documented offline sync payload size with the route-specific body limit', async () => {
+    const app = Fastify({ logger: false, bodyLimit: OFFLINE_SYNC_JSON_BODY_LIMIT_BYTES });
+    registerJsonBodyParser(app);
+    app.post('/offline-sync-payload', async (request) => ({
+      scans: (request.body as { scans: unknown[] }).scans.length,
+      rawBodyLength: (request as unknown as { rawBody: string }).rawBody.length,
+    }));
+    const payload = {
+      checkInListId: 'cil_1',
+      deviceId: 'sd_public',
+      scans: Array.from({ length: MAX_OFFLINE_SYNC_SCANS }, (_, index) => ({
+        qrHash: index.toString(16).padStart(64, '0'),
+        scannedAt: '2026-06-01T12:00:00.000Z',
+        offline: true,
+      })),
+    };
+    const rawPayload = JSON.stringify(payload);
+
+    expect(Buffer.byteLength(rawPayload)).toBeGreaterThan(API_JSON_BODY_LIMIT_BYTES);
+    expect(Buffer.byteLength(rawPayload)).toBeLessThanOrEqual(OFFLINE_SYNC_JSON_BODY_LIMIT_BYTES);
+
+    const response = await app.inject({
+      method: 'POST',
+      url: '/offline-sync-payload',
+      headers: { 'content-type': 'application/json' },
+      payload: rawPayload,
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toMatchObject({
+      scans: MAX_OFFLINE_SYNC_SCANS,
+      rawBodyLength: rawPayload.length,
+    });
+    await app.close();
+  });
+
   it('accepts empty JSON POST bodies without throwing parser errors', async () => {
     const app = Fastify({ logger: false });
     registerJsonBodyParser(app);

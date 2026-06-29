@@ -5,7 +5,18 @@ import { ValidationError } from '@tixkit/domain';
 const ulidSchema = z.string().min(1);
 const currencySchema = z.string().length(3);
 const iso8601Schema = z.string().datetime();
-export const MAX_OFFLINE_SYNC_SCANS = 500;
+export const MAX_OFFLINE_SYNC_SCANS = 100_000;
+export const OFFLINE_SYNC_JSON_BODY_LIMIT_BYTES = 32 * 1024 * 1024;
+export const MAX_BULK_OFFLINE_SYNC_CHUNKS = 1_000;
+export const MAX_BULK_OFFLINE_SYNC_CHUNK_SCANS = 50_000;
+export const MAX_BULK_OFFLINE_SYNC_TOTAL_SCANS = 250_000;
+export const MAX_MESSAGE_TEMPLATE_KEY_LENGTH = 128;
+export const MAX_MESSAGE_VARIABLES_BYTES = 16 * 1024;
+export const MAX_MESSAGE_VARIABLE_DEPTH = 6;
+export const MAX_MESSAGE_TEMPLATE_SUBJECT_LENGTH = 500;
+export const MAX_MESSAGE_TEMPLATE_HTML_LENGTH = 50_000;
+export const MAX_MESSAGE_TEMPLATE_TEXT_LENGTH = 5_000;
+export const MAX_MESSAGE_OPT_OUT_TOKEN_LENGTH = 256;
 const eventSlugSchema = z
   .string()
   .min(1)
@@ -35,6 +46,38 @@ const brandLegalUrlsSchema = z
     refundPolicy: urlSchema.optional(),
   })
   .strict();
+
+function jsonByteLength(value: unknown): number {
+  return Buffer.byteLength(JSON.stringify(value), 'utf8');
+}
+
+function jsonDepth(value: unknown): number {
+  if (value === null || typeof value !== 'object') return 0;
+  if (Array.isArray(value)) {
+    return value.length === 0 ? 1 : 1 + Math.max(...value.map((item) => jsonDepth(item)));
+  }
+  const entries = Object.values(value as Record<string, unknown>);
+  return entries.length === 0 ? 1 : 1 + Math.max(...entries.map((item) => jsonDepth(item)));
+}
+
+const messageTemplateKeySchema = z
+  .string()
+  .trim()
+  .min(1)
+  .max(MAX_MESSAGE_TEMPLATE_KEY_LENGTH)
+  .regex(
+    /^[A-Za-z0-9][A-Za-z0-9._:-]*$/,
+    'Template keys may contain only letters, numbers, dots, underscores, colons, and hyphens',
+  );
+
+const boundedMessageRecordSchema = z
+  .record(z.string().min(1).max(128), z.unknown())
+  .refine((value) => jsonByteLength(value) <= MAX_MESSAGE_VARIABLES_BYTES, {
+    message: `Message variables must be ${MAX_MESSAGE_VARIABLES_BYTES} bytes or smaller`,
+  })
+  .refine((value) => jsonDepth(value) <= MAX_MESSAGE_VARIABLE_DEPTH, {
+    message: `Message variables may be nested at most ${MAX_MESSAGE_VARIABLE_DEPTH} levels`,
+  });
 
 function isDevelopmentLike(): boolean {
   return process.env.NODE_ENV === 'development' || process.env.NODE_ENV === 'test';
@@ -547,11 +590,23 @@ export const updateWebhookEndpointSchema = z
 export const sendMessageSchema = z
   .object({
     eventId: ulidSchema.optional(),
-    templateKey: z.string().min(1),
+    emailTemplateKey: messageTemplateKeySchema.optional(),
+    smsTemplateKey: messageTemplateKeySchema.optional(),
     audience: z.enum(['all', 'checked_in', 'not_checked_in', 'specific']),
-    attendeeIds: z.array(ulidSchema).optional(),
-    variables: z.record(z.string(), z.unknown()).optional(),
+    attendeeIds: z.array(ulidSchema).max(5_000).optional(),
+    variables: boundedMessageRecordSchema.optional(),
     channel: z.enum(['email', 'sms', 'both']),
+  })
+  .strict();
+
+export const renderMessagePreviewSchema = z
+  .object({
+    channel: z.enum(['email', 'sms']).optional(),
+    subjectTemplate: z.string().max(MAX_MESSAGE_TEMPLATE_SUBJECT_LENGTH).optional(),
+    htmlTemplate: z.string().max(MAX_MESSAGE_TEMPLATE_HTML_LENGTH).optional(),
+    textTemplate: z.string().max(MAX_MESSAGE_TEMPLATE_TEXT_LENGTH).optional(),
+    context: boundedMessageRecordSchema.optional(),
+    optOutToken: z.string().max(MAX_MESSAGE_OPT_OUT_TOKEN_LENGTH).optional(),
   })
   .strict();
 
@@ -579,6 +634,30 @@ export const syncScanSchema = z
         }),
       )
       .max(MAX_OFFLINE_SYNC_SCANS),
+  })
+  .strict();
+
+export const createBulkSyncJobSchema = z
+  .object({
+    checkInListId: ulidSchema,
+    deviceId: z.string().optional(),
+    totalChunks: z.number().int().min(1).max(MAX_BULK_OFFLINE_SYNC_CHUNKS),
+    totalScans: z.number().int().min(1).max(MAX_BULK_OFFLINE_SYNC_TOTAL_SCANS).optional(),
+  })
+  .strict();
+
+export const bulkSyncChunkSchema = z
+  .object({
+    scans: z
+      .array(
+        z.object({
+          qrHash: z.string().min(1),
+          scannedAt: iso8601Schema,
+          offline: z.boolean(),
+        }),
+      )
+      .min(1)
+      .max(MAX_BULK_OFFLINE_SYNC_CHUNK_SCANS),
   })
   .strict();
 

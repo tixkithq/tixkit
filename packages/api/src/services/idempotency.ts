@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto';
 import { ulid } from 'ulid';
 import type { Database } from '@tixkit/db';
-import { IdempotencyConflictError } from '@tixkit/domain';
+import { IdempotencyConflictError, IdempotencyInProgressError } from '@tixkit/domain';
 
 export type IdempotentResponse = {
   status: number;
@@ -64,13 +64,18 @@ export async function withIdempotency(
     tenantId: string;
     requestHash: string;
     ttlSeconds?: number;
+    inProgressWaitMs?: number;
+    inProgressPollIntervalMs?: number;
   },
   handler: () => Promise<IdempotentResponse>,
 ): Promise<IdempotentResponse> {
-  const replayExisting = async (): Promise<IdempotentResponse | null> => {
-    const deadline = Date.now() + 10_000;
+  const inProgressWaitMs = Math.max(0, input.inProgressWaitMs ?? 10_000);
+  const inProgressPollIntervalMs = Math.max(1, input.inProgressPollIntervalMs ?? 50);
 
-    while (Date.now() < deadline) {
+  const replayExisting = async (): Promise<IdempotentResponse | null> => {
+    const deadline = Date.now() + inProgressWaitMs;
+
+    while (true) {
       // eslint-disable-next-line no-await-in-loop -- idempotency replay must poll sequentially until the winning request commits its response.
       const existing = await findRecord(db, input.key, input.tenantId);
       if (!existing) return null;
@@ -85,11 +90,14 @@ export async function withIdempotency(
       if ((existing.status ?? 'completed') === 'completed') {
         return { status: existing.response_status, body: JSON.parse(existing.response_body) };
       }
+      if (Date.now() >= deadline) break;
       // eslint-disable-next-line no-await-in-loop -- backoff is intentionally sequential between replay polling attempts.
-      await new Promise((resolve) => setTimeout(resolve, 50));
+      await new Promise((resolve) =>
+        setTimeout(resolve, Math.min(inProgressPollIntervalMs, Math.max(1, deadline - Date.now()))),
+      );
     }
 
-    throw new Error('Idempotent request is still in progress');
+    throw new IdempotencyInProgressError(input.key);
   };
 
   const replayed = await replayExisting();

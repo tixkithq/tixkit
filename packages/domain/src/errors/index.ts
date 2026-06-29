@@ -23,6 +23,7 @@ export type ErrorCode =
   | 'DISCOUNT_EXHAUSTED'
   | 'ACCESS_CODE_REQUIRED'
   | 'IDEMPOTENCY_CONFLICT'
+  | 'IDEMPOTENCY_IN_PROGRESS'
   | 'TENANT_MISMATCH'
   | 'WEBHOOK_SIGNATURE_INVALID'
   | 'INTERNAL_ERROR'
@@ -159,5 +160,14 @@ export class IdempotencyConflictError extends DomainError {
       },
     );
     this.name = 'IdempotencyConflictError';
+  }
+}
+
+export class IdempotencyInProgressError extends DomainError {
+  constructor(key: string) {
+    super('IDEMPOTENCY_IN_PROGRESS', `Idempotency key ${key} is still in progress`, 409, {
+      key,
+    });
+    this.name = 'IdempotencyInProgressError';
   }
 }
