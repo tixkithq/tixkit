@@ -437,9 +437,12 @@ function renderHeadlessBlock(
     }
     case 'tickets': {
       const tickets = (context.tickets ?? []).filter((ticket) => ticket.status !== 'hidden');
+      const checkoutUrl = context.event?.checkoutUrl
+        ? safeRenderedUrl(context.event.checkoutUrl, context, options)
+        : undefined;
       const html = `<section class="tk-ep-tickets" data-block-id="${escapeAttr(block.id)}"><h2>${escapeHtml(renderPlain(block.title, context))}</h2>${block.body ? `<p>${escapeHtml(renderPlain(block.body, context))}</p>` : ''}<ul>${tickets
         .map((ticket) => `<li><strong>${escapeHtml(ticket.name)}</strong>${ticket.description ? `<span>${escapeHtml(ticket.description)}</span>` : ''}${ticket.priceLabel ? `<span>${escapeHtml(ticket.priceLabel)}</span>` : ''}</li>`)
-        .join('')}</ul></section>`;
+        .join('')}</ul>${block.ctaLabel && checkoutUrl ? `<a class="tk-ep-button" href="${escapeAttr(checkoutUrl)}">${escapeHtml(renderPlain(block.ctaLabel, context))}</a>` : ''}</section>`;
       return { type: block.type, id: block.id, title: renderPlain(block.title, context), text: block.body ? renderPlain(block.body, context) : undefined, html, items: tickets };
     }
     case 'products': {

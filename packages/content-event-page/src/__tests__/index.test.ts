@@ -71,6 +71,8 @@ describe('renderEventPageDocument', () => {
     expect(first.html).toContain('class="tixkit-event-page"');
     expect(first.html).toContain('All Access Chicago');
     expect(first.html).toContain('General Admission');
+    expect(first.html).toContain('Get tickets');
+    expect(first.text).toContain('Get tickets');
     expect(first.html).not.toContain('Hidden comp');
     expect(first.headless.some((block) => block.type === 'tickets')).toBe(true);
     expect(first.discovery).toMatchObject({

@@ -80,6 +80,27 @@ describe('ContentEditorShell', () => {
     expect(onPublish).not.toHaveBeenCalled();
   });
 
+  it('can disable only test-send while leaving publish available', () => {
+    const fixture = createContentEditorFixture({ channel: 'event_page' });
+    const onPublish = vi.fn();
+    const onTestSend = vi.fn();
+
+    render(
+      <ContentEditorShell
+        {...fixture}
+        channelLabel={fixtureChannelLabel(fixture.document.channel)}
+        testSendUnavailableReason="Hosted pages use preview instead of test sends."
+        onPublish={onPublish}
+        onTestSend={onTestSend}
+      />,
+    );
+
+    expect(screen.getByRole('button', { name: 'Test send unavailable' })).toBeDisabled();
+    fireEvent.click(screen.getByRole('button', { name: 'Publish' }));
+    expect(onPublish).toHaveBeenCalledTimes(1);
+    expect(onTestSend).not.toHaveBeenCalled();
+  });
+
   it('renders unavailable future channels as closed states', () => {
     const fixture = createContentEditorFixture({ channel: 'imessage' });
 

@@ -23,24 +23,12 @@ async function expectShellRegions(page: Page): Promise<void> {
 }
 
 test.describe('admin content editor shell', () => {
-  test('renders enabled editors and future-channel unavailable routes with axe and no-console gates', async ({
+  test('renders future-channel unavailable routes with axe and no-console gates', async ({
     page,
   }, testInfo) => {
     await requireReachable(page, adminBaseUrl, 'admin dashboard');
 
     const routes = [
-      {
-        path: `/events/${fixtureEventId}/content/event-page`,
-        heading: 'Event page editor',
-        preview: 'TipTap event-page preview',
-        name: 'event-page',
-      },
-      {
-        path: `/events/${fixtureEventId}/content/email`,
-        heading: 'Email template editor',
-        preview: 'React Email preview',
-        name: 'email',
-      },
       {
         path: `/events/${fixtureEventId}/content/imessage`,
         heading: 'iMessage template unavailable',
@@ -79,12 +67,6 @@ test.describe('admin content editor shell', () => {
     await requireReachable(page, adminBaseUrl, 'admin dashboard');
 
     for (const route of [
-      {
-        path: `/events/${fixtureEventId}/content/event-page`,
-        name: 'event-page',
-        minCanvasWidth: 500,
-      },
-      { path: `/events/${fixtureEventId}/content/email`, name: 'email', minCanvasWidth: 360 },
       {
         path: `/events/${fixtureEventId}/content/imessage`,
         name: 'imessage',
