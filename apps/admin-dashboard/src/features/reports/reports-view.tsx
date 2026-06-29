@@ -416,6 +416,16 @@ function SalesReportPanel({ report }: { report: AdminSalesReportSummary }) {
           value={formatCurrency(report.netRevenueCents, report.currency)}
           icon={TrendingUp}
         />
+        <ReportCard
+          title="Online Sales"
+          value={formatCurrency(report.grossSalesByChannelCents.online, report.currency)}
+          icon={DollarSign}
+        />
+        <ReportCard
+          title="Box Office"
+          value={formatCurrency(report.grossSalesByChannelCents.boxOffice, report.currency)}
+          icon={Receipt}
+        />
         <ReportCard title="Tickets Sold" value={formatNumber(report.ticketsSold)} icon={Ticket} />
         <ReportCard title="Check-ins" value={formatNumber(report.checkIns)} icon={CalendarCheck} />
         <ReportCard

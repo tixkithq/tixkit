@@ -3,7 +3,13 @@ import { PassThrough } from 'node:stream';
 import { Redis } from 'ioredis';
 import { ClerkAuthService } from '../../auth/clerk.js';
 import { EventRepository, type Database } from '@tixkit/db';
-import { NotFoundError, ValidationError, type Principal } from '@tixkit/domain';
+import {
+  groupRevenueByChannel,
+  NotFoundError,
+  ValidationError,
+  type Principal,
+  type SalesChannel,
+} from '@tixkit/domain';
 import { ulid } from 'ulid';
 import { createExportSchema, parseBody } from '../../http/schemas.js';
 import { withIdempotency, hashRequest } from '../../services/idempotency.js';
@@ -133,6 +139,16 @@ export const reportingRoutes: FastifyPluginAsync = async (app) => {
     const refundRows = await refundQuery.execute();
 
     const grossSales = orders.reduce((sum, o) => sum + Number(o.total_cents), 0);
+    const grossSalesByChannel = groupRevenueByChannel(
+      orders.map((order) => {
+        const salesChannel: SalesChannel =
+          order.sales_channel === 'box_office' ? 'box_office' : 'online';
+        return {
+          salesChannel,
+          amountCents: Number(order.total_cents),
+        };
+      }),
+    );
     const refunds = refundRows.reduce((sum, refund) => sum + Number(refund.amount_cents), 0);
     const netRevenue = grossSales - refunds;
     const feesCollected = orders.reduce((sum, o) => sum + Number(o.fee_cents), 0);
@@ -191,6 +207,10 @@ export const reportingRoutes: FastifyPluginAsync = async (app) => {
       eventId,
       currency: orders[0]?.currency ?? event.currency ?? 'USD',
       grossSalesCents: grossSales,
+      grossSalesByChannelCents: {
+        online: grossSalesByChannel.online,
+        boxOffice: grossSalesByChannel.box_office,
+      },
       netRevenueCents: netRevenue,
       refundsCents: refunds,
       feesCents: feesCollected,

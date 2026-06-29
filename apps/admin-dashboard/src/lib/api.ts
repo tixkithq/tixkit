@@ -784,6 +784,10 @@ export type AdminSalesReportSummary = {
   eventId: string;
   currency: string;
   grossSalesCents: number;
+  grossSalesByChannelCents: {
+    online: number;
+    boxOffice: number;
+  };
   netRevenueCents: number;
   feesCents: number;
   taxCents: number;
@@ -2947,6 +2951,10 @@ function fixtureSalesReport(eventId: string, range?: ReportDateRange): AdminSale
     eventId,
     currency: event?.currency ?? 'USD',
     grossSalesCents: gross,
+    grossSalesByChannelCents: {
+      online: gross,
+      boxOffice: 0,
+    },
     netRevenueCents: gross - refunds - Math.round(gross * 0.03),
     feesCents: Math.round(gross * 0.03),
     taxCents: Math.round(gross * 0.08),

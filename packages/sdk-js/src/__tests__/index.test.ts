@@ -809,6 +809,37 @@ describe('TixkitClient new resource methods', () => {
     expect(report.widgetViews).toBe(18);
   });
 
+  it('reports.sales returns sales-channel gross totals from the API contract', async () => {
+    const fm = mockFetch(200, {
+      eventId: 'evt_1',
+      currency: 'USD',
+      grossSalesCents: 12500,
+      grossSalesByChannelCents: { online: 9000, boxOffice: 3500 },
+      netRevenueCents: 10000,
+      refundsCents: 2000,
+      feesCents: 500,
+      taxCents: 1000,
+      ticketsSold: 8,
+      checkIns: 4,
+      ordersCount: 6,
+      paidOrdersCount: 5,
+      range: { from: '2026-06-01', to: '2026-06-30' },
+    });
+    const c = new TixkitClient({
+      apiKey: '***********',
+      apiBaseUrl: 'https://api.test',
+      maxRetries: 0,
+    });
+
+    const report = await c.reports.sales('evt_1', { from: '2026-06-01', to: '2026-06-30' });
+    const call = getCall(fm);
+
+    expect(call.url).toBe(
+      'https://api.test/v1/events/evt_1/reports/sales?from=2026-06-01&to=2026-06-30',
+    );
+    expect(report.grossSalesByChannelCents).toEqual({ online: 9000, boxOffice: 3500 });
+  });
+
   it('products resource sends category and product management requests', async () => {
     const fm = mockFetch(201, {
       id: 'prd_1',
