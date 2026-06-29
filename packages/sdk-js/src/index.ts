@@ -439,7 +439,7 @@ export type ContentRenderArtifact = {
   documentId: string;
   versionId: string;
   channel: ContentChannel;
-  outputType: 'preview' | 'test_send';
+  outputType: 'preview' | 'test_send' | 'send';
   artifactRef: string;
   checksum: string;
   createdAt: string;

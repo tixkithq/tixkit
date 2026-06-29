@@ -599,6 +599,7 @@ export const messagingRoutes: FastifyPluginAsync = async (app) => {
                     templateKey: body.templateKey,
                     variables: {
                       ...variables,
+                      contentVersionId: publishedSmsTemplate.version.id,
                       attendeeId: attendee.id,
                       eventId,
                       notificationType,
@@ -625,6 +626,7 @@ export const messagingRoutes: FastifyPluginAsync = async (app) => {
                   templateKey: body.templateKey,
                   variables: {
                     ...variables,
+                    contentVersionId: publishedSmsTemplate.version.id,
                     attendeeId: attendee.id,
                     eventId,
                     notificationType,

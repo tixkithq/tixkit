@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { createDb } from '@tixkit/db';
 import {
   ContentRepository,
@@ -30,6 +31,81 @@ import type { SmsTransport } from '@tixkit/domain/messaging';
 import { ulid } from 'ulid';
 import type { WorkflowActivityResult } from '../shared/types.js';
 import { okResult, errResult } from '../shared/types.js';
+
+type SendRenderOutput = {
+  subject?: string;
+  html?: string;
+  text?: string;
+  segments?: number;
+};
+
+function normalizeForChecksum(value: unknown): unknown {
+  if (Array.isArray(value)) {
+    return value.map((item) => normalizeForChecksum(item));
+  }
+  if (value && typeof value === 'object') {
+    const object = value as Record<string, unknown>;
+    const keys: string[] = [];
+    for (const key of Object.keys(object)) {
+      const index = keys.findIndex((candidate) => key.localeCompare(candidate) < 0);
+      if (index === -1) {
+        keys.push(key);
+      } else {
+        keys.splice(index, 0, key);
+      }
+    }
+    return Object.fromEntries(keys.map((key) => [key, normalizeForChecksum(object[key])]));
+  }
+  return value;
+}
+
+function checksumRenderOutput(output: SendRenderOutput): string {
+  return createHash('sha256')
+    .update(JSON.stringify(normalizeForChecksum(output)))
+    .digest('hex');
+}
+
+function parseJobVariables(value: unknown): Record<string, unknown> {
+  if (value && typeof value === 'object') return value as Record<string, unknown>;
+  if (typeof value !== 'string') return {};
+  try {
+    const parsed = JSON.parse(value);
+    return parsed && typeof parsed === 'object' ? (parsed as Record<string, unknown>) : {};
+  } catch {
+    return {};
+  }
+}
+
+async function recordSendRenderArtifact(input: {
+  db: ReturnType<typeof createDb>;
+  tenantId: string;
+  brandId: string;
+  channel: 'email' | 'sms';
+  versionId?: string | null;
+  artifactRef: string;
+  output: SendRenderOutput;
+}): Promise<void> {
+  if (!input.versionId) return;
+
+  const contentRepo = new ContentRepository(input.db);
+  const content = await contentRepo.findPublishedVersionById({
+    tenantId: input.tenantId,
+    brandId: input.brandId,
+    versionId: input.versionId,
+    channel: input.channel,
+  });
+  if (!content) return;
+
+  await contentRepo.recordRenderArtifact({
+    tenantId: input.tenantId,
+    documentId: content.document.id,
+    versionId: content.version.id,
+    channel: input.channel,
+    outputType: 'send',
+    artifactRef: input.artifactRef,
+    checksum: checksumRenderOutput(input.output),
+  });
+}
 
 export async function checkSuppressionActivity(input: {
   email: string;
@@ -330,9 +406,24 @@ export async function sendEmailActivity(input: {
         providerMessageId: result.providerMessageId,
         status: result.status,
         attemptedProviders: [result.provider],
-        acceptedProvider: result.provider,
+        acceptedProvider:
+          result.status === 'accepted' || result.status === 'sent' ? result.provider : undefined,
       });
-      await jobRepo.update(input.jobId, { status: 'sent' });
+      await jobRepo.update(input.jobId, {
+        status: result.status === 'failed' ? 'failed' : 'sent',
+      });
+      if (result.status === 'failed') {
+        return errResult('EMAIL_SEND_FAILED', 'Default email provider failed', true);
+      }
+      await recordSendRenderArtifact({
+        db,
+        tenantId: job.tenant_id,
+        brandId: job.brand_id,
+        channel: 'email',
+        versionId: job.template_version_id,
+        artifactRef: `email-delivery:${result.deliveryId}`,
+        output: { subject: input.subject, html: input.html, text: input.text },
+      });
       return okResult({ deliveryId: result.deliveryId, provider: result.provider });
     }
 
@@ -438,7 +529,6 @@ export async function sendEmailActivity(input: {
         result.status === 'accepted' || result.status === 'sent' ? result.provider : undefined,
       metadata: { attemptedProviders: result.attemptedFallbackProviders },
     });
-
     await jobRepo.update(input.jobId, {
       status: result.status === 'failed' ? 'failed' : 'sent',
     });
@@ -446,6 +536,16 @@ export async function sendEmailActivity(input: {
     if (result.status === 'failed') {
       return errResult('EMAIL_SEND_FAILED', 'All providers failed', true);
     }
+
+    await recordSendRenderArtifact({
+      db,
+      tenantId: job.tenant_id,
+      brandId: job.brand_id,
+      channel: 'email',
+      versionId: job.template_version_id,
+      artifactRef: `email-delivery:${result.deliveryId}`,
+      output: { subject: input.subject, html: input.html, text: input.text },
+    });
 
     return okResult({ deliveryId: result.deliveryId, provider: result.provider });
   } catch (err) {
@@ -471,6 +571,14 @@ export async function sendSmsActivity(input: {
     if (!job) {
       return errResult('SMS_JOB_NOT_FOUND', 'SMS job not found', false);
     }
+
+    const variables = parseJobVariables(job.variables);
+    const contentVersionId =
+      typeof variables.contentVersionId === 'string'
+        ? variables.contentVersionId
+        : typeof variables.templateVersionId === 'string'
+          ? variables.templateVersionId
+          : undefined;
 
     const consentResult = await checkSmsConsentActivity({
       phone: job.to_phone,
@@ -575,7 +683,6 @@ export async function sendSmsActivity(input: {
       acceptedProvider: result.status === 'failed' ? undefined : result.provider,
       metadata: { attemptedProviders: result.attemptedFallbackProviders },
     });
-
     await jobRepo.update(input.jobId, {
       status: result.status === 'failed' ? 'failed' : 'sent',
     });
@@ -583,6 +690,16 @@ export async function sendSmsActivity(input: {
     if (result.status === 'failed') {
       return errResult('SMS_SEND_FAILED', 'All SMS providers failed', true);
     }
+
+    await recordSendRenderArtifact({
+      db,
+      tenantId: job.tenant_id,
+      brandId: job.brand_id,
+      channel: 'sms',
+      versionId: contentVersionId,
+      artifactRef: `sms-delivery:${result.deliveryId}`,
+      output: { text: job.body },
+    });
 
     return okResult({ deliveryId: result.deliveryId, provider: result.provider });
   } catch (err) {

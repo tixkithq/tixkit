@@ -628,7 +628,7 @@ export const openApiSpec = {
             type: 'string',
             enum: ['event_page', 'email', 'sms', 'imessage', 'social_invite'],
           },
-          outputType: { type: 'string', enum: ['preview', 'test_send'] },
+          outputType: { type: 'string', enum: ['preview', 'test_send', 'send'] },
           artifactRef: { type: 'string' },
           checksum: { type: 'string', pattern: '^[a-f0-9]{64}$' },
           createdAt: { type: 'string', format: 'date-time' },

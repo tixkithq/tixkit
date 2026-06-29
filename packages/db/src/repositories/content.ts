@@ -69,7 +69,7 @@ export type ContentRenderArtifactRecord = {
   documentId: string;
   versionId: string;
   channel: ContentChannel;
-  outputType: 'preview' | 'test_send';
+  outputType: 'preview' | 'test_send' | 'send';
   artifactRef: string;
   checksum: string;
   createdAt: string;
@@ -453,7 +453,7 @@ export class ContentRepository extends BaseRepository {
     documentId: string;
     versionId: string;
     channel: ContentChannel;
-    outputType: 'preview' | 'test_send';
+    outputType: 'preview' | 'test_send' | 'send';
     artifactRef: string;
     checksum: string;
   }): Promise<ContentRenderArtifactRecord> {
@@ -590,7 +590,10 @@ export class ContentRepository extends BaseRepository {
       documentId: row.document_id,
       versionId: row.version_id,
       channel: row.channel as ContentChannel,
-      outputType: row.output_type === 'test_send' ? 'test_send' : 'preview',
+      outputType:
+        row.output_type === 'test_send' || row.output_type === 'send'
+          ? row.output_type
+          : 'preview',
       artifactRef: row.artifact_ref,
       checksum: row.checksum,
       createdAt: iso(row.created_at),

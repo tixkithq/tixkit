@@ -362,8 +362,8 @@ describe('ContentRepository', () => {
       documentId: 'cdoc_1',
       versionId: 'cver_1',
       channel: 'sms',
-      outputType: 'test_send',
-      artifactRef: 'content-test-send:ctsend_1',
+      outputType: 'send',
+      artifactRef: 'sms-delivery:smd_1',
       checksum: 'a'.repeat(64),
     });
 
@@ -372,8 +372,8 @@ describe('ContentRepository', () => {
       documentId: 'cdoc_1',
       versionId: 'cver_1',
       channel: 'sms',
-      outputType: 'test_send',
-      artifactRef: 'content-test-send:ctsend_1',
+      outputType: 'send',
+      artifactRef: 'sms-delivery:smd_1',
       checksum: 'a'.repeat(64),
     });
     expect(artifact.id).toMatch(/^cra_/);
@@ -383,8 +383,8 @@ describe('ContentRepository', () => {
         document_id: 'cdoc_1',
         version_id: 'cver_1',
         channel: 'sms',
-        output_type: 'test_send',
-        artifact_ref: 'content-test-send:ctsend_1',
+        output_type: 'send',
+        artifact_ref: 'sms-delivery:smd_1',
         checksum: 'a'.repeat(64),
       }),
     ]);

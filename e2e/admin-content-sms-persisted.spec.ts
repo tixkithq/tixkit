@@ -36,6 +36,21 @@ type ContentVersionList = {
   }>;
 };
 
+type ContentRenderArtifact = {
+  id: string;
+  outputType: 'preview' | 'test_send' | 'send';
+  artifactRef: string;
+  checksum: string;
+};
+
+type ContentPreviewResponse = {
+  renderArtifact: ContentRenderArtifact;
+};
+
+type ContentTestSendResponse = {
+  renderArtifact: ContentRenderArtifact;
+};
+
 async function jsonResponse<T>(response: APIResponse, expectedStatus: number): Promise<T> {
   const body = await response.json().catch(async () => ({
     raw: await response.text(),
@@ -143,6 +158,45 @@ test.describe('persisted admin SMS content editor', () => {
     expect(
       persisted.versions.some((version) => version.status === 'draft' && version.contentJson.editor?.body === smsBody),
     ).toBe(true);
+
+    const publishedVersionId = persisted.document.publishedVersionId!;
+    const renderContext = {
+      event: { title: event.title, checkoutUrl: `https://checkout.test/e/${event.id}` },
+      recipient: { name: 'Ada Lovelace' },
+    };
+    const artifactPreview = await jsonResponse<ContentPreviewResponse>(
+      await page.request.post(`${apiBaseUrl}/v1/content-documents/${persisted.document.id}/preview`, {
+        data: {
+          versionId: publishedVersionId,
+          context: renderContext,
+          optOutToken: 'Reply STOP to opt out',
+        },
+      }),
+      200,
+    );
+    expect(artifactPreview.renderArtifact).toMatchObject({
+      outputType: 'preview',
+      artifactRef: expect.stringContaining(
+        `content-preview:${persisted.document.id}:${publishedVersionId}:`,
+      ),
+      checksum: expect.stringMatching(/^[a-f0-9]{64}$/),
+    });
+    const artifactTestSend = await jsonResponse<ContentTestSendResponse>(
+      await page.request.post(`${apiBaseUrl}/v1/content-documents/${persisted.document.id}/test-sends`, {
+        data: {
+          versionId: publishedVersionId,
+          recipient: '+15550000003',
+          context: renderContext,
+          optOutToken: 'Reply STOP to opt out',
+        },
+      }),
+      202,
+    );
+    expect(artifactTestSend.renderArtifact).toMatchObject({
+      outputType: 'test_send',
+      artifactRef: expect.stringMatching(/^content-test-send:cts_/),
+      checksum: artifactPreview.renderArtifact.checksum,
+    });
 
     await attachScreenshot(page, testInfo, 'admin-content-sms-persisted-desktop');
     await expectNoAxeViolations(page, testInfo);

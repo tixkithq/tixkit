@@ -18,6 +18,8 @@ const dbState = vi.hoisted(() => ({
     brand_id: 'brd_1',
     to_phone: '+15550000001',
     body: 'Update',
+    template_key: 'event-update',
+    variables: JSON.stringify({ contentVersionId: 'cver_1' }),
     idempotency_key: 'idem_sms',
   },
   emailRoutes: [] as Array<Record<string, unknown>>,
@@ -32,6 +34,7 @@ const dbState = vi.hoisted(() => ({
   } as Record<string, unknown> | undefined,
   emailDeliveries: [] as Record<string, unknown>[],
   smsDeliveries: [] as Record<string, unknown>[],
+  renderArtifacts: [] as Record<string, unknown>[],
   emailJobUpdates: [] as Record<string, unknown>[],
   smsJobUpdates: [] as Record<string, unknown>[],
   contentDocument: {
@@ -171,6 +174,15 @@ vi.mock('@tixkit/db', () => {
       if (document.publishedVersionId !== version.id) return undefined;
       return { document, version };
     }
+
+    async recordRenderArtifact(input: Record<string, unknown>) {
+      const artifact = {
+        id: `cra_${dbState.renderArtifacts.length + 1}`,
+        ...input,
+      };
+      dbState.renderArtifacts.push(artifact);
+      return artifact;
+    }
   }
 
   return {
@@ -225,6 +237,9 @@ function activeSmsRoute(overrides: Record<string, unknown> = {}) {
 
 describe('notification activity deliverability gating', () => {
   beforeEach(() => {
+    dbState.emailJob.template_version_id = 'ntv_1';
+    dbState.emailJob.variables = JSON.stringify({ notificationType: 'bulk' });
+    dbState.smsJob.variables = JSON.stringify({ contentVersionId: 'cver_1' });
     dbState.emailRoutes = [];
     dbState.smsRoutes = [];
     dbState.emailSender = undefined;
@@ -237,6 +252,7 @@ describe('notification activity deliverability gating', () => {
     };
     dbState.emailDeliveries = [];
     dbState.smsDeliveries = [];
+    dbState.renderArtifacts = [];
     dbState.emailJobUpdates = [];
     dbState.smsJobUpdates = [];
     dbState.contentDocument = {
@@ -390,6 +406,7 @@ describe('notification activity deliverability gating', () => {
       retryable: false,
     });
     expect(dbState.emailDeliveries).toHaveLength(0);
+    expect(dbState.renderArtifacts).toHaveLength(0);
   });
 
   it('fails closed when email routes have no verified sender for the route domain', async () => {
@@ -408,6 +425,7 @@ describe('notification activity deliverability gating', () => {
       retryable: false,
     });
     expect(dbState.emailDeliveries).toHaveLength(0);
+    expect(dbState.renderArtifacts).toHaveLength(0);
   });
 
   it('fails closed when SMS provider routes have no verified sender identity', async () => {
@@ -430,5 +448,88 @@ describe('notification activity deliverability gating', () => {
       retryable: false,
     });
     expect(dbState.smsDeliveries).toHaveLength(0);
+    expect(dbState.renderArtifacts).toHaveLength(0);
+  });
+
+  it('records send render artifacts for accepted content email deliveries', async () => {
+    dbState.emailJob.template_version_id = 'cver_1';
+    dbState.emailRoutes = [activeEmailRoute()];
+    dbState.emailSender = {
+      id: 'bsi_1',
+      brand_id: 'brd_1',
+      email: 'tickets@example.com',
+      name: 'Tixkit',
+      reply_to_email: 'support@example.com',
+      verified: true,
+    };
+
+    const result = await sendEmailActivity({
+      jobId: 'emj_1',
+      providerRouteId: 'epr_1',
+      subject: 'Update for All Access',
+      html: '<p>Hello Ada</p>',
+      text: 'Hello Ada',
+    });
+
+    expect(result).toMatchObject({ ok: true });
+    expect(dbState.renderArtifacts).toEqual([
+      expect.objectContaining({
+        tenantId: 'tnt_1',
+        documentId: 'cdoc_1',
+        versionId: 'cver_1',
+        channel: 'email',
+        outputType: 'send',
+        artifactRef: expect.stringMatching(/^email-delivery:emd_/),
+        checksum: expect.stringMatching(/^[a-f0-9]{64}$/),
+      }),
+    ]);
+  });
+
+  it('records send render artifacts for accepted content SMS deliveries', async () => {
+    dbState.contentDocument = {
+      ...dbState.contentDocument!,
+      channel: 'sms',
+    };
+    dbState.contentVersion = {
+      ...dbState.contentVersion!,
+      subject: null,
+      renderedHtml: null,
+      renderedText: 'Update',
+      contentJson: createDefaultSmsTemplate({
+        editor: { body: 'Update' },
+        settings: {
+          templateKey: 'event-update',
+          category: 'bulk',
+          consentCategory: 'marketing',
+          segmentLimit: 2,
+          optOutText: 'Reply STOP to opt out',
+        },
+      }),
+    };
+    dbState.smsRoutes = [activeSmsRoute({ provider_type: 'capture' })];
+    dbState.smsSender = {
+      id: 'ssi_1',
+      sender: '+15550000002',
+      verified: true,
+    };
+
+    const result = await sendSmsActivity({
+      jobId: 'smj_1',
+      providerRouteId: 'spr_1',
+      notificationType: 'bulk',
+    });
+
+    expect(result).toMatchObject({ ok: true });
+    expect(dbState.renderArtifacts).toEqual([
+      expect.objectContaining({
+        tenantId: 'tnt_1',
+        documentId: 'cdoc_1',
+        versionId: 'cver_1',
+        channel: 'sms',
+        outputType: 'send',
+        artifactRef: expect.stringMatching(/^sms-delivery:smd_/),
+        checksum: expect.stringMatching(/^[a-f0-9]{64}$/),
+      }),
+    ]);
   });
 });

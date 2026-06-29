@@ -206,6 +206,9 @@ describe('openApiSpec', () => {
     expect(openApiSpec.components.schemas.ContentPreview.properties.renderArtifact).toEqual({
       $ref: '#/components/schemas/ContentRenderArtifact',
     });
+    expect(openApiSpec.components.schemas.ContentRenderArtifact.properties.outputType.enum).toEqual(
+      ['preview', 'test_send', 'send'],
+    );
     expect(openApiSpec.components.schemas.ContentRenderArtifact.required).toEqual([
       'id',
       'tenantId',

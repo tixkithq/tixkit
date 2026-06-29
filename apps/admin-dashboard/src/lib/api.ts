@@ -604,6 +604,19 @@ export type AdminContentPreview = {
   channel: AdminContentChannel;
   output: AdminContentRenderOutput;
   validation: AdminContentValidationResult;
+  renderArtifact?: AdminContentRenderArtifact;
+};
+
+export type AdminContentRenderArtifact = {
+  id: string;
+  tenantId: string;
+  documentId: string;
+  versionId: string;
+  channel: AdminContentChannel;
+  outputType: 'preview' | 'test_send' | 'send';
+  artifactRef: string;
+  checksum: string;
+  createdAt: string;
 };
 
 export type AdminContentTestSend = {
@@ -1575,7 +1588,13 @@ export type AdminApi = {
       context?: Record<string, unknown>;
       optOutToken?: string;
     },
-  ): Promise<ApiResult<{ testSend: AdminContentTestSend; output: AdminContentRenderOutput }>>;
+  ): Promise<
+    ApiResult<{
+      testSend: AdminContentTestSend;
+      output: AdminContentRenderOutput;
+      renderArtifact?: AdminContentRenderArtifact;
+    }>
+  >;
 
   previewMessageRecipients(
     eventId: string,
@@ -4754,7 +4773,11 @@ export const adminApi: AdminApi = {
   async testSendContent(documentId, input) {
     return withFixture(
       () =>
-        request<{ testSend: AdminContentTestSend; output: AdminContentRenderOutput }>(
+        request<{
+          testSend: AdminContentTestSend;
+          output: AdminContentRenderOutput;
+          renderArtifact?: AdminContentRenderArtifact;
+        }>(
           `/v1/content-documents/${documentId}/test-sends`,
           {
             method: 'POST',
@@ -4762,7 +4785,11 @@ export const adminApi: AdminApi = {
           },
         ),
       () =>
-        err<{ testSend: AdminContentTestSend; output: AdminContentRenderOutput }>(
+        err<{
+          testSend: AdminContentTestSend;
+          output: AdminContentRenderOutput;
+          renderArtifact?: AdminContentRenderArtifact;
+        }>(
           apiError('fixture_unavailable', 'Content test sends require the live API', 503),
         ),
     );

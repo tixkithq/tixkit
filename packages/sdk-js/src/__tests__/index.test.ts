@@ -7,6 +7,7 @@ import path from 'node:path';
 import {
   TixkitClient,
   TixkitApiError,
+  type ContentRenderArtifact,
   type EmailTemplateDocument,
   type SmsTemplateDocument,
   type WebhookEvent,
@@ -1218,6 +1219,19 @@ describe('TixkitClient new resource methods', () => {
   });
 
   it('content testSend returns render artifact metadata from the documented path', async () => {
+    const acceptedSendArtifact: ContentRenderArtifact = {
+      id: 'cra_send_1',
+      tenantId: 'tnt_1',
+      documentId: 'cdoc_1',
+      versionId: 'cver_1',
+      channel: 'sms',
+      outputType: 'send',
+      artifactRef: 'sms-delivery:smd_1',
+      checksum: 'b'.repeat(64),
+      createdAt: '2026-06-29T00:00:00.000Z',
+    };
+    expect(acceptedSendArtifact.outputType).toBe('send');
+
     const fm = mockFetch(202, {
       testSend: {
         id: 'ctsend_1',
