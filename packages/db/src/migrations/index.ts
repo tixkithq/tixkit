@@ -27,3 +27,4 @@ export { WebhookDeliveryAttemptIdentityMigration } from './0026_webhook_delivery
 export { WebhookDeliveryReplayIdentityMigration } from './0027_webhook_delivery_replay_identity.js';
 export { ShortLinksMigration } from './0028_short_links.js';
 export { EventCodeFormatMigration } from './0029_event_code_format.js';
+export { ContentDocumentsMigration } from './0030_content_documents.js';

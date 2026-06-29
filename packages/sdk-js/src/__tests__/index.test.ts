@@ -835,6 +835,70 @@ describe('TixkitClient new resource methods', () => {
     });
   });
 
+  it('content resource sends lifecycle requests', async () => {
+    const fm = mockFetch(200, {
+      id: 'cdoc_1',
+      tenantId: 'tnt_1',
+      organizationId: 'org_1',
+      brandId: 'brd_1',
+      channel: 'email',
+      key: 'order-confirmed',
+      name: 'Order confirmed',
+      status: 'draft',
+      locale: 'en',
+      createdAt: '2026-01-01T00:00:00.000Z',
+      updatedAt: '2026-01-01T00:00:00.000Z',
+    });
+    const c = new TixkitClient({
+      apiKey: '***********',
+      apiBaseUrl: 'https://api.test',
+      maxRetries: 0,
+    });
+
+    await c.content.create({
+      organizationId: 'org_1',
+      brandId: 'brd_1',
+      channel: 'email',
+      key: 'order-confirmed',
+      name: 'Order confirmed',
+    });
+
+    const call = getCall(fm);
+    expect(call.url).toBe('https://api.test/v1/content-documents');
+    expect(call.method).toBe('POST');
+    expect(JSON.parse(call.body)).toMatchObject({
+      organizationId: 'org_1',
+      brandId: 'brd_1',
+      channel: 'email',
+      key: 'order-confirmed',
+    });
+  });
+
+  it('content preview and public content page use documented paths', async () => {
+    const fm = mockFetch(200, {
+      channel: 'email',
+      output: { subject: 'Hi Ada' },
+      validation: { valid: true, severity: 'warning', issues: [] },
+    });
+    const c = new TixkitClient({
+      apiKey: '***********',
+      apiBaseUrl: 'https://api.test',
+      maxRetries: 0,
+    });
+
+    await c.content.preview('cdoc_1', {
+      versionId: 'cver_1',
+      context: { buyer: { first_name: 'Ada' } },
+    });
+    expect(getCall(fm, 0).url).toBe('https://api.test/v1/content-documents/cdoc_1/preview');
+    expect(getCall(fm, 0).method).toBe('POST');
+
+    await c.public.getContentPage('evt_1', { locale: 'en' });
+    expect(getCall(fm, 1).url).toBe(
+      'https://api.test/v1/public/events/evt_1/content-page?locale=en',
+    );
+  });
+
   it('messages.getCampaign sends GET', async () => {
     const fm = mockFetch(200, {
       id: 'cmp_1',

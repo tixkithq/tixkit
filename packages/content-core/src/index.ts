@@ -325,4 +325,15 @@ export function fixtureSmsDocument(overrides: Partial<ContentDocument> = {}): Co
   });
 }
 
+export function fixtureEventPageDocument(overrides: Partial<ContentDocument> = {}): ContentDocument {
+  return fixtureEmailDocument({
+    id: 'cdoc_event_page_1',
+    channel: 'event_page',
+    key: 'all-access-chicago',
+    name: 'All Access Chicago',
+    eventId: 'evt_demo_001',
+    ...overrides,
+  });
+}
+
 export * from './renderers.js';

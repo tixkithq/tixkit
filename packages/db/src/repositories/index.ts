@@ -60,3 +60,4 @@ export {
 } from './messaging.js';
 
 export { ShortLinkRepository } from './short-links.js';
+export { ContentRepository } from './content.js';

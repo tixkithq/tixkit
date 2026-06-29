@@ -62,6 +62,32 @@ billing.write
 
 API keys cannot grant scopes the creating principal does not have. Brand-scoped principals must create brand- or event-scoped credentials; event-scoped principals must create event-scoped credentials. Missing scopes return `403 FORBIDDEN`.
 
+## Content Documents
+
+The Phase 6 content-studio foundation stores event pages, email templates, SMS templates, and future channel documents behind one lifecycle.
+
+Authenticated routes:
+
+| Method | Path | Purpose |
+| ------ | ---- | ------- |
+| `GET` | `/v1/content-documents` | List scoped content documents. Optional filters: `channel`, `brandId`, `eventId`, `limit`. |
+| `POST` | `/v1/content-documents` | Create a document for `event_page`, `email`, or `sms`. Stubbed future channels such as `imessage` and `social_invite` fail closed with `VALIDATION_ERROR`. |
+| `GET` | `/v1/content-documents/:documentId` | Fetch a scoped content document. |
+| `GET` | `/v1/content-documents/:documentId/versions` | List saved versions. |
+| `POST` | `/v1/content-documents/:documentId/versions` | Save a draft version and persist validation issues. |
+| `POST` | `/v1/content-documents/:documentId/preview` | Render a preview through the shared renderer. |
+| `POST` | `/v1/content-documents/:documentId/versions/:versionId/publish` | Publish a valid version. Invalid versions return publish blockers. |
+| `POST` | `/v1/content-documents/:documentId/archive` | Archive a document. |
+| `POST` | `/v1/content-documents/:documentId/test-sends` | Capture a renderer-backed test send without faking provider delivery. |
+
+Public route:
+
+| Method | Path | Purpose |
+| ------ | ---- | ------- |
+| `GET` | `/v1/public/events/:eventId/content-page` | Fetch allowlisted published event-page content for a published event. Optional `locale`; response excludes tenant, organization, brand, draft, validation, variable, and creator metadata. |
+
+Permission rules follow the existing product scopes: event pages use `events.read`/`events.write`, while email and SMS templates use `messages.write`.
+
 ## Pagination
 
 List endpoints use cursor-based pagination with a stable ascending sort by `id` (ULID):

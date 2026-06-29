@@ -347,6 +347,129 @@ export type PaymentCompensation = {
   updatedAt: string;
 };
 
+export type ContentChannel = 'event_page' | 'email' | 'sms' | 'imessage' | 'social_invite';
+export type ContentDocumentStatus = 'draft' | 'published' | 'archived';
+export type ContentVersionStatus = 'draft' | 'published' | 'superseded';
+
+export type ContentValidationIssue = {
+  code: string;
+  message: string;
+  severity: 'error' | 'warning';
+  field?: string;
+};
+
+export type ContentValidationResult = {
+  valid: boolean;
+  severity: 'error' | 'warning';
+  issues: ContentValidationIssue[];
+};
+
+export type ContentDocument = {
+  id: string;
+  tenantId: string;
+  organizationId: string;
+  brandId: string;
+  eventId?: string;
+  channel: ContentChannel;
+  key: string;
+  name: string;
+  status: ContentDocumentStatus;
+  locale: string;
+  currentDraftVersionId?: string;
+  publishedVersionId?: string;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type ContentDocumentVersion = {
+  id: string;
+  documentId: string;
+  versionNumber: number;
+  status: ContentVersionStatus;
+  schemaVersion: number;
+  subject?: string;
+  previewText?: string;
+  contentJson: unknown;
+  renderedHtml?: string;
+  renderedText?: string;
+  variables: Array<{ key: string; required: boolean; description?: string }>;
+  validation: ContentValidationResult;
+  createdBy: string;
+  createdAt: string;
+  publishedAt?: string;
+};
+
+export type ContentRenderOutput = {
+  subject?: string;
+  html?: string;
+  text?: string;
+  segments?: {
+    segments: number;
+    encoding: string;
+    charsPerSegment: number;
+    unitsUsed: number;
+    remaining: number;
+  };
+};
+
+export type ContentPreview = {
+  channel: ContentChannel;
+  output: ContentRenderOutput;
+  validation: ContentValidationResult;
+};
+
+export type PublicContentPage = {
+  document: {
+    eventId: string;
+    channel: 'event_page';
+    key: string;
+    name: string;
+    locale: string;
+    updatedAt: string;
+  };
+  version: {
+    versionNumber: number;
+    subject?: string;
+    previewText?: string;
+    renderedHtml?: string;
+    renderedText?: string;
+    publishedAt?: string;
+  };
+};
+
+export type ContentTestSend = {
+  id: string;
+  tenantId: string;
+  documentId: string;
+  versionId: string;
+  channel: ContentChannel;
+  recipient: string;
+  status: 'captured' | 'failed';
+  renderedSubject?: string;
+  renderedHtml?: string;
+  renderedText?: string;
+  error?: string;
+  createdAt: string;
+};
+
+export type CreateContentDocumentInput = {
+  organizationId: string;
+  brandId: string;
+  eventId?: string;
+  channel: ContentChannel;
+  key: string;
+  name: string;
+  locale?: string;
+};
+
+export type SaveContentVersionInput = {
+  subject?: string;
+  previewText?: string;
+  contentJson?: unknown;
+  renderedHtml?: string;
+  renderedText?: string;
+};
+
 export type Order = {
   id: string;
   tenantId: string;
@@ -998,6 +1121,7 @@ export class TixkitClient {
   readonly reports: ReportResource;
   readonly exports: ExportResource;
   readonly messages: MessageResource;
+  readonly content: ContentResource;
   readonly webhookEndpoints: WebhookEndpointResource;
   readonly paymentAccounts: PaymentAccountResource;
   readonly questions: QuestionResource;
@@ -1035,6 +1159,7 @@ export class TixkitClient {
     this.reports = new ReportResource(this);
     this.exports = new ExportResource(this);
     this.messages = new MessageResource(this);
+    this.content = new ContentResource(this);
     this.webhookEndpoints = new WebhookEndpointResource(this);
     this.paymentAccounts = new PaymentAccountResource(this);
     this.questions = new QuestionResource(this);
@@ -1847,6 +1972,84 @@ class PrivacyResource {
   }
 }
 
+class ContentResource {
+  constructor(private client: TixkitClient) {}
+
+  async list(
+    params?: PaginationParams & {
+      channel?: ContentChannel;
+      brandId?: string;
+      eventId?: string;
+    },
+  ): Promise<PageResult<ContentDocument>> {
+    return this.client.request('GET', '/content-documents', {
+      params: paginationParams(params),
+    });
+  }
+
+  async create(input: CreateContentDocumentInput): Promise<ContentDocument> {
+    return this.client.request('POST', '/content-documents', { body: input });
+  }
+
+  async get(documentId: string): Promise<ContentDocument> {
+    return this.client.request('GET', `/content-documents/${documentId}`);
+  }
+
+  async versions(documentId: string): Promise<PageResult<ContentDocumentVersion>> {
+    return this.client.request('GET', `/content-documents/${documentId}/versions`);
+  }
+
+  async saveVersion(
+    documentId: string,
+    input: SaveContentVersionInput,
+  ): Promise<ContentDocumentVersion> {
+    return this.client.request('POST', `/content-documents/${documentId}/versions`, {
+      body: input,
+    });
+  }
+
+  async preview(
+    documentId: string,
+    input: SaveContentVersionInput & {
+      versionId?: string;
+      context?: Record<string, unknown>;
+      optOutToken?: string;
+    },
+  ): Promise<ContentPreview> {
+    return this.client.request('POST', `/content-documents/${documentId}/preview`, {
+      body: input,
+    });
+  }
+
+  async publish(
+    documentId: string,
+    versionId: string,
+  ): Promise<{ document: ContentDocument; version: ContentDocumentVersion }> {
+    return this.client.request(
+      'POST',
+      `/content-documents/${documentId}/versions/${versionId}/publish`,
+    );
+  }
+
+  async archive(documentId: string): Promise<ContentDocument> {
+    return this.client.request('POST', `/content-documents/${documentId}/archive`);
+  }
+
+  async testSend(
+    documentId: string,
+    input: {
+      versionId: string;
+      recipient: string;
+      context?: Record<string, unknown>;
+      optOutToken?: string;
+    },
+  ): Promise<{ testSend: ContentTestSend; output: ContentRenderOutput }> {
+    return this.client.request('POST', `/content-documents/${documentId}/test-sends`, {
+      body: input,
+    });
+  }
+}
+
 class MessageResource {
   constructor(private client: TixkitClient) {}
   async send(
@@ -2079,6 +2282,14 @@ class PublicResource {
   constructor(private client: TixkitClient) {}
   async getEvent(eventId: string): Promise<Event> {
     return this.client.request('GET', `/public/events/${eventId}`);
+  }
+  async getContentPage(
+    eventId: string,
+    params?: { locale?: string },
+  ): Promise<PublicContentPage> {
+    return this.client.request('GET', `/public/events/${eventId}/content-page`, {
+      params: params?.locale ? { locale: params.locale } : undefined,
+    });
   }
   async getBrand(brandId: string): Promise<Brand> {
     return this.client.request('GET', `/public/brands/${brandId}`);
