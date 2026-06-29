@@ -46,6 +46,7 @@ export type SeededTicketVariantCheckoutEvent = {
 
 export type SeededMessagingPrerequisites = {
   templateKey: string;
+  emailTemplateKey: string;
 };
 
 export async function seedSmsCaptureProviderRoute(): Promise<void> {
@@ -1083,13 +1084,49 @@ export async function seedPaidRefundableOrder(
 
 export async function seedMessagingPrerequisites(
   suffix: string,
+  eventId: string,
 ): Promise<SeededMessagingPrerequisites> {
   const now = new Date();
   const safeSuffix = safeIdPart(suffix);
   const templateId = `ntf_e2e_${safeSuffix}`.slice(0, 32);
   const templateVersionId = `ntv_e2e_${safeSuffix}`.slice(0, 32);
+  const contentDocumentId = `cdoc_e2e_${safeSuffix}`.slice(0, 32);
+  const contentVersionId = `cver_e2e_${safeSuffix}`.slice(0, 32);
   const providerRouteId = `epr_e2e_${safeSuffix}`.slice(0, 32);
   const templateKey = `e2e-campaign-${safeSuffix}`.slice(0, 100);
+  const contentJson = {
+    schemaVersion: 1,
+    editor: {
+      provider: '@react-email/editor',
+      contentHtml: '<h1>{{event.title}}</h1><p>{{body}}</p>',
+    },
+    settings: {
+      templateKey,
+      subject: 'Tixkit update',
+      previewText: 'Browser messaging validation',
+      locale: 'en',
+      category: 'bulk',
+      sender: {
+        fromEmail: 'tickets@example.test',
+        fromName: 'Tixkit',
+        replyToEmail: 'support@example.test',
+      },
+    },
+    blocks: [
+      {
+        type: 'event_hero',
+        headline: '{{event.title}}',
+        body: '{{body}}',
+        ctaLabel: 'View event',
+        ctaUrl: '{{event.checkoutUrl}}',
+      },
+      {
+        type: 'unsubscribe_footer',
+        body: 'You are receiving this because you opted in to event updates.',
+        unsubscribeUrl: '{{brand.supportUrl}}',
+      },
+    ],
+  };
 
   await withE2eDb(async (db) => {
     const existingTemplate = await db
@@ -1134,6 +1171,57 @@ export async function seedMessagingPrerequisites(
         .execute();
     }
 
+    const existingContentDocument = await db
+      .selectFrom('content_documents')
+      .select('id')
+      .where('id', '=', contentDocumentId)
+      .executeTakeFirst();
+
+    if (!existingContentDocument) {
+      await db
+        .insertInto('content_documents')
+        .values({
+          id: contentDocumentId,
+          tenant_id: devTenantId,
+          organization_id: devOrganizationId,
+          brand_id: devBrandId,
+          event_id: eventId,
+          channel: 'email',
+          key: templateKey,
+          name: `E2E campaign ${safeSuffix}`,
+          status: 'published',
+          locale: 'en',
+          current_draft_version_id: null,
+          published_version_id: contentVersionId,
+          created_at: now,
+          updated_at: now,
+        })
+        .execute();
+
+      await db
+        .insertInto('content_document_versions')
+        .values({
+          id: contentVersionId,
+          document_id: contentDocumentId,
+          version_number: 1,
+          status: 'published',
+          schema_version: 1,
+          subject: 'Tixkit update',
+          preview_text: 'Browser messaging validation',
+          content_json: JSON.stringify(contentJson),
+          rendered_html: '<h1>{{event.title}}</h1><p>{{body}}</p>',
+          rendered_text: '{{body}}',
+          variables: JSON.stringify([
+            { key: 'body', required: false, description: 'Campaign body copy' },
+          ]),
+          validation: JSON.stringify({ valid: true, severity: 'warning', issues: [] }),
+          created_by: 'e2e',
+          created_at: now,
+          published_at: now,
+        })
+        .execute();
+    }
+
     const existingRoute = await db
       .selectFrom('email_provider_routes')
       .select('id')
@@ -1163,7 +1251,7 @@ export async function seedMessagingPrerequisites(
     }
   });
 
-  return { templateKey };
+  return { templateKey, emailTemplateKey: templateKey };
 }
 
 export async function seedMessageConsentForEmail(

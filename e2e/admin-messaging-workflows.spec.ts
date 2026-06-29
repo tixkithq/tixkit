@@ -49,7 +49,7 @@ test.describe('admin messaging workflow coverage', () => {
 
     const suffix = `${testInfo.workerIndex}-${Date.now()}`;
     const { event, ticketType, product } = await seedFreeCheckoutEvent(request, suffix);
-    const { templateKey } = await seedMessagingPrerequisites(suffix);
+    const { emailTemplateKey } = await seedMessagingPrerequisites(suffix, event.id);
     const buyerEmail = `message-workflow+${suffix}@example.com`;
 
     await completeSeededFreeCheckout(
@@ -67,25 +67,27 @@ test.describe('admin messaging workflow coverage', () => {
     await page.getByRole('button', { name: 'New campaign' }).click();
 
     await expect(page.getByRole('heading', { name: 'New Campaign' })).toBeVisible();
-    await page.getByLabel('Template key').fill(templateKey);
+    await expect(page.getByLabel('Email template')).toContainText('E2E campaign');
     await page.getByLabel('Message').fill(`Browser messaging validation ${suffix}`);
     await expect(page.getByText('1 recipients')).toBeVisible();
     await page.getByRole('button', { name: 'Send Campaign' }).click();
 
-    await expect(page.getByText(templateKey, { exact: true })).toBeVisible();
+    await expect(page.getByText(emailTemplateKey, { exact: true })).toBeVisible();
     await expect(page.getByText(/all attendees .* 1 queued/i)).toBeVisible();
 
     await page.reload();
-    await expect(page.getByText(templateKey, { exact: true })).toBeVisible();
+    await expect(page.getByText(emailTemplateKey, { exact: true })).toBeVisible();
     await page.getByRole('button', { name: 'Details' }).click();
 
     const detailPanel = page.locator('[data-slot="card"]').filter({ hasText: 'Email jobs' });
-    await expect(detailPanel.getByText(templateKey, { exact: true })).toBeVisible();
+    await expect(detailPanel.getByText(emailTemplateKey, { exact: true })).toBeVisible();
     await expect(detailPanel.getByText('Queued', { exact: true })).toBeVisible();
     await expect(detailPanel.getByText('Email jobs', { exact: true })).toBeVisible();
     await expect(detailPanel.getByText('Consent exclusions', { exact: true })).toBeVisible();
     await expect(detailPanel.getByText('Jobs', { exact: true })).toBeVisible();
-    await expect(detailPanel.getByText(buyerEmail, { exact: true })).toBeVisible();
+    const maskedBuyerEmail = `${buyerEmail.slice(0, 1)}***@${buyerEmail.split('@')[1]}`;
+    await expect(detailPanel.getByText(maskedBuyerEmail, { exact: true })).toBeVisible();
+    await expect(detailPanel.getByText(buyerEmail, { exact: true })).toHaveCount(0);
     await expect(detailPanel.getByText('Delivery logs', { exact: true })).toBeVisible();
     await expect(detailPanel.getByText('Provider events', { exact: true })).toBeVisible();
 
