@@ -1,18 +1,24 @@
-import { describe, expect, it, vi } from 'vitest';
-import { render, screen, fireEvent, waitFor } from '@testing-library/react';
+import './test-dom';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import { cleanup, render, fireEvent, waitFor } from '@testing-library/react';
 import React from 'react';
 import { AttendeeForm, type AttendeeAnswers } from '@/components/checkout/attendee-form';
 import { publicApi, type Buyer, type CheckoutQuestion } from '@/lib/api';
 
-vi.mock('@/lib/api', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('@/lib/api')>();
+vi.mock('@/lib/api', () => {
   return {
-    ...actual,
     publicApi: {
-      ...actual.publicApi,
       uploadCheckoutArtifact: vi.fn(),
     },
   };
+});
+
+const publicApiMock = publicApi as unknown as {
+  uploadCheckoutArtifact: ReturnType<typeof vi.fn>;
+};
+
+afterEach(() => {
+  cleanup();
 });
 
 const buyer: Buyer = { email: 'a@b.com', firstName: '', lastName: '', phone: '' };
@@ -41,7 +47,7 @@ describe('AttendeeForm dynamic question types', () => {
     const answers: AttendeeAnswers = {};
     const onChange = vi.fn();
 
-    render(
+    const view = render(
       createAttendeeForm({
         buyerQuestions: [question],
         buyerAnswers: answers,
@@ -50,12 +56,12 @@ describe('AttendeeForm dynamic question types', () => {
     );
 
     // Each option renders its own checkbox labelled with the option text.
-    expect(screen.getByText('Music')).toBeInTheDocument();
-    expect(screen.getByText('Food')).toBeInTheDocument();
-    expect(screen.getByText('Art')).toBeInTheDocument();
+    expect(view.getByText('Music')).toBeInTheDocument();
+    expect(view.getByText('Food')).toBeInTheDocument();
+    expect(view.getByText('Art')).toBeInTheDocument();
 
     // Ticking an option propagates the typed multiselect value upward.
-    fireEvent.click(screen.getByText('Music'));
+    fireEvent.click(view.getByText('Music'));
     expect(onChange).toHaveBeenCalledWith(expect.objectContaining({ q_multi: ['Music'] }));
   });
 
@@ -82,7 +88,7 @@ describe('AttendeeForm dynamic question types', () => {
         },
       },
     ];
-    const { rerender } = render(
+    const view = render(
       createAttendeeForm({
         buyerQuestions: questions,
         buyerAnswers: { q_parent: 'no' },
@@ -90,9 +96,9 @@ describe('AttendeeForm dynamic question types', () => {
       }),
     );
 
-    expect(screen.queryByLabelText(/Guest name/)).toBeNull();
+    expect(view.queryByLabelText(/Guest name/)).toBeNull();
 
-    rerender(
+    view.rerender(
       createAttendeeForm({
         buyerQuestions: questions,
         buyerAnswers: { q_parent: 'yes' },
@@ -100,7 +106,7 @@ describe('AttendeeForm dynamic question types', () => {
       }),
     );
 
-    expect(screen.getByLabelText(/Guest name/)).toBeInTheDocument();
+    expect(view.getByLabelText(/Guest name/)).toBeInTheDocument();
   });
 
   it('uploads file question answers as upload artifacts', async () => {
@@ -113,7 +119,7 @@ describe('AttendeeForm dynamic question types', () => {
     };
     const onChange = vi.fn();
 
-    render(
+    const view = render(
       createAttendeeForm({
         eventId: 'evt_1',
         buyerQuestions: [question],
@@ -122,15 +128,15 @@ describe('AttendeeForm dynamic question types', () => {
       }),
     );
 
-    vi.mocked(publicApi.uploadCheckoutArtifact).mockResolvedValueOnce({
+    publicApiMock.uploadCheckoutArtifact.mockResolvedValueOnce({
       artifactId: 'upl_01JYTESTARTIFACT',
       fileName: 'id.png',
       contentType: 'image/png',
       sizeBytes: 12,
     });
     const file = new File(['test-upload'], 'id.png', { type: 'image/png' });
-    expect(screen.getByText('Upload ID')).toBeInTheDocument();
-    fireEvent.change(screen.getByLabelText(/Upload ID/), {
+    expect(view.getByText('Upload ID')).toBeInTheDocument();
+    fireEvent.change(view.getByLabelText(/Upload ID/), {
       target: { files: [file] },
     });
 
@@ -144,7 +150,7 @@ describe('AttendeeForm dynamic question types', () => {
         },
       });
     });
-    expect(publicApi.uploadCheckoutArtifact).toHaveBeenCalledWith('evt_1', file, 'q_file');
+    expect(publicApiMock.uploadCheckoutArtifact).toHaveBeenCalledWith('evt_1', file, 'q_file');
   });
 
   it('renders a select dropdown for select questions', () => {
@@ -156,14 +162,14 @@ describe('AttendeeForm dynamic question types', () => {
       appliesTo: 'attendee',
       options: ['None', 'Vegan'],
     };
-    render(
+    const view = render(
       createAttendeeForm({
         buyerQuestions: [question],
         buyerAnswers: {},
         onBuyerAnswersChange: () => {},
       }),
     );
-    expect(screen.getByText('None')).toBeInTheDocument();
+    expect(view.getByText('None')).toBeInTheDocument();
   });
 
   it('renders HTML-looking question text as escaped content', () => {
@@ -186,7 +192,7 @@ describe('AttendeeForm dynamic question types', () => {
       },
     ];
 
-    const { container } = render(
+    const { container, getByText } = render(
       createAttendeeForm({
         buyerQuestions: questions,
         buyerAnswers: {},
@@ -194,9 +200,9 @@ describe('AttendeeForm dynamic question types', () => {
       }),
     );
 
-    expect(screen.getByText('<img src=x onerror=alert(1)>')).toBeInTheDocument();
-    expect(screen.getByText('<script>alert(1)</script>')).toBeInTheDocument();
-    expect(screen.getByText('<svg onload=alert(1)>')).toBeInTheDocument();
+    expect(getByText('<img src=x onerror=alert(1)>')).toBeInTheDocument();
+    expect(getByText('<script>alert(1)</script>')).toBeInTheDocument();
+    expect(getByText('<svg onload=alert(1)>')).toBeInTheDocument();
     expect(container.querySelector('img')).toBeNull();
     expect(container.querySelector('script')).toBeNull();
     expect(container.querySelector('[onload]')).toBeNull();

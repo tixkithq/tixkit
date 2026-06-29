@@ -59,6 +59,8 @@ export function AttendeeForm({
   onAttendeeAnswersChange,
   eventId,
 }: Props) {
+  const emailFeedbackId = 'email_feedback';
+
   return (
     <div className="grid gap-4">
       <div className="grid gap-2">
@@ -75,11 +77,14 @@ export function AttendeeForm({
           required
           disabled={disabled}
           aria-invalid={Boolean(emailError)}
+          aria-describedby={emailFeedbackId}
         />
         {emailError ? (
-          <p className="text-sm text-destructive">{emailError}</p>
+          <p id={emailFeedbackId} className="text-sm text-destructive">
+            {emailError}
+          </p>
         ) : (
-          <p className="text-xs text-muted-foreground">
+          <p id={emailFeedbackId} className="text-xs text-muted-foreground">
             Your tickets and receipt will be sent here.
           </p>
         )}

@@ -1,5 +1,6 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { render, screen, waitFor } from '@testing-library/react';
+import './test-dom';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { cleanup, render, waitFor } from '@testing-library/react';
 import React from 'react';
 import EventPageClient from '@/app/e/[eventId]/event-page-client';
 import { publicApi, type AvailabilityItem, type PublicEvent } from '@/lib/api';
@@ -8,12 +9,9 @@ vi.mock('next/navigation', () => ({
   useRouter: () => ({ push: vi.fn() }),
 }));
 
-vi.mock('@/lib/api', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('@/lib/api')>();
+vi.mock('@/lib/api', () => {
   return {
-    ...actual,
     publicApi: {
-      ...actual.publicApi,
       getEvent: vi.fn(),
       getEventBySlug: vi.fn(),
       getEventPage: vi.fn(),
@@ -22,6 +20,19 @@ vi.mock('@/lib/api', async (importOriginal) => {
       getBrand: vi.fn(),
     },
   };
+});
+
+const publicApiMock = publicApi as unknown as {
+  getEvent: ReturnType<typeof vi.fn>;
+  getEventBySlug: ReturnType<typeof vi.fn>;
+  getEventPage: ReturnType<typeof vi.fn>;
+  getEventPageBySlug: ReturnType<typeof vi.fn>;
+  getAvailability: ReturnType<typeof vi.fn>;
+  getBrand: ReturnType<typeof vi.fn>;
+};
+
+afterEach(() => {
+  cleanup();
 });
 
 describe('EventPageClient escaping', () => {
@@ -54,21 +65,21 @@ describe('EventPageClient escaping', () => {
         status: 'active',
       },
     ];
-    vi.mocked(publicApi.getEvent).mockResolvedValue(event);
-    vi.mocked(publicApi.getEventPage).mockResolvedValue(null as never);
-    vi.mocked(publicApi.getAvailability).mockResolvedValue(availability);
-    vi.mocked(publicApi.getBrand).mockRejectedValue(new Error('brand unavailable'));
+    publicApiMock.getEvent.mockResolvedValue(event);
+    publicApiMock.getEventPage.mockResolvedValue(null);
+    publicApiMock.getAvailability.mockResolvedValue(availability);
+    publicApiMock.getBrand.mockRejectedValue(new Error('brand unavailable'));
 
-    const { container } = render(React.createElement(EventPageClient, { eventId: 'evt_xss' }));
+    const { container, getByText } = render(
+      React.createElement(EventPageClient, { eventId: 'evt_xss' }),
+    );
 
     await waitFor(() => {
-      expect(screen.getByText('<img src=x onerror=alert(1)>')).toBeInTheDocument();
+      expect(getByText('<img src=x onerror=alert(1)>')).toBeInTheDocument();
     });
-    expect(screen.getByText('<script>alert(1)</script>')).toBeInTheDocument();
-    expect(screen.getByText('<svg onload=alert(1)>')).toBeInTheDocument();
-    expect(
-      screen.getByText('<iframe srcdoc="<script>alert(1)</script>"></iframe>'),
-    ).toBeInTheDocument();
+    expect(getByText('<script>alert(1)</script>')).toBeInTheDocument();
+    expect(getByText('<svg onload=alert(1)>')).toBeInTheDocument();
+    expect(getByText('<iframe srcdoc="<script>alert(1)</script>"></iframe>')).toBeInTheDocument();
     expect(container.querySelector('img')).toBeNull();
     expect(container.querySelector('script')).toBeNull();
     expect(container.querySelector('iframe')).toBeNull();
@@ -84,10 +95,10 @@ describe('EventPageClient escaping', () => {
       startsAt: '2026-07-17T19:00:00.000Z',
       brandId: 'brd_1',
     };
-    vi.mocked(publicApi.getEvent).mockResolvedValue(event);
-    vi.mocked(publicApi.getAvailability).mockResolvedValue([]);
-    vi.mocked(publicApi.getBrand).mockRejectedValue(new Error('brand unavailable'));
-    vi.mocked(publicApi.getEventPage).mockResolvedValue({
+    publicApiMock.getEvent.mockResolvedValue(event);
+    publicApiMock.getAvailability.mockResolvedValue([]);
+    publicApiMock.getBrand.mockRejectedValue(new Error('brand unavailable'));
+    publicApiMock.getEventPage.mockResolvedValue({
       document: {
         eventId: 'evt_content',
         channel: 'event_page',
@@ -106,12 +117,12 @@ describe('EventPageClient escaping', () => {
       },
     });
 
-    render(React.createElement(EventPageClient, { eventId: 'evt_content' }));
+    const view = render(React.createElement(EventPageClient, { eventId: 'evt_content' }));
 
     await waitFor(() => {
-      expect(screen.getByTestId('published-event-page')).toHaveTextContent('Published content');
+      expect(view.getByTestId('published-event-page')).toHaveTextContent('Published content');
     });
-    const publishedPage = screen.getByTestId('published-event-page');
+    const publishedPage = view.getByTestId('published-event-page');
     expect(publishedPage.querySelector('script')).toBeNull();
     expect(publishedPage.querySelector('[onclick]')).toBeNull();
     expect(publishedPage.querySelector('[onerror]')).toBeNull();
@@ -136,10 +147,10 @@ describe('EventPageClient escaping', () => {
       startsAt: '2026-07-17T19:00:00.000Z',
       brandId: 'brd_1',
     };
-    vi.mocked(publicApi.getEventBySlug).mockResolvedValue(event);
-    vi.mocked(publicApi.getAvailability).mockResolvedValue([]);
-    vi.mocked(publicApi.getBrand).mockRejectedValue(new Error('brand unavailable'));
-    vi.mocked(publicApi.getEventPageBySlug).mockResolvedValue({
+    publicApiMock.getEventBySlug.mockResolvedValue(event);
+    publicApiMock.getAvailability.mockResolvedValue([]);
+    publicApiMock.getBrand.mockRejectedValue(new Error('brand unavailable'));
+    publicApiMock.getEventPageBySlug.mockResolvedValue({
       document: {
         eventId: 'evt_slug',
         channel: 'event_page',
@@ -157,7 +168,7 @@ describe('EventPageClient escaping', () => {
       },
     });
 
-    render(
+    const view = render(
       React.createElement(EventPageClient, {
         eventSlug: 'all-access',
         customDomainHost: 'events.example.com',
@@ -165,7 +176,7 @@ describe('EventPageClient escaping', () => {
     );
 
     await waitFor(() => {
-      expect(screen.getByTestId('published-event-page')).toHaveTextContent('Domain page');
+      expect(view.getByTestId('published-event-page')).toHaveTextContent('Domain page');
     });
     expect(publicApi.getEventBySlug).toHaveBeenCalledWith(
       'all-access',

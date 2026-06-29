@@ -361,7 +361,7 @@ export default function CheckoutFlow({
     return null;
   }
 
-  const canCreateSession = eventId && selectedItems.length > 0 && emailValid && !loading;
+  const canCreateSession = Boolean(eventId && selectedItems.length > 0 && !loading);
 
   // Resolve an existing session once on mount when resuming via sessionId +
   // token. This must NOT re-run when we create a new session mid-flow (that
