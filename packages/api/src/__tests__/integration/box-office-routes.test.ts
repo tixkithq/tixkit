@@ -9,6 +9,28 @@ type Row = Record<string, unknown>;
 type Tables = Record<string, Row[]>;
 
 const now = new Date('2026-06-29T12:00:00.000Z');
+const defaultQuote = {
+  currency: 'USD',
+  subtotalCents: 2500,
+  discountCents: 0,
+  taxCents: 0,
+  feeCents: 0,
+  totalCents: 2500,
+  lineItems: [
+    {
+      type: 'ticket',
+      ticketTypeId: 'tt_ga',
+      name: 'General Admission',
+      quantity: 1,
+      unitPriceCents: 2500,
+      subtotalCents: 2500,
+      discountCents: 0,
+      taxCents: 0,
+      feeCents: 0,
+      totalCents: 2500,
+    },
+  ],
+};
 
 function getColumn(row: Row, column: string) {
   return row[column] ?? row[column.split('.').at(-1) ?? column];
@@ -129,6 +151,41 @@ function makePrincipal(overrides: Partial<Principal> = {}): Principal {
   };
 }
 
+function boxOfficeOrderRow(overrides: Row = {}): Row {
+  return {
+    id: 'ord_box',
+    tenant_id: 'tnt_1',
+    organization_id: 'org_1',
+    brand_id: 'brd_1',
+    event_id: 'evt_box',
+    checkout_session_id: 'cs_existing',
+    order_number: 'TK-BOX',
+    status: 'paid',
+    currency: 'USD',
+    subtotal_cents: 2500,
+    discount_cents: 0,
+    tax_cents: 0,
+    fee_cents: 0,
+    total_cents: 2500,
+    refunded_cents: 0,
+    buyer_email: 'door@example.com',
+    buyer_first_name: 'Door',
+    buyer_last_name: 'Buyer',
+    buyer_phone: null,
+    payment_intent_id: null,
+    payment_provider: null,
+    sales_channel: 'box_office',
+    operator_id: 'usr_box',
+    tender_type: 'cash',
+    paid_at: now,
+    refunded_at: null,
+    cancelled_at: null,
+    created_at: now,
+    updated_at: now,
+    ...overrides,
+  };
+}
+
 function baseTables(overrides: Tables = {}): Tables {
   return {
     events: [
@@ -169,39 +226,7 @@ function baseTables(overrides: Tables = {}): Tables {
     fee_rules: [],
     checkout_sessions: [],
     idempotency_records: [],
-    orders: [
-      {
-        id: 'ord_box',
-        tenant_id: 'tnt_1',
-        organization_id: 'org_1',
-        brand_id: 'brd_1',
-        event_id: 'evt_box',
-        checkout_session_id: 'cs_existing',
-        order_number: 'TK-BOX',
-        status: 'paid',
-        currency: 'USD',
-        subtotal_cents: 2500,
-        discount_cents: 0,
-        tax_cents: 0,
-        fee_cents: 0,
-        total_cents: 2500,
-        refunded_cents: 0,
-        buyer_email: 'door@example.com',
-        buyer_first_name: 'Door',
-        buyer_last_name: 'Buyer',
-        buyer_phone: null,
-        payment_intent_id: null,
-        payment_provider: null,
-        sales_channel: 'box_office',
-        operator_id: 'usr_box',
-        tender_type: 'cash',
-        paid_at: now,
-        refunded_at: null,
-        cancelled_at: null,
-        created_at: now,
-        updated_at: now,
-      },
-    ],
+    orders: [boxOfficeOrderRow()],
     ...overrides,
   };
 }
@@ -211,6 +236,7 @@ async function setupApp(input: {
   principal?: Principal;
   reserveCart?: ReturnType<typeof vi.fn>;
   startCheckoutSession?: ReturnType<typeof vi.fn>;
+  quote?: typeof defaultQuote;
 }) {
   const app = Fastify();
   const reserveCart =
@@ -225,28 +251,7 @@ async function setupApp(input: {
   app.decorate('context', {
     db: createMockDb(input.tables) as Database,
     pricingEngine: {
-      calculate: vi.fn(() => ({
-        currency: 'USD',
-        subtotalCents: 2500,
-        discountCents: 0,
-        taxCents: 0,
-        feeCents: 0,
-        totalCents: 2500,
-        lineItems: [
-          {
-            type: 'ticket',
-            ticketTypeId: 'tt_ga',
-            name: 'General Admission',
-            quantity: 1,
-            unitPriceCents: 2500,
-            subtotalCents: 2500,
-            discountCents: 0,
-            taxCents: 0,
-            feeCents: 0,
-            totalCents: 2500,
-          },
-        ],
-      })),
+      calculate: vi.fn(() => input.quote ?? defaultQuote),
     },
     inventoryService: { reserveCart },
     temporalClient: { startCheckoutSession },
@@ -298,6 +303,150 @@ describe('box-office order route', () => {
         amountCents: 2500,
       }),
     );
+  });
+
+  it('creates a comp order with a zeroed server quote and free payment mode', async () => {
+    const tables = baseTables({
+      orders: [
+        boxOfficeOrderRow({
+          subtotal_cents: 0,
+          total_cents: 0,
+          tender_type: 'comp',
+        }),
+      ],
+    });
+    const { app, reserveCart, startCheckoutSession } = await setupApp({ tables });
+
+    const response = await app.inject({
+      method: 'POST',
+      url: '/events/evt_box/box-office/orders',
+      headers: { 'idempotency-key': 'box_comp_1' },
+      payload: {
+        tenderType: 'comp',
+        amountCents: 0,
+        buyer: { email: 'guest@example.com', firstName: 'Guest' },
+        items: [{ ticketTypeId: 'tt_ga', quantity: 1 }],
+      },
+    });
+
+    expect(response.statusCode).toBe(201);
+    expect(response.json()).toMatchObject({
+      order: {
+        id: 'ord_box',
+        totalCents: 0,
+        salesChannel: 'box_office',
+        operatorId: 'usr_box',
+        tenderType: 'comp',
+      },
+      status: 'completed',
+    });
+    expect(reserveCart).toHaveBeenCalledTimes(1);
+    expect(startCheckoutSession).toHaveBeenCalledWith(
+      expect.objectContaining({
+        amountCents: 0,
+        isFreeOrder: true,
+        paymentMode: 'free',
+        salesChannel: 'box_office',
+        operatorId: 'usr_box',
+        tenderType: 'comp',
+      }),
+    );
+    const storedQuote = JSON.parse(String(tables.checkout_sessions[0]?.quote));
+    expect(storedQuote).toMatchObject({
+      discountCents: 2500,
+      totalCents: 0,
+    });
+  });
+
+  it('creates a manual card-not-present order without a provider intent', async () => {
+    const tables = baseTables({
+      orders: [boxOfficeOrderRow({ tender_type: 'manual_card' })],
+    });
+    const { app, reserveCart, startCheckoutSession } = await setupApp({ tables });
+
+    const response = await app.inject({
+      method: 'POST',
+      url: '/events/evt_box/box-office/orders',
+      headers: { 'idempotency-key': 'box_manual_1' },
+      payload: {
+        tenderType: 'manual_card',
+        amountCents: 2500,
+        buyer: { email: 'manual@example.com' },
+        items: [{ ticketTypeId: 'tt_ga', quantity: 1 }],
+      },
+    });
+
+    expect(response.statusCode).toBe(201);
+    expect(response.json()).toMatchObject({
+      order: {
+        salesChannel: 'box_office',
+        operatorId: 'usr_box',
+        tenderType: 'manual_card',
+      },
+    });
+    expect(reserveCart).toHaveBeenCalledTimes(1);
+    expect(startCheckoutSession).toHaveBeenCalledWith(
+      expect.objectContaining({
+        amountCents: 2500,
+        isFreeOrder: false,
+        paymentMode: 'offline',
+        salesChannel: 'box_office',
+        operatorId: 'usr_box',
+        tenderType: 'manual_card',
+      }),
+    );
+  });
+
+  it('rejects a cash tender that does not match the server-priced total before reserving inventory', async () => {
+    const tables = baseTables();
+    const reserveCart = vi.fn();
+    const { app, startCheckoutSession } = await setupApp({ tables, reserveCart });
+
+    const response = await app.inject({
+      method: 'POST',
+      url: '/events/evt_box/box-office/orders',
+      headers: { 'idempotency-key': 'box_cash_mismatch' },
+      payload: {
+        tenderType: 'cash',
+        amountCents: 2400,
+        buyer: { email: 'door@example.com' },
+        items: [{ ticketTypeId: 'tt_ga', quantity: 1 }],
+      },
+    });
+
+    expect(response.statusCode).toBe(400);
+    expect(reserveCart).not.toHaveBeenCalled();
+    expect(startCheckoutSession).not.toHaveBeenCalled();
+  });
+
+  it('replays a completed box-office order for the same idempotency key without duplicate side effects', async () => {
+    const tables = baseTables();
+    const { app, reserveCart, startCheckoutSession } = await setupApp({ tables });
+    const payload = {
+      tenderType: 'cash',
+      amountCents: 2500,
+      buyer: { email: 'door@example.com', firstName: 'Door', lastName: 'Buyer' },
+      items: [{ ticketTypeId: 'tt_ga', quantity: 1 }],
+    };
+
+    const first = await app.inject({
+      method: 'POST',
+      url: '/events/evt_box/box-office/orders',
+      headers: { 'idempotency-key': 'box_replay_1' },
+      payload,
+    });
+    const second = await app.inject({
+      method: 'POST',
+      url: '/events/evt_box/box-office/orders',
+      headers: { 'idempotency-key': 'box_replay_1' },
+      payload,
+    });
+
+    expect(first.statusCode).toBe(201);
+    expect(second.statusCode).toBe(201);
+    expect(second.json()).toEqual(first.json());
+    expect(reserveCart).toHaveBeenCalledTimes(1);
+    expect(startCheckoutSession).toHaveBeenCalledTimes(1);
   });
 
   it('fails closed before reserving inventory for a cross-tenant event', async () => {
