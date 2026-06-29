@@ -150,4 +150,83 @@ describe('@tixkit/content-message SMS adapter', () => {
       expect(first.text.endsWith('Reply STOP to opt out')).toBe(true);
     }
   });
+
+  it('load-renders concurrent SMS variants without drifting output or budget accounting', async () => {
+    const templates = Array.from({ length: 250 }, (_, index) =>
+      createDefaultSmsTemplate({
+        editor: {
+          body: `Hi {{recipient.name}}, gate ${index % 7} opens for {{event.title}}: {{event.checkoutUrl}}`,
+        },
+        settings: {
+          templateKey: `event-update-${index}`,
+          segmentLimit: 3,
+          estimatedCostPerSegmentCents: (index % 3) + 1,
+        },
+      }),
+    );
+
+    const rendered = await Promise.all(
+      templates.map(async (document, index) => {
+        const context = {
+          ...sampleContext,
+          recipient: {
+            name: `Guest ${index}`,
+            phone: `+1555${String(index).padStart(7, '0')}`,
+          },
+        };
+        const first = renderSmsTemplate(document, context);
+        const second = renderSmsTemplate(document, context);
+        expect(first).toEqual(second);
+        return first;
+      }),
+    );
+
+    expect(rendered).toHaveLength(250);
+    expect(rendered.every((message) => message.validation.valid)).toBe(true);
+    expect(rendered.every((message) => message.segments >= 1 && message.segments <= 3)).toBe(true);
+    expect(rendered.reduce((sum, message) => sum + message.estimatedCostCents, 0)).toBeGreaterThan(0);
+  });
+
+  it('fails closed for malformed SMS editor exports and hostile canonical content', () => {
+    const malformedExports: unknown[] = [
+      undefined,
+      null,
+      [],
+      { schemaVersion: 2, editor: { provider: '@tixkit/content-message/sms-composer', body: 'x' } },
+      { schemaVersion: 1, editor: { provider: '@tixkit/content-message/sms-composer', body: 7 } },
+      { schemaVersion: 1, editor: { provider: '@tixkit/content-message/sms-composer', body: 'x' }, settings: {} },
+      createDefaultSmsTemplate({ settings: { segmentLimit: 0 } }),
+      createDefaultSmsTemplate({ settings: { estimatedCostPerSegmentCents: -1 } }),
+      createDefaultSmsTemplate({ settings: { category: 'legacy' as never } }),
+    ];
+
+    for (const payload of malformedExports) {
+      expect(normalizeSmsTemplateDocument(payload)).toBeUndefined();
+    }
+
+    const hostileDocument = createDefaultSmsTemplate({
+      editor: {
+        body: 'Hi {{recipient.name}}, open https://127.0.0.1/admin and {{missing.value}}',
+      },
+      settings: {
+        templateKey: '../bad',
+        category: 'bulk',
+        consentCategory: 'transactional',
+        optOutText: '',
+      },
+    });
+    const rendered = renderSmsTemplate(hostileDocument, sampleContext);
+
+    expect(rendered.validation.valid).toBe(false);
+    expect(rendered.validation.issues).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ code: 'invalid_template_key' }),
+        expect.objectContaining({ code: 'unsafe_link' }),
+        expect.objectContaining({ code: 'unknown_variable' }),
+        expect.objectContaining({ code: 'missing_opt_out_token' }),
+        expect.objectContaining({ code: 'consent_category_mismatch' }),
+      ]),
+    );
+    expect(rendered.text).not.toContain('undefined');
+  });
 });
