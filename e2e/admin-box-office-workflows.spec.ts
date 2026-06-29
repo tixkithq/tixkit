@@ -14,6 +14,11 @@ async function attachScreenshot(page: Page, testInfo: TestInfo, name: string): P
   });
 }
 
+async function expectReportCardValue(page: Page, title: string, value: string): Promise<void> {
+  const card = page.locator('[data-slot="card"]').filter({ hasText: title });
+  await expect(card).toContainText(value);
+}
+
 async function fillDoorOrderForm(
   page: Page,
   tender: 'cash' | 'manual_card' | 'comp',
@@ -147,6 +152,15 @@ test.describe('admin box-office POS workflows', () => {
     await expect(issuedOrderAlert.getByText(`Order: ${orderBody.order.id}`)).toBeVisible();
     await expectNoAxeViolations(page, testInfo);
     await attachScreenshot(page, testInfo, 'admin-box-office-cash-order-mobile');
+
+    await page.setViewportSize(desktopViewport);
+    await page.goto(`${adminBaseUrl}/events/${event.id}/reports`);
+    await expect(page.getByRole('heading', { name: 'Reports' })).toBeVisible();
+    await page.getByRole('tab', { name: 'Sales' }).click();
+    await expectReportCardValue(page, 'Online Sales', '$0.00');
+    await expectReportCardValue(page, 'Box Office', '$25.00');
+    await expectNoAxeViolations(page, testInfo);
+    await attachScreenshot(page, testInfo, 'admin-box-office-cash-sales-report-desktop');
   });
 
   test('Sell at door panel exposes Chromium CDP layout metrics after issue', async ({
