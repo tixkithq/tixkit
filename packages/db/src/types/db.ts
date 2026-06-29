@@ -3,6 +3,13 @@ import type { BoxOfficeTenderType, SalesChannel } from '@tixkit/domain';
 
 export type Timestamp = ColumnType<Date, Date | string, Date | string>;
 
+export type OrganizationBoxOfficeSettings = {
+  enabled: boolean;
+  allowedTenderTypes: BoxOfficeTenderType[];
+  requireBuyerEmail: boolean;
+  receiptMode: 'print' | 'email' | 'both';
+};
+
 export interface TenantTable {
   id: string;
   name: string;
@@ -18,6 +25,7 @@ export interface OrganizationTable {
   name: string;
   slug: string;
   clerk_organization_id: string | null;
+  box_office_settings: OrganizationBoxOfficeSettings | string;
   status: string;
   created_at: Timestamp;
   updated_at: Timestamp;

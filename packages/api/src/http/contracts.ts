@@ -16,6 +16,20 @@ export type PaginationInput = {
 const DEFAULT_LIMIT = 50;
 const MAX_LIMIT = 100;
 const INTEGER_STRING = /^\d+$/;
+const boxOfficeTenderTypes = ['cash', 'manual_card', 'comp'] as const;
+const boxOfficeReceiptModes = ['print', 'email', 'both'] as const;
+type BoxOfficeSettings = {
+  enabled: boolean;
+  allowedTenderTypes: Array<(typeof boxOfficeTenderTypes)[number]>;
+  requireBuyerEmail: boolean;
+  receiptMode: (typeof boxOfficeReceiptModes)[number];
+};
+const defaultBoxOfficeSettings: BoxOfficeSettings = {
+  enabled: true,
+  allowedTenderTypes: [...boxOfficeTenderTypes],
+  requireBuyerEmail: false,
+  receiptMode: 'email',
+};
 export function parseJsonValue<T>(value: unknown, fallback: T): T {
   if (value == null) return fallback;
   if (typeof value !== 'string') return value as T;
@@ -24,6 +38,43 @@ export function parseJsonValue<T>(value: unknown, fallback: T): T {
   } catch {
     return fallback;
   }
+}
+
+export function parseBoxOfficeSettings(value: unknown): BoxOfficeSettings {
+  let parsed: unknown = value ?? defaultBoxOfficeSettings;
+  if (typeof parsed === 'string') {
+    try {
+      parsed = JSON.parse(parsed);
+    } catch {
+      throw new ValidationError('Invalid box-office settings');
+    }
+  }
+  if (parsed == null || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    throw new ValidationError('Invalid box-office settings');
+  }
+  const record = parsed as Record<string, unknown>;
+  const tenderTypes = record.allowedTenderTypes;
+  if (
+    typeof record.enabled !== 'boolean' ||
+    !Array.isArray(tenderTypes) ||
+    tenderTypes.length < 1 ||
+    tenderTypes.length > boxOfficeTenderTypes.length ||
+    new Set(tenderTypes).size !== tenderTypes.length ||
+    tenderTypes.some(
+      (tenderType) => !(boxOfficeTenderTypes as readonly unknown[]).includes(tenderType),
+    ) ||
+    typeof record.requireBuyerEmail !== 'boolean' ||
+    !(boxOfficeReceiptModes as readonly unknown[]).includes(record.receiptMode)
+  ) {
+    throw new ValidationError('Invalid box-office settings');
+  }
+
+  return {
+    enabled: record.enabled,
+    allowedTenderTypes: tenderTypes as BoxOfficeSettings['allowedTenderTypes'],
+    requireBuyerEmail: record.requireBuyerEmail,
+    receiptMode: record.receiptMode as BoxOfficeSettings['receiptMode'],
+  };
 }
 
 export function toIso(value: Date | string | null | undefined): string | undefined {
@@ -457,6 +508,7 @@ export function serializeOrganization(row: Record<string, unknown>) {
     name: row.name,
     slug: row.slug,
     clerkOrganizationId: row.clerk_organization_id ?? undefined,
+    boxOfficeSettings: parseBoxOfficeSettings(row.box_office_settings),
     status: row.status,
     createdAt: toIso(row.created_at as Date | string),
     updatedAt: toIso(row.updated_at as Date | string),

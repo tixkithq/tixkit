@@ -13,6 +13,7 @@ import {
   ProductRepository,
   EventOccurrenceRepository,
   PaymentCompensationRepository,
+  OrganizationRepository,
 } from '@tixkit/db';
 import { ClerkAuthService, createAuthMiddleware } from '../../auth/clerk.js';
 import type { ProductForPricing, TicketTypeForPricing } from '../../services/pricing.js';
@@ -39,7 +40,12 @@ import {
   BoxOfficeError,
 } from '@tixkit/domain';
 import type { Question } from '@tixkit/domain';
-import { parseJsonValue, pickAllowedFields, serializeOrder } from '../../http/contracts.js';
+import {
+  parseBoxOfficeSettings,
+  parseJsonValue,
+  pickAllowedFields,
+  serializeOrder,
+} from '../../http/contracts.js';
 import {
   createCheckoutSessionSchema,
   createBoxOfficeOrderSchema,
@@ -246,7 +252,9 @@ function normalizeCartItems(
   return [...normalized.values()];
 }
 
-function cartItemWithoutAttendeeFields(item: CartInput['items'][number]): CartInput['items'][number] {
+function cartItemWithoutAttendeeFields(
+  item: CartInput['items'][number],
+): CartInput['items'][number] {
   return {
     ticketTypeId: item.ticketTypeId,
     occurrenceId: item.occurrenceId,
@@ -624,6 +632,28 @@ export const checkoutRoutes: FastifyPluginAsync = async (app) => {
       ClerkAuthService.requireEventScope(principal, event.id);
       if (event.status !== 'published') {
         throw new ValidationError('Box-office sales require a published event');
+      }
+      const organization = await new OrganizationRepository(db).findById(event.organization_id);
+      if (!organization) throw new NotFoundError('Organization', event.organization_id);
+      ClerkAuthService.requireResourceTenant(
+        principal,
+        organization,
+        'Organization',
+        event.organization_id,
+      );
+      const boxOfficeSettings = parseBoxOfficeSettings(
+        (organization as Record<string, unknown>).box_office_settings,
+      );
+      if (!boxOfficeSettings.enabled) {
+        throw new ValidationError('Box-office sales are disabled for this organization');
+      }
+      if (!boxOfficeSettings.allowedTenderTypes.includes(body.tenderType)) {
+        throw new ValidationError(
+          `Box-office tender type ${body.tenderType} is not enabled for this organization`,
+        );
+      }
+      if (boxOfficeSettings.requireBuyerEmail && !body.buyer?.email) {
+        throw new ValidationError('Buyer email is required for box-office sales');
       }
 
       try {

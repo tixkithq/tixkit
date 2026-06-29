@@ -199,6 +199,24 @@ function baseTables(overrides: Tables = {}): Tables {
         currency: 'USD',
       },
     ],
+    organizations: [
+      {
+        id: 'org_1',
+        tenant_id: 'tnt_1',
+        name: 'Door Sales',
+        slug: 'door-sales',
+        clerk_organization_id: null,
+        box_office_settings: {
+          enabled: true,
+          allowedTenderTypes: ['cash', 'manual_card', 'comp'],
+          requireBuyerEmail: false,
+          receiptMode: 'email',
+        },
+        status: 'active',
+        created_at: now,
+        updated_at: now,
+      },
+    ],
     ticket_types: [
       {
         id: 'tt_ga',
@@ -452,6 +470,134 @@ describe('box-office order route', () => {
     expect(response.statusCode).toBe(400);
     expect(reserveCart).not.toHaveBeenCalled();
     expect(startCheckoutSession).not.toHaveBeenCalled();
+  });
+
+  it('rejects box-office orders when organization settings disable sales', async () => {
+    const tables = baseTables({
+      organizations: [
+        {
+          id: 'org_1',
+          tenant_id: 'tnt_1',
+          name: 'Door Sales',
+          slug: 'door-sales',
+          clerk_organization_id: null,
+          box_office_settings: {
+            enabled: false,
+            allowedTenderTypes: ['cash', 'manual_card', 'comp'],
+            requireBuyerEmail: false,
+            receiptMode: 'email',
+          },
+          status: 'active',
+          created_at: now,
+          updated_at: now,
+        },
+      ],
+    });
+    const reserveCart = vi.fn();
+    const { app, startCheckoutSession } = await setupApp({ tables, reserveCart });
+
+    const response = await app.inject({
+      method: 'POST',
+      url: '/events/evt_box/box-office/orders',
+      headers: { 'idempotency-key': 'box_settings_disabled' },
+      payload: {
+        tenderType: 'cash',
+        amountCents: 2500,
+        items: [{ ticketTypeId: 'tt_ga', quantity: 1 }],
+      },
+    });
+
+    expect(response.statusCode).toBe(400);
+    expect(response.json().message).toBe('Box-office sales are disabled for this organization');
+    expect(reserveCart).not.toHaveBeenCalled();
+    expect(startCheckoutSession).not.toHaveBeenCalled();
+    expect(tables.idempotency_records).toHaveLength(0);
+  });
+
+  it('rejects disabled tender types before reservation and workflow side effects', async () => {
+    const tables = baseTables({
+      organizations: [
+        {
+          id: 'org_1',
+          tenant_id: 'tnt_1',
+          name: 'Door Sales',
+          slug: 'door-sales',
+          clerk_organization_id: null,
+          box_office_settings: {
+            enabled: true,
+            allowedTenderTypes: ['cash'],
+            requireBuyerEmail: false,
+            receiptMode: 'email',
+          },
+          status: 'active',
+          created_at: now,
+          updated_at: now,
+        },
+      ],
+    });
+    const reserveCart = vi.fn();
+    const { app, startCheckoutSession } = await setupApp({ tables, reserveCart });
+
+    const response = await app.inject({
+      method: 'POST',
+      url: '/events/evt_box/box-office/orders',
+      headers: { 'idempotency-key': 'box_tender_denied' },
+      payload: {
+        tenderType: 'manual_card',
+        amountCents: 2500,
+        items: [{ ticketTypeId: 'tt_ga', quantity: 1 }],
+      },
+    });
+
+    expect(response.statusCode).toBe(400);
+    expect(response.json().message).toBe(
+      'Box-office tender type manual_card is not enabled for this organization',
+    );
+    expect(reserveCart).not.toHaveBeenCalled();
+    expect(startCheckoutSession).not.toHaveBeenCalled();
+    expect(tables.idempotency_records).toHaveLength(0);
+  });
+
+  it('requires buyer email before side effects when the organization policy demands it', async () => {
+    const tables = baseTables({
+      organizations: [
+        {
+          id: 'org_1',
+          tenant_id: 'tnt_1',
+          name: 'Door Sales',
+          slug: 'door-sales',
+          clerk_organization_id: null,
+          box_office_settings: {
+            enabled: true,
+            allowedTenderTypes: ['cash', 'manual_card', 'comp'],
+            requireBuyerEmail: true,
+            receiptMode: 'email',
+          },
+          status: 'active',
+          created_at: now,
+          updated_at: now,
+        },
+      ],
+    });
+    const reserveCart = vi.fn();
+    const { app, startCheckoutSession } = await setupApp({ tables, reserveCart });
+
+    const response = await app.inject({
+      method: 'POST',
+      url: '/events/evt_box/box-office/orders',
+      headers: { 'idempotency-key': 'box_email_required' },
+      payload: {
+        tenderType: 'cash',
+        amountCents: 2500,
+        items: [{ ticketTypeId: 'tt_ga', quantity: 1 }],
+      },
+    });
+
+    expect(response.statusCode).toBe(400);
+    expect(response.json().message).toBe('Buyer email is required for box-office sales');
+    expect(reserveCart).not.toHaveBeenCalled();
+    expect(startCheckoutSession).not.toHaveBeenCalled();
+    expect(tables.idempotency_records).toHaveLength(0);
   });
 
   it('replays a completed box-office order for the same idempotency key without duplicate side effects', async () => {

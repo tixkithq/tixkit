@@ -45,6 +45,12 @@ async function seedEvent(trx: Database): Promise<void> {
       name: 'Concurrency Test Org',
       slug: `conc-${Date.now()}`,
       clerk_organization_id: null,
+      box_office_settings: JSON.stringify({
+        enabled: true,
+        allowedTenderTypes: ['cash', 'manual_card', 'comp'],
+        requireBuyerEmail: false,
+        receiptMode: 'email',
+      }),
       status: 'active',
       created_at: new Date(),
       updated_at: new Date(),

@@ -149,6 +149,12 @@ export class ClerkAuthService {
           name: 'Tixkit Dev',
           slug: 'tixkit-dev',
           clerk_organization_id: null,
+          box_office_settings: JSON.stringify({
+            enabled: true,
+            allowedTenderTypes: ['cash', 'manual_card', 'comp'],
+            requireBuyerEmail: false,
+            receiptMode: 'email',
+          }),
           status: 'active',
           created_at: now,
           updated_at: now,

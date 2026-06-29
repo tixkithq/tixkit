@@ -1,4 +1,5 @@
 import type { BaseEntity, ISO8601Date, Slug, TenantScopedEntity, Ulid } from '../shared/index.js';
+import type { BoxOfficeTenderType } from '../ticketing/box-office.js';
 
 export type ThemeTokens = {
   primaryColor: string;
@@ -45,11 +46,40 @@ export type Brand = TenantScopedEntity & {
   whiteLabel: boolean;
 };
 
+export type BoxOfficeReceiptMode = 'print' | 'email' | 'both';
+
+export type BoxOfficeSettings = {
+  enabled: boolean;
+  allowedTenderTypes: BoxOfficeTenderType[];
+  requireBuyerEmail: boolean;
+  receiptMode: BoxOfficeReceiptMode;
+};
+
+export const BOX_OFFICE_TENDER_TYPES = [
+  'cash',
+  'manual_card',
+  'comp',
+] as const satisfies readonly BoxOfficeTenderType[];
+
+export const BOX_OFFICE_RECEIPT_MODES = [
+  'print',
+  'email',
+  'both',
+] as const satisfies readonly BoxOfficeReceiptMode[];
+
+export const DEFAULT_BOX_OFFICE_SETTINGS: BoxOfficeSettings = {
+  enabled: true,
+  allowedTenderTypes: [...BOX_OFFICE_TENDER_TYPES],
+  requireBuyerEmail: false,
+  receiptMode: 'email',
+};
+
 export type Organization = TenantScopedEntity & {
   name: string;
   slug: Slug;
   clerkOrganizationId?: string;
   status: 'active' | 'suspended';
+  boxOfficeSettings: BoxOfficeSettings;
 };
 
 export type Tenant = BaseEntity & {
@@ -102,6 +132,7 @@ export type CreateOrganizationInput = {
   name: string;
   slug: Slug;
   clerkOrganizationId?: string;
+  boxOfficeSettings?: BoxOfficeSettings;
 };
 
 export type AddBrandDomainInput = {

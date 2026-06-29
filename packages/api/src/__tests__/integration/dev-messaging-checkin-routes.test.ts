@@ -464,6 +464,12 @@ describe('brand domain creation', () => {
           name: 'Old Org',
           slug: 'old-org',
           clerk_organization_id: null,
+          box_office_settings: {
+            enabled: true,
+            allowedTenderTypes: ['cash', 'manual_card', 'comp'],
+            requireBuyerEmail: false,
+            receiptMode: 'email',
+          },
           status: 'active',
           created_at: new Date(),
           updated_at: new Date(),
@@ -474,10 +480,109 @@ describe('brand domain creation', () => {
     const res = await app.inject({
       method: 'PATCH',
       url: '/organizations/org_1',
-      payload: { name: 'New Org', slug: 'new-org' },
+      payload: {
+        name: 'New Org',
+        slug: 'new-org',
+        boxOfficeSettings: {
+          enabled: true,
+          allowedTenderTypes: ['cash', 'comp'],
+          requireBuyerEmail: true,
+          receiptMode: 'both',
+        },
+      },
     });
     expect(res.statusCode).toBe(200);
-    expect(res.json()).toMatchObject({ name: 'New Org', slug: 'new-org' });
+    expect(res.json()).toMatchObject({
+      name: 'New Org',
+      slug: 'new-org',
+      boxOfficeSettings: {
+        enabled: true,
+        allowedTenderTypes: ['cash', 'comp'],
+        requireBuyerEmail: true,
+        receiptMode: 'both',
+      },
+    });
+    expect(tables.organizations[0].box_office_settings).toBe(
+      JSON.stringify({
+        enabled: true,
+        allowedTenderTypes: ['cash', 'comp'],
+        requireBuyerEmail: true,
+        receiptMode: 'both',
+      }),
+    );
+    await app.close();
+  });
+
+  it('PATCH /organizations/:organizationId rejects invalid box-office settings', async () => {
+    const tables = {
+      organizations: [
+        {
+          id: 'org_1',
+          tenant_id: 'tnt_1',
+          name: 'Old Org',
+          slug: 'old-org',
+          clerk_organization_id: null,
+          box_office_settings: {
+            enabled: true,
+            allowedTenderTypes: ['cash', 'manual_card', 'comp'],
+            requireBuyerEmail: false,
+            receiptMode: 'email',
+          },
+          status: 'active',
+          created_at: new Date(),
+          updated_at: new Date(),
+        },
+      ],
+    };
+    const app = await setupApp(tenantRoutes, makePrincipal(), tables);
+    const res = await app.inject({
+      method: 'PATCH',
+      url: '/organizations/org_1',
+      payload: {
+        boxOfficeSettings: {
+          enabled: true,
+          allowedTenderTypes: ['cash', 'cash'],
+          requireBuyerEmail: false,
+          receiptMode: 'email',
+        },
+      },
+    });
+    expect(res.statusCode).toBe(400);
+    await app.close();
+  });
+
+  it('PATCH /organizations/:organizationId rejects whitespace-only organization names', async () => {
+    const tables = {
+      organizations: [
+        {
+          id: 'org_1',
+          tenant_id: 'tnt_1',
+          name: 'Old Org',
+          slug: 'old-org',
+          clerk_organization_id: null,
+          box_office_settings: {
+            enabled: true,
+            allowedTenderTypes: ['cash', 'manual_card', 'comp'],
+            requireBuyerEmail: false,
+            receiptMode: 'email',
+          },
+          status: 'active',
+          created_at: new Date(),
+          updated_at: new Date(),
+        },
+      ],
+    };
+    const app = await setupApp(tenantRoutes, makePrincipal(), tables);
+    const res = await app.inject({
+      method: 'PATCH',
+      url: '/organizations/org_1',
+      payload: {
+        name: '   ',
+      },
+    });
+
+    expect(res.statusCode).toBe(400);
+    expect(tables.organizations[0].name).toBe('Old Org');
     await app.close();
   });
 
@@ -5072,10 +5177,7 @@ describe('checkout question validation', () => {
     expect(cart.items).toEqual([
       expect.objectContaining({
         quantity: 2,
-        attendeeFields: [
-          { q_attendee_name: 'Ada Lovelace' },
-          { q_attendee_name: 'Grace Hopper' },
-        ],
+        attendeeFields: [{ q_attendee_name: 'Ada Lovelace' }, { q_attendee_name: 'Grace Hopper' }],
       }),
     ]);
     expect(cart.attendeeFields.tt_1).toEqual([

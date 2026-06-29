@@ -36,6 +36,7 @@ import { ScanLogsTicketIndexMigration } from './migrations/0032_scan_logs_ticket
 import { EmailJobsTemplateVersionForeignKeyMigration } from './migrations/0033_email_jobs_template_version_fk.js';
 import { OfflineCheckInBulkSyncMigration } from './migrations/0034_offline_check_in_bulk_sync.js';
 import { OfflineCheckInBulkSyncHardeningMigration } from './migrations/0035_offline_check_in_bulk_sync_hardening.js';
+import { OrganizationBoxOfficeSettingsMigration } from './migrations/0036_organization_box_office_settings.js';
 
 const INITIAL_MIGRATION_NAME = '0001_initial';
 const MIGRATION_TABLE = 'kysely_migration';
@@ -194,6 +195,7 @@ export class TixkitMigrationProvider implements MigrationProvider {
       '0033_email_jobs_template_version_fk': EmailJobsTemplateVersionForeignKeyMigration,
       '0034_offline_check_in_bulk_sync': OfflineCheckInBulkSyncMigration,
       '0035_offline_check_in_bulk_sync_hardening': OfflineCheckInBulkSyncHardeningMigration,
+      '0036_organization_box_office_settings': OrganizationBoxOfficeSettingsMigration,
     };
   }
 }

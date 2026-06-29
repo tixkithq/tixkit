@@ -769,9 +769,17 @@ export type Organization = {
   name: string;
   slug: string;
   clerkOrganizationId?: string;
+  boxOfficeSettings: BoxOfficeSettings;
   status: string;
   createdAt: string;
   updatedAt: string;
+};
+
+export type BoxOfficeSettings = {
+  enabled: boolean;
+  allowedTenderTypes: Array<'cash' | 'manual_card' | 'comp'>;
+  requireBuyerEmail: boolean;
+  receiptMode: 'print' | 'email' | 'both';
 };
 
 export type Brand = {
@@ -1985,12 +1993,13 @@ class OrganizationResource {
     name: string;
     slug: string;
     clerkOrganizationId?: string;
+    boxOfficeSettings?: BoxOfficeSettings;
   }): Promise<Organization> {
     return this.client.request('POST', '/organizations', { body: input });
   }
   async update(
     organizationId: string,
-    input: Partial<Pick<Organization, 'name' | 'slug' | 'status'>>,
+    input: Partial<Pick<Organization, 'name' | 'slug' | 'status' | 'boxOfficeSettings'>>,
   ): Promise<Organization> {
     return this.client.request('PATCH', `/organizations/${organizationId}`, { body: input });
   }

@@ -33,3 +33,4 @@ export { ScanLogsTicketIndexMigration } from './0032_scan_logs_ticket_index.js';
 export { EmailJobsTemplateVersionForeignKeyMigration } from './0033_email_jobs_template_version_fk.js';
 export { OfflineCheckInBulkSyncMigration } from './0034_offline_check_in_bulk_sync.js';
 export { OfflineCheckInBulkSyncHardeningMigration } from './0035_offline_check_in_bulk_sync_hardening.js';
+export { OrganizationBoxOfficeSettingsMigration } from './0036_organization_box_office_settings.js';

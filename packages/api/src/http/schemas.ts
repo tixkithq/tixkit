@@ -386,11 +386,45 @@ export const createEventOccurrenceSchema = z
 export const updateEventOccurrenceSchema = createEventOccurrenceSchema.partial().strict();
 
 // Tenant schemas
+const boxOfficeTenderTypes = ['cash', 'manual_card', 'comp'] as const;
+const boxOfficeReceiptModes = ['print', 'email', 'both'] as const;
+const defaultBoxOfficeSettings = {
+  enabled: true,
+  allowedTenderTypes: [...boxOfficeTenderTypes],
+  requireBuyerEmail: false,
+  receiptMode: 'email' as const,
+};
+
+export const boxOfficeSettingsSchema = z
+  .object({
+    enabled: z.boolean(),
+    allowedTenderTypes: z
+      .array(z.enum(boxOfficeTenderTypes))
+      .min(1)
+      .max(boxOfficeTenderTypes.length)
+      .refine((values) => new Set(values).size === values.length, {
+        message: 'Box-office tender types must be unique',
+      }),
+    requireBuyerEmail: z.boolean(),
+    receiptMode: z.enum(boxOfficeReceiptModes),
+  })
+  .strict();
+
 export const createOrganizationSchema = z
   .object({
-    name: z.string().min(1),
-    slug: z.string().min(1),
+    name: z.string().trim().min(1),
+    slug: z.string().trim().min(1),
     clerkOrganizationId: z.string().optional(),
+    boxOfficeSettings: boxOfficeSettingsSchema.optional().default(defaultBoxOfficeSettings),
+  })
+  .strict();
+
+export const updateOrganizationSchema = z
+  .object({
+    name: z.string().trim().min(1).optional(),
+    slug: z.string().trim().min(1).optional(),
+    clerkOrganizationId: z.string().nullable().optional(),
+    boxOfficeSettings: boxOfficeSettingsSchema.optional(),
   })
   .strict();
 

@@ -9,36 +9,113 @@ function isMssql(): boolean {
   return process.env.DB_DRIVER === 'mssql';
 }
 
+function quoteMysqlIdentifier(identifier: string): string {
+  return `\`${identifier.replaceAll('`', '``')}\``;
+}
+
+async function mysqlColumnExists(
+  db: Parameters<Migration['up']>[0],
+  tableName: string,
+  columnName: string,
+): Promise<boolean> {
+  const result = await sql<{ column_exists: number }>`
+    select count(*) as column_exists
+    from information_schema.columns
+    where table_schema = database()
+      and table_name = ${tableName}
+      and column_name = ${columnName}
+  `.execute(db);
+  return Number(result.rows[0]?.column_exists ?? 0) > 0;
+}
+
+async function mysqlIndexExists(
+  db: Parameters<Migration['up']>[0],
+  tableName: string,
+  indexName: string,
+): Promise<boolean> {
+  const result = await sql<{ index_exists: number }>`
+    select count(*) as index_exists
+    from information_schema.statistics
+    where table_schema = database()
+      and table_name = ${tableName}
+      and index_name = ${indexName}
+  `.execute(db);
+  return Number(result.rows[0]?.index_exists ?? 0) > 0;
+}
+
+async function addMysqlColumnIfMissing(
+  db: Parameters<Migration['up']>[0],
+  tableName: string,
+  columnName: string,
+  definition: string,
+): Promise<void> {
+  if (await mysqlColumnExists(db, tableName, columnName)) return;
+  await sql
+    .raw(
+      `alter table ${quoteMysqlIdentifier(tableName)} add column ${quoteMysqlIdentifier(columnName)} ${definition}`,
+    )
+    .execute(db);
+}
+
+async function dropMysqlColumnIfExists(
+  db: Parameters<Migration['up']>[0],
+  tableName: string,
+  columnName: string,
+): Promise<void> {
+  if (!(await mysqlColumnExists(db, tableName, columnName))) return;
+  await sql
+    .raw(
+      `alter table ${quoteMysqlIdentifier(tableName)} drop column ${quoteMysqlIdentifier(columnName)}`,
+    )
+    .execute(db);
+}
+
 async function addColumns(db: Parameters<Migration['up']>[0]): Promise<void> {
   if (isMysql()) {
-    await sql`
-      alter table offline_check_in_sync_jobs
-        add column if not exists attempt_count integer not null default 0,
-        add column if not exists lease_owner varchar(255),
-        add column if not exists leased_until timestamp null,
-        add column if not exists next_attempt_at timestamp null,
-        add column if not exists last_attempted_at timestamp null,
-        add column if not exists last_heartbeat_at timestamp null,
-        add column if not exists processing_started_at timestamp null,
-        add column if not exists processing_completed_at timestamp null,
-        add column if not exists processing_duration_ms bigint not null default 0,
-        add column if not exists transaction_duration_ms bigint not null default 0,
-        add column if not exists lock_wait_ms bigint not null default 0,
-        add column if not exists scan_log_insert_duration_ms bigint not null default 0,
-        add column if not exists ticket_update_duration_ms bigint not null default 0,
-        add column if not exists attendee_update_duration_ms bigint not null default 0,
-        add column if not exists rows_processed bigint not null default 0,
-        add column if not exists clock_warning_count bigint not null default 0
-    `.execute(db);
+    const jobColumns: Array<[string, string]> = [
+      ['attempt_count', 'integer not null default 0'],
+      ['lease_owner', 'varchar(255)'],
+      ['leased_until', 'timestamp null'],
+      ['next_attempt_at', 'timestamp null'],
+      ['last_attempted_at', 'timestamp null'],
+      ['last_heartbeat_at', 'timestamp null'],
+      ['processing_started_at', 'timestamp null'],
+      ['processing_completed_at', 'timestamp null'],
+      ['processing_duration_ms', 'bigint not null default 0'],
+      ['transaction_duration_ms', 'bigint not null default 0'],
+      ['lock_wait_ms', 'bigint not null default 0'],
+      ['scan_log_insert_duration_ms', 'bigint not null default 0'],
+      ['ticket_update_duration_ms', 'bigint not null default 0'],
+      ['attendee_update_duration_ms', 'bigint not null default 0'],
+      ['rows_processed', 'bigint not null default 0'],
+      ['clock_warning_count', 'bigint not null default 0'],
+    ];
+    for (const [columnName, definition] of jobColumns) {
+      // eslint-disable-next-line no-await-in-loop -- schema changes must run in deterministic order.
+      await addMysqlColumnIfMissing(db, 'offline_check_in_sync_jobs', columnName, definition);
+    }
+    await addMysqlColumnIfMissing(
+      db,
+      'offline_check_in_sync_chunks',
+      'clock_warning_count',
+      'bigint not null default 0',
+    );
     await sql`
       alter table offline_check_in_sync_chunks
-        add column if not exists clock_warning_count bigint not null default 0,
         modify column payload json null
     `.execute(db);
-    await sql`
-      create index if not exists idx_offline_sync_jobs_worker_ready
-      on offline_check_in_sync_jobs (status, next_attempt_at, leased_until, updated_at)
-    `.execute(db);
+    if (
+      !(await mysqlIndexExists(
+        db,
+        'offline_check_in_sync_jobs',
+        'idx_offline_sync_jobs_worker_ready',
+      ))
+    ) {
+      await sql`
+        create index idx_offline_sync_jobs_worker_ready
+        on offline_check_in_sync_jobs (status, next_attempt_at, leased_until, updated_at)
+      `.execute(db);
+    }
     return;
   }
 
@@ -118,32 +195,36 @@ async function addColumns(db: Parameters<Migration['up']>[0]): Promise<void> {
 
 async function dropColumns(db: Parameters<Migration['up']>[0]): Promise<void> {
   if (isMysql()) {
-    await sql`drop index idx_offline_sync_jobs_worker_ready on offline_check_in_sync_jobs`.execute(
-      db,
-    );
-    await sql`
-      alter table offline_check_in_sync_chunks
-        drop column clock_warning_count
-    `.execute(db);
-    await sql`
-      alter table offline_check_in_sync_jobs
-        drop column attempt_count,
-        drop column lease_owner,
-        drop column leased_until,
-        drop column next_attempt_at,
-        drop column last_attempted_at,
-        drop column last_heartbeat_at,
-        drop column processing_started_at,
-        drop column processing_completed_at,
-        drop column processing_duration_ms,
-        drop column transaction_duration_ms,
-        drop column lock_wait_ms,
-        drop column scan_log_insert_duration_ms,
-        drop column ticket_update_duration_ms,
-        drop column attendee_update_duration_ms,
-        drop column rows_processed,
-        drop column clock_warning_count
-    `.execute(db);
+    if (
+      await mysqlIndexExists(db, 'offline_check_in_sync_jobs', 'idx_offline_sync_jobs_worker_ready')
+    ) {
+      await sql`drop index idx_offline_sync_jobs_worker_ready on offline_check_in_sync_jobs`.execute(
+        db,
+      );
+    }
+    await dropMysqlColumnIfExists(db, 'offline_check_in_sync_chunks', 'clock_warning_count');
+    const jobColumns = [
+      'attempt_count',
+      'lease_owner',
+      'leased_until',
+      'next_attempt_at',
+      'last_attempted_at',
+      'last_heartbeat_at',
+      'processing_started_at',
+      'processing_completed_at',
+      'processing_duration_ms',
+      'transaction_duration_ms',
+      'lock_wait_ms',
+      'scan_log_insert_duration_ms',
+      'ticket_update_duration_ms',
+      'attendee_update_duration_ms',
+      'rows_processed',
+      'clock_warning_count',
+    ];
+    for (const columnName of jobColumns) {
+      // eslint-disable-next-line no-await-in-loop -- rollback drops columns in the reverse migration's defined order.
+      await dropMysqlColumnIfExists(db, 'offline_check_in_sync_jobs', columnName);
+    }
     return;
   }
 

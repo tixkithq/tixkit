@@ -7,6 +7,7 @@ import { ScanLogsTicketIndexMigration } from '../../migrations/0032_scan_logs_ti
 import { EmailJobsTemplateVersionForeignKeyMigration } from '../../migrations/0033_email_jobs_template_version_fk.js';
 import { OfflineCheckInBulkSyncMigration } from '../../migrations/0034_offline_check_in_bulk_sync.js';
 import { OfflineCheckInBulkSyncHardeningMigration } from '../../migrations/0035_offline_check_in_bulk_sync_hardening.js';
+import { OrganizationBoxOfficeSettingsMigration } from '../../migrations/0036_organization_box_office_settings.js';
 
 const offlineCheckInBulkSyncMigrationPath = new URL(
   '../../migrations/0034_offline_check_in_bulk_sync.ts',
@@ -14,6 +15,10 @@ const offlineCheckInBulkSyncMigrationPath = new URL(
 );
 const offlineCheckInBulkSyncHardeningMigrationPath = new URL(
   '../../migrations/0035_offline_check_in_bulk_sync_hardening.ts',
+  import.meta.url,
+);
+const organizationBoxOfficeSettingsMigrationPath = new URL(
+  '../../migrations/0036_organization_box_office_settings.ts',
   import.meta.url,
 );
 
@@ -161,7 +166,7 @@ describe('OrderSalesChannelMigration', () => {
   it('is registered with the production migrator provider', async () => {
     const migrations = await new TixkitMigrationProvider().getMigrations();
 
-    expect(Object.keys(migrations).at(-1)).toBe('0035_offline_check_in_bulk_sync_hardening');
+    expect(Object.keys(migrations).at(-1)).toBe('0036_organization_box_office_settings');
     expect(migrations['0031_order_sales_channel']).toBe(OrderSalesChannelMigration);
     expect(migrations['0032_scan_logs_ticket_index']).toBe(ScanLogsTicketIndexMigration);
     expect(migrations['0033_email_jobs_template_version_fk']).toBe(
@@ -171,6 +176,20 @@ describe('OrderSalesChannelMigration', () => {
     expect(migrations['0035_offline_check_in_bulk_sync_hardening']).toBe(
       OfflineCheckInBulkSyncHardeningMigration,
     );
+    expect(migrations['0036_organization_box_office_settings']).toBe(
+      OrganizationBoxOfficeSettingsMigration,
+    );
+  });
+
+  it('keeps organization box-office settings migration portable across supported SQL drivers', () => {
+    const source = readFileSync(organizationBoxOfficeSettingsMigrationPath, 'utf8');
+
+    expect(source).toContain("process.env.DB_DRIVER === 'mysql'");
+    expect(source).toContain("process.env.DB_DRIVER === 'mssql'");
+    expect(source).toContain('information_schema.columns');
+    expect(source).toContain('jsonb not null');
+    expect(source).toContain('modify column box_office_settings json not null');
+    expect(source).toContain('isjson(box_office_settings) = 1');
   });
 
   it('keeps offline bulk sync migration types portable across supported SQL drivers', () => {
@@ -190,6 +209,10 @@ describe('OrderSalesChannelMigration', () => {
 
     expect(source).toContain('modify column payload json null');
     expect(source).toContain('alter column payload drop not null');
+    expect(source).toContain('information_schema.columns');
+    expect(source).toContain('information_schema.statistics');
+    expect(source).toContain("addMysqlColumnIfMissing(db, 'offline_check_in_sync_jobs'");
+    expect(source).toContain('mysqlIndexExists(');
     expect(source).not.toContain('modify column payload json not null');
     expect(source).not.toContain('alter column payload set not null');
   });

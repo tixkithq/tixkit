@@ -115,6 +115,12 @@ async function seedTenantGraph(trx: Database): Promise<void> {
       name: 'Load Harness Org',
       slug: `load-${RUN_ID}`,
       clerk_organization_id: null,
+      box_office_settings: JSON.stringify({
+        enabled: true,
+        allowedTenderTypes: ['cash', 'manual_card', 'comp'],
+        requireBuyerEmail: false,
+        receiptMode: 'email',
+      }),
       status: 'active',
       created_at: new Date(),
       updated_at: new Date(),

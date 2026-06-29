@@ -76,6 +76,12 @@ async function seedTenantGraph(database: Database): Promise<void> {
         name: `POS DB ${RUN_ID}`,
         slug: `pos-db-${RUN_ID}`,
         clerk_organization_id: null,
+        box_office_settings: JSON.stringify({
+          enabled: true,
+          allowedTenderTypes: ['cash', 'manual_card', 'comp'],
+          requireBuyerEmail: false,
+          receiptMode: 'email',
+        }),
         status: 'active',
         created_at: now,
         updated_at: now,
@@ -292,9 +298,11 @@ describeWithIntegrationDatabase(
     }, 120_000);
 
     afterAll(async () => {
-      await app.close();
-      await cleanupAll(db);
-      await db.destroy();
+      await app?.close();
+      if (db) {
+        await cleanupAll(db);
+        await db.destroy();
+      }
       restoreDatabaseDriver(previousDbDriver);
     }, 120_000);
 
@@ -340,8 +348,8 @@ describeWithIntegrationDatabase(
         sales_channel: 'box_office',
         operator_id: OPERATOR_ID,
         tender_type: 'manual_card',
-        total_cents: 2500,
       });
+      expect(Number(orders[0].total_cents)).toBe(2500);
 
       const pool = await db
         .selectFrom('inventory_pools')

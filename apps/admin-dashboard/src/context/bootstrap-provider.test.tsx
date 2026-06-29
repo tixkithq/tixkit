@@ -21,8 +21,32 @@ describe('BootstrapProvider', () => {
     vi.spyOn(adminApi, 'listOrganizations').mockResolvedValue({
       ok: true,
       data: [
-        { id: 'org_1', tenantId: 'tnt_1', name: 'Org One', slug: 'one', status: 'active' },
-        { id: 'org_2', tenantId: 'tnt_1', name: 'Org Two', slug: 'two', status: 'active' },
+        {
+          id: 'org_1',
+          tenantId: 'tnt_1',
+          name: 'Org One',
+          slug: 'one',
+          status: 'active',
+          boxOfficeSettings: {
+            enabled: true,
+            allowedTenderTypes: ['cash', 'manual_card', 'comp'],
+            requireBuyerEmail: false,
+            receiptMode: 'email',
+          },
+        },
+        {
+          id: 'org_2',
+          tenantId: 'tnt_1',
+          name: 'Org Two',
+          slug: 'two',
+          status: 'active',
+          boxOfficeSettings: {
+            enabled: true,
+            allowedTenderTypes: ['cash', 'manual_card', 'comp'],
+            requireBuyerEmail: false,
+            receiptMode: 'email',
+          },
+        },
       ],
     });
     vi.spyOn(adminApi, 'listBrands').mockResolvedValue({

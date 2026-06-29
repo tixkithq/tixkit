@@ -1008,8 +1008,16 @@ export type AdminOrganization = {
   slug: string;
   status: 'active' | 'suspended';
   clerkOrganizationId?: string;
+  boxOfficeSettings: AdminBoxOfficeSettings;
   createdAt?: string;
   updatedAt?: string;
+};
+
+export type AdminBoxOfficeSettings = {
+  enabled: boolean;
+  allowedTenderTypes: Array<'cash' | 'manual_card' | 'comp'>;
+  requireBuyerEmail: boolean;
+  receiptMode: 'print' | 'email' | 'both';
 };
 
 export type AdminBrandDomain = {
@@ -1375,8 +1383,8 @@ export type UpdateWebhookEndpointInput = Partial<CreateWebhookEndpointInput> & {
 export type UpdateOrganizationInput = {
   name?: string;
   slug?: string;
-  defaultCurrency?: string;
-  description?: string;
+  clerkOrganizationId?: string | null;
+  boxOfficeSettings?: AdminBoxOfficeSettings;
 };
 
 export type UpdateBrandInput = {
@@ -1758,6 +1766,45 @@ function nullableStringValue(value: unknown): string | null {
   return typeof value === 'string' && value.length > 0 ? value : null;
 }
 
+const defaultBoxOfficeSettings: AdminBoxOfficeSettings = {
+  enabled: true,
+  allowedTenderTypes: ['cash', 'manual_card', 'comp'],
+  requireBuyerEmail: false,
+  receiptMode: 'email',
+};
+
+function normalizeBoxOfficeSettings(value: unknown): AdminBoxOfficeSettings {
+  if (value == null) return defaultBoxOfficeSettings;
+  if (typeof value !== 'object' || Array.isArray(value)) return defaultBoxOfficeSettings;
+
+  const record = value as Record<string, unknown>;
+  const allowedTenderTypes = Array.isArray(record.allowedTenderTypes)
+    ? record.allowedTenderTypes.filter(
+        (tenderType): tenderType is AdminBoxOfficeSettings['allowedTenderTypes'][number] =>
+          tenderType === 'cash' || tenderType === 'manual_card' || tenderType === 'comp',
+      )
+    : defaultBoxOfficeSettings.allowedTenderTypes;
+
+  return {
+    enabled:
+      typeof record.enabled === 'boolean' ? record.enabled : defaultBoxOfficeSettings.enabled,
+    allowedTenderTypes:
+      allowedTenderTypes.length > 0
+        ? [...new Set(allowedTenderTypes)]
+        : defaultBoxOfficeSettings.allowedTenderTypes,
+    requireBuyerEmail:
+      typeof record.requireBuyerEmail === 'boolean'
+        ? record.requireBuyerEmail
+        : defaultBoxOfficeSettings.requireBuyerEmail,
+    receiptMode:
+      record.receiptMode === 'print' ||
+      record.receiptMode === 'email' ||
+      record.receiptMode === 'both'
+        ? record.receiptMode
+        : defaultBoxOfficeSettings.receiptMode,
+  };
+}
+
 function parseJsonRecord(value: unknown): Record<string, unknown> {
   if (!value) return {};
   if (typeof value === 'object') return asRecord(value);
@@ -1813,6 +1860,9 @@ function normalizeOrganization(value: Record<string, unknown>): AdminOrganizatio
     clerkOrganizationId: stringValue(
       value.clerkOrganizationId ?? value.clerk_organization_id,
       undefined,
+    ),
+    boxOfficeSettings: normalizeBoxOfficeSettings(
+      value.boxOfficeSettings ?? value.box_office_settings,
     ),
     createdAt: stringValue(value.createdAt ?? value.created_at, undefined),
     updatedAt: stringValue(value.updatedAt ?? value.updated_at, undefined),
@@ -2926,6 +2976,7 @@ const fixtureOrganizations: AdminOrganization[] = [
     name: 'Tixkit',
     slug: 'tixkit',
     status: 'active',
+    boxOfficeSettings: defaultBoxOfficeSettings,
     createdAt: iso(-30),
     updatedAt: iso(0),
   },

@@ -69,6 +69,31 @@ describe('openApiSpec', () => {
   });
 
   it('documents order sales-channel attribution for box-office reporting', () => {
+    expect(openApiSpec.components.schemas.Organization.properties.boxOfficeSettings).toEqual({
+      $ref: '#/components/schemas/BoxOfficeSettings',
+    });
+    expect(openApiSpec.components.schemas.Organization.required).toContain('boxOfficeSettings');
+    expect(openApiSpec.components.schemas.BoxOfficeSettings).toEqual({
+      type: 'object',
+      properties: {
+        enabled: { type: 'boolean' },
+        allowedTenderTypes: {
+          type: 'array',
+          items: { type: 'string', enum: ['cash', 'manual_card', 'comp'] },
+          minItems: 1,
+          maxItems: 3,
+          uniqueItems: true,
+        },
+        requireBuyerEmail: { type: 'boolean' },
+        receiptMode: { type: 'string', enum: ['print', 'email', 'both'] },
+      },
+      required: ['enabled', 'allowedTenderTypes', 'requireBuyerEmail', 'receiptMode'],
+    });
+    expect(
+      openApiSpec.paths['/organizations/{organizationId}'].patch.requestBody.content[
+        'application/json'
+      ].schema.properties.boxOfficeSettings,
+    ).toEqual({ $ref: '#/components/schemas/BoxOfficeSettings' });
     expect(openApiSpec.components.schemas.Order.properties.salesChannel).toEqual({
       type: 'string',
       enum: ['online', 'box_office'],

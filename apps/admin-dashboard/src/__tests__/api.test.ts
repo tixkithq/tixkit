@@ -25,10 +25,22 @@ describe('AdminApi settings fixtures', () => {
     const updateResult = await adminApi.updateOrganization(organization.id, {
       name: 'Updated Tixkit',
       slug: organization.slug,
+      boxOfficeSettings: {
+        enabled: true,
+        allowedTenderTypes: ['cash', 'comp'],
+        requireBuyerEmail: true,
+        receiptMode: 'both',
+      },
     });
     expect(updateResult.ok).toBe(true);
     if (updateResult.ok) {
       expect(updateResult.data.name).toBe('Updated Tixkit');
+      expect(updateResult.data.boxOfficeSettings).toEqual({
+        enabled: true,
+        allowedTenderTypes: ['cash', 'comp'],
+        requireBuyerEmail: true,
+        receiptMode: 'both',
+      });
     }
   });
 

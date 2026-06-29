@@ -7,11 +7,21 @@ import {
   PaymentAccountRepository,
   AuditLogRepository,
 } from '@tixkit/db';
-import type { CreateOrganizationInput, CreateBrandInput } from '@tixkit/domain';
+import type { CreateBrandInput } from '@tixkit/domain';
 import { ValidationError } from '@tixkit/domain';
 import { writeAuditLog } from '../../auth/audit.js';
-import { addBrandDomainSchema, parseBody, updateBrandSchema } from '../../http/schemas.js';
-import { serializeBrand, serializeBrandDomain } from '../../http/contracts.js';
+import {
+  addBrandDomainSchema,
+  createOrganizationSchema,
+  parseBody,
+  updateBrandSchema,
+  updateOrganizationSchema,
+} from '../../http/schemas.js';
+import {
+  serializeBrand,
+  serializeBrandDomain,
+  serializeOrganization,
+} from '../../http/contracts.js';
 import Stripe from 'stripe';
 
 type PaymentAccountRow = {
@@ -157,17 +167,19 @@ export const tenantRoutes: FastifyPluginAsync = async (app) => {
   app.post('/organizations', async (request, reply) => {
     const principal = request.principal!;
     ClerkAuthService.requirePermission(principal, 'settings.write');
-    const body = request.body as CreateOrganizationInput;
+    const body = parseBody(createOrganizationSchema, request.body);
 
     const repo = new OrganizationRepository(db);
-    const org = await repo.create({
+    const createInput = {
       tenantId: principal.tenantId,
       name: body.name,
       slug: body.slug,
       clerkOrganizationId: body.clerkOrganizationId,
-    });
+      boxOfficeSettings: body.boxOfficeSettings,
+    };
+    const org = await repo.create(createInput);
 
-    return reply.status(201).send(org);
+    return reply.status(201).send(serializeOrganization(org));
   });
 
   app.get('/organizations', async (request) => {
@@ -177,8 +189,11 @@ export const tenantRoutes: FastifyPluginAsync = async (app) => {
     const orgs = await repo.findByTenant(principal.tenantId);
     // Filter by principal's organizations to prevent cross-org data exposure
     // within the same tenant. System principals see all orgs.
-    if (principal.type === 'system') return orgs;
-    return orgs.filter((org) => principal.organizationIds.includes(org.id));
+    const scopedOrganizations =
+      principal.type === 'system'
+        ? orgs
+        : orgs.filter((org) => principal.organizationIds.includes(org.id));
+    return scopedOrganizations.map(serializeOrganization);
   });
 
   app.patch('/organizations/:organizationId', async (request) => {
@@ -190,16 +205,15 @@ export const tenantRoutes: FastifyPluginAsync = async (app) => {
     ClerkAuthService.requireResourceTenant(principal, current, 'Organization', organizationId);
     ClerkAuthService.requireOrganizationScope(principal, organizationId);
 
-    const body = request.body as {
-      name?: string;
-      slug?: string;
-      clerkOrganizationId?: string | null;
-    };
+    const body = parseBody(updateOrganizationSchema, request.body);
     const updated = await new OrganizationRepository(db).update(organizationId, {
       ...(typeof body.name === 'string' ? { name: body.name.trim() } : {}),
       ...(typeof body.slug === 'string' ? { slug: body.slug.trim() } : {}),
       ...(body.clerkOrganizationId !== undefined
         ? { clerk_organization_id: body.clerkOrganizationId }
+        : {}),
+      ...(body.boxOfficeSettings !== undefined
+        ? { box_office_settings: JSON.stringify(body.boxOfficeSettings) }
         : {}),
     });
     await writeAuditLog(audit(), request, principal, {
@@ -213,9 +227,12 @@ export const tenantRoutes: FastifyPluginAsync = async (app) => {
         ...(body.clerkOrganizationId !== undefined
           ? { clerkOrganizationId: body.clerkOrganizationId }
           : {}),
+        ...(body.boxOfficeSettings !== undefined
+          ? { boxOfficeSettings: body.boxOfficeSettings }
+          : {}),
       },
     });
-    return updated;
+    return serializeOrganization(updated);
   });
 
   app.get('/organizations/:organizationId/members', async (request) => {

@@ -1,0 +1,108 @@
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
+
+const testState = vi.hoisted(() => {
+  const organizationFixture = {
+    id: 'org_1',
+    tenantId: 'tnt_1',
+    name: 'Tixkit',
+    slug: 'tixkit',
+    status: 'active' as const,
+    boxOfficeSettings: {
+      enabled: true,
+      allowedTenderTypes: ['cash', 'manual_card', 'comp'] as Array<'cash' | 'manual_card' | 'comp'>,
+      requireBuyerEmail: false,
+      receiptMode: 'email' as const,
+    },
+  };
+  return {
+    organizationFixture,
+    bootstrapState: {
+      value: {
+        organizations: [organizationFixture],
+        organizationId: 'org_1',
+        loading: false,
+        error: null,
+      },
+    },
+  };
+});
+
+const apiMock = vi.hoisted(() => ({
+  updateOrganization: vi.fn(),
+}));
+
+const toastMock = vi.hoisted(() => ({
+  success: vi.fn(),
+  error: vi.fn(),
+}));
+
+vi.mock('@/context/bootstrap-provider', () => ({
+  useBootstrap: () => testState.bootstrapState.value,
+}));
+
+vi.mock('@/lib/api', () => ({
+  adminApi: apiMock,
+}));
+
+vi.mock('sonner', () => ({
+  toast: toastMock,
+}));
+
+import WorkspacePage from './page';
+
+describe('WorkspacePage', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it('saves workspace identity and box-office policy together', async () => {
+    apiMock.updateOrganization.mockResolvedValue({
+      ok: true,
+      data: {
+        ...testState.organizationFixture,
+        name: 'Festival Ops',
+        boxOfficeSettings: {
+          enabled: true,
+          allowedTenderTypes: ['cash', 'comp'],
+          requireBuyerEmail: true,
+          receiptMode: 'email',
+        },
+      },
+    });
+
+    render(<WorkspacePage />);
+
+    fireEvent.change(await screen.findByLabelText('Workspace Name'), {
+      target: { value: 'Festival Ops' },
+    });
+    fireEvent.click(screen.getByLabelText('Manual Card'));
+    fireEvent.click(screen.getByText('Require buyer email for at-door orders'));
+    fireEvent.click(screen.getByRole('button', { name: 'Save Changes' }));
+
+    await waitFor(() => expect(apiMock.updateOrganization).toHaveBeenCalledTimes(1));
+    expect(apiMock.updateOrganization).toHaveBeenCalledWith('org_1', {
+      name: 'Festival Ops',
+      slug: 'tixkit',
+      boxOfficeSettings: {
+        enabled: true,
+        allowedTenderTypes: ['cash', 'comp'],
+        requireBuyerEmail: true,
+        receiptMode: 'email',
+      },
+    });
+    expect(toastMock.success).toHaveBeenCalledWith('Workspace settings saved');
+  });
+
+  it('requires a non-empty workspace name before saving', async () => {
+    render(<WorkspacePage />);
+
+    fireEvent.change(await screen.findByLabelText('Workspace Name'), {
+      target: { value: '   ' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Save Changes' }));
+
+    expect(apiMock.updateOrganization).not.toHaveBeenCalled();
+    expect(toastMock.error).toHaveBeenCalledWith('Workspace name is required');
+  });
+});

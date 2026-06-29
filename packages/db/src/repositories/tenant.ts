@@ -1,6 +1,20 @@
 import { BaseRepository } from './base.js';
 import { ulid } from 'ulid';
 
+type BoxOfficeSettings = {
+  enabled: boolean;
+  allowedTenderTypes: Array<'cash' | 'manual_card' | 'comp'>;
+  requireBuyerEmail: boolean;
+  receiptMode: 'print' | 'email' | 'both';
+};
+
+const defaultBoxOfficeSettings: BoxOfficeSettings = {
+  enabled: true,
+  allowedTenderTypes: ['cash', 'manual_card', 'comp'],
+  requireBuyerEmail: false,
+  receiptMode: 'email',
+};
+
 export class TenantRepository extends BaseRepository {
   async create(input: { name: string; plan?: string }) {
     const id = `tnt_${ulid()}`;
@@ -35,6 +49,7 @@ export class OrganizationRepository extends BaseRepository {
     name: string;
     slug: string;
     clerkOrganizationId?: string;
+    boxOfficeSettings?: BoxOfficeSettings;
   }) {
     const id = `org_${ulid()}`;
     const now = new Date();
@@ -46,6 +61,7 @@ export class OrganizationRepository extends BaseRepository {
         name: input.name,
         slug: input.slug,
         clerk_organization_id: input.clerkOrganizationId ?? null,
+        box_office_settings: JSON.stringify(input.boxOfficeSettings ?? defaultBoxOfficeSettings),
         status: 'active',
         created_at: now,
         updated_at: now,

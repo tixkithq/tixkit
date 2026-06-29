@@ -811,10 +811,27 @@ describe('TixkitClient new resource methods', () => {
       apiBaseUrl: 'https://api.test',
       maxRetries: 0,
     });
-    await c.organizations.update('org_1', { name: 'Updated' });
+    await c.organizations.update('org_1', {
+      name: 'Updated',
+      boxOfficeSettings: {
+        enabled: true,
+        allowedTenderTypes: ['cash', 'comp'],
+        requireBuyerEmail: true,
+        receiptMode: 'both',
+      },
+    });
     const call = getCall(fm);
     expect(call.url).toBe('https://api.test/v1/organizations/org_1');
     expect(call.method).toBe('PATCH');
+    expect(JSON.parse(call.body)).toEqual({
+      name: 'Updated',
+      boxOfficeSettings: {
+        enabled: true,
+        allowedTenderTypes: ['cash', 'comp'],
+        requireBuyerEmail: true,
+        receiptMode: 'both',
+      },
+    });
   });
 
   it('attendees.listAll sends GET to /attendees with query params', async () => {
