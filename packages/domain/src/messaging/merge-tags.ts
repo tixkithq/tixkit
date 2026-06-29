@@ -99,12 +99,33 @@ export const MERGE_TAG_REGISTRY: readonly MergeTagVariable[] = [
   { key: 'event.timezone', description: 'Event timezone', example: 'America/New_York' },
   { key: 'event.venueName', description: 'Venue name', example: 'The Grand Hall' },
   { key: 'event.venueCity', description: 'Venue city', example: 'Brooklyn' },
-  { key: 'event.publicUrl', description: 'Public event page URL', example: 'https://example.test/e/evt_1' },
-  { key: 'event.checkoutUrl', description: 'Hosted checkout URL', example: 'https://checkout.example.test/checkout?eventId=evt_1' },
+  {
+    key: 'event.publicUrl',
+    description: 'Public event page URL',
+    example: 'https://example.test/e/evt_1',
+  },
+  {
+    key: 'event.checkoutUrl',
+    description: 'Hosted checkout URL',
+    example: 'https://checkout.example.test/checkout?eventId=evt_1',
+  },
   { key: 'brand.name', description: 'Brand/organizer name', example: 'Acme Events' },
-  { key: 'brand.supportUrl', description: 'Brand support URL', example: 'https://help.example.test' },
-  { key: 'recipient.name', description: 'Recipient display name', example: 'Jordan Lee', required: true },
-  { key: 'recipient.email', description: 'Recipient email address', example: 'jordan@example.test' },
+  {
+    key: 'brand.supportUrl',
+    description: 'Brand support URL',
+    example: 'https://help.example.test',
+  },
+  {
+    key: 'recipient.name',
+    description: 'Recipient display name',
+    example: 'Jordan Lee',
+    required: true,
+  },
+  {
+    key: 'recipient.email',
+    description: 'Recipient email address',
+    example: 'jordan@example.test',
+  },
   { key: 'recipient.phone', description: 'Recipient phone number', example: '+15551234567' },
   { key: 'attendee.name', description: 'Attendee name', example: 'Jordan Lee' },
   { key: 'attendee.checkedIn', description: 'Attendee check-in status', example: 'checked in' },
@@ -117,9 +138,7 @@ export const MERGE_TAG_REGISTRY: readonly MergeTagVariable[] = [
 ];
 
 const REGISTRY_KEYS = new Set(MERGE_TAG_REGISTRY.map((v) => v.key));
-const REQUIRED_KEYS = new Set(
-  MERGE_TAG_REGISTRY.filter((v) => v.required).map((v) => v.key),
-);
+const REQUIRED_KEYS = new Set(MERGE_TAG_REGISTRY.filter((v) => v.required).map((v) => v.key));
 
 const TAG_PATTERN = /\{\{\s*([a-zA-Z0-9_.]+)\s*\}\}/g;
 const CUSTOM_ANSWER_PATTERN = /^customAnswers\.([a-zA-Z0-9_-]+)$/;
@@ -314,20 +333,44 @@ export function countSmsSegments(body: string): SmsSegmentResult {
     const singleLimit = 70;
     const multiLimit = 67;
     if (units <= singleLimit) {
-      return { segments: 1, encoding, charsPerSegment: singleLimit, unitsUsed: units, remaining: singleLimit - units };
+      return {
+        segments: 1,
+        encoding,
+        charsPerSegment: singleLimit,
+        unitsUsed: units,
+        remaining: singleLimit - units,
+      };
     }
     const segments = Math.ceil(units / multiLimit);
-    return { segments, encoding, charsPerSegment: multiLimit, unitsUsed: units, remaining: segments * multiLimit - units };
+    return {
+      segments,
+      encoding,
+      charsPerSegment: multiLimit,
+      unitsUsed: units,
+      remaining: segments * multiLimit - units,
+    };
   }
   let units = 0;
   for (const char of body) units += gsmCharUnits(char);
   const singleLimit = 160;
   const multiLimit = 153;
   if (units <= singleLimit) {
-    return { segments: 1, encoding, charsPerSegment: singleLimit, unitsUsed: units, remaining: singleLimit - units };
+    return {
+      segments: 1,
+      encoding,
+      charsPerSegment: singleLimit,
+      unitsUsed: units,
+      remaining: singleLimit - units,
+    };
   }
   const segments = Math.ceil(units / multiLimit);
-  return { segments, encoding, charsPerSegment: multiLimit, unitsUsed: units, remaining: segments * multiLimit - units };
+  return {
+    segments,
+    encoding,
+    charsPerSegment: multiLimit,
+    unitsUsed: units,
+    remaining: segments * multiLimit - units,
+  };
 }
 
 /** Estimated cost for a body given a per-segment cost. */

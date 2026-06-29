@@ -4568,11 +4568,9 @@ describe('POST /events/:eventId/messages/render-preview (C-076/C-077 merge-tag p
   });
 
   it('rejects requests without messages.write permission', async () => {
-    const app = await setupApp(
-      messagingRoutes,
-      makePrincipal({ scopes: ['events.read'] }),
-      { events: [event] },
-    );
+    const app = await setupApp(messagingRoutes, makePrincipal({ scopes: ['events.read'] }), {
+      events: [event],
+    });
     const res = await app.inject({
       method: 'POST',
       url: '/events/evt_1/messages/render-preview',
