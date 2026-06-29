@@ -58,3 +58,5 @@ export {
   SmsProviderEventRepository,
   MessageConsentRepository,
 } from './messaging.js';
+
+export { ShortLinkRepository } from './short-links.js';

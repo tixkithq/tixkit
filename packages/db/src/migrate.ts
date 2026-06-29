@@ -28,6 +28,7 @@ import { WebhookDeliveryEndpointHistoryIndexMigration } from './migrations/0024_
 import { PaymentAccountsUniqueMigration } from './migrations/0025_payment_accounts_unique.js';
 import { WebhookDeliveryAttemptIdentityMigration } from './migrations/0026_webhook_delivery_attempt_identity.js';
 import { WebhookDeliveryReplayIdentityMigration } from './migrations/0027_webhook_delivery_replay_identity.js';
+import { ShortLinksMigration } from './migrations/0028_short_links.js';
 
 const INITIAL_MIGRATION_NAME = '0001_initial';
 const MIGRATION_TABLE = 'kysely_migration';
@@ -117,6 +118,8 @@ const ALL_SCHEMA_TABLES = [
   'payment_compensations',
   'privacy_requests',
   'email_provider_events',
+  'short_links',
+  'link_clicks',
 ] as const;
 
 function quoteMssqlIdentifier(identifier: string): string {
@@ -169,6 +172,7 @@ class TixkitMigrationProvider implements MigrationProvider {
       '0025_payment_accounts_unique': PaymentAccountsUniqueMigration,
       '0026_webhook_delivery_attempt_identity': WebhookDeliveryAttemptIdentityMigration,
       '0027_webhook_delivery_replay_identity': WebhookDeliveryReplayIdentityMigration,
+      '0028_short_links': ShortLinksMigration,
     };
   }
 }
