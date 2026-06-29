@@ -28,3 +28,4 @@ export { WebhookDeliveryReplayIdentityMigration } from './0027_webhook_delivery_
 export { ShortLinksMigration } from './0028_short_links.js';
 export { EventCodeFormatMigration } from './0029_event_code_format.js';
 export { ContentDocumentsMigration } from './0030_content_documents.js';
+export { OrderSalesChannelMigration } from './0031_order_sales_channel.js';

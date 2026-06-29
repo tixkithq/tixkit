@@ -3,7 +3,7 @@ import rateLimit from '@fastify/rate-limit';
 import { describe, expect, it } from 'vitest';
 import { ValidationError } from '@tixkit/domain';
 import { registerErrorHandler, registerHealthRoute, registerJsonBodyParser } from '../app.js';
-import { pageEnvelope, parsePagination } from '../http/contracts.js';
+import { pageEnvelope, parsePagination, serializeOrder } from '../http/contracts.js';
 
 describe('API contract helpers', () => {
   it('parses cursor pagination with documented defaults and max limit', () => {
@@ -35,6 +35,86 @@ describe('API contract helpers', () => {
       items: [{ id: 'row_1' }],
       nextCursor: null,
       hasMore: false,
+    });
+  });
+
+  it('serializes order sales attribution with online defaults for legacy rows', () => {
+    const serialized = serializeOrder({
+      id: 'ord_1',
+      tenant_id: 'tnt_1',
+      organization_id: 'org_1',
+      brand_id: 'brd_1',
+      event_id: 'evt_1',
+      checkout_session_id: 'chk_1',
+      order_number: 'TK-1001',
+      status: 'paid',
+      currency: 'USD',
+      subtotal_cents: 2500,
+      discount_cents: 0,
+      tax_cents: 200,
+      fee_cents: 125,
+      total_cents: 2825,
+      refunded_cents: 0,
+      buyer_email: 'buyer@example.com',
+      buyer_first_name: null,
+      buyer_last_name: null,
+      buyer_phone: null,
+      payment_intent_id: null,
+      payment_provider: 'stripe',
+      paid_at: '2026-06-01T12:00:00.000Z',
+      refunded_at: null,
+      cancelled_at: null,
+      created_at: '2026-06-01T12:00:00.000Z',
+      updated_at: '2026-06-01T12:00:00.000Z',
+    });
+
+    expect(serialized).toMatchObject({
+      id: 'ord_1',
+      salesChannel: 'online',
+      operatorId: undefined,
+      tenderType: undefined,
+    });
+  });
+
+  it('serializes box-office operator and tender attribution', () => {
+    const serialized = serializeOrder({
+      id: 'ord_pos',
+      tenant_id: 'tnt_1',
+      organization_id: 'org_1',
+      brand_id: 'brd_1',
+      event_id: 'evt_1',
+      checkout_session_id: 'chk_pos',
+      order_number: 'TK-POS-1',
+      status: 'paid',
+      currency: 'USD',
+      subtotal_cents: 0,
+      discount_cents: 0,
+      tax_cents: 0,
+      fee_cents: 0,
+      total_cents: 0,
+      refunded_cents: 0,
+      buyer_email: 'guest@example.com',
+      buyer_first_name: null,
+      buyer_last_name: null,
+      buyer_phone: null,
+      payment_intent_id: null,
+      payment_provider: 'manual',
+      sales_channel: 'box_office',
+      operator_id: 'usr_operator',
+      tender_type: 'cash',
+      paid_at: '2026-06-01T12:00:00.000Z',
+      refunded_at: null,
+      cancelled_at: null,
+      created_at: '2026-06-01T12:00:00.000Z',
+      updated_at: '2026-06-01T12:00:00.000Z',
+    });
+
+    expect(serialized).toMatchObject({
+      id: 'ord_pos',
+      paymentProvider: 'manual',
+      salesChannel: 'box_office',
+      operatorId: 'usr_operator',
+      tenderType: 'cash',
     });
   });
 });

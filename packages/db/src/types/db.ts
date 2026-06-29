@@ -1,4 +1,5 @@
 import type { ColumnType, Generated } from 'kysely';
+import type { BoxOfficeTenderType, SalesChannel } from '@tixkit/domain';
 
 export type Timestamp = ColumnType<Date, Date | string, Date | string>;
 
@@ -321,6 +322,9 @@ export interface OrderTable {
   buyer_phone: string | null;
   payment_intent_id: string | null;
   payment_provider: string | null;
+  sales_channel: Generated<SalesChannel>;
+  operator_id: string | null;
+  tender_type: BoxOfficeTenderType | null;
   paid_at: Timestamp | null;
   refunded_at: Timestamp | null;
   cancelled_at: Timestamp | null;

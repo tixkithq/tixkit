@@ -334,6 +334,9 @@ export type AdminOrderListItem = {
   currency: string;
   attendeeCount: number;
   paymentProvider?: 'stripe' | 'free' | 'manual';
+  salesChannel?: 'online' | 'box_office';
+  operatorId?: string;
+  tenderType?: 'comp' | 'cash' | 'manual_card';
   createdAt: string;
   /** Timestamp the order transitioned to paid (if it has). */
   paidAt?: string;
