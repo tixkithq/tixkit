@@ -29,3 +29,7 @@ export { ShortLinksMigration } from './0028_short_links.js';
 export { EventCodeFormatMigration } from './0029_event_code_format.js';
 export { ContentDocumentsMigration } from './0030_content_documents.js';
 export { OrderSalesChannelMigration } from './0031_order_sales_channel.js';
+export { ScanLogsTicketIndexMigration } from './0032_scan_logs_ticket_index.js';
+export { EmailJobsTemplateVersionForeignKeyMigration } from './0033_email_jobs_template_version_fk.js';
+export { OfflineCheckInBulkSyncMigration } from './0034_offline_check_in_bulk_sync.js';
+export { OfflineCheckInBulkSyncHardeningMigration } from './0035_offline_check_in_bulk_sync_hardening.js';

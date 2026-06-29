@@ -1,7 +1,21 @@
+import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 
 import { TixkitMigrationProvider } from '../../migrate.js';
 import { OrderSalesChannelMigration } from '../../migrations/0031_order_sales_channel.js';
+import { ScanLogsTicketIndexMigration } from '../../migrations/0032_scan_logs_ticket_index.js';
+import { EmailJobsTemplateVersionForeignKeyMigration } from '../../migrations/0033_email_jobs_template_version_fk.js';
+import { OfflineCheckInBulkSyncMigration } from '../../migrations/0034_offline_check_in_bulk_sync.js';
+import { OfflineCheckInBulkSyncHardeningMigration } from '../../migrations/0035_offline_check_in_bulk_sync_hardening.js';
+
+const offlineCheckInBulkSyncMigrationPath = new URL(
+  '../../migrations/0034_offline_check_in_bulk_sync.ts',
+  import.meta.url,
+);
+const offlineCheckInBulkSyncHardeningMigrationPath = new URL(
+  '../../migrations/0035_offline_check_in_bulk_sync_hardening.ts',
+  import.meta.url,
+);
 
 type AddedColumn = {
   tableName: string;
@@ -147,8 +161,37 @@ describe('OrderSalesChannelMigration', () => {
   it('is registered with the production migrator provider', async () => {
     const migrations = await new TixkitMigrationProvider().getMigrations();
 
-    expect(Object.keys(migrations).at(-1)).toBe('0031_order_sales_channel');
+    expect(Object.keys(migrations).at(-1)).toBe('0035_offline_check_in_bulk_sync_hardening');
     expect(migrations['0031_order_sales_channel']).toBe(OrderSalesChannelMigration);
+    expect(migrations['0032_scan_logs_ticket_index']).toBe(ScanLogsTicketIndexMigration);
+    expect(migrations['0033_email_jobs_template_version_fk']).toBe(
+      EmailJobsTemplateVersionForeignKeyMigration,
+    );
+    expect(migrations['0034_offline_check_in_bulk_sync']).toBe(OfflineCheckInBulkSyncMigration);
+    expect(migrations['0035_offline_check_in_bulk_sync_hardening']).toBe(
+      OfflineCheckInBulkSyncHardeningMigration,
+    );
+  });
+
+  it('keeps offline bulk sync migration types portable across supported SQL drivers', () => {
+    const source = readFileSync(offlineCheckInBulkSyncMigrationPath, 'utf8');
+
+    expect(source).toContain("process.env.DB_DRIVER === 'mysql'");
+    expect(source).toContain("process.env.DB_DRIVER === 'mssql'");
+    expect(source).toContain("if (isMssql()) return 'datetime2'");
+    expect(source).toContain("if (isMssql()) return 'nvarchar(max)'");
+    expect(source).toContain('return isMysql() || isMssql()');
+    expect(source).not.toContain("return isMysql() ? 'timestamp' : 'timestamptz'");
+    expect(source).not.toContain("return isMysql() ? 'json' : 'jsonb'");
+  });
+
+  it('keeps processed async chunk payloads nullable during hardening rollbacks', () => {
+    const source = readFileSync(offlineCheckInBulkSyncHardeningMigrationPath, 'utf8');
+
+    expect(source).toContain('modify column payload json null');
+    expect(source).toContain('alter column payload drop not null');
+    expect(source).not.toContain('modify column payload json not null');
+    expect(source).not.toContain('alter column payload set not null');
   });
 
   it('adds order attribution columns and a tenant sales-channel index', async () => {

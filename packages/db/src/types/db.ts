@@ -569,6 +569,66 @@ export interface ScanLogTable {
   created_at: Timestamp;
 }
 
+export interface OfflineCheckInSyncJobTable {
+  id: string;
+  tenant_id: string;
+  event_id: string;
+  check_in_list_id: string;
+  device_id: string;
+  requested_by_principal_id: string;
+  total_chunks: number;
+  total_scans: number | null;
+  chunks_received: number;
+  chunks_processed: number;
+  accepted_count: number;
+  duplicate_count: number;
+  invalid_count: number;
+  sample_errors: string;
+  status: string;
+  failure_message: string | null;
+  attempt_count: number;
+  lease_owner: string | null;
+  leased_until: Timestamp | null;
+  next_attempt_at: Timestamp | null;
+  last_attempted_at: Timestamp | null;
+  last_heartbeat_at: Timestamp | null;
+  processing_started_at: Timestamp | null;
+  processing_completed_at: Timestamp | null;
+  processing_duration_ms: number;
+  transaction_duration_ms: number;
+  lock_wait_ms: number;
+  scan_log_insert_duration_ms: number;
+  ticket_update_duration_ms: number;
+  attendee_update_duration_ms: number;
+  rows_processed: number;
+  clock_warning_count: number;
+  created_at: Timestamp;
+  updated_at: Timestamp;
+  completed_at: Timestamp | null;
+}
+
+export interface OfflineCheckInSyncChunkTable {
+  id: string;
+  tenant_id: string;
+  job_id: string;
+  sequence: number;
+  scan_count: number;
+  payload_hash: string;
+  payload: string | null;
+  accepted_count: number;
+  duplicate_count: number;
+  invalid_count: number;
+  sample_errors: string;
+  clock_warning_count: number;
+  status: string;
+  attempt_count: number;
+  failure_message: string | null;
+  locked_at: Timestamp | null;
+  processed_at: Timestamp | null;
+  created_at: Timestamp;
+  updated_at: Timestamp;
+}
+
 export interface PaymentIntentTable {
   id: string;
   tenant_id: string;
@@ -1299,6 +1359,8 @@ export interface DB {
   ticket_secrets: TicketSecretTable;
   check_in_lists: CheckInListTable;
   scan_logs: ScanLogTable;
+  offline_check_in_sync_jobs: OfflineCheckInSyncJobTable;
+  offline_check_in_sync_chunks: OfflineCheckInSyncChunkTable;
   payment_intents: PaymentIntentTable;
   refunds: RefundTable;
   payment_compensations: PaymentCompensationTable;

@@ -32,6 +32,10 @@ import { ShortLinksMigration } from './migrations/0028_short_links.js';
 import { EventCodeFormatMigration } from './migrations/0029_event_code_format.js';
 import { ContentDocumentsMigration } from './migrations/0030_content_documents.js';
 import { OrderSalesChannelMigration } from './migrations/0031_order_sales_channel.js';
+import { ScanLogsTicketIndexMigration } from './migrations/0032_scan_logs_ticket_index.js';
+import { EmailJobsTemplateVersionForeignKeyMigration } from './migrations/0033_email_jobs_template_version_fk.js';
+import { OfflineCheckInBulkSyncMigration } from './migrations/0034_offline_check_in_bulk_sync.js';
+import { OfflineCheckInBulkSyncHardeningMigration } from './migrations/0035_offline_check_in_bulk_sync_hardening.js';
 
 const INITIAL_MIGRATION_NAME = '0001_initial';
 const MIGRATION_TABLE = 'kysely_migration';
@@ -128,6 +132,8 @@ const ALL_SCHEMA_TABLES = [
   'content_assets',
   'content_document_versions',
   'content_documents',
+  'offline_check_in_sync_chunks',
+  'offline_check_in_sync_jobs',
 ] as const;
 
 function quoteMssqlIdentifier(identifier: string): string {
@@ -184,6 +190,10 @@ export class TixkitMigrationProvider implements MigrationProvider {
       '0029_event_code_format': EventCodeFormatMigration,
       '0030_content_documents': ContentDocumentsMigration,
       '0031_order_sales_channel': OrderSalesChannelMigration,
+      '0032_scan_logs_ticket_index': ScanLogsTicketIndexMigration,
+      '0033_email_jobs_template_version_fk': EmailJobsTemplateVersionForeignKeyMigration,
+      '0034_offline_check_in_bulk_sync': OfflineCheckInBulkSyncMigration,
+      '0035_offline_check_in_bulk_sync_hardening': OfflineCheckInBulkSyncHardeningMigration,
     };
   }
 }
