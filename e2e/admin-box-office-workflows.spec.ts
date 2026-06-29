@@ -166,4 +166,47 @@ test.describe('admin box-office POS workflows', () => {
     expect(metrics.tender?.height).toBeGreaterThan(28);
     expect(metrics.amount?.height).toBeGreaterThan(28);
   });
+
+  test('operator issues a comp order and prints the receipt artifact', async ({
+    page,
+    request,
+  }, testInfo) => {
+    await requireReachable(page, adminBaseUrl, 'admin dashboard');
+    await requireReachable(page, `${apiBaseUrl}/health`, 'api');
+
+    const suffix = `box-office-print-${testInfo.project.name}-${testInfo.workerIndex}-${Date.now()}`;
+    const { event } = await seedPaidCheckoutEvent(request, suffix);
+
+    await page.setViewportSize(desktopViewport);
+    await page.goto(`${adminBaseUrl}/events/${event.id}/tickets`);
+    await expect(page.getByRole('heading', { name: 'Sell at door' })).toBeVisible();
+    await fillDoorOrderForm(page, 'comp');
+
+    const orderResponsePromise = page.waitForResponse(
+      (response) =>
+        response.url() === `${apiBaseUrl}/v1/events/${event.id}/box-office/orders` &&
+        response.request().method() === 'POST',
+    );
+    await page.getByRole('button', { name: 'Issue door order' }).click();
+    const orderResponse = await orderResponsePromise;
+    const orderBody = await orderResponse.json();
+    expect(orderResponse.status(), JSON.stringify(orderBody, null, 2)).toBe(201);
+    expect(orderBody.order.salesChannel).toBe('box_office');
+    expect(orderBody.order.tenderType).toBe('comp');
+    expect(orderBody.order.totalCents).toBe(0);
+
+    const issuedOrderAlert = page.getByRole('alert').filter({ hasText: 'Order issued' });
+    await expect(issuedOrderAlert).toBeVisible();
+    await expect(issuedOrderAlert.getByText(`Order: ${orderBody.order.id}`)).toBeVisible();
+    await expectNoAxeViolations(page, testInfo);
+
+    await page.evaluate(() => {
+      window.print = () => {
+        document.documentElement.setAttribute('data-print-receipt-invoked', 'true');
+      };
+    });
+    await issuedOrderAlert.getByRole('button', { name: 'Print receipt' }).click();
+    await expect(page.locator('html[data-print-receipt-invoked="true"]')).toHaveCount(1);
+    await attachScreenshot(page, testInfo, 'admin-box-office-print-receipt');
+  });
 });

@@ -489,7 +489,11 @@ export function BoxOfficeOrderPanel({
           ) : null}
 
           <div className="flex justify-end">
-            <Button type="submit" disabled={submitting}>
+            <Button
+              type="submit"
+              disabled={submitting}
+              className="disabled:bg-muted disabled:text-foreground disabled:opacity-100"
+            >
               <ReceiptText className="size-4" />
               {submitting ? 'Issuing...' : 'Issue door order'}
             </Button>
