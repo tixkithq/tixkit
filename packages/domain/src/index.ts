@@ -12,3 +12,4 @@ export * from './forms/index.js';
 export * from './messaging/index.js';
 export * from './reporting/index.js';
 export * from './developer/index.js';
+export * from './i18n/index.js';
