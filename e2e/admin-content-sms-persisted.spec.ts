@@ -98,7 +98,9 @@ async function loadSmsContentState(eventId: string, page: Page) {
     }),
     200,
   );
-  const document = documents.items.find((item) => item.channel === 'sms' && item.eventId === eventId);
+  const document = documents.items.find(
+    (item) => item.channel === 'sms' && item.eventId === eventId,
+  );
   expect(document).toBeTruthy();
   const versions = await jsonResponse<ContentVersionList>(
     await page.request.get(`${apiBaseUrl}/v1/content-documents/${document!.id}/versions`),
@@ -138,7 +140,9 @@ test.describe('persisted admin SMS content editor', () => {
     await page.getByRole('button', { name: 'Preview', exact: true }).click();
     await expect(page.getByText('Preview rendered from the saved content version')).toBeVisible();
     await page.getByRole('button', { name: 'Open preview' }).click();
-    await expect(page.getByTestId('preview-drawer')).toContainText(`Hi Ada Lovelace, ${event.title}`);
+    await expect(page.getByTestId('preview-drawer')).toContainText(
+      `Hi Ada Lovelace, ${event.title}`,
+    );
     await expect(page.getByTestId('preview-drawer')).toContainText('Reply STOP to opt out');
     await expect(page.getByTestId('preview-drawer')).toContainText('Segments:');
 
@@ -153,10 +157,14 @@ test.describe('persisted admin SMS content editor', () => {
     expect(persisted.document.status).toBe('published');
     expect(persisted.document.publishedVersionId).toBeTruthy();
     expect(
-      persisted.versions.some((version) => version.status === 'published' && version.contentJson.editor?.body === smsBody),
+      persisted.versions.some(
+        (version) => version.status === 'published' && version.contentJson.editor?.body === smsBody,
+      ),
     ).toBe(true);
     expect(
-      persisted.versions.some((version) => version.status === 'draft' && version.contentJson.editor?.body === smsBody),
+      persisted.versions.some(
+        (version) => version.status === 'draft' && version.contentJson.editor?.body === smsBody,
+      ),
     ).toBe(true);
 
     const publishedVersionId = persisted.document.publishedVersionId!;
@@ -165,13 +173,16 @@ test.describe('persisted admin SMS content editor', () => {
       recipient: { name: 'Ada Lovelace' },
     };
     const artifactPreview = await jsonResponse<ContentPreviewResponse>(
-      await page.request.post(`${apiBaseUrl}/v1/content-documents/${persisted.document.id}/preview`, {
-        data: {
-          versionId: publishedVersionId,
-          context: renderContext,
-          optOutToken: 'Reply STOP to opt out',
+      await page.request.post(
+        `${apiBaseUrl}/v1/content-documents/${persisted.document.id}/preview`,
+        {
+          data: {
+            versionId: publishedVersionId,
+            context: renderContext,
+            optOutToken: 'Reply STOP to opt out',
+          },
         },
-      }),
+      ),
       200,
     );
     expect(artifactPreview.renderArtifact).toMatchObject({
@@ -182,14 +193,17 @@ test.describe('persisted admin SMS content editor', () => {
       checksum: expect.stringMatching(/^[a-f0-9]{64}$/),
     });
     const artifactTestSend = await jsonResponse<ContentTestSendResponse>(
-      await page.request.post(`${apiBaseUrl}/v1/content-documents/${persisted.document.id}/test-sends`, {
-        data: {
-          versionId: publishedVersionId,
-          recipient: '+15550000003',
-          context: renderContext,
-          optOutToken: 'Reply STOP to opt out',
+      await page.request.post(
+        `${apiBaseUrl}/v1/content-documents/${persisted.document.id}/test-sends`,
+        {
+          data: {
+            versionId: publishedVersionId,
+            recipient: '+15550000003',
+            context: renderContext,
+            optOutToken: 'Reply STOP to opt out',
+          },
         },
-      }),
+      ),
       202,
     );
     expect(artifactTestSend.renderArtifact).toMatchObject({
@@ -238,18 +252,21 @@ test.describe('persisted admin SMS content editor', () => {
       body: 'textarea',
       recipient: 'input[type="tel"]',
     } as const;
-    const boxes: Record<string, unknown> = {};
-    for (const [name, selector] of Object.entries(selectors)) {
-      const node = await client.send('DOM.querySelector', {
-        nodeId: root.nodeId,
-        selector,
-      });
-      expect(node.nodeId).toBeGreaterThan(0);
-      const box = await client.send('DOM.getBoxModel', { nodeId: node.nodeId });
-      expect(widthOf(box.model.content)).toBeGreaterThan(name === 'shell' ? 900 : 250);
-      expect(heightOf(box.model.content)).toBeGreaterThanOrEqual(name === 'body' ? 100 : 20);
-      boxes[name] = box;
-    }
+    const boxes = Object.fromEntries(
+      await Promise.all(
+        Object.entries(selectors).map(async ([name, selector]) => {
+          const node = await client.send('DOM.querySelector', {
+            nodeId: root.nodeId,
+            selector,
+          });
+          expect(node.nodeId).toBeGreaterThan(0);
+          const box = await client.send('DOM.getBoxModel', { nodeId: node.nodeId });
+          expect(widthOf(box.model.content)).toBeGreaterThan(name === 'shell' ? 900 : 250);
+          expect(heightOf(box.model.content)).toBeGreaterThanOrEqual(name === 'body' ? 100 : 20);
+          return [name, box] as const;
+        }),
+      ),
+    );
 
     await testInfo.attach('cdp-layout-boxes-sms-persisted', {
       body: JSON.stringify(boxes, null, 2),

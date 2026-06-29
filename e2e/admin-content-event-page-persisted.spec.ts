@@ -198,7 +198,8 @@ test.describe('persisted admin event-page content editor', () => {
           version.contentJson.schemaVersion === 1 &&
           version.contentJson.editor?.provider === '@tiptap/core' &&
           version.contentJson.blocks?.some(
-            (block) => block.type === 'hero' && block.headline === headline && block.body === summary,
+            (block) =>
+              block.type === 'hero' && block.headline === headline && block.body === summary,
           ) &&
           version.contentJson.blocks?.some(
             (block) => block.type === 'tickets' && block.ctaLabel === ctaLabel,
@@ -246,18 +247,21 @@ test.describe('persisted admin event-page content editor', () => {
         publishedArticle: '[data-testid="published-event-page"]',
         contentCta: '[data-testid="published-event-page"] .tk-ep-button',
       } as const;
-      const hostedBoxes: Record<string, unknown> = {};
-      for (const [name, selector] of Object.entries(hostedSelectors)) {
-        const node = await client.send('DOM.querySelector', {
-          nodeId: root.nodeId,
-          selector,
-        });
-        expect(node.nodeId).toBeGreaterThan(0);
-        const box = await client.send('DOM.getBoxModel', { nodeId: node.nodeId });
-        expect(widthOf(box.model.content)).toBeGreaterThan(name === 'contentCta' ? 60 : 300);
-        expect(heightOf(box.model.content)).toBeGreaterThan(name === 'contentCta' ? 12 : 40);
-        hostedBoxes[name] = box;
-      }
+      const hostedBoxes = Object.fromEntries(
+        await Promise.all(
+          Object.entries(hostedSelectors).map(async ([name, selector]) => {
+            const node = await client.send('DOM.querySelector', {
+              nodeId: root.nodeId,
+              selector,
+            });
+            expect(node.nodeId).toBeGreaterThan(0);
+            const box = await client.send('DOM.getBoxModel', { nodeId: node.nodeId });
+            expect(widthOf(box.model.content)).toBeGreaterThan(name === 'contentCta' ? 60 : 300);
+            expect(heightOf(box.model.content)).toBeGreaterThan(name === 'contentCta' ? 12 : 40);
+            return [name, box] as const;
+          }),
+        ),
+      );
       await testInfo.attach('cdp-layout-boxes-checkout-event-page-published', {
         body: JSON.stringify(hostedBoxes, null, 2),
         contentType: 'application/json',
@@ -316,18 +320,21 @@ test.describe('persisted admin event-page content editor', () => {
       headline: 'input',
       summary: 'textarea',
     } as const;
-    const boxes: Record<string, unknown> = {};
-    for (const [name, selector] of Object.entries(selectors)) {
-      const node = await client.send('DOM.querySelector', {
-        nodeId: root.nodeId,
-        selector,
-      });
-      expect(node.nodeId).toBeGreaterThan(0);
-      const box = await client.send('DOM.getBoxModel', { nodeId: node.nodeId });
-      expect(widthOf(box.model.content)).toBeGreaterThan(name === 'shell' ? 900 : 250);
-      expect(heightOf(box.model.content)).toBeGreaterThanOrEqual(name === 'summary' ? 80 : 20);
-      boxes[name] = box;
-    }
+    const boxes = Object.fromEntries(
+      await Promise.all(
+        Object.entries(selectors).map(async ([name, selector]) => {
+          const node = await client.send('DOM.querySelector', {
+            nodeId: root.nodeId,
+            selector,
+          });
+          expect(node.nodeId).toBeGreaterThan(0);
+          const box = await client.send('DOM.getBoxModel', { nodeId: node.nodeId });
+          expect(widthOf(box.model.content)).toBeGreaterThan(name === 'shell' ? 900 : 250);
+          expect(heightOf(box.model.content)).toBeGreaterThanOrEqual(name === 'summary' ? 80 : 20);
+          return [name, box] as const;
+        }),
+      ),
+    );
 
     await testInfo.attach('cdp-layout-boxes-event-page-persisted', {
       body: JSON.stringify(boxes, null, 2),
