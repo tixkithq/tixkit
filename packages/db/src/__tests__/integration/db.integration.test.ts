@@ -4,6 +4,7 @@ import { createDb } from '../../client.js';
 import { runMigrations, truncateAllData } from '../../migrate.js';
 import {
   BrandRepository,
+  ContentRepository,
   EventRepository,
   InventoryPoolRepository,
   OrganizationRepository,
@@ -143,6 +144,68 @@ describe.each(driverCases)('database integration: $driver', ({ driver, url }) =>
       tenant_id: tenant.id,
       organization_id: organization.id,
     });
+  });
+
+  it('duplicates content documents as unpublished draft copies with fresh version identity', async () => {
+    const { tenant, organization, brand, event } = await createCatalog(db);
+    const repo = new ContentRepository(db);
+    const document = await repo.createDocument({
+      tenantId: tenant.id,
+      organizationId: organization.id,
+      brandId: brand.id,
+      eventId: event.id,
+      channel: 'email',
+      key: 'order-confirmed',
+      name: 'Order confirmed',
+      locale: 'en',
+    });
+    const version = await repo.createVersion({
+      documentId: document.id,
+      subject: 'Hi {{recipient.name}}',
+      previewText: 'Tickets ready',
+      contentJson: { blocks: [{ type: 'text', text: 'Hi {{recipient.name}}' }] },
+      renderedHtml: '<p>Hi {{recipient.name}}</p>',
+      renderedText: 'Hi {{recipient.name}}',
+      variables: [],
+      validation: { valid: true, severity: 'warning', issues: [] },
+      createdBy: 'usr_integration',
+    });
+    await repo.publishVersion({ documentId: document.id, versionId: version.id });
+
+    const duplicate = await repo.duplicateDocument({
+      documentId: document.id,
+      tenantId: tenant.id,
+      key: 'order-confirmed-copy',
+      name: 'Order confirmed copy',
+      createdBy: 'usr_copy',
+    });
+
+    expect(duplicate.document).toMatchObject({
+      tenantId: tenant.id,
+      organizationId: organization.id,
+      brandId: brand.id,
+      eventId: event.id,
+      channel: 'email',
+      key: 'order-confirmed-copy',
+      name: 'Order confirmed copy',
+      status: 'draft',
+    });
+    expect(duplicate.document.id).not.toBe(document.id);
+    expect(duplicate.document.publishedVersionId).toBeUndefined();
+    expect(duplicate.versions).toHaveLength(1);
+    expect(duplicate.versions[0]).toMatchObject({
+      documentId: duplicate.document.id,
+      versionNumber: 1,
+      status: 'draft',
+      subject: 'Hi {{recipient.name}}',
+      renderedText: 'Hi {{recipient.name}}',
+      createdBy: 'usr_copy',
+    });
+    expect(duplicate.versions[0]?.id).not.toBe(version.id);
+    expect(duplicate.versions[0]?.publishedAt).toBeUndefined();
+    await expect(repo.listVersions(duplicate.document.id)).resolves.toMatchObject([
+      { id: duplicate.versions[0]?.id, status: 'draft' },
+    ]);
   });
 
   it('enforces tenant-scoped unique slugs', async () => {

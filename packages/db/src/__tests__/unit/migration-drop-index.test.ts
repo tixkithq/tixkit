@@ -63,7 +63,7 @@ type WebhookDeliverySeedRow = {
   id: string;
   endpoint_id?: string | null;
   event_id: string;
-  requested_endpoint_id: string;
+  requested_endpoint_id?: string;
   delivery_key?: string;
   attempt: number;
   status: string;
@@ -406,6 +406,7 @@ class FakeMarketingIntegrationsDb {
 class FakeWebhookDeliveriesDb {
   readonly createdIndexes: CreatedIndex[] = [];
   readonly rawSqlStatements: string[] = [];
+  requestedEndpointColumnExists: boolean;
   rows: WebhookDeliverySeedRow[];
   readonly schema = {
     createIndex: (indexName: string) => new FakeCreateIndexBuilder(this, indexName),
@@ -433,8 +434,12 @@ class FakeWebhookDeliveriesDb {
     }),
   };
 
-  constructor(rows: WebhookDeliverySeedRow[]) {
+  constructor(
+    rows: WebhookDeliverySeedRow[],
+    options: { requestedEndpointColumnExists?: boolean } = {},
+  ) {
     this.rows = [...rows];
+    this.requestedEndpointColumnExists = options.requestedEndpointColumnExists ?? true;
   }
 
   selectFrom(tableName: string) {
@@ -474,12 +479,35 @@ class FakeWebhookDeliveriesDb {
     return query;
   }
 
-  executeRawSql(statement: string): void {
+  executeRawSql(statement: string): { rows: Array<{ column_name: string }> } {
     this.rawSqlStatements.push(statement);
+
+    if (statement.includes('information_schema.columns')) {
+      return {
+        rows: this.requestedEndpointColumnExists
+          ? [{ column_name: 'requested_endpoint_id' }]
+          : [],
+      };
+    }
+
+    if (statement.includes('add column requested_endpoint_id')) {
+      this.requestedEndpointColumnExists = true;
+      return { rows: [] };
+    }
+
+    if (statement.includes('update webhook_deliveries set requested_endpoint_id = endpoint_id')) {
+      this.rows = this.rows.map((row) => ({
+        ...row,
+        requested_endpoint_id: row.endpoint_id ?? row.requested_endpoint_id,
+      }));
+      return { rows: [] };
+    }
 
     if (statement.includes('ranked_webhook_deliveries')) {
       this.dedupeWebhookDeliveries();
     }
+
+    return { rows: [] };
   }
 
   createIndex(createdIndex: CreatedIndex): void {
@@ -580,8 +608,8 @@ function fakeSql(strings: TemplateStringsArray, ...values: unknown[]) {
   }, '');
 
   return {
-    async execute(db: { executeRawSql(statement: string): void }): Promise<void> {
-      db.executeRawSql(statement);
+    async execute(db: { executeRawSql(statement: string): unknown }): Promise<unknown> {
+      return db.executeRawSql(statement);
     },
   };
 }
@@ -895,12 +923,67 @@ describe('events brand slug migration safety', () => {
 
 describe('webhook delivery endpoint history index migration safety', () => {
   it('creates a composite requested-endpoint pagination index', async () => {
+    delete process.env.DB_DRIVER;
+    vi.doMock('kysely', async (importOriginal) => {
+      const actual = await importOriginal<typeof import('kysely')>();
+
+      return { ...actual, sql: fakeSql };
+    });
     const { WebhookDeliveryEndpointHistoryIndexMigration } =
       await import('../../migrations/0024_webhook_delivery_endpoint_history_index.js');
-    const db = new FakeMarketingIntegrationsDb([]);
+    const db = new FakeWebhookDeliveriesDb([]);
 
     await WebhookDeliveryEndpointHistoryIndexMigration.up(db as never);
 
+    expect(db.rawSqlStatements).toHaveLength(1);
+    expect(db.rawSqlStatements[0]).toContain('information_schema.columns');
+    expect(db.createdIndexes).toEqual([
+      {
+        indexName: 'idx_webhook_deliveries_requested_endpoint_history',
+        tableName: 'webhook_deliveries',
+        columns: ['requested_endpoint_id', 'created_at', 'id'],
+        unique: false,
+      },
+    ]);
+  });
+
+  it('repairs older schemas missing requested_endpoint_id before creating the history index', async () => {
+    process.env.DB_DRIVER = 'mysql';
+    vi.doMock('kysely', async (importOriginal) => {
+      const actual = await importOriginal<typeof import('kysely')>();
+
+      return { ...actual, sql: fakeSql };
+    });
+    const { WebhookDeliveryEndpointHistoryIndexMigration } =
+      await import('../../migrations/0024_webhook_delivery_endpoint_history_index.js');
+    const db = new FakeWebhookDeliveriesDb(
+      [
+        {
+          id: 'whd_1',
+          endpoint_id: 'wh_1',
+          event_id: 'whe_1',
+          attempt: 1,
+          status: 'pending',
+          created_at: '2026-01-01T00:00:00.000Z',
+        },
+      ],
+      { requestedEndpointColumnExists: false },
+    );
+
+    await WebhookDeliveryEndpointHistoryIndexMigration.up(db as never);
+
+    expect(db.requestedEndpointColumnExists).toBe(true);
+    expect(db.rows[0]?.requested_endpoint_id).toBe('wh_1');
+    expect(db.rawSqlStatements).toEqual(
+      expect.arrayContaining([
+        expect.stringContaining('information_schema.columns'),
+        expect.stringContaining('alter table webhook_deliveries add column requested_endpoint_id'),
+        expect.stringContaining('update webhook_deliveries set requested_endpoint_id = endpoint_id'),
+        expect.stringContaining(
+          'alter table webhook_deliveries modify requested_endpoint_id varchar(32) not null',
+        ),
+      ]),
+    );
     expect(db.createdIndexes).toEqual([
       {
         indexName: 'idx_webhook_deliveries_requested_endpoint_history',
@@ -916,6 +999,7 @@ describe('webhook delivery endpoint history index migration safety', () => {
     const upSource = migrationMethodSource(source, 'up');
     const downSource = migrationMethodSource(source, 'down');
 
+    expect(upSource).toContain('ensureRequestedEndpointColumn(db)');
     expect(upSource).toContain("createIndex('idx_webhook_deliveries_requested_endpoint_history')");
     expect(upSource).toContain(".on('webhook_deliveries')");
     expect(upSource).toContain("columns(['requested_endpoint_id', 'created_at', 'id'])");

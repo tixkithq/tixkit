@@ -144,6 +144,7 @@ describe('openApiSpec', () => {
     expect(openApiSpec.paths['/events/{eventId}/messages']).toBeDefined();
     expect(openApiSpec.paths['/events/{eventId}/messages/preview']).toBeDefined();
     expect(openApiSpec.paths['/content-documents']).toBeDefined();
+    expect(openApiSpec.paths['/content-documents/{documentId}/duplicate']).toBeDefined();
     expect(openApiSpec.paths['/content-documents/{documentId}/versions']).toBeDefined();
     expect(openApiSpec.paths['/content-documents/{documentId}/preview']).toBeDefined();
     expect(openApiSpec.paths['/public/events/{eventId}/page']).toBeDefined();
@@ -193,6 +194,11 @@ describe('openApiSpec', () => {
       openApiSpec.paths['/content-documents/{documentId}/versions/{versionId}/publish'].post
         .responses['200'].content['application/json'].schema.required,
     ).toEqual(['document', 'version']);
+    expect(
+      openApiSpec.paths['/content-documents/{documentId}/duplicate'].post.responses['201'].content[
+        'application/json'
+      ].schema.required,
+    ).toEqual(['document', 'versions']);
     expect(
       openApiSpec.paths['/public/events/{eventId}/content-page'].get.responses['200'].content[
         'application/json'

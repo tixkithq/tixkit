@@ -77,6 +77,7 @@ Authenticated routes:
 | `POST` | `/v1/content-documents/:documentId/versions` | Save a draft version and persist validation issues. |
 | `POST` | `/v1/content-documents/:documentId/preview` | Render a preview through the shared renderer. |
 | `POST` | `/v1/content-documents/:documentId/versions/:versionId/publish` | Publish a valid version. Invalid versions return publish blockers. |
+| `POST` | `/v1/content-documents/:documentId/duplicate` | Duplicate a scoped document as an unpublished draft copy with fresh version IDs. |
 | `POST` | `/v1/content-documents/:documentId/archive` | Archive a document. |
 | `POST` | `/v1/content-documents/:documentId/test-sends` | Capture a renderer-backed test send without faking provider delivery. |
 

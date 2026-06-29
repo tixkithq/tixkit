@@ -5434,6 +5434,56 @@ export const openApiSpec = {
         },
       },
     },
+    '/content-documents/{documentId}/duplicate': {
+      post: {
+        summary: 'Duplicate a content document as an unpublished draft copy',
+        security: [{ BearerAuth: [] }],
+        parameters: [{ name: 'documentId', in: 'path', required: true, schema: { type: 'string' } }],
+        requestBody: {
+          required: false,
+          content: {
+            'application/json': {
+              schema: {
+                type: 'object',
+                additionalProperties: false,
+                properties: {
+                  key: { type: 'string', pattern: '^[a-z0-9][a-z0-9._-]*$', maxLength: 128 },
+                  name: { type: 'string', minLength: 1, maxLength: 160 },
+                },
+              },
+            },
+          },
+        },
+        responses: {
+          '201': {
+            description: 'Duplicated draft document and copied draft versions',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  properties: {
+                    document: { $ref: '#/components/schemas/ContentDocument' },
+                    versions: {
+                      type: 'array',
+                      items: { $ref: '#/components/schemas/ContentDocumentVersion' },
+                    },
+                  },
+                  required: ['document', 'versions'],
+                },
+              },
+            },
+          },
+          '400': {
+            description: 'Validation error, including unavailable future channels',
+            content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } },
+          },
+          '404': {
+            description: 'Not found or outside tenant scope',
+            content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } },
+          },
+        },
+      },
+    },
     '/content-documents/{documentId}/versions': {
       get: {
         summary: 'List content document versions',
