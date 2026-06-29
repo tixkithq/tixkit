@@ -25,6 +25,27 @@ const mockValuesEqual = (rowValue: unknown, filterValue: unknown): boolean => {
   return rowValue === filterValue;
 };
 
+const likePatternMatches = (rowValue: unknown, pattern: unknown): boolean => {
+  if (typeof rowValue !== 'string' || typeof pattern !== 'string') return false;
+  let regex = '^';
+  for (let index = 0; index < pattern.length; index += 1) {
+    const character = pattern[index];
+    if (character === '\\') {
+      index += 1;
+      const escaped = pattern[index] ?? '\\';
+      regex += escaped.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    } else if (character === '%') {
+      regex += '.*';
+    } else if (character === '_') {
+      regex += '.';
+    } else {
+      regex += character.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    }
+  }
+  regex += '$';
+  return new RegExp(regex).test(rowValue);
+};
+
 function createMockDb(tables: Record<string, unknown> = {}): unknown {
   const tableState = tables as Record<string, unknown>;
   const getRows = (table: string): Record<string, unknown>[] => {
@@ -54,6 +75,7 @@ function createMockDb(tables: Record<string, unknown> = {}): unknown {
             if (op === '=') return mockValuesEqual(rowValue, value);
             if (op === 'is') return value === null ? rowValue === null : rowValue === value;
             if (op === 'is not') return value === null ? rowValue !== null : rowValue !== value;
+            if (op === 'like') return likePatternMatches(rowValue, value);
             return true;
           }),
         );
@@ -1919,7 +1941,7 @@ describe('messaging endpoint', () => {
       url: '/events/evt_1/messages',
       headers: { 'Idempotency-Key': 'msg_test_1' },
       payload: {
-        templateKey: 'attendee-message',
+        smsTemplateKey: 'attendee-message',
         audience: 'all',
         channel: 'sms',
         variables: { body: 'Update' },
@@ -1931,11 +1953,139 @@ describe('messaging endpoint', () => {
       queuedSmsJobs: 1,
       queuedEmailJobs: 0,
     });
-    expect((tables.sms_jobs as Array<{ body: string }>)[0].body).toContain('Hi Ada Lovelace, Event starts');
+    expect((tables.sms_jobs as Array<{ body: string }>)[0].body).toContain(
+      'Hi Ada Lovelace, Event starts',
+    );
     await app.close();
   });
 
-  it('POST /events/:eventId/messages persists consent exclusions without starting delivery workflows', async () => {
+  it('POST /events/:eventId/messages excludes same-event attendees from another tenant', async () => {
+    const now = new Date();
+    const smsContent = publishedSmsContentRows(now);
+    const validAttendee = {
+      id: 'att_1',
+      tenant_id: 'tnt_1',
+      order_id: 'ord_1',
+      event_id: 'evt_1',
+      ticket_type_id: 'tt_1',
+      ticket_id: 'tkt_1',
+      first_name: 'Ada',
+      last_name: 'Lovelace',
+      email: 'ada@test.com',
+      phone: '+15550000002',
+      status: 'confirmed',
+      custom_answers: null,
+      checked_in_at: null,
+      check_in_device_id: null,
+      created_at: now,
+      updated_at: now,
+    };
+    const foreignTenantAttendee = {
+      ...validAttendee,
+      id: 'att_foreign',
+      tenant_id: 'tnt_other',
+      order_id: 'ord_foreign',
+      ticket_id: 'tkt_foreign',
+      first_name: 'Foreign',
+      last_name: 'Guest',
+      email: 'foreign@test.com',
+      phone: '+15550000999',
+    };
+    const tables = {
+      events: [
+        {
+          id: 'evt_1',
+          tenant_id: 'tnt_1',
+          organization_id: 'org_1',
+          brand_id: 'brd_1',
+          status: 'published',
+          slug: 'evt',
+          title: 'Event',
+          timezone: 'UTC',
+          starts_at: now,
+          visibility: 'public',
+          seo: '{}',
+        },
+      ],
+      attendees: [validAttendee, foreignTenantAttendee],
+      message_consents: [validAttendee, foreignTenantAttendee].map((attendee) => ({
+        id: `msc_${attendee.id}`,
+        tenant_id: 'tnt_1',
+        attendee_id: attendee.id,
+        email: attendee.email,
+        phone: attendee.phone,
+        email_opt_in: true,
+        sms_opt_in: true,
+        consent_text: 'Updates',
+        consent_version: 'v1',
+        consented_at: now,
+        revoked_at: null,
+        created_at: now,
+      })),
+      sms_provider_routes: [
+        {
+          id: 'spr_1',
+          tenant_id: 'tnt_1',
+          brand_id: 'brd_1',
+          provider_type: 'capture',
+          credentials_ref: 'capture',
+          sender_identity_id: 'ssi_1',
+          priority: 0,
+          is_fallback: false,
+          rate_limit_per_hour: null,
+          allowed_categories: JSON.stringify(['bulk']),
+          status: 'active',
+          smoke_send_verified: true,
+          webhook_url: null,
+          created_at: now,
+          updated_at: now,
+        },
+      ],
+      content_documents: [smsContent.document],
+      content_document_versions: [smsContent.version],
+      sms_jobs: [],
+    };
+    const app = await setupApp(messagingRoutes, makePrincipal(), tables);
+
+    const preview = await app.inject({
+      method: 'POST',
+      url: '/events/evt_1/messages/preview',
+      payload: { audience: 'all', channel: 'sms' },
+    });
+    expect(preview.statusCode).toBe(200);
+    expect(preview.json()).toMatchObject({
+      audienceCount: 1,
+      eligibleCount: 1,
+      recipients: [expect.objectContaining({ id: 'att_1', phone: '+15550000002' })],
+    });
+    expect(JSON.stringify(preview.json())).not.toContain('foreign@test.com');
+    expect(JSON.stringify(preview.json())).not.toContain('+15550000999');
+
+    const send = await app.inject({
+      method: 'POST',
+      url: '/events/evt_1/messages',
+      headers: { 'Idempotency-Key': 'msg_tenant_scoped_audience' },
+      payload: {
+        smsTemplateKey: 'attendee-message',
+        audience: 'all',
+        channel: 'sms',
+      },
+    });
+    expect(send.statusCode).toBe(202);
+    expect(send.json()).toMatchObject({
+      status: 'queued',
+      audienceCount: 1,
+      queuedSmsJobs: 1,
+    });
+    const smsJobs = tables.sms_jobs as Array<{ to_phone: string; variables: string }>;
+    expect(smsJobs).toHaveLength(1);
+    expect(smsJobs[0].to_phone).toBe('+15550000002');
+    expect(JSON.parse(smsJobs[0].variables)).toMatchObject({ attendeeId: 'att_1' });
+
+    await app.close();
+  });
+
+  it('POST /events/:eventId/messages rejects all-suppressed campaigns without persisting jobs', async () => {
     const now = new Date();
     const smsContent = publishedSmsContentRows(now);
     const tables = {
@@ -2018,18 +2168,13 @@ describe('messaging endpoint', () => {
       method: 'POST',
       url: '/events/evt_1/messages',
       headers: { 'Idempotency-Key': 'msg_test_consent' },
-      payload: { templateKey: 'attendee-message', audience: 'all', channel: 'sms' },
+      payload: { smsTemplateKey: 'attendee-message', audience: 'all', channel: 'sms' },
     });
-    expect(res.statusCode).toBe(202);
+    expect(res.statusCode).toBe(400);
     expect(res.json()).toMatchObject({
-      status: 'suppressed',
-      queuedSmsJobs: 0,
-      suppressedRecipients: 1,
-      consentExclusions: 1,
+      message: 'No eligible recipients for this message campaign',
     });
-    const smsJobs = tables.sms_jobs as Array<{ status: string }>;
-    expect(tables.sms_jobs).toHaveLength(1);
-    expect(smsJobs[0].status).toBe('suppressed');
+    expect(tables.sms_jobs).toHaveLength(0);
     expect(
       app.context.temporalClient.startSmsDelivery as ReturnType<typeof vi.fn>,
     ).not.toHaveBeenCalled();
@@ -2092,7 +2237,7 @@ describe('messaging endpoint', () => {
     const res = await app.inject({
       method: 'POST',
       url: '/events/evt_1/messages/preview',
-      payload: { templateKey: 'attendee-message', audience: 'all', channel: 'sms' },
+      payload: { audience: 'all', channel: 'sms' },
     });
     expect(res.statusCode).toBe(200);
     expect(res.json()).toMatchObject({
@@ -2201,7 +2346,7 @@ describe('messaging endpoint', () => {
     const checkedIn = await app.inject({
       method: 'POST',
       url: '/events/evt_1/messages/preview',
-      payload: { templateKey: 'attendee-message', audience: 'checked_in', channel: 'sms' },
+      payload: { audience: 'checked_in', channel: 'sms' },
     });
     expect(checkedIn.statusCode).toBe(200);
     expect(checkedIn.json().recipients.map((recipient: { id: string }) => recipient.id)).toEqual([
@@ -2211,7 +2356,7 @@ describe('messaging endpoint', () => {
     const notCheckedIn = await app.inject({
       method: 'POST',
       url: '/events/evt_1/messages/preview',
-      payload: { templateKey: 'attendee-message', audience: 'not_checked_in', channel: 'sms' },
+      payload: { audience: 'not_checked_in', channel: 'sms' },
     });
     expect(notCheckedIn.statusCode).toBe(200);
     expect(notCheckedIn.json().recipients.map((recipient: { id: string }) => recipient.id)).toEqual(
@@ -2222,7 +2367,6 @@ describe('messaging endpoint', () => {
       method: 'POST',
       url: '/events/evt_1/messages/preview',
       payload: {
-        templateKey: 'attendee-message',
         audience: 'specific',
         attendeeIds: ['att_waiting', 'att_other_event'],
         channel: 'sms',
@@ -2305,7 +2449,7 @@ describe('messaging endpoint', () => {
     const res = await app.inject({
       method: 'POST',
       url: '/events/evt_1/messages/preview',
-      payload: { templateKey: 'attendee-message', audience: 'all', channel: 'email' },
+      payload: { audience: 'all', channel: 'email' },
     });
     expect(res.statusCode).toBe(200);
     expect(res.json()).toMatchObject({
@@ -2376,7 +2520,7 @@ describe('messaging endpoint', () => {
     const res = await app.inject({
       method: 'POST',
       url: '/events/evt_1/messages/preview',
-      payload: { templateKey: 'attendee-message', audience: 'all', channel: 'email' },
+      payload: { audience: 'all', channel: 'email' },
     });
     expect(res.statusCode).toBe(200);
     expect(res.json()).toMatchObject({
@@ -2453,8 +2597,8 @@ describe('messaging endpoint', () => {
           brand_id: 'brd_1',
           event_id: 'evt_1',
           channel: 'email',
-          key: 'attendee-message',
-          name: 'Attendee message',
+          key: 'attendee-email',
+          name: 'Attendee email',
           status: 'published',
           locale: 'en',
           current_draft_version_id: null,
@@ -2525,12 +2669,18 @@ describe('messaging endpoint', () => {
       sms_jobs: [],
     };
     const app = await setupApp(messagingRoutes, makePrincipal(), tables);
-    const payload = { templateKey: 'attendee-message', audience: 'all', channel: 'both' };
+    const previewPayload = { audience: 'all', channel: 'both' };
+    const sendPayload = {
+      emailTemplateKey: 'attendee-email',
+      smsTemplateKey: 'attendee-message',
+      audience: 'all',
+      channel: 'both',
+    };
 
     const preview = await app.inject({
       method: 'POST',
       url: '/events/evt_1/messages/preview',
-      payload,
+      payload: previewPayload,
     });
     expect(preview.statusCode).toBe(200);
     expect(preview.json()).toMatchObject({
@@ -2546,7 +2696,7 @@ describe('messaging endpoint', () => {
       method: 'POST',
       url: '/events/evt_1/messages',
       headers: { 'Idempotency-Key': 'msg_preview_parity' },
-      payload,
+      payload: sendPayload,
     });
     expect(send.statusCode, send.body).toBe(202);
     expect(send.json()).toMatchObject({
@@ -2558,15 +2708,25 @@ describe('messaging endpoint', () => {
       queuedSmsJobs: 0,
     });
     expect(tables.email_jobs).toHaveLength(1);
-    expect(tables.sms_jobs).toHaveLength(1);
+    expect(tables.sms_jobs).toHaveLength(0);
+    expect((tables.email_jobs as Array<{ template_key: string }>)[0].template_key).toBe(
+      'attendee-email',
+    );
     expect(
       JSON.parse((tables.email_jobs as Array<{ variables: string }>)[0].variables),
     ).toMatchObject({
       campaignAudience: 'all',
+      campaignEmailTemplateKey: 'attendee-email',
+      campaignSmsTemplateKey: 'attendee-message',
       campaignAudienceAttendeeIds: [],
       campaignAudienceCount: 1,
+      campaignSuppressedRecipients: 1,
+      campaignConsentExclusions: 1,
+      campaignSkippedRecipients: 0,
     });
-    expect((tables.sms_jobs as Array<{ status: string }>)[0].status).toBe('suppressed');
+    expect(
+      app.context.temporalClient.startSmsDelivery as ReturnType<typeof vi.fn>,
+    ).not.toHaveBeenCalled();
     await app.close();
   });
 
@@ -2690,7 +2850,16 @@ describe('messaging endpoint', () => {
       method: 'POST',
       url: '/events/evt_1/messages',
       headers: { 'Idempotency-Key': 'msg_content_email' },
-      payload: { templateKey: 'attendee-message', audience: 'all', channel: 'email' },
+      payload: {
+        emailTemplateKey: 'attendee-message',
+        audience: 'all',
+        channel: 'email',
+        variables: {
+          body: 'Doors open at 6pm.',
+          event: { title: 'Client supplied title' },
+          recipient: { email: 'client-supplied@example.test' },
+        },
+      },
     });
 
     expect(send.statusCode, send.body).toBe(202);
@@ -2699,15 +2868,47 @@ describe('messaging endpoint', () => {
       queuedSmsJobs: 0,
     });
     expect(tables.email_jobs).toHaveLength(1);
-    expect((tables.email_jobs as Array<{ template_version_id: string }>)[0].template_version_id).toBe(
-      'cver_email_1',
+    expect(
+      (tables.email_jobs as Array<{ template_version_id: string }>)[0].template_version_id,
+    ).toBe('cver_email_1');
+    const emailVariables = JSON.parse(
+      (tables.email_jobs as Array<{ variables: string }>)[0].variables,
     );
+    expect(emailVariables).toMatchObject({
+      body: 'Doors open at 6pm.',
+      attendeeId: 'att_1',
+      eventId: 'evt_1',
+      notificationType: 'bulk',
+      event: {
+        title: 'Event',
+        startsAt: now.toISOString(),
+        timezone: 'UTC',
+      },
+      recipient: {
+        name: 'Ada Lovelace',
+        email: 'ada@test.com',
+        phone: '+15550000002',
+      },
+      attendee: {
+        name: 'Ada Lovelace',
+        checkedIn: false,
+      },
+    });
     expect(startNotificationDelivery).toHaveBeenCalledWith(
       expect.objectContaining({
         templateKey: 'attendee-message',
         templateVersionId: 'cver_email_1',
         tenantId: 'tnt_1',
         brandId: 'brd_1',
+        variables: expect.objectContaining({
+          body: 'Doors open at 6pm.',
+          event: expect.objectContaining({ title: 'Event', timezone: 'UTC' }),
+          recipient: expect.objectContaining({
+            name: 'Ada Lovelace',
+            email: 'ada@test.com',
+          }),
+          attendee: expect.objectContaining({ checkedIn: false }),
+        }),
       }),
     );
     await app.close();
@@ -2901,9 +3102,142 @@ describe('messaging endpoint', () => {
     expect(res.json()).toMatchObject({
       id: 'msg_detail',
       status: 'sent',
-      smsJobs: [{ id: 'smj_1' }],
+      smsJobs: [{ id: 'smj_1', recipient: '***0002' }],
       smsDeliveries: [{ id: 'smd_1' }],
     });
+    expect(JSON.stringify(res.json())).not.toContain('+15550000002');
+    expect(JSON.stringify(res.json())).not.toContain('"body"');
+    expect(JSON.stringify(res.json())).not.toContain('"variables"');
+    await app.close();
+  });
+
+  it('GET /events/:eventId/messages/:campaignId treats LIKE metacharacters as literals', async () => {
+    const now = new Date();
+    const baseJob = {
+      tenant_id: 'tnt_1',
+      brand_id: 'brd_1',
+      to_phone: '+15550000002',
+      body: 'Update',
+      template_key: 'attendee-message',
+      variables: JSON.stringify({
+        eventId: 'evt_1',
+        attendeeId: 'att_1',
+        notificationType: 'bulk',
+      }),
+      provider_route_id: 'spr_1',
+      status: 'queued',
+      priority: 'low',
+      scheduled_at: null,
+      workflow_id: null,
+      created_at: now,
+      updated_at: now,
+    };
+    const tables = {
+      events: [
+        {
+          id: 'evt_1',
+          tenant_id: 'tnt_1',
+          organization_id: 'org_1',
+          brand_id: 'brd_1',
+          status: 'published',
+          slug: 'evt',
+          title: 'Event',
+          timezone: 'UTC',
+          starts_at: now,
+          visibility: 'public',
+          seo: '{}',
+        },
+      ],
+      sms_jobs: [
+        {
+          ...baseJob,
+          id: 'smj_literal',
+          idempotency_key: 'msg_%:sms:att_1',
+        },
+        {
+          ...baseJob,
+          id: 'smj_wildcard_neighbor',
+          to_phone: '+15550000003',
+          variables: JSON.stringify({
+            eventId: 'evt_1',
+            attendeeId: 'att_2',
+            notificationType: 'bulk',
+          }),
+          idempotency_key: 'msg_ab:sms:att_2',
+        },
+      ],
+    };
+    const app = await setupApp(messagingRoutes, makePrincipal(), tables);
+    const res = await app.inject({ method: 'GET', url: '/events/evt_1/messages/msg_%25' });
+
+    expect(res.statusCode).toBe(200);
+    expect(res.json()).toMatchObject({
+      id: 'msg_%',
+      smsJobs: [{ id: 'smj_literal' }],
+    });
+    expect(res.json().smsJobs.map((job: { id: string }) => job.id)).toEqual(['smj_literal']);
+
+    await app.close();
+  });
+
+  it('GET /events/:eventId/messages/:campaignId requires an exact derived campaign id', async () => {
+    const now = new Date();
+    const baseJob = {
+      tenant_id: 'tnt_1',
+      brand_id: 'brd_1',
+      to_phone: '+15550000002',
+      body: 'Update',
+      template_key: 'attendee-message',
+      variables: JSON.stringify({
+        eventId: 'evt_1',
+        attendeeId: 'att_1',
+        notificationType: 'bulk',
+      }),
+      provider_route_id: 'spr_1',
+      status: 'queued',
+      priority: 'low',
+      scheduled_at: null,
+      workflow_id: null,
+      created_at: now,
+      updated_at: now,
+    };
+    const tables = {
+      events: [
+        {
+          id: 'evt_1',
+          tenant_id: 'tnt_1',
+          organization_id: 'org_1',
+          brand_id: 'brd_1',
+          status: 'published',
+          slug: 'evt',
+          title: 'Event',
+          timezone: 'UTC',
+          starts_at: now,
+          visibility: 'public',
+          seo: '{}',
+        },
+      ],
+      sms_jobs: [
+        {
+          ...baseJob,
+          id: 'smj_colon_campaign',
+          idempotency_key: 'msg:foo:sms:att_1',
+        },
+      ],
+    };
+    const app = await setupApp(messagingRoutes, makePrincipal(), tables);
+
+    const prefixRes = await app.inject({ method: 'GET', url: '/events/evt_1/messages/msg' });
+    expect(prefixRes.statusCode).toBe(400);
+    expect(prefixRes.json().message).toBe('Message campaign not found');
+
+    const exactRes = await app.inject({ method: 'GET', url: '/events/evt_1/messages/msg%3Afoo' });
+    expect(exactRes.statusCode).toBe(200);
+    expect(exactRes.json()).toMatchObject({
+      id: 'msg:foo',
+      smsJobs: [{ id: 'smj_colon_campaign' }],
+    });
+
     await app.close();
   });
 
@@ -2953,8 +3287,16 @@ describe('messaging endpoint', () => {
     const list = await app.inject({ method: 'GET', url: '/events/evt_1/messages/msg_jobs/jobs' });
     expect(list.statusCode).toBe(200);
     expect(list.json().items).toMatchObject([
-      { channel: 'sms', campaignId: 'msg_jobs', job: { id: 'smj_1' } },
+      {
+        channel: 'sms',
+        campaignId: 'msg_jobs',
+        job: { id: 'smj_1', recipient: '***0002', template_key: 'attendee-message' },
+      },
     ]);
+    expect(JSON.stringify(list.json())).not.toContain('+15550000002');
+    expect(JSON.stringify(list.json())).not.toContain('"body"');
+    expect(JSON.stringify(list.json())).not.toContain('"variables"');
+    expect(JSON.stringify(list.json())).not.toContain('"idempotency_key"');
 
     const detail = await app.inject({
       method: 'GET',
@@ -2964,8 +3306,12 @@ describe('messaging endpoint', () => {
     expect(detail.json()).toMatchObject({
       channel: 'sms',
       campaignId: 'msg_jobs',
-      job: { id: 'smj_1' },
+      job: { id: 'smj_1', recipient: '***0002', template_key: 'attendee-message' },
     });
+    expect(JSON.stringify(detail.json())).not.toContain('+15550000002');
+    expect(JSON.stringify(detail.json())).not.toContain('"body"');
+    expect(JSON.stringify(detail.json())).not.toContain('"variables"');
+    expect(JSON.stringify(detail.json())).not.toContain('"idempotency_key"');
     await app.close();
   });
 
@@ -3151,6 +3497,8 @@ describe('messaging endpoint', () => {
     expect(list.json().items).toMatchObject([
       { channel: 'sms', event: { id: 'spe_1', event_type: 'message.sent' } },
     ]);
+    expect(JSON.stringify(list.json())).not.toContain('raw_payload');
+    expect(JSON.stringify(list.json())).not.toContain('"data"');
 
     const detail = await app.inject({
       method: 'GET',
@@ -3161,6 +3509,8 @@ describe('messaging endpoint', () => {
       channel: 'sms',
       event: { id: 'spe_1', provider_event_id: 'evt_provider_1' },
     });
+    expect(JSON.stringify(detail.json())).not.toContain('raw_payload');
+    expect(JSON.stringify(detail.json())).not.toContain('"data"');
     await app.close();
   });
 
@@ -3187,7 +3537,7 @@ describe('messaging endpoint', () => {
       method: 'POST',
       url: '/events/evt_1/messages',
       headers: { 'Idempotency-Key': 'msg_test_2' },
-      payload: { templateKey: 'attendee-message', audience: 'specific', channel: 'email' },
+      payload: { emailTemplateKey: 'attendee-message', audience: 'specific', channel: 'email' },
     });
     expect(res.statusCode).toBe(400);
     await app.close();
@@ -3215,7 +3565,7 @@ describe('messaging endpoint', () => {
     const res = await app.inject({
       method: 'POST',
       url: '/events/evt_1/messages',
-      payload: { templateKey: 'attendee-message', audience: 'all', channel: 'sms' },
+      payload: { smsTemplateKey: 'attendee-message', audience: 'all', channel: 'sms' },
     });
     expect(res.statusCode).toBe(400);
     await app.close();
@@ -3264,7 +3614,7 @@ describe('messaging endpoint', () => {
       method: 'POST',
       url: '/events/evt_1/messages',
       headers: { 'Idempotency-Key': 'msg_no_recipients' },
-      payload: { templateKey: 'attendee-message', audience: 'all', channel: 'sms' },
+      payload: { smsTemplateKey: 'attendee-message', audience: 'all', channel: 'sms' },
     });
     expect(res.statusCode).toBe(400);
     await app.close();
@@ -4603,6 +4953,209 @@ describe('checkout question validation', () => {
     expect(res.json().message).toContain('Attendee name is required');
   });
 
+  it('rejects malformed stored select question options without leaking parser errors', async () => {
+    const tables = {
+      events: [baseEvent],
+      ticket_types: [baseTicketType],
+      checkout_sessions: [],
+      idempotency_records: [],
+      questions: [
+        checkoutQuestion({
+          id: 'q_bad_options',
+          type: 'select',
+          label: 'Meal preference',
+          options: '{not-json',
+          applies_to: 'buyer',
+        }),
+      ],
+    };
+
+    const res = await postCheckoutSession(tables, {
+      buyerFields: { q_bad_options: 'VIP' },
+    });
+
+    expect(res.statusCode).toBe(400);
+    expect(res.json().message).toContain('Meal preference has an invalid option');
+    expect(tables.checkout_sessions).toHaveLength(0);
+  });
+
+  it('persists normalized attendee answers without raw hidden attendee fields', async () => {
+    const tables = {
+      events: [baseEvent],
+      ticket_types: [baseTicketType],
+      checkout_sessions: [],
+      idempotency_records: [],
+      questions: [
+        checkoutQuestion({
+          id: 'q_attendee_parent',
+          type: 'select',
+          label: 'Needs accommodation?',
+          options: JSON.stringify(['yes', 'no']),
+          applies_to: 'attendee',
+        }),
+        checkoutQuestion({
+          id: 'q_attendee_hidden',
+          label: 'Accommodation detail',
+          applies_to: 'attendee',
+          conditional_visibility: JSON.stringify({
+            field: 'q_attendee_parent',
+            operator: 'equals',
+            value: 'yes',
+          }),
+        }),
+      ],
+    };
+
+    const res = await postCheckoutSession(tables, {
+      items: [
+        {
+          ticketTypeId: 'tt_1',
+          quantity: 1,
+          attendeeFields: [
+            {
+              q_attendee_parent: 'no',
+              q_attendee_hidden: 'raw stale accommodation text',
+            },
+          ],
+        },
+      ],
+    });
+
+    expect(res.statusCode).toBe(201);
+    const storedSession = (tables.checkout_sessions as Array<{ cart: string }>)[0];
+    const cart = JSON.parse(storedSession.cart) as {
+      items: Array<{ attendeeFields?: unknown }>;
+      attendeeFields: Record<string, unknown[]>;
+    };
+    expect(cart.items[0].attendeeFields).toEqual([{ q_attendee_parent: 'no' }]);
+    expect(cart.attendeeFields.tt_1).toEqual([{ q_attendee_parent: 'no' }]);
+    expect(storedSession.cart).not.toContain('q_attendee_hidden');
+    expect(storedSession.cart).not.toContain('raw stale accommodation text');
+  });
+
+  it('persists sanitized attendee answers per normalized cart line when ticket types repeat', async () => {
+    const tables = {
+      events: [baseEvent],
+      ticket_types: [baseTicketType],
+      checkout_sessions: [],
+      idempotency_records: [],
+      questions: [
+        checkoutQuestion({
+          id: 'q_attendee_name',
+          label: 'Attendee name',
+          applies_to: 'attendee',
+        }),
+      ],
+    };
+
+    const res = await postCheckoutSession(tables, {
+      items: [
+        {
+          ticketTypeId: 'tt_1',
+          quantity: 1,
+          attendeeFields: [{ q_attendee_name: 'Ada Lovelace' }],
+        },
+        {
+          ticketTypeId: 'tt_1',
+          quantity: 1,
+          attendeeFields: [{ q_attendee_name: 'Grace Hopper' }],
+        },
+      ],
+    });
+
+    expect(res.statusCode).toBe(201);
+    const storedSession = (tables.checkout_sessions as Array<{ cart: string }>)[0];
+    const cart = JSON.parse(storedSession.cart) as {
+      items: Array<{ quantity: number; attendeeFields?: unknown }>;
+      attendeeFields: Record<string, unknown[]>;
+    };
+    expect(cart.items).toEqual([
+      expect.objectContaining({
+        quantity: 2,
+        attendeeFields: [
+          { q_attendee_name: 'Ada Lovelace' },
+          { q_attendee_name: 'Grace Hopper' },
+        ],
+      }),
+    ]);
+    expect(cart.attendeeFields.tt_1).toEqual([
+      { q_attendee_name: 'Ada Lovelace' },
+      { q_attendee_name: 'Grace Hopper' },
+    ]);
+  });
+
+  it('persists sanitized attendee answers per occurrence when ticket types repeat', async () => {
+    const occurrence = (id: string, startsAt: Date) => ({
+      id,
+      event_id: 'evt_1',
+      title: id,
+      starts_at: startsAt,
+      ends_at: new Date(startsAt.getTime() + 60 * 60 * 1000),
+      timezone: 'UTC',
+      venue: null,
+      capacity: null,
+      sort_order: 0,
+      status: 'scheduled',
+      created_at: new Date(),
+      updated_at: new Date(),
+    });
+    const tables = {
+      events: [baseEvent],
+      ticket_types: [baseTicketType],
+      event_occurrences: [
+        occurrence('occ_morning', new Date(Date.now() + 86_400_000)),
+        occurrence('occ_evening', new Date(Date.now() + 90_000_000)),
+      ],
+      checkout_sessions: [],
+      idempotency_records: [],
+      questions: [
+        checkoutQuestion({
+          id: 'q_attendee_name',
+          label: 'Attendee name',
+          applies_to: 'attendee',
+        }),
+      ],
+    };
+
+    const res = await postCheckoutSession(tables, {
+      items: [
+        {
+          ticketTypeId: 'tt_1',
+          occurrenceId: 'occ_morning',
+          quantity: 1,
+          attendeeFields: [{ q_attendee_name: 'Morning buyer' }],
+        },
+        {
+          ticketTypeId: 'tt_1',
+          occurrenceId: 'occ_evening',
+          quantity: 1,
+          attendeeFields: [{ q_attendee_name: 'Evening buyer' }],
+        },
+      ],
+    });
+
+    expect(res.statusCode).toBe(201);
+    const storedSession = (tables.checkout_sessions as Array<{ cart: string }>)[0];
+    const cart = JSON.parse(storedSession.cart) as {
+      items: Array<{ occurrenceId?: string; attendeeFields?: unknown }>;
+      attendeeFields: Record<string, unknown[]>;
+    };
+    expect(cart.items).toEqual([
+      expect.objectContaining({
+        occurrenceId: 'occ_morning',
+        attendeeFields: [{ q_attendee_name: 'Morning buyer' }],
+      }),
+      expect.objectContaining({
+        occurrenceId: 'occ_evening',
+        attendeeFields: [{ q_attendee_name: 'Evening buyer' }],
+      }),
+    ]);
+    expect(cart.attendeeFields.tt_1).toEqual([
+      { q_attendee_name: 'Morning buyer' },
+      { q_attendee_name: 'Evening buyer' },
+    ]);
+  });
+
   it('rejects raw file question answers during checkout session creation', async () => {
     const tables = {
       events: [baseEvent],
@@ -4799,6 +5352,23 @@ describe('POST /events/:eventId/messages/render-preview (C-076/C-077 merge-tag p
       payload: { channel: 'email', htmlTemplate: '<p>Hi {{recipient.name}}</p>' },
     });
     expect(res.statusCode).toBe(403);
+    await app.close();
+  });
+
+  it('rejects malformed render-preview payloads before rendering merge tags', async () => {
+    const app = await setupApp(messagingRoutes, makePrincipal(), { events: [event] });
+    const res = await app.inject({
+      method: 'POST',
+      url: '/events/evt_1/messages/render-preview',
+      payload: {
+        channel: 'email',
+        subjectTemplate: 123,
+      },
+    });
+
+    expect(res.statusCode).toBe(400);
+    expect(res.json().message).toBe('Invalid message render preview request');
+
     await app.close();
   });
 });

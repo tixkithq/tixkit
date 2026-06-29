@@ -10,7 +10,13 @@ import {
 } from '@tixkit/db';
 import type { Principal } from '@tixkit/domain';
 import type { AppContext } from '../../app.js';
+import { checkInRoutes, processPendingBulkSyncChunks } from '../../routes/modules/checkin.js';
 import { eventRoutes } from '../../routes/modules/events.js';
+import {
+  MAX_BULK_OFFLINE_SYNC_CHUNK_SCANS,
+  MAX_OFFLINE_SYNC_SCANS,
+  OFFLINE_SYNC_JSON_BODY_LIMIT_BYTES,
+} from '../../http/schemas.js';
 import { InventoryService } from '../../services/inventory.js';
 import { hashRequest, withIdempotency } from '../../services/idempotency.js';
 import { ulid } from 'ulid';
@@ -53,6 +59,41 @@ const CHECKOUT_P95_SLO_MS = 2_000;
 const SCAN_P95_SLO_MS = 500;
 const WEBHOOK_CATCHUP_SLO_MS = 300_000;
 const PAYMENT_SUCCESS_RATE_SLO = 0.98;
+const OFFLINE_SYNC_BATCH_LOAD = process.env.OFFLINE_SYNC_BATCH_LOAD === '1';
+const OFFLINE_SYNC_BATCH_SIZE = Number.parseInt(
+  process.env.OFFLINE_SYNC_BATCH_SIZE ?? String(MAX_OFFLINE_SYNC_SCANS),
+  10,
+);
+const OFFLINE_SYNC_BATCH_SLO_MS = process.env.OFFLINE_SYNC_BATCH_SLO_MS
+  ? Number.parseInt(process.env.OFFLINE_SYNC_BATCH_SLO_MS, 10)
+  : null;
+const OFFLINE_SYNC_INVALID_BATCH_LOAD = process.env.OFFLINE_SYNC_INVALID_BATCH_LOAD === '1';
+const OFFLINE_SYNC_INVALID_BATCH_SIZE = Number.parseInt(
+  process.env.OFFLINE_SYNC_INVALID_BATCH_SIZE ?? String(OFFLINE_SYNC_BATCH_SIZE),
+  10,
+);
+const OFFLINE_SYNC_INVALID_BATCH_SLO_MS = process.env.OFFLINE_SYNC_INVALID_BATCH_SLO_MS
+  ? Number.parseInt(process.env.OFFLINE_SYNC_INVALID_BATCH_SLO_MS, 10)
+  : null;
+const BULK_OFFLINE_SYNC_LOAD = process.env.BULK_OFFLINE_SYNC_LOAD === '1';
+const BULK_OFFLINE_SYNC_BATCH_SIZE = Number.parseInt(
+  process.env.BULK_OFFLINE_SYNC_BATCH_SIZE ?? '250000',
+  10,
+);
+const BULK_OFFLINE_SYNC_CHUNK_SIZE = Number.parseInt(
+  process.env.BULK_OFFLINE_SYNC_CHUNK_SIZE ?? String(MAX_BULK_OFFLINE_SYNC_CHUNK_SCANS),
+  10,
+);
+const BULK_OFFLINE_SYNC_INVALID_LOAD = process.env.BULK_OFFLINE_SYNC_INVALID_LOAD === '1';
+const BULK_OFFLINE_SYNC_INVALID_BATCH_SIZE = Number.parseInt(
+  process.env.BULK_OFFLINE_SYNC_INVALID_BATCH_SIZE ?? String(BULK_OFFLINE_SYNC_BATCH_SIZE),
+  10,
+);
+const BULK_OFFLINE_SYNC_FLEET_LOAD = process.env.BULK_OFFLINE_SYNC_FLEET_LOAD === '1';
+const BULK_OFFLINE_SYNC_SLO_MS = process.env.BULK_OFFLINE_SYNC_SLO_MS
+  ? Number.parseInt(process.env.BULK_OFFLINE_SYNC_SLO_MS, 10)
+  : null;
+const INSERT_CHUNK_SIZE = 500;
 
 async function seedTenantGraph(trx: Database): Promise<void> {
   await trx
@@ -124,8 +165,11 @@ async function seedTenantGraph(trx: Database): Promise<void> {
 
 async function cleanupAll(database: Database): Promise<void> {
   // Clean up load-harness data in reverse FK order.
+  await cleanupScanLogsForEvent(database);
+  await database.deleteFrom('offline_check_in_sync_chunks').where('tenant_id', '=', TENANT_ID).execute();
+  await database.deleteFrom('offline_check_in_sync_jobs').where('tenant_id', '=', TENANT_ID).execute();
   await database.deleteFrom('marketing_integrations').where('event_id', '=', EVENT_ID).execute();
-  await database.deleteFrom('scan_logs').where('tenant_id', '=', TENANT_ID).execute();
+  await database.deleteFrom('idempotency_records').where('tenant_id', '=', TENANT_ID).execute();
   await database.deleteFrom('tickets').where('event_id', '=', EVENT_ID).execute();
   await database.deleteFrom('attendees').where('event_id', '=', EVENT_ID).execute();
   await database.deleteFrom('orders').where('tenant_id', '=', TENANT_ID).execute();
@@ -136,13 +180,32 @@ async function cleanupAll(database: Database): Promise<void> {
     .deleteFrom('checkout_holds')
     .where('checkout_session_id', 'like', 'cs_load_%')
     .execute();
-  await database.deleteFrom('checkout_sessions').where('id', 'like', 'cs_load_%').execute();
+  await database
+    .deleteFrom('checkout_sessions')
+    .where('tenant_id', '=', TENANT_ID)
+    .where('event_id', '=', EVENT_ID)
+    .execute();
+  await database.deleteFrom('check_in_lists').where('event_id', '=', EVENT_ID).execute();
   await database.deleteFrom('ticket_types').where('event_id', '=', EVENT_ID).execute();
   await database.deleteFrom('inventory_pools').where('event_id', '=', EVENT_ID).execute();
   await database.deleteFrom('events').where('id', '=', EVENT_ID).execute();
   await database.deleteFrom('brands').where('id', '=', BRAND_ID).execute();
   await database.deleteFrom('organizations').where('id', '=', ORG_ID).execute();
   await database.deleteFrom('tenants').where('id', '=', TENANT_ID).execute();
+}
+
+async function cleanupScanLogsForEvent(database: Database): Promise<void> {
+  const lists = await database
+    .selectFrom('check_in_lists')
+    .select('id')
+    .where('event_id', '=', EVENT_ID)
+    .execute();
+  for (let offset = 0; offset < lists.length; offset += INSERT_CHUNK_SIZE) {
+    const listIds = lists.slice(offset, offset + INSERT_CHUNK_SIZE).map((list) => list.id);
+    if (listIds.length === 0) continue;
+    // eslint-disable-next-line no-await-in-loop -- chunked indexed deletes keep max-size load cleanup bounded.
+    await database.deleteFrom('scan_logs').where('check_in_list_id', 'in', listIds).execute();
+  }
 }
 
 async function createPool(database: Database, capacity: number, ttl = 300): Promise<string> {
@@ -363,6 +426,17 @@ function makePrincipal(): Principal {
   };
 }
 
+function makeScannerPrincipal(): Principal {
+  return {
+    type: 'mobile_device',
+    id: `dev_load_${RUN_ID}`,
+    tenantId: TENANT_ID,
+    organizationIds: [ORG_ID],
+    eventIds: [EVENT_ID],
+    scopes: ['checkins.write'],
+  };
+}
+
 async function setupEventRouteApp(database: Database): Promise<FastifyInstance> {
   const routeApp = Fastify();
   routeApp.decorate('context', {
@@ -378,6 +452,250 @@ async function setupEventRouteApp(database: Database): Promise<FastifyInstance> 
   });
   await routeApp.register(eventRoutes);
   return routeApp;
+}
+
+async function setupCheckInRouteApp(database: Database): Promise<FastifyInstance> {
+  const routeApp = Fastify({ bodyLimit: OFFLINE_SYNC_JSON_BODY_LIMIT_BYTES });
+  routeApp.decorate('context', {
+    db: database,
+    pricingEngine: {},
+    inventoryService: {},
+    qrService: {},
+    authService: {},
+    temporalClient: {},
+  } as unknown as AppContext);
+  routeApp.addHook('onRequest', async (request) => {
+    request.principal = makeScannerPrincipal();
+  });
+  await routeApp.register(checkInRoutes);
+  return routeApp;
+}
+
+async function insertOfflineSyncBatchFixtures(batchSize: number): Promise<{
+  checkInListId: string;
+  deviceId: string;
+  scans: { qrHash: string; scannedAt: string; offline: true }[];
+}> {
+  const poolId = await createPool(db, batchSize);
+  const ticketTypeId = await createTicketType(db, poolId);
+  const orderId = await createOrder();
+  const checkInListId = `cil_load_${ulid().slice(-10)}`;
+  const deviceId = makeScannerPrincipal().id;
+  const now = new Date();
+  const scanBaseTime = Date.parse('2026-06-01T12:00:00.000Z');
+
+  await db
+    .insertInto('check_in_lists')
+    .values({
+      id: checkInListId,
+      event_id: EVENT_ID,
+      name: `Load Check-in ${RUN_ID}`,
+      ticket_type_ids: JSON.stringify([ticketTypeId]),
+      status: 'active',
+      created_at: now,
+      updated_at: now,
+    })
+    .execute();
+
+  const scans: { qrHash: string; scannedAt: string; offline: true }[] = [];
+  for (let offset = 0; offset < batchSize; offset += INSERT_CHUNK_SIZE) {
+    const chunkSize = Math.min(INSERT_CHUNK_SIZE, batchSize - offset);
+    const attendees = [];
+    const tickets = [];
+
+    for (let index = offset; index < offset + chunkSize; index += 1) {
+      const attendeeId = `att_load_${ulid().slice(-14)}`;
+      const ticketId = `tkt_load_${ulid().slice(-14)}`;
+      const qrHash = `qrh_load_${RUN_ID}_${index}`;
+      const scannedAt = new Date(scanBaseTime + index).toISOString();
+
+      attendees.push({
+        id: attendeeId,
+        tenant_id: TENANT_ID,
+        order_id: orderId,
+        event_id: EVENT_ID,
+        ticket_type_id: ticketTypeId,
+        ticket_id: ticketId,
+        first_name: 'Offline',
+        last_name: `Sync${index}`,
+        email: `offline-sync-${RUN_ID}-${index}@example.com`,
+        phone: null,
+        status: 'pending',
+        custom_answers: null,
+        checked_in_at: null,
+        check_in_device_id: null,
+        created_at: now,
+        updated_at: now,
+      });
+      tickets.push({
+        id: ticketId,
+        tenant_id: TENANT_ID,
+        order_id: orderId,
+        attendee_id: attendeeId,
+        event_id: EVENT_ID,
+        ticket_type_id: ticketTypeId,
+        status: 'valid',
+        code: `code_${RUN_ID}_${index}`,
+        qr_payload: `payload_${RUN_ID}_${index}`,
+        qr_hash: qrHash,
+        transferred_to_email: null,
+        transferred_at: null,
+        checked_in_at: null,
+        checked_in_by_device_id: null,
+        wallet_pass_id: null,
+        created_at: now,
+        updated_at: now,
+      });
+      scans.push({ qrHash, scannedAt, offline: true });
+    }
+
+    // eslint-disable-next-line no-await-in-loop -- chunked inserts keep the 10k fixture under query parameter limits.
+    await db.insertInto('attendees').values(attendees).execute();
+    // eslint-disable-next-line no-await-in-loop -- tickets reference attendees from the immediately preceding chunk.
+    await db.insertInto('tickets').values(tickets).execute();
+  }
+
+  return { checkInListId, deviceId, scans };
+}
+
+async function insertOfflineSyncInvalidBatchFixtures(batchSize: number): Promise<{
+  checkInListId: string;
+  deviceId: string;
+  scans: { qrHash: string; scannedAt: string; offline: true }[];
+}> {
+  const poolId = await createPool(db, 1);
+  const ticketTypeId = await createTicketType(db, poolId);
+  const checkInListId = `cil_invalid_${ulid().slice(-10)}`;
+  const deviceId = makeScannerPrincipal().id;
+  const now = new Date();
+  const scanBaseTime = Date.parse('2026-06-01T12:00:00.000Z');
+
+  await db
+    .insertInto('check_in_lists')
+    .values({
+      id: checkInListId,
+      event_id: EVENT_ID,
+      name: `Invalid Load Check-in ${RUN_ID}`,
+      ticket_type_ids: JSON.stringify([ticketTypeId]),
+      status: 'active',
+      created_at: now,
+      updated_at: now,
+    })
+    .execute();
+
+  const scans = Array.from({ length: batchSize }, (_, index) => ({
+    qrHash: `qrh_invalid_${RUN_ID}_${index}`,
+    scannedAt: new Date(scanBaseTime + index).toISOString(),
+    offline: true as const,
+  }));
+
+  return { checkInListId, deviceId, scans };
+}
+
+async function runBulkOfflineSyncRoute(input: {
+  routeApp: FastifyInstance;
+  checkInListId: string;
+  deviceId: string;
+  scans: { qrHash: string; scannedAt: string; offline: true }[];
+  chunkSize: number;
+}): Promise<{
+  jobId: string;
+  createJobMs: number;
+  uploadChunksMs: number;
+  processMs: number;
+  replayChunksMs: number;
+  status: {
+    accepted: number;
+    duplicates: number;
+    invalid: number;
+    chunksProcessed: number;
+    status: string;
+  };
+}> {
+  const totalChunks = Math.ceil(input.scans.length / input.chunkSize);
+  const createJob = await measure(() =>
+    input.routeApp.inject({
+      method: 'POST',
+      url: '/check-ins/bulk-sync-jobs',
+      headers: { 'Idempotency-Key': `idem_bulk_job_${ulid()}` },
+      payload: {
+        checkInListId: input.checkInListId,
+        deviceId: input.deviceId,
+        totalChunks,
+        totalScans: input.scans.length,
+      },
+    }),
+  );
+  expect(createJob.value.statusCode).toBe(202);
+  const job = createJob.value.json() as { id: string };
+
+  const uploadChunks = await measure(async () => {
+    for (let offset = 0; offset < input.scans.length; offset += input.chunkSize) {
+      const sequence = Math.floor(offset / input.chunkSize) + 1;
+      const chunk = input.scans.slice(offset, offset + input.chunkSize);
+      // eslint-disable-next-line no-await-in-loop -- chunks are sequenced by persisted job order.
+      const response = await input.routeApp.inject({
+        method: 'PUT',
+        url: `/check-ins/bulk-sync-jobs/${job.id}/chunks/${sequence}`,
+        headers: { 'Idempotency-Key': `idem_bulk_chunk_${sequence}_${ulid()}` },
+        payload: { scans: chunk },
+      });
+      expect(response.statusCode).toBe(202);
+    }
+  });
+
+  const processing = await measure(async () => {
+    const deadline = Date.now() + 600_000;
+    while (Date.now() < deadline) {
+      // eslint-disable-next-line no-await-in-loop -- worker recovery and polling are intentionally sequential.
+      await processPendingBulkSyncChunks(db, job.id);
+      // eslint-disable-next-line no-await-in-loop -- status polling waits for async worker completion.
+      const response = await input.routeApp.inject({
+        method: 'GET',
+        url: `/check-ins/bulk-sync-jobs/${job.id}`,
+      });
+      expect(response.statusCode).toBe(200);
+      const current = response.json() as {
+        accepted: number;
+        duplicates: number;
+        invalid: number;
+        chunksProcessed: number;
+        status: string;
+      };
+      if (current.status === 'completed' || current.status === 'failed') return current;
+      // eslint-disable-next-line no-await-in-loop -- bounded polling avoids racing the API-local background worker.
+      await new Promise((resolve) => setTimeout(resolve, 250));
+    }
+    throw new Error('Timed out waiting for bulk offline sync job completion');
+  });
+  const status = processing.value;
+  expect(status.status).toBe('completed');
+  expect(status.chunksProcessed).toBe(totalChunks);
+
+  const replayChunks = await measure(async () => {
+    for (let offset = 0; offset < input.scans.length; offset += input.chunkSize) {
+      const sequence = Math.floor(offset / input.chunkSize) + 1;
+      const chunk = input.scans.slice(offset, offset + input.chunkSize);
+      // eslint-disable-next-line no-await-in-loop -- replay checks persisted chunk idempotency sequence by sequence.
+      const response = await input.routeApp.inject({
+        method: 'PUT',
+        url: `/check-ins/bulk-sync-jobs/${job.id}/chunks/${sequence}`,
+        headers: { 'Idempotency-Key': `idem_bulk_chunk_replay_${sequence}_${ulid()}` },
+        payload: { scans: chunk },
+      });
+      expect(response.statusCode).toBe(202);
+    }
+    await processPendingBulkSyncChunks(db, job.id);
+  });
+
+  return {
+    jobId: job.id,
+    createJobMs: createJob.durationMs,
+    uploadChunksMs: uploadChunks.durationMs,
+    processMs: processing.durationMs,
+    replayChunksMs: replayChunks.durationMs,
+    status,
+  };
 }
 
 describeWithIntegrationDatabase('Load and concurrency harnesses', () => {
@@ -398,14 +716,17 @@ describeWithIntegrationDatabase('Load and concurrency harnesses', () => {
     await cleanupAll(db);
     await db.destroy();
     restoreDatabaseDriver(previousDbDriver);
-  });
+  }, 120_000);
 
   beforeEach(async () => {
     // Reset per-test mutation targets scoped to this run. Order matters because
     // of FK constraints: tickets/attendees reference orders, orders reference
     // checkout_sessions.
+    await cleanupScanLogsForEvent(db);
+    await db.deleteFrom('offline_check_in_sync_chunks').where('tenant_id', '=', TENANT_ID).execute();
+    await db.deleteFrom('offline_check_in_sync_jobs').where('tenant_id', '=', TENANT_ID).execute();
     await db.deleteFrom('marketing_integrations').where('event_id', '=', EVENT_ID).execute();
-    await db.deleteFrom('scan_logs').where('tenant_id', '=', TENANT_ID).execute();
+    await db.deleteFrom('idempotency_records').where('tenant_id', '=', TENANT_ID).execute();
     await db.deleteFrom('tickets').where('event_id', '=', EVENT_ID).execute();
     await db.deleteFrom('attendees').where('event_id', '=', EVENT_ID).execute();
     await db.deleteFrom('orders').where('tenant_id', '=', TENANT_ID).execute();
@@ -416,10 +737,15 @@ describeWithIntegrationDatabase('Load and concurrency harnesses', () => {
       .deleteFrom('checkout_holds')
       .where('checkout_session_id', 'like', 'cs_load_%')
       .execute();
-    await db.deleteFrom('checkout_sessions').where('id', 'like', 'cs_load_%').execute();
+    await db
+      .deleteFrom('checkout_sessions')
+      .where('tenant_id', '=', TENANT_ID)
+      .where('event_id', '=', EVENT_ID)
+      .execute();
+    await db.deleteFrom('check_in_lists').where('event_id', '=', EVENT_ID).execute();
     await db.deleteFrom('ticket_types').where('event_id', '=', EVENT_ID).execute();
     await db.deleteFrom('inventory_pools').where('event_id', '=', EVENT_ID).execute();
-  });
+  }, 120_000);
 
   it('upserts one GA4 marketing integration when concurrent first-create requests target the same event/provider', async () => {
     const CONCURRENT_CLIENTS = 32;
@@ -681,6 +1007,497 @@ describeWithIntegrationDatabase('Load and concurrency harnesses', () => {
     expect(refreshed?.status).toBe('checked_in');
     expect(refreshed?.checked_in_by_device_id).toBe(deviceId);
   });
+
+  const offlineSyncBatchLoadTest = OFFLINE_SYNC_BATCH_LOAD ? it : it.skip;
+
+  offlineSyncBatchLoadTest(
+    'offline sync batch load: processes the production batch ceiling through the real route',
+    async () => {
+      expect(Number.isFinite(OFFLINE_SYNC_BATCH_SIZE)).toBe(true);
+      expect(OFFLINE_SYNC_BATCH_SIZE).toBeGreaterThan(0);
+      expect(OFFLINE_SYNC_BATCH_SIZE).toBeLessThanOrEqual(MAX_OFFLINE_SYNC_SCANS);
+
+      const routeApp = await setupCheckInRouteApp(db);
+      const idempotencyKey = `idem_offline_sync_load_${ulid()}`;
+      try {
+        const fixtureMetrics = await measure(() =>
+          insertOfflineSyncBatchFixtures(OFFLINE_SYNC_BATCH_SIZE),
+        );
+        const { checkInListId, deviceId, scans } = fixtureMetrics.value;
+
+        const firstSync = await measure(() =>
+          routeApp.inject({
+            method: 'POST',
+            url: '/check-ins/sync',
+            headers: { 'Idempotency-Key': idempotencyKey },
+            payload: {
+              checkInListId,
+              deviceId,
+              scans,
+            },
+          }),
+        );
+
+        expect(firstSync.value.statusCode).toBe(200);
+        const firstBody = firstSync.value.json() as {
+          accepted: number;
+          duplicates: number;
+          invalid: number;
+          results: unknown[];
+        };
+        expect(firstBody.accepted).toBe(OFFLINE_SYNC_BATCH_SIZE);
+        expect(firstBody.duplicates).toBe(0);
+        expect(firstBody.invalid).toBe(0);
+        expect(firstBody.results).toHaveLength(OFFLINE_SYNC_BATCH_SIZE);
+
+        const scanLogCount = await db
+          .selectFrom('scan_logs')
+          .select(({ fn }) => fn.countAll<number>().as('count'))
+          .where('tenant_id', '=', TENANT_ID)
+          .where('check_in_list_id', '=', checkInListId)
+          .executeTakeFirstOrThrow();
+        const checkedInTicketCount = await db
+          .selectFrom('tickets')
+          .select(({ fn }) => fn.countAll<number>().as('count'))
+          .where('event_id', '=', EVENT_ID)
+          .where('status', '=', 'checked_in')
+          .where('checked_in_by_device_id', '=', deviceId)
+          .executeTakeFirstOrThrow();
+        const checkedInAttendeeCount = await db
+          .selectFrom('attendees')
+          .select(({ fn }) => fn.countAll<number>().as('count'))
+          .where('event_id', '=', EVENT_ID)
+          .where('status', '=', 'checked_in')
+          .where('check_in_device_id', '=', deviceId)
+          .executeTakeFirstOrThrow();
+
+        expect(Number(scanLogCount.count)).toBe(OFFLINE_SYNC_BATCH_SIZE);
+        expect(Number(checkedInTicketCount.count)).toBe(OFFLINE_SYNC_BATCH_SIZE);
+        expect(Number(checkedInAttendeeCount.count)).toBe(OFFLINE_SYNC_BATCH_SIZE);
+
+        const replay = await measure(() =>
+          routeApp.inject({
+            method: 'POST',
+            url: '/check-ins/sync',
+            headers: { 'Idempotency-Key': idempotencyKey },
+            payload: {
+              checkInListId,
+              deviceId,
+              scans,
+            },
+          }),
+        );
+        expect(replay.value.statusCode).toBe(200);
+        expect(replay.value.json()).toEqual(firstBody);
+
+        const replayScanLogCount = await db
+          .selectFrom('scan_logs')
+          .select(({ fn }) => fn.countAll<number>().as('count'))
+          .where('tenant_id', '=', TENANT_ID)
+          .where('check_in_list_id', '=', checkInListId)
+          .executeTakeFirstOrThrow();
+        expect(Number(replayScanLogCount.count)).toBe(OFFLINE_SYNC_BATCH_SIZE);
+
+        const metrics = {
+          batchSize: OFFLINE_SYNC_BATCH_SIZE,
+          fixtureSetupMs: Number(fixtureMetrics.durationMs.toFixed(2)),
+          firstSyncMs: Number(firstSync.durationMs.toFixed(2)),
+          replayMs: Number(replay.durationMs.toFixed(2)),
+          scanLogs: Number(scanLogCount.count),
+          checkedInTickets: Number(checkedInTicketCount.count),
+          checkedInAttendees: Number(checkedInAttendeeCount.count),
+        };
+        console.info(`offline sync batch load metrics: ${JSON.stringify(metrics)}`);
+
+        if (OFFLINE_SYNC_BATCH_SLO_MS !== null) {
+          expectSloAtOrBelow(
+            'offline sync batch route latency',
+            firstSync.durationMs,
+            OFFLINE_SYNC_BATCH_SLO_MS,
+          );
+        }
+      } finally {
+        await routeApp.close();
+      }
+    },
+    900_000,
+  );
+
+  const offlineSyncInvalidBatchLoadTest = OFFLINE_SYNC_INVALID_BATCH_LOAD ? it : it.skip;
+
+  offlineSyncInvalidBatchLoadTest(
+    'offline sync invalid batch load: bounds amplification for max-sized invalid scans',
+    async () => {
+      expect(Number.isFinite(OFFLINE_SYNC_INVALID_BATCH_SIZE)).toBe(true);
+      expect(OFFLINE_SYNC_INVALID_BATCH_SIZE).toBeGreaterThan(0);
+      expect(OFFLINE_SYNC_INVALID_BATCH_SIZE).toBeLessThanOrEqual(MAX_OFFLINE_SYNC_SCANS);
+
+      const routeApp = await setupCheckInRouteApp(db);
+      const idempotencyKey = `idem_offline_sync_invalid_${ulid()}`;
+      try {
+        const fixtureMetrics = await measure(() =>
+          insertOfflineSyncInvalidBatchFixtures(OFFLINE_SYNC_INVALID_BATCH_SIZE),
+        );
+        const { checkInListId, deviceId, scans } = fixtureMetrics.value;
+
+        const firstSync = await measure(() =>
+          routeApp.inject({
+            method: 'POST',
+            url: '/check-ins/sync',
+            headers: { 'Idempotency-Key': idempotencyKey },
+            payload: {
+              checkInListId,
+              deviceId,
+              scans,
+            },
+          }),
+        );
+
+        expect(firstSync.value.statusCode).toBe(200);
+        const firstBody = firstSync.value.json() as {
+          accepted: number;
+          duplicates: number;
+          invalid: number;
+          results: unknown[];
+        };
+        expect(firstBody.accepted).toBe(0);
+        expect(firstBody.duplicates).toBe(0);
+        expect(firstBody.invalid).toBe(OFFLINE_SYNC_INVALID_BATCH_SIZE);
+        expect(firstBody.results).toHaveLength(OFFLINE_SYNC_INVALID_BATCH_SIZE);
+
+        const scanLogCount = await db
+          .selectFrom('scan_logs')
+          .select(({ fn }) => fn.countAll<number>().as('count'))
+          .where('tenant_id', '=', TENANT_ID)
+          .where('check_in_list_id', '=', checkInListId)
+          .executeTakeFirstOrThrow();
+        const checkedInTicketCount = await db
+          .selectFrom('tickets')
+          .select(({ fn }) => fn.countAll<number>().as('count'))
+          .where('event_id', '=', EVENT_ID)
+          .where('status', '=', 'checked_in')
+          .where('checked_in_by_device_id', '=', deviceId)
+          .executeTakeFirstOrThrow();
+        const checkedInAttendeeCount = await db
+          .selectFrom('attendees')
+          .select(({ fn }) => fn.countAll<number>().as('count'))
+          .where('event_id', '=', EVENT_ID)
+          .where('status', '=', 'checked_in')
+          .where('check_in_device_id', '=', deviceId)
+          .executeTakeFirstOrThrow();
+
+        expect(Number(scanLogCount.count)).toBe(OFFLINE_SYNC_INVALID_BATCH_SIZE);
+        expect(Number(checkedInTicketCount.count)).toBe(0);
+        expect(Number(checkedInAttendeeCount.count)).toBe(0);
+
+        const replay = await measure(() =>
+          routeApp.inject({
+            method: 'POST',
+            url: '/check-ins/sync',
+            headers: { 'Idempotency-Key': idempotencyKey },
+            payload: {
+              checkInListId,
+              deviceId,
+              scans,
+            },
+          }),
+        );
+        expect(replay.value.statusCode).toBe(200);
+        expect(replay.value.json()).toEqual(firstBody);
+
+        const replayScanLogCount = await db
+          .selectFrom('scan_logs')
+          .select(({ fn }) => fn.countAll<number>().as('count'))
+          .where('tenant_id', '=', TENANT_ID)
+          .where('check_in_list_id', '=', checkInListId)
+          .executeTakeFirstOrThrow();
+        expect(Number(replayScanLogCount.count)).toBe(OFFLINE_SYNC_INVALID_BATCH_SIZE);
+
+        const metrics = {
+          batchSize: OFFLINE_SYNC_INVALID_BATCH_SIZE,
+          fixtureSetupMs: Number(fixtureMetrics.durationMs.toFixed(2)),
+          firstSyncMs: Number(firstSync.durationMs.toFixed(2)),
+          replayMs: Number(replay.durationMs.toFixed(2)),
+          scanLogs: Number(scanLogCount.count),
+          checkedInTickets: Number(checkedInTicketCount.count),
+          checkedInAttendees: Number(checkedInAttendeeCount.count),
+        };
+        console.info(`offline sync invalid batch load metrics: ${JSON.stringify(metrics)}`);
+
+        if (OFFLINE_SYNC_INVALID_BATCH_SLO_MS !== null) {
+          expectSloAtOrBelow(
+            'offline sync invalid batch route latency',
+            firstSync.durationMs,
+            OFFLINE_SYNC_INVALID_BATCH_SLO_MS,
+          );
+        }
+      } finally {
+        await routeApp.close();
+      }
+    },
+    900_000,
+  );
+
+  const bulkOfflineSyncLoadTest = BULK_OFFLINE_SYNC_LOAD ? it : it.skip;
+
+  bulkOfflineSyncLoadTest(
+    'bulk offline sync load: processes an async valid batch above the sync cap',
+    async () => {
+      expect(Number.isFinite(BULK_OFFLINE_SYNC_BATCH_SIZE)).toBe(true);
+      expect(BULK_OFFLINE_SYNC_BATCH_SIZE).toBeGreaterThan(MAX_OFFLINE_SYNC_SCANS);
+      expect(BULK_OFFLINE_SYNC_CHUNK_SIZE).toBeGreaterThan(0);
+      expect(BULK_OFFLINE_SYNC_CHUNK_SIZE).toBeLessThanOrEqual(
+        MAX_BULK_OFFLINE_SYNC_CHUNK_SCANS,
+      );
+
+      const routeApp = await setupCheckInRouteApp(db);
+      try {
+        const fixtureMetrics = await measure(() =>
+          insertOfflineSyncBatchFixtures(BULK_OFFLINE_SYNC_BATCH_SIZE),
+        );
+        const { checkInListId, deviceId, scans } = fixtureMetrics.value;
+        const bulk = await runBulkOfflineSyncRoute({
+          routeApp,
+          checkInListId,
+          deviceId,
+          scans,
+          chunkSize: BULK_OFFLINE_SYNC_CHUNK_SIZE,
+        });
+
+        expect(bulk.status.accepted).toBe(BULK_OFFLINE_SYNC_BATCH_SIZE);
+        expect(bulk.status.duplicates).toBe(0);
+        expect(bulk.status.invalid).toBe(0);
+
+        const scanLogCount = await db
+          .selectFrom('scan_logs')
+          .select(({ fn }) => fn.countAll<number>().as('count'))
+          .where('tenant_id', '=', TENANT_ID)
+          .where('check_in_list_id', '=', checkInListId)
+          .executeTakeFirstOrThrow();
+        const checkedInTicketCount = await db
+          .selectFrom('tickets')
+          .select(({ fn }) => fn.countAll<number>().as('count'))
+          .where('event_id', '=', EVENT_ID)
+          .where('status', '=', 'checked_in')
+          .where('checked_in_by_device_id', '=', deviceId)
+          .executeTakeFirstOrThrow();
+        const checkedInAttendeeCount = await db
+          .selectFrom('attendees')
+          .select(({ fn }) => fn.countAll<number>().as('count'))
+          .where('event_id', '=', EVENT_ID)
+          .where('status', '=', 'checked_in')
+          .where('check_in_device_id', '=', deviceId)
+          .executeTakeFirstOrThrow();
+
+        expect(Number(scanLogCount.count)).toBe(BULK_OFFLINE_SYNC_BATCH_SIZE);
+        expect(Number(checkedInTicketCount.count)).toBe(BULK_OFFLINE_SYNC_BATCH_SIZE);
+        expect(Number(checkedInAttendeeCount.count)).toBe(BULK_OFFLINE_SYNC_BATCH_SIZE);
+
+        const replayScanLogCount = await db
+          .selectFrom('scan_logs')
+          .select(({ fn }) => fn.countAll<number>().as('count'))
+          .where('tenant_id', '=', TENANT_ID)
+          .where('check_in_list_id', '=', checkInListId)
+          .executeTakeFirstOrThrow();
+        expect(Number(replayScanLogCount.count)).toBe(BULK_OFFLINE_SYNC_BATCH_SIZE);
+
+        const metrics = {
+          batchSize: BULK_OFFLINE_SYNC_BATCH_SIZE,
+          chunkSize: BULK_OFFLINE_SYNC_CHUNK_SIZE,
+          fixtureSetupMs: Number(fixtureMetrics.durationMs.toFixed(2)),
+          createJobMs: Number(bulk.createJobMs.toFixed(2)),
+          uploadChunksMs: Number(bulk.uploadChunksMs.toFixed(2)),
+          processMs: Number(bulk.processMs.toFixed(2)),
+          replayChunksMs: Number(bulk.replayChunksMs.toFixed(2)),
+          scanLogs: Number(scanLogCount.count),
+          checkedInTickets: Number(checkedInTicketCount.count),
+          checkedInAttendees: Number(checkedInAttendeeCount.count),
+        };
+        console.info(`bulk offline sync load metrics: ${JSON.stringify(metrics)}`);
+
+        if (BULK_OFFLINE_SYNC_SLO_MS !== null) {
+          expectSloAtOrBelow(
+            'bulk offline sync processing latency',
+            bulk.processMs,
+            BULK_OFFLINE_SYNC_SLO_MS,
+          );
+        }
+      } finally {
+        await routeApp.close();
+      }
+    },
+    1_200_000,
+  );
+
+  const bulkOfflineSyncInvalidLoadTest = BULK_OFFLINE_SYNC_INVALID_LOAD ? it : it.skip;
+
+  bulkOfflineSyncInvalidLoadTest(
+    'bulk offline sync invalid load: bounds async invalid amplification above the sync cap',
+    async () => {
+      expect(Number.isFinite(BULK_OFFLINE_SYNC_INVALID_BATCH_SIZE)).toBe(true);
+      expect(BULK_OFFLINE_SYNC_INVALID_BATCH_SIZE).toBeGreaterThan(MAX_OFFLINE_SYNC_SCANS);
+      expect(BULK_OFFLINE_SYNC_CHUNK_SIZE).toBeGreaterThan(0);
+      expect(BULK_OFFLINE_SYNC_CHUNK_SIZE).toBeLessThanOrEqual(
+        MAX_BULK_OFFLINE_SYNC_CHUNK_SCANS,
+      );
+
+      const routeApp = await setupCheckInRouteApp(db);
+      try {
+        const fixtureMetrics = await measure(() =>
+          insertOfflineSyncInvalidBatchFixtures(BULK_OFFLINE_SYNC_INVALID_BATCH_SIZE),
+        );
+        const { checkInListId, deviceId, scans } = fixtureMetrics.value;
+        const bulk = await runBulkOfflineSyncRoute({
+          routeApp,
+          checkInListId,
+          deviceId,
+          scans,
+          chunkSize: BULK_OFFLINE_SYNC_CHUNK_SIZE,
+        });
+
+        expect(bulk.status.accepted).toBe(0);
+        expect(bulk.status.duplicates).toBe(0);
+        expect(bulk.status.invalid).toBe(BULK_OFFLINE_SYNC_INVALID_BATCH_SIZE);
+
+        const scanLogCount = await db
+          .selectFrom('scan_logs')
+          .select(({ fn }) => fn.countAll<number>().as('count'))
+          .where('tenant_id', '=', TENANT_ID)
+          .where('check_in_list_id', '=', checkInListId)
+          .executeTakeFirstOrThrow();
+        const checkedInTicketCount = await db
+          .selectFrom('tickets')
+          .select(({ fn }) => fn.countAll<number>().as('count'))
+          .where('event_id', '=', EVENT_ID)
+          .where('status', '=', 'checked_in')
+          .where('checked_in_by_device_id', '=', deviceId)
+          .executeTakeFirstOrThrow();
+        const checkedInAttendeeCount = await db
+          .selectFrom('attendees')
+          .select(({ fn }) => fn.countAll<number>().as('count'))
+          .where('event_id', '=', EVENT_ID)
+          .where('status', '=', 'checked_in')
+          .where('check_in_device_id', '=', deviceId)
+          .executeTakeFirstOrThrow();
+
+        expect(Number(scanLogCount.count)).toBe(BULK_OFFLINE_SYNC_INVALID_BATCH_SIZE);
+        expect(Number(checkedInTicketCount.count)).toBe(0);
+        expect(Number(checkedInAttendeeCount.count)).toBe(0);
+
+        const replayScanLogCount = await db
+          .selectFrom('scan_logs')
+          .select(({ fn }) => fn.countAll<number>().as('count'))
+          .where('tenant_id', '=', TENANT_ID)
+          .where('check_in_list_id', '=', checkInListId)
+          .executeTakeFirstOrThrow();
+        expect(Number(replayScanLogCount.count)).toBe(BULK_OFFLINE_SYNC_INVALID_BATCH_SIZE);
+
+        const metrics = {
+          batchSize: BULK_OFFLINE_SYNC_INVALID_BATCH_SIZE,
+          chunkSize: BULK_OFFLINE_SYNC_CHUNK_SIZE,
+          fixtureSetupMs: Number(fixtureMetrics.durationMs.toFixed(2)),
+          createJobMs: Number(bulk.createJobMs.toFixed(2)),
+          uploadChunksMs: Number(bulk.uploadChunksMs.toFixed(2)),
+          processMs: Number(bulk.processMs.toFixed(2)),
+          replayChunksMs: Number(bulk.replayChunksMs.toFixed(2)),
+          scanLogs: Number(scanLogCount.count),
+          checkedInTickets: Number(checkedInTicketCount.count),
+          checkedInAttendees: Number(checkedInAttendeeCount.count),
+        };
+        console.info(`bulk offline sync invalid load metrics: ${JSON.stringify(metrics)}`);
+      } finally {
+        await routeApp.close();
+      }
+    },
+    1_200_000,
+  );
+
+  const bulkOfflineSyncFleetLoadTest = BULK_OFFLINE_SYNC_FLEET_LOAD ? it : it.skip;
+
+  bulkOfflineSyncFleetLoadTest(
+    'bulk offline sync fleet: tolerates worker, poll, and replay storms',
+    async () => {
+      expect(BULK_OFFLINE_SYNC_BATCH_SIZE).toBeGreaterThan(MAX_OFFLINE_SYNC_SCANS);
+      expect(BULK_OFFLINE_SYNC_CHUNK_SIZE).toBeGreaterThan(0);
+      expect(BULK_OFFLINE_SYNC_CHUNK_SIZE).toBeLessThanOrEqual(
+        MAX_BULK_OFFLINE_SYNC_CHUNK_SCANS,
+      );
+
+      const routeApp = await setupCheckInRouteApp(db);
+      try {
+        const [validFixtures, invalidFixtures] = await Promise.all([
+          insertOfflineSyncBatchFixtures(BULK_OFFLINE_SYNC_BATCH_SIZE),
+          insertOfflineSyncInvalidBatchFixtures(BULK_OFFLINE_SYNC_BATCH_SIZE),
+        ]);
+
+        const [validBulk, invalidBulk] = await Promise.all([
+          runBulkOfflineSyncRoute({
+            routeApp,
+            ...validFixtures,
+            chunkSize: BULK_OFFLINE_SYNC_CHUNK_SIZE,
+          }),
+          runBulkOfflineSyncRoute({
+            routeApp,
+            ...invalidFixtures,
+            chunkSize: BULK_OFFLINE_SYNC_CHUNK_SIZE,
+          }),
+        ]);
+
+        expect(validBulk.status).toMatchObject({
+          status: 'completed',
+          accepted: BULK_OFFLINE_SYNC_BATCH_SIZE,
+          invalid: 0,
+        });
+        expect(invalidBulk.status).toMatchObject({
+          status: 'completed',
+          accepted: 0,
+          invalid: BULK_OFFLINE_SYNC_BATCH_SIZE,
+        });
+
+        const scanLogCountBeforeStorm = await db
+          .selectFrom('scan_logs')
+          .select(({ fn }) => fn.countAll<number>().as('count'))
+          .where('tenant_id', '=', TENANT_ID)
+          .executeTakeFirstOrThrow();
+
+        await Promise.all(
+          Array.from({ length: 20 }, () =>
+            routeApp.inject({
+              method: 'GET',
+              url: `/check-ins/bulk-sync-jobs/${validBulk.jobId}`,
+            }),
+          ),
+        );
+        await Promise.all(
+          Array.from({ length: 10 }, (_, index) =>
+            processPendingBulkSyncChunks(db, validBulk.jobId, {
+              workerId: `fleet-worker-${index}`,
+            }),
+          ),
+        );
+
+        const scanLogCountAfterStorm = await db
+          .selectFrom('scan_logs')
+          .select(({ fn }) => fn.countAll<number>().as('count'))
+          .where('tenant_id', '=', TENANT_ID)
+          .executeTakeFirstOrThrow();
+
+        expect(Number(scanLogCountAfterStorm.count)).toBe(Number(scanLogCountBeforeStorm.count));
+
+        const metrics = {
+          batchSize: BULK_OFFLINE_SYNC_BATCH_SIZE,
+          chunkSize: BULK_OFFLINE_SYNC_CHUNK_SIZE,
+          validProcessMs: Number(validBulk.processMs.toFixed(2)),
+          invalidProcessMs: Number(invalidBulk.processMs.toFixed(2)),
+          scanLogs: Number(scanLogCountAfterStorm.count),
+        };
+        console.info(`bulk offline sync fleet metrics: ${JSON.stringify(metrics)}`);
+      } finally {
+        await routeApp.close();
+      }
+    },
+    1_800_000,
+  );
 
   it('payment success SLO: provider success events process above the production threshold', async () => {
     const ATTEMPTS = 100;

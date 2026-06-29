@@ -1050,7 +1050,7 @@ describe('cross-tenant denial', () => {
       method: 'POST',
       url: '/events/evt_1/messages',
       headers: { 'idempotency-key': 'key-x-msg' },
-      payload: { templateKey: 'attendee-message', audience: 'all', channel: 'sms' },
+      payload: { smsTemplateKey: 'attendee-message', audience: 'all', channel: 'sms' },
     });
     expect(res.statusCode).toBe(404);
     await app.close();
@@ -1111,7 +1111,12 @@ describe('cross-tenant denial', () => {
       '/content-documents/cdoc_1/versions/cver_1/publish',
       undefined,
     ],
-    ['POST /content-documents/:documentId/archive', 'POST', '/content-documents/cdoc_1/archive', undefined],
+    [
+      'POST /content-documents/:documentId/archive',
+      'POST',
+      '/content-documents/cdoc_1/archive',
+      undefined,
+    ],
     [
       'POST /content-documents/:documentId/test-sends',
       'POST',
@@ -1122,27 +1127,30 @@ describe('cross-tenant denial', () => {
         context: {},
       },
     ],
-  ] as const)('%s returns 404 for a document in another tenant', async (_label, method, url, payload) => {
-    const tables: Tables = {
-      brands: [brandRow({ tenant_id: 'tnt_other' })],
-      events: [eventRow({ tenant_id: 'tnt_other' })],
-      content_documents: [contentDocumentRow({ tenant_id: 'tnt_other' })],
-      content_document_versions: [contentVersionRow()],
-      content_test_sends: [],
-    };
-    const app = await setupApp(contentRoutes, principal, tables);
+  ] as const)(
+    '%s returns 404 for a document in another tenant',
+    async (_label, method, url, payload) => {
+      const tables: Tables = {
+        brands: [brandRow({ tenant_id: 'tnt_other' })],
+        events: [eventRow({ tenant_id: 'tnt_other' })],
+        content_documents: [contentDocumentRow({ tenant_id: 'tnt_other' })],
+        content_document_versions: [contentVersionRow()],
+        content_test_sends: [],
+      };
+      const app = await setupApp(contentRoutes, principal, tables);
 
-    const res = await app.inject({
-      method,
-      url,
-      ...(payload === undefined ? {} : { payload }),
-    });
+      const res = await app.inject({
+        method,
+        url,
+        ...(payload === undefined ? {} : { payload }),
+      });
 
-    expect(res.statusCode).toBe(404);
-    expect(tables.content_document_versions).toHaveLength(1);
-    expect(tables.content_test_sends).toHaveLength(0);
-    await app.close();
-  });
+      expect(res.statusCode).toBe(404);
+      expect(tables.content_document_versions).toHaveLength(1);
+      expect(tables.content_test_sends).toHaveLength(0);
+      await app.close();
+    },
+  );
 });
 
 // ===========================================================================
@@ -1284,7 +1292,7 @@ describe('cross-organization denial (same tenant)', () => {
   });
 
   it('POST /events/:eventId/messages does not replay same-tenant idempotency across organizations', async () => {
-    const payload = { templateKey: 'attendee-message', audience: 'all', channel: 'sms' };
+    const payload = { smsTemplateKey: 'attendee-message', audience: 'all', channel: 'sms' };
     const tables: Tables = {
       events: [eventRow({ id: 'evt_1', tenant_id: 'tnt_1', organization_id: 'org_B' })],
       idempotency_records: [
