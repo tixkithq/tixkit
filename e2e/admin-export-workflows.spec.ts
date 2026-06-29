@@ -518,6 +518,8 @@ test.describe('admin export workflow coverage', () => {
     await page.getByRole('tab', { name: 'Sales' }).click();
     await expect(page.getByText('Tickets Sold')).toBeVisible();
     await expect(page.getByText('Gross Sales')).toBeVisible();
+    await expect(page.getByText('Online Sales')).toBeVisible();
+    await expect(page.getByText('Box Office')).toBeVisible();
     await attachScreenshot(page, testInfo, 'admin-reports-mobile-sales');
 
     await page.getByRole('tab', { name: 'Tax' }).click();
@@ -544,5 +546,72 @@ test.describe('admin export workflow coverage', () => {
     await attachScreenshot(page, testInfo, 'admin-reports-mobile-conversion');
 
     await expectNoAxeViolations(page, testInfo);
+  });
+
+  test('admin sales report channel cards expose Chromium CDP layout metrics', async ({
+    browserName,
+    page,
+    request,
+  }, testInfo) => {
+    test.skip(browserName !== 'chromium', 'CDP layout inspection is Chromium-only.');
+    await requireReachable(page, adminBaseUrl, 'admin dashboard');
+    await requireReachable(page, checkoutBaseUrl, 'checkout app');
+    await requireReachable(page, `${apiBaseUrl}/health`, 'api');
+
+    const suffix = `report-channel-cdp-${testInfo.workerIndex}-${Date.now()}`;
+    const { event, ticketType, product } = await seedFreeCheckoutEvent(request, suffix);
+    await completeSeededFreeCheckout(
+      page,
+      event.id,
+      event.title,
+      ticketType.name,
+      product.name,
+      `report-channel-cdp+${suffix}@example.com`,
+    );
+
+    await page.goto(`${adminBaseUrl}/events/${event.id}/reports`);
+    await expect(page.getByRole('heading', { name: 'Reports' })).toBeVisible();
+    await page.getByRole('tab', { name: 'Sales' }).click();
+    await expect(page.getByText('Online Sales')).toBeVisible();
+    await expect(page.getByText('Box Office')).toBeVisible();
+    await expectNoAxeViolations(page, testInfo);
+    await attachScreenshot(page, testInfo, 'admin-reports-channel-cdp');
+
+    const client = await page.context().newCDPSession(page);
+    const evaluation = await client.send('Runtime.evaluate', {
+      returnByValue: true,
+      expression: `(() => {
+        const titles = ['Online Sales', 'Box Office'];
+        return Object.fromEntries(titles.map((title) => {
+          const titleNode = Array.from(document.querySelectorAll('[data-slot="card-title"]'))
+            .find((node) => node.textContent?.trim() === title);
+          const card = titleNode?.closest('[data-slot="card"]');
+          const rect = card?.getBoundingClientRect();
+          return [title, rect ? {
+            width: rect.width,
+            height: rect.height,
+            left: rect.left,
+            top: rect.top,
+          } : null];
+        }));
+      })()`,
+    });
+    const metrics = evaluation.result.value as Record<
+      string,
+      { width: number; height: number; left: number; top: number } | null
+    >;
+
+    expect(metrics['Online Sales']).toMatchObject({
+      width: expect.any(Number),
+      height: expect.any(Number),
+    });
+    expect(metrics['Box Office']).toMatchObject({
+      width: expect.any(Number),
+      height: expect.any(Number),
+    });
+    expect(metrics['Online Sales']?.width).toBeGreaterThan(140);
+    expect(metrics['Online Sales']?.height).toBeGreaterThan(80);
+    expect(metrics['Box Office']?.width).toBeGreaterThan(140);
+    expect(metrics['Box Office']?.height).toBeGreaterThan(80);
   });
 });
