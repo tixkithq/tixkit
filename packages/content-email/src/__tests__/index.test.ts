@@ -160,6 +160,139 @@ describe('renderEmailTemplate', () => {
     expect(rendered.html).toBe('');
     expect(rendered.validation.issues.some((issue) => issue.code === 'missing_subject')).toBe(true);
   });
+
+  it('load-renders concurrent email variants without drifting output or merge-tag escaping', async () => {
+    const baseTemplate = createDefaultEmailTemplate();
+    const templates = Array.from({ length: 120 }, (_, index) =>
+      createDefaultEmailTemplate({
+        settings: {
+          ...baseTemplate.settings,
+          templateKey: `order-confirmed-${index}`,
+          subject: `Gate ${index % 5}: {{event.title}} tickets for {{recipient.name}}`,
+          previewText: `Arrival window ${index % 3}`,
+        },
+        blocks: [
+          {
+            type: 'event_hero',
+            headline: `Welcome {{recipient.name}} ${index}`,
+            body: 'Your {{event.title}} order is confirmed.',
+            ctaLabel: 'View tickets',
+            ctaUrl: '{{event.checkoutUrl}}',
+          },
+          {
+            type: 'order_summary',
+            title: 'Order summary',
+            rows: [
+              { label: 'Ticket', value: '{{ticket.type}}' },
+              { label: 'Total', value: '{{order.total}}' },
+            ],
+          },
+          {
+            type: 'unsubscribe_footer',
+            body: 'Manage email preferences for {{brand.name}}.',
+            unsubscribeUrl: '{{brand.supportUrl}}',
+          },
+        ],
+      }),
+    );
+
+    const rendered = await Promise.all(
+      templates.map(async (template, index) => {
+        const variantContext = {
+          ...context,
+          recipient: {
+            name: `Guest ${index}<script>${index}</script>`,
+            email: `guest-${index}@example.test`,
+          },
+        };
+        const first = await renderEmailTemplate(template, variantContext);
+        const second = await renderEmailTemplate(template, variantContext);
+
+        expect(first).toEqual(second);
+        expect(first.validation.valid).toBe(true);
+        expect(first.html).toContain(`Guest ${index}&lt;script&gt;${index}&lt;/script&gt;`);
+        expect(first.html).not.toContain(`Guest ${index}<script>${index}</script>`);
+        return first;
+      }),
+    );
+
+    expect(rendered).toHaveLength(120);
+    expect(new Set(rendered.map((message) => message.subject)).size).toBe(120);
+    expect(rendered.every((message) => message.html.includes('Order summary'))).toBe(true);
+    expect(rendered.every((message) => message.text.trim().length > 0)).toBe(true);
+  });
+
+  it('fails closed for malformed editor exports and hostile provider-incompatible content', async () => {
+    const baseTemplate = createDefaultEmailTemplate();
+    const malformedExports: unknown[] = [
+      undefined,
+      null,
+      [],
+      createDefaultEmailTemplate({ schemaVersion: 2 as 1 }),
+      {
+        ...baseTemplate,
+        editor: { ...baseTemplate.editor, provider: 'legacy-html-editor' },
+      },
+      createDefaultEmailTemplate({ blocks: [{ type: 'legacy_block' } as never] }),
+      {
+        ...baseTemplate,
+        settings: { ...baseTemplate.settings, category: 'legacy' },
+      },
+      {
+        ...baseTemplate,
+        settings: {
+          ...baseTemplate.settings,
+          sender: { ...baseTemplate.settings.sender, fromEmail: 42 },
+        },
+      },
+    ];
+
+    for (const payload of malformedExports) {
+      expect(normalizeEmailTemplateDocument(payload)).toBeUndefined();
+    }
+
+    const hostileTemplate = createDefaultEmailTemplate({
+      settings: {
+        ...baseTemplate.settings,
+        subject: 'x'.repeat(999),
+        sender: { ...baseTemplate.settings.sender, fromEmail: 'not-an-email', replyToEmail: 'bad-reply-to' },
+      },
+      blocks: [
+        {
+          type: 'event_hero',
+          headline: '{{unknown.value}}',
+          imageUrl: 'https://cdn.example.test/hero.jpg',
+          ctaLabel: 'Open',
+          ctaUrl: 'http://127.0.0.1/admin',
+        },
+        { type: 'raw_html', html: '<script>alert(1)</script>', safe: false },
+        {
+          type: 'unsubscribe_footer',
+          body: 'Manage preferences',
+          unsubscribeUrl: 'https://help.example.test/preferences',
+        },
+      ],
+    });
+
+    const validation = validateEmailTemplate(hostileTemplate, { provider: 'resend' });
+    const rendered = await renderEmailTemplate(hostileTemplate, context);
+
+    expect(validation.valid).toBe(false);
+    expect(validation.issues).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ code: 'unknown_variable' }),
+        expect.objectContaining({ code: 'invalid_sender_context' }),
+        expect.objectContaining({ code: 'invalid_reply_to' }),
+        expect.objectContaining({ code: 'unsafe_link' }),
+        expect.objectContaining({ code: 'missing_image_alt' }),
+        expect.objectContaining({ code: 'unsafe_raw_html' }),
+        expect.objectContaining({ code: 'provider_incompatible_subject' }),
+      ]),
+    );
+    expect(rendered.validation.valid).toBe(false);
+    expect(rendered.html).toBe('');
+    expect(rendered.text).toBe('');
+  });
 });
 
 describe('createEmailTestSend', () => {
