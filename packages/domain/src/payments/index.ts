@@ -1,4 +1,5 @@
 import type { BaseEntity, CurrencyCode, ISO8601Date, Ulid } from '../shared/index.js';
+export * from './risk-engine.js';
 
 export type PaymentProviderType = 'stripe' | 'stripe_connect' | 'mock';
 
