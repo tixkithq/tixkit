@@ -435,6 +435,35 @@ export type PublicContentPage = {
     renderedText?: string;
     publishedAt?: string;
   };
+  page: {
+    html: string;
+    text: string;
+    headless: PublicEventPageBlock[];
+    discovery: PublicEventDiscoveryCard;
+  };
+};
+
+export type PublicEventPageBlock = {
+  type: string;
+  id: string;
+  title?: string;
+  text?: string;
+  html?: string;
+  imageUrl?: string;
+  imageAlt?: string;
+  links?: Array<{ label: string; url: string }>;
+  items?: unknown[];
+};
+
+export type PublicEventDiscoveryCard = {
+  title: string;
+  summary: string;
+  category?: string;
+  tags: string[];
+  imageUrl?: string;
+  startsAt?: string;
+  venueName?: string;
+  publicPath?: string;
 };
 
 export type ContentTestSend = {
@@ -2283,11 +2312,35 @@ class PublicResource {
   async getEvent(eventId: string): Promise<Event> {
     return this.client.request('GET', `/public/events/${eventId}`);
   }
+  async getEventPage(
+    eventId: string,
+    params?: { locale?: string },
+  ): Promise<PublicContentPage> {
+    return this.client.request('GET', `/public/events/${eventId}/page`, {
+      params: params?.locale ? { locale: params.locale } : undefined,
+    });
+  }
   async getContentPage(
     eventId: string,
     params?: { locale?: string },
   ): Promise<PublicContentPage> {
     return this.client.request('GET', `/public/events/${eventId}/content-page`, {
+      params: params?.locale ? { locale: params.locale } : undefined,
+    });
+  }
+  async getEventPageBySlug(
+    slug: string,
+    params: { host: string; locale?: string },
+  ): Promise<PublicContentPage> {
+    return this.client.request('GET', `/public/events/by-slug/${slug}/page`, {
+      params: params.locale ? { host: params.host, locale: params.locale } : { host: params.host },
+    });
+  }
+  async getEventDiscoveryCard(
+    eventId: string,
+    params?: { locale?: string },
+  ): Promise<PublicEventDiscoveryCard> {
+    return this.client.request('GET', `/public/events/${eventId}/discovery-card`, {
       params: params?.locale ? { locale: params.locale } : undefined,
     });
   }

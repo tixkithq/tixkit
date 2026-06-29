@@ -24,6 +24,7 @@
     "@fastify/helmet": "^12.0.0",
     "@fastify/rate-limit": "^10.0.0",
     "@tixkit/content-core": "workspace:*",
+    "@tixkit/content-event-page": "workspace:*",
     "@tixkit/db": "workspace:*",
     "@tixkit/domain": "workspace:*",
     "@tixkit/shared": "workspace:*",

@@ -21,6 +21,7 @@ import {
   publicApi,
   CheckoutApiError,
   type PublicEvent,
+  type PublicContentPage,
   type AvailabilityItem,
   userFacingMessage,
 } from '@/lib/api';
@@ -58,6 +59,7 @@ export default function EventPageClient({
 }: Props) {
   const router = useRouter();
   const [event, setEvent] = useState<PublicEvent | null>(null);
+  const [contentPage, setContentPage] = useState<PublicContentPage | null>(null);
   const [availability, setAvailability] = useState<AvailabilityItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -89,12 +91,16 @@ export default function EventPageClient({
         const loadedEvent = eventId
           ? await publicApi.getEvent(eventId, controller.signal)
           : await publicApi.getEventBySlug(eventSlug!, customDomainHost!, controller.signal);
-        const loadedAvailability = await publicApi.getAvailability(
-          loadedEvent.id,
-          controller.signal,
-        );
+        const [loadedAvailability, loadedContentPage] = await Promise.all([
+          publicApi.getAvailability(loadedEvent.id, controller.signal),
+          publicApi.getEventPage(loadedEvent.id, controller.signal).catch((err) => {
+            if (err instanceof CheckoutApiError && err.status === 404) return null;
+            throw err;
+          }),
+        ]);
         if (cancelled) return;
         setEvent(loadedEvent);
+        setContentPage(loadedContentPage);
         setAvailability(loadedAvailability);
       } catch (err) {
         if (cancelled || controller.signal.aborted) return;
@@ -221,6 +227,16 @@ export default function EventPageClient({
           </dl>
         </header>
 
+        {contentPage ? (
+          <article
+            className="prose prose-neutral max-w-none dark:prose-invert"
+            data-testid="published-event-page"
+            dangerouslySetInnerHTML={{
+              __html: sanitizePublishedEventPageHtml(contentPage.page.html),
+            }}
+          />
+        ) : null}
+
         <Separator />
 
         <section className="space-y-4">
@@ -291,6 +307,19 @@ export default function EventPageClient({
       </div>
     </SurfaceShell>
   );
+}
+
+function sanitizePublishedEventPageHtml(html: string): string {
+  return html
+    .replace(/<script[\s\S]*?>[\s\S]*?<\/script>/gi, '')
+    .replace(
+      /\s+on[a-z][\w:-]*(?:\s*=\s*(?:"[^"]*"|'[^']*'|`[^`]*`|[^\s"'`=<>]+))?/gi,
+      '',
+    )
+    .replace(
+      /\s+(href|src)\s*=\s*(?:"[\s\u0000-\u001f]*(?:javascript|data|file):[^"]*"|'[\s\u0000-\u001f]*(?:javascript|data|file):[^']*'|`[\s\u0000-\u001f]*(?:javascript|data|file):[^`]*`|[\s\u0000-\u001f]*(?:javascript|data|file):[^\s"'`=<>]*)/gi,
+      '',
+    );
 }
 
 function SurfaceShell({ brand, children }: { brand: ResolvedBrand; children: React.ReactNode }) {

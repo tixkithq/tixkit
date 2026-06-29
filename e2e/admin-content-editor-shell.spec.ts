@@ -32,7 +32,7 @@ test.describe('admin content editor shell', () => {
       {
         path: `/events/${fixtureEventId}/content/event-page`,
         heading: 'Event page editor',
-        preview: 'Hosted page',
+        preview: 'TipTap event-page preview',
         name: 'event-page',
       },
       {
