@@ -3972,6 +3972,7 @@ export const openApiSpec = {
                   checkInListId: { type: 'string' },
                   scans: {
                     type: 'array',
+                    maxItems: 500,
                     items: {
                       type: 'object',
                       properties: {

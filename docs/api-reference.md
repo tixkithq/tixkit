@@ -399,7 +399,7 @@ Refund body: `{ "amountCents"?, "reason", "voidTickets"?, "restoreInventory"? }`
 | `POST`  | `/v1/check-ins/scan`                                         | `checkins.write`  | Online scan (recommended `Idempotency-Key`)               |
 | `POST`  | `/v1/check-ins/sync`                                         | `checkins.write`  | Offline scan sync (requires `Idempotency-Key`)            |
 
-Scan outcomes: `accepted`, `duplicate`, `not_found`, `already_checked_in`, `invalid_list`, `wrong_event`. Scan logs are persisted with `deviceId`, `scannedAt`, `qrHash`, and `metadata`.
+Offline sync accepts up to 500 scans per request. Scan outcomes: `accepted`, `duplicate`, `not_found`, `already_checked_in`, `invalid_list`, `wrong_event`. Scan logs are persisted with `deviceId`, `scannedAt`, `qrHash`, and `metadata`.
 
 ### Messaging
 
