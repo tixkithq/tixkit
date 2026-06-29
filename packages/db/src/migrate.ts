@@ -31,6 +31,7 @@ import { WebhookDeliveryReplayIdentityMigration } from './migrations/0027_webhoo
 import { ShortLinksMigration } from './migrations/0028_short_links.js';
 import { EventCodeFormatMigration } from './migrations/0029_event_code_format.js';
 import { ContentDocumentsMigration } from './migrations/0030_content_documents.js';
+import { OrderSalesChannelMigration } from './migrations/0031_order_sales_channel.js';
 
 const INITIAL_MIGRATION_NAME = '0001_initial';
 const MIGRATION_TABLE = 'kysely_migration';
@@ -149,7 +150,7 @@ function buildMigrationFailureMessage(error: unknown): string {
   ].join('\n');
 }
 
-class TixkitMigrationProvider implements MigrationProvider {
+export class TixkitMigrationProvider implements MigrationProvider {
   async getMigrations(): Promise<Record<string, Migration>> {
     return {
       [INITIAL_MIGRATION_NAME]: InitialMigration,
@@ -182,6 +183,7 @@ class TixkitMigrationProvider implements MigrationProvider {
       '0028_short_links': ShortLinksMigration,
       '0029_event_code_format': EventCodeFormatMigration,
       '0030_content_documents': ContentDocumentsMigration,
+      '0031_order_sales_channel': OrderSalesChannelMigration,
     };
   }
 }

@@ -68,6 +68,18 @@ describe('openApiSpec', () => {
     ).toHaveProperty('paymentAccountId');
   });
 
+  it('documents order sales-channel attribution for box-office reporting', () => {
+    expect(openApiSpec.components.schemas.Order.properties.salesChannel).toEqual({
+      type: 'string',
+      enum: ['online', 'box_office'],
+    });
+    expect(openApiSpec.components.schemas.Order.properties.operatorId).toEqual({ type: 'string' });
+    expect(openApiSpec.components.schemas.Order.properties.tenderType).toEqual({
+      type: 'string',
+      enum: ['comp', 'cash', 'manual_card'],
+    });
+  });
+
   it('documents Stripe Connect onboarding URL responses', () => {
     expect(openApiSpec.components.schemas.PaymentAccount.properties).toHaveProperty(
       'onboardingUrl',

@@ -1,6 +1,7 @@
 import { BaseRepository } from './base.js';
 import { ulid } from 'ulid';
 import { randomBytes } from 'node:crypto';
+import type { BoxOfficeTenderType, SalesChannel } from '@tixkit/domain';
 
 export class CheckoutHoldRepository extends BaseRepository {
   async create(input: {
@@ -164,6 +165,9 @@ export class OrderRepository extends BaseRepository {
     buyerPhone?: string;
     paymentIntentId?: string;
     paymentProvider?: string;
+    salesChannel?: SalesChannel;
+    operatorId?: string;
+    tenderType?: BoxOfficeTenderType;
   }) {
     const id = `ord_${ulid()}`;
     const now = new Date();
@@ -191,6 +195,9 @@ export class OrderRepository extends BaseRepository {
         buyer_phone: input.buyerPhone ?? null,
         payment_intent_id: input.paymentIntentId ?? null,
         payment_provider: input.paymentProvider ?? null,
+        sales_channel: input.salesChannel ?? 'online',
+        operator_id: input.operatorId ?? null,
+        tender_type: input.tenderType ?? null,
         paid_at: input.status === 'paid' ? now : null,
         created_at: now,
         updated_at: now,
