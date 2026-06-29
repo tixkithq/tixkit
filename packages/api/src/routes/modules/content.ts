@@ -73,7 +73,11 @@ const createDocumentSchema = z
     brandId: z.string().min(1),
     eventId: z.string().min(1).optional(),
     channel: contentChannelSchema,
-    key: z.string().min(1).max(128).regex(/^[a-z0-9][a-z0-9._-]*$/),
+    key: z
+      .string()
+      .min(1)
+      .max(128)
+      .regex(/^[a-z0-9][a-z0-9._-]*$/),
     name: z.string().min(1).max(160),
     locale: z.string().min(2).max(16).default('en'),
   })
@@ -108,7 +112,12 @@ const testSendSchema = z
 
 const duplicateDocumentSchema = z
   .object({
-    key: z.string().min(1).max(128).regex(/^[a-z0-9][a-z0-9._-]*$/).optional(),
+    key: z
+      .string()
+      .min(1)
+      .max(128)
+      .regex(/^[a-z0-9][a-z0-9._-]*$/)
+      .optional(),
     name: z.string().min(1).max(160).optional(),
   })
   .strict();
@@ -148,7 +157,10 @@ function requireContentPermission(
   operation: 'read' | 'write',
 ): void {
   if (channel === 'event_page') {
-    ClerkAuthService.requirePermission(principal, operation === 'read' ? 'events.read' : 'events.write');
+    ClerkAuthService.requirePermission(
+      principal,
+      operation === 'read' ? 'events.read' : 'events.write',
+    );
     return;
   }
   ClerkAuthService.requirePermission(principal, 'messages.write');
@@ -174,7 +186,8 @@ async function authorizeScope(
   const brand = await new BrandRepository(db).findById(input.brandId);
   if (!brand) throw new NotFoundError('Brand', input.brandId);
   ClerkAuthService.requireResourceTenant(principal, brand, 'Brand', input.brandId);
-  if (brand.organization_id !== input.organizationId) throw new NotFoundError('Brand', input.brandId);
+  if (brand.organization_id !== input.organizationId)
+    throw new NotFoundError('Brand', input.brandId);
 
   if (!input.eventId) return;
   ClerkAuthService.requireEventScope(principal, input.eventId);
@@ -195,7 +208,8 @@ async function loadAuthorizedDocument(
 ): Promise<ContentDocument> {
   const document = await repo.findDocumentById(documentId);
   if (!document) throw new NotFoundError('ContentDocument', documentId);
-  if (document.tenantId !== principal.tenantId) throw new NotFoundError('ContentDocument', documentId);
+  if (document.tenantId !== principal.tenantId)
+    throw new NotFoundError('ContentDocument', documentId);
   requireContentPermission(principal, document.channel, operation);
   await authorizeScope(db, principal, {
     organizationId: document.organizationId,
@@ -500,11 +514,17 @@ function venueContext(value: unknown): { name?: string; city?: string } {
   };
 }
 
-function priceLabel(row: { kind: string; price_cents: unknown; minimum_price_cents?: unknown; currency: string }): string {
+function priceLabel(row: {
+  kind: string;
+  price_cents: unknown;
+  minimum_price_cents?: unknown;
+  currency: string;
+}): string {
   if (row.kind === 'free') return 'Free';
-  const cents = row.kind === 'donation' && row.minimum_price_cents != null
-    ? Number(row.minimum_price_cents)
-    : Number(row.price_cents);
+  const cents =
+    row.kind === 'donation' && row.minimum_price_cents != null
+      ? Number(row.minimum_price_cents)
+      : Number(row.price_cents);
   const formatted = new Intl.NumberFormat('en-US', {
     style: 'currency',
     currency: row.currency,
@@ -571,7 +591,13 @@ export const contentRoutes: FastifyPluginAsync = async (app) => {
 
   app.post('/content-documents/:documentId/duplicate', async (request, reply) => {
     const { documentId } = request.params as { documentId: string };
-    const document = await loadAuthorizedDocument(repo(), db, request.principal!, documentId, 'write');
+    const document = await loadAuthorizedDocument(
+      repo(),
+      db,
+      request.principal!,
+      documentId,
+      'write',
+    );
     assertChannelAvailable(document.channel);
     const body = parseBody(duplicateDocumentSchema, request.body ?? {});
     const duplicated = await repo().duplicateDocument({
@@ -592,7 +618,13 @@ export const contentRoutes: FastifyPluginAsync = async (app) => {
 
   app.post('/content-documents/:documentId/versions', async (request, reply) => {
     const { documentId } = request.params as { documentId: string };
-    const document = await loadAuthorizedDocument(repo(), db, request.principal!, documentId, 'write');
+    const document = await loadAuthorizedDocument(
+      repo(),
+      db,
+      request.principal!,
+      documentId,
+      'write',
+    );
     assertChannelAvailable(document.channel);
     const body = parseBody(saveVersionSchema, request.body);
     const validation = validationFor(document.channel, body);
@@ -600,13 +632,18 @@ export const contentRoutes: FastifyPluginAsync = async (app) => {
       document.channel === 'sms' ? normalizeSmsTemplateDocument(body.contentJson) : undefined;
     const emailDocument =
       document.channel === 'email' ? normalizeEmailTemplateDocument(body.contentJson) : undefined;
+    const renderedEmail = emailDocument ? await renderEmailTemplate(emailDocument, {}) : undefined;
     const version = await repo().createVersion({
       documentId,
       subject: emailDocument ? emailDocument.settings.subject : body.subject,
       previewText: emailDocument ? emailDocument.settings.previewText : body.previewText,
       contentJson: body.contentJson,
       renderedHtml: emailDocument ? emailDocument.editor.contentHtml : body.renderedHtml,
-      renderedText: smsDocument ? smsDocument.editor.body : body.renderedText,
+      renderedText: renderedEmail
+        ? renderedEmail.text
+        : smsDocument
+          ? smsDocument.editor.body
+          : body.renderedText,
       variables: variableDefinitionsForChannel(document.channel),
       validation,
       createdBy: request.principal!.id,
@@ -616,7 +653,13 @@ export const contentRoutes: FastifyPluginAsync = async (app) => {
 
   app.post('/content-documents/:documentId/preview', async (request) => {
     const { documentId } = request.params as { documentId: string };
-    const document = await loadAuthorizedDocument(repo(), db, request.principal!, documentId, 'read');
+    const document = await loadAuthorizedDocument(
+      repo(),
+      db,
+      request.principal!,
+      documentId,
+      'read',
+    );
     assertChannelAvailable(document.channel);
     const body = parseBody(previewSchema, request.body);
     const version = body.versionId ? await repo().findVersionById(body.versionId) : undefined;
@@ -653,7 +696,13 @@ export const contentRoutes: FastifyPluginAsync = async (app) => {
 
   app.post('/content-documents/:documentId/versions/:versionId/publish', async (request) => {
     const { documentId, versionId } = request.params as { documentId: string; versionId: string };
-    const document = await loadAuthorizedDocument(repo(), db, request.principal!, documentId, 'write');
+    const document = await loadAuthorizedDocument(
+      repo(),
+      db,
+      request.principal!,
+      documentId,
+      'write',
+    );
     assertChannelAvailable(document.channel);
     const version = await repo().findVersionById(versionId);
     if (!version || version.documentId !== documentId) {
@@ -675,7 +724,13 @@ export const contentRoutes: FastifyPluginAsync = async (app) => {
 
   app.post('/content-documents/:documentId/test-sends', async (request, reply) => {
     const { documentId } = request.params as { documentId: string };
-    const document = await loadAuthorizedDocument(repo(), db, request.principal!, documentId, 'write');
+    const document = await loadAuthorizedDocument(
+      repo(),
+      db,
+      request.principal!,
+      documentId,
+      'write',
+    );
     assertChannelAvailable(document.channel);
     const body = parseBody(testSendSchema, request.body);
     const version = await repo().findVersionById(body.versionId);
@@ -689,9 +744,12 @@ export const contentRoutes: FastifyPluginAsync = async (app) => {
       body.optOutToken,
     );
     if ((document.channel === 'sms' || document.channel === 'email') && !validation.valid) {
-      throw new ValidationError(`${document.channel === 'sms' ? 'SMS' : 'Email'} test send has render blockers`, {
-        issues: validation.issues,
-      });
+      throw new ValidationError(
+        `${document.channel === 'sms' ? 'SMS' : 'Email'} test send has render blockers`,
+        {
+          issues: validation.issues,
+        },
+      );
     }
     const send = await repo().recordTestSend({
       tenantId: principalTenant(request.principal!),
@@ -725,15 +783,18 @@ function principalTenant(principal: Principal): string {
 export const publicContentRoutes: FastifyPluginAsync = async (app) => {
   const db = app.context.db;
 
-  async function contextForEvent(event: {
-    id: string;
-    slug?: string | null;
-    title: string;
-    starts_at?: Date | string | null;
-    ends_at?: Date | string | null;
-    timezone?: string | null;
-    venue?: unknown;
-  }, host?: string): Promise<EventPageRenderContext> {
+  async function contextForEvent(
+    event: {
+      id: string;
+      slug?: string | null;
+      title: string;
+      starts_at?: Date | string | null;
+      ends_at?: Date | string | null;
+      timezone?: string | null;
+      venue?: unknown;
+    },
+    host?: string,
+  ): Promise<EventPageRenderContext> {
     const venue = venueContext(event.venue);
     const tickets = await new TicketTypeRepository(db).findPublicByEvent(event.id);
     return {
@@ -757,7 +818,11 @@ export const publicContentRoutes: FastifyPluginAsync = async (app) => {
     };
   }
 
-  async function loadPublicPage(eventId: string, locale?: string, host?: string): Promise<PublicContentPage> {
+  async function loadPublicPage(
+    eventId: string,
+    locale?: string,
+    host?: string,
+  ): Promise<PublicContentPage> {
     const event = await new EventRepository(db).findById(eventId);
     if (!event || !isPubliclyReadableEvent(event)) throw new NotFoundError('Event', eventId);
     const result = await new ContentRepository(db).findPublishedEventPage({
@@ -769,7 +834,10 @@ export const publicContentRoutes: FastifyPluginAsync = async (app) => {
     return toPublicContentPage({ ...result, context: await contextForEvent(event, host) });
   }
 
-  async function resolveEventBySlug(slug: string, host: unknown): Promise<{ id: string; host: string }> {
+  async function resolveEventBySlug(
+    slug: string,
+    host: unknown,
+  ): Promise<{ id: string; host: string }> {
     const normalizedHost = normalizeHost(host);
     if (!normalizedHost) throw new NotFoundError('Event', slug);
     const brandDomain = await db
@@ -792,7 +860,10 @@ export const publicContentRoutes: FastifyPluginAsync = async (app) => {
       .where('id', '=', brandDomain.brand_id)
       .executeTakeFirst();
     if (!brand || !boolValue(brand.white_label)) throw new NotFoundError('Event', slug);
-    const event = await new EventRepository(db).findByBrandSlug(brandDomain.brand_id as string, slug);
+    const event = await new EventRepository(db).findByBrandSlug(
+      brandDomain.brand_id as string,
+      slug,
+    );
     if (!event || !isPubliclyReadableEvent(event)) throw new NotFoundError('Event', slug);
     const tenant = await db
       .selectFrom('tenants')

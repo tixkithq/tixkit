@@ -69,6 +69,8 @@ describe('renderEventPageDocument', () => {
 
     expect(first.validation.valid).toBe(true);
     expect(first.html).toContain('class="tixkit-event-page"');
+    expect(first.html).toContain('<div class="tixkit-event-page"');
+    expect(first.html).not.toContain('<main');
     expect(first.html).toContain('All Access Chicago');
     expect(first.html).toContain('General Admission');
     expect(first.html).toContain('Get tickets');
@@ -80,6 +82,20 @@ describe('renderEventPageDocument', () => {
       summary: 'A full night of access.',
     });
     expect(second).toEqual(first);
+  });
+
+  it('renders discovery URL merge tags through the safe URL path', () => {
+    const document = createDefaultEventPageDocument({
+      eventId: 'evt_demo_001',
+      eventTitle: 'All Access Chicago',
+      eventDescription: 'A full night of access.',
+      publicUrl: '{{event.publicUrl}}',
+      checkoutUrl: 'https://checkout.example.test/checkout?eventId=evt_demo_001',
+    });
+
+    const rendered = renderEventPageDocument(document, context);
+
+    expect(rendered.discovery.publicPath).toBe('https://events.example.test/e/all-access-chicago');
   });
 
   it('escapes merge tag values and blocks unsafe links', () => {
@@ -153,9 +169,9 @@ describe('custom embed sanitization', () => {
   it('removes scripts, event handlers, and unsafe URL attributes', () => {
     expect(
       sanitizeEventPageHtml(
-        '<div onclick="alert(1)" onmouseover=alert(2)><script>alert(1)</script><a href="javascript:alert(1)" src=DATA:text/html,evil>quoted</a><img src=file:///etc/passwd onerror=alert(3) /></div>',
+        '<div onclick="alert(1)" onmouseover=alert(2)><script>alert(1)</script><a href="jav&#x61;script:alert(1)" src=DATA:text/html,evil>quoted</a><img src="fi&Tab;le&colon;///etc/passwd" onerror=alert(3) /><a href="java&#9999999999;script:alert(1)">bad entity</a><form action="jav&#x61;script:alert(1)"><button>submit</button></form><iframe srcdoc="&lt;script&gt;alert(1)&lt;/script&gt;"></iframe><object data="jav&#x61;script:alert(1)"></object><svg><a xlink:href="jav&#x61;script:alert(1)">svg</a></svg></div>',
       ),
-    ).toBe('<div><a>quoted</a><img /></div>');
+    ).toBe('<div><a>quoted</a><img /><a>bad entity</a></div>');
   });
 });
 

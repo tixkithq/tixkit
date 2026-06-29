@@ -99,7 +99,9 @@ function createContentDb(seed: Record<string, Record<string, unknown>[]>) {
           returningAll: () => ({
             executeTakeFirstOrThrow: async () => {
               const row = rows(table).find((candidate) =>
-                conditions.every(([column, comparison]) => valueFor(candidate, column) === comparison),
+                conditions.every(
+                  ([column, comparison]) => valueFor(candidate, column) === comparison,
+                ),
               );
               if (!row) throw new Error(`No row to update for ${table}`);
               Object.assign(row, value);
@@ -109,7 +111,9 @@ function createContentDb(seed: Record<string, Record<string, unknown>[]>) {
           }),
           execute: async () => {
             for (const row of rows(table)) {
-              if (conditions.every(([column, comparison]) => valueFor(row, column) === comparison)) {
+              if (
+                conditions.every(([column, comparison]) => valueFor(row, column) === comparison)
+              ) {
                 Object.assign(row, value);
                 updated.push(value);
               }
@@ -223,15 +227,17 @@ function emailDocumentJson(overrides: Parameters<typeof createDefaultEmailTempla
   });
 }
 
-function eventPageJson(overrides: Parameters<typeof createDefaultEventPageDocument>[0] = {
-  eventId: 'evt_1',
-  eventTitle: 'Published page',
-  eventDescription: 'Preview copy',
-  startsAt: '2026-07-17T19:00:00.000Z',
-  timezone: 'America/Chicago',
-  venue: { name: 'The Salt Shed', city: 'Chicago' },
-  checkoutUrl: 'https://checkout.tixkit.com/checkout?eventId=evt_1',
-}) {
+function eventPageJson(
+  overrides: Parameters<typeof createDefaultEventPageDocument>[0] = {
+    eventId: 'evt_1',
+    eventTitle: 'Published page',
+    eventDescription: 'Preview copy',
+    startsAt: '2026-07-17T19:00:00.000Z',
+    timezone: 'America/Chicago',
+    venue: { name: 'The Salt Shed', city: 'Chicago' },
+    checkoutUrl: 'https://checkout.tixkit.com/checkout?eventId=evt_1',
+  },
+) {
   return createDefaultEventPageDocument(overrides);
 }
 
@@ -393,8 +399,10 @@ describe('content routes', () => {
       subject: 'Tickets for {{event.title}}',
       previewText: 'Ready for {{recipient.name}}',
       renderedHtml: '<h1>{{event.title}}</h1><p>Hi {{recipient.name}}</p>',
+      renderedText: expect.stringContaining('TICKET SUMMARY'),
       validation: { valid: true },
     });
+    expect(save.json().renderedText).not.toBe('caller supplied text');
 
     const context = {
       event: {
@@ -723,7 +731,10 @@ describe('content routes', () => {
     );
     expect(inserted).toEqual(
       expect.arrayContaining([
-        expect.objectContaining({ document_id: 'cdoc_sms', rendered_text: smsDocument.editor.body }),
+        expect.objectContaining({
+          document_id: 'cdoc_sms',
+          rendered_text: smsDocument.editor.body,
+        }),
         expect.objectContaining({
           channel: 'sms',
           recipient: '+15550000001',

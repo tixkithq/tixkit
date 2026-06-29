@@ -363,9 +363,9 @@ export function renderEventPageDocument(
   }
 
   const headless = document.blocks.map((block) => renderHeadlessBlock(block, context, options));
-  const html = `<main class="tixkit-event-page" data-schema-version="${EVENT_PAGE_SCHEMA_VERSION}">${headless
+  const html = `<div class="tixkit-event-page" data-schema-version="${EVENT_PAGE_SCHEMA_VERSION}">${headless
     .map((block) => block.html ?? '')
-    .join('')}</main>`;
+    .join('')}</div>`;
   return {
     html,
     text: toPlainText(headless),
@@ -377,15 +377,78 @@ export function renderEventPageDocument(
 
 export function sanitizeEventPageHtml(html: string): string {
   return html
-    .replace(/<script[\s\S]*?>[\s\S]*?<\/script>/gi, '')
+    .replace(
+      /<iframe\b(?=[^>]*\ssrcdoc\b)[\s\S]*?<\/iframe>/gi,
+      '',
+    )
+    .replace(
+      /<(script|object|embed|form|svg|math|base|link|meta|style|template)\b[\s\S]*?<\/\1>/gi,
+      '',
+    )
+    .replace(
+      /<(script|object|embed|form|svg|math|base|link|meta|style|template)\b[^>]*\/?>/gi,
+      '',
+    )
     .replace(
       /\s+on[a-z][\w:-]*(?:\s*=\s*(?:"[^"]*"|'[^']*'|`[^`]*`|[^\s"'`=<>]+))?/gi,
       '',
     )
     .replace(
-      /\s+(href|src)\s*=\s*(?:"[\s\u0000-\u001f]*(?:javascript|data|file):[^"]*"|'[\s\u0000-\u001f]*(?:javascript|data|file):[^']*'|`[\s\u0000-\u001f]*(?:javascript|data|file):[^`]*`|[\s\u0000-\u001f]*(?:javascript|data|file):[^\s"'`=<>]*)/gi,
+      /\s+(srcdoc|style)\s*=\s*("[^"]*"|'[^']*'|`[^`]*`|[^\s"'`=<>]*)/gi,
       '',
+    )
+    .replace(
+      /\s+(href|src|data|action|formaction|xlink:href)\s*=\s*("[^"]*"|'[^']*'|`[^`]*`|[^\s"'`=<>]*)/gi,
+      (attribute: string, _name: string, rawValue: string) =>
+        hasUnsafeHtmlUrlScheme(rawValue) ? '' : attribute,
     );
+}
+
+function hasUnsafeHtmlUrlScheme(rawValue: string): boolean {
+  const value = stripAttributeQuotes(rawValue)
+    .replace(/&(?:#x([0-9a-f]+)|#([0-9]+)|([a-z][a-z0-9]+));?/gi, (_entity, hex, decimal, named) => {
+      if (hex) return htmlCodePointEntity(hex, 16);
+      if (decimal) return htmlCodePointEntity(decimal, 10);
+      return namedHtmlEntity(named);
+    })
+    .split('')
+    .filter((char) => {
+      const code = char.codePointAt(0) ?? 0;
+      return code > 0x20 && code !== 0x7f;
+    })
+    .join('')
+    .trim()
+    .toLowerCase();
+  return /^(?:javascript|data|file):/.test(value);
+}
+
+function stripAttributeQuotes(rawValue: string): string {
+  const first = rawValue[0];
+  const last = rawValue[rawValue.length - 1];
+  return (first === '"' || first === "'" || first === '`') && first === last
+    ? rawValue.slice(1, -1)
+    : rawValue;
+}
+
+function htmlCodePointEntity(value: string, radix: number): string {
+  const codePoint = Number.parseInt(value, radix);
+  if (!Number.isFinite(codePoint) || codePoint < 0 || codePoint > 0x10ffff) {
+    return '';
+  }
+  return String.fromCodePoint(codePoint);
+}
+
+function namedHtmlEntity(name: string): string {
+  const normalized = name.toLowerCase();
+  if (normalized === 'colon') return ':';
+  if (normalized === 'tab') return '\t';
+  if (normalized === 'newline') return '\n';
+  if (normalized === 'amp') return '&';
+  if (normalized === 'lt') return '<';
+  if (normalized === 'gt') return '>';
+  if (normalized === 'quot') return '"';
+  if (normalized === 'apos') return "'";
+  return `&${name};`;
 }
 
 export function normalizeEventPageDocument(value: unknown): EventPageDocument | undefined {
@@ -789,15 +852,17 @@ function renderItem(
 
 function discoveryCard(document: EventPageDocument, context: EventPageRenderContext): EventPageDiscoveryCard {
   const hero = document.blocks.find((block): block is Extract<EventPageBlock, { type: 'hero' }> => block.type === 'hero');
+  const imageUrl = document.settings.discovery.coverImageUrl ?? hero?.imageUrl;
+  const publicPath = document.settings.publicPath ?? context.event?.publicUrl;
   return {
     title: renderPlain(document.settings.discovery.seoTitle ?? hero?.headline ?? context.event?.title ?? 'Event', context),
     summary: renderPlain(document.settings.discovery.summary, context),
     category: document.settings.discovery.category,
     tags: document.settings.discovery.tags,
-    imageUrl: document.settings.discovery.coverImageUrl ?? hero?.imageUrl,
+    imageUrl: imageUrl ? safeRenderedUrl(imageUrl, context, {}) : undefined,
     startsAt: context.event?.startsAt,
     venueName: context.event?.venueName,
-    publicPath: document.settings.publicPath ?? context.event?.publicUrl,
+    publicPath: publicPath ? safeRenderedUrl(publicPath, context, {}) : undefined,
   };
 }
 

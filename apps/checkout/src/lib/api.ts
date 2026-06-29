@@ -428,6 +428,20 @@ export const publicApi = {
     );
   },
 
+  async getEventPageBySlug(
+    slug: string,
+    host: string,
+    signal?: AbortSignal,
+    locale?: string,
+  ): Promise<PublicContentPage> {
+    const params = new URLSearchParams({ host });
+    if (locale) params.set('locale', locale);
+    return apiRequest<PublicContentPage>(
+      `/public/events/by-slug/${encodeURIComponent(slug)}/page?${params.toString()}`,
+      { signal },
+    );
+  },
+
   async getAvailability(
     eventId: string,
     signal?: AbortSignal,
