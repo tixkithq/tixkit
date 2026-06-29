@@ -9,3 +9,5 @@ All SDKs in this directory are pinned to API version `2026-01-01` and are covere
 - [Flutter](./flutter.md)
 - [iOS](./ios.md)
 - [Android](./android.md)
+- [Go](./go.md)
+- [Rust](./rust.md)

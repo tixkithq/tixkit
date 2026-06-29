@@ -88,6 +88,38 @@ const checks = [
       'syncScans',
     ],
   },
+  {
+    platform: 'Rust',
+    file: 'packages/sdk-rust/src/lib.rs',
+    patterns: [
+      'TIXKIT_API_VERSION: &str = "2026-01-01"',
+      'TixkitClientBuilder',
+      'create_box_office_order',
+      'Idempotency-Key',
+      'verify_tixkit_webhook',
+      'PageParams',
+    ],
+  },
+  {
+    platform: 'Go',
+    file: 'packages/sdk-go/client.go',
+    patterns: [
+      'APIVersion = "2026-01-01"',
+      'NewClient',
+      'X-Tixkit-Version',
+      'Idempotency-Key',
+      'CheckoutSessions',
+    ],
+  },
+  {
+    platform: 'Go Webhooks',
+    file: 'packages/sdk-go/webhook.go',
+    patterns: [
+      'VerifyWebhookSignature',
+      'WebhookSignatureHeader',
+      't=%d,v1=%s',
+    ],
+  },
 ];
 
 const guides = [
@@ -98,6 +130,8 @@ const guides = [
   'docs/sdk-guides/flutter.md',
   'docs/sdk-guides/ios.md',
   'docs/sdk-guides/android.md',
+  'docs/sdk-guides/go.md',
+  'docs/sdk-guides/rust.md',
 ];
 
 const npmIgnores = [
