@@ -462,6 +462,24 @@ export interface TicketTable {
   updated_at: Timestamp;
 }
 
+export interface TicketListingTable {
+  id: string;
+  tenant_id: string;
+  event_id: string;
+  ticket_id: string;
+  seller_id: string;
+  status: 'listed' | 'delisted' | 'sold' | 'expired';
+  price_cents: number | string;
+  currency: string;
+  face_value_cents: number | string;
+  sold_to_id: string | null;
+  active_listing_key: string;
+  expires_at: Timestamp | null;
+  sold_at: Timestamp | null;
+  created_at: Timestamp;
+  updated_at: Timestamp;
+}
+
 export interface WalletPassTable {
   id: string;
   tenant_id: string;
@@ -1360,6 +1378,7 @@ export interface DB {
   attendees: AttendeeTable;
   order_timeline_events: OrderTimelineEventTable;
   tickets: TicketTable;
+  ticket_listings: TicketListingTable;
   wallet_passes: WalletPassTable;
   upload_artifacts: UploadArtifactTable;
   widget_impressions: WidgetImpressionTable;

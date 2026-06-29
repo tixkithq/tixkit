@@ -37,6 +37,7 @@ import { EmailJobsTemplateVersionForeignKeyMigration } from './migrations/0033_e
 import { OfflineCheckInBulkSyncMigration } from './migrations/0034_offline_check_in_bulk_sync.js';
 import { OfflineCheckInBulkSyncHardeningMigration } from './migrations/0035_offline_check_in_bulk_sync_hardening.js';
 import { OrganizationBoxOfficeSettingsMigration } from './migrations/0036_organization_box_office_settings.js';
+import { TicketListingsMigration } from './migrations/0037_ticket_listings.js';
 
 const INITIAL_MIGRATION_NAME = '0001_initial';
 const MIGRATION_TABLE = 'kysely_migration';
@@ -135,6 +136,7 @@ const ALL_SCHEMA_TABLES = [
   'content_documents',
   'offline_check_in_sync_chunks',
   'offline_check_in_sync_jobs',
+  'ticket_listings',
 ] as const;
 
 function quoteMssqlIdentifier(identifier: string): string {
@@ -196,6 +198,7 @@ export class TixkitMigrationProvider implements MigrationProvider {
       '0034_offline_check_in_bulk_sync': OfflineCheckInBulkSyncMigration,
       '0035_offline_check_in_bulk_sync_hardening': OfflineCheckInBulkSyncHardeningMigration,
       '0036_organization_box_office_settings': OrganizationBoxOfficeSettingsMigration,
+      '0037_ticket_listings': TicketListingsMigration,
     };
   }
 }

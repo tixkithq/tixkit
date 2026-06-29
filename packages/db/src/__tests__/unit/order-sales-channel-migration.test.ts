@@ -8,6 +8,7 @@ import { EmailJobsTemplateVersionForeignKeyMigration } from '../../migrations/00
 import { OfflineCheckInBulkSyncMigration } from '../../migrations/0034_offline_check_in_bulk_sync.js';
 import { OfflineCheckInBulkSyncHardeningMigration } from '../../migrations/0035_offline_check_in_bulk_sync_hardening.js';
 import { OrganizationBoxOfficeSettingsMigration } from '../../migrations/0036_organization_box_office_settings.js';
+import { TicketListingsMigration } from '../../migrations/0037_ticket_listings.js';
 
 const offlineCheckInBulkSyncMigrationPath = new URL(
   '../../migrations/0034_offline_check_in_bulk_sync.ts',
@@ -19,6 +20,10 @@ const offlineCheckInBulkSyncHardeningMigrationPath = new URL(
 );
 const organizationBoxOfficeSettingsMigrationPath = new URL(
   '../../migrations/0036_organization_box_office_settings.ts',
+  import.meta.url,
+);
+const ticketListingsMigrationPath = new URL(
+  '../../migrations/0037_ticket_listings.ts',
   import.meta.url,
 );
 
@@ -166,7 +171,7 @@ describe('OrderSalesChannelMigration', () => {
   it('is registered with the production migrator provider', async () => {
     const migrations = await new TixkitMigrationProvider().getMigrations();
 
-    expect(Object.keys(migrations).at(-1)).toBe('0036_organization_box_office_settings');
+    expect(Object.keys(migrations).at(-1)).toBe('0037_ticket_listings');
     expect(migrations['0031_order_sales_channel']).toBe(OrderSalesChannelMigration);
     expect(migrations['0032_scan_logs_ticket_index']).toBe(ScanLogsTicketIndexMigration);
     expect(migrations['0033_email_jobs_template_version_fk']).toBe(
@@ -179,6 +184,19 @@ describe('OrderSalesChannelMigration', () => {
     expect(migrations['0036_organization_box_office_settings']).toBe(
       OrganizationBoxOfficeSettingsMigration,
     );
+    expect(migrations['0037_ticket_listings']).toBe(TicketListingsMigration);
+  });
+
+  it('keeps ticket listings portable with a cross-database active listing key', () => {
+    const source = readFileSync(ticketListingsMigrationPath, 'utf8');
+
+    expect(source).toContain("process.env.DB_DRIVER === 'mysql'");
+    expect(source).toContain("process.env.DB_DRIVER === 'mssql'");
+    expect(source).toContain("createTable('ticket_listings')");
+    expect(source).toContain('active_listing_key');
+    expect(source).toContain('ticket_listings_active_unique');
+    expect(source).toContain("status in ('listed', 'delisted', 'sold', 'expired')");
+    expect(source).toContain('price_cents >= 0');
   });
 
   it('keeps organization box-office settings migration portable across supported SQL drivers', () => {

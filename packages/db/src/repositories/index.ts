@@ -21,7 +21,12 @@ export {
   OrderRepository,
   AttendeeRepository,
 } from './checkout.js';
-export { TicketRepository, CheckInListRepository, ScanLogRepository } from './ticket.js';
+export {
+  TicketRepository,
+  TicketListingRepository,
+  CheckInListRepository,
+  ScanLogRepository,
+} from './ticket.js';
 export {
   PaymentIntentRepository,
   PaymentCompensationRepository,

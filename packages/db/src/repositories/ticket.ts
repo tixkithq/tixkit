@@ -1,6 +1,8 @@
 import { BaseRepository } from './base.js';
 import { ulid } from 'ulid';
 
+type TicketListingTerminalStatus = 'delisted' | 'expired';
+
 export class TicketRepository extends BaseRepository {
   async create(input: {
     tenantId: string;
@@ -103,6 +105,148 @@ export class TicketRepository extends BaseRepository {
       }
       return updated;
     });
+  }
+}
+
+export class TicketListingRepository extends BaseRepository {
+  async create(input: {
+    tenantId: string;
+    eventId: string;
+    ticketId: string;
+    sellerId: string;
+    priceCents: number;
+    currency: string;
+    faceValueCents: number;
+    expiresAt?: Date;
+  }) {
+    const id = `lst_${ulid()}`;
+    const now = new Date();
+    return this.insertReturning(
+      'ticket_listings',
+      {
+        id,
+        tenant_id: input.tenantId,
+        event_id: input.eventId,
+        ticket_id: input.ticketId,
+        seller_id: input.sellerId,
+        status: 'listed',
+        price_cents: input.priceCents,
+        currency: input.currency,
+        face_value_cents: input.faceValueCents,
+        sold_to_id: null,
+        active_listing_key: input.ticketId,
+        expires_at: input.expiresAt ?? null,
+        sold_at: null,
+        created_at: now,
+        updated_at: now,
+      },
+      id,
+    );
+  }
+
+  async findById(id: string) {
+    return this.db
+      .selectFrom('ticket_listings')
+      .selectAll()
+      .where('id', '=', id)
+      .executeTakeFirst();
+  }
+
+  async findActiveByTicket(tenantId: string, ticketId: string) {
+    return this.db
+      .selectFrom('ticket_listings')
+      .selectAll()
+      .where('tenant_id', '=', tenantId)
+      .where('ticket_id', '=', ticketId)
+      .where('status', '=', 'listed')
+      .executeTakeFirst();
+  }
+
+  async findByEvent(eventId: string, limit = 50, cursor?: string) {
+    let query = this.db
+      .selectFrom('ticket_listings')
+      .selectAll()
+      .where('event_id', '=', eventId)
+      .orderBy('id', 'asc')
+      .limit(limit);
+    if (cursor) query = query.where('id', '>', cursor);
+    return query.execute();
+  }
+
+  async delist(id: string) {
+    return this.setTerminalStatus(id, 'delisted');
+  }
+
+  async expire(id: string) {
+    return this.setTerminalStatus(id, 'expired');
+  }
+
+  async markSold(id: string, buyerId: string) {
+    await this.updateListedListing(id, {
+      status: 'sold',
+      sold_to_id: buyerId,
+      sold_at: new Date(),
+      active_listing_key: id,
+      updated_at: new Date(),
+    });
+    return this.findByIdOrThrow(id);
+  }
+
+  async relist(
+    id: string,
+    input: {
+      priceCents: number;
+      faceValueCents: number;
+      expiresAt?: Date;
+    },
+  ) {
+    const listing = await this.findByIdOrThrow(id);
+    const result = await this.db
+      .updateTable('ticket_listings')
+      .set({
+        status: 'listed',
+        price_cents: input.priceCents,
+        face_value_cents: input.faceValueCents,
+        sold_to_id: null,
+        sold_at: null,
+        active_listing_key: listing.ticket_id,
+        expires_at: input.expiresAt ?? null,
+        updated_at: new Date(),
+      })
+      .where('id', '=', id)
+      .where('status', '=', 'delisted')
+      .executeTakeFirst();
+    if (Number(result.numUpdatedRows ?? 0) !== 1) {
+      throw new Error(`Ticket listing ${id} is not delisted`);
+    }
+    return this.findByIdOrThrow(id);
+  }
+
+  private async setTerminalStatus(id: string, status: TicketListingTerminalStatus) {
+    await this.updateListedListing(id, {
+      status,
+      active_listing_key: id,
+      updated_at: new Date(),
+    });
+    return this.findByIdOrThrow(id);
+  }
+
+  private async updateListedListing(id: string, values: Record<string, unknown>) {
+    const result = await this.db
+      .updateTable('ticket_listings')
+      .set(values)
+      .where('id', '=', id)
+      .where('status', '=', 'listed')
+      .executeTakeFirst();
+    if (Number(result.numUpdatedRows ?? 0) !== 1) {
+      throw new Error(`Ticket listing ${id} is not listed`);
+    }
+  }
+
+  private async findByIdOrThrow(id: string) {
+    const listing = await this.findById(id);
+    if (!listing) throw new Error(`Ticket listing ${id} not found`);
+    return listing;
   }
 }
 

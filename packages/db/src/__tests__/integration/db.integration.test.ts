@@ -8,6 +8,11 @@ import {
   EventRepository,
   InventoryPoolRepository,
   OrganizationRepository,
+  CheckoutSessionRepository,
+  OrderRepository,
+  AttendeeRepository,
+  TicketRepository,
+  TicketListingRepository,
   TenantRepository,
   TicketTypeRepository,
 } from '../../repositories/index.js';
@@ -144,6 +149,120 @@ describe.each(driverCases)('database integration: $driver', ({ driver, url }) =>
       tenant_id: tenant.id,
       organization_id: organization.id,
     });
+  });
+
+  it('persists resale listings and enforces one active listing per ticket', async () => {
+    const { tenant, brand, event, ticketType } = await createCatalog(db);
+    const checkoutSession = await new CheckoutSessionRepository(db).create({
+      tenantId: tenant.id,
+      eventId: event.id,
+      brandId: brand.id,
+      currency: 'USD',
+      cart: { items: [{ ticketTypeId: ticketType.id, quantity: 1 }] },
+      buyer: { email: 'seller@example.com' },
+      quote: { totalCents: 2500 },
+      expiresAt: new Date(Date.now() + 900_000),
+      idempotencyKey: `resale-session-${driver}`,
+    });
+    const order = await new OrderRepository(db).create({
+      tenantId: tenant.id,
+      organizationId: event.organization_id,
+      brandId: brand.id,
+      eventId: event.id,
+      checkoutSessionId: checkoutSession.id,
+      orderNumber: `RESALE-${driver}`,
+      status: 'paid',
+      currency: 'USD',
+      subtotalCents: 2500,
+      discountCents: 0,
+      taxCents: 0,
+      feeCents: 0,
+      totalCents: 2500,
+      buyerEmail: 'seller@example.com',
+    });
+    const attendee = await new AttendeeRepository(db).create({
+      tenantId: tenant.id,
+      orderId: order.id,
+      eventId: event.id,
+      ticketTypeId: ticketType.id,
+      email: 'seller@example.com',
+    });
+    const ticket = await new TicketRepository(db).create({
+      tenantId: tenant.id,
+      orderId: order.id,
+      attendeeId: attendee.id,
+      eventId: event.id,
+      ticketTypeId: ticketType.id,
+      code: `RESALE-${driver}`,
+      qrPayload: `resale-payload-${driver}`,
+      qrHash: `resale-hash-${driver}`,
+    });
+
+    const repo = new TicketListingRepository(db);
+    const listing = await repo.create({
+      tenantId: tenant.id,
+      eventId: event.id,
+      ticketId: ticket.id,
+      sellerId: 'usr_seller',
+      priceCents: 2400,
+      currency: 'USD',
+      faceValueCents: 2500,
+    });
+
+    expect(listing).toMatchObject({
+      tenant_id: tenant.id,
+      ticket_id: ticket.id,
+      status: 'listed',
+      active_listing_key: ticket.id,
+    });
+    expect(Number(listing.price_cents)).toBe(2400);
+    await expect(repo.findActiveByTicket(tenant.id, ticket.id)).resolves.toMatchObject({
+      id: listing.id,
+    });
+    await expect(
+      repo.create({
+        tenantId: tenant.id,
+        eventId: event.id,
+        ticketId: ticket.id,
+        sellerId: 'usr_seller',
+        priceCents: 2300,
+        currency: 'USD',
+        faceValueCents: 2500,
+      }),
+    ).rejects.toThrow();
+
+    const delisted = await repo.delist(listing.id);
+    expect(delisted).toMatchObject({
+      status: 'delisted',
+      active_listing_key: listing.id,
+    });
+    await expect(repo.markSold(listing.id, 'usr_late_buyer')).rejects.toThrow(
+      `Ticket listing ${listing.id} is not listed`,
+    );
+    await expect(repo.findActiveByTicket(tenant.id, ticket.id)).resolves.toBeUndefined();
+
+    const secondListing = await repo.create({
+      tenantId: tenant.id,
+      eventId: event.id,
+      ticketId: ticket.id,
+      sellerId: 'usr_seller',
+      priceCents: 2200,
+      currency: 'USD',
+      faceValueCents: 2500,
+    });
+    const sold = await repo.markSold(secondListing.id, 'usr_buyer');
+    expect(sold).toMatchObject({
+      status: 'sold',
+      sold_to_id: 'usr_buyer',
+      active_listing_key: secondListing.id,
+    });
+    expect(sold.sold_at).toBeTruthy();
+    await expect(
+      repo.relist(secondListing.id, {
+        priceCents: 2100,
+        faceValueCents: 2500,
+      }),
+    ).rejects.toThrow(`Ticket listing ${secondListing.id} is not delisted`);
   });
 
   it('duplicates content documents as unpublished draft copies with fresh version identity', async () => {
