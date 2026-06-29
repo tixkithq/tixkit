@@ -2,10 +2,21 @@
 name = "tixkit"
 version = "0.1.0"
 edition = "2024"
+rust-version = "1.93"
 license = "Apache-2.0"
 description = "Async Rust SDK for the Tixkit API"
 repository = "https://github.com/nkgotcode/tixkit"
-rust-version = "1.93"
+homepage = "https://github.com/nkgotcode/tixkit"
+documentation = "https://docs.rs/tixkit"
+readme = "README.md"
+keywords = ["tixkit", "ticketing", "sdk", "api", "webhooks"]
+categories = ["api-bindings", "asynchronous", "web-programming::http-client"]
+include = [
+  "Cargo.toml",
+  "README.md",
+  "src/**/*.rs",
+  "examples/**/*.rs",
+]
 
 [dependencies]
 futures-util = "0.3.32"

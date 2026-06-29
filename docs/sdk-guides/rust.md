@@ -67,4 +67,8 @@ cargo fmt --check
 cargo clippy --all-targets -- -D warnings
 cargo test
 cargo build --examples
+cargo package --allow-dirty
 ```
+
+The crate manifest includes crates.io/docs.rs metadata and an explicit package
+include list so local build artifacts are not published.
