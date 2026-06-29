@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import '@testing-library/jest-dom/vitest';
 import * as React from 'react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
@@ -210,6 +210,53 @@ describe('SmsPersistedEditorView', () => {
       'cdoc_sms',
       expect.objectContaining({
         contentJson: expect.objectContaining({ schemaVersion: 1 }),
+      }),
+    );
+  });
+
+  it('ignores stale save completions before publishing the latest SMS draft', async () => {
+    let resolveStaleSave: (value: unknown) => void;
+    adminApiMock.saveContentVersion
+      .mockReturnValueOnce(
+        new Promise((resolve) => {
+          resolveStaleSave = resolve;
+        }),
+      )
+      .mockResolvedValue(ok({ ...savedVersion, id: 'cver_fresh', versionNumber: 3 }));
+    adminApiMock.publishContentVersion.mockResolvedValue(
+      ok({
+        document: { ...document, status: 'published', publishedVersionId: 'cver_fresh' },
+        version: { ...savedVersion, id: 'cver_fresh', versionNumber: 3, status: 'published' },
+      }),
+    );
+
+    render(React.createElement(SmsPersistedEditorView, { eventId: 'evt_1' }));
+
+    const body = await screen.findByLabelText('SMS body');
+    fireEvent.change(body, { target: { value: 'Stale SMS body.' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Save draft' }));
+    await waitFor(() => expect(screen.getByText('Saving')).toBeInTheDocument());
+
+    fireEvent.change(body, { target: { value: 'Fresh SMS body.' } });
+    await waitFor(() => expect(screen.getByText('Ready')).toBeInTheDocument());
+
+    await act(async () => {
+      resolveStaleSave(ok({ ...savedVersion, id: 'cver_stale', renderedText: 'Stale SMS body.' }));
+    });
+
+    expect(screen.queryByText('Saved draft v2')).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Publish' }));
+    await waitFor(() => {
+      expect(adminApiMock.publishContentVersion).toHaveBeenCalledWith('cdoc_sms', 'cver_fresh');
+    });
+    expect(adminApiMock.saveContentVersion).toHaveBeenLastCalledWith(
+      'cdoc_sms',
+      expect.objectContaining({
+        renderedText: 'Fresh SMS body.',
+        contentJson: expect.objectContaining({
+          editor: expect.objectContaining({ body: 'Fresh SMS body.' }),
+        }),
       }),
     );
   });

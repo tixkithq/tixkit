@@ -262,6 +262,22 @@ export function EventPagePersistedEditorView({ eventId }: { eventId: string }) {
   const [loading, setLoading] = React.useState(true);
   const [error, setError] = React.useState<string>();
   const [notice, setNotice] = React.useState<string>();
+  const operationIdRef = React.useRef(0);
+
+  function nextOperationId() {
+    operationIdRef.current += 1;
+    return operationIdRef.current;
+  }
+
+  function isCurrentOperation(operationId: number) {
+    return operationIdRef.current === operationId;
+  }
+
+  function markDraftDirty() {
+    nextOperationId();
+    setAutosave('idle');
+    setNotice(undefined);
+  }
 
   const load = React.useCallback(async () => {
     setLoading(true);
@@ -363,17 +379,18 @@ export function EventPagePersistedEditorView({ eventId }: { eventId: string }) {
     void load();
   }, [load]);
 
-  async function saveDraft() {
-    if (!document || !event || !eventPageDocument) return undefined;
+  async function saveDraft(operationId = nextOperationId(), snapshot = eventPageDocument) {
+    if (!document || !event || !snapshot) return undefined;
     setAutosave('saving');
-    const rendered = renderEventPageDocument(eventPageDocument, sampleContext(event));
+    const rendered = renderEventPageDocument(snapshot, sampleContext(event));
     const result = await adminApi.saveContentVersion(document.id, {
-      contentJson: eventPageDocument,
-      subject: heroHeadline(eventPageDocument),
-      previewText: eventPageDocument.settings.discovery.summary,
+      contentJson: snapshot,
+      subject: heroHeadline(snapshot),
+      previewText: snapshot.settings.discovery.summary,
       renderedHtml: rendered.html,
       renderedText: rendered.text,
     });
+    if (!isCurrentOperation(operationId)) return undefined;
     if (!result.ok) {
       setAutosave('error');
       setError(resultMessage(result.error, 'Unable to save event-page draft'));
@@ -389,15 +406,18 @@ export function EventPagePersistedEditorView({ eventId }: { eventId: string }) {
 
   async function previewSavedDraft() {
     if (!document || !event || !eventPageDocument) return;
-    const saved = await saveDraft();
+    const operationId = nextOperationId();
+    const snapshot = eventPageDocument;
+    const saved = await saveDraft(operationId, snapshot);
     if (!saved) return;
     const result = await adminApi.previewContent(document.id, {
       versionId: saved.id,
-      contentJson: eventPageDocument,
-      subject: heroHeadline(eventPageDocument),
-      previewText: eventPageDocument.settings.discovery.summary,
+      contentJson: snapshot,
+      subject: heroHeadline(snapshot),
+      previewText: snapshot.settings.discovery.summary,
       context: sampleContext(event),
     });
+    if (!isCurrentOperation(operationId)) return;
     if (!result.ok) {
       setAutosave('error');
       setError(resultMessage(result.error, 'Unable to preview event-page draft'));
@@ -408,10 +428,12 @@ export function EventPagePersistedEditorView({ eventId }: { eventId: string }) {
   }
 
   async function publishDraft() {
-    if (!document) return;
-    const saved = await saveDraft();
+    if (!document || !eventPageDocument) return;
+    const operationId = nextOperationId();
+    const saved = await saveDraft(operationId, eventPageDocument);
     if (!saved) return;
     const result = await adminApi.publishContentVersion(document.id, saved.id);
+    if (!isCurrentOperation(operationId)) return;
     if (!result.ok) {
       setAutosave('error');
       setError(resultMessage(result.error, 'Unable to publish event page'));
@@ -429,7 +451,9 @@ export function EventPagePersistedEditorView({ eventId }: { eventId: string }) {
 
   async function archiveDocument() {
     if (!document) return;
+    const operationId = nextOperationId();
     const result = await adminApi.archiveContentDocument(document.id);
+    if (!isCurrentOperation(operationId)) return;
     if (!result.ok) {
       setAutosave('error');
       setError(resultMessage(result.error, 'Unable to archive event page'));
@@ -476,8 +500,7 @@ export function EventPagePersistedEditorView({ eventId }: { eventId: string }) {
               className="w-full rounded-md border bg-background px-3 py-2 text-sm"
               onChange={(change) => {
                 setEventPageDocument(updateHero(eventPageDocument, { headline: change.currentTarget.value }));
-                setAutosave('idle');
-                setNotice(undefined);
+                markDraftDirty();
               }}
               value={heroHeadline(eventPageDocument)}
             />
@@ -488,8 +511,7 @@ export function EventPagePersistedEditorView({ eventId }: { eventId: string }) {
               className="min-h-28 w-full rounded-md border bg-background px-3 py-2 text-sm leading-6"
               onChange={(change) => {
                 setEventPageDocument(updateSummary(eventPageDocument, change.currentTarget.value));
-                setAutosave('idle');
-                setNotice(undefined);
+                markDraftDirty();
               }}
               value={heroBody(eventPageDocument)}
             />
@@ -502,8 +524,7 @@ export function EventPagePersistedEditorView({ eventId }: { eventId: string }) {
               className="w-full rounded-md border bg-background px-3 py-2"
               onChange={(change) => {
                 setEventPageDocument(updateTicketCta(eventPageDocument, change.currentTarget.value));
-                setAutosave('idle');
-                setNotice(undefined);
+                markDraftDirty();
               }}
               value={ticketCtaLabel(eventPageDocument)}
             />

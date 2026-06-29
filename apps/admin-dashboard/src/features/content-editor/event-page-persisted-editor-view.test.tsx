@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import '@testing-library/jest-dom/vitest';
 import * as React from 'react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
@@ -211,6 +211,55 @@ describe('EventPagePersistedEditorView', () => {
           editor: expect.objectContaining({ provider: '@tiptap/core' }),
         }),
         renderedHtml: expect.stringContaining('tixkit-event-page'),
+      }),
+    );
+  });
+
+  it('ignores stale save completions before publishing the latest event-page draft', async () => {
+    let resolveStaleSave: (value: unknown) => void;
+    adminApiMock.saveContentVersion
+      .mockReturnValueOnce(
+        new Promise((resolve) => {
+          resolveStaleSave = resolve;
+        }),
+      )
+      .mockResolvedValue(ok({ ...savedVersion, id: 'cver_fresh', versionNumber: 3 }));
+    adminApiMock.publishContentVersion.mockResolvedValue(
+      ok({
+        document: { ...document, status: 'published', publishedVersionId: 'cver_fresh' },
+        version: { ...savedVersion, id: 'cver_fresh', versionNumber: 3, status: 'published' },
+      }),
+    );
+
+    render(React.createElement(EventPagePersistedEditorView, { eventId: 'evt_1' }));
+
+    const headline = await screen.findByLabelText('Page headline');
+    fireEvent.change(headline, { target: { value: 'Stale hosted page' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Save draft' }));
+    await waitFor(() => expect(screen.getByText('Saving')).toBeInTheDocument());
+
+    fireEvent.change(headline, { target: { value: 'Fresh hosted page' } });
+    await waitFor(() => expect(screen.getByText('Ready')).toBeInTheDocument());
+
+    await act(async () => {
+      resolveStaleSave(ok({ ...savedVersion, id: 'cver_stale', subject: 'Stale hosted page' }));
+    });
+
+    expect(screen.queryByText('Saved draft v2')).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Publish' }));
+    await waitFor(() => {
+      expect(adminApiMock.publishContentVersion).toHaveBeenCalledWith('cdoc_event_page', 'cver_fresh');
+    });
+    expect(adminApiMock.saveContentVersion).toHaveBeenLastCalledWith(
+      'cdoc_event_page',
+      expect.objectContaining({
+        subject: 'Fresh hosted page',
+        contentJson: expect.objectContaining({
+          blocks: expect.arrayContaining([
+            expect.objectContaining({ type: 'hero', headline: 'Fresh hosted page' }),
+          ]),
+        }),
       }),
     );
   });

@@ -146,6 +146,22 @@ export function SmsPersistedEditorView({ eventId }: { eventId: string }) {
   const [loading, setLoading] = React.useState(true);
   const [error, setError] = React.useState<string>();
   const [notice, setNotice] = React.useState<string>();
+  const operationIdRef = React.useRef(0);
+
+  function nextOperationId() {
+    operationIdRef.current += 1;
+    return operationIdRef.current;
+  }
+
+  function isCurrentOperation(operationId: number) {
+    return operationIdRef.current === operationId;
+  }
+
+  function markDraftDirty() {
+    nextOperationId();
+    setAutosave('idle');
+    setNotice(undefined);
+  }
 
   const load = React.useCallback(async () => {
     setLoading(true);
@@ -243,13 +259,14 @@ export function SmsPersistedEditorView({ eventId }: { eventId: string }) {
     void load();
   }, [load]);
 
-  async function saveDraft() {
-    if (!document || !smsDocument) return undefined;
+  async function saveDraft(operationId = nextOperationId(), snapshot = smsDocument) {
+    if (!document || !snapshot) return undefined;
     setAutosave('saving');
     const result = await adminApi.saveContentVersion(document.id, {
-      contentJson: smsDocument,
-      renderedText: smsDocument.editor.body,
+      contentJson: snapshot,
+      renderedText: snapshot.editor.body,
     });
+    if (!isCurrentOperation(operationId)) return undefined;
     if (!result.ok) {
       setAutosave('error');
       setError(resultMessage(result.error, 'Unable to save SMS draft'));
@@ -264,14 +281,17 @@ export function SmsPersistedEditorView({ eventId }: { eventId: string }) {
 
   async function previewSavedDraft() {
     if (!document || !event || !smsDocument) return;
-    const saved = await saveDraft();
+    const operationId = nextOperationId();
+    const snapshot = smsDocument;
+    const saved = await saveDraft(operationId, snapshot);
     if (!saved) return;
     const result = await adminApi.previewContent(document.id, {
       versionId: saved.id,
-      contentJson: smsDocument,
-      renderedText: smsDocument.editor.body,
+      contentJson: snapshot,
+      renderedText: snapshot.editor.body,
       context: sampleContext(event),
     });
+    if (!isCurrentOperation(operationId)) return;
     if (!result.ok) {
       setAutosave('error');
       setError(resultMessage(result.error, 'Unable to preview SMS draft'));
@@ -282,10 +302,12 @@ export function SmsPersistedEditorView({ eventId }: { eventId: string }) {
   }
 
   async function publishDraft() {
-    if (!document) return;
-    const saved = await saveDraft();
+    if (!document || !smsDocument) return;
+    const operationId = nextOperationId();
+    const saved = await saveDraft(operationId, smsDocument);
     if (!saved) return;
     const result = await adminApi.publishContentVersion(document.id, saved.id);
+    if (!isCurrentOperation(operationId)) return;
     if (!result.ok) {
       setAutosave('error');
       setError(resultMessage(result.error, 'Unable to publish SMS draft'));
@@ -302,14 +324,16 @@ export function SmsPersistedEditorView({ eventId }: { eventId: string }) {
   }
 
   async function sendTest() {
-    if (!document) return;
-    const saved = await saveDraft();
+    if (!document || !smsDocument) return;
+    const operationId = nextOperationId();
+    const saved = await saveDraft(operationId, smsDocument);
     if (!saved) return;
     const result = await adminApi.testSendContent(document.id, {
       versionId: saved.id,
       recipient,
       context: event ? sampleContext(event) : undefined,
     });
+    if (!isCurrentOperation(operationId)) return;
     if (!result.ok) {
       setAutosave('error');
       setError(resultMessage(result.error, 'Unable to capture SMS test send'));
@@ -321,7 +345,9 @@ export function SmsPersistedEditorView({ eventId }: { eventId: string }) {
 
   async function archiveDocument() {
     if (!document) return;
+    const operationId = nextOperationId();
     const result = await adminApi.archiveContentDocument(document.id);
+    if (!isCurrentOperation(operationId)) return;
     if (!result.ok) {
       setAutosave('error');
       setError(resultMessage(result.error, 'Unable to archive SMS template'));
@@ -370,8 +396,7 @@ export function SmsPersistedEditorView({ eventId }: { eventId: string }) {
                 ...smsDocument,
                 editor: { ...smsDocument.editor, body: change.currentTarget.value },
               });
-              setAutosave('idle');
-              setNotice(undefined);
+              markDraftDirty();
             }}
             value={smsDocument.editor.body}
           />

@@ -218,6 +218,22 @@ export function EmailPersistedEditorView({ eventId }: { eventId: string }) {
   const [loading, setLoading] = React.useState(true);
   const [error, setError] = React.useState<string>();
   const [notice, setNotice] = React.useState<string>();
+  const operationIdRef = React.useRef(0);
+
+  function nextOperationId() {
+    operationIdRef.current += 1;
+    return operationIdRef.current;
+  }
+
+  function isCurrentOperation(operationId: number) {
+    return operationIdRef.current === operationId;
+  }
+
+  function markDraftDirty() {
+    nextOperationId();
+    setAutosave('idle');
+    setNotice(undefined);
+  }
 
   const load = React.useCallback(async () => {
     setLoading(true);
@@ -319,17 +335,18 @@ export function EmailPersistedEditorView({ eventId }: { eventId: string }) {
     void load();
   }, [load]);
 
-  async function saveDraft() {
-    if (!document || !event || !emailDocument) return undefined;
+  async function saveDraft(operationId = nextOperationId(), snapshot = emailDocument) {
+    if (!document || !event || !snapshot) return undefined;
     setAutosave('saving');
-    const rendered = await renderEmailTemplate(emailDocument, sampleContext(event));
+    const rendered = await renderEmailTemplate(snapshot, sampleContext(event));
     const result = await adminApi.saveContentVersion(document.id, {
-      contentJson: emailDocument,
-      subject: emailDocument.settings.subject,
-      previewText: emailDocument.settings.previewText,
-      renderedHtml: emailDocument.editor.contentHtml,
+      contentJson: snapshot,
+      subject: snapshot.settings.subject,
+      previewText: snapshot.settings.previewText,
+      renderedHtml: snapshot.editor.contentHtml,
       renderedText: rendered.text,
     });
+    if (!isCurrentOperation(operationId)) return undefined;
     if (!result.ok) {
       setAutosave('error');
       setError(resultMessage(result.error, 'Unable to save email draft'));
@@ -345,15 +362,18 @@ export function EmailPersistedEditorView({ eventId }: { eventId: string }) {
 
   async function previewSavedDraft() {
     if (!document || !event || !emailDocument) return;
-    const saved = await saveDraft();
+    const operationId = nextOperationId();
+    const snapshot = emailDocument;
+    const saved = await saveDraft(operationId, snapshot);
     if (!saved) return;
     const result = await adminApi.previewContent(document.id, {
       versionId: saved.id,
-      contentJson: emailDocument,
-      subject: emailDocument.settings.subject,
-      previewText: emailDocument.settings.previewText,
+      contentJson: snapshot,
+      subject: snapshot.settings.subject,
+      previewText: snapshot.settings.previewText,
       context: sampleContext(event),
     });
+    if (!isCurrentOperation(operationId)) return;
     if (!result.ok) {
       setAutosave('error');
       setError(resultMessage(result.error, 'Unable to preview email draft'));
@@ -364,10 +384,12 @@ export function EmailPersistedEditorView({ eventId }: { eventId: string }) {
   }
 
   async function publishDraft() {
-    if (!document) return;
-    const saved = await saveDraft();
+    if (!document || !emailDocument) return;
+    const operationId = nextOperationId();
+    const saved = await saveDraft(operationId, emailDocument);
     if (!saved) return;
     const result = await adminApi.publishContentVersion(document.id, saved.id);
+    if (!isCurrentOperation(operationId)) return;
     if (!result.ok) {
       setAutosave('error');
       setError(resultMessage(result.error, 'Unable to publish email draft'));
@@ -384,14 +406,16 @@ export function EmailPersistedEditorView({ eventId }: { eventId: string }) {
   }
 
   async function sendTest() {
-    if (!document) return;
-    const saved = await saveDraft();
+    if (!document || !emailDocument) return;
+    const operationId = nextOperationId();
+    const saved = await saveDraft(operationId, emailDocument);
     if (!saved) return;
     const result = await adminApi.testSendContent(document.id, {
       versionId: saved.id,
       recipient,
       context: event ? sampleContext(event) : undefined,
     });
+    if (!isCurrentOperation(operationId)) return;
     if (!result.ok) {
       setAutosave('error');
       setError(resultMessage(result.error, 'Unable to capture email test send'));
@@ -403,7 +427,9 @@ export function EmailPersistedEditorView({ eventId }: { eventId: string }) {
 
   async function archiveDocument() {
     if (!document) return;
+    const operationId = nextOperationId();
     const result = await adminApi.archiveContentDocument(document.id);
+    if (!isCurrentOperation(operationId)) return;
     if (!result.ok) {
       setAutosave('error');
       setError(resultMessage(result.error, 'Unable to archive email template'));
@@ -453,8 +479,7 @@ export function EmailPersistedEditorView({ eventId }: { eventId: string }) {
                   ...emailDocument,
                   settings: { ...emailDocument.settings, subject: change.currentTarget.value },
                 });
-                setAutosave('idle');
-                setNotice(undefined);
+                markDraftDirty();
               }}
               value={emailDocument.settings.subject}
             />
@@ -468,8 +493,7 @@ export function EmailPersistedEditorView({ eventId }: { eventId: string }) {
                   ...emailDocument,
                   settings: { ...emailDocument.settings, previewText: change.currentTarget.value },
                 });
-                setAutosave('idle');
-                setNotice(undefined);
+                markDraftDirty();
               }}
               value={emailDocument.settings.previewText ?? ''}
             />
@@ -480,8 +504,7 @@ export function EmailPersistedEditorView({ eventId }: { eventId: string }) {
               className="min-h-32 w-full rounded-md border bg-background px-3 py-2 text-sm leading-6"
               onChange={(change) => {
                 setEmailDocument(updatePrimaryBody(emailDocument, change.currentTarget.value));
-                setAutosave('idle');
-                setNotice(undefined);
+                markDraftDirty();
               }}
               value={primaryBody(emailDocument)}
             />
@@ -500,8 +523,7 @@ export function EmailPersistedEditorView({ eventId }: { eventId: string }) {
                     sender: { ...emailDocument.settings.sender, fromEmail: change.currentTarget.value },
                   },
                 });
-                setAutosave('idle');
-                setNotice(undefined);
+                markDraftDirty();
               }}
               type="email"
               value={emailDocument.settings.sender.fromEmail ?? ''}
@@ -519,8 +541,7 @@ export function EmailPersistedEditorView({ eventId }: { eventId: string }) {
                     sender: { ...emailDocument.settings.sender, replyToEmail: change.currentTarget.value },
                   },
                 });
-                setAutosave('idle');
-                setNotice(undefined);
+                markDraftDirty();
               }}
               type="email"
               value={emailDocument.settings.sender.replyToEmail ?? ''}
