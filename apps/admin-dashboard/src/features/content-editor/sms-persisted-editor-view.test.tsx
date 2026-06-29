@@ -1,0 +1,216 @@
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import '@testing-library/jest-dom/vitest';
+import * as React from 'react';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { createDefaultSmsTemplate } from '@tixkit/content-message';
+import { SmsPersistedEditorView } from './sms-persisted-editor-view';
+
+const adminApiMock = vi.hoisted(() => ({
+  getEvent: vi.fn(),
+  listContentDocuments: vi.fn(),
+  createContentDocument: vi.fn(),
+  listContentVersions: vi.fn(),
+  saveContentVersion: vi.fn(),
+  previewContent: vi.fn(),
+  publishContentVersion: vi.fn(),
+  archiveContentDocument: vi.fn(),
+  testSendContent: vi.fn(),
+}));
+
+const toastMock = vi.hoisted(() => ({
+  success: vi.fn(),
+}));
+
+vi.mock('@/lib/api', () => ({
+  adminApi: adminApiMock,
+}));
+
+vi.mock('sonner', () => ({
+  toast: toastMock,
+}));
+
+const smsDocument = createDefaultSmsTemplate({
+  editor: {
+    body: 'Hi {{recipient.name}}, {{event.title}} starts {{event.startsAt}}.',
+  },
+  settings: {
+    templateKey: 'event-update',
+    locale: 'en',
+    category: 'bulk',
+    consentCategory: 'marketing',
+    segmentLimit: 3,
+    estimatedCostPerSegmentCents: 2,
+    optOutText: 'Reply STOP to opt out',
+  },
+  shortLinks: [],
+});
+
+const event = {
+  id: 'evt_1',
+  title: 'All Access Chicago',
+  startsAt: '2026-07-17 19:00',
+  status: 'draft',
+  visibility: 'public',
+  seo: {},
+  currency: 'USD',
+  grossSalesCents: 0,
+  ticketsSold: 0,
+  checkIns: 0,
+  updatedAt: '2026-06-29T00:00:00.000Z',
+  organizationId: 'org_1',
+  brandId: 'brd_1',
+};
+
+const document = {
+  id: 'cdoc_sms',
+  tenantId: 'tnt_1',
+  organizationId: 'org_1',
+  brandId: 'brd_1',
+  eventId: 'evt_1',
+  channel: 'sms',
+  key: 'event-update',
+  name: 'All Access Chicago SMS updates',
+  status: 'draft',
+  locale: 'en',
+  currentDraftVersionId: 'cver_1',
+  createdAt: '2026-06-29T00:00:00.000Z',
+  updatedAt: '2026-06-29T00:00:00.000Z',
+};
+
+const version = {
+  id: 'cver_1',
+  documentId: 'cdoc_sms',
+  versionNumber: 1,
+  status: 'draft',
+  schemaVersion: 1,
+  contentJson: smsDocument,
+  renderedText: smsDocument.editor.body,
+  variables: [],
+  validation: { valid: true, severity: 'warning', issues: [] },
+  createdBy: 'usr_1',
+  createdAt: '2026-06-29T00:00:00.000Z',
+};
+
+const savedVersion = {
+  ...version,
+  id: 'cver_2',
+  versionNumber: 2,
+};
+
+function ok<T>(data: T) {
+  return { ok: true as const, data };
+}
+
+describe('SmsPersistedEditorView', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    adminApiMock.getEvent.mockResolvedValue(ok(event));
+    adminApiMock.listContentDocuments.mockResolvedValue(ok({ items: [document] }));
+    adminApiMock.listContentVersions.mockResolvedValue(ok({ items: [version] }));
+    adminApiMock.saveContentVersion.mockResolvedValue(ok(savedVersion));
+    adminApiMock.previewContent.mockResolvedValue(
+      ok({
+        channel: 'sms',
+        output: { text: 'Hi Ada saved. Reply STOP to opt out', segments: 1 },
+        validation: { valid: true, severity: 'warning', issues: [] },
+      }),
+    );
+    adminApiMock.publishContentVersion.mockResolvedValue(
+      ok({
+        document: { ...document, status: 'published', publishedVersionId: 'cver_2' },
+        version: { ...savedVersion, status: 'published' },
+      }),
+    );
+    adminApiMock.archiveContentDocument.mockResolvedValue(ok({ ...document, status: 'archived' }));
+    adminApiMock.testSendContent.mockResolvedValue(
+      ok({
+        testSend: {
+          id: 'cts_1',
+          tenantId: 'tnt_1',
+          documentId: 'cdoc_sms',
+          versionId: 'cver_2',
+          channel: 'sms',
+          recipient: '+15550000001',
+          status: 'captured',
+          renderedText: 'Hi Ada saved. Reply STOP to opt out',
+          createdAt: '2026-06-29T00:00:00.000Z',
+        },
+        output: { text: 'Hi Ada saved. Reply STOP to opt out', segments: 1 },
+      }),
+    );
+  });
+
+  it('loads an existing SMS document and persists preview, publish, and test-send actions', async () => {
+    render(React.createElement(SmsPersistedEditorView, { eventId: 'evt_1' }));
+
+    const body = await screen.findByLabelText('SMS body');
+    fireEvent.change(body, {
+      target: { value: 'Hi {{recipient.name}}, saved update for {{event.title}}.' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Preview' }));
+
+    await waitFor(() => {
+      expect(adminApiMock.saveContentVersion).toHaveBeenCalledWith(
+        'cdoc_sms',
+        expect.objectContaining({
+          renderedText: 'Hi {{recipient.name}}, saved update for {{event.title}}.',
+        }),
+      );
+      expect(adminApiMock.previewContent).toHaveBeenCalledWith(
+        'cdoc_sms',
+        expect.objectContaining({ versionId: 'cver_2' }),
+      );
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: 'Open preview' }));
+    expect(screen.getByTestId('preview-drawer')).toHaveTextContent('Hi Ada saved');
+
+    fireEvent.click(screen.getByRole('button', { name: 'Publish' }));
+    await waitFor(() => {
+      expect(adminApiMock.publishContentVersion).toHaveBeenCalledWith('cdoc_sms', 'cver_2');
+    });
+
+    fireEvent.click(screen.getAllByRole('button', { name: 'Send test' })[0]);
+    await waitFor(() => {
+      expect(adminApiMock.testSendContent).toHaveBeenCalledWith(
+        'cdoc_sms',
+        expect.objectContaining({
+          versionId: 'cver_2',
+          recipient: '+15550000001',
+        }),
+      );
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: 'Archive template' }));
+    await waitFor(() => {
+      expect(adminApiMock.archiveContentDocument).toHaveBeenCalledWith('cdoc_sms');
+    });
+    expect(screen.getByText('Archived SMS template')).toBeInTheDocument();
+  });
+
+  it('creates the event-scoped SMS document and initial canonical draft when none exists', async () => {
+    adminApiMock.listContentDocuments.mockResolvedValue(ok({ items: [] }));
+    adminApiMock.createContentDocument.mockResolvedValue(ok(document));
+    adminApiMock.listContentVersions.mockResolvedValue(ok({ items: [] }));
+    adminApiMock.saveContentVersion.mockResolvedValue(ok(version));
+
+    render(React.createElement(SmsPersistedEditorView, { eventId: 'evt_1' }));
+
+    await screen.findByLabelText('SMS body');
+    expect(adminApiMock.createContentDocument).toHaveBeenCalledWith({
+      organizationId: 'org_1',
+      brandId: 'brd_1',
+      eventId: 'evt_1',
+      channel: 'sms',
+      key: 'event-update',
+      name: 'All Access Chicago SMS updates',
+      locale: 'en',
+    });
+    expect(adminApiMock.saveContentVersion).toHaveBeenCalledWith(
+      'cdoc_sms',
+      expect.objectContaining({
+        contentJson: expect.objectContaining({ schemaVersion: 1 }),
+      }),
+    );
+  });
+});

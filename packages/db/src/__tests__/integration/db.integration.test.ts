@@ -207,6 +207,31 @@ describe.each(driverCases)('database integration: $driver', ({ driver, url }) =>
       { id: duplicate.versions[0]?.id, status: 'draft' },
     ]);
 
+    const testSend = await repo.recordTestSend({
+      tenantId: tenant.id,
+      documentId: document.id,
+      versionId: version.id,
+      channel: 'email',
+      recipient: 'ada@example.com',
+      status: 'captured',
+      renderedSubject: 'Hi Ada',
+      renderedHtml: '<p>Hi Ada</p>',
+      renderedText: 'Hi Ada',
+    });
+
+    expect(testSend).toMatchObject({
+      tenantId: tenant.id,
+      documentId: document.id,
+      versionId: version.id,
+      channel: 'email',
+      recipient: 'ada@example.com',
+      status: 'captured',
+      renderedSubject: 'Hi Ada',
+      renderedText: 'Hi Ada',
+    });
+    expect(testSend.id).toMatch(/^cts_/);
+    expect(testSend.id.length).toBeLessThanOrEqual(32);
+
     const artifact = await repo.recordRenderArtifact({
       tenantId: tenant.id,
       documentId: document.id,
