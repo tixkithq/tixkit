@@ -148,6 +148,9 @@ function draftForChannel(
 }
 
 function insertActionsForChannel(channel: ContentChannel): ContentEditorInsertAction[] {
+  if (channel === 'imessage' || channel === 'social_invite') {
+    return [];
+  }
   if (channel === 'event_page') {
     return [
       { id: 'text', label: 'Text', icon: 'text' },
@@ -183,6 +186,9 @@ function insertActionsForChannel(channel: ContentChannel): ContentEditorInsertAc
 }
 
 function blocksForChannel(channel: ContentChannel): ContentEditorCanvasBlock[] {
+  if (channel === 'imessage' || channel === 'social_invite') {
+    return [];
+  }
   if (channel === 'sms') {
     return [
       {
@@ -232,6 +238,13 @@ function blocksForChannel(channel: ContentChannel): ContentEditorCanvasBlock[] {
 
 function previewForChannel(channel: ContentChannel): ContentEditorPreview {
   const contract = RENDER_CONTRACTS[channel];
+  if (channel === 'imessage' || channel === 'social_invite') {
+    return {
+      label: 'Unavailable preview',
+      output: `${fixtureChannelLabel(channel)} is registered as a future channel and fails closed until enabled.`,
+      format: contract.output,
+    };
+  }
   if (channel === 'sms') {
     return {
       label: 'Sample SMS',

@@ -6,7 +6,12 @@ import {
 } from '@tixkit/content-editor-shell';
 import type { ContentChannel } from '@tixkit/content-core';
 
-export type ContentEditorRouteKind = 'event-page' | 'email' | 'sms';
+export type ContentEditorRouteKind =
+  | 'event-page'
+  | 'email'
+  | 'sms'
+  | 'imessage'
+  | 'social-invite';
 
 export type ContentEditorFixtureAdapter = ReturnType<typeof createContentEditorFixture> & {
   channelLabel: string;
@@ -23,6 +28,10 @@ export function contentChannelFromRoute(kind: ContentEditorRouteKind): ContentCh
       return 'email';
     case 'sms':
       return 'sms';
+    case 'imessage':
+      return 'imessage';
+    case 'social-invite':
+      return 'social_invite';
   }
 }
 
@@ -62,6 +71,10 @@ function titleForKind(kind: ContentEditorRouteKind): string {
       return 'Email template editor';
     case 'sms':
       return 'SMS template editor';
+    case 'imessage':
+      return 'iMessage template unavailable';
+    case 'social-invite':
+      return 'Social invite unavailable';
   }
 }
 
@@ -73,5 +86,9 @@ function descriptionForKind(kind: ContentEditorRouteKind): string {
       return 'Author email templates with React Email export and Tixkit publish blockers.';
     case 'sms':
       return 'Author SMS templates with segment accounting, opt-out checks, and preview guardrails.';
+    case 'imessage':
+      return 'Future-channel adapter seam only; iMessage authoring is disabled until the channel is explicitly enabled.';
+    case 'social-invite':
+      return 'Future-channel adapter seam only; social-invite authoring is disabled until the channel is explicitly enabled.';
   }
 }

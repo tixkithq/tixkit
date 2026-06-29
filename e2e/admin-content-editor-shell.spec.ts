@@ -23,7 +23,7 @@ async function expectShellRegions(page: Page): Promise<void> {
 }
 
 test.describe('admin content editor shell', () => {
-  test('renders event page, email, and SMS fixture editors with axe and no-console gates', async ({
+  test('renders enabled editors and future-channel unavailable routes with axe and no-console gates', async ({
     page,
   }, testInfo) => {
     await requireReachable(page, adminBaseUrl, 'admin dashboard');
@@ -46,6 +46,18 @@ test.describe('admin content editor shell', () => {
         heading: 'SMS template editor',
         preview: 'SMS compliance preview',
         name: 'sms',
+      },
+      {
+        path: `/events/${fixtureEventId}/content/imessage`,
+        heading: 'iMessage template unavailable',
+        preview: 'Unavailable preview',
+        name: 'imessage',
+      },
+      {
+        path: `/events/${fixtureEventId}/content/social-invite`,
+        heading: 'Social invite unavailable',
+        preview: 'Unavailable preview',
+        name: 'social-invite',
       },
     ] as const;
 
@@ -80,6 +92,16 @@ test.describe('admin content editor shell', () => {
       },
       { path: `/events/${fixtureEventId}/content/email`, name: 'email', minCanvasWidth: 360 },
       { path: `/events/${fixtureEventId}/content/sms`, name: 'sms', minCanvasWidth: 320 },
+      {
+        path: `/events/${fixtureEventId}/content/imessage`,
+        name: 'imessage',
+        minCanvasWidth: 500,
+      },
+      {
+        path: `/events/${fixtureEventId}/content/social-invite`,
+        name: 'social-invite',
+        minCanvasWidth: 500,
+      },
     ] as const) {
       await page.setViewportSize(desktopViewport);
       await page.goto(`${adminBaseUrl}${route.path}`);
