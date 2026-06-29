@@ -91,3 +91,5 @@ apps/checkout/public/tixkit-widget.js
 .reference/
 .vscode/
 .playwright*
+artifacts/
+.continue-*

@@ -17,7 +17,7 @@ jobs:
       - run: bun run audit
       - run: bun run format:check
       - run: bun run lint
-      - run: npx turbo run typecheck
+      - run: bun run typecheck
 
   build:
     name: Build
