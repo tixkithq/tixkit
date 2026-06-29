@@ -346,7 +346,10 @@ export const messagingRoutes: FastifyPluginAsync = async (app) => {
 
     await loadAuthorizedEvent(eventId, principal, db);
 
-    const subject = renderMergeTags(subjectTemplate, context, { channel: 'email', escape: 'plain' });
+    const subject = renderMergeTags(subjectTemplate, context, {
+      channel: 'email',
+      escape: 'plain',
+    });
     const html = renderMergeTags(htmlTemplate, context, { channel: 'email', escape: 'html' });
     const text = textTemplate
       ? renderMergeTags(textTemplate, context, {
@@ -356,7 +359,7 @@ export const messagingRoutes: FastifyPluginAsync = async (app) => {
         })
       : undefined;
 
-    const smsBody = channel === 'sms' ? text ?? subject : text;
+    const smsBody = channel === 'sms' ? (text ?? subject) : text;
     const segments =
       channel === 'sms' && smsBody
         ? countSmsSegments(
