@@ -1,4 +1,4 @@
-import Fastify from 'fastify';
+import Fastify, { type FastifyInstance } from 'fastify';
 import { describe, expect, it, vi } from 'vitest';
 import type { Principal } from '@tixkit/domain';
 import type { Database } from '@tixkit/db';
@@ -6,9 +6,17 @@ import type { AppContext } from '../app.js';
 import {
   buildOfflineManifest,
   checkInRoutes,
+  processPendingBulkSyncChunks,
+  processPendingBulkSyncJobs,
   processScan,
   verifyOfflineManifestSignature,
 } from '../routes/modules/checkin.js';
+import {
+  MAX_BULK_OFFLINE_SYNC_CHUNK_SCANS,
+  MAX_BULK_OFFLINE_SYNC_TOTAL_SCANS,
+  MAX_OFFLINE_SYNC_SCANS,
+  OFFLINE_SYNC_JSON_BODY_LIMIT_BYTES,
+} from '../http/schemas.js';
 
 const list = {
   id: 'cil_1',
@@ -19,6 +27,7 @@ const list = {
 function ticket(overrides: Record<string, unknown> = {}) {
   return {
     id: 'tkt_1',
+    tenant_id: 'tnt_1',
     event_id: 'evt_1',
     ticket_type_id: 'tt_allowed',
     qr_hash: 'hash_1',
@@ -35,17 +44,66 @@ function repo(row: Record<string, unknown> | null, checkInResult = true) {
   };
 }
 
+async function createBulkJob(
+  app: FastifyInstance,
+  payloadOverrides: Partial<{ checkInListId: string; totalChunks: number; totalScans: number }> = {},
+) {
+  const response = await app.inject({
+    method: 'POST',
+    url: '/check-ins/bulk-sync-jobs',
+    headers: { 'Idempotency-Key': 'idem_bulk_job_1' },
+    payload: {
+      checkInListId: 'cil_1',
+      totalChunks: 2,
+      ...payloadOverrides,
+    },
+  });
+  expect(response.statusCode).toBe(202);
+  return response.json() as { id: string };
+}
+
+async function flushBulkSyncScheduler() {
+  await new Promise((resolve) => setTimeout(resolve, 0));
+}
+
 type OfflineSyncMockOverrides = {
   list?: Record<string, unknown> | null;
   event?: Record<string, unknown> | null;
-  ticket?: Record<string, unknown> | null;
+  ticket?: Record<string, unknown> | Record<string, unknown>[] | null;
   checkInSucceeds?: boolean;
   existingIdempotency?: Record<string, unknown> | null;
+  failScanLogInsert?: boolean;
+  onUnclaimedBulkSyncJob?: () => Promise<void> | void;
 };
+
+type MockCondition =
+  | { column: string; op: string; value: unknown }
+  | ((row: Record<string, unknown>) => boolean);
+
+function matchesMockCondition(row: Record<string, unknown>, condition: MockCondition) {
+  if (typeof condition === 'function') return condition(row);
+  const { column, op, value } = condition;
+  if (typeof column !== 'string') return true;
+  const key = column.includes('.') ? column.split('.').at(-1)! : column;
+  if (op === '=') return row[key] === value;
+  if (op === '<>') return row[key] !== value;
+  if (op === '<') return Number(row[key] ?? 0) < Number(value);
+  if (op === 'in') return Array.isArray(value) && value.includes(row[key]);
+  if (op === 'ref>=') return Number(row[key] ?? 0) >= Number(row[value as string] ?? 0);
+  if (op === 'is') return value === null ? row[key] === null || row[key] === undefined : true;
+  if (op === '<=') {
+    const left =
+      row[key] instanceof Date ? row[key].getTime() : new Date(row[key] as string).getTime();
+    const right = value instanceof Date ? value.getTime() : new Date(value as string).getTime();
+    return Number.isFinite(left) && Number.isFinite(right) ? left <= right : true;
+  }
+  return true;
+}
 
 function buildOfflineSyncMockDb(overrides: OfflineSyncMockOverrides = {}) {
   const inserts: Array<{ table: string; values: Record<string, unknown> }> = [];
   const updates: Array<{ table: string; values: Record<string, unknown> }> = [];
+  let unclaimedBulkSyncJobCallbackInvoked = false;
   const checkInList =
     overrides.list !== undefined
       ? overrides.list
@@ -66,14 +124,43 @@ function buildOfflineSyncMockDb(overrides: OfflineSyncMockOverrides = {}) {
       ? overrides.ticket
       : {
           id: 'tkt_1',
+          tenant_id: 'tnt_1',
+          attendee_id: 'att_1',
           event_id: 'evt_1',
           ticket_type_id: 'tt_allowed',
           qr_hash: 'hash_1',
           status: 'valid',
         };
+  const ticketRows = ticketRow === null ? [] : Array.isArray(ticketRow) ? ticketRow : [ticketRow];
+  const expressionBuilder = Object.assign(
+    (column: string, op: string, value: unknown) => (row: Record<string, unknown>) =>
+      matchesMockCondition(row, { column, op, value }),
+    {
+      or:
+        (predicates: Array<(row: Record<string, unknown>) => boolean>) =>
+        (row: Record<string, unknown>) =>
+          predicates.some((predicate) => predicate(row)),
+      and:
+        (predicates: Array<(row: Record<string, unknown>) => boolean>) =>
+        (row: Record<string, unknown>) =>
+          predicates.every((predicate) => predicate(row)),
+    },
+  );
 
   // Table-aware query builder: returns the right mock data per table.
   function makeQuery(table: string) {
+    const conditions: MockCondition[] = [];
+    const matchesConditions = (row: Record<string, unknown>) =>
+      conditions.every((condition) => matchesMockCondition(row, condition));
+    const tableRows = () => {
+      if (table === 'check_in_lists') return checkInList ? [checkInList] : [];
+      if (table === 'events') return event ? [event] : [];
+      if (table === 'tickets') return ticketRows;
+      if (table === 'idempotency_records') {
+        return overrides.existingIdempotency ? [overrides.existingIdempotency] : [];
+      }
+      return inserts.filter((insert) => insert.table === table).map((insert) => insert.values);
+    };
     const q = {
       innerJoin() {
         return q;
@@ -84,7 +171,18 @@ function buildOfflineSyncMockDb(overrides: OfflineSyncMockOverrides = {}) {
       selectAll() {
         return q;
       },
-      where() {
+      where(
+        column:
+          | string
+          | ((eb: typeof expressionBuilder) => (row: Record<string, unknown>) => boolean),
+        op?: string,
+        value?: unknown,
+      ) {
+        conditions.push(
+          typeof column === 'function'
+            ? column(expressionBuilder)
+            : { column, op: op ?? '=', value },
+        );
         return q;
       },
       orderBy() {
@@ -93,12 +191,11 @@ function buildOfflineSyncMockDb(overrides: OfflineSyncMockOverrides = {}) {
       limit() {
         return q;
       },
+      forUpdate() {
+        return q;
+      },
       async executeTakeFirst() {
-        if (table === 'check_in_lists') return checkInList;
-        if (table === 'events') return event;
-        if (table === 'tickets') return ticketRow;
-        if (table === 'idempotency_records') return overrides.existingIdempotency ?? null;
-        return null;
+        return tableRows().find((row) => matchesConditions(row)) ?? null;
       },
       async executeTakeFirstOrThrow() {
         const result = await q.executeTakeFirst();
@@ -106,41 +203,145 @@ function buildOfflineSyncMockDb(overrides: OfflineSyncMockOverrides = {}) {
         return result;
       },
       async execute() {
-        if (table === 'check_in_lists') return checkInList ? [checkInList] : [];
-        if (table === 'tickets') return ticketRow ? [ticketRow] : [];
-        return [];
+        return tableRows().filter((row) => matchesConditions(row));
       },
     };
     return q;
   }
 
+  const applyMockUpdate = (
+    table: string,
+    conditions: MockCondition[],
+    values: Record<string, unknown>,
+  ) => {
+    const matchesConditions = (row: Record<string, unknown>) =>
+      conditions.every((condition) => matchesMockCondition(row, condition));
+    const rows = inserts
+      .filter((insert) => insert.table === table)
+      .map((insert) => insert.values)
+      .filter((row) => matchesConditions(row));
+    for (const row of rows) {
+      for (const [key, value] of Object.entries(values)) {
+        const increment = value as { __increment?: number; column?: string };
+        const incrementValue = increment?.['__increment'];
+        if (increment && typeof increment === 'object' && incrementValue !== undefined) {
+          row[key] = Number(row[key] ?? 0) + incrementValue;
+        } else {
+          row[key] = value;
+        }
+      }
+    }
+    return rows.length;
+  };
+
   const db = {
     selectFrom: vi.fn((table: string) => makeQuery(table)),
     insertInto: vi.fn((table: string) => ({
-      values: (values: Record<string, unknown>) => ({
-        returningAll: () => ({
-          executeTakeFirstOrThrow: vi.fn(async () => {
-            inserts.push({ table, values });
-            return { id: 'slog_1', ...values };
+      values: (values: Record<string, unknown> | Record<string, unknown>[]) => {
+        const persistedValues = (Array.isArray(values) ? values : [values]).map((value) => {
+          if (table !== 'scan_logs' || value.metadata == null) return value;
+          return Object.assign({}, value, {
+            metadata:
+              typeof value.metadata === 'string' ? value.metadata : JSON.stringify(value.metadata),
+          });
+        });
+        const firstPersistedValue = persistedValues[0] ?? {};
+        return {
+          returningAll: () => ({
+            executeTakeFirstOrThrow: vi.fn(async () => {
+              for (const value of persistedValues) inserts.push({ table, values: value });
+              return { id: 'slog_1', ...firstPersistedValue };
+            }),
           }),
-        }),
-        execute: vi.fn(async () => {
-          inserts.push({ table, values });
-          return [];
-        }),
-      }),
+          execute: vi.fn(async () => {
+            if (table === 'scan_logs' && overrides.failScanLogInsert) {
+              throw new Error('scan log insert failed');
+            }
+            for (const value of persistedValues) inserts.push({ table, values: value });
+            return [];
+          }),
+        };
+      },
     })),
     updateTable: vi.fn((table: string) => {
+      const conditions: MockCondition[] = [];
+      let pendingValues: Record<string, unknown> = {};
       const updateChain = {
-        set: (values: Record<string, unknown>) => {
-          updates.push({ table, values });
+        set: (
+          values:
+            | Record<string, unknown>
+            | ((
+                eb: (column: string, op: string, amount: number) => unknown,
+              ) => Record<string, unknown>),
+        ) => {
+          const resolvedValues =
+            typeof values === 'function'
+              ? values((column: string, op: string, amount: number) =>
+                  op === '+' ? { __increment: amount, column } : { __op: op, amount, column },
+                )
+              : values;
+          pendingValues = resolvedValues;
+          updates.push({ table, values: resolvedValues });
           return updateChain;
         },
-        where: () => updateChain,
+        where: (
+          column:
+            | string
+            | ((eb: typeof expressionBuilder) => (row: Record<string, unknown>) => boolean),
+          op?: string,
+          value?: unknown,
+        ) => {
+          conditions.push(
+            typeof column === 'function'
+              ? column(expressionBuilder)
+              : { column, op: op ?? '=', value },
+          );
+          return updateChain;
+        },
+        whereRef: (left: string, op: string, right: string) => {
+          conditions.push({ column: left, op: op === '>=' ? 'ref>=' : op, value: right });
+          return updateChain;
+        },
         async executeTakeFirst() {
+          if (table === 'offline_check_in_sync_jobs' || table === 'offline_check_in_sync_chunks') {
+            return { numUpdatedRows: BigInt(applyMockUpdate(table, conditions, pendingValues)) };
+          }
           return { numUpdatedRows: 1n };
         },
+        returning: () => ({
+          execute: vi.fn(async () => {
+            if (overrides.checkInSucceeds === false) return [];
+            if (table !== 'tickets') return ticketRows.map((row) => ({ id: row.id as string }));
+            const acceptedRows = ticketRows.filter((row) => row.status === 'valid');
+            for (const row of acceptedRows) row.status = 'checked_in';
+            return acceptedRows.map((row) => ({ id: row.id as string }));
+          }),
+        }),
+        returningAll: () => ({
+          executeTakeFirst: vi.fn(async () => {
+            const matched = inserts
+              .filter((insert) => insert.table === table)
+              .map((insert) => insert.values)
+              .find((row) => conditions.every((condition) => matchesMockCondition(row, condition)));
+            if (!matched) {
+              if (
+                table === 'offline_check_in_sync_jobs' &&
+                pendingValues.status === 'processing' &&
+                !unclaimedBulkSyncJobCallbackInvoked
+              ) {
+                unclaimedBulkSyncJobCallbackInvoked = true;
+                await overrides.onUnclaimedBulkSyncJob?.();
+              }
+              return null;
+            }
+            applyMockUpdate(table, conditions, pendingValues);
+            return matched;
+          }),
+        }),
         async execute() {
+          if (table === 'offline_check_in_sync_jobs' || table === 'offline_check_in_sync_chunks') {
+            applyMockUpdate(table, conditions, pendingValues);
+          }
           return [];
         },
       };
@@ -152,7 +353,17 @@ function buildOfflineSyncMockDb(overrides: OfflineSyncMockOverrides = {}) {
       }),
     })),
     transaction: vi.fn(() => ({
-      execute: async (cb: (trx: unknown) => Promise<unknown>) => cb(db),
+      execute: async (cb: (trx: unknown) => Promise<unknown>) => {
+        const insertCount = inserts.length;
+        const updateCount = updates.length;
+        try {
+          return await cb(db);
+        } catch (error) {
+          inserts.length = insertCount;
+          updates.length = updateCount;
+          throw error;
+        }
+      },
     })),
     destroy: vi.fn(async () => {}),
   };
@@ -165,6 +376,7 @@ describe('processScan', () => {
     const ticketRepo = repo(ticket());
     const result = await processScan({
       ticketRepo: ticketRepo as never,
+      tenantId: 'tnt_1',
       list: list as never,
       qrHash: 'hash_1',
       deviceId: 'sd_1',
@@ -184,6 +396,7 @@ describe('processScan', () => {
   it('rejects tickets for another event', async () => {
     const result = await processScan({
       ticketRepo: repo(ticket({ event_id: 'evt_other' })) as never,
+      tenantId: 'tnt_1',
       list: list as never,
       qrHash: 'hash_1',
       deviceId: 'sd_1',
@@ -196,9 +409,27 @@ describe('processScan', () => {
     expect(result.ticketId).toBe('tkt_1');
   });
 
+  it('does not expose ticket ids from another tenant during online scans', async () => {
+    const ticketRepo = repo(ticket({ tenant_id: 'tnt_other' }));
+    const result = await processScan({
+      ticketRepo: ticketRepo as never,
+      tenantId: 'tnt_1',
+      list: list as never,
+      qrHash: 'hash_1',
+      deviceId: 'sd_1',
+      scannedAt: new Date('2026-06-01T00:00:00Z'),
+      verification: { valid: true, ticketId: 'tkt_1' },
+      requireVerifiedTicketId: true,
+    });
+
+    expect(result).toEqual({ outcome: 'not_found', qrHash: 'hash_1' });
+    expect(ticketRepo.checkInIfValid).not.toHaveBeenCalled();
+  });
+
   it('rejects tickets whose type is not on the check-in list', async () => {
     const result = await processScan({
       ticketRepo: repo(ticket({ ticket_type_id: 'tt_other' })) as never,
+      tenantId: 'tnt_1',
       list: list as never,
       qrHash: 'hash_1',
       deviceId: 'sd_1',
@@ -214,6 +445,7 @@ describe('processScan', () => {
     const ticketRepo = repo(ticket({ event_occurrence_id: 'occ_other' }));
     const result = await processScan({
       ticketRepo: ticketRepo as never,
+      tenantId: 'tnt_1',
       list: { ...list, event_occurrence_id: 'occ_allowed' } as never,
       qrHash: 'hash_1',
       deviceId: 'sd_1',
@@ -239,6 +471,7 @@ describe('processScan', () => {
     const ticketRepo = repo(ticket(), true);
     const result = await processScan({
       ticketRepo: ticketRepo as never,
+      tenantId: 'tnt_1',
       list: list as never,
       qrHash: 'hash_1',
       deviceId: 'sd_1',
@@ -258,6 +491,7 @@ describe('processScan', () => {
   it('returns duplicate when another scan already claimed the ticket', async () => {
     const result = await processScan({
       ticketRepo: repo(ticket(), false) as never,
+      tenantId: 'tnt_1',
       list: list as never,
       qrHash: 'hash_1',
       deviceId: 'sd_1',
@@ -280,7 +514,7 @@ describe('check-in routes', () => {
       scopes: ['checkins.write'],
       eventIds: ['evt_1'],
     };
-    const app = Fastify();
+    const app = Fastify({ bodyLimit: OFFLINE_SYNC_JSON_BODY_LIMIT_BYTES });
     app.decorate('context', {
       db: {} as Database,
       pricingEngine: {},
@@ -426,6 +660,52 @@ describe('buildOfflineManifest', () => {
 });
 
 describe('offline sync endpoint', () => {
+  it('rejects oversized sync batches before repository work', async () => {
+    const principal: Principal = {
+      type: 'mobile_device',
+      id: 'sd_public',
+      tenantId: 'tnt_1',
+      organizationIds: ['org_1'],
+      scopes: ['checkins.write'],
+      eventIds: ['evt_1'],
+    };
+    const db = { selectFrom: vi.fn() } as unknown as Database;
+    const app = Fastify();
+    app.decorate('context', {
+      db,
+      pricingEngine: {},
+      inventoryService: {},
+      qrService: {},
+      authService: {},
+      temporalClient: {},
+    } as unknown as AppContext);
+    app.addHook('onRequest', async (request) => {
+      request.principal = principal;
+    });
+    await app.register(checkInRoutes);
+
+    const response = await app.inject({
+      method: 'POST',
+      url: '/check-ins/sync',
+      headers: { 'Idempotency-Key': 'idem_sync_oversized' },
+      payload: {
+        checkInListId: 'cil_1',
+        deviceId: 'sd_public',
+        scans: Array.from({ length: MAX_OFFLINE_SYNC_SCANS + 1 }, (_, index) => ({
+          qrHash: `hash_${index}`,
+          scannedAt: '2026-06-01T12:00:00.000Z',
+          offline: true,
+        })),
+      },
+    });
+
+    expect(response.statusCode).toBe(400);
+    expect(response.json()).toMatchObject({ code: 'VALIDATION_ERROR' });
+    expect(db.selectFrom).not.toHaveBeenCalled();
+
+    await app.close();
+  });
+
   it('processes offline scans and returns accepted/duplicate/invalid counts', async () => {
     const principal: Principal = {
       type: 'mobile_device',
@@ -493,6 +773,89 @@ describe('offline sync endpoint', () => {
     await app.close();
   });
 
+  it('persists each accepted offline scan with its own scannedAt timestamp', async () => {
+    const principal: Principal = {
+      type: 'mobile_device',
+      id: 'sd_public',
+      tenantId: 'tnt_1',
+      organizationIds: ['org_1'],
+      scopes: ['checkins.write'],
+      eventIds: ['evt_1'],
+    };
+    const { db, inserts } = buildOfflineSyncMockDb({
+      ticket: [
+        {
+          id: 'tkt_early',
+          tenant_id: 'tnt_1',
+          attendee_id: 'att_early',
+          event_id: 'evt_1',
+          ticket_type_id: 'tt_allowed',
+          qr_hash: 'hash_early',
+          status: 'valid',
+        },
+        {
+          id: 'tkt_late',
+          tenant_id: 'tnt_1',
+          attendee_id: 'att_late',
+          event_id: 'evt_1',
+          ticket_type_id: 'tt_allowed',
+          qr_hash: 'hash_late',
+          status: 'valid',
+        },
+      ],
+    });
+    const app = Fastify();
+    app.decorate('context', {
+      db,
+      pricingEngine: {},
+      inventoryService: {},
+      qrService: {},
+      authService: {},
+      temporalClient: {},
+    } as unknown as AppContext);
+    app.addHook('onRequest', async (request) => {
+      request.principal = principal;
+    });
+    await app.register(checkInRoutes);
+
+    const earlyScan = '2026-06-01T12:00:00.000Z';
+    const lateScan = '2026-06-01T12:05:00.000Z';
+    const response = await app.inject({
+      method: 'POST',
+      url: '/check-ins/sync',
+      headers: { 'Idempotency-Key': 'idem_sync_distinct_scan_times' },
+      payload: {
+        checkInListId: 'cil_1',
+        deviceId: 'sd_public',
+        scans: [
+          { qrHash: 'hash_late', scannedAt: lateScan, offline: true },
+          { qrHash: 'hash_early', scannedAt: earlyScan, offline: true },
+        ],
+      },
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toMatchObject({ accepted: 2, duplicates: 0, invalid: 0 });
+    expect(inserts.filter((insert) => insert.table === 'scan_logs')).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          values: expect.objectContaining({
+            qr_hash: 'hash_early',
+            scanned_at: new Date(earlyScan),
+          }),
+        }),
+        expect.objectContaining({
+          values: expect.objectContaining({
+            qr_hash: 'hash_late',
+            scanned_at: new Date(lateScan),
+          }),
+        }),
+      ]),
+    );
+
+    await app.close();
+  });
+
   it('logs same-event wrong-occurrence offline scans as invalid without checking in the ticket', async () => {
     const principal: Principal = {
       type: 'mobile_device',
@@ -512,6 +875,7 @@ describe('offline sync endpoint', () => {
       },
       ticket: {
         id: 'tkt_1',
+        tenant_id: 'tnt_1',
         event_id: 'evt_1',
         event_occurrence_id: 'occ_other',
         ticket_type_id: 'tt_allowed',
@@ -564,13 +928,89 @@ describe('offline sync endpoint', () => {
     expect(scanLogInsert?.values).toMatchObject({
       device_id: 'sd_public',
       outcome: 'wrong_list',
-      metadata: expect.any(String),
     });
-    expect(JSON.parse(scanLogInsert?.values.metadata as string)).toEqual({
+    const metadata = scanLogInsert?.values.metadata;
+    expect(typeof metadata === 'string' ? JSON.parse(metadata) : metadata).toEqual({
       reason: 'wrong_event_occurrence',
       expectedEventOccurrenceId: 'occ_allowed',
       actualEventOccurrenceId: 'occ_other',
     });
+
+    await app.close();
+  });
+
+  it('does not expose or persist ticket ids from another tenant during offline sync', async () => {
+    const principal: Principal = {
+      type: 'mobile_device',
+      id: 'sd_public',
+      tenantId: 'tnt_1',
+      organizationIds: ['org_1'],
+      scopes: ['checkins.write'],
+      eventIds: ['evt_1'],
+    };
+    const { db, inserts, updates } = buildOfflineSyncMockDb({
+      ticket: {
+        id: 'tkt_foreign',
+        tenant_id: 'tnt_other',
+        attendee_id: 'att_foreign',
+        event_id: 'evt_foreign',
+        ticket_type_id: 'tt_allowed',
+        qr_hash: 'hash_foreign',
+        status: 'valid',
+      },
+    });
+    const app = Fastify();
+    app.decorate('context', {
+      db,
+      pricingEngine: {},
+      inventoryService: {},
+      qrService: {},
+      authService: {},
+      temporalClient: {},
+    } as unknown as AppContext);
+    app.addHook('onRequest', async (request) => {
+      request.principal = principal;
+    });
+    await app.register(checkInRoutes);
+
+    const response = await app.inject({
+      method: 'POST',
+      url: '/check-ins/sync',
+      headers: { 'Idempotency-Key': 'idem_sync_foreign_tenant_ticket' },
+      payload: {
+        checkInListId: 'cil_1',
+        deviceId: 'sd_public',
+        scans: [{ qrHash: 'hash_foreign', scannedAt: '2026-06-01T12:00:00.000Z', offline: true }],
+      },
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toMatchObject({
+      accepted: 0,
+      duplicates: 0,
+      invalid: 1,
+      results: [{ qrHash: 'hash_foreign', outcome: 'not_found' }],
+    });
+    expect(updates).not.toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          table: 'tickets',
+          values: expect.objectContaining({ checked_in_by_device_id: 'sd_public' }),
+        }),
+      ]),
+    );
+    expect(inserts).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          table: 'scan_logs',
+          values: expect.objectContaining({
+            ticket_id: null,
+            qr_hash: 'hash_foreign',
+            outcome: 'not_found',
+          }),
+        }),
+      ]),
+    );
 
     await app.close();
   });
@@ -621,6 +1061,198 @@ describe('offline sync endpoint', () => {
     await app.close();
   });
 
+  it('attributes non-mobile offline syncs to the authenticated principal', async () => {
+    const principal: Principal = {
+      type: 'user',
+      id: 'usr_checkin_admin',
+      tenantId: 'tnt_1',
+      organizationIds: ['org_1'],
+      scopes: ['checkins.write'],
+      eventIds: ['evt_1'],
+    };
+    const { db, inserts, updates } = buildOfflineSyncMockDb();
+    const app = Fastify();
+    app.decorate('context', {
+      db,
+      pricingEngine: {},
+      inventoryService: {},
+      qrService: {},
+      authService: {},
+      temporalClient: {},
+    } as unknown as AppContext);
+    app.addHook('onRequest', async (request) => {
+      request.principal = principal;
+    });
+    await app.register(checkInRoutes);
+
+    const response = await app.inject({
+      method: 'POST',
+      url: '/check-ins/sync',
+      headers: { 'Idempotency-Key': 'idem_sync_user_device_forge' },
+      payload: {
+        checkInListId: 'cil_1',
+        deviceId: 'sd_victim',
+        scans: [{ qrHash: 'hash_1', scannedAt: '2026-06-01T12:00:00.000Z', offline: true }],
+      },
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(updates).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          table: 'tickets',
+          values: expect.objectContaining({ checked_in_by_device_id: 'usr_checkin_admin' }),
+        }),
+        expect.objectContaining({
+          table: 'attendees',
+          values: expect.objectContaining({ check_in_device_id: 'usr_checkin_admin' }),
+        }),
+      ]),
+    );
+    expect(inserts).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          table: 'scan_logs',
+          values: expect.objectContaining({ device_id: 'usr_checkin_admin' }),
+        }),
+      ]),
+    );
+    expect(updates).not.toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          values: expect.objectContaining({ checked_in_by_device_id: 'sd_victim' }),
+        }),
+        expect.objectContaining({
+          values: expect.objectContaining({ check_in_device_id: 'sd_victim' }),
+        }),
+      ]),
+    );
+    expect(inserts).not.toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          values: expect.objectContaining({ device_id: 'sd_victim' }),
+        }),
+      ]),
+    );
+
+    await app.close();
+  });
+
+  it('rolls back ticket and attendee updates when offline scan logging fails', async () => {
+    const principal: Principal = {
+      type: 'mobile_device',
+      id: 'sd_1',
+      tenantId: 'tnt_1',
+      organizationIds: ['org_1'],
+      scopes: ['checkins.write'],
+      eventIds: ['evt_1'],
+    };
+    const { db, inserts, updates } = buildOfflineSyncMockDb({ failScanLogInsert: true });
+    const app = Fastify();
+    app.decorate('context', {
+      db,
+      pricingEngine: {},
+      inventoryService: {},
+      qrService: {},
+      authService: {},
+      temporalClient: {},
+    } as unknown as AppContext);
+    app.addHook('onRequest', async (request) => {
+      request.principal = principal;
+    });
+    await app.register(checkInRoutes);
+
+    const response = await app.inject({
+      method: 'POST',
+      url: '/check-ins/sync',
+      headers: { 'Idempotency-Key': 'idem_sync_log_failure' },
+      payload: {
+        checkInListId: 'cil_1',
+        scans: [{ qrHash: 'hash_1', scannedAt: '2026-06-01T12:00:00.000Z', offline: true }],
+      },
+    });
+
+    expect(response.statusCode).toBe(500);
+    expect(db.transaction).toHaveBeenCalled();
+    expect(updates).toHaveLength(0);
+    expect(inserts).not.toEqual(
+      expect.arrayContaining([expect.objectContaining({ table: 'scan_logs' })]),
+    );
+
+    await app.close();
+  });
+
+  it('does not count already-checked-in non-Postgres fallback rows as accepted', async () => {
+    const originalDbDriver = process.env.DB_DRIVER;
+    process.env.DB_DRIVER = 'mysql';
+    const principal: Principal = {
+      type: 'mobile_device',
+      id: 'sd_1',
+      tenantId: 'tnt_1',
+      organizationIds: ['org_1'],
+      scopes: ['checkins.write'],
+      eventIds: ['evt_1'],
+    };
+    const { db, inserts } = buildOfflineSyncMockDb();
+    db.updateTable = vi.fn(() => {
+      const updateChain = {
+        set: () => updateChain,
+        where: () => updateChain,
+        returning: () => ({
+          execute: vi.fn(async () => [{ id: 'tkt_1' }]),
+        }),
+        executeTakeFirst: vi.fn(async () => ({ numUpdatedRows: 0n })),
+        execute: vi.fn(async () => []),
+      };
+      return updateChain;
+    }) as never;
+    const app = Fastify();
+    app.decorate('context', {
+      db,
+      pricingEngine: {},
+      inventoryService: {},
+      qrService: {},
+      authService: {},
+      temporalClient: {},
+    } as unknown as AppContext);
+    app.addHook('onRequest', async (request) => {
+      request.principal = principal;
+    });
+    await app.register(checkInRoutes);
+
+    try {
+      const response = await app.inject({
+        method: 'POST',
+        url: '/check-ins/sync',
+        headers: { 'Idempotency-Key': 'idem_sync_mysql_duplicate' },
+        payload: {
+          checkInListId: 'cil_1',
+          scans: [{ qrHash: 'hash_1', scannedAt: '2026-06-01T12:00:00.000Z', offline: true }],
+        },
+      });
+
+      expect(response.statusCode).toBe(200);
+      expect(response.json()).toMatchObject({
+        accepted: 0,
+        duplicates: 1,
+        invalid: 0,
+        results: [{ qrHash: 'hash_1', outcome: 'duplicate' }],
+      });
+      expect(inserts).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            table: 'scan_logs',
+            values: expect.objectContaining({ outcome: 'duplicate' }),
+          }),
+        ]),
+      );
+    } finally {
+      if (originalDbDriver === undefined) delete process.env.DB_DRIVER;
+      else process.env.DB_DRIVER = originalDbDriver;
+      await app.close();
+    }
+  });
+
   it('sorts scans by scannedAt so earliest scan wins (deterministic conflict resolution)', async () => {
     const principal: Principal = {
       type: 'mobile_device',
@@ -642,12 +1274,18 @@ describe('offline sync endpoint', () => {
           checkInCallCount++;
           return { numUpdatedRows: checkInCallCount === 1 ? 1n : 0n };
         },
+        returning: () => ({
+          execute: vi.fn(async () => {
+            checkInCallCount++;
+            return checkInCallCount === 1 ? [{ id: 'tkt_1' }] : [];
+          }),
+        }),
         async execute() {
           return [];
         },
       };
       return updateChain;
-    });
+    }) as never;
     const app = Fastify();
     app.decorate('context', {
       db,
@@ -720,6 +1358,705 @@ describe('offline sync endpoint', () => {
     });
 
     expect(response.statusCode).toBe(404);
+
+    await app.close();
+  });
+});
+
+describe('bulk offline sync endpoint', () => {
+  const principal: Principal = {
+    type: 'mobile_device',
+    id: 'sd_bulk',
+    tenantId: 'tnt_1',
+    organizationIds: ['org_1'],
+    scopes: ['checkins.read', 'checkins.write'],
+    eventIds: ['evt_1'],
+  };
+
+  async function setupBulkApp(overrides: OfflineSyncMockOverrides = {}) {
+    const mock = buildOfflineSyncMockDb(overrides);
+    const app = Fastify();
+    app.decorate('context', {
+      db: mock.db,
+      pricingEngine: {},
+      inventoryService: {},
+      qrService: {},
+      authService: {},
+      temporalClient: {},
+    } as unknown as AppContext);
+    app.addHook('onRequest', async (request) => {
+      request.principal = principal;
+    });
+    await app.register(checkInRoutes);
+    return { app, ...mock };
+  }
+
+  it('creates a bounded async job for an authorized active check-in list', async () => {
+    const { app } = await setupBulkApp();
+
+    const job = await createBulkJob(app);
+
+    expect(job).toMatchObject({
+      checkInListId: 'cil_1',
+      eventId: 'evt_1',
+      deviceId: 'sd_bulk',
+      totalChunks: 2,
+      chunksReceived: 0,
+      chunksProcessed: 0,
+      status: 'pending',
+      accepted: 0,
+      duplicates: 0,
+      invalid: 0,
+      sampleErrors: [],
+    });
+    expect(job).not.toHaveProperty('results');
+
+    await app.close();
+  });
+
+  it('rejects inactive check-in lists before creating a bulk job', async () => {
+    const { app, inserts } = await setupBulkApp({
+      list: {
+        id: 'cil_1',
+        event_id: 'evt_1',
+        ticket_type_ids: JSON.stringify(['tt_allowed']),
+        status: 'disabled',
+      },
+    });
+
+    const response = await app.inject({
+      method: 'POST',
+      url: '/check-ins/bulk-sync-jobs',
+      headers: { 'Idempotency-Key': 'idem_bulk_inactive_list' },
+      payload: {
+        checkInListId: 'cil_1',
+        totalChunks: 1,
+      },
+    });
+
+    expect(response.statusCode).toBe(400);
+    expect(response.json()).toMatchObject({ message: 'Check-in list is not active' });
+    expect(inserts).not.toEqual(
+      expect.arrayContaining([expect.objectContaining({ table: 'offline_check_in_sync_jobs' })]),
+    );
+
+    await app.close();
+  });
+
+  it('rejects oversized async chunks before persisting chunk state', async () => {
+    const { app, inserts } = await setupBulkApp();
+    const job = await createBulkJob(app);
+
+    const response = await app.inject({
+      method: 'PUT',
+      url: `/check-ins/bulk-sync-jobs/${job.id}/chunks/1`,
+      headers: { 'Idempotency-Key': 'idem_bulk_chunk_oversized' },
+      payload: {
+        scans: Array.from({ length: MAX_BULK_OFFLINE_SYNC_CHUNK_SCANS + 1 }, (_, index) => ({
+          qrHash: `hash_${index}`,
+          scannedAt: '2026-06-01T12:00:00.000Z',
+          offline: true,
+        })),
+      },
+    });
+
+    expect(response.statusCode).toBe(400);
+    expect(inserts).not.toEqual(
+      expect.arrayContaining([expect.objectContaining({ table: 'offline_check_in_sync_chunks' })]),
+    );
+
+    await app.close();
+  });
+
+  it('rejects chunk uploads that exceed the global async scan cap when totalScans is omitted', async () => {
+    const { app, inserts } = await setupBulkApp();
+    const job = await createBulkJob(app);
+    inserts.push({
+      table: 'offline_check_in_sync_chunks',
+      values: {
+        id: 'bch_existing_max',
+        tenant_id: 'tnt_1',
+        job_id: job.id,
+        sequence: 1,
+        scan_count: MAX_BULK_OFFLINE_SYNC_TOTAL_SCANS,
+        payload_hash: 'existing_hash',
+        payload: JSON.stringify([]),
+        accepted_count: 0,
+        duplicate_count: 0,
+        invalid_count: 0,
+        sample_errors: JSON.stringify([]),
+        status: 'uploaded',
+        attempt_count: 0,
+        failure_message: null,
+        locked_at: null,
+        processed_at: null,
+        created_at: new Date('2026-06-01T12:00:00.000Z'),
+        updated_at: new Date('2026-06-01T12:00:00.000Z'),
+      },
+    });
+
+    const response = await app.inject({
+      method: 'PUT',
+      url: `/check-ins/bulk-sync-jobs/${job.id}/chunks/2`,
+      headers: { 'Idempotency-Key': 'idem_bulk_global_cap' },
+      payload: {
+        scans: [{ qrHash: 'hash_1', scannedAt: '2026-06-01T12:00:00.000Z', offline: true }],
+      },
+    });
+
+    expect(response.statusCode).toBe(400);
+    expect(response.json()).toMatchObject({
+      message: 'Uploaded chunk scans exceed maximum bulk sync scan count',
+    });
+    expect(
+      inserts.filter(
+        (insert) =>
+          insert.table === 'offline_check_in_sync_chunks' &&
+          insert.values.id !== 'bch_existing_max',
+      ),
+    ).toHaveLength(0);
+
+    await app.close();
+  });
+
+  it('fails completed async jobs whose uploaded chunk scan count is below totalScans', async () => {
+    const { app, db, inserts } = await setupBulkApp();
+    const job = await createBulkJob(app, { totalScans: 3 });
+
+    for (const [sequence, qrHash] of [
+      [1, 'hash_1'],
+      [2, 'missing_hash'],
+    ] as const) {
+      const response = await app.inject({
+        method: 'PUT',
+        url: `/check-ins/bulk-sync-jobs/${job.id}/chunks/${sequence}`,
+        headers: { 'Idempotency-Key': `idem_bulk_truncated_${sequence}` },
+        payload: {
+          scans: [{ qrHash, scannedAt: '2026-06-01T12:00:00.000Z', offline: true }],
+        },
+      });
+      expect(response.statusCode).toBe(202);
+    }
+
+    await processPendingBulkSyncChunks(db as unknown as Database, job.id);
+
+    expect(inserts.filter((insert) => insert.table === 'scan_logs')).toHaveLength(0);
+    const status = await app.inject({
+      method: 'GET',
+      url: `/check-ins/bulk-sync-jobs/${job.id}`,
+    });
+    expect(status.statusCode).toBe(200);
+    expect(status.json()).toMatchObject({
+      status: 'failed',
+      totalScans: 3,
+      chunksReceived: 2,
+      chunksProcessed: 0,
+      failureMessage: 'Bulk sync chunk processing failed',
+    });
+
+    await app.close();
+  });
+
+  it('accepts out-of-order chunks and processes each chunk once across replay', async () => {
+    const { app, db, inserts } = await setupBulkApp();
+    const job = await createBulkJob(app);
+
+    const secondChunk = await app.inject({
+      method: 'PUT',
+      url: `/check-ins/bulk-sync-jobs/${job.id}/chunks/2`,
+      headers: { 'Idempotency-Key': 'idem_bulk_chunk_2' },
+      payload: {
+        scans: [{ qrHash: 'hash_1', scannedAt: '2026-06-01T12:05:00.000Z', offline: true }],
+      },
+    });
+    expect(secondChunk.statusCode).toBe(202);
+    await processPendingBulkSyncChunks(db as unknown as Database, job.id);
+    expect(inserts.filter((insert) => insert.table === 'scan_logs')).toHaveLength(0);
+
+    const firstChunk = await app.inject({
+      method: 'PUT',
+      url: `/check-ins/bulk-sync-jobs/${job.id}/chunks/1`,
+      headers: { 'Idempotency-Key': 'idem_bulk_chunk_1' },
+      payload: {
+        scans: [
+          { qrHash: 'hash_1', scannedAt: '2026-06-01T12:00:00.000Z', offline: true },
+          { qrHash: 'missing_hash', scannedAt: '2026-06-01T12:01:00.000Z', offline: true },
+        ],
+      },
+    });
+    expect(firstChunk.statusCode).toBe(202);
+
+    await processPendingBulkSyncChunks(db as unknown as Database, job.id);
+    const logsAfterFirstProcessing = inserts.filter((insert) => insert.table === 'scan_logs');
+    expect(logsAfterFirstProcessing).toHaveLength(3);
+    expect(logsAfterFirstProcessing).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          values: expect.objectContaining({ qr_hash: 'hash_1', outcome: 'accepted' }),
+        }),
+        expect.objectContaining({
+          values: expect.objectContaining({ qr_hash: 'hash_1', outcome: 'duplicate' }),
+        }),
+        expect.objectContaining({
+          values: expect.objectContaining({ qr_hash: 'missing_hash', outcome: 'not_found' }),
+        }),
+      ]),
+    );
+
+    await processPendingBulkSyncChunks(db as unknown as Database, job.id);
+    expect(inserts.filter((insert) => insert.table === 'scan_logs')).toHaveLength(3);
+
+    const status = await app.inject({
+      method: 'GET',
+      url: `/check-ins/bulk-sync-jobs/${job.id}`,
+    });
+
+    expect(status.statusCode).toBe(200);
+    expect(status.json()).toMatchObject({
+      status: 'completed',
+      chunksReceived: 2,
+      chunksProcessed: 2,
+      accepted: 1,
+      duplicates: 1,
+      invalid: 1,
+      sampleErrors: [
+        expect.objectContaining({
+          sequence: 1,
+          scanIndex: 1,
+          outcome: 'not_found',
+        }),
+      ],
+    });
+    expect(status.json().sampleErrors[0]).not.toHaveProperty('qrHash');
+    expect(status.json()).not.toHaveProperty('results');
+
+    await app.close();
+  });
+
+  it('reruns async processing when the final chunk arrives during an in-flight incomplete pass', async () => {
+    let appRef: FastifyInstance | null = null;
+    let jobId = '';
+    let uploadedFinalChunkDuringWorker = false;
+    const { app, inserts } = await setupBulkApp({
+      onUnclaimedBulkSyncJob: async () => {
+        if (!appRef || uploadedFinalChunkDuringWorker) return;
+        uploadedFinalChunkDuringWorker = true;
+        const finalChunk = await appRef.inject({
+          method: 'PUT',
+          url: `/check-ins/bulk-sync-jobs/${jobId}/chunks/2`,
+          headers: { 'Idempotency-Key': 'idem_bulk_rerun_chunk_2' },
+          payload: {
+            scans: [{ qrHash: 'missing_hash', scannedAt: '2026-06-01T12:01:00.000Z', offline: true }],
+          },
+        });
+        expect(finalChunk.statusCode).toBe(202);
+      },
+    });
+    appRef = app;
+    const job = await createBulkJob(app);
+    jobId = job.id;
+
+    const firstChunk = await app.inject({
+      method: 'PUT',
+      url: `/check-ins/bulk-sync-jobs/${job.id}/chunks/1`,
+      headers: { 'Idempotency-Key': 'idem_bulk_rerun_chunk_1' },
+      payload: {
+        scans: [{ qrHash: 'hash_1', scannedAt: '2026-06-01T12:00:00.000Z', offline: true }],
+      },
+    });
+    expect(firstChunk.statusCode).toBe(202);
+
+    for (let attempt = 0; attempt < 5; attempt += 1) {
+      await flushBulkSyncScheduler();
+      if (inserts.some((insert) => insert.table === 'scan_logs')) break;
+    }
+
+    expect(uploadedFinalChunkDuringWorker).toBe(true);
+    expect(inserts.filter((insert) => insert.table === 'scan_logs')).toHaveLength(2);
+    const status = await app.inject({
+      method: 'GET',
+      url: `/check-ins/bulk-sync-jobs/${job.id}`,
+    });
+    expect(status.statusCode).toBe(200);
+    expect(status.json()).toMatchObject({
+      status: 'completed',
+      chunksReceived: 2,
+      chunksProcessed: 2,
+      accepted: 1,
+      invalid: 1,
+    });
+
+    await app.close();
+  });
+
+  it('redacts raw worker failures from bulk sync status responses', async () => {
+    const { app, db } = await setupBulkApp({ failScanLogInsert: true });
+    const job = await createBulkJob(app);
+
+    const firstChunk = await app.inject({
+      method: 'PUT',
+      url: `/check-ins/bulk-sync-jobs/${job.id}/chunks/1`,
+      headers: { 'Idempotency-Key': 'idem_bulk_failed_chunk_1' },
+      payload: {
+        scans: [{ qrHash: 'hash_1', scannedAt: '2026-06-01T12:00:00.000Z', offline: true }],
+      },
+    });
+    expect(firstChunk.statusCode).toBe(202);
+
+    const secondChunk = await app.inject({
+      method: 'PUT',
+      url: `/check-ins/bulk-sync-jobs/${job.id}/chunks/2`,
+      headers: { 'Idempotency-Key': 'idem_bulk_failed_chunk_2' },
+      payload: {
+        scans: [{ qrHash: 'missing_hash', scannedAt: '2026-06-01T12:01:00.000Z', offline: true }],
+      },
+    });
+    expect(secondChunk.statusCode).toBe(202);
+
+    await processPendingBulkSyncChunks(db as unknown as Database, job.id);
+
+    const status = await app.inject({
+      method: 'GET',
+      url: `/check-ins/bulk-sync-jobs/${job.id}`,
+    });
+
+    expect(status.statusCode).toBe(200);
+    expect(status.json()).toMatchObject({
+      status: 'failed',
+      failureMessage: 'Bulk sync chunk processing failed',
+    });
+    expect(JSON.stringify(status.json())).not.toContain('scan log insert failed');
+
+    await app.close();
+  });
+
+  it('uses earliest scannedAt across all async chunks before marking duplicates', async () => {
+    const { app, db, inserts } = await setupBulkApp();
+    const job = await createBulkJob(app);
+
+    const lateFirstChunk = await app.inject({
+      method: 'PUT',
+      url: `/check-ins/bulk-sync-jobs/${job.id}/chunks/1`,
+      headers: { 'Idempotency-Key': 'idem_bulk_global_order_chunk_1' },
+      payload: {
+        scans: [{ qrHash: 'hash_1', scannedAt: '2026-06-01T12:05:00.000Z', offline: true }],
+      },
+    });
+    expect(lateFirstChunk.statusCode).toBe(202);
+
+    const earlySecondChunk = await app.inject({
+      method: 'PUT',
+      url: `/check-ins/bulk-sync-jobs/${job.id}/chunks/2`,
+      headers: { 'Idempotency-Key': 'idem_bulk_global_order_chunk_2' },
+      payload: {
+        scans: [{ qrHash: 'hash_1', scannedAt: '2026-06-01T12:00:00.000Z', offline: true }],
+      },
+    });
+    expect(earlySecondChunk.statusCode).toBe(202);
+
+    await processPendingBulkSyncChunks(db as unknown as Database, job.id);
+
+    const scanLogs = inserts
+      .filter((insert) => insert.table === 'scan_logs')
+      .map((insert) => insert.values);
+    expect(scanLogs).toEqual([
+      expect.objectContaining({
+        qr_hash: 'hash_1',
+        outcome: 'accepted',
+        scanned_at: new Date('2026-06-01T12:00:00.000Z'),
+      }),
+      expect.objectContaining({
+        qr_hash: 'hash_1',
+        outcome: 'duplicate',
+        scanned_at: new Date('2026-06-01T12:05:00.000Z'),
+      }),
+    ]);
+
+    const status = await app.inject({
+      method: 'GET',
+      url: `/check-ins/bulk-sync-jobs/${job.id}`,
+    });
+    expect(status.statusCode).toBe(200);
+    expect(status.json()).toMatchObject({
+      status: 'completed',
+      accepted: 1,
+      duplicates: 1,
+      invalid: 0,
+    });
+
+    await app.close();
+  });
+
+  it('claims one worker lease when multiple workers process the same completed job', async () => {
+    const { app, db, inserts } = await setupBulkApp();
+    const job = await createBulkJob(app);
+
+    for (const [sequence, qrHash] of [
+      [1, 'hash_1'],
+      [2, 'missing_hash'],
+    ] as const) {
+      const response = await app.inject({
+        method: 'PUT',
+        url: `/check-ins/bulk-sync-jobs/${job.id}/chunks/${sequence}`,
+        headers: { 'Idempotency-Key': `idem_bulk_worker_race_${sequence}` },
+        payload: {
+          scans: [{ qrHash, scannedAt: '2026-06-01T12:00:00.000Z', offline: true }],
+        },
+      });
+      expect(response.statusCode).toBe(202);
+    }
+
+    await Promise.all([
+      processPendingBulkSyncChunks(db as unknown as Database, job.id, { workerId: 'worker-a' }),
+      processPendingBulkSyncChunks(db as unknown as Database, job.id, { workerId: 'worker-b' }),
+    ]);
+    await processPendingBulkSyncChunks(db as unknown as Database, job.id, { workerId: 'worker-c' });
+
+    expect(inserts.filter((insert) => insert.table === 'scan_logs')).toHaveLength(2);
+    const chunkRows = inserts
+      .filter((insert) => insert.table === 'offline_check_in_sync_chunks')
+      .map((insert) => insert.values);
+    expect(chunkRows).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ status: 'processed', payload: null }),
+        expect.objectContaining({ status: 'processed', payload: null }),
+      ]),
+    );
+
+    await app.close();
+  });
+
+  it('retries a stuck processing job after the lease expires', async () => {
+    const { app, db, inserts } = await setupBulkApp();
+    const job = await createBulkJob(app);
+
+    for (const sequence of [1, 2]) {
+      const response = await app.inject({
+        method: 'PUT',
+        url: `/check-ins/bulk-sync-jobs/${job.id}/chunks/${sequence}`,
+        headers: { 'Idempotency-Key': `idem_bulk_stuck_retry_${sequence}` },
+        payload: {
+          scans: [
+            {
+              qrHash: sequence === 1 ? 'hash_1' : 'missing_hash',
+              scannedAt: `2026-06-01T12:0${sequence}:00.000Z`,
+              offline: true,
+            },
+          ],
+        },
+      });
+      expect(response.statusCode).toBe(202);
+    }
+
+    const expiredLease = new Date(Date.now() - 60_000);
+    const jobRow = inserts.find((insert) => insert.table === 'offline_check_in_sync_jobs')!.values;
+    Object.assign(jobRow, {
+      status: 'processing',
+      lease_owner: 'dead-worker',
+      leased_until: expiredLease,
+      next_attempt_at: expiredLease,
+      attempt_count: 1,
+    });
+    for (const chunk of inserts.filter(
+      (insert) => insert.table === 'offline_check_in_sync_chunks',
+    )) {
+      Object.assign(chunk.values, {
+        status: 'processing',
+        locked_at: expiredLease,
+      });
+    }
+
+    const processed = await processPendingBulkSyncJobs(db as unknown as Database, {
+      workerId: 'replacement-worker',
+      limit: 10,
+    });
+
+    expect(processed).toBeGreaterThanOrEqual(1);
+    expect(inserts.filter((insert) => insert.table === 'scan_logs')).toHaveLength(2);
+    expect(jobRow).toEqual(
+      expect.objectContaining({
+        status: 'completed',
+        lease_owner: null,
+        leased_until: null,
+        rows_processed: 2,
+      }),
+    );
+
+    await app.close();
+  });
+
+  it('does not retry a failed bulk sync job before next_attempt_at', async () => {
+    const { app, db, inserts } = await setupBulkApp();
+    const job = await createBulkJob(app);
+
+    const chunkUploadResponses = await Promise.all(
+      [1, 2].map((sequence) =>
+        app.inject({
+          method: 'PUT',
+          url: `/check-ins/bulk-sync-jobs/${job.id}/chunks/${sequence}`,
+          headers: { 'Idempotency-Key': `idem_bulk_retry_backoff_${sequence}` },
+          payload: {
+            scans: [
+              {
+                qrHash: sequence === 1 ? 'hash_1' : 'missing_hash',
+                scannedAt: `2026-06-01T12:0${sequence}:00.000Z`,
+                offline: true,
+              },
+            ],
+          },
+        }),
+      ),
+    );
+    for (const response of chunkUploadResponses) {
+      expect(response.statusCode).toBe(202);
+    }
+
+    const futureAttempt = new Date(Date.now() + 15 * 60 * 1000);
+    const jobRow = inserts.find((insert) => insert.table === 'offline_check_in_sync_jobs')!.values;
+    Object.assign(jobRow, {
+      status: 'failed',
+      failure_message: 'Bulk sync chunk processing failed',
+      lease_owner: null,
+      leased_until: null,
+      next_attempt_at: futureAttempt,
+      attempt_count: 1,
+    });
+    for (const chunk of inserts.filter(
+      (insert) => insert.table === 'offline_check_in_sync_chunks',
+    )) {
+      Object.assign(chunk.values, {
+        status: 'failed',
+        failure_message: 'Bulk sync chunk processing failed',
+      });
+    }
+
+    await processPendingBulkSyncChunks(db as unknown as Database, job.id, {
+      workerId: 'early-worker',
+    });
+
+    expect(inserts.filter((insert) => insert.table === 'scan_logs')).toHaveLength(0);
+    expect(jobRow).toEqual(
+      expect.objectContaining({
+        status: 'failed',
+        lease_owner: null,
+        leased_until: null,
+        next_attempt_at: futureAttempt,
+        attempt_count: 1,
+      }),
+    );
+
+    await app.close();
+  });
+
+  it('rejects extreme future async scannedAt values before storing chunks', async () => {
+    const { app, inserts } = await setupBulkApp();
+    const job = await createBulkJob(app);
+
+    const response = await app.inject({
+      method: 'PUT',
+      url: `/check-ins/bulk-sync-jobs/${job.id}/chunks/1`,
+      headers: { 'Idempotency-Key': 'idem_bulk_future_clock' },
+      payload: {
+        scans: [{ qrHash: 'hash_1', scannedAt: '2099-01-01T00:00:00.000Z', offline: true }],
+      },
+    });
+
+    expect(response.statusCode).toBe(400);
+    expect(response.json()).toMatchObject({ message: 'scan.scannedAt is too far in the future' });
+    expect(
+      inserts.filter((insert) => insert.table === 'offline_check_in_sync_chunks'),
+    ).toHaveLength(0);
+
+    await app.close();
+  });
+
+  it('records stale device-clock warnings on async jobs and scan logs', async () => {
+    const { app, db, inserts } = await setupBulkApp();
+    const job = await createBulkJob(app);
+
+    for (const sequence of [1, 2]) {
+      const response = await app.inject({
+        method: 'PUT',
+        url: `/check-ins/bulk-sync-jobs/${job.id}/chunks/${sequence}`,
+        headers: { 'Idempotency-Key': `idem_bulk_clock_warning_${sequence}` },
+        payload: {
+          scans: [
+            {
+              qrHash: sequence === 1 ? 'hash_1' : 'missing_hash',
+              scannedAt: `2020-01-01T00:0${sequence}:00.000Z`,
+              offline: true,
+            },
+          ],
+        },
+      });
+      expect(response.statusCode).toBe(202);
+    }
+
+    await processPendingBulkSyncChunks(db as unknown as Database, job.id, {
+      workerId: 'clock-worker',
+    });
+
+    const status = await app.inject({
+      method: 'GET',
+      url: `/check-ins/bulk-sync-jobs/${job.id}`,
+    });
+    expect(status.statusCode).toBe(200);
+    expect(status.json()).toMatchObject({
+      status: 'completed',
+      processingMetrics: expect.objectContaining({ clockWarnings: 2 }),
+    });
+    const logMetadata = inserts
+      .filter((insert) => insert.table === 'scan_logs')
+      .map((insert) => JSON.parse(insert.values.metadata as string));
+    expect(logMetadata).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ clockWarning: 'stale_device_clock' }),
+        expect.objectContaining({ clockWarning: 'stale_device_clock' }),
+      ]),
+    );
+
+    await app.close();
+  });
+
+  it('replays identical chunk uploads and rejects same-sequence payload conflicts', async () => {
+    const { app, inserts } = await setupBulkApp();
+    const job = await createBulkJob(app);
+    const payload = {
+      scans: [{ qrHash: 'hash_1', scannedAt: '2026-06-01T12:00:00.000Z', offline: true }],
+    };
+
+    const first = await app.inject({
+      method: 'PUT',
+      url: `/check-ins/bulk-sync-jobs/${job.id}/chunks/1`,
+      headers: { 'Idempotency-Key': 'idem_bulk_chunk_replay_1' },
+      payload,
+    });
+    expect(first.statusCode).toBe(202);
+
+    const replay = await app.inject({
+      method: 'PUT',
+      url: `/check-ins/bulk-sync-jobs/${job.id}/chunks/1`,
+      headers: { 'Idempotency-Key': 'idem_bulk_chunk_replay_2' },
+      payload,
+    });
+    expect(replay.statusCode).toBe(202);
+    expect(
+      inserts.filter((insert) => insert.table === 'offline_check_in_sync_chunks'),
+    ).toHaveLength(1);
+
+    const conflict = await app.inject({
+      method: 'PUT',
+      url: `/check-ins/bulk-sync-jobs/${job.id}/chunks/1`,
+      headers: { 'Idempotency-Key': 'idem_bulk_chunk_conflict' },
+      payload: {
+        scans: [{ qrHash: 'hash_other', scannedAt: '2026-06-01T12:00:00.000Z', offline: true }],
+      },
+    });
+
+    expect(conflict.statusCode).toBe(400);
+    expect(conflict.json()).toMatchObject({
+      message: 'Chunk sequence was already uploaded with different scans',
+    });
 
     await app.close();
   });

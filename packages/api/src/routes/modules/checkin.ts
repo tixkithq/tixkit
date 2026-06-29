@@ -1,16 +1,21 @@
 import type { FastifyPluginAsync, FastifyRequest } from 'fastify';
-import { createHmac, timingSafeEqual } from 'node:crypto';
+import { createHash, createHmac, timingSafeEqual } from 'node:crypto';
+import { performance } from 'node:perf_hooks';
 import { ClerkAuthService } from '../../auth/clerk.js';
 import {
+  type Database,
   EventRepository,
   TicketRepository,
   CheckInListRepository,
   ScanLogRepository,
   AttendeeRepository,
+  getDriver,
 } from '@tixkit/db';
+import { sql } from 'kysely';
 import { NotFoundError, ValidationError } from '@tixkit/domain';
 import type { ScanRequest, SyncScanInput } from '@tixkit/domain';
 import { withIdempotency, hashRequest } from '../../services/idempotency.js';
+import { ulid } from 'ulid';
 import {
   pageEnvelope,
   parseJsonValue,
@@ -19,8 +24,13 @@ import {
   serializeAttendee,
   serializeCheckInList,
   serializeTicket,
+  toIso,
 } from '../../http/contracts.js';
 import {
+  createBulkSyncJobSchema,
+  bulkSyncChunkSchema,
+  MAX_BULK_OFFLINE_SYNC_TOTAL_SCANS,
+  OFFLINE_SYNC_JSON_BODY_LIMIT_BYTES,
   scanSchema,
   syncScanSchema,
   updateAttendeeSchema,
@@ -29,6 +39,121 @@ import {
 } from '../../http/schemas.js';
 
 type Principal = NonNullable<FastifyRequest['principal']>;
+type CheckInListRow = NonNullable<Awaited<ReturnType<CheckInListRepository['findById']>>>;
+type TicketRow = NonNullable<Awaited<ReturnType<TicketRepository['findById']>>>;
+type NormalizedOfflineScan = {
+  qrHash: string;
+  scannedAt: Date;
+  scannedAtIso: string;
+  offline?: boolean;
+  clockWarning?: 'future_device_clock' | 'stale_device_clock';
+  clockDriftMs?: number;
+  chunkSequence?: number;
+  chunkScanIndex?: number;
+};
+type OfflineScanResult = {
+  qrHash: string;
+  outcome: string;
+  ticketId?: string;
+  metadata?: Record<string, unknown>;
+};
+type BulkSyncErrorSample = {
+  sequence: number;
+  scanIndex: number;
+  qrHash: string;
+  outcome: string;
+  metadata?: Record<string, unknown>;
+};
+type PublicBulkSyncErrorSample = Omit<BulkSyncErrorSample, 'qrHash'>;
+type BulkSyncJobRow = {
+  id: string;
+  tenant_id: string;
+  event_id: string;
+  check_in_list_id: string;
+  device_id: string;
+  requested_by_principal_id: string;
+  total_chunks: number;
+  total_scans: number | null;
+  chunks_received: number;
+  chunks_processed: number;
+  accepted_count: number | string | bigint;
+  duplicate_count: number | string | bigint;
+  invalid_count: number | string | bigint;
+  sample_errors: unknown;
+  status: string;
+  failure_message: string | null;
+  attempt_count?: number | string | bigint;
+  lease_owner?: string | null;
+  leased_until?: Date | string | null;
+  next_attempt_at?: Date | string | null;
+  last_attempted_at?: Date | string | null;
+  last_heartbeat_at?: Date | string | null;
+  processing_started_at?: Date | string | null;
+  processing_completed_at?: Date | string | null;
+  processing_duration_ms?: number | string | bigint;
+  transaction_duration_ms?: number | string | bigint;
+  lock_wait_ms?: number | string | bigint;
+  scan_log_insert_duration_ms?: number | string | bigint;
+  ticket_update_duration_ms?: number | string | bigint;
+  attendee_update_duration_ms?: number | string | bigint;
+  rows_processed?: number | string | bigint;
+  clock_warning_count?: number | string | bigint;
+  created_at: Date | string;
+  updated_at: Date | string;
+  completed_at: Date | string | null;
+};
+type BulkSyncChunkRow = {
+  id: string;
+  tenant_id: string;
+  job_id: string;
+  sequence: number;
+  scan_count: number;
+  payload_hash: string;
+  payload: unknown | null;
+  accepted_count: number | string | bigint;
+  duplicate_count: number | string | bigint;
+  invalid_count: number | string | bigint;
+  sample_errors: unknown;
+  clock_warning_count?: number | string | bigint;
+  status: string;
+  attempt_count: number;
+  failure_message: string | null;
+  locked_at: Date | string | null;
+  processed_at: Date | string | null;
+  created_at: Date | string;
+  updated_at: Date | string;
+};
+type AcceptedCandidate = {
+  ticketId: string;
+  attendeeId: string;
+  scannedAt: Date;
+  resultIndex: number;
+};
+type OfflineSyncBatchMetrics = {
+  rowsProcessed: number;
+  clockWarnings: number;
+  scanLogInsertDurationMs: number;
+  ticketUpdateDurationMs: number;
+  attendeeUpdateDurationMs: number;
+};
+type BulkSyncWorkerOptions = {
+  workerId?: string;
+  limit?: number;
+};
+
+const OFFLINE_SYNC_DB_CHUNK_SIZE = 500;
+const BULK_SYNC_ERROR_SAMPLE_LIMIT = 25;
+const BULK_SYNC_PROCESSING_BATCH_SIZE = 50_000;
+const BULK_SYNC_PUBLIC_FAILURE_MESSAGE = 'Bulk sync chunk processing failed';
+const BULK_SYNC_WORKER_LEASE_MS = 60 * 60 * 1000;
+const BULK_SYNC_RETRY_BASE_MS = 30 * 1000;
+const BULK_SYNC_RETRY_MAX_MS = 15 * 60 * 1000;
+const BULK_SYNC_MAX_ATTEMPTS = 5;
+const DEVICE_CLOCK_WARNING_FUTURE_MS = 5 * 60 * 1000;
+const DEVICE_CLOCK_REJECT_FUTURE_MS = 24 * 60 * 60 * 1000;
+const DEVICE_CLOCK_STALE_WARNING_MS = 180 * 24 * 60 * 60 * 1000;
+const scheduledBulkSyncJobs = new Set<string>();
+const pendingBulkSyncJobSchedules = new Set<string>();
 
 function requireEventAccess(principal: Principal, event: Record<string, unknown>, eventId: string) {
   ClerkAuthService.requireResourceTenant(principal, event, 'Event', eventId);
@@ -245,6 +370,7 @@ export const checkInRoutes: FastifyPluginAsync = async (app) => {
     if (!body.checkInListId) throw new ValidationError('checkInListId is required');
     if (!body.qrPayload) throw new ValidationError('qrPayload is required for online scans');
     if (!body.scannedAt) throw new ValidationError('scannedAt is required');
+    const normalizedScannedAt = normalizeScannedAt(body.scannedAt);
 
     const list = await listRepo.findById(body.checkInListId);
     if (!list) throw new NotFoundError('CheckInList', body.checkInListId);
@@ -263,11 +389,12 @@ export const checkInRoutes: FastifyPluginAsync = async (app) => {
     const handler = async () => {
       const result = await processScan({
         ticketRepo,
+        tenantId: principal.tenantId,
         list,
         qrHash: qrService.hashPayload(body.qrPayload!),
         verification: qrService.getQrPayload(body.qrPayload!),
         deviceId: effectiveDeviceId,
-        scannedAt: new Date(body.scannedAt!),
+        scannedAt: normalizedScannedAt.scannedAt,
         requireVerifiedTicketId: true,
       });
 
@@ -278,9 +405,9 @@ export const checkInRoutes: FastifyPluginAsync = async (app) => {
         ticketId: result.ticketId,
         qrHash: result.qrHash,
         outcome: result.outcome,
-        scannedAt: new Date(body.scannedAt!),
+        scannedAt: normalizedScannedAt.scannedAt,
         offline: body.offline ?? false,
-        metadata: result.metadata,
+        metadata: metadataWithClockWarning(result.metadata, normalizedScannedAt),
       });
 
       return {
@@ -310,21 +437,96 @@ export const checkInRoutes: FastifyPluginAsync = async (app) => {
     return reply.status(result.status).send(result.body);
   });
 
-  app.post('/check-ins/sync', async (request, reply) => {
+  app.post(
+    '/check-ins/sync',
+    { bodyLimit: OFFLINE_SYNC_JSON_BODY_LIMIT_BYTES },
+    async (request, reply) => {
+      const principal = request.principal!;
+      ClerkAuthService.requirePermission(principal, 'checkins.write');
+      const body = parseBody(syncScanSchema, request.body) as SyncScanInput;
+      const idempotencyKey = request.headers['idempotency-key'];
+      if (typeof idempotencyKey !== 'string') {
+        throw new ValidationError('Idempotency-Key header is required for offline scan sync');
+      }
+      if (!body.checkInListId) throw new ValidationError('checkInListId is required');
+      if (!Array.isArray(body.scans)) throw new ValidationError('scans must be an array');
+
+      const listRepo = new CheckInListRepository(db);
+
+      const list = await listRepo.findById(body.checkInListId);
+      if (!list) throw new NotFoundError('CheckInList', body.checkInListId);
+      const event = await loadEvent(list.event_id);
+      requireEventAccess(principal, event, list.event_id);
+      if (list.status !== 'active') throw new ValidationError('Check-in list is not active');
+      const effectiveDeviceId = resolveCheckInDeviceId(principal, body.deviceId);
+
+      const normalizedScans = normalizeBulkSyncScans(body.scans);
+
+      // Deterministic conflict resolution: sort by scannedAt so the earliest
+      // offline scan wins the check-in; later scans for the same ticket become
+      // duplicates. The idempotency guard below prevents replayed batches from
+      // writing duplicate scan logs.
+      // eslint-disable-next-line unicorn/no-array-sort -- sorting a fresh array preserves deterministic offline conflict ordering.
+      const sortedScans = [...normalizedScans].sort(
+        (a, b) => a.scannedAt.getTime() - b.scannedAt.getTime(),
+      );
+
+      const requestHash = hashRequest({
+        checkInListId: body.checkInListId,
+        deviceId: effectiveDeviceId,
+        scans: sortedScans.map((scan) => ({
+          qrHash: scan.qrHash,
+          scannedAt: scan.scannedAtIso,
+          offline: scan.offline,
+        })),
+      });
+
+      const syncResult = await withIdempotency(
+        db,
+        {
+          key: idempotencyKey,
+          tenantId: principal.tenantId,
+          requestHash,
+        },
+        async () => {
+          const result = await db.transaction().execute(async (trx) =>
+            processOfflineSyncBatch({
+              db: trx as Database,
+              tenantId: principal.tenantId,
+              list,
+              checkInListId: body.checkInListId,
+              deviceId: effectiveDeviceId,
+              scans: sortedScans,
+            }),
+          );
+
+          const { errorSamples: _errorSamples, metrics: _metrics, ...syncBody } = result;
+          return { status: 200, body: syncBody };
+        },
+      );
+
+      return reply.status(syncResult.status).send(syncResult.body);
+    },
+  );
+
+  app.post('/check-ins/bulk-sync-jobs', async (request, reply) => {
     const principal = request.principal!;
     ClerkAuthService.requirePermission(principal, 'checkins.write');
-    const body = parseBody(syncScanSchema, request.body) as SyncScanInput;
+    const body = parseBody(createBulkSyncJobSchema, request.body) as {
+      checkInListId: string;
+      deviceId?: string;
+      totalChunks: number;
+      totalScans?: number;
+    };
     const idempotencyKey = request.headers['idempotency-key'];
     if (typeof idempotencyKey !== 'string') {
-      throw new ValidationError('Idempotency-Key header is required for offline scan sync');
+      throw new ValidationError('Idempotency-Key header is required for bulk offline sync jobs');
     }
-    if (!body.checkInListId) throw new ValidationError('checkInListId is required');
-    if (!Array.isArray(body.scans)) throw new ValidationError('scans must be an array');
+    if (body.totalScans !== undefined && body.totalScans < body.totalChunks) {
+      throw new ValidationError('totalScans must be greater than or equal to totalChunks');
+    }
 
-    const ticketRepo = new TicketRepository(db);
-    const scanRepo = new ScanLogRepository(db);
     const listRepo = new CheckInListRepository(db);
-
     const list = await listRepo.findById(body.checkInListId);
     if (!list) throw new NotFoundError('CheckInList', body.checkInListId);
     const event = await loadEvent(list.event_id);
@@ -332,83 +534,809 @@ export const checkInRoutes: FastifyPluginAsync = async (app) => {
     if (list.status !== 'active') throw new ValidationError('Check-in list is not active');
     const effectiveDeviceId = resolveCheckInDeviceId(principal, body.deviceId);
 
-    // Deterministic conflict resolution: sort by scannedAt so the earliest
-    // offline scan wins the check-in; later scans for the same ticket become
-    // duplicates. The idempotency guard below prevents replayed batches from
-    // writing duplicate scan logs.
-    // eslint-disable-next-line unicorn/no-array-sort -- sorting a fresh array preserves deterministic offline conflict ordering.
-    const sortedScans = [...body.scans].sort(
-      (a, b) => new Date(a.scannedAt).getTime() - new Date(b.scannedAt).getTime(),
-    );
-
-    for (const scan of sortedScans) {
-      if (!scan.qrHash) throw new ValidationError('scan.qrHash is required');
-      if (!scan.scannedAt || Number.isNaN(new Date(scan.scannedAt).getTime())) {
-        throw new ValidationError('scan.scannedAt must be a valid ISO8601 date');
-      }
-    }
-
-    const requestHash = hashRequest({
-      checkInListId: body.checkInListId,
-      deviceId: effectiveDeviceId,
-      scans: sortedScans.map((scan) => ({
-        qrHash: scan.qrHash,
-        scannedAt: scan.scannedAt,
-        offline: scan.offline,
-      })),
-    });
-
-    const syncResult = await withIdempotency(
+    const result = await withIdempotency(
       db,
       {
         key: idempotencyKey,
         tenantId: principal.tenantId,
-        requestHash,
+        requestHash: hashRequest({
+          checkInListId: body.checkInListId,
+          deviceId: effectiveDeviceId,
+          totalChunks: body.totalChunks,
+          totalScans: body.totalScans ?? null,
+        }),
       },
       async () => {
-        const results: { qrHash: string; outcome: string }[] = [];
-        let accepted = 0;
-        let duplicates = 0;
-        let invalid = 0;
+        const now = new Date();
+        const job = (await db
+          .insertInto('offline_check_in_sync_jobs')
+          .values({
+            id: `bcs_${ulid()}`,
+            tenant_id: principal.tenantId,
+            event_id: list.event_id,
+            check_in_list_id: body.checkInListId,
+            device_id: effectiveDeviceId,
+            requested_by_principal_id: principal.id,
+            total_chunks: body.totalChunks,
+            total_scans: body.totalScans ?? null,
+            chunks_received: 0,
+            chunks_processed: 0,
+            accepted_count: 0,
+            duplicate_count: 0,
+            invalid_count: 0,
+            sample_errors: JSON.stringify([]),
+            status: 'pending',
+            failure_message: null,
+            attempt_count: 0,
+            lease_owner: null,
+            leased_until: null,
+            next_attempt_at: null,
+            last_attempted_at: null,
+            last_heartbeat_at: null,
+            processing_started_at: null,
+            processing_completed_at: null,
+            processing_duration_ms: 0,
+            transaction_duration_ms: 0,
+            lock_wait_ms: 0,
+            scan_log_insert_duration_ms: 0,
+            ticket_update_duration_ms: 0,
+            attendee_update_duration_ms: 0,
+            rows_processed: 0,
+            clock_warning_count: 0,
+            created_at: now,
+            updated_at: now,
+            completed_at: null,
+          })
+          .returningAll()
+          .executeTakeFirstOrThrow()) as BulkSyncJobRow;
 
-        for (const scan of sortedScans) {
-          // eslint-disable-next-line no-await-in-loop -- sorted offline scans must be processed sequentially so the earliest scan wins.
-          const scanResult = await processScan({
-            ticketRepo,
-            list,
-            qrHash: scan.qrHash,
-            deviceId: effectiveDeviceId,
-            scannedAt: new Date(scan.scannedAt),
-            requireVerifiedTicketId: false,
-          });
-
-          if (scanResult.outcome === 'accepted') accepted++;
-          else if (scanResult.outcome === 'duplicate') duplicates++;
-          else invalid++;
-
-          // eslint-disable-next-line no-await-in-loop -- each scan log records the outcome produced by the immediately preceding scan.
-          await scanRepo.create({
-            tenantId: principal.tenantId,
-            checkInListId: body.checkInListId,
-            deviceId: effectiveDeviceId,
-            ticketId: scanResult.ticketId,
-            qrHash: scan.qrHash,
-            outcome: scanResult.outcome,
-            scannedAt: new Date(scan.scannedAt),
-            offline: true,
-            metadata: scanResult.metadata,
-          });
-
-          results.push({ qrHash: scan.qrHash, outcome: scanResult.outcome });
-        }
-
-        return { status: 200, body: { accepted, duplicates, invalid, results } };
+        return { status: 202, body: serializeBulkSyncJob(job) };
       },
     );
 
-    return reply.status(syncResult.status).send(syncResult.body);
+    return reply.status(result.status).send(result.body);
+  });
+
+  app.put(
+    '/check-ins/bulk-sync-jobs/:jobId/chunks/:sequence',
+    { bodyLimit: OFFLINE_SYNC_JSON_BODY_LIMIT_BYTES },
+    async (request, reply) => {
+      const principal = request.principal!;
+      ClerkAuthService.requirePermission(principal, 'checkins.write');
+      const { jobId, sequence } = request.params as { jobId: string; sequence: string };
+      const body = parseBody(bulkSyncChunkSchema, request.body) as {
+        scans: { qrHash: string; scannedAt: string; offline: boolean }[];
+      };
+      const idempotencyKey = request.headers['idempotency-key'];
+      if (typeof idempotencyKey !== 'string') {
+        throw new ValidationError('Idempotency-Key header is required for bulk sync chunk upload');
+      }
+
+      const chunkSequence = parseChunkSequence(sequence);
+      const job = await loadAuthorizedBulkSyncJob(db, principal, jobId, loadEvent);
+      if (chunkSequence > job.total_chunks) {
+        throw new ValidationError('Chunk sequence exceeds job totalChunks');
+      }
+
+      const normalizedScans = normalizeBulkSyncScans(body.scans);
+      const payloadHash = hashBulkSyncChunkPayload(normalizedScans);
+      const requestHash = hashRequest({
+        jobId,
+        sequence: chunkSequence,
+        payloadHash,
+      });
+
+      const result = await withIdempotency(
+        db,
+        {
+          key: idempotencyKey,
+          tenantId: principal.tenantId,
+          requestHash,
+        },
+        async () => {
+          return db.transaction().execute(async (trx) => {
+            const lockedJob = (await trx
+              .selectFrom('offline_check_in_sync_jobs')
+              .selectAll()
+              .where('id', '=', jobId)
+              .forUpdate()
+              .executeTakeFirst()) as BulkSyncJobRow | undefined;
+            if (!lockedJob) throw new NotFoundError('BulkSyncJob', jobId);
+            ClerkAuthService.requireResourceTenant(principal, lockedJob, 'BulkSyncJob', jobId);
+            if (chunkSequence > lockedJob.total_chunks) {
+              throw new ValidationError('Chunk sequence exceeds job totalChunks');
+            }
+            const maxJobScans = lockedJob.total_scans ?? MAX_BULK_OFFLINE_SYNC_TOTAL_SCANS;
+            const uploadedScanCount = await sumUploadedBulkSyncScans(
+              trx as Database,
+              lockedJob.id,
+              chunkSequence,
+            );
+            if (uploadedScanCount + body.scans.length > maxJobScans) {
+              throw new ValidationError(
+                lockedJob.total_scans === null
+                  ? 'Uploaded chunk scans exceed maximum bulk sync scan count'
+                  : 'Uploaded chunk scans exceed job totalScans',
+              );
+            }
+
+            const existing = (await trx
+              .selectFrom('offline_check_in_sync_chunks')
+              .selectAll()
+              .where('job_id', '=', jobId)
+              .where('sequence', '=', chunkSequence)
+              .executeTakeFirst()) as BulkSyncChunkRow | undefined;
+
+            if (existing) {
+              if (existing.payload_hash !== payloadHash) {
+                throw new ValidationError(
+                  'Chunk sequence was already uploaded with different scans',
+                );
+              }
+              return { status: 202, body: serializeBulkSyncChunk(existing) };
+            }
+
+            const now = new Date();
+            const chunk = (await trx
+              .insertInto('offline_check_in_sync_chunks')
+              .values({
+                id: `bch_${ulid()}`,
+                tenant_id: principal.tenantId,
+                job_id: jobId,
+                sequence: chunkSequence,
+                scan_count: normalizedScans.length,
+                payload_hash: payloadHash,
+                payload: JSON.stringify(normalizedScans),
+                accepted_count: 0,
+                duplicate_count: 0,
+                invalid_count: 0,
+                sample_errors: JSON.stringify([]),
+                clock_warning_count: 0,
+                status: 'uploaded',
+                attempt_count: 0,
+                failure_message: null,
+                locked_at: null,
+                processed_at: null,
+                created_at: now,
+                updated_at: now,
+              })
+              .returningAll()
+              .executeTakeFirstOrThrow()) as BulkSyncChunkRow;
+
+            await trx
+              .updateTable('offline_check_in_sync_jobs')
+              .set((eb) => ({
+                chunks_received: eb('chunks_received', '+', 1),
+                status: lockedJob.status === 'pending' ? 'receiving' : lockedJob.status,
+                updated_at: now,
+              }))
+              .where('id', '=', jobId)
+              .execute();
+
+            return { status: 202, body: serializeBulkSyncChunk(chunk) };
+          });
+        },
+      );
+
+      scheduleBulkSyncProcessing(db, jobId);
+      return reply.status(result.status).send(result.body);
+    },
+  );
+
+  app.get('/check-ins/bulk-sync-jobs/:jobId', async (request) => {
+    const principal = request.principal!;
+    ClerkAuthService.requirePermission(principal, 'checkins.write');
+    const { jobId } = request.params as { jobId: string };
+    const job = await loadAuthorizedBulkSyncJob(db, principal, jobId, loadEvent);
+    if (shouldScheduleBulkSyncJob(job)) {
+      scheduleBulkSyncProcessing(db, jobId);
+    }
+    return serializeBulkSyncJob(job);
+  });
+
+  app.get('/check-ins/bulk-sync-jobs/:jobId/chunks', async (request) => {
+    const principal = request.principal!;
+    ClerkAuthService.requirePermission(principal, 'checkins.write');
+    const { jobId } = request.params as { jobId: string };
+    await loadAuthorizedBulkSyncJob(db, principal, jobId, loadEvent);
+    const rows = (await db
+      .selectFrom('offline_check_in_sync_chunks')
+      .selectAll()
+      .where('job_id', '=', jobId)
+      .where('tenant_id', '=', principal.tenantId)
+      .orderBy('sequence', 'asc')
+      .execute()) as BulkSyncChunkRow[];
+
+    return {
+      items: rows.map((row) => serializeBulkSyncChunk(row)),
+      total: rows.length,
+    };
   });
 };
+
+function scheduleBulkSyncProcessing(db: Database, jobId: string): void {
+  if (scheduledBulkSyncJobs.has(jobId)) {
+    pendingBulkSyncJobSchedules.add(jobId);
+    return;
+  }
+  scheduledBulkSyncJobs.add(jobId);
+  setTimeout(() => {
+    void processPendingBulkSyncChunks(db, jobId)
+      .catch(() => {
+        // Processing state is persisted on the job row by the worker path.
+      })
+      .finally(() => {
+        scheduledBulkSyncJobs.delete(jobId);
+        if (pendingBulkSyncJobSchedules.delete(jobId)) {
+          scheduleBulkSyncProcessing(db, jobId);
+        }
+      });
+  }, 0);
+}
+
+function shouldScheduleBulkSyncJob(job: BulkSyncJobRow): boolean {
+  if (job.status === 'completed') return false;
+  if (job.status !== 'failed') return true;
+  if (!job.next_attempt_at) return false;
+  return new Date(job.next_attempt_at).getTime() <= Date.now();
+}
+
+async function loadAuthorizedBulkSyncJob(
+  db: Database,
+  principal: Principal,
+  jobId: string,
+  loadEvent: (eventId: string) => Promise<Record<string, unknown>>,
+): Promise<BulkSyncJobRow> {
+  const job = (await db
+    .selectFrom('offline_check_in_sync_jobs')
+    .selectAll()
+    .where('id', '=', jobId)
+    .executeTakeFirst()) as BulkSyncJobRow | undefined;
+  if (!job) throw new NotFoundError('BulkSyncJob', jobId);
+  ClerkAuthService.requireResourceTenant(principal, job, 'BulkSyncJob', jobId);
+  const event = await loadEvent(job.event_id);
+  requireEventAccess(principal, event, job.event_id);
+  return job;
+}
+
+function serializeBulkSyncJob(job: BulkSyncJobRow) {
+  return {
+    id: job.id,
+    tenantId: job.tenant_id,
+    eventId: job.event_id,
+    checkInListId: job.check_in_list_id,
+    deviceId: job.device_id,
+    totalChunks: job.total_chunks,
+    totalScans: job.total_scans,
+    chunksReceived: job.chunks_received,
+    chunksProcessed: job.chunks_processed,
+    status: job.status,
+    attemptCount: countValue(job.attempt_count ?? 0),
+    nextAttemptAt: toIso(job.next_attempt_at ?? null),
+    leasedUntil: toIso(job.leased_until ?? null),
+    lastAttemptedAt: toIso(job.last_attempted_at ?? null),
+    processingStartedAt: toIso(job.processing_started_at ?? null),
+    processingCompletedAt: toIso(job.processing_completed_at ?? null),
+    accepted: countValue(job.accepted_count),
+    duplicates: countValue(job.duplicate_count),
+    invalid: countValue(job.invalid_count),
+    processingMetrics: {
+      processingDurationMs: countValue(job.processing_duration_ms ?? 0),
+      transactionDurationMs: countValue(job.transaction_duration_ms ?? 0),
+      lockWaitMs: countValue(job.lock_wait_ms ?? 0),
+      scanLogInsertDurationMs: countValue(job.scan_log_insert_duration_ms ?? 0),
+      ticketUpdateDurationMs: countValue(job.ticket_update_duration_ms ?? 0),
+      attendeeUpdateDurationMs: countValue(job.attendee_update_duration_ms ?? 0),
+      rowsProcessed: countValue(job.rows_processed ?? 0),
+      clockWarnings: countValue(job.clock_warning_count ?? 0),
+    },
+    sampleErrors: publicBulkSyncErrorSamples(job.sample_errors),
+    failureMessage: publicBulkSyncFailureMessage(job.failure_message),
+    createdAt: toIso(job.created_at),
+    updatedAt: toIso(job.updated_at),
+    completedAt: toIso(job.completed_at),
+  };
+}
+
+function serializeBulkSyncChunk(chunk: BulkSyncChunkRow) {
+  return {
+    id: chunk.id,
+    jobId: chunk.job_id,
+    sequence: chunk.sequence,
+    scanCount: chunk.scan_count,
+    status: chunk.status,
+    accepted: countValue(chunk.accepted_count),
+    duplicates: countValue(chunk.duplicate_count),
+    invalid: countValue(chunk.invalid_count),
+    clockWarnings: countValue(chunk.clock_warning_count ?? 0),
+    sampleErrors: publicBulkSyncErrorSamples(chunk.sample_errors),
+    attemptCount: chunk.attempt_count,
+    failureMessage: publicBulkSyncFailureMessage(chunk.failure_message),
+    createdAt: toIso(chunk.created_at),
+    updatedAt: toIso(chunk.updated_at),
+    processedAt: toIso(chunk.processed_at),
+  };
+}
+
+function countValue(value: number | string | bigint): number {
+  const count = typeof value === 'bigint' ? Number(value) : Number(value);
+  return Number.isFinite(count) ? count : 0;
+}
+
+function publicBulkSyncErrorSamples(value: unknown): PublicBulkSyncErrorSample[] {
+  return parseJsonValue<BulkSyncErrorSample[]>(value, [])
+    .slice(0, BULK_SYNC_ERROR_SAMPLE_LIMIT)
+    .map((sample) => {
+      const publicSample: PublicBulkSyncErrorSample = {
+        sequence: sample.sequence,
+        scanIndex: sample.scanIndex,
+        outcome: sample.outcome,
+      };
+      if (sample.metadata && typeof sample.metadata === 'object') {
+        publicSample.metadata = sample.metadata;
+      }
+      return publicSample;
+    });
+}
+
+function publicBulkSyncFailureMessage(message: string | null): string | null {
+  return message ? BULK_SYNC_PUBLIC_FAILURE_MESSAGE : null;
+}
+
+function parseChunkSequence(value: string): number {
+  if (!/^[1-9]\d*$/.test(value)) {
+    throw new ValidationError('Chunk sequence must be a positive integer');
+  }
+  const sequence = Number(value);
+  if (!Number.isSafeInteger(sequence)) {
+    throw new ValidationError('Chunk sequence must be a safe integer');
+  }
+  return sequence;
+}
+
+function normalizeScannedAt(
+  value: string,
+  now = new Date(),
+): Omit<NormalizedOfflineScan, 'qrHash'> {
+  const scannedAt = new Date(value);
+  if (!value || Number.isNaN(scannedAt.getTime())) {
+    throw new ValidationError('scan.scannedAt must be a valid ISO8601 date');
+  }
+
+  const clockDriftMs = scannedAt.getTime() - now.getTime();
+  if (clockDriftMs > DEVICE_CLOCK_REJECT_FUTURE_MS) {
+    throw new ValidationError('scan.scannedAt is too far in the future');
+  }
+
+  const normalized: Omit<NormalizedOfflineScan, 'qrHash'> = {
+    scannedAt,
+    scannedAtIso: value,
+  };
+  if (clockDriftMs > DEVICE_CLOCK_WARNING_FUTURE_MS) {
+    normalized.clockWarning = 'future_device_clock';
+    normalized.clockDriftMs = clockDriftMs;
+  } else if (Math.abs(clockDriftMs) > DEVICE_CLOCK_STALE_WARNING_MS) {
+    normalized.clockWarning = 'stale_device_clock';
+    normalized.clockDriftMs = clockDriftMs;
+  }
+  return normalized;
+}
+
+function normalizeBulkSyncScans(
+  scans: { qrHash: string; scannedAt: string; offline: boolean }[],
+): NormalizedOfflineScan[] {
+  const now = new Date();
+  return scans.map((scan) => {
+    const normalizedScannedAt = normalizeScannedAt(scan.scannedAt, now);
+    return {
+      qrHash: scan.qrHash,
+      offline: scan.offline,
+      ...normalizedScannedAt,
+    };
+  });
+}
+
+function hashBulkSyncChunkPayload(scans: NormalizedOfflineScan[]): string {
+  return createHash('sha256')
+    .update(
+      JSON.stringify(
+        scans.map((scan) => ({
+          qrHash: scan.qrHash,
+          scannedAt: scan.scannedAtIso,
+          offline: scan.offline,
+        })),
+      ),
+    )
+    .digest('hex');
+}
+
+function metadataWithClockWarning(
+  metadata: Record<string, unknown> | undefined,
+  scan: Pick<NormalizedOfflineScan, 'clockWarning' | 'clockDriftMs'>,
+): Record<string, unknown> | undefined {
+  if (!scan.clockWarning) return metadata;
+  if (!metadata) {
+    return {
+      clockWarning: scan.clockWarning,
+      clockDriftMs: scan.clockDriftMs ?? null,
+    };
+  }
+  return {
+    ...metadata,
+    clockWarning: scan.clockWarning,
+    clockDriftMs: scan.clockDriftMs ?? null,
+  };
+}
+
+async function sumUploadedBulkSyncScans(
+  db: Database,
+  jobId: string,
+  excludingSequence: number,
+): Promise<number> {
+  const rows = (await db
+    .selectFrom('offline_check_in_sync_chunks')
+    .select('scan_count')
+    .where('job_id', '=', jobId)
+    .where('sequence', '<>', excludingSequence)
+    .execute()) as Array<{ scan_count: number | string | bigint }>;
+  return rows.reduce((total, row) => total + countValue(row.scan_count), 0);
+}
+
+export async function processPendingBulkSyncJobs(
+  db: Database,
+  options: BulkSyncWorkerOptions = {},
+): Promise<number> {
+  const limit = options.limit ?? 25;
+  const now = new Date();
+  const rows = (await db
+    .selectFrom('offline_check_in_sync_jobs')
+    .selectAll()
+    .where('status', 'in', ['receiving', 'failed', 'processing'])
+    .orderBy('updated_at', 'asc')
+    .limit(limit)
+    .execute()) as BulkSyncJobRow[];
+
+  let processed = 0;
+  for (const job of rows) {
+    if (job.chunks_received < job.total_chunks) continue;
+    if (job.next_attempt_at && new Date(job.next_attempt_at).getTime() > now.getTime()) continue;
+    if (
+      job.leased_until &&
+      new Date(job.leased_until).getTime() > now.getTime() &&
+      job.lease_owner !== options.workerId
+    ) {
+      continue;
+    }
+    // eslint-disable-next-line no-await-in-loop -- worker claims are intentionally bounded and sequential.
+    await processPendingBulkSyncChunks(db, job.id, options);
+    processed += 1;
+  }
+  return processed;
+}
+
+export async function processPendingBulkSyncChunks(
+  db: Database,
+  jobId: string,
+  options: BulkSyncWorkerOptions = {},
+): Promise<void> {
+  try {
+    await processBulkSyncJob(db, jobId, options);
+  } catch (error) {
+    await markBulkSyncJobFailed(db, jobId, error);
+  }
+}
+
+async function claimBulkSyncJobLease(
+  db: Database,
+  jobId: string,
+  options: BulkSyncWorkerOptions,
+): Promise<{ job: BulkSyncJobRow; workerId: string; lockWaitMs: number } | null> {
+  const workerId = options.workerId ?? `api-${process.pid}`;
+  const now = new Date();
+  const leasedUntil = new Date(now.getTime() + BULK_SYNC_WORKER_LEASE_MS);
+  const lockStartedAt = performance.now();
+  const claimed = (await db
+    .updateTable('offline_check_in_sync_jobs')
+    .set((eb) => ({
+      status: 'processing',
+      attempt_count: eb('attempt_count', '+', 1),
+      lease_owner: workerId,
+      leased_until: leasedUntil,
+      next_attempt_at: null,
+      last_attempted_at: now,
+      last_heartbeat_at: now,
+      processing_started_at: now,
+      processing_completed_at: null,
+      failure_message: null,
+      updated_at: now,
+    }))
+    .where('id', '=', jobId)
+    .where('status', 'in', ['receiving', 'failed', 'processing'])
+    .whereRef('chunks_received', '>=', 'total_chunks')
+    .where('attempt_count', '<', BULK_SYNC_MAX_ATTEMPTS)
+    .where((eb) =>
+      eb.or([
+        eb('leased_until', 'is', null),
+        eb('leased_until', '<=', now),
+        eb('lease_owner', '=', workerId),
+      ]),
+    )
+    .where((eb) =>
+      eb.or([
+        eb('status', '<>', 'failed'),
+        eb('next_attempt_at', 'is', null),
+        eb('next_attempt_at', '<=', now),
+      ]),
+    )
+    .returningAll()
+    .executeTakeFirst()) as BulkSyncJobRow | undefined;
+  const lockWaitMs = Math.round(performance.now() - lockStartedAt);
+  if (!claimed) return null;
+  if (claimed.status === 'completed') return null;
+
+  return { job: claimed, workerId, lockWaitMs };
+}
+
+async function processBulkSyncJob(
+  db: Database,
+  jobId: string,
+  options: BulkSyncWorkerOptions,
+): Promise<boolean> {
+  const claim = await claimBulkSyncJobLease(db, jobId, options);
+  if (!claim) return false;
+  const processingStartedAt = new Date();
+  const transactionStartedAt = performance.now();
+  return db.transaction().execute(async (trx) => {
+    let jobQuery = trx.selectFrom('offline_check_in_sync_jobs').selectAll().where('id', '=', jobId);
+    if (getDriver() === 'postgres') {
+      jobQuery = jobQuery.forUpdate();
+    }
+    const job = (await jobQuery.executeTakeFirst()) as BulkSyncJobRow | undefined;
+    if (!job || job.status === 'completed') return false;
+    if (job.lease_owner && job.lease_owner !== claim.workerId) return false;
+    if (job.chunks_received < job.total_chunks) return false;
+
+    const list = await new CheckInListRepository(trx as Database).findById(job.check_in_list_id);
+    if (!list) throw new NotFoundError('CheckInList', job.check_in_list_id);
+    if (list.status !== 'active') throw new ValidationError('Check-in list is not active');
+
+    const chunks = (await trx
+      .selectFrom('offline_check_in_sync_chunks')
+      .selectAll()
+      .where('job_id', '=', job.id)
+      .where('tenant_id', '=', job.tenant_id)
+      .orderBy('sequence', 'asc')
+      .execute()) as BulkSyncChunkRow[];
+    if (chunks.length < job.total_chunks) return false;
+    if (job.total_scans !== null) {
+      const uploadedScanCount = chunks.reduce(
+        (total, chunk) => total + countValue(chunk.scan_count),
+        0,
+      );
+      if (uploadedScanCount !== job.total_scans) {
+        throw new ValidationError('Uploaded chunk scans do not match job totalScans');
+      }
+    }
+    if (chunks.some((chunk) => chunk.payload === null)) {
+      throw new ValidationError('Bulk sync chunk payload is unavailable for retry');
+    }
+
+    const now = new Date();
+    await trx
+      .updateTable('offline_check_in_sync_chunks')
+      .set((eb) => ({
+        status: 'processing',
+        attempt_count: eb('attempt_count', '+', 1),
+        failure_message: null,
+        locked_at: now,
+        updated_at: now,
+      }))
+      .where('job_id', '=', job.id)
+      .where('tenant_id', '=', job.tenant_id)
+      .where('status', 'in', ['uploaded', 'processing', 'failed'])
+      .execute();
+    await trx
+      .updateTable('offline_check_in_sync_jobs')
+      .set({
+        status: 'processing',
+        failure_message: null,
+        last_heartbeat_at: now,
+        leased_until: new Date(now.getTime() + BULK_SYNC_WORKER_LEASE_MS),
+        updated_at: now,
+      })
+      .where('id', '=', job.id)
+      .execute();
+
+    const orderedScans = chunks.flatMap((chunk) =>
+      parseJsonValue<NormalizedOfflineScan[]>(chunk.payload, []).map((scan, index) =>
+        Object.assign({}, scan, {
+          scannedAt: new Date(scan.scannedAtIso),
+          chunkSequence: chunk.sequence,
+          chunkScanIndex: index,
+        }),
+      ),
+    );
+    // eslint-disable-next-line unicorn/no-array-sort -- deterministic global offline conflict resolution requires a full-job sort.
+    orderedScans.sort(
+      (a, b) =>
+        a.scannedAt.getTime() - b.scannedAt.getTime() ||
+        (a.chunkSequence ?? 0) - (b.chunkSequence ?? 0) ||
+        (a.chunkScanIndex ?? 0) - (b.chunkScanIndex ?? 0),
+    );
+
+    const chunkSummaries = new Map<
+      number,
+      {
+        accepted: number;
+        duplicates: number;
+        invalid: number;
+        clockWarnings: number;
+        errorSamples: BulkSyncErrorSample[];
+      }
+    >();
+    for (const chunk of chunks) {
+      chunkSummaries.set(chunk.sequence, {
+        accepted: 0,
+        duplicates: 0,
+        invalid: 0,
+        clockWarnings: 0,
+        errorSamples: [],
+      });
+    }
+    let accepted = 0;
+    let duplicates = 0;
+    let invalid = 0;
+    const metrics: OfflineSyncBatchMetrics = {
+      rowsProcessed: 0,
+      clockWarnings: 0,
+      scanLogInsertDurationMs: 0,
+      ticketUpdateDurationMs: 0,
+      attendeeUpdateDurationMs: 0,
+    };
+    const sampleErrors: BulkSyncErrorSample[] = [];
+
+    for (let offset = 0; offset < orderedScans.length; offset += BULK_SYNC_PROCESSING_BATCH_SIZE) {
+      const scanBatch = orderedScans.slice(offset, offset + BULK_SYNC_PROCESSING_BATCH_SIZE);
+      // eslint-disable-next-line no-await-in-loop -- each sorted batch observes claims made earlier in the same transaction.
+      const result = await processOfflineSyncBatch({
+        db: trx as Database,
+        tenantId: job.tenant_id,
+        list,
+        checkInListId: job.check_in_list_id,
+        deviceId: job.device_id,
+        scans: scanBatch,
+      });
+      accepted += result.accepted;
+      duplicates += result.duplicates;
+      invalid += result.invalid;
+      metrics.rowsProcessed += result.metrics.rowsProcessed;
+      metrics.clockWarnings += result.metrics.clockWarnings;
+      metrics.scanLogInsertDurationMs += result.metrics.scanLogInsertDurationMs;
+      metrics.ticketUpdateDurationMs += result.metrics.ticketUpdateDurationMs;
+      metrics.attendeeUpdateDurationMs += result.metrics.attendeeUpdateDurationMs;
+      sampleErrors.push(...result.errorSamples);
+
+      for (const [index, scanResult] of result.results.entries()) {
+        const scan = scanBatch[index];
+        const sequence = scan.chunkSequence ?? 1;
+        const summary = chunkSummaries.get(sequence);
+        if (!summary) continue;
+        if (scanResult.outcome === 'accepted') summary.accepted += 1;
+        else if (scanResult.outcome === 'duplicate') summary.duplicates += 1;
+        else summary.invalid += 1;
+        if (scan.clockWarning) summary.clockWarnings += 1;
+      }
+      for (const errorSample of result.errorSamples) {
+        const summary = chunkSummaries.get(errorSample.sequence);
+        if (summary && summary.errorSamples.length < BULK_SYNC_ERROR_SAMPLE_LIMIT) {
+          summary.errorSamples.push(errorSample);
+        }
+      }
+    }
+
+    const completedAt = new Date();
+    for (const chunk of chunks) {
+      const summary = chunkSummaries.get(chunk.sequence)!;
+      // eslint-disable-next-line no-await-in-loop -- per-chunk summaries are bounded by totalChunks and kept explicit for portability.
+      await trx
+        .updateTable('offline_check_in_sync_chunks')
+        .set({
+          status: 'processed',
+          accepted_count: summary.accepted,
+          duplicate_count: summary.duplicates,
+          invalid_count: summary.invalid,
+          clock_warning_count: summary.clockWarnings,
+          sample_errors: JSON.stringify(
+            summary.errorSamples.slice(0, BULK_SYNC_ERROR_SAMPLE_LIMIT),
+          ),
+          payload: null,
+          failure_message: null,
+          processed_at: completedAt,
+          updated_at: completedAt,
+        })
+        .where('id', '=', chunk.id)
+        .where('tenant_id', '=', job.tenant_id)
+        .where('status', '=', 'processing')
+        .execute();
+    }
+
+    const processingDurationMs = completedAt.getTime() - processingStartedAt.getTime();
+    const transactionDurationMs = Math.round(performance.now() - transactionStartedAt);
+    await trx
+      .updateTable('offline_check_in_sync_jobs')
+      .set({
+        chunks_processed: job.total_chunks,
+        accepted_count: accepted,
+        duplicate_count: duplicates,
+        invalid_count: invalid,
+        clock_warning_count: metrics.clockWarnings,
+        sample_errors: JSON.stringify(sampleErrors.slice(0, BULK_SYNC_ERROR_SAMPLE_LIMIT)),
+        status: 'completed',
+        failure_message: null,
+        lease_owner: null,
+        leased_until: null,
+        next_attempt_at: null,
+        last_heartbeat_at: completedAt,
+        processing_completed_at: completedAt,
+        processing_duration_ms: processingDurationMs,
+        transaction_duration_ms: transactionDurationMs,
+        lock_wait_ms: claim.lockWaitMs,
+        scan_log_insert_duration_ms: metrics.scanLogInsertDurationMs,
+        ticket_update_duration_ms: metrics.ticketUpdateDurationMs,
+        attendee_update_duration_ms: metrics.attendeeUpdateDurationMs,
+        rows_processed: metrics.rowsProcessed,
+        updated_at: completedAt,
+        completed_at: completedAt,
+      })
+      .where('id', '=', job.id)
+      .execute();
+
+    return true;
+  });
+}
+
+async function markBulkSyncJobFailed(db: Database, jobId: string, _error?: unknown): Promise<void> {
+  const job = (await db
+    .selectFrom('offline_check_in_sync_jobs')
+    .selectAll()
+    .where('id', '=', jobId)
+    .executeTakeFirst()) as BulkSyncJobRow | undefined;
+  if (!job || job.status === 'completed') return;
+
+  const now = new Date();
+  const attemptCount = countValue(job.attempt_count ?? 0);
+  const retryDelayMs = Math.min(
+    BULK_SYNC_RETRY_BASE_MS * Math.pow(2, Math.max(0, attemptCount - 1)),
+    BULK_SYNC_RETRY_MAX_MS,
+  );
+  const nextAttemptAt =
+    attemptCount >= BULK_SYNC_MAX_ATTEMPTS ? null : new Date(now.getTime() + retryDelayMs);
+  await db
+    .updateTable('offline_check_in_sync_chunks')
+    .set({
+      status: 'failed',
+      failure_message: BULK_SYNC_PUBLIC_FAILURE_MESSAGE,
+      updated_at: now,
+    })
+    .where('job_id', '=', jobId)
+    .where('tenant_id', '=', job.tenant_id)
+    .where('status', 'in', ['uploaded', 'processing', 'failed'])
+    .execute();
+  await db
+    .updateTable('offline_check_in_sync_jobs')
+    .set({
+      status: 'failed',
+      failure_message: BULK_SYNC_PUBLIC_FAILURE_MESSAGE,
+      lease_owner: null,
+      leased_until: null,
+      next_attempt_at: nextAttemptAt,
+      processing_completed_at: now,
+      last_heartbeat_at: now,
+      updated_at: now,
+    })
+    .where('id', '=', jobId)
+    .execute();
+}
 
 function resolveCheckInDeviceId(
   principal: NonNullable<import('fastify').FastifyRequest['principal']>,
@@ -420,11 +1348,339 @@ function resolveCheckInDeviceId(
     }
     return principal.id;
   }
-  return requestedDeviceId ?? principal.id;
+  return principal.id;
+}
+
+async function processOfflineSyncBatch(input: {
+  db: Database;
+  tenantId: string;
+  list: CheckInListRow;
+  checkInListId: string;
+  deviceId: string;
+  scans: NormalizedOfflineScan[];
+  resultSequence?: number;
+}): Promise<{
+  accepted: number;
+  duplicates: number;
+  invalid: number;
+  results: { qrHash: string; outcome: string }[];
+  errorSamples: BulkSyncErrorSample[];
+  metrics: OfflineSyncBatchMetrics;
+}> {
+  const allowedTicketTypeIds = new Set(parseJsonValue<string[]>(input.list.ticket_type_ids, []));
+  const ticketsByQrHash = await loadTicketsByQrHash(
+    input.db,
+    input.tenantId,
+    input.list.event_id,
+    input.scans.map((scan) => scan.qrHash),
+  );
+  const results: OfflineScanResult[] = [];
+  const acceptedCandidates: AcceptedCandidate[] = [];
+  const acceptedTicketIdsInBatch = new Set<string>();
+
+  for (const scan of input.scans) {
+    const ticket = ticketsByQrHash.get(scan.qrHash);
+    const result = classifyOfflineScan({
+      list: input.list,
+      allowedTicketTypeIds,
+      ticket,
+      qrHash: scan.qrHash,
+    });
+
+    if (result.outcome === 'accepted') {
+      if (result.ticketId && !acceptedTicketIdsInBatch.has(result.ticketId)) {
+        acceptedTicketIdsInBatch.add(result.ticketId);
+        acceptedCandidates.push({
+          ticketId: result.ticketId,
+          attendeeId: ticket!.attendee_id,
+          scannedAt: scan.scannedAt,
+          resultIndex: results.length,
+        });
+      } else {
+        result.outcome = 'duplicate';
+      }
+    }
+
+    results.push(result);
+  }
+
+  const ticketUpdateStartedAt = performance.now();
+  const acceptedTicketIds = await bulkCheckInTickets(input.db, acceptedCandidates, input.deviceId);
+  const ticketUpdateDurationMs = Math.round(performance.now() - ticketUpdateStartedAt);
+  const acceptedCandidatesByTicketId = new Map(
+    acceptedCandidates.map((candidate) => [candidate.ticketId, candidate]),
+  );
+  for (const candidate of acceptedCandidates) {
+    if (!acceptedTicketIds.has(candidate.ticketId)) {
+      results[candidate.resultIndex] = {
+        ...results[candidate.resultIndex],
+        outcome: 'duplicate',
+      };
+    }
+  }
+
+  const attendeeUpdateStartedAt = performance.now();
+  await bulkCheckInAttendees(
+    input.db,
+    [...acceptedTicketIds].map((ticketId) => acceptedCandidatesByTicketId.get(ticketId)!),
+    input.deviceId,
+  );
+  const attendeeUpdateDurationMs = Math.round(performance.now() - attendeeUpdateStartedAt);
+  const scanLogInsertStartedAt = performance.now();
+  await bulkInsertOfflineScanLogs({
+    db: input.db,
+    tenantId: input.tenantId,
+    checkInListId: input.checkInListId,
+    deviceId: input.deviceId,
+    scans: input.scans,
+    results,
+  });
+  const scanLogInsertDurationMs = Math.round(performance.now() - scanLogInsertStartedAt);
+
+  const counts = results.reduce(
+    (accumulator, result) => {
+      if (result.outcome === 'accepted') accumulator.accepted += 1;
+      else if (result.outcome === 'duplicate') accumulator.duplicates += 1;
+      else accumulator.invalid += 1;
+      return accumulator;
+    },
+    { accepted: 0, duplicates: 0, invalid: 0 },
+  );
+  const errorSamples = results
+    .map((result, index) => ({ result, index }))
+    .filter(({ result }) => result.outcome !== 'accepted' && result.outcome !== 'duplicate')
+    .slice(0, BULK_SYNC_ERROR_SAMPLE_LIMIT)
+    .map(({ result, index }) => {
+      const scan = input.scans[index];
+      const sample: BulkSyncErrorSample = {
+        sequence: scan?.chunkSequence ?? input.resultSequence ?? 1,
+        scanIndex: scan?.chunkScanIndex ?? index,
+        qrHash: result.qrHash ?? scan?.qrHash ?? '',
+        outcome: result.outcome,
+      };
+      if (result.metadata) sample.metadata = result.metadata;
+      return sample;
+    });
+
+  return {
+    ...counts,
+    results: results.map((result) => ({ qrHash: result.qrHash, outcome: result.outcome })),
+    errorSamples,
+    metrics: {
+      rowsProcessed: input.scans.length,
+      clockWarnings: input.scans.filter((scan) => scan.clockWarning).length,
+      scanLogInsertDurationMs,
+      ticketUpdateDurationMs,
+      attendeeUpdateDurationMs,
+    },
+  };
+}
+
+function classifyOfflineScan(input: {
+  list: CheckInListRow;
+  allowedTicketTypeIds: Set<string>;
+  ticket?: TicketRow;
+  qrHash: string;
+}): OfflineScanResult {
+  const { list, allowedTicketTypeIds, ticket, qrHash } = input;
+
+  if (!ticket) {
+    return { outcome: 'not_found', qrHash };
+  }
+  if (ticket.qr_hash !== qrHash) {
+    return {
+      outcome: 'invalid',
+      ticketId: ticket.id,
+      qrHash,
+      metadata: { reason: 'hash_mismatch' },
+    };
+  }
+  if (ticket.event_id !== list.event_id) {
+    return { outcome: 'wrong_event', ticketId: ticket.id, qrHash };
+  }
+  if (list.event_occurrence_id && ticket.event_occurrence_id !== list.event_occurrence_id) {
+    return {
+      outcome: 'wrong_list',
+      ticketId: ticket.id,
+      qrHash,
+      metadata: {
+        reason: 'wrong_event_occurrence',
+        expectedEventOccurrenceId: list.event_occurrence_id,
+        actualEventOccurrenceId: ticket.event_occurrence_id ?? null,
+      },
+    };
+  }
+  if (allowedTicketTypeIds.size > 0 && !allowedTicketTypeIds.has(ticket.ticket_type_id)) {
+    return { outcome: 'wrong_list', ticketId: ticket.id, qrHash };
+  }
+  if (ticket.status === 'void' || ticket.status === 'refunded' || ticket.status === 'transferred') {
+    return { outcome: 'revoked', ticketId: ticket.id, qrHash };
+  }
+  if (ticket.status === 'valid') {
+    return { outcome: 'accepted', ticketId: ticket.id, qrHash };
+  }
+  return { outcome: 'duplicate', ticketId: ticket.id, qrHash };
+}
+
+async function loadTicketsByQrHash(
+  db: Database,
+  tenantId: string,
+  eventId: string,
+  qrHashes: string[],
+): Promise<Map<string, TicketRow>> {
+  const ticketsByQrHash = new Map<string, TicketRow>();
+  const uniqueQrHashes = [...new Set(qrHashes)];
+
+  for (let offset = 0; offset < uniqueQrHashes.length; offset += OFFLINE_SYNC_DB_CHUNK_SIZE) {
+    const chunk = uniqueQrHashes.slice(offset, offset + OFFLINE_SYNC_DB_CHUNK_SIZE);
+    if (chunk.length === 0) continue;
+    // eslint-disable-next-line no-await-in-loop -- chunking avoids oversized `IN` predicates on max-sized offline batches.
+    const tickets = await db
+      .selectFrom('tickets')
+      .selectAll()
+      .where('tenant_id', '=', tenantId)
+      .where('event_id', '=', eventId)
+      .where('qr_hash', 'in', chunk)
+      .execute();
+    for (const ticket of tickets) {
+      if (ticket.tenant_id === tenantId && ticket.event_id === eventId) {
+        ticketsByQrHash.set(ticket.qr_hash, ticket as TicketRow);
+      }
+    }
+  }
+
+  return ticketsByQrHash;
+}
+
+async function bulkCheckInTickets(
+  db: Database,
+  candidates: AcceptedCandidate[],
+  deviceId: string,
+): Promise<Set<string>> {
+  const acceptedTicketIds = new Set<string>();
+  const isPostgres = getDriver() === 'postgres';
+
+  for (let offset = 0; offset < candidates.length; offset += OFFLINE_SYNC_DB_CHUNK_SIZE) {
+    const chunk = candidates.slice(offset, offset + OFFLINE_SYNC_DB_CHUNK_SIZE);
+    const ticketIds = chunk.map((candidate) => candidate.ticketId);
+    const checkedInAt = chunk[0]?.scannedAt;
+    if (!checkedInAt || ticketIds.length === 0) continue;
+
+    const update = db
+      .updateTable('tickets')
+      .set({
+        status: 'checked_in',
+        checked_in_at: scannedAtCase('id', chunk, (candidate) => candidate.ticketId),
+        checked_in_by_device_id: deviceId,
+        updated_at: new Date(),
+      })
+      .where('id', 'in', ticketIds)
+      .where('status', '=', 'valid');
+
+    if (isPostgres) {
+      // eslint-disable-next-line no-await-in-loop -- each chunk is a bounded conditional update.
+      const rows = await update.returning('id').execute();
+      for (const row of rows) acceptedTicketIds.add(row.id);
+    } else {
+      for (const candidate of chunk) {
+        // eslint-disable-next-line no-await-in-loop -- dialects without RETURNING must claim each row from affected-row evidence.
+        const result = await db
+          .updateTable('tickets')
+          .set({
+            status: 'checked_in',
+            checked_in_at: candidate.scannedAt,
+            checked_in_by_device_id: deviceId,
+            updated_at: new Date(),
+          })
+          .where('id', '=', candidate.ticketId)
+          .where('status', '=', 'valid')
+          .executeTakeFirst();
+        if (Number(result.numUpdatedRows ?? 0) === 1) {
+          acceptedTicketIds.add(candidate.ticketId);
+        }
+      }
+    }
+  }
+
+  return acceptedTicketIds;
+}
+
+async function bulkCheckInAttendees(
+  db: Database,
+  acceptedCandidates: AcceptedCandidate[],
+  deviceId: string,
+): Promise<void> {
+  for (let offset = 0; offset < acceptedCandidates.length; offset += OFFLINE_SYNC_DB_CHUNK_SIZE) {
+    const chunk = acceptedCandidates.slice(offset, offset + OFFLINE_SYNC_DB_CHUNK_SIZE);
+    const attendeeIds = chunk.map((candidate) => candidate.attendeeId);
+    const checkedInAt = chunk[0]?.scannedAt;
+    if (!checkedInAt || attendeeIds.length === 0) continue;
+
+    // eslint-disable-next-line no-await-in-loop -- each chunk updates attendees for tickets won by the preceding conditional ticket update.
+    await db
+      .updateTable('attendees')
+      .set({
+        status: 'checked_in',
+        checked_in_at: scannedAtCase('id', chunk, (candidate) => candidate.attendeeId),
+        check_in_device_id: deviceId,
+        updated_at: new Date(),
+      })
+      .where('id', 'in', attendeeIds)
+      .execute();
+  }
+}
+
+function scannedAtCase(
+  idColumn: string,
+  candidates: AcceptedCandidate[],
+  idForCandidate: (candidate: AcceptedCandidate) => string,
+) {
+  return sql<Date>`case ${sql.ref(idColumn)} ${sql.join(
+    candidates.map(
+      (candidate) => sql`when ${idForCandidate(candidate)} then ${candidate.scannedAt}`,
+    ),
+    sql` `,
+  )} else ${sql.ref('checked_in_at')} end`;
+}
+
+async function bulkInsertOfflineScanLogs(input: {
+  db: Database;
+  tenantId: string;
+  checkInListId: string;
+  deviceId: string;
+  scans: NormalizedOfflineScan[];
+  results: OfflineScanResult[];
+}): Promise<void> {
+  for (let offset = 0; offset < input.scans.length; offset += OFFLINE_SYNC_DB_CHUNK_SIZE) {
+    const scanChunk = input.scans.slice(offset, offset + OFFLINE_SYNC_DB_CHUNK_SIZE);
+    const rows = scanChunk.map((scan, index) => {
+      const result = input.results[offset + index];
+      const metadata = metadataWithClockWarning(result.metadata, scan);
+      return {
+        id: `scan_${ulid()}`,
+        tenant_id: input.tenantId,
+        check_in_list_id: input.checkInListId,
+        device_id: input.deviceId,
+        ticket_id: result.ticketId ?? null,
+        qr_hash: scan.qrHash,
+        outcome: result.outcome,
+        scanned_at: scan.scannedAt,
+        synced_at: null,
+        offline: true,
+        metadata: metadata ? JSON.stringify(metadata) : null,
+        created_at: new Date(),
+      };
+    });
+    if (rows.length === 0) continue;
+
+    // eslint-disable-next-line no-await-in-loop -- chunked inserts keep max-sized sync under query parameter limits.
+    await input.db.insertInto('scan_logs').values(rows).execute();
+  }
 }
 
 export async function processScan(input: {
   ticketRepo: TicketRepository;
+  tenantId: string;
   list: Awaited<ReturnType<CheckInListRepository['findById']>> & {};
   qrHash: string;
   deviceId: string;
@@ -451,6 +1707,9 @@ export async function processScan(input: {
     : await input.ticketRepo.findByQrHash(input.qrHash);
 
   if (!ticket) {
+    return { outcome: 'not_found', qrHash: input.qrHash };
+  }
+  if (ticket.tenant_id !== input.tenantId) {
     return { outcome: 'not_found', qrHash: input.qrHash };
   }
   if (ticket.qr_hash !== input.qrHash) {
