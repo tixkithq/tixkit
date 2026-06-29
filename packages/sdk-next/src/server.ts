@@ -42,6 +42,30 @@ export function createTixkitClient(config: TixkitNextClientConfig) {
   return new TixkitClient(config);
 }
 
+export async function loadPublicEventPage(
+  client: TixkitClient,
+  eventId: string,
+  params?: { locale?: string },
+) {
+  return client.public.getEventPage(eventId, params);
+}
+
+export async function loadPublicEventPageBySlug(
+  client: TixkitClient,
+  slug: string,
+  params: { host: string; locale?: string },
+) {
+  return client.public.getEventPageBySlug(slug, params);
+}
+
+export async function loadPublicEventDiscoveryCard(
+  client: TixkitClient,
+  eventId: string,
+  params?: { locale?: string },
+) {
+  return client.public.getEventDiscoveryCard(eventId, params);
+}
+
 export function verifyTixkitWebhook(input: {
   body: string;
   signature: string;

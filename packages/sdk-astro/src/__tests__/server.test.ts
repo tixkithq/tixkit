@@ -1,6 +1,14 @@
 import { createHmac } from 'node:crypto';
 import { describe, expect, it, vi } from 'vitest';
-import { createTixkitClient, createTixkitWebhookEndpoint, verifyTixkitWebhook } from '../server.js';
+import {
+  createTixkitClient,
+  createTixkitWebhookEndpoint,
+  loadPublicEventDiscoveryCard,
+  loadPublicEventPage,
+  loadPublicEventPageBySlug,
+  verifyTixkitWebhook,
+} from '../server.js';
+import type { TixkitClient } from '@tixkit/js';
 
 function signature(body: string, secret: string, timestamp: number): string {
   const digest = createHmac('sha256', secret).update(`${timestamp}.${body}`).digest('hex');
@@ -51,6 +59,30 @@ describe('Astro server helpers', () => {
     const client = createTixkitClient({ apiKey: 'tk_test_placeholder' });
     expect(client).toBeDefined();
     expect(typeof client.checkout.create).toBe('function');
+  });
+
+  it('loads public content-studio event pages through the JS SDK public client', async () => {
+    const client = {
+      public: {
+        getEventPage: vi.fn(async () => ({ page: { discovery: { title: 'All Access' } } })),
+        getEventPageBySlug: vi.fn(async () => ({ document: { eventId: 'evt_1' } })),
+        getEventDiscoveryCard: vi.fn(async () => ({ title: 'All Access' })),
+      },
+    } as unknown as TixkitClient;
+
+    await loadPublicEventPage(client, 'evt_1', { locale: 'en' });
+    await loadPublicEventPageBySlug(client, 'all-access', {
+      host: 'events.example.com',
+      locale: 'en',
+    });
+    await loadPublicEventDiscoveryCard(client, 'evt_1');
+
+    expect(client.public.getEventPage).toHaveBeenCalledWith('evt_1', { locale: 'en' });
+    expect(client.public.getEventPageBySlug).toHaveBeenCalledWith('all-access', {
+      host: 'events.example.com',
+      locale: 'en',
+    });
+    expect(client.public.getEventDiscoveryCard).toHaveBeenCalledWith('evt_1', undefined);
   });
 
   it('createTixkitWebhookEndpoint rejects invalid signatures with 401', async () => {

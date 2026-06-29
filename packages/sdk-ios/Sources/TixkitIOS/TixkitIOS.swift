@@ -343,6 +343,166 @@ public func tixkitQRHash(forPayload payload: String) -> String {
   SHA256.hash(data: Data(payload.utf8)).hexString
 }
 
+public struct TixkitPublicContentPage: Codable, Equatable, Sendable {
+  public let document: TixkitPublicContentDocument
+  public let version: TixkitPublicContentVersion
+  public let page: TixkitPublicEventPage
+}
+
+public struct TixkitPublicContentDocument: Codable, Equatable, Sendable {
+  public let eventId: String
+  public let channel: String
+  public let key: String
+  public let name: String
+  public let locale: String
+  public let updatedAt: String
+}
+
+public struct TixkitPublicContentVersion: Codable, Equatable, Sendable {
+  public let versionNumber: Int
+  public let subject: String?
+  public let previewText: String?
+  public let renderedHtml: String?
+  public let renderedText: String?
+  public let publishedAt: String?
+}
+
+public struct TixkitPublicEventPage: Codable, Equatable, Sendable {
+  public let html: String
+  public let text: String
+  public let headless: [TixkitPublicEventPageBlock]
+  public let discovery: TixkitPublicEventDiscoveryCard
+}
+
+public struct TixkitPublicEventPageBlock: Codable, Equatable, Sendable {
+  public let type: String
+  public let id: String
+  public let title: String?
+  public let text: String?
+  public let html: String?
+  public let imageUrl: String?
+  public let imageAlt: String?
+  public let links: [TixkitPublicPageLink]?
+  public let items: [TixkitJSONValue]?
+}
+
+public struct TixkitPublicPageLink: Codable, Equatable, Sendable {
+  public let label: String
+  public let url: String
+}
+
+public struct TixkitPublicEventDiscoveryCard: Codable, Equatable, Sendable {
+  public let title: String
+  public let summary: String
+  public let category: String?
+  public let tags: [String]
+  public let imageUrl: String?
+  public let startsAt: String?
+  public let venueName: String?
+  public let publicPath: String?
+}
+
+public enum TixkitJSONValue: Codable, Equatable, Sendable {
+  case string(String)
+  case number(Double)
+  case bool(Bool)
+  case object([String: TixkitJSONValue])
+  case array([TixkitJSONValue])
+  case null
+
+  public init(from decoder: Decoder) throws {
+    let container = try decoder.singleValueContainer()
+    if container.decodeNil() {
+      self = .null
+    } else if let value = try? container.decode(Bool.self) {
+      self = .bool(value)
+    } else if let value = try? container.decode(Double.self) {
+      self = .number(value)
+    } else if let value = try? container.decode(String.self) {
+      self = .string(value)
+    } else if let value = try? container.decode([TixkitJSONValue].self) {
+      self = .array(value)
+    } else {
+      self = .object(try container.decode([String: TixkitJSONValue].self))
+    }
+  }
+
+  public func encode(to encoder: Encoder) throws {
+    var container = encoder.singleValueContainer()
+    switch self {
+    case .string(let value):
+      try container.encode(value)
+    case .number(let value):
+      try container.encode(value)
+    case .bool(let value):
+      try container.encode(value)
+    case .object(let value):
+      try container.encode(value)
+    case .array(let value):
+      try container.encode(value)
+    case .null:
+      try container.encodeNil()
+    }
+  }
+}
+
+public final class TixkitPublicEventPageClient: Sendable {
+  public init(
+    apiBaseURL: URL = URL(string: "https://api.tixkit.com")!,
+    urlSession: URLSession = .shared
+  ) {
+    self.apiBaseURL = apiBaseURL
+    self.urlSession = urlSession
+  }
+
+  public let apiBaseURL: URL
+  public let urlSession: URLSession
+
+  public func getEventPage(eventId: String, locale: String? = nil) async throws -> TixkitPublicContentPage {
+    try await getPage(path: "/public/events/\(eventId)/page", locale: locale)
+  }
+
+  public func getContentPage(eventId: String, locale: String? = nil) async throws -> TixkitPublicContentPage {
+    try await getPage(path: "/public/events/\(eventId)/content-page", locale: locale)
+  }
+
+  public func getEventPageBySlug(
+    slug: String,
+    host: String,
+    locale: String? = nil
+  ) async throws -> TixkitPublicContentPage {
+    try await getPage(path: "/public/events/by-slug/\(slug)/page", host: host, locale: locale)
+  }
+
+  public func getEventDiscoveryCard(eventId: String, locale: String? = nil) async throws -> TixkitPublicEventDiscoveryCard {
+    let (data, response) = try await urlSession.data(for: URLRequest(url: apiURL(path: "/public/events/\(eventId)/discovery-card", locale: locale)))
+    try assertSuccess(response)
+    return try JSONDecoder().decode(TixkitPublicEventDiscoveryCard.self, from: data)
+  }
+
+  private func getPage(path: String, host: String? = nil, locale: String? = nil) async throws -> TixkitPublicContentPage {
+    let (data, response) = try await urlSession.data(for: URLRequest(url: apiURL(path: path, host: host, locale: locale)))
+    try assertSuccess(response)
+    return try JSONDecoder().decode(TixkitPublicContentPage.self, from: data)
+  }
+
+  private func apiURL(path: String, host: String? = nil, locale: String? = nil) -> URL {
+    var components = URLComponents(url: apiBaseURL, resolvingAgainstBaseURL: false)!
+    components.path = "/v1\(path)"
+    var queryItems: [URLQueryItem] = []
+    if let host { queryItems.append(URLQueryItem(name: "host", value: host)) }
+    if let locale { queryItems.append(URLQueryItem(name: "locale", value: locale)) }
+    components.queryItems = queryItems.isEmpty ? nil : queryItems
+    return components.url!
+  }
+
+  private func assertSuccess(_ response: URLResponse) throws {
+    guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else {
+      throw URLError(.badServerResponse)
+    }
+  }
+}
+
 public final class TixkitScannerClient: @unchecked Sendable {
   public init(
     deviceId: String,

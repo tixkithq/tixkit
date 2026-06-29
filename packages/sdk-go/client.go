@@ -46,6 +46,7 @@ type Client struct {
 	Exports          *ExportsService
 	Webhooks         *WebhooksService
 	APIKeys          *APIKeysService
+	Public           *PublicService
 }
 
 // ClientOption configures a Client.
@@ -121,6 +122,7 @@ func NewClient(apiKey string, options ...ClientOption) (*Client, error) {
 	client.Exports = &ExportsService{client: client}
 	client.Webhooks = &WebhooksService{client: client}
 	client.APIKeys = &APIKeysService{client: client}
+	client.Public = &PublicService{client: client}
 	return client, nil
 }
 

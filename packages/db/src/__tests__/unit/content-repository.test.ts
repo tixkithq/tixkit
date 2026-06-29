@@ -423,6 +423,33 @@ describe('ContentRepository', () => {
     ]);
   });
 
+  it('rejects published event-page documents whose current version is stale', async () => {
+    const { db } = createContentLookupDb({
+      documents: [
+        publishedDocument({
+          id: 'cdoc_page',
+          event_id: 'evt_1',
+          channel: 'event_page',
+          published_version_id: 'cver_page',
+        }),
+      ],
+      versions: [
+        publishedVersion({
+          id: 'cver_page',
+          document_id: 'cdoc_page',
+          status: 'draft',
+        }),
+      ],
+    });
+
+    await expect(
+      new ContentRepository(db).findPublishedEventPage({
+        tenantId: 'tnt_1',
+        eventId: 'evt_1',
+      }),
+    ).resolves.toBeUndefined();
+  });
+
   it('prefers an event-scoped published email template over brand fallback', async () => {
     const { db, whereCalls } = createContentLookupDb({
       documents: [

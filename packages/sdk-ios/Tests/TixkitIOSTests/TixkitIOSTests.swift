@@ -38,6 +38,76 @@ final class TixkitIOSTests: XCTestCase {
     XCTAssertEqual(tixkitQRHash(forPayload: payload), expected)
   }
 
+  func testFetchesPublicEventPagesWithoutScannerHeaders() async throws {
+    var requestURLs: [String] = []
+    URLProtocolStub.handler = { request in
+      requestURLs.append(request.url!.absoluteString)
+      XCTAssertNil(request.value(forHTTPHeaderField: "X-Device-Id"))
+      XCTAssertNil(request.value(forHTTPHeaderField: "X-Device-Secret"))
+      XCTAssertNil(request.value(forHTTPHeaderField: "Authorization"))
+      let body: [String: Any]
+      if request.url!.path.hasSuffix("/discovery-card") {
+        body = [
+          "title": "All Access",
+          "summary": "Chicago",
+          "tags": ["music"],
+          "venueName": "The Salt Shed",
+        ]
+      } else {
+        body = [
+          "document": [
+            "eventId": "evt_1",
+            "channel": "event_page",
+            "key": "main",
+            "name": "Main event page",
+            "locale": "en",
+            "updatedAt": "2026-06-01T00:00:00.000Z",
+          ],
+          "version": [
+            "versionNumber": 3,
+            "renderedHtml": "<main class=\"tixkit-event-page\">All Access</main>",
+            "renderedText": "All Access",
+            "publishedAt": "2026-06-02T00:00:00.000Z",
+          ],
+          "page": [
+            "html": "<main>All Access</main>",
+            "text": "All Access",
+            "headless": [["type": "hero", "id": "hero", "title": "All Access"]],
+            "discovery": [
+              "title": "All Access",
+              "summary": "Chicago",
+              "tags": ["music"],
+            ],
+          ],
+        ]
+      }
+      let data = try JSONSerialization.data(withJSONObject: body)
+      return (HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!, data)
+    }
+    defer { URLProtocolStub.handler = nil }
+    let configuration = URLSessionConfiguration.ephemeral
+    configuration.protocolClasses = [URLProtocolStub.self]
+    let client = TixkitPublicEventPageClient(
+      apiBaseURL: try XCTUnwrap(URL(string: "https://api.test")),
+      urlSession: URLSession(configuration: configuration)
+    )
+
+    let contentPage = try await client.getContentPage(eventId: "evt_1", locale: "en")
+    XCTAssertEqual(contentPage.document.eventId, "evt_1")
+    XCTAssertEqual(contentPage.page.discovery.title, "All Access")
+    _ = try await client.getEventPage(eventId: "evt_1", locale: "en")
+    _ = try await client.getEventPageBySlug(slug: "all-access", host: "events.example.com", locale: "en")
+    let card = try await client.getEventDiscoveryCard(eventId: "evt_1")
+    XCTAssertEqual(card.venueName, "The Salt Shed")
+
+    XCTAssertEqual(requestURLs, [
+      "https://api.test/v1/public/events/evt_1/content-page?locale=en",
+      "https://api.test/v1/public/events/evt_1/page?locale=en",
+      "https://api.test/v1/public/events/by-slug/all-access/page?host=events.example.com&locale=en",
+      "https://api.test/v1/public/events/evt_1/discovery-card",
+    ])
+  }
+
   func testVerifiesSignedOfflineManifestAndScansOffline() throws {
     let payload = "signed-ticket-payload"
     let manifest = signedManifest(ticketStatus: "valid", payload: payload)

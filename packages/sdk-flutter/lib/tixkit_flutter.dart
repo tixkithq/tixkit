@@ -296,6 +296,267 @@ Uri tixkitCheckoutHandoffUri(TixkitCheckoutHandoffOptions options) {
   return uri.replace(queryParameters: query);
 }
 
+class TixkitPublicContentPage {
+  const TixkitPublicContentPage({
+    required this.document,
+    required this.version,
+    required this.page,
+  });
+
+  factory TixkitPublicContentPage.fromJson(Map<String, Object?> json) {
+    return TixkitPublicContentPage(
+      document: TixkitPublicContentDocument.fromJson(
+        json['document'] as Map<String, Object?>? ?? const {},
+      ),
+      version: TixkitPublicContentVersion.fromJson(
+        json['version'] as Map<String, Object?>? ?? const {},
+      ),
+      page: TixkitPublicEventPage.fromJson(
+        json['page'] as Map<String, Object?>? ?? const {},
+      ),
+    );
+  }
+
+  final TixkitPublicContentDocument document;
+  final TixkitPublicContentVersion version;
+  final TixkitPublicEventPage page;
+}
+
+class TixkitPublicContentDocument {
+  const TixkitPublicContentDocument({
+    required this.eventId,
+    required this.channel,
+    required this.key,
+    required this.name,
+    required this.locale,
+    required this.updatedAt,
+  });
+
+  factory TixkitPublicContentDocument.fromJson(Map<String, Object?> json) {
+    return TixkitPublicContentDocument(
+      eventId: json['eventId'] as String? ?? '',
+      channel: json['channel'] as String? ?? '',
+      key: json['key'] as String? ?? '',
+      name: json['name'] as String? ?? '',
+      locale: json['locale'] as String? ?? '',
+      updatedAt: json['updatedAt'] as String? ?? '',
+    );
+  }
+
+  final String eventId;
+  final String channel;
+  final String key;
+  final String name;
+  final String locale;
+  final String updatedAt;
+}
+
+class TixkitPublicContentVersion {
+  const TixkitPublicContentVersion({
+    required this.versionNumber,
+    this.subject,
+    this.previewText,
+    this.renderedHtml,
+    this.renderedText,
+    this.publishedAt,
+  });
+
+  factory TixkitPublicContentVersion.fromJson(Map<String, Object?> json) {
+    return TixkitPublicContentVersion(
+      versionNumber: json['versionNumber'] as int? ?? 0,
+      subject: json['subject'] as String?,
+      previewText: json['previewText'] as String?,
+      renderedHtml: json['renderedHtml'] as String?,
+      renderedText: json['renderedText'] as String?,
+      publishedAt: json['publishedAt'] as String?,
+    );
+  }
+
+  final int versionNumber;
+  final String? subject;
+  final String? previewText;
+  final String? renderedHtml;
+  final String? renderedText;
+  final String? publishedAt;
+}
+
+class TixkitPublicEventPage {
+  const TixkitPublicEventPage({
+    required this.html,
+    required this.text,
+    required this.headless,
+    required this.discovery,
+  });
+
+  factory TixkitPublicEventPage.fromJson(Map<String, Object?> json) {
+    final rawHeadless = json['headless'];
+    return TixkitPublicEventPage(
+      html: json['html'] as String? ?? '',
+      text: json['text'] as String? ?? '',
+      headless: rawHeadless is List
+          ? rawHeadless
+              .whereType<Map<String, Object?>>()
+              .map(TixkitPublicEventPageBlock.fromJson)
+              .toList(growable: false)
+          : const [],
+      discovery: TixkitPublicEventDiscoveryCard.fromJson(
+        json['discovery'] as Map<String, Object?>? ?? const {},
+      ),
+    );
+  }
+
+  final String html;
+  final String text;
+  final List<TixkitPublicEventPageBlock> headless;
+  final TixkitPublicEventDiscoveryCard discovery;
+}
+
+class TixkitPublicEventPageBlock {
+  const TixkitPublicEventPageBlock({
+    required this.type,
+    required this.id,
+    this.title,
+    this.text,
+    this.html,
+    this.imageUrl,
+    this.imageAlt,
+    this.links = const [],
+    this.items = const [],
+  });
+
+  factory TixkitPublicEventPageBlock.fromJson(Map<String, Object?> json) {
+    final rawLinks = json['links'];
+    final rawItems = json['items'];
+    return TixkitPublicEventPageBlock(
+      type: json['type'] as String? ?? '',
+      id: json['id'] as String? ?? '',
+      title: json['title'] as String?,
+      text: json['text'] as String?,
+      html: json['html'] as String?,
+      imageUrl: json['imageUrl'] as String?,
+      imageAlt: json['imageAlt'] as String?,
+      links: rawLinks is List
+          ? rawLinks
+              .whereType<Map<String, Object?>>()
+              .map(TixkitPublicPageLink.fromJson)
+              .toList(growable: false)
+          : const [],
+      items: rawItems is List ? rawItems.cast<Object?>() : const [],
+    );
+  }
+
+  final String type;
+  final String id;
+  final String? title;
+  final String? text;
+  final String? html;
+  final String? imageUrl;
+  final String? imageAlt;
+  final List<TixkitPublicPageLink> links;
+  final List<Object?> items;
+}
+
+class TixkitPublicPageLink {
+  const TixkitPublicPageLink({required this.label, required this.url});
+
+  factory TixkitPublicPageLink.fromJson(Map<String, Object?> json) {
+    return TixkitPublicPageLink(
+      label: json['label'] as String? ?? '',
+      url: json['url'] as String? ?? '',
+    );
+  }
+
+  final String label;
+  final String url;
+}
+
+class TixkitPublicEventDiscoveryCard {
+  const TixkitPublicEventDiscoveryCard({
+    required this.title,
+    required this.summary,
+    required this.tags,
+    this.category,
+    this.imageUrl,
+    this.startsAt,
+    this.venueName,
+    this.publicPath,
+  });
+
+  factory TixkitPublicEventDiscoveryCard.fromJson(Map<String, Object?> json) {
+    final rawTags = json['tags'];
+    return TixkitPublicEventDiscoveryCard(
+      title: json['title'] as String? ?? '',
+      summary: json['summary'] as String? ?? '',
+      tags: rawTags is List ? rawTags.whereType<String>().toList(growable: false) : const [],
+      category: json['category'] as String?,
+      imageUrl: json['imageUrl'] as String?,
+      startsAt: json['startsAt'] as String?,
+      venueName: json['venueName'] as String?,
+      publicPath: json['publicPath'] as String?,
+    );
+  }
+
+  final String title;
+  final String summary;
+  final List<String> tags;
+  final String? category;
+  final String? imageUrl;
+  final String? startsAt;
+  final String? venueName;
+  final String? publicPath;
+}
+
+class TixkitPublicEventPageClient {
+  TixkitPublicEventPageClient({
+    this.apiBaseUrl = 'https://api.tixkit.com',
+    http.Client? httpClient,
+  }) : httpClient = httpClient ?? http.Client();
+
+  final String apiBaseUrl;
+  final http.Client httpClient;
+
+  Future<TixkitPublicContentPage> getEventPage(String eventId, {String? locale}) {
+    return _getPage('/public/events/$eventId/page', locale: locale);
+  }
+
+  Future<TixkitPublicContentPage> getContentPage(String eventId, {String? locale}) {
+    return _getPage('/public/events/$eventId/content-page', locale: locale);
+  }
+
+  Future<TixkitPublicContentPage> getEventPageBySlug(
+    String slug, {
+    required String host,
+    String? locale,
+  }) {
+    return _getPage('/public/events/by-slug/$slug/page', host: host, locale: locale);
+  }
+
+  Future<TixkitPublicEventDiscoveryCard> getEventDiscoveryCard(String eventId, {String? locale}) async {
+    final response = await httpClient.get(_apiUri('/public/events/$eventId/discovery-card', locale: locale));
+    _assertSuccess(response);
+    return TixkitPublicEventDiscoveryCard.fromJson(jsonDecode(response.body) as Map<String, Object?>);
+  }
+
+  Future<TixkitPublicContentPage> _getPage(String path, {String? host, String? locale}) async {
+    final response = await httpClient.get(_apiUri(path, host: host, locale: locale));
+    _assertSuccess(response);
+    return TixkitPublicContentPage.fromJson(jsonDecode(response.body) as Map<String, Object?>);
+  }
+
+  Uri _apiUri(String path, {String? host, String? locale}) {
+    final query = <String, String>{};
+    if (host != null) query['host'] = host;
+    if (locale != null) query['locale'] = locale;
+    final base = Uri.parse(apiBaseUrl);
+    return base.replace(path: '/v1$path', queryParameters: query.isEmpty ? null : query);
+  }
+
+  void _assertSuccess(http.Response response) {
+    if (response.statusCode >= 200 && response.statusCode < 300) return;
+    throw StateError('Tixkit API request failed with HTTP ${response.statusCode}');
+  }
+}
+
 typedef TixkitSyncConflictCallback = void Function(String qrHash, String outcome);
 
 class TixkitScannerClient {

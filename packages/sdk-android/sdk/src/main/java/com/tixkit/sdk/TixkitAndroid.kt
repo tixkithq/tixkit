@@ -8,6 +8,8 @@ import android.util.Base64
 import android.view.View
 import android.widget.LinearLayout
 import android.widget.TextView
+import java.net.HttpURLConnection
+import java.net.URL
 import java.net.URLEncoder
 import java.nio.charset.StandardCharsets
 import java.security.KeyStore
@@ -21,6 +23,8 @@ import javax.crypto.Mac
 import javax.crypto.SecretKey
 import javax.crypto.spec.GCMParameterSpec
 import javax.crypto.spec.SecretKeySpec
+import org.json.JSONArray
+import org.json.JSONObject
 
 enum class TixkitScanOutcome(val wireValue: String) {
   ACCEPTED("accepted"),
@@ -112,6 +116,114 @@ data class TixkitCheckoutOptions(
   val promoCode: String? = null,
   val tracking: String? = null,
 )
+
+data class TixkitPublicContentPage(
+  val document: TixkitPublicContentDocument,
+  val version: TixkitPublicContentVersion,
+  val page: TixkitPublicEventPage,
+)
+
+data class TixkitPublicContentDocument(
+  val eventId: String,
+  val channel: String,
+  val key: String,
+  val name: String,
+  val locale: String,
+  val updatedAt: String,
+)
+
+data class TixkitPublicContentVersion(
+  val versionNumber: Int,
+  val subject: String? = null,
+  val previewText: String? = null,
+  val renderedHtml: String? = null,
+  val renderedText: String? = null,
+  val publishedAt: String? = null,
+)
+
+data class TixkitPublicEventPage(
+  val html: String,
+  val text: String,
+  val headless: List<TixkitPublicEventPageBlock>,
+  val discovery: TixkitPublicEventDiscoveryCard,
+)
+
+data class TixkitPublicEventPageBlock(
+  val type: String,
+  val id: String,
+  val title: String? = null,
+  val text: String? = null,
+  val html: String? = null,
+  val imageUrl: String? = null,
+  val imageAlt: String? = null,
+  val links: List<TixkitPublicPageLink> = emptyList(),
+  val items: List<Any?> = emptyList(),
+)
+
+data class TixkitPublicPageLink(
+  val label: String,
+  val url: String,
+)
+
+data class TixkitPublicEventDiscoveryCard(
+  val title: String,
+  val summary: String,
+  val tags: List<String>,
+  val category: String? = null,
+  val imageUrl: String? = null,
+  val startsAt: String? = null,
+  val venueName: String? = null,
+  val publicPath: String? = null,
+)
+
+fun interface TixkitPublicEventPageTransport {
+  fun get(url: String, headers: Map<String, String>): String
+}
+
+class TixkitHttpUrlConnectionTransport : TixkitPublicEventPageTransport {
+  override fun get(url: String, headers: Map<String, String>): String {
+    val connection = URL(url).openConnection() as HttpURLConnection
+    connection.requestMethod = "GET"
+    headers.forEach { (key, value) -> connection.setRequestProperty(key, value) }
+    val status = connection.responseCode
+    val stream = if (status in 200..299) connection.inputStream else connection.errorStream
+    val body = stream?.bufferedReader(StandardCharsets.UTF_8)?.use { it.readText() }.orEmpty()
+    if (status !in 200..299) error("Tixkit API request failed with HTTP $status")
+    return body
+  }
+}
+
+class TixkitPublicEventPageClient(
+  private val apiBaseUrl: String = "https://api.tixkit.com",
+  private val transport: TixkitPublicEventPageTransport = TixkitHttpUrlConnectionTransport(),
+) {
+  fun getEventPage(eventId: String, locale: String? = null): TixkitPublicContentPage =
+    getPage("/public/events/$eventId/page", locale = locale)
+
+  fun getContentPage(eventId: String, locale: String? = null): TixkitPublicContentPage =
+    getPage("/public/events/$eventId/content-page", locale = locale)
+
+  fun getEventPageBySlug(slug: String, host: String, locale: String? = null): TixkitPublicContentPage =
+    getPage("/public/events/by-slug/$slug/page", host = host, locale = locale)
+
+  fun getEventDiscoveryCard(eventId: String, locale: String? = null): TixkitPublicEventDiscoveryCard =
+    parseDiscovery(JSONObject(transport.get(apiUrl("/public/events/$eventId/discovery-card", locale = locale), publicHeaders)))
+
+  private fun getPage(path: String, host: String? = null, locale: String? = null): TixkitPublicContentPage =
+    parsePage(JSONObject(transport.get(apiUrl(path, host = host, locale = locale), publicHeaders)))
+
+  private val publicHeaders: Map<String, String>
+    get() = mapOf("X-Tixkit-Version" to TixkitAndroid.API_VERSION)
+
+  private fun apiUrl(path: String, host: String? = null, locale: String? = null): String {
+    val base = apiBaseUrl.trimEnd('/')
+    val query = buildList {
+      if (!host.isNullOrBlank()) add("host" to host)
+      if (!locale.isNullOrBlank()) add("locale" to locale)
+    }.joinToString("&") { (key, value) -> "${encode(key)}=${encode(value)}" }
+    return "$base/v1$path${if (query.isEmpty()) "" else "?$query"}"
+  }
+}
 
 interface TixkitSecureStorage {
   fun getItem(key: String): String?
@@ -404,6 +516,11 @@ object TixkitAndroid {
     clock: Clock = Clock.systemUTC(),
     onlineScanner: ((String) -> TixkitScanResult)? = null,
   ): TixkitScannerClient = TixkitScannerClient(storage = storage, clock = clock, onlineScanner = onlineScanner)
+
+  fun publicEventPageClient(
+    apiBaseUrl: String = "https://api.tixkit.com",
+    transport: TixkitPublicEventPageTransport = TixkitHttpUrlConnectionTransport(),
+  ): TixkitPublicEventPageClient = TixkitPublicEventPageClient(apiBaseUrl = apiBaseUrl, transport = transport)
 }
 
 fun tixkitQrHashForPayload(qrPayload: String): String =
@@ -456,6 +573,90 @@ private fun hmacSha256Hex(secret: String, message: String): String {
   val mac = Mac.getInstance("HmacSHA256")
   mac.init(SecretKeySpec(secret.toByteArray(StandardCharsets.UTF_8), "HmacSHA256"))
   return mac.doFinal(message.toByteArray(StandardCharsets.UTF_8)).toHex()
+}
+
+private fun parsePage(json: JSONObject): TixkitPublicContentPage =
+  TixkitPublicContentPage(
+    document = parseDocument(json.getJSONObject("document")),
+    version = parseVersion(json.getJSONObject("version")),
+    page = parseEventPage(json.getJSONObject("page")),
+  )
+
+private fun parseDocument(json: JSONObject): TixkitPublicContentDocument =
+  TixkitPublicContentDocument(
+    eventId = json.optString("eventId"),
+    channel = json.optString("channel"),
+    key = json.optString("key"),
+    name = json.optString("name"),
+    locale = json.optString("locale"),
+    updatedAt = json.optString("updatedAt"),
+  )
+
+private fun parseVersion(json: JSONObject): TixkitPublicContentVersion =
+  TixkitPublicContentVersion(
+    versionNumber = json.optInt("versionNumber"),
+    subject = json.optNullableString("subject"),
+    previewText = json.optNullableString("previewText"),
+    renderedHtml = json.optNullableString("renderedHtml"),
+    renderedText = json.optNullableString("renderedText"),
+    publishedAt = json.optNullableString("publishedAt"),
+  )
+
+private fun parseEventPage(json: JSONObject): TixkitPublicEventPage =
+  TixkitPublicEventPage(
+    html = json.optString("html"),
+    text = json.optString("text"),
+    headless = json.optJSONArray("headless").toObjectList(::parseBlock),
+    discovery = parseDiscovery(json.getJSONObject("discovery")),
+  )
+
+private fun parseBlock(json: JSONObject): TixkitPublicEventPageBlock =
+  TixkitPublicEventPageBlock(
+    type = json.optString("type"),
+    id = json.optString("id"),
+    title = json.optNullableString("title"),
+    text = json.optNullableString("text"),
+    html = json.optNullableString("html"),
+    imageUrl = json.optNullableString("imageUrl"),
+    imageAlt = json.optNullableString("imageAlt"),
+    links = json.optJSONArray("links").toObjectList(::parseLink),
+    items = json.optJSONArray("items").toAnyList(),
+  )
+
+private fun parseLink(json: JSONObject): TixkitPublicPageLink =
+  TixkitPublicPageLink(
+    label = json.optString("label"),
+    url = json.optString("url"),
+  )
+
+private fun parseDiscovery(json: JSONObject): TixkitPublicEventDiscoveryCard =
+  TixkitPublicEventDiscoveryCard(
+    title = json.optString("title"),
+    summary = json.optString("summary"),
+    tags = json.optJSONArray("tags").toStringList(),
+    category = json.optNullableString("category"),
+    imageUrl = json.optNullableString("imageUrl"),
+    startsAt = json.optNullableString("startsAt"),
+    venueName = json.optNullableString("venueName"),
+    publicPath = json.optNullableString("publicPath"),
+  )
+
+private fun JSONObject.optNullableString(key: String): String? =
+  if (has(key) && !isNull(key)) optString(key) else null
+
+private fun <T> JSONArray?.toObjectList(mapper: (JSONObject) -> T): List<T> {
+  if (this == null) return emptyList()
+  return List(length()) { index -> mapper(getJSONObject(index)) }
+}
+
+private fun JSONArray?.toStringList(): List<String> {
+  if (this == null) return emptyList()
+  return List(length()) { index -> getString(index) }
+}
+
+private fun JSONArray?.toAnyList(): List<Any?> {
+  if (this == null) return emptyList()
+  return List(length()) { index -> if (isNull(index)) null else get(index) }
 }
 
 private fun sha256Hex(bytes: ByteArray): String =

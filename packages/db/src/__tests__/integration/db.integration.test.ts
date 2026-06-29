@@ -253,6 +253,120 @@ describe.each(driverCases)('database integration: $driver', ({ driver, url }) =>
     expect(artifact.artifactRef).toBe(`content-preview:${document.id}:${version.id}:integration`);
   });
 
+  it('persists and resolves published event-page content with scoped render artifacts', async () => {
+    const { tenant, organization, brand, event } = await createCatalog(db);
+    const repo = new ContentRepository(db);
+    const eventPageJson = {
+      schemaVersion: 1,
+      editor: {
+        provider: '@tixkit/event-page-tiptap',
+        document: {
+          type: 'doc',
+          content: [
+            {
+              type: 'paragraph',
+              content: [{ type: 'text', text: 'Welcome to {{event.title}}' }],
+            },
+          ],
+        },
+      },
+      settings: {
+        eventId: event.id,
+        locale: 'en',
+        publicUrl: `https://events.example.test/e/${event.slug}`,
+        checkoutUrl: `https://checkout.example.test/e/${event.id}`,
+      },
+      blocks: [
+        {
+          type: 'hero',
+          id: 'hero',
+          headline: '{{event.title}}',
+          body: 'Repository parity proof',
+          ctaLabel: 'Get tickets',
+          ctaUrl: '{{event.checkoutUrl}}',
+        },
+        {
+          type: 'tickets',
+          id: 'tickets',
+          title: 'Tickets',
+          body: 'Choose your ticket.',
+          ctaLabel: 'Get tickets',
+        },
+      ],
+    };
+
+    const document = await repo.createDocument({
+      tenantId: tenant.id,
+      organizationId: organization.id,
+      brandId: brand.id,
+      eventId: event.id,
+      channel: 'event_page',
+      key: 'event-page',
+      name: 'Event page',
+      locale: 'en',
+    });
+    const version = await repo.createVersion({
+      documentId: document.id,
+      contentJson: eventPageJson,
+      renderedHtml: '<div class="tixkit-event-page">Welcome to Integration Event</div>',
+      renderedText: 'Welcome to Integration Event',
+      variables: [],
+      validation: { valid: true, severity: 'warning', issues: [] },
+      createdBy: 'usr_integration',
+    });
+
+    await expect(
+      repo.findPublishedEventPage({ tenantId: tenant.id, eventId: event.id }),
+    ).resolves.toBeUndefined();
+
+    await repo.publishVersion({ documentId: document.id, versionId: version.id });
+    const published = await repo.findPublishedEventPage({
+      tenantId: tenant.id,
+      eventId: event.id,
+      locale: 'en',
+    });
+
+    expect(published?.document).toMatchObject({
+      id: document.id,
+      tenantId: tenant.id,
+      brandId: brand.id,
+      eventId: event.id,
+      channel: 'event_page',
+      status: 'published',
+    });
+    expect(published?.version).toMatchObject({
+      id: version.id,
+      documentId: document.id,
+      status: 'published',
+      renderedText: 'Welcome to Integration Event',
+    });
+    expect(published?.version.contentJson).toMatchObject(eventPageJson);
+    await expect(
+      repo.findPublishedEventPage({ tenantId: 'tnt_other', eventId: event.id }),
+    ).resolves.toBeUndefined();
+    await expect(
+      repo.findPublishedEventPage({ tenantId: tenant.id, eventId: event.id, locale: 'fr' }),
+    ).resolves.toBeUndefined();
+
+    const artifact = await repo.recordRenderArtifact({
+      tenantId: tenant.id,
+      documentId: document.id,
+      versionId: version.id,
+      channel: 'event_page',
+      outputType: 'preview',
+      artifactRef: `content-preview:${document.id}:${version.id}:event-page`,
+      checksum: 'c'.repeat(64),
+    });
+    expect(artifact).toMatchObject({
+      tenantId: tenant.id,
+      documentId: document.id,
+      versionId: version.id,
+      channel: 'event_page',
+      outputType: 'preview',
+      checksum: 'c'.repeat(64),
+    });
+  });
+
   it('enforces tenant-scoped unique slugs', async () => {
     const { tenant } = await createCatalog(db);
 

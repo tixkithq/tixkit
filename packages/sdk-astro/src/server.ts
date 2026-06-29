@@ -99,6 +99,30 @@ export async function loadEvent(eventId: string, client: TixkitClient) {
   return client.events.get(eventId);
 }
 
+export async function loadPublicEventPage(
+  client: TixkitClient,
+  eventId: string,
+  params?: { locale?: string },
+) {
+  return client.public.getEventPage(eventId, params);
+}
+
+export async function loadPublicEventPageBySlug(
+  client: TixkitClient,
+  slug: string,
+  params: { host: string; locale?: string },
+) {
+  return client.public.getEventPageBySlug(slug, params);
+}
+
+export async function loadPublicEventDiscoveryCard(
+  client: TixkitClient,
+  eventId: string,
+  params?: { locale?: string },
+) {
+  return client.public.getEventDiscoveryCard(eventId, params);
+}
+
 export async function createCheckoutAction(
   client: TixkitClient,
   formData: {

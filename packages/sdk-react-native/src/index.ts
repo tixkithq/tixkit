@@ -1,4 +1,8 @@
-import { TixkitClient } from '@tixkit/js';
+import {
+  TixkitClient,
+  type PublicContentPage,
+  type PublicEventDiscoveryCard,
+} from '@tixkit/js';
 
 export const TIXKIT_API_VERSION = '2026-01-01';
 
@@ -244,6 +248,21 @@ export type TixkitCheckoutHandoffOptions = {
 export type TixkitCheckoutOpenOptions = TixkitCheckoutHandoffOptions & {
   openURL: (url: string) => Promise<unknown> | unknown;
 };
+
+export type TixkitPublicEventPageClientConfig = {
+  apiBaseUrl?: string;
+};
+
+export type PublicEventPageParams = {
+  locale?: string;
+};
+
+export type PublicEventPageBySlugParams = {
+  host: string;
+  locale?: string;
+};
+
+export type { PublicContentPage, PublicEventDiscoveryCard };
 
 export type TixkitCreateElement = (
   type: unknown,
@@ -661,6 +680,39 @@ export function checkoutHandoffUrl(options: TixkitCheckoutHandoffOptions): strin
   if (options.successUrl) url.searchParams.set('successUrl', options.successUrl);
   if (options.cancelUrl) url.searchParams.set('cancelUrl', options.cancelUrl);
   return url.toString();
+}
+
+export class TixkitPublicEventPageClient {
+  private readonly client: TixkitClient;
+
+  constructor(config: TixkitPublicEventPageClientConfig = {}) {
+    this.client = new TixkitClient({ apiBaseUrl: config.apiBaseUrl });
+  }
+
+  async getEventPage(eventId: string, params?: PublicEventPageParams): Promise<PublicContentPage> {
+    return this.client.public.getEventPage(eventId, params);
+  }
+
+  async getContentPage(
+    eventId: string,
+    params?: PublicEventPageParams,
+  ): Promise<PublicContentPage> {
+    return this.client.public.getContentPage(eventId, params);
+  }
+
+  async getEventPageBySlug(
+    slug: string,
+    params: PublicEventPageBySlugParams,
+  ): Promise<PublicContentPage> {
+    return this.client.public.getEventPageBySlug(slug, params);
+  }
+
+  async getEventDiscoveryCard(
+    eventId: string,
+    params?: PublicEventPageParams,
+  ): Promise<PublicEventDiscoveryCard> {
+    return this.client.public.getEventDiscoveryCard(eventId, params);
+  }
 }
 
 export class TixkitScannerClient {

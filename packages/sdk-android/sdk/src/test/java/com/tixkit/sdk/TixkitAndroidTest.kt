@@ -43,6 +43,83 @@ class TixkitAndroidTest {
   }
 
   @Test
+  fun fetchesPublicEventPagesWithoutScannerHeaders() {
+    val urls = mutableListOf<String>()
+    val headersSeen = mutableListOf<Map<String, String>>()
+    val transport = TixkitPublicEventPageTransport { url, headers ->
+      urls.add(url)
+      headersSeen.add(headers)
+      if (url.endsWith("/discovery-card")) {
+        """
+        {
+          "title": "All Access",
+          "summary": "Chicago",
+          "tags": ["music"],
+          "venueName": "The Salt Shed"
+        }
+        """.trimIndent()
+      } else {
+        """
+        {
+          "document": {
+            "eventId": "evt_1",
+            "channel": "event_page",
+            "key": "main",
+            "name": "Main event page",
+            "locale": "en",
+            "updatedAt": "2026-06-01T00:00:00.000Z"
+          },
+          "version": {
+            "versionNumber": 3,
+            "renderedHtml": "<main class=\"tixkit-event-page\">All Access</main>",
+            "renderedText": "All Access",
+            "publishedAt": "2026-06-02T00:00:00.000Z"
+          },
+          "page": {
+            "html": "<main>All Access</main>",
+            "text": "All Access",
+            "headless": [{"type": "hero", "id": "hero", "title": "All Access"}],
+            "discovery": {
+              "title": "All Access",
+              "summary": "Chicago",
+              "tags": ["music"]
+            }
+          }
+        }
+        """.trimIndent()
+      }
+    }
+    val client = TixkitAndroid.publicEventPageClient(
+      apiBaseUrl = "https://api.test",
+      transport = transport,
+    )
+
+    val contentPage = client.getContentPage("evt_1", locale = "en")
+    assertEquals("evt_1", contentPage.document.eventId)
+    assertEquals("All Access", contentPage.page.discovery.title)
+    client.getEventPage("evt_1", locale = "en")
+    client.getEventPageBySlug("all-access", host = "events.example.com", locale = "en")
+    val card = client.getEventDiscoveryCard("evt_1")
+    assertEquals("The Salt Shed", card.venueName)
+
+    assertEquals(
+      listOf(
+        "https://api.test/v1/public/events/evt_1/content-page?locale=en",
+        "https://api.test/v1/public/events/evt_1/page?locale=en",
+        "https://api.test/v1/public/events/by-slug/all-access/page?host=events.example.com&locale=en",
+        "https://api.test/v1/public/events/evt_1/discovery-card",
+      ),
+      urls,
+    )
+    headersSeen.forEach { headers ->
+      assertEquals("2026-01-01", headers["X-Tixkit-Version"])
+      assertFalse(headers.containsKey("Authorization"))
+      assertFalse(headers.containsKey("X-Device-Id"))
+      assertFalse(headers.containsKey("X-Device-Secret"))
+    }
+  }
+
+  @Test
   fun signsAndVerifiesOfflineManifest() {
     val unsigned = manifest(signature = "")
     val signed = unsigned.copy(signature = signTixkitOfflineManifest(unsigned, "manifest-secret"))

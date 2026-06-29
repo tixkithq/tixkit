@@ -1143,6 +1143,223 @@ describe('content routes', () => {
     expect(JSON.stringify(response.json())).not.toContain('usr_private');
   });
 
+  it('keeps public event-page route latency bounded under concurrent load', async () => {
+    const { db } = createContentDb({
+      events: [
+        {
+          id: 'evt_1',
+          tenant_id: 'tnt_1',
+          organization_id: 'org_1',
+          brand_id: 'brd_1',
+          slug: 'published-page',
+          title: 'Published page',
+          status: 'published',
+          visibility: 'public',
+          starts_at: new Date('2026-07-17T19:00:00.000Z'),
+          ends_at: null,
+          timezone: 'America/Chicago',
+          venue: JSON.stringify({ name: 'The Salt Shed', city: 'Chicago' }),
+        },
+      ],
+      ticket_types: [
+        {
+          id: 'tt_ga',
+          event_id: 'evt_1',
+          name: 'General Admission',
+          description: 'Standing room',
+          kind: 'paid',
+          status: 'active',
+          visibility: 'public',
+          currency: 'USD',
+          price_cents: 3500,
+          minimum_price_cents: null,
+        },
+        {
+          id: 'tt_vip',
+          event_id: 'evt_1',
+          name: 'VIP',
+          description: 'Balcony',
+          kind: 'paid',
+          status: 'sold_out',
+          visibility: 'public',
+          currency: 'USD',
+          price_cents: 7500,
+          minimum_price_cents: null,
+        },
+        {
+          id: 'tt_hidden',
+          event_id: 'evt_1',
+          name: 'Hidden comp',
+          description: 'Internal hold',
+          kind: 'free',
+          status: 'active',
+          visibility: 'hidden',
+          currency: 'USD',
+          price_cents: 0,
+          minimum_price_cents: null,
+        },
+      ],
+      content_documents: [
+        documentRow({
+          id: 'cdoc_public',
+          channel: 'event_page',
+          event_id: 'evt_1',
+          key: 'main',
+          name: 'Main event page',
+          status: 'published',
+          published_version_id: 'cver_public',
+        }),
+      ],
+      content_document_versions: [
+        versionRow({
+          id: 'cver_public',
+          document_id: 'cdoc_public',
+          version_number: 3,
+          status: 'published',
+          subject: 'Published page',
+          preview_text: 'Preview copy',
+          content_json: JSON.stringify(eventPageJson()),
+          rendered_html: '<main>stored html must not render</main>',
+          rendered_text: 'stored text must not render',
+          variables: JSON.stringify([]),
+          validation: JSON.stringify({ valid: true, severity: 'warning', issues: [] }),
+          created_by: 'usr_private',
+          published_at: new Date('2026-06-02T00:00:00.000Z'),
+        }),
+      ],
+    });
+    const app = await setupPublicContentApp(db);
+    const requestCount = 100;
+
+    const responses = await Promise.all(
+      Array.from({ length: requestCount }, async (_, index) => {
+        const startedAt = performance.now();
+        const response = await app.inject({
+          method: 'GET',
+          url: `/public/events/evt_1/page?locale=en&request=${index}`,
+        });
+        return { response, durationMs: performance.now() - startedAt };
+      }),
+    );
+    const maxDurationMs = responses.reduce(
+      (currentMax, { durationMs }) => Math.max(currentMax, durationMs),
+      0,
+    );
+
+    expect(responses).toHaveLength(requestCount);
+    expect(responses.every(({ response }) => response.statusCode === 200)).toBe(true);
+    expect(maxDurationMs).toBeLessThan(2_000);
+    for (const { response } of responses) {
+      const payload = response.json();
+      expect(payload.version.renderedHtml).toContain('General Admission');
+      expect(payload.version.renderedHtml).toContain('VIP');
+      expect(payload.version.renderedHtml).not.toContain('Hidden comp');
+      expect(JSON.stringify(payload)).not.toContain('tnt_1');
+      expect(JSON.stringify(payload)).not.toContain('stored html must not render');
+    }
+  });
+
+  it('fails closed for private events and stale published event-page versions', async () => {
+    const { db } = createContentDb({
+      events: [
+        {
+          id: 'evt_private',
+          tenant_id: 'tnt_1',
+          organization_id: 'org_1',
+          brand_id: 'brd_1',
+          slug: 'private-page',
+          title: 'Private page',
+          status: 'published',
+          visibility: 'private',
+          starts_at: new Date('2026-07-17T19:00:00.000Z'),
+          timezone: 'America/Chicago',
+        },
+        {
+          id: 'evt_stale',
+          tenant_id: 'tnt_1',
+          organization_id: 'org_1',
+          brand_id: 'brd_1',
+          slug: 'stale-page',
+          title: 'Stale page',
+          status: 'published',
+          visibility: 'public',
+          starts_at: new Date('2026-07-17T19:00:00.000Z'),
+          timezone: 'America/Chicago',
+        },
+      ],
+      ticket_types: [],
+      content_documents: [
+        documentRow({
+          id: 'cdoc_private',
+          channel: 'event_page',
+          event_id: 'evt_private',
+          key: 'main',
+          status: 'published',
+          published_version_id: 'cver_private',
+        }),
+        documentRow({
+          id: 'cdoc_stale',
+          channel: 'event_page',
+          event_id: 'evt_stale',
+          key: 'main',
+          status: 'published',
+          published_version_id: 'cver_stale',
+        }),
+      ],
+      content_document_versions: [
+        versionRow({
+          id: 'cver_private',
+          document_id: 'cdoc_private',
+          status: 'published',
+          content_json: JSON.stringify(
+            eventPageJson({
+              eventId: 'evt_private',
+              eventTitle: 'Private page',
+              eventDescription: 'Private draft must not leak',
+              checkoutUrl: 'https://checkout.tixkit.com/checkout?eventId=evt_private',
+            }),
+          ),
+          rendered_html: '<main>private draft must not leak</main>',
+          rendered_text: 'private draft must not leak',
+          validation: JSON.stringify({ valid: true, severity: 'warning', issues: [] }),
+          published_at: new Date('2026-06-02T00:00:00.000Z'),
+        }),
+        versionRow({
+          id: 'cver_stale',
+          document_id: 'cdoc_stale',
+          status: 'draft',
+          content_json: JSON.stringify(
+            eventPageJson({
+              eventId: 'evt_stale',
+              eventTitle: 'Stale page',
+              eventDescription: 'Stale draft must not leak',
+              checkoutUrl: 'https://checkout.tixkit.com/checkout?eventId=evt_stale',
+            }),
+          ),
+          rendered_html: '<main>stale draft must not leak</main>',
+          rendered_text: 'stale draft must not leak',
+          validation: JSON.stringify({ valid: true, severity: 'warning', issues: [] }),
+          published_at: null,
+        }),
+      ],
+    });
+    const app = await setupPublicContentApp(db);
+
+    const privateResponse = await app.inject({
+      method: 'GET',
+      url: '/public/events/evt_private/page',
+    });
+    const staleResponse = await app.inject({
+      method: 'GET',
+      url: '/public/events/evt_stale/page',
+    });
+
+    expect(privateResponse.statusCode).toBe(404);
+    expect(JSON.stringify(privateResponse.json()).toLowerCase()).not.toContain('private draft');
+    expect(staleResponse.statusCode).toBe(404);
+    expect(JSON.stringify(staleResponse.json()).toLowerCase()).not.toContain('stale draft');
+  });
+
   it('serves event pages by verified custom-domain slug and returns structured discovery cards', async () => {
     const { db } = createContentDb({
       tenants: [{ id: 'tnt_1', plan: 'pro' }],
@@ -1231,6 +1448,94 @@ describe('content routes', () => {
       startsAt: '2026-07-17T19:00:00.000Z',
       venueName: 'The Salt Shed',
     });
+  });
+
+  it('rejects custom-domain event pages when domain, brand, or tenant gates are not production-ready', async () => {
+    const { db } = createContentDb({
+      tenants: [
+        { id: 'tnt_pro', plan: 'pro' },
+        { id: 'tnt_free', plan: 'free' },
+      ],
+      brand_domains: [
+        {
+          id: 'bd_pending',
+          brand_id: 'brd_verified',
+          domain: 'pending.example.com',
+          is_verified: false,
+          ssl_status: 'pending',
+        },
+        {
+          id: 'bd_plain',
+          brand_id: 'brd_plain',
+          domain: 'plain.example.com',
+          is_verified: true,
+          ssl_status: 'active',
+        },
+        {
+          id: 'bd_free',
+          brand_id: 'brd_free',
+          domain: 'free.example.com',
+          is_verified: true,
+          ssl_status: 'active',
+        },
+      ],
+      brands: [
+        { id: 'brd_verified', white_label: true },
+        { id: 'brd_plain', white_label: false },
+        { id: 'brd_free', white_label: true },
+      ],
+      events: [
+        {
+          id: 'evt_pending',
+          tenant_id: 'tnt_pro',
+          organization_id: 'org_1',
+          brand_id: 'brd_verified',
+          slug: 'published-page',
+          title: 'Pending domain',
+          status: 'published',
+          visibility: 'public',
+        },
+        {
+          id: 'evt_plain',
+          tenant_id: 'tnt_pro',
+          organization_id: 'org_1',
+          brand_id: 'brd_plain',
+          slug: 'published-page',
+          title: 'Plain brand',
+          status: 'published',
+          visibility: 'public',
+        },
+        {
+          id: 'evt_free',
+          tenant_id: 'tnt_free',
+          organization_id: 'org_1',
+          brand_id: 'brd_free',
+          slug: 'published-page',
+          title: 'Free tenant',
+          status: 'published',
+          visibility: 'public',
+        },
+      ],
+      ticket_types: [],
+      content_documents: [],
+      content_document_versions: [],
+    });
+    const app = await setupPublicContentApp(db);
+
+    const responses = await Promise.all(
+      ['pending.example.com', 'plain.example.com', 'free.example.com'].map((host) =>
+        app.inject({
+          method: 'GET',
+          url: `/public/events/by-slug/published-page/page?host=${host}`,
+        }),
+      ),
+    );
+
+    for (const response of responses) {
+      expect(response.statusCode).toBe(404);
+      expect(JSON.stringify(response.json())).not.toContain('tnt_');
+      expect(JSON.stringify(response.json())).not.toContain('brd_');
+    }
   });
 
   it('rejects published event-page records that are not canonical event-page JSON', async () => {

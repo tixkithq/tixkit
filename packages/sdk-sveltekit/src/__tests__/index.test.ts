@@ -1,6 +1,13 @@
 import { createHmac } from 'node:crypto';
 import { describe, expect, it, vi } from 'vitest';
-import { createCheckoutFormAction, verifyTixkitWebhook } from '../server.js';
+import {
+  createCheckoutFormAction,
+  loadPublicEventDiscoveryCard,
+  loadPublicEventPage,
+  loadPublicEventPageBySlug,
+  verifyTixkitWebhook,
+} from '../server.js';
+import type { TixkitClient } from '@tixkit/js';
 import {
   checkoutWidgetUrl,
   checkoutUrl,
@@ -41,6 +48,30 @@ describe('SvelteKit server helpers', () => {
         toleranceSeconds: 300,
       }),
     ).toBe(false);
+  });
+
+  it('loads public content-studio event pages through the JS SDK public client', async () => {
+    const client = {
+      public: {
+        getEventPage: vi.fn(async () => ({ page: { discovery: { title: 'All Access' } } })),
+        getEventPageBySlug: vi.fn(async () => ({ document: { eventId: 'evt_1' } })),
+        getEventDiscoveryCard: vi.fn(async () => ({ title: 'All Access' })),
+      },
+    } as unknown as TixkitClient;
+
+    await loadPublicEventPage(client, 'evt_1', { locale: 'en' });
+    await loadPublicEventPageBySlug(client, 'all-access', {
+      host: 'events.example.com',
+      locale: 'en',
+    });
+    await loadPublicEventDiscoveryCard(client, 'evt_1');
+
+    expect(client.public.getEventPage).toHaveBeenCalledWith('evt_1', { locale: 'en' });
+    expect(client.public.getEventPageBySlug).toHaveBeenCalledWith('all-access', {
+      host: 'events.example.com',
+      locale: 'en',
+    });
+    expect(client.public.getEventDiscoveryCard).toHaveBeenCalledWith('evt_1', undefined);
   });
 
   it('creates checkout sessions from validated form actions', async () => {

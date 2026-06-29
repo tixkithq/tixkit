@@ -38,6 +38,7 @@ android {
 
 dependencies {
   coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.1.5")
+  testImplementation("org.json:json:20260522")
   testImplementation(kotlin("test"))
 }
 

@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createHmac, createHash } from 'node:crypto';
 import {
   TixkitScannerClient,
+  TixkitPublicEventPageClient,
   checkoutHandoffUrl,
   clearScannerCredentials,
   createTixkitReactNativeComponents,
@@ -384,6 +385,83 @@ describe('TixkitScannerClient', () => {
     expect(openURL).toHaveBeenCalledWith(
       'https://checkout.example.test/checkout?eventId=evt_1&items=tt_1%3D1',
     );
+  });
+
+  it('fetches public event-page content without scanner or API-key headers', async () => {
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockImplementation(async (url) => {
+      if (String(url).includes('/discovery-card')) {
+        return new Response(
+          JSON.stringify({
+            title: 'All Access',
+            summary: 'Chicago',
+            tags: ['music'],
+            venueName: 'The Salt Shed',
+          }),
+          { status: 200, headers: { 'Content-Type': 'application/json' } },
+        );
+      }
+      return new Response(
+        JSON.stringify({
+          document: {
+            eventId: 'evt_1',
+            channel: 'event_page',
+            key: 'main',
+            name: 'Main event page',
+            locale: 'en',
+            updatedAt: '2026-06-01T00:00:00.000Z',
+          },
+          version: {
+            versionNumber: 3,
+            renderedHtml: '<main class="tixkit-event-page">All Access</main>',
+            renderedText: 'All Access',
+            publishedAt: '2026-06-02T00:00:00.000Z',
+          },
+          page: {
+            html: '<main>All Access</main>',
+            text: 'All Access',
+            headless: [{ type: 'hero', id: 'hero', title: 'All Access' }],
+            discovery: {
+              title: 'All Access',
+              summary: 'Chicago',
+              tags: ['music'],
+            },
+          },
+        }),
+        { status: 200, headers: { 'Content-Type': 'application/json' } },
+      );
+    });
+    const client = new TixkitPublicEventPageClient({ apiBaseUrl: 'https://api.test' });
+
+    await expect(client.getContentPage('evt_1', { locale: 'en' })).resolves.toMatchObject({
+      document: { eventId: 'evt_1' },
+    });
+    await client.getEventPage('evt_1', { locale: 'en' });
+    await client.getEventPageBySlug('all-access', {
+      host: 'events.example.com',
+      locale: 'en',
+    });
+    await expect(client.getEventDiscoveryCard('evt_1')).resolves.toMatchObject({
+      title: 'All Access',
+    });
+
+    expect(String(fetchMock.mock.calls[0]?.[0])).toBe(
+      'https://api.test/v1/public/events/evt_1/content-page?locale=en',
+    );
+    expect(String(fetchMock.mock.calls[1]?.[0])).toBe(
+      'https://api.test/v1/public/events/evt_1/page?locale=en',
+    );
+    expect(String(fetchMock.mock.calls[2]?.[0])).toBe(
+      'https://api.test/v1/public/events/by-slug/all-access/page?host=events.example.com&locale=en',
+    );
+    expect(String(fetchMock.mock.calls[3]?.[0])).toBe(
+      'https://api.test/v1/public/events/evt_1/discovery-card',
+    );
+    for (const [, init] of fetchMock.mock.calls) {
+      const headers = init?.headers as Record<string, string>;
+      expect(headers.Authorization).toBeUndefined();
+      expect(headers['X-Device-Id']).toBeUndefined();
+      expect(headers['X-Device-Secret']).toBeUndefined();
+    }
   });
 
   it('hashes scanned QR payloads with the same SHA-256 contract as offline manifests', () => {

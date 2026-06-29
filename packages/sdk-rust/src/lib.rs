@@ -124,6 +124,10 @@ impl TixkitClient {
         EventResource { client: self }
     }
 
+    pub fn public(&self) -> PublicResource<'_> {
+        PublicResource { client: self }
+    }
+
     pub fn ticket_types(&self) -> TicketTypeResource<'_> {
         TicketTypeResource { client: self }
     }
@@ -450,6 +454,113 @@ pub struct Event {
 
 #[derive(Debug, Clone, Serialize, serde::Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
+pub struct PublicContentPage {
+    pub document: PublicContentDocument,
+    pub version: PublicContentVersion,
+    pub page: PublicEventPage,
+}
+
+#[derive(Debug, Clone, Serialize, serde::Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct PublicContentDocument {
+    pub event_id: String,
+    pub channel: String,
+    pub key: String,
+    pub name: String,
+    pub locale: String,
+    pub updated_at: String,
+}
+
+#[derive(Debug, Clone, Serialize, serde::Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct PublicContentVersion {
+    pub version_number: u32,
+    pub subject: Option<String>,
+    pub preview_text: Option<String>,
+    pub rendered_html: Option<String>,
+    pub rendered_text: Option<String>,
+    pub published_at: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, serde::Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct PublicEventPage {
+    pub html: String,
+    pub text: String,
+    pub headless: Vec<PublicEventPageBlock>,
+    pub discovery: PublicEventDiscoveryCard,
+}
+
+#[derive(Debug, Clone, Serialize, serde::Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct PublicEventPageBlock {
+    #[serde(rename = "type")]
+    pub block_type: String,
+    pub id: String,
+    pub title: Option<String>,
+    pub text: Option<String>,
+    pub html: Option<String>,
+    pub image_url: Option<String>,
+    pub image_alt: Option<String>,
+    pub links: Option<Vec<PublicPageLink>>,
+    pub items: Option<Vec<Value>>,
+}
+
+#[derive(Debug, Clone, Serialize, serde::Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct PublicPageLink {
+    pub label: String,
+    pub url: String,
+}
+
+#[derive(Debug, Clone, Serialize, serde::Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct PublicEventDiscoveryCard {
+    pub title: String,
+    pub summary: String,
+    pub category: Option<String>,
+    pub tags: Vec<String>,
+    pub image_url: Option<String>,
+    pub starts_at: Option<String>,
+    pub venue_name: Option<String>,
+    pub public_path: Option<String>,
+}
+
+#[derive(Debug, Clone, Default, Serialize, serde::Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct PublicEventPageParams {
+    pub locale: Option<String>,
+}
+
+impl PublicEventPageParams {
+    fn to_query(&self) -> Vec<(String, String)> {
+        let mut query = Vec::new();
+        if let Some(locale) = &self.locale {
+            query.push(("locale".to_string(), locale.clone()));
+        }
+        query
+    }
+}
+
+#[derive(Debug, Clone, Serialize, serde::Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct PublicEventPageBySlugParams {
+    pub host: String,
+    pub locale: Option<String>,
+}
+
+impl PublicEventPageBySlugParams {
+    fn to_query(&self) -> Vec<(String, String)> {
+        let mut query = vec![("host".to_string(), self.host.clone())];
+        if let Some(locale) = &self.locale {
+            query.push(("locale".to_string(), locale.clone()));
+        }
+        query
+    }
+}
+
+#[derive(Debug, Clone, Serialize, serde::Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
 pub struct TicketType {
     pub id: String,
     pub event_id: String,
@@ -676,6 +787,78 @@ impl CheckoutResource<'_> {
 
 pub struct EventResource<'a> {
     client: &'a TixkitClient,
+}
+
+pub struct PublicResource<'a> {
+    client: &'a TixkitClient,
+}
+
+impl PublicResource<'_> {
+    pub async fn get_event(&self, event_id: &str) -> Result<Event, TixkitError> {
+        self.client
+            .request(
+                reqwest::Method::GET,
+                &format!("/public/events/{event_id}"),
+                RequestOptions::<()>::default(),
+            )
+            .await
+    }
+
+    pub async fn get_event_page(
+        &self,
+        event_id: &str,
+        params: PublicEventPageParams,
+    ) -> Result<PublicContentPage, TixkitError> {
+        self.client
+            .request(
+                reqwest::Method::GET,
+                &format!("/public/events/{event_id}/page"),
+                RequestOptions::<()>::query(params.to_query()),
+            )
+            .await
+    }
+
+    pub async fn get_content_page(
+        &self,
+        event_id: &str,
+        params: PublicEventPageParams,
+    ) -> Result<PublicContentPage, TixkitError> {
+        self.client
+            .request(
+                reqwest::Method::GET,
+                &format!("/public/events/{event_id}/content-page"),
+                RequestOptions::<()>::query(params.to_query()),
+            )
+            .await
+    }
+
+    pub async fn get_event_page_by_slug(
+        &self,
+        slug: &str,
+        params: PublicEventPageBySlugParams,
+    ) -> Result<PublicContentPage, TixkitError> {
+        self.client
+            .request(
+                reqwest::Method::GET,
+                &format!("/public/events/by-slug/{slug}/page"),
+                RequestOptions::<()>::query(params.to_query()),
+            )
+            .await
+    }
+
+    pub async fn get_event_discovery_card(
+        &self,
+        event_id: &str,
+        params: PublicEventPageParams,
+    ) -> Result<PublicEventDiscoveryCard, TixkitError> {
+        self.client
+            .request(
+                reqwest::Method::GET,
+                &format!("/public/events/{event_id}/discovery-card"),
+                RequestOptions::<()>::query(params.to_query()),
+            )
+            .await
+    }
 }
 
 impl EventResource<'_> {
@@ -1089,6 +1272,125 @@ mod tests {
             .expect("checkout session");
 
         assert_eq!(result.id, "cs_1");
+    }
+
+    #[tokio::test]
+    async fn builds_public_event_page_routes() {
+        let server = MockServer::start().await;
+        let page_body = json!({
+            "document": {
+                "eventId": "evt_1",
+                "channel": "event_page",
+                "key": "main",
+                "name": "Main event page",
+                "locale": "en",
+                "updatedAt": "2026-06-01T00:00:00.000Z"
+            },
+            "version": {
+                "versionNumber": 3,
+                "renderedHtml": "<main class=\"tixkit-event-page\">All Access</main>",
+                "renderedText": "All Access",
+                "publishedAt": "2026-06-02T00:00:00.000Z"
+            },
+            "page": {
+                "html": "<main>All Access</main>",
+                "text": "All Access",
+                "headless": [{"type": "hero", "id": "hero", "title": "All Access"}],
+                "discovery": {
+                    "title": "All Access",
+                    "summary": "Chicago",
+                    "tags": ["music"],
+                    "venueName": "The Salt Shed"
+                }
+            }
+        });
+        Mock::given(method("GET"))
+            .and(path("/v1/public/events/evt_1/content-page"))
+            .and(query_param("locale", "en"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(page_body.clone()))
+            .mount(&server)
+            .await;
+        Mock::given(method("GET"))
+            .and(path("/v1/public/events/evt_1/page"))
+            .and(query_param("locale", "en"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(page_body.clone()))
+            .mount(&server)
+            .await;
+        Mock::given(method("GET"))
+            .and(path("/v1/public/events/by-slug/all-access/page"))
+            .and(query_param("host", "events.example.com"))
+            .and(query_param("locale", "en"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(page_body))
+            .mount(&server)
+            .await;
+
+        let tixkit = client(&server).await;
+        let content_page = tixkit
+            .public()
+            .get_content_page(
+                "evt_1",
+                PublicEventPageParams {
+                    locale: Some("en".to_string()),
+                },
+            )
+            .await
+            .expect("content page");
+        assert_eq!(content_page.document.event_id, "evt_1");
+        assert_eq!(content_page.page.discovery.title, "All Access");
+
+        tixkit
+            .public()
+            .get_event_page(
+                "evt_1",
+                PublicEventPageParams {
+                    locale: Some("en".to_string()),
+                },
+            )
+            .await
+            .expect("event page");
+
+        tixkit
+            .public()
+            .get_event_page_by_slug(
+                "all-access",
+                PublicEventPageBySlugParams {
+                    host: "events.example.com".to_string(),
+                    locale: Some("en".to_string()),
+                },
+            )
+            .await
+            .expect("slug page");
+    }
+
+    #[tokio::test]
+    async fn builds_public_event_discovery_card_route() {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/v1/public/events/evt_1/discovery-card"))
+            .and(query_param("locale", "en"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                "title": "All Access",
+                "summary": "Chicago",
+                "tags": ["music"],
+                "venueName": "The Salt Shed"
+            })))
+            .mount(&server)
+            .await;
+
+        let card = client(&server)
+            .await
+            .public()
+            .get_event_discovery_card(
+                "evt_1",
+                PublicEventPageParams {
+                    locale: Some("en".to_string()),
+                },
+            )
+            .await
+            .expect("discovery card");
+
+        assert_eq!(card.title, "All Access");
+        assert_eq!(card.venue_name.as_deref(), Some("The Salt Shed"));
     }
 
     #[tokio::test]

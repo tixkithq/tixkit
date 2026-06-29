@@ -145,6 +145,74 @@ describe('renderEventPageDocument', () => {
     expect(rendered.html).toContain('&lt;script&gt;alert(1)&lt;/script&gt;');
     expect(rendered.html).not.toContain('<script>alert(1)</script>');
   });
+
+  it('renders a deterministic 200-page load within the event-page budget', () => {
+    const documents = Array.from({ length: 200 }, (_, index) =>
+      createDefaultEventPageDocument({
+        eventId: `evt_load_${index}`,
+        eventTitle: `All Access Chicago ${index}`,
+        eventDescription: `Load proof ${index}`,
+        checkoutUrl: `https://checkout.example.test/checkout?eventId=evt_load_${index}`,
+      }),
+    );
+
+    const startedAt = performance.now();
+    const rendered = documents.map((document, index) =>
+      renderEventPageDocument(document, {
+        ...context,
+        event: {
+          ...context.event,
+          title: `All Access Chicago ${index}`,
+          checkoutUrl: `https://checkout.example.test/checkout?eventId=evt_load_${index}`,
+        },
+      }),
+    );
+    const durationMs = performance.now() - startedAt;
+
+    expect(durationMs).toBeLessThan(2_000);
+    expect(rendered).toHaveLength(200);
+    expect(rendered.every((page) => page.validation.valid)).toBe(true);
+    expect(new Set(rendered.map((page) => page.html)).size).toBe(200);
+    expect(rendered.every((page) => !page.html.includes('<script'))).toBe(true);
+  });
+
+  it('fails closed for malformed editor exports with unsafe links and unsupported nodes', () => {
+    const document = createDefaultEventPageDocument({
+      eventId: 'evt_demo_001',
+      eventTitle: 'All Access Chicago',
+      eventDescription: 'Safe copy',
+      checkoutUrl: 'https://checkout.example.test/checkout?eventId=evt_demo_001',
+    });
+    document.editor.document = {
+      type: 'doc',
+      content: [
+        {
+          type: 'video',
+          attrs: { src: 'javascript:alert(1)' },
+        },
+        {
+          type: 'paragraph',
+          content: [
+            {
+              type: 'text',
+              text: 'Unsafe link',
+              marks: [{ type: 'link', attrs: { href: 'javascript:alert(1)' } }],
+            },
+          ],
+        },
+      ],
+    };
+
+    const validation = validateEventPageDocument(document);
+    const rendered = renderEventPageDocument(document, context);
+
+    expect(validation.valid).toBe(false);
+    expect(validation.issues.map((issue) => issue.code)).toEqual(
+      expect.arrayContaining(['unsupported_tiptap_node', 'unsafe_link']),
+    );
+    expect(rendered.html).toBe('');
+    expect(rendered.headless).toEqual([]);
+  });
 });
 
 describe('custom embed sanitization', () => {

@@ -9,6 +9,51 @@ import (
 
 type EventsService struct{ client *Client }
 
+type PublicService struct{ client *Client }
+
+func (s *PublicService) GetEvent(ctx context.Context, eventID string) (*Event, error) {
+	var out Event
+	err := s.client.request(ctx, http.MethodGet, "/public/events/"+escape(eventID), nil, &out)
+	return &out, err
+}
+
+func (s *PublicService) GetEventPage(ctx context.Context, eventID string, params *PublicEventPageParams) (*PublicContentPage, error) {
+	var out PublicContentPage
+	err := s.client.request(ctx, http.MethodGet, "/public/events/"+escape(eventID)+"/page", nil, &out, withParams(publicEventPageValues(params)))
+	return &out, err
+}
+
+func (s *PublicService) GetContentPage(ctx context.Context, eventID string, params *PublicEventPageParams) (*PublicContentPage, error) {
+	var out PublicContentPage
+	err := s.client.request(ctx, http.MethodGet, "/public/events/"+escape(eventID)+"/content-page", nil, &out, withParams(publicEventPageValues(params)))
+	return &out, err
+}
+
+func (s *PublicService) GetEventPageBySlug(ctx context.Context, slug string, params PublicEventPageBySlugParams) (*PublicContentPage, error) {
+	values := url.Values{}
+	values.Set("host", params.Host)
+	if params.Locale != "" {
+		values.Set("locale", params.Locale)
+	}
+	var out PublicContentPage
+	err := s.client.request(ctx, http.MethodGet, "/public/events/by-slug/"+escape(slug)+"/page", nil, &out, withParams(values))
+	return &out, err
+}
+
+func (s *PublicService) GetEventDiscoveryCard(ctx context.Context, eventID string, params *PublicEventPageParams) (*PublicEventDiscoveryCard, error) {
+	var out PublicEventDiscoveryCard
+	err := s.client.request(ctx, http.MethodGet, "/public/events/"+escape(eventID)+"/discovery-card", nil, &out, withParams(publicEventPageValues(params)))
+	return &out, err
+}
+
+func publicEventPageValues(params *PublicEventPageParams) url.Values {
+	values := url.Values{}
+	if params != nil && params.Locale != "" {
+		values.Set("locale", params.Locale)
+	}
+	return values
+}
+
 func (s *EventsService) List(ctx context.Context, params *PaginationParams) (*Page[Event], error) {
 	var out Page[Event]
 	err := s.client.request(ctx, http.MethodGet, "/events", nil, &out, withParams(paginationValues(params)))

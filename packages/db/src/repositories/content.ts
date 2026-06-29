@@ -231,7 +231,7 @@ export class ContentRepository extends BaseRepository {
     const row = await query.executeTakeFirst();
     if (!row || !row.published_version_id) return undefined;
     const version = await this.findVersionById(row.published_version_id);
-    if (!version) return undefined;
+    if (!version || version.status !== 'published') return undefined;
     return { document: this.toDocument(row), version };
   }
 

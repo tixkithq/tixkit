@@ -179,6 +179,104 @@ func TestBoxOfficeOrderSendsIdempotencyHeader(t *testing.T) {
 	}
 }
 
+func TestPublicEventPageRoutes(t *testing.T) {
+	t.Parallel()
+
+	paths := make(chan string, 4)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		paths <- r.URL.RequestURI()
+		_ = json.NewEncoder(w).Encode(PublicContentPage{
+			Document: PublicContentDocument{
+				EventID:   "evt_1",
+				Channel:   "event_page",
+				Key:       "main",
+				Name:      "Main event page",
+				Locale:    "en",
+				UpdatedAt: "2026-06-01T00:00:00.000Z",
+			},
+			Version: PublicContentVersion{
+				VersionNumber: 3,
+				RenderedHTML:  `<main class="tixkit-event-page">All Access</main>`,
+				RenderedText:  "All Access",
+				PublishedAt:   "2026-06-02T00:00:00.000Z",
+			},
+			Page: PublicEventPage{
+				HTML: "<main>All Access</main>",
+				Text: "All Access",
+				Headless: []PublicEventPageBlock{{
+					Type:  "hero",
+					ID:    "hero",
+					Title: "All Access",
+				}},
+				Discovery: PublicEventDiscoveryCard{
+					Title: "All Access",
+					Tags:  []string{"music"},
+				},
+			},
+		})
+	}))
+	defer server.Close()
+
+	client, err := NewClient("", WithBaseURL(server.URL), WithMaxRetries(0))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	page, err := client.Public.GetContentPage(context.Background(), "evt_1", &PublicEventPageParams{Locale: "en"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if page.Document.EventID != "evt_1" || page.Page.Discovery.Title != "All Access" {
+		t.Fatalf("page = %#v", page)
+	}
+	if got := <-paths; got != "/v1/public/events/evt_1/content-page?locale=en" {
+		t.Fatalf("content page path = %s", got)
+	}
+
+	if _, err := client.Public.GetEventPage(context.Background(), "evt_1", &PublicEventPageParams{Locale: "en"}); err != nil {
+		t.Fatal(err)
+	}
+	if got := <-paths; got != "/v1/public/events/evt_1/page?locale=en" {
+		t.Fatalf("event page path = %s", got)
+	}
+
+	if _, err := client.Public.GetEventPageBySlug(context.Background(), "all-access", PublicEventPageBySlugParams{Host: "events.example.com", Locale: "en"}); err != nil {
+		t.Fatal(err)
+	}
+	if got := <-paths; got != "/v1/public/events/by-slug/all-access/page?host=events.example.com&locale=en" {
+		t.Fatalf("slug page path = %s", got)
+	}
+}
+
+func TestPublicEventDiscoveryCardRoute(t *testing.T) {
+	t.Parallel()
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.RequestURI() != "/v1/public/events/evt_1/discovery-card?locale=en" {
+			t.Fatalf("path = %s", r.URL.RequestURI())
+		}
+		_ = json.NewEncoder(w).Encode(PublicEventDiscoveryCard{
+			Title:     "All Access",
+			Summary:   "Chicago",
+			Tags:      []string{"music"},
+			VenueName: "The Salt Shed",
+		})
+	}))
+	defer server.Close()
+
+	client, err := NewClient("", WithBaseURL(server.URL), WithMaxRetries(0))
+	if err != nil {
+		t.Fatal(err)
+	}
+	card, err := client.Public.GetEventDiscoveryCard(context.Background(), "evt_1", &PublicEventPageParams{Locale: "en"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if card.Title != "All Access" || card.VenueName != "The Salt Shed" {
+		t.Fatalf("card = %#v", card)
+	}
+}
+
 func TestErrorMapping(t *testing.T) {
 	t.Parallel()
 

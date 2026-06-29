@@ -92,6 +92,74 @@ type EventAvailability struct {
 	Status            string `json:"status"`
 }
 
+type PublicContentPage struct {
+	Document PublicContentDocument `json:"document"`
+	Version  PublicContentVersion  `json:"version"`
+	Page     PublicEventPage       `json:"page"`
+}
+
+type PublicContentDocument struct {
+	EventID   string `json:"eventId"`
+	Channel   string `json:"channel"`
+	Key       string `json:"key"`
+	Name      string `json:"name"`
+	Locale    string `json:"locale"`
+	UpdatedAt string `json:"updatedAt"`
+}
+
+type PublicContentVersion struct {
+	VersionNumber int    `json:"versionNumber"`
+	Subject       string `json:"subject,omitempty"`
+	PreviewText   string `json:"previewText,omitempty"`
+	RenderedHTML  string `json:"renderedHtml,omitempty"`
+	RenderedText  string `json:"renderedText,omitempty"`
+	PublishedAt   string `json:"publishedAt,omitempty"`
+}
+
+type PublicEventPage struct {
+	HTML      string                   `json:"html"`
+	Text      string                   `json:"text"`
+	Headless  []PublicEventPageBlock   `json:"headless"`
+	Discovery PublicEventDiscoveryCard `json:"discovery"`
+}
+
+type PublicEventPageBlock struct {
+	Type     string           `json:"type"`
+	ID       string           `json:"id"`
+	Title    string           `json:"title,omitempty"`
+	Text     string           `json:"text,omitempty"`
+	HTML     string           `json:"html,omitempty"`
+	ImageURL string           `json:"imageUrl,omitempty"`
+	ImageAlt string           `json:"imageAlt,omitempty"`
+	Links    []PublicPageLink `json:"links,omitempty"`
+	Items    []any            `json:"items,omitempty"`
+}
+
+type PublicPageLink struct {
+	Label string `json:"label"`
+	URL   string `json:"url"`
+}
+
+type PublicEventDiscoveryCard struct {
+	Title      string   `json:"title"`
+	Summary    string   `json:"summary"`
+	Category   string   `json:"category,omitempty"`
+	Tags       []string `json:"tags"`
+	ImageURL   string   `json:"imageUrl,omitempty"`
+	StartsAt   string   `json:"startsAt,omitempty"`
+	VenueName  string   `json:"venueName,omitempty"`
+	PublicPath string   `json:"publicPath,omitempty"`
+}
+
+type PublicEventPageParams struct {
+	Locale string
+}
+
+type PublicEventPageBySlugParams struct {
+	Host   string
+	Locale string
+}
+
 type CreateEventOccurrenceRequest struct {
 	Title     string         `json:"title"`
 	StartsAt  string         `json:"startsAt"`

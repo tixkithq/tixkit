@@ -36,6 +36,75 @@ void main() {
     );
   });
 
+  test('fetches public event pages and discovery cards', () async {
+    final urls = <String>[];
+    final client = TixkitPublicEventPageClient(
+      apiBaseUrl: 'https://api.test',
+      httpClient: MockClient((request) async {
+        urls.add(request.url.toString());
+        expect(request.headers['X-Device-Id'], isNull);
+        expect(request.headers['Authorization'], isNull);
+        if (request.url.path.endsWith('/discovery-card')) {
+          return http.Response(
+            jsonEncode({
+              'title': 'All Access',
+              'summary': 'Chicago',
+              'tags': ['music'],
+              'venueName': 'The Salt Shed',
+            }),
+            200,
+          );
+        }
+        return http.Response(
+          jsonEncode({
+            'document': {
+              'eventId': 'evt_1',
+              'channel': 'event_page',
+              'key': 'main',
+              'name': 'Main event page',
+              'locale': 'en',
+              'updatedAt': '2026-06-01T00:00:00.000Z',
+            },
+            'version': {
+              'versionNumber': 3,
+              'renderedHtml': '<main class="tixkit-event-page">All Access</main>',
+              'renderedText': 'All Access',
+              'publishedAt': '2026-06-02T00:00:00.000Z',
+            },
+            'page': {
+              'html': '<main>All Access</main>',
+              'text': 'All Access',
+              'headless': [
+                {'type': 'hero', 'id': 'hero', 'title': 'All Access'},
+              ],
+              'discovery': {
+                'title': 'All Access',
+                'summary': 'Chicago',
+                'tags': ['music'],
+              },
+            },
+          }),
+          200,
+        );
+      }),
+    );
+
+    final page = await client.getContentPage('evt_1', locale: 'en');
+    expect(page.document.eventId, 'evt_1');
+    expect(page.page.discovery.title, 'All Access');
+    await client.getEventPage('evt_1', locale: 'en');
+    await client.getEventPageBySlug('all-access', host: 'events.example.com', locale: 'en');
+    final card = await client.getEventDiscoveryCard('evt_1');
+    expect(card.venueName, 'The Salt Shed');
+
+    expect(urls, [
+      'https://api.test/v1/public/events/evt_1/content-page?locale=en',
+      'https://api.test/v1/public/events/evt_1/page?locale=en',
+      'https://api.test/v1/public/events/by-slug/all-access/page?host=events.example.com&locale=en',
+      'https://api.test/v1/public/events/evt_1/discovery-card',
+    ]);
+  });
+
   test('hashes QR payloads with SHA-256', () {
     const payload = 'signed-ticket-payload';
     expect(tixkitQrHashForPayload(payload), sha256.convert(utf8.encode(payload)).toString());

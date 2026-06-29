@@ -6,6 +6,9 @@ import {
   createTixkitClient,
   createTixkitWebhookRouteHandler,
   createWebhookHandler,
+  loadPublicEventDiscoveryCard,
+  loadPublicEventPage,
+  loadPublicEventPageBySlug,
   verifyTixkitWebhook,
 } from '../server.js';
 
@@ -21,6 +24,36 @@ describe('Next server webhook helpers', () => {
 
   it('creates a server-side Tixkit client', () => {
     expect(createTixkitClient({ apiKey: 'tk_test_123' })).toBeInstanceOf(TixkitClient);
+  });
+
+  it('loads public content-studio event pages through the JS SDK public client', async () => {
+    const client = {
+      public: {
+        getEventPage: vi.fn(async () => ({ page: { discovery: { title: 'All Access' } } })),
+        getEventPageBySlug: vi.fn(async () => ({ document: { eventId: 'evt_1' } })),
+        getEventDiscoveryCard: vi.fn(async () => ({ title: 'All Access' })),
+      },
+    } as unknown as TixkitClient;
+
+    await expect(loadPublicEventPage(client, 'evt_1', { locale: 'en' })).resolves.toMatchObject({
+      page: { discovery: { title: 'All Access' } },
+    });
+    await expect(
+      loadPublicEventPageBySlug(client, 'all-access', {
+        host: 'events.example.com',
+        locale: 'en',
+      }),
+    ).resolves.toMatchObject({ document: { eventId: 'evt_1' } });
+    await expect(loadPublicEventDiscoveryCard(client, 'evt_1')).resolves.toEqual({
+      title: 'All Access',
+    });
+
+    expect(client.public.getEventPage).toHaveBeenCalledWith('evt_1', { locale: 'en' });
+    expect(client.public.getEventPageBySlug).toHaveBeenCalledWith('all-access', {
+      host: 'events.example.com',
+      locale: 'en',
+    });
+    expect(client.public.getEventDiscoveryCard).toHaveBeenCalledWith('evt_1', undefined);
   });
 
   it('verifies timestamped Tixkit webhook signatures', () => {
