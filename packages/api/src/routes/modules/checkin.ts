@@ -1,5 +1,5 @@
 import type { FastifyPluginAsync, FastifyRequest } from 'fastify';
-import { createHmac } from 'node:crypto';
+import { createHmac, timingSafeEqual } from 'node:crypto';
 import { ClerkAuthService } from '../../auth/clerk.js';
 import {
   EventRepository,
@@ -464,6 +464,21 @@ export async function processScan(input: {
   if (ticket.event_id !== input.list.event_id) {
     return { outcome: 'wrong_event', ticketId: ticket.id, qrHash: input.qrHash };
   }
+  if (
+    input.list.event_occurrence_id &&
+    ticket.event_occurrence_id !== input.list.event_occurrence_id
+  ) {
+    return {
+      outcome: 'wrong_list',
+      ticketId: ticket.id,
+      qrHash: input.qrHash,
+      metadata: {
+        reason: 'wrong_event_occurrence',
+        expectedEventOccurrenceId: input.list.event_occurrence_id,
+        actualEventOccurrenceId: ticket.event_occurrence_id ?? null,
+      },
+    };
+  }
   if (allowedTicketTypeIds.size > 0 && !allowedTicketTypeIds.has(ticket.ticket_type_id)) {
     return { outcome: 'wrong_list', ticketId: ticket.id, qrHash: input.qrHash };
   }
@@ -578,12 +593,12 @@ export function verifyOfflineManifestSignature(manifest: {
 }): boolean {
   const signingKey = getManifestSigningKey();
   const { signature, ...payload } = manifest;
+  if (!/^[0-9a-f]{64}$/i.test(signature)) {
+    return false;
+  }
   const expectedSignature = createHmac('sha256', signingKey)
     .update(JSON.stringify(payload))
     .digest('hex');
 
-  const a = Buffer.from(expectedSignature, 'hex');
-  const b = Buffer.from(signature, 'hex');
-  if (a.length !== b.length) return false;
-  return a.equals(b);
+  return timingSafeEqual(Buffer.from(expectedSignature, 'hex'), Buffer.from(signature, 'hex'));
 }

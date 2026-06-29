@@ -1,7 +1,12 @@
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { adminApi } from '@/lib/api';
 
 describe('API key create/revoke', () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+    vi.unstubAllGlobals();
+  });
+
   it('listApiKeys returns fixture keys', async () => {
     const result = await adminApi.listApiKeys();
     expect(result.ok).toBe(true);
@@ -28,6 +33,28 @@ describe('API key create/revoke', () => {
       expect(result.data.apiKey).toBeDefined();
       expect(result.data.apiKey).toMatch(/^tk_live_/);
       expect(result.data.scopes).toEqual(scopes);
+    }
+  });
+
+  it('uses Web Crypto bytes for fixture API key secrets when randomUUID is unavailable', async () => {
+    const mathRandom = vi.spyOn(Math, 'random');
+    const getRandomValues = vi.fn((bytes: Uint8Array) => {
+      bytes.fill(0xab);
+      return bytes;
+    });
+    vi.stubGlobal('crypto', { getRandomValues });
+
+    const result = await adminApi.createApiKey({
+      name: 'Crypto-backed Key',
+      scopes: ['events:read'],
+    });
+
+    expect(result.ok).toBe(true);
+    expect(getRandomValues).toHaveBeenCalled();
+    expect(mathRandom).not.toHaveBeenCalled();
+    if (result.ok) {
+      expect(result.data.id).toBe('key_ababababa');
+      expect(result.data.apiKey).toBe(`tk_live_${'ab'.repeat(24)}`);
     }
   });
 

@@ -210,6 +210,31 @@ describe('processScan', () => {
     expect(result.outcome).toBe('wrong_list');
   });
 
+  it('rejects same-event tickets from another occurrence on occurrence-scoped lists', async () => {
+    const ticketRepo = repo(ticket({ event_occurrence_id: 'occ_other' }));
+    const result = await processScan({
+      ticketRepo: ticketRepo as never,
+      list: { ...list, event_occurrence_id: 'occ_allowed' } as never,
+      qrHash: 'hash_1',
+      deviceId: 'sd_1',
+      scannedAt: new Date('2026-06-01T00:00:00Z'),
+      verification: { valid: true, ticketId: 'tkt_1' },
+      requireVerifiedTicketId: true,
+    });
+
+    expect(result).toEqual({
+      outcome: 'wrong_list',
+      ticketId: 'tkt_1',
+      qrHash: 'hash_1',
+      metadata: {
+        reason: 'wrong_event_occurrence',
+        expectedEventOccurrenceId: 'occ_allowed',
+        actualEventOccurrenceId: 'occ_other',
+      },
+    });
+    expect(ticketRepo.checkInIfValid).not.toHaveBeenCalled();
+  });
+
   it('accepts valid tickets only when the atomic check-in wins', async () => {
     const ticketRepo = repo(ticket(), true);
     const result = await processScan({
@@ -352,6 +377,18 @@ describe('buildOfflineManifest', () => {
     expect(verifyOfflineManifestSignature(tampered)).toBe(false);
   });
 
+  it('rejects malformed manifest signatures', () => {
+    const manifest = buildOfflineManifest({
+      eventId: 'evt_1',
+      checkInListId: 'cil_1',
+      rows: [],
+    });
+
+    for (const signature of ['not-hex', 'a'.repeat(63), 'a'.repeat(65), 'g'.repeat(64)]) {
+      expect(verifyOfflineManifestSignature({ ...manifest, signature })).toBe(false);
+    }
+  });
+
   it('requires an explicit manifest signing secret in production', () => {
     const originalNodeEnv = process.env.NODE_ENV;
     const originalManifestKey = process.env.OFFLINE_MANIFEST_SIGNING_KEY;
@@ -452,6 +489,88 @@ describe('offline sync endpoint', () => {
         }),
       ]),
     );
+
+    await app.close();
+  });
+
+  it('logs same-event wrong-occurrence offline scans as invalid without checking in the ticket', async () => {
+    const principal: Principal = {
+      type: 'mobile_device',
+      id: 'sd_public',
+      tenantId: 'tnt_1',
+      organizationIds: ['org_1'],
+      scopes: ['checkins.write'],
+      eventIds: ['evt_1'],
+    };
+    const { db, inserts, updates } = buildOfflineSyncMockDb({
+      list: {
+        id: 'cil_1',
+        event_id: 'evt_1',
+        event_occurrence_id: 'occ_allowed',
+        ticket_type_ids: JSON.stringify(['tt_allowed']),
+        status: 'active',
+      },
+      ticket: {
+        id: 'tkt_1',
+        event_id: 'evt_1',
+        event_occurrence_id: 'occ_other',
+        ticket_type_id: 'tt_allowed',
+        qr_hash: 'hash_1',
+        status: 'valid',
+      },
+    });
+    const app = Fastify();
+    app.decorate('context', {
+      db,
+      pricingEngine: {},
+      inventoryService: {},
+      qrService: {},
+      authService: {},
+      temporalClient: {},
+    } as unknown as AppContext);
+    app.addHook('onRequest', async (request) => {
+      request.principal = principal;
+    });
+    await app.register(checkInRoutes);
+
+    const response = await app.inject({
+      method: 'POST',
+      url: '/check-ins/sync',
+      headers: { 'Idempotency-Key': 'idem_sync_wrong_occurrence' },
+      payload: {
+        checkInListId: 'cil_1',
+        deviceId: 'sd_public',
+        scans: [{ qrHash: 'hash_1', scannedAt: '2026-06-01T12:00:00.000Z', offline: true }],
+      },
+    });
+
+    expect(response.statusCode).toBe(200);
+    const body = response.json();
+    expect(body).toMatchObject({
+      accepted: 0,
+      duplicates: 0,
+      invalid: 1,
+      results: [{ qrHash: 'hash_1', outcome: 'wrong_list' }],
+    });
+    expect(updates).not.toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          table: 'tickets',
+          values: expect.objectContaining({ checked_in_by_device_id: 'sd_public' }),
+        }),
+      ]),
+    );
+    const scanLogInsert = inserts.find((insert) => insert.table === 'scan_logs');
+    expect(scanLogInsert?.values).toMatchObject({
+      device_id: 'sd_public',
+      outcome: 'wrong_list',
+      metadata: expect.any(String),
+    });
+    expect(JSON.parse(scanLogInsert?.values.metadata as string)).toEqual({
+      reason: 'wrong_event_occurrence',
+      expectedEventOccurrenceId: 'occ_allowed',
+      actualEventOccurrenceId: 'occ_other',
+    });
 
     await app.close();
   });

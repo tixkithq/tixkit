@@ -57,6 +57,21 @@ describe('Check-in scan result', () => {
     }
   });
 
+  it('trims pasted QR payloads before matching tickets', async () => {
+    const result = await adminApi.scanTicket({
+      eventId: 'evt_demo_002',
+      qrPayload: '  tkt_003  ',
+    });
+
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.data.status).toBe('accepted');
+      if (result.data.status === 'accepted') {
+        expect(result.data.attendee?.name).toBe('Bob Smith');
+      }
+    }
+  });
+
   it('includes scannedAt timestamp in all results', async () => {
     const result = await adminApi.scanTicket({
       eventId: 'evt_demo_001',
@@ -92,6 +107,23 @@ describe('Check-in scan result', () => {
       status: 'duplicate',
       message: 'Check-in duplicate',
       scannedAt: '2026-06-27T12:01:00.000Z',
+    });
+  });
+
+  it('normalizes live wrong-list scan responses for the scanner UI', () => {
+    const result = normalizeLiveCheckInScanResult(
+      {
+        outcome: 'wrong_list',
+        ticketId: 'tkt_live_001',
+        message: 'Ticket is not valid for this list',
+      },
+      '2026-06-27T12:01:30.000Z',
+    );
+
+    expect(result).toEqual({
+      status: 'wrong_list',
+      message: 'Ticket is not valid for this list',
+      scannedAt: '2026-06-27T12:01:30.000Z',
     });
   });
 

@@ -588,7 +588,7 @@ export type CheckInScanResult =
       scannedAt: string;
     }
   | {
-      status: 'duplicate' | 'invalid' | 'revoked' | 'wrong_event';
+      status: 'duplicate' | 'invalid' | 'revoked' | 'wrong_event' | 'wrong_list';
       message: string;
       attendee?: AdminAttendeeListItem;
       scannedAt: string;
@@ -1657,11 +1657,38 @@ function parseJsonRecord(value: unknown): Record<string, unknown> {
   }
 }
 
-function newIdempotencyKey(prefix: string): string {
-  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
-    return `${prefix}_${crypto.randomUUID()}`;
+function cryptoRandomHex(byteLength: number): string | undefined {
+  try {
+    const getRandomValues = globalThis.crypto?.getRandomValues?.bind(globalThis.crypto);
+    if (!getRandomValues) return undefined;
+    const bytes = new Uint8Array(byteLength);
+    getRandomValues(bytes);
+    return Array.from(bytes, (byte) => byte.toString(16).padStart(2, '0')).join('');
+  } catch {
+    return undefined;
   }
-  return `${prefix}_${Date.now()}_${Math.random().toString(36).slice(2)}`;
+}
+
+function randomToken(length: number): string {
+  const randomUUID = globalThis.crypto?.randomUUID?.();
+  if (randomUUID) return randomUUID.replaceAll('-', '').slice(0, length);
+
+  const randomHex = cryptoRandomHex(Math.ceil(length / 2));
+  if (randomHex) return randomHex.slice(0, length);
+
+  return `${Date.now().toString(36)}${Math.random().toString(36).slice(2)}`.slice(0, length);
+}
+
+function newFixtureId(prefix: string, length = 9): string {
+  return `${prefix}_${randomToken(length)}`;
+}
+
+function newApiKeySecret(): string {
+  return `tk_live_${randomToken(48)}`;
+}
+
+function newIdempotencyKey(prefix: string): string {
+  return `${prefix}_${randomToken(32)}`;
 }
 
 function normalizeOrganization(value: Record<string, unknown>): AdminOrganization {
@@ -2090,7 +2117,7 @@ function firstDuplicateAccessRule(rules: CreateAccessRuleInput[]) {
 function createFixtureAccessRules(ticketTypeId: string, rules: CreateAccessRuleInput[]) {
   const created = rules.map((input) =>
     normalizeAccessRule({
-      id: `acr_${Math.random().toString(36).slice(2, 11)}`,
+      id: newFixtureId('acr'),
       ticketTypeId,
       type: input.type,
       value: input.value.trim(),
@@ -3035,10 +3062,7 @@ function buildQuery(input?: PageCursor & Record<string, string | number | undefi
 }
 
 function adminIdempotencyKey(prefix: string): string {
-  if (typeof crypto !== 'undefined' && 'randomUUID' in crypto) {
-    return `${prefix}_${crypto.randomUUID()}`;
-  }
-  return `${prefix}_${Date.now()}_${Math.random().toString(36).slice(2)}`;
+  return newIdempotencyKey(prefix);
 }
 
 export const adminApi: AdminApi = {
@@ -3125,7 +3149,7 @@ export const adminApi: AdminApi = {
         const brand = fixtureBrands.find((item) => item.id === brandId);
         if (!brand) return err<AdminBrandDomain>(apiError('not_found', 'Brand not found', 404));
         const brandDomain: AdminBrandDomain = {
-          id: `bdom_${Math.random().toString(36).slice(2, 11)}`,
+          id: newFixtureId('bdom'),
           brandId,
           domain,
           isPrimary,
@@ -3170,7 +3194,7 @@ export const adminApi: AdminApi = {
       },
       () => {
         const member: AdminTeamMember = {
-          id: `tm_${Math.random().toString(36).slice(2, 11)}`,
+          id: newFixtureId('tm'),
           organizationId,
           name: input.email.split('@')[0] || 'Invited member',
           email: input.email,
@@ -3219,10 +3243,10 @@ export const adminApi: AdminApi = {
       },
       () => {
         const account: AdminPaymentAccount = {
-          id: `pa_${Math.random().toString(36).slice(2, 11)}`,
+          id: newFixtureId('pa'),
           organizationId,
           provider: 'stripe_connect',
-          providerAccountId: `acct_${Math.random().toString(36).slice(2, 14)}`,
+          providerAccountId: newFixtureId('acct', 12),
           status: 'pending',
           defaultCurrency: 'USD',
           detailsSubmitted: false,
@@ -3331,7 +3355,7 @@ export const adminApi: AdminApi = {
       },
       () =>
         ok({
-          artifactId: `upl_${Math.random().toString(36).slice(2, 11)}`,
+          artifactId: newFixtureId('upl'),
           status: 'uploaded',
           scanStatus: 'clean',
           downloadUrl: URL.createObjectURL(input.file),
@@ -3419,7 +3443,7 @@ export const adminApi: AdminApi = {
       () => {
         const venue = input.venue ?? { name: input.venueName, address: input.address };
         const newEvent: AdminEventDetail = {
-          id: `evt_${Math.random().toString(36).slice(2, 11)}`,
+          id: newFixtureId('evt'),
           title: input.title,
           slug: input.slug ?? input.title.toLowerCase().replace(/[^a-z0-9]+/g, '-'),
           status: 'draft',
@@ -3697,7 +3721,7 @@ export const adminApi: AdminApi = {
       },
       () => {
         const newTt = normalizeTicketType({
-          id: `tt_${Math.random().toString(36).slice(2, 11)}`,
+          id: newFixtureId('tt'),
           eventId,
           name: input.name,
           description: input.description,
@@ -3772,7 +3796,7 @@ export const adminApi: AdminApi = {
         let inventoryPoolId = input.ticketType.inventoryPoolId;
         if (!inventoryPoolId && input.inventoryPool) {
           const pool: AdminInventoryPool = {
-            id: `ip_${Math.random().toString(36).slice(2, 11)}`,
+            id: newFixtureId('ip'),
             eventId,
             name: input.inventoryPool.name,
             totalCapacity: input.inventoryPool.totalCapacity,
@@ -3798,7 +3822,7 @@ export const adminApi: AdminApi = {
           );
         }
         const newTt = normalizeTicketType({
-          id: `tt_${Math.random().toString(36).slice(2, 11)}`,
+          id: newFixtureId('tt'),
           eventId,
           ...input.ticketType,
           inventoryPoolId,
@@ -3966,7 +3990,7 @@ export const adminApi: AdminApi = {
         }),
       () => {
         const rule: AdminAccessRule = {
-          id: `acr_${Math.random().toString(36).slice(2, 11)}`,
+          id: newFixtureId('acr'),
           ticketTypeId,
           type: input.type,
           value: input.value,
@@ -4024,7 +4048,7 @@ export const adminApi: AdminApi = {
         }),
       () => {
         const pool: AdminInventoryPool = {
-          id: `ip_${Math.random().toString(36).slice(2, 11)}`,
+          id: newFixtureId('ip'),
           eventId,
           name: input.name,
           totalCapacity: input.totalCapacity,
@@ -4079,7 +4103,7 @@ export const adminApi: AdminApi = {
       },
       () => {
         const category = normalizeProductCategory({
-          id: `pcat_${Math.random().toString(36).slice(2, 11)}`,
+          id: newFixtureId('pcat'),
           eventId,
           name: input.name,
           sortOrder: input.sortOrder ?? fixtureProductCategories[eventId]?.length ?? 0,
@@ -4120,7 +4144,7 @@ export const adminApi: AdminApi = {
       },
       () => {
         const product = normalizeProduct({
-          id: `prd_${Math.random().toString(36).slice(2, 11)}`,
+          id: newFixtureId('prd'),
           eventId,
           name: input.name,
           description: input.description,
@@ -4215,7 +4239,7 @@ export const adminApi: AdminApi = {
       () => {
         const question = normalizeQuestion({
           ...input,
-          id: `q_${Math.random().toString(36).slice(2, 11)}`,
+          id: newFixtureId('q'),
           eventId,
           required: input.required ?? false,
           appliesTo: input.appliesTo ?? 'attendee',
@@ -4471,6 +4495,9 @@ export const adminApi: AdminApi = {
   },
 
   async scanTicket(input) {
+    const qrPayload = input.qrPayload.trim();
+    const scannedAt = input.scannedAt ?? new Date().toISOString();
+
     return withFixture(
       async () => {
         if (!input.checkInListId) {
@@ -4488,19 +4515,17 @@ export const adminApi: AdminApi = {
           method: 'POST',
           body: JSON.stringify({
             checkInListId: input.checkInListId,
-            qrPayload: input.qrPayload,
-            scannedAt: input.scannedAt ?? new Date().toISOString(),
+            qrPayload,
+            scannedAt,
             deviceId: input.deviceId,
           }),
         });
-        return result.ok
-          ? ok(normalizeLiveCheckInScanResult(result.data, input.scannedAt))
-          : result;
+        return result.ok ? ok(normalizeLiveCheckInScanResult(result.data, scannedAt)) : result;
       },
       () => {
         // Simulate scan: find attendee by ticket id in qrPayload
         const attendee = fixtureAttendees.find(
-          (a) => a.eventId === input.eventId && a.ticketId === input.qrPayload,
+          (a) => a.eventId === input.eventId && a.ticketId === qrPayload,
         );
         if (!attendee) {
           return ok<CheckInScanResult>({
@@ -4731,7 +4756,7 @@ export const adminApi: AdminApi = {
       },
       () => {
         const campaign: AdminMessageCampaign = {
-          id: `msg_${Math.random().toString(36).slice(2, 11)}`,
+          id: newFixtureId('msg'),
           eventId,
           name: input.templateKey,
           channel: input.channel === 'both' ? 'email' : input.channel,
@@ -4951,7 +4976,7 @@ export const adminApi: AdminApi = {
       },
       () => {
         const job = normalizeExportJob({
-          exportId: `exp_${Math.random().toString(36).slice(2, 11)}`,
+          exportId: newFixtureId('exp'),
           eventId: input.eventId,
           type: input.type,
           format: input.format,
@@ -5126,10 +5151,10 @@ export const adminApi: AdminApi = {
         });
       },
       () => {
-        const secret = `tk_live_${Math.random().toString(36).slice(2)}${Math.random().toString(36).slice(2)}`;
+        const secret = newApiKeySecret();
         const scopes = input.scopes ?? ['events:read', 'events:write', 'orders:read'];
         const key: AdminApiKey = {
-          id: `key_${Math.random().toString(36).slice(2, 11)}`,
+          id: newFixtureId('key'),
           name: input.name,
           keyPrefix: secret.slice(0, 10),
           createdAt: iso(0),
@@ -5196,7 +5221,7 @@ export const adminApi: AdminApi = {
       },
       () => {
         const endpoint: AdminWebhookEndpoint = {
-          id: `wh_${Math.random().toString(36).slice(2, 11)}`,
+          id: newFixtureId('wh'),
           url: input.url,
           description: input.description,
           events: input.events,
