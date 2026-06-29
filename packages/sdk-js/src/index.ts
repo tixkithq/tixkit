@@ -1200,7 +1200,7 @@ export class TixkitClient {
     }
 
     this.apiKey = config.apiKey;
-    this.apiBaseUrl = config.apiBaseUrl ?? 'https://api.tixkit.com';
+    this.apiBaseUrl = normalizeApiBaseUrl(config.apiBaseUrl ?? 'https://api.tixkit.com');
     this.apiVersion = config.apiVersion ?? TIXKIT_API_VERSION;
     this.timeout = config.timeout ?? 30000;
     this.maxRetries = config.maxRetries ?? 3;
@@ -1328,6 +1328,10 @@ export class TixkitClient {
 function isBrowserRuntime(): boolean {
   const runtime = globalThis as typeof globalThis & { window?: unknown; document?: unknown };
   return runtime.window !== undefined && runtime.document !== undefined;
+}
+
+function normalizeApiBaseUrl(value: string): string {
+  return value.replace(/\/+$/, '');
 }
 
 function looksLikeSecretApiKey(value: string): boolean {

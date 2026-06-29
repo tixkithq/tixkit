@@ -64,6 +64,19 @@ describe('TixkitClient', () => {
     expect(client).toBeDefined();
   });
 
+  it('normalizes trailing slashes from custom API base URLs', async () => {
+    const fetchMock = mockFetch(200, { data: [], nextCursor: null });
+    const client = new TixkitClient({
+      apiKey: 'tk_test_123',
+      apiBaseUrl: 'https://api.test///',
+      maxRetries: 0,
+    });
+
+    await client.events.list();
+
+    expect(getCall(fetchMock).url).toBe('https://api.test/v1/events');
+  });
+
   it('TixkitApiError should have correct properties', () => {
     const error = new TixkitApiError('NOT_FOUND', 'Resource not found', 404, 'req_123', {
       resource: 'event',
