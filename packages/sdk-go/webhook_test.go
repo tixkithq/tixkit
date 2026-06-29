@@ -52,3 +52,49 @@ func TestWebhookSignatureRejectsBadAndExpiredSignatures(t *testing.T) {
 		t.Fatal("expected tolerance-disabled signature to verify")
 	}
 }
+
+func TestWebhookSignatureRejectsMalformedHeaders(t *testing.T) {
+	t.Parallel()
+
+	body := []byte(`{"id":"whe_123"}`)
+	secret := "whsec_test"
+	timestamp := int64(1_775_000_000)
+	signature := WebhookSignature(body, secret, timestamp)
+	clock := WithWebhookClock(func() time.Time { return time.Unix(timestamp, 0) })
+
+	tests := []struct {
+		name   string
+		header string
+	}{
+		{name: "empty", header: ""},
+		{name: "missing timestamp", header: "v1=" + signature},
+		{name: "missing signature", header: "t=1775000000"},
+		{name: "invalid timestamp", header: "t=not-a-number,v1=" + signature},
+		{name: "non hex signature", header: "t=1775000000,v1=not-hex"},
+		{name: "short signature", header: "t=1775000000,v1=" + signature[:60]},
+		{name: "long signature", header: "t=1775000000,v1=" + signature + "00"},
+	}
+
+	for _, tt := range tests {
+		tt := tt
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			if VerifyWebhookSignature(body, tt.header, secret, clock) {
+				t.Fatalf("malformed header verified: %q", tt.header)
+			}
+		})
+	}
+}
+
+func TestWebhookSignatureAcceptsWhitespaceAndIgnoresUnknownHeaderParts(t *testing.T) {
+	t.Parallel()
+
+	body := []byte(`{"id":"whe_123","type":"order.paid"}`)
+	secret := "whsec_test"
+	timestamp := int64(1_775_000_000)
+	header := " v0=ignored, t=1775000000, ignored, v1=" + WebhookSignature(body, secret, timestamp) + " "
+
+	if !VerifyWebhookSignature(body, header, secret, WithWebhookClock(func() time.Time { return time.Unix(timestamp, 0) })) {
+		t.Fatal("expected whitespace-padded header with unknown parts to verify")
+	}
+}

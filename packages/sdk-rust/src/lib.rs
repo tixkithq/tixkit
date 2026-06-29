@@ -1431,6 +1431,96 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn does_not_retry_non_idempotent_post_server_errors() {
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/v1/events"))
+            .respond_with(ResponseTemplate::new(503).set_body_json(json!({
+                "error": {"code": "TEMPORARY", "message": "try again", "requestId": "req_create"}
+            })))
+            .mount(&server)
+            .await;
+
+        let error = TixkitClient::builder()
+            .api_base_url(server.uri())
+            .max_retries(3)
+            .retry_backoff(Duration::from_millis(1))
+            .build()
+            .expect("client")
+            .events()
+            .create(json!({"title": "Box Office"}))
+            .await
+            .expect_err("non-idempotent create fails once");
+
+        match error {
+            TixkitError::Api(source) => {
+                assert_eq!(source.status, StatusCode::SERVICE_UNAVAILABLE);
+                assert_eq!(source.code, "TEMPORARY");
+                assert_eq!(source.request_id, "req_create");
+            }
+            other => panic!("unexpected error: {other:?}"),
+        }
+        let create_attempts = server
+            .received_requests()
+            .await
+            .expect("recorded requests")
+            .iter()
+            .filter(|request| request.method == "POST" && request.url.path() == "/v1/events")
+            .count();
+        assert_eq!(create_attempts, 1);
+    }
+
+    #[tokio::test]
+    async fn returns_last_retryable_api_error_after_retry_budget_is_exhausted() {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/v1/events/evt_retry"))
+            .respond_with(ResponseTemplate::new(503).set_body_json(json!({
+                "error": {"code": "TEMPORARY", "message": "first failure", "requestId": "req_503"}
+            })))
+            .up_to_n_times(1)
+            .mount(&server)
+            .await;
+        Mock::given(method("GET"))
+            .and(path("/v1/events/evt_retry"))
+            .respond_with(ResponseTemplate::new(429).set_body_json(json!({
+                "error": {"code": "RATE_LIMITED", "message": "slow down", "requestId": "req_429"}
+            })))
+            .mount(&server)
+            .await;
+
+        let error = TixkitClient::builder()
+            .api_base_url(server.uri())
+            .max_retries(1)
+            .retry_backoff(Duration::from_millis(1))
+            .build()
+            .expect("client")
+            .events()
+            .get("evt_retry")
+            .await
+            .expect_err("retry budget exhausted");
+
+        match error {
+            TixkitError::Api(source) => {
+                assert_eq!(source.status, StatusCode::TOO_MANY_REQUESTS);
+                assert_eq!(source.code, "RATE_LIMITED");
+                assert_eq!(source.request_id, "req_429");
+            }
+            other => panic!("unexpected error: {other:?}"),
+        }
+        let attempts = server
+            .received_requests()
+            .await
+            .expect("recorded requests")
+            .iter()
+            .filter(|request| {
+                request.method == "GET" && request.url.path() == "/v1/events/evt_retry"
+            })
+            .count();
+        assert_eq!(attempts, 2);
+    }
+
+    #[tokio::test]
     async fn maps_api_errors_without_retrying_client_errors() {
         let server = MockServer::start().await;
         Mock::given(method("GET"))
@@ -1501,6 +1591,59 @@ mod tests {
         assert_eq!(
             events.iter().map(|event| &event.id).collect::<Vec<_>>(),
             vec!["evt_1", "evt_2"]
+        );
+    }
+
+    #[tokio::test]
+    async fn streams_large_event_pagination_without_dropping_or_looping() {
+        let server = MockServer::start().await;
+        let page_count = 25;
+        for page in 0..page_count {
+            let event_id = format!("evt_{page:02}");
+            let next_cursor = if page + 1 == page_count {
+                Value::Null
+            } else {
+                json!(format!("cursor_{:02}", page + 1))
+            };
+            let mut mock = Mock::given(method("GET")).and(path("/v1/events"));
+            if page == 0 {
+                mock = mock.and(query_param("limit", "1"));
+            } else {
+                mock = mock.and(query_param("cursor", format!("cursor_{page:02}")));
+            }
+            mock.respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                "items": [{"id": event_id, "title": format!("Event {page:02}")}],
+                "nextCursor": next_cursor
+            })))
+            .up_to_n_times(1)
+            .mount(&server)
+            .await;
+        }
+
+        let events = client(&server)
+            .await
+            .events()
+            .iter(PageParams {
+                cursor: None,
+                limit: Some(1),
+            })
+            .try_collect::<Vec<_>>()
+            .await
+            .expect("events");
+
+        assert_eq!(events.len(), page_count);
+        assert_eq!(
+            events.first().map(|event| event.id.as_str()),
+            Some("evt_00")
+        );
+        assert_eq!(events.last().map(|event| event.id.as_str()), Some("evt_24"));
+        let requests = server.received_requests().await.expect("recorded requests");
+        assert_eq!(
+            requests
+                .iter()
+                .filter(|request| request.method == "GET" && request.url.path() == "/v1/events")
+                .count(),
+            page_count
         );
     }
 
@@ -1588,6 +1731,28 @@ mod tests {
             verify_tixkit_webhook_signature_at(raw, "sha256=001122", secret, timestamp, 300)
                 .is_err()
         );
+    }
+
+    #[test]
+    fn rejects_malformed_tixkit_webhook_signature_headers() {
+        let raw = br#"{"id":"whe_123","type":"order.paid"}"#;
+        let secret = "whsec_test";
+        let timestamp = 1_775_000_000;
+        let signature = tixkit_webhook_signature(raw, secret, timestamp).expect("signature");
+        let invalid_headers = [
+            format!("t=not-a-number,v1={signature}"),
+            format!("t={timestamp},v1=not-hex"),
+            format!("t={timestamp}"),
+            format!("v1={signature}"),
+            format!("t={timestamp},v1={}", &signature[..signature.len() - 2]),
+        ];
+
+        for header in invalid_headers {
+            assert!(
+                verify_tixkit_webhook_signature_at(raw, &header, secret, timestamp, 300).is_err(),
+                "header should fail verification: {header}"
+            );
+        }
     }
 
     fn empty_checkout() -> CreateCheckoutSession {
