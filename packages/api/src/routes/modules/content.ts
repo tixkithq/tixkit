@@ -18,10 +18,18 @@ import {
   ContentRepository,
   EmailProviderRouteRepository,
   EventRepository,
+  SmsProviderRouteRepository,
+  SmsSenderIdentityRepository,
   TicketTypeRepository,
   type Database,
 } from '@tixkit/db';
-import { NotFoundError, ValidationError, type EmailTransport, type Principal } from '@tixkit/domain';
+import {
+  NotFoundError,
+  ValidationError,
+  type EmailTransport,
+  type Principal,
+  type SmsTransport,
+} from '@tixkit/domain';
 import {
   normalizeEventPageDocument,
   renderEventPageDocument,
@@ -32,8 +40,11 @@ import {
 } from '@tixkit/content-event-page';
 import {
   normalizeSmsTemplateDocument,
+  createSmsTestSend,
   renderSmsTemplate,
   validateSmsTemplate,
+  type RenderedSmsTemplate,
+  type SmsTemplateDocument,
 } from '@tixkit/content-message';
 import {
   normalizeEmailTemplateDocument,
@@ -366,8 +377,11 @@ async function renderDocumentPreview(
 type EmailProviderRouteRow = Awaited<
   ReturnType<EmailProviderRouteRepository['findActiveByBrand']>
 >[number];
+type SmsProviderRouteRow = Awaited<
+  ReturnType<SmsProviderRouteRepository['findActiveByBrand']>
+>[number];
 
-function parseAllowedCategories(route: EmailProviderRouteRow): string[] {
+function parseAllowedCategories(route: { allowed_categories: unknown }): string[] {
   if (Array.isArray(route.allowed_categories)) return route.allowed_categories as string[];
   if (typeof route.allowed_categories !== 'string') return [];
   try {
@@ -382,6 +396,19 @@ function selectEmailProviderRoute(
   routes: EmailProviderRouteRow[],
   category: EmailTemplateDocument['settings']['category'],
 ): EmailProviderRouteRow | undefined {
+  return [...routes]
+    .filter((route) => parseAllowedCategories(route).includes(category))
+    // eslint-disable-next-line unicorn/no-array-sort -- sorting a fresh copied array preserves provider priority without mutating repository output.
+    .sort((left, right) => {
+      if (left.is_fallback !== right.is_fallback) return left.is_fallback ? 1 : -1;
+      return Number(left.priority) - Number(right.priority);
+    })[0];
+}
+
+function selectSmsProviderRoute(
+  routes: SmsProviderRouteRow[],
+  category: SmsTemplateDocument['settings']['category'],
+): SmsProviderRouteRow | undefined {
   return [...routes]
     .filter((route) => parseAllowedCategories(route).includes(category))
     // eslint-disable-next-line unicorn/no-array-sort -- sorting a fresh copied array preserves provider priority without mutating repository output.
@@ -429,6 +456,61 @@ async function sendEmailTestThroughProvider(input: {
   if (result.status === 'failed') {
     throw new ValidationError('Email test send provider rejected the message', {
       code: 'email_provider_send_failed',
+      provider: result.provider,
+    });
+  }
+}
+
+async function sendSmsTestThroughProvider(input: {
+  db: Database;
+  document: ContentDocument;
+  version: ContentDocumentVersion;
+  recipient: string;
+  rendered: RenderedSmsTemplate;
+  smsDocument: SmsTemplateDocument;
+  transport: SmsTransport;
+}): Promise<void> {
+  const routes = await new SmsProviderRouteRepository(input.db).findActiveByBrand(
+    input.document.brandId,
+  );
+  const route = selectSmsProviderRoute(routes, input.smsDocument.settings.category);
+  if (!route) {
+    throw new ValidationError('SMS test send requires an active verified provider route', {
+      code: 'sms_provider_route_unavailable',
+      brandId: input.document.brandId,
+    });
+  }
+  const senderIdentity = await new SmsSenderIdentityRepository(input.db).findById(
+    route.sender_identity_id,
+  );
+  if (
+    !senderIdentity ||
+    !senderIdentity.verified ||
+    senderIdentity.brand_id !== input.document.brandId
+  ) {
+    throw new ValidationError('SMS test send requires a verified sender identity', {
+      code: 'sms_sender_identity_unavailable',
+      brandId: input.document.brandId,
+    });
+  }
+
+  const send = createSmsTestSend(input.smsDocument, input.rendered, {
+    tenantId: input.document.tenantId,
+    organizationId: input.document.organizationId,
+    brandId: input.document.brandId,
+    jobId: `ctsms_${ulid()}`,
+    templateVersionId: input.version.id,
+    providerRouteId: route.id,
+    deliveryId: `cts_${ulid()}`,
+    from: senderIdentity.sender,
+    to: input.recipient,
+    idempotencyKey: `content-test-send:${input.document.id}:${input.version.id}:${input.recipient}`,
+    metadata: input.document.eventId ? { eventId: input.document.eventId } : undefined,
+  });
+  const result = await input.transport.send(send);
+  if (result.status === 'failed') {
+    throw new ValidationError('SMS test send provider rejected the message', {
+      code: 'sms_provider_send_failed',
       provider: result.provider,
     });
   }
@@ -844,6 +926,26 @@ export const contentRoutes: FastifyPluginAsync = async (app) => {
         rendered,
         emailDocument,
         transport: app.context.emailTransport,
+      });
+    }
+    if (document.channel === 'sms') {
+      const smsDocument = normalizeSmsTemplateDocument(content.contentJson);
+      if (!smsDocument) {
+        throw new ValidationError('SMS test send requires canonical SMS template JSON', {
+          code: 'invalid_sms_template_document',
+        });
+      }
+      const rendered = renderSmsTemplate(smsDocument, body.context, {
+        optOutToken: body.optOutToken,
+      });
+      await sendSmsTestThroughProvider({
+        db,
+        document,
+        version,
+        recipient: body.recipient,
+        rendered,
+        smsDocument,
+        transport: app.context.smsTransport,
       });
     }
     const send = await repo().recordTestSend({

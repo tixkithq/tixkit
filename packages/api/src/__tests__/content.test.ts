@@ -1,6 +1,14 @@
 import Fastify from 'fastify';
 import { describe, expect, it } from 'vitest';
-import type { EmailTransport, Principal, SendEmailInput, SendEmailResult } from '@tixkit/domain';
+import type {
+  EmailTransport,
+  Principal,
+  SendEmailInput,
+  SendEmailResult,
+  SendSmsInput,
+  SendSmsResult,
+  SmsTransport,
+} from '@tixkit/domain';
 import type { Database } from '@tixkit/db';
 import { REACT_EMAIL_EDITOR_PACKAGE, createDefaultEmailTemplate } from '@tixkit/content-email';
 import { createDefaultEventPageDocument } from '@tixkit/content-event-page';
@@ -21,6 +29,22 @@ class TestCaptureEmailTransport implements EmailTransport {
       deliveryId: input.deliveryId,
       provider: 'capture',
       providerMessageId: 'cap_content_email',
+      status: 'accepted',
+      attemptedFallbackProviders: [],
+      sentAt: '2026-06-29T00:00:00.000Z',
+    };
+  }
+}
+
+class TestCaptureSmsTransport implements SmsTransport {
+  public sent: SendSmsInput[] = [];
+
+  async send(input: SendSmsInput): Promise<SendSmsResult> {
+    this.sent.push(input);
+    return {
+      deliveryId: input.deliveryId,
+      provider: 'capture',
+      providerMessageId: 'cap_content_sms',
       status: 'accepted',
       attemptedFallbackProviders: [],
       sentAt: '2026-06-29T00:00:00.000Z',
@@ -271,6 +295,7 @@ async function setupContentApp(
     authService: {},
     temporalClient: {},
     emailTransport: new TestCaptureEmailTransport(),
+    smsTransport: new TestCaptureSmsTransport(),
     ...overrides,
   } as unknown as AppContext);
   app.addHook('onRequest', async (request) => {
@@ -290,6 +315,7 @@ async function setupPublicContentApp(db: Database) {
     authService: {},
     temporalClient: {},
     emailTransport: new TestCaptureEmailTransport(),
+    smsTransport: new TestCaptureSmsTransport(),
   } as unknown as AppContext);
   await app.register(publicContentRoutes);
   return app;
@@ -733,12 +759,47 @@ describe('content routes', () => {
   });
 
   it('saves, previews, and captures canonical SMS template test sends', async () => {
+    const smsTransport = new TestCaptureSmsTransport();
     const smsDocument = createDefaultSmsTemplate({
       editor: { body: 'Hi {{recipient.name}}, {{event.title}} starts {{event.startsAt}}.' },
       settings: { templateKey: 'event-update', segmentLimit: 2, estimatedCostPerSegmentCents: 4 },
     });
     const { db, inserted } = createContentDb({
       brands: [{ id: 'brd_1', tenant_id: 'tnt_1', organization_id: 'org_1' }],
+      sms_sender_identities: [
+        {
+          id: 'ssi_content_sms',
+          tenant_id: 'tnt_1',
+          brand_id: 'brd_1',
+          sender: '+15550000001',
+          kind: 'phone_number',
+          provider_type: 'capture',
+          provider_sender_id: 'capture-sender',
+          verified: true,
+          verified_at: new Date('2026-06-01T00:00:00.000Z'),
+          created_at: new Date('2026-06-01T00:00:00.000Z'),
+          updated_at: new Date('2026-06-01T00:00:00.000Z'),
+        },
+      ],
+      sms_provider_routes: [
+        {
+          id: 'spr_content_sms',
+          tenant_id: 'tnt_1',
+          brand_id: 'brd_1',
+          provider_type: 'capture',
+          credentials_ref: 'secret://sms/content-message',
+          sender_identity_id: 'ssi_content_sms',
+          priority: 0,
+          is_fallback: false,
+          rate_limit_per_hour: null,
+          allowed_categories: JSON.stringify(['bulk']),
+          status: 'active',
+          smoke_send_verified: true,
+          webhook_url: 'https://api.example.test/webhooks/sms',
+          created_at: new Date('2026-06-01T00:00:00.000Z'),
+          updated_at: new Date('2026-06-01T00:00:00.000Z'),
+        },
+      ],
       content_documents: [
         documentRow({
           id: 'cdoc_sms',
@@ -751,7 +812,7 @@ describe('content routes', () => {
       content_test_sends: [],
       content_render_artifacts: [],
     });
-    const app = await setupContentApp(db, principal);
+    const app = await setupContentApp(db, principal, { smsTransport });
 
     const save = await app.inject({
       method: 'POST',
@@ -803,7 +864,7 @@ describe('content routes', () => {
       url: `/content-documents/cdoc_sms/test-sends`,
       payload: {
         versionId: save.json().id,
-        recipient: '+15550000001',
+        recipient: '+15550000002',
         context: {
           event: { title: 'All Access', startsAt: '2026-07-17 19:00' },
           recipient: { name: 'Ada' },
@@ -815,7 +876,7 @@ describe('content routes', () => {
     expect(capture.json()).toMatchObject({
       testSend: {
         channel: 'sms',
-        recipient: '+15550000001',
+        recipient: '+15550000002',
         status: 'captured',
         renderedText: 'Hi Ada, All Access starts 2026-07-17 19:00. Reply STOP to opt out',
       },
@@ -831,6 +892,22 @@ describe('content routes', () => {
     expect(capture.json().renderArtifact.artifactRef).toBe(
       `content-test-send:${capture.json().testSend.id}`,
     );
+    expect(smsTransport.sent).toHaveLength(1);
+    expect(smsTransport.sent[0]).toMatchObject({
+      tenantId: 'tnt_1',
+      organizationId: 'org_1',
+      brandId: 'brd_1',
+      providerRouteId: 'spr_content_sms',
+      from: '+15550000001',
+      to: '+15550000002',
+      body: preview.json().output.text,
+      notificationType: 'bulk',
+    });
+    expect(smsTransport.sent[0]?.jobId).toMatch(/^ctsms_/);
+    expect(smsTransport.sent[0]?.deliveryId).toMatch(/^cts_/);
+    expect(smsTransport.sent[0]?.idempotencyKey).toBe(
+      `content-test-send:cdoc_sms:${save.json().id}:+15550000002`,
+    );
     expect(inserted).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
@@ -839,7 +916,7 @@ describe('content routes', () => {
         }),
         expect.objectContaining({
           channel: 'sms',
-          recipient: '+15550000001',
+          recipient: '+15550000002',
           status: 'captured',
         }),
         expect.objectContaining({
@@ -851,6 +928,64 @@ describe('content routes', () => {
           document_id: 'cdoc_sms',
           output_type: 'test_send',
           checksum: capture.json().renderArtifact.checksum,
+        }),
+      ]),
+    );
+  });
+
+  it('fails closed for SMS test sends without an active verified provider route', async () => {
+    const smsTransport = new TestCaptureSmsTransport();
+    const smsDocument = createDefaultSmsTemplate({
+      editor: { body: 'Hi {{recipient.name}}, {{event.title}} starts {{event.startsAt}}.' },
+      settings: { templateKey: 'event-update', segmentLimit: 2, estimatedCostPerSegmentCents: 4 },
+    });
+    const { db, inserted } = createContentDb({
+      brands: [{ id: 'brd_1', tenant_id: 'tnt_1', organization_id: 'org_1' }],
+      content_documents: [
+        documentRow({
+          id: 'cdoc_sms',
+          channel: 'sms',
+          key: 'event-update',
+          name: 'Event SMS',
+        }),
+      ],
+      content_document_versions: [
+        versionRow({
+          id: 'cver_sms',
+          document_id: 'cdoc_sms',
+          content_json: JSON.stringify(smsDocument),
+          rendered_text: smsDocument.editor.body,
+          validation: JSON.stringify({ valid: true, severity: 'info', issues: [] }),
+        }),
+      ],
+      content_test_sends: [],
+      content_render_artifacts: [],
+    });
+    const app = await setupContentApp(db, principal, { smsTransport });
+
+    const response = await app.inject({
+      method: 'POST',
+      url: '/content-documents/cdoc_sms/test-sends',
+      payload: {
+        versionId: 'cver_sms',
+        recipient: '+15550000002',
+        context: {
+          event: { title: 'All Access', startsAt: '2026-07-17 19:00' },
+          recipient: { name: 'Ada' },
+        },
+      },
+    });
+
+    expect(response.statusCode).toBe(400);
+    expect(response.json().message ?? response.json().error?.message).toContain(
+      'active verified provider route',
+    );
+    expect(smsTransport.sent).toHaveLength(0);
+    expect(inserted).not.toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          channel: 'sms',
+          recipient: '+15550000002',
         }),
       ]),
     );
