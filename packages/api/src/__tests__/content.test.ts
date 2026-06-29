@@ -1,6 +1,6 @@
 import Fastify from 'fastify';
 import { describe, expect, it } from 'vitest';
-import type { Principal } from '@tixkit/domain';
+import type { EmailTransport, Principal, SendEmailInput, SendEmailResult } from '@tixkit/domain';
 import type { Database } from '@tixkit/db';
 import { REACT_EMAIL_EDITOR_PACKAGE, createDefaultEmailTemplate } from '@tixkit/content-email';
 import { createDefaultEventPageDocument } from '@tixkit/content-event-page';
@@ -10,6 +10,22 @@ import { contentRoutes, publicContentRoutes } from '../routes/modules/content.js
 
 function valueFor(row: Record<string, unknown>, column: string) {
   return row[column] ?? row[column.split('.').at(-1) ?? column];
+}
+
+class TestCaptureEmailTransport implements EmailTransport {
+  public sent: SendEmailInput[] = [];
+
+  async send(input: SendEmailInput): Promise<SendEmailResult> {
+    this.sent.push(input);
+    return {
+      deliveryId: input.deliveryId,
+      provider: 'capture',
+      providerMessageId: 'cap_content_email',
+      status: 'accepted',
+      attemptedFallbackProviders: [],
+      sentAt: '2026-06-29T00:00:00.000Z',
+    };
+  }
 }
 
 function createContentDb(seed: Record<string, Record<string, unknown>[]>) {
@@ -241,7 +257,11 @@ function eventPageJson(
   return createDefaultEventPageDocument(overrides);
 }
 
-async function setupContentApp(db: Database, principal: Principal) {
+async function setupContentApp(
+  db: Database,
+  principal: Principal,
+  overrides: Partial<AppContext> = {},
+) {
   const app = Fastify();
   app.decorate('context', {
     db,
@@ -250,6 +270,8 @@ async function setupContentApp(db: Database, principal: Principal) {
     qrService: {},
     authService: {},
     temporalClient: {},
+    emailTransport: new TestCaptureEmailTransport(),
+    ...overrides,
   } as unknown as AppContext);
   app.addHook('onRequest', async (request) => {
     request.principal = principal;
@@ -267,6 +289,7 @@ async function setupPublicContentApp(db: Database) {
     qrService: {},
     authService: {},
     temporalClient: {},
+    emailTransport: new TestCaptureEmailTransport(),
   } as unknown as AppContext);
   await app.register(publicContentRoutes);
   return app;
@@ -363,6 +386,7 @@ describe('content routes', () => {
   });
 
   it('saves, previews, and captures canonical email template test sends', async () => {
+    const emailTransport = new TestCaptureEmailTransport();
     const emailDocument = emailDocumentJson({
       settings: {
         templateKey: 'order-confirmed',
@@ -375,12 +399,30 @@ describe('content routes', () => {
     });
     const { db, inserted } = createContentDb({
       brands: [{ id: 'brd_1', tenant_id: 'tnt_1', organization_id: 'org_1' }],
+      email_provider_routes: [
+        {
+          id: 'epr_content_email',
+          tenant_id: 'tnt_1',
+          brand_id: 'brd_1',
+          provider_type: 'resend',
+          credentials_ref: 'secret://resend/content-email',
+          sender_domain: 'example.test',
+          priority: 0,
+          is_fallback: false,
+          rate_limit_per_hour: null,
+          allowed_categories: JSON.stringify(['transactional']),
+          status: 'active',
+          smoke_send_verified: true,
+          created_at: new Date('2026-06-01T00:00:00.000Z'),
+          updated_at: new Date('2026-06-01T00:00:00.000Z'),
+        },
+      ],
       content_documents: [documentRow()],
       content_document_versions: [],
       content_test_sends: [],
       content_render_artifacts: [],
     });
-    const app = await setupContentApp(db, principal);
+    const app = await setupContentApp(db, principal, { emailTransport });
 
     const save = await app.inject({
       method: 'POST',
@@ -462,6 +504,26 @@ describe('content routes', () => {
       },
     });
     expect(capture.json().renderArtifact.checksum).toBe(preview.json().renderArtifact.checksum);
+    expect(emailTransport.sent).toHaveLength(1);
+    expect(emailTransport.sent[0]).toMatchObject({
+      tenantId: 'tnt_1',
+      organizationId: 'org_1',
+      brandId: 'brd_1',
+      templateKey: 'order-confirmed',
+      templateVersionId: save.json().id,
+      providerRouteId: 'epr_content_email',
+      from: { email: 'tickets@example.test' },
+      to: [{ email: 'ada@example.test' }],
+      subject: 'Tickets for All Access',
+      html: preview.json().output.html,
+      text: preview.json().output.text,
+      metadata: {
+        notificationType: 'transactional',
+      },
+    });
+    expect(emailTransport.sent[0]?.idempotencyKey).toBe(
+      `content-test-send:cdoc_1:${save.json().id}:ada@example.test`,
+    );
     expect(inserted).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
@@ -528,6 +590,46 @@ describe('content routes', () => {
     expect(invalidTestSend.statusCode).toBe(400);
     expect(invalidTestSend.json().message ?? invalidTestSend.json().error?.message).toContain(
       'Email test send has render blockers',
+    );
+  });
+
+  it('fails closed for valid email test sends without an active verified provider route', async () => {
+    const { db, inserted } = createContentDb({
+      brands: [{ id: 'brd_1', tenant_id: 'tnt_1', organization_id: 'org_1' }],
+      content_documents: [documentRow()],
+      content_document_versions: [versionRow()],
+      content_test_sends: [],
+      content_render_artifacts: [],
+    });
+    const app = await setupContentApp(db, principal);
+
+    const response = await app.inject({
+      method: 'POST',
+      url: '/content-documents/cdoc_1/test-sends',
+      payload: {
+        versionId: 'cver_1',
+        recipient: 'ada@example.test',
+        context: {
+          event: { title: 'All Access', checkoutUrl: 'https://checkout.example.test' },
+          brand: { name: 'Tixkit', supportUrl: 'https://help.example.test/preferences' },
+          recipient: { name: 'Ada' },
+          ticket: { type: 'General Admission' },
+          order: { total: '$35.00' },
+        },
+      },
+    });
+
+    expect(response.statusCode).toBe(400);
+    expect(response.json().message ?? response.json().error?.message).toContain(
+      'active verified provider route',
+    );
+    expect(inserted).not.toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          channel: 'email',
+          recipient: 'ada@example.test',
+        }),
+      ]),
     );
   });
 

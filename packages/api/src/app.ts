@@ -2,6 +2,7 @@ import Fastify, { type FastifyInstance } from 'fastify';
 import cors from '@fastify/cors';
 import helmet from '@fastify/helmet';
 import rateLimit from '@fastify/rate-limit';
+import { ulid } from 'ulid';
 import { createDb, type Database } from '@tixkit/db';
 import { pinoRedactionPaths, redactErrorFields, redactString } from '@tixkit/shared';
 import { config } from './config/index.js';
@@ -41,6 +42,7 @@ import {
   registerObservability,
 } from './observability.js';
 import type Stripe from 'stripe';
+import type { EmailTransport, SendEmailInput, SendEmailResult } from '@tixkit/domain';
 
 type CorsOriginCallback = (error: Error | null, allow: boolean) => void;
 
@@ -51,8 +53,22 @@ export type AppContext = {
   qrService: QrService;
   authService: AuthProvider;
   temporalClient: TemporalClient;
+  emailTransport: EmailTransport;
   stripe?: Stripe;
 };
+
+class ApiCaptureEmailTransport implements EmailTransport {
+  async send(input: SendEmailInput): Promise<SendEmailResult> {
+    return {
+      deliveryId: input.deliveryId,
+      provider: 'capture',
+      providerMessageId: `cap_${ulid()}`,
+      status: 'accepted',
+      attemptedFallbackProviders: [],
+      sentAt: new Date().toISOString(),
+    };
+  }
+}
 
 export function createCorsOriginValidator(allowedOrigins: readonly string[]) {
   const allowed = new Set(allowedOrigins);
@@ -152,6 +168,7 @@ export async function buildApp(): Promise<FastifyInstance> {
   const pricingEngine = new PricingEngine();
   const inventoryService = new InventoryService(db);
   const qrService = new QrService();
+  const emailTransport = new ApiCaptureEmailTransport();
   const authService = createAuthProvider(
     {
       provider: config.authProvider,
@@ -175,6 +192,7 @@ export async function buildApp(): Promise<FastifyInstance> {
     qrService,
     authService,
     temporalClient,
+    emailTransport,
   };
   app.decorate('context', ctx);
   registerErrorHandler(app);
