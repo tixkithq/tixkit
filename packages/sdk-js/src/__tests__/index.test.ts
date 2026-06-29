@@ -991,6 +991,58 @@ describe('TixkitClient new resource methods', () => {
     );
   });
 
+  it('content testSend returns render artifact metadata from the documented path', async () => {
+    const fm = mockFetch(202, {
+      testSend: {
+        id: 'ctsend_1',
+        tenantId: 'tnt_1',
+        documentId: 'cdoc_1',
+        versionId: 'cver_1',
+        channel: 'sms',
+        recipient: '+15550000001',
+        status: 'captured',
+        renderedText: 'Hi Ada',
+        createdAt: '2026-06-29T00:00:00.000Z',
+      },
+      output: { text: 'Hi Ada', segments: 1 },
+      renderArtifact: {
+        id: 'cra_1',
+        tenantId: 'tnt_1',
+        documentId: 'cdoc_1',
+        versionId: 'cver_1',
+        channel: 'sms',
+        outputType: 'test_send',
+        artifactRef: 'content-test-send:ctsend_1',
+        checksum: 'a'.repeat(64),
+        createdAt: '2026-06-29T00:00:00.000Z',
+      },
+    });
+    const c = new TixkitClient({
+      apiKey: '***********',
+      apiBaseUrl: 'https://api.test',
+      maxRetries: 0,
+    });
+
+    const result = await c.content.testSend('cdoc_1', {
+      versionId: 'cver_1',
+      recipient: '+15550000001',
+      context: { recipient: { name: 'Ada' } },
+    });
+
+    expect(getCall(fm).url).toBe('https://api.test/v1/content-documents/cdoc_1/test-sends');
+    expect(getCall(fm).method).toBe('POST');
+    expect(JSON.parse(getCall(fm).body)).toEqual({
+      versionId: 'cver_1',
+      recipient: '+15550000001',
+      context: { recipient: { name: 'Ada' } },
+    });
+    expect(result.renderArtifact).toMatchObject({
+      outputType: 'test_send',
+      artifactRef: 'content-test-send:ctsend_1',
+      checksum: 'a'.repeat(64),
+    });
+  });
+
   it('messages.getCampaign sends GET', async () => {
     const fm = mockFetch(200, {
       id: 'cmp_1',

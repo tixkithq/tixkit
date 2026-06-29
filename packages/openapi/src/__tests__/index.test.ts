@@ -176,6 +176,20 @@ describe('openApiSpec', () => {
     expect(openApiSpec.components.schemas.ContentRenderOutput.properties.segments).toMatchObject({
       type: 'integer',
     });
+    expect(openApiSpec.components.schemas.ContentPreview.properties.renderArtifact).toEqual({
+      $ref: '#/components/schemas/ContentRenderArtifact',
+    });
+    expect(openApiSpec.components.schemas.ContentRenderArtifact.required).toEqual([
+      'id',
+      'tenantId',
+      'documentId',
+      'versionId',
+      'channel',
+      'outputType',
+      'artifactRef',
+      'checksum',
+      'createdAt',
+    ]);
     expect(openApiSpec.components.schemas.SmsTemplateDocument.properties.editor.properties.provider.enum).toEqual([
       '@tixkit/content-message/sms-composer',
     ]);
@@ -199,6 +213,11 @@ describe('openApiSpec', () => {
         'application/json'
       ].schema.required,
     ).toEqual(['document', 'versions']);
+    expect(
+      openApiSpec.paths['/content-documents/{documentId}/test-sends'].post.responses['202'].content[
+        'application/json'
+      ].schema.required,
+    ).toEqual(['testSend', 'output', 'renderArtifact']);
     expect(
       openApiSpec.paths['/public/events/{eventId}/content-page'].get.responses['200'].content[
         'application/json'
