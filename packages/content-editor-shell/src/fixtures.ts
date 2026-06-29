@@ -152,8 +152,19 @@ function insertActionsForChannel(channel: ContentChannel): ContentEditorInsertAc
     return [
       { id: 'text', label: 'Text', icon: 'text' },
       { id: 'image', label: 'Image', icon: 'image' },
+      { id: 'gallery', label: 'Gallery', icon: 'image' },
+      { id: 'details', label: 'Details', icon: 'calendar' },
       { id: 'tickets', label: 'Tickets', icon: 'ticket' },
+      { id: 'products', label: 'Add-ons', icon: 'ticket' },
+      { id: 'schedule', label: 'Schedule', icon: 'calendar' },
       { id: 'venue', label: 'Venue', icon: 'map' },
+      { id: 'faq', label: 'FAQ', icon: 'shield' },
+      { id: 'sponsors', label: 'Sponsors', icon: 'image' },
+      { id: 'hosts', label: 'Hosts', icon: 'variable' },
+      { id: 'button', label: 'Button', icon: 'link' },
+      { id: 'divider', label: 'Divider', icon: 'code' },
+      { id: 'social', label: 'Social', icon: 'link' },
+      { id: 'embed', label: 'Embed', icon: 'code' },
     ];
   }
   if (channel === 'sms') {

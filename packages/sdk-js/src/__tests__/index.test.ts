@@ -897,6 +897,22 @@ describe('TixkitClient new resource methods', () => {
     expect(getCall(fm, 1).url).toBe(
       'https://api.test/v1/public/events/evt_1/content-page?locale=en',
     );
+
+    await c.public.getEventPage('evt_1', { locale: 'en' });
+    expect(getCall(fm, 2).url).toBe('https://api.test/v1/public/events/evt_1/page?locale=en');
+
+    await c.public.getEventPageBySlug('all-access', {
+      host: 'events.example.com',
+      locale: 'en',
+    });
+    expect(getCall(fm, 3).url).toBe(
+      'https://api.test/v1/public/events/by-slug/all-access/page?host=events.example.com&locale=en',
+    );
+
+    await c.public.getEventDiscoveryCard('evt_1');
+    expect(getCall(fm, 4).url).toBe(
+      'https://api.test/v1/public/events/evt_1/discovery-card',
+    );
   });
 
   it('messages.getCampaign sends GET', async () => {

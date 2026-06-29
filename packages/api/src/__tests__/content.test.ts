@@ -2,6 +2,7 @@ import Fastify from 'fastify';
 import { describe, expect, it } from 'vitest';
 import type { Principal } from '@tixkit/domain';
 import type { Database } from '@tixkit/db';
+import { createDefaultEventPageDocument } from '@tixkit/content-event-page';
 import type { AppContext } from '../app.js';
 import { contentRoutes, publicContentRoutes } from '../routes/modules/content.js';
 
@@ -166,6 +167,18 @@ function versionRow(overrides: Record<string, unknown> = {}) {
   };
 }
 
+function eventPageJson(overrides: Parameters<typeof createDefaultEventPageDocument>[0] = {
+  eventId: 'evt_1',
+  eventTitle: 'Published page',
+  eventDescription: 'Preview copy',
+  startsAt: '2026-07-17T19:00:00.000Z',
+  timezone: 'America/Chicago',
+  venue: { name: 'The Salt Shed', city: 'Chicago' },
+  checkoutUrl: 'https://checkout.tixkit.com/checkout?eventId=evt_1',
+}) {
+  return createDefaultEventPageDocument(overrides);
+}
+
 async function setupContentApp(db: Database, principal: Principal) {
   const app = Fastify();
   app.decorate('context', {
@@ -256,7 +269,7 @@ describe('content routes', () => {
     });
   });
 
-  it('returns an allowlisted public event content page without internal lifecycle fields', async () => {
+  it('returns a rendered public event page from canonical content JSON without lifecycle fields', async () => {
     const { db } = createContentDb({
       events: [
         {
@@ -264,7 +277,39 @@ describe('content routes', () => {
           tenant_id: 'tnt_1',
           organization_id: 'org_1',
           brand_id: 'brd_1',
+          slug: 'published-page',
+          title: 'Published page',
           status: 'published',
+          visibility: 'public',
+          starts_at: new Date('2026-07-17T19:00:00.000Z'),
+          ends_at: null,
+          timezone: 'America/Chicago',
+          venue: JSON.stringify({ name: 'The Salt Shed', city: 'Chicago' }),
+        },
+      ],
+      ticket_types: [
+        {
+          id: 'tt_ga',
+          event_id: 'evt_1',
+          name: 'General Admission',
+          description: 'Standing room',
+          kind: 'paid',
+          status: 'active',
+          visibility: 'public',
+          currency: 'USD',
+          price_cents: 3500,
+          minimum_price_cents: null,
+        },
+        {
+          id: 'tt_hidden',
+          event_id: 'evt_1',
+          name: 'Hidden comp',
+          kind: 'free',
+          status: 'active',
+          visibility: 'hidden',
+          currency: 'USD',
+          price_cents: 0,
+          minimum_price_cents: null,
         },
       ],
       content_documents: [
@@ -287,9 +332,9 @@ describe('content routes', () => {
           status: 'published',
           subject: 'Published page',
           preview_text: 'Preview copy',
-          content_json: JSON.stringify({ privateEditorState: true }),
-          rendered_html: '<main>Published page</main>',
-          rendered_text: 'Published page',
+          content_json: JSON.stringify(eventPageJson()),
+          rendered_html: '<script>alert(1)</script><main>stored html must not render</main>',
+          rendered_text: 'stored text must not render',
           variables: JSON.stringify([{ key: 'buyer.name', required: false }]),
           validation: JSON.stringify({ valid: true, severity: 'warning', issues: [] }),
           created_by: 'usr_private',
@@ -305,7 +350,7 @@ describe('content routes', () => {
     });
 
     expect(response.statusCode).toBe(200);
-    expect(response.json()).toEqual({
+    expect(response.json()).toMatchObject({
       document: {
         eventId: 'evt_1',
         channel: 'event_page',
@@ -318,11 +363,20 @@ describe('content routes', () => {
         versionNumber: 3,
         subject: 'Published page',
         previewText: 'Preview copy',
-        renderedHtml: '<main>Published page</main>',
-        renderedText: 'Published page',
         publishedAt: '2026-06-02T00:00:00.000Z',
       },
+      page: {
+        discovery: {
+          title: 'Published page',
+          summary: 'Preview copy',
+        },
+      },
     });
+    expect(response.json().version.renderedHtml).toContain('class="tixkit-event-page"');
+    expect(response.json().version.renderedHtml).toContain('General Admission');
+    expect(response.json().version.renderedHtml).not.toContain('Hidden comp');
+    expect(response.json().version.renderedHtml).not.toContain('stored html must not render');
+    expect(response.json().version.renderedHtml).not.toContain('<script>');
     expect(JSON.stringify(response.json())).not.toContain('tnt_1');
     expect(JSON.stringify(response.json())).not.toContain('org_1');
     expect(JSON.stringify(response.json())).not.toContain('brd_1');
@@ -332,5 +386,123 @@ describe('content routes', () => {
     expect(JSON.stringify(response.json())).not.toContain('privateEditorState');
     expect(JSON.stringify(response.json())).not.toContain('buyer.name');
     expect(JSON.stringify(response.json())).not.toContain('usr_private');
+  });
+
+  it('serves event pages by verified custom-domain slug and returns structured discovery cards', async () => {
+    const { db } = createContentDb({
+      tenants: [{ id: 'tnt_1', plan: 'pro' }],
+      brand_domains: [
+        {
+          id: 'bd_1',
+          brand_id: 'brd_1',
+          domain: 'events.example.com',
+          is_verified: true,
+          ssl_status: 'active',
+        },
+      ],
+      brands: [{ id: 'brd_1', white_label: true }],
+      events: [
+        {
+          id: 'evt_1',
+          tenant_id: 'tnt_1',
+          organization_id: 'org_1',
+          brand_id: 'brd_1',
+          slug: 'published-page',
+          title: 'Published page',
+          status: 'published',
+          visibility: 'public',
+          starts_at: new Date('2026-07-17T19:00:00.000Z'),
+          ends_at: null,
+          timezone: 'America/Chicago',
+          venue: JSON.stringify({ name: 'The Salt Shed', city: 'Chicago' }),
+        },
+      ],
+      ticket_types: [],
+      content_documents: [
+        documentRow({
+          id: 'cdoc_public',
+          channel: 'event_page',
+          event_id: 'evt_1',
+          key: 'main',
+          name: 'Main event page',
+          status: 'published',
+          published_version_id: 'cver_public',
+        }),
+      ],
+      content_document_versions: [
+        versionRow({
+          id: 'cver_public',
+          document_id: 'cdoc_public',
+          version_number: 1,
+          status: 'published',
+          content_json: JSON.stringify(eventPageJson()),
+          validation: JSON.stringify({ valid: true, severity: 'warning', issues: [] }),
+          published_at: new Date('2026-06-02T00:00:00.000Z'),
+        }),
+      ],
+    });
+    const app = await setupPublicContentApp(db);
+
+    const page = await app.inject({
+      method: 'GET',
+      url: '/public/events/by-slug/published-page/page?host=events.example.com',
+    });
+    const card = await app.inject({
+      method: 'GET',
+      url: '/public/events/evt_1/discovery-card',
+    });
+
+    expect(page.statusCode).toBe(200);
+    expect(page.json().document.eventId).toBe('evt_1');
+    expect(card.statusCode).toBe(200);
+    expect(card.json()).toMatchObject({
+      title: 'Published page',
+      summary: 'Preview copy',
+      startsAt: '2026-07-17T19:00:00.000Z',
+      venueName: 'The Salt Shed',
+    });
+  });
+
+  it('rejects published event-page records that are not canonical event-page JSON', async () => {
+    const { db } = createContentDb({
+      events: [
+        {
+          id: 'evt_1',
+          tenant_id: 'tnt_1',
+          organization_id: 'org_1',
+          brand_id: 'brd_1',
+          title: 'Published page',
+          status: 'published',
+          visibility: 'public',
+        },
+      ],
+      content_documents: [
+        documentRow({
+          id: 'cdoc_public',
+          channel: 'event_page',
+          event_id: 'evt_1',
+          status: 'published',
+          published_version_id: 'cver_public',
+        }),
+      ],
+      content_document_versions: [
+        versionRow({
+          id: 'cver_public',
+          document_id: 'cdoc_public',
+          status: 'published',
+          content_json: JSON.stringify({ privateEditorState: true }),
+          validation: JSON.stringify({ valid: true, severity: 'warning', issues: [] }),
+          published_at: new Date('2026-06-02T00:00:00.000Z'),
+        }),
+      ],
+    });
+    const app = await setupPublicContentApp(db);
+
+    const response = await app.inject({ method: 'GET', url: '/public/events/evt_1/page' });
+
+    expect(response.statusCode).toBe(400);
+    expect(response.json().message ?? response.json().error?.message).toContain(
+      'valid event-page document',
+    );
   });
 });

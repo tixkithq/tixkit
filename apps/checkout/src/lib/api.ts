@@ -65,6 +65,54 @@ export type AvailabilityItem = {
   salesEndAt?: string;
 };
 
+export type PublicEventPageBlock = {
+  type: string;
+  id: string;
+  title?: string;
+  text?: string;
+  html?: string;
+  imageUrl?: string;
+  imageAlt?: string;
+  links?: Array<{ label: string; url: string }>;
+  items?: unknown[];
+};
+
+export type PublicEventDiscoveryCard = {
+  title: string;
+  summary: string;
+  category?: string;
+  tags: string[];
+  imageUrl?: string;
+  startsAt?: string;
+  venueName?: string;
+  publicPath?: string;
+};
+
+export type PublicContentPage = {
+  document: {
+    eventId: string;
+    channel: 'event_page';
+    key: string;
+    name: string;
+    locale: string;
+    updatedAt: string;
+  };
+  version: {
+    versionNumber: number;
+    subject?: string;
+    previewText?: string;
+    renderedHtml?: string;
+    renderedText?: string;
+    publishedAt?: string;
+  };
+  page: {
+    html: string;
+    text: string;
+    headless: PublicEventPageBlock[];
+    discovery: PublicEventDiscoveryCard;
+  };
+};
+
 export type CheckoutQuote = {
   totalCents: number;
   subtotalCents: number;
@@ -362,6 +410,20 @@ export const publicApi = {
     const params = new URLSearchParams({ host });
     return apiRequest<PublicEvent>(
       `/public/events/by-slug/${encodeURIComponent(slug)}?${params.toString()}`,
+      { signal },
+    );
+  },
+
+  async getEventPage(
+    eventId: string,
+    signal?: AbortSignal,
+    locale?: string,
+  ): Promise<PublicContentPage> {
+    const params = new URLSearchParams();
+    if (locale) params.set('locale', locale);
+    const query = params.toString();
+    return apiRequest<PublicContentPage>(
+      `/public/events/${encodeURIComponent(eventId)}/page${query ? `?${query}` : ''}`,
       { signal },
     );
   },

@@ -15,9 +15,18 @@ import {
   BrandRepository,
   ContentRepository,
   EventRepository,
+  TicketTypeRepository,
   type Database,
 } from '@tixkit/db';
 import { NotFoundError, ValidationError, type Principal } from '@tixkit/domain';
+import {
+  normalizeEventPageDocument,
+  renderEventPageDocument,
+  validateEventPageDocument,
+  type EventPageDiscoveryCard,
+  type EventPageHeadlessBlock,
+  type EventPageRenderContext,
+} from '@tixkit/content-event-page';
 import { ClerkAuthService } from '../../auth/clerk.js';
 
 const contentChannelSchema = z.enum(['event_page', 'email', 'sms', 'imessage', 'social_invite']);
@@ -38,6 +47,12 @@ type PublicContentPage = {
     renderedHtml?: string;
     renderedText?: string;
     publishedAt?: string;
+  };
+  page: {
+    html: string;
+    text: string;
+    headless: EventPageHeadlessBlock[];
+    discovery: EventPageDiscoveryCard;
   };
 };
 
@@ -181,6 +196,24 @@ function contentFromVersion(version: ContentDocumentVersion) {
 }
 
 function validationFor(channel: ContentChannel, body: z.infer<typeof saveVersionSchema>) {
+  if (channel === 'event_page') {
+    const document = normalizeEventPageDocument(body.contentJson);
+    if (!document) {
+      return {
+        valid: false,
+        severity: 'error' as const,
+        issues: [
+          {
+            code: 'invalid_event_page_document',
+            message: 'Event-page versions must store canonical TipTap event-page JSON',
+            severity: 'error' as const,
+            field: 'contentJson',
+          },
+        ],
+      };
+    }
+    return validateEventPageDocument(document);
+  }
   const preview =
     channel === 'sms' && body.renderedText
       ? renderPreview(channel, RENDER_CONTRACTS[channel], { text: body.renderedText }, {})
@@ -210,6 +243,7 @@ function renderDocumentPreview(
 function toPublicContentPage(input: {
   document: ContentDocument;
   version: ContentDocumentVersion;
+  context: EventPageRenderContext;
 }): PublicContentPage {
   if (
     input.document.channel !== 'event_page' ||
@@ -217,6 +251,20 @@ function toPublicContentPage(input: {
     input.version.documentId !== input.document.id
   ) {
     throw new NotFoundError('ContentDocument', input.document.eventId ?? input.document.id);
+  }
+  const pageDocument = normalizeEventPageDocument(input.version.contentJson);
+  if (!pageDocument) {
+    throw new ValidationError('Published event page is not a valid event-page document', {
+      code: 'invalid_event_page_document',
+      eventId: input.document.eventId,
+    });
+  }
+  const rendered = renderEventPageDocument(pageDocument, input.context);
+  if (!rendered.validation.valid) {
+    throw new ValidationError('Published event page has render blockers', {
+      issues: rendered.validation.issues,
+      eventId: input.document.eventId,
+    });
   }
 
   return {
@@ -232,11 +280,104 @@ function toPublicContentPage(input: {
       versionNumber: input.version.versionNumber,
       subject: input.version.subject,
       previewText: input.version.previewText,
-      renderedHtml: input.version.renderedHtml,
-      renderedText: input.version.renderedText,
+      renderedHtml: rendered.html,
+      renderedText: rendered.text,
       publishedAt: input.version.publishedAt,
     },
+    page: {
+      html: rendered.html,
+      text: rendered.text,
+      headless: rendered.headless,
+      discovery: rendered.discovery,
+    },
   };
+}
+
+function firstQueryParam(value: unknown): string {
+  return Array.isArray(value) ? String(value[0] ?? '') : typeof value === 'string' ? value : '';
+}
+
+function normalizeHost(value: unknown): string {
+  const host = firstQueryParam(value).trim();
+  if (!host) return '';
+  if (host.includes('://') || /[\s,/?#]/.test(host)) return '';
+  try {
+    const url = new URL(`https://${host}`);
+    if (
+      url.port ||
+      url.username ||
+      url.password ||
+      url.pathname !== '/' ||
+      url.search ||
+      url.hash
+    ) {
+      return '';
+    }
+    return url.hostname.toLowerCase().replace(/\.$/, '');
+  } catch {
+    return '';
+  }
+}
+
+function boolValue(value: unknown): boolean {
+  return value === true || value === 1;
+}
+
+function parseJsonValue<T>(value: unknown, fallback: T): T {
+  if (value === null || value === undefined) return fallback;
+  if (typeof value !== 'string') return value as T;
+  try {
+    return JSON.parse(value) as T;
+  } catch {
+    return fallback;
+  }
+}
+
+function isPubliclyReadableEvent(event: { status: string; visibility?: string | null }): boolean {
+  return event.status === 'published' && event.visibility !== 'private';
+}
+
+function publicEventUrl(eventId: string): string {
+  const base = process.env.PUBLIC_CHECKOUT_URL?.trim() || process.env.CHECKOUT_PUBLIC_URL?.trim();
+  if (!base) return `https://checkout.tixkit.com/e/${encodeURIComponent(eventId)}`;
+  try {
+    return new URL(`/e/${encodeURIComponent(eventId)}`, base).toString();
+  } catch {
+    return `https://checkout.tixkit.com/e/${encodeURIComponent(eventId)}`;
+  }
+}
+
+function checkoutUrl(eventId: string): string {
+  const base = process.env.PUBLIC_CHECKOUT_URL?.trim() || process.env.CHECKOUT_PUBLIC_URL?.trim();
+  if (!base) return `https://checkout.tixkit.com/checkout?eventId=${encodeURIComponent(eventId)}`;
+  try {
+    const url = new URL('/checkout', base);
+    url.searchParams.set('eventId', eventId);
+    return url.toString();
+  } catch {
+    return `https://checkout.tixkit.com/checkout?eventId=${encodeURIComponent(eventId)}`;
+  }
+}
+
+function venueContext(value: unknown): { name?: string; city?: string } {
+  const venue = parseJsonValue<Record<string, unknown> | null>(value, null);
+  if (!venue) return {};
+  return {
+    name: typeof venue.name === 'string' ? venue.name : undefined,
+    city: typeof venue.city === 'string' ? venue.city : undefined,
+  };
+}
+
+function priceLabel(row: { kind: string; price_cents: unknown; minimum_price_cents?: unknown; currency: string }): string {
+  if (row.kind === 'free') return 'Free';
+  const cents = row.kind === 'donation' && row.minimum_price_cents != null
+    ? Number(row.minimum_price_cents)
+    : Number(row.price_cents);
+  const formatted = new Intl.NumberFormat('en-US', {
+    style: 'currency',
+    currency: row.currency,
+  }).format(cents / 100);
+  return row.kind === 'donation' ? `From ${formatted}` : formatted;
 }
 
 export const contentRoutes: FastifyPluginAsync = async (app) => {
@@ -407,17 +548,105 @@ function principalTenant(principal: Principal): string {
 export const publicContentRoutes: FastifyPluginAsync = async (app) => {
   const db = app.context.db;
 
-  app.get('/public/events/:eventId/content-page', async (request) => {
-    const { eventId } = request.params as { eventId: string };
-    const { locale } = request.query as { locale?: string };
+  async function contextForEvent(event: {
+    id: string;
+    title: string;
+    starts_at?: Date | string | null;
+    ends_at?: Date | string | null;
+    timezone?: string | null;
+    venue?: unknown;
+  }): Promise<EventPageRenderContext> {
+    const venue = venueContext(event.venue);
+    const tickets = await new TicketTypeRepository(db).findPublicByEvent(event.id);
+    return {
+      event: {
+        title: event.title,
+        startsAt: event.starts_at ? new Date(event.starts_at).toISOString() : undefined,
+        endsAt: event.ends_at ? new Date(event.ends_at).toISOString() : undefined,
+        timezone: event.timezone ?? undefined,
+        venueName: venue.name,
+        venueCity: venue.city,
+        publicUrl: publicEventUrl(event.id),
+        checkoutUrl: checkoutUrl(event.id),
+      },
+      tickets: tickets.map((ticket) => ({
+        id: ticket.id,
+        name: ticket.name,
+        description: ticket.description ?? undefined,
+        status: ticket.status === 'sold_out' ? 'sold_out' : 'active',
+        priceLabel: priceLabel(ticket),
+      })),
+    };
+  }
+
+  async function loadPublicPage(eventId: string, locale?: string): Promise<PublicContentPage> {
     const event = await new EventRepository(db).findById(eventId);
-    if (!event || event.status !== 'published') throw new NotFoundError('Event', eventId);
+    if (!event || !isPubliclyReadableEvent(event)) throw new NotFoundError('Event', eventId);
     const result = await new ContentRepository(db).findPublishedEventPage({
       tenantId: event.tenant_id,
       eventId,
       locale,
     });
     if (!result) throw new NotFoundError('ContentDocument', eventId);
-    return toPublicContentPage(result);
+    return toPublicContentPage({ ...result, context: await contextForEvent(event) });
+  }
+
+  async function resolveEventIdBySlug(slug: string, host: unknown): Promise<string> {
+    const normalizedHost = normalizeHost(host);
+    if (!normalizedHost) throw new NotFoundError('Event', slug);
+    const brandDomain = await db
+      .selectFrom('brand_domains')
+      .selectAll()
+      .where('domain', '=', normalizedHost)
+      .where('is_verified', '=', true)
+      .where('ssl_status', '=', 'active')
+      .executeTakeFirst();
+    if (
+      !brandDomain ||
+      !boolValue(brandDomain.is_verified) ||
+      brandDomain.ssl_status !== 'active'
+    ) {
+      throw new NotFoundError('Event', slug);
+    }
+    const brand = await db
+      .selectFrom('brands')
+      .selectAll()
+      .where('id', '=', brandDomain.brand_id)
+      .executeTakeFirst();
+    if (!brand || !boolValue(brand.white_label)) throw new NotFoundError('Event', slug);
+    const event = await new EventRepository(db).findByBrandSlug(brandDomain.brand_id as string, slug);
+    if (!event || !isPubliclyReadableEvent(event)) throw new NotFoundError('Event', slug);
+    const tenant = await db
+      .selectFrom('tenants')
+      .selectAll()
+      .where('id', '=', event.tenant_id)
+      .executeTakeFirst();
+    if (!tenant || tenant.plan === 'free') throw new NotFoundError('Event', slug);
+    return event.id;
+  }
+
+  app.get('/public/events/:eventId/page', async (request) => {
+    const { eventId } = request.params as { eventId: string };
+    const { locale } = request.query as { locale?: string };
+    return loadPublicPage(eventId, locale);
+  });
+
+  app.get('/public/events/:eventId/content-page', async (request) => {
+    const { eventId } = request.params as { eventId: string };
+    const { locale } = request.query as { locale?: string };
+    return loadPublicPage(eventId, locale);
+  });
+
+  app.get('/public/events/by-slug/:slug/page', async (request) => {
+    const { slug } = request.params as { slug: string };
+    const query = request.query as { host?: unknown; locale?: string };
+    const eventId = await resolveEventIdBySlug(slug, query.host);
+    return loadPublicPage(eventId, query.locale);
+  });
+
+  app.get('/public/events/:eventId/discovery-card', async (request) => {
+    const { eventId } = request.params as { eventId: string };
+    const { locale } = request.query as { locale?: string };
+    return (await loadPublicPage(eventId, locale)).page.discovery;
   });
 };

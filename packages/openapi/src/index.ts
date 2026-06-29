@@ -241,8 +241,60 @@ export const openApiSpec = {
             },
             required: ['versionNumber'],
           },
+          page: {
+            type: 'object',
+            properties: {
+              html: { type: 'string' },
+              text: { type: 'string' },
+              headless: {
+                type: 'array',
+                items: { $ref: '#/components/schemas/PublicEventPageBlock' },
+              },
+              discovery: { $ref: '#/components/schemas/PublicEventDiscoveryCard' },
+            },
+            required: ['html', 'text', 'headless', 'discovery'],
+          },
         },
-        required: ['document', 'version'],
+        required: ['document', 'version', 'page'],
+      },
+      PublicEventPageBlock: {
+        type: 'object',
+        properties: {
+          type: { type: 'string' },
+          id: { type: 'string' },
+          title: { type: 'string' },
+          text: { type: 'string' },
+          html: { type: 'string' },
+          imageUrl: { type: 'string' },
+          imageAlt: { type: 'string' },
+          links: {
+            type: 'array',
+            items: {
+              type: 'object',
+              properties: {
+                label: { type: 'string' },
+                url: { type: 'string' },
+              },
+              required: ['label', 'url'],
+            },
+          },
+          items: { type: 'array', items: { type: 'object', additionalProperties: true } },
+        },
+        required: ['type', 'id'],
+      },
+      PublicEventDiscoveryCard: {
+        type: 'object',
+        properties: {
+          title: { type: 'string' },
+          summary: { type: 'string' },
+          category: { type: 'string' },
+          tags: { type: 'array', items: { type: 'string' } },
+          imageUrl: { type: 'string' },
+          startsAt: { type: 'string', format: 'date-time' },
+          venueName: { type: 'string' },
+          publicPath: { type: 'string' },
+        },
+        required: ['title', 'summary', 'tags'],
       },
       ContentDocumentPage: {
         type: 'object',
@@ -5504,7 +5556,7 @@ export const openApiSpec = {
         },
       },
     },
-    '/public/events/{eventId}/content-page': {
+    '/public/events/{eventId}/page': {
       get: {
         summary: 'Get the published content-studio event page for an event',
         parameters: [
@@ -5517,6 +5569,76 @@ export const openApiSpec = {
             content: {
               'application/json': {
                 schema: { $ref: '#/components/schemas/PublicContentPage' },
+              },
+            },
+          },
+          '404': {
+            description: 'No published event page',
+            content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } },
+          },
+        },
+      },
+    },
+    '/public/events/{eventId}/content-page': {
+      get: {
+        summary: 'Compatibility alias for the published content-studio event page',
+        parameters: [
+          { name: 'eventId', in: 'path', required: true, schema: { type: 'string' } },
+          { name: 'locale', in: 'query', schema: { type: 'string' } },
+        ],
+        responses: {
+          '200': {
+            description: 'Published public event-page content without editor lifecycle metadata',
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/PublicContentPage' },
+              },
+            },
+          },
+          '404': {
+            description: 'No published event page',
+            content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } },
+          },
+        },
+      },
+    },
+    '/public/events/by-slug/{slug}/page': {
+      get: {
+        summary: 'Get the published content-studio event page for a verified custom-domain slug',
+        parameters: [
+          { name: 'slug', in: 'path', required: true, schema: { type: 'string' } },
+          { name: 'host', in: 'query', required: true, schema: { type: 'string' } },
+          { name: 'locale', in: 'query', schema: { type: 'string' } },
+        ],
+        responses: {
+          '200': {
+            description: 'Published public event-page content for the verified host and slug',
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/PublicContentPage' },
+              },
+            },
+          },
+          '404': {
+            description: 'No verified custom-domain event page',
+            content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } },
+          },
+        },
+      },
+    },
+    '/public/events/{eventId}/discovery-card': {
+      get: {
+        summary: 'Get structured discovery metadata for a published event page',
+        parameters: [
+          { name: 'eventId', in: 'path', required: true, schema: { type: 'string' } },
+          { name: 'locale', in: 'query', schema: { type: 'string' } },
+        ],
+        responses: {
+          '200': {
+            description: 'Structured public discovery metadata',
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/PublicEventDiscoveryCard' },
               },
             },
           },

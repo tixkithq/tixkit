@@ -146,7 +146,10 @@ describe('openApiSpec', () => {
     expect(openApiSpec.paths['/content-documents']).toBeDefined();
     expect(openApiSpec.paths['/content-documents/{documentId}/versions']).toBeDefined();
     expect(openApiSpec.paths['/content-documents/{documentId}/preview']).toBeDefined();
+    expect(openApiSpec.paths['/public/events/{eventId}/page']).toBeDefined();
     expect(openApiSpec.paths['/public/events/{eventId}/content-page']).toBeDefined();
+    expect(openApiSpec.paths['/public/events/by-slug/{slug}/page']).toBeDefined();
+    expect(openApiSpec.paths['/public/events/{eventId}/discovery-card']).toBeDefined();
     expect(openApiSpec.paths['/webhook-events/{eventId}/replay']).toBeDefined();
     expect(
       openApiSpec.paths['/webhook-endpoints/{endpointId}/events/{eventId}/replay'],
@@ -181,12 +184,28 @@ describe('openApiSpec', () => {
         'application/json'
       ].schema,
     ).toEqual({ $ref: '#/components/schemas/PublicContentPage' });
+    expect(
+      openApiSpec.paths['/public/events/{eventId}/page'].get.responses['200'].content[
+        'application/json'
+      ].schema,
+    ).toEqual({ $ref: '#/components/schemas/PublicContentPage' });
+    expect(
+      openApiSpec.paths['/public/events/{eventId}/discovery-card'].get.responses['200'].content[
+        'application/json'
+      ].schema,
+    ).toEqual({ $ref: '#/components/schemas/PublicEventDiscoveryCard' });
     expect(openApiSpec.components.schemas.PublicContentPage.properties.document.properties).not.toHaveProperty(
       'tenantId',
     );
     expect(openApiSpec.components.schemas.PublicContentPage.properties.version.properties).not.toHaveProperty(
       'contentJson',
     );
+    expect(openApiSpec.components.schemas.PublicContentPage.properties.page.required).toEqual([
+      'html',
+      'text',
+      'headless',
+      'discovery',
+    ]);
   });
 
   it('documents checkout tracking separately from affiliate attribution', () => {
