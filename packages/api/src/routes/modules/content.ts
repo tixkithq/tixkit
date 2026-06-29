@@ -33,6 +33,11 @@ import {
   renderSmsTemplate,
   validateSmsTemplate,
 } from '@tixkit/content-message';
+import {
+  normalizeEmailTemplateDocument,
+  renderEmailTemplate,
+  validateEmailTemplate,
+} from '@tixkit/content-email';
 import { ClerkAuthService } from '../../auth/clerk.js';
 
 const contentChannelSchema = z.enum(['event_page', 'email', 'sms', 'imessage', 'social_invite']);
@@ -240,6 +245,11 @@ function validationFor(channel: ContentChannel, body: z.infer<typeof saveVersion
     if (!document) return invalidSmsTemplateValidation();
     return validateSmsTemplate(document);
   }
+  if (channel === 'email') {
+    const document = normalizeEmailTemplateDocument(body.contentJson);
+    if (!document) return invalidEmailTemplateValidation();
+    return validateEmailTemplate(document);
+  }
   return validateContentVersion(
     {
       subject: body.subject,
@@ -267,12 +277,44 @@ function invalidSmsTemplateValidation() {
   };
 }
 
-function renderDocumentPreview(
+function invalidEmailTemplateValidation() {
+  return {
+    valid: false,
+    severity: 'error' as const,
+    issues: [
+      {
+        code: 'invalid_email_template_document',
+        message: 'Email versions must store canonical Tixkit React Email template JSON',
+        severity: 'error' as const,
+        field: 'contentJson',
+      },
+    ],
+  };
+}
+
+async function renderDocumentPreview(
   channel: ContentChannel,
   content: PreviewContent,
   context: Record<string, unknown>,
   optOutToken?: string,
-): { output: RenderOutput; validation: ReturnType<typeof validateContentVersion> } {
+): Promise<{ output: RenderOutput; validation: ReturnType<typeof validateContentVersion> }> {
+  if (channel === 'email') {
+    const document = normalizeEmailTemplateDocument(content.contentJson);
+    if (!document) {
+      throw new ValidationError('Email preview requires canonical React Email template JSON', {
+        code: 'invalid_email_template_document',
+      });
+    }
+    const rendered = await renderEmailTemplate(document, context);
+    return {
+      output: {
+        subject: rendered.subject,
+        html: rendered.html,
+        text: rendered.text,
+      },
+      validation: rendered.validation,
+    };
+  }
   if (channel === 'sms') {
     const document = normalizeSmsTemplateDocument(content.contentJson);
     if (!document) {
@@ -556,12 +598,14 @@ export const contentRoutes: FastifyPluginAsync = async (app) => {
     const validation = validationFor(document.channel, body);
     const smsDocument =
       document.channel === 'sms' ? normalizeSmsTemplateDocument(body.contentJson) : undefined;
+    const emailDocument =
+      document.channel === 'email' ? normalizeEmailTemplateDocument(body.contentJson) : undefined;
     const version = await repo().createVersion({
       documentId,
-      subject: body.subject,
-      previewText: body.previewText,
+      subject: emailDocument ? emailDocument.settings.subject : body.subject,
+      previewText: emailDocument ? emailDocument.settings.previewText : body.previewText,
       contentJson: body.contentJson,
-      renderedHtml: body.renderedHtml,
+      renderedHtml: emailDocument ? emailDocument.editor.contentHtml : body.renderedHtml,
       renderedText: smsDocument ? smsDocument.editor.body : body.renderedText,
       variables: variableDefinitionsForChannel(document.channel),
       validation,
@@ -587,7 +631,7 @@ export const contentRoutes: FastifyPluginAsync = async (app) => {
           text: body.renderedText,
           contentJson: body.contentJson,
         };
-    const { output, validation } = renderDocumentPreview(
+    const { output, validation } = await renderDocumentPreview(
       document.channel,
       content,
       body.context,
@@ -638,14 +682,14 @@ export const contentRoutes: FastifyPluginAsync = async (app) => {
     if (!version || version.documentId !== documentId) {
       throw new NotFoundError('ContentDocumentVersion', body.versionId);
     }
-    const { output, validation } = renderDocumentPreview(
+    const { output, validation } = await renderDocumentPreview(
       document.channel,
       contentFromVersion(version),
       body.context,
       body.optOutToken,
     );
-    if (document.channel === 'sms' && !validation.valid) {
-      throw new ValidationError('SMS test send has render blockers', {
+    if ((document.channel === 'sms' || document.channel === 'email') && !validation.valid) {
+      throw new ValidationError(`${document.channel === 'sms' ? 'SMS' : 'Email'} test send has render blockers`, {
         issues: validation.issues,
       });
     }

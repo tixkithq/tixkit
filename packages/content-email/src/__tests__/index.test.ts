@@ -3,6 +3,7 @@ import {
   REACT_EMAIL_EDITOR_PACKAGE,
   createDefaultEmailTemplate,
   createEmailTestSend,
+  normalizeEmailTemplateDocument,
   renderEmailTemplate,
   validateEditorExport,
   validateEmailTemplate,
@@ -29,6 +30,27 @@ const context = {
     total: '$35.00',
   },
 };
+
+describe('normalizeEmailTemplateDocument', () => {
+  it('accepts canonical React Email editor documents and rejects malformed JSON', () => {
+    const template = createDefaultEmailTemplate();
+
+    expect(normalizeEmailTemplateDocument(template)).toEqual(template);
+    expect(normalizeEmailTemplateDocument({ ...template, schemaVersion: 2 })).toBeUndefined();
+    expect(
+      normalizeEmailTemplateDocument({
+        ...template,
+        editor: { ...template.editor, provider: 'legacy-html-editor' },
+      }),
+    ).toBeUndefined();
+    expect(
+      normalizeEmailTemplateDocument({
+        ...template,
+        blocks: [{ type: 'event_hero', body: 'Missing headline' }],
+      }),
+    ).toBeUndefined();
+  });
+});
 
 describe('validateEmailTemplate', () => {
   it('accepts a transactional template exported through the React Email editor seam', () => {

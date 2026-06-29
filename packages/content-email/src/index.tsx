@@ -128,6 +128,49 @@ export type EmailTestSendInput = {
   metadata?: SendEmailInput['metadata'];
 };
 
+export function normalizeEmailTemplateDocument(value: unknown): EmailTemplateDocument | undefined {
+  if (!value || typeof value !== 'object') return undefined;
+  const document = value as Partial<EmailTemplateDocument>;
+  if (document.schemaVersion !== 1) return undefined;
+  if (!document.editor || typeof document.editor !== 'object') return undefined;
+  if (document.editor.provider !== REACT_EMAIL_EDITOR_PACKAGE) return undefined;
+  if (typeof document.editor.contentHtml !== 'string') return undefined;
+  if (!document.settings || typeof document.settings !== 'object') return undefined;
+  if (typeof document.settings.templateKey !== 'string') return undefined;
+  if (typeof document.settings.subject !== 'string') return undefined;
+  if (
+    document.settings.previewText !== undefined &&
+    typeof document.settings.previewText !== 'string'
+  ) {
+    return undefined;
+  }
+  if (typeof document.settings.locale !== 'string') return undefined;
+  if (!isEmailTemplateCategory(document.settings.category)) return undefined;
+  if (!document.settings.sender || typeof document.settings.sender !== 'object') return undefined;
+  if (
+    document.settings.sender.fromEmail !== undefined &&
+    typeof document.settings.sender.fromEmail !== 'string'
+  ) {
+    return undefined;
+  }
+  if (
+    document.settings.sender.fromName !== undefined &&
+    typeof document.settings.sender.fromName !== 'string'
+  ) {
+    return undefined;
+  }
+  if (
+    document.settings.sender.replyToEmail !== undefined &&
+    typeof document.settings.sender.replyToEmail !== 'string'
+  ) {
+    return undefined;
+  }
+  if (!Array.isArray(document.blocks) || !document.blocks.every(isEmailTemplateBlock)) {
+    return undefined;
+  }
+  return document as EmailTemplateDocument;
+}
+
 const defaultContainerStyle = {
   margin: '0 auto',
   padding: '24px 0',
@@ -600,6 +643,67 @@ function hasUnsubscribeFooter(document: EmailTemplateDocument): boolean {
   return document.blocks.some(
     (block) => block.type === 'unsubscribe_footer' && Boolean(block.unsubscribeUrl.trim()),
   );
+}
+
+function isEmailTemplateCategory(value: unknown): value is EmailTemplateCategory {
+  return value === 'transactional' || value === 'bulk' || value === 'staff' || value === 'system';
+}
+
+function isEmailTemplateBlock(value: unknown): value is EmailTemplateBlock {
+  if (!value || typeof value !== 'object') return false;
+  const block = value as Record<string, unknown>;
+  switch (block.type) {
+    case 'event_hero':
+      return (
+        typeof block.headline === 'string' &&
+        optionalString(block.body) &&
+        optionalString(block.imageUrl) &&
+        optionalString(block.imageAlt) &&
+        optionalString(block.ctaLabel) &&
+        optionalString(block.ctaUrl)
+      );
+    case 'ticket_summary':
+      return typeof block.title === 'string' && typeof block.body === 'string';
+    case 'order_summary':
+      return (
+        typeof block.title === 'string' &&
+        Array.isArray(block.rows) &&
+        block.rows.every(
+          (row) =>
+            row &&
+            typeof row === 'object' &&
+            typeof (row as Record<string, unknown>).label === 'string' &&
+            typeof (row as Record<string, unknown>).value === 'string',
+        )
+      );
+    case 'qr_code':
+      return typeof block.title === 'string' && typeof block.imageUrl === 'string' && optionalString(block.imageAlt);
+    case 'calendar_button':
+      return typeof block.label === 'string' && typeof block.url === 'string';
+    case 'venue_block':
+      return typeof block.title === 'string' && typeof block.address === 'string' && optionalString(block.mapUrl);
+    case 'social_links':
+      return (
+        Array.isArray(block.links) &&
+        block.links.every(
+          (link) =>
+            link &&
+            typeof link === 'object' &&
+            typeof (link as Record<string, unknown>).label === 'string' &&
+            typeof (link as Record<string, unknown>).url === 'string',
+        )
+      );
+    case 'unsubscribe_footer':
+      return typeof block.body === 'string' && typeof block.unsubscribeUrl === 'string';
+    case 'raw_html':
+      return typeof block.html === 'string' && typeof block.safe === 'boolean';
+    default:
+      return false;
+  }
+}
+
+function optionalString(value: unknown): boolean {
+  return value === undefined || typeof value === 'string';
 }
 
 function isEmailLike(value: string): boolean {
