@@ -250,6 +250,66 @@ test.describe('persisted admin email content editor', () => {
     expect(archived.document.status).toBe('archived');
   });
 
+  test('surfaces publish blockers for invalid email content with axe and CDP proof', async ({
+    browserName,
+    page,
+  }, testInfo) => {
+    await requireReachable(page, adminBaseUrl, 'admin dashboard');
+    await requireReachable(page, `${apiBaseUrl}/health`, 'api');
+
+    const event = await seedContentEvent(
+      page,
+      `blockers-${testInfo.project.name}-${testInfo.workerIndex}-${Date.now()}`,
+    );
+
+    await page.setViewportSize(desktopViewport);
+    await page.goto(`${adminBaseUrl}/events/${event.id}/content/email`);
+    await expectPersistedEmailEditorRegions(page);
+
+    await page.getByLabel('Subject').fill('');
+    await page.getByLabel('Email body').fill(`Hi {{recipient.name}}, ${event.title} is almost here.`);
+    await page.getByRole('button', { name: 'Save draft' }).click();
+
+    await expect(page.getByText(/Saved draft v\d+/)).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Resolve publish blockers' })).toBeDisabled();
+    await page.getByRole('button', { name: 'Blockers', exact: true }).click();
+    await expect(page.getByText('missing_subject')).toBeVisible();
+    await expect(page.getByText('Email templates require a subject line before publishing')).toBeVisible();
+    await expect(page.getByLabel('Subject')).toHaveValue('');
+    await expect(page.getByLabel('Email body')).toBeVisible();
+
+    await attachScreenshot(page, testInfo, `admin-content-email-publish-blockers-${browserName}`);
+    await expectNoAxeViolations(page, testInfo);
+
+    if (browserName === 'chromium') {
+      const client = await page.context().newCDPSession(page);
+      const blockerSnapshot = await client.send('Runtime.evaluate', {
+        expression: `(() => {
+          const blockers = [...document.querySelectorAll('section')]
+            .find((section) => section.textContent?.includes('Publish blockers'));
+          const blockerTab = [...document.querySelectorAll('button')]
+            .find((candidate) => candidate.textContent?.trim() === 'Blockers');
+          return {
+            hasBlockerPanel: Boolean(blockers),
+            blockerText: blockers?.textContent ?? '',
+            blockerTabPressed: blockerTab?.getAttribute('aria-pressed') === 'true',
+          };
+        })()`,
+        returnByValue: true,
+      });
+      await testInfo.attach('cdp-email-publish-blockers', {
+        body: JSON.stringify(blockerSnapshot.result.value, null, 2),
+        contentType: 'application/json',
+      });
+      expect(blockerSnapshot.result.value).toMatchObject({
+        hasBlockerPanel: true,
+        blockerTabPressed: true,
+      });
+      expect(String(blockerSnapshot.result.value.blockerText)).toContain('missing_subject');
+      await client.detach();
+    }
+  });
+
   test('captures Chromium CDP layout metrics for the persisted email editor', async ({
     browserName,
     page,
