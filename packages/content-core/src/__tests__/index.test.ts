@@ -10,6 +10,7 @@ import {
   createDefaultChannelRegistry,
   variableDefinitionsForChannel,
   fixtureEmailDocument,
+  fixtureEventPageDocument,
   fixtureSmsDocument,
 } from '../index.js';
 
@@ -148,6 +149,10 @@ describe('fixtures', () => {
   });
   it('sms fixture defaults to the sms channel', () => {
     expect(fixtureSmsDocument().channel).toBe('sms');
+  });
+
+  it('event page fixture defaults to the event_page channel', () => {
+    expect(fixtureEventPageDocument().channel).toBe('event_page');
   });
 });
 

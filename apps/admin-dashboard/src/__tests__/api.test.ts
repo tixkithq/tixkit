@@ -108,6 +108,31 @@ describe('AdminApi message campaign fixtures', () => {
   });
 });
 
+describe('AdminApi content document contract', () => {
+  it('lists content documents through a typed page envelope', async () => {
+    const result = await adminApi.listContentDocuments({ channel: 'email', limit: 5 });
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.data.items).toEqual([]);
+    }
+  });
+
+  it('does not fake content document writes in fixtures', async () => {
+    const result = await adminApi.createContentDocument({
+      organizationId: 'org_demo',
+      brandId: 'brd_demo',
+      channel: 'email',
+      key: 'order-confirmed',
+      name: 'Order confirmed',
+    });
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.error.code).toBe('fixture_unavailable');
+      expect(result.error.status).toBe(503);
+    }
+  });
+});
+
 describe('AdminApi.updateTicketType', () => {
   it('updates an existing ticket type by id', async () => {
     const createResult = await adminApi.createTicketType('evt_demo_001', {

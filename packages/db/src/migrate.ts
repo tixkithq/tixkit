@@ -30,6 +30,7 @@ import { WebhookDeliveryAttemptIdentityMigration } from './migrations/0026_webho
 import { WebhookDeliveryReplayIdentityMigration } from './migrations/0027_webhook_delivery_replay_identity.js';
 import { ShortLinksMigration } from './migrations/0028_short_links.js';
 import { EventCodeFormatMigration } from './migrations/0029_event_code_format.js';
+import { ContentDocumentsMigration } from './migrations/0030_content_documents.js';
 
 const INITIAL_MIGRATION_NAME = '0001_initial';
 const MIGRATION_TABLE = 'kysely_migration';
@@ -121,6 +122,11 @@ const ALL_SCHEMA_TABLES = [
   'email_provider_events',
   'short_links',
   'link_clicks',
+  'content_test_sends',
+  'content_render_artifacts',
+  'content_assets',
+  'content_document_versions',
+  'content_documents',
 ] as const;
 
 function quoteMssqlIdentifier(identifier: string): string {
@@ -175,6 +181,7 @@ class TixkitMigrationProvider implements MigrationProvider {
       '0027_webhook_delivery_replay_identity': WebhookDeliveryReplayIdentityMigration,
       '0028_short_links': ShortLinksMigration,
       '0029_event_code_format': EventCodeFormatMigration,
+      '0030_content_documents': ContentDocumentsMigration,
     };
   }
 }

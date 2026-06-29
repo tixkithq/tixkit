@@ -1187,6 +1187,79 @@ export interface LinkClickTable {
   created_at: Timestamp;
 }
 
+export interface ContentDocumentTable {
+  id: string;
+  tenant_id: string;
+  organization_id: string;
+  brand_id: string;
+  event_id: string | null;
+  channel: string;
+  key: string;
+  name: string;
+  status: string;
+  locale: string;
+  current_draft_version_id: string | null;
+  published_version_id: string | null;
+  created_at: Timestamp;
+  updated_at: Timestamp;
+}
+
+export interface ContentDocumentVersionTable {
+  id: string;
+  document_id: string;
+  version_number: number;
+  status: string;
+  schema_version: number;
+  subject: string | null;
+  preview_text: string | null;
+  content_json: string;
+  rendered_html: string | null;
+  rendered_text: string | null;
+  variables: string;
+  validation: string;
+  created_by: string;
+  created_at: Timestamp;
+  published_at: Timestamp | null;
+}
+
+export interface ContentAssetTable {
+  id: string;
+  tenant_id: string;
+  document_id: string;
+  version_id: string | null;
+  storage_key: string;
+  content_type: string;
+  bytes: number;
+  created_at: Timestamp;
+}
+
+export interface ContentRenderArtifactTable {
+  id: string;
+  tenant_id: string;
+  document_id: string;
+  version_id: string;
+  channel: string;
+  output_type: string;
+  artifact_ref: string;
+  checksum: string;
+  created_at: Timestamp;
+}
+
+export interface ContentTestSendTable {
+  id: string;
+  tenant_id: string;
+  document_id: string;
+  version_id: string;
+  channel: string;
+  recipient: string;
+  status: string;
+  rendered_subject: string | null;
+  rendered_html: string | null;
+  rendered_text: string | null;
+  error: string | null;
+  created_at: Timestamp;
+}
+
 export interface DB {
   tenants: TenantTable;
   organizations: OrganizationTable;
@@ -1266,4 +1339,9 @@ export interface DB {
   marketing_integrations: MarketingIntegrationTable;
   short_links: ShortLinkTable;
   link_clicks: LinkClickTable;
+  content_documents: ContentDocumentTable;
+  content_document_versions: ContentDocumentVersionTable;
+  content_assets: ContentAssetTable;
+  content_render_artifacts: ContentRenderArtifactTable;
+  content_test_sends: ContentTestSendTable;
 }

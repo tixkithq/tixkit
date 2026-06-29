@@ -478,6 +478,90 @@ export type AdminPaymentCompensation = {
   updatedAt: string;
 };
 
+export type AdminContentChannel = 'event_page' | 'email' | 'sms' | 'imessage' | 'social_invite';
+
+export type AdminContentValidationIssue = {
+  code: string;
+  message: string;
+  severity: 'error' | 'warning';
+  field?: string;
+};
+
+export type AdminContentValidationResult = {
+  valid: boolean;
+  severity: 'error' | 'warning';
+  issues: AdminContentValidationIssue[];
+};
+
+export type AdminContentDocument = {
+  id: string;
+  tenantId: string;
+  organizationId: string;
+  brandId: string;
+  eventId?: string;
+  channel: AdminContentChannel;
+  key: string;
+  name: string;
+  status: 'draft' | 'published' | 'archived';
+  locale: string;
+  currentDraftVersionId?: string;
+  publishedVersionId?: string;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type AdminContentDocumentVersion = {
+  id: string;
+  documentId: string;
+  versionNumber: number;
+  status: 'draft' | 'published' | 'superseded';
+  schemaVersion: number;
+  subject?: string;
+  previewText?: string;
+  contentJson: unknown;
+  renderedHtml?: string;
+  renderedText?: string;
+  variables: Array<{ key: string; required: boolean; description?: string }>;
+  validation: AdminContentValidationResult;
+  createdBy: string;
+  createdAt: string;
+  publishedAt?: string;
+};
+
+export type AdminContentRenderOutput = {
+  subject?: string;
+  html?: string;
+  text?: string;
+  segments?: {
+    segments: number;
+    encoding: string;
+    charsPerSegment: number;
+    unitsUsed: number;
+    remaining: number;
+  };
+};
+
+export type AdminContentPreview = {
+  channel: AdminContentChannel;
+  output: AdminContentRenderOutput;
+  validation: AdminContentValidationResult;
+};
+
+export type AdminContentTestSend = {
+  id: string;
+  tenantId: string;
+  documentId: string;
+  versionId: string;
+  channel: AdminContentChannel;
+  recipient: string;
+  status: 'captured' | 'failed';
+  renderedSubject?: string;
+  renderedHtml?: string;
+  renderedText?: string;
+  error?: string;
+  createdAt: string;
+};
+
 export type AttendeeStatus = 'active' | 'cancelled' | 'refunded' | 'transferred';
 export type CheckInStatus = 'not_checked_in' | 'checked_in' | 'duplicate' | 'revoked';
 
@@ -1151,6 +1235,24 @@ export type SendMessageInput = {
   variables?: Record<string, unknown>;
 };
 
+export type CreateContentDocumentInput = {
+  organizationId: string;
+  brandId: string;
+  eventId?: string;
+  channel: AdminContentChannel;
+  key: string;
+  name: string;
+  locale?: string;
+};
+
+export type SaveContentVersionInput = {
+  subject?: string;
+  previewText?: string;
+  contentJson?: unknown;
+  renderedHtml?: string;
+  renderedText?: string;
+};
+
 export type CreateApiKeyInput = {
   organizationId?: string;
   name: string;
@@ -1366,6 +1468,47 @@ export type AdminApi = {
   ): Promise<ApiResult<AdminAttendeeListItem>>;
   listCheckInLists(eventId: string): Promise<ApiResult<AdminCheckInList[]>>;
   scanTicket(input: ScanTicketInput): Promise<ApiResult<CheckInScanResult>>;
+
+  listContentDocuments(
+    input?: PageCursor & {
+      channel?: AdminContentChannel;
+      brandId?: string;
+      eventId?: string;
+    },
+  ): Promise<ApiResult<PageResult<AdminContentDocument>>>;
+  createContentDocument(
+    input: CreateContentDocumentInput,
+  ): Promise<ApiResult<AdminContentDocument>>;
+  getContentDocument(documentId: string): Promise<ApiResult<AdminContentDocument>>;
+  listContentVersions(
+    documentId: string,
+  ): Promise<ApiResult<PageResult<AdminContentDocumentVersion>>>;
+  saveContentVersion(
+    documentId: string,
+    input: SaveContentVersionInput,
+  ): Promise<ApiResult<AdminContentDocumentVersion>>;
+  previewContent(
+    documentId: string,
+    input: SaveContentVersionInput & {
+      versionId?: string;
+      context?: Record<string, unknown>;
+      optOutToken?: string;
+    },
+  ): Promise<ApiResult<AdminContentPreview>>;
+  publishContentVersion(
+    documentId: string,
+    versionId: string,
+  ): Promise<ApiResult<{ document: AdminContentDocument; version: AdminContentDocumentVersion }>>;
+  archiveContentDocument(documentId: string): Promise<ApiResult<AdminContentDocument>>;
+  testSendContent(
+    documentId: string,
+    input: {
+      versionId: string;
+      recipient: string;
+      context?: Record<string, unknown>;
+      optOutToken?: string;
+    },
+  ): Promise<ApiResult<{ testSend: AdminContentTestSend; output: AdminContentRenderOutput }>>;
 
   previewMessageRecipients(
     eventId: string,
@@ -4390,6 +4533,133 @@ export const adminApi: AdminApi = {
           scannedAt: iso(0),
         });
       },
+    );
+  },
+
+  // ---- Content documents ----
+  async listContentDocuments(input) {
+    return withFixture(
+      () => {
+        const params = new URLSearchParams();
+        if (input?.cursor) params.set('cursor', input.cursor);
+        if (input?.limit) params.set('limit', String(input.limit));
+        if (input?.channel) params.set('channel', input.channel);
+        if (input?.brandId) params.set('brandId', input.brandId);
+        if (input?.eventId) params.set('eventId', input.eventId);
+        const qs = params.toString();
+        return request<PageResult<AdminContentDocument>>(
+          `/v1/content-documents${qs ? `?${qs}` : ''}`,
+          { method: 'GET' },
+        );
+      },
+      () => ok(paginate([], input?.cursor, input?.limit)),
+    );
+  },
+
+  async createContentDocument(input) {
+    return withFixture(
+      () =>
+        request<AdminContentDocument>('/v1/content-documents', {
+          method: 'POST',
+          body: JSON.stringify(input),
+        }),
+      () =>
+        err<AdminContentDocument>(
+          apiError('fixture_unavailable', 'Content documents require the live API', 503),
+        ),
+    );
+  },
+
+  async getContentDocument(documentId) {
+    return withFixture(
+      () => request<AdminContentDocument>(`/v1/content-documents/${documentId}`, { method: 'GET' }),
+      () =>
+        err<AdminContentDocument>(
+          apiError('fixture_unavailable', 'Content documents require the live API', 503),
+        ),
+    );
+  },
+
+  async listContentVersions(documentId) {
+    return withFixture(
+      () =>
+        request<PageResult<AdminContentDocumentVersion>>(
+          `/v1/content-documents/${documentId}/versions`,
+          { method: 'GET' },
+        ),
+      () => ok(paginate([], undefined, undefined)),
+    );
+  },
+
+  async saveContentVersion(documentId, input) {
+    return withFixture(
+      () =>
+        request<AdminContentDocumentVersion>(`/v1/content-documents/${documentId}/versions`, {
+          method: 'POST',
+          body: JSON.stringify(input),
+        }),
+      () =>
+        err<AdminContentDocumentVersion>(
+          apiError('fixture_unavailable', 'Content version saves require the live API', 503),
+        ),
+    );
+  },
+
+  async previewContent(documentId, input) {
+    return withFixture(
+      () =>
+        request<AdminContentPreview>(`/v1/content-documents/${documentId}/preview`, {
+          method: 'POST',
+          body: JSON.stringify(input),
+        }),
+      () =>
+        err<AdminContentPreview>(
+          apiError('fixture_unavailable', 'Content previews require the live API', 503),
+        ),
+    );
+  },
+
+  async publishContentVersion(documentId, versionId) {
+    return withFixture(
+      () =>
+        request<{ document: AdminContentDocument; version: AdminContentDocumentVersion }>(
+          `/v1/content-documents/${documentId}/versions/${versionId}/publish`,
+          { method: 'POST' },
+        ),
+      () =>
+        err<{ document: AdminContentDocument; version: AdminContentDocumentVersion }>(
+          apiError('fixture_unavailable', 'Content publishing requires the live API', 503),
+        ),
+    );
+  },
+
+  async archiveContentDocument(documentId) {
+    return withFixture(
+      () =>
+        request<AdminContentDocument>(`/v1/content-documents/${documentId}/archive`, {
+          method: 'POST',
+        }),
+      () =>
+        err<AdminContentDocument>(
+          apiError('fixture_unavailable', 'Content archiving requires the live API', 503),
+        ),
+    );
+  },
+
+  async testSendContent(documentId, input) {
+    return withFixture(
+      () =>
+        request<{ testSend: AdminContentTestSend; output: AdminContentRenderOutput }>(
+          `/v1/content-documents/${documentId}/test-sends`,
+          {
+            method: 'POST',
+            body: JSON.stringify(input),
+          },
+        ),
+      () =>
+        err<{ testSend: AdminContentTestSend; output: AdminContentRenderOutput }>(
+          apiError('fixture_unavailable', 'Content test sends require the live API', 503),
+        ),
     );
   },
 

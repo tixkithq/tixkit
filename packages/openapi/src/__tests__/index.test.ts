@@ -143,6 +143,10 @@ describe('openApiSpec', () => {
     expect(openApiSpec.paths['/exports']).toBeDefined();
     expect(openApiSpec.paths['/events/{eventId}/messages']).toBeDefined();
     expect(openApiSpec.paths['/events/{eventId}/messages/preview']).toBeDefined();
+    expect(openApiSpec.paths['/content-documents']).toBeDefined();
+    expect(openApiSpec.paths['/content-documents/{documentId}/versions']).toBeDefined();
+    expect(openApiSpec.paths['/content-documents/{documentId}/preview']).toBeDefined();
+    expect(openApiSpec.paths['/public/events/{eventId}/content-page']).toBeDefined();
     expect(openApiSpec.paths['/webhook-events/{eventId}/replay']).toBeDefined();
     expect(
       openApiSpec.paths['/webhook-endpoints/{endpointId}/events/{eventId}/replay'],
@@ -152,6 +156,37 @@ describe('openApiSpec', () => {
       'accessRules',
     ]);
     expect(openApiSpec.components.schemas.CreateTicketTypeBatch.required).toContain('ticketType');
+  });
+
+  it('documents content-studio document lifecycle contracts', () => {
+    expect(openApiSpec.components.schemas.ContentDocument.properties.channel.enum).toEqual([
+      'event_page',
+      'email',
+      'sms',
+      'imessage',
+      'social_invite',
+    ]);
+    expect(openApiSpec.components.schemas.ContentDocumentVersion.properties.validation).toEqual({
+      $ref: '#/components/schemas/ContentValidationResult',
+    });
+    expect(
+      openApiSpec.paths['/content-documents'].post.responses['400'].description,
+    ).toContain('unavailable');
+    expect(
+      openApiSpec.paths['/content-documents/{documentId}/versions/{versionId}/publish'].post
+        .responses['200'].content['application/json'].schema.required,
+    ).toEqual(['document', 'version']);
+    expect(
+      openApiSpec.paths['/public/events/{eventId}/content-page'].get.responses['200'].content[
+        'application/json'
+      ].schema,
+    ).toEqual({ $ref: '#/components/schemas/PublicContentPage' });
+    expect(openApiSpec.components.schemas.PublicContentPage.properties.document.properties).not.toHaveProperty(
+      'tenantId',
+    );
+    expect(openApiSpec.components.schemas.PublicContentPage.properties.version.properties).not.toHaveProperty(
+      'contentJson',
+    );
   });
 
   it('documents checkout tracking separately from affiliate attribution', () => {

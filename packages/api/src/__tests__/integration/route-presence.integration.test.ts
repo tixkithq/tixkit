@@ -10,6 +10,7 @@ import { checkInRoutes } from '../../routes/modules/checkin.js';
 import { webhookRoutes } from '../../routes/modules/webhooks.js';
 import { developerRoutes } from '../../routes/modules/developer.js';
 import { messagingRoutes } from '../../routes/modules/messaging.js';
+import { contentRoutes, publicContentRoutes } from '../../routes/modules/content.js';
 import { shortLinkRoutes, shortLinkRedirectRoutes } from '../../routes/modules/short-links.js';
 import { reportingRoutes } from '../../routes/modules/reporting.js';
 import { privacyRoutes } from '../../routes/modules/privacy.js';
@@ -91,6 +92,7 @@ async function buildRouteManifest(): Promise<CapturedRoute[]> {
     await publicGroup.register(publicWaitlistRoutes, { prefix: '/v1' });
     await publicGroup.register(oauthTokenRoutes, { prefix: '/v1' });
     await publicGroup.register(shortLinkRedirectRoutes, { prefix: '/v1' });
+    await publicGroup.register(publicContentRoutes, { prefix: '/v1' });
   });
 
   // Authenticated routes.
@@ -104,6 +106,7 @@ async function buildRouteManifest(): Promise<CapturedRoute[]> {
     await authenticated.register(developerRoutes, { prefix: '/v1' });
     await authenticated.register(oauthAuthorizeRoutes, { prefix: '/v1' });
     await authenticated.register(messagingRoutes, { prefix: '/v1' });
+    await authenticated.register(contentRoutes, { prefix: '/v1' });
     await authenticated.register(shortLinkRoutes, { prefix: '/v1' });
     await authenticated.register(reportingRoutes, { prefix: '/v1' });
     await authenticated.register(privacyRoutes, { prefix: '/v1' });

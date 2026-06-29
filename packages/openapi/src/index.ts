@@ -114,6 +114,207 @@ export const openApiSpec = {
         },
         required: ['error'],
       },
+      ContentValidationIssue: {
+        type: 'object',
+        properties: {
+          code: { type: 'string' },
+          message: { type: 'string' },
+          severity: { type: 'string', enum: ['error', 'warning'] },
+          field: { type: 'string' },
+        },
+        required: ['code', 'message', 'severity'],
+      },
+      ContentValidationResult: {
+        type: 'object',
+        properties: {
+          valid: { type: 'boolean' },
+          severity: { type: 'string', enum: ['error', 'warning'] },
+          issues: {
+            type: 'array',
+            items: { $ref: '#/components/schemas/ContentValidationIssue' },
+          },
+        },
+        required: ['valid', 'severity', 'issues'],
+      },
+      ContentDocument: {
+        type: 'object',
+        properties: {
+          id: { type: 'string' },
+          tenantId: { type: 'string' },
+          organizationId: { type: 'string' },
+          brandId: { type: 'string' },
+          eventId: { type: 'string' },
+          channel: {
+            type: 'string',
+            enum: ['event_page', 'email', 'sms', 'imessage', 'social_invite'],
+          },
+          key: { type: 'string' },
+          name: { type: 'string' },
+          status: { type: 'string', enum: ['draft', 'published', 'archived'] },
+          locale: { type: 'string' },
+          currentDraftVersionId: { type: 'string' },
+          publishedVersionId: { type: 'string' },
+          createdAt: { type: 'string', format: 'date-time' },
+          updatedAt: { type: 'string', format: 'date-time' },
+        },
+        required: [
+          'id',
+          'tenantId',
+          'organizationId',
+          'brandId',
+          'channel',
+          'key',
+          'name',
+          'status',
+          'locale',
+          'createdAt',
+          'updatedAt',
+        ],
+      },
+      ContentDocumentVersion: {
+        type: 'object',
+        properties: {
+          id: { type: 'string' },
+          documentId: { type: 'string' },
+          versionNumber: { type: 'integer' },
+          status: { type: 'string', enum: ['draft', 'published', 'superseded'] },
+          schemaVersion: { type: 'integer' },
+          subject: { type: 'string' },
+          previewText: { type: 'string' },
+          contentJson: { type: 'object', additionalProperties: true },
+          renderedHtml: { type: 'string' },
+          renderedText: { type: 'string' },
+          variables: {
+            type: 'array',
+            items: {
+              type: 'object',
+              properties: {
+                key: { type: 'string' },
+                required: { type: 'boolean' },
+                description: { type: 'string' },
+              },
+              required: ['key', 'required'],
+            },
+          },
+          validation: { $ref: '#/components/schemas/ContentValidationResult' },
+          createdBy: { type: 'string' },
+          createdAt: { type: 'string', format: 'date-time' },
+          publishedAt: { type: 'string', format: 'date-time' },
+        },
+        required: [
+          'id',
+          'documentId',
+          'versionNumber',
+          'status',
+          'schemaVersion',
+          'contentJson',
+          'variables',
+          'validation',
+          'createdBy',
+          'createdAt',
+        ],
+      },
+      PublicContentPage: {
+        type: 'object',
+        properties: {
+          document: {
+            type: 'object',
+            properties: {
+              eventId: { type: 'string' },
+              channel: { type: 'string', enum: ['event_page'] },
+              key: { type: 'string' },
+              name: { type: 'string' },
+              locale: { type: 'string' },
+              updatedAt: { type: 'string', format: 'date-time' },
+            },
+            required: ['eventId', 'channel', 'key', 'name', 'locale', 'updatedAt'],
+          },
+          version: {
+            type: 'object',
+            properties: {
+              versionNumber: { type: 'integer' },
+              subject: { type: 'string' },
+              previewText: { type: 'string' },
+              renderedHtml: { type: 'string' },
+              renderedText: { type: 'string' },
+              publishedAt: { type: 'string', format: 'date-time' },
+            },
+            required: ['versionNumber'],
+          },
+        },
+        required: ['document', 'version'],
+      },
+      ContentDocumentPage: {
+        type: 'object',
+        properties: {
+          items: {
+            type: 'array',
+            items: { $ref: '#/components/schemas/ContentDocument' },
+          },
+        },
+        required: ['items'],
+      },
+      ContentDocumentVersionPage: {
+        type: 'object',
+        properties: {
+          items: {
+            type: 'array',
+            items: { $ref: '#/components/schemas/ContentDocumentVersion' },
+          },
+        },
+        required: ['items'],
+      },
+      ContentRenderOutput: {
+        type: 'object',
+        properties: {
+          subject: { type: 'string' },
+          html: { type: 'string' },
+          text: { type: 'string' },
+          segments: {
+            type: 'object',
+            properties: {
+              segments: { type: 'integer' },
+              encoding: { type: 'string' },
+              charsPerSegment: { type: 'integer' },
+              unitsUsed: { type: 'integer' },
+              remaining: { type: 'integer' },
+            },
+          },
+        },
+      },
+      ContentPreview: {
+        type: 'object',
+        properties: {
+          channel: {
+            type: 'string',
+            enum: ['event_page', 'email', 'sms', 'imessage', 'social_invite'],
+          },
+          output: { $ref: '#/components/schemas/ContentRenderOutput' },
+          validation: { $ref: '#/components/schemas/ContentValidationResult' },
+        },
+        required: ['channel', 'output', 'validation'],
+      },
+      ContentTestSend: {
+        type: 'object',
+        properties: {
+          id: { type: 'string' },
+          tenantId: { type: 'string' },
+          documentId: { type: 'string' },
+          versionId: { type: 'string' },
+          channel: {
+            type: 'string',
+            enum: ['event_page', 'email', 'sms', 'imessage', 'social_invite'],
+          },
+          recipient: { type: 'string' },
+          status: { type: 'string', enum: ['captured', 'failed'] },
+          renderedSubject: { type: 'string' },
+          renderedHtml: { type: 'string' },
+          renderedText: { type: 'string' },
+          error: { type: 'string' },
+          createdAt: { type: 'string', format: 'date-time' },
+        },
+        required: ['id', 'tenantId', 'documentId', 'versionId', 'channel', 'recipient', 'status', 'createdAt'],
+      },
       Event: {
         type: 'object',
         properties: {
@@ -5034,6 +5235,293 @@ export const openApiSpec = {
           },
           '403': {
             description: 'Forbidden',
+            content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } },
+          },
+        },
+      },
+    },
+    '/content-documents': {
+      get: {
+        summary: 'List scoped content documents',
+        security: [{ BearerAuth: [] }],
+        parameters: [
+          { name: 'channel', in: 'query', schema: { type: 'string' } },
+          { name: 'brandId', in: 'query', schema: { type: 'string' } },
+          { name: 'eventId', in: 'query', schema: { type: 'string' } },
+          { name: 'limit', in: 'query', schema: { type: 'integer', minimum: 1, maximum: 100 } },
+        ],
+        responses: {
+          '200': {
+            description: 'Content documents',
+            content: {
+              'application/json': { schema: { $ref: '#/components/schemas/ContentDocumentPage' } },
+            },
+          },
+          '401': {
+            description: 'Unauthorized',
+            content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } },
+          },
+          '403': {
+            description: 'Forbidden',
+            content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } },
+          },
+        },
+      },
+      post: {
+        summary: 'Create a content document',
+        security: [{ BearerAuth: [] }],
+        requestBody: {
+          required: true,
+          content: {
+            'application/json': {
+              schema: {
+                type: 'object',
+                properties: {
+                  organizationId: { type: 'string' },
+                  brandId: { type: 'string' },
+                  eventId: { type: 'string' },
+                  channel: {
+                    type: 'string',
+                    enum: ['event_page', 'email', 'sms', 'imessage', 'social_invite'],
+                  },
+                  key: { type: 'string' },
+                  name: { type: 'string' },
+                  locale: { type: 'string' },
+                },
+                required: ['organizationId', 'brandId', 'channel', 'key', 'name'],
+              },
+            },
+          },
+        },
+        responses: {
+          '201': {
+            description: 'Created content document',
+            content: {
+              'application/json': { schema: { $ref: '#/components/schemas/ContentDocument' } },
+            },
+          },
+          '400': {
+            description: 'Validation error, including unavailable future channels',
+            content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } },
+          },
+          '401': {
+            description: 'Unauthorized',
+            content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } },
+          },
+          '403': {
+            description: 'Forbidden',
+            content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } },
+          },
+        },
+      },
+    },
+    '/content-documents/{documentId}': {
+      get: {
+        summary: 'Get a content document',
+        security: [{ BearerAuth: [] }],
+        parameters: [{ name: 'documentId', in: 'path', required: true, schema: { type: 'string' } }],
+        responses: {
+          '200': {
+            description: 'Content document',
+            content: {
+              'application/json': { schema: { $ref: '#/components/schemas/ContentDocument' } },
+            },
+          },
+          '404': {
+            description: 'Not found',
+            content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } },
+          },
+        },
+      },
+    },
+    '/content-documents/{documentId}/versions': {
+      get: {
+        summary: 'List content document versions',
+        security: [{ BearerAuth: [] }],
+        parameters: [{ name: 'documentId', in: 'path', required: true, schema: { type: 'string' } }],
+        responses: {
+          '200': {
+            description: 'Content document versions',
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/ContentDocumentVersionPage' },
+              },
+            },
+          },
+        },
+      },
+      post: {
+        summary: 'Save a content document draft version',
+        security: [{ BearerAuth: [] }],
+        parameters: [{ name: 'documentId', in: 'path', required: true, schema: { type: 'string' } }],
+        requestBody: {
+          required: true,
+          content: {
+            'application/json': {
+              schema: {
+                type: 'object',
+                properties: {
+                  subject: { type: 'string' },
+                  previewText: { type: 'string' },
+                  contentJson: { type: 'object', additionalProperties: true },
+                  renderedHtml: { type: 'string' },
+                  renderedText: { type: 'string' },
+                },
+              },
+            },
+          },
+        },
+        responses: {
+          '201': {
+            description: 'Saved draft version',
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/ContentDocumentVersion' },
+              },
+            },
+          },
+        },
+      },
+    },
+    '/content-documents/{documentId}/preview': {
+      post: {
+        summary: 'Render a content document preview',
+        security: [{ BearerAuth: [] }],
+        parameters: [{ name: 'documentId', in: 'path', required: true, schema: { type: 'string' } }],
+        requestBody: {
+          required: true,
+          content: {
+            'application/json': {
+              schema: {
+                type: 'object',
+                properties: {
+                  versionId: { type: 'string' },
+                  subject: { type: 'string' },
+                  renderedHtml: { type: 'string' },
+                  renderedText: { type: 'string' },
+                  contentJson: { type: 'object', additionalProperties: true },
+                  context: { type: 'object', additionalProperties: true },
+                  optOutToken: { type: 'string' },
+                },
+              },
+            },
+          },
+        },
+        responses: {
+          '200': {
+            description: 'Rendered preview',
+            content: {
+              'application/json': { schema: { $ref: '#/components/schemas/ContentPreview' } },
+            },
+          },
+        },
+      },
+    },
+    '/content-documents/{documentId}/versions/{versionId}/publish': {
+      post: {
+        summary: 'Publish a content document version',
+        security: [{ BearerAuth: [] }],
+        parameters: [
+          { name: 'documentId', in: 'path', required: true, schema: { type: 'string' } },
+          { name: 'versionId', in: 'path', required: true, schema: { type: 'string' } },
+        ],
+        responses: {
+          '200': {
+            description: 'Published document and version',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  properties: {
+                    document: { $ref: '#/components/schemas/ContentDocument' },
+                    version: { $ref: '#/components/schemas/ContentDocumentVersion' },
+                  },
+                  required: ['document', 'version'],
+                },
+              },
+            },
+          },
+          '400': {
+            description: 'Publish blockers',
+            content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } },
+          },
+        },
+      },
+    },
+    '/content-documents/{documentId}/archive': {
+      post: {
+        summary: 'Archive a content document',
+        security: [{ BearerAuth: [] }],
+        parameters: [{ name: 'documentId', in: 'path', required: true, schema: { type: 'string' } }],
+        responses: {
+          '200': {
+            description: 'Archived document',
+            content: {
+              'application/json': { schema: { $ref: '#/components/schemas/ContentDocument' } },
+            },
+          },
+        },
+      },
+    },
+    '/content-documents/{documentId}/test-sends': {
+      post: {
+        summary: 'Capture a content test send through the shared renderer',
+        security: [{ BearerAuth: [] }],
+        parameters: [{ name: 'documentId', in: 'path', required: true, schema: { type: 'string' } }],
+        requestBody: {
+          required: true,
+          content: {
+            'application/json': {
+              schema: {
+                type: 'object',
+                properties: {
+                  versionId: { type: 'string' },
+                  recipient: { type: 'string' },
+                  context: { type: 'object', additionalProperties: true },
+                  optOutToken: { type: 'string' },
+                },
+                required: ['versionId', 'recipient'],
+              },
+            },
+          },
+        },
+        responses: {
+          '202': {
+            description: 'Captured test send',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  properties: {
+                    testSend: { $ref: '#/components/schemas/ContentTestSend' },
+                    output: { $ref: '#/components/schemas/ContentRenderOutput' },
+                  },
+                  required: ['testSend', 'output'],
+                },
+              },
+            },
+          },
+        },
+      },
+    },
+    '/public/events/{eventId}/content-page': {
+      get: {
+        summary: 'Get the published content-studio event page for an event',
+        parameters: [
+          { name: 'eventId', in: 'path', required: true, schema: { type: 'string' } },
+          { name: 'locale', in: 'query', schema: { type: 'string' } },
+        ],
+        responses: {
+          '200': {
+            description: 'Published public event-page content without editor lifecycle metadata',
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/PublicContentPage' },
+              },
+            },
+          },
+          '404': {
+            description: 'No published event page',
             content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } },
           },
         },
