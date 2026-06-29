@@ -31,14 +31,14 @@ function createMockDb(tables: Record<string, unknown> = {}): unknown {
     return [];
   };
   function createQuery(table: string) {
-    const filters: Array<[string, unknown]> = [];
+    const filters: Array<[string, string, unknown]> = [];
     const query = {
       select: () => query,
       selectAll: () => query,
       innerJoin: () => query,
       where: (...args: unknown[]) => {
-        if (typeof args[0] === 'string' && args[1] === '=') {
-          filters.push([args[0], args[2]]);
+        if (typeof args[0] === 'string' && typeof args[1] === 'string') {
+          filters.push([args[0], args[1], args[2]]);
         }
         return query;
       },
@@ -48,9 +48,13 @@ function createMockDb(tables: Record<string, unknown> = {}): unknown {
       fn: { sum: () => 'sum', countAll: () => 'count' },
       rows() {
         return getRows(table).filter((row) =>
-          filters.every(([column, value]) =>
-            mockValuesEqual(getMockColumnValue(row, column), value),
-          ),
+          filters.every(([column, op, value]) => {
+            const rowValue = getMockColumnValue(row, column);
+            if (op === '=') return mockValuesEqual(rowValue, value);
+            if (op === 'is') return value === null ? rowValue === null : rowValue === value;
+            if (op === 'is not') return value === null ? rowValue !== null : rowValue !== value;
+            return true;
+          }),
         );
       },
       async executeTakeFirst() {
@@ -2375,34 +2379,41 @@ describe('messaging endpoint', () => {
           created_at: now,
         },
       ],
-      notification_templates: [
+      content_documents: [
         {
-          id: 'ntf_1',
+          id: 'cdoc_msg_1',
           tenant_id: 'tnt_1',
+          organization_id: 'org_1',
           brand_id: 'brd_1',
+          event_id: 'evt_1',
+          channel: 'email',
           key: 'attendee-message',
           name: 'Attendee message',
-          description: null,
-          category: 'bulk',
-          variables: '[]',
-          current_version_id: 'ntv_1',
+          status: 'published',
+          locale: 'en',
+          current_draft_version_id: null,
+          published_version_id: 'cver_msg_1',
           created_at: now,
           updated_at: now,
         },
       ],
-      notification_template_versions: [
+      content_document_versions: [
         {
-          id: 'ntv_1',
-          template_id: 'ntf_1',
-          version: 1,
-          subject_template: 'Update',
-          html_template: '<p>Update</p>',
-          text_template: 'Update',
-          locale: 'en',
-          is_default: true,
-          published_at: now,
+          id: 'cver_msg_1',
+          document_id: 'cdoc_msg_1',
+          version_number: 1,
+          status: 'published',
+          schema_version: 1,
+          subject: 'Update',
+          preview_text: null,
+          content_json: '{}',
+          rendered_html: '<p>Update</p>',
+          rendered_text: 'Update',
+          variables: '[]',
+          validation: '{"valid":true,"severity":"warning","issues":[]}',
+          created_by: 'usr_1',
           created_at: now,
-          updated_at: now,
+          published_at: now,
         },
       ],
       email_provider_routes: [
@@ -2469,7 +2480,7 @@ describe('messaging endpoint', () => {
       headers: { 'Idempotency-Key': 'msg_preview_parity' },
       payload,
     });
-    expect(send.statusCode).toBe(202);
+    expect(send.statusCode, send.body).toBe(202);
     expect(send.json()).toMatchObject({
       audienceCount: preview.json().audienceCount,
       suppressedRecipients: preview.json().suppressedRecipients,
@@ -2488,6 +2499,149 @@ describe('messaging endpoint', () => {
       campaignAudienceCount: 1,
     });
     expect((tables.sms_jobs as Array<{ status: string }>)[0].status).toBe('suppressed');
+    await app.close();
+  });
+
+  it('POST /events/:eventId/messages queues the published content email version when available', async () => {
+    const now = new Date();
+    const tables = {
+      events: [
+        {
+          id: 'evt_1',
+          tenant_id: 'tnt_1',
+          organization_id: 'org_1',
+          brand_id: 'brd_1',
+          status: 'published',
+          slug: 'evt',
+          title: 'Event',
+          timezone: 'UTC',
+          starts_at: now,
+          visibility: 'public',
+          seo: '{}',
+        },
+      ],
+      attendees: [
+        {
+          id: 'att_1',
+          tenant_id: 'tnt_1',
+          order_id: 'ord_1',
+          event_id: 'evt_1',
+          ticket_type_id: 'tt_1',
+          ticket_id: 'tkt_1',
+          first_name: 'Ada',
+          last_name: 'Lovelace',
+          email: 'ada@test.com',
+          phone: '+15550000002',
+          status: 'confirmed',
+          custom_answers: null,
+          checked_in_at: null,
+          check_in_device_id: null,
+          created_at: now,
+          updated_at: now,
+        },
+      ],
+      message_consents: [
+        {
+          id: 'msc_1',
+          tenant_id: 'tnt_1',
+          attendee_id: 'att_1',
+          email: 'ada@test.com',
+          phone: '+15550000002',
+          email_opt_in: true,
+          sms_opt_in: true,
+          consent_text: 'Updates',
+          consent_version: 'v1',
+          consented_at: now,
+          revoked_at: null,
+          created_at: now,
+        },
+      ],
+      content_documents: [
+        {
+          id: 'cdoc_1',
+          tenant_id: 'tnt_1',
+          organization_id: 'org_1',
+          brand_id: 'brd_1',
+          event_id: 'evt_1',
+          channel: 'email',
+          key: 'attendee-message',
+          name: 'Attendee message',
+          status: 'published',
+          locale: 'en',
+          current_draft_version_id: null,
+          published_version_id: 'cver_email_1',
+          created_at: now,
+          updated_at: now,
+        },
+      ],
+      content_document_versions: [
+        {
+          id: 'cver_email_1',
+          document_id: 'cdoc_1',
+          version_number: 1,
+          status: 'published',
+          schema_version: 1,
+          subject: 'Event update',
+          preview_text: 'Preview',
+          content_json: '{}',
+          rendered_html: '<p>Update</p>',
+          rendered_text: 'Update',
+          variables: '[]',
+          validation: '{"valid":true,"severity":"warning","issues":[]}',
+          created_by: 'usr_1',
+          created_at: now,
+          published_at: now,
+        },
+      ],
+      email_provider_routes: [
+        {
+          id: 'epr_1',
+          tenant_id: 'tnt_1',
+          brand_id: 'brd_1',
+          provider_type: 'capture',
+          credentials_ref: 'capture',
+          sender_domain: 'example.com',
+          priority: 0,
+          is_fallback: false,
+          rate_limit_per_hour: null,
+          allowed_categories: JSON.stringify(['bulk']),
+          status: 'active',
+          smoke_send_verified: true,
+          created_at: now,
+          updated_at: now,
+        },
+      ],
+      email_jobs: [],
+    };
+    const startNotificationDelivery = vi.fn();
+    const app = await setupApp(messagingRoutes, makePrincipal(), tables, {
+      temporalClient: { startNotificationDelivery },
+    });
+
+    const send = await app.inject({
+      method: 'POST',
+      url: '/events/evt_1/messages',
+      headers: { 'Idempotency-Key': 'msg_content_email' },
+      payload: { templateKey: 'attendee-message', audience: 'all', channel: 'email' },
+    });
+
+    expect(send.statusCode, send.body).toBe(202);
+    expect(send.json()).toMatchObject({
+      queuedEmailJobs: 1,
+      queuedSmsJobs: 0,
+    });
+    expect(tables.email_jobs).toHaveLength(1);
+    expect((tables.email_jobs as Array<{ template_version_id: string }>)[0].template_version_id).toBe(
+      'cver_email_1',
+    );
+    expect(startNotificationDelivery).toHaveBeenCalledWith(
+      expect.objectContaining({
+        templateKey: 'attendee-message',
+        templateVersionId: 'cver_email_1',
+        tenantId: 'tnt_1',
+        brandId: 'brd_1',
+      }),
+    );
     await app.close();
   });
 

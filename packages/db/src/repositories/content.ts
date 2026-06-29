@@ -156,6 +156,52 @@ export class ContentRepository extends BaseRepository {
     return { document: this.toDocument(row), version };
   }
 
+  async findPublishedEmailTemplate(input: {
+    tenantId: string;
+    brandId: string;
+    key: string;
+    eventId?: string;
+    locale?: string;
+  }): Promise<
+    | {
+        document: ContentDocumentRecord;
+        version: ContentDocumentVersion;
+      }
+    | undefined
+  > {
+    const eventScoped = input.eventId
+      ? await this.findPublishedContentByScope({ ...input, channel: 'email', eventId: input.eventId })
+      : undefined;
+    return (
+      eventScoped ??
+      (await this.findPublishedContentByScope({ ...input, channel: 'email', eventId: undefined }))
+    );
+  }
+
+  async findPublishedVersionById(input: {
+    tenantId: string;
+    versionId: string;
+    brandId?: string;
+    channel?: ContentChannel;
+  }): Promise<
+    | {
+        document: ContentDocumentRecord;
+        version: ContentDocumentVersion;
+      }
+    | undefined
+  > {
+    const version = await this.findVersionById(input.versionId);
+    if (!version || version.status !== 'published') return undefined;
+    const document = await this.findDocumentById(version.documentId);
+    if (!document) return undefined;
+    if (document.tenantId !== input.tenantId) return undefined;
+    if (input.brandId && document.brandId !== input.brandId) return undefined;
+    if (input.channel && document.channel !== input.channel) return undefined;
+    if (document.status !== 'published') return undefined;
+    if (document.publishedVersionId !== version.id) return undefined;
+    return { document, version };
+  }
+
   async listVersions(documentId: string): Promise<ContentDocumentVersion[]> {
     const rows = await this.db
       .selectFrom('content_document_versions')
@@ -299,6 +345,42 @@ export class ContentRepository extends BaseRepository {
       id,
     );
     return this.toTestSend(row);
+  }
+
+  private async findPublishedContentByScope(input: {
+    tenantId: string;
+    brandId: string;
+    channel: ContentChannel;
+    key: string;
+    eventId?: string;
+    locale?: string;
+  }): Promise<
+    | {
+        document: ContentDocumentRecord;
+        version: ContentDocumentVersion;
+      }
+    | undefined
+  > {
+    let query = this.db
+      .selectFrom('content_documents')
+      .selectAll()
+      .where('tenant_id', '=', input.tenantId)
+      .where('brand_id', '=', input.brandId)
+      .where('channel', '=', input.channel)
+      .where('key', '=', input.key)
+      .where('status', '=', 'published')
+      .where('published_version_id', 'is not', null);
+
+    query = input.eventId
+      ? query.where('event_id', '=', input.eventId)
+      : query.where('event_id', 'is', null);
+    if (input.locale) query = query.where('locale', '=', input.locale);
+
+    const row = await query.executeTakeFirst();
+    if (!row || !row.published_version_id) return undefined;
+    const version = await this.findVersionById(row.published_version_id);
+    if (!version || version.status !== 'published') return undefined;
+    return { document: this.toDocument(row), version };
   }
 
   private async nextVersionNumber(documentId: string): Promise<number> {

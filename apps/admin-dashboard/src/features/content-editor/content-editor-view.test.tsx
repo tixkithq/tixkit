@@ -49,4 +49,25 @@ describe('ContentEditorView', () => {
     expect(screen.getByRole('button', { name: 'Opt-out' })).toBeInTheDocument();
     expect(screen.getByText('Mobile canvas')).toBeInTheDocument();
   });
+
+  it('renders server-provided email adapter preview output', () => {
+    render(
+      React.createElement(ContentEditorView, {
+        eventId: 'evt_1',
+        kind: 'email',
+        preview: {
+          label: 'React Email preview',
+          output: 'Subject: Your All Access Chicago tickets are ready',
+          format: 'html',
+        },
+        actionsUnavailableReason:
+          'React Email adapter preview is active; publish waits for persisted content wiring.',
+      }),
+    );
+
+    expect(screen.getByText('React Email adapter preview is active; publish waits for persisted content wiring.')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Open preview' }));
+    expect(screen.getByTestId('preview-drawer')).toHaveTextContent('React Email preview');
+    expect(screen.getByTestId('preview-drawer')).toHaveTextContent('Your All Access Chicago tickets are ready');
+  });
 });

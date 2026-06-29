@@ -30,6 +30,8 @@ const {
     notificationType: string;
   }): Promise<WorkflowActivityResult<{ allowed: boolean }>>;
   renderTemplateActivity(input: {
+    tenantId?: string;
+    brandId?: string;
     templateKey: string;
     templateVersionId: string;
     variables: Record<string, unknown>;
@@ -102,6 +104,8 @@ export async function notificationDeliveryWorkflow(
 
   // Step 2: Render template
   const renderResult = await renderTemplateActivity({
+    tenantId: input.tenantId,
+    brandId: input.brandId,
     templateKey: input.templateKey,
     templateVersionId: input.templateVersionId,
     variables: input.variables,

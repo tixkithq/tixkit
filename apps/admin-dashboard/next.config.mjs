@@ -24,7 +24,12 @@ const adminSecurityHeaders = [
 
 /** @type {import('next').NextConfig} */
 const nextConfig = {
-  transpilePackages: ['@tixkit/content-editor-shell', '@tixkit/js', '@tixkit/next'],
+  transpilePackages: [
+    '@tixkit/content-email',
+    '@tixkit/content-editor-shell',
+    '@tixkit/js',
+    '@tixkit/next',
+  ],
   env: {
     NEXT_PUBLIC_API_BASE_URL: process.env.NEXT_PUBLIC_API_BASE_URL ?? 'http://localhost:4000/v1',
     NEXT_PUBLIC_ADMIN_API_BASE_URL:
