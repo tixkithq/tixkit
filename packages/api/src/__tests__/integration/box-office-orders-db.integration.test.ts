@@ -1,5 +1,5 @@
 import Fastify, { type FastifyInstance } from 'fastify';
-import { afterAll, beforeAll, beforeEach, expect, it } from 'vitest';
+import { afterAll, beforeAll, beforeEach, expect, it, vi } from 'vitest';
 import { createDb, OrderRepository, type Database } from '@tixkit/db';
 import type { Principal } from '@tixkit/domain';
 import { ulid } from 'ulid';
@@ -191,7 +191,11 @@ async function createPool(database: Database, capacity: number): Promise<string>
   return poolId;
 }
 
-async function createTicketType(database: Database, poolId: string, priceCents: number): Promise<string> {
+async function createTicketType(
+  database: Database,
+  poolId: string,
+  priceCents: number,
+): Promise<string> {
   const ticketTypeId = `tt_pos_${ulid().slice(-10).toLowerCase()}`;
   await database
     .insertInto('ticket_types')
@@ -230,7 +234,12 @@ async function setupRouteApp(database: Database): Promise<FastifyInstance> {
     pricingEngine,
     inventoryService,
     qrService: {},
-    authService: {},
+    authService: {
+      isLocalDevMode: vi.fn(() => true),
+      authenticateLocalDev: vi.fn(async () => ({
+        principal: makePrincipal(),
+      })),
+    },
     temporalClient: {
       startCheckoutSession: async (input: TemporalStartInput) => {
         await inventoryService.convertHoldsForSession(input.checkoutSessionId);
@@ -266,139 +275,139 @@ async function setupRouteApp(database: Database): Promise<FastifyInstance> {
       },
     },
   } as unknown as AppContext);
-  routeApp.addHook('onRequest', async (request) => {
-    request.principal = makePrincipal();
-  });
   registerErrorHandler(routeApp);
   await routeApp.register(checkoutRoutes);
   return routeApp;
 }
 
-describeWithIntegrationDatabase(`box-office order route DB parity (${integrationDatabaseDriver()})`, () => {
-  beforeAll(async () => {
-    previousDbDriver = setIntegrationDatabaseDriver();
-    db = createDb(integrationDatabaseUrl());
-    await cleanupAll(db).catch(() => undefined);
-    await seedTenantGraph(db);
-    app = await setupRouteApp(db);
-  }, 120_000);
+describeWithIntegrationDatabase(
+  `box-office order route DB parity (${integrationDatabaseDriver()})`,
+  () => {
+    beforeAll(async () => {
+      previousDbDriver = setIntegrationDatabaseDriver();
+      db = createDb(integrationDatabaseUrl());
+      await cleanupAll(db).catch(() => undefined);
+      await seedTenantGraph(db);
+      app = await setupRouteApp(db);
+    }, 120_000);
 
-  afterAll(async () => {
-    await app.close();
-    await cleanupAll(db);
-    await db.destroy();
-    restoreDatabaseDriver(previousDbDriver);
-  }, 120_000);
+    afterAll(async () => {
+      await app.close();
+      await cleanupAll(db);
+      await db.destroy();
+      restoreDatabaseDriver(previousDbDriver);
+    }, 120_000);
 
-  beforeEach(async () => {
-    await resetMutableState(db);
-  });
-
-  it('persists an authenticated manual-card POS order with real DB idempotency and inventory conversion', async () => {
-    const poolId = await createPool(db, 3);
-    const ticketTypeId = await createTicketType(db, poolId, 2500);
-    const payload = {
-      tenderType: 'manual_card',
-      amountCents: 2500,
-      buyer: { email: 'manual-db@example.com', firstName: 'Manual', lastName: 'Buyer' },
-      items: [{ ticketTypeId, quantity: 1 }],
-    };
-
-    const first = await app.inject({
-      method: 'POST',
-      url: `/events/${EVENT_ID}/box-office/orders`,
-      headers: { 'Idempotency-Key': `pos_db_manual_${RUN_ID}` },
-      payload,
-    });
-    const replay = await app.inject({
-      method: 'POST',
-      url: `/events/${EVENT_ID}/box-office/orders`,
-      headers: { 'Idempotency-Key': `pos_db_manual_${RUN_ID}` },
-      payload,
+    beforeEach(async () => {
+      await resetMutableState(db);
     });
 
-    expect(first.statusCode).toBe(201);
-    expect(replay.statusCode).toBe(201);
-    expect(replay.json()).toEqual(first.json());
-    expect(finalizedOrderCount).toBe(1);
+    it('persists an authenticated manual-card POS order with real DB idempotency and inventory conversion', async () => {
+      const poolId = await createPool(db, 3);
+      const ticketTypeId = await createTicketType(db, poolId, 2500);
+      const payload = {
+        tenderType: 'manual_card',
+        amountCents: 2500,
+        buyer: { email: 'manual-db@example.com', firstName: 'Manual', lastName: 'Buyer' },
+        items: [{ ticketTypeId, quantity: 1 }],
+      };
 
-    const orders = await db
-      .selectFrom('orders')
-      .selectAll()
-      .where('tenant_id', '=', TENANT_ID)
-      .execute();
-    expect(orders).toHaveLength(1);
-    expect(orders[0]).toMatchObject({
-      sales_channel: 'box_office',
-      operator_id: OPERATOR_ID,
-      tender_type: 'manual_card',
-      total_cents: 2500,
+      const first = await app.inject({
+        method: 'POST',
+        url: `/events/${EVENT_ID}/box-office/orders`,
+        headers: { 'Idempotency-Key': `pos_db_manual_${RUN_ID}` },
+        payload,
+      });
+      const replay = await app.inject({
+        method: 'POST',
+        url: `/events/${EVENT_ID}/box-office/orders`,
+        headers: { 'Idempotency-Key': `pos_db_manual_${RUN_ID}` },
+        payload,
+      });
+
+      expect(first.statusCode).toBe(201);
+      expect(replay.statusCode).toBe(201);
+      expect(replay.json()).toEqual(first.json());
+      expect(finalizedOrderCount).toBe(1);
+
+      const orders = await db
+        .selectFrom('orders')
+        .selectAll()
+        .where('tenant_id', '=', TENANT_ID)
+        .execute();
+      expect(orders).toHaveLength(1);
+      expect(orders[0]).toMatchObject({
+        sales_channel: 'box_office',
+        operator_id: OPERATOR_ID,
+        tender_type: 'manual_card',
+        total_cents: 2500,
+      });
+
+      const pool = await db
+        .selectFrom('inventory_pools')
+        .selectAll()
+        .where('id', '=', poolId)
+        .executeTakeFirstOrThrow();
+      expect(Number(pool.sold_count)).toBe(1);
+
+      const activeHolds = await db
+        .selectFrom('checkout_holds')
+        .select(({ fn }) => fn.countAll<number>().as('count'))
+        .where('inventory_pool_id', '=', poolId)
+        .where('status', '=', 'active')
+        .executeTakeFirstOrThrow();
+      expect(Number(activeHolds.count)).toBe(0);
     });
 
-    const pool = await db
-      .selectFrom('inventory_pools')
-      .selectAll()
-      .where('id', '=', poolId)
-      .executeTakeFirstOrThrow();
-    expect(Number(pool.sold_count)).toBe(1);
+    it('prevents oversell when concurrent POS cash orders exceed capacity', async () => {
+      const capacity = 2;
+      const burst = 6;
+      const poolId = await createPool(db, capacity);
+      const ticketTypeId = await createTicketType(db, poolId, 1000);
+      const responses = await Promise.all(
+        Array.from({ length: burst }, (_, index) =>
+          app.inject({
+            method: 'POST',
+            url: `/events/${EVENT_ID}/box-office/orders`,
+            headers: { 'Idempotency-Key': `pos_db_burst_${RUN_ID}_${index}` },
+            payload: {
+              tenderType: 'cash',
+              amountCents: 1000,
+              buyer: { email: `cash-${index}@example.com` },
+              items: [{ ticketTypeId, quantity: 1 }],
+            },
+          }),
+        ),
+      );
 
-    const activeHolds = await db
-      .selectFrom('checkout_holds')
-      .select(({ fn }) => fn.countAll<number>().as('count'))
-      .where('inventory_pool_id', '=', poolId)
-      .where('status', '=', 'active')
-      .executeTakeFirstOrThrow();
-    expect(Number(activeHolds.count)).toBe(0);
-  });
+      const successes = responses.filter((response) => response.statusCode === 201);
+      const failures = responses.filter((response) => response.statusCode !== 201);
+      expect(successes).toHaveLength(capacity);
+      expect(failures).toHaveLength(burst - capacity);
+      expect(failures.every((response) => response.statusCode < 500)).toBe(true);
 
-  it('prevents oversell when concurrent POS cash orders exceed capacity', async () => {
-    const capacity = 2;
-    const burst = 6;
-    const poolId = await createPool(db, capacity);
-    const ticketTypeId = await createTicketType(db, poolId, 1000);
-    const responses = await Promise.all(
-      Array.from({ length: burst }, (_, index) =>
-        app.inject({
-          method: 'POST',
-          url: `/events/${EVENT_ID}/box-office/orders`,
-          headers: { 'Idempotency-Key': `pos_db_burst_${RUN_ID}_${index}` },
-          payload: {
-            tenderType: 'cash',
-            amountCents: 1000,
-            buyer: { email: `cash-${index}@example.com` },
-            items: [{ ticketTypeId, quantity: 1 }],
-          },
-        }),
-      ),
-    );
+      const pool = await db
+        .selectFrom('inventory_pools')
+        .selectAll()
+        .where('id', '=', poolId)
+        .executeTakeFirstOrThrow();
+      expect(Number(pool.sold_count)).toBe(capacity);
 
-    const successes = responses.filter((response) => response.statusCode === 201);
-    const failures = responses.filter((response) => response.statusCode !== 201);
-    expect(successes).toHaveLength(capacity);
-    expect(failures).toHaveLength(burst - capacity);
-    expect(failures.every((response) => response.statusCode < 500)).toBe(true);
+      const held = await db
+        .selectFrom('checkout_holds')
+        .select(({ fn }) => fn.countAll<number>().as('count'))
+        .where('inventory_pool_id', '=', poolId)
+        .where('status', '=', 'active')
+        .executeTakeFirstOrThrow();
+      expect(Number(held.count)).toBe(0);
 
-    const pool = await db
-      .selectFrom('inventory_pools')
-      .selectAll()
-      .where('id', '=', poolId)
-      .executeTakeFirstOrThrow();
-    expect(Number(pool.sold_count)).toBe(capacity);
-
-    const held = await db
-      .selectFrom('checkout_holds')
-      .select(({ fn }) => fn.countAll<number>().as('count'))
-      .where('inventory_pool_id', '=', poolId)
-      .where('status', '=', 'active')
-      .executeTakeFirstOrThrow();
-    expect(Number(held.count)).toBe(0);
-
-    const orderCount = await db
-      .selectFrom('orders')
-      .select(({ fn }) => fn.countAll<number>().as('count'))
-      .where('tenant_id', '=', TENANT_ID)
-      .where('sales_channel', '=', 'box_office')
-      .executeTakeFirstOrThrow();
-    expect(Number(orderCount.count)).toBe(capacity);
-  });
-});
+      const orderCount = await db
+        .selectFrom('orders')
+        .select(({ fn }) => fn.countAll<number>().as('count'))
+        .where('tenant_id', '=', TENANT_ID)
+        .where('sales_channel', '=', 'box_office')
+        .executeTakeFirstOrThrow();
+      expect(Number(orderCount.count)).toBe(capacity);
+    });
+  },
+);

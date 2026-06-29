@@ -461,6 +461,62 @@ export type AdminOrderDetail = AdminOrderListItem & {
   };
 };
 
+export type AdminBoxOfficeOrderInput = {
+  tenderType: 'comp' | 'cash' | 'manual_card';
+  amountCents: number;
+  items: Array<{
+    ticketTypeId: string;
+    occurrenceId?: string;
+    quantity: number;
+    attendeeFields?: Array<Record<string, unknown>>;
+  }>;
+  buyer?: {
+    email?: string;
+    firstName?: string;
+    lastName?: string;
+    phone?: string;
+  };
+  buyerFields?: Record<string, unknown>;
+  notes?: string;
+  idempotencyKey: string;
+};
+
+export type AdminBoxOfficeOrderResult = {
+  order: {
+    id: string;
+    tenantId?: string;
+    organizationId?: string;
+    brandId?: string;
+    eventId: string;
+    checkoutSessionId?: string;
+    orderNumber?: string;
+    status: string;
+    currency: string;
+    subtotalCents?: number;
+    discountCents?: number;
+    taxCents?: number;
+    feeCents?: number;
+    totalCents: number;
+    refundedCents?: number;
+    buyerEmail?: string;
+    buyerFirstName?: string;
+    buyerLastName?: string;
+    buyerPhone?: string;
+    paymentIntentId?: string;
+    paymentProvider?: string;
+    salesChannel?: 'online' | 'box_office';
+    operatorId?: string;
+    tenderType?: 'comp' | 'cash' | 'manual_card';
+    paidAt?: string;
+    refundedAt?: string;
+    cancelledAt?: string;
+    createdAt?: string;
+    updatedAt?: string;
+  };
+  sessionId: string;
+  status: 'completed';
+};
+
 export type AdminPaymentCompensation = {
   id: string;
   tenantId: string;
@@ -1459,6 +1515,10 @@ export type AdminApi = {
   listOrders(
     input?: PageCursor & { eventId?: string },
   ): Promise<ApiResult<PageResult<AdminOrderListItem>>>;
+  createBoxOfficeOrder(
+    eventId: string,
+    input: AdminBoxOfficeOrderInput,
+  ): Promise<ApiResult<AdminBoxOfficeOrderResult>>;
   listPaymentCompensations(
     input?: PageCursor & { status?: string; checkoutSessionId?: string },
   ): Promise<ApiResult<PageResult<AdminPaymentCompensation>>>;
@@ -4369,6 +4429,15 @@ export const adminApi: AdminApi = {
         return ok(paginate(orders, input?.cursor, input?.limit));
       },
     );
+  },
+
+  async createBoxOfficeOrder(eventId, input) {
+    const { idempotencyKey, ...body } = input;
+    return request<AdminBoxOfficeOrderResult>(`/v1/events/${eventId}/box-office/orders`, {
+      method: 'POST',
+      headers: { 'Idempotency-Key': idempotencyKey },
+      body: JSON.stringify(body),
+    });
   },
 
   async listPaymentCompensations(input) {

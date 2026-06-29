@@ -237,6 +237,7 @@ async function setupApp(input: {
   reserveCart?: ReturnType<typeof vi.fn>;
   startCheckoutSession?: ReturnType<typeof vi.fn>;
   quote?: typeof defaultQuote;
+  authService?: unknown;
 }) {
   const app = Fastify();
   const reserveCart =
@@ -255,15 +256,49 @@ async function setupApp(input: {
     },
     inventoryService: { reserveCart },
     temporalClient: { startCheckoutSession },
+    authService:
+      input.authService ??
+      ({
+        isLocalDevMode: vi.fn(() => true),
+        authenticateLocalDev: vi.fn(async () => ({
+          principal: input.principal ?? makePrincipal(),
+        })),
+      } as unknown),
   } as unknown as AppContext);
-  app.addHook('onRequest', async (request) => {
-    request.principal = input.principal ?? makePrincipal();
-  });
   await app.register(checkoutRoutes);
   return { app, reserveCart, startCheckoutSession };
 }
 
 describe('box-office order route', () => {
+  it('rejects unauthenticated POS order requests before inventory or workflow side effects', async () => {
+    const reserveCart = vi.fn();
+    const startCheckoutSession = vi.fn();
+    const { app } = await setupApp({
+      tables: baseTables(),
+      reserveCart,
+      startCheckoutSession,
+      authService: {
+        isLocalDevMode: vi.fn(() => false),
+      },
+    });
+
+    const response = await app.inject({
+      method: 'POST',
+      url: '/events/evt_box/box-office/orders',
+      headers: { 'idempotency-key': 'box_unauth_1' },
+      payload: {
+        tenderType: 'cash',
+        amountCents: 2500,
+        buyer: { email: 'door@example.com', firstName: 'Door', lastName: 'Buyer' },
+        items: [{ ticketTypeId: 'tt_ga', quantity: 1 }],
+      },
+    });
+
+    expect(response.statusCode).toBe(401);
+    expect(reserveCart).not.toHaveBeenCalled();
+    expect(startCheckoutSession).not.toHaveBeenCalled();
+  });
+
   it('creates an offline cash order through the checkout workflow with POS attribution', async () => {
     const tables = baseTables();
     const { app, reserveCart, startCheckoutSession } = await setupApp({ tables });

@@ -34,6 +34,7 @@ import {
 } from '@/components/ui/dropdown-menu';
 import { useAdminData } from '@/hooks/use-admin-data';
 import { formatCurrency, formatNumber, formatDateTime } from '@/lib/format';
+import { BoxOfficeOrderPanel } from './box-office-order-panel';
 import { TicketTypeStatusBadge } from './event-status-badge';
 import { TicketTypeFormDrawer } from './ticket-type-form';
 
@@ -136,7 +137,7 @@ export function EventTicketsView({ eventId }: { eventId: string }) {
     void refetchOccurrences();
   };
 
-  if (loading) {
+  if (loading && ticketTypes.length === 0) {
     return (
       <div className="space-y-3">
         {Array.from({ length: 3 }).map((_, i) => (
@@ -166,6 +167,14 @@ export function EventTicketsView({ eventId }: { eventId: string }) {
           error={occurrencesError?.message}
           onCreate={handleCreateOccurrence}
           onRetry={refetchOccurrences}
+        />
+        <BoxOfficeOrderPanel
+          eventId={eventId}
+          ticketTypes={ticketTypes}
+          occurrences={occurrences}
+          onOrderCreated={() => {
+            void refetch();
+          }}
         />
         <EmptyState
           icon={Ticket}
@@ -233,6 +242,15 @@ export function EventTicketsView({ eventId }: { eventId: string }) {
         error={occurrencesError?.message}
         onCreate={handleCreateOccurrence}
         onRetry={refetchOccurrences}
+      />
+
+      <BoxOfficeOrderPanel
+        eventId={eventId}
+        ticketTypes={ticketTypes}
+        occurrences={occurrences}
+        onOrderCreated={() => {
+          void refetch();
+        }}
       />
 
       <div className="rounded-md border">
