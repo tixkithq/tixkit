@@ -2,6 +2,7 @@ import Fastify from 'fastify';
 import { describe, expect, it } from 'vitest';
 import type { Principal } from '@tixkit/domain';
 import type { Database } from '@tixkit/db';
+import { REACT_EMAIL_EDITOR_PACKAGE, createDefaultEmailTemplate } from '@tixkit/content-email';
 import { createDefaultEventPageDocument } from '@tixkit/content-event-page';
 import { createDefaultSmsTemplate } from '@tixkit/content-message';
 import type { AppContext } from '../app.js';
@@ -169,8 +170,8 @@ function versionRow(overrides: Record<string, unknown> = {}) {
     schema_version: 1,
     subject: 'Hi {{recipient.name}}',
     preview_text: null,
-    content_json: JSON.stringify({ blocks: [] }),
-    rendered_html: '<p>Hi {{recipient.name}}</p>',
+    content_json: JSON.stringify(emailDocumentJson()),
+    rendered_html: '<h1>{{event.title}}</h1><p>Hi {{recipient.name}}</p>',
     rendered_text: 'Hi {{recipient.name}}',
     variables: JSON.stringify([]),
     validation: JSON.stringify({ valid: true, severity: 'warning', issues: [] }),
@@ -179,6 +180,47 @@ function versionRow(overrides: Record<string, unknown> = {}) {
     published_at: null,
     ...overrides,
   };
+}
+
+function emailDocumentJson(overrides: Parameters<typeof createDefaultEmailTemplate>[0] = {}) {
+  return createDefaultEmailTemplate({
+    editor: {
+      provider: REACT_EMAIL_EDITOR_PACKAGE,
+      contentHtml: '<h1>{{event.title}}</h1><p>Hi {{recipient.name}}</p>',
+    },
+    settings: {
+      templateKey: 'order-confirmed',
+      subject: 'Hi {{recipient.name}}',
+      previewText: 'Preview for {{recipient.name}}',
+      locale: 'en',
+      category: 'transactional',
+      sender: {
+        fromEmail: 'tickets@example.test',
+        fromName: 'Tixkit',
+        replyToEmail: 'support@example.test',
+      },
+    },
+    blocks: [
+      {
+        type: 'event_hero',
+        headline: 'Hi {{recipient.name}}',
+        body: 'Your {{event.title}} tickets are ready.',
+        ctaLabel: 'View tickets',
+        ctaUrl: '{{event.checkoutUrl}}',
+      },
+      {
+        type: 'ticket_summary',
+        title: 'Ticket summary',
+        body: '{{ticket.type}} - {{order.total}}',
+      },
+      {
+        type: 'unsubscribe_footer',
+        body: 'You are receiving this because you bought tickets with {{brand.name}}.',
+        unsubscribeUrl: '{{brand.supportUrl}}',
+      },
+    ],
+    ...overrides,
+  });
 }
 
 function eventPageJson(overrides: Parameters<typeof createDefaultEventPageDocument>[0] = {
@@ -254,7 +296,7 @@ describe('content routes', () => {
     expect(inserted).toHaveLength(0);
   });
 
-  it('renders previews through the shared content renderer', async () => {
+  it('renders email previews through the React Email adapter and records artifacts', async () => {
     const { db, inserted } = createContentDb({
       brands: [{ id: 'brd_1', tenant_id: 'tnt_1', organization_id: 'org_1' }],
       content_documents: [documentRow()],
@@ -268,7 +310,16 @@ describe('content routes', () => {
       url: '/content-documents/cdoc_1/preview',
       payload: {
         versionId: 'cver_1',
-        context: { recipient: { name: 'Ada' } },
+        context: {
+          event: {
+            title: 'All Access',
+            checkoutUrl: 'https://checkout.example.test/checkout?eventId=evt_1',
+          },
+          brand: { name: 'Tixkit', supportUrl: 'https://help.example.test/preferences' },
+          recipient: { name: 'Ada' },
+          ticket: { type: 'General Admission' },
+          order: { total: '$35.00' },
+        },
       },
     });
 
@@ -277,8 +328,6 @@ describe('content routes', () => {
       channel: 'email',
       output: {
         subject: 'Hi Ada',
-        html: '<p>Hi Ada</p>',
-        text: 'Hi Ada',
       },
       validation: { valid: true },
       renderArtifact: {
@@ -302,6 +351,175 @@ describe('content routes', () => {
           checksum: response.json().renderArtifact.checksum,
         }),
       ]),
+    );
+    expect(response.json().output.html).toContain('Hi Ada');
+    expect(response.json().output.text).toContain('Your All Access tickets are ready.');
+  });
+
+  it('saves, previews, and captures canonical email template test sends', async () => {
+    const emailDocument = emailDocumentJson({
+      settings: {
+        templateKey: 'order-confirmed',
+        subject: 'Tickets for {{event.title}}',
+        previewText: 'Ready for {{recipient.name}}',
+        locale: 'en',
+        category: 'transactional',
+        sender: { fromEmail: 'tickets@example.test' },
+      },
+    });
+    const { db, inserted } = createContentDb({
+      brands: [{ id: 'brd_1', tenant_id: 'tnt_1', organization_id: 'org_1' }],
+      content_documents: [documentRow()],
+      content_document_versions: [],
+      content_test_sends: [],
+      content_render_artifacts: [],
+    });
+    const app = await setupContentApp(db, principal);
+
+    const save = await app.inject({
+      method: 'POST',
+      url: '/content-documents/cdoc_1/versions',
+      payload: {
+        contentJson: emailDocument,
+        subject: 'caller supplied subject must not win',
+        renderedHtml: '<p>caller supplied html must not win</p>',
+        renderedText: 'caller supplied text',
+      },
+    });
+
+    expect(save.statusCode).toBe(201);
+    expect(save.json()).toMatchObject({
+      documentId: 'cdoc_1',
+      subject: 'Tickets for {{event.title}}',
+      previewText: 'Ready for {{recipient.name}}',
+      renderedHtml: '<h1>{{event.title}}</h1><p>Hi {{recipient.name}}</p>',
+      validation: { valid: true },
+    });
+
+    const context = {
+      event: {
+        title: 'All Access',
+        checkoutUrl: 'https://checkout.example.test/checkout?eventId=evt_1',
+      },
+      brand: { name: 'Tixkit', supportUrl: 'https://help.example.test/preferences' },
+      recipient: { name: 'Ada' },
+      ticket: { type: 'General Admission' },
+      order: { total: '$35.00' },
+    };
+    const preview = await app.inject({
+      method: 'POST',
+      url: '/content-documents/cdoc_1/preview',
+      payload: { versionId: save.json().id, context },
+    });
+
+    expect(preview.statusCode).toBe(200);
+    expect(preview.json()).toMatchObject({
+      channel: 'email',
+      output: { subject: 'Tickets for All Access' },
+      validation: { valid: true },
+      renderArtifact: {
+        documentId: 'cdoc_1',
+        versionId: save.json().id,
+        channel: 'email',
+        outputType: 'preview',
+      },
+    });
+    expect(preview.json().output.html).toContain('Hi Ada');
+    expect(preview.json().output.text).toContain('TICKET SUMMARY');
+
+    const capture = await app.inject({
+      method: 'POST',
+      url: '/content-documents/cdoc_1/test-sends',
+      payload: {
+        versionId: save.json().id,
+        recipient: 'ada@example.test',
+        context,
+      },
+    });
+
+    expect(capture.statusCode).toBe(202);
+    expect(capture.json()).toMatchObject({
+      testSend: {
+        channel: 'email',
+        recipient: 'ada@example.test',
+        status: 'captured',
+        renderedSubject: 'Tickets for All Access',
+      },
+      output: preview.json().output,
+      renderArtifact: {
+        documentId: 'cdoc_1',
+        versionId: save.json().id,
+        channel: 'email',
+        outputType: 'test_send',
+      },
+    });
+    expect(capture.json().renderArtifact.checksum).toBe(preview.json().renderArtifact.checksum);
+    expect(inserted).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          document_id: 'cdoc_1',
+          subject: 'Tickets for {{event.title}}',
+          rendered_html: '<h1>{{event.title}}</h1><p>Hi {{recipient.name}}</p>',
+        }),
+        expect.objectContaining({
+          channel: 'email',
+          recipient: 'ada@example.test',
+          status: 'captured',
+        }),
+      ]),
+    );
+  });
+
+  it('fails closed for malformed email template previews and invalid email test sends', async () => {
+    const invalidEmail = emailDocumentJson({
+      settings: {
+        templateKey: 'order-confirmed',
+        subject: 'Invalid email',
+        locale: 'en',
+        category: 'transactional',
+        sender: { fromEmail: 'not-an-email' },
+      },
+    });
+    const { db } = createContentDb({
+      brands: [{ id: 'brd_1', tenant_id: 'tnt_1', organization_id: 'org_1' }],
+      content_documents: [documentRow()],
+      content_document_versions: [
+        versionRow({
+          id: 'cver_email_bad_shape',
+          content_json: JSON.stringify({ editor: { provider: 'legacy-html-editor' } }),
+          validation: JSON.stringify({ valid: false, severity: 'error', issues: [] }),
+        }),
+        versionRow({
+          id: 'cver_email_invalid',
+          content_json: JSON.stringify(invalidEmail),
+          validation: JSON.stringify({ valid: false, severity: 'error', issues: [] }),
+        }),
+      ],
+    });
+    const app = await setupContentApp(db, principal);
+
+    const malformedPreview = await app.inject({
+      method: 'POST',
+      url: '/content-documents/cdoc_1/preview',
+      payload: { versionId: 'cver_email_bad_shape', context: { recipient: { name: 'Ada' } } },
+    });
+    const invalidTestSend = await app.inject({
+      method: 'POST',
+      url: '/content-documents/cdoc_1/test-sends',
+      payload: {
+        versionId: 'cver_email_invalid',
+        recipient: 'ada@example.test',
+        context: { recipient: { name: 'Ada' } },
+      },
+    });
+
+    expect(malformedPreview.statusCode).toBe(400);
+    expect(malformedPreview.json().message ?? malformedPreview.json().error?.message).toContain(
+      'canonical React Email',
+    );
+    expect(invalidTestSend.statusCode).toBe(400);
+    expect(invalidTestSend.json().message ?? invalidTestSend.json().error?.message).toContain(
+      'Email test send has render blockers',
     );
   });
 
