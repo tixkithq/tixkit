@@ -14,6 +14,7 @@ import { developerRoutes } from '../../routes/modules/developer.js';
 import { reportingRoutes } from '../../routes/modules/reporting.js';
 import { messagingRoutes } from '../../routes/modules/messaging.js';
 import { waitlistRoutes } from '../../routes/modules/waitlist.js';
+import { contentRoutes } from '../../routes/modules/content.js';
 import { hashRequest } from '../../services/idempotency.js';
 
 /**
@@ -153,16 +154,17 @@ function createMockDb(tables: Tables = {}): unknown {
     };
   }
 
-  return {
+  const db = {
     selectFrom: createQuery,
     updateTable: createUpdate,
     insertInto: createInsert,
     deleteFrom: createDelete,
     transaction: () => ({
-      execute: async (fn: (trx: unknown) => Promise<unknown>) => fn({}),
+      execute: async (fn: (trx: unknown) => Promise<unknown>) => fn(db),
     }),
     destroy: vi.fn(),
   };
+  return db;
 }
 
 // ---------------------------------------------------------------------------
@@ -444,6 +446,47 @@ function exportJobRow(overrides: Row = {}): Row {
     filters: null,
     created_at: new Date('2026-06-01'),
     completed_at: new Date('2026-06-01'),
+    ...overrides,
+  };
+}
+
+function contentDocumentRow(overrides: Row = {}): Row {
+  return {
+    id: 'cdoc_1',
+    tenant_id: 'tnt_1',
+    organization_id: 'org_1',
+    brand_id: 'brd_1',
+    event_id: 'evt_1',
+    channel: 'event_page',
+    key: 'event-page',
+    name: 'Event page',
+    locale: 'en',
+    status: 'draft',
+    current_draft_version_id: 'cver_1',
+    published_version_id: null,
+    archived_at: null,
+    created_at: new Date('2026-06-01T00:00:00.000Z'),
+    updated_at: new Date('2026-06-01T00:00:00.000Z'),
+    ...overrides,
+  };
+}
+
+function contentVersionRow(overrides: Row = {}): Row {
+  return {
+    id: 'cver_1',
+    document_id: 'cdoc_1',
+    version_number: 1,
+    subject: 'Event update',
+    preview_text: 'Preview',
+    content_json: JSON.stringify({ blocks: [{ type: 'text', text: 'Hello' }] }),
+    rendered_html: '<p>Hello</p>',
+    rendered_text: 'Hello',
+    variables: '[]',
+    validation: JSON.stringify({ valid: true, severity: 'warning', issues: [] }),
+    status: 'draft',
+    created_by: 'usr_author',
+    published_at: null,
+    created_at: new Date('2026-06-01T00:00:00.000Z'),
     ...overrides,
   };
 }
@@ -1012,6 +1055,94 @@ describe('cross-tenant denial', () => {
     expect(res.statusCode).toBe(404);
     await app.close();
   });
+
+  it('GET /content-documents excludes documents from another tenant', async () => {
+    const tables: Tables = {
+      content_documents: [contentDocumentRow({ tenant_id: 'tnt_other' })],
+    };
+    const app = await setupApp(contentRoutes, principal, tables);
+
+    const res = await app.inject({ method: 'GET', url: '/content-documents' });
+
+    expect(res.statusCode).toBe(200);
+    expect(res.json().items).toHaveLength(0);
+    await app.close();
+  });
+
+  it.each([
+    ['GET /content-documents/:documentId', 'GET', '/content-documents/cdoc_1', undefined],
+    [
+      'POST /content-documents/:documentId/duplicate',
+      'POST',
+      '/content-documents/cdoc_1/duplicate',
+      { key: 'copy' },
+    ],
+    [
+      'GET /content-documents/:documentId/versions',
+      'GET',
+      '/content-documents/cdoc_1/versions',
+      undefined,
+    ],
+    [
+      'POST /content-documents/:documentId/versions',
+      'POST',
+      '/content-documents/cdoc_1/versions',
+      {
+        subject: 'Blocked',
+        previewText: 'Blocked',
+        contentJson: { blocks: [] },
+        renderedHtml: '<p>Blocked</p>',
+        renderedText: 'Blocked',
+      },
+    ],
+    [
+      'POST /content-documents/:documentId/preview',
+      'POST',
+      '/content-documents/cdoc_1/preview',
+      {
+        contentJson: { blocks: [] },
+        renderedHtml: '<p>Blocked</p>',
+        renderedText: 'Blocked',
+      },
+    ],
+    [
+      'POST /content-documents/:documentId/versions/:versionId/publish',
+      'POST',
+      '/content-documents/cdoc_1/versions/cver_1/publish',
+      undefined,
+    ],
+    ['POST /content-documents/:documentId/archive', 'POST', '/content-documents/cdoc_1/archive', undefined],
+    [
+      'POST /content-documents/:documentId/test-sends',
+      'POST',
+      '/content-documents/cdoc_1/test-sends',
+      {
+        versionId: 'cver_1',
+        recipient: 'editor@example.com',
+        context: {},
+      },
+    ],
+  ] as const)('%s returns 404 for a document in another tenant', async (_label, method, url, payload) => {
+    const tables: Tables = {
+      brands: [brandRow({ tenant_id: 'tnt_other' })],
+      events: [eventRow({ tenant_id: 'tnt_other' })],
+      content_documents: [contentDocumentRow({ tenant_id: 'tnt_other' })],
+      content_document_versions: [contentVersionRow()],
+      content_test_sends: [],
+    };
+    const app = await setupApp(contentRoutes, principal, tables);
+
+    const res = await app.inject({
+      method,
+      url,
+      ...(payload === undefined ? {} : { payload }),
+    });
+
+    expect(res.statusCode).toBe(404);
+    expect(tables.content_document_versions).toHaveLength(1);
+    expect(tables.content_test_sends).toHaveLength(0);
+    await app.close();
+  });
 });
 
 // ===========================================================================
@@ -1238,6 +1369,74 @@ describe('cross-organization denial (same tenant)', () => {
     const app = await setupApp(eventRoutes, principal, tables);
     const res = await app.inject({ method: 'GET', url: '/events?organizationId=org_B' });
     expect(res.statusCode).toBe(404);
+    await app.close();
+  });
+
+  it('GET /content-documents excludes documents from another organization', async () => {
+    const tables: Tables = {
+      content_documents: [contentDocumentRow({ tenant_id: 'tnt_1', organization_id: 'org_B' })],
+    };
+    const app = await setupApp(contentRoutes, principal, tables);
+
+    const res = await app.inject({ method: 'GET', url: '/content-documents' });
+
+    expect(res.statusCode).toBe(200);
+    expect(res.json().items).toHaveLength(0);
+    await app.close();
+  });
+
+  it('POST /content-documents returns 404 for a target organization outside principal scope', async () => {
+    const tables: Tables = {
+      brands: [brandRow({ id: 'brd_B', organization_id: 'org_B' })],
+      events: [eventRow({ id: 'evt_B', organization_id: 'org_B', brand_id: 'brd_B' })],
+      content_documents: [],
+    };
+    const app = await setupApp(contentRoutes, principal, tables);
+
+    const res = await app.inject({
+      method: 'POST',
+      url: '/content-documents',
+      payload: {
+        organizationId: 'org_B',
+        brandId: 'brd_B',
+        eventId: 'evt_B',
+        channel: 'event_page',
+        key: 'event-page',
+        name: 'Event page',
+        locale: 'en',
+      },
+    });
+
+    expect(res.statusCode).toBe(404);
+    expect(tables.content_documents).toHaveLength(0);
+    await app.close();
+  });
+
+  it('GET and write content document routes return 404 for another organization', async () => {
+    const tables: Tables = {
+      brands: [brandRow({ organization_id: 'org_B' })],
+      events: [eventRow({ organization_id: 'org_B' })],
+      content_documents: [contentDocumentRow({ organization_id: 'org_B' })],
+      content_document_versions: [contentVersionRow()],
+      content_test_sends: [],
+    };
+    const app = await setupApp(contentRoutes, principal, tables);
+
+    const readRes = await app.inject({ method: 'GET', url: '/content-documents/cdoc_1' });
+    const duplicateRes = await app.inject({
+      method: 'POST',
+      url: '/content-documents/cdoc_1/duplicate',
+      payload: { key: 'blocked-copy' },
+    });
+    const archiveRes = await app.inject({
+      method: 'POST',
+      url: '/content-documents/cdoc_1/archive',
+    });
+
+    expect(readRes.statusCode).toBe(404);
+    expect(duplicateRes.statusCode).toBe(404);
+    expect(archiveRes.statusCode).toBe(404);
+    expect(tables.content_documents).toHaveLength(1);
     await app.close();
   });
 });
@@ -1681,6 +1880,136 @@ describe('brand and event scope denial', () => {
     expect(res.headers.location).toBe('https://exports.example.test/exp_1.csv');
     await app.close();
   });
+
+  it('GET /content-documents exposes only permitted brand documents for brand-scoped keys', async () => {
+    const principal = makePrincipal({
+      type: 'api_key',
+      id: 'ak_brand_scoped',
+      brandIds: ['brd_A'],
+      scopes: ['events.read'],
+    });
+    const tables: Tables = {
+      content_documents: [
+        contentDocumentRow({ id: 'cdoc_A', brand_id: 'brd_A' }),
+        contentDocumentRow({ id: 'cdoc_B', brand_id: 'brd_B' }),
+      ],
+    };
+    const app = await setupApp(contentRoutes, principal, tables);
+
+    const res = await app.inject({ method: 'GET', url: '/content-documents?channel=event_page' });
+
+    expect(res.statusCode).toBe(200);
+    expect(res.json().items.map((item: { id: string }) => item.id)).toEqual(['cdoc_A']);
+    await app.close();
+  });
+
+  it('GET /content-documents/:documentId returns 404 for brand-scoped keys accessing another brand document', async () => {
+    const principal = makePrincipal({
+      type: 'api_key',
+      id: 'ak_brand_scoped',
+      brandIds: ['brd_A'],
+      scopes: ['events.read'],
+    });
+    const tables: Tables = {
+      brands: [brandRow({ id: 'brd_B' })],
+      events: [eventRow({ brand_id: 'brd_B' })],
+      content_documents: [contentDocumentRow({ brand_id: 'brd_B' })],
+    };
+    const app = await setupApp(contentRoutes, principal, tables);
+
+    const res = await app.inject({ method: 'GET', url: '/content-documents/cdoc_1' });
+
+    expect(res.statusCode).toBe(404);
+    await app.close();
+  });
+
+  it('POST /content-documents returns 404 for brand-scoped keys creating under another brand', async () => {
+    const principal = makePrincipal({
+      type: 'api_key',
+      id: 'ak_brand_scoped',
+      brandIds: ['brd_A'],
+      scopes: ['events.write'],
+    });
+    const tables: Tables = {
+      brands: [brandRow({ id: 'brd_B' })],
+      events: [eventRow({ id: 'evt_B', brand_id: 'brd_B' })],
+      content_documents: [],
+    };
+    const app = await setupApp(contentRoutes, principal, tables);
+
+    const res = await app.inject({
+      method: 'POST',
+      url: '/content-documents',
+      payload: {
+        organizationId: 'org_1',
+        brandId: 'brd_B',
+        eventId: 'evt_B',
+        channel: 'event_page',
+        key: 'event-page',
+        name: 'Event page',
+        locale: 'en',
+      },
+    });
+
+    expect(res.statusCode).toBe(404);
+    expect(tables.content_documents).toHaveLength(0);
+    await app.close();
+  });
+
+  it('GET /content-documents exposes only permitted event documents for event-scoped keys', async () => {
+    const principal = makePrincipal({
+      type: 'api_key',
+      id: 'ak_event_scoped',
+      eventIds: ['evt_A'],
+      scopes: ['events.read'],
+    });
+    const tables: Tables = {
+      content_documents: [
+        contentDocumentRow({ id: 'cdoc_A', event_id: 'evt_A' }),
+        contentDocumentRow({ id: 'cdoc_B', event_id: 'evt_B' }),
+        contentDocumentRow({ id: 'cdoc_brand', event_id: null }),
+      ],
+    };
+    const app = await setupApp(contentRoutes, principal, tables);
+
+    const res = await app.inject({ method: 'GET', url: '/content-documents?channel=event_page' });
+
+    expect(res.statusCode).toBe(200);
+    expect(res.json().items.map((item: { id: string }) => item.id)).toEqual(['cdoc_A']);
+    await app.close();
+  });
+
+  it('POST /content-documents/:documentId/versions returns 404 for event-scoped keys accessing another event document', async () => {
+    const principal = makePrincipal({
+      type: 'api_key',
+      id: 'ak_event_scoped',
+      eventIds: ['evt_A'],
+      scopes: ['events.write'],
+    });
+    const tables: Tables = {
+      brands: [brandRow()],
+      events: [eventRow({ id: 'evt_B' })],
+      content_documents: [contentDocumentRow({ event_id: 'evt_B' })],
+      content_document_versions: [],
+    };
+    const app = await setupApp(contentRoutes, principal, tables);
+
+    const res = await app.inject({
+      method: 'POST',
+      url: '/content-documents/cdoc_1/versions',
+      payload: {
+        subject: 'Blocked',
+        previewText: 'Blocked',
+        contentJson: { blocks: [] },
+        renderedHtml: '<p>Blocked</p>',
+        renderedText: 'Blocked',
+      },
+    });
+
+    expect(res.statusCode).toBe(404);
+    expect(tables.content_document_versions).toHaveLength(0);
+    await app.close();
+  });
 });
 
 // ===========================================================================
@@ -1738,6 +2067,63 @@ describe('API key scope enforcement', () => {
       url: '/events/evt_1/waitlist/settings',
       payload: { autoOfferEnabled: true, offerTtlMinutes: 60 },
     });
+    expect(res.statusCode).toBe(403);
+    await app.close();
+  });
+
+  it('POST /content-documents returns 403 for event-page content without events.write', async () => {
+    const principal = makePrincipal({ scopes: ['events.read'] });
+    const app = await setupApp(contentRoutes, principal, {
+      brands: [brandRow()],
+      events: [eventRow()],
+      content_documents: [],
+    });
+
+    const res = await app.inject({
+      method: 'POST',
+      url: '/content-documents',
+      payload: {
+        organizationId: 'org_1',
+        brandId: 'brd_1',
+        eventId: 'evt_1',
+        channel: 'event_page',
+        key: 'event-page',
+        name: 'Event page',
+        locale: 'en',
+      },
+    });
+
+    expect(res.statusCode).toBe(403);
+    await app.close();
+  });
+
+  it('GET /content-documents/:documentId returns 403 for email content without messages.write', async () => {
+    const principal = makePrincipal({ scopes: ['events.read'] });
+    const app = await setupApp(contentRoutes, principal, {
+      brands: [brandRow()],
+      events: [eventRow()],
+      content_documents: [contentDocumentRow({ channel: 'email', key: 'order-confirmed' })],
+    });
+
+    const res = await app.inject({ method: 'GET', url: '/content-documents/cdoc_1' });
+
+    expect(res.statusCode).toBe(403);
+    await app.close();
+  });
+
+  it('POST /content-documents/:documentId/archive returns 403 for event-page content without events.write', async () => {
+    const principal = makePrincipal({ scopes: ['events.read'] });
+    const app = await setupApp(contentRoutes, principal, {
+      brands: [brandRow()],
+      events: [eventRow()],
+      content_documents: [contentDocumentRow()],
+    });
+
+    const res = await app.inject({
+      method: 'POST',
+      url: '/content-documents/cdoc_1/archive',
+    });
+
     expect(res.statusCode).toBe(403);
     await app.close();
   });
