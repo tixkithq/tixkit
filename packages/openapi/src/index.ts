@@ -1642,6 +1642,14 @@ export const openApiSpec = {
           eventId: { type: 'string' },
           currency: { type: 'string' },
           grossSalesCents: { type: 'integer' },
+          grossSalesByChannelCents: {
+            type: 'object',
+            properties: {
+              online: { type: 'integer' },
+              boxOffice: { type: 'integer' },
+            },
+            required: ['online', 'boxOffice'],
+          },
           netRevenueCents: { type: 'integer' },
           refundsCents: { type: 'integer' },
           feesCents: { type: 'integer' },
@@ -1656,6 +1664,7 @@ export const openApiSpec = {
           'eventId',
           'currency',
           'grossSalesCents',
+          'grossSalesByChannelCents',
           'netRevenueCents',
           'refundsCents',
           'feesCents',

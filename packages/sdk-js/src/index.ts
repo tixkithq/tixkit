@@ -789,6 +789,10 @@ export type SalesReport = {
   eventId: string;
   currency: string;
   grossSalesCents: number;
+  grossSalesByChannelCents: {
+    online: number;
+    boxOffice: number;
+  };
   netRevenueCents: number;
   refundsCents: number;
   feesCents: number;

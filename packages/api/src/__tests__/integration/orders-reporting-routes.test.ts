@@ -948,6 +948,7 @@ describe('reporting routes', () => {
     const body = res.json();
     expect(body.eventId).toBe('evt_1');
     expect(body.grossSalesCents).toBe(10700);
+    expect(body.grossSalesByChannelCents).toEqual({ online: 10700, boxOffice: 0 });
     expect(body.refundsCents).toBe(1000);
     expect(body.netRevenueCents).toBe(9700);
     expect(body.ticketsSold).toBe(2);
@@ -982,6 +983,43 @@ describe('reporting routes', () => {
         ]),
       }),
     );
+    await app.close();
+  });
+
+  it('GET /events/:eventId/reports/sales groups gross sales by sales channel', async () => {
+    dbState.orders = [
+      { ...dbState.order, id: 'ord_online', sales_channel: 'online', total_cents: 10_700 },
+      {
+        ...dbState.order,
+        id: 'ord_box_office',
+        sales_channel: 'box_office',
+        tender_type: 'cash',
+        operator_id: 'usr_operator',
+        total_cents: 3_500,
+        fee_cents: 0,
+        tax_cents: 0,
+      },
+      {
+        ...dbState.order,
+        id: 'ord_legacy_online',
+        sales_channel: undefined,
+        total_cents: 2_000,
+        fee_cents: 0,
+        tax_cents: 0,
+      },
+    ];
+
+    const app = await setupApp(reportingRoutes, makePrincipal());
+    const res = await app.inject({ method: 'GET', url: '/events/evt_1/reports/sales' });
+
+    expect(res.statusCode).toBe(200);
+    expect(res.json()).toMatchObject({
+      grossSalesCents: 16_200,
+      grossSalesByChannelCents: {
+        online: 12_700,
+        boxOffice: 3_500,
+      },
+    });
     await app.close();
   });
 

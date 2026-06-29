@@ -421,7 +421,7 @@ Bulk marketing and event-update SMS require active `smsOptIn`. Suppression and c
 
 | Method | Path                                                  | Scope          | Description                                                      |
 | ------ | ----------------------------------------------------- | -------------- | ---------------------------------------------------------------- |
-| `GET`  | `/v1/events/:eventId/reports/sales`                   | `reports.read` | Gross/net sales, refunds, fees, tax, tickets sold, check-ins     |
+| `GET`  | `/v1/events/:eventId/reports/sales`                   | `reports.read` | Gross/net sales, sales by channel, refunds, fees, tax, tickets sold, check-ins |
 | `GET`  | `/v1/events/:eventId/reports/tax`                     | `reports.read` | Tax breakdown                                                    |
 | `GET`  | `/v1/events/:eventId/reports/attendance`              | `reports.read` | Attendance/check-in stats                                        |
 | `GET`  | `/v1/events/:eventId/reports/promo`                   | `reports.read` | Promo/discount usage                                             |

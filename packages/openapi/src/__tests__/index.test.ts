@@ -78,6 +78,17 @@ describe('openApiSpec', () => {
       type: 'string',
       enum: ['comp', 'cash', 'manual_card'],
     });
+    expect(openApiSpec.components.schemas.SalesReport.properties.grossSalesByChannelCents).toEqual({
+      type: 'object',
+      properties: {
+        online: { type: 'integer' },
+        boxOffice: { type: 'integer' },
+      },
+      required: ['online', 'boxOffice'],
+    });
+    expect(openApiSpec.components.schemas.SalesReport.required).toContain(
+      'grossSalesByChannelCents',
+    );
   });
 
   it('documents Stripe Connect onboarding URL responses', () => {

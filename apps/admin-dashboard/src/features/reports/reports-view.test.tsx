@@ -155,6 +155,7 @@ describe('ReportsView', () => {
         eventId: 'evt_1',
         currency: 'USD',
         grossSalesCents: 12500,
+        grossSalesByChannelCents: { online: 9000, boxOffice: 3500 },
         netRevenueCents: 10000,
         feesCents: 500,
         taxCents: 1000,
@@ -259,6 +260,8 @@ describe('ReportsView', () => {
     const view = render(<ReportsView eventId="evt_1" />);
 
     expect(await view.findByText('Gross Sales')).toBeInTheDocument();
+    expect(view.getByText('Online Sales')).toBeInTheDocument();
+    expect(view.getByText('Box Office')).toBeInTheDocument();
 
     fireEvent.click(view.getByRole('tab', { name: 'Tax' }));
     expect(await view.findAllByText('Tax Collected')).toHaveLength(2);
