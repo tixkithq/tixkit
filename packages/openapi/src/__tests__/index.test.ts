@@ -217,6 +217,26 @@ describe('openApiSpec', () => {
       'checksum',
       'createdAt',
     ]);
+    expect(
+      openApiSpec.components.schemas.EmailTemplateDocument.properties.editor.properties.provider.enum,
+    ).toEqual(['@react-email/editor']);
+    expect(openApiSpec.components.schemas.EmailTemplateDocument.example).toMatchObject({
+      schemaVersion: 1,
+      editor: { provider: '@react-email/editor' },
+      settings: {
+        templateKey: 'order-confirmed',
+        category: 'transactional',
+        sender: {
+          fromEmail: 'tickets@example.test',
+          replyToEmail: 'support@example.test',
+        },
+      },
+      blocks: expect.arrayContaining([
+        expect.objectContaining({ type: 'event_hero' }),
+        expect.objectContaining({ type: 'ticket_summary' }),
+        expect.objectContaining({ type: 'unsubscribe_footer' }),
+      ]),
+    });
     expect(openApiSpec.components.schemas.SmsTemplateDocument.properties.editor.properties.provider.enum).toEqual([
       '@tixkit/content-message/sms-composer',
     ]);
@@ -225,6 +245,16 @@ describe('openApiSpec', () => {
         'application/json'
       ].schema.properties.contentJson.oneOf,
     ).toEqual([
+      { $ref: '#/components/schemas/EmailTemplateDocument' },
+      { $ref: '#/components/schemas/SmsTemplateDocument' },
+      { type: 'object', additionalProperties: true },
+    ]);
+    expect(
+      openApiSpec.paths['/content-documents/{documentId}/preview'].post.requestBody.content[
+        'application/json'
+      ].schema.properties.contentJson.oneOf,
+    ).toEqual([
+      { $ref: '#/components/schemas/EmailTemplateDocument' },
       { $ref: '#/components/schemas/SmsTemplateDocument' },
       { type: 'object', additionalProperties: true },
     ]);

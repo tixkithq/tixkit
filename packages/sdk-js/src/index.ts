@@ -526,10 +526,87 @@ export type DuplicateContentDocumentInput = {
 export type SaveContentVersionInput = {
   subject?: string;
   previewText?: string;
-  contentJson?: unknown | SmsTemplateDocument;
+  contentJson?: EmailTemplateDocument | SmsTemplateDocument | Record<string, unknown>;
   renderedHtml?: string;
   renderedText?: string;
 };
+
+export type EmailTemplateCategory = 'transactional' | 'bulk' | 'staff' | 'system';
+
+export type EmailTemplateSender = {
+  fromEmail?: string;
+  fromName?: string;
+  replyToEmail?: string;
+};
+
+export type EmailTemplateDocument = {
+  schemaVersion: 1;
+  editor: {
+    provider: '@react-email/editor';
+    contentHtml: string;
+  };
+  settings: {
+    templateKey: string;
+    subject: string;
+    previewText?: string;
+    locale: string;
+    category: EmailTemplateCategory;
+    sender: EmailTemplateSender;
+  };
+  blocks: EmailTemplateBlock[];
+};
+
+export type EmailTemplateBlock =
+  | {
+      type: 'event_hero';
+      headline: string;
+      body?: string;
+      imageUrl?: string;
+      imageAlt?: string;
+      ctaLabel?: string;
+      ctaUrl?: string;
+    }
+  | {
+      type: 'ticket_summary';
+      title: string;
+      body: string;
+    }
+  | {
+      type: 'order_summary';
+      title: string;
+      rows: Array<{ label: string; value: string }>;
+    }
+  | {
+      type: 'qr_code';
+      title: string;
+      imageUrl: string;
+      imageAlt?: string;
+    }
+  | {
+      type: 'calendar_button';
+      label: string;
+      url: string;
+    }
+  | {
+      type: 'venue_block';
+      title: string;
+      address: string;
+      mapUrl?: string;
+    }
+  | {
+      type: 'social_links';
+      links: Array<{ label: string; url: string }>;
+    }
+  | {
+      type: 'unsubscribe_footer';
+      body: string;
+      unsubscribeUrl: string;
+    }
+  | {
+      type: 'raw_html';
+      html: string;
+      safe: boolean;
+    };
 
 export type SmsTemplateDocument = {
   schemaVersion: 1;

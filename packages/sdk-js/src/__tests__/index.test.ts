@@ -4,7 +4,12 @@ import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
-import { TixkitClient, TixkitApiError, type WebhookEvent } from '../index.js';
+import {
+  TixkitClient,
+  TixkitApiError,
+  type EmailTemplateDocument,
+  type WebhookEvent,
+} from '../index.js';
 
 function mockFetch(status: number, body: unknown) {
   const init: ResponseInit = { status, headers: { 'Content-Type': 'application/json' } };
@@ -1075,6 +1080,77 @@ describe('TixkitClient new resource methods', () => {
     expect(getCall(fm, 4).url).toBe(
       'https://api.test/v1/public/events/evt_1/discovery-card',
     );
+  });
+
+  it('content preview sends canonical React Email document JSON without narrowing to generic objects', async () => {
+    const fm = mockFetch(200, {
+      channel: 'email',
+      output: {
+        subject: 'Your All Access Chicago tickets are ready',
+        html: '<h1>All Access Chicago</h1>',
+        text: 'All Access Chicago',
+      },
+      validation: { valid: true, severity: 'warning', issues: [] },
+    });
+    const c = new TixkitClient({
+      apiKey: '***********',
+      apiBaseUrl: 'https://api.test',
+      maxRetries: 0,
+    });
+    const contentJson: EmailTemplateDocument = {
+      schemaVersion: 1,
+      editor: {
+        provider: '@react-email/editor',
+        contentHtml:
+          '<h1>{{event.title}}</h1><p>Hi {{recipient.name}}, your tickets are ready.</p>',
+      },
+      settings: {
+        templateKey: 'order-confirmed',
+        subject: 'Your {{event.title}} tickets are ready',
+        previewText: 'Everything you need before arrival.',
+        locale: 'en',
+        category: 'transactional',
+        sender: {
+          fromEmail: 'tickets@example.test',
+          fromName: '{{brand.name}}',
+          replyToEmail: 'support@example.test',
+        },
+      },
+      blocks: [
+        {
+          type: 'event_hero',
+          headline: '{{event.title}}',
+          body: 'Hi {{recipient.name}}, your order is confirmed.',
+          ctaLabel: 'View tickets',
+          ctaUrl: '{{event.checkoutUrl}}',
+        },
+        {
+          type: 'ticket_summary',
+          title: 'Ticket summary',
+          body: '{{ticket.type}} - {{order.total}}',
+        },
+        {
+          type: 'unsubscribe_footer',
+          body: 'You are receiving this because you purchased or manage tickets with {{brand.name}}.',
+          unsubscribeUrl: '{{brand.supportUrl}}',
+        },
+      ],
+    };
+
+    await c.content.preview('cdoc_email', {
+      versionId: 'cver_email',
+      contentJson,
+      context: { recipient: { name: 'Ada Lovelace' } },
+    });
+
+    const call = getCall(fm);
+    expect(call.url).toBe('https://api.test/v1/content-documents/cdoc_email/preview');
+    expect(call.method).toBe('POST');
+    expect(JSON.parse(call.body)).toEqual({
+      versionId: 'cver_email',
+      contentJson,
+      context: { recipient: { name: 'Ada Lovelace' } },
+    });
   });
 
   it('content testSend returns render artifact metadata from the documented path', async () => {

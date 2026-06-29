@@ -181,7 +181,13 @@ export const openApiSpec = {
           schemaVersion: { type: 'integer' },
           subject: { type: 'string' },
           previewText: { type: 'string' },
-          contentJson: { type: 'object', additionalProperties: true },
+          contentJson: {
+            oneOf: [
+              { $ref: '#/components/schemas/EmailTemplateDocument' },
+              { $ref: '#/components/schemas/SmsTemplateDocument' },
+              { type: 'object', additionalProperties: true },
+            ],
+          },
           renderedHtml: { type: 'string' },
           renderedText: { type: 'string' },
           variables: {
@@ -213,6 +219,199 @@ export const openApiSpec = {
           'createdBy',
           'createdAt',
         ],
+      },
+      EmailTemplateDocument: {
+        type: 'object',
+        description: 'Canonical React Email template JSON for email content document versions.',
+        properties: {
+          schemaVersion: { type: 'integer', enum: [1] },
+          editor: {
+            type: 'object',
+            properties: {
+              provider: { type: 'string', enum: ['@react-email/editor'] },
+              contentHtml: {
+                type: 'string',
+                description: 'React Email editor export HTML used for round-tripping authoring state.',
+              },
+            },
+            required: ['provider', 'contentHtml'],
+          },
+          settings: {
+            type: 'object',
+            properties: {
+              templateKey: { type: 'string' },
+              subject: { type: 'string' },
+              previewText: { type: 'string' },
+              locale: { type: 'string' },
+              category: {
+                type: 'string',
+                enum: ['transactional', 'bulk', 'staff', 'system'],
+              },
+              sender: {
+                type: 'object',
+                properties: {
+                  fromEmail: { type: 'string', format: 'email' },
+                  fromName: { type: 'string' },
+                  replyToEmail: { type: 'string', format: 'email' },
+                },
+              },
+            },
+            required: ['templateKey', 'subject', 'locale', 'category', 'sender'],
+          },
+          blocks: {
+            type: 'array',
+            items: {
+              oneOf: [
+                {
+                  type: 'object',
+                  properties: {
+                    type: { type: 'string', enum: ['event_hero'] },
+                    headline: { type: 'string' },
+                    body: { type: 'string' },
+                    imageUrl: { type: 'string' },
+                    imageAlt: { type: 'string' },
+                    ctaLabel: { type: 'string' },
+                    ctaUrl: { type: 'string' },
+                  },
+                  required: ['type', 'headline'],
+                },
+                {
+                  type: 'object',
+                  properties: {
+                    type: { type: 'string', enum: ['ticket_summary'] },
+                    title: { type: 'string' },
+                    body: { type: 'string' },
+                  },
+                  required: ['type', 'title', 'body'],
+                },
+                {
+                  type: 'object',
+                  properties: {
+                    type: { type: 'string', enum: ['order_summary'] },
+                    title: { type: 'string' },
+                    rows: {
+                      type: 'array',
+                      items: {
+                        type: 'object',
+                        properties: {
+                          label: { type: 'string' },
+                          value: { type: 'string' },
+                        },
+                        required: ['label', 'value'],
+                      },
+                    },
+                  },
+                  required: ['type', 'title', 'rows'],
+                },
+                {
+                  type: 'object',
+                  properties: {
+                    type: { type: 'string', enum: ['qr_code'] },
+                    title: { type: 'string' },
+                    imageUrl: { type: 'string' },
+                    imageAlt: { type: 'string' },
+                  },
+                  required: ['type', 'title', 'imageUrl'],
+                },
+                {
+                  type: 'object',
+                  properties: {
+                    type: { type: 'string', enum: ['calendar_button'] },
+                    label: { type: 'string' },
+                    url: { type: 'string' },
+                  },
+                  required: ['type', 'label', 'url'],
+                },
+                {
+                  type: 'object',
+                  properties: {
+                    type: { type: 'string', enum: ['venue_block'] },
+                    title: { type: 'string' },
+                    address: { type: 'string' },
+                    mapUrl: { type: 'string' },
+                  },
+                  required: ['type', 'title', 'address'],
+                },
+                {
+                  type: 'object',
+                  properties: {
+                    type: { type: 'string', enum: ['social_links'] },
+                    links: {
+                      type: 'array',
+                      items: {
+                        type: 'object',
+                        properties: {
+                          label: { type: 'string' },
+                          url: { type: 'string' },
+                        },
+                        required: ['label', 'url'],
+                      },
+                    },
+                  },
+                  required: ['type', 'links'],
+                },
+                {
+                  type: 'object',
+                  properties: {
+                    type: { type: 'string', enum: ['unsubscribe_footer'] },
+                    body: { type: 'string' },
+                    unsubscribeUrl: { type: 'string' },
+                  },
+                  required: ['type', 'body', 'unsubscribeUrl'],
+                },
+                {
+                  type: 'object',
+                  properties: {
+                    type: { type: 'string', enum: ['raw_html'] },
+                    html: { type: 'string' },
+                    safe: { type: 'boolean' },
+                  },
+                  required: ['type', 'html', 'safe'],
+                },
+              ],
+            },
+          },
+        },
+        required: ['schemaVersion', 'editor', 'settings', 'blocks'],
+        example: {
+          schemaVersion: 1,
+          editor: {
+            provider: '@react-email/editor',
+            contentHtml:
+              '<h1>{{event.title}}</h1><p>Hi {{recipient.name}}, your tickets are ready.</p>',
+          },
+          settings: {
+            templateKey: 'order-confirmed',
+            subject: 'Your {{event.title}} tickets are ready',
+            previewText: 'Everything you need before arrival.',
+            locale: 'en',
+            category: 'transactional',
+            sender: {
+              fromEmail: 'tickets@example.test',
+              fromName: '{{brand.name}}',
+              replyToEmail: 'support@example.test',
+            },
+          },
+          blocks: [
+            {
+              type: 'event_hero',
+              headline: '{{event.title}}',
+              body: 'Hi {{recipient.name}}, your order is confirmed.',
+              ctaLabel: 'View tickets',
+              ctaUrl: '{{event.checkoutUrl}}',
+            },
+            {
+              type: 'ticket_summary',
+              title: 'Ticket summary',
+              body: '{{ticket.type}} - {{order.total}}',
+            },
+            {
+              type: 'unsubscribe_footer',
+              body: 'You are receiving this because you purchased or manage tickets with {{brand.name}}.',
+              unsubscribeUrl: '{{brand.supportUrl}}',
+            },
+          ],
+        },
       },
       SmsTemplateDocument: {
         type: 'object',
@@ -5647,6 +5846,7 @@ export const openApiSpec = {
                   previewText: { type: 'string' },
                   contentJson: {
                     oneOf: [
+                      { $ref: '#/components/schemas/EmailTemplateDocument' },
                       { $ref: '#/components/schemas/SmsTemplateDocument' },
                       { type: 'object', additionalProperties: true },
                     ],
@@ -5688,6 +5888,7 @@ export const openApiSpec = {
                   renderedText: { type: 'string' },
                   contentJson: {
                     oneOf: [
+                      { $ref: '#/components/schemas/EmailTemplateDocument' },
                       { $ref: '#/components/schemas/SmsTemplateDocument' },
                       { type: 'object', additionalProperties: true },
                     ],
