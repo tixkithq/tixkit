@@ -16,7 +16,7 @@ import java.security.KeyStore
 import java.security.MessageDigest
 import java.time.Clock
 import java.time.Instant
-import java.time.format.DateTimeFormatter
+import java.time.format.DateTimeFormatterBuilder
 import javax.crypto.Cipher
 import javax.crypto.KeyGenerator
 import javax.crypto.Mac
@@ -56,6 +56,7 @@ data class TixkitScanResult(
 data class TixkitOfflineTicket(
   val ticketId: String,
   val ticketTypeId: String? = null,
+  val eventOccurrenceId: String? = null,
   val attendeeName: String? = null,
   val qrHash: String,
   val status: String,
@@ -717,31 +718,37 @@ fun verifyTixkitOfflineManifest(manifest: TixkitOfflineManifest, secret: String,
   return constantTimeEquals(expected, manifest.signature)
 }
 
+private val apiInstantFormatter = DateTimeFormatterBuilder().appendInstant(3).toFormatter()
+
 fun canonicalUnsignedManifestJson(manifest: TixkitOfflineManifest): String {
-  val tickets = manifest.tickets.sortedBy { it.ticketId }.joinToString(",", prefix = "[", postfix = "]") { ticket ->
+  val tickets = manifest.tickets.joinToString(",", prefix = "[", postfix = "]") { ticket ->
     buildString {
       append("{")
+      appendJsonField("ticketId", ticket.ticketId)
+      append(",")
+      appendJsonField("ticketTypeId", ticket.ticketTypeId ?: "")
+      if (ticket.eventOccurrenceId != null) {
+        append(",")
+        appendJsonField("eventOccurrenceId", ticket.eventOccurrenceId)
+      }
+      append(",")
       appendJsonField("attendeeName", ticket.attendeeName ?: "")
       append(",")
       appendJsonField("qrHash", ticket.qrHash)
       append(",")
       appendJsonField("status", ticket.status)
-      append(",")
-      appendJsonField("ticketId", ticket.ticketId)
-      append(",")
-      appendJsonField("ticketTypeId", ticket.ticketTypeId ?: "")
       append("}")
     }
   }
   return buildString {
     append("{")
-    appendJsonField("checkInListId", manifest.checkInListId)
-    append(",")
     appendJsonField("eventId", manifest.eventId)
     append(",")
-    appendJsonField("expiresAt", DateTimeFormatter.ISO_INSTANT.format(manifest.expiresAt))
+    appendJsonField("checkInListId", manifest.checkInListId)
     append(",")
-    appendJsonField("generatedAt", DateTimeFormatter.ISO_INSTANT.format(manifest.generatedAt))
+    appendJsonField("generatedAt", apiInstantFormatter.format(manifest.generatedAt))
+    append(",")
+    appendJsonField("expiresAt", apiInstantFormatter.format(manifest.expiresAt))
     append(",")
     appendJsonField("keyId", manifest.keyId)
     append(",")

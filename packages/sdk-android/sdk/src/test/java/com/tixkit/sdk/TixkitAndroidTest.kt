@@ -263,6 +263,39 @@ class TixkitAndroidTest {
   }
 
   @Test
+  fun verifiesApiSignedOfflineManifestFixture() {
+    val apiClock = Clock.fixed(Instant.parse("2026-06-01T00:00:30Z"), ZoneOffset.UTC)
+    val manifest = TixkitOfflineManifest(
+      eventId = "evt_1",
+      checkInListId = "cil_1",
+      generatedAt = Instant.parse("2026-06-01T00:00:00Z"),
+      expiresAt = Instant.parse("2026-06-01T00:01:00Z"),
+      keyId = "manifest:test",
+      signature = "d8fdb5795ec9219c5cb880dd2bee328cb6298e976098008cfe730e7a2b71be48",
+      tickets = listOf(
+        TixkitOfflineTicket(
+          ticketId = "tkt_b",
+          ticketTypeId = "tt_vip",
+          eventOccurrenceId = "occ_1",
+          attendeeName = "Grace Hopper",
+          qrHash = "hash_b",
+          status = "valid",
+        ),
+        TixkitOfflineTicket(
+          ticketId = "tkt_a",
+          ticketTypeId = "tt_ga",
+          attendeeName = "",
+          qrHash = "hash_a",
+          status = "issued",
+        ),
+      ),
+    )
+
+    assertTrue(verifyTixkitOfflineManifest(manifest, "manifest-secret", apiClock))
+    assertFalse(verifyTixkitOfflineManifest(manifest.copy(eventId = "evt_tampered"), "manifest-secret", apiClock))
+  }
+
+  @Test
   fun acceptsOfflineTicketThenDeduplicatesDeviceReplay() {
     val client = TixkitAndroid.scannerClient(storage = TixkitMemorySecureStorage(), clock = clock)
     val signedManifest = signedManifest()

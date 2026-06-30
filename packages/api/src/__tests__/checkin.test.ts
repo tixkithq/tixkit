@@ -605,6 +605,82 @@ describe('buildOfflineManifest', () => {
     expect(verifyOfflineManifestSignature(manifest)).toBe(true);
   });
 
+  it('matches the cross-SDK offline manifest contract fixture', () => {
+    const originalManifestKey = process.env.OFFLINE_MANIFEST_SIGNING_KEY;
+    const originalKeyId = process.env.OFFLINE_MANIFEST_KEY_ID;
+    process.env.OFFLINE_MANIFEST_SIGNING_KEY = 'manifest-secret';
+    process.env.OFFLINE_MANIFEST_KEY_ID = 'manifest:test';
+
+    try {
+      const manifest = buildOfflineManifest({
+        eventId: 'evt_1',
+        checkInListId: 'cil_1',
+        generatedAt: new Date('2026-06-01T00:00:00.000Z'),
+        ttlMs: 60_000,
+        rows: [
+          {
+            ticket_id: 'tkt_b',
+            ticket_type_id: 'tt_vip',
+            event_occurrence_id: 'occ_1',
+            qr_hash: 'hash_b',
+            status: 'valid',
+            first_name: 'Grace',
+            last_name: 'Hopper',
+            email: 'grace@example.com',
+          },
+          {
+            ticket_id: 'tkt_a',
+            ticket_type_id: 'tt_ga',
+            event_occurrence_id: null,
+            qr_hash: 'hash_a',
+            status: 'issued',
+            first_name: null,
+            last_name: null,
+            email: 'buyer@example.com',
+          },
+        ],
+      });
+
+      expect(manifest).toMatchObject({
+        eventId: 'evt_1',
+        checkInListId: 'cil_1',
+        generatedAt: '2026-06-01T00:00:00.000Z',
+        expiresAt: '2026-06-01T00:01:00.000Z',
+        keyId: 'manifest:test',
+        signature: 'd8fdb5795ec9219c5cb880dd2bee328cb6298e976098008cfe730e7a2b71be48',
+        tickets: [
+          {
+            ticketId: 'tkt_b',
+            ticketTypeId: 'tt_vip',
+            eventOccurrenceId: 'occ_1',
+            attendeeName: 'Grace Hopper',
+            qrHash: 'hash_b',
+            status: 'valid',
+          },
+          {
+            ticketId: 'tkt_a',
+            ticketTypeId: 'tt_ga',
+            attendeeName: '',
+            qrHash: 'hash_a',
+            status: 'issued',
+          },
+        ],
+      });
+      expect(verifyOfflineManifestSignature(manifest)).toBe(true);
+    } finally {
+      if (originalManifestKey === undefined) {
+        delete process.env.OFFLINE_MANIFEST_SIGNING_KEY;
+      } else {
+        process.env.OFFLINE_MANIFEST_SIGNING_KEY = originalManifestKey;
+      }
+      if (originalKeyId === undefined) {
+        delete process.env.OFFLINE_MANIFEST_KEY_ID;
+      } else {
+        process.env.OFFLINE_MANIFEST_KEY_ID = originalKeyId;
+      }
+    }
+  });
+
   it('rejects a tampered manifest signature', () => {
     const manifest = buildOfflineManifest({
       eventId: 'evt_1',
