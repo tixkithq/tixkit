@@ -69,7 +69,7 @@ export function subscribeToExportJob(
           const { value, done } = await reader.read();
           if (done) break;
           buffer += decoder.decode(value, { stream: true });
-          const frames = buffer.split('\n\n');
+          const frames = splitSseFrames(buffer);
           buffer = frames.pop() ?? '';
           for (const frame of frames) {
             lastEventId = handleEventFrame(frame, handlers, lastEventId, () => {
@@ -110,7 +110,13 @@ function handleEventFrame(
   if (!data) return eventId;
 
   if (event === 'error') {
-    const payload = JSON.parse(data) as { message?: string };
+    const payload = parseSseJson<{ message?: string }>(
+      data,
+      'Export status stream sent an invalid error event',
+      handlers,
+      close,
+    );
+    if (!payload) return eventId;
     handlers.onError(new Error(payload.message ?? 'Export status stream failed'));
     close();
     return eventId;
@@ -118,7 +124,22 @@ function handleEventFrame(
 
   if (event !== 'export' && event !== 'message') return eventId;
 
-  const job = normalizeExportJob(JSON.parse(data) as Record<string, unknown>);
+  const payload = parseSseJson<Record<string, unknown>>(
+    data,
+    'Export status stream sent an invalid export event',
+    handlers,
+    close,
+  );
+  if (!payload) return eventId;
+
+  let job: AdminExportJob;
+  try {
+    job = normalizeExportJob(payload);
+  } catch {
+    handlers.onError(new Error('Export status stream sent an invalid export event'));
+    close();
+    return eventId;
+  }
   handlers.onUpdate(job);
   if (job.status === 'completed' || job.status === 'failed') {
     handlers.onDone(job);
@@ -127,10 +148,29 @@ function handleEventFrame(
   return eventId;
 }
 
+function splitSseFrames(buffer: string): string[] {
+  return buffer.split(/\r?\n\r?\n/);
+}
+
+function parseSseJson<T>(
+  data: string,
+  message: string,
+  handlers: ExportJobSubscription,
+  close: () => void,
+): T | undefined {
+  try {
+    return JSON.parse(data) as T;
+  } catch {
+    handlers.onError(new Error(message));
+    close();
+    return undefined;
+  }
+}
+
 function readSseField(frame: string, field: string): string | undefined {
   const prefix = `${field}:`;
   const values = frame
-    .split('\n')
+    .split(/\r?\n/)
     .filter((line) => line.startsWith(prefix))
     .map((line) => line.slice(prefix.length).trimStart());
   if (values.length === 0) return undefined;

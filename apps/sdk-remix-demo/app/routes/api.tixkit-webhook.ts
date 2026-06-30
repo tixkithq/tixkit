@@ -11,7 +11,13 @@ export async function action({ request }: ActionFunctionArgs) {
     return json({ error: 'Invalid signature' }, { status: 401 });
   }
 
-  const event = JSON.parse(body);
+  let event: unknown;
+  try {
+    event = JSON.parse(body);
+  } catch {
+    return json({ error: 'Invalid JSON body' }, { status: 400 });
+  }
+
   console.log('Tixkit webhook received', event);
   return json({ received: true, handledBy: 'sdk-remix-demo' });
 }

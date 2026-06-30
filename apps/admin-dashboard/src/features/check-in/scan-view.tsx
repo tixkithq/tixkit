@@ -29,6 +29,7 @@ export function CheckInView() {
   const [scanning, setScanning] = React.useState(false);
   const [lastResult, setLastResult] = React.useState<CheckInScanResult | null>(null);
   const [manualSearch, setManualSearch] = React.useState('');
+  const [acceptedScanCount, setAcceptedScanCount] = React.useState(0);
   const eventSelectLabelId = React.useId();
   const checkInListLabelId = React.useId();
   const ticketInputId = React.useId();
@@ -70,6 +71,7 @@ export function CheckInView() {
     setQrPayload('');
     setLastResult(null);
     setManualSearch('');
+    setAcceptedScanCount(0);
   }, [selectedEventId]);
 
   // Auto-select the only active check-in list when one is available.
@@ -91,6 +93,9 @@ export function CheckInView() {
       });
       if (result.ok) {
         setLastResult(result.data);
+        if (result.data.status === 'accepted') {
+          setAcceptedScanCount((count) => count + 1);
+        }
         setQrPayload('');
       } else {
         setLastResult({
@@ -207,6 +212,7 @@ export function CheckInView() {
                   id={ticketInputId}
                   autoComplete="off"
                   inputMode="text"
+                  disabled={scanning}
                   placeholder="Enter QR code or ticket ID"
                   value={qrPayload}
                   onChange={(e) => setQrPayload(e.target.value)}
@@ -254,7 +260,7 @@ export function CheckInView() {
               </div>
               <div className="space-y-1">
                 <p className="text-sm text-muted-foreground">Checked In</p>
-                <p className="text-2xl font-bold">{selectedEvent.checkIns}</p>
+                <p className="text-2xl font-bold">{selectedEvent.checkIns + acceptedScanCount}</p>
               </div>
             </div>
           </CardContent>

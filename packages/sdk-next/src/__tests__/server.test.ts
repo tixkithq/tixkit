@@ -159,6 +159,23 @@ describe('Next server webhook helpers', () => {
     });
   });
 
+  it('rejects legacy webhook helper requests with signed malformed JSON', async () => {
+    const body = '{"id":';
+    const secret = 'whsec_test';
+    const timestamp = Math.floor(Date.now() / 1000);
+    const handler = createWebhookHandler(secret);
+
+    await expect(
+      handler({
+        body,
+        headers: { 'x-tixkit-signature': signature(body, secret, timestamp) },
+      }),
+    ).resolves.toEqual({
+      status: 400,
+      body: { error: 'Invalid JSON body' },
+    });
+  });
+
   it('creates App Router-compatible webhook route handlers', async () => {
     const body = JSON.stringify({ id: 'wevt_1', type: 'order.created' });
     const secret = 'whsec_test';

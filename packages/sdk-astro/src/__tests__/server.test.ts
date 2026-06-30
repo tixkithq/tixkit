@@ -160,6 +160,22 @@ describe('Astro server helpers', () => {
     expect(response.status).toBe(401);
   });
 
+  it('createTixkitWebhookEndpoint rejects signed malformed JSON with 400', async () => {
+    const body = '{"id":';
+    const secret = 'whsec_test';
+    const timestamp = Math.floor(Date.now() / 1000);
+    const handler = createTixkitWebhookEndpoint({ secret });
+    const request = new Request('https://example.test/api/webhook', {
+      method: 'POST',
+      body,
+      headers: { 'tixkit-signature': signature(body, secret, timestamp) },
+    });
+
+    const response = await handler({ request, url: new URL(request.url) });
+    expect(response.status).toBe(400);
+    await expect(response.json()).resolves.toEqual({ error: 'Invalid JSON body' });
+  });
+
   it('createTixkitWebhookEndpoint accepts valid signatures and calls onEvent', async () => {
     const body = JSON.stringify({ id: 'wevt_1' });
     const secret = 'whsec_test';

@@ -70,6 +70,44 @@ describe('subscribeToExportJob', () => {
     unsubscribe();
   });
 
+  it('parses CRLF-delimited export event streams', async () => {
+    const fetchMock = vi.mocked(globalThis.fetch);
+    fetchMock.mockResolvedValueOnce(
+      new Response(
+        sseStream(
+          [
+            {
+              id: 'eev_completed',
+              data: {
+                exportId: 'exp_crlf',
+                status: 'completed',
+                type: 'sales',
+                format: 'csv',
+                downloadUrl: 'https://files.test/export-crlf.csv',
+              },
+            },
+          ],
+          '\r\n',
+        ),
+        { status: 200 },
+      ),
+    );
+
+    const onUpdate = vi.fn();
+    const onDone = vi.fn();
+    const onError = vi.fn();
+    const unsubscribe = subscribeToExportJob('exp_crlf', { onUpdate, onDone, onError });
+
+    await vi.waitFor(() => expect(onDone).toHaveBeenCalledTimes(1));
+
+    expect(onUpdate).toHaveBeenCalledWith(
+      expect.objectContaining({ exportId: 'exp_crlf', status: 'completed' }),
+    );
+    expect(onError).not.toHaveBeenCalled();
+
+    unsubscribe();
+  });
+
   it('reconnects with Last-Event-ID after a dropped nonterminal stream', async () => {
     vi.useFakeTimers();
     const fetchMock = vi.mocked(globalThis.fetch);
@@ -135,17 +173,87 @@ describe('subscribeToExportJob', () => {
 
     unsubscribe();
   });
+
+  it('reports malformed export events without reconnecting', async () => {
+    const fetchMock = vi.mocked(globalThis.fetch);
+    fetchMock.mockResolvedValueOnce(
+      new Response(rawSseStream('id: eev_bad\nevent: export\ndata: {not-json}\n\n'), {
+        status: 200,
+      }),
+    );
+
+    const onUpdate = vi.fn();
+    const onDone = vi.fn();
+    const onError = vi.fn();
+    const unsubscribe = subscribeToExportJob('exp_bad', { onUpdate, onDone, onError });
+
+    await vi.waitFor(() => expect(onError).toHaveBeenCalledTimes(1));
+
+    expect(onError).toHaveBeenCalledWith(
+      expect.objectContaining({
+        message: 'Export status stream sent an invalid export event',
+      }),
+    );
+    expect(onUpdate).not.toHaveBeenCalled();
+    expect(onDone).not.toHaveBeenCalled();
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+
+    unsubscribe();
+  });
+
+  it('reports malformed error events without reconnecting', async () => {
+    const fetchMock = vi.mocked(globalThis.fetch);
+    fetchMock.mockResolvedValueOnce(
+      new Response(rawSseStream('id: eev_bad_error\nevent: error\ndata: {not-json}\n\n'), {
+        status: 200,
+      }),
+    );
+
+    const onUpdate = vi.fn();
+    const onDone = vi.fn();
+    const onError = vi.fn();
+    const unsubscribe = subscribeToExportJob('exp_bad_error', { onUpdate, onDone, onError });
+
+    await vi.waitFor(() => expect(onError).toHaveBeenCalledTimes(1));
+
+    expect(onError).toHaveBeenCalledWith(
+      expect.objectContaining({
+        message: 'Export status stream sent an invalid error event',
+      }),
+    );
+    expect(onUpdate).not.toHaveBeenCalled();
+    expect(onDone).not.toHaveBeenCalled();
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+
+    unsubscribe();
+  });
 });
 
 function sseStream(
   frames: Array<{ id: string; data: Record<string, unknown>; event?: string }>,
+  lineEnding = '\n',
 ): ReadableStream<Uint8Array> {
   const body = frames
     .map(
       (frame) =>
-        `id: ${frame.id}\nevent: ${frame.event ?? 'export'}\ndata: ${JSON.stringify(frame.data)}\n\n`,
+        [
+          `id: ${frame.id}`,
+          `event: ${frame.event ?? 'export'}`,
+          `data: ${JSON.stringify(frame.data)}`,
+          '',
+          '',
+        ].join(lineEnding),
     )
     .join('');
+  return new ReadableStream({
+    start(controller) {
+      controller.enqueue(new TextEncoder().encode(body));
+      controller.close();
+    },
+  });
+}
+
+function rawSseStream(body: string): ReadableStream<Uint8Array> {
   return new ReadableStream({
     start(controller) {
       controller.enqueue(new TextEncoder().encode(body));

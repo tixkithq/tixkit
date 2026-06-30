@@ -28,6 +28,7 @@ export function EventCheckInView({ eventId }: { eventId: string }) {
   const [scanning, setScanning] = React.useState(false);
   const [lastResult, setLastResult] = React.useState<CheckInScanResult | null>(null);
   const [manualSearch, setManualSearch] = React.useState('');
+  const [acceptedScanCount, setAcceptedScanCount] = React.useState(0);
   const checkInListLabelId = React.useId();
   const ticketInputId = React.useId();
   const scanStatusId = React.useId();
@@ -63,6 +64,13 @@ export function EventCheckInView({ eventId }: { eventId: string }) {
         : undefined;
   const canScan = Boolean(trimmedQrPayload) && !scanBlockedReason && !scanning;
 
+  React.useEffect(() => {
+    setAcceptedScanCount(0);
+    setQrPayload('');
+    setLastResult(null);
+    setManualSearch('');
+  }, [eventId]);
+
   // Auto-select the only active check-in list when one is available.
   React.useEffect(() => {
     if (
@@ -88,6 +96,9 @@ export function EventCheckInView({ eventId }: { eventId: string }) {
       });
       if (result.ok) {
         setLastResult(result.data);
+        if (result.data.status === 'accepted') {
+          setAcceptedScanCount((count) => count + 1);
+        }
         setQrPayload('');
       } else {
         setLastResult({
@@ -134,6 +145,7 @@ export function EventCheckInView({ eventId }: { eventId: string }) {
           a.ticketId.toLowerCase().includes(normalizedManualSearch),
       )
     : attendees.slice(0, 10);
+  const displayedCheckIns = event.checkIns + acceptedScanCount;
 
   return (
     <div className="space-y-6">
@@ -154,7 +166,7 @@ export function EventCheckInView({ eventId }: { eventId: string }) {
               </div>
               <div className="space-y-1">
                 <p className="text-sm text-muted-foreground">Checked In</p>
-                <p className="text-2xl font-bold">{event.checkIns}</p>
+                <p className="text-2xl font-bold">{displayedCheckIns}</p>
               </div>
             </div>
           </CardContent>

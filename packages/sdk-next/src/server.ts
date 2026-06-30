@@ -170,7 +170,13 @@ export function createWebhookHandler(secret: string) {
       return { status: 401, body: { error: 'Invalid signature' } };
     }
 
-    const event = parseJsonBody(request.body);
+    let event: unknown;
+    try {
+      event = parseJsonBody(request.body);
+    } catch {
+      return { status: 400, body: { error: 'Invalid JSON body' } };
+    }
+
     return { status: 200, body: { received: true, event } };
   };
 }

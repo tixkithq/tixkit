@@ -1,5 +1,12 @@
-import { describe, expect, it } from 'vitest';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import '@testing-library/jest-dom/vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { adminApi, normalizeLiveCheckInScanResult } from '@/lib/api';
+import { EventCheckInView } from '@/features/events/event-check-in-view';
+
+afterEach(() => {
+  vi.restoreAllMocks();
+});
 
 describe('Check-in scan result', () => {
   it('returns accepted for valid unchecked-in attendee', async () => {
@@ -137,6 +144,78 @@ describe('Check-in scan result', () => {
       status: 'invalid',
       message: 'Check-in not_found',
       scannedAt: '2026-06-27T12:02:00.000Z',
+    });
+  });
+
+  it('updates the visible checked-in summary after an accepted scan', async () => {
+    vi.spyOn(adminApi, 'getEvent').mockResolvedValue({
+      ok: true,
+      data: {
+        id: 'evt_1',
+        title: 'Spring Gala',
+        slug: 'spring-gala',
+        status: 'published',
+        startsAt: '2026-07-01T19:00:00.000Z',
+        endsAt: '2026-07-01T23:00:00.000Z',
+        timezone: 'America/New_York',
+        venueName: 'Main Hall',
+        city: 'New York',
+        visibility: 'public',
+        seo: {},
+        currency: 'USD',
+        resalePolicy: { enabled: false, maxMultiplier: 1 },
+        grossSalesCents: 250000,
+        ticketsSold: 25,
+        capacity: 100,
+        checkIns: 10,
+        updatedAt: '2026-06-29T12:00:00.000Z',
+      },
+    });
+    vi.spyOn(adminApi, 'listCheckInLists').mockResolvedValue({
+      ok: true,
+      data: [
+        {
+          id: 'cil_1',
+          eventId: 'evt_1',
+          name: 'Main Door',
+          ticketTypeIds: ['tt_1'],
+          status: 'active',
+        },
+      ],
+    });
+    vi.spyOn(adminApi, 'listAttendees').mockResolvedValue({
+      ok: true,
+      data: { items: [], total: 0 },
+    });
+    vi.spyOn(adminApi, 'scanTicket').mockResolvedValue({
+      ok: true,
+      data: {
+        status: 'accepted',
+        message: 'Check-in successful',
+        scannedAt: '2026-06-29T12:05:00.000Z',
+      },
+    });
+
+    render(<EventCheckInView eventId="evt_1" />);
+
+    const checkedInLabel = await screen.findByText('Checked In');
+    expect(checkedInLabel.nextElementSibling).toHaveTextContent('10');
+
+    const scannerInput = await screen.findByPlaceholderText('Enter QR code or ticket ID');
+    await waitFor(() => {
+      expect(scannerInput).not.toBeDisabled();
+    });
+    fireEvent.change(scannerInput, { target: { value: 'signed-ticket-payload' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Scan' }));
+
+    await waitFor(() => {
+      expect(checkedInLabel.nextElementSibling).toHaveTextContent('11');
+    });
+    expect(adminApi.scanTicket).toHaveBeenCalledWith({
+      eventId: 'evt_1',
+      checkInListId: 'cil_1',
+      qrPayload: 'signed-ticket-payload',
+      scannedAt: expect.any(String),
     });
   });
 });

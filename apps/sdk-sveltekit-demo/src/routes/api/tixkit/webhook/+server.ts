@@ -10,9 +10,16 @@ export const POST: RequestHandler = async ({ request }) => {
     return json({ error: 'Invalid signature' }, { status: 401 });
   }
 
+  let event: unknown;
+  try {
+    event = JSON.parse(body);
+  } catch {
+    return json({ error: 'Invalid JSON body' }, { status: 400 });
+  }
+
   return json({
     received: true,
-    event: body ? JSON.parse(body) : null,
+    event,
     handledBy: 'sdk-sveltekit-demo',
   });
 };

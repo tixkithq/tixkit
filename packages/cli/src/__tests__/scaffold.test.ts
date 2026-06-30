@@ -163,6 +163,8 @@ describe('scaffold inside repo', () => {
       'utf8',
     );
     expect(webhook).toContain('verifyTixkitWebhook');
+    expect(webhook).toContain('readRawBody');
+    expect(webhook).toContain('Invalid JSON body');
     expect(webhook).not.toContain('__NAME__');
   });
 
@@ -204,6 +206,12 @@ describe('scaffold inside repo', () => {
     expect(index).toContain('brd_astro');
     expect(index).toContain('evt_astro');
     expect(index).not.toContain('__EVENT_ID__');
+
+    const webhook = await readFile(
+      path.join(targetDir, 'src', 'pages', 'api', 'tixkit', 'webhook.ts'),
+      'utf8',
+    );
+    expect(webhook).toContain('Invalid JSON body');
   });
 
   it('generates a remix app with rendered placeholders', async () => {
@@ -244,5 +252,11 @@ describe('scaffold inside repo', () => {
     const vite = await readFile(path.join(targetDir, 'vite.config.ts'), 'utf8');
     expect(vite).toContain('3700');
     expect(vite).not.toContain('__PORT__');
+
+    const webhook = await readFile(
+      path.join(targetDir, 'app', 'routes', 'api.tixkit-webhook.ts'),
+      'utf8',
+    );
+    expect(webhook).toContain('Invalid JSON body');
   });
 });

@@ -60,6 +60,16 @@ export function createTixkitClient(config: TixkitAstroClientConfig) {
   return new TixkitClient(config);
 }
 
+function jsonResponse(body: unknown, init?: ResponseInit): Response {
+  const headers = new Headers(init?.headers);
+  if (!headers.has('content-type')) headers.set('content-type', 'application/json');
+  return new Response(JSON.stringify(body), { ...init, headers });
+}
+
+function parseJsonBody(body: string): unknown {
+  return body ? JSON.parse(body) : null;
+}
+
 export function verifyTixkitWebhook(input: {
   body: string;
   signature: string;
@@ -313,17 +323,18 @@ export function createTixkitWebhookEndpoint(
         toleranceSeconds: options.toleranceSeconds,
       })
     ) {
-      return new Response(JSON.stringify({ error: 'Invalid signature' }), {
-        status: 401,
-        headers: { 'content-type': 'application/json' },
-      });
+      return jsonResponse({ error: 'Invalid signature' }, { status: 401 });
     }
-    const event = JSON.parse(body) as unknown;
+
+    let event: unknown;
+    try {
+      event = parseJsonBody(body);
+    } catch {
+      return jsonResponse({ error: 'Invalid JSON body' }, { status: 400 });
+    }
+
     const result = await options.onEvent?.(event, { request, body });
     if (result instanceof Response) return result;
-    return new Response(JSON.stringify(result ?? { received: true }), {
-      status: 200,
-      headers: { 'content-type': 'application/json' },
-    });
+    return jsonResponse(result ?? { received: true }, { status: 200 });
   };
 }
