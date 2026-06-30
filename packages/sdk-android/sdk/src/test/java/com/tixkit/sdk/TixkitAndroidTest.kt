@@ -120,6 +120,103 @@ class TixkitAndroidTest {
   }
 
   @Test
+  fun resaleClientUsesVersionedRequestsAndRequiredHeaders() {
+    val requests = mutableListOf<String>()
+    val methods = mutableListOf<String>()
+    val idempotencyKeys = mutableListOf<String?>()
+    val sessionTokens = mutableListOf<String?>()
+    val bodies = mutableListOf<String?>()
+    val transport = TixkitResaleTransport { method, url, headers, body ->
+      requests.add(url)
+      methods.add(method)
+      idempotencyKeys.add(headers["Idempotency-Key"])
+      sessionTokens.add(headers["X-Checkout-Session-Token"])
+      bodies.add(body)
+      assertEquals("2026-01-01", headers["X-Tixkit-Version"])
+      assertEquals("Bearer tk_test_123", headers["Authorization"])
+
+      when {
+        method == "GET" && url.contains("/events/evt_1/resale-listings") ->
+          """
+          {
+            "items": [{
+              "id": "lst_1",
+              "eventId": "evt_1",
+              "ticketId": "tkt_1",
+              "status": "listed",
+              "priceCents": 5500,
+              "currency": "USD"
+            }],
+            "hasMore": false
+          }
+          """.trimIndent()
+        url.endsWith("/complete") ->
+          """
+          {
+            "listing": {
+              "id": "lst_2",
+              "eventId": "evt_1",
+              "ticketId": "tkt_1",
+              "status": "sold",
+              "priceCents": 5500,
+              "currency": "USD"
+            },
+            "buyerTicket": {"id": "tkt_2"},
+            "buyerAttendee": {"id": "att_2"}
+          }
+          """.trimIndent()
+        else ->
+          """
+          {
+            "id": "${if (url.endsWith("/resale-listing")) "lst_3" else "lst_2"}",
+            "eventId": "evt_1",
+            "ticketId": "tkt_1",
+            "status": "${if (url.endsWith("/delist")) "delisted" else "listed"}",
+            "priceCents": 5500,
+            "currency": "USD"
+          }
+          """.trimIndent()
+      }
+    }
+    val client = TixkitAndroid.resaleClient(
+      apiBaseUrl = "https://api.test",
+      apiKey = "tk_test_123",
+      transport = transport,
+    )
+
+    val page = client.listResaleListings("evt_1", cursor = "lst_0", limit = 25)
+    assertEquals("lst_1", page.items.single().id)
+    client.createTicketResaleListing("tkt_1", priceCents = 5500, idempotencyKey = "idem_create")
+    client.createCheckoutTicketResaleListing(
+      "cs_1",
+      "tkt_1",
+      priceCents = 5500,
+      sessionToken = "client_token",
+      idempotencyKey = "idem_checkout",
+    )
+    client.delistResaleListing("lst_2", idempotencyKey = "idem_delist")
+    val completed = client.completeResaleListing(
+      "lst_2",
+      buyerId = "usr_1",
+      buyerEmail = "buyer@example.test",
+      idempotencyKey = "idem_complete",
+      externalPaymentReference = "pi_1",
+    )
+
+    assertEquals("sold", completed.listing.status)
+    assertEquals("tkt_2", completed.buyerTicketId)
+    assertEquals(listOf("GET", "POST", "POST", "POST", "POST"), methods)
+    assertEquals(
+      "https://api.test/v1/events/evt_1/resale-listings?cursor=lst_0&limit=25",
+      requests.first(),
+    )
+    assertEquals(listOf(null, "idem_create", "idem_checkout", "idem_delist", "idem_complete"), idempotencyKeys)
+    assertEquals(listOf(null, null, "client_token", null, null), sessionTokens)
+    assertTrue(bodies[1]!!.contains("\"priceCents\":5500"))
+    assertTrue(bodies[4]!!.contains("\"externalPaymentReference\":\"pi_1\""))
+  }
+
+  @Test
   fun signsAndVerifiesOfflineManifest() {
     val unsigned = manifest(signature = "")
     val signed = unsigned.copy(signature = signTixkitOfflineManifest(unsigned, "manifest-secret"))

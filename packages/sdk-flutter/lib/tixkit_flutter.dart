@@ -506,6 +506,94 @@ class TixkitPublicEventDiscoveryCard {
   final String? publicPath;
 }
 
+class TixkitTicketListingPage {
+  const TixkitTicketListingPage({
+    required this.items,
+    required this.hasMore,
+    this.nextCursor,
+  });
+
+  factory TixkitTicketListingPage.fromJson(Map<String, Object?> json) {
+    final rawItems = json['items'];
+    return TixkitTicketListingPage(
+      items: rawItems is List
+          ? rawItems
+              .whereType<Map<String, Object?>>()
+              .map(TixkitTicketListing.fromJson)
+              .toList(growable: false)
+          : const [],
+      hasMore: json['hasMore'] as bool? ?? false,
+      nextCursor: json['nextCursor'] as String?,
+    );
+  }
+
+  final List<TixkitTicketListing> items;
+  final bool hasMore;
+  final String? nextCursor;
+}
+
+class TixkitTicketListing {
+  const TixkitTicketListing({
+    required this.id,
+    required this.eventId,
+    required this.ticketId,
+    required this.status,
+    required this.priceCents,
+    required this.currency,
+    this.sellerId,
+    this.faceValueCents,
+    this.soldToId,
+  });
+
+  factory TixkitTicketListing.fromJson(Map<String, Object?> json) {
+    return TixkitTicketListing(
+      id: json['id'] as String? ?? '',
+      eventId: json['eventId'] as String? ?? '',
+      ticketId: json['ticketId'] as String? ?? '',
+      sellerId: json['sellerId'] as String?,
+      status: json['status'] as String? ?? '',
+      priceCents: json['priceCents'] as int? ?? 0,
+      currency: json['currency'] as String? ?? '',
+      faceValueCents: json['faceValueCents'] as int?,
+      soldToId: json['soldToId'] as String?,
+    );
+  }
+
+  final String id;
+  final String eventId;
+  final String ticketId;
+  final String? sellerId;
+  final String status;
+  final int priceCents;
+  final String currency;
+  final int? faceValueCents;
+  final String? soldToId;
+}
+
+class TixkitResaleCompletion {
+  const TixkitResaleCompletion({
+    required this.listing,
+    this.buyerTicketId,
+    this.buyerAttendeeId,
+  });
+
+  factory TixkitResaleCompletion.fromJson(Map<String, Object?> json) {
+    final rawBuyerTicket = json['buyerTicket'];
+    final rawBuyerAttendee = json['buyerAttendee'];
+    return TixkitResaleCompletion(
+      listing: TixkitTicketListing.fromJson(json['listing'] as Map<String, Object?>? ?? const {}),
+      buyerTicketId:
+          rawBuyerTicket is Map<String, Object?> ? rawBuyerTicket['id'] as String? : null,
+      buyerAttendeeId:
+          rawBuyerAttendee is Map<String, Object?> ? rawBuyerAttendee['id'] as String? : null,
+    );
+  }
+
+  final TixkitTicketListing listing;
+  final String? buyerTicketId;
+  final String? buyerAttendeeId;
+}
+
 class TixkitPublicEventPageClient {
   TixkitPublicEventPageClient({
     this.apiBaseUrl = 'https://api.tixkit.com',
@@ -549,6 +637,140 @@ class TixkitPublicEventPageClient {
     if (locale != null) query['locale'] = locale;
     final base = Uri.parse(apiBaseUrl);
     return base.replace(path: '/v1$path', queryParameters: query.isEmpty ? null : query);
+  }
+
+  void _assertSuccess(http.Response response) {
+    if (response.statusCode >= 200 && response.statusCode < 300) return;
+    throw StateError('Tixkit API request failed with HTTP ${response.statusCode}');
+  }
+}
+
+class TixkitResaleClient {
+  TixkitResaleClient({
+    this.apiBaseUrl = 'https://api.tixkit.com',
+    this.apiKey,
+    http.Client? httpClient,
+  }) : httpClient = httpClient ?? http.Client();
+
+  final String apiBaseUrl;
+  final String? apiKey;
+  final http.Client httpClient;
+
+  Future<TixkitTicketListingPage> listResaleListings(
+    String eventId, {
+    String? cursor,
+    int? limit,
+  }) async {
+    final response = await httpClient.get(
+      _apiUri('/events/$eventId/resale-listings', cursor: cursor, limit: limit),
+      headers: _headers(),
+    );
+    _assertSuccess(response);
+    return TixkitTicketListingPage.fromJson(jsonDecode(response.body) as Map<String, Object?>);
+  }
+
+  Future<TixkitTicketListing> createTicketResaleListing(
+    String ticketId, {
+    required int priceCents,
+    required String idempotencyKey,
+    String? expiresAt,
+  }) async {
+    return _postListing(
+      '/tickets/$ticketId/resale-listings',
+      idempotencyKey: idempotencyKey,
+      body: {
+        'priceCents': priceCents,
+        if (expiresAt != null) 'expiresAt': expiresAt,
+      },
+    );
+  }
+
+  Future<TixkitTicketListing> createCheckoutTicketResaleListing(
+    String sessionId,
+    String ticketId, {
+    required int priceCents,
+    required String sessionToken,
+    required String idempotencyKey,
+    String? expiresAt,
+  }) async {
+    return _postListing(
+      '/checkout/sessions/$sessionId/tickets/$ticketId/resale-listing',
+      idempotencyKey: idempotencyKey,
+      sessionToken: sessionToken,
+      body: {
+        'priceCents': priceCents,
+        if (expiresAt != null) 'expiresAt': expiresAt,
+      },
+    );
+  }
+
+  Future<TixkitTicketListing> delistResaleListing(
+    String listingId, {
+    required String idempotencyKey,
+  }) {
+    return _postListing(
+      '/ticket-listings/$listingId/delist',
+      idempotencyKey: idempotencyKey,
+      body: const {},
+    );
+  }
+
+  Future<TixkitResaleCompletion> completeResaleListing(
+    String listingId, {
+    required String buyerId,
+    required String buyerEmail,
+    required String idempotencyKey,
+    String? buyerFirstName,
+    String? buyerLastName,
+    String? externalPaymentReference,
+  }) async {
+    final response = await httpClient.post(
+      _apiUri('/ticket-listings/$listingId/complete'),
+      headers: _headers(idempotencyKey: idempotencyKey),
+      body: jsonEncode({
+        'buyerId': buyerId,
+        'buyerEmail': buyerEmail,
+        if (buyerFirstName != null) 'buyerFirstName': buyerFirstName,
+        if (buyerLastName != null) 'buyerLastName': buyerLastName,
+        if (externalPaymentReference != null)
+          'externalPaymentReference': externalPaymentReference,
+      }),
+    );
+    _assertSuccess(response);
+    return TixkitResaleCompletion.fromJson(jsonDecode(response.body) as Map<String, Object?>);
+  }
+
+  Future<TixkitTicketListing> _postListing(
+    String path, {
+    required String idempotencyKey,
+    required Map<String, Object?> body,
+    String? sessionToken,
+  }) async {
+    final response = await httpClient.post(
+      _apiUri(path),
+      headers: _headers(idempotencyKey: idempotencyKey, sessionToken: sessionToken),
+      body: jsonEncode(body),
+    );
+    _assertSuccess(response);
+    return TixkitTicketListing.fromJson(jsonDecode(response.body) as Map<String, Object?>);
+  }
+
+  Uri _apiUri(String path, {String? cursor, int? limit}) {
+    final query = <String, String>{};
+    if (cursor != null) query['cursor'] = cursor;
+    if (limit != null) query['limit'] = '$limit';
+    final base = Uri.parse(apiBaseUrl);
+    return base.replace(path: '/v1$path', queryParameters: query.isEmpty ? null : query);
+  }
+
+  Map<String, String> _headers({String? idempotencyKey, String? sessionToken}) {
+    return {
+      'X-Tixkit-Version': tixkitApiVersion,
+      if (apiKey != null) 'Authorization': 'Bearer $apiKey',
+      if (idempotencyKey != null) 'Idempotency-Key': idempotencyKey,
+      if (sessionToken != null) 'X-Checkout-Session-Token': sessionToken,
+      if (idempotencyKey != null || sessionToken != null) 'Content-Type': 'application/json',
+    };
   }
 
   void _assertSuccess(http.Response response) {

@@ -176,8 +176,36 @@ data class TixkitPublicEventDiscoveryCard(
   val publicPath: String? = null,
 )
 
+data class TixkitTicketListingPage(
+  val items: List<TixkitTicketListing>,
+  val hasMore: Boolean = false,
+  val nextCursor: String? = null,
+)
+
+data class TixkitTicketListing(
+  val id: String,
+  val eventId: String,
+  val ticketId: String,
+  val sellerId: String? = null,
+  val status: String,
+  val priceCents: Int,
+  val currency: String,
+  val faceValueCents: Int? = null,
+  val soldToId: String? = null,
+)
+
+data class TixkitResaleCompletion(
+  val listing: TixkitTicketListing,
+  val buyerTicketId: String? = null,
+  val buyerAttendeeId: String? = null,
+)
+
 fun interface TixkitPublicEventPageTransport {
   fun get(url: String, headers: Map<String, String>): String
+}
+
+fun interface TixkitResaleTransport {
+  fun request(method: String, url: String, headers: Map<String, String>, body: String?): String
 }
 
 class TixkitHttpUrlConnectionTransport : TixkitPublicEventPageTransport {
@@ -190,6 +218,23 @@ class TixkitHttpUrlConnectionTransport : TixkitPublicEventPageTransport {
     val body = stream?.bufferedReader(StandardCharsets.UTF_8)?.use { it.readText() }.orEmpty()
     if (status !in 200..299) error("Tixkit API request failed with HTTP $status")
     return body
+  }
+}
+
+class TixkitHttpUrlConnectionResaleTransport : TixkitResaleTransport {
+  override fun request(method: String, url: String, headers: Map<String, String>, body: String?): String {
+    val connection = URL(url).openConnection() as HttpURLConnection
+    connection.requestMethod = method
+    headers.forEach { (key, value) -> connection.setRequestProperty(key, value) }
+    if (body != null) {
+      connection.doOutput = true
+      connection.outputStream.use { it.write(body.toByteArray(StandardCharsets.UTF_8)) }
+    }
+    val status = connection.responseCode
+    val stream = if (status in 200..299) connection.inputStream else connection.errorStream
+    val responseBody = stream?.bufferedReader(StandardCharsets.UTF_8)?.use { it.readText() }.orEmpty()
+    if (status !in 200..299) error("Tixkit API request failed with HTTP $status")
+    return responseBody
   }
 }
 
@@ -220,6 +265,110 @@ class TixkitPublicEventPageClient(
     val query = buildList {
       if (!host.isNullOrBlank()) add("host" to host)
       if (!locale.isNullOrBlank()) add("locale" to locale)
+    }.joinToString("&") { (key, value) -> "${encode(key)}=${encode(value)}" }
+    return "$base/v1$path${if (query.isEmpty()) "" else "?$query"}"
+  }
+}
+
+class TixkitResaleClient(
+  private val apiBaseUrl: String = "https://api.tixkit.com",
+  private val apiKey: String? = null,
+  private val transport: TixkitResaleTransport = TixkitHttpUrlConnectionResaleTransport(),
+) {
+  fun listResaleListings(eventId: String, cursor: String? = null, limit: Int? = null): TixkitTicketListingPage =
+    parseListingPage(JSONObject(transport.request("GET", apiUrl("/events/$eventId/resale-listings", cursor = cursor, limit = limit), headers(), null)))
+
+  fun createTicketResaleListing(ticketId: String, priceCents: Int, idempotencyKey: String, expiresAt: String? = null): TixkitTicketListing =
+    postListing(
+      path = "/tickets/$ticketId/resale-listings",
+      idempotencyKey = idempotencyKey,
+      body = JSONObject().put("priceCents", priceCents).putOptional("expiresAt", expiresAt),
+    )
+
+  fun createCheckoutTicketResaleListing(
+    sessionId: String,
+    ticketId: String,
+    priceCents: Int,
+    sessionToken: String,
+    idempotencyKey: String,
+    expiresAt: String? = null,
+  ): TixkitTicketListing =
+    postListing(
+      path = "/checkout/sessions/$sessionId/tickets/$ticketId/resale-listing",
+      idempotencyKey = idempotencyKey,
+      sessionToken = sessionToken,
+      body = JSONObject().put("priceCents", priceCents).putOptional("expiresAt", expiresAt),
+    )
+
+  fun delistResaleListing(listingId: String, idempotencyKey: String): TixkitTicketListing =
+    postListing(
+      path = "/ticket-listings/$listingId/delist",
+      idempotencyKey = idempotencyKey,
+      body = JSONObject(),
+    )
+
+  fun completeResaleListing(
+    listingId: String,
+    buyerId: String,
+    buyerEmail: String,
+    idempotencyKey: String,
+    buyerFirstName: String? = null,
+    buyerLastName: String? = null,
+    externalPaymentReference: String? = null,
+  ): TixkitResaleCompletion {
+    val body = JSONObject()
+      .put("buyerId", buyerId)
+      .put("buyerEmail", buyerEmail)
+      .putOptional("buyerFirstName", buyerFirstName)
+      .putOptional("buyerLastName", buyerLastName)
+      .putOptional("externalPaymentReference", externalPaymentReference)
+    val json = JSONObject(
+      transport.request(
+        "POST",
+        apiUrl("/ticket-listings/$listingId/complete"),
+        headers(idempotencyKey = idempotencyKey),
+        body.toString(),
+      ),
+    )
+    return parseResaleCompletion(json)
+  }
+
+  private fun postListing(
+    path: String,
+    idempotencyKey: String,
+    body: JSONObject,
+    sessionToken: String? = null,
+  ): TixkitTicketListing =
+    parseListing(
+      JSONObject(
+        transport.request(
+          "POST",
+          apiUrl(path),
+          headers(idempotencyKey = idempotencyKey, sessionToken = sessionToken),
+          body.toString(),
+        ),
+      ),
+    )
+
+  private fun headers(idempotencyKey: String? = null, sessionToken: String? = null): Map<String, String> =
+    buildMap {
+      put("X-Tixkit-Version", TixkitAndroid.API_VERSION)
+      apiKey?.takeIf { it.isNotBlank() }?.let { put("Authorization", "Bearer $it") }
+      idempotencyKey?.let {
+        put("Idempotency-Key", it)
+        put("Content-Type", "application/json")
+      }
+      sessionToken?.let {
+        put("X-Checkout-Session-Token", it)
+        put("Content-Type", "application/json")
+      }
+    }
+
+  private fun apiUrl(path: String, cursor: String? = null, limit: Int? = null): String {
+    val base = apiBaseUrl.trimEnd('/')
+    val query = buildList {
+      if (!cursor.isNullOrBlank()) add("cursor" to cursor)
+      if (limit != null) add("limit" to "$limit")
     }.joinToString("&") { (key, value) -> "${encode(key)}=${encode(value)}" }
     return "$base/v1$path${if (query.isEmpty()) "" else "?$query"}"
   }
@@ -521,6 +670,12 @@ object TixkitAndroid {
     apiBaseUrl: String = "https://api.tixkit.com",
     transport: TixkitPublicEventPageTransport = TixkitHttpUrlConnectionTransport(),
   ): TixkitPublicEventPageClient = TixkitPublicEventPageClient(apiBaseUrl = apiBaseUrl, transport = transport)
+
+  fun resaleClient(
+    apiBaseUrl: String = "https://api.tixkit.com",
+    apiKey: String? = null,
+    transport: TixkitResaleTransport = TixkitHttpUrlConnectionResaleTransport(),
+  ): TixkitResaleClient = TixkitResaleClient(apiBaseUrl = apiBaseUrl, apiKey = apiKey, transport = transport)
 }
 
 fun tixkitQrHashForPayload(qrPayload: String): String =
@@ -641,8 +796,41 @@ private fun parseDiscovery(json: JSONObject): TixkitPublicEventDiscoveryCard =
     publicPath = json.optNullableString("publicPath"),
   )
 
+private fun parseListingPage(json: JSONObject): TixkitTicketListingPage =
+  TixkitTicketListingPage(
+    items = json.optJSONArray("items").toObjectList(::parseListing),
+    hasMore = json.optBoolean("hasMore", false),
+    nextCursor = json.optNullableString("nextCursor"),
+  )
+
+private fun parseListing(json: JSONObject): TixkitTicketListing =
+  TixkitTicketListing(
+    id = json.optString("id"),
+    eventId = json.optString("eventId"),
+    ticketId = json.optString("ticketId"),
+    sellerId = json.optNullableString("sellerId"),
+    status = json.optString("status"),
+    priceCents = json.optInt("priceCents"),
+    currency = json.optString("currency"),
+    faceValueCents = json.optNullableInt("faceValueCents"),
+    soldToId = json.optNullableString("soldToId"),
+  )
+
+private fun parseResaleCompletion(json: JSONObject): TixkitResaleCompletion =
+  TixkitResaleCompletion(
+    listing = parseListing(json.getJSONObject("listing")),
+    buyerTicketId = json.optJSONObject("buyerTicket")?.optNullableString("id"),
+    buyerAttendeeId = json.optJSONObject("buyerAttendee")?.optNullableString("id"),
+  )
+
+private fun JSONObject.putOptional(key: String, value: String?): JSONObject =
+  if (value == null) this else put(key, value)
+
 private fun JSONObject.optNullableString(key: String): String? =
   if (has(key) && !isNull(key)) optString(key) else null
+
+private fun JSONObject.optNullableInt(key: String): Int? =
+  if (has(key) && !isNull(key)) optInt(key) else null
 
 private fun <T> JSONArray?.toObjectList(mapper: (JSONObject) -> T): List<T> {
   if (this == null) return emptyList()

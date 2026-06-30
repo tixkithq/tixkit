@@ -108,6 +108,98 @@ final class TixkitIOSTests: XCTestCase {
     ])
   }
 
+  func testResaleClientUsesVersionedRequestsAndRequiredHeaders() async throws {
+    var requestURLs: [String] = []
+    var requestMethods: [String] = []
+    var idempotencyKeys: [String?] = []
+    var sessionTokens: [String?] = []
+    URLProtocolStub.handler = { request in
+      requestURLs.append(request.url!.absoluteString)
+      requestMethods.append(request.httpMethod ?? "")
+      idempotencyKeys.append(request.value(forHTTPHeaderField: "Idempotency-Key"))
+      sessionTokens.append(request.value(forHTTPHeaderField: "X-Checkout-Session-Token"))
+      XCTAssertEqual(request.value(forHTTPHeaderField: "X-Tixkit-Version"), TixkitAPIVersion)
+      XCTAssertEqual(request.value(forHTTPHeaderField: "Authorization"), "Bearer tk_test_123")
+
+      let body: [String: Any]
+      if request.url!.path.hasSuffix("/resale-listings"), request.httpMethod == "GET" {
+        body = [
+          "items": [[
+            "id": "lst_1",
+            "eventId": "evt_1",
+            "ticketId": "tkt_1",
+            "status": "listed",
+            "priceCents": 5500,
+            "currency": "USD",
+          ]],
+          "hasMore": false,
+        ]
+      } else if request.url!.path.hasSuffix("/complete") {
+        body = [
+          "listing": [
+            "id": "lst_2",
+            "eventId": "evt_1",
+            "ticketId": "tkt_1",
+            "status": "sold",
+            "priceCents": 5500,
+            "currency": "USD",
+          ],
+          "buyerTicket": ["id": "tkt_2"],
+          "buyerAttendee": ["id": "att_2"],
+        ]
+      } else {
+        body = [
+          "id": request.url!.path.hasSuffix("/resale-listing") ? "lst_3" : "lst_2",
+          "eventId": "evt_1",
+          "ticketId": "tkt_1",
+          "status": request.url!.path.hasSuffix("/delist") ? "delisted" : "listed",
+          "priceCents": 5500,
+          "currency": "USD",
+        ]
+      }
+
+      let data = try JSONSerialization.data(withJSONObject: body)
+      return (HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!, data)
+    }
+    defer { URLProtocolStub.handler = nil }
+    let configuration = URLSessionConfiguration.ephemeral
+    configuration.protocolClasses = [URLProtocolStub.self]
+    let client = TixkitResaleClient(
+      apiBaseURL: try XCTUnwrap(URL(string: "https://api.test")),
+      apiKey: "tk_test_123",
+      urlSession: URLSession(configuration: configuration)
+    )
+
+    let page = try await client.listResaleListings(eventId: "evt_1", cursor: "lst_0", limit: 25)
+    XCTAssertEqual(page.items.first?.id, "lst_1")
+    _ = try await client.createTicketResaleListing(
+      ticketId: "tkt_1",
+      priceCents: 5500,
+      idempotencyKey: "idem_create"
+    )
+    _ = try await client.createCheckoutTicketResaleListing(
+      sessionId: "cs_1",
+      ticketId: "tkt_1",
+      priceCents: 5500,
+      sessionToken: "client_token",
+      idempotencyKey: "idem_checkout"
+    )
+    _ = try await client.delistResaleListing(listingId: "lst_2", idempotencyKey: "idem_delist")
+    let completed = try await client.completeResaleListing(
+      listingId: "lst_2",
+      buyerId: "usr_1",
+      buyerEmail: "buyer@example.test",
+      idempotencyKey: "idem_complete",
+      externalPaymentReference: "pi_1"
+    )
+    XCTAssertEqual(completed.listing.status, "sold")
+
+    XCTAssertEqual(requestMethods, ["GET", "POST", "POST", "POST", "POST"])
+    XCTAssertEqual(requestURLs.first, "https://api.test/v1/events/evt_1/resale-listings?cursor=lst_0&limit=25")
+    XCTAssertEqual(idempotencyKeys, [nil, "idem_create", "idem_checkout", "idem_delist", "idem_complete"])
+    XCTAssertEqual(sessionTokens, [nil, nil, "client_token", nil, nil])
+  }
+
   func testVerifiesSignedOfflineManifestAndScansOffline() throws {
     let payload = "signed-ticket-payload"
     let manifest = signedManifest(ticketStatus: "valid", payload: payload)

@@ -105,6 +105,94 @@ void main() {
     ]);
   });
 
+  test('routes resale helpers through versioned API requests with required headers', () async {
+    final urls = <String>[];
+    final methods = <String>[];
+    final headers = <Map<String, String>>[];
+    final client = TixkitResaleClient(
+      apiBaseUrl: 'https://api.test',
+      apiKey: 'tk_test_123',
+      httpClient: MockClient((request) async {
+        urls.add(request.url.toString());
+        methods.add(request.method);
+        headers.add(request.headers);
+        expect(request.headers['X-Tixkit-Version'], tixkitApiVersion);
+
+        if (request.url.path.endsWith('/resale-listings') && request.method == 'GET') {
+          expect(request.headers['Authorization'], 'Bearer tk_test_123');
+          return http.Response(
+            jsonEncode({
+              'items': [
+                {'id': 'lst_1', 'eventId': 'evt_1', 'ticketId': 'tkt_1', 'status': 'listed', 'priceCents': 5500, 'currency': 'USD'},
+              ],
+              'hasMore': false,
+            }),
+            200,
+          );
+        }
+        if (request.url.path.endsWith('/resale-listings')) {
+          expect(request.headers['Idempotency-Key'], 'idem_create');
+          return http.Response(
+            jsonEncode({'id': 'lst_2', 'eventId': 'evt_1', 'ticketId': 'tkt_1', 'status': 'listed', 'priceCents': 5500, 'currency': 'USD'}),
+            200,
+          );
+        }
+        if (request.url.path.endsWith('/resale-listing')) {
+          expect(request.headers['X-Checkout-Session-Token'], 'client_token');
+          expect(request.headers['Idempotency-Key'], 'idem_checkout');
+          return http.Response(
+            jsonEncode({'id': 'lst_3', 'eventId': 'evt_1', 'ticketId': 'tkt_1', 'status': 'listed', 'priceCents': 5500, 'currency': 'USD'}),
+            200,
+          );
+        }
+        if (request.url.path.endsWith('/delist')) {
+          expect(request.headers['Idempotency-Key'], 'idem_delist');
+          return http.Response(
+            jsonEncode({'id': 'lst_2', 'eventId': 'evt_1', 'ticketId': 'tkt_1', 'status': 'delisted', 'priceCents': 5500, 'currency': 'USD'}),
+            200,
+          );
+        }
+        if (request.url.path.endsWith('/complete')) {
+          expect(request.headers['Idempotency-Key'], 'idem_complete');
+          return http.Response(
+            jsonEncode({
+              'listing': {'id': 'lst_2', 'eventId': 'evt_1', 'ticketId': 'tkt_1', 'status': 'sold', 'priceCents': 5500, 'currency': 'USD'},
+              'buyerTicket': {'id': 'tkt_2'},
+              'buyerAttendee': {'id': 'att_2'},
+            }),
+            200,
+          );
+        }
+        return http.Response('unexpected', 500);
+      }),
+    );
+
+    final page = await client.listResaleListings('evt_1', cursor: 'lst_0', limit: 25);
+    expect(page.items.single.id, 'lst_1');
+    await client.createTicketResaleListing('tkt_1', priceCents: 5500, idempotencyKey: 'idem_create');
+    await client.createCheckoutTicketResaleListing(
+      'cs_1',
+      'tkt_1',
+      priceCents: 5500,
+      sessionToken: 'client_token',
+      idempotencyKey: 'idem_checkout',
+    );
+    await client.delistResaleListing('lst_2', idempotencyKey: 'idem_delist');
+    final completed = await client.completeResaleListing(
+      'lst_2',
+      buyerId: 'usr_1',
+      buyerEmail: 'buyer@example.test',
+      externalPaymentReference: 'pi_1',
+      idempotencyKey: 'idem_complete',
+    );
+    expect(completed.listing.status, 'sold');
+    expect(completed.buyerTicketId, 'tkt_2');
+
+    expect(methods, ['GET', 'POST', 'POST', 'POST', 'POST']);
+    expect(urls.first, 'https://api.test/v1/events/evt_1/resale-listings?cursor=lst_0&limit=25');
+    expect(headers.every((item) => item['Authorization'] == 'Bearer tk_test_123'), isTrue);
+  });
+
   test('hashes QR payloads with SHA-256', () {
     const payload = 'signed-ticket-payload';
     expect(tixkitQrHashForPayload(payload), sha256.convert(utf8.encode(payload)).toString());

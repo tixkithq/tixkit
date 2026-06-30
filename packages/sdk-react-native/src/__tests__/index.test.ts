@@ -3,6 +3,7 @@ import { createHmac, createHash } from 'node:crypto';
 import {
   TixkitScannerClient,
   TixkitPublicEventPageClient,
+  TixkitResaleClient,
   checkoutHandoffUrl,
   clearScannerCredentials,
   createTixkitReactNativeComponents,
@@ -462,6 +463,84 @@ describe('TixkitScannerClient', () => {
       expect(headers['X-Device-Id']).toBeUndefined();
       expect(headers['X-Device-Secret']).toBeUndefined();
     }
+  });
+
+  it('routes resale helpers through versioned API requests with required headers', async () => {
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockImplementation(async (input, init) => {
+      const url = String(input);
+      const headers = init?.headers as Record<string, string>;
+      expect(headers['X-Tixkit-Version']).toBe('2026-01-01');
+
+      if (url.includes('/events/evt_1/resale-listings')) {
+        expect(init?.method).toBe('GET');
+        expect(headers.Authorization).toBe('Bearer tk_test_123');
+        return new Response(JSON.stringify({ items: [{ id: 'lst_1', status: 'listed' }] }), {
+          status: 200,
+        });
+      }
+      if (url.includes('/checkout/sessions/cs_1/tickets/tkt_1/resale-listing')) {
+        expect(init?.method).toBe('POST');
+        expect(headers['X-Checkout-Session-Token']).toBe('client_token');
+        expect(headers['Idempotency-Key']).toBe('idem_checkout');
+        return new Response(JSON.stringify({ id: 'lst_checkout', status: 'listed' }), {
+          status: 200,
+        });
+      }
+      if (url.includes('/tickets/tkt_1/resale-listings')) {
+        expect(init?.method).toBe('POST');
+        expect(headers.Authorization).toBe('Bearer tk_test_123');
+        expect(headers['Idempotency-Key']).toBe('idem_create');
+        return new Response(JSON.stringify({ id: 'lst_2', status: 'listed' }), { status: 200 });
+      }
+      if (url.includes('/ticket-listings/lst_2/delist')) {
+        expect(init?.method).toBe('POST');
+        expect(headers['Idempotency-Key']).toBe('idem_delist');
+        return new Response(JSON.stringify({ id: 'lst_2', status: 'delisted' }), { status: 200 });
+      }
+      if (url.includes('/ticket-listings/lst_2/complete')) {
+        expect(init?.method).toBe('POST');
+        expect(headers['Idempotency-Key']).toBe('idem_complete');
+        return new Response(
+          JSON.stringify({
+            listing: { id: 'lst_2', status: 'sold' },
+            buyerTicket: { id: 'tkt_2' },
+          }),
+          { status: 200 },
+        );
+      }
+      return new Response(JSON.stringify({ message: 'unexpected request' }), { status: 500 });
+    });
+
+    const client = new TixkitResaleClient({
+      apiBaseUrl: 'https://api.test',
+      apiKey: 'tk_test_123',
+    });
+
+    await expect(
+      client.listResaleListings('evt_1', { cursor: 'lst_0', limit: 25 }),
+    ).resolves.toMatchObject({ items: [{ id: 'lst_1' }] });
+    await client.createTicketResaleListing('tkt_1', {
+      priceCents: 5500,
+      idempotencyKey: 'idem_create',
+    });
+    await client.createCheckoutTicketResaleListing('cs_1', 'tkt_1', {
+      priceCents: 5500,
+      clientToken: 'client_token',
+      idempotencyKey: 'idem_checkout',
+    });
+    await client.delistResaleListing('lst_2', { idempotencyKey: 'idem_delist' });
+    await expect(
+      client.completeResaleListing('lst_2', {
+        buyerId: 'usr_1',
+        buyerEmail: 'buyer@example.test',
+        externalPaymentReference: 'pi_1',
+        idempotencyKey: 'idem_complete',
+      }),
+    ).resolves.toMatchObject({ listing: { status: 'sold' } });
+
+    expect(String(fetchMock.mock.calls[0]?.[0])).toBe(
+      'https://api.test/v1/events/evt_1/resale-listings?cursor=lst_0&limit=25',
+    );
   });
 
   it('hashes scanned QR payloads with the same SHA-256 contract as offline manifests', () => {

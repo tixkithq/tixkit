@@ -382,6 +382,13 @@ async function resetListings(database: Database): Promise<void> {
     .execute();
 }
 
+function percentile(values: number[], percentileValue: number): number {
+  const sorted = values.toSorted((left, right) => left - right);
+  if (sorted.length === 0) return 0;
+  const index = Math.min(sorted.length - 1, Math.ceil(sorted.length * percentileValue) - 1);
+  return sorted[index] ?? 0;
+}
+
 describeWithIntegrationDatabase(
   `resale listing route DB parity (${integrationDatabaseDriver()})`,
   () => {
@@ -814,6 +821,111 @@ describeWithIntegrationDatabase(
         .where('type', '=', 'ticket.resale_completed')
         .execute();
       expect(timeline).toHaveLength(0);
+    });
+
+    it('keeps resale discovery stable while completion is under bounded mixed load', async () => {
+      const listed = await app.inject({
+        method: 'POST',
+        url: `/tickets/${TICKET_ID}/resale-listings`,
+        headers: { 'Idempotency-Key': `resale_db_load_listing_${RUN_ID}` },
+        payload: { priceCents: 5500 },
+      });
+      expect(listed.statusCode).toBe(201);
+      const listingId = listed.json().id as string;
+
+      const readCount = 80;
+      const completionCount = 16;
+      const startedAt = performance.now();
+      const readDurations: number[] = [];
+
+      const reads = Array.from({ length: readCount }, async (_, index) => {
+        const readStartedAt = performance.now();
+        const response = await app.inject({
+          method: 'GET',
+          url: `/events/${EVENT_ID}/resale-listings?limit=10&cursor=load-${index}`,
+        });
+        readDurations.push(performance.now() - readStartedAt);
+        return response;
+      });
+      const completions = Array.from({ length: completionCount }, (_, index) =>
+        app.inject({
+          method: 'POST',
+          url: `/ticket-listings/${listingId}/complete`,
+          headers: { 'Idempotency-Key': `resale_db_load_complete_${RUN_ID}_${index}` },
+          payload: {
+            buyerId: `usr_resale_load_${RUN_ID}_${index}`,
+            buyerEmail: `buyer-load-${index}-${RUN_ID}@example.com`,
+            buyerFirstName: 'Load',
+            buyerLastName: `Buyer ${index}`,
+            externalPaymentReference: `stripe_pi_load_${RUN_ID}_${index}`,
+          },
+        }),
+      );
+
+      const [readResponses, completionResponses] = await Promise.all([
+        Promise.all(reads),
+        Promise.all(completions),
+      ]);
+      const durationMs = performance.now() - startedAt;
+
+      expect(readResponses).toHaveLength(readCount);
+      expect(readResponses.every((response) => response.statusCode === 200)).toBe(true);
+      for (const response of readResponses) {
+        const body = response.json();
+        expect(body.items.length).toBeLessThanOrEqual(1);
+        for (const item of body.items) {
+          expect(item).toMatchObject({
+            id: listingId,
+            eventId: EVENT_ID,
+            ticketId: TICKET_ID,
+            status: 'listed',
+          });
+        }
+      }
+
+      const completionStatuses = completionResponses.map((response) => response.statusCode);
+      expect(completionStatuses.filter((status) => status === 200)).toHaveLength(1);
+      expect(completionStatuses.filter((status) => status === 400)).toHaveLength(
+        completionCount - 1,
+      );
+      expect(percentile(readDurations, 0.95)).toBeLessThan(2_500);
+      expect(durationMs).toBeLessThan(15_000);
+
+      const listings = await db
+        .selectFrom('ticket_listings')
+        .selectAll()
+        .where('tenant_id', '=', TENANT_ID)
+        .execute();
+      expect(listings).toHaveLength(1);
+      expect(listings[0]).toMatchObject({
+        id: listingId,
+        status: 'sold',
+        active_listing_key: listingId,
+      });
+
+      const tickets = await db
+        .selectFrom('tickets')
+        .selectAll()
+        .where('tenant_id', '=', TENANT_ID)
+        .execute();
+      expect(tickets.filter((ticket) => ticket.id === TICKET_ID)).toHaveLength(1);
+      expect(tickets.filter((ticket) => ticket.status === 'transferred')).toHaveLength(1);
+      expect(tickets.filter((ticket) => ticket.status === 'valid')).toHaveLength(1);
+
+      const attendees = await db
+        .selectFrom('attendees')
+        .selectAll()
+        .where('tenant_id', '=', TENANT_ID)
+        .execute();
+      expect(attendees.filter((attendee) => attendee.status === 'confirmed')).toHaveLength(2);
+
+      const timeline = await db
+        .selectFrom('order_timeline_events')
+        .selectAll()
+        .where('order_id', '=', ORDER_ID)
+        .where('type', '=', 'ticket.resale_completed')
+        .execute();
+      expect(timeline).toHaveLength(1);
     });
 
     it('enforces persisted resale policy before inserting a listing', async () => {

@@ -66,6 +66,47 @@ export async function loadPublicEventDiscoveryCard(
   return client.public.getEventDiscoveryCard(eventId, params);
 }
 
+export async function listResaleListings(
+  client: TixkitClient,
+  eventId: string,
+  params?: Parameters<TixkitClient['events']['listResaleListings']>[1],
+) {
+  return client.events.listResaleListings(eventId, params);
+}
+
+export async function createTicketResaleListing(
+  client: TixkitClient,
+  ticketId: string,
+  input: Parameters<TixkitClient['tickets']['createResaleListing']>[1],
+) {
+  return client.tickets.createResaleListing(ticketId, input);
+}
+
+export async function delistResaleListing(
+  client: TixkitClient,
+  listingId: string,
+  input: Parameters<TixkitClient['tickets']['delistResaleListing']>[1],
+) {
+  return client.tickets.delistResaleListing(listingId, input);
+}
+
+export async function completeResaleListing(
+  client: TixkitClient,
+  listingId: string,
+  input: Parameters<TixkitClient['tickets']['completeResaleListing']>[1],
+) {
+  return client.tickets.completeResaleListing(listingId, input);
+}
+
+export async function createCheckoutTicketResaleListing(
+  client: TixkitClient,
+  sessionId: string,
+  ticketId: string,
+  input: Parameters<TixkitClient['checkout']['createTicketResaleListing']>[2],
+) {
+  return client.checkout.createTicketResaleListing(sessionId, ticketId, input);
+}
+
 export function verifyTixkitWebhook(input: {
   body: string;
   signature: string;

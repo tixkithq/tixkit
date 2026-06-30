@@ -1,7 +1,12 @@
 import { createHmac } from 'node:crypto';
 import { describe, expect, it, vi } from 'vitest';
 import {
+  completeResaleListing,
+  createCheckoutTicketResaleListing,
+  createTicketResaleListing,
   createTixkitClient,
+  delistResaleListing,
+  listResaleListings,
   loadPublicEventDiscoveryCard,
   loadPublicEventPage,
   loadPublicEventPageBySlug,
@@ -42,6 +47,65 @@ describe('Vue server helpers', () => {
       locale: 'en',
     });
     expect(client.public.getEventDiscoveryCard).toHaveBeenCalledWith('evt_1', undefined);
+  });
+
+  it('delegates resale helpers through the JS SDK resources', async () => {
+    const client = {
+      events: {
+        listResaleListings: vi.fn(async () => ({ items: [{ id: 'lst_1' }], hasMore: false })),
+      },
+      tickets: {
+        createResaleListing: vi.fn(async () => ({ id: 'lst_2', status: 'listed' })),
+        delistResaleListing: vi.fn(async () => ({ id: 'lst_2', status: 'delisted' })),
+        completeResaleListing: vi.fn(async () => ({
+          listing: { id: 'lst_2', status: 'sold' },
+        })),
+      },
+      checkout: {
+        createTicketResaleListing: vi.fn(async () => ({ id: 'lst_3', status: 'listed' })),
+      },
+    } as unknown as TixkitClient;
+
+    await listResaleListings(client, 'evt_1', { cursor: 'lst_0', limit: 25 });
+    await createTicketResaleListing(client, 'tkt_1', {
+      priceCents: 5500,
+      idempotencyKey: 'idem_create',
+    });
+    await delistResaleListing(client, 'lst_2', { idempotencyKey: 'idem_delist' });
+    await completeResaleListing(client, 'lst_2', {
+      buyerId: 'usr_1',
+      buyerEmail: 'buyer@example.test',
+      externalPaymentReference: 'pi_1',
+      idempotencyKey: 'idem_complete',
+    });
+    await createCheckoutTicketResaleListing(client, 'cs_1', 'tkt_1', {
+      priceCents: 5500,
+      clientToken: 'client_token',
+      idempotencyKey: 'idem_checkout',
+    });
+
+    expect(client.events.listResaleListings).toHaveBeenCalledWith('evt_1', {
+      cursor: 'lst_0',
+      limit: 25,
+    });
+    expect(client.tickets.createResaleListing).toHaveBeenCalledWith('tkt_1', {
+      priceCents: 5500,
+      idempotencyKey: 'idem_create',
+    });
+    expect(client.tickets.delistResaleListing).toHaveBeenCalledWith('lst_2', {
+      idempotencyKey: 'idem_delist',
+    });
+    expect(client.tickets.completeResaleListing).toHaveBeenCalledWith('lst_2', {
+      buyerId: 'usr_1',
+      buyerEmail: 'buyer@example.test',
+      externalPaymentReference: 'pi_1',
+      idempotencyKey: 'idem_complete',
+    });
+    expect(client.checkout.createTicketResaleListing).toHaveBeenCalledWith('cs_1', 'tkt_1', {
+      priceCents: 5500,
+      clientToken: 'client_token',
+      idempotencyKey: 'idem_checkout',
+    });
   });
 
   it('verifyTixkitWebhook accepts a valid signature', () => {

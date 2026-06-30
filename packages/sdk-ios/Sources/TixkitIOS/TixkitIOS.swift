@@ -503,6 +503,187 @@ public final class TixkitPublicEventPageClient: Sendable {
   }
 }
 
+public struct TixkitTicketListingPage: Codable, Equatable, Sendable {
+  public let items: [TixkitTicketListing]
+  public let hasMore: Bool
+  public let nextCursor: String?
+}
+
+public struct TixkitTicketListing: Codable, Equatable, Sendable {
+  public let id: String
+  public let eventId: String
+  public let ticketId: String
+  public let sellerId: String?
+  public let status: String
+  public let priceCents: Int
+  public let currency: String
+  public let faceValueCents: Int?
+  public let soldToId: String?
+}
+
+public struct TixkitResaleCompletion: Codable, Equatable, Sendable {
+  public let listing: TixkitTicketListing
+  public let buyerTicket: TixkitJSONValue?
+  public let sellerTicket: TixkitJSONValue?
+  public let buyerAttendee: TixkitJSONValue?
+}
+
+public final class TixkitResaleClient: Sendable {
+  public init(
+    apiBaseURL: URL = URL(string: "https://api.tixkit.com")!,
+    apiKey: String? = nil,
+    urlSession: URLSession = .shared
+  ) {
+    self.apiBaseURL = apiBaseURL
+    self.apiKey = apiKey
+    self.urlSession = urlSession
+  }
+
+  public let apiBaseURL: URL
+  public let apiKey: String?
+  public let urlSession: URLSession
+
+  public func listResaleListings(
+    eventId: String,
+    cursor: String? = nil,
+    limit: Int? = nil
+  ) async throws -> TixkitTicketListingPage {
+    let request = apiRequest(path: "/events/\(eventId)/resale-listings", cursor: cursor, limit: limit)
+    let (data, response) = try await urlSession.data(for: request)
+    try assertSuccess(response)
+    return try JSONDecoder().decode(TixkitTicketListingPage.self, from: data)
+  }
+
+  public func createTicketResaleListing(
+    ticketId: String,
+    priceCents: Int,
+    idempotencyKey: String,
+    expiresAt: String? = nil
+  ) async throws -> TixkitTicketListing {
+    try await postListing(
+      path: "/tickets/\(ticketId)/resale-listings",
+      body: [
+        "priceCents": priceCents,
+        "expiresAt": expiresAt as Any,
+      ],
+      idempotencyKey: idempotencyKey
+    )
+  }
+
+  public func createCheckoutTicketResaleListing(
+    sessionId: String,
+    ticketId: String,
+    priceCents: Int,
+    sessionToken: String,
+    idempotencyKey: String,
+    expiresAt: String? = nil
+  ) async throws -> TixkitTicketListing {
+    try await postListing(
+      path: "/checkout/sessions/\(sessionId)/tickets/\(ticketId)/resale-listing",
+      body: [
+        "priceCents": priceCents,
+        "expiresAt": expiresAt as Any,
+      ],
+      idempotencyKey: idempotencyKey,
+      sessionToken: sessionToken
+    )
+  }
+
+  public func delistResaleListing(
+    listingId: String,
+    idempotencyKey: String
+  ) async throws -> TixkitTicketListing {
+    try await postListing(
+      path: "/ticket-listings/\(listingId)/delist",
+      body: [:],
+      idempotencyKey: idempotencyKey
+    )
+  }
+
+  public func completeResaleListing(
+    listingId: String,
+    buyerId: String,
+    buyerEmail: String,
+    idempotencyKey: String,
+    buyerFirstName: String? = nil,
+    buyerLastName: String? = nil,
+    externalPaymentReference: String? = nil
+  ) async throws -> TixkitResaleCompletion {
+    var request = apiRequest(path: "/ticket-listings/\(listingId)/complete")
+    request.httpMethod = "POST"
+    applyWriteHeaders(&request, idempotencyKey: idempotencyKey)
+    request.httpBody = try jsonData([
+      "buyerId": buyerId,
+      "buyerEmail": buyerEmail,
+      "buyerFirstName": buyerFirstName as Any,
+      "buyerLastName": buyerLastName as Any,
+      "externalPaymentReference": externalPaymentReference as Any,
+    ])
+    let (data, response) = try await urlSession.data(for: request)
+    try assertSuccess(response)
+    return try JSONDecoder().decode(TixkitResaleCompletion.self, from: data)
+  }
+
+  private func postListing(
+    path: String,
+    body: [String: Any],
+    idempotencyKey: String,
+    sessionToken: String? = nil
+  ) async throws -> TixkitTicketListing {
+    var request = apiRequest(path: path)
+    request.httpMethod = "POST"
+    applyWriteHeaders(&request, idempotencyKey: idempotencyKey, sessionToken: sessionToken)
+    request.httpBody = try jsonData(body)
+    let (data, response) = try await urlSession.data(for: request)
+    try assertSuccess(response)
+    return try JSONDecoder().decode(TixkitTicketListing.self, from: data)
+  }
+
+  private func apiRequest(
+    path: String,
+    cursor: String? = nil,
+    limit: Int? = nil
+  ) -> URLRequest {
+    var components = URLComponents(url: apiBaseURL, resolvingAgainstBaseURL: false)!
+    components.path = "/v1\(path)"
+    var queryItems: [URLQueryItem] = []
+    if let cursor { queryItems.append(URLQueryItem(name: "cursor", value: cursor)) }
+    if let limit { queryItems.append(URLQueryItem(name: "limit", value: "\(limit)")) }
+    components.queryItems = queryItems.isEmpty ? nil : queryItems
+
+    var request = URLRequest(url: components.url!)
+    request.setValue(TixkitAPIVersion, forHTTPHeaderField: "X-Tixkit-Version")
+    if let apiKey { request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization") }
+    return request
+  }
+
+  private func applyWriteHeaders(
+    _ request: inout URLRequest,
+    idempotencyKey: String,
+    sessionToken: String? = nil
+  ) {
+    request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+    request.setValue(idempotencyKey, forHTTPHeaderField: "Idempotency-Key")
+    if let sessionToken {
+      request.setValue(sessionToken, forHTTPHeaderField: "X-Checkout-Session-Token")
+    }
+  }
+
+  private func jsonData(_ dictionary: [String: Any]) throws -> Data {
+    let compact = dictionary.compactMapValues { value -> Any? in
+      if case Optional<Any>.none = value { return nil }
+      return value
+    }
+    return try JSONSerialization.data(withJSONObject: compact)
+  }
+
+  private func assertSuccess(_ response: URLResponse) throws {
+    guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else {
+      throw URLError(.badServerResponse)
+    }
+  }
+}
+
 public final class TixkitScannerClient: @unchecked Sendable {
   public init(
     deviceId: String,

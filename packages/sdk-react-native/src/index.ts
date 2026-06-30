@@ -2,6 +2,9 @@ import {
   TixkitClient,
   type PublicContentPage,
   type PublicEventDiscoveryCard,
+  type PageResult,
+  type TicketListing,
+  type TicketResaleCompletion,
 } from '@tixkit/js';
 
 export const TIXKIT_API_VERSION = '2026-01-01';
@@ -253,6 +256,11 @@ export type TixkitPublicEventPageClientConfig = {
   apiBaseUrl?: string;
 };
 
+export type TixkitResaleClientConfig = {
+  apiBaseUrl?: string;
+  apiKey?: string;
+};
+
 export type PublicEventPageParams = {
   locale?: string;
 };
@@ -263,6 +271,32 @@ export type PublicEventPageBySlugParams = {
 };
 
 export type { PublicContentPage, PublicEventDiscoveryCard };
+
+export type { TicketListing, TicketResaleCompletion };
+
+export type TixkitResaleListParams = {
+  cursor?: string;
+  limit?: number;
+};
+
+export type TixkitCreateResaleListingInput = {
+  priceCents: number;
+  expiresAt?: string;
+  idempotencyKey: string;
+};
+
+export type TixkitCreateCheckoutResaleListingInput = TixkitCreateResaleListingInput & {
+  clientToken: string;
+};
+
+export type TixkitCompleteResaleListingInput = {
+  buyerId: string;
+  buyerEmail: string;
+  buyerFirstName?: string;
+  buyerLastName?: string;
+  externalPaymentReference?: string;
+  idempotencyKey: string;
+};
 
 export type TixkitCreateElement = (
   type: unknown,
@@ -712,6 +746,50 @@ export class TixkitPublicEventPageClient {
     params?: PublicEventPageParams,
   ): Promise<PublicEventDiscoveryCard> {
     return this.client.public.getEventDiscoveryCard(eventId, params);
+  }
+}
+
+export class TixkitResaleClient {
+  private readonly client: TixkitClient;
+
+  constructor(config: TixkitResaleClientConfig = {}) {
+    this.client = new TixkitClient({ apiBaseUrl: config.apiBaseUrl, apiKey: config.apiKey });
+  }
+
+  async listResaleListings(
+    eventId: string,
+    params?: TixkitResaleListParams,
+  ): Promise<PageResult<TicketListing>> {
+    return this.client.events.listResaleListings(eventId, params);
+  }
+
+  async createTicketResaleListing(
+    ticketId: string,
+    input: TixkitCreateResaleListingInput,
+  ): Promise<TicketListing> {
+    return this.client.tickets.createResaleListing(ticketId, input);
+  }
+
+  async createCheckoutTicketResaleListing(
+    sessionId: string,
+    ticketId: string,
+    input: TixkitCreateCheckoutResaleListingInput,
+  ): Promise<TicketListing> {
+    return this.client.checkout.createTicketResaleListing(sessionId, ticketId, input);
+  }
+
+  async delistResaleListing(
+    listingId: string,
+    input: { idempotencyKey: string },
+  ): Promise<TicketListing> {
+    return this.client.tickets.delistResaleListing(listingId, input);
+  }
+
+  async completeResaleListing(
+    listingId: string,
+    input: TixkitCompleteResaleListingInput,
+  ): Promise<TicketResaleCompletion> {
+    return this.client.tickets.completeResaleListing(listingId, input);
   }
 }
 
