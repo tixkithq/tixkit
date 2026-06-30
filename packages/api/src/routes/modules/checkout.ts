@@ -1670,6 +1670,12 @@ export const checkoutRoutes: FastifyPluginAsync = async (app) => {
     const event = await eventRepo.findById(session.event_id);
     if (!event) throw new NotFoundError('Event', session.event_id);
 
+    if (session.status === 'completed') {
+      const order = await orderRepo.findById(session.order_id!);
+      if (!order) throw new NotFoundError('Order', session.order_id!);
+      return reply.status(200).send({ order, sessionId, status: 'completed' });
+    }
+
     if (new Date(session.expires_at) < new Date()) {
       throw new CheckoutExpiredError(sessionId);
     }
@@ -1692,12 +1698,6 @@ export const checkoutRoutes: FastifyPluginAsync = async (app) => {
         }),
       },
       async () => {
-        if (session.status === 'completed') {
-          const order = await orderRepo.findById(session.order_id!);
-          if (!order) throw new NotFoundError('Order', session.order_id!);
-          return { status: 200, body: { order, sessionId, status: 'completed' } };
-        }
-
         // Allow retry from pending_payment (buyer abandoned or the client lost
         // the response). A checkout workflow is keyed by session id, so a
         // second start would return the same workflow; return its active

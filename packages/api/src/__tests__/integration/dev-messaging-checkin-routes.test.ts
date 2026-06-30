@@ -3985,7 +3985,7 @@ describe('resale listing routes', () => {
     expect(firstBody).toMatchObject({
       eventId: 'evt_1',
       ticketId: 'tkt_1',
-      sellerId: 'usr_1',
+      sellerId: 'ord_1',
       status: 'listed',
       priceCents: 5500,
       faceValueCents: 5000,
@@ -4461,6 +4461,86 @@ describe('checkout confirm', () => {
       payload: {},
     });
     // Should return the completed order
+    expect(res.statusCode).toBe(200);
+    const body = res.json();
+    expect(body.status).toBe('completed');
+    expect(body.order.id).toBe('ord_1');
+    await app.close();
+  });
+
+  it('POST /checkout/sessions/:sessionId/confirm replays completed sessions after expiry', async () => {
+    const tables = {
+      checkout_sessions: [
+        {
+          id: 'cs_1',
+          tenant_id: 'tnt_1',
+          event_id: 'evt_1',
+          brand_id: 'brd_1',
+          status: 'completed',
+          currency: 'USD',
+          quote: JSON.stringify({
+            totalCents: 0,
+            subtotalCents: 0,
+            discountCents: 0,
+            taxCents: 0,
+            feeCents: 0,
+          }),
+          buyer: JSON.stringify({ email: 'buyer@test.com' }),
+          cart: JSON.stringify({ items: [] }),
+          expires_at: new Date(Date.now() - 60000),
+          hold_id: 'hld_1',
+          order_id: 'ord_1',
+          client_token: 'tok_1',
+          success_url: null,
+          cancel_url: null,
+          idempotency_key: 'key_1',
+        },
+      ],
+      events: [
+        {
+          id: 'evt_1',
+          tenant_id: 'tnt_1',
+          organization_id: 'org_1',
+          brand_id: 'brd_1',
+          status: 'published',
+          slug: 'evt',
+          title: 'Event',
+          timezone: 'UTC',
+          starts_at: new Date(),
+          visibility: 'public',
+          seo: '{}',
+        },
+      ],
+      orders: [
+        {
+          id: 'ord_1',
+          tenant_id: 'tnt_1',
+          organization_id: 'org_1',
+          brand_id: 'brd_1',
+          event_id: 'evt_1',
+          order_number: 'TK-1',
+          status: 'paid',
+          currency: 'USD',
+          total_cents: 0,
+          subtotal_cents: 0,
+          discount_cents: 0,
+          tax_cents: 0,
+          fee_cents: 0,
+          refunded_cents: 0,
+          buyer_email: 'buyer@test.com',
+          created_at: new Date(),
+          updated_at: new Date(),
+        },
+      ],
+    };
+    const app = await setupApp(checkoutRoutes, makePrincipal(), tables);
+    const res = await app.inject({
+      method: 'POST',
+      url: '/checkout/sessions/cs_1/confirm',
+      headers: { 'idempotency-key': 'key-2', 'x-checkout-session-token': 'tok_1' },
+      payload: {},
+    });
+
     expect(res.statusCode).toBe(200);
     const body = res.json();
     expect(body.status).toBe('completed');

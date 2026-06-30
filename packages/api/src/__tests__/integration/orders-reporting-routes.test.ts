@@ -718,7 +718,7 @@ describe('order routes', () => {
     expect(body.downloadUrl).toBeUndefined();
 
     const download = await app.inject({ method: 'GET', url: '/exports/exp_unsafe/download' });
-    expect(download.statusCode).toBe(400);
+    expect(download.statusCode).toBe(409);
     expect(download.headers.location).toBeUndefined();
     await app.close();
   });
@@ -825,7 +825,7 @@ describe('order routes', () => {
 
     dbState.exportJobs[0] = { ...dbState.exportJobs[0], status: 'processing', file_url: null };
     const pending = await app.inject({ method: 'GET', url: '/exports/exp_3/download' });
-    expect(pending.statusCode).toBe(400);
+    expect(pending.statusCode).toBe(409);
     await app.close();
   });
 });

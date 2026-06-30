@@ -4,6 +4,7 @@ import { Redis } from 'ioredis';
 import { ClerkAuthService } from '../../auth/clerk.js';
 import { EventRepository, type Database } from '@tixkit/db';
 import {
+  ConflictError,
   groupRevenueByChannel,
   NotFoundError,
   ValidationError,
@@ -801,7 +802,7 @@ export const reportingRoutes: FastifyPluginAsync = async (app) => {
     const exportJob = await loadScopedExportJob(principal, exportId);
 
     if (exportJob.status !== 'completed' || !isValidExportFileUrl(exportJob.file_url)) {
-      throw new ValidationError('Export is not ready for download');
+      throw new ConflictError('Export is not ready for download');
     }
 
     return reply.redirect(exportJob.file_url);
