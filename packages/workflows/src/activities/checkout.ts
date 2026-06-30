@@ -1380,6 +1380,10 @@ export async function finalizeOrderActivity(input: {
       buyerFields?: Record<string, unknown>;
       attendeeFields?: Record<string, unknown[]>;
       discountCode?: string;
+      accessRuleRedemptions?: Array<{
+        accessRuleId?: string;
+        ticketTypeId?: string;
+      }>;
       waitlistEntryId?: string;
     }>(session.cart);
     const buyer = parseStoredJson<{
@@ -1613,6 +1617,105 @@ export async function finalizeOrderActivity(input: {
             };
           }
           resaleFulfillments.push({ listing, sellerTicket });
+        }
+        /* eslint-enable no-await-in-loop */
+
+        const accessRuleRedemptions = [
+          ...new Map(
+            (cart.accessRuleRedemptions ?? [])
+              .filter(
+                (redemption): redemption is { accessRuleId: string; ticketTypeId: string } =>
+                  Boolean(redemption.accessRuleId) && Boolean(redemption.ticketTypeId),
+              )
+              .map((redemption) => [redemption.accessRuleId, redemption]),
+          ).values(),
+        ].sort((left, right) => left.accessRuleId.localeCompare(right.accessRuleId));
+
+        /* eslint-disable no-await-in-loop -- access rule rows are locked in deterministic order to enforce limited-use caps. */
+        for (const redemption of accessRuleRedemptions) {
+          const accessRule = await trx
+            .selectFrom('access_rules')
+            .selectAll()
+            .where('id', '=', redemption.accessRuleId)
+            .forUpdate()
+            .executeTakeFirst();
+
+          if (!accessRule || accessRule.ticket_type_id !== redemption.ticketTypeId) {
+            return {
+              ok: false,
+              errorCode: 'ACCESS_RULE_INVALID',
+              message: `Access rule ${redemption.accessRuleId} is not valid for this checkout`,
+              retryable: false,
+            };
+          }
+
+          const ticketType = await trx
+            .selectFrom('ticket_types')
+            .select(['id'])
+            .where('id', '=', accessRule.ticket_type_id)
+            .where('event_id', '=', session.event_id)
+            .executeTakeFirst();
+
+          if (!ticketType) {
+            return {
+              ok: false,
+              errorCode: 'ACCESS_RULE_INVALID',
+              message: `Access rule ${redemption.accessRuleId} is not valid for this event`,
+              retryable: false,
+            };
+          }
+
+          const existingRedemption = await trx
+            .selectFrom('access_rule_redemptions')
+            .select(['id'])
+            .where('access_rule_id', '=', accessRule.id)
+            .where('checkout_session_id', '=', input.checkoutSessionId)
+            .executeTakeFirst();
+
+          if (existingRedemption) continue;
+
+          if (accessRule.expires_at && new Date(accessRule.expires_at) < now) {
+            return {
+              ok: false,
+              errorCode: 'ACCESS_RULE_INVALID',
+              message: `Access rule ${redemption.accessRuleId} has expired`,
+              retryable: false,
+            };
+          }
+          if (
+            accessRule.max_uses != null &&
+            Number(accessRule.uses_count) >= Number(accessRule.max_uses)
+          ) {
+            return {
+              ok: false,
+              errorCode: 'ACCESS_RULE_EXHAUSTED',
+              message: `Access rule ${redemption.accessRuleId} max uses reached`,
+              retryable: false,
+            };
+          }
+
+          await trx
+            .updateTable('access_rules')
+            .set((eb) => ({
+              uses_count: eb('uses_count', '+', 1),
+              updated_at: now,
+            }))
+            .where('id', '=', accessRule.id)
+            .execute();
+
+          await trx
+            .insertInto('access_rule_redemptions')
+            .values({
+              id: `ared_${ulid()}`,
+              access_rule_id: accessRule.id,
+              ticket_type_id: accessRule.ticket_type_id,
+              event_id: session.event_id,
+              checkout_session_id: input.checkoutSessionId,
+              order_id: orderId,
+              tenant_id: input.tenantId,
+              created_at: now,
+            })
+            .execute();
         }
         /* eslint-enable no-await-in-loop */
 

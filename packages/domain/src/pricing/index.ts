@@ -118,6 +118,10 @@ export type CartItem = {
 export type CartInput = {
   items: CartItem[];
   discountCode?: string;
+  accessRuleRedemptions?: Array<{
+    accessRuleId: Ulid;
+    ticketTypeId: Ulid;
+  }>;
   affiliateCode?: string;
   trackingId?: string;
   buyerFields?: Record<string, unknown>;

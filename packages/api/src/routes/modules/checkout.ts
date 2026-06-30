@@ -35,6 +35,7 @@ import type {
 import {
   NotFoundError,
   ValidationError,
+  AccessCodeRequiredError,
   CheckoutExpiredError,
   ResaleError,
   validateTicketPurchase,
@@ -612,9 +613,31 @@ type FeeRuleRow = {
   updated_at: Date | string;
 };
 
+type AccessRuleRow = {
+  id: string;
+  ticket_type_id: string;
+  type: AccessRuleRecord['type'];
+  value: string;
+  max_uses: number | null;
+  uses_count: number;
+  expires_at: Date | string | null;
+};
+
 function toIsoString(value: Date | string | null): string | undefined {
   if (value == null) return undefined;
   return value instanceof Date ? value.toISOString() : value;
+}
+
+function accessRuleMatches(
+  row: AccessRuleRow,
+  input: { accessCode?: string; buyerEmail?: string; now: Date },
+): boolean {
+  if (row.expires_at && input.now > new Date(row.expires_at)) return false;
+  if (row.max_uses != null && Number(row.uses_count) >= Number(row.max_uses)) return false;
+  if (row.type === 'allowlist') {
+    return Boolean(input.buyerEmail) && row.value.toLowerCase() === input.buyerEmail!.toLowerCase();
+  }
+  return Boolean(input.accessCode) && row.value === input.accessCode;
 }
 
 function parseStringArray(value: string | string[] | null): string[] | undefined {
@@ -1348,27 +1371,34 @@ export const checkoutRoutes: FastifyPluginAsync = async (app) => {
           (item): item is CartInput['items'][number] & { ticketTypeId: string } =>
             Boolean(item.ticketTypeId),
         );
-        const accessRulesRows = await accessRuleRepo.findByTicketTypes(
+        const accessRulesRows = (await accessRuleRepo.findByTicketTypes(
           ticketItems.map((i) => i.ticketTypeId),
-        );
-        const rulesByTicket = new Map<string, AccessRuleRecord[]>();
+        )) as unknown as AccessRuleRow[];
+        const rulesByTicket = new Map<string, AccessRuleRow[]>();
         for (const row of accessRulesRows) {
           const list = rulesByTicket.get(row.ticket_type_id) ?? [];
-          list.push({
+          list.push(row);
+          rulesByTicket.set(row.ticket_type_id, list);
+        }
+        const accessRuleValidationRecords = (rows?: AccessRuleRow[]): AccessRuleRecord[] =>
+          (rows ?? []).map((row) => ({
             type: row.type as AccessRuleRecord['type'],
             value: row.value,
             maxUses: row.max_uses,
             usesCount: row.uses_count,
             expiresAt: row.expires_at,
-          });
-          rulesByTicket.set(row.ticket_type_id, list);
-        }
+          }));
 
         // Validate every line item before reserving inventory.
         const reservationItems: CartReservationItem[] = [];
+        const accessRuleRedemptionsByRule = new Map<
+          string,
+          { accessRuleId: string; ticketTypeId: string }
+        >();
         for (const item of ticketItems) {
           const ttRecord = ttById.get(item.ticketTypeId);
           if (!ttRecord) throw new NotFoundError('TicketType', item.ticketTypeId);
+          const itemAccessRules = rulesByTicket.get(item.ticketTypeId);
           validateTicketPurchase({
             ticketType: {
               id: ttRecord.id,
@@ -1389,8 +1419,22 @@ export const checkoutRoutes: FastifyPluginAsync = async (app) => {
             unitAmountCents: item.unitAmountCents,
             accessCode: body.accessCode,
             buyerEmail: body.buyer?.email,
-            accessRules: rulesByTicket.get(item.ticketTypeId),
+            accessRules: accessRuleValidationRecords(itemAccessRules),
           });
+          if (ttRecord.visibility === 'locked' || ttRecord.requires_access_code) {
+            const matchedAccessRule = itemAccessRules?.find((row) =>
+              accessRuleMatches(row, {
+                accessCode: body.accessCode,
+                buyerEmail: body.buyer?.email,
+                now: new Date(answeredAt),
+              }),
+            );
+            if (!matchedAccessRule) throw new AccessCodeRequiredError(item.ticketTypeId);
+            accessRuleRedemptionsByRule.set(matchedAccessRule.id, {
+              accessRuleId: matchedAccessRule.id,
+              ticketTypeId: item.ticketTypeId,
+            });
+          }
           reservationItems.push({
             inventoryPoolId: ttRecord.inventory_pool_id,
             ticketTypeId: ttRecord.id,
@@ -1424,6 +1468,10 @@ export const checkoutRoutes: FastifyPluginAsync = async (app) => {
             attendeeFields: i.attendeeFields,
           })),
           discountCode: body.discountCode,
+          accessRuleRedemptions:
+            accessRuleRedemptionsByRule.size > 0
+              ? [...accessRuleRedemptionsByRule.values()]
+              : undefined,
           affiliateCode: body.affiliateCode,
           trackingId: body.trackingId,
           buyerFields,
