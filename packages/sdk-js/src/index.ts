@@ -1111,6 +1111,13 @@ export type TicketListing = {
   updatedAt: string;
 };
 
+export type TicketResaleCompletion = {
+  listing: TicketListing;
+  sellerTicket: Ticket;
+  buyerTicket: Ticket;
+  buyerAttendee: Attendee;
+};
+
 export type PaymentAccount = {
   id: string;
   tenantId: string;
@@ -2039,6 +2046,24 @@ class TicketResource {
     return this.client.request('POST', `/ticket-listings/${listingId}/delist`, {
       body: {},
       idempotencyKey: input.idempotencyKey,
+    });
+  }
+
+  async completeResaleListing(
+    listingId: string,
+    input: {
+      buyerId: string;
+      buyerEmail: string;
+      buyerFirstName?: string | null;
+      buyerLastName?: string | null;
+      buyerPhone?: string | null;
+      externalPaymentReference?: string | null;
+    } & IdempotencyOptions,
+  ): Promise<TicketResaleCompletion> {
+    const { idempotencyKey, ...body } = input;
+    return this.client.request('POST', `/ticket-listings/${listingId}/complete`, {
+      body,
+      idempotencyKey,
     });
   }
 }

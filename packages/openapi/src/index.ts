@@ -1819,6 +1819,16 @@ export const openApiSpec = {
         },
         required: ['items', 'nextCursor', 'hasMore'],
       },
+      TicketResaleCompletion: {
+        type: 'object',
+        properties: {
+          listing: { $ref: '#/components/schemas/TicketListing' },
+          sellerTicket: { $ref: '#/components/schemas/Ticket' },
+          buyerTicket: { $ref: '#/components/schemas/Ticket' },
+          buyerAttendee: { $ref: '#/components/schemas/Attendee' },
+        },
+        required: ['listing', 'sellerTicket', 'buyerTicket', 'buyerAttendee'],
+      },
       CheckInList: {
         type: 'object',
         properties: {
@@ -4590,6 +4600,40 @@ export const openApiSpec = {
             description: 'Resale listing delisted',
             content: {
               'application/json': { schema: { $ref: '#/components/schemas/TicketListing' } },
+            },
+          },
+        },
+      },
+    },
+    '/ticket-listings/{listingId}/complete': {
+      post: {
+        summary: 'Complete a provider-delegated resale listing and reissue the ticket',
+        security: [{ BearerAuth: [] }],
+        parameters: [{ $ref: '#/components/parameters/RequiredIdempotencyKey' }],
+        requestBody: {
+          required: true,
+          content: {
+            'application/json': {
+              schema: {
+                type: 'object',
+                properties: {
+                  buyerId: { type: 'string', minLength: 1 },
+                  buyerEmail: { type: 'string', format: 'email' },
+                  buyerFirstName: { type: ['string', 'null'], minLength: 1 },
+                  buyerLastName: { type: ['string', 'null'], minLength: 1 },
+                  buyerPhone: { type: ['string', 'null'], minLength: 1 },
+                  externalPaymentReference: { type: ['string', 'null'], minLength: 1, maxLength: 256 },
+                },
+                required: ['buyerId', 'buyerEmail'],
+              },
+            },
+          },
+        },
+        responses: {
+          '200': {
+            description: 'Resale listing completed and buyer ticket issued',
+            content: {
+              'application/json': { schema: { $ref: '#/components/schemas/TicketResaleCompletion' } },
             },
           },
         },

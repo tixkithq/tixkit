@@ -6,6 +6,7 @@ import { ulid } from 'ulid';
 import type { AppContext } from '../../app.js';
 import { registerErrorHandler } from '../../app.js';
 import { ticketingRoutes } from '../../routes/modules/ticketing.js';
+import { QrService } from '../../services/qr.js';
 import {
   describeWithIntegrationDatabase,
   integrationDatabaseDriver,
@@ -26,6 +27,7 @@ const CHECKOUT_SESSION_ID = `chk_resale_${RUN_ID}`;
 const ORDER_ID = `ord_resale_${RUN_ID}`;
 const ATTENDEE_ID = `att_resale_${RUN_ID}`;
 const TICKET_ID = `tkt_resale_${RUN_ID}`;
+const WALLET_PASS_ID = `wps_resale_${RUN_ID}`;
 
 let db: Database;
 let app: FastifyInstance;
@@ -49,7 +51,7 @@ async function setupRouteApp(database: Database): Promise<FastifyInstance> {
     db: database,
     pricingEngine: {},
     inventoryService: {},
-    qrService: {},
+    qrService: new QrService('resale-db-test-secret'),
     authService: {
       isLocalDevMode: vi.fn(() => true),
       authenticateLocalDev: vi.fn(async () => ({ principal: makePrincipal() })),
@@ -279,7 +281,23 @@ async function seedTenantGraph(database: Database): Promise<void> {
         transferred_at: null,
         checked_in_at: null,
         checked_in_by_device_id: null,
-        wallet_pass_id: null,
+        wallet_pass_id: WALLET_PASS_ID,
+        created_at: now,
+        updated_at: now,
+      })
+      .execute();
+    await trx
+      .insertInto('wallet_passes')
+      .values({
+        id: WALLET_PASS_ID,
+        tenant_id: TENANT_ID,
+        ticket_id: TICKET_ID,
+        provider: 'apple',
+        pass_url: `https://wallet.example/${RUN_ID}`,
+        serial_number: `serial-${RUN_ID}`,
+        status: 'active',
+        metadata: JSON.stringify({}),
+        revoked_at: null,
         created_at: now,
         updated_at: now,
       })
@@ -290,8 +308,10 @@ async function seedTenantGraph(database: Database): Promise<void> {
 async function cleanupAll(database: Database): Promise<void> {
   await database.deleteFrom('ticket_listings').where('tenant_id', '=', TENANT_ID).execute();
   await database.deleteFrom('idempotency_records').where('tenant_id', '=', TENANT_ID).execute();
+  await database.deleteFrom('wallet_passes').where('tenant_id', '=', TENANT_ID).execute();
   await database.deleteFrom('tickets').where('tenant_id', '=', TENANT_ID).execute();
   await database.deleteFrom('attendees').where('tenant_id', '=', TENANT_ID).execute();
+  await database.deleteFrom('order_timeline_events').where('order_id', '=', ORDER_ID).execute();
   await database.deleteFrom('orders').where('tenant_id', '=', TENANT_ID).execute();
   await database.deleteFrom('checkout_sessions').where('tenant_id', '=', TENANT_ID).execute();
   await database.deleteFrom('ticket_types').where('event_id', '=', EVENT_ID).execute();
@@ -305,10 +325,48 @@ async function cleanupAll(database: Database): Promise<void> {
 async function resetListings(database: Database): Promise<void> {
   await database.deleteFrom('ticket_listings').where('tenant_id', '=', TENANT_ID).execute();
   await database.deleteFrom('idempotency_records').where('tenant_id', '=', TENANT_ID).execute();
+  await database.deleteFrom('order_timeline_events').where('order_id', '=', ORDER_ID).execute();
+  await database
+    .deleteFrom('wallet_passes')
+    .where('tenant_id', '=', TENANT_ID)
+    .where('ticket_id', '!=', TICKET_ID)
+    .execute();
+  await database
+    .deleteFrom('tickets')
+    .where('tenant_id', '=', TENANT_ID)
+    .where('id', '!=', TICKET_ID)
+    .execute();
+  await database
+    .deleteFrom('attendees')
+    .where('tenant_id', '=', TENANT_ID)
+    .where('id', '!=', ATTENDEE_ID)
+    .execute();
   await database
     .updateTable('tickets')
-    .set({ status: 'valid', updated_at: new Date() })
+    .set({
+      status: 'valid',
+      transferred_to_email: null,
+      transferred_at: null,
+      wallet_pass_id: WALLET_PASS_ID,
+      updated_at: new Date(),
+    })
     .where('id', '=', TICKET_ID)
+    .execute();
+  await database
+    .updateTable('attendees')
+    .set({
+      ticket_id: TICKET_ID,
+      status: 'confirmed',
+      checked_in_at: null,
+      check_in_device_id: null,
+      updated_at: new Date(),
+    })
+    .where('id', '=', ATTENDEE_ID)
+    .execute();
+  await database
+    .updateTable('wallet_passes')
+    .set({ status: 'active', revoked_at: null, updated_at: new Date() })
+    .where('id', '=', WALLET_PASS_ID)
     .execute();
   await database
     .updateTable('events')
@@ -410,6 +468,102 @@ describeWithIntegrationDatabase(
         .executeTakeFirstOrThrow();
       expect(delisted.status).toBe('delisted');
       expect(delisted.active_listing_key).toBe(listingId);
+    });
+
+    it('completes a listed resale once and replays buyer ticket issuance', async () => {
+      const listed = await app.inject({
+        method: 'POST',
+        url: `/tickets/${TICKET_ID}/resale-listings`,
+        headers: { 'Idempotency-Key': `resale_db_complete_listing_${RUN_ID}` },
+        payload: { priceCents: 5500 },
+      });
+      expect(listed.statusCode).toBe(201);
+      const listingId = listed.json().id as string;
+      const payload = {
+        buyerId: `usr_resale_buyer_${RUN_ID}`,
+        buyerEmail: `buyer-${RUN_ID}@example.com`,
+        buyerFirstName: 'Resale',
+        buyerLastName: 'Buyer',
+        externalPaymentReference: `stripe_pi_${RUN_ID}`,
+      };
+      const first = await app.inject({
+        method: 'POST',
+        url: `/ticket-listings/${listingId}/complete`,
+        headers: { 'Idempotency-Key': `resale_db_complete_${RUN_ID}` },
+        payload,
+      });
+      const replay = await app.inject({
+        method: 'POST',
+        url: `/ticket-listings/${listingId}/complete`,
+        headers: { 'Idempotency-Key': `resale_db_complete_${RUN_ID}` },
+        payload,
+      });
+
+      expect(first.statusCode).toBe(200);
+      expect(replay.statusCode).toBe(200);
+      expect(replay.json()).toEqual(first.json());
+
+      const body = first.json();
+      expect(body.listing).toMatchObject({
+        id: listingId,
+        status: 'sold',
+        soldToId: payload.buyerId,
+      });
+      expect(body.sellerTicket).toMatchObject({
+        id: TICKET_ID,
+        status: 'transferred',
+        transferredToEmail: payload.buyerEmail,
+      });
+      expect(body.buyerTicket).toMatchObject({
+        status: 'valid',
+        attendeeId: body.buyerAttendee.id,
+        eventId: EVENT_ID,
+        ticketTypeId: TICKET_TYPE_ID,
+      });
+      expect(body.buyerAttendee).toMatchObject({
+        email: payload.buyerEmail,
+        status: 'confirmed',
+        ticketId: body.buyerTicket.id,
+      });
+
+      const qr = new QrService('resale-db-test-secret').getQrPayload(body.buyerTicket.qrPayload);
+      expect(qr).toMatchObject({ valid: true, ticketId: body.buyerTicket.id });
+
+      const rows = await db
+        .selectFrom('tickets')
+        .selectAll()
+        .where('tenant_id', '=', TENANT_ID)
+        .execute();
+      expect(rows.filter((row) => row.id === TICKET_ID)).toHaveLength(1);
+      expect(rows.filter((row) => row.status === 'valid')).toHaveLength(1);
+
+      const walletPass = await db
+        .selectFrom('wallet_passes')
+        .selectAll()
+        .where('id', '=', WALLET_PASS_ID)
+        .executeTakeFirstOrThrow();
+      expect(walletPass.status).toBe('revoked');
+      expect(walletPass.revoked_at).toBeTruthy();
+
+      const timeline = await db
+        .selectFrom('order_timeline_events')
+        .selectAll()
+        .where('order_id', '=', ORDER_ID)
+        .where('type', '=', 'ticket.resale_completed')
+        .execute();
+      expect(timeline).toHaveLength(1);
+
+      const duplicate = await app.inject({
+        method: 'POST',
+        url: `/ticket-listings/${listingId}/complete`,
+        headers: { 'Idempotency-Key': `resale_db_complete_again_${RUN_ID}` },
+        payload: {
+          ...payload,
+          buyerId: `usr_resale_buyer_again_${RUN_ID}`,
+          buyerEmail: `buyer-again-${RUN_ID}@example.com`,
+        },
+      });
+      expect(duplicate.statusCode).toBe(400);
     });
 
     it('enforces persisted resale policy before inserting a listing', async () => {

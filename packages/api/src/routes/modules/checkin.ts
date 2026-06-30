@@ -278,17 +278,17 @@ export const checkInRoutes: FastifyPluginAsync = async (app) => {
         requestHash: hashRequest({ ticketId, toEmail: body.toEmail }),
       },
       async () => {
-        if (ticket.status !== 'valid') {
-          throw new ValidationError(`Ticket status is ${ticket.status}, cannot transfer`);
+        const transferredAt = new Date();
+        const transferred = await ticketRepo.transferIfValid(ticketId, body.toEmail, transferredAt);
+        if (!transferred) {
+          const currentTicket = await ticketRepo.findById(ticketId);
+          const currentStatus = currentTicket?.status ?? ticket.status;
+          throw new ValidationError(`Ticket status is ${currentStatus}, cannot transfer`);
         }
 
-        const updated = await ticketRepo.update(ticketId, {
-          status: 'transferred',
-          transferred_to_email: body.toEmail,
-          transferred_at: new Date(),
-        });
+        const updated = await ticketRepo.findById(ticketId);
 
-        return { status: 200, body: updated };
+        return { status: 200, body: updated! };
       },
     );
 

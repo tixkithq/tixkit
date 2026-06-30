@@ -5,6 +5,7 @@ type TicketListingTerminalStatus = 'delisted' | 'expired';
 
 export class TicketRepository extends BaseRepository {
   async create(input: {
+    id?: string;
     tenantId: string;
     orderId: string;
     attendeeId: string;
@@ -15,7 +16,7 @@ export class TicketRepository extends BaseRepository {
     qrPayload: string;
     qrHash: string;
   }) {
-    const id = `tkt_${ulid()}`;
+    const id = input.id ?? `tkt_${ulid()}`;
     const now = new Date();
     return this.insertReturning(
       'tickets',
@@ -69,6 +70,21 @@ export class TicketRepository extends BaseRepository {
 
   async update(id: string, input: Record<string, unknown>) {
     return this.updateReturning('tickets', id, { ...input, updated_at: new Date() });
+  }
+
+  async transferIfValid(id: string, toEmail: string, transferredAt: Date): Promise<boolean> {
+    const result = await this.db
+      .updateTable('tickets')
+      .set({
+        status: 'transferred',
+        transferred_to_email: toEmail,
+        transferred_at: transferredAt,
+        updated_at: new Date(),
+      })
+      .where('id', '=', id)
+      .where('status', '=', 'valid')
+      .executeTakeFirst();
+    return Number(result.numUpdatedRows ?? 0) === 1;
   }
 
   /**

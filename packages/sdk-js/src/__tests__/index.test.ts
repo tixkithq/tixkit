@@ -824,7 +824,7 @@ describe('TixkitClient new resource methods', () => {
     expect(getCall(fm).method).toBe('GET');
   });
 
-  it('tickets creates and delists resale listings with idempotency keys', async () => {
+  it('tickets creates, delists, and completes resale listings with idempotency keys', async () => {
     const fm = mockFetch(201, { id: 'lst_1', status: 'listed' });
     const c = new TixkitClient({
       apiKey: '***********',
@@ -845,6 +845,22 @@ describe('TixkitClient new resource methods', () => {
     expect(getCall(fm).url).toBe('https://api.test/v1/ticket-listings/lst_1/delist');
     expect(getCall(fm).method).toBe('POST');
     expect(getCall(fm).headers['Idempotency-Key']).toBe('delist_1');
+
+    fm.mockClear();
+    await c.tickets.completeResaleListing('lst_1', {
+      buyerId: 'usr_buyer',
+      buyerEmail: 'buyer@example.com',
+      externalPaymentReference: 'stripe_pi_1',
+      idempotencyKey: 'complete_1',
+    });
+    expect(getCall(fm).url).toBe('https://api.test/v1/ticket-listings/lst_1/complete');
+    expect(getCall(fm).method).toBe('POST');
+    expect(getCall(fm).headers['Idempotency-Key']).toBe('complete_1');
+    expect(JSON.parse(getCall(fm).body)).toEqual({
+      buyerId: 'usr_buyer',
+      buyerEmail: 'buyer@example.com',
+      externalPaymentReference: 'stripe_pi_1',
+    });
   });
 
   it('organizations.update sends PATCH', async () => {

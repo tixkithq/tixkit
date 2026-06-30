@@ -166,6 +166,54 @@ export type AdminTicketListing = {
   updatedAt: string;
 };
 
+export type AdminResaleTicket = {
+  id: string;
+  tenantId: string;
+  orderId: string;
+  attendeeId: string;
+  eventId: string;
+  ticketTypeId: string;
+  eventOccurrenceId?: string;
+  status: string;
+  code: string;
+  qrPayload: string;
+  qrHash: string;
+  transferredToEmail?: string;
+  transferredAt?: string;
+  checkedInAt?: string;
+  checkedInByDeviceId?: string;
+  walletPassId?: string;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type AdminResaleAttendee = {
+  id: string;
+  tenantId: string;
+  orderId: string;
+  eventId: string;
+  ticketTypeId: string;
+  eventOccurrenceId?: string;
+  ticketId?: string;
+  firstName?: string;
+  lastName?: string;
+  email: string;
+  phone?: string;
+  status: string;
+  customAnswers?: unknown;
+  checkedInAt?: string;
+  checkInDeviceId?: string;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type AdminTicketResaleCompletion = {
+  listing: AdminTicketListing;
+  sellerTicket: AdminResaleTicket;
+  buyerTicket: AdminResaleTicket;
+  buyerAttendee: AdminResaleAttendee;
+};
+
 export type AdminMarketingIntegrationProvider = 'ga4' | 'meta_pixel' | 'generic_tag';
 
 export type AdminMarketingIntegration = {
@@ -1521,6 +1569,18 @@ export type AdminApi = {
     listingId: string,
     input?: { idempotencyKey?: string },
   ): Promise<ApiResult<AdminTicketListing>>;
+  completeResaleListing(
+    listingId: string,
+    input: {
+      buyerId: string;
+      buyerEmail: string;
+      buyerFirstName?: string | null;
+      buyerLastName?: string | null;
+      buyerPhone?: string | null;
+      externalPaymentReference?: string | null;
+      idempotencyKey?: string;
+    },
+  ): Promise<ApiResult<AdminTicketResaleCompletion>>;
   listEventOccurrences(eventId: string): Promise<ApiResult<AdminEventOccurrence[]>>;
   createEventOccurrence(
     eventId: string,
@@ -2113,6 +2173,73 @@ function normalizeTicketListing(
     soldAt: stringValue(value.soldAt ?? value.sold_at, undefined),
     createdAt: String(value.createdAt ?? value.created_at ?? new Date(0).toISOString()),
     updatedAt: String(value.updatedAt ?? value.updated_at ?? new Date(0).toISOString()),
+  };
+}
+
+function normalizeResaleTicket(value: Record<string, unknown>): AdminResaleTicket {
+  return {
+    id: String(value.id),
+    tenantId: String(value.tenantId ?? value.tenant_id),
+    orderId: String(value.orderId ?? value.order_id),
+    attendeeId: String(value.attendeeId ?? value.attendee_id),
+    eventId: String(value.eventId ?? value.event_id),
+    ticketTypeId: String(value.ticketTypeId ?? value.ticket_type_id),
+    eventOccurrenceId: stringValue(
+      value.eventOccurrenceId ?? value.event_occurrence_id,
+      undefined,
+    ),
+    status: String(value.status),
+    code: String(value.code),
+    qrPayload: String(value.qrPayload ?? value.qr_payload),
+    qrHash: String(value.qrHash ?? value.qr_hash),
+    transferredToEmail: stringValue(
+      value.transferredToEmail ?? value.transferred_to_email,
+      undefined,
+    ),
+    transferredAt: stringValue(value.transferredAt ?? value.transferred_at, undefined),
+    checkedInAt: stringValue(value.checkedInAt ?? value.checked_in_at, undefined),
+    checkedInByDeviceId: stringValue(
+      value.checkedInByDeviceId ?? value.checked_in_by_device_id,
+      undefined,
+    ),
+    walletPassId: stringValue(value.walletPassId ?? value.wallet_pass_id, undefined),
+    createdAt: String(value.createdAt ?? value.created_at ?? new Date(0).toISOString()),
+    updatedAt: String(value.updatedAt ?? value.updated_at ?? new Date(0).toISOString()),
+  };
+}
+
+function normalizeResaleAttendee(value: Record<string, unknown>): AdminResaleAttendee {
+  return {
+    id: String(value.id),
+    tenantId: String(value.tenantId ?? value.tenant_id),
+    orderId: String(value.orderId ?? value.order_id),
+    eventId: String(value.eventId ?? value.event_id),
+    ticketTypeId: String(value.ticketTypeId ?? value.ticket_type_id),
+    eventOccurrenceId: stringValue(
+      value.eventOccurrenceId ?? value.event_occurrence_id,
+      undefined,
+    ),
+    ticketId: stringValue(value.ticketId ?? value.ticket_id, undefined),
+    firstName: stringValue(value.firstName ?? value.first_name, undefined),
+    lastName: stringValue(value.lastName ?? value.last_name, undefined),
+    email: String(value.email),
+    phone: stringValue(value.phone, undefined),
+    status: String(value.status),
+    customAnswers: value.customAnswers ?? value.custom_answers,
+    checkedInAt: stringValue(value.checkedInAt ?? value.checked_in_at, undefined),
+    checkInDeviceId: stringValue(value.checkInDeviceId ?? value.check_in_device_id, undefined),
+    createdAt: String(value.createdAt ?? value.created_at ?? new Date(0).toISOString()),
+    updatedAt: String(value.updatedAt ?? value.updated_at ?? new Date(0).toISOString()),
+  };
+}
+
+function normalizeTicketResaleCompletion(value: unknown): AdminTicketResaleCompletion {
+  const record = asRecord(value);
+  return {
+    listing: normalizeTicketListing(asRecord(record?.listing) ?? {}),
+    sellerTicket: normalizeResaleTicket(asRecord(record?.sellerTicket) ?? {}),
+    buyerTicket: normalizeResaleTicket(asRecord(record?.buyerTicket) ?? {}),
+    buyerAttendee: normalizeResaleAttendee(asRecord(record?.buyerAttendee) ?? {}),
   };
 }
 
@@ -3948,6 +4075,89 @@ export const adminApi: AdminApi = {
             faceValueCents: 0,
             createdAt: iso(0),
             updatedAt: iso(0),
+          }),
+        ),
+    );
+  },
+
+  async completeResaleListing(listingId, input) {
+    return withFixture(
+      async () => {
+        const { idempotencyKey, ...body } = input;
+        const result = await request<AdminTicketResaleCompletion>(
+          `/v1/ticket-listings/${listingId}/complete`,
+          {
+            method: 'POST',
+            headers: {
+              'Idempotency-Key': idempotencyKey ?? adminIdempotencyKey(`resale_complete_${listingId}`),
+            },
+            body: JSON.stringify(body),
+          },
+        );
+        return result.ok ? ok(normalizeTicketResaleCompletion(result.data)) : result;
+      },
+      () =>
+        ok(
+          normalizeTicketResaleCompletion({
+            listing: {
+              id: listingId,
+              tenantId: 'tnt_demo',
+              eventId: 'evt_demo_001',
+              ticketId: `tkt_${listingId}`,
+              sellerId: 'usr_demo',
+              status: 'sold',
+              priceCents: 5000,
+              currency: 'USD',
+              faceValueCents: 5000,
+              soldToId: input.buyerId,
+              soldAt: iso(0),
+              createdAt: iso(0),
+              updatedAt: iso(0),
+            },
+            sellerTicket: {
+              id: `tkt_${listingId}`,
+              tenantId: 'tnt_demo',
+              orderId: 'ord_demo',
+              attendeeId: 'att_seller',
+              eventId: 'evt_demo_001',
+              ticketTypeId: 'tt_demo',
+              status: 'transferred',
+              code: 'TK-SELLER',
+              qrPayload: 'seller-payload',
+              qrHash: 'seller-hash',
+              transferredToEmail: input.buyerEmail,
+              transferredAt: iso(0),
+              createdAt: iso(0),
+              updatedAt: iso(0),
+            },
+            buyerTicket: {
+              id: `tkt_buyer_${listingId}`,
+              tenantId: 'tnt_demo',
+              orderId: 'ord_demo',
+              attendeeId: 'att_buyer',
+              eventId: 'evt_demo_001',
+              ticketTypeId: 'tt_demo',
+              status: 'valid',
+              code: 'TK-BUYER',
+              qrPayload: 'buyer-payload',
+              qrHash: 'buyer-hash',
+              createdAt: iso(0),
+              updatedAt: iso(0),
+            },
+            buyerAttendee: {
+              id: 'att_buyer',
+              tenantId: 'tnt_demo',
+              orderId: 'ord_demo',
+              eventId: 'evt_demo_001',
+              ticketTypeId: 'tt_demo',
+              ticketId: `tkt_buyer_${listingId}`,
+              firstName: input.buyerFirstName ?? undefined,
+              lastName: input.buyerLastName ?? undefined,
+              email: input.buyerEmail,
+              status: 'confirmed',
+              createdAt: iso(0),
+              updatedAt: iso(0),
+            },
           }),
         ),
     );

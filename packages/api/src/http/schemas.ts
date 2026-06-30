@@ -727,6 +727,17 @@ export const createResaleListingSchema = z
   })
   .strict();
 
+export const completeResaleListingSchema = z
+  .object({
+    buyerId: z.string().trim().min(1),
+    buyerEmail: z.string().trim().toLowerCase().email(),
+    buyerFirstName: z.string().trim().min(1).nullable().optional(),
+    buyerLastName: z.string().trim().min(1).nullable().optional(),
+    buyerPhone: z.string().trim().min(1).nullable().optional(),
+    externalPaymentReference: z.string().trim().min(1).max(256).nullable().optional(),
+  })
+  .strict();
+
 // Export schema
 export const createExportSchema = z
   .object({
