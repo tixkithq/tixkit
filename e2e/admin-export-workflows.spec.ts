@@ -248,7 +248,9 @@ test.describe('admin export workflow coverage', () => {
       expect(queuedExport.status).toBe('pending');
 
       await expect(
-        page.getByText(`${exportCase.statusLabel} CSV export ${queuedExport.exportId} is completed.`),
+        page.getByText(
+          `${exportCase.statusLabel} CSV export ${queuedExport.exportId} is completed.`,
+        ),
       ).toBeVisible({ timeout: 60_000 });
 
       const downloadLink = page.getByRole('link', { name: 'Download' });
@@ -433,7 +435,11 @@ test.describe('admin export workflow coverage', () => {
       suffix,
     });
     const [checkedInTicket] = checkInList.tickets;
-    const scanResult = await expectJsonStatus<{ outcome: string; ticketId?: string }>(
+    const scanResult = await expectJsonStatus<{
+      outcome: string;
+      ticketId?: string;
+      message: string;
+    }>(
       await request.post(`${apiBaseUrl}/v1/check-ins/scan`, {
         headers: { 'idempotency-key': `report-attendance-scan-${suffix}` },
         data: {
@@ -445,7 +451,11 @@ test.describe('admin export workflow coverage', () => {
       }),
       200,
     );
-    expect(scanResult).toMatchObject({ outcome: 'accepted', ticketId: checkedInTicket.id });
+    expect(scanResult).toMatchObject({
+      outcome: 'accepted',
+      ticketId: checkedInTicket.id,
+      message: 'Check-in successful',
+    });
 
     await page.goto(`${adminBaseUrl}/events/${event.id}/reports`);
     await expect(page.getByRole('heading', { name: 'Reports' })).toBeVisible();
@@ -543,7 +553,11 @@ test.describe('admin export workflow coverage', () => {
       suffix,
     });
     const [checkedInTicket] = checkInList.tickets;
-    const scanResult = await expectJsonStatus<{ outcome: string; ticketId?: string }>(
+    const scanResult = await expectJsonStatus<{
+      outcome: string;
+      ticketId?: string;
+      message: string;
+    }>(
       await request.post(`${apiBaseUrl}/v1/check-ins/scan`, {
         headers: { 'idempotency-key': `report-mobile-scan-${suffix}` },
         data: {
@@ -555,7 +569,11 @@ test.describe('admin export workflow coverage', () => {
       }),
       200,
     );
-    expect(scanResult).toMatchObject({ outcome: 'accepted', ticketId: checkedInTicket.id });
+    expect(scanResult).toMatchObject({
+      outcome: 'accepted',
+      ticketId: checkedInTicket.id,
+      message: 'Check-in successful',
+    });
     await expectCheckedInAttendanceReport(page, event.id, ticketType.name);
 
     await page.goto(`${adminBaseUrl}/events/${event.id}/reports`);

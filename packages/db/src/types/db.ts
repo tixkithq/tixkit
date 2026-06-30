@@ -145,6 +145,7 @@ export interface ScannerDeviceTable {
   device_id: string;
   hashed_secret: string;
   event_ids: string;
+  scopes: string;
   status: string;
   last_seen_at: Timestamp | null;
   created_at: Timestamp;
@@ -522,6 +523,8 @@ export interface UploadArtifactTable {
   checksum_sha256: string | null;
   client_token_hash: string | null;
   metadata: string;
+  consumed_by_checkout_session_id: string | null;
+  consumed_at: Timestamp | null;
   expires_at: Timestamp;
   created_at: Timestamp;
   updated_at: Timestamp;

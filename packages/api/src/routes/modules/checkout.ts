@@ -16,6 +16,7 @@ import {
   EventOccurrenceRepository,
   PaymentCompensationRepository,
   OrganizationRepository,
+  type Database,
 } from '@tixkit/db';
 import { ClerkAuthService, createAuthMiddleware } from '../../auth/clerk.js';
 import type { ProductForPricing, TicketTypeForPricing } from '../../services/pricing.js';
@@ -340,6 +341,72 @@ function normalizeAttendeeFieldsForCartItems(
   });
 
   return { items: normalizedItems, attendeeFieldsByTicketType };
+}
+
+async function claimCheckoutUploadArtifacts(
+  db: Database,
+  tenantId: string,
+  eventId: string,
+  cart: CartInput,
+  checkoutSessionId: string,
+): Promise<void> {
+  const claimedArtifactIds = new Set<string>();
+  await assertCompletedUploadArtifacts(db, tenantId, eventId, cart.buyerFields ?? {}, {
+    checkoutSessionId,
+    claimedArtifactIds,
+  });
+
+  for (const answerSets of Object.values(cart.attendeeFields ?? {})) {
+    for (const answers of answerSets) {
+      if (!answers || typeof answers !== 'object' || Array.isArray(answers)) continue;
+      // eslint-disable-next-line no-await-in-loop -- claim ordering keeps duplicate artifact use deterministic.
+      await assertCompletedUploadArtifacts(
+        db,
+        tenantId,
+        eventId,
+        answers as Record<string, unknown>,
+        {
+          checkoutSessionId,
+          claimedArtifactIds,
+        },
+      );
+    }
+  }
+}
+
+async function releaseCheckoutUploadArtifactClaims(
+  db: Database,
+  checkoutSessionId: string,
+): Promise<void> {
+  await db
+    .updateTable('upload_artifacts')
+    .set({
+      consumed_by_checkout_session_id: null,
+      consumed_at: null,
+      updated_at: new Date(),
+    })
+    .where('consumed_by_checkout_session_id', '=', checkoutSessionId)
+    .execute();
+}
+
+async function compensateCheckoutSessionCreation(input: {
+  db: Database;
+  releaseHoldsForSession: (checkoutSessionId: string) => Promise<void>;
+  checkoutSessionId: string;
+  sessionCreated: boolean;
+}): Promise<void> {
+  await Promise.allSettled([
+    releaseCheckoutUploadArtifactClaims(input.db, input.checkoutSessionId),
+    input.releaseHoldsForSession(input.checkoutSessionId),
+    input.sessionCreated
+      ? input.db
+          .updateTable('checkout_sessions')
+          .set({ status: 'cancelled', updated_at: new Date() })
+          .where('id', '=', input.checkoutSessionId)
+          .where('status', '=', 'open')
+          .execute()
+      : Promise.resolve(),
+  ]);
 }
 
 type QuestionRow = {
@@ -753,6 +820,7 @@ export const checkoutRoutes: FastifyPluginAsync = async (app) => {
           )
             .filter(isVisibleCheckoutQuestion)
             .map((question) => toDomainQuestion(question));
+          const sessionId = `cs_${ulid()}`;
           const answeredAt = new Date().toISOString();
           const buyerFields = normalizeValidAnswers(
             applicableQuestions(eventQuestions, 'buyer'),
@@ -876,69 +944,91 @@ export const checkoutRoutes: FastifyPluginAsync = async (app) => {
               `Box-office tender amount ${body.amountCents} does not match server total ${quote.totalCents}`,
             );
           }
-
           const sessionRepo = new CheckoutSessionRepository(db);
-          const sessionId = `cs_${ulid()}`;
-          const reservation = await inventoryService.reserveCart({
-            items: reservationItems,
-            checkoutSessionId: sessionId,
-          });
-          const session = await sessionRepo.create({
-            id: sessionId,
-            tenantId: event.tenant_id,
-            eventId,
-            brandId: event.brand_id,
-            holdId: reservation.primaryHoldId,
-            currency: quote.currency,
-            cart: cart as Record<string, unknown>,
-            buyer: (body.buyer as Record<string, unknown>) ?? {},
-            quote: quote as Record<string, unknown>,
-            expiresAt: reservation.expiresAt,
-            idempotencyKey,
-            successUrl: undefined,
-            cancelUrl: undefined,
-          });
+          let sessionCreated = false;
+          let shouldCompensate = true;
+          try {
+            const reservation = await inventoryService.reserveCart({
+              items: reservationItems,
+              checkoutSessionId: sessionId,
+            });
+            const session = await sessionRepo.create({
+              id: sessionId,
+              tenantId: event.tenant_id,
+              eventId,
+              brandId: event.brand_id,
+              holdId: reservation.primaryHoldId,
+              currency: quote.currency,
+              cart: cart as Record<string, unknown>,
+              buyer: (body.buyer as Record<string, unknown>) ?? {},
+              quote: quote as Record<string, unknown>,
+              expiresAt: reservation.expiresAt,
+              idempotencyKey,
+              successUrl: undefined,
+              cancelUrl: undefined,
+            });
+            sessionCreated = true;
+            await claimCheckoutUploadArtifacts(db, event.tenant_id, eventId, cart, sessionId);
 
-          const handle = await temporalClient.startCheckoutSession({
-            checkoutSessionId: session.id,
-            tenantId: event.tenant_id,
-            organizationId: event.organization_id,
-            eventId,
-            brandId: event.brand_id,
-            holdId: session.hold_id ?? undefined,
-            currency: session.currency,
-            amountCents: quote.totalCents,
-            feeCents: quote.feeCents,
-            buyerEmail: body.buyer?.email ?? '',
-            isFreeOrder: quote.totalCents === 0,
-            paymentMode: body.tenderType === 'comp' ? 'free' : 'offline',
-            salesChannel: 'box_office',
-            operatorId: principal.id,
-            tenderType: body.tenderType,
-          });
-          const workflowResult = await handle.result();
-          if (workflowResult.status !== 'completed' || !workflowResult.orderId) {
-            return {
-              status: 409,
-              body: {
-                error: {
-                  code: 'BOX_OFFICE_ORDER_FAILED',
-                  message: 'Box-office order could not be finalized',
-                  requestId: request.id,
+            const handle = await temporalClient.startCheckoutSession({
+              checkoutSessionId: session.id,
+              tenantId: event.tenant_id,
+              organizationId: event.organization_id,
+              eventId,
+              brandId: event.brand_id,
+              holdId: session.hold_id ?? undefined,
+              currency: session.currency,
+              amountCents: quote.totalCents,
+              feeCents: quote.feeCents,
+              buyerEmail: body.buyer?.email ?? '',
+              isFreeOrder: quote.totalCents === 0,
+              paymentMode: body.tenderType === 'comp' ? 'free' : 'offline',
+              salesChannel: 'box_office',
+              operatorId: principal.id,
+              tenderType: body.tenderType,
+            });
+            const workflowResult = await handle.result();
+            if (workflowResult.status !== 'completed' || !workflowResult.orderId) {
+              await compensateCheckoutSessionCreation({
+                db,
+                releaseHoldsForSession: (id) => inventoryService.releaseHoldsForSession(id),
+                checkoutSessionId: sessionId,
+                sessionCreated,
+              });
+              shouldCompensate = false;
+              return {
+                status: 409,
+                body: {
+                  error: {
+                    code: 'BOX_OFFICE_ORDER_FAILED',
+                    message: 'Box-office order could not be finalized',
+                    requestId: request.id,
+                  },
                 },
+              };
+            }
+            shouldCompensate = false;
+            const order = await new OrderRepository(db).findById(workflowResult.orderId);
+            if (!order) throw new NotFoundError('Order', workflowResult.orderId);
+            return {
+              status: 201,
+              body: {
+                order: serializeOrder(order),
+                sessionId: session.id,
+                status: workflowResult.status,
               },
             };
+          } catch (error) {
+            if (shouldCompensate) {
+              await compensateCheckoutSessionCreation({
+                db,
+                releaseHoldsForSession: (id) => inventoryService.releaseHoldsForSession(id),
+                checkoutSessionId: sessionId,
+                sessionCreated,
+              });
+            }
+            throw error;
           }
-          const order = await new OrderRepository(db).findById(workflowResult.orderId);
-          if (!order) throw new NotFoundError('Order', workflowResult.orderId);
-          return {
-            status: 201,
-            body: {
-              order: serializeOrder(order),
-              sessionId: session.id,
-              status: workflowResult.status,
-            },
-          };
         },
       );
 
@@ -1192,6 +1282,7 @@ export const checkoutRoutes: FastifyPluginAsync = async (app) => {
           .filter(isVisibleCheckoutQuestion)
           .map((q) => toDomainQuestion(q));
 
+        const sessionId = `cs_${ulid()}`;
         const answeredAt = new Date().toISOString();
         const buyerFields = normalizeValidAnswers(
           applicableQuestions(eventQuestions, 'buyer'),
@@ -1351,35 +1442,46 @@ export const checkoutRoutes: FastifyPluginAsync = async (app) => {
           feeRules: (feeRules as FeeRuleRow[]).map(toDomainFeeRule),
           discountCodes: (discounts as DiscountCodeRow[]).map(toDomainDiscountCode),
         });
-
         // Reserve inventory across every pool the cart draws from.
         const sessionRepo = new CheckoutSessionRepository(db);
-        const sessionId = `cs_${ulid()}`;
-        const reservation =
-          reservationItems.length > 0
-            ? await inventoryService.reserveCart({
-                items: reservationItems,
-                checkoutSessionId: sessionId,
-              })
-            : { primaryHoldId: null, expiresAt: new Date(Date.now() + 10 * 60 * 1000) };
+        let sessionCreated = false;
+        try {
+          const reservation =
+            reservationItems.length > 0
+              ? await inventoryService.reserveCart({
+                  items: reservationItems,
+                  checkoutSessionId: sessionId,
+                })
+              : { primaryHoldId: null, expiresAt: new Date(Date.now() + 10 * 60 * 1000) };
 
-        const session = await sessionRepo.create({
-          id: sessionId,
-          tenantId: event.tenant_id,
-          eventId: body.eventId,
-          brandId: event.brand_id,
-          holdId: reservation.primaryHoldId ?? undefined,
-          currency: quote.currency,
-          cart: cart as Record<string, unknown>,
-          buyer: (body.buyer as Record<string, unknown>) ?? {},
-          quote: quote as Record<string, unknown>,
-          expiresAt: reservation.expiresAt,
-          idempotencyKey,
-          successUrl: body.successUrl,
-          cancelUrl: body.cancelUrl,
-        });
+          const session = await sessionRepo.create({
+            id: sessionId,
+            tenantId: event.tenant_id,
+            eventId: body.eventId,
+            brandId: event.brand_id,
+            holdId: reservation.primaryHoldId ?? undefined,
+            currency: quote.currency,
+            cart: cart as Record<string, unknown>,
+            buyer: (body.buyer as Record<string, unknown>) ?? {},
+            quote: quote as Record<string, unknown>,
+            expiresAt: reservation.expiresAt,
+            idempotencyKey,
+            successUrl: body.successUrl,
+            cancelUrl: body.cancelUrl,
+          });
+          sessionCreated = true;
+          await claimCheckoutUploadArtifacts(db, event.tenant_id, body.eventId, cart, sessionId);
 
-        return { status: 201, body: publicCheckoutSession(session) };
+          return { status: 201, body: publicCheckoutSession(session) };
+        } catch (error) {
+          await compensateCheckoutSessionCreation({
+            db,
+            releaseHoldsForSession: (id) => inventoryService.releaseHoldsForSession(id),
+            checkoutSessionId: sessionId,
+            sessionCreated,
+          });
+          throw error;
+        }
       },
     );
 

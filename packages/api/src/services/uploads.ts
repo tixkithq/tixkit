@@ -69,6 +69,10 @@ const PURPOSE_LIMITS: Record<
   },
 };
 
+function isUploadPurpose(value: string): value is UploadPurpose {
+  return Object.hasOwn(PURPOSE_LIMITS, value);
+}
+
 function tokenHash(token: string): string {
   return createHash('sha256').update(token).digest('hex');
 }
@@ -96,6 +100,9 @@ function extension(name: string): string {
 function assertUploadAllowed(
   input: Pick<CreateUploadInput, 'purpose' | 'contentType' | 'sizeBytes'>,
 ): void {
+  if (!isUploadPurpose(input.purpose)) {
+    throw new ValidationError(`Unsupported upload purpose: ${input.purpose}`);
+  }
   const limits = PURPOSE_LIMITS[input.purpose];
   if (!limits.contentTypes.has(input.contentType)) {
     throw new ValidationError(`Unsupported upload content type: ${input.contentType}`);
@@ -542,15 +549,38 @@ function metadataQuestionId(metadata: unknown): string | undefined {
   return typeof questionId === 'string' && questionId.length > 0 ? questionId : undefined;
 }
 
+type UploadArtifactClaimOptions = {
+  checkoutSessionId?: string;
+  claimedArtifactIds?: Set<string>;
+};
+
+function countUpdatedRows(result: { numUpdatedRows?: bigint | number } | undefined): number {
+  return Number(result?.numUpdatedRows ?? 0);
+}
+
 export async function assertCompletedUploadArtifacts(
   db: Database,
   tenantId: string,
   eventId: string,
   answers: Record<string, unknown>,
+  options: UploadArtifactClaimOptions = {},
 ): Promise<void> {
   const answerArtifacts = uploadArtifactAnswerEntries(answers);
   const artifactIds = answerArtifacts.map(([, artifactId]) => artifactId);
   if (artifactIds.length === 0) return;
+
+  const duplicateArtifactIds = artifactIds.filter(
+    (artifactId, index) => artifactIds.indexOf(artifactId) !== index,
+  );
+  const alreadyClaimedInPayload = options.claimedArtifactIds
+    ? artifactIds.filter((artifactId) => options.claimedArtifactIds!.has(artifactId))
+    : [];
+  const repeatedArtifactIds = [...new Set([...duplicateArtifactIds, ...alreadyClaimedInPayload])];
+  if (repeatedArtifactIds.length > 0) {
+    throw new ValidationError('File answer upload artifacts can only be used once', {
+      artifactIds: repeatedArtifactIds,
+    });
+  }
 
   const questionIdsByArtifactId = new Map<string, Set<string>>();
   for (const [questionId, artifactId] of answerArtifacts) {
@@ -561,7 +591,14 @@ export async function assertCompletedUploadArtifacts(
 
   const rows = await db
     .selectFrom('upload_artifacts')
-    .select(['id', 'purpose', 'status', 'scan_status', 'metadata'])
+    .select([
+      'id',
+      'purpose',
+      'status',
+      'scan_status',
+      'metadata',
+      'consumed_by_checkout_session_id',
+    ])
     .where('tenant_id', '=', tenantId)
     .where('event_id', '=', eventId)
     .where('id', 'in', artifactIds)
@@ -570,12 +607,20 @@ export async function assertCompletedUploadArtifacts(
   const invalidPurpose = new Set<string>();
   const mismatched = new Set<string>();
   const missingQuestionMetadata = new Set<string>();
+  const consumed = new Set<string>();
   for (const row of rows) {
     if (row.purpose !== 'checkout_answer') {
       invalidPurpose.add(row.id);
       continue;
     }
     if (row.status !== 'uploaded' || row.scan_status !== 'clean') continue;
+    if (
+      row.consumed_by_checkout_session_id &&
+      row.consumed_by_checkout_session_id !== options.checkoutSessionId
+    ) {
+      consumed.add(row.id);
+      continue;
+    }
 
     const artifactQuestionId = metadataQuestionId(row.metadata);
     const answerQuestionIds = questionIdsByArtifactId.get(row.id);
@@ -621,11 +666,54 @@ export async function assertCompletedUploadArtifacts(
     );
   }
 
+  if (consumed.size > 0) {
+    throw new ValidationError('File answer references an upload artifact that has already been used', {
+      artifactIds: [...consumed],
+    });
+  }
+
   const missing = artifactIds.filter((artifactId) => !valid.has(artifactId));
   if (missing.length > 0) {
     throw new ValidationError(
       'File answer references an upload artifact that is not completed and clean',
       { artifactIds: missing },
     );
+  }
+
+  if (options.checkoutSessionId) {
+    for (const artifactId of valid) {
+      // eslint-disable-next-line no-await-in-loop -- each artifact must be claimed independently so replay races fail closed.
+      const claimed = await db
+        .updateTable('upload_artifacts')
+        .set({
+          consumed_by_checkout_session_id: options.checkoutSessionId,
+          consumed_at: new Date(),
+          updated_at: new Date(),
+        })
+        .where('id', '=', artifactId)
+        .where('consumed_by_checkout_session_id', 'is', null)
+        .executeTakeFirst();
+
+      if (countUpdatedRows(claimed) === 0) {
+        // eslint-disable-next-line no-await-in-loop -- re-read is scoped to the artifact that failed the conditional claim.
+        const current = await db
+          .selectFrom('upload_artifacts')
+          .select(['consumed_by_checkout_session_id'])
+          .where('id', '=', artifactId)
+          .executeTakeFirst();
+        if (current?.consumed_by_checkout_session_id !== options.checkoutSessionId) {
+          throw new ValidationError(
+            'File answer references an upload artifact that has already been used',
+            {
+              artifactIds: [artifactId],
+            },
+          );
+        }
+      }
+    }
+  }
+
+  for (const artifactId of valid) {
+    options.claimedArtifactIds?.add(artifactId);
   }
 }

@@ -8,6 +8,7 @@ import { expectNoAxeViolations } from './helpers/axe';
 import { apiBaseUrl, checkoutBaseUrl } from './helpers/env';
 import {
   devOrganizationId,
+  readCheckoutSessionArtifactAnswerState,
   readOrphanPaymentCompensationState,
   readPromoCheckoutCaptureState,
   readPaidCheckoutCaptureState,
@@ -94,14 +95,20 @@ function passFieldGroup(passJson: Record<string, unknown>, group: string): unkno
 
 function decodeGoogleWalletPayload(saveUrl: string): {
   eventTicketClasses: Array<{ issuerName?: string }>;
-  eventTicketObjects: Array<{ hexBackgroundColor?: string }>;
+  eventTicketObjects: Array<{
+    barcode?: { alternateText?: string; type?: string; value?: string };
+    hexBackgroundColor?: string;
+  }>;
 } {
   const token = saveUrl.replace('https://pay.google.com/gp/v/save/', '');
   const [, payload] = token.split('.');
   const claims = JSON.parse(Buffer.from(payload, 'base64url').toString('utf8')) as {
     payload: {
       eventTicketClasses: Array<{ issuerName?: string }>;
-      eventTicketObjects: Array<{ hexBackgroundColor?: string }>;
+      eventTicketObjects: Array<{
+        barcode?: { alternateText?: string; type?: string; value?: string };
+        hexBackgroundColor?: string;
+      }>;
     };
   };
   return claims.payload;
@@ -390,6 +397,75 @@ test.describe('paid checkout capture workflow', () => {
     await expect(page.getByRole('heading', { name: 'Resale tickets' })).toHaveCount(0);
   });
 
+  test('uploads a checkout file answer through hosted checkout and consumes the artifact', async ({
+    page,
+    request,
+  }, testInfo) => {
+    await requireReachable(page, `${apiBaseUrl}/health`, 'api');
+    await requireReachable(page, checkoutBaseUrl, 'checkout app');
+
+    const suffix = `file-upload-ui-${testInfo.workerIndex}-${Date.now()}`;
+    const { event, ticketType, inventoryPool } = await seedPaidCheckoutEvent(request, suffix);
+    const question = (await expectJsonResponse(
+      await request.post(`${apiBaseUrl}/v1/events/${event.id}/questions`, {
+        data: {
+          type: 'file',
+          label: 'Upload waiver',
+          required: true,
+          appliesTo: 'buyer',
+        },
+      }),
+      201,
+    )) as { id: string };
+
+    const uploadPath = join(tmpdir(), `tixkit-waiver-${suffix}.txt`);
+    writeFileSync(uploadPath, `waiver evidence ${suffix}`);
+    try {
+      await page.goto(`${checkoutBaseUrl}/checkout?eventId=${event.id}`);
+      await expect(page.getByRole('heading', { name: event.title })).toBeVisible();
+      await page.getByRole('button', { name: `Increase ${ticketType.name} quantity` }).click();
+      await page.getByLabel('Email').fill(`file-upload-ui+${suffix}@example.com`);
+      await page.getByLabel('First name').fill('File');
+      await page.getByLabel('Last name').fill('Buyer');
+      await page.getByLabel(/Upload waiver/).setInputFiles(uploadPath);
+      await expect(page.getByText('Uploaded', { exact: false })).toContainText(
+        `tixkit-waiver-${suffix}.txt`,
+      );
+      await attachScreenshot(page, testInfo, 'hosted-file-upload-checkout-select');
+      await expectNoAxeViolations(page, testInfo);
+
+      await page.getByRole('button', { name: 'Continue' }).click();
+      await expect(page.getByRole('button', { name: 'Pay $25.00' })).toBeVisible();
+      await page.getByRole('button', { name: 'Pay $25.00' }).click();
+      await expect(page.getByRole('heading', { name: 'Order confirmed' })).toBeVisible();
+
+      const confirmationUrl = new URL(page.url());
+      const sessionId = confirmationUrl.searchParams.get('sessionId');
+      const orderId = confirmationUrl.searchParams.get('orderId');
+      expect(sessionId).toEqual(expect.any(String));
+      expect(orderId).toEqual(expect.any(String));
+
+      const state = await readPaidCheckoutCaptureState(sessionId!, inventoryPool.id);
+      expect(state.session).toMatchObject({ status: 'completed', orderId });
+      const answerState = await readCheckoutSessionArtifactAnswerState(sessionId!, question.id);
+      const buyerFields = answerState.cart.buyerFields as Record<string, unknown>;
+      expect(buyerFields[question.id]).toMatchObject({
+        fileName: `tixkit-waiver-${suffix}.txt`,
+        contentType: 'text/plain',
+      });
+      expect(answerState.artifact).toMatchObject({
+        eventId: event.id,
+        purpose: 'checkout_answer',
+        status: 'uploaded',
+        scanStatus: 'clean',
+        metadata: { questionId: question.id },
+        consumedByCheckoutSessionId: sessionId,
+      });
+    } finally {
+      rmSync(uploadPath, { force: true });
+    }
+  });
+
   test('shows compensated orphan payments as expired with no tickets or wallet actions', async ({
     page,
     request,
@@ -592,6 +668,8 @@ test.describe('paid checkout capture workflow', () => {
       orderId,
     });
     expect(state.ticketCount).toBe(1);
+    expect(state.ticketQrPayloads).toHaveLength(1);
+    expect(state.ticketQrPayloads[0]).toEqual(expect.stringMatching(/^[A-Za-z0-9_-]+$/));
 
     const walletPasses = await readWalletPassState(sessionId!);
     expect(walletPasses).toHaveLength(2);
@@ -642,11 +720,25 @@ test.describe('paid checkout capture workflow', () => {
     expect(passFieldGroup(passJson, 'auxiliaryFields')).toEqual(
       expect.arrayContaining([expect.objectContaining({ key: 'holder', value: 'Wallet Buyer' })]),
     );
+    expect(passJson).toMatchObject({
+      barcodes: [
+        expect.objectContaining({
+          altText: applePass?.ticketCode,
+          format: 'PKBarcodeFormatQR',
+          message: state.ticketQrPayloads[0],
+        }),
+      ],
+    });
     const googlePayload = decodeGoogleWalletPayload(googleHref!);
     expect(googlePayload.eventTicketClasses[0]).toMatchObject({
       issuerName: configuredBrand.name,
     });
     expect(googlePayload.eventTicketObjects[0]).toMatchObject({
+      barcode: {
+        alternateText: googlePass?.ticketCode,
+        type: 'QR_CODE',
+        value: state.ticketQrPayloads[0],
+      },
       hexBackgroundColor: configuredBrand.theme.primaryColor,
     });
 

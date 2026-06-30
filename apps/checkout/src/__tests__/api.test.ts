@@ -31,6 +31,7 @@ describe('isRetryable', () => {
     expect(isRetryable(new CheckoutApiError('NETWORK_ERROR', 'x', 0))).toBe(true);
     expect(isRetryable(new CheckoutApiError('X', 'x', 503))).toBe(true);
     expect(isRetryable(new CheckoutApiError('SERVICE_UNAVAILABLE', 'x', 503))).toBe(true);
+    expect(isRetryable(new CheckoutApiError('INVALID_RESPONSE', 'x', 200))).toBe(true);
   });
 
   it('treats 4xx as non-retryable', () => {
@@ -41,6 +42,55 @@ describe('isRetryable', () => {
   it('returns false for non-api errors', () => {
     expect(isRetryable(new Error('boom'))).toBe(false);
     expect(isRetryable('nope')).toBe(false);
+  });
+});
+
+describe('checkout API response parsing', () => {
+  it('falls back to a typed request error when an upstream error body is not JSON', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(
+        async () =>
+          new Response('<html>bad gateway</html>', {
+            status: 502,
+            headers: { 'Content-Type': 'text/html' },
+          }),
+      ),
+    );
+
+    await expect(publicApi.getAvailability('evt_1')).rejects.toMatchObject({
+      code: 'REQUEST_FAILED',
+      message: 'Request failed with status 502',
+      status: 502,
+    });
+  });
+
+  it('returns a retryable typed error when a successful response body is not JSON', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(
+        async () =>
+          new Response('ok', {
+            status: 200,
+            headers: { 'Content-Type': 'text/plain' },
+          }),
+      ),
+    );
+
+    let caught: unknown;
+    try {
+      await publicApi.getAvailability('evt_1');
+    } catch (error) {
+      caught = error;
+    }
+
+    expect(caught).toBeInstanceOf(CheckoutApiError);
+    expect(caught).toMatchObject({
+      code: 'INVALID_RESPONSE',
+      message: 'Checkout service returned an invalid response. Please try again.',
+      status: 200,
+    });
+    expect(isRetryable(caught)).toBe(true);
   });
 });
 

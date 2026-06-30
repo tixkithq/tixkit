@@ -3,6 +3,7 @@
 import { useClerk } from '@clerk/nextjs';
 import { useRouter } from 'next/navigation';
 import { ConfirmDialog } from '@/components/confirm-dialog';
+import { resetPrincipalCache } from '@/context/permission-provider';
 import { hasClerkKey } from '@/lib/auth';
 
 interface SignOutDialogProps {
@@ -19,6 +20,7 @@ function ClerkSignOutDialog({ open, onOpenChange }: SignOutDialogProps) {
   const { signOut } = useClerk();
 
   const handleSignOut = () => {
+    resetPrincipalCache();
     signOut(() => router.push('/sign-in'));
   };
 
@@ -38,6 +40,7 @@ function ClerkSignOutDialog({ open, onOpenChange }: SignOutDialogProps) {
 
 function LocalSignOutDialog({ open, onOpenChange }: SignOutDialogProps) {
   const handleSignOut = () => {
+    resetPrincipalCache();
     onOpenChange(false);
   };
 

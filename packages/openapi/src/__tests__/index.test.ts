@@ -89,6 +89,15 @@ describe('openApiSpec', () => {
     expect(
       openApiSpec.paths['/scanner-devices/{deviceId}/revoke'].post.responses,
     ).not.toHaveProperty('204');
+    expect(openApiSpec.components.schemas.ScannerDevice.properties.scopes.items.enum).toEqual([
+      'checkins.read',
+      'checkins.write',
+    ]);
+    expect(openApiSpec.components.schemas.ScannerDevice.required).toContain('scopes');
+    expect(
+      openApiSpec.paths['/scanner-devices'].post.requestBody.content['application/json'].schema
+        .properties.scopes.default,
+    ).toEqual(['checkins.read', 'checkins.write']);
     expect(openApiSpec.paths).not.toHaveProperty('/developer/api-keys');
   });
 
@@ -232,6 +241,18 @@ describe('openApiSpec', () => {
       openApiSpec.paths['/check-ins/bulk-sync-jobs/{jobId}/chunks/{sequence}'].put.requestBody
         .content['application/json'].schema.properties.scans.maxItems,
     ).toBe(50_000);
+    expect(openApiSpec.paths['/check-ins/bulk-sync-jobs'].post.description).toContain(
+      'checkins.write',
+    );
+    expect(
+      openApiSpec.paths['/check-ins/bulk-sync-jobs/{jobId}/chunks/{sequence}'].put.description,
+    ).toContain('checkins.write');
+    expect(openApiSpec.paths['/check-ins/bulk-sync-jobs/{jobId}'].get.description).toContain(
+      'checkins.read',
+    );
+    expect(openApiSpec.paths['/check-ins/bulk-sync-jobs/{jobId}/chunks'].get.description).toContain(
+      'checkins.read',
+    );
     expect(openApiSpec.components.schemas.BulkSyncJob.properties).not.toHaveProperty('results');
     expect(openApiSpec.components.schemas.BulkSyncJob.properties.sampleErrors.maxItems).toBe(25);
     expect(openApiSpec.components.schemas.BulkSyncErrorSample.properties).not.toHaveProperty(
@@ -652,6 +673,13 @@ describe('openApiSpec', () => {
   });
 
   it('requires public upload completion tokens without requiring them for authenticated completion', () => {
+    expect(openApiSpec.components.schemas.PublicCreateUploadArtifact).toMatchObject({
+      required: ['fileName', 'contentType', 'sizeBytes', 'questionId'],
+      properties: {
+        questionId: { type: 'string', minLength: 1 },
+      },
+    });
+
     expect(openApiSpec.components.schemas.PublicCompleteUploadArtifact).toMatchObject({
       required: ['token'],
       properties: {

@@ -40,7 +40,7 @@ Revoked (`DELETE /v1/api-keys/:keyId`) or expired keys fail with `401 UNAUTHORIZ
 
 ### Scanner devices
 
-Scanner devices authenticate with a `deviceId` and `secret` pair issued via `POST /v1/scanner-devices`. The secret is constant-time compared against the stored hash. Revoked devices fail with `403 FORBIDDEN`.
+Scanner devices authenticate with a `deviceId` and `secret` pair issued via `POST /v1/scanner-devices`. The secret is constant-time compared against the stored hash. Revoked devices fail with `403 FORBIDDEN`. Scanner devices carry explicit `checkins.read`/`checkins.write` scopes; omit `scopes` during creation for the default read/write device, or create a polling-only scanner with `scopes: ["checkins.read"]`.
 
 ## Permissions
 
@@ -485,22 +485,22 @@ Privacy requests accept `organizationId`, optional `brandId`, `subjectType` (`bu
 
 ### Developer & Webhooks
 
-| Method   | Path                                       | Scope              | Description                                                |
-| -------- | ------------------------------------------ | ------------------ | ---------------------------------------------------------- |
-| `POST`   | `/v1/api-keys`                             | `developers.write` | Create API key (raw key returned once)                     |
-| `GET`    | `/v1/api-keys`                             | `developers.write` | List API keys                                              |
-| `DELETE` | `/v1/api-keys/:keyId`                      | `developers.write` | Revoke API key                                             |
-| `POST`   | `/v1/scanner-devices`                      | `developers.write` | Create scanner device (secret returned once)               |
-| `GET`    | `/v1/scanner-devices`                      | `developers.write` | List scanner devices                                       |
-| `POST`   | `/v1/scanner-devices/:deviceId/revoke`     | `developers.write` | Revoke scanner device                                      |
-| `POST`   | `/v1/oauth-applications`                   | `developers.write` | Create OAuth app (`clientId`/`clientSecret` returned once) |
-| `GET`    | `/v1/oauth-applications`                   | `developers.write` | List OAuth apps                                            |
-| `DELETE` | `/v1/oauth-applications/:appId`            | `developers.write` | Revoke OAuth app                                           |
-| `POST`   | `/v1/webhook-endpoints`                    | `developers.write` | Create webhook endpoint (secret returned once)             |
-| `PATCH`  | `/v1/webhook-endpoints/:endpointId`        | `developers.write` | Update endpoint                                            |
-| `GET`    | `/v1/webhook-endpoints`                    | `developers.write` | List endpoints                                             |
-| `GET`    | `/v1/webhook-endpoints/:endpointId/events` | `developers.write` | List delivery events for endpoint                          |
-| `POST`   | `/v1/webhook-events/:eventId/replay`       | `developers.write` | Re-queue a webhook event to active endpoints               |
+| Method   | Path                                       | Scope              | Description                                                                |
+| -------- | ------------------------------------------ | ------------------ | -------------------------------------------------------------------------- |
+| `POST`   | `/v1/api-keys`                             | `developers.write` | Create API key (raw key returned once)                                     |
+| `GET`    | `/v1/api-keys`                             | `developers.write` | List API keys                                                              |
+| `DELETE` | `/v1/api-keys/:keyId`                      | `developers.write` | Revoke API key                                                             |
+| `POST`   | `/v1/scanner-devices`                      | `developers.write` | Create scanner device with explicit check-in scopes (secret returned once) |
+| `GET`    | `/v1/scanner-devices`                      | `developers.write` | List scanner devices                                                       |
+| `POST`   | `/v1/scanner-devices/:deviceId/revoke`     | `developers.write` | Revoke scanner device                                                      |
+| `POST`   | `/v1/oauth-applications`                   | `developers.write` | Create OAuth app (`clientId`/`clientSecret` returned once)                 |
+| `GET`    | `/v1/oauth-applications`                   | `developers.write` | List OAuth apps                                                            |
+| `DELETE` | `/v1/oauth-applications/:appId`            | `developers.write` | Revoke OAuth app                                                           |
+| `POST`   | `/v1/webhook-endpoints`                    | `developers.write` | Create webhook endpoint (secret returned once)                             |
+| `PATCH`  | `/v1/webhook-endpoints/:endpointId`        | `developers.write` | Update endpoint                                                            |
+| `GET`    | `/v1/webhook-endpoints`                    | `developers.write` | List endpoints                                                             |
+| `GET`    | `/v1/webhook-endpoints/:endpointId/events` | `developers.write` | List delivery events for endpoint                                          |
+| `POST`   | `/v1/webhook-events/:eventId/replay`       | `developers.write` | Re-queue a webhook event to active endpoints                               |
 
 ## Inbound Webhook Routes (provider)
 

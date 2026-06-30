@@ -57,6 +57,7 @@ function createMockDb(seed: Record<string, Row[]> = {}) {
   function matches(row: Row, conditions: Array<[string, string, unknown]>): boolean {
     return conditions.every(([column, operator, value]) => {
       if (operator === 'in' && Array.isArray(value)) return value.includes(row[column]);
+      if (operator === 'is') return value === null ? row[column] == null : row[column] === value;
       if (operator === '<')
         return (
           new Date(row[column] as string | Date).getTime() <
@@ -112,9 +113,24 @@ function createMockDb(seed: Record<string, Row[]> = {}) {
             return this;
           },
           execute: async () => {
+            let updatedCount = 0;
             for (const row of rowsFor(table)) {
-              if (matches(row, conditions)) Object.assign(row, values);
+              if (matches(row, conditions)) {
+                Object.assign(row, values);
+                updatedCount += 1;
+              }
             }
+            return [{ numUpdatedRows: BigInt(updatedCount) }];
+          },
+          executeTakeFirst: async () => {
+            let updatedCount = 0;
+            for (const row of rowsFor(table)) {
+              if (matches(row, conditions)) {
+                Object.assign(row, values);
+                updatedCount += 1;
+              }
+            }
+            return { numUpdatedRows: BigInt(updatedCount) };
           },
         };
       },
@@ -136,6 +152,19 @@ function makePrincipal(overrides: Partial<Principal> = {}): Principal {
     scopes: ['events.write', 'settings.write'],
     brandIds: ['brd_1'],
     eventIds: ['evt_1'],
+    ...overrides,
+  };
+}
+
+function fileQuestion(overrides: Row = {}): Row {
+  return {
+    id: 'q_file',
+    event_id: 'evt_1',
+    type: 'file',
+    status: 'active',
+    is_hidden: false,
+    hidden_at: null,
+    deleted_at: null,
     ...overrides,
   };
 }
@@ -310,6 +339,7 @@ describe('upload artifact service', () => {
           expires_at: new Date(Date.now() - 60_000),
         },
       ],
+      questions: [fileQuestion()],
     });
     s3Send.mockResolvedValueOnce({});
 
@@ -358,6 +388,7 @@ describe('upload artifact service', () => {
           expires_at: new Date(now.getTime() - 60_000),
         },
       ],
+      questions: [fileQuestion()],
     });
     s3Send.mockResolvedValue({});
 
@@ -453,6 +484,45 @@ describe('upload artifact service', () => {
       scanStatus: 'clean',
     });
     expect(s3Send).not.toHaveBeenCalled();
+  });
+
+  it('fails closed for corrupt persisted upload artifact purposes before scanning', async () => {
+    const { db, tables } = createMockDb({
+      upload_artifacts: [
+        {
+          id: 'upl_future',
+          status: 'pending',
+          scan_status: 'pending',
+          purpose: 'future_artifact',
+          bucket: 'tixkit',
+          object_key: 'uploads/tnt_1/future/staging/upl_future.txt',
+          content_type: 'text/plain',
+          size_bytes: 5,
+          expires_at: new Date(Date.now() + 60_000),
+        },
+      ],
+    });
+    s3Send.mockResolvedValueOnce({ ContentLength: 5, ContentType: 'text/plain' });
+    s3Send.mockResolvedValueOnce({});
+
+    await expect(completeUploadArtifact(db, 'upl_future')).rejects.toThrow(
+      'Uploaded object metadata is invalid: Unsupported upload purpose: future_artifact',
+    );
+    expect(tables.upload_artifacts[0]).toMatchObject({
+      status: 'rejected',
+      scan_status: 'blocked',
+      scan_result:
+        'Uploaded object metadata is invalid: Unsupported upload purpose: future_artifact',
+    });
+    expect(s3Send).toHaveBeenCalledTimes(2);
+    expect(s3Send.mock.calls[0][0].input).toMatchObject({
+      Bucket: 'tixkit',
+      Key: 'uploads/tnt_1/future/staging/upl_future.txt',
+    });
+    expect(s3Send.mock.calls[1][0].input).toMatchObject({
+      Bucket: 'tixkit',
+      Key: 'uploads/tnt_1/future/staging/upl_future.txt',
+    });
   });
 
   it('rejects size-mismatched uploaded objects, blocks the row, and deletes the staging object', async () => {
@@ -719,7 +789,102 @@ describe('upload artifact service', () => {
         q_file: { artifactId: 'upl_shared' },
         q_other: { artifactId: 'upl_shared' },
       }),
-    ).rejects.toThrow('different question');
+    ).rejects.toThrow('only be used once');
+  });
+
+  it('rejects duplicate file artifact reuse and claims clean artifacts for one checkout session', async () => {
+    const { db, tables } = createMockDb({
+      upload_artifacts: [
+        {
+          id: 'upl_clean',
+          tenant_id: 'tnt_1',
+          event_id: 'evt_1',
+          purpose: 'checkout_answer',
+          status: 'uploaded',
+          scan_status: 'clean',
+          metadata: JSON.stringify({ questionId: 'q_file' }),
+          consumed_by_checkout_session_id: null,
+        },
+        {
+          id: 'upl_other',
+          tenant_id: 'tnt_1',
+          event_id: 'evt_1',
+          purpose: 'checkout_answer',
+          status: 'uploaded',
+          scan_status: 'clean',
+          metadata: JSON.stringify({ questionId: 'q_other' }),
+          consumed_by_checkout_session_id: null,
+        },
+      ],
+    });
+    const claimedArtifactIds = new Set<string>();
+
+    await expect(
+      assertCompletedUploadArtifacts(
+        db,
+        'tnt_1',
+        'evt_1',
+        {
+          q_file: { artifactId: 'upl_clean' },
+          q_other: { artifactId: 'upl_clean' },
+        },
+        { checkoutSessionId: 'cs_1', claimedArtifactIds },
+      ),
+    ).rejects.toThrow('only be used once');
+
+    await expect(
+      assertCompletedUploadArtifacts(
+        db,
+        'tnt_1',
+        'evt_1',
+        { q_file: { artifactId: 'upl_clean' } },
+        { checkoutSessionId: 'cs_1', claimedArtifactIds },
+      ),
+    ).resolves.toBeUndefined();
+    expect(tables.upload_artifacts[0]).toMatchObject({
+      consumed_by_checkout_session_id: 'cs_1',
+    });
+    expect(claimedArtifactIds.has('upl_clean')).toBe(true);
+
+    await expect(
+      assertCompletedUploadArtifacts(
+        db,
+        'tnt_1',
+        'evt_1',
+        { q_other: { artifactId: 'upl_other' } },
+        { checkoutSessionId: 'cs_1', claimedArtifactIds },
+      ),
+    ).resolves.toBeUndefined();
+    expect(tables.upload_artifacts[1]).toMatchObject({
+      consumed_by_checkout_session_id: 'cs_1',
+    });
+  });
+
+  it('rejects file artifact replay from another checkout session', async () => {
+    const { db } = createMockDb({
+      upload_artifacts: [
+        {
+          id: 'upl_consumed',
+          tenant_id: 'tnt_1',
+          event_id: 'evt_1',
+          purpose: 'checkout_answer',
+          status: 'uploaded',
+          scan_status: 'clean',
+          metadata: JSON.stringify({ questionId: 'q_file' }),
+          consumed_by_checkout_session_id: 'cs_existing',
+        },
+      ],
+    });
+
+    await expect(
+      assertCompletedUploadArtifacts(
+        db,
+        'tnt_1',
+        'evt_1',
+        { q_file: { artifactId: 'upl_consumed' } },
+        { checkoutSessionId: 'cs_other', claimedArtifactIds: new Set() },
+      ),
+    ).rejects.toThrow('already been used');
   });
 
   it('rejects file-answer artifacts without matching questionId metadata after scope and scan checks', async () => {
@@ -778,6 +943,7 @@ describe('upload artifact routes', () => {
           status: 'published',
         },
       ],
+      questions: [fileQuestion()],
     });
     const app = await setupUploadApp(db, publicUploadRoutes);
     const create = await app.inject({
@@ -816,6 +982,7 @@ describe('upload artifact routes', () => {
             status: 'published',
           },
         ],
+        questions: [fileQuestion()],
       });
       const app = await setupUploadApp(db, publicUploadRoutes);
       const response = await app.inject({
@@ -844,6 +1011,62 @@ describe('upload artifact routes', () => {
       delete process.env.UPLOAD_MALWARE_SCANNER;
       delete process.env.CLAMAV_HOST;
     }
+  });
+
+  it('rejects public upload tickets without an active file question before signing', async () => {
+    const { db, tables } = createMockDb({
+      events: [
+        {
+          id: 'evt_1',
+          tenant_id: 'tnt_1',
+          organization_id: 'org_1',
+          brand_id: 'brd_1',
+          status: 'published',
+        },
+      ],
+      questions: [
+        fileQuestion({ id: 'q_text', type: 'text' }),
+        fileQuestion({ id: 'q_hidden', status: 'hidden' }),
+      ],
+    });
+    const app = await setupUploadApp(db, publicUploadRoutes);
+
+    const missingQuestionId = await app.inject({
+      method: 'POST',
+      url: '/public/events/evt_1/upload-artifacts',
+      payload: {
+        fileName: 'waiver.pdf',
+        contentType: 'application/pdf',
+        sizeBytes: 12,
+      },
+    });
+    const nonFileQuestion = await app.inject({
+      method: 'POST',
+      url: '/public/events/evt_1/upload-artifacts',
+      payload: {
+        fileName: 'waiver.pdf',
+        contentType: 'application/pdf',
+        sizeBytes: 12,
+        questionId: 'q_text',
+      },
+    });
+    const hiddenQuestion = await app.inject({
+      method: 'POST',
+      url: '/public/events/evt_1/upload-artifacts',
+      payload: {
+        fileName: 'waiver.pdf',
+        contentType: 'application/pdf',
+        sizeBytes: 12,
+        questionId: 'q_hidden',
+      },
+    });
+
+    expect(missingQuestionId.statusCode).toBe(400);
+    expect(nonFileQuestion.statusCode).toBe(400);
+    expect(hiddenQuestion.statusCode).toBe(400);
+    expect(tables.upload_artifacts).toHaveLength(0);
+    expect(signedUrlInputs).toHaveLength(0);
+    await app.close();
   });
 
   it('requires settings.write for authenticated brand-logo uploads', async () => {
@@ -961,6 +1184,65 @@ describe('upload artifact routes', () => {
     expect(questionScoped.statusCode).toBe(400);
     expect(tables.upload_artifacts).toHaveLength(0);
     expect(signedUrlInputs).toHaveLength(0);
+    await app.close();
+  });
+
+  it('requires authenticated checkout-answer uploads to reference an active file question', async () => {
+    const { db, tables } = createMockDb({
+      events: [
+        {
+          id: 'evt_1',
+          tenant_id: 'tnt_1',
+          organization_id: 'org_1',
+          brand_id: 'brd_1',
+          status: 'published',
+        },
+      ],
+      questions: [fileQuestion(), fileQuestion({ id: 'q_text', type: 'text' })],
+    });
+    const app = await setupUploadApp(db);
+
+    const missingMetadata = await app.inject({
+      method: 'POST',
+      url: '/upload-artifacts',
+      payload: {
+        purpose: 'checkout_answer',
+        eventId: 'evt_1',
+        fileName: 'waiver.pdf',
+        contentType: 'application/pdf',
+        sizeBytes: 12,
+      },
+    });
+    const nonFileQuestion = await app.inject({
+      method: 'POST',
+      url: '/upload-artifacts',
+      payload: {
+        purpose: 'checkout_answer',
+        eventId: 'evt_1',
+        fileName: 'waiver.pdf',
+        contentType: 'application/pdf',
+        sizeBytes: 12,
+        metadata: { questionId: 'q_text' },
+      },
+    });
+    const fileQuestionUpload = await app.inject({
+      method: 'POST',
+      url: '/upload-artifacts',
+      payload: {
+        purpose: 'checkout_answer',
+        eventId: 'evt_1',
+        fileName: 'waiver.pdf',
+        contentType: 'application/pdf',
+        sizeBytes: 12,
+        metadata: { questionId: 'q_file' },
+      },
+    });
+
+    expect(missingMetadata.statusCode).toBe(400);
+    expect(nonFileQuestion.statusCode).toBe(400);
+    expect(fileQuestionUpload.statusCode).toBe(201);
+    expect(tables.upload_artifacts).toHaveLength(1);
+    expect(signedUrlInputs).toHaveLength(1);
     await app.close();
   });
 
@@ -1109,6 +1391,43 @@ describe('upload artifact routes', () => {
 
     expect(res.statusCode).toBe(200);
     expect(signedUrlInputs).toHaveLength(1);
+    await app.close();
+  });
+
+  it('denies complete and download for unknown upload artifact purposes', async () => {
+    const { db } = createMockDb({
+      upload_artifacts: [
+        {
+          id: 'upl_unknown',
+          tenant_id: 'tnt_1',
+          organization_id: 'org_1',
+          brand_id: 'brd_1',
+          event_id: 'evt_1',
+          purpose: 'future_artifact',
+          status: 'uploaded',
+          scan_status: 'clean',
+          bucket: 'tixkit',
+          object_key: 'uploads/tnt_1/future/upl_unknown.txt',
+          content_type: 'text/plain',
+          file_name: 'future.txt',
+        },
+      ],
+    });
+    const app = await setupUploadApp(db);
+
+    const complete = await app.inject({
+      method: 'POST',
+      url: '/upload-artifacts/upl_unknown/complete',
+    });
+    const download = await app.inject({
+      method: 'GET',
+      url: '/upload-artifacts/upl_unknown/download',
+    });
+
+    expect(complete.statusCode).toBe(403);
+    expect(download.statusCode).toBe(403);
+    expect(s3Send).not.toHaveBeenCalled();
+    expect(signedUrlInputs).toHaveLength(0);
     await app.close();
   });
 

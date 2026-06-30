@@ -46,7 +46,11 @@ function repo(row: Record<string, unknown> | null, checkInResult = true) {
 
 async function createBulkJob(
   app: FastifyInstance,
-  payloadOverrides: Partial<{ checkInListId: string; totalChunks: number; totalScans: number }> = {},
+  payloadOverrides: Partial<{
+    checkInListId: string;
+    totalChunks: number;
+    totalScans: number;
+  }> = {},
 ) {
   const response = await app.inject({
     method: 'POST',
@@ -1376,6 +1380,7 @@ describe('bulk offline sync endpoint', () => {
   async function setupBulkApp(overrides: OfflineSyncMockOverrides = {}) {
     const mock = buildOfflineSyncMockDb(overrides);
     const app = Fastify();
+    let activePrincipal = principal;
     app.decorate('context', {
       db: mock.db,
       pricingEngine: {},
@@ -1385,10 +1390,16 @@ describe('bulk offline sync endpoint', () => {
       temporalClient: {},
     } as unknown as AppContext);
     app.addHook('onRequest', async (request) => {
-      request.principal = principal;
+      request.principal = activePrincipal;
     });
     await app.register(checkInRoutes);
-    return { app, ...mock };
+    return {
+      app,
+      setPrincipal: (nextPrincipal: Principal) => {
+        activePrincipal = nextPrincipal;
+      },
+      ...mock,
+    };
   }
 
   it('creates a bounded async job for an authorized active check-in list', async () => {
@@ -1438,6 +1449,132 @@ describe('bulk offline sync endpoint', () => {
     expect(response.json()).toMatchObject({ message: 'Check-in list is not active' });
     expect(inserts).not.toEqual(
       expect.arrayContaining([expect.objectContaining({ table: 'offline_check_in_sync_jobs' })]),
+    );
+
+    await app.close();
+  });
+
+  it('allows read-only scanner principals to poll async job and chunk summaries', async () => {
+    const { app, setPrincipal } = await setupBulkApp();
+    const job = await createBulkJob(app);
+    const chunk = await app.inject({
+      method: 'PUT',
+      url: `/check-ins/bulk-sync-jobs/${job.id}/chunks/1`,
+      headers: { 'Idempotency-Key': 'idem_bulk_read_only_chunk_1' },
+      payload: {
+        scans: [{ qrHash: 'hash_1', scannedAt: '2026-06-01T12:00:00.000Z', offline: true }],
+      },
+    });
+    expect(chunk.statusCode).toBe(202);
+
+    setPrincipal({
+      ...principal,
+      id: 'sd_bulk_read_only',
+      scopes: ['checkins.read'],
+    });
+
+    const status = await app.inject({
+      method: 'GET',
+      url: `/check-ins/bulk-sync-jobs/${job.id}`,
+    });
+    expect(status.statusCode).toBe(200);
+    expect(status.json()).toMatchObject({ id: job.id, status: 'receiving' });
+
+    const chunks = await app.inject({
+      method: 'GET',
+      url: `/check-ins/bulk-sync-jobs/${job.id}/chunks`,
+    });
+    expect(chunks.statusCode).toBe(200);
+    expect(chunks.json()).toMatchObject({
+      total: 1,
+      items: [expect.objectContaining({ sequence: 1, status: 'uploaded' })],
+    });
+
+    await app.close();
+  });
+
+  it('keeps read-only async job polling free of worker scheduling side effects', async () => {
+    const { app, setPrincipal } = await setupBulkApp();
+    const job = await createBulkJob(app);
+    const setTimeoutSpy = vi.spyOn(globalThis, 'setTimeout');
+
+    setPrincipal({
+      ...principal,
+      id: 'sd_bulk_read_only',
+      scopes: ['checkins.read'],
+    });
+    setTimeoutSpy.mockClear();
+
+    const status = await app.inject({
+      method: 'GET',
+      url: `/check-ins/bulk-sync-jobs/${job.id}`,
+    });
+
+    expect(status.statusCode).toBe(200);
+    expect(status.json()).toMatchObject({ id: job.id, status: 'pending' });
+    expect(setTimeoutSpy).not.toHaveBeenCalled();
+
+    setTimeoutSpy.mockRestore();
+    await app.close();
+  });
+
+  it('rejects read-only scanner principals when creating async jobs or uploading chunks', async () => {
+    const { app, setPrincipal } = await setupBulkApp();
+    const job = await createBulkJob(app);
+
+    setPrincipal({
+      ...principal,
+      id: 'sd_bulk_read_only',
+      scopes: ['checkins.read'],
+    });
+
+    const create = await app.inject({
+      method: 'POST',
+      url: '/check-ins/bulk-sync-jobs',
+      headers: { 'Idempotency-Key': 'idem_bulk_read_only_create' },
+      payload: {
+        checkInListId: 'cl_1',
+        totalChunks: 1,
+        totalScans: 1,
+      },
+    });
+    expect(create.statusCode).toBe(403);
+
+    const upload = await app.inject({
+      method: 'PUT',
+      url: `/check-ins/bulk-sync-jobs/${job.id}/chunks/1`,
+      headers: { 'Idempotency-Key': 'idem_bulk_read_only_upload' },
+      payload: {
+        scans: [{ qrHash: 'hash_1', scannedAt: '2026-06-01T12:00:00.000Z', offline: true }],
+      },
+    });
+    expect(upload.statusCode).toBe(403);
+
+    await app.close();
+  });
+
+  it('rejects scanner principals uploading chunks to another scanner device job', async () => {
+    const { app, setPrincipal, inserts } = await setupBulkApp();
+    const job = await createBulkJob(app);
+
+    setPrincipal({
+      ...principal,
+      id: 'sd_other_writer',
+      scopes: ['checkins.read', 'checkins.write'],
+    });
+
+    const response = await app.inject({
+      method: 'PUT',
+      url: `/check-ins/bulk-sync-jobs/${job.id}/chunks/1`,
+      headers: { 'Idempotency-Key': 'idem_bulk_wrong_device_upload' },
+      payload: {
+        scans: [{ qrHash: 'hash_1', scannedAt: '2026-06-01T12:00:00.000Z', offline: true }],
+      },
+    });
+
+    expect(response.statusCode).toBe(404);
+    expect(inserts).not.toEqual(
+      expect.arrayContaining([expect.objectContaining({ table: 'offline_check_in_sync_chunks' })]),
     );
 
     await app.close();
@@ -1646,7 +1783,9 @@ describe('bulk offline sync endpoint', () => {
           url: `/check-ins/bulk-sync-jobs/${jobId}/chunks/2`,
           headers: { 'Idempotency-Key': 'idem_bulk_rerun_chunk_2' },
           payload: {
-            scans: [{ qrHash: 'missing_hash', scannedAt: '2026-06-01T12:01:00.000Z', offline: true }],
+            scans: [
+              { qrHash: 'missing_hash', scannedAt: '2026-06-01T12:01:00.000Z', offline: true },
+            ],
           },
         });
         expect(finalChunk.statusCode).toBe(202);

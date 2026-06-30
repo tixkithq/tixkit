@@ -374,7 +374,9 @@ test.describe('Stripe provider hosted checkout workflow', () => {
         async () => {
           try {
             const state = await readPaidCheckoutCaptureState(sessionId!, inventoryPool.id);
-            return state.paymentIntent.providerIntentId === paymentIntentId ? state : null;
+            return state.paymentIntent.providerIntentId === paymentIntentId && state.ticketEmailJob
+              ? state
+              : null;
           } catch {
             return null;
           }
@@ -400,6 +402,16 @@ test.describe('Stripe provider hosted checkout workflow', () => {
     expect(state!.hold).toMatchObject({ status: 'converted', quantity: 1 });
     expect(state!.inventoryPool.soldCount).toBe(1);
     expect(state!.ticketCount).toBe(1);
+    expect(state!.ticketEmailJob).toMatchObject({
+      templateKey: 'tickets-issued',
+      attachments: [
+        expect.objectContaining({
+          filename: expect.stringMatching(/^ticket-.*\.pdf$/),
+          contentType: 'application/pdf',
+          contentEncoding: 'base64',
+        }),
+      ],
+    });
     await attachScreenshot(page, testInfo, 'stripe-provider-confirmation');
 
     const salesReport = (await expectJsonResponse(

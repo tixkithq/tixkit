@@ -52,6 +52,23 @@ export const ALL_PERMISSIONS: Permission[] = [
   'developers.write',
   'billing.write',
 ];
+const DEFAULT_SCANNER_DEVICE_SCOPES: Permission[] = ['checkins.read', 'checkins.write'];
+const SCANNER_DEVICE_PERMISSIONS = new Set<Permission>(DEFAULT_SCANNER_DEVICE_SCOPES);
+
+function parseScannerDeviceScopes(value: unknown): Permission[] {
+  if (value == null || value === '') return [...DEFAULT_SCANNER_DEVICE_SCOPES];
+  try {
+    const parsed = typeof value === 'string' ? JSON.parse(value) : value;
+    if (!Array.isArray(parsed)) return [];
+    const scopes = parsed.filter(
+      (scope): scope is Permission =>
+        typeof scope === 'string' && SCANNER_DEVICE_PERMISSIONS.has(scope as Permission),
+    );
+    return scopes;
+  } catch {
+    return [];
+  }
+}
 
 function grantScopeIds(
   grants: Array<{ scope_type?: unknown; scope_id?: unknown }>,
@@ -562,13 +579,14 @@ export class ClerkAuthService {
     const eventIds = device.event_ids
       ? (JSON.parse(device.event_ids as string) as Ulid[])
       : undefined;
+    const scopes = parseScannerDeviceScopes(device.scopes);
 
     const principal: Principal = {
       type: 'mobile_device',
       id: device.device_id,
       tenantId: device.tenant_id,
       organizationIds: [device.organization_id],
-      scopes: ['checkins.read', 'checkins.write'],
+      scopes,
       eventIds: eventIds && eventIds.length > 0 ? eventIds : undefined,
     };
 

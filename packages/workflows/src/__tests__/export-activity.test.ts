@@ -53,6 +53,8 @@ const dbState = vi.hoisted(() => ({
   templateVersion: { id: 'ntv_1' } as Record<string, unknown> | null,
   createdJobs: [] as Record<string, unknown>[],
   exportEvents: [] as Record<string, unknown>[],
+  scanLogSelects: [] as unknown[][],
+  scanLogOrderBys: [] as Array<{ column: string; direction: string }>,
   // Configurable row sets so each test can stage its own export dataset.
   attendees: [
     {
@@ -93,6 +95,21 @@ const dbState = vi.hoisted(() => ({
     },
   ] as Record<string, unknown>[],
   questions: [] as Record<string, unknown>[],
+  scanLogs: [
+    {
+      id: 'slog_1',
+      check_in_list_id: 'cil_1',
+      device_id: 'scanner_1',
+      ticket_id: 'tkt_1',
+      qr_hash: 'hash_1',
+      outcome: 'accepted',
+      offline: false,
+      tenant_id: 'tnt_1',
+      check_in_list_event_id: 'evt_1',
+      scanned_at: new Date('2026-06-01T12:00:00Z'),
+      created_at: new Date('2026-06-01T12:00:01Z'),
+    },
+  ] as Record<string, unknown>[],
   destroy: vi.fn(),
 }));
 
@@ -105,20 +122,49 @@ vi.mock('@tixkit/db', () => {
   }
 
   function createQuery(table: string) {
+    const conditions: Array<{ column: string; op: string; value: unknown }> = [];
+    let selectedColumns: unknown[] | null = null;
+    const orderBys: Array<{ column: string; direction: string }> = [];
+    const matchesConditions = (row: Record<string, unknown>) =>
+      conditions.every((condition) => {
+        const column = condition.column.includes('.')
+          ? condition.column.split('.').at(-1)!
+          : condition.column;
+        const actual =
+          condition.column === 'check_in_lists.event_id'
+            ? (row.check_in_list_event_id ?? row.event_id)
+            : row[column];
+        if (condition.op === '=') return actual === condition.value;
+        if (condition.op === 'in' && Array.isArray(condition.value)) {
+          return condition.value.includes(actual);
+        }
+        return true;
+      });
     const query = {
       innerJoin() {
         return query;
       },
-      select() {
+      select(columns: unknown[]) {
+        if (table === 'scan_logs') {
+          selectedColumns = columns;
+          dbState.scanLogSelects.push(columns);
+        }
         return query;
       },
       selectAll() {
         return query;
       },
-      where() {
+      where(column: string, op: string, value: unknown) {
+        if (table === 'scan_logs') {
+          conditions.push({ column, op, value });
+        }
         return query;
       },
-      orderBy() {
+      orderBy(column: string, direction = 'asc') {
+        if (table === 'scan_logs') {
+          orderBys.push({ column, direction });
+          dbState.scanLogOrderBys.push({ column, direction });
+        }
         return query;
       },
       async executeTakeFirst() {
@@ -139,16 +185,36 @@ vi.mock('@tixkit/db', () => {
         if (table === 'attendees') return dbState.attendees;
         if (table === 'orders') return dbState.orders;
         if (table === 'questions') return dbState.questions;
-        if (table === 'scan_logs')
-          return [
-            {
-              id: 'slog_1',
-              outcome: 'accepted',
-              qr_hash: 'hash_1',
-              tenant_id: 'tnt_1',
-              created_at: new Date('2026-06-01'),
-            },
-          ];
+        if (table === 'scan_logs') {
+          const rows = dbState.scanLogs.filter(matchesConditions).sort((a, b) => {
+            for (const orderBy of orderBys) {
+              const column = orderBy.column.includes('.')
+                ? orderBy.column.split('.').at(-1)!
+                : orderBy.column;
+              const aValue = a[column];
+              const bValue = b[column];
+              const aComparable = aValue instanceof Date ? aValue.getTime() : String(aValue ?? '');
+              const bComparable = bValue instanceof Date ? bValue.getTime() : String(bValue ?? '');
+              if (aComparable === bComparable) continue;
+              const direction = orderBy.direction === 'desc' ? -1 : 1;
+              return aComparable > bComparable ? direction : -direction;
+            }
+            return 0;
+          });
+
+          if (!selectedColumns) return rows;
+          const columns = selectedColumns;
+          return rows.map((row) =>
+            Object.fromEntries(
+              columns.map((selection) => {
+                const selectionText = String(selection);
+                const [source, alias] = selectionText.split(/\s+as\s+/i);
+                const sourceColumn = source.includes('.') ? source.split('.').at(-1)! : source;
+                return [alias ?? sourceColumn, row[sourceColumn]];
+              }),
+            ),
+          );
+        }
         if (table === 'tickets') return [{ attendee_id: 'att_1' }];
         return [];
       },
@@ -219,6 +285,21 @@ describe('generateExportActivity', () => {
     dbState.updateCalls = [];
     dbState.exportEvents = [];
     dbState.questions = [];
+    dbState.scanLogs = [
+      {
+        id: 'slog_1',
+        check_in_list_id: 'cil_1',
+        device_id: 'scanner_1',
+        ticket_id: 'tkt_1',
+        qr_hash: 'hash_1',
+        outcome: 'accepted',
+        offline: false,
+        tenant_id: 'tnt_1',
+        check_in_list_event_id: 'evt_1',
+        scanned_at: new Date('2026-06-01T12:00:00Z'),
+        created_at: new Date('2026-06-01T12:00:01Z'),
+      },
+    ];
     dbState.attendees = [
       {
         id: 'att_1',
@@ -1229,6 +1310,243 @@ describe('T30 export content validation - consent field data', () => {
     // Alan - declined.
     expect(rows[3][acceptCol]).toBe('');
     expect(rows[3][textCol]).toBe('');
+  });
+});
+
+describe('T30 export content validation - scan log CSV', () => {
+  beforeEach(() => {
+    dbState.exportJob = {
+      id: 'exp_scan_logs',
+      tenant_id: 'tnt_1',
+      event_id: 'evt_1',
+      type: 'scan_logs',
+      format: 'csv',
+      status: 'processing',
+      filters: null,
+      file_url: null,
+      completed_at: null,
+    };
+    dbState.updateCalls = [];
+    dbState.exportEvents = [];
+    dbState.scanLogSelects = [];
+    dbState.scanLogOrderBys = [];
+    dbState.scanLogs = [
+      {
+        id: 'slog_2',
+        check_in_list_id: 'cil_1',
+        device_id: 'scanner_gate_2',
+        ticket_id: 'tkt_duplicate',
+        qr_hash: 'hash_duplicate',
+        outcome: 'duplicate',
+        offline: true,
+        tenant_id: 'tnt_1',
+        check_in_list_event_id: 'evt_1',
+        scanned_at: new Date('2026-06-02T12:00:00Z'),
+        created_at: new Date('2026-06-01T12:00:01Z'),
+      },
+      {
+        id: 'slog_1',
+        check_in_list_id: 'cil_1',
+        device_id: 'scanner_gate_1',
+        ticket_id: 'tkt_checked_in',
+        qr_hash: 'hash_checked_in',
+        outcome: 'accepted',
+        offline: false,
+        tenant_id: 'tnt_1',
+        check_in_list_event_id: 'evt_1',
+        scanned_at: new Date('2026-06-01T12:00:00Z'),
+        created_at: new Date('2026-06-03T12:00:01Z'),
+      },
+      {
+        id: 'slog_other_tenant',
+        check_in_list_id: 'cil_other_tenant',
+        device_id: 'scanner_other_tenant',
+        ticket_id: 'tkt_other_tenant',
+        qr_hash: 'hash_other_tenant',
+        outcome: 'accepted',
+        offline: false,
+        tenant_id: 'tnt_other',
+        check_in_list_event_id: 'evt_1',
+        scanned_at: new Date('2026-06-01T12:30:00Z'),
+        created_at: new Date('2026-06-01T12:30:01Z'),
+      },
+      {
+        id: 'slog_other_event',
+        check_in_list_id: 'cil_other_event',
+        device_id: 'scanner_other_event',
+        ticket_id: 'tkt_other_event',
+        qr_hash: 'hash_other_event',
+        outcome: 'accepted',
+        offline: false,
+        tenant_id: 'tnt_1',
+        check_in_list_event_id: 'evt_other',
+        scanned_at: new Date('2026-06-01T12:45:00Z'),
+        created_at: new Date('2026-06-01T12:45:01Z'),
+      },
+    ];
+  });
+
+  it('emits the expected scan-log export headers in order', async () => {
+    const result = await generateExportActivity({
+      exportId: 'exp_scan_logs',
+      type: 'scan_logs',
+      format: 'csv',
+    });
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.value.rowCount).toBe(2);
+    expect(dbState.scanLogSelects).toEqual([
+      [
+        'scan_logs.id as id',
+        'scan_logs.check_in_list_id as check_in_list_id',
+        'scan_logs.device_id as device_id',
+        'scan_logs.ticket_id as ticket_id',
+        'scan_logs.qr_hash as qr_hash',
+        'scan_logs.outcome as outcome',
+        'scan_logs.scanned_at as scanned_at',
+        'scan_logs.offline as offline',
+        'scan_logs.created_at as created_at',
+      ],
+    ]);
+    expect(dbState.scanLogOrderBys).toEqual([
+      { column: 'scan_logs.scanned_at', direction: 'asc' },
+      { column: 'scan_logs.id', direction: 'asc' },
+    ]);
+    const rows = parseCsv(result.value.data);
+    expect(rows[0]).toEqual([
+      'id',
+      'checkInListId',
+      'deviceId',
+      'ticketId',
+      'qrHash',
+      'outcome',
+      'scannedAt',
+      'offline',
+      'createdAt',
+    ]);
+  });
+
+  it('includes accepted and duplicate scan-log values in the correct columns', async () => {
+    const result = await generateExportActivity({
+      exportId: 'exp_scan_logs',
+      type: 'scan_logs',
+      format: 'csv',
+    });
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    const rows = parseCsv(result.value.data);
+    expect(rows).toHaveLength(3);
+    const headers = rows[0];
+    const deviceIdCol = headers.indexOf('deviceId');
+    const ticketIdCol = headers.indexOf('ticketId');
+    const qrHashCol = headers.indexOf('qrHash');
+    const outcomeCol = headers.indexOf('outcome');
+    const offlineCol = headers.indexOf('offline');
+
+    expect(rows[1][deviceIdCol]).toBe('scanner_gate_1');
+    expect(rows[1][ticketIdCol]).toBe('tkt_checked_in');
+    expect(rows[1][qrHashCol]).toBe('hash_checked_in');
+    expect(rows[1][outcomeCol]).toBe('accepted');
+    expect(rows[1][offlineCol]).toBe('false');
+    expect(rows[2][deviceIdCol]).toBe('scanner_gate_2');
+    expect(rows[2][ticketIdCol]).toBe('tkt_duplicate');
+    expect(rows[2][qrHashCol]).toBe('hash_duplicate');
+    expect(rows[2][outcomeCol]).toBe('duplicate');
+    expect(rows[2][offlineCol]).toBe('true');
+  });
+
+  it('excludes scan logs from other tenants and events', async () => {
+    const result = await generateExportActivity({
+      exportId: 'exp_scan_logs',
+      type: 'scan_logs',
+      format: 'csv',
+    });
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.value.rowCount).toBe(2);
+    const rows = parseCsv(result.value.data);
+    const ids = rows.slice(1).map((row) => row[0]);
+    expect(ids).toEqual(['slog_1', 'slog_2']);
+    expect(ids).not.toContain('slog_other_tenant');
+    expect(ids).not.toContain('slog_other_event');
+  });
+
+  it('filters scan-log exports by outcome status', async () => {
+    dbState.exportJob = {
+      ...dbState.exportJob,
+      filters: JSON.stringify({ status: 'accepted' }),
+    };
+
+    const result = await generateExportActivity({
+      exportId: 'exp_scan_logs',
+      type: 'scan_logs',
+      format: 'csv',
+    });
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.value.rowCount).toBe(1);
+    const rows = parseCsv(result.value.data);
+    expect(rows).toHaveLength(2);
+    expect(rows[1][0]).toBe('slog_1');
+  });
+
+  it('does not export unexpected raw QR payload or buyer PII properties in scan-log CSV content', async () => {
+    dbState.scanLogs[0] = {
+      ...dbState.scanLogs[0],
+      qr_payload: 'signed-qr-payload-should-not-export',
+      buyer_email: 'buyer@example.com',
+    };
+
+    const result = await generateExportActivity({
+      exportId: 'exp_scan_logs',
+      type: 'scan_logs',
+      format: 'csv',
+    });
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.value.data).toContain('hash_checked_in');
+    expect(result.value.data).not.toContain('signed-qr-payload-should-not-export');
+    expect(result.value.data).not.toContain('buyer@example.com');
+  });
+
+  it('applies date-only filters to scan-log export rows', async () => {
+    dbState.exportJob = {
+      ...dbState.exportJob,
+      filters: JSON.stringify({ from: '2026-06-01', to: '2026-06-01' }),
+    };
+
+    const result = await generateExportActivity({
+      exportId: 'exp_scan_logs',
+      type: 'scan_logs',
+      format: 'csv',
+    });
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.value.rowCount).toBe(1);
+    const rows = parseCsv(result.value.data);
+    expect(rows).toHaveLength(2);
+    expect(rows[1][0]).toBe('slog_1');
+  });
+
+  it('returns an empty CSV body when there are zero scan logs', async () => {
+    dbState.scanLogs = [];
+
+    const result = await generateExportActivity({
+      exportId: 'exp_scan_logs',
+      type: 'scan_logs',
+      format: 'csv',
+    });
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.value.rowCount).toBe(0);
+    expect(result.value.data).toBe('');
   });
 });
 

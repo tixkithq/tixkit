@@ -47,6 +47,7 @@ import { refundWorkflow } from '../workflows/refund.js';
 import { exportWorkflow } from '../workflows/export.js';
 import { webhookDeliveryWorkflow } from '../workflows/webhook-delivery.js';
 import { holdExpirationWorkflow } from '../workflows/hold-expiration.js';
+import { notificationDeliveryWorkflow } from '../workflows/notification.js';
 import { paymentReconciliationWorkflow } from '../workflows/payment-reconciliation.js';
 import { clerkIdentitySyncWorkflow } from '../workflows/clerk-identity-sync.js';
 import { privacyRequestWorkflow } from '../workflows/privacy.js';
@@ -108,6 +109,22 @@ function makeRefundInput(overrides: Record<string, unknown> = {}) {
   };
 }
 
+function makeNotificationDeliveryInput(overrides: Record<string, unknown> = {}) {
+  return {
+    version: 1,
+    jobId: 'emj_test_1',
+    tenantId: 'tnt_1',
+    brandId: 'brd_1',
+    templateKey: 'tickets-issued',
+    templateVersionId: 'ntv_1',
+    toEmail: 'buyer@test.com',
+    variables: { orderId: 'ord_1', notificationType: 'transactional' },
+    providerRouteId: 'epr_1',
+    notificationType: 'transactional' as const,
+    ...overrides,
+  };
+}
+
 function makeWebhookDeliveryInput(overrides: Record<string, unknown> = {}) {
   return {
     version: 1,
@@ -162,6 +179,15 @@ const defaultActivities = {
     okResult({ voidedCount: 2, voidedTicketIds: ['tkt_1', 'tkt_2'] }),
   restoreInventoryActivity: async () => okResult({ restored: 2 }),
   notifyRefundActivity: async () => okResult({ notified: true, jobId: 'emj_3' }),
+  checkSuppressionActivity: async () => okResult({ suppressed: false }),
+  checkConsentActivity: async () => okResult({ allowed: true }),
+  renderTemplateActivity: async () =>
+    okResult({
+      subject: 'Your tickets',
+      html: '<p>Your tickets are attached.</p>',
+      text: 'Your tickets are attached.',
+    }),
+  sendEmailActivity: async () => okResult({ deliveryId: 'emd_1', provider: 'capture' }),
   generateExportActivity: async () => okResult({ data: 'id\n1', rowCount: 1 }),
   uploadFileActivity: async () => okResult({ fileUrl: 'https://exports.example.test/exp_1.csv' }),
   markExportFailedActivity: async () => okResult({ failed: true }),
@@ -850,6 +876,46 @@ describe('refundWorkflow', () => {
     });
     await refundWorkflow(makeRefundInput({ voidTickets: true, restoreInventory: true }));
     expect(notifyCalled).toBe(true);
+  });
+});
+
+describe('notificationDeliveryWorkflow', () => {
+  beforeEach(() => {
+    resetState();
+    Object.entries(defaultActivities).forEach(([name, impl]) => setActivity(name, impl));
+  });
+
+  it('throws retryable render failures so ticket fulfillment can be retried', async () => {
+    setActivity('renderTemplateActivity', async () =>
+      errResult('RENDER_TRANSIENT', 'Template renderer unavailable', true),
+    );
+
+    await expect(notificationDeliveryWorkflow(makeNotificationDeliveryInput())).rejects.toThrow(
+      'Email render failed (RENDER_TRANSIENT): Template renderer unavailable',
+    );
+  });
+
+  it('throws retryable send failures so queued ticket emails can drain on retry', async () => {
+    const sendAttempts: Array<Record<string, unknown>> = [];
+    setActivity('sendEmailActivity', async (input) => {
+      sendAttempts.push(input);
+      return errResult('EMAIL_SEND_FAILED', 'Capture route temporarily unavailable', true);
+    });
+
+    await expect(notificationDeliveryWorkflow(makeNotificationDeliveryInput())).rejects.toThrow(
+      'Email delivery failed (EMAIL_SEND_FAILED): Capture route temporarily unavailable',
+    );
+    expect(sendAttempts).toHaveLength(1);
+  });
+
+  it('keeps non-retryable send failures failed without throwing', async () => {
+    setActivity('sendEmailActivity', async () =>
+      errResult('EMAIL_SENDER_NOT_VERIFIED', 'Sender identity is not verified', false),
+    );
+
+    await expect(notificationDeliveryWorkflow(makeNotificationDeliveryInput())).resolves.toEqual({
+      status: 'failed',
+    });
   });
 });
 

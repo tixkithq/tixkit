@@ -11,6 +11,7 @@ const dbState = vi.hoisted(() => ({
   existingJob: undefined as { id: string; status: string } | undefined,
   providerRoute: undefined as { id: string } | undefined,
   templateVersion: { id: 'ntv_default' } as { id: string } | undefined,
+  createJobErrorOnce: undefined as Error | undefined,
   createdJobs: [] as Record<string, unknown>[],
   order: {
     id: 'ord_1',
@@ -53,6 +54,11 @@ const dbState = vi.hoisted(() => ({
 vi.mock('@tixkit/db', () => {
   class EmailJobRepository {
     async create(input: Record<string, unknown>) {
+      if (dbState.createJobErrorOnce) {
+        const error = dbState.createJobErrorOnce;
+        dbState.createJobErrorOnce = undefined;
+        throw error;
+      }
       dbState.createdJobs.push(input);
       return { id: 'emj_1', status: 'pending', ...input };
     }
@@ -124,6 +130,7 @@ describe('sendConfirmationEmailActivity', () => {
     dbState.existingJob = undefined;
     dbState.providerRoute = undefined;
     dbState.templateVersion = { id: 'ntv_default' };
+    dbState.createJobErrorOnce = undefined;
     dbState.createdJobs = [];
     dbState.tickets = [];
     dbState.ticketTypes = [{ id: 'tt_1', name: 'General Admission' }];
@@ -179,6 +186,7 @@ describe('issueTicketsActivity', () => {
     dbState.existingJob = undefined;
     dbState.providerRoute = { id: 'epr_1' };
     dbState.templateVersion = { id: 'ntv_default' };
+    dbState.createJobErrorOnce = undefined;
     dbState.createdJobs = [];
     dbState.tickets = [
       {
@@ -191,6 +199,34 @@ describe('issueTicketsActivity', () => {
       },
     ];
     dbState.destroy.mockClear();
+    delete process.env.E2E_FAIL_TICKET_ISSUE_ACTIVITY_ONCE;
+    delete process.env.E2E_FAIL_TICKET_ISSUE_ACTIVITY_ONCE_KEY;
+  });
+
+  it('injects one non-production ticket issue activity failure for provider-backed retry proof', async () => {
+    process.env.E2E_FAIL_TICKET_ISSUE_ACTIVITY_ONCE = '1';
+    process.env.E2E_FAIL_TICKET_ISSUE_ACTIVITY_ONCE_KEY = 'retry-proof@example.com';
+
+    await expect(
+      issueTicketsActivity({
+        orderId: 'ord_1',
+        toEmail: 'retry-proof@example.com',
+        tenantId: 'tnt_1',
+        brandId: 'brd_1',
+      }),
+    ).rejects.toThrow('E2E injected ticket issue activity failure for retry-proof@example.com');
+    expect(dbState.destroy).not.toHaveBeenCalled();
+    expect(dbState.createdJobs).toHaveLength(0);
+
+    const retryResult = await issueTicketsActivity({
+      orderId: 'ord_1',
+      toEmail: 'retry-proof@example.com',
+      tenantId: 'tnt_1',
+      brandId: 'brd_1',
+    });
+
+    expect(retryResult).toEqual({ ok: true, value: { issued: 1, jobId: 'emj_1' } });
+    expect(dbState.createdJobs).toHaveLength(1);
   });
 
   it('queues tickets-issued email with a valid branded PDF attachment containing ticket metadata', async () => {
@@ -228,6 +264,59 @@ describe('issueTicketsActivity', () => {
     expect(pdf.getSubject()).toContain('Founders Summit');
     expect(pdf.getKeywords()).toContain('tkt_1');
     expect(pdf.getKeywords()).toContain('TK-ABC123');
-    expect(pdf.getKeywords()).toContain('signed_qr_payload_1');
+    expect(pdf.getKeywords()).not.toContain('signed_qr_payload_1');
+    expect(pdf.getKeywords()).not.toContain('buyer@example.com');
+    expect(pdf.getKeywords()).not.toContain('ada@example.com');
+    const pdfText = pdfBytes.toString('latin1');
+    expect(pdfText).not.toContain('signed_qr_payload_1');
+    expect(pdfText).not.toContain('buyer@example.com');
+    expect(pdfText).not.toContain('ada@example.com');
+  });
+
+  it('can retry a transient ticket email queue failure without duplicate jobs', async () => {
+    dbState.createJobErrorOnce = new Error('database temporarily unavailable');
+
+    await expect(
+      issueTicketsActivity({
+        orderId: 'ord_1',
+        toEmail: 'buyer@example.com',
+        tenantId: 'tnt_1',
+        brandId: 'brd_1',
+      }),
+    ).resolves.toMatchObject({
+      ok: false,
+      errorCode: 'TICKET_ISSUE_FAILED',
+      retryable: true,
+    });
+    expect(dbState.createdJobs).toHaveLength(0);
+
+    const retryResult = await issueTicketsActivity({
+      orderId: 'ord_1',
+      toEmail: 'buyer@example.com',
+      tenantId: 'tnt_1',
+      brandId: 'brd_1',
+    });
+
+    expect(retryResult).toEqual({ ok: true, value: { issued: 1, jobId: 'emj_1' } });
+    expect(dbState.createdJobs).toHaveLength(1);
+    expect(dbState.createdJobs[0]).toMatchObject({
+      templateKey: 'tickets-issued',
+      idempotencyKey: 'tickets-issued:ord_1',
+      providerRouteId: 'epr_1',
+    });
+  });
+
+  it('returns the existing ticket email job on retry without queueing another job', async () => {
+    dbState.existingJob = { id: 'emj_existing', status: 'failed' };
+
+    const result = await issueTicketsActivity({
+      orderId: 'ord_1',
+      toEmail: 'buyer@example.com',
+      tenantId: 'tnt_1',
+      brandId: 'brd_1',
+    });
+
+    expect(result).toEqual({ ok: true, value: { issued: 1, jobId: 'emj_existing' } });
+    expect(dbState.createdJobs).toHaveLength(0);
   });
 });

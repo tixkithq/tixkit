@@ -1,4 +1,5 @@
 import { BaseRepository } from './base.js';
+import type { Permission } from '@tixkit/domain';
 import { ulid } from 'ulid';
 import { createHash, randomBytes } from 'node:crypto';
 
@@ -146,6 +147,7 @@ export class ScannerDeviceRepository extends BaseRepository {
     organizationId: string;
     name: string;
     eventIds: string[];
+    scopes: Permission[];
   }): Promise<{
     secret: string;
     record: Record<string, unknown>;
@@ -166,6 +168,7 @@ export class ScannerDeviceRepository extends BaseRepository {
         device_id: deviceId,
         hashed_secret: hashedSecret,
         event_ids: JSON.stringify(input.eventIds),
+        scopes: JSON.stringify(input.scopes),
         status: 'active',
         last_seen_at: null,
         created_at: now,

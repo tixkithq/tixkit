@@ -10,6 +10,15 @@ const ignoredConsoleErrorFragments = (process.env.E2E_ALLOWED_CONSOLE_ERRORS ?? 
   .filter(Boolean);
 
 function isIgnoredConsoleError(message: string): boolean {
+  if (
+    process.env.E2E_LIVE_CLERK === '1' &&
+    message.includes('_cfuvid') &&
+    message.includes('invalid domain') &&
+    message.includes('clerk.accounts.dev')
+  ) {
+    return true;
+  }
+
   return ignoredConsoleErrorFragments.some((fragment) => message.includes(fragment));
 }
 

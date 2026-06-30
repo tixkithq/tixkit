@@ -27,7 +27,11 @@ export function ProfileDropdown() {
     <>
       <DropdownMenu modal={false}>
         <DropdownMenuTrigger asChild>
-          <Button variant="ghost" className="relative h-8 w-8 rounded-full">
+          <Button
+            variant="ghost"
+            className="relative h-8 w-8 rounded-full"
+            aria-label="Open account menu"
+          >
             <Avatar className="h-8 w-8">
               {user.imageUrl ? <AvatarImage src={user.imageUrl} alt={user.name} /> : null}
               <AvatarFallback>{initials}</AvatarFallback>

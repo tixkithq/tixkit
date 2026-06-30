@@ -817,13 +817,17 @@ describe.each(driverCases)('privacy retention activity integration: $driver', ({
     });
     expect(auditLog).toMatchObject({
       id: ids.auditLogId,
+      tenant_id: ids.tenantId,
+      organization_id: null,
       action: 'privacy.erasure.requested',
+      resource_type: 'privacy_request',
       resource_id: ids.requestId,
     });
     const auditSummary = parseJsonColumn(auditLog.diff_summary);
     expect(auditSummary).toMatchObject({
       subjectEmail: expect.stringMatching(/^erased\+[a-f0-9]{16}@privacy\.tixkit\.invalid$/),
     });
+    expect(JSON.stringify(auditLog)).not.toContain('buyer@test.com');
 
     expect(privacyRequest).toMatchObject({
       id: ids.requestId,
@@ -1019,6 +1023,7 @@ describe.each(driverCases)('privacy retention activity integration: $driver', ({
     expect(parseJsonColumn(auditLog.diff_summary)).toMatchObject({
       subjectEmail: expect.stringMatching(/^erased\+[a-f0-9]{16}@privacy\.tixkit\.invalid$/),
     });
+    expect(JSON.stringify(auditLog)).not.toContain('buyer@test.com');
     expect(privacyRequest).toMatchObject({ id: ids.requestId, status: 'completed', error: null });
     expect(String(privacyRequest.subject_email)).toMatch(
       /^erased\+[a-f0-9]{16}@privacy\.tixkit\.invalid$/,

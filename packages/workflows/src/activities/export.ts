@@ -350,18 +350,25 @@ function parseDateFilterBoundary(value: string, boundary: 'start' | 'end'): Date
   return new Date(value);
 }
 
-function applyDateFilter<T extends { created_at: Date | string }>(
+function applyDateFilter<T extends Record<string, unknown>>(
   query: T[],
   filters: ExportFilters,
+  dateField = 'created_at',
 ): T[] {
   let result = query;
   if (filters.from) {
     const from = parseDateFilterBoundary(filters.from, 'start');
-    result = result.filter((row) => new Date(row.created_at) >= from);
+    result = result.filter((row) => {
+      const value = row[dateField];
+      return (value instanceof Date || typeof value === 'string') && new Date(value) >= from;
+    });
   }
   if (filters.to) {
     const to = parseDateFilterBoundary(filters.to, 'end');
-    result = result.filter((row) => new Date(row.created_at) <= to);
+    result = result.filter((row) => {
+      const value = row[dateField];
+      return (value instanceof Date || typeof value === 'string') && new Date(value) <= to;
+    });
   }
   return result;
 }
@@ -533,7 +540,20 @@ export async function generateExportActivity(input: {
         createdAt: t.created_at,
       }));
     } else if (input.type === 'scan_logs') {
-      let query = db.selectFrom('scan_logs').selectAll().where('tenant_id', '=', tenantId);
+      let query = db
+        .selectFrom('scan_logs')
+        .select([
+          'scan_logs.id as id',
+          'scan_logs.check_in_list_id as check_in_list_id',
+          'scan_logs.device_id as device_id',
+          'scan_logs.ticket_id as ticket_id',
+          'scan_logs.qr_hash as qr_hash',
+          'scan_logs.outcome as outcome',
+          'scan_logs.scanned_at as scanned_at',
+          'scan_logs.offline as offline',
+          'scan_logs.created_at as created_at',
+        ])
+        .where('scan_logs.tenant_id', '=', tenantId);
 
       if (eventId) {
         query = query
@@ -541,12 +561,15 @@ export async function generateExportActivity(input: {
           .where('check_in_lists.event_id', '=', eventId) as typeof query;
       }
       if (filters.status) {
-        query = query.where('outcome', '=', filters.status) as typeof query;
+        query = query.where('scan_logs.outcome', '=', filters.status) as typeof query;
       }
 
-      let scanLogs = await query.execute();
+      let scanLogs = await query
+        .orderBy('scan_logs.scanned_at', 'asc')
+        .orderBy('scan_logs.id', 'asc')
+        .execute();
       if (filters.from || filters.to) {
-        scanLogs = applyDateFilter(scanLogs, filters);
+        scanLogs = applyDateFilter(scanLogs, filters, 'scanned_at');
       }
 
       rows = scanLogs.map((s) => ({

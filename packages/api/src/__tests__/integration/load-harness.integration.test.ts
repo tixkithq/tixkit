@@ -439,7 +439,7 @@ function makeScannerPrincipal(): Principal {
     tenantId: TENANT_ID,
     organizationIds: [ORG_ID],
     eventIds: [EVENT_ID],
-    scopes: ['checkins.write'],
+    scopes: ['checkins.read', 'checkins.write'],
   };
 }
 

@@ -99,6 +99,7 @@ export type ScannerDevice = TenantScopedEntity & {
   deviceId: string;
   hashedSecret: string;
   eventIds: Ulid[];
+  scopes: Permission[];
   status: 'active' | 'revoked';
   lastSeenAt?: ISO8601Date;
 };
@@ -134,4 +135,5 @@ export type CreateScannerDeviceInput = {
   organizationId: Ulid;
   name: string;
   eventIds: Ulid[];
+  scopes: Permission[];
 };

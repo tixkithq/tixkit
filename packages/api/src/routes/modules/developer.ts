@@ -25,6 +25,7 @@ import {
 
 const SENSITIVE_API_KEY_FIELDS = ['hashed_key'] as const;
 const SENSITIVE_DEVICE_FIELDS = ['hashed_secret'] as const;
+const DEFAULT_SCANNER_DEVICE_SCOPES = ['checkins.read', 'checkins.write'] as const;
 type Principal = NonNullable<FastifyRequest['principal']>;
 type ScopedCredentialRow = {
   brand_ids?: unknown;
@@ -331,6 +332,8 @@ export const developerRoutes: FastifyPluginAsync = async (app) => {
     ClerkAuthService.requireOrganizationScope(principal, body.organizationId);
     requireAssignableScannerScope(principal, body.eventIds);
     await assertEventIds(principal, body.eventIds);
+    const scopes = [...(body.scopes ?? DEFAULT_SCANNER_DEVICE_SCOPES)];
+    requireAssignableScopes(principal, scopes);
 
     const repo = new ScannerDeviceRepository(db);
     const { secret, record } = await repo.create({
@@ -338,6 +341,7 @@ export const developerRoutes: FastifyPluginAsync = async (app) => {
       organizationId: body.organizationId,
       name: body.name,
       eventIds: body.eventIds ?? [],
+      scopes,
     });
 
     await writeAuditLog(new AuditLogRepository(db), request, principal, {
@@ -345,7 +349,7 @@ export const developerRoutes: FastifyPluginAsync = async (app) => {
       organizationId: body.organizationId,
       resourceType: 'ScannerDevice',
       resourceId: record.id as string,
-      diffSummary: { name: body.name, eventIds: body.eventIds },
+      diffSummary: { name: body.name, eventIds: body.eventIds, scopes },
     });
 
     // The raw device `secret` is returned exactly once. The persisted record
@@ -373,6 +377,7 @@ export const developerRoutes: FastifyPluginAsync = async (app) => {
         'name',
         'device_id',
         'event_ids',
+        'scopes',
         'status',
         'last_seen_at',
         'created_at',

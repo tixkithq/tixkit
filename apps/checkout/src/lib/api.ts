@@ -397,6 +397,20 @@ function normalizeQuestionsResponse(value: unknown): QuestionsResponse {
   };
 }
 
+function parseApiResponseBody(text: string, status: number): unknown {
+  if (!text) return null;
+  try {
+    return JSON.parse(text) as unknown;
+  } catch {
+    if (status >= 400) return null;
+    throw new CheckoutApiError(
+      'INVALID_RESPONSE',
+      'Checkout service returned an invalid response. Please try again.',
+      status,
+    );
+  }
+}
+
 export function newCheckoutIdempotencyKey(): string {
   return idempotencyKey('checkout');
 }
@@ -434,7 +448,7 @@ async function apiRequest<T>(
   }
 
   const text = await response.text();
-  const data = text ? (JSON.parse(text) as unknown) : null;
+  const data = parseApiResponseBody(text, response.status);
 
   if (!response.ok) {
     const error = (data ?? {}) as {
@@ -545,7 +559,7 @@ export const publicApi = {
   async uploadCheckoutArtifact(
     eventId: string,
     file: File,
-    questionId?: string,
+    questionId: string,
   ): Promise<{ artifactId: string; fileName: string; contentType: string; sizeBytes: number }> {
     const artifact = await apiRequest<UploadArtifact>(
       `/public/events/${encodeURIComponent(eventId)}/upload-artifacts`,
@@ -727,6 +741,7 @@ export function isRetryable(error: unknown): boolean {
       error.status === 0 ||
       error.status >= 500 ||
       error.code === 'NETWORK_ERROR' ||
+      error.code === 'INVALID_RESPONSE' ||
       error.code === 'SERVICE_UNAVAILABLE'
     );
   }

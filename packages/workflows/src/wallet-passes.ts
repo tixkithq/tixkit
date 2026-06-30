@@ -253,7 +253,8 @@ export async function generateAppleWalletPass(
       passTypeIdentifier: config.passTypeIdentifier,
       teamIdentifier: config.teamIdentifier,
       barcodeFormat: 'PKBarcodeFormatQR',
-      barcodeMessage: input.qrPayload,
+      barcodeAltText: input.ticketCode,
+      barcodeHash: createHash('sha256').update(input.qrPayload).digest('hex'),
     },
   };
 }
@@ -308,7 +309,8 @@ export function generateGoogleWalletPass(
       classId,
       objectId,
       barcodeType: 'QR_CODE',
-      barcodeValue: input.qrPayload,
+      barcodeAltText: input.ticketCode,
+      barcodeHash: createHash('sha256').update(input.qrPayload).digest('hex'),
     },
   };
 }

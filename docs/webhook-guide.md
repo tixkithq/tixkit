@@ -12,7 +12,7 @@ For local development with real Stripe provider events, run:
 bun run dev:webhooks
 ```
 
-This checks that the Stripe CLI is installed and authenticated, starts `stripe listen`, forwards the required payment and Connect events to `http://localhost:4000/v1/stripe/webhooks`, captures the local webhook signing secret, and writes it to `STRIPE_WEBHOOK_SECRET` in `.env.local`. The forwarded event set is:
+This checks that the Stripe CLI is installed, starts `stripe listen`, forwards the required payment and Connect events to `http://localhost:4000/v1/webhooks/stripe`, captures the local webhook signing secret, and writes it to `STRIPE_WEBHOOK_SECRET` in `.env.local`. It authenticates with `STRIPE_API_KEY` or `STRIPE_SECRET_KEY` from the selected env file when present; otherwise use `stripe login`. The forwarded event set is:
 
 - `payment_intent.succeeded`
 - `payment_intent.payment_failed`
@@ -27,7 +27,7 @@ Run a dry-run to see the planned forwarding without starting the Stripe CLI:
 bun run dev:webhooks --dry-run
 ```
 
-If the Stripe CLI is missing, the command prints an install link. If it is installed but not authenticated, run `stripe login` and retry.
+Dry-run does not require Stripe CLI installation or authentication; it is the safe planning check for local runbooks and CI documentation review. For live forwarding, if the Stripe CLI is missing, the command prints an install link. If no Stripe API key is available in the selected env file and the CLI is not authenticated, run `stripe login` and retry.
 
 ## Endpoint Management
 
@@ -231,6 +231,18 @@ curl -X POST https://your.endpoint/tixkit-webhooks \
 ### SDK helpers
 
 The Tixkit SDKs (`@tixkit/sdk-next`, `@tixkit/sdk-sveltekit`) ship a `verifyWebhookSignature` helper that wraps the algorithm above. Use it in your route handler to avoid re-implementing the crypto.
+
+## C-094 Validation Evidence
+
+Latest local evidence on 2026-06-30:
+
+- API/provider webhook route and developer endpoint coverage: `cd packages/api && ../../node_modules/.bin/vitest run src/__tests__/stripe-webhooks.test.ts src/__tests__/email-webhooks.test.ts src/__tests__/telnyx-webhooks.test.ts src/__tests__/integration/developer-routes.integration.test.ts` passed 38/38.
+- Workflow/activity coverage: `cd packages/workflows && ../../node_modules/.bin/vitest run src/__tests__/webhook-delivery-activity.test.ts src/__tests__/webhook-event-activity.test.ts src/__tests__/workflows.test.ts` passed 100/100, including signature/header contract, bounded endpoint responses, hard request deadlines, replay-scoped delivery keys, in-flight final attempts, stale completion protection, inactive/missing endpoint dead-lettering, and dead-letter persistence failures.
+- Load proof: the clean Postgres 16 load refresh ran `load-harness.integration.test.ts -t "prevents oversell|webhook burst|payment success SLO|large export"` and passed 4/4; the webhook burst gate deduped 50 concurrent deliveries for the same Stripe event to exactly one stored and processed row inside the 300,000 ms catch-up SLO.
+- Operational CLI and live forwarding proof: `cd packages/cli && ../../node_modules/.bin/vitest run src/__tests__/dev-webhooks.test.ts --configLoader native` passed 7/7, including Stripe CLI auth via `STRIPE_API_KEY`/`STRIPE_SECRET_KEY` from the selected env file without putting the key in process arguments and root `.env.local` resolution when launched through the root `bun --filter @tixkit/cli` script. `bun run dev:webhooks --dry-run` confirms the six forwarded Stripe event types: `payment_intent.succeeded`, `payment_intent.payment_failed`, `payment_intent.canceled`, `charge.refunded`, `charge.refund.updated`, and `account.updated`. Live smoke on 2026-06-30 first ran API and worker processes on `tixkit-e2e-c094-live-2`, started `dev:webhooks --api-url http://localhost:4301 --no-write-secret`, forwarded to `/v1/webhooks/stripe`, triggered `payment_intent.succeeded`, and observed HTTP 200 plus stored provider event `evt_3To0tHCy5akHxoJx0iVSvHgd`.
+- Mapped provider proof: `dev:webhooks --api-url http://localhost:4304` plus `TIXKIT_API_URL=http://localhost:4304 CHECKOUT_URL=http://localhost:3315 ADMIN_DASHBOARD_URL=http://localhost:3316 WORKER_HEALTH_URL=http://127.0.0.1:4402 TEMPORAL_TASK_QUEUE=tixkit-e2e-c094-cli-1782824025 E2E_STRIPE_PROVIDER=1 bun --env-file=.env.local playwright test e2e/checkout-stripe-provider-workflow.spec.ts --project=chromium --workers=1` passed 1/1. The live CLI-forwarded Stripe events `evt_3To1B8Cy5akHxoJx1VIiUMpF` (`payment_intent.succeeded`), `evt_3To1B8Cy5akHxoJx1nZdpi5U` (`charge.refunded`), and `evt_3To1B8Cy5akHxoJx1ek10VOg` (`charge.refund.updated`) were stored with `processed_at` set.
+
+Generic `stripe trigger payment_intent.succeeded` fixtures still prove signature validation and storage only; they do not include local checkout metadata and are expected to stay unprocessed.
 
 ## Best Practices
 

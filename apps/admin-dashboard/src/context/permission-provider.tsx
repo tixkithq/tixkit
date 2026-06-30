@@ -1,6 +1,7 @@
 'use client';
 
 import { createContext, useContext, useEffect, useMemo, useState } from 'react';
+import { useAuth } from '@clerk/nextjs';
 import { LOCAL_DEV_PERMISSIONS, type TixkitPermission, hasPermission } from '@/lib/permissions';
 import { hasClerkKey } from '@/lib/auth';
 import { adminApi } from '@/lib/api';
@@ -16,20 +17,45 @@ type PermissionContextValue = {
 
 const PermissionContext = createContext<PermissionContextValue | null>(null);
 
+type PrincipalCacheKey = string;
+
 /**
- * Module-level cache for the resolved principal so the fetch happens at most
- * once per browser session (the Tixkit principal is stable for a session).
+ * Module-level cache for the resolved principal, scoped to the active Clerk
+ * identity. This prevents stale permissions from surviving sign-out/sign-in,
+ * account switches, organization switches, and Clerk multi-tab updates.
  */
 let principalCache: TixkitPermission[] | null = null;
 let principalFetchPromise: Promise<TixkitPermission[]> | null = null;
+let principalCacheKey: PrincipalCacheKey | null = null;
+let principalFetchKey: PrincipalCacheKey | null = null;
+let principalResetGeneration = 0;
+const principalResetListeners = new Set<() => void>();
 
-async function resolvePermissions(): Promise<TixkitPermission[]> {
+function cacheKeyForPrincipal(input: {
+  sessionId?: string | null;
+  userId?: string | null;
+  orgId?: string | null;
+}): PrincipalCacheKey {
+  return [input.sessionId ?? 'no-session', input.userId ?? 'no-user', input.orgId ?? 'no-org'].join(
+    ':',
+  );
+}
+
+async function resolvePermissions(cacheKey: PrincipalCacheKey): Promise<TixkitPermission[]> {
   if (!hasClerkKey()) {
     return LOCAL_DEV_PERMISSIONS;
   }
 
-  if (principalCache) return principalCache;
-  if (principalFetchPromise) return principalFetchPromise;
+  if (principalCacheKey !== cacheKey) {
+    principalCache = null;
+  }
+
+  if (principalCache && principalCacheKey === cacheKey) return principalCache;
+  if (principalFetchPromise && principalFetchKey === cacheKey) return principalFetchPromise;
+
+  principalFetchPromise = null;
+  principalFetchKey = cacheKey;
+  const fetchGeneration = principalResetGeneration;
 
   principalFetchPromise = (async () => {
     const result = await adminApi.getPrincipal();
@@ -38,61 +64,118 @@ async function resolvePermissions(): Promise<TixkitPermission[]> {
       const granted = result.data.permissions.filter(
         (p): p is TixkitPermission => typeof p === 'string' && p.length > 0,
       );
-      principalCache = granted;
+      if (principalResetGeneration === fetchGeneration && principalFetchKey === cacheKey) {
+        principalCache = granted;
+        principalCacheKey = cacheKey;
+      }
       return granted;
     }
     // Fetch failed: fail closed with no permissions. Callers surface the
-    // error; we never default to full access in production.
-    principalCache = [];
+    // error; keep failures uncached so remounts retry instead of presenting a
+    // silent empty-permissions success state.
+    principalCache = null;
+    principalCacheKey = null;
     throw new Error(result.error.message || 'Failed to load permissions for your account.');
   })();
 
   try {
     return await principalFetchPromise;
   } finally {
-    principalFetchPromise = null;
+    if (principalFetchKey === cacheKey) {
+      principalFetchPromise = null;
+      principalFetchKey = null;
+    }
   }
 }
 
 /** Reset the principal cache. Exposed for tests and sign-out flows. */
 export function resetPrincipalCache(): void {
+  principalResetGeneration += 1;
   principalCache = null;
   principalFetchPromise = null;
+  principalCacheKey = null;
+  principalFetchKey = null;
+  for (const listener of principalResetListeners) listener();
 }
 
-export function PermissionProvider({ children }: { children: React.ReactNode }) {
+function subscribePrincipalReset(listener: () => void): () => void {
+  principalResetListeners.add(listener);
+  return () => {
+    principalResetListeners.delete(listener);
+  };
+}
+
+function LocalPermissionProvider({ children }: { children: React.ReactNode }) {
+  const value = useMemo<PermissionContextValue>(
+    () => ({
+      permissions: LOCAL_DEV_PERMISSIONS,
+      can: (permission?: TixkitPermission) => hasPermission(LOCAL_DEV_PERMISSIONS, permission),
+      loading: false,
+      error: null,
+    }),
+    [],
+  );
+
+  return <PermissionContext value={value}>{children}</PermissionContext>;
+}
+
+function ClerkPermissionProvider({ children }: { children: React.ReactNode }) {
+  const { isLoaded, isSignedIn, sessionId, userId, orgId } = useAuth();
   const [permissions, setPermissions] = useState<TixkitPermission[]>(() => []);
-  const [loading, setLoading] = useState<boolean>(() => hasClerkKey());
+  const [loading, setLoading] = useState<boolean>(() => true);
   const [error, setError] = useState<string | null>(null);
 
+  useEffect(
+    () =>
+      subscribePrincipalReset(() => {
+        setPermissions([]);
+        setLoading(false);
+        setError(null);
+      }),
+    [],
+  );
+
   useEffect(() => {
-    if (!hasClerkKey()) {
-      setPermissions(LOCAL_DEV_PERMISSIONS);
+    if (!isLoaded) {
+      resetPrincipalCache();
+      setPermissions([]);
+      setLoading(true);
+      setError(null);
+      return;
+    }
+
+    if (!isSignedIn || !sessionId || !userId) {
+      resetPrincipalCache();
+      setPermissions([]);
       setLoading(false);
       setError(null);
       return;
     }
 
+    const cacheKey = cacheKeyForPrincipal({ sessionId, userId, orgId });
+    const resetGeneration = principalResetGeneration;
     let cancelled = false;
+    setPermissions([]);
     setLoading(true);
-    resolvePermissions()
+    setError(null);
+    resolvePermissions(cacheKey)
       .then((granted) => {
-        if (cancelled) return;
+        if (cancelled || resetGeneration !== principalResetGeneration) return;
         setPermissions(granted);
         setError(null);
       })
       .catch((e: unknown) => {
-        if (cancelled) return;
+        if (cancelled || resetGeneration !== principalResetGeneration) return;
         setPermissions([]);
         setError(e instanceof Error ? e.message : 'Failed to load permissions.');
       })
       .finally(() => {
-        if (!cancelled) setLoading(false);
+        if (!cancelled && resetGeneration === principalResetGeneration) setLoading(false);
       });
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [isLoaded, isSignedIn, sessionId, userId, orgId]);
 
   const value = useMemo<PermissionContextValue>(
     () => ({
@@ -105,6 +188,14 @@ export function PermissionProvider({ children }: { children: React.ReactNode }) 
   );
 
   return <PermissionContext value={value}>{children}</PermissionContext>;
+}
+
+export function PermissionProvider({ children }: { children: React.ReactNode }) {
+  return hasClerkKey() ? (
+    <ClerkPermissionProvider>{children}</ClerkPermissionProvider>
+  ) : (
+    <LocalPermissionProvider>{children}</LocalPermissionProvider>
+  );
 }
 
 export function usePermissions() {

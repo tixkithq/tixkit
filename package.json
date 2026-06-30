@@ -38,6 +38,7 @@
     "test:e2e:settings": "playwright test e2e/settings-gated-actions.spec.ts",
     "test:e2e:checkout-widget": "playwright test e2e/checkout-widget-console.spec.ts",
     "test:e2e:stripe-provider": "E2E_STRIPE_PROVIDER=1 playwright test e2e/checkout-stripe-provider-workflow.spec.ts --project=chromium",
+    "test:e2e:live-clerk": "E2E_LIVE_CLERK=1 playwright test e2e/admin-live-clerk-auth.spec.ts",
     "test:e2e:ui": "playwright test --ui",
     "test:e2e:debug": "playwright test --debug",
     "db:migrate": "bun run --env-file=.env.local --filter @tixkit/db migrate",

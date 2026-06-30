@@ -6,6 +6,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
   createAppleWalletPass,
+  generateAppleWalletPass,
   generateGoogleWalletPass,
   loadWalletPassConfig,
   type WalletPassTicketInput,
@@ -99,6 +100,28 @@ describe('wallet pass generation', () => {
     expect(manifest['pass.json']).toBe(passJsonSha1);
   });
 
+  it('persists Apple wallet metadata without raw QR payload or access token material', async () => {
+    const certificates = testCertificates();
+    const artifact = await generateAppleWalletPass(
+      testInput(),
+      {
+        passTypeIdentifier: 'pass.test.tixkit',
+        teamIdentifier: 'TEAM123456',
+        organizationName: 'Tixkit Test',
+        ...certificates,
+      },
+      'https://api.example.test/v1',
+    );
+    const metadataText = JSON.stringify(artifact.metadata);
+
+    expect(artifact.accessToken).toBeTruthy();
+    expect(artifact.accessTokenHash).toBeTruthy();
+    expect(metadataText).toContain(createHash('sha256').update('tixkit:signed:qr').digest('hex'));
+    expect(metadataText).not.toContain('tixkit:signed:qr');
+    expect(metadataText).not.toContain(artifact.accessToken);
+    expect(metadataText).not.toContain('Ada Lovelace');
+  });
+
   it('generates a signed Google Wallet save URL with an event ticket barcode', () => {
     const { privateKey, publicKey } = generateKeyPairSync('rsa', { modulusLength: 2048 });
     const privatePem = privateKey.export({ type: 'pkcs8', format: 'pem' }).toString();
@@ -152,5 +175,10 @@ describe('wallet pass generation', () => {
     expect(claims.payload.eventTicketObjects[0]).toMatchObject({
       hexBackgroundColor: '#1f6feb',
     });
+    const metadataText = JSON.stringify(artifact.metadata);
+    expect(metadataText).toContain(createHash('sha256').update('tixkit:signed:qr').digest('hex'));
+    expect(metadataText).not.toContain('tixkit:signed:qr');
+    expect(metadataText).not.toContain(privatePem);
+    expect(metadataText).not.toContain('Ada Lovelace');
   });
 });

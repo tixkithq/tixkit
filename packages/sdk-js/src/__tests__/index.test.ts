@@ -89,6 +89,82 @@ describe('TixkitClient', () => {
     expect(getCall(fetchMock).url).toBe('https://api.test/v1/events');
   });
 
+  it('scannerDevices.create forwards explicit device scopes', async () => {
+    const fetchMock = mockFetch(201, {
+      id: 'sd_1',
+      tenantId: 'tnt_1',
+      organizationId: 'org_1',
+      name: 'Read only scanner',
+      deviceId: 'sd_public',
+      eventIds: ['evt_1'],
+      scopes: ['checkins.read'],
+      status: 'active',
+      createdAt: '2026-06-01T00:00:00.000Z',
+      updatedAt: '2026-06-01T00:00:00.000Z',
+      secret: 'secret',
+    });
+    const client = new TixkitClient({
+      apiKey: 'tk_test_123',
+      apiBaseUrl: 'https://api.test',
+      maxRetries: 0,
+    });
+
+    const created = await client.scannerDevices.create({
+      organizationId: 'org_1',
+      name: 'Read only scanner',
+      eventIds: ['evt_1'],
+      scopes: ['checkins.read'],
+    });
+
+    expect(created.secret).toBe('secret');
+
+    const call = getCall(fetchMock);
+    expect(call.url).toBe('https://api.test/v1/scanner-devices');
+    expect(call.method).toBe('POST');
+    expect(JSON.parse(call.body)).toEqual({
+      organizationId: 'org_1',
+      name: 'Read only scanner',
+      eventIds: ['evt_1'],
+      scopes: ['checkins.read'],
+    });
+  });
+
+  it('scannerDevices.create allows organization-wide scanner devices', async () => {
+    const fetchMock = mockFetch(201, {
+      id: 'sd_1',
+      tenantId: 'tnt_1',
+      organizationId: 'org_1',
+      name: 'Org scanner',
+      deviceId: 'sd_public',
+      eventIds: [],
+      scopes: ['checkins.read', 'checkins.write'],
+      status: 'active',
+      createdAt: '2026-06-01T00:00:00.000Z',
+      updatedAt: '2026-06-01T00:00:00.000Z',
+      secret: 'secret',
+    });
+    const client = new TixkitClient({
+      apiKey: 'tk_test_123',
+      apiBaseUrl: 'https://api.test',
+      maxRetries: 0,
+    });
+
+    const created = await client.scannerDevices.create({
+      organizationId: 'org_1',
+      name: 'Org scanner',
+    });
+
+    expect(created.secret).toBe('secret');
+
+    const call = getCall(fetchMock);
+    expect(call.url).toBe('https://api.test/v1/scanner-devices');
+    expect(call.method).toBe('POST');
+    expect(JSON.parse(call.body)).toEqual({
+      organizationId: 'org_1',
+      name: 'Org scanner',
+    });
+  });
+
   it('TixkitApiError should have correct properties', () => {
     const error = new TixkitApiError('NOT_FOUND', 'Resource not found', 404, 'req_123', {
       resource: 'event',

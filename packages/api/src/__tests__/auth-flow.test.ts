@@ -757,6 +757,7 @@ describe('ClerkAuthService scanner device auth', () => {
           hashed_secret: hash('scanner_secret'),
           status: 'active',
           event_ids: JSON.stringify(['evt_1']),
+          scopes: JSON.stringify(['checkins.read']),
         },
       ],
     });
@@ -774,7 +775,7 @@ describe('ClerkAuthService scanner device auth', () => {
       id: 'sd_public',
       tenantId: 'tnt_1',
       organizationIds: ['org_1'],
-      scopes: ['checkins.read', 'checkins.write'],
+      scopes: ['checkins.read'],
       eventIds: ['evt_1'],
     });
     expect(tables.scanner_devices[0].last_seen_at).toBeInstanceOf(Date);
@@ -785,6 +786,60 @@ describe('ClerkAuthService scanner device auth', () => {
         ids: ['sd_internal'],
       },
     ]);
+  });
+
+  it('defaults legacy scanner device rows without scopes to read/write', async () => {
+    const { db } = createAuthDb({
+      scanner_devices: [
+        {
+          id: 'sd_internal',
+          tenant_id: 'tnt_1',
+          organization_id: 'org_1',
+          device_id: 'sd_public',
+          hashed_secret: hash('scanner_secret'),
+          status: 'active',
+          event_ids: JSON.stringify(['evt_1']),
+        },
+      ],
+    });
+
+    const service = new ClerkAuthService('sk_test_auth', db as never);
+    const result = await service.authenticateScannerDevice(
+      request({
+        'x-device-id': 'sd_public',
+        'x-device-secret': 'scanner_secret',
+      }),
+    );
+
+    expect(result.principal.scopes).toEqual(['checkins.read', 'checkins.write']);
+  });
+
+  it('fail-closes present malformed scanner device scopes', async () => {
+    const { db } = createAuthDb({
+      scanner_devices: [
+        {
+          id: 'sd_internal',
+          tenant_id: 'tnt_1',
+          organization_id: 'org_1',
+          device_id: 'sd_public',
+          hashed_secret: hash('scanner_secret'),
+          status: 'active',
+          event_ids: JSON.stringify(['evt_1']),
+          scopes: 'not-json',
+        },
+      ],
+    });
+
+    const service = new ClerkAuthService('sk_test_auth', db as never);
+    const result = await service.authenticateScannerDevice(
+      request({
+        'x-device-id': 'sd_public',
+        'x-device-secret': 'scanner_secret',
+      }),
+    );
+
+    expect(result.principal.scopes).toEqual([]);
+    expect(result.principal.eventIds).toEqual(['evt_1']);
   });
 
   it('rejects missing, invalid, and revoked scanner devices', async () => {

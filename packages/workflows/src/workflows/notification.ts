@@ -37,7 +37,9 @@ const {
     templateVersionId: string;
     variables: Record<string, unknown>;
     optOutToken?: string;
-  }): Promise<WorkflowActivityResult<{ subject: string; html: string; text?: string; segments?: number }>>;
+  }): Promise<
+    WorkflowActivityResult<{ subject: string; html: string; text?: string; segments?: number }>
+  >;
 }>({
   startToCloseTimeout: '30 seconds',
   retry: {
@@ -69,6 +71,17 @@ export type SmsDeliveryWorkflowInput = {
   providerRouteId: string;
   notificationType: 'transactional' | 'bulk' | 'staff' | 'system';
 };
+
+function handleDeliveryActivityFailure(
+  activityContext: string,
+  result: Extract<WorkflowActivityResult<unknown>, { ok: false }>,
+): { status: 'failed' } {
+  if (result.retryable) {
+    throw new Error(`${activityContext} failed (${result.errorCode}): ${result.message}`);
+  }
+
+  return { status: 'failed' };
+}
 
 export async function notificationDeliveryWorkflow(
   input: NotificationDeliveryWorkflowInput,
@@ -114,7 +127,7 @@ export async function notificationDeliveryWorkflow(
   });
 
   if (!renderResult.ok) {
-    return { status: 'failed' };
+    return handleDeliveryActivityFailure('Email render', renderResult);
   }
 
   // Step 3: Send email with rendered content
@@ -127,8 +140,7 @@ export async function notificationDeliveryWorkflow(
   });
 
   if (!sendResult.ok) {
-    // Retry with fallback provider would happen here
-    return { status: 'failed' };
+    return handleDeliveryActivityFailure('Email delivery', sendResult);
   }
 
   return { status: 'sent' };

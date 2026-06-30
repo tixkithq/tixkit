@@ -1363,9 +1363,9 @@ const rawOpenApiSpec = {
           fileName: { type: 'string', minLength: 1, maxLength: 255 },
           contentType: { type: 'string', minLength: 1, maxLength: 255 },
           sizeBytes: { type: 'integer', minimum: 1 },
-          questionId: { type: 'string' },
+          questionId: { type: 'string', minLength: 1 },
         },
-        required: ['fileName', 'contentType', 'sizeBytes'],
+        required: ['fileName', 'contentType', 'sizeBytes', 'questionId'],
       },
       UploadArtifactTicket: {
         type: 'object',
@@ -1747,10 +1747,16 @@ const rawOpenApiSpec = {
           deviceId: { type: 'string' },
           status: { type: 'string', enum: ['active', 'revoked'] },
           eventIds: { type: 'array', items: { type: 'string' } },
+          scopes: {
+            type: 'array',
+            items: { type: 'string', enum: ['checkins.read', 'checkins.write'] },
+            description:
+              'Scanner device scopes. Use checkins.read for polling-only devices and add checkins.write for scan creation/upload.',
+          },
           lastSeenAt: { type: 'string', format: 'date-time' },
           createdAt: { type: 'string', format: 'date-time' },
         },
-        required: ['id', 'name', 'deviceId', 'status'],
+        required: ['id', 'name', 'deviceId', 'eventIds', 'scopes', 'status'],
       },
       ScannerDevicePage: {
         type: 'object',
@@ -5033,6 +5039,7 @@ const rawOpenApiSpec = {
     '/check-ins/bulk-sync-jobs': {
       post: {
         summary: 'Create an async bulk offline check-in sync job',
+        description: 'Requires `checkins.write` because it creates a durable sync job.',
         security: [{ ScannerDeviceAuth: [] }, { BearerAuth: [] }],
         parameters: [
           { $ref: '#/components/parameters/ScannerDeviceSecret' },
@@ -5068,6 +5075,7 @@ const rawOpenApiSpec = {
     '/check-ins/bulk-sync-jobs/{jobId}/chunks/{sequence}': {
       put: {
         summary: 'Upload a bounded async bulk sync chunk',
+        description: 'Requires `checkins.write` because it persists scan payload data.',
         security: [{ ScannerDeviceAuth: [] }, { BearerAuth: [] }],
         parameters: [
           { name: 'jobId', in: 'path', required: true, schema: { type: 'string' } },
@@ -5120,6 +5128,7 @@ const rawOpenApiSpec = {
     '/check-ins/bulk-sync-jobs/{jobId}': {
       get: {
         summary: 'Get async bulk sync job status',
+        description: 'Requires `checkins.read`; read-only scanner principals can poll job status.',
         security: [{ ScannerDeviceAuth: [] }, { BearerAuth: [] }],
         parameters: [
           { name: 'jobId', in: 'path', required: true, schema: { type: 'string' } },
@@ -5138,6 +5147,8 @@ const rawOpenApiSpec = {
     '/check-ins/bulk-sync-jobs/{jobId}/chunks': {
       get: {
         summary: 'List async bulk sync chunk summaries',
+        description:
+          'Requires `checkins.read`; read-only scanner principals can poll bounded chunk summaries.',
         security: [{ ScannerDeviceAuth: [] }, { BearerAuth: [] }],
         parameters: [
           { name: 'jobId', in: 'path', required: true, schema: { type: 'string' } },
@@ -5239,6 +5250,11 @@ const rawOpenApiSpec = {
                   organizationId: { type: 'string' },
                   name: { type: 'string' },
                   eventIds: { type: 'array', items: { type: 'string' } },
+                  scopes: {
+                    type: 'array',
+                    items: { type: 'string', enum: ['checkins.read', 'checkins.write'] },
+                    default: ['checkins.read', 'checkins.write'],
+                  },
                 },
                 required: ['organizationId', 'name'],
               },

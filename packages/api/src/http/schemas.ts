@@ -608,6 +608,10 @@ export const createScannerDeviceSchema = z
     organizationId: ulidSchema,
     name: z.string().min(1),
     eventIds: z.array(ulidSchema).optional(),
+    scopes: z
+      .array(z.enum(['checkins.read', 'checkins.write']))
+      .min(1)
+      .optional(),
   })
   .strict();
 

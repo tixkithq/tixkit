@@ -258,6 +258,7 @@ export type PaidCheckoutCaptureState = {
   inventoryPool: { soldCount: number };
   ticketCount: number;
   ticketIds: string[];
+  ticketQrPayloads: string[];
   ticketEmailJob: {
     templateKey: string;
     attachments: Array<{
@@ -291,6 +292,19 @@ export type ResalePurchaseState = {
     status: string;
     transferredToEmail: string | null;
     orderId: string | null;
+  };
+};
+
+export type CheckoutSessionArtifactAnswerState = {
+  cart: Record<string, unknown>;
+  artifact: {
+    id: string;
+    status: string;
+    scanStatus: string;
+    eventId: string | null;
+    purpose: string;
+    metadata: Record<string, unknown>;
+    consumedByCheckoutSessionId: string | null;
   };
 };
 
@@ -1569,7 +1583,11 @@ export async function readPaidCheckoutCaptureState(
         .select(['sold_count'])
         .where('id', '=', inventoryPoolId)
         .executeTakeFirstOrThrow(),
-      db.selectFrom('tickets').select(['id']).where('order_id', '=', session.order_id).execute(),
+      db
+        .selectFrom('tickets')
+        .select(['id', 'qr_payload'])
+        .where('order_id', '=', session.order_id)
+        .execute(),
       db
         .selectFrom('email_jobs')
         .select(['template_key', 'variables'])
@@ -1627,6 +1645,7 @@ export async function readPaidCheckoutCaptureState(
       },
       ticketCount: tickets.length,
       ticketIds: tickets.map((ticket) => ticket.id),
+      ticketQrPayloads: tickets.map((ticket) => ticket.qr_payload),
       ticketEmailJob: ticketEmailJob
         ? {
             templateKey: ticketEmailJob.template_key,
@@ -1701,6 +1720,55 @@ export async function readResalePurchaseState(input: {
         status: sellerTicket.status,
         transferredToEmail: sellerTicket.transferred_to_email,
         orderId: sellerTicket.order_id,
+      },
+    };
+  });
+}
+
+export async function readCheckoutSessionArtifactAnswerState(
+  sessionId: string,
+  questionId: string,
+): Promise<CheckoutSessionArtifactAnswerState> {
+  return withE2eDb(async (db) => {
+    const session = await db
+      .selectFrom('checkout_sessions')
+      .select(['cart'])
+      .where('id', '=', sessionId)
+      .executeTakeFirstOrThrow();
+    const cart = parseJsonRecord(session.cart);
+    const buyerFields = parseJsonRecord(cart.buyerFields);
+    const answer = parseJsonRecord(buyerFields[questionId]);
+    const artifactId = answer.artifactId;
+    if (typeof artifactId !== 'string') {
+      throw new Error(
+        `Checkout session ${sessionId} did not persist artifact answer ${questionId}`,
+      );
+    }
+
+    const artifact = await db
+      .selectFrom('upload_artifacts')
+      .select([
+        'id',
+        'event_id',
+        'purpose',
+        'status',
+        'scan_status',
+        'metadata',
+        'consumed_by_checkout_session_id',
+      ])
+      .where('id', '=', artifactId)
+      .executeTakeFirstOrThrow();
+
+    return {
+      cart,
+      artifact: {
+        id: artifact.id,
+        eventId: artifact.event_id,
+        purpose: artifact.purpose,
+        status: artifact.status,
+        scanStatus: artifact.scan_status,
+        metadata: parseJsonRecord(artifact.metadata),
+        consumedByCheckoutSessionId: artifact.consumed_by_checkout_session_id,
       },
     };
   });

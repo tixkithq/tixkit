@@ -1,6 +1,8 @@
 import { sql } from 'kysely';
 import type { Migration } from 'kysely/migration';
 
+type MigrationDb = Parameters<Migration['up']>[0];
+
 function isMysql(): boolean {
   return process.env.DB_DRIVER === 'mysql';
 }
@@ -14,7 +16,7 @@ function quoteMysqlIdentifier(identifier: string): string {
 }
 
 async function mysqlColumnExists(
-  db: Parameters<Migration['up']>[0],
+  db: MigrationDb,
   tableName: string,
   columnName: string,
 ): Promise<boolean> {
@@ -29,7 +31,7 @@ async function mysqlColumnExists(
 }
 
 async function mysqlIndexExists(
-  db: Parameters<Migration['up']>[0],
+  db: MigrationDb,
   tableName: string,
   indexName: string,
 ): Promise<boolean> {
@@ -44,7 +46,7 @@ async function mysqlIndexExists(
 }
 
 async function addMysqlColumnIfMissing(
-  db: Parameters<Migration['up']>[0],
+  db: MigrationDb,
   tableName: string,
   columnName: string,
   definition: string,
@@ -58,7 +60,7 @@ async function addMysqlColumnIfMissing(
 }
 
 async function dropMysqlColumnIfExists(
-  db: Parameters<Migration['up']>[0],
+  db: MigrationDb,
   tableName: string,
   columnName: string,
 ): Promise<void> {
@@ -70,11 +72,11 @@ async function dropMysqlColumnIfExists(
     .execute(db);
 }
 
-async function addColumns(db: Parameters<Migration['up']>[0]): Promise<void> {
+async function addColumns(db: MigrationDb): Promise<void> {
   if (isMysql()) {
-    const jobColumns: Array<[string, string]> = [
+    const jobColumns: Array<[column: string, definition: string]> = [
       ['attempt_count', 'integer not null default 0'],
-      ['lease_owner', 'varchar(255)'],
+      ['lease_owner', 'varchar(255) null'],
       ['leased_until', 'timestamp null'],
       ['next_attempt_at', 'timestamp null'],
       ['last_attempted_at', 'timestamp null'],
@@ -193,7 +195,7 @@ async function addColumns(db: Parameters<Migration['up']>[0]): Promise<void> {
   `.execute(db);
 }
 
-async function dropColumns(db: Parameters<Migration['up']>[0]): Promise<void> {
+async function dropColumns(db: MigrationDb): Promise<void> {
   if (isMysql()) {
     if (
       await mysqlIndexExists(db, 'offline_check_in_sync_jobs', 'idx_offline_sync_jobs_worker_ready')

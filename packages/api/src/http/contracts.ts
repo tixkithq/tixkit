@@ -18,6 +18,7 @@ const MAX_LIMIT = 100;
 const INTEGER_STRING = /^\d+$/;
 const boxOfficeTenderTypes = ['cash', 'manual_card', 'comp'] as const;
 const boxOfficeReceiptModes = ['print', 'email', 'both'] as const;
+const DEFAULT_SCANNER_DEVICE_SCOPES: Permission[] = ['checkins.read', 'checkins.write'];
 type BoxOfficeSettings = {
   enabled: boolean;
   allowedTenderTypes: Array<(typeof boxOfficeTenderTypes)[number]>;
@@ -75,6 +76,15 @@ export function parseBoxOfficeSettings(value: unknown): BoxOfficeSettings {
     requireBuyerEmail: record.requireBuyerEmail,
     receiptMode: record.receiptMode as BoxOfficeSettings['receiptMode'],
   };
+}
+
+function parseScannerDeviceScopes(value: unknown): Permission[] {
+  if (value == null || value === '') return [...DEFAULT_SCANNER_DEVICE_SCOPES];
+  const parsed = parseJsonValue<unknown>(value, []);
+  if (!Array.isArray(parsed)) return [];
+  return parsed.filter(
+    (scope): scope is Permission => scope === 'checkins.read' || scope === 'checkins.write',
+  );
 }
 
 export function toIso(value: Date | string | null | undefined): string | undefined {
@@ -622,6 +632,7 @@ export function serializeScannerDevice(row: Record<string, unknown>) {
     name: row.name,
     deviceId: row.device_id,
     eventIds: parseJsonValue<string[]>(row.event_ids, []),
+    scopes: parseScannerDeviceScopes(row.scopes),
     status: row.status,
     lastSeenAt: toIso(row.last_seen_at as Date | string | null),
     createdAt: toIso(row.created_at as Date | string),

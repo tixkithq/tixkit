@@ -1,6 +1,6 @@
 import type { FastifyPluginAsync } from 'fastify';
 import { z } from 'zod';
-import { BrandRepository, EventRepository } from '@tixkit/db';
+import { BrandRepository, EventRepository, type Database } from '@tixkit/db';
 import { ClerkAuthService } from '../../auth/clerk.js';
 import {
   ForbiddenError,
@@ -37,7 +37,7 @@ const publicCreateUploadSchema = z
     fileName: z.string().min(1).max(255),
     contentType: z.string().min(1).max(255),
     sizeBytes: z.number().int().positive(),
-    questionId: z.string().optional(),
+    questionId: z.string().min(1),
   })
   .strict();
 
@@ -49,6 +49,38 @@ const publicCompleteSchema = z
 
 function hasCheckoutQuestionMetadata(metadata: Record<string, unknown> | undefined): boolean {
   return metadata !== undefined && Object.prototype.hasOwnProperty.call(metadata, 'questionId');
+}
+
+function checkoutQuestionIdFromMetadata(metadata: Record<string, unknown> | undefined): string {
+  const questionId = metadata?.questionId;
+  if (typeof questionId !== 'string' || questionId.length === 0) {
+    throw new ValidationError('metadata.questionId is required for checkout answer uploads');
+  }
+  return questionId;
+}
+
+async function requireCheckoutFileQuestion(
+  db: Database,
+  eventId: string,
+  questionId: string,
+): Promise<void> {
+  const question = await db
+    .selectFrom('questions')
+    .select(['id', 'type', 'status', 'is_hidden', 'hidden_at', 'deleted_at'])
+    .where('event_id', '=', eventId)
+    .where('id', '=', questionId)
+    .executeTakeFirst();
+
+  if (
+    !question ||
+    question.type !== 'file' ||
+    question.status === 'hidden' ||
+    question.is_hidden ||
+    question.hidden_at ||
+    question.deleted_at
+  ) {
+    throw new ValidationError('questionId must reference an active file question for this event');
+  }
 }
 
 type ScopedUploadArtifact = {
@@ -96,7 +128,10 @@ function requireUploadArtifactAccess(
     if (!artifact.created_by_user_id || artifact.created_by_user_id !== principal.id) {
       throw new NotFoundError('UploadArtifact', 'scoped');
     }
+    return;
   }
+
+  throw new ForbiddenError('Upload artifact purpose is not supported');
 }
 
 export const publicUploadRoutes: FastifyPluginAsync = async (app) => {
@@ -108,6 +143,7 @@ export const publicUploadRoutes: FastifyPluginAsync = async (app) => {
     const event = await new EventRepository(db).findById(eventId);
     if (!event) throw new NotFoundError('Event', eventId);
     if (event.status !== 'published') throw new ValidationError('Event is not published');
+    await requireCheckoutFileQuestion(db, eventId, body.questionId);
 
     const result = await createUploadArtifact(db, {
       tenantId: event.tenant_id,
@@ -171,12 +207,14 @@ export const uploadRoutes: FastifyPluginAsync = async (app) => {
     } else if (body.purpose === 'checkout_answer') {
       ClerkAuthService.requirePermission(principal, 'events.write');
       if (!eventId) throw new ValidationError('eventId is required for checkout answer uploads');
+      const questionId = checkoutQuestionIdFromMetadata(body.metadata);
       const event = await new EventRepository(db).findById(eventId);
       if (!event) throw new NotFoundError('Event', eventId);
       ClerkAuthService.requireResourceTenant(principal, event, 'Event', eventId);
       ClerkAuthService.requireOrganizationScope(principal, event.organization_id);
       ClerkAuthService.requireBrandScope(principal, event.brand_id);
       ClerkAuthService.requireEventScope(principal, eventId);
+      await requireCheckoutFileQuestion(db, eventId, questionId);
       tenantId = event.tenant_id;
       organizationId = event.organization_id;
       brandId = event.brand_id;

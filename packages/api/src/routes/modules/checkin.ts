@@ -613,7 +613,9 @@ export const checkInRoutes: FastifyPluginAsync = async (app) => {
       }
 
       const chunkSequence = parseChunkSequence(sequence);
-      const job = await loadAuthorizedBulkSyncJob(db, principal, jobId, loadEvent);
+      const job = await loadAuthorizedBulkSyncJob(db, principal, jobId, loadEvent, {
+        requireOwningDevice: true,
+      });
       if (chunkSequence > job.total_chunks) {
         throw new ValidationError('Chunk sequence exceeds job totalChunks');
       }
@@ -643,6 +645,7 @@ export const checkInRoutes: FastifyPluginAsync = async (app) => {
               .executeTakeFirst()) as BulkSyncJobRow | undefined;
             if (!lockedJob) throw new NotFoundError('BulkSyncJob', jobId);
             ClerkAuthService.requireResourceTenant(principal, lockedJob, 'BulkSyncJob', jobId);
+            requireBulkSyncJobDeviceAccess(principal, lockedJob, jobId);
             if (chunkSequence > lockedJob.total_chunks) {
               throw new ValidationError('Chunk sequence exceeds job totalChunks');
             }
@@ -725,18 +728,15 @@ export const checkInRoutes: FastifyPluginAsync = async (app) => {
 
   app.get('/check-ins/bulk-sync-jobs/:jobId', async (request) => {
     const principal = request.principal!;
-    ClerkAuthService.requirePermission(principal, 'checkins.write');
+    ClerkAuthService.requirePermission(principal, 'checkins.read');
     const { jobId } = request.params as { jobId: string };
     const job = await loadAuthorizedBulkSyncJob(db, principal, jobId, loadEvent);
-    if (shouldScheduleBulkSyncJob(job)) {
-      scheduleBulkSyncProcessing(db, jobId);
-    }
     return serializeBulkSyncJob(job);
   });
 
   app.get('/check-ins/bulk-sync-jobs/:jobId/chunks', async (request) => {
     const principal = request.principal!;
-    ClerkAuthService.requirePermission(principal, 'checkins.write');
+    ClerkAuthService.requirePermission(principal, 'checkins.read');
     const { jobId } = request.params as { jobId: string };
     await loadAuthorizedBulkSyncJob(db, principal, jobId, loadEvent);
     const rows = (await db
@@ -774,18 +774,12 @@ function scheduleBulkSyncProcessing(db: Database, jobId: string): void {
   }, 0);
 }
 
-function shouldScheduleBulkSyncJob(job: BulkSyncJobRow): boolean {
-  if (job.status === 'completed') return false;
-  if (job.status !== 'failed') return true;
-  if (!job.next_attempt_at) return false;
-  return new Date(job.next_attempt_at).getTime() <= Date.now();
-}
-
 async function loadAuthorizedBulkSyncJob(
   db: Database,
   principal: Principal,
   jobId: string,
   loadEvent: (eventId: string) => Promise<Record<string, unknown>>,
+  options: { requireOwningDevice?: boolean } = {},
 ): Promise<BulkSyncJobRow> {
   const job = (await db
     .selectFrom('offline_check_in_sync_jobs')
@@ -794,9 +788,20 @@ async function loadAuthorizedBulkSyncJob(
     .executeTakeFirst()) as BulkSyncJobRow | undefined;
   if (!job) throw new NotFoundError('BulkSyncJob', jobId);
   ClerkAuthService.requireResourceTenant(principal, job, 'BulkSyncJob', jobId);
+  if (options.requireOwningDevice) requireBulkSyncJobDeviceAccess(principal, job, jobId);
   const event = await loadEvent(job.event_id);
   requireEventAccess(principal, event, job.event_id);
   return job;
+}
+
+function requireBulkSyncJobDeviceAccess(
+  principal: Principal,
+  job: BulkSyncJobRow,
+  jobId: string,
+): void {
+  if (principal.type === 'mobile_device' && job.device_id !== principal.id) {
+    throw new NotFoundError('BulkSyncJob', jobId);
+  }
 }
 
 function serializeBulkSyncJob(job: BulkSyncJobRow) {

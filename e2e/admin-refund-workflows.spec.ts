@@ -114,7 +114,7 @@ test.describe('admin refund workflow coverage', () => {
     await page.goto(`${adminBaseUrl}/events/${seeded.event.id}/reports`);
     await expect(page.getByRole('heading', { name: 'Reports' })).toBeVisible();
     await expect(page.getByText('Gross Sales')).toBeVisible();
-    await expect(page.getByText('$100.00', { exact: true })).toBeVisible();
+    await expect(page.getByText('$100.00', { exact: true }).first()).toBeVisible();
     await expect(page.getByText('Net Revenue')).toBeVisible();
     await expect(page.getByText('$50.00', { exact: true }).first()).toBeVisible();
     await expect(page.getByText('Refunds')).toBeVisible();

@@ -318,7 +318,7 @@ export async function reconcileRefundActivity(input: {
 
     const existingRefunds = await refundRepo.findByOrder(order.id);
     const isCumulativeChargeRefund =
-      refundOrCharge.amount === undefined && refundOrCharge.amount_refunded !== undefined;
+      input.eventType.startsWith('charge.') && refundOrCharge.amount_refunded !== undefined;
     if (isCumulativeChargeRefund) {
       const aggregateRefunded = Math.max(0, refundOrCharge.amount_refunded ?? 0);
       const reconciledRefunded = Math.min(Number(order.total_cents), aggregateRefunded);

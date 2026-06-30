@@ -31,6 +31,7 @@ const TEMPORAL_NAMESPACE = process.env.TEMPORAL_NAMESPACE ?? 'default';
 const TEMPORAL_TASK_QUEUE = process.env.TEMPORAL_TASK_QUEUE ?? 'tixkit';
 
 let cachedClient: Client | null = null;
+const e2eTicketIssueFailures = new Set<string>();
 
 type CheckoutHoldRow = {
   id: string;
@@ -142,6 +143,21 @@ async function startNotificationWorkflow(
 function parseStoredJson<T>(value: unknown): T {
   if (typeof value === 'string') return JSON.parse(value) as T;
   return value as T;
+}
+
+function failTicketIssueActivityOnceForE2e(input: { orderId: string; toEmail: string }): void {
+  if (
+    process.env.NODE_ENV === 'production' ||
+    process.env.E2E_FAIL_TICKET_ISSUE_ACTIVITY_ONCE !== '1'
+  ) {
+    return;
+  }
+
+  const key = process.env.E2E_FAIL_TICKET_ISSUE_ACTIVITY_ONCE_KEY?.trim() || input.toEmail;
+  if (!input.toEmail.includes(key) && input.orderId !== key) return;
+  if (e2eTicketIssueFailures.has(key)) return;
+  e2eTicketIssueFailures.add(key);
+  throw new Error(`E2E injected ticket issue activity failure for ${key}`);
 }
 
 function isRetryableDbConcurrencyError(error: unknown): boolean {
@@ -2346,6 +2362,8 @@ export async function issueTicketsActivity(input: {
   tenantId: string;
   brandId: string;
 }): Promise<WorkflowActivityResult<{ issued: number; jobId?: string }>> {
+  failTicketIssueActivityOnceForE2e(input);
+
   const db = createDb();
   try {
     const tickets = await db
@@ -2674,7 +2692,7 @@ async function generateTicketPdf(input: TicketPdfInput): Promise<string> {
   pdfDoc.setSubject(
     `${input.event?.title ?? 'Event ticket'} / ${input.order?.order_number ?? input.order?.id ?? 'Order'}`,
   );
-  pdfDoc.setKeywords([input.ticket.id, input.ticket.code, input.ticket.qr_payload]);
+  pdfDoc.setKeywords([input.ticket.id, input.ticket.code]);
   pdfDoc.setProducer('Tixkit');
 
   const page = pdfDoc.addPage([612, 792]);

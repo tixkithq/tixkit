@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from 'vitest';
 import type { Principal } from '@tixkit/domain';
 import type { Database } from '@tixkit/db';
 import type { AppContext } from '../../app.js';
+import { ClerkAuthService } from '../../auth/clerk.js';
 import { developerRoutes } from '../../routes/modules/developer.js';
 import { webhookRoutes } from '../../routes/modules/webhooks.js';
 
@@ -33,11 +34,99 @@ function createApiKeyListDb(rows: Record<string, unknown>[]) {
 }
 
 type QueryPredicate = (row: Record<string, unknown>) => boolean;
+type QueryCondition = { column: string; operator: string; value: unknown };
 type ExpressionBuilder = {
   (column: string, operator: string, value: unknown): QueryPredicate;
   and(predicates: QueryPredicate[]): QueryPredicate;
   or(predicates: QueryPredicate[]): QueryPredicate;
 };
+
+function matchesScannerLifecycleRow(
+  row: Record<string, unknown>,
+  conditions: QueryCondition[],
+): boolean {
+  return conditions.every(({ column, operator, value }) => {
+    if (operator === '=') return row[column] === value;
+    if (operator === 'is') return row[column] === value;
+    throw new Error(`Unsupported scanner lifecycle test operator: ${operator}`);
+  });
+}
+
+function createScannerDeviceLifecycleDb() {
+  const tables: Record<string, Record<string, unknown>[]> = {
+    scanner_devices: [],
+    audit_logs: [],
+  };
+  const rowsFor = (table: string) => {
+    tables[table] ??= [];
+    return tables[table];
+  };
+
+  return {
+    tables,
+    db: {
+      insertInto(table: string) {
+        return {
+          values(values: Record<string, unknown>) {
+            const insert = {
+              returningAll() {
+                return insert;
+              },
+              async executeTakeFirstOrThrow() {
+                rowsFor(table).push(values);
+                return values;
+              },
+              async execute() {
+                rowsFor(table).push(values);
+                return [];
+              },
+            };
+            return insert;
+          },
+        };
+      },
+      selectFrom(table: string) {
+        const conditions: QueryCondition[] = [];
+        const query = {
+          selectAll() {
+            return query;
+          },
+          where(column: string, operator: string, value: unknown) {
+            conditions.push({ column, operator, value });
+            return query;
+          },
+          async executeTakeFirst() {
+            return rowsFor(table).find((row) => matchesScannerLifecycleRow(row, conditions));
+          },
+        };
+        return query;
+      },
+      updateTable(table: string) {
+        const conditions: QueryCondition[] = [];
+        let values: Record<string, unknown> = {};
+        const update = {
+          set(nextValues: Record<string, unknown>) {
+            values = nextValues;
+            return update;
+          },
+          where(column: string, operator: string, value: unknown) {
+            conditions.push({ column, operator, value });
+            return update;
+          },
+          async execute() {
+            for (const row of rowsFor(table).filter((candidate) =>
+              matchesScannerLifecycleRow(candidate, conditions),
+            )) {
+              Object.assign(row, values);
+            }
+            return [];
+          },
+        };
+        return update;
+      },
+    },
+  };
+}
 
 function createWebhookDb(tables: Record<string, Record<string, unknown>[]>) {
   // eslint-disable-next-line unicorn/consistent-function-scoping -- this resolver is scoped to the joined-row shape in this mock DB.
@@ -435,6 +524,90 @@ describe('developer routes integration', () => {
       code: 'FORBIDDEN',
       message: 'Scoped principals must bind scanner devices to explicit events',
     });
+
+    await app.close();
+  });
+
+  it('blocks principals from minting scanner device scopes they do not hold before insert', async () => {
+    const principal: Principal = {
+      type: 'user',
+      id: 'usr_1',
+      tenantId: 'tnt_1',
+      organizationIds: ['org_1'],
+      scopes: ['developers.write', 'checkins.read'],
+    };
+    const db = {
+      insertInto: vi.fn(() => {
+        throw new Error('Scanner device insert must not run for scope escalation');
+      }),
+    };
+    const app = await setupDeveloperRouteApp(principal, db);
+
+    const response = await app.inject({
+      method: 'POST',
+      url: '/scanner-devices',
+      payload: {
+        organizationId: 'org_1',
+        name: 'Escalated scanner',
+      },
+    });
+
+    expect(response.statusCode).toBe(403);
+    expect(response.json()).toMatchObject({
+      code: 'FORBIDDEN',
+      message: 'Cannot grant scope the principal does not have: checkins.write',
+    });
+    expect(db.insertInto).not.toHaveBeenCalled();
+
+    await app.close();
+  });
+
+  it('creates read-only scanner credentials that authenticate without write scope', async () => {
+    const principal: Principal = {
+      type: 'user',
+      id: 'usr_1',
+      tenantId: 'tnt_1',
+      organizationIds: ['org_1'],
+      scopes: ['developers.write', 'checkins.read'],
+    };
+    const { db, tables } = createScannerDeviceLifecycleDb();
+    const app = await setupDeveloperRouteApp(principal, db);
+
+    const response = await app.inject({
+      method: 'POST',
+      url: '/scanner-devices',
+      payload: {
+        organizationId: 'org_1',
+        name: 'Read-only gate scanner',
+        scopes: ['checkins.read'],
+      },
+    });
+
+    expect(response.statusCode).toBe(201);
+    const created = response.json() as { deviceId: string; secret: string; scopes: string[] };
+    expect(created.scopes).toEqual(['checkins.read']);
+    expect(tables.scanner_devices[0]).toMatchObject({
+      organization_id: 'org_1',
+      scopes: JSON.stringify(['checkins.read']),
+      status: 'active',
+    });
+
+    const service = new ClerkAuthService('sk_test_auth', db as never);
+    const result = await service.authenticateScannerDevice({
+      headers: {
+        'x-device-id': created.deviceId,
+        'x-device-secret': created.secret,
+      },
+    } as never);
+
+    expect(result.principal).toMatchObject({
+      type: 'mobile_device',
+      id: created.deviceId,
+      tenantId: 'tnt_1',
+      organizationIds: ['org_1'],
+      scopes: ['checkins.read'],
+    });
+    expect(result.principal.scopes).not.toContain('checkins.write');
 
     await app.close();
   });

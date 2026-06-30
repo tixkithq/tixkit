@@ -71,6 +71,7 @@ function help(): string {
     '  --env-file <path>    Env file to update (default: .env.local)',
     '  --dry-run            Print planned forwarding without starting Stripe CLI',
     '  --no-write-secret    Capture secret but do not write it to the env file',
+    '  Live forwarding uses STRIPE_API_KEY or STRIPE_SECRET_KEY from the env file when present and stays in the foreground until Ctrl+C.',
     '',
     'Options for quickstart:',
     '  --no-open            Do not open the browser after services are healthy',
@@ -190,7 +191,12 @@ async function main(): Promise<void> {
       const writeSecret = !hasFlag('--no-write-secret');
       const result = await runDevWebhooks({ apiUrl, envFilePath: envFile, dryRun, writeSecret });
       console.log(formatWebhookResult(result));
-      process.exit(result.ok ? 0 : 1);
+      if (!result.ok || dryRun) {
+        process.exit(result.ok ? 0 : 1);
+      }
+      // Keep the Stripe CLI child process in the foreground so forwarding
+      // continues until the operator stops this command with Ctrl+C.
+      break;
     }
 
     case 'seed:sample-data': {

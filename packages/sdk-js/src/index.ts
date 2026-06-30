@@ -253,7 +253,7 @@ export type PublicCreateUploadArtifactInput = {
   fileName: string;
   contentType: string;
   sizeBytes: number;
-  questionId?: string;
+  questionId: string;
 };
 
 export type UploadArtifactTicket = {
@@ -856,11 +856,16 @@ export type ScannerDevice = {
   name: string;
   deviceId: string;
   eventIds: string[];
+  scopes: string[];
   status: string;
   lastSeenAt?: string;
   createdAt: string;
   updatedAt: string;
   secret?: string;
+};
+
+export type ScannerDeviceCreated = ScannerDevice & {
+  secret: string;
 };
 
 export type WebhookEndpoint = {
@@ -2512,8 +2517,9 @@ class ScannerDeviceResource {
   async create(input: {
     organizationId: string;
     name: string;
-    eventIds: string[];
-  }): Promise<ScannerDevice> {
+    eventIds?: string[];
+    scopes?: Array<'checkins.read' | 'checkins.write'>;
+  }): Promise<ScannerDeviceCreated> {
     return this.client.request('POST', '/scanner-devices', { body: input });
   }
   async revoke(deviceId: string): Promise<{ deviceId: string; status: string }> {

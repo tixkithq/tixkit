@@ -5692,6 +5692,8 @@ describe('checkout question validation', () => {
           status: 'uploaded',
           scan_status: 'clean',
           metadata: JSON.stringify({ questionId: 'q_file' }),
+          consumed_by_checkout_session_id: null,
+          consumed_at: null,
         },
       ],
     };
@@ -5739,6 +5741,8 @@ describe('checkout question validation', () => {
           status: 'uploaded',
           scan_status: 'clean',
           metadata: JSON.stringify({ questionId: 'q_other' }),
+          consumed_by_checkout_session_id: null,
+          consumed_at: null,
         },
       ],
     };

@@ -571,6 +571,46 @@ describe('reconcileRefundActivity', () => {
     expect(mockState.timeline).toHaveLength(0);
   });
 
+  it('treats real charge.refunded payloads with amount as aggregate reconciliation', async () => {
+    mockState.order = {
+      ...mockState.order,
+      total_cents: 2500,
+      refunded_cents: 2500,
+      status: 'refunded',
+    };
+    mockState.refunds = [
+      {
+        id: 'ref_existing',
+        order_id: 'ord_1',
+        provider_refund_id: 're_existing',
+        amount_cents: 2500,
+        status: 'succeeded',
+      },
+    ];
+
+    const result = await reconcileRefundActivity({
+      providerEventId: 'evt_charge_refunded_real',
+      provider: 'stripe',
+      eventType: 'charge.refunded',
+      data: {
+        id: 'ch_1',
+        payment_intent: 'pi_provider_1',
+        amount: 2500,
+        amount_refunded: 2500,
+        status: 'succeeded',
+      },
+    });
+
+    expect(result).toMatchObject({
+      ok: true,
+      value: { orderId: 'ord_1', status: 'refunded' },
+    });
+    expect(mockState.createdRefunds).toHaveLength(0);
+    expect(mockState.refunds).toHaveLength(1);
+    expect(mockState.refunds[0]).toMatchObject({ provider_refund_id: 're_existing' });
+    expect(mockState.timeline).toHaveLength(0);
+  });
+
   it('does not double count a refund object after a cumulative charge refund event', async () => {
     const chargeResult = await reconcileRefundActivity({
       providerEventId: 'evt_charge_refunded_first',
