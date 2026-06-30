@@ -198,7 +198,9 @@ describe('EventPagePersistedEditorView', () => {
     await waitFor(() => {
       expect(adminApiMock.archiveContentDocument).toHaveBeenCalledWith('cdoc_event_page');
     });
-    expect(screen.getByText('Archived event page')).toBeInTheDocument();
+    await waitFor(() => {
+      expect(screen.getByText('Archived event page')).toBeInTheDocument();
+    });
   });
 
   it('loads event-page content documents from array and keyed API response shapes', async () => {
