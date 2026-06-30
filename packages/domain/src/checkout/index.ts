@@ -120,6 +120,7 @@ export type CreateCheckoutSessionInput = {
     ticketTypeId?: Ulid;
     occurrenceId?: Ulid;
     productId?: Ulid;
+    resaleListingId?: Ulid;
     quantity: number;
     unitAmountCents?: number;
     attendeeFields?: Record<string, unknown>[];

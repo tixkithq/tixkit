@@ -32,6 +32,18 @@ final class TixkitIOSTests: XCTestCase {
     )
   }
 
+  func testBuildsResaleCheckoutHandoffURL() throws {
+    let url = tixkitCheckoutHandoffURL(
+      TixkitCheckoutHandoffOptions(
+        eventId: "evt_1",
+        checkoutBaseURL: try XCTUnwrap(URL(string: "https://checkout.example.test")),
+        items: [TixkitCheckoutHandoffItem(resaleListingId: "lst_1", quantity: 1)]
+      )
+    )
+
+    XCTAssertEqual(url.absoluteString, "https://checkout.example.test/checkout?eventId=evt_1&resaleListing=lst_1")
+  }
+
   func testHashesQRPayloadsWithSHA256() {
     let payload = "signed-ticket-payload"
     let expected = SHA256.hash(data: Data(payload.utf8)).map { String(format: "%02x", $0) }.joined()
@@ -46,7 +58,19 @@ final class TixkitIOSTests: XCTestCase {
       XCTAssertNil(request.value(forHTTPHeaderField: "X-Device-Secret"))
       XCTAssertNil(request.value(forHTTPHeaderField: "Authorization"))
       let body: [String: Any]
-      if request.url!.path.hasSuffix("/discovery-card") {
+      if request.url!.path.hasSuffix("/resale-listings") {
+        body = [
+          "items": [[
+            "id": "lst_1",
+            "eventId": "evt_1",
+            "status": "listed",
+            "priceCents": 5500,
+            "currency": "USD",
+            "faceValueCents": 5000,
+          ]],
+          "hasMore": false,
+        ]
+      } else if request.url!.path.hasSuffix("/discovery-card") {
         body = [
           "title": "All Access",
           "summary": "Chicago",
@@ -99,12 +123,15 @@ final class TixkitIOSTests: XCTestCase {
     _ = try await client.getEventPageBySlug(slug: "all-access", host: "events.example.com", locale: "en")
     let card = try await client.getEventDiscoveryCard(eventId: "evt_1")
     XCTAssertEqual(card.venueName, "The Salt Shed")
+    let listings = try await client.listResaleListings(eventId: "evt_1", cursor: "lst_0", limit: 25)
+    XCTAssertEqual(listings.items.first?.id, "lst_1")
 
     XCTAssertEqual(requestURLs, [
       "https://api.test/v1/public/events/evt_1/content-page?locale=en",
       "https://api.test/v1/public/events/evt_1/page?locale=en",
       "https://api.test/v1/public/events/by-slug/all-access/page?host=events.example.com&locale=en",
       "https://api.test/v1/public/events/evt_1/discovery-card",
+      "https://api.test/v1/public/events/evt_1/resale-listings?cursor=lst_0&limit=25",
     ])
   }
 

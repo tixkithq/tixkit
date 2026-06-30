@@ -160,6 +160,9 @@ vi.mock('@tixkit/db', () => {
         }
         return [{ numUpdatedRows: BigInt(updatedCount) }];
       },
+      async executeTakeFirst() {
+        return (await query.execute())[0];
+      },
     };
     return query;
   }
@@ -750,6 +753,120 @@ describe('finalizeOrderActivity inventory holds', () => {
     expect(dbState.tables.inventory_pools.pool_1.sold_count).toBe(0);
     expect(dbState.tables.checkout_sessions.cs_1.status).toBe('expired');
     expect(dbState.destroy).toHaveBeenCalledTimes(1);
+  });
+
+  it('finalizes a reserved resale listing into a buyer order and transfers the seller ticket', async () => {
+    seedCheckout({ holdExpiresAt: new Date(Date.now() + 60_000) });
+    dbState.tables.checkout_holds = {};
+    dbState.tables.inventory_pools = {};
+    dbState.tables.checkout_sessions.cs_1.quote = JSON.stringify({
+      subtotalCents: 5500,
+      discountCents: 0,
+      taxCents: 0,
+      feeCents: 0,
+      totalCents: 5500,
+      lineItems: [
+        {
+          type: 'resale',
+          ticketTypeId: 'tt_1',
+          resaleListingId: 'lst_1',
+          name: 'Resale ticket - General Admission',
+          quantity: 1,
+          unitPriceCents: 5500,
+          subtotalCents: 5500,
+          discountCents: 0,
+          taxCents: 0,
+          feeCents: 0,
+          totalCents: 5500,
+        },
+      ],
+    });
+    dbState.tables.checkout_sessions.cs_1.cart = JSON.stringify({
+      items: [{ resaleListingId: 'lst_1', quantity: 1 }],
+      buyerFields: {},
+      attendeeFields: {},
+    });
+    dbState.tables.ticket_listings = {
+      lst_1: {
+        id: 'lst_1',
+        tenant_id: 'tnt_1',
+        event_id: 'evt_1',
+        ticket_id: 'tkt_seller_1',
+        seller_id: 'ord_seller_1',
+        status: 'listed',
+        price_cents: 5500,
+        currency: 'USD',
+        face_value_cents: 5000,
+        sold_to_id: null,
+        active_listing_key: 'tkt_seller_1',
+        reserved_checkout_session_id: 'cs_1',
+        reserved_until: new Date(Date.now() + 60_000),
+        expires_at: null,
+        sold_at: null,
+        created_at: new Date(),
+        updated_at: new Date(),
+      },
+    };
+    dbState.tables.tickets = {
+      tkt_seller_1: {
+        id: 'tkt_seller_1',
+        tenant_id: 'tnt_1',
+        order_id: 'ord_seller_1',
+        attendee_id: 'att_seller_1',
+        event_id: 'evt_1',
+        event_occurrence_id: null,
+        ticket_type_id: 'tt_1',
+        status: 'valid',
+      },
+    };
+    dbState.tables.wallet_passes = {
+      wps_seller_1: {
+        id: 'wps_seller_1',
+        tenant_id: 'tnt_1',
+        ticket_id: 'tkt_seller_1',
+        status: 'active',
+      },
+    };
+    seedTrustedPaymentIntent({ amountCents: 5500 });
+
+    const result = await finalizeOrderActivity({
+      checkoutSessionId: 'cs_1',
+      tenantId: 'tnt_1',
+      paymentIntentId: 'pi_provider_1',
+    });
+
+    expect(result.ok).toBe(true);
+    const buyerOrderId = result.ok ? result.value.orderId : '';
+    const buyerTickets = Object.values(dbState.tables.tickets).filter(
+      (ticket) => ticket.order_id === buyerOrderId,
+    );
+    expect(buyerTickets).toHaveLength(1);
+    expect(dbState.tables.tickets.tkt_seller_1).toMatchObject({
+      status: 'transferred',
+      transferred_to_email: 'buyer@example.test',
+    });
+    expect(dbState.tables.ticket_listings.lst_1).toMatchObject({
+      status: 'sold',
+      sold_to_id: buyerOrderId,
+      active_listing_key: 'lst_1',
+      reserved_checkout_session_id: null,
+      reserved_until: null,
+    });
+    expect(dbState.tables.wallet_passes.wps_seller_1).toMatchObject({ status: 'revoked' });
+    expect(Object.values(dbState.tables.order_line_items)).toEqual([
+      expect.objectContaining({
+        order_id: buyerOrderId,
+        resale_listing_id: 'lst_1',
+        ticket_type_id: 'tt_1',
+        total_cents: 5500,
+      }),
+    ]);
+    expect(Object.values(dbState.tables.order_timeline_events)).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ order_id: buyerOrderId, type: 'ticket.resale_purchased' }),
+        expect.objectContaining({ order_id: 'ord_seller_1', type: 'ticket.resale_completed' }),
+      ]),
+    );
   });
 
   it('fails closed for a paid checkout when the provider intent is unknown', async () => {

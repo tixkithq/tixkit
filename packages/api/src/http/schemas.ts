@@ -232,13 +232,20 @@ export const createCheckoutSessionSchema = (devMode: boolean) =>
               ticketTypeId: ulidSchema.optional(),
               occurrenceId: ulidSchema.optional(),
               productId: ulidSchema.optional(),
+              resaleListingId: ulidSchema.optional(),
               quantity: z.number().int().min(1),
               unitAmountCents: z.number().int().min(0).optional(),
               attendeeFields: z.array(z.record(z.string(), z.unknown())).optional(),
             })
-            .refine((item) => Boolean(item.ticketTypeId) !== Boolean(item.productId), {
-              message: 'Each checkout item must include exactly one of ticketTypeId or productId',
-            })
+            .refine(
+              (item) =>
+                [item.ticketTypeId, item.productId, item.resaleListingId].filter(Boolean)
+                  .length === 1,
+              {
+                message:
+                  'Each checkout item must include exactly one of ticketTypeId, productId, or resaleListingId',
+              },
+            )
             .refine((item) => Boolean(item.ticketTypeId) || item.unitAmountCents === undefined, {
               message: 'unitAmountCents is only accepted for ticket items',
             })
@@ -247,6 +254,9 @@ export const createCheckoutSessionSchema = (devMode: boolean) =>
             })
             .refine((item) => Boolean(item.ticketTypeId) || item.occurrenceId === undefined, {
               message: 'occurrenceId is only accepted for ticket items',
+            })
+            .refine((item) => !item.resaleListingId || item.quantity === 1, {
+              message: 'Resale listing checkout items must have quantity 1',
             }),
         )
         .min(1),

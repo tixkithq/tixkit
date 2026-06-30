@@ -34,6 +34,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     ticket_type_id: Some(std::env::var("TIXKIT_TICKET_TYPE_ID")?),
                     occurrence_id: None,
                     product_id: None,
+                    resale_listing_id: None,
                     quantity: 1,
                     unit_amount_cents: None,
                     attendee_fields: None,

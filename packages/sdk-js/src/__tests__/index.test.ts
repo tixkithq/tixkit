@@ -263,6 +263,41 @@ describe('TixkitClient', () => {
     ]);
   });
 
+  it('sends resale checkout line items', async () => {
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          id: 'cs_1',
+          eventId: 'evt_1',
+          status: 'open',
+          currency: 'USD',
+          quote: {},
+          expiresAt: '2026-01-01T00:00:00.000Z',
+        }),
+        {
+          status: 201,
+          headers: { 'Content-Type': 'application/json' },
+        },
+      ),
+    );
+
+    const client = new TixkitClient({
+      apiKey: 'tk_test_123',
+      apiBaseUrl: 'https://api.test',
+      maxRetries: 0,
+    });
+    await client.checkout.create({
+      idempotencyKey: 'idem_checkout_resale',
+      eventId: 'evt_1',
+      items: [{ resaleListingId: 'lst_1', quantity: 1 }],
+    });
+
+    const [, init] = fetchMock.mock.calls[0]!;
+    const body = JSON.parse(init?.body as string) as Record<string, unknown>;
+
+    expect(body.items).toEqual([{ resaleListingId: 'lst_1', quantity: 1 }]);
+  });
+
   it('passes waitlist claim tokens through checkout create', async () => {
     const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue(
       new Response(
@@ -1977,6 +2012,17 @@ describe('TixkitClient new resource methods', () => {
     await c.public.getEvent('evt_1');
     const call = getCall(fm);
     expect(call.url).toBe('https://api.test/v1/public/events/evt_1');
+  });
+
+  it('public.listResaleListings sends public GET with pagination', async () => {
+    const fm = mockFetch(200, { items: [{ id: 'lst_1', status: 'listed' }] });
+    const c = new TixkitClient({ apiBaseUrl: 'https://api.test', maxRetries: 0 });
+    await c.public.listResaleListings('evt_1', { cursor: 'lst_0', limit: 25 });
+    const call = getCall(fm);
+    expect(call.url).toBe(
+      'https://api.test/v1/public/events/evt_1/resale-listings?cursor=lst_0&limit=25',
+    );
+    expect(call.method).toBe('GET');
   });
 
   it('public.validateAccessCode sends POST with ticketTypeIds and accessCode', async () => {

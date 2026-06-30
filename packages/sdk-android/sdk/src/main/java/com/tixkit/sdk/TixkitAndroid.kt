@@ -112,6 +112,7 @@ data class TixkitCheckoutOptions(
   val successUrl: String,
   val cancelUrl: String,
   val ticketTypes: Map<String, Int> = emptyMap(),
+  val resaleListingId: String? = null,
   val attendeeEmail: String? = null,
   val promoCode: String? = null,
   val tracking: String? = null,
@@ -180,6 +181,26 @@ data class TixkitTicketListingPage(
   val items: List<TixkitTicketListing>,
   val hasMore: Boolean = false,
   val nextCursor: String? = null,
+)
+
+data class TixkitPublicTicketListingPage(
+  val items: List<TixkitPublicTicketListing>,
+  val hasMore: Boolean = false,
+  val nextCursor: String? = null,
+)
+
+data class TixkitPublicTicketListing(
+  val id: String,
+  val eventId: String,
+  val ticketTypeId: String? = null,
+  val ticketTypeName: String? = null,
+  val status: String,
+  val priceCents: Int,
+  val currency: String,
+  val faceValueCents: Int,
+  val expiresAt: String? = null,
+  val createdAt: String? = null,
+  val updatedAt: String? = null,
 )
 
 data class TixkitTicketListing(
@@ -254,17 +275,22 @@ class TixkitPublicEventPageClient(
   fun getEventDiscoveryCard(eventId: String, locale: String? = null): TixkitPublicEventDiscoveryCard =
     parseDiscovery(JSONObject(transport.get(apiUrl("/public/events/$eventId/discovery-card", locale = locale), publicHeaders)))
 
+  fun listResaleListings(eventId: String, cursor: String? = null, limit: Int? = null): TixkitPublicTicketListingPage =
+    parsePublicListingPage(JSONObject(transport.get(apiUrl("/public/events/$eventId/resale-listings", cursor = cursor, limit = limit), publicHeaders)))
+
   private fun getPage(path: String, host: String? = null, locale: String? = null): TixkitPublicContentPage =
     parsePage(JSONObject(transport.get(apiUrl(path, host = host, locale = locale), publicHeaders)))
 
   private val publicHeaders: Map<String, String>
     get() = mapOf("X-Tixkit-Version" to TixkitAndroid.API_VERSION)
 
-  private fun apiUrl(path: String, host: String? = null, locale: String? = null): String {
+  private fun apiUrl(path: String, host: String? = null, locale: String? = null, cursor: String? = null, limit: Int? = null): String {
     val base = apiBaseUrl.trimEnd('/')
     val query = buildList {
       if (!host.isNullOrBlank()) add("host" to host)
       if (!locale.isNullOrBlank()) add("locale" to locale)
+      if (!cursor.isNullOrBlank()) add("cursor" to cursor)
+      if (limit != null) add("limit" to limit.toString())
     }.joinToString("&") { (key, value) -> "${encode(key)}=${encode(value)}" }
     return "$base/v1$path${if (query.isEmpty()) "" else "?$query"}"
   }
@@ -650,6 +676,7 @@ object TixkitAndroid {
       if (options.ticketTypes.isNotEmpty()) {
         add("items" to options.ticketTypes.entries.joinToString(",") { "${it.key}=${it.value}" })
       }
+      options.resaleListingId?.takeIf { it.isNotBlank() }?.let { add("resaleListing" to it) }
       options.attendeeEmail?.takeIf { it.isNotBlank() }?.let { add("attendeeEmail" to it) }
       options.promoCode?.takeIf { it.isNotBlank() }?.let { add("promoCode" to it) }
       options.tracking?.takeIf { it.isNotBlank() }?.let { add("tracking" to it) }
@@ -801,6 +828,28 @@ private fun parseListingPage(json: JSONObject): TixkitTicketListingPage =
     items = json.optJSONArray("items").toObjectList(::parseListing),
     hasMore = json.optBoolean("hasMore", false),
     nextCursor = json.optNullableString("nextCursor"),
+  )
+
+private fun parsePublicListingPage(json: JSONObject): TixkitPublicTicketListingPage =
+  TixkitPublicTicketListingPage(
+    items = json.optJSONArray("items").toObjectList(::parsePublicListing),
+    hasMore = json.optBoolean("hasMore", false),
+    nextCursor = json.optNullableString("nextCursor"),
+  )
+
+private fun parsePublicListing(json: JSONObject): TixkitPublicTicketListing =
+  TixkitPublicTicketListing(
+    id = json.optString("id"),
+    eventId = json.optString("eventId"),
+    ticketTypeId = json.optNullableString("ticketTypeId"),
+    ticketTypeName = json.optNullableString("ticketTypeName"),
+    status = json.optString("status"),
+    priceCents = json.optInt("priceCents"),
+    currency = json.optString("currency"),
+    faceValueCents = json.optInt("faceValueCents"),
+    expiresAt = json.optNullableString("expiresAt"),
+    createdAt = json.optNullableString("createdAt"),
+    updatedAt = json.optNullableString("updatedAt"),
   )
 
 private fun parseListing(json: JSONObject): TixkitTicketListing =

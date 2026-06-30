@@ -45,13 +45,14 @@ export type MarketingIntegration = {
 };
 
 export type AvailabilityItem = {
-  type?: 'ticket' | 'product';
+  type?: 'ticket' | 'product' | 'resale';
   ticketTypeId?: string;
   eventOccurrenceId?: string;
   productId?: string;
+  resaleListingId?: string;
   name: string;
   description?: string;
-  kind: 'free' | 'paid' | 'donation' | 'product';
+  kind: 'free' | 'paid' | 'donation' | 'product' | 'resale';
   priceCents: number;
   currency: string;
   minimumPriceCents?: number;
@@ -120,10 +121,14 @@ export type CheckoutQuote = {
   taxCents: number;
   feeCents: number;
   lineItems?: Array<{
+    type?: string;
     ticketTypeId?: string;
     productId?: string;
+    resaleListingId?: string;
     description: string;
+    name?: string;
     quantity: number;
+    unitPriceCents?: number;
     unitAmountCents?: number;
     subtotalCents?: number;
     discountCents?: number;
@@ -179,10 +184,12 @@ export type CheckoutWalletPasses = {
 
 export type CheckoutResaleListing = {
   id: string;
-  tenantId: string;
   eventId: string;
+  tenantId?: string;
   ticketId: string;
-  sellerId: string;
+  ticketTypeId?: string;
+  ticketTypeName?: string;
+  sellerId?: string;
   status: 'listed' | 'delisted' | 'sold' | 'expired' | string;
   priceCents: number;
   currency: string;
@@ -192,6 +199,26 @@ export type CheckoutResaleListing = {
   soldAt?: string;
   createdAt: string;
   updatedAt: string;
+};
+
+export type CheckoutPublicResaleListing = {
+  id: string;
+  eventId: string;
+  ticketTypeId?: string;
+  ticketTypeName?: string;
+  status: 'listed' | string;
+  priceCents: number;
+  currency: string;
+  faceValueCents: number;
+  expiresAt?: string;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type CheckoutResaleListingsResponse = {
+  items: CheckoutPublicResaleListing[];
+  nextCursor?: string | null;
+  hasMore?: boolean;
 };
 
 export type UploadArtifact = {
@@ -236,6 +263,7 @@ export type CartItem = {
   ticketTypeId?: string;
   occurrenceId?: string;
   productId?: string;
+  resaleListingId?: string;
   quantity: number;
   unitAmountCents?: number;
   attendeeFields?: Record<string, unknown>[];
@@ -474,6 +502,16 @@ export const publicApi = {
     const query = params.toString();
     return apiRequest<AvailabilityItem[]>(
       `/public/events/${encodeURIComponent(eventId)}/availability${query ? `?${query}` : ''}`,
+      { signal },
+    );
+  },
+
+  async getResaleListings(
+    eventId: string,
+    signal?: AbortSignal,
+  ): Promise<CheckoutResaleListingsResponse> {
+    return apiRequest<CheckoutResaleListingsResponse>(
+      `/public/events/${encodeURIComponent(eventId)}/resale-listings`,
       { signal },
     );
   },

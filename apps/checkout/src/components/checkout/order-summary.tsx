@@ -94,12 +94,14 @@ export function OrderSummary({ items, tickets, currency, quote, presetTotalCents
 }
 
 function availabilityItemId(item: AvailabilityItem): string {
+  if (item.resaleListingId) return `resale:${item.resaleListingId}`;
   if (item.ticketTypeId) return `ticket:${item.ticketTypeId}:${item.eventOccurrenceId ?? 'event'}`;
   if (item.productId) return `product:${item.productId}`;
   return item.name;
 }
 
 function cartItemId(item: CartItem): string {
+  if (item.resaleListingId) return `resale:${item.resaleListingId}`;
   if (item.ticketTypeId) return `ticket:${item.ticketTypeId}:${item.occurrenceId ?? 'event'}`;
   if (item.productId) return `product:${item.productId}`;
   return '';

@@ -366,6 +366,16 @@ describe('TixkitScannerClient', () => {
     );
   });
 
+  it('builds hosted checkout handoff URLs for resale listings', () => {
+    const url = checkoutHandoffUrl({
+      checkoutBaseUrl: 'https://checkout.example.test',
+      eventId: 'evt_1',
+      items: [{ resaleListingId: 'lst_1', quantity: 1 }],
+    });
+
+    expect(url).toBe('https://checkout.example.test/checkout?eventId=evt_1&resaleListing=lst_1');
+  });
+
   it('opens hosted checkout through a React Native Linking-compatible adapter', async () => {
     const openURL = vi.fn(async () => undefined);
     const client = new TixkitScannerClient({
@@ -390,6 +400,12 @@ describe('TixkitScannerClient', () => {
 
   it('fetches public event-page content without scanner or API-key headers', async () => {
     const fetchMock = vi.spyOn(globalThis, 'fetch').mockImplementation(async (url) => {
+      if (String(url).includes('/resale-listings')) {
+        return new Response(JSON.stringify({ items: [{ id: 'lst_1', status: 'listed' }] }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        });
+      }
       if (String(url).includes('/discovery-card')) {
         return new Response(
           JSON.stringify({
@@ -444,6 +460,11 @@ describe('TixkitScannerClient', () => {
     await expect(client.getEventDiscoveryCard('evt_1')).resolves.toMatchObject({
       title: 'All Access',
     });
+    await expect(
+      client.listResaleListings('evt_1', { cursor: 'lst_0', limit: 25 }),
+    ).resolves.toMatchObject({
+      items: [{ id: 'lst_1', status: 'listed' }],
+    });
 
     expect(String(fetchMock.mock.calls[0]?.[0])).toBe(
       'https://api.test/v1/public/events/evt_1/content-page?locale=en',
@@ -456,6 +477,9 @@ describe('TixkitScannerClient', () => {
     );
     expect(String(fetchMock.mock.calls[3]?.[0])).toBe(
       'https://api.test/v1/public/events/evt_1/discovery-card',
+    );
+    expect(String(fetchMock.mock.calls[4]?.[0])).toBe(
+      'https://api.test/v1/public/events/evt_1/resale-listings?cursor=lst_0&limit=25',
     );
     for (const [, init] of fetchMock.mock.calls) {
       const headers = init?.headers as Record<string, string>;

@@ -1,12 +1,14 @@
 import './test-dom';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { cleanup, render, waitFor } from '@testing-library/react';
+import { cleanup, fireEvent, render, waitFor } from '@testing-library/react';
 import React from 'react';
 import EventPageClient from '@/app/e/[eventId]/event-page-client';
 import { publicApi, type AvailabilityItem, type PublicEvent } from '@/lib/api';
 
+const push = vi.fn();
+
 vi.mock('next/navigation', () => ({
-  useRouter: () => ({ push: vi.fn() }),
+  useRouter: () => ({ push }),
 }));
 
 vi.mock('@/lib/api', () => {
@@ -17,6 +19,7 @@ vi.mock('@/lib/api', () => {
       getEventPage: vi.fn(),
       getEventPageBySlug: vi.fn(),
       getAvailability: vi.fn(),
+      getResaleListings: vi.fn(),
       getBrand: vi.fn(),
     },
   };
@@ -28,6 +31,7 @@ const publicApiMock = publicApi as unknown as {
   getEventPage: ReturnType<typeof vi.fn>;
   getEventPageBySlug: ReturnType<typeof vi.fn>;
   getAvailability: ReturnType<typeof vi.fn>;
+  getResaleListings: ReturnType<typeof vi.fn>;
   getBrand: ReturnType<typeof vi.fn>;
 };
 
@@ -38,6 +42,7 @@ afterEach(() => {
 describe('EventPageClient escaping', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    publicApiMock.getResaleListings.mockResolvedValue({ items: [] });
   });
 
   it('renders HTML-looking event and ticket copy as text', async () => {
@@ -84,6 +89,46 @@ describe('EventPageClient escaping', () => {
     expect(container.querySelector('script')).toBeNull();
     expect(container.querySelector('iframe')).toBeNull();
     expect(container.querySelector('[onload]')).toBeNull();
+  });
+
+  it('renders public resale listings and routes buyers into resale checkout', async () => {
+    const event: PublicEvent = {
+      id: 'evt_resale',
+      title: 'All Access Chicago',
+      status: 'published',
+      timezone: 'America/Chicago',
+      startsAt: '2026-07-17T19:00:00.000Z',
+      brandId: 'brd_1',
+    };
+    publicApiMock.getEvent.mockResolvedValue(event);
+    publicApiMock.getEventPage.mockResolvedValue(null);
+    publicApiMock.getAvailability.mockResolvedValue([]);
+    publicApiMock.getResaleListings.mockResolvedValue({
+      items: [
+        {
+          id: 'lst_1',
+          eventId: 'evt_resale',
+          ticketTypeId: 'tt_1',
+          ticketTypeName: 'General Admission',
+          status: 'listed',
+          priceCents: 5500,
+          currency: 'USD',
+          faceValueCents: 5000,
+          createdAt: '2026-06-01T00:00:00.000Z',
+          updatedAt: '2026-06-01T00:00:00.000Z',
+        },
+      ],
+    });
+    publicApiMock.getBrand.mockRejectedValue(new Error('brand unavailable'));
+
+    const view = render(React.createElement(EventPageClient, { eventId: 'evt_resale' }));
+
+    expect(await view.findByText('Resale ticket - General Admission')).toBeInTheDocument();
+    fireEvent.click(view.getByRole('button', { name: /Buy resale/i }));
+
+    expect(push).toHaveBeenCalledWith(
+      expect.stringContaining('/checkout?eventId=evt_resale&resaleListing=lst_1'),
+    );
   });
 
   it('sanitizes published event-page HTML before injecting it', async () => {

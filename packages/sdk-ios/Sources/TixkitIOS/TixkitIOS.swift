@@ -255,14 +255,16 @@ public enum TixkitScannerCredentialStore {
 }
 
 public struct TixkitCheckoutHandoffItem: Equatable, Sendable {
-  public init(ticketTypeId: String? = nil, productId: String? = nil, quantity: Int) {
+  public init(ticketTypeId: String? = nil, productId: String? = nil, resaleListingId: String? = nil, quantity: Int) {
     self.ticketTypeId = ticketTypeId
     self.productId = productId
+    self.resaleListingId = resaleListingId
     self.quantity = quantity
   }
 
   public let ticketTypeId: String?
   public let productId: String?
+  public let resaleListingId: String?
   public let quantity: Int
 }
 
@@ -320,7 +322,11 @@ public func tixkitCheckoutHandoffURL(_ options: TixkitCheckoutHandoffOptions) ->
   components.path = "/checkout"
   var queryItems = [URLQueryItem(name: "eventId", value: options.eventId)]
   if let brandId = options.brandId { queryItems.append(URLQueryItem(name: "brand", value: brandId)) }
+  if let resaleListingId = options.items.first(where: { !($0.resaleListingId ?? "").isEmpty })?.resaleListingId {
+    queryItems.append(URLQueryItem(name: "resaleListing", value: resaleListingId))
+  }
   let encodedItems = options.items.compactMap { item -> String? in
+    if item.resaleListingId != nil { return nil }
     guard item.quantity > 0, let id = item.ticketTypeId ?? item.productId else { return nil }
     return "\(id)=\(item.quantity)"
   }.joined(separator: ",")
@@ -402,6 +408,26 @@ public struct TixkitPublicEventDiscoveryCard: Codable, Equatable, Sendable {
   public let publicPath: String?
 }
 
+public struct TixkitPublicTicketListingPage: Codable, Equatable, Sendable {
+  public let items: [TixkitPublicTicketListing]
+  public let hasMore: Bool
+  public let nextCursor: String?
+}
+
+public struct TixkitPublicTicketListing: Codable, Equatable, Sendable {
+  public let id: String
+  public let eventId: String
+  public let ticketTypeId: String?
+  public let ticketTypeName: String?
+  public let status: String
+  public let priceCents: Int
+  public let currency: String
+  public let faceValueCents: Int
+  public let expiresAt: String?
+  public let createdAt: String?
+  public let updatedAt: String?
+}
+
 public enum TixkitJSONValue: Codable, Equatable, Sendable {
   case string(String)
   case number(Double)
@@ -480,18 +506,26 @@ public final class TixkitPublicEventPageClient: Sendable {
     return try JSONDecoder().decode(TixkitPublicEventDiscoveryCard.self, from: data)
   }
 
+  public func listResaleListings(eventId: String, cursor: String? = nil, limit: Int? = nil) async throws -> TixkitPublicTicketListingPage {
+    let (data, response) = try await urlSession.data(for: URLRequest(url: apiURL(path: "/public/events/\(eventId)/resale-listings", cursor: cursor, limit: limit)))
+    try assertSuccess(response)
+    return try JSONDecoder().decode(TixkitPublicTicketListingPage.self, from: data)
+  }
+
   private func getPage(path: String, host: String? = nil, locale: String? = nil) async throws -> TixkitPublicContentPage {
     let (data, response) = try await urlSession.data(for: URLRequest(url: apiURL(path: path, host: host, locale: locale)))
     try assertSuccess(response)
     return try JSONDecoder().decode(TixkitPublicContentPage.self, from: data)
   }
 
-  private func apiURL(path: String, host: String? = nil, locale: String? = nil) -> URL {
+  private func apiURL(path: String, host: String? = nil, locale: String? = nil, cursor: String? = nil, limit: Int? = nil) -> URL {
     var components = URLComponents(url: apiBaseURL, resolvingAgainstBaseURL: false)!
     components.path = "/v1\(path)"
     var queryItems: [URLQueryItem] = []
     if let host { queryItems.append(URLQueryItem(name: "host", value: host)) }
     if let locale { queryItems.append(URLQueryItem(name: "locale", value: locale)) }
+    if let cursor { queryItems.append(URLQueryItem(name: "cursor", value: cursor)) }
+    if let limit { queryItems.append(URLQueryItem(name: "limit", value: String(limit))) }
     components.queryItems = queryItems.isEmpty ? nil : queryItems
     return components.url!
   }

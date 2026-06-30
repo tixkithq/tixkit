@@ -101,6 +101,20 @@ type EventAvailability struct {
 	Status            string `json:"status"`
 }
 
+type PublicTicketListing struct {
+	ID             string `json:"id"`
+	EventID        string `json:"eventId,omitempty"`
+	TicketTypeID   string `json:"ticketTypeId,omitempty"`
+	TicketTypeName string `json:"ticketTypeName,omitempty"`
+	Status         string `json:"status"`
+	PriceCents     int    `json:"priceCents"`
+	Currency       string `json:"currency"`
+	FaceValueCents int    `json:"faceValueCents"`
+	ExpiresAt      string `json:"expiresAt,omitempty"`
+	CreatedAt      string `json:"createdAt,omitempty"`
+	UpdatedAt      string `json:"updatedAt,omitempty"`
+}
+
 type PublicContentPage struct {
 	Document PublicContentDocument `json:"document"`
 	Version  PublicContentVersion  `json:"version"`
@@ -307,6 +321,7 @@ type CheckoutItem struct {
 	TicketTypeID    string           `json:"ticketTypeId,omitempty"`
 	OccurrenceID    string           `json:"occurrenceId,omitempty"`
 	ProductID       string           `json:"productId,omitempty"`
+	ResaleListingID string           `json:"resaleListingId,omitempty"`
 	Quantity        int              `json:"quantity"`
 	UnitAmountCents int              `json:"unitAmountCents,omitempty"`
 	AttendeeFields  []FlexibleObject `json:"attendeeFields,omitempty"`
@@ -465,6 +480,7 @@ type OrderLineItem struct {
 	OrderID           string `json:"orderId,omitempty"`
 	TicketTypeID      string `json:"ticketTypeId,omitempty"`
 	ProductID         string `json:"productId,omitempty"`
+	ResaleListingID   string `json:"resaleListingId,omitempty"`
 	EventOccurrenceID string `json:"eventOccurrenceId,omitempty"`
 	AttendeeID        string `json:"attendeeId,omitempty"`
 	Description       string `json:"description,omitempty"`

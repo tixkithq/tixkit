@@ -349,6 +349,7 @@ export interface OrderLineItemTable {
   ticket_type_id: string | null;
   product_id: string | null;
   event_occurrence_id: string | null;
+  resale_listing_id: string | null;
   attendee_id: string | null;
   description: string;
   quantity: number;
@@ -477,6 +478,8 @@ export interface TicketListingTable {
   face_value_cents: number | string;
   sold_to_id: string | null;
   active_listing_key: string;
+  reserved_checkout_session_id: string | null;
+  reserved_until: Timestamp | null;
   expires_at: Timestamp | null;
   sold_at: Timestamp | null;
   created_at: Timestamp;

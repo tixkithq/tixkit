@@ -2,6 +2,7 @@ import {
   TixkitClient,
   type PublicContentPage,
   type PublicEventDiscoveryCard,
+  type PublicTicketListing,
   type PageResult,
   type TicketListing,
   type TicketResaleCompletion,
@@ -228,6 +229,7 @@ export type TixkitSecureStorageOptions = {
 export type TixkitCheckoutHandoffItem = {
   ticketTypeId?: string;
   productId?: string;
+  resaleListingId?: string;
   quantity: number;
 };
 
@@ -271,6 +273,7 @@ export type PublicEventPageBySlugParams = {
 };
 
 export type { PublicContentPage, PublicEventDiscoveryCard };
+export type { PublicTicketListing };
 
 export type { TicketListing, TicketResaleCompletion };
 
@@ -688,6 +691,7 @@ function encodeCheckoutItems(items: TixkitCheckoutHandoffItem[] | undefined): st
   if (!items?.length) return undefined;
   const encoded = items
     .map((item) => {
+      if (item.resaleListingId) return null;
       const id = item.ticketTypeId ?? item.productId;
       if (!id || !Number.isInteger(item.quantity) || item.quantity <= 0) return null;
       return `${id}=${item.quantity}`;
@@ -701,6 +705,8 @@ export function checkoutHandoffUrl(options: TixkitCheckoutHandoffOptions): strin
   const url = new URL('/checkout', base);
   url.searchParams.set('eventId', options.eventId);
   if (options.brandId) url.searchParams.set('brand', options.brandId);
+  const resaleListingId = options.items?.find((item) => item.resaleListingId)?.resaleListingId;
+  if (resaleListingId) url.searchParams.set('resaleListing', resaleListingId);
   const items = encodeCheckoutItems(options.items);
   if (items) url.searchParams.set('items', items);
   if (options.products?.length) url.searchParams.set('products', options.products.join(','));
@@ -746,6 +752,13 @@ export class TixkitPublicEventPageClient {
     params?: PublicEventPageParams,
   ): Promise<PublicEventDiscoveryCard> {
     return this.client.public.getEventDiscoveryCard(eventId, params);
+  }
+
+  async listResaleListings(
+    eventId: string,
+    params?: TixkitResaleListParams,
+  ): Promise<PageResult<PublicTicketListing>> {
+    return this.client.public.listResaleListings(eventId, params);
   }
 }
 

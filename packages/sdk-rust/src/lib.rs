@@ -586,6 +586,8 @@ pub struct CheckoutItem {
     pub occurrence_id: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub product_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub resale_listing_id: Option<String>,
     pub quantity: u32,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub unit_amount_cents: Option<i64>,
@@ -800,6 +802,24 @@ pub struct TicketListing {
 
 #[derive(Debug, Clone, Serialize, serde::Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
+pub struct PublicTicketListing {
+    pub id: String,
+    pub event_id: Option<String>,
+    pub ticket_type_id: Option<String>,
+    pub ticket_type_name: Option<String>,
+    pub status: Option<String>,
+    pub price_cents: Option<i64>,
+    pub currency: Option<String>,
+    pub face_value_cents: Option<i64>,
+    pub expires_at: Option<String>,
+    pub created_at: Option<String>,
+    pub updated_at: Option<String>,
+    #[serde(flatten)]
+    pub extra: Map<String, Value>,
+}
+
+#[derive(Debug, Clone, Serialize, serde::Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
 pub struct TicketResaleCompletion {
     pub listing: TicketListing,
     pub seller_ticket: Ticket,
@@ -978,6 +998,20 @@ impl PublicResource<'_> {
             .request(
                 reqwest::Method::GET,
                 &format!("/public/events/{event_id}/discovery-card"),
+                RequestOptions::<()>::query(params.to_query()),
+            )
+            .await
+    }
+
+    pub async fn list_resale_listings(
+        &self,
+        event_id: &str,
+        params: PageParams,
+    ) -> Result<Page<PublicTicketListing>, TixkitError> {
+        self.client
+            .request(
+                reqwest::Method::GET,
+                &format!("/public/events/{event_id}/resale-listings"),
                 RequestOptions::<()>::query(params.to_query()),
             )
             .await
@@ -1435,6 +1469,7 @@ mod tests {
                         ticket_type_id: Some("tt_1".to_string()),
                         occurrence_id: None,
                         product_id: None,
+                        resale_listing_id: None,
                         quantity: 1,
                         unit_amount_cents: None,
                         attendee_fields: None,
@@ -1460,6 +1495,60 @@ mod tests {
             .expect("checkout session");
 
         assert_eq!(result.id, "cs_1");
+    }
+
+    #[tokio::test]
+    async fn builds_resale_checkout_request() {
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/v1/checkout/sessions"))
+            .and(header("idempotency-key", "idem_resale_1"))
+            .and(body_json(json!({
+                "eventId": "evt_1",
+                "items": [{"resaleListingId": "lst_1", "quantity": 1}]
+            })))
+            .respond_with(ResponseTemplate::new(201).set_body_json(json!({
+                "id": "cs_resale",
+                "eventId": "evt_1",
+                "status": "open",
+                "currency": "USD",
+                "quote": {},
+                "expiresAt": "2026-01-01T00:00:00.000Z"
+            })))
+            .mount(&server)
+            .await;
+
+        let result = client(&server)
+            .await
+            .checkout()
+            .create(
+                CreateCheckoutSession {
+                    event_id: "evt_1".to_string(),
+                    items: vec![CheckoutItem {
+                        ticket_type_id: None,
+                        occurrence_id: None,
+                        product_id: None,
+                        resale_listing_id: Some("lst_1".to_string()),
+                        quantity: 1,
+                        unit_amount_cents: None,
+                        attendee_fields: None,
+                    }],
+                    buyer: None,
+                    buyer_fields: None,
+                    discount_code: None,
+                    affiliate_code: None,
+                    tracking_id: None,
+                    success_url: None,
+                    cancel_url: None,
+                    access_code: None,
+                    waitlist_claim_token: None,
+                },
+                "idem_resale_1",
+            )
+            .await
+            .expect("resale checkout session");
+
+        assert_eq!(result.id, "cs_resale");
     }
 
     #[tokio::test]
@@ -1579,6 +1668,37 @@ mod tests {
 
         assert_eq!(card.title, "All Access");
         assert_eq!(card.venue_name.as_deref(), Some("The Salt Shed"));
+    }
+
+    #[tokio::test]
+    async fn builds_public_resale_listings_route() {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/v1/public/events/evt_1/resale-listings"))
+            .and(query_param("cursor", "lst_0"))
+            .and(query_param("limit", "25"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                "items": [{"id": "lst_1", "status": "listed", "priceCents": 5500}],
+                "nextCursor": null,
+                "hasMore": false
+            })))
+            .mount(&server)
+            .await;
+
+        let page = client(&server)
+            .await
+            .public()
+            .list_resale_listings(
+                "evt_1",
+                PageParams {
+                    cursor: Some("lst_0".to_string()),
+                    limit: Some(25),
+                },
+            )
+            .await
+            .expect("public resale listings");
+
+        assert_eq!(page.items[0].id, "lst_1");
     }
 
     #[tokio::test]
@@ -2011,6 +2131,7 @@ mod tests {
                         ticket_type_id: Some("tt_1".to_string()),
                         occurrence_id: None,
                         product_id: None,
+                        resale_listing_id: None,
                         quantity: 1,
                         unit_amount_cents: None,
                         attendee_fields: None,
@@ -2087,6 +2208,7 @@ mod tests {
                 ticket_type_id: Some("tt_1".to_string()),
                 occurrence_id: None,
                 product_id: None,
+                resale_listing_id: None,
                 quantity: 1,
                 unit_amount_cents: None,
                 attendee_fields: None,

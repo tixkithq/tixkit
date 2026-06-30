@@ -46,6 +46,7 @@ export default async function CheckoutPage({
         affiliateCode={firstParam(params.affiliateCode) || firstParam(params.affiliate)}
         prefilledItemsParam={firstParam(params.items)}
         productFilterParam={firstParam(params.products)}
+        resaleListingId={firstParam(params.resaleListing)}
       />
     </Suspense>
   );

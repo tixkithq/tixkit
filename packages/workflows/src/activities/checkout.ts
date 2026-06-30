@@ -1242,9 +1242,10 @@ export async function finalizeOrderActivity(input: {
       feeCents: number;
       totalCents: number;
       lineItems?: Array<{
-        type?: 'ticket' | 'product';
+        type?: 'ticket' | 'product' | 'resale';
         ticketTypeId?: string;
         productId?: string;
+        resaleListingId?: string;
         eventOccurrenceId?: string;
         name: string;
         quantity: number;
@@ -1274,6 +1275,7 @@ export async function finalizeOrderActivity(input: {
         ticketTypeId?: string;
         occurrenceId?: string;
         productId?: string;
+        resaleListingId?: string;
         quantity: number;
         attendeeFields?: Record<string, unknown>[];
       }[];
@@ -1384,6 +1386,134 @@ export async function finalizeOrderActivity(input: {
             message: heldCart.message,
             retryable: false,
           };
+        }
+
+        const resaleListingIds = cart.items
+          .map((item) => item.resaleListingId)
+          .filter((listingId): listingId is string => Boolean(listingId));
+        if (new Set(resaleListingIds).size !== resaleListingIds.length) {
+          return {
+            ok: false,
+            errorCode: 'RESALE_LISTING_DUPLICATE',
+            message: 'Checkout session contains duplicate resale listings',
+            retryable: false,
+          };
+        }
+        const resaleFulfillments: Array<{
+          listing: {
+            id: string;
+            tenant_id: string;
+            event_id: string;
+            ticket_id: string;
+            seller_id: string;
+            status: string;
+            expires_at: Date | string | null;
+            reserved_checkout_session_id: string | null;
+            reserved_until: Date | string | null;
+          };
+          sellerTicket: {
+            id: string;
+            tenant_id: string;
+            order_id: string;
+            attendee_id: string;
+            event_id: string;
+            event_occurrence_id: string | null;
+            ticket_type_id: string;
+            status: string;
+          };
+        }> = [];
+        for (const resaleListingId of resaleListingIds) {
+          const listing = await trx
+            .selectFrom('ticket_listings')
+            .select([
+              'id',
+              'tenant_id',
+              'event_id',
+              'ticket_id',
+              'seller_id',
+              'status',
+              'expires_at',
+              'reserved_checkout_session_id',
+              'reserved_until',
+            ])
+            .where('id', '=', resaleListingId)
+            .where('tenant_id', '=', input.tenantId)
+            .where('event_id', '=', session.event_id)
+            .forUpdate()
+            .executeTakeFirst();
+          if (!listing || listing.status !== 'listed') {
+            return {
+              ok: false,
+              errorCode: 'RESALE_LISTING_UNAVAILABLE',
+              message: `Ticket listing ${resaleListingId} is not listed`,
+              retryable: false,
+            };
+          }
+          if (listing.expires_at && new Date(listing.expires_at) <= now) {
+            await trx
+              .updateTable('ticket_listings')
+              .set({
+                status: 'expired',
+                active_listing_key: resaleListingId,
+                reserved_checkout_session_id: null,
+                reserved_until: null,
+                updated_at: now,
+              })
+              .where('id', '=', resaleListingId)
+              .execute();
+            return {
+              ok: false,
+              errorCode: 'RESALE_LISTING_EXPIRED',
+              message: `Ticket listing ${resaleListingId} has expired`,
+              retryable: false,
+            };
+          }
+          if (
+            listing.reserved_checkout_session_id !== input.checkoutSessionId ||
+            !listing.reserved_until ||
+            new Date(listing.reserved_until) <= now
+          ) {
+            return {
+              ok: false,
+              errorCode: 'RESALE_LISTING_RESERVATION_EXPIRED',
+              message: `Ticket listing ${resaleListingId} reservation has expired`,
+              retryable: false,
+            };
+          }
+
+          const sellerTicket = await trx
+            .selectFrom('tickets')
+            .select([
+              'id',
+              'tenant_id',
+              'order_id',
+              'attendee_id',
+              'event_id',
+              'event_occurrence_id',
+              'ticket_type_id',
+              'status',
+            ])
+            .where('id', '=', listing.ticket_id)
+            .where('tenant_id', '=', input.tenantId)
+            .forUpdate()
+            .executeTakeFirst();
+          if (!sellerTicket || sellerTicket.event_id !== session.event_id) {
+            return {
+              ok: false,
+              errorCode: 'RESALE_LISTING_INVALID_TICKET',
+              message: `Ticket listing ${resaleListingId} is not attached to a valid ticket`,
+              retryable: false,
+            };
+          }
+          if (sellerTicket.status !== 'valid') {
+            return {
+              ok: false,
+              errorCode: 'RESALE_LISTING_INVALID_TICKET',
+              message: `Ticket status is ${sellerTicket.status}, cannot complete resale`,
+              retryable: false,
+            };
+          }
+          resaleFulfillments.push({ listing, sellerTicket });
         }
 
         // Consume promo code idempotently under lock. The discount_codes row is
@@ -1576,6 +1706,7 @@ export async function finalizeOrderActivity(input: {
               ticket_type_id: line.ticketTypeId ?? null,
               event_occurrence_id: line.eventOccurrenceId ?? null,
               product_id: line.productId ?? null,
+              resale_listing_id: line.resaleListingId ?? null,
               attendee_id: null,
               description: line.name,
               quantity: line.quantity,
@@ -1619,6 +1750,156 @@ export async function finalizeOrderActivity(input: {
               })
               .execute();
           }
+        }
+
+        for (const fulfillment of resaleFulfillments) {
+          const buyerAttendeeId = `att_${ulid()}`;
+          await trx
+            .insertInto('attendees')
+            .values({
+              id: buyerAttendeeId,
+              tenant_id: input.tenantId,
+              order_id: orderId,
+              event_id: fulfillment.sellerTicket.event_id,
+              ticket_type_id: fulfillment.sellerTicket.ticket_type_id,
+              event_occurrence_id: fulfillment.sellerTicket.event_occurrence_id ?? null,
+              ticket_id: null,
+              first_name: buyer.firstName ?? null,
+              last_name: buyer.lastName ?? null,
+              email: buyer.email ?? '',
+              phone: buyer.phone ?? null,
+              status: 'confirmed',
+              custom_answers: JSON.stringify({
+                resaleListingId: fulfillment.listing.id,
+                resaleSellerOrderId: fulfillment.sellerTicket.order_id,
+                resaleSellerTicketId: fulfillment.sellerTicket.id,
+                checkoutSessionId: input.checkoutSessionId,
+              }),
+              checked_in_at: null,
+              check_in_device_id: null,
+              created_at: now,
+              updated_at: now,
+            })
+            .execute();
+
+          const buyerTicketId = `tkt_${ulid()}`;
+          const qr = new QrService().generate(buyerTicketId);
+          await trx
+            .insertInto('tickets')
+            .values({
+              id: buyerTicketId,
+              tenant_id: input.tenantId,
+              order_id: orderId,
+              attendee_id: buyerAttendeeId,
+              event_id: fulfillment.sellerTicket.event_id,
+              ticket_type_id: fulfillment.sellerTicket.ticket_type_id,
+              event_occurrence_id: fulfillment.sellerTicket.event_occurrence_id ?? null,
+              status: 'valid',
+              code: qr.code,
+              qr_payload: qr.payload,
+              qr_hash: qr.hash,
+              transferred_to_email: null,
+              transferred_at: null,
+              checked_in_at: null,
+              checked_in_by_device_id: null,
+              wallet_pass_id: null,
+              created_at: now,
+              updated_at: now,
+            })
+            .execute();
+
+          await trx
+            .updateTable('attendees')
+            .set({ ticket_id: buyerTicketId, updated_at: now })
+            .where('id', '=', buyerAttendeeId)
+            .execute();
+
+          const sellerTransfer = await trx
+            .updateTable('tickets')
+            .set({
+              status: 'transferred',
+              transferred_to_email: buyer.email ?? '',
+              transferred_at: now,
+              updated_at: now,
+            })
+            .where('id', '=', fulfillment.sellerTicket.id)
+            .where('status', '=', 'valid')
+            .executeTakeFirst();
+          if (Number(sellerTransfer.numUpdatedRows ?? 0) !== 1) {
+            return {
+              ok: false,
+              errorCode: 'RESALE_LISTING_INVALID_TICKET',
+              message: `Ticket status changed before resale completion`,
+              retryable: true,
+            };
+          }
+
+          await trx
+            .updateTable('wallet_passes')
+            .set({ status: 'revoked', revoked_at: now, updated_at: now })
+            .where('ticket_id', '=', fulfillment.sellerTicket.id)
+            .where('status', '=', 'active')
+            .execute();
+
+          const soldListing = await trx
+            .updateTable('ticket_listings')
+            .set({
+              status: 'sold',
+              sold_to_id: orderId,
+              sold_at: now,
+              active_listing_key: fulfillment.listing.id,
+              reserved_checkout_session_id: null,
+              reserved_until: null,
+              updated_at: now,
+            })
+            .where('id', '=', fulfillment.listing.id)
+            .where('status', '=', 'listed')
+            .where('reserved_checkout_session_id', '=', input.checkoutSessionId)
+            .executeTakeFirst();
+          if (Number(soldListing.numUpdatedRows ?? 0) !== 1) {
+            return {
+              ok: false,
+              errorCode: 'RESALE_LISTING_UNAVAILABLE',
+              message: `Ticket listing ${fulfillment.listing.id} could not be sold`,
+              retryable: true,
+            };
+          }
+
+          await trx
+            .insertInto('order_timeline_events')
+            .values({
+              id: `ote_${ulid()}`,
+              order_id: orderId,
+              type: 'ticket.resale_purchased',
+              description: `Resale ticket ${buyerTicketId} issued`,
+              metadata: JSON.stringify({
+                listingId: fulfillment.listing.id,
+                sellerOrderId: fulfillment.sellerTicket.order_id,
+                sellerTicketId: fulfillment.sellerTicket.id,
+                buyerTicketId,
+                buyerAttendeeId,
+              }),
+              actor_id: null,
+              created_at: now,
+            })
+            .execute();
+          await trx
+            .insertInto('order_timeline_events')
+            .values({
+              id: `ote_${ulid()}`,
+              order_id: fulfillment.sellerTicket.order_id,
+              type: 'ticket.resale_completed',
+              description: `Ticket ${fulfillment.sellerTicket.id} resold to ${buyer.email ?? 'buyer'}`,
+              metadata: JSON.stringify({
+                listingId: fulfillment.listing.id,
+                buyerOrderId: orderId,
+                buyerTicketId,
+                buyerAttendeeId,
+              }),
+              actor_id: null,
+              created_at: now,
+            })
+            .execute();
         }
 
         const buyerFields =
@@ -1978,6 +2259,40 @@ export async function releaseHoldActivity(input: {
     }
 
     await db.transaction().execute(async (trx) => {
+      if (input.checkoutSessionId) {
+        const session = await trx
+          .selectFrom('checkout_sessions')
+          .select(['tenant_id', 'cart'])
+          .where('id', '=', input.checkoutSessionId)
+          .executeTakeFirst();
+        if (session) {
+          const cart = parseStoredJson<{
+            items?: Array<{ resaleListingId?: string }>;
+          }>(session.cart);
+          const resaleListingIds = [
+            ...new Set(
+              (cart.items ?? [])
+                .map((item) => item.resaleListingId)
+                .filter((listingId): listingId is string => Boolean(listingId)),
+            ),
+          ];
+          if (resaleListingIds.length > 0) {
+            await trx
+              .updateTable('ticket_listings')
+              .set({
+                reserved_checkout_session_id: null,
+                reserved_until: null,
+                updated_at: now,
+              })
+              .where('tenant_id', '=', session.tenant_id)
+              .where('id', 'in', resaleListingIds)
+              .where('reserved_checkout_session_id', '=', input.checkoutSessionId)
+              .where('status', '=', 'listed')
+              .execute();
+          }
+        }
+      }
+
       let query = trx
         .updateTable('checkout_holds')
         .set({ status: 'released', updated_at: now })

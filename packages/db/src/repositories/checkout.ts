@@ -273,6 +273,7 @@ export class OrderRepository extends BaseRepository {
     ticketTypeId?: string;
     eventOccurrenceId?: string;
     productId?: string;
+    resaleListingId?: string;
     attendeeId?: string;
     description: string;
     quantity: number;
@@ -294,6 +295,7 @@ export class OrderRepository extends BaseRepository {
         ticket_type_id: input.ticketTypeId ?? null,
         event_occurrence_id: input.eventOccurrenceId ?? null,
         product_id: input.productId ?? null,
+        resale_listing_id: input.resaleListingId ?? null,
         attendee_id: input.attendeeId ?? null,
         description: input.description,
         quantity: input.quantity,

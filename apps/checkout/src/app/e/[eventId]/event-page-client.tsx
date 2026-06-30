@@ -23,6 +23,7 @@ import {
   type PublicEvent,
   type PublicContentPage,
   type AvailabilityItem,
+  type CheckoutPublicResaleListing,
   userFacingMessage,
 } from '@/lib/api';
 import { brandThemeStyle, type ResolvedBrand } from '@/lib/brand';
@@ -61,6 +62,7 @@ export default function EventPageClient({
   const [event, setEvent] = useState<PublicEvent | null>(null);
   const [contentPage, setContentPage] = useState<PublicContentPage | null>(null);
   const [availability, setAvailability] = useState<AvailabilityItem[]>([]);
+  const [resaleListings, setResaleListings] = useState<CheckoutPublicResaleListing[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [notFound, setNotFound] = useState(false);
@@ -95,10 +97,14 @@ export default function EventPageClient({
           eventSlug && customDomainHost
             ? () => publicApi.getEventPageBySlug(eventSlug, customDomainHost, controller.signal)
             : () => publicApi.getEventPage(loadedEvent.id, controller.signal);
-        const [loadedAvailability, loadedContentPage] = await Promise.all([
+        const [loadedAvailability, loadedContentPage, loadedResaleListings] = await Promise.all([
           publicApi.getAvailability(loadedEvent.id, controller.signal),
           loadContentPage().catch((err) => {
             if (err instanceof CheckoutApiError && err.status === 404) return null;
+            throw err;
+          }),
+          publicApi.getResaleListings(loadedEvent.id, controller.signal).catch((err) => {
+            if (err instanceof CheckoutApiError && err.status === 404) return { items: [] };
             throw err;
           }),
         ]);
@@ -106,6 +112,7 @@ export default function EventPageClient({
         setEvent(loadedEvent);
         setContentPage(loadedContentPage);
         setAvailability(loadedAvailability);
+        setResaleListings(loadedResaleListings.items);
       } catch (err) {
         if (cancelled || controller.signal.aborted) return;
         setNotFound(err instanceof CheckoutApiError && err.status === 404);
@@ -139,11 +146,12 @@ export default function EventPageClient({
     });
   }, [event, visibleTickets]);
 
-  function goToCheckout() {
+  function goToCheckout(resaleListingId?: string) {
     const checkoutEventId = event?.id ?? eventId;
     if (!checkoutEventId) return;
     const params = new URLSearchParams();
     params.set('eventId', checkoutEventId);
+    if (resaleListingId) params.set('resaleListing', resaleListingId);
     if (brand.id && !brand.fallback) params.set('brand', brand.id);
     if (supportUrl) params.set('supportUrl', supportUrl);
     if (termsUrl) params.set('termsUrl', termsUrl);
@@ -247,7 +255,7 @@ export default function EventPageClient({
           <div className="flex items-center justify-between gap-2">
             <h2 className="text-lg font-semibold">Tickets</h2>
             {hasActiveTickets ? (
-              <Button size="sm" onClick={goToCheckout} className="gap-1.5">
+              <Button size="sm" onClick={() => goToCheckout()} className="gap-1.5">
                 Get tickets
                 <ArrowRightIcon className="size-4" />
               </Button>
@@ -297,10 +305,55 @@ export default function EventPageClient({
           )}
         </section>
 
+        {resaleListings.length > 0 ? (
+          <section className="space-y-4">
+            <div className="flex items-center justify-between gap-2">
+              <h2 className="text-lg font-semibold">Resale tickets</h2>
+              <Badge variant="outline">Verified listings</Badge>
+            </div>
+            <ul className="space-y-3">
+              {resaleListings.map((listing) => (
+                <li key={listing.id}>
+                  <Card className="flex flex-row items-center justify-between gap-4 py-4">
+                    <CardContent className="flex flex-1 flex-col gap-1">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <span className="font-medium">
+                          {listing.ticketTypeName
+                            ? `Resale ticket - ${listing.ticketTypeName}`
+                            : 'Resale ticket'}
+                        </span>
+                        <Badge variant="secondary">1 available</Badge>
+                      </div>
+                      {listing.expiresAt ? (
+                        <p className="text-sm text-muted-foreground">
+                          Listing expires {new Date(listing.expiresAt).toLocaleString()}
+                        </p>
+                      ) : null}
+                    </CardContent>
+                    <div className="flex flex-col items-end gap-2 px-6 text-right">
+                      <div className="font-semibold">
+                        {formatCurrency(listing.priceCents, listing.currency)}
+                      </div>
+                      <Button
+                        size="sm"
+                        onClick={() => goToCheckout(listing.id)}
+                        className="gap-1.5"
+                      >
+                        Buy resale
+                        <ArrowRightIcon className="size-4" />
+                      </Button>
+                    </div>
+                  </Card>
+                </li>
+              ))}
+            </ul>
+          </section>
+        ) : null}
+
         {hasActiveTickets ? (
           <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
             <p className="text-sm text-muted-foreground">Secure checkout powered by Tixkit</p>
-            <Button size="lg" onClick={goToCheckout} className="gap-1.5">
+            <Button size="lg" onClick={() => goToCheckout()} className="gap-1.5">
               Get tickets
               <ArrowRightIcon className="size-4" />
             </Button>
@@ -315,26 +368,14 @@ export default function EventPageClient({
 
 function sanitizePublishedEventPageHtml(html: string): string {
   return html
-    .replace(
-      /<iframe\b(?=[^>]*\ssrcdoc\b)[\s\S]*?<\/iframe>/gi,
-      '',
-    )
+    .replace(/<iframe\b(?=[^>]*\ssrcdoc\b)[\s\S]*?<\/iframe>/gi, '')
     .replace(
       /<(script|object|embed|form|svg|math|base|link|meta|style|template)\b[\s\S]*?<\/\1>/gi,
       '',
     )
-    .replace(
-      /<(script|object|embed|form|svg|math|base|link|meta|style|template)\b[^>]*\/?>/gi,
-      '',
-    )
-    .replace(
-      /\s+on[a-z][\w:-]*(?:\s*=\s*(?:"[^"]*"|'[^']*'|`[^`]*`|[^\s"'`=<>]+))?/gi,
-      '',
-    )
-    .replace(
-      /\s+(srcdoc|style)\s*=\s*("[^"]*"|'[^']*'|`[^`]*`|[^\s"'`=<>]*)/gi,
-      '',
-    )
+    .replace(/<(script|object|embed|form|svg|math|base|link|meta|style|template)\b[^>]*\/?>/gi, '')
+    .replace(/\s+on[a-z][\w:-]*(?:\s*=\s*(?:"[^"]*"|'[^']*'|`[^`]*`|[^\s"'`=<>]+))?/gi, '')
+    .replace(/\s+(srcdoc|style)\s*=\s*("[^"]*"|'[^']*'|`[^`]*`|[^\s"'`=<>]*)/gi, '')
     .replace(
       /\s+(href|src|data|action|formaction|xlink:href)\s*=\s*("[^"]*"|'[^']*'|`[^`]*`|[^\s"'`=<>]*)/gi,
       (attribute: string, _name: string, rawValue: string) =>
@@ -344,11 +385,14 @@ function sanitizePublishedEventPageHtml(html: string): string {
 
 function hasUnsafeHtmlUrlScheme(rawValue: string): boolean {
   const value = stripAttributeQuotes(rawValue)
-    .replace(/&(?:#x([0-9a-f]+)|#([0-9]+)|([a-z][a-z0-9]+));?/gi, (_entity, hex, decimal, named) => {
-      if (hex) return htmlCodePointEntity(hex, 16);
-      if (decimal) return htmlCodePointEntity(decimal, 10);
-      return namedHtmlEntity(named);
-    })
+    .replace(
+      /&(?:#x([0-9a-f]+)|#([0-9]+)|([a-z][a-z0-9]+));?/gi,
+      (_entity, hex, decimal, named) => {
+        if (hex) return htmlCodePointEntity(hex, 16);
+        if (decimal) return htmlCodePointEntity(decimal, 10);
+        return namedHtmlEntity(named);
+      },
+    )
     .split('')
     .filter((char) => {
       const code = char.codePointAt(0) ?? 0;

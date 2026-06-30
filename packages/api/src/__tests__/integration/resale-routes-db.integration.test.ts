@@ -6,6 +6,7 @@ import { ulid } from 'ulid';
 import type { AppContext } from '../../app.js';
 import { registerErrorHandler } from '../../app.js';
 import { checkoutRoutes } from '../../routes/modules/checkout.js';
+import { publicRoutes } from '../../routes/modules/public.js';
 import { ticketingRoutes } from '../../routes/modules/ticketing.js';
 import { QrService } from '../../services/qr.js';
 import {
@@ -64,6 +65,7 @@ async function setupRouteApp(database: Database): Promise<FastifyInstance> {
     request.principal = makePrincipal();
   });
   await routeApp.register(ticketingRoutes);
+  await routeApp.register(publicRoutes);
   await routeApp.register(checkoutRoutes);
   return routeApp;
 }
@@ -134,7 +136,7 @@ async function seedTenantGraph(database: Database): Promise<void> {
         starts_at: new Date(now.getTime() + 86_400_000),
         ends_at: null,
         venue: null,
-        visibility: 'private',
+        visibility: 'public',
         seo: JSON.stringify({}),
         capacity: null,
         cover_image_url: null,
@@ -310,6 +312,11 @@ async function seedTenantGraph(database: Database): Promise<void> {
 async function cleanupAll(database: Database): Promise<void> {
   await database.deleteFrom('ticket_listings').where('tenant_id', '=', TENANT_ID).execute();
   await database.deleteFrom('idempotency_records').where('tenant_id', '=', TENANT_ID).execute();
+  await database
+    .deleteFrom('checkout_sessions')
+    .where('tenant_id', '=', TENANT_ID)
+    .where('id', '!=', CHECKOUT_SESSION_ID)
+    .execute();
   await database.deleteFrom('wallet_passes').where('tenant_id', '=', TENANT_ID).execute();
   await database.deleteFrom('tickets').where('tenant_id', '=', TENANT_ID).execute();
   await database.deleteFrom('attendees').where('tenant_id', '=', TENANT_ID).execute();
@@ -450,6 +457,7 @@ describeWithIntegrationDatabase(
       expect(rows).toHaveLength(1);
       expect(rows[0]).toMatchObject({
         ticket_id: TICKET_ID,
+        seller_id: ORDER_ID,
         status: 'listed',
         active_listing_key: TICKET_ID,
       });
@@ -486,6 +494,201 @@ describeWithIntegrationDatabase(
         .executeTakeFirstOrThrow();
       expect(delisted.status).toBe('delisted');
       expect(delisted.active_listing_key).toBe(listingId);
+    });
+
+    it('exposes public resale listings without seller or tenant internals', async () => {
+      const create = await app.inject({
+        method: 'POST',
+        url: `/tickets/${TICKET_ID}/resale-listings`,
+        headers: { 'Idempotency-Key': `resale_db_public_${RUN_ID}` },
+        payload: { priceCents: 5500 },
+      });
+      expect(create.statusCode).toBe(201);
+
+      const list = await app.inject({
+        method: 'GET',
+        url: `/public/events/${EVENT_ID}/resale-listings`,
+      });
+      expect(list.statusCode).toBe(200);
+      expect(list.json().items).toEqual([
+        expect.objectContaining({
+          id: create.json().id,
+          eventId: EVENT_ID,
+          ticketTypeId: TICKET_TYPE_ID,
+          ticketTypeName: 'Resale DB Ticket',
+          status: 'listed',
+          priceCents: 5500,
+          currency: 'USD',
+          faceValueCents: 5000,
+        }),
+      ]);
+      expect(list.json().items[0]).not.toHaveProperty('sellerId');
+      expect(list.json().items[0]).not.toHaveProperty('tenantId');
+      expect(list.json().items[0]).not.toHaveProperty('ticketId');
+    });
+
+    it('paginates public resale listings after filtering unavailable rows in the database', async () => {
+      const secondTicketId = `tkt_resale_${RUN_ID}_2`;
+      await db
+        .insertInto('tickets')
+        .values({
+          id: secondTicketId,
+          tenant_id: TENANT_ID,
+          order_id: ORDER_ID,
+          attendee_id: ATTENDEE_ID,
+          event_id: EVENT_ID,
+          event_occurrence_id: null,
+          ticket_type_id: TICKET_TYPE_ID,
+          status: 'valid',
+          code: `RESALE-${RUN_ID}-2`,
+          qr_payload: `resale-payload-${RUN_ID}-2`,
+          qr_hash: `resale-hash-${RUN_ID}-2`,
+          transferred_to_email: null,
+          transferred_at: null,
+          checked_in_at: null,
+          checked_in_by_device_id: null,
+          wallet_pass_id: null,
+          created_at: new Date(),
+          updated_at: new Date(),
+        })
+        .execute();
+
+      const firstListing = await app.inject({
+        method: 'POST',
+        url: `/tickets/${TICKET_ID}/resale-listings`,
+        headers: { 'Idempotency-Key': `resale_db_page_first_${RUN_ID}` },
+        payload: { priceCents: 5500 },
+      });
+      const secondListing = await app.inject({
+        method: 'POST',
+        url: `/tickets/${secondTicketId}/resale-listings`,
+        headers: { 'Idempotency-Key': `resale_db_page_second_${RUN_ID}` },
+        payload: { priceCents: 5600 },
+      });
+      expect(firstListing.statusCode).toBe(201);
+      expect(secondListing.statusCode).toBe(201);
+
+      const firstPage = await app.inject({
+        method: 'GET',
+        url: `/public/events/${EVENT_ID}/resale-listings?limit=1`,
+      });
+      expect(firstPage.statusCode).toBe(200);
+      expect(firstPage.json().items).toHaveLength(1);
+      expect(firstPage.json()).toMatchObject({ hasMore: true });
+      expect(firstPage.json().nextCursor).toEqual(firstPage.json().items[0].id);
+
+      const secondPage = await app.inject({
+        method: 'GET',
+        url: `/public/events/${EVENT_ID}/resale-listings?limit=1&cursor=${encodeURIComponent(
+          firstPage.json().nextCursor,
+        )}`,
+      });
+      expect(secondPage.statusCode).toBe(200);
+      expect(secondPage.json().items).toHaveLength(1);
+      expect(secondPage.json().items[0].id).not.toBe(firstPage.json().items[0].id);
+      expect(secondPage.json()).toMatchObject({ hasMore: false, nextCursor: null });
+    });
+
+    it('reserves a public resale listing when creating a checkout session and rejects racing buyers', async () => {
+      const create = await app.inject({
+        method: 'POST',
+        url: `/tickets/${TICKET_ID}/resale-listings`,
+        headers: { 'Idempotency-Key': `resale_db_checkout_listing_${RUN_ID}` },
+        payload: { priceCents: 5500 },
+      });
+      expect(create.statusCode).toBe(201);
+      const listingId = create.json().id as string;
+
+      const payload = {
+        eventId: EVENT_ID,
+        items: [{ resaleListingId: listingId, quantity: 1 }],
+        buyer: { email: 'resale-public-buyer@example.com', firstName: 'Public', lastName: 'Buyer' },
+      };
+      const first = await app.inject({
+        method: 'POST',
+        url: '/checkout/sessions',
+        headers: { 'Idempotency-Key': `resale_db_checkout_${RUN_ID}` },
+        payload,
+      });
+      const replay = await app.inject({
+        method: 'POST',
+        url: '/checkout/sessions',
+        headers: { 'Idempotency-Key': `resale_db_checkout_${RUN_ID}` },
+        payload,
+      });
+      const racingBuyer = await app.inject({
+        method: 'POST',
+        url: '/checkout/sessions',
+        headers: { 'Idempotency-Key': `resale_db_checkout_race_${RUN_ID}` },
+        payload,
+      });
+
+      expect(first.statusCode).toBe(201);
+      expect(replay.statusCode).toBe(201);
+      expect(replay.json()).toEqual(first.json());
+      expect(racingBuyer.statusCode).toBe(400);
+      expect(first.json().quote).toMatchObject({
+        subtotalCents: 5500,
+        discountCents: 0,
+        taxCents: 0,
+        feeCents: 0,
+        totalCents: 5500,
+      });
+      expect(first.json().quote.lineItems).toEqual([
+        expect.objectContaining({
+          type: 'resale',
+          resaleListingId: listingId,
+          ticketTypeId: TICKET_TYPE_ID,
+          quantity: 1,
+          unitPriceCents: 5500,
+        }),
+      ]);
+
+      const reserved = await db
+        .selectFrom('ticket_listings')
+        .selectAll()
+        .where('id', '=', listingId)
+        .executeTakeFirstOrThrow();
+      expect(reserved.reserved_checkout_session_id).toBe(first.json().id);
+      expect(reserved.reserved_until).toBeTruthy();
+
+      const publicList = await app.inject({
+        method: 'GET',
+        url: `/public/events/${EVENT_ID}/resale-listings`,
+      });
+      expect(publicList.statusCode).toBe(200);
+      expect(publicList.json().items).toHaveLength(0);
+    });
+
+    it('rejects staff-created resale checkout when the buyer is the original ticket owner', async () => {
+      const create = await app.inject({
+        method: 'POST',
+        url: `/tickets/${TICKET_ID}/resale-listings`,
+        headers: { 'Idempotency-Key': `resale_db_self_checkout_listing_${RUN_ID}` },
+        payload: { priceCents: 5500 },
+      });
+      expect(create.statusCode).toBe(201);
+      expect(create.json()).toMatchObject({ sellerId: ORDER_ID });
+
+      const selfPurchase = await app.inject({
+        method: 'POST',
+        url: '/checkout/sessions',
+        headers: { 'Idempotency-Key': `resale_db_self_checkout_${RUN_ID}` },
+        payload: {
+          eventId: EVENT_ID,
+          items: [{ resaleListingId: create.json().id, quantity: 1 }],
+          buyer: {
+            email: 'RESALE-BUYER@example.com',
+            firstName: 'Resale',
+            lastName: 'Seller',
+          },
+        },
+      });
+
+      expect(selfPurchase.statusCode).toBe(400);
+      expect(JSON.stringify(selfPurchase.json())).toContain(
+        'Buyer cannot purchase their own resale listing',
+      );
     });
 
     it('lets a checkout-session owner create and replay a buyer resale listing', async () => {
@@ -887,8 +1090,8 @@ describeWithIntegrationDatabase(
             id: listingId,
             eventId: EVENT_ID,
             ticketId: TICKET_ID,
-            status: 'listed',
           });
+          expect(['listed', 'sold']).toContain(item.status);
         }
       }
 

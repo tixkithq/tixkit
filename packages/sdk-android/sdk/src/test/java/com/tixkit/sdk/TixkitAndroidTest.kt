@@ -35,6 +35,25 @@ class TixkitAndroidTest {
   }
 
   @Test
+  fun buildsHostedCheckoutHandoffUrlForResaleListing() {
+    val url = TixkitAndroid.checkoutUrl(
+      TixkitCheckoutOptions(
+        checkoutBaseUrl = "https://checkout.example.test/",
+        eventId = "evt_123",
+        organizationId = "org_123",
+        successUrl = "https://app.example.test/success",
+        cancelUrl = "https://app.example.test/cancel",
+        resaleListingId = "lst_1",
+      ),
+    )
+
+    assertEquals(
+      "https://checkout.example.test/checkout?eventId=evt_123&organizationId=org_123&successUrl=https%3A%2F%2Fapp.example.test%2Fsuccess&cancelUrl=https%3A%2F%2Fapp.example.test%2Fcancel&resaleListing=lst_1",
+      url,
+    )
+  }
+
+  @Test
   fun hashesQrPayloadsWithSha256() {
     assertEquals(
       "a587564d544459dd049a043aee1aa25285ec90ac11e61311a0cd30f558a36914",
@@ -49,7 +68,21 @@ class TixkitAndroidTest {
     val transport = TixkitPublicEventPageTransport { url, headers ->
       urls.add(url)
       headersSeen.add(headers)
-      if (url.endsWith("/discovery-card")) {
+      if (url.contains("/resale-listings")) {
+        """
+        {
+          "items": [{
+            "id": "lst_1",
+            "eventId": "evt_1",
+            "status": "listed",
+            "priceCents": 5500,
+            "currency": "USD",
+            "faceValueCents": 5000
+          }],
+          "hasMore": false
+        }
+        """.trimIndent()
+      } else if (url.endsWith("/discovery-card")) {
         """
         {
           "title": "All Access",
@@ -101,6 +134,8 @@ class TixkitAndroidTest {
     client.getEventPageBySlug("all-access", host = "events.example.com", locale = "en")
     val card = client.getEventDiscoveryCard("evt_1")
     assertEquals("The Salt Shed", card.venueName)
+    val listings = client.listResaleListings("evt_1", cursor = "lst_0", limit = 25)
+    assertEquals("lst_1", listings.items.single().id)
 
     assertEquals(
       listOf(
@@ -108,6 +143,7 @@ class TixkitAndroidTest {
         "https://api.test/v1/public/events/evt_1/page?locale=en",
         "https://api.test/v1/public/events/by-slug/all-access/page?host=events.example.com&locale=en",
         "https://api.test/v1/public/events/evt_1/discovery-card",
+        "https://api.test/v1/public/events/evt_1/resale-listings?cursor=lst_0&limit=25",
       ),
       urls,
     )

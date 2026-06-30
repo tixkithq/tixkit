@@ -11,10 +11,12 @@ import {
   readOrphanPaymentCompensationState,
   readPromoCheckoutCaptureState,
   readPaidCheckoutCaptureState,
+  readResalePurchaseState,
   readWalletPassState,
   seedCompensatedOrphanPaymentForSession,
   seedPaidCheckoutEvent,
   seedPaidPromoCheckoutEvent,
+  seedPublishedEventPageContent,
 } from './helpers/seed';
 import { expect, requireReachable, test } from './fixtures/validation-test';
 
@@ -240,6 +242,152 @@ test.describe('paid checkout capture workflow', () => {
     expect(state.hold).toMatchObject({ status: 'converted', quantity: 1 });
     expect(state.inventoryPool.soldCount).toBe(1);
     expect(state.ticketCount).toBe(1);
+  });
+
+  test('completes a public resale purchase through hosted checkout UI', async ({
+    browserName,
+    page,
+    request,
+  }, testInfo) => {
+    await requireReachable(page, `${apiBaseUrl}/health`, 'api');
+    await requireReachable(page, checkoutBaseUrl, 'checkout app');
+
+    const suffix = `resale-buy-ui-${testInfo.workerIndex}-${Date.now()}`;
+    const { event, ticketType, inventoryPool } = await seedPaidCheckoutEvent(request, suffix);
+    await seedPublishedEventPageContent({ event, suffix });
+
+    await expectJsonResponse(
+      await request.put(`${apiBaseUrl}/v1/events/${event.id}/resale-policy`, {
+        data: {
+          enabled: true,
+          maxMultiplier: 1.2,
+          maxAbsoluteCents: 3000,
+        },
+      }),
+      200,
+    );
+
+    const sellerSession = (await expectJsonResponse(
+      await request.post(`${apiBaseUrl}/v1/checkout/sessions`, {
+        headers: { 'idempotency-key': `resale-seller-session-${suffix}` },
+        data: {
+          eventId: event.id,
+          items: [{ ticketTypeId: ticketType.id, quantity: 1 }],
+          buyer: {
+            email: `resale-seller+${suffix}@example.com`,
+            firstName: 'Resale',
+            lastName: 'Seller',
+          },
+        },
+      }),
+      201,
+    )) as { id: string; clientToken: string };
+    await expectJsonResponse(
+      await request.post(`${apiBaseUrl}/v1/checkout/sessions/${sellerSession.id}/confirm`, {
+        headers: {
+          'idempotency-key': `resale-seller-confirm-${suffix}`,
+          'x-checkout-session-token': sellerSession.clientToken,
+        },
+        data: { paymentMethodId: 'pm_card_visa' },
+      }),
+      200,
+    );
+
+    const sellerState = await readPaidCheckoutCaptureState(sellerSession.id, inventoryPool.id);
+    const listing = (await expectJsonResponse(
+      await request.post(`${apiBaseUrl}/v1/tickets/${sellerState.ticketIds[0]}/resale-listings`, {
+        headers: { 'Idempotency-Key': `resale-public-list-${suffix}` },
+        data: { priceCents: 2500 },
+      }),
+      201,
+    )) as { id: string; priceCents: number; status: string };
+    expect(listing).toMatchObject({ status: 'listed', priceCents: 2500 });
+
+    const publicListings = (await expectJsonResponse(
+      await request.get(`${apiBaseUrl}/v1/public/events/${event.id}/resale-listings`),
+      200,
+    )) as { items: Array<Record<string, unknown>> };
+    expect(publicListings.items).toContainEqual(
+      expect.objectContaining({
+        id: listing.id,
+        eventId: event.id,
+        ticketTypeId: ticketType.id,
+        status: 'listed',
+        priceCents: 2500,
+      }),
+    );
+    expect(publicListings.items[0]).not.toHaveProperty('tenantId');
+    expect(publicListings.items[0]).not.toHaveProperty('sellerId');
+    expect(publicListings.items[0]).not.toHaveProperty('ticketId');
+
+    await page.goto(`${checkoutBaseUrl}/e/${encodeURIComponent(event.id)}`);
+    await expect(page.locator('header').getByRole('heading', { name: event.title })).toBeVisible();
+    const resaleSection = page
+      .locator('section')
+      .filter({ has: page.getByRole('heading', { name: 'Resale tickets' }) });
+    await expect(resaleSection.getByRole('heading', { name: 'Resale tickets' })).toBeVisible();
+    await expect(
+      resaleSection.getByText(`Resale ticket - ${ticketType.name}`, { exact: true }),
+    ).toBeVisible();
+    await expectNoAxeViolations(page, testInfo);
+
+    if (browserName === 'chromium') {
+      const client = await page.context().newCDPSession(page);
+      const { result } = await client.send('Runtime.evaluate', {
+        expression: `(() => {
+          const resaleHeading = [...document.querySelectorAll('h2,h3')].some((node) => node.textContent?.includes('Resale tickets'));
+          const buyButton = [...document.querySelectorAll('button')].some((node) => node.textContent?.includes('Buy resale'));
+          return { resaleHeading, buyButton, url: location.href };
+        })()`,
+        returnByValue: true,
+      });
+      expect(result.value).toMatchObject({ resaleHeading: true, buyButton: true });
+      await client.detach();
+    }
+
+    await page.getByRole('button', { name: 'Buy resale' }).click();
+    await expect(page).toHaveURL(/\/checkout\?/);
+    await expect(page.getByRole('heading', { name: event.title })).toBeVisible();
+    await expect(
+      page.getByText(`Resale ticket - ${ticketType.name}`, { exact: true }).first(),
+    ).toBeVisible();
+    await page.getByLabel('Email').fill(`resale-buyer+${suffix}@example.com`);
+    await page.getByLabel('First name').fill('Resale');
+    await page.getByLabel('Last name').fill('Buyer');
+    await attachScreenshot(page, testInfo, 'hosted-resale-checkout-select');
+    await expectNoAxeViolations(page, testInfo);
+
+    await page.getByRole('button', { name: 'Continue' }).click();
+    await expect(page.getByRole('button', { name: 'Pay $25.00' })).toBeVisible();
+    await page.getByRole('button', { name: 'Pay $25.00' }).click();
+    await expect(page.getByRole('heading', { name: 'Order confirmed' })).toBeVisible();
+    await attachScreenshot(page, testInfo, 'hosted-resale-checkout-confirmed');
+
+    const resaleState = await readResalePurchaseState({
+      listingId: listing.id,
+      buyerEmail: `resale-buyer+${suffix}@example.com`,
+    });
+    expect(resaleState.listing).toMatchObject({
+      status: 'sold',
+      ticketId: sellerState.ticketIds[0],
+      soldToId: resaleState.buyerOrder.id,
+    });
+    expect(resaleState.buyerOrder).toMatchObject({
+      status: 'paid',
+      totalCents: 2500,
+    });
+    expect(resaleState.lineItems).toContainEqual(
+      expect.objectContaining({ resaleListingId: listing.id, totalCents: 2500 }),
+    );
+    expect(resaleState.buyerTickets).toHaveLength(1);
+    expect(resaleState.buyerTickets[0]).toMatchObject({ status: 'valid' });
+    expect(resaleState.sellerTicket).toMatchObject({
+      id: sellerState.ticketIds[0],
+      transferredToEmail: `resale-buyer+${suffix}@example.com`,
+    });
+
+    await page.goto(`${checkoutBaseUrl}/e/${encodeURIComponent(event.id)}`);
+    await expect(page.getByRole('heading', { name: 'Resale tickets' })).toHaveCount(0);
   });
 
   test('shows compensated orphan payments as expired with no tickets or wallet actions', async ({
@@ -508,8 +656,9 @@ test.describe('paid checkout capture workflow', () => {
       (response) =>
         response
           .url()
-          .includes(`/v1/checkout/sessions/${sessionId}/tickets/${state.ticketIds[0]}/resale-listing`) &&
-        response.request().method() === 'POST',
+          .includes(
+            `/v1/checkout/sessions/${sessionId}/tickets/${state.ticketIds[0]}/resale-listing`,
+          ) && response.request().method() === 'POST',
     );
     await page.getByRole('button', { name: 'Create listing' }).click();
     expect((await resaleResponse).status()).toBe(201);

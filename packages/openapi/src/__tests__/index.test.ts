@@ -200,6 +200,7 @@ describe('openApiSpec', () => {
     expect(openApiSpec.paths['/tickets/{ticketId}/transfer']).toBeDefined();
     expect(openApiSpec.paths['/events/{eventId}/resale-policy']).toBeDefined();
     expect(openApiSpec.paths['/events/{eventId}/resale-listings']).toBeDefined();
+    expect(openApiSpec.paths['/public/events/{eventId}/resale-listings']).toBeDefined();
     expect(openApiSpec.paths['/tickets/{ticketId}/resale-listings']).toBeDefined();
     expect(openApiSpec.paths['/ticket-listings/{listingId}/delist']).toBeDefined();
     expect(openApiSpec.paths['/ticket-listings/{listingId}/complete']).toBeDefined();
@@ -237,6 +238,51 @@ describe('openApiSpec', () => {
       'accessRules',
     ]);
     expect(openApiSpec.components.schemas.CreateTicketTypeBatch.required).toContain('ticketType');
+  });
+
+  it('documents public resale listings without internal seller or ticket fields', () => {
+    const schema = openApiSpec.components.schemas.PublicTicketListing;
+    expect(schema.properties).toMatchObject({
+      id: { type: 'string' },
+      eventId: { type: 'string' },
+      priceCents: { type: 'integer', minimum: 0 },
+      currency: { type: 'string', minLength: 3, maxLength: 3 },
+      faceValueCents: { type: 'integer', minimum: 0 },
+    });
+    expect(schema.properties).not.toHaveProperty('tenantId');
+    expect(schema.properties).not.toHaveProperty('sellerId');
+    expect(schema.properties).not.toHaveProperty('ticketId');
+    expect(openApiSpec.components.schemas.OrderLineItem.properties).toHaveProperty(
+      'resaleListingId',
+    );
+    expect(
+      openApiSpec.paths['/public/events/{eventId}/resale-listings'].get.responses['200'].content[
+        'application/json'
+      ].schema,
+    ).toEqual({ $ref: '#/components/schemas/PublicTicketListingPage' });
+    expect(openApiSpec.paths['/public/events/{eventId}/resale-listings'].get.parameters).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ name: 'eventId', in: 'path', required: true }),
+        expect.objectContaining({ name: 'cursor', in: 'query' }),
+        expect.objectContaining({
+          name: 'limit',
+          in: 'query',
+          schema: expect.objectContaining({ maximum: 50 }),
+        }),
+      ]),
+    );
+    const checkoutItemBranches =
+      openApiSpec.paths['/checkout/sessions'].post.requestBody.content['application/json'].schema
+        .properties.items.items.oneOf;
+    const resaleCheckoutItemBranch = checkoutItemBranches.at(-1);
+    expect(resaleCheckoutItemBranch).toBeDefined();
+    expect(resaleCheckoutItemBranch!.not.anyOf).toEqual(
+      expect.arrayContaining([
+        { required: ['occurrenceId'] },
+        { required: ['unitAmountCents'] },
+        { required: ['attendeeFields'] },
+      ]),
+    );
   });
 
   it('documents split-key message campaign request and response contracts', () => {

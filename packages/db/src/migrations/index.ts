@@ -36,3 +36,4 @@ export { OfflineCheckInBulkSyncHardeningMigration } from './0035_offline_check_i
 export { OrganizationBoxOfficeSettingsMigration } from './0036_organization_box_office_settings.js';
 export { TicketListingsMigration } from './0037_ticket_listings.js';
 export { EventResalePolicyMigration } from './0038_event_resale_policy.js';
+export { ResaleCheckoutReservationsMigration } from './0039_resale_checkout_reservations.js';

@@ -5,6 +5,7 @@ import {
   AccessRuleRepository,
   EventRepository,
   TicketTypeRepository,
+  TicketListingRepository,
   BrandRepository,
   ProductRepository,
   EventOccurrenceRepository,
@@ -15,6 +16,7 @@ import {
   parseJsonValue,
   serializeEventOccurrenceStatus,
   serializeMarketingIntegration,
+  serializeResalePolicy,
 } from '../../http/contracts.js';
 import { parseBody } from '../../http/schemas.js';
 import { ulid } from 'ulid';
@@ -65,6 +67,16 @@ function parseTicketTypeIds(value: unknown): string[] {
   return [
     ...new Set(value.filter((id): id is string => typeof id === 'string' && id.trim().length > 0)),
   ];
+}
+
+function parsePublicPageParams(query: { cursor?: unknown; limit?: unknown }): {
+  cursor?: string;
+  limit: number;
+} {
+  const cursor = firstQueryParam(query.cursor).trim() || undefined;
+  const rawLimit = Number.parseInt(firstQueryParam(query.limit), 10);
+  const limit = Number.isFinite(rawLimit) ? Math.min(Math.max(rawLimit, 1), 50) : 50;
+  return { cursor, limit };
 }
 
 function normalizeAnalyticsUrl(value?: string): string | null {
@@ -420,6 +432,61 @@ export const publicRoutes: FastifyPluginAsync = async (app) => {
       });
     }
     return results;
+  });
+
+  app.get('/public/events/:eventId/resale-listings', async (request) => {
+    const { eventId } = request.params as { eventId: string };
+    const page = parsePublicPageParams(request.query as { cursor?: unknown; limit?: unknown });
+    const event = await new EventRepository(db).findById(eventId);
+    if (!event || !isPubliclyReadableEvent(event)) throw new NotFoundError('Event', eventId);
+    if (!serializeResalePolicy(event).enabled) {
+      return { items: [], nextCursor: null, hasMore: false };
+    }
+
+    const listings = await new TicketListingRepository(db).findPublicAvailableByEvent({
+      tenantId: event.tenant_id,
+      eventId,
+      limit: page.limit + 1,
+      cursor: page.cursor,
+    });
+    const listed = listings.slice(0, page.limit);
+    const ticketIds = [...new Set(listed.map((listing) => String(listing.ticket_id)))];
+    const rows =
+      ticketIds.length > 0
+        ? await db
+            .selectFrom('tickets')
+            .innerJoin('ticket_types', 'ticket_types.id', 'tickets.ticket_type_id')
+            .select([
+              'tickets.id as ticket_id',
+              'ticket_types.id as ticket_type_id',
+              'ticket_types.name as ticket_type_name',
+            ])
+            .where('tickets.tenant_id', '=', event.tenant_id)
+            .where('tickets.id', 'in', ticketIds)
+            .execute()
+        : [];
+    const ticketTypeByTicket = new Map(rows.map((row) => [row.ticket_id, row]));
+
+    return {
+      items: listed.map((listing) => {
+        const ticketType = ticketTypeByTicket.get(listing.ticket_id);
+        return {
+          id: listing.id,
+          eventId: listing.event_id,
+          ticketTypeId: ticketType?.ticket_type_id,
+          ticketTypeName: ticketType?.ticket_type_name,
+          status: listing.status,
+          priceCents: Number(listing.price_cents),
+          currency: listing.currency,
+          faceValueCents: Number(listing.face_value_cents),
+          expiresAt: listing.expires_at ?? undefined,
+          createdAt: listing.created_at,
+          updatedAt: listing.updated_at,
+        };
+      }),
+      nextCursor: listings.length > page.limit ? listed.at(-1)?.id : null,
+      hasMore: listings.length > page.limit,
+    };
   });
 
   app.post(

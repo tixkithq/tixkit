@@ -220,6 +220,7 @@ function normalizeCartItems(
       ticketTypeId?: string;
       occurrenceId?: string;
       productId?: string;
+      resaleListingId?: string;
       quantity: number;
       unitAmountCents?: number;
       attendeeFields?: Record<string, unknown>[];
@@ -227,6 +228,18 @@ function normalizeCartItems(
   >();
 
   for (const item of items) {
+    if (item.resaleListingId) {
+      if (item.quantity !== 1) {
+        throw new ValidationError('Resale listing checkout items must have quantity 1');
+      }
+      const key = `resale:${item.resaleListingId}`;
+      if (normalized.has(key)) {
+        throw new ValidationError(`Duplicate resale listing ${item.resaleListingId}`);
+      }
+      normalized.set(key, { resaleListingId: item.resaleListingId, quantity: 1 });
+      continue;
+    }
+
     if (item.ticketTypeId) {
       const ticketType = ticketTypes.get(item.ticketTypeId);
       if (!ticketType) throw new NotFoundError('TicketType', item.ticketTypeId);
@@ -962,6 +975,157 @@ export const checkoutRoutes: FastifyPluginAsync = async (app) => {
         requestHash: hashRequest(body),
       },
       async () => {
+        const resaleItems = body.items.filter((item) => item.resaleListingId);
+        if (resaleItems.length > 0) {
+          if (body.items.length !== 1) {
+            throw new ValidationError(
+              'Resale checkout cannot be mixed with primary tickets or products',
+            );
+          }
+          if (body.discountCode || body.accessCode || body.waitlistClaimToken) {
+            throw new ValidationError(
+              'Discount codes, access codes, and waitlist claims are not supported for resale checkout',
+            );
+          }
+
+          const resaleItem = resaleItems[0]!;
+          const listingId = resaleItem.resaleListingId!;
+          const now = new Date();
+          const listing = await db
+            .selectFrom('ticket_listings')
+            .innerJoin('tickets', 'tickets.id', 'ticket_listings.ticket_id')
+            .innerJoin('ticket_types', 'ticket_types.id', 'tickets.ticket_type_id')
+            .leftJoin('orders as seller_order', 'seller_order.id', 'tickets.order_id')
+            .select([
+              'ticket_listings.id as id',
+              'ticket_listings.tenant_id as tenant_id',
+              'ticket_listings.event_id as event_id',
+              'ticket_listings.ticket_id as ticket_id',
+              'ticket_listings.seller_id as seller_id',
+              'ticket_listings.status as status',
+              'ticket_listings.price_cents as price_cents',
+              'ticket_listings.currency as currency',
+              'ticket_listings.face_value_cents as face_value_cents',
+              'ticket_listings.expires_at as expires_at',
+              'ticket_listings.reserved_checkout_session_id as reserved_checkout_session_id',
+              'ticket_listings.reserved_until as reserved_until',
+              'tickets.order_id as ticket_order_id',
+              'tickets.status as ticket_status',
+              'tickets.ticket_type_id as ticket_type_id',
+              'ticket_types.name as ticket_type_name',
+              'seller_order.buyer_email as seller_buyer_email',
+            ])
+            .where('ticket_listings.id', '=', listingId)
+            .where('ticket_listings.event_id', '=', body.eventId)
+            .executeTakeFirst();
+
+          if (!listing || listing.tenant_id !== event.tenant_id) {
+            throw new NotFoundError('TicketListing', listingId);
+          }
+          if (!serializeResalePolicy(event).enabled) {
+            throw new ValidationError('Resale is not enabled for this event');
+          }
+          if (listing.status !== 'listed') {
+            throw new ValidationError(`Ticket listing ${listingId} is not listed`);
+          }
+          if (listing.ticket_status !== 'valid') {
+            throw new ValidationError(
+              `Ticket listing ${listingId} is attached to a ${listing.ticket_status} ticket`,
+            );
+          }
+          if (listing.expires_at && new Date(listing.expires_at as Date | string) <= now) {
+            await new TicketListingRepository(db).expire(listingId);
+            throw new ValidationError(`Ticket listing ${listingId} has expired`);
+          }
+          if (
+            listing.reserved_checkout_session_id &&
+            listing.reserved_until &&
+            new Date(listing.reserved_until as Date | string) > now
+          ) {
+            throw new ValidationError(`Ticket listing ${listingId} is already reserved`);
+          }
+          const buyerEmail = body.buyer?.email?.trim().toLowerCase();
+          if (
+            buyerEmail &&
+            typeof listing.seller_buyer_email === 'string' &&
+            listing.seller_buyer_email.toLowerCase() === buyerEmail
+          ) {
+            throw new ValidationError('Buyer cannot purchase their own resale listing');
+          }
+
+          const sessionId = `cs_${ulid()}`;
+          const defaultReservationExpiry = new Date(Date.now() + 10 * 60 * 1000);
+          const listingExpiry = listing.expires_at
+            ? new Date(listing.expires_at as Date | string)
+            : null;
+          const reservedUntil =
+            listingExpiry && listingExpiry < defaultReservationExpiry
+              ? listingExpiry
+              : defaultReservationExpiry;
+
+          const priceCents = Number(listing.price_cents);
+          const quote = {
+            id: `pq_${ulid()}`,
+            currency: String(listing.currency).toUpperCase(),
+            subtotalCents: priceCents,
+            discountCents: 0,
+            taxCents: 0,
+            feeCents: 0,
+            totalCents: priceCents,
+            lineItems: [
+              {
+                type: 'resale' as const,
+                ticketTypeId: listing.ticket_type_id,
+                resaleListingId: listingId,
+                name: `Resale ticket - ${listing.ticket_type_name}`,
+                quantity: 1,
+                unitPriceCents: priceCents,
+                subtotalCents: priceCents,
+                discountCents: 0,
+                taxCents: 0,
+                taxBreakdown: [],
+                feeCents: 0,
+                totalCents: priceCents,
+              },
+            ],
+            expiresAt: reservedUntil.toISOString(),
+          };
+          const cart: CartInput = {
+            items: [{ resaleListingId: listingId, quantity: 1 }],
+            affiliateCode: body.affiliateCode,
+            trackingId: body.trackingId,
+            buyerFields: body.buyerFields ?? {},
+          };
+          const session = await db.transaction().execute(async (trx) => {
+            const reserved = await new TicketListingRepository(trx).reserveForCheckout({
+              tenantId: event.tenant_id,
+              listingId,
+              checkoutSessionId: sessionId,
+              reservedUntil,
+              now,
+            });
+            if (!reserved) {
+              throw new ValidationError(`Ticket listing ${listingId} is no longer available`);
+            }
+            return new CheckoutSessionRepository(trx).create({
+              id: sessionId,
+              tenantId: event.tenant_id,
+              eventId: body.eventId,
+              brandId: event.brand_id,
+              currency: quote.currency,
+              cart: cart as Record<string, unknown>,
+              buyer: (body.buyer as Record<string, unknown>) ?? {},
+              quote,
+              expiresAt: reservedUntil,
+              idempotencyKey,
+              successUrl: body.successUrl,
+              cancelUrl: body.cancelUrl,
+            });
+          });
+
+          return { status: 201, body: publicCheckoutSession(session) };
+        }
+
         const ttRepo = new TicketTypeRepository(db);
         const productRepo = new ProductRepository(db);
         const [ticketTypes, products] = await Promise.all([
@@ -1160,6 +1324,7 @@ export const checkoutRoutes: FastifyPluginAsync = async (app) => {
             ticketTypeId: i.ticketTypeId,
             occurrenceId: i.occurrenceId,
             productId: i.productId,
+            resaleListingId: i.resaleListingId,
             quantity: i.quantity,
             unitAmountCents: i.unitAmountCents,
             attendeeFields: i.attendeeFields,
@@ -1309,9 +1474,7 @@ export const checkoutRoutes: FastifyPluginAsync = async (app) => {
     >();
     for (const row of rows) {
       const resalePolicy = serializeResalePolicy(row);
-      const capByMultiplier = Math.round(
-        Number(row.face_value_cents) * resalePolicy.maxMultiplier,
-      );
+      const capByMultiplier = Math.round(Number(row.face_value_cents) * resalePolicy.maxMultiplier);
       const resaleMaxPriceCents =
         resalePolicy.maxAbsoluteCents === undefined
           ? capByMultiplier
@@ -1347,90 +1510,93 @@ export const checkoutRoutes: FastifyPluginAsync = async (app) => {
     return { tickets: [...tickets.values()] };
   });
 
-  app.post('/checkout/sessions/:sessionId/tickets/:ticketId/resale-listing', async (request, reply) => {
-    const { sessionId, ticketId } = request.params as { sessionId: string; ticketId: string };
-    const clientToken = requireCheckoutSessionToken(request);
-    const idempotencyKey = requireIdempotencyKey(request);
-    const body = parseBody(createResaleListingSchema, request.body);
+  app.post(
+    '/checkout/sessions/:sessionId/tickets/:ticketId/resale-listing',
+    async (request, reply) => {
+      const { sessionId, ticketId } = request.params as { sessionId: string; ticketId: string };
+      const clientToken = requireCheckoutSessionToken(request);
+      const idempotencyKey = requireIdempotencyKey(request);
+      const body = parseBody(createResaleListingSchema, request.body);
 
-    const sessionRepo = new CheckoutSessionRepository(db);
-    const session = await sessionRepo.findById(sessionId);
-    if (!session) throw new NotFoundError('CheckoutSession', sessionId);
-    assertCheckoutSessionToken(session, clientToken);
-    if (session.status !== 'completed' || !session.order_id) {
-      throw new ValidationError('Only completed checkout sessions can list tickets for resale');
-    }
+      const sessionRepo = new CheckoutSessionRepository(db);
+      const session = await sessionRepo.findById(sessionId);
+      if (!session) throw new NotFoundError('CheckoutSession', sessionId);
+      assertCheckoutSessionToken(session, clientToken);
+      if (session.status !== 'completed' || !session.order_id) {
+        throw new ValidationError('Only completed checkout sessions can list tickets for resale');
+      }
 
-    const ticketRepo = new TicketRepository(db);
-    const ticket = await ticketRepo.findById(ticketId);
-    if (
-      !ticket ||
-      ticket.tenant_id !== session.tenant_id ||
-      ticket.order_id !== session.order_id ||
-      ticket.event_id !== session.event_id
-    ) {
-      throw new NotFoundError('Ticket', ticketId);
-    }
-    if (ticket.status !== 'valid') {
-      throw new ValidationError(`Ticket status is ${ticket.status}, cannot list for resale`);
-    }
+      const ticketRepo = new TicketRepository(db);
+      const ticket = await ticketRepo.findById(ticketId);
+      if (
+        !ticket ||
+        ticket.tenant_id !== session.tenant_id ||
+        ticket.order_id !== session.order_id ||
+        ticket.event_id !== session.event_id
+      ) {
+        throw new NotFoundError('Ticket', ticketId);
+      }
+      if (ticket.status !== 'valid') {
+        throw new ValidationError(`Ticket status is ${ticket.status}, cannot list for resale`);
+      }
 
-    const event = await new EventRepository(db).findById(ticket.event_id);
-    if (!event || event.tenant_id !== session.tenant_id) {
-      throw new NotFoundError('Event', ticket.event_id);
-    }
-    const ticketType = await new TicketTypeRepository(db).findById(ticket.ticket_type_id);
-    if (!ticketType || ticketType.event_id !== ticket.event_id) {
-      throw new NotFoundError('TicketType', ticket.ticket_type_id);
-    }
+      const event = await new EventRepository(db).findById(ticket.event_id);
+      if (!event || event.tenant_id !== session.tenant_id) {
+        throw new NotFoundError('Event', ticket.event_id);
+      }
+      const ticketType = await new TicketTypeRepository(db).findById(ticket.ticket_type_id);
+      if (!ticketType || ticketType.event_id !== ticket.event_id) {
+        throw new NotFoundError('TicketType', ticket.ticket_type_id);
+      }
 
-    const requestHash = hashRequest({
-      sessionId,
-      ticketId,
-      priceCents: body.priceCents,
-      expiresAt: body.expiresAt ?? null,
-    });
+      const requestHash = hashRequest({
+        sessionId,
+        ticketId,
+        priceCents: body.priceCents,
+        expiresAt: body.expiresAt ?? null,
+      });
 
-    const result = await withIdempotency(
-      db,
-      { key: idempotencyKey, tenantId: session.tenant_id, requestHash },
-      async () => {
-        const listingRepo = new TicketListingRepository(db);
-        const active = await listingRepo.findActiveByTicket(session.tenant_id, ticketId);
-        if (active) {
-          throw new ValidationError(`Ticket ${ticketId} already has an active resale listing`);
-        }
-
-        const faceValueCents = Number(ticketType.price_cents);
-        try {
-          validateResalePrice(body.priceCents, faceValueCents, serializeResalePolicy(event));
-        } catch (error) {
-          toResaleValidationError(error);
-        }
-
-        try {
-          const listing = await listingRepo.create({
-            tenantId: session.tenant_id,
-            eventId: ticket.event_id,
-            ticketId,
-            sellerId: session.order_id as string,
-            priceCents: body.priceCents,
-            currency: String(ticketType.currency),
-            faceValueCents,
-            expiresAt: body.expiresAt ? new Date(body.expiresAt) : undefined,
-          });
-          return { status: 201, body: serializeTicketListing(listing) };
-        } catch (error) {
-          if (isUniqueViolation(error)) {
+      const result = await withIdempotency(
+        db,
+        { key: idempotencyKey, tenantId: session.tenant_id, requestHash },
+        async () => {
+          const listingRepo = new TicketListingRepository(db);
+          const active = await listingRepo.findActiveByTicket(session.tenant_id, ticketId);
+          if (active) {
             throw new ValidationError(`Ticket ${ticketId} already has an active resale listing`);
           }
-          throw error;
-        }
-      },
-    );
 
-    return reply.status(result.status).send(result.body);
-  });
+          const faceValueCents = Number(ticketType.price_cents);
+          try {
+            validateResalePrice(body.priceCents, faceValueCents, serializeResalePolicy(event));
+          } catch (error) {
+            toResaleValidationError(error);
+          }
+
+          try {
+            const listing = await listingRepo.create({
+              tenantId: session.tenant_id,
+              eventId: ticket.event_id,
+              ticketId,
+              sellerId: session.order_id as string,
+              priceCents: body.priceCents,
+              currency: String(ticketType.currency),
+              faceValueCents,
+              expiresAt: body.expiresAt ? new Date(body.expiresAt) : undefined,
+            });
+            return { status: 201, body: serializeTicketListing(listing) };
+          } catch (error) {
+            if (isUniqueViolation(error)) {
+              throw new ValidationError(`Ticket ${ticketId} already has an active resale listing`);
+            }
+            throw error;
+          }
+        },
+      );
+
+      return reply.status(result.status).send(result.body);
+    },
+  );
 
   app.get('/wallet-passes/:passId/apple.pkpass', async (request, reply) => {
     const { passId } = request.params as { passId: string };

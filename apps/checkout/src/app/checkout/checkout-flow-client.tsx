@@ -17,6 +17,7 @@ type Props = {
   affiliateCode?: string;
   prefilledItemsParam?: string;
   productFilterParam?: string;
+  resaleListingId?: string;
 };
 
 export default function CheckoutFlowClient(props: Props) {

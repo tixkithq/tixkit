@@ -280,6 +280,42 @@ func TestCheckoutCreateSendsIdempotencyHeader(t *testing.T) {
 	}
 }
 
+func TestCheckoutCreateSendsResaleListingItems(t *testing.T) {
+	t.Parallel()
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/v1/checkout/sessions" {
+			t.Fatalf("path = %s", r.URL.Path)
+		}
+		var body CreateCheckoutSessionRequest
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Fatal(err)
+		}
+		if len(body.Items) != 1 || body.Items[0].ResaleListingID != "lst_1" || body.Items[0].Quantity != 1 {
+			t.Fatalf("body = %#v", body)
+		}
+		w.WriteHeader(http.StatusCreated)
+		_ = json.NewEncoder(w).Encode(CheckoutSession{ID: "cs_resale", EventID: "evt_1"})
+	}))
+	defer server.Close()
+
+	client := testClient(t, server.URL)
+	session, err := client.CheckoutSessions.Create(context.Background(), CreateCheckoutSessionRequest{
+		EventID:        "evt_1",
+		IdempotencyKey: "idem_checkout_resale_1",
+		Items: []CheckoutItem{{
+			ResaleListingID: "lst_1",
+			Quantity:        1,
+		}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if session.ID != "cs_resale" {
+		t.Fatalf("session = %#v", session)
+	}
+}
+
 func TestBoxOfficeOrderSendsIdempotencyHeader(t *testing.T) {
 	t.Parallel()
 
@@ -540,6 +576,32 @@ func TestPublicEventDiscoveryCardRoute(t *testing.T) {
 	}
 	if card.Title != "All Access" || card.VenueName != "The Salt Shed" {
 		t.Fatalf("card = %#v", card)
+	}
+}
+
+func TestPublicResaleListingsRoute(t *testing.T) {
+	t.Parallel()
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.RequestURI() != "/v1/public/events/evt_1/resale-listings?cursor=lst_0&limit=25" {
+			t.Fatalf("path = %s", r.URL.RequestURI())
+		}
+		_ = json.NewEncoder(w).Encode(Page[PublicTicketListing]{
+			Items: []PublicTicketListing{{ID: "lst_1", Status: "listed", PriceCents: 5500}},
+		})
+	}))
+	defer server.Close()
+
+	client, err := NewClient("", WithBaseURL(server.URL), WithMaxRetries(0))
+	if err != nil {
+		t.Fatal(err)
+	}
+	page, err := client.Public.ListResaleListings(context.Background(), "evt_1", &PaginationParams{Cursor: "lst_0", Limit: 25})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(page.Items) != 1 || page.Items[0].ID != "lst_1" {
+		t.Fatalf("page = %#v", page)
 	}
 }
 

@@ -686,6 +686,7 @@ export type OrderLineItem = {
   ticketTypeId?: string;
   eventOccurrenceId?: string;
   productId?: string;
+  resaleListingId?: string;
   attendeeId?: string;
   description: string;
   quantity: number;
@@ -1112,6 +1113,20 @@ export type TicketListing = {
   soldToId?: string;
   expiresAt?: string;
   soldAt?: string;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type PublicTicketListing = {
+  id: string;
+  eventId: string;
+  ticketTypeId?: string;
+  ticketTypeName?: string;
+  status: 'listed' | string;
+  priceCents: number;
+  currency: string;
+  faceValueCents: number;
+  expiresAt?: string;
   createdAt: string;
   updatedAt: string;
 };
@@ -1690,6 +1705,7 @@ class CheckoutResource {
         ticketTypeId?: string;
         occurrenceId?: string;
         productId?: string;
+        resaleListingId?: string;
         quantity: number;
         unitAmountCents?: number;
         attendeeFields?: Record<string, unknown>[];
@@ -2962,6 +2978,14 @@ class PublicResource {
   > {
     const query = products?.length ? `?products=${products.join(',')}` : '';
     return this.client.request('GET', `/public/events/${eventId}/availability${query}`);
+  }
+  async listResaleListings(
+    eventId: string,
+    params?: PaginationParams,
+  ): Promise<PageResult<PublicTicketListing>> {
+    return this.client.request('GET', `/public/events/${eventId}/resale-listings`, {
+      params: paginationParams(params),
+    });
   }
   async listOccurrences(eventId: string): Promise<EventOccurrence[]> {
     const response = await this.client.request<PageResult<EventOccurrence> | EventOccurrence[]>(

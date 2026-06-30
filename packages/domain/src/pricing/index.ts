@@ -1,10 +1,11 @@
 import type { BaseEntity, CurrencyCode, ISO8601Date, Ulid } from '../shared/index.js';
 
 export type PriceLineItem = {
-  type: 'ticket' | 'product';
+  type: 'ticket' | 'product' | 'resale';
   ticketTypeId?: Ulid;
   eventOccurrenceId?: Ulid;
   productId?: Ulid;
+  resaleListingId?: Ulid;
   name: string;
   quantity: number;
   unitPriceCents: number;
@@ -108,6 +109,7 @@ export type CartItem = {
   ticketTypeId?: Ulid;
   occurrenceId?: Ulid;
   productId?: Ulid;
+  resaleListingId?: Ulid;
   quantity: number;
   unitAmountCents?: number;
   attendeeFields?: Record<string, unknown>[];

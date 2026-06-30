@@ -228,11 +228,13 @@ class TixkitCheckoutHandoffItem {
   const TixkitCheckoutHandoffItem({
     this.ticketTypeId,
     this.productId,
+    this.resaleListingId,
     required this.quantity,
   });
 
   final String? ticketTypeId;
   final String? productId;
+  final String? resaleListingId;
   final int quantity;
 }
 
@@ -274,8 +276,18 @@ Uri tixkitCheckoutHandoffUri(TixkitCheckoutHandoffOptions options) {
   final uri = Uri.parse(options.checkoutBaseUrl).replace(path: '/checkout');
   final query = <String, String>{'eventId': options.eventId};
   if (options.brandId != null) query['brand'] = options.brandId!;
+  String? resaleListingId;
+  for (final item in options.items) {
+    final id = item.resaleListingId;
+    if (id != null && id.isNotEmpty) {
+      resaleListingId = id;
+      break;
+    }
+  }
+  if (resaleListingId != null) query['resaleListing'] = resaleListingId;
   final items = options.items
       .map((item) {
+        if (item.resaleListingId != null) return null;
         final id = item.ticketTypeId ?? item.productId;
         if (id == null || item.quantity <= 0) return null;
         return '$id=${item.quantity}';
@@ -532,6 +544,74 @@ class TixkitTicketListingPage {
   final String? nextCursor;
 }
 
+class TixkitPublicTicketListingPage {
+  const TixkitPublicTicketListingPage({
+    required this.items,
+    this.hasMore = false,
+    this.nextCursor,
+  });
+
+  factory TixkitPublicTicketListingPage.fromJson(Map<String, Object?> json) {
+    final rawItems = json['items'] as List<Object?>? ?? const [];
+    return TixkitPublicTicketListingPage(
+      items: rawItems
+          .whereType<Map<String, Object?>>()
+          .map(TixkitPublicTicketListing.fromJson)
+          .toList(growable: false),
+      hasMore: json['hasMore'] as bool? ?? false,
+      nextCursor: json['nextCursor'] as String?,
+    );
+  }
+
+  final List<TixkitPublicTicketListing> items;
+  final bool hasMore;
+  final String? nextCursor;
+}
+
+class TixkitPublicTicketListing {
+  const TixkitPublicTicketListing({
+    required this.id,
+    required this.eventId,
+    required this.status,
+    required this.priceCents,
+    required this.currency,
+    required this.faceValueCents,
+    this.ticketTypeId,
+    this.ticketTypeName,
+    this.expiresAt,
+    this.createdAt,
+    this.updatedAt,
+  });
+
+  factory TixkitPublicTicketListing.fromJson(Map<String, Object?> json) {
+    return TixkitPublicTicketListing(
+      id: json['id'] as String? ?? '',
+      eventId: json['eventId'] as String? ?? '',
+      ticketTypeId: json['ticketTypeId'] as String?,
+      ticketTypeName: json['ticketTypeName'] as String?,
+      status: json['status'] as String? ?? '',
+      priceCents: json['priceCents'] as int? ?? 0,
+      currency: json['currency'] as String? ?? '',
+      faceValueCents: json['faceValueCents'] as int? ?? 0,
+      expiresAt: json['expiresAt'] as String?,
+      createdAt: json['createdAt'] as String?,
+      updatedAt: json['updatedAt'] as String?,
+    );
+  }
+
+  final String id;
+  final String eventId;
+  final String? ticketTypeId;
+  final String? ticketTypeName;
+  final String status;
+  final int priceCents;
+  final String currency;
+  final int faceValueCents;
+  final String? expiresAt;
+  final String? createdAt;
+  final String? updatedAt;
+}
+
 class TixkitTicketListing {
   const TixkitTicketListing({
     required this.id,
@@ -625,16 +705,30 @@ class TixkitPublicEventPageClient {
     return TixkitPublicEventDiscoveryCard.fromJson(jsonDecode(response.body) as Map<String, Object?>);
   }
 
+  Future<TixkitPublicTicketListingPage> listResaleListings(
+    String eventId, {
+    String? cursor,
+    int? limit,
+  }) async {
+    final response = await httpClient.get(
+      _apiUri('/public/events/$eventId/resale-listings', cursor: cursor, limit: limit),
+    );
+    _assertSuccess(response);
+    return TixkitPublicTicketListingPage.fromJson(jsonDecode(response.body) as Map<String, Object?>);
+  }
+
   Future<TixkitPublicContentPage> _getPage(String path, {String? host, String? locale}) async {
     final response = await httpClient.get(_apiUri(path, host: host, locale: locale));
     _assertSuccess(response);
     return TixkitPublicContentPage.fromJson(jsonDecode(response.body) as Map<String, Object?>);
   }
 
-  Uri _apiUri(String path, {String? host, String? locale}) {
+  Uri _apiUri(String path, {String? host, String? locale, String? cursor, int? limit}) {
     final query = <String, String>{};
     if (host != null) query['host'] = host;
     if (locale != null) query['locale'] = locale;
+    if (cursor != null) query['cursor'] = cursor;
+    if (limit != null) query['limit'] = '$limit';
     final base = Uri.parse(apiBaseUrl);
     return base.replace(path: '/v1$path', queryParameters: query.isEmpty ? null : query);
   }

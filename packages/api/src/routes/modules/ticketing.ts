@@ -196,6 +196,9 @@ export const ticketingRoutes: FastifyPluginAsync = async (app) => {
     if (ticket.status !== 'valid') {
       throw new ValidationError(`Ticket status is ${ticket.status}, cannot list for resale`);
     }
+    if (!ticket.order_id) {
+      throw new ValidationError(`Ticket ${ticketId} is not attached to an order`);
+    }
     const ticketType = await new TicketTypeRepository(db).findById(ticket.ticket_type_id as string);
     if (!ticketType || ticketType.event_id !== ticket.event_id) {
       throw new NotFoundError('TicketType', ticket.ticket_type_id as string);
@@ -228,7 +231,7 @@ export const ticketingRoutes: FastifyPluginAsync = async (app) => {
             tenantId,
             eventId: ticket.event_id as string,
             ticketId,
-            sellerId: principal.id,
+            sellerId: ticket.order_id as string,
             priceCents: body.priceCents,
             currency: String(ticketType.currency),
             faceValueCents,
@@ -351,10 +354,14 @@ export const ticketingRoutes: FastifyPluginAsync = async (app) => {
             sellerTicket.tenant_id !== principal.tenantId ||
             sellerTicket.event_id !== currentListing.event_id
           ) {
-            throw new ValidationError(`Ticket listing ${listingId} is not attached to a valid ticket`);
+            throw new ValidationError(
+              `Ticket listing ${listingId} is not attached to a valid ticket`,
+            );
           }
           if (sellerTicket.status !== 'valid') {
-            throw new ValidationError(`Ticket status is ${sellerTicket.status}, cannot complete resale`);
+            throw new ValidationError(
+              `Ticket status is ${sellerTicket.status}, cannot complete resale`,
+            );
           }
 
           const sellerAttendee = await txAttendeeRepo.findById(sellerTicket.attendee_id as string);

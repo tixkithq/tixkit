@@ -357,6 +357,7 @@ export function serializeOrderLineItem(row: Record<string, unknown>) {
     ticketTypeId: row.ticket_type_id ?? undefined,
     eventOccurrenceId: row.event_occurrence_id ?? undefined,
     productId: row.product_id ?? undefined,
+    resaleListingId: row.resale_listing_id ?? undefined,
     attendeeId: row.attendee_id ?? undefined,
     description: row.description,
     quantity: row.quantity,

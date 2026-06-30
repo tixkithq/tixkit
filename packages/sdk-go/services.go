@@ -46,6 +46,12 @@ func (s *PublicService) GetEventDiscoveryCard(ctx context.Context, eventID strin
 	return &out, err
 }
 
+func (s *PublicService) ListResaleListings(ctx context.Context, eventID string, params *PaginationParams) (*Page[PublicTicketListing], error) {
+	var out Page[PublicTicketListing]
+	err := s.client.request(ctx, http.MethodGet, "/public/events/"+escape(eventID)+"/resale-listings", nil, &out, withParams(paginationValues(params)))
+	return &out, err
+}
+
 func publicEventPageValues(params *PublicEventPageParams) url.Values {
 	values := url.Values{}
 	if params != nil && params.Locale != "" {

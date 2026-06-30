@@ -466,6 +466,7 @@ async function ensureSampleOrder(ctx: SeedContext, now: Date): Promise<string | 
         order_id: orderId,
         ticket_type_id: ctx.paidTicketTypeId,
         product_id: null,
+        resale_listing_id: null,
         attendee_id: null,
         description: 'Paid General Admission',
         quantity: 1,

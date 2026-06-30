@@ -16,6 +16,7 @@ vi.mock('@/lib/api', () => {
     publicApi: {
       getEvent: vi.fn(),
       getAvailability: vi.fn(),
+      getResaleListings: vi.fn(),
       getQuestions: vi.fn(),
       getBrand: vi.fn(),
     },
@@ -30,6 +31,7 @@ vi.mock('@/lib/api', () => {
 const publicApiMock = publicApi as unknown as {
   getEvent: ReturnType<typeof vi.fn>;
   getAvailability: ReturnType<typeof vi.fn>;
+  getResaleListings: ReturnType<typeof vi.fn>;
   getQuestions: ReturnType<typeof vi.fn>;
   getBrand: ReturnType<typeof vi.fn>;
 };
@@ -65,12 +67,13 @@ const availability: AvailabilityItem[] = [
   },
 ];
 
-function renderCheckoutFlow() {
+function renderCheckoutFlow(props: Partial<React.ComponentProps<typeof CheckoutFlow>> = {}) {
   return render(
     React.createElement(CheckoutFlow, {
       initialEventId: 'evt_checkout',
       initialSessionId: '',
       initialSessionToken: '',
+      ...props,
     }),
   );
 }
@@ -80,6 +83,7 @@ describe('CheckoutFlow buyer validation', () => {
     vi.clearAllMocks();
     publicApiMock.getEvent.mockResolvedValue(event);
     publicApiMock.getAvailability.mockResolvedValue(availability);
+    publicApiMock.getResaleListings.mockResolvedValue({ items: [] });
     publicApiMock.getQuestions.mockResolvedValue({
       buyerQuestions: [],
       attendeeQuestions: [],
@@ -112,5 +116,61 @@ describe('CheckoutFlow buyer validation', () => {
     expect(await view.findByText('Email is required to continue.')).toBeInTheDocument();
     expect(view.getByLabelText(/Email/)).toHaveAttribute('aria-describedby', 'email_feedback');
     expect(checkoutApiMock.createSession).not.toHaveBeenCalled();
+  });
+
+  it('creates a resale checkout session for a selected public listing', async () => {
+    publicApiMock.getAvailability.mockResolvedValue([]);
+    publicApiMock.getResaleListings.mockResolvedValue({
+      items: [
+        {
+          id: 'lst_1',
+          eventId: 'evt_checkout',
+          ticketTypeId: 'tt_general',
+          ticketTypeName: 'General Admission',
+          status: 'listed',
+          priceCents: 5500,
+          currency: 'USD',
+          faceValueCents: 5000,
+          createdAt: '2026-06-01T00:00:00.000Z',
+          updatedAt: '2026-06-01T00:00:00.000Z',
+        },
+      ],
+    });
+    checkoutApiMock.createSession.mockResolvedValue({
+      id: 'cs_1',
+      eventId: 'evt_checkout',
+      brandId: 'brd_1',
+      status: 'open',
+      currency: 'USD',
+      clientToken: 'token_1',
+      quote: {
+        subtotalCents: 5500,
+        discountCents: 0,
+        taxCents: 0,
+        feeCents: 0,
+        totalCents: 5500,
+      },
+      expiresAt: '2026-06-01T00:10:00.000Z',
+    });
+    const view = renderCheckoutFlow({ resaleListingId: 'lst_1' });
+
+    expect(await view.findAllByText('Resale ticket - General Admission')).not.toHaveLength(0);
+    fireEvent.change(view.getByLabelText(/Email/), {
+      target: { value: 'buyer@example.com' },
+    });
+    fireEvent.click(view.getByRole('button', { name: 'Continue' }));
+
+    await waitFor(() => {
+      expect(checkoutApiMock.createSession).toHaveBeenCalledWith(
+        expect.objectContaining({
+          eventId: 'evt_checkout',
+          items: [{ resaleListingId: 'lst_1', quantity: 1 }],
+          buyer: expect.objectContaining({ email: 'buyer@example.com' }),
+          discountCode: undefined,
+          accessCode: undefined,
+          waitlistClaimToken: undefined,
+        }),
+      );
+    });
   });
 });

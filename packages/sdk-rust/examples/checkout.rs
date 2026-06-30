@@ -20,6 +20,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     ticket_type_id: Some(ticket_type_id),
                     occurrence_id: None,
                     product_id: None,
+                    resale_listing_id: None,
                     quantity: 1,
                     unit_amount_cents: None,
                     attendee_fields: None,

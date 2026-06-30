@@ -32,6 +32,7 @@ import {
   type PublicEvent,
   type AvailabilityItem,
   type CheckoutSession,
+  type CheckoutPublicResaleListing,
   type Buyer,
   type CartItem,
   type ConfirmResult,
@@ -64,15 +65,18 @@ type Props = {
   affiliateCode?: string;
   prefilledItemsParam?: string;
   productFilterParam?: string;
+  resaleListingId?: string;
 };
 
 function availabilityItemId(item: AvailabilityItem): string {
+  if (item.resaleListingId) return `resale:${item.resaleListingId}`;
   if (item.ticketTypeId) return `ticket:${item.ticketTypeId}:${item.eventOccurrenceId ?? 'event'}`;
   if (item.productId) return `product:${item.productId}`;
   return item.name;
 }
 
 function cartItemId(item: CartItem): string {
+  if (item.resaleListingId) return `resale:${item.resaleListingId}`;
   if (item.ticketTypeId) return `ticket:${item.ticketTypeId}:${item.occurrenceId ?? 'event'}`;
   if (item.productId) return `product:${item.productId}`;
   return '';
@@ -116,6 +120,7 @@ export default function CheckoutFlow({
   affiliateCode,
   prefilledItemsParam,
   productFilterParam,
+  resaleListingId,
 }: Props) {
   const router = useRouter();
   const [eventId, setEventId] = useState(initialEventId);
@@ -123,6 +128,7 @@ export default function CheckoutFlow({
   const [sessionToken, setSessionToken] = useState(initialSessionToken);
   const [event, setEvent] = useState<PublicEvent | null>(null);
   const [availability, setAvailability] = useState<AvailabilityItem[]>([]);
+  const [resaleListing, setResaleListing] = useState<CheckoutPublicResaleListing | null>(null);
   const [questions, setQuestions] = useState<QuestionsResponse | null>(null);
   const [quantities, setQuantities] = useState<Record<string, number>>({});
   const [donationAmounts, setDonationAmounts] = useState<Record<string, number>>({});
@@ -173,13 +179,30 @@ export default function CheckoutFlow({
     [productFilterParam],
   );
 
-  const visibleAvailability = useMemo(
-    () =>
-      productFilter
-        ? availability.filter((item) => productFilterMatches(item, productFilter))
-        : availability,
-    [availability, productFilter],
-  );
+  const visibleAvailability = useMemo(() => {
+    if (resaleListing) {
+      return [
+        {
+          type: 'resale' as const,
+          resaleListingId: resaleListing.id,
+          name: resaleListing.ticketTypeName
+            ? `Resale ticket - ${resaleListing.ticketTypeName}`
+            : 'Resale ticket',
+          description: 'Verified resale ticket from another attendee.',
+          kind: 'resale' as const,
+          priceCents: resaleListing.priceCents,
+          currency: resaleListing.currency,
+          minPerOrder: 1,
+          maxPerOrder: 1,
+          available: 1,
+          status: 'active',
+        },
+      ];
+    }
+    return productFilter
+      ? availability.filter((item) => productFilterMatches(item, productFilter))
+      : availability;
+  }, [availability, productFilter, resaleListing]);
   const prefilledItems = useMemo(() => parseItemsParam(prefilledItemsParam), [prefilledItemsParam]);
 
   // Determine if the cart contains any ticket that requires an access code.
@@ -200,6 +223,8 @@ export default function CheckoutFlow({
   const accessCodeApplied = unlockedTicketTypeIds.size > 0;
 
   const selectedItems = useMemo<CartItem[]>(() => {
+    if (resaleListing) return [{ resaleListingId: resaleListing.id, quantity: 1 }];
+
     const baseItems: CartItem[] = [];
     for (const item of visibleAvailability) {
       const itemId = availabilityItemId(item);
@@ -248,7 +273,7 @@ export default function CheckoutFlow({
       }
       return Object.assign({}, item, { attendeeFields });
     });
-  }, [visibleAvailability, quantities, donationAmounts, questions, attendeeAnswers]);
+  }, [visibleAvailability, quantities, donationAmounts, questions, attendeeAnswers, resaleListing]);
 
   const previewTotal = useMemo(
     () =>
@@ -274,7 +299,7 @@ export default function CheckoutFlow({
           (candidate) => availabilityItemId(candidate) === cartItemId(item),
         );
         return {
-          id: item.ticketTypeId ?? item.productId,
+          id: item.resaleListingId ?? item.ticketTypeId ?? item.productId,
           name: availabilityItem?.name,
           quantity: item.quantity,
           priceCents: item.unitAmountCents ?? availabilityItem?.priceCents,
@@ -422,13 +447,27 @@ export default function CheckoutFlow({
       setInitialLoading(true);
       setError(null);
       try {
-        const [loadedEvent, loadedAvailability] = await Promise.all([
+        const [loadedEvent, loadedAvailability, resaleListings] = await Promise.all([
           publicApi.getEvent(eventId, controller.signal),
           publicApi.getAvailability(eventId, controller.signal, productFilterParam),
+          resaleListingId
+            ? publicApi.getResaleListings(eventId, controller.signal)
+            : Promise.resolve({ items: [] }),
         ]);
         if (cancelled) return;
+        const selectedResaleListing = resaleListingId
+          ? resaleListings.items.find((listing) => listing.id === resaleListingId)
+          : undefined;
+        if (resaleListingId && !selectedResaleListing) {
+          throw new CheckoutApiError(
+            'RESALE_LISTING_UNAVAILABLE',
+            'This resale ticket is no longer available.',
+            404,
+          );
+        }
         setEvent(loadedEvent);
         setAvailability(loadedAvailability);
+        setResaleListing(selectedResaleListing ?? null);
         setQuantities((current) => {
           const initialPrefilledItems = didApplyPrefilledItemsRef.current ? [] : prefilledItems;
           const next: Record<string, number> = {};
@@ -482,7 +521,7 @@ export default function CheckoutFlow({
       cancelled = true;
       controller.abort();
     };
-  }, [eventId, prefilledItems, productFilterParam]);
+  }, [eventId, prefilledItems, productFilterParam, resaleListingId]);
 
   useEffect(() => {
     if (!waitlistClaimToken) return;
@@ -706,9 +745,9 @@ export default function CheckoutFlow({
         ),
         // Pass both discountCode and accessCode when both are set, so buyers
         // can use a promo code alongside an access code for locked tickets.
-        discountCode: discountCode || undefined,
-        accessCode: accessCodeApplied ? accessCode : undefined,
-        waitlistClaimToken: waitlistClaimToken || undefined,
+        discountCode: resaleListing ? undefined : discountCode || undefined,
+        accessCode: resaleListing ? undefined : accessCodeApplied ? accessCode : undefined,
+        waitlistClaimToken: resaleListing ? undefined : waitlistClaimToken || undefined,
         trackingId,
         affiliateCode,
         successUrl,
@@ -907,7 +946,25 @@ export default function CheckoutFlow({
                   <CardTitle>Select tickets</CardTitle>
                 </CardHeader>
                 <CardContent className="space-y-5">
-                  {visibleAvailability.length === 0 ? (
+                  {resaleListing ? (
+                    <div className="rounded-lg border bg-card p-4">
+                      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                        <div className="min-w-0">
+                          <p className="font-medium">
+                            {resaleListing.ticketTypeName
+                              ? `Resale ticket - ${resaleListing.ticketTypeName}`
+                              : 'Resale ticket'}
+                          </p>
+                          <p className="text-sm text-muted-foreground">
+                            Verified resale ticket. Quantity is fixed at 1.
+                          </p>
+                        </div>
+                        <p className="font-semibold tabular-nums">
+                          {formatCurrency(resaleListing.priceCents, resaleListing.currency)}
+                        </p>
+                      </div>
+                    </div>
+                  ) : visibleAvailability.length === 0 ? (
                     <EmptyState
                       icon={TicketIcon}
                       title="No tickets available"
@@ -930,7 +987,7 @@ export default function CheckoutFlow({
 
                   <Separator />
 
-                  {hasVisibleLockedTicket ? (
+                  {!resaleListing && hasVisibleLockedTicket ? (
                     <div className="space-y-4">
                       <div className="space-y-2">
                         <p className="text-sm font-medium">Access code</p>
@@ -946,16 +1003,18 @@ export default function CheckoutFlow({
                     </div>
                   ) : null}
 
-                  <div className="space-y-2">
-                    <p className="text-sm font-medium">Have a promo code?</p>
-                    <PromoInput
-                      initialCode={discountCode}
-                      disabled={loading}
-                      applied={promoApplied}
-                      onApply={applyDiscount}
-                      onRemove={removeDiscount}
-                    />
-                  </div>
+                  {!resaleListing ? (
+                    <div className="space-y-2">
+                      <p className="text-sm font-medium">Have a promo code?</p>
+                      <PromoInput
+                        initialCode={discountCode}
+                        disabled={loading}
+                        applied={promoApplied}
+                        onApply={applyDiscount}
+                        onRemove={removeDiscount}
+                      />
+                    </div>
+                  ) : null}
                 </CardContent>
               </Card>
             ) : null}

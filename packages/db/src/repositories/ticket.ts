@@ -151,6 +151,8 @@ export class TicketListingRepository extends BaseRepository {
         face_value_cents: input.faceValueCents,
         sold_to_id: null,
         active_listing_key: input.ticketId,
+        reserved_checkout_session_id: null,
+        reserved_until: null,
         expires_at: input.expiresAt ?? null,
         sold_at: null,
         created_at: now,
@@ -189,6 +191,84 @@ export class TicketListingRepository extends BaseRepository {
     return query.execute();
   }
 
+  async findPublicAvailableByEvent(input: {
+    tenantId: string;
+    eventId: string;
+    limit: number;
+    cursor?: string;
+    now?: Date;
+  }) {
+    const now = input.now ?? new Date();
+    let query = this.db
+      .selectFrom('ticket_listings')
+      .selectAll()
+      .where('tenant_id', '=', input.tenantId)
+      .where('event_id', '=', input.eventId)
+      .where('status', '=', 'listed')
+      .where((eb) => eb.or([eb('expires_at', 'is', null), eb('expires_at', '>', now)]))
+      .where((eb) =>
+        eb.or([
+          eb('reserved_checkout_session_id', 'is', null),
+          eb('reserved_until', 'is', null),
+          eb('reserved_until', '<=', now),
+        ]),
+      )
+      .orderBy('id', 'asc')
+      .limit(input.limit);
+    if (input.cursor) query = query.where('id', '>', input.cursor);
+    return query.execute();
+  }
+
+  async reserveForCheckout(input: {
+    tenantId: string;
+    listingId: string;
+    checkoutSessionId: string;
+    reservedUntil: Date;
+    now?: Date;
+  }) {
+    const now = input.now ?? new Date();
+    const result = await this.db
+      .updateTable('ticket_listings')
+      .set({
+        reserved_checkout_session_id: input.checkoutSessionId,
+        reserved_until: input.reservedUntil,
+        updated_at: now,
+      })
+      .where('tenant_id', '=', input.tenantId)
+      .where('id', '=', input.listingId)
+      .where('status', '=', 'listed')
+      .where((eb) =>
+        eb.or([
+          eb('reserved_checkout_session_id', 'is', null),
+          eb('reserved_checkout_session_id', '=', input.checkoutSessionId),
+          eb('reserved_until', '<=', now),
+        ]),
+      )
+      .where((eb) => eb.or([eb('expires_at', 'is', null), eb('expires_at', '>', now)]))
+      .executeTakeFirst();
+    if (Number(result.numUpdatedRows ?? 0) !== 1) return undefined;
+    return this.findById(input.listingId);
+  }
+
+  async releaseCheckoutReservation(input: {
+    tenantId: string;
+    listingId: string;
+    checkoutSessionId: string;
+  }) {
+    await this.db
+      .updateTable('ticket_listings')
+      .set({
+        reserved_checkout_session_id: null,
+        reserved_until: null,
+        updated_at: new Date(),
+      })
+      .where('tenant_id', '=', input.tenantId)
+      .where('id', '=', input.listingId)
+      .where('reserved_checkout_session_id', '=', input.checkoutSessionId)
+      .where('status', '=', 'listed')
+      .execute();
+  }
+
   async delist(id: string) {
     return this.setTerminalStatus(id, 'delisted');
   }
@@ -203,6 +283,8 @@ export class TicketListingRepository extends BaseRepository {
       sold_to_id: buyerId,
       sold_at: new Date(),
       active_listing_key: id,
+      reserved_checkout_session_id: null,
+      reserved_until: null,
       updated_at: new Date(),
     });
     return this.findByIdOrThrow(id);
@@ -226,6 +308,8 @@ export class TicketListingRepository extends BaseRepository {
         sold_to_id: null,
         sold_at: null,
         active_listing_key: listing.ticket_id,
+        reserved_checkout_session_id: null,
+        reserved_until: null,
         expires_at: input.expiresAt ?? null,
         updated_at: new Date(),
       })
@@ -242,6 +326,8 @@ export class TicketListingRepository extends BaseRepository {
     await this.updateListedListing(id, {
       status,
       active_listing_key: id,
+      reserved_checkout_session_id: null,
+      reserved_until: null,
       updated_at: new Date(),
     });
     return this.findByIdOrThrow(id);

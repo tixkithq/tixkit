@@ -22,6 +22,128 @@ export type SeededPaidPromoCheckoutEvent = SeededPaidCheckoutEvent & {
   discountCode: { id: string; code: string; discountCents: number };
 };
 
+export async function seedPublishedEventPageContent(input: {
+  event: { id: string; title: string };
+  suffix: string;
+}): Promise<void> {
+  const now = new Date();
+  const safeSuffix = compactIdPart(input.suffix, 24);
+  const documentId = `doc_evt_${safeSuffix}`.slice(0, 32);
+  const versionId = `ver_evt_${safeSuffix}`.slice(0, 32);
+  const summary = `Public resale checkout coverage for ${input.event.title}.`;
+  const contentJson = {
+    schemaVersion: 1,
+    editor: {
+      provider: '@tiptap/core',
+      document: {
+        type: 'doc',
+        content: [{ type: 'paragraph', content: [{ type: 'text', text: summary }] }],
+      },
+    },
+    settings: {
+      locale: 'en',
+      ticketCtaLabel: 'Get tickets',
+      discovery: {
+        summary,
+        tags: ['resale', 'checkout'],
+        seoTitle: input.event.title,
+        seoDescription: summary,
+      },
+    },
+    blocks: [
+      {
+        type: 'hero',
+        id: 'hero',
+        headline: input.event.title,
+        body: summary,
+        ctaLabel: 'Get tickets',
+        ctaUrl: '{{event.checkoutUrl}}',
+      },
+      {
+        type: 'tickets',
+        id: 'tickets',
+        title: 'Tickets',
+        body: 'Choose your tickets and continue through secure checkout.',
+        ctaLabel: 'Get tickets',
+      },
+    ],
+  };
+
+  await withE2eDb(async (db) => {
+    await db
+      .insertInto('content_documents')
+      .values({
+        id: documentId,
+        tenant_id: devTenantId,
+        organization_id: devOrganizationId,
+        brand_id: devBrandId,
+        event_id: input.event.id,
+        channel: 'event_page',
+        key: 'main',
+        name: `E2E event page ${safeSuffix}`,
+        status: 'published',
+        locale: 'en',
+        current_draft_version_id: null,
+        published_version_id: versionId,
+        created_at: now,
+        updated_at: now,
+      })
+      .onConflict((oc) =>
+        oc.column('id').doUpdateSet({
+          tenant_id: devTenantId,
+          organization_id: devOrganizationId,
+          brand_id: devBrandId,
+          event_id: input.event.id,
+          channel: 'event_page',
+          key: 'main',
+          name: `E2E event page ${safeSuffix}`,
+          status: 'published',
+          locale: 'en',
+          published_version_id: versionId,
+          updated_at: now,
+        }),
+      )
+      .execute();
+
+    await db
+      .insertInto('content_document_versions')
+      .values({
+        id: versionId,
+        document_id: documentId,
+        version_number: 1,
+        status: 'published',
+        schema_version: 1,
+        subject: input.event.title,
+        preview_text: summary,
+        content_json: JSON.stringify(contentJson),
+        rendered_html: '',
+        rendered_text: summary,
+        variables: JSON.stringify([]),
+        validation: JSON.stringify({ valid: true, severity: 'warning', issues: [] }),
+        created_by: 'e2e',
+        created_at: now,
+        published_at: now,
+      })
+      .onConflict((oc) =>
+        oc.column('id').doUpdateSet({
+          document_id: documentId,
+          version_number: 1,
+          status: 'published',
+          schema_version: 1,
+          subject: input.event.title,
+          preview_text: summary,
+          content_json: JSON.stringify(contentJson),
+          rendered_html: '',
+          rendered_text: summary,
+          variables: JSON.stringify([]),
+          validation: JSON.stringify({ valid: true, severity: 'warning', issues: [] }),
+          published_at: now,
+        }),
+      )
+      .execute();
+  });
+}
+
 export type SeededTicketVariantCheckoutEvent = {
   event: { id: string; title: string };
   accessCode: string;
@@ -144,6 +266,31 @@ export type PaidCheckoutCaptureState = {
       contentEncoding?: 'base64';
     }>;
   } | null;
+};
+
+export type ResalePurchaseState = {
+  listing: {
+    status: string;
+    ticketId: string;
+    soldToId: string | null;
+  };
+  buyerOrder: {
+    id: string;
+    status: string;
+    buyerEmail: string | null;
+    totalCents: number;
+  };
+  lineItems: Array<{
+    resaleListingId: string | null;
+    totalCents: number;
+  }>;
+  buyerTickets: Array<{ id: string; status: string; orderId: string | null }>;
+  sellerTicket: {
+    id: string;
+    status: string;
+    transferredToEmail: string | null;
+    orderId: string | null;
+  };
 };
 
 export type OrphanPaymentCompensationState = {
@@ -954,6 +1101,7 @@ export async function seedPaidRefundableOrder(
           order_id: orderId,
           ticket_type_id: ticketType.id,
           product_id: null,
+          resale_listing_id: null,
           attendee_id: null,
           description: ticketType.name,
           quantity: 2,
@@ -1484,6 +1632,75 @@ export async function readPaidCheckoutCaptureState(
             attachments,
           }
         : null,
+    };
+  });
+}
+
+export async function readResalePurchaseState(input: {
+  listingId: string;
+  buyerEmail: string;
+}): Promise<ResalePurchaseState> {
+  return withE2eDb(async (db) => {
+    const listing = await db
+      .selectFrom('ticket_listings')
+      .select(['ticket_id', 'status', 'sold_to_id'])
+      .where('id', '=', input.listingId)
+      .executeTakeFirstOrThrow();
+    if (!listing.sold_to_id) {
+      throw new Error(`Resale listing ${input.listingId} has not been sold`);
+    }
+
+    const [buyerOrder, lineItems, buyerTickets, sellerTicket] = await Promise.all([
+      db
+        .selectFrom('orders')
+        .select(['id', 'status', 'buyer_email', 'total_cents'])
+        .where('id', '=', listing.sold_to_id)
+        .where('buyer_email', '=', input.buyerEmail)
+        .executeTakeFirstOrThrow(),
+      db
+        .selectFrom('order_line_items')
+        .select(['resale_listing_id', 'total_cents'])
+        .where('order_id', '=', listing.sold_to_id)
+        .execute(),
+      db
+        .selectFrom('tickets')
+        .select(['id', 'status', 'order_id'])
+        .where('order_id', '=', listing.sold_to_id)
+        .execute(),
+      db
+        .selectFrom('tickets')
+        .select(['id', 'status', 'transferred_to_email', 'order_id'])
+        .where('id', '=', listing.ticket_id)
+        .executeTakeFirstOrThrow(),
+    ]);
+
+    return {
+      listing: {
+        status: listing.status,
+        ticketId: listing.ticket_id,
+        soldToId: listing.sold_to_id,
+      },
+      buyerOrder: {
+        id: buyerOrder.id,
+        status: buyerOrder.status,
+        buyerEmail: buyerOrder.buyer_email,
+        totalCents: Number(buyerOrder.total_cents),
+      },
+      lineItems: lineItems.map((item) => ({
+        resaleListingId: item.resale_listing_id,
+        totalCents: Number(item.total_cents),
+      })),
+      buyerTickets: buyerTickets.map((ticket) => ({
+        id: ticket.id,
+        status: ticket.status,
+        orderId: ticket.order_id,
+      })),
+      sellerTicket: {
+        id: sellerTicket.id,
+        status: sellerTicket.status,
+        transferredToEmail: sellerTicket.transferred_to_email,
+        orderId: sellerTicket.order_id,
+      },
     };
   });
 }

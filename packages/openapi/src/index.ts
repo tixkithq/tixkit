@@ -732,7 +732,7 @@ export const openApiSpec = {
           eventId: { type: 'string' },
           eventOccurrenceId: { type: 'string' },
           name: { type: 'string' },
-          kind: { type: 'string', enum: ['free', 'paid', 'donation'] },
+          kind: { type: 'string', enum: ['free', 'paid', 'donation', 'product'] },
           status: { type: 'string', enum: ['draft', 'active', 'paused', 'sold_out', 'ended'] },
           visibility: { type: 'string', enum: ['public', 'hidden', 'locked'] },
           currency: { type: 'string' },
@@ -1118,6 +1118,61 @@ export const openApiSpec = {
         },
         required: ['buyerQuestions', 'attendeeQuestions'],
       },
+      PublicTicketListing: {
+        type: 'object',
+        properties: {
+          id: { type: 'string' },
+          eventId: { type: 'string' },
+          ticketTypeId: { type: 'string' },
+          ticketTypeName: { type: 'string' },
+          status: { type: 'string', enum: ['listed'] },
+          priceCents: { type: 'integer', minimum: 0 },
+          currency: { type: 'string', minLength: 3, maxLength: 3 },
+          faceValueCents: { type: 'integer', minimum: 0 },
+          expiresAt: { type: 'string', format: 'date-time' },
+          createdAt: { type: 'string', format: 'date-time' },
+          updatedAt: { type: 'string', format: 'date-time' },
+        },
+        required: [
+          'id',
+          'eventId',
+          'status',
+          'priceCents',
+          'currency',
+          'faceValueCents',
+          'createdAt',
+          'updatedAt',
+        ],
+      },
+      PublicTicketListingPage: {
+        type: 'object',
+        properties: {
+          items: { type: 'array', items: { $ref: '#/components/schemas/PublicTicketListing' } },
+          nextCursor: { type: ['string', 'null'] },
+          hasMore: { type: 'boolean' },
+        },
+        required: ['items', 'nextCursor', 'hasMore'],
+      },
+      CheckoutQuoteLineItem: {
+        type: 'object',
+        properties: {
+          type: { type: 'string', enum: ['ticket', 'product', 'resale'] },
+          ticketTypeId: { type: 'string' },
+          productId: { type: 'string' },
+          resaleListingId: { type: 'string' },
+          name: { type: 'string' },
+          description: { type: 'string' },
+          quantity: { type: 'integer' },
+          unitPriceCents: { type: 'integer' },
+          unitAmountCents: { type: 'integer' },
+          subtotalCents: { type: 'integer' },
+          discountCents: { type: 'integer' },
+          taxCents: { type: 'integer' },
+          feeCents: { type: 'integer' },
+          totalCents: { type: 'integer' },
+        },
+        required: ['quantity', 'totalCents'],
+      },
       CheckoutSession: {
         type: 'object',
         properties: {
@@ -1138,7 +1193,10 @@ export const openApiSpec = {
               discountCents: { type: 'integer' },
               taxCents: { type: 'integer' },
               feeCents: { type: 'integer' },
-              lineItems: { type: 'array', items: { type: 'object' } },
+              lineItems: {
+                type: 'array',
+                items: { $ref: '#/components/schemas/CheckoutQuoteLineItem' },
+              },
             },
             required: ['totalCents', 'subtotalCents', 'discountCents', 'taxCents', 'feeCents'],
           },
@@ -1416,6 +1474,7 @@ export const openApiSpec = {
           ticketTypeId: { type: 'string' },
           eventOccurrenceId: { type: 'string' },
           productId: { type: 'string' },
+          resaleListingId: { type: 'string' },
           description: { type: 'string' },
           quantity: { type: 'integer' },
           unitPriceCents: { type: 'integer' },
@@ -3693,6 +3752,31 @@ export const openApiSpec = {
         },
       },
     },
+    '/public/events/{eventId}/resale-listings': {
+      get: {
+        summary: 'List public resale listings (no auth, buyer-safe fields only)',
+        parameters: [
+          { name: 'eventId', in: 'path', required: true, schema: { type: 'string' } },
+          { name: 'cursor', in: 'query', required: false, schema: { type: 'string' } },
+          {
+            name: 'limit',
+            in: 'query',
+            required: false,
+            schema: { type: 'integer', minimum: 1, maximum: 50, default: 50 },
+          },
+        ],
+        responses: {
+          '200': {
+            description: 'Buyer-facing resale listings for a published event',
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/PublicTicketListingPage' },
+              },
+            },
+          },
+        },
+      },
+    },
     '/public/events/{eventId}/occurrences': {
       get: {
         summary: 'List public event occurrences',
@@ -3998,6 +4082,7 @@ export const openApiSpec = {
                         ticketTypeId: { type: 'string' },
                         occurrenceId: { type: 'string' },
                         productId: { type: 'string' },
+                        resaleListingId: { type: 'string' },
                         quantity: { type: 'integer', minimum: 1 },
                         unitAmountCents: { type: 'integer' },
                         attendeeFields: { type: 'array', items: { type: 'object' } },
@@ -4005,11 +4090,31 @@ export const openApiSpec = {
                       oneOf: [
                         {
                           required: ['ticketTypeId', 'quantity'],
-                          not: { required: ['productId'] },
+                          not: {
+                            anyOf: [{ required: ['productId'] }, { required: ['resaleListingId'] }],
+                          },
                         },
                         {
                           required: ['productId', 'quantity'],
-                          not: { required: ['ticketTypeId'] },
+                          not: {
+                            anyOf: [
+                              { required: ['ticketTypeId'] },
+                              { required: ['resaleListingId'] },
+                            ],
+                          },
+                        },
+                        {
+                          required: ['resaleListingId', 'quantity'],
+                          properties: { quantity: { const: 1 } },
+                          not: {
+                            anyOf: [
+                              { required: ['ticketTypeId'] },
+                              { required: ['productId'] },
+                              { required: ['occurrenceId'] },
+                              { required: ['unitAmountCents'] },
+                              { required: ['attendeeFields'] },
+                            ],
+                          },
                         },
                       ],
                     },
@@ -4678,7 +4783,11 @@ export const openApiSpec = {
                   buyerFirstName: { type: ['string', 'null'], minLength: 1 },
                   buyerLastName: { type: ['string', 'null'], minLength: 1 },
                   buyerPhone: { type: ['string', 'null'], minLength: 1 },
-                  externalPaymentReference: { type: ['string', 'null'], minLength: 1, maxLength: 256 },
+                  externalPaymentReference: {
+                    type: ['string', 'null'],
+                    minLength: 1,
+                    maxLength: 256,
+                  },
                 },
                 required: ['buyerId', 'buyerEmail'],
               },
@@ -4689,7 +4798,9 @@ export const openApiSpec = {
           '200': {
             description: 'Resale listing completed and buyer ticket issued',
             content: {
-              'application/json': { schema: { $ref: '#/components/schemas/TicketResaleCompletion' } },
+              'application/json': {
+                schema: { $ref: '#/components/schemas/TicketResaleCompletion' },
+              },
             },
           },
         },

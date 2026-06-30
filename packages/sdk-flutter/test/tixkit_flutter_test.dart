@@ -36,6 +36,18 @@ void main() {
     );
   });
 
+  test('builds resale checkout handoff URLs', () {
+    final uri = tixkitCheckoutHandoffUri(
+      const TixkitCheckoutHandoffOptions(
+        checkoutBaseUrl: 'https://checkout.example.test',
+        eventId: 'evt_1',
+        items: [TixkitCheckoutHandoffItem(resaleListingId: 'lst_1', quantity: 1)],
+      ),
+    );
+
+    expect(uri.toString(), 'https://checkout.example.test/checkout?eventId=evt_1&resaleListing=lst_1');
+  });
+
   test('fetches public event pages and discovery cards', () async {
     final urls = <String>[];
     final client = TixkitPublicEventPageClient(
@@ -44,6 +56,17 @@ void main() {
         urls.add(request.url.toString());
         expect(request.headers['X-Device-Id'], isNull);
         expect(request.headers['Authorization'], isNull);
+        if (request.url.path.endsWith('/resale-listings')) {
+          return http.Response(
+            jsonEncode({
+              'items': [
+                {'id': 'lst_1', 'eventId': 'evt_1', 'status': 'listed', 'priceCents': 5500, 'currency': 'USD', 'faceValueCents': 5000},
+              ],
+              'hasMore': false,
+            }),
+            200,
+          );
+        }
         if (request.url.path.endsWith('/discovery-card')) {
           return http.Response(
             jsonEncode({
@@ -96,12 +119,15 @@ void main() {
     await client.getEventPageBySlug('all-access', host: 'events.example.com', locale: 'en');
     final card = await client.getEventDiscoveryCard('evt_1');
     expect(card.venueName, 'The Salt Shed');
+    final listings = await client.listResaleListings('evt_1', cursor: 'lst_0', limit: 25);
+    expect(listings.items.single.id, 'lst_1');
 
     expect(urls, [
       'https://api.test/v1/public/events/evt_1/content-page?locale=en',
       'https://api.test/v1/public/events/evt_1/page?locale=en',
       'https://api.test/v1/public/events/by-slug/all-access/page?host=events.example.com&locale=en',
       'https://api.test/v1/public/events/evt_1/discovery-card',
+      'https://api.test/v1/public/events/evt_1/resale-listings?cursor=lst_0&limit=25',
     ]);
   });
 

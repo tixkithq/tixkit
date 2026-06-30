@@ -39,6 +39,7 @@ import { OfflineCheckInBulkSyncHardeningMigration } from './migrations/0035_offl
 import { OrganizationBoxOfficeSettingsMigration } from './migrations/0036_organization_box_office_settings.js';
 import { TicketListingsMigration } from './migrations/0037_ticket_listings.js';
 import { EventResalePolicyMigration } from './migrations/0038_event_resale_policy.js';
+import { ResaleCheckoutReservationsMigration } from './migrations/0039_resale_checkout_reservations.js';
 
 const INITIAL_MIGRATION_NAME = '0001_initial';
 const MIGRATION_TABLE = 'kysely_migration';
@@ -201,6 +202,7 @@ export class TixkitMigrationProvider implements MigrationProvider {
       '0036_organization_box_office_settings': OrganizationBoxOfficeSettingsMigration,
       '0037_ticket_listings': TicketListingsMigration,
       '0038_event_resale_policy': EventResalePolicyMigration,
+      '0039_resale_checkout_reservations': ResaleCheckoutReservationsMigration,
     };
   }
 }
