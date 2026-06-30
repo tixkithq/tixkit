@@ -12,6 +12,7 @@ import {
   InventoryPoolRepository,
   ProductCategoryRepository,
   ProductRepository,
+  type Database,
 } from '@tixkit/db';
 import { NotFoundError, ResaleError, ValidationError, validateResalePrice } from '@tixkit/domain';
 import { withIdempotency, hashRequest } from '../../services/idempotency.js';
@@ -92,6 +93,56 @@ async function assertNoExistingAccessRuleDuplicates(
   );
   if (duplicate) {
     throw new ValidationError(`Access rule already exists: ${duplicate.value}`);
+  }
+}
+
+async function assertInventoryPoolReassignmentAllowed(
+  db: Database,
+  input: {
+    ticketTypeId: string;
+    currentInventoryPoolId: string;
+    nextInventoryPoolId?: unknown;
+  },
+) {
+  if (
+    typeof input.nextInventoryPoolId !== 'string' ||
+    input.nextInventoryPoolId === input.currentInventoryPoolId
+  ) {
+    return;
+  }
+
+  const [hold, orderLineItem, ticket, waitlistEntry] = await Promise.all([
+    db
+      .selectFrom('checkout_holds')
+      .select('id')
+      .where('ticket_type_id', '=', input.ticketTypeId)
+      .limit(1)
+      .executeTakeFirst(),
+    db
+      .selectFrom('order_line_items')
+      .select('id')
+      .where('ticket_type_id', '=', input.ticketTypeId)
+      .limit(1)
+      .executeTakeFirst(),
+    db
+      .selectFrom('tickets')
+      .select('id')
+      .where('ticket_type_id', '=', input.ticketTypeId)
+      .limit(1)
+      .executeTakeFirst(),
+    db
+      .selectFrom('waitlist_entries')
+      .select('id')
+      .where('ticket_type_id', '=', input.ticketTypeId)
+      .where('status', 'in', ['joined', 'offered'])
+      .limit(1)
+      .executeTakeFirst(),
+  ]);
+
+  if (hold || orderLineItem || ticket || waitlistEntry) {
+    throw new ValidationError(
+      'Inventory pool cannot be changed after holds, orders, tickets, or active waitlist entries exist for this ticket type',
+    );
   }
 }
 
@@ -637,6 +688,11 @@ export const ticketingRoutes: FastifyPluginAsync = async (app) => {
       if (!pool || pool.event_id !== existing.event_id) {
         throw new NotFoundError('InventoryPool', updateData.inventory_pool_id as string);
       }
+      await assertInventoryPoolReassignmentAllowed(db, {
+        ticketTypeId,
+        currentInventoryPoolId: existing.inventory_pool_id,
+        nextInventoryPoolId: updateData.inventory_pool_id,
+      });
     }
     if ('event_occurrence_id' in updateData) {
       await validateEventOccurrence(
@@ -664,6 +720,11 @@ export const ticketingRoutes: FastifyPluginAsync = async (app) => {
       if (!pool || pool.event_id !== existing.event_id) {
         throw new NotFoundError('InventoryPool', body.ticketType.inventoryPoolId);
       }
+      await assertInventoryPoolReassignmentAllowed(db, {
+        ticketTypeId,
+        currentInventoryPoolId: existing.inventory_pool_id,
+        nextInventoryPoolId: body.ticketType.inventoryPoolId,
+      });
     }
     await validateEventOccurrence(existing.event_id, body.ticketType.eventOccurrenceId);
 
