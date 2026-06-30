@@ -74,6 +74,7 @@ function createMockDb(tables: Record<string, unknown> = {}): unknown {
           filters.every(([column, op, value]) => {
             const rowValue = getMockColumnValue(row, column);
             if (op === '=') return mockValuesEqual(rowValue, value);
+            if (op === 'in' && Array.isArray(value)) return value.includes(rowValue);
             if (op === 'is') return value === null ? rowValue === null : rowValue === value;
             if (op === 'is not') return value === null ? rowValue !== null : rowValue !== value;
             if (op === 'like') return likePatternMatches(rowValue, value);
@@ -126,6 +127,7 @@ function createMockDb(tables: Record<string, unknown> = {}): unknown {
             filters.every(([column, op, value]) => {
               const rowValue = getMockColumnValue(row, column);
               if (op === '=') return mockValuesEqual(rowValue, value);
+              if (op === 'in' && Array.isArray(value)) return value.includes(rowValue);
               if (op === 'is') return value === null ? rowValue === null : rowValue === value;
               if (op === 'is not') return value === null ? rowValue !== null : rowValue !== value;
               return true;
@@ -188,16 +190,17 @@ function createMockDb(tables: Record<string, unknown> = {}): unknown {
     };
   }
 
-  return {
+  const mockDb = {
     selectFrom: createQuery,
     updateTable: createUpdate,
     insertInto: createInsert,
     deleteFrom: createDelete,
     transaction: () => ({
-      execute: async (fn: (trx: unknown) => Promise<unknown>) => fn({}),
+      execute: async (fn: (trx: unknown) => Promise<unknown>) => fn(mockDb),
     }),
     destroy: vi.fn(),
   };
+  return mockDb;
 }
 
 function createDelete(_table: string) {
@@ -381,6 +384,153 @@ async function setupApp(
   await app.register(routes);
   return app;
 }
+
+describe('ticketing route inventory pool invariants', () => {
+  const now = new Date('2026-06-01T00:00:00.000Z');
+  const ticketPrincipal = () =>
+    makePrincipal({ scopes: [...makePrincipal().scopes, 'tickets.write'] });
+
+  const event = {
+    id: 'evt_1',
+    tenant_id: 'tnt_1',
+    organization_id: 'org_1',
+    brand_id: 'brd_1',
+    status: 'published',
+    slug: 'evt',
+    title: 'Event',
+    timezone: 'UTC',
+    starts_at: now,
+    visibility: 'public',
+    seo: '{}',
+    created_at: now,
+    updated_at: now,
+  };
+
+  const ticketType = {
+    id: 'tt_1',
+    event_id: 'evt_1',
+    inventory_pool_id: 'ip_old',
+    name: 'General admission',
+    description: null,
+    kind: 'paid',
+    status: 'active',
+    visibility: 'public',
+    currency: 'USD',
+    price_cents: 2500,
+    minimum_price_cents: null,
+    sales_start_at: null,
+    sales_end_at: null,
+    min_per_order: 1,
+    max_per_order: 10,
+    requires_access_code: false,
+    access_code_hint: null,
+    event_occurrence_id: null,
+    sort_order: 0,
+    created_at: now,
+    updated_at: now,
+  };
+
+  const pools = [
+    {
+      id: 'ip_old',
+      event_id: 'evt_1',
+      name: 'Original pool',
+      total_capacity: 10,
+      reserved_count: 0,
+      sold_count: 1,
+      hold_ttl_seconds: 900,
+      created_at: now,
+      updated_at: now,
+    },
+    {
+      id: 'ip_new',
+      event_id: 'evt_1',
+      name: 'Replacement pool',
+      total_capacity: 10,
+      reserved_count: 0,
+      sold_count: 0,
+      hold_ttl_seconds: 900,
+      created_at: now,
+      updated_at: now,
+    },
+  ];
+
+  it('rejects direct inventory pool changes after checkout holds exist', async () => {
+    const tables = {
+      events: [event],
+      ticket_types: [{ ...ticketType }],
+      inventory_pools: pools,
+      checkout_holds: [
+        {
+          id: 'hold_1',
+          inventory_pool_id: 'ip_old',
+          checkout_session_id: 'cs_1',
+          ticket_type_id: 'tt_1',
+          quantity: 1,
+          status: 'converted',
+          expires_at: now,
+          created_at: now,
+          updated_at: now,
+        },
+      ],
+    };
+    const app = await setupApp(ticketingRoutes, ticketPrincipal(), tables);
+
+    const res = await app.inject({
+      method: 'PATCH',
+      url: '/ticket-types/tt_1',
+      payload: { inventoryPoolId: 'ip_new' },
+    });
+
+    expect(res.statusCode).toBe(400);
+    expect(res.json().message).toContain('Inventory pool cannot be changed');
+    expect((tables.ticket_types[0] as Record<string, unknown>).inventory_pool_id).toBe('ip_old');
+    await app.close();
+  });
+
+  it('rejects batch inventory pool changes after order line items exist', async () => {
+    const tables = {
+      events: [event],
+      ticket_types: [{ ...ticketType }],
+      inventory_pools: pools,
+      order_line_items: [
+        {
+          id: 'oli_1',
+          order_id: 'ord_1',
+          ticket_type_id: 'tt_1',
+          product_id: null,
+          event_occurrence_id: null,
+          resale_listing_id: null,
+          attendee_id: null,
+          description: 'General admission',
+          quantity: 1,
+          unit_price_cents: 2500,
+          subtotal_cents: 2500,
+          discount_cents: 0,
+          tax_cents: 0,
+          fee_cents: 0,
+          total_cents: 2500,
+          currency: 'USD',
+          created_at: now,
+          updated_at: now,
+        },
+      ],
+      access_rules: [],
+    };
+    const app = await setupApp(ticketingRoutes, ticketPrincipal(), tables);
+
+    const res = await app.inject({
+      method: 'PATCH',
+      url: '/ticket-types/tt_1/batch',
+      payload: { ticketType: { inventoryPoolId: 'ip_new' } },
+    });
+
+    expect(res.statusCode).toBe(400);
+    expect(res.json().message).toContain('Inventory pool cannot be changed');
+    expect((tables.ticket_types[0] as Record<string, unknown>).inventory_pool_id).toBe('ip_old');
+    await app.close();
+  });
+});
 
 function customQuestionRow(overrides: Record<string, unknown> = {}) {
   return {
