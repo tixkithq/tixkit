@@ -144,7 +144,33 @@ docker inspect --format '{{index .RepoDigests 0}}' localhost:5000/tixkit-arc-run
 
 Pin the resulting digest in `infra/ci/arc/runner-values.yaml`.
 
-### 5) Install ARC controller
+### 5) Start host-level MSSQL for trusted CI
+
+Postgres/MySQL/Redis/Temporal run as normal GitHub Actions service containers through the ARC dind sidecar. MSSQL is different: the upstream SQL Server image contains `security.capability` xattrs on `sqlservr`, and Docker inside Kata cannot register that layer. Keep MSSQL as a host Docker service and point trusted CI at the host tailnet address.
+
+```bash
+docker run -d --restart=always \
+  --name tixkit-ci-mssql \
+  --memory=12g \
+  -e ACCEPT_EULA=Y \
+  -e MSSQL_PID=Developer \
+  -e MSSQL_SA_PASSWORD=Test-password-12345 \
+  -p 1433:1433 \
+  mcr.microsoft.com/mssql/server:2022-latest
+
+for i in $(seq 1 60); do
+  if docker exec tixkit-ci-mssql /opt/mssql-tools18/bin/sqlcmd \
+    -S localhost -U sa -P Test-password-12345 -C \
+    -Q "IF DB_ID('tixkit') IS NULL CREATE DATABASE tixkit"; then
+    break
+  fi
+  sleep 5
+done
+```
+
+The trusted workflow uses `sqlserver://sa:Test-password-12345@100.103.201.10:1433/tixkit?encrypt=false&trustServerCertificate=true`.
+
+### 6) Install ARC controller
 
 ```bash
 helm install arc \
@@ -155,7 +181,7 @@ helm install arc \
   oci://ghcr.io/actions/actions-runner-controller-charts/gha-runner-scale-set-controller
 ```
 
-### 6) Apply ARC namespace hardening
+### 7) Apply ARC namespace hardening
 
 ```bash
 kubectl apply -f infra/ci/k8s/arc-hardening.yaml
@@ -171,7 +197,7 @@ The manifest adds:
 
 On k3s' default flannel CNI, Kubernetes `NetworkPolicy` resources are accepted but not enforced. Use a NetworkPolicy-capable CNI such as Cilium or Calico before relying on these policies as a boundary.
 
-### 7) Create GitHub auth secret
+### 8) Create GitHub auth secret
 
 ```bash
 kubectl create namespace arc-runners --dry-run=client -o yaml | kubectl apply -f -
@@ -182,7 +208,7 @@ kubectl create secret generic arc-github-auth \
   --from-file=github_app_private_key=/path/to/private-key.pem
 ```
 
-### 8) Install the repo-scoped runner scale set
+### 9) Install the repo-scoped runner scale set
 
 ```bash
 helm install tixkit-epyc-trusted \

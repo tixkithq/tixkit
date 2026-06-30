@@ -275,26 +275,76 @@ jobs:
   integration-tests-mssql:
     name: Integration Tests (MSSQL)
     runs-on: tixkit-epyc-trusted
-    services:
-      mssql:
-        image: mcr.microsoft.com/mssql/server:2022-latest
-        env:
-          ACCEPT_EULA: 'Y'
-          MSSQL_SA_PASSWORD: 'Test-password-12345'
-        ports:
-          - 1433:1433
-        options: >-
-          --health-cmd "/opt/mssql-tools18/bin/sqlcmd -S localhost -U sa -P Test-password-12345 -C -Q 'SELECT 1'"
-          --health-interval 10s
-          --health-timeout 5s
-          --health-retries 20
     env:
       DB_DRIVER: mssql
-      DATABASE_URL_MSSQL: sqlserver://sa:Test-password-12345@localhost:1433/tixkit?trustServerCertificate=true
+      DATABASE_URL_MSSQL: sqlserver://sa:Test-password-12345@100.103.201.10:1433/tixkit?encrypt=false&trustServerCertificate=true
     steps:
       - uses: actions/checkout@v7
       - uses: ./.github/actions/setup-js
       - run: bun install --frozen-lockfile
-      - name: Create MSSQL database
-        run: docker exec "${{ job.services.mssql.id }}" /opt/mssql-tools18/bin/sqlcmd -S localhost -U sa -P Test-password-12345 -C -Q "IF DB_ID('tixkit') IS NULL CREATE DATABASE tixkit"
+      - name: Ensure MSSQL database
+        run: |
+          cat > /tmp/ensure-mssql.mjs <<'EOF'
+          import { Connection, Request } from 'tedious';
+
+          const config = {
+            server: '100.103.201.10',
+            authentication: {
+              type: 'default',
+              options: {
+                userName: 'sa',
+                password: 'Test-password-12345',
+              },
+            },
+            options: {
+              port: 1433,
+              database: 'master',
+              encrypt: false,
+              trustServerCertificate: true,
+              connectTimeout: 5000,
+              requestTimeout: 10000,
+            },
+          };
+
+          function ensureDatabase() {
+            return new Promise((resolve, reject) => {
+              const connection = new Connection(config);
+              connection.on('connect', (error) => {
+                if (error) {
+                  connection.close();
+                  reject(error);
+                  return;
+                }
+
+                const request = new Request(
+                  "IF DB_ID(N'tixkit') IS NULL CREATE DATABASE [tixkit]",
+                  (requestError) => {
+                    connection.close();
+                    if (requestError) reject(requestError);
+                    else resolve();
+                  },
+                );
+                connection.execSql(request);
+              });
+              connection.connect();
+            });
+          }
+
+          let lastError;
+          for (let attempt = 1; attempt <= 60; attempt += 1) {
+            try {
+              await ensureDatabase();
+              console.log('MSSQL ready');
+              process.exit(0);
+            } catch (error) {
+              lastError = error;
+              console.log(`Waiting for MSSQL... (${attempt})`);
+              await new Promise((resolve) => setTimeout(resolve, 5000));
+            }
+          }
+
+          console.error(lastError);
+          process.exit(1);
+          EOF
+          bun /tmp/ensure-mssql.mjs
       - run: bun run --filter @tixkit/db test:mssql
