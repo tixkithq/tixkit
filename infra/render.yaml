@@ -20,6 +20,12 @@ services:
         value: 1
       - key: CORS_ALLOWED_ORIGINS
         value: https://checkout.example.com,https://admin.example.com
+      - key: TEMPORAL_ADDRESS
+        sync: false
+      - key: TEMPORAL_NAMESPACE
+        sync: false
+      - key: TEMPORAL_TASK_QUEUE
+        value: tixkit-production
     plan: starter
 
   - type: worker
@@ -36,6 +42,12 @@ services:
           type: redis
           name: tixkit-redis
           property: connectionString
+      - key: TEMPORAL_ADDRESS
+        sync: false
+      - key: TEMPORAL_NAMESPACE
+        sync: false
+      - key: TEMPORAL_TASK_QUEUE
+        value: tixkit-production
     plan: starter
 
   - type: web

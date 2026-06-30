@@ -58,6 +58,40 @@ export function resolveCorsAllowedOrigins(value: string | undefined, nodeEnv: st
   return configured.length > 0 ? configured : defaultCorsAllowedOrigins(nodeEnv);
 }
 
+function isLocalTemporalAddress(value: string): boolean {
+  const endpoint = value
+    .trim()
+    .toLowerCase()
+    .replace(/^[a-z][a-z0-9+.-]*:\/\//, '')
+    .split('/')[0];
+  const host =
+    endpoint?.startsWith('[') && endpoint.includes(']')
+      ? endpoint.slice(1, endpoint.indexOf(']'))
+      : endpoint?.split(':')[0];
+
+  return host === 'localhost' || host === '::1' || host === '127.0.0.1' || host?.startsWith('127.');
+}
+
+function requireProductionTemporalConfig(): void {
+  const missing = [
+    ['TEMPORAL_ADDRESS', process.env.TEMPORAL_ADDRESS],
+    ['TEMPORAL_NAMESPACE', process.env.TEMPORAL_NAMESPACE],
+    ['TEMPORAL_TASK_QUEUE', process.env.TEMPORAL_TASK_QUEUE],
+  ]
+    .filter(([, value]) => value === undefined || value.trim().length === 0)
+    .map(([name]) => name);
+
+  if (missing.length > 0) {
+    throw new Error(`Production Temporal config requires ${missing.join(', ')}`);
+  }
+
+  if (isLocalTemporalAddress(process.env.TEMPORAL_ADDRESS ?? '')) {
+    throw new Error(
+      'TEMPORAL_ADDRESS must not point to localhost in production. Set it to the managed Temporal endpoint.',
+    );
+  }
+}
+
 function isValidProxyAddressEntry(entry: string): boolean {
   const [address, prefix, extra] = entry.split('/');
   const ipVersion = isIP(address ?? '');
@@ -157,6 +191,9 @@ export function loadConfig(): AppConfig {
     throw new Error(
       'TRUST_PROXY=true is not allowed in production. Set TRUST_PROXY to a numeric hop count or an explicit proxy CIDR/list.',
     );
+  }
+  if (nodeEnv === 'production') {
+    requireProductionTemporalConfig();
   }
 
   return {
