@@ -4,6 +4,7 @@ import { expectNoAxeViolations } from './helpers/axe';
 import { adminBaseUrl, apiBaseUrl, checkoutBaseUrl } from './helpers/env';
 import {
   readPromoCheckoutCaptureState,
+  resignTicketsForOnlineScan,
   seedAffiliateAttributionForOrder,
   seedCheckInListForOrder,
   seedFreeCheckoutEvent,
@@ -21,6 +22,19 @@ const exportCases = [
 ] as const;
 
 const mobileReportViewport = { width: 390, height: 844 } as const;
+
+type AttendanceReport = {
+  eventId: string;
+  totalAttendees: number;
+  checkedIn: number;
+  notCheckedIn: number;
+  checkInRate: number;
+  breakdownByTicketType: Array<{
+    ticketTypeName: string;
+    total: number;
+    checkedIn: number;
+  }>;
+};
 
 async function attachScreenshot(page: Page, testInfo: TestInfo, name: string): Promise<void> {
   await testInfo.attach(name, {
@@ -42,6 +56,53 @@ async function expectJsonStatus<T>(
   const body = await response.json().catch(async () => ({ raw: await response.text() }));
   expect(response.status(), JSON.stringify(body, null, 2)).toBe(expectedStatus);
   return body as T;
+}
+
+async function readAttendanceReport(page: Page, eventId: string): Promise<AttendanceReport> {
+  return expectJsonStatus<AttendanceReport>(
+    await page.request.get(`${apiBaseUrl}/v1/events/${eventId}/reports/attendance`, {
+      failOnStatusCode: false,
+    }),
+    200,
+  );
+}
+
+async function expectCheckedInAttendanceReport(
+  page: Page,
+  eventId: string,
+  ticketTypeName: string,
+): Promise<AttendanceReport> {
+  let latestReport: AttendanceReport | undefined;
+
+  await expect
+    .poll(
+      async () => {
+        latestReport = await readAttendanceReport(page, eventId);
+        return {
+          totalAttendees: latestReport.totalAttendees,
+          checkedIn: latestReport.checkedIn,
+          notCheckedIn: latestReport.notCheckedIn,
+          checkInRate: latestReport.checkInRate,
+          ticketTypeRow: latestReport.breakdownByTicketType.find(
+            (row) => row.ticketTypeName === ticketTypeName,
+          ),
+        };
+      },
+      { message: 'attendance report reflects accepted scan', timeout: 10_000 },
+    )
+    .toMatchObject({
+      totalAttendees: 1,
+      checkedIn: 1,
+      notCheckedIn: 0,
+      checkInRate: 1,
+      ticketTypeRow: expect.objectContaining({
+        ticketTypeName,
+        total: 1,
+        checkedIn: 1,
+      }),
+    });
+
+  return latestReport!;
 }
 
 async function completeSeededFreeCheckout(
@@ -360,6 +421,7 @@ test.describe('admin export workflow coverage', () => {
       product.name,
       buyerEmail,
     );
+    await resignTicketsForOnlineScan(completed.orderId);
     const taxSnapshot = await seedTaxSnapshotForOrder({
       eventId: event.id,
       orderId: completed.orderId,
@@ -371,7 +433,7 @@ test.describe('admin export workflow coverage', () => {
       suffix,
     });
     const [checkedInTicket] = checkInList.tickets;
-    await expectJsonStatus(
+    const scanResult = await expectJsonStatus<{ outcome: string; ticketId?: string }>(
       await request.post(`${apiBaseUrl}/v1/check-ins/scan`, {
         headers: { 'idempotency-key': `report-attendance-scan-${suffix}` },
         data: {
@@ -383,6 +445,7 @@ test.describe('admin export workflow coverage', () => {
       }),
       200,
     );
+    expect(scanResult).toMatchObject({ outcome: 'accepted', ticketId: checkedInTicket.id });
 
     await page.goto(`${adminBaseUrl}/events/${event.id}/reports`);
     await expect(page.getByRole('heading', { name: 'Reports' })).toBeVisible();
@@ -422,23 +485,7 @@ test.describe('admin export workflow coverage', () => {
     ).toBeVisible();
     await attachScreenshot(page, testInfo, 'admin-tax-report-edge-state');
 
-    const attendanceReport = await expectJsonStatus<{
-      eventId: string;
-      totalAttendees: number;
-      checkedIn: number;
-      notCheckedIn: number;
-      checkInRate: number;
-      breakdownByTicketType: Array<{
-        ticketTypeName: string;
-        total: number;
-        checkedIn: number;
-      }>;
-    }>(
-      await page.request.get(`${apiBaseUrl}/v1/events/${event.id}/reports/attendance`, {
-        failOnStatusCode: false,
-      }),
-      200,
-    );
+    const attendanceReport = await expectCheckedInAttendanceReport(page, event.id, ticketType.name);
     expect(attendanceReport).toMatchObject({
       eventId: event.id,
       totalAttendees: 1,
@@ -484,6 +531,7 @@ test.describe('admin export workflow coverage', () => {
       product.name,
       buyerEmail,
     );
+    await resignTicketsForOnlineScan(completed.orderId);
     const taxSnapshot = await seedTaxSnapshotForOrder({
       eventId: event.id,
       orderId: completed.orderId,
@@ -495,7 +543,7 @@ test.describe('admin export workflow coverage', () => {
       suffix,
     });
     const [checkedInTicket] = checkInList.tickets;
-    await expectJsonStatus(
+    const scanResult = await expectJsonStatus<{ outcome: string; ticketId?: string }>(
       await request.post(`${apiBaseUrl}/v1/check-ins/scan`, {
         headers: { 'idempotency-key': `report-mobile-scan-${suffix}` },
         data: {
@@ -507,6 +555,8 @@ test.describe('admin export workflow coverage', () => {
       }),
       200,
     );
+    expect(scanResult).toMatchObject({ outcome: 'accepted', ticketId: checkedInTicket.id });
+    await expectCheckedInAttendanceReport(page, event.id, ticketType.name);
 
     await page.goto(`${adminBaseUrl}/events/${event.id}/reports`);
     await expect(page.getByRole('heading', { name: 'Reports' })).toBeVisible();

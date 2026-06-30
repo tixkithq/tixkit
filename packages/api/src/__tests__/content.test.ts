@@ -351,6 +351,43 @@ describe('content routes', () => {
     expect(inserted).toHaveLength(0);
   });
 
+  it.each(['abc', '0', '-1', '101'])(
+    'rejects invalid content document list limit %s',
+    async (limit) => {
+      const { db } = createContentDb({
+        content_documents: [documentRow()],
+      });
+      const app = await setupContentApp(db, principal);
+
+      const response = await app.inject({
+        method: 'GET',
+        url: `/content-documents?limit=${encodeURIComponent(limit)}`,
+      });
+
+      expect(response.statusCode).toBe(400);
+      expect(response.json().message ?? response.json().error?.message).toContain(
+        'Invalid content query',
+      );
+    },
+  );
+
+  it('rejects unsupported content document list query keys', async () => {
+    const { db } = createContentDb({
+      content_documents: [documentRow()],
+    });
+    const app = await setupContentApp(db, principal);
+
+    const response = await app.inject({
+      method: 'GET',
+      url: '/content-documents?cursor=cdoc_1',
+    });
+
+    expect(response.statusCode).toBe(400);
+    expect(response.json().message ?? response.json().error?.message).toContain(
+      'Invalid content query',
+    );
+  });
+
   it('renders email previews through the React Email adapter and records artifacts', async () => {
     const { db, inserted } = createContentDb({
       brands: [{ id: 'brd_1', tenant_id: 'tnt_1', organization_id: 'org_1' }],

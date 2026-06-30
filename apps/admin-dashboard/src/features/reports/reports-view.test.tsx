@@ -241,10 +241,10 @@ describe('ReportsView', () => {
         ],
       },
     });
-    adminApiMock.createExport.mockResolvedValue({
+    adminApiMock.createExport.mockImplementation(async (input: { type: string }) => ({
       ok: true,
-      data: { exportId: 'exp_1', status: 'pending', type: 'sales', format: 'csv' },
-    });
+      data: { exportId: 'exp_1', status: 'pending', type: input.type, format: 'csv' },
+    }));
   });
 
   it('renders navigation tabs for all existing report APIs', async () => {
@@ -284,6 +284,27 @@ describe('ReportsView', () => {
     expect(adminApiMock.getAffiliateReport).not.toHaveBeenCalled();
   });
 
+  it('loads report APIs only after their tab is selected', async () => {
+    const view = render(<ReportsView eventId="evt_1" />);
+
+    await view.findByText('Gross Sales');
+    expect(adminApiMock.getSalesReport).toHaveBeenCalledTimes(1);
+    expect(adminApiMock.getTaxReport).not.toHaveBeenCalled();
+    expect(adminApiMock.getAttendanceReport).not.toHaveBeenCalled();
+    expect(adminApiMock.getPromoReport).not.toHaveBeenCalled();
+    expect(adminApiMock.getConversionReport).not.toHaveBeenCalled();
+    expect(adminApiMock.getAffiliateReport).not.toHaveBeenCalled();
+
+    fireEvent.click(view.getByRole('tab', { name: 'Tax' }));
+    expect(await view.findAllByText('Tax Collected')).toHaveLength(2);
+
+    expect(adminApiMock.getTaxReport).toHaveBeenCalledTimes(1);
+    expect(adminApiMock.getAttendanceReport).not.toHaveBeenCalled();
+    expect(adminApiMock.getPromoReport).not.toHaveBeenCalled();
+    expect(adminApiMock.getConversionReport).not.toHaveBeenCalled();
+    expect(adminApiMock.getAffiliateReport).not.toHaveBeenCalled();
+  });
+
   it('exposes and queues every backend-supported report export type', async () => {
     const view = render(<ReportsView eventId="evt_1" />);
 
@@ -311,5 +332,19 @@ describe('ReportsView', () => {
         }),
       );
     });
+  });
+
+  it('shows progress and status for the selected export type only', async () => {
+    const view = render(<ReportsView eventId="evt_1" />);
+
+    await view.findByText('Gross Sales');
+    fireEvent.click(view.getByRole('button', { name: 'Export orders CSV' }));
+
+    expect(await view.findByText('Exporting Orders...')).toBeInTheDocument();
+    expect(view.getByRole('button', { name: 'Export sales CSV' })).toHaveTextContent('Sales');
+    expect(view.getByRole('button', { name: 'Export tax CSV' })).toHaveTextContent('Tax');
+    expect(await view.findByRole('status')).toHaveTextContent(
+      'Orders CSV export exp_1 is pending.',
+    );
   });
 });

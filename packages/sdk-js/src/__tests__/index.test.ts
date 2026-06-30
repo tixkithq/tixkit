@@ -1357,6 +1357,33 @@ describe('TixkitClient new resource methods', () => {
     });
   });
 
+  it('content list sends only backend-supported filters', async () => {
+    const fm = mockFetch(200, {
+      items: [],
+      nextCursor: null,
+      hasMore: false,
+    });
+    const c = new TixkitClient({
+      apiKey: '***********',
+      apiBaseUrl: 'https://api.test',
+      maxRetries: 0,
+    });
+
+    await c.content.list({
+      limit: 25,
+      channel: 'email',
+      brandId: 'brd_1',
+      eventId: 'evt_1',
+      cursor: 'unsupported',
+    } as Parameters<typeof c.content.list>[0] & { cursor: string });
+
+    const call = getCall(fm);
+    expect(call.url).toBe(
+      'https://api.test/v1/content-documents?limit=25&channel=email&brandId=brd_1&eventId=evt_1',
+    );
+    expect(call.method).toBe('GET');
+  });
+
   it('content preview and public content page use documented paths', async () => {
     const fm = mockFetch(200, {
       channel: 'sms',

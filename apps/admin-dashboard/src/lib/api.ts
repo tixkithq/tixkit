@@ -1685,7 +1685,8 @@ export type AdminApi = {
   scanTicket(input: ScanTicketInput): Promise<ApiResult<CheckInScanResult>>;
 
   listContentDocuments(
-    input?: PageCursor & {
+    input?: {
+      limit?: number;
       channel?: AdminContentChannel;
       brandId?: string;
       eventId?: string;
@@ -5168,7 +5169,6 @@ export const adminApi: AdminApi = {
     return withFixture(
       () => {
         const params = new URLSearchParams();
-        if (input?.cursor) params.set('cursor', input.cursor);
         if (input?.limit) params.set('limit', String(input.limit));
         if (input?.channel) params.set('channel', input.channel);
         if (input?.brandId) params.set('brandId', input.brandId);
@@ -5179,7 +5179,7 @@ export const adminApi: AdminApi = {
           { method: 'GET' },
         );
       },
-      () => ok(paginate([], input?.cursor, input?.limit)),
+      () => ok(paginate([], undefined, input?.limit)),
     );
   },
 

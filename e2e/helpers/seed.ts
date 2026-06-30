@@ -1,5 +1,6 @@
 import { expect, type APIRequestContext, type APIResponse } from '@playwright/test';
 import { createDb, type Database } from '../../packages/db/src/client';
+import { QrService } from '../../packages/domain/src/tickets/index';
 import { apiBaseUrl } from './env';
 
 const devTenantId = 'tnt_dev_local';
@@ -2211,6 +2212,34 @@ export async function seedCheckInListForOrder(input: {
         status: ticket.status,
       })),
     };
+  });
+}
+
+export async function resignTicketsForOnlineScan(orderId: string): Promise<void> {
+  const qrService = new QrService(process.env.QR_SIGNING_SECRET ?? 'ci-qr-signing-secret');
+
+  await withE2eDb(async (db) => {
+    const tickets = await db
+      .selectFrom('tickets')
+      .select(['id'])
+      .where('order_id', '=', orderId)
+      .execute();
+
+    await Promise.all(
+      tickets.map(async (ticket) => {
+        const qr = qrService.generate(ticket.id);
+        await db
+          .updateTable('tickets')
+          .set({
+            code: qr.code,
+            qr_payload: qr.payload,
+            qr_hash: qr.hash,
+            updated_at: new Date(),
+          })
+          .where('id', '=', ticket.id)
+          .execute();
+      }),
+    );
   });
 }
 

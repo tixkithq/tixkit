@@ -352,6 +352,12 @@ describe('openApiSpec', () => {
       'imessage',
       'social_invite',
     ]);
+    expect(openApiSpec.paths['/content-documents'].get.parameters).toEqual([
+      { name: 'channel', in: 'query', schema: { type: 'string' } },
+      { name: 'brandId', in: 'query', schema: { type: 'string' } },
+      { name: 'eventId', in: 'query', schema: { type: 'string' } },
+      { name: 'limit', in: 'query', schema: { type: 'integer', minimum: 1, maximum: 100 } },
+    ]);
     expect(openApiSpec.components.schemas.ContentDocumentVersion.properties.validation).toEqual({
       $ref: '#/components/schemas/ContentValidationResult',
     });

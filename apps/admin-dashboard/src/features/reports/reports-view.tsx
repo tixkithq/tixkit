@@ -99,7 +99,7 @@ function emptyPage<T>(): Promise<{ ok: true; data: PageResult<T> }> {
 export function ReportsView({ eventId }: ReportsViewProps) {
   const [selectedEventId, setSelectedEventId] = React.useState<string>(eventId ?? '');
   const [activeTab, setActiveTab] = React.useState<ReportTab>('sales');
-  const [exporting, setExporting] = React.useState(false);
+  const [exportingType, setExportingType] = React.useState<AdminExportType | null>(null);
   const [lastExport, setLastExport] = React.useState<AdminExportJob | null>(null);
   const [selectedOrganizationId, setSelectedOrganizationId] = React.useState('');
   const exportSubscriptionRef = React.useRef<(() => void) | null>(null);
@@ -132,43 +132,45 @@ export function ReportsView({ eventId }: ReportsViewProps) {
 
   const salesState = useAdminData(
     () =>
-      selectedEventId
+      selectedEventId && activeTab === 'sales'
         ? adminApi.getSalesReport(selectedEventId, range)
         : emptyResult<AdminSalesReportSummary>(),
-    [selectedEventId, selectedRangeKey],
+    [activeTab, selectedEventId, selectedRangeKey],
   );
   const taxState = useAdminData(
     () =>
-      selectedEventId
+      selectedEventId && activeTab === 'tax'
         ? adminApi.getTaxReport(selectedEventId, range)
         : emptyResult<AdminTaxReport>(),
-    [selectedEventId, selectedRangeKey],
+    [activeTab, selectedEventId, selectedRangeKey],
   );
   const attendanceState = useAdminData(
     () =>
-      selectedEventId
+      selectedEventId && activeTab === 'attendance'
         ? adminApi.getAttendanceReport(selectedEventId)
         : emptyResult<AdminAttendanceReport>(),
-    [selectedEventId],
+    [activeTab, selectedEventId],
   );
   const promoState = useAdminData(
     () =>
-      selectedEventId ? adminApi.getPromoReport(selectedEventId) : emptyResult<AdminPromoReport>(),
-    [selectedEventId],
+      selectedEventId && activeTab === 'promo'
+        ? adminApi.getPromoReport(selectedEventId)
+        : emptyResult<AdminPromoReport>(),
+    [activeTab, selectedEventId],
   );
   const conversionState = useAdminData(
     () =>
-      selectedEventId
+      selectedEventId && activeTab === 'conversion'
         ? adminApi.getConversionReport(selectedEventId)
         : emptyResult<AdminConversionReport>(),
-    [selectedEventId],
+    [activeTab, selectedEventId],
   );
   const affiliateState = useAdminData(
     () =>
-      selectedOrganizationId
+      selectedOrganizationId && activeTab === 'affiliate'
         ? adminApi.getAffiliateReport(selectedOrganizationId)
         : emptyResult<AdminAffiliateReport>(),
-    [selectedOrganizationId],
+    [activeTab, selectedOrganizationId],
   );
 
   React.useEffect(() => {
@@ -181,7 +183,7 @@ export function ReportsView({ eventId }: ReportsViewProps) {
     if (!selectedEventId) return;
 
     exportSubscriptionRef.current?.();
-    setExporting(true);
+    setExportingType(exportType);
     const result = await adminApi.createExport({
       eventId: selectedEventId,
       type: exportType,
@@ -189,7 +191,7 @@ export function ReportsView({ eventId }: ReportsViewProps) {
       filters: range,
     });
     if (!result.ok) {
-      setExporting(false);
+      setExportingType(null);
       toast.error(result.error.message);
       return;
     }
@@ -200,7 +202,7 @@ export function ReportsView({ eventId }: ReportsViewProps) {
       onUpdate: setLastExport,
       onDone: (completed) => {
         setLastExport(completed);
-        setExporting(false);
+        setExportingType(null);
         if (completed.status === 'completed') {
           toast.success('Export ready to download');
         } else {
@@ -208,7 +210,7 @@ export function ReportsView({ eventId }: ReportsViewProps) {
         }
       },
       onError: (error) => {
-        setExporting(false);
+        setExportingType(null);
         toast.error(error.message);
       },
     });
@@ -304,10 +306,10 @@ export function ReportsView({ eventId }: ReportsViewProps) {
                   variant="outline"
                   size="sm"
                   onClick={() => handleExport(option.type)}
-                  disabled={!selectedEventId || exporting}
+                  disabled={!selectedEventId || exportingType !== null}
                 >
                   <Download className="size-4" />
-                  {exporting ? 'Exporting...' : option.label}
+                  {exportingType === option.type ? `Exporting ${option.label}...` : option.label}
                 </Button>
               ))}
             </div>
@@ -664,10 +666,16 @@ function ReportSkeleton() {
 
 function ExportStatusNotice({ exportJob }: { exportJob: AdminExportJob }) {
   const href = exportJob.downloadUrl ?? exportJob.fileUrl;
+  const exportTypeLabel =
+    EXPORT_OPTIONS.find((option) => option.type === exportJob.type)?.label ?? 'Export';
   return (
-    <div className="flex flex-wrap items-center justify-between gap-3 rounded-md border bg-muted/30 p-3 text-sm">
+    <output
+      className="flex flex-wrap items-center justify-between gap-3 rounded-md border bg-muted/30 p-3 text-sm"
+      aria-live="polite"
+    >
       <span>
-        Export {exportJob.exportId} is {exportJob.status}.
+        {exportTypeLabel} {exportJob.format?.toUpperCase() ?? 'CSV'} export {exportJob.exportId}{' '}
+        is {exportJob.status}.
       </span>
       {exportJob.status === 'completed' && href ? (
         <Button asChild size="sm" variant="outline">
@@ -677,7 +685,7 @@ function ExportStatusNotice({ exportJob }: { exportJob: AdminExportJob }) {
           </a>
         </Button>
       ) : null}
-    </div>
+    </output>
   );
 }
 

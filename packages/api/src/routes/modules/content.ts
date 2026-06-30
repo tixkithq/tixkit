@@ -138,6 +138,20 @@ const duplicateDocumentSchema = z
   })
   .strict();
 
+const listDocumentsQuerySchema = z
+  .object({
+    channel: contentChannelSchema.optional(),
+    brandId: z.string().min(1).optional(),
+    eventId: z.string().min(1).optional(),
+    limit: z
+      .string()
+      .regex(/^[1-9]\d*$/)
+      .transform(Number)
+      .pipe(z.number().int().min(1).max(100))
+      .optional(),
+  })
+  .strict();
+
 function parseBody<T>(schema: z.ZodType<T>, body: unknown): T {
   const parsed = schema.safeParse(body);
   if (!parsed.success) {
@@ -151,9 +165,17 @@ function parseBody<T>(schema: z.ZodType<T>, body: unknown): T {
   return parsed.data;
 }
 
-function parseChannel(value: unknown): ContentChannel | undefined {
-  const parsed = contentChannelSchema.safeParse(value);
-  return parsed.success ? parsed.data : undefined;
+function parseQuery<T>(schema: z.ZodType<T>, query: unknown): T {
+  const parsed = schema.safeParse(query);
+  if (!parsed.success) {
+    throw new ValidationError('Invalid content query', {
+      issues: parsed.error.issues.map((issue) => ({
+        path: issue.path.join('.'),
+        message: issue.message,
+      })),
+    });
+  }
+  return parsed.data;
 }
 
 function assertChannelAvailable(channel: ContentChannel): void {
@@ -696,14 +718,8 @@ export const contentRoutes: FastifyPluginAsync = async (app) => {
 
   app.get('/content-documents', async (request) => {
     const principal = request.principal!;
-    const query = request.query as {
-      channel?: string;
-      brandId?: string;
-      eventId?: string;
-      limit?: string;
-    };
-    const channel = parseChannel(query.channel);
-    if (query.channel && !channel) throw new ValidationError('Invalid content channel');
+    const query = parseQuery(listDocumentsQuerySchema, request.query);
+    const channel = query.channel;
     requireContentListPermission(principal, channel);
     if (query.brandId) ClerkAuthService.requireBrandScope(principal, query.brandId);
     if (query.eventId) ClerkAuthService.requireEventScope(principal, query.eventId);
@@ -718,7 +734,7 @@ export const contentRoutes: FastifyPluginAsync = async (app) => {
       channel,
       brandId: query.brandId,
       eventId: query.eventId,
-      limit: query.limit ? Number(query.limit) : 50,
+      limit: query.limit ?? 50,
     });
     return { items: documents };
   });

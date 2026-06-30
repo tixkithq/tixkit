@@ -532,6 +532,13 @@ export type CreateContentDocumentInput = {
   locale?: string;
 };
 
+export type ContentDocumentListParams = {
+  limit?: number;
+  channel?: ContentChannel;
+  brandId?: string;
+  eventId?: string;
+};
+
 export type DuplicateContentDocumentInput = {
   key?: string;
   name?: string;
@@ -2609,15 +2616,15 @@ class PrivacyResource {
 class ContentResource {
   constructor(private client: TixkitClient) {}
 
-  async list(
-    params?: PaginationParams & {
-      channel?: ContentChannel;
-      brandId?: string;
-      eventId?: string;
-    },
-  ): Promise<PageResult<ContentDocument>> {
+  async list(params?: ContentDocumentListParams): Promise<PageResult<ContentDocument>> {
+    const query: Record<string, string> = {};
+    if (params?.limit !== undefined) query.limit = String(params.limit);
+    if (params?.channel) query.channel = params.channel;
+    if (params?.brandId) query.brandId = params.brandId;
+    if (params?.eventId) query.eventId = params.eventId;
+
     return this.client.request('GET', '/content-documents', {
-      params: paginationParams(params),
+      params: Object.keys(query).length > 0 ? query : undefined,
     });
   }
 
