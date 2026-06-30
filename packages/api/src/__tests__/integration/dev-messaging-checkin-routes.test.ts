@@ -5072,6 +5072,48 @@ describe('checkout pricing tamper resistance', () => {
     });
   });
 
+  it('persists matched access-rule redemptions for locked checkout sessions', async () => {
+    const lockedTicketType = {
+      ...paidTicketType,
+      id: 'tt_locked',
+      inventory_pool_id: 'inv_locked',
+      visibility: 'locked',
+      requires_access_code: true,
+    };
+    const tables = pricingTables({
+      ticket_types: [lockedTicketType],
+      access_rules: [
+        {
+          id: 'ar_vip',
+          ticket_type_id: 'tt_locked',
+          type: 'access_code',
+          value: 'VIP123',
+          max_uses: 1,
+          uses_count: 0,
+          expires_at: null,
+          created_at: new Date(),
+          updated_at: new Date(),
+        },
+      ],
+    });
+
+    const res = await postPricingCheckoutSession(
+      {
+        items: [{ ticketTypeId: 'tt_locked', quantity: 1 }],
+        accessCode: 'VIP123',
+      },
+      tables,
+    );
+
+    expect(res.statusCode).toBe(201);
+    const storedSession = (tables.checkout_sessions as Array<{ cart: string }>)[0];
+    const storedCart = JSON.parse(storedSession.cart) as Record<string, unknown>;
+    expect(storedCart).toMatchObject({
+      accessRuleRedemptions: [{ accessRuleId: 'ar_vip', ticketTypeId: 'tt_locked' }],
+    });
+    expect(storedCart).not.toHaveProperty('accessCode');
+  });
+
   it('rejects checkout session creation for private published events without reserving inventory', async () => {
     const tables = pricingTables({
       events: [{ ...baseEvent, visibility: 'private' }],

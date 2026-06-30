@@ -1229,6 +1229,94 @@ describe('finalizeOrderActivity promo code redemption', () => {
   });
 });
 
+describe('finalizeOrderActivity access rule redemption', () => {
+  beforeEach(() => {
+    dbState.tables = {};
+    dbState.locks = [];
+    dbState.afterSelect = undefined;
+    dbState.destroy.mockClear();
+  });
+
+  it('consumes a valid access rule on first finalize, incrementing uses_count', async () => {
+    seedCheckoutWithAccessRule({
+      holdExpiresAt: new Date(Date.now() + 60_000),
+      usesCount: 0,
+      maxUses: 2,
+    });
+    seedTrustedPaymentIntent();
+
+    const result = await finalizeOrderActivity({
+      checkoutSessionId: 'cs_1',
+      tenantId: 'tnt_1',
+      paymentIntentId: 'pi_provider_1',
+    });
+
+    expect(result.ok).toBe(true);
+    expect(dbState.tables.access_rules.ar_1.uses_count).toBe(1);
+    expect(Object.values(dbState.tables.access_rule_redemptions)).toHaveLength(1);
+    expect(dbState.tables.access_rule_redemptions).toMatchObject({
+      [Object.keys(dbState.tables.access_rule_redemptions)[0]]: {
+        access_rule_id: 'ar_1',
+        ticket_type_id: 'tt_1',
+        checkout_session_id: 'cs_1',
+      },
+    });
+  });
+
+  it('does not double-consume an access rule with an existing session redemption', async () => {
+    seedCheckoutWithAccessRule({
+      holdExpiresAt: new Date(Date.now() + 60_000),
+      usesCount: 1,
+      maxUses: 1,
+    });
+    dbState.tables.access_rule_redemptions.ared_existing = {
+      id: 'ared_existing',
+      access_rule_id: 'ar_1',
+      ticket_type_id: 'tt_1',
+      event_id: 'evt_1',
+      checkout_session_id: 'cs_1',
+      order_id: 'ord_previous_attempt',
+      tenant_id: 'tnt_1',
+      created_at: new Date(),
+    };
+    seedTrustedPaymentIntent();
+
+    const result = await finalizeOrderActivity({
+      checkoutSessionId: 'cs_1',
+      tenantId: 'tnt_1',
+      paymentIntentId: 'pi_provider_1',
+    });
+
+    expect(result.ok).toBe(true);
+    expect(dbState.tables.access_rules.ar_1.uses_count).toBe(1);
+    expect(Object.values(dbState.tables.access_rule_redemptions)).toHaveLength(1);
+  });
+
+  it('rejects an exhausted access rule before creating an order', async () => {
+    seedCheckoutWithAccessRule({
+      holdExpiresAt: new Date(Date.now() + 60_000),
+      usesCount: 1,
+      maxUses: 1,
+    });
+    seedTrustedPaymentIntent();
+
+    const result = await finalizeOrderActivity({
+      checkoutSessionId: 'cs_1',
+      tenantId: 'tnt_1',
+      paymentIntentId: 'pi_provider_1',
+    });
+
+    expect(result).toMatchObject({
+      ok: false,
+      errorCode: 'ACCESS_RULE_EXHAUSTED',
+      retryable: false,
+    });
+    expect(dbState.tables.access_rules.ar_1.uses_count).toBe(1);
+    expect(Object.values(dbState.tables.access_rule_redemptions)).toHaveLength(0);
+    expect(Object.values(dbState.tables.orders)).toHaveLength(0);
+  });
+});
+
 function seedCheckout(input: { holdExpiresAt: Date }) {
   dbState.tables = {
     orders: {},
@@ -1304,6 +1392,41 @@ function seedCheckout(input: { holdExpiresAt: Date }) {
     payment_intents: {},
     affiliates: {},
   };
+}
+
+function seedCheckoutWithAccessRule(input: {
+  holdExpiresAt: Date;
+  usesCount: number;
+  maxUses: number | null;
+  expiresAt?: Date;
+}) {
+  seedCheckout({ holdExpiresAt: input.holdExpiresAt });
+  dbState.tables.checkout_sessions.cs_1.cart = JSON.stringify({
+    items: [{ ticketTypeId: 'tt_1', quantity: 1 }],
+    buyerFields: {},
+    attendeeFields: {},
+    accessRuleRedemptions: [{ accessRuleId: 'ar_1', ticketTypeId: 'tt_1' }],
+  });
+  dbState.tables.ticket_types = {
+    tt_1: {
+      id: 'tt_1',
+      event_id: 'evt_1',
+    },
+  };
+  dbState.tables.access_rules = {
+    ar_1: {
+      id: 'ar_1',
+      ticket_type_id: 'tt_1',
+      type: 'access_code',
+      value: 'VIP123',
+      max_uses: input.maxUses,
+      uses_count: input.usesCount,
+      expires_at: input.expiresAt ?? null,
+      created_at: new Date(),
+      updated_at: new Date(),
+    },
+  };
+  dbState.tables.access_rule_redemptions = {};
 }
 
 function seedTrustedPaymentIntent(

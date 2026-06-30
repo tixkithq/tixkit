@@ -823,6 +823,17 @@ export interface AccessRuleTable {
   updated_at: Timestamp;
 }
 
+export interface AccessRuleRedemptionTable {
+  id: string;
+  access_rule_id: string;
+  ticket_type_id: string;
+  event_id: string;
+  checkout_session_id: string;
+  order_id: string | null;
+  tenant_id: string | null;
+  created_at: Timestamp;
+}
+
 export interface QuestionTable {
   id: string;
   event_id: string;
@@ -1408,6 +1419,7 @@ export interface DB {
   products: ProductTable;
   product_categories: ProductCategoryTable;
   access_rules: AccessRuleTable;
+  access_rule_redemptions: AccessRuleRedemptionTable;
   questions: QuestionTable;
   webhook_endpoints: WebhookEndpointTable;
   webhook_events: WebhookEventTable;
