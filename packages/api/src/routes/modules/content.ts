@@ -816,7 +816,7 @@ export const contentRoutes: FastifyPluginAsync = async (app) => {
       subject: emailDocument ? emailDocument.settings.subject : body.subject,
       previewText: emailDocument ? emailDocument.settings.previewText : body.previewText,
       contentJson: body.contentJson,
-      renderedHtml: emailDocument ? emailDocument.editor.contentHtml : body.renderedHtml,
+      renderedHtml: renderedEmail ? renderedEmail.html : body.renderedHtml,
       renderedText: renderedEmail
         ? renderedEmail.text
         : smsDocument
