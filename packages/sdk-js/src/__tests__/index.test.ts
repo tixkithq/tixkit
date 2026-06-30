@@ -1339,6 +1339,48 @@ describe('TixkitClient new resource methods', () => {
     });
   });
 
+  it('messages.renderPreview sends the documented event-scoped preview body', async () => {
+    const fm = mockFetch(200, {
+      channel: 'sms',
+      subject: 'Hi Ada',
+      html: '',
+      text: 'Hi Ada. Reply STOP to opt out',
+      segments: {
+        segments: 1,
+        encoding: 'gsm',
+        charsPerSegment: 160,
+        unitsUsed: 29,
+        remaining: 131,
+      },
+      validation: { valid: true, unknownTags: [] },
+    });
+    const c = new TixkitClient({
+      apiKey: '***********',
+      apiBaseUrl: 'https://api.test',
+      maxRetries: 0,
+    });
+
+    const result = await c.messages.renderPreview('evt_1', {
+      channel: 'sms',
+      subjectTemplate: 'Hi {{recipient.name}}',
+      textTemplate: 'Hi {{recipient.name}}',
+      context: { recipient: { name: 'Ada' } },
+      optOutToken: 'Reply STOP to opt out',
+    });
+
+    const call = getCall(fm);
+    expect(call.url).toBe('https://api.test/v1/events/evt_1/messages/render-preview');
+    expect(call.method).toBe('POST');
+    expect(JSON.parse(call.body)).toEqual({
+      channel: 'sms',
+      subjectTemplate: 'Hi {{recipient.name}}',
+      textTemplate: 'Hi {{recipient.name}}',
+      context: { recipient: { name: 'Ada' } },
+      optOutToken: 'Reply STOP to opt out',
+    });
+    expect(result.segments?.segments).toBe(1);
+  });
+
   it('messages.send sends split template keys with idempotency', async () => {
     const fm = mockFetch(202, {
       campaignId: 'cmp_1',

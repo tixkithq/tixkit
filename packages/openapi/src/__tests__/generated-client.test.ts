@@ -93,6 +93,16 @@ describe('Generated client compile validation (T33)', () => {
     expect(output).toContain('"Idempotency-Key"');
   });
 
+  it('generated types preserve the event-scoped message render-preview contract', async () => {
+    const output = await generateTypes();
+
+    expect(output).toContain('/events/{eventId}/messages/render-preview');
+    expect(output).toContain('unknownTags');
+    expect(output).toContain('charsPerSegment');
+    expect(output).toContain('unitsUsed');
+    expect(output).toContain('remaining');
+  });
+
   // Cleanup temp files after all tests.
   it('cleanup', () => {
     if (existsSync(tmpDir)) rmSync(tmpDir, { recursive: true, force: true });

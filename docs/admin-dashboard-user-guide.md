@@ -57,12 +57,12 @@ Use order detail as the source of truth for buyer state, line items, attendees, 
 
 ## Troubleshooting
 
-| Problem | First checks |
-| --- | --- |
+| Problem                             | First checks                                                                                                        |
+| ----------------------------------- | ------------------------------------------------------------------------------------------------------------------- |
 | Paid checkout did not issue tickets | Open Orders, search by buyer email or payment reference, and check the order timeline before retrying or refunding. |
-| Scanner says duplicate | Confirm the selected event and check-in list, then review attendee status before overriding at the door. |
-| Webhook delivery failed | Open Developer > Webhooks, inspect endpoint status and recent events, then replay after the destination is healthy. |
-| Report looks incomplete | Verify date range, event selection, refund state, and export status before sharing externally. |
+| Scanner says duplicate              | Confirm the selected event and check-in list, then review attendee status before overriding at the door.            |
+| Webhook delivery failed             | Open Developer > Webhooks, inspect endpoint status and recent events, then replay after the destination is healthy. |
+| Report looks incomplete             | Verify date range, event selection, refund state, and export status before sharing externally.                      |
 
 ## Related Operator Docs
 

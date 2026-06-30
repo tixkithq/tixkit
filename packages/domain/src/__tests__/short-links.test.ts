@@ -104,9 +104,9 @@ describe('composeRedirectUrl', () => {
   });
 
   it('preserves existing query params', () => {
-    expect(
-      composeRedirectUrl('https://example.test/e/evt_1?ref=abc', { utm_medium: 'sms' }),
-    ).toBe('https://example.test/e/evt_1?ref=abc&utm_medium=sms');
+    expect(composeRedirectUrl('https://example.test/e/evt_1?ref=abc', { utm_medium: 'sms' })).toBe(
+      'https://example.test/e/evt_1?ref=abc&utm_medium=sms',
+    );
   });
 
   it('returns the destination unchanged when no UTM params', () => {

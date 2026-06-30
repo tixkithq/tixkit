@@ -593,7 +593,11 @@ export const eventRoutes: FastifyPluginAsync = async (app) => {
       payloadFormat: payloadFormat as CodeFormat['payloadFormat'],
     };
     if (body.rotating && typeof body.rotating === 'object') {
-      const r = body.rotating as { timeStepSeconds?: number; toleranceWindows?: number; digits?: number };
+      const r = body.rotating as {
+        timeStepSeconds?: number;
+        toleranceWindows?: number;
+        digits?: number;
+      };
       if (typeof r.timeStepSeconds !== 'number' || r.timeStepSeconds < 5) {
         throw new ValidationError('rotating.timeStepSeconds must be >= 5', { field: 'rotating' });
       }

@@ -9,9 +9,7 @@ const dbState = {
   tables: {} as Record<string, Record<string, any>>,
   locks: [] as string[],
   destroy: vi.fn(),
-  afterSelect: undefined as
-    | ((table: string, rows: Array<Record<string, any>>) => void)
-    | undefined,
+  afterSelect: undefined as ((table: string, rows: Array<Record<string, any>>) => void) | undefined,
 };
 
 const stripeMock = {

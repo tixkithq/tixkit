@@ -81,7 +81,12 @@ export function evaluateRisk(
   // Allowlist overrides block/review down to allow for known-good emails.
   if (level !== 'allow') {
     const allowRule = rules.find((r) => r.type === 'allow_email');
-    if (allowRule && allowRule.type === 'allow_email' && signal.email && allowRule.emails.includes(signal.email)) {
+    if (
+      allowRule &&
+      allowRule.type === 'allow_email' &&
+      signal.email &&
+      allowRule.emails.includes(signal.email)
+    ) {
       level = 'allow';
       reasons.push('email allowlist override');
     }
@@ -116,7 +121,11 @@ function ruleMatches(
     }
     case 'block_country': {
       if (signal.country && rule.countries.includes(signal.country)) {
-        return { matched: true, action: rule.action, reason: `country ${signal.country} blocklisted` };
+        return {
+          matched: true,
+          action: rule.action,
+          reason: `country ${signal.country} blocklisted`,
+        };
       }
       return { matched: false, action: 'allow' };
     }
@@ -179,10 +188,7 @@ export class VelocityTracker {
 
 // ---- Stripe Radar webhook mapping ----
 
-export type RadarReviewEvent =
-  | 'review.opened'
-  | 'review.closed'
-  | 'radar.early_fraud_warning';
+export type RadarReviewEvent = 'review.opened' | 'review.closed' | 'radar.early_fraud_warning';
 
 export type OrderReviewStatus = 'open' | 'released' | 'refunded' | 'flagged';
 

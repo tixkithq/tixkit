@@ -663,13 +663,7 @@ export type AdminContentRenderOutput = {
   subject?: string;
   html?: string;
   text?: string;
-  segments?: {
-    segments: number;
-    encoding: string;
-    charsPerSegment: number;
-    unitsUsed: number;
-    remaining: number;
-  };
+  segments?: number;
 };
 
 export type AdminContentPreview = {
@@ -1689,14 +1683,12 @@ export type AdminApi = {
   listCheckInLists(eventId: string): Promise<ApiResult<AdminCheckInList[]>>;
   scanTicket(input: ScanTicketInput): Promise<ApiResult<CheckInScanResult>>;
 
-  listContentDocuments(
-    input?: {
-      limit?: number;
-      channel?: AdminContentChannel;
-      brandId?: string;
-      eventId?: string;
-    },
-  ): Promise<ApiResult<PageResult<AdminContentDocument>>>;
+  listContentDocuments(input?: {
+    limit?: number;
+    channel?: AdminContentChannel;
+    brandId?: string;
+    eventId?: string;
+  }): Promise<ApiResult<PageResult<AdminContentDocument>>>;
   createContentDocument(
     input: CreateContentDocumentInput,
   ): Promise<ApiResult<AdminContentDocument>>;
@@ -2194,10 +2186,7 @@ function normalizeResaleTicket(value: Record<string, unknown>): AdminResaleTicke
     attendeeId: String(value.attendeeId ?? value.attendee_id),
     eventId: String(value.eventId ?? value.event_id),
     ticketTypeId: String(value.ticketTypeId ?? value.ticket_type_id),
-    eventOccurrenceId: stringValue(
-      value.eventOccurrenceId ?? value.event_occurrence_id,
-      undefined,
-    ),
+    eventOccurrenceId: stringValue(value.eventOccurrenceId ?? value.event_occurrence_id, undefined),
     status: String(value.status),
     code: String(value.code),
     qrPayload: String(value.qrPayload ?? value.qr_payload),
@@ -2225,10 +2214,7 @@ function normalizeResaleAttendee(value: Record<string, unknown>): AdminResaleAtt
     orderId: String(value.orderId ?? value.order_id),
     eventId: String(value.eventId ?? value.event_id),
     ticketTypeId: String(value.ticketTypeId ?? value.ticket_type_id),
-    eventOccurrenceId: stringValue(
-      value.eventOccurrenceId ?? value.event_occurrence_id,
-      undefined,
-    ),
+    eventOccurrenceId: stringValue(value.eventOccurrenceId ?? value.event_occurrence_id, undefined),
     ticketId: stringValue(value.ticketId ?? value.ticket_id, undefined),
     firstName: stringValue(value.firstName ?? value.first_name, undefined),
     lastName: stringValue(value.lastName ?? value.last_name, undefined),
@@ -4099,7 +4085,8 @@ export const adminApi: AdminApi = {
           {
             method: 'POST',
             headers: {
-              'Idempotency-Key': idempotencyKey ?? adminIdempotencyKey(`resale_complete_${listingId}`),
+              'Idempotency-Key':
+                idempotencyKey ?? adminIdempotencyKey(`resale_complete_${listingId}`),
             },
             body: JSON.stringify(body),
           },
@@ -5212,7 +5199,7 @@ export const adminApi: AdminApi = {
       () =>
         err<AdminContentDocument>(
           apiError('fixture_unavailable', 'Content documents require the live API', 503),
-      ),
+        ),
     );
   },
 

@@ -1438,6 +1438,7 @@ export async function finalizeOrderActivity(input: {
             status: string;
           };
         }> = [];
+        /* eslint-disable no-await-in-loop -- resale listing locks must be acquired and validated in order within the transaction. */
         for (const resaleListingId of resaleListingIds) {
           const listing = await trx
             .selectFrom('ticket_listings')
@@ -1531,6 +1532,7 @@ export async function finalizeOrderActivity(input: {
           }
           resaleFulfillments.push({ listing, sellerTicket });
         }
+        /* eslint-enable no-await-in-loop */
 
         // Consume promo code idempotently under lock. The discount_codes row is
         // locked for update, revalidated against max_uses, and a redemption
@@ -1768,6 +1770,7 @@ export async function finalizeOrderActivity(input: {
           }
         }
 
+        /* eslint-disable no-await-in-loop -- resale fulfillment mutates buyer, seller, listing, and timeline rows in a fixed transaction order. */
         for (const fulfillment of resaleFulfillments) {
           const buyerAttendeeId = `att_${ulid()}`;
           await trx
@@ -1917,6 +1920,7 @@ export async function finalizeOrderActivity(input: {
             })
             .execute();
         }
+        /* eslint-enable no-await-in-loop */
 
         const buyerFields =
           cart.buyerFields && typeof cart.buyerFields === 'object'

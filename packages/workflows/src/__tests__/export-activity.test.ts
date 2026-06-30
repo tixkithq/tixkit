@@ -186,6 +186,7 @@ vi.mock('@tixkit/db', () => {
         if (table === 'orders') return dbState.orders;
         if (table === 'questions') return dbState.questions;
         if (table === 'scan_logs') {
+          // eslint-disable-next-line unicorn/no-array-sort -- this sorts the filtered copy and keeps compatibility with the package TS target.
           const rows = dbState.scanLogs.filter(matchesConditions).sort((a, b) => {
             for (const orderBy of orderBys) {
               const column = orderBy.column.includes('.')

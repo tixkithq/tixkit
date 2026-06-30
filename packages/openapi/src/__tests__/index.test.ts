@@ -9,16 +9,26 @@ describe('openApiSpec', () => {
 
   it('declares required path parameters for every templated path operation', () => {
     const pathTemplateParameterPattern = /\{([^}]+)\}/g;
-    const operations = new Set(['get', 'put', 'post', 'delete', 'options', 'head', 'patch', 'trace']);
+    const operations = new Set([
+      'get',
+      'put',
+      'post',
+      'delete',
+      'options',
+      'head',
+      'patch',
+      'trace',
+    ]);
     const missingParameters: string[] = [];
 
     for (const [path, pathItem] of Object.entries(openApiSpec.paths)) {
-      const parameterNames = [...path.matchAll(pathTemplateParameterPattern)].map((match) => match[1]);
+      const parameterNames = [...path.matchAll(pathTemplateParameterPattern)].map(
+        (match) => match[1],
+      );
       if (parameterNames.length === 0) continue;
 
-      const pathParameters = 'parameters' in pathItem && Array.isArray(pathItem.parameters)
-        ? pathItem.parameters
-        : [];
+      const pathParameters =
+        'parameters' in pathItem && Array.isArray(pathItem.parameters) ? pathItem.parameters : [];
       for (const [method, operation] of Object.entries(pathItem)) {
         if (!operations.has(method) || !operation || typeof operation !== 'object') continue;
 
@@ -35,7 +45,8 @@ describe('openApiSpec', () => {
               parameter.in === 'path' &&
               parameter.required === true,
           );
-          if (!isDeclared) missingParameters.push(`${method.toUpperCase()} ${path} missing ${name}`);
+          if (!isDeclared)
+            missingParameters.push(`${method.toUpperCase()} ${path} missing ${name}`);
         }
       }
     }

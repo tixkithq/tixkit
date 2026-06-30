@@ -58,9 +58,10 @@ export function validateResalePrice(
     throw new ResaleError('Resale price cannot be negative');
   }
   const capByMultiplier = Math.round(faceValueCents * policy.maxMultiplier);
-  const cap = policy.maxAbsoluteCents !== undefined
-    ? Math.min(capByMultiplier, policy.maxAbsoluteCents)
-    : capByMultiplier;
+  const cap =
+    policy.maxAbsoluteCents !== undefined
+      ? Math.min(capByMultiplier, policy.maxAbsoluteCents)
+      : capByMultiplier;
   if (priceCents > cap) {
     throw new ResaleError(
       `Resale price ${priceCents} exceeds cap ${cap} (face value ${faceValueCents} * ${policy.maxMultiplier}${policy.maxAbsoluteCents !== undefined ? `, absolute ${policy.maxAbsoluteCents}` : ''})`,
@@ -109,13 +110,8 @@ export function transitionListing(
 }
 
 /** Guard against double-sell: a ticket can only have one active listing. */
-export function assertNoActiveListing(
-  ticketId: string,
-  listings: TicketListing[],
-): void {
-  const active = listings.find(
-    (l) => l.ticketId === ticketId && (l.status === 'listed'),
-  );
+export function assertNoActiveListing(ticketId: string, listings: TicketListing[]): void {
+  const active = listings.find((l) => l.ticketId === ticketId && l.status === 'listed');
   if (active) {
     throw new ResaleError(`Ticket ${ticketId} already has an active listing ${active.id}`);
   }

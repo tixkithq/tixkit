@@ -686,8 +686,8 @@ function ExportStatusNotice({ exportJob }: { exportJob: AdminExportJob }) {
       aria-live="polite"
     >
       <span>
-        {exportTypeLabel} {exportJob.format?.toUpperCase() ?? 'CSV'} export {exportJob.exportId}{' '}
-        is {exportJob.status}.
+        {exportTypeLabel} {exportJob.format?.toUpperCase() ?? 'CSV'} export {exportJob.exportId} is{' '}
+        {exportJob.status}.
       </span>
       {exportJob.status === 'completed' && href ? (
         <Button asChild size="sm" variant="outline">

@@ -667,9 +667,12 @@ export async function assertCompletedUploadArtifacts(
   }
 
   if (consumed.size > 0) {
-    throw new ValidationError('File answer references an upload artifact that has already been used', {
-      artifactIds: [...consumed],
-    });
+    throw new ValidationError(
+      'File answer references an upload artifact that has already been used',
+      {
+        artifactIds: [...consumed],
+      },
+    );
   }
 
   const missing = artifactIds.filter((artifactId) => !valid.has(artifactId));

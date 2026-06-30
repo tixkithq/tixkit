@@ -72,7 +72,9 @@ async function ensureRequestedEndpointColumn(db: Parameters<Migration['up']>[0])
     return;
   }
 
-  await sql`alter table webhook_deliveries add column requested_endpoint_id varchar(32)`.execute(db);
+  await sql`alter table webhook_deliveries add column requested_endpoint_id varchar(32)`.execute(
+    db,
+  );
   await sql`update webhook_deliveries set requested_endpoint_id = endpoint_id`.execute(db);
   await sql`alter table webhook_deliveries alter column requested_endpoint_id set not null`.execute(
     db,

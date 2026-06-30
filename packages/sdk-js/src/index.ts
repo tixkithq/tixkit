@@ -1354,6 +1354,33 @@ export type MessageRecipientPreview = {
   }>;
 };
 
+export type MessageRenderPreviewInput = {
+  channel: 'email' | 'sms';
+  subjectTemplate?: string;
+  htmlTemplate?: string;
+  textTemplate?: string;
+  context?: Record<string, unknown>;
+  optOutToken?: string;
+};
+
+export type MessageRenderPreview = {
+  channel: 'email' | 'sms';
+  subject: string;
+  html: string;
+  text?: string;
+  segments?: {
+    segments: number;
+    encoding: 'gsm' | 'unicode';
+    charsPerSegment: number;
+    unitsUsed: number;
+    remaining: number;
+  };
+  validation: {
+    valid: boolean;
+    unknownTags: string[];
+  };
+};
+
 export type SendMessageAudience = 'all' | 'checked_in' | 'not_checked_in' | 'specific';
 export type SendMessageBaseInput = {
   audience: SendMessageAudience;
@@ -1618,9 +1645,9 @@ export class TixkitClient {
 
         if (attempt < attempts - 1) {
           // Exponential backoff
-          const delay = Math.min(1000 * Math.pow(2, attempt), 10000);
+          const backoffMs = Math.min(1000 * Math.pow(2, attempt), 10000);
           // eslint-disable-next-line no-await-in-loop -- retry backoff is intentionally sequential between attempts.
-          await new Promise((resolve) => setTimeout(resolve, delay));
+          await new Promise((resolve) => setTimeout(resolve, backoffMs));
         }
       }
     }
@@ -2406,6 +2433,7 @@ class CheckInResource {
     const timeoutMs = input.timeoutMs ?? 10 * 60 * 1000;
 
     while (true) {
+      // eslint-disable-next-line no-await-in-loop -- polling must observe one server status before scheduling the next request.
       const job = await this.getBulkSyncJob(jobId, { headers: input.headers });
       if (job.status === 'completed' || job.status === 'failed') return job;
       if (Date.now() - startedAt > timeoutMs) {
@@ -2721,6 +2749,14 @@ class MessageResource {
     input: { audience: string; attendeeIds?: string[]; channel: string },
   ): Promise<MessageRecipientPreview> {
     return this.client.request('POST', `/events/${eventId}/messages/preview`, { body: input });
+  }
+  async renderPreview(
+    eventId: string,
+    input: MessageRenderPreviewInput,
+  ): Promise<MessageRenderPreview> {
+    return this.client.request('POST', `/events/${eventId}/messages/render-preview`, {
+      body: input,
+    });
   }
   async list(eventId: string, params?: PaginationParams): Promise<PageResult<MessageCampaign>> {
     return this.client.request('GET', `/events/${eventId}/messages`, {

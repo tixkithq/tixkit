@@ -46,10 +46,7 @@ function rowMatchesWhereCalls(row: Row, calls: WhereCall[]) {
   });
 }
 
-function createContentLookupDb(input: {
-  documents: Row[];
-  versions: Row[];
-}) {
+function createContentLookupDb(input: { documents: Row[]; versions: Row[] }) {
   const whereCalls: Record<string, WhereCall[]> = {
     content_documents: [],
     content_document_versions: [],

@@ -11,12 +11,7 @@ documentation = "https://docs.rs/tixkit"
 readme = "README.md"
 keywords = ["tixkit", "ticketing", "sdk", "api", "webhooks"]
 categories = ["api-bindings", "asynchronous", "web-programming::http-client"]
-include = [
-  "Cargo.toml",
-  "README.md",
-  "src/**/*.rs",
-  "examples/**/*.rs",
-]
+include = ["Cargo.toml", "README.md", "src/**/*.rs", "examples/**/*.rs"]
 
 [dependencies]
 futures-util = "0.3.32"

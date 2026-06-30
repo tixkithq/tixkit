@@ -199,9 +199,8 @@ vi.mock('@tixkit/db', () => {
   };
 });
 
-const { renderTemplateActivity, sendEmailActivity, sendSmsActivity } = await import(
-  '../activities/notification.js'
-);
+const { renderTemplateActivity, sendEmailActivity, sendSmsActivity } =
+  await import('../activities/notification.js');
 
 function activeEmailRoute(overrides: Record<string, unknown> = {}) {
   return {

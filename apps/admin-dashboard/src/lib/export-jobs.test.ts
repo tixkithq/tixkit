@@ -234,15 +234,14 @@ function sseStream(
   lineEnding = '\n',
 ): ReadableStream<Uint8Array> {
   const body = frames
-    .map(
-      (frame) =>
-        [
-          `id: ${frame.id}`,
-          `event: ${frame.event ?? 'export'}`,
-          `data: ${JSON.stringify(frame.data)}`,
-          '',
-          '',
-        ].join(lineEnding),
+    .map((frame) =>
+      [
+        `id: ${frame.id}`,
+        `event: ${frame.event ?? 'export'}`,
+        `data: ${JSON.stringify(frame.data)}`,
+        '',
+        '',
+      ].join(lineEnding),
     )
     .join('');
   return new ReadableStream({

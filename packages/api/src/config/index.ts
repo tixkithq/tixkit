@@ -98,7 +98,11 @@ export function parseTrustProxy(value: string | undefined): TrustProxyConfig {
   );
 }
 
-function parsePositiveIntegerConfig(name: string, value: string | undefined, fallback: string): number {
+function parsePositiveIntegerConfig(
+  name: string,
+  value: string | undefined,
+  fallback: string,
+): number {
   const candidate = value === undefined ? fallback : value.trim();
   if (!/^[1-9]\d*$/.test(candidate)) {
     throw new Error(`${name} must be a positive integer`);
@@ -114,7 +118,9 @@ function parsePositiveIntegerConfig(name: string, value: string | undefined, fal
 
 function parseRateLimitTimeWindow(value: string | undefined, fallback: string): string {
   const candidate = value === undefined ? fallback : value.trim().toLowerCase();
-  const match = /^([1-9]\d*)\s*(milliseconds?|ms|seconds?|s|minutes?|m|hours?|h|days?|d)$/.exec(candidate);
+  const match = /^([1-9]\d*)\s*(milliseconds?|ms|seconds?|s|minutes?|m|hours?|h|days?|d)$/.exec(
+    candidate,
+  );
   if (!match) {
     throw new Error(
       'RATE_LIMIT_TIME_WINDOW must be a positive duration such as "1 minute", "30 seconds", or "100 ms"',

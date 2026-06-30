@@ -1664,6 +1664,7 @@ describe('bulk offline sync endpoint', () => {
       [1, 'hash_1'],
       [2, 'missing_hash'],
     ] as const) {
+      // eslint-disable-next-line no-await-in-loop -- each chunk upload assertion uses the sequence-specific response.
       const response = await app.inject({
         method: 'PUT',
         url: `/check-ins/bulk-sync-jobs/${job.id}/chunks/${sequence}`,
@@ -1806,6 +1807,7 @@ describe('bulk offline sync endpoint', () => {
     expect(firstChunk.statusCode).toBe(202);
 
     for (let attempt = 0; attempt < 5; attempt += 1) {
+      // eslint-disable-next-line no-await-in-loop -- scheduler flushes are retried until the worker writes scan logs.
       await flushBulkSyncScheduler();
       if (inserts.some((insert) => insert.table === 'scan_logs')) break;
     }
@@ -1934,6 +1936,7 @@ describe('bulk offline sync endpoint', () => {
       [1, 'hash_1'],
       [2, 'missing_hash'],
     ] as const) {
+      // eslint-disable-next-line no-await-in-loop -- each chunk upload assertion uses the sequence-specific response.
       const response = await app.inject({
         method: 'PUT',
         url: `/check-ins/bulk-sync-jobs/${job.id}/chunks/${sequence}`,
@@ -1970,6 +1973,7 @@ describe('bulk offline sync endpoint', () => {
     const job = await createBulkJob(app);
 
     for (const sequence of [1, 2]) {
+      // eslint-disable-next-line no-await-in-loop -- chunk uploads intentionally set up ordered worker lease state.
       const response = await app.inject({
         method: 'PUT',
         url: `/check-ins/bulk-sync-jobs/${job.id}/chunks/${sequence}`,
@@ -2114,6 +2118,7 @@ describe('bulk offline sync endpoint', () => {
     const job = await createBulkJob(app);
 
     for (const sequence of [1, 2]) {
+      // eslint-disable-next-line no-await-in-loop -- chunk uploads intentionally set up ordered device-clock warning state.
       const response = await app.inject({
         method: 'PUT',
         url: `/check-ins/bulk-sync-jobs/${job.id}/chunks/${sequence}`,

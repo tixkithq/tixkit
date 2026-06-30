@@ -1,11 +1,13 @@
 export type OpenApiReference = { $ref: string };
-export type OpenApiParameter = OpenApiReference | {
-  name: string;
-  in: string;
-  required?: boolean;
-  schema?: Record<string, unknown>;
-  description?: string;
-};
+export type OpenApiParameter =
+  | OpenApiReference
+  | {
+      name: string;
+      in: string;
+      required?: boolean;
+      schema?: Record<string, unknown>;
+      description?: string;
+    };
 
 type HttpMethod = 'get' | 'put' | 'post' | 'delete' | 'options' | 'head' | 'patch' | 'trace';
 type OpenApiOperation = {
@@ -20,23 +22,22 @@ type OpenApiDocument = {
   paths: Record<string, OpenApiPathItem>;
   [key: string]: unknown;
 };
-type NormalizedOpenApiOperation<T, HasPathTemplate extends boolean> = T extends Record<
-  string,
-  unknown
->
-  ? Omit<T, 'parameters'> &
-      (HasPathTemplate extends true
-        ? { parameters: OpenApiParameter[] }
-        : { parameters?: OpenApiParameter[] })
-  : T;
-type NormalizedOpenApiPathItem<Path extends string, T> = T extends Record<string, unknown>
-  ? Omit<T, HttpMethod> & {
-      [Method in keyof T & HttpMethod]: NormalizedOpenApiOperation<
-        T[Method],
-        Path extends `${string}{${string}}${string}` ? true : false
-      >;
-    }
-  : T;
+type NormalizedOpenApiOperation<T, HasPathTemplate extends boolean> =
+  T extends Record<string, unknown>
+    ? Omit<T, 'parameters'> &
+        (HasPathTemplate extends true
+          ? { parameters: OpenApiParameter[] }
+          : { parameters?: OpenApiParameter[] })
+    : T;
+type NormalizedOpenApiPathItem<Path extends string, T> =
+  T extends Record<string, unknown>
+    ? Omit<T, HttpMethod> & {
+        [Method in keyof T & HttpMethod]: NormalizedOpenApiOperation<
+          T[Method],
+          Path extends `${string}{${string}}${string}` ? true : false
+        >;
+      }
+    : T;
 type NormalizedOpenApiDocument<T extends OpenApiDocument> = Omit<T, 'paths'> & {
   paths: {
     [Path in keyof T['paths'] & string]: NormalizedOpenApiPathItem<Path, T['paths'][Path]>;
@@ -56,7 +57,12 @@ const httpMethods = new Set<HttpMethod>([
 ]);
 
 function isDeclaredPathParameter(parameter: OpenApiParameter, name: string) {
-  return !('$ref' in parameter) && parameter.name === name && parameter.in === 'path' && parameter.required === true;
+  return (
+    !('$ref' in parameter) &&
+    parameter.name === name &&
+    parameter.in === 'path' &&
+    parameter.required === true
+  );
 }
 
 function isHttpMethod(method: string): method is HttpMethod {
@@ -67,12 +73,19 @@ function withDeclaredPathParameters<const T extends OpenApiDocument>(
   spec: T,
 ): NormalizedOpenApiDocument<T> {
   for (const [path, pathItem] of Object.entries(spec.paths)) {
-    const parameterNames = [...path.matchAll(pathTemplateParameterPattern)].map((match) => match[1]);
+    const parameterNames = [...path.matchAll(pathTemplateParameterPattern)].map(
+      (match) => match[1],
+    );
     if (parameterNames.length === 0) continue;
 
     const pathLevelParameters = Array.isArray(pathItem.parameters) ? pathItem.parameters : [];
     for (const [method, operation] of Object.entries(pathItem)) {
-      if (!isHttpMethod(method) || !operation || typeof operation !== 'object' || Array.isArray(operation)) {
+      if (
+        !isHttpMethod(method) ||
+        !operation ||
+        typeof operation !== 'object' ||
+        Array.isArray(operation)
+      ) {
         continue;
       }
 

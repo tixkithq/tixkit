@@ -42,7 +42,9 @@ export type SmsTemplateDocument = {
   shortLinks: SmsShortLinkSuggestion[];
 };
 
-export type SmsTemplateDocumentOverrides = Partial<Omit<SmsTemplateDocument, 'editor' | 'settings'>> & {
+export type SmsTemplateDocumentOverrides = Partial<
+  Omit<SmsTemplateDocument, 'editor' | 'settings'>
+> & {
   editor?: Partial<SmsTemplateDocument['editor']>;
   settings?: Partial<SmsTemplateSettings>;
 };
@@ -183,7 +185,8 @@ export function validateSmsTemplate(
   if (!templateKeyIsSafe(document.settings.templateKey)) {
     issues.push({
       code: 'invalid_template_key',
-      message: 'SMS template keys must use lowercase letters, numbers, dots, underscores, or dashes',
+      message:
+        'SMS template keys must use lowercase letters, numbers, dots, underscores, or dashes',
       severity: 'error',
       field: 'settings.templateKey',
     });
@@ -245,9 +248,10 @@ export function renderSmsTemplate(
     escape: 'plain',
     fallback: options.fallback ?? '',
   });
-  const text = requiresOptOut(document.settings) && optOutText
-    ? injectOptOutToken(personalized, optOutText)
-    : personalized;
+  const text =
+    requiresOptOut(document.settings) && optOutText
+      ? injectOptOutToken(personalized, optOutText)
+      : personalized;
   const segmentInfo = countSmsSegments(text);
   const cost = estimateSmsCost(text, document.settings.estimatedCostPerSegmentCents);
   const renderIssues: ContentValidationIssue[] = [...validation.issues];
@@ -325,7 +329,10 @@ function requiresOptOut(settings: SmsTemplateSettings): boolean {
   return settings.category === 'bulk' || settings.consentCategory === 'marketing';
 }
 
-function consentMatchesCategory(category: SmsTemplateCategory, consentCategory: SmsConsentCategory): boolean {
+function consentMatchesCategory(
+  category: SmsTemplateCategory,
+  consentCategory: SmsConsentCategory,
+): boolean {
   if (category === 'bulk') return consentCategory === 'marketing';
   if (category === 'transactional') return consentCategory === 'transactional';
   return category === consentCategory;
@@ -340,7 +347,9 @@ function isSmsCategory(value: unknown): value is SmsTemplateCategory {
 }
 
 function isConsentCategory(value: unknown): value is SmsConsentCategory {
-  return value === 'transactional' || value === 'marketing' || value === 'staff' || value === 'system';
+  return (
+    value === 'transactional' || value === 'marketing' || value === 'staff' || value === 'system'
+  );
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

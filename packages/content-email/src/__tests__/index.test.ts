@@ -287,7 +287,11 @@ describe('renderEmailTemplate', () => {
       settings: {
         ...baseTemplate.settings,
         subject: 'x'.repeat(999),
-        sender: { ...baseTemplate.settings.sender, fromEmail: 'not-an-email', replyToEmail: 'bad-reply-to' },
+        sender: {
+          ...baseTemplate.settings.sender,
+          fromEmail: 'not-an-email',
+          replyToEmail: 'bad-reply-to',
+        },
       },
       blocks: [
         {

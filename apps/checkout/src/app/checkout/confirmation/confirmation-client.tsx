@@ -487,10 +487,7 @@ export default function ConfirmationClient() {
                 </CardHeader>
                 <CardContent className="space-y-3">
                   {walletPasses.map((ticket) => (
-                    <div
-                      key={ticket.ticketId}
-                      className="space-y-3 rounded-md border p-3"
-                    >
+                    <div key={ticket.ticketId} className="space-y-3 rounded-md border p-3">
                       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                         <div className="min-w-0 space-y-1">
                           <p className="truncate font-mono text-sm font-medium">
@@ -504,7 +501,8 @@ export default function ConfirmationClient() {
                           {ticket.activeResaleListing ? (
                             <Badge variant="secondary" className="justify-center gap-1.5">
                               <BadgeDollarSignIcon className="size-3.5" />
-                              Listed for {formatCurrency(
+                              Listed for{' '}
+                              {formatCurrency(
                                 ticket.activeResaleListing.priceCents,
                                 ticket.activeResaleListing.currency,
                               )}
@@ -543,9 +541,7 @@ export default function ConfirmationClient() {
                       {resaleForms[ticket.ticketId]?.expanded && !ticket.activeResaleListing ? (
                         <div className="grid gap-3 border-t pt-3 sm:grid-cols-[1fr_auto] sm:items-end">
                           <div className="space-y-1.5">
-                            <Label htmlFor={`resale-price-${ticket.ticketId}`}>
-                              Resale price
-                            </Label>
+                            <Label htmlFor={`resale-price-${ticket.ticketId}`}>Resale price</Label>
                             <Input
                               id={`resale-price-${ticket.ticketId}`}
                               inputMode="decimal"

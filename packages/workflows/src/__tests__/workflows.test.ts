@@ -277,9 +277,7 @@ describe('checkoutSessionWorkflow', () => {
       return okResult({ released: true });
     });
 
-    await expect(
-      checkoutSessionWorkflow(makeCheckoutInput({ isFreeOrder: true })),
-    ).rejects.toThrow(
+    await expect(checkoutSessionWorkflow(makeCheckoutInput({ isFreeOrder: true }))).rejects.toThrow(
       'Checkout finalization failed (ORDER_FINALIZE_FAILED): database lock timeout',
     );
     expect(released).toBe(false);
@@ -1215,9 +1213,7 @@ describe('exportWorkflow', () => {
 
   it('throws retryable upload failures without marking the export failed', async () => {
     let markedFailed = false;
-    setActivity('uploadFileActivity', async () =>
-      errResult('UPLOAD_FAILED', 'S3 timeout', true),
-    );
+    setActivity('uploadFileActivity', async () => errResult('UPLOAD_FAILED', 'S3 timeout', true));
     setActivity('markExportFailedActivity', async () => {
       markedFailed = true;
       return okResult({ failed: true });

@@ -275,8 +275,7 @@ describe('WebhookDeliveryRepository', () => {
     const { db } = createWebhookDeliveryDb(
       delivery,
       (row) =>
-        row.status === 'pending' &&
-        row.next_retry_at?.getTime() === staleLeaseExpiresAt.getTime(),
+        row.status === 'pending' && row.next_retry_at?.getTime() === staleLeaseExpiresAt.getTime(),
     );
     const repo = new WebhookDeliveryRepository(db);
 

@@ -14,9 +14,7 @@ const allDriverCases: DriverCase[] = [
 
 const requestedDriver = process.env.DB_INTEGRATION_DRIVER;
 const driverCases = (
-  requestedDriver
-    ? allDriverCases.filter((c) => c.driver === requestedDriver)
-    : allDriverCases
+  requestedDriver ? allDriverCases.filter((c) => c.driver === requestedDriver) : allDriverCases
 ).filter((c) => c.url.length > 0);
 
 if (driverCases.length === 0) {

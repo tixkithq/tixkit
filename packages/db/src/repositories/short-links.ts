@@ -55,11 +55,7 @@ export class ShortLinkRepository extends BaseRepository {
   }
 
   async findById(id: string) {
-    return this.db
-      .selectFrom('short_links')
-      .selectAll()
-      .where('id', '=', id)
-      .executeTakeFirst();
+    return this.db.selectFrom('short_links').selectAll().where('id', '=', id).executeTakeFirst();
   }
 
   async listByTenant(tenantId: string, limit = 50) {

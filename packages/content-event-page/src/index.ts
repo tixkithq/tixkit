@@ -62,7 +62,14 @@ export type EventPageBlock =
   | { type: 'tickets'; id: string; title: string; body?: string; ctaLabel?: string }
   | { type: 'products'; id: string; title: string; body?: string; productIds: string[] }
   | { type: 'schedule'; id: string; title: string; items: EventPageScheduleItem[] }
-  | { type: 'venue_map'; id: string; title: string; venueName: string; address?: string; mapUrl?: string }
+  | {
+      type: 'venue_map';
+      id: string;
+      title: string;
+      venueName: string;
+      address?: string;
+      mapUrl?: string;
+    }
   | { type: 'faq'; id: string; title: string; items: EventPageFaqItem[] }
   | { type: 'sponsors'; id: string; title: string; items: EventPageLogoItem[] }
   | { type: 'speakers'; id: string; title: string; items: EventPagePersonItem[] }
@@ -189,7 +196,14 @@ export function createDefaultEventPageDocument(input: {
   startsAt?: string | Date | null;
   endsAt?: string | Date | null;
   timezone?: string | null;
-  venue?: { name?: string | null; address?: string | null; city?: string | null; region?: string | null; country?: string | null; mapUrl?: string | null } | null;
+  venue?: {
+    name?: string | null;
+    address?: string | null;
+    city?: string | null;
+    region?: string | null;
+    country?: string | null;
+    mapUrl?: string | null;
+  } | null;
   brandName?: string | null;
   publicUrl?: string | null;
   checkoutUrl?: string | null;
@@ -200,7 +214,10 @@ export function createDefaultEventPageDocument(input: {
   const startsAt = isoOrTemplate(input.startsAt, '{{event.startsAt}}');
   const endsAt = isoOrTemplate(input.endsAt, '{{event.endsAt}}');
   const venueName = input.venue?.name?.trim() || '{{event.venueName}}';
-  const summary = firstNonEmpty(input.eventDescription, `Tickets and details for ${input.eventTitle}.`);
+  const summary = firstNonEmpty(
+    input.eventDescription,
+    `Tickets and details for ${input.eventTitle}.`,
+  );
   const checkoutUrl = input.checkoutUrl?.trim() || '{{event.checkoutUrl}}';
 
   return {
@@ -257,7 +274,15 @@ export function createDefaultEventPageDocument(input: {
         type: 'schedule',
         id: 'schedule',
         title: 'Schedule',
-        items: [{ title: input.eventTitle, startsAt, endsAt, timezone: input.timezone ?? undefined, venueName }],
+        items: [
+          {
+            title: input.eventTitle,
+            startsAt,
+            endsAt,
+            timezone: input.timezone ?? undefined,
+            venueName,
+          },
+        ],
       },
       {
         type: 'venue_map',
@@ -274,7 +299,8 @@ export function createDefaultEventPageDocument(input: {
         items: [
           {
             question: 'How do I get my tickets?',
-            answer: 'Tickets are delivered by email after checkout and can be opened from your confirmation page.',
+            answer:
+              'Tickets are delivered by email after checkout and can be opened from your confirmation page.',
           },
         ],
       },
@@ -378,26 +404,14 @@ export function renderEventPageDocument(
 
 export function sanitizeEventPageHtml(html: string): string {
   return html
-    .replace(
-      /<iframe\b(?=[^>]*\ssrcdoc\b)[\s\S]*?<\/iframe>/gi,
-      '',
-    )
+    .replace(/<iframe\b(?=[^>]*\ssrcdoc\b)[\s\S]*?<\/iframe>/gi, '')
     .replace(
       /<(script|object|embed|form|svg|math|base|link|meta|style|template)\b[\s\S]*?<\/\1>/gi,
       '',
     )
-    .replace(
-      /<(script|object|embed|form|svg|math|base|link|meta|style|template)\b[^>]*\/?>/gi,
-      '',
-    )
-    .replace(
-      /\s+on[a-z][\w:-]*(?:\s*=\s*(?:"[^"]*"|'[^']*'|`[^`]*`|[^\s"'`=<>]+))?/gi,
-      '',
-    )
-    .replace(
-      /\s+(srcdoc|style)\s*=\s*("[^"]*"|'[^']*'|`[^`]*`|[^\s"'`=<>]*)/gi,
-      '',
-    )
+    .replace(/<(script|object|embed|form|svg|math|base|link|meta|style|template)\b[^>]*\/?>/gi, '')
+    .replace(/\s+on[a-z][\w:-]*(?:\s*=\s*(?:"[^"]*"|'[^']*'|`[^`]*`|[^\s"'`=<>]+))?/gi, '')
+    .replace(/\s+(srcdoc|style)\s*=\s*("[^"]*"|'[^']*'|`[^`]*`|[^\s"'`=<>]*)/gi, '')
     .replace(
       /\s+(href|src|data|action|formaction|xlink:href)\s*=\s*("[^"]*"|'[^']*'|`[^`]*`|[^\s"'`=<>]*)/gi,
       (attribute: string, _name: string, rawValue: string) =>
@@ -407,11 +421,14 @@ export function sanitizeEventPageHtml(html: string): string {
 
 function hasUnsafeHtmlUrlScheme(rawValue: string): boolean {
   const value = stripAttributeQuotes(rawValue)
-    .replace(/&(?:#x([0-9a-f]+)|#([0-9]+)|([a-z][a-z0-9]+));?/gi, (_entity, hex, decimal, named) => {
-      if (hex) return htmlCodePointEntity(hex, 16);
-      if (decimal) return htmlCodePointEntity(decimal, 10);
-      return namedHtmlEntity(named);
-    })
+    .replace(
+      /&(?:#x([0-9a-f]+)|#([0-9]+)|([a-z][a-z0-9]+));?/gi,
+      (_entity, hex, decimal, named) => {
+        if (hex) return htmlCodePointEntity(hex, 16);
+        if (decimal) return htmlCodePointEntity(decimal, 10);
+        return namedHtmlEntity(named);
+      },
+    )
     .split('')
     .filter((char) => {
       const code = char.codePointAt(0) ?? 0;
@@ -456,7 +473,11 @@ export function normalizeEventPageDocument(value: unknown): EventPageDocument | 
   if (!isRecord(value)) return undefined;
   if (value.schemaVersion !== EVENT_PAGE_SCHEMA_VERSION) return undefined;
   const editor = value.editor;
-  if (!isRecord(editor) || editor.provider !== TIPTAP_EVENT_PAGE_PROVIDER || !isRecord(editor.document)) {
+  if (
+    !isRecord(editor) ||
+    editor.provider !== TIPTAP_EVENT_PAGE_PROVIDER ||
+    !isRecord(editor.document)
+  ) {
     return undefined;
   }
   if (!isRecord(value.settings) || !Array.isArray(value.blocks)) return undefined;
@@ -472,18 +493,34 @@ function renderHeadlessBlock(
     case 'hero': {
       const title = renderPlain(block.headline, context);
       const body = block.body ? renderPlain(block.body, context) : undefined;
-      const imageUrl = block.imageUrl ? safeRenderedUrl(block.imageUrl, context, options) : undefined;
+      const imageUrl = block.imageUrl
+        ? safeRenderedUrl(block.imageUrl, context, options)
+        : undefined;
       const ctaUrl = block.ctaUrl ? safeRenderedUrl(block.ctaUrl, context, options) : undefined;
       const html = [
         `<section class="tk-ep-hero" data-block-id="${escapeAttr(block.id)}">`,
-        block.eyebrow ? `<p class="tk-ep-eyebrow">${escapeHtml(renderPlain(block.eyebrow, context))}</p>` : '',
+        block.eyebrow
+          ? `<p class="tk-ep-eyebrow">${escapeHtml(renderPlain(block.eyebrow, context))}</p>`
+          : '',
         `<h1>${escapeHtml(title)}</h1>`,
         body ? `<p>${escapeHtml(body)}</p>` : '',
-        imageUrl ? `<img src="${escapeAttr(imageUrl)}" alt="${escapeAttr(renderPlain(block.imageAlt ?? '', context))}" loading="lazy" />` : '',
-        block.ctaLabel && ctaUrl ? `<a class="tk-ep-button" href="${escapeAttr(ctaUrl)}">${escapeHtml(renderPlain(block.ctaLabel, context))}</a>` : '',
+        imageUrl
+          ? `<img src="${escapeAttr(imageUrl)}" alt="${escapeAttr(renderPlain(block.imageAlt ?? '', context))}" loading="lazy" />`
+          : '',
+        block.ctaLabel && ctaUrl
+          ? `<a class="tk-ep-button" href="${escapeAttr(ctaUrl)}">${escapeHtml(renderPlain(block.ctaLabel, context))}</a>`
+          : '',
         '</section>',
       ].join('');
-      return { type: block.type, id: block.id, title, text: body, html, imageUrl, imageAlt: block.imageAlt };
+      return {
+        type: block.type,
+        id: block.id,
+        title,
+        text: body,
+        html,
+        imageUrl,
+        imageAlt: block.imageAlt,
+      };
     }
     case 'rich_text': {
       const html = `<section class="tk-ep-rich-text" data-block-id="${escapeAttr(block.id)}">${sanitizeEventPageHtml(renderTipTap(block.content, context))}</section>`;
@@ -495,9 +532,18 @@ function renderHeadlessBlock(
         value: renderPlain(item.value, context),
       }));
       const html = `<section class="tk-ep-details" data-block-id="${escapeAttr(block.id)}"><h2>${escapeHtml(renderPlain(block.title, context))}</h2><dl>${items
-        .map((item) => `<div><dt>${escapeHtml(item.label)}</dt><dd>${escapeHtml(item.value)}</dd></div>`)
+        .map(
+          (item) =>
+            `<div><dt>${escapeHtml(item.label)}</dt><dd>${escapeHtml(item.value)}</dd></div>`,
+        )
         .join('')}</dl></section>`;
-      return { type: block.type, id: block.id, title: renderPlain(block.title, context), html, items };
+      return {
+        type: block.type,
+        id: block.id,
+        title: renderPlain(block.title, context),
+        html,
+        items,
+      };
     }
     case 'tickets': {
       const tickets = (context.tickets ?? []).filter((ticket) => ticket.status !== 'hidden');
@@ -505,17 +551,38 @@ function renderHeadlessBlock(
         ? safeRenderedUrl(context.event.checkoutUrl, context, options)
         : undefined;
       const html = `<section class="tk-ep-tickets" data-block-id="${escapeAttr(block.id)}"><h2>${escapeHtml(renderPlain(block.title, context))}</h2>${block.body ? `<p>${escapeHtml(renderPlain(block.body, context))}</p>` : ''}<ul>${tickets
-        .map((ticket) => `<li><strong>${escapeHtml(ticket.name)}</strong>${ticket.description ? `<span>${escapeHtml(ticket.description)}</span>` : ''}${ticket.priceLabel ? `<span>${escapeHtml(ticket.priceLabel)}</span>` : ''}</li>`)
-        .join('')}</ul>${block.ctaLabel && checkoutUrl ? `<a class="tk-ep-button" href="${escapeAttr(checkoutUrl)}">${escapeHtml(renderPlain(block.ctaLabel, context))}</a>` : ''}</section>`;
-      return { type: block.type, id: block.id, title: renderPlain(block.title, context), text: block.body ? renderPlain(block.body, context) : undefined, html, items: tickets };
+        .map(
+          (ticket) =>
+            `<li><strong>${escapeHtml(ticket.name)}</strong>${ticket.description ? `<span>${escapeHtml(ticket.description)}</span>` : ''}${ticket.priceLabel ? `<span>${escapeHtml(ticket.priceLabel)}</span>` : ''}</li>`,
+        )
+        .join(
+          '',
+        )}</ul>${block.ctaLabel && checkoutUrl ? `<a class="tk-ep-button" href="${escapeAttr(checkoutUrl)}">${escapeHtml(renderPlain(block.ctaLabel, context))}</a>` : ''}</section>`;
+      return {
+        type: block.type,
+        id: block.id,
+        title: renderPlain(block.title, context),
+        text: block.body ? renderPlain(block.body, context) : undefined,
+        html,
+        items: tickets,
+      };
     }
     case 'products': {
       const productIds = new Set(block.productIds);
       const products = (context.products ?? []).filter((product) => productIds.has(product.id));
       const html = `<section class="tk-ep-products" data-block-id="${escapeAttr(block.id)}"><h2>${escapeHtml(renderPlain(block.title, context))}</h2>${block.body ? `<p>${escapeHtml(renderPlain(block.body, context))}</p>` : ''}<ul>${products
-        .map((product) => `<li><strong>${escapeHtml(product.name)}</strong>${product.description ? `<span>${escapeHtml(product.description)}</span>` : ''}${product.priceLabel ? `<span>${escapeHtml(product.priceLabel)}</span>` : ''}</li>`)
+        .map(
+          (product) =>
+            `<li><strong>${escapeHtml(product.name)}</strong>${product.description ? `<span>${escapeHtml(product.description)}</span>` : ''}${product.priceLabel ? `<span>${escapeHtml(product.priceLabel)}</span>` : ''}</li>`,
+        )
         .join('')}</ul></section>`;
-      return { type: block.type, id: block.id, title: renderPlain(block.title, context), html, items: products };
+      return {
+        type: block.type,
+        id: block.id,
+        title: renderPlain(block.title, context),
+        html,
+        items: products,
+      };
     }
     case 'schedule': {
       const items = block.items.map((item) => ({
@@ -526,14 +593,29 @@ function renderHeadlessBlock(
         venueName: item.venueName ? renderPlain(item.venueName, context) : undefined,
       }));
       const html = `<section class="tk-ep-schedule" data-block-id="${escapeAttr(block.id)}"><h2>${escapeHtml(renderPlain(block.title, context))}</h2><ol>${items
-        .map((item) => `<li><strong>${escapeHtml(item.title)}</strong><time>${escapeHtml(item.startsAt)}</time>${item.venueName ? `<span>${escapeHtml(item.venueName)}</span>` : ''}</li>`)
+        .map(
+          (item) =>
+            `<li><strong>${escapeHtml(item.title)}</strong><time>${escapeHtml(item.startsAt)}</time>${item.venueName ? `<span>${escapeHtml(item.venueName)}</span>` : ''}</li>`,
+        )
         .join('')}</ol></section>`;
-      return { type: block.type, id: block.id, title: renderPlain(block.title, context), html, items };
+      return {
+        type: block.type,
+        id: block.id,
+        title: renderPlain(block.title, context),
+        html,
+        items,
+      };
     }
     case 'venue_map': {
       const mapUrl = block.mapUrl ? safeRenderedUrl(block.mapUrl, context, options) : undefined;
       const html = `<section class="tk-ep-venue" data-block-id="${escapeAttr(block.id)}"><h2>${escapeHtml(renderPlain(block.title, context))}</h2><p><strong>${escapeHtml(renderPlain(block.venueName, context))}</strong></p>${block.address ? `<p>${escapeHtml(renderPlain(block.address, context))}</p>` : ''}${mapUrl ? `<a href="${escapeAttr(mapUrl)}">Open map</a>` : ''}</section>`;
-      return { type: block.type, id: block.id, title: renderPlain(block.title, context), html, links: mapUrl ? [{ label: 'Open map', url: mapUrl }] : [] };
+      return {
+        type: block.type,
+        id: block.id,
+        title: renderPlain(block.title, context),
+        html,
+        links: mapUrl ? [{ label: 'Open map', url: mapUrl }] : [],
+      };
     }
     case 'faq': {
       const items = block.items.map((item) => ({
@@ -541,25 +623,53 @@ function renderHeadlessBlock(
         answer: renderPlain(item.answer, context),
       }));
       const html = `<section class="tk-ep-faq" data-block-id="${escapeAttr(block.id)}"><h2>${escapeHtml(renderPlain(block.title, context))}</h2>${items
-        .map((item) => `<details><summary>${escapeHtml(item.question)}</summary><p>${escapeHtml(item.answer)}</p></details>`)
+        .map(
+          (item) =>
+            `<details><summary>${escapeHtml(item.question)}</summary><p>${escapeHtml(item.answer)}</p></details>`,
+        )
         .join('')}</section>`;
-      return { type: block.type, id: block.id, title: renderPlain(block.title, context), html, items };
+      return {
+        type: block.type,
+        id: block.id,
+        title: renderPlain(block.title, context),
+        html,
+        items,
+      };
     }
     case 'sponsors':
     case 'speakers': {
       const items = block.items.map((item) => renderItem(item, context, options));
       const html = `<section class="tk-ep-${block.type}" data-block-id="${escapeAttr(block.id)}"><h2>${escapeHtml(renderPlain(block.title, context))}</h2><ul>${items
-        .map((item) => `<li><strong>${escapeHtml(item.name)}</strong>${item.role ? `<span>${escapeHtml(item.role)}</span>` : ''}${item.bio ? `<p>${escapeHtml(item.bio)}</p>` : ''}${item.url ? `<a href="${escapeAttr(item.url)}">Open</a>` : ''}${item.imageUrl ? `<img src="${escapeAttr(item.imageUrl)}" alt="${escapeAttr(item.imageAlt ?? item.name)}" loading="lazy" />` : ''}</li>`)
+        .map(
+          (item) =>
+            `<li><strong>${escapeHtml(item.name)}</strong>${item.role ? `<span>${escapeHtml(item.role)}</span>` : ''}${item.bio ? `<p>${escapeHtml(item.bio)}</p>` : ''}${item.url ? `<a href="${escapeAttr(item.url)}">Open</a>` : ''}${item.imageUrl ? `<img src="${escapeAttr(item.imageUrl)}" alt="${escapeAttr(item.imageAlt ?? item.name)}" loading="lazy" />` : ''}</li>`,
+        )
         .join('')}</ul></section>`;
-      return { type: block.type, id: block.id, title: renderPlain(block.title, context), html, items };
+      return {
+        type: block.type,
+        id: block.id,
+        title: renderPlain(block.title, context),
+        html,
+        items,
+      };
     }
     case 'button': {
       const url = safeRenderedUrl(block.url, context, options);
       const html = `<section class="tk-ep-action" data-block-id="${escapeAttr(block.id)}"><a class="tk-ep-button tk-ep-button-${escapeAttr(block.style ?? 'primary')}" href="${escapeAttr(url)}">${escapeHtml(renderPlain(block.label, context))}</a></section>`;
-      return { type: block.type, id: block.id, title: renderPlain(block.label, context), html, links: [{ label: renderPlain(block.label, context), url }] };
+      return {
+        type: block.type,
+        id: block.id,
+        title: renderPlain(block.label, context),
+        html,
+        links: [{ label: renderPlain(block.label, context), url }],
+      };
     }
     case 'divider':
-      return { type: block.type, id: block.id, html: `<hr class="tk-ep-divider" data-block-id="${escapeAttr(block.id)}" />` };
+      return {
+        type: block.type,
+        id: block.id,
+        html: `<hr class="tk-ep-divider" data-block-id="${escapeAttr(block.id)}" />`,
+      };
     case 'social_links': {
       const links = block.links.map((link) => ({
         label: renderPlain(link.label, context),
@@ -568,12 +678,19 @@ function renderHeadlessBlock(
       const html = `<section class="tk-ep-social" data-block-id="${escapeAttr(block.id)}">${block.title ? `<h2>${escapeHtml(renderPlain(block.title, context))}</h2>` : ''}<ul>${links
         .map((link) => `<li><a href="${escapeAttr(link.url)}">${escapeHtml(link.label)}</a></li>`)
         .join('')}</ul></section>`;
-      return { type: block.type, id: block.id, title: block.title ? renderPlain(block.title, context) : undefined, html, links };
+      return {
+        type: block.type,
+        id: block.id,
+        title: block.title ? renderPlain(block.title, context) : undefined,
+        html,
+        links,
+      };
     }
     case 'custom_embed': {
-      const html = options.allowUnsafeEmbeds && block.allowUnsafeEmbed
-        ? `<section class="tk-ep-embed" data-block-id="${escapeAttr(block.id)}">${sanitizeEventPageHtml(block.html)}</section>`
-        : '';
+      const html =
+        options.allowUnsafeEmbeds && block.allowUnsafeEmbed
+          ? `<section class="tk-ep-embed" data-block-id="${escapeAttr(block.id)}">${sanitizeEventPageHtml(block.html)}</section>`
+          : '';
       return { type: block.type, id: block.id, html };
     }
   }
@@ -663,7 +780,14 @@ function walkTipTap(value: JSONContent, field: string, issues: ContentValidation
             field,
           }),
         );
-        if (!isAllowedDestination(renderMergeTags(mark.attrs.href, sampleContext(), { channel: 'email', escape: 'plain' }))) {
+        if (
+          !isAllowedDestination(
+            renderMergeTags(mark.attrs.href, sampleContext(), {
+              channel: 'email',
+              escape: 'plain',
+            }),
+          )
+        ) {
           issues.push({
             code: 'unsafe_link',
             message: 'TipTap links must use safe http(s) destinations',
@@ -687,7 +811,12 @@ function validateBlock(
   const issues: ContentValidationIssue[] = [];
   const field = `blocks.${index}`;
   if (!block.id.trim()) {
-    issues.push({ code: 'missing_block_id', message: 'Event-page blocks require stable IDs', severity: 'error', field });
+    issues.push({
+      code: 'missing_block_id',
+      message: 'Event-page blocks require stable IDs',
+      severity: 'error',
+      field,
+    });
   }
   if (block.type === 'custom_embed') {
     if (!options.allowUnsafeEmbeds || !block.allowUnsafeEmbed) {
@@ -709,7 +838,10 @@ function validateBlock(
     }
   }
   for (const link of linkFields(block)) {
-    const rendered = renderMergeTags(link.url, sampleContext(), { channel: 'email', escape: 'plain' });
+    const rendered = renderMergeTags(link.url, sampleContext(), {
+      channel: 'email',
+      escape: 'plain',
+    });
     if (!isAllowedDestination(rendered, Boolean(options.allowPrivateLinks))) {
       issues.push({
         code: 'unsafe_link',
@@ -720,7 +852,10 @@ function validateBlock(
     }
   }
   for (const image of imageFields(block)) {
-    const rendered = renderMergeTags(image.url, sampleContext(), { channel: 'email', escape: 'plain' });
+    const rendered = renderMergeTags(image.url, sampleContext(), {
+      channel: 'email',
+      escape: 'plain',
+    });
     if (!isAllowedDestination(rendered, Boolean(options.allowPrivateLinks))) {
       issues.push({
         code: 'unsafe_image',
@@ -752,21 +887,34 @@ function linkFields(block: EventPageBlock): { field: string; url: string }[] {
     case 'social_links':
       return block.links.map((link, index) => ({ field: `links.${index}.url`, url: link.url }));
     case 'sponsors':
-      return block.items.flatMap((item, index) => item.url ? [{ field: `items.${index}.url`, url: item.url }] : []);
+      return block.items.flatMap((item, index) =>
+        item.url ? [{ field: `items.${index}.url`, url: item.url }] : [],
+      );
     default:
       return [];
   }
 }
 
-function imageFields(block: EventPageBlock): { field: string; url: string; altField: string; alt?: string }[] {
+function imageFields(
+  block: EventPageBlock,
+): { field: string; url: string; altField: string; alt?: string }[] {
   switch (block.type) {
     case 'hero':
-      return block.imageUrl ? [{ field: 'imageUrl', url: block.imageUrl, altField: 'imageAlt', alt: block.imageAlt }] : [];
+      return block.imageUrl
+        ? [{ field: 'imageUrl', url: block.imageUrl, altField: 'imageAlt', alt: block.imageAlt }]
+        : [];
     case 'sponsors':
     case 'speakers':
       return block.items.flatMap((item, index) =>
         item.imageUrl
-          ? [{ field: `items.${index}.imageUrl`, url: item.imageUrl, altField: `items.${index}.imageAlt`, alt: item.imageAlt }]
+          ? [
+              {
+                field: `items.${index}.imageUrl`,
+                url: item.imageUrl,
+                altField: `items.${index}.imageAlt`,
+                alt: item.imageAlt,
+              },
+            ]
           : [],
       );
     default:
@@ -793,7 +941,15 @@ function stringsFromBlock(block: EventPageBlock): string[] {
     case 'rich_text':
       return textFromTipTap(block.content);
     case 'hero':
-      return [block.headline, block.eyebrow ?? '', block.body ?? '', block.ctaLabel ?? '', block.ctaUrl ?? '', block.imageUrl ?? '', block.imageAlt ?? ''];
+      return [
+        block.headline,
+        block.eyebrow ?? '',
+        block.body ?? '',
+        block.ctaLabel ?? '',
+        block.ctaUrl ?? '',
+        block.imageUrl ?? '',
+        block.imageAlt ?? '',
+      ];
     case 'event_details':
       return [block.title, ...block.items.flatMap((item) => [item.label, item.value])];
     case 'tickets':
@@ -801,21 +957,33 @@ function stringsFromBlock(block: EventPageBlock): string[] {
     case 'products':
       return [block.title, block.body ?? '', ...block.productIds];
     case 'schedule':
-      return [block.title, ...block.items.flatMap((item) => [item.title, item.startsAt, item.endsAt ?? '', item.timezone ?? '', item.venueName ?? ''])];
+      return [
+        block.title,
+        ...block.items.flatMap((item) => [
+          item.title,
+          item.startsAt,
+          item.endsAt ?? '',
+          item.timezone ?? '',
+          item.venueName ?? '',
+        ]),
+      ];
     case 'venue_map':
       return [block.title, block.venueName, block.address ?? '', block.mapUrl ?? ''];
     case 'faq':
       return [block.title, ...block.items.flatMap((item) => [item.question, item.answer])];
     case 'sponsors':
     case 'speakers':
-      return [block.title, ...block.items.flatMap((item) => [
-        item.name,
-        'role' in item ? item.role ?? '' : '',
-        'bio' in item ? item.bio ?? '' : '',
-        'url' in item ? item.url ?? '' : '',
-        item.imageUrl ?? '',
-        item.imageAlt ?? '',
-      ])];
+      return [
+        block.title,
+        ...block.items.flatMap((item) => [
+          item.name,
+          'role' in item ? (item.role ?? '') : '',
+          'bio' in item ? (item.bio ?? '') : '',
+          'url' in item ? (item.url ?? '') : '',
+          item.imageUrl ?? '',
+          item.imageAlt ?? '',
+        ]),
+      ];
     case 'button':
       return [block.label, block.url];
     case 'divider':
@@ -851,12 +1019,20 @@ function renderItem(
   };
 }
 
-function discoveryCard(document: EventPageDocument, context: EventPageRenderContext): EventPageDiscoveryCard {
-  const hero = document.blocks.find((block): block is Extract<EventPageBlock, { type: 'hero' }> => block.type === 'hero');
+function discoveryCard(
+  document: EventPageDocument,
+  context: EventPageRenderContext,
+): EventPageDiscoveryCard {
+  const hero = document.blocks.find(
+    (block): block is Extract<EventPageBlock, { type: 'hero' }> => block.type === 'hero',
+  );
   const imageUrl = document.settings.discovery.coverImageUrl ?? hero?.imageUrl;
   const publicPath = document.settings.publicPath ?? context.event?.publicUrl;
   return {
-    title: renderPlain(document.settings.discovery.seoTitle ?? hero?.headline ?? context.event?.title ?? 'Event', context),
+    title: renderPlain(
+      document.settings.discovery.seoTitle ?? hero?.headline ?? context.event?.title ?? 'Event',
+      context,
+    ),
     summary: renderPlain(document.settings.discovery.summary, context),
     category: document.settings.discovery.category,
     tags: document.settings.discovery.tags,
@@ -888,8 +1064,20 @@ function isoOrTemplate(value: string | Date | null | undefined, fallback: string
   return value instanceof Date ? value.toISOString() : value;
 }
 
-function formatAddress(venue: { address?: string | null; city?: string | null; region?: string | null; country?: string | null } | null | undefined): string | undefined {
-  const parts = [venue?.address, venue?.city, venue?.region, venue?.country].map((part) => part?.trim()).filter(Boolean);
+function formatAddress(
+  venue:
+    | {
+        address?: string | null;
+        city?: string | null;
+        region?: string | null;
+        country?: string | null;
+      }
+    | null
+    | undefined,
+): string | undefined {
+  const parts = [venue?.address, venue?.city, venue?.region, venue?.country]
+    .map((part) => part?.trim())
+    .filter(Boolean);
   return parts.length > 0 ? parts.join(', ') : undefined;
 }
 
@@ -916,7 +1104,10 @@ function safeRenderedUrl(
 }
 
 function stripTags(html: string): string {
-  return html.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim();
+  return html
+    .replace(/<[^>]+>/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
 }
 
 function escapeHtml(value: string): string {

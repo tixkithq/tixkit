@@ -239,8 +239,8 @@ export const createCheckoutSessionSchema = (devMode: boolean) =>
             })
             .refine(
               (item) =>
-                [item.ticketTypeId, item.productId, item.resaleListingId].filter(Boolean)
-                  .length === 1,
+                [item.ticketTypeId, item.productId, item.resaleListingId].filter(Boolean).length ===
+                1,
               {
                 message:
                   'Each checkout item must include exactly one of ticketTypeId, productId, or resaleListingId',

@@ -97,7 +97,11 @@ export function resolveTemplateLocale(
   preferredLocale: string | string[] | undefined,
   defaultLocale: string = DEFAULT_LOCALE,
 ): { locale: string; content: string } {
-  const candidates = Array.isArray(preferredLocale) ? preferredLocale : preferredLocale ? [preferredLocale] : [];
+  const candidates = Array.isArray(preferredLocale)
+    ? preferredLocale
+    : preferredLocale
+      ? [preferredLocale]
+      : [];
   for (const candidate of candidates) {
     if (variants[candidate]) return { locale: candidate, content: variants[candidate] };
     const lang = candidate.split('-')[0];

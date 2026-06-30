@@ -203,8 +203,7 @@ export function createDefaultEmailTemplate(
     schemaVersion: 1,
     editor: {
       provider: REACT_EMAIL_EDITOR_PACKAGE,
-      contentHtml:
-        '<h1>{{event.title}}</h1><p>Hi {{recipient.name}}, your tickets are ready.</p>',
+      contentHtml: '<h1>{{event.title}}</h1><p>Hi {{recipient.name}}, your tickets are ready.</p>',
     },
     settings: {
       templateKey: 'order-confirmed',
@@ -254,7 +253,10 @@ export function createDefaultEmailTemplate(
 
 export function validateEmailTemplate(
   document: EmailTemplateDocument,
-  options: { provider?: 'resend' | 'opencore_email_sdk' | 'smtp'; allowPrivateLinks?: boolean } = {},
+  options: {
+    provider?: 'resend' | 'opencore_email_sdk' | 'smtp';
+    allowPrivateLinks?: boolean;
+  } = {},
 ): ContentValidationResult {
   const issues: ContentValidationIssue[] = [];
   const renderedForValidation = collectTemplateStrings(document).join('\n');
@@ -279,7 +281,10 @@ export function validateEmailTemplate(
     });
   }
 
-  if (document.settings.sender.replyToEmail && !isEmailLike(document.settings.sender.replyToEmail)) {
+  if (
+    document.settings.sender.replyToEmail &&
+    !isEmailLike(document.settings.sender.replyToEmail)
+  ) {
     issues.push({
       code: 'invalid_reply_to',
       message: 'Reply-To must be a valid email address when provided',
@@ -424,9 +429,17 @@ function EmailTemplate({
     React.createElement(
       Body,
       { style: { backgroundColor: '#f8fafc', fontFamily: 'Arial, sans-serif' } },
-      React.createElement(Container, { style: defaultContainerStyle }, blocks.map((block, index) =>
-        React.createElement(React.Fragment, { key: `${block.type}-${index}` }, renderBlock(block, context)),
-      )),
+      React.createElement(
+        Container,
+        { style: defaultContainerStyle },
+        blocks.map((block, index) =>
+          React.createElement(
+            React.Fragment,
+            { key: `${block.type}-${index}` },
+            renderBlock(block, context),
+          ),
+        ),
+      ),
     ),
   );
 }
@@ -445,7 +458,9 @@ function renderBlock(block: EmailTemplateBlock, context: MergeTagContext): React
             })
           : undefined,
         React.createElement(Heading, { as: 'h1' }, renderPlain(block.headline, context)),
-        block.body ? React.createElement(Text, { style: paragraphStyle }, renderPlain(block.body, context)) : undefined,
+        block.body
+          ? React.createElement(Text, { style: paragraphStyle }, renderPlain(block.body, context))
+          : undefined,
         block.ctaLabel && block.ctaUrl
           ? React.createElement(
               Button,
@@ -523,7 +538,11 @@ function renderBlock(block: EmailTemplateBlock, context: MergeTagContext): React
         { style: { color: '#64748b', fontSize: '12px', padding: '20px 28px' } },
         React.createElement(Hr),
         React.createElement(Text, null, renderPlain(block.body, context)),
-        React.createElement(Link, { href: renderUrl(block.unsubscribeUrl, context) }, 'Manage preferences'),
+        React.createElement(
+          Link,
+          { href: renderUrl(block.unsubscribeUrl, context) },
+          'Manage preferences',
+        ),
       );
     case 'raw_html':
       return React.createElement(Section, {
@@ -576,7 +595,10 @@ function stringsFromBlock(block: EmailTemplateBlock): string[] {
   }
 }
 
-function validateLinks(document: EmailTemplateDocument, allowPrivate: boolean): ContentValidationIssue[] {
+function validateLinks(
+  document: EmailTemplateDocument,
+  allowPrivate: boolean,
+): ContentValidationIssue[] {
   const issues: ContentValidationIssue[] = [];
   for (const link of linkFields(document)) {
     const withExampleContext = renderUrl(link.url, sampleContext());
@@ -677,11 +699,19 @@ function isEmailTemplateBlock(value: unknown): value is EmailTemplateBlock {
         )
       );
     case 'qr_code':
-      return typeof block.title === 'string' && typeof block.imageUrl === 'string' && optionalString(block.imageAlt);
+      return (
+        typeof block.title === 'string' &&
+        typeof block.imageUrl === 'string' &&
+        optionalString(block.imageAlt)
+      );
     case 'calendar_button':
       return typeof block.label === 'string' && typeof block.url === 'string';
     case 'venue_block':
-      return typeof block.title === 'string' && typeof block.address === 'string' && optionalString(block.mapUrl);
+      return (
+        typeof block.title === 'string' &&
+        typeof block.address === 'string' &&
+        optionalString(block.mapUrl)
+      );
     case 'social_links':
       return (
         Array.isArray(block.links) &&
@@ -760,12 +790,14 @@ function dedupeIssues(issues: ContentValidationIssue[]): ContentValidationIssue[
 
 export function validateEditorExport(html: string): ContentValidationResult {
   const result = validateMergeTags(html);
-  const issues = result.unknownTags.map((tag): ContentValidationIssue => ({
-    code: 'unknown_variable',
-    message: `Unknown merge tag {{${tag}}} — add it to the registry or remove it`,
-    severity: 'error',
-    field: tag,
-  }));
+  const issues = result.unknownTags.map(
+    (tag): ContentValidationIssue => ({
+      code: 'unknown_variable',
+      message: `Unknown merge tag {{${tag}}} — add it to the registry or remove it`,
+      severity: 'error',
+      field: tag,
+    }),
+  );
   return {
     valid: issues.length === 0,
     severity: issues.length > 0 ? 'error' : 'warning',

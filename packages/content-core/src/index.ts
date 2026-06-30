@@ -11,11 +11,7 @@
  * unknown-variable publish blockers.
  */
 
-import {
-  MERGE_TAG_REGISTRY,
-  validateMergeTags,
-  type MergeTagVariable,
-} from '@tixkit/domain';
+import { MERGE_TAG_REGISTRY, validateMergeTags, type MergeTagVariable } from '@tixkit/domain';
 
 export type ContentChannel = 'event_page' | 'email' | 'sms' | 'imessage' | 'social_invite';
 
@@ -131,11 +127,7 @@ export const RENDER_CONTRACTS: Record<ContentChannel, RenderContract> = {
 
 export const CONTENT_SCHEMA_VERSION = 1;
 
-export const SUPPORTED_CONTENT_CHANNELS: readonly ContentChannel[] = [
-  'event_page',
-  'email',
-  'sms',
-];
+export const SUPPORTED_CONTENT_CHANNELS: readonly ContentChannel[] = ['event_page', 'email', 'sms'];
 
 /** Channels that are stubbed and fail closed until explicitly enabled (C-089). */
 export const STUBBED_CHANNELS: readonly ContentChannel[] = ['imessage', 'social_invite'];
@@ -161,7 +153,11 @@ export function validateContentVersion(
   const issues: ContentValidationIssue[] = [];
 
   // Variable validation against the whitelisted merge-tag registry.
-  const templatesToCheck = [version.subject ?? '', version.renderedHtml ?? '', version.renderedText ?? ''];
+  const templatesToCheck = [
+    version.subject ?? '',
+    version.renderedHtml ?? '',
+    version.renderedText ?? '',
+  ];
   for (const template of templatesToCheck) {
     if (!template) continue;
     const tagResult = validateMergeTags(template);
@@ -287,7 +283,9 @@ export function createDefaultChannelRegistry(): ChannelAdapterRegistry {
 
 // ---- Variable metadata (reuses the merge-tag registry) ----
 
-export function variableDefinitionsForChannel(_channel: ContentChannel): ContentVariableDefinition[] {
+export function variableDefinitionsForChannel(
+  _channel: ContentChannel,
+): ContentVariableDefinition[] {
   // All channels share the base merge-tag vocabulary; SMS adds opt-out implicitly.
   return MERGE_TAG_REGISTRY.map((v: MergeTagVariable) => ({
     key: v.key,
@@ -325,7 +323,9 @@ export function fixtureSmsDocument(overrides: Partial<ContentDocument> = {}): Co
   });
 }
 
-export function fixtureEventPageDocument(overrides: Partial<ContentDocument> = {}): ContentDocument {
+export function fixtureEventPageDocument(
+  overrides: Partial<ContentDocument> = {},
+): ContentDocument {
   return fixtureEmailDocument({
     id: 'cdoc_event_page_1',
     channel: 'event_page',

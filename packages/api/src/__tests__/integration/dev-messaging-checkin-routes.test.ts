@@ -306,6 +306,23 @@ function checkoutQuestion(overrides: Record<string, unknown>) {
   };
 }
 
+function checkoutOccurrence(id: string, startsAt: Date) {
+  return {
+    id,
+    event_id: 'evt_1',
+    title: id,
+    starts_at: startsAt,
+    ends_at: new Date(startsAt.getTime() + 60 * 60 * 1000),
+    timezone: 'UTC',
+    venue: null,
+    capacity: null,
+    sort_order: 0,
+    status: 'scheduled',
+    created_at: new Date(),
+    updated_at: new Date(),
+  };
+}
+
 async function setupApp(
   routes: any,
   principal: Principal,
@@ -5572,26 +5589,12 @@ describe('checkout question validation', () => {
   });
 
   it('persists sanitized attendee answers per occurrence when ticket types repeat', async () => {
-    const occurrence = (id: string, startsAt: Date) => ({
-      id,
-      event_id: 'evt_1',
-      title: id,
-      starts_at: startsAt,
-      ends_at: new Date(startsAt.getTime() + 60 * 60 * 1000),
-      timezone: 'UTC',
-      venue: null,
-      capacity: null,
-      sort_order: 0,
-      status: 'scheduled',
-      created_at: new Date(),
-      updated_at: new Date(),
-    });
     const tables = {
       events: [baseEvent],
       ticket_types: [baseTicketType],
       event_occurrences: [
-        occurrence('occ_morning', new Date(Date.now() + 86_400_000)),
-        occurrence('occ_evening', new Date(Date.now() + 90_000_000)),
+        checkoutOccurrence('occ_morning', new Date(Date.now() + 86_400_000)),
+        checkoutOccurrence('occ_evening', new Date(Date.now() + 90_000_000)),
       ],
       checkout_sessions: [],
       idempotency_records: [],

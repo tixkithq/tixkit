@@ -108,17 +108,20 @@ function draftForChannel(
   document: ContentDocument,
   includeBlockers: boolean,
 ): ContentDocumentVersion {
-  const renderedHtml = document.channel === 'sms'
-    ? undefined
-    : '<main><h1>{{event.title}}</h1><p>{{event.startsAt}}</p></main>';
-  const renderedText = document.channel === 'sms'
-    ? 'Hi {{recipient.name}}, your ticket for {{event.title}} is ready. Reply STOP to opt out.'
-    : 'Your ticket for {{event.title}} is ready.';
-  const subject = document.channel === 'email' && !includeBlockers
-    ? 'Your {{event.title}} tickets are ready'
-    : document.channel === 'email'
-      ? ''
-      : undefined;
+  const renderedHtml =
+    document.channel === 'sms'
+      ? undefined
+      : '<main><h1>{{event.title}}</h1><p>{{event.startsAt}}</p></main>';
+  const renderedText =
+    document.channel === 'sms'
+      ? 'Hi {{recipient.name}}, your ticket for {{event.title}} is ready. Reply STOP to opt out.'
+      : 'Your ticket for {{event.title}} is ready.';
+  const subject =
+    document.channel === 'email' && !includeBlockers
+      ? 'Your {{event.title}} tickets are ready'
+      : document.channel === 'email'
+        ? ''
+        : undefined;
   const validation = validateContentVersion(
     {
       subject,
@@ -137,7 +140,8 @@ function draftForChannel(
     status: 'draft',
     schemaVersion: CONTENT_SCHEMA_VERSION,
     subject,
-    previewText: document.channel === 'email' ? 'Everything attendees need before arrival.' : undefined,
+    previewText:
+      document.channel === 'email' ? 'Everything attendees need before arrival.' : undefined,
     contentJson: { fixture: true, channel: document.channel },
     renderedHtml,
     renderedText,

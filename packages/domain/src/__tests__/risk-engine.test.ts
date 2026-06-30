@@ -20,9 +20,7 @@ const baseSignal: RiskSignal = {
 
 describe('evaluateRisk - amount thresholds', () => {
   it('blocks when amount exceeds a block threshold', () => {
-    const rules: RiskRule[] = [
-      { type: 'amount_threshold', minCents: 100_000, action: 'block' },
-    ];
+    const rules: RiskRule[] = [{ type: 'amount_threshold', minCents: 100_000, action: 'block' }];
     const decision = evaluateRisk({ ...baseSignal, amountCents: 150_000 }, rules, {});
     expect(decision.level).toBe('block');
     expect(decision.triggeredRules).toContain('amount_threshold');
@@ -38,9 +36,7 @@ describe('evaluateRisk - amount thresholds', () => {
   });
 
   it('allows small amounts', () => {
-    const rules: RiskRule[] = [
-      { type: 'amount_threshold', minCents: 50_000, action: 'review' },
-    ];
+    const rules: RiskRule[] = [{ type: 'amount_threshold', minCents: 50_000, action: 'review' }];
     const decision = evaluateRisk({ ...baseSignal, amountCents: 5_000 }, rules, {});
     expect(decision.level).toBe('allow');
   });
@@ -90,7 +86,12 @@ describe('evaluateRisk - velocity', () => {
 
   it('does not trigger when the fingerprint is absent', () => {
     const rules: RiskRule[] = [
-      { type: 'velocity', fingerprint: 'ip', window: { durationSeconds: 60, maxCount: 1 }, action: 'block' },
+      {
+        type: 'velocity',
+        fingerprint: 'ip',
+        window: { durationSeconds: 60, maxCount: 1 },
+        action: 'block',
+      },
     ];
     const decision = evaluateRisk({ ...baseSignal, ip: undefined }, rules, {});
     expect(decision.level).toBe('allow');
@@ -172,8 +173,14 @@ describe('Stripe Radar event mapping', () => {
 
 describe('shouldHoldForReview', () => {
   it('holds for review and block decisions but not allow', () => {
-    expect(shouldHoldForReview({ level: 'review', score: 30, reasons: [], triggeredRules: [] })).toBe(true);
-    expect(shouldHoldForReview({ level: 'block', score: 80, reasons: [], triggeredRules: [] })).toBe(true);
-    expect(shouldHoldForReview({ level: 'allow', score: 0, reasons: [], triggeredRules: [] })).toBe(false);
+    expect(
+      shouldHoldForReview({ level: 'review', score: 30, reasons: [], triggeredRules: [] }),
+    ).toBe(true);
+    expect(
+      shouldHoldForReview({ level: 'block', score: 80, reasons: [], triggeredRules: [] }),
+    ).toBe(true);
+    expect(shouldHoldForReview({ level: 'allow', score: 0, reasons: [], triggeredRules: [] })).toBe(
+      false,
+    );
   });
 });

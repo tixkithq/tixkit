@@ -22,7 +22,13 @@ const context = {
   },
   brand: { name: 'Tixkit', supportUrl: 'https://help.example.test' },
   tickets: [
-    { id: 'tt_ga', name: 'General Admission', description: 'Standing room', status: 'active' as const, priceLabel: '$35.00' },
+    {
+      id: 'tt_ga',
+      name: 'General Admission',
+      description: 'Standing room',
+      status: 'active' as const,
+      priceLabel: '$35.00',
+    },
     { id: 'tt_hidden', name: 'Hidden comp', status: 'hidden' as const, priceLabel: 'Free' },
   ],
   products: [{ id: 'prod_poster', name: 'Poster', priceLabel: '$10.00' }],

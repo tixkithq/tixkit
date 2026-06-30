@@ -172,8 +172,14 @@ async function seedTenantGraph(trx: Database): Promise<void> {
 async function cleanupAll(database: Database): Promise<void> {
   // Clean up load-harness data in reverse FK order.
   await cleanupScanLogsForEvent(database);
-  await database.deleteFrom('offline_check_in_sync_chunks').where('tenant_id', '=', TENANT_ID).execute();
-  await database.deleteFrom('offline_check_in_sync_jobs').where('tenant_id', '=', TENANT_ID).execute();
+  await database
+    .deleteFrom('offline_check_in_sync_chunks')
+    .where('tenant_id', '=', TENANT_ID)
+    .execute();
+  await database
+    .deleteFrom('offline_check_in_sync_jobs')
+    .where('tenant_id', '=', TENANT_ID)
+    .execute();
   await database.deleteFrom('marketing_integrations').where('event_id', '=', EVENT_ID).execute();
   await database.deleteFrom('idempotency_records').where('tenant_id', '=', TENANT_ID).execute();
   await database.deleteFrom('tickets').where('event_id', '=', EVENT_ID).execute();
@@ -729,7 +735,10 @@ describeWithIntegrationDatabase('Load and concurrency harnesses', () => {
     // of FK constraints: tickets/attendees reference orders, orders reference
     // checkout_sessions.
     await cleanupScanLogsForEvent(db);
-    await db.deleteFrom('offline_check_in_sync_chunks').where('tenant_id', '=', TENANT_ID).execute();
+    await db
+      .deleteFrom('offline_check_in_sync_chunks')
+      .where('tenant_id', '=', TENANT_ID)
+      .execute();
     await db.deleteFrom('offline_check_in_sync_jobs').where('tenant_id', '=', TENANT_ID).execute();
     await db.deleteFrom('marketing_integrations').where('event_id', '=', EVENT_ID).execute();
     await db.deleteFrom('idempotency_records').where('tenant_id', '=', TENANT_ID).execute();
@@ -1252,9 +1261,7 @@ describeWithIntegrationDatabase('Load and concurrency harnesses', () => {
       expect(Number.isFinite(BULK_OFFLINE_SYNC_BATCH_SIZE)).toBe(true);
       expect(BULK_OFFLINE_SYNC_BATCH_SIZE).toBeGreaterThan(MAX_OFFLINE_SYNC_SCANS);
       expect(BULK_OFFLINE_SYNC_CHUNK_SIZE).toBeGreaterThan(0);
-      expect(BULK_OFFLINE_SYNC_CHUNK_SIZE).toBeLessThanOrEqual(
-        MAX_BULK_OFFLINE_SYNC_CHUNK_SCANS,
-      );
+      expect(BULK_OFFLINE_SYNC_CHUNK_SIZE).toBeLessThanOrEqual(MAX_BULK_OFFLINE_SYNC_CHUNK_SCANS);
 
       const routeApp = await setupCheckInRouteApp(db);
       try {
@@ -1343,9 +1350,7 @@ describeWithIntegrationDatabase('Load and concurrency harnesses', () => {
       expect(Number.isFinite(BULK_OFFLINE_SYNC_INVALID_BATCH_SIZE)).toBe(true);
       expect(BULK_OFFLINE_SYNC_INVALID_BATCH_SIZE).toBeGreaterThan(MAX_OFFLINE_SYNC_SCANS);
       expect(BULK_OFFLINE_SYNC_CHUNK_SIZE).toBeGreaterThan(0);
-      expect(BULK_OFFLINE_SYNC_CHUNK_SIZE).toBeLessThanOrEqual(
-        MAX_BULK_OFFLINE_SYNC_CHUNK_SCANS,
-      );
+      expect(BULK_OFFLINE_SYNC_CHUNK_SIZE).toBeLessThanOrEqual(MAX_BULK_OFFLINE_SYNC_CHUNK_SCANS);
 
       const routeApp = await setupCheckInRouteApp(db);
       try {
@@ -1425,9 +1430,7 @@ describeWithIntegrationDatabase('Load and concurrency harnesses', () => {
     async () => {
       expect(BULK_OFFLINE_SYNC_BATCH_SIZE).toBeGreaterThan(MAX_OFFLINE_SYNC_SCANS);
       expect(BULK_OFFLINE_SYNC_CHUNK_SIZE).toBeGreaterThan(0);
-      expect(BULK_OFFLINE_SYNC_CHUNK_SIZE).toBeLessThanOrEqual(
-        MAX_BULK_OFFLINE_SYNC_CHUNK_SCANS,
-      );
+      expect(BULK_OFFLINE_SYNC_CHUNK_SIZE).toBeLessThanOrEqual(MAX_BULK_OFFLINE_SYNC_CHUNK_SCANS);
 
       const routeApp = await setupCheckInRouteApp(db);
       try {

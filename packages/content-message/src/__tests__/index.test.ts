@@ -96,8 +96,9 @@ describe('@tixkit/content-message SMS adapter', () => {
     const document = createDefaultSmsTemplate();
 
     expect(normalizeSmsTemplateDocument(document)).toEqual(document);
-    expect(normalizeSmsTemplateDocument({ ...document, editor: { provider: 'legacy', body: 'x' } }))
-      .toBeUndefined();
+    expect(
+      normalizeSmsTemplateDocument({ ...document, editor: { provider: 'legacy', body: 'x' } }),
+    ).toBeUndefined();
   });
 
   it('creates capture-compatible SendSmsInput without provider side effects', () => {
@@ -184,7 +185,9 @@ describe('@tixkit/content-message SMS adapter', () => {
     expect(rendered).toHaveLength(250);
     expect(rendered.every((message) => message.validation.valid)).toBe(true);
     expect(rendered.every((message) => message.segments >= 1 && message.segments <= 3)).toBe(true);
-    expect(rendered.reduce((sum, message) => sum + message.estimatedCostCents, 0)).toBeGreaterThan(0);
+    expect(rendered.reduce((sum, message) => sum + message.estimatedCostCents, 0)).toBeGreaterThan(
+      0,
+    );
   });
 
   it('fails closed for malformed SMS editor exports and hostile canonical content', () => {
@@ -194,7 +197,11 @@ describe('@tixkit/content-message SMS adapter', () => {
       [],
       { schemaVersion: 2, editor: { provider: '@tixkit/content-message/sms-composer', body: 'x' } },
       { schemaVersion: 1, editor: { provider: '@tixkit/content-message/sms-composer', body: 7 } },
-      { schemaVersion: 1, editor: { provider: '@tixkit/content-message/sms-composer', body: 'x' }, settings: {} },
+      {
+        schemaVersion: 1,
+        editor: { provider: '@tixkit/content-message/sms-composer', body: 'x' },
+        settings: {},
+      },
       createDefaultSmsTemplate({ settings: { segmentLimit: 0 } }),
       createDefaultSmsTemplate({ settings: { estimatedCostPerSegmentCents: -1 } }),
       createDefaultSmsTemplate({ settings: { category: 'legacy' as never } }),

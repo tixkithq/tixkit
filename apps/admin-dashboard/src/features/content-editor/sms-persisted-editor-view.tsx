@@ -101,7 +101,9 @@ function canvasBlocks(document: SmsTemplateDocument): ContentEditorCanvasBlock[]
       label: 'SMS body',
       summary: document.editor.body,
       content: (
-        <p className="whitespace-pre-wrap text-sm leading-6 text-foreground">{document.editor.body}</p>
+        <p className="whitespace-pre-wrap text-sm leading-6 text-foreground">
+          {document.editor.body}
+        </p>
       ),
     },
     {

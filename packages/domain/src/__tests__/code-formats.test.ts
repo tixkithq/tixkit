@@ -120,17 +120,17 @@ describe('rotating short-lived codes', () => {
     const now = new Date(1_700_000_000_000);
     const { code } = generateRotatingCode(TICKET_ID, KEY, config, now);
     // One step ahead (within tolerance=1) verifies.
-    expect(
-      verifyRotatingCode(TICKET_ID, code, KEY, config, new Date(now.getTime() + 30_000)),
-    ).toBe(true);
+    expect(verifyRotatingCode(TICKET_ID, code, KEY, config, new Date(now.getTime() + 30_000))).toBe(
+      true,
+    );
     // One step behind (within tolerance=1) verifies.
-    expect(
-      verifyRotatingCode(TICKET_ID, code, KEY, config, new Date(now.getTime() - 30_000)),
-    ).toBe(true);
+    expect(verifyRotatingCode(TICKET_ID, code, KEY, config, new Date(now.getTime() - 30_000))).toBe(
+      true,
+    );
     // Two steps ahead (outside tolerance=1) does not verify.
-    expect(
-      verifyRotatingCode(TICKET_ID, code, KEY, config, new Date(now.getTime() + 60_000)),
-    ).toBe(false);
+    expect(verifyRotatingCode(TICKET_ID, code, KEY, config, new Date(now.getTime() + 60_000))).toBe(
+      false,
+    );
   });
 
   it('rejects a rotating code signed with a different key', () => {

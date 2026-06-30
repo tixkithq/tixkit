@@ -31,9 +31,9 @@ describe('validateBoxOfficeOrder', () => {
   });
 
   it('rejects an invalid tender type', () => {
-    expect(() =>
-      validateBoxOfficeOrder({ ...baseInput, tenderType: 'crypto' as any }),
-    ).toThrow(BoxOfficeError);
+    expect(() => validateBoxOfficeOrder({ ...baseInput, tenderType: 'crypto' as any })).toThrow(
+      BoxOfficeError,
+    );
   });
 
   it('comp orders must have a zero amount', () => {
@@ -51,7 +51,11 @@ describe('validateBoxOfficeOrder', () => {
   });
 
   it('manual_card tender requires a non-negative amount', () => {
-    const order = validateBoxOfficeOrder({ ...baseInput, tenderType: 'manual_card', amountCents: 5000 });
+    const order = validateBoxOfficeOrder({
+      ...baseInput,
+      tenderType: 'manual_card',
+      amountCents: 5000,
+    });
     expect(order.tenderType).toBe('manual_card');
   });
 

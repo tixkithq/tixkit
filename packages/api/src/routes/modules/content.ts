@@ -418,26 +418,30 @@ function selectEmailProviderRoute(
   routes: EmailProviderRouteRow[],
   category: EmailTemplateDocument['settings']['category'],
 ): EmailProviderRouteRow | undefined {
-  return [...routes]
-    .filter((route) => parseAllowedCategories(route).includes(category))
-    // eslint-disable-next-line unicorn/no-array-sort -- sorting a fresh copied array preserves provider priority without mutating repository output.
-    .sort((left, right) => {
-      if (left.is_fallback !== right.is_fallback) return left.is_fallback ? 1 : -1;
-      return Number(left.priority) - Number(right.priority);
-    })[0];
+  return (
+    [...routes]
+      .filter((route) => parseAllowedCategories(route).includes(category))
+      // eslint-disable-next-line unicorn/no-array-sort -- sorting a fresh copied array preserves provider priority without mutating repository output.
+      .sort((left, right) => {
+        if (left.is_fallback !== right.is_fallback) return left.is_fallback ? 1 : -1;
+        return Number(left.priority) - Number(right.priority);
+      })[0]
+  );
 }
 
 function selectSmsProviderRoute(
   routes: SmsProviderRouteRow[],
   category: SmsTemplateDocument['settings']['category'],
 ): SmsProviderRouteRow | undefined {
-  return [...routes]
-    .filter((route) => parseAllowedCategories(route).includes(category))
-    // eslint-disable-next-line unicorn/no-array-sort -- sorting a fresh copied array preserves provider priority without mutating repository output.
-    .sort((left, right) => {
-      if (left.is_fallback !== right.is_fallback) return left.is_fallback ? 1 : -1;
-      return Number(left.priority) - Number(right.priority);
-    })[0];
+  return (
+    [...routes]
+      .filter((route) => parseAllowedCategories(route).includes(category))
+      // eslint-disable-next-line unicorn/no-array-sort -- sorting a fresh copied array preserves provider priority without mutating repository output.
+      .sort((left, right) => {
+        if (left.is_fallback !== right.is_fallback) return left.is_fallback ? 1 : -1;
+        return Number(left.priority) - Number(right.priority);
+      })[0]
+  );
 }
 
 async function sendEmailTestThroughProvider(input: {

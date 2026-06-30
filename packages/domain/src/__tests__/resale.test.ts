@@ -38,13 +38,19 @@ describe('validateResalePrice', () => {
   });
 
   it('honors an absolute cap when lower than the multiplier cap', () => {
-    const withAbsolute: ResalePriceCapPolicy = { maxMultiplier: 1.2, maxAbsoluteCents: 5500, enabled: true };
+    const withAbsolute: ResalePriceCapPolicy = {
+      maxMultiplier: 1.2,
+      maxAbsoluteCents: 5500,
+      enabled: true,
+    };
     expect(() => validateResalePrice(5600, faceValue, withAbsolute)).toThrow(ResaleError);
     expect(() => validateResalePrice(5500, faceValue, withAbsolute)).not.toThrow();
   });
 
   it('rejects resale when disabled', () => {
-    expect(() => validateResalePrice(5000, faceValue, { ...cap, enabled: false })).toThrow(ResaleError);
+    expect(() => validateResalePrice(5000, faceValue, { ...cap, enabled: false })).toThrow(
+      ResaleError,
+    );
   });
 
   it('rejects negative prices', () => {

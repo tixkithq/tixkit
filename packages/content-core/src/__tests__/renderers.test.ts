@@ -1,5 +1,10 @@
 import { describe, it, expect } from 'vitest';
-import { renderContent, renderPreview, withinSmsSegmentBudget, RENDER_CONTRACTS } from '../index.js';
+import {
+  renderContent,
+  renderPreview,
+  withinSmsSegmentBudget,
+  RENDER_CONTRACTS,
+} from '../index.js';
 import type { MergeTagContext } from '@tixkit/domain';
 
 const sampleContext: MergeTagContext = {
@@ -25,7 +30,12 @@ describe('renderContent - email', () => {
 
   it('preview equals send for the same content + context', () => {
     const content = { subject: 'Hi {{recipient.name}}', html: '<p>{{event.title}}</p>' };
-    const send = renderContent({ channel: 'email', contract: RENDER_CONTRACTS.email, context: sampleContext, ...content });
+    const send = renderContent({
+      channel: 'email',
+      contract: RENDER_CONTRACTS.email,
+      context: sampleContext,
+      ...content,
+    });
     const preview = renderPreview('email', RENDER_CONTRACTS.email, content, sampleContext);
     expect(preview).toEqual(send);
   });
@@ -96,8 +106,18 @@ describe('withinSmsSegmentBudget', () => {
 describe('render determinism (parity)', () => {
   it('repeated rendering with the same inputs is identical', () => {
     const content = { subject: 'Hi {{recipient.name}}', html: '<p>{{event.title}}</p>' };
-    const a = renderContent({ channel: 'email', contract: RENDER_CONTRACTS.email, context: sampleContext, ...content });
-    const b = renderContent({ channel: 'email', contract: RENDER_CONTRACTS.email, context: sampleContext, ...content });
+    const a = renderContent({
+      channel: 'email',
+      contract: RENDER_CONTRACTS.email,
+      context: sampleContext,
+      ...content,
+    });
+    const b = renderContent({
+      channel: 'email',
+      contract: RENDER_CONTRACTS.email,
+      context: sampleContext,
+      ...content,
+    });
     expect(a).toEqual(b);
   });
 });

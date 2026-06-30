@@ -275,9 +275,7 @@ describe('EventPagePersistedEditorView', () => {
                 id: 'rich-text-7',
                 type: 'rich_text',
                 content: expect.objectContaining({
-                  content: expect.arrayContaining([
-                    expect.objectContaining({ type: 'paragraph' }),
-                  ]),
+                  content: expect.arrayContaining([expect.objectContaining({ type: 'paragraph' })]),
                 }),
               }),
               expect.objectContaining({

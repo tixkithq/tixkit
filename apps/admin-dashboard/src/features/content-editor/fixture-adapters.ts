@@ -6,12 +6,7 @@ import {
 } from '@tixkit/content-editor-shell';
 import type { ContentChannel } from '@tixkit/content-core';
 
-export type ContentEditorRouteKind =
-  | 'event-page'
-  | 'email'
-  | 'sms'
-  | 'imessage'
-  | 'social-invite';
+export type ContentEditorRouteKind = 'event-page' | 'email' | 'sms' | 'imessage' | 'social-invite';
 
 export type ContentEditorFixtureAdapter = ReturnType<typeof createContentEditorFixture> & {
   channelLabel: string;

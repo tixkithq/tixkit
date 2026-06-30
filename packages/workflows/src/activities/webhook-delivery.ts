@@ -286,9 +286,7 @@ export async function deliverWebhookActivity(input: {
             status_code: null,
             response: err instanceof Error ? err.message : 'Unknown error',
             status:
-              input.finalAttempt === true || nonRetryableDeliveryError
-                ? 'dead_lettered'
-                : 'failed',
+              input.finalAttempt === true || nonRetryableDeliveryError ? 'dead_lettered' : 'failed',
             delivered_at: null,
             next_retry_at:
               input.finalAttempt === true || nonRetryableDeliveryError
@@ -456,9 +454,7 @@ function postWebhook(
     let settled = false;
     let deadline: ReturnType<typeof setTimeout> | undefined;
     const settle = (
-      result:
-        | { ok: true; response: WebhookHttpResponse }
-        | { ok: false; error: Error },
+      result: { ok: true; response: WebhookHttpResponse } | { ok: false; error: Error },
     ) => {
       if (settled) return;
       settled = true;
@@ -652,11 +648,7 @@ function createBlockedHostError(message: string): NodeJS.ErrnoException {
 }
 
 function isNonRetryableWebhookDeliveryError(error: unknown): boolean {
-  return (
-    error instanceof Error &&
-    'code' in error &&
-    error.code === 'ERR_WEBHOOK_BLOCKED_HOST'
-  );
+  return error instanceof Error && 'code' in error && error.code === 'ERR_WEBHOOK_BLOCKED_HOST';
 }
 
 function normalizeHostname(hostname: string): string {

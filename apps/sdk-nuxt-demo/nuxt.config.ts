@@ -6,9 +6,7 @@ const sdkVueServer = fileURLToPath(
 const sdkVueClient = fileURLToPath(
   new URL('../../packages/sdk-vue/src/client.ts', import.meta.url),
 );
-const sdkVueIndex = fileURLToPath(
-  new URL('../../packages/sdk-vue/src/index.ts', import.meta.url),
-);
+const sdkVueIndex = fileURLToPath(new URL('../../packages/sdk-vue/src/index.ts', import.meta.url));
 const sdkJsIndex = fileURLToPath(new URL('../../packages/sdk-js/src/index.ts', import.meta.url));
 
 export default defineNuxtConfig({

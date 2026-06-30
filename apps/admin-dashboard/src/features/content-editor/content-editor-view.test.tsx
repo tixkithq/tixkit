@@ -3,10 +3,7 @@ import '@testing-library/jest-dom/vitest';
 import * as React from 'react';
 import { describe, expect, it, vi } from 'vitest';
 import { ContentEditorView } from './content-editor-view';
-import {
-  contentChannelFromRoute,
-  createContentEditorRouteFixture,
-} from './fixture-adapters';
+import { contentChannelFromRoute, createContentEditorRouteFixture } from './fixture-adapters';
 
 vi.mock('sonner', () => ({
   toast: {
@@ -89,7 +86,9 @@ describe('ContentEditorView', () => {
 
     fireEvent.click(screen.getByRole('button', { name: 'Open preview' }));
     expect(screen.getByTestId('preview-drawer')).toHaveTextContent('React Email preview');
-    expect(screen.getByTestId('preview-drawer')).toHaveTextContent('Your All Access Chicago tickets are ready');
+    expect(screen.getByTestId('preview-drawer')).toHaveTextContent(
+      'Your All Access Chicago tickets are ready',
+    );
   });
 
   it('renders future-channel unavailable states without fake insert actions', () => {
@@ -102,12 +101,14 @@ describe('ContentEditorView', () => {
       }),
     );
 
-    expect(screen.getByRole('heading', { name: 'iMessage template unavailable' })).toBeInTheDocument();
+    expect(
+      screen.getByRole('heading', { name: 'iMessage template unavailable' }),
+    ).toBeInTheDocument();
     expect(screen.getByTestId('content-editor-shell')).toHaveAttribute('data-channel', 'imessage');
     expect(screen.getByText('Channel unavailable')).toBeInTheDocument();
-    expect(screen.getAllByText('iMessage template is not enabled for this workspace.')).toHaveLength(
-      2,
-    );
+    expect(
+      screen.getAllByText('iMessage template is not enabled for this workspace.'),
+    ).toHaveLength(2);
     expect(screen.getByRole('button', { name: 'Resolve publish blockers' })).toBeDisabled();
     expect(screen.getByRole('button', { name: 'Test send unavailable' })).toBeDisabled();
     expect(screen.queryByRole('button', { name: 'Hero' })).not.toBeInTheDocument();

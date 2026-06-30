@@ -59,11 +59,7 @@ async function expectJsonStatus<T extends { status?: string; id?: string }>(
   return body as T;
 }
 
-function isApiResponse(
-  response: PlaywrightResponse,
-  method: string,
-  pathname: string,
-): boolean {
+function isApiResponse(response: PlaywrightResponse, method: string, pathname: string): boolean {
   return response.request().method() === method && new URL(response.url()).pathname === pathname;
 }
 

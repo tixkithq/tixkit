@@ -54,10 +54,17 @@ export function renderContent(input: RenderInput): RenderOutput {
 
   if (channel === 'sms') {
     const body = input.text ?? '';
-    const withOptOut = contract.supportsOptOut && input.optOutToken
-      ? renderMergeTags(body, context, { channel: 'sms', escape: 'plain', optOutToken: input.optOutToken })
-      : renderMergeTags(body, context, { channel: 'sms', escape: 'plain' });
-    const segments = contract.supportsSegmentAccounting ? countSmsSegments(withOptOut).segments : undefined;
+    const withOptOut =
+      contract.supportsOptOut && input.optOutToken
+        ? renderMergeTags(body, context, {
+            channel: 'sms',
+            escape: 'plain',
+            optOutToken: input.optOutToken,
+          })
+        : renderMergeTags(body, context, { channel: 'sms', escape: 'plain' });
+    const segments = contract.supportsSegmentAccounting
+      ? countSmsSegments(withOptOut).segments
+      : undefined;
     return { text: withOptOut, segments };
   }
 

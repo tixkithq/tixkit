@@ -88,7 +88,9 @@ export const ResaleCheckoutReservationsMigration: Migration = {
           on ticket_listings (tenant_id, reserved_checkout_session_id, reserved_until)
         `.execute(db);
       }
-      if (!(await mysqlIndexExists(db, 'order_line_items', 'idx_order_line_items_resale_listing'))) {
+      if (
+        !(await mysqlIndexExists(db, 'order_line_items', 'idx_order_line_items_resale_listing'))
+      ) {
         await sql`
           create index idx_order_line_items_resale_listing
           on order_line_items (resale_listing_id)

@@ -130,7 +130,11 @@ describe('channel adapter registry', () => {
 
   it('can register a custom adapter', () => {
     const registry = new ChannelAdapterRegistry();
-    registry.register({ channel: 'email', available: true, renderContract: RENDER_CONTRACTS.email });
+    registry.register({
+      channel: 'email',
+      available: true,
+      renderContract: RENDER_CONTRACTS.email,
+    });
     expect(registry.get('email')?.available).toBe(true);
   });
 });

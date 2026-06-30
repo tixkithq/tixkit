@@ -1,9 +1,11 @@
 import { createRequire } from 'node:module';
 
 const require = createRequire(import.meta.url);
-const { CreateBucketCommand, HeadBucketCommand, S3Client } = require(
-  '../packages/api/node_modules/@aws-sdk/client-s3',
-);
+const {
+  CreateBucketCommand,
+  HeadBucketCommand,
+  S3Client,
+} = require('../packages/api/node_modules/@aws-sdk/client-s3');
 
 const endpoint = process.env.S3_ENDPOINT ?? 'http://localhost:9000';
 const bucket = process.env.S3_BUCKET ?? 'tixkit';

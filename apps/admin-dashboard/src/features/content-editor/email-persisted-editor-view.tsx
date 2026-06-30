@@ -239,7 +239,9 @@ function appendVariableToBlock(
       return {
         ...block,
         links: block.links.map((link, index) =>
-          index === block.links.length - 1 ? { ...link, label: appendToken(link.label, token) } : link,
+          index === block.links.length - 1
+            ? { ...link, label: appendToken(link.label, token) }
+            : link,
         ),
       };
     case 'raw_html':
@@ -1050,7 +1052,10 @@ export function EmailPersistedEditorView({ eventId }: { eventId: string }) {
               <p className="text-lg font-semibold text-foreground">Order summary</p>
               <dl className="divide-y text-sm">
                 {block.rows.map((row, rowIndex) => (
-                  <div className="grid grid-cols-[1fr_auto] gap-4 py-2" key={`${row.label}-${rowIndex}`}>
+                  <div
+                    className="grid grid-cols-[1fr_auto] gap-4 py-2"
+                    key={`${row.label}-${rowIndex}`}
+                  >
                     <dt className="text-muted-foreground">{row.label}</dt>
                     <dd className="font-medium text-foreground">{row.value}</dd>
                   </div>
@@ -1104,7 +1109,11 @@ export function EmailPersistedEditorView({ eventId }: { eventId: string }) {
           content: (
             <nav aria-label="Email social links" className="flex flex-wrap gap-3 text-sm">
               {block.links.map((link, linkIndex) => (
-                <a className="font-medium text-primary underline-offset-4 hover:underline" href={link.url} key={`${link.label}-${linkIndex}`}>
+                <a
+                  className="font-medium text-primary underline-offset-4 hover:underline"
+                  href={link.url}
+                  key={`${link.label}-${linkIndex}`}
+                >
                   {link.label}
                 </a>
               ))}

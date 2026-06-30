@@ -222,7 +222,9 @@ export async function renderTemplateActivity(input: {
   templateVersionId: string;
   variables: Record<string, unknown>;
   optOutToken?: string;
-}): Promise<WorkflowActivityResult<{ subject: string; html: string; text?: string; segments?: number }>> {
+}): Promise<
+  WorkflowActivityResult<{ subject: string; html: string; text?: string; segments?: number }>
+> {
   const db = createDb();
   try {
     if (!input.tenantId) {

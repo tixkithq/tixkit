@@ -154,8 +154,7 @@ describe('EventPageClient escaping', () => {
       },
       version: { versionNumber: 1 },
       page: {
-        html:
-          '<section><h2>Published content</h2><script>alert(1)</script><a href="jav&#x61;script:alert(1)" onclick="alert(2)">bad</a><img src="da&Tab;ta&colon;text/html,evil" onerror=alert(3) /><a href="java&#9999999999;script:alert(1)">bad entity</a><form action="jav&#x61;script:alert(1)"><button>submit</button></form><iframe srcdoc="&lt;script&gt;alert(1)&lt;/script&gt;"></iframe><object data="jav&#x61;script:alert(1)"></object><svg><a xlink:href="jav&#x61;script:alert(1)">svg</a></svg></section>',
+        html: '<section><h2>Published content</h2><script>alert(1)</script><a href="jav&#x61;script:alert(1)" onclick="alert(2)">bad</a><img src="da&Tab;ta&colon;text/html,evil" onerror=alert(3) /><a href="java&#9999999999;script:alert(1)">bad entity</a><form action="jav&#x61;script:alert(1)"><button>submit</button></form><iframe srcdoc="&lt;script&gt;alert(1)&lt;/script&gt;"></iframe><object data="jav&#x61;script:alert(1)"></object><svg><a xlink:href="jav&#x61;script:alert(1)">svg</a></svg></section>',
         text: 'Published content',
         headless: [],
         discovery: { title: 'All Access Chicago', summary: 'Published content', tags: [] },
@@ -173,9 +172,9 @@ describe('EventPageClient escaping', () => {
     expect(publishedPage.querySelector('[onerror]')).toBeNull();
     expect(publishedPage.querySelector('[href^="javascript:"]')).toBeNull();
     expect(publishedPage.querySelector('[src^="data:"]')).toBeNull();
-    expect(Array.from(publishedPage.querySelectorAll('a')).every((link) => !link.hasAttribute('href'))).toBe(
-      true,
-    );
+    expect(
+      Array.from(publishedPage.querySelectorAll('a')).every((link) => !link.hasAttribute('href')),
+    ).toBe(true);
     expect(publishedPage.querySelector('img')?.hasAttribute('src')).toBe(false);
     expect(publishedPage.querySelector('form')).toBeNull();
     expect(publishedPage.querySelector('iframe')).toBeNull();

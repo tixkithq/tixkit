@@ -20,10 +20,14 @@ async function dropTemplateVersionForeignKey(db: Parameters<Migration['up']>[0])
     return;
   }
 
-  await sql`alter table email_jobs drop constraint if exists email_jobs_template_version_fk`.execute(db);
+  await sql`alter table email_jobs drop constraint if exists email_jobs_template_version_fk`.execute(
+    db,
+  );
 }
 
-async function addLegacyTemplateVersionForeignKey(db: Parameters<Migration['up']>[0]): Promise<void> {
+async function addLegacyTemplateVersionForeignKey(
+  db: Parameters<Migration['up']>[0],
+): Promise<void> {
   if (isMysql()) {
     await sql`
       alter table email_jobs

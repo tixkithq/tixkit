@@ -249,7 +249,11 @@ export class ContentRepository extends BaseRepository {
     | undefined
   > {
     const eventScoped = input.eventId
-      ? await this.findPublishedContentByScope({ ...input, channel: 'email', eventId: input.eventId })
+      ? await this.findPublishedContentByScope({
+          ...input,
+          channel: 'email',
+          eventId: input.eventId,
+        })
       : undefined;
     return (
       eventScoped ??
@@ -591,9 +595,7 @@ export class ContentRepository extends BaseRepository {
       versionId: row.version_id,
       channel: row.channel as ContentChannel,
       outputType:
-        row.output_type === 'test_send' || row.output_type === 'send'
-          ? row.output_type
-          : 'preview',
+        row.output_type === 'test_send' || row.output_type === 'send' ? row.output_type : 'preview',
       artifactRef: row.artifact_ref,
       checksum: row.checksum,
       createdAt: iso(row.created_at),
