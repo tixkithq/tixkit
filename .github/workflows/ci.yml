@@ -113,6 +113,7 @@ jobs:
         with:
           distribution: temurin
           java-version: '21'
+      - uses: android-actions/setup-android@v3
       - uses: gradle/actions/setup-gradle@v6
       - name: Build and test Android SDK
         run: cd packages/sdk-android && ./gradlew build test

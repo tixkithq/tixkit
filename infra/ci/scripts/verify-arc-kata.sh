@@ -18,6 +18,16 @@ verify_arc_supply_chain_pins() {
     return 1
   fi
 
+  if ! grep -q -- '--storage-driver=vfs' "${runner_values}"; then
+    printf 'ARC runner dind sidecar must force the vfs storage driver for Kata compatibility.\n' >&2
+    return 1
+  fi
+
+  if ! grep -q -- 'containerd-snapshotter=false' "${runner_values}"; then
+    printf 'ARC runner dind sidecar must disable the containerd overlay snapshotter for Kata compatibility.\n' >&2
+    return 1
+  fi
+
   if [[ "$(grep -c -- '--version "${arc_chart_version}"' "${install_script}")" -lt 2 ]]; then
     printf 'ARC chart installs must pass --version "${arc_chart_version}" for both charts.\n' >&2
     return 1

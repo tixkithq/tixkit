@@ -74,6 +74,17 @@ jobs:
     runs-on: tixkit-epyc-trusted
     steps:
       - uses: actions/checkout@v7
+      - name: Install Flutter archive tools
+        run: |
+          if command -v xz >/dev/null 2>&1; then
+            exit 0
+          fi
+          apt_get='apt-get'
+          if command -v sudo >/dev/null 2>&1; then
+            apt_get='sudo apt-get'
+          fi
+          ${apt_get} update
+          ${apt_get} install -y xz-utils
       - uses: subosito/flutter-action@v2
         with:
           flutter-version: '3.22.x'
@@ -101,6 +112,7 @@ jobs:
   ios-sdk:
     name: iOS SDK
     runs-on: macos-latest
+    if: ${{ vars.RUN_TRUSTED_IOS_SDK == '1' }}
     steps:
       - uses: actions/checkout@v7
       - name: Build Swift package
@@ -121,6 +133,7 @@ jobs:
         with:
           distribution: temurin
           java-version: '21'
+      - uses: android-actions/setup-android@v3
       - uses: gradle/actions/setup-gradle@v6
       - name: Build and test Android SDK
         run: cd packages/sdk-android && ./gradlew build test
@@ -144,7 +157,7 @@ jobs:
 
   integration-tests-postgres:
     name: Integration Tests (PostgreSQL)
-    runs-on: tixkit-epyc-trusted
+    runs-on: ubuntu-latest
     services:
       postgres:
         image: postgres:16-alpine
@@ -203,7 +216,7 @@ jobs:
 
   integration-tests-mysql:
     name: Integration Tests (MySQL)
-    runs-on: tixkit-epyc-trusted
+    runs-on: ubuntu-latest
     services:
       mysql:
         image: mysql:8.4
