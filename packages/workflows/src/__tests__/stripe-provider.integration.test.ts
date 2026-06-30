@@ -72,6 +72,12 @@ async function seedProviderCheckout(db: Database, ids: ProviderSeedIds) {
         slug: `stripe-provider-${ids.suffix}`,
         clerk_organization_id: null,
         status: 'active',
+        box_office_settings: JSON.stringify({
+          enabled: false,
+          allowedTenderTypes: ['cash', 'card', 'comp'],
+          requireBuyerEmail: false,
+          receiptMode: 'email',
+        }),
         created_at: now,
         updated_at: now,
       })

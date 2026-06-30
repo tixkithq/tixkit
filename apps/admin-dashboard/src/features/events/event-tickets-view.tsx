@@ -2,9 +2,20 @@
 
 import * as React from 'react';
 import { toast } from 'sonner';
-import { CalendarDays, Copy, MoreHorizontal, Pencil, Plus, Ticket, UserPlus } from 'lucide-react';
+import {
+  CalendarDays,
+  Copy,
+  MoreHorizontal,
+  Pencil,
+  Plus,
+  ShieldCheck,
+  Ticket,
+  UserPlus,
+} from 'lucide-react';
 import {
   type AdminEventOccurrence,
+  type AdminResalePolicy,
+  type AdminTicketListing,
   type AdminTicketType,
   type AdminWaitlistEntry,
   adminApi,
@@ -41,6 +52,14 @@ import { TicketTypeFormDrawer } from './ticket-type-form';
 const EMPTY_TICKET_TYPES: AdminTicketType[] = [];
 const EMPTY_WAITLIST_ENTRIES: AdminWaitlistEntry[] = [];
 const EMPTY_OCCURRENCES: AdminEventOccurrence[] = [];
+const EMPTY_RESALE_LISTINGS: AdminTicketListing[] = [];
+
+function buildResaleIdempotencyKey(eventId: string): string {
+  const random =
+    globalThis.crypto?.randomUUID?.().replaceAll('-', '') ??
+    `${Date.now().toString(36)}${Math.random().toString(36).slice(2)}`;
+  return `resale_${eventId}_${random}`;
+}
 
 export function EventTicketsView({ eventId }: { eventId: string }) {
   const [drawerOpen, setDrawerOpen] = React.useState(false);
@@ -61,11 +80,24 @@ export function EventTicketsView({ eventId }: { eventId: string }) {
     error: occurrencesError,
     refetch: refetchOccurrences,
   } = useAdminData(() => adminApi.listEventOccurrences(eventId), [eventId]);
+  const {
+    data: resalePolicy,
+    loading: resalePolicyLoading,
+    error: resalePolicyError,
+    refetch: refetchResalePolicy,
+  } = useAdminData(() => adminApi.getResalePolicy(eventId), [eventId]);
+  const {
+    data: resaleListingsData,
+    loading: resaleListingsLoading,
+    error: resaleListingsError,
+    refetch: refetchResaleListings,
+  } = useAdminData(() => adminApi.listResaleListings(eventId, { limit: 25 }), [eventId]);
   const [offeringEntryId, setOfferingEntryId] = React.useState<string | null>(null);
   const [claimUrlByEntryId, setClaimUrlByEntryId] = React.useState<Record<string, string>>({});
 
   const ticketTypes = data ?? EMPTY_TICKET_TYPES;
   const occurrences = occurrencesData ?? EMPTY_OCCURRENCES;
+  const resaleListings = resaleListingsData?.items ?? EMPTY_RESALE_LISTINGS;
   const waitlistEntries = waitlistData?.items ?? EMPTY_WAITLIST_ENTRIES;
   const waitlistSettings = waitlistData?.settings ?? {
     autoOfferEnabled: true,
@@ -137,6 +169,28 @@ export function EventTicketsView({ eventId }: { eventId: string }) {
     void refetchOccurrences();
   };
 
+  const handleSaveResalePolicy = async (input: AdminResalePolicy) => {
+    const result = await adminApi.updateResalePolicy(eventId, input);
+    if (!result.ok) {
+      toast.error(result.error.message);
+      return;
+    }
+    toast.success('Resale policy saved');
+    void refetchResalePolicy();
+  };
+
+  const handleDelistResaleListing = async (listing: AdminTicketListing) => {
+    const result = await adminApi.delistResaleListing(listing.id, {
+      idempotencyKey: buildResaleIdempotencyKey(eventId),
+    });
+    if (!result.ok) {
+      toast.error(result.error.message);
+      return;
+    }
+    toast.success('Resale listing delisted');
+    void refetchResaleListings();
+  };
+
   if (loading && ticketTypes.length === 0) {
     return (
       <div className="space-y-3">
@@ -174,6 +228,19 @@ export function EventTicketsView({ eventId }: { eventId: string }) {
           occurrences={occurrences}
           onOrderCreated={() => {
             void refetch();
+          }}
+        />
+        <ResalePolicyPanel
+          policy={resalePolicy}
+          listings={resaleListings}
+          ticketNameById={ticketNameById}
+          loading={resalePolicyLoading || resaleListingsLoading}
+          error={resalePolicyError?.message ?? resaleListingsError?.message}
+          onSavePolicy={handleSaveResalePolicy}
+          onDelistListing={handleDelistResaleListing}
+          onRetry={() => {
+            void refetchResalePolicy();
+            void refetchResaleListings();
           }}
         />
         <EmptyState
@@ -250,6 +317,20 @@ export function EventTicketsView({ eventId }: { eventId: string }) {
         occurrences={occurrences}
         onOrderCreated={() => {
           void refetch();
+        }}
+      />
+
+      <ResalePolicyPanel
+        policy={resalePolicy}
+        listings={resaleListings}
+        ticketNameById={ticketNameById}
+        loading={resalePolicyLoading || resaleListingsLoading}
+        error={resalePolicyError?.message ?? resaleListingsError?.message}
+        onSavePolicy={handleSaveResalePolicy}
+        onDelistListing={handleDelistResaleListing}
+        onRetry={() => {
+          void refetchResalePolicy();
+          void refetchResaleListings();
         }}
       />
 
@@ -493,6 +574,210 @@ function OccurrencesTable({
                       <Badge variant={occurrence.status === 'scheduled' ? 'secondary' : 'outline'}>
                         {occurrence.status}
                       </Badge>
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          </div>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
+function ResalePolicyPanel({
+  policy,
+  listings,
+  ticketNameById,
+  loading,
+  error,
+  onSavePolicy,
+  onDelistListing,
+  onRetry,
+}: {
+  policy?: AdminResalePolicy;
+  listings: AdminTicketListing[];
+  ticketNameById: Map<string, string>;
+  loading: boolean;
+  error?: string;
+  onSavePolicy: (input: AdminResalePolicy) => Promise<void>;
+  onDelistListing: (listing: AdminTicketListing) => Promise<void>;
+  onRetry: () => void;
+}) {
+  const [enabled, setEnabled] = React.useState(policy?.enabled ?? false);
+  const [maxMultiplier, setMaxMultiplier] = React.useState(String(policy?.maxMultiplier ?? 1));
+  const [maxAbsoluteCents, setMaxAbsoluteCents] = React.useState(
+    policy?.maxAbsoluteCents === undefined ? '' : String(policy.maxAbsoluteCents),
+  );
+  const [saving, setSaving] = React.useState(false);
+  const [delistingId, setDelistingId] = React.useState<string | null>(null);
+
+  React.useEffect(() => {
+    setEnabled(policy?.enabled ?? false);
+    setMaxMultiplier(String(policy?.maxMultiplier ?? 1));
+    setMaxAbsoluteCents(
+      policy?.maxAbsoluteCents === undefined ? '' : String(policy.maxAbsoluteCents),
+    );
+  }, [policy?.enabled, policy?.maxMultiplier, policy?.maxAbsoluteCents]);
+
+  const savePolicy = async () => {
+    const multiplier = Number(maxMultiplier);
+    if (!Number.isFinite(multiplier) || multiplier < 0) {
+      toast.error('Maximum markup must be zero or greater.');
+      return;
+    }
+    const absoluteCap =
+      maxAbsoluteCents.trim().length === 0 ? undefined : Number(maxAbsoluteCents.trim());
+    if (
+      absoluteCap !== undefined &&
+      (!Number.isInteger(absoluteCap) || absoluteCap < 0 || !Number.isSafeInteger(absoluteCap))
+    ) {
+      toast.error('Absolute cap must be a non-negative amount in cents.');
+      return;
+    }
+    const input: AdminResalePolicy = {
+      enabled,
+      maxMultiplier: multiplier,
+    };
+    if (absoluteCap !== undefined) {
+      input.maxAbsoluteCents = absoluteCap;
+    }
+
+    setSaving(true);
+    try {
+      await onSavePolicy(input);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const delist = async (listing: AdminTicketListing) => {
+    setDelistingId(listing.id);
+    try {
+      await onDelistListing(listing);
+    } finally {
+      setDelistingId(null);
+    }
+  };
+
+  if (loading) {
+    return (
+      <div className="space-y-3">
+        <Skeleton className="h-8 w-48" />
+        <Skeleton className="h-28 w-full" />
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <EmptyState
+        icon={ShieldCheck}
+        title="Failed to load resale"
+        description={error}
+        action={<Button onClick={onRetry}>Try again</Button>}
+      />
+    );
+  }
+
+  return (
+    <Card data-testid="resale-policy-panel">
+      <CardContent className="space-y-4 p-4">
+        <div className="flex items-center gap-2">
+          <ShieldCheck className="size-4 text-muted-foreground" />
+          <h2 className="text-sm font-semibold">Resale</h2>
+          <Badge variant={enabled ? 'secondary' : 'outline'}>
+            {enabled ? 'Enabled' : 'Disabled'}
+          </Badge>
+        </div>
+        <div className="grid gap-4 rounded-md border p-3 sm:grid-cols-[1fr_170px_190px_auto] sm:items-end">
+          <div className="flex items-center justify-between gap-4 sm:block sm:space-y-2">
+            <Label htmlFor="resale-enabled">Resale policy</Label>
+            <Switch id="resale-enabled" checked={enabled} onCheckedChange={setEnabled} />
+          </div>
+          <div className="space-y-2">
+            <Label htmlFor="resale-max-multiplier">Max markup</Label>
+            <Input
+              id="resale-max-multiplier"
+              type="number"
+              min={0}
+              step="0.01"
+              value={maxMultiplier}
+              onChange={(event) => setMaxMultiplier(event.target.value)}
+            />
+          </div>
+          <div className="space-y-2">
+            <Label htmlFor="resale-absolute-cap">Absolute cap</Label>
+            <Input
+              id="resale-absolute-cap"
+              type="number"
+              min={0}
+              step={1}
+              value={maxAbsoluteCents}
+              onChange={(event) => setMaxAbsoluteCents(event.target.value)}
+            />
+          </div>
+          <Button
+            type="button"
+            variant="outline"
+            disabled={saving}
+            aria-label="Save resale policy"
+            onClick={savePolicy}
+          >
+            Save
+          </Button>
+        </div>
+        {listings.length === 0 ? (
+          <div className="flex items-center gap-3 text-sm text-muted-foreground">
+            <Ticket className="size-4" />
+            No resale listings yet.
+          </div>
+        ) : (
+          <div className="rounded-md border">
+            <Table>
+              <TableHeader>
+                <TableRow className="hover:bg-transparent">
+                  <TableHead>Ticket</TableHead>
+                  <TableHead>Price</TableHead>
+                  <TableHead>Face value</TableHead>
+                  <TableHead>Status</TableHead>
+                  <TableHead>Seller</TableHead>
+                  <TableHead className="w-[110px]">
+                    <span className="sr-only">Actions</span>
+                  </TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {listings.map((listing) => (
+                  <TableRow key={listing.id}>
+                    <TableCell className="font-medium">
+                      {ticketNameById.get(listing.ticketId) ?? listing.ticketId}
+                    </TableCell>
+                    <TableCell>{formatCurrency(listing.priceCents, listing.currency)}</TableCell>
+                    <TableCell>
+                      {formatCurrency(listing.faceValueCents, listing.currency)}
+                    </TableCell>
+                    <TableCell>
+                      <Badge variant={listing.status === 'listed' ? 'secondary' : 'outline'}>
+                        {listing.status}
+                      </Badge>
+                    </TableCell>
+                    <TableCell className="text-sm text-muted-foreground">
+                      {listing.sellerId}
+                    </TableCell>
+                    <TableCell>
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        disabled={listing.status !== 'listed' || delistingId === listing.id}
+                        onClick={() => {
+                          void delist(listing);
+                        }}
+                      >
+                        Delist
+                      </Button>
                     </TableCell>
                   </TableRow>
                 ))}

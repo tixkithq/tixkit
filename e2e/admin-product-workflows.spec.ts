@@ -2,7 +2,11 @@ import { type Page, type Response as PlaywrightResponse, type TestInfo } from '@
 import { test, expect, requireReachable } from './fixtures/validation-test';
 import { expectNoAxeViolations } from './helpers/axe';
 import { adminBaseUrl, apiBaseUrl, checkoutBaseUrl } from './helpers/env';
-import { seedFreeCheckoutEvent, seedTicketVariantCheckoutEvent } from './helpers/seed';
+import {
+  seedFreeCheckoutEvent,
+  seedPaidRefundableOrder,
+  seedTicketVariantCheckoutEvent,
+} from './helpers/seed';
 import { createDb } from '../packages/db/src/client';
 
 const desktopViewport = { width: 1440, height: 1000 } as const;
@@ -502,6 +506,201 @@ test.describe('admin product workflow coverage', () => {
 
     await attachScreenshot(page, testInfo, 'admin-waitlist-offer-desktop');
     await expectNoAxeViolations(page, testInfo);
+  });
+
+  test('admin can manage resale policy and delist resale listings from tickets', async ({
+    browserName,
+    page,
+    request,
+  }, testInfo) => {
+    await requireReachable(page, adminBaseUrl, 'admin dashboard');
+    await requireReachable(page, `${apiBaseUrl}/health`, 'api');
+
+    const suffix = `resale-${testInfo.workerIndex}-${Date.now()}`;
+    const seeded = await seedPaidRefundableOrder(request, suffix);
+    const resalePolicy = await expectJsonStatus<{
+      enabled: boolean;
+      maxMultiplier: number;
+      maxAbsoluteCents?: number;
+    }>(
+      await request.put(`${apiBaseUrl}/v1/events/${seeded.event.id}/resale-policy`, {
+        data: {
+          enabled: true,
+          maxMultiplier: 1.2,
+          maxAbsoluteCents: 6000,
+        },
+        failOnStatusCode: false,
+      }),
+      200,
+    );
+    expect(resalePolicy).toEqual({
+      enabled: true,
+      maxMultiplier: 1.2,
+      maxAbsoluteCents: 6000,
+    });
+
+    const listing = await expectJsonStatus<{
+      id: string;
+      ticketId: string;
+      status: string;
+      priceCents: number;
+      faceValueCents: number;
+    }>(
+      await request.post(`${apiBaseUrl}/v1/tickets/${seeded.ticketIds[0]}/resale-listings`, {
+        data: { priceCents: 5500 },
+        headers: { 'Idempotency-Key': `e2e-resale-list-${suffix}` },
+        failOnStatusCode: false,
+      }),
+      201,
+    );
+    expect(listing).toMatchObject({
+      ticketId: seeded.ticketIds[0],
+      status: 'listed',
+      priceCents: 5500,
+      faceValueCents: 5000,
+    });
+
+    await page.setViewportSize(desktopViewport);
+    await page.goto(`${adminBaseUrl}/events/${seeded.event.id}/tickets`);
+    await expect(page.getByRole('heading', { name: 'Ticket Types' })).toBeVisible();
+    const resalePanel = page.getByTestId('resale-policy-panel');
+    await expect(resalePanel.getByRole('heading', { name: 'Resale' })).toBeVisible();
+    await expect(resalePanel.getByRole('switch', { name: 'Resale policy' })).toBeChecked();
+    await expect(resalePanel.getByLabel('Max markup')).toHaveValue('1.2');
+    await expect(resalePanel.getByLabel('Absolute cap')).toHaveValue('6000');
+
+    const listingRow = resalePanel.getByRole('row').filter({ hasText: seeded.ticketIds[0] });
+    await expect(listingRow).toBeVisible();
+    await expect(listingRow.getByText('$55.00')).toBeVisible();
+    await expect(listingRow.getByText('$50.00')).toBeVisible();
+    await expect(listingRow.getByText('listed')).toBeVisible();
+
+    await resalePanel.getByRole('switch', { name: 'Resale policy' }).click();
+    await resalePanel.getByLabel('Max markup').fill('1.1');
+    await resalePanel.getByLabel('Absolute cap').fill('5500');
+    const policyResponsePromise = page.waitForResponse((response) => {
+      return (
+        response.url() === `${apiBaseUrl}/v1/events/${seeded.event.id}/resale-policy` &&
+        response.request().method() === 'PUT'
+      );
+    });
+    await resalePanel.getByRole('button', { name: 'Save resale policy' }).click();
+    const updatedPolicy = await expectJsonStatus<{
+      enabled: boolean;
+      maxMultiplier: number;
+      maxAbsoluteCents?: number;
+    }>(await policyResponsePromise, 200);
+    expect(updatedPolicy).toEqual({
+      enabled: false,
+      maxMultiplier: 1.1,
+      maxAbsoluteCents: 5500,
+    });
+
+    const persistedPolicy = await expectJsonStatus<{
+      enabled: boolean;
+      maxMultiplier: number;
+      maxAbsoluteCents?: number;
+    }>(
+      await page.request.get(`${apiBaseUrl}/v1/events/${seeded.event.id}/resale-policy`, {
+        failOnStatusCode: false,
+      }),
+      200,
+    );
+    expect(persistedPolicy).toEqual(updatedPolicy);
+
+    const delistResponsePromise = page.waitForResponse((response) => {
+      return (
+        response.url() === `${apiBaseUrl}/v1/ticket-listings/${listing.id}/delist` &&
+        response.request().method() === 'POST'
+      );
+    });
+    await listingRow.getByRole('button', { name: 'Delist' }).click();
+    const delisted = await expectJsonStatus<{ id: string; status: string }>(
+      await delistResponsePromise,
+      200,
+    );
+    expect(delisted).toMatchObject({ id: listing.id, status: 'delisted' });
+
+    const persistedListings = await expectJsonStatus<{
+      items: Array<{ id: string; status: string; ticketId: string }>;
+    }>(
+      await page.request.get(`${apiBaseUrl}/v1/events/${seeded.event.id}/resale-listings`, {
+        failOnStatusCode: false,
+      }),
+      200,
+    );
+    expect(persistedListings.items).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          id: listing.id,
+          ticketId: seeded.ticketIds[0],
+          status: 'delisted',
+        }),
+      ]),
+    );
+
+    await attachScreenshot(page, testInfo, 'admin-resale-policy-listings-desktop');
+    await expectNoAxeViolations(page, testInfo);
+
+    if (browserName === 'chromium') {
+      const client = await page.context().newCDPSession(page);
+      const evaluation = await client.send('Runtime.evaluate', {
+        returnByValue: true,
+        expression: `(() => {
+          const panel = document.querySelector('[data-testid="resale-policy-panel"]');
+          const heading = Array.from(panel?.querySelectorAll('h2') ?? [])
+            .find((node) => node.textContent?.trim() === 'Resale') ?? null;
+          const policySwitch = panel?.querySelector('[role="switch"]') ?? null;
+          const multiplier = panel?.querySelector('#resale-max-multiplier') ?? null;
+          const absoluteCap = panel?.querySelector('#resale-absolute-cap') ?? null;
+          const delistButton = Array.from(panel?.querySelectorAll('button') ?? [])
+            .find((node) => node.textContent?.includes('Delist')) ?? null;
+          const metric = (node) => {
+            const rect = node?.getBoundingClientRect();
+            return rect ? {
+              width: rect.width,
+              height: rect.height,
+              top: rect.top,
+              left: rect.left,
+              visible: rect.width > 0 && rect.height > 0,
+            } : null;
+          };
+          return {
+            panel: metric(panel),
+            heading: metric(heading),
+            policySwitch: metric(policySwitch),
+            multiplier: metric(multiplier),
+            absoluteCap: metric(absoluteCap),
+            delistButton: metric(delistButton),
+          };
+        })()`,
+      });
+      const metrics = evaluation.result.value as Record<
+        string,
+        { width: number; height: number; top: number; left: number; visible: boolean } | null
+      >;
+
+      for (const key of [
+        'panel',
+        'heading',
+        'policySwitch',
+        'multiplier',
+        'absoluteCap',
+        'delistButton',
+      ] as const) {
+        expect(metrics[key], key).toMatchObject({
+          width: expect.any(Number),
+          height: expect.any(Number),
+          visible: true,
+        });
+      }
+      expect(metrics.panel?.width).toBeGreaterThan(320);
+      expect(metrics.panel?.height).toBeGreaterThan(220);
+      expect(metrics.policySwitch?.height).toBeGreaterThan(16);
+      expect(metrics.multiplier?.height).toBeGreaterThan(28);
+      expect(metrics.absoluteCap?.height).toBeGreaterThan(28);
+      expect(metrics.delistButton?.width).toBeGreaterThan(48);
+    }
   });
 
   test('admin can configure multi-session event occurrences from the tickets workspace', async ({

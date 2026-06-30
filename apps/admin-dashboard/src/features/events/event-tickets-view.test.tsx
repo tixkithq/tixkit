@@ -8,6 +8,10 @@ type EventTicketsAdminApiMock = {
   listTicketTypes: ReturnType<typeof vi.fn>;
   listWaitlist: ReturnType<typeof vi.fn>;
   listEventOccurrences: ReturnType<typeof vi.fn>;
+  getResalePolicy: ReturnType<typeof vi.fn>;
+  updateResalePolicy: ReturnType<typeof vi.fn>;
+  listResaleListings: ReturnType<typeof vi.fn>;
+  delistResaleListing: ReturnType<typeof vi.fn>;
   createEventOccurrence: ReturnType<typeof vi.fn>;
   offerWaitlistEntry: ReturnType<typeof vi.fn>;
   updateWaitlistSettings: ReturnType<typeof vi.fn>;
@@ -18,6 +22,10 @@ const adminApiMock = vi.hoisted(
     listTicketTypes: vi.fn(),
     listWaitlist: vi.fn(),
     listEventOccurrences: vi.fn(),
+    getResalePolicy: vi.fn(),
+    updateResalePolicy: vi.fn(),
+    listResaleListings: vi.fn(),
+    delistResaleListing: vi.fn(),
     createEventOccurrence: vi.fn(),
     offerWaitlistEntry: vi.fn(),
     updateWaitlistSettings: vi.fn(),
@@ -115,6 +123,20 @@ const ticketTypes = [
   },
 ];
 
+const resaleListing = {
+  id: 'lst_1',
+  tenantId: 'tnt_1',
+  eventId: 'evt_1',
+  ticketId: 'tkt_1',
+  sellerId: 'usr_seller',
+  status: 'listed' as const,
+  priceCents: 5500,
+  currency: 'USD',
+  faceValueCents: 3500,
+  createdAt: '2026-08-15T12:00:00.000Z',
+  updatedAt: '2026-08-15T12:00:00.000Z',
+};
+
 function mockEventTicketsData() {
   adminApiMock.listTicketTypes.mockResolvedValue({
     ok: true,
@@ -133,6 +155,37 @@ function mockEventTicketsData() {
   adminApiMock.listEventOccurrences.mockResolvedValue({
     ok: true,
     data: [fridayOccurrence, saturdayOccurrence],
+  });
+  adminApiMock.getResalePolicy.mockResolvedValue({
+    ok: true,
+    data: {
+      enabled: true,
+      maxMultiplier: 1.2,
+      maxAbsoluteCents: 6000,
+    },
+  });
+  adminApiMock.updateResalePolicy.mockResolvedValue({
+    ok: true,
+    data: {
+      enabled: false,
+      maxMultiplier: 1.1,
+      maxAbsoluteCents: 5500,
+    },
+  });
+  adminApiMock.listResaleListings.mockResolvedValue({
+    ok: true,
+    data: {
+      items: [resaleListing],
+      nextCursor: undefined,
+      hasMore: false,
+    },
+  });
+  adminApiMock.delistResaleListing.mockResolvedValue({
+    ok: true,
+    data: {
+      ...resaleListing,
+      status: 'delisted',
+    },
   });
 }
 
@@ -207,5 +260,68 @@ describe('EventTicketsView occurrences', () => {
       3 * 60 * 60 * 1000,
     );
     expect(adminApiMock.listEventOccurrences).toHaveBeenCalledTimes(2);
+  });
+});
+
+describe('EventTicketsView resale', () => {
+  it('renders resale policy controls and active listings', async () => {
+    mockEventTicketsData();
+
+    const view = render(<EventTicketsView eventId="evt_1" />);
+
+    const panel = await view.findByTestId('resale-policy-panel');
+
+    expect(within(panel).getByText('Resale')).toBeInTheDocument();
+    expect(within(panel).getByText('Enabled')).toBeInTheDocument();
+    expect(within(panel).getByRole('switch', { name: /Resale policy/i })).toHaveAttribute(
+      'data-state',
+      'checked',
+    );
+    expect(within(panel).getByLabelText('Max markup')).toHaveValue(1.2);
+    expect(within(panel).getByLabelText('Absolute cap')).toHaveValue(6000);
+    expect(within(panel).getByText('tkt_1')).toBeInTheDocument();
+    expect(within(panel).getByText('$55.00')).toBeInTheDocument();
+    expect(within(panel).getByText('$35.00')).toBeInTheDocument();
+  });
+
+  it('saves resale policy edits and refreshes policy data', async () => {
+    mockEventTicketsData();
+
+    const view = render(<EventTicketsView eventId="evt_1" />);
+
+    const panel = await view.findByTestId('resale-policy-panel');
+    fireEvent.click(within(panel).getByRole('switch', { name: /Resale policy/i }));
+    fireEvent.change(within(panel).getByLabelText('Max markup'), {
+      target: { value: '1.1' },
+    });
+    fireEvent.change(within(panel).getByLabelText('Absolute cap'), {
+      target: { value: '5500' },
+    });
+    fireEvent.click(within(panel).getByRole('button', { name: /Save resale policy/i }));
+
+    await waitFor(() => {
+      expect(adminApiMock.updateResalePolicy).toHaveBeenCalledWith('evt_1', {
+        enabled: false,
+        maxMultiplier: 1.1,
+        maxAbsoluteCents: 5500,
+      });
+    });
+    expect(adminApiMock.getResalePolicy).toHaveBeenCalledTimes(2);
+  });
+
+  it('delists resale listings with a scoped idempotency key and refreshes listings', async () => {
+    mockEventTicketsData();
+
+    const view = render(<EventTicketsView eventId="evt_1" />);
+
+    const panel = await view.findByTestId('resale-policy-panel');
+    fireEvent.click(within(panel).getByRole('button', { name: /Delist/i }));
+
+    await waitFor(() => {
+      expect(adminApiMock.delistResaleListing).toHaveBeenCalledWith('lst_1', {
+        idempotencyKey: expect.stringMatching(/^resale_evt_1_[a-zA-Z0-9-]+$/),
+      });
+    });
+    expect(adminApiMock.listResaleListings).toHaveBeenCalledTimes(2);
   });
 });

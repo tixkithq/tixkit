@@ -231,6 +231,12 @@ async function seedBaseRows(db: Database) {
       slug: `waitlist-${RUN_ID}`,
       clerk_organization_id: null,
       status: 'active',
+      box_office_settings: JSON.stringify({
+        enabled: false,
+        allowedTenderTypes: ['cash', 'card', 'comp'],
+        requireBuyerEmail: false,
+        receiptMode: 'email',
+      }),
       created_at: new Date(),
       updated_at: new Date(),
     })

@@ -86,6 +86,12 @@ async function seedPrivacyRetentionFixture(db: Database, ids: FixtureIds, suffix
       slug: `privacy-retention-${suffix}`,
       clerk_organization_id: null,
       status: 'active',
+      box_office_settings: JSON.stringify({
+        enabled: false,
+        allowedTenderTypes: ['cash', 'card', 'comp'],
+        requireBuyerEmail: false,
+        receiptMode: 'email',
+      }),
       created_at: now,
       updated_at: now,
     })
@@ -99,6 +105,12 @@ async function seedPrivacyRetentionFixture(db: Database, ids: FixtureIds, suffix
       slug: `privacy-retention-other-${suffix}`,
       clerk_organization_id: null,
       status: 'active',
+      box_office_settings: JSON.stringify({
+        enabled: false,
+        allowedTenderTypes: ['cash', 'card', 'comp'],
+        requireBuyerEmail: false,
+        receiptMode: 'email',
+      }),
       created_at: now,
       updated_at: now,
     })
