@@ -20,6 +20,14 @@ vi.mock('@/context/bootstrap-provider', () => ({
   BootstrapProvider: ({ children }: { children: React.ReactNode }) => <>{children}</>,
 }));
 
+vi.mock('@/components/layout/scope-selector', () => ({
+  ScopeSelector: ({ className }: { className?: string }) => (
+    <nav aria-label="Workspace scope" className={className}>
+      Workspace Tixkit Dev
+    </nav>
+  ),
+}));
+
 import { AuthenticatedLayout } from './authenticated-layout';
 
 function renderLayout() {
@@ -39,11 +47,12 @@ describe('AuthenticatedLayout', () => {
     expect(screen.getByText('Dashboard content')).toBeInTheDocument();
   });
 
-  it('keeps header actions in the top header and workspace scope in the sidebar', () => {
+  it('keeps workspace scope and header actions in the top header', () => {
     renderLayout();
 
     const header = screen.getByRole('banner');
     expect(header).toContainElement(screen.getByRole('button', { name: 'Toggle Sidebar' }));
+    expect(header).toContainElement(screen.getByRole('navigation', { name: 'Workspace scope' }));
     expect(header).toContainElement(screen.getByRole('button', { name: 'Header action' }));
     expect(header).not.toContainElement(screen.getByRole('complementary', { name: 'App sidebar' }));
     expect(screen.getByRole('complementary', { name: 'App sidebar' })).toBeInTheDocument();

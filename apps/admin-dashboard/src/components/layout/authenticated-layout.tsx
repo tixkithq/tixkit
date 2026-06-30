@@ -9,6 +9,7 @@ import { BootstrapProvider } from '@/context/bootstrap-provider';
 import { SidebarInset, SidebarProvider, SidebarTrigger } from '@/components/ui/sidebar';
 import { AppSidebar } from '@/components/layout/app-sidebar';
 import { SkipToMain } from '@/components/skip-to-main';
+import { ScopeSelector } from '@/components/layout/scope-selector';
 
 type AuthenticatedLayoutProps = {
   children?: React.ReactNode;
@@ -35,8 +36,9 @@ export function AuthenticatedLayout({ children, headerActions }: AuthenticatedLa
                 <header className="sticky top-0 z-50 border-b bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/80">
                   <div className="flex min-h-16 w-full items-center gap-3 px-4 py-3">
                     <SidebarTrigger className="shrink-0 md:hidden" />
+                    <ScopeSelector className="min-w-0 flex-1 overflow-hidden" />
                     {headerActions ? (
-                      <div className="flex min-w-0 flex-1 items-center justify-end gap-3 sm:gap-4">
+                      <div className="ml-auto flex shrink-0 items-center justify-end gap-3 sm:gap-4">
                         {headerActions}
                       </div>
                     ) : null}

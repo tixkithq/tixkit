@@ -12,7 +12,6 @@ import { sidebarData } from '@/config/nav';
 import { AppTitle } from './app-title';
 import { NavGroup } from './nav-group';
 import { NavUser } from './nav-user';
-import { ScopeSelector } from './scope-selector';
 
 export function AppSidebar() {
   const { collapsible, variant } = useLayout();
@@ -20,7 +19,6 @@ export function AppSidebar() {
     <Sidebar collapsible={collapsible} variant={variant}>
       <SidebarHeader>
         <AppTitle />
-        <ScopeSelector className="px-2 pb-2 group-data-[collapsible=icon]:hidden" />
       </SidebarHeader>
       <SidebarContent>
         {sidebarData.navGroups.map((props) => (

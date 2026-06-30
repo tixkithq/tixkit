@@ -20,9 +20,9 @@ type ScopePillProps = {
 
 function ScopePill({ icon: Icon, label, value }: ScopePillProps) {
   return (
-    <div className="flex h-7 min-w-0 items-center gap-2 rounded-md px-2 text-sm text-sidebar-foreground">
-      <Icon aria-hidden="true" className="size-4 shrink-0 text-sidebar-foreground/70" />
-      <span className="shrink-0 text-xs font-medium text-sidebar-foreground/70">{label}</span>
+    <div className="flex h-8 min-w-0 max-w-56 flex-1 basis-0 items-center gap-2 rounded-md border bg-background px-2 text-sm text-foreground">
+      <Icon aria-hidden="true" className="size-4 shrink-0 text-muted-foreground" />
+      <span className="shrink-0 text-xs font-medium text-muted-foreground">{label}</span>
       <span className="truncate font-medium">{value ?? 'None'}</span>
     </div>
   );
@@ -73,16 +73,19 @@ export function ScopeSelector({ className }: ScopeSelectorProps) {
   const showBrandScope = canSwitchBrands || !brandMatchesWorkspace;
 
   return (
-    <nav aria-label="Workspace scope" className={cn('flex min-w-0 flex-col gap-1', className)}>
+    <nav
+      aria-label="Workspace scope"
+      className={cn('flex min-w-0 flex-row items-center gap-2', className)}
+    >
       {canSwitchOrganizations ? (
         <Select value={organizationId} onValueChange={setOrganizationId}>
           <SelectTrigger
             aria-label="Select workspace"
             size="sm"
-            className="h-7 w-full min-w-0 border-0 bg-transparent px-2 text-sidebar-foreground shadow-none hover:bg-sidebar-accent hover:text-sidebar-accent-foreground focus-visible:ring-0 focus-visible:ring-offset-0 dark:bg-transparent dark:hover:bg-sidebar-accent [&_svg:not([class*='text-'])]:text-sidebar-foreground/70"
+            className="h-8 min-w-0 max-w-56 flex-1 basis-0 px-2 text-foreground [&_svg:not([class*='text-'])]:text-muted-foreground"
           >
-            <Building2 className="size-4 text-sidebar-foreground/70" />
-            <span className="text-xs font-medium text-sidebar-foreground/70">Workspace</span>
+            <Building2 className="size-4 text-muted-foreground" />
+            <span className="shrink-0 text-xs font-medium text-muted-foreground">Workspace</span>
             <SelectValue placeholder="Select workspace" />
           </SelectTrigger>
           <SelectContent>
@@ -106,10 +109,10 @@ export function ScopeSelector({ className }: ScopeSelectorProps) {
           <SelectTrigger
             aria-label="Select brand"
             size="sm"
-            className="h-7 w-full min-w-0 border-0 bg-transparent px-2 text-sidebar-foreground shadow-none hover:bg-sidebar-accent hover:text-sidebar-accent-foreground focus-visible:ring-0 focus-visible:ring-offset-0 dark:bg-transparent dark:hover:bg-sidebar-accent [&_svg:not([class*='text-'])]:text-sidebar-foreground/70"
+            className="h-8 min-w-0 max-w-56 flex-1 basis-0 px-2 text-foreground [&_svg:not([class*='text-'])]:text-muted-foreground"
           >
-            <Store className="size-4 text-sidebar-foreground/70" />
-            <span className="text-xs font-medium text-sidebar-foreground/70">Brand</span>
+            <Store className="size-4 text-muted-foreground" />
+            <span className="shrink-0 text-xs font-medium text-muted-foreground">Brand</span>
             <SelectValue placeholder={organizationId ? 'Select brand' : 'Select workspace first'} />
           </SelectTrigger>
           <SelectContent>

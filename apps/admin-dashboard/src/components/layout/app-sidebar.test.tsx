@@ -42,22 +42,14 @@ vi.mock('./nav-user', () => ({
   NavUser: () => <div>Current user</div>,
 }));
 
-vi.mock('./scope-selector', () => ({
-  ScopeSelector: ({ className }: { className?: string }) => (
-    <nav aria-label="Workspace scope" className={className}>
-      Workspace Tixkit Dev
-    </nav>
-  ),
-}));
-
 import { AppSidebar } from './app-sidebar';
 
 describe('AppSidebar', () => {
-  it('renders workspace scope under the app title in the sidebar header', () => {
+  it('keeps the sidebar header focused on the app title', () => {
     render(<AppSidebar />);
 
     const header = screen.getByTestId('sidebar-header');
     expect(header).toContainElement(screen.getByText('Tixkit Admin'));
-    expect(header).toContainElement(screen.getByRole('navigation', { name: 'Workspace scope' }));
+    expect(screen.queryByRole('navigation', { name: 'Workspace scope' })).not.toBeInTheDocument();
   });
 });
