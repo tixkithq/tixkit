@@ -24,7 +24,7 @@ import {
   ProviderRouteSelector,
   validateProviderFields,
 } from '@tixkit/email-transport';
-import { RENDER_CONTRACTS, renderContent } from '@tixkit/content-core';
+import { normalizeEmailTemplateDocument, renderEmailTemplate } from '@tixkit/content-email';
 import { normalizeSmsTemplateDocument, renderSmsTemplate } from '@tixkit/content-message';
 import type { EmailTransport } from '@tixkit/domain';
 import type { SmsTransport } from '@tixkit/domain/messaging';
@@ -274,17 +274,25 @@ export async function renderTemplateActivity(input: {
         segments: rendered.segments,
       });
     }
-    const rendered = renderContent({
-      channel: 'email',
-      contract: RENDER_CONTRACTS.email,
-      subject: contentVersion.version.subject,
-      html: contentVersion.version.renderedHtml,
-      text: contentVersion.version.renderedText,
-      context: input.variables,
-    });
+    const document = normalizeEmailTemplateDocument(contentVersion.version.contentJson);
+    if (!document) {
+      return errResult(
+        'EMAIL_TEMPLATE_INVALID',
+        'Published email content version is not canonical React Email template JSON',
+        false,
+      );
+    }
+    const rendered = await renderEmailTemplate(document, input.variables);
+    if (!rendered.validation.valid) {
+      return errResult(
+        'EMAIL_TEMPLATE_RENDER_BLOCKED',
+        'Published email content version has render blockers',
+        false,
+      );
+    }
     return okResult({
-      subject: rendered.subject ?? '',
-      html: rendered.html ?? '',
+      subject: rendered.subject,
+      html: rendered.html,
       text: rendered.text,
     });
   } catch (err) {

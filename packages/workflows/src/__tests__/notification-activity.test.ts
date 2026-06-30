@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { REACT_EMAIL_EDITOR_PACKAGE, createDefaultEmailTemplate } from '@tixkit/content-email';
 import { createDefaultSmsTemplate } from '@tixkit/content-message';
 
 const dbState = vi.hoisted(() => ({
@@ -277,7 +278,26 @@ describe('notification activity deliverability gating', () => {
       subject: 'Update for {{event.title}}',
       renderedHtml: '<p>Hello {{recipient.name}}</p>',
       renderedText: 'Hello {{recipient.name}}',
-      contentJson: {},
+      contentJson: createDefaultEmailTemplate({
+        editor: {
+          provider: REACT_EMAIL_EDITOR_PACKAGE,
+          contentHtml: '<p>Hello {{recipient.name}}</p>',
+          contentText: 'Hello {{recipient.name}}',
+          contentJson: { type: 'doc', content: [] },
+        },
+        settings: {
+          templateKey: 'event-update',
+          subject: 'Update for {{event.title}}',
+          previewText: 'Latest event details.',
+          locale: 'en',
+          category: 'transactional',
+          sender: {
+            fromEmail: 'tickets@example.test',
+            fromName: 'Tixkit',
+            replyToEmail: 'support@example.test',
+          },
+        },
+      }),
       variables: [],
       validation: { valid: true, severity: 'warning', issues: [] },
       createdBy: 'usr_1',
@@ -306,6 +326,59 @@ describe('notification activity deliverability gating', () => {
         html: '<p>Hello &lt;script&gt;alert(1)&lt;/script&gt;</p>',
         text: 'Hello <script>alert(1)</script>',
       },
+    });
+  });
+
+  it('renders content email versions from canonical JSON instead of stored HTML', async () => {
+    dbState.contentVersion = {
+      ...dbState.contentVersion!,
+      renderedHtml: '<script>alert("stored")</script><p>Stored {{recipient.name}}</p>',
+      renderedText: 'Stored {{recipient.name}}',
+    };
+
+    const result = await renderTemplateActivity({
+      tenantId: 'tnt_1',
+      brandId: 'brd_1',
+      templateKey: 'event-update',
+      templateVersionId: 'cver_1',
+      variables: {
+        event: { title: 'All Access' },
+        recipient: { name: 'Ada' },
+      },
+    });
+
+    expect(result).toMatchObject({
+      ok: true,
+      value: {
+        subject: 'Update for All Access',
+        html: '<p>Hello Ada</p>',
+        text: 'Hello Ada',
+      },
+    });
+  });
+
+  it('fails closed when a published content email version is not canonical JSON', async () => {
+    dbState.contentVersion = {
+      ...dbState.contentVersion!,
+      contentJson: {},
+      renderedHtml: '<p>Hello {{recipient.name}}</p>',
+    };
+
+    const result = await renderTemplateActivity({
+      tenantId: 'tnt_1',
+      brandId: 'brd_1',
+      templateKey: 'event-update',
+      templateVersionId: 'cver_1',
+      variables: {
+        event: { title: 'All Access' },
+        recipient: { name: 'Ada' },
+      },
+    });
+
+    expect(result).toMatchObject({
+      ok: false,
+      errorCode: 'EMAIL_TEMPLATE_INVALID',
+      retryable: false,
     });
   });
 

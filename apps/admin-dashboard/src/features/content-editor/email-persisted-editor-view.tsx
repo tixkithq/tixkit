@@ -206,6 +206,8 @@ const emailVariableInserts = [
   'brand.supportUrl',
 ];
 
+const emailCategoryOptions = ['transactional', 'bulk', 'staff', 'system'] as const;
+
 const textInputClassName =
   'h-9 w-full border-0 border-b border-black/10 bg-transparent px-0 text-sm text-black outline-none transition placeholder:text-black/35 focus:border-black';
 const darkInputClassName =
@@ -876,8 +878,16 @@ export function EmailPersistedEditorView({ eventId }: { eventId: string }) {
 
   async function sendTest() {
     if (!document || !emailDocument || isArchived) return;
+    const review = await reviewCurrentDraft({ openPanel: false });
+    if (!review) return;
+    if (hasBlockingIssues(review.issues)) {
+      setAutosave('error');
+      setActionError('Resolve email test-send blockers before sending a test.');
+      openInspectorPanel('issues');
+      return;
+    }
     const operationId = nextOperationId();
-    const saved = await saveDraft(operationId, emailDocument);
+    const saved = await saveDraft(operationId, review.document);
     if (!saved) return;
     const result = await adminApi.testSendContent(document.id, {
       versionId: saved.version.id,
@@ -1323,18 +1333,79 @@ export function EmailPersistedEditorView({ eventId }: { eventId: string }) {
                   value={recipient}
                 />
               </label>
+              <label className="space-y-1.5 text-xs font-medium text-white/55">
+                Template key
+                <input
+                  aria-label="Template key"
+                  className={darkInputClassName}
+                  disabled={!canEdit}
+                  onChange={(change) =>
+                    updateEmailDocument({
+                      ...emailDocument,
+                      settings: {
+                        ...emailDocument.settings,
+                        templateKey: change.currentTarget.value,
+                      },
+                    })
+                  }
+                  value={emailDocument.settings.templateKey}
+                />
+              </label>
+              <label className="space-y-1.5 text-xs font-medium text-white/55">
+                Locale
+                <input
+                  aria-label="Locale"
+                  className={darkInputClassName}
+                  disabled={!canEdit}
+                  onChange={(change) =>
+                    updateEmailDocument({
+                      ...emailDocument,
+                      settings: {
+                        ...emailDocument.settings,
+                        locale: change.currentTarget.value,
+                      },
+                    })
+                  }
+                  value={emailDocument.settings.locale}
+                />
+              </label>
+              <label className="space-y-1.5 text-xs font-medium text-white/55">
+                Category
+                <select
+                  aria-label="Category"
+                  className={darkInputClassName}
+                  disabled={!canEdit}
+                  onChange={(change) =>
+                    updateEmailDocument({
+                      ...emailDocument,
+                      settings: {
+                        ...emailDocument.settings,
+                        category: change.currentTarget
+                          .value as EmailTemplateDocument['settings']['category'],
+                      },
+                    })
+                  }
+                  value={emailDocument.settings.category}
+                >
+                  {emailCategoryOptions.map((category) => (
+                    <option className="bg-neutral-950 text-white" key={category} value={category}>
+                      {category}
+                    </option>
+                  ))}
+                </select>
+              </label>
               <dl className="space-y-3 text-xs">
                 <div className="flex justify-between gap-4 border-b border-white/10 pb-3">
-                  <dt className="text-white/45">Template key</dt>
-                  <dd className="font-mono text-white/80">{emailDocument.settings.templateKey}</dd>
+                  <dt className="text-white/45">Brand scope</dt>
+                  <dd className="max-w-[12rem] truncate font-mono text-white/80">
+                    {document.brandId}
+                  </dd>
                 </div>
                 <div className="flex justify-between gap-4 border-b border-white/10 pb-3">
-                  <dt className="text-white/45">Locale</dt>
-                  <dd className="font-mono text-white/80">{emailDocument.settings.locale}</dd>
-                </div>
-                <div className="flex justify-between gap-4 border-b border-white/10 pb-3">
-                  <dt className="text-white/45">Category</dt>
-                  <dd className="font-mono text-white/80">{emailDocument.settings.category}</dd>
+                  <dt className="text-white/45">Event scope</dt>
+                  <dd className="max-w-[12rem] truncate font-mono text-white/80">
+                    {document.eventId ?? 'brand'}
+                  </dd>
                 </div>
               </dl>
               <button

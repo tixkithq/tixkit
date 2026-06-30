@@ -52,7 +52,7 @@ The EPYC host has been configured with:
 - repo-scoped runner scale set `tixkit-epyc-trusted`
 - ARC namespace Pod Security labels and NetworkPolicy manifests in `infra/ci/k8s/arc-hardening.yaml`
 
-The runner scale set is configured with `minRunners: 0` and `maxRunners: 8`, so idle runner pods are not kept around. ARC keeps a listener pod online and creates ephemeral Kata-backed runner pods when trusted jobs are assigned.
+The runner scale set is configured with `minRunners: 0` and `maxRunners: 12`, so idle runner pods are not kept around. ARC keeps a listener pod online and creates ephemeral Kata-backed runner pods when trusted jobs are assigned. Runner containers request 4 CPU / 8 GiB and can burst up to 16 CPU / 24 GiB; the dind container is still managed by ARC's built-in dind template.
 
 ## Rebuild host-side install sequence
 

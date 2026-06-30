@@ -10,7 +10,7 @@ runnerGroup: Default
 #   --from-file=github_app_private_key=/path/to/private-key.pem
 githubConfigSecret: arc-github-auth
 
-maxRunners: 8
+maxRunners: 12
 minRunners: 0
 
 scaleSetLabels:
@@ -48,6 +48,13 @@ template:
             drop:
               - ALL
           readOnlyRootFilesystem: false
+        resources:
+          requests:
+            cpu: "4"
+            memory: 8Gi
+          limits:
+            cpu: "16"
+            memory: 24Gi
     volumes:
       - name: work
         emptyDir: {}
@@ -63,6 +70,13 @@ listenerTemplate:
         effect: NoSchedule
     containers:
       - name: listener
+        resources:
+          requests:
+            cpu: 100m
+            memory: 128Mi
+          limits:
+            cpu: 500m
+            memory: 512Mi
 
 controllerServiceAccount:
   namespace: arc-systems

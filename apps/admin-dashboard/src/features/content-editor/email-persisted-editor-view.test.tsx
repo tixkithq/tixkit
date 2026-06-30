@@ -351,6 +351,15 @@ describe('EmailPersistedEditorView', () => {
     fireEvent.change(subject, {
       target: { value: 'Updated tickets for {{event.title}}' },
     });
+    fireEvent.change(screen.getByLabelText('Template key'), {
+      target: { value: 'door-reminder' },
+    });
+    fireEvent.change(screen.getByLabelText('Locale'), {
+      target: { value: 'en-US' },
+    });
+    fireEvent.change(screen.getByLabelText('Category'), {
+      target: { value: 'staff' },
+    });
     const canvas = screen.getByRole('textbox', { name: 'Email editor canvas' });
     canvas.textContent = 'Updated saved email for {{recipient.name}}.';
     fireEvent.input(canvas);
@@ -365,6 +374,9 @@ describe('EmailPersistedEditorView', () => {
             schemaVersion: 1,
             settings: expect.objectContaining({
               subject: 'Updated tickets for {{event.title}}',
+              templateKey: 'door-reminder',
+              locale: 'en-US',
+              category: 'staff',
             }),
             editor: expect.objectContaining({
               contentJson: expect.objectContaining({ type: 'doc' }),
@@ -620,6 +632,13 @@ describe('EmailPersistedEditorView', () => {
     expect(await screen.findByText('missing_subject')).toBeInTheDocument();
     expect(screen.getByText('unknown_variable')).toBeInTheDocument();
     expect(screen.getByText('Current draft review')).toBeInTheDocument();
+
+    fireEvent.click(screen.getAllByRole('button', { name: 'Send test' })[0]);
+
+    expect(
+      await screen.findByText('Resolve email test-send blockers before sending a test.'),
+    ).toBeInTheDocument();
+    expect(adminApiMock.testSendContent).not.toHaveBeenCalled();
 
     fireEvent.click(screen.getByRole('button', { name: 'Publish' }));
 
