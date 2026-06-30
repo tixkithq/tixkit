@@ -140,6 +140,14 @@ function throwIfRetryableFinalizeFailure(
   }
 }
 
+function throwIfFulfillmentFailure(activityName: string, result: WorkflowActivityResult<unknown>) {
+  if (!result.ok) {
+    throw new Error(
+      `Checkout fulfillment ${activityName} failed (${result.errorCode}): ${result.message}`,
+    );
+  }
+}
+
 export async function checkoutSessionWorkflow(
   input: CheckoutSessionWorkflowInput,
 ): Promise<{ orderId?: string; status: string }> {
@@ -266,19 +274,21 @@ export async function checkoutSessionWorkflow(
       return { status: 'failed' };
     }
 
-    await sendConfirmationEmailActivity({
+    const emailResult = await sendConfirmationEmailActivity({
       orderId: finalizeResult.value.orderId,
       toEmail: input.buyerEmail,
       tenantId: input.tenantId,
       brandId: input.brandId,
     });
+    throwIfFulfillmentFailure('confirmation email', emailResult);
 
-    await issueTicketsActivity({
+    const ticketResult = await issueTicketsActivity({
       orderId: finalizeResult.value.orderId,
       toEmail: input.buyerEmail,
       tenantId: input.tenantId,
       brandId: input.brandId,
     });
+    throwIfFulfillmentFailure('ticket issuance', ticketResult);
 
     await emitOrderWebhook(finalizeResult.value.orderId);
 
@@ -415,19 +425,21 @@ export async function checkoutSessionWorkflow(
     return { status: 'failed' };
   }
 
-  await sendConfirmationEmailActivity({
+  const emailResult = await sendConfirmationEmailActivity({
     orderId: finalizeResult.value.orderId,
     toEmail: input.buyerEmail,
     tenantId: input.tenantId,
     brandId: input.brandId,
   });
+  throwIfFulfillmentFailure('confirmation email', emailResult);
 
-  await issueTicketsActivity({
+  const ticketResult = await issueTicketsActivity({
     orderId: finalizeResult.value.orderId,
     toEmail: input.buyerEmail,
     tenantId: input.tenantId,
     brandId: input.brandId,
   });
+  throwIfFulfillmentFailure('ticket issuance', ticketResult);
 
   await emitOrderWebhook(finalizeResult.value.orderId);
 
