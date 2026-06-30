@@ -29,6 +29,7 @@ The ARC scale set should therefore expose labels including:
 - `trusted`
 - `linux`
 - `epyc`
+- `self-hosted`
 
 ## What this setup is trying to achieve
 
@@ -186,19 +187,15 @@ gh run list --repo nkgotcode/tixkit --workflow trusted-ci.yml
 ## Important caveats
 
 ### 1) Kata verification
-
 The cluster must keep a functioning `kata` runtime class. If `runtimeClassName: kata` fails, ARC runner pods will stay pending or fail admission.
 
 ### 2) DIND is intentionally retained
-
 The ARC runner values use `containerMode.type: dind` because existing Tixkit workflows depend on GitHub Actions service containers. That preserves compatibility with the current CI jobs.
 
 ### 3) iOS stays GitHub-hosted
-
 `trusted-ci.yml` keeps the iOS job on `macos-latest`; the EPYC Linux runner cannot replace that lane.
 
 ### 4) GitHub App auth
-
 Use GitHub App authentication so runner registration is not tied to a human account token. The app should be installed only on `nkgotcode/tixkit`.
 
 For repo-scoped ARC registration, GitHub's ARC docs require:
