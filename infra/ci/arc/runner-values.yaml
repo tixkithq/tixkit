@@ -41,7 +41,7 @@ template:
         type: RuntimeDefault
     initContainers:
       - name: init-dind-externals
-        image: ghcr.io/actions/actions-runner:latest
+        image: ghcr.io/actions/actions-runner:2.335.1@sha256:08c30b43a9dcc876becb9021ec311a3ff86135db1f52d10b295b7ef0b6592287
         command:
           - cp
           - -r
@@ -51,7 +51,8 @@ template:
           - name: dind-externals
             mountPath: /home/runner/tmpDir
       - name: dind
-        image: docker:dind
+        image: docker:29.6.1-dind@sha256:66d292e5c26bd33a6f6f61cacb880de2186339a524ecba1ce098dbbaceed6515
+        restartPolicy: Always
         args:
           - dockerd
           - --host=unix:///var/run/docker.sock
@@ -62,7 +63,6 @@ template:
             value: '123'
         securityContext:
           privileged: true
-        restartPolicy: Always
         startupProbe:
           exec:
             command:
@@ -80,7 +80,7 @@ template:
             mountPath: /home/runner/externals
     containers:
       - name: runner
-        image: ghcr.io/actions/actions-runner:latest
+        image: ghcr.io/actions/actions-runner:2.335.1@sha256:08c30b43a9dcc876becb9021ec311a3ff86135db1f52d10b295b7ef0b6592287
         command:
           - /home/runner/run.sh
         env:
@@ -94,6 +94,11 @@ template:
             drop:
               - ALL
           readOnlyRootFilesystem: false
+        volumeMounts:
+          - name: work
+            mountPath: /home/runner/_work
+          - name: dind-sock
+            mountPath: /var/run
         resources:
           requests:
             cpu: '4'
@@ -101,11 +106,6 @@ template:
           limits:
             cpu: '16'
             memory: 24Gi
-        volumeMounts:
-          - name: work
-            mountPath: /home/runner/_work
-          - name: dind-sock
-            mountPath: /var/run
     volumes:
       - name: work
         emptyDir: {}

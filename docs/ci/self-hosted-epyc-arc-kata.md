@@ -52,7 +52,7 @@ The EPYC host has been configured with:
 - repo-scoped runner scale set `tixkit-epyc-trusted`
 - ARC namespace Pod Security labels and NetworkPolicy manifests in `infra/ci/k8s/arc-hardening.yaml`
 
-The runner scale set is configured with `minRunners: 0` and `maxRunners: 12`, so idle runner pods are not kept around. ARC keeps a listener pod online and creates ephemeral Kata-backed runner pods when trusted jobs are assigned. Runner containers request 4 CPU / 8 GiB and can burst up to 16 CPU / 24 GiB; the dind container is still managed by ARC's built-in dind template.
+The runner scale set is configured with `minRunners: 0` and `maxRunners: 12`, so idle runner pods are not kept around. ARC keeps a listener pod online and creates ephemeral Kata-backed runner pods when trusted jobs are assigned. Runner and Docker-in-Docker images are pinned with explicit versions and SHA-256 digests in `infra/ci/arc/runner-values.yaml`; update them through review instead of floating tags. Runner containers request 4 CPU / 8 GiB and can burst up to 16 CPU / 24 GiB.
 
 ## Rebuild host-side install sequence
 
@@ -111,6 +111,7 @@ helm install arc \
   --namespace arc-systems \
   --create-namespace \
   -f infra/ci/arc/controller-values.yaml \
+  --version 0.14.2 \
   oci://ghcr.io/actions/actions-runner-controller-charts/gha-runner-scale-set-controller
 ```
 
@@ -148,10 +149,17 @@ helm install tixkit-epyc-trusted \
   --namespace arc-runners \
   --create-namespace \
   -f infra/ci/arc/runner-values.yaml \
+  --version 0.14.2 \
   oci://ghcr.io/actions/actions-runner-controller-charts/gha-runner-scale-set
 ```
 
 ## Verification commands
+
+Check that the committed ARC chart and image references are pinned before applying them:
+
+```bash
+bun run verify:arc:kata:supply-chain
+```
 
 Check ARC controller:
 
