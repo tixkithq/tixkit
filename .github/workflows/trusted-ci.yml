@@ -72,20 +72,12 @@ jobs:
   flutter-sdk:
     name: Flutter SDK
     runs-on: tixkit-epyc-trusted
-    if: ${{ vars.RUN_TRUSTED_FLUTTER_SDK == '1' }}
     steps:
       - uses: actions/checkout@v7
-      - name: Install Flutter archive tools
+      - name: Verify Flutter runner prerequisites
         run: |
-          if command -v xz >/dev/null 2>&1; then
-            exit 0
-          fi
-          apt_get='apt-get'
-          if command -v sudo >/dev/null 2>&1; then
-            apt_get='sudo apt-get'
-          fi
-          ${apt_get} update
-          ${apt_get} install -y xz-utils
+          xz --version
+          unzip -v | head -n 2
       - uses: subosito/flutter-action@v2
         with:
           flutter-version: '3.22.x'
@@ -159,7 +151,6 @@ jobs:
   integration-tests-postgres:
     name: Integration Tests (PostgreSQL)
     runs-on: tixkit-epyc-trusted
-    if: ${{ vars.RUN_TRUSTED_DB_INTEGRATION == '1' }}
     services:
       postgres:
         image: postgres:16-alpine
@@ -219,7 +210,6 @@ jobs:
   integration-tests-mysql:
     name: Integration Tests (MySQL)
     runs-on: tixkit-epyc-trusted
-    if: ${{ vars.RUN_TRUSTED_DB_INTEGRATION == '1' }}
     services:
       mysql:
         image: mysql:8.4
@@ -281,3 +271,30 @@ jobs:
           DB_INTEGRATION_DRIVER=mysql bun vitest run src/__tests__/integration/inventory-concurrency.integration.test.ts src/__tests__/integration/load-harness.integration.test.ts
           cd ../..
           DB_INTEGRATION_DRIVER=mysql bun --filter @tixkit/workflows test:mysql-tier1
+
+  integration-tests-mssql:
+    name: Integration Tests (MSSQL)
+    runs-on: tixkit-epyc-trusted
+    services:
+      mssql:
+        image: mcr.microsoft.com/mssql/server:2022-latest
+        env:
+          ACCEPT_EULA: 'Y'
+          MSSQL_SA_PASSWORD: 'Test-password-12345'
+        ports:
+          - 1433:1433
+        options: >-
+          --health-cmd "/opt/mssql-tools18/bin/sqlcmd -S localhost -U sa -P Test-password-12345 -C -Q 'SELECT 1'"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 20
+    env:
+      DB_DRIVER: mssql
+      DATABASE_URL_MSSQL: sqlserver://sa:Test-password-12345@localhost:1433/tixkit?trustServerCertificate=true
+    steps:
+      - uses: actions/checkout@v7
+      - uses: ./.github/actions/setup-js
+      - run: bun install --frozen-lockfile
+      - name: Create MSSQL database
+        run: docker exec "${{ job.services.mssql.id }}" /opt/mssql-tools18/bin/sqlcmd -S localhost -U sa -P Test-password-12345 -C -Q "IF DB_ID('tixkit') IS NULL CREATE DATABASE tixkit"
+      - run: bun run --filter @tixkit/db test:mssql

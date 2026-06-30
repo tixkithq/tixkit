@@ -14,6 +14,7 @@ This repo is wired for a **split-trust** GitHub Actions setup:
 - `.github/workflows/trusted-release-dry-run.yml` runs trusted release dry runs on self-hosted runners for **push to main + manual**.
 - `infra/ci/arc/controller-values.yaml` contains ARC controller defaults.
 - `infra/ci/arc/runner-values.yaml` contains the repo-scoped runner scale-set values.
+- `infra/ci/arc/runner-image/Dockerfile` builds the custom ARC runner image with Flutter/Linux prerequisites preinstalled.
 
 ## Runner labels expected by workflows
 
@@ -36,7 +37,7 @@ The ARC scale set should therefore expose labels including:
 1. **Public/fork PR code never lands on the EPYC host.**
 2. **Trusted jobs use ephemeral ARC runners.**
 3. **Runner pods use `runtimeClassName: kata`** for microVM-backed isolation.
-4. **Service-container-heavy jobs** (Postgres/MySQL/Redis/Temporal) are moved to the trusted runner lane.
+4. **Service-container-heavy jobs** (Postgres/MySQL/MSSQL/Redis/Temporal) are moved to the trusted runner lane.
 
 ## EPYC host-side state
 
@@ -50,9 +51,10 @@ The EPYC host has been configured with:
 - ARC controller chart `0.14.2`
 - ARC runner scale set chart `0.14.2`
 - repo-scoped runner scale set `tixkit-epyc-trusted`
+- local Docker registry on `localhost:5000`
 - ARC namespace Pod Security labels and NetworkPolicy manifests in `infra/ci/k8s/arc-hardening.yaml`
 
-The runner scale set is configured with `minRunners: 0` and `maxRunners: 12`, so idle runner pods are not kept around. ARC keeps a listener pod online and creates ephemeral Kata-backed runner pods when trusted jobs are assigned. Runner and Docker-in-Docker images are pinned with explicit versions and SHA-256 digests in `infra/ci/arc/runner-values.yaml`; update them through review instead of floating tags. Runner containers request 4 CPU / 8 GiB and can burst up to 16 CPU / 24 GiB.
+The runner scale set is configured with `minRunners: 0` and `maxRunners: 12`, so idle runner pods are not kept around. ARC keeps a listener pod online and creates ephemeral Kata-backed runner pods when trusted jobs are assigned. The custom runner image and Docker-in-Docker image are pinned with explicit versions and SHA-256 digests in `infra/ci/arc/runner-values.yaml`; update them through review instead of floating tags. Runner containers request 4 CPU / 8 GiB and can burst up to 16 CPU / 24 GiB, which leaves enough headroom for MSSQL service containers.
 
 ## Rebuild host-side install sequence
 
@@ -104,7 +106,45 @@ curl https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | bash
 helm version
 ```
 
-### 4) Install ARC controller
+### 4) Configure the EPYC local registry
+
+The custom runner image is built with host Docker and served from a local registry because Docker builds inside Kata-backed ARC pods cannot register some upstream runner image layer xattrs.
+
+```bash
+sudo mkdir -p /opt/tixkit-registry
+docker run -d --restart=always \
+  --name tixkit-registry \
+  -p 5000:5000 \
+  -v /opt/tixkit-registry:/var/lib/registry \
+  registry:2
+
+sudo tee /etc/rancher/k3s/registries.yaml >/dev/null <<'EOF'
+mirrors:
+  "localhost:5000":
+    endpoint:
+      - "http://localhost:5000"
+  "100.103.201.10:5000":
+    endpoint:
+      - "http://100.103.201.10:5000"
+EOF
+
+sudo systemctl restart k3s
+sudo kubectl wait --for=condition=Ready node --all --timeout=180s
+```
+
+Build and publish the runner image:
+
+```bash
+docker build --platform linux/amd64 \
+  -t localhost:5000/tixkit-arc-runner:2.335.1-flutter \
+  infra/ci/arc/runner-image
+docker push localhost:5000/tixkit-arc-runner:2.335.1-flutter
+docker inspect --format '{{index .RepoDigests 0}}' localhost:5000/tixkit-arc-runner:2.335.1-flutter
+```
+
+Pin the resulting digest in `infra/ci/arc/runner-values.yaml`.
+
+### 5) Install ARC controller
 
 ```bash
 helm install arc \
@@ -115,7 +155,7 @@ helm install arc \
   oci://ghcr.io/actions/actions-runner-controller-charts/gha-runner-scale-set-controller
 ```
 
-### 5) Apply ARC namespace hardening
+### 6) Apply ARC namespace hardening
 
 ```bash
 kubectl apply -f infra/ci/k8s/arc-hardening.yaml
@@ -131,7 +171,7 @@ The manifest adds:
 
 On k3s' default flannel CNI, Kubernetes `NetworkPolicy` resources are accepted but not enforced. Use a NetworkPolicy-capable CNI such as Cilium or Calico before relying on these policies as a boundary.
 
-### 6) Create GitHub auth secret
+### 7) Create GitHub auth secret
 
 ```bash
 kubectl create namespace arc-runners --dry-run=client -o yaml | kubectl apply -f -
@@ -142,7 +182,7 @@ kubectl create secret generic arc-github-auth \
   --from-file=github_app_private_key=/path/to/private-key.pem
 ```
 
-### 7) Install the repo-scoped runner scale set
+### 8) Install the repo-scoped runner scale set
 
 ```bash
 helm install tixkit-epyc-trusted \
@@ -203,6 +243,8 @@ The cluster must keep a functioning `kata` runtime class. If `runtimeClassName: 
 The ARC runner values keep Docker-in-Docker enabled because existing Tixkit workflows depend on GitHub Actions service containers. That preserves compatibility with the current CI jobs.
 
 The values file spells out the dind pod template instead of using ARC's generated `containerMode.type: dind` template so the Docker daemon can run with `--storage-driver=vfs`. Kata-backed pods reject overlayfs mounts when GitHub service containers are created, so leaving Docker on its default overlay driver makes trusted jobs fail before repo steps run.
+
+The custom runner image preinstalls `xz-utils`, `unzip`, `clang`, `cmake`, `ninja-build`, and GTK/OpenGL packages so Flutter SDK setup and Linux/web builds do not need privileged package installation during CI.
 
 ### 3) iOS stays GitHub-hosted
 

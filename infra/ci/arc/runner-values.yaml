@@ -41,7 +41,7 @@ template:
         type: RuntimeDefault
     initContainers:
       - name: init-dind-externals
-        image: ghcr.io/actions/actions-runner:2.335.1@sha256:08c30b43a9dcc876becb9021ec311a3ff86135db1f52d10b295b7ef0b6592287
+        image: localhost:5000/tixkit-arc-runner:2.335.1-flutter@sha256:e49f5d30ab66a2d25c963def78d3dd75982c8978ab23acbb4757e43aa2bec1e9
         command:
           - cp
           - -r
@@ -82,7 +82,7 @@ template:
             mountPath: /home/runner/externals
     containers:
       - name: runner
-        image: ghcr.io/actions/actions-runner:2.335.1@sha256:08c30b43a9dcc876becb9021ec311a3ff86135db1f52d10b295b7ef0b6592287
+        image: localhost:5000/tixkit-arc-runner:2.335.1-flutter@sha256:e49f5d30ab66a2d25c963def78d3dd75982c8978ab23acbb4757e43aa2bec1e9
         command:
           - /home/runner/run.sh
         env:

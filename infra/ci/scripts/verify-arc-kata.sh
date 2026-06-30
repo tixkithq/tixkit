@@ -3,6 +3,7 @@ set -euo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
 runner_values="${repo_root}/infra/ci/arc/runner-values.yaml"
+runner_image_dockerfile="${repo_root}/infra/ci/arc/runner-image/Dockerfile"
 install_script="${repo_root}/infra/ci/scripts/install-arc.sh"
 
 verify_arc_supply_chain_pins() {
@@ -27,6 +28,20 @@ verify_arc_supply_chain_pins() {
     printf 'ARC runner dind sidecar must disable the containerd overlay snapshotter for Kata compatibility.\n' >&2
     return 1
   fi
+
+  if ! grep -qE '^FROM .+@sha256:[0-9a-f]{64}$' "${runner_image_dockerfile}"; then
+    printf 'ARC runner image Dockerfile must pin its base image by sha256 digest.\n' >&2
+    return 1
+  fi
+
+  local required_runner_packages=(xz-utils unzip libgtk-3-dev ninja-build cmake clang)
+  local package_name
+  for package_name in "${required_runner_packages[@]}"; do
+    if ! grep -qE "^[[:space:]]*${package_name}( |$|\\\\)" "${runner_image_dockerfile}"; then
+      printf 'ARC runner image Dockerfile must preinstall %s.\n' "${package_name}" >&2
+      return 1
+    fi
+  done
 
   if [[ "$(grep -c -- '--version "${arc_chart_version}"' "${install_script}")" -lt 2 ]]; then
     printf 'ARC chart installs must pass --version "${arc_chart_version}" for both charts.\n' >&2
