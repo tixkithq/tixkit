@@ -1493,7 +1493,77 @@ describe('bulk offline sync endpoint', () => {
     await app.close();
   });
 
-  it('keeps read-only async job polling free of worker scheduling side effects', async () => {
+  it('lets read-only async job polling reschedule eligible stuck processing work', async () => {
+    const { app, setPrincipal, inserts } = await setupBulkApp();
+    const job = await createBulkJob(app);
+    const storedJob = inserts.find(
+      (insert) => insert.table === 'offline_check_in_sync_jobs',
+    )?.values;
+    expect(storedJob).toBeDefined();
+    Object.assign(storedJob!, {
+      status: 'receiving',
+      chunks_received: 2,
+      updated_at: new Date('2026-06-01T12:02:00.000Z'),
+    });
+    for (const [sequence, qrHash] of [
+      [1, 'hash_1'],
+      [2, 'missing_hash'],
+    ] as const) {
+      inserts.push({
+        table: 'offline_check_in_sync_chunks',
+        values: {
+          id: `bch_poll_${sequence}`,
+          tenant_id: 'tnt_1',
+          job_id: job.id,
+          sequence,
+          scan_count: 1,
+          payload_hash: `hash_${sequence}`,
+          payload: JSON.stringify([
+            {
+              qrHash,
+              scannedAt: new Date(`2026-06-01T12:0${sequence}:00.000Z`),
+              scannedAtIso: `2026-06-01T12:0${sequence}:00.000Z`,
+              offline: true,
+            },
+          ]),
+          accepted_count: 0,
+          duplicate_count: 0,
+          invalid_count: 0,
+          sample_errors: JSON.stringify([]),
+          clock_warning_count: 0,
+          status: 'uploaded',
+          attempt_count: 0,
+          failure_message: null,
+          locked_at: null,
+          processed_at: null,
+          created_at: new Date('2026-06-01T12:00:00.000Z'),
+          updated_at: new Date('2026-06-01T12:00:00.000Z'),
+        },
+      });
+    }
+    const setTimeoutSpy = vi.spyOn(globalThis, 'setTimeout');
+
+    setPrincipal({
+      ...principal,
+      id: 'sd_bulk_read_only',
+      scopes: ['checkins.read'],
+    });
+    setTimeoutSpy.mockClear();
+
+    const status = await app.inject({
+      method: 'GET',
+      url: `/check-ins/bulk-sync-jobs/${job.id}`,
+    });
+
+    expect(status.statusCode).toBe(200);
+    expect(status.json()).toMatchObject({ id: job.id, status: 'receiving', chunksReceived: 2 });
+    expect(setTimeoutSpy).toHaveBeenCalled();
+
+    setTimeoutSpy.mockRestore();
+    await app.close();
+  });
+
+  it('does not reschedule read-only async job polling until all chunks are uploaded', async () => {
     const { app, setPrincipal } = await setupBulkApp();
     const job = await createBulkJob(app);
     const setTimeoutSpy = vi.spyOn(globalThis, 'setTimeout');
@@ -1511,7 +1581,7 @@ describe('bulk offline sync endpoint', () => {
     });
 
     expect(status.statusCode).toBe(200);
-    expect(status.json()).toMatchObject({ id: job.id, status: 'pending' });
+    expect(status.json()).toMatchObject({ id: job.id, status: 'pending', chunksReceived: 0 });
     expect(setTimeoutSpy).not.toHaveBeenCalled();
 
     setTimeoutSpy.mockRestore();

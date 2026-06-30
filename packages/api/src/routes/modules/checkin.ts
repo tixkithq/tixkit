@@ -731,6 +731,9 @@ export const checkInRoutes: FastifyPluginAsync = async (app) => {
     ClerkAuthService.requirePermission(principal, 'checkins.read');
     const { jobId } = request.params as { jobId: string };
     const job = await loadAuthorizedBulkSyncJob(db, principal, jobId, loadEvent);
+    if (shouldScheduleBulkSyncJob(job)) {
+      scheduleBulkSyncProcessing(db, job.id);
+    }
     return serializeBulkSyncJob(job);
   });
 
@@ -772,6 +775,17 @@ function scheduleBulkSyncProcessing(db: Database, jobId: string): void {
         }
       });
   }, 0);
+}
+
+function shouldScheduleBulkSyncJob(job: BulkSyncJobRow): boolean {
+  if (!['receiving', 'failed', 'processing'].includes(job.status)) return false;
+  if (job.chunks_received < job.total_chunks) return false;
+  if (countValue(job.attempt_count ?? 0) >= BULK_SYNC_MAX_ATTEMPTS) return false;
+
+  const now = Date.now();
+  if (job.next_attempt_at && new Date(job.next_attempt_at).getTime() > now) return false;
+  if (job.leased_until && new Date(job.leased_until).getTime() > now) return false;
+  return true;
 }
 
 async function loadAuthorizedBulkSyncJob(
