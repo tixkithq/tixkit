@@ -224,6 +224,11 @@ export type CheckoutSession = {
 export type CheckoutWalletPassTicket = {
   ticketId: string;
   ticketCode: string;
+  faceValueCents: number;
+  currency: string;
+  resaleEnabled: boolean;
+  resaleMaxPriceCents: number;
+  activeResaleListing?: TicketListing;
   appleUrl?: string;
   googleUrl?: string;
 };
@@ -1726,6 +1731,27 @@ class CheckoutResource {
     return this.client.request('GET', `/checkout/sessions/${sessionId}/wallet-passes`, {
       headers: clientToken ? { 'X-Checkout-Session-Token': clientToken } : undefined,
     });
+  }
+
+  async createTicketResaleListing(
+    sessionId: string,
+    ticketId: string,
+    input: {
+      clientToken: string;
+      priceCents: number;
+      expiresAt?: string;
+    } & IdempotencyOptions,
+  ): Promise<TicketListing> {
+    const { idempotencyKey, clientToken, ...body } = input;
+    return this.client.request(
+      'POST',
+      `/checkout/sessions/${sessionId}/tickets/${ticketId}/resale-listing`,
+      {
+        body,
+        idempotencyKey,
+        headers: { 'X-Checkout-Session-Token': clientToken },
+      },
+    );
   }
 
   async update(

@@ -102,6 +102,12 @@ func (s *EventsService) Availability(ctx context.Context, eventID string) (*Page
 	return &out, err
 }
 
+func (s *EventsService) ListResaleListings(ctx context.Context, eventID string, params *PaginationParams) (*Page[TicketListing], error) {
+	var out Page[TicketListing]
+	err := s.client.request(ctx, http.MethodGet, "/events/"+escape(eventID)+"/resale-listings", nil, &out, withParams(paginationValues(params)))
+	return &out, err
+}
+
 func (s *EventsService) ListOccurrences(ctx context.Context, eventID string) (*Page[EventOccurrence], error) {
 	var out Page[EventOccurrence]
 	err := s.client.request(ctx, http.MethodGet, "/events/"+escape(eventID)+"/occurrences", nil, &out)
@@ -168,6 +174,26 @@ func (s *TicketTypesService) DeleteAccessRule(ctx context.Context, accessRuleID 
 	return s.client.request(ctx, http.MethodDelete, "/access-rules/"+escape(accessRuleID), nil, nil)
 }
 
+type TicketsService struct{ client *Client }
+
+func (s *TicketsService) CreateResaleListing(ctx context.Context, ticketID string, input CreateResaleListingRequest) (*TicketListing, error) {
+	var out TicketListing
+	err := s.client.request(ctx, http.MethodPost, "/tickets/"+escape(ticketID)+"/resale-listings", input, &out, withIdempotencyKey(input.IdempotencyKey))
+	return &out, err
+}
+
+func (s *TicketsService) DelistResaleListing(ctx context.Context, listingID string, idempotencyKey string) (*TicketListing, error) {
+	var out TicketListing
+	err := s.client.request(ctx, http.MethodPost, "/ticket-listings/"+escape(listingID)+"/delist", map[string]any{}, &out, withIdempotencyKey(idempotencyKey))
+	return &out, err
+}
+
+func (s *TicketsService) CompleteResaleListing(ctx context.Context, listingID string, input CompleteResaleListingRequest) (*TicketResaleCompletion, error) {
+	var out TicketResaleCompletion
+	err := s.client.request(ctx, http.MethodPost, "/ticket-listings/"+escape(listingID)+"/complete", input, &out, withIdempotencyKey(input.IdempotencyKey))
+	return &out, err
+}
+
 type CheckoutSessionsService struct{ client *Client }
 
 func (s *CheckoutSessionsService) Create(ctx context.Context, input CreateCheckoutSessionRequest) (*CheckoutSession, error) {
@@ -199,6 +225,24 @@ func (s *CheckoutSessionsService) WalletPasses(ctx context.Context, sessionID st
 		headers.Set("X-Checkout-Session-Token", clientToken)
 	}
 	err := s.client.request(ctx, http.MethodGet, "/checkout/sessions/"+escape(sessionID)+"/wallet-passes", nil, &out, withHeaders(headers))
+	return &out, err
+}
+
+func (s *CheckoutSessionsService) CreateTicketResaleListing(ctx context.Context, sessionID string, ticketID string, input CreateCheckoutTicketResaleListingRequest) (*TicketListing, error) {
+	var out TicketListing
+	headers := http.Header{}
+	if input.ClientToken != "" {
+		headers.Set("X-Checkout-Session-Token", input.ClientToken)
+	}
+	err := s.client.request(
+		ctx,
+		http.MethodPost,
+		"/checkout/sessions/"+escape(sessionID)+"/tickets/"+escape(ticketID)+"/resale-listing",
+		input,
+		&out,
+		withHeaders(headers),
+		withIdempotencyKey(input.IdempotencyKey),
+	)
 	return &out, err
 }
 

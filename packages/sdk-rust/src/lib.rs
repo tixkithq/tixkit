@@ -132,6 +132,10 @@ impl TixkitClient {
         TicketTypeResource { client: self }
     }
 
+    pub fn tickets(&self) -> TicketResource<'_> {
+        TicketResource { client: self }
+    }
+
     pub fn orders(&self) -> OrderResource<'_> {
         OrderResource { client: self }
     }
@@ -689,6 +693,29 @@ pub struct BoxOfficeOrderResult {
     pub status: String,
 }
 
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CreateResaleListing {
+    pub price_cents: i64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub expires_at: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CompleteResaleListing {
+    pub buyer_id: String,
+    pub buyer_email: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub buyer_first_name: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub buyer_last_name: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub buyer_phone: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub external_payment_reference: Option<String>,
+}
+
 #[derive(Debug, Clone, Serialize, serde::Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct Order {
@@ -701,6 +728,83 @@ pub struct Order {
     pub tender_type: Option<String>,
     #[serde(flatten)]
     pub extra: Map<String, Value>,
+}
+
+#[derive(Debug, Clone, Serialize, serde::Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct Ticket {
+    pub id: String,
+    pub tenant_id: Option<String>,
+    pub order_id: Option<String>,
+    pub attendee_id: Option<String>,
+    pub event_id: Option<String>,
+    pub ticket_type_id: Option<String>,
+    pub status: Option<String>,
+    pub code: Option<String>,
+    pub qr_payload: Option<String>,
+    pub qr_hash: Option<String>,
+    pub transferred_to_email: Option<String>,
+    pub transferred_at: Option<String>,
+    pub checked_in_at: Option<String>,
+    pub checked_in_by_device_id: Option<String>,
+    pub wallet_pass_id: Option<String>,
+    pub created_at: Option<String>,
+    pub updated_at: Option<String>,
+    #[serde(flatten)]
+    pub extra: Map<String, Value>,
+}
+
+#[derive(Debug, Clone, Serialize, serde::Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct Attendee {
+    pub id: String,
+    pub tenant_id: Option<String>,
+    pub event_id: Option<String>,
+    pub event_occurrence_id: Option<String>,
+    pub order_id: Option<String>,
+    pub ticket_id: Option<String>,
+    pub ticket_type_id: Option<String>,
+    pub first_name: Option<String>,
+    pub last_name: Option<String>,
+    pub email: Option<String>,
+    pub phone: Option<String>,
+    pub status: Option<String>,
+    pub checked_in_at: Option<String>,
+    pub check_in_device_id: Option<String>,
+    pub created_at: Option<String>,
+    pub updated_at: Option<String>,
+    #[serde(flatten)]
+    pub extra: Map<String, Value>,
+}
+
+#[derive(Debug, Clone, Serialize, serde::Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct TicketListing {
+    pub id: String,
+    pub tenant_id: Option<String>,
+    pub event_id: Option<String>,
+    pub ticket_id: Option<String>,
+    pub seller_id: Option<String>,
+    pub status: Option<String>,
+    pub price_cents: Option<i64>,
+    pub currency: Option<String>,
+    pub face_value_cents: Option<i64>,
+    pub sold_to_id: Option<String>,
+    pub expires_at: Option<String>,
+    pub sold_at: Option<String>,
+    pub created_at: Option<String>,
+    pub updated_at: Option<String>,
+    #[serde(flatten)]
+    pub extra: Map<String, Value>,
+}
+
+#[derive(Debug, Clone, Serialize, serde::Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct TicketResaleCompletion {
+    pub listing: TicketListing,
+    pub seller_ticket: Ticket,
+    pub buyer_ticket: Ticket,
+    pub buyer_attendee: Attendee,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -780,6 +884,25 @@ impl CheckoutResource<'_> {
                 reqwest::Method::POST,
                 &format!("/events/{event_id}/box-office/orders"),
                 RequestOptions::body(input).idempotency_key(Some(idempotency_key.into())),
+            )
+            .await
+    }
+
+    pub async fn create_ticket_resale_listing(
+        &self,
+        session_id: &str,
+        ticket_id: &str,
+        input: CreateResaleListing,
+        client_token: &str,
+        idempotency_key: impl Into<String>,
+    ) -> Result<TicketListing, TixkitError> {
+        self.client
+            .request(
+                reqwest::Method::POST,
+                &format!("/checkout/sessions/{session_id}/tickets/{ticket_id}/resale-listing"),
+                RequestOptions::body(input)
+                    .idempotency_key(Some(idempotency_key.into()))
+                    .header("X-Checkout-Session-Token", client_token),
             )
             .await
     }
@@ -926,6 +1049,20 @@ impl EventResource<'_> {
             .await
     }
 
+    pub async fn list_resale_listings(
+        &self,
+        event_id: &str,
+        params: PageParams,
+    ) -> Result<Page<TicketListing>, TixkitError> {
+        self.client
+            .request(
+                reqwest::Method::GET,
+                &format!("/events/{event_id}/resale-listings"),
+                RequestOptions::<()>::query(params.to_query()),
+            )
+            .await
+    }
+
     pub async fn create(&self, input: Value) -> Result<Event, TixkitError> {
         self.client
             .request(
@@ -940,6 +1077,57 @@ impl EventResource<'_> {
 struct EventPageState {
     params: Option<PageParams>,
     buffer: VecDeque<Event>,
+}
+
+pub struct TicketResource<'a> {
+    client: &'a TixkitClient,
+}
+
+impl TicketResource<'_> {
+    pub async fn create_resale_listing(
+        &self,
+        ticket_id: &str,
+        input: CreateResaleListing,
+        idempotency_key: impl Into<String>,
+    ) -> Result<TicketListing, TixkitError> {
+        self.client
+            .request(
+                reqwest::Method::POST,
+                &format!("/tickets/{ticket_id}/resale-listings"),
+                RequestOptions::body(input).idempotency_key(Some(idempotency_key.into())),
+            )
+            .await
+    }
+
+    pub async fn delist_resale_listing(
+        &self,
+        listing_id: &str,
+        idempotency_key: impl Into<String>,
+    ) -> Result<TicketListing, TixkitError> {
+        self.client
+            .request(
+                reqwest::Method::POST,
+                &format!("/ticket-listings/{listing_id}/delist"),
+                RequestOptions::body(serde_json::json!({}))
+                    .idempotency_key(Some(idempotency_key.into())),
+            )
+            .await
+    }
+
+    pub async fn complete_resale_listing(
+        &self,
+        listing_id: &str,
+        input: CompleteResaleListing,
+        idempotency_key: impl Into<String>,
+    ) -> Result<TicketResaleCompletion, TixkitError> {
+        self.client
+            .request(
+                reqwest::Method::POST,
+                &format!("/ticket-listings/{listing_id}/complete"),
+                RequestOptions::body(input).idempotency_key(Some(idempotency_key.into())),
+            )
+            .await
+    }
 }
 
 macro_rules! json_resource {
@@ -1391,6 +1579,143 @@ mod tests {
 
         assert_eq!(card.title, "All Access");
         assert_eq!(card.venue_name.as_deref(), Some("The Salt Shed"));
+    }
+
+    #[tokio::test]
+    async fn builds_resale_route_requests_with_idempotency_and_session_token() {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/v1/events/evt_1/resale-listings"))
+            .and(query_param("cursor", "lst_0"))
+            .and(query_param("limit", "25"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                "items": [{"id": "lst_1", "status": "listed"}],
+                "nextCursor": null
+            })))
+            .mount(&server)
+            .await;
+        Mock::given(method("POST"))
+            .and(path("/v1/tickets/tkt_1/resale-listings"))
+            .and(header("idempotency-key", "idem_create_1"))
+            .and(body_json(json!({
+                "priceCents": 5500,
+                "expiresAt": "2026-07-01T00:00:00.000Z"
+            })))
+            .respond_with(ResponseTemplate::new(201).set_body_json(json!({
+                "id": "lst_2",
+                "status": "listed"
+            })))
+            .mount(&server)
+            .await;
+        Mock::given(method("POST"))
+            .and(path(
+                "/v1/checkout/sessions/cs_1/tickets/tkt_1/resale-listing",
+            ))
+            .and(header("x-checkout-session-token", "client_1"))
+            .and(header("idempotency-key", "idem_checkout_resale_1"))
+            .and(body_json(json!({"priceCents": 5600})))
+            .respond_with(ResponseTemplate::new(201).set_body_json(json!({
+                "id": "lst_3",
+                "status": "listed"
+            })))
+            .mount(&server)
+            .await;
+        Mock::given(method("POST"))
+            .and(path("/v1/ticket-listings/lst_1/delist"))
+            .and(header("idempotency-key", "idem_delist_1"))
+            .and(body_json(json!({})))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                "id": "lst_1",
+                "status": "delisted"
+            })))
+            .mount(&server)
+            .await;
+        Mock::given(method("POST"))
+            .and(path("/v1/ticket-listings/lst_1/complete"))
+            .and(header("idempotency-key", "idem_complete_1"))
+            .and(body_json(json!({
+                "buyerId": "usr_1",
+                "buyerEmail": "buyer@example.com",
+                "externalPaymentReference": "stripe_pi_1"
+            })))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                "listing": {"id": "lst_1", "status": "sold"},
+                "sellerTicket": {"id": "tkt_1", "status": "transferred"},
+                "buyerTicket": {"id": "tkt_2", "status": "valid"},
+                "buyerAttendee": {"id": "att_2", "email": "buyer@example.com"}
+            })))
+            .mount(&server)
+            .await;
+
+        let tixkit = client(&server).await;
+        let listings = tixkit
+            .events()
+            .list_resale_listings(
+                "evt_1",
+                PageParams {
+                    cursor: Some("lst_0".to_string()),
+                    limit: Some(25),
+                },
+            )
+            .await
+            .expect("resale listings");
+        assert_eq!(listings.items[0].id, "lst_1");
+
+        let created = tixkit
+            .tickets()
+            .create_resale_listing(
+                "tkt_1",
+                CreateResaleListing {
+                    price_cents: 5500,
+                    expires_at: Some("2026-07-01T00:00:00.000Z".to_string()),
+                },
+                "idem_create_1",
+            )
+            .await
+            .expect("create resale listing");
+        assert_eq!(created.id, "lst_2");
+
+        let checkout_created = tixkit
+            .checkout()
+            .create_ticket_resale_listing(
+                "cs_1",
+                "tkt_1",
+                CreateResaleListing {
+                    price_cents: 5600,
+                    expires_at: None,
+                },
+                "client_1",
+                "idem_checkout_resale_1",
+            )
+            .await
+            .expect("checkout resale listing");
+        assert_eq!(checkout_created.id, "lst_3");
+
+        let delisted = tixkit
+            .tickets()
+            .delist_resale_listing("lst_1", "idem_delist_1")
+            .await
+            .expect("delist resale listing");
+        assert_eq!(delisted.status.as_deref(), Some("delisted"));
+
+        let completed = tixkit
+            .tickets()
+            .complete_resale_listing(
+                "lst_1",
+                CompleteResaleListing {
+                    buyer_id: "usr_1".to_string(),
+                    buyer_email: "buyer@example.com".to_string(),
+                    buyer_first_name: None,
+                    buyer_last_name: None,
+                    buyer_phone: None,
+                    external_payment_reference: Some("stripe_pi_1".to_string()),
+                },
+                "idem_complete_1",
+            )
+            .await
+            .expect("complete resale listing");
+        assert_eq!(completed.listing.status.as_deref(), Some("sold"));
+        assert_eq!(completed.buyer_ticket.id, "tkt_2");
     }
 
     #[tokio::test]

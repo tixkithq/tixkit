@@ -34,6 +34,7 @@ type Client struct {
 
 	Events           *EventsService
 	TicketTypes      *TicketTypesService
+	Tickets          *TicketsService
 	CheckoutSessions *CheckoutSessionsService
 	Orders           *OrdersService
 	Refunds          *RefundsService
@@ -110,6 +111,7 @@ func NewClient(apiKey string, options ...ClientOption) (*Client, error) {
 	}
 	client.Events = &EventsService{client: client}
 	client.TicketTypes = &TicketTypesService{client: client}
+	client.Tickets = &TicketsService{client: client}
 	client.CheckoutSessions = &CheckoutSessionsService{client: client}
 	client.Orders = &OrdersService{client: client}
 	client.Refunds = &RefundsService{client: client}

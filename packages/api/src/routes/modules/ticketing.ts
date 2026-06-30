@@ -339,7 +339,7 @@ export const ticketingRoutes: FastifyPluginAsync = async (app) => {
             new Date(currentListing.expires_at as Date | string).getTime() <= now.getTime()
           ) {
             await txListingRepo.expire(listingId);
-            throw new ValidationError(`Ticket listing ${listingId} has expired`);
+            return { expired: true as const };
           }
           if (currentListing.seller_id === body.buyerId) {
             throw new ValidationError('Buyer cannot be the resale listing seller');
@@ -447,6 +447,9 @@ export const ticketingRoutes: FastifyPluginAsync = async (app) => {
             buyerAttendee: confirmedBuyerAttendee,
           };
         });
+        if ('expired' in completed) {
+          throw new ValidationError(`Ticket listing ${listingId} has expired`);
+        }
         return { status: 200, body: serializeTicketResaleCompletion(completed) };
       },
     );

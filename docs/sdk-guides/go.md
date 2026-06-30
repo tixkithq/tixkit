@@ -80,6 +80,51 @@ order, err := client.CheckoutSessions.CreateBoxOfficeOrder(ctx, "evt_123", tixki
 })
 ```
 
+## Resale
+
+Resale listing, delisting, and completion mutations require caller-provided idempotency keys:
+
+```go
+listings, err := client.Events.ListResaleListings(ctx, "evt_123", &tixkit.PaginationParams{Limit: 25})
+if err != nil {
+	log.Fatal(err)
+}
+
+listing, err := client.Tickets.CreateResaleListing(ctx, "tkt_123", tixkit.CreateResaleListingRequest{
+	PriceCents:     5500,
+	ExpiresAt:      "2026-07-01T00:00:00.000Z",
+	IdempotencyKey: "resale-list-tkt-123",
+})
+if err != nil {
+	log.Fatal(err)
+}
+
+_, err = client.Tickets.DelistResaleListing(ctx, listing.ID, "resale-delist-"+listing.ID)
+if err != nil {
+	log.Fatal(err)
+}
+
+_, err = client.Tickets.CompleteResaleListing(ctx, listings.Items[0].ID, tixkit.CompleteResaleListingRequest{
+	BuyerID:                  "usr_456",
+	BuyerEmail:               "buyer@example.com",
+	ExternalPaymentReference: "stripe_pi_...",
+	IdempotencyKey:           "resale-complete-"+listings.Items[0].ID,
+})
+if err != nil {
+	log.Fatal(err)
+}
+```
+
+Buyer-owned checkout sessions list issued wallet-pass tickets by sending the session client token:
+
+```go
+listing, err = client.CheckoutSessions.CreateTicketResaleListing(ctx, "cs_123", "tkt_123", tixkit.CreateCheckoutTicketResaleListingRequest{
+	ClientToken:    "client_...",
+	PriceCents:     5500,
+	IdempotencyKey: "buyer-resale-tkt-123",
+})
+```
+
 ## Pagination
 
 List methods return `Page[T]`. For cursor iteration, use `NewCursorIterator`:

@@ -309,6 +309,142 @@ func TestBoxOfficeOrderSendsIdempotencyHeader(t *testing.T) {
 	}
 }
 
+func TestResaleRoutesSendExpectedHeadersAndBodies(t *testing.T) {
+	t.Parallel()
+
+	paths := make(chan string, 5)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		paths <- r.URL.RequestURI()
+		switch r.URL.Path {
+		case "/v1/events/evt_1/resale-listings":
+			if r.Method != http.MethodGet {
+				t.Fatalf("list resale method = %s", r.Method)
+			}
+			if r.URL.Query().Get("limit") != "25" || r.URL.Query().Get("cursor") != "lst_0" {
+				t.Fatalf("list resale query = %s", r.URL.RawQuery)
+			}
+			_ = json.NewEncoder(w).Encode(Page[TicketListing]{
+				Items: []TicketListing{{ID: "lst_1", Status: "listed"}},
+			})
+		case "/v1/tickets/tkt_1/resale-listings":
+			if r.Method != http.MethodPost {
+				t.Fatalf("create resale method = %s", r.Method)
+			}
+			if got := r.Header.Get("Idempotency-Key"); got != "idem_create_1" {
+				t.Fatalf("create resale idempotency key = %s", got)
+			}
+			var body CreateResaleListingRequest
+			if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+				t.Fatal(err)
+			}
+			if body.IdempotencyKey != "" || body.PriceCents != 5500 || body.ExpiresAt != "2026-07-01T00:00:00.000Z" {
+				t.Fatalf("create resale body = %#v", body)
+			}
+			w.WriteHeader(http.StatusCreated)
+			_ = json.NewEncoder(w).Encode(TicketListing{ID: "lst_2", Status: "listed"})
+		case "/v1/checkout/sessions/cs_1/tickets/tkt_1/resale-listing":
+			if got := r.Header.Get("X-Checkout-Session-Token"); got != "client_1" {
+				t.Fatalf("checkout resale token = %s", got)
+			}
+			if got := r.Header.Get("Idempotency-Key"); got != "idem_checkout_resale_1" {
+				t.Fatalf("checkout resale idempotency key = %s", got)
+			}
+			var body CreateCheckoutTicketResaleListingRequest
+			if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+				t.Fatal(err)
+			}
+			if body.ClientToken != "" || body.IdempotencyKey != "" || body.PriceCents != 5600 {
+				t.Fatalf("checkout resale body = %#v", body)
+			}
+			w.WriteHeader(http.StatusCreated)
+			_ = json.NewEncoder(w).Encode(TicketListing{ID: "lst_3", Status: "listed"})
+		case "/v1/ticket-listings/lst_1/delist":
+			if got := r.Header.Get("Idempotency-Key"); got != "idem_delist_1" {
+				t.Fatalf("delist idempotency key = %s", got)
+			}
+			var body map[string]any
+			if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+				t.Fatal(err)
+			}
+			if len(body) != 0 {
+				t.Fatalf("delist body = %#v", body)
+			}
+			_ = json.NewEncoder(w).Encode(TicketListing{ID: "lst_1", Status: "delisted"})
+		case "/v1/ticket-listings/lst_1/complete":
+			if got := r.Header.Get("Idempotency-Key"); got != "idem_complete_1" {
+				t.Fatalf("complete idempotency key = %s", got)
+			}
+			var body CompleteResaleListingRequest
+			if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+				t.Fatal(err)
+			}
+			if body.IdempotencyKey != "" || body.BuyerID != "usr_1" || body.ExternalPaymentReference != "stripe_pi_1" {
+				t.Fatalf("complete body = %#v", body)
+			}
+			_ = json.NewEncoder(w).Encode(TicketResaleCompletion{
+				Listing:       TicketListing{ID: "lst_1", Status: "sold"},
+				SellerTicket:  Ticket{ID: "tkt_1", Status: "transferred"},
+				BuyerTicket:   Ticket{ID: "tkt_2", Status: "valid"},
+				BuyerAttendee: Attendee{ID: "att_2", Email: "buyer@example.com"},
+			})
+		default:
+			t.Fatalf("unexpected path = %s", r.URL.Path)
+		}
+	}))
+	defer server.Close()
+
+	client := testClient(t, server.URL)
+	listings, err := client.Events.ListResaleListings(context.Background(), "evt_1", &PaginationParams{Limit: 25, Cursor: "lst_0"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(listings.Items) != 1 || listings.Items[0].ID != "lst_1" {
+		t.Fatalf("listings = %#v", listings)
+	}
+	if _, err := client.Tickets.CreateResaleListing(context.Background(), "tkt_1", CreateResaleListingRequest{
+		PriceCents:     5500,
+		ExpiresAt:      "2026-07-01T00:00:00.000Z",
+		IdempotencyKey: "idem_create_1",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := client.CheckoutSessions.CreateTicketResaleListing(context.Background(), "cs_1", "tkt_1", CreateCheckoutTicketResaleListingRequest{
+		ClientToken:    "client_1",
+		PriceCents:     5600,
+		IdempotencyKey: "idem_checkout_resale_1",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := client.Tickets.DelistResaleListing(context.Background(), "lst_1", "idem_delist_1"); err != nil {
+		t.Fatal(err)
+	}
+	completion, err := client.Tickets.CompleteResaleListing(context.Background(), "lst_1", CompleteResaleListingRequest{
+		BuyerID:                  "usr_1",
+		BuyerEmail:               "buyer@example.com",
+		ExternalPaymentReference: "stripe_pi_1",
+		IdempotencyKey:           "idem_complete_1",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if completion.Listing.Status != "sold" || completion.BuyerTicket.ID != "tkt_2" {
+		t.Fatalf("completion = %#v", completion)
+	}
+
+	want := []string{
+		"/v1/events/evt_1/resale-listings?cursor=lst_0&limit=25",
+		"/v1/tickets/tkt_1/resale-listings",
+		"/v1/checkout/sessions/cs_1/tickets/tkt_1/resale-listing",
+		"/v1/ticket-listings/lst_1/delist",
+		"/v1/ticket-listings/lst_1/complete",
+	}
+	for index, expected := range want {
+		if got := <-paths; got != expected {
+			t.Fatalf("path %d = %s, want %s", index+1, got, expected)
+		}
+	}
+}
+
 func TestPublicEventPageRoutes(t *testing.T) {
 	t.Parallel()
 

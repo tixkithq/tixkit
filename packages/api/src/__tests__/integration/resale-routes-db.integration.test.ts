@@ -547,6 +547,38 @@ describeWithIntegrationDatabase(
       ]);
     });
 
+    it('allows only one buyer resale listing under concurrent create attempts', async () => {
+      const attempts = await Promise.all(
+        Array.from({ length: 8 }, (_, index) =>
+          app.inject({
+            method: 'POST',
+            url: `/checkout/sessions/${CHECKOUT_SESSION_ID}/tickets/${TICKET_ID}/resale-listing`,
+            headers: {
+              'X-Checkout-Session-Token': `client_${RUN_ID}`,
+              'Idempotency-Key': `buyer_resale_race_${RUN_ID}_${index}`,
+            },
+            payload: { priceCents: 5500 },
+          }),
+        ),
+      );
+
+      const statuses = attempts.map((response) => response.statusCode);
+      expect(statuses.filter((status) => status === 201)).toHaveLength(1);
+      expect(statuses.filter((status) => status === 400)).toHaveLength(7);
+
+      const listings = await db
+        .selectFrom('ticket_listings')
+        .selectAll()
+        .where('tenant_id', '=', TENANT_ID)
+        .execute();
+      expect(listings).toHaveLength(1);
+      expect(listings[0]).toMatchObject({
+        ticket_id: TICKET_ID,
+        status: 'listed',
+        active_listing_key: TICKET_ID,
+      });
+    });
+
     it('completes a listed resale once and replays buyer ticket issuance', async () => {
       const listed = await app.inject({
         method: 'POST',
@@ -641,6 +673,147 @@ describeWithIntegrationDatabase(
         },
       });
       expect(duplicate.statusCode).toBe(400);
+    });
+
+    it('allows only one resale completion under concurrent buyer attempts', async () => {
+      const listed = await app.inject({
+        method: 'POST',
+        url: `/tickets/${TICKET_ID}/resale-listings`,
+        headers: { 'Idempotency-Key': `resale_db_complete_race_listing_${RUN_ID}` },
+        payload: { priceCents: 5500 },
+      });
+      expect(listed.statusCode).toBe(201);
+      const listingId = listed.json().id as string;
+
+      const attempts = await Promise.all(
+        Array.from({ length: 8 }, (_, index) =>
+          app.inject({
+            method: 'POST',
+            url: `/ticket-listings/${listingId}/complete`,
+            headers: { 'Idempotency-Key': `resale_db_complete_race_${RUN_ID}_${index}` },
+            payload: {
+              buyerId: `usr_resale_race_${RUN_ID}_${index}`,
+              buyerEmail: `buyer-race-${index}-${RUN_ID}@example.com`,
+              buyerFirstName: 'Race',
+              buyerLastName: `Buyer ${index}`,
+              externalPaymentReference: `stripe_pi_race_${RUN_ID}_${index}`,
+            },
+          }),
+        ),
+      );
+
+      const statuses = attempts.map((response) => response.statusCode);
+      expect(statuses.filter((status) => status === 200)).toHaveLength(1);
+      expect(statuses.filter((status) => status === 400)).toHaveLength(7);
+
+      const soldListing = await db
+        .selectFrom('ticket_listings')
+        .selectAll()
+        .where('id', '=', listingId)
+        .executeTakeFirstOrThrow();
+      expect(soldListing.status).toBe('sold');
+      expect(soldListing.sold_to_id).toBeTruthy();
+
+      const tickets = await db
+        .selectFrom('tickets')
+        .selectAll()
+        .where('tenant_id', '=', TENANT_ID)
+        .execute();
+      expect(tickets.filter((ticket) => ticket.id === TICKET_ID)).toHaveLength(1);
+      expect(tickets.filter((ticket) => ticket.status === 'valid')).toHaveLength(1);
+      expect(tickets.filter((ticket) => ticket.status === 'transferred')).toHaveLength(1);
+
+      const attendees = await db
+        .selectFrom('attendees')
+        .selectAll()
+        .where('tenant_id', '=', TENANT_ID)
+        .execute();
+      expect(attendees.filter((attendee) => attendee.status === 'confirmed')).toHaveLength(2);
+
+      const walletPass = await db
+        .selectFrom('wallet_passes')
+        .selectAll()
+        .where('id', '=', WALLET_PASS_ID)
+        .executeTakeFirstOrThrow();
+      expect(walletPass.status).toBe('revoked');
+
+      const timeline = await db
+        .selectFrom('order_timeline_events')
+        .selectAll()
+        .where('order_id', '=', ORDER_ID)
+        .where('type', '=', 'ticket.resale_completed')
+        .execute();
+      expect(timeline).toHaveLength(1);
+    });
+
+    it('expires stale resale listings without issuing buyer credentials', async () => {
+      const listed = await app.inject({
+        method: 'POST',
+        url: `/tickets/${TICKET_ID}/resale-listings`,
+        headers: { 'Idempotency-Key': `resale_db_expired_listing_${RUN_ID}` },
+        payload: { priceCents: 5500, expiresAt: '2020-01-01T00:00:00.000Z' },
+      });
+      expect(listed.statusCode).toBe(201);
+      const listingId = listed.json().id as string;
+
+      const expired = await app.inject({
+        method: 'POST',
+        url: `/ticket-listings/${listingId}/complete`,
+        headers: { 'Idempotency-Key': `resale_db_expired_complete_${RUN_ID}` },
+        payload: {
+          buyerId: `usr_resale_expired_${RUN_ID}`,
+          buyerEmail: `buyer-expired-${RUN_ID}@example.com`,
+          buyerFirstName: 'Expired',
+          buyerLastName: 'Buyer',
+          externalPaymentReference: `stripe_pi_expired_${RUN_ID}`,
+        },
+      });
+      expect(expired.statusCode).toBe(400);
+
+      const row = await db
+        .selectFrom('ticket_listings')
+        .selectAll()
+        .where('id', '=', listingId)
+        .executeTakeFirstOrThrow();
+      expect(row).toMatchObject({
+        status: 'expired',
+        sold_to_id: null,
+        active_listing_key: listingId,
+      });
+
+      const tickets = await db
+        .selectFrom('tickets')
+        .selectAll()
+        .where('tenant_id', '=', TENANT_ID)
+        .execute();
+      expect(tickets).toHaveLength(1);
+      expect(tickets[0]).toMatchObject({
+        id: TICKET_ID,
+        status: 'valid',
+        transferred_to_email: null,
+      });
+
+      const attendees = await db
+        .selectFrom('attendees')
+        .selectAll()
+        .where('tenant_id', '=', TENANT_ID)
+        .execute();
+      expect(attendees).toHaveLength(1);
+
+      const walletPass = await db
+        .selectFrom('wallet_passes')
+        .selectAll()
+        .where('id', '=', WALLET_PASS_ID)
+        .executeTakeFirstOrThrow();
+      expect(walletPass).toMatchObject({ status: 'active', revoked_at: null });
+
+      const timeline = await db
+        .selectFrom('order_timeline_events')
+        .selectAll()
+        .where('order_id', '=', ORDER_ID)
+        .where('type', '=', 'ticket.resale_completed')
+        .execute();
+      expect(timeline).toHaveLength(0);
     });
 
     it('enforces persisted resale policy before inserting a listing', async () => {

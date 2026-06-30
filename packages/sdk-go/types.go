@@ -29,8 +29,17 @@ type Event struct {
 	ExternalURL    string         `json:"externalUrl,omitempty"`
 	Venue          FlexibleObject `json:"venue,omitempty"`
 	SEO            FlexibleObject `json:"seo,omitempty"`
+	ResalePolicy   *ResalePolicy  `json:"resalePolicy,omitempty"`
 	CreatedAt      string         `json:"createdAt,omitempty"`
 	UpdatedAt      string         `json:"updatedAt,omitempty"`
+}
+
+type ResalePolicy struct {
+	Enabled          bool     `json:"enabled"`
+	MaxMultiplier    float64  `json:"maxMultiplier"`
+	MaxAbsoluteCents *int     `json:"maxAbsoluteCents,omitempty"`
+	Currency         *string  `json:"currency,omitempty"`
+	Sources          []string `json:"sources,omitempty"`
 }
 
 type CreateEventRequest struct {
@@ -369,10 +378,24 @@ type CheckoutWalletPasses struct {
 }
 
 type CheckoutWalletPassTicket struct {
-	TicketID     string `json:"ticketId"`
-	AttendeeID   string `json:"attendeeId,omitempty"`
-	WalletPassID string `json:"walletPassId,omitempty"`
-	AppleURL     string `json:"appleUrl,omitempty"`
+	TicketID            string         `json:"ticketId"`
+	TicketCode          string         `json:"ticketCode,omitempty"`
+	AttendeeID          string         `json:"attendeeId,omitempty"`
+	WalletPassID        string         `json:"walletPassId,omitempty"`
+	FaceValueCents      int            `json:"faceValueCents,omitempty"`
+	Currency            string         `json:"currency,omitempty"`
+	ResaleEnabled       bool           `json:"resaleEnabled,omitempty"`
+	ResaleMaxPriceCents int            `json:"resaleMaxPriceCents,omitempty"`
+	ActiveResaleListing *TicketListing `json:"activeResaleListing,omitempty"`
+	AppleURL            string         `json:"appleUrl,omitempty"`
+	GoogleURL           string         `json:"googleUrl,omitempty"`
+}
+
+type CreateCheckoutTicketResaleListingRequest struct {
+	ClientToken    string `json:"-"`
+	PriceCents     int    `json:"priceCents"`
+	ExpiresAt      string `json:"expiresAt,omitempty"`
+	IdempotencyKey string `json:"-"`
 }
 
 type BoxOfficeBuyer struct {
@@ -589,6 +612,46 @@ type Ticket struct {
 	WalletPassID        string `json:"walletPassId,omitempty"`
 	CreatedAt           string `json:"createdAt,omitempty"`
 	UpdatedAt           string `json:"updatedAt,omitempty"`
+}
+
+type TicketListing struct {
+	ID             string `json:"id"`
+	TenantID       string `json:"tenantId,omitempty"`
+	EventID        string `json:"eventId,omitempty"`
+	TicketID       string `json:"ticketId,omitempty"`
+	SellerID       string `json:"sellerId,omitempty"`
+	Status         string `json:"status,omitempty"`
+	PriceCents     int    `json:"priceCents,omitempty"`
+	Currency       string `json:"currency,omitempty"`
+	FaceValueCents int    `json:"faceValueCents,omitempty"`
+	SoldToID       string `json:"soldToId,omitempty"`
+	ExpiresAt      string `json:"expiresAt,omitempty"`
+	SoldAt         string `json:"soldAt,omitempty"`
+	CreatedAt      string `json:"createdAt,omitempty"`
+	UpdatedAt      string `json:"updatedAt,omitempty"`
+}
+
+type CreateResaleListingRequest struct {
+	PriceCents     int    `json:"priceCents"`
+	ExpiresAt      string `json:"expiresAt,omitempty"`
+	IdempotencyKey string `json:"-"`
+}
+
+type CompleteResaleListingRequest struct {
+	BuyerID                  string `json:"buyerId"`
+	BuyerEmail               string `json:"buyerEmail"`
+	BuyerFirstName           string `json:"buyerFirstName,omitempty"`
+	BuyerLastName            string `json:"buyerLastName,omitempty"`
+	BuyerPhone               string `json:"buyerPhone,omitempty"`
+	ExternalPaymentReference string `json:"externalPaymentReference,omitempty"`
+	IdempotencyKey           string `json:"-"`
+}
+
+type TicketResaleCompletion struct {
+	Listing       TicketListing `json:"listing"`
+	SellerTicket  Ticket        `json:"sellerTicket"`
+	BuyerTicket   Ticket        `json:"buyerTicket"`
+	BuyerAttendee Attendee      `json:"buyerAttendee"`
 }
 
 type CheckInList struct {

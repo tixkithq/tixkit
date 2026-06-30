@@ -863,6 +863,31 @@ describe('TixkitClient new resource methods', () => {
     });
   });
 
+  it('checkout creates buyer-owned resale listings with session token and idempotency', async () => {
+    const fm = mockFetch(201, { id: 'lst_1', status: 'listed' });
+    const c = new TixkitClient({
+      apiKey: '***********',
+      apiBaseUrl: 'https://api.test',
+      maxRetries: 0,
+    });
+    await c.checkout.createTicketResaleListing('cs_1', 'tkt_1', {
+      clientToken: 'client_1',
+      priceCents: 5500,
+      expiresAt: '2026-06-30T00:00:00.000Z',
+      idempotencyKey: 'buyer_resale_1',
+    });
+    expect(getCall(fm).url).toBe(
+      'https://api.test/v1/checkout/sessions/cs_1/tickets/tkt_1/resale-listing',
+    );
+    expect(getCall(fm).method).toBe('POST');
+    expect(getCall(fm).headers['X-Checkout-Session-Token']).toBe('client_1');
+    expect(getCall(fm).headers['Idempotency-Key']).toBe('buyer_resale_1');
+    expect(JSON.parse(getCall(fm).body)).toEqual({
+      priceCents: 5500,
+      expiresAt: '2026-06-30T00:00:00.000Z',
+    });
+  });
+
   it('organizations.update sends PATCH', async () => {
     const fm = mockFetch(200, { id: 'org_1', name: 'Updated' });
     const c = new TixkitClient({

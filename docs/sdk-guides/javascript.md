@@ -21,6 +21,41 @@ const session = await client.checkout.create({
 });
 ```
 
+## Resale
+
+Staff tools can list and complete provider-verified resale transfers:
+
+```ts
+const listings = await client.events.listResaleListings('evt_123', { limit: 25 });
+
+const listing = await client.tickets.createResaleListing('tkt_123', {
+  priceCents: 5500,
+  expiresAt: '2026-07-01T00:00:00.000Z',
+  idempotencyKey: crypto.randomUUID(),
+});
+
+await client.tickets.delistResaleListing(listing.id, {
+  idempotencyKey: crypto.randomUUID(),
+});
+
+await client.tickets.completeResaleListing(listings.items[0].id, {
+  buyerId: 'usr_456',
+  buyerEmail: 'buyer@example.com',
+  externalPaymentReference: 'stripe_pi_...',
+  idempotencyKey: crypto.randomUUID(),
+});
+```
+
+Buyer-owned checkout sessions can list an issued wallet-pass ticket without an API key by sending the session client token:
+
+```ts
+await client.checkout.createTicketResaleListing('cs_123', 'tkt_123', {
+  clientToken: 'client_...',
+  priceCents: 5500,
+  idempotencyKey: crypto.randomUUID(),
+});
+```
+
 ## Validation
 
 Run `bun run --filter @tixkit/js test:unit` and `npm pack --dry-run` from `packages/sdk-js`.
