@@ -8,7 +8,7 @@ import { ThemeSwitch } from '@/components/theme-switch';
 import { ConfigDrawer } from '@/components/config-drawer';
 import { ProfileDropdown } from '@/components/profile-dropdown';
 import { NavigationProgress } from '@/components/navigation-progress';
-import { hasClerkKey } from '@/lib/auth';
+import { hasClerkKey, usesLocalDevAuth } from '@/lib/auth';
 
 type PrincipalError = {
   code: string;
@@ -43,8 +43,31 @@ function ApiUnavailableState({ apiBaseUrl, message }: { apiBaseUrl: string; mess
   );
 }
 
+function AuthUnavailableState() {
+  return (
+    <div className="flex min-h-svh items-center justify-center bg-background p-6">
+      <div className="w-full max-w-lg space-y-4 rounded-lg border bg-card p-6 text-card-foreground shadow-sm">
+        <div className="space-y-2">
+          <p className="text-sm font-medium text-muted-foreground">Authentication unavailable</p>
+          <h1 className="text-2xl font-semibold tracking-tight">
+            Dashboard authentication is not configured
+          </h1>
+          <p className="text-sm text-muted-foreground">
+            Configure a valid Clerk publishable key before using the production admin dashboard.
+          </p>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export default async function DashboardLayout({ children }: { children: ReactNode }) {
-  if (hasClerkKey()) {
+  const clerkEnabled = hasClerkKey();
+  if (!clerkEnabled && !usesLocalDevAuth()) {
+    return <AuthUnavailableState />;
+  }
+
+  if (clerkEnabled) {
     const { userId, getToken } = await auth();
     if (!userId) redirect('/sign-in');
 

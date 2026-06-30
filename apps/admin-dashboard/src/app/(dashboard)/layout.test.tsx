@@ -118,10 +118,13 @@ describe('DashboardLayout auth handoff', () => {
   });
 
   afterEach(() => {
+    vi.unstubAllEnvs();
     restoreClerkEnv();
   });
 
   it('renders the dashboard shell without Clerk in local dev mode', async () => {
+    vi.stubEnv('NODE_ENV', 'development');
+
     const element = await DashboardLayout({
       children: <div data-testid="dashboard-child">Dashboard</div>,
     });
@@ -142,6 +145,22 @@ describe('DashboardLayout auth handoff', () => {
       screen.getByTestId('profile-dropdown'),
     );
     expect(screen.getByTestId('dashboard-child')).toBeInTheDocument();
+  });
+
+  it('fails closed when Clerk is expected but no usable key is configured', async () => {
+    vi.stubEnv('NODE_ENV', 'production');
+
+    const element = await DashboardLayout({
+      children: <div data-testid="dashboard-child">Dashboard</div>,
+    });
+
+    render(element);
+
+    expect(mocks.auth).not.toHaveBeenCalled();
+    expect(mocks.getPrincipal).not.toHaveBeenCalled();
+    expect(screen.queryByTestId('authenticated-layout')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('dashboard-child')).not.toBeInTheDocument();
+    expect(screen.getByText('Dashboard authentication is not configured')).toBeInTheDocument();
   });
 
   it('redirects signed-out Clerk users to sign-in before calling the Tixkit API', async () => {

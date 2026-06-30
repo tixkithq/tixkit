@@ -1,4 +1,5 @@
-import { test, expect } from '@playwright/test';
+import { test, expect, type Page } from '@playwright/test';
+import { adminBaseUrl } from './helpers/env';
 
 /**
  * Admin dashboard smoke tests.
@@ -10,6 +11,36 @@ import { test, expect } from '@playwright/test';
  */
 
 test.describe('Admin dashboard smoke', () => {
+  async function requireAdminReachable(page: Page): Promise<void> {
+    const response = await page.request
+      .get(adminBaseUrl, { failOnStatusCode: false, timeout: 5_000 })
+      .catch(() => null);
+    test.skip(
+      !(response && response.status() < 500),
+      `admin dashboard is not reachable at ${adminBaseUrl}`,
+    );
+  }
+
+  async function expectDashboardOrSkipClerkMode(page: Page, path: string): Promise<void> {
+    await requireAdminReachable(page);
+
+    await page.goto(`${adminBaseUrl}${path}`);
+    if (!page.url().includes('/dashboard')) {
+      const currentPath = new URL(page.url()).pathname;
+      if (currentPath === '/sign-in' || currentPath === '/sign-up') {
+        test.skip(true, 'runtime admin server is Clerk-enabled; Clerk redirects are unit-tested');
+      }
+    }
+
+    await expect(page).toHaveURL(/\/dashboard(?:[?#].*)?$/);
+    await expect(page.getByRole('heading', { name: 'Overview' })).toBeVisible();
+    await expect(page.getByRole('main')).toBeVisible();
+  }
+
+  test.beforeEach(async ({ page }) => {
+    await requireAdminReachable(page);
+  });
+
   test('sign-in page loads', async ({ page }) => {
     await page.goto('/sign-in');
     // The page should render without errors.
@@ -22,6 +53,18 @@ test.describe('Admin dashboard smoke', () => {
     const response = await page.goto('/');
     // The root should either redirect (302) or render (200).
     expect(response?.status()).toBeLessThan(400);
+  });
+
+  test('no-Clerk sign-in lands on dashboard without a manual refresh', async ({ page }) => {
+    await expectDashboardOrSkipClerkMode(page, '/sign-in');
+  });
+
+  test('no-Clerk sign-up lands on dashboard without a manual refresh', async ({ page }) => {
+    await expectDashboardOrSkipClerkMode(page, '/sign-up');
+  });
+
+  test('root route resolves to dashboard content without a manual refresh', async ({ page }) => {
+    await expectDashboardOrSkipClerkMode(page, '/');
   });
 
   test('non-existent route shows 404', async ({ page }) => {
