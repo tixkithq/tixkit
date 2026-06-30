@@ -51,6 +51,8 @@
     "release:dry-run": "infra/scripts/release-dry-run.sh",
     "dr:backup:postgres": "infra/scripts/backup-postgres.sh",
     "dr:restore:postgres": "infra/scripts/restore-postgres.sh",
+    "dr:backup:mysql": "infra/scripts/backup-mysql.sh",
+    "dr:restore:mysql": "infra/scripts/restore-mysql.sh",
     "dr:backup:object-storage": "infra/scripts/backup-object-storage.sh",
     "dr:restore:object-storage": "infra/scripts/restore-object-storage.sh",
     "dr:migration-rehearsal": "infra/scripts/migration-rehearsal.sh",

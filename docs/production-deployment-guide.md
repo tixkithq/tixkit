@@ -245,7 +245,7 @@ After buyer traffic has reached the new schema, rollback by database restore is 
 | Data store                  | RPO target | RTO target | Mechanism                                                                   |
 | --------------------------- | ---------- | ---------- | --------------------------------------------------------------------------- |
 | Postgres                    | 5 minutes  | 30 minutes | Managed PITR plus `infra/scripts/backup-postgres.sh` before releases        |
-| MySQL Tier-1 deployment     | 5 minutes  | 30 minutes | Managed PITR/snapshot before releases                                       |
+| MySQL Tier-1 deployment     | 5 minutes  | 30 minutes | Managed PITR plus `infra/scripts/backup-mysql.sh` before releases           |
 | Object storage              | 15 minutes | 60 minutes | Bucket versioning/replication plus `infra/scripts/backup-object-storage.sh` |
 | Temporal visibility/history | 15 minutes | 60 minutes | Temporal Cloud managed retention or backing-store snapshots                 |
 
@@ -259,6 +259,18 @@ Postgres restore:
 
 ```bash
 DATABASE_URL=<postgres-url> POSTGRES_BACKUP_FILE=backups/postgres/tixkit-postgres-<timestamp>.dump bun run dr:restore:postgres
+```
+
+MySQL backup:
+
+```bash
+DATABASE_URL_MYSQL=<mysql-url> BACKUP_DIR=backups/mysql bun run dr:backup:mysql
+```
+
+MySQL restore:
+
+```bash
+DATABASE_URL_MYSQL=<mysql-url> MYSQL_BACKUP_FILE=backups/mysql/tixkit-mysql-<timestamp>.sql.gz bun run dr:restore:mysql
 ```
 
 Object storage backup:
