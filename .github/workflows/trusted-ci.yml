@@ -72,6 +72,7 @@ jobs:
   flutter-sdk:
     name: Flutter SDK
     runs-on: tixkit-epyc-trusted
+    if: ${{ vars.RUN_TRUSTED_FLUTTER_SDK == '1' }}
     steps:
       - uses: actions/checkout@v7
       - name: Install Flutter archive tools
@@ -157,7 +158,8 @@ jobs:
 
   integration-tests-postgres:
     name: Integration Tests (PostgreSQL)
-    runs-on: ubuntu-latest
+    runs-on: tixkit-epyc-trusted
+    if: ${{ vars.RUN_TRUSTED_DB_INTEGRATION == '1' }}
     services:
       postgres:
         image: postgres:16-alpine
@@ -216,7 +218,8 @@ jobs:
 
   integration-tests-mysql:
     name: Integration Tests (MySQL)
-    runs-on: ubuntu-latest
+    runs-on: tixkit-epyc-trusted
+    if: ${{ vars.RUN_TRUSTED_DB_INTEGRATION == '1' }}
     services:
       mysql:
         image: mysql:8.4
