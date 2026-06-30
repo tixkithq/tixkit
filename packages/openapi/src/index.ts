@@ -1,4 +1,107 @@
-export const openApiSpec = {
+export type OpenApiReference = { $ref: string };
+export type OpenApiParameter = OpenApiReference | {
+  name: string;
+  in: string;
+  required?: boolean;
+  schema?: Record<string, unknown>;
+  description?: string;
+};
+
+type HttpMethod = 'get' | 'put' | 'post' | 'delete' | 'options' | 'head' | 'patch' | 'trace';
+type OpenApiOperation = {
+  parameters?: OpenApiParameter[];
+  [key: string]: unknown;
+};
+type OpenApiPathItem = {
+  parameters?: OpenApiParameter[];
+  [method: string]: unknown;
+};
+type OpenApiDocument = {
+  paths: Record<string, OpenApiPathItem>;
+  [key: string]: unknown;
+};
+type NormalizedOpenApiOperation<T, HasPathTemplate extends boolean> = T extends Record<
+  string,
+  unknown
+>
+  ? Omit<T, 'parameters'> &
+      (HasPathTemplate extends true
+        ? { parameters: OpenApiParameter[] }
+        : { parameters?: OpenApiParameter[] })
+  : T;
+type NormalizedOpenApiPathItem<Path extends string, T> = T extends Record<string, unknown>
+  ? Omit<T, HttpMethod> & {
+      [Method in keyof T & HttpMethod]: NormalizedOpenApiOperation<
+        T[Method],
+        Path extends `${string}{${string}}${string}` ? true : false
+      >;
+    }
+  : T;
+type NormalizedOpenApiDocument<T extends OpenApiDocument> = Omit<T, 'paths'> & {
+  paths: {
+    [Path in keyof T['paths'] & string]: NormalizedOpenApiPathItem<Path, T['paths'][Path]>;
+  };
+};
+
+const pathTemplateParameterPattern = /\{([^}]+)\}/g;
+const httpMethods = new Set<HttpMethod>([
+  'get',
+  'put',
+  'post',
+  'delete',
+  'options',
+  'head',
+  'patch',
+  'trace',
+]);
+
+function isDeclaredPathParameter(parameter: OpenApiParameter, name: string) {
+  return !('$ref' in parameter) && parameter.name === name && parameter.in === 'path' && parameter.required === true;
+}
+
+function isHttpMethod(method: string): method is HttpMethod {
+  return httpMethods.has(method as HttpMethod);
+}
+
+function withDeclaredPathParameters<const T extends OpenApiDocument>(
+  spec: T,
+): NormalizedOpenApiDocument<T> {
+  for (const [path, pathItem] of Object.entries(spec.paths)) {
+    const parameterNames = [...path.matchAll(pathTemplateParameterPattern)].map((match) => match[1]);
+    if (parameterNames.length === 0) continue;
+
+    const pathLevelParameters = Array.isArray(pathItem.parameters) ? pathItem.parameters : [];
+    for (const [method, operation] of Object.entries(pathItem)) {
+      if (!isHttpMethod(method) || !operation || typeof operation !== 'object' || Array.isArray(operation)) {
+        continue;
+      }
+
+      const operationObject = operation as OpenApiOperation;
+      const operationParameters = Array.isArray(operationObject.parameters)
+        ? operationObject.parameters
+        : [];
+      const declaredParameters = [...pathLevelParameters, ...operationParameters];
+      const missingParameters = parameterNames.filter(
+        (name) => !declaredParameters.some((parameter) => isDeclaredPathParameter(parameter, name)),
+      );
+      if (missingParameters.length === 0) continue;
+
+      operationObject.parameters = [
+        ...missingParameters.map((name) => ({
+          name,
+          in: 'path',
+          required: true,
+          schema: { type: 'string' },
+        })),
+        ...operationParameters,
+      ];
+    }
+  }
+
+  return spec as unknown as NormalizedOpenApiDocument<T>;
+}
+
+const rawOpenApiSpec = {
   openapi: '3.1.0',
   info: {
     title: 'Tixkit API',
@@ -7819,4 +7922,5 @@ export const openApiSpec = {
   },
 } as const;
 
+export const openApiSpec = withDeclaredPathParameters(rawOpenApiSpec);
 export type OpenApiSpec = typeof openApiSpec;

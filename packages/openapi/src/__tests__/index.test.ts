@@ -1,9 +1,55 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, expectTypeOf, it } from 'vitest';
+import type { OpenApiParameter } from '../index.js';
 import { openApiSpec } from '../index.js';
 
 describe('openApiSpec', () => {
   it('publishes the documented API lifecycle version', () => {
     expect(openApiSpec.info.version).toBe('2026-01-01');
+  });
+
+  it('declares required path parameters for every templated path operation', () => {
+    const pathTemplateParameterPattern = /\{([^}]+)\}/g;
+    const operations = new Set(['get', 'put', 'post', 'delete', 'options', 'head', 'patch', 'trace']);
+    const missingParameters: string[] = [];
+
+    for (const [path, pathItem] of Object.entries(openApiSpec.paths)) {
+      const parameterNames = [...path.matchAll(pathTemplateParameterPattern)].map((match) => match[1]);
+      if (parameterNames.length === 0) continue;
+
+      const pathParameters = 'parameters' in pathItem && Array.isArray(pathItem.parameters)
+        ? pathItem.parameters
+        : [];
+      for (const [method, operation] of Object.entries(pathItem)) {
+        if (!operations.has(method) || !operation || typeof operation !== 'object') continue;
+
+        const operationParameters =
+          'parameters' in operation && Array.isArray(operation.parameters)
+            ? operation.parameters
+            : [];
+        const declaredParameters = [...pathParameters, ...operationParameters];
+        for (const name of parameterNames) {
+          const isDeclared = declaredParameters.some(
+            (parameter) =>
+              !('$ref' in parameter) &&
+              parameter.name === name &&
+              parameter.in === 'path' &&
+              parameter.required === true,
+          );
+          if (!isDeclared) missingParameters.push(`${method.toUpperCase()} ${path} missing ${name}`);
+        }
+      }
+    }
+
+    expect(missingParameters).toEqual([]);
+  });
+
+  it('types normalized templated path operation parameters as exported runtime fields', () => {
+    expectTypeOf(openApiSpec.paths['/checkout/sessions/{sessionId}'].get.parameters).toEqualTypeOf<
+      OpenApiParameter[]
+    >();
+    expectTypeOf(openApiSpec.paths['/orders/{orderId}/cancel'].post.parameters).toEqualTypeOf<
+      OpenApiParameter[]
+    >();
   });
 
   it('documents the root-level health route outside the versioned API server', () => {
@@ -525,10 +571,13 @@ describe('openApiSpec', () => {
       in: 'query',
       required: false,
     });
-    expect(openApiSpec.paths['/checkout/sessions/{sessionId}'].get.parameters).toEqual([
-      { $ref: '#/components/parameters/OptionalCheckoutSessionToken' },
-      { $ref: '#/components/parameters/PaymentIntentClientSecret' },
-    ]);
+    expect(openApiSpec.paths['/checkout/sessions/{sessionId}'].get.parameters).toEqual(
+      expect.arrayContaining([
+        { name: 'sessionId', in: 'path', required: true, schema: { type: 'string' } },
+        { $ref: '#/components/parameters/OptionalCheckoutSessionToken' },
+        { $ref: '#/components/parameters/PaymentIntentClientSecret' },
+      ]),
+    );
   });
 
   it('documents implemented order list filters', () => {
@@ -668,7 +717,9 @@ describe('openApiSpec', () => {
     expect(openApiSpec.paths['/orders/{orderId}/refunds'].post.parameters).toContainEqual({
       $ref: '#/components/parameters/RequiredIdempotencyKey',
     });
-    expect(openApiSpec.paths['/orders/{orderId}/cancel'].post).not.toHaveProperty('parameters');
+    expect(openApiSpec.paths['/orders/{orderId}/cancel'].post.parameters).toEqual([
+      { name: 'orderId', in: 'path', required: true, schema: { type: 'string' } },
+    ]);
     expect(openApiSpec.paths['/checkout/sessions'].post.parameters).toContainEqual({
       $ref: '#/components/parameters/RequiredIdempotencyKey',
     });
