@@ -383,7 +383,16 @@ async function resetListings(database: Database): Promise<void> {
 }
 
 function percentile(values: number[], percentileValue: number): number {
-  const sorted = values.toSorted((left, right) => left - right);
+  const sorted = [...values];
+  for (let index = 1; index < sorted.length; index++) {
+    const value = sorted[index] ?? 0;
+    let previous = index - 1;
+    while (previous >= 0 && (sorted[previous] ?? 0) > value) {
+      sorted[previous + 1] = sorted[previous] ?? 0;
+      previous--;
+    }
+    sorted[previous + 1] = value;
+  }
   if (sorted.length === 0) return 0;
   const index = Math.min(sorted.length - 1, Math.ceil(sorted.length * percentileValue) - 1);
   return sorted[index] ?? 0;

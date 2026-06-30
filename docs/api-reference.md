@@ -142,7 +142,7 @@ All non-2xx responses use a single envelope:
 | `409` | `CHECKOUT_CANCELLED`        | Checkout session was cancelled before confirm                                                                                      |
 | `402` | `PAYMENT_FAILED`            | Payment intent creation or capture failed                                                                                          |
 | `422` | `IDEMPOTENCY_CONFLICT`      | Idempotency key reused with a different payload                                                                                    |
-| `429` | `RATE_LIMITED`              | Rate limit exceeded (100 req / min / IP in production by default; configurable with `RATE_LIMIT_MAX` and `RATE_LIMIT_TIME_WINDOW`) |
+| `429` | `RATE_LIMITED`              | Rate limit exceeded (100 req / min by default; public/webhook routes use the requester IP, authenticated routes use the resolved tenant) |
 | `500` | `INTERNAL_ERROR`            | Unexpected server error (logged with `requestId`)                                                                                  |
 | `503` | `SERVICE_UNAVAILABLE`       | Temporal/payment intent not yet ready, or webhook secret missing                                                                   |
 
@@ -515,7 +515,7 @@ These are unauthenticated but signature-verified. See [Webhook Guide](./webhook-
 
 ## Rate Limits
 
-The default Fastify rate-limit plugin applies `100` requests per minute per IP across the API. Authenticated mutation endpoints that start workflows are additionally gated by idempotency. Contact the platform team to raise limits for high-volume scanner or bulk messaging workloads.
+The default Fastify rate-limit plugin applies `100` requests per minute. Public buyer-facing and webhook routes are bucketed by requester IP. Authenticated admin, scanner, and integration routes are bucketed by the resolved tenant after authentication, so one high-volume tenant cannot throttle another tenant sharing the same NAT/proxy address. Production instances require Redis-backed counters; test runs use in-process counters. Authenticated mutation endpoints that start workflows are additionally gated by idempotency. Configure `RATE_LIMIT_MAX` and `RATE_LIMIT_TIME_WINDOW` to raise limits for high-volume scanner or bulk messaging workloads.
 
 ## Health
 

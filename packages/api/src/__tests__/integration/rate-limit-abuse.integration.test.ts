@@ -2,8 +2,15 @@ import Fastify from 'fastify';
 import rateLimit from '@fastify/rate-limit';
 import { afterEach, describe, expect, it } from 'vitest';
 import type { Database } from '@tixkit/db';
+import type { Principal } from '@tixkit/domain';
 import type { AppContext } from '../../app.js';
-import { registerErrorHandler, registerJsonBodyParser } from '../../app.js';
+import {
+  createRateLimitRedisClient,
+  registerErrorHandler,
+  registerJsonBodyParser,
+  registerTenantRateLimit,
+} from '../../app.js';
+import { config } from '../../config/index.js';
 import { publicRoutes } from '../../routes/modules/public.js';
 
 type Row = Record<string, unknown>;
@@ -138,6 +145,45 @@ async function buildRateLimitedPublicApp() {
   return app;
 }
 
+function makePrincipal(tenantId: string, userId: string): Principal {
+  return {
+    type: 'user',
+    id: userId,
+    tenantId,
+    organizationIds: [`org_${tenantId}`],
+    brandIds: [`brd_${tenantId}`],
+    eventIds: [],
+    scopes: ['events.read'],
+  };
+}
+
+async function buildTenantLimitedAuthenticatedApp() {
+  const app = Fastify({ logger: false, trustProxy: true });
+  app.decorate('context', {
+    db: createMockDb({}),
+    inventoryService: {},
+    pricingEngine: {},
+    qrService: {},
+    authService: {},
+    temporalClient: {},
+    emailTransport: {},
+    smsTransport: {},
+  } as AppContext);
+  registerErrorHandler(app);
+  app.addHook('onRequest', async (request) => {
+    const tenantId = String(request.headers['x-test-tenant'] ?? 'tnt_alpha');
+    const userId = String(request.headers['x-test-user'] ?? `usr_${tenantId}`);
+    request.principal = makePrincipal(tenantId, userId);
+  });
+  await registerTenantRateLimit(app, { max: 8, timeWindow: '1 minute' });
+  app.get('/v1/tenant-rate-limit-probe', async (request) => ({
+    tenantId: request.principal?.tenantId,
+    userId: request.principal?.id,
+  }));
+  await app.ready();
+  return app;
+}
+
 function accessCodePayload(ticketTypeId: string, accessCode: string) {
   return {
     ticketTypeIds: [ticketTypeId],
@@ -231,5 +277,120 @@ describe('public access-code abuse rate limiting', () => {
       abusiveRequesterStatuses.filter((status) => status === 429).length,
     ).toBeGreaterThanOrEqual(1);
     expect(separateRequesterResponse.statusCode).toBe(400);
+  });
+
+  it('isolates authenticated abuse buckets by tenant instead of shared IP', async () => {
+    const app = await buildTenantLimitedAuthenticatedApp();
+    apps.push(app);
+    const sharedIp = '198.51.100.42';
+
+    const alphaWarmupStatuses: number[] = [];
+    for (let attempt = 0; attempt < 8; attempt++) {
+      // Sequential requests keep the exact threshold deterministic while proving bucket ownership.
+      // eslint-disable-next-line no-await-in-loop
+      const response = await app.inject({
+        method: 'GET',
+        url: '/v1/tenant-rate-limit-probe',
+        headers: {
+          'x-forwarded-for': sharedIp,
+          'x-test-tenant': 'tnt_alpha',
+          'x-test-user': `usr_alpha_${attempt}`,
+        },
+      });
+      alphaWarmupStatuses.push(response.statusCode);
+    }
+
+    const sameTenantDifferentUser = await app.inject({
+      method: 'GET',
+      url: '/v1/tenant-rate-limit-probe',
+      headers: {
+        'x-forwarded-for': sharedIp,
+        'x-test-tenant': 'tnt_alpha',
+        'x-test-user': 'usr_alpha_other',
+      },
+    });
+    const betaSameIp = await app.inject({
+      method: 'GET',
+      url: '/v1/tenant-rate-limit-probe',
+      headers: {
+        'x-forwarded-for': sharedIp,
+        'x-test-tenant': 'tnt_beta',
+        'x-test-user': 'usr_beta',
+      },
+    });
+
+    expect(alphaWarmupStatuses).toEqual(Array.from({ length: 8 }, () => 200));
+    expect(sameTenantDifferentUser.statusCode).toBe(429);
+    expect(betaSameIp.statusCode).toBe(200);
+    expect(betaSameIp.json()).toMatchObject({ tenantId: 'tnt_beta', userId: 'usr_beta' });
+  });
+
+  it('keeps non-abusive tenants healthy during same-IP authenticated load', async () => {
+    const app = await buildTenantLimitedAuthenticatedApp();
+    apps.push(app);
+    const sharedIp = '198.51.100.99';
+
+    const alphaWarmupStatuses: number[] = [];
+    for (let attempt = 0; attempt < 8; attempt++) {
+      // Sequential requests deterministically fill the bucket; the overflow burst below exercises load.
+      // eslint-disable-next-line no-await-in-loop
+      const response = await app.inject({
+        method: 'GET',
+        url: '/v1/tenant-rate-limit-probe',
+        headers: {
+          'x-forwarded-for': sharedIp,
+          'x-test-tenant': 'tnt_alpha_load',
+          'x-test-user': `usr_alpha_load_${attempt}`,
+        },
+      });
+      alphaWarmupStatuses.push(response.statusCode);
+    }
+    const alphaOverflowStatuses = await Promise.all(
+      Array.from({ length: 12 }, async (_, attempt) => {
+        const response = await app.inject({
+          method: 'GET',
+          url: '/v1/tenant-rate-limit-probe',
+          headers: {
+            'x-forwarded-for': sharedIp,
+            'x-test-tenant': 'tnt_alpha_load',
+            'x-test-user': `usr_alpha_overflow_${attempt}`,
+          },
+        });
+        return response.statusCode;
+      }),
+    );
+    const betaStatuses = await Promise.all(
+      Array.from({ length: 8 }, async (_, attempt) => {
+        const response = await app.inject({
+          method: 'GET',
+          url: '/v1/tenant-rate-limit-probe',
+          headers: {
+            'x-forwarded-for': sharedIp,
+            'x-test-tenant': 'tnt_beta_load',
+            'x-test-user': `usr_beta_load_${attempt}`,
+          },
+        });
+        return response.statusCode;
+      }),
+    );
+
+    expect(alphaWarmupStatuses).toEqual(Array.from({ length: 8 }, () => 200));
+    expect(alphaOverflowStatuses).toEqual(Array.from({ length: 12 }, () => 429));
+    expect(betaStatuses).toEqual(Array.from({ length: 8 }, () => 200));
+  });
+
+  it('fails closed in production when Redis rate-limit counters are unavailable', async () => {
+    const previousNodeEnv = config.nodeEnv;
+    const previousRedisUrl = config.redisUrl;
+    config.nodeEnv = 'production';
+    config.redisUrl = 'redis://127.0.0.1:1';
+    try {
+      await expect(createRateLimitRedisClient()).rejects.toThrow(
+        'Redis is required for production rate limiting',
+      );
+    } finally {
+      config.nodeEnv = previousNodeEnv;
+      config.redisUrl = previousRedisUrl;
+    }
   });
 });

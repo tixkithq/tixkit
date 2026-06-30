@@ -1,8 +1,10 @@
-import Fastify, { type FastifyInstance } from 'fastify';
+import Fastify, { type FastifyInstance, type FastifyRequest } from 'fastify';
 import cors from '@fastify/cors';
 import helmet from '@fastify/helmet';
 import rateLimit from '@fastify/rate-limit';
+import type { RateLimitPluginOptions } from '@fastify/rate-limit';
 import { ulid } from 'ulid';
+import { Redis } from 'ioredis';
 import { createDb, type Database } from '@tixkit/db';
 import { pinoRedactionPaths, redactErrorFields, redactString } from '@tixkit/shared';
 import { config } from './config/index.js';
@@ -160,6 +162,68 @@ export function registerJsonBodyParser(app: FastifyInstance): void {
   });
 }
 
+type RateLimitRegistrationOptions = {
+  max?: number;
+  timeWindow?: string;
+  redis?: RateLimitPluginOptions['redis'];
+};
+
+export async function registerIpRateLimit(
+  app: FastifyInstance,
+  options: RateLimitRegistrationOptions = {},
+): Promise<void> {
+  await app.register(rateLimit, {
+    max: options.max ?? config.rateLimitMax,
+    timeWindow: options.timeWindow ?? config.rateLimitTimeWindow,
+    redis: options.redis,
+  });
+}
+
+export function tenantRateLimitKey(request: FastifyRequest): string {
+  const principal = request.principal;
+  if (principal) return `tenant:${principal.tenantId}`;
+  return `unauthenticated:${request.ip}`;
+}
+
+export async function registerTenantRateLimit(
+  app: FastifyInstance,
+  options: RateLimitRegistrationOptions = {},
+): Promise<void> {
+  await app.register(rateLimit, {
+    max: options.max ?? config.rateLimitMax,
+    timeWindow: options.timeWindow ?? config.rateLimitTimeWindow,
+    redis: options.redis,
+    hook: 'preHandler',
+    keyGenerator: tenantRateLimitKey,
+  });
+}
+
+export function shouldUseRedisRateLimit(): boolean {
+  return config.nodeEnv !== 'test';
+}
+
+export async function createRateLimitRedisClient(): Promise<Redis | undefined> {
+  if (!shouldUseRedisRateLimit()) return undefined;
+
+  const redis = new Redis(config.redisUrl, {
+    connectTimeout: 1_000,
+    enableOfflineQueue: false,
+    maxRetriesPerRequest: 1,
+    lazyConnect: true,
+  });
+  redis.on('error', () => undefined);
+  try {
+    await redis.connect();
+    return redis;
+  } catch (error) {
+    redis.disconnect();
+    if (config.nodeEnv === 'production') {
+      throw new Error('Redis is required for production rate limiting', { cause: error });
+    }
+    return undefined;
+  }
+}
+
 export async function buildApp(): Promise<FastifyInstance> {
   const app = Fastify({
     bodyLimit: API_JSON_BODY_LIMIT_BYTES,
@@ -172,6 +236,10 @@ export async function buildApp(): Promise<FastifyInstance> {
   });
   const observability = await createApiObservability();
   registerObservability(app, observability);
+  const rateLimitRedis = await createRateLimitRedisClient();
+  app.addHook('onClose', async () => {
+    rateLimitRedis?.disconnect();
+  });
 
   // Plugins
   await app.register(helmet);
@@ -179,11 +247,6 @@ export async function buildApp(): Promise<FastifyInstance> {
     origin: createCorsOriginValidator(config.corsAllowedOrigins),
     credentials: true,
   });
-  await app.register(rateLimit, {
-    max: config.rateLimitMax,
-    timeWindow: config.rateLimitTimeWindow,
-  });
-
   // Capture raw body for webhook signature verification while still parsing JSON for all routes
   registerJsonBodyParser(app);
 
@@ -228,14 +291,18 @@ export async function buildApp(): Promise<FastifyInstance> {
   registerMetricsRoute(app, observability, () => db);
 
   // Public webhook routes (no auth, signature-verified)
-  await app.register(clerkWebhookRoutes, { prefix: '/v1/webhooks/clerk' });
-  await app.register(stripeWebhookRoutes, { prefix: '/v1/webhooks/stripe' });
-  await app.register(telnyxWebhookRoutes, { prefix: '/v1/webhooks/telnyx' });
-  await app.register(emailWebhookRoutes, { prefix: '/v1/webhooks/email' });
+  await app.register(async (publicWebhooks) => {
+    await registerIpRateLimit(publicWebhooks, { redis: rateLimitRedis });
+    await publicWebhooks.register(clerkWebhookRoutes, { prefix: '/v1/webhooks/clerk' });
+    await publicWebhooks.register(stripeWebhookRoutes, { prefix: '/v1/webhooks/stripe' });
+    await publicWebhooks.register(telnyxWebhookRoutes, { prefix: '/v1/webhooks/telnyx' });
+    await publicWebhooks.register(emailWebhookRoutes, { prefix: '/v1/webhooks/email' });
+  });
 
   // Public buyer-facing routes (no admin auth). Checkout is intentionally public:
   // buyers are anonymous and tenancy is resolved from the published event.
   await app.register(async (publicGroup) => {
+    await registerIpRateLimit(publicGroup, { redis: rateLimitRedis });
     await publicGroup.register(publicRoutes, { prefix: '/v1' });
     await publicGroup.register(checkoutRoutes, { prefix: '/v1' });
     await publicGroup.register(publicUploadRoutes, { prefix: '/v1' });
@@ -248,6 +315,7 @@ export async function buildApp(): Promise<FastifyInstance> {
   // Authenticated admin/integration routes (Clerk user, API key, or scanner device)
   await app.register(async (authenticated) => {
     authenticated.addHook('onRequest', createAuthMiddleware(authService));
+    await registerTenantRateLimit(authenticated, { redis: rateLimitRedis });
 
     await authenticated.register(tenantRoutes, { prefix: '/v1' });
     await authenticated.register(eventRoutes, { prefix: '/v1' });
