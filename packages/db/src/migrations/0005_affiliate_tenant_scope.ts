@@ -10,10 +10,26 @@ function isMysql() {
   return process.env.DB_DRIVER === 'mysql';
 }
 
+function isMssql() {
+  return process.env.DB_DRIVER === 'mssql';
+}
+
 async function columnExists(
   db: Kysely<Record<string, unknown>>,
   columnName: string,
 ): Promise<boolean> {
+  if (isMssql()) {
+    const result = await sql<{ column_name: string }>`
+      select top 1 column_name
+      from information_schema.columns
+      where table_schema = schema_name()
+        and table_name = 'affiliates'
+        and column_name = ${columnName}
+    `.execute(db);
+
+    return result.rows.length > 0;
+  }
+
   const result = isMysql()
     ? await sql<{ column_name: string }>`
         select column_name

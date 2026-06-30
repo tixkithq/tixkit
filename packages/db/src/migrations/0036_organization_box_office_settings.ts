@@ -66,7 +66,9 @@ export const OrganizationBoxOfficeSettingsMigration: Migration = {
         if col_length('organizations', 'box_office_settings') is null
           alter table organizations
             add box_office_settings nvarchar(max) not null
-            constraint organizations_box_office_settings_default default ${defaultBoxOfficeSettingsJson};
+            constraint organizations_box_office_settings_default default ${sql.raw(
+              sqlStringLiteral(defaultBoxOfficeSettingsJson),
+            )};
       `.execute(db);
       await sql`
         if not exists (

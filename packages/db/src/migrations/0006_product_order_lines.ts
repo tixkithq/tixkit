@@ -10,11 +10,27 @@ function isMysql() {
   return process.env.DB_DRIVER === 'mysql';
 }
 
+function isMssql() {
+  return process.env.DB_DRIVER === 'mssql';
+}
+
 async function columnExists(
   db: Kysely<Record<string, unknown>>,
   tableName: string,
   columnName: string,
 ): Promise<boolean> {
+  if (isMssql()) {
+    const result = await sql<{ column_name: string }>`
+      select top 1 column_name
+      from information_schema.columns
+      where table_schema = schema_name()
+        and table_name = ${tableName}
+        and column_name = ${columnName}
+    `.execute(db);
+
+    return result.rows.length > 0;
+  }
+
   const result = isMysql()
     ? await sql<{ column_name: string }>`
         select column_name
@@ -41,6 +57,11 @@ export const ProductOrderLinesMigration: Migration = {
     if (isMysql()) {
       await sql`alter table checkout_sessions modify hold_id varchar(32) null`.execute(db);
       await sql`alter table order_line_items modify ticket_type_id varchar(32) null`.execute(db);
+    } else if (isMssql()) {
+      await sql`alter table checkout_sessions alter column hold_id varchar(32) null`.execute(db);
+      await sql`alter table order_line_items alter column ticket_type_id varchar(32) null`.execute(
+        db,
+      );
     } else {
       await sql`alter table checkout_sessions alter column hold_id drop not null`.execute(db);
       await sql`alter table order_line_items alter column ticket_type_id drop not null`.execute(db);
@@ -81,6 +102,13 @@ export const ProductOrderLinesMigration: Migration = {
         db,
       );
       await sql`alter table checkout_sessions modify hold_id varchar(32) not null`.execute(db);
+    } else if (isMssql()) {
+      await sql`alter table order_line_items alter column ticket_type_id varchar(32) not null`.execute(
+        db,
+      );
+      await sql`alter table checkout_sessions alter column hold_id varchar(32) not null`.execute(
+        db,
+      );
     } else {
       await sql`alter table order_line_items alter column ticket_type_id set not null`.execute(db);
       await sql`alter table checkout_sessions alter column hold_id set not null`.execute(db);

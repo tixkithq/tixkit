@@ -1,4 +1,4 @@
-import type { ColumnDataType } from 'kysely';
+import type { ColumnDataType, Expression } from 'kysely';
 import type { Migration } from 'kysely/migration';
 import { sql } from 'kysely';
 
@@ -21,14 +21,16 @@ function nowDefault() {
   return isMysql() || isMssql() ? sql`CURRENT_TIMESTAMP` : sql`now()`;
 }
 
-function jsonType(): ColumnDataType {
+function jsonType(): ColumnDataType | Expression<unknown> {
   if (isMysql()) return 'json';
-  if (isMssql()) return 'nvarchar(max)' as ColumnDataType;
+  if (isMssql()) return sql`nvarchar(max)`;
 
   return 'jsonb';
 }
 
-function textType(): ColumnDataType {
+function textType(): ColumnDataType | Expression<unknown> {
+  if (isMssql()) return sql`nvarchar(max)`;
+
   return 'text';
 }
 
@@ -108,9 +110,12 @@ export const OfflineCheckInBulkSyncMigration: Migration = {
       .addColumn('updated_at', timestampType(), (col) => col.notNull().defaultTo(nowDefault()))
       .addUniqueConstraint('offline_sync_chunks_job_sequence_unique', ['job_id', 'sequence'])
       .addForeignKeyConstraint('offline_sync_chunks_tenant_fk', ['tenant_id'], 'tenants', ['id'])
-      .addForeignKeyConstraint('offline_sync_chunks_job_fk', ['job_id'], 'offline_check_in_sync_jobs', [
-        'id',
-      ])
+      .addForeignKeyConstraint(
+        'offline_sync_chunks_job_fk',
+        ['job_id'],
+        'offline_check_in_sync_jobs',
+        ['id'],
+      )
       .execute();
 
     await db.schema

@@ -6,8 +6,15 @@ function isMysql() {
   return process.env.DB_DRIVER === 'mysql';
 }
 
+function isMssql() {
+  return process.env.DB_DRIVER === 'mssql';
+}
+
 function timestampType(): ColumnDataType {
-  return isMysql() ? 'timestamp' : 'timestamptz';
+  if (isMysql()) return 'timestamp';
+  if (isMssql()) return 'datetime2' as ColumnDataType;
+
+  return 'timestamptz';
 }
 
 function nowDefault() {

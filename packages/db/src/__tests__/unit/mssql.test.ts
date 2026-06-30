@@ -1,7 +1,9 @@
 import { describe, expect, it } from 'vitest';
+import { Kysely } from 'kysely';
 import {
   buildMssqlMergeUpsert,
   createMssqlDialect,
+  createMssqlLimitPlugin,
   mssqlDropTableIfExists,
   mssqlForUpdateTable,
   mssqlObjectIdExists,
@@ -64,5 +66,36 @@ describe('MSSQL dialect helpers', () => {
     expect(mssqlForUpdateTable('dbo.inventory_pools', 'pool')).toBe(
       '[dbo].[inventory_pools] AS [pool] WITH (UPDLOCK, HOLDLOCK)',
     );
+  });
+
+  it('compiles select limits to SQL Server TOP syntax', () => {
+    const db = new Kysely<{ events: { id: string } }>({
+      dialect: createMssqlDialect('mssql://sa:password@localhost/tixkit'),
+      plugins: [createMssqlLimitPlugin()],
+    });
+
+    const compiled = db.selectFrom('events').selectAll().orderBy('id', 'asc').limit(50).compile();
+
+    expect(compiled.sql).toBe('select top(50) * from "events" order by "id" asc');
+  });
+
+  it('compiles offset limits to SQL Server OFFSET FETCH syntax', () => {
+    const db = new Kysely<{ events: { id: string } }>({
+      dialect: createMssqlDialect('mssql://sa:password@localhost/tixkit'),
+      plugins: [createMssqlLimitPlugin()],
+    });
+
+    const compiled = db
+      .selectFrom('events')
+      .selectAll()
+      .orderBy('id', 'asc')
+      .offset(10)
+      .limit(25)
+      .compile();
+
+    expect(compiled.sql).toBe(
+      'select * from "events" order by "id" asc offset @1 rows fetch next @2 rows only',
+    );
+    expect(compiled.parameters).toEqual([10, 25]);
   });
 });

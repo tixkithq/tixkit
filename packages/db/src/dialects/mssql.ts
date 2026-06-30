@@ -1,4 +1,19 @@
-import { MssqlDialect, sql, type Kysely } from 'kysely';
+import {
+  FetchNode,
+  MssqlDialect,
+  OperationNodeTransformer,
+  sql,
+  TopNode,
+  ValueNode,
+  type Kysely,
+  type KyselyPlugin,
+  type PluginTransformQueryArgs,
+  type PluginTransformResultArgs,
+  type QueryResult,
+  type RootOperationNode,
+  type SelectQueryNode,
+  type UnknownRow,
+} from 'kysely';
 import * as Tarn from 'tarn';
 import * as Tedious from 'tedious';
 
@@ -74,6 +89,43 @@ export function createMssqlDialect(url: string): MssqlDialect {
         }),
     },
   });
+}
+
+class MssqlLimitTransformer extends OperationNodeTransformer {
+  protected override transformSelectQuery(
+    node: SelectQueryNode,
+    queryId?: Parameters<OperationNodeTransformer['transformNode']>[1],
+  ): SelectQueryNode {
+    const transformed = super.transformSelectQuery(node, queryId);
+    if (!transformed.limit) return transformed;
+
+    const limitNode = transformed.limit.limit;
+    if (!ValueNode.is(limitNode)) {
+      throw new Error('MSSQL select limits must be numeric literals');
+    }
+
+    const limit = limitNode.value;
+    if (typeof limit !== 'number' && typeof limit !== 'bigint') {
+      throw new Error('MSSQL select limits must be numeric literals');
+    }
+
+    return transformed.offset
+      ? { ...transformed, limit: undefined, fetch: FetchNode.create(limit, 'only') }
+      : { ...transformed, limit: undefined, top: TopNode.create(limit) };
+  }
+}
+
+export function createMssqlLimitPlugin(): KyselyPlugin {
+  const transformer = new MssqlLimitTransformer();
+
+  return {
+    transformQuery(args: PluginTransformQueryArgs): RootOperationNode {
+      return transformer.transformNode(args.node);
+    },
+    async transformResult(args: PluginTransformResultArgs): Promise<QueryResult<UnknownRow>> {
+      return args.result;
+    },
+  };
 }
 
 export function mssqlObjectIdExists(objectName: string): string {

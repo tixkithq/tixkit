@@ -1,5 +1,5 @@
 import { sql } from 'kysely';
-import type { ColumnDataType } from 'kysely';
+import type { ColumnDataType, Expression } from 'kysely';
 import type { Migration } from 'kysely/migration';
 
 function varchar(len: number): ColumnDataType {
@@ -7,15 +7,29 @@ function varchar(len: number): ColumnDataType {
 }
 
 function timestampType(): ColumnDataType {
+  if (process.env.DB_DRIVER === 'mssql') return 'datetime2' as ColumnDataType;
+
   return process.env.DB_DRIVER === 'mysql' ? 'datetime' : 'timestamptz';
 }
 
-function jsonType(): ColumnDataType {
+function jsonType(): ColumnDataType | Expression<unknown> {
+  if (process.env.DB_DRIVER === 'mssql') return sql`nvarchar(max)`;
+
   return process.env.DB_DRIVER === 'mysql' ? 'json' : 'jsonb';
 }
 
 function nowDefault() {
-  return process.env.DB_DRIVER === 'mysql' ? sql`CURRENT_TIMESTAMP` : sql`now()`;
+  return process.env.DB_DRIVER === 'mysql' || process.env.DB_DRIVER === 'mssql'
+    ? sql`CURRENT_TIMESTAMP`
+    : sql`now()`;
+}
+
+function booleanType(): ColumnDataType | Expression<unknown> {
+  return process.env.DB_DRIVER === 'mssql' ? sql`bit` : 'boolean';
+}
+
+function falseDefault() {
+  return process.env.DB_DRIVER === 'mssql' ? sql`0` : false;
 }
 
 export const TaxInvoicesMigration: Migration = {
@@ -36,7 +50,7 @@ export const TaxInvoicesMigration: Migration = {
       .addColumn('taxable_amount_cents', 'integer', (col) => col.notNull())
       .addColumn('tax_cents', 'integer', (col) => col.notNull())
       .addColumn('currency', varchar(3), (col) => col.notNull())
-      .addColumn('inclusive', 'boolean', (col) => col.notNull().defaultTo(false))
+      .addColumn('inclusive', booleanType(), (col) => col.notNull().defaultTo(falseDefault()))
       .addColumn('provider', varchar(32), (col) => col.notNull().defaultTo('tixkit_rules'))
       .addColumn('provider_calculation_id', varchar(128))
       .addColumn('metadata', jsonType())
@@ -84,7 +98,7 @@ export const TaxInvoicesMigration: Migration = {
       .addColumn('buyer_tax_id', varchar(128))
       .addColumn('seller_name', varchar(255), (col) => col.notNull())
       .addColumn('seller_tax_id', varchar(128))
-      .addColumn('reverse_charge', 'boolean', (col) => col.notNull().defaultTo(false))
+      .addColumn('reverse_charge', booleanType(), (col) => col.notNull().defaultTo(falseDefault()))
       .addColumn('issued_at', timestampType(), (col) => col.notNull().defaultTo(nowDefault()))
       .addColumn('voided_at', timestampType())
       .addColumn('metadata', jsonType())

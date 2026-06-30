@@ -1,5 +1,5 @@
 import type { Migration } from 'kysely/migration';
-import type { ColumnDataType } from 'kysely';
+import type { ColumnDataType, Expression } from 'kysely';
 import { sql } from 'kysely';
 import type { Database } from '../client.js';
 
@@ -7,8 +7,15 @@ function isMysql() {
   return process.env.DB_DRIVER === 'mysql';
 }
 
+function isMssql() {
+  return process.env.DB_DRIVER === 'mssql';
+}
+
 function timestampType(): ColumnDataType {
-  return isMysql() ? 'timestamp' : 'timestamptz';
+  if (isMysql()) return 'timestamp';
+  if (isMssql()) return 'datetime2' as ColumnDataType;
+
+  return 'timestamptz';
 }
 
 // Server-side default so the database, not the migration process clock, stamps
@@ -17,16 +24,27 @@ function nowDefault() {
   return sql`CURRENT_TIMESTAMP`;
 }
 
-function jsonType(): ColumnDataType {
-  return isMysql() ? 'json' : 'jsonb';
+function jsonType(): ColumnDataType | Expression<unknown> {
+  if (isMysql()) return 'json';
+  if (isMssql()) return sql`nvarchar(max)`;
+
+  return 'jsonb';
 }
 
-function textType(): ColumnDataType {
+function textType(): ColumnDataType | Expression<unknown> {
+  if (isMssql()) return sql`nvarchar(max)`;
+
   return 'text';
 }
 
-function booleanType(): ColumnDataType {
+function booleanType(): ColumnDataType | Expression<unknown> {
+  if (isMssql()) return sql`bit`;
+
   return 'boolean';
+}
+
+function falseDefault() {
+  return isMssql() ? sql`0` : false;
 }
 
 function varchar(len: number): ColumnDataType {
@@ -76,7 +94,7 @@ export const InitialMigration: Migration = {
       .addColumn('payment_account_id', varchar(32))
       .addColumn('support_url', varchar(2048))
       .addColumn('legal_urls', jsonType(), (col) => col.notNull())
-      .addColumn('white_label', booleanType(), (col) => col.notNull().defaultTo(false))
+      .addColumn('white_label', booleanType(), (col) => col.notNull().defaultTo(falseDefault()))
       .addColumn('created_at', timestampType(), (col) => col.notNull().defaultTo(nowDefault()))
       .addColumn('updated_at', timestampType(), (col) => col.notNull().defaultTo(nowDefault()))
       .addUniqueConstraint('brands_slug_tenant_unique', ['tenant_id', 'slug'])
@@ -92,8 +110,8 @@ export const InitialMigration: Migration = {
       .addColumn('id', varchar(32), (col) => col.primaryKey())
       .addColumn('brand_id', varchar(32), (col) => col.notNull())
       .addColumn('domain', varchar(255), (col) => col.notNull())
-      .addColumn('is_primary', booleanType(), (col) => col.notNull().defaultTo(false))
-      .addColumn('is_verified', booleanType(), (col) => col.notNull().defaultTo(false))
+      .addColumn('is_primary', booleanType(), (col) => col.notNull().defaultTo(falseDefault()))
+      .addColumn('is_verified', booleanType(), (col) => col.notNull().defaultTo(falseDefault()))
       .addColumn('verification_token', varchar(255))
       .addColumn('ssl_status', varchar(50), (col) => col.notNull().defaultTo('pending'))
       .addColumn('created_at', timestampType(), (col) => col.notNull().defaultTo(nowDefault()))
@@ -163,7 +181,7 @@ export const InitialMigration: Migration = {
       .addColumn('tenant_id', varchar(32), (col) => col.notNull())
       .addColumn('name', varchar(100), (col) => col.notNull())
       .addColumn('permissions', jsonType(), (col) => col.notNull())
-      .addColumn('is_system', booleanType(), (col) => col.notNull().defaultTo(false))
+      .addColumn('is_system', booleanType(), (col) => col.notNull().defaultTo(falseDefault()))
       .addColumn('created_at', timestampType(), (col) => col.notNull().defaultTo(nowDefault()))
       .addColumn('updated_at', timestampType(), (col) => col.notNull().defaultTo(nowDefault()))
       .addForeignKeyConstraint('roles_tenant_fk', ['tenant_id'], 'tenants', ['id'])
@@ -282,7 +300,7 @@ export const InitialMigration: Migration = {
       .addColumn('title', varchar(500), (col) => col.notNull())
       .addColumn('description', textType())
       .addColumn('content_html', textType())
-      .addColumn('is_default', booleanType(), (col) => col.notNull().defaultTo(false))
+      .addColumn('is_default', booleanType(), (col) => col.notNull().defaultTo(falseDefault()))
       .addColumn('created_at', timestampType(), (col) => col.notNull().defaultTo(nowDefault()))
       .addColumn('updated_at', timestampType(), (col) => col.notNull().defaultTo(nowDefault()))
       .addForeignKeyConstraint('event_pages_event_fk', ['event_id'], 'events', ['id'])
@@ -331,7 +349,9 @@ export const InitialMigration: Migration = {
       .addColumn('max_per_order', 'integer', (col) => col.notNull().defaultTo(10))
       .addColumn('inventory_pool_id', varchar(32), (col) => col.notNull())
       .addColumn('sort_order', 'integer', (col) => col.notNull().defaultTo(0))
-      .addColumn('requires_access_code', booleanType(), (col) => col.notNull().defaultTo(false))
+      .addColumn('requires_access_code', booleanType(), (col) =>
+        col.notNull().defaultTo(falseDefault()),
+      )
       .addColumn('access_code_hint', varchar(255))
       .addColumn('created_at', timestampType(), (col) => col.notNull().defaultTo(nowDefault()))
       .addColumn('updated_at', timestampType(), (col) => col.notNull().defaultTo(nowDefault()))
@@ -592,7 +612,7 @@ export const InitialMigration: Migration = {
       .addColumn('outcome', varchar(50), (col) => col.notNull())
       .addColumn('scanned_at', timestampType(), (col) => col.notNull())
       .addColumn('synced_at', timestampType())
-      .addColumn('offline', booleanType(), (col) => col.notNull().defaultTo(false))
+      .addColumn('offline', booleanType(), (col) => col.notNull().defaultTo(falseDefault()))
       .addColumn('metadata', jsonType())
       .addColumn('created_at', timestampType(), (col) => col.notNull().defaultTo(nowDefault()))
       .addForeignKeyConstraint('scan_logs_tenant_fk', ['tenant_id'], 'tenants', ['id'])
@@ -732,7 +752,9 @@ export const InitialMigration: Migration = {
       .addColumn('type', varchar(50), (col) => col.notNull())
       .addColumn('value', 'integer', (col) => col.notNull())
       .addColumn('applied_to', varchar(50), (col) => col.notNull())
-      .addColumn('absorb_into_price', booleanType(), (col) => col.notNull().defaultTo(false))
+      .addColumn('absorb_into_price', booleanType(), (col) =>
+        col.notNull().defaultTo(falseDefault()),
+      )
       .addColumn('created_at', timestampType(), (col) => col.notNull().defaultTo(nowDefault()))
       .addColumn('updated_at', timestampType(), (col) => col.notNull().defaultTo(nowDefault()))
       .addCheckConstraint('fee_rules_value_nonnegative', sql`value >= 0`)
@@ -806,18 +828,20 @@ export const InitialMigration: Migration = {
       .addColumn('type', varchar(50), (col) => col.notNull())
       .addColumn('label', varchar(500), (col) => col.notNull())
       .addColumn('description', textType())
-      .addColumn('required', booleanType(), (col) => col.notNull().defaultTo(false))
+      .addColumn('required', booleanType(), (col) => col.notNull().defaultTo(falseDefault()))
       .addColumn('applies_to', varchar(50), (col) => col.notNull().defaultTo('attendee'))
       .addColumn('options', jsonType())
       .addColumn('placeholder', varchar(255))
       .addColumn('validation_pattern', varchar(500))
       .addColumn('conditional_visibility', jsonType())
       .addColumn('status', varchar(50), (col) => col.notNull().defaultTo('active'))
-      .addColumn('is_hidden', booleanType(), (col) => col.notNull().defaultTo(false))
+      .addColumn('is_hidden', booleanType(), (col) => col.notNull().defaultTo(falseDefault()))
       .addColumn('hidden_at', timestampType())
       .addColumn('deleted_at', timestampType())
       .addColumn('sort_order', 'integer', (col) => col.notNull().defaultTo(0))
-      .addColumn('is_consent_field', booleanType(), (col) => col.notNull().defaultTo(false))
+      .addColumn('is_consent_field', booleanType(), (col) =>
+        col.notNull().defaultTo(falseDefault()),
+      )
       .addColumn('consent_text', textType())
       .addColumn('consent_version', varchar(50))
       .addColumn('created_at', timestampType(), (col) => col.notNull().defaultTo(nowDefault()))
@@ -956,7 +980,7 @@ export const InitialMigration: Migration = {
       .addColumn('html_template', textType(), (col) => col.notNull())
       .addColumn('text_template', textType())
       .addColumn('locale', varchar(10), (col) => col.notNull().defaultTo('en'))
-      .addColumn('is_default', booleanType(), (col) => col.notNull().defaultTo(false))
+      .addColumn('is_default', booleanType(), (col) => col.notNull().defaultTo(falseDefault()))
       .addColumn('published_at', timestampType())
       .addColumn('created_at', timestampType(), (col) => col.notNull().defaultTo(nowDefault()))
       .addColumn('updated_at', timestampType(), (col) => col.notNull().defaultTo(nowDefault()))
@@ -1043,11 +1067,13 @@ export const InitialMigration: Migration = {
       .addColumn('credentials_ref', varchar(255), (col) => col.notNull())
       .addColumn('sender_domain', varchar(255), (col) => col.notNull())
       .addColumn('priority', 'integer', (col) => col.notNull().defaultTo(0))
-      .addColumn('is_fallback', booleanType(), (col) => col.notNull().defaultTo(false))
+      .addColumn('is_fallback', booleanType(), (col) => col.notNull().defaultTo(falseDefault()))
       .addColumn('rate_limit_per_hour', 'integer')
       .addColumn('allowed_categories', jsonType(), (col) => col.notNull())
       .addColumn('status', varchar(50), (col) => col.notNull().defaultTo('pending'))
-      .addColumn('smoke_send_verified', booleanType(), (col) => col.notNull().defaultTo(false))
+      .addColumn('smoke_send_verified', booleanType(), (col) =>
+        col.notNull().defaultTo(falseDefault()),
+      )
       .addColumn('created_at', timestampType(), (col) => col.notNull().defaultTo(nowDefault()))
       .addColumn('updated_at', timestampType(), (col) => col.notNull().defaultTo(nowDefault()))
       .addForeignKeyConstraint('email_provider_routes_tenant_fk', ['tenant_id'], 'tenants', ['id'])
@@ -1063,7 +1089,7 @@ export const InitialMigration: Migration = {
       .addColumn('email', varchar(255), (col) => col.notNull())
       .addColumn('name', varchar(255), (col) => col.notNull())
       .addColumn('reply_to_email', varchar(255))
-      .addColumn('verified', booleanType(), (col) => col.notNull().defaultTo(false))
+      .addColumn('verified', booleanType(), (col) => col.notNull().defaultTo(falseDefault()))
       .addColumn('verified_at', timestampType())
       .addColumn('created_at', timestampType(), (col) => col.notNull().defaultTo(nowDefault()))
       .addColumn('updated_at', timestampType(), (col) => col.notNull().defaultTo(nowDefault()))
@@ -1079,7 +1105,7 @@ export const InitialMigration: Migration = {
       .addColumn('kind', varchar(50), (col) => col.notNull())
       .addColumn('provider_type', varchar(50), (col) => col.notNull())
       .addColumn('provider_sender_id', varchar(255))
-      .addColumn('verified', booleanType(), (col) => col.notNull().defaultTo(false))
+      .addColumn('verified', booleanType(), (col) => col.notNull().defaultTo(falseDefault()))
       .addColumn('verified_at', timestampType())
       .addColumn('created_at', timestampType(), (col) => col.notNull().defaultTo(nowDefault()))
       .addColumn('updated_at', timestampType(), (col) => col.notNull().defaultTo(nowDefault()))
@@ -1097,11 +1123,13 @@ export const InitialMigration: Migration = {
       .addColumn('credentials_ref', varchar(255), (col) => col.notNull())
       .addColumn('sender_identity_id', varchar(32), (col) => col.notNull())
       .addColumn('priority', 'integer', (col) => col.notNull().defaultTo(0))
-      .addColumn('is_fallback', booleanType(), (col) => col.notNull().defaultTo(false))
+      .addColumn('is_fallback', booleanType(), (col) => col.notNull().defaultTo(falseDefault()))
       .addColumn('rate_limit_per_hour', 'integer')
       .addColumn('allowed_categories', jsonType(), (col) => col.notNull())
       .addColumn('status', varchar(50), (col) => col.notNull().defaultTo('pending'))
-      .addColumn('smoke_send_verified', booleanType(), (col) => col.notNull().defaultTo(false))
+      .addColumn('smoke_send_verified', booleanType(), (col) =>
+        col.notNull().defaultTo(falseDefault()),
+      )
       .addColumn('webhook_url', varchar(2048))
       .addColumn('created_at', timestampType(), (col) => col.notNull().defaultTo(nowDefault()))
       .addColumn('updated_at', timestampType(), (col) => col.notNull().defaultTo(nowDefault()))
@@ -1193,8 +1221,8 @@ export const InitialMigration: Migration = {
       .addColumn('attendee_id', varchar(32), (col) => col.notNull())
       .addColumn('email', varchar(255), (col) => col.notNull())
       .addColumn('phone', varchar(50))
-      .addColumn('email_opt_in', booleanType(), (col) => col.notNull().defaultTo(false))
-      .addColumn('sms_opt_in', booleanType(), (col) => col.notNull().defaultTo(false))
+      .addColumn('email_opt_in', booleanType(), (col) => col.notNull().defaultTo(falseDefault()))
+      .addColumn('sms_opt_in', booleanType(), (col) => col.notNull().defaultTo(falseDefault()))
       .addColumn('consent_text', textType(), (col) => col.notNull())
       .addColumn('consent_version', varchar(50), (col) => col.notNull())
       .addColumn('consented_at', timestampType(), (col) => col.notNull().defaultTo(nowDefault()))
@@ -1240,9 +1268,11 @@ export const InitialMigration: Migration = {
       .addColumn('provider_account_id', varchar(255), (col) => col.notNull())
       .addColumn('status', varchar(50), (col) => col.notNull().defaultTo('pending'))
       .addColumn('default_currency', varchar(3), (col) => col.notNull().defaultTo('USD'))
-      .addColumn('details_submitted', booleanType(), (col) => col.notNull().defaultTo(false))
-      .addColumn('charges_enabled', booleanType(), (col) => col.notNull().defaultTo(false))
-      .addColumn('payouts_enabled', booleanType(), (col) => col.notNull().defaultTo(false))
+      .addColumn('details_submitted', booleanType(), (col) =>
+        col.notNull().defaultTo(falseDefault()),
+      )
+      .addColumn('charges_enabled', booleanType(), (col) => col.notNull().defaultTo(falseDefault()))
+      .addColumn('payouts_enabled', booleanType(), (col) => col.notNull().defaultTo(falseDefault()))
       .addColumn('requirements', jsonType())
       .addColumn('disabled_reason', varchar(255))
       .addColumn('created_at', timestampType(), (col) => col.notNull().defaultTo(nowDefault()))
@@ -1273,7 +1303,7 @@ export const InitialMigration: Migration = {
       .addColumn('brand_id', varchar(32), (col) => col.notNull())
       .addColumn('email', varchar(255), (col) => col.notNull())
       .addColumn('name', varchar(255), (col) => col.notNull())
-      .addColumn('verified', booleanType(), (col) => col.notNull().defaultTo(false))
+      .addColumn('verified', booleanType(), (col) => col.notNull().defaultTo(falseDefault()))
       .addColumn('provider_type', varchar(50), (col) => col.notNull())
       .addColumn('created_at', timestampType(), (col) => col.notNull().defaultTo(nowDefault()))
       .addColumn('updated_at', timestampType(), (col) => col.notNull().defaultTo(nowDefault()))
@@ -1285,7 +1315,7 @@ export const InitialMigration: Migration = {
       .addColumn('id', varchar(32), (col) => col.primaryKey())
       .addColumn('tenant_id', varchar(32), (col) => col.notNull())
       .addColumn('key', varchar(100), (col) => col.notNull())
-      .addColumn('enabled', booleanType(), (col) => col.notNull().defaultTo(false))
+      .addColumn('enabled', booleanType(), (col) => col.notNull().defaultTo(falseDefault()))
       .addColumn('config', jsonType(), (col) => col.notNull())
       .addColumn('created_at', timestampType(), (col) => col.notNull().defaultTo(nowDefault()))
       .addColumn('updated_at', timestampType(), (col) => col.notNull().defaultTo(nowDefault()))

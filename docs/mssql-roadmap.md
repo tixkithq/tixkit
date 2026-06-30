@@ -23,6 +23,7 @@ Implemented helpers:
 | ------------------------- | ---------------------------------------------------------------------- |
 | `parseMssqlConnectionUrl` | Parses SQL Server URLs into tedious-compatible connection settings.    |
 | `createMssqlDialect`      | Creates a Kysely MSSQL dialect backed by `tedious`.                    |
+| `createMssqlLimitPlugin`  | Rewrites select `.limit()` nodes to SQL Server `TOP` / `OFFSET FETCH`. |
 | `mssqlObjectIdExists`     | Generates `OBJECT_ID()` existence checks for migration helpers.        |
 | `mssqlDropTableIfExists`  | Generates SQL Server-safe conditional table drops.                     |
 | `buildMssqlMergeUpsert`   | Generates `MERGE` SQL for upsert semantics.                            |
@@ -59,6 +60,16 @@ bun run --filter @tixkit/db lint
 
 CI includes a gated `integration-tests-mssql` job. It only runs when `RUN_MSSQL_TESTS` is enabled because the SQL Server container is heavier than the default Postgres/MySQL services.
 
+Fresh local proof on 2026-06-30 used a disposable SQL Server 2022 container and passed:
+
+```bash
+DB_INTEGRATION_DRIVER=mssql \
+DATABASE_URL_MSSQL=sqlserver://<user>:<password>@<host>:1433/tixkit?encrypt=true\&trustServerCertificate=true \
+bun run --filter @tixkit/db test:mssql
+```
+
+That run applied all 39 migrations and passed 12/12 DB integration tests.
+
 ## Remaining Work
 
-The current implementation provides dialect construction and correctness-critical SQL helpers. Full repository-by-repository MSSQL integration parity should be expanded as production customers select SQL Server as their primary database.
+The current implementation provides dialect construction, migrations, reset/truncate helpers, correctness-critical SQL helpers, and core DB integration coverage against SQL Server. Broader API/workflow/E2E MSSQL matrices can be expanded if production customers select SQL Server as their primary database.

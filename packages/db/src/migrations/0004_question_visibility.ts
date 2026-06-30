@@ -1,5 +1,5 @@
 import { sql } from 'kysely';
-import type { ColumnDataType, Kysely } from 'kysely';
+import type { ColumnDataType, Expression, Kysely } from 'kysely';
 import type { Migration } from 'kysely/migration';
 
 function varchar(len: number): ColumnDataType {
@@ -10,11 +10,38 @@ function isMysql() {
   return process.env.DB_DRIVER === 'mysql';
 }
 
+function isMssql() {
+  return process.env.DB_DRIVER === 'mssql';
+}
+
 function timestampType(): ColumnDataType {
-  return isMysql() ? 'timestamp' : 'timestamptz';
+  if (isMysql()) return 'timestamp';
+  if (isMssql()) return 'datetime2' as ColumnDataType;
+
+  return 'timestamptz';
+}
+
+function booleanType(): ColumnDataType | Expression<unknown> {
+  return isMssql() ? sql`bit` : 'boolean';
+}
+
+function falseDefault() {
+  return isMssql() ? sql`0` : false;
 }
 
 async function columnExists(db: Kysely<unknown>, columnName: string): Promise<boolean> {
+  if (isMssql()) {
+    const result = await sql<{ column_name: string }>`
+      select top 1 column_name
+      from information_schema.columns
+      where table_schema = schema_name()
+        and table_name = 'questions'
+        and column_name = ${columnName}
+    `.execute(db);
+
+    return result.rows.length > 0;
+  }
+
   const result = isMysql()
     ? await sql<{ column_name: string }>`
         select column_name
@@ -48,7 +75,7 @@ export const QuestionVisibilityMigration: Migration = {
     if (!(await columnExists(db, 'is_hidden'))) {
       await db.schema
         .alterTable('questions')
-        .addColumn('is_hidden', 'boolean', (col) => col.notNull().defaultTo(false))
+        .addColumn('is_hidden', booleanType(), (col) => col.notNull().defaultTo(falseDefault()))
         .execute();
     }
 

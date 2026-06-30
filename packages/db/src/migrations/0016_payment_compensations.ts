@@ -1,25 +1,33 @@
 import { sql } from 'kysely';
-import type { ColumnDataType } from 'kysely';
+import type { ColumnDataType, Expression } from 'kysely';
 import type { Migration } from 'kysely/migration';
 
 function varchar(len: number): ColumnDataType {
   return `varchar(${len})`;
 }
 
-function textType(): ColumnDataType {
+function textType(): ColumnDataType | Expression<unknown> {
+  if (process.env.DB_DRIVER === 'mssql') return sql`nvarchar(max)`;
+
   return 'text';
 }
 
 function timestampType(): ColumnDataType {
+  if (process.env.DB_DRIVER === 'mssql') return 'datetime2' as ColumnDataType;
+
   return process.env.DB_DRIVER === 'mysql' ? 'datetime' : 'timestamptz';
 }
 
-function jsonType(): ColumnDataType {
+function jsonType(): ColumnDataType | Expression<unknown> {
+  if (process.env.DB_DRIVER === 'mssql') return sql`nvarchar(max)`;
+
   return process.env.DB_DRIVER === 'mysql' ? 'json' : 'jsonb';
 }
 
 function nowDefault() {
-  return process.env.DB_DRIVER === 'mysql' ? sql`CURRENT_TIMESTAMP` : sql`now()`;
+  return process.env.DB_DRIVER === 'mysql' || process.env.DB_DRIVER === 'mssql'
+    ? sql`CURRENT_TIMESTAMP`
+    : sql`now()`;
 }
 
 export const PaymentCompensationsMigration: Migration = {

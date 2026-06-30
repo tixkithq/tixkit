@@ -239,7 +239,7 @@ describe('OrderSalesChannelMigration', () => {
     expect(source).toContain("process.env.DB_DRIVER === 'mysql'");
     expect(source).toContain("process.env.DB_DRIVER === 'mssql'");
     expect(source).toContain("if (isMssql()) return 'datetime2'");
-    expect(source).toContain("if (isMssql()) return 'nvarchar(max)'");
+    expect(source).toContain('if (isMssql()) return sql`nvarchar(max)`');
     expect(source).toContain('return isMysql() || isMssql()');
     expect(source).not.toContain("return isMysql() ? 'timestamp' : 'timestamptz'");
     expect(source).not.toContain("return isMysql() ? 'json' : 'jsonb'");

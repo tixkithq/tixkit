@@ -7,11 +7,15 @@ function varchar(len: number): ColumnDataType {
 }
 
 function timestampType(): ColumnDataType {
+  if (process.env.DB_DRIVER === 'mssql') return 'datetime2' as ColumnDataType;
+
   return process.env.DB_DRIVER === 'mysql' ? 'datetime' : 'timestamptz';
 }
 
 function nowDefault() {
-  return process.env.DB_DRIVER === 'mysql' ? sql`CURRENT_TIMESTAMP` : sql`now()`;
+  return process.env.DB_DRIVER === 'mysql' || process.env.DB_DRIVER === 'mssql'
+    ? sql`CURRENT_TIMESTAMP`
+    : sql`now()`;
 }
 
 export const WidgetImpressionsMigration: Migration = {

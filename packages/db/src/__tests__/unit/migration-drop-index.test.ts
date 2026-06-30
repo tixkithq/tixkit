@@ -9,6 +9,7 @@ const turboConfigPath = resolve(
   dirname(fileURLToPath(import.meta.url)),
   '../../../../../turbo.json',
 );
+const oauthGrantsMigrationPath = resolve(migrationDir, '0013_oauth_grants.ts');
 const marketingIntegrationsMigrationPath = resolve(migrationDir, '0014_marketing_integrations.ts');
 const marketingIntegrationsUniqueMigrationPath = resolve(
   migrationDir,
@@ -484,9 +485,7 @@ class FakeWebhookDeliveriesDb {
 
     if (statement.includes('information_schema.columns')) {
       return {
-        rows: this.requestedEndpointColumnExists
-          ? [{ column_name: 'requested_endpoint_id' }]
-          : [],
+        rows: this.requestedEndpointColumnExists ? [{ column_name: 'requested_endpoint_id' }] : [],
       };
     }
 
@@ -903,6 +902,46 @@ describe('nullable webhook delivery endpoint migration dialect safety', () => {
   });
 });
 
+describe('oauth grants migration dialect safety', () => {
+  it('uses SQL Server-compatible timestamp defaults and JSON storage', () => {
+    const source = readFileSync(oauthGrantsMigrationPath, 'utf8');
+    const upSource = migrationMethodSource(source, 'up');
+    const timestampTypeSource = sourceBetween(
+      source,
+      'function timestampType',
+      'function nowDefault',
+    );
+    const nowDefaultSource = sourceBetween(source, 'function nowDefault', 'function jsonType');
+    const jsonTypeSource = sourceBetween(
+      source,
+      'function jsonType',
+      'export const OAuthGrantsMigration',
+    );
+
+    expect(source).toContain("process.env.DB_DRIVER === 'mysql'");
+    expect(source).toContain("process.env.DB_DRIVER === 'mssql'");
+    expect(source).not.toContain("process.env.DB_DRIVER === 'mysql' ? 'datetime' : 'timestamptz'");
+    expect(source).not.toContain(
+      "process.env.DB_DRIVER === 'mysql' ? sql`CURRENT_TIMESTAMP` : sql`now()`",
+    );
+    expect(timestampTypeSource).toContain("if (isMssql()) return 'datetime2'");
+    expect(timestampTypeSource).toContain("return 'timestamptz'");
+    expect(nowDefaultSource).toContain('isMysql() || isMssql()');
+    expect(nowDefaultSource).toContain('sql`CURRENT_TIMESTAMP`');
+    expect(nowDefaultSource).toContain('sql`now()`');
+    expect(jsonTypeSource).toContain('if (isMssql()) return sql`nvarchar(max)`');
+    expect(jsonTypeSource).toContain("return 'json'");
+    expect(upSource).toContain("addColumn('scopes', jsonType()");
+    expect(upSource).not.toContain("addColumn('scopes', 'json'");
+    expectSourceOrder(
+      timestampTypeSource,
+      "if (isMssql()) return 'datetime2'",
+      "return 'timestamptz'",
+    );
+    expectSourceOrder(jsonTypeSource, 'if (isMssql()) return sql`nvarchar(max)`', "return 'json'");
+  });
+});
+
 describe('events brand slug migration safety', () => {
   it('drops older tenant/global slug constraints before adding brand-scoped uniqueness', () => {
     const source = readFileSync(eventsBrandSlugScopeMigrationPath, 'utf8');
@@ -978,7 +1017,9 @@ describe('webhook delivery endpoint history index migration safety', () => {
       expect.arrayContaining([
         expect.stringContaining('information_schema.columns'),
         expect.stringContaining('alter table webhook_deliveries add column requested_endpoint_id'),
-        expect.stringContaining('update webhook_deliveries set requested_endpoint_id = endpoint_id'),
+        expect.stringContaining(
+          'update webhook_deliveries set requested_endpoint_id = endpoint_id',
+        ),
         expect.stringContaining(
           'alter table webhook_deliveries modify requested_endpoint_id varchar(32) not null',
         ),
@@ -1245,9 +1286,9 @@ describe('marketing integrations base migration dialect safety', () => {
     expect(source).not.toContain("addColumn('consent_required', 'boolean'");
     expect(timestampTypeSource).toContain("if (isMssql()) return 'datetime2'");
     expect(timestampTypeSource).toContain("return 'timestamptz'");
-    expect(jsonTypeSource).toContain("if (isMssql()) return 'nvarchar(max)'");
+    expect(jsonTypeSource).toContain('if (isMssql()) return sql`nvarchar(max)`');
     expect(jsonTypeSource).toContain("return 'jsonb'");
-    expect(booleanTypeSource).toContain("if (isMssql()) return 'bit'");
+    expect(booleanTypeSource).toContain('if (isMssql()) return sql`bit`');
     expect(booleanTypeSource).toContain("return 'boolean'");
     expect(nowDefaultSource).toContain('isMysql() || isMssql()');
     expect(nowDefaultSource).toContain('sql`CURRENT_TIMESTAMP`');
@@ -1261,7 +1302,7 @@ describe('marketing integrations base migration dialect safety', () => {
       "if (isMssql()) return 'datetime2'",
       "return 'timestamptz'",
     );
-    expectSourceOrder(jsonTypeSource, "if (isMssql()) return 'nvarchar(max)'", "return 'jsonb'");
+    expectSourceOrder(jsonTypeSource, 'if (isMssql()) return sql`nvarchar(max)`', "return 'jsonb'");
     expectSourceOrder(downSource, ".on('marketing_integrations')", '.ifExists()');
     expectSourceOrder(downSource, '.ifExists()', "dropTable('marketing_integrations')");
   });

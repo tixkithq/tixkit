@@ -1,5 +1,5 @@
 import { sql } from 'kysely';
-import type { ColumnDataType } from 'kysely';
+import type { ColumnDataType, Expression } from 'kysely';
 import type { Migration } from 'kysely/migration';
 
 function varchar(len: number): ColumnDataType {
@@ -7,11 +7,21 @@ function varchar(len: number): ColumnDataType {
 }
 
 function timestampType(): ColumnDataType {
+  if (process.env.DB_DRIVER === 'mssql') return 'datetime2' as ColumnDataType;
+
   return process.env.DB_DRIVER === 'mysql' ? 'datetime' : 'timestamptz';
 }
 
 function nowDefault() {
-  return process.env.DB_DRIVER === 'mysql' ? sql`CURRENT_TIMESTAMP` : sql`now()`;
+  return process.env.DB_DRIVER === 'mysql' || process.env.DB_DRIVER === 'mssql'
+    ? sql`CURRENT_TIMESTAMP`
+    : sql`now()`;
+}
+
+function jsonType(): ColumnDataType | Expression<unknown> {
+  if (process.env.DB_DRIVER === 'mssql') return sql`nvarchar(max)`;
+
+  return 'json';
 }
 
 export const EventOccurrencesMigration: Migration = {
@@ -24,7 +34,7 @@ export const EventOccurrencesMigration: Migration = {
       .addColumn('starts_at', timestampType(), (col) => col.notNull())
       .addColumn('ends_at', timestampType(), (col) => col.notNull())
       .addColumn('timezone', varchar(64), (col) => col.notNull())
-      .addColumn('venue', 'json')
+      .addColumn('venue', jsonType())
       .addColumn('capacity', 'integer')
       .addColumn('sort_order', 'integer', (col) => col.notNull().defaultTo(0))
       .addColumn('status', varchar(32), (col) => col.notNull().defaultTo('scheduled'))

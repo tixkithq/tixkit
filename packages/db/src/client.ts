@@ -2,7 +2,7 @@ import { Kysely, PostgresDialect, MysqlDialect } from 'kysely';
 import { Pool as PgPool } from 'pg';
 import { createPool } from 'mysql2';
 import type { DB } from './types/db.js';
-import { createMssqlDialect } from './dialects/mssql.js';
+import { createMssqlDialect, createMssqlLimitPlugin } from './dialects/mssql.js';
 
 export type DbDriver = 'postgres' | 'mysql' | 'mssql';
 
@@ -58,6 +58,7 @@ export function createDb(dbUrl?: string): Kysely<DB> {
   if (driver === 'mssql') {
     return new Kysely<DB>({
       dialect: createMssqlDialect(url),
+      plugins: [createMssqlLimitPlugin()],
     });
   }
 

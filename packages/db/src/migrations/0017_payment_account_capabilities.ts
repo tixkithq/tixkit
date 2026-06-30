@@ -1,11 +1,20 @@
-import type { ColumnDataType, Kysely } from 'kysely';
+import { sql } from 'kysely';
+import type { ColumnDataType, Expression, Kysely } from 'kysely';
 import type { Migration } from 'kysely/migration';
 
-function booleanType(): ColumnDataType {
+function booleanType(): ColumnDataType | Expression<unknown> {
+  if (process.env.DB_DRIVER === 'mssql') return sql`bit`;
+
   return 'boolean';
 }
 
-function jsonType(): ColumnDataType {
+function falseDefault() {
+  return process.env.DB_DRIVER === 'mssql' ? sql`0` : false;
+}
+
+function jsonType(): ColumnDataType | Expression<unknown> {
+  if (process.env.DB_DRIVER === 'mssql') return sql`nvarchar(max)`;
+
   return process.env.DB_DRIVER === 'mysql' ? 'json' : 'jsonb';
 }
 
@@ -22,19 +31,25 @@ export const PaymentAccountCapabilitiesMigration: Migration = {
     if (!existing.has('details_submitted')) {
       await db.schema
         .alterTable('payment_accounts')
-        .addColumn('details_submitted', booleanType(), (col) => col.notNull().defaultTo(false))
+        .addColumn('details_submitted', booleanType(), (col) =>
+          col.notNull().defaultTo(falseDefault()),
+        )
         .execute();
     }
     if (!existing.has('charges_enabled')) {
       await db.schema
         .alterTable('payment_accounts')
-        .addColumn('charges_enabled', booleanType(), (col) => col.notNull().defaultTo(false))
+        .addColumn('charges_enabled', booleanType(), (col) =>
+          col.notNull().defaultTo(falseDefault()),
+        )
         .execute();
     }
     if (!existing.has('payouts_enabled')) {
       await db.schema
         .alterTable('payment_accounts')
-        .addColumn('payouts_enabled', booleanType(), (col) => col.notNull().defaultTo(false))
+        .addColumn('payouts_enabled', booleanType(), (col) =>
+          col.notNull().defaultTo(falseDefault()),
+        )
         .execute();
     }
     if (!existing.has('requirements')) {

@@ -1,5 +1,5 @@
 import { sql } from 'kysely';
-import type { ColumnDataType } from 'kysely';
+import type { ColumnDataType, Expression } from 'kysely';
 import type { Migration } from 'kysely/migration';
 
 function varchar(len: number): ColumnDataType {
@@ -7,18 +7,32 @@ function varchar(len: number): ColumnDataType {
 }
 
 function timestampType(): ColumnDataType {
+  if (process.env.DB_DRIVER === 'mssql') return 'datetime2' as ColumnDataType;
+
   return process.env.DB_DRIVER === 'mysql' ? 'datetime' : 'timestamptz';
 }
 
 function nowDefault() {
-  return process.env.DB_DRIVER === 'mysql' ? sql`CURRENT_TIMESTAMP` : sql`now()`;
+  return process.env.DB_DRIVER === 'mysql' || process.env.DB_DRIVER === 'mssql'
+    ? sql`CURRENT_TIMESTAMP`
+    : sql`now()`;
+}
+
+function booleanType(): ColumnDataType | Expression<unknown> {
+  return process.env.DB_DRIVER === 'mssql' ? sql`bit` : 'boolean';
+}
+
+function trueDefault() {
+  return process.env.DB_DRIVER === 'mssql' ? sql`1` : true;
 }
 
 export const WaitlistsMigration: Migration = {
   async up(db): Promise<void> {
     await db.schema
       .alterTable('events')
-      .addColumn('waitlist_auto_offer_enabled', 'boolean', (col) => col.notNull().defaultTo(true))
+      .addColumn('waitlist_auto_offer_enabled', booleanType(), (col) =>
+        col.notNull().defaultTo(trueDefault()),
+      )
       .addColumn('waitlist_offer_ttl_minutes', 'integer', (col) => col.notNull().defaultTo(1440))
       .execute();
 

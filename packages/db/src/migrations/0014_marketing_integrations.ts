@@ -1,5 +1,5 @@
 import { sql } from 'kysely';
-import type { ColumnDataType } from 'kysely';
+import type { ColumnDataType, Expression } from 'kysely';
 import type { Migration } from 'kysely/migration';
 
 function varchar(len: number): ColumnDataType {
@@ -21,15 +21,15 @@ function timestampType(): ColumnDataType {
   return 'timestamptz';
 }
 
-function jsonType(): ColumnDataType {
+function jsonType(): ColumnDataType | Expression<unknown> {
   if (isMysql()) return 'json';
-  if (isMssql()) return 'nvarchar(max)' as ColumnDataType;
+  if (isMssql()) return sql`nvarchar(max)`;
 
   return 'jsonb';
 }
 
-function booleanType(): ColumnDataType {
-  if (isMssql()) return 'bit' as ColumnDataType;
+function booleanType(): ColumnDataType | Expression<unknown> {
+  if (isMssql()) return sql`bit`;
   return 'boolean';
 }
 

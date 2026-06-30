@@ -1,17 +1,34 @@
 import { sql } from 'kysely';
-import type { ColumnDataType } from 'kysely';
+import type { ColumnDataType, Expression } from 'kysely';
 import type { Migration } from 'kysely/migration';
 
 function varchar(len: number): ColumnDataType {
   return `varchar(${len})`;
 }
 
+function isMysql() {
+  return process.env.DB_DRIVER === 'mysql';
+}
+
+function isMssql() {
+  return process.env.DB_DRIVER === 'mssql';
+}
+
 function timestampType(): ColumnDataType {
-  return process.env.DB_DRIVER === 'mysql' ? 'datetime' : 'timestamptz';
+  if (isMysql()) return 'datetime';
+  if (isMssql()) return 'datetime2' as ColumnDataType;
+
+  return 'timestamptz';
 }
 
 function nowDefault() {
-  return process.env.DB_DRIVER === 'mysql' ? sql`CURRENT_TIMESTAMP` : sql`now()`;
+  return isMysql() || isMssql() ? sql`CURRENT_TIMESTAMP` : sql`now()`;
+}
+
+function jsonType(): ColumnDataType | Expression<unknown> {
+  if (isMssql()) return sql`nvarchar(max)`;
+
+  return 'json';
 }
 
 export const OAuthGrantsMigration: Migration = {
@@ -25,7 +42,7 @@ export const OAuthGrantsMigration: Migration = {
       .addColumn('user_id', varchar(32))
       .addColumn('code_hash', varchar(64), (col) => col.notNull().unique())
       .addColumn('redirect_uri', varchar(2048), (col) => col.notNull())
-      .addColumn('scopes', 'json', (col) => col.notNull())
+      .addColumn('scopes', jsonType(), (col) => col.notNull())
       .addColumn('expires_at', timestampType(), (col) => col.notNull())
       .addColumn('consumed_at', timestampType())
       .addColumn('created_at', timestampType(), (col) => col.notNull().defaultTo(nowDefault()))
@@ -51,7 +68,7 @@ export const OAuthGrantsMigration: Migration = {
       .addColumn('tenant_id', varchar(32), (col) => col.notNull())
       .addColumn('organization_id', varchar(32), (col) => col.notNull())
       .addColumn('token_hash', varchar(64), (col) => col.notNull().unique())
-      .addColumn('scopes', 'json', (col) => col.notNull())
+      .addColumn('scopes', jsonType(), (col) => col.notNull())
       .addColumn('expires_at', timestampType(), (col) => col.notNull())
       .addColumn('revoked_at', timestampType())
       .addColumn('created_at', timestampType(), (col) => col.notNull().defaultTo(nowDefault()))
@@ -79,7 +96,7 @@ export const OAuthGrantsMigration: Migration = {
       .addColumn('tenant_id', varchar(32), (col) => col.notNull())
       .addColumn('organization_id', varchar(32), (col) => col.notNull())
       .addColumn('token_hash', varchar(64), (col) => col.notNull().unique())
-      .addColumn('scopes', 'json', (col) => col.notNull())
+      .addColumn('scopes', jsonType(), (col) => col.notNull())
       .addColumn('expires_at', timestampType(), (col) => col.notNull())
       .addColumn('revoked_at', timestampType())
       .addColumn('created_at', timestampType(), (col) => col.notNull().defaultTo(nowDefault()))
