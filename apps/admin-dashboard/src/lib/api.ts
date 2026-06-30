@@ -74,6 +74,11 @@ export type PageResult<T> = {
   total?: number;
 };
 
+type DuplicateContentDocumentResponse = {
+  document: AdminContentDocument;
+  versions: AdminContentDocumentVersion[];
+};
+
 // ---------------------------------------------------------------------------
 // View-model types (Tixkit Domain Contracts)
 // ---------------------------------------------------------------------------
@@ -5205,11 +5210,16 @@ export const adminApi: AdminApi = {
 
   async duplicateContentDocument(documentId, input) {
     return withFixture(
-      () =>
-        request<AdminContentDocument>(`/v1/content-documents/${documentId}/duplicate`, {
-          method: 'POST',
-          body: JSON.stringify(input ?? {}),
-        }),
+      async () => {
+        const result = await request<DuplicateContentDocumentResponse>(
+          `/v1/content-documents/${documentId}/duplicate`,
+          {
+            method: 'POST',
+            body: JSON.stringify(input ?? {}),
+          },
+        );
+        return result.ok ? ok(result.data.document) : result;
+      },
       () =>
         err<AdminContentDocument>(
           apiError('fixture_unavailable', 'Content duplication requires the live API', 503),

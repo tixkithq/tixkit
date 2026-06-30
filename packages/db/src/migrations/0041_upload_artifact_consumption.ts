@@ -5,7 +5,12 @@ function varchar(len: number): ColumnDataType {
   return `varchar(${len})`;
 }
 
+function isMssql(): boolean {
+  return process.env.DB_DRIVER === 'mssql';
+}
+
 function timestampType(): ColumnDataType {
+  if (isMssql()) return 'datetime2';
   return process.env.DB_DRIVER === 'mysql' ? 'datetime' : 'timestamptz';
 }
 

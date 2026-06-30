@@ -1,0 +1,38 @@
+labels:
+  app.kubernetes.io/part-of: tixkit-ci
+
+flags:
+  logLevel: info
+  logFormat: json
+  watchSingleNamespace: arc-runners
+  runnerMaxConcurrentReconciles: 4
+
+affinity:
+  nodeAffinity:
+    requiredDuringSchedulingIgnoredDuringExecution:
+      nodeSelectorTerms:
+        - matchExpressions:
+            - key: node-role.kubernetes.io/ci
+              operator: In
+              values:
+                - "true"
+
+tolerations:
+  - key: dedicated
+    operator: Equal
+    value: ci
+    effect: NoSchedule
+
+resources:
+  requests:
+    cpu: 250m
+    memory: 256Mi
+  limits:
+    cpu: 1
+    memory: 1Gi
+
+podAnnotations:
+  container.apparmor.security.beta.kubernetes.io/manager: runtime/default
+
+serviceAccount:
+  create: true

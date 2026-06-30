@@ -1,0 +1,68 @@
+githubConfigUrl: https://github.com/nkgotcode/tixkit
+runnerScaleSetName: tixkit-epyc-trusted
+runnerGroup: Default
+
+# Create the secret separately. GitHub App auth is preferred:
+# kubectl create secret generic arc-github-auth \
+#   -n arc-runners \
+#   --from-literal=github_app_id='<app_id>' \
+#   --from-literal=github_app_installation_id='<installation_id>' \
+#   --from-file=github_app_private_key=/path/to/private-key.pem
+githubConfigSecret: arc-github-auth
+
+maxRunners: 8
+minRunners: 0
+
+scaleSetLabels:
+  - tixkit
+  - trusted
+  - linux
+  - epyc
+
+containerMode:
+  type: dind
+
+template:
+  spec:
+    runtimeClassName: kata
+    restartPolicy: Never
+    nodeSelector:
+      node-role.kubernetes.io/ci: "true"
+    tolerations:
+      - key: dedicated
+        operator: Equal
+        value: ci
+        effect: NoSchedule
+    securityContext:
+      seccompProfile:
+        type: RuntimeDefault
+    containers:
+      - name: runner
+        image: ghcr.io/actions/actions-runner:latest
+        command:
+          - /home/runner/run.sh
+        securityContext:
+          allowPrivilegeEscalation: false
+          capabilities:
+            drop:
+              - ALL
+          readOnlyRootFilesystem: false
+    volumes:
+      - name: work
+        emptyDir: {}
+
+listenerTemplate:
+  spec:
+    nodeSelector:
+      node-role.kubernetes.io/ci: "true"
+    tolerations:
+      - key: dedicated
+        operator: Equal
+        value: ci
+        effect: NoSchedule
+    containers:
+      - name: listener
+
+controllerServiceAccount:
+  namespace: arc-systems
+  name: arc-gha-rs-controller

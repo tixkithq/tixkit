@@ -1,14 +1,21 @@
-name: Release Dry Run
+name: Trusted Release Dry Run
 
 on:
-  pull_request:
+  push:
     branches: [main]
   workflow_dispatch:
+
+concurrency:
+  group: trusted-release-dry-run-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
 
 jobs:
   release-dry-run:
     name: Build, Migrate, Render, Smoke
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, linux, tixkit, trusted]
     services:
       postgres:
         image: postgres:16-alpine
