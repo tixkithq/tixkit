@@ -328,7 +328,7 @@ test.describe('paid checkout capture workflow', () => {
     expect(publicListings.items[0]).not.toHaveProperty('ticketId');
 
     await page.goto(`${checkoutBaseUrl}/e/${encodeURIComponent(event.id)}`);
-    await expect(page.locator('header').getByRole('heading', { name: event.title })).toBeVisible();
+    await expect(page.getByRole('heading', { name: event.title, level: 1 })).toBeVisible();
     const resaleSection = page
       .locator('section')
       .filter({ has: page.getByRole('heading', { name: 'Resale tickets' }) });

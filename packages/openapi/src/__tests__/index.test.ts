@@ -610,6 +610,69 @@ describe('openApiSpec', () => {
     expect(checkoutSessionBody.properties.trackingId).toEqual({ type: 'string' });
   });
 
+  it('documents report contracts from live route shapes', () => {
+    expect(openApiSpec.components.schemas.SalesReport.properties.range).toEqual({
+      type: 'object',
+      properties: {
+        from: { type: 'string', format: 'date-time' },
+        to: { type: 'string', format: 'date-time' },
+      },
+      required: ['from', 'to'],
+    });
+    expect(openApiSpec.components.schemas.SalesReport.required).toContain('range');
+    expect(
+      openApiSpec.components.schemas.TaxReport.properties.breakdown.items.properties.rate,
+    ).toEqual({
+      type: ['number', 'null'],
+    });
+    expect(openApiSpec.paths['/events/{eventId}/reports/tax'].get.parameters).toEqual(
+      expect.arrayContaining([
+        {
+          name: 'from',
+          in: 'query',
+          required: false,
+          schema: { type: 'string', format: 'date-time' },
+        },
+        {
+          name: 'to',
+          in: 'query',
+          required: false,
+          schema: { type: 'string', format: 'date-time' },
+        },
+      ]),
+    );
+    expect(
+      openApiSpec.paths['/events/{eventId}/reports/attendance'].get.responses['200'].content[
+        'application/json'
+      ].schema,
+    ).toEqual({ $ref: '#/components/schemas/AttendanceReport' });
+    expect(
+      openApiSpec.paths['/events/{eventId}/reports/promo'].get.responses['200'].content[
+        'application/json'
+      ].schema,
+    ).toEqual({ $ref: '#/components/schemas/PromoReport' });
+    expect(
+      openApiSpec.paths['/organizations/{organizationId}/reports/affiliate'].get.responses['200']
+        .content['application/json'].schema,
+    ).toEqual({ $ref: '#/components/schemas/AffiliateReport' });
+    expect(openApiSpec.components.schemas.AttendanceReport.required).toEqual([
+      'eventId',
+      'totalAttendees',
+      'checkedIn',
+      'notCheckedIn',
+      'checkInRate',
+      'breakdownByTicketType',
+    ]);
+    expect(openApiSpec.components.schemas.PromoReport.required).toEqual([
+      'eventId',
+      'discountCodes',
+    ]);
+    expect(openApiSpec.components.schemas.AffiliateReport.required).toEqual([
+      'organizationId',
+      'affiliates',
+    ]);
+  });
+
   it('documents box-office order creation as an idempotent admin mutation', () => {
     const route = openApiSpec.paths['/events/{eventId}/box-office/orders'].post;
     expect(route.security).toEqual([{ BearerAuth: [] }, { ApiKey: [] }]);

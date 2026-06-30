@@ -60,7 +60,7 @@ const handoffUrl = checkoutUrl({
     const events = [];
     const output = document.getElementById('events');
     window.addEventListener('message', (message) => {
-      if (message.origin !== checkoutOrigin) return;
+      if (message.origin && message.origin !== checkoutOrigin) return;
       const raw = message.data || {};
       const type = raw.type ?? raw.event;
       if (!type) return;

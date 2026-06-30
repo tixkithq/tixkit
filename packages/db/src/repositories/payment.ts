@@ -159,6 +159,9 @@ export class PaymentCompensationRepository extends BaseRepository {
 
   async listForTenant(input: {
     tenantId: string;
+    organizationIds?: string[];
+    brandIds?: string[];
+    eventIds?: string[];
     status?: string;
     checkoutSessionId?: string;
     limit: number;
@@ -166,15 +169,39 @@ export class PaymentCompensationRepository extends BaseRepository {
   }) {
     let query = this.db
       .selectFrom('payment_compensations')
-      .selectAll()
-      .where('tenant_id', '=', input.tenantId)
-      .orderBy('id', 'asc')
+      .innerJoin(
+        'checkout_sessions',
+        'checkout_sessions.id',
+        'payment_compensations.checkout_session_id',
+      )
+      .innerJoin('events', 'events.id', 'checkout_sessions.event_id')
+      .selectAll('payment_compensations')
+      .where('payment_compensations.tenant_id', '=', input.tenantId)
+      .where('checkout_sessions.tenant_id', '=', input.tenantId)
+      .where('events.tenant_id', '=', input.tenantId)
+      .orderBy('payment_compensations.id', 'asc')
       .limit(input.limit + 1);
-    if (input.status) query = query.where('status', '=', input.status);
-    if (input.checkoutSessionId) {
-      query = query.where('checkout_session_id', '=', input.checkoutSessionId);
+    if (input.organizationIds) {
+      query =
+        input.organizationIds.length > 0
+          ? query.where('events.organization_id', 'in', input.organizationIds)
+          : query.where('events.organization_id', 'in', ['__none__']);
     }
-    if (input.cursor) query = query.where('id', '>', input.cursor);
+    if (input.brandIds && input.brandIds.length > 0) {
+      query = query.where('checkout_sessions.brand_id', 'in', input.brandIds);
+    }
+    if (input.eventIds && input.eventIds.length > 0) {
+      query = query.where('checkout_sessions.event_id', 'in', input.eventIds);
+    }
+    if (input.status) query = query.where('payment_compensations.status', '=', input.status);
+    if (input.checkoutSessionId) {
+      query = query.where(
+        'payment_compensations.checkout_session_id',
+        '=',
+        input.checkoutSessionId,
+      );
+    }
+    if (input.cursor) query = query.where('payment_compensations.id', '>', input.cursor);
     return query.execute();
   }
 

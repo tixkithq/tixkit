@@ -1,34 +1,66 @@
 import { createHmac } from 'node:crypto';
-import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
+import { execFileSync, spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
+import { createServer } from 'node:net';
 import { test, expect } from './fixtures/validation-test';
 import { expectNoAxeViolations } from './helpers/axe';
 
-const NUXT_DEMO_URL = 'http://127.0.0.1:3312';
-const ASTRO_DEMO_URL = 'http://127.0.0.1:3313';
-const REMIX_DEMO_URL = 'http://127.0.0.1:3314';
+let nuxtDemoUrl = 'http://127.0.0.1:3312';
+let astroDemoUrl = 'http://127.0.0.1:3313';
+let remixDemoUrl = 'http://127.0.0.1:3314';
 const CHECKOUT_ORIGIN = 'http://localhost:3201';
 const WEBHOOK_SECRET = 'whsec_demo_framework';
 const REPO_ROOT = process.cwd();
-const servers: ChildProcessWithoutNullStreams[] = [];
+const servers: Array<{ child: ChildProcessWithoutNullStreams; label: string; logs: string[] }> = [];
 
 function startServer(
+  label: string,
   command: string,
   args: string[],
   cwd: string,
   env: Record<string, string>,
-): ChildProcessWithoutNullStreams {
+): void {
   const child = spawn(command, args, {
     cwd,
     env: { ...process.env, ...env },
+    detached: true,
     stdio: 'pipe',
   });
-  servers.push(child);
-  return child;
+  const server = { child, label, logs: [] };
+  child.stdout.on('data', (chunk: Buffer) => {
+    server.logs.push(chunk.toString());
+    if (server.logs.length > 50) server.logs.splice(0, server.logs.length - 50);
+  });
+  child.stderr.on('data', (chunk: Buffer) => {
+    server.logs.push(chunk.toString());
+    if (server.logs.length > 50) server.logs.splice(0, server.logs.length - 50);
+  });
+  servers.push(server);
 }
 
-async function waitForHttp(url: string): Promise<void> {
+async function availablePort(): Promise<number> {
+  return await new Promise<number>((resolve, reject) => {
+    const server = createServer();
+    server.once('error', reject);
+    server.listen(0, '127.0.0.1', () => {
+      const address = server.address();
+      if (!address || typeof address === 'string') {
+        server.close(() => reject(new Error('Unable to allocate a loopback port')));
+        return;
+      }
+      server.close(() => resolve(address.port));
+    });
+  });
+}
+
+async function waitForHttp(url: string, serverLabel: string): Promise<void> {
   const startedAt = Date.now();
   while (Date.now() - startedAt < 60_000) {
+    const server = servers.find((entry) => entry.label === serverLabel);
+    if (server?.child.exitCode !== null && server.child.exitCode !== 0) {
+      throw new Error(
+        `${serverLabel} exited with code ${server.child.exitCode} before ${url} became healthy:\n${server.logs.join('')}`,
+      );
+    }
     try {
       const response = await fetch(url);
       if (response.ok || response.status === 404) return;
@@ -46,12 +78,38 @@ function tixkitSignature(body: string, secret: string): string {
   return `t=${timestamp},v1=${digest}`;
 }
 
+function stopFrameworkDevServers(): void {
+  for (const [pkg, args] of [
+    ['@tixkit/sdk-astro-demo', ['dev', 'stop']],
+    ['@tixkit/sdk-nuxt-demo', ['clean']],
+  ] as const) {
+    try {
+      execFileSync('bun', ['run', '--filter', pkg, ...args], {
+        cwd: REPO_ROOT,
+        stdio: 'ignore',
+      });
+    } catch {
+      // Best-effort cleanup for framework dev daemons left behind by retries.
+    }
+  }
+}
+
 test.describe.configure({ mode: 'serial' });
 
 test.beforeAll(async () => {
   test.setTimeout(180_000);
+  stopFrameworkDevServers();
+  const [nuxtPort, astroPort, remixPort] = await Promise.all([
+    availablePort(),
+    availablePort(),
+    availablePort(),
+  ]);
+  nuxtDemoUrl = `http://127.0.0.1:${nuxtPort}`;
+  astroDemoUrl = `http://127.0.0.1:${astroPort}`;
+  remixDemoUrl = `http://127.0.0.1:${remixPort}`;
 
   startServer(
+    'sdk-nuxt-demo',
     'bun',
     [
       'run',
@@ -62,17 +120,19 @@ test.beforeAll(async () => {
       '--host',
       '127.0.0.1',
       '--port',
-      '3312',
+      String(nuxtPort),
     ],
     REPO_ROOT,
     {
       NUXT_PUBLIC_TIXKIT_CHECKOUT_URL: CHECKOUT_ORIGIN,
-      PORT: '3312',
+      NUXT_IGNORE_LOCK: '1',
+      PORT: String(nuxtPort),
       TIXKIT_WEBHOOK_SECRET: WEBHOOK_SECRET,
     },
   );
 
   startServer(
+    'sdk-astro-demo',
     'bun',
     [
       'run',
@@ -83,17 +143,18 @@ test.beforeAll(async () => {
       '--host',
       '127.0.0.1',
       '--port',
-      '3313',
+      String(astroPort),
     ],
     REPO_ROOT,
     {
       PUBLIC_TIXKIT_CHECKOUT_URL: CHECKOUT_ORIGIN,
-      PORT: '3313',
+      PORT: String(astroPort),
       TIXKIT_WEBHOOK_SECRET: WEBHOOK_SECRET,
     },
   );
 
   startServer(
+    'sdk-remix-demo',
     'bun',
     [
       'run',
@@ -104,40 +165,53 @@ test.beforeAll(async () => {
       '--host',
       '127.0.0.1',
       '--port',
-      '3314',
+      String(remixPort),
     ],
     REPO_ROOT,
     {
-      PORT: '3314',
+      PORT: String(remixPort),
       TIXKIT_CHECKOUT_URL: CHECKOUT_ORIGIN,
       TIXKIT_WEBHOOK_SECRET: WEBHOOK_SECRET,
     },
   );
   await Promise.all([
-    waitForHttp(NUXT_DEMO_URL),
-    waitForHttp(ASTRO_DEMO_URL),
-    waitForHttp(REMIX_DEMO_URL),
+    waitForHttp(nuxtDemoUrl, 'sdk-nuxt-demo'),
+    waitForHttp(astroDemoUrl, 'sdk-astro-demo'),
+    waitForHttp(remixDemoUrl, 'sdk-remix-demo'),
   ]);
 });
 
 test.afterAll(async () => {
   await Promise.all(
     servers.map(
-      (server) =>
+      ({ child }) =>
         new Promise<void>((resolve) => {
-          if (server.exitCode !== null) {
+          if (child.exitCode !== null) {
             resolve();
             return;
           }
-          server.once('exit', () => resolve());
-          server.kill('SIGTERM');
+          child.once('exit', () => resolve());
+          try {
+            if (child.pid) process.kill(-child.pid, 'SIGTERM');
+            else child.kill('SIGTERM');
+          } catch {
+            child.kill('SIGTERM');
+          }
           setTimeout(() => {
-            if (server.exitCode === null) server.kill('SIGKILL');
+            if (child.exitCode === null) {
+              try {
+                if (child.pid) process.kill(-child.pid, 'SIGKILL');
+                else child.kill('SIGKILL');
+              } catch {
+                child.kill('SIGKILL');
+              }
+            }
             resolve();
           }, 2_000).unref();
         }),
     ),
   );
+  stopFrameworkDevServers();
 });
 
 // Intercept the widget iframe's checkout request so it loads clean HTML
@@ -157,7 +231,7 @@ test('Nuxt demo renders widget iframe, checkout handoff, lifecycle, and verifies
   request,
 }, testInfo) => {
   await attachConsoleAndRoute(page);
-  await page.goto(NUXT_DEMO_URL);
+  await page.goto(nuxtDemoUrl);
   await expect(page.getByRole('heading', { name: 'Tixkit Nuxt Demo' })).toBeVisible();
 
   const widget = page.locator('iframe[title="Tixkit Ticket Widget"]');
@@ -178,7 +252,7 @@ test('Nuxt demo renders widget iframe, checkout handoff, lifecycle, and verifies
   await expect(page.getByLabel('Tixkit lifecycle events')).toContainText('order_completed');
 
   const body = JSON.stringify({ id: 'wevt_nuxt_demo', type: 'order.completed' });
-  const response = await request.post(`${NUXT_DEMO_URL}/api/tixkit/webhook`, {
+  const response = await request.post(`${nuxtDemoUrl}/api/tixkit/webhook`, {
     data: body,
     headers: {
       'content-type': 'application/json',
@@ -188,7 +262,7 @@ test('Nuxt demo renders widget iframe, checkout handoff, lifecycle, and verifies
   await expect(response).toBeOK();
   await expect(await response.json()).toMatchObject({ received: true, handledBy: 'sdk-nuxt-demo' });
 
-  const badResponse = await request.post(`${NUXT_DEMO_URL}/api/tixkit/webhook`, {
+  const badResponse = await request.post(`${nuxtDemoUrl}/api/tixkit/webhook`, {
     data: body,
     headers: { 'content-type': 'application/json', 'tixkit-signature': 't=1,v1=bad' },
   });
@@ -206,7 +280,7 @@ test('Astro demo renders widget iframe, checkout handoff, lifecycle, and verifie
   request,
 }, testInfo) => {
   await attachConsoleAndRoute(page);
-  await page.goto(ASTRO_DEMO_URL);
+  await page.goto(astroDemoUrl);
   await expect(page.getByRole('heading', { name: 'Tixkit Astro Demo' })).toBeVisible();
 
   const widget = page.locator('iframe[title="Tixkit Ticket Widget"]');
@@ -227,7 +301,7 @@ test('Astro demo renders widget iframe, checkout handoff, lifecycle, and verifie
   await expect(page.getByLabel('Tixkit lifecycle events')).toContainText('order_completed');
 
   const body = JSON.stringify({ id: 'wevt_astro_demo', type: 'order.completed' });
-  const response = await request.post(`${ASTRO_DEMO_URL}/api/tixkit/webhook`, {
+  const response = await request.post(`${astroDemoUrl}/api/tixkit/webhook`, {
     data: body,
     headers: {
       'content-type': 'application/json',
@@ -240,7 +314,7 @@ test('Astro demo renders widget iframe, checkout handoff, lifecycle, and verifie
     handledBy: 'sdk-astro-demo',
   });
 
-  const badResponse = await request.post(`${ASTRO_DEMO_URL}/api/tixkit/webhook`, {
+  const badResponse = await request.post(`${astroDemoUrl}/api/tixkit/webhook`, {
     data: body,
     headers: { 'content-type': 'application/json', 'tixkit-signature': 't=1,v1=bad' },
   });
@@ -258,7 +332,7 @@ test('Remix demo renders widget iframe, checkout handoff, lifecycle, and verifie
   request,
 }, testInfo) => {
   await attachConsoleAndRoute(page);
-  await page.goto(REMIX_DEMO_URL);
+  await page.goto(remixDemoUrl);
   await expect(page.getByRole('heading', { name: 'Tixkit Remix Demo' })).toBeVisible();
 
   const widget = page.locator('iframe[title="Tixkit Ticket Widget"]');
@@ -279,7 +353,7 @@ test('Remix demo renders widget iframe, checkout handoff, lifecycle, and verifie
   await expect(page.getByLabel('Tixkit lifecycle events')).toContainText('order_completed');
 
   const body = JSON.stringify({ id: 'wevt_remix_demo', type: 'order.completed' });
-  const response = await request.post(`${REMIX_DEMO_URL}/api/tixkit-webhook`, {
+  const response = await request.post(`${remixDemoUrl}/api/tixkit-webhook`, {
     data: body,
     headers: {
       'content-type': 'application/json',
@@ -292,7 +366,7 @@ test('Remix demo renders widget iframe, checkout handoff, lifecycle, and verifie
     handledBy: 'sdk-remix-demo',
   });
 
-  const badResponse = await request.post(`${REMIX_DEMO_URL}/api/tixkit-webhook`, {
+  const badResponse = await request.post(`${remixDemoUrl}/api/tixkit-webhook`, {
     data: body,
     headers: { 'content-type': 'application/json', 'tixkit-signature': 't=1,v1=bad' },
   });

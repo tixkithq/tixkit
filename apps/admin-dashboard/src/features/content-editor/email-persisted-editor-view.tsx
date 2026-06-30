@@ -10,7 +10,6 @@ import {
   Columns2,
   Copy,
   Eye,
-  FileJson,
   Image,
   Link,
   MapPin,
@@ -53,6 +52,7 @@ import {
 
 type AutosaveState = 'idle' | 'saving' | 'saved' | 'error';
 type EmailReviewState = 'idle' | 'checking' | 'checked' | 'error';
+type EmailInspectorPanelId = 'style' | 'components' | 'variables' | 'history' | 'issues' | 'json';
 
 type EditorPreview = {
   label: string;
@@ -209,7 +209,7 @@ const emailVariableInserts = [
 const emailCategoryOptions = ['transactional', 'bulk', 'staff', 'system'] as const;
 
 const textInputClassName =
-  'h-9 w-full border-0 border-b border-black/10 bg-transparent px-0 text-sm text-black outline-none transition placeholder:text-black/35 focus:border-black';
+  'h-10 w-full min-w-0 rounded-sm border-0 bg-transparent px-0 text-sm font-medium text-black outline-none transition placeholder:text-black/35 focus:outline-none focus-visible:outline-none disabled:cursor-not-allowed disabled:opacity-60';
 const darkInputClassName =
   'h-9 w-full rounded-md border border-white/10 bg-white/5 px-3 text-sm text-white outline-none transition placeholder:text-white/35 focus:border-white/35 disabled:cursor-not-allowed disabled:opacity-50';
 
@@ -424,22 +424,21 @@ function issueBadgeClassName(issue: ContentValidationIssue): string {
 function NativeEmailInspector({ host }: { host: HTMLElement | null }) {
   if (!host) return null;
   return createPortal(
-    <Inspector.Root
-      aria-label="React Email style inspector"
-      className="tixkit-email-native-inspector"
-    >
-      <div className="space-y-1 border-b border-white/10 pb-3">
-        <p className="text-xs uppercase tracking-wide text-white/40">Selection</p>
-        <div className="text-sm font-semibold text-white">
-          <Inspector.Breadcrumb />
+    <div className="tixkit-email-native-inspector">
+      <Inspector.Root aria-label="React Email style inspector">
+        <div className="space-y-1 border-b border-white/10 pb-3">
+          <p className="text-xs uppercase tracking-wide text-white/60">Selection</p>
+          <div className="text-sm font-semibold text-white">
+            <Inspector.Breadcrumb />
+          </div>
         </div>
-      </div>
-      <div className="space-y-5">
-        <Inspector.Document />
-        <Inspector.Node />
-        <Inspector.Text />
-      </div>
-    </Inspector.Root>,
+        <div className="space-y-5">
+          <Inspector.Document />
+          <Inspector.Node />
+          <Inspector.Text />
+        </div>
+      </Inspector.Root>
+    </div>,
     host,
   );
 }
@@ -453,7 +452,7 @@ function withEditorExport(
   document: EmailTemplateDocument,
   exported: { html: string; text: string; json: Record<string, unknown> },
 ): EmailTemplateDocument {
-  const contentText = exported.text.trim() || plainTextFromHtml(exported.html);
+  const contentText = plainTextFromHtml(exported.html) || exported.text.trim();
   return {
     ...document,
     editor: {
@@ -513,7 +512,7 @@ function PreviewDrawer({ onClose, preview }: { onClose: () => void; preview: Edi
     >
       <div className="flex h-14 items-center justify-between border-b border-white/10 px-4">
         <div>
-          <p className="text-xs uppercase tracking-wide text-white/45">{preview.format}</p>
+          <p className="text-xs uppercase tracking-wide text-white/60">{preview.format}</p>
           <h2 className="text-sm font-semibold">{preview.label}</h2>
         </div>
         <button
@@ -538,10 +537,9 @@ export function EmailPersistedEditorView({ eventId }: { eventId: string }) {
   const [draft, setDraft] = React.useState<AdminContentDocumentVersion>();
   const [versions, setVersions] = React.useState<AdminContentDocumentVersion[]>([]);
   const [emailDocument, setEmailDocument] = React.useState<EmailTemplateDocument>();
-  const [inspectorPanelId, setInspectorPanelId] = React.useState<
-    'style' | 'components' | 'variables' | 'history' | 'issues' | 'json'
-  >('style');
+  const [inspectorPanelId, setInspectorPanelId] = React.useState<EmailInspectorPanelId>('style');
   const [inspectorCollapsed, setInspectorCollapsed] = React.useState(false);
+  const [insertDrawerOpen, setInsertDrawerOpen] = React.useState(false);
   const [moreActionsOpen, setMoreActionsOpen] = React.useState(false);
   const [reviewIssues, setReviewIssues] = React.useState<ContentValidationIssue[]>([]);
   const [reviewState, setReviewState] = React.useState<EmailReviewState>('idle');
@@ -554,6 +552,8 @@ export function EmailPersistedEditorView({ eventId }: { eventId: string }) {
   const [error, setError] = React.useState<string>();
   const [actionError, setActionError] = React.useState<string>();
   const [notice, setNotice] = React.useState<string>();
+  const editorCanvasRef = React.useRef<HTMLElement | null>(null);
+  const inspectorRef = React.useRef<HTMLElement | null>(null);
   const operationIdRef = React.useRef(0);
   const emailEditorRef = React.useRef<EmailEditorRef | null>(null);
 
@@ -677,15 +677,75 @@ export function EmailPersistedEditorView({ eventId }: { eventId: string }) {
     void load();
   }, [load]);
 
+  React.useEffect(() => {
+    if (typeof window === 'undefined' || typeof window.matchMedia !== 'function') return;
+    if (window.matchMedia('(max-width: 1023px)').matches) {
+      setInspectorCollapsed(true);
+    }
+  }, []);
+
   const isArchived = document?.status === 'archived';
   const canEdit = !isArchived;
 
-  function openInspectorPanel(panelId: typeof inspectorPanelId) {
+  React.useEffect(() => {
+    const canvas = editorCanvasRef.current;
+    const inspector = inspectorRef.current;
+    if (!canvas && !inspector) return;
+    const labelEmailBody = () => {
+      if (!canvas) return;
+      const editor = canvas.querySelector<HTMLElement>(
+        '[contenteditable="true"], [contenteditable=""], [role="textbox"]:not(input):not(textarea)',
+      );
+      editor?.setAttribute('aria-label', 'Email body');
+    };
+    const labelInspectorControls = () => {
+      if (!inspector) return;
+      const contrastNodes = inspector.querySelectorAll<HTMLElement>(
+        '[data-re-inspector-breadcrumb-button], [data-re-inspector-label]',
+      );
+      for (const node of contrastNodes) {
+        node.style.color = 'rgb(229 229 229)';
+      }
+      const inputs = inspector.querySelectorAll<HTMLInputElement>(
+        'input[data-re-inspector-input], input[data-re-inspector-color-trigger], input[data-re-inspector-color-hex]',
+      );
+      for (const input of inputs) {
+        if (input.getAttribute('aria-label')) continue;
+        const row = input.closest<HTMLElement>('[data-re-inspector-prop-row]');
+        const section = input.closest<HTMLElement>('[data-re-inspector-section]');
+        const rowLabel =
+          Array.from(row?.children ?? [])
+            .find((child) => !child.contains(input))
+            ?.textContent?.trim() || 'Inspector property';
+        const sectionLabel =
+          section
+            ?.querySelector<HTMLElement>('[data-re-inspector-section-toggle]')
+            ?.textContent?.trim() || 'Style';
+        const inputLabel = input.hasAttribute('data-re-inspector-color-trigger')
+          ? `${sectionLabel} ${rowLabel} color picker`
+          : input.hasAttribute('data-re-inspector-color-hex')
+            ? `${sectionLabel} ${rowLabel} hex color`
+            : `${sectionLabel} ${rowLabel}`;
+        input.setAttribute('aria-label', inputLabel);
+      }
+    };
+    const labelEditorAccessibility = () => {
+      labelEmailBody();
+      labelInspectorControls();
+    };
+    labelEditorAccessibility();
+    const observer = new MutationObserver(labelEditorAccessibility);
+    if (canvas) observer.observe(canvas, { childList: true, subtree: true });
+    if (inspector) observer.observe(inspector, { childList: true, subtree: true });
+    return () => observer.disconnect();
+  }, [draft?.id, emailDocument, inspectorCollapsed, inspectorPanelId]);
+
+  function openInspectorPanel(panelId: EmailInspectorPanelId) {
     setInspectorPanelId(panelId);
     setInspectorCollapsed(false);
   }
 
-  function openMenuInspectorPanel(panelId: typeof inspectorPanelId) {
+  function openMenuInspectorPanel(panelId: EmailInspectorPanelId) {
     openInspectorPanel(panelId);
     setMoreActionsOpen(false);
   }
@@ -980,10 +1040,23 @@ export function EmailPersistedEditorView({ eventId }: { eventId: string }) {
   const history = versionSummaries(versions);
   const issuePanelIssues = reviewState === 'idle' ? draft.validation.issues : reviewIssues;
   const issuePanelTitle = reviewState === 'checked' ? 'Current draft review' : 'Saved draft review';
+  const inspectorHeading: Record<EmailInspectorPanelId, { eyebrow: string; title: string }> = {
+    style: { eyebrow: 'Page style', title: 'React Email inspector' },
+    components: { eyebrow: 'Components', title: 'Insert email sections' },
+    variables: { eyebrow: 'Variables', title: 'Insert merge tags' },
+    history: { eyebrow: 'Version history', title: `${history.length} versions` },
+    issues: { eyebrow: 'Publish blockers', title: issuePanelTitle },
+    json: { eyebrow: 'Editor JSON', title: 'Saved payload' },
+  };
 
   return (
-    <section className="min-h-svh overflow-hidden bg-neutral-950 text-white" data-channel="email">
-      <header className="grid h-16 grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-4 border-b border-white/10 px-4">
+    <section
+      aria-label="Email content editor"
+      className="h-screen min-h-screen overflow-hidden bg-neutral-950 text-white"
+      data-channel="email"
+      data-testid="content-editor-shell"
+    >
+      <header className="grid h-16 grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-2 border-b border-white/10 px-3 sm:gap-4 sm:px-4">
         <a
           aria-label="Back to event"
           className="inline-flex size-9 items-center justify-center rounded-md border border-white/10 text-white/70 hover:bg-white/10 hover:text-white"
@@ -991,9 +1064,9 @@ export function EmailPersistedEditorView({ eventId }: { eventId: string }) {
         >
           <ChevronLeft className="size-4" />
         </a>
-        <div className="min-w-0 text-center">
+        <div className="hidden min-w-0 text-center md:block">
           <div className="flex min-w-0 items-center justify-center gap-2 text-sm text-white/55">
-            <span className="truncate">Templates</span>
+            <h1 className="truncate text-sm font-semibold text-white">Email template editor</h1>
             <span>/</span>
             <button
               className="min-w-0 truncate font-semibold text-white"
@@ -1014,32 +1087,22 @@ export function EmailPersistedEditorView({ eventId }: { eventId: string }) {
           </div>
           {(notice || actionError) && (
             <p
-              className={`mt-1 truncate text-xs ${actionError ? 'text-red-200' : 'text-white/45'}`}
+              className={`mt-1 truncate text-xs ${actionError ? 'text-red-200' : 'text-white/60'}`}
             >
               {actionError ?? notice}
             </p>
           )}
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex min-w-0 items-center justify-end gap-1.5 sm:gap-2">
           <button
             aria-label="Open preview"
             className="inline-flex size-9 items-center justify-center rounded-md border border-white/10 text-white/70 hover:bg-white/10 hover:text-white disabled:cursor-not-allowed disabled:opacity-40"
             disabled={Boolean(archivedReason)}
-            onClick={() => setPreviewOpen(true)}
+            onClick={() => void previewSavedDraft()}
             title={archivedReason}
             type="button"
           >
             <Eye className="size-4" />
-          </button>
-          <button
-            className="inline-flex h-9 items-center gap-2 rounded-md border border-white/10 px-3 text-sm font-medium text-white/80 hover:bg-white/10 disabled:cursor-not-allowed disabled:opacity-40"
-            disabled={Boolean(archivedReason)}
-            onClick={() => void sendTest()}
-            title={archivedReason}
-            type="button"
-          >
-            <Send className="size-4" />
-            Send test
           </button>
           <div className="relative">
             <button
@@ -1078,6 +1141,14 @@ export function EmailPersistedEditorView({ eventId }: { eventId: string }) {
                   Template details
                 </button>
                 <button
+                  className="flex w-full items-center gap-2 rounded-md px-2 py-2 text-left text-white/80 hover:bg-white/10"
+                  onClick={() => openMenuInspectorPanel('json')}
+                  type="button"
+                >
+                  <Code className="size-4" />
+                  View JSON payload
+                </button>
+                <button
                   className="flex w-full items-center gap-2 rounded-md px-2 py-2 text-left text-white/80 hover:bg-white/10 disabled:cursor-not-allowed disabled:opacity-40"
                   disabled={reviewState === 'checking'}
                   onClick={() => {
@@ -1088,6 +1159,31 @@ export function EmailPersistedEditorView({ eventId }: { eventId: string }) {
                 >
                   <Eye className="size-4" />
                   Review blockers
+                </button>
+                <button
+                  aria-label="Send test"
+                  className="flex w-full items-center gap-2 rounded-md px-2 py-2 text-left text-white/80 hover:bg-white/10 disabled:cursor-not-allowed disabled:opacity-40"
+                  disabled={Boolean(archivedReason)}
+                  onClick={() => {
+                    setMoreActionsOpen(false);
+                    void sendTest();
+                  }}
+                  type="button"
+                >
+                  <Send className="size-4" />
+                  Send test
+                </button>
+                <button
+                  className="flex w-full items-center gap-2 rounded-md px-2 py-2 text-left text-white/80 hover:bg-white/10 disabled:cursor-not-allowed disabled:opacity-40"
+                  disabled={Boolean(archivedReason)}
+                  onClick={() => {
+                    setMoreActionsOpen(false);
+                    void saveDraft();
+                  }}
+                  type="button"
+                >
+                  <Save className="size-4" />
+                  Save draft
                 </button>
                 <div className="my-1 border-t border-white/10" />
                 <button
@@ -1117,7 +1213,7 @@ export function EmailPersistedEditorView({ eventId }: { eventId: string }) {
             )}
           </div>
           <button
-            className="inline-flex h-9 items-center gap-2 rounded-md bg-white px-4 text-sm font-semibold text-black hover:bg-white/90 disabled:cursor-not-allowed disabled:opacity-50"
+            className="inline-flex h-9 items-center gap-2 rounded-md bg-white px-3 text-sm font-semibold text-black hover:bg-white/90 disabled:cursor-not-allowed disabled:opacity-50 sm:px-4"
             disabled={Boolean(archivedReason)}
             onClick={() => void publishDraft()}
             type="button"
@@ -1128,7 +1224,7 @@ export function EmailPersistedEditorView({ eventId }: { eventId: string }) {
       </header>
 
       <div
-        className={`grid h-[calc(100svh-4rem)] grid-cols-[4rem_minmax(0,1fr)] ${
+        className={`grid h-[calc(100vh-4rem)] min-h-0 grid-cols-1 ${
           inspectorCollapsed
             ? 'lg:grid-cols-[4rem_minmax(0,1fr)]'
             : 'lg:grid-cols-[4rem_minmax(0,1fr)_22rem]'
@@ -1136,7 +1232,7 @@ export function EmailPersistedEditorView({ eventId }: { eventId: string }) {
       >
         <aside
           aria-label="Insert content"
-          className="flex flex-col items-center gap-2 border-r border-white/10 bg-neutral-950 px-2 py-5"
+          className="hidden flex-col items-center gap-2 border-r border-white/10 bg-neutral-950 px-2 py-5 lg:flex"
         >
           {emailInsertActions.map((action) => (
             <button
@@ -1153,98 +1249,102 @@ export function EmailPersistedEditorView({ eventId }: { eventId: string }) {
           ))}
         </aside>
 
-        <main className="min-w-0 overflow-auto rounded-tl-3xl bg-white text-black">
-          <div className="mx-auto min-h-full w-full max-w-[600px] px-6 py-10">
-            <div className="space-y-3" data-testid="email-metadata-bar">
-              <div className="grid gap-x-8 gap-y-2 sm:grid-cols-2">
-                <label className="grid grid-cols-[5rem_minmax(0,1fr)] items-center gap-4 text-sm text-black/55">
-                  From
-                  <input
-                    aria-label="From"
-                    className={textInputClassName}
-                    disabled={!canEdit}
-                    onChange={(change) => {
-                      updateEmailDocument({
-                        ...emailDocument,
-                        settings: {
-                          ...emailDocument.settings,
-                          sender: {
-                            ...emailDocument.settings.sender,
-                            fromEmail: change.currentTarget.value,
-                          },
+        <section
+          aria-label="email template editable document"
+          className="min-h-0 min-w-0 overflow-auto bg-white text-black lg:rounded-tl-3xl"
+          data-testid="editor-canvas"
+          ref={editorCanvasRef}
+        >
+          <div className="mx-auto min-h-full w-full max-w-5xl px-5 py-8 sm:px-6 sm:py-10">
+            <div
+              className="tixkit-editor-metadata mx-auto grid w-full max-w-[600px] border-b border-black/10"
+              data-testid="email-metadata-bar"
+            >
+              <label className="grid min-h-12 grid-cols-[6rem_minmax(0,1fr)] items-center gap-4 border-t border-black/10 text-sm text-black/55">
+                From
+                <input
+                  aria-label="From"
+                  className={textInputClassName}
+                  disabled={!canEdit}
+                  onChange={(change) => {
+                    updateEmailDocument({
+                      ...emailDocument,
+                      settings: {
+                        ...emailDocument.settings,
+                        sender: {
+                          ...emailDocument.settings.sender,
+                          fromEmail: change.currentTarget.value,
                         },
-                      });
-                    }}
-                    type="email"
-                    value={emailDocument.settings.sender.fromEmail ?? ''}
-                  />
-                </label>
-                <label className="grid grid-cols-[5rem_minmax(0,1fr)] items-center gap-4 text-sm text-black/55">
-                  Reply-To
-                  <input
-                    aria-label="Reply-To"
-                    className={textInputClassName}
-                    disabled={!canEdit}
-                    onChange={(change) => {
-                      updateEmailDocument({
-                        ...emailDocument,
-                        settings: {
-                          ...emailDocument.settings,
-                          sender: {
-                            ...emailDocument.settings.sender,
-                            replyToEmail: change.currentTarget.value,
-                          },
+                      },
+                    });
+                  }}
+                  type="email"
+                  value={emailDocument.settings.sender.fromEmail ?? ''}
+                />
+              </label>
+              <label className="grid min-h-12 grid-cols-[6rem_minmax(0,1fr)] items-center gap-4 border-t border-black/10 text-sm text-black/55">
+                Reply-To
+                <input
+                  aria-label="Reply-To"
+                  className={textInputClassName}
+                  disabled={!canEdit}
+                  onChange={(change) => {
+                    updateEmailDocument({
+                      ...emailDocument,
+                      settings: {
+                        ...emailDocument.settings,
+                        sender: {
+                          ...emailDocument.settings.sender,
+                          replyToEmail: change.currentTarget.value,
                         },
-                      });
-                    }}
-                    type="email"
-                    value={emailDocument.settings.sender.replyToEmail ?? ''}
-                  />
-                </label>
-              </div>
-              <div className="grid gap-x-8 gap-y-2 sm:grid-cols-[minmax(0,1fr)_12rem]">
-                <label className="grid grid-cols-[5rem_minmax(0,1fr)] items-center gap-4 text-sm text-black/55">
-                  Subject
-                  <input
-                    aria-label="Subject"
-                    className={textInputClassName}
-                    disabled={!canEdit}
-                    onChange={(change) => {
-                      updateEmailDocument({
-                        ...emailDocument,
-                        settings: {
-                          ...emailDocument.settings,
-                          subject: change.currentTarget.value,
-                        },
-                      });
-                    }}
-                    placeholder="Subject"
-                    value={emailDocument.settings.subject}
-                  />
-                </label>
-                <label className="grid grid-cols-[5rem_minmax(0,1fr)] items-center gap-4 text-sm text-black/55">
-                  Preview
-                  <input
-                    aria-label="Preview text"
-                    className={textInputClassName}
-                    disabled={!canEdit}
-                    onChange={(change) => {
-                      updateEmailDocument({
-                        ...emailDocument,
-                        settings: {
-                          ...emailDocument.settings,
-                          previewText: change.currentTarget.value,
-                        },
-                      });
-                    }}
-                    placeholder="Preview text"
-                    value={emailDocument.settings.previewText ?? ''}
-                  />
-                </label>
-              </div>
+                      },
+                    });
+                  }}
+                  type="email"
+                  value={emailDocument.settings.sender.replyToEmail ?? ''}
+                />
+              </label>
+              <label className="grid min-h-12 grid-cols-[6rem_minmax(0,1fr)] items-center gap-4 border-t border-black/10 text-sm text-black/55">
+                Subject
+                <input
+                  aria-label="Subject"
+                  className={textInputClassName}
+                  disabled={!canEdit}
+                  onChange={(change) => {
+                    updateEmailDocument({
+                      ...emailDocument,
+                      settings: {
+                        ...emailDocument.settings,
+                        subject: change.currentTarget.value,
+                      },
+                    });
+                  }}
+                  placeholder="Subject"
+                  value={emailDocument.settings.subject}
+                />
+              </label>
+              <label className="grid min-h-12 grid-cols-[6rem_minmax(0,1fr)] items-center gap-4 border-t border-black/10 text-sm text-black/55">
+                Preview text
+                <input
+                  aria-label="Preview text"
+                  className={textInputClassName}
+                  disabled={!canEdit}
+                  onChange={(change) => {
+                    updateEmailDocument({
+                      ...emailDocument,
+                      settings: {
+                        ...emailDocument.settings,
+                        previewText: change.currentTarget.value,
+                      },
+                    });
+                  }}
+                  placeholder="Preview text"
+                  value={emailDocument.settings.previewText ?? ''}
+                />
+              </label>
             </div>
 
-            <div className="mt-6 border-t border-black/10 pt-6">
+            <div className="mx-auto mt-8 w-full max-w-[600px]">
               <EmailEditor
                 key={draft.id}
                 ref={emailEditorRef}
@@ -1265,40 +1365,23 @@ export function EmailPersistedEditorView({ eventId }: { eventId: string }) {
               </EmailEditor>
             </div>
           </div>
-        </main>
+        </section>
 
         <aside
           aria-label="Email inspector"
-          className={`col-span-2 min-h-0 overflow-auto border-t border-white/10 bg-neutral-950 p-4 lg:col-span-1 lg:border-l lg:border-t-0 ${
+          className={`fixed inset-x-0 bottom-0 z-40 max-h-[78vh] min-h-0 overflow-auto rounded-t-2xl border-t border-white/10 bg-neutral-950 p-4 shadow-2xl lg:static lg:col-span-1 lg:max-h-none lg:rounded-none lg:border-l lg:border-t-0 lg:shadow-none ${
             inspectorCollapsed ? 'hidden' : ''
           }`}
+          ref={inspectorRef}
         >
-          <div className="grid grid-cols-[minmax(0,1fr)_2.25rem] gap-2">
-            <div className="grid grid-cols-6 gap-1" aria-label="Email inspector modes">
-              {[
-                { id: 'style', label: 'Style', icon: <Palette className="size-4" /> },
-                { id: 'components', label: 'Components', icon: <Sparkles className="size-4" /> },
-                { id: 'variables', label: 'Variables', icon: <Variable className="size-4" /> },
-                { id: 'history', label: 'History', icon: <Save className="size-4" /> },
-                { id: 'issues', label: 'Issues', icon: <Eye className="size-4" /> },
-                { id: 'json', label: 'JSON', icon: <FileJson className="size-4" /> },
-              ].map((panel) => (
-                <button
-                  aria-label={panel.label}
-                  aria-pressed={inspectorPanelId === panel.id}
-                  className={`inline-flex h-9 items-center justify-center rounded-md border text-xs ${
-                    inspectorPanelId === panel.id
-                      ? 'border-white/30 bg-white text-black'
-                      : 'border-white/10 text-white/60 hover:bg-white/10 hover:text-white'
-                  }`}
-                  key={panel.id}
-                  onClick={() => openInspectorPanel(panel.id as typeof inspectorPanelId)}
-                  title={panel.label}
-                  type="button"
-                >
-                  {panel.icon}
-                </button>
-              ))}
+          <div className="flex items-start justify-between gap-3 border-b border-white/10 pb-4">
+            <div className="min-w-0">
+              <p className="text-xs uppercase tracking-wide text-white/60">
+                {inspectorHeading[inspectorPanelId].eyebrow}
+              </p>
+              <h2 className="mt-1 truncate font-semibold">
+                {inspectorHeading[inspectorPanelId].title}
+              </h2>
             </div>
             <button
               aria-label="Collapse inspector"
@@ -1313,10 +1396,6 @@ export function EmailPersistedEditorView({ eventId }: { eventId: string }) {
 
           {inspectorPanelId === 'style' && (
             <section className="mt-6 space-y-5 text-sm">
-              <div>
-                <p className="text-xs uppercase tracking-wide text-white/40">Page style</p>
-                <h2 className="mt-1 font-semibold">React Email inspector</h2>
-              </div>
               <div
                 className="min-h-[24rem]"
                 data-testid="native-email-inspector-host"
@@ -1396,44 +1475,22 @@ export function EmailPersistedEditorView({ eventId }: { eventId: string }) {
               </label>
               <dl className="space-y-3 text-xs">
                 <div className="flex justify-between gap-4 border-b border-white/10 pb-3">
-                  <dt className="text-white/45">Brand scope</dt>
+                  <dt className="text-white/60">Brand scope</dt>
                   <dd className="max-w-[12rem] truncate font-mono text-white/80">
                     {document.brandId}
                   </dd>
                 </div>
                 <div className="flex justify-between gap-4 border-b border-white/10 pb-3">
-                  <dt className="text-white/45">Event scope</dt>
+                  <dt className="text-white/60">Event scope</dt>
                   <dd className="max-w-[12rem] truncate font-mono text-white/80">
                     {document.eventId ?? 'brand'}
                   </dd>
                 </div>
               </dl>
-              <button
-                className="inline-flex h-9 w-full items-center justify-center gap-2 rounded-md border border-white/10 text-sm font-medium text-white/80 hover:bg-white/10 disabled:cursor-not-allowed disabled:opacity-40"
-                disabled={!canEdit}
-                onClick={() => void saveDraft()}
-                type="button"
-              >
-                <Save className="size-4" />
-                Save draft
-              </button>
-              <button
-                className="inline-flex h-9 w-full items-center justify-center gap-2 rounded-md border border-white/10 text-sm font-medium text-white/80 hover:bg-white/10 disabled:cursor-not-allowed disabled:opacity-40"
-                disabled={!canEdit}
-                onClick={() => void previewSavedDraft()}
-                type="button"
-              >
-                <Eye className="size-4" />
-                Preview
-              </button>
             </section>
           )}
           {inspectorPanelId === 'components' && (
             <section className="mt-6 space-y-4 text-sm">
-              <div>
-                <p className="text-xs uppercase tracking-wide text-white/40">Components</p>
-                <h2 className="mt-1 font-semibold">Insert email sections</h2>
-              </div>
               <div className="grid gap-2">
                 {emailComponentInserts.map((component) => (
                   <button
@@ -1447,7 +1504,7 @@ export function EmailPersistedEditorView({ eventId }: { eventId: string }) {
                       {component.icon}
                       <span>{component.label}</span>
                     </span>
-                    <span className="mt-1 block text-xs text-white/45">
+                    <span className="mt-1 block text-xs text-white/60">
                       {component.description}
                     </span>
                   </button>
@@ -1458,10 +1515,6 @@ export function EmailPersistedEditorView({ eventId }: { eventId: string }) {
 
           {inspectorPanelId === 'variables' && (
             <section className="mt-6 space-y-4 text-sm">
-              <div>
-                <p className="text-xs uppercase tracking-wide text-white/40">Variables</p>
-                <h2 className="mt-1 font-semibold">Insert merge tags</h2>
-              </div>
               <div className="grid gap-2">
                 {emailVariableInserts.map((key) => (
                   <button
@@ -1480,15 +1533,11 @@ export function EmailPersistedEditorView({ eventId }: { eventId: string }) {
 
           {inspectorPanelId === 'history' && (
             <section className="mt-6 space-y-4 text-sm">
-              <div>
-                <p className="text-xs uppercase tracking-wide text-white/40">Version history</p>
-                <h2 className="mt-1 font-semibold">{history.length} versions</h2>
-              </div>
               <ol className="space-y-2">
                 {history.map((version) => (
                   <li className="rounded-md border border-white/10 p-3 text-xs" key={version.id}>
                     <div className="font-medium text-white">{version.label}</div>
-                    <div className="mt-1 text-white/45">{version.timestamp}</div>
+                    <div className="mt-1 text-white/60">{version.timestamp}</div>
                   </li>
                 ))}
               </ol>
@@ -1497,10 +1546,6 @@ export function EmailPersistedEditorView({ eventId }: { eventId: string }) {
 
           {inspectorPanelId === 'issues' && (
             <section className="mt-6 space-y-4 text-sm">
-              <div>
-                <p className="text-xs uppercase tracking-wide text-white/40">Publish blockers</p>
-                <h2 className="mt-1 font-semibold">{issuePanelTitle}</h2>
-              </div>
               <button
                 className="inline-flex h-9 w-full items-center justify-center gap-2 rounded-md border border-white/10 text-sm font-medium text-white/80 hover:bg-white/10 disabled:cursor-not-allowed disabled:opacity-40"
                 disabled={!canEdit || reviewState === 'checking'}
@@ -1541,10 +1586,6 @@ export function EmailPersistedEditorView({ eventId }: { eventId: string }) {
 
           {inspectorPanelId === 'json' && (
             <section className="mt-6 space-y-4 text-sm">
-              <div>
-                <p className="text-xs uppercase tracking-wide text-white/40">Editor JSON</p>
-                <h2 className="mt-1 font-semibold">Saved payload</h2>
-              </div>
               <pre className="max-h-[42rem] overflow-auto rounded-md border border-white/10 bg-white/5 p-3 text-xs leading-5 text-white/75">
                 {JSON.stringify(emailDocument, null, 2)}
               </pre>
@@ -1562,6 +1603,56 @@ export function EmailPersistedEditorView({ eventId }: { eventId: string }) {
             <PanelRightOpen className="size-4" />
             Inspector
           </button>
+        )}
+
+        <button
+          aria-label="Open insert menu"
+          className="fixed bottom-4 left-16 z-20 inline-flex h-10 items-center gap-2 rounded-md border border-white/10 bg-neutral-950 px-3 text-sm font-medium text-white/80 shadow-2xl hover:bg-neutral-900 hover:text-white lg:hidden"
+          disabled={!canEdit}
+          onClick={() => setInsertDrawerOpen(true)}
+          type="button"
+        >
+          <Sparkles className="size-4" />
+          Insert
+        </button>
+
+        {insertDrawerOpen && (
+          <aside
+            aria-label="Mobile insert content"
+            className="fixed inset-x-0 bottom-0 z-50 max-h-[78vh] overflow-auto rounded-t-2xl border-t border-white/10 bg-neutral-950 p-4 text-white shadow-2xl lg:hidden"
+          >
+            <div className="flex items-start justify-between gap-3 border-b border-white/10 pb-4">
+              <div>
+                <p className="text-xs uppercase tracking-wide text-white/60">Insert</p>
+                <h2 className="mt-1 font-semibold">Add email content</h2>
+              </div>
+              <button
+                aria-label="Close insert menu"
+                className="inline-flex h-9 items-center justify-center rounded-md border border-white/10 px-2 text-white/60 hover:bg-white/10 hover:text-white"
+                onClick={() => setInsertDrawerOpen(false)}
+                type="button"
+              >
+                <PanelRightClose className="size-4" />
+              </button>
+            </div>
+            <div className="mt-4 grid gap-2">
+              {emailInsertActions.map((action) => (
+                <button
+                  className="flex min-h-11 items-center gap-3 rounded-md border border-white/10 px-3 py-2 text-left text-sm font-medium text-white/85 hover:bg-white/10 disabled:cursor-not-allowed disabled:opacity-40"
+                  disabled={!canEdit}
+                  key={action.id}
+                  onClick={() => {
+                    setInsertDrawerOpen(false);
+                    insertEmailAction(action.id);
+                  }}
+                  type="button"
+                >
+                  {action.icon}
+                  {action.label}
+                </button>
+              ))}
+            </div>
+          </aside>
         )}
       </div>
 

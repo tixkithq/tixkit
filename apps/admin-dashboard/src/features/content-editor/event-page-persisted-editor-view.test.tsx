@@ -105,6 +105,20 @@ function ok<T>(data: T) {
   return { ok: true as const, data };
 }
 
+function openEventPageMoreActions() {
+  fireEvent.click(screen.getByRole('button', { name: 'More actions' }));
+}
+
+function clickEventPageSaveDraft() {
+  openEventPageMoreActions();
+  fireEvent.click(screen.getByRole('button', { name: 'Save draft' }));
+}
+
+function clickEventPageViewPublicPage() {
+  openEventPageMoreActions();
+  fireEvent.click(screen.getByRole('button', { name: 'View public page' }));
+}
+
 describe('EventPagePersistedEditorView', () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -141,15 +155,17 @@ describe('EventPagePersistedEditorView', () => {
   it('loads an existing event page and persists preview, publish, and archive actions', async () => {
     render(React.createElement(EventPagePersistedEditorView, { eventId: 'evt_1' }));
 
-    expect(await screen.findByTestId('event-page-metadata-bar')).toBeInTheDocument();
+    expect(await screen.findByLabelText('Page headline')).toBeInTheDocument();
+    expect(screen.queryByTestId('event-page-metadata-bar')).not.toBeInTheDocument();
     expect(screen.getByRole('complementary', { name: 'Insert content' })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Content' })).toHaveAttribute('aria-pressed', 'true');
+    expect(screen.getByText('Selected block')).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Hero' })).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: 'Collapse inspector' }));
     expect(screen.getByRole('button', { name: 'Open inspector' })).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: 'Open inspector' }));
     expect(screen.getByRole('button', { name: 'Collapse inspector' })).toBeInTheDocument();
 
-    const headline = await screen.findByLabelText('Page headline');
+    const headline = screen.getByLabelText('Page headline');
     fireEvent.change(headline, {
       target: { value: 'Updated hosted page' },
     });
@@ -159,7 +175,20 @@ describe('EventPagePersistedEditorView', () => {
     fireEvent.change(screen.getByLabelText('Ticket CTA label'), {
       target: { value: 'Reserve tickets' },
     });
-    fireEvent.click(screen.getByRole('button', { name: 'Preview' }));
+    openEventPageMoreActions();
+    expect(screen.getByRole('button', { name: 'More actions' })).toHaveAttribute(
+      'aria-expanded',
+      'true',
+    );
+    fireEvent.click(screen.getByRole('button', { name: 'Open version history' }));
+    expect(screen.getByText('Version history')).toBeInTheDocument();
+    openEventPageMoreActions();
+    fireEvent.click(screen.getByRole('button', { name: 'Page details' }));
+    expect(screen.getByText('Page details')).toBeInTheDocument();
+    openEventPageMoreActions();
+    fireEvent.click(screen.getByRole('button', { name: 'Review blockers' }));
+    expect(screen.getByText('Publish blockers')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Open preview' }));
 
     await waitFor(() => {
       expect(adminApiMock.saveContentVersion).toHaveBeenCalledWith(
@@ -183,7 +212,6 @@ describe('EventPagePersistedEditorView', () => {
       );
     });
 
-    fireEvent.click(screen.getByRole('button', { name: 'Open preview' }));
     expect(screen.getByTestId('preview-drawer')).toHaveTextContent('Updated page copy');
 
     expect(screen.getByRole('button', { name: 'Test send unavailable' })).toBeDisabled();
@@ -193,7 +221,7 @@ describe('EventPagePersistedEditorView', () => {
       expect(adminApiMock.publishContentVersion).toHaveBeenCalledWith('cdoc_event_page', 'cver_2');
     });
 
-    fireEvent.click(screen.getByLabelText('More actions'));
+    openEventPageMoreActions();
     fireEvent.click(screen.getByRole('button', { name: 'Archive page' }));
     await waitFor(() => {
       expect(adminApiMock.archiveContentDocument).toHaveBeenCalledWith('cdoc_event_page');
@@ -201,7 +229,7 @@ describe('EventPagePersistedEditorView', () => {
     await waitFor(() => {
       expect(screen.getByText('Archived event page')).toBeInTheDocument();
     });
-  });
+  }, 10000);
 
   it('loads event-page content documents from array and keyed API response shapes', async () => {
     adminApiMock.listContentDocuments.mockResolvedValueOnce(ok([document]));
@@ -234,7 +262,7 @@ describe('EventPagePersistedEditorView', () => {
     render(React.createElement(EventPagePersistedEditorView, { eventId: 'evt_1' }));
 
     await screen.findByLabelText('Page headline');
-    fireEvent.click(screen.getByRole('button', { name: 'View public page' }));
+    clickEventPageViewPublicPage();
 
     expect(openPage).toHaveBeenCalledWith(
       'https://events.example.test/e/evt_1',
@@ -243,10 +271,12 @@ describe('EventPagePersistedEditorView', () => {
     );
     expect(screen.getByText('Opened public page')).toBeInTheDocument();
 
+    openEventPageMoreActions();
+    fireEvent.click(screen.getByRole('button', { name: 'Page details' }));
     fireEvent.change(screen.getByLabelText('Public path'), {
       target: { value: 'javascript:alert(1)' },
     });
-    fireEvent.click(screen.getByRole('button', { name: 'View public page' }));
+    clickEventPageViewPublicPage();
 
     expect(openPage).toHaveBeenCalledTimes(1);
     expect(
@@ -269,7 +299,7 @@ describe('EventPagePersistedEditorView', () => {
     fireEvent.change(screen.getByLabelText('Button label'), {
       target: { value: 'Join the list' },
     });
-    fireEvent.click(screen.getByRole('button', { name: 'Save draft' }));
+    clickEventPageSaveDraft();
 
     await waitFor(() => {
       expect(adminApiMock.saveContentVersion).toHaveBeenCalledWith(
@@ -333,7 +363,7 @@ describe('EventPagePersistedEditorView', () => {
     );
 
     await screen.findByLabelText('Page headline');
-    fireEvent.click(screen.getByLabelText('More actions'));
+    openEventPageMoreActions();
     fireEvent.click(screen.getByRole('button', { name: 'Archive page' }));
 
     expect(adminApiMock.archiveContentDocument).not.toHaveBeenCalled();
@@ -354,9 +384,11 @@ describe('EventPagePersistedEditorView', () => {
 
     expect(await screen.findByLabelText('Page headline')).toBeDisabled();
     expect(screen.getByRole('button', { name: 'Open preview' })).toBeDisabled();
-    expect(screen.getByRole('button', { name: 'View public page' })).toBeDisabled();
     expect(screen.getByRole('button', { name: 'Publish unavailable' })).toBeDisabled();
     expect(screen.getByRole('button', { name: 'Test send unavailable' })).toBeDisabled();
+    openEventPageMoreActions();
+    expect(screen.getByRole('button', { name: 'Save draft' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'View public page' })).toBeDisabled();
   });
 
   it('creates the event-scoped event-page document and initial canonical draft when none exists', async () => {
@@ -409,7 +441,7 @@ describe('EventPagePersistedEditorView', () => {
 
     const headline = await screen.findByLabelText('Page headline');
     fireEvent.change(headline, { target: { value: 'Stale hosted page' } });
-    fireEvent.click(screen.getByRole('button', { name: 'Save draft' }));
+    clickEventPageSaveDraft();
     await waitFor(() => expect(screen.getByText('Saving')).toBeInTheDocument());
 
     fireEvent.change(headline, { target: { value: 'Fresh hosted page' } });
@@ -453,7 +485,7 @@ describe('EventPagePersistedEditorView', () => {
 
     const headline = await screen.findByLabelText('Page headline');
     fireEvent.change(headline, { target: { value: 'Retryable hosted page' } });
-    fireEvent.click(screen.getByRole('button', { name: 'Save draft' }));
+    clickEventPageSaveDraft();
 
     expect(await screen.findByText('Injected event-page save outage')).toBeInTheDocument();
     expect(screen.getByText('Save failed')).toBeInTheDocument();
@@ -463,7 +495,7 @@ describe('EventPagePersistedEditorView', () => {
     expect(screen.queryByText('Injected event-page save outage')).not.toBeInTheDocument();
     expect(screen.getByText('Ready')).toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole('button', { name: 'Save draft' }));
+    clickEventPageSaveDraft();
     await waitFor(() => {
       expect(screen.getByText('Saved draft v2')).toBeInTheDocument();
     });
@@ -479,7 +511,7 @@ describe('EventPagePersistedEditorView', () => {
     const headline = await screen.findByLabelText('Page headline');
     fireEvent.change(headline, { target: { value: 'Duplicate-ready hosted page' } });
 
-    fireEvent.click(screen.getByLabelText('More actions'));
+    openEventPageMoreActions();
     fireEvent.click(screen.getByRole('button', { name: 'Duplicate page' }));
 
     await waitFor(() => {

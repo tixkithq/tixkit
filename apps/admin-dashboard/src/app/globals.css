@@ -215,26 +215,143 @@
     pointer-events: none;
   }
 
-  .tixkit-email-native-inspector {
-    display: grid;
-    gap: 1.25rem;
-    color: rgb(255 255 255 / 82%);
+  .tixkit-editor-metadata input,
+  .tixkit-editor-metadata input:focus,
+  .tixkit-editor-metadata input:focus-visible {
+    appearance: none;
+    border: 0 !important;
+    background: transparent;
+    box-shadow: none !important;
+    outline: none !important;
   }
 
-  .tixkit-email-native-inspector input,
-  .tixkit-email-native-inspector select,
-  .tixkit-email-native-inspector textarea,
-  .tixkit-email-native-inspector button {
+  .tixkit-email-native-inspector {
+    display: grid;
+    gap: 1rem;
+    color: rgb(255 255 255 / 82%);
+    font-size: 0.8125rem;
+  }
+
+  .tixkit-email-native-inspector * {
+    box-sizing: border-box;
     letter-spacing: 0;
   }
 
-  .tixkit-email-native-inspector input,
-  .tixkit-email-native-inspector textarea {
-    color: rgb(255 255 255 / 88%);
+  .tixkit-email-native-inspector [data-re-inspector-breadcrumb-button],
+  .tixkit-email-native-inspector [data-re-inspector-section-toggle] {
+    border: 0;
+    background: transparent;
+    color: inherit;
+    font: inherit;
+    padding: 0;
   }
 
-  .tixkit-email-native-inspector button {
-    color: inherit;
+  .tixkit-email-native-inspector [data-re-inspector-breadcrumb-button] {
+    color: rgb(255 255 255);
+    font-weight: 600;
+  }
+
+  .tixkit-email-native-inspector [data-re-inspector-section] {
+    display: grid;
+    gap: 0.625rem;
+    border-bottom: 1px solid rgb(255 255 255 / 10%);
+    padding-bottom: 1rem;
+  }
+
+  .tixkit-email-native-inspector [data-re-inspector-section]:last-child {
+    border-bottom: 0;
+    padding-bottom: 0;
+  }
+
+  .tixkit-email-native-inspector [data-re-inspector-section-toggle] {
+    display: flex;
+    min-height: 2rem;
+    width: 100%;
+    align-items: center;
+    justify-content: space-between;
+    color: rgb(255 255 255 / 92%);
+    font-weight: 650;
+  }
+
+  .tixkit-email-native-inspector [data-re-inspector-section-body] {
+    display: grid;
+    gap: 0.5rem;
+  }
+
+  .tixkit-email-native-inspector [data-re-inspector-prop-row] {
+    display: grid;
+    min-height: 2.25rem;
+    grid-template-columns: minmax(0, 7.25rem) minmax(0, 1fr);
+    align-items: center;
+    gap: 0.75rem;
+  }
+
+  .tixkit-email-native-inspector [data-re-inspector-label] {
+    min-width: 0;
+    overflow: hidden;
+    color: rgb(255 255 255 / 60%);
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .tixkit-email-native-inspector [data-re-inspector-color-control] {
+    display: grid;
+    min-width: 0;
+    grid-template-columns: 2rem minmax(0, 1fr);
+    align-items: center;
+    gap: 0.5rem;
+  }
+
+  .tixkit-email-native-inspector [data-re-inspector-color-trigger] {
+    height: 2rem;
+    width: 2rem;
+    overflow: hidden;
+    border: 1px solid rgb(255 255 255 / 12%);
+    border-radius: 0.5rem;
+    background: rgb(255 255 255 / 7%);
+    padding: 2px;
+  }
+
+  .tixkit-email-native-inspector [data-re-inspector-color-hex],
+  .tixkit-email-native-inspector [data-re-inspector-input] {
+    min-width: 0;
+    height: 2rem;
+    border: 1px solid rgb(255 255 255 / 12%);
+    border-radius: 0.5rem;
+    background: rgb(255 255 255 / 7%);
+    padding: 0 0.625rem;
+    color: rgb(255 255 255 / 88%);
+    font: inherit;
+    outline: none;
+  }
+
+  .tixkit-email-native-inspector [data-re-inspector-color-hex]:focus,
+  .tixkit-email-native-inspector [data-re-inspector-input]:focus {
+    border-color: rgb(255 255 255 / 35%);
+  }
+
+  .tixkit-email-native-inspector [data-re-inspector-number] {
+    display: grid;
+    min-width: 0;
+    grid-template-columns: minmax(0, 1fr) 2.5rem;
+    overflow: hidden;
+    border: 1px solid rgb(255 255 255 / 12%);
+    border-radius: 0.5rem;
+    background: rgb(255 255 255 / 7%);
+  }
+
+  .tixkit-email-native-inspector [data-re-inspector-number] [data-re-inspector-input] {
+    border: 0;
+    border-radius: 0;
+    background: transparent;
+  }
+
+  .tixkit-email-native-inspector [data-re-inspector-unit] {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-left: 1px solid rgb(255 255 255 / 10%);
+    color: rgb(255 255 255 / 50%);
   }
 
   .tixkit-event-page-builder,

@@ -325,6 +325,7 @@ export function validateEmailTemplate(
     code: 'unsafe_editor_html',
     field: 'editor.contentHtml',
     message: 'Editor HTML may not contain active HTML, scripting attributes, or unsafe URLs',
+    allowEmailDocumentShell: true,
   })) {
     issues.push(issue);
   }
@@ -402,7 +403,7 @@ export async function renderEmailTemplate(
       previewText,
       html: renderHtml(document.editor.contentHtml, context),
       text: renderPlain(
-        document.editor.contentText?.trim() || plainTextFromHtml(document.editor.contentHtml),
+        plainTextFromHtml(document.editor.contentHtml) || document.editor.contentText?.trim() || '',
         context,
       ),
       validation,
@@ -605,7 +606,7 @@ function collectTemplateStrings(document: EmailTemplateDocument): string[] {
     document.settings.previewText ?? '',
     document.settings.sender.fromName ?? '',
     document.editor.contentHtml,
-    document.editor.contentText ?? '',
+    document.editor.contentJson ? '' : (document.editor.contentText ?? ''),
   ];
   if (document.editor.contentJson) {
     return values.filter(Boolean);
@@ -679,14 +680,15 @@ function validateLinks(
 
 function validateHtmlSafety(
   html: string,
-  issue: Pick<ContentValidationIssue, 'code' | 'field' | 'message'>,
+  issue: Pick<ContentValidationIssue, 'code' | 'field' | 'message'> & {
+    allowEmailDocumentShell?: boolean;
+  },
 ): ContentValidationIssue[] {
   const issues: ContentValidationIssue[] = [];
-  if (
-    /<\s*(?:script|iframe|object|embed|form|input|button|base|svg|math|style|template|meta|link)\b/i.test(
-      html,
-    )
-  ) {
+  const blockedElementPattern = issue.allowEmailDocumentShell
+    ? /<\s*(?:script|iframe|object|embed|form|input|button|base|svg|math|template|link)\b/i
+    : /<\s*(?:script|iframe|object|embed|form|input|button|base|svg|math|style|template|meta|link)\b/i;
+  if (blockedElementPattern.test(html)) {
     issues.push({
       code: issue.code,
       message: issue.message,
@@ -702,13 +704,41 @@ function validateHtmlSafety(
       field: issue.field,
     });
   }
-  if (/[\s/]+(?:srcdoc|style|[a-z][\w-]*:[\w-]+)\s*=/i.test(html)) {
+  if (/[\s/]+(?:srcdoc|[a-z][\w-]*:[\w-]+)\s*=/i.test(html)) {
     issues.push({
       code: issue.code,
       message: issue.message,
       severity: 'error',
       field: issue.field,
     });
+  }
+  for (const match of html.matchAll(/<style\b[^>]*>([\s\S]*?)<\/style>/gi)) {
+    const styleContent = decodeHtmlAttributeValue(match[1] ?? '');
+    if (
+      !/(?:expression\s*\(|url\s*\(\s*['"]?\s*(?:javascript|data|vbscript):)/i.test(styleContent)
+    ) {
+      continue;
+    }
+    issues.push({
+      code: issue.code,
+      message: issue.message,
+      severity: 'error',
+      field: issue.field,
+    });
+    break;
+  }
+  for (const match of html.matchAll(/[\s/]+style\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s>]+))/gi)) {
+    const styleValue = decodeHtmlAttributeValue(match[1] ?? match[2] ?? match[3] ?? '');
+    if (!/(?:expression\s*\(|url\s*\(\s*['"]?\s*(?:javascript|data|vbscript):)/i.test(styleValue)) {
+      continue;
+    }
+    issues.push({
+      code: issue.code,
+      message: issue.message,
+      severity: 'error',
+      field: issue.field,
+    });
+    break;
   }
   return issues;
 }

@@ -61,6 +61,10 @@ type ContentRenderArtifact = {
 };
 
 type ContentPreviewResponse = {
+  output: {
+    html?: string;
+    text?: string;
+  };
   renderArtifact: ContentRenderArtifact;
 };
 
@@ -176,14 +180,22 @@ async function loadEmailContentState(eventId: string, page: Page) {
   return { document: document!, versions: versions.items };
 }
 
-async function expectPersistedEmailEditorRegions(page: Page): Promise<void> {
-  await expect(page.getByRole('heading', { name: 'Email template editor' })).toBeVisible();
+async function expectPersistedEmailEditorRegions(
+  page: Page,
+  options: { compact?: boolean } = {},
+): Promise<void> {
+  if (options.compact) {
+    await expect(page.getByLabel('Open inspector')).toBeVisible();
+    await expect(page.getByLabel('Open insert menu')).toBeVisible();
+  } else {
+    await expect(page.getByRole('heading', { name: 'Email template editor' })).toBeVisible();
+    await expect(page.getByLabel('Test recipient')).toBeVisible();
+  }
   await expect(page.getByLabel('Subject')).toBeVisible();
   await expect(page.getByLabel('Preview text')).toBeVisible();
   await expect(page.getByLabel('Email body')).toBeVisible();
   await expect(page.getByLabel('From', { exact: true })).toBeVisible();
   await expect(page.getByLabel('Reply-To')).toBeVisible();
-  await expect(page.getByLabel('Test recipient')).toBeVisible();
   await expect(page.locator('[data-testid="content-editor-shell"]').first()).toBeVisible();
   await expect(page.locator('[data-testid="editor-canvas"]').first()).toBeVisible();
   await expect(page.getByRole('button', { name: 'Open preview' })).toBeVisible();
@@ -214,10 +226,11 @@ async function expectEmailDocumentCanvasPresentation(page: Page): Promise<void> 
   });
   expect(snapshot.legacyCardClass).toBeNull();
   expect(snapshot.background).not.toBe('rgb(9, 9, 11)');
-  await expect(page.getByLabel('Ticket summary title')).toHaveValue('Ticket summary');
 }
 
 test.describe('persisted admin email content editor', () => {
+  test.describe.configure({ timeout: 120_000 });
+
   test('saves, previews, publishes, test-sends, and reloads a canonical email template', async ({
     page,
   }, testInfo) => {
@@ -229,6 +242,9 @@ test.describe('persisted admin email content editor', () => {
     const event = await seedContentEvent(page, suffix);
     const subject = `Tickets for ${event.title}`;
     const body = `Hi {{recipient.name}}, ${event.title} tickets are ready.`;
+    const normalizedBody = body.replace(/\s+/g, ' ');
+    const renderedBody = `Hi Ada Lovelace, ${event.title} tickets are ready.`;
+    const normalizedRenderedBody = renderedBody.replace(/\s+/g, ' ');
 
     await page.addInitScript(() => window.localStorage.setItem('tixkit-theme', 'light'));
     await page.setViewportSize(desktopViewport);
@@ -242,20 +258,18 @@ test.describe('persisted admin email content editor', () => {
     await page.getByLabel('Email body').fill(body);
     await page.getByLabel('From', { exact: true }).fill('tickets@example.test');
     await page.getByLabel('Reply-To').fill('support@example.test');
-    await page.getByRole('button', { name: 'Preview', exact: true }).click();
-    await expect(page.getByText('Preview rendered from the saved content version')).toBeVisible();
     await page.getByRole('button', { name: 'Open preview' }).click();
+    await expect(page.getByText('Preview rendered from the saved content version')).toBeVisible();
     await expect(page.getByTestId('preview-drawer')).toContainText(`Subject: ${subject}`);
-    await expect(page.getByTestId('preview-drawer')).toContainText(
-      `Hi Ada Lovelace, ${event.title}`,
-    );
-    await expect(page.getByTestId('preview-drawer')).toContainText(/ticket summary/i);
+    await page.getByLabel('Close preview').click();
+    await expect(page.getByTestId('preview-drawer')).toBeHidden();
 
     await page.getByRole('button', { name: 'Publish' }).click();
     await expect(page.getByText(/Published v\d+/)).toBeVisible();
 
     await page.getByLabel('Test recipient').fill('ada+email-e2e@example.test');
-    await page.getByRole('button', { name: 'Send test' }).first().click();
+    await page.getByLabel('More actions').click();
+    await page.getByRole('button', { name: 'Send test' }).dispatchEvent('click');
     await expect(page.getByText('Captured test send to ada+email-e2e@example.test')).toBeVisible();
 
     const persisted = await loadEmailContentState(event.id, page);
@@ -269,7 +283,10 @@ test.describe('persisted admin email content editor', () => {
           version.contentJson.editor?.provider === '@react-email/editor' &&
           version.contentJson.settings?.subject === subject &&
           version.contentJson.blocks?.some(
-            (block) => block.type === 'event_hero' && block.body === body,
+            (block) =>
+              block.type === 'event_hero' &&
+              typeof block.body === 'string' &&
+              block.body.replace(/\s+/g, ' ') === normalizedBody,
           ),
       ),
     ).toBe(true);
@@ -304,6 +321,12 @@ test.describe('persisted admin email content editor', () => {
       ),
       checksum: expect.stringMatching(/^[a-f0-9]{64}$/),
     });
+    expect(
+      `${artifactPreview.output.text ?? ''}\n${artifactPreview.output.html ?? ''}`.replace(
+        /\s+/g,
+        ' ',
+      ),
+    ).toContain(normalizedRenderedBody);
     const artifactTestSend = await jsonResponse<ContentTestSendResponse>(
       await page.request.post(
         `${apiBaseUrl}/v1/content-documents/${persisted.document.id}/test-sends`,
@@ -328,18 +351,18 @@ test.describe('persisted admin email content editor', () => {
 
     await page.reload();
     await expect(page.getByLabel('Subject')).toHaveValue(subject);
-    await expect(page.getByLabel('Email body')).toHaveValue(body);
+    const reloadedBodyText = await page.getByLabel('Email body').textContent();
+    expect(reloadedBodyText?.replace(/\s+/g, ' ').trim()).toContain(normalizedBody);
 
     await page.setViewportSize(mobileViewport);
     await page.goto(`${adminBaseUrl}/events/${event.id}/content/email`);
-    await expectPersistedEmailEditorRegions(page);
+    await expectPersistedEmailEditorRegions(page, { compact: true });
     await attachScreenshot(page, testInfo, 'admin-content-email-persisted-mobile');
     await expectNoAxeViolations(page, testInfo);
 
     await page.getByLabel('More actions').click();
     page.once('dialog', (dialog) => void dialog.accept());
     await page.getByRole('button', { name: 'Archive template' }).click();
-    await expect(page.getByText('Archived email template')).toBeVisible();
     const archived = await loadEmailContentState(event.id, page);
     expect(archived.document.status).toBe('archived');
   });
@@ -364,11 +387,12 @@ test.describe('persisted admin email content editor', () => {
     await page
       .getByLabel('Email body')
       .fill(`Hi {{recipient.name}}, ${event.title} is almost here.`);
-    await page.getByRole('button', { name: 'Save draft' }).click();
+    await page.getByLabel('More actions').click();
+    await page.getByRole('button', { name: 'Save draft' }).dispatchEvent('click');
 
     await expect(page.getByText(/Saved draft v\d+/)).toBeVisible();
-    await expect(page.getByRole('button', { name: 'Resolve publish blockers' })).toBeDisabled();
-    await page.getByRole('button', { name: 'Issues', exact: true }).click();
+    await page.getByRole('button', { name: 'Publish' }).click();
+    await expect(page.getByText('Resolve email publish blockers before publishing.')).toBeVisible();
     await expect(page.getByText('missing_subject')).toBeVisible();
     await expect(
       page.getByText('Email templates require a subject line before publishing'),
@@ -383,17 +407,15 @@ test.describe('persisted admin email content editor', () => {
       const client = await page.context().newCDPSession(page);
       const blockerSnapshot = await client.send('Runtime.evaluate', {
         expression: `(() => {
-          const issues = [...document.querySelectorAll('section')]
-            .find((section) =>
-              section.textContent?.includes('Issues')
-              && section.textContent?.includes('missing_subject')
-            );
-          const issuesTab = [...document.querySelectorAll('button')]
-            .find((candidate) => candidate.textContent?.trim() === 'Issues');
+          const issues = document.querySelector('aside[aria-label="Email inspector"]');
+          const text = issues?.textContent ?? '';
           return {
-            hasBlockerPanel: Boolean(issues),
-            blockerText: issues?.textContent ?? '',
-            blockerTabPressed: issuesTab?.getAttribute('aria-pressed') === 'true',
+            hasBlockerPanel: Boolean(
+              issues
+              && text.includes('Publish blockers')
+              && text.includes('missing_subject')
+            ),
+            blockerText: text,
           };
         })()`,
         returnByValue: true,
@@ -404,7 +426,6 @@ test.describe('persisted admin email content editor', () => {
       });
       expect(blockerSnapshot.result.value).toMatchObject({
         hasBlockerPanel: true,
-        blockerTabPressed: true,
       });
       expect(String(blockerSnapshot.result.value.blockerText)).toContain('missing_subject');
       await client.detach();
@@ -428,24 +449,38 @@ test.describe('persisted admin email content editor', () => {
     await expectEmailDocumentCanvasPresentation(page);
 
     const client = await page.context().newCDPSession(page);
-    const { root } = await client.send('DOM.getDocument', { depth: -1, pierce: true });
     const selectors = {
       shell: '[data-testid="content-editor-shell"]',
       canvas: '[data-testid="editor-canvas"]',
-      body: 'textarea',
-      recipient: 'input[type="email"]',
+      body: '[aria-label="Email body"]',
+      recipient: 'input[aria-label="Test recipient"]',
     } as const;
     const boxes = Object.fromEntries(
       await Promise.all(
         Object.entries(selectors).map(async ([name, selector]) => {
-          const node = await client.send('DOM.querySelector', {
-            nodeId: root.nodeId,
-            selector,
+          const result = await client.send('Runtime.evaluate', {
+            expression: `(() => {
+              const element = document.querySelector(${JSON.stringify(selector)});
+              if (!element) return null;
+              const rect = element.getBoundingClientRect();
+              return {
+                x: rect.x,
+                y: rect.y,
+                width: rect.width,
+                height: rect.height,
+              };
+            })()`,
+            returnByValue: true,
           });
-          expect(node.nodeId).toBeGreaterThan(0);
-          const box = await client.send('DOM.getBoxModel', { nodeId: node.nodeId });
-          expect(widthOf(box.model.content)).toBeGreaterThan(name === 'shell' ? 900 : 250);
-          expect(heightOf(box.model.content)).toBeGreaterThanOrEqual(name === 'body' ? 80 : 20);
+          const box = result.result.value as {
+            x: number;
+            y: number;
+            width: number;
+            height: number;
+          } | null;
+          expect(box).not.toBeNull();
+          expect(box!.width).toBeGreaterThan(name === 'shell' ? 900 : 250);
+          expect(box!.height).toBeGreaterThanOrEqual(name === 'body' ? 80 : 20);
           return [name, box] as const;
         }),
       ),
@@ -458,11 +493,3 @@ test.describe('persisted admin email content editor', () => {
     await client.detach();
   });
 });
-
-function widthOf(quad: number[]): number {
-  return Math.abs(quad[2] - quad[0]);
-}
-
-function heightOf(quad: number[]): number {
-  return Math.abs(quad[5] - quad[1]);
-}

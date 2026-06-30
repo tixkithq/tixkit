@@ -196,7 +196,7 @@ export class ClerkAuthService {
           name: 'Tixkit Dev',
           slug: 'tixkit-dev',
           status: 'active',
-          theme: JSON.stringify({ primaryColor: '#6366f1' }),
+          theme: JSON.stringify({ primaryColor: '#4f46e5' }),
           legal_urls: JSON.stringify({}),
           white_label: false,
           created_at: now,

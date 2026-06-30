@@ -41,11 +41,13 @@ const dbState = vi.hoisted(() => ({
     brand_id: 'brd_1',
     currency: 'USD',
   } as Record<string, unknown>,
+  events: [] as Record<string, unknown>[],
   lineItems: [] as Record<string, unknown>[],
   attendees: [] as Record<string, unknown>[],
   tickets: [] as Record<string, unknown>[],
   checkoutSession: null as Record<string, unknown> | null,
   checkoutSessions: [] as Record<string, unknown>[],
+  paymentCompensations: [] as Record<string, unknown>[],
   widgetImpressions: [] as Record<string, unknown>[],
   refunds: [] as Record<string, unknown>[],
   affiliates: [] as Record<string, unknown>[],
@@ -73,7 +75,9 @@ function rowMatchesWheres(
 ): boolean {
   return wheres.every((where) => {
     const column = where.column.includes('.') ? where.column.split('.').at(-1)! : where.column;
-    const value = row[column];
+    const value = Object.prototype.hasOwnProperty.call(row, where.column)
+      ? row[where.column]
+      : row[column];
     if (where.op === '=') return value === where.value;
     if (where.op === 'in') return Array.isArray(where.value) && where.value.includes(value);
     if (where.op === 'is') return value === where.value;
@@ -204,6 +208,30 @@ function createMockDb(): unknown {
           ].filter((ticketType) => rowMatchesWheres(ticketType, query.wheres));
         }
         if (table === 'checkout_sessions') return [];
+        if (table === 'payment_compensations') {
+          return dbState.paymentCompensations
+            .map((compensation) => {
+              const checkoutSession = dbState.checkoutSessions.find(
+                (session) => session.id === compensation.checkout_session_id,
+              );
+              const event = dbState.events.find(
+                (candidate) => candidate.id === checkoutSession?.event_id,
+              );
+              return {
+                ...compensation,
+                'payment_compensations.tenant_id': compensation.tenant_id,
+                'payment_compensations.checkout_session_id': compensation.checkout_session_id,
+                'payment_compensations.status': compensation.status,
+                'payment_compensations.id': compensation.id,
+                'checkout_sessions.tenant_id': checkoutSession?.tenant_id,
+                'checkout_sessions.brand_id': checkoutSession?.brand_id,
+                'checkout_sessions.event_id': checkoutSession?.event_id,
+                'events.tenant_id': event?.tenant_id,
+                'events.organization_id': event?.organization_id,
+              };
+            })
+            .filter((compensation) => rowMatchesWheres(compensation, query.wheres));
+        }
         if (table === 'checkout_holds') return [];
         if (table === 'export_job_events') {
           return dbState.exportEvents.filter((event) => {
@@ -422,6 +450,8 @@ describe('order routes', () => {
     dbState.timelineEvents = [];
     dbState.checkoutSession = null;
     dbState.checkoutSessions = [];
+    dbState.events = [];
+    dbState.paymentCompensations = [];
   });
 
   it('GET /orders/:orderId returns the full persisted detail contract', async () => {
@@ -633,6 +663,76 @@ describe('order routes', () => {
 
     expect(res.statusCode).toBe(200);
     expect(res.json().items.map((order: { id: string }) => order.id)).toEqual(['ord_1']);
+    await app.close();
+  });
+
+  it('GET /payment-compensations hides rows outside the principal organization scope', async () => {
+    dbState.paymentCompensations = [
+      {
+        id: 'pcmp_org_1',
+        tenant_id: 'tnt_1',
+        checkout_session_id: 'cs_1',
+        payment_intent_id: 'pi_1',
+        provider: 'stripe',
+        provider_intent_id: 'pi_provider_1',
+        amount_cents: 2500,
+        currency: 'USD',
+        action: 'refund',
+        status: 'manual_review',
+        provider_compensation_id: null,
+        attempts: 1,
+        reason: 'Same organization review',
+        last_error: 'Stripe secret key is not configured',
+        metadata: '{}',
+        created_at: new Date('2026-06-01T00:00:00Z'),
+        updated_at: new Date('2026-06-01T00:00:00Z'),
+      },
+      {
+        id: 'pcmp_org_2',
+        tenant_id: 'tnt_1',
+        checkout_session_id: 'cs_2',
+        payment_intent_id: 'pi_2',
+        provider: 'stripe',
+        provider_intent_id: 'pi_provider_2',
+        amount_cents: 9900,
+        currency: 'USD',
+        action: 'refund',
+        status: 'manual_review',
+        provider_compensation_id: null,
+        attempts: 1,
+        reason: 'Cross organization review',
+        last_error: 'Provider declined automatic refund',
+        metadata: '{}',
+        created_at: new Date('2026-06-01T00:01:00Z'),
+        updated_at: new Date('2026-06-01T00:01:00Z'),
+      },
+    ];
+    dbState.checkoutSessions = [
+      { id: 'cs_1', tenant_id: 'tnt_1', brand_id: 'brd_1', event_id: 'evt_1' },
+      { id: 'cs_2', tenant_id: 'tnt_1', brand_id: 'brd_2', event_id: 'evt_2' },
+    ];
+    dbState.events = [
+      { id: 'evt_1', tenant_id: 'tnt_1', organization_id: 'org_1', brand_id: 'brd_1' },
+      { id: 'evt_2', tenant_id: 'tnt_1', organization_id: 'org_2', brand_id: 'brd_2' },
+    ];
+    const app = await setupApp(orderRoutes, makePrincipal({ organizationIds: ['org_1'] }));
+
+    const res = await app.inject({
+      method: 'GET',
+      url: '/payment-compensations?status=manual_review',
+    });
+
+    expect(res.statusCode).toBe(200);
+    expect(res.json().items.map((item: { id: string }) => item.id)).toEqual(['pcmp_org_1']);
+    expect(
+      dbState.queryWheres.some(
+        (entry) =>
+          entry.table === 'payment_compensations' &&
+          entry.wheres.some(
+            (where) => where.column === 'events.organization_id' && where.op === 'in',
+          ),
+      ),
+    ).toBe(true);
     await app.close();
   });
 

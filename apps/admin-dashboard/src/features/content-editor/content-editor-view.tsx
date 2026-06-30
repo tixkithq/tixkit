@@ -34,7 +34,7 @@ export function ContentEditorView({
     'div',
     { className: 'space-y-4' },
     React.createElement(
-      'div',
+      'header',
       { className: 'flex flex-wrap items-center justify-between gap-3' },
       React.createElement(
         'div',

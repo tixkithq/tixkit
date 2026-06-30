@@ -72,6 +72,9 @@ export const orderRoutes: FastifyPluginAsync = async (app) => {
     const repo = new PaymentCompensationRepository(db);
     const rows = await repo.listForTenant({
       tenantId: principal.tenantId,
+      organizationIds: principal.type === 'system' ? undefined : principal.organizationIds,
+      brandIds: principal.brandIds,
+      eventIds: principal.eventIds,
       status,
       checkoutSessionId,
       limit: pagination.limit,

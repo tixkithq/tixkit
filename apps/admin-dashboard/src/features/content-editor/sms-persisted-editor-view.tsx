@@ -484,7 +484,7 @@ export function SmsPersistedEditorView({ eventId }: { eventId: string }) {
 
   return (
     <div className="space-y-4">
-      <div className="flex flex-wrap items-center justify-between gap-3">
+      <header className="flex flex-wrap items-center justify-between gap-3">
         <div className="min-w-0 space-y-1">
           <h1 className="truncate text-2xl font-bold tracking-tight">SMS template editor</h1>
           <p className="max-w-3xl text-sm text-muted-foreground">
@@ -492,14 +492,17 @@ export function SmsPersistedEditorView({ eventId }: { eventId: string }) {
           </p>
         </div>
         {notice && <p className="text-sm text-emerald-700">{notice}</p>}
-      </div>
+      </header>
       {actionError && (
         <p className="rounded-md border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive">
           {actionError}
         </p>
       )}
 
-      <section className="grid gap-3 lg:grid-cols-[minmax(0,1fr)_18rem]">
+      <section
+        aria-label="SMS draft controls"
+        className="grid gap-3 lg:grid-cols-[minmax(0,1fr)_18rem]"
+      >
         <label className="space-y-2 text-sm font-medium">
           SMS body
           <textarea

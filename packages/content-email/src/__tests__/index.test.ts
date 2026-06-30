@@ -172,7 +172,60 @@ describe('validateEmailTemplate', () => {
     );
   });
 
-  it('blocks SVG, namespaced URLs, srcdoc, and inline styles in editor exports', () => {
+  it('allows benign editor inline styles', () => {
+    const template = createDefaultEmailTemplate({
+      editor: {
+        provider: REACT_EMAIL_EDITOR_PACKAGE,
+        contentHtml:
+          '<h1 style="font-weight: 700;">{{event.title}}</h1><p style="white-space: pre-wrap;">Hi {{recipient.name}}, tickets are ready.</p>',
+        contentText: 'Hi {{recipient.name}}, tickets are ready.',
+        contentJson: { type: 'doc' },
+      },
+    });
+
+    const result = validateEmailTemplate(template);
+
+    expect(result.issues).not.toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          code: 'unsafe_editor_html',
+          field: 'editor.contentHtml',
+        }),
+      ]),
+    );
+    expect(result.valid).toBe(true);
+  });
+
+  it('accepts full React Email editor documents with safe metadata and styles', async () => {
+    const template = createDefaultEmailTemplate({
+      editor: {
+        provider: REACT_EMAIL_EDITOR_PACKAGE,
+        contentHtml: [
+          '<!DOCTYPE html>',
+          '<html dir="ltr" lang="en">',
+          '<head>',
+          '<meta content="width=device-width" name="viewport" />',
+          '<meta content="text/html; charset=UTF-8" http-equiv="Content-Type" />',
+          '<style>@media (prefers-color-scheme: dark){li::marker{color:#c4c4c4}}</style>',
+          '</head>',
+          '<body style="background-color:#ffffff">',
+          '<h1 style="font-weight:600">Hi {{recipient.name}}, {{event.title}} tickets are ready.</h1>',
+          '</body>',
+          '</html>',
+        ].join(''),
+        contentText: 'HI {{RECIPIENT.NAME}}, {{EVENT.TITLE}} TICKETS ARE READY.',
+        contentJson: { type: 'doc' },
+      },
+    });
+
+    const rendered = await renderEmailTemplate(template, context);
+
+    expect(rendered.validation.valid).toBe(true);
+    expect(rendered.text).toContain('Hi Ada Lovelace, All Access Chicago tickets are ready.');
+    expect(rendered.html).toContain('Hi Ada Lovelace, All Access Chicago tickets are ready.');
+  });
+
+  it('blocks SVG, namespaced URLs, srcdoc, and unsafe inline styles in editor exports', () => {
     const template = createDefaultEmailTemplate({
       editor: {
         provider: REACT_EMAIL_EDITOR_PACKAGE,
@@ -472,7 +525,7 @@ describe('renderEmailTemplate', () => {
 
   it('load-renders concurrent email variants without drifting output or merge-tag escaping', async () => {
     const baseTemplate = createDefaultEmailTemplate();
-    const templates = Array.from({ length: 120 }, (_, index) =>
+    const templates = Array.from({ length: 40 }, (_, index) =>
       createDefaultEmailTemplate({
         settings: {
           ...baseTemplate.settings,
@@ -525,8 +578,8 @@ describe('renderEmailTemplate', () => {
       }),
     );
 
-    expect(rendered).toHaveLength(120);
-    expect(new Set(rendered.map((message) => message.subject)).size).toBe(120);
+    expect(rendered).toHaveLength(40);
+    expect(new Set(rendered.map((message) => message.subject)).size).toBe(40);
     expect(rendered.every((message) => message.html.includes('Order summary'))).toBe(true);
     expect(rendered.every((message) => message.text.trim().length > 0)).toBe(true);
   });

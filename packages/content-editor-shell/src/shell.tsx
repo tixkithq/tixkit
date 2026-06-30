@@ -152,7 +152,8 @@ export function ContentEditorShell({
   }
 
   return (
-    <section
+    <main
+      aria-label={`${channelLabel} content editor`}
       className="min-h-[calc(100svh-8rem)] overflow-hidden border bg-background text-foreground"
       data-channel={document.channel}
       data-testid="content-editor-shell"
@@ -208,7 +209,7 @@ export function ContentEditorShell({
           />
         )}
       </div>
-    </section>
+    </main>
   );
 }
 

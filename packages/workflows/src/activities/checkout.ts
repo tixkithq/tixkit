@@ -52,6 +52,9 @@ type FinalizePaymentIntentValidationResult =
 
 type OrphanPaymentCompensationAction = 'cancel' | 'refund' | 'local_noop';
 type OrphanPaymentCompensationStatus = 'succeeded' | 'failed' | 'manual_review' | 'already_ordered';
+type CompensablePaymentIntentLookup =
+  | { paymentIntent?: PaymentIntentRow; mismatchMessage?: undefined }
+  | { paymentIntent?: undefined; mismatchMessage: string };
 
 class WaitlistOfferUnavailableError extends Error {
   constructor() {
@@ -253,25 +256,37 @@ async function findCompensablePaymentIntent(input: {
   checkoutSessionId: string;
   provider?: string;
   providerIntentId?: string;
-}): Promise<PaymentIntentRow | undefined> {
-  if (input.provider && input.providerIntentId) {
-    const exact = await input.repo.findByProviderAndIntentId(
-      input.provider,
-      input.providerIntentId,
-    );
-    if (exact) return exact;
-  }
-
+}): Promise<CompensablePaymentIntentLookup> {
   if (input.providerIntentId) {
     const sessionScoped = await input.repo.findByCheckoutSessionAndProviderIntentId(
       input.checkoutSessionId,
       input.providerIntentId,
     );
-    if (sessionScoped) return sessionScoped;
-    return undefined;
+    if (sessionScoped) {
+      if (input.provider && sessionScoped.provider !== input.provider) {
+        return {
+          mismatchMessage: 'Payment intent provider does not match the checkout provider',
+        };
+      }
+      return { paymentIntent: sessionScoped };
+    }
+
+    const anyProviderIntent = await input.repo.findByProviderIntentId(input.providerIntentId);
+    if (anyProviderIntent) {
+      return {
+        mismatchMessage: 'Provider payment intent does not match the checkout session',
+      };
+    }
+    return {};
   }
 
-  return input.repo.findLatestByCheckoutSession(input.checkoutSessionId);
+  const latest = await input.repo.findLatestByCheckoutSession(input.checkoutSessionId);
+  if (latest && input.provider && latest.provider !== input.provider) {
+    return {
+      mismatchMessage: 'Payment intent provider does not match the checkout provider',
+    };
+  }
+  return { paymentIntent: latest };
 }
 
 async function releaseOrphanCheckoutResources(
@@ -280,6 +295,38 @@ async function releaseOrphanCheckoutResources(
 ): Promise<void> {
   const now = new Date();
   await db.transaction().execute(async (trx) => {
+    const session = await trx
+      .selectFrom('checkout_sessions')
+      .select(['tenant_id', 'cart'])
+      .where('id', '=', checkoutSessionId)
+      .executeTakeFirst();
+    if (session) {
+      const cart = parseStoredJson<{
+        items?: Array<{ resaleListingId?: string }>;
+      }>(session.cart);
+      const resaleListingIds = [
+        ...new Set(
+          (cart.items ?? [])
+            .map((item) => item.resaleListingId)
+            .filter((listingId): listingId is string => Boolean(listingId)),
+        ),
+      ];
+      if (resaleListingIds.length > 0) {
+        await trx
+          .updateTable('ticket_listings')
+          .set({
+            reserved_checkout_session_id: null,
+            reserved_until: null,
+            updated_at: now,
+          })
+          .where('tenant_id', '=', session.tenant_id)
+          .where('id', 'in', resaleListingIds)
+          .where('reserved_checkout_session_id', '=', checkoutSessionId)
+          .where('status', '=', 'listed')
+          .execute();
+      }
+    }
+
     await trx
       .updateTable('checkout_holds')
       .set({ status: 'released', updated_at: now })
@@ -898,15 +945,24 @@ export async function compensateOrphanPaymentActivity(input: {
   let compensation: PaymentCompensationRow | undefined;
   let attemptedAction: OrphanPaymentCompensationAction = 'refund';
   let compensationMetadata: Record<string, unknown> = {};
+  let providerCompensationCompleted = false;
   try {
     const piRepo = new PaymentIntentRepository(db);
     compensationRepo = new PaymentCompensationRepository(db);
-    const paymentIntent = await findCompensablePaymentIntent({
+    const paymentIntentLookup = await findCompensablePaymentIntent({
       repo: piRepo,
       checkoutSessionId: input.checkoutSessionId,
       provider: input.provider,
       providerIntentId: input.providerIntentId,
     });
+    if (paymentIntentLookup.mismatchMessage) {
+      return errResult(
+        'PAYMENT_COMPENSATION_UNTRUSTED',
+        paymentIntentLookup.mismatchMessage,
+        false,
+      );
+    }
+    const paymentIntent = paymentIntentLookup.paymentIntent;
 
     const existingOrder = await db
       .selectFrom('orders')
@@ -922,15 +978,29 @@ export async function compensateOrphanPaymentActivity(input: {
       .select(['id', 'tenant_id', 'currency'])
       .where('id', '=', input.checkoutSessionId)
       .executeTakeFirst();
-
-    const tenantId = paymentIntent?.tenant_id ?? session?.tenant_id ?? input.tenantId;
-    if (tenantId !== input.tenantId) {
+    if (!session) {
       return errResult(
-        'PAYMENT_COMPENSATION_TENANT_MISMATCH',
-        'Payment intent tenant does not match checkout tenant',
+        'PAYMENT_COMPENSATION_UNTRUSTED',
+        'Payment compensation checkout session was not found',
         false,
       );
     }
+
+    if (session.tenant_id !== input.tenantId) {
+      return errResult(
+        'PAYMENT_COMPENSATION_TENANT_MISMATCH',
+        'Checkout session tenant does not match compensation tenant',
+        false,
+      );
+    }
+    if (paymentIntent && paymentIntent.tenant_id !== session.tenant_id) {
+      return errResult(
+        'PAYMENT_COMPENSATION_TENANT_MISMATCH',
+        'Payment intent tenant does not match checkout session tenant',
+        false,
+      );
+    }
+    const tenantId = session.tenant_id;
 
     const provider = paymentIntent?.provider ?? input.provider;
     const providerIntentId = paymentIntent?.provider_intent_id ?? input.providerIntentId;
@@ -972,6 +1042,8 @@ export async function compensateOrphanPaymentActivity(input: {
     });
 
     if (compensation.status === 'succeeded') {
+      providerCompensationCompleted = true;
+      await releaseOrphanCheckoutResources(db, input.checkoutSessionId);
       return okResult({
         status: 'succeeded',
         action: compensation.action as OrphanPaymentCompensationAction,
@@ -988,8 +1060,6 @@ export async function compensateOrphanPaymentActivity(input: {
       });
     }
 
-    await releaseOrphanCheckoutResources(db, input.checkoutSessionId);
-
     if (provider === 'stripe_capture') {
       attemptedAction = 'local_noop';
       const updated = await completePaymentCompensation({
@@ -1000,6 +1070,9 @@ export async function compensateOrphanPaymentActivity(input: {
         providerCompensationId: `local:${providerIntentId}`,
         metadata,
       });
+      compensation = updated;
+      providerCompensationCompleted = true;
+      await releaseOrphanCheckoutResources(db, input.checkoutSessionId);
       return okResult({
         status: 'succeeded',
         action: 'local_noop',
@@ -1109,6 +1182,9 @@ export async function compensateOrphanPaymentActivity(input: {
           stripePaymentIntentStatus: stripePaymentIntent.status,
         },
       });
+      compensation = updated;
+      providerCompensationCompleted = true;
+      await releaseOrphanCheckoutResources(db, input.checkoutSessionId);
       return okResult({
         status: 'succeeded',
         action: 'refund',
@@ -1127,6 +1203,9 @@ export async function compensateOrphanPaymentActivity(input: {
         providerCompensationId: providerIntentId,
         metadata: { ...metadata, stripePaymentIntentStatus: stripePaymentIntent.status },
       });
+      compensation = updated;
+      providerCompensationCompleted = true;
+      await releaseOrphanCheckoutResources(db, input.checkoutSessionId);
       return okResult({
         status: 'succeeded',
         action: 'cancel',
@@ -1175,6 +1254,9 @@ export async function compensateOrphanPaymentActivity(input: {
           stripePaymentIntentStatus: stripePaymentIntent.status,
         },
       });
+      compensation = updated;
+      providerCompensationCompleted = true;
+      await releaseOrphanCheckoutResources(db, input.checkoutSessionId);
       return okResult({
         status: 'succeeded',
         action: 'cancel',
@@ -1199,7 +1281,7 @@ export async function compensateOrphanPaymentActivity(input: {
     });
   } catch (err) {
     const message = err instanceof Error ? err.message : 'Unknown error';
-    if (compensationRepo && compensation) {
+    if (compensationRepo && compensation && !providerCompensationCompleted) {
       try {
         await completePaymentCompensation({
           repo: compensationRepo,

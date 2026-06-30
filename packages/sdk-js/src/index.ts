@@ -1060,7 +1060,7 @@ export type TaxReport = {
   totalTaxCollectedCents: number;
   breakdown: {
     taxRuleName: string;
-    rate: number;
+    rate: number | null;
     taxableAmountCents: number;
     taxCollectedCents: number;
   }[];
@@ -2605,8 +2605,13 @@ class ReportResource {
       params: Object.keys(query).length > 0 ? query : undefined,
     });
   }
-  async tax(eventId: string): Promise<TaxReport> {
-    return this.client.request('GET', `/events/${eventId}/reports/tax`);
+  async tax(eventId: string, params?: { from?: string; to?: string }): Promise<TaxReport> {
+    const query: Record<string, string> = {};
+    if (params?.from) query.from = params.from;
+    if (params?.to) query.to = params.to;
+    return this.client.request('GET', `/events/${eventId}/reports/tax`, {
+      params: Object.keys(query).length > 0 ? query : undefined,
+    });
   }
   async attendance(eventId: string): Promise<AttendanceReport> {
     return this.client.request('GET', `/events/${eventId}/reports/attendance`);
@@ -3043,10 +3048,7 @@ class PublicResource {
    * Fetches ticket availability for a published event. Pass `products` to
    * filter/reveal hidden ticket types for direct-link or widget purchase flows.
    */
-  async getAvailability(
-    eventId: string,
-    products?: string[],
-  ): Promise<PublicAvailabilityItem[]> {
+  async getAvailability(eventId: string, products?: string[]): Promise<PublicAvailabilityItem[]> {
     return this.client.request('GET', `/public/events/${eventId}/availability`, {
       params: products?.length ? { products: products.join(',') } : undefined,
     });

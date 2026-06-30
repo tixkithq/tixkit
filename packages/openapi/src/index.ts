@@ -2392,7 +2392,14 @@ const rawOpenApiSpec = {
           checkIns: { type: 'integer' },
           ordersCount: { type: 'integer' },
           paidOrdersCount: { type: 'integer' },
-          range: { type: 'object' },
+          range: {
+            type: 'object',
+            properties: {
+              from: { type: 'string', format: 'date-time' },
+              to: { type: 'string', format: 'date-time' },
+            },
+            required: ['from', 'to'],
+          },
         },
         required: [
           'eventId',
@@ -2407,6 +2414,7 @@ const rawOpenApiSpec = {
           'checkIns',
           'ordersCount',
           'paidOrdersCount',
+          'range',
         ],
       },
       TaxReport: {
@@ -2415,9 +2423,101 @@ const rawOpenApiSpec = {
           eventId: { type: 'string' },
           currency: { type: 'string' },
           totalTaxCollectedCents: { type: 'integer' },
-          breakdown: { type: 'array', items: { type: 'object' } },
+          breakdown: {
+            type: 'array',
+            items: {
+              type: 'object',
+              properties: {
+                taxRuleName: { type: 'string' },
+                rate: { type: ['number', 'null'] },
+                taxableAmountCents: { type: 'integer' },
+                taxCollectedCents: { type: 'integer' },
+              },
+              required: ['taxRuleName', 'rate', 'taxableAmountCents', 'taxCollectedCents'],
+            },
+          },
         },
         required: ['eventId', 'currency', 'totalTaxCollectedCents', 'breakdown'],
+      },
+      AttendanceReport: {
+        type: 'object',
+        properties: {
+          eventId: { type: 'string' },
+          totalAttendees: { type: 'integer' },
+          checkedIn: { type: 'integer' },
+          notCheckedIn: { type: 'integer' },
+          checkInRate: { type: 'number' },
+          breakdownByTicketType: {
+            type: 'array',
+            items: {
+              type: 'object',
+              properties: {
+                ticketTypeId: { type: 'string' },
+                ticketTypeName: { type: 'string' },
+                total: { type: 'integer' },
+                checkedIn: { type: 'integer' },
+              },
+              required: ['ticketTypeId', 'ticketTypeName', 'total', 'checkedIn'],
+            },
+          },
+        },
+        required: [
+          'eventId',
+          'totalAttendees',
+          'checkedIn',
+          'notCheckedIn',
+          'checkInRate',
+          'breakdownByTicketType',
+        ],
+      },
+      PromoReport: {
+        type: 'object',
+        properties: {
+          eventId: { type: 'string' },
+          discountCodes: {
+            type: 'array',
+            items: {
+              type: 'object',
+              properties: {
+                code: { type: 'string' },
+                usesCount: { type: 'integer' },
+                discountAmountCents: { type: 'integer' },
+                revenueAttributedCents: { type: 'integer' },
+              },
+              required: ['code', 'usesCount', 'discountAmountCents', 'revenueAttributedCents'],
+            },
+          },
+        },
+        required: ['eventId', 'discountCodes'],
+      },
+      AffiliateReport: {
+        type: 'object',
+        properties: {
+          organizationId: { type: 'string' },
+          affiliates: {
+            type: 'array',
+            items: {
+              type: 'object',
+              properties: {
+                affiliateId: { type: 'string' },
+                code: { type: 'string' },
+                name: { type: 'string' },
+                referralsCount: { type: 'integer' },
+                revenueAttributedCents: { type: 'integer' },
+                commissionCents: { type: 'integer' },
+              },
+              required: [
+                'affiliateId',
+                'code',
+                'name',
+                'referralsCount',
+                'revenueAttributedCents',
+                'commissionCents',
+              ],
+            },
+          },
+        },
+        required: ['organizationId', 'affiliates'],
       },
       ExportJobQueued: {
         type: 'object',
@@ -5397,6 +5497,20 @@ const rawOpenApiSpec = {
       get: {
         summary: 'Get tax report',
         security: [{ BearerAuth: [] }],
+        parameters: [
+          {
+            name: 'from',
+            in: 'query',
+            required: false,
+            schema: { type: 'string', format: 'date-time' },
+          },
+          {
+            name: 'to',
+            in: 'query',
+            required: false,
+            schema: { type: 'string', format: 'date-time' },
+          },
+        ],
         responses: {
           '200': {
             description: 'Tax metrics',
@@ -5422,30 +5536,7 @@ const rawOpenApiSpec = {
             description: 'Attendance metrics',
             content: {
               'application/json': {
-                schema: {
-                  type: 'object',
-                  properties: {
-                    totalAttendees: { type: 'number' },
-                    checkedInAttendees: { type: 'number' },
-                    noShowAttendees: { type: 'number' },
-                    checkInRatePercentage: { type: 'number' },
-                    scanLogsTimeline: {
-                      type: 'array',
-                      items: {
-                        type: 'object',
-                        properties: { date: { type: 'string' }, scans: { type: 'number' } },
-                        required: ['date', 'scans'],
-                      },
-                    },
-                  },
-                  required: [
-                    'totalAttendees',
-                    'checkedInAttendees',
-                    'noShowAttendees',
-                    'checkInRatePercentage',
-                    'scanLogsTimeline',
-                  ],
-                },
+                schema: { $ref: '#/components/schemas/AttendanceReport' },
               },
             },
           },
@@ -5469,23 +5560,7 @@ const rawOpenApiSpec = {
             description: 'Promo code metrics',
             content: {
               'application/json': {
-                schema: {
-                  type: 'object',
-                  properties: {
-                    promoCodeId: { type: 'string' },
-                    code: { type: 'string' },
-                    uses: { type: 'number' },
-                    discountAmountCents: { type: 'number' },
-                    revenueAttributedCents: { type: 'number' },
-                  },
-                  required: [
-                    'promoCodeId',
-                    'code',
-                    'uses',
-                    'discountAmountCents',
-                    'revenueAttributedCents',
-                  ],
-                },
+                schema: { $ref: '#/components/schemas/PromoReport' },
               },
             },
           },
@@ -5549,25 +5624,7 @@ const rawOpenApiSpec = {
             description: 'Affiliate metrics',
             content: {
               'application/json': {
-                schema: {
-                  type: 'object',
-                  properties: {
-                    affiliateId: { type: 'string' },
-                    code: { type: 'string' },
-                    linkClicks: { type: 'number' },
-                    ordersAttributed: { type: 'number' },
-                    revenueAttributedCents: { type: 'number' },
-                    commissionEarnedCents: { type: 'number' },
-                  },
-                  required: [
-                    'affiliateId',
-                    'code',
-                    'linkClicks',
-                    'ordersAttributed',
-                    'revenueAttributedCents',
-                    'commissionEarnedCents',
-                  ],
-                },
+                schema: { $ref: '#/components/schemas/AffiliateReport' },
               },
             },
           },

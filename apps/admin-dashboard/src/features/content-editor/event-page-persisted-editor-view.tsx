@@ -80,32 +80,10 @@ const eventPageInsertActions: InsertAction[] = [
   { id: 'button', label: 'Button', icon: <ExternalLink className="size-4" /> },
 ];
 
-const panelLabels: Record<InspectorPanelId, string> = {
-  block: 'Content',
-  page: 'Page',
-  body: 'Body',
-  theme: 'Theme',
-  code: 'Code',
-  variables: 'Variables',
-  history: 'History',
-  issues: 'Issues',
-};
-
-const panelIcons: Record<InspectorPanelId, React.ReactNode> = {
-  block: <LayoutTemplate className="size-4" />,
-  page: <ListChecks className="size-4" />,
-  body: <Type className="size-4" />,
-  theme: <Palette className="size-4" />,
-  code: <FileJson className="size-4" />,
-  variables: <Type className="size-4" />,
-  history: <Save className="size-4" />,
-  issues: <Eye className="size-4" />,
-};
-
 const darkInputClassName =
   'w-full rounded-md border border-white/10 bg-white/5 px-2.5 py-1.5 text-sm text-white outline-none focus:border-white/35 disabled:cursor-not-allowed disabled:opacity-50';
 const canvasInputClassName =
-  'w-full rounded-sm border-0 bg-transparent p-0 shadow-none outline-none transition placeholder:text-black/35 focus-visible:ring-2 focus-visible:ring-black/25 disabled:cursor-not-allowed disabled:opacity-70';
+  'w-full rounded-sm border-0 bg-transparent p-0 shadow-none outline-none transition placeholder:text-black/35 focus:outline-none focus-visible:outline-none disabled:cursor-not-allowed disabled:opacity-70';
 
 function listItemsFromResponse<T>(value: unknown): T[] {
   if (Array.isArray(value)) return value as T[];
@@ -1096,6 +1074,8 @@ export function EventPagePersistedEditorView({ eventId }: { eventId: string }) {
   const [selectedBlockId, setSelectedBlockId] = React.useState<string>();
   const [inspectorPanelId, setInspectorPanelId] = React.useState<InspectorPanelId>('block');
   const [inspectorCollapsed, setInspectorCollapsed] = React.useState(false);
+  const [insertDrawerOpen, setInsertDrawerOpen] = React.useState(false);
+  const [moreActionsOpen, setMoreActionsOpen] = React.useState(false);
   const [preview, setPreview] = React.useState<EditorPreview>();
   const [previewOpen, setPreviewOpen] = React.useState(false);
   const [autosave, setAutosave] = React.useState<AutosaveState>('idle');
@@ -1148,15 +1128,24 @@ export function EventPagePersistedEditorView({ eventId }: { eventId: string }) {
   React.useEffect(() => {
     if (!pageEditor || !eventPageDocument || !draft) return;
     if (hydratedDraftIdRef.current === draft.id) return;
-    hydratedDraftIdRef.current = draft.id;
+    const draftId = draft.id;
     hydratingEditorRef.current = true;
-    pageEditor.commands.setContent(eventPageEditorContent(eventPageDocument), {
-      emitUpdate: false,
-    });
-    setSelectedBlockId(eventPageDocument.blocks[0]?.id);
+    let cancelled = false;
     queueMicrotask(() => {
+      if (cancelled || pageEditor.isDestroyed) return;
+      pageEditor.commands.setContent(eventPageEditorContent(eventPageDocument), {
+        emitUpdate: false,
+      });
+      hydratedDraftIdRef.current = draftId;
+      setSelectedBlockId(eventPageDocument.blocks[0]?.id);
       hydratingEditorRef.current = false;
     });
+    return () => {
+      cancelled = true;
+      if (hydratedDraftIdRef.current !== draftId) {
+        hydratingEditorRef.current = false;
+      }
+    };
   }, [draft, eventPageDocument, pageEditor]);
 
   function nextOperationId() {
@@ -1173,6 +1162,16 @@ export function EventPagePersistedEditorView({ eventId }: { eventId: string }) {
     setAutosave('idle');
     setActionError(undefined);
     setNotice(undefined);
+  }
+
+  function openInspectorPanel(panelId: InspectorPanelId) {
+    setInspectorPanelId(panelId);
+    setInspectorCollapsed(false);
+  }
+
+  function openMenuInspectorPanel(panelId: InspectorPanelId) {
+    openInspectorPanel(panelId);
+    setMoreActionsOpen(false);
   }
 
   const load = React.useCallback(async () => {
@@ -1279,6 +1278,13 @@ export function EventPagePersistedEditorView({ eventId }: { eventId: string }) {
     void load();
   }, [load]);
 
+  React.useEffect(() => {
+    if (typeof window === 'undefined' || typeof window.matchMedia !== 'function') return;
+    if (window.matchMedia('(max-width: 1023px)').matches) {
+      setInspectorCollapsed(true);
+    }
+  }, []);
+
   function snapshotFromEditor(snapshot = eventPageDocument): EventPageDocument | undefined {
     if (!snapshot) return undefined;
     if (!pageEditor) return snapshot;
@@ -1295,7 +1301,7 @@ export function EventPagePersistedEditorView({ eventId }: { eventId: string }) {
 
   function selectBlock(blockId: string) {
     setSelectedBlockId(blockId);
-    setInspectorPanelId('block');
+    openInspectorPanel('block');
     if (!pageEditor) return;
     const position = findBlockPosition(pageEditor, blockId);
     if (position !== undefined) pageEditor.commands.setNodeSelection(position);
@@ -1389,6 +1395,7 @@ export function EventPagePersistedEditorView({ eventId }: { eventId: string }) {
       return;
     }
     setPreview(previewFromApiOutput(result.data.output));
+    setPreviewOpen(true);
     setActionError(undefined);
     setNotice('Preview rendered from the saved content version');
   }
@@ -1487,7 +1494,7 @@ export function EventPagePersistedEditorView({ eventId }: { eventId: string }) {
             <p className="text-sm text-white/50">Event page editor</p>
             <h1 className="text-2xl font-semibold">Unable to load editor</h1>
           </div>
-          <p className="text-sm text-red-200">{error ?? 'Event-page editor could not load.'}</p>
+          <p className="text-sm text-red-200">{error ?? 'Hosted page editor could not load.'}</p>
           <button
             className="rounded-md border border-white/15 px-3 py-2 text-sm hover:bg-white/10"
             onClick={() => void load()}
@@ -1609,13 +1616,24 @@ export function EventPagePersistedEditorView({ eventId }: { eventId: string }) {
 
     return <p className="text-xs text-white/45">{blockSummary(selectedBlock)}</p>;
   })();
+  const inspectorHeading: Record<InspectorPanelId, { eyebrow: string; title: string }> = {
+    block: { eyebrow: 'Selected block', title: selectedBlockLabel },
+    page: { eyebrow: 'Page details', title: heroHeadline(eventPageDocument) },
+    body: { eyebrow: 'Page structure', title: `${eventPageDocument.blocks.length} blocks` },
+    theme: { eyebrow: 'Theme', title: 'Hosted page' },
+    code: { eyebrow: 'Editor JSON', title: 'Saved payload' },
+    variables: { eyebrow: 'Variables', title: 'Merge tags' },
+    history: { eyebrow: 'Version history', title: `${history.length} versions` },
+    issues: { eyebrow: 'Publish blockers', title: 'Validation' },
+  };
 
   return (
     <section
-      className="min-h-svh overflow-hidden bg-neutral-950 text-white"
+      className="h-screen min-h-screen overflow-hidden bg-neutral-950 text-white"
       data-channel="event-page"
+      data-testid="content-editor-shell"
     >
-      <header className="grid h-16 grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-4 border-b border-white/10 px-4">
+      <header className="grid h-16 grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-2 border-b border-white/10 px-3 sm:gap-4 sm:px-4">
         <a
           aria-label="Back to event"
           className="inline-flex size-9 items-center justify-center rounded-md border border-white/10 text-white/70 hover:bg-white/10 hover:text-white"
@@ -1623,14 +1641,14 @@ export function EventPagePersistedEditorView({ eventId }: { eventId: string }) {
         >
           <ChevronLeft className="size-4" />
         </a>
-        <div className="min-w-0 text-center">
+        <div className="hidden min-w-0 text-center md:block">
           <div className="flex min-w-0 items-center justify-center gap-2 text-sm text-white/55">
-            <span className="truncate">Hosted page</span>
+            <h1 className="truncate text-sm font-semibold text-white">Hosted page editor</h1>
             <span>/</span>
             <button
               className="min-w-0 truncate font-semibold text-white"
               disabled={!canEdit}
-              onClick={() => setInspectorPanelId('page')}
+              onClick={() => openInspectorPanel('page')}
               type="button"
             >
               {document.name}
@@ -1652,12 +1670,12 @@ export function EventPagePersistedEditorView({ eventId }: { eventId: string }) {
             </p>
           )}
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex min-w-0 items-center justify-end gap-1.5 sm:gap-2">
           <button
             aria-label="Open preview"
             className="inline-flex size-9 items-center justify-center rounded-md border border-white/10 text-white/70 hover:bg-white/10 hover:text-white disabled:cursor-not-allowed disabled:opacity-40"
             disabled={Boolean(archivedReason)}
-            onClick={() => setPreviewOpen(true)}
+            onClick={() => void previewSavedDraft()}
             title={archivedReason}
             type="button"
           >
@@ -1665,44 +1683,136 @@ export function EventPagePersistedEditorView({ eventId }: { eventId: string }) {
           </button>
           <button
             aria-label="Test send unavailable"
-            className="inline-flex h-9 items-center gap-2 rounded-md border border-white/10 px-3 text-sm font-medium text-white/45 disabled:cursor-not-allowed disabled:opacity-60"
+            className="inline-flex size-9 items-center justify-center gap-2 rounded-md border border-white/10 text-sm font-medium text-white/45 disabled:cursor-not-allowed disabled:opacity-60 sm:w-auto sm:px-3"
             disabled
             title="Hosted pages use preview and public routes instead of test sends."
             type="button"
           >
             <Send className="size-4" />
-            Send test
+            <span className="hidden sm:inline">Send test</span>
           </button>
-          <details className="relative">
-            <summary
+          <div className="relative">
+            <button
               aria-label="More actions"
+              aria-expanded={moreActionsOpen}
               className="inline-flex size-9 list-none items-center justify-center rounded-md border border-white/10 text-white/70 hover:bg-white/10 hover:text-white"
+              onClick={() => setMoreActionsOpen((open) => !open)}
+              type="button"
             >
               <MoreHorizontal className="size-4" />
-            </summary>
-            <div className="absolute right-0 top-11 z-30 w-48 rounded-lg border border-white/10 bg-neutral-900 p-1 text-sm shadow-2xl">
-              <button
-                className="flex w-full items-center gap-2 rounded-md px-2 py-2 text-left text-white/80 hover:bg-white/10 disabled:cursor-not-allowed disabled:opacity-40"
-                disabled={Boolean(archivedReason)}
-                onClick={() => void duplicateDocument()}
-                type="button"
-              >
-                <Copy className="size-4" />
-                Duplicate page
-              </button>
-              <button
-                className="flex w-full items-center gap-2 rounded-md px-2 py-2 text-left text-red-200 hover:bg-red-500/10 disabled:cursor-not-allowed disabled:opacity-40"
-                onClick={() => void archiveDocument()}
-                type="button"
-              >
-                <Archive className="size-4" />
-                Archive page
-              </button>
-            </div>
-          </details>
+            </button>
+            {moreActionsOpen && (
+              <div className="absolute right-0 top-11 z-30 w-56 rounded-lg border border-white/10 bg-neutral-900 p-1 text-sm shadow-2xl">
+                <button
+                  className="flex w-full items-center gap-2 rounded-md px-2 py-2 text-left text-white/80 hover:bg-white/10"
+                  onClick={() => openMenuInspectorPanel('body')}
+                  type="button"
+                >
+                  <LayoutTemplate className="size-4" />
+                  Open structure panel
+                </button>
+                <button
+                  className="flex w-full items-center gap-2 rounded-md px-2 py-2 text-left text-white/80 hover:bg-white/10"
+                  onClick={() => openMenuInspectorPanel('variables')}
+                  type="button"
+                >
+                  <Type className="size-4" />
+                  Open variables panel
+                </button>
+                <button
+                  className="flex w-full items-center gap-2 rounded-md px-2 py-2 text-left text-white/80 hover:bg-white/10"
+                  onClick={() => openMenuInspectorPanel('history')}
+                  type="button"
+                >
+                  <Save className="size-4" />
+                  Open version history
+                </button>
+                <button
+                  className="flex w-full items-center gap-2 rounded-md px-2 py-2 text-left text-white/80 hover:bg-white/10"
+                  onClick={() => openMenuInspectorPanel('page')}
+                  type="button"
+                >
+                  <ListChecks className="size-4" />
+                  Page details
+                </button>
+                <button
+                  className="flex w-full items-center gap-2 rounded-md px-2 py-2 text-left text-white/80 hover:bg-white/10"
+                  onClick={() => openMenuInspectorPanel('theme')}
+                  type="button"
+                >
+                  <Palette className="size-4" />
+                  Theme details
+                </button>
+                <button
+                  className="flex w-full items-center gap-2 rounded-md px-2 py-2 text-left text-white/80 hover:bg-white/10"
+                  onClick={() => openMenuInspectorPanel('code')}
+                  type="button"
+                >
+                  <FileJson className="size-4" />
+                  View JSON payload
+                </button>
+                <button
+                  className="flex w-full items-center gap-2 rounded-md px-2 py-2 text-left text-white/80 hover:bg-white/10"
+                  onClick={() => openMenuInspectorPanel('issues')}
+                  type="button"
+                >
+                  <Eye className="size-4" />
+                  Review blockers
+                </button>
+                <button
+                  className="flex w-full items-center gap-2 rounded-md px-2 py-2 text-left text-white/80 hover:bg-white/10 disabled:cursor-not-allowed disabled:opacity-40"
+                  disabled={Boolean(archivedReason)}
+                  onClick={() => {
+                    setMoreActionsOpen(false);
+                    void saveDraft();
+                  }}
+                  type="button"
+                >
+                  <Save className="size-4" />
+                  Save draft
+                </button>
+                <button
+                  className="flex w-full items-center gap-2 rounded-md px-2 py-2 text-left text-white/80 hover:bg-white/10 disabled:cursor-not-allowed disabled:opacity-40"
+                  disabled={Boolean(archivedReason)}
+                  onClick={() => {
+                    setMoreActionsOpen(false);
+                    viewPublicPage();
+                  }}
+                  type="button"
+                >
+                  <ExternalLink className="size-4" />
+                  View public page
+                </button>
+                <div className="my-1 border-t border-white/10" />
+                <button
+                  className="flex w-full items-center gap-2 rounded-md px-2 py-2 text-left text-white/80 hover:bg-white/10 disabled:cursor-not-allowed disabled:opacity-40"
+                  disabled={Boolean(archivedReason)}
+                  onClick={() => {
+                    setMoreActionsOpen(false);
+                    void duplicateDocument();
+                  }}
+                  type="button"
+                >
+                  <Copy className="size-4" />
+                  Duplicate page
+                </button>
+                <button
+                  className="flex w-full items-center gap-2 rounded-md px-2 py-2 text-left text-red-200 hover:bg-red-500/10 disabled:cursor-not-allowed disabled:opacity-40"
+                  onClick={() => {
+                    setMoreActionsOpen(false);
+                    void archiveDocument();
+                  }}
+                  type="button"
+                >
+                  <Archive className="size-4" />
+                  Archive page
+                </button>
+              </div>
+            )}
+          </div>
           <button
             aria-label={archivedReason ? 'Publish unavailable' : undefined}
-            className="inline-flex h-9 items-center gap-2 rounded-md bg-white px-4 text-sm font-semibold text-black hover:bg-white/90 disabled:cursor-not-allowed disabled:opacity-50"
+            className="inline-flex h-9 items-center gap-2 rounded-md bg-white px-3 text-sm font-semibold text-black hover:bg-white/90 disabled:cursor-not-allowed disabled:opacity-50 sm:px-4"
             disabled={Boolean(archivedReason)}
             onClick={() => void publishDraft()}
             title={archivedReason}
@@ -1714,7 +1824,7 @@ export function EventPagePersistedEditorView({ eventId }: { eventId: string }) {
       </header>
 
       <div
-        className={`grid h-[calc(100svh-4rem)] grid-cols-[4rem_minmax(0,1fr)] ${
+        className={`grid h-[calc(100vh-4rem)] min-h-0 grid-cols-1 ${
           inspectorCollapsed
             ? 'lg:grid-cols-[4rem_minmax(0,1fr)]'
             : 'lg:grid-cols-[4rem_minmax(0,1fr)_22rem]'
@@ -1722,7 +1832,7 @@ export function EventPagePersistedEditorView({ eventId }: { eventId: string }) {
       >
         <aside
           aria-label="Insert content"
-          className="flex flex-col items-center gap-2 border-r border-white/10 bg-neutral-950 px-2 py-5"
+          className="hidden flex-col items-center gap-2 border-r border-white/10 bg-neutral-950 px-2 py-5 lg:flex"
         >
           {eventPageInsertActions.map((action) => (
             <button
@@ -1739,79 +1849,13 @@ export function EventPagePersistedEditorView({ eventId }: { eventId: string }) {
           ))}
         </aside>
 
-        <main className="min-w-0 overflow-auto bg-neutral-100 text-black">
-          <div className="mx-auto min-h-full w-full max-w-5xl px-6 py-8">
-            <div
-              className="mb-5 grid gap-3 rounded-lg border border-black/10 bg-white p-4 text-sm shadow-sm"
-              data-testid="event-page-metadata-bar"
-            >
-              <div className="grid gap-3 md:grid-cols-[minmax(0,1fr)_12rem]">
-                <label className="space-y-1.5 text-xs font-medium text-black/45">
-                  Public path
-                  <input
-                    aria-label="Public path"
-                    className="w-full rounded-md border border-black/10 px-2.5 py-1.5 text-sm text-black outline-none focus:border-black/35 disabled:cursor-not-allowed disabled:opacity-60"
-                    disabled={!canEdit}
-                    onChange={(change) =>
-                      updateEventPageSettings((current) => ({
-                        ...current,
-                        settings: {
-                          ...current.settings,
-                          publicPath: change.currentTarget.value,
-                        },
-                      }))
-                    }
-                    value={eventPageDocument.settings.publicPath ?? ''}
-                  />
-                </label>
-                <label className="space-y-1.5 text-xs font-medium text-black/45">
-                  Locale
-                  <input
-                    aria-label="Locale"
-                    className="w-full rounded-md border border-black/10 px-2.5 py-1.5 text-sm text-black outline-none focus:border-black/35 disabled:cursor-not-allowed disabled:opacity-60"
-                    disabled={!canEdit}
-                    onChange={(change) =>
-                      updateEventPageSettings((current) => ({
-                        ...current,
-                        settings: { ...current.settings, locale: change.currentTarget.value },
-                      }))
-                    }
-                    value={eventPageDocument.settings.locale}
-                  />
-                </label>
-              </div>
-              <div className="flex flex-wrap items-center gap-2">
-                <button
-                  className="inline-flex h-9 items-center gap-2 rounded-md border border-black/10 px-3 text-sm font-medium text-black hover:bg-black/[0.03] disabled:cursor-not-allowed disabled:opacity-40"
-                  disabled={!canEdit}
-                  onClick={() => void saveDraft()}
-                  type="button"
-                >
-                  <Save className="size-4" />
-                  Save draft
-                </button>
-                <button
-                  className="inline-flex h-9 items-center gap-2 rounded-md border border-black/10 px-3 text-sm font-medium text-black hover:bg-black/[0.03] disabled:cursor-not-allowed disabled:opacity-40"
-                  disabled={!canEdit}
-                  onClick={() => void previewSavedDraft()}
-                  type="button"
-                >
-                  <Eye className="size-4" />
-                  Preview
-                </button>
-                <button
-                  className="inline-flex h-9 items-center gap-2 rounded-md border border-black/10 px-3 text-sm font-medium text-black hover:bg-black/[0.03] disabled:cursor-not-allowed disabled:opacity-40"
-                  disabled={!canEdit}
-                  onClick={viewPublicPage}
-                  type="button"
-                >
-                  <ExternalLink className="size-4" />
-                  View public page
-                </button>
-              </div>
-            </div>
-
-            <div className="rounded-xl border border-black/10 bg-white p-5 shadow-sm">
+        <main
+          aria-label="Event page editable document"
+          className="min-h-0 min-w-0 overflow-auto bg-white text-black lg:rounded-tl-3xl"
+          data-testid="editor-canvas"
+        >
+          <div className="mx-auto min-h-full w-full max-w-5xl px-5 py-8 sm:px-6">
+            <div>
               {pageEditor ? (
                 <EditorContent editor={pageEditor} />
               ) : (
@@ -1823,29 +1867,18 @@ export function EventPagePersistedEditorView({ eventId }: { eventId: string }) {
 
         <aside
           aria-label="Event page inspector"
-          className={`col-span-2 min-h-0 overflow-auto border-t border-white/10 bg-neutral-950 p-4 lg:col-span-1 lg:border-l lg:border-t-0 ${
+          className={`fixed inset-x-0 bottom-0 z-40 max-h-[78vh] min-h-0 overflow-auto rounded-t-2xl border-t border-white/10 bg-neutral-950 p-4 shadow-2xl lg:static lg:col-span-1 lg:max-h-none lg:rounded-none lg:border-l lg:border-t-0 lg:shadow-none ${
             inspectorCollapsed ? 'hidden' : ''
           }`}
         >
-          <div className="grid grid-cols-[minmax(0,1fr)_2.25rem] gap-2">
-            <div className="grid grid-cols-4 gap-1" aria-label="Event page inspector modes">
-              {(Object.keys(panelLabels) as InspectorPanelId[]).map((id) => (
-                <button
-                  aria-label={panelLabels[id]}
-                  aria-pressed={inspectorPanelId === id}
-                  className={`inline-flex h-9 items-center justify-center rounded-md border text-xs ${
-                    inspectorPanelId === id
-                      ? 'border-white/30 bg-white text-black'
-                      : 'border-white/10 text-white/60 hover:bg-white/10 hover:text-white'
-                  }`}
-                  key={id}
-                  onClick={() => setInspectorPanelId(id)}
-                  title={panelLabels[id]}
-                  type="button"
-                >
-                  {panelIcons[id]}
-                </button>
-              ))}
+          <div className="flex items-start justify-between gap-3 border-b border-white/10 pb-4">
+            <div className="min-w-0">
+              <p className="text-xs uppercase tracking-wide text-white/40">
+                {inspectorHeading[inspectorPanelId].eyebrow}
+              </p>
+              <h2 className="mt-1 truncate font-semibold">
+                {inspectorHeading[inspectorPanelId].title}
+              </h2>
             </div>
             <button
               aria-label="Collapse inspector"
@@ -1860,10 +1893,6 @@ export function EventPagePersistedEditorView({ eventId }: { eventId: string }) {
 
           {inspectorPanelId === 'block' && (
             <section className="mt-6 space-y-4 text-sm">
-              <div>
-                <p className="text-xs uppercase tracking-wide text-white/40">Selected block</p>
-                <h2 className="mt-1 font-semibold">{selectedBlockLabel}</h2>
-              </div>
               {selectedBlockControls}
               <div className="space-y-2 border-t border-white/10 pt-4">
                 {eventPageDocument.blocks.map((block) => (
@@ -1887,24 +1916,45 @@ export function EventPagePersistedEditorView({ eventId }: { eventId: string }) {
 
           {inspectorPanelId === 'page' && (
             <section className="mt-6 space-y-4 text-sm">
-              <div>
-                <p className="text-xs uppercase tracking-wide text-white/40">Page metadata</p>
-                <h2 className="mt-1 font-semibold">{heroHeadline(eventPageDocument)}</h2>
+              <div className="space-y-3">
+                <label className="space-y-1.5 text-xs font-medium text-white/55">
+                  Public path
+                  <input
+                    aria-label="Public path"
+                    className={darkInputClassName}
+                    disabled={!canEdit}
+                    onChange={(change) =>
+                      updateEventPageSettings((current) => ({
+                        ...current,
+                        settings: {
+                          ...current.settings,
+                          publicPath: change.currentTarget.value,
+                        },
+                      }))
+                    }
+                    value={eventPageDocument.settings.publicPath ?? ''}
+                  />
+                </label>
+                <label className="space-y-1.5 text-xs font-medium text-white/55">
+                  Locale
+                  <input
+                    aria-label="Locale"
+                    className={darkInputClassName}
+                    disabled={!canEdit}
+                    onChange={(change) =>
+                      updateEventPageSettings((current) => ({
+                        ...current,
+                        settings: { ...current.settings, locale: change.currentTarget.value },
+                      }))
+                    }
+                    value={eventPageDocument.settings.locale}
+                  />
+                </label>
               </div>
               <dl className="space-y-3 text-xs">
                 <div className="flex justify-between gap-4 border-b border-white/10 pb-3">
                   <dt className="text-white/45">CTA</dt>
                   <dd className="font-medium text-white/80">{ticketCtaLabel(eventPageDocument)}</dd>
-                </div>
-                <div className="flex justify-between gap-4 border-b border-white/10 pb-3">
-                  <dt className="text-white/45">Locale</dt>
-                  <dd className="font-mono text-white/80">{eventPageDocument.settings.locale}</dd>
-                </div>
-                <div className="flex justify-between gap-4 border-b border-white/10 pb-3">
-                  <dt className="text-white/45">Public path</dt>
-                  <dd className="max-w-[12rem] truncate font-mono text-white/80">
-                    {eventPageDocument.settings.publicPath ?? 'default'}
-                  </dd>
                 </div>
               </dl>
             </section>
@@ -1912,10 +1962,6 @@ export function EventPagePersistedEditorView({ eventId }: { eventId: string }) {
 
           {inspectorPanelId === 'body' && (
             <section className="mt-6 space-y-4 text-sm">
-              <div>
-                <p className="text-xs uppercase tracking-wide text-white/40">Page structure</p>
-                <h2 className="mt-1 font-semibold">{eventPageDocument.blocks.length} blocks</h2>
-              </div>
               <ol className="space-y-2">
                 {eventPageDocument.blocks.map((block) => (
                   <li className="rounded-md border border-white/10 p-3 text-xs" key={block.id}>
@@ -1929,10 +1975,6 @@ export function EventPagePersistedEditorView({ eventId }: { eventId: string }) {
 
           {inspectorPanelId === 'theme' && (
             <section className="mt-6 space-y-4 text-sm">
-              <div>
-                <p className="text-xs uppercase tracking-wide text-white/40">Theme</p>
-                <h2 className="mt-1 font-semibold">Hosted page</h2>
-              </div>
               <p className="rounded-md border border-white/10 bg-white/5 p-3 text-xs leading-5 text-white/60">
                 Full-width responsive sections, checkout-first content density, and event metadata
                 inherited from the canonical event record.
@@ -1942,10 +1984,6 @@ export function EventPagePersistedEditorView({ eventId }: { eventId: string }) {
 
           {inspectorPanelId === 'code' && (
             <section className="mt-6 space-y-4 text-sm">
-              <div>
-                <p className="text-xs uppercase tracking-wide text-white/40">Editor JSON</p>
-                <h2 className="mt-1 font-semibold">Saved payload</h2>
-              </div>
               <pre className="max-h-[42rem] overflow-auto rounded-md border border-white/10 bg-white/5 p-3 text-xs leading-5 text-white/75">
                 {JSON.stringify(eventPageDocument, null, 2)}
               </pre>
@@ -1954,10 +1992,6 @@ export function EventPagePersistedEditorView({ eventId }: { eventId: string }) {
 
           {inspectorPanelId === 'variables' && (
             <section className="mt-6 space-y-4 text-sm">
-              <div>
-                <p className="text-xs uppercase tracking-wide text-white/40">Variables</p>
-                <h2 className="mt-1 font-semibold">Merge tags</h2>
-              </div>
               <div className="grid gap-2">
                 {['event.title', 'event.startsAt', 'event.venueName', 'event.checkoutUrl'].map(
                   (key) => (
@@ -1975,10 +2009,6 @@ export function EventPagePersistedEditorView({ eventId }: { eventId: string }) {
 
           {inspectorPanelId === 'history' && (
             <section className="mt-6 space-y-4 text-sm">
-              <div>
-                <p className="text-xs uppercase tracking-wide text-white/40">Version history</p>
-                <h2 className="mt-1 font-semibold">{history.length} versions</h2>
-              </div>
               <ol className="space-y-2">
                 {history.map((version) => (
                   <li className="rounded-md border border-white/10 p-3 text-xs" key={version.id}>
@@ -1992,10 +2022,6 @@ export function EventPagePersistedEditorView({ eventId }: { eventId: string }) {
 
           {inspectorPanelId === 'issues' && (
             <section className="mt-6 space-y-4 text-sm">
-              <div>
-                <p className="text-xs uppercase tracking-wide text-white/40">Publish blockers</p>
-                <h2 className="mt-1 font-semibold">Validation</h2>
-              </div>
               {draft.validation.issues.length === 0 ? (
                 <p className="rounded-md border border-emerald-400/30 bg-emerald-400/10 p-3 text-xs text-emerald-100">
                   No publish blockers.
@@ -2027,6 +2053,56 @@ export function EventPagePersistedEditorView({ eventId }: { eventId: string }) {
             <PanelRightOpen className="size-4" />
             Inspector
           </button>
+        )}
+
+        <button
+          aria-label="Open insert menu"
+          className="fixed bottom-4 left-16 z-20 inline-flex h-10 items-center gap-2 rounded-md border border-white/10 bg-neutral-950 px-3 text-sm font-medium text-white/80 shadow-2xl hover:bg-neutral-900 hover:text-white lg:hidden"
+          disabled={!canEdit}
+          onClick={() => setInsertDrawerOpen(true)}
+          type="button"
+        >
+          <LayoutTemplate className="size-4" />
+          Insert
+        </button>
+
+        {insertDrawerOpen && (
+          <aside
+            aria-label="Mobile insert content"
+            className="fixed inset-x-0 bottom-0 z-50 max-h-[78vh] overflow-auto rounded-t-2xl border-t border-white/10 bg-neutral-950 p-4 text-white shadow-2xl lg:hidden"
+          >
+            <div className="flex items-start justify-between gap-3 border-b border-white/10 pb-4">
+              <div>
+                <p className="text-xs uppercase tracking-wide text-white/40">Insert</p>
+                <h2 className="mt-1 font-semibold">Add page content</h2>
+              </div>
+              <button
+                aria-label="Close insert menu"
+                className="inline-flex h-9 items-center justify-center rounded-md border border-white/10 px-2 text-white/60 hover:bg-white/10 hover:text-white"
+                onClick={() => setInsertDrawerOpen(false)}
+                type="button"
+              >
+                <PanelRightClose className="size-4" />
+              </button>
+            </div>
+            <div className="mt-4 grid gap-2">
+              {eventPageInsertActions.map((action) => (
+                <button
+                  className="flex min-h-11 items-center gap-3 rounded-md border border-white/10 px-3 py-2 text-left text-sm font-medium text-white/85 hover:bg-white/10 disabled:cursor-not-allowed disabled:opacity-40"
+                  disabled={!canEdit}
+                  key={action.id}
+                  onClick={() => {
+                    setInsertDrawerOpen(false);
+                    insertEventPageAction(action.id);
+                  }}
+                  type="button"
+                >
+                  {action.icon}
+                  {action.label}
+                </button>
+              ))}
+            </div>
+          </aside>
         )}
       </div>
 

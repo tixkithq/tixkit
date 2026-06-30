@@ -187,15 +187,21 @@ gh run list --repo nkgotcode/tixkit --workflow trusted-ci.yml
 ## Important caveats
 
 ### 1) Kata verification
+
 The cluster must keep a functioning `kata` runtime class. If `runtimeClassName: kata` fails, ARC runner pods will stay pending or fail admission.
 
 ### 2) DIND is intentionally retained
-The ARC runner values use `containerMode.type: dind` because existing Tixkit workflows depend on GitHub Actions service containers. That preserves compatibility with the current CI jobs.
+
+The ARC runner values keep Docker-in-Docker enabled because existing Tixkit workflows depend on GitHub Actions service containers. That preserves compatibility with the current CI jobs.
+
+The values file spells out the dind pod template instead of using ARC's generated `containerMode.type: dind` template so the Docker daemon can run with `--storage-driver=vfs`. Kata-backed pods reject overlayfs mounts when GitHub service containers are created, so leaving Docker on its default overlay driver makes trusted jobs fail before repo steps run.
 
 ### 3) iOS stays GitHub-hosted
+
 `trusted-ci.yml` keeps the iOS job on `macos-latest`; the EPYC Linux runner cannot replace that lane.
 
 ### 4) GitHub App auth
+
 Use GitHub App authentication so runner registration is not tied to a human account token. The app should be installed only on `nkgotcode/tixkit`.
 
 For repo-scoped ARC registration, GitHub's ARC docs require:

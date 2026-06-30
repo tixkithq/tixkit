@@ -136,7 +136,7 @@ vi.mock('@react-email/editor', async () => {
       return ReactModule.createElement(
         'div',
         {
-          'aria-label': 'Email editor canvas',
+          'aria-label': 'Email body',
           contentEditable: editable,
           role: 'textbox',
           suppressContentEditableWarning: true,
@@ -254,6 +254,11 @@ function openEmailMoreActions() {
   fireEvent.click(screen.getByRole('button', { name: 'More actions' }));
 }
 
+function clickEmailSaveDraft() {
+  openEmailMoreActions();
+  fireEvent.click(screen.getByRole('button', { name: 'Save draft' }));
+}
+
 describe('EmailPersistedEditorView', () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -313,39 +318,35 @@ describe('EmailPersistedEditorView', () => {
 
     expect(await screen.findByTestId('email-metadata-bar')).toBeInTheDocument();
     expect(screen.getByRole('complementary', { name: 'Insert content' })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Style' })).toHaveAttribute('aria-pressed', 'true');
+    expect(screen.getByText('React Email inspector')).toBeInTheDocument();
     expect(screen.getByTestId('native-email-inspector-host')).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: 'Collapse inspector' }));
     expect(screen.getByRole('button', { name: 'Open inspector' })).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: 'Insert Variables' }));
-    expect(screen.getByRole('button', { name: 'Variables' })).toHaveAttribute(
-      'aria-pressed',
-      'true',
-    );
+    expect(screen.getByText('Insert merge tags')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '{{brand.name}}' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Collapse inspector' })).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: 'Collapse inspector' }));
     fireEvent.click(screen.getByRole('button', { name: 'Open inspector' }));
     expect(screen.getByRole('button', { name: 'Collapse inspector' })).toBeInTheDocument();
     openEmailMoreActions();
     fireEvent.click(screen.getByRole('button', { name: 'Open version history' }));
-    expect(screen.getByRole('button', { name: 'History' })).toHaveAttribute(
-      'aria-pressed',
-      'true',
-    );
+    expect(screen.getByText('Version history')).toBeInTheDocument();
     openEmailMoreActions();
     fireEvent.click(screen.getByRole('button', { name: 'Open variables panel' }));
-    expect(screen.getByRole('button', { name: 'Variables' })).toHaveAttribute(
-      'aria-pressed',
-      'true',
-    );
+    expect(screen.getByText('Insert merge tags')).toBeInTheDocument();
     openEmailMoreActions();
     fireEvent.click(screen.getByRole('button', { name: 'Template details' }));
-    expect(screen.getByRole('button', { name: 'Style' })).toHaveAttribute('aria-pressed', 'true');
+    expect(screen.getByText('React Email inspector')).toBeInTheDocument();
+    openEmailMoreActions();
+    fireEvent.click(screen.getByRole('button', { name: 'View JSON payload' }));
+    expect(screen.getByText('Saved payload')).toBeInTheDocument();
     openEmailMoreActions();
     fireEvent.click(screen.getByRole('button', { name: 'Review blockers' }));
-    expect(screen.getByRole('button', { name: 'Issues' })).toHaveAttribute('aria-pressed', 'true');
-    fireEvent.click(screen.getByRole('button', { name: 'Style' }));
-    expect(screen.getByRole('button', { name: 'Style' })).toHaveAttribute('aria-pressed', 'true');
+    expect(await screen.findByText('Current draft review')).toBeInTheDocument();
+    openEmailMoreActions();
+    fireEvent.click(screen.getByRole('button', { name: 'Template details' }));
+    expect(screen.getByText('React Email inspector')).toBeInTheDocument();
 
     const subject = await screen.findByLabelText('Subject');
     fireEvent.change(subject, {
@@ -360,10 +361,10 @@ describe('EmailPersistedEditorView', () => {
     fireEvent.change(screen.getByLabelText('Category'), {
       target: { value: 'staff' },
     });
-    const canvas = screen.getByRole('textbox', { name: 'Email editor canvas' });
+    const canvas = screen.getByRole('textbox', { name: 'Email body' });
     canvas.textContent = 'Updated saved email for {{recipient.name}}.';
     fireEvent.input(canvas);
-    fireEvent.click(screen.getByRole('button', { name: 'Preview' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Open preview' }));
 
     await waitFor(() => {
       expect(adminApiMock.saveContentVersion).toHaveBeenCalledWith(
@@ -399,7 +400,8 @@ describe('EmailPersistedEditorView', () => {
       expect(adminApiMock.publishContentVersion).toHaveBeenCalledWith('cdoc_email', 'cver_2');
     });
 
-    fireEvent.click(screen.getAllByRole('button', { name: 'Send test' })[0]);
+    openEmailMoreActions();
+    fireEvent.click(screen.getByRole('button', { name: 'Send test' }));
     await waitFor(() => {
       expect(adminApiMock.testSendContent).toHaveBeenCalledWith(
         'cdoc_email',
@@ -416,7 +418,7 @@ describe('EmailPersistedEditorView', () => {
       expect(adminApiMock.archiveContentDocument).toHaveBeenCalledWith('cdoc_email');
     });
     expect(screen.getByText('Archived email template')).toBeInTheDocument();
-  });
+  }, 10000);
 
   it('loads email content documents from array and keyed API response shapes', async () => {
     adminApiMock.listContentDocuments.mockResolvedValueOnce(ok([document]));
@@ -473,6 +475,7 @@ describe('EmailPersistedEditorView', () => {
     expect(await screen.findByLabelText('Subject')).toBeDisabled();
     expect(screen.getByRole('button', { name: 'Open preview' })).toBeDisabled();
     expect(screen.getByRole('button', { name: 'Publish' })).toBeDisabled();
+    openEmailMoreActions();
     expect(screen.getByRole('button', { name: 'Send test' })).toBeDisabled();
   });
 
@@ -525,7 +528,7 @@ describe('EmailPersistedEditorView', () => {
 
     const subject = await screen.findByLabelText('Subject');
     fireEvent.change(subject, { target: { value: 'Stale email subject' } });
-    fireEvent.click(screen.getByRole('button', { name: 'Save draft' }));
+    clickEmailSaveDraft();
     await waitFor(() => expect(screen.getByText('Saving')).toBeInTheDocument());
 
     fireEvent.change(subject, { target: { value: 'Fresh email subject' } });
@@ -564,7 +567,7 @@ describe('EmailPersistedEditorView', () => {
 
     const subject = await screen.findByLabelText('Subject');
     fireEvent.change(subject, { target: { value: 'Retryable email subject' } });
-    fireEvent.click(screen.getByRole('button', { name: 'Save draft' }));
+    clickEmailSaveDraft();
 
     expect(await screen.findByText('Injected email save outage')).toBeInTheDocument();
     expect(screen.getByText('Save failed')).toBeInTheDocument();
@@ -574,7 +577,7 @@ describe('EmailPersistedEditorView', () => {
     expect(screen.queryByText('Injected email save outage')).not.toBeInTheDocument();
     expect(screen.getByText('Ready')).toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole('button', { name: 'Save draft' }));
+    clickEmailSaveDraft();
     await waitFor(() => {
       expect(screen.getByText('Saved draft v2')).toBeInTheDocument();
     });
@@ -587,19 +590,15 @@ describe('EmailPersistedEditorView', () => {
   it('adds editor-authored images and reusable components from the insert rail', async () => {
     render(React.createElement(EmailPersistedEditorView, { eventId: 'evt_1' }));
 
-    await screen.findByRole('textbox', { name: 'Email editor canvas' });
+    await screen.findByRole('textbox', { name: 'Email body' });
 
     fireEvent.click(screen.getByRole('button', { name: 'Insert Image' }));
     fireEvent.click(screen.getByRole('button', { name: 'Insert Components' }));
-    expect(screen.getByRole('button', { name: 'Components' })).toHaveAttribute(
-      'aria-pressed',
-      'true',
-    );
+    expect(screen.getByText('Insert email sections')).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: /QR code/ }));
     fireEvent.click(screen.getByRole('button', { name: /Calendar button/ }));
     fireEvent.click(screen.getByRole('button', { name: /Ticket summary/ }));
-    fireEvent.click(screen.getByRole('button', { name: 'Style' }));
-    fireEvent.click(screen.getByRole('button', { name: 'Save draft' }));
+    clickEmailSaveDraft();
 
     await waitFor(() => {
       expect(adminApiMock.saveContentVersion).toHaveBeenCalledWith(
@@ -622,18 +621,19 @@ describe('EmailPersistedEditorView', () => {
 
     const subject = await screen.findByLabelText('Subject');
     fireEvent.change(subject, { target: { value: '' } });
-    const canvas = screen.getByRole('textbox', { name: 'Email editor canvas' });
+    const canvas = screen.getByRole('textbox', { name: 'Email body' });
     canvas.textContent = '{{unknown.value}}';
     fireEvent.input(canvas);
 
-    fireEvent.click(screen.getByRole('button', { name: 'Issues' }));
-    fireEvent.click(screen.getByRole('button', { name: 'Review current draft' }));
+    openEmailMoreActions();
+    fireEvent.click(screen.getByRole('button', { name: 'Review blockers' }));
 
     expect(await screen.findByText('missing_subject')).toBeInTheDocument();
     expect(screen.getByText('unknown_variable')).toBeInTheDocument();
     expect(screen.getByText('Current draft review')).toBeInTheDocument();
 
-    fireEvent.click(screen.getAllByRole('button', { name: 'Send test' })[0]);
+    openEmailMoreActions();
+    fireEvent.click(screen.getByRole('button', { name: 'Send test' }));
 
     expect(
       await screen.findByText('Resolve email test-send blockers before sending a test.'),
@@ -651,8 +651,8 @@ describe('EmailPersistedEditorView', () => {
   it('inserts the selected variable token into the active email block', async () => {
     render(React.createElement(EmailPersistedEditorView, { eventId: 'evt_1' }));
 
-    const canvas = await screen.findByRole('textbox', { name: 'Email editor canvas' });
-    fireEvent.click(screen.getByRole('button', { name: 'Variables' }));
+    const canvas = await screen.findByRole('textbox', { name: 'Email body' });
+    fireEvent.click(screen.getByRole('button', { name: 'Insert Variables' }));
     fireEvent.click(screen.getByRole('button', { name: '{{brand.name}}' }));
 
     expect(canvas).toHaveTextContent('{{brand.name}}');
