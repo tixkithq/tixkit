@@ -10,6 +10,7 @@ import { OfflineCheckInBulkSyncHardeningMigration } from '../../migrations/0035_
 import { OrganizationBoxOfficeSettingsMigration } from '../../migrations/0036_organization_box_office_settings.js';
 import { TicketListingsMigration } from '../../migrations/0037_ticket_listings.js';
 import { EventResalePolicyMigration } from '../../migrations/0038_event_resale_policy.js';
+import { ResaleCheckoutReservationsMigration } from '../../migrations/0039_resale_checkout_reservations.js';
 
 const offlineCheckInBulkSyncMigrationPath = new URL(
   '../../migrations/0034_offline_check_in_bulk_sync.ts',
@@ -176,7 +177,7 @@ describe('OrderSalesChannelMigration', () => {
   it('is registered with the production migrator provider', async () => {
     const migrations = await new TixkitMigrationProvider().getMigrations();
 
-    expect(Object.keys(migrations).at(-1)).toBe('0038_event_resale_policy');
+    expect(Object.keys(migrations).at(-1)).toBe('0039_resale_checkout_reservations');
     expect(migrations['0031_order_sales_channel']).toBe(OrderSalesChannelMigration);
     expect(migrations['0032_scan_logs_ticket_index']).toBe(ScanLogsTicketIndexMigration);
     expect(migrations['0033_email_jobs_template_version_fk']).toBe(
@@ -191,6 +192,9 @@ describe('OrderSalesChannelMigration', () => {
     );
     expect(migrations['0037_ticket_listings']).toBe(TicketListingsMigration);
     expect(migrations['0038_event_resale_policy']).toBe(EventResalePolicyMigration);
+    expect(migrations['0039_resale_checkout_reservations']).toBe(
+      ResaleCheckoutReservationsMigration,
+    );
   });
 
   it('keeps event resale policy columns portable across supported SQL drivers', () => {
