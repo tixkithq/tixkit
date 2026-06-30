@@ -169,7 +169,7 @@ kubectl exec -n arc-runners deploy/tixkit-ci-mssql -- \
   -Q "IF DB_ID('tixkit') IS NULL CREATE DATABASE tixkit"
 ```
 
-The trusted workflow uses `sqlserver://sa:Test-password-12345@tixkit-ci-mssql.arc-runners.svc.cluster.local:1433/tixkit?encrypt=false&trustServerCertificate=true`.
+The trusted workflow uses `sqlserver://sa:Test-password-12345@tixkit-ci-mssql.arc-runners.svc.cluster.local:1433/tixkit?encrypt=false&trustServerCertificate=true`. The MSSQL job drops and recreates the `tixkit` database before tests, then runs an `always()` cleanup step that drops it again after the job. The Kubernetes deployment uses `emptyDir`, so deleting or restarting the pod also clears all SQL Server data files.
 
 ### 6) Install ARC controller
 

@@ -282,10 +282,17 @@ jobs:
       - uses: actions/checkout@v7
       - uses: ./.github/actions/setup-js
       - run: bun install --frozen-lockfile
-      - name: Ensure MSSQL database
+      - name: Reset MSSQL database
         run: |
-          cat > /tmp/ensure-mssql.mjs <<'EOF'
+          cat > /tmp/reset-mssql.mjs <<'EOF'
           import { Connection, Request } from 'tedious';
+
+          const operation = process.argv[2];
+
+          if (operation !== 'setup' && operation !== 'cleanup') {
+            console.error('Usage: reset-mssql.mjs setup|cleanup');
+            process.exit(2);
+          }
 
           const config = {
             server: 'tixkit-ci-mssql.arc-runners.svc.cluster.local',
@@ -306,7 +313,7 @@ jobs:
             },
           };
 
-          function ensureDatabase() {
+          function runSql(sql) {
             return new Promise((resolve, reject) => {
               const connection = new Connection(config);
               connection.on('connect', (error) => {
@@ -317,7 +324,7 @@ jobs:
                 }
 
                 const request = new Request(
-                  "IF DB_ID(N'tixkit') IS NULL CREATE DATABASE [tixkit]",
+                  sql,
                   (requestError) => {
                     connection.close();
                     if (requestError) reject(requestError);
@@ -330,11 +337,28 @@ jobs:
             });
           }
 
+          const resetSql = `
+          IF DB_ID(N'tixkit') IS NOT NULL
+          BEGIN
+            ALTER DATABASE [tixkit] SET SINGLE_USER WITH ROLLBACK IMMEDIATE;
+            DROP DATABASE [tixkit];
+          END;
+          CREATE DATABASE [tixkit];
+          `;
+
+          const cleanupSql = `
+          IF DB_ID(N'tixkit') IS NOT NULL
+          BEGIN
+            ALTER DATABASE [tixkit] SET SINGLE_USER WITH ROLLBACK IMMEDIATE;
+            DROP DATABASE [tixkit];
+          END;
+          `;
+
           let lastError;
           for (let attempt = 1; attempt <= 60; attempt += 1) {
             try {
-              await ensureDatabase();
-              console.log('MSSQL ready');
+              await runSql(operation === 'setup' ? resetSql : cleanupSql);
+              console.log(operation === 'setup' ? 'MSSQL database reset' : 'MSSQL database cleaned up');
               process.exit(0);
             } catch (error) {
               lastError = error;
@@ -346,5 +370,9 @@ jobs:
           console.error(lastError);
           process.exit(1);
           EOF
-          bun /tmp/ensure-mssql.mjs
+          bun /tmp/reset-mssql.mjs setup
+      - run: bunx turbo run build --filter=@tixkit/domain --filter=@tixkit/db --filter=@tixkit/shared
       - run: bun run --filter @tixkit/db test:mssql
+      - name: Cleanup MSSQL database
+        if: ${{ always() }}
+        run: bun /tmp/reset-mssql.mjs cleanup
