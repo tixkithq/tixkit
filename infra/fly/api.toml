@@ -14,3 +14,5 @@ min_machines_running = 1
 [env]
 NODE_ENV = "production"
 PORT = "4000"
+TRUST_PROXY = "1"
+CORS_ALLOWED_ORIGINS = "https://checkout.example.com,https://admin.example.com"

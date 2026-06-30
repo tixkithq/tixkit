@@ -58,18 +58,16 @@ bun run --filter @tixkit/db test:unit
 bun run --filter @tixkit/db lint
 ```
 
-CI includes a gated `integration-tests-mssql` job. It only runs when `RUN_MSSQL_TESTS` is enabled because the SQL Server container is heavier than the default Postgres/MySQL services.
-
-Fresh local proof on 2026-06-30 used a disposable SQL Server 2022 container and passed:
+Run the gated DB integration suite against a SQL Server instance:
 
 ```bash
 DB_INTEGRATION_DRIVER=mssql \
-DATABASE_URL_MSSQL=sqlserver://<user>:<password>@<host>:1433/tixkit?encrypt=true\&trustServerCertificate=true \
+DATABASE_URL_MSSQL=<sqlserver-connection-url> \
 bun run --filter @tixkit/db test:mssql
 ```
 
-That run applied all 39 migrations and passed 12/12 DB integration tests.
+CI includes a gated `integration-tests-mssql` job. It only runs when `RUN_MSSQL_TESTS` is enabled because the SQL Server container is heavier than the default Postgres/MySQL services. The current parity proof (migrations applied and DB integration suite passing on SQL Server) is recorded against backlog item C-055 in `docs/completion/backlog.md`.
 
-## Remaining Work
+## Scope
 
-The current implementation provides dialect construction, migrations, reset/truncate helpers, correctness-critical SQL helpers, and core DB integration coverage against SQL Server. Broader API/workflow/E2E MSSQL matrices can be expanded if production customers select SQL Server as their primary database.
+The MSSQL target provides dialect construction, migrations, reset/truncate helpers, correctness-critical SQL helpers, and core DB integration coverage against SQL Server. Broader API/workflow/E2E MSSQL matrices can be expanded if production customers select SQL Server as their primary database.

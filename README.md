@@ -305,7 +305,9 @@ End-to-end suites run across three browsers and include accessibility assertions
 
 ## Roadmap
 
-Tixkit is actively developed. Areas on the near-term roadmap include additional payment providers, internationalization and localized content, box-office and point-of-sale flows, custom scanning code formats, and additional integrator SDKs (including Go and Rust). Contributions in these areas are especially welcome.
+Tixkit is actively developed. Recent releases shipped internationalization and localized checkout/templates, box-office and point-of-sale sales, paid ticket resale, configurable scanning code formats, advanced fraud and Stripe Radar controls, email/SMS personalization, link shortening, first-class Go and Rust integrator SDKs, and a multi-channel content studio for event pages, email, and SMS.
+
+Genuinely near-term areas include additional payment providers (PayPal, then Adyen and Square in the managed tier), more channel adapters (such as WhatsApp, iMessage, and social invites), and further integrator SDKs. Contributions in these areas are especially welcome.
 
 ---
 

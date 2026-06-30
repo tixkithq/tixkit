@@ -6,7 +6,7 @@ export function Toaster({ ...props }: ToasterProps) {
   return (
     <Sonner
       theme="system"
-      className="toaster group [&_div[data-content]]:w-full"
+      className="toaster group"
       style={
         {
           '--normal-bg': 'var(--popover)',

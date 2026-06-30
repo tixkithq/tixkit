@@ -43,7 +43,7 @@ api:
   replicas: 2
   image: api
   port: 4000
-  trustProxy: '10.0.0.0/8,172.16.0.0/12,192.168.0.0/16'
+  trustProxy: '1'
   resources:
     requests:
       cpu: 250m

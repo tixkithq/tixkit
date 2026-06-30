@@ -49,6 +49,7 @@
     "infra:down": "docker compose -f infra/docker-compose.yml down",
     "iac:lint": "helm lint infra/helm/tixkit",
     "iac:template": "helm template tixkit infra/helm/tixkit --namespace tixkit",
+    "deploy:check": "infra/scripts/validate-deploy-templates.sh",
     "release:dry-run": "infra/scripts/release-dry-run.sh",
     "dr:backup:postgres": "infra/scripts/backup-postgres.sh",
     "dr:restore:postgres": "infra/scripts/restore-postgres.sh",

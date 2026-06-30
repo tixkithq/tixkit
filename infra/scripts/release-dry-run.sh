@@ -9,6 +9,7 @@ bun install --frozen-lockfile
 bun run build
 bun run typecheck
 bun run lint
+bun run deploy:check
 helm lint "${chart_dir}"
 helm template "${release_name}" "${chart_dir}" --namespace "${namespace}" >/tmp/tixkit-release-rendered.yaml
 

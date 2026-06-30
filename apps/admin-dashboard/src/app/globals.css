@@ -119,7 +119,13 @@
     @apply overflow-x-hidden;
   }
   body {
-    @apply min-h-svh w-full bg-background text-foreground has-[div[data-variant='inset']]:bg-sidebar;
+    @apply min-h-svh w-full bg-background text-foreground;
+  }
+  body:has(div[data-variant='inset']) {
+    @apply bg-sidebar;
+  }
+  .toaster div[data-content] {
+    width: 100%;
   }
 
   /* Override Radix scroll locking for sticky headers */

@@ -157,6 +157,33 @@ async function expectPersistedEventPageEditorRegions(page: Page): Promise<void> 
   await expect(page.getByLabel('More actions')).toBeVisible();
 }
 
+async function expectEventPageDocumentCanvasPresentation(page: Page): Promise<void> {
+  const canvas = page.locator('[data-testid="editor-canvas"]').first();
+  await expect(canvas).toHaveAttribute('aria-label', /event page editable document$/);
+  await expect(canvas.getByRole('button', { name: /Select content region|Selected/i })).toHaveCount(
+    0,
+  );
+  const snapshot = await canvas.evaluate((node) => {
+    const legacyCard = [...node.querySelectorAll<HTMLElement>('*')].find((element) => {
+      const className = element.getAttribute('class') ?? '';
+      return (
+        className.includes('group') &&
+        className.includes('rounded-md') &&
+        className.includes('border') &&
+        className.includes('p-4')
+      );
+    });
+    return {
+      legacyCardClass: legacyCard?.getAttribute('class') ?? null,
+      background: window.getComputedStyle(node).backgroundColor,
+      text: node.textContent ?? '',
+    };
+  });
+  expect(snapshot.legacyCardClass).toBeNull();
+  expect(snapshot.background).not.toBe('rgb(9, 9, 11)');
+  expect(snapshot.text).toContain('Tickets');
+}
+
 test.describe('persisted admin event-page content editor', () => {
   test('saves, previews, publishes, renders publicly, and reloads a canonical event page', async ({
     browserName,
@@ -172,9 +199,12 @@ test.describe('persisted admin event-page content editor', () => {
     const summary = `Updated public page copy for ${event.title}.`;
     const ctaLabel = 'Reserve tickets';
 
+    await page.addInitScript(() => window.localStorage.setItem('tixkit-theme', 'light'));
     await page.setViewportSize(desktopViewport);
     await page.goto(`${adminBaseUrl}/events/${event.id}/content/event-page`);
     await expectPersistedEventPageEditorRegions(page);
+    await expect(page.locator('html')).not.toHaveClass(/dark/);
+    await expectEventPageDocumentCanvasPresentation(page);
 
     await page.getByLabel('Page headline').fill(headline);
     await page.getByLabel('Page summary').fill(summary);
@@ -310,9 +340,12 @@ test.describe('persisted admin event-page content editor', () => {
     await requireReachable(page, `${apiBaseUrl}/health`, 'api');
 
     const event = await seedContentEvent(page, `cdp-${Date.now()}`);
+    await page.addInitScript(() => window.localStorage.setItem('tixkit-theme', 'light'));
     await page.setViewportSize(desktopViewport);
     await page.goto(`${adminBaseUrl}/events/${event.id}/content/event-page`);
     await expectPersistedEventPageEditorRegions(page);
+    await expect(page.locator('html')).not.toHaveClass(/dark/);
+    await expectEventPageDocumentCanvasPresentation(page);
 
     const client = await page.context().newCDPSession(page);
     const { root } = await client.send('DOM.getDocument', { depth: -1, pierce: true });

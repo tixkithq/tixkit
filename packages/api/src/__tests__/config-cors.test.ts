@@ -1,5 +1,6 @@
 import Fastify from 'fastify';
 import cors from '@fastify/cors';
+import rateLimit from '@fastify/rate-limit';
 import { afterEach, describe, expect, it } from 'vitest';
 import { createCorsOriginValidator } from '../app.js';
 import { loadConfig, parseTrustProxy, resolveCorsAllowedOrigins } from '../config/index.js';
@@ -8,6 +9,8 @@ const ENV_KEYS = [
   'CORS_ALLOWED_ORIGINS',
   'METRICS_BEARER_TOKEN',
   'NODE_ENV',
+  'RATE_LIMIT_MAX',
+  'RATE_LIMIT_TIME_WINDOW',
   'TRUST_PROXY',
 ] as const;
 
@@ -103,8 +106,31 @@ describe('API exposure config parsing', () => {
     expect(parseTrustProxy('true')).toBe(true);
     expect(parseTrustProxy('false')).toBe(false);
     expect(parseTrustProxy('1')).toBe(1);
+    expect(parseTrustProxy('192.168.0.10')).toBe('192.168.0.10');
     expect(parseTrustProxy('10.0.0.0/8')).toBe('10.0.0.0/8');
+    expect(parseTrustProxy('2001:db8::/32')).toBe('2001:db8::/32');
     expect(parseTrustProxy(undefined)).toBe(false);
+  });
+
+  it('rejects malformed TRUST_PROXY values', () => {
+    for (const value of [
+      '0',
+      '-1',
+      '1.5',
+      '01',
+      'truee',
+      '10.0.0.999',
+      '10.0.0.0/99',
+      '10.0.0.0/not-a-prefix',
+      '10.0.0.0/8,not-a-proxy',
+      ',',
+    ]) {
+      process.env.TRUST_PROXY = value;
+
+      expect(() => loadConfig(), value).toThrow(
+        'TRUST_PROXY must be false, true, a positive hop count, or an explicit proxy IP/CIDR list',
+      );
+    }
   });
 
   it('rejects TRUST_PROXY=true in production', () => {
@@ -137,6 +163,72 @@ describe('API exposure config parsing', () => {
 
     process.env.NODE_ENV = 'test';
     expect(loadConfig().trustProxy).toBe(true);
+  });
+
+  it('rejects malformed RATE_LIMIT_MAX values', () => {
+    for (const value of ['abc', '100abc', '0', '-1', '1.5', '', '9007199254740992']) {
+      process.env.RATE_LIMIT_MAX = value;
+
+      expect(() => loadConfig(), value).toThrow('RATE_LIMIT_MAX must be a positive integer');
+    }
+  });
+
+  it('parses RATE_LIMIT_MAX strictly with environment defaults', () => {
+    process.env.RATE_LIMIT_MAX = '250';
+    expect(loadConfig().rateLimitMax).toBe(250);
+
+    delete process.env.RATE_LIMIT_MAX;
+    process.env.NODE_ENV = 'development';
+    expect(loadConfig().rateLimitMax).toBe(1000);
+
+    process.env.NODE_ENV = 'production';
+    expect(loadConfig().rateLimitMax).toBe(100);
+  });
+
+  it('rejects malformed RATE_LIMIT_TIME_WINDOW values', () => {
+    for (const value of ['abc', '0', '-1', '1.5 seconds', '', '9007199254740992 minutes']) {
+      process.env.RATE_LIMIT_TIME_WINDOW = value;
+
+      expect(() => loadConfig(), value).toThrow(
+        'RATE_LIMIT_TIME_WINDOW must be a positive duration such as "1 minute", "30 seconds", or "100 ms"',
+      );
+    }
+  });
+
+  it('parses RATE_LIMIT_TIME_WINDOW strictly with normalized duration units', () => {
+    process.env.RATE_LIMIT_TIME_WINDOW = '30 seconds';
+    expect(loadConfig().rateLimitTimeWindow).toBe('30 seconds');
+
+    process.env.RATE_LIMIT_TIME_WINDOW = '100ms';
+    expect(loadConfig().rateLimitTimeWindow).toBe('100 milliseconds');
+
+    process.env.RATE_LIMIT_TIME_WINDOW = '1h';
+    expect(loadConfig().rateLimitTimeWindow).toBe('1 hour');
+
+    delete process.env.RATE_LIMIT_TIME_WINDOW;
+    expect(loadConfig().rateLimitTimeWindow).toBe('1 minute');
+  });
+
+  it('keeps parsed RATE_LIMIT_TIME_WINDOW compatible with Fastify rate limits', async () => {
+    process.env.RATE_LIMIT_TIME_WINDOW = '100 milliseconds';
+    const app = Fastify({ logger: false });
+    await app.register(cors, {
+      origin: createCorsOriginValidator(resolveCorsAllowedOrigins(undefined, 'development')),
+      credentials: true,
+    });
+    await app.register(rateLimit, {
+      max: 1,
+      timeWindow: loadConfig().rateLimitTimeWindow,
+    });
+    app.get('/limited', async () => ({ ok: true }));
+
+    const first = await app.inject({ method: 'GET', url: '/limited' });
+    const second = await app.inject({ method: 'GET', url: '/limited' });
+
+    expect(first.statusCode).toBe(200);
+    expect(second.statusCode).toBe(429);
+
+    await app.close();
   });
 
   it('defaults local CORS origins in development but not production', () => {

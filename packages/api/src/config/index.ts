@@ -1,3 +1,5 @@
+import { isIP } from 'node:net';
+
 import type { FastifyServerOptions } from 'fastify';
 
 export type TrustProxyConfig = NonNullable<FastifyServerOptions['trustProxy']>;
@@ -56,6 +58,17 @@ export function resolveCorsAllowedOrigins(value: string | undefined, nodeEnv: st
   return configured.length > 0 ? configured : defaultCorsAllowedOrigins(nodeEnv);
 }
 
+function isValidProxyAddressEntry(entry: string): boolean {
+  const [address, prefix, extra] = entry.split('/');
+  const ipVersion = isIP(address ?? '');
+  if (extra !== undefined || ipVersion === 0) return false;
+  if (prefix === undefined) return true;
+  if (!/^(0|[1-9]\d*)$/.test(prefix)) return false;
+
+  const prefixLength = Number(prefix);
+  return prefixLength <= (ipVersion === 4 ? 32 : 128);
+}
+
 export function parseTrustProxy(value: string | undefined): TrustProxyConfig {
   const trimmed = value?.trim();
   if (!trimmed) return false;
@@ -64,13 +77,70 @@ export function parseTrustProxy(value: string | undefined): TrustProxyConfig {
   if (normalized === 'true') return true;
   if (normalized === 'false') return false;
 
-  const numberValue = Number(trimmed);
-  if (Number.isInteger(numberValue) && numberValue >= 0 && String(numberValue) === trimmed) {
-    return numberValue;
+  if (/^[1-9]\d*$/.test(trimmed)) {
+    const hopCount = Number(trimmed);
+    if (!Number.isSafeInteger(hopCount)) {
+      throw new Error(
+        'TRUST_PROXY must be false, true, a positive hop count, or an explicit proxy IP/CIDR list',
+      );
+    }
+
+    return hopCount;
   }
 
   const entries = parseCommaSeparatedList(trimmed);
-  return entries.length > 1 ? entries : trimmed;
+  if (entries.length > 0 && entries.every(isValidProxyAddressEntry)) {
+    return entries.length > 1 ? entries : entries[0];
+  }
+
+  throw new Error(
+    'TRUST_PROXY must be false, true, a positive hop count, or an explicit proxy IP/CIDR list',
+  );
+}
+
+function parsePositiveIntegerConfig(name: string, value: string | undefined, fallback: string): number {
+  const candidate = value === undefined ? fallback : value.trim();
+  if (!/^[1-9]\d*$/.test(candidate)) {
+    throw new Error(`${name} must be a positive integer`);
+  }
+
+  const parsed = Number(candidate);
+  if (!Number.isSafeInteger(parsed)) {
+    throw new Error(`${name} must be a positive integer`);
+  }
+
+  return parsed;
+}
+
+function parseRateLimitTimeWindow(value: string | undefined, fallback: string): string {
+  const candidate = value === undefined ? fallback : value.trim().toLowerCase();
+  const match = /^([1-9]\d*)\s*(milliseconds?|ms|seconds?|s|minutes?|m|hours?|h|days?|d)$/.exec(candidate);
+  if (!match) {
+    throw new Error(
+      'RATE_LIMIT_TIME_WINDOW must be a positive duration such as "1 minute", "30 seconds", or "100 ms"',
+    );
+  }
+
+  const amount = Number(match[1]);
+  if (!Number.isSafeInteger(amount)) {
+    throw new Error(
+      'RATE_LIMIT_TIME_WINDOW must be a positive duration such as "1 minute", "30 seconds", or "100 ms"',
+    );
+  }
+
+  const unit = match[2];
+  const normalizedUnit =
+    unit === 'ms' || unit.startsWith('millisecond')
+      ? 'millisecond'
+      : unit === 's' || unit.startsWith('second')
+        ? 'second'
+        : unit === 'm' || unit.startsWith('minute')
+          ? 'minute'
+          : unit === 'h' || unit.startsWith('hour')
+            ? 'hour'
+            : 'day';
+
+  return `${amount} ${normalizedUnit}${amount === 1 ? '' : 's'}`;
 }
 
 export function loadConfig(): AppConfig {
@@ -109,11 +179,12 @@ export function loadConfig(): AppConfig {
     apiBaseUrl: process.env.API_BASE_URL ?? 'http://localhost:4000',
     corsAllowedOrigins: resolveCorsAllowedOrigins(process.env.CORS_ALLOWED_ORIGINS, nodeEnv),
     metricsBearerToken: process.env.METRICS_BEARER_TOKEN?.trim() ?? '',
-    rateLimitMax: parseInt(
-      process.env.RATE_LIMIT_MAX ?? (process.env.NODE_ENV === 'production' ? '100' : '1000'),
-      10,
+    rateLimitMax: parsePositiveIntegerConfig(
+      'RATE_LIMIT_MAX',
+      process.env.RATE_LIMIT_MAX,
+      nodeEnv === 'production' ? '100' : '1000',
     ),
-    rateLimitTimeWindow: process.env.RATE_LIMIT_TIME_WINDOW ?? '1 minute',
+    rateLimitTimeWindow: parseRateLimitTimeWindow(process.env.RATE_LIMIT_TIME_WINDOW, '1 minute'),
     trustProxy,
   };
 }

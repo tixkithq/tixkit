@@ -191,6 +191,32 @@ async function expectPersistedEmailEditorRegions(page: Page): Promise<void> {
   await expect(page.getByLabel('More actions')).toBeVisible();
 }
 
+async function expectEmailDocumentCanvasPresentation(page: Page): Promise<void> {
+  const canvas = page.locator('[data-testid="editor-canvas"]').first();
+  await expect(canvas).toHaveAttribute('aria-label', /email template editable document$/);
+  await expect(canvas.getByRole('button', { name: /Select content region|Selected/i })).toHaveCount(
+    0,
+  );
+  const snapshot = await canvas.evaluate((node) => {
+    const legacyCard = [...node.querySelectorAll<HTMLElement>('*')].find((element) => {
+      const className = element.getAttribute('class') ?? '';
+      return (
+        className.includes('group') &&
+        className.includes('rounded-md') &&
+        className.includes('border') &&
+        className.includes('p-4')
+      );
+    });
+    return {
+      legacyCardClass: legacyCard?.getAttribute('class') ?? null,
+      background: window.getComputedStyle(node).backgroundColor,
+    };
+  });
+  expect(snapshot.legacyCardClass).toBeNull();
+  expect(snapshot.background).not.toBe('rgb(9, 9, 11)');
+  await expect(page.getByLabel('Ticket summary title')).toHaveValue('Ticket summary');
+}
+
 test.describe('persisted admin email content editor', () => {
   test('saves, previews, publishes, test-sends, and reloads a canonical email template', async ({
     page,
@@ -204,9 +230,12 @@ test.describe('persisted admin email content editor', () => {
     const subject = `Tickets for ${event.title}`;
     const body = `Hi {{recipient.name}}, ${event.title} tickets are ready.`;
 
+    await page.addInitScript(() => window.localStorage.setItem('tixkit-theme', 'light'));
     await page.setViewportSize(desktopViewport);
     await page.goto(`${adminBaseUrl}/events/${event.id}/content/email`);
     await expectPersistedEmailEditorRegions(page);
+    await expect(page.locator('html')).not.toHaveClass(/dark/);
+    await expectEmailDocumentCanvasPresentation(page);
 
     await page.getByLabel('Subject').fill(subject);
     await page.getByLabel('Preview text').fill('Everything you need before arrival.');
@@ -391,9 +420,12 @@ test.describe('persisted admin email content editor', () => {
     await requireReachable(page, `${apiBaseUrl}/health`, 'api');
 
     const event = await seedContentEvent(page, `cdp-${Date.now()}`);
+    await page.addInitScript(() => window.localStorage.setItem('tixkit-theme', 'light'));
     await page.setViewportSize(desktopViewport);
     await page.goto(`${adminBaseUrl}/events/${event.id}/content/email`);
     await expectPersistedEmailEditorRegions(page);
+    await expect(page.locator('html')).not.toHaveClass(/dark/);
+    await expectEmailDocumentCanvasPresentation(page);
 
     const client = await page.context().newCDPSession(page);
     const { root } = await client.send('DOM.getDocument', { depth: -1, pierce: true });
