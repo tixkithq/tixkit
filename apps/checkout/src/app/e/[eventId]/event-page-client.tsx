@@ -260,15 +260,7 @@ export default function EventPageClient({
         <Separator />
 
         <section className="space-y-4">
-          <div className="flex items-center justify-between gap-2">
-            <h2 className="text-lg font-semibold">Tickets</h2>
-            {hasActiveTickets ? (
-              <Button size="sm" onClick={() => goToCheckout()} className="gap-1.5">
-                Get tickets
-                <ArrowRightIcon className="size-4" />
-              </Button>
-            ) : null}
-          </div>
+          <h2 className="text-lg font-semibold">Tickets</h2>
 
           {visibleTickets.length === 0 ? (
             <EmptyState
@@ -382,10 +374,10 @@ function sanitizePublishedEventPageHtml(html: string): string {
       '',
     )
     .replace(/<(script|object|embed|form|svg|math|base|link|meta|style|template)\b[^>]*\/?>/gi, '')
-    .replace(/\s+on[a-z][\w:-]*(?:\s*=\s*(?:"[^"]*"|'[^']*'|`[^`]*`|[^\s"'`=<>]+))?/gi, '')
-    .replace(/\s+(srcdoc|style)\s*=\s*("[^"]*"|'[^']*'|`[^`]*`|[^\s"'`=<>]*)/gi, '')
+    .replace(/[\s/]+on[a-z][\w:-]*(?:\s*=\s*(?:"[^"]*"|'[^']*'|`[^`]*`|[^\s"'`=<>]+))?/gi, '')
+    .replace(/[\s/]+(srcdoc|style)\s*=\s*("[^"]*"|'[^']*'|`[^`]*`|[^\s"'`=<>]*)/gi, '')
     .replace(
-      /\s+(href|src|data|action|formaction|xlink:href)\s*=\s*("[^"]*"|'[^']*'|`[^`]*`|[^\s"'`=<>]*)/gi,
+      /[\s/]+(href|src|data|action|formaction|xlink:href)\s*=\s*("[^"]*"|'[^']*'|`[^`]*`|[^\s"'`=<>]*)/gi,
       (attribute: string, _name: string, rawValue: string) =>
         hasUnsafeHtmlUrlScheme(rawValue) ? '' : attribute,
     );

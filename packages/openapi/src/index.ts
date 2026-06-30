@@ -350,6 +350,16 @@ const rawOpenApiSpec = {
                 description:
                   'React Email editor export HTML used for round-tripping authoring state.',
               },
+              contentText: {
+                type: 'string',
+                description: 'Plain-text export from the React Email editor authoring canvas.',
+              },
+              contentJson: {
+                type: 'object',
+                description:
+                  'TipTap JSON document emitted by the React Email editor for round-tripping authoring state.',
+                additionalProperties: true,
+              },
             },
             required: ['provider', 'contentHtml'],
           },

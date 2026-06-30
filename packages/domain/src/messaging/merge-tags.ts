@@ -146,8 +146,15 @@ export const MERGE_TAG_REGISTRY: readonly MergeTagVariable[] = [
 const REGISTRY_KEYS = new Set(MERGE_TAG_REGISTRY.map((v) => v.key));
 const REQUIRED_KEYS = new Set(MERGE_TAG_REGISTRY.filter((v) => v.required).map((v) => v.key));
 
-const TAG_PATTERN = /\{\{\s*([a-zA-Z0-9_.]+)\s*\}\}/g;
+const TAG_PATTERN =
+  /\{\{\s*((?:customAnswers\.[a-zA-Z0-9_-]+)|(?:[a-zA-Z0-9_]+(?:\.[a-zA-Z0-9_]+)*))\s*\}\}/g;
 const CUSTOM_ANSWER_PATTERN = /^customAnswers\.([a-zA-Z0-9_-]+)$/;
+const URL_TAG_KEYS = new Set([
+  'event.publicUrl',
+  'event.checkoutUrl',
+  'brand.supportUrl',
+  'ticket.qrCodeUrl',
+]);
 
 export function htmlEscape(input: string): string {
   return input
@@ -162,6 +169,15 @@ export function plainTextEscape(input: string): string {
   // SMS/plain text: strip control characters except common whitespace; keep it readable.
   // eslint-disable-next-line no-control-regex -- intentionally stripping control chars for SMS safety
   return input.replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g, '');
+}
+
+function isSafeUrlValue(input: string): boolean {
+  try {
+    const url = new URL(input);
+    return url.protocol === 'http:' || url.protocol === 'https:';
+  } catch {
+    return false;
+  }
 }
 
 function resolveTag(key: string, context: MergeTagContext): string | undefined {
@@ -246,7 +262,11 @@ export function validateMergeTags(template: string): MergeTagValidationResult {
       missingRequired.push(required);
     }
   }
-  return { valid: unknownTags.length === 0, unknownTags, missingRequired };
+  return {
+    valid: unknownTags.length === 0 && missingRequired.length === 0,
+    unknownTags,
+    missingRequired,
+  };
 }
 
 export function renderMergeTags(
@@ -258,6 +278,7 @@ export function renderMergeTags(
   const unknownBehavior = options.unknownTagBehavior ?? 'fallback';
   const escapeMode = options.escape ?? (options.channel === 'email' ? 'html' : 'plain');
   const escape = escapeMode === 'html' ? htmlEscape : plainTextEscape;
+  const escapedFallback = escape(fallback);
 
   const rendered = template.replace(TAG_PATTERN, (match, rawKey: string) => {
     const key = rawKey.trim();
@@ -267,11 +288,13 @@ export function renderMergeTags(
       if (unknownBehavior === 'error') {
         throw new MergeTagError(`Unknown merge tag: {{${key}}}`, key);
       }
-      return fallback;
+      return escapedFallback;
     }
     const value = resolveTag(key, context);
-    if (value === undefined || value === null) return fallback;
-    return escape(String(value));
+    if (value === undefined || value === null) return escapedFallback;
+    const resolved = String(value);
+    if (URL_TAG_KEYS.has(key) && !isSafeUrlValue(resolved)) return escapedFallback;
+    return escape(resolved);
   });
 
   if (options.channel === 'sms' && options.optOutToken) {

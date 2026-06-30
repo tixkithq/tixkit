@@ -1,25 +1,45 @@
 'use client';
 
 import * as React from 'react';
-import { ExternalLink, Eye, Save } from 'lucide-react';
+import { mergeAttributes, Node, type Editor, type JSONContent } from '@tiptap/core';
+import Image from '@tiptap/extension-image';
+import Link from '@tiptap/extension-link';
+import StarterKit from '@tiptap/starter-kit';
+import {
+  EditorContent,
+  NodeViewWrapper,
+  ReactNodeViewRenderer,
+  useEditor,
+  type NodeViewProps,
+} from '@tiptap/react';
+import {
+  Archive,
+  CalendarDays,
+  ChevronLeft,
+  Copy,
+  ExternalLink,
+  Eye,
+  FileJson,
+  ImageIcon,
+  LayoutTemplate,
+  ListChecks,
+  MapPin,
+  MoreHorizontal,
+  Palette,
+  Save,
+  Send,
+  Ticket,
+  Type,
+} from 'lucide-react';
 import { toast } from 'sonner';
 import {
   createDefaultEventPageDocument,
   normalizeEventPageDocument,
   renderEventPageDocument,
+  TIPTAP_EVENT_PAGE_PROVIDER,
   type EventPageBlock,
   type EventPageDocument,
 } from '@tixkit/content-event-page';
-import {
-  ContentEditorShell,
-  type ContentEditorAutosaveState,
-  type ContentEditorCanvasBlock,
-  type ContentEditorInspectorPanel,
-  type ContentEditorInsertAction,
-  type ContentEditorPreview,
-  type ContentEditorVersionSummary,
-} from '@tixkit/content-editor-shell';
-import type { ContentDocument, ContentDocumentVersion } from '@tixkit/content-core';
 import {
   adminApi,
   type AdminContentDocument,
@@ -28,64 +48,62 @@ import {
   type AdminEventDetail,
 } from '@/lib/api';
 
-const eventPageInsertActions: ContentEditorInsertAction[] = [
-  { id: 'text', label: 'Text', icon: 'text' },
-  { id: 'image', label: 'Image', icon: 'image' },
-  { id: 'tickets', label: 'Tickets', icon: 'ticket' },
-  { id: 'schedule', label: 'Schedule', icon: 'calendar' },
-  { id: 'venue', label: 'Venue', icon: 'map' },
-  { id: 'button', label: 'Button', icon: 'link' },
+type AutosaveState = 'idle' | 'saving' | 'saved' | 'error';
+type EditorPreview = { label: string; format: 'html' | 'text'; output: string };
+type InsertActionId = 'text' | 'image' | 'tickets' | 'schedule' | 'venue' | 'button';
+type InspectorPanelId =
+  | 'block'
+  | 'page'
+  | 'body'
+  | 'theme'
+  | 'code'
+  | 'variables'
+  | 'history'
+  | 'issues';
+
+type InsertAction = {
+  id: InsertActionId;
+  label: string;
+  icon: React.ReactNode;
+};
+
+const EVENT_PAGE_BLOCK_NODE = 'eventPageBlock';
+
+const eventPageInsertActions: InsertAction[] = [
+  { id: 'text', label: 'Text', icon: <Type className="size-4" /> },
+  { id: 'image', label: 'Image', icon: <ImageIcon className="size-4" /> },
+  { id: 'tickets', label: 'Tickets', icon: <Ticket className="size-4" /> },
+  { id: 'schedule', label: 'Schedule', icon: <CalendarDays className="size-4" /> },
+  { id: 'venue', label: 'Venue', icon: <MapPin className="size-4" /> },
+  { id: 'button', label: 'Button', icon: <ExternalLink className="size-4" /> },
 ];
 
-const compactInputClassName =
-  'w-full rounded-md border bg-background px-2.5 py-1.5 text-sm shadow-sm';
-const actionButtonClassName =
-  'inline-flex items-center gap-2 rounded-md border bg-background px-3 py-2 text-sm font-medium shadow-sm hover:bg-accent disabled:cursor-not-allowed disabled:opacity-50';
+const panelLabels: Record<InspectorPanelId, string> = {
+  block: 'Content',
+  page: 'Page',
+  body: 'Body',
+  theme: 'Theme',
+  code: 'Code',
+  variables: 'Variables',
+  history: 'History',
+  issues: 'Issues',
+};
 
-function EditablePlainText({
-  className,
-  disabled,
-  label,
-  multiline = false,
-  onChange,
-  onFocus,
-  value,
-}: {
-  className: string;
-  disabled: boolean;
-  label: string;
-  multiline?: boolean;
-  onChange: (value: string) => void;
-  onFocus?: () => void;
-  value: string;
-}) {
-  const controlClassName = `${className} w-full rounded-sm border-0 bg-transparent p-0 shadow-none outline-none transition placeholder:text-muted-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background disabled:cursor-not-allowed disabled:opacity-70`;
+const panelIcons: Record<InspectorPanelId, React.ReactNode> = {
+  block: <LayoutTemplate className="size-4" />,
+  page: <ListChecks className="size-4" />,
+  body: <Type className="size-4" />,
+  theme: <Palette className="size-4" />,
+  code: <FileJson className="size-4" />,
+  variables: <Type className="size-4" />,
+  history: <Save className="size-4" />,
+  issues: <Eye className="size-4" />,
+};
 
-  if (multiline) {
-    return (
-      <textarea
-        aria-label={label}
-        className={`${controlClassName} resize-none overflow-hidden`}
-        disabled={disabled}
-        onChange={(event) => onChange(event.currentTarget.value)}
-        onFocus={onFocus}
-        rows={3}
-        value={value}
-      />
-    );
-  }
-
-  return (
-    <input
-      aria-label={label}
-      className={controlClassName}
-      disabled={disabled}
-      onChange={(event) => onChange(event.currentTarget.value)}
-      onFocus={onFocus}
-      value={value}
-    />
-  );
-}
+const darkInputClassName =
+  'w-full rounded-md border border-white/10 bg-white/5 px-2.5 py-1.5 text-sm text-white outline-none focus:border-white/35 disabled:cursor-not-allowed disabled:opacity-50';
+const canvasInputClassName =
+  'w-full rounded-sm border-0 bg-transparent p-0 shadow-none outline-none transition placeholder:text-black/35 focus-visible:ring-2 focus-visible:ring-black/25 disabled:cursor-not-allowed disabled:opacity-70';
 
 function listItemsFromResponse<T>(value: unknown): T[] {
   if (Array.isArray(value)) return value as T[];
@@ -140,10 +158,7 @@ function defaultEventPageDocument(event: AdminEventDetail): EventPageDocument {
   });
 }
 
-function previewFromRendered(
-  document: EventPageDocument,
-  event: AdminEventDetail,
-): ContentEditorPreview {
+function previewFromRendered(document: EventPageDocument, event: AdminEventDetail): EditorPreview {
   const rendered = renderEventPageDocument(document, sampleContext(event));
   return {
     label: 'TipTap event-page preview',
@@ -158,7 +173,7 @@ function publicPageUrl(document: EventPageDocument, event: AdminEventDetail): st
   return publicPath && publicPath !== '#' ? publicPath : undefined;
 }
 
-function previewFromApiOutput(output: AdminContentRenderOutput): ContentEditorPreview {
+function previewFromApiOutput(output: AdminContentRenderOutput): EditorPreview {
   return {
     label: 'Saved event-page preview',
     format: output.html ? 'html' : 'text',
@@ -186,42 +201,6 @@ function ticketCtaLabel(document: EventPageDocument): string {
     : document.settings.ticketCtaLabel;
 }
 
-function updateHero(
-  document: EventPageDocument,
-  update: Partial<Extract<EventPageBlock, { type: 'hero' }>>,
-): EventPageDocument {
-  return {
-    ...document,
-    blocks: document.blocks.map((block) =>
-      block.type === 'hero' ? { ...block, ...update } : block,
-    ),
-  };
-}
-
-function updateSummary(document: EventPageDocument, summary: string): EventPageDocument {
-  return {
-    ...updateHero(document, { body: summary }),
-    settings: {
-      ...document.settings,
-      discovery: {
-        ...document.settings.discovery,
-        summary,
-        seoDescription: summary,
-      },
-    },
-  };
-}
-
-function updateTicketCta(document: EventPageDocument, label: string): EventPageDocument {
-  return {
-    ...document,
-    settings: { ...document.settings, ticketCtaLabel: label },
-    blocks: document.blocks.map((block) =>
-      block.type === 'tickets' ? { ...block, ctaLabel: label } : block,
-    ),
-  };
-}
-
 function nextBlockId(document: EventPageDocument, prefix: string): string {
   const existing = new Set(document.blocks.map((block) => block.id));
   let index = document.blocks.length + 1;
@@ -233,7 +212,7 @@ function nextBlockId(document: EventPageDocument, prefix: string): string {
   return id;
 }
 
-function textContentNode(text: string) {
+function textContentNode(text: string): JSONContent {
   return {
     type: 'doc',
     content: [
@@ -245,7 +224,7 @@ function textContentNode(text: string) {
   };
 }
 
-function imageContentNode(src: string, alt: string) {
+function imageContentNode(src: string, alt: string): JSONContent {
   return {
     type: 'doc',
     content: [
@@ -292,7 +271,7 @@ function tipTapImageAttrs(block: Extract<EventPageBlock, { type: 'rich_text' }>)
 }
 
 function createInsertedBlock(
-  actionId: string,
+  actionId: InsertActionId,
   document: EventPageDocument,
   event: AdminEventDetail,
 ): EventPageBlock | undefined {
@@ -419,11 +398,11 @@ function blockSummary(block: EventPageBlock): string {
     case 'divider':
       return 'Divider';
     case 'rich_text':
-      return 'Structured TipTap content';
+      return tipTapImageAttrs(block) ? 'Image content' : tipTapText(block) || 'Structured content';
   }
 }
 
-function versionSummaries(versions: AdminContentDocumentVersion[]): ContentEditorVersionSummary[] {
+function versionSummaries(versions: AdminContentDocumentVersion[]) {
   return versions.map((version) => ({
     id: version.id,
     label: `${version.status === 'published' ? 'Published' : 'Draft'} v${version.versionNumber}`,
@@ -449,14 +428,6 @@ function latestDraft(versions: AdminContentDocumentVersion[], document: AdminCon
   );
 }
 
-function toShellDocument(document: AdminContentDocument): ContentDocument {
-  return document as ContentDocument;
-}
-
-function toShellVersion(version: AdminContentDocumentVersion): ContentDocumentVersion {
-  return version as ContentDocumentVersion;
-}
-
 function resultMessage(error: { message?: string } | undefined, defaultMessage: string) {
   return error?.message ?? defaultMessage;
 }
@@ -466,8 +437,652 @@ function duplicateDocumentName(name: string): string {
   return name.endsWith(suffix) ? name : `${name.slice(0, 160 - suffix.length)}${suffix}`;
 }
 
-function unreachableEventPageBlock(block: never): never {
-  throw new Error(`Unhandled event-page block: ${JSON.stringify(block)}`);
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
+}
+
+function cloneBlock(block: EventPageBlock): EventPageBlock {
+  return JSON.parse(JSON.stringify(block)) as EventPageBlock;
+}
+
+function eventPageEditorContent(document: EventPageDocument): JSONContent {
+  return {
+    type: 'doc',
+    content: document.blocks.map((block) => ({
+      type: EVENT_PAGE_BLOCK_NODE,
+      attrs: { block },
+    })),
+  };
+}
+
+function editorDocumentFromBlocks(blocks: EventPageBlock[]): JSONContent {
+  const content = blocks
+    .flatMap((block) => {
+      const summary = blockSummary(block).trim();
+      return summary
+        ? [
+            {
+              type: 'paragraph',
+              content: [{ type: 'text', text: summary }],
+            },
+          ]
+        : [];
+    })
+    .slice(0, 40);
+  return {
+    type: 'doc',
+    content: content.length > 0 ? content : [{ type: 'paragraph' }],
+  };
+}
+
+function isEventPageBlock(value: unknown): value is EventPageBlock {
+  return isRecord(value) && typeof value.id === 'string' && typeof value.type === 'string';
+}
+
+function blocksFromEditor(editor: Editor, fallback: EventPageDocument): EventPageBlock[] {
+  const json = editor.getJSON() as JSONContent;
+  const blocks =
+    json.content
+      ?.flatMap((node) => {
+        const block = isRecord(node.attrs) ? node.attrs.block : undefined;
+        return isEventPageBlock(block) ? [cloneBlock(block)] : [];
+      })
+      .filter((block) => block.id.trim()) ?? [];
+  return blocks.length > 0 ? blocks : fallback.blocks;
+}
+
+function withEditorBlocks(
+  snapshot: EventPageDocument,
+  blocks: EventPageBlock[],
+): EventPageDocument {
+  const hero = blocks.find(
+    (block): block is Extract<EventPageBlock, { type: 'hero' }> => block.type === 'hero',
+  );
+  const tickets = blocks.find(
+    (block): block is Extract<EventPageBlock, { type: 'tickets' }> => block.type === 'tickets',
+  );
+  const summary = hero?.body ?? snapshot.settings.discovery.summary;
+  const ticketLabel = tickets?.ctaLabel ?? snapshot.settings.ticketCtaLabel;
+
+  return {
+    ...snapshot,
+    editor: {
+      provider: TIPTAP_EVENT_PAGE_PROVIDER,
+      document: editorDocumentFromBlocks(blocks),
+    },
+    settings: {
+      ...snapshot.settings,
+      ticketCtaLabel: ticketLabel,
+      discovery: {
+        ...snapshot.settings.discovery,
+        summary,
+        seoTitle: hero?.headline ?? snapshot.settings.discovery.seoTitle,
+        seoDescription: summary,
+        coverImageUrl: snapshot.settings.discovery.coverImageUrl ?? hero?.imageUrl,
+        socialImageUrl: snapshot.settings.discovery.socialImageUrl ?? hero?.imageUrl,
+      },
+    },
+    blocks,
+  };
+}
+
+function findBlockPosition(editor: Editor, blockId: string): number | undefined {
+  let position: number | undefined;
+  editor.state.doc.descendants((node, pos) => {
+    if (node.type.name !== EVENT_PAGE_BLOCK_NODE) return true;
+    const block = node.attrs.block;
+    if (isEventPageBlock(block) && block.id === blockId) {
+      position = pos;
+      return false;
+    }
+    return true;
+  });
+  return position;
+}
+
+function selectedBlockIdFromEditor(editor: Editor): string | undefined {
+  const { from } = editor.state.selection;
+  let selectedId: string | undefined;
+  editor.state.doc.descendants((node, pos) => {
+    if (node.type.name !== EVENT_PAGE_BLOCK_NODE) return true;
+    const block = node.attrs.block;
+    const inRange = from >= pos && from <= pos + node.nodeSize;
+    if (inRange && isEventPageBlock(block)) {
+      selectedId = block.id;
+      return false;
+    }
+    return true;
+  });
+  return selectedId;
+}
+
+function updateBlockInEditor(editor: Editor, blockId: string, nextBlock: EventPageBlock): boolean {
+  const position = findBlockPosition(editor, blockId);
+  if (position === undefined) return false;
+  return editor.commands.command(({ state, tr, dispatch }) => {
+    const node = state.doc.nodeAt(position);
+    if (!node || node.type.name !== EVENT_PAGE_BLOCK_NODE) return false;
+    dispatch?.(tr.setNodeMarkup(position, undefined, { ...node.attrs, block: nextBlock }));
+    return true;
+  });
+}
+
+function autosaveLabel(state: AutosaveState): string {
+  if (state === 'saving') return 'Saving';
+  if (state === 'saved') return 'Saved';
+  if (state === 'error') return 'Save failed';
+  return 'Ready';
+}
+
+function autosaveClassName(state: AutosaveState): string {
+  if (state === 'saving') return 'border-amber-400/40 bg-amber-400/10 text-amber-100';
+  if (state === 'saved') return 'border-emerald-400/40 bg-emerald-400/10 text-emerald-100';
+  if (state === 'error') return 'border-red-400/40 bg-red-400/10 text-red-100';
+  return 'border-cyan-400/40 bg-cyan-400/10 text-cyan-100';
+}
+
+function formatDate(value?: string) {
+  if (!value) return 'Not recorded';
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? value : date.toLocaleString();
+}
+
+function BlockTextField({
+  className,
+  disabled,
+  label,
+  multiline = false,
+  onChange,
+  value,
+}: {
+  className: string;
+  disabled: boolean;
+  label: string;
+  multiline?: boolean;
+  onChange: (value: string) => void;
+  value: string;
+}) {
+  if (multiline) {
+    return (
+      <textarea
+        aria-label={label}
+        className={`${canvasInputClassName} ${className} resize-none overflow-hidden`}
+        disabled={disabled}
+        onChange={(event) => onChange(event.currentTarget.value)}
+        rows={3}
+        value={value}
+      />
+    );
+  }
+
+  return (
+    <input
+      aria-label={label}
+      className={`${canvasInputClassName} ${className}`}
+      disabled={disabled}
+      onChange={(event) => onChange(event.currentTarget.value)}
+      value={value}
+    />
+  );
+}
+
+function EventPageBlockNodeView(props: NodeViewProps) {
+  const block = props.node.attrs.block as EventPageBlock | undefined;
+  const disabled = !props.editor.isEditable;
+
+  if (!block) {
+    return (
+      <NodeViewWrapper className="rounded-md border border-red-200 bg-red-50 p-4 text-sm text-red-700">
+        Unsupported event page block
+      </NodeViewWrapper>
+    );
+  }
+
+  const selectSelf = () => {
+    const position = props.getPos();
+    if (typeof position === 'number') props.editor.commands.setNodeSelection(position);
+  };
+  const updateBlock = (nextBlock: EventPageBlock) => {
+    props.updateAttributes({ block: nextBlock });
+  };
+  const frameClassName = props.selected
+    ? 'border-black shadow-[0_0_0_2px_rgba(0,0,0,0.14)]'
+    : 'border-black/10 hover:border-black/25';
+
+  return (
+    <NodeViewWrapper
+      as="section"
+      className={`group relative rounded-lg border bg-white p-5 transition ${frameClassName}`}
+      contentEditable={false}
+      data-block-id={block.id}
+      data-block-type={block.type}
+      onClick={selectSelf}
+    >
+      <div className="mb-4 flex items-center justify-between gap-3 text-xs text-black/45">
+        <span className="font-medium uppercase">{blockLabel(block)}</span>
+        <span className="font-mono">{block.id}</span>
+      </div>
+      <BlockNodeContent block={block} disabled={disabled} updateBlock={updateBlock} />
+    </NodeViewWrapper>
+  );
+}
+
+function BlockNodeContent({
+  block,
+  disabled,
+  updateBlock,
+}: {
+  block: EventPageBlock;
+  disabled: boolean;
+  updateBlock: (nextBlock: EventPageBlock) => void;
+}) {
+  if (block.type === 'hero') {
+    return (
+      <div className="space-y-5">
+        <BlockTextField
+          className="max-w-4xl text-5xl font-semibold leading-tight text-black"
+          disabled={disabled}
+          label="Page headline"
+          onChange={(value) => updateBlock({ ...block, headline: value })}
+          value={block.headline}
+        />
+        <BlockTextField
+          className="max-w-3xl whitespace-pre-wrap text-base leading-7 text-black/60"
+          disabled={disabled}
+          label="Page summary"
+          multiline
+          onChange={(value) => updateBlock({ ...block, body: value })}
+          value={block.body ?? ''}
+        />
+        <div className="inline-flex min-h-10 max-w-full items-center rounded-md bg-black px-4 py-2 text-sm font-semibold text-white">
+          <BlockTextField
+            className="min-w-20 text-white"
+            disabled={disabled}
+            label="Hero CTA label"
+            onChange={(value) => updateBlock({ ...block, ctaLabel: value })}
+            value={block.ctaLabel ?? ''}
+          />
+        </div>
+      </div>
+    );
+  }
+
+  if (block.type === 'tickets') {
+    return (
+      <section className="space-y-3">
+        <BlockTextField
+          className="text-2xl font-semibold text-black"
+          disabled={disabled}
+          label="Ticket block title"
+          onChange={(value) => updateBlock({ ...block, title: value })}
+          value={block.title}
+        />
+        {block.body && <p className="max-w-2xl text-sm leading-6 text-black/55">{block.body}</p>}
+        <div className="inline-flex min-h-10 items-center rounded-md border border-black/15 px-4 py-2 text-sm font-semibold">
+          <BlockTextField
+            className="min-w-24 text-black"
+            disabled={disabled}
+            label="Ticket CTA label"
+            onChange={(value) => updateBlock({ ...block, ctaLabel: value })}
+            value={block.ctaLabel ?? 'Get tickets'}
+          />
+        </div>
+      </section>
+    );
+  }
+
+  if (block.type === 'rich_text') {
+    const imageAttrs = tipTapImageAttrs(block);
+    if (imageAttrs) {
+      return imageAttrs.src ? (
+        <img
+          alt={imageAttrs.alt}
+          className="max-h-96 w-full rounded-md object-cover"
+          src={imageAttrs.src}
+        />
+      ) : (
+        <div className="flex min-h-48 items-center justify-center rounded-md border border-dashed bg-black/[0.03] text-sm font-medium text-black/45">
+          Add an image URL
+        </div>
+      );
+    }
+
+    return (
+      <BlockTextField
+        className="whitespace-pre-wrap text-base leading-7 text-black/75"
+        disabled={disabled}
+        label="Rich text content"
+        multiline
+        onChange={(value) => updateBlock({ ...block, content: textContentNode(value) })}
+        value={tipTapText(block)}
+      />
+    );
+  }
+
+  if (block.type === 'event_details') {
+    return (
+      <section className="space-y-4">
+        <BlockTextField
+          className="text-2xl font-semibold text-black"
+          disabled={disabled}
+          label="Event details title"
+          onChange={(value) => updateBlock({ ...block, title: value })}
+          value={block.title}
+        />
+        <dl className="grid gap-x-8 gap-y-3 text-sm md:grid-cols-2">
+          {block.items.map((item, itemIndex) => (
+            <div className="border-t border-black/10 pt-3" key={`${item.label}-${itemIndex}`}>
+              <dt className="font-medium text-black/45">{item.label}</dt>
+              <dd className="mt-1 text-black">{item.value}</dd>
+            </div>
+          ))}
+        </dl>
+      </section>
+    );
+  }
+
+  if (block.type === 'schedule') {
+    const firstItem = block.items[0] ?? {
+      title: 'Schedule item',
+      startsAt: '',
+    };
+    return (
+      <section className="space-y-4">
+        <BlockTextField
+          className="text-2xl font-semibold text-black"
+          disabled={disabled}
+          label="Schedule title"
+          onChange={(value) => updateBlock({ ...block, title: value })}
+          value={block.title}
+        />
+        <div className="grid gap-3 md:grid-cols-[minmax(0,1fr)_13rem]">
+          <BlockTextField
+            className="text-base font-medium text-black"
+            disabled={disabled}
+            label="Schedule item title"
+            onChange={(value) =>
+              updateBlock({
+                ...block,
+                items: [{ ...firstItem, title: value }, ...block.items.slice(1)],
+              })
+            }
+            value={firstItem.title}
+          />
+          <label className="space-y-1.5 text-xs font-medium text-black/45">
+            Starts
+            <input
+              aria-label="Schedule start time"
+              className="w-full rounded-md border border-black/10 px-2.5 py-1.5 text-sm"
+              disabled={disabled}
+              onChange={(change) =>
+                updateBlock({
+                  ...block,
+                  items: [
+                    { ...firstItem, startsAt: change.currentTarget.value },
+                    ...block.items.slice(1),
+                  ],
+                })
+              }
+              value={firstItem.startsAt}
+            />
+          </label>
+        </div>
+      </section>
+    );
+  }
+
+  if (block.type === 'venue_map') {
+    return (
+      <section className="space-y-4">
+        <BlockTextField
+          className="text-2xl font-semibold text-black"
+          disabled={disabled}
+          label="Venue title"
+          onChange={(value) => updateBlock({ ...block, title: value })}
+          value={block.title}
+        />
+        <div className="grid gap-3 md:grid-cols-2">
+          <BlockTextField
+            className="text-base font-medium text-black"
+            disabled={disabled}
+            label="Venue name"
+            onChange={(value) => updateBlock({ ...block, venueName: value })}
+            value={block.venueName}
+          />
+          <BlockTextField
+            className="text-sm text-black/55"
+            disabled={disabled}
+            label="Venue address"
+            onChange={(value) => updateBlock({ ...block, address: value })}
+            value={block.address ?? ''}
+          />
+        </div>
+      </section>
+    );
+  }
+
+  if (block.type === 'faq') {
+    return (
+      <section className="space-y-4">
+        <BlockTextField
+          className="text-2xl font-semibold text-black"
+          disabled={disabled}
+          label="FAQ title"
+          onChange={(value) => updateBlock({ ...block, title: value })}
+          value={block.title}
+        />
+        <div className="divide-y divide-black/10">
+          {block.items.map((item, itemIndex) => (
+            <div className="space-y-1 py-3" key={`${item.question}-${itemIndex}`}>
+              <p className="font-medium text-black">{item.question}</p>
+              <p className="text-sm text-black/55">{item.answer}</p>
+            </div>
+          ))}
+        </div>
+      </section>
+    );
+  }
+
+  if (block.type === 'products') {
+    return (
+      <section className="space-y-3">
+        <BlockTextField
+          className="text-2xl font-semibold text-black"
+          disabled={disabled}
+          label="Products title"
+          onChange={(value) => updateBlock({ ...block, title: value })}
+          value={block.title}
+        />
+        <BlockTextField
+          className="whitespace-pre-wrap text-base leading-7 text-black/55"
+          disabled={disabled}
+          label="Products body"
+          multiline
+          onChange={(value) => updateBlock({ ...block, body: value })}
+          value={block.body ?? ''}
+        />
+        <p className="text-sm font-medium text-black">{block.productIds.length} linked products</p>
+      </section>
+    );
+  }
+
+  if (block.type === 'sponsors') {
+    return (
+      <section className="space-y-4">
+        <BlockTextField
+          className="text-2xl font-semibold text-black"
+          disabled={disabled}
+          label="Sponsors title"
+          onChange={(value) => updateBlock({ ...block, title: value })}
+          value={block.title}
+        />
+        <div className="flex flex-wrap gap-x-6 gap-y-3 text-sm font-medium text-black">
+          {block.items.map((item, itemIndex) =>
+            item.url ? (
+              <a className="underline-offset-4 hover:underline" href={item.url} key={item.name}>
+                {item.name}
+              </a>
+            ) : (
+              <span key={`${item.name}-${itemIndex}`}>{item.name}</span>
+            ),
+          )}
+        </div>
+      </section>
+    );
+  }
+
+  if (block.type === 'speakers') {
+    return (
+      <section className="space-y-4">
+        <BlockTextField
+          className="text-2xl font-semibold text-black"
+          disabled={disabled}
+          label="Speakers title"
+          onChange={(value) => updateBlock({ ...block, title: value })}
+          value={block.title}
+        />
+        <div className="divide-y divide-black/10">
+          {block.items.map((item, itemIndex) => (
+            <div className="py-3" key={`${item.name}-${itemIndex}`}>
+              <p className="font-medium text-black">{item.name}</p>
+              {item.role && <p className="text-sm text-black/55">{item.role}</p>}
+              {item.bio && <p className="mt-1 text-sm leading-6 text-black/55">{item.bio}</p>}
+            </div>
+          ))}
+        </div>
+      </section>
+    );
+  }
+
+  if (block.type === 'button') {
+    return (
+      <div className="inline-flex min-h-10 max-w-full items-center rounded-md bg-black px-4 py-2 text-sm font-semibold text-white">
+        <BlockTextField
+          className="min-w-20 text-white"
+          disabled={disabled}
+          label="Button label"
+          onChange={(value) => updateBlock({ ...block, label: value })}
+          value={block.label}
+        />
+      </div>
+    );
+  }
+
+  if (block.type === 'divider') {
+    return <hr className="border-black/15" />;
+  }
+
+  if (block.type === 'social_links') {
+    return (
+      <nav aria-label="Event page social links" className="space-y-3">
+        {block.title && <h2 className="text-2xl font-semibold text-black">{block.title}</h2>}
+        <div className="flex flex-wrap gap-3 text-sm">
+          {block.links.map((link, linkIndex) => (
+            <a
+              className="font-medium underline-offset-4 hover:underline"
+              href={link.url}
+              key={`${link.label}-${linkIndex}`}
+            >
+              {link.label}
+            </a>
+          ))}
+        </div>
+      </nav>
+    );
+  }
+
+  return (
+    <BlockTextField
+      className="font-mono text-xs leading-5 text-black/55"
+      disabled={disabled}
+      label="Custom embed HTML"
+      multiline
+      onChange={(value) => updateBlock({ ...block, html: value })}
+      value={block.html}
+    />
+  );
+}
+
+const EventPageBlockNode = Node.create({
+  name: EVENT_PAGE_BLOCK_NODE,
+  group: 'block',
+  atom: true,
+  selectable: true,
+  draggable: true,
+
+  addAttributes() {
+    return {
+      block: {
+        default: null,
+        rendered: false,
+      },
+    };
+  },
+
+  parseHTML() {
+    return [{ tag: 'section[data-event-page-block]' }];
+  },
+
+  renderHTML({ node, HTMLAttributes }) {
+    const block = node.attrs.block as EventPageBlock | undefined;
+    return [
+      'section',
+      mergeAttributes(HTMLAttributes, {
+        'data-event-page-block': block?.type ?? 'unknown',
+        'data-block-id': block?.id ?? '',
+      }),
+    ];
+  },
+
+  addNodeView() {
+    return ReactNodeViewRenderer(EventPageBlockNodeView);
+  },
+});
+
+const eventPageEditorExtensions = [
+  StarterKit.configure({
+    heading: { levels: [1, 2, 3] },
+    link: false,
+    codeBlock: false,
+    horizontalRule: false,
+  }),
+  Link.configure({
+    openOnClick: false,
+    HTMLAttributes: { rel: 'noopener noreferrer', target: '_blank' },
+  }),
+  Image.configure({
+    allowBase64: false,
+  }),
+  EventPageBlockNode,
+];
+
+function PreviewDrawer({ onClose, preview }: { onClose: () => void; preview: EditorPreview }) {
+  return (
+    <aside
+      aria-label="Event page preview"
+      className="fixed inset-y-0 right-0 z-50 flex w-full max-w-xl flex-col border-l border-white/10 bg-neutral-950 text-white shadow-2xl"
+      data-testid="preview-drawer"
+    >
+      <div className="flex items-center justify-between gap-3 border-b border-white/10 px-4 py-3">
+        <div>
+          <p className="text-sm font-semibold">{preview.label}</p>
+          <p className="text-xs text-white/45">{preview.format.toUpperCase()}</p>
+        </div>
+        <button
+          className="rounded-md border border-white/10 px-3 py-1.5 text-sm hover:bg-white/10"
+          onClick={onClose}
+          type="button"
+        >
+          Close
+        </button>
+      </div>
+      <div className="min-h-0 flex-1 overflow-auto p-4">
+        <pre className="whitespace-pre-wrap rounded-md border border-white/10 bg-white/5 p-4 text-sm leading-6 text-white/80">
+          {preview.output}
+        </pre>
+      </div>
+    </aside>
+  );
 }
 
 export function EventPagePersistedEditorView({ eventId }: { eventId: string }) {
@@ -476,15 +1091,70 @@ export function EventPagePersistedEditorView({ eventId }: { eventId: string }) {
   const [draft, setDraft] = React.useState<AdminContentDocumentVersion>();
   const [versions, setVersions] = React.useState<AdminContentDocumentVersion[]>([]);
   const [eventPageDocument, setEventPageDocument] = React.useState<EventPageDocument>();
-  const [selectedBlockId, setSelectedBlockId] = React.useState('event-page-block-0');
-  const [inspectorPanelId, setInspectorPanelId] = React.useState('block');
-  const [preview, setPreview] = React.useState<ContentEditorPreview>();
-  const [autosave, setAutosave] = React.useState<ContentEditorAutosaveState>('idle');
+  const [selectedBlockId, setSelectedBlockId] = React.useState<string>();
+  const [inspectorPanelId, setInspectorPanelId] = React.useState<InspectorPanelId>('block');
+  const [preview, setPreview] = React.useState<EditorPreview>();
+  const [previewOpen, setPreviewOpen] = React.useState(false);
+  const [autosave, setAutosave] = React.useState<AutosaveState>('idle');
   const [loading, setLoading] = React.useState(true);
   const [error, setError] = React.useState<string>();
   const [actionError, setActionError] = React.useState<string>();
   const [notice, setNotice] = React.useState<string>();
   const operationIdRef = React.useRef(0);
+  const documentRef = React.useRef<EventPageDocument | undefined>(undefined);
+  const hydratingEditorRef = React.useRef(false);
+  const hydratedDraftIdRef = React.useRef<string | undefined>(undefined);
+  const isArchived = document?.status === 'archived';
+  const canEdit = Boolean(document) && !isArchived;
+
+  const pageEditor = useEditor({
+    extensions: eventPageEditorExtensions,
+    content: { type: 'doc', content: [] },
+    editable: false,
+    immediatelyRender: false,
+    editorProps: {
+      attributes: {
+        'aria-label': 'Event page editor canvas',
+        class: 'tixkit-event-page-builder focus:outline-none',
+      },
+    },
+    onSelectionUpdate: ({ editor }) => {
+      const blockId = selectedBlockIdFromEditor(editor);
+      if (blockId) setSelectedBlockId(blockId);
+    },
+    onUpdate: ({ editor }) => {
+      if (hydratingEditorRef.current || !documentRef.current) return;
+      const nextDocument = withEditorBlocks(
+        documentRef.current,
+        blocksFromEditor(editor, documentRef.current),
+      );
+      documentRef.current = nextDocument;
+      setEventPageDocument(nextDocument);
+      markDraftDirty();
+    },
+  });
+
+  React.useEffect(() => {
+    documentRef.current = eventPageDocument;
+  }, [eventPageDocument]);
+
+  React.useEffect(() => {
+    pageEditor?.setEditable(canEdit);
+  }, [canEdit, pageEditor]);
+
+  React.useEffect(() => {
+    if (!pageEditor || !eventPageDocument || !draft) return;
+    if (hydratedDraftIdRef.current === draft.id) return;
+    hydratedDraftIdRef.current = draft.id;
+    hydratingEditorRef.current = true;
+    pageEditor.commands.setContent(eventPageEditorContent(eventPageDocument), {
+      emitUpdate: false,
+    });
+    setSelectedBlockId(eventPageDocument.blocks[0]?.id);
+    queueMicrotask(() => {
+      hydratingEditorRef.current = false;
+    });
+  }, [draft, eventPageDocument, pageEditor]);
 
   function nextOperationId() {
     operationIdRef.current += 1;
@@ -507,6 +1177,7 @@ export function EventPagePersistedEditorView({ eventId }: { eventId: string }) {
     setError(undefined);
     setActionError(undefined);
     setNotice(undefined);
+    hydratedDraftIdRef.current = undefined;
 
     const eventResult = await adminApi.getEvent(eventId);
     if (!eventResult.ok) {
@@ -589,11 +1260,13 @@ export function EventPagePersistedEditorView({ eventId }: { eventId: string }) {
       return;
     }
 
+    documentRef.current = normalized;
     setEvent(loadedEvent);
     setDocument(loadedDocument);
     setDraft(loadedDraft);
     setVersions(loadedVersions);
     setEventPageDocument(normalized);
+    setSelectedBlockId(normalized.blocks[0]?.id);
     setPreview(previewFromRendered(normalized, loadedEvent));
     setAutosave('saved');
     setLoading(false);
@@ -603,10 +1276,16 @@ export function EventPagePersistedEditorView({ eventId }: { eventId: string }) {
     void load();
   }, [load]);
 
-  const isArchived = document?.status === 'archived';
+  function snapshotFromEditor(snapshot = eventPageDocument): EventPageDocument | undefined {
+    if (!snapshot) return undefined;
+    if (!pageEditor) return snapshot;
+    return withEditorBlocks(snapshot, blocksFromEditor(pageEditor, snapshot));
+  }
 
-  function updateEventPageDocument(nextDocument: EventPageDocument) {
-    if (isArchived) return;
+  function updateEventPageSettings(update: (document: EventPageDocument) => EventPageDocument) {
+    if (!eventPageDocument || isArchived) return;
+    const nextDocument = update(eventPageDocument);
+    documentRef.current = nextDocument;
     setEventPageDocument(nextDocument);
     markDraftDirty();
   }
@@ -614,27 +1293,53 @@ export function EventPagePersistedEditorView({ eventId }: { eventId: string }) {
   function selectBlock(blockId: string) {
     setSelectedBlockId(blockId);
     setInspectorPanelId('block');
+    if (!pageEditor) return;
+    const position = findBlockPosition(pageEditor, blockId);
+    if (position !== undefined) pageEditor.commands.setNodeSelection(position);
   }
 
-  function insertEventPageAction(actionId: string) {
-    if (!event || !eventPageDocument || isArchived) return;
-    const inserted = createInsertedBlock(actionId, eventPageDocument, event);
+  function updateSelectedEventPageBlock(nextBlock: EventPageBlock) {
+    if (
+      !pageEditor ||
+      !selectedBlockId ||
+      !updateBlockInEditor(pageEditor, selectedBlockId, nextBlock)
+    ) {
+      if (!eventPageDocument || !selectedBlockId) return;
+      updateEventPageSettings((current) =>
+        withEditorBlocks(
+          current,
+          current.blocks.map((block) => (block.id === selectedBlockId ? nextBlock : block)),
+        ),
+      );
+    }
+  }
+
+  function insertEventPageAction(actionId: InsertActionId) {
+    if (!event || !eventPageDocument || !pageEditor || isArchived) return;
+    const currentDocument = snapshotFromEditor(eventPageDocument) ?? eventPageDocument;
+    const inserted = createInsertedBlock(actionId, currentDocument, event);
     if (!inserted) return;
-    updateEventPageDocument({
-      ...eventPageDocument,
-      blocks: [...eventPageDocument.blocks, inserted],
-    });
-    setSelectedBlockId(`event-page-block-${eventPageDocument.blocks.length}`);
+    pageEditor
+      .chain()
+      .focus()
+      .insertContentAt(pageEditor.state.doc.content.size, {
+        type: EVENT_PAGE_BLOCK_NODE,
+        attrs: { block: inserted },
+      })
+      .run();
+    selectBlock(inserted.id);
   }
 
   async function saveDraft(operationId = nextOperationId(), snapshot = eventPageDocument) {
     if (!document || !event || !snapshot || isArchived) return undefined;
     setAutosave('saving');
-    const rendered = renderEventPageDocument(snapshot, sampleContext(event));
+    const editorSnapshot = snapshotFromEditor(snapshot);
+    if (!editorSnapshot) return undefined;
+    const rendered = renderEventPageDocument(editorSnapshot, sampleContext(event));
     const result = await adminApi.saveContentVersion(document.id, {
-      contentJson: snapshot,
-      subject: heroHeadline(snapshot),
-      previewText: snapshot.settings.discovery.summary,
+      contentJson: editorSnapshot,
+      subject: heroHeadline(editorSnapshot),
+      previewText: editorSnapshot.settings.discovery.summary,
       renderedHtml: rendered.html,
       renderedText: rendered.text,
     });
@@ -644,6 +1349,8 @@ export function EventPagePersistedEditorView({ eventId }: { eventId: string }) {
       setActionError(resultMessage(result.error, 'Unable to save event-page draft'));
       return undefined;
     }
+    documentRef.current = editorSnapshot;
+    setEventPageDocument(editorSnapshot);
     setDraft(result.data);
     setVersions((current) => [
       result.data,
@@ -657,20 +1364,19 @@ export function EventPagePersistedEditorView({ eventId }: { eventId: string }) {
     setAutosave('saved');
     setActionError(undefined);
     setNotice(`Saved draft v${result.data.versionNumber}`);
-    return result.data;
+    return { version: result.data, document: editorSnapshot };
   }
 
   async function previewSavedDraft() {
     if (!document || !event || !eventPageDocument || isArchived) return;
     const operationId = nextOperationId();
-    const snapshot = eventPageDocument;
-    const saved = await saveDraft(operationId, snapshot);
+    const saved = await saveDraft(operationId, eventPageDocument);
     if (!saved) return;
     const result = await adminApi.previewContent(document.id, {
-      versionId: saved.id,
-      contentJson: snapshot,
-      subject: heroHeadline(snapshot),
-      previewText: snapshot.settings.discovery.summary,
+      versionId: saved.version.id,
+      contentJson: saved.document,
+      subject: heroHeadline(saved.document),
+      previewText: saved.document.settings.discovery.summary,
       context: sampleContext(event),
     });
     if (!isCurrentOperation(operationId)) return;
@@ -686,7 +1392,8 @@ export function EventPagePersistedEditorView({ eventId }: { eventId: string }) {
 
   function viewPublicPage() {
     if (!event || !eventPageDocument || isArchived) return;
-    const url = publicPageUrl(eventPageDocument, event);
+    const snapshot = snapshotFromEditor(eventPageDocument) ?? eventPageDocument;
+    const url = publicPageUrl(snapshot, event);
     if (!url) {
       setActionError('Public page URL is not available. Set a safe http(s) public path first.');
       return;
@@ -701,7 +1408,7 @@ export function EventPagePersistedEditorView({ eventId }: { eventId: string }) {
     const operationId = nextOperationId();
     const saved = await saveDraft(operationId, eventPageDocument);
     if (!saved) return;
-    const result = await adminApi.publishContentVersion(document.id, saved.id);
+    const result = await adminApi.publishContentVersion(document.id, saved.version.id);
     if (!isCurrentOperation(operationId)) return;
     if (!result.ok) {
       setAutosave('error');
@@ -762,625 +1469,56 @@ export function EventPagePersistedEditorView({ eventId }: { eventId: string }) {
   }
 
   if (loading) {
-    return <p className="text-sm text-muted-foreground">Loading event-page editor...</p>;
+    return (
+      <div className="flex min-h-svh items-center justify-center bg-neutral-950 text-sm text-white/65">
+        Loading event-page editor...
+      </div>
+    );
   }
 
   if (error || !event || !document || !draft || !eventPageDocument || !preview) {
     return (
-      <section className="space-y-3">
-        <h1 className="text-2xl font-bold tracking-tight">Event-page editor</h1>
-        <p className="text-sm text-destructive">{error ?? 'Event-page editor could not load.'}</p>
-        <button
-          className="rounded-md border px-3 py-2 text-sm"
-          onClick={() => void load()}
-          type="button"
-        >
-          Retry
-        </button>
+      <section className="flex min-h-svh items-center justify-center bg-neutral-950 p-6 text-white">
+        <div className="w-full max-w-lg space-y-4 rounded-lg border border-white/10 bg-white/5 p-6">
+          <div className="space-y-1">
+            <p className="text-sm text-white/50">Event page editor</p>
+            <h1 className="text-2xl font-semibold">Unable to load editor</h1>
+          </div>
+          <p className="text-sm text-red-200">{error ?? 'Event-page editor could not load.'}</p>
+          <button
+            className="rounded-md border border-white/15 px-3 py-2 text-sm hover:bg-white/10"
+            onClick={() => void load()}
+            type="button"
+          >
+            Retry
+          </button>
+        </div>
       </section>
     );
   }
 
-  const selectedBlockIndex = eventPageDocument.blocks.findIndex(
-    (_block, index) => `event-page-block-${index}` === selectedBlockId,
-  );
-  const selectedBlock =
-    selectedBlockIndex >= 0
-      ? eventPageDocument.blocks[selectedBlockIndex]
-      : eventPageDocument.blocks[0];
-  const selectedBlockLabel = selectedBlock ? blockLabel(selectedBlock) : 'Content';
-  const canEdit = !isArchived;
   const archivedReason = isArchived ? 'Archived pages are read-only.' : undefined;
-  const canvasHeader = (
-    <div className="space-y-3" data-testid="event-page-metadata-bar">
-      <div className="grid gap-3 md:grid-cols-[minmax(0,1fr)_14rem]">
-        <label className="space-y-1.5 text-xs font-medium text-muted-foreground">
-          Public path
-          <input
-            aria-label="Public path"
-            className={compactInputClassName}
-            disabled={!canEdit}
-            onChange={(change) => {
-              updateEventPageDocument({
-                ...eventPageDocument,
-                settings: { ...eventPageDocument.settings, publicPath: change.currentTarget.value },
-              });
-            }}
-            value={eventPageDocument.settings.publicPath ?? ''}
-          />
-        </label>
-        <label className="space-y-1.5 text-xs font-medium text-muted-foreground">
-          Locale
-          <input
-            aria-label="Locale"
-            className={compactInputClassName}
-            disabled={!canEdit}
-            onChange={(change) => {
-              updateEventPageDocument({
-                ...eventPageDocument,
-                settings: { ...eventPageDocument.settings, locale: change.currentTarget.value },
-              });
-            }}
-            value={eventPageDocument.settings.locale}
-          />
-        </label>
-      </div>
-      <div className="flex flex-wrap items-center gap-2">
-        <button
-          className={actionButtonClassName}
-          disabled={!canEdit}
-          onClick={() => void saveDraft()}
-          type="button"
-        >
-          <Save className="size-4" />
-          Save draft
-        </button>
-        <button
-          className={actionButtonClassName}
-          disabled={!canEdit}
-          onClick={() => void previewSavedDraft()}
-          type="button"
-        >
-          <Eye className="size-4" />
-          Preview
-        </button>
-        <button
-          className={actionButtonClassName}
-          disabled={!canEdit}
-          onClick={viewPublicPage}
-          type="button"
-        >
-          <ExternalLink className="size-4" />
-          View public page
-        </button>
-      </div>
-    </div>
-  );
-  const directCanvasBlocks: ContentEditorCanvasBlock[] = eventPageDocument.blocks.map(
-    (block, index) => {
-      const id = `event-page-block-${index}`;
-      const selected = id === selectedBlockId;
-      const summary = blockSummary(block);
-      const updateBlock = (nextBlock: EventPageBlock) => {
-        updateEventPageDocument({
-          ...eventPageDocument,
-          blocks: eventPageDocument.blocks.map((item, itemIndex) =>
-            itemIndex === index ? nextBlock : item,
-          ),
-        });
-      };
-
-      if (block.type === 'hero') {
-        return {
-          id,
-          label: blockLabel(block),
-          presentation: 'document',
-          summary,
-          selected,
-          onSelect: () => selectBlock(id),
-          content: (
-            <div className="space-y-5">
-              <EditablePlainText
-                className="max-w-3xl text-4xl font-bold leading-tight text-foreground"
-                disabled={!canEdit}
-                label="Page headline"
-                onChange={(value) =>
-                  updateEventPageDocument(updateHero(eventPageDocument, { headline: value }))
-                }
-                onFocus={() => selectBlock(id)}
-                value={block.headline}
-              />
-              <EditablePlainText
-                className="max-w-2xl whitespace-pre-wrap text-base leading-7 text-muted-foreground"
-                disabled={!canEdit}
-                label="Page summary"
-                multiline
-                onChange={(value) =>
-                  updateEventPageDocument(updateSummary(eventPageDocument, value))
-                }
-                onFocus={() => selectBlock(id)}
-                value={block.body ?? ''}
-              />
-              <div className="space-y-2">
-                <div className="inline-flex min-h-10 items-center rounded-md bg-primary px-4 py-2 text-sm font-semibold text-primary-foreground shadow-sm">
-                  <EditablePlainText
-                    className="min-w-20 text-primary-foreground"
-                    disabled={!canEdit}
-                    label="Hero CTA label"
-                    onChange={(value) => updateBlock({ ...block, ctaLabel: value })}
-                    onFocus={() => selectBlock(id)}
-                    value={block.ctaLabel ?? ''}
-                  />
-                </div>
-              </div>
-            </div>
-          ),
-        };
-      }
-
-      if (block.type === 'tickets') {
-        return {
-          id,
-          label: blockLabel(block),
-          presentation: 'document',
-          summary,
-          selected,
-          onSelect: () => selectBlock(id),
-          content: (
-            <div className="space-y-3">
-              <EditablePlainText
-                className="text-2xl font-semibold text-foreground"
-                disabled={!canEdit}
-                label="Ticket block title"
-                onChange={(value) => updateBlock({ ...block, title: value })}
-                onFocus={() => selectBlock(id)}
-                value={block.title}
-              />
-              <div className="inline-flex min-h-10 items-center rounded-md border bg-background px-4 py-2 text-sm font-semibold shadow-sm">
-                <EditablePlainText
-                  className="min-w-24 text-foreground"
-                  disabled={!canEdit}
-                  label="Ticket CTA label"
-                  onChange={(value) =>
-                    updateEventPageDocument(updateTicketCta(eventPageDocument, value))
-                  }
-                  onFocus={() => selectBlock(id)}
-                  value={ticketCtaLabel(eventPageDocument)}
-                />
-              </div>
-            </div>
-          ),
-        };
-      }
-
-      if (block.type === 'rich_text') {
-        const imageAttrs = tipTapImageAttrs(block);
-        return {
-          id,
-          label: blockLabel(block),
-          presentation: 'document',
-          summary,
-          selected,
-          onSelect: () => selectBlock(id),
-          content: (
-            <div className="space-y-3">
-              {imageAttrs ? (
-                <>
-                  {imageAttrs.src ? (
-                    <img
-                      alt={imageAttrs.alt}
-                      className="max-h-80 w-full rounded-md object-cover"
-                      src={imageAttrs.src}
-                    />
-                  ) : (
-                    <div className="flex min-h-48 items-center justify-center rounded-md border border-dashed bg-muted/30 text-sm font-medium text-muted-foreground">
-                      Add an image URL
-                    </div>
-                  )}
-                </>
-              ) : (
-                <EditablePlainText
-                  className="whitespace-pre-wrap text-base leading-7 text-foreground"
-                  disabled={!canEdit}
-                  label="Rich text content"
-                  multiline
-                  onChange={(value) => updateBlock({ ...block, content: textContentNode(value) })}
-                  onFocus={() => selectBlock(id)}
-                  value={tipTapText(block)}
-                />
-              )}
-            </div>
-          ),
-        };
-      }
-
-      if (block.type === 'event_details') {
-        return {
-          id,
-          label: blockLabel(block),
-          presentation: 'document',
-          summary,
-          selected,
-          onSelect: () => selectBlock(id),
-          content: (
-            <section className="space-y-4">
-              <EditablePlainText
-                className="text-2xl font-semibold text-foreground"
-                disabled={!canEdit}
-                label="Event details title"
-                onChange={(value) => updateBlock({ ...block, title: value })}
-                onFocus={() => selectBlock(id)}
-                value={block.title}
-              />
-              <dl className="grid gap-x-8 gap-y-3 text-sm md:grid-cols-2">
-                {block.items.map((item, itemIndex) => (
-                  <div className="border-t pt-3" key={`${item.label}-${itemIndex}`}>
-                    <dt className="font-medium text-muted-foreground">{item.label}</dt>
-                    <dd className="mt-1 text-foreground">{item.value}</dd>
-                  </div>
-                ))}
-              </dl>
-            </section>
-          ),
-        };
-      }
-
-      if (block.type === 'schedule') {
-        const firstItem = block.items[0] ?? {
-          title: event.title,
-          startsAt: event.startsAt,
-          endsAt: event.endsAt,
-          timezone: event.timezone,
-          venueName: event.venueName ?? event.venue?.name,
-        };
-        return {
-          id,
-          label: blockLabel(block),
-          presentation: 'document',
-          summary,
-          selected,
-          onSelect: () => selectBlock(id),
-          content: (
-            <section className="space-y-4">
-              <EditablePlainText
-                className="text-2xl font-semibold text-foreground"
-                disabled={!canEdit}
-                label="Schedule title"
-                onChange={(value) => updateBlock({ ...block, title: value })}
-                onFocus={() => selectBlock(id)}
-                value={block.title}
-              />
-              <div className="grid gap-3 md:grid-cols-[minmax(0,1fr)_13rem]">
-                <EditablePlainText
-                  className="text-base font-medium text-foreground"
-                  disabled={!canEdit}
-                  label="Schedule item title"
-                  onChange={(value) =>
-                    updateBlock({
-                      ...block,
-                      items: [{ ...firstItem, title: value }, ...block.items.slice(1)],
-                    })
-                  }
-                  onFocus={() => selectBlock(id)}
-                  value={firstItem.title}
-                />
-                <label className="space-y-1.5 text-xs font-medium text-muted-foreground">
-                  Starts
-                  <input
-                    aria-label="Schedule start time"
-                    className={compactInputClassName}
-                    disabled={!canEdit}
-                    onChange={(change) =>
-                      updateBlock({
-                        ...block,
-                        items: [
-                          { ...firstItem, startsAt: change.currentTarget.value },
-                          ...block.items.slice(1),
-                        ],
-                      })
-                    }
-                    onFocus={() => selectBlock(id)}
-                    value={firstItem.startsAt}
-                  />
-                </label>
-              </div>
-            </section>
-          ),
-        };
-      }
-
-      if (block.type === 'venue_map') {
-        return {
-          id,
-          label: blockLabel(block),
-          presentation: 'document',
-          summary,
-          selected,
-          onSelect: () => selectBlock(id),
-          content: (
-            <section className="space-y-4">
-              <EditablePlainText
-                className="text-2xl font-semibold text-foreground"
-                disabled={!canEdit}
-                label="Venue title"
-                onChange={(value) => updateBlock({ ...block, title: value })}
-                onFocus={() => selectBlock(id)}
-                value={block.title}
-              />
-              <div className="grid gap-3 md:grid-cols-2">
-                <EditablePlainText
-                  className="text-base font-medium text-foreground"
-                  disabled={!canEdit}
-                  label="Venue name"
-                  onChange={(value) => updateBlock({ ...block, venueName: value })}
-                  onFocus={() => selectBlock(id)}
-                  value={block.venueName}
-                />
-                <EditablePlainText
-                  className="text-sm text-muted-foreground"
-                  disabled={!canEdit}
-                  label="Venue address"
-                  onChange={(value) => updateBlock({ ...block, address: value })}
-                  onFocus={() => selectBlock(id)}
-                  value={block.address ?? ''}
-                />
-              </div>
-            </section>
-          ),
-        };
-      }
-
-      if (block.type === 'faq') {
-        return {
-          id,
-          label: blockLabel(block),
-          presentation: 'document',
-          summary,
-          selected,
-          onSelect: () => selectBlock(id),
-          content: (
-            <section className="space-y-4">
-              <EditablePlainText
-                className="text-2xl font-semibold text-foreground"
-                disabled={!canEdit}
-                label="FAQ title"
-                onChange={(value) => updateBlock({ ...block, title: value })}
-                onFocus={() => selectBlock(id)}
-                value={block.title}
-              />
-              <div className="divide-y">
-                {block.items.map((item, itemIndex) => (
-                  <div className="space-y-1 py-3" key={`${item.question}-${itemIndex}`}>
-                    <p className="font-medium text-foreground">{item.question}</p>
-                    <p className="text-sm text-muted-foreground">{item.answer}</p>
-                  </div>
-                ))}
-              </div>
-            </section>
-          ),
-        };
-      }
-
-      if (block.type === 'products') {
-        return {
-          id,
-          label: blockLabel(block),
-          presentation: 'document',
-          summary,
-          selected,
-          onSelect: () => selectBlock(id),
-          content: (
-            <section className="space-y-3">
-              <EditablePlainText
-                className="text-2xl font-semibold text-foreground"
-                disabled={!canEdit}
-                label="Products title"
-                onChange={(value) => updateBlock({ ...block, title: value })}
-                onFocus={() => selectBlock(id)}
-                value={block.title}
-              />
-              <EditablePlainText
-                className="whitespace-pre-wrap text-base leading-7 text-muted-foreground"
-                disabled={!canEdit}
-                label="Products body"
-                multiline
-                onChange={(value) => updateBlock({ ...block, body: value })}
-                onFocus={() => selectBlock(id)}
-                value={block.body ?? ''}
-              />
-              <p className="text-sm font-medium text-foreground">
-                {block.productIds.length} linked products
-              </p>
-            </section>
-          ),
-        };
-      }
-
-      if (block.type === 'sponsors') {
-        return {
-          id,
-          label: blockLabel(block),
-          presentation: 'document',
-          summary,
-          selected,
-          onSelect: () => selectBlock(id),
-          content: (
-            <section className="space-y-4">
-              <EditablePlainText
-                className="text-2xl font-semibold text-foreground"
-                disabled={!canEdit}
-                label="Sponsors title"
-                onChange={(value) => updateBlock({ ...block, title: value })}
-                onFocus={() => selectBlock(id)}
-                value={block.title}
-              />
-              <div className="flex flex-wrap gap-x-6 gap-y-3 text-sm font-medium text-foreground">
-                {block.items.map((item, itemIndex) =>
-                  item.url ? (
-                    <a
-                      className="text-primary underline-offset-4 hover:underline"
-                      href={item.url}
-                      key={`${item.name}-${itemIndex}`}
-                    >
-                      {item.name}
-                    </a>
-                  ) : (
-                    <span key={`${item.name}-${itemIndex}`}>{item.name}</span>
-                  ),
-                )}
-              </div>
-            </section>
-          ),
-        };
-      }
-
-      if (block.type === 'speakers') {
-        return {
-          id,
-          label: blockLabel(block),
-          presentation: 'document',
-          summary,
-          selected,
-          onSelect: () => selectBlock(id),
-          content: (
-            <section className="space-y-4">
-              <EditablePlainText
-                className="text-2xl font-semibold text-foreground"
-                disabled={!canEdit}
-                label="Speakers title"
-                onChange={(value) => updateBlock({ ...block, title: value })}
-                onFocus={() => selectBlock(id)}
-                value={block.title}
-              />
-              <div className="divide-y">
-                {block.items.map((item, itemIndex) => (
-                  <div className="py-3" key={`${item.name}-${itemIndex}`}>
-                    <p className="font-medium text-foreground">{item.name}</p>
-                    {item.role && <p className="text-sm text-muted-foreground">{item.role}</p>}
-                    {item.bio && (
-                      <p className="mt-1 text-sm leading-6 text-muted-foreground">{item.bio}</p>
-                    )}
-                  </div>
-                ))}
-              </div>
-            </section>
-          ),
-        };
-      }
-
-      if (block.type === 'button') {
-        return {
-          id,
-          label: blockLabel(block),
-          presentation: 'document',
-          summary,
-          selected,
-          onSelect: () => selectBlock(id),
-          content: (
-            <div className="inline-flex min-h-10 items-center rounded-md bg-primary px-4 py-2 text-sm font-semibold text-primary-foreground shadow-sm">
-              <EditablePlainText
-                className="min-w-20 text-primary-foreground"
-                disabled={!canEdit}
-                label="Button label"
-                onChange={(value) => updateBlock({ ...block, label: value })}
-                onFocus={() => selectBlock(id)}
-                value={block.label}
-              />
-            </div>
-          ),
-        };
-      }
-
-      if (block.type === 'divider') {
-        return {
-          id,
-          label: blockLabel(block),
-          presentation: 'document',
-          summary,
-          selected,
-          onSelect: () => selectBlock(id),
-          content: <hr className="border-border" />,
-        };
-      }
-
-      if (block.type === 'social_links') {
-        return {
-          id,
-          label: blockLabel(block),
-          presentation: 'document',
-          summary,
-          selected,
-          onSelect: () => selectBlock(id),
-          content: (
-            <nav aria-label="Event page social links" className="space-y-3">
-              {block.title && (
-                <h2 className="text-2xl font-semibold text-foreground">{block.title}</h2>
-              )}
-              <div className="flex flex-wrap gap-3 text-sm">
-                {block.links.map((link, linkIndex) => (
-                  <a
-                    className="font-medium text-primary underline-offset-4 hover:underline"
-                    href={link.url}
-                    key={`${link.label}-${linkIndex}`}
-                  >
-                    {link.label}
-                  </a>
-                ))}
-              </div>
-            </nav>
-          ),
-        };
-      }
-
-      if (block.type === 'custom_embed') {
-        return {
-          id,
-          label: blockLabel(block),
-          presentation: 'document',
-          summary,
-          selected,
-          onSelect: () => selectBlock(id),
-          content: (
-            <EditablePlainText
-              className="font-mono text-xs leading-5 text-muted-foreground"
-              disabled={!canEdit}
-              label="Custom embed HTML"
-              multiline
-              onChange={(value) => updateBlock({ ...block, html: value })}
-              onFocus={() => selectBlock(id)}
-              value={block.html}
-            />
-          ),
-        };
-      }
-
-      return unreachableEventPageBlock(block);
-    },
-  );
-  const updateSelectedEventPageBlock = (nextBlock: EventPageBlock) => {
-    if (selectedBlockIndex < 0) return;
-    updateEventPageDocument({
-      ...eventPageDocument,
-      blocks: eventPageDocument.blocks.map((item, itemIndex) =>
-        itemIndex === selectedBlockIndex ? nextBlock : item,
-      ),
-    });
-  };
+  const selectedBlock = eventPageDocument.blocks.find((block) => block.id === selectedBlockId);
+  const selectedBlockLabel = selectedBlock ? blockLabel(selectedBlock) : 'Content';
+  const history = versionSummaries(versions);
   const selectedBlockControls = (() => {
     if (!selectedBlock) {
-      return <p className="text-xs text-muted-foreground">Select content in the canvas.</p>;
+      return <p className="text-xs text-white/45">Select content in the canvas.</p>;
     }
 
     if (selectedBlock.type === 'hero') {
       return (
-        <label className="space-y-1.5 text-xs font-medium text-muted-foreground">
+        <label className="space-y-1.5 text-xs font-medium text-white/55">
           Hero CTA URL
           <input
             aria-label="Hero CTA URL"
-            className={compactInputClassName}
+            className={darkInputClassName}
             disabled={!canEdit}
             onChange={(change) =>
-              updateSelectedEventPageBlock({ ...selectedBlock, ctaUrl: change.currentTarget.value })
+              updateSelectedEventPageBlock({
+                ...selectedBlock,
+                ctaUrl: change.currentTarget.value,
+              })
             }
             value={selectedBlock.ctaUrl ?? ''}
           />
@@ -1391,15 +1529,15 @@ export function EventPagePersistedEditorView({ eventId }: { eventId: string }) {
     if (selectedBlock.type === 'rich_text') {
       const imageAttrs = tipTapImageAttrs(selectedBlock);
       if (!imageAttrs) {
-        return <p className="text-xs text-muted-foreground">{blockSummary(selectedBlock)}</p>;
+        return <p className="text-xs text-white/45">{blockSummary(selectedBlock)}</p>;
       }
       return (
         <div className="space-y-3">
-          <label className="space-y-1.5 text-xs font-medium text-muted-foreground">
+          <label className="space-y-1.5 text-xs font-medium text-white/55">
             Image URL
             <input
               aria-label="Image URL"
-              className={compactInputClassName}
+              className={darkInputClassName}
               disabled={!canEdit}
               onChange={(change) =>
                 updateSelectedEventPageBlock({
@@ -1410,11 +1548,11 @@ export function EventPagePersistedEditorView({ eventId }: { eventId: string }) {
               value={imageAttrs.src}
             />
           </label>
-          <label className="space-y-1.5 text-xs font-medium text-muted-foreground">
+          <label className="space-y-1.5 text-xs font-medium text-white/55">
             Image alt text
             <input
               aria-label="Image alt text"
-              className={compactInputClassName}
+              className={darkInputClassName}
               disabled={!canEdit}
               onChange={(change) =>
                 updateSelectedEventPageBlock({
@@ -1431,11 +1569,11 @@ export function EventPagePersistedEditorView({ eventId }: { eventId: string }) {
 
     if (selectedBlock.type === 'venue_map') {
       return (
-        <label className="space-y-1.5 text-xs font-medium text-muted-foreground">
+        <label className="space-y-1.5 text-xs font-medium text-white/55">
           Map URL
           <input
             aria-label="Map URL"
-            className={compactInputClassName}
+            className={darkInputClassName}
             disabled={!canEdit}
             onChange={(change) =>
               updateSelectedEventPageBlock({
@@ -1451,11 +1589,11 @@ export function EventPagePersistedEditorView({ eventId }: { eventId: string }) {
 
     if (selectedBlock.type === 'button') {
       return (
-        <label className="space-y-1.5 text-xs font-medium text-muted-foreground">
+        <label className="space-y-1.5 text-xs font-medium text-white/55">
           Button URL
           <input
             aria-label="Button URL"
-            className={compactInputClassName}
+            className={darkInputClassName}
             disabled={!canEdit}
             onChange={(change) =>
               updateSelectedEventPageBlock({ ...selectedBlock, url: change.currentTarget.value })
@@ -1466,217 +1604,399 @@ export function EventPagePersistedEditorView({ eventId }: { eventId: string }) {
       );
     }
 
-    return <p className="text-xs text-muted-foreground">{blockSummary(selectedBlock)}</p>;
+    return <p className="text-xs text-white/45">{blockSummary(selectedBlock)}</p>;
   })();
-  const panelIds = ['block', 'page', 'body', 'theme', 'code', 'variables', 'history', 'issues'];
-  const panelLabels: Record<string, string> = {
-    block: 'Content',
-    page: 'Page',
-    body: 'Body',
-    theme: 'Theme',
-    code: 'Code',
-    variables: 'Variables',
-    history: 'History',
-    issues: 'Issues',
-  };
-  const inspectorNav = (
-    <div className="grid grid-cols-2 gap-1" aria-label="Event page inspector modes">
-      {panelIds.map((id) => (
-        <button
-          aria-pressed={inspectorPanelId === id}
-          className={`rounded-md px-2 py-1.5 text-xs font-medium ${
-            inspectorPanelId === id
-              ? 'bg-primary text-primary-foreground'
-              : 'text-muted-foreground hover:bg-accent'
-          }`}
-          key={id}
-          onClick={() => setInspectorPanelId(id)}
-          type="button"
-        >
-          {panelLabels[id]}
-        </button>
-      ))}
-    </div>
-  );
-  const inspectorPanels: ContentEditorInspectorPanel[] = [
-    {
-      id: 'block',
-      label: 'Content',
-      content: (
-        <section className="space-y-3 text-sm">
-          {inspectorNav}
-          <h2 className="text-sm font-semibold">Selected {selectedBlockLabel}</h2>
-          {selectedBlockControls}
-        </section>
-      ),
-    },
-    {
-      id: 'page',
-      label: 'Page',
-      content: (
-        <section className="space-y-3 text-sm">
-          {inspectorNav}
-          <h2 className="text-sm font-semibold">Page metadata</h2>
-          <dl className="space-y-2">
-            <div className="grid grid-cols-[5rem_minmax(0,1fr)] gap-2">
-              <dt className="text-muted-foreground">Title</dt>
-              <dd className="truncate font-medium">{heroHeadline(eventPageDocument)}</dd>
-            </div>
-            <div className="grid grid-cols-[5rem_minmax(0,1fr)] gap-2">
-              <dt className="text-muted-foreground">CTA</dt>
-              <dd className="truncate font-medium">{eventPageDocument.settings.ticketCtaLabel}</dd>
-            </div>
-          </dl>
-        </section>
-      ),
-    },
-    {
-      id: 'body',
-      label: 'Body',
-      content: (
-        <section className="space-y-3 text-sm">
-          {inspectorNav}
-          <h2 className="text-sm font-semibold">Body</h2>
-          <p className="rounded-md border bg-muted/30 p-3 text-xs text-muted-foreground">
-            Hosted event pages use full-width responsive sections with checkout-first content
-            density.
-          </p>
-        </section>
-      ),
-    },
-    {
-      id: 'theme',
-      label: 'Theme',
-      content: (
-        <section className="space-y-3 text-sm">
-          {inspectorNav}
-          <h2 className="text-sm font-semibold">Theme</h2>
-          <p className="rounded-md border bg-muted/30 p-3 text-xs text-muted-foreground">
-            Locale {eventPageDocument.settings.locale}; public path{' '}
-            {eventPageDocument.settings.publicPath ?? 'default'}.
-          </p>
-        </section>
-      ),
-    },
-    {
-      id: 'code',
-      label: 'Code',
-      content: (
-        <section className="space-y-3 text-sm">
-          {inspectorNav}
-          <h2 className="text-sm font-semibold">Editor JSON</h2>
-          <pre className="max-h-80 overflow-auto rounded-md border bg-muted/30 p-3 text-xs">
-            {JSON.stringify(eventPageDocument, null, 2)}
-          </pre>
-        </section>
-      ),
-    },
-    {
-      id: 'variables',
-      label: 'Variables',
-      content: (
-        <section className="space-y-3 text-sm">
-          {inspectorNav}
-          <h2 className="text-sm font-semibold">Variables</h2>
-          <div className="grid gap-2">
-            {['event.title', 'event.startsAt', 'event.venueName', 'event.checkoutUrl'].map(
-              (key) => (
-                <code
-                  className="rounded-md border px-2 py-1.5 text-xs"
-                  key={key}
-                >{`{{${key}}}`}</code>
-              ),
-            )}
-          </div>
-        </section>
-      ),
-    },
-    {
-      id: 'history',
-      label: 'History',
-      content: (
-        <section className="space-y-3 text-sm">
-          {inspectorNav}
-          <h2 className="text-sm font-semibold">History</h2>
-          <ol className="space-y-2">
-            {versionSummaries(versions).map((version) => (
-              <li className="rounded-md border p-2 text-xs" key={version.id}>
-                <div className="font-medium">{version.label}</div>
-                <div className="text-muted-foreground">{version.status}</div>
-              </li>
-            ))}
-          </ol>
-        </section>
-      ),
-    },
-    {
-      id: 'issues',
-      label: 'Issues',
-      content: (
-        <section className="space-y-3 text-sm">
-          {inspectorNav}
-          <h2 className="text-sm font-semibold">Issues</h2>
-          {draft.validation.issues.length === 0 ? (
-            <p className="rounded-md border border-emerald-300 bg-emerald-50 p-3 text-xs text-emerald-800">
-              No publish blockers.
-            </p>
-          ) : (
-            <ul className="space-y-2">
-              {draft.validation.issues.map((issue) => (
-                <li
-                  className="rounded-md border p-2 text-xs"
-                  key={`${issue.code}-${issue.message}`}
-                >
-                  <strong>{issue.code}</strong>
-                  <p>{issue.message}</p>
-                </li>
-              ))}
-            </ul>
-          )}
-        </section>
-      ),
-    },
-  ];
 
   return (
-    <div className="space-y-4">
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <div className="min-w-0 space-y-1">
-          <h1 className="truncate text-2xl font-bold tracking-tight">Event-page editor</h1>
-          <p className="max-w-3xl text-sm text-muted-foreground">
-            Persisted hosted page composer for {event.title}
-          </p>
+    <section
+      className="min-h-svh overflow-hidden bg-neutral-950 text-white"
+      data-channel="event-page"
+    >
+      <header className="grid h-16 grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-4 border-b border-white/10 px-4">
+        <a
+          aria-label="Back to event"
+          className="inline-flex size-9 items-center justify-center rounded-md border border-white/10 text-white/70 hover:bg-white/10 hover:text-white"
+          href={`/events/${event.id}`}
+        >
+          <ChevronLeft className="size-4" />
+        </a>
+        <div className="min-w-0 text-center">
+          <div className="flex min-w-0 items-center justify-center gap-2 text-sm text-white/55">
+            <span className="truncate">Hosted page</span>
+            <span>/</span>
+            <button
+              className="min-w-0 truncate font-semibold text-white"
+              disabled={!canEdit}
+              onClick={() => setInspectorPanelId('page')}
+              type="button"
+            >
+              {document.name}
+            </button>
+            <span className="rounded-md bg-white/10 px-2 py-0.5 text-xs text-white/70">
+              {document.status}
+            </span>
+            <span
+              className={`rounded-md border px-2 py-0.5 text-xs ${autosaveClassName(autosave)}`}
+            >
+              {autosaveLabel(autosave)}
+            </span>
+          </div>
+          {(notice || actionError) && (
+            <p
+              className={`mt-1 truncate text-xs ${actionError ? 'text-red-200' : 'text-white/45'}`}
+            >
+              {actionError ?? notice}
+            </p>
+          )}
         </div>
-        {notice && <p className="text-sm text-emerald-700">{notice}</p>}
-      </div>
-      {actionError && (
-        <p className="rounded-md border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive">
-          {actionError}
-        </p>
-      )}
+        <div className="flex items-center gap-2">
+          <button
+            aria-label="Open preview"
+            className="inline-flex size-9 items-center justify-center rounded-md border border-white/10 text-white/70 hover:bg-white/10 hover:text-white disabled:cursor-not-allowed disabled:opacity-40"
+            disabled={Boolean(archivedReason)}
+            onClick={() => setPreviewOpen(true)}
+            title={archivedReason}
+            type="button"
+          >
+            <Eye className="size-4" />
+          </button>
+          <button
+            aria-label="Test send unavailable"
+            className="inline-flex h-9 items-center gap-2 rounded-md border border-white/10 px-3 text-sm font-medium text-white/45 disabled:cursor-not-allowed disabled:opacity-60"
+            disabled
+            title="Hosted pages use preview and public routes instead of test sends."
+            type="button"
+          >
+            <Send className="size-4" />
+            Send test
+          </button>
+          <details className="relative">
+            <summary
+              aria-label="More actions"
+              className="inline-flex size-9 list-none items-center justify-center rounded-md border border-white/10 text-white/70 hover:bg-white/10 hover:text-white"
+            >
+              <MoreHorizontal className="size-4" />
+            </summary>
+            <div className="absolute right-0 top-11 z-30 w-48 rounded-lg border border-white/10 bg-neutral-900 p-1 text-sm shadow-2xl">
+              <button
+                className="flex w-full items-center gap-2 rounded-md px-2 py-2 text-left text-white/80 hover:bg-white/10 disabled:cursor-not-allowed disabled:opacity-40"
+                disabled={Boolean(archivedReason)}
+                onClick={() => void duplicateDocument()}
+                type="button"
+              >
+                <Copy className="size-4" />
+                Duplicate page
+              </button>
+              <button
+                className="flex w-full items-center gap-2 rounded-md px-2 py-2 text-left text-red-200 hover:bg-red-500/10 disabled:cursor-not-allowed disabled:opacity-40"
+                onClick={() => void archiveDocument()}
+                type="button"
+              >
+                <Archive className="size-4" />
+                Archive page
+              </button>
+            </div>
+          </details>
+          <button
+            aria-label={archivedReason ? 'Publish unavailable' : undefined}
+            className="inline-flex h-9 items-center gap-2 rounded-md bg-white px-4 text-sm font-semibold text-black hover:bg-white/90 disabled:cursor-not-allowed disabled:opacity-50"
+            disabled={Boolean(archivedReason)}
+            onClick={() => void publishDraft()}
+            title={archivedReason}
+            type="button"
+          >
+            Publish
+          </button>
+        </div>
+      </header>
 
-      <ContentEditorShell
-        actionsUnavailableReason={archivedReason}
-        autosave={autosave}
-        canvasBlocks={directCanvasBlocks}
-        canvasHeader={canvasHeader}
-        channelLabel="Event page"
-        document={toShellDocument(document)}
-        draft={toShellVersion(draft)}
-        activeInspectorPanelId={inspectorPanelId}
-        inspectorPanels={inspectorPanels}
-        insertActions={eventPageInsertActions}
-        preview={preview}
-        showInspectorPanelTabs={false}
-        testSendUnavailableReason="Hosted pages use preview and public routes instead of test sends."
-        versions={versionSummaries(versions)}
-        onInsertAction={insertEventPageAction}
-        onInspectorPanelChange={setInspectorPanelId}
-        onPreview={() => void previewSavedDraft()}
-        onPublish={() => void publishDraft()}
-        onDuplicate={() => void duplicateDocument()}
-        onArchive={() => void archiveDocument()}
-      />
-    </div>
+      <div className="grid h-[calc(100svh-4rem)] grid-cols-[4rem_minmax(0,1fr)] lg:grid-cols-[4rem_minmax(0,1fr)_22rem]">
+        <aside
+          aria-label="Insert content"
+          className="flex flex-col items-center gap-2 border-r border-white/10 bg-neutral-950 px-2 py-5"
+        >
+          {eventPageInsertActions.map((action) => (
+            <button
+              aria-label={`Insert ${action.label}`}
+              className="inline-flex size-10 items-center justify-center rounded-md border border-white/10 text-white/60 hover:bg-white/10 hover:text-white disabled:cursor-not-allowed disabled:opacity-40"
+              disabled={!canEdit}
+              key={action.id}
+              onClick={() => insertEventPageAction(action.id)}
+              title={action.label}
+              type="button"
+            >
+              {action.icon}
+            </button>
+          ))}
+        </aside>
+
+        <main className="min-w-0 overflow-auto bg-neutral-100 text-black">
+          <div className="mx-auto min-h-full w-full max-w-5xl px-6 py-8">
+            <div
+              className="mb-5 grid gap-3 rounded-lg border border-black/10 bg-white p-4 text-sm shadow-sm"
+              data-testid="event-page-metadata-bar"
+            >
+              <div className="grid gap-3 md:grid-cols-[minmax(0,1fr)_12rem]">
+                <label className="space-y-1.5 text-xs font-medium text-black/45">
+                  Public path
+                  <input
+                    aria-label="Public path"
+                    className="w-full rounded-md border border-black/10 px-2.5 py-1.5 text-sm text-black outline-none focus:border-black/35 disabled:cursor-not-allowed disabled:opacity-60"
+                    disabled={!canEdit}
+                    onChange={(change) =>
+                      updateEventPageSettings((current) => ({
+                        ...current,
+                        settings: {
+                          ...current.settings,
+                          publicPath: change.currentTarget.value,
+                        },
+                      }))
+                    }
+                    value={eventPageDocument.settings.publicPath ?? ''}
+                  />
+                </label>
+                <label className="space-y-1.5 text-xs font-medium text-black/45">
+                  Locale
+                  <input
+                    aria-label="Locale"
+                    className="w-full rounded-md border border-black/10 px-2.5 py-1.5 text-sm text-black outline-none focus:border-black/35 disabled:cursor-not-allowed disabled:opacity-60"
+                    disabled={!canEdit}
+                    onChange={(change) =>
+                      updateEventPageSettings((current) => ({
+                        ...current,
+                        settings: { ...current.settings, locale: change.currentTarget.value },
+                      }))
+                    }
+                    value={eventPageDocument.settings.locale}
+                  />
+                </label>
+              </div>
+              <div className="flex flex-wrap items-center gap-2">
+                <button
+                  className="inline-flex h-9 items-center gap-2 rounded-md border border-black/10 px-3 text-sm font-medium text-black hover:bg-black/[0.03] disabled:cursor-not-allowed disabled:opacity-40"
+                  disabled={!canEdit}
+                  onClick={() => void saveDraft()}
+                  type="button"
+                >
+                  <Save className="size-4" />
+                  Save draft
+                </button>
+                <button
+                  className="inline-flex h-9 items-center gap-2 rounded-md border border-black/10 px-3 text-sm font-medium text-black hover:bg-black/[0.03] disabled:cursor-not-allowed disabled:opacity-40"
+                  disabled={!canEdit}
+                  onClick={() => void previewSavedDraft()}
+                  type="button"
+                >
+                  <Eye className="size-4" />
+                  Preview
+                </button>
+                <button
+                  className="inline-flex h-9 items-center gap-2 rounded-md border border-black/10 px-3 text-sm font-medium text-black hover:bg-black/[0.03] disabled:cursor-not-allowed disabled:opacity-40"
+                  disabled={!canEdit}
+                  onClick={viewPublicPage}
+                  type="button"
+                >
+                  <ExternalLink className="size-4" />
+                  View public page
+                </button>
+              </div>
+            </div>
+
+            <div className="rounded-xl border border-black/10 bg-white p-5 shadow-sm">
+              {pageEditor ? (
+                <EditorContent editor={pageEditor} />
+              ) : (
+                <p className="text-sm text-black/45">Preparing editor...</p>
+              )}
+            </div>
+          </div>
+        </main>
+
+        <aside
+          aria-label="Event page inspector"
+          className="col-span-2 min-h-0 overflow-auto border-t border-white/10 bg-neutral-950 p-4 lg:col-span-1 lg:border-l lg:border-t-0"
+        >
+          <div className="grid grid-cols-4 gap-1" aria-label="Event page inspector modes">
+            {(Object.keys(panelLabels) as InspectorPanelId[]).map((id) => (
+              <button
+                aria-label={panelLabels[id]}
+                aria-pressed={inspectorPanelId === id}
+                className={`inline-flex h-9 items-center justify-center rounded-md border text-xs ${
+                  inspectorPanelId === id
+                    ? 'border-white/30 bg-white text-black'
+                    : 'border-white/10 text-white/60 hover:bg-white/10 hover:text-white'
+                }`}
+                key={id}
+                onClick={() => setInspectorPanelId(id)}
+                title={panelLabels[id]}
+                type="button"
+              >
+                {panelIcons[id]}
+              </button>
+            ))}
+          </div>
+
+          {inspectorPanelId === 'block' && (
+            <section className="mt-6 space-y-4 text-sm">
+              <div>
+                <p className="text-xs uppercase tracking-wide text-white/40">Selected block</p>
+                <h2 className="mt-1 font-semibold">{selectedBlockLabel}</h2>
+              </div>
+              {selectedBlockControls}
+              <div className="space-y-2 border-t border-white/10 pt-4">
+                {eventPageDocument.blocks.map((block) => (
+                  <button
+                    className={`w-full rounded-md border px-3 py-2 text-left text-xs ${
+                      block.id === selectedBlockId
+                        ? 'border-white/30 bg-white text-black'
+                        : 'border-white/10 text-white/70 hover:bg-white/10'
+                    }`}
+                    key={block.id}
+                    onClick={() => selectBlock(block.id)}
+                    type="button"
+                  >
+                    <span className="block font-medium">{blockLabel(block)}</span>
+                    <span className="mt-1 block truncate opacity-70">{blockSummary(block)}</span>
+                  </button>
+                ))}
+              </div>
+            </section>
+          )}
+
+          {inspectorPanelId === 'page' && (
+            <section className="mt-6 space-y-4 text-sm">
+              <div>
+                <p className="text-xs uppercase tracking-wide text-white/40">Page metadata</p>
+                <h2 className="mt-1 font-semibold">{heroHeadline(eventPageDocument)}</h2>
+              </div>
+              <dl className="space-y-3 text-xs">
+                <div className="flex justify-between gap-4 border-b border-white/10 pb-3">
+                  <dt className="text-white/45">CTA</dt>
+                  <dd className="font-medium text-white/80">{ticketCtaLabel(eventPageDocument)}</dd>
+                </div>
+                <div className="flex justify-between gap-4 border-b border-white/10 pb-3">
+                  <dt className="text-white/45">Locale</dt>
+                  <dd className="font-mono text-white/80">{eventPageDocument.settings.locale}</dd>
+                </div>
+                <div className="flex justify-between gap-4 border-b border-white/10 pb-3">
+                  <dt className="text-white/45">Public path</dt>
+                  <dd className="max-w-[12rem] truncate font-mono text-white/80">
+                    {eventPageDocument.settings.publicPath ?? 'default'}
+                  </dd>
+                </div>
+              </dl>
+            </section>
+          )}
+
+          {inspectorPanelId === 'body' && (
+            <section className="mt-6 space-y-4 text-sm">
+              <div>
+                <p className="text-xs uppercase tracking-wide text-white/40">Page structure</p>
+                <h2 className="mt-1 font-semibold">{eventPageDocument.blocks.length} blocks</h2>
+              </div>
+              <ol className="space-y-2">
+                {eventPageDocument.blocks.map((block) => (
+                  <li className="rounded-md border border-white/10 p-3 text-xs" key={block.id}>
+                    <div className="font-medium text-white">{blockLabel(block)}</div>
+                    <div className="mt-1 truncate text-white/45">{blockSummary(block)}</div>
+                  </li>
+                ))}
+              </ol>
+            </section>
+          )}
+
+          {inspectorPanelId === 'theme' && (
+            <section className="mt-6 space-y-4 text-sm">
+              <div>
+                <p className="text-xs uppercase tracking-wide text-white/40">Theme</p>
+                <h2 className="mt-1 font-semibold">Hosted page</h2>
+              </div>
+              <p className="rounded-md border border-white/10 bg-white/5 p-3 text-xs leading-5 text-white/60">
+                Full-width responsive sections, checkout-first content density, and event metadata
+                inherited from the canonical event record.
+              </p>
+            </section>
+          )}
+
+          {inspectorPanelId === 'code' && (
+            <section className="mt-6 space-y-4 text-sm">
+              <div>
+                <p className="text-xs uppercase tracking-wide text-white/40">Editor JSON</p>
+                <h2 className="mt-1 font-semibold">Saved payload</h2>
+              </div>
+              <pre className="max-h-[42rem] overflow-auto rounded-md border border-white/10 bg-white/5 p-3 text-xs leading-5 text-white/75">
+                {JSON.stringify(eventPageDocument, null, 2)}
+              </pre>
+            </section>
+          )}
+
+          {inspectorPanelId === 'variables' && (
+            <section className="mt-6 space-y-4 text-sm">
+              <div>
+                <p className="text-xs uppercase tracking-wide text-white/40">Variables</p>
+                <h2 className="mt-1 font-semibold">Merge tags</h2>
+              </div>
+              <div className="grid gap-2">
+                {['event.title', 'event.startsAt', 'event.venueName', 'event.checkoutUrl'].map(
+                  (key) => (
+                    <code
+                      className="rounded-md border border-white/10 px-2 py-1.5 text-xs"
+                      key={key}
+                    >
+                      {`{{${key}}}`}
+                    </code>
+                  ),
+                )}
+              </div>
+            </section>
+          )}
+
+          {inspectorPanelId === 'history' && (
+            <section className="mt-6 space-y-4 text-sm">
+              <div>
+                <p className="text-xs uppercase tracking-wide text-white/40">Version history</p>
+                <h2 className="mt-1 font-semibold">{history.length} versions</h2>
+              </div>
+              <ol className="space-y-2">
+                {history.map((version) => (
+                  <li className="rounded-md border border-white/10 p-3 text-xs" key={version.id}>
+                    <div className="font-medium text-white">{version.label}</div>
+                    <div className="mt-1 text-white/45">{formatDate(version.timestamp)}</div>
+                  </li>
+                ))}
+              </ol>
+            </section>
+          )}
+
+          {inspectorPanelId === 'issues' && (
+            <section className="mt-6 space-y-4 text-sm">
+              <div>
+                <p className="text-xs uppercase tracking-wide text-white/40">Publish blockers</p>
+                <h2 className="mt-1 font-semibold">Validation</h2>
+              </div>
+              {draft.validation.issues.length === 0 ? (
+                <p className="rounded-md border border-emerald-400/30 bg-emerald-400/10 p-3 text-xs text-emerald-100">
+                  No publish blockers.
+                </p>
+              ) : (
+                <ul className="space-y-2">
+                  {draft.validation.issues.map((issue) => (
+                    <li
+                      className="rounded-md border border-white/10 p-3 text-xs"
+                      key={`${issue.code}-${issue.message}`}
+                    >
+                      <strong className="text-white">{issue.code}</strong>
+                      <p className="mt-1 text-white/60">{issue.message}</p>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </section>
+          )}
+        </aside>
+      </div>
+
+      {previewOpen && <PreviewDrawer onClose={() => setPreviewOpen(false)} preview={preview} />}
+    </section>
   );
 }

@@ -22,6 +22,28 @@ const toastMock = vi.hoisted(() => ({
   success: vi.fn(),
 }));
 
+const editorMockHelpers = vi.hoisted(() => ({
+  textFromHtml(value: string): string {
+    return value
+      .replace(/<img\b[^>]*alt="([^"]*)"[^>]*>/gi, ' $1 ')
+      .replace(/<[^>]*>/g, ' ')
+      .replace(/\s+/g, ' ')
+      .trim();
+  },
+  textFromContent(content: unknown): string {
+    if (typeof content === 'string') return editorMockHelpers.textFromHtml(content);
+    if (!content || typeof content !== 'object') return '';
+    return JSON.stringify(content);
+  },
+  escapeHtml(value: string): string {
+    return value
+      .replaceAll('&', '&amp;')
+      .replaceAll('<', '&lt;')
+      .replaceAll('>', '&gt;')
+      .replaceAll('"', '&quot;');
+  },
+}));
+
 vi.mock('@/lib/api', () => ({
   adminApi: adminApiMock,
 }));
@@ -29,6 +51,107 @@ vi.mock('@/lib/api', () => ({
 vi.mock('sonner', () => ({
   toast: toastMock,
 }));
+
+vi.mock('@react-email/editor', async () => {
+  const ReactModule = await import('react');
+
+  const EmailEditor = ReactModule.forwardRef(
+    (
+      {
+        content,
+        editable = true,
+        onReady,
+        onUpdate,
+      }: {
+        content?: unknown;
+        editable?: boolean;
+        onReady?: (ref: unknown) => void;
+        onUpdate?: (ref: unknown) => void;
+      },
+      ref,
+    ) => {
+      const [value, setValue] = ReactModule.useState(() =>
+        editorMockHelpers.textFromContent(content),
+      );
+      const valueRef = ReactModule.useRef(value);
+      const onReadyRef = ReactModule.useRef(onReady);
+      const onUpdateRef = ReactModule.useRef(onUpdate);
+      const didMountRef = ReactModule.useRef(false);
+      const editor = ReactModule.useMemo(
+        () => ({
+          chain() {
+            const chainApi = {
+              focus: () => chainApi,
+              insertContent: (next: string) => {
+                setValue((current) => `${current} ${editorMockHelpers.textFromHtml(next)}`.trim());
+                return chainApi;
+              },
+              run: () => true,
+            };
+            return chainApi;
+          },
+        }),
+        [],
+      );
+      const editorRef = ReactModule.useMemo(
+        () => ({
+          getEmail: async () => ({
+            html: `<p>${editorMockHelpers.escapeHtml(valueRef.current)}</p>`,
+            text: valueRef.current,
+          }),
+          getEmailHTML: async () => `<p>${editorMockHelpers.escapeHtml(valueRef.current)}</p>`,
+          getEmailText: async () => valueRef.current,
+          getJSON: () => ({
+            type: 'doc',
+            content: valueRef.current
+              ? [{ type: 'paragraph', content: [{ type: 'text', text: valueRef.current }] }]
+              : [],
+          }),
+          editor,
+        }),
+        [editor],
+      );
+
+      ReactModule.useImperativeHandle(ref, () => editorRef, [editorRef]);
+      ReactModule.useEffect(() => {
+        valueRef.current = value;
+      }, [value]);
+      ReactModule.useEffect(() => {
+        onReadyRef.current = onReady;
+      }, [onReady]);
+      ReactModule.useEffect(() => {
+        onUpdateRef.current = onUpdate;
+      }, [onUpdate]);
+      ReactModule.useEffect(() => {
+        onReadyRef.current?.(editorRef);
+      }, [editorRef]);
+      ReactModule.useEffect(() => {
+        if (!didMountRef.current) {
+          didMountRef.current = true;
+          return;
+        }
+        onUpdateRef.current?.(editorRef);
+      }, [editorRef, value]);
+
+      return ReactModule.createElement(
+        'div',
+        {
+          'aria-label': 'Email editor canvas',
+          contentEditable: editable,
+          role: 'textbox',
+          suppressContentEditableWarning: true,
+          onInput: (event: React.FormEvent<HTMLDivElement>) => {
+            setValue(event.currentTarget.textContent ?? '');
+          },
+        },
+        value,
+      );
+    },
+  );
+  EmailEditor.displayName = 'MockEmailEditor';
+
+  return { EmailEditor };
+});
 
 const emailDocument = createDefaultEmailTemplate({
   editor: {
@@ -186,15 +309,16 @@ describe('EmailPersistedEditorView', () => {
 
     expect(await screen.findByTestId('email-metadata-bar')).toBeInTheDocument();
     expect(screen.getByRole('complementary', { name: 'Insert content' })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Content' })).toHaveAttribute('aria-pressed', 'true');
+    expect(screen.getByRole('button', { name: 'Style' })).toHaveAttribute('aria-pressed', 'true');
+    expect(screen.getByTestId('native-email-inspector-host')).toBeInTheDocument();
 
     const subject = await screen.findByLabelText('Subject');
     fireEvent.change(subject, {
       target: { value: 'Updated tickets for {{event.title}}' },
     });
-    fireEvent.change(screen.getByLabelText('Email body'), {
-      target: { value: 'Updated saved email for {{recipient.name}}.' },
-    });
+    const canvas = screen.getByRole('textbox', { name: 'Email editor canvas' });
+    canvas.textContent = 'Updated saved email for {{recipient.name}}.';
+    fireEvent.input(canvas);
     fireEvent.click(screen.getByRole('button', { name: 'Preview' }));
 
     await waitFor(() => {
@@ -207,6 +331,10 @@ describe('EmailPersistedEditorView', () => {
             settings: expect.objectContaining({
               subject: 'Updated tickets for {{event.title}}',
             }),
+            editor: expect.objectContaining({
+              contentJson: expect.objectContaining({ type: 'doc' }),
+              contentText: 'Updated saved email for {{recipient.name}}.',
+            }),
           }),
           renderedHtml: expect.stringContaining('Updated saved email for Ada Lovelace.'),
         }),
@@ -217,7 +345,6 @@ describe('EmailPersistedEditorView', () => {
       );
     });
 
-    fireEvent.click(screen.getByRole('button', { name: 'Open preview' }));
     expect(screen.getByTestId('preview-drawer')).toHaveTextContent('Updated saved email');
 
     fireEvent.click(screen.getByRole('button', { name: 'Publish' }));
@@ -297,8 +424,8 @@ describe('EmailPersistedEditorView', () => {
 
     expect(await screen.findByLabelText('Subject')).toBeDisabled();
     expect(screen.getByRole('button', { name: 'Open preview' })).toBeDisabled();
-    expect(screen.getByRole('button', { name: 'Publish unavailable' })).toBeDisabled();
-    expect(screen.getByRole('button', { name: 'Test send unavailable' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Publish' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Send test' })).toBeDisabled();
   });
 
   it('creates the event-scoped email document and initial canonical draft when none exists', async () => {
@@ -409,27 +536,21 @@ describe('EmailPersistedEditorView', () => {
     );
   });
 
-  it('adds directly editable QR and calendar blocks from the insert rail', async () => {
+  it('adds editor-authored images and reusable components from the insert rail', async () => {
     render(React.createElement(EmailPersistedEditorView, { eventId: 'evt_1' }));
 
-    await screen.findByLabelText('Email headline');
+    await screen.findByRole('textbox', { name: 'Email editor canvas' });
 
     fireEvent.click(screen.getByRole('button', { name: 'Insert Image' }));
-    fireEvent.change(screen.getByLabelText('QR code title'), {
-      target: { value: 'Your entry QR' },
-    });
-    fireEvent.change(screen.getByLabelText('QR image alt text'), {
-      target: { value: 'Personal ticket QR code' },
-    });
-
     fireEvent.click(screen.getByRole('button', { name: 'Insert Components' }));
-    fireEvent.change(screen.getByLabelText('Calendar button label'), {
-      target: { value: 'Save this date' },
-    });
-    fireEvent.change(screen.getByLabelText('Calendar URL'), {
-      target: { value: '{{event.publicUrl}}' },
-    });
-
+    expect(screen.getByRole('button', { name: 'Components' })).toHaveAttribute(
+      'aria-pressed',
+      'true',
+    );
+    fireEvent.click(screen.getByRole('button', { name: /QR code/ }));
+    fireEvent.click(screen.getByRole('button', { name: /Calendar button/ }));
+    fireEvent.click(screen.getByRole('button', { name: /Ticket summary/ }));
+    fireEvent.click(screen.getByRole('button', { name: 'Style' }));
     fireEvent.click(screen.getByRole('button', { name: 'Save draft' }));
 
     await waitFor(() => {
@@ -437,37 +558,50 @@ describe('EmailPersistedEditorView', () => {
         'cdoc_email',
         expect.objectContaining({
           contentJson: expect.objectContaining({
-            blocks: expect.arrayContaining([
-              expect.objectContaining({
-                type: 'qr_code',
-                title: 'Your entry QR',
-                imageUrl: '{{ticket.qrCodeUrl}}',
-                imageAlt: 'Personal ticket QR code',
-              }),
-              expect.objectContaining({
-                type: 'calendar_button',
-                label: 'Save this date',
-                url: '{{event.publicUrl}}',
-              }),
-            ]),
+            editor: expect.objectContaining({
+              contentText: expect.stringMatching(/Ticket QR code[\s\S]*Add to calendar/),
+              contentJson: expect.objectContaining({ type: 'doc' }),
+            }),
           }),
-          renderedHtml: expect.stringContaining('Save this date'),
+          renderedHtml: expect.stringMatching(/Add to calendar[\s\S]*General Admission/),
         }),
       );
     });
   });
 
+  it('reviews the current email export and blocks publish with local validation errors', async () => {
+    render(React.createElement(EmailPersistedEditorView, { eventId: 'evt_1' }));
+
+    const subject = await screen.findByLabelText('Subject');
+    fireEvent.change(subject, { target: { value: '' } });
+    const canvas = screen.getByRole('textbox', { name: 'Email editor canvas' });
+    canvas.textContent = '{{unknown.value}}';
+    fireEvent.input(canvas);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Issues' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Review current draft' }));
+
+    expect(await screen.findByText('missing_subject')).toBeInTheDocument();
+    expect(screen.getByText('unknown_variable')).toBeInTheDocument();
+    expect(screen.getByText('Current draft review')).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Publish' }));
+
+    expect(
+      await screen.findByText('Resolve email publish blockers before publishing.'),
+    ).toBeInTheDocument();
+    expect(adminApiMock.publishContentVersion).not.toHaveBeenCalled();
+  });
+
   it('inserts the selected variable token into the active email block', async () => {
     render(React.createElement(EmailPersistedEditorView, { eventId: 'evt_1' }));
 
-    const body = await screen.findByLabelText('Email body');
+    const canvas = await screen.findByRole('textbox', { name: 'Email editor canvas' });
     fireEvent.click(screen.getByRole('button', { name: 'Variables' }));
     fireEvent.click(screen.getByRole('button', { name: '{{brand.name}}' }));
 
-    expect((body as HTMLTextAreaElement).value).toContain('{{brand.name}}');
-    expect((body as HTMLTextAreaElement).value).not.toContain(
-      '{{recipient.name}} {{recipient.name}}',
-    );
+    expect(canvas).toHaveTextContent('{{brand.name}}');
+    expect(canvas.textContent).not.toContain('{{recipient.name}} {{recipient.name}}');
   });
 
   it('saves the latest email draft before duplicating the template', async () => {

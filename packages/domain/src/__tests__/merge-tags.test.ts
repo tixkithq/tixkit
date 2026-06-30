@@ -92,11 +92,32 @@ describe('renderMergeTags - email', () => {
     expect(out).toBe('Hi —!');
   });
 
+  it('escapes custom fallback values before inserting them into email output', () => {
+    const out = renderMergeTags(
+      'Missing {{event.venueCity}} and {{unknown.tag}}',
+      { event: {} },
+      {
+        channel: 'email',
+        fallback: '<script>alert("x")</script>',
+      },
+    );
+    expect(out).toBe(
+      'Missing &lt;script&gt;alert(&quot;x&quot;)&lt;/script&gt; and &lt;script&gt;alert(&quot;x&quot;)&lt;/script&gt;',
+    );
+  });
+
   it('resolves custom answers', () => {
-    const out = renderMergeTags('Shirt: {{customAnswers.tshirtSize}}', baseContext, {
-      channel: 'email',
-    });
-    expect(out).toBe('Shirt: M');
+    const out = renderMergeTags(
+      'Shirt: {{customAnswers.tshirtSize}}, ticket: {{customAnswers.ticket-size}}',
+      {
+        ...baseContext,
+        customAnswers: { tshirtSize: 'M', 'ticket-size': 'VIP' },
+      },
+      {
+        channel: 'email',
+      },
+    );
+    expect(out).toBe('Shirt: M, ticket: VIP');
   });
 
   it('resolves ticket QR code URLs for email image blocks', () => {
@@ -105,6 +126,26 @@ describe('renderMergeTags - email', () => {
       escape: 'plain',
     });
     expect(out).toBe('QR: https://tickets.example.test/qr/TKT-ABC123.png');
+  });
+
+  it('falls back for unsafe URL-valued tags before email rendering', () => {
+    const out = renderMergeTags(
+      [
+        '<a href="{{event.publicUrl}}">event</a>',
+        '<a href="{{brand.supportUrl}}">support</a>',
+        '<img src="{{ticket.qrCodeUrl}}">',
+      ].join(' '),
+      {
+        event: { publicUrl: 'javascript:alert(1)' },
+        brand: { supportUrl: 'vbscript:msgbox(1)' },
+        ticket: { qrCodeUrl: 'data:text/html,<script>alert(1)</script>' },
+      },
+      {
+        channel: 'email',
+        fallback: '#',
+      },
+    );
+    expect(out).toBe('<a href="#">event</a> <a href="#">support</a> <img src="#">');
   });
 
   it('renders attendee check-in status', () => {
@@ -183,11 +224,15 @@ describe('validateMergeTags', () => {
   it('reports missing required tags', () => {
     const result = validateMergeTags('Welcome to {{event.title}}');
     expect(result.missingRequired).toEqual(['recipient.name']);
+    expect(result.valid).toBe(false);
   });
 
   it('accepts custom answers as known', () => {
-    const result = validateMergeTags('{{customAnswers.shirt}} {{recipient.name}}');
+    const result = validateMergeTags(
+      '{{customAnswers.shirt}} {{customAnswers.ticket-size}} {{recipient.name}}',
+    );
     expect(result.unknownTags).toEqual([]);
+    expect(result.valid).toBe(true);
   });
 });
 
@@ -357,9 +402,17 @@ describe('merge-tag fuzz/property tests', () => {
   });
 
   it('listTemplateTags extracts only the inner tag names', () => {
-    expect(listTemplateTags('Hi {{recipient.name}} {{event.title}} {{recipient.name}}')).toEqual([
-      'recipient.name',
-      'event.title',
-    ]);
+    expect(
+      listTemplateTags(
+        'Hi {{recipient.name}} {{event.title}} {{customAnswers.ticket-size}} {{recipient.name}}',
+      ),
+    ).toEqual(['recipient.name', 'event.title', 'customAnswers.ticket-size']);
+  });
+
+  it('does not treat top-level hyphenated brace text as merge tags', () => {
+    expect(listTemplateTags('Literal {{promo-code}} text')).toEqual([]);
+    expect(renderMergeTags('Literal {{promo-code}} text', baseContext, { channel: 'email' })).toBe(
+      'Literal {{promo-code}} text',
+    );
   });
 });

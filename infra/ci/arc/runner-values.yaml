@@ -27,7 +27,7 @@ template:
     runtimeClassName: kata
     restartPolicy: Never
     nodeSelector:
-      node-role.kubernetes.io/ci: "true"
+      node-role.kubernetes.io/ci: 'true'
     tolerations:
       - key: dedicated
         operator: Equal
@@ -54,7 +54,7 @@ template:
 listenerTemplate:
   spec:
     nodeSelector:
-      node-role.kubernetes.io/ci: "true"
+      node-role.kubernetes.io/ci: 'true'
     tolerations:
       - key: dedicated
         operator: Equal

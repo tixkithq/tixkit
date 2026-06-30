@@ -1,5 +1,9 @@
 @import 'tailwindcss';
 @import 'tw-animate-css';
+@import '@react-email/editor/themes/default.css';
+@import '@react-email/editor/styles/bubble-menu.css';
+@import '@react-email/editor/styles/slash-command.css';
+@import '@react-email/editor/styles/inspector.css';
 
 @source "../../../../packages/content-editor-shell/src";
 
@@ -146,6 +150,112 @@
     textarea {
       font-size: 16px !important;
     }
+  }
+}
+
+@layer components {
+  .tixkit-react-email-editor {
+    min-height: 42rem;
+    width: 100%;
+    color: #050505;
+  }
+
+  .tixkit-react-email-editor .tiptap,
+  .tixkit-react-email-editor .ProseMirror {
+    min-height: 42rem;
+    width: 100%;
+    outline: none;
+  }
+
+  .tixkit-react-email-editor .ProseMirror > * + * {
+    margin-top: 1rem;
+  }
+
+  .tixkit-react-email-editor .ProseMirror h1 {
+    margin: 0 0 1.5rem;
+    font-size: 2rem;
+    font-weight: 700;
+    line-height: 1.1;
+    letter-spacing: 0;
+  }
+
+  .tixkit-react-email-editor .ProseMirror h2 {
+    margin: 1.5rem 0 0.75rem;
+    font-size: 1.35rem;
+    font-weight: 650;
+    line-height: 1.2;
+    letter-spacing: 0;
+  }
+
+  .tixkit-react-email-editor .ProseMirror p {
+    margin: 0;
+    color: rgb(24 24 27 / 78%);
+    font-size: 0.95rem;
+    line-height: 1.65;
+  }
+
+  .tixkit-react-email-editor .ProseMirror a {
+    color: #0f172a;
+    font-weight: 600;
+    text-decoration: underline;
+    text-underline-offset: 3px;
+  }
+
+  .tixkit-react-email-editor .ProseMirror img {
+    display: block;
+    max-width: 100%;
+    border-radius: 0.5rem;
+  }
+
+  .tixkit-react-email-editor .ProseMirror p.is-editor-empty:first-child::before {
+    color: rgb(24 24 27 / 35%);
+    content: attr(data-placeholder);
+    float: left;
+    height: 0;
+    pointer-events: none;
+  }
+
+  .tixkit-email-native-inspector {
+    display: grid;
+    gap: 1.25rem;
+    color: rgb(255 255 255 / 82%);
+  }
+
+  .tixkit-email-native-inspector input,
+  .tixkit-email-native-inspector select,
+  .tixkit-email-native-inspector textarea,
+  .tixkit-email-native-inspector button {
+    letter-spacing: 0;
+  }
+
+  .tixkit-email-native-inspector input,
+  .tixkit-email-native-inspector textarea {
+    color: rgb(255 255 255 / 88%);
+  }
+
+  .tixkit-email-native-inspector button {
+    color: inherit;
+  }
+
+  .tixkit-event-page-builder,
+  .tixkit-event-page-builder .ProseMirror {
+    min-height: 46rem;
+    width: 100%;
+    outline: none;
+  }
+
+  .tixkit-event-page-builder .ProseMirror {
+    display: grid;
+    gap: 1rem;
+  }
+
+  .tixkit-event-page-builder .ProseMirror-selectednode {
+    outline: none;
+  }
+
+  .tixkit-event-page-builder input,
+  .tixkit-event-page-builder textarea {
+    letter-spacing: 0;
   }
 }
 

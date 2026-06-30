@@ -947,6 +947,7 @@ export const checkoutRoutes: FastifyPluginAsync = async (app) => {
           const sessionRepo = new CheckoutSessionRepository(db);
           let sessionCreated = false;
           let shouldCompensate = true;
+          let workflowStarted = false;
           try {
             const reservation = await inventoryService.reserveCart({
               items: reservationItems,
@@ -987,6 +988,7 @@ export const checkoutRoutes: FastifyPluginAsync = async (app) => {
               operatorId: principal.id,
               tenderType: body.tenderType,
             });
+            workflowStarted = true;
             const workflowResult = await handle.result();
             if (workflowResult.status !== 'completed' || !workflowResult.orderId) {
               await compensateCheckoutSessionCreation({
@@ -1019,7 +1021,7 @@ export const checkoutRoutes: FastifyPluginAsync = async (app) => {
               },
             };
           } catch (error) {
-            if (shouldCompensate) {
+            if (shouldCompensate && !workflowStarted) {
               await compensateCheckoutSessionCreation({
                 db,
                 releaseHoldsForSession: (id) => inventoryService.releaseHoldsForSession(id),

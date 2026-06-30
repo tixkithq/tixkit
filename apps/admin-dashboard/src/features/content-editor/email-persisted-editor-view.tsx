@@ -1,26 +1,47 @@
 'use client';
 
 import * as React from 'react';
-import { Eye, Save, Send } from 'lucide-react';
+import { createPortal } from 'react-dom';
+import {
+  Archive,
+  CalendarDays,
+  ChevronLeft,
+  Code,
+  Columns2,
+  Copy,
+  Eye,
+  FileJson,
+  Image,
+  Link,
+  MapPin,
+  Minus,
+  MoreHorizontal,
+  Palette,
+  PanelRightClose,
+  QrCode,
+  ReceiptText,
+  Save,
+  Send,
+  Share2,
+  Sparkles,
+  Ticket,
+  Type,
+  Variable,
+} from 'lucide-react';
+import { EmailEditor, type EmailEditorProps, type EmailEditorRef } from '@react-email/editor';
+import { Inspector } from '@react-email/editor/ui';
 import { toast } from 'sonner';
 import {
   REACT_EMAIL_EDITOR_PACKAGE,
   createDefaultEmailTemplate,
   normalizeEmailTemplateDocument,
   renderEmailTemplate,
+  validateEditorExport,
+  validateEmailTemplate,
   type EmailTemplateDocument,
   type RenderedEmailTemplate,
 } from '@tixkit/content-email';
-import {
-  ContentEditorShell,
-  type ContentEditorAutosaveState,
-  type ContentEditorCanvasBlock,
-  type ContentEditorInspectorPanel,
-  type ContentEditorInsertAction,
-  type ContentEditorPreview,
-  type ContentEditorVersionSummary,
-} from '@tixkit/content-editor-shell';
-import type { ContentDocument, ContentDocumentVersion } from '@tixkit/content-core';
+import type { ContentValidationIssue } from '@tixkit/content-core';
 import {
   adminApi,
   type AdminContentDocument,
@@ -29,63 +50,165 @@ import {
   type AdminEventDetail,
 } from '@/lib/api';
 
-const emailInsertActions: ContentEditorInsertAction[] = [
-  { id: 'text', label: 'Text', icon: 'text' },
-  { id: 'image', label: 'Image', icon: 'image' },
-  { id: 'components', label: 'Components', icon: 'ticket' },
-  { id: 'variables', label: 'Variables', icon: 'variable' },
+type AutosaveState = 'idle' | 'saving' | 'saved' | 'error';
+type EmailReviewState = 'idle' | 'checking' | 'checked' | 'error';
+
+type EditorPreview = {
+  label: string;
+  output: string;
+  format: 'html' | 'text';
+};
+
+type InsertAction = {
+  id: 'text' | 'image' | 'components' | 'variables';
+  label: string;
+  icon: React.ReactNode;
+};
+
+type EmailComponentInsert = {
+  id:
+    | 'button'
+    | 'divider'
+    | 'section-columns'
+    | 'event-hero'
+    | 'ticket-summary'
+    | 'order-summary'
+    | 'qr-code'
+    | 'calendar'
+    | 'venue'
+    | 'social-links'
+    | 'footer'
+    | 'raw-html';
+  label: string;
+  description: string;
+  icon: React.ReactNode;
+  html: string;
+};
+
+const emailInsertActions: InsertAction[] = [
+  { id: 'text', label: 'Text', icon: <Type className="size-4" /> },
+  { id: 'image', label: 'Image', icon: <Image className="size-4" /> },
+  { id: 'components', label: 'Components', icon: <Sparkles className="size-4" /> },
+  { id: 'variables', label: 'Variables', icon: <Variable className="size-4" /> },
 ];
 
-const inputClassName = 'w-full rounded-md border bg-background px-3 py-2 text-sm shadow-sm';
-const compactInputClassName =
-  'w-full rounded-md border bg-background px-2.5 py-1.5 text-sm shadow-sm';
-const actionButtonClassName =
-  'inline-flex items-center gap-2 rounded-md border bg-background px-3 py-2 text-sm font-medium shadow-sm hover:bg-accent disabled:cursor-not-allowed disabled:opacity-50';
+const emailComponentInserts: EmailComponentInsert[] = [
+  {
+    id: 'event-hero',
+    label: 'Event hero',
+    description: 'Headline, attendee greeting, and primary ticket CTA.',
+    icon: <Sparkles className="size-4" />,
+    html: [
+      '<h1>{{event.title}}</h1>',
+      '<p>Hi {{recipient.name}}, your tickets are ready.</p>',
+      '<p><a href="{{event.checkoutUrl}}">View tickets</a></p>',
+    ].join(''),
+  },
+  {
+    id: 'section-columns',
+    label: 'Section / columns',
+    description: 'Two-column email section for schedule and venue details.',
+    icon: <Columns2 className="size-4" />,
+    html: [
+      '<table role="presentation" width="100%">',
+      '<tr>',
+      '<td width="50%"><p>{{event.startsAt}}</p></td>',
+      '<td width="50%"><p>{{event.venueName}}</p></td>',
+      '</tr>',
+      '</table>',
+    ].join(''),
+  },
+  {
+    id: 'ticket-summary',
+    label: 'Ticket summary',
+    description: 'Ticket type and order total for transactional mail.',
+    icon: <Ticket className="size-4" />,
+    html: '<p><strong>{{ticket.type}}</strong><br />{{order.total}}</p>',
+  },
+  {
+    id: 'order-summary',
+    label: 'Order summary',
+    description: 'Compact order ID and payment total block.',
+    icon: <ReceiptText className="size-4" />,
+    html: '<p>Order {{order.id}}<br />Total {{order.total}}</p>',
+  },
+  {
+    id: 'qr-code',
+    label: 'QR code',
+    description: 'Ticket QR image with safe merge-tag URL.',
+    icon: <QrCode className="size-4" />,
+    html: '<p><img src="{{ticket.qrCodeUrl}}" alt="Ticket QR code" /></p>',
+  },
+  {
+    id: 'calendar',
+    label: 'Calendar button',
+    description: 'Link attendees to the public event page.',
+    icon: <CalendarDays className="size-4" />,
+    html: '<p><a href="{{event.publicUrl}}">Add to calendar</a></p>',
+  },
+  {
+    id: 'venue',
+    label: 'Venue block',
+    description: 'Date, time, and venue merge tags.',
+    icon: <MapPin className="size-4" />,
+    html: '<p>{{event.startsAt}}<br />{{event.venueName}}</p>',
+  },
+  {
+    id: 'button',
+    label: 'Button',
+    description: 'Provider-safe link styled by the email renderer.',
+    icon: <Link className="size-4" />,
+    html: '<p><a href="{{event.checkoutUrl}}">Buy tickets</a></p>',
+  },
+  {
+    id: 'divider',
+    label: 'Divider',
+    description: 'Horizontal separator between content sections.',
+    icon: <Minus className="size-4" />,
+    html: '<hr />',
+  },
+  {
+    id: 'social-links',
+    label: 'Social links',
+    description: 'Reusable brand and support links.',
+    icon: <Share2 className="size-4" />,
+    html: '<p><a href="{{event.publicUrl}}">Event page</a> - <a href="{{brand.supportUrl}}">Support</a></p>',
+  },
+  {
+    id: 'footer',
+    label: 'Footer',
+    description: 'Brand footer for transactional context.',
+    icon: <PanelRightClose className="size-4" />,
+    html: '<p>You are receiving this because you purchased or manage tickets with {{brand.name}}.</p>',
+  },
+  {
+    id: 'raw-html',
+    label: 'Raw HTML',
+    description: 'Validated HTML handoff for advanced imports.',
+    icon: <Code className="size-4" />,
+    html: '<p data-tixkit-raw-html="true">Paste reviewed HTML here.</p>',
+  },
+];
 
-function EditablePlainText({
-  className,
-  disabled,
-  label,
-  multiline = false,
-  onChange,
-  onFocus,
-  value,
-}: {
-  className: string;
-  disabled: boolean;
-  label: string;
-  multiline?: boolean;
-  onChange: (value: string) => void;
-  onFocus?: () => void;
-  value: string;
-}) {
-  const controlClassName = `${className} w-full rounded-sm border-0 bg-transparent p-0 shadow-none outline-none transition placeholder:text-muted-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background disabled:cursor-not-allowed disabled:opacity-70`;
+const emailVariableInserts = [
+  'event.title',
+  'event.startsAt',
+  'event.venueName',
+  'event.checkoutUrl',
+  'event.publicUrl',
+  'recipient.name',
+  'ticket.type',
+  'ticket.qrCodeUrl',
+  'order.id',
+  'order.total',
+  'brand.name',
+  'brand.supportUrl',
+];
 
-  if (multiline) {
-    return (
-      <textarea
-        aria-label={label}
-        className={`${controlClassName} resize-none overflow-hidden`}
-        disabled={disabled}
-        onChange={(event) => onChange(event.currentTarget.value)}
-        onFocus={onFocus}
-        rows={3}
-        value={value}
-      />
-    );
-  }
-
-  return (
-    <input
-      aria-label={label}
-      className={controlClassName}
-      disabled={disabled}
-      onChange={(event) => onChange(event.currentTarget.value)}
-      onFocus={onFocus}
-      value={value}
-    />
-  );
-}
+const textInputClassName =
+  'h-9 w-full border-0 border-b border-black/10 bg-transparent px-0 text-sm text-black outline-none transition placeholder:text-black/35 focus:border-black';
+const darkInputClassName =
+  'h-9 w-full rounded-md border border-white/10 bg-white/5 px-3 text-sm text-white outline-none transition placeholder:text-white/35 focus:border-white/35 disabled:cursor-not-allowed disabled:opacity-50';
 
 function listItemsFromResponse<T>(value: unknown): T[] {
   if (Array.isArray(value)) return value as T[];
@@ -102,6 +225,7 @@ function sampleContext(event: AdminEventDetail): Record<string, unknown> {
     event: {
       title: event.title,
       startsAt: event.startsAt,
+      venueName: 'Radius Chicago',
       checkoutUrl: `https://checkout.example.test/checkout?eventId=${event.id}`,
       publicUrl: `https://events.example.test/e/${event.id}`,
     },
@@ -118,6 +242,7 @@ function sampleContext(event: AdminEventDetail): Record<string, unknown> {
       qrCodeUrl: 'https://tickets.example.test/qr/preview.png',
     },
     order: {
+      id: 'ord_preview_123',
       total: '$35.00',
     },
   };
@@ -127,7 +252,18 @@ function defaultEmailDocument(event?: AdminEventDetail): EmailTemplateDocument {
   return createDefaultEmailTemplate({
     editor: {
       provider: REACT_EMAIL_EDITOR_PACKAGE,
-      contentHtml: '<h1>{{event.title}}</h1><p>Hi {{recipient.name}}, your tickets are ready.</p>',
+      contentHtml: [
+        '<h1>{{event.title}}</h1>',
+        '<p>Hi {{recipient.name}}, your tickets are ready.</p>',
+        '<p>{{ticket.type}} - {{order.total}}</p>',
+        '<p>You are receiving this because you purchased or manage tickets with {{brand.name}}.</p>',
+      ].join(''),
+      contentText: [
+        '{{event.title}}',
+        'Hi {{recipient.name}}, your tickets are ready.',
+        '{{ticket.type}} - {{order.total}}',
+        'You are receiving this because you purchased or manage tickets with {{brand.name}}.',
+      ].join('\n\n'),
     },
     settings: {
       templateKey: 'order-confirmed',
@@ -168,7 +304,7 @@ function defaultEmailDocument(event?: AdminEventDetail): EmailTemplateDocument {
 async function previewFromRendered(
   document: EmailTemplateDocument,
   event: AdminEventDetail,
-): Promise<ContentEditorPreview> {
+): Promise<EditorPreview> {
   const rendered = await renderEmailTemplate(document, sampleContext(event));
   return previewFromEmailOutput('React Email preview', rendered);
 }
@@ -176,7 +312,7 @@ async function previewFromRendered(
 function previewFromEmailOutput(
   label: string,
   output: Pick<RenderedEmailTemplate, 'subject' | 'html' | 'text'> | AdminContentRenderOutput,
-): ContentEditorPreview {
+): EditorPreview {
   const text = output.text?.trim();
   const html = output.html?.trim();
   return {
@@ -186,150 +322,7 @@ function previewFromEmailOutput(
   };
 }
 
-function updateEmailBlock(
-  document: EmailTemplateDocument,
-  blockIndex: number,
-  update: EmailTemplateDocument['blocks'][number],
-): EmailTemplateDocument {
-  return syncEmailEditorHtml({
-    ...document,
-    blocks: document.blocks.map((block, index) => (index === blockIndex ? update : block)),
-  });
-}
-
-function appendToken(value: string | undefined, token: string): string {
-  const current = value?.trim() ?? '';
-  if (!current) return token;
-  if (current.includes(token)) return current;
-  return `${current} ${token}`;
-}
-
-function appendVariableToBlock(
-  block: EmailTemplateDocument['blocks'][number],
-  token: string,
-): EmailTemplateDocument['blocks'][number] {
-  switch (block.type) {
-    case 'event_hero':
-      return { ...block, body: appendToken(block.body, token) };
-    case 'ticket_summary':
-      return { ...block, body: appendToken(block.body, token) };
-    case 'unsubscribe_footer':
-      return { ...block, body: appendToken(block.body, token) };
-    case 'order_summary': {
-      if (block.rows.length === 0) {
-        return { ...block, rows: [{ label: 'Note', value: token }] };
-      }
-      return {
-        ...block,
-        rows: block.rows.map((row, index) =>
-          index === block.rows.length - 1 ? { ...row, value: appendToken(row.value, token) } : row,
-        ),
-      };
-    }
-    case 'qr_code':
-      return { ...block, title: appendToken(block.title, token) };
-    case 'calendar_button':
-      return { ...block, label: appendToken(block.label, token) };
-    case 'venue_block':
-      return { ...block, address: appendToken(block.address, token) };
-    case 'social_links':
-      if (block.links.length === 0) {
-        return { ...block, links: [{ label: token, url: '{{brand.supportUrl}}' }] };
-      }
-      return {
-        ...block,
-        links: block.links.map((link, index) =>
-          index === block.links.length - 1
-            ? { ...link, label: appendToken(link.label, token) }
-            : link,
-        ),
-      };
-    case 'raw_html':
-      return { ...block, html: appendToken(block.html, token) };
-  }
-}
-
-function syncEmailEditorHtml(document: EmailTemplateDocument): EmailTemplateDocument {
-  const hero = document.blocks.find((block) => block.type === 'event_hero');
-  const ticketSummary = document.blocks.find((block) => block.type === 'ticket_summary');
-  const footer = document.blocks.find((block) => block.type === 'unsubscribe_footer');
-  const headline = hero?.type === 'event_hero' ? hero.headline : '{{event.title}}';
-  const heroBody = hero?.type === 'event_hero' ? (hero.body ?? '') : '';
-  const ticketBody = ticketSummary?.type === 'ticket_summary' ? ticketSummary.body : '';
-  const footerBody = footer?.type === 'unsubscribe_footer' ? footer.body : '';
-
-  return {
-    ...document,
-    editor: {
-      ...document.editor,
-      contentHtml: [
-        `<h1>${escapeHtml(headline)}</h1>`,
-        heroBody ? `<p>${escapeHtml(heroBody)}</p>` : '',
-        ticketBody ? `<p>${escapeHtml(ticketBody)}</p>` : '',
-        footerBody ? `<p>${escapeHtml(footerBody)}</p>` : '',
-      ]
-        .filter(Boolean)
-        .join(''),
-    },
-  };
-}
-
-function escapeHtml(value: string): string {
-  return value
-    .replaceAll('&', '&amp;')
-    .replaceAll('<', '&lt;')
-    .replaceAll('>', '&gt;')
-    .replaceAll('"', '&quot;')
-    .replaceAll("'", '&#39;');
-}
-
-function blockLabel(block: EmailTemplateDocument['blocks'][number]): string {
-  switch (block.type) {
-    case 'event_hero':
-      return 'Email body';
-    case 'ticket_summary':
-      return 'Ticket summary';
-    case 'unsubscribe_footer':
-      return 'Footer';
-    case 'order_summary':
-      return 'Order summary';
-    case 'qr_code':
-      return 'QR code';
-    case 'calendar_button':
-      return 'Calendar button';
-    case 'venue_block':
-      return 'Venue';
-    case 'social_links':
-      return 'Social links';
-    case 'raw_html':
-      return 'Raw HTML';
-  }
-}
-
-function blockSummary(block: EmailTemplateDocument['blocks'][number]): string {
-  switch (block.type) {
-    case 'event_hero':
-      return block.body ? `${block.headline} - ${block.body}` : block.headline;
-    case 'ticket_summary':
-      return block.body ? `${block.title} - ${block.body}` : block.title;
-    case 'unsubscribe_footer':
-      return block.body;
-    case 'order_summary':
-      return `${block.rows.length} rows`;
-    case 'qr_code':
-      return block.title;
-    case 'calendar_button':
-      return block.label;
-    case 'venue_block':
-      return block.address ? `${block.title} - ${block.address}` : block.title;
-    case 'social_links':
-      return `${block.links.length} links`;
-    case 'raw_html':
-      return block.safe ? 'Reviewed HTML' : 'Blocked until reviewed';
-  }
-}
-
-function versionSummaries(versions: AdminContentDocumentVersion[]): ContentEditorVersionSummary[] {
+function versionSummaries(versions: AdminContentDocumentVersion[]) {
   return versions.map((version) => ({
     id: version.id,
     label: `${version.status === 'published' ? 'Published' : 'Draft'} v${version.versionNumber}`,
@@ -355,14 +348,6 @@ function latestDraft(versions: AdminContentDocumentVersion[], document: AdminCon
   );
 }
 
-function toShellDocument(document: AdminContentDocument): ContentDocument {
-  return document as ContentDocument;
-}
-
-function toShellVersion(version: AdminContentDocumentVersion): ContentDocumentVersion {
-  return version as ContentDocumentVersion;
-}
-
 function resultMessage(error: { message?: string } | undefined, defaultMessage: string) {
   return error?.message ?? defaultMessage;
 }
@@ -372,8 +357,176 @@ function duplicateDocumentName(name: string): string {
   return name.endsWith(suffix) ? name : `${name.slice(0, 160 - suffix.length)}${suffix}`;
 }
 
-function unreachableEmailBlock(block: never): never {
-  throw new Error(`Unhandled email template block: ${JSON.stringify(block)}`);
+function autosaveLabel(state: AutosaveState): string {
+  switch (state) {
+    case 'saving':
+      return 'Saving';
+    case 'saved':
+      return 'Saved';
+    case 'error':
+      return 'Save failed';
+    case 'idle':
+      return 'Ready';
+  }
+}
+
+function autosaveClassName(state: AutosaveState): string {
+  switch (state) {
+    case 'saving':
+      return 'border-amber-400/40 bg-amber-400/10 text-amber-100';
+    case 'saved':
+      return 'border-emerald-400/40 bg-emerald-400/10 text-emerald-100';
+    case 'error':
+      return 'border-red-400/40 bg-red-400/10 text-red-100';
+    case 'idle':
+      return 'border-cyan-400/40 bg-cyan-400/10 text-cyan-100';
+  }
+}
+
+function validationIssueKey(issue: ContentValidationIssue): string {
+  return `${issue.code}:${issue.field ?? ''}:${issue.message}:${issue.severity}`;
+}
+
+function mergeValidationIssues(issues: ContentValidationIssue[]): ContentValidationIssue[] {
+  const seen = new Set<string>();
+  const uniqueIssues: ContentValidationIssue[] = [];
+  const errors: ContentValidationIssue[] = [];
+  const warnings: ContentValidationIssue[] = [];
+  for (const issue of issues) {
+    const key = validationIssueKey(issue);
+    if (seen.has(key)) continue;
+    seen.add(key);
+    uniqueIssues.push(issue);
+  }
+  for (const issue of uniqueIssues) {
+    if (issue.severity === 'error') {
+      errors.push(issue);
+    } else {
+      warnings.push(issue);
+    }
+  }
+  return [...errors, ...warnings];
+}
+
+function hasBlockingIssues(issues: ContentValidationIssue[]): boolean {
+  return issues.some((issue) => issue.severity === 'error');
+}
+
+function issueBadgeClassName(issue: ContentValidationIssue): string {
+  return issue.severity === 'error'
+    ? 'border-red-400/40 bg-red-400/10 text-red-100'
+    : 'border-amber-400/40 bg-amber-400/10 text-amber-100';
+}
+
+function NativeEmailInspector({ host }: { host: HTMLElement | null }) {
+  if (!host) return null;
+  return createPortal(
+    <Inspector.Root
+      aria-label="React Email style inspector"
+      className="tixkit-email-native-inspector"
+    >
+      <div className="space-y-1 border-b border-white/10 pb-3">
+        <p className="text-xs uppercase tracking-wide text-white/40">Selection</p>
+        <div className="text-sm font-semibold text-white">
+          <Inspector.Breadcrumb />
+        </div>
+      </div>
+      <div className="space-y-5">
+        <Inspector.Document />
+        <Inspector.Node />
+        <Inspector.Text />
+      </div>
+    </Inspector.Root>,
+    host,
+  );
+}
+
+function initialEditorContent(document: EmailTemplateDocument): EmailEditorProps['content'] {
+  return (document.editor.contentJson ??
+    document.editor.contentHtml) as EmailEditorProps['content'];
+}
+
+function withEditorExport(
+  document: EmailTemplateDocument,
+  exported: { html: string; text: string; json: Record<string, unknown> },
+): EmailTemplateDocument {
+  const contentText = exported.text.trim() || plainTextFromHtml(exported.html);
+  return {
+    ...document,
+    editor: {
+      ...document.editor,
+      contentHtml: exported.html,
+      contentText,
+      contentJson: exported.json,
+    },
+    blocks: projectEditorTextToLegacyBlocks(document.blocks, contentText),
+  };
+}
+
+function projectEditorTextToLegacyBlocks(
+  blocks: EmailTemplateDocument['blocks'],
+  contentText: string,
+): EmailTemplateDocument['blocks'] {
+  if (!contentText.trim()) return blocks;
+  const firstTextBlock = blocks.findIndex(
+    (block) => block.type === 'event_hero' || block.type === 'ticket_summary',
+  );
+  if (firstTextBlock < 0) return blocks;
+  return blocks.map((block, index) => {
+    if (index !== firstTextBlock) return block;
+    if (block.type === 'event_hero') {
+      return { ...block, body: contentText };
+    }
+    if (block.type === 'ticket_summary') {
+      return { ...block, body: contentText };
+    }
+    return block;
+  });
+}
+
+function plainTextFromHtml(html: string): string {
+  return html
+    .replace(/<style\b[\s\S]*?<\/style>/gi, ' ')
+    .replace(/<script\b[\s\S]*?<\/script>/gi, ' ')
+    .replace(/<br\s*\/?>/gi, '\n')
+    .replace(/<\/(?:p|div|section|article|h[1-6]|li|tr)>/gi, '\n')
+    .replace(/<[^>]*>/g, ' ')
+    .replace(/&nbsp;/gi, ' ')
+    .replace(/&amp;/gi, '&')
+    .replace(/&lt;/gi, '<')
+    .replace(/&gt;/gi, '>')
+    .replace(/&quot;/gi, '"')
+    .replace(/&#39;/g, "'")
+    .replace(/\n{3,}/g, '\n\n')
+    .replace(/[ \t]{2,}/g, ' ')
+    .trim();
+}
+
+function PreviewDrawer({ onClose, preview }: { onClose: () => void; preview: EditorPreview }) {
+  return (
+    <aside
+      className="fixed inset-y-0 right-0 z-50 flex w-full max-w-xl flex-col border-l border-white/10 bg-neutral-950 text-white shadow-2xl"
+      data-testid="preview-drawer"
+    >
+      <div className="flex h-14 items-center justify-between border-b border-white/10 px-4">
+        <div>
+          <p className="text-xs uppercase tracking-wide text-white/45">{preview.format}</p>
+          <h2 className="text-sm font-semibold">{preview.label}</h2>
+        </div>
+        <button
+          aria-label="Close preview"
+          className="inline-flex size-8 items-center justify-center rounded-md border border-white/10 text-white/70 hover:bg-white/10 hover:text-white"
+          onClick={onClose}
+          type="button"
+        >
+          <PanelRightClose className="size-4" />
+        </button>
+      </div>
+      <pre className="min-h-0 flex-1 overflow-auto whitespace-pre-wrap p-4 text-sm leading-6 text-white/80">
+        {preview.output}
+      </pre>
+    </aside>
+  );
 }
 
 export function EmailPersistedEditorView({ eventId }: { eventId: string }) {
@@ -382,16 +535,22 @@ export function EmailPersistedEditorView({ eventId }: { eventId: string }) {
   const [draft, setDraft] = React.useState<AdminContentDocumentVersion>();
   const [versions, setVersions] = React.useState<AdminContentDocumentVersion[]>([]);
   const [emailDocument, setEmailDocument] = React.useState<EmailTemplateDocument>();
-  const [selectedBlockId, setSelectedBlockId] = React.useState('email-block-0');
-  const [inspectorPanelId, setInspectorPanelId] = React.useState('block');
+  const [inspectorPanelId, setInspectorPanelId] = React.useState<
+    'style' | 'components' | 'variables' | 'history' | 'issues' | 'json'
+  >('style');
+  const [reviewIssues, setReviewIssues] = React.useState<ContentValidationIssue[]>([]);
+  const [reviewState, setReviewState] = React.useState<EmailReviewState>('idle');
+  const [nativeInspectorHost, setNativeInspectorHost] = React.useState<HTMLElement | null>(null);
   const [recipient, setRecipient] = React.useState('ada@example.test');
-  const [preview, setPreview] = React.useState<ContentEditorPreview>();
-  const [autosave, setAutosave] = React.useState<ContentEditorAutosaveState>('idle');
+  const [preview, setPreview] = React.useState<EditorPreview>();
+  const [previewOpen, setPreviewOpen] = React.useState(false);
+  const [autosave, setAutosave] = React.useState<AutosaveState>('idle');
   const [loading, setLoading] = React.useState(true);
   const [error, setError] = React.useState<string>();
   const [actionError, setActionError] = React.useState<string>();
   const [notice, setNotice] = React.useState<string>();
   const operationIdRef = React.useRef(0);
+  const emailEditorRef = React.useRef<EmailEditorRef | null>(null);
 
   function nextOperationId() {
     operationIdRef.current += 1;
@@ -405,6 +564,7 @@ export function EmailPersistedEditorView({ eventId }: { eventId: string }) {
   function markDraftDirty() {
     nextOperationId();
     setAutosave('idle');
+    setReviewState('idle');
     setActionError(undefined);
     setNotice(undefined);
   }
@@ -502,6 +662,8 @@ export function EmailPersistedEditorView({ eventId }: { eventId: string }) {
     setVersions(loadedVersions);
     setEmailDocument(normalized);
     setPreview(await previewFromRendered(normalized, loadedEvent));
+    setReviewIssues(validateEmailTemplate(normalized, { provider: 'resend' }).issues);
+    setReviewState('checked');
     setAutosave('saved');
     setLoading(false);
   }, [eventId]);
@@ -511,6 +673,7 @@ export function EmailPersistedEditorView({ eventId }: { eventId: string }) {
   }, [load]);
 
   const isArchived = document?.status === 'archived';
+  const canEdit = !isArchived;
 
   function updateEmailDocument(nextDocument: EmailTemplateDocument) {
     if (isArchived) return;
@@ -518,90 +681,109 @@ export function EmailPersistedEditorView({ eventId }: { eventId: string }) {
     markDraftDirty();
   }
 
-  function selectBlock(blockId: string) {
-    setSelectedBlockId(blockId);
-    setInspectorPanelId('block');
+  async function snapshotFromEditor(
+    snapshot = emailDocument,
+  ): Promise<EmailTemplateDocument | undefined> {
+    if (!snapshot) return undefined;
+    const ref = emailEditorRef.current;
+    if (!ref) return snapshot;
+    const exported = await ref.getEmail();
+    return withEditorExport(snapshot, {
+      html: exported.html,
+      text: exported.text,
+      json: ref.getJSON() as Record<string, unknown>,
+    });
+  }
+
+  function insertEditorContent(content: string) {
+    if (isArchived) return;
+    const editor = emailEditorRef.current?.editor;
+    if (!editor) return;
+    editor.chain().focus().insertContent(content).run();
+    markDraftDirty();
   }
 
   function insertEmailVariable(variableKey: string) {
-    if (!emailDocument || isArchived) return;
-    const token = `{{${variableKey}}}`;
-    const selectedIndex = emailDocument.blocks.findIndex(
-      (_block, index) => `email-block-${index}` === selectedBlockId,
-    );
-    const heroIndex = emailDocument.blocks.findIndex((block) => block.type === 'event_hero');
-    const targetIndex = selectedIndex >= 0 ? selectedIndex : heroIndex;
-    if (targetIndex < 0) return;
-    updateEmailDocument({
-      ...emailDocument,
-      blocks: emailDocument.blocks.map((block, index) =>
-        index === targetIndex ? appendVariableToBlock(block, token) : block,
-      ),
-    });
-    setSelectedBlockId(`email-block-${targetIndex}`);
+    insertEditorContent(`{{${variableKey}}}`);
   }
 
-  function insertEmailAction(actionId: string) {
-    if (!emailDocument || isArchived) return;
+  function insertEmailComponent(componentId: EmailComponentInsert['id']) {
+    const component = emailComponentInserts.find((item) => item.id === componentId);
+    if (!component) return;
+    insertEditorContent(component.html);
+  }
+
+  function insertEmailAction(actionId: InsertAction['id']) {
     if (actionId === 'variables') {
-      insertEmailVariable('recipient.name');
+      setInspectorPanelId('variables');
       return;
     }
     if (actionId === 'text') {
-      updateEmailDocument({
-        ...emailDocument,
-        blocks: [
-          ...emailDocument.blocks,
-          {
-            type: 'ticket_summary',
-            title: 'New text block',
-            body: 'Add attendee-ready copy here.',
-          },
-        ],
-      });
-      setSelectedBlockId(`email-block-${emailDocument.blocks.length}`);
+      insertEditorContent('<p>Add attendee-ready copy here.</p>');
       return;
     }
     if (actionId === 'components') {
-      updateEmailDocument({
-        ...emailDocument,
-        blocks: [
-          ...emailDocument.blocks,
-          {
-            type: 'calendar_button',
-            label: 'Add to calendar',
-            url: '{{event.checkoutUrl}}',
-          },
-        ],
-      });
-      setSelectedBlockId(`email-block-${emailDocument.blocks.length}`);
+      setInspectorPanelId('components');
       return;
     }
     if (actionId === 'image') {
-      updateEmailDocument({
-        ...emailDocument,
-        blocks: [
-          ...emailDocument.blocks,
-          {
-            type: 'qr_code',
-            title: 'Ticket QR code',
-            imageUrl: '{{ticket.qrCodeUrl}}',
-            imageAlt: 'Ticket QR code',
-          },
-        ],
-      });
-      setSelectedBlockId(`email-block-${emailDocument.blocks.length}`);
+      insertEditorContent('<img src="{{ticket.qrCodeUrl}}" alt="Ticket QR code" />');
     }
+  }
+
+  async function reviewCurrentDraft(options: { openPanel?: boolean } = {}) {
+    if (!emailDocument) return undefined;
+    setReviewState('checking');
+    if (options.openPanel !== false) setInspectorPanelId('issues');
+    let editorSnapshot: EmailTemplateDocument | undefined;
+    try {
+      editorSnapshot = await snapshotFromEditor(emailDocument);
+    } catch (reviewError) {
+      setReviewState('error');
+      setActionError(
+        reviewError instanceof Error ? reviewError.message : 'Unable to review email draft',
+      );
+      return undefined;
+    }
+    if (!editorSnapshot) return undefined;
+    const templateValidation = validateEmailTemplate(editorSnapshot, { provider: 'resend' });
+    const exportValidation = validateEditorExport(editorSnapshot.editor.contentHtml);
+    const issues = mergeValidationIssues([
+      ...templateValidation.issues,
+      ...exportValidation.issues,
+    ]);
+    setEmailDocument(editorSnapshot);
+    setReviewIssues(issues);
+    setReviewState('checked');
+    setActionError(undefined);
+    setNotice(
+      issues.length === 0
+        ? 'Current email draft passed review'
+        : `Current email draft has ${issues.length} review ${issues.length === 1 ? 'item' : 'items'}`,
+    );
+    return { document: editorSnapshot, issues };
   }
 
   async function saveDraft(operationId = nextOperationId(), snapshot = emailDocument) {
     if (!document || !event || !snapshot || isArchived) return undefined;
     setAutosave('saving');
-    const rendered = await renderEmailTemplate(snapshot, sampleContext(event));
+    let editorSnapshot: EmailTemplateDocument | undefined;
+    try {
+      editorSnapshot = await snapshotFromEditor(snapshot);
+    } catch (saveError) {
+      if (!isCurrentOperation(operationId)) return undefined;
+      setAutosave('error');
+      setActionError(saveError instanceof Error ? saveError.message : 'Unable to export email');
+      return undefined;
+    }
+    if (!editorSnapshot) return undefined;
+    const rendered = await renderEmailTemplate(editorSnapshot, sampleContext(event));
+    setReviewIssues(rendered.validation.issues);
+    setReviewState('checked');
     const result = await adminApi.saveContentVersion(document.id, {
-      contentJson: snapshot,
-      subject: snapshot.settings.subject,
-      previewText: snapshot.settings.previewText,
+      contentJson: editorSnapshot,
+      subject: editorSnapshot.settings.subject,
+      previewText: editorSnapshot.settings.previewText,
       renderedHtml: rendered.html,
       renderedText: rendered.text,
     });
@@ -611,6 +793,7 @@ export function EmailPersistedEditorView({ eventId }: { eventId: string }) {
       setActionError(resultMessage(result.error, 'Unable to save email draft'));
       return undefined;
     }
+    setEmailDocument(editorSnapshot);
     setDraft(result.data);
     setVersions((current) => [
       result.data,
@@ -620,20 +803,19 @@ export function EmailPersistedEditorView({ eventId }: { eventId: string }) {
     setAutosave('saved');
     setActionError(undefined);
     setNotice(`Saved draft v${result.data.versionNumber}`);
-    return result.data;
+    return { version: result.data, document: editorSnapshot };
   }
 
   async function previewSavedDraft() {
     if (!document || !event || !emailDocument || isArchived) return;
     const operationId = nextOperationId();
-    const snapshot = emailDocument;
-    const saved = await saveDraft(operationId, snapshot);
+    const saved = await saveDraft(operationId, emailDocument);
     if (!saved) return;
     const result = await adminApi.previewContent(document.id, {
-      versionId: saved.id,
-      contentJson: snapshot,
-      subject: snapshot.settings.subject,
-      previewText: snapshot.settings.previewText,
+      versionId: saved.version.id,
+      contentJson: saved.document,
+      subject: saved.document.settings.subject,
+      previewText: saved.document.settings.previewText,
       context: sampleContext(event),
     });
     if (!isCurrentOperation(operationId)) return;
@@ -643,16 +825,25 @@ export function EmailPersistedEditorView({ eventId }: { eventId: string }) {
       return;
     }
     setPreview(previewFromEmailOutput('Saved email preview', result.data.output));
+    setPreviewOpen(true);
     setActionError(undefined);
     setNotice('Preview rendered from the saved content version');
   }
 
   async function publishDraft() {
     if (!document || !emailDocument || isArchived) return;
+    const review = await reviewCurrentDraft({ openPanel: false });
+    if (!review) return;
+    if (hasBlockingIssues(review.issues)) {
+      setAutosave('error');
+      setActionError('Resolve email publish blockers before publishing.');
+      setInspectorPanelId('issues');
+      return;
+    }
     const operationId = nextOperationId();
-    const saved = await saveDraft(operationId, emailDocument);
+    const saved = await saveDraft(operationId, review.document);
     if (!saved) return;
-    const result = await adminApi.publishContentVersion(document.id, saved.id);
+    const result = await adminApi.publishContentVersion(document.id, saved.version.id);
     if (!isCurrentOperation(operationId)) return;
     if (!result.ok) {
       setAutosave('error');
@@ -676,7 +867,7 @@ export function EmailPersistedEditorView({ eventId }: { eventId: string }) {
     const saved = await saveDraft(operationId, emailDocument);
     if (!saved) return;
     const result = await adminApi.testSendContent(document.id, {
-      versionId: saved.id,
+      versionId: saved.version.id,
       recipient,
       context: event ? sampleContext(event) : undefined,
     });
@@ -734,730 +925,485 @@ export function EmailPersistedEditorView({ eventId }: { eventId: string }) {
   }
 
   if (loading) {
-    return <p className="text-sm text-muted-foreground">Loading email editor...</p>;
+    return (
+      <div className="flex min-h-svh items-center justify-center bg-neutral-950 text-sm text-white/65">
+        Loading email editor...
+      </div>
+    );
   }
 
   if (error || !event || !document || !draft || !emailDocument || !preview) {
     return (
-      <section className="space-y-3">
-        <h1 className="text-2xl font-bold tracking-tight">Email template editor</h1>
-        <p className="text-sm text-destructive">{error ?? 'Email editor could not load.'}</p>
-        <button
-          className="rounded-md border px-3 py-2 text-sm"
-          onClick={() => void load()}
-          type="button"
-        >
-          Retry
-        </button>
+      <section className="flex min-h-svh items-center justify-center bg-neutral-950 p-6 text-white">
+        <div className="w-full max-w-lg space-y-4 rounded-lg border border-white/10 bg-white/5 p-6">
+          <div className="space-y-1">
+            <p className="text-sm text-white/50">Email template editor</p>
+            <h1 className="text-2xl font-semibold">Unable to load editor</h1>
+          </div>
+          <p className="text-sm text-red-200">{error ?? 'Email editor could not load.'}</p>
+          <button
+            className="rounded-md border border-white/15 px-3 py-2 text-sm hover:bg-white/10"
+            onClick={() => void load()}
+            type="button"
+          >
+            Retry
+          </button>
+        </div>
       </section>
     );
   }
 
-  const selectedBlockIndex = emailDocument.blocks.findIndex(
-    (_block, index) => `email-block-${index}` === selectedBlockId,
-  );
-  const selectedBlock =
-    selectedBlockIndex >= 0 ? emailDocument.blocks[selectedBlockIndex] : emailDocument.blocks[0];
-  const selectedBlockLabel = selectedBlock ? blockLabel(selectedBlock) : 'Content';
-  const canEdit = !isArchived;
   const archivedReason = isArchived ? 'Archived templates are read-only.' : undefined;
-  const canvasHeader = (
-    <div className="space-y-3" data-testid="email-metadata-bar">
-      <div className="grid gap-3 md:grid-cols-2">
-        <label className="space-y-1.5 text-xs font-medium text-muted-foreground">
-          From
-          <input
-            aria-label="From"
-            className={compactInputClassName}
-            disabled={!canEdit}
-            onChange={(change) => {
-              updateEmailDocument({
-                ...emailDocument,
-                settings: {
-                  ...emailDocument.settings,
-                  sender: {
-                    ...emailDocument.settings.sender,
-                    fromEmail: change.currentTarget.value,
-                  },
-                },
-              });
-            }}
-            type="email"
-            value={emailDocument.settings.sender.fromEmail ?? ''}
-          />
-        </label>
-        <label className="space-y-1.5 text-xs font-medium text-muted-foreground">
-          Reply-To
-          <input
-            aria-label="Reply-To"
-            className={compactInputClassName}
-            disabled={!canEdit}
-            onChange={(change) => {
-              updateEmailDocument({
-                ...emailDocument,
-                settings: {
-                  ...emailDocument.settings,
-                  sender: {
-                    ...emailDocument.settings.sender,
-                    replyToEmail: change.currentTarget.value,
-                  },
-                },
-              });
-            }}
-            type="email"
-            value={emailDocument.settings.sender.replyToEmail ?? ''}
-          />
-        </label>
-      </div>
-      <div className="grid gap-3 md:grid-cols-[minmax(0,1.2fr)_minmax(0,1fr)]">
-        <label className="space-y-1.5 text-xs font-medium text-muted-foreground">
-          Subject
-          <input
-            aria-label="Subject"
-            className={inputClassName}
-            disabled={!canEdit}
-            onChange={(change) => {
-              updateEmailDocument({
-                ...emailDocument,
-                settings: { ...emailDocument.settings, subject: change.currentTarget.value },
-              });
-            }}
-            value={emailDocument.settings.subject}
-          />
-        </label>
-        <label className="space-y-1.5 text-xs font-medium text-muted-foreground">
-          Preview text
-          <input
-            aria-label="Preview text"
-            className={inputClassName}
-            disabled={!canEdit}
-            onChange={(change) => {
-              updateEmailDocument({
-                ...emailDocument,
-                settings: { ...emailDocument.settings, previewText: change.currentTarget.value },
-              });
-            }}
-            value={emailDocument.settings.previewText ?? ''}
-          />
-        </label>
-      </div>
-      <div className="flex flex-wrap items-center gap-2">
-        <button
-          className={actionButtonClassName}
-          disabled={!canEdit}
-          onClick={() => void saveDraft()}
-          type="button"
-        >
-          <Save className="size-4" />
-          Save draft
-        </button>
-        <button
-          className={actionButtonClassName}
-          disabled={!canEdit}
-          onClick={() => void previewSavedDraft()}
-          type="button"
-        >
-          <Eye className="size-4" />
-          Preview
-        </button>
-        <button
-          className={actionButtonClassName}
-          disabled={!canEdit}
-          onClick={() => void sendTest()}
-          type="button"
-        >
-          <Send className="size-4" />
-          Send test
-        </button>
-        <label className="ml-auto min-w-56 space-y-1.5 text-xs font-medium text-muted-foreground">
-          Test recipient
-          <input
-            aria-label="Test recipient"
-            className={compactInputClassName}
-            disabled={!canEdit}
-            onChange={(change) => setRecipient(change.currentTarget.value)}
-            type="email"
-            value={recipient}
-          />
-        </label>
-      </div>
-    </div>
-  );
-  const directCanvasBlocks: ContentEditorCanvasBlock[] = emailDocument.blocks.map(
-    (block, index) => {
-      const id = `email-block-${index}`;
-      const selected = id === selectedBlockId;
-      const summary = blockSummary(block);
-      const updateBlock = (nextBlock: EmailTemplateDocument['blocks'][number]) => {
-        updateEmailDocument(updateEmailBlock(emailDocument, index, nextBlock));
-      };
-
-      if (block.type === 'event_hero') {
-        return {
-          id,
-          label: blockLabel(block),
-          presentation: 'document',
-          summary,
-          selected,
-          onSelect: () => selectBlock(id),
-          content: (
-            <div className="space-y-5">
-              <EditablePlainText
-                className="max-w-[34rem] text-3xl font-bold leading-tight text-foreground"
-                disabled={!canEdit}
-                label="Email headline"
-                onChange={(value) => updateBlock({ ...block, headline: value })}
-                onFocus={() => selectBlock(id)}
-                value={block.headline}
-              />
-              <EditablePlainText
-                className="max-w-[35rem] whitespace-pre-wrap text-base leading-7 text-muted-foreground"
-                disabled={!canEdit}
-                label="Email body"
-                multiline
-                onChange={(value) => updateBlock({ ...block, body: value })}
-                onFocus={() => selectBlock(id)}
-                value={block.body ?? ''}
-              />
-              <div className="inline-flex min-h-10 items-center rounded-md bg-primary px-4 py-2 text-sm font-semibold text-primary-foreground shadow-sm">
-                <EditablePlainText
-                  className="min-w-20 text-primary-foreground"
-                  disabled={!canEdit}
-                  label="CTA label"
-                  onChange={(value) => updateBlock({ ...block, ctaLabel: value })}
-                  onFocus={() => selectBlock(id)}
-                  value={block.ctaLabel ?? ''}
-                />
-              </div>
-            </div>
-          ),
-        };
-      }
-
-      if (block.type === 'ticket_summary') {
-        return {
-          id,
-          label: blockLabel(block),
-          presentation: 'document',
-          summary,
-          selected,
-          onSelect: () => selectBlock(id),
-          content: (
-            <div className="space-y-2">
-              <EditablePlainText
-                className="text-lg font-semibold text-foreground"
-                disabled={!canEdit}
-                label="Ticket summary title"
-                onChange={(value) => updateBlock({ ...block, title: value })}
-                onFocus={() => selectBlock(id)}
-                value={block.title}
-              />
-              <EditablePlainText
-                className="whitespace-pre-wrap text-sm leading-6 text-muted-foreground"
-                disabled={!canEdit}
-                label="Ticket summary body"
-                multiline
-                onChange={(value) => updateBlock({ ...block, body: value })}
-                onFocus={() => selectBlock(id)}
-                value={block.body}
-              />
-            </div>
-          ),
-        };
-      }
-
-      if (block.type === 'unsubscribe_footer') {
-        return {
-          id,
-          label: blockLabel(block),
-          presentation: 'document',
-          summary,
-          selected,
-          onSelect: () => selectBlock(id),
-          content: (
-            <div className="space-y-2">
-              <EditablePlainText
-                className="whitespace-pre-wrap text-xs leading-5 text-muted-foreground"
-                disabled={!canEdit}
-                label="Footer body"
-                multiline
-                onChange={(value) => updateBlock({ ...block, body: value })}
-                onFocus={() => selectBlock(id)}
-                value={block.body}
-              />
-            </div>
-          ),
-        };
-      }
-
-      if (block.type === 'qr_code') {
-        return {
-          id,
-          label: blockLabel(block),
-          presentation: 'document',
-          summary,
-          selected,
-          onSelect: () => selectBlock(id),
-          content: (
-            <div className="space-y-3 text-center">
-              <EditablePlainText
-                className="text-lg font-semibold text-foreground"
-                disabled={!canEdit}
-                label="QR code title"
-                onChange={(value) => updateBlock({ ...block, title: value })}
-                onFocus={() => selectBlock(id)}
-                value={block.title}
-              />
-              <div className="mx-auto flex size-36 items-center justify-center rounded-md border border-dashed bg-muted/30 px-3 text-xs font-medium text-muted-foreground">
-                QR image
-              </div>
-            </div>
-          ),
-        };
-      }
-
-      if (block.type === 'calendar_button') {
-        return {
-          id,
-          label: blockLabel(block),
-          presentation: 'document',
-          summary,
-          selected,
-          onSelect: () => selectBlock(id),
-          content: (
-            <div className="inline-flex min-h-10 items-center rounded-md border bg-background px-4 py-2 text-sm font-semibold shadow-sm">
-              <EditablePlainText
-                className="min-w-28 text-foreground"
-                disabled={!canEdit}
-                label="Calendar button label"
-                onChange={(value) => updateBlock({ ...block, label: value })}
-                onFocus={() => selectBlock(id)}
-                value={block.label}
-              />
-            </div>
-          ),
-        };
-      }
-
-      if (block.type === 'order_summary') {
-        return {
-          id,
-          label: blockLabel(block),
-          presentation: 'document',
-          summary,
-          selected,
-          onSelect: () => selectBlock(id),
-          content: (
-            <div className="space-y-3">
-              <p className="text-lg font-semibold text-foreground">Order summary</p>
-              <dl className="divide-y text-sm">
-                {block.rows.map((row, rowIndex) => (
-                  <div
-                    className="grid grid-cols-[1fr_auto] gap-4 py-2"
-                    key={`${row.label}-${rowIndex}`}
-                  >
-                    <dt className="text-muted-foreground">{row.label}</dt>
-                    <dd className="font-medium text-foreground">{row.value}</dd>
-                  </div>
-                ))}
-              </dl>
-            </div>
-          ),
-        };
-      }
-
-      if (block.type === 'venue_block') {
-        return {
-          id,
-          label: blockLabel(block),
-          presentation: 'document',
-          summary,
-          selected,
-          onSelect: () => selectBlock(id),
-          content: (
-            <div className="space-y-2">
-              <EditablePlainText
-                className="text-lg font-semibold text-foreground"
-                disabled={!canEdit}
-                label="Venue title"
-                onChange={(value) => updateBlock({ ...block, title: value })}
-                onFocus={() => selectBlock(id)}
-                value={block.title}
-              />
-              <EditablePlainText
-                className="whitespace-pre-wrap text-sm leading-6 text-muted-foreground"
-                disabled={!canEdit}
-                label="Venue address"
-                multiline
-                onChange={(value) => updateBlock({ ...block, address: value })}
-                onFocus={() => selectBlock(id)}
-                value={block.address}
-              />
-            </div>
-          ),
-        };
-      }
-
-      if (block.type === 'social_links') {
-        return {
-          id,
-          label: blockLabel(block),
-          presentation: 'document',
-          summary,
-          selected,
-          onSelect: () => selectBlock(id),
-          content: (
-            <nav aria-label="Email social links" className="flex flex-wrap gap-3 text-sm">
-              {block.links.map((link, linkIndex) => (
-                <a
-                  className="font-medium text-primary underline-offset-4 hover:underline"
-                  href={link.url}
-                  key={`${link.label}-${linkIndex}`}
-                >
-                  {link.label}
-                </a>
-              ))}
-            </nav>
-          ),
-        };
-      }
-
-      if (block.type === 'raw_html') {
-        return {
-          id,
-          label: blockLabel(block),
-          presentation: 'document',
-          summary,
-          selected,
-          onSelect: () => selectBlock(id),
-          content: (
-            <EditablePlainText
-              className="font-mono text-xs leading-5 text-muted-foreground"
-              disabled={!canEdit}
-              label="Raw HTML"
-              multiline
-              onChange={(value) => updateBlock({ ...block, html: value })}
-              onFocus={() => selectBlock(id)}
-              value={block.html}
-            />
-          ),
-        };
-      }
-
-      return unreachableEmailBlock(block);
-    },
-  );
-  const updateSelectedEmailBlock = (nextBlock: EmailTemplateDocument['blocks'][number]) => {
-    if (selectedBlockIndex < 0) return;
-    updateEmailDocument(updateEmailBlock(emailDocument, selectedBlockIndex, nextBlock));
-  };
-  const selectedBlockControls = (() => {
-    if (!selectedBlock) {
-      return <p className="text-xs text-muted-foreground">Select content in the canvas.</p>;
-    }
-
-    if (selectedBlock.type === 'event_hero') {
-      return (
-        <label className="space-y-1.5 text-xs font-medium text-muted-foreground">
-          CTA URL
-          <input
-            aria-label="CTA URL"
-            className={compactInputClassName}
-            disabled={!canEdit}
-            onChange={(change) =>
-              updateSelectedEmailBlock({ ...selectedBlock, ctaUrl: change.currentTarget.value })
-            }
-            value={selectedBlock.ctaUrl ?? ''}
-          />
-        </label>
-      );
-    }
-
-    if (selectedBlock.type === 'unsubscribe_footer') {
-      return (
-        <label className="space-y-1.5 text-xs font-medium text-muted-foreground">
-          Preferences URL
-          <input
-            aria-label="Preferences URL"
-            className={compactInputClassName}
-            disabled={!canEdit}
-            onChange={(change) =>
-              updateSelectedEmailBlock({
-                ...selectedBlock,
-                unsubscribeUrl: change.currentTarget.value,
-              })
-            }
-            value={selectedBlock.unsubscribeUrl}
-          />
-        </label>
-      );
-    }
-
-    if (selectedBlock.type === 'qr_code') {
-      return (
-        <div className="space-y-3">
-          <label className="space-y-1.5 text-xs font-medium text-muted-foreground">
-            QR image URL
-            <input
-              aria-label="QR image URL"
-              className={compactInputClassName}
-              disabled={!canEdit}
-              onChange={(change) =>
-                updateSelectedEmailBlock({ ...selectedBlock, imageUrl: change.currentTarget.value })
-              }
-              value={selectedBlock.imageUrl}
-            />
-          </label>
-          <label className="space-y-1.5 text-xs font-medium text-muted-foreground">
-            QR image alt text
-            <input
-              aria-label="QR image alt text"
-              className={compactInputClassName}
-              disabled={!canEdit}
-              onChange={(change) =>
-                updateSelectedEmailBlock({ ...selectedBlock, imageAlt: change.currentTarget.value })
-              }
-              value={selectedBlock.imageAlt ?? ''}
-            />
-          </label>
-        </div>
-      );
-    }
-
-    if (selectedBlock.type === 'calendar_button') {
-      return (
-        <label className="space-y-1.5 text-xs font-medium text-muted-foreground">
-          Calendar URL
-          <input
-            aria-label="Calendar URL"
-            className={compactInputClassName}
-            disabled={!canEdit}
-            onChange={(change) =>
-              updateSelectedEmailBlock({ ...selectedBlock, url: change.currentTarget.value })
-            }
-            value={selectedBlock.url}
-          />
-        </label>
-      );
-    }
-
-    return <p className="text-xs text-muted-foreground">{blockSummary(selectedBlock)}</p>;
-  })();
-  const panelIds = ['block', 'page', 'body', 'theme', 'code', 'variables', 'history', 'issues'];
-  const panelLabels: Record<string, string> = {
-    block: 'Content',
-    page: 'Page',
-    body: 'Body',
-    theme: 'Theme',
-    code: 'Code',
-    variables: 'Variables',
-    history: 'History',
-    issues: 'Issues',
-  };
-  const inspectorNav = (
-    <div className="grid grid-cols-2 gap-1" aria-label="Email inspector modes">
-      {panelIds.map((id) => (
-        <button
-          aria-pressed={inspectorPanelId === id}
-          className={`rounded-md px-2 py-1.5 text-xs font-medium ${
-            inspectorPanelId === id
-              ? 'bg-primary text-primary-foreground'
-              : 'text-muted-foreground hover:bg-accent'
-          }`}
-          key={id}
-          onClick={() => setInspectorPanelId(id)}
-          type="button"
-        >
-          {panelLabels[id]}
-        </button>
-      ))}
-    </div>
-  );
-  const inspectorPanels: ContentEditorInspectorPanel[] = [
-    {
-      id: 'block',
-      label: 'Content',
-      content: (
-        <section className="space-y-3 text-sm">
-          {inspectorNav}
-          <h2 className="text-sm font-semibold">Selected {selectedBlockLabel}</h2>
-          {selectedBlockControls}
-        </section>
-      ),
-    },
-    {
-      id: 'page',
-      label: 'Page',
-      content: (
-        <section className="space-y-3 text-sm">
-          {inspectorNav}
-          <h2 className="text-sm font-semibold">Email metadata</h2>
-          <dl className="space-y-2">
-            <div className="grid grid-cols-[5rem_minmax(0,1fr)] gap-2">
-              <dt className="text-muted-foreground">Subject</dt>
-              <dd className="truncate font-medium">{emailDocument.settings.subject}</dd>
-            </div>
-            <div className="grid grid-cols-[5rem_minmax(0,1fr)] gap-2">
-              <dt className="text-muted-foreground">From</dt>
-              <dd className="truncate font-medium">
-                {emailDocument.settings.sender.fromEmail ?? 'Missing'}
-              </dd>
-            </div>
-          </dl>
-        </section>
-      ),
-    },
-    {
-      id: 'body',
-      label: 'Body',
-      content: (
-        <section className="space-y-3 text-sm">
-          {inspectorNav}
-          <h2 className="text-sm font-semibold">Body style</h2>
-          <p className="rounded-md border bg-muted/30 p-3 text-xs text-muted-foreground">
-            React Email body uses Tixkit transactional defaults with 640px content width.
-          </p>
-        </section>
-      ),
-    },
-    {
-      id: 'theme',
-      label: 'Theme',
-      content: (
-        <section className="space-y-3 text-sm">
-          {inspectorNav}
-          <h2 className="text-sm font-semibold">Theme</h2>
-          <p className="rounded-md border bg-muted/30 p-3 text-xs text-muted-foreground">
-            Locale {emailDocument.settings.locale}; category {emailDocument.settings.category}.
-          </p>
-        </section>
-      ),
-    },
-    {
-      id: 'code',
-      label: 'Code',
-      content: (
-        <section className="space-y-3 text-sm">
-          {inspectorNav}
-          <h2 className="text-sm font-semibold">Editor JSON</h2>
-          <pre className="max-h-80 overflow-auto rounded-md border bg-muted/30 p-3 text-xs">
-            {JSON.stringify(emailDocument, null, 2)}
-          </pre>
-        </section>
-      ),
-    },
-    {
-      id: 'variables',
-      label: 'Variables',
-      content: (
-        <section className="space-y-3 text-sm">
-          {inspectorNav}
-          <h2 className="text-sm font-semibold">Variables</h2>
-          <div className="grid gap-2">
-            {['event.title', 'recipient.name', 'ticket.type', 'order.total', 'brand.name'].map(
-              (key) => (
-                <button
-                  className="rounded-md border px-2 py-1.5 text-left font-mono text-xs hover:bg-accent"
-                  disabled={!canEdit}
-                  key={key}
-                  onClick={() => insertEmailVariable(key)}
-                  type="button"
-                >
-                  {`{{${key}}}`}
-                </button>
-              ),
-            )}
-          </div>
-        </section>
-      ),
-    },
-    {
-      id: 'history',
-      label: 'History',
-      content: (
-        <section className="space-y-3 text-sm">
-          {inspectorNav}
-          <h2 className="text-sm font-semibold">History</h2>
-          <ol className="space-y-2">
-            {versionSummaries(versions).map((version) => (
-              <li className="rounded-md border p-2 text-xs" key={version.id}>
-                <div className="font-medium">{version.label}</div>
-                <div className="text-muted-foreground">{version.status}</div>
-              </li>
-            ))}
-          </ol>
-        </section>
-      ),
-    },
-    {
-      id: 'issues',
-      label: 'Issues',
-      content: (
-        <section className="space-y-3 text-sm">
-          {inspectorNav}
-          <h2 className="text-sm font-semibold">Issues</h2>
-          {draft.validation.issues.length === 0 ? (
-            <p className="rounded-md border border-emerald-300 bg-emerald-50 p-3 text-xs text-emerald-800">
-              No publish blockers.
-            </p>
-          ) : (
-            <ul className="space-y-2">
-              {draft.validation.issues.map((issue) => (
-                <li
-                  className="rounded-md border p-2 text-xs"
-                  key={`${issue.code}-${issue.message}`}
-                >
-                  <strong>{issue.code}</strong>
-                  <p>{issue.message}</p>
-                </li>
-              ))}
-            </ul>
-          )}
-        </section>
-      ),
-    },
-  ];
+  const history = versionSummaries(versions);
+  const issuePanelIssues = reviewState === 'idle' ? draft.validation.issues : reviewIssues;
+  const issuePanelTitle = reviewState === 'checked' ? 'Current draft review' : 'Saved draft review';
 
   return (
-    <div className="space-y-4">
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <div className="min-w-0 space-y-1">
-          <h1 className="truncate text-2xl font-bold tracking-tight">Email template editor</h1>
-          <p className="max-w-3xl text-sm text-muted-foreground">
-            Persisted React Email composer for {event.title}
-          </p>
+    <section className="min-h-svh overflow-hidden bg-neutral-950 text-white" data-channel="email">
+      <header className="grid h-16 grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-4 border-b border-white/10 px-4">
+        <a
+          aria-label="Back to event"
+          className="inline-flex size-9 items-center justify-center rounded-md border border-white/10 text-white/70 hover:bg-white/10 hover:text-white"
+          href={`/events/${event.id}`}
+        >
+          <ChevronLeft className="size-4" />
+        </a>
+        <div className="min-w-0 text-center">
+          <div className="flex min-w-0 items-center justify-center gap-2 text-sm text-white/55">
+            <span className="truncate">Templates</span>
+            <span>/</span>
+            <button
+              className="min-w-0 truncate font-semibold text-white"
+              disabled={!canEdit}
+              onClick={() => setInspectorPanelId('style')}
+              type="button"
+            >
+              {document.name}
+            </button>
+            <span className="rounded-md bg-white/10 px-2 py-0.5 text-xs text-white/70">
+              {document.status}
+            </span>
+            <span
+              className={`rounded-md border px-2 py-0.5 text-xs ${autosaveClassName(autosave)}`}
+            >
+              {autosaveLabel(autosave)}
+            </span>
+          </div>
+          {(notice || actionError) && (
+            <p
+              className={`mt-1 truncate text-xs ${actionError ? 'text-red-200' : 'text-white/45'}`}
+            >
+              {actionError ?? notice}
+            </p>
+          )}
         </div>
-        {notice && <p className="text-sm text-emerald-700">{notice}</p>}
-      </div>
-      {actionError && (
-        <p className="rounded-md border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive">
-          {actionError}
-        </p>
-      )}
+        <div className="flex items-center gap-2">
+          <button
+            aria-label="Open preview"
+            className="inline-flex size-9 items-center justify-center rounded-md border border-white/10 text-white/70 hover:bg-white/10 hover:text-white disabled:cursor-not-allowed disabled:opacity-40"
+            disabled={Boolean(archivedReason)}
+            onClick={() => setPreviewOpen(true)}
+            title={archivedReason}
+            type="button"
+          >
+            <Eye className="size-4" />
+          </button>
+          <button
+            className="inline-flex h-9 items-center gap-2 rounded-md border border-white/10 px-3 text-sm font-medium text-white/80 hover:bg-white/10 disabled:cursor-not-allowed disabled:opacity-40"
+            disabled={Boolean(archivedReason)}
+            onClick={() => void sendTest()}
+            title={archivedReason}
+            type="button"
+          >
+            <Send className="size-4" />
+            Send test
+          </button>
+          <details className="relative">
+            <summary
+              aria-label="More actions"
+              className="inline-flex size-9 list-none items-center justify-center rounded-md border border-white/10 text-white/70 hover:bg-white/10 hover:text-white"
+            >
+              <MoreHorizontal className="size-4" />
+            </summary>
+            <div className="absolute right-0 top-11 z-30 w-48 rounded-lg border border-white/10 bg-neutral-900 p-1 text-sm shadow-2xl">
+              <button
+                className="flex w-full items-center gap-2 rounded-md px-2 py-2 text-left text-white/80 hover:bg-white/10 disabled:cursor-not-allowed disabled:opacity-40"
+                disabled={Boolean(archivedReason)}
+                onClick={() => void duplicateDocument()}
+                type="button"
+              >
+                <Copy className="size-4" />
+                Duplicate template
+              </button>
+              <button
+                className="flex w-full items-center gap-2 rounded-md px-2 py-2 text-left text-red-200 hover:bg-red-500/10 disabled:cursor-not-allowed disabled:opacity-40"
+                onClick={() => void archiveDocument()}
+                type="button"
+              >
+                <Archive className="size-4" />
+                Archive template
+              </button>
+            </div>
+          </details>
+          <button
+            className="inline-flex h-9 items-center gap-2 rounded-md bg-white px-4 text-sm font-semibold text-black hover:bg-white/90 disabled:cursor-not-allowed disabled:opacity-50"
+            disabled={Boolean(archivedReason)}
+            onClick={() => void publishDraft()}
+            type="button"
+          >
+            Publish
+          </button>
+        </div>
+      </header>
 
-      <ContentEditorShell
-        actionsUnavailableReason={archivedReason}
-        autosave={autosave}
-        canvasBlocks={directCanvasBlocks}
-        canvasHeader={canvasHeader}
-        channelLabel="Email template"
-        document={toShellDocument(document)}
-        draft={toShellVersion(draft)}
-        activeInspectorPanelId={inspectorPanelId}
-        inspectorPanels={inspectorPanels}
-        insertActions={emailInsertActions}
-        preview={preview}
-        showInspectorPanelTabs={false}
-        testSendUnavailableReason={archivedReason}
-        versions={versionSummaries(versions)}
-        onInsertAction={insertEmailAction}
-        onInspectorPanelChange={setInspectorPanelId}
-        onPreview={() => void previewSavedDraft()}
-        onPublish={() => void publishDraft()}
-        onDuplicate={() => void duplicateDocument()}
-        onArchive={() => void archiveDocument()}
-        onTestSend={() => void sendTest()}
-      />
-    </div>
+      <div className="grid h-[calc(100svh-4rem)] grid-cols-[4rem_minmax(0,1fr)] lg:grid-cols-[4rem_minmax(0,1fr)_22rem]">
+        <aside
+          aria-label="Insert content"
+          className="flex flex-col items-center gap-2 border-r border-white/10 bg-neutral-950 px-2 py-5"
+        >
+          {emailInsertActions.map((action) => (
+            <button
+              aria-label={`Insert ${action.label}`}
+              className="inline-flex size-10 items-center justify-center rounded-md border border-white/10 text-white/60 hover:bg-white/10 hover:text-white disabled:cursor-not-allowed disabled:opacity-40"
+              disabled={!canEdit}
+              key={action.id}
+              onClick={() => insertEmailAction(action.id)}
+              title={action.label}
+              type="button"
+            >
+              {action.icon}
+            </button>
+          ))}
+        </aside>
+
+        <main className="min-w-0 overflow-auto rounded-tl-3xl bg-white text-black">
+          <div className="mx-auto min-h-full w-full max-w-[600px] px-6 py-10">
+            <div className="space-y-3" data-testid="email-metadata-bar">
+              <div className="grid gap-x-8 gap-y-2 sm:grid-cols-2">
+                <label className="grid grid-cols-[5rem_minmax(0,1fr)] items-center gap-4 text-sm text-black/55">
+                  From
+                  <input
+                    aria-label="From"
+                    className={textInputClassName}
+                    disabled={!canEdit}
+                    onChange={(change) => {
+                      updateEmailDocument({
+                        ...emailDocument,
+                        settings: {
+                          ...emailDocument.settings,
+                          sender: {
+                            ...emailDocument.settings.sender,
+                            fromEmail: change.currentTarget.value,
+                          },
+                        },
+                      });
+                    }}
+                    type="email"
+                    value={emailDocument.settings.sender.fromEmail ?? ''}
+                  />
+                </label>
+                <label className="grid grid-cols-[5rem_minmax(0,1fr)] items-center gap-4 text-sm text-black/55">
+                  Reply-To
+                  <input
+                    aria-label="Reply-To"
+                    className={textInputClassName}
+                    disabled={!canEdit}
+                    onChange={(change) => {
+                      updateEmailDocument({
+                        ...emailDocument,
+                        settings: {
+                          ...emailDocument.settings,
+                          sender: {
+                            ...emailDocument.settings.sender,
+                            replyToEmail: change.currentTarget.value,
+                          },
+                        },
+                      });
+                    }}
+                    type="email"
+                    value={emailDocument.settings.sender.replyToEmail ?? ''}
+                  />
+                </label>
+              </div>
+              <div className="grid gap-x-8 gap-y-2 sm:grid-cols-[minmax(0,1fr)_12rem]">
+                <label className="grid grid-cols-[5rem_minmax(0,1fr)] items-center gap-4 text-sm text-black/55">
+                  Subject
+                  <input
+                    aria-label="Subject"
+                    className={textInputClassName}
+                    disabled={!canEdit}
+                    onChange={(change) => {
+                      updateEmailDocument({
+                        ...emailDocument,
+                        settings: {
+                          ...emailDocument.settings,
+                          subject: change.currentTarget.value,
+                        },
+                      });
+                    }}
+                    placeholder="Subject"
+                    value={emailDocument.settings.subject}
+                  />
+                </label>
+                <label className="grid grid-cols-[5rem_minmax(0,1fr)] items-center gap-4 text-sm text-black/55">
+                  Preview
+                  <input
+                    aria-label="Preview text"
+                    className={textInputClassName}
+                    disabled={!canEdit}
+                    onChange={(change) => {
+                      updateEmailDocument({
+                        ...emailDocument,
+                        settings: {
+                          ...emailDocument.settings,
+                          previewText: change.currentTarget.value,
+                        },
+                      });
+                    }}
+                    placeholder="Preview text"
+                    value={emailDocument.settings.previewText ?? ''}
+                  />
+                </label>
+              </div>
+            </div>
+
+            <div className="mt-6 border-t border-black/10 pt-6">
+              <EmailEditor
+                key={draft.id}
+                ref={emailEditorRef}
+                bubbleMenu={{ hideWhenActiveNodes: ['button', 'horizontalRule'] }}
+                className="tixkit-react-email-editor"
+                content={initialEditorContent(emailDocument)}
+                editable={canEdit}
+                onReady={(ref) => {
+                  emailEditorRef.current = ref;
+                }}
+                onUpdate={(ref) => {
+                  emailEditorRef.current = ref;
+                  markDraftDirty();
+                }}
+                placeholder="Write the email..."
+              >
+                <NativeEmailInspector host={nativeInspectorHost} />
+              </EmailEditor>
+            </div>
+          </div>
+        </main>
+
+        <aside
+          aria-label="Email inspector"
+          className="col-span-2 min-h-0 overflow-auto border-t border-white/10 bg-neutral-950 p-4 lg:col-span-1 lg:border-l lg:border-t-0"
+        >
+          <div className="grid grid-cols-6 gap-1" aria-label="Email inspector modes">
+            {[
+              { id: 'style', label: 'Style', icon: <Palette className="size-4" /> },
+              { id: 'components', label: 'Components', icon: <Sparkles className="size-4" /> },
+              { id: 'variables', label: 'Variables', icon: <Variable className="size-4" /> },
+              { id: 'history', label: 'History', icon: <Save className="size-4" /> },
+              { id: 'issues', label: 'Issues', icon: <Eye className="size-4" /> },
+              { id: 'json', label: 'JSON', icon: <FileJson className="size-4" /> },
+            ].map((panel) => (
+              <button
+                aria-label={panel.label}
+                aria-pressed={inspectorPanelId === panel.id}
+                className={`inline-flex h-9 items-center justify-center rounded-md border text-xs ${
+                  inspectorPanelId === panel.id
+                    ? 'border-white/30 bg-white text-black'
+                    : 'border-white/10 text-white/60 hover:bg-white/10 hover:text-white'
+                }`}
+                key={panel.id}
+                onClick={() => setInspectorPanelId(panel.id as typeof inspectorPanelId)}
+                title={panel.label}
+                type="button"
+              >
+                {panel.icon}
+              </button>
+            ))}
+          </div>
+
+          {inspectorPanelId === 'style' && (
+            <section className="mt-6 space-y-5 text-sm">
+              <div>
+                <p className="text-xs uppercase tracking-wide text-white/40">Page style</p>
+                <h2 className="mt-1 font-semibold">React Email inspector</h2>
+              </div>
+              <div
+                className="min-h-[24rem]"
+                data-testid="native-email-inspector-host"
+                ref={setNativeInspectorHost}
+              />
+              <label className="space-y-1.5 text-xs font-medium text-white/55">
+                Test recipient
+                <input
+                  aria-label="Test recipient"
+                  className={darkInputClassName}
+                  disabled={!canEdit}
+                  onChange={(change) => setRecipient(change.currentTarget.value)}
+                  type="email"
+                  value={recipient}
+                />
+              </label>
+              <dl className="space-y-3 text-xs">
+                <div className="flex justify-between gap-4 border-b border-white/10 pb-3">
+                  <dt className="text-white/45">Template key</dt>
+                  <dd className="font-mono text-white/80">{emailDocument.settings.templateKey}</dd>
+                </div>
+                <div className="flex justify-between gap-4 border-b border-white/10 pb-3">
+                  <dt className="text-white/45">Locale</dt>
+                  <dd className="font-mono text-white/80">{emailDocument.settings.locale}</dd>
+                </div>
+                <div className="flex justify-between gap-4 border-b border-white/10 pb-3">
+                  <dt className="text-white/45">Category</dt>
+                  <dd className="font-mono text-white/80">{emailDocument.settings.category}</dd>
+                </div>
+              </dl>
+              <button
+                className="inline-flex h-9 w-full items-center justify-center gap-2 rounded-md border border-white/10 text-sm font-medium text-white/80 hover:bg-white/10 disabled:cursor-not-allowed disabled:opacity-40"
+                disabled={!canEdit}
+                onClick={() => void saveDraft()}
+                type="button"
+              >
+                <Save className="size-4" />
+                Save draft
+              </button>
+              <button
+                className="inline-flex h-9 w-full items-center justify-center gap-2 rounded-md border border-white/10 text-sm font-medium text-white/80 hover:bg-white/10 disabled:cursor-not-allowed disabled:opacity-40"
+                disabled={!canEdit}
+                onClick={() => void previewSavedDraft()}
+                type="button"
+              >
+                <Eye className="size-4" />
+                Preview
+              </button>
+            </section>
+          )}
+
+          {inspectorPanelId === 'components' && (
+            <section className="mt-6 space-y-4 text-sm">
+              <div>
+                <p className="text-xs uppercase tracking-wide text-white/40">Components</p>
+                <h2 className="mt-1 font-semibold">Insert email sections</h2>
+              </div>
+              <div className="grid gap-2">
+                {emailComponentInserts.map((component) => (
+                  <button
+                    className="rounded-md border border-white/10 px-3 py-2 text-left text-white/80 hover:bg-white/10 disabled:cursor-not-allowed disabled:opacity-40"
+                    disabled={!canEdit}
+                    key={component.id}
+                    onClick={() => insertEmailComponent(component.id)}
+                    type="button"
+                  >
+                    <span className="flex items-center gap-2 text-sm font-medium text-white">
+                      {component.icon}
+                      <span>{component.label}</span>
+                    </span>
+                    <span className="mt-1 block text-xs text-white/45">
+                      {component.description}
+                    </span>
+                  </button>
+                ))}
+              </div>
+            </section>
+          )}
+
+          {inspectorPanelId === 'variables' && (
+            <section className="mt-6 space-y-4 text-sm">
+              <div>
+                <p className="text-xs uppercase tracking-wide text-white/40">Variables</p>
+                <h2 className="mt-1 font-semibold">Insert merge tags</h2>
+              </div>
+              <div className="grid gap-2">
+                {emailVariableInserts.map((key) => (
+                  <button
+                    className="rounded-md border border-white/10 px-3 py-2 text-left font-mono text-xs text-white/80 hover:bg-white/10 disabled:cursor-not-allowed disabled:opacity-40"
+                    disabled={!canEdit}
+                    key={key}
+                    onClick={() => insertEmailVariable(key)}
+                    type="button"
+                  >
+                    {`{{${key}}}`}
+                  </button>
+                ))}
+              </div>
+            </section>
+          )}
+
+          {inspectorPanelId === 'history' && (
+            <section className="mt-6 space-y-4 text-sm">
+              <div>
+                <p className="text-xs uppercase tracking-wide text-white/40">Version history</p>
+                <h2 className="mt-1 font-semibold">{history.length} versions</h2>
+              </div>
+              <ol className="space-y-2">
+                {history.map((version) => (
+                  <li className="rounded-md border border-white/10 p-3 text-xs" key={version.id}>
+                    <div className="font-medium text-white">{version.label}</div>
+                    <div className="mt-1 text-white/45">{version.timestamp}</div>
+                  </li>
+                ))}
+              </ol>
+            </section>
+          )}
+
+          {inspectorPanelId === 'issues' && (
+            <section className="mt-6 space-y-4 text-sm">
+              <div>
+                <p className="text-xs uppercase tracking-wide text-white/40">Publish blockers</p>
+                <h2 className="mt-1 font-semibold">{issuePanelTitle}</h2>
+              </div>
+              <button
+                className="inline-flex h-9 w-full items-center justify-center gap-2 rounded-md border border-white/10 text-sm font-medium text-white/80 hover:bg-white/10 disabled:cursor-not-allowed disabled:opacity-40"
+                disabled={!canEdit || reviewState === 'checking'}
+                onClick={() => void reviewCurrentDraft()}
+                type="button"
+              >
+                <Eye className="size-4" />
+                {reviewState === 'checking' ? 'Reviewing...' : 'Review current draft'}
+              </button>
+              {reviewState === 'error' && (
+                <p className="rounded-md border border-red-400/30 bg-red-400/10 p-3 text-xs text-red-100">
+                  Unable to review the current email draft.
+                </p>
+              )}
+              {issuePanelIssues.length === 0 ? (
+                <p className="rounded-md border border-emerald-400/30 bg-emerald-400/10 p-3 text-xs text-emerald-100">
+                  No publish blockers.
+                </p>
+              ) : (
+                <ul className="space-y-2">
+                  {issuePanelIssues.map((issue) => (
+                    <li
+                      className={`rounded-md border p-3 text-xs ${issueBadgeClassName(issue)}`}
+                      key={validationIssueKey(issue)}
+                    >
+                      <div className="flex items-center justify-between gap-3">
+                        <strong>{issue.code}</strong>
+                        <span className="uppercase tracking-wide">{issue.severity}</span>
+                      </div>
+                      <p className="mt-1 opacity-80">{issue.message}</p>
+                      {issue.field && <p className="mt-2 font-mono opacity-60">{issue.field}</p>}
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </section>
+          )}
+
+          {inspectorPanelId === 'json' && (
+            <section className="mt-6 space-y-4 text-sm">
+              <div>
+                <p className="text-xs uppercase tracking-wide text-white/40">Editor JSON</p>
+                <h2 className="mt-1 font-semibold">Saved payload</h2>
+              </div>
+              <pre className="max-h-[42rem] overflow-auto rounded-md border border-white/10 bg-white/5 p-3 text-xs leading-5 text-white/75">
+                {JSON.stringify(emailDocument, null, 2)}
+              </pre>
+            </section>
+          )}
+        </aside>
+      </div>
+
+      {previewOpen && <PreviewDrawer onClose={() => setPreviewOpen(false)} preview={preview} />}
+    </section>
   );
 }

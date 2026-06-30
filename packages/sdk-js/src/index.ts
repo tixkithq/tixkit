@@ -565,6 +565,8 @@ export type EmailTemplateDocument = {
   editor: {
     provider: '@react-email/editor';
     contentHtml: string;
+    contentText?: string;
+    contentJson?: Record<string, unknown>;
   };
   settings: {
     templateKey: string;

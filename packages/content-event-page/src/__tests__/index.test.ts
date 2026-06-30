@@ -243,9 +243,11 @@ describe('custom embed sanitization', () => {
   it('removes scripts, event handlers, and unsafe URL attributes', () => {
     expect(
       sanitizeEventPageHtml(
-        '<div onclick="alert(1)" onmouseover=alert(2)><script>alert(1)</script><a href="jav&#x61;script:alert(1)" src=DATA:text/html,evil>quoted</a><img src="fi&Tab;le&colon;///etc/passwd" onerror=alert(3) /><a href="java&#9999999999;script:alert(1)">bad entity</a><form action="jav&#x61;script:alert(1)"><button>submit</button></form><iframe srcdoc="&lt;script&gt;alert(1)&lt;/script&gt;"></iframe><object data="jav&#x61;script:alert(1)"></object><svg><a xlink:href="jav&#x61;script:alert(1)">svg</a></svg></div>',
+        '<div onclick="alert(1)" onmouseover=alert(2)><script>alert(1)</script><a href="jav&#x61;script:alert(1)" src=DATA:text/html,evil>quoted</a><img src="fi&Tab;le&colon;///etc/passwd" onerror=alert(3) /><a/href=javascript:alert(1)>slash link</a><img/src=javascript:alert(2) alt="slash image" /><a href="java&#9999999999;script:alert(1)">bad entity</a><form action="jav&#x61;script:alert(1)"><button>submit</button></form><iframe srcdoc="&lt;script&gt;alert(1)&lt;/script&gt;"></iframe><object data="jav&#x61;script:alert(1)"></object><svg><a xlink:href="jav&#x61;script:alert(1)">svg</a></svg></div>',
       ),
-    ).toBe('<div><a>quoted</a><img /><a>bad entity</a></div>');
+    ).toBe(
+      '<div><a>quoted</a><img /><a>slash link</a><img alt="slash image" /><a>bad entity</a></div>',
+    );
   });
 });
 

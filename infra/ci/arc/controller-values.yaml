@@ -15,7 +15,7 @@ affinity:
             - key: node-role.kubernetes.io/ci
               operator: In
               values:
-                - "true"
+                - 'true'
 
 tolerations:
   - key: dedicated

@@ -450,6 +450,37 @@ describe('box-office order route', () => {
     );
   });
 
+  it('does not compensate a box-office session after the checkout workflow starts', async () => {
+    const tables = baseTables();
+    const startCheckoutSession = vi.fn(async () => ({
+      workflowId: 'checkout-session:cs_box',
+      result: async () => {
+        throw new Error('Temporal result stream disconnected');
+      },
+    }));
+    const { app, reserveCart } = await setupApp({ tables, startCheckoutSession });
+
+    const response = await app.inject({
+      method: 'POST',
+      url: '/events/evt_box/box-office/orders',
+      headers: { 'idempotency-key': 'box_workflow_disconnect' },
+      payload: {
+        tenderType: 'cash',
+        amountCents: 2500,
+        buyer: { email: 'door@example.com', firstName: 'Door', lastName: 'Buyer' },
+        items: [{ ticketTypeId: 'tt_ga', quantity: 1 }],
+      },
+    });
+
+    expect(response.statusCode).toBe(500);
+    expect(reserveCart).toHaveBeenCalledTimes(1);
+    expect(startCheckoutSession).toHaveBeenCalledTimes(1);
+    expect(tables.checkout_sessions).toHaveLength(1);
+    expect(tables.checkout_sessions[0]).toMatchObject({
+      status: 'open',
+    });
+  });
+
   it('rejects a cash tender that does not match the server-priced total before reserving inventory', async () => {
     const tables = baseTables();
     const reserveCart = vi.fn();

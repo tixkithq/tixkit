@@ -124,6 +124,260 @@ describe('validateEmailTemplate', () => {
     expect(result.valid).toBe(false);
     expect(result.issues.some((issue) => issue.code === 'unsafe_raw_html')).toBe(true);
   });
+
+  it('blocks active HTML emitted through the React Email editor export', () => {
+    const template = createDefaultEmailTemplate({
+      editor: {
+        provider: REACT_EMAIL_EDITOR_PACKAGE,
+        contentHtml:
+          '<p>Tickets ready</p><img src="https://cdn.example.test/qr.png" onerror="alert(1)">',
+        contentText: 'Tickets ready',
+        contentJson: { type: 'doc' },
+      },
+    });
+
+    const result = validateEmailTemplate(template);
+
+    expect(result.valid).toBe(false);
+    expect(result.issues).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          code: 'unsafe_editor_html',
+          field: 'editor.contentHtml',
+        }),
+      ]),
+    );
+  });
+
+  it('blocks editor-exported images without alt text', () => {
+    const template = createDefaultEmailTemplate({
+      editor: {
+        provider: REACT_EMAIL_EDITOR_PACKAGE,
+        contentHtml: '<p>Tickets ready</p><img src="https://cdn.example.test/qr.png">',
+        contentText: 'Tickets ready',
+        contentJson: { type: 'doc' },
+      },
+    });
+
+    const result = validateEmailTemplate(template);
+
+    expect(result.valid).toBe(false);
+    expect(result.issues).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          code: 'missing_image_alt',
+          field: 'editor.contentHtml.images.0.alt',
+        }),
+      ]),
+    );
+  });
+
+  it('blocks SVG, namespaced URLs, srcdoc, and inline styles in editor exports', () => {
+    const template = createDefaultEmailTemplate({
+      editor: {
+        provider: REACT_EMAIL_EDITOR_PACKAGE,
+        contentHtml: [
+          '<p style="background:url(javascript:alert(1))">Tickets ready</p>',
+          '<svg><a xlink:href="javascript:alert(1)">Open</a></svg>',
+          '<iframe srcdoc="<script>alert(1)</script>"></iframe>',
+        ].join(''),
+        contentText: 'Tickets ready',
+        contentJson: { type: 'doc' },
+      },
+    });
+
+    const result = validateEmailTemplate(template);
+
+    expect(result.valid).toBe(false);
+    expect(result.issues).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          code: 'unsafe_editor_html',
+          field: 'editor.contentHtml',
+        }),
+        expect.objectContaining({
+          code: 'unsafe_link',
+          field: 'editor.contentHtml',
+        }),
+      ]),
+    );
+  });
+
+  it('decodes HTML entities before validating editor link schemes', async () => {
+    const template = createDefaultEmailTemplate({
+      editor: {
+        provider: REACT_EMAIL_EDITOR_PACKAGE,
+        contentHtml: '<p><a href="jav&#x61;script&colon;alert(1)">Open tickets</a></p>',
+        contentText: 'Open tickets',
+        contentJson: { type: 'doc' },
+      },
+    });
+
+    const rendered = await renderEmailTemplate(template, context);
+
+    expect(rendered.validation.valid).toBe(false);
+    expect(rendered.validation.issues).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          code: 'unsafe_link',
+          field: 'editor.contentHtml',
+        }),
+      ]),
+    );
+    expect(rendered.html).toBe('');
+    expect(rendered.text).toBe('');
+  });
+
+  it('blocks unquoted unsafe editor links before rendering editor HTML', async () => {
+    const template = createDefaultEmailTemplate({
+      editor: {
+        provider: REACT_EMAIL_EDITOR_PACKAGE,
+        contentHtml: '<p><a href=javascript:alert(1)>Open tickets</a></p>',
+        contentText: 'Open tickets',
+        contentJson: { type: 'doc' },
+      },
+    });
+
+    const rendered = await renderEmailTemplate(template, context);
+
+    expect(rendered.validation.valid).toBe(false);
+    expect(rendered.validation.issues).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          code: 'unsafe_link',
+          field: 'editor.contentHtml',
+        }),
+      ]),
+    );
+    expect(rendered.html).toBe('');
+    expect(rendered.text).toBe('');
+  });
+
+  it('blocks slash-separated unsafe editor attributes before rendering editor HTML', async () => {
+    const template = createDefaultEmailTemplate({
+      editor: {
+        provider: REACT_EMAIL_EDITOR_PACKAGE,
+        contentHtml:
+          '<p><a/href=javascript:alert(1)>Open</a><img/src=javascript:alert(2) alt="QR"></p>',
+        contentText: 'Open',
+        contentJson: { type: 'doc' },
+      },
+    });
+
+    const rendered = await renderEmailTemplate(template, context);
+
+    expect(rendered.validation.valid).toBe(false);
+    expect(rendered.validation.issues).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          code: 'unsafe_link',
+          field: 'editor.contentHtml',
+        }),
+      ]),
+    );
+    expect(rendered.html).toBe('');
+    expect(rendered.text).toBe('');
+  });
+
+  it('blocks active raw HTML even when marked safe', async () => {
+    const template = createDefaultEmailTemplate({
+      blocks: [
+        {
+          type: 'raw_html',
+          html: '<p onclick="alert(1)"><a href="jav&#x61;script:alert(1)">Bad</a></p><script>alert(1)</script>',
+          safe: true,
+        },
+        {
+          type: 'unsubscribe_footer',
+          body: 'Manage preferences',
+          unsubscribeUrl: 'https://help.example.test/preferences',
+        },
+      ],
+    });
+
+    const rendered = await renderEmailTemplate(template, context);
+
+    expect(rendered.validation.valid).toBe(false);
+    expect(rendered.validation.issues).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          code: 'unsafe_raw_html',
+          field: 'blocks.raw_html',
+        }),
+        expect.objectContaining({
+          code: 'unsafe_link',
+          field: 'blocks.0.html',
+        }),
+      ]),
+    );
+    expect(rendered.html).toBe('');
+    expect(rendered.text).toBe('');
+  });
+
+  it('blocks slash-separated unsafe raw HTML attributes before rendering', async () => {
+    const template = createDefaultEmailTemplate({
+      blocks: [
+        {
+          type: 'raw_html',
+          html: '<p><a/href=javascript:alert(1)>Bad</a><img/src=javascript:alert(2) alt="QR"></p>',
+          safe: true,
+        },
+        {
+          type: 'unsubscribe_footer',
+          body: 'Manage preferences',
+          unsubscribeUrl: 'https://help.example.test/preferences',
+        },
+      ],
+    });
+
+    const rendered = await renderEmailTemplate(template, context);
+
+    expect(rendered.validation.valid).toBe(false);
+    expect(rendered.validation.issues).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          code: 'unsafe_link',
+          field: 'blocks.0.html',
+        }),
+      ]),
+    );
+    expect(rendered.html).toBe('');
+    expect(rendered.text).toBe('');
+  });
+
+  it('validates required merge tags against the editor export that will render', async () => {
+    const template = createDefaultEmailTemplate({
+      editor: {
+        provider: REACT_EMAIL_EDITOR_PACKAGE,
+        contentHtml: '<p>Your tickets are ready.</p>',
+        contentText: 'Your tickets are ready.',
+        contentJson: { type: 'doc' },
+      },
+      blocks: [
+        {
+          type: 'event_hero',
+          headline: '{{event.title}}',
+          body: 'Hi {{recipient.name}}, your order is confirmed.',
+          ctaLabel: 'View tickets',
+          ctaUrl: '{{event.checkoutUrl}}',
+        },
+      ],
+    });
+
+    const rendered = await renderEmailTemplate(template, context);
+
+    expect(rendered.validation.valid).toBe(false);
+    expect(rendered.validation.issues).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          code: 'missing_required_variable',
+          field: 'recipient.name',
+        }),
+      ]),
+    );
+    expect(rendered.html).toBe('');
+    expect(rendered.text).toBe('');
+  });
 });
 
 describe('renderEmailTemplate', () => {
@@ -191,6 +445,29 @@ describe('renderEmailTemplate', () => {
     expect(rendered.html).toContain('Save this date');
     expect(rendered.html).toContain('https://tickets.example.test/qr/TKT-123.png');
     expect(rendered.text).toContain('Save this date');
+  });
+
+  it('renders safe raw HTML blocks without React Email child conflicts', async () => {
+    const template = createDefaultEmailTemplate({
+      blocks: [
+        {
+          type: 'raw_html',
+          html: '<p>Safe sponsor copy</p>',
+          safe: true,
+        },
+        {
+          type: 'unsubscribe_footer',
+          body: 'Manage preferences',
+          unsubscribeUrl: 'https://help.example.test/preferences',
+        },
+      ],
+    });
+
+    const rendered = await renderEmailTemplate(template, context);
+
+    expect(rendered.validation.valid).toBe(true);
+    expect(rendered.html).toContain('Safe sponsor copy');
+    expect(rendered.text).toContain('Safe sponsor copy');
   });
 
   it('load-renders concurrent email variants without drifting output or merge-tag escaping', async () => {

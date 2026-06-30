@@ -103,6 +103,8 @@ export type EmailTemplateDocument = {
   editor: {
     provider: typeof REACT_EMAIL_EDITOR_PACKAGE;
     contentHtml: string;
+    contentText?: string;
+    contentJson?: Record<string, unknown>;
   };
   settings: EmailTemplateSettings;
   blocks: EmailTemplateBlock[];
@@ -135,6 +137,18 @@ export function normalizeEmailTemplateDocument(value: unknown): EmailTemplateDoc
   if (!document.editor || typeof document.editor !== 'object') return undefined;
   if (document.editor.provider !== REACT_EMAIL_EDITOR_PACKAGE) return undefined;
   if (typeof document.editor.contentHtml !== 'string') return undefined;
+  if (
+    document.editor.contentText !== undefined &&
+    typeof document.editor.contentText !== 'string'
+  ) {
+    return undefined;
+  }
+  if (
+    document.editor.contentJson !== undefined &&
+    (!document.editor.contentJson || typeof document.editor.contentJson !== 'object')
+  ) {
+    return undefined;
+  }
   if (!document.settings || typeof document.settings !== 'object') return undefined;
   if (typeof document.settings.templateKey !== 'string') return undefined;
   if (typeof document.settings.subject !== 'string') return undefined;
@@ -271,6 +285,7 @@ export function validateEmailTemplate(
     'email',
   );
   issues.push(...base.issues);
+  issues.push(...validateRequiredMergeTags(renderedForValidation));
 
   if (!document.settings.sender.fromEmail || !isEmailLike(document.settings.sender.fromEmail)) {
     issues.push({
@@ -306,18 +321,37 @@ export function validateEmailTemplate(
     issues.push(issue);
   }
 
+  for (const issue of validateHtmlSafety(document.editor.contentHtml, {
+    code: 'unsafe_editor_html',
+    field: 'editor.contentHtml',
+    message: 'Editor HTML may not contain active HTML, scripting attributes, or unsafe URLs',
+  })) {
+    issues.push(issue);
+  }
+
   for (const issue of validateImageAlts(document)) {
+    issues.push(issue);
+  }
+  for (const issue of validateEditorImageAlts(document.editor.contentHtml)) {
     issues.push(issue);
   }
 
   for (const block of document.blocks) {
-    if (block.type === 'raw_html' && !block.safe) {
+    if (block.type !== 'raw_html') continue;
+    if (!block.safe) {
       issues.push({
         code: 'unsafe_raw_html',
         message: 'Raw HTML blocks must be explicitly marked safe after sanitization review',
         severity: 'error',
         field: 'blocks.raw_html',
       });
+    }
+    for (const issue of validateHtmlSafety(block.html, {
+      code: 'unsafe_raw_html',
+      field: 'blocks.raw_html',
+      message: 'Raw HTML blocks may not contain active HTML, scripting attributes, or unsafe URLs',
+    })) {
+      issues.push(issue);
     }
   }
 
@@ -362,6 +396,19 @@ export async function renderEmailTemplate(
   const previewText = document.settings.previewText
     ? renderPlain(document.settings.previewText, context)
     : undefined;
+  if (document.editor.contentJson) {
+    return {
+      subject,
+      previewText,
+      html: renderHtml(document.editor.contentHtml, context),
+      text: renderPlain(
+        document.editor.contentText?.trim() || plainTextFromHtml(document.editor.contentHtml),
+        context,
+      ),
+      validation,
+    };
+  }
+
   const html = await render(
     React.createElement(EmailTemplate, {
       blocks: document.blocks,
@@ -545,7 +592,7 @@ function renderBlock(block: EmailTemplateBlock, context: MergeTagContext): React
         ),
       );
     case 'raw_html':
-      return React.createElement(Section, {
+      return React.createElement('div', {
         dangerouslySetInnerHTML: { __html: block.safe ? block.html : '' },
         style: { backgroundColor: '#ffffff', padding: '24px 28px' },
       });
@@ -558,11 +605,27 @@ function collectTemplateStrings(document: EmailTemplateDocument): string[] {
     document.settings.previewText ?? '',
     document.settings.sender.fromName ?? '',
     document.editor.contentHtml,
+    document.editor.contentText ?? '',
   ];
+  if (document.editor.contentJson) {
+    return values.filter(Boolean);
+  }
   for (const block of document.blocks) {
     values.push(...stringsFromBlock(block));
   }
   return values.filter(Boolean);
+}
+
+function validateRequiredMergeTags(template: string): ContentValidationIssue[] {
+  const result = validateMergeTags(template);
+  return result.missingRequired.map(
+    (tag): ContentValidationIssue => ({
+      code: 'missing_required_variable',
+      message: `Required merge tag {{${tag}}} must appear in rendered email content`,
+      severity: 'error',
+      field: tag,
+    }),
+  );
 }
 
 function stringsFromBlock(block: EmailTemplateBlock): string[] {
@@ -601,7 +664,7 @@ function validateLinks(
 ): ContentValidationIssue[] {
   const issues: ContentValidationIssue[] = [];
   for (const link of linkFields(document)) {
-    const withExampleContext = renderUrl(link.url, sampleContext());
+    const withExampleContext = decodeHtmlAttributeValue(renderUrl(link.url, sampleContext()));
     if (!isAllowedDestination(withExampleContext, allowPrivate)) {
       issues.push({
         code: 'unsafe_link',
@@ -610,6 +673,42 @@ function validateLinks(
         field: link.field,
       });
     }
+  }
+  return issues;
+}
+
+function validateHtmlSafety(
+  html: string,
+  issue: Pick<ContentValidationIssue, 'code' | 'field' | 'message'>,
+): ContentValidationIssue[] {
+  const issues: ContentValidationIssue[] = [];
+  if (
+    /<\s*(?:script|iframe|object|embed|form|input|button|base|svg|math|style|template|meta|link)\b/i.test(
+      html,
+    )
+  ) {
+    issues.push({
+      code: issue.code,
+      message: issue.message,
+      severity: 'error',
+      field: issue.field,
+    });
+  }
+  if (/[\s/]+on[a-z][a-z0-9_-]*\s*=/i.test(html)) {
+    issues.push({
+      code: issue.code,
+      message: issue.message,
+      severity: 'error',
+      field: issue.field,
+    });
+  }
+  if (/[\s/]+(?:srcdoc|style|[a-z][\w-]*:[\w-]+)\s*=/i.test(html)) {
+    issues.push({
+      code: issue.code,
+      message: issue.message,
+      severity: 'error',
+      field: issue.field,
+    });
   }
   return issues;
 }
@@ -637,6 +736,30 @@ function validateImageAlts(document: EmailTemplateDocument): ContentValidationIs
   return issues;
 }
 
+function validateEditorImageAlts(html: string): ContentValidationIssue[] {
+  const issues: ContentValidationIssue[] = [];
+  const imageTagPattern = /<img\b[^>]*>/gi;
+  let imageIndex = 0;
+  let match: RegExpExecArray | null;
+
+  while ((match = imageTagPattern.exec(html))) {
+    const imageTag = match[0];
+    const altMatch = /[\s/]+alt\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s"'=<>`]+))/i.exec(imageTag);
+    const altText = decodeHtmlAttributeValue(altMatch?.[1] ?? altMatch?.[2] ?? altMatch?.[3] ?? '');
+    if (!altText.trim()) {
+      issues.push({
+        code: 'missing_image_alt',
+        message: 'Editor images require alt text before publish',
+        severity: 'error',
+        field: `editor.contentHtml.images.${imageIndex}.alt`,
+      });
+    }
+    imageIndex += 1;
+  }
+
+  return issues;
+}
+
 function linkFields(document: EmailTemplateDocument): { field: string; url: string }[] {
   const links: { field: string; url: string }[] = [];
   document.blocks.forEach((block, index) => {
@@ -657,8 +780,60 @@ function linkFields(document: EmailTemplateDocument): { field: string; url: stri
     if (block.type === 'unsubscribe_footer') {
       links.push({ field: `blocks.${index}.unsubscribeUrl`, url: block.unsubscribeUrl });
     }
+    if (block.type === 'raw_html') {
+      links.push(...htmlLinkFields(block.html, `blocks.${index}.html`));
+    }
   });
+  links.push(...htmlLinkFields(document.editor.contentHtml, 'editor.contentHtml'));
   return links;
+}
+
+function htmlLinkFields(html: string, field: string): { field: string; url: string }[] {
+  const links: { field: string; url: string }[] = [];
+  const attributePattern =
+    /[\s/]+(?:href|src|data|action|formaction|xlink:href)\s*=\s*(?:(['"])(.*?)\1|([^\s"'=<>`]+))/gi;
+  for (const match of html.matchAll(attributePattern)) {
+    links.push({ field, url: match[2] ?? match[3] ?? '' });
+  }
+  return links;
+}
+
+function decodeHtmlAttributeValue(value: string): string {
+  return value.replace(
+    /&(?:#x([0-9a-f]+)|#([0-9]+)|([a-z][a-z0-9]+));?/gi,
+    (_entity, hex: string | undefined, decimal: string | undefined, named: string | undefined) => {
+      if (hex) return htmlCodePointEntity(hex, 16);
+      if (decimal) return htmlCodePointEntity(decimal, 10);
+      switch (named?.toLowerCase()) {
+        case 'amp':
+          return '&';
+        case 'colon':
+          return ':';
+        case 'tab':
+          return '\t';
+        case 'newline':
+          return '\n';
+        case 'lt':
+          return '<';
+        case 'gt':
+          return '>';
+        case 'quot':
+          return '"';
+        case 'apos':
+          return "'";
+        default:
+          return '';
+      }
+    },
+  );
+}
+
+function htmlCodePointEntity(value: string, radix: number): string {
+  const codePoint = Number.parseInt(value, radix);
+  if (!Number.isFinite(codePoint) || codePoint < 0 || codePoint > 0x10ffff) {
+    return '';
+  }
+  return String.fromCodePoint(codePoint);
 }
 
 function hasUnsubscribeFooter(document: EmailTemplateDocument): boolean {
@@ -744,8 +919,30 @@ function renderPlain(template: string, context: MergeTagContext): string {
   return renderMergeTags(template, context, { channel: 'email', escape: 'plain' });
 }
 
+function renderHtml(template: string, context: MergeTagContext): string {
+  return renderMergeTags(template, context, { channel: 'email', escape: 'html' });
+}
+
 function renderUrl(template: string, context: MergeTagContext): string {
   return renderMergeTags(template, context, { channel: 'email', escape: 'plain' });
+}
+
+function plainTextFromHtml(html: string): string {
+  return html
+    .replace(/<style\b[\s\S]*?<\/style>/gi, ' ')
+    .replace(/<script\b[\s\S]*?<\/script>/gi, ' ')
+    .replace(/<br\s*\/?>/gi, '\n')
+    .replace(/<\/(?:p|div|section|article|h[1-6]|li|tr)>/gi, '\n')
+    .replace(/<[^>]*>/g, ' ')
+    .replace(/&nbsp;/gi, ' ')
+    .replace(/&amp;/gi, '&')
+    .replace(/&lt;/gi, '<')
+    .replace(/&gt;/gi, '>')
+    .replace(/&quot;/gi, '"')
+    .replace(/&#39;/g, "'")
+    .replace(/\n{3,}/g, '\n\n')
+    .replace(/[ \t]{2,}/g, ' ')
+    .trim();
 }
 
 function sampleContext(): MergeTagContext {
