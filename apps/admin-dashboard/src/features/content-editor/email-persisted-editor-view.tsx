@@ -426,9 +426,9 @@ function NativeEmailInspector({ host }: { host: HTMLElement | null }) {
   return createPortal(
     <div className="tixkit-email-native-inspector">
       <Inspector.Root aria-label="React Email style inspector">
-        <div className="space-y-1 border-b border-white/10 pb-3">
-          <p className="text-xs uppercase tracking-wide text-white/60">Selection</p>
-          <div className="text-sm font-semibold text-white">
+        <div className="space-y-1 border-b border-border pb-3">
+          <p className="text-xs uppercase tracking-wide text-muted-foreground">Selection</p>
+          <div className="text-sm font-semibold text-foreground">
             <Inspector.Breadcrumb />
           </div>
         </div>
@@ -507,24 +507,24 @@ function plainTextFromHtml(html: string): string {
 function PreviewDrawer({ onClose, preview }: { onClose: () => void; preview: EditorPreview }) {
   return (
     <aside
-      className="fixed inset-y-0 right-0 z-50 flex w-full max-w-xl flex-col border-l border-white/10 bg-neutral-950 text-white shadow-2xl"
+      className="fixed inset-y-0 right-0 z-50 flex w-full max-w-xl flex-col border-l bg-background text-foreground shadow-2xl"
       data-testid="preview-drawer"
     >
-      <div className="flex h-14 items-center justify-between border-b border-white/10 px-4">
+      <div className="flex h-14 items-center justify-between border-b px-4">
         <div>
-          <p className="text-xs uppercase tracking-wide text-white/60">{preview.format}</p>
+          <p className="text-xs uppercase tracking-wide text-muted-foreground">{preview.format}</p>
           <h2 className="text-sm font-semibold">{preview.label}</h2>
         </div>
         <button
           aria-label="Close preview"
-          className="inline-flex size-8 items-center justify-center rounded-md border border-white/10 text-white/70 hover:bg-white/10 hover:text-white"
+          className="inline-flex size-8 items-center justify-center rounded-md border text-muted-foreground transition-colors hover:bg-accent hover:text-accent-foreground"
           onClick={onClose}
           type="button"
         >
           <PanelRightClose className="size-4" />
         </button>
       </div>
-      <pre className="min-h-0 flex-1 overflow-auto whitespace-pre-wrap p-4 text-sm leading-6 text-white/80">
+      <pre className="min-h-0 flex-1 overflow-auto whitespace-pre-wrap p-4 text-sm leading-6 text-muted-foreground">
         {preview.output}
       </pre>
     </aside>
@@ -1009,7 +1009,7 @@ export function EmailPersistedEditorView({ eventId }: { eventId: string }) {
 
   if (loading) {
     return (
-      <div className="flex min-h-svh items-center justify-center bg-neutral-950 text-sm text-white/65">
+      <div className="flex min-h-svh items-center justify-center bg-background text-sm text-muted-foreground">
         Loading email editor...
       </div>
     );
@@ -1017,15 +1017,15 @@ export function EmailPersistedEditorView({ eventId }: { eventId: string }) {
 
   if (error || !event || !document || !draft || !emailDocument || !preview) {
     return (
-      <section className="flex min-h-svh items-center justify-center bg-neutral-950 p-6 text-white">
-        <div className="w-full max-w-lg space-y-4 rounded-lg border border-white/10 bg-white/5 p-6">
+      <section className="flex min-h-svh items-center justify-center bg-background p-6 text-foreground">
+        <div className="w-full max-w-lg space-y-4 rounded-lg border bg-card p-6 text-card-foreground">
           <div className="space-y-1">
-            <p className="text-sm text-white/50">Email template editor</p>
+            <p className="text-sm text-muted-foreground">Email template editor</p>
             <h1 className="text-2xl font-semibold">Unable to load editor</h1>
           </div>
-          <p className="text-sm text-red-200">{error ?? 'Email editor could not load.'}</p>
+          <p className="text-sm text-destructive">{error ?? 'Email editor could not load.'}</p>
           <button
-            className="rounded-md border border-white/15 px-3 py-2 text-sm hover:bg-white/10"
+            className="rounded-md border px-3 py-2 text-sm transition-colors hover:bg-accent"
             onClick={() => void load()}
             type="button"
           >
