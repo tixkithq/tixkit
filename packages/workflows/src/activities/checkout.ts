@@ -2108,6 +2108,15 @@ export async function finalizeOrderActivity(input: {
       });
 
     if (!finalizeResult.ok) {
+      const committed = await db
+        .selectFrom('orders')
+        .select(['id'])
+        .where('checkout_session_id', '=', input.checkoutSessionId)
+        .where('tenant_id', '=', input.tenantId)
+        .executeTakeFirst();
+      if (committed) {
+        return okResult({ orderId: committed.id });
+      }
       return errResult(finalizeResult.errorCode, finalizeResult.message, finalizeResult.retryable);
     }
 
@@ -2130,10 +2139,14 @@ export async function finalizeOrderActivity(input: {
     if (err instanceof WaitlistOfferUnavailableError) {
       return errResult('WAITLIST_OFFER_UNAVAILABLE', err.message, false);
     }
+    const retryable = isRetryableDbConcurrencyError(err);
+    if (retryable) {
+      throw err;
+    }
     return errResult(
       'ORDER_FINALIZE_FAILED',
       err instanceof Error ? err.message : 'Unknown error',
-      isRetryableDbConcurrencyError(err),
+      false,
     );
   } finally {
     await db.destroy();

@@ -132,6 +132,14 @@ export type CheckoutSessionWorkflowInput = {
   tenderType?: BoxOfficeTenderType;
 };
 
+function throwIfRetryableFinalizeFailure(
+  result: Extract<WorkflowActivityResult<unknown>, { ok: false }>,
+) {
+  if (result.retryable) {
+    throw new Error(`Checkout finalization failed (${result.errorCode}): ${result.message}`);
+  }
+}
+
 export async function checkoutSessionWorkflow(
   input: CheckoutSessionWorkflowInput,
 ): Promise<{ orderId?: string; status: string }> {
@@ -252,6 +260,7 @@ export async function checkoutSessionWorkflow(
     });
 
     if (!finalizeResult.ok) {
+      throwIfRetryableFinalizeFailure(finalizeResult);
       await releaseCheckoutHold({ checkoutSessionId: input.checkoutSessionId });
       state = { status: 'failed', holdId: input.holdId, error: finalizeResult.message };
       return { status: 'failed' };
@@ -380,6 +389,7 @@ export async function checkoutSessionWorkflow(
   });
 
   if (!finalizeResult.ok) {
+    throwIfRetryableFinalizeFailure(finalizeResult);
     await compensateOrphanPayment({
       provider: paymentProvider,
       providerIntentId: paymentIntentId,

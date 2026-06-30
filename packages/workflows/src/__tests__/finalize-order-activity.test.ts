@@ -9,6 +9,9 @@ const dbState = {
   tables: {} as Record<string, Record<string, any>>,
   locks: [] as string[],
   destroy: vi.fn(),
+  afterSelect: undefined as
+    | ((table: string, rows: Array<Record<string, any>>) => void)
+    | undefined,
 };
 
 const stripeMock = {
@@ -106,7 +109,9 @@ vi.mock('@tixkit/db', () => {
         return query;
       },
       async execute() {
-        return Object.values(rowsFor(table)).filter((row) => matches(row, filters));
+        const rows = Object.values(rowsFor(table)).filter((row) => matches(row, filters));
+        dbState.afterSelect?.(table, rows);
+        return rows;
       },
       async executeTakeFirst() {
         return (await query.execute())[0];
@@ -312,6 +317,7 @@ describe('createPaymentIntentActivity capture mode', () => {
   beforeEach(() => {
     dbState.tables = {};
     dbState.locks = [];
+    dbState.afterSelect = undefined;
     dbState.destroy.mockClear();
     stripeMock.paymentIntentsCreate.mockClear();
     stripeMock.paymentIntentsRetrieve.mockClear();
@@ -607,6 +613,7 @@ describe('finalizeOrderActivity inventory holds', () => {
   beforeEach(() => {
     dbState.tables = {};
     dbState.locks = [];
+    dbState.afterSelect = undefined;
     dbState.destroy.mockClear();
     seedCheckout({ holdExpiresAt: new Date(Date.now() + 60_000) });
     seedTrustedPaymentIntent();
@@ -752,6 +759,54 @@ describe('finalizeOrderActivity inventory holds', () => {
     expect(dbState.tables.checkout_holds.hld_1.status).toBe('expired');
     expect(dbState.tables.inventory_pools.pool_1.sold_count).toBe(0);
     expect(dbState.tables.checkout_sessions.cs_1.status).toBe('expired');
+    expect(dbState.destroy).toHaveBeenCalledTimes(1);
+  });
+
+  it('returns a committed order when a concurrent finalize wins before a handled transaction failure', async () => {
+    seedCheckout({ holdExpiresAt: new Date(Date.now() - 60_000) });
+    seedTrustedPaymentIntent();
+
+    let injected = false;
+    dbState.afterSelect = (table) => {
+      if (table !== 'orders' || injected) return;
+      injected = true;
+      dbState.tables.orders.ord_committed = {
+        id: 'ord_committed',
+        tenant_id: 'tnt_1',
+        checkout_session_id: 'cs_1',
+      };
+    };
+
+    const result = await finalizeOrderActivity({
+      checkoutSessionId: 'cs_1',
+      tenantId: 'tnt_1',
+      paymentIntentId: 'pi_provider_1',
+    });
+
+    expect(result).toMatchObject({
+      ok: true,
+      value: { orderId: 'ord_committed' },
+    });
+    expect(dbState.tables.checkout_holds.hld_1.status).toBe('expired');
+    expect(dbState.destroy).toHaveBeenCalledTimes(1);
+  });
+
+  it('throws retryable database concurrency errors so Temporal retries finalization', async () => {
+    const concurrencyError = Object.assign(new Error('serialization failure'), {
+      code: '40001',
+    });
+
+    dbState.afterSelect = (table) => {
+      if (table === 'checkout_holds') throw concurrencyError;
+    };
+
+    await expect(
+      finalizeOrderActivity({
+        checkoutSessionId: 'cs_1',
+        tenantId: 'tnt_1',
+        paymentIntentId: 'pi_provider_1',
+      }),
+    ).rejects.toBe(concurrencyError);
     expect(dbState.destroy).toHaveBeenCalledTimes(1);
   });
 
@@ -961,6 +1016,7 @@ describe('releaseHoldActivity checkout session status', () => {
   beforeEach(() => {
     dbState.tables = {};
     dbState.locks = [];
+    dbState.afterSelect = undefined;
     dbState.destroy.mockClear();
     seedCheckout({ holdExpiresAt: new Date(Date.now() + 60_000) });
     dbState.tables.checkout_sessions.cs_1.status = 'pending_payment';
@@ -1012,6 +1068,7 @@ describe('finalizeOrderActivity promo code redemption', () => {
   beforeEach(() => {
     dbState.tables = {};
     dbState.locks = [];
+    dbState.afterSelect = undefined;
     dbState.destroy.mockClear();
   });
 

@@ -241,6 +241,24 @@ describe('checkoutSessionWorkflow', () => {
     expect(released).toBe(true);
   });
 
+  it('throws when free checkout finalization returns a retryable error', async () => {
+    let released = false;
+    setActivity('finalizeOrderActivity', async () =>
+      errResult('ORDER_FINALIZE_FAILED', 'database lock timeout', true),
+    );
+    setActivity('releaseHoldActivity', async () => {
+      released = true;
+      return okResult({ released: true });
+    });
+
+    await expect(
+      checkoutSessionWorkflow(makeCheckoutInput({ isFreeOrder: true })),
+    ).rejects.toThrow(
+      'Checkout finalization failed (ORDER_FINALIZE_FAILED): database lock timeout',
+    );
+    expect(released).toBe(false);
+  });
+
   it('completes a paid order when payment succeeds', async () => {
     mockState.conditionResult = true; // Payment succeeded
     const result = await checkoutSessionWorkflow(makeCheckoutInput({ isFreeOrder: false }));
@@ -506,6 +524,49 @@ describe('checkoutSessionWorkflow', () => {
       source: 'checkout_finalize_failed',
       metadata: { eventId: 'evt_1', brandId: 'brd_1', errorCode: 'HOLD_EXPIRED' },
     });
+    expect(emailCalled).toBe(false);
+    expect(issueTicketsCalled).toBe(false);
+    expect(webhookCalled).toBe(false);
+  });
+
+  it('throws when paid checkout finalization returns a retryable error before compensation', async () => {
+    let releaseCalled = false;
+    let compensationCalled = false;
+    let emailCalled = false;
+    let issueTicketsCalled = false;
+    let webhookCalled = false;
+
+    setActivity('finalizeOrderActivity', async () =>
+      errResult('ORDER_FINALIZE_FAILED', 'database lock timeout', true),
+    );
+    setActivity('releaseHoldActivity', async () => {
+      releaseCalled = true;
+      return okResult({ released: true });
+    });
+    setActivity('compensateOrphanPaymentActivity', async () => {
+      compensationCalled = true;
+      return okResult({ status: 'succeeded', action: 'refund', compensationId: 'pcmp_1' });
+    });
+    setActivity('sendConfirmationEmailActivity', async () => {
+      emailCalled = true;
+      return okResult({ jobId: 'emj_1', status: 'queued' });
+    });
+    setActivity('issueTicketsActivity', async () => {
+      issueTicketsCalled = true;
+      return okResult({ issued: 2, jobId: 'emj_2' });
+    });
+    setActivity('emitWebhookEventActivity', async () => {
+      webhookCalled = true;
+      return okResult({ eventId: 'evt_1', deliveries: [] });
+    });
+
+    await expect(
+      checkoutSessionWorkflow(makeCheckoutInput({ isFreeOrder: false })),
+    ).rejects.toThrow(
+      'Checkout finalization failed (ORDER_FINALIZE_FAILED): database lock timeout',
+    );
+    expect(releaseCalled).toBe(false);
+    expect(compensationCalled).toBe(false);
     expect(emailCalled).toBe(false);
     expect(issueTicketsCalled).toBe(false);
     expect(webhookCalled).toBe(false);
