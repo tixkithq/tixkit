@@ -11,6 +11,9 @@ const ENV_KEYS = [
   'NODE_ENV',
   'RATE_LIMIT_MAX',
   'RATE_LIMIT_TIME_WINDOW',
+  'TEMPORAL_ADDRESS',
+  'TEMPORAL_NAMESPACE',
+  'TEMPORAL_TASK_QUEUE',
   'TRUST_PROXY',
 ] as const;
 
@@ -144,6 +147,9 @@ describe('API exposure config parsing', () => {
 
   it('accepts bounded TRUST_PROXY values in production', () => {
     process.env.NODE_ENV = 'production';
+    process.env.TEMPORAL_ADDRESS = 'temporal.example.com:7233';
+    process.env.TEMPORAL_NAMESPACE = 'tixkit.production';
+    process.env.TEMPORAL_TASK_QUEUE = 'tixkit-production';
 
     process.env.TRUST_PROXY = '1';
     expect(loadConfig().trustProxy).toBe(1);
@@ -153,6 +159,33 @@ describe('API exposure config parsing', () => {
 
     process.env.TRUST_PROXY = '10.0.0.0/8,192.168.0.0/16';
     expect(loadConfig().trustProxy).toEqual(['10.0.0.0/8', '192.168.0.0/16']);
+  });
+
+  it('rejects missing production Temporal config', () => {
+    process.env.NODE_ENV = 'production';
+    process.env.TRUST_PROXY = '1';
+    delete process.env.TEMPORAL_ADDRESS;
+    delete process.env.TEMPORAL_NAMESPACE;
+    delete process.env.TEMPORAL_TASK_QUEUE;
+
+    expect(() => loadConfig()).toThrow(
+      'Production Temporal config requires TEMPORAL_ADDRESS, TEMPORAL_NAMESPACE, TEMPORAL_TASK_QUEUE',
+    );
+  });
+
+  it('rejects localhost Temporal addresses in production', () => {
+    process.env.NODE_ENV = 'production';
+    process.env.TRUST_PROXY = '1';
+    process.env.TEMPORAL_NAMESPACE = 'tixkit.production';
+    process.env.TEMPORAL_TASK_QUEUE = 'tixkit-production';
+
+    for (const address of ['localhost:7233', '127.0.0.1:7233', '[::1]:7233']) {
+      process.env.TEMPORAL_ADDRESS = address;
+
+      expect(() => loadConfig(), address).toThrow(
+        'TEMPORAL_ADDRESS must not point to localhost in production. Set it to the managed Temporal endpoint.',
+      );
+    }
   });
 
   it('accepts TRUST_PROXY=true outside production', () => {
@@ -182,6 +215,9 @@ describe('API exposure config parsing', () => {
     expect(loadConfig().rateLimitMax).toBe(1000);
 
     process.env.NODE_ENV = 'production';
+    process.env.TEMPORAL_ADDRESS = 'temporal.example.com:7233';
+    process.env.TEMPORAL_NAMESPACE = 'tixkit.production';
+    process.env.TEMPORAL_TASK_QUEUE = 'tixkit-production';
     expect(loadConfig().rateLimitMax).toBe(100);
   });
 
@@ -243,6 +279,9 @@ describe('API exposure config parsing', () => {
     ]);
 
     process.env.NODE_ENV = 'production';
+    process.env.TEMPORAL_ADDRESS = 'temporal.example.com:7233';
+    process.env.TEMPORAL_NAMESPACE = 'tixkit.production';
+    process.env.TEMPORAL_TASK_QUEUE = 'tixkit-production';
 
     expect(loadConfig().corsAllowedOrigins).toEqual([]);
   });
