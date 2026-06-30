@@ -59,6 +59,40 @@ describe('Generated client compile validation (T33)', () => {
     expect(output).toContain('BrandPage');
   });
 
+  it('generated types preserve public event-page and resale SDK surfaces', async () => {
+    const output = await generateTypes();
+
+    for (const path of [
+      '/public/events/{eventId}/page',
+      '/public/events/{eventId}/content-page',
+      '/public/events/{eventId}/discovery-card',
+      '/public/events/{eventId}/resale-listings',
+      '/public/events/by-slug/{slug}/page',
+      '/s/{slug}',
+      '/tickets/{ticketId}/resale-listings',
+      '/checkout/sessions/{sessionId}/tickets/{ticketId}/resale-listing',
+      '/ticket-listings/{listingId}/delist',
+      '/ticket-listings/{listingId}/complete',
+    ]) {
+      expect(output).toContain(path);
+    }
+
+    for (const schema of [
+      'PublicContentPage',
+      'PublicEventDiscoveryCard',
+      'PublicTicketListing',
+      'PublicTicketListingPage',
+      'TicketListing',
+      'TicketListingPage',
+      'TicketResaleCompletion',
+    ]) {
+      expect(output).toContain(schema);
+    }
+
+    expect(output).toContain('"X-Checkout-Session-Token"');
+    expect(output).toContain('"Idempotency-Key"');
+  });
+
   // Cleanup temp files after all tests.
   it('cleanup', () => {
     if (existsSync(tmpDir)) rmSync(tmpDir, { recursive: true, force: true });
