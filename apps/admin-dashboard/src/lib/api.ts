@@ -1427,6 +1427,11 @@ export type CreateContentDocumentInput = {
   locale?: string;
 };
 
+export type DuplicateContentDocumentInput = {
+  key?: string;
+  name?: string;
+};
+
 export type SaveContentVersionInput = {
   subject?: string;
   previewText?: string;
@@ -1696,6 +1701,10 @@ export type AdminApi = {
     input: CreateContentDocumentInput,
   ): Promise<ApiResult<AdminContentDocument>>;
   getContentDocument(documentId: string): Promise<ApiResult<AdminContentDocument>>;
+  duplicateContentDocument(
+    documentId: string,
+    input?: DuplicateContentDocumentInput,
+  ): Promise<ApiResult<AdminContentDocument>>;
   listContentVersions(
     documentId: string,
   ): Promise<ApiResult<PageResult<AdminContentDocumentVersion>>>;
@@ -5203,6 +5212,20 @@ export const adminApi: AdminApi = {
       () =>
         err<AdminContentDocument>(
           apiError('fixture_unavailable', 'Content documents require the live API', 503),
+      ),
+    );
+  },
+
+  async duplicateContentDocument(documentId, input) {
+    return withFixture(
+      () =>
+        request<AdminContentDocument>(`/v1/content-documents/${documentId}/duplicate`, {
+          method: 'POST',
+          body: JSON.stringify(input ?? {}),
+        }),
+      () =>
+        err<AdminContentDocument>(
+          apiError('fixture_unavailable', 'Content duplication requires the live API', 503),
         ),
     );
   },

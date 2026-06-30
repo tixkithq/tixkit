@@ -225,6 +225,7 @@ test.describe('persisted admin SMS content editor', () => {
     await expectNoAxeViolations(page, testInfo);
 
     await page.getByLabel('More actions').click();
+    page.once('dialog', (dialog) => void dialog.accept());
     await page.getByRole('button', { name: 'Archive template' }).click();
     await expect(page.getByText('Archived SMS template')).toBeVisible();
     const archived = await loadSmsContentState(event.id, page);

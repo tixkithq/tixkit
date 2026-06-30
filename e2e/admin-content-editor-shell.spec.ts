@@ -35,10 +35,10 @@ async function attachScreenshot(page: Page, testInfo: TestInfo, name: string): P
 
 async function expectShellRegions(page: Page): Promise<void> {
   await expect(page.locator('[data-testid="content-editor-shell"]').first()).toBeVisible();
-  await expect(page.getByLabel('Insert blocks').first()).toBeVisible();
+  await expect(page.getByLabel('Insert content').first()).toBeVisible();
   await expect(page.locator('[data-testid="editor-canvas"]').first()).toBeVisible();
   await expect(page.getByRole('button', { name: 'Open preview' })).toBeVisible();
-  await expect(page.getByRole('button', { name: 'Publish unavailable' })).toBeDisabled();
+  await expect(page.getByRole('button', { name: 'Resolve publish blockers' })).toBeDisabled();
 }
 
 async function expectUnavailableRoute(
@@ -85,7 +85,7 @@ async function expectCdpLayoutForRoute(
     }),
     client.send('DOM.querySelector', {
       nodeId: root.nodeId,
-      selector: '[aria-label="Insert blocks"]',
+      selector: '[aria-label="Insert content"]',
     }),
   ]);
 

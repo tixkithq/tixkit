@@ -231,6 +231,7 @@ type EventFormProps = {
 export function EventForm({ event, onSuccess, onCancel }: EventFormProps) {
   const [submitting, setSubmitting] = React.useState(false);
   const { organizationId, brandId, loading: bootstrapLoading } = useBootstrap();
+  const createDisabled = !event && (bootstrapLoading || !organizationId || !brandId);
 
   const initialValues = React.useMemo<EventFormValues>(
     () =>
@@ -704,7 +705,7 @@ export function EventForm({ event, onSuccess, onCancel }: EventFormProps) {
               Cancel
             </Button>
           )}
-          <Button type="submit" disabled={submitting || (!event && bootstrapLoading)}>
+          <Button type="submit" disabled={submitting || createDisabled}>
             {submitting ? 'Saving...' : event ? 'Save Changes' : 'Create Event'}
           </Button>
         </div>

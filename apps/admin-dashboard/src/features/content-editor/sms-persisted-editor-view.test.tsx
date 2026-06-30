@@ -13,6 +13,7 @@ const adminApiMock = vi.hoisted(() => ({
   saveContentVersion: vi.fn(),
   previewContent: vi.fn(),
   publishContentVersion: vi.fn(),
+  duplicateContentDocument: vi.fn(),
   archiveContentDocument: vi.fn(),
   testSendContent: vi.fn(),
 }));
@@ -104,6 +105,10 @@ function ok<T>(data: T) {
 describe('SmsPersistedEditorView', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    vi.stubGlobal(
+      'confirm',
+      vi.fn(() => true),
+    );
     adminApiMock.getEvent.mockResolvedValue(ok(event));
     adminApiMock.listContentDocuments.mockResolvedValue(ok({ items: [document] }));
     adminApiMock.listContentVersions.mockResolvedValue(ok({ items: [version] }));
@@ -120,6 +125,9 @@ describe('SmsPersistedEditorView', () => {
         document: { ...document, status: 'published', publishedVersionId: 'cver_2' },
         version: { ...savedVersion, status: 'published' },
       }),
+    );
+    adminApiMock.duplicateContentDocument.mockResolvedValue(
+      ok({ ...document, id: 'cdoc_sms_copy', name: 'All Access Chicago SMS updates Copy' }),
     );
     adminApiMock.archiveContentDocument.mockResolvedValue(ok({ ...document, status: 'archived' }));
     adminApiMock.testSendContent.mockResolvedValue(
@@ -186,6 +194,110 @@ describe('SmsPersistedEditorView', () => {
       expect(adminApiMock.archiveContentDocument).toHaveBeenCalledWith('cdoc_sms');
     });
     expect(screen.getByText('Archived SMS template')).toBeInTheDocument();
+  });
+
+  it('loads SMS documents and versions from keyed list responses without crashing', async () => {
+    adminApiMock.listContentDocuments.mockResolvedValue(ok({ cdoc_sms: document }));
+    adminApiMock.listContentVersions.mockResolvedValue(ok({ cver_1: version }));
+
+    render(React.createElement(SmsPersistedEditorView, { eventId: 'evt_1' }));
+
+    expect(await screen.findByLabelText('SMS body')).toHaveValue(smsDocument.editor.body);
+    expect(adminApiMock.createContentDocument).not.toHaveBeenCalled();
+    expect(adminApiMock.saveContentVersion).not.toHaveBeenCalled();
+  });
+
+  it('adds real SMS body content from insert rail actions', async () => {
+    render(React.createElement(SmsPersistedEditorView, { eventId: 'evt_1' }));
+
+    const body = await screen.findByLabelText('SMS body');
+    fireEvent.click(screen.getByRole('button', { name: 'Insert Variable' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Insert Link' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Insert Opt-out' }));
+
+    expect(body).toHaveValue(
+      `${smsDocument.editor.body} {{recipient.name}} {{event.checkoutUrl}} Reply STOP to opt out`,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: 'Save draft' }));
+    await waitFor(() => {
+      expect(adminApiMock.saveContentVersion).toHaveBeenCalledWith(
+        'cdoc_sms',
+        expect.objectContaining({
+          renderedText: `${smsDocument.editor.body} {{recipient.name}} {{event.checkoutUrl}} Reply STOP to opt out`,
+          contentJson: expect.objectContaining({
+            editor: expect.objectContaining({
+              body: `${smsDocument.editor.body} {{recipient.name}} {{event.checkoutUrl}} Reply STOP to opt out`,
+            }),
+          }),
+        }),
+      );
+    });
+  });
+
+  it('saves the latest SMS draft before duplicating the template', async () => {
+    render(React.createElement(SmsPersistedEditorView, { eventId: 'evt_1' }));
+
+    const body = await screen.findByLabelText('SMS body');
+    fireEvent.change(body, { target: { value: 'Duplicate-ready SMS for {{event.title}}.' } });
+
+    fireEvent.click(screen.getByLabelText('More actions'));
+    fireEvent.click(screen.getByRole('button', { name: 'Duplicate template' }));
+
+    await waitFor(() => {
+      expect(adminApiMock.duplicateContentDocument).toHaveBeenCalledWith('cdoc_sms', {
+        name: 'All Access Chicago SMS updates Copy',
+      });
+    });
+    expect(adminApiMock.saveContentVersion).toHaveBeenCalledWith(
+      'cdoc_sms',
+      expect.objectContaining({
+        renderedText: 'Duplicate-ready SMS for {{event.title}}.',
+      }),
+    );
+    const saveCallOrder = adminApiMock.saveContentVersion.mock.invocationCallOrder;
+    const duplicateCallOrder = adminApiMock.duplicateContentDocument.mock.invocationCallOrder;
+    expect(saveCallOrder[saveCallOrder.length - 1]).toBeLessThan(
+      duplicateCallOrder[duplicateCallOrder.length - 1],
+    );
+    expect(
+      screen.getByText('Duplicated SMS template as All Access Chicago SMS updates Copy'),
+    ).toBeInTheDocument();
+  });
+
+  it('requires confirmation before archiving and locks archived SMS templates', async () => {
+    vi.stubGlobal(
+      'confirm',
+      vi.fn(() => false),
+    );
+
+    const editable = render(React.createElement(SmsPersistedEditorView, { eventId: 'evt_1' }));
+
+    await screen.findByLabelText('SMS body');
+    fireEvent.click(screen.getByLabelText('More actions'));
+    fireEvent.click(screen.getByRole('button', { name: 'Archive template' }));
+
+    expect(adminApiMock.archiveContentDocument).not.toHaveBeenCalled();
+    editable.unmount();
+
+    vi.clearAllMocks();
+    adminApiMock.getEvent.mockResolvedValue(ok(event));
+    adminApiMock.listContentDocuments.mockResolvedValue(
+      ok({ items: [{ ...document, status: 'archived' }] }),
+    );
+    adminApiMock.listContentVersions.mockResolvedValue(ok({ items: [version] }));
+
+    render(React.createElement(SmsPersistedEditorView, { eventId: 'evt_1' }));
+
+    expect(await screen.findByLabelText('SMS body')).toBeDisabled();
+    expect(screen.getByLabelText('Test recipient')).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Save draft' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Open preview' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Publish unavailable' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Test send unavailable' })).toBeDisabled();
+    fireEvent.click(screen.getByLabelText('More actions'));
+    expect(screen.getByRole('button', { name: 'Duplicate template' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Archive template' })).toBeDisabled();
   });
 
   it('creates the event-scoped SMS document and initial canonical draft when none exists', async () => {

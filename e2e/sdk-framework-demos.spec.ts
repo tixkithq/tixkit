@@ -49,20 +49,64 @@ function tixkitSignature(body: string, secret: string): string {
 test.describe.configure({ mode: 'serial' });
 
 test.beforeAll(async () => {
-  startServer('node', ['apps/sdk-nuxt-demo/.output/server/index.mjs'], REPO_ROOT, {
-    PORT: '3312',
-    NUXT_PUBLIC_TIXKIT_CHECKOUT_URL: CHECKOUT_ORIGIN,
-    TIXKIT_WEBHOOK_SECRET: WEBHOOK_SECRET,
-  });
-  startServer('node', ['apps/sdk-astro-demo/dist/server/entry.mjs'], REPO_ROOT, {
-    PORT: '3313',
-    HOST: '127.0.0.1',
-    TIXKIT_WEBHOOK_SECRET: WEBHOOK_SECRET,
-  });
+  test.setTimeout(180_000);
+
   startServer(
-    'bunx',
-    ['remix-serve', './build/server/index.js'],
-    `${REPO_ROOT}/apps/sdk-remix-demo`,
+    'bun',
+    [
+      'run',
+      '--filter',
+      '@tixkit/sdk-nuxt-demo',
+      'dev',
+      '--',
+      '--host',
+      '127.0.0.1',
+      '--port',
+      '3312',
+    ],
+    REPO_ROOT,
+    {
+      NUXT_PUBLIC_TIXKIT_CHECKOUT_URL: CHECKOUT_ORIGIN,
+      PORT: '3312',
+      TIXKIT_WEBHOOK_SECRET: WEBHOOK_SECRET,
+    },
+  );
+
+  startServer(
+    'bun',
+    [
+      'run',
+      '--filter',
+      '@tixkit/sdk-astro-demo',
+      'dev',
+      '--',
+      '--host',
+      '127.0.0.1',
+      '--port',
+      '3313',
+    ],
+    REPO_ROOT,
+    {
+      PUBLIC_TIXKIT_CHECKOUT_URL: CHECKOUT_ORIGIN,
+      PORT: '3313',
+      TIXKIT_WEBHOOK_SECRET: WEBHOOK_SECRET,
+    },
+  );
+
+  startServer(
+    'bun',
+    [
+      'run',
+      '--filter',
+      '@tixkit/sdk-remix-demo',
+      'dev',
+      '--',
+      '--host',
+      '127.0.0.1',
+      '--port',
+      '3314',
+    ],
+    REPO_ROOT,
     {
       PORT: '3314',
       TIXKIT_CHECKOUT_URL: CHECKOUT_ORIGIN,

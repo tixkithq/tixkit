@@ -169,6 +169,7 @@ export type EventPageValidationOptions = {
 const tiptapExtensions = [
   StarterKit.configure({
     heading: { levels: [1, 2, 3] },
+    link: false,
     codeBlock: false,
     horizontalRule: false,
   }),

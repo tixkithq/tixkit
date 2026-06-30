@@ -3,6 +3,7 @@ export {
   type ContentEditorShellProps,
   type ContentEditorAutosaveState,
   type ContentEditorCanvasBlock,
+  type ContentEditorInspectorPanel,
   type ContentEditorInsertAction,
   type ContentEditorPreview,
   type ContentEditorVersionSummary,

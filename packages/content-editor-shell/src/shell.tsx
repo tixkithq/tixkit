@@ -7,6 +7,7 @@ import {
   Blocks,
   CalendarPlus,
   Code2,
+  Copy,
   Eye,
   Image,
   Link,
@@ -34,22 +35,17 @@ export type ContentEditorAutosaveState = 'idle' | 'saving' | 'saved' | 'error';
 export type ContentEditorInsertAction = {
   id: string;
   label: string;
-  icon:
-    | 'calendar'
-    | 'code'
-    | 'image'
-    | 'link'
-    | 'map'
-    | 'shield'
-    | 'text'
-    | 'ticket'
-    | 'variable';
+  icon: 'calendar' | 'code' | 'image' | 'link' | 'map' | 'shield' | 'text' | 'ticket' | 'variable';
 };
 
 export type ContentEditorCanvasBlock = {
   id: string;
   label: string;
   summary: string;
+  content: React.ReactNode;
+  presentation?: 'document';
+  selected?: boolean;
+  onSelect?: () => void;
 };
 
 export type ContentEditorVersionSummary = {
@@ -66,6 +62,12 @@ export type ContentEditorPreview = {
   format: 'html' | 'text' | 'json';
 };
 
+export type ContentEditorInspectorPanel = {
+  id: string;
+  label: string;
+  content: React.ReactNode;
+};
+
 export type ContentEditorShellProps = {
   document: ContentDocument;
   draft: ContentDocumentVersion;
@@ -78,9 +80,16 @@ export type ContentEditorShellProps = {
   actionsUnavailableReason?: string;
   testSendUnavailableReason?: string;
   unavailableReason?: string;
+  canvasHeader?: React.ReactNode;
+  inspectorPanels?: ContentEditorInspectorPanel[];
+  activeInspectorPanelId?: string;
+  showInspectorPanelTabs?: boolean;
+  onInsertAction?: (actionId: string) => void;
+  onInspectorPanelChange?: (panelId: string) => void;
   onPublish?: () => void;
   onPreview?: () => void;
   onTestSend?: () => void;
+  onDuplicate?: () => void;
   onArchive?: () => void;
 };
 
@@ -98,9 +107,16 @@ export function ContentEditorShell({
   actionsUnavailableReason,
   testSendUnavailableReason,
   unavailableReason,
+  canvasHeader,
+  inspectorPanels,
+  activeInspectorPanelId,
+  showInspectorPanelTabs = true,
+  onInsertAction,
+  onInspectorPanelChange,
   onPublish,
   onPreview,
   onTestSend,
+  onDuplicate,
   onArchive,
 }: ContentEditorShellProps) {
   const [inspectorOpen, setInspectorOpen] = React.useState(true);
@@ -109,10 +125,35 @@ export function ContentEditorShell({
     draft.validation.issues.length > 0 ? 'blockers' : 'settings',
   );
   const publishBlocked = draft.validation.issues.some((issue) => issue.severity === 'error');
+  const defaultPanels = React.useMemo<ContentEditorInspectorPanel[]>(
+    () => [
+      { id: 'settings', label: 'Settings', content: <SettingsPanel draft={draft} /> },
+      {
+        id: 'variables',
+        label: 'Variables',
+        content: <VariablePanel variables={draft.variables} />,
+      },
+      { id: 'versions', label: 'Versions', content: <VersionPanel versions={versions} /> },
+      {
+        id: 'blockers',
+        label: 'Blockers',
+        content: <BlockerPanel issues={draft.validation.issues} />,
+      },
+    ],
+    [draft, versions],
+  );
+  const panels = inspectorPanels?.length ? inspectorPanels : defaultPanels;
+  const selectedPanelId = activeInspectorPanelId ?? panel;
+  const selectedPanel = panels.find((item) => item.id === selectedPanelId) ?? panels[0];
+
+  function handlePanelChange(panelId: string) {
+    setPanel(panelId as InspectorPanel);
+    onInspectorPanelChange?.(panelId);
+  }
 
   return (
     <section
-      className="min-h-[calc(100svh-8rem)] overflow-hidden rounded-lg border bg-background text-foreground"
+      className="min-h-[calc(100svh-8rem)] overflow-hidden border bg-background text-foreground"
       data-channel={document.channel}
       data-testid="content-editor-shell"
     >
@@ -128,6 +169,7 @@ export function ContentEditorShell({
         previewOpen={previewOpen}
         testSendUnavailableReason={testSendUnavailableReason}
         unavailableReason={unavailableReason}
+        onDuplicate={onDuplicate}
         onArchive={onArchive}
         onInspectorToggle={() => setInspectorOpen((current) => !current)}
         onPreviewToggle={() => {
@@ -139,28 +181,29 @@ export function ContentEditorShell({
       />
 
       <div className="grid min-h-[calc(100svh-12rem)] grid-cols-[4rem_minmax(0,1fr)] lg:grid-cols-[4rem_minmax(0,1fr)_20rem]">
-        <InsertRail actions={insertActions} />
+        <InsertRail actions={insertActions} onInsertAction={onInsertAction} />
         <section
           aria-label="Editor canvas workspace"
-          className="min-w-0 overflow-auto bg-muted/30 px-4 py-5 sm:px-6 lg:px-8"
+          className="min-w-0 overflow-auto bg-zinc-100 px-3 py-4 dark:bg-zinc-950 sm:px-5 lg:px-7"
         >
           <CanvasFrame
             blocks={canvasBlocks}
             channel={document.channel}
             empty={canvasBlocks.length === 0}
+            header={canvasHeader}
             title={document.name}
             unavailableReason={unavailableReason}
           />
         </section>
         {inspectorOpen && (
           <Inspector
-            activePanel={panel}
-            draft={draft}
+            activePanelId={selectedPanel.id}
+            panels={panels}
             preview={preview}
             previewOpen={previewOpen}
-            variables={draft.variables}
-            versions={versions}
-            onPanelChange={setPanel}
+            selectedPanel={selectedPanel}
+            showPanelTabs={showInspectorPanelTabs}
+            onPanelChange={handlePanelChange}
             onPreviewClose={() => setPreviewOpen(false)}
           />
         )}
@@ -181,6 +224,7 @@ function EditorTopBar({
   actionsUnavailableReason,
   testSendUnavailableReason,
   unavailableReason,
+  onDuplicate,
   onArchive,
   onInspectorToggle,
   onPreviewToggle,
@@ -198,6 +242,7 @@ function EditorTopBar({
   actionsUnavailableReason?: string;
   testSendUnavailableReason?: string;
   unavailableReason?: string;
+  onDuplicate?: () => void;
   onArchive?: () => void;
   onInspectorToggle: () => void;
   onPreviewToggle: () => void;
@@ -221,6 +266,7 @@ function EditorTopBar({
           </span>
         )}
         <IconButton
+          disabled={Boolean(actionsUnavailableReason)}
           label={previewOpen ? 'Close preview' : 'Open preview'}
           onClick={onPreviewToggle}
         >
@@ -254,7 +300,11 @@ function EditorTopBar({
           label={inspectorOpen ? 'Close inspector' : 'Open inspector'}
           onClick={onInspectorToggle}
         >
-          {inspectorOpen ? <PanelRightClose className="size-4" /> : <PanelRightOpen className="size-4" />}
+          {inspectorOpen ? (
+            <PanelRightClose className="size-4" />
+          ) : (
+            <PanelRightOpen className="size-4" />
+          )}
         </IconButton>
         <details className="relative">
           <summary
@@ -266,7 +316,17 @@ function EditorTopBar({
           </summary>
           <div className="absolute right-0 z-20 mt-2 w-44 rounded-md border bg-popover p-1 text-sm shadow-md">
             <button
-              className="flex w-full items-center gap-2 rounded px-2 py-2 text-left text-destructive hover:bg-destructive/10"
+              className="flex w-full items-center gap-2 rounded px-2 py-2 text-left hover:bg-accent disabled:cursor-not-allowed disabled:opacity-50"
+              disabled={Boolean(actionsUnavailableReason) || !onDuplicate}
+              onClick={onDuplicate}
+              type="button"
+            >
+              <Copy className="size-4" />
+              Duplicate {channel === 'event_page' ? 'page' : 'template'}
+            </button>
+            <button
+              className="flex w-full items-center gap-2 rounded px-2 py-2 text-left text-destructive hover:bg-destructive/10 disabled:cursor-not-allowed disabled:opacity-50"
+              disabled={Boolean(actionsUnavailableReason) || !onArchive}
               onClick={onArchive}
               type="button"
             >
@@ -287,24 +347,35 @@ function AutosaveBadge({ autosave }: { autosave: ContentEditorAutosaveState }) {
     saved: 'Saved',
     error: 'Save failed',
   }[autosave];
-  const tone = autosave === 'error'
-    ? 'border-destructive/30 text-destructive'
-    : autosave === 'saving'
-      ? 'border-amber-300 text-amber-700'
-      : 'border-emerald-300 text-emerald-700';
+  const tone =
+    autosave === 'error'
+      ? 'border-destructive/30 text-destructive'
+      : autosave === 'saving'
+        ? 'border-amber-300 text-amber-700'
+        : 'border-emerald-300 text-emerald-700';
 
   return <span className={`rounded-md border px-2 py-1 ${tone}`}>{label}</span>;
 }
 
-function InsertRail({ actions }: { actions: ContentEditorInsertAction[] }) {
+function InsertRail({
+  actions,
+  onInsertAction,
+}: {
+  actions: ContentEditorInsertAction[];
+  onInsertAction?: (actionId: string) => void;
+}) {
   return (
     <aside
-      aria-label="Insert blocks"
+      aria-label="Insert content"
       className="flex flex-col items-center gap-2 border-r bg-background px-2 py-4"
     >
       <Blocks className="mb-1 size-4 text-muted-foreground" />
       {actions.map((action) => (
-        <IconButton key={action.id} label={action.label}>
+        <IconButton
+          key={action.id}
+          label={`Insert ${action.label}`}
+          onClick={onInsertAction ? () => onInsertAction(action.id) : undefined}
+        >
           <InsertIcon icon={action.icon} />
         </IconButton>
       ))}
@@ -316,24 +387,47 @@ function CanvasFrame({
   blocks,
   channel,
   empty,
+  header,
   title,
   unavailableReason,
 }: {
   blocks: ContentEditorCanvasBlock[];
   channel: ContentChannel;
   empty: boolean;
+  header?: React.ReactNode;
   title: string;
   unavailableReason?: string;
 }) {
-  const canvasWidth = channel === 'email' ? 'max-w-[680px]' : channel === 'sms' ? 'max-w-[390px]' : 'max-w-4xl';
+  const canvasWidth =
+    channel === 'email' ? 'max-w-[680px]' : channel === 'sms' ? 'max-w-[390px]' : 'max-w-4xl';
+  const isDocumentCanvas = channel === 'email' || channel === 'event_page';
 
   return (
-    <div className={`mx-auto min-h-[34rem] ${canvasWidth}`} data-testid="editor-canvas">
-      <div className="rounded-lg border bg-background shadow-sm">
-        <div className="border-b px-5 py-4">
-          <p className="text-xs font-medium uppercase text-muted-foreground">{canvasLabel(channel)}</p>
-          <h2 className="mt-1 text-xl font-semibold">{title}</h2>
+    <div
+      aria-label={isDocumentCanvas ? `${title} editable document` : undefined}
+      className={`mx-auto min-h-[34rem] ${canvasWidth}`}
+      data-testid="editor-canvas"
+    >
+      {header && (
+        <div className="mb-3 border-b bg-background/95 px-4 py-3 dark:bg-zinc-900/95">
+          {header}
         </div>
+      )}
+      <div
+        className={
+          isDocumentCanvas
+            ? 'min-h-[34rem] bg-white shadow-sm ring-1 ring-border/70 dark:bg-zinc-950'
+            : 'overflow-hidden rounded-md border bg-background shadow-sm'
+        }
+      >
+        {!isDocumentCanvas && (
+          <div className="border-b bg-background px-5 py-4">
+            <p className="text-xs font-medium uppercase text-muted-foreground">
+              {canvasLabel(channel)}
+            </p>
+            <h2 className="mt-1 text-xl font-semibold">{title}</h2>
+          </div>
+        )}
         {unavailableReason ? (
           <EmptyCanvas
             icon={<AlertTriangle className="size-7" />}
@@ -343,21 +437,68 @@ function CanvasFrame({
         ) : empty ? (
           <EmptyCanvas
             icon={<Blocks className="size-7" />}
-            title="Start with a block"
-            description="Use the insert rail to add the first content block."
+            title="Start writing"
+            description={
+              isDocumentCanvas
+                ? 'Use the insert rail to add the first piece of editable content.'
+                : 'Use the insert rail to add editable content.'
+            }
           />
         ) : (
-          <div className="space-y-3 p-4 sm:p-5">
-            {blocks.map((block) => (
-              <button
-                className="w-full rounded-md border bg-background p-4 text-left transition hover:border-ring hover:bg-accent/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-                key={block.id}
-                type="button"
-              >
-                <span className="block text-sm font-semibold">{block.label}</span>
-                <span className="mt-1 block text-sm text-muted-foreground">{block.summary}</span>
-              </button>
-            ))}
+          <div
+            className={
+              channel === 'email'
+                ? 'p-6 sm:p-9'
+                : channel === 'event_page'
+                  ? 'space-y-10 p-6 sm:p-10'
+                  : 'space-y-3 p-4 sm:p-5'
+            }
+          >
+            {blocks.map((block) => {
+              if (isDocumentCanvas) {
+                if (!block.content || block.presentation !== 'document') {
+                  throw new Error(`Document canvas block must render document content: ${block.id}`);
+                }
+                return (
+                  <section
+                    aria-current={block.selected ? 'true' : undefined}
+                    className="contents"
+                    key={block.id}
+                    onClick={block.onSelect}
+                    onFocusCapture={block.onSelect}
+                  >
+                    {block.content}
+                  </section>
+                );
+              }
+
+              return (
+                <article
+                  className={`rounded-md border bg-background p-4 transition ${
+                    block.selected
+                      ? 'border-ring shadow-[0_0_0_1px_hsl(var(--ring))]'
+                      : 'hover:border-ring/70'
+                  }`}
+                  key={block.id}
+                >
+                  <div className="mb-3 flex items-start justify-between gap-3">
+                    <div className="min-w-0">
+                      <h2 className="text-sm font-semibold">{block.label}</h2>
+                      <p className="mt-0.5 text-xs text-muted-foreground">{block.summary}</p>
+                    </div>
+                    <button
+                      aria-pressed={Boolean(block.selected)}
+                      className="rounded-md border border-ring/40 px-2 py-1 text-xs text-muted-foreground hover:bg-accent"
+                      onClick={block.onSelect}
+                      type="button"
+                    >
+                      {block.selected ? 'Selected' : 'Select'}
+                    </button>
+                  </div>
+                  {block.content}
+                </article>
+              );
+            })}
           </div>
         )}
       </div>
@@ -377,45 +518,48 @@ function EmptyCanvas({
   return (
     <div className="flex min-h-80 flex-col items-center justify-center px-6 py-12 text-center">
       <div className="mb-3 text-muted-foreground">{icon}</div>
-      <h3 className="text-base font-semibold">{title}</h3>
+      <h2 className="text-base font-semibold">{title}</h2>
       <p className="mt-1 max-w-sm text-sm text-muted-foreground">{description}</p>
     </div>
   );
 }
 
 function Inspector({
-  activePanel,
-  draft,
+  activePanelId,
+  panels,
   preview,
   previewOpen,
-  variables,
-  versions,
+  selectedPanel,
+  showPanelTabs,
   onPanelChange,
   onPreviewClose,
 }: {
-  activePanel: InspectorPanel;
-  draft: ContentDocumentVersion;
+  activePanelId: string;
+  panels: ContentEditorInspectorPanel[];
   preview: ContentEditorPreview;
   previewOpen: boolean;
-  variables: ContentVariableDefinition[];
-  versions: ContentEditorVersionSummary[];
-  onPanelChange: (panel: InspectorPanel) => void;
+  selectedPanel: ContentEditorInspectorPanel;
+  showPanelTabs: boolean;
+  onPanelChange: (panelId: string) => void;
   onPreviewClose: () => void;
 }) {
   return (
-    <aside className="fixed inset-x-0 bottom-0 z-30 max-h-[52svh] overflow-auto border-t bg-background p-3 shadow-lg lg:static lg:z-auto lg:max-h-none lg:border-l lg:border-t-0 lg:p-0 lg:shadow-none">
-      <div className="flex gap-1 overflow-x-auto border-b pb-2 lg:grid lg:grid-cols-2 lg:p-2">
-        <PanelButton active={activePanel === 'settings'} label="Settings" onClick={() => onPanelChange('settings')} />
-        <PanelButton active={activePanel === 'variables'} label="Variables" onClick={() => onPanelChange('variables')} />
-        <PanelButton active={activePanel === 'versions'} label="Versions" onClick={() => onPanelChange('versions')} />
-        <PanelButton active={activePanel === 'blockers'} label="Blockers" onClick={() => onPanelChange('blockers')} />
-      </div>
+    <aside className="col-span-2 max-h-[52svh] overflow-auto border-t bg-background p-3 lg:col-span-1 lg:max-h-none lg:border-l lg:border-t-0 lg:p-0">
+      {showPanelTabs && (
+        <div className="flex gap-1 overflow-x-auto border-b pb-2 lg:grid lg:grid-cols-2 lg:p-2">
+          {panels.map((panel) => (
+            <PanelButton
+              active={activePanelId === panel.id}
+              key={panel.id}
+              label={panel.label}
+              onClick={() => onPanelChange(panel.id)}
+            />
+          ))}
+        </div>
+      )}
       <div className="space-y-4 p-3">
         {previewOpen && <PreviewDrawer preview={preview} onClose={onPreviewClose} />}
-        {activePanel === 'settings' && <SettingsPanel draft={draft} />}
-        {activePanel === 'variables' && <VariablePanel variables={variables} />}
-        {activePanel === 'versions' && <VersionPanel versions={versions} />}
-        {activePanel === 'blockers' && <BlockerPanel issues={draft.validation.issues} />}
+        {selectedPanel.content}
       </div>
     </aside>
   );
@@ -444,12 +588,18 @@ function PanelButton({
   );
 }
 
-function PreviewDrawer({ preview, onClose }: { preview: ContentEditorPreview; onClose: () => void }) {
+function PreviewDrawer({
+  preview,
+  onClose,
+}: {
+  preview: ContentEditorPreview;
+  onClose: () => void;
+}) {
   return (
     <section className="rounded-md border bg-muted/30 p-3" data-testid="preview-drawer">
       <div className="flex items-center justify-between gap-2">
         <div>
-          <h3 className="text-sm font-semibold">{preview.label}</h3>
+          <h2 className="text-sm font-semibold">{preview.label}</h2>
           <p className="text-xs text-muted-foreground">{preview.format.toUpperCase()} output</p>
         </div>
         <button
@@ -470,7 +620,7 @@ function PreviewDrawer({ preview, onClose }: { preview: ContentEditorPreview; on
 function SettingsPanel({ draft }: { draft: ContentDocumentVersion }) {
   return (
     <section>
-      <h3 className="text-sm font-semibold">Version settings</h3>
+      <h2 className="text-sm font-semibold">Version settings</h2>
       <dl className="mt-3 space-y-3 text-sm">
         <InspectorRow label="Status" value={draft.status} />
         <InspectorRow label="Version" value={`v${draft.versionNumber}`} />
@@ -485,7 +635,7 @@ function SettingsPanel({ draft }: { draft: ContentDocumentVersion }) {
 function VariablePanel({ variables }: { variables: ContentVariableDefinition[] }) {
   return (
     <section>
-      <h3 className="text-sm font-semibold">Variables</h3>
+      <h2 className="text-sm font-semibold">Variables</h2>
       <div className="mt-3 space-y-2">
         {variables.map((variable) => (
           <div className="rounded-md border p-2" key={variable.key}>
@@ -506,7 +656,7 @@ function VariablePanel({ variables }: { variables: ContentVariableDefinition[] }
 function VersionPanel({ versions }: { versions: ContentEditorVersionSummary[] }) {
   return (
     <section>
-      <h3 className="text-sm font-semibold">Version history</h3>
+      <h2 className="text-sm font-semibold">Version history</h2>
       <ol className="mt-3 space-y-2">
         {versions.map((version) => (
           <li className="rounded-md border p-2 text-sm" key={version.id}>
@@ -527,7 +677,7 @@ function VersionPanel({ versions }: { versions: ContentEditorVersionSummary[] })
 function BlockerPanel({ issues }: { issues: ContentValidationIssue[] }) {
   return (
     <section>
-      <h3 className="text-sm font-semibold">Publish blockers</h3>
+      <h2 className="text-sm font-semibold">Publish blockers</h2>
       {issues.length === 0 ? (
         <p className="mt-3 rounded-md border border-emerald-300 bg-emerald-50 p-3 text-sm text-emerald-800">
           No publish blockers.

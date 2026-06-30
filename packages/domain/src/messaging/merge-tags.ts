@@ -50,6 +50,7 @@ export type MergeTagAttendeeContext = {
 export type MergeTagTicketContext = {
   type?: string;
   code?: string;
+  qrCodeUrl?: string;
 };
 
 export type MergeTagOrderContext = {
@@ -131,6 +132,11 @@ export const MERGE_TAG_REGISTRY: readonly MergeTagVariable[] = [
   { key: 'attendee.checkedIn', description: 'Attendee check-in status', example: 'checked in' },
   { key: 'ticket.type', description: 'Ticket type name', example: 'General Admission' },
   { key: 'ticket.code', description: 'Ticket code', example: 'TKT-ABC123' },
+  {
+    key: 'ticket.qrCodeUrl',
+    description: 'Ticket QR code image URL',
+    example: 'https://tickets.example.test/qr/TKT-ABC123.png',
+  },
   { key: 'order.id', description: 'Order reference', example: 'ORD-123' },
   { key: 'order.total', description: 'Order total (formatted)', example: '$45.00' },
   { key: 'refund.amount', description: 'Refund amount (formatted)', example: '$20.00' },
@@ -202,6 +208,8 @@ function resolveTag(key: string, context: MergeTagContext): string | undefined {
       return context.ticket?.type;
     case 'ticket.code':
       return context.ticket?.code;
+    case 'ticket.qrCodeUrl':
+      return context.ticket?.qrCodeUrl;
     case 'order.id':
       return context.order?.id;
     case 'order.total':

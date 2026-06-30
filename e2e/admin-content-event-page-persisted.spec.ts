@@ -232,7 +232,8 @@ test.describe('persisted admin event-page content editor', () => {
     ).toBe(true);
 
     await page.goto(`${checkoutBaseUrl}/e/${encodeURIComponent(event.id)}`);
-    await expect(page.getByRole('heading', { name: event.title })).toBeVisible();
+    await expect(page.getByText(event.title, { exact: true }).first()).toBeVisible();
+    await expect(page.getByRole('heading', { name: headline, level: 1 })).toBeVisible();
     await expect(page.getByTestId('published-event-page')).toContainText(headline);
     await expect(page.getByTestId('published-event-page')).toContainText(summary);
     await expect(page.getByTestId('published-event-page')).toContainText(ctaLabel);
@@ -293,6 +294,7 @@ test.describe('persisted admin event-page content editor', () => {
     await expectNoAxeViolations(page, testInfo);
 
     await page.getByLabel('More actions').click();
+    page.once('dialog', (dialog) => void dialog.accept());
     await page.getByRole('button', { name: 'Archive page' }).click();
     await expect(page.getByText('Archived event page')).toBeVisible();
     const archived = await loadEventPageContentState(event.id, page);

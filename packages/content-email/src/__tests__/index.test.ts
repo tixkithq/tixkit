@@ -13,6 +13,7 @@ const context = {
   event: {
     title: 'All Access Chicago',
     startsAt: '2026-07-17 19:00',
+    publicUrl: 'https://events.example.test/e/all-access-chicago',
     checkoutUrl: 'https://checkout.example.test/checkout?eventId=evt_demo_001',
   },
   brand: {
@@ -25,6 +26,7 @@ const context = {
   },
   ticket: {
     type: 'General Admission',
+    qrCodeUrl: 'https://tickets.example.test/qr/TKT-123.png',
   },
   order: {
     total: '$35.00',
@@ -159,6 +161,36 @@ describe('renderEmailTemplate', () => {
     expect(rendered.validation.valid).toBe(false);
     expect(rendered.html).toBe('');
     expect(rendered.validation.issues.some((issue) => issue.code === 'missing_subject')).toBe(true);
+  });
+
+  it('renders QR code images and calendar buttons from merge-tag URLs', async () => {
+    const template = createDefaultEmailTemplate({
+      blocks: [
+        {
+          type: 'qr_code',
+          title: 'Your entry QR',
+          imageUrl: '{{ticket.qrCodeUrl}}',
+          imageAlt: 'Personal ticket QR code',
+        },
+        {
+          type: 'calendar_button',
+          label: 'Save this date',
+          url: '{{event.publicUrl}}',
+        },
+        {
+          type: 'unsubscribe_footer',
+          body: 'You are receiving this because you purchased tickets with {{brand.name}}.',
+          unsubscribeUrl: '{{brand.supportUrl}}',
+        },
+      ],
+    });
+
+    const rendered = await renderEmailTemplate(template, context);
+
+    expect(rendered.validation.valid).toBe(true);
+    expect(rendered.html).toContain('Save this date');
+    expect(rendered.html).toContain('https://tickets.example.test/qr/TKT-123.png');
+    expect(rendered.text).toContain('Save this date');
   });
 
   it('load-renders concurrent email variants without drifting output or merge-tag escaping', async () => {

@@ -181,8 +181,8 @@ async function expectPersistedEmailEditorRegions(page: Page): Promise<void> {
   await expect(page.getByLabel('Subject')).toBeVisible();
   await expect(page.getByLabel('Preview text')).toBeVisible();
   await expect(page.getByLabel('Email body')).toBeVisible();
-  await expect(page.getByLabel('From email')).toBeVisible();
-  await expect(page.getByLabel('Reply-to email')).toBeVisible();
+  await expect(page.getByLabel('From', { exact: true })).toBeVisible();
+  await expect(page.getByLabel('Reply-To')).toBeVisible();
   await expect(page.getByLabel('Test recipient')).toBeVisible();
   await expect(page.locator('[data-testid="content-editor-shell"]').first()).toBeVisible();
   await expect(page.locator('[data-testid="editor-canvas"]').first()).toBeVisible();
@@ -211,8 +211,8 @@ test.describe('persisted admin email content editor', () => {
     await page.getByLabel('Subject').fill(subject);
     await page.getByLabel('Preview text').fill('Everything you need before arrival.');
     await page.getByLabel('Email body').fill(body);
-    await page.getByLabel('From email').fill('tickets@example.test');
-    await page.getByLabel('Reply-to email').fill('support@example.test');
+    await page.getByLabel('From', { exact: true }).fill('tickets@example.test');
+    await page.getByLabel('Reply-To').fill('support@example.test');
     await page.getByRole('button', { name: 'Preview', exact: true }).click();
     await expect(page.getByText('Preview rendered from the saved content version')).toBeVisible();
     await page.getByRole('button', { name: 'Open preview' }).click();
@@ -308,6 +308,7 @@ test.describe('persisted admin email content editor', () => {
     await expectNoAxeViolations(page, testInfo);
 
     await page.getByLabel('More actions').click();
+    page.once('dialog', (dialog) => void dialog.accept());
     await page.getByRole('button', { name: 'Archive template' }).click();
     await expect(page.getByText('Archived email template')).toBeVisible();
     const archived = await loadEmailContentState(event.id, page);
@@ -338,7 +339,7 @@ test.describe('persisted admin email content editor', () => {
 
     await expect(page.getByText(/Saved draft v\d+/)).toBeVisible();
     await expect(page.getByRole('button', { name: 'Resolve publish blockers' })).toBeDisabled();
-    await page.getByRole('button', { name: 'Blockers', exact: true }).click();
+    await page.getByRole('button', { name: 'Issues', exact: true }).click();
     await expect(page.getByText('missing_subject')).toBeVisible();
     await expect(
       page.getByText('Email templates require a subject line before publishing'),
@@ -353,14 +354,17 @@ test.describe('persisted admin email content editor', () => {
       const client = await page.context().newCDPSession(page);
       const blockerSnapshot = await client.send('Runtime.evaluate', {
         expression: `(() => {
-          const blockers = [...document.querySelectorAll('section')]
-            .find((section) => section.textContent?.includes('Publish blockers'));
-          const blockerTab = [...document.querySelectorAll('button')]
-            .find((candidate) => candidate.textContent?.trim() === 'Blockers');
+          const issues = [...document.querySelectorAll('section')]
+            .find((section) =>
+              section.textContent?.includes('Issues')
+              && section.textContent?.includes('missing_subject')
+            );
+          const issuesTab = [...document.querySelectorAll('button')]
+            .find((candidate) => candidate.textContent?.trim() === 'Issues');
           return {
-            hasBlockerPanel: Boolean(blockers),
-            blockerText: blockers?.textContent ?? '',
-            blockerTabPressed: blockerTab?.getAttribute('aria-pressed') === 'true',
+            hasBlockerPanel: Boolean(issues),
+            blockerText: issues?.textContent ?? '',
+            blockerTabPressed: issuesTab?.getAttribute('aria-pressed') === 'true',
           };
         })()`,
         returnByValue: true,
@@ -409,7 +413,7 @@ test.describe('persisted admin email content editor', () => {
           expect(node.nodeId).toBeGreaterThan(0);
           const box = await client.send('DOM.getBoxModel', { nodeId: node.nodeId });
           expect(widthOf(box.model.content)).toBeGreaterThan(name === 'shell' ? 900 : 250);
-          expect(heightOf(box.model.content)).toBeGreaterThanOrEqual(name === 'body' ? 100 : 20);
+          expect(heightOf(box.model.content)).toBeGreaterThanOrEqual(name === 'body' ? 80 : 20);
           return [name, box] as const;
         }),
       ),

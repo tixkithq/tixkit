@@ -13,6 +13,7 @@ const adminApiMock = vi.hoisted(() => ({
   saveContentVersion: vi.fn(),
   previewContent: vi.fn(),
   publishContentVersion: vi.fn(),
+  duplicateContentDocument: vi.fn(),
   archiveContentDocument: vi.fn(),
   testSendContent: vi.fn(),
 }));
@@ -129,6 +130,10 @@ function ok<T>(data: T) {
 describe('EmailPersistedEditorView', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    vi.stubGlobal(
+      'confirm',
+      vi.fn(() => true),
+    );
     adminApiMock.getEvent.mockResolvedValue(ok(event));
     adminApiMock.listContentDocuments.mockResolvedValue(ok({ items: [document] }));
     adminApiMock.listContentVersions.mockResolvedValue(ok({ items: [version] }));
@@ -149,6 +154,9 @@ describe('EmailPersistedEditorView', () => {
         document: { ...document, status: 'published', publishedVersionId: 'cver_2' },
         version: { ...savedVersion, status: 'published' },
       }),
+    );
+    adminApiMock.duplicateContentDocument.mockResolvedValue(
+      ok({ ...document, id: 'cdoc_email_copy', name: 'All Access Chicago email template Copy' }),
     );
     adminApiMock.archiveContentDocument.mockResolvedValue(ok({ ...document, status: 'archived' }));
     adminApiMock.testSendContent.mockResolvedValue(
@@ -176,6 +184,10 @@ describe('EmailPersistedEditorView', () => {
   it('loads an existing email document and persists preview, publish, and test-send actions', async () => {
     render(React.createElement(EmailPersistedEditorView, { eventId: 'evt_1' }));
 
+    expect(await screen.findByTestId('email-metadata-bar')).toBeInTheDocument();
+    expect(screen.getByRole('complementary', { name: 'Insert content' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Content' })).toHaveAttribute('aria-pressed', 'true');
+
     const subject = await screen.findByLabelText('Subject');
     fireEvent.change(subject, {
       target: { value: 'Updated tickets for {{event.title}}' },
@@ -196,7 +208,7 @@ describe('EmailPersistedEditorView', () => {
               subject: 'Updated tickets for {{event.title}}',
             }),
           }),
-          renderedHtml: '<h1>{{event.title}}</h1><p>Updated saved email for {{recipient.name}}.</p>',
+          renderedHtml: expect.stringContaining('Updated saved email for Ada Lovelace.'),
         }),
       );
       expect(adminApiMock.previewContent).toHaveBeenCalledWith(
@@ -229,6 +241,64 @@ describe('EmailPersistedEditorView', () => {
       expect(adminApiMock.archiveContentDocument).toHaveBeenCalledWith('cdoc_email');
     });
     expect(screen.getByText('Archived email template')).toBeInTheDocument();
+  });
+
+  it('loads email content documents from array and keyed API response shapes', async () => {
+    adminApiMock.listContentDocuments.mockResolvedValueOnce(ok([document]));
+    const first = render(React.createElement(EmailPersistedEditorView, { eventId: 'evt_1' }));
+
+    expect(await screen.findByLabelText('Subject')).toHaveValue(emailDocument.settings.subject);
+    expect(adminApiMock.createContentDocument).not.toHaveBeenCalled();
+    first.unmount();
+
+    vi.clearAllMocks();
+    vi.stubGlobal(
+      'confirm',
+      vi.fn(() => true),
+    );
+    adminApiMock.getEvent.mockResolvedValue(ok(event));
+    adminApiMock.listContentDocuments.mockResolvedValue(ok({ cdoc_email: document }));
+    adminApiMock.listContentVersions.mockResolvedValue(ok({ items: [version] }));
+    adminApiMock.saveContentVersion.mockResolvedValue(ok(savedVersion));
+
+    render(React.createElement(EmailPersistedEditorView, { eventId: 'evt_1' }));
+
+    expect(await screen.findByLabelText('Subject')).toHaveValue(emailDocument.settings.subject);
+    expect(adminApiMock.createContentDocument).not.toHaveBeenCalled();
+  });
+
+  it('requires confirmation before archiving and locks archived email templates', async () => {
+    vi.stubGlobal(
+      'confirm',
+      vi.fn(() => false),
+    );
+
+    const editable = render(React.createElement(EmailPersistedEditorView, { eventId: 'evt_1' }));
+
+    await screen.findByLabelText('Subject');
+    fireEvent.click(screen.getByLabelText('More actions'));
+    fireEvent.click(screen.getByRole('button', { name: 'Archive template' }));
+
+    expect(adminApiMock.archiveContentDocument).not.toHaveBeenCalled();
+    editable.unmount();
+
+    vi.clearAllMocks();
+    vi.stubGlobal(
+      'confirm',
+      vi.fn(() => true),
+    );
+    adminApiMock.getEvent.mockResolvedValue(ok(event));
+    adminApiMock.listContentDocuments.mockResolvedValue(
+      ok({ items: [{ ...document, status: 'archived' }] }),
+    );
+    adminApiMock.listContentVersions.mockResolvedValue(ok({ items: [version] }));
+
+    render(React.createElement(EmailPersistedEditorView, { eventId: 'evt_1' }));
+
+    expect(await screen.findByLabelText('Subject')).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Open preview' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Publish unavailable' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Test send unavailable' })).toBeDisabled();
   });
 
   it('creates the event-scoped email document and initial canonical draft when none exists', async () => {
@@ -339,6 +409,99 @@ describe('EmailPersistedEditorView', () => {
     );
   });
 
+  it('adds directly editable QR and calendar blocks from the insert rail', async () => {
+    render(React.createElement(EmailPersistedEditorView, { eventId: 'evt_1' }));
+
+    await screen.findByLabelText('Email headline');
+
+    fireEvent.click(screen.getByRole('button', { name: 'Insert Image' }));
+    fireEvent.change(screen.getByLabelText('QR code title'), {
+      target: { value: 'Your entry QR' },
+    });
+    fireEvent.change(screen.getByLabelText('QR image alt text'), {
+      target: { value: 'Personal ticket QR code' },
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: 'Insert Components' }));
+    fireEvent.change(screen.getByLabelText('Calendar button label'), {
+      target: { value: 'Save this date' },
+    });
+    fireEvent.change(screen.getByLabelText('Calendar URL'), {
+      target: { value: '{{event.publicUrl}}' },
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: 'Save draft' }));
+
+    await waitFor(() => {
+      expect(adminApiMock.saveContentVersion).toHaveBeenCalledWith(
+        'cdoc_email',
+        expect.objectContaining({
+          contentJson: expect.objectContaining({
+            blocks: expect.arrayContaining([
+              expect.objectContaining({
+                type: 'qr_code',
+                title: 'Your entry QR',
+                imageUrl: '{{ticket.qrCodeUrl}}',
+                imageAlt: 'Personal ticket QR code',
+              }),
+              expect.objectContaining({
+                type: 'calendar_button',
+                label: 'Save this date',
+                url: '{{event.publicUrl}}',
+              }),
+            ]),
+          }),
+          renderedHtml: expect.stringContaining('Save this date'),
+        }),
+      );
+    });
+  });
+
+  it('inserts the selected variable token into the active email block', async () => {
+    render(React.createElement(EmailPersistedEditorView, { eventId: 'evt_1' }));
+
+    const body = await screen.findByLabelText('Email body');
+    fireEvent.click(screen.getByRole('button', { name: 'Variables' }));
+    fireEvent.click(screen.getByRole('button', { name: '{{brand.name}}' }));
+
+    expect((body as HTMLTextAreaElement).value).toContain('{{brand.name}}');
+    expect((body as HTMLTextAreaElement).value).not.toContain(
+      '{{recipient.name}} {{recipient.name}}',
+    );
+  });
+
+  it('saves the latest email draft before duplicating the template', async () => {
+    render(React.createElement(EmailPersistedEditorView, { eventId: 'evt_1' }));
+
+    const subject = await screen.findByLabelText('Subject');
+    fireEvent.change(subject, {
+      target: { value: 'Duplicate-ready tickets for {{event.title}}' },
+    });
+
+    fireEvent.click(screen.getByLabelText('More actions'));
+    fireEvent.click(screen.getByRole('button', { name: 'Duplicate template' }));
+
+    await waitFor(() => {
+      expect(adminApiMock.duplicateContentDocument).toHaveBeenCalledWith('cdoc_email', {
+        name: 'All Access Chicago email template Copy',
+      });
+    });
+    expect(adminApiMock.saveContentVersion).toHaveBeenCalledWith(
+      'cdoc_email',
+      expect.objectContaining({
+        subject: 'Duplicate-ready tickets for {{event.title}}',
+      }),
+    );
+    const saveCallOrder = adminApiMock.saveContentVersion.mock.invocationCallOrder;
+    const duplicateCallOrder = adminApiMock.duplicateContentDocument.mock.invocationCallOrder;
+    expect(saveCallOrder[saveCallOrder.length - 1]).toBeLessThan(
+      duplicateCallOrder[duplicateCallOrder.length - 1],
+    );
+    expect(
+      screen.getByText('Duplicated email template as All Access Chicago email template Copy'),
+    ).toBeInTheDocument();
+  });
+
   it('fails closed when the saved draft is not canonical React Email JSON', async () => {
     adminApiMock.listContentVersions.mockResolvedValue(
       ok({
@@ -353,6 +516,10 @@ describe('EmailPersistedEditorView', () => {
 
     render(React.createElement(EmailPersistedEditorView, { eventId: 'evt_1' }));
 
-    expect(await screen.findByText('Saved email draft is not canonical Tixkit React Email template JSON.')).toBeInTheDocument();
+    expect(
+      await screen.findByText(
+        'Saved email draft is not canonical Tixkit React Email template JSON.',
+      ),
+    ).toBeInTheDocument();
   });
 });

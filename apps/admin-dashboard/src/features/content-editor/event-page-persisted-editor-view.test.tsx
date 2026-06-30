@@ -13,6 +13,7 @@ const adminApiMock = vi.hoisted(() => ({
   saveContentVersion: vi.fn(),
   previewContent: vi.fn(),
   publishContentVersion: vi.fn(),
+  duplicateContentDocument: vi.fn(),
   archiveContentDocument: vi.fn(),
 }));
 
@@ -107,6 +108,10 @@ function ok<T>(data: T) {
 describe('EventPagePersistedEditorView', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    vi.stubGlobal(
+      'confirm',
+      vi.fn(() => true),
+    );
     adminApiMock.getEvent.mockResolvedValue(ok(event));
     adminApiMock.listContentDocuments.mockResolvedValue(ok({ items: [document] }));
     adminApiMock.listContentVersions.mockResolvedValue(ok({ items: [version] }));
@@ -127,11 +132,18 @@ describe('EventPagePersistedEditorView', () => {
         version: { ...savedVersion, status: 'published' },
       }),
     );
+    adminApiMock.duplicateContentDocument.mockResolvedValue(
+      ok({ ...document, id: 'cdoc_event_page_copy', name: 'All Access Chicago event page Copy' }),
+    );
     adminApiMock.archiveContentDocument.mockResolvedValue(ok({ ...document, status: 'archived' }));
   });
 
   it('loads an existing event page and persists preview, publish, and archive actions', async () => {
     render(React.createElement(EventPagePersistedEditorView, { eventId: 'evt_1' }));
+
+    expect(await screen.findByTestId('event-page-metadata-bar')).toBeInTheDocument();
+    expect(screen.getByRole('complementary', { name: 'Insert content' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Content' })).toHaveAttribute('aria-pressed', 'true');
 
     const headline = await screen.findByLabelText('Page headline');
     fireEvent.change(headline, {
@@ -183,6 +195,164 @@ describe('EventPagePersistedEditorView', () => {
       expect(adminApiMock.archiveContentDocument).toHaveBeenCalledWith('cdoc_event_page');
     });
     expect(screen.getByText('Archived event page')).toBeInTheDocument();
+  });
+
+  it('loads event-page content documents from array and keyed API response shapes', async () => {
+    adminApiMock.listContentDocuments.mockResolvedValueOnce(ok([document]));
+    const first = render(React.createElement(EventPagePersistedEditorView, { eventId: 'evt_1' }));
+
+    expect(await screen.findByLabelText('Page headline')).toHaveValue('All Access Chicago');
+    expect(adminApiMock.createContentDocument).not.toHaveBeenCalled();
+    first.unmount();
+
+    vi.clearAllMocks();
+    vi.stubGlobal(
+      'confirm',
+      vi.fn(() => true),
+    );
+    adminApiMock.getEvent.mockResolvedValue(ok(event));
+    adminApiMock.listContentDocuments.mockResolvedValue(ok({ cdoc_event_page: document }));
+    adminApiMock.listContentVersions.mockResolvedValue(ok({ items: [version] }));
+    adminApiMock.saveContentVersion.mockResolvedValue(ok(savedVersion));
+
+    render(React.createElement(EventPagePersistedEditorView, { eventId: 'evt_1' }));
+
+    expect(await screen.findByLabelText('Page headline')).toHaveValue('All Access Chicago');
+    expect(adminApiMock.createContentDocument).not.toHaveBeenCalled();
+  });
+
+  it('opens the renderer-resolved public page URL and rejects unsafe public paths', async () => {
+    const openPage = vi.fn();
+    vi.stubGlobal('open', openPage);
+
+    render(React.createElement(EventPagePersistedEditorView, { eventId: 'evt_1' }));
+
+    await screen.findByLabelText('Page headline');
+    fireEvent.click(screen.getByRole('button', { name: 'View public page' }));
+
+    expect(openPage).toHaveBeenCalledWith(
+      'https://events.example.test/e/evt_1',
+      '_blank',
+      'noopener,noreferrer',
+    );
+    expect(screen.getByText('Opened public page')).toBeInTheDocument();
+
+    fireEvent.change(screen.getByLabelText('Public path'), {
+      target: { value: 'javascript:alert(1)' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'View public page' }));
+
+    expect(openPage).toHaveBeenCalledTimes(1);
+    expect(
+      screen.getByText('Public page URL is not available. Set a safe http(s) public path first.'),
+    ).toBeInTheDocument();
+  });
+
+  it('adds real event-page blocks for every insert rail action', async () => {
+    render(React.createElement(EventPagePersistedEditorView, { eventId: 'evt_1' }));
+
+    await screen.findByLabelText('Page headline');
+
+    fireEvent.click(screen.getByRole('button', { name: 'Insert Text' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Insert Image' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Insert Tickets' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Insert Schedule' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Insert Venue' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Insert Button' }));
+
+    fireEvent.change(screen.getByLabelText('Button label'), {
+      target: { value: 'Join the list' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Save draft' }));
+
+    await waitFor(() => {
+      expect(adminApiMock.saveContentVersion).toHaveBeenCalledWith(
+        'cdoc_event_page',
+        expect.objectContaining({
+          contentJson: expect.objectContaining({
+            blocks: expect.arrayContaining([
+              expect.objectContaining({
+                id: 'rich-text-7',
+                type: 'rich_text',
+                content: expect.objectContaining({
+                  content: expect.arrayContaining([
+                    expect.objectContaining({ type: 'paragraph' }),
+                  ]),
+                }),
+              }),
+              expect.objectContaining({
+                id: 'image-8',
+                type: 'rich_text',
+                content: expect.objectContaining({
+                  content: expect.arrayContaining([expect.objectContaining({ type: 'image' })]),
+                }),
+              }),
+              expect.objectContaining({
+                id: 'tickets-9',
+                type: 'tickets',
+                ctaLabel: 'Get tickets',
+              }),
+              expect.objectContaining({
+                id: 'schedule-10',
+                type: 'schedule',
+                items: expect.arrayContaining([
+                  expect.objectContaining({ title: 'All Access Chicago' }),
+                ]),
+              }),
+              expect.objectContaining({
+                id: 'venue-11',
+                type: 'venue_map',
+                venueName: 'The Salt Shed',
+              }),
+              expect.objectContaining({
+                id: 'button-12',
+                type: 'button',
+                label: 'Join the list',
+                url: '{{event.checkoutUrl}}',
+              }),
+            ]),
+          }),
+          renderedHtml: expect.stringContaining('Join the list'),
+        }),
+      );
+    });
+  });
+
+  it('requires confirmation before archiving and locks archived event pages', async () => {
+    vi.stubGlobal(
+      'confirm',
+      vi.fn(() => false),
+    );
+
+    const editable = render(
+      React.createElement(EventPagePersistedEditorView, { eventId: 'evt_1' }),
+    );
+
+    await screen.findByLabelText('Page headline');
+    fireEvent.click(screen.getByLabelText('More actions'));
+    fireEvent.click(screen.getByRole('button', { name: 'Archive page' }));
+
+    expect(adminApiMock.archiveContentDocument).not.toHaveBeenCalled();
+    editable.unmount();
+
+    vi.clearAllMocks();
+    vi.stubGlobal(
+      'confirm',
+      vi.fn(() => true),
+    );
+    adminApiMock.getEvent.mockResolvedValue(ok(event));
+    adminApiMock.listContentDocuments.mockResolvedValue(
+      ok({ items: [{ ...document, status: 'archived' }] }),
+    );
+    adminApiMock.listContentVersions.mockResolvedValue(ok({ items: [version] }));
+
+    render(React.createElement(EventPagePersistedEditorView, { eventId: 'evt_1' }));
+
+    expect(await screen.findByLabelText('Page headline')).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Open preview' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'View public page' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Publish unavailable' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Test send unavailable' })).toBeDisabled();
   });
 
   it('creates the event-scoped event-page document and initial canonical draft when none exists', async () => {
@@ -249,7 +419,10 @@ describe('EventPagePersistedEditorView', () => {
 
     fireEvent.click(screen.getByRole('button', { name: 'Publish' }));
     await waitFor(() => {
-      expect(adminApiMock.publishContentVersion).toHaveBeenCalledWith('cdoc_event_page', 'cver_fresh');
+      expect(adminApiMock.publishContentVersion).toHaveBeenCalledWith(
+        'cdoc_event_page',
+        'cver_fresh',
+      );
     });
     expect(adminApiMock.saveContentVersion).toHaveBeenLastCalledWith(
       'cdoc_event_page',
@@ -296,6 +469,41 @@ describe('EventPagePersistedEditorView', () => {
     );
   });
 
+  it('saves the latest event-page draft before duplicating the page', async () => {
+    render(React.createElement(EventPagePersistedEditorView, { eventId: 'evt_1' }));
+
+    const headline = await screen.findByLabelText('Page headline');
+    fireEvent.change(headline, { target: { value: 'Duplicate-ready hosted page' } });
+
+    fireEvent.click(screen.getByLabelText('More actions'));
+    fireEvent.click(screen.getByRole('button', { name: 'Duplicate page' }));
+
+    await waitFor(() => {
+      expect(adminApiMock.duplicateContentDocument).toHaveBeenCalledWith('cdoc_event_page', {
+        name: 'All Access Chicago event page Copy',
+      });
+    });
+    expect(adminApiMock.saveContentVersion).toHaveBeenCalledWith(
+      'cdoc_event_page',
+      expect.objectContaining({
+        subject: 'Duplicate-ready hosted page',
+        contentJson: expect.objectContaining({
+          blocks: expect.arrayContaining([
+            expect.objectContaining({ type: 'hero', headline: 'Duplicate-ready hosted page' }),
+          ]),
+        }),
+      }),
+    );
+    const saveCallOrder = adminApiMock.saveContentVersion.mock.invocationCallOrder;
+    const duplicateCallOrder = adminApiMock.duplicateContentDocument.mock.invocationCallOrder;
+    expect(saveCallOrder[saveCallOrder.length - 1]).toBeLessThan(
+      duplicateCallOrder[duplicateCallOrder.length - 1],
+    );
+    expect(
+      screen.getByText('Duplicated event page as All Access Chicago event page Copy'),
+    ).toBeInTheDocument();
+  });
+
   it('fails closed when the saved draft is not canonical TipTap event-page JSON', async () => {
     adminApiMock.listContentVersions.mockResolvedValue(
       ok({
@@ -310,6 +518,10 @@ describe('EventPagePersistedEditorView', () => {
 
     render(React.createElement(EventPagePersistedEditorView, { eventId: 'evt_1' }));
 
-    expect(await screen.findByText('Saved event-page draft is not canonical Tixkit TipTap event-page JSON.')).toBeInTheDocument();
+    expect(
+      await screen.findByText(
+        'Saved event-page draft is not canonical Tixkit TipTap event-page JSON.',
+      ),
+    ).toBeInTheDocument();
   });
 });

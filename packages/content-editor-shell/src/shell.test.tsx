@@ -17,11 +17,60 @@ describe('ContentEditorShell', () => {
 
     expect(screen.getByTestId('content-editor-shell')).toHaveAttribute('data-channel', 'email');
     expect(screen.getAllByRole('heading', { name: 'Order confirmed' }).length).toBeGreaterThan(0);
-    expect(screen.getByLabelText('Insert blocks')).toBeInTheDocument();
+    expect(screen.getByRole('complementary', { name: 'Insert content' })).toBeInTheDocument();
     expect(screen.getByTestId('editor-canvas')).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Hero' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Insert Hero' })).toBeInTheDocument();
+    expect(screen.getByText('Two general admission tickets')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Variables' })).toBeInTheDocument();
     expect(screen.getByText('Saved')).toBeInTheDocument();
+  });
+
+  it('fires compact insert rail actions with accessible button names', () => {
+    const fixture = createContentEditorFixture({ channel: 'email' });
+    const onInsertAction = vi.fn();
+
+    render(
+      <ContentEditorShell
+        {...fixture}
+        channelLabel={fixtureChannelLabel(fixture.document.channel)}
+        onInsertAction={onInsertAction}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: 'Insert Hero' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Insert Ticket summary' }));
+
+    expect(onInsertAction).toHaveBeenNthCalledWith(1, 'hero');
+    expect(onInsertAction).toHaveBeenNthCalledWith(2, 'ticket-summary');
+  });
+
+  it('renders host inspector modes for content page body theme code variables history and issues', () => {
+    const fixture = createContentEditorFixture({ channel: 'email' });
+    const onPanelChange = vi.fn();
+    const panels = ['Content', 'Page', 'Body', 'Theme', 'Code', 'Variables', 'History', 'Issues'].map(
+      (label) => ({
+        id: label === 'Content' ? 'block' : label.toLowerCase(),
+        label,
+        content: <section>{label} panel</section>,
+      }),
+    );
+
+    render(
+      <ContentEditorShell
+        {...fixture}
+        activeInspectorPanelId="block"
+        channelLabel={fixtureChannelLabel(fixture.document.channel)}
+        inspectorPanels={panels}
+        onInspectorPanelChange={onPanelChange}
+      />,
+    );
+
+    for (const panel of panels) {
+      expect(screen.getByRole('button', { name: panel.label })).toBeInTheDocument();
+    }
+
+    fireEvent.click(screen.getByRole('button', { name: 'Code' }));
+    expect(onPanelChange).toHaveBeenCalledWith('code');
   });
 
   it('opens and closes preview output without losing inspector controls', async () => {
@@ -101,6 +150,28 @@ describe('ContentEditorShell', () => {
     expect(onTestSend).not.toHaveBeenCalled();
   });
 
+  it('fires duplicate and archive actions from the More actions menu', () => {
+    const fixture = createContentEditorFixture({ channel: 'email' });
+    const onDuplicate = vi.fn();
+    const onArchive = vi.fn();
+
+    render(
+      <ContentEditorShell
+        {...fixture}
+        channelLabel={fixtureChannelLabel(fixture.document.channel)}
+        onArchive={onArchive}
+        onDuplicate={onDuplicate}
+      />,
+    );
+
+    fireEvent.click(screen.getByLabelText('More actions'));
+    fireEvent.click(screen.getByRole('button', { name: 'Duplicate template' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Archive template' }));
+
+    expect(onDuplicate).toHaveBeenCalledTimes(1);
+    expect(onArchive).toHaveBeenCalledTimes(1);
+  });
+
   it('renders unavailable future channels as closed states', () => {
     const fixture = createContentEditorFixture({ channel: 'imessage' });
 
@@ -114,5 +185,43 @@ describe('ContentEditorShell', () => {
     expect(screen.getAllByText('iMessage template').length).toBeGreaterThan(0);
     expect(screen.getByText('Channel unavailable')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Resolve publish blockers' })).toBeDisabled();
+  });
+
+  it('fails closed when document canvas content is not explicit', () => {
+    const fixture = createContentEditorFixture({ channel: 'email' });
+
+    expect(() =>
+      render(
+        <ContentEditorShell
+          {...fixture}
+          canvasBlocks={[
+            {
+              id: 'legacy-summary-only',
+              label: 'Legacy summary-only content',
+              summary: 'This must not render through a fallback shell.',
+            },
+          ] as unknown as typeof fixture.canvasBlocks}
+          channelLabel={fixtureChannelLabel(fixture.document.channel)}
+        />,
+      ),
+    ).toThrow('Document canvas block must render document content: legacy-summary-only');
+  });
+
+  it('renders document canvases without visible block-selection chrome', () => {
+    const fixture = createContentEditorFixture({ channel: 'event_page' });
+
+    render(
+      <ContentEditorShell
+        {...fixture}
+        channelLabel={fixtureChannelLabel(fixture.document.channel)}
+      />,
+    );
+
+    expect(screen.getByTestId('editor-canvas')).toHaveAttribute(
+      'aria-label',
+      'All Access Chicago editable document',
+    );
+    expect(screen.queryByRole('button', { name: /Select content region/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Selected' })).not.toBeInTheDocument();
   });
 });

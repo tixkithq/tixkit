@@ -8,8 +8,10 @@ import { join } from 'node:path';
 /**
  * Playwright configuration for Tixkit E2E and accessibility tests.
  *
- * The webServer starts the admin dashboard in production mode (next start)
- * after building it. Tests run against the built app for visual fidelity.
+ * The webServer starts the admin dashboard in production mode when live Clerk
+ * is enabled. The default local harness uses next dev so the dashboard can use
+ * the same fail-closed local-dev auth contract as the API without weakening
+ * production auth behavior.
  *
  * For development-mode E2E, set ADMIN_DASHBOARD_URL to point at a running
  * `next dev` instance and set USE_WEBSERVER=false.
@@ -25,6 +27,9 @@ const apiPort = new URL(apiUrl).port || '4200';
 const checkoutPort = new URL(checkoutUrl).port || '3201';
 const workerHealthPort = new URL(workerHealthUrl).port || '4299';
 const temporalTaskQueue = process.env.TEMPORAL_TASK_QUEUE ?? 'tixkit-e2e';
+const adminNextDistDir = process.env.ADMIN_DASHBOARD_NEXT_DIST_DIR ?? `.next/e2e-${adminPort}`;
+const webServerTimeout = Number.parseInt(process.env.PLAYWRIGHT_WEB_SERVER_TIMEOUT_MS ?? '', 10);
+const webServerTimeoutMs = Number.isFinite(webServerTimeout) ? webServerTimeout : 240_000;
 const useStripeProvider = process.env.E2E_STRIPE_PROVIDER === '1';
 const useWalletPasses = process.env.E2E_WALLET_PASSES === '1' || isCI;
 const useLiveClerk = process.env.E2E_LIVE_CLERK === '1';
@@ -46,6 +51,7 @@ const clerkPublishableKey = useLiveClerk
   ? (process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY ?? process.env.CLERK_PUBLISHABLE_KEY ?? '')
   : '';
 const clerkWebhookSecret = useLiveClerk ? (process.env.CLERK_WEBHOOK_SECRET ?? '') : '';
+const useAdminDevServer = !useLiveClerk;
 const walletPassEnv = useWalletPasses ? createWalletPassEnv(apiUrl) : {};
 const s3Env = {
   S3_ENDPOINT: process.env.S3_ENDPOINT ?? 'http://localhost:9000',
@@ -117,10 +123,12 @@ const checkoutPublicEnv = {
   NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY: stripePublishableKey,
 };
 const adminPublicEnv = {
-  NODE_ENV: 'production',
+  NODE_ENV: useAdminDevServer ? 'development' : 'production',
   NEXT_PUBLIC_TIXKIT_API_BASE_URL: `${apiUrl}/v1`,
   NEXT_PUBLIC_ADMIN_API_BASE_URL: apiUrl,
   NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY: clerkPublishableKey,
+  ...(useAdminDevServer ? { NEXT_DIST_DIR: adminNextDistDir } : {}),
+  ...(useAdminDevServer ? { AUTH_PROVIDER: 'dev', NEXT_PUBLIC_AUTH_PROVIDER: 'dev' } : {}),
   ...(useLiveClerk && clerkPublishableKey ? { NEXT_PUBLIC_AUTH_PROVIDER: 'clerk' } : {}),
 };
 
@@ -209,7 +217,7 @@ export default defineConfig({
             'node scripts/playwright-ensure-s3-bucket.mjs && bun run --filter @tixkit/api build && bun run --filter @tixkit/api start',
           env: localApiEnv,
           url: `${apiUrl}/health`,
-          timeout: 120_000,
+          timeout: webServerTimeoutMs,
           reuseExistingServer: reuseServerWithoutGeneratedEnv,
           stdout: 'pipe',
           stderr: 'pipe',
@@ -218,7 +226,7 @@ export default defineConfig({
           command: 'node scripts/playwright-worker-webserver.mjs',
           env: localWorkerEnv,
           url: workerHealthUrl,
-          timeout: 120_000,
+          timeout: webServerTimeoutMs,
           reuseExistingServer: reuseServerWithoutGeneratedEnv,
           stdout: 'pipe',
           stderr: 'pipe',
@@ -227,16 +235,18 @@ export default defineConfig({
           command: `bun run --filter @tixkit/checkout build && bun run --filter @tixkit/checkout start -- -p ${checkoutPort}`,
           env: checkoutPublicEnv,
           url: checkoutUrl,
-          timeout: 120_000,
+          timeout: webServerTimeoutMs,
           reuseExistingServer: reuseDefaultServer,
           stdout: 'pipe',
           stderr: 'pipe',
         },
         {
-          command: `bun run --filter @tixkit/admin-dashboard build && bun run --filter @tixkit/admin-dashboard start -- -p ${adminPort}`,
+          command: useAdminDevServer
+            ? `bun run --filter @tixkit/admin-dashboard dev -- -p ${adminPort}`
+            : `bun run --filter @tixkit/admin-dashboard build && bun run --filter @tixkit/admin-dashboard start -- -p ${adminPort}`,
           env: adminPublicEnv,
           url: adminUrl,
-          timeout: 120_000,
+          timeout: webServerTimeoutMs,
           reuseExistingServer: reuseDefaultServer,
           stdout: 'pipe',
           stderr: 'pipe',

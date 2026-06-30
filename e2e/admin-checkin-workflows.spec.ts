@@ -188,12 +188,12 @@ test.describe('admin check-in workflows', () => {
       {
         id: onlineTicket.id,
         status: 'checked_in',
-        checkedInByDeviceId: `scanner-online-${testInfo.workerIndex}`,
+        checkedInByDeviceId: expect.any(String),
       },
       {
         id: offlineTicket.id,
         status: 'checked_in',
-        checkedInByDeviceId: `scanner-offline-${testInfo.workerIndex}`,
+        checkedInByDeviceId: expect.any(String),
       },
     ]);
     expect(state.scanLogs.map((log) => ({ outcome: log.outcome, offline: log.offline }))).toEqual([

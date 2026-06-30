@@ -1,3 +1,4 @@
+import * as React from 'react';
 import {
   CONTENT_SCHEMA_VERSION,
   RENDER_CONTRACTS,
@@ -195,6 +196,11 @@ function blocksForChannel(channel: ContentChannel): ContentEditorCanvasBlock[] {
         id: 'sms-body',
         label: 'Message body',
         summary: 'Personalized reminder with opt-out token and segment accounting.',
+        content: React.createElement(
+          'p',
+          { className: 'text-sm leading-6 text-foreground' },
+          'Hi {{recipient.name}}, your ticket is ready. Reply STOP to opt out.',
+        ),
       },
     ];
   }
@@ -203,17 +209,23 @@ function blocksForChannel(channel: ContentChannel): ContentEditorCanvasBlock[] {
       {
         id: 'event-hero',
         label: 'Hero',
+        presentation: 'document',
         summary: 'Event name, date, and primary call to action.',
+        content: React.createElement('section', null, 'All Access Chicago'),
       },
       {
         id: 'ticket-grid',
         label: 'Tickets',
+        presentation: 'document',
         summary: 'Available ticket types and purchase entry point.',
+        content: React.createElement('section', null, 'General admission from $35'),
       },
       {
         id: 'venue',
         label: 'Venue',
+        presentation: 'document',
         summary: 'Location, map, and arrival notes.',
+        content: React.createElement('section', null, 'Browser Hall'),
       },
     ];
   }
@@ -221,17 +233,23 @@ function blocksForChannel(channel: ContentChannel): ContentEditorCanvasBlock[] {
     {
       id: 'email-hero',
       label: 'Hero',
+      presentation: 'document',
       summary: 'Event branding, headline, and preview-safe image slot.',
+      content: React.createElement('section', null, 'Order confirmed'),
     },
     {
       id: 'order-summary',
       label: 'Order summary',
+      presentation: 'document',
       summary: 'Ticket counts, order total, and QR-code delivery note.',
+      content: React.createElement('section', null, 'Two general admission tickets'),
     },
     {
       id: 'footer',
       label: 'Footer',
+      presentation: 'document',
       summary: 'Organizer contact and unsubscribe language.',
+      content: React.createElement('section', null, 'Manage preferences'),
     },
   ];
 }

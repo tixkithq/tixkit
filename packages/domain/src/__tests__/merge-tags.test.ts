@@ -26,7 +26,11 @@ const baseContext: MergeTagContext = {
   brand: { name: 'Acme Events', supportUrl: 'https://help.example.test' },
   recipient: { name: 'Jordan Lee', email: 'jordan@example.test' },
   attendee: { name: 'Jordan Lee', checkedIn: false },
-  ticket: { type: 'General Admission', code: 'TKT-ABC123' },
+  ticket: {
+    type: 'General Admission',
+    code: 'TKT-ABC123',
+    qrCodeUrl: 'https://tickets.example.test/qr/TKT-ABC123.png',
+  },
   order: { id: 'ORD-123', total: '$45.00' },
   customAnswers: { tshirtSize: 'M' },
 };
@@ -40,6 +44,11 @@ describe('merge-tag registry', () => {
   it('marks recipient.name as required', () => {
     const recipientName = MERGE_TAG_REGISTRY.find((v) => v.key === 'recipient.name');
     expect(recipientName?.required).toBe(true);
+  });
+
+  it('includes ticket QR image URLs for rendered email QR blocks', () => {
+    const qrCodeUrl = MERGE_TAG_REGISTRY.find((v) => v.key === 'ticket.qrCodeUrl');
+    expect(qrCodeUrl?.example).toContain('https://');
   });
 });
 
@@ -88,6 +97,14 @@ describe('renderMergeTags - email', () => {
       channel: 'email',
     });
     expect(out).toBe('Shirt: M');
+  });
+
+  it('resolves ticket QR code URLs for email image blocks', () => {
+    const out = renderMergeTags('QR: {{ticket.qrCodeUrl}}', baseContext, {
+      channel: 'email',
+      escape: 'plain',
+    });
+    expect(out).toBe('QR: https://tickets.example.test/qr/TKT-ABC123.png');
   });
 
   it('renders attendee check-in status', () => {

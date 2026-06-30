@@ -136,6 +136,8 @@ export default function EventPageClient({
   const hasActiveTickets = visibleTickets.some((t) => t.status === 'active');
   const startsAt = event ? formatDateTime(event.startsAt, event.timezone) : null;
   const venueName = event?.venue?.name;
+  const publishedContentHasH1 = /<h1(?:\s|>)/i.test(contentPage?.page.html ?? '');
+  const eventTitle = event?.title ?? 'Event';
 
   useEffect(() => {
     if (!event) return;
@@ -210,9 +212,15 @@ export default function EventPageClient({
             <TicketIcon className="size-3.5" />
             {brand.name}
           </Badge>
-          <h1 className="text-3xl font-bold tracking-tight text-balance sm:text-4xl">
-            {event?.title ?? 'Event'}
-          </h1>
+          {publishedContentHasH1 ? (
+            <p className="text-3xl font-bold tracking-tight text-balance sm:text-4xl">
+              {eventTitle}
+            </p>
+          ) : (
+            <h1 className="text-3xl font-bold tracking-tight text-balance sm:text-4xl">
+              {eventTitle}
+            </h1>
+          )}
           {event?.description ? (
             <p className="max-w-2xl text-sm leading-relaxed text-muted-foreground sm:text-base">
               {event.description}

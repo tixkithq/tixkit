@@ -59,6 +59,68 @@ async function expectJsonStatus<T extends { status?: string; id?: string }>(
   return body as T;
 }
 
+function isApiResponse(
+  response: PlaywrightResponse,
+  method: string,
+  pathname: string,
+): boolean {
+  return response.request().method() === method && new URL(response.url()).pathname === pathname;
+}
+
+type BootstrapScope = {
+  organizationId: string;
+  brandId: string;
+};
+
+function collectionItems(value: unknown): Array<Record<string, unknown>> {
+  if (Array.isArray(value)) return value.filter((item) => item && typeof item === 'object');
+  if (value && typeof value === 'object' && Array.isArray((value as { items?: unknown }).items)) {
+    return (value as { items: unknown[] }).items.filter(
+      (item): item is Record<string, unknown> => Boolean(item) && typeof item === 'object',
+    );
+  }
+  return [];
+}
+
+async function bootstrapAdminScope(page: Page): Promise<BootstrapScope> {
+  const [organizationsResponse, brandsResponse] = await Promise.all([
+    page.request.get(`${apiBaseUrl}/v1/organizations`, { failOnStatusCode: false }),
+    page.request.get(`${apiBaseUrl}/v1/brands`, { failOnStatusCode: false }),
+  ]);
+  const organizationsBody = await organizationsResponse
+    .json()
+    .catch(async () => ({ raw: await organizationsResponse.text() }));
+  const brandsBody = await brandsResponse
+    .json()
+    .catch(async () => ({ raw: await brandsResponse.text() }));
+
+  expect(organizationsResponse.status(), JSON.stringify(organizationsBody, null, 2)).toBe(200);
+  expect(brandsResponse.status(), JSON.stringify(brandsBody, null, 2)).toBe(200);
+
+  const organizations = collectionItems(organizationsBody);
+  const brands = collectionItems(brandsBody);
+  const selectedBrand = brands.find(
+    (brand) =>
+      typeof brand.id === 'string' &&
+      typeof brand.organizationId === 'string' &&
+      organizations.some((organization) => organization.id === brand.organizationId),
+  );
+
+  expect(selectedBrand, JSON.stringify({ organizations, brands }, null, 2)).toBeTruthy();
+
+  return {
+    organizationId: String(selectedBrand?.organizationId),
+    brandId: String(selectedBrand?.id),
+  };
+}
+
+async function setAdminScope(page: Page, scope: BootstrapScope): Promise<void> {
+  await page.addInitScript(({ organizationId, brandId }) => {
+    window.localStorage.setItem('tixkit:selected-organization-id', organizationId);
+    window.localStorage.setItem('tixkit:selected-brand-id', brandId);
+  }, scope);
+}
+
 async function completeSeededFreeCheckout(
   page: Page,
   eventId: string,
@@ -154,6 +216,7 @@ test.describe('admin product workflow coverage', () => {
   }, testInfo) => {
     await requireReachable(page, adminBaseUrl, 'admin dashboard');
     await requireReachable(page, `${apiBaseUrl}/health`, 'api');
+    await setAdminScope(page, await bootstrapAdminScope(page));
 
     const suffix = `${testInfo.workerIndex}-${Date.now()}`;
     const title = `E2E Admin Lifecycle ${suffix}`;
@@ -162,17 +225,20 @@ test.describe('admin product workflow coverage', () => {
     await expect(page.getByRole('heading', { name: 'Events' })).toBeVisible();
     await page.getByRole('button', { name: 'Create event' }).click();
 
-    await expect(page.getByRole('heading', { name: 'Create Event' })).toBeVisible();
-    await page.getByRole('textbox', { name: 'Title', exact: true }).fill(title);
-    await page.getByLabel('Slug').fill(`e2e-admin-lifecycle-${suffix}`);
-    await page.getByLabel('Start Date').fill('2026-08-20T19:00');
-    await page.getByLabel('End Date').fill('2026-08-20T22:00');
-    await page.getByLabel('Venue Name').fill('Browser Hall');
+    const createEventDialog = page.getByRole('dialog', { name: 'Create Event' });
+    await expect(createEventDialog).toBeVisible();
+    await createEventDialog.getByRole('textbox', { name: 'Title', exact: true }).fill(title);
+    await createEventDialog.getByLabel('Slug').fill(`e2e-admin-lifecycle-${suffix}`);
+    await createEventDialog.getByLabel('Start Date').fill('2026-08-20T19:00');
+    await createEventDialog.getByLabel('End Date').fill('2026-08-20T22:00');
+    await createEventDialog.getByLabel('Venue Name').fill('Browser Hall');
+    const submitCreateEvent = createEventDialog.getByRole('button', { name: 'Create Event' });
+    await expect(submitCreateEvent).toBeEnabled();
 
-    const createResponsePromise = page.waitForResponse((response) => {
-      return response.url() === `${apiBaseUrl}/v1/events` && response.request().method() === 'POST';
-    });
-    await page.getByRole('button', { name: 'Create Event' }).click();
+    const createResponsePromise = page.waitForResponse((response) =>
+      isApiResponse(response, 'POST', '/v1/events'),
+    );
+    await submitCreateEvent.click();
     const createdEvent = await expectJsonStatus<{ id: string; status: string }>(
       await createResponsePromise,
       201,
@@ -446,13 +512,10 @@ test.describe('admin product workflow coverage', () => {
     await autoOfferSwitch.click();
     await page.getByLabel('Claim window').fill('45');
 
-    const settingsResponsePromise = page.waitForResponse((response) => {
-      return (
-        response.url() === `${apiBaseUrl}/v1/events/${seeded.event.id}/waitlist/settings` &&
-        response.request().method() === 'PATCH'
-      );
-    });
-    await page.getByRole('button', { name: 'Save' }).click();
+    const settingsResponsePromise = page.waitForResponse((response) =>
+      isApiResponse(response, 'PATCH', `/v1/events/${seeded.event.id}/waitlist/settings`),
+    );
+    await page.getByRole('button', { name: 'Save', exact: true }).click();
     const settings = await expectJsonStatus<{ autoOfferEnabled: boolean; offerTtlMinutes: number }>(
       await settingsResponsePromise,
       200,

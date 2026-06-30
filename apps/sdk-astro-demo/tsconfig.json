@@ -1,8 +1,13 @@
 {
   "extends": "astro/tsconfigs/strict",
   "compilerOptions": {
+    "baseUrl": ".",
     "paths": {
-      "@/*": ["./src/*"]
+      "@/*": ["./src/*"],
+      "@tixkit/astro": ["../../packages/sdk-astro/src/index.ts"],
+      "@tixkit/astro/client": ["../../packages/sdk-astro/src/client.ts"],
+      "@tixkit/astro/server": ["../../packages/sdk-astro/src/server.ts"],
+      "@tixkit/js": ["../../packages/sdk-js/src/index.ts"]
     }
   }
 }

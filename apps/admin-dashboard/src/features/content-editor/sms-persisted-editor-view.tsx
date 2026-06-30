@@ -63,7 +63,20 @@ function defaultSmsDocument(): SmsTemplateDocument {
   });
 }
 
-function previewFromRendered(document: SmsTemplateDocument, event: AdminEventDetail): ContentEditorPreview {
+function listItemsFromResponse<T>(value: unknown): T[] {
+  if (Array.isArray(value)) return value as T[];
+  if (!value || typeof value !== 'object') return [];
+  const keyed = value as { items?: unknown };
+  if (Array.isArray(keyed.items)) return keyed.items as T[];
+  return Object.values(value).filter(
+    (item): item is T => Boolean(item) && typeof item === 'object',
+  );
+}
+
+function previewFromRendered(
+  document: SmsTemplateDocument,
+  event: AdminEventDetail,
+): ContentEditorPreview {
   const rendered = renderSmsTemplate(document, sampleContext(event));
   return {
     label: 'SMS preview',
@@ -87,11 +100,30 @@ function canvasBlocks(document: SmsTemplateDocument): ContentEditorCanvasBlock[]
       id: 'sms-body',
       label: 'SMS body',
       summary: document.editor.body,
+      content: (
+        <p className="whitespace-pre-wrap text-sm leading-6 text-foreground">{document.editor.body}</p>
+      ),
     },
     {
       id: 'sms-compliance',
       label: 'Compliance',
       summary: `${document.settings.category} · ${document.settings.consentCategory} · limit ${document.settings.segmentLimit} segments`,
+      content: (
+        <dl className="grid gap-2 text-sm sm:grid-cols-3">
+          <div>
+            <dt className="text-xs font-medium uppercase text-muted-foreground">Category</dt>
+            <dd className="mt-1 font-medium">{document.settings.category}</dd>
+          </div>
+          <div>
+            <dt className="text-xs font-medium uppercase text-muted-foreground">Consent</dt>
+            <dd className="mt-1 font-medium">{document.settings.consentCategory}</dd>
+          </div>
+          <div>
+            <dt className="text-xs font-medium uppercase text-muted-foreground">Segment limit</dt>
+            <dd className="mt-1 font-medium">{document.settings.segmentLimit}</dd>
+          </div>
+        </dl>
+      ),
     },
   ];
 }
@@ -134,6 +166,16 @@ function resultMessage(error: { message?: string } | undefined, fallback: string
   return error?.message ?? fallback;
 }
 
+function duplicateDocumentName(name: string): string {
+  return name.endsWith(' Copy') ? `${name} 2` : `${name} Copy`;
+}
+
+function appendSmsToken(body: string, token: string): string {
+  if (!body.trim()) return token;
+  const separator = body.endsWith(' ') || body.endsWith('\n') ? '' : ' ';
+  return `${body}${separator}${token}`;
+}
+
 export function SmsPersistedEditorView({ eventId }: { eventId: string }) {
   const [event, setEvent] = React.useState<AdminEventDetail>();
   const [document, setDocument] = React.useState<AdminContentDocument>();
@@ -148,6 +190,9 @@ export function SmsPersistedEditorView({ eventId }: { eventId: string }) {
   const [actionError, setActionError] = React.useState<string>();
   const [notice, setNotice] = React.useState<string>();
   const operationIdRef = React.useRef(0);
+  const isArchived = document?.status === 'archived';
+  const canEdit = !isArchived;
+  const archivedReason = isArchived ? 'Archived templates are read-only.' : undefined;
 
   function nextOperationId() {
     operationIdRef.current += 1;
@@ -159,6 +204,7 @@ export function SmsPersistedEditorView({ eventId }: { eventId: string }) {
   }
 
   function markDraftDirty() {
+    if (isArchived) return;
     nextOperationId();
     setAutosave('idle');
     setActionError(undefined);
@@ -196,7 +242,8 @@ export function SmsPersistedEditorView({ eventId }: { eventId: string }) {
       return;
     }
 
-    let loadedDocument = documentsResult.data.items.find(
+    const documents = listItemsFromResponse<AdminContentDocument>(documentsResult.data);
+    let loadedDocument = documents.find(
       (item) => item.channel === 'sms' && item.eventId === loadedEvent.id,
     );
     if (!loadedDocument) {
@@ -224,7 +271,7 @@ export function SmsPersistedEditorView({ eventId }: { eventId: string }) {
       return;
     }
 
-    let loadedVersions = versionsResult.data.items;
+    let loadedVersions = listItemsFromResponse<AdminContentDocumentVersion>(versionsResult.data);
     let loadedDraft = latestDraft(loadedVersions, loadedDocument);
     if (!loadedDraft) {
       const initialDocument = defaultSmsDocument();
@@ -263,7 +310,7 @@ export function SmsPersistedEditorView({ eventId }: { eventId: string }) {
   }, [load]);
 
   async function saveDraft(operationId = nextOperationId(), snapshot = smsDocument) {
-    if (!document || !snapshot) return undefined;
+    if (!document || !snapshot || isArchived) return undefined;
     setAutosave('saving');
     const result = await adminApi.saveContentVersion(document.id, {
       contentJson: snapshot,
@@ -276,7 +323,10 @@ export function SmsPersistedEditorView({ eventId }: { eventId: string }) {
       return undefined;
     }
     setDraft(result.data);
-    setVersions((current) => [result.data, ...current.filter((version) => version.id !== result.data.id)]);
+    setVersions((current) => [
+      result.data,
+      ...current.filter((version) => version.id !== result.data.id),
+    ]);
     setAutosave('saved');
     setActionError(undefined);
     setNotice(`Saved draft v${result.data.versionNumber}`);
@@ -284,7 +334,7 @@ export function SmsPersistedEditorView({ eventId }: { eventId: string }) {
   }
 
   async function previewSavedDraft() {
-    if (!document || !event || !smsDocument) return;
+    if (!document || !event || !smsDocument || isArchived) return;
     const operationId = nextOperationId();
     const snapshot = smsDocument;
     const saved = await saveDraft(operationId, snapshot);
@@ -307,7 +357,7 @@ export function SmsPersistedEditorView({ eventId }: { eventId: string }) {
   }
 
   async function publishDraft() {
-    if (!document || !smsDocument) return;
+    if (!document || !smsDocument || isArchived) return;
     const operationId = nextOperationId();
     const saved = await saveDraft(operationId, smsDocument);
     if (!saved) return;
@@ -330,7 +380,7 @@ export function SmsPersistedEditorView({ eventId }: { eventId: string }) {
   }
 
   async function sendTest() {
-    if (!document || !smsDocument) return;
+    if (!document || !smsDocument || isArchived) return;
     const operationId = nextOperationId();
     const saved = await saveDraft(operationId, smsDocument);
     if (!saved) return;
@@ -352,6 +402,13 @@ export function SmsPersistedEditorView({ eventId }: { eventId: string }) {
 
   async function archiveDocument() {
     if (!document) return;
+    if (
+      !window.confirm(
+        'Archive this SMS template? Editing, publishing, previews, and test sends will be disabled.',
+      )
+    ) {
+      return;
+    }
     const operationId = nextOperationId();
     const result = await adminApi.archiveContentDocument(document.id);
     if (!isCurrentOperation(operationId)) return;
@@ -366,6 +423,43 @@ export function SmsPersistedEditorView({ eventId }: { eventId: string }) {
     toast.success('SMS template archived');
   }
 
+  async function duplicateDocument() {
+    if (!document || !smsDocument || isArchived) return;
+    const operationId = nextOperationId();
+    const saved = await saveDraft(operationId, smsDocument);
+    if (!saved) return;
+    const result = await adminApi.duplicateContentDocument(document.id, {
+      name: duplicateDocumentName(document.name),
+    });
+    if (!isCurrentOperation(operationId)) return;
+    if (!result.ok) {
+      setAutosave('error');
+      setActionError(resultMessage(result.error, 'Unable to duplicate SMS template'));
+      return;
+    }
+    setActionError(undefined);
+    setNotice(`Duplicated SMS template as ${result.data.name}`);
+    toast.success('SMS template duplicated');
+  }
+
+  function insertSmsAction(actionId: string) {
+    if (!smsDocument || isArchived) return;
+    const token =
+      actionId === 'variable'
+        ? '{{recipient.name}}'
+        : actionId === 'link'
+          ? '{{event.checkoutUrl}}'
+          : (smsDocument.settings.optOutText ?? 'Reply STOP to opt out');
+    setSmsDocument({
+      ...smsDocument,
+      editor: {
+        ...smsDocument.editor,
+        body: appendSmsToken(smsDocument.editor.body, token),
+      },
+    });
+    markDraftDirty();
+  }
+
   if (loading) {
     return <p className="text-sm text-muted-foreground">Loading SMS editor...</p>;
   }
@@ -375,7 +469,11 @@ export function SmsPersistedEditorView({ eventId }: { eventId: string }) {
       <section className="space-y-3">
         <h1 className="text-2xl font-bold tracking-tight">SMS template editor</h1>
         <p className="text-sm text-destructive">{error ?? 'SMS editor could not load.'}</p>
-        <button className="rounded-md border px-3 py-2 text-sm" onClick={() => void load()} type="button">
+        <button
+          className="rounded-md border px-3 py-2 text-sm"
+          onClick={() => void load()}
+          type="button"
+        >
           Retry
         </button>
       </section>
@@ -404,6 +502,7 @@ export function SmsPersistedEditorView({ eventId }: { eventId: string }) {
           SMS body
           <textarea
             className="min-h-32 w-full rounded-md border bg-background px-3 py-2 text-sm leading-6"
+            disabled={!canEdit}
             onChange={(change) => {
               setSmsDocument({
                 ...smsDocument,
@@ -419,21 +518,37 @@ export function SmsPersistedEditorView({ eventId }: { eventId: string }) {
             Test recipient
             <input
               className="w-full rounded-md border bg-background px-3 py-2"
+              disabled={!canEdit}
               onChange={(change) => setRecipient(change.currentTarget.value)}
               type="tel"
               value={recipient}
             />
           </label>
           <div className="flex flex-wrap gap-2">
-            <button className="inline-flex items-center gap-2 rounded-md border px-3 py-2" onClick={() => void saveDraft()} type="button">
+            <button
+              className="inline-flex items-center gap-2 rounded-md border px-3 py-2"
+              disabled={!canEdit}
+              onClick={() => void saveDraft()}
+              type="button"
+            >
               <Save className="size-4" />
               Save draft
             </button>
-            <button className="inline-flex items-center gap-2 rounded-md border px-3 py-2" onClick={() => void previewSavedDraft()} type="button">
+            <button
+              className="inline-flex items-center gap-2 rounded-md border px-3 py-2"
+              disabled={!canEdit}
+              onClick={() => void previewSavedDraft()}
+              type="button"
+            >
               <Eye className="size-4" />
               Preview
             </button>
-            <button className="inline-flex items-center gap-2 rounded-md border px-3 py-2" onClick={() => void sendTest()} type="button">
+            <button
+              className="inline-flex items-center gap-2 rounded-md border px-3 py-2"
+              disabled={!canEdit}
+              onClick={() => void sendTest()}
+              type="button"
+            >
               <Send className="size-4" />
               Send test
             </button>
@@ -442,6 +557,7 @@ export function SmsPersistedEditorView({ eventId }: { eventId: string }) {
       </section>
 
       <ContentEditorShell
+        actionsUnavailableReason={archivedReason}
         autosave={autosave}
         canvasBlocks={canvasBlocks(smsDocument)}
         channelLabel="SMS template"
@@ -449,9 +565,12 @@ export function SmsPersistedEditorView({ eventId }: { eventId: string }) {
         draft={toShellVersion(draft)}
         insertActions={smsInsertActions}
         preview={preview}
+        testSendUnavailableReason={archivedReason}
         versions={versionSummaries(versions)}
+        onInsertAction={insertSmsAction}
         onPreview={() => void previewSavedDraft()}
         onPublish={() => void publishDraft()}
+        onDuplicate={() => void duplicateDocument()}
         onArchive={() => void archiveDocument()}
         onTestSend={() => void sendTest()}
       />

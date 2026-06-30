@@ -494,6 +494,8 @@ export async function seedFreeCheckoutEvent(
     200,
   );
 
+  await seedPublishedEventPageContent({ event, suffix });
+
   return { event, ticketType, product };
 }
 

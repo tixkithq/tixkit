@@ -4,10 +4,7 @@ import * as React from 'react';
 import { toast } from 'sonner';
 import { ContentEditorShell } from '@tixkit/content-editor-shell';
 import type { ContentEditorPreview } from '@tixkit/content-editor-shell';
-import {
-  createContentEditorRouteFixture,
-  type ContentEditorRouteKind,
-} from './fixture-adapters';
+import { createContentEditorRouteFixture, type ContentEditorRouteKind } from './fixture-adapters';
 
 export function ContentEditorView({
   actionsUnavailableReason,
@@ -55,7 +52,6 @@ export function ContentEditorView({
       ),
     ),
     React.createElement(ContentEditorShell, {
-      actionsUnavailableReason: fixture.actionsUnavailableReason,
       autosave: fixture.autosave,
       canvasBlocks: fixture.canvasBlocks,
       channelLabel: fixture.channelLabel,
@@ -63,6 +59,7 @@ export function ContentEditorView({
       draft: fixture.draft,
       insertActions: fixture.insertActions,
       preview: fixture.preview,
+      testSendUnavailableReason: fixture.actionsUnavailableReason,
       unavailableReason: fixture.unavailableReason,
       versions: fixture.versions,
       onArchive: unavailable,

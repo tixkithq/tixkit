@@ -38,7 +38,7 @@ describe('ContentEditorView', () => {
       'data-channel',
       'event_page',
     );
-    expect(screen.getByRole('button', { name: 'Publish unavailable' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Publish' })).toBeEnabled();
 
     fireEvent.click(screen.getByRole('button', { name: 'Open preview' }));
     expect(screen.getByTestId('preview-drawer')).toHaveTextContent('Hosted page');
@@ -48,8 +48,8 @@ describe('ContentEditorView', () => {
     render(React.createElement(ContentEditorView, { eventId: 'evt_1', kind: 'sms' }));
 
     expect(screen.getByRole('heading', { name: 'SMS template editor' })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Opt-out' })).toBeInTheDocument();
-    expect(screen.getByText('Mobile canvas')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Insert Opt-out' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Insert Variable' })).toBeInTheDocument();
   });
 
   it('renders server-provided SMS compliance preview output', () => {
@@ -67,7 +67,6 @@ describe('ContentEditorView', () => {
       }),
     );
 
-    expect(screen.getByText('SMS compliance adapter preview is active; publish waits for persisted content wiring.')).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: 'Open preview' }));
     expect(screen.getByTestId('preview-drawer')).toHaveTextContent('SMS compliance preview');
     expect(screen.getByTestId('preview-drawer')).toHaveTextContent('Segments: 1 (gsm)');
@@ -88,7 +87,6 @@ describe('ContentEditorView', () => {
       }),
     );
 
-    expect(screen.getByText('React Email adapter preview is active; publish waits for persisted content wiring.')).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: 'Open preview' }));
     expect(screen.getByTestId('preview-drawer')).toHaveTextContent('React Email preview');
     expect(screen.getByTestId('preview-drawer')).toHaveTextContent('Your All Access Chicago tickets are ready');
@@ -110,7 +108,7 @@ describe('ContentEditorView', () => {
     expect(screen.getAllByText('iMessage template is not enabled for this workspace.')).toHaveLength(
       2,
     );
-    expect(screen.getByRole('button', { name: 'Publish unavailable' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Resolve publish blockers' })).toBeDisabled();
     expect(screen.getByRole('button', { name: 'Test send unavailable' })).toBeDisabled();
     expect(screen.queryByRole('button', { name: 'Hero' })).not.toBeInTheDocument();
   });

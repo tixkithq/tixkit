@@ -12,6 +12,13 @@
     "forceConsistentCasingInFileNames": true,
     "noEmit": true,
     "allowImportingTsExtensions": true,
+    "baseUrl": ".",
+    "paths": {
+      "@tixkit/remix": ["../../packages/sdk-remix/src/index.ts"],
+      "@tixkit/remix/client": ["../../packages/sdk-remix/src/client.ts"],
+      "@tixkit/remix/server": ["../../packages/sdk-remix/src/server.ts"],
+      "@tixkit/js": ["../../packages/sdk-js/src/index.ts"]
+    },
     "types": ["@remix-run/node", "vite/client"]
   }
 }

@@ -737,6 +737,7 @@ function sampleContext(): MergeTagContext {
     ticket: {
       type: 'General Admission',
       code: 'TKT-123',
+      qrCodeUrl: 'https://tickets.example.test/qr/TKT-123.png',
     },
     order: {
       id: 'ord_123',
