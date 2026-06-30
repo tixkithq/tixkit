@@ -18,6 +18,7 @@
     "clean": "rm -rf dist"
   },
   "dependencies": {
+    "@aws-sdk/client-s3": "^3.1075.0",
     "@tixkit/content-core": "workspace:*",
     "@tixkit/content-message": "workspace:*",
     "@tixkit/db": "workspace:*",

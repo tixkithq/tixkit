@@ -1032,10 +1032,10 @@ describe('exportWorkflow', () => {
     });
   });
 
-  it('marks the export failed when generation fails', async () => {
+  it('marks the export failed when generation returns a non-retryable failure', async () => {
     let failedInput: Record<string, unknown> | undefined;
     setActivity('generateExportActivity', async () =>
-      errResult('EXPORT_FAILED', 'Generation failed', true),
+      errResult('EXPORT_FAILED', 'Invalid export filters', false),
     );
     setActivity('markExportFailedActivity', async (activityInput: Record<string, unknown>) => {
       failedInput = activityInput;
@@ -1047,14 +1047,30 @@ describe('exportWorkflow', () => {
     expect(result.status).toBe('failed');
     expect(failedInput).toMatchObject({
       exportId: 'exp_1',
-      reason: 'Generation failed',
+      reason: 'Invalid export filters',
     });
   });
 
-  it('marks the export failed when upload fails', async () => {
+  it('throws retryable generation failures without marking the export failed', async () => {
+    let markedFailed = false;
+    setActivity('generateExportActivity', async () =>
+      errResult('EXPORT_FAILED', 'Database unavailable', true),
+    );
+    setActivity('markExportFailedActivity', async () => {
+      markedFailed = true;
+      return okResult({ failed: true });
+    });
+
+    await expect(exportWorkflow(input)).rejects.toThrow(
+      'Export generation failed (EXPORT_FAILED): Database unavailable',
+    );
+    expect(markedFailed).toBe(false);
+  });
+
+  it('marks the export failed when upload returns a non-retryable failure', async () => {
     let failedInput: Record<string, unknown> | undefined;
     setActivity('uploadFileActivity', async () =>
-      errResult('UPLOAD_FAILED', 'Upload failed', true),
+      errResult('UPLOAD_FAILED', 'Invalid S3 credentials', false),
     );
     setActivity('markExportFailedActivity', async (activityInput: Record<string, unknown>) => {
       failedInput = activityInput;
@@ -1066,8 +1082,40 @@ describe('exportWorkflow', () => {
     expect(result.status).toBe('failed');
     expect(failedInput).toMatchObject({
       exportId: 'exp_1',
-      reason: 'Upload failed',
+      reason: 'Invalid S3 credentials',
     });
+  });
+
+  it('throws retryable upload failures without marking the export failed', async () => {
+    let markedFailed = false;
+    setActivity('uploadFileActivity', async () =>
+      errResult('UPLOAD_FAILED', 'S3 timeout', true),
+    );
+    setActivity('markExportFailedActivity', async () => {
+      markedFailed = true;
+      return okResult({ failed: true });
+    });
+
+    await expect(exportWorkflow(input)).rejects.toThrow(
+      'Export upload failed (UPLOAD_FAILED): S3 timeout',
+    );
+    expect(markedFailed).toBe(false);
+  });
+
+  it('throws retryable completion notification failures without marking the export failed', async () => {
+    let markedFailed = false;
+    setActivity('notifyExportCompleteActivity', async () =>
+      errResult('EXPORT_NOTIFICATION_FAILED', 'Database unavailable', true),
+    );
+    setActivity('markExportFailedActivity', async () => {
+      markedFailed = true;
+      return okResult({ failed: true });
+    });
+
+    await expect(exportWorkflow(input)).rejects.toThrow(
+      'Export completion notification failed (EXPORT_NOTIFICATION_FAILED): Database unavailable',
+    );
+    expect(markedFailed).toBe(false);
   });
 });
 

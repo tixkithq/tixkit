@@ -6,6 +6,35 @@ vi.mock('@temporalio/client', () => ({
   Client: vi.fn(),
 }));
 
+const s3Mock = vi.hoisted(() => ({
+  constructorConfigs: [] as unknown[],
+  putObjectInputs: [] as Record<string, unknown>[],
+  send: vi.fn(async (_command: unknown) => ({})),
+}));
+
+vi.mock('@aws-sdk/client-s3', () => {
+  class S3Client {
+    constructor(config: unknown) {
+      s3Mock.constructorConfigs.push(config);
+    }
+
+    send(command: unknown) {
+      return s3Mock.send(command);
+    }
+  }
+
+  class PutObjectCommand {
+    readonly input: Record<string, unknown>;
+
+    constructor(input: Record<string, unknown>) {
+      this.input = input;
+      s3Mock.putObjectInputs.push(input);
+    }
+  }
+
+  return { S3Client, PutObjectCommand };
+});
+
 const dbState = vi.hoisted(() => ({
   exportJob: {
     id: 'exp_1',
@@ -265,6 +294,25 @@ describe('generateExportActivity', () => {
 });
 
 describe('uploadFileActivity', () => {
+  const originalNodeEnv = process.env.NODE_ENV;
+
+  beforeEach(() => {
+    s3Mock.constructorConfigs.length = 0;
+    s3Mock.putObjectInputs.length = 0;
+    s3Mock.send.mockReset();
+    s3Mock.send.mockResolvedValue({});
+    process.env.NODE_ENV = originalNodeEnv;
+    delete process.env.EXPORT_STORAGE_MODE;
+    delete process.env.S3_ENDPOINT;
+    delete process.env.S3_FORCE_PATH_STYLE;
+    delete process.env.S3_ACCESS_KEY_ID;
+    delete process.env.S3_SECRET_ACCESS_KEY;
+    delete process.env.S3_BUCKET;
+    delete process.env.S3_REGION;
+    delete process.env.S3_EXPORT_BUCKET;
+    delete process.env.S3_EXPORT_REGION;
+  });
+
   it('returns a file URL based on bucket and key', async () => {
     const result = await uploadFileActivity({
       exportId: 'exp_1',
@@ -276,6 +324,67 @@ describe('uploadFileActivity', () => {
     if (result.ok) {
       expect(result.value.fileUrl).toContain('exp_1.csv');
       expect(result.value.fileUrl).toMatch(/^https:\/\//);
+    }
+  });
+
+  it('uploads export data to the default S3 endpoint in production', async () => {
+    process.env.NODE_ENV = 'production';
+    process.env.S3_EXPORT_BUCKET = 'exports-bucket';
+    process.env.S3_EXPORT_REGION = 'us-west-2';
+
+    const result = await uploadFileActivity({
+      exportId: 'exp_1',
+      data: 'id,name\n1,Test',
+      format: 'csv',
+    });
+
+    expect(result.ok).toBe(true);
+    expect(s3Mock.send).toHaveBeenCalledTimes(1);
+    expect(s3Mock.constructorConfigs[0]).toEqual({ region: 'us-west-2' });
+    expect(s3Mock.putObjectInputs[0]).toMatchObject({
+      Bucket: 'exports-bucket',
+      Key: 'exports/exp_1.csv',
+      Body: 'id,name\n1,Test',
+      ContentType: 'text/csv',
+    });
+  });
+
+  it('uses the existing shared S3 bucket and region env when export-specific values are unset', async () => {
+    process.env.NODE_ENV = 'production';
+    process.env.S3_BUCKET = 'shared-bucket';
+    process.env.S3_REGION = 'eu-west-1';
+
+    const result = await uploadFileActivity({
+      exportId: 'exp_1',
+      data: '[{"id":"1"}]',
+      format: 'json',
+    });
+
+    expect(result.ok).toBe(true);
+    expect(s3Mock.send).toHaveBeenCalledTimes(1);
+    expect(s3Mock.constructorConfigs[0]).toEqual({ region: 'eu-west-1' });
+    expect(s3Mock.putObjectInputs[0]).toMatchObject({
+      Bucket: 'shared-bucket',
+      Key: 'exports/exp_1.json',
+      Body: '[{"id":"1"}]',
+      ContentType: 'application/json',
+    });
+  });
+
+  it('returns a failed activity result when production S3 upload fails', async () => {
+    process.env.NODE_ENV = 'production';
+    s3Mock.send.mockRejectedValueOnce(new Error('Access denied'));
+
+    const result = await uploadFileActivity({
+      exportId: 'exp_1',
+      data: 'id,name\n1,Test',
+      format: 'csv',
+    });
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.errorCode).toBe('FILE_UPLOAD_FAILED');
+      expect(result.message).toBe('Access denied');
     }
   });
 });

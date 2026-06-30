@@ -1,4 +1,5 @@
 import { createDb, type Database } from '@tixkit/db';
+import { PutObjectCommand, S3Client, type S3ClientConfig } from '@aws-sdk/client-s3';
 import { Redis } from 'ioredis';
 import { ulid } from 'ulid';
 import type { WorkflowActivityResult } from '../shared/types.js';
@@ -14,6 +15,22 @@ function isValidExportFileUrl(value: unknown): value is string {
   } catch {
     return false;
   }
+}
+
+function isLocalExportStorageMode() {
+  return (
+    process.env.EXPORT_STORAGE_MODE === 'local' ||
+    process.env.NODE_ENV === 'test' ||
+    (process.env.NODE_ENV === 'development' && process.env.S3_EXPORT_UPLOAD !== 'true')
+  );
+}
+
+function exportContentType(format: string) {
+  if (format === 'json') return 'application/json';
+  if (format === 'xlsx') {
+    return 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
+  }
+  return 'text/csv';
 }
 
 type ExportJobStatus = 'pending' | 'processing' | 'completed' | 'failed';
@@ -629,36 +646,41 @@ export async function uploadFileActivity(input: {
   format: string;
 }): Promise<WorkflowActivityResult<{ fileUrl: string }>> {
   try {
-    const bucket = process.env.S3_EXPORT_BUCKET ?? 'tixkit-exports';
-    const region = process.env.S3_EXPORT_REGION ?? 'us-east-1';
+    const bucket = process.env.S3_EXPORT_BUCKET ?? process.env.S3_BUCKET ?? 'tixkit-exports';
+    const region = process.env.S3_EXPORT_REGION ?? process.env.S3_REGION ?? 'us-east-1';
     const key = `exports/${input.exportId}.${input.format}`;
     const fileUrl = `https://${bucket}.s3.${region}.amazonaws.com/${key}`;
 
-    const s3Endpoint = process.env.S3_ENDPOINT;
-    if (s3Endpoint) {
-      try {
-        // @ts-expect-error - @aws-sdk/client-s3 is an optional dependency
-        const { S3Client, PutObjectCommand } = await import('@aws-sdk/client-s3');
-        const s3 = new S3Client({
-          region,
-          endpoint: s3Endpoint,
-          forcePathStyle: process.env.S3_FORCE_PATH_STYLE === 'true',
-          credentials: {
-            accessKeyId: process.env.S3_ACCESS_KEY_ID ?? '',
-            secretAccessKey: process.env.S3_SECRET_ACCESS_KEY ?? '',
-          },
-        });
-        await s3.send(
-          new PutObjectCommand({
-            Bucket: bucket,
-            Key: key,
-            Body: input.data,
-            ContentType: input.format === 'json' ? 'application/json' : 'text/csv',
-          }),
+    if (!isLocalExportStorageMode()) {
+      const accessKeyId = process.env.S3_ACCESS_KEY_ID;
+      const secretAccessKey = process.env.S3_SECRET_ACCESS_KEY;
+      if ((accessKeyId && !secretAccessKey) || (!accessKeyId && secretAccessKey)) {
+        return errResult(
+          'FILE_UPLOAD_FAILED',
+          'S3_ACCESS_KEY_ID and S3_SECRET_ACCESS_KEY must be configured together',
+          false,
         );
-      } catch {
-        // S3 SDK not installed; return URL for development
       }
+
+      const s3Config: S3ClientConfig = { region };
+      const s3Endpoint = process.env.S3_ENDPOINT;
+      if (s3Endpoint) {
+        s3Config.endpoint = s3Endpoint;
+        s3Config.forcePathStyle = process.env.S3_FORCE_PATH_STYLE === 'true';
+      }
+      if (accessKeyId && secretAccessKey) {
+        s3Config.credentials = { accessKeyId, secretAccessKey };
+      }
+
+      const s3 = new S3Client(s3Config);
+      await s3.send(
+        new PutObjectCommand({
+          Bucket: bucket,
+          Key: key,
+          Body: input.data,
+          ContentType: exportContentType(input.format),
+        }),
+      );
     }
 
     return okResult({ fileUrl });

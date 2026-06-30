@@ -45,45 +45,54 @@ export type ExportWorkflowInput = {
   tenantId?: string;
 };
 
+function throwIfRetryableExportFailure(
+  activityContext: string,
+  result: Exclude<WorkflowActivityResult<unknown>, { ok: true }>,
+) {
+  if (result.retryable) {
+    throw new Error(`${activityContext} failed (${result.errorCode}): ${result.message}`);
+  }
+}
+
 export async function exportWorkflow(
   input: ExportWorkflowInput,
 ): Promise<{ status: string; fileUrl?: string }> {
-  try {
-    const genResult = await generateExportActivity({
-      exportId: input.exportId,
-      type: input.type,
-      format: input.format,
-    });
+  const genResult = await generateExportActivity({
+    exportId: input.exportId,
+    type: input.type,
+    format: input.format,
+  });
 
-    if (!genResult.ok) {
-      await markExportFailedActivity({ exportId: input.exportId, reason: genResult.message });
-      return { status: 'failed' };
-    }
-
-    const uploadResult = await uploadFileActivity({
-      exportId: input.exportId,
-      data: genResult.value.data,
-      format: input.format,
-    });
-
-    if (!uploadResult.ok) {
-      await markExportFailedActivity({ exportId: input.exportId, reason: uploadResult.message });
-      return { status: 'failed' };
-    }
-
-    await notifyExportCompleteActivity({
-      exportId: input.exportId,
-      fileUrl: uploadResult.value.fileUrl,
-      requestedBy: input.requestedBy,
-      tenantId: input.tenantId,
-    });
-
-    return { status: 'completed', fileUrl: uploadResult.value.fileUrl };
-  } catch (err) {
-    await markExportFailedActivity({
-      exportId: input.exportId,
-      reason: err instanceof Error ? err.message : 'Unknown export workflow failure',
-    });
+  if (!genResult.ok) {
+    throwIfRetryableExportFailure('Export generation', genResult);
+    await markExportFailedActivity({ exportId: input.exportId, reason: genResult.message });
     return { status: 'failed' };
   }
+
+  const uploadResult = await uploadFileActivity({
+    exportId: input.exportId,
+    data: genResult.value.data,
+    format: input.format,
+  });
+
+  if (!uploadResult.ok) {
+    throwIfRetryableExportFailure('Export upload', uploadResult);
+    await markExportFailedActivity({ exportId: input.exportId, reason: uploadResult.message });
+    return { status: 'failed' };
+  }
+
+  const notifyResult = await notifyExportCompleteActivity({
+    exportId: input.exportId,
+    fileUrl: uploadResult.value.fileUrl,
+    requestedBy: input.requestedBy,
+    tenantId: input.tenantId,
+  });
+
+  if (!notifyResult.ok) {
+    throwIfRetryableExportFailure('Export completion notification', notifyResult);
+    await markExportFailedActivity({ exportId: input.exportId, reason: notifyResult.message });
+    return { status: 'failed' };
+  }
+
+  return { status: 'completed', fileUrl: uploadResult.value.fileUrl };
 }
