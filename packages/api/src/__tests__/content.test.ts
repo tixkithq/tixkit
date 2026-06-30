@@ -503,10 +503,14 @@ describe('content routes', () => {
       documentId: 'cdoc_1',
       subject: 'Tickets for {{event.title}}',
       previewText: 'Ready for {{recipient.name}}',
-      renderedHtml: '<h1>{{event.title}}</h1><p>Hi {{recipient.name}}</p>',
+      renderedHtml: expect.stringContaining('<!DOCTYPE html'),
       renderedText: expect.stringContaining('TICKET SUMMARY'),
       validation: { valid: true },
     });
+    expect(save.json().renderedHtml).not.toBe(
+      '<h1>{{event.title}}</h1><p>Hi {{recipient.name}}</p>',
+    );
+    expect(save.json().renderedHtml).not.toBe('<p>caller supplied html must not win</p>');
     expect(save.json().renderedText).not.toBe('caller supplied text');
 
     const context = {
@@ -592,12 +596,60 @@ describe('content routes', () => {
         expect.objectContaining({
           document_id: 'cdoc_1',
           subject: 'Tickets for {{event.title}}',
-          rendered_html: '<h1>{{event.title}}</h1><p>Hi {{recipient.name}}</p>',
+          rendered_html: expect.stringContaining('<!DOCTYPE html'),
         }),
         expect.objectContaining({
           channel: 'email',
           recipient: 'ada@example.test',
           status: 'captured',
+        }),
+      ]),
+    );
+  });
+
+  it('fails closed for unsafe email editor HTML when saving rendered output', async () => {
+    const unsafeContentHtml =
+      '<p>Tickets ready</p><img src="https://cdn.example.test/ticket.png" onerror="alert(1)"><a href="jav&#x61;script&colon;alert(1)">Open tickets</a>';
+    const emailDocument = emailDocumentJson({
+      editor: {
+        provider: REACT_EMAIL_EDITOR_PACKAGE,
+        contentHtml: unsafeContentHtml,
+      },
+    });
+    const { db } = createContentDb({
+      brands: [{ id: 'brd_1', tenant_id: 'tnt_1', organization_id: 'org_1' }],
+      content_documents: [documentRow()],
+      content_document_versions: [],
+    });
+    const app = await setupContentApp(db, principal);
+
+    const save = await app.inject({
+      method: 'POST',
+      url: '/content-documents/cdoc_1/versions',
+      payload: {
+        contentJson: emailDocument,
+        renderedHtml: '<p>caller supplied html must not win</p>',
+        renderedText: 'caller supplied text',
+      },
+    });
+
+    expect(save.statusCode).toBe(201);
+    expect(save.json()).toMatchObject({
+      documentId: 'cdoc_1',
+      renderedHtml: '',
+      renderedText: '',
+      validation: { valid: false },
+    });
+    expect(save.json().contentJson.editor.contentHtml).toBe(unsafeContentHtml);
+    expect(save.json().validation.issues).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          code: 'unsafe_editor_html',
+          field: 'editor.contentHtml',
+        }),
+        expect.objectContaining({
+          code: 'unsafe_link',
+          field: 'editor.contentHtml',
         }),
       ]),
     );
