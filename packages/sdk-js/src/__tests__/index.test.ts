@@ -1,4 +1,4 @@
-import { afterEach, describe, it, expect, vi } from 'vitest';
+import { afterEach, describe, it, expect, expectTypeOf, vi } from 'vitest';
 import { execFileSync } from 'node:child_process';
 import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -9,6 +9,7 @@ import {
   TixkitApiError,
   type ContentRenderArtifact,
   type EmailTemplateDocument,
+  type PublicAvailabilityItem,
   type SmsTemplateDocument,
   type WebhookEvent,
 } from '../index.js';
@@ -2168,6 +2169,39 @@ describe('TixkitClient new resource methods', () => {
       'https://api.test/v1/public/events/evt_1/resale-listings?cursor=lst_0&limit=25',
     );
     expect(call.method).toBe('GET');
+  });
+
+  it('public.getAvailability sends product filters and returns product rows', async () => {
+    const fm = mockFetch(200, [
+      {
+        type: 'product',
+        productId: 'prd_1',
+        name: 'T-shirt',
+        kind: 'product',
+        priceCents: 2500,
+        currency: 'USD',
+        minPerOrder: 1,
+        maxPerOrder: 3,
+        available: 3,
+        status: 'active',
+        requiresAccessCode: false,
+      },
+    ]);
+    const c = new TixkitClient({ apiBaseUrl: 'https://api.test', maxRetries: 0 });
+
+    const availability = await c.public.getAvailability('evt_1', ['tt_hidden', 'prd_1']);
+    expectTypeOf(availability).toEqualTypeOf<PublicAvailabilityItem[]>();
+
+    const call = getCall(fm);
+    expect(call.url).toBe(
+      'https://api.test/v1/public/events/evt_1/availability?products=tt_hidden%2Cprd_1',
+    );
+    expect(call.method).toBe('GET');
+    expect(availability[0]).toMatchObject({
+      type: 'product',
+      productId: 'prd_1',
+      kind: 'product',
+    });
   });
 
   it('public.validateAccessCode sends POST with ticketTypeIds and accessCode', async () => {

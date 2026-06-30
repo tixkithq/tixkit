@@ -144,6 +144,10 @@ describe('EventPagePersistedEditorView', () => {
     expect(await screen.findByTestId('event-page-metadata-bar')).toBeInTheDocument();
     expect(screen.getByRole('complementary', { name: 'Insert content' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Content' })).toHaveAttribute('aria-pressed', 'true');
+    fireEvent.click(screen.getByRole('button', { name: 'Collapse inspector' }));
+    expect(screen.getByRole('button', { name: 'Open inspector' })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Open inspector' }));
+    expect(screen.getByRole('button', { name: 'Collapse inspector' })).toBeInTheDocument();
 
     const headline = await screen.findByLabelText('Page headline');
     fireEvent.change(headline, {

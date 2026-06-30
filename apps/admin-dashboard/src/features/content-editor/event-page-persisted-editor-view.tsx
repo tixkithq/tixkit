@@ -26,6 +26,8 @@ import {
   MapPin,
   MoreHorizontal,
   Palette,
+  PanelRightClose,
+  PanelRightOpen,
   Save,
   Send,
   Ticket,
@@ -1093,6 +1095,7 @@ export function EventPagePersistedEditorView({ eventId }: { eventId: string }) {
   const [eventPageDocument, setEventPageDocument] = React.useState<EventPageDocument>();
   const [selectedBlockId, setSelectedBlockId] = React.useState<string>();
   const [inspectorPanelId, setInspectorPanelId] = React.useState<InspectorPanelId>('block');
+  const [inspectorCollapsed, setInspectorCollapsed] = React.useState(false);
   const [preview, setPreview] = React.useState<EditorPreview>();
   const [previewOpen, setPreviewOpen] = React.useState(false);
   const [autosave, setAutosave] = React.useState<AutosaveState>('idle');
@@ -1710,7 +1713,13 @@ export function EventPagePersistedEditorView({ eventId }: { eventId: string }) {
         </div>
       </header>
 
-      <div className="grid h-[calc(100svh-4rem)] grid-cols-[4rem_minmax(0,1fr)] lg:grid-cols-[4rem_minmax(0,1fr)_22rem]">
+      <div
+        className={`grid h-[calc(100svh-4rem)] grid-cols-[4rem_minmax(0,1fr)] ${
+          inspectorCollapsed
+            ? 'lg:grid-cols-[4rem_minmax(0,1fr)]'
+            : 'lg:grid-cols-[4rem_minmax(0,1fr)_22rem]'
+        }`}
+      >
         <aside
           aria-label="Insert content"
           className="flex flex-col items-center gap-2 border-r border-white/10 bg-neutral-950 px-2 py-5"
@@ -1814,26 +1823,39 @@ export function EventPagePersistedEditorView({ eventId }: { eventId: string }) {
 
         <aside
           aria-label="Event page inspector"
-          className="col-span-2 min-h-0 overflow-auto border-t border-white/10 bg-neutral-950 p-4 lg:col-span-1 lg:border-l lg:border-t-0"
+          className={`col-span-2 min-h-0 overflow-auto border-t border-white/10 bg-neutral-950 p-4 lg:col-span-1 lg:border-l lg:border-t-0 ${
+            inspectorCollapsed ? 'hidden' : ''
+          }`}
         >
-          <div className="grid grid-cols-4 gap-1" aria-label="Event page inspector modes">
-            {(Object.keys(panelLabels) as InspectorPanelId[]).map((id) => (
-              <button
-                aria-label={panelLabels[id]}
-                aria-pressed={inspectorPanelId === id}
-                className={`inline-flex h-9 items-center justify-center rounded-md border text-xs ${
-                  inspectorPanelId === id
-                    ? 'border-white/30 bg-white text-black'
-                    : 'border-white/10 text-white/60 hover:bg-white/10 hover:text-white'
-                }`}
-                key={id}
-                onClick={() => setInspectorPanelId(id)}
-                title={panelLabels[id]}
-                type="button"
-              >
-                {panelIcons[id]}
-              </button>
-            ))}
+          <div className="grid grid-cols-[minmax(0,1fr)_2.25rem] gap-2">
+            <div className="grid grid-cols-4 gap-1" aria-label="Event page inspector modes">
+              {(Object.keys(panelLabels) as InspectorPanelId[]).map((id) => (
+                <button
+                  aria-label={panelLabels[id]}
+                  aria-pressed={inspectorPanelId === id}
+                  className={`inline-flex h-9 items-center justify-center rounded-md border text-xs ${
+                    inspectorPanelId === id
+                      ? 'border-white/30 bg-white text-black'
+                      : 'border-white/10 text-white/60 hover:bg-white/10 hover:text-white'
+                  }`}
+                  key={id}
+                  onClick={() => setInspectorPanelId(id)}
+                  title={panelLabels[id]}
+                  type="button"
+                >
+                  {panelIcons[id]}
+                </button>
+              ))}
+            </div>
+            <button
+              aria-label="Collapse inspector"
+              className="inline-flex h-9 items-center justify-center rounded-md border border-white/10 text-white/60 hover:bg-white/10 hover:text-white"
+              onClick={() => setInspectorCollapsed(true)}
+              title="Collapse inspector"
+              type="button"
+            >
+              <PanelRightClose className="size-4" />
+            </button>
           </div>
 
           {inspectorPanelId === 'block' && (
@@ -1994,6 +2016,18 @@ export function EventPagePersistedEditorView({ eventId }: { eventId: string }) {
             </section>
           )}
         </aside>
+
+        {inspectorCollapsed && (
+          <button
+            aria-label="Open inspector"
+            className="fixed bottom-4 right-4 z-20 inline-flex h-10 items-center gap-2 rounded-md border border-white/10 bg-neutral-950 px-3 text-sm font-medium text-white/80 shadow-2xl hover:bg-neutral-900 hover:text-white"
+            onClick={() => setInspectorCollapsed(false)}
+            type="button"
+          >
+            <PanelRightOpen className="size-4" />
+            Inspector
+          </button>
+        )}
       </div>
 
       {previewOpen && <PreviewDrawer onClose={() => setPreviewOpen(false)} preview={preview} />}

@@ -250,6 +250,10 @@ function ok<T>(data: T) {
   return { ok: true as const, data };
 }
 
+function openEmailMoreActions() {
+  fireEvent.click(screen.getByRole('button', { name: 'More actions' }));
+}
+
 describe('EmailPersistedEditorView', () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -311,6 +315,37 @@ describe('EmailPersistedEditorView', () => {
     expect(screen.getByRole('complementary', { name: 'Insert content' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Style' })).toHaveAttribute('aria-pressed', 'true');
     expect(screen.getByTestId('native-email-inspector-host')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Collapse inspector' }));
+    expect(screen.getByRole('button', { name: 'Open inspector' })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Insert Variables' }));
+    expect(screen.getByRole('button', { name: 'Variables' })).toHaveAttribute(
+      'aria-pressed',
+      'true',
+    );
+    expect(screen.getByRole('button', { name: 'Collapse inspector' })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Collapse inspector' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Open inspector' }));
+    expect(screen.getByRole('button', { name: 'Collapse inspector' })).toBeInTheDocument();
+    openEmailMoreActions();
+    fireEvent.click(screen.getByRole('button', { name: 'Open version history' }));
+    expect(screen.getByRole('button', { name: 'History' })).toHaveAttribute(
+      'aria-pressed',
+      'true',
+    );
+    openEmailMoreActions();
+    fireEvent.click(screen.getByRole('button', { name: 'Open variables panel' }));
+    expect(screen.getByRole('button', { name: 'Variables' })).toHaveAttribute(
+      'aria-pressed',
+      'true',
+    );
+    openEmailMoreActions();
+    fireEvent.click(screen.getByRole('button', { name: 'Template details' }));
+    expect(screen.getByRole('button', { name: 'Style' })).toHaveAttribute('aria-pressed', 'true');
+    openEmailMoreActions();
+    fireEvent.click(screen.getByRole('button', { name: 'Review blockers' }));
+    expect(screen.getByRole('button', { name: 'Issues' })).toHaveAttribute('aria-pressed', 'true');
+    fireEvent.click(screen.getByRole('button', { name: 'Style' }));
+    expect(screen.getByRole('button', { name: 'Style' })).toHaveAttribute('aria-pressed', 'true');
 
     const subject = await screen.findByLabelText('Subject');
     fireEvent.change(subject, {
@@ -363,6 +398,7 @@ describe('EmailPersistedEditorView', () => {
       );
     });
 
+    openEmailMoreActions();
     fireEvent.click(screen.getByRole('button', { name: 'Archive template' }));
     await waitFor(() => {
       expect(adminApiMock.archiveContentDocument).toHaveBeenCalledWith('cdoc_email');

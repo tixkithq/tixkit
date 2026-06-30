@@ -1203,7 +1203,7 @@ const rawOpenApiSpec = {
         },
         required: ['items', 'nextCursor', 'hasMore'],
       },
-      PublicAvailabilityItem: {
+      PublicAvailabilityTicketItem: {
         type: 'object',
         properties: {
           ticketTypeId: { type: 'string' },
@@ -1234,6 +1234,44 @@ const rawOpenApiSpec = {
           'available',
           'status',
           'requiresAccessCode',
+        ],
+      },
+      PublicAvailabilityProductItem: {
+        type: 'object',
+        properties: {
+          type: { type: 'string', enum: ['product'] },
+          productId: { type: 'string' },
+          name: { type: 'string' },
+          kind: { type: 'string', enum: ['product'] },
+          priceCents: { type: 'integer' },
+          currency: { type: 'string' },
+          minPerOrder: { type: 'integer' },
+          maxPerOrder: { type: 'integer' },
+          available: { type: 'integer' },
+          status: { type: 'string' },
+          requiresAccessCode: { type: 'boolean' },
+          description: { type: 'string' },
+          salesStartAt: { type: 'string', format: 'date-time' },
+          salesEndAt: { type: 'string', format: 'date-time' },
+        },
+        required: [
+          'type',
+          'productId',
+          'name',
+          'kind',
+          'priceCents',
+          'currency',
+          'minPerOrder',
+          'maxPerOrder',
+          'available',
+          'status',
+          'requiresAccessCode',
+        ],
+      },
+      PublicAvailabilityItem: {
+        oneOf: [
+          { $ref: '#/components/schemas/PublicAvailabilityTicketItem' },
+          { $ref: '#/components/schemas/PublicAvailabilityProductItem' },
         ],
       },
       PublicQuestionsResponse: {
@@ -3868,7 +3906,18 @@ const rawOpenApiSpec = {
     },
     '/public/events/{eventId}/availability': {
       get: {
-        summary: 'Get public availability (no auth, hidden excluded)',
+        summary: 'Get public availability (no auth, public tickets and active products)',
+        parameters: [
+          { name: 'eventId', in: 'path', required: true, schema: { type: 'string' } },
+          {
+            name: 'products',
+            in: 'query',
+            required: false,
+            schema: { type: 'string' },
+            description:
+              'Comma-delimited product or direct-link ticket IDs to reveal in buyer-facing availability.',
+          },
+        ],
         responses: {
           '200': {
             description: 'Buyer-facing ticket availability',

@@ -507,6 +507,44 @@ export type PublicEventDiscoveryCard = {
   publicPath?: string;
 };
 
+export type PublicAvailabilityTicketItem = {
+  ticketTypeId: string;
+  eventOccurrenceId?: string;
+  name: string;
+  kind: 'free' | 'paid' | 'donation';
+  priceCents: number;
+  currency: string;
+  minimumPriceCents?: number;
+  minPerOrder: number;
+  maxPerOrder: number;
+  available: number;
+  status: string;
+  requiresAccessCode: boolean;
+  accessCodeHint?: string;
+  description?: string;
+  salesStartAt?: string;
+  salesEndAt?: string;
+};
+
+export type PublicAvailabilityProductItem = {
+  type: 'product';
+  productId: string;
+  name: string;
+  kind: 'product';
+  priceCents: number;
+  currency: string;
+  minPerOrder: number;
+  maxPerOrder: number;
+  available: number;
+  status: string;
+  requiresAccessCode: false;
+  description?: string;
+  salesStartAt?: string;
+  salesEndAt?: string;
+};
+
+export type PublicAvailabilityItem = PublicAvailabilityTicketItem | PublicAvailabilityProductItem;
+
 export type ContentTestSend = {
   id: string;
   tenantId: string;
@@ -3008,27 +3046,10 @@ class PublicResource {
   async getAvailability(
     eventId: string,
     products?: string[],
-  ): Promise<
-    Array<{
-      ticketTypeId: string;
-      eventOccurrenceId?: string;
-      name?: string;
-      kind?: string;
-      priceCents: number;
-      currency: string;
-      minimumPriceCents?: number;
-      available: number;
-      status: string;
-      requiresAccessCode?: boolean;
-      accessCodeHint?: string;
-      description?: string;
-      salesStartAt?: string;
-      salesEndAt?: string;
-      maxPerOrder?: number;
-    }>
-  > {
-    const query = products?.length ? `?products=${products.join(',')}` : '';
-    return this.client.request('GET', `/public/events/${eventId}/availability${query}`);
+  ): Promise<PublicAvailabilityItem[]> {
+    return this.client.request('GET', `/public/events/${eventId}/availability`, {
+      params: products?.length ? { products: products.join(',') } : undefined,
+    });
   }
   async listResaleListings(
     eventId: string,

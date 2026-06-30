@@ -93,6 +93,18 @@ describe('Generated client compile validation (T33)', () => {
     expect(output).toContain('"Idempotency-Key"');
   });
 
+  it('generated types preserve public availability product rows', async () => {
+    const output = await generateTypes();
+
+    expect(output).toContain('/public/events/{eventId}/availability');
+    expect(output).toContain('PublicAvailabilityItem');
+    expect(output).toContain('PublicAvailabilityTicketItem');
+    expect(output).toContain('PublicAvailabilityProductItem');
+    expect(output).toContain('productId: string');
+    expect(output).toContain('type: "product"');
+    expect(output).toContain('products?: string');
+  });
+
   it('generated types preserve the event-scoped message render-preview contract', async () => {
     const output = await generateTypes();
 

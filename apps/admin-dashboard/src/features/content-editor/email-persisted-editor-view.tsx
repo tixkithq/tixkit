@@ -18,6 +18,7 @@ import {
   MoreHorizontal,
   Palette,
   PanelRightClose,
+  PanelRightOpen,
   QrCode,
   ReceiptText,
   Save,
@@ -538,6 +539,8 @@ export function EmailPersistedEditorView({ eventId }: { eventId: string }) {
   const [inspectorPanelId, setInspectorPanelId] = React.useState<
     'style' | 'components' | 'variables' | 'history' | 'issues' | 'json'
   >('style');
+  const [inspectorCollapsed, setInspectorCollapsed] = React.useState(false);
+  const [moreActionsOpen, setMoreActionsOpen] = React.useState(false);
   const [reviewIssues, setReviewIssues] = React.useState<ContentValidationIssue[]>([]);
   const [reviewState, setReviewState] = React.useState<EmailReviewState>('idle');
   const [nativeInspectorHost, setNativeInspectorHost] = React.useState<HTMLElement | null>(null);
@@ -675,6 +678,16 @@ export function EmailPersistedEditorView({ eventId }: { eventId: string }) {
   const isArchived = document?.status === 'archived';
   const canEdit = !isArchived;
 
+  function openInspectorPanel(panelId: typeof inspectorPanelId) {
+    setInspectorPanelId(panelId);
+    setInspectorCollapsed(false);
+  }
+
+  function openMenuInspectorPanel(panelId: typeof inspectorPanelId) {
+    openInspectorPanel(panelId);
+    setMoreActionsOpen(false);
+  }
+
   function updateEmailDocument(nextDocument: EmailTemplateDocument) {
     if (isArchived) return;
     setEmailDocument(nextDocument);
@@ -715,7 +728,7 @@ export function EmailPersistedEditorView({ eventId }: { eventId: string }) {
 
   function insertEmailAction(actionId: InsertAction['id']) {
     if (actionId === 'variables') {
-      setInspectorPanelId('variables');
+      openInspectorPanel('variables');
       return;
     }
     if (actionId === 'text') {
@@ -723,7 +736,7 @@ export function EmailPersistedEditorView({ eventId }: { eventId: string }) {
       return;
     }
     if (actionId === 'components') {
-      setInspectorPanelId('components');
+      openInspectorPanel('components');
       return;
     }
     if (actionId === 'image') {
@@ -734,7 +747,7 @@ export function EmailPersistedEditorView({ eventId }: { eventId: string }) {
   async function reviewCurrentDraft(options: { openPanel?: boolean } = {}) {
     if (!emailDocument) return undefined;
     setReviewState('checking');
-    if (options.openPanel !== false) setInspectorPanelId('issues');
+    if (options.openPanel !== false) openInspectorPanel('issues');
     let editorSnapshot: EmailTemplateDocument | undefined;
     try {
       editorSnapshot = await snapshotFromEditor(emailDocument);
@@ -975,7 +988,7 @@ export function EmailPersistedEditorView({ eventId }: { eventId: string }) {
             <button
               className="min-w-0 truncate font-semibold text-white"
               disabled={!canEdit}
-              onClick={() => setInspectorPanelId('style')}
+              onClick={() => openInspectorPanel('style')}
               type="button"
             >
               {document.name}
@@ -1018,33 +1031,81 @@ export function EmailPersistedEditorView({ eventId }: { eventId: string }) {
             <Send className="size-4" />
             Send test
           </button>
-          <details className="relative">
-            <summary
+          <div className="relative">
+            <button
               aria-label="More actions"
+              aria-expanded={moreActionsOpen}
               className="inline-flex size-9 list-none items-center justify-center rounded-md border border-white/10 text-white/70 hover:bg-white/10 hover:text-white"
+              onClick={() => setMoreActionsOpen((open) => !open)}
+              type="button"
             >
               <MoreHorizontal className="size-4" />
-            </summary>
-            <div className="absolute right-0 top-11 z-30 w-48 rounded-lg border border-white/10 bg-neutral-900 p-1 text-sm shadow-2xl">
-              <button
-                className="flex w-full items-center gap-2 rounded-md px-2 py-2 text-left text-white/80 hover:bg-white/10 disabled:cursor-not-allowed disabled:opacity-40"
-                disabled={Boolean(archivedReason)}
-                onClick={() => void duplicateDocument()}
-                type="button"
-              >
-                <Copy className="size-4" />
-                Duplicate template
-              </button>
-              <button
-                className="flex w-full items-center gap-2 rounded-md px-2 py-2 text-left text-red-200 hover:bg-red-500/10 disabled:cursor-not-allowed disabled:opacity-40"
-                onClick={() => void archiveDocument()}
-                type="button"
-              >
-                <Archive className="size-4" />
-                Archive template
-              </button>
-            </div>
-          </details>
+            </button>
+            {moreActionsOpen && (
+              <div className="absolute right-0 top-11 z-30 w-56 rounded-lg border border-white/10 bg-neutral-900 p-1 text-sm shadow-2xl">
+                <button
+                  className="flex w-full items-center gap-2 rounded-md px-2 py-2 text-left text-white/80 hover:bg-white/10"
+                  onClick={() => openMenuInspectorPanel('variables')}
+                  type="button"
+                >
+                  <Variable className="size-4" />
+                  Open variables panel
+                </button>
+                <button
+                  className="flex w-full items-center gap-2 rounded-md px-2 py-2 text-left text-white/80 hover:bg-white/10"
+                  onClick={() => openMenuInspectorPanel('history')}
+                  type="button"
+                >
+                  <Save className="size-4" />
+                  Open version history
+                </button>
+                <button
+                  className="flex w-full items-center gap-2 rounded-md px-2 py-2 text-left text-white/80 hover:bg-white/10"
+                  onClick={() => openMenuInspectorPanel('style')}
+                  type="button"
+                >
+                  <Palette className="size-4" />
+                  Template details
+                </button>
+                <button
+                  className="flex w-full items-center gap-2 rounded-md px-2 py-2 text-left text-white/80 hover:bg-white/10 disabled:cursor-not-allowed disabled:opacity-40"
+                  disabled={reviewState === 'checking'}
+                  onClick={() => {
+                    setMoreActionsOpen(false);
+                    void reviewCurrentDraft();
+                  }}
+                  type="button"
+                >
+                  <Eye className="size-4" />
+                  Review blockers
+                </button>
+                <div className="my-1 border-t border-white/10" />
+                <button
+                  className="flex w-full items-center gap-2 rounded-md px-2 py-2 text-left text-white/80 hover:bg-white/10 disabled:cursor-not-allowed disabled:opacity-40"
+                  disabled={Boolean(archivedReason)}
+                  onClick={() => {
+                    setMoreActionsOpen(false);
+                    void duplicateDocument();
+                  }}
+                  type="button"
+                >
+                  <Copy className="size-4" />
+                  Duplicate template
+                </button>
+                <button
+                  className="flex w-full items-center gap-2 rounded-md px-2 py-2 text-left text-red-200 hover:bg-red-500/10 disabled:cursor-not-allowed disabled:opacity-40"
+                  onClick={() => {
+                    setMoreActionsOpen(false);
+                    void archiveDocument();
+                  }}
+                  type="button"
+                >
+                  <Archive className="size-4" />
+                  Archive template
+                </button>
+              </div>
+            )}
+          </div>
           <button
             className="inline-flex h-9 items-center gap-2 rounded-md bg-white px-4 text-sm font-semibold text-black hover:bg-white/90 disabled:cursor-not-allowed disabled:opacity-50"
             disabled={Boolean(archivedReason)}
@@ -1056,7 +1117,13 @@ export function EmailPersistedEditorView({ eventId }: { eventId: string }) {
         </div>
       </header>
 
-      <div className="grid h-[calc(100svh-4rem)] grid-cols-[4rem_minmax(0,1fr)] lg:grid-cols-[4rem_minmax(0,1fr)_22rem]">
+      <div
+        className={`grid h-[calc(100svh-4rem)] grid-cols-[4rem_minmax(0,1fr)] ${
+          inspectorCollapsed
+            ? 'lg:grid-cols-[4rem_minmax(0,1fr)]'
+            : 'lg:grid-cols-[4rem_minmax(0,1fr)_22rem]'
+        }`}
+      >
         <aside
           aria-label="Insert content"
           className="flex flex-col items-center gap-2 border-r border-white/10 bg-neutral-950 px-2 py-5"
@@ -1192,33 +1259,46 @@ export function EmailPersistedEditorView({ eventId }: { eventId: string }) {
 
         <aside
           aria-label="Email inspector"
-          className="col-span-2 min-h-0 overflow-auto border-t border-white/10 bg-neutral-950 p-4 lg:col-span-1 lg:border-l lg:border-t-0"
+          className={`col-span-2 min-h-0 overflow-auto border-t border-white/10 bg-neutral-950 p-4 lg:col-span-1 lg:border-l lg:border-t-0 ${
+            inspectorCollapsed ? 'hidden' : ''
+          }`}
         >
-          <div className="grid grid-cols-6 gap-1" aria-label="Email inspector modes">
-            {[
-              { id: 'style', label: 'Style', icon: <Palette className="size-4" /> },
-              { id: 'components', label: 'Components', icon: <Sparkles className="size-4" /> },
-              { id: 'variables', label: 'Variables', icon: <Variable className="size-4" /> },
-              { id: 'history', label: 'History', icon: <Save className="size-4" /> },
-              { id: 'issues', label: 'Issues', icon: <Eye className="size-4" /> },
-              { id: 'json', label: 'JSON', icon: <FileJson className="size-4" /> },
-            ].map((panel) => (
-              <button
-                aria-label={panel.label}
-                aria-pressed={inspectorPanelId === panel.id}
-                className={`inline-flex h-9 items-center justify-center rounded-md border text-xs ${
-                  inspectorPanelId === panel.id
-                    ? 'border-white/30 bg-white text-black'
-                    : 'border-white/10 text-white/60 hover:bg-white/10 hover:text-white'
-                }`}
-                key={panel.id}
-                onClick={() => setInspectorPanelId(panel.id as typeof inspectorPanelId)}
-                title={panel.label}
-                type="button"
-              >
-                {panel.icon}
-              </button>
-            ))}
+          <div className="grid grid-cols-[minmax(0,1fr)_2.25rem] gap-2">
+            <div className="grid grid-cols-6 gap-1" aria-label="Email inspector modes">
+              {[
+                { id: 'style', label: 'Style', icon: <Palette className="size-4" /> },
+                { id: 'components', label: 'Components', icon: <Sparkles className="size-4" /> },
+                { id: 'variables', label: 'Variables', icon: <Variable className="size-4" /> },
+                { id: 'history', label: 'History', icon: <Save className="size-4" /> },
+                { id: 'issues', label: 'Issues', icon: <Eye className="size-4" /> },
+                { id: 'json', label: 'JSON', icon: <FileJson className="size-4" /> },
+              ].map((panel) => (
+                <button
+                  aria-label={panel.label}
+                  aria-pressed={inspectorPanelId === panel.id}
+                  className={`inline-flex h-9 items-center justify-center rounded-md border text-xs ${
+                    inspectorPanelId === panel.id
+                      ? 'border-white/30 bg-white text-black'
+                      : 'border-white/10 text-white/60 hover:bg-white/10 hover:text-white'
+                  }`}
+                  key={panel.id}
+                  onClick={() => openInspectorPanel(panel.id as typeof inspectorPanelId)}
+                  title={panel.label}
+                  type="button"
+                >
+                  {panel.icon}
+                </button>
+              ))}
+            </div>
+            <button
+              aria-label="Collapse inspector"
+              className="inline-flex h-9 items-center justify-center rounded-md border border-white/10 text-white/60 hover:bg-white/10 hover:text-white"
+              onClick={() => setInspectorCollapsed(true)}
+              title="Collapse inspector"
+              type="button"
+            >
+              <PanelRightClose className="size-4" />
+            </button>
           </div>
 
           {inspectorPanelId === 'style' && (
@@ -1277,7 +1357,6 @@ export function EmailPersistedEditorView({ eventId }: { eventId: string }) {
               </button>
             </section>
           )}
-
           {inspectorPanelId === 'components' && (
             <section className="mt-6 space-y-4 text-sm">
               <div>
@@ -1401,6 +1480,18 @@ export function EmailPersistedEditorView({ eventId }: { eventId: string }) {
             </section>
           )}
         </aside>
+
+        {inspectorCollapsed && (
+          <button
+            aria-label="Open inspector"
+            className="fixed bottom-4 right-4 z-20 inline-flex h-10 items-center gap-2 rounded-md border border-white/10 bg-neutral-950 px-3 text-sm font-medium text-white/80 shadow-2xl hover:bg-neutral-900 hover:text-white"
+            onClick={() => setInspectorCollapsed(false)}
+            type="button"
+          >
+            <PanelRightOpen className="size-4" />
+            Inspector
+          </button>
+        )}
       </div>
 
       {previewOpen && <PreviewDrawer onClose={() => setPreviewOpen(false)} preview={preview} />}

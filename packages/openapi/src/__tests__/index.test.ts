@@ -318,6 +318,42 @@ describe('openApiSpec', () => {
     expect(openApiSpec.components.schemas.CreateTicketTypeBatch.required).toContain('ticketType');
   });
 
+  it('documents public availability ticket and product rows', () => {
+    const schemas = openApiSpec.components.schemas;
+    expect(schemas.PublicAvailabilityItem).toEqual({
+      oneOf: [
+        { $ref: '#/components/schemas/PublicAvailabilityTicketItem' },
+        { $ref: '#/components/schemas/PublicAvailabilityProductItem' },
+      ],
+    });
+
+    expect(schemas.PublicAvailabilityTicketItem).toMatchObject({
+      properties: {
+        ticketTypeId: { type: 'string' },
+        kind: { type: 'string', enum: ['free', 'paid', 'donation'] },
+      },
+    });
+    expect(schemas.PublicAvailabilityTicketItem.required).toContain('ticketTypeId');
+
+    expect(schemas.PublicAvailabilityProductItem).toMatchObject({
+      properties: {
+        type: { type: 'string', enum: ['product'] },
+        productId: { type: 'string' },
+        kind: { type: 'string', enum: ['product'] },
+      },
+    });
+    expect(schemas.PublicAvailabilityProductItem.required).toContain('productId');
+    expect(schemas.PublicAvailabilityProductItem.required).not.toContain('ticketTypeId');
+
+    const parameters = openApiSpec.paths['/public/events/{eventId}/availability'].get.parameters;
+    expect(parameters).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ name: 'eventId', in: 'path', required: true }),
+        expect.objectContaining({ name: 'products', in: 'query', required: false }),
+      ]),
+    );
+  });
+
   it('documents public resale listings without internal seller or ticket fields', () => {
     const schema = openApiSpec.components.schemas.PublicTicketListing;
     expect(schema.properties).toMatchObject({
