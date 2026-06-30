@@ -230,7 +230,7 @@ describe('ContentEditorShell', () => {
       'aria-label',
       'All Access Chicago editable document',
     );
-    expect(screen.getByRole('region', { name: 'Hero' })).toBeInTheDocument();
+    expect(screen.getByRole('region', { name: 'Editable document region 1' })).toBeInTheDocument();
     expect(
       screen.queryByRole('button', { name: /Select content region/i }),
     ).not.toBeInTheDocument();

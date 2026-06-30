@@ -452,7 +452,7 @@ function CanvasFrame({
                   : 'space-y-3 p-4 sm:p-5'
             }
           >
-            {blocks.map((block) => {
+            {blocks.map((block, index) => {
               if (isDocumentCanvas) {
                 if (!block.content || block.presentation !== 'document') {
                   throw new Error(
@@ -461,7 +461,7 @@ function CanvasFrame({
                 }
                 return (
                   <section
-                    aria-label={block.label}
+                    aria-label={`Editable document region ${index + 1}`}
                     aria-current={block.selected ? 'true' : undefined}
                     className="contents"
                     key={block.id}
