@@ -195,7 +195,7 @@ jobs:
       - name: Wait for Temporal
         run: |
           for i in $(seq 1 60); do
-            if nc -z localhost 7233 2>/dev/null; then
+            if timeout 2 bash -c '</dev/tcp/127.0.0.1/7233' 2>/dev/null; then
               echo "Temporal ready"
               exit 0
             fi
@@ -255,7 +255,7 @@ jobs:
       - name: Wait for Temporal
         run: |
           for i in $(seq 1 60); do
-            if nc -z localhost 7233 2>/dev/null; then
+            if timeout 2 bash -c '</dev/tcp/127.0.0.1/7233' 2>/dev/null; then
               echo "Temporal ready"
               exit 0
             fi
@@ -277,7 +277,7 @@ jobs:
     runs-on: tixkit-epyc-trusted
     env:
       DB_DRIVER: mssql
-      DATABASE_URL_MSSQL: sqlserver://sa:Test-password-12345@100.103.201.10:1433/tixkit?encrypt=false&trustServerCertificate=true
+      DATABASE_URL_MSSQL: sqlserver://sa:Test-password-12345@tixkit-ci-mssql.arc-runners.svc.cluster.local:1433/tixkit?encrypt=false&trustServerCertificate=true
     steps:
       - uses: actions/checkout@v7
       - uses: ./.github/actions/setup-js
@@ -288,7 +288,7 @@ jobs:
           import { Connection, Request } from 'tedious';
 
           const config = {
-            server: '100.103.201.10',
+            server: 'tixkit-ci-mssql.arc-runners.svc.cluster.local',
             authentication: {
               type: 'default',
               options: {

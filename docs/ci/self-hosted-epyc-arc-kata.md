@@ -37,7 +37,7 @@ The ARC scale set should therefore expose labels including:
 1. **Public/fork PR code never lands on the EPYC host.**
 2. **Trusted jobs use ephemeral ARC runners.**
 3. **Runner pods use `runtimeClassName: kata`** for microVM-backed isolation.
-4. **Service-container-heavy jobs** (Postgres/MySQL/MSSQL/Redis/Temporal) are moved to the trusted runner lane.
+4. **Service-container-heavy jobs** (Postgres/MySQL/Redis/Temporal) are moved to the trusted runner lane. MSSQL runs as a dedicated Kubernetes service because the upstream SQL Server image cannot be unpacked by Docker inside Kata.
 
 ## EPYC host-side state
 
@@ -54,7 +54,7 @@ The EPYC host has been configured with:
 - local Docker registry on `localhost:5000`
 - ARC namespace Pod Security labels and NetworkPolicy manifests in `infra/ci/k8s/arc-hardening.yaml`
 
-The runner scale set is configured with `minRunners: 0` and `maxRunners: 12`, so idle runner pods are not kept around. ARC keeps a listener pod online and creates ephemeral Kata-backed runner pods when trusted jobs are assigned. The custom runner image and Docker-in-Docker image are pinned with explicit versions and SHA-256 digests in `infra/ci/arc/runner-values.yaml`; update them through review instead of floating tags. Runner containers request 4 CPU / 8 GiB and can burst up to 16 CPU / 24 GiB, which leaves enough headroom for MSSQL service containers.
+The runner scale set is configured with `minRunners: 0` and `maxRunners: 12`, so idle runner pods are not kept around. ARC keeps a listener pod online and creates ephemeral Kata-backed runner pods when trusted jobs are assigned. The custom runner image and Docker-in-Docker image are pinned with explicit versions and SHA-256 digests in `infra/ci/arc/runner-values.yaml`; update them through review instead of floating tags. Runner containers request 4 CPU / 8 GiB and can burst up to 16 CPU / 24 GiB. The MSSQL Kubernetes deployment separately requests 2 CPU / 8 GiB and is capped at 8 CPU / 12 GiB.
 
 ## Rebuild host-side install sequence
 
@@ -144,31 +144,32 @@ docker inspect --format '{{index .RepoDigests 0}}' localhost:5000/tixkit-arc-run
 
 Pin the resulting digest in `infra/ci/arc/runner-values.yaml`.
 
-### 5) Start host-level MSSQL for trusted CI
+### 5) Start MSSQL for trusted CI
 
-Postgres/MySQL/Redis/Temporal run as normal GitHub Actions service containers through the ARC dind sidecar. MSSQL is different: the upstream SQL Server image contains `security.capability` xattrs on `sqlservr`, and Docker inside Kata cannot register that layer. Keep MSSQL as a host Docker service and point trusted CI at the host tailnet address.
+Postgres/MySQL/Redis/Temporal run as normal GitHub Actions service containers through the ARC dind sidecar. MSSQL is different: the upstream SQL Server image contains `security.capability` xattrs on `sqlservr`, and Docker inside Kata cannot register that layer. Run MSSQL as a Kubernetes deployment in `arc-runners` and point trusted CI at its cluster DNS name.
+
+SQL Server also needs a larger host async I/O limit on this node:
 
 ```bash
-docker run -d --restart=always \
-  --name tixkit-ci-mssql \
-  --memory=12g \
-  -e ACCEPT_EULA=Y \
-  -e MSSQL_PID=Developer \
-  -e MSSQL_SA_PASSWORD=Test-password-12345 \
-  -p 1433:1433 \
-  mcr.microsoft.com/mssql/server:2022-latest
-
-for i in $(seq 1 60); do
-  if docker exec tixkit-ci-mssql /opt/mssql-tools18/bin/sqlcmd \
-    -S localhost -U sa -P Test-password-12345 -C \
-    -Q "IF DB_ID('tixkit') IS NULL CREATE DATABASE tixkit"; then
-    break
-  fi
-  sleep 5
-done
+echo "fs.aio-max-nr = 1048576" | sudo tee /etc/sysctl.d/99-tixkit-ci-mssql.conf
+sudo sysctl --system
 ```
 
-The trusted workflow uses `sqlserver://sa:Test-password-12345@100.103.201.10:1433/tixkit?encrypt=false&trustServerCertificate=true`.
+```bash
+kubectl apply -f infra/ci/k8s/trusted-ci-mssql.yaml
+kubectl rollout status deployment/tixkit-ci-mssql -n arc-runners --timeout=300s
+```
+
+The manifest adds narrow NetworkPolicies so ARC runner pods can reach only TCP 1433 on the MSSQL pod while the namespace-wide ingress and egress defaults stay locked down.
+
+```bash
+kubectl exec -n arc-runners deploy/tixkit-ci-mssql -- \
+  /opt/mssql-tools18/bin/sqlcmd \
+  -S localhost -U sa -P Test-password-12345 -C \
+  -Q "IF DB_ID('tixkit') IS NULL CREATE DATABASE tixkit"
+```
+
+The trusted workflow uses `sqlserver://sa:Test-password-12345@tixkit-ci-mssql.arc-runners.svc.cluster.local:1433/tixkit?encrypt=false&trustServerCertificate=true`.
 
 ### 6) Install ARC controller
 

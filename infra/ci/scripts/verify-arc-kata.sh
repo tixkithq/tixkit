@@ -5,6 +5,7 @@ repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
 runner_values="${repo_root}/infra/ci/arc/runner-values.yaml"
 runner_image_dockerfile="${repo_root}/infra/ci/arc/runner-image/Dockerfile"
 install_script="${repo_root}/infra/ci/scripts/install-arc.sh"
+mssql_manifest="${repo_root}/infra/ci/k8s/trusted-ci-mssql.yaml"
 
 verify_arc_supply_chain_pins() {
   local unpinned_images
@@ -52,6 +53,16 @@ verify_arc_supply_chain_pins() {
     printf 'ARC chart version must default to the documented 0.14.2 baseline.\n' >&2
     return 1
   fi
+
+  if ! grep -qE 'image: mcr\.microsoft\.com/mssql/server:2022-latest@sha256:[0-9a-f]{64}' "${mssql_manifest}"; then
+    printf 'Trusted CI MSSQL manifest must pin the SQL Server image by sha256 digest.\n' >&2
+    return 1
+  fi
+
+  if ! grep -q 'name: arc-runners-egress-mssql' "${mssql_manifest}" || ! grep -q 'name: tixkit-ci-mssql-ingress' "${mssql_manifest}"; then
+    printf 'Trusted CI MSSQL manifest must include narrow runner egress and MSSQL ingress policies.\n' >&2
+    return 1
+  fi
 }
 
 verify_arc_supply_chain_pins
@@ -66,6 +77,12 @@ kubectl get pods -n arc-systems -o wide
 kubectl get autoscalingrunnersets -n arc-runners -o wide
 kubectl get autoscalinglisteners -n arc-systems -o wide
 kubectl get networkpolicy -A
+kubectl get deployment,service,networkpolicy -n arc-runners -l app.kubernetes.io/name=tixkit-ci-mssql -o wide
+
+if [[ "$(sysctl -n fs.aio-max-nr 2>/dev/null || echo 0)" -lt 1048576 ]]; then
+  printf 'EPYC host must set fs.aio-max-nr >= 1048576 for the trusted CI MSSQL pod.\n' >&2
+  exit 1
+fi
 
 kubectl delete pod kata-smoke --ignore-not-found=true --wait=true
 kubectl run kata-smoke \
