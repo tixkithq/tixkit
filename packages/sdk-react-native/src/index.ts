@@ -175,6 +175,7 @@ export type OfflineManifest = {
   tickets: {
     ticketId: string;
     ticketTypeId: string;
+    eventOccurrenceId?: string;
     attendeeName: string;
     qrHash: string;
     status: string;
