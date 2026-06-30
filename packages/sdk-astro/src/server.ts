@@ -314,7 +314,7 @@ export function createTixkitWebhookEndpoint(
 ): TixkitAstroEndpointHandler {
   return async ({ request }) => {
     const body = await request.text();
-    const signature = request.headers.get(options.signatureHeader ?? 'tixkit-signature') ?? '';
+    const signature = request.headers.get(options.signatureHeader ?? 'x-tixkit-signature') ?? '';
     if (
       !verifyTixkitWebhook({
         body,

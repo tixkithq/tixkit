@@ -154,7 +154,7 @@ describe('Astro server helpers', () => {
     const request = new Request('https://example.test/api/webhook', {
       method: 'POST',
       body: JSON.stringify({ id: 'wevt_1' }),
-      headers: { 'tixkit-signature': 't=0,v1=invalid' },
+      headers: { 'x-tixkit-signature': 't=0,v1=invalid' },
     });
     const response = await handler({ request, url: new URL(request.url) });
     expect(response.status).toBe(401);
@@ -168,7 +168,7 @@ describe('Astro server helpers', () => {
     const request = new Request('https://example.test/api/webhook', {
       method: 'POST',
       body,
-      headers: { 'tixkit-signature': signature(body, secret, timestamp) },
+      headers: { 'x-tixkit-signature': signature(body, secret, timestamp) },
     });
 
     const response = await handler({ request, url: new URL(request.url) });
@@ -185,9 +185,52 @@ describe('Astro server helpers', () => {
     const request = new Request('https://example.test/api/webhook', {
       method: 'POST',
       body,
-      headers: { 'tixkit-signature': signature(body, secret, timestamp) },
+      headers: { 'x-tixkit-signature': signature(body, secret, timestamp) },
     });
     const response = await handler({ request, url: new URL(request.url) });
+    expect(response.status).toBe(200);
+    expect(onEvent).toHaveBeenCalledTimes(1);
+  });
+
+  it('createTixkitWebhookEndpoint rejects legacy signature headers by default', async () => {
+    const body = JSON.stringify({ id: 'wevt_legacy' });
+    const secret = 'whsec_test';
+    const timestamp = Math.floor(Date.now() / 1000);
+    const onEvent = vi.fn().mockResolvedValue({ received: true });
+    const handler = createTixkitWebhookEndpoint({ secret, onEvent });
+    const request = new Request('https://example.test/api/webhook', {
+      method: 'POST',
+      body,
+      headers: { 'tixkit-signature': signature(body, secret, timestamp) },
+    });
+
+    const response = await handler({ request, url: new URL(request.url) });
+
+    expect(response.status).toBe(401);
+    expect(onEvent).not.toHaveBeenCalled();
+  });
+
+  it('createTixkitWebhookEndpoint preserves explicit custom signature headers', async () => {
+    const body = JSON.stringify({ id: 'wevt_custom' });
+    const secret = 'whsec_test';
+    const timestamp = Math.floor(Date.now() / 1000);
+    const onEvent = vi.fn().mockResolvedValue({ received: true });
+    const handler = createTixkitWebhookEndpoint({
+      secret,
+      onEvent,
+      signatureHeader: 'tixkit-signature',
+    });
+    const request = new Request('https://example.test/api/webhook', {
+      method: 'POST',
+      body,
+      headers: {
+        'x-tixkit-signature': signature(body, 'wrong_secret', timestamp),
+        'tixkit-signature': signature(body, secret, timestamp),
+      },
+    });
+
+    const response = await handler({ request, url: new URL(request.url) });
+
     expect(response.status).toBe(200);
     expect(onEvent).toHaveBeenCalledTimes(1);
   });

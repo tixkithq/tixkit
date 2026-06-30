@@ -1858,6 +1858,68 @@ describe('TixkitClient new resource methods', () => {
     });
   });
 
+  it('apiKeys.create returns a required one-time api key', async () => {
+    const fm = mockFetch(201, {
+      id: 'ak_1',
+      tenantId: 'tnt_1',
+      organizationId: 'org_1',
+      name: 'Server key',
+      keyPrefix: 'tk_live',
+      scopes: ['events.read'],
+      createdAt: '2026-06-01T00:00:00.000Z',
+      updatedAt: '2026-06-01T00:00:00.000Z',
+      apiKey: 'tk_live_secret',
+    });
+    const c = new TixkitClient({
+      apiKey: '***********',
+      apiBaseUrl: 'https://api.test',
+      maxRetries: 0,
+    });
+
+    const created = await c.apiKeys.create({
+      organizationId: 'org_1',
+      name: 'Server key',
+      scopes: ['events.read'],
+    });
+    const call = getCall(fm);
+
+    expect(created.apiKey).toBe('tk_live_secret');
+    expectTypeOf(created.apiKey).toEqualTypeOf<string>();
+    expect(call.method).toBe('POST');
+    expect(call.url).toBe('https://api.test/v1/api-keys');
+  });
+
+  it('webhookEndpoints.create returns a required one-time signing secret', async () => {
+    const fm = mockFetch(201, {
+      id: 'wh_1',
+      tenantId: 'tnt_1',
+      organizationId: 'org_1',
+      url: 'https://hooks.example.com/tixkit',
+      events: ['order.paid'],
+      status: 'active',
+      createdAt: '2026-06-01T00:00:00.000Z',
+      updatedAt: '2026-06-01T00:00:00.000Z',
+      secret: 'whsec_123',
+    });
+    const c = new TixkitClient({
+      apiKey: '***********',
+      apiBaseUrl: 'https://api.test',
+      maxRetries: 0,
+    });
+
+    const created = await c.webhookEndpoints.create({
+      organizationId: 'org_1',
+      url: 'https://hooks.example.com/tixkit',
+      events: ['order.paid'],
+    });
+    const call = getCall(fm);
+
+    expect(created.secret).toBe('whsec_123');
+    expectTypeOf(created.secret).toEqualTypeOf<string>();
+    expect(call.method).toBe('POST');
+    expect(call.url).toBe('https://api.test/v1/webhook-endpoints');
+  });
+
   it('webhookEndpoints.listEvents sends GET', async () => {
     const fm = mockFetch(200, { items: [], nextCursor: null, hasMore: false });
     const c = new TixkitClient({
@@ -1884,6 +1946,22 @@ describe('TixkitClient new resource methods', () => {
     expect(result).toEqual({ queued: true, eventId: 'whe_1', endpointId: 'ep_1' });
     expect(call.method).toBe('POST');
     expect(call.url).toBe('https://api.test/v1/webhook-endpoints/ep_1/events/whe_1/replay');
+  });
+
+  it('webhookEndpoints.replay sends POST to the whole-event replay route', async () => {
+    const fm = mockFetch(202, { queued: true, eventId: 'whe_1', endpoints: 2 });
+    const c = new TixkitClient({
+      apiKey: '***********',
+      apiBaseUrl: 'https://api.test',
+      maxRetries: 0,
+    });
+
+    const result = await c.webhookEndpoints.replay('whe_1');
+    const call = getCall(fm);
+
+    expect(result).toEqual({ queued: true, eventId: 'whe_1', endpoints: 2 });
+    expect(call.method).toBe('POST');
+    expect(call.url).toBe('https://api.test/v1/webhook-events/whe_1/replay');
   });
 
   it('webhookEndpoints.listEvents supports missing-endpoint dead letters', async () => {

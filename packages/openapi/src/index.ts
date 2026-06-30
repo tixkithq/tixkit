@@ -55,6 +55,16 @@ const httpMethods = new Set<HttpMethod>([
   'patch',
   'trace',
 ]);
+const webhookEventTypeValues = [
+  'order.created',
+  'order.paid',
+  'order.refunded',
+  'ticket.issued',
+  'ticket.checked_in',
+  'attendee.updated',
+  'event.published',
+  'event.cancelled',
+] as const;
 
 function isDeclaredPathParameter(parameter: OpenApiParameter, name: string) {
   return (
@@ -2337,12 +2347,22 @@ const rawOpenApiSpec = {
           organizationId: { type: 'string' },
           url: { type: 'string' },
           description: { type: 'string' },
-          events: { type: 'array', items: { type: 'string' } },
+          events: {
+            type: 'array',
+            items: { $ref: '#/components/schemas/WebhookEventType' },
+            minItems: 1,
+            maxItems: webhookEventTypeValues.length,
+            uniqueItems: true,
+          },
           status: { type: 'string', enum: ['active', 'disabled'] },
           createdAt: { type: 'string', format: 'date-time' },
           updatedAt: { type: 'string', format: 'date-time' },
         },
         required: ['id', 'organizationId', 'url', 'events', 'status'],
+      },
+      WebhookEventType: {
+        type: 'string',
+        enum: [...webhookEventTypeValues],
       },
       WebhookEndpointCreated: {
         type: 'object',
@@ -2677,11 +2697,11 @@ const rawOpenApiSpec = {
       WebhookReplayQueued: {
         type: 'object',
         properties: {
-          message: { type: 'string' },
+          queued: { type: 'boolean' },
           eventId: { type: 'string' },
           endpoints: { type: 'integer' },
         },
-        required: ['message', 'eventId', 'endpoints'],
+        required: ['queued', 'eventId', 'endpoints'],
       },
       WebhookEndpointReplayQueued: {
         type: 'object',
@@ -7689,7 +7709,13 @@ const rawOpenApiSpec = {
                 properties: {
                   organizationId: { type: 'string' },
                   url: { type: 'string', format: 'uri' },
-                  events: { type: 'array', items: { type: 'string' } },
+                  events: {
+                    type: 'array',
+                    items: { $ref: '#/components/schemas/WebhookEventType' },
+                    minItems: 1,
+                    maxItems: webhookEventTypeValues.length,
+                    uniqueItems: true,
+                  },
                   description: { type: 'string' },
                 },
                 required: ['organizationId', 'url', 'events'],
@@ -7721,7 +7747,13 @@ const rawOpenApiSpec = {
                 type: 'object',
                 properties: {
                   url: { type: 'string', format: 'uri' },
-                  events: { type: 'array', items: { type: 'string' } },
+                  events: {
+                    type: 'array',
+                    items: { $ref: '#/components/schemas/WebhookEventType' },
+                    minItems: 1,
+                    maxItems: webhookEventTypeValues.length,
+                    uniqueItems: true,
+                  },
                   status: { type: 'string', enum: ['active', 'disabled'] },
                   description: { type: 'string', nullable: true },
                 },

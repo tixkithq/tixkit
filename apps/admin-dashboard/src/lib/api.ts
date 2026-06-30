@@ -1033,12 +1033,21 @@ export type AdminApiKey = {
 };
 
 export type WebhookEndpointStatus = 'active' | 'disabled';
+export type WebhookEventType =
+  | 'order.created'
+  | 'order.paid'
+  | 'order.refunded'
+  | 'ticket.issued'
+  | 'ticket.checked_in'
+  | 'attendee.updated'
+  | 'event.published'
+  | 'event.cancelled';
 
 export type AdminWebhookEndpoint = {
   id: string;
   url: string;
   description?: string;
-  events: string[];
+  events: WebhookEventType[];
   status: WebhookEndpointStatus;
   failureCount: number;
   lastDeliveryAt?: string;
@@ -1449,7 +1458,7 @@ export type CreateWebhookEndpointInput = {
   organizationId?: string;
   url: string;
   description?: string;
-  events: string[];
+  events: WebhookEventType[];
 };
 
 export type UpdateWebhookEndpointInput = Partial<CreateWebhookEndpointInput> & {

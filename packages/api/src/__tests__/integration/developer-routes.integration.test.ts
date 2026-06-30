@@ -325,6 +325,23 @@ async function setupDeveloperRouteApp(principal: Principal, db: unknown) {
   return app;
 }
 
+async function setupWebhookRouteApp(principal: Principal, db: unknown) {
+  const app = Fastify();
+  app.decorate('context', {
+    db: db as Database,
+    pricingEngine: {},
+    inventoryService: {},
+    qrService: {},
+    authService: {},
+    temporalClient: {},
+  } as unknown as AppContext);
+  app.addHook('onRequest', async (request) => {
+    request.principal = principal;
+  });
+  await app.register(webhookRoutes);
+  return app;
+}
+
 describe('developer routes integration', () => {
   it('lists API keys as a paginated public contract without secret material', async () => {
     const principal: Principal = {
@@ -442,6 +459,68 @@ describe('developer routes integration', () => {
     const res = await app.inject({ method: 'GET', url: '/webhook-endpoints' });
     expect(res.statusCode).toBe(200);
     expect(res.json().items[0].secret).toBeUndefined();
+    await app.close();
+  });
+
+  it('rejects invalid webhook endpoint event subscriptions before creating an endpoint', async () => {
+    const principal: Principal = {
+      type: 'user',
+      id: 'usr_1',
+      tenantId: 'tnt_1',
+      organizationIds: ['org_1'],
+      scopes: ['developers.write'],
+    };
+    const db = {
+      insertInto: vi.fn(() => {
+        throw new Error('Invalid webhook endpoint payload must not be persisted');
+      }),
+    };
+    const app = await setupWebhookRouteApp(principal, db);
+
+    const response = await app.inject({
+      method: 'POST',
+      url: '/webhook-endpoints',
+      payload: {
+        organizationId: 'org_1',
+        url: 'https://hooks.example.com/tixkit',
+        events: ['order.paidd'],
+      },
+    });
+
+    expect(response.statusCode).toBe(400);
+    expect(db.insertInto).not.toHaveBeenCalled();
+    await app.close();
+  });
+
+  it('rejects invalid webhook endpoint event subscription updates before loading the endpoint', async () => {
+    const principal: Principal = {
+      type: 'user',
+      id: 'usr_1',
+      tenantId: 'tnt_1',
+      organizationIds: ['org_1'],
+      scopes: ['developers.write'],
+    };
+    const db = {
+      selectFrom: vi.fn(() => {
+        throw new Error('Invalid webhook endpoint update must not load from the database');
+      }),
+      updateTable: vi.fn(() => {
+        throw new Error('Invalid webhook endpoint update must not be persisted');
+      }),
+    };
+    const app = await setupWebhookRouteApp(principal, db);
+
+    const response = await app.inject({
+      method: 'PATCH',
+      url: '/webhook-endpoints/wh_1',
+      payload: {
+        events: [],
+      },
+    });
+
+    expect(response.statusCode).toBe(400);
+    expect(db.selectFrom).not.toHaveBeenCalled();
+    expect(db.updateTable).not.toHaveBeenCalled();
     await app.close();
   });
 
@@ -1130,7 +1209,7 @@ describe('developer routes integration', () => {
     const response = await app.inject({ method: 'POST', url: '/webhook-events/whe_1/replay' });
 
     expect(response.statusCode).toBe(202);
-    expect(response.json()).toMatchObject({ queued: true, eventId: 'whe_1', endpoints: 1 });
+    expect(response.json()).toEqual({ queued: true, eventId: 'whe_1', endpoints: 1 });
     expect(startWebhookDelivery).toHaveBeenCalledTimes(1);
     expect(startWebhookDelivery).toHaveBeenCalledWith(
       expect.objectContaining({

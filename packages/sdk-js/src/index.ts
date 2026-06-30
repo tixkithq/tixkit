@@ -889,6 +889,10 @@ export type ApiKey = {
   apiKey?: string;
 };
 
+export type ApiKeyCreated = ApiKey & {
+  apiKey: string;
+};
+
 export type ScannerDevice = {
   id: string;
   tenantId: string;
@@ -908,17 +912,31 @@ export type ScannerDeviceCreated = ScannerDevice & {
   secret: string;
 };
 
+export type WebhookEventType =
+  | 'order.created'
+  | 'order.paid'
+  | 'order.refunded'
+  | 'ticket.issued'
+  | 'ticket.checked_in'
+  | 'attendee.updated'
+  | 'event.published'
+  | 'event.cancelled';
+
 export type WebhookEndpoint = {
   id: string;
   tenantId: string;
   organizationId: string;
   url: string;
   secret?: string;
-  events: string[];
+  events: WebhookEventType[];
   status: string;
   description?: string;
   createdAt: string;
   updatedAt: string;
+};
+
+export type WebhookEndpointCreated = WebhookEndpoint & {
+  secret: string;
 };
 
 export type CheckInList = {
@@ -2570,7 +2588,7 @@ class ApiKeyResource {
     brandIds?: string[];
     eventIds?: string[];
     expiresAt?: string;
-  }): Promise<ApiKey> {
+  }): Promise<ApiKeyCreated> {
     return this.client.request('POST', '/api-keys', { body: input });
   }
   async revoke(keyId: string): Promise<void> {
@@ -2881,9 +2899,9 @@ class WebhookEndpointResource {
   async create(input: {
     organizationId: string;
     url: string;
-    events: string[];
+    events: WebhookEventType[];
     description?: string;
-  }): Promise<WebhookEndpoint> {
+  }): Promise<WebhookEndpointCreated> {
     return this.client.request('POST', '/webhook-endpoints', { body: input });
   }
   async update(
@@ -2906,7 +2924,7 @@ class WebhookEndpointResource {
   ): Promise<{ queued: true; eventId: string; endpointId: string }> {
     return this.client.request('POST', `/webhook-endpoints/${endpointId}/events/${eventId}/replay`);
   }
-  async replay(eventId: string): Promise<{ message: string; eventId: string; endpoints: number }> {
+  async replay(eventId: string): Promise<{ queued: true; eventId: string; endpoints: number }> {
     return this.client.request('POST', `/webhook-events/${eventId}/replay`);
   }
 }

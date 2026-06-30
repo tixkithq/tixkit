@@ -839,6 +839,72 @@ describe('event routes', () => {
     await app.close();
   });
 
+  it('returns event code format for a principal scoped to the event', async () => {
+    const principal: Principal = {
+      type: 'api_key',
+      id: 'key_1',
+      tenantId: 'tnt_1',
+      organizationIds: ['org_1'],
+      scopes: ['events.read'],
+      brandIds: ['brd_1'],
+      eventIds: ['evt_1'],
+    };
+    const { db } = createEventMutationDb({
+      event: baseEventRow({
+        code_format: JSON.stringify({ symbology: 'pdf417', payloadFormat: 'compact_v2' }),
+      }),
+    });
+    const app = await setupEventApp(db, principal);
+
+    const response = await app.inject({ method: 'GET', url: '/events/evt_1/code-format' });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toMatchObject({
+      eventId: 'evt_1',
+      codeFormat: { symbology: 'pdf417', payloadFormat: 'compact_v2' },
+    });
+    expect(response.json().scannerContractVersion).toBeTypeOf('string');
+    await app.close();
+  });
+
+  it('hides event code format from principals outside the event scope', async () => {
+    const principal: Principal = {
+      type: 'api_key',
+      id: 'key_1',
+      tenantId: 'tnt_1',
+      organizationIds: ['org_1'],
+      scopes: ['events.read'],
+      brandIds: ['brd_1'],
+      eventIds: ['evt_other'],
+    };
+    const { db } = createEventMutationDb({ event: baseEventRow() });
+    const app = await setupEventApp(db, principal);
+
+    const response = await app.inject({ method: 'GET', url: '/events/evt_1/code-format' });
+
+    expect(response.statusCode).toBe(404);
+    await app.close();
+  });
+
+  it('hides event code format from principals outside the brand scope', async () => {
+    const principal: Principal = {
+      type: 'api_key',
+      id: 'key_1',
+      tenantId: 'tnt_1',
+      organizationIds: ['org_1'],
+      scopes: ['events.read'],
+      brandIds: ['brd_other'],
+      eventIds: ['evt_1'],
+    };
+    const { db } = createEventMutationDb({ event: baseEventRow() });
+    const app = await setupEventApp(db, principal);
+
+    const response = await app.inject({ method: 'GET', url: '/events/evt_1/code-format' });
+
+    expect(response.statusCode).toBe(404);
+    await app.close();
+  });
+
   it('applies brand and event scope filters when listing events', async () => {
     const principal: Principal = {
       type: 'api_key',

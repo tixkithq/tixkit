@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { ValidationError } from '@tixkit/domain';
+import { ValidationError, WEBHOOK_EVENT_TYPES } from '@tixkit/domain';
 
 // Reusable primitives
 const ulidSchema = z.string().min(1);
@@ -616,11 +616,30 @@ export const createScannerDeviceSchema = z
   .strict();
 
 // Webhook schemas
+const webhookEventTypeSchema = z.enum(WEBHOOK_EVENT_TYPES);
+const webhookEndpointEventsSchema = z
+  .array(webhookEventTypeSchema)
+  .min(1)
+  .max(WEBHOOK_EVENT_TYPES.length)
+  .superRefine((events, ctx) => {
+    const seen = new Set<string>();
+    events.forEach((event, index) => {
+      if (seen.has(event)) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: [index],
+          message: 'Webhook endpoint events must be unique',
+        });
+      }
+      seen.add(event);
+    });
+  });
+
 export const createWebhookEndpointSchema = z
   .object({
     organizationId: ulidSchema,
     url: webhookUrlSchema,
-    events: z.array(z.string().min(1)),
+    events: webhookEndpointEventsSchema,
     description: z.string().optional(),
   })
   .strict();
@@ -628,7 +647,7 @@ export const createWebhookEndpointSchema = z
 export const updateWebhookEndpointSchema = z
   .object({
     url: webhookUrlSchema.optional(),
-    events: z.array(z.string().min(1)).optional(),
+    events: webhookEndpointEventsSchema.optional(),
     status: z.enum(['active', 'disabled']).optional(),
     description: z.string().nullable().optional(),
   })

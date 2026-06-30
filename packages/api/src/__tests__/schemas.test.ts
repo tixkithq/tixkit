@@ -360,6 +360,44 @@ describe('webhook and OAuth URL policy', () => {
   });
 
   it.each([
+    { events: [], label: 'empty event list' },
+    { events: [''], label: 'blank event name' },
+    { events: ['order.paidd'], label: 'unknown event name' },
+    { events: ['order.paid', 'order.paid'], label: 'duplicate event names' },
+    {
+      events: [
+        'order.created',
+        'order.paid',
+        'order.refunded',
+        'ticket.issued',
+        'ticket.checked_in',
+        'attendee.updated',
+        'event.published',
+        'event.cancelled',
+        'order.created',
+      ],
+      label: 'oversized event list',
+    },
+  ])('rejects webhook endpoint create with $label', ({ events }) => {
+    expect(() =>
+      parseBody(createWebhookEndpointSchema, {
+        organizationId: 'org_1',
+        url: 'https://hooks.example.com/tixkit',
+        events,
+      }),
+    ).toThrow(ValidationError);
+  });
+
+  it.each([
+    { events: [], label: 'empty event list' },
+    { events: [''], label: 'blank event name' },
+    { events: ['ticket.checked_in', 'ticket.checked_in'], label: 'duplicate event names' },
+    { events: ['ticket.checked_in', 'ticket.checkedin'], label: 'unknown event name' },
+  ])('rejects webhook endpoint update with $label', ({ events }) => {
+    expect(() => parseBody(updateWebhookEndpointSchema, { events })).toThrow(ValidationError);
+  });
+
+  it.each([
     'http://hooks.example.com/tixkit',
     'https://localhost:8443/tixkit',
     'https://127.0.0.1/tixkit',

@@ -7,20 +7,23 @@ export type WebhookEndpoint = TenantScopedEntity & {
   organizationId: Ulid;
   url: string;
   secret: string;
-  events: string[];
+  events: WebhookEventType[];
   status: 'active' | 'disabled';
   description?: string;
 };
 
-export type WebhookEventType =
-  | 'order.created'
-  | 'order.paid'
-  | 'order.refunded'
-  | 'ticket.issued'
-  | 'ticket.checked_in'
-  | 'attendee.updated'
-  | 'event.published'
-  | 'event.cancelled';
+export const WEBHOOK_EVENT_TYPES = [
+  'order.created',
+  'order.paid',
+  'order.refunded',
+  'ticket.issued',
+  'ticket.checked_in',
+  'attendee.updated',
+  'event.published',
+  'event.cancelled',
+] as const;
+
+export type WebhookEventType = (typeof WEBHOOK_EVENT_TYPES)[number];
 
 export type WebhookEnvelope = {
   id: Ulid;

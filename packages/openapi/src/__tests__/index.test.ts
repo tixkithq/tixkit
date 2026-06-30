@@ -124,6 +124,57 @@ describe('openApiSpec', () => {
         }),
       ]),
     });
+    expect(openApiSpec.components.schemas.WebhookEventType).toEqual({
+      type: 'string',
+      enum: [
+        'order.created',
+        'order.paid',
+        'order.refunded',
+        'ticket.issued',
+        'ticket.checked_in',
+        'attendee.updated',
+        'event.published',
+        'event.cancelled',
+      ],
+    });
+    const createEventsSchema =
+      openApiSpec.paths['/webhook-endpoints'].post.requestBody.content['application/json'].schema
+        .properties.events;
+    expect(createEventsSchema).toMatchObject({
+      type: 'array',
+      items: { $ref: '#/components/schemas/WebhookEventType' },
+      minItems: 1,
+      maxItems: 8,
+      uniqueItems: true,
+    });
+    const updateEventsSchema =
+      openApiSpec.paths['/webhook-endpoints/{endpointId}'].patch.requestBody.content[
+        'application/json'
+      ].schema.properties.events;
+    expect(updateEventsSchema).toMatchObject({
+      type: 'array',
+      items: { $ref: '#/components/schemas/WebhookEventType' },
+      minItems: 1,
+      maxItems: 8,
+      uniqueItems: true,
+    });
+  });
+
+  it('documents whole-event webhook replay queued responses', () => {
+    expect(openApiSpec.components.schemas.WebhookReplayQueued).toEqual({
+      type: 'object',
+      properties: {
+        queued: { type: 'boolean' },
+        eventId: { type: 'string' },
+        endpoints: { type: 'integer' },
+      },
+      required: ['queued', 'eventId', 'endpoints'],
+    });
+    expect(
+      openApiSpec.paths['/webhook-events/{eventId}/replay'].post.responses['202'].content[
+        'application/json'
+      ].schema,
+    ).toEqual({ $ref: '#/components/schemas/WebhookReplayQueued' });
   });
 
   it('documents brand payment account binding on response schemas', () => {

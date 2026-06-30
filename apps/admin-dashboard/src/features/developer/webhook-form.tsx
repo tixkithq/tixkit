@@ -8,6 +8,7 @@ import {
   type AdminWebhookEndpoint,
   type CreateWebhookEndpointInput,
   type UpdateWebhookEndpointInput,
+  type WebhookEventType,
   adminApi,
 } from '@/lib/api';
 import { useBootstrap } from '@/context/bootstrap-provider';
@@ -44,12 +45,12 @@ const webhookEvents = [
   'attendee.updated',
   'event.published',
   'event.cancelled',
-];
+] as const satisfies readonly WebhookEventType[];
 
 const webhookSchema = z.object({
   url: z.string().url('Enter a valid URL'),
   description: z.string().optional(),
-  events: z.array(z.string()).min(1, 'Select at least one event'),
+  events: z.array(z.enum(webhookEvents)).min(1, 'Select at least one event'),
 });
 
 type WebhookFormValues = z.infer<typeof webhookSchema>;
@@ -91,7 +92,7 @@ export function WebhookFormDrawer({
 
   const watchedEvents = form.watch('events');
 
-  const toggleEvent = (event: string) => {
+  const toggleEvent = (event: WebhookEventType) => {
     const current = form.getValues('events');
     const updated = current.includes(event)
       ? current.filter((e) => e !== event)

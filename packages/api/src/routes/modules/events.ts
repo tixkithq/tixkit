@@ -567,6 +567,9 @@ export const eventRoutes: FastifyPluginAsync = async (app) => {
     const existing = await repo.findById(eventId);
     if (!existing) throw new NotFoundError('Event', eventId);
     ClerkAuthService.requireResourceTenant(principal, existing, 'Event', eventId);
+    ClerkAuthService.requireOrganizationScope(principal, existing.organization_id);
+    ClerkAuthService.requireBrandScope(principal, existing.brand_id);
+    ClerkAuthService.requireEventScope(principal, eventId);
     const config = existing.code_format
       ? (JSON.parse(existing.code_format) as CodeFormat)
       : DEFAULT_CODE_FORMAT;

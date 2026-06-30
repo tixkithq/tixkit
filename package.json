@@ -30,7 +30,7 @@
     "audit": "bun audit",
     "lint": "turbo run lint",
     "typecheck": "turbo run typecheck",
-    "test": "turbo run test:unit test:integration",
+    "test": "bun run test:unit && bun run test:integration",
     "test:unit": "turbo run test:unit",
     "test:integration": "turbo run test:integration --concurrency=1",
     "test:integration:serial": "turbo run test:integration --concurrency=1",
