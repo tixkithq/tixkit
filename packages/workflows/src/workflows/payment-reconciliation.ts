@@ -1,11 +1,29 @@
-import { proxyActivities, sleep } from '@temporalio/workflow';
+import { proxyActivities, sleep, startChild } from '@temporalio/workflow';
 import type { WorkflowActivityResult } from '../shared/types.js';
+import { WEBHOOK_DELIVERY_WORKFLOW_VERSION, webhookDeliveryWorkflowId } from '../shared/types.js';
+import { webhookDeliveryWorkflow } from './webhook-delivery.js';
+
+type ReconciledOrderWebhookEvent = {
+  tenantId: string;
+  organizationId: string;
+  eventId: string;
+  orderId: string;
+  checkoutSessionId: string;
+  eventType: string;
+  payload: Record<string, unknown>;
+};
+
+type ReconciliationActivityValue = {
+  orderId?: string;
+  status: string;
+  webhookEvent?: ReconciledOrderWebhookEvent;
+};
 
 const {
   reconcilePaymentActivity,
   reconcileRefundActivity,
   reconcileDisputeActivity,
-  emitDomainEventActivity,
+  emitWebhookEventActivity,
   markProviderEventProcessedActivity,
 } = proxyActivities<{
   reconcilePaymentActivity(input: {
@@ -13,22 +31,29 @@ const {
     provider: string;
     eventType: string;
     data: Record<string, unknown>;
-  }): Promise<WorkflowActivityResult<{ orderId?: string; status: string }>>;
+  }): Promise<WorkflowActivityResult<ReconciliationActivityValue>>;
   reconcileRefundActivity(input: {
     providerEventId: string;
     provider: string;
     eventType: string;
     data: Record<string, unknown>;
-  }): Promise<WorkflowActivityResult<{ orderId?: string; status: string }>>;
+  }): Promise<WorkflowActivityResult<ReconciliationActivityValue>>;
   reconcileDisputeActivity(input: {
     providerEventId: string;
     provider: string;
     data: Record<string, unknown>;
-  }): Promise<WorkflowActivityResult<{ orderId?: string; status: string }>>;
-  emitDomainEventActivity(input: {
-    orderId: string;
+  }): Promise<WorkflowActivityResult<ReconciliationActivityValue>>;
+  emitWebhookEventActivity(input: {
+    tenantId: string;
+    organizationId: string;
     eventType: string;
-  }): Promise<WorkflowActivityResult<{ emitted: boolean }>>;
+    payload: Record<string, unknown>;
+  }): Promise<
+    WorkflowActivityResult<{
+      eventId: string;
+      deliveries: { endpointId: string; eventId: string; url: string }[];
+    }>
+  >;
   markProviderEventProcessedActivity(input: {
     provider: string;
     providerEventId: string;
@@ -50,7 +75,7 @@ export type PaymentReconciliationWorkflowInput = {
   data: Record<string, unknown>;
 };
 
-type ReconciliationResult = WorkflowActivityResult<{ orderId?: string; status: string }>;
+type ReconciliationResult = WorkflowActivityResult<ReconciliationActivityValue>;
 
 const PAYMENT_RECONCILIATION_BOUNDED_RETRY_VERSION = 2;
 const RECONCILIATION_MAX_ATTEMPTS = 5;
@@ -136,19 +161,41 @@ export async function paymentReconciliationWorkflow(
     );
   }
 
-  // Emit domain event if order was affected
-  if (result.value.orderId) {
-    const domainEventResult = await emitDomainEventActivity({
-      orderId: result.value.orderId,
-      eventType: input.eventType,
+  if (result.value.webhookEvent) {
+    const webhookEvent = result.value.webhookEvent;
+    const webhookEventResult = await emitWebhookEventActivity({
+      tenantId: webhookEvent.tenantId,
+      organizationId: webhookEvent.organizationId,
+      eventType: webhookEvent.eventType,
+      payload: webhookEvent.payload,
     });
-    if (!domainEventResult.ok) {
-      if (domainEventResult.retryable) {
+    if (!webhookEventResult.ok) {
+      if (webhookEventResult.retryable) {
         throw new Error(
-          `Payment reconciliation domain event failed (${domainEventResult.errorCode}): ${domainEventResult.message}`,
+          `Payment reconciliation webhook event failed (${webhookEventResult.errorCode}): ${webhookEventResult.message}`,
         );
       }
       return { status: 'failed' };
+    }
+
+    if (webhookEventResult.value.deliveries.length > 0) {
+      await Promise.all(
+        webhookEventResult.value.deliveries.map((delivery) =>
+          startChild(webhookDeliveryWorkflow, {
+            workflowId: webhookDeliveryWorkflowId(delivery.eventId, delivery.endpointId),
+            args: [
+              {
+                version: WEBHOOK_DELIVERY_WORKFLOW_VERSION,
+                endpointId: delivery.endpointId,
+                eventId: delivery.eventId,
+                eventType: webhookEvent.eventType,
+                payload: webhookEvent.payload,
+                maxAttempts: 5,
+              },
+            ],
+          }),
+        ),
+      );
     }
   }
 

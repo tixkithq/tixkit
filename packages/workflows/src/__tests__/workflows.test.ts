@@ -149,6 +149,19 @@ function makePaymentReconciliationInput(overrides: Record<string, unknown> = {})
   };
 }
 
+function makeReconciledOrderWebhookEvent(overrides: Record<string, unknown> = {}) {
+  return {
+    tenantId: 'tnt_1',
+    organizationId: 'org_1',
+    eventId: 'evt_1',
+    orderId: 'ord_1',
+    checkoutSessionId: 'cs_1',
+    eventType: 'order.paid',
+    payload: { orderId: 'ord_1', eventId: 'evt_1', checkoutSessionId: 'cs_1' },
+    ...overrides,
+  };
+}
+
 function makeClerkIdentitySyncInput(overrides: Record<string, unknown> = {}) {
   return {
     version: 1,
@@ -965,16 +978,23 @@ describe('paymentReconciliationWorkflow', () => {
     Object.entries(defaultActivities).forEach(([name, impl]) => setActivity(name, impl));
   });
 
-  it('marks the provider event processed after successful reconciliation work', async () => {
-    let domainEventInput: Record<string, unknown> | undefined;
+  it('marks the provider event processed after durable webhook event creation', async () => {
+    let webhookEventInput: Record<string, unknown> | undefined;
     let markInput: Record<string, unknown> | undefined;
 
     setActivity('reconcilePaymentActivity', async () =>
-      okResult({ orderId: 'ord_1', status: 'paid' }),
+      okResult({
+        orderId: 'ord_1',
+        status: 'paid',
+        webhookEvent: makeReconciledOrderWebhookEvent(),
+      }),
     );
-    setActivity('emitDomainEventActivity', async (input) => {
-      domainEventInput = input;
-      return okResult({ emitted: true });
+    setActivity('emitWebhookEventActivity', async (input) => {
+      webhookEventInput = input;
+      return okResult({
+        eventId: 'whe_1',
+        deliveries: [{ endpointId: 'wh_1', eventId: 'whe_1', url: 'https://example.test/hook' }],
+      });
     });
     setActivity('markProviderEventProcessedActivity', async (input) => {
       markInput = input;
@@ -984,13 +1004,36 @@ describe('paymentReconciliationWorkflow', () => {
     const result = await paymentReconciliationWorkflow(makePaymentReconciliationInput());
 
     expect(result).toEqual({ status: 'paid' });
-    expect(domainEventInput).toEqual({ orderId: 'ord_1', eventType: 'payment_intent.succeeded' });
+    expect(webhookEventInput).toEqual({
+      tenantId: 'tnt_1',
+      organizationId: 'org_1',
+      eventType: 'order.paid',
+      payload: { orderId: 'ord_1', eventId: 'evt_1', checkoutSessionId: 'cs_1' },
+    });
+    expect(mockState.childStarts).toEqual([
+      {
+        workflow: webhookDeliveryWorkflow,
+        options: {
+          workflowId: 'webhook-delivery:whe_1:wh_1',
+          args: [
+            {
+              version: 1,
+              endpointId: 'wh_1',
+              eventId: 'whe_1',
+              eventType: 'order.paid',
+              payload: { orderId: 'ord_1', eventId: 'evt_1', checkoutSessionId: 'cs_1' },
+              maxAttempts: 5,
+            },
+          ],
+        },
+      },
+    ]);
     expect(markInput).toEqual({ provider: 'stripe', providerEventId: 'evt_stripe_1' });
   });
 
   it('retries retryable payment reconciliation before emitting and marking processed', async () => {
     let reconcileCalls = 0;
-    let domainEventInput: Record<string, unknown> | undefined;
+    let webhookEventInput: Record<string, unknown> | undefined;
     let markInput: Record<string, unknown> | undefined;
 
     setActivity('reconcilePaymentActivity', async () => {
@@ -1002,11 +1045,15 @@ describe('paymentReconciliationWorkflow', () => {
           true,
         );
       }
-      return okResult({ orderId: 'ord_1', status: 'paid' });
+      return okResult({
+        orderId: 'ord_1',
+        status: 'paid',
+        webhookEvent: makeReconciledOrderWebhookEvent(),
+      });
     });
-    setActivity('emitDomainEventActivity', async (input) => {
-      domainEventInput = input;
-      return okResult({ emitted: true });
+    setActivity('emitWebhookEventActivity', async (input) => {
+      webhookEventInput = input;
+      return okResult({ eventId: 'whe_1', deliveries: [] });
     });
     setActivity('markProviderEventProcessedActivity', async (input) => {
       markInput = input;
@@ -1018,8 +1065,81 @@ describe('paymentReconciliationWorkflow', () => {
     expect(result).toEqual({ status: 'paid' });
     expect(reconcileCalls).toBe(2);
     expect(mockState.sleeps).toEqual(['5 seconds']);
-    expect(domainEventInput).toEqual({ orderId: 'ord_1', eventType: 'payment_intent.succeeded' });
+    expect(webhookEventInput).toEqual({
+      tenantId: 'tnt_1',
+      organizationId: 'org_1',
+      eventType: 'order.paid',
+      payload: { orderId: 'ord_1', eventId: 'evt_1', checkoutSessionId: 'cs_1' },
+    });
     expect(markInput).toEqual({ provider: 'stripe', providerEventId: 'evt_stripe_1' });
+  });
+
+  it('does not mark provider events processed when webhook event creation fails retryably', async () => {
+    let marked = false;
+
+    setActivity('reconcilePaymentActivity', async () =>
+      okResult({
+        orderId: 'ord_1',
+        status: 'paid',
+        webhookEvent: makeReconciledOrderWebhookEvent(),
+      }),
+    );
+    setActivity('emitWebhookEventActivity', async () =>
+      errResult('WEBHOOK_EVENT_CREATE_FAILED', 'database unavailable', true),
+    );
+    setActivity('markProviderEventProcessedActivity', async () => {
+      marked = true;
+      return okResult({ processed: true });
+    });
+
+    await expect(paymentReconciliationWorkflow(makePaymentReconciliationInput())).rejects.toThrow(
+      'Payment reconciliation webhook event failed (WEBHOOK_EVENT_CREATE_FAILED): database unavailable',
+    );
+    expect(marked).toBe(false);
+  });
+
+  it('emits refund and dispute webhook events before marking processed', async () => {
+    const emittedEventTypes: unknown[] = [];
+    const markedProviderEvents: unknown[] = [];
+
+    setActivity('emitWebhookEventActivity', async (input) => {
+      emittedEventTypes.push(input.eventType);
+      return okResult({ eventId: `whe_${emittedEventTypes.length}`, deliveries: [] });
+    });
+    setActivity('markProviderEventProcessedActivity', async (input) => {
+      markedProviderEvents.push(input);
+      return okResult({ processed: true });
+    });
+    setActivity('reconcileRefundActivity', async () =>
+      okResult({
+        orderId: 'ord_1',
+        status: 'refunded',
+        webhookEvent: makeReconciledOrderWebhookEvent({ eventType: 'order.refunded' }),
+      }),
+    );
+
+    await expect(
+      paymentReconciliationWorkflow(
+        makePaymentReconciliationInput({ eventType: 'refund.created' }),
+      ),
+    ).resolves.toEqual({ status: 'refunded' });
+
+    setActivity('reconcileDisputeActivity', async () =>
+      okResult({
+        orderId: 'ord_1',
+        status: 'disputed',
+        webhookEvent: makeReconciledOrderWebhookEvent({ eventType: 'order.disputed' }),
+      }),
+    );
+
+    await expect(
+      paymentReconciliationWorkflow(
+        makePaymentReconciliationInput({ eventType: 'charge.dispute.created' }),
+      ),
+    ).resolves.toEqual({ status: 'disputed' });
+
+    expect(emittedEventTypes).toEqual(['order.refunded', 'order.disputed']);
+    expect(markedProviderEvents).toHaveLength(2);
   });
 
   it('keeps v1 retryable reconciliation failures as immediate workflow retries without marking processed', async () => {

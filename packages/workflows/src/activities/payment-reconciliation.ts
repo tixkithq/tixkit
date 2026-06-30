@@ -58,12 +58,56 @@ function providerIntentIdForPaymentEvent(
   return objectId(payload.id);
 }
 
+type ReconciledOrderContext = {
+  id: string;
+  tenant_id: string;
+  organization_id: string;
+  event_id: string;
+  checkout_session_id: string;
+};
+
+type ReconciledOrderWebhookEvent = {
+  tenantId: string;
+  organizationId: string;
+  eventId: string;
+  orderId: string;
+  checkoutSessionId: string;
+  eventType: string;
+  payload: Record<string, unknown>;
+};
+
+type PaymentReconciliationResult = {
+  orderId?: string;
+  status: string;
+  webhookEvent?: ReconciledOrderWebhookEvent;
+};
+
+function orderWebhookEvent(
+  order: ReconciledOrderContext,
+  eventType: 'order.paid' | 'order.refunded' | 'order.disputed',
+): ReconciledOrderWebhookEvent {
+  const payload = {
+    orderId: order.id,
+    eventId: order.event_id,
+    checkoutSessionId: order.checkout_session_id,
+  };
+  return {
+    tenantId: order.tenant_id,
+    organizationId: order.organization_id,
+    eventId: order.event_id,
+    orderId: order.id,
+    checkoutSessionId: order.checkout_session_id,
+    eventType,
+    payload,
+  };
+}
+
 export async function reconcilePaymentActivity(input: {
   providerEventId: string;
   provider: string;
   eventType: string;
   data: Record<string, unknown>;
-}): Promise<WorkflowActivityResult<{ orderId?: string; status: string }>> {
+}): Promise<WorkflowActivityResult<PaymentReconciliationResult>> {
   const db = createDb();
   try {
     const paymentIntent = input.data as {
@@ -156,7 +200,11 @@ export async function reconcilePaymentActivity(input: {
           'order.paid',
           'Payment confirmed via Stripe',
         );
-        return okResult({ orderId: dbPi.order_id, status: 'paid' });
+        return okResult({
+          orderId: dbPi.order_id,
+          status: 'paid',
+          webhookEvent: orderWebhookEvent(order, 'order.paid'),
+        });
       }
       if (order && isFailedPaymentEvent(input.eventType, paymentIntent.status)) {
         await orderRepo.addTimelineEvent(
@@ -282,7 +330,7 @@ export async function reconcileRefundActivity(input: {
   provider: string;
   eventType: string;
   data: Record<string, unknown>;
-}): Promise<WorkflowActivityResult<{ orderId?: string; status: string }>> {
+}): Promise<WorkflowActivityResult<PaymentReconciliationResult>> {
   const db = createDb();
   try {
     const refundOrCharge = input.data as {
@@ -334,7 +382,11 @@ export async function reconcileRefundActivity(input: {
           order,
           reconciledRefunded,
         );
-        return okResult({ orderId: order.id, status });
+        return okResult({
+          orderId: order.id,
+          status,
+          webhookEvent: orderWebhookEvent(order, 'order.refunded'),
+        });
       }
       return okResult({ orderId: order.id, status: order.status });
     }
@@ -359,7 +411,11 @@ export async function reconcileRefundActivity(input: {
           order,
           reconciledRefunded,
         );
-        return okResult({ orderId: order.id, status });
+        return okResult({
+          orderId: order.id,
+          status,
+          webhookEvent: orderWebhookEvent(order, 'order.refunded'),
+        });
       }
       return okResult({ orderId: order.id, status: order.status });
     }
@@ -391,7 +447,11 @@ export async function reconcileRefundActivity(input: {
       );
     }
 
-    return okResult({ orderId: order.id, status: newStatus });
+    return okResult({
+      orderId: order.id,
+      status: newStatus,
+      webhookEvent: orderWebhookEvent(order, 'order.refunded'),
+    });
   } catch (err) {
     return errResult(
       'REFUND_RECONCILE_FAILED',
@@ -407,7 +467,7 @@ export async function reconcileDisputeActivity(input: {
   providerEventId: string;
   provider: string;
   data: Record<string, unknown>;
-}): Promise<WorkflowActivityResult<{ orderId?: string; status: string }>> {
+}): Promise<WorkflowActivityResult<PaymentReconciliationResult>> {
   const db = createDb();
   try {
     const dispute = input.data as {
@@ -447,7 +507,11 @@ export async function reconcileDisputeActivity(input: {
       { disputeId: dispute.id, providerDisputeId: dispute.id, amount: dispute.amount },
     );
 
-    return okResult({ orderId: order.id, status: 'disputed' });
+    return okResult({
+      orderId: order.id,
+      status: 'disputed',
+      webhookEvent: orderWebhookEvent(order, 'order.disputed'),
+    });
   } catch (err) {
     return errResult(
       'DISPUTE_RECONCILE_FAILED',
