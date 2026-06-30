@@ -60,6 +60,8 @@ services:
         value: production
       - key: PORT
         value: 3000
+      - key: NEXT_PUBLIC_TIXKIT_API_BASE_URL
+        value: https://tixkit-api.onrender.com/v1
     plan: starter
 
   - type: web
@@ -72,6 +74,8 @@ services:
         value: production
       - key: PORT
         value: 3001
+      - key: NEXT_PUBLIC_ADMIN_API_BASE_URL
+        value: https://tixkit-api.onrender.com
     plan: starter
 
 databases:

@@ -16,6 +16,8 @@ require_file infra/render.yaml
 require_file infra/helm/tixkit/values.yaml
 
 expected_cors_origins='https://checkout.example.com,https://admin.example.com'
+expected_render_api_origin='https://tixkit-api.onrender.com'
+expected_render_checkout_api_base_url="${expected_render_api_origin}/v1"
 
 grep -Eq '^[[:space:]]*TRUST_PROXY[[:space:]]*=[[:space:]]*"1"[[:space:]]*$' infra/fly/api.toml ||
   fail 'infra/fly/api.toml must set API TRUST_PROXY to bounded hop count "1"'
@@ -130,6 +132,81 @@ awk '
   }
 ' infra/render.yaml ||
   fail "infra/render.yaml must set tixkit-api TRUST_PROXY=1, CORS_ALLOWED_ORIGINS=${expected_cors_origins}, and explicit TEMPORAL_ADDRESS/TEMPORAL_NAMESPACE/TEMPORAL_TASK_QUEUE=tixkit-production for tixkit-api and tixkit-worker"
+
+awk -v checkout_api_base_url="${expected_render_checkout_api_base_url}" \
+  -v admin_api_base_url="${expected_render_api_origin}" '
+  function reset_service_state() {
+    checkout_api_count = 0
+    admin_api_count = 0
+    pending_checkout_api = 0
+    pending_admin_api = 0
+    bad_checkout_api = 0
+    bad_admin_api = 0
+  }
+  function finish_service() {
+    if (in_checkout && (checkout_api_count != 1 || bad_checkout_api || pending_checkout_api)) {
+      exit 1
+    }
+    if (in_admin && (admin_api_count != 1 || bad_admin_api || pending_admin_api)) {
+      exit 1
+    }
+  }
+  /^  - type: / {
+    finish_service()
+    in_checkout = 0
+    in_admin = 0
+    reset_service_state()
+  }
+  /^    name: tixkit-checkout$/ {
+    in_checkout = 1
+    found_checkout = 1
+    reset_service_state()
+  }
+  /^    name: tixkit-admin$/ {
+    in_admin = 1
+    found_admin = 1
+    reset_service_state()
+  }
+  in_checkout && /^[[:space:]]*- key: NEXT_PUBLIC_TIXKIT_API_BASE_URL$/ {
+    checkout_api_count += 1
+    pending_checkout_api = 1
+    next
+  }
+  in_checkout && pending_checkout_api && /^[[:space:]]*value:/ {
+    expected = "^[[:space:]]*value:[[:space:]]*" checkout_api_base_url "[[:space:]]*$"
+    if ($0 !~ expected) {
+      bad_checkout_api = 1
+    }
+    pending_checkout_api = 0
+    next
+  }
+  in_checkout && pending_checkout_api && /^[[:space:]]*- key:/ {
+    bad_checkout_api = 1
+    pending_checkout_api = 0
+  }
+  in_admin && /^[[:space:]]*- key: NEXT_PUBLIC_ADMIN_API_BASE_URL$/ {
+    admin_api_count += 1
+    pending_admin_api = 1
+    next
+  }
+  in_admin && pending_admin_api && /^[[:space:]]*value:/ {
+    expected = "^[[:space:]]*value:[[:space:]]*" admin_api_base_url "[[:space:]]*$"
+    if ($0 !~ expected) {
+      bad_admin_api = 1
+    }
+    pending_admin_api = 0
+    next
+  }
+  in_admin && pending_admin_api && /^[[:space:]]*- key:/ {
+    bad_admin_api = 1
+    pending_admin_api = 0
+  }
+  END {
+    finish_service()
+    exit found_checkout && found_admin ? 0 : 1
+  }
+' infra/render.yaml ||
+  fail "infra/render.yaml must set tixkit-checkout NEXT_PUBLIC_TIXKIT_API_BASE_URL=${expected_render_checkout_api_base_url} and tixkit-admin NEXT_PUBLIC_ADMIN_API_BASE_URL=${expected_render_api_origin}"
 
 grep -Eq "^[[:space:]]*trustProxy:[[:space:]]*'1'[[:space:]]*$" infra/helm/tixkit/values.yaml ||
   fail 'infra/helm/tixkit/values.yaml must set API trustProxy to bounded hop count 1'
