@@ -196,12 +196,24 @@ export function ReportsView({ eventId }: ReportsViewProps) {
       return;
     }
 
-    setLastExport(result.data);
+    const queuedExport = { ...result.data, type: exportType, format: 'csv' as const };
+    setLastExport(queuedExport);
+    setExportingType(null);
     toast.success(`Export queued (${result.data.exportId})`);
     exportSubscriptionRef.current = subscribeToExportJob(result.data.exportId, {
-      onUpdate: setLastExport,
+      onUpdate: (updated) => {
+        setLastExport({
+          ...updated,
+          type: updated.type ?? queuedExport.type,
+          format: updated.format ?? queuedExport.format,
+        });
+      },
       onDone: (completed) => {
-        setLastExport(completed);
+        setLastExport({
+          ...completed,
+          type: completed.type ?? queuedExport.type,
+          format: completed.format ?? queuedExport.format,
+        });
         setExportingType(null);
         if (completed.status === 'completed') {
           toast.success('Export ready to download');

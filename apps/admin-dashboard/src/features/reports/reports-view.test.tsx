@@ -334,17 +334,17 @@ describe('ReportsView', () => {
     });
   });
 
-  it('shows progress and status for the selected export type only', async () => {
+  it('shows status for the selected export type and unlocks exports after queueing', async () => {
     const view = render(<ReportsView eventId="evt_1" />);
 
     await view.findByText('Gross Sales');
     fireEvent.click(view.getByRole('button', { name: 'Export orders CSV' }));
 
-    expect(await view.findByText('Exporting Orders...')).toBeInTheDocument();
-    expect(view.getByRole('button', { name: 'Export sales CSV' })).toHaveTextContent('Sales');
-    expect(view.getByRole('button', { name: 'Export tax CSV' })).toHaveTextContent('Tax');
     expect(await view.findByRole('status')).toHaveTextContent(
       'Orders CSV export exp_1 is pending.',
     );
+    expect(view.getByRole('button', { name: 'Export sales CSV' })).toBeEnabled();
+    expect(view.getByRole('button', { name: 'Export tax CSV' })).toBeEnabled();
+    expect(view.getByRole('button', { name: 'Export orders CSV' })).toBeEnabled();
   });
 });

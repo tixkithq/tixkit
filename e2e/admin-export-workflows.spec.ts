@@ -13,12 +13,12 @@ import {
 } from './helpers/seed';
 
 const exportCases = [
-  { type: 'sales', buttonName: 'Export sales CSV' },
-  { type: 'tax', buttonName: 'Export tax CSV' },
-  { type: 'attendees', buttonName: 'Export attendees CSV' },
-  { type: 'orders', buttonName: 'Export orders CSV' },
-  { type: 'tickets', buttonName: 'Export tickets CSV' },
-  { type: 'scan_logs', buttonName: 'Export scan logs CSV' },
+  { type: 'sales', buttonName: 'Export sales CSV', statusLabel: 'Sales' },
+  { type: 'tax', buttonName: 'Export tax CSV', statusLabel: 'Tax' },
+  { type: 'attendees', buttonName: 'Export attendees CSV', statusLabel: 'Attendees' },
+  { type: 'orders', buttonName: 'Export orders CSV', statusLabel: 'Orders' },
+  { type: 'tickets', buttonName: 'Export tickets CSV', statusLabel: 'Tickets' },
+  { type: 'scan_logs', buttonName: 'Export scan logs CSV', statusLabel: 'Scan Logs' },
 ] as const;
 
 const mobileReportViewport = { width: 390, height: 844 } as const;
@@ -247,9 +247,9 @@ test.describe('admin export workflow coverage', () => {
       }>(await createExportResponse, 202);
       expect(queuedExport.status).toBe('pending');
 
-      await expect(page.getByText(`Export ${queuedExport.exportId} is completed.`)).toBeVisible({
-        timeout: 60_000,
-      });
+      await expect(
+        page.getByText(`${exportCase.statusLabel} CSV export ${queuedExport.exportId} is completed.`),
+      ).toBeVisible({ timeout: 60_000 });
 
       const downloadLink = page.getByRole('link', { name: 'Download' });
       await expect(downloadLink).toBeVisible();

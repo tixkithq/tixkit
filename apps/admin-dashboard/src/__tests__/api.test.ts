@@ -509,6 +509,8 @@ describe('AdminApi reports date range', () => {
     if (result.ok) {
       expect(result.data.exportId).toMatch(/^exp_/);
       expect(result.data.status).toBe('pending');
+      expect(result.data.type).toBe('sales');
+      expect(result.data.format).toBe('csv');
     }
   });
 

@@ -5590,7 +5590,16 @@ export const adminApi: AdminApi = {
           },
           body: JSON.stringify(input),
         });
-        return result.ok ? ok(normalizeExportJob(result.data)) : result;
+        return result.ok
+          ? ok(
+              normalizeExportJob({
+                ...result.data,
+                eventId: result.data.eventId ?? input.eventId,
+                type: result.data.type ?? input.type,
+                format: result.data.format ?? input.format,
+              }),
+            )
+          : result;
       },
       () => {
         const job = normalizeExportJob({
