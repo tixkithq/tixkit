@@ -283,11 +283,53 @@ describe('checkoutSessionWorkflow', () => {
     expect(released).toBe(false);
   });
 
+  it('throws when free checkout confirmation email returns a retryable error', async () => {
+    let issueTicketsCalled = false;
+    let webhookCalled = false;
+
+    setActivity('sendConfirmationEmailActivity', async () =>
+      errResult('EMAIL_QUEUE_FAILED', 'database temporarily unavailable', true),
+    );
+    setActivity('issueTicketsActivity', async () => {
+      issueTicketsCalled = true;
+      return okResult({ issued: 2, jobId: 'emj_2' });
+    });
+    setActivity('emitWebhookEventActivity', async () => {
+      webhookCalled = true;
+      return okResult({ eventId: 'evt_1', deliveries: [] });
+    });
+
+    await expect(checkoutSessionWorkflow(makeCheckoutInput({ isFreeOrder: true }))).rejects.toThrow(
+      'Checkout fulfillment confirmation email failed (EMAIL_QUEUE_FAILED): database temporarily unavailable',
+    );
+    expect(issueTicketsCalled).toBe(false);
+    expect(webhookCalled).toBe(false);
+  });
+
   it('completes a paid order when payment succeeds', async () => {
     mockState.conditionResult = true; // Payment succeeded
     const result = await checkoutSessionWorkflow(makeCheckoutInput({ isFreeOrder: false }));
     expect(result.status).toBe('completed');
     expect(result.orderId).toBe('ord_test_1');
+  });
+
+  it('throws when paid checkout ticket issuance returns a retryable error before webhook', async () => {
+    let webhookCalled = false;
+
+    setActivity('issueTicketsActivity', async () =>
+      errResult('TICKET_ISSUE_FAILED', 'database temporarily unavailable', true),
+    );
+    setActivity('emitWebhookEventActivity', async () => {
+      webhookCalled = true;
+      return okResult({ eventId: 'evt_1', deliveries: [] });
+    });
+
+    await expect(
+      checkoutSessionWorkflow(makeCheckoutInput({ isFreeOrder: false })),
+    ).rejects.toThrow(
+      'Checkout fulfillment ticket issuance failed (TICKET_ISSUE_FAILED): database temporarily unavailable',
+    );
+    expect(webhookCalled).toBe(false);
   });
 
   it('passes quoted fee cents to payment intent creation', async () => {
