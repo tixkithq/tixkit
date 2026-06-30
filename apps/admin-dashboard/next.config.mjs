@@ -24,6 +24,7 @@ const adminSecurityHeaders = [
 
 /** @type {import('next').NextConfig} */
 const nextConfig = {
+  distDir: process.env.NEXT_DIST_DIR ?? '.next',
   transpilePackages: [
     '@tixkit/content-email',
     '@tixkit/content-editor-shell',

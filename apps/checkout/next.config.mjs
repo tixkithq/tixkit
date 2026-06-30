@@ -25,6 +25,7 @@ const checkoutSecurityHeaders = [
 
 /** @type {import('next').NextConfig} */
 const nextConfig = {
+  distDir: process.env.NEXT_DIST_DIR ?? '.next',
   transpilePackages: [],
   env: {
     NEXT_PUBLIC_TIXKIT_API_BASE_URL:
