@@ -1854,6 +1854,48 @@ export function normalizeLiveCheckInScanResult(
   };
 }
 
+export function normalizeAdminAttendeeListItem(value: unknown): AdminAttendeeListItem {
+  const record = asRecord(value);
+  const firstName = stringValue(record.firstName ?? record.first_name, '');
+  const lastName = stringValue(record.lastName ?? record.last_name, '');
+  const fullName = [firstName, lastName].filter(Boolean).join(' ').trim();
+  const email = stringValue(record.email, undefined);
+  const checkedInAt = stringValue(record.checkedInAt ?? record.checked_in_at, undefined);
+  const status = record.status === 'refunded' ? 'refunded' : stringValue(record.status, 'active');
+  const checkInStatus =
+    record.checkInStatus === 'checked_in' || record.check_in_status === 'checked_in' || checkedInAt
+      ? 'checked_in'
+      : status === 'refunded' ||
+          record.checkInStatus === 'revoked' ||
+          record.check_in_status === 'revoked'
+        ? 'revoked'
+        : 'not_checked_in';
+
+  return {
+    id: String(record.id),
+    eventId: stringValue(record.eventId ?? record.event_id, ''),
+    eventTitle: stringValue(record.eventTitle ?? record.event_title, ''),
+    orderId: stringValue(record.orderId ?? record.order_id, ''),
+    ticketId: stringValue(record.ticketId ?? record.ticket_id, ''),
+    ticketTypeName: stringValue(
+      record.ticketTypeName ??
+        record.ticket_type_name ??
+        record.ticketTypeId ??
+        record.ticket_type_id,
+      'Ticket',
+    ),
+    name: stringValue(record.name, fullName || email || 'Attendee'),
+    email,
+    status:
+      status === 'cancelled' || status === 'refunded' || status === 'transferred'
+        ? status
+        : 'active',
+    checkInStatus,
+    checkedInAt,
+    createdAt: stringValue(record.createdAt ?? record.created_at, new Date(0).toISOString()),
+  };
+}
+
 function finiteNumber(value: unknown, fallback = 0): number {
   const numeric = typeof value === 'number' ? value : Number(value);
   return Number.isFinite(numeric) ? numeric : fallback;
@@ -5049,16 +5091,25 @@ export const adminApi: AdminApi = {
   // ---- Attendees ----
   async listAttendees(input) {
     return withFixture(
-      () => {
+      async () => {
         const params = new URLSearchParams();
         if (input.cursor) params.set('cursor', input.cursor);
         if (input.limit) params.set('limit', String(input.limit));
         if (input.eventId) params.set('eventId', input.eventId);
         const qs = params.toString();
         const path = input.eventId ? `/v1/events/${input.eventId}/attendees` : '/v1/attendees';
-        return request<PageResult<AdminAttendeeListItem>>(`${path}${qs ? `?${qs}` : ''}`, {
-          method: 'GET',
-        });
+        const result = await request<PageResult<AdminAttendeeListItem>>(
+          `${path}${qs ? `?${qs}` : ''}`,
+          {
+            method: 'GET',
+          },
+        );
+        return result.ok
+          ? ok({
+              ...result.data,
+              items: result.data.items.map((attendee) => normalizeAdminAttendeeListItem(attendee)),
+            })
+          : result;
       },
       () => {
         let attendees = fixtureAttendees;
@@ -5070,11 +5121,13 @@ export const adminApi: AdminApi = {
 
   async updateAttendee(attendeeId, input) {
     return withFixture(
-      () =>
-        request<AdminAttendeeListItem>(`/v1/attendees/${attendeeId}`, {
+      async () => {
+        const result = await request<AdminAttendeeListItem>(`/v1/attendees/${attendeeId}`, {
           method: 'PATCH',
           body: JSON.stringify(input),
-        }),
+        });
+        return result.ok ? ok(normalizeAdminAttendeeListItem(result.data)) : result;
+      },
       () => {
         const attendee = fixtureAttendees.find((a) => a.id === attendeeId);
         if (!attendee)
