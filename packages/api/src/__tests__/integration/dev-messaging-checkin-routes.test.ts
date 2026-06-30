@@ -4340,6 +4340,94 @@ describe('checkout confirm', () => {
     await app.close();
   });
 
+  it('GET /checkout/sessions/:sessionId omits bearer token on tokenless completed reads', async () => {
+    const tables = {
+      checkout_sessions: [
+        {
+          id: 'cs_1',
+          tenant_id: 'tnt_1',
+          event_id: 'evt_1',
+          brand_id: 'brd_1',
+          status: 'completed',
+          currency: 'USD',
+          quote: {
+            totalCents: 2500,
+            subtotalCents: 2500,
+            discountCents: 0,
+            taxCents: 0,
+            feeCents: 0,
+          },
+          buyer: { email: 'buyer@test.com' },
+          cart: { items: [{ ticketTypeId: 'tt_1', quantity: 1 }] },
+          expires_at: new Date(Date.now() + 60000),
+          hold_id: 'hld_1',
+          order_id: 'ord_1',
+          client_token: 'tok_1',
+          success_url: null,
+          cancel_url: null,
+          idempotency_key: 'key_1',
+        },
+      ],
+    };
+    const app = await setupApp(checkoutRoutes, makePrincipal(), tables);
+
+    const tokenless = await app.inject({
+      method: 'GET',
+      url: '/checkout/sessions/cs_1',
+    });
+    expect(tokenless.statusCode).toBe(200);
+    expect(tokenless.json()).not.toHaveProperty('clientToken');
+
+    const withToken = await app.inject({
+      method: 'GET',
+      url: '/checkout/sessions/cs_1',
+      headers: { 'x-checkout-session-token': 'tok_1' },
+    });
+    expect(withToken.statusCode).toBe(200);
+    expect(withToken.json().clientToken).toBe('tok_1');
+    await app.close();
+  });
+
+  it('GET /checkout/sessions/:sessionId/wallet-passes requires the checkout session token', async () => {
+    const tables = {
+      checkout_sessions: [
+        {
+          id: 'cs_1',
+          tenant_id: 'tnt_1',
+          event_id: 'evt_1',
+          brand_id: 'brd_1',
+          status: 'completed',
+          currency: 'USD',
+          quote: {
+            totalCents: 2500,
+            subtotalCents: 2500,
+            discountCents: 0,
+            taxCents: 0,
+            feeCents: 0,
+          },
+          buyer: { email: 'buyer@test.com' },
+          cart: { items: [{ ticketTypeId: 'tt_1', quantity: 1 }] },
+          expires_at: new Date(Date.now() + 60000),
+          hold_id: 'hld_1',
+          order_id: 'ord_1',
+          client_token: 'tok_1',
+          success_url: null,
+          cancel_url: null,
+          idempotency_key: 'key_1',
+        },
+      ],
+    };
+    const app = await setupApp(checkoutRoutes, makePrincipal(), tables);
+    const res = await app.inject({
+      method: 'GET',
+      url: '/checkout/sessions/cs_1/wallet-passes',
+    });
+
+    expect(res.statusCode).toBe(400);
+    expect(res.json().message).toContain('X-Checkout-Session-Token header is required');
+    await app.close();
+  });
+
   it('GET /checkout/sessions/:sessionId accepts matching Stripe client secret for pending confirmation', async () => {
     const tables = {
       checkout_sessions: [
@@ -4385,6 +4473,7 @@ describe('checkout confirm', () => {
     const body = res.json();
     expect(body.id).toBe('cs_1');
     expect(body.status).toBe('pending_payment');
+    expect(body).not.toHaveProperty('clientToken');
     await app.close();
   });
 

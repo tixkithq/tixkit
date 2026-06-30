@@ -663,10 +663,10 @@ export const checkoutApi = {
     );
   },
 
-  async getWalletPasses(sessionId: string, sessionToken?: string): Promise<CheckoutWalletPasses> {
+  async getWalletPasses(sessionId: string, sessionToken: string): Promise<CheckoutWalletPasses> {
     return apiRequest<CheckoutWalletPasses>(
       `/checkout/sessions/${encodeURIComponent(sessionId)}/wallet-passes`,
-      sessionToken ? { sessionToken } : undefined,
+      { sessionToken },
     );
   },
 

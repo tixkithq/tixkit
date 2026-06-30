@@ -149,6 +149,7 @@ function publicCheckoutSession(
     last_error: string | null;
     updated_at: Date | string;
   },
+  options: { includeClientToken?: boolean } = {},
 ) {
   return {
     id: session.id,
@@ -161,7 +162,7 @@ function publicCheckoutSession(
     successUrl: session.success_url,
     cancelUrl: session.cancel_url,
     orderId: session.order_id,
-    clientToken: session.client_token,
+    ...(options.includeClientToken === false ? {} : { clientToken: session.client_token }),
     paymentCompensation: compensation
       ? {
           id: compensation.id,
@@ -1395,8 +1396,10 @@ export const checkoutRoutes: FastifyPluginAsync = async (app) => {
     const session = await repo.findById(sessionId);
     if (!session) throw new NotFoundError('CheckoutSession', sessionId);
     const clientToken = request.headers['x-checkout-session-token'];
+    let includeClientToken = false;
     if (typeof clientToken === 'string') {
       assertCheckoutSessionToken(session, clientToken);
+      includeClientToken = true;
     } else if (
       typeof paymentIntentClientSecret === 'string' &&
       paymentIntentClientSecret.length > 0 &&
@@ -1418,7 +1421,7 @@ export const checkoutRoutes: FastifyPluginAsync = async (app) => {
     const compensation = await new PaymentCompensationRepository(db).findLatestByCheckoutSession(
       sessionId,
     );
-    return publicCheckoutSession(session, compensation);
+    return publicCheckoutSession(session, compensation, { includeClientToken });
   });
 
   app.get('/checkout/sessions/:sessionId/wallet-passes', async (request) => {
@@ -1428,11 +1431,10 @@ export const checkoutRoutes: FastifyPluginAsync = async (app) => {
     if (!session) throw new NotFoundError('CheckoutSession', sessionId);
 
     const clientToken = request.headers['x-checkout-session-token'];
-    if (typeof clientToken === 'string') {
-      assertCheckoutSessionToken(session, clientToken);
-    } else if (session.status !== 'completed') {
+    if (typeof clientToken !== 'string') {
       throw new ValidationError('X-Checkout-Session-Token header is required');
     }
+    assertCheckoutSessionToken(session, clientToken);
 
     if (!session.order_id) return { tickets: [] };
 

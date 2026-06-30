@@ -27,8 +27,8 @@ describe('confirmation state derivation', () => {
     expect(deriveState(makeSession('completed'), null)).toBe('confirmed');
   });
 
-  it('returns confirmed for redirect_status=succeeded', () => {
-    expect(deriveState(makeSession('pending_payment'), 'succeeded')).toBe('confirmed');
+  it('keeps pending_payment pending even when redirect_status=succeeded', () => {
+    expect(deriveState(makeSession('pending_payment'), 'succeeded')).toBe('pending');
   });
 
   it.each([
@@ -71,8 +71,10 @@ describe('confirmation state derivation', () => {
     expect(deriveState(null, null)).toBe('unknown');
   });
 
-  it('redirect_status=succeeded confirms non-terminal session status', () => {
-    expect(deriveState(makeSession('pending_payment'), 'succeeded')).toBe('confirmed');
+  it('redirect_status=succeeded does not confirm non-terminal session status', () => {
+    expect(deriveState(makeSession('pending_payment'), 'succeeded')).toBe('pending');
+    expect(deriveState(makeSession('open'), 'succeeded')).toBe('pending');
+    expect(deriveState(null, 'succeeded')).toBe('pending');
   });
 
   it('returns a valid ConfirmationState for every input', () => {

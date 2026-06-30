@@ -225,6 +225,10 @@ export default function ConfirmationClient() {
         return;
       }
       const token = getSessionToken(sessionId);
+      if (!token) {
+        setWalletPasses([]);
+        return;
+      }
       try {
         const result = await checkoutApi.getWalletPasses(sessionId, token);
         if (!cancelled) setWalletPasses(result.tickets);

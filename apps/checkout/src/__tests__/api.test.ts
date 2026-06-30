@@ -113,25 +113,7 @@ describe('checkoutApi.getSession', () => {
 });
 
 describe('checkoutApi.getWalletPasses', () => {
-  it('fetches session-scoped wallet passes without a checkout token for completed confirmations', async () => {
-    const fetchMock = vi.fn(
-      async () =>
-        new Response(JSON.stringify({ tickets: [] }), {
-          status: 200,
-          headers: { 'Content-Type': 'application/json' },
-        }),
-    );
-    vi.stubGlobal('fetch', fetchMock);
-
-    await checkoutApi.getWalletPasses('cs_1');
-
-    expect(fetchMock).toHaveBeenCalledTimes(1);
-    const [url, init] = fetchMock.mock.calls[0] as unknown as [string, RequestInit];
-    expect(url).toContain('/checkout/sessions/cs_1/wallet-passes');
-    expect((init.headers as Record<string, string>)['X-Checkout-Session-Token']).toBeUndefined();
-  });
-
-  it('sends the checkout token while a session is still token-scoped', async () => {
+  it('sends the checkout token for session-scoped wallet passes', async () => {
     const fetchMock = vi.fn(
       async () =>
         new Response(JSON.stringify({ tickets: [] }), {
@@ -143,7 +125,9 @@ describe('checkoutApi.getWalletPasses', () => {
 
     await checkoutApi.getWalletPasses('cs_1', 'tok_1');
 
-    const [_url, init] = fetchMock.mock.calls[0] as unknown as [string, RequestInit];
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const [url, init] = fetchMock.mock.calls[0] as unknown as [string, RequestInit];
+    expect(url).toContain('/checkout/sessions/cs_1/wallet-passes');
     expect((init.headers as Record<string, string>)['X-Checkout-Session-Token']).toBe('tok_1');
   });
 });
