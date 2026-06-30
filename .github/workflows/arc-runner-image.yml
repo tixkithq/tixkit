@@ -1,0 +1,35 @@
+name: ARC Runner Image
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+    paths:
+      - .github/workflows/arc-runner-image.yml
+      - infra/ci/arc/runner-image/Dockerfile
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  publish:
+    name: Publish ARC runner image
+    runs-on: ubuntu-24.04
+    env:
+      IMAGE: ghcr.io/${{ github.repository_owner }}/tixkit-arc-runner:2.335.1-flutter
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Login to GHCR
+        run: echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u "${{ github.actor }}" --password-stdin
+
+      - name: Build image
+        run: docker build --platform linux/amd64 -t "${IMAGE}" infra/ci/arc/runner-image
+
+      - name: Push image
+        run: docker push "${IMAGE}"
+
+      - name: Inspect image
+        run: docker buildx imagetools inspect "${IMAGE}"
