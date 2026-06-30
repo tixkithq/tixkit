@@ -15,12 +15,15 @@ import {
   WalletCardsIcon,
   DownloadIcon,
   ExternalLinkIcon,
+  BadgeDollarSignIcon,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
 import { BrandFooter } from '@/components/checkout/brand-footer';
 import {
   checkoutApi,
@@ -29,6 +32,7 @@ import {
   type CheckoutPaymentCompensation,
   type CheckoutSession,
   type CheckoutWalletPassTicket,
+  type CheckoutResaleListing,
   type PublicEvent,
 } from '@/lib/api';
 import { brandThemeStyle, type ResolvedBrand } from '@/lib/brand';
@@ -41,6 +45,29 @@ import { deriveState, type ConfirmationState } from './confirmation-state';
 // Re-export so consumers can import the single source of truth from the
 // component module without duplicating the derivation logic.
 export { deriveState, type ConfirmationState } from './confirmation-state';
+
+type ResaleFormState = {
+  expanded: boolean;
+  price: string;
+  idempotencyKey: string;
+  loading: boolean;
+  error?: string;
+};
+
+function createResaleIdempotencyKey(sessionId: string, ticketId: string): string {
+  const random =
+    typeof crypto !== 'undefined' && 'randomUUID' in crypto
+      ? crypto.randomUUID()
+      : `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+  return `buyer_resale_${sessionId}_${ticketId}_${random}`;
+}
+
+function centsFromCurrencyInput(value: string): number | null {
+  const normalized = value.trim().replace(/^\$/, '');
+  if (!/^\d+(?:\.\d{1,2})?$/.test(normalized)) return null;
+  const [whole, fraction = ''] = normalized.split('.');
+  return Number(whole) * 100 + Number(fraction.padEnd(2, '0'));
+}
 
 function emitOrderCompleted(detail: Record<string, unknown>) {
   if (typeof window === 'undefined') return;
@@ -64,6 +91,7 @@ export default function ConfirmationClient() {
 
   const [session, setSession] = useState<CheckoutSession | null>(null);
   const [walletPasses, setWalletPasses] = useState<CheckoutWalletPassTicket[]>([]);
+  const [resaleForms, setResaleForms] = useState<Record<string, ResaleFormState>>({});
   const [event, setEvent] = useState<PublicEvent | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -210,6 +238,97 @@ export default function ConfirmationClient() {
       cancelled = true;
     };
   }, [confirmationState, sessionId]);
+
+  const setResaleForm = useCallback((ticketId: string, patch: Partial<ResaleFormState>) => {
+    setResaleForms((current) => {
+      const existing = current[ticketId] ?? {
+        expanded: false,
+        price: '',
+        idempotencyKey: '',
+        loading: false,
+      };
+      return {
+        ...current,
+        [ticketId]: { ...existing, ...patch },
+      };
+    });
+  }, []);
+
+  const toggleResaleForm = useCallback(
+    (ticket: CheckoutWalletPassTicket) => {
+      setResaleForms((current) => {
+        const existing = current[ticket.ticketId];
+        const expanded = !existing?.expanded;
+        return {
+          ...current,
+          [ticket.ticketId]: {
+            expanded,
+            price:
+              existing?.price ||
+              (ticket.faceValueCents > 0 ? (ticket.faceValueCents / 100).toFixed(2) : ''),
+            idempotencyKey:
+              existing?.idempotencyKey || createResaleIdempotencyKey(sessionId, ticket.ticketId),
+            loading: false,
+            error: undefined,
+          },
+        };
+      });
+    },
+    [sessionId],
+  );
+
+  const submitResaleListing = useCallback(
+    async (ticket: CheckoutWalletPassTicket) => {
+      const form = resaleForms[ticket.ticketId];
+      const priceCents = centsFromCurrencyInput(form?.price ?? '');
+      if (priceCents === null) {
+        setResaleForm(ticket.ticketId, { error: 'Enter a valid resale price.' });
+        return;
+      }
+      if (priceCents > ticket.resaleMaxPriceCents) {
+        setResaleForm(ticket.ticketId, {
+          error: `Maximum resale price is ${formatCurrency(ticket.resaleMaxPriceCents, ticket.currency)}.`,
+        });
+        return;
+      }
+      const token = getSessionToken(sessionId);
+      if (!token) {
+        setResaleForm(ticket.ticketId, {
+          error: 'Open this confirmation from the original checkout browser to list the ticket.',
+        });
+        return;
+      }
+
+      const idempotencyKey =
+        form?.idempotencyKey || createResaleIdempotencyKey(sessionId, ticket.ticketId);
+      setResaleForm(ticket.ticketId, { loading: true, error: undefined, idempotencyKey });
+      try {
+        const listing = await checkoutApi.createResaleListing(sessionId, ticket.ticketId, token, {
+          priceCents,
+          idempotencyKey,
+        });
+        setWalletPasses((current) =>
+          current.map((item) =>
+            item.ticketId === ticket.ticketId
+              ? { ...item, activeResaleListing: listing as CheckoutResaleListing }
+              : item,
+          ),
+        );
+        setResaleForm(ticket.ticketId, {
+          expanded: false,
+          loading: false,
+          error: undefined,
+          idempotencyKey: createResaleIdempotencyKey(sessionId, ticket.ticketId),
+        });
+      } catch (err) {
+        setResaleForm(ticket.ticketId, {
+          loading: false,
+          error: userFacingMessage(err),
+        });
+      }
+    },
+    [resaleForms, sessionId, setResaleForm],
+  );
 
   const total = session?.quote.totalCents ?? 0;
   const currency = session?.currency ?? 'USD';
@@ -366,31 +485,102 @@ export default function ConfirmationClient() {
                   {walletPasses.map((ticket) => (
                     <div
                       key={ticket.ticketId}
-                      className="flex flex-col gap-3 rounded-md border p-3 sm:flex-row sm:items-center sm:justify-between"
+                      className="space-y-3 rounded-md border p-3"
                     >
-                      <div className="min-w-0">
-                        <p className="truncate font-mono text-sm font-medium">
-                          {ticket.ticketCode}
-                        </p>
+                      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                        <div className="min-w-0 space-y-1">
+                          <p className="truncate font-mono text-sm font-medium">
+                            {ticket.ticketCode}
+                          </p>
+                          <p className="text-xs text-muted-foreground">
+                            Face value {formatCurrency(ticket.faceValueCents, ticket.currency)}
+                          </p>
+                        </div>
+                        <div className="flex flex-col gap-2 sm:flex-row">
+                          {ticket.activeResaleListing ? (
+                            <Badge variant="secondary" className="justify-center gap-1.5">
+                              <BadgeDollarSignIcon className="size-3.5" />
+                              Listed for {formatCurrency(
+                                ticket.activeResaleListing.priceCents,
+                                ticket.activeResaleListing.currency,
+                              )}
+                            </Badge>
+                          ) : null}
+                          {ticket.resaleEnabled && !ticket.activeResaleListing ? (
+                            <Button
+                              type="button"
+                              size="sm"
+                              variant="outline"
+                              className="gap-1.5"
+                              onClick={() => toggleResaleForm(ticket)}
+                            >
+                              <BadgeDollarSignIcon className="size-4" />
+                              List for resale
+                            </Button>
+                          ) : null}
+                          {ticket.appleUrl ? (
+                            <Button asChild size="sm" className="gap-1.5">
+                              <a href={ticket.appleUrl}>
+                                <DownloadIcon className="size-4" />
+                                Apple Wallet
+                              </a>
+                            </Button>
+                          ) : null}
+                          {ticket.googleUrl ? (
+                            <Button asChild size="sm" variant="outline" className="gap-1.5">
+                              <a href={ticket.googleUrl} target="_blank" rel="noreferrer">
+                                <ExternalLinkIcon className="size-4" />
+                                Google Wallet
+                              </a>
+                            </Button>
+                          ) : null}
+                        </div>
                       </div>
-                      <div className="flex flex-col gap-2 sm:flex-row">
-                        {ticket.appleUrl ? (
-                          <Button asChild size="sm" className="gap-1.5">
-                            <a href={ticket.appleUrl}>
-                              <DownloadIcon className="size-4" />
-                              Apple Wallet
-                            </a>
+                      {resaleForms[ticket.ticketId]?.expanded && !ticket.activeResaleListing ? (
+                        <div className="grid gap-3 border-t pt-3 sm:grid-cols-[1fr_auto] sm:items-end">
+                          <div className="space-y-1.5">
+                            <Label htmlFor={`resale-price-${ticket.ticketId}`}>
+                              Resale price
+                            </Label>
+                            <Input
+                              id={`resale-price-${ticket.ticketId}`}
+                              inputMode="decimal"
+                              value={resaleForms[ticket.ticketId]?.price ?? ''}
+                              onChange={(inputEvent) =>
+                                setResaleForm(ticket.ticketId, {
+                                  price: inputEvent.target.value,
+                                  error: undefined,
+                                })
+                              }
+                              aria-describedby={`resale-help-${ticket.ticketId}`}
+                            />
+                            <p
+                              id={`resale-help-${ticket.ticketId}`}
+                              className="text-xs text-muted-foreground"
+                            >
+                              Max {formatCurrency(ticket.resaleMaxPriceCents, ticket.currency)}
+                            </p>
+                          </div>
+                          <Button
+                            type="button"
+                            className="gap-1.5"
+                            onClick={() => void submitResaleListing(ticket)}
+                            disabled={resaleForms[ticket.ticketId]?.loading}
+                          >
+                            {resaleForms[ticket.ticketId]?.loading ? (
+                              <LoaderCircleIcon className="size-4 animate-spin" />
+                            ) : (
+                              <BadgeDollarSignIcon className="size-4" />
+                            )}
+                            Create listing
                           </Button>
-                        ) : null}
-                        {ticket.googleUrl ? (
-                          <Button asChild size="sm" variant="outline" className="gap-1.5">
-                            <a href={ticket.googleUrl} target="_blank" rel="noreferrer">
-                              <ExternalLinkIcon className="size-4" />
-                              Google Wallet
-                            </a>
-                          </Button>
-                        ) : null}
-                      </div>
+                          {resaleForms[ticket.ticketId]?.error ? (
+                            <p className="text-sm text-destructive sm:col-span-2">
+                              {resaleForms[ticket.ticketId]?.error}
+                            </p>
+                          ) : null}
+                        </div>
+                      ) : null}
                     </div>
                   ))}
                 </CardContent>

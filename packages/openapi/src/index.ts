@@ -1162,10 +1162,22 @@ export const openApiSpec = {
               properties: {
                 ticketId: { type: 'string' },
                 ticketCode: { type: 'string' },
+                faceValueCents: { type: 'integer', minimum: 0 },
+                currency: { type: 'string', minLength: 3, maxLength: 3 },
+                resaleEnabled: { type: 'boolean' },
+                resaleMaxPriceCents: { type: 'integer', minimum: 0 },
+                activeResaleListing: { $ref: '#/components/schemas/TicketListing' },
                 appleUrl: { type: 'string', format: 'uri' },
                 googleUrl: { type: 'string', format: 'uri' },
               },
-              required: ['ticketId', 'ticketCode'],
+              required: [
+                'ticketId',
+                'ticketCode',
+                'faceValueCents',
+                'currency',
+                'resaleEnabled',
+                'resaleMaxPriceCents',
+              ],
             },
           },
         },
@@ -4198,6 +4210,50 @@ export const openApiSpec = {
             description: 'Active Apple Wallet and Google Wallet links grouped by ticket',
             content: {
               'application/json': { schema: { $ref: '#/components/schemas/CheckoutWalletPasses' } },
+            },
+          },
+        },
+      },
+    },
+    '/checkout/sessions/{sessionId}/tickets/{ticketId}/resale-listing': {
+      post: {
+        summary: 'Create a buyer-owned resale listing for a completed checkout ticket',
+        parameters: [
+          {
+            name: 'sessionId',
+            in: 'path',
+            required: true,
+            schema: { type: 'string' },
+          },
+          {
+            name: 'ticketId',
+            in: 'path',
+            required: true,
+            schema: { type: 'string' },
+          },
+          { $ref: '#/components/parameters/CheckoutSessionToken' },
+          { $ref: '#/components/parameters/RequiredIdempotencyKey' },
+        ],
+        requestBody: {
+          required: true,
+          content: {
+            'application/json': {
+              schema: {
+                type: 'object',
+                properties: {
+                  priceCents: { type: 'integer', minimum: 0 },
+                  expiresAt: { type: 'string', format: 'date-time' },
+                },
+                required: ['priceCents'],
+              },
+            },
+          },
+        },
+        responses: {
+          '201': {
+            description: 'Buyer resale listing created',
+            content: {
+              'application/json': { schema: { $ref: '#/components/schemas/TicketListing' } },
             },
           },
         },

@@ -359,6 +359,7 @@ test.describe('paid checkout capture workflow', () => {
   });
 
   test('renders Apple and Google Wallet actions backed by signed pass artifacts', async ({
+    browserName,
     page,
     request,
   }, testInfo) => {
@@ -400,6 +401,16 @@ test.describe('paid checkout capture workflow', () => {
     const { event, ticketType, inventoryPool } = await seedPaidCheckoutEvent(request, suffix, {
       brandId: configuredBrand.id,
     });
+    await expectJsonResponse(
+      await request.put(`${apiBaseUrl}/v1/events/${event.id}/resale-policy`, {
+        data: {
+          enabled: true,
+          maxMultiplier: 1.2,
+          maxAbsoluteCents: 3000,
+        },
+      }),
+      200,
+    );
 
     await page.goto(`${checkoutBaseUrl}/checkout?eventId=${event.id}`);
     await expect(page.getByRole('heading', { name: event.title })).toBeVisible();
@@ -436,7 +447,7 @@ test.describe('paid checkout capture workflow', () => {
 
     const walletPasses = await readWalletPassState(sessionId!);
     expect(walletPasses).toHaveLength(2);
-    expect(walletPasses.map((pass) => pass.provider).sort()).toEqual(['apple', 'google']);
+    expect(walletPasses.map((pass) => pass.provider).toSorted()).toEqual(['apple', 'google']);
     const applePass = walletPasses.find((pass) => pass.provider === 'apple');
     const googlePass = walletPasses.find((pass) => pass.provider === 'google');
     expect(applePass).toMatchObject({
@@ -490,6 +501,49 @@ test.describe('paid checkout capture workflow', () => {
     expect(googlePayload.eventTicketObjects[0]).toMatchObject({
       hexBackgroundColor: configuredBrand.theme.primaryColor,
     });
+
+    await page.getByRole('button', { name: 'List for resale' }).click();
+    await page.getByLabel('Resale price').fill('25.00');
+    const resaleResponse = page.waitForResponse(
+      (response) =>
+        response
+          .url()
+          .includes(`/v1/checkout/sessions/${sessionId}/tickets/${state.ticketIds[0]}/resale-listing`) &&
+        response.request().method() === 'POST',
+    );
+    await page.getByRole('button', { name: 'Create listing' }).click();
+    expect((await resaleResponse).status()).toBe(201);
+    await expect(page.getByText('Listed for $25.00')).toBeVisible();
+
+    const listings = (await expectJsonResponse(
+      await request.get(`${apiBaseUrl}/v1/events/${event.id}/resale-listings`),
+      200,
+    )) as { items: Array<{ ticketId: string; status: string; priceCents: number }> };
+    expect(listings.items).toContainEqual(
+      expect.objectContaining({
+        ticketId: state.ticketIds[0],
+        status: 'listed',
+        priceCents: 2500,
+      }),
+    );
+
+    await attachScreenshot(page, testInfo, 'hosted-wallet-pass-resale-listed');
+    await expectNoAxeViolations(page, testInfo);
+    if (browserName === 'chromium') {
+      const client = await page.context().newCDPSession(page);
+      const { result } = await client.send('Runtime.evaluate', {
+        expression: `(() => {
+          const buttons = [...document.querySelectorAll('button')].map((node) => node.textContent?.trim());
+          const listed = document.body.textContent?.includes('Listed for $25.00') ?? false;
+          return { listed, buttons };
+        })()`,
+        returnByValue: true,
+      });
+      expect(result.value).toMatchObject({
+        listed: true,
+      });
+      await client.detach();
+    }
   });
 
   test('applies a hosted promo code and persists discount redemption in local capture mode', async ({

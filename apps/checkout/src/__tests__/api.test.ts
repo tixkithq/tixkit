@@ -148,6 +148,32 @@ describe('checkoutApi.getWalletPasses', () => {
   });
 });
 
+describe('checkoutApi.createResaleListing', () => {
+  it('creates a session-owned resale listing with token and idempotency headers', async () => {
+    const fetchMock = vi.fn(
+      async () =>
+        new Response(JSON.stringify({ id: 'lst_1', status: 'listed' }), {
+          status: 201,
+          headers: { 'Content-Type': 'application/json' },
+        }),
+    );
+    vi.stubGlobal('fetch', fetchMock);
+
+    await checkoutApi.createResaleListing('cs_1', 'tkt_1', 'tok_1', {
+      priceCents: 2500,
+      idempotencyKey: 'resale_1',
+    });
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const [url, init] = fetchMock.mock.calls[0] as unknown as [string, RequestInit];
+    expect(url).toContain('/checkout/sessions/cs_1/tickets/tkt_1/resale-listing');
+    expect(init.method).toBe('POST');
+    expect((init.headers as Record<string, string>)['X-Checkout-Session-Token']).toBe('tok_1');
+    expect((init.headers as Record<string, string>)['Idempotency-Key']).toBe('resale_1');
+    expect(JSON.parse(String(init.body))).toEqual({ priceCents: 2500 });
+  });
+});
+
 describe('checkoutApi.createSession', () => {
   it('sends trackingId separately from affiliateCode', async () => {
     const fetchMock = vi.fn(

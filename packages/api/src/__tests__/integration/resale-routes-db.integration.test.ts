@@ -5,6 +5,7 @@ import type { Principal } from '@tixkit/domain';
 import { ulid } from 'ulid';
 import type { AppContext } from '../../app.js';
 import { registerErrorHandler } from '../../app.js';
+import { checkoutRoutes } from '../../routes/modules/checkout.js';
 import { ticketingRoutes } from '../../routes/modules/ticketing.js';
 import { QrService } from '../../services/qr.js';
 import {
@@ -63,6 +64,7 @@ async function setupRouteApp(database: Database): Promise<FastifyInstance> {
     request.principal = makePrincipal();
   });
   await routeApp.register(ticketingRoutes);
+  await routeApp.register(checkoutRoutes);
   return routeApp;
 }
 
@@ -468,6 +470,81 @@ describeWithIntegrationDatabase(
         .executeTakeFirstOrThrow();
       expect(delisted.status).toBe('delisted');
       expect(delisted.active_listing_key).toBe(listingId);
+    });
+
+    it('lets a checkout-session owner create and replay a buyer resale listing', async () => {
+      const payload = { priceCents: 5500 };
+      const missingToken = await app.inject({
+        method: 'POST',
+        url: `/checkout/sessions/${CHECKOUT_SESSION_ID}/tickets/${TICKET_ID}/resale-listing`,
+        headers: { 'Idempotency-Key': `buyer_resale_missing_${RUN_ID}` },
+        payload,
+      });
+      expect(missingToken.statusCode).toBe(400);
+
+      const first = await app.inject({
+        method: 'POST',
+        url: `/checkout/sessions/${CHECKOUT_SESSION_ID}/tickets/${TICKET_ID}/resale-listing`,
+        headers: {
+          'X-Checkout-Session-Token': `client_${RUN_ID}`,
+          'Idempotency-Key': `buyer_resale_${RUN_ID}`,
+        },
+        payload,
+      });
+      const replay = await app.inject({
+        method: 'POST',
+        url: `/checkout/sessions/${CHECKOUT_SESSION_ID}/tickets/${TICKET_ID}/resale-listing`,
+        headers: {
+          'X-Checkout-Session-Token': `client_${RUN_ID}`,
+          'Idempotency-Key': `buyer_resale_${RUN_ID}`,
+        },
+        payload,
+      });
+
+      expect(first.statusCode).toBe(201);
+      expect(replay.statusCode).toBe(201);
+      expect(replay.json()).toEqual(first.json());
+      expect(first.json()).toMatchObject({
+        ticketId: TICKET_ID,
+        sellerId: ORDER_ID,
+        status: 'listed',
+        priceCents: 5500,
+        faceValueCents: 5000,
+      });
+
+      const rows = await db
+        .selectFrom('ticket_listings')
+        .selectAll()
+        .where('tenant_id', '=', TENANT_ID)
+        .execute();
+      expect(rows).toHaveLength(1);
+      expect(rows[0]).toMatchObject({
+        ticket_id: TICKET_ID,
+        seller_id: ORDER_ID,
+        active_listing_key: TICKET_ID,
+      });
+
+      const walletTickets = await app.inject({
+        method: 'GET',
+        url: `/checkout/sessions/${CHECKOUT_SESSION_ID}/wallet-passes`,
+        headers: { 'X-Checkout-Session-Token': `client_${RUN_ID}` },
+      });
+      expect(walletTickets.statusCode).toBe(200);
+      expect(walletTickets.json().tickets).toEqual([
+        expect.objectContaining({
+          ticketId: TICKET_ID,
+          ticketCode: `RESALE-${RUN_ID}`,
+          faceValueCents: 5000,
+          currency: 'USD',
+          resaleEnabled: true,
+          resaleMaxPriceCents: 6000,
+          activeResaleListing: expect.objectContaining({
+            id: first.json().id,
+            status: 'listed',
+            priceCents: 5500,
+          }),
+        }),
+      ]);
     });
 
     it('completes a listed resale once and replays buyer ticket issuance', async () => {

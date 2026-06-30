@@ -164,12 +164,34 @@ export type CheckoutPaymentCompensation = {
 export type CheckoutWalletPassTicket = {
   ticketId: string;
   ticketCode: string;
+  faceValueCents: number;
+  currency: string;
+  resaleEnabled: boolean;
+  resaleMaxPriceCents: number;
+  activeResaleListing?: CheckoutResaleListing;
   appleUrl?: string;
   googleUrl?: string;
 };
 
 export type CheckoutWalletPasses = {
   tickets: CheckoutWalletPassTicket[];
+};
+
+export type CheckoutResaleListing = {
+  id: string;
+  tenantId: string;
+  eventId: string;
+  ticketId: string;
+  sellerId: string;
+  status: 'listed' | 'delisted' | 'sold' | 'expired' | string;
+  priceCents: number;
+  currency: string;
+  faceValueCents: number;
+  soldToId?: string;
+  expiresAt?: string;
+  soldAt?: string;
+  createdAt: string;
+  updatedAt: string;
 };
 
 export type UploadArtifact = {
@@ -607,6 +629,28 @@ export const checkoutApi = {
     return apiRequest<CheckoutWalletPasses>(
       `/checkout/sessions/${encodeURIComponent(sessionId)}/wallet-passes`,
       sessionToken ? { sessionToken } : undefined,
+    );
+  },
+
+  async createResaleListing(
+    sessionId: string,
+    ticketId: string,
+    sessionToken: string,
+    input: { priceCents: number; expiresAt?: string; idempotencyKey: string },
+  ): Promise<CheckoutResaleListing> {
+    return apiRequest<CheckoutResaleListing>(
+      `/checkout/sessions/${encodeURIComponent(sessionId)}/tickets/${encodeURIComponent(
+        ticketId,
+      )}/resale-listing`,
+      {
+        method: 'POST',
+        sessionToken,
+        idempotencyKey: input.idempotencyKey,
+        body: JSON.stringify({
+          priceCents: input.priceCents,
+          expiresAt: input.expiresAt,
+        }),
+      },
     );
   },
 

@@ -4,6 +4,8 @@ import { ulid } from 'ulid';
 import {
   EventRepository,
   TicketTypeRepository,
+  TicketRepository,
+  TicketListingRepository,
   CheckoutSessionRepository,
   OrderRepository,
   DiscountCodeRepository,
@@ -33,7 +35,9 @@ import {
   NotFoundError,
   ValidationError,
   CheckoutExpiredError,
+  ResaleError,
   validateTicketPurchase,
+  validateResalePrice,
   validateAnswers,
   normalizeQuestionAnswers,
   validateBoxOfficeOrder,
@@ -45,12 +49,15 @@ import {
   parseJsonValue,
   pickAllowedFields,
   serializeOrder,
+  serializeResalePolicy,
+  serializeTicketListing,
 } from '../../http/contracts.js';
 import {
   createCheckoutSessionSchema,
   createBoxOfficeOrderSchema,
   updateCheckoutSessionSchema,
   confirmCheckoutSchema,
+  createResaleListingSchema,
   parseBody,
 } from '../../http/schemas.js';
 import { hashWaitlistClaimToken } from './waitlist.js';
@@ -91,6 +98,28 @@ function tokenHashMatches(expected: string | null, candidate: string): boolean {
   return (
     expectedBuffer.length === candidateBuffer.length &&
     timingSafeEqual(expectedBuffer, candidateBuffer)
+  );
+}
+
+function toResaleValidationError(error: unknown): never {
+  if (error instanceof ResaleError) {
+    throw new ValidationError(error.message);
+  }
+  throw error;
+}
+
+function isUniqueViolation(error: unknown): boolean {
+  const record = error as {
+    code?: unknown;
+    errno?: unknown;
+    message?: unknown;
+  };
+  return (
+    record.code === '23505' ||
+    record.code === 'ER_DUP_ENTRY' ||
+    record.errno === 1062 ||
+    record.errno === '1062' ||
+    /duplicate|unique/i.test(String(record.message ?? ''))
   );
 }
 
@@ -1245,11 +1274,18 @@ export const checkoutRoutes: FastifyPluginAsync = async (app) => {
     const rows = await db
       .selectFrom('wallet_passes')
       .innerJoin('tickets', 'tickets.id', 'wallet_passes.ticket_id')
+      .innerJoin('ticket_types', 'ticket_types.id', 'tickets.ticket_type_id')
+      .innerJoin('events', 'events.id', 'tickets.event_id')
       .select([
         'wallet_passes.ticket_id as ticket_id',
         'wallet_passes.provider as provider',
         'wallet_passes.pass_url as pass_url',
         'tickets.code as ticket_code',
+        'ticket_types.price_cents as face_value_cents',
+        'ticket_types.currency as currency',
+        'events.resale_enabled as resale_enabled',
+        'events.resale_max_multiplier as resale_max_multiplier',
+        'events.resale_max_absolute_cents as resale_max_absolute_cents',
       ])
       .where('wallet_passes.tenant_id', '=', session.tenant_id)
       .where('tickets.order_id', '=', session.order_id)
@@ -1262,21 +1298,138 @@ export const checkoutRoutes: FastifyPluginAsync = async (app) => {
       {
         ticketId: string;
         ticketCode: string;
+        faceValueCents: number;
+        currency: string;
+        resaleEnabled: boolean;
+        resaleMaxPriceCents: number;
+        activeResaleListing?: ReturnType<typeof serializeTicketListing>;
         appleUrl?: string;
         googleUrl?: string;
       }
     >();
     for (const row of rows) {
+      const resalePolicy = serializeResalePolicy(row);
+      const capByMultiplier = Math.round(
+        Number(row.face_value_cents) * resalePolicy.maxMultiplier,
+      );
+      const resaleMaxPriceCents =
+        resalePolicy.maxAbsoluteCents === undefined
+          ? capByMultiplier
+          : Math.min(capByMultiplier, resalePolicy.maxAbsoluteCents);
       const current = tickets.get(row.ticket_id) ?? {
         ticketId: row.ticket_id,
         ticketCode: row.ticket_code,
+        faceValueCents: Number(row.face_value_cents),
+        currency: String(row.currency),
+        resaleEnabled: resalePolicy.enabled,
+        resaleMaxPriceCents,
       };
       if (row.provider === 'apple') current.appleUrl = row.pass_url;
       if (row.provider === 'google') current.googleUrl = row.pass_url;
       tickets.set(row.ticket_id, current);
     }
 
+    const ticketIds = [...tickets.keys()];
+    if (ticketIds.length > 0) {
+      const listings = await db
+        .selectFrom('ticket_listings')
+        .selectAll()
+        .where('tenant_id', '=', session.tenant_id)
+        .where('ticket_id', 'in', ticketIds)
+        .where('status', '=', 'listed')
+        .execute();
+      for (const listing of listings) {
+        const ticket = tickets.get(listing.ticket_id);
+        if (ticket) ticket.activeResaleListing = serializeTicketListing(listing);
+      }
+    }
+
     return { tickets: [...tickets.values()] };
+  });
+
+  app.post('/checkout/sessions/:sessionId/tickets/:ticketId/resale-listing', async (request, reply) => {
+    const { sessionId, ticketId } = request.params as { sessionId: string; ticketId: string };
+    const clientToken = requireCheckoutSessionToken(request);
+    const idempotencyKey = requireIdempotencyKey(request);
+    const body = parseBody(createResaleListingSchema, request.body);
+
+    const sessionRepo = new CheckoutSessionRepository(db);
+    const session = await sessionRepo.findById(sessionId);
+    if (!session) throw new NotFoundError('CheckoutSession', sessionId);
+    assertCheckoutSessionToken(session, clientToken);
+    if (session.status !== 'completed' || !session.order_id) {
+      throw new ValidationError('Only completed checkout sessions can list tickets for resale');
+    }
+
+    const ticketRepo = new TicketRepository(db);
+    const ticket = await ticketRepo.findById(ticketId);
+    if (
+      !ticket ||
+      ticket.tenant_id !== session.tenant_id ||
+      ticket.order_id !== session.order_id ||
+      ticket.event_id !== session.event_id
+    ) {
+      throw new NotFoundError('Ticket', ticketId);
+    }
+    if (ticket.status !== 'valid') {
+      throw new ValidationError(`Ticket status is ${ticket.status}, cannot list for resale`);
+    }
+
+    const event = await new EventRepository(db).findById(ticket.event_id);
+    if (!event || event.tenant_id !== session.tenant_id) {
+      throw new NotFoundError('Event', ticket.event_id);
+    }
+    const ticketType = await new TicketTypeRepository(db).findById(ticket.ticket_type_id);
+    if (!ticketType || ticketType.event_id !== ticket.event_id) {
+      throw new NotFoundError('TicketType', ticket.ticket_type_id);
+    }
+
+    const requestHash = hashRequest({
+      sessionId,
+      ticketId,
+      priceCents: body.priceCents,
+      expiresAt: body.expiresAt ?? null,
+    });
+
+    const result = await withIdempotency(
+      db,
+      { key: idempotencyKey, tenantId: session.tenant_id, requestHash },
+      async () => {
+        const listingRepo = new TicketListingRepository(db);
+        const active = await listingRepo.findActiveByTicket(session.tenant_id, ticketId);
+        if (active) {
+          throw new ValidationError(`Ticket ${ticketId} already has an active resale listing`);
+        }
+
+        const faceValueCents = Number(ticketType.price_cents);
+        try {
+          validateResalePrice(body.priceCents, faceValueCents, serializeResalePolicy(event));
+        } catch (error) {
+          toResaleValidationError(error);
+        }
+
+        try {
+          const listing = await listingRepo.create({
+            tenantId: session.tenant_id,
+            eventId: ticket.event_id,
+            ticketId,
+            sellerId: session.order_id as string,
+            priceCents: body.priceCents,
+            currency: String(ticketType.currency),
+            faceValueCents,
+            expiresAt: body.expiresAt ? new Date(body.expiresAt) : undefined,
+          });
+          return { status: 201, body: serializeTicketListing(listing) };
+        } catch (error) {
+          if (isUniqueViolation(error)) {
+            throw new ValidationError(`Ticket ${ticketId} already has an active resale listing`);
+          }
+          throw error;
+        }
+      },
+    );
+
+    return reply.status(result.status).send(result.body);
   });
 
   app.get('/wallet-passes/:passId/apple.pkpass', async (request, reply) => {
