@@ -409,9 +409,7 @@ function CanvasFrame({
       data-testid="editor-canvas"
     >
       {header && (
-        <div className="mb-3 border-b bg-background/95 px-4 py-3 dark:bg-zinc-900/95">
-          {header}
-        </div>
+        <div className="mb-3 border-b bg-background/95 px-4 py-3 dark:bg-zinc-900/95">{header}</div>
       )}
       <div
         className={
@@ -457,14 +455,16 @@ function CanvasFrame({
             {blocks.map((block) => {
               if (isDocumentCanvas) {
                 if (!block.content || block.presentation !== 'document') {
-                  throw new Error(`Document canvas block must render document content: ${block.id}`);
+                  throw new Error(
+                    `Document canvas block must render document content: ${block.id}`,
+                  );
                 }
                 return (
                   <section
+                    aria-label={block.label}
                     aria-current={block.selected ? 'true' : undefined}
                     className="contents"
                     key={block.id}
-                    onClick={block.onSelect}
                     onFocusCapture={block.onSelect}
                   >
                     {block.content}

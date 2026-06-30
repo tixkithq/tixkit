@@ -356,8 +356,9 @@ try {
     'swift test',
     ':sdk:publishToMavenLocal',
     'sdk-parity-matrix.mjs',
-    'actions/upload-artifact@v7',
+    'actions/upload-artifact@',
     'sdk-release-provenance',
+    'if-no-files-found: error',
   ]) {
     assert(workflow.includes(pattern), `SDK release dry-run workflow is missing ${pattern}`);
   }

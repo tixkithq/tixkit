@@ -47,13 +47,20 @@ describe('ContentEditorShell', () => {
   it('renders host inspector modes for content page body theme code variables history and issues', () => {
     const fixture = createContentEditorFixture({ channel: 'email' });
     const onPanelChange = vi.fn();
-    const panels = ['Content', 'Page', 'Body', 'Theme', 'Code', 'Variables', 'History', 'Issues'].map(
-      (label) => ({
-        id: label === 'Content' ? 'block' : label.toLowerCase(),
-        label,
-        content: <section>{label} panel</section>,
-      }),
-    );
+    const panels = [
+      'Content',
+      'Page',
+      'Body',
+      'Theme',
+      'Code',
+      'Variables',
+      'History',
+      'Issues',
+    ].map((label) => ({
+      id: label === 'Content' ? 'block' : label.toLowerCase(),
+      label,
+      content: <section>{label} panel</section>,
+    }));
 
     render(
       <ContentEditorShell
@@ -194,13 +201,15 @@ describe('ContentEditorShell', () => {
       render(
         <ContentEditorShell
           {...fixture}
-          canvasBlocks={[
-            {
-              id: 'legacy-summary-only',
-              label: 'Legacy summary-only content',
-              summary: 'This must not render through a fallback shell.',
-            },
-          ] as unknown as typeof fixture.canvasBlocks}
+          canvasBlocks={
+            [
+              {
+                id: 'legacy-summary-only',
+                label: 'Legacy summary-only content',
+                summary: 'This must not render through a fallback shell.',
+              },
+            ] as unknown as typeof fixture.canvasBlocks
+          }
           channelLabel={fixtureChannelLabel(fixture.document.channel)}
         />,
       ),
@@ -221,7 +230,10 @@ describe('ContentEditorShell', () => {
       'aria-label',
       'All Access Chicago editable document',
     );
-    expect(screen.queryByRole('button', { name: /Select content region/i })).not.toBeInTheDocument();
+    expect(screen.getByRole('region', { name: 'Hero' })).toBeInTheDocument();
+    expect(
+      screen.queryByRole('button', { name: /Select content region/i }),
+    ).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Selected' })).not.toBeInTheDocument();
   });
 });
