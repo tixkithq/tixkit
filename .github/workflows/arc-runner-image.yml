@@ -16,7 +16,7 @@ permissions:
 jobs:
   publish:
     name: Publish ARC runner image
-    runs-on: ubuntu-24.04
+    runs-on: tixkit-epyc-trusted
     env:
       IMAGE: ghcr.io/${{ github.repository_owner }}/tixkit-arc-runner:2.335.1-flutter
     steps:
