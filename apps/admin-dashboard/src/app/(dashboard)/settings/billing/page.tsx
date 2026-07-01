@@ -7,10 +7,19 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Badge } from '@/components/ui/badge';
 import { EmptyState } from '@/components/empty-state';
 import { GatedControl } from '@/components/gated-control';
+import { PermissionGuard } from '@/components/permission-guard';
 import { adminApi, type AdminBillingOverview, type AdminOrganization } from '@/lib/api';
 import { useBootstrap } from '@/context/bootstrap-provider';
 
 export default function BillingPage() {
+  return (
+    <PermissionGuard required="billing.write">
+      <BillingPageContent />
+    </PermissionGuard>
+  );
+}
+
+function BillingPageContent() {
   const {
     organizations,
     organizationId,
