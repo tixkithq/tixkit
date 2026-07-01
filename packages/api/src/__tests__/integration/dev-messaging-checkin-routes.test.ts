@@ -55,8 +55,24 @@ function createMockDb(tables: Record<string, unknown> = {}): unknown {
   };
   function createQuery(table: string) {
     const filters: Array<[string, string, unknown]> = [];
+    let countAlias: string | null = null;
     const query = {
-      select: () => query,
+      select: (selection?: unknown) => {
+        if (typeof selection === 'function') {
+          const aggregateBuilder = {
+            fn: {
+              countAll: () => ({
+                as: (alias: string) => {
+                  countAlias = alias;
+                  return alias;
+                },
+              }),
+            },
+          };
+          selection(aggregateBuilder);
+        }
+        return query;
+      },
       selectAll: () => query,
       innerJoin: () => query,
       where: (...args: unknown[]) => {
@@ -83,6 +99,7 @@ function createMockDb(tables: Record<string, unknown> = {}): unknown {
         );
       },
       async executeTakeFirst() {
+        if (countAlias) return { [countAlias]: query.rows().length };
         return query.rows()[0];
       },
       async executeTakeFirstOrThrow() {
@@ -964,7 +981,53 @@ describe('brand domain creation', () => {
           updated_at: new Date(),
         },
       ],
-      tickets: [{ id: 'tkt_1', tenant_id: 'tnt_1' }],
+      events: [
+        {
+          id: 'evt_org_1',
+          tenant_id: 'tnt_1',
+          organization_id: 'org_1',
+        },
+        {
+          id: 'evt_org_other',
+          tenant_id: 'tnt_1',
+          organization_id: 'org_other',
+        },
+        {
+          id: 'evt_other_tenant',
+          tenant_id: 'tnt_2',
+          organization_id: 'org_external',
+        },
+      ],
+      tickets: [
+        {
+          id: 'tkt_1',
+          tenant_id: 'tnt_1',
+          event_id: 'evt_org_1',
+          'events.tenant_id': 'tnt_1',
+          'events.organization_id': 'org_1',
+        },
+        {
+          id: 'tkt_2',
+          tenant_id: 'tnt_1',
+          event_id: 'evt_org_1',
+          'events.tenant_id': 'tnt_1',
+          'events.organization_id': 'org_1',
+        },
+        {
+          id: 'tkt_other_org',
+          tenant_id: 'tnt_1',
+          event_id: 'evt_org_other',
+          'events.tenant_id': 'tnt_1',
+          'events.organization_id': 'org_other',
+        },
+        {
+          id: 'tkt_other_tenant',
+          tenant_id: 'tnt_2',
+          event_id: 'evt_other_tenant',
+          'events.tenant_id': 'tnt_2',
+          'events.organization_id': 'org_external',
+        },
+      ],
     };
     const app = await setupApp(tenantRoutes, makePrincipal(), tables);
     const res = await app.inject({ method: 'GET', url: '/organizations/org_1/billing' });
@@ -973,6 +1036,7 @@ describe('brand domain creation', () => {
       organizationId: 'org_1',
       plan: 'pro',
       status: 'active',
+      ticketsThisMonth: 2,
     });
     await app.close();
   });

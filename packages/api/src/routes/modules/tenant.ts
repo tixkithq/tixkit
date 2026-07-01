@@ -695,8 +695,11 @@ export const tenantRoutes: FastifyPluginAsync = async (app) => {
       .executeTakeFirst();
     const ticketStats = await db
       .selectFrom('tickets')
+      .innerJoin('events', 'events.id', 'tickets.event_id')
       .select((eb) => eb.fn.countAll<number>().as('count'))
-      .where('tenant_id', '=', principal.tenantId)
+      .where('tickets.tenant_id', '=', principal.tenantId)
+      .where('events.tenant_id', '=', principal.tenantId)
+      .where('events.organization_id', '=', organizationId)
       .executeTakeFirst();
 
     return {
