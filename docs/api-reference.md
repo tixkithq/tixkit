@@ -325,14 +325,14 @@ All routes below require authentication. Most mutations are tenant-scoped and ad
 | ------- | --------------------------------------------------------------------------------------------- | ---------------- | ---------------------------------------------------------------- |
 | `GET`   | `/v1/me`                                                                                      | any              | Current principal and permissions                                |
 | `POST`  | `/v1/organizations`                                                                           | `settings.write` | Create organization                                              |
-| `GET`   | `/v1/organizations`                                                                           | any              | List organizations in tenant                                     |
+| `GET`   | `/v1/organizations`                                                                           | `settings.write` | List organizations in tenant                                     |
 | `PATCH` | `/v1/organizations/:organizationId`                                                           | `settings.write` | Update organization                                              |
 | `GET`   | `/v1/organizations/:organizationId/members`                                                   | `settings.write` | List members                                                     |
 | `POST`  | `/v1/organizations/:organizationId/members/invitations`                                       | `settings.write` | Invite member by email                                           |
 | `POST`  | `/v1/brands`                                                                                  | `settings.write` | Create brand                                                     |
 | `PATCH` | `/v1/brands/:brandId`                                                                         | `settings.write` | Update brand (name, theme, whiteLabel, legalUrls)                |
 | `POST`  | `/v1/brands/:brandId/domains`                                                                 | `settings.write` | Add custom domain                                                |
-| `GET`   | `/v1/brands`                                                                                  | any              | List brands in tenant                                            |
+| `GET`   | `/v1/brands`                                                                                  | `settings.write` | List brands in tenant                                            |
 | `GET`   | `/v1/organizations/:organizationId/payment-accounts`                                          | `billing.write`  | List payment accounts                                            |
 | `POST`  | `/v1/organizations/:organizationId/payment-accounts/stripe-connect`                           | `billing.write`  | Register/return Stripe Connect account                           |
 | `POST`  | `/v1/organizations/:organizationId/payment-accounts/:paymentAccountId/stripe-connect/refresh` | `billing.write`  | Refresh Stripe Connect account status and onboarding/update link |
