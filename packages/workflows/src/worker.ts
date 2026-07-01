@@ -2,6 +2,7 @@ import { Worker, NativeConnection, type ActivityInterceptorsFactory } from '@tem
 import { Connection, Client } from '@temporalio/client';
 import { createTelemetryResource, createTraceExporter } from '@tixkit/shared';
 import { createRequire } from 'node:module';
+import { pathToFileURL } from 'node:url';
 import { config } from './config.js';
 import * as allActivities from './activities/index.js';
 import { holdExpirationWorkflow } from './workflows/index.js';
@@ -12,7 +13,75 @@ import { createWorkflowExporterSink } from './otel-workflow-exporter.js';
 
 const require = createRequire(import.meta.url);
 
-async function runWorker(): Promise<void> {
+type SchedulerConnection = {
+  close(): Promise<void> | void;
+};
+
+type SchedulerClient = {
+  workflow: {
+    start(
+      workflow: typeof holdExpirationWorkflow,
+      options: {
+        taskQueue: string;
+        workflowId: string;
+        args: [{ version: typeof HOLD_EXPIRATION_WORKFLOW_VERSION }];
+      },
+    ): Promise<unknown>;
+  };
+};
+
+type EnsureHoldExpirationSchedulerOptions = {
+  connect?: () => Promise<SchedulerConnection>;
+  createClient?: (connection: SchedulerConnection) => SchedulerClient;
+  taskQueue?: string;
+  workflowId?: string;
+};
+
+type RunWorkerOptions = {
+  workflowsPath?: string;
+};
+
+function isWorkflowExecutionAlreadyStartedError(err: unknown): boolean {
+  return (
+    err instanceof Error &&
+    (err.name === 'WorkflowExecutionAlreadyStartedError' || err.message.includes('already started'))
+  );
+}
+
+export async function ensureHoldExpirationScheduler(
+  options: EnsureHoldExpirationSchedulerOptions = {},
+): Promise<'started' | 'already_started'> {
+  const clientConnection =
+    options.connect === undefined
+      ? await Connection.connect({ address: config.temporalAddress })
+      : await options.connect();
+
+  try {
+    const client =
+      options.createClient?.(clientConnection) ??
+      new Client({
+        connection: clientConnection as Connection,
+        namespace: config.temporalNamespace,
+      });
+    try {
+      await client.workflow.start(holdExpirationWorkflow, {
+        taskQueue: options.taskQueue ?? config.temporalTaskQueue,
+        workflowId: options.workflowId ?? holdExpirationWorkflowId(),
+        args: [{ version: HOLD_EXPIRATION_WORKFLOW_VERSION }],
+      });
+      return 'started';
+    } catch (err) {
+      if (isWorkflowExecutionAlreadyStartedError(err)) {
+        return 'already_started';
+      }
+      throw err;
+    }
+  } finally {
+    await clientConnection.close();
+  }
+}
+
+export async function runWorker(options: RunWorkerOptions = {}): Promise<void> {
   const observability = await startWorkerObservability();
   const connection = await NativeConnection.connect({
     address: config.temporalAddress,
@@ -44,7 +113,7 @@ async function runWorker(): Promise<void> {
     connection,
     namespace: config.temporalNamespace,
     taskQueue: config.temporalTaskQueue,
-    workflowsPath: require.resolve('./workflows/index.js'),
+    workflowsPath: options.workflowsPath ?? require.resolve('./workflows/index.js'),
     activities: allActivities,
     enableSDKTracing: !tracingDisabled,
     ...(workflowTraceExporter && telemetryResource
@@ -62,44 +131,16 @@ async function runWorker(): Promise<void> {
     },
   });
 
+  await ensureHoldExpirationScheduler();
+
   const workerRun = worker.run();
   console.log(`TIXKIT_WORKER_READY taskQueue=${config.temporalTaskQueue}`);
-
-  // Start the hold-expiration workflow on worker boot if not already running.
-  // This is a long-running workflow that periodically expires stale holds.
-  try {
-    const clientConnection = await Connection.connect({ address: config.temporalAddress });
-    const client = new Client({
-      connection: clientConnection,
-      namespace: config.temporalNamespace,
-    });
-    const workflowId = holdExpirationWorkflowId();
-    try {
-      await client.workflow.start(holdExpirationWorkflow, {
-        taskQueue: config.temporalTaskQueue,
-        workflowId,
-        args: [{ version: HOLD_EXPIRATION_WORKFLOW_VERSION }],
-      });
-    } catch (err) {
-      // Already running is fine.
-      if (
-        !(
-          err instanceof Error &&
-          (err.name === 'WorkflowExecutionAlreadyStartedError' ||
-            err.message.includes('already started'))
-        )
-      ) {
-        throw err;
-      }
-    }
-  } catch {
-    // Non-fatal: hold expiration also runs via lazy cleanup in checkout activities.
-  }
-
   await workerRun;
 }
 
-runWorker().catch((err) => {
-  console.error(buildWorkerStartupFailureMessage(err));
-  process.exit(1);
-});
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+  runWorker().catch((err) => {
+    console.error(buildWorkerStartupFailureMessage(err));
+    process.exit(1);
+  });
+}
