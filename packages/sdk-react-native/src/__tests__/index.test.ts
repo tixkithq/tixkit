@@ -228,15 +228,51 @@ describe('TixkitScannerClient', () => {
     ]);
   });
 
-  it('persists and restores offline scans through the configured storage adapter', async () => {
+  it('persists verified manifests and restores offline scanning through storage', async () => {
     vi.useFakeTimers();
-    const manifest = makeSignedManifest();
-    vi.spyOn(globalThis, 'fetch').mockResolvedValue(
-      new Response(JSON.stringify(manifest), {
-        status: 200,
-        headers: { 'Content-Type': 'application/json' },
-      }),
-    );
+    const manifest = makeSignedManifest({
+      tickets: [
+        {
+          ticketId: 'tkt_1',
+          ticketTypeId: 'tt_1',
+          attendeeName: 'Ada Lovelace',
+          qrHash: 'hash_1',
+          status: 'valid',
+        },
+        {
+          ticketId: 'tkt_2',
+          ticketTypeId: 'tt_1',
+          attendeeName: 'Grace Hopper',
+          qrHash: 'hash_2',
+          status: 'valid',
+        },
+      ],
+    });
+    const fetchMock = vi
+      .spyOn(globalThis, 'fetch')
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify(manifest), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        }),
+      )
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            accepted: 2,
+            duplicates: 0,
+            invalid: 0,
+            results: [
+              { qrHash: 'hash_1', outcome: 'accepted' },
+              { qrHash: 'hash_2', outcome: 'accepted' },
+            ],
+          }),
+          {
+            status: 200,
+            headers: { 'Content-Type': 'application/json' },
+          },
+        ),
+      );
     const { storage, store } = createMemoryStorage();
     const first = new TixkitScannerClient({
       deviceId: 'sd_public_1',
@@ -247,12 +283,23 @@ describe('TixkitScannerClient', () => {
     });
 
     await first.downloadManifest('evt_1', 'cil_1');
+    const storageKey = 'tixkit:scanner:sd_public_1:offline-state';
+    expect(JSON.parse(store.get(storageKey) ?? '{}')).toMatchObject({
+      version: 1,
+      deviceId: 'sd_public_1',
+      eventId: 'evt_1',
+      checkInListId: 'cil_1',
+      expiresAt: manifest.expiresAt,
+      manifest,
+      offlineScans: [],
+    });
+
     vi.setSystemTime(new Date('2026-06-01T12:00:00.000Z'));
     expect(first.scanOffline('hash_1').outcome).toBe('accepted');
-    expect(storage.setItem).toHaveBeenCalledWith(
-      'tixkit:scanner:sd_public_1:offline-scans',
-      JSON.stringify([['hash_1', '2026-06-01T12:00:00.000Z']]),
-    );
+    expect(JSON.parse(store.get(storageKey) ?? '{}')).toMatchObject({
+      manifest,
+      offlineScans: [['hash_1', '2026-06-01T12:00:00.000Z']],
+    });
 
     const second = new TixkitScannerClient({
       deviceId: 'sd_public_1',
@@ -262,7 +309,133 @@ describe('TixkitScannerClient', () => {
       storage,
     });
     await second.restoreOfflineScans();
-    expect(store.get('tixkit:scanner:sd_public_1:offline-scans')).toContain('hash_1');
+    vi.setSystemTime(new Date('2026-06-01T12:05:00.000Z'));
+    expect(second.scanOffline('hash_2')).toEqual({
+      outcome: 'accepted',
+      message: 'Check-in successful (offline)',
+      ticketId: 'tkt_2',
+    });
+
+    await second.syncScans();
+
+    const [, init] = fetchMock.mock.calls[1]!;
+    const body = JSON.parse(init?.body as string) as {
+      checkInListId: string;
+      scans: { qrHash: string; scannedAt: string; offline: boolean }[];
+    };
+    expect(body.checkInListId).toBe('cil_1');
+    expect(body.scans).toEqual([
+      {
+        qrHash: 'hash_1',
+        scannedAt: '2026-06-01T12:00:00.000Z',
+        offline: true,
+      },
+      {
+        qrHash: 'hash_2',
+        scannedAt: '2026-06-01T12:05:00.000Z',
+        offline: true,
+      },
+    ]);
+    expect(JSON.parse(store.get(storageKey) ?? '{}')).toMatchObject({
+      manifest,
+      offlineScans: [],
+    });
+  });
+
+  it('refuses tampered persisted scanner manifests', async () => {
+    const manifest = makeSignedManifest();
+    const storageKey = 'tixkit:scanner:sd_public_1:offline-state';
+    const { storage, store } = createMemoryStorage({
+      [storageKey]: JSON.stringify({
+        version: 1,
+        deviceId: 'sd_public_1',
+        eventId: 'evt_tampered',
+        checkInListId: 'cil_1',
+        expiresAt: manifest.expiresAt,
+        manifest: { ...manifest, eventId: 'evt_tampered' },
+        offlineScans: [['hash_1', '2026-06-01T12:00:00.000Z']],
+      }),
+    });
+    const client = new TixkitScannerClient({
+      deviceId: 'sd_public_1',
+      deviceSecret: 'scanner-secret',
+      apiBaseUrl: 'https://api.test',
+      manifestSigningKey: SIGNING_KEY,
+      storage,
+    });
+
+    await client.restoreOfflineScans();
+
+    expect(client.scanOffline('hash_1')).toEqual({
+      outcome: 'invalid',
+      message: 'No manifest downloaded',
+    });
+    expect(store.has(storageKey)).toBe(false);
+  });
+
+  it('refuses expired persisted scanner manifests', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-06-01T12:00:00.000Z'));
+    const manifest = makeSignedManifest({ expiresAt: '2026-05-01T00:00:00.000Z' });
+    const storageKey = 'tixkit:scanner:sd_public_1:offline-state';
+    const { storage, store } = createMemoryStorage({
+      [storageKey]: JSON.stringify({
+        version: 1,
+        deviceId: 'sd_public_1',
+        eventId: manifest.eventId,
+        checkInListId: manifest.checkInListId,
+        expiresAt: manifest.expiresAt,
+        manifest,
+        offlineScans: [['hash_1', '2026-06-01T12:00:00.000Z']],
+      }),
+    });
+    const client = new TixkitScannerClient({
+      deviceId: 'sd_public_1',
+      deviceSecret: 'scanner-secret',
+      apiBaseUrl: 'https://api.test',
+      manifestSigningKey: SIGNING_KEY,
+      storage,
+    });
+
+    await client.restoreOfflineScans();
+
+    expect(client.scanOffline('hash_1')).toEqual({
+      outcome: 'invalid',
+      message: 'No manifest downloaded',
+    });
+    expect(store.has(storageKey)).toBe(false);
+  });
+
+  it('ignores persisted scanner state for a different device', async () => {
+    const manifest = makeSignedManifest();
+    const storageKey = 'shared-scanner-state';
+    const { storage, store } = createMemoryStorage({
+      [storageKey]: JSON.stringify({
+        version: 1,
+        deviceId: 'sd_other',
+        eventId: manifest.eventId,
+        checkInListId: manifest.checkInListId,
+        expiresAt: manifest.expiresAt,
+        manifest,
+        offlineScans: [['hash_1', '2026-06-01T12:00:00.000Z']],
+      }),
+    });
+    const client = new TixkitScannerClient({
+      deviceId: 'sd_public_1',
+      deviceSecret: 'scanner-secret',
+      apiBaseUrl: 'https://api.test',
+      manifestSigningKey: SIGNING_KEY,
+      storage,
+      storageKey,
+    });
+
+    await client.restoreOfflineScans();
+
+    expect(client.scanOffline('hash_1')).toEqual({
+      outcome: 'invalid',
+      message: 'No manifest downloaded',
+    });
+    expect(store.has(storageKey)).toBe(true);
   });
 
   it('invokes conflict callbacks for non-accepted sync results', async () => {

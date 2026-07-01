@@ -208,6 +208,16 @@ export type TixkitScannerStorage = {
   removeItem(key: string): Promise<void> | void;
 };
 
+type PersistedScannerState = {
+  version: 1;
+  deviceId: string;
+  eventId: string;
+  checkInListId: string;
+  expiresAt: string;
+  manifest: OfflineManifest;
+  offlineScans: [string, string][];
+};
+
 export type TixkitSecureStorageAdapter = {
   getItem(key: string): Promise<string | null> | string | null;
   setItem(key: string, value: string): Promise<void> | void;
@@ -825,7 +835,7 @@ export class TixkitScannerClient {
     this.checkoutBaseUrl = config.checkoutBaseUrl;
     this.manifestSigningKey = config.manifestSigningKey;
     this.storage = config.storage;
-    this.storageKey = config.storageKey ?? `tixkit:scanner:${config.deviceId}:offline-scans`;
+    this.storageKey = config.storageKey ?? `tixkit:scanner:${config.deviceId}:offline-state`;
     this.onSyncConflict = config.onSyncConflict;
     this.client = new TixkitClient({ apiBaseUrl: config.apiBaseUrl });
   }
@@ -851,6 +861,7 @@ export class TixkitScannerClient {
 
     this.manifest = manifest;
     this.offlineScans.clear();
+    await this.persistOfflineState();
     return manifest;
   }
 
@@ -879,7 +890,7 @@ export class TixkitScannerClient {
       return { outcome: 'invalid', message: 'No manifest downloaded' };
     }
 
-    if (new Date(this.manifest.expiresAt) < new Date()) {
+    if (this.isManifestExpired(this.manifest)) {
       return { outcome: 'invalid', message: 'Manifest expired' };
     }
 
@@ -905,7 +916,7 @@ export class TixkitScannerClient {
     }
 
     this.offlineScans.set(qrHash, new Date().toISOString());
-    void this.persistOfflineScans();
+    void this.persistOfflineState();
     return {
       outcome: 'accepted',
       message: 'Check-in successful (offline)',
@@ -944,7 +955,7 @@ export class TixkitScannerClient {
     for (const item of result.results) {
       if (item.outcome === 'accepted') this.offlineScans.delete(item.qrHash);
     }
-    await this.persistOfflineScans();
+    await this.persistOfflineState();
     return result;
   }
 
@@ -952,18 +963,28 @@ export class TixkitScannerClient {
     if (!this.storage) return;
     const raw = await this.storage.getItem(this.storageKey);
     if (!raw) return;
-    const parsed = JSON.parse(raw) as Array<[string, string]>;
-    this.offlineScans = new Map(
-      parsed.filter(
-        (entry): entry is [string, string] =>
-          Array.isArray(entry) && typeof entry[0] === 'string' && typeof entry[1] === 'string',
-      ),
-    );
+    const state = this.parsePersistedScannerState(raw);
+    if (
+      !state ||
+      state.deviceId !== this.deviceId ||
+      state.eventId !== state.manifest.eventId ||
+      state.checkInListId !== state.manifest.checkInListId ||
+      state.expiresAt !== state.manifest.expiresAt ||
+      !this.verifyManifestSignature(state.manifest) ||
+      this.isManifestExpired(state.manifest)
+    ) {
+      this.manifest = null;
+      this.offlineScans.clear();
+      if (state?.deviceId === this.deviceId) await this.storage.removeItem(this.storageKey);
+      return;
+    }
+    this.manifest = state.manifest;
+    this.offlineScans = new Map(state.offlineScans);
   }
 
   async clearOfflineScans(): Promise<void> {
     this.offlineScans.clear();
-    await this.storage?.removeItem(this.storageKey);
+    await this.persistOfflineState();
   }
 
   checkoutUrl(options: Omit<TixkitCheckoutHandoffOptions, 'checkoutBaseUrl'>): string {
@@ -1020,13 +1041,88 @@ export class TixkitScannerClient {
     ].join(':');
   }
 
-  private async persistOfflineScans(): Promise<void> {
+  private async persistOfflineState(): Promise<void> {
     if (!this.storage) return;
-    if (this.offlineScans.size === 0) {
+    if (!this.manifest && this.offlineScans.size === 0) {
       await this.storage.removeItem(this.storageKey);
       return;
     }
-    await this.storage.setItem(this.storageKey, JSON.stringify([...this.offlineScans.entries()]));
+    if (!this.manifest) return;
+    const state: PersistedScannerState = {
+      version: 1,
+      deviceId: this.deviceId,
+      eventId: this.manifest.eventId,
+      checkInListId: this.manifest.checkInListId,
+      expiresAt: this.manifest.expiresAt,
+      manifest: this.manifest,
+      offlineScans: [...this.offlineScans.entries()],
+    };
+    await this.storage.setItem(this.storageKey, JSON.stringify(state));
+  }
+
+  private parsePersistedScannerState(raw: string): PersistedScannerState | null {
+    try {
+      const parsed = JSON.parse(raw) as unknown;
+      if (!parsed || typeof parsed !== 'object') return null;
+      const state = parsed as Partial<PersistedScannerState>;
+      if (
+        state.version !== 1 ||
+        typeof state.deviceId !== 'string' ||
+        typeof state.eventId !== 'string' ||
+        typeof state.checkInListId !== 'string' ||
+        typeof state.expiresAt !== 'string' ||
+        !this.isOfflineManifest(state.manifest) ||
+        !Array.isArray(state.offlineScans)
+      ) {
+        return null;
+      }
+      const offlineScans = state.offlineScans.filter(
+        (entry): entry is [string, string] =>
+          Array.isArray(entry) && typeof entry[0] === 'string' && typeof entry[1] === 'string',
+      );
+      return {
+        version: 1,
+        deviceId: state.deviceId,
+        eventId: state.eventId,
+        checkInListId: state.checkInListId,
+        expiresAt: state.expiresAt,
+        manifest: state.manifest,
+        offlineScans,
+      };
+    } catch {
+      return null;
+    }
+  }
+
+  private isOfflineManifest(value: unknown): value is OfflineManifest {
+    if (!value || typeof value !== 'object') return false;
+    const manifest = value as Partial<OfflineManifest>;
+    return (
+      typeof manifest.eventId === 'string' &&
+      typeof manifest.checkInListId === 'string' &&
+      typeof manifest.generatedAt === 'string' &&
+      typeof manifest.expiresAt === 'string' &&
+      typeof manifest.keyId === 'string' &&
+      typeof manifest.signature === 'string' &&
+      Array.isArray(manifest.tickets) &&
+      manifest.tickets.every(
+        (ticket) =>
+          ticket &&
+          typeof ticket === 'object' &&
+          typeof ticket.ticketId === 'string' &&
+          typeof ticket.ticketTypeId === 'string' &&
+          (ticket.eventOccurrenceId === undefined ||
+            typeof ticket.eventOccurrenceId === 'string') &&
+          typeof ticket.attendeeName === 'string' &&
+          typeof ticket.qrHash === 'string' &&
+          typeof ticket.status === 'string',
+      )
+    );
+  }
+
+  private isManifestExpired(manifest: OfflineManifest): boolean {
+    const expiresAt = Date.parse(manifest.expiresAt);
+    return !Number.isFinite(expiresAt) || expiresAt < Date.now();
   }
 }
 
