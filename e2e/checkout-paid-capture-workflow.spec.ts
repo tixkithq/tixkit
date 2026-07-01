@@ -295,6 +295,117 @@ test.describe('paid checkout capture workflow', () => {
     }
   });
 
+  test('keeps primary event tickets purchasable when resale listings fail', async ({ page }) => {
+    await requireReachable(page, checkoutBaseUrl, 'checkout app');
+
+    await page.addInitScript(() => {
+      const originalFetch = window.fetch.bind(window);
+      const eventId = 'evt_resale_down';
+
+      window.fetch = async (input, init) => {
+        const url =
+          typeof input === 'string' ? input : input instanceof Request ? input.url : String(input);
+
+        if (url.includes(`/v1/public/events/${eventId}/resale-listings`)) {
+          return new Response(
+            JSON.stringify({
+              error: {
+                code: 'resale_listings_unavailable',
+                message: 'Resale listings are temporarily unavailable',
+              },
+            }),
+            {
+              status: 503,
+              headers: { 'Content-Type': 'application/json' },
+            },
+          );
+        }
+
+        if (url.includes(`/v1/public/events/${eventId}/availability`)) {
+          return new Response(
+            JSON.stringify([
+              {
+                type: 'ticket',
+                ticketTypeId: 'tt_primary_available',
+                name: 'Primary General Admission',
+                kind: 'paid',
+                priceCents: 2500,
+                currency: 'USD',
+                minPerOrder: 1,
+                maxPerOrder: 4,
+                available: 12,
+                status: 'active',
+              },
+            ]),
+            {
+              status: 200,
+              headers: { 'Content-Type': 'application/json' },
+            },
+          );
+        }
+
+        if (url.includes(`/v1/public/events/${eventId}/page`)) {
+          return new Response(
+            JSON.stringify({ error: { code: 'not_found', message: 'Missing' } }),
+            {
+              status: 404,
+              headers: { 'Content-Type': 'application/json' },
+            },
+          );
+        }
+
+        if (url.includes(`/v1/public/events/${eventId}`)) {
+          return new Response(
+            JSON.stringify({
+              id: eventId,
+              title: 'Resale Down Primary Sale',
+              status: 'published',
+              timezone: 'America/New_York',
+              startsAt: '2026-07-17T19:00:00.000Z',
+              brandId: 'brand_platform',
+            }),
+            {
+              status: 200,
+              headers: { 'Content-Type': 'application/json' },
+            },
+          );
+        }
+
+        if (url.includes('/v1/public/brands/brand_platform')) {
+          return new Response(
+            JSON.stringify({
+              id: 'brand_platform',
+              name: 'Tixkit',
+              theme: {},
+              legalUrls: {},
+              whiteLabel: false,
+            }),
+            {
+              status: 200,
+              headers: { 'Content-Type': 'application/json' },
+            },
+          );
+        }
+
+        return originalFetch(input, init);
+      };
+    });
+
+    await page.goto(`${checkoutBaseUrl}/e/evt_resale_down`);
+
+    await expect(page.getByRole('heading', { name: 'Resale Down Primary Sale' })).toBeVisible();
+    await expect(page.getByText('Primary General Admission')).toBeVisible();
+    const alert = page.getByRole('alert').filter({
+      hasText: 'Resale tickets are temporarily unavailable',
+    });
+    await expect(alert).toBeVisible();
+    await expect(alert.getByText('Resale listings are temporarily unavailable')).toBeVisible();
+    await expect(page.getByText('Could not load event')).toHaveCount(0);
+    await expect(page.getByRole('button', { name: 'Get tickets' })).toBeVisible();
+    await page.getByRole('button', { name: 'Get tickets' }).click();
+    await expect(page).toHaveURL(/\/checkout\?eventId=evt_resale_down/);
+  });
+
   test('completes a public resale purchase through hosted checkout UI', async ({
     browserName,
     page,

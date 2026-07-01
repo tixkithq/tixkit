@@ -12,6 +12,23 @@ vi.mock('next/navigation', () => ({
 }));
 
 vi.mock('@/lib/api', () => {
+  class CheckoutApiError extends Error {
+    constructor(
+      public readonly code: string,
+      message: string,
+      public readonly status: number,
+      public readonly requestId?: string,
+    ) {
+      super(message);
+      this.name = 'CheckoutApiError';
+    }
+  }
+
+  function userFacingMessage(error: unknown): string {
+    if (error instanceof Error) return error.message;
+    return 'Something went wrong. Please try again.';
+  }
+
   return {
     publicApi: {
       getEvent: vi.fn(),
@@ -22,6 +39,8 @@ vi.mock('@/lib/api', () => {
       getResaleListings: vi.fn(),
       getBrand: vi.fn(),
     },
+    CheckoutApiError,
+    userFacingMessage,
   };
 });
 
@@ -129,6 +148,70 @@ describe('EventPageClient escaping', () => {
     expect(push).toHaveBeenCalledWith(
       expect.stringContaining('/checkout?eventId=evt_resale&resaleListing=lst_1'),
     );
+  });
+
+  it('keeps primary tickets available when resale listings fail', async () => {
+    const event: PublicEvent = {
+      id: 'evt_resale_down',
+      title: 'Primary Still On Sale',
+      status: 'published',
+      timezone: 'America/Chicago',
+      startsAt: '2026-07-17T19:00:00.000Z',
+      brandId: 'brd_1',
+    };
+    const availability: AvailabilityItem[] = [
+      {
+        type: 'ticket',
+        ticketTypeId: 'tt_primary',
+        name: 'Primary General Admission',
+        kind: 'paid',
+        priceCents: 2500,
+        currency: 'USD',
+        minPerOrder: 1,
+        maxPerOrder: 4,
+        available: 24,
+        status: 'active',
+      },
+    ];
+    publicApiMock.getEvent.mockResolvedValue(event);
+    publicApiMock.getEventPage.mockResolvedValue(null);
+    publicApiMock.getAvailability.mockResolvedValue(availability);
+    publicApiMock.getResaleListings.mockRejectedValue(new Error('Resale listings unavailable'));
+    publicApiMock.getBrand.mockRejectedValue(new Error('brand unavailable'));
+
+    const view = render(React.createElement(EventPageClient, { eventId: 'evt_resale_down' }));
+
+    expect(await view.findByText('Primary General Admission')).toBeInTheDocument();
+    expect(view.queryByText('Could not load event')).toBeNull();
+    const alert = view.getByRole('alert');
+    expect(alert).toHaveTextContent('Resale tickets are temporarily unavailable');
+    expect(alert).toHaveTextContent('Resale listings unavailable');
+
+    fireEvent.click(view.getByRole('button', { name: /Get tickets/i }));
+
+    expect(push).toHaveBeenCalledWith(expect.stringContaining('/checkout?eventId=evt_resale_down'));
+  });
+
+  it('keeps availability failures page-blocking', async () => {
+    const event: PublicEvent = {
+      id: 'evt_availability_down',
+      title: 'Availability Down',
+      status: 'published',
+      timezone: 'America/Chicago',
+      startsAt: '2026-07-17T19:00:00.000Z',
+      brandId: 'brd_1',
+    };
+    publicApiMock.getEvent.mockResolvedValue(event);
+    publicApiMock.getEventPage.mockResolvedValue(null);
+    publicApiMock.getAvailability.mockRejectedValue(new Error('Availability unavailable'));
+    publicApiMock.getBrand.mockRejectedValue(new Error('brand unavailable'));
+
+    const view = render(React.createElement(EventPageClient, { eventId: 'evt_availability_down' }));
+
+    expect(await view.findByText('Could not load event')).toBeInTheDocument();
+    expect(view.getByText('Availability unavailable')).toBeInTheDocument();
+    expect(view.queryByRole('button', { name: /Get tickets/i })).toBeNull();
+    expect(view.queryByText('Resale tickets are temporarily unavailable')).toBeNull();
   });
 
   it('uses mobile-first vertical cards for long ticket and resale names', async () => {

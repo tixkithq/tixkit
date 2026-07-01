@@ -15,6 +15,7 @@ import { Card, CardContent } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Separator } from '@/components/ui/separator';
+import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { EmptyState } from '@/components/empty-state';
 import { BrandFooter } from '@/components/checkout/brand-footer';
 import {
@@ -63,6 +64,7 @@ export default function EventPageClient({
   const [contentPage, setContentPage] = useState<PublicContentPage | null>(null);
   const [availability, setAvailability] = useState<AvailabilityItem[]>([]);
   const [resaleListings, setResaleListings] = useState<CheckoutPublicResaleListing[]>([]);
+  const [resaleListingsError, setResaleListingsError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [notFound, setNotFound] = useState(false);
@@ -89,6 +91,7 @@ export default function EventPageClient({
       if (!eventId && (!eventSlug || !customDomainHost)) return;
       setLoading(true);
       setError(null);
+      setResaleListingsError(null);
       try {
         const loadedEvent = eventId
           ? await publicApi.getEvent(eventId, controller.signal)
@@ -103,16 +106,23 @@ export default function EventPageClient({
             if (err instanceof CheckoutApiError && err.status === 404) return null;
             throw err;
           }),
-          publicApi.getResaleListings(loadedEvent.id, controller.signal).catch((err) => {
-            if (err instanceof CheckoutApiError && err.status === 404) return { items: [] };
-            throw err;
-          }),
+          publicApi
+            .getResaleListings(loadedEvent.id, controller.signal)
+            .then((response) => ({ items: response.items, error: null }))
+            .catch((err) => {
+              if (controller.signal.aborted) throw err;
+              if (err instanceof CheckoutApiError && err.status === 404) {
+                return { items: [], error: null };
+              }
+              return { items: [], error: userFacingMessage(err) };
+            }),
         ]);
         if (cancelled) return;
         setEvent(loadedEvent);
         setContentPage(loadedContentPage);
         setAvailability(loadedAvailability);
         setResaleListings(loadedResaleListings.items);
+        setResaleListingsError(loadedResaleListings.error);
       } catch (err) {
         if (cancelled || controller.signal.aborted) return;
         setNotFound(err instanceof CheckoutApiError && err.status === 404);
@@ -304,6 +314,14 @@ export default function EventPageClient({
             </ul>
           )}
         </section>
+
+        {resaleListingsError ? (
+          <Alert>
+            <AlertCircleIcon className="size-4" />
+            <AlertTitle>Resale tickets are temporarily unavailable</AlertTitle>
+            <AlertDescription>{resaleListingsError}</AlertDescription>
+          </Alert>
+        ) : null}
 
         {resaleListings.length > 0 ? (
           <section className="space-y-4">
