@@ -235,6 +235,38 @@ describe('openApiSpec', () => {
     ).toHaveProperty('paymentAccountId');
   });
 
+  it('documents brand sender identity list responses', () => {
+    expect(openApiSpec.components.schemas.BrandSenderIdentity).toMatchObject({
+      type: 'object',
+      properties: expect.objectContaining({
+        tenantId: { type: 'string' },
+        brandId: { type: 'string' },
+        email: { type: 'string', format: 'email' },
+        replyToEmail: { type: 'string', format: 'email' },
+        verified: { type: 'boolean' },
+        verifiedAt: { type: 'string', format: 'date-time' },
+      }),
+    });
+    expect(openApiSpec.components.schemas.BrandSenderIdentity.required).toEqual([
+      'id',
+      'tenantId',
+      'brandId',
+      'email',
+      'name',
+      'verified',
+      'createdAt',
+      'updatedAt',
+    ]);
+    expect(
+      openApiSpec.paths['/brands/{brandId}/email-sender-identities'].get.responses['200'].content[
+        'application/json'
+      ].schema,
+    ).toEqual({
+      type: 'array',
+      items: { $ref: '#/components/schemas/BrandSenderIdentity' },
+    });
+  });
+
   it('documents order sales-channel attribution for box-office reporting', () => {
     expect(openApiSpec.components.schemas.Organization.properties.boxOfficeSettings).toEqual({
       $ref: '#/components/schemas/BoxOfficeSettings',

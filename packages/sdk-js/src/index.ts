@@ -872,6 +872,19 @@ export type BrandDomain = {
   updatedAt: string;
 };
 
+export type BrandSenderIdentity = {
+  id: string;
+  tenantId: string;
+  brandId: string;
+  email: string;
+  name: string;
+  replyToEmail?: string;
+  verified: boolean;
+  verifiedAt?: string;
+  createdAt: string;
+  updatedAt: string;
+};
+
 export type ApiKey = {
   id: string;
   tenantId: string;
@@ -2265,6 +2278,9 @@ class BrandResource {
     input: { domain: string; isPrimary?: boolean },
   ): Promise<BrandDomain> {
     return this.client.request('POST', `/brands/${brandId}/domains`, { body: input });
+  }
+  async listSenderIdentities(brandId: string): Promise<BrandSenderIdentity[]> {
+    return this.client.request('GET', `/brands/${brandId}/email-sender-identities`);
   }
 }
 

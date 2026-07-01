@@ -1979,6 +1979,31 @@ const rawOpenApiSpec = {
         },
         required: ['id', 'brandId', 'domain', 'isPrimary', 'isVerified', 'sslStatus'],
       },
+      BrandSenderIdentity: {
+        type: 'object',
+        properties: {
+          id: { type: 'string' },
+          tenantId: { type: 'string' },
+          brandId: { type: 'string' },
+          email: { type: 'string', format: 'email' },
+          name: { type: 'string' },
+          replyToEmail: { type: 'string', format: 'email' },
+          verified: { type: 'boolean' },
+          verifiedAt: { type: 'string', format: 'date-time' },
+          createdAt: { type: 'string', format: 'date-time' },
+          updatedAt: { type: 'string', format: 'date-time' },
+        },
+        required: [
+          'id',
+          'tenantId',
+          'brandId',
+          'email',
+          'name',
+          'verified',
+          'createdAt',
+          'updatedAt',
+        ],
+      },
       InventoryPool: {
         type: 'object',
         properties: {
@@ -3108,6 +3133,33 @@ const rawOpenApiSpec = {
             description: 'Brand domain created',
             content: {
               'application/json': { schema: { $ref: '#/components/schemas/BrandDomain' } },
+            },
+          },
+        },
+      },
+    },
+    '/brands/{brandId}/email-sender-identities': {
+      get: {
+        summary: 'List brand email sender identities',
+        security: [{ BearerAuth: [] }],
+        parameters: [
+          {
+            name: 'brandId',
+            in: 'path',
+            required: true,
+            schema: { type: 'string' },
+          },
+        ],
+        responses: {
+          '200': {
+            description: 'Brand email sender identities',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'array',
+                  items: { $ref: '#/components/schemas/BrandSenderIdentity' },
+                },
+              },
             },
           },
         },

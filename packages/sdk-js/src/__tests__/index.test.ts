@@ -7,6 +7,7 @@ import path from 'node:path';
 import {
   TixkitClient,
   TixkitApiError,
+  type BrandSenderIdentity,
   type ContentRenderArtifact,
   type EmailTemplateDocument,
   type OAuthApplication,
@@ -2240,6 +2241,35 @@ describe('TixkitClient new resource methods', () => {
       client_secret: 'secret_1',
       token: 'tk_oat_test',
     });
+  });
+
+  it('brands.listSenderIdentities sends GET to the brand sender identity endpoint', async () => {
+    const identities: BrandSenderIdentity[] = [
+      {
+        id: 'bsi_1',
+        tenantId: 'tnt_1',
+        brandId: 'brd_1',
+        email: 'tickets@example.com',
+        name: 'Tickets',
+        replyToEmail: 'support@example.com',
+        verified: true,
+        verifiedAt: '2026-06-01T00:00:00.000Z',
+        createdAt: '2026-06-01T00:00:00.000Z',
+        updatedAt: '2026-06-01T00:00:00.000Z',
+      },
+    ];
+    const fm = mockFetch(200, identities);
+    const c = new TixkitClient({
+      apiKey: '***********',
+      apiBaseUrl: 'https://api.test',
+      maxRetries: 0,
+    });
+
+    await expect(c.brands.listSenderIdentities('brd_1')).resolves.toEqual(identities);
+
+    const call = getCall(fm);
+    expect(call.url).toBe('https://api.test/v1/brands/brd_1/email-sender-identities');
+    expect(call.method).toBe('GET');
   });
 
   it('paymentAccounts.refreshStripeConnect sends POST to the account refresh endpoint', async () => {
