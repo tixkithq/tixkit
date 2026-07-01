@@ -270,7 +270,7 @@ Retrieves a session. For non-`completed` sessions, pass `X-Checkout-Session-Toke
 
 ### `GET /v1/checkout/sessions/:sessionId/wallet-passes`
 
-Lists active Apple Wallet and Google Wallet links for tickets in a checkout session. Completed sessions can be read tokenless from the confirmation page; non-completed sessions require `X-Checkout-Session-Token`. Apple links point to token-protected `.pkpass` downloads. Google links are signed Google Wallet save URLs.
+Lists active Apple Wallet and Google Wallet links for tickets in a checkout session. All wallet-pass reads require `X-Checkout-Session-Token: <clientToken>`, including completed sessions shown on the confirmation page. Apple links point to token-protected `.pkpass` downloads. Google links are signed Google Wallet save URLs.
 
 ### `GET /v1/wallet-passes/:passId/apple.pkpass`
 

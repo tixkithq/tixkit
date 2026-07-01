@@ -1876,9 +1876,9 @@ class CheckoutResource {
     });
   }
 
-  async walletPasses(sessionId: string, clientToken?: string): Promise<CheckoutWalletPasses> {
+  async walletPasses(sessionId: string, clientToken: string): Promise<CheckoutWalletPasses> {
     return this.client.request('GET', `/checkout/sessions/${sessionId}/wallet-passes`, {
-      headers: clientToken ? { 'X-Checkout-Session-Token': clientToken } : undefined,
+      headers: { 'X-Checkout-Session-Token': clientToken },
     });
   }
 

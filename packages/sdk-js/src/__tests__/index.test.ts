@@ -1005,6 +1005,23 @@ describe('TixkitClient new resource methods', () => {
     });
   });
 
+  it('checkout.walletPasses requires and sends the checkout session token', async () => {
+    const fm = mockFetch(200, { tickets: [] });
+    const c = new TixkitClient({
+      apiKey: '***********',
+      apiBaseUrl: 'https://api.test',
+      maxRetries: 0,
+    });
+
+    expectTypeOf(c.checkout.walletPasses).parameter(1).toEqualTypeOf<string>();
+
+    await c.checkout.walletPasses('cs_1', 'client_1');
+
+    expect(getCall(fm).url).toBe('https://api.test/v1/checkout/sessions/cs_1/wallet-passes');
+    expect(getCall(fm).method).toBe('GET');
+    expect(getCall(fm).headers['X-Checkout-Session-Token']).toBe('client_1');
+  });
+
   it('organizations.update sends PATCH', async () => {
     const fm = mockFetch(200, { id: 'org_1', name: 'Updated' });
     const c = new TixkitClient({
