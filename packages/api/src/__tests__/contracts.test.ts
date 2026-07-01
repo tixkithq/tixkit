@@ -182,23 +182,41 @@ describe('API error envelope', () => {
     await app.close();
   });
 
-  it('serializes domain errors with code, message, and requestId', async () => {
+  it('serializes domain errors with code, message, details, and requestId', async () => {
     const app = Fastify({ logger: false, genReqId: () => 'req_contract' });
     registerErrorHandler(app);
     app.get('/validation', async () => {
-      throw new ValidationError('limit must be a positive integer');
+      throw new ValidationError('limit must be a positive integer', {
+        fields: { limit: 'must be a positive integer' },
+        buyerEmail: 'buyer@example.com',
+        metadata: {
+          token: 'tk_live_secret',
+          notes: ['contact buyer@example.com before retry'],
+        },
+      });
     });
 
     const response = await app.inject({ method: 'GET', url: '/validation' });
+    const body = response.json();
 
     expect(response.statusCode).toBe(400);
-    expect(response.json()).toEqual({
+    expect(body).toEqual({
       error: {
         code: 'VALIDATION_ERROR',
         message: 'limit must be a positive integer',
+        details: {
+          fields: { limit: 'must be a positive integer' },
+          buyerEmail: '[REDACTED]',
+          metadata: {
+            token: '[REDACTED]',
+            notes: ['contact [REDACTED] before retry'],
+          },
+        },
         requestId: 'req_contract',
       },
     });
+    expect(JSON.stringify(body)).not.toContain('buyer@example.com');
+    expect(JSON.stringify(body)).not.toContain('tk_live_secret');
     await app.close();
   });
 

@@ -6,7 +6,7 @@ import type { RateLimitPluginOptions } from '@fastify/rate-limit';
 import { ulid } from 'ulid';
 import { Redis } from 'ioredis';
 import { createDb, type Database } from '@tixkit/db';
-import { pinoRedactionPaths, redactErrorFields, redactString } from '@tixkit/shared';
+import { pinoRedactionPaths, redactErrorFields, redactObject, redactString } from '@tixkit/shared';
 import { config } from './config/index.js';
 import { ClerkAuthService, createAuthMiddleware } from './auth/clerk.js';
 import { createAuthProvider } from './auth/providers.js';
@@ -95,6 +95,34 @@ class ApiCaptureSmsTransport implements SmsTransport {
 
 export const API_JSON_BODY_LIMIT_BYTES = 2 * 1024 * 1024;
 
+function toJsonSafeErrorDetail(value: unknown, depth = 0): unknown {
+  if (depth > 8) return '[REDACTED]';
+  if (value === null) return null;
+  if (typeof value === 'string' || typeof value === 'boolean') return value;
+  if (typeof value === 'number') return Number.isFinite(value) ? value : String(value);
+  if (typeof value === 'bigint') return value.toString();
+  if (value instanceof Date) return value.toISOString();
+  if (Array.isArray(value)) {
+    return value
+      .map((entry) => toJsonSafeErrorDetail(entry, depth + 1))
+      .filter((entry) => entry !== undefined);
+  }
+  if (typeof value === 'object') {
+    const safe: Record<string, unknown> = {};
+    for (const [key, entry] of Object.entries(value)) {
+      const safeEntry = toJsonSafeErrorDetail(entry, depth + 1);
+      if (safeEntry !== undefined) safe[key] = safeEntry;
+    }
+    return safe;
+  }
+  return undefined;
+}
+
+function sanitizeErrorDetails(details: unknown): Record<string, unknown> | undefined {
+  if (!details || typeof details !== 'object' || Array.isArray(details)) return undefined;
+  return toJsonSafeErrorDetail(redactObject(details)) as Record<string, unknown>;
+}
+
 export function createCorsOriginValidator(allowedOrigins: readonly string[]) {
   const allowed = new Set(allowedOrigins);
   return (origin: string | undefined, callback: CorsOriginCallback): void => {
@@ -105,7 +133,12 @@ export function createCorsOriginValidator(allowedOrigins: readonly string[]) {
 export function registerErrorHandler(app: FastifyInstance): void {
   app.setErrorHandler((error, request, reply) => {
     const requestId = request.id;
-    const err = error as Error & { statusCode?: number; code?: string; expose?: boolean };
+    const err = error as Error & {
+      statusCode?: number;
+      code?: string;
+      expose?: boolean;
+      details?: Record<string, unknown>;
+    };
     const statusCode = err.statusCode;
     const exposesError =
       typeof statusCode === 'number' &&
@@ -113,11 +146,13 @@ export function registerErrorHandler(app: FastifyInstance): void {
       statusCode < 600 &&
       (statusCode < 500 || err.expose === true);
     if (exposesError) {
+      const details = sanitizeErrorDetails(err.details);
       return reply.status(statusCode).send({
         error: {
           code: err.code ?? (statusCode >= 500 ? 'SERVICE_UNAVAILABLE' : 'VALIDATION_ERROR'),
           message: redactString(err.message),
           requestId,
+          ...(details ? { details } : {}),
         },
       });
     }
