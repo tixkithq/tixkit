@@ -19,7 +19,7 @@ spec:
     spec:
       containers:
         - name: api
-          image: {{ include "tixkit.image" (dict "Values" .Values "image" .Values.api.image) }}
+          image: {{ include "tixkit.image" (dict "Values" .Values "image" .Values.api.image "digest" .Values.api.imageDigest) }}
           imagePullPolicy: {{ .Values.global.imagePullPolicy }}
           ports:
             - name: http

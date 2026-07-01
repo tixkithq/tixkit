@@ -20,7 +20,7 @@ spec:
       restartPolicy: Never
       containers:
         - name: migrate
-          image: {{ include "tixkit.image" (dict "Values" .Values "image" .Values.migrations.image) }}
+          image: {{ include "tixkit.image" (dict "Values" .Values "image" .Values.migrations.image "digest" .Values.migrations.imageDigest) }}
           imagePullPolicy: {{ .Values.global.imagePullPolicy }}
           command: ["bun", "run", "db:migrate"]
           envFrom:

@@ -1,7 +1,6 @@
 global:
   imageRegistry: ghcr.io/your-org/tixkit
   imagePullPolicy: IfNotPresent
-  imageTag: '0.1.0'
   environment: production
   apiBaseUrl: https://api.example.com
   checkoutUrl: https://checkout.example.com
@@ -42,6 +41,7 @@ secrets:
 api:
   replicas: 2
   image: api
+  imageDigest: sha256:1111111111111111111111111111111111111111111111111111111111111111
   port: 4000
   trustProxy: '1'
   resources:
@@ -55,6 +55,7 @@ api:
 worker:
   replicas: 2
   image: worker
+  imageDigest: sha256:2222222222222222222222222222222222222222222222222222222222222222
   resources:
     requests:
       cpu: 250m
@@ -66,6 +67,7 @@ worker:
 checkout:
   replicas: 2
   image: checkout
+  imageDigest: sha256:3333333333333333333333333333333333333333333333333333333333333333
   port: 3000
   resources:
     requests:
@@ -78,6 +80,7 @@ checkout:
 admin:
   replicas: 2
   image: admin-dashboard
+  imageDigest: sha256:4444444444444444444444444444444444444444444444444444444444444444
   port: 3001
   resources:
     requests:
@@ -90,6 +93,7 @@ admin:
 migrations:
   enabled: true
   image: db-migrate
+  imageDigest: sha256:5555555555555555555555555555555555555555555555555555555555555555
   backoffLimit: 1
 
 ingress:

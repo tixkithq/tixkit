@@ -76,6 +76,30 @@ validate_runtime_image_pins() {
     grep -v '@sha256:' >/dev/null; then
     fail 'MinIO server/client image references must include @sha256 digests'
   fi
+
+  if grep -Eq '^[[:space:]]*imageTag:' infra/helm/tixkit/values.yaml; then
+    fail 'first-party Helm images must use per-component imageDigest values instead of global imageTag'
+  fi
+
+  local component
+  for component in api worker checkout admin migrations; do
+    awk -v component="${component}" '
+      $0 == component ":" {
+        in_component = 1
+        next
+      }
+      in_component && /^[^[:space:]]/ {
+        in_component = 0
+      }
+      in_component && /^[[:space:]]*imageDigest:[[:space:]]*sha256:[0-9a-f]{64}[[:space:]]*$/ {
+        found = 1
+      }
+      END {
+        exit found ? 0 : 1
+      }
+    ' infra/helm/tixkit/values.yaml ||
+      fail "infra/helm/tixkit/values.yaml must set ${component}.imageDigest to sha256:<64 lowercase hex chars>"
+  done
 }
 
 validate_runtime_image_pins
@@ -478,6 +502,28 @@ awk '
   fail "infra/helm/tixkit/values.yaml must include API CORS origins ${expected_cors_origins}"
 
 if command -v helm >/dev/null 2>&1; then
+  rendered_chart="$(helm template tixkit infra/helm/tixkit --namespace tixkit)"
+  first_party_images="$(printf '%s\n' "${rendered_chart}" | awk '
+    /^[[:space:]]*image:[[:space:]]*ghcr\.io\/your-org\/tixkit\// {
+      sub(/^[[:space:]]*image:[[:space:]]*/, "")
+      gsub(/^"|"$/, "")
+      print
+    }
+  ')"
+  first_party_image_count="$(printf '%s\n' "${first_party_images}" | awk 'NF { count += 1 } END { print count + 0 }')"
+  test "${first_party_image_count}" = '5' ||
+    fail "rendered Helm chart must include five first-party images, found ${first_party_image_count}"
+  printf '%s\n' "${first_party_images}" | awk '
+    NF && $0 !~ /^ghcr\.io\/your-org\/tixkit\/(api|worker|checkout|admin-dashboard|db-migrate)@sha256:[0-9a-f]{64}$/ {
+      exit 1
+    }
+  ' ||
+    fail 'rendered Helm first-party image references must use ghcr.io/your-org/tixkit/<image>@sha256:<digest>'
+  for component in api worker checkout admin-dashboard db-migrate; do
+    printf '%s\n' "${first_party_images}" | grep -Eq "^ghcr\\.io/your-org/tixkit/${component}@sha256:[0-9a-f]{64}$" ||
+      fail "rendered Helm chart must include digest-addressed first-party image ${component}"
+  done
+
   rendered_config="$(helm template tixkit infra/helm/tixkit --namespace tixkit --show-only templates/configmap.yaml)"
   printf '%s\n' "${rendered_config}" | grep -Eq '^[[:space:]]*TRUST_PROXY:[[:space:]]*"1"[[:space:]]*$' ||
     fail 'rendered Helm ConfigMap must set API TRUST_PROXY to bounded hop count 1'

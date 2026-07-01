@@ -24,5 +24,8 @@ app.kubernetes.io/instance: {{ .Release.Name }}
 {{- end -}}
 
 {{- define "tixkit.image" -}}
-{{- printf "%s/%s:%s" .Values.global.imageRegistry .image .Values.global.imageTag -}}
+{{- if not (regexMatch "^sha256:[0-9a-f]{64}$" .digest) -}}
+{{- fail (printf "first-party image %s must set imageDigest to sha256:<64 lowercase hex chars>" .image) -}}
+{{- end -}}
+{{- printf "%s/%s@%s" .Values.global.imageRegistry .image .digest -}}
 {{- end -}}

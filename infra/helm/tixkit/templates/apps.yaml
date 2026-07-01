@@ -19,7 +19,7 @@ spec:
     spec:
       containers:
         - name: checkout
-          image: {{ include "tixkit.image" (dict "Values" .Values "image" .Values.checkout.image) }}
+          image: {{ include "tixkit.image" (dict "Values" .Values "image" .Values.checkout.image "digest" .Values.checkout.imageDigest) }}
           imagePullPolicy: {{ .Values.global.imagePullPolicy }}
           ports:
             - name: http
@@ -69,7 +69,7 @@ spec:
     spec:
       containers:
         - name: admin
-          image: {{ include "tixkit.image" (dict "Values" .Values "image" .Values.admin.image) }}
+          image: {{ include "tixkit.image" (dict "Values" .Values "image" .Values.admin.image "digest" .Values.admin.imageDigest) }}
           imagePullPolicy: {{ .Values.global.imagePullPolicy }}
           ports:
             - name: http

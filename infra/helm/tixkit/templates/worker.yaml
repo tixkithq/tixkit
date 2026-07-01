@@ -19,7 +19,7 @@ spec:
     spec:
       containers:
         - name: worker
-          image: {{ include "tixkit.image" (dict "Values" .Values "image" .Values.worker.image) }}
+          image: {{ include "tixkit.image" (dict "Values" .Values "image" .Values.worker.image "digest" .Values.worker.imageDigest) }}
           imagePullPolicy: {{ .Values.global.imagePullPolicy }}
           envFrom:
             - configMapRef:
