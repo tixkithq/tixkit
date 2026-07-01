@@ -354,7 +354,10 @@ export default function CheckoutFlow({
             const key = `${lineId}:${i}:${q.id}`;
             const answer = attendeeAnswers[key];
             if (isAnswerEmpty(answer)) {
-              return `Please complete all required attendee fields for ${ticketType?.name ?? 'this ticket'}.`;
+              if (q.type === 'checkbox') {
+                return `Please check ${q.label} for ${ticketType?.name ?? 'this ticket'} attendee ${i + 1}.`;
+              }
+              return `Please complete ${q.label} for ${ticketType?.name ?? 'this ticket'} attendee ${i + 1}.`;
             }
           }
         }
@@ -365,7 +368,10 @@ export default function CheckoutFlow({
         if (!q.required) continue;
         const answer = buyerAnswers[q.id];
         if (isAnswerEmpty(answer)) {
-          return `Please complete all required fields.`;
+          if (q.type === 'checkbox') {
+            return `Please check ${q.label}.`;
+          }
+          return `Please complete ${q.label}.`;
         }
       }
     }

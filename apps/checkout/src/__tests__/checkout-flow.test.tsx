@@ -118,6 +118,32 @@ describe('CheckoutFlow buyer validation', () => {
     expect(checkoutApiMock.createSession).not.toHaveBeenCalled();
   });
 
+  it('directs buyers to the missing required checkbox question', async () => {
+    publicApiMock.getQuestions.mockResolvedValue({
+      buyerQuestions: [
+        {
+          id: 'q_ack',
+          label: 'I agree to the photo policy',
+          type: 'checkbox',
+          required: true,
+          appliesTo: 'buyer',
+        },
+      ],
+      attendeeQuestions: [],
+    });
+    const view = renderCheckoutFlow();
+
+    await view.findByText('General Admission');
+    fireEvent.click(view.getByRole('button', { name: 'Increase General Admission quantity' }));
+    fireEvent.change(view.getByLabelText(/Email/), {
+      target: { value: 'buyer@example.com' },
+    });
+    fireEvent.click(view.getByRole('button', { name: 'Continue' }));
+
+    expect(await view.findByText('Please check I agree to the photo policy.')).toBeInTheDocument();
+    expect(checkoutApiMock.createSession).not.toHaveBeenCalled();
+  });
+
   it('creates a resale checkout session for a selected public listing', async () => {
     publicApiMock.getAvailability.mockResolvedValue([]);
     publicApiMock.getResaleListings.mockResolvedValue({

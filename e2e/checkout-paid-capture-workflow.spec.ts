@@ -251,6 +251,50 @@ test.describe('paid checkout capture workflow', () => {
     expect(state.ticketCount).toBe(1);
   });
 
+  test('marks required checkout checkbox questions before submission', async ({
+    page,
+    request,
+  }, testInfo) => {
+    await requireReachable(page, `${apiBaseUrl}/health`, 'api');
+    await requireReachable(page, checkoutBaseUrl, 'checkout app');
+
+    const suffix = `required-checkbox-ui-${testInfo.workerIndex}-${Date.now()}`;
+    const { event, ticketType } = await seedPaidCheckoutEvent(request, suffix);
+    await expectJsonResponse(
+      await request.post(`${apiBaseUrl}/v1/events/${event.id}/questions`, {
+        data: {
+          type: 'checkbox',
+          label: 'I agree to the venue photo policy',
+          description: 'Required for entry.',
+          required: true,
+          appliesTo: 'buyer',
+        },
+      }),
+      201,
+    );
+
+    for (const viewport of [
+      { name: 'desktop', width: 1440, height: 1000 },
+      { name: 'mobile', width: 375, height: 812 },
+    ]) {
+      await page.setViewportSize({ width: viewport.width, height: viewport.height });
+      await page.goto(`${checkoutBaseUrl}/checkout?eventId=${event.id}`);
+      await expect(page.getByRole('heading', { name: event.title })).toBeVisible();
+      await page.getByRole('button', { name: `Increase ${ticketType.name} quantity` }).click();
+      const requiredCheckbox = page.getByLabel(/I agree to the venue photo policy\s+\*/);
+      await expect(requiredCheckbox).toBeVisible();
+      await expect(requiredCheckbox).toHaveAttribute('required', '');
+      await expect(requiredCheckbox).toHaveAttribute('aria-required', 'true');
+      await expect(requiredCheckbox).toHaveAccessibleDescription('Required for entry.');
+      await page.getByLabel('Email').fill(`checkbox-ui+${suffix}@example.com`);
+      await page.getByLabel('First name').fill('Checkbox');
+      await page.getByLabel('Last name').fill('Buyer');
+      await page.getByRole('button', { name: 'Continue' }).click();
+      await expect(page.getByText('Please check I agree to the venue photo policy.')).toBeVisible();
+      await attachScreenshot(page, testInfo, `hosted-required-checkbox-${viewport.name}`);
+    }
+  });
+
   test('completes a public resale purchase through hosted checkout UI', async ({
     browserName,
     page,

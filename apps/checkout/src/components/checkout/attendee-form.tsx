@@ -214,29 +214,42 @@ function DynamicQuestionField({
   const [uploading, setUploading] = useState(false);
   const [uploadError, setUploadError] = useState<string | null>(null);
   const id = `q_${fieldId.replace(/[^A-Za-z0-9_-]/g, '_')}`;
+  const descriptionId = question.description ? `${id}_description` : undefined;
   const stringValue = typeof value === 'string' ? value : '';
+  const requiredMarker = question.required ? <span className="text-destructive"> *</span> : null;
   const label = (
     <Label htmlFor={id}>
       {question.label}
-      {question.required ? <span className="text-destructive"> *</span> : null}
+      {requiredMarker}
     </Label>
   );
 
   if (question.type === 'checkbox') {
     return (
-      <div className="flex items-center gap-2">
-        <input
-          id={id}
-          name={question.id}
-          type="checkbox"
-          checked={value === true || value === 'true'}
-          disabled={disabled}
-          onChange={(e) => onChange(e.target.checked)}
-          className="size-4 rounded border-input accent-primary"
-        />
-        <Label htmlFor={id} className="text-sm font-normal">
-          {question.label}
-        </Label>
+      <div className="grid gap-2">
+        <div className="flex items-center gap-2">
+          <input
+            id={id}
+            name={question.id}
+            type="checkbox"
+            checked={value === true || value === 'true'}
+            disabled={disabled}
+            required={question.required}
+            aria-required={question.required || undefined}
+            aria-describedby={descriptionId}
+            onChange={(e) => onChange(e.target.checked)}
+            className="size-4 rounded border-input accent-primary"
+          />
+          <Label htmlFor={id} className="text-sm font-normal">
+            {question.label}
+            {requiredMarker}
+          </Label>
+        </div>
+        {question.description ? (
+          <p id={descriptionId} className="text-xs text-muted-foreground">
+            {question.description}
+          </p>
+        ) : null}
       </div>
     );
   }
@@ -391,13 +404,18 @@ function DynamicQuestionField({
             type="checkbox"
             checked={value === true || value === 'true'}
             disabled={disabled}
+            required={question.required}
+            aria-required={question.required || undefined}
+            aria-describedby={descriptionId}
             onChange={(e) => onChange(e.target.checked)}
             className="size-4 rounded border-input accent-primary"
           />
           {label}
         </div>
         {question.description ? (
-          <p className="text-xs text-muted-foreground">{question.description}</p>
+          <p id={descriptionId} className="text-xs text-muted-foreground">
+            {question.description}
+          </p>
         ) : null}
       </div>
     );

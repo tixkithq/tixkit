@@ -181,6 +181,68 @@ describe('AttendeeForm dynamic question types', () => {
     });
   });
 
+  it('marks required buyer checkbox questions visually and accessibly', () => {
+    const question: CheckoutQuestion = {
+      id: 'q_ack',
+      label: 'I agree to the photo policy',
+      description: 'Required for entry.',
+      type: 'checkbox',
+      required: true,
+      appliesTo: 'buyer',
+    };
+
+    const view = render(
+      createAttendeeForm({
+        buyerQuestions: [question],
+        buyerAnswers: {},
+        onBuyerAnswersChange: () => {},
+      }),
+    );
+
+    const checkbox = view.getByLabelText(/I agree to the photo policy\s+\*/);
+
+    expect(checkbox).toBeRequired();
+    expect(checkbox).toHaveAttribute('aria-required', 'true');
+    expect(checkbox).toHaveAccessibleDescription('Required for entry.');
+  });
+
+  it('marks repeated required attendee checkboxes with unique accessible controls', () => {
+    const question: CheckoutQuestion = {
+      id: 'q_attend_ack',
+      label: 'Confirm attendance acknowledgement',
+      type: 'checkbox',
+      required: true,
+      appliesTo: 'attendee',
+    };
+
+    const view = render(
+      createAttendeeForm({
+        attendeeQuestionGroups: [
+          {
+            lineId: 'line_1',
+            ticketTypeId: 'tt_1',
+            ticketName: 'General Admission',
+            quantity: 2,
+            questions: [question],
+          },
+        ],
+        attendeeAnswers: {},
+        onAttendeeAnswersChange: () => {},
+      }),
+    );
+
+    const controls = view.getAllByLabelText(/Confirm attendance acknowledgement\s+\*/);
+    const ids = controls.map((control) => control.id);
+
+    expect(controls).toHaveLength(2);
+    expect(new Set(ids).size).toBe(ids.length);
+    expect(ids).toEqual(['q_attendee-line_1-0-q_attend_ack', 'q_attendee-line_1-1-q_attend_ack']);
+    for (const control of controls) {
+      expect(control).toBeRequired();
+      expect(control).toHaveAttribute('aria-required', 'true');
+    }
+  });
+
   it('uploads file question answers as upload artifacts', async () => {
     const question: CheckoutQuestion = {
       id: 'q_file',
