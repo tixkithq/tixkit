@@ -1402,6 +1402,7 @@ export type ScanTicketInput = {
   qrPayload: string;
   scannedAt?: string;
   deviceId?: string;
+  idempotencyKey?: string;
 };
 
 type SendMessageAudience = 'all' | 'checked_in' | 'not_checked_in' | 'specific';
@@ -2007,6 +2008,37 @@ function newApiKeySecret(): string {
 
 function newIdempotencyKey(prefix: string): string {
   return `${prefix}_${randomToken(32)}`;
+}
+
+const retryableScanErrorCodes = new Set(['network_error', 'timeout', 'unknown']);
+const liveScanIdempotencyKeys = new Map<string, string>();
+
+function liveScanAttemptKey(
+  input: Pick<ScanTicketInput, 'eventId' | 'checkInListId' | 'qrPayload'>,
+): string {
+  return [input.eventId, input.checkInListId ?? '', input.qrPayload.trim()].join('\u001f');
+}
+
+function liveScanIdempotencyKey(
+  input: ScanTicketInput,
+  qrPayload: string,
+): {
+  key: string;
+  attemptKey?: string;
+} {
+  if (input.idempotencyKey) return { key: input.idempotencyKey };
+
+  const attemptKey = liveScanAttemptKey({ ...input, qrPayload });
+  const existingKey = liveScanIdempotencyKeys.get(attemptKey);
+  if (existingKey) return { key: existingKey, attemptKey };
+
+  const key = newIdempotencyKey(`scan_${input.eventId}`);
+  liveScanIdempotencyKeys.set(attemptKey, key);
+  return { key, attemptKey };
+}
+
+function shouldRetainLiveScanIdempotencyKey<T>(result: ApiResult<T>): boolean {
+  return !result.ok && retryableScanErrorCodes.has(result.error.code);
 }
 
 function normalizeOrganization(value: Record<string, unknown>): AdminOrganization {
@@ -5177,8 +5209,10 @@ export const adminApi: AdminApi = {
             ),
           );
         }
+        const idempotency = liveScanIdempotencyKey(input, qrPayload);
         const result = await request<LiveCheckInScanResponse>('/v1/check-ins/scan', {
           method: 'POST',
+          headers: { 'Idempotency-Key': idempotency.key },
           body: JSON.stringify({
             checkInListId: input.checkInListId,
             qrPayload,
@@ -5186,7 +5220,13 @@ export const adminApi: AdminApi = {
             deviceId: input.deviceId,
           }),
         });
-        return result.ok ? ok(normalizeLiveCheckInScanResult(result.data, scannedAt)) : result;
+        const scanResult = result.ok
+          ? ok(normalizeLiveCheckInScanResult(result.data, scannedAt))
+          : result;
+        if (idempotency.attemptKey && !shouldRetainLiveScanIdempotencyKey(scanResult)) {
+          liveScanIdempotencyKeys.delete(idempotency.attemptKey);
+        }
+        return scanResult;
       },
       () => {
         // Simulate scan: find attendee by ticket id in qrPayload
