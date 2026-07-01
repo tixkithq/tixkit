@@ -2847,6 +2847,16 @@ const rawOpenApiSpec = {
         },
         required: ['channel', 'campaignId', 'eventId', 'job'],
       },
+      MessageDeliveryLogEnvelope: {
+        type: 'object',
+        properties: {
+          channel: { type: 'string', enum: ['email', 'sms'] },
+          campaignId: { type: 'string' },
+          eventId: { type: 'string' },
+          delivery: { type: 'object', additionalProperties: true },
+        },
+        required: ['channel', 'campaignId', 'eventId', 'delivery'],
+      },
       MessageProviderEvent: {
         type: 'object',
         properties: {
@@ -7606,7 +7616,7 @@ const rawOpenApiSpec = {
                   properties: {
                     items: {
                       type: 'array',
-                      items: { $ref: '#/components/schemas/MessageProviderEventEnvelope' },
+                      items: { $ref: '#/components/schemas/MessageDeliveryLogEnvelope' },
                     },
                   },
                   required: ['items'],
@@ -7636,7 +7646,11 @@ const rawOpenApiSpec = {
         responses: {
           '200': {
             description: 'Delivery log detail',
-            content: { 'application/json': { schema: { type: 'object' } } },
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/MessageDeliveryLogEnvelope' },
+              },
+            },
           },
           '401': {
             description: 'Unauthorized',
@@ -7664,7 +7678,12 @@ const rawOpenApiSpec = {
               'application/json': {
                 schema: {
                   type: 'object',
-                  properties: { items: { type: 'array', items: { type: 'object' } } },
+                  properties: {
+                    items: {
+                      type: 'array',
+                      items: { $ref: '#/components/schemas/MessageProviderEventEnvelope' },
+                    },
+                  },
                   required: ['items'],
                 },
               },

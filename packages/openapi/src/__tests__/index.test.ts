@@ -659,6 +659,63 @@ describe('openApiSpec', () => {
     expect(renderPreviewPost.responses).toHaveProperty('400');
   });
 
+  it('documents message list envelopes and delivery-log schemas', () => {
+    const messageListSchema =
+      openApiSpec.paths['/events/{eventId}/messages'].get.responses['200'].content[
+        'application/json'
+      ].schema;
+    expect(messageListSchema.required).toEqual(['items']);
+    expect(messageListSchema.properties).not.toHaveProperty('nextCursor');
+    expect(messageListSchema.properties).not.toHaveProperty('hasMore');
+
+    const jobsSchema =
+      openApiSpec.paths['/events/{eventId}/messages/{campaignId}/jobs'].get.responses['200']
+        .content['application/json'].schema;
+    expect(jobsSchema).toMatchObject({
+      required: ['items'],
+      properties: {
+        items: { items: { $ref: '#/components/schemas/MessageJobEnvelope' } },
+      },
+    });
+    expect(jobsSchema.properties).not.toHaveProperty('nextCursor');
+    expect(jobsSchema.properties).not.toHaveProperty('hasMore');
+
+    const deliveryLogsSchema =
+      openApiSpec.paths['/events/{eventId}/messages/{campaignId}/delivery-logs'].get.responses[
+        '200'
+      ].content['application/json'].schema;
+    expect(deliveryLogsSchema).toMatchObject({
+      required: ['items'],
+      properties: {
+        items: { items: { $ref: '#/components/schemas/MessageDeliveryLogEnvelope' } },
+      },
+    });
+    expect(
+      openApiSpec.paths[
+        '/events/{eventId}/messages/{campaignId}/delivery-logs/{channel}/{deliveryId}'
+      ].get.responses['200'].content['application/json'].schema,
+    ).toEqual({ $ref: '#/components/schemas/MessageDeliveryLogEnvelope' });
+    expect(openApiSpec.components.schemas.MessageDeliveryLogEnvelope.required).toEqual([
+      'channel',
+      'campaignId',
+      'eventId',
+      'delivery',
+    ]);
+
+    const providerEventsSchema =
+      openApiSpec.paths['/events/{eventId}/messages/{campaignId}/provider-events'].get.responses[
+        '200'
+      ].content['application/json'].schema;
+    expect(providerEventsSchema).toMatchObject({
+      required: ['items'],
+      properties: {
+        items: { items: { $ref: '#/components/schemas/MessageProviderEventEnvelope' } },
+      },
+    });
+    expect(providerEventsSchema.properties).not.toHaveProperty('nextCursor');
+    expect(providerEventsSchema.properties).not.toHaveProperty('hasMore');
+  });
+
   it('documents content-studio document lifecycle contracts', () => {
     expect(openApiSpec.components.schemas.ContentDocument.properties.channel.enum).toEqual([
       'event_page',

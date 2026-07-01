@@ -1597,6 +1597,10 @@ export type PageResult<T> = {
   hasMore: boolean;
 };
 
+export type ItemList<T> = {
+  items: T[];
+};
+
 export type PaginationParams = {
   cursor?: string;
   limit?: number;
@@ -2995,22 +2999,14 @@ class MessageResource {
       body: input,
     });
   }
-  async list(eventId: string, params?: PaginationParams): Promise<PageResult<MessageCampaign>> {
-    return this.client.request('GET', `/events/${eventId}/messages`, {
-      params: paginationParams(params),
-    });
+  async list(eventId: string): Promise<ItemList<MessageCampaign>> {
+    return this.client.request('GET', `/events/${eventId}/messages`);
   }
   async getCampaign(eventId: string, campaignId: string): Promise<MessageCampaign> {
     return this.client.request('GET', `/events/${eventId}/messages/${campaignId}`);
   }
-  async jobs(
-    eventId: string,
-    campaignId: string,
-    params?: PaginationParams,
-  ): Promise<PageResult<MessageJob>> {
-    return this.client.request('GET', `/events/${eventId}/messages/${campaignId}/jobs`, {
-      params: paginationParams(params),
-    });
+  async jobs(eventId: string, campaignId: string): Promise<ItemList<MessageJob>> {
+    return this.client.request('GET', `/events/${eventId}/messages/${campaignId}/jobs`);
   }
   async job(
     eventId: string,
@@ -3023,14 +3019,8 @@ class MessageResource {
       `/events/${eventId}/messages/${campaignId}/jobs/${channel}/${jobId}`,
     );
   }
-  async deliveryLogs(
-    eventId: string,
-    campaignId: string,
-    params?: PaginationParams,
-  ): Promise<PageResult<MessageDeliveryLog>> {
-    return this.client.request('GET', `/events/${eventId}/messages/${campaignId}/delivery-logs`, {
-      params: paginationParams(params),
-    });
+  async deliveryLogs(eventId: string, campaignId: string): Promise<ItemList<MessageDeliveryLog>> {
+    return this.client.request('GET', `/events/${eventId}/messages/${campaignId}/delivery-logs`);
   }
   async deliveryLog(
     eventId: string,
@@ -3046,11 +3036,8 @@ class MessageResource {
   async providerEvents(
     eventId: string,
     campaignId: string,
-    params?: PaginationParams,
-  ): Promise<PageResult<MessageProviderEvent>> {
-    return this.client.request('GET', `/events/${eventId}/messages/${campaignId}/provider-events`, {
-      params: paginationParams(params),
-    });
+  ): Promise<ItemList<MessageProviderEvent>> {
+    return this.client.request('GET', `/events/${eventId}/messages/${campaignId}/provider-events`);
   }
   async providerEvent(
     eventId: string,

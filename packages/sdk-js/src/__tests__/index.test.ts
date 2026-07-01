@@ -1480,16 +1480,17 @@ describe('TixkitClient new resource methods', () => {
     expect(JSON.parse(getCall(fm, 2).body)).toEqual({ description: null, status: 'inactive' });
   });
 
-  it('messages.list sends GET with pagination', async () => {
-    const fm = mockFetch(200, { items: [], nextCursor: null, hasMore: false });
+  it('messages.list sends GET without pagination params', async () => {
+    const fm = mockFetch(200, { items: [] });
     const c = new TixkitClient({
       apiKey: '***********',
       apiBaseUrl: 'https://api.test',
       maxRetries: 0,
     });
-    await c.messages.list('evt_1', { limit: 10 });
+    const result = await c.messages.list('evt_1');
     const call = getCall(fm);
-    expect(call.url).toBe('https://api.test/v1/events/evt_1/messages?limit=10');
+    expect(call.url).toBe('https://api.test/v1/events/evt_1/messages');
+    expect(result).toEqual({ items: [] });
   });
 
   it('messages.previewRecipients sends POST body', async () => {
@@ -1982,6 +1983,27 @@ describe('TixkitClient new resource methods', () => {
       audienceLabel: 'Custom (2 attendees)',
     });
     expect(campaign).not.toHaveProperty('queued');
+  });
+
+  it('message sub-resource list methods use live item-list envelopes', async () => {
+    const fm = mockFetch(200, { items: [] });
+    const c = new TixkitClient({
+      apiKey: '***********',
+      apiBaseUrl: 'https://api.test',
+      maxRetries: 0,
+    });
+
+    await c.messages.jobs('evt_1', 'cmp_1');
+    await c.messages.deliveryLogs('evt_1', 'cmp_1');
+    await c.messages.providerEvents('evt_1', 'cmp_1');
+
+    expect(getCall(fm, 0).url).toBe('https://api.test/v1/events/evt_1/messages/cmp_1/jobs');
+    expect(getCall(fm, 1).url).toBe(
+      'https://api.test/v1/events/evt_1/messages/cmp_1/delivery-logs',
+    );
+    expect(getCall(fm, 2).url).toBe(
+      'https://api.test/v1/events/evt_1/messages/cmp_1/provider-events',
+    );
   });
 
   it('ticketTypes access-rule methods send typed requests', async () => {

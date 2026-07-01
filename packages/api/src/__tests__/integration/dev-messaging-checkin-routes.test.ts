@@ -3842,6 +3842,7 @@ describe('messaging endpoint', () => {
     const app = await setupApp(messagingRoutes, makePrincipal(), tables);
     const res = await app.inject({ method: 'GET', url: '/events/evt_1/messages' });
     expect(res.statusCode).toBe(200);
+    expect(Object.keys(res.json()).sort()).toEqual(['items']);
     expect(res.json().items[0]).toMatchObject({
       id: 'msg_campaign',
       eventId: 'evt_1',
@@ -4167,6 +4168,7 @@ describe('messaging endpoint', () => {
     const app = await setupApp(messagingRoutes, makePrincipal(), tables);
     const list = await app.inject({ method: 'GET', url: '/events/evt_1/messages/msg_jobs/jobs' });
     expect(list.statusCode).toBe(200);
+    expect(Object.keys(list.json()).sort()).toEqual(['items']);
     expect(list.json().items).toMatchObject([
       {
         channel: 'sms',
@@ -4280,6 +4282,7 @@ describe('messaging endpoint', () => {
       url: '/events/evt_1/messages/msg_logs/delivery-logs',
     });
     expect(list.statusCode).toBe(200);
+    expect(Object.keys(list.json()).sort()).toEqual(['items']);
     expect(list.json().items).toHaveLength(1);
     expect(list.json().items[0]).toMatchObject({ channel: 'sms', delivery: { id: 'smd_1' } });
 
@@ -4375,6 +4378,7 @@ describe('messaging endpoint', () => {
       url: '/events/evt_1/messages/msg_events/provider-events',
     });
     expect(list.statusCode).toBe(200);
+    expect(Object.keys(list.json()).sort()).toEqual(['items']);
     expect(list.json().items).toMatchObject([
       { channel: 'sms', event: { id: 'spe_1', event_type: 'message.sent' } },
     ]);
