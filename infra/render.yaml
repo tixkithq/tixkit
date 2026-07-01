@@ -1,4 +1,9 @@
 services:
+  - type: keyvalue
+    name: tixkit-redis
+    plan: starter
+    ipAllowList: []
+
   - type: web
     name: tixkit-api
     env: docker
@@ -8,10 +13,12 @@ services:
       - key: NODE_ENV
         value: production
       - key: DATABASE_URL
-        fromDatabase: postgres
+        fromDatabase:
+          name: postgres
+          property: connectionString
       - key: REDIS_URL
         fromService:
-          type: redis
+          type: keyvalue
           name: tixkit-redis
           property: connectionString
       - key: PORT
@@ -36,10 +43,12 @@ services:
       - key: NODE_ENV
         value: production
       - key: DATABASE_URL
-        fromDatabase: postgres
+        fromDatabase:
+          name: postgres
+          property: connectionString
       - key: REDIS_URL
         fromService:
-          type: redis
+          type: keyvalue
           name: tixkit-redis
           property: connectionString
       - key: TEMPORAL_ADDRESS
@@ -80,8 +89,4 @@ services:
 
 databases:
   - name: postgres
-    plan: starter
-
-  - name: tixkit-redis
-    type: redis
     plan: starter

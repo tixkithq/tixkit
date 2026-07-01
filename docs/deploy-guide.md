@@ -110,7 +110,7 @@ Render supports monorepo deployments via `render.yaml`. See `infra/render.yaml` 
 
 1. Connect your Tixkit repository to Render.
 2. Use the blueprint at `infra/render.yaml` to create all services.
-3. Add managed PostgreSQL and Redis from Render's database marketplace.
+3. Let the blueprint create managed PostgreSQL and Key Value resources.
 4. Set environment variables in each service.
 5. Run migrations as a render shell command.
 

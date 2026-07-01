@@ -179,6 +179,133 @@ awk '
 ' infra/render.yaml ||
   fail "infra/render.yaml must set tixkit-api TRUST_PROXY=1, CORS_ALLOWED_ORIGINS=${expected_cors_origins}, and explicit TEMPORAL_ADDRESS/TEMPORAL_NAMESPACE/TEMPORAL_TASK_QUEUE=tixkit-production for tixkit-api and tixkit-worker"
 
+awk '
+  function reset_service_state() {
+    in_api = 0
+    in_worker = 0
+    in_redis = 0
+    service_type = ""
+    database_url_count = 0
+    redis_url_count = 0
+    pending_database_from_database = 0
+    pending_database_name = 0
+    pending_database_property = 0
+    pending_redis_from_service = 0
+    pending_redis_type = 0
+    pending_redis_name = 0
+    pending_redis_property = 0
+    redis_has_ip_allow_list = 0
+  }
+  function fail_pending_datastore_refs() {
+    if (pending_database_from_database || pending_database_name || pending_database_property ||
+      pending_redis_from_service || pending_redis_type || pending_redis_name || pending_redis_property) {
+      bad_datastore_refs = 1
+    }
+    pending_database_from_database = 0
+    pending_database_name = 0
+    pending_database_property = 0
+    pending_redis_from_service = 0
+    pending_redis_type = 0
+    pending_redis_name = 0
+    pending_redis_property = 0
+  }
+  function finish_service() {
+    fail_pending_datastore_refs()
+    if ((in_api || in_worker) && (database_url_count != 1 || redis_url_count != 1)) {
+      bad_datastore_refs = 1
+    }
+    if (in_redis && (service_type != "keyvalue" || !redis_has_ip_allow_list)) {
+      bad_redis_service = 1
+    }
+  }
+  BEGIN {
+    reset_service_state()
+  }
+  /^databases:$/ {
+    in_databases = 1
+    next
+  }
+  /^[^[:space:]]/ {
+    in_databases = 0
+  }
+  in_databases && /^  - name: tixkit-redis$/ {
+    bad_redis_database = 1
+  }
+  /^  - type: / {
+    finish_service()
+    reset_service_state()
+    service_type = $3
+    next
+  }
+  /^    name: tixkit-api$/ {
+    in_api = 1
+    next
+  }
+  /^    name: tixkit-worker$/ {
+    in_worker = 1
+    next
+  }
+  /^    name: tixkit-redis$/ {
+    in_redis = 1
+    found_redis_service = 1
+    next
+  }
+  in_redis && /^[[:space:]]*ipAllowList:[[:space:]]*\[\][[:space:]]*$/ {
+    redis_has_ip_allow_list = 1
+    next
+  }
+  (in_api || in_worker) && /^[[:space:]]*- key: DATABASE_URL$/ {
+    fail_pending_datastore_refs()
+    database_url_count += 1
+    pending_database_from_database = 1
+    next
+  }
+  (in_api || in_worker) && pending_database_from_database && /^[[:space:]]*fromDatabase:[[:space:]]*$/ {
+    pending_database_from_database = 0
+    pending_database_name = 1
+    next
+  }
+  (in_api || in_worker) && pending_database_name && /^[[:space:]]*name:[[:space:]]*postgres[[:space:]]*$/ {
+    pending_database_name = 0
+    pending_database_property = 1
+    next
+  }
+  (in_api || in_worker) && pending_database_property && /^[[:space:]]*property:[[:space:]]*connectionString[[:space:]]*$/ {
+    pending_database_property = 0
+    next
+  }
+  (in_api || in_worker) && /^[[:space:]]*- key: REDIS_URL$/ {
+    fail_pending_datastore_refs()
+    redis_url_count += 1
+    pending_redis_from_service = 1
+    next
+  }
+  (in_api || in_worker) && pending_redis_from_service && /^[[:space:]]*fromService:[[:space:]]*$/ {
+    pending_redis_from_service = 0
+    pending_redis_type = 1
+    next
+  }
+  (in_api || in_worker) && pending_redis_type && /^[[:space:]]*type:[[:space:]]*keyvalue[[:space:]]*$/ {
+    pending_redis_type = 0
+    pending_redis_name = 1
+    next
+  }
+  (in_api || in_worker) && pending_redis_name && /^[[:space:]]*name:[[:space:]]*tixkit-redis[[:space:]]*$/ {
+    pending_redis_name = 0
+    pending_redis_property = 1
+    next
+  }
+  (in_api || in_worker) && pending_redis_property && /^[[:space:]]*property:[[:space:]]*connectionString[[:space:]]*$/ {
+    pending_redis_property = 0
+    next
+  }
+  END {
+    finish_service()
+    exit !bad_datastore_refs && !bad_redis_service && !bad_redis_database && found_redis_service ? 0 : 1
+  }
+' infra/render.yaml ||
+  fail 'infra/render.yaml must use object-form Render datastore refs and declare tixkit-redis as a keyvalue service with ipAllowList'
+
 awk -v checkout_api_base_url="${expected_render_checkout_api_base_url}" \
   -v admin_api_base_url="${expected_render_api_origin}" '
   function reset_service_state() {
