@@ -527,7 +527,12 @@ describe('openApiSpec', () => {
     ]);
     expect(requestSchema.oneOf[0].properties).not.toHaveProperty('templateKey');
     expect(requestSchema.oneOf[0].properties.emailTemplateKey.maxLength).toBe(128);
+    expect(requestSchema.oneOf[0].properties.scheduledAt).toEqual({
+      type: 'string',
+      format: 'date-time',
+    });
     expect(requestSchema.oneOf[1].properties.smsTemplateKey.maxLength).toBe(128);
+    expect(requestSchema.oneOf.every((schema) => 'scheduledAt' in schema.properties)).toBe(true);
     expect(messagePost.responses['202'].content['application/json'].schema).toEqual({
       $ref: '#/components/schemas/MessageQueued',
     });
@@ -541,6 +546,7 @@ describe('openApiSpec', () => {
       status: { type: 'string' },
       queuedEmailJobs: { type: 'integer' },
       queuedSmsJobs: { type: 'integer' },
+      scheduledAt: { type: 'string', format: 'date-time' },
     });
     expect(messageQueued.required).toEqual(
       expect.arrayContaining([

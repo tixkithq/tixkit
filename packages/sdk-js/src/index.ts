@@ -1147,6 +1147,7 @@ export type MessageQueued = {
   suppressedRecipients: number;
   consentExclusions: number;
   skippedRecipients: number;
+  scheduledAt?: string;
   emailJobIds: string[];
   smsJobIds: string[];
 };
@@ -1446,6 +1447,7 @@ export type SendMessageBaseInput = {
   audience: SendMessageAudience;
   attendeeIds?: string[];
   variables?: Record<string, unknown>;
+  scheduledAt?: string;
 } & IdempotencyOptions;
 export type SendEmailMessageInput = SendMessageBaseInput & {
   channel: 'email';

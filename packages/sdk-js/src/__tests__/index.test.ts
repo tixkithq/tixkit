@@ -1421,6 +1421,7 @@ describe('TixkitClient new resource methods', () => {
       suppressedRecipients: 0,
       consentExclusions: 0,
       skippedRecipients: 0,
+      scheduledAt: '2026-07-02T15:00:00.000Z',
       emailJobIds: ['email_1', 'email_2'],
       smsJobIds: ['sms_1', 'sms_2'],
     });
@@ -1430,11 +1431,12 @@ describe('TixkitClient new resource methods', () => {
       maxRetries: 0,
     });
 
-    await c.messages.send('evt_1', {
+    const result = await c.messages.send('evt_1', {
       emailTemplateKey: 'door-reminder-email',
       smsTemplateKey: 'door-reminder-sms',
       audience: 'all',
       channel: 'both',
+      scheduledAt: '2026-07-02T15:00:00.000Z',
       idempotencyKey: 'idem_msg_1',
     });
 
@@ -1447,7 +1449,9 @@ describe('TixkitClient new resource methods', () => {
       smsTemplateKey: 'door-reminder-sms',
       audience: 'all',
       channel: 'both',
+      scheduledAt: '2026-07-02T15:00:00.000Z',
     });
+    expect(result.scheduledAt).toBe('2026-07-02T15:00:00.000Z');
   });
 
   it('content resource sends lifecycle requests', async () => {
