@@ -219,10 +219,11 @@ export class BrandSenderIdentityRepository extends BaseRepository {
     );
   }
 
-  async findByBrand(brandId: string) {
+  async findByBrand(tenantId: string, brandId: string) {
     return this.db
       .selectFrom('brand_sender_identities')
       .selectAll()
+      .where('tenant_id', '=', tenantId)
       .where('brand_id', '=', brandId)
       .execute();
   }

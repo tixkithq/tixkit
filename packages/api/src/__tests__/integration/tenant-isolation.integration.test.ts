@@ -630,6 +630,65 @@ describe('tenant settings list permission gates', () => {
     await app.close();
   });
 
+  it('GET /brands/:brandId/email-sender-identities returns scoped sender identities', async () => {
+    const app = await setupApp(
+      tenantRoutes,
+      makePrincipal({ organizationIds: ['org_1'], scopes: ['settings.write'] }),
+      {
+        brands: [brandRow({ id: 'brd_1', organization_id: 'org_1' })],
+        brand_sender_identities: [
+          {
+            id: 'bsi_1',
+            tenant_id: 'tnt_1',
+            brand_id: 'brd_1',
+            email: 'tickets@example.test',
+            name: 'Tickets',
+            reply_to_email: 'support@example.test',
+            verified: 1,
+            verified_at: new Date('2026-06-01T00:00:00.000Z'),
+            created_at: new Date('2026-06-01T00:00:00.000Z'),
+            updated_at: new Date('2026-06-01T00:00:00.000Z'),
+          },
+          {
+            id: 'bsi_other_tenant',
+            tenant_id: 'tnt_other',
+            brand_id: 'brd_1',
+            email: 'other-tenant@example.test',
+            name: 'Other Tenant',
+            reply_to_email: null,
+            verified: 1,
+            verified_at: new Date('2026-06-01T00:00:00.000Z'),
+            created_at: new Date('2026-06-01T00:00:00.000Z'),
+            updated_at: new Date('2026-06-01T00:00:00.000Z'),
+          },
+        ],
+      },
+    );
+
+    const res = await app.inject({
+      method: 'GET',
+      url: '/brands/brd_1/email-sender-identities',
+    });
+
+    expect(res.statusCode).toBe(200);
+    expect(res.json()).toEqual([
+      expect.objectContaining({
+        id: 'bsi_1',
+        tenantId: 'tnt_1',
+        brandId: 'brd_1',
+        email: 'tickets@example.test',
+        name: 'Tickets',
+        replyToEmail: 'support@example.test',
+        verified: true,
+        verifiedAt: '2026-06-01T00:00:00.000Z',
+      }),
+    ]);
+    expect(res.json().map((identity: { id: string }) => identity.id)).not.toContain(
+      'bsi_other_tenant',
+    );
+    await app.close();
+  });
+
   it('POST /brands returns the serialized brand contract', async () => {
     const app = await setupApp(
       tenantRoutes,

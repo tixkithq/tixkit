@@ -3,6 +3,7 @@ import { ClerkAuthService } from '../../auth/clerk.js';
 import {
   OrganizationRepository,
   OrganizationMemberRepository,
+  BrandSenderIdentityRepository,
   BrandRepository,
   PaymentAccountRepository,
   AuditLogRepository,
@@ -20,6 +21,7 @@ import {
 import {
   serializeBrand,
   serializeBrandDomain,
+  serializeBrandSenderIdentity,
   serializeOrganization,
 } from '../../http/contracts.js';
 import Stripe from 'stripe';
@@ -429,6 +431,26 @@ export const tenantRoutes: FastifyPluginAsync = async (app) => {
       diffSummary: { domain: body.domain, isPrimary: body.isPrimary },
     });
     return reply.status(201).send(serializeBrandDomain(domain));
+  });
+
+  app.get('/brands/:brandId/email-sender-identities', async (request) => {
+    const principal = request.principal!;
+    ClerkAuthService.requirePermission(principal, 'settings.write');
+    const { brandId } = request.params as { brandId: string };
+
+    const brand = await new BrandRepository(db).findById(brandId);
+    if (!brand) throw new ValidationError('Brand not found');
+    ClerkAuthService.requireResourceTenant(principal, brand, 'Brand', brandId);
+    ClerkAuthService.requireBrandScope(principal, brandId);
+    ClerkAuthService.requireOrganizationScope(principal, brand.organization_id);
+
+    const identities = await new BrandSenderIdentityRepository(db).findByBrand(
+      principal.tenantId,
+      brandId,
+    );
+    return identities.map((identity) =>
+      serializeBrandSenderIdentity(identity as Record<string, unknown>),
+    );
   });
 
   app.get('/brands', async (request) => {
