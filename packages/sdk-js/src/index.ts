@@ -5,6 +5,7 @@
 export const TIXKIT_API_VERSION = '2026-01-01';
 export const MAX_OFFLINE_SYNC_SCANS = 100_000;
 export const MAX_BULK_OFFLINE_SYNC_CHUNK_SCANS = 50_000;
+export const MAX_OFFLINE_MANIFEST_TICKETS = 50_000;
 
 export type TixkitConfig = {
   apiKey?: string;

@@ -142,6 +142,7 @@ type BulkSyncWorkerOptions = {
 };
 
 const OFFLINE_SYNC_DB_CHUNK_SIZE = 500;
+export const MAX_OFFLINE_MANIFEST_TICKETS = 50_000;
 const BULK_SYNC_ERROR_SAMPLE_LIMIT = 25;
 const BULK_SYNC_PROCESSING_BATCH_SIZE = 50_000;
 const BULK_SYNC_PUBLIC_FAILURE_MESSAGE = 'Bulk sync chunk processing failed';
@@ -352,7 +353,13 @@ export const checkInRoutes: FastifyPluginAsync = async (app) => {
       ticketQuery = ticketQuery.where('tickets.event_occurrence_id', '=', list.event_occurrence_id);
     }
 
-    const rows = await ticketQuery.execute();
+    const rows = await ticketQuery.limit(MAX_OFFLINE_MANIFEST_TICKETS + 1).execute();
+    if (rows.length > MAX_OFFLINE_MANIFEST_TICKETS) {
+      throw new ValidationError(
+        `Offline manifest exceeds maximum ticket count of ${MAX_OFFLINE_MANIFEST_TICKETS}`,
+        { maxTickets: MAX_OFFLINE_MANIFEST_TICKETS },
+      );
+    }
     return buildOfflineManifest({ eventId, checkInListId, rows });
   });
 

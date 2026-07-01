@@ -7,9 +7,11 @@ import path from 'node:path';
 import {
   TixkitClient,
   TixkitApiError,
+  MAX_OFFLINE_MANIFEST_TICKETS,
   type BrandSenderIdentity,
   type ContentRenderArtifact,
   type EmailTemplateDocument,
+  type OfflineManifest,
   type OAuthApplication,
   type PublicAvailabilityItem,
   type SmsTemplateDocument,
@@ -1063,6 +1065,46 @@ describe('TixkitClient new resource methods', () => {
 
     const call = getCall(fm);
     expect(call.url).toBe('https://api.test/v1/events/evt_1/check-in-lists?cursor=cil_0&limit=25');
+    expect(call.method).toBe('GET');
+    expect(call.headers.Authorization).toBeUndefined();
+    expect(call.headers['X-Device-Id']).toBe('sd_public_1');
+    expect(call.headers['X-Device-Secret']).toBe('scanner-secret');
+  });
+
+  it('checkInLists.getManifest exposes the bounded single-download manifest contract', async () => {
+    expect(MAX_OFFLINE_MANIFEST_TICKETS).toBe(50_000);
+    const manifest: OfflineManifest = {
+      eventId: 'evt_1',
+      checkInListId: 'cil_1',
+      generatedAt: '2026-06-01T00:00:00.000Z',
+      expiresAt: '2026-06-02T00:00:00.000Z',
+      keyId: 'manifest:v1',
+      signature: 'a'.repeat(64),
+      tickets: [
+        {
+          ticketId: 'tkt_1',
+          ticketTypeId: 'tt_1',
+          attendeeName: 'Ada Lovelace',
+          qrHash: 'hash_1',
+          status: 'valid',
+        },
+      ],
+    };
+    const fm = mockFetch(200, manifest);
+    const c = new TixkitClient({
+      apiBaseUrl: 'https://api.test',
+      maxRetries: 0,
+    });
+
+    await expect(
+      c.checkInLists.getManifest('evt_1', 'cil_1', {
+        'X-Device-Id': 'sd_public_1',
+        'X-Device-Secret': 'scanner-secret',
+      }),
+    ).resolves.toEqual(manifest);
+
+    const call = getCall(fm);
+    expect(call.url).toBe('https://api.test/v1/events/evt_1/check-in-lists/cil_1/manifest');
     expect(call.method).toBe('GET');
     expect(call.headers.Authorization).toBeUndefined();
     expect(call.headers['X-Device-Id']).toBe('sd_public_1');

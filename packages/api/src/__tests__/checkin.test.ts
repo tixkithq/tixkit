@@ -6,6 +6,7 @@ import type { AppContext } from '../app.js';
 import {
   buildOfflineManifest,
   checkInRoutes,
+  MAX_OFFLINE_MANIFEST_TICKETS,
   processPendingBulkSyncChunks,
   processPendingBulkSyncJobs,
   processScan,
@@ -154,6 +155,7 @@ function buildOfflineSyncMockDb(overrides: OfflineSyncMockOverrides = {}) {
   // Table-aware query builder: returns the right mock data per table.
   function makeQuery(table: string) {
     const conditions: MockCondition[] = [];
+    let limitValue: number | undefined;
     const matchesConditions = (row: Record<string, unknown>) =>
       conditions.every((condition) => matchesMockCondition(row, condition));
     const tableRows = () => {
@@ -192,7 +194,8 @@ function buildOfflineSyncMockDb(overrides: OfflineSyncMockOverrides = {}) {
       orderBy() {
         return q;
       },
-      limit() {
+      limit(value: number) {
+        limitValue = value;
         return q;
       },
       forUpdate() {
@@ -207,7 +210,8 @@ function buildOfflineSyncMockDb(overrides: OfflineSyncMockOverrides = {}) {
         return result;
       },
       async execute() {
-        return tableRows().filter((row) => matchesConditions(row));
+        const rows = tableRows().filter((row) => matchesConditions(row));
+        return limitValue === undefined ? rows : rows.slice(0, limitValue);
       },
     };
     return q;
@@ -736,6 +740,59 @@ describe('buildOfflineManifest', () => {
         process.env.QR_SIGNING_SECRET = originalQrSigningSecret;
       }
     }
+  });
+});
+
+describe('offline manifest endpoint', () => {
+  it('rejects single-download manifests above the ticket cap before signing', async () => {
+    const principal: Principal = {
+      type: 'user',
+      id: 'usr_1',
+      tenantId: 'tnt_1',
+      organizationIds: ['org_1'],
+      scopes: ['checkins.read'],
+    };
+    const tickets = Array.from({ length: MAX_OFFLINE_MANIFEST_TICKETS + 1 }, (_, index) => ({
+      id: `tkt_${index}`,
+      ticket_id: `tkt_${index}`,
+      tenant_id: 'tnt_1',
+      attendee_id: `att_${index}`,
+      event_id: 'evt_1',
+      ticket_type_id: 'tt_allowed',
+      event_occurrence_id: null,
+      qr_hash: `hash_${index}`,
+      status: 'valid',
+      first_name: 'Scan',
+      last_name: String(index),
+      email: `scan-${index}@example.com`,
+    }));
+    const { db } = buildOfflineSyncMockDb({ ticket: tickets });
+    const app = Fastify();
+    app.decorate('context', {
+      db,
+      pricingEngine: {},
+      inventoryService: {},
+      qrService: {},
+      authService: {},
+      temporalClient: {},
+    } as unknown as AppContext);
+    app.addHook('onRequest', async (request) => {
+      request.principal = principal;
+    });
+    await app.register(checkInRoutes);
+
+    const response = await app.inject({
+      method: 'GET',
+      url: '/events/evt_1/check-in-lists/cil_1/manifest',
+    });
+
+    expect(response.statusCode).toBe(400);
+    expect(response.json()).toMatchObject({
+      code: 'VALIDATION_ERROR',
+      message: `Offline manifest exceeds maximum ticket count of ${MAX_OFFLINE_MANIFEST_TICKETS}`,
+    });
+
+    await app.close();
   });
 });
 

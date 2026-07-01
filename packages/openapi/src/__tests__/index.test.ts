@@ -373,7 +373,14 @@ describe('openApiSpec', () => {
         '200'
       ].content['application/json'].schema,
     ).toEqual({ $ref: '#/components/schemas/OfflineManifest' });
+    expect(
+      openApiSpec.paths['/events/{eventId}/check-in-lists/{checkInListId}/manifest'].get.responses,
+    ).toHaveProperty('400');
     expect(openApiSpec.components.schemas.OfflineManifest.required).toContain('tickets');
+    expect(openApiSpec.components.schemas.OfflineManifest.properties.tickets.maxItems).toBe(50_000);
+    expect(openApiSpec.components.schemas.OfflineManifest.properties.tickets.description).toContain(
+      '50,000 tickets',
+    );
     expect(
       openApiSpec.components.schemas.OfflineManifest.properties.tickets.items.properties,
     ).toHaveProperty('eventOccurrenceId');

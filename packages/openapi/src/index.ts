@@ -2170,6 +2170,9 @@ const rawOpenApiSpec = {
           },
           tickets: {
             type: 'array',
+            maxItems: 50_000,
+            description:
+              'Single-download offline manifests are capped at 50,000 tickets. Lists above this size must use a smaller check-in list scope before downloading a manifest.',
             items: {
               type: 'object',
               properties: {
@@ -5221,6 +5224,8 @@ const rawOpenApiSpec = {
     '/events/{eventId}/check-in-lists/{checkInListId}/manifest': {
       get: {
         summary: 'Download offline check-in manifest',
+        description:
+          'Returns a signed single-download offline manifest for active check-in lists up to 50,000 tickets.',
         security: [{ ScannerDeviceAuth: [] }, { BearerAuth: [] }],
         parameters: [{ $ref: '#/components/parameters/OptionalScannerDeviceSecret' }],
         responses: {
@@ -5230,6 +5235,7 @@ const rawOpenApiSpec = {
               'application/json': { schema: { $ref: '#/components/schemas/OfflineManifest' } },
             },
           },
+          '400': { description: 'Check-in list is inactive or exceeds the offline manifest cap' },
         },
       },
     },
