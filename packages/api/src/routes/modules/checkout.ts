@@ -1968,9 +1968,21 @@ export const checkoutRoutes: FastifyPluginAsync = async (app) => {
 
         if (quote.totalCents === 0) {
           const workflowResult = await handle.result();
-          const order = await orderRepo.findById(workflowResult.orderId!);
-          if (!order) throw new NotFoundError('Order', workflowResult.orderId!);
-          return { status: 200, body: { order, sessionId, status: workflowResult.status } };
+          if (workflowResult.status === 'completed' && workflowResult.orderId) {
+            const order = await orderRepo.findById(workflowResult.orderId);
+            if (!order) throw new NotFoundError('Order', workflowResult.orderId);
+            return { status: 200, body: { order, sessionId, status: 'completed' } };
+          }
+          return {
+            status: 409,
+            body: {
+              error: {
+                code: 'CHECKOUT_FINALIZATION_FAILED',
+                message: 'Checkout could not be finalized',
+                requestId: request.id,
+              },
+            },
+          };
         }
 
         // Poll the workflow until the payment intent is created or it fails.
