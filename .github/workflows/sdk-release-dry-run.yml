@@ -20,8 +20,10 @@ jobs:
     name: SDK Parity Matrix
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-node@v6
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+      - name: Verify GitHub Action refs are pinned
+        run: infra/ci/scripts/verify-github-action-pins.sh
+      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6
         with:
           node-version: 24
       - name: Verify SDK parity matrix
@@ -31,7 +33,7 @@ jobs:
     name: NPM SDK Dry Run
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
       - uses: ./.github/actions/setup-js
       - run: bun install --frozen-lockfile
       - name: Build package SDKs
@@ -48,7 +50,7 @@ jobs:
           (cd packages/sdk-next && npm pack --dry-run --json) | tee sdk-release-provenance/sdk-next-npm-pack.json
           (cd packages/sdk-sveltekit && npm pack --dry-run --json) | tee sdk-release-provenance/sdk-sveltekit-npm-pack.json
           (cd packages/sdk-react-native && npm pack --dry-run --json) | tee sdk-release-provenance/sdk-react-native-npm-pack.json
-      - uses: actions/upload-artifact@v7
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         if: always()
         with:
           name: npm-sdk-dry-run-provenance
@@ -59,8 +61,8 @@ jobs:
     name: Flutter SDK Dry Run
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
-      - uses: subosito/flutter-action@v2
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+      - uses: subosito/flutter-action@1a449444c387b1966244ae4d4f8c696479add0b2 # v2
         with:
           flutter-version: '3.22.x'
           channel: stable
@@ -74,7 +76,7 @@ jobs:
           flutter analyze 2>&1 | tee ../../sdk-release-provenance/flutter-analyze.log
           flutter test 2>&1 | tee ../../sdk-release-provenance/flutter-test.log
           flutter pub publish --dry-run 2>&1 | tee ../../sdk-release-provenance/flutter-publish-dry-run.log
-      - uses: actions/upload-artifact@v7
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         if: always()
         with:
           name: flutter-sdk-dry-run-provenance
@@ -85,14 +87,14 @@ jobs:
     name: iOS SDK Dry Run
     runs-on: macos-latest
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
       - name: Build and test Swift package
         run: |
           set -euo pipefail
           mkdir -p sdk-release-provenance
           (cd packages/sdk-ios && swift build) 2>&1 | tee sdk-release-provenance/ios-swift-build.log
           (cd packages/sdk-ios && swift test) 2>&1 | tee sdk-release-provenance/ios-swift-test.log
-      - uses: actions/upload-artifact@v7
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         if: always()
         with:
           name: ios-sdk-dry-run-provenance
@@ -103,12 +105,12 @@ jobs:
     name: Android SDK Dry Run
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-java@v5
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+      - uses: actions/setup-java@1bcf9fb12cf4aa7d266a90ae39939e61372fe520 # v5
         with:
           distribution: temurin
           java-version: '21'
-      - uses: gradle/actions/setup-gradle@v6
+      - uses: gradle/actions/setup-gradle@90ddb51e90a5fd9ba75f40cf85156b7b41bf76a3 # v6
       - name: Build, test, and publish Android package locally
         run: |
           set -euo pipefail
@@ -116,7 +118,7 @@ jobs:
           (cd packages/sdk-android && ./gradlew build test) 2>&1 | tee sdk-release-provenance/android-gradle-build-test.log
           (cd packages/sdk-android && ./gradlew :example:testDebugUnitTest) 2>&1 | tee sdk-release-provenance/android-example-test.log
           (cd packages/sdk-android && ./gradlew :sdk:publishToMavenLocal) 2>&1 | tee sdk-release-provenance/android-publish-to-maven-local.log
-      - uses: actions/upload-artifact@v7
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         if: always()
         with:
           name: android-sdk-dry-run-provenance

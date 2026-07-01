@@ -19,7 +19,9 @@ jobs:
     name: Lint & Typecheck
     runs-on: tixkit-epyc-trusted
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+      - name: Verify GitHub Action refs are pinned
+        run: infra/ci/scripts/verify-github-action-pins.sh
       - uses: ./.github/actions/setup-js
       - run: bun install --frozen-lockfile
       - run: bun run audit
@@ -32,7 +34,7 @@ jobs:
     runs-on: tixkit-epyc-trusted
     needs: lint-typecheck
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
       - uses: ./.github/actions/setup-js
       - run: bun install --frozen-lockfile
       - run: bunx turbo run build
@@ -42,7 +44,7 @@ jobs:
     runs-on: tixkit-epyc-trusted
     needs: lint-typecheck
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
       - uses: ./.github/actions/setup-js
       - run: bun install --frozen-lockfile
       - name: Generate sanitized public export
@@ -65,7 +67,7 @@ jobs:
     name: Unit Tests
     runs-on: tixkit-epyc-trusted
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
       - uses: ./.github/actions/setup-js
       - run: bun install --frozen-lockfile
       - run: bun run test:unit
@@ -74,12 +76,12 @@ jobs:
     name: Flutter SDK
     runs-on: tixkit-epyc-trusted
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
       - name: Verify Flutter runner prerequisites
         run: |
           xz --version
           unzip -v | head -n 2
-      - uses: subosito/flutter-action@v2
+      - uses: subosito/flutter-action@1a449444c387b1966244ae4d4f8c696479add0b2 # v2
         with:
           flutter-version: '3.22.x'
           channel: stable
@@ -108,7 +110,7 @@ jobs:
     runs-on: macos-latest
     if: ${{ vars.RUN_TRUSTED_IOS_SDK == '1' }}
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
       - name: Build Swift package
         run: cd packages/sdk-ios && swift build
       - name: Run Swift package tests
@@ -122,13 +124,13 @@ jobs:
     name: Android SDK
     runs-on: tixkit-epyc-trusted
     steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-java@v5
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+      - uses: actions/setup-java@1bcf9fb12cf4aa7d266a90ae39939e61372fe520 # v5
         with:
           distribution: temurin
           java-version: '21'
-      - uses: android-actions/setup-android@v3
-      - uses: gradle/actions/setup-gradle@v6
+      - uses: android-actions/setup-android@9fc6c4e9069bf8d3d10b2204b1fb8f6ef7065407 # v3
+      - uses: gradle/actions/setup-gradle@90ddb51e90a5fd9ba75f40cf85156b7b41bf76a3 # v6
       - name: Build and test Android SDK
         run: cd packages/sdk-android && ./gradlew build test
       - name: Run example scanner smoke
@@ -138,7 +140,7 @@ jobs:
     name: React Native Demo
     runs-on: tixkit-epyc-trusted
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
       - uses: ./.github/actions/setup-js
       - name: Install dependencies
         run: bun install --frozen-lockfile
@@ -190,7 +192,7 @@ jobs:
       REDIS_URL: redis://localhost:6379
       TEMPORAL_ADDRESS: localhost:7233
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
       - uses: ./.github/actions/setup-js
       - run: bun install --frozen-lockfile
       - name: Wait for Temporal
@@ -250,7 +252,7 @@ jobs:
       REDIS_URL: redis://localhost:6379
       TEMPORAL_ADDRESS: localhost:7233
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
       - uses: ./.github/actions/setup-js
       - run: bun install --frozen-lockfile
       - name: Wait for Temporal
@@ -280,7 +282,7 @@ jobs:
       DB_DRIVER: mssql
       DATABASE_URL_MSSQL: sqlserver://sa:Test-password-12345@tixkit-ci-mssql.arc-runners.svc.cluster.local:1433/tixkit?encrypt=false&trustServerCertificate=true
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
       - uses: ./.github/actions/setup-js
       - run: bun install --frozen-lockfile
       - name: Reset MSSQL database
