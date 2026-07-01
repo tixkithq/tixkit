@@ -500,6 +500,7 @@ Privacy requests accept `organizationId`, optional `brandId`, `subjectType` (`bu
 | `PATCH`  | `/v1/webhook-endpoints/:endpointId`        | `developers.write` | Update endpoint                                                            |
 | `GET`    | `/v1/webhook-endpoints`                    | `developers.write` | List endpoints                                                             |
 | `GET`    | `/v1/webhook-endpoints/:endpointId/events` | `developers.write` | List delivery events for endpoint                                          |
+| `POST`   | `/v1/webhook-endpoints/:endpointId/events/:eventId/replay` | `developers.write` | Re-queue a webhook event to one endpoint                                   |
 | `POST`   | `/v1/webhook-events/:eventId/replay`       | `developers.write` | Re-queue a webhook event to active endpoints                               |
 
 ## Inbound Webhook Routes (provider)

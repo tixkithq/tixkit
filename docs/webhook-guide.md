@@ -193,6 +193,19 @@ Response `202`:
 
 Replay starts a fresh `webhookDeliveryWorkflow` per matching endpoint, each with the full retry/dead-letter behavior. Replay is idempotent at the delivery level only if your handler is idempotent; design handlers to handle duplicate deliveries gracefully.
 
+Re-deliver an event to one endpoint when triage shows only that endpoint failed:
+
+```bash
+curl -X POST http://localhost:4000/v1/webhook-endpoints/whk_.../events/wevt_01HN.../replay \
+  -H "Authorization: Bearer tk_..."
+```
+
+Response `202`:
+
+```json
+{ "queued": true, "eventId": "wevt_01HN...", "endpointId": "whk_..." }
+```
+
 ## Inspecting Deliveries
 
 List deliveries for an endpoint (newest first, cursor-paginated):

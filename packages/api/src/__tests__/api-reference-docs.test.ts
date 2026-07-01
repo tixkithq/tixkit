@@ -29,4 +29,11 @@ describe('API reference route scopes', () => {
   ] as const)('documents %s %s as settings.write', (method, routePath) => {
     expect(apiReferenceScopeFor(method, routePath)).toBe('settings.write');
   });
+
+  it.each([
+    ['POST', '/v1/webhook-events/:eventId/replay'],
+    ['POST', '/v1/webhook-endpoints/:endpointId/events/:eventId/replay'],
+  ] as const)('documents %s %s as developers.write', (method, routePath) => {
+    expect(apiReferenceScopeFor(method, routePath)).toBe('developers.write');
+  });
 });
