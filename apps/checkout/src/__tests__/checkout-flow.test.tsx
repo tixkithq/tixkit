@@ -12,6 +12,17 @@ vi.mock('next/navigation', () => ({
 }));
 
 vi.mock('@/lib/api', () => {
+  class CheckoutApiError extends Error {
+    code: string;
+    status: number;
+
+    constructor(code: string, message: string, status = 500) {
+      super(message);
+      this.code = code;
+      this.status = status;
+    }
+  }
+
   return {
     publicApi: {
       getEvent: vi.fn(),
@@ -25,6 +36,9 @@ vi.mock('@/lib/api', () => {
       getSession: vi.fn(),
       confirmSession: vi.fn(),
     },
+    CheckoutApiError,
+    userFacingMessage: (error: unknown) =>
+      error instanceof Error ? error.message : 'Checkout is temporarily unavailable.',
   };
 });
 
@@ -118,6 +132,36 @@ describe('CheckoutFlow buyer validation', () => {
     expect(checkoutApiMock.createSession).not.toHaveBeenCalled();
   });
 
+  it('blocks checkout with a retryable error when question metadata fails to load', async () => {
+    publicApiMock.getQuestions
+      .mockRejectedValueOnce(new Error('question metadata unavailable'))
+      .mockResolvedValueOnce({
+        buyerQuestions: [],
+        attendeeQuestions: [],
+      });
+    const view = renderCheckoutFlow();
+
+    await view.findByText('General Admission');
+    await view.findByText('Checkout fields unavailable');
+    expect(view.getByText('question metadata unavailable')).toBeInTheDocument();
+    expect(view.queryByLabelText(/Email/)).not.toBeInTheDocument();
+
+    fireEvent.click(view.getByRole('button', { name: 'Increase General Admission quantity' }));
+    expect(view.getByRole('button', { name: 'Continue' })).toBeDisabled();
+    expect(checkoutApiMock.createSession).not.toHaveBeenCalled();
+
+    fireEvent.click(view.getByRole('button', { name: 'Retry checkout fields' }));
+
+    await waitFor(() => {
+      expect(publicApiMock.getQuestions).toHaveBeenCalledTimes(2);
+    });
+    await waitFor(() => {
+      expect(view.queryByText('Checkout fields unavailable')).not.toBeInTheDocument();
+    });
+    expect(view.getByLabelText(/Email/)).toBeInTheDocument();
+    expect(view.getByRole('button', { name: 'Continue' })).toBeEnabled();
+  });
+
   it('directs buyers to the missing required checkbox question', async () => {
     publicApiMock.getQuestions.mockResolvedValue({
       buyerQuestions: [
@@ -134,6 +178,7 @@ describe('CheckoutFlow buyer validation', () => {
     const view = renderCheckoutFlow();
 
     await view.findByText('General Admission');
+    await view.findByText('I agree to the photo policy');
     fireEvent.click(view.getByRole('button', { name: 'Increase General Admission quantity' }));
     fireEvent.change(view.getByLabelText(/Email/), {
       target: { value: 'buyer@example.com' },

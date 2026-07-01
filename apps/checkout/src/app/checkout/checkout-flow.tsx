@@ -130,6 +130,9 @@ export default function CheckoutFlow({
   const [availability, setAvailability] = useState<AvailabilityItem[]>([]);
   const [resaleListing, setResaleListing] = useState<CheckoutPublicResaleListing | null>(null);
   const [questions, setQuestions] = useState<QuestionsResponse | null>(null);
+  const [questionsLoading, setQuestionsLoading] = useState(false);
+  const [questionsError, setQuestionsError] = useState<string | null>(null);
+  const [questionsRetryKey, setQuestionsRetryKey] = useState(0);
   const [quantities, setQuantities] = useState<Record<string, number>>({});
   const [donationAmounts, setDonationAmounts] = useState<Record<string, number>>({});
   const [buyer, setBuyer] = useState<Buyer>({
@@ -320,6 +323,10 @@ export default function CheckoutFlow({
 
   // Validate donation amounts and attendee questions before creating session.
   function validateCart(): string | null {
+    if (!questions) {
+      return questionsError ?? 'Required checkout fields are still loading. Please try again.';
+    }
+
     for (const item of selectedItems) {
       if (!item.ticketTypeId) continue;
       const lineId = cartItemId(item);
@@ -392,7 +399,14 @@ export default function CheckoutFlow({
     return null;
   }
 
-  const canCreateSession = Boolean(eventId && selectedItems.length > 0 && !loading);
+  const canCreateSession = Boolean(
+    eventId &&
+    selectedItems.length > 0 &&
+    !loading &&
+    !questionsLoading &&
+    !questionsError &&
+    questions,
+  );
 
   // Resolve an existing session once on mount when resuming via sessionId +
   // token. This must NOT re-run when we create a new session mid-flow (that
@@ -448,10 +462,16 @@ export default function CheckoutFlow({
     async function loadEvent() {
       if (!eventId) {
         setInitialLoading(false);
+        setQuestions(null);
+        setQuestionsError(null);
+        setQuestionsLoading(false);
         return;
       }
       setInitialLoading(true);
       setError(null);
+      setQuestions(null);
+      setQuestionsError(null);
+      setQuestionsLoading(false);
       try {
         const [loadedEvent, loadedAvailability, resaleListings] = await Promise.all([
           publicApi.getEvent(eventId, controller.signal),
@@ -507,12 +527,24 @@ export default function CheckoutFlow({
           return next;
         });
 
-        // Load questions (best-effort, non-fatal).
+        if (!cancelled) setInitialLoading(false);
+
+        // Required checkout fields are server-authoritative. If the question
+        // metadata cannot load, keep checkout blocked until a retry succeeds.
+        setQuestionsLoading(true);
         try {
           const loadedQuestions = await publicApi.getQuestions(eventId, controller.signal);
-          if (!cancelled) setQuestions(loadedQuestions);
-        } catch {
-          // Questions endpoint may not be available yet; checkout still works.
+          if (!cancelled) {
+            setQuestions(loadedQuestions);
+            setQuestionsError(null);
+          }
+        } catch (err) {
+          if (!cancelled && !controller.signal.aborted) {
+            setQuestions(null);
+            setQuestionsError(userFacingMessage(err));
+          }
+        } finally {
+          if (!cancelled) setQuestionsLoading(false);
         }
       } catch (err) {
         if (cancelled || controller.signal.aborted) return;
@@ -527,7 +559,7 @@ export default function CheckoutFlow({
       cancelled = true;
       controller.abort();
     };
-  }, [eventId, prefilledItems, productFilterParam, resaleListingId]);
+  }, [eventId, prefilledItems, productFilterParam, resaleListingId, questionsRetryKey]);
 
   useEffect(() => {
     if (!waitlistClaimToken) return;
@@ -1031,19 +1063,46 @@ export default function CheckoutFlow({
                   <CardTitle>Your details</CardTitle>
                 </CardHeader>
                 <CardContent>
-                  <AttendeeForm
-                    buyer={buyer}
-                    onChange={setBuyer}
-                    disabled={loading && phase === 'confirm'}
-                    emailError={emailError}
-                    eventId={eventId}
-                    buyerQuestions={questions?.buyerQuestions}
-                    buyerAnswers={buyerAnswers}
-                    onBuyerAnswersChange={setBuyerAnswers}
-                    attendeeQuestionGroups={attendeeQuestionGroups}
-                    attendeeAnswers={attendeeAnswers}
-                    onAttendeeAnswersChange={setAttendeeAnswers}
-                  />
+                  {questionsLoading ? (
+                    <Alert>
+                      <LoaderCircleIcon className="animate-spin" />
+                      <AlertTitle>Loading checkout fields</AlertTitle>
+                      <AlertDescription>
+                        Required buyer and attendee fields are loading before checkout can continue.
+                      </AlertDescription>
+                    </Alert>
+                  ) : questionsError ? (
+                    <Alert variant="destructive">
+                      <AlertCircleIcon />
+                      <AlertTitle>Checkout fields unavailable</AlertTitle>
+                      <AlertDescription className="space-y-3">
+                        <span>{questionsError}</span>
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="sm"
+                          className="w-fit"
+                          onClick={() => setQuestionsRetryKey((current) => current + 1)}
+                        >
+                          Retry checkout fields
+                        </Button>
+                      </AlertDescription>
+                    </Alert>
+                  ) : questions ? (
+                    <AttendeeForm
+                      buyer={buyer}
+                      onChange={setBuyer}
+                      disabled={loading && phase === 'confirm'}
+                      emailError={emailError}
+                      eventId={eventId}
+                      buyerQuestions={questions.buyerQuestions}
+                      buyerAnswers={buyerAnswers}
+                      onBuyerAnswersChange={setBuyerAnswers}
+                      attendeeQuestionGroups={attendeeQuestionGroups}
+                      attendeeAnswers={attendeeAnswers}
+                      onAttendeeAnswersChange={setAttendeeAnswers}
+                    />
+                  ) : null}
                 </CardContent>
               </Card>
             ) : null}
