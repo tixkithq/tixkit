@@ -7,6 +7,7 @@ const mockState = vi.hoisted(() => ({
   patchedResult: true as boolean,
   sleeps: [] as string[],
   childStarts: [] as Array<{ workflow: unknown; options: Record<string, unknown> }>,
+  continueAsNewInputs: [] as unknown[],
   proxyActivityOptions: [] as Array<Record<string, unknown>>,
 }));
 
@@ -40,6 +41,9 @@ vi.mock('@temporalio/workflow', () => ({
     mockState.childStarts.push({ workflow, options });
     return { workflowId: 'child-mock' };
   },
+  continueAsNew: async (input: unknown) => {
+    mockState.continueAsNewInputs.push(input);
+  },
 }));
 
 import { checkoutSessionWorkflow } from '../workflows/checkout.js';
@@ -71,6 +75,7 @@ function resetState() {
   mockState.patchedResult = true;
   mockState.sleeps = [];
   mockState.childStarts = [];
+  mockState.continueAsNewInputs = [];
 }
 
 function makeCheckoutInput(overrides: Record<string, unknown> = {}) {
@@ -1481,6 +1486,48 @@ describe('holdExpirationWorkflow', () => {
       'privacy',
     ]);
     expect(mockState.sleeps).toEqual(['15 seconds']);
+    expect(mockState.continueAsNewInputs).toEqual([]);
+  });
+
+  it('continues as new after the configured production rollover threshold', async () => {
+    const calls: string[] = [];
+    setActivity('expireStaleHoldsActivity', async () => {
+      calls.push('holds');
+      return okResult({ expiredCount: 1 });
+    });
+    setActivity('expireStaleSessionsActivity', async () => {
+      calls.push('sessions');
+      return okResult({ expiredCount: 1 });
+    });
+    setActivity('processWaitlistOffersActivity', async () => {
+      calls.push('waitlist');
+      return okResult({ expiredCount: 1, offeredCount: 1, queuedEmailCount: 1 });
+    });
+    setActivity('enforcePrivacyRetentionActivity', async () => {
+      calls.push('privacy');
+      return okResult({ inspectedCount: 1, repairedCount: 1, skippedCount: 0 });
+    });
+
+    await holdExpirationWorkflow({
+      version: 1,
+      tickIntervalSeconds: 15,
+      continueAsNewAfterIterations: 2,
+    });
+
+    expect(calls).toEqual([
+      'holds',
+      'sessions',
+      'waitlist',
+      'privacy',
+      'holds',
+      'sessions',
+      'waitlist',
+      'privacy',
+    ]);
+    expect(mockState.sleeps).toEqual(['15 seconds']);
+    expect(mockState.continueAsNewInputs).toEqual([
+      { version: 1, tickIntervalSeconds: 15, continueAsNewAfterIterations: 2 },
+    ]);
   });
 
   it('skips privacy retention on pre-patch replay histories', async () => {

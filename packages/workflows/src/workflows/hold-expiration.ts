@@ -1,4 +1,4 @@
-import { patched, proxyActivities, sleep } from '@temporalio/workflow';
+import { continueAsNew, patched, proxyActivities, sleep } from '@temporalio/workflow';
 import type { WorkflowActivityResult } from '../shared/types.js';
 
 const {
@@ -32,7 +32,10 @@ export type HoldExpirationWorkflowInput = {
   version?: number;
   tickIntervalSeconds?: number;
   maxIterations?: number;
+  continueAsNewAfterIterations?: number;
 };
+
+export const DEFAULT_HOLD_EXPIRATION_CONTINUE_AS_NEW_ITERATIONS = 1_440;
 
 function throwIfPrivacyRetentionFailed(
   result: WorkflowActivityResult<{
@@ -52,11 +55,16 @@ export async function holdExpirationWorkflow(input?: HoldExpirationWorkflowInput
   // future schema changes should introduce new versions and gated migrations instead.
   const tickIntervalSeconds = input?.tickIntervalSeconds ?? 60;
   const maxIterations = input?.maxIterations;
+  const continueAsNewAfterIterations = Math.max(
+    1,
+    input?.continueAsNewAfterIterations ?? DEFAULT_HOLD_EXPIRATION_CONTINUE_AS_NEW_ITERATIONS,
+  );
   let iterations = 0;
 
   // This is a long-running workflow that periodically expires stale holds,
-  // sessions, waitlist offers, and privacy-retention repairs. `maxIterations` keeps unit tests bounded;
-  // production starts omit it so the workflow continues running.
+  // sessions, waitlist offers, and privacy-retention repairs. `maxIterations`
+  // keeps unit tests bounded; production starts omit it so the workflow rolls
+  // over with continue-as-new before history grows without bound.
   while (true) {
     if (maxIterations !== undefined && iterations >= maxIterations) {
       return;
@@ -74,6 +82,14 @@ export async function holdExpirationWorkflow(input?: HoldExpirationWorkflowInput
     }
     iterations += 1;
     if (maxIterations !== undefined && iterations >= maxIterations) {
+      return;
+    }
+    if (maxIterations === undefined && iterations >= continueAsNewAfterIterations) {
+      await continueAsNew<typeof holdExpirationWorkflow>({
+        version: input?.version,
+        tickIntervalSeconds,
+        continueAsNewAfterIterations,
+      });
       return;
     }
     // eslint-disable-next-line no-await-in-loop -- Temporal sleep spaces recurring maintenance ticks.
