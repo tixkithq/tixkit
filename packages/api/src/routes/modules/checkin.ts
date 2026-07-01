@@ -737,7 +737,9 @@ export const checkInRoutes: FastifyPluginAsync = async (app) => {
     const principal = request.principal!;
     ClerkAuthService.requirePermission(principal, 'checkins.read');
     const { jobId } = request.params as { jobId: string };
-    const job = await loadAuthorizedBulkSyncJob(db, principal, jobId, loadEvent);
+    const job = await loadAuthorizedBulkSyncJob(db, principal, jobId, loadEvent, {
+      requireOwningDevice: true,
+    });
     if (shouldScheduleBulkSyncJob(job)) {
       scheduleBulkSyncProcessing(db, job.id);
     }
@@ -748,7 +750,9 @@ export const checkInRoutes: FastifyPluginAsync = async (app) => {
     const principal = request.principal!;
     ClerkAuthService.requirePermission(principal, 'checkins.read');
     const { jobId } = request.params as { jobId: string };
-    await loadAuthorizedBulkSyncJob(db, principal, jobId, loadEvent);
+    await loadAuthorizedBulkSyncJob(db, principal, jobId, loadEvent, {
+      requireOwningDevice: true,
+    });
     const rows = (await db
       .selectFrom('offline_check_in_sync_chunks')
       .selectAll()

@@ -1587,7 +1587,7 @@ describe('bulk offline sync endpoint', () => {
     await app.close();
   });
 
-  it('allows read-only scanner principals to poll async job and chunk summaries', async () => {
+  it('allows owning read-only scanner principals to poll async job and chunk summaries', async () => {
     const { app, setPrincipal } = await setupBulkApp();
     const job = await createBulkJob(app);
     const chunk = await app.inject({
@@ -1602,7 +1602,6 @@ describe('bulk offline sync endpoint', () => {
 
     setPrincipal({
       ...principal,
-      id: 'sd_bulk_read_only',
       scopes: ['checkins.read'],
     });
 
@@ -1623,6 +1622,76 @@ describe('bulk offline sync endpoint', () => {
       items: [expect.objectContaining({ sequence: 1, status: 'uploaded' })],
     });
 
+    await app.close();
+  });
+
+  it('hides async job polling and chunks from non-owner scanner principals without scheduling', async () => {
+    const { app, setPrincipal, inserts } = await setupBulkApp();
+    const job = await createBulkJob(app);
+    const storedJob = inserts.find(
+      (insert) => insert.table === 'offline_check_in_sync_jobs',
+    )?.values;
+    expect(storedJob).toBeDefined();
+    Object.assign(storedJob!, {
+      status: 'receiving',
+      chunks_received: 2,
+      updated_at: new Date('2026-06-01T12:02:00.000Z'),
+    });
+    inserts.push({
+      table: 'offline_check_in_sync_chunks',
+      values: {
+        id: 'bch_non_owner_1',
+        tenant_id: 'tnt_1',
+        job_id: job.id,
+        sequence: 1,
+        scan_count: 1,
+        payload_hash: 'hash_1',
+        payload: JSON.stringify([
+          {
+            qrHash: 'hash_1',
+            scannedAt: new Date('2026-06-01T12:01:00.000Z'),
+            scannedAtIso: '2026-06-01T12:01:00.000Z',
+            offline: true,
+          },
+        ]),
+        accepted_count: 0,
+        duplicate_count: 0,
+        invalid_count: 0,
+        sample_errors: JSON.stringify([]),
+        clock_warning_count: 0,
+        status: 'uploaded',
+        attempt_count: 0,
+        failure_message: null,
+        locked_at: null,
+        processed_at: null,
+        created_at: new Date('2026-06-01T12:00:00.000Z'),
+        updated_at: new Date('2026-06-01T12:00:00.000Z'),
+      },
+    });
+    const setTimeoutSpy = vi.spyOn(globalThis, 'setTimeout');
+
+    setPrincipal({
+      ...principal,
+      id: 'sd_bulk_non_owner',
+      scopes: ['checkins.read'],
+    });
+    setTimeoutSpy.mockClear();
+
+    const status = await app.inject({
+      method: 'GET',
+      url: `/check-ins/bulk-sync-jobs/${job.id}`,
+    });
+    expect(status.statusCode).toBe(404);
+    expect(setTimeoutSpy).not.toHaveBeenCalled();
+
+    const chunks = await app.inject({
+      method: 'GET',
+      url: `/check-ins/bulk-sync-jobs/${job.id}/chunks`,
+    });
+    expect(chunks.statusCode).toBe(404);
+    expect(setTimeoutSpy).not.toHaveBeenCalled();
+
+    setTimeoutSpy.mockRestore();
     await app.close();
   });
 
@@ -1678,7 +1747,6 @@ describe('bulk offline sync endpoint', () => {
 
     setPrincipal({
       ...principal,
-      id: 'sd_bulk_read_only',
       scopes: ['checkins.read'],
     });
     setTimeoutSpy.mockClear();
@@ -1703,7 +1771,6 @@ describe('bulk offline sync endpoint', () => {
 
     setPrincipal({
       ...principal,
-      id: 'sd_bulk_read_only',
       scopes: ['checkins.read'],
     });
     setTimeoutSpy.mockClear();
