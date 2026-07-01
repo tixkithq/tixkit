@@ -37,9 +37,17 @@ public struct TixkitScanResult: Codable, Equatable, Sendable {
 }
 
 public struct TixkitOfflineTicket: Codable, Equatable, Sendable {
-  public init(ticketId: String, ticketTypeId: String? = nil, attendeeName: String? = nil, qrHash: String, status: String) {
+  public init(
+    ticketId: String,
+    ticketTypeId: String? = nil,
+    eventOccurrenceId: String? = nil,
+    attendeeName: String? = nil,
+    qrHash: String,
+    status: String
+  ) {
     self.ticketId = ticketId
     self.ticketTypeId = ticketTypeId
+    self.eventOccurrenceId = eventOccurrenceId
     self.attendeeName = attendeeName
     self.qrHash = qrHash
     self.status = status
@@ -47,6 +55,7 @@ public struct TixkitOfflineTicket: Codable, Equatable, Sendable {
 
   public let ticketId: String
   public let ticketTypeId: String?
+  public let eventOccurrenceId: String?
   public let attendeeName: String?
   public let qrHash: String
   public let status: String
@@ -1095,8 +1104,12 @@ private extension TixkitOfflineManifest {
       if ticket.ticketTypeId == nil {
         fields[1] = #""ticketTypeId":null"#
       }
+      if let eventOccurrenceId = ticket.eventOccurrenceId {
+        fields.insert(#""eventOccurrenceId":"\#(eventOccurrenceId.jsonEscaped)""#, at: 2)
+      }
       if ticket.attendeeName == nil {
-        fields[2] = #""attendeeName":null"#
+        let attendeeNameIndex = ticket.eventOccurrenceId == nil ? 2 : 3
+        fields[attendeeNameIndex] = #""attendeeName":null"#
       }
       return "{\(fields.joined(separator: ","))}"
     }.joined(separator: ",")

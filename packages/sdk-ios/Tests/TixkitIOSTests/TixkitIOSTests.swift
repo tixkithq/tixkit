@@ -249,6 +249,42 @@ final class TixkitIOSTests: XCTestCase {
     XCTAssertEqual(duplicate.ticketId, "tkt_1")
   }
 
+  func testVerifiesAPISignedOccurrenceScopedOfflineManifestFixture() throws {
+    let manifest = TixkitOfflineManifest(
+      eventId: "evt_1",
+      checkInListId: "cil_1",
+      generatedAt: generatedAt,
+      expiresAt: generatedAt.addingTimeInterval(60),
+      keyId: "manifest:test",
+      signature: "d8fdb5795ec9219c5cb880dd2bee328cb6298e976098008cfe730e7a2b71be48",
+      tickets: [
+        TixkitOfflineTicket(
+          ticketId: "tkt_b",
+          ticketTypeId: "tt_vip",
+          eventOccurrenceId: "occ_1",
+          attendeeName: "Grace Hopper",
+          qrHash: "hash_b",
+          status: "valid"
+        ),
+        TixkitOfflineTicket(
+          ticketId: "tkt_a",
+          ticketTypeId: "tt_ga",
+          attendeeName: "",
+          qrHash: "hash_a",
+          status: "issued"
+        ),
+      ]
+    )
+    let client = TixkitScannerClient(
+      deviceId: "sd_public_1",
+      deviceSecret: "scanner-secret",
+      manifestSigningKey: "manifest-secret"
+    )
+
+    XCTAssertEqual(manifest.tickets.first?.eventOccurrenceId, "occ_1")
+    XCTAssertTrue(client.verifyManifestSignature(manifest))
+  }
+
   func testRejectsRevokedOfflineTickets() {
     let manifest = signedManifest(ticketStatus: "refunded", payload: "signed-ticket-payload")
     let client = TixkitScannerClient(

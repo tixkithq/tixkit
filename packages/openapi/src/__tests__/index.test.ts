@@ -342,6 +342,12 @@ describe('openApiSpec', () => {
       ].content['application/json'].schema,
     ).toEqual({ $ref: '#/components/schemas/OfflineManifest' });
     expect(openApiSpec.components.schemas.OfflineManifest.required).toContain('tickets');
+    expect(
+      openApiSpec.components.schemas.OfflineManifest.properties.tickets.items.properties,
+    ).toHaveProperty('eventOccurrenceId');
+    expect(
+      openApiSpec.components.schemas.OfflineManifest.properties.tickets.items.required,
+    ).not.toContain('eventOccurrenceId');
     expect(openApiSpec.paths['/check-ins/sync'].post.parameters).toContainEqual({
       $ref: '#/components/parameters/RequiredIdempotencyKey',
     });

@@ -254,6 +254,46 @@ void main() {
     expect(client.verifyManifestSignature(manifest), isTrue);
   });
 
+  test('verifies API-signed occurrence scoped offline manifest fixture', () {
+    final unsigned = {
+      'eventId': 'evt_1',
+      'checkInListId': 'cil_1',
+      'generatedAt': '2026-06-01T00:00:00.000Z',
+      'expiresAt': '2026-06-01T00:01:00.000Z',
+      'keyId': 'manifest:test',
+      'tickets': [
+        {
+          'ticketId': 'tkt_b',
+          'ticketTypeId': 'tt_vip',
+          'eventOccurrenceId': 'occ_1',
+          'attendeeName': 'Grace Hopper',
+          'qrHash': 'hash_b',
+          'status': 'valid',
+        },
+        {
+          'ticketId': 'tkt_a',
+          'ticketTypeId': 'tt_ga',
+          'attendeeName': '',
+          'qrHash': 'hash_a',
+          'status': 'issued',
+        },
+      ],
+    };
+    final manifest = TixkitOfflineManifest.fromJson({
+      ...unsigned,
+      'signature': 'd8fdb5795ec9219c5cb880dd2bee328cb6298e976098008cfe730e7a2b71be48',
+    });
+    final client = TixkitScannerClient(
+      deviceId: 'sd_public_1',
+      deviceSecret: 'scanner-secret',
+      manifestSigningKey: 'manifest-secret',
+      storage: TixkitMemoryScannerStorage(),
+    );
+
+    expect(manifest.tickets.first.eventOccurrenceId, 'occ_1');
+    expect(client.verifyManifestSignature(manifest), isTrue);
+  });
+
   test('reports sync conflicts and keeps duplicate scans pending for retry', () async {
     const key = 'manifest-signing-key';
     const payload = 'signed-ticket-payload';

@@ -2150,6 +2150,7 @@ const rawOpenApiSpec = {
               properties: {
                 ticketId: { type: 'string' },
                 ticketTypeId: { type: 'string' },
+                eventOccurrenceId: { type: 'string' },
                 attendeeName: { type: 'string' },
                 qrHash: { type: 'string' },
                 status: { type: 'string' },

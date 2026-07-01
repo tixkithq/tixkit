@@ -81,6 +81,7 @@ class TixkitOfflineTicket {
   const TixkitOfflineTicket({
     required this.ticketId,
     required this.ticketTypeId,
+    this.eventOccurrenceId,
     required this.attendeeName,
     required this.qrHash,
     required this.status,
@@ -90,6 +91,7 @@ class TixkitOfflineTicket {
     return TixkitOfflineTicket(
       ticketId: json['ticketId'] as String,
       ticketTypeId: json['ticketTypeId'] as String,
+      eventOccurrenceId: json['eventOccurrenceId'] as String?,
       attendeeName: json['attendeeName'] as String? ?? '',
       qrHash: json['qrHash'] as String,
       status: json['status'] as String,
@@ -98,6 +100,7 @@ class TixkitOfflineTicket {
 
   final String ticketId;
   final String ticketTypeId;
+  final String? eventOccurrenceId;
   final String attendeeName;
   final String qrHash;
   final String status;
@@ -106,6 +109,7 @@ class TixkitOfflineTicket {
     return {
       'ticketId': ticketId,
       'ticketTypeId': ticketTypeId,
+      if (eventOccurrenceId != null) 'eventOccurrenceId': eventOccurrenceId,
       'attendeeName': attendeeName,
       'qrHash': qrHash,
       'status': status,
