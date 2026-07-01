@@ -4,6 +4,7 @@ import { generateKeyPairSync, randomUUID } from 'node:crypto';
 import { mkdtempSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { resolveAdminDistDir } from './scripts/playwright-clean-admin-dist.mjs';
 
 /**
  * Playwright configuration for Tixkit E2E and accessibility tests.
@@ -29,8 +30,9 @@ const workerHealthPort = new URL(workerHealthUrl).port || '4299';
 const temporalTaskQueue = process.env.TEMPORAL_TASK_QUEUE ?? 'tixkit-e2e';
 const playwrightRunId =
   process.env.PLAYWRIGHT_RUN_ID ?? `${process.pid}-${randomUUID().slice(0, 8)}`;
-const adminNextDistDir =
+const requestedAdminNextDistDir =
   process.env.ADMIN_DASHBOARD_NEXT_DIST_DIR ?? `.next/e2e-${adminPort}-${playwrightRunId}`;
+const { relativePath: adminNextDistDir } = resolveAdminDistDir(requestedAdminNextDistDir);
 const webServerTimeout = Number.parseInt(process.env.PLAYWRIGHT_WEB_SERVER_TIMEOUT_MS ?? '', 10);
 const webServerTimeoutMs = Number.isFinite(webServerTimeout) ? webServerTimeout : 240_000;
 const useStripeProvider = process.env.E2E_STRIPE_PROVIDER === '1';
@@ -245,7 +247,7 @@ export default defineConfig({
         },
         {
           command: useAdminDevServer
-            ? `rm -rf apps/admin-dashboard/${adminNextDistDir} && bun run --filter @tixkit/admin-dashboard dev -- -p ${adminPort}`
+            ? `node scripts/playwright-clean-admin-dist.mjs && bun run --filter @tixkit/admin-dashboard dev -- -p ${adminPort}`
             : `bun run --filter @tixkit/admin-dashboard build && bun run --filter @tixkit/admin-dashboard start -- -p ${adminPort}`,
           env: adminPublicEnv,
           url: adminUrl,
