@@ -326,10 +326,16 @@ func (s *OrdersService) ListPaymentCompensations(ctx context.Context, params *Pa
 	return &out, err
 }
 
+func (s *OrdersService) Refund(ctx context.Context, orderID string, input RefundRequest) (*RefundQueued, error) {
+	var out RefundQueued
+	err := s.client.request(ctx, http.MethodPost, "/orders/"+escape(orderID)+"/refunds", input, &out, withIdempotencyKey(input.IdempotencyKey))
+	return &out, err
+}
+
 type RefundsService struct{ client *Client }
 
-func (s *RefundsService) Create(ctx context.Context, orderID string, input RefundRequest) (*Refund, error) {
-	var out Refund
+func (s *RefundsService) Create(ctx context.Context, orderID string, input RefundRequest) (*RefundQueued, error) {
+	var out RefundQueued
 	err := s.client.request(ctx, http.MethodPost, "/orders/"+escape(orderID)+"/refunds", input, &out, withIdempotencyKey(input.IdempotencyKey))
 	return &out, err
 }

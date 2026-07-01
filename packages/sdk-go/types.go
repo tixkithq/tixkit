@@ -559,6 +559,13 @@ type RefundRequest struct {
 	IdempotencyKey   string `json:"-"`
 }
 
+type RefundQueued struct {
+	OrderID      string `json:"orderId"`
+	RefundAmount int    `json:"refundAmount"`
+	Status       string `json:"status"`
+	Message      string `json:"message"`
+}
+
 type Refund struct {
 	ID               string         `json:"id"`
 	TenantID         string         `json:"tenantId,omitempty"`

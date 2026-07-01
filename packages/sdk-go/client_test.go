@@ -345,6 +345,55 @@ func TestBoxOfficeOrderSendsIdempotencyHeader(t *testing.T) {
 	}
 }
 
+func TestOrderRefundSendsLifecycleFlagsAndDecodesQueuedResponse(t *testing.T) {
+	t.Parallel()
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			t.Fatalf("method = %s", r.Method)
+		}
+		if r.URL.Path != "/v1/orders/ord_1/refunds" {
+			t.Fatalf("path = %s", r.URL.Path)
+		}
+		if got := r.Header.Get("Idempotency-Key"); got != "idem_refund_1" {
+			t.Fatalf("idempotency key = %s", got)
+		}
+		var body RefundRequest
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Fatal(err)
+		}
+		if body.IdempotencyKey != "" {
+			t.Fatalf("idempotency key leaked into body: %#v", body)
+		}
+		if body.AmountCents != 2500 || body.Reason != "customer_request" || !body.VoidTickets || !body.RestoreInventory {
+			t.Fatalf("body = %#v", body)
+		}
+		w.WriteHeader(http.StatusAccepted)
+		_ = json.NewEncoder(w).Encode(RefundQueued{
+			OrderID:      "ord_1",
+			RefundAmount: 2500,
+			Status:       "pending",
+			Message:      "Refund workflow queued",
+		})
+	}))
+	defer server.Close()
+
+	client := testClient(t, server.URL)
+	result, err := client.Orders.Refund(context.Background(), "ord_1", RefundRequest{
+		AmountCents:      2500,
+		Reason:           "customer_request",
+		VoidTickets:      true,
+		RestoreInventory: true,
+		IdempotencyKey:   "idem_refund_1",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.OrderID != "ord_1" || result.RefundAmount != 2500 || result.Status != "pending" {
+		t.Fatalf("result = %#v", result)
+	}
+}
+
 func TestResaleRoutesSendExpectedHeadersAndBodies(t *testing.T) {
 	t.Parallel()
 

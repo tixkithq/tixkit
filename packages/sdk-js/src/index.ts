@@ -1224,6 +1224,13 @@ export type TicketResaleCompletion = {
   buyerAttendee: Attendee;
 };
 
+export type RefundQueued = {
+  orderId: string;
+  refundAmount: number;
+  status: 'pending' | string;
+  message: string;
+};
+
 export type PaymentAccount = {
   id: string;
   tenantId: string;
@@ -1567,6 +1574,13 @@ export type OrderListParams = PaginationParams & {
 export type IdempotencyOptions = {
   idempotencyKey: string;
 };
+
+export type CreateRefundInput = {
+  amountCents?: number;
+  reason: string;
+  voidTickets?: boolean;
+  restoreInventory?: boolean;
+} & IdempotencyOptions;
 
 export class TixkitClient {
   private readonly apiKey?: string;
@@ -2158,10 +2172,7 @@ class OrderResource {
     return this.client.request('POST', `/orders/${orderId}/cancel`);
   }
 
-  async refund(
-    orderId: string,
-    input: { amountCents?: number; reason: string } & IdempotencyOptions,
-  ): Promise<unknown> {
+  async refund(orderId: string, input: CreateRefundInput): Promise<RefundQueued> {
     const { idempotencyKey, ...body } = input;
     return this.client.request('POST', `/orders/${orderId}/refunds`, {
       body,

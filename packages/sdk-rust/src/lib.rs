@@ -140,10 +140,6 @@ impl TixkitClient {
         OrderResource { client: self }
     }
 
-    pub fn refunds(&self) -> RefundResource<'_> {
-        RefundResource { client: self }
-    }
-
     pub fn attendees(&self) -> AttendeeResource<'_> {
         AttendeeResource { client: self }
     }
@@ -830,10 +826,22 @@ pub struct TicketResaleCompletion {
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct CreateRefund {
-    pub order_id: String,
-    pub amount_cents: i64,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub reason: Option<String>,
+    pub amount_cents: Option<i64>,
+    pub reason: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub void_tickets: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub restore_inventory: Option<bool>,
+}
+
+#[derive(Debug, Clone, Serialize, serde::Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct RefundQueued {
+    pub order_id: String,
+    pub refund_amount: i64,
+    pub status: String,
+    pub message: String,
 }
 
 pub type JsonObject = Map<String, Value>;
@@ -1211,7 +1219,6 @@ macro_rules! json_resource {
 }
 
 json_resource!(TicketTypeResource, "/ticket-types");
-json_resource!(RefundResource, "/refunds");
 json_resource!(AttendeeResource, "/attendees");
 json_resource!(QuestionResource, "/questions");
 json_resource!(WaitlistResource, "/waitlist");
@@ -1240,6 +1247,21 @@ impl OrderResource<'_> {
                 reqwest::Method::GET,
                 &format!("/orders/{order_id}"),
                 RequestOptions::<()>::default(),
+            )
+            .await
+    }
+
+    pub async fn refund(
+        &self,
+        order_id: &str,
+        input: CreateRefund,
+        idempotency_key: impl Into<String>,
+    ) -> Result<RefundQueued, TixkitError> {
+        self.client
+            .request(
+                reqwest::Method::POST,
+                &format!("/orders/{order_id}/refunds"),
+                RequestOptions::body(input).idempotency_key(Some(idempotency_key.into())),
             )
             .await
     }
@@ -2147,6 +2169,48 @@ mod tests {
 
         assert_eq!(result.order.sales_channel.as_deref(), Some("box_office"));
         assert_eq!(result.order.tender_type.as_deref(), Some("manual_card"));
+    }
+
+    #[tokio::test]
+    async fn sends_order_refund_lifecycle_flags_and_decodes_queued_response() {
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/v1/orders/ord_1/refunds"))
+            .and(header("idempotency-key", "idem_refund_1"))
+            .and(body_json(json!({
+                "amountCents": 2500,
+                "reason": "customer_request",
+                "voidTickets": true,
+                "restoreInventory": true
+            })))
+            .respond_with(ResponseTemplate::new(202).set_body_json(json!({
+                "orderId": "ord_1",
+                "refundAmount": 2500,
+                "status": "pending",
+                "message": "Refund workflow queued"
+            })))
+            .mount(&server)
+            .await;
+
+        let result = client(&server)
+            .await
+            .orders()
+            .refund(
+                "ord_1",
+                CreateRefund {
+                    amount_cents: Some(2500),
+                    reason: "customer_request".to_string(),
+                    void_tickets: Some(true),
+                    restore_inventory: Some(true),
+                },
+                "idem_refund_1",
+            )
+            .await
+            .expect("refund queued");
+
+        assert_eq!(result.order_id, "ord_1");
+        assert_eq!(result.refund_amount, 2500);
+        assert_eq!(result.status, "pending");
     }
 
     #[test]

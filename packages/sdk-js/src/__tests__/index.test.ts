@@ -2345,6 +2345,45 @@ describe('TixkitClient new resource methods', () => {
     expect(call.url).toBe('https://api.test/v1/orders?limit=50&organizationId=org_1&eventId=evt_1');
   });
 
+  it('orders.refund sends lifecycle flags and returns queued refund status', async () => {
+    const fm = mockFetch(202, {
+      orderId: 'ord_1',
+      refundAmount: 2500,
+      status: 'pending',
+      message: 'Refund workflow queued',
+    });
+    const c = new TixkitClient({
+      apiKey: 'tk_test_123',
+      apiBaseUrl: 'https://api.test',
+      maxRetries: 0,
+    });
+
+    const result = await c.orders.refund('ord_1', {
+      amountCents: 2500,
+      reason: 'customer_request',
+      voidTickets: true,
+      restoreInventory: true,
+      idempotencyKey: 'idem_refund_1',
+    });
+    const call = getCall(fm);
+
+    expect(call.url).toBe('https://api.test/v1/orders/ord_1/refunds');
+    expect(call.method).toBe('POST');
+    expect(call.headers['Idempotency-Key']).toBe('idem_refund_1');
+    expect(JSON.parse(call.body)).toEqual({
+      amountCents: 2500,
+      reason: 'customer_request',
+      voidTickets: true,
+      restoreInventory: true,
+    });
+    expect(result).toEqual({
+      orderId: 'ord_1',
+      refundAmount: 2500,
+      status: 'pending',
+      message: 'Refund workflow queued',
+    });
+  });
+
   it('public.getEvent sends GET without auth', async () => {
     const fm = mockFetch(200, { id: 'evt_1', title: 'Event' });
     const c = new TixkitClient({ apiBaseUrl: 'https://api.test', maxRetries: 0 });
