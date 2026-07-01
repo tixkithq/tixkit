@@ -341,7 +341,7 @@ describe('event routes', () => {
     await app.close();
   });
 
-  it('persists status when updating events through PATCH', async () => {
+  it('rejects status changes through generic event PATCH', async () => {
     const { db, updates } = createEventMutationDb({ event: baseEventRow() });
     const app = await setupEventApp(db, writePrincipal);
 
@@ -353,9 +353,38 @@ describe('event routes', () => {
       },
     });
 
+    expect(response.statusCode).toBe(400);
+    expect(response.json()).toMatchObject({
+      message: 'Use the dedicated publish, pause, or archive endpoint to change event status',
+    });
+    expect(updates.some((update) => update.status === 'paused')).toBe(false);
+    await app.close();
+  });
+
+  it('writes an audit entry when publishing through the lifecycle endpoint', async () => {
+    const { db, inserted, updates } = createEventMutationDb({ event: baseEventRow() });
+    const app = await setupEventApp(db, writePrincipal);
+
+    const response = await app.inject({
+      method: 'POST',
+      url: '/events/evt_1/publish',
+    });
+
     expect(response.statusCode).toBe(200);
-    expect(response.json().status).toBe('paused');
-    expect(updates.some((update) => update.status === 'paused')).toBe(true);
+    expect(response.json().status).toBe('published');
+    expect(updates).toContainEqual(expect.objectContaining({ status: 'published' }));
+    expect(inserted).toContainEqual(
+      expect.objectContaining({
+        tenant_id: 'tnt_1',
+        organization_id: 'org_1',
+        brand_id: 'brd_1',
+        actor_type: 'user',
+        actor_id: 'usr_1',
+        action: 'event.published',
+        resource_type: 'Event',
+        resource_id: 'evt_1',
+      }),
+    );
     await app.close();
   });
 

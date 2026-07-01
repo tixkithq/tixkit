@@ -337,6 +337,12 @@ export const eventRoutes: FastifyPluginAsync = async (app) => {
     ClerkAuthService.requireBrandScope(principal, existing.brand_id);
     ClerkAuthService.requireEventScope(principal, eventId);
 
+    if (body.status !== undefined) {
+      throw new ValidationError(
+        'Use the dedicated publish, pause, or archive endpoint to change event status',
+      );
+    }
+
     const updateData: Record<string, unknown> = {};
     if (body.title !== undefined) updateData.title = body.title;
     if (body.slug !== undefined) {
@@ -356,7 +362,6 @@ export const eventRoutes: FastifyPluginAsync = async (app) => {
     if (body.capacity !== undefined) updateData.capacity = body.capacity;
     if (body.coverImageUrl !== undefined) updateData.cover_image_url = body.coverImageUrl;
     if (body.externalUrl !== undefined) updateData.external_url = body.externalUrl;
-    if (body.status !== undefined) updateData.status = body.status;
 
     return serializeEvent(await repo.update(eventId, updateData));
   });
