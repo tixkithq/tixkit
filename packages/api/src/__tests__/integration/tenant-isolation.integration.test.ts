@@ -689,6 +689,87 @@ describe('tenant settings list permission gates', () => {
     await app.close();
   });
 
+  it('GET /brands/:brandId/email-sender-identities allows messages.write for in-scope brands', async () => {
+    const app = await setupApp(
+      tenantRoutes,
+      makePrincipal({ organizationIds: ['org_1'], scopes: ['messages.write'] }),
+      {
+        brands: [brandRow({ id: 'brd_1', organization_id: 'org_1' })],
+        brand_sender_identities: [
+          {
+            id: 'bsi_1',
+            tenant_id: 'tnt_1',
+            brand_id: 'brd_1',
+            email: 'tickets@example.test',
+            name: 'Tickets',
+            reply_to_email: 'support@example.test',
+            verified: 1,
+            verified_at: new Date('2026-06-01T00:00:00.000Z'),
+            created_at: new Date('2026-06-01T00:00:00.000Z'),
+            updated_at: new Date('2026-06-01T00:00:00.000Z'),
+          },
+        ],
+      },
+    );
+
+    const res = await app.inject({
+      method: 'GET',
+      url: '/brands/brd_1/email-sender-identities',
+    });
+
+    expect(res.statusCode).toBe(200);
+    expect(res.json()).toEqual([
+      expect.objectContaining({
+        id: 'bsi_1',
+        tenantId: 'tnt_1',
+        brandId: 'brd_1',
+        email: 'tickets@example.test',
+        verified: true,
+      }),
+    ]);
+    await app.close();
+  });
+
+  it('GET /brands/:brandId/email-sender-identities denies messages.write across brand scope', async () => {
+    const app = await setupApp(
+      tenantRoutes,
+      makePrincipal({
+        organizationIds: ['org_1'],
+        brandIds: ['brd_1'],
+        scopes: ['messages.write'],
+      }),
+      {
+        brands: [
+          brandRow({ id: 'brd_1', organization_id: 'org_1' }),
+          brandRow({ id: 'brd_2', organization_id: 'org_1' }),
+        ],
+        brand_sender_identities: [
+          {
+            id: 'bsi_2',
+            tenant_id: 'tnt_1',
+            brand_id: 'brd_2',
+            email: 'riverside@example.test',
+            name: 'Riverside',
+            reply_to_email: null,
+            verified: 1,
+            verified_at: new Date('2026-06-01T00:00:00.000Z'),
+            created_at: new Date('2026-06-01T00:00:00.000Z'),
+            updated_at: new Date('2026-06-01T00:00:00.000Z'),
+          },
+        ],
+      },
+    );
+
+    const res = await app.inject({
+      method: 'GET',
+      url: '/brands/brd_2/email-sender-identities',
+    });
+
+    expect(res.statusCode).toBe(404);
+    expect(res.json().message).toContain('Brand');
+    await app.close();
+  });
+
   it('POST /brands returns the serialized brand contract', async () => {
     const app = await setupApp(
       tenantRoutes,

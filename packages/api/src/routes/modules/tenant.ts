@@ -1,5 +1,6 @@
 import type { FastifyPluginAsync } from 'fastify';
 import { ClerkAuthService } from '../../auth/clerk.js';
+import type { Permission, Principal } from '@tixkit/domain';
 import {
   OrganizationRepository,
   OrganizationMemberRepository,
@@ -8,7 +9,7 @@ import {
   PaymentAccountRepository,
   AuditLogRepository,
 } from '@tixkit/db';
-import { ValidationError } from '@tixkit/domain';
+import { ForbiddenError, ValidationError } from '@tixkit/domain';
 import { writeAuditLog } from '../../auth/audit.js';
 import {
   addBrandDomainSchema,
@@ -60,6 +61,12 @@ function parseJsonObject(
 
 function boolValue(value: boolean | number | null | undefined): boolean {
   return value === true || value === 1;
+}
+
+function requireAnyPermission(principal: Principal, permissions: Permission[]): void {
+  if (!permissions.some((permission) => ClerkAuthService.hasPermission(principal, permission))) {
+    throw new ForbiddenError(`Missing required permission: ${permissions.join(' or ')}`);
+  }
 }
 
 function serializePaymentAccount(account: PaymentAccountRow, onboardingUrl?: string) {
@@ -435,7 +442,7 @@ export const tenantRoutes: FastifyPluginAsync = async (app) => {
 
   app.get('/brands/:brandId/email-sender-identities', async (request) => {
     const principal = request.principal!;
-    ClerkAuthService.requirePermission(principal, 'settings.write');
+    requireAnyPermission(principal, ['settings.write', 'messages.write']);
     const { brandId } = request.params as { brandId: string };
 
     const brand = await new BrandRepository(db).findById(brandId);
