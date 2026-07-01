@@ -111,8 +111,16 @@ export const stripeWebhookRoutes: FastifyPluginAsync = async (app) => {
                 paymentIntent.last_payment_error?.message ?? 'Payment failed',
               );
             }
-          } catch {
-            // If the checkout workflow is no longer running, reconciliation still owns provider state convergence.
+          } catch (err) {
+            const message =
+              err instanceof Error ? err.message : 'Failed to signal checkout workflow';
+            return reply.status(503).send({
+              error: {
+                code: 'CHECKOUT_PAYMENT_SIGNAL_FAILED',
+                message,
+                requestId: request.id,
+              },
+            });
           }
         }
       }

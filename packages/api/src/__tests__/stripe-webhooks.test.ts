@@ -336,6 +336,63 @@ describe('Stripe webhook route', () => {
     await app.close();
   });
 
+  it('returns retryable failure when trusted checkout payment success signal fails', async () => {
+    const state: StripeWebhookTestState = {
+      events: [],
+      checkoutSession: { id: 'cs_1', tenant_id: 'tnt_1' },
+      paymentIntent: {
+        id: 'pi_1',
+        tenant_id: 'tnt_1',
+        checkout_session_id: 'cs_1',
+        provider_intent_id: 'pi_stripe_1',
+        amount_cents: 1000,
+        currency: 'USD',
+        payment_account_id: null,
+      },
+      operations: [],
+    };
+    const temporalClient = {
+      startPaymentReconciliation: vi.fn(async () => {
+        state.operations.push('start:payment-reconciliation');
+      }),
+      signalPaymentSucceeded: vi.fn(async () => {
+        state.operations.push('signal:payment-succeeded');
+        throw new Error('Temporal signal unavailable');
+      }),
+      signalPaymentFailed: vi.fn(),
+    };
+    const app = await setupStripeWebhookApp(createMockDb(state) as Database, temporalClient);
+
+    const res = await app.inject({
+      method: 'POST',
+      url: '/',
+      headers: { 'content-type': 'application/json', 'stripe-signature': 'sig_test' },
+      payload: createStripePaymentIntentEvent(),
+    });
+
+    expect(res.statusCode).toBe(503);
+    expect(res.json()).toMatchObject({
+      error: {
+        code: 'CHECKOUT_PAYMENT_SIGNAL_FAILED',
+        message: 'Temporal signal unavailable',
+      },
+    });
+    expect(state.events).toHaveLength(1);
+    expect(state.events[0]).toMatchObject({
+      provider_event_id: 'evt_stripe_1',
+      processed_at: null,
+    });
+    expect(state.operations).toEqual([
+      'insert:payment_events',
+      'start:payment-reconciliation',
+      'signal:payment-succeeded',
+    ]);
+    expect(temporalClient.startPaymentReconciliation).toHaveBeenCalledOnce();
+    expect(temporalClient.signalPaymentSucceeded).toHaveBeenCalledWith('cs_1', 'pi_stripe_1');
+
+    await app.close();
+  });
+
   it('ingests account.updated events into the connected payment account state', async () => {
     const state: StripeWebhookTestState = {
       events: [],
