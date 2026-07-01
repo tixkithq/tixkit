@@ -999,6 +999,17 @@ describe('openApiSpec', () => {
     });
   });
 
+  it('documents supported question update fields', () => {
+    const updateSchema =
+      openApiSpec.paths['/questions/{questionId}'].patch.requestBody.content['application/json']
+        .schema;
+
+    expect(updateSchema.properties).toMatchObject({
+      ticketTypeId: { type: ['string', 'null'] },
+      conditionalVisibility: { type: ['object', 'null'] },
+    });
+  });
+
   it('documents audit logging and GDPR privacy request routes', () => {
     expect(
       openApiSpec.paths['/audit-logs'].get.responses['200'].content['application/json'].schema,
