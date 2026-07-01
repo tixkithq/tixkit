@@ -1,7 +1,7 @@
 import type { FastifyPluginAsync } from 'fastify';
 import { ShortLinkRepository } from '@tixkit/db';
 import { ClerkAuthService } from '../../auth/clerk.js';
-import { ValidationError } from '@tixkit/domain';
+import { NotFoundError, ValidationError } from '@tixkit/domain';
 import {
   generateUniqueSlug,
   sanitizeUtmParams,
@@ -33,6 +33,17 @@ export const shortLinkRoutes: FastifyPluginAsync = async (app) => {
       throw new ValidationError('destinationUrl must be an http(s) public URL', {
         field: 'destinationUrl',
       });
+    }
+    if (body.brandId) {
+      const brand = await db
+        .selectFrom('brands')
+        .select(['id', 'organization_id'])
+        .where('tenant_id', '=', principal.tenantId)
+        .where('id', '=', body.brandId)
+        .executeTakeFirst();
+      if (!brand) throw new NotFoundError('Brand', body.brandId);
+      ClerkAuthService.requireOrganizationScope(principal, brand.organization_id);
+      ClerkAuthService.requireBrandScope(principal, body.brandId);
     }
     const repo = new ShortLinkRepository(db);
     const slug = body.slug

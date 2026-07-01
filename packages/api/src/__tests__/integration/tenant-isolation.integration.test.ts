@@ -15,6 +15,7 @@ import { reportingRoutes } from '../../routes/modules/reporting.js';
 import { messagingRoutes } from '../../routes/modules/messaging.js';
 import { waitlistRoutes } from '../../routes/modules/waitlist.js';
 import { contentRoutes } from '../../routes/modules/content.js';
+import { shortLinkRoutes } from '../../routes/modules/short-links.js';
 import { hashRequest } from '../../services/idempotency.js';
 
 /**
@@ -1596,6 +1597,58 @@ describe('developer credential resource scope containment', () => {
 // ===========================================================================
 
 describe('brand and event scope denial', () => {
+  it('POST /short-links rejects out-of-scope brand attribution for brand-scoped keys', async () => {
+    const principal = makePrincipal({
+      type: 'api_key',
+      id: 'ak_brand_scoped',
+      brandIds: ['brd_A'],
+      scopes: ['messages.write'],
+    });
+    const tables: Tables = {
+      brands: [
+        brandRow({ id: 'brd_A', organization_id: 'org_1' }),
+        brandRow({ id: 'brd_B', organization_id: 'org_1' }),
+      ],
+      short_links: [],
+    };
+    const app = await setupApp(shortLinkRoutes, principal, tables);
+
+    const denied = await app.inject({
+      method: 'POST',
+      url: '/short-links',
+      payload: {
+        destinationUrl: 'https://example.com/tickets',
+        slug: 'brand-b-link',
+        brandId: 'brd_B',
+      },
+    });
+    expect(denied.statusCode).toBe(404);
+    expect(tables.short_links).toHaveLength(0);
+
+    const allowed = await app.inject({
+      method: 'POST',
+      url: '/short-links',
+      payload: {
+        destinationUrl: 'https://example.com/tickets',
+        slug: 'brand-a-link',
+        brandId: 'brd_A',
+      },
+    });
+    expect(allowed.statusCode).toBe(200);
+    expect(allowed.json()).toMatchObject({
+      slug: 'brand-a-link',
+      destinationUrl: 'https://example.com/tickets',
+    });
+    expect(tables.short_links).toHaveLength(1);
+    expect(tables.short_links[0]).toMatchObject({
+      tenant_id: 'tnt_1',
+      brand_id: 'brd_A',
+      slug: 'brand-a-link',
+    });
+
+    await app.close();
+  });
+
   it('PATCH /brands/:brandId returns 404 for brand-scoped key accessing another same-org brand', async () => {
     const principal = makePrincipal({
       type: 'api_key',
