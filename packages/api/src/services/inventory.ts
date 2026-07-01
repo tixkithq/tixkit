@@ -19,6 +19,20 @@ export type CartReservationResult = {
   expiresAt: Date;
 };
 
+export type InventoryAvailability = {
+  total: number;
+  sold: number;
+  reserved: number;
+  available: number;
+};
+
+const emptyAvailability = (): InventoryAvailability => ({
+  total: 0,
+  sold: 0,
+  reserved: 0,
+  available: 0,
+});
+
 export class InventoryService {
   constructor(private db: Database) {}
 
@@ -457,46 +471,63 @@ export class InventoryService {
   /**
    * Gets current availability for a pool.
    */
-  async getAvailability(inventoryPoolId: string): Promise<{
-    total: number;
-    sold: number;
-    reserved: number;
-    available: number;
-  }> {
+  async getAvailability(inventoryPoolId: string): Promise<InventoryAvailability> {
+    const availability = await this.getAvailabilityBatch([inventoryPoolId]);
+    return availability.get(inventoryPoolId) ?? emptyAvailability();
+  }
+
+  /**
+   * Gets current availability for multiple pools in one transaction.
+   */
+  async getAvailabilityBatch(
+    inventoryPoolIds: readonly string[],
+  ): Promise<Map<string, InventoryAvailability>> {
+    const poolIds = [...new Set(inventoryPoolIds.filter((poolId) => poolId.length > 0))];
+    const availability = new Map(poolIds.map((poolId) => [poolId, emptyAvailability()]));
+    if (poolIds.length === 0) return availability;
+
     return this.db.transaction().execute(async (trx) => {
-      const pool = await trx
+      const pools = await trx
         .selectFrom('inventory_pools')
         .selectAll()
-        .where('id', '=', inventoryPoolId)
-        .executeTakeFirst();
-
-      if (!pool) return { total: 0, sold: 0, reserved: 0, available: 0 };
+        .where('id', 'in', poolIds)
+        .execute();
 
       const now = new Date();
       await trx
         .updateTable('checkout_holds')
         .set({ status: 'expired', updated_at: now })
-        .where('inventory_pool_id', '=', inventoryPoolId)
+        .where('inventory_pool_id', 'in', poolIds)
         .where('status', '=', 'active')
         .where('expires_at', '<', now)
         .execute();
 
       const activeHolds = await trx
         .selectFrom('checkout_holds')
-        .select(trx.fn.sum('quantity').as('total_held'))
-        .where('inventory_pool_id', '=', inventoryPoolId)
+        .select(['inventory_pool_id', 'quantity'])
+        .where('inventory_pool_id', 'in', poolIds)
         .where('status', '=', 'active')
-        .executeTakeFirst();
+        .execute();
 
-      const reserved = Number(activeHolds?.total_held ?? 0);
-      const available = pool.total_capacity - pool.sold_count - reserved;
+      const reservedByPool = new Map<string, number>();
+      for (const hold of activeHolds) {
+        reservedByPool.set(
+          hold.inventory_pool_id,
+          (reservedByPool.get(hold.inventory_pool_id) ?? 0) + Number(hold.quantity ?? 0),
+        );
+      }
 
-      return {
-        total: pool.total_capacity,
-        sold: pool.sold_count,
-        reserved,
-        available,
-      };
+      for (const pool of pools) {
+        const reserved = reservedByPool.get(pool.id) ?? 0;
+        availability.set(pool.id, {
+          total: pool.total_capacity,
+          sold: pool.sold_count,
+          reserved,
+          available: pool.total_capacity - pool.sold_count - reserved,
+        });
+      }
+
+      return availability;
     });
   }
 }

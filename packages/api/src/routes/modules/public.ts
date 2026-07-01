@@ -381,30 +381,35 @@ export const publicRoutes: FastifyPluginAsync = async (app) => {
     // also reveal hidden ticket IDs for direct-link/widget purchase flows.
     const ticketTypes = await ttRepo.findPublicOrRequestedByEvent(eventId, requestedProducts);
     const products = await new ProductRepository(db).findByEvent(eventId);
+    const inventoryPoolIds = [...new Set(ticketTypes.map((tt) => tt.inventory_pool_id))];
+    const availabilityByPool = await inventoryService.getAvailabilityBatch(inventoryPoolIds);
 
-    const results: Record<string, unknown>[] = await Promise.all(
-      ticketTypes.map(async (tt) => {
-        const availability = await inventoryService.getAvailability(tt.inventory_pool_id);
-        return {
-          ticketTypeId: tt.id,
-          eventOccurrenceId: tt.event_occurrence_id ?? undefined,
-          name: tt.name,
-          kind: tt.kind,
-          priceCents: Number(tt.price_cents),
-          currency: tt.currency,
-          minimumPriceCents: tt.minimum_price_cents ? Number(tt.minimum_price_cents) : undefined,
-          minPerOrder: tt.min_per_order,
-          maxPerOrder: tt.max_per_order,
-          available: availability.available,
-          status: availability.available > 0 ? tt.status : 'sold_out',
-          requiresAccessCode: tt.requires_access_code,
-          accessCodeHint: tt.access_code_hint ?? undefined,
-          description: tt.description ?? undefined,
-          salesStartAt: tt.sales_start_at,
-          salesEndAt: tt.sales_end_at,
-        };
-      }),
-    );
+    const results: Record<string, unknown>[] = ticketTypes.map((tt) => {
+      const availability = availabilityByPool.get(tt.inventory_pool_id) ?? {
+        total: 0,
+        sold: 0,
+        reserved: 0,
+        available: 0,
+      };
+      return {
+        ticketTypeId: tt.id,
+        eventOccurrenceId: tt.event_occurrence_id ?? undefined,
+        name: tt.name,
+        kind: tt.kind,
+        priceCents: Number(tt.price_cents),
+        currency: tt.currency,
+        minimumPriceCents: tt.minimum_price_cents ? Number(tt.minimum_price_cents) : undefined,
+        minPerOrder: tt.min_per_order,
+        maxPerOrder: tt.max_per_order,
+        available: availability.available,
+        status: availability.available > 0 ? tt.status : 'sold_out',
+        requiresAccessCode: tt.requires_access_code,
+        accessCodeHint: tt.access_code_hint ?? undefined,
+        description: tt.description ?? undefined,
+        salesStartAt: tt.sales_start_at,
+        salesEndAt: tt.sales_end_at,
+      };
+    });
     const now = new Date();
     for (const product of products) {
       const availableFrom = toDate(product.available_from);

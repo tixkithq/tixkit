@@ -370,7 +370,10 @@ async function setupApp(
         lineItems: [],
       }),
     },
-    inventoryService: { reserveCart: () => ({ primaryHoldId: 'hld_1', expiresAt: new Date() }) },
+    inventoryService: {
+      reserveCart: () => ({ primaryHoldId: 'hld_1', expiresAt: new Date() }),
+      getAvailabilityBatch: async () => new Map<string, unknown>(),
+    },
     qrService: {
       hashPayload: () => 'hash_1',
       getQrPayload: () => ({ valid: true, ticketId: 'tkt_1' }),
@@ -1910,6 +1913,120 @@ describe('public access code validation', () => {
     expect(second.statusCode).toBe(200);
     expect(second.json()).toEqual({ tracked: false, deduped: true });
     expect(tables.widget_impressions).toHaveLength(1);
+    await app.close();
+  });
+
+  it('batches public availability by distinct inventory pool', async () => {
+    const now = new Date('2026-06-01T00:00:00.000Z');
+    const getAvailabilityBatch = vi.fn(async (poolIds: readonly string[]) => {
+      expect(poolIds).toEqual(['inv_shared', 'inv_vip']);
+      return new Map([
+        ['inv_shared', { total: 20, sold: 5, reserved: 8, available: 7 }],
+        ['inv_vip', { total: 5, sold: 5, reserved: 0, available: 0 }],
+      ]);
+    });
+    const app = await setupApp(
+      publicRoutes,
+      makePrincipal(),
+      {
+        events: [
+          {
+            id: 'evt_1',
+            tenant_id: 'tnt_1',
+            organization_id: 'org_1',
+            brand_id: 'br_1',
+            slug: 'event',
+            title: 'Event',
+            description: null,
+            status: 'published',
+            timezone: 'America/New_York',
+            starts_at: now,
+            ends_at: null,
+            venue: null,
+            visibility: 'public',
+          },
+        ],
+        ticket_types: [
+          {
+            id: 'tt_ga',
+            event_id: 'evt_1',
+            name: 'GA',
+            description: null,
+            kind: 'paid',
+            status: 'active',
+            visibility: 'public',
+            currency: 'USD',
+            price_cents: 2500,
+            minimum_price_cents: null,
+            sales_start_at: null,
+            sales_end_at: null,
+            min_per_order: 1,
+            max_per_order: 4,
+            inventory_pool_id: 'inv_shared',
+            sort_order: 1,
+            requires_access_code: false,
+            access_code_hint: null,
+          },
+          {
+            id: 'tt_child',
+            event_id: 'evt_1',
+            name: 'Child',
+            description: null,
+            kind: 'paid',
+            status: 'active',
+            visibility: 'public',
+            currency: 'USD',
+            price_cents: 1000,
+            minimum_price_cents: null,
+            sales_start_at: null,
+            sales_end_at: null,
+            min_per_order: 1,
+            max_per_order: 4,
+            inventory_pool_id: 'inv_shared',
+            sort_order: 2,
+            requires_access_code: false,
+            access_code_hint: null,
+          },
+          {
+            id: 'tt_vip',
+            event_id: 'evt_1',
+            name: 'VIP',
+            description: null,
+            kind: 'paid',
+            status: 'active',
+            visibility: 'public',
+            currency: 'USD',
+            price_cents: 5000,
+            minimum_price_cents: null,
+            sales_start_at: null,
+            sales_end_at: null,
+            min_per_order: 1,
+            max_per_order: 2,
+            inventory_pool_id: 'inv_vip',
+            sort_order: 3,
+            requires_access_code: false,
+            access_code_hint: null,
+          },
+        ],
+        products: [],
+      },
+      {
+        inventoryService: {
+          reserveCart: vi.fn(),
+          getAvailabilityBatch,
+        },
+      },
+    );
+
+    const res = await app.inject({ method: 'GET', url: '/public/events/evt_1/availability' });
+
+    expect(res.statusCode).toBe(200);
+    expect(getAvailabilityBatch).toHaveBeenCalledTimes(1);
+    expect(res.json()).toMatchObject([
+      { ticketTypeId: 'tt_ga', available: 7, status: 'active' },
+      { ticketTypeId: 'tt_child', available: 7, status: 'active' },
+      { ticketTypeId: 'tt_vip', available: 0, status: 'sold_out' },
+    ]);
     await app.close();
   });
 

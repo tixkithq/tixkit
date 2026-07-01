@@ -30,15 +30,18 @@ type Hold = {
 class MockTable {
   constructor(private rows: Map<string, any>) {}
 
-  private matches(row: any, conds: Array<{ col: string; val: any }>): boolean {
+  private matches(row: any, conds: Array<{ col: string; op: string; val: any }>): boolean {
     return conds.every((c) => {
-      if (c.col === 'expires_at') return new Date(row.expires_at) < new Date(c.val);
+      if (c.op === 'in') return Array.isArray(c.val) && c.val.includes(row[c.col]);
+      if (c.col === 'expires_at' && c.op === '<') {
+        return new Date(row.expires_at) < new Date(c.val);
+      }
       return row[c.col] === c.val;
     });
   }
 
   selectFrom() {
-    const conds: Array<{ col: string; val: any }> = [];
+    const conds: Array<{ col: string; op: string; val: any }> = [];
     let sumCol: string | null = null;
     let idOnly = false;
 
@@ -52,8 +55,8 @@ class MockTable {
         }
         return chain;
       },
-      where: (col: string, _op: string, val: any) => {
-        conds.push({ col, val });
+      where: (col: string, op: string, val: any) => {
+        conds.push({ col, op, val });
         return chain;
       },
       forUpdate: () => chain,
@@ -74,7 +77,11 @@ class MockTable {
     return chain;
   }
 
-  private getRows(conds: Array<{ col: string; val: any }>, sumCol: string | null, idOnly: boolean) {
+  private getRows(
+    conds: Array<{ col: string; op: string; val: any }>,
+    sumCol: string | null,
+    idOnly: boolean,
+  ) {
     let rows = [...this.rows.values()];
     rows = rows.filter((r) => this.matches(r, conds));
     if (sumCol) {
@@ -86,7 +93,7 @@ class MockTable {
   }
 
   updateTable() {
-    const conds: Array<{ col: string; val: any }> = [];
+    const conds: Array<{ col: string; op: string; val: any }> = [];
     let setFn: ((eb: any) => Record<string, unknown>) | Record<string, unknown> = {};
 
     const chain: any = {
@@ -94,8 +101,8 @@ class MockTable {
         setFn = values;
         return chain;
       },
-      where: (col: string, _op: string, val: any) => {
-        conds.push({ col, val });
+      where: (col: string, op: string, val: any) => {
+        conds.push({ col, op, val });
         return chain;
       },
       executeTakeFirst: () =>
@@ -532,6 +539,36 @@ describe('InventoryService', () => {
 
       expect(mock.getHold('hld_stale')!.status).toBe('expired');
       expect(avail).toEqual({ total: 10, sold: 2, reserved: 3, available: 5 });
+    });
+
+    it('batches availability across pools and expires stale holds once', async () => {
+      mock.addPool({ id: 'pool_1', total_capacity: 10, sold_count: 1 });
+      mock.addPool({ id: 'pool_2', total_capacity: 8, sold_count: 2 });
+      mock.addHold({
+        id: 'hld_1_active',
+        inventory_pool_id: 'pool_1',
+        quantity: 3,
+        status: 'active',
+      });
+      mock.addHold({
+        id: 'hld_1_stale',
+        inventory_pool_id: 'pool_1',
+        quantity: 4,
+        status: 'active',
+        expires_at: new Date(Date.now() - 10_000),
+      });
+      mock.addHold({
+        id: 'hld_2_active',
+        inventory_pool_id: 'pool_2',
+        quantity: 2,
+        status: 'active',
+      });
+
+      const availability = await service.getAvailabilityBatch(['pool_1', 'pool_2', 'pool_1']);
+
+      expect(mock.getHold('hld_1_stale')!.status).toBe('expired');
+      expect(availability.get('pool_1')).toEqual({ total: 10, sold: 1, reserved: 3, available: 6 });
+      expect(availability.get('pool_2')).toEqual({ total: 8, sold: 2, reserved: 2, available: 4 });
     });
 
     it('returns zeros for non-existent pool', async () => {
