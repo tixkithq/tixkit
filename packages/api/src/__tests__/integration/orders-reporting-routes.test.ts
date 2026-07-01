@@ -902,6 +902,66 @@ describe('order routes', () => {
     await app.close();
   });
 
+  it('GET /exports/:exportId/events sends terminal state after stale cursors', async () => {
+    dbState.exportJobs = [
+      {
+        id: 'exp_terminal_cursor',
+        tenant_id: 'tnt_1',
+        event_id: 'evt_1',
+        type: 'sales',
+        format: 'csv',
+        status: 'completed',
+        file_url: 'https://exports.example.test/exp_terminal_cursor.csv',
+        requested_by: 'usr_1',
+        filters: null,
+        created_at: new Date('2026-06-01'),
+        completed_at: new Date('2026-06-01T00:01:00Z'),
+      },
+    ];
+    dbState.exportEvents = [
+      {
+        id: 'eev_00000000000000000000000001',
+        tenant_id: 'tnt_1',
+        export_job_id: 'exp_terminal_cursor',
+        status: 'completed',
+        payload: JSON.stringify({
+          exportId: 'exp_terminal_cursor',
+          status: 'completed',
+          downloadUrl: '/v1/exports/exp_terminal_cursor/download',
+        }),
+        created_at: new Date('2026-06-01T00:01:00Z'),
+      },
+      {
+        id: 'eev_00000000000000000000000099',
+        tenant_id: 'tnt_1',
+        export_job_id: 'exp_other',
+        status: 'completed',
+        payload: JSON.stringify({ exportId: 'exp_other', status: 'completed' }),
+        created_at: new Date('2026-06-01T00:01:00Z'),
+      },
+    ];
+
+    const app = await setupApp(reportingRoutes, makePrincipal());
+    const futureCursor = await app.inject({
+      method: 'GET',
+      url: '/exports/exp_terminal_cursor/events',
+      headers: { 'last-event-id': 'zzzz_future_cursor' },
+    });
+    const wrongExportCursor = await app.inject({
+      method: 'GET',
+      url: '/exports/exp_terminal_cursor/events',
+      headers: { 'last-event-id': 'eev_00000000000000000000000099' },
+    });
+
+    for (const res of [futureCursor, wrongExportCursor]) {
+      expect(res.statusCode).toBe(200);
+      expect(res.body).toContain('event: export');
+      expect(res.body).toContain('"status":"completed"');
+      expect(res.body).toContain('"downloadUrl":"/v1/exports/exp_terminal_cursor/download"');
+    }
+    await app.close();
+  });
+
   it('GET /exports/:exportId/download redirects only when completed', async () => {
     dbState.exportJobs = [
       {

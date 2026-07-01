@@ -767,7 +767,7 @@ export const reportingRoutes: FastifyPluginAsync = async (app) => {
     }
 
     const replayedCount = await replayEvents();
-    if (replayedCount === 0 && !lastSentEventId) {
+    if (replayedCount === 0 && (!lastSentEventId || isTerminalExportStatus(exportJob.status))) {
       sendEvent('export', serializeExportJob(exportJob));
     }
     if (isTerminalExportStatus(exportJob.status)) {
