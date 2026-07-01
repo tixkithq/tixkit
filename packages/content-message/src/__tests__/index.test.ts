@@ -54,6 +54,31 @@ describe('@tixkit/content-message SMS adapter', () => {
     );
   });
 
+  it('counts required opt-out text during save-time segment validation', () => {
+    const document = createDefaultSmsTemplate({
+      editor: { body: 'A'.repeat(160) },
+      settings: {
+        category: 'bulk',
+        consentCategory: 'marketing',
+        optOutText: 'Reply STOP to opt out',
+        segmentLimit: 1,
+      },
+    });
+
+    const validation = validateSmsTemplate(document);
+
+    expect(validation.valid).toBe(false);
+    expect(validation.issues).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          code: 'segment_limit_exceeded',
+          field: 'renderedText',
+          severity: 'error',
+        }),
+      ]),
+    );
+  });
+
   it('blocks unknown variables, missing opt-out text, and consent mismatches', () => {
     const document = createDefaultSmsTemplate({
       editor: { body: 'Hi {{recipient.nickname}}' },

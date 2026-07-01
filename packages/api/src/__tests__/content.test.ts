@@ -1022,6 +1022,64 @@ describe('content routes', () => {
     );
   });
 
+  it('persists required opt-out segment blockers before SMS publish', async () => {
+    const smsDocument = createDefaultSmsTemplate({
+      editor: { body: 'A'.repeat(160) },
+      settings: {
+        templateKey: 'event-update',
+        category: 'bulk',
+        consentCategory: 'marketing',
+        optOutText: 'Reply STOP to opt out',
+        segmentLimit: 1,
+        estimatedCostPerSegmentCents: 4,
+      },
+    });
+    const { db } = createContentDb({
+      brands: [{ id: 'brd_1', tenant_id: 'tnt_1', organization_id: 'org_1' }],
+      content_documents: [
+        documentRow({
+          id: 'cdoc_sms',
+          channel: 'sms',
+          key: 'event-update',
+          name: 'Event SMS',
+        }),
+      ],
+      content_document_versions: [],
+    });
+    const app = await setupContentApp(db, principal);
+
+    const save = await app.inject({
+      method: 'POST',
+      url: '/content-documents/cdoc_sms/versions',
+      payload: { contentJson: smsDocument },
+    });
+
+    expect(save.statusCode).toBe(201);
+    expect(save.json()).toMatchObject({
+      documentId: 'cdoc_sms',
+      renderedText: smsDocument.editor.body,
+      validation: { valid: false },
+    });
+    expect(save.json().validation.issues).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          code: 'segment_limit_exceeded',
+          field: 'renderedText',
+        }),
+      ]),
+    );
+
+    const publish = await app.inject({
+      method: 'POST',
+      url: `/content-documents/cdoc_sms/versions/${save.json().id}/publish`,
+    });
+
+    expect(publish.statusCode).toBe(400);
+    expect(publish.json().message ?? publish.json().error?.message).toContain(
+      'Content version has publish blockers',
+    );
+  });
+
   it('fails closed for SMS test sends without an active verified provider route', async () => {
     const smsTransport = new TestCaptureSmsTransport();
     const smsDocument = createDefaultSmsTemplate({

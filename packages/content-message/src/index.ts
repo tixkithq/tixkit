@@ -171,10 +171,13 @@ export function validateSmsTemplate(
 ): ContentValidationResult {
   const issues: ContentValidationIssue[] = [];
   const body = document.editor.body;
-  const baseSegments = countSmsSegments(body);
+  const optOutText = document.settings.optOutText?.trim();
+  const validationText =
+    requiresOptOut(document.settings) && optOutText ? injectOptOutToken(body, optOutText) : body;
+  const baseSegments = countSmsSegments(validationText);
   const base = validateContentVersion(
     {
-      renderedText: body,
+      renderedText: validationText,
       contentJson: document,
     },
     'sms',
@@ -192,7 +195,7 @@ export function validateSmsTemplate(
     });
   }
 
-  if (requiresOptOut(document.settings) && !document.settings.optOutText?.trim()) {
+  if (requiresOptOut(document.settings) && !optOutText) {
     issues.push({
       code: 'missing_opt_out_token',
       message: 'Bulk SMS templates require opt-out text before publishing',
