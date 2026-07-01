@@ -9,6 +9,7 @@ import {
   TixkitApiError,
   type ContentRenderArtifact,
   type EmailTemplateDocument,
+  type OAuthApplication,
   type PublicAvailabilityItem,
   type SmsTemplateDocument,
   type WebhookEvent,
@@ -2111,14 +2112,25 @@ describe('TixkitClient new resource methods', () => {
     expect(call.url).toBe('https://api.test/v1/oauth-applications');
   });
 
-  it('oauthApplications.create sends POST with body', async () => {
-    const fm = mockFetch(201, { id: 'app_1', name: 'Test', clientId: 'cli_1' });
+  it('oauthApplications.create sends POST with body and exposes tenant metadata', async () => {
+    const fm = mockFetch(201, {
+      id: 'app_1',
+      tenantId: 'tnt_1',
+      organizationId: 'org_1',
+      name: 'Test',
+      clientId: 'cli_1',
+      redirectUris: ['https://example.com/cb'],
+      scopes: ['read'],
+      status: 'active',
+      createdAt: '2026-06-01T00:00:00.000Z',
+      updatedAt: '2026-06-01T00:00:00.000Z',
+    });
     const c = new TixkitClient({
       apiKey: '***********',
       apiBaseUrl: 'https://api.test',
       maxRetries: 0,
     });
-    await c.oauthApplications.create({
+    const created = await c.oauthApplications.create({
       organizationId: 'org_1',
       name: 'Test',
       redirectUris: ['https://example.com/cb'],
@@ -2132,6 +2144,9 @@ describe('TixkitClient new resource methods', () => {
       redirectUris: ['https://example.com/cb'],
       scopes: ['read'],
     });
+    expect(created.tenantId).toBe('tnt_1');
+    expectTypeOf(created).toEqualTypeOf<OAuthApplication>();
+    expectTypeOf(created.tenantId).toEqualTypeOf<string>();
   });
 
   it('oauthApplications.delete sends DELETE', async () => {

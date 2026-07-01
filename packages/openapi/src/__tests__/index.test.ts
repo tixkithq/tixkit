@@ -112,6 +112,56 @@ describe('openApiSpec', () => {
     expect(openApiSpec.paths).not.toHaveProperty('/developer/api-keys');
   });
 
+  it('documents stable credential metadata returned by API serializers', () => {
+    expect(openApiSpec.components.schemas.ApiKey.properties).toMatchObject({
+      tenantId: { type: 'string' },
+      organizationId: { type: 'string' },
+      brandIds: { type: 'array', items: { type: 'string' } },
+      eventIds: { type: 'array', items: { type: 'string' } },
+      revokedAt: { type: 'string', format: 'date-time' },
+      updatedAt: { type: 'string', format: 'date-time' },
+    });
+    expect(openApiSpec.components.schemas.ApiKey.required).toEqual([
+      'id',
+      'tenantId',
+      'organizationId',
+      'name',
+      'keyPrefix',
+      'scopes',
+      'createdAt',
+      'updatedAt',
+    ]);
+
+    expect(openApiSpec.components.schemas.ScannerDevice.properties).toMatchObject({
+      tenantId: { type: 'string' },
+      organizationId: { type: 'string' },
+      updatedAt: { type: 'string', format: 'date-time' },
+    });
+    expect(openApiSpec.components.schemas.ScannerDevice.required).toEqual([
+      'id',
+      'tenantId',
+      'organizationId',
+      'name',
+      'deviceId',
+      'eventIds',
+      'scopes',
+      'status',
+      'createdAt',
+      'updatedAt',
+    ]);
+
+    expect(openApiSpec.components.schemas.WebhookEndpoint.required).toEqual([
+      'id',
+      'tenantId',
+      'organizationId',
+      'url',
+      'events',
+      'status',
+      'createdAt',
+      'updatedAt',
+    ]);
+  });
+
   it('documents one-time webhook signing secrets on endpoint creation', () => {
     expect(
       openApiSpec.paths['/webhook-endpoints'].post.responses['201'].content['application/json']

@@ -1287,6 +1287,7 @@ export type ReorderQuestionInput = {
 
 export type OAuthApplication = {
   id: string;
+  tenantId: string;
   organizationId: string;
   name: string;
   clientId: string;
