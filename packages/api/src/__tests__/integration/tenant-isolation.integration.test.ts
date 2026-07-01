@@ -664,10 +664,11 @@ describe('tenant settings list permission gates', () => {
   });
 
   it('PATCH /brands/:brandId and POST /brands/:brandId/domains return serialized contracts', async () => {
+    const tables: Tables = { brands: [brandRow({ id: 'brd_1', organization_id: 'org_1' })] };
     const app = await setupApp(
       tenantRoutes,
       makePrincipal({ organizationIds: ['org_1'], scopes: ['settings.write'] }),
-      { brands: [brandRow({ id: 'brd_1', organization_id: 'org_1' })] },
+      tables,
     );
 
     const patchRes = await app.inject({
@@ -676,6 +677,11 @@ describe('tenant settings list permission gates', () => {
       payload: {
         name: 'Updated Brand',
         theme: { primaryColor: '#0f766e' },
+        supportUrl: 'https://help.example.test/brand',
+        legalUrls: {
+          privacy: 'https://example.test/privacy',
+          terms: 'https://example.test/terms',
+        },
         whiteLabel: true,
       },
     });
@@ -687,9 +693,21 @@ describe('tenant settings list permission gates', () => {
         organizationId: 'org_1',
         name: 'Updated Brand',
         theme: { primaryColor: '#0f766e' },
+        supportUrl: 'https://help.example.test/brand',
+        legalUrls: {
+          privacy: 'https://example.test/privacy',
+          terms: 'https://example.test/terms',
+        },
         whiteLabel: true,
       }),
     );
+    expect(tables.brands[0]).toMatchObject({
+      support_url: 'https://help.example.test/brand',
+    });
+    expect(JSON.parse(String(tables.brands[0].legal_urls))).toEqual({
+      privacy: 'https://example.test/privacy',
+      terms: 'https://example.test/terms',
+    });
     expect(patchRes.json()).not.toHaveProperty('tenant_id');
     expect(patchRes.json()).not.toHaveProperty('organization_id');
     expect(patchRes.json()).not.toHaveProperty('white_label');

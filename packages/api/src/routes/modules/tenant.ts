@@ -378,6 +378,7 @@ export const tenantRoutes: FastifyPluginAsync = async (app) => {
       ...(typeof body.slug === 'string' ? { slug: body.slug.trim() } : {}),
       ...(typeof body.status === 'string' ? { status: body.status } : {}),
       ...(body.theme !== undefined ? { theme: JSON.stringify(body.theme) } : {}),
+      ...(body.supportUrl !== undefined ? { support_url: body.supportUrl } : {}),
       ...(body.whiteLabel !== undefined ? { white_label: Boolean(body.whiteLabel) } : {}),
       ...(body.legalUrls !== undefined ? { legal_urls: JSON.stringify(body.legalUrls) } : {}),
       ...(body.paymentAccountId !== undefined
@@ -395,6 +396,7 @@ export const tenantRoutes: FastifyPluginAsync = async (app) => {
         ...(typeof body.slug === 'string' ? { slug: body.slug.trim() } : {}),
         ...(typeof body.status === 'string' ? { status: body.status } : {}),
         ...(body.theme !== undefined ? { theme: body.theme } : {}),
+        ...(body.supportUrl !== undefined ? { supportUrl: body.supportUrl } : {}),
         ...(body.whiteLabel !== undefined ? { whiteLabel: Boolean(body.whiteLabel) } : {}),
         ...(body.legalUrls !== undefined ? { legalUrls: body.legalUrls } : {}),
         ...(body.paymentAccountId !== undefined
