@@ -27,8 +27,9 @@ function apiError(
   message: string,
   status?: number,
   details?: unknown,
+  requestId?: string,
 ): AdminApiError {
-  return { code, message, status, details };
+  return { code, message, status, details, requestId };
 }
 
 function ok<T>(data: T): ApiResult<T> {
@@ -119,7 +120,7 @@ export async function request<T>(path: string, options: RequestInit = {}): Promi
 
     if (!res.ok) {
       const body = json as {
-        error?: { code?: string; message?: string; details?: unknown };
+        error?: { code?: string; message?: string; details?: unknown; requestId?: string };
       } | null;
       return err<T>(
         apiError(
@@ -127,6 +128,7 @@ export async function request<T>(path: string, options: RequestInit = {}): Promi
           body?.error?.message ?? `Request failed with status ${res.status}`,
           res.status,
           body?.error?.details,
+          body?.error?.requestId,
         ),
       );
     }

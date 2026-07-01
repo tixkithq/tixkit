@@ -24,6 +24,7 @@ export type AdminApiError = {
   message: string;
   status?: number;
   details?: unknown;
+  requestId?: string;
 };
 
 export type ApiResult<T> = { ok: true; data: T } | { ok: false; error: AdminApiError };
