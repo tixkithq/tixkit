@@ -62,9 +62,22 @@ describe('confirmation state derivation', () => {
     expect(deriveState(makeSession('failed'), null)).toBe('failed');
   });
 
-  it('returns failed for redirect_status=failed regardless of session status', () => {
-    expect(deriveState(makeSession('completed'), 'failed')).toBe('failed');
+  it.each([
+    ['confirmed', 'completed'],
+    ['expired', 'expired'],
+    ['cancelled', 'cancelled'],
+    ['failed', 'failed'],
+  ] as const)(
+    'returns %s when %s session status wins over redirect_status=failed',
+    (expected, status) => {
+      expect(deriveState(makeSession(status), 'failed')).toBe(expected);
+    },
+  );
+
+  it('returns failed for redirect_status=failed when the session is absent or non-terminal', () => {
     expect(deriveState(null, 'failed')).toBe('failed');
+    expect(deriveState(makeSession('pending_payment'), 'failed')).toBe('failed');
+    expect(deriveState(makeSession('open'), 'failed')).toBe('failed');
   });
 
   it('returns unknown for null session and null redirect status', () => {

@@ -130,4 +130,15 @@ describe('ConfirmationClient resale validation accessibility', () => {
       expect(checkoutApiMock.createResaleListing).not.toHaveBeenCalled();
     });
   });
+
+  it('renders confirmed order content when a completed session returns with redirect_status=failed', async () => {
+    navigationState.searchParams = new URLSearchParams(
+      'sessionId=cs_1&orderId=ord_1&orderNumber=TK-1001&redirect_status=failed',
+    );
+
+    render(<ConfirmationClient />);
+
+    expect(await screen.findByText('What happens next')).toBeInTheDocument();
+    expect(screen.queryByText('Payment failed')).not.toBeInTheDocument();
+  });
 });

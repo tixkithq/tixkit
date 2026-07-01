@@ -21,8 +21,8 @@ export function deriveState(
   session: CheckoutSession | null,
   redirectStatus: string | null,
 ): ConfirmationState {
-  if (redirectStatus === 'failed') return 'failed';
   if (!session) {
+    if (redirectStatus === 'failed') return 'failed';
     return redirectStatus === 'succeeded' ? 'pending' : 'unknown';
   }
 
@@ -31,6 +31,7 @@ export function deriveState(
   if (status === 'expired') return 'expired';
   if (status === 'cancelled') return 'cancelled';
   if (status === 'completed') return 'confirmed';
+  if (redirectStatus === 'failed') return 'failed';
   if (status === 'pending_payment') return 'pending';
   // Paid orders have session status "completed" but the order status may be "paid".
   if (status === 'open') return 'pending';
