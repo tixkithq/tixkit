@@ -1974,15 +1974,6 @@ const rawOpenApiSpec = {
         },
         required: ['enabled', 'allowedTenderTypes', 'requireBuyerEmail', 'receiptMode'],
       },
-      OrganizationPage: {
-        type: 'object',
-        properties: {
-          items: { type: 'array', items: { $ref: '#/components/schemas/Organization' } },
-          nextCursor: { type: ['string', 'null'] },
-          hasMore: { type: 'boolean' },
-        },
-        required: ['items', 'nextCursor', 'hasMore'],
-      },
       Brand: {
         type: 'object',
         properties: {
@@ -2005,15 +1996,6 @@ const rawOpenApiSpec = {
           updatedAt: { type: 'string', format: 'date-time' },
         },
         required: ['id', 'tenantId', 'organizationId', 'name', 'slug', 'status'],
-      },
-      BrandPage: {
-        type: 'object',
-        properties: {
-          items: { type: 'array', items: { $ref: '#/components/schemas/Brand' } },
-          nextCursor: { type: ['string', 'null'] },
-          hasMore: { type: 'boolean' },
-        },
-        required: ['items', 'nextCursor', 'hasMore'],
       },
       BrandDomain: {
         type: 'object',
@@ -2880,15 +2862,6 @@ const rawOpenApiSpec = {
           'disabledReason',
         ],
       },
-      PaymentAccountPage: {
-        type: 'object',
-        properties: {
-          items: { type: 'array', items: { $ref: '#/components/schemas/PaymentAccount' } },
-          nextCursor: { type: ['string', 'null'] },
-          hasMore: { type: 'boolean' },
-        },
-        required: ['items', 'nextCursor', 'hasMore'],
-      },
       Question: {
         type: 'object',
         properties: {
@@ -3031,15 +3004,16 @@ const rawOpenApiSpec = {
       get: {
         summary: 'List organizations',
         security: [{ BearerAuth: [] }],
-        parameters: [
-          { $ref: '#/components/parameters/Cursor' },
-          { $ref: '#/components/parameters/Limit' },
-        ],
         responses: {
           '200': {
-            description: 'Page of organizations',
+            description: 'Organizations visible to the principal',
             content: {
-              'application/json': { schema: { $ref: '#/components/schemas/OrganizationPage' } },
+              'application/json': {
+                schema: {
+                  type: 'array',
+                  items: { $ref: '#/components/schemas/Organization' },
+                },
+              },
             },
           },
           '401': {
@@ -3102,14 +3076,17 @@ const rawOpenApiSpec = {
       get: {
         summary: 'List brands',
         security: [{ BearerAuth: [] }],
-        parameters: [
-          { $ref: '#/components/parameters/Cursor' },
-          { $ref: '#/components/parameters/Limit' },
-        ],
         responses: {
           '200': {
-            description: 'Page of brands',
-            content: { 'application/json': { schema: { $ref: '#/components/schemas/BrandPage' } } },
+            description: 'Brands visible to the principal',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'array',
+                  items: { $ref: '#/components/schemas/Brand' },
+                },
+              },
+            },
           },
         },
       },
@@ -6008,9 +5985,14 @@ const rawOpenApiSpec = {
         security: [{ BearerAuth: [] }],
         responses: {
           '200': {
-            description: 'Page of payment accounts',
+            description: 'Payment accounts for the organization',
             content: {
-              'application/json': { schema: { $ref: '#/components/schemas/PaymentAccountPage' } },
+              'application/json': {
+                schema: {
+                  type: 'array',
+                  items: { $ref: '#/components/schemas/PaymentAccount' },
+                },
+              },
             },
           },
           '401': {

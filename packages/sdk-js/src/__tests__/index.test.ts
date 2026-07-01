@@ -1071,6 +1071,50 @@ describe('TixkitClient new resource methods', () => {
     });
   });
 
+  it('tenant settings list methods return runtime arrays without pagination params', async () => {
+    const fm = mockFetch(200, [{ id: 'org_1', name: 'Org' }]);
+    const c = new TixkitClient({
+      apiKey: '***********',
+      apiBaseUrl: 'https://api.test',
+      maxRetries: 0,
+    });
+
+    await expect(c.organizations.list()).resolves.toEqual([{ id: 'org_1', name: 'Org' }]);
+    const call = getCall(fm);
+    expect(call.url).toBe('https://api.test/v1/organizations');
+    expect(call.method).toBe('GET');
+  });
+
+  it('brands.list returns a runtime array without pagination params', async () => {
+    const fm = mockFetch(200, [{ id: 'brd_1', name: 'Brand' }]);
+    const c = new TixkitClient({
+      apiKey: '***********',
+      apiBaseUrl: 'https://api.test',
+      maxRetries: 0,
+    });
+
+    await expect(c.brands.list()).resolves.toEqual([{ id: 'brd_1', name: 'Brand' }]);
+    const call = getCall(fm);
+    expect(call.url).toBe('https://api.test/v1/brands');
+    expect(call.method).toBe('GET');
+  });
+
+  it('paymentAccounts.list returns a runtime array without pagination params', async () => {
+    const fm = mockFetch(200, [{ id: 'pa_1', provider: 'stripe_connect' }]);
+    const c = new TixkitClient({
+      apiKey: '***********',
+      apiBaseUrl: 'https://api.test',
+      maxRetries: 0,
+    });
+
+    await expect(c.paymentAccounts.list('org_1')).resolves.toEqual([
+      { id: 'pa_1', provider: 'stripe_connect' },
+    ]);
+    const call = getCall(fm);
+    expect(call.url).toBe('https://api.test/v1/organizations/org_1/payment-accounts');
+    expect(call.method).toBe('GET');
+  });
+
   it('attendees.listAll sends GET to /attendees with query params', async () => {
     const fm = mockFetch(200, { items: [], nextCursor: null, hasMore: false });
     const c = new TixkitClient({

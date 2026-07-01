@@ -238,7 +238,11 @@ export type CheckoutWalletPasses = {
   tickets: CheckoutWalletPassTicket[];
 };
 
-export type UploadPurpose = 'checkout_answer' | 'brand_logo' | 'user_avatar' | 'content_email_image';
+export type UploadPurpose =
+  | 'checkout_answer'
+  | 'brand_logo'
+  | 'user_avatar'
+  | 'content_email_image';
 
 export type CreateUploadArtifactInput = {
   purpose: UploadPurpose;
@@ -2367,8 +2371,8 @@ class TicketResource {
 
 class OrganizationResource {
   constructor(private client: TixkitClient) {}
-  async list(params?: PaginationParams): Promise<PageResult<Organization>> {
-    return this.client.request('GET', '/organizations', { params: paginationParams(params) });
+  async list(): Promise<Organization[]> {
+    return this.client.request('GET', '/organizations');
   }
   async create(input: {
     name: string;
@@ -2388,8 +2392,8 @@ class OrganizationResource {
 
 class BrandResource {
   constructor(private client: TixkitClient) {}
-  async list(params?: PaginationParams): Promise<PageResult<Brand>> {
-    return this.client.request('GET', '/brands', { params: paginationParams(params) });
+  async list(): Promise<Brand[]> {
+    return this.client.request('GET', '/brands');
   }
   async create(input: {
     organizationId: string;
@@ -3100,13 +3104,8 @@ class WebhookEndpointResource {
 
 class PaymentAccountResource {
   constructor(private client: TixkitClient) {}
-  async list(
-    organizationId: string,
-    params?: PaginationParams,
-  ): Promise<PageResult<PaymentAccount>> {
-    return this.client.request('GET', `/organizations/${organizationId}/payment-accounts`, {
-      params: paginationParams(params),
-    });
+  async list(organizationId: string): Promise<PaymentAccount[]> {
+    return this.client.request('GET', `/organizations/${organizationId}/payment-accounts`);
   }
   async createStripeConnect(organizationId: string): Promise<PaymentAccount> {
     return this.client.request(

@@ -55,8 +55,9 @@ describe('Generated client compile validation (T33)', () => {
     // Paginated envelopes should be present as schemas.
     expect(output).toContain('EventPage');
     expect(output).toContain('OrderPage');
-    expect(output).toContain('OrganizationPage');
-    expect(output).toContain('BrandPage');
+    expect(output).not.toContain('OrganizationPage');
+    expect(output).not.toContain('BrandPage');
+    expect(output).not.toContain('PaymentAccountPage');
   });
 
   it('generated types preserve public event-page and resale SDK surfaces', async () => {

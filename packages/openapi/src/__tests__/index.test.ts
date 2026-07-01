@@ -77,17 +77,26 @@ describe('openApiSpec', () => {
       openApiSpec.paths['/events'].get.responses['200'].content['application/json'].schema,
     ).toEqual({ $ref: '#/components/schemas/EventPage' });
     expect(
-      openApiSpec.paths['/organizations'].get.responses['200'].content['application/json'].schema,
-    ).toEqual({ $ref: '#/components/schemas/OrganizationPage' });
-    expect(
-      openApiSpec.paths['/brands'].get.responses['200'].content['application/json'].schema,
-    ).toEqual({ $ref: '#/components/schemas/BrandPage' });
-    expect(
       openApiSpec.paths['/orders'].get.responses['200'].content['application/json'].schema,
     ).toEqual({ $ref: '#/components/schemas/OrderPage' });
     expect(
       openApiSpec.paths['/api-keys'].get.responses['200'].content['application/json'].schema,
     ).toEqual({ $ref: '#/components/schemas/ApiKeyPage' });
+  });
+
+  it('documents tenant settings lists as runtime array responses', () => {
+    expect(
+      openApiSpec.paths['/organizations'].get.responses['200'].content['application/json'].schema,
+    ).toEqual({ type: 'array', items: { $ref: '#/components/schemas/Organization' } });
+    expect(openApiSpec.paths['/organizations'].get.parameters).toBeUndefined();
+    expect(
+      openApiSpec.paths['/brands'].get.responses['200'].content['application/json'].schema,
+    ).toEqual({ type: 'array', items: { $ref: '#/components/schemas/Brand' } });
+    expect(openApiSpec.paths['/brands'].get.parameters).toBeUndefined();
+    expect(
+      openApiSpec.paths['/organizations/{organizationId}/payment-accounts'].get.responses['200']
+        .content['application/json'].schema,
+    ).toEqual({ type: 'array', items: { $ref: '#/components/schemas/PaymentAccount' } });
   });
 
   it('uses implemented developer route paths', () => {
