@@ -152,6 +152,49 @@ describe('renderEventPageDocument', () => {
     expect(rendered.html).not.toContain('<script>alert(1)</script>');
   });
 
+  it('rejects rich-text images with unsafe URLs or missing alt text', () => {
+    const document = createDefaultEventPageDocument({
+      eventId: 'evt_demo_001',
+      eventTitle: 'All Access Chicago',
+      eventDescription: 'Safe copy',
+      checkoutUrl: 'https://checkout.example.test/checkout?eventId=evt_demo_001',
+    });
+    document.blocks.push({
+      type: 'rich_text',
+      id: 'story',
+      content: {
+        type: 'doc',
+        content: [
+          {
+            type: 'image',
+            attrs: {
+              src: 'http://127.0.0.1/private-preview.png',
+              alt: '',
+            },
+          },
+        ],
+      },
+    });
+
+    const validation = validateEventPageDocument(document);
+    const rendered = renderEventPageDocument(document, context);
+
+    expect(validation.valid).toBe(false);
+    expect(validation.issues).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          code: 'unsafe_image',
+          field: 'blocks.6.content.content.0.attrs.src',
+        }),
+        expect.objectContaining({
+          code: 'missing_image_alt',
+          field: 'blocks.6.content.content.0.attrs.alt',
+        }),
+      ]),
+    );
+    expect(rendered.html).toBe('');
+  });
+
   it('renders a deterministic 200-page load within the event-page budget', () => {
     const documents = Array.from({ length: 200 }, (_, index) =>
       createDefaultEventPageDocument({

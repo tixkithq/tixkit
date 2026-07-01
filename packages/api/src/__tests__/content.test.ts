@@ -1080,6 +1080,80 @@ describe('content routes', () => {
     );
   });
 
+  it('fails closed for unsafe event-page rich-text images before publish', async () => {
+    const eventPageDocument = eventPageJson();
+    eventPageDocument.blocks.push({
+      type: 'rich_text',
+      id: 'story',
+      content: {
+        type: 'doc',
+        content: [
+          {
+            type: 'image',
+            attrs: {
+              src: 'http://127.0.0.1/private-preview.png',
+              alt: '',
+            },
+          },
+        ],
+      },
+    });
+    const { db } = createContentDb({
+      brands: [{ id: 'brd_1', tenant_id: 'tnt_1', organization_id: 'org_1' }],
+      content_documents: [
+        documentRow({
+          id: 'cdoc_event_page',
+          channel: 'event_page',
+          key: 'main',
+          name: 'Main event page',
+        }),
+      ],
+      content_document_versions: [],
+      content_render_artifacts: [],
+    });
+    const app = await setupContentApp(db, principal);
+
+    const save = await app.inject({
+      method: 'POST',
+      url: '/content-documents/cdoc_event_page/versions',
+      payload: { contentJson: eventPageDocument },
+    });
+
+    expect(save.statusCode).toBe(201);
+    expect(save.json()).toMatchObject({
+      documentId: 'cdoc_event_page',
+      validation: { valid: false },
+    });
+    expect(save.json().validation.issues).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ code: 'unsafe_image' }),
+        expect.objectContaining({ code: 'missing_image_alt' }),
+      ]),
+    );
+
+    const preview = await app.inject({
+      method: 'POST',
+      url: '/content-documents/cdoc_event_page/preview',
+      payload: { versionId: save.json().id },
+    });
+
+    expect(preview.statusCode).toBe(200);
+    expect(preview.json()).toMatchObject({
+      channel: 'event_page',
+      output: { html: '' },
+    });
+
+    const publish = await app.inject({
+      method: 'POST',
+      url: `/content-documents/cdoc_event_page/versions/${save.json().id}/publish`,
+    });
+
+    expect(publish.statusCode).toBe(400);
+    expect(publish.json().message ?? publish.json().error?.message).toContain(
+      'Content version has publish blockers',
+    );
+  });
+
   it('fails closed for SMS test sends without an active verified provider route', async () => {
     const smsTransport = new TestCaptureSmsTransport();
     const smsDocument = createDefaultSmsTemplate({

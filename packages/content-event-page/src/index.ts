@@ -349,7 +349,7 @@ export function validateEventPageDocument(
     });
   }
 
-  issues.push(...validateTipTapDocument(document.editor.document, 'editor.document'));
+  issues.push(...validateTipTapDocument(document.editor.document, 'editor.document', options));
   for (const [index, block] of document.blocks.entries()) {
     issues.push(...validateBlock(block, index, options));
   }
@@ -722,13 +722,22 @@ function renderMergeTagsInJson(value: JSONContent, context: MergeTagContext): JS
   return next;
 }
 
-function validateTipTapDocument(value: JSONContent, field: string): ContentValidationIssue[] {
+function validateTipTapDocument(
+  value: JSONContent,
+  field: string,
+  options: EventPageValidationOptions,
+): ContentValidationIssue[] {
   const issues: ContentValidationIssue[] = [];
-  walkTipTap(value, field, issues);
+  walkTipTap(value, field, options, issues);
   return issues;
 }
 
-function walkTipTap(value: JSONContent, field: string, issues: ContentValidationIssue[]): void {
+function walkTipTap(
+  value: JSONContent,
+  field: string,
+  options: EventPageValidationOptions,
+  issues: ContentValidationIssue[],
+): void {
   const allowedNodes = new Set([
     'doc',
     'paragraph',
@@ -758,6 +767,38 @@ function walkTipTap(value: JSONContent, field: string, issues: ContentValidation
         message: 'Event-page headings are limited to h1, h2, and h3',
         severity: 'error',
         field,
+      });
+    }
+  }
+  if (value.type === 'image') {
+    const attrs = isRecord(value.attrs) ? value.attrs : {};
+    const src = typeof attrs.src === 'string' ? attrs.src : '';
+    const alt = typeof attrs.alt === 'string' ? attrs.alt : '';
+    validateMergeTags(src).unknownTags.forEach((tag) =>
+      issues.push({
+        code: 'unknown_variable',
+        message: `Unknown merge tag {{${tag}}} — add it to the registry or remove it`,
+        severity: 'error',
+        field: `${field}.attrs.src`,
+      }),
+    );
+    const renderedSrc = src
+      ? renderMergeTags(src, sampleContext(), { channel: 'email', escape: 'plain' })
+      : '';
+    if (!src || !isAllowedDestination(renderedSrc, Boolean(options.allowPrivateLinks))) {
+      issues.push({
+        code: 'unsafe_image',
+        message: 'TipTap images must use safe http(s) destinations',
+        severity: 'error',
+        field: `${field}.attrs.src`,
+      });
+    }
+    if (!alt.trim()) {
+      issues.push({
+        code: 'missing_image_alt',
+        message: 'Event-page images require alt text',
+        severity: 'error',
+        field: `${field}.attrs.alt`,
       });
     }
   }
@@ -799,7 +840,9 @@ function walkTipTap(value: JSONContent, field: string, issues: ContentValidation
     }
   }
   if (Array.isArray(value.content)) {
-    value.content.forEach((child, index) => walkTipTap(child, `${field}.content.${index}`, issues));
+    value.content.forEach((child, index) =>
+      walkTipTap(child, `${field}.content.${index}`, options, issues),
+    );
   }
 }
 
@@ -836,6 +879,9 @@ function validateBlock(
         field,
       });
     }
+  }
+  if (block.type === 'rich_text') {
+    issues.push(...validateTipTapDocument(block.content, `${field}.content`, options));
   }
   for (const link of linkFields(block)) {
     const rendered = renderMergeTags(link.url, sampleContext(), {
