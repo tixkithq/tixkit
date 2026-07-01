@@ -486,103 +486,116 @@ export default function ConfirmationClient() {
                   </CardTitle>
                 </CardHeader>
                 <CardContent className="space-y-3">
-                  {walletPasses.map((ticket) => (
-                    <div key={ticket.ticketId} className="space-y-3 rounded-md border p-3">
-                      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-                        <div className="min-w-0 space-y-1">
-                          <p className="truncate font-mono text-sm font-medium">
-                            {ticket.ticketCode}
-                          </p>
-                          <p className="text-xs text-muted-foreground">
-                            Face value {formatCurrency(ticket.faceValueCents, ticket.currency)}
-                          </p>
-                        </div>
-                        <div className="flex flex-col gap-2 sm:flex-row">
-                          {ticket.activeResaleListing ? (
-                            <Badge variant="secondary" className="justify-center gap-1.5">
-                              <BadgeDollarSignIcon className="size-3.5" />
-                              Listed for{' '}
-                              {formatCurrency(
-                                ticket.activeResaleListing.priceCents,
-                                ticket.activeResaleListing.currency,
-                              )}
-                            </Badge>
-                          ) : null}
-                          {ticket.resaleEnabled && !ticket.activeResaleListing ? (
-                            <Button
-                              type="button"
-                              size="sm"
-                              variant="outline"
-                              className="gap-1.5"
-                              onClick={() => toggleResaleForm(ticket)}
-                            >
-                              <BadgeDollarSignIcon className="size-4" />
-                              List for resale
-                            </Button>
-                          ) : null}
-                          {ticket.appleUrl ? (
-                            <Button asChild size="sm" className="gap-1.5">
-                              <a href={ticket.appleUrl}>
-                                <DownloadIcon className="size-4" />
-                                Apple Wallet
-                              </a>
-                            </Button>
-                          ) : null}
-                          {ticket.googleUrl ? (
-                            <Button asChild size="sm" variant="outline" className="gap-1.5">
-                              <a href={ticket.googleUrl} target="_blank" rel="noreferrer">
-                                <ExternalLinkIcon className="size-4" />
-                                Google Wallet
-                              </a>
-                            </Button>
-                          ) : null}
-                        </div>
-                      </div>
-                      {resaleForms[ticket.ticketId]?.expanded && !ticket.activeResaleListing ? (
-                        <div className="grid gap-3 border-t pt-3 sm:grid-cols-[1fr_auto] sm:items-end">
-                          <div className="space-y-1.5">
-                            <Label htmlFor={`resale-price-${ticket.ticketId}`}>Resale price</Label>
-                            <Input
-                              id={`resale-price-${ticket.ticketId}`}
-                              inputMode="decimal"
-                              value={resaleForms[ticket.ticketId]?.price ?? ''}
-                              onChange={(inputEvent) =>
-                                setResaleForm(ticket.ticketId, {
-                                  price: inputEvent.target.value,
-                                  error: undefined,
-                                })
-                              }
-                              aria-describedby={`resale-help-${ticket.ticketId}`}
-                            />
-                            <p
-                              id={`resale-help-${ticket.ticketId}`}
-                              className="text-xs text-muted-foreground"
-                            >
-                              Max {formatCurrency(ticket.resaleMaxPriceCents, ticket.currency)}
+                  {walletPasses.map((ticket) => {
+                    const resaleHelpId = `resale-help-${ticket.ticketId}`;
+                    const resaleErrorId = `resale-error-${ticket.ticketId}`;
+                    const resaleError = resaleForms[ticket.ticketId]?.error;
+                    const resaleDescription = resaleError
+                      ? `${resaleHelpId} ${resaleErrorId}`
+                      : resaleHelpId;
+
+                    return (
+                      <div key={ticket.ticketId} className="space-y-3 rounded-md border p-3">
+                        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                          <div className="min-w-0 space-y-1">
+                            <p className="truncate font-mono text-sm font-medium">
+                              {ticket.ticketCode}
+                            </p>
+                            <p className="text-xs text-muted-foreground">
+                              Face value {formatCurrency(ticket.faceValueCents, ticket.currency)}
                             </p>
                           </div>
-                          <Button
-                            type="button"
-                            className="gap-1.5"
-                            onClick={() => void submitResaleListing(ticket)}
-                            disabled={resaleForms[ticket.ticketId]?.loading}
-                          >
-                            {resaleForms[ticket.ticketId]?.loading ? (
-                              <LoaderCircleIcon className="size-4 animate-spin" />
-                            ) : (
-                              <BadgeDollarSignIcon className="size-4" />
-                            )}
-                            Create listing
-                          </Button>
-                          {resaleForms[ticket.ticketId]?.error ? (
-                            <p className="text-sm text-destructive sm:col-span-2">
-                              {resaleForms[ticket.ticketId]?.error}
-                            </p>
-                          ) : null}
+                          <div className="flex flex-col gap-2 sm:flex-row">
+                            {ticket.activeResaleListing ? (
+                              <Badge variant="secondary" className="justify-center gap-1.5">
+                                <BadgeDollarSignIcon className="size-3.5" />
+                                Listed for{' '}
+                                {formatCurrency(
+                                  ticket.activeResaleListing.priceCents,
+                                  ticket.activeResaleListing.currency,
+                                )}
+                              </Badge>
+                            ) : null}
+                            {ticket.resaleEnabled && !ticket.activeResaleListing ? (
+                              <Button
+                                type="button"
+                                size="sm"
+                                variant="outline"
+                                className="gap-1.5"
+                                onClick={() => toggleResaleForm(ticket)}
+                              >
+                                <BadgeDollarSignIcon className="size-4" />
+                                List for resale
+                              </Button>
+                            ) : null}
+                            {ticket.appleUrl ? (
+                              <Button asChild size="sm" className="gap-1.5">
+                                <a href={ticket.appleUrl}>
+                                  <DownloadIcon className="size-4" />
+                                  Apple Wallet
+                                </a>
+                              </Button>
+                            ) : null}
+                            {ticket.googleUrl ? (
+                              <Button asChild size="sm" variant="outline" className="gap-1.5">
+                                <a href={ticket.googleUrl} target="_blank" rel="noreferrer">
+                                  <ExternalLinkIcon className="size-4" />
+                                  Google Wallet
+                                </a>
+                              </Button>
+                            ) : null}
+                          </div>
                         </div>
-                      ) : null}
-                    </div>
-                  ))}
+                        {resaleForms[ticket.ticketId]?.expanded && !ticket.activeResaleListing ? (
+                          <div className="grid gap-3 border-t pt-3 sm:grid-cols-[1fr_auto] sm:items-end">
+                            <div className="space-y-1.5">
+                              <Label htmlFor={`resale-price-${ticket.ticketId}`}>
+                                Resale price
+                              </Label>
+                              <Input
+                                id={`resale-price-${ticket.ticketId}`}
+                                inputMode="decimal"
+                                value={resaleForms[ticket.ticketId]?.price ?? ''}
+                                onChange={(inputEvent) =>
+                                  setResaleForm(ticket.ticketId, {
+                                    price: inputEvent.target.value,
+                                    error: undefined,
+                                  })
+                                }
+                                aria-describedby={resaleDescription}
+                                aria-invalid={resaleError ? 'true' : undefined}
+                              />
+                              <p id={resaleHelpId} className="text-xs text-muted-foreground">
+                                Max {formatCurrency(ticket.resaleMaxPriceCents, ticket.currency)}
+                              </p>
+                            </div>
+                            <Button
+                              type="button"
+                              className="gap-1.5"
+                              onClick={() => void submitResaleListing(ticket)}
+                              disabled={resaleForms[ticket.ticketId]?.loading}
+                            >
+                              {resaleForms[ticket.ticketId]?.loading ? (
+                                <LoaderCircleIcon className="size-4 animate-spin" />
+                              ) : (
+                                <BadgeDollarSignIcon className="size-4" />
+                              )}
+                              Create listing
+                            </Button>
+                            {resaleError ? (
+                              <p
+                                id={resaleErrorId}
+                                role="alert"
+                                className="text-sm text-destructive sm:col-span-2"
+                              >
+                                {resaleError}
+                              </p>
+                            ) : null}
+                          </div>
+                        ) : null}
+                      </div>
+                    );
+                  })}
                 </CardContent>
               </Card>
             ) : null}
