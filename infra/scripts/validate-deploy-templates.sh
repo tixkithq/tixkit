@@ -150,6 +150,126 @@ next_app_route_file_for_path() {
   printf '%s/%s/route.ts\n' "${app_root}" "${route_segments}"
 }
 
+require_helm_frontend_probe_values() {
+  local component="$1"
+  local expected_path="$2"
+
+  awk -v component="${component}" -v expected_path="${expected_path}" '
+    $0 == component ":" {
+      in_component = 1
+      next
+    }
+    in_component && /^[^[:space:]]/ {
+      in_component = 0
+    }
+    in_component && /^[[:space:]]*readiness:$/ {
+      in_readiness = 1
+      in_liveness = 0
+      readiness_section = 1
+      next
+    }
+    in_component && /^[[:space:]]*liveness:$/ {
+      in_readiness = 0
+      in_liveness = 1
+      liveness_section = 1
+      next
+    }
+    in_component && (in_readiness || in_liveness) && /^[[:space:]]*path:/ {
+      value = $0
+      sub(/^[[:space:]]*path:[[:space:]]*/, "", value)
+      sub(/[[:space:]]*$/, "", value)
+      gsub(/^'\''|'\''$/, "", value)
+      gsub(/^"|"$/, "", value)
+      if (in_readiness && value == expected_path) {
+        readiness_path = 1
+      }
+      if (in_liveness && value == expected_path) {
+        liveness_path = 1
+      }
+      next
+    }
+    in_component && (in_readiness || in_liveness) && /^[[:space:]]*initialDelaySeconds:[[:space:]]*[0-9]+[[:space:]]*$/ {
+      initial_delay_count += 1
+      next
+    }
+    in_component && (in_readiness || in_liveness) && /^[[:space:]]*periodSeconds:[[:space:]]*[0-9]+[[:space:]]*$/ {
+      period_count += 1
+      next
+    }
+    in_component && (in_readiness || in_liveness) && /^[[:space:]]*timeoutSeconds:[[:space:]]*[0-9]+[[:space:]]*$/ {
+      timeout_count += 1
+      next
+    }
+    in_component && (in_readiness || in_liveness) && /^[[:space:]]*failureThreshold:[[:space:]]*[0-9]+[[:space:]]*$/ {
+      failure_count += 1
+      next
+    }
+    END {
+      exit readiness_section && liveness_section && readiness_path && liveness_path &&
+        initial_delay_count == 2 && period_count == 2 && timeout_count == 2 && failure_count == 2 ? 0 : 1
+    }
+  ' infra/helm/tixkit/values.yaml ||
+    fail "infra/helm/tixkit/values.yaml must configure ${component} readiness/liveness probes for ${expected_path}"
+}
+
+require_rendered_frontend_probes() {
+  local rendered_chart="$1"
+  local component="$2"
+  local expected_path="$3"
+
+  printf '%s\n' "${rendered_chart}" | awk -v component="${component}" -v expected_path="${expected_path}" '
+    /^[[:space:]]*app.kubernetes.io\/component:[[:space:]]*/ {
+      if ($2 == component) {
+        seen_component = 1
+      }
+    }
+    seen_component && /^[[:space:]]*containers:[[:space:]]*$/ {
+      in_target = 1
+      next
+    }
+    in_target && /^[[:space:]]*readinessProbe:[[:space:]]*$/ {
+      in_readiness = 1
+      in_liveness = 0
+      readiness = 1
+      next
+    }
+    in_target && /^[[:space:]]*livenessProbe:[[:space:]]*$/ {
+      in_readiness = 0
+      in_liveness = 1
+      liveness = 1
+      next
+    }
+    in_target && /^[[:space:]]*path:[[:space:]]*/ {
+      value = $0
+      sub(/^[[:space:]]*path:[[:space:]]*/, "", value)
+      gsub(/^"|"$/, "", value)
+      if (in_readiness && value == expected_path) {
+        readiness_path = 1
+      }
+      if (in_liveness && value == expected_path) {
+        liveness_path = 1
+      }
+      next
+    }
+    in_target && /^[[:space:]]*port:[[:space:]]*http[[:space:]]*$/ {
+      if (in_readiness) {
+        readiness_port = 1
+      }
+      if (in_liveness) {
+        liveness_port = 1
+      }
+      next
+    }
+    in_target && /^---$/ {
+      exit readiness && liveness && readiness_path && liveness_path && readiness_port && liveness_port ? 0 : 1
+    }
+    END {
+      exit readiness && liveness && readiness_path && liveness_path && readiness_port && liveness_port ? 0 : 1
+    }
+  ' ||
+    fail "rendered Helm ${component} deployment must include readinessProbe and livenessProbe on ${expected_path}"
+}
+
 expected_cors_origins='https://checkout.example.com,https://admin.example.com'
 expected_render_api_origin='https://tixkit-api.onrender.com'
 expected_render_checkout_api_base_url="${expected_render_api_origin}/v1"
@@ -478,8 +598,13 @@ checkout_health_route="$(next_app_route_file_for_path apps/checkout/src/app "${c
   fail "infra/render.yaml tixkit-checkout healthCheckPath ${checkout_health_path} must map to a static Next app route"
 require_file "${checkout_health_route}"
 
+require_file apps/admin-dashboard/src/app/health/route.ts
+
 grep -Eq "^[[:space:]]*trustProxy:[[:space:]]*'1'[[:space:]]*$" infra/helm/tixkit/values.yaml ||
   fail 'infra/helm/tixkit/values.yaml must set API trustProxy to bounded hop count 1'
+
+require_helm_frontend_probe_values checkout /health
+require_helm_frontend_probe_values admin /health
 
 awk '
   /^[[:space:]]*corsAllowedOrigins:$/ {
@@ -523,6 +648,8 @@ if command -v helm >/dev/null 2>&1; then
     printf '%s\n' "${first_party_images}" | grep -Eq "^ghcr\\.io/your-org/tixkit/${component}@sha256:[0-9a-f]{64}$" ||
       fail "rendered Helm chart must include digest-addressed first-party image ${component}"
   done
+  require_rendered_frontend_probes "${rendered_chart}" checkout /health
+  require_rendered_frontend_probes "${rendered_chart}" admin /health
 
   rendered_config="$(helm template tixkit infra/helm/tixkit --namespace tixkit --show-only templates/configmap.yaml)"
   printf '%s\n' "${rendered_config}" | grep -Eq '^[[:space:]]*TRUST_PROXY:[[:space:]]*"1"[[:space:]]*$' ||

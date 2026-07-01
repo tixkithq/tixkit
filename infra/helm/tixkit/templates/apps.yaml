@@ -29,6 +29,22 @@ spec:
                 name: {{ include "tixkit.fullname" . }}-config
             - secretRef:
                 name: {{ .Values.secrets.name }}
+          readinessProbe:
+            httpGet:
+              path: {{ .Values.checkout.probes.readiness.path | quote }}
+              port: http
+            initialDelaySeconds: {{ .Values.checkout.probes.readiness.initialDelaySeconds }}
+            periodSeconds: {{ .Values.checkout.probes.readiness.periodSeconds }}
+            timeoutSeconds: {{ .Values.checkout.probes.readiness.timeoutSeconds }}
+            failureThreshold: {{ .Values.checkout.probes.readiness.failureThreshold }}
+          livenessProbe:
+            httpGet:
+              path: {{ .Values.checkout.probes.liveness.path | quote }}
+              port: http
+            initialDelaySeconds: {{ .Values.checkout.probes.liveness.initialDelaySeconds }}
+            periodSeconds: {{ .Values.checkout.probes.liveness.periodSeconds }}
+            timeoutSeconds: {{ .Values.checkout.probes.liveness.timeoutSeconds }}
+            failureThreshold: {{ .Values.checkout.probes.liveness.failureThreshold }}
           resources:
             {{- toYaml .Values.checkout.resources | nindent 12 }}
 ---
@@ -79,6 +95,22 @@ spec:
                 name: {{ include "tixkit.fullname" . }}-config
             - secretRef:
                 name: {{ .Values.secrets.name }}
+          readinessProbe:
+            httpGet:
+              path: {{ .Values.admin.probes.readiness.path | quote }}
+              port: http
+            initialDelaySeconds: {{ .Values.admin.probes.readiness.initialDelaySeconds }}
+            periodSeconds: {{ .Values.admin.probes.readiness.periodSeconds }}
+            timeoutSeconds: {{ .Values.admin.probes.readiness.timeoutSeconds }}
+            failureThreshold: {{ .Values.admin.probes.readiness.failureThreshold }}
+          livenessProbe:
+            httpGet:
+              path: {{ .Values.admin.probes.liveness.path | quote }}
+              port: http
+            initialDelaySeconds: {{ .Values.admin.probes.liveness.initialDelaySeconds }}
+            periodSeconds: {{ .Values.admin.probes.liveness.periodSeconds }}
+            timeoutSeconds: {{ .Values.admin.probes.liveness.timeoutSeconds }}
+            failureThreshold: {{ .Values.admin.probes.liveness.failureThreshold }}
           resources:
             {{- toYaml .Values.admin.resources | nindent 12 }}
 ---
