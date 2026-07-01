@@ -3,7 +3,12 @@
 import * as React from 'react';
 import { Download, Eraser, RefreshCw, ScrollText } from 'lucide-react';
 import { toast } from 'sonner';
-import { type AdminAuditLog, type AdminPrivacyRequest, adminApi } from '@/lib/api';
+import {
+  type AdminAuditLog,
+  type AdminPrivacyRequest,
+  type CreatePrivacyRequestInput,
+  adminApi,
+} from '@/lib/api';
 import { ApiErrorState } from '@/components/api-error-state';
 import { EmptyState } from '@/components/empty-state';
 import { Badge } from '@/components/ui/badge';
@@ -158,13 +163,28 @@ export function AuditLogView() {
     }
 
     setSubmitting(true);
-    const payload = {
+    const basePayload = {
       organizationId: organizationId.trim(),
       brandId: brandId.trim() || undefined,
       subjectType,
-      subjectEmail: subjectEmail.trim() || undefined,
-      subjectId: subjectId.trim() || undefined,
     };
+    const trimmedSubjectEmail = subjectEmail.trim();
+    const trimmedSubjectId = subjectId.trim();
+    const payload: CreatePrivacyRequestInput = trimmedSubjectEmail
+      ? trimmedSubjectId
+        ? {
+            ...basePayload,
+            subjectEmail: trimmedSubjectEmail,
+            subjectId: trimmedSubjectId,
+          }
+        : {
+            ...basePayload,
+            subjectEmail: trimmedSubjectEmail,
+          }
+      : {
+          ...basePayload,
+          subjectId: trimmedSubjectId,
+        };
     const result =
       requestType === 'export'
         ? await adminApi.createPrivacyExport(payload)

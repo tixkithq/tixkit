@@ -1042,6 +1042,14 @@ describe('openApiSpec', () => {
     ).toEqual({
       $ref: '#/components/schemas/AuditLogPage',
     });
+    expect(openApiSpec.components.schemas.PrivacyRequestInput).toMatchObject({
+      required: ['organizationId', 'subjectType'],
+      anyOf: [{ required: ['subjectId'] }, { required: ['subjectEmail'] }],
+      properties: {
+        subjectId: { type: 'string' },
+        subjectEmail: { type: 'string', format: 'email' },
+      },
+    });
     expect(openApiSpec.paths['/privacy/data-exports'].post.parameters).toContainEqual({
       $ref: '#/components/parameters/RequiredIdempotencyKey',
     });

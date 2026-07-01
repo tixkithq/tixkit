@@ -1384,13 +1384,21 @@ export type PrivacyRequest = {
   completedAt: string | null;
 };
 
+type PrivacyRequestSubjectIdentifier =
+  | {
+      subjectId: string;
+      subjectEmail?: string;
+    }
+  | {
+      subjectId?: string;
+      subjectEmail: string;
+    };
+
 export type PrivacyRequestInput = {
   organizationId: string;
   brandId?: string;
   subjectType: 'buyer' | 'attendee';
-  subjectId?: string;
-  subjectEmail?: string;
-};
+} & PrivacyRequestSubjectIdentifier;
 
 export type MessageCampaign = {
   id: string;

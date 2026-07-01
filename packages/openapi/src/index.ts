@@ -2651,6 +2651,7 @@ const rawOpenApiSpec = {
           subjectEmail: { type: 'string', format: 'email' },
         },
         required: ['organizationId', 'subjectType'],
+        anyOf: [{ required: ['subjectId'] }, { required: ['subjectEmail'] }],
       },
       PrivacyRequest: {
         type: 'object',

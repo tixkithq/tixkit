@@ -13,6 +13,7 @@ import {
   type EmailTemplateDocument,
   type OfflineManifest,
   type OAuthApplication,
+  type PrivacyRequestInput,
   type PublicAvailabilityItem,
   type SmsTemplateDocument,
   type UploadPurpose,
@@ -1020,6 +1021,23 @@ describe('TixkitClient new resource methods', () => {
     expect(getCall(fm).url).toBe('https://api.test/v1/checkout/sessions/cs_1/wallet-passes');
     expect(getCall(fm).method).toBe('GET');
     expect(getCall(fm).headers['X-Checkout-Session-Token']).toBe('client_1');
+  });
+
+  it('privacy request inputs require a subject identifier', () => {
+    expectTypeOf<{
+      organizationId: string;
+      subjectType: 'buyer';
+      subjectEmail: string;
+    }>().toExtend<PrivacyRequestInput>();
+    expectTypeOf<{
+      organizationId: string;
+      subjectType: 'attendee';
+      subjectId: string;
+    }>().toExtend<PrivacyRequestInput>();
+    expectTypeOf<{
+      organizationId: string;
+      subjectType: 'buyer';
+    }>().not.toExtend<PrivacyRequestInput>();
   });
 
   it('organizations.update sends PATCH', async () => {
