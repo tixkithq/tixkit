@@ -17,7 +17,25 @@ export function PaymentCompensationsPanel() {
   const compensations = data?.items ?? [];
 
   if (loading) return <Skeleton className="h-24 w-full" />;
-  if (error || compensations.length === 0) return null;
+  if (error) {
+    return (
+      <Alert variant="destructive">
+        <AlertTriangle className="h-4 w-4" />
+        <AlertTitle>Payment compensation review unavailable</AlertTitle>
+        <AlertDescription className="mt-3 space-y-3">
+          <p>
+            {error.message ||
+              'Manual-review payment compensations could not be loaded. Try again before assuming the review queue is empty.'}
+          </p>
+          <Button type="button" variant="outline" size="sm" onClick={refetch}>
+            <RefreshCw className="mr-2 h-4 w-4" />
+            Try again
+          </Button>
+        </AlertDescription>
+      </Alert>
+    );
+  }
+  if (compensations.length === 0) return null;
 
   return (
     <Alert variant="destructive">

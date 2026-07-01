@@ -21,6 +21,62 @@ async function expectJsonStatus<T>(
 }
 
 test.describe('admin refund workflow coverage', () => {
+  test('orders page shows retryable payment compensation load failures', async ({ page }) => {
+    await requireReachable(page, adminBaseUrl, 'admin dashboard');
+
+    await page.addInitScript(() => {
+      const originalFetch = window.fetch.bind(window);
+      let compensationRequests = 0;
+
+      Object.defineProperty(window, '__paymentCompensationRequests', {
+        configurable: true,
+        get: () => compensationRequests,
+      });
+
+      window.fetch = async (input, init) => {
+        const url =
+          typeof input === 'string' ? input : input instanceof Request ? input.url : String(input);
+        if (url.includes('/v1/payment-compensations')) {
+          compensationRequests += 1;
+          return new Response(
+            JSON.stringify({
+              error: {
+                code: 'service_unavailable',
+                message: 'Payment compensation review is temporarily unavailable',
+              },
+            }),
+            {
+              status: 503,
+              headers: { 'Content-Type': 'application/json' },
+            },
+          );
+        }
+        return originalFetch(input, init);
+      };
+    });
+
+    const compensationRequestCount = async () =>
+      page.evaluate(
+        () =>
+          (window as typeof window & { __paymentCompensationRequests?: number })
+            .__paymentCompensationRequests ?? 0,
+      );
+
+    await page.goto(`${adminBaseUrl}/orders`);
+
+    const alert = page.getByRole('alert').filter({
+      hasText: 'Payment compensation review unavailable',
+    });
+    await expect(alert).toBeVisible();
+    await expect(
+      alert.getByText('Payment compensation review is temporarily unavailable'),
+    ).toBeVisible();
+
+    await alert.getByRole('button', { name: 'Try again' }).click();
+
+    await expect.poll(compensationRequestCount).toBe(2);
+  });
+
   test('admin can partially refund an order through the Temporal refund workflow', async ({
     page,
     request,
