@@ -3,7 +3,8 @@ name: Trusted CI
 on:
   push:
     branches:
-      - '**'
+      - main
+      - 'release/**'
   workflow_dispatch:
 
 concurrency:
