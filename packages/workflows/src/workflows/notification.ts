@@ -103,7 +103,7 @@ export async function notificationDeliveryWorkflow(
   });
 
   if (!suppressionResult.ok) {
-    return { status: 'failed' };
+    return handleDeliveryActivityFailure('Email suppression check', suppressionResult);
   }
 
   if (suppressionResult.value.suppressed && input.notificationType !== 'transactional') {
@@ -119,7 +119,7 @@ export async function notificationDeliveryWorkflow(
     });
 
     if (!consentResult.ok) {
-      return { status: 'failed' };
+      return handleDeliveryActivityFailure('Email consent check', consentResult);
     }
 
     if (!consentResult.value.allowed) {

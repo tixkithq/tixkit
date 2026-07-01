@@ -1000,6 +1000,66 @@ describe('notificationDeliveryWorkflow', () => {
       status: 'failed',
     });
   });
+
+  it('throws retryable suppression check failures so temporary lookup errors are retried', async () => {
+    setActivity('checkSuppressionActivity', async () =>
+      errResult('SUPPRESSION_LOOKUP_FAILED', 'Suppression database unavailable', true),
+    );
+
+    await expect(notificationDeliveryWorkflow(makeNotificationDeliveryInput())).rejects.toThrow(
+      'Email suppression check failed (SUPPRESSION_LOOKUP_FAILED): Suppression database unavailable',
+    );
+  });
+
+  it('keeps non-retryable suppression check failures failed without throwing', async () => {
+    setActivity('checkSuppressionActivity', async () =>
+      errResult('SUPPRESSION_LOOKUP_INVALID', 'Suppression lookup is invalid', false),
+    );
+
+    await expect(notificationDeliveryWorkflow(makeNotificationDeliveryInput())).resolves.toEqual({
+      status: 'failed',
+    });
+  });
+
+  it('throws retryable consent check failures so temporary lookup errors are retried', async () => {
+    setActivity('checkConsentActivity', async () =>
+      errResult('CONSENT_LOOKUP_FAILED', 'Consent database unavailable', true),
+    );
+
+    await expect(
+      notificationDeliveryWorkflow(makeNotificationDeliveryInput({ notificationType: 'bulk' })),
+    ).rejects.toThrow(
+      'Email consent check failed (CONSENT_LOOKUP_FAILED): Consent database unavailable',
+    );
+  });
+
+  it('keeps non-retryable consent check failures failed without throwing', async () => {
+    setActivity('checkConsentActivity', async () =>
+      errResult('CONSENT_LOOKUP_INVALID', 'Consent lookup is invalid', false),
+    );
+
+    await expect(
+      notificationDeliveryWorkflow(makeNotificationDeliveryInput({ notificationType: 'bulk' })),
+    ).resolves.toEqual({
+      status: 'failed',
+    });
+  });
+
+  it('suppresses non-transactional emails when consent is denied', async () => {
+    const sendAttempts: Array<Record<string, unknown>> = [];
+    setActivity('checkConsentActivity', async () => okResult({ allowed: false }));
+    setActivity('sendEmailActivity', async (input) => {
+      sendAttempts.push(input);
+      return okResult({ deliveryId: 'emd_1', provider: 'capture' });
+    });
+
+    await expect(
+      notificationDeliveryWorkflow(makeNotificationDeliveryInput({ notificationType: 'bulk' })),
+    ).resolves.toEqual({
+      status: 'suppressed',
+    });
+    expect(sendAttempts).toHaveLength(0);
+  });
 });
 
 describe('smsDeliveryWorkflow', () => {
