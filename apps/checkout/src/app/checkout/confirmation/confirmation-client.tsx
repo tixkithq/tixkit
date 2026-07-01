@@ -338,6 +338,7 @@ export default function ConfirmationClient() {
   const currency = session?.currency ?? 'USD';
   const startsAt = event ? formatDateTime(event.startsAt, event.timezone) : null;
   const compensationMessage = paymentCompensationMessage(session?.paymentCompensation);
+  const orderReference = orderNumber || orderId || session?.orderId || '';
 
   if (loading) {
     return (
@@ -356,10 +357,10 @@ export default function ConfirmationClient() {
       <main className="mx-auto w-full max-w-xl space-y-8 px-4 py-12 sm:px-6">
         <ConfirmationHeader state={confirmationState} />
 
-        {(orderNumber || orderId) && confirmationState !== 'error' ? (
+        {orderReference && confirmationState !== 'error' ? (
           <div className="flex justify-center">
             <Badge variant="secondary" className="font-mono">
-              {orderNumber || orderId}
+              {orderReference}
             </Badge>
           </div>
         ) : null}

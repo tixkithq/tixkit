@@ -77,7 +77,7 @@ const resaleTicket: CheckoutWalletPassTicket = {
   resaleMaxPriceCents: 6000,
 };
 
-describe('ConfirmationClient resale validation accessibility', () => {
+describe('ConfirmationClient', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     window.sessionStorage.clear();
@@ -140,5 +140,15 @@ describe('ConfirmationClient resale validation accessibility', () => {
 
     expect(await screen.findByText('What happens next')).toBeInTheDocument();
     expect(screen.queryByText('Payment failed')).not.toBeInTheDocument();
+  });
+
+  it('shows the loaded session order reference when tokenless confirmation has no order query params', async () => {
+    navigationState.searchParams = new URLSearchParams(
+      'sessionId=cs_1&payment_intent_client_secret=pi_secret_1&redirect_status=succeeded',
+    );
+
+    render(<ConfirmationClient />);
+
+    expect(await screen.findByText('ord_1')).toBeInTheDocument();
   });
 });
