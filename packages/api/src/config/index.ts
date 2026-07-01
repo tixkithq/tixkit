@@ -58,28 +58,54 @@ export function resolveCorsAllowedOrigins(value: string | undefined, nodeEnv: st
   return configured.length > 0 ? configured : defaultCorsAllowedOrigins(nodeEnv);
 }
 
-function isLocalTemporalAddress(value: string): boolean {
-  const endpoint = value
-    .trim()
-    .toLowerCase()
-    .replace(/^[a-z][a-z0-9+.-]*:\/\//, '')
-    .split('/')[0];
-  const host =
-    endpoint?.startsWith('[') && endpoint.includes(']')
-      ? endpoint.slice(1, endpoint.indexOf(']'))
-      : endpoint?.split(':')[0];
+function envValue(name: string): string | undefined {
+  return process.env[name]?.trim();
+}
 
-  return host === 'localhost' || host === '::1' || host === '127.0.0.1' || host?.startsWith('127.');
+function requireEnvValues(names: readonly string[]): string[] {
+  return names.filter((name) => !envValue(name));
+}
+
+function hostnameFromUrlLike(value: string): string {
+  const candidate = value.trim();
+  if (/^[a-z][a-z0-9+.-]*:\/\//i.test(candidate)) {
+    try {
+      return new URL(candidate).hostname.toLowerCase();
+    } catch {
+      return '';
+    }
+  }
+
+  const endpoint = candidate.toLowerCase().split('/')[0];
+  return endpoint.startsWith('[') && endpoint.includes(']')
+    ? endpoint.slice(1, endpoint.indexOf(']'))
+    : (endpoint.split(':')[0] ?? '');
+}
+
+function isLocalHostname(hostname: string): boolean {
+  return (
+    hostname === 'localhost' ||
+    hostname === '::1' ||
+    hostname === '127.0.0.1' ||
+    hostname.startsWith('127.')
+  );
+}
+
+function isLocalEndpoint(value: string | undefined): boolean {
+  if (!value?.trim()) return false;
+  return isLocalHostname(hostnameFromUrlLike(value));
+}
+
+function isLocalTemporalAddress(value: string): boolean {
+  return isLocalEndpoint(value);
 }
 
 function requireProductionTemporalConfig(): void {
-  const missing = [
-    ['TEMPORAL_ADDRESS', process.env.TEMPORAL_ADDRESS],
-    ['TEMPORAL_NAMESPACE', process.env.TEMPORAL_NAMESPACE],
-    ['TEMPORAL_TASK_QUEUE', process.env.TEMPORAL_TASK_QUEUE],
-  ]
-    .filter(([, value]) => value === undefined || value.trim().length === 0)
-    .map(([name]) => name);
+  const missing = requireEnvValues([
+    'TEMPORAL_ADDRESS',
+    'TEMPORAL_NAMESPACE',
+    'TEMPORAL_TASK_QUEUE',
+  ]);
 
   if (missing.length > 0) {
     throw new Error(`Production Temporal config requires ${missing.join(', ')}`);
@@ -88,6 +114,71 @@ function requireProductionTemporalConfig(): void {
   if (isLocalTemporalAddress(process.env.TEMPORAL_ADDRESS ?? '')) {
     throw new Error(
       'TEMPORAL_ADDRESS must not point to localhost in production. Set it to the managed Temporal endpoint.',
+    );
+  }
+}
+
+function requireProductionConfig(nodeEnv: string, trustProxy: TrustProxyConfig): void {
+  if (nodeEnv !== 'production') return;
+
+  if (trustProxy === true) {
+    throw new Error(
+      'TRUST_PROXY=true is not allowed in production. Set TRUST_PROXY to a numeric hop count or an explicit proxy CIDR/list.',
+    );
+  }
+
+  requireProductionTemporalConfig();
+
+  const authProvider = parseAuthProvider(process.env.AUTH_PROVIDER, nodeEnv);
+  if (authProvider === 'dev') {
+    throw new Error('AUTH_PROVIDER=dev is not allowed in production.');
+  }
+
+  const required = [
+    'DATABASE_URL',
+    'REDIS_URL',
+    'METRICS_BEARER_TOKEN',
+    'API_BASE_URL',
+    'CORS_ALLOWED_ORIGINS',
+    'STRIPE_SECRET_KEY',
+    'STRIPE_WEBHOOK_SECRET',
+    'S3_ENDPOINT',
+    'S3_BUCKET',
+    'S3_ACCESS_KEY_ID',
+    'S3_SECRET_ACCESS_KEY',
+    'S3_REGION',
+    ...(authProvider === 'clerk'
+      ? ['CLERK_SECRET_KEY', 'CLERK_PUBLISHABLE_KEY', 'CLERK_WEBHOOK_SECRET']
+      : ['OIDC_ISSUER_URL', 'OIDC_AUDIENCE']),
+  ];
+  const missing = requireEnvValues(required);
+  if (missing.length > 0) {
+    throw new Error(`Production config requires ${missing.join(', ')}`);
+  }
+
+  const localEndpoints = [
+    ['DATABASE_URL', process.env.DATABASE_URL],
+    ['REDIS_URL', process.env.REDIS_URL],
+    ['API_BASE_URL', process.env.API_BASE_URL],
+    ['S3_ENDPOINT', process.env.S3_ENDPOINT],
+  ]
+    .filter(([, value]) => isLocalEndpoint(value))
+    .map(([name]) => name);
+  if (localEndpoints.length > 0) {
+    throw new Error(
+      `Production config must not point to localhost for ${localEndpoints.join(', ')}`,
+    );
+  }
+
+  const defaultSecrets = [
+    ['S3_ACCESS_KEY_ID', process.env.S3_ACCESS_KEY_ID],
+    ['S3_SECRET_ACCESS_KEY', process.env.S3_SECRET_ACCESS_KEY],
+  ]
+    .filter(([, value]) => value?.trim() === 'minioadmin')
+    .map(([name]) => name);
+  if (defaultSecrets.length > 0) {
+    throw new Error(
+      `Production config must not use local default credentials for ${defaultSecrets.join(', ')}`,
     );
   }
 }
@@ -187,14 +278,7 @@ export function loadConfig(): AppConfig {
   const nodeEnv = process.env.NODE_ENV ?? 'development';
   const trustProxy = parseTrustProxy(process.env.TRUST_PROXY);
 
-  if (nodeEnv === 'production' && trustProxy === true) {
-    throw new Error(
-      'TRUST_PROXY=true is not allowed in production. Set TRUST_PROXY to a numeric hop count or an explicit proxy CIDR/list.',
-    );
-  }
-  if (nodeEnv === 'production') {
-    requireProductionTemporalConfig();
-  }
+  requireProductionConfig(nodeEnv, trustProxy);
 
   return {
     port: parseInt(process.env.PORT ?? '4000', 10),

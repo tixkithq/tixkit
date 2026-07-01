@@ -6,11 +6,27 @@ import { createCorsOriginValidator } from '../app.js';
 import { loadConfig, parseTrustProxy, resolveCorsAllowedOrigins } from '../config/index.js';
 
 const ENV_KEYS = [
+  'API_BASE_URL',
+  'AUTH_PROVIDER',
+  'CLERK_PUBLISHABLE_KEY',
+  'CLERK_SECRET_KEY',
+  'CLERK_WEBHOOK_SECRET',
   'CORS_ALLOWED_ORIGINS',
+  'DATABASE_URL',
   'METRICS_BEARER_TOKEN',
   'NODE_ENV',
+  'OIDC_AUDIENCE',
+  'OIDC_ISSUER_URL',
   'RATE_LIMIT_MAX',
   'RATE_LIMIT_TIME_WINDOW',
+  'REDIS_URL',
+  'S3_ACCESS_KEY_ID',
+  'S3_BUCKET',
+  'S3_ENDPOINT',
+  'S3_REGION',
+  'S3_SECRET_ACCESS_KEY',
+  'STRIPE_SECRET_KEY',
+  'STRIPE_WEBHOOK_SECRET',
   'TEMPORAL_ADDRESS',
   'TEMPORAL_NAMESPACE',
   'TEMPORAL_TASK_QUEUE',
@@ -29,6 +45,30 @@ afterEach(() => {
     }
   }
 });
+
+function setValidProductionConfig(): void {
+  process.env.NODE_ENV = 'production';
+  process.env.API_BASE_URL = 'https://api.example.com';
+  process.env.AUTH_PROVIDER = 'clerk';
+  process.env.CLERK_PUBLISHABLE_KEY = 'pk_live_example';
+  process.env.CLERK_SECRET_KEY = 'sk_live_example';
+  process.env.CLERK_WEBHOOK_SECRET = 'whsec_clerk_example';
+  process.env.CORS_ALLOWED_ORIGINS = 'https://admin.example.com,https://checkout.example.com';
+  process.env.DATABASE_URL = 'postgres://tixkit:secret@db.example.com:5432/tixkit';
+  process.env.METRICS_BEARER_TOKEN = 'metrics-token';
+  process.env.REDIS_URL = 'rediss://redis.example.com:6379';
+  process.env.S3_ACCESS_KEY_ID = 's3-production-key';
+  process.env.S3_BUCKET = 'tixkit-production';
+  process.env.S3_ENDPOINT = 'https://s3.example.com';
+  process.env.S3_REGION = 'us-east-1';
+  process.env.S3_SECRET_ACCESS_KEY = 's3-production-secret';
+  process.env.STRIPE_SECRET_KEY = 'sk_live_stripe_example';
+  process.env.STRIPE_WEBHOOK_SECRET = 'whsec_stripe_example';
+  process.env.TEMPORAL_ADDRESS = 'temporal.example.com:7233';
+  process.env.TEMPORAL_NAMESPACE = 'tixkit.production';
+  process.env.TEMPORAL_TASK_QUEUE = 'tixkit-production';
+  process.env.TRUST_PROXY = '1';
+}
 
 describe('API CORS configuration', () => {
   it('allows configured credentialed origins and rejects attacker origins', async () => {
@@ -137,7 +177,7 @@ describe('API exposure config parsing', () => {
   });
 
   it('rejects TRUST_PROXY=true in production', () => {
-    process.env.NODE_ENV = 'production';
+    setValidProductionConfig();
     process.env.TRUST_PROXY = 'true';
 
     expect(() => loadConfig()).toThrow(
@@ -146,10 +186,7 @@ describe('API exposure config parsing', () => {
   });
 
   it('accepts bounded TRUST_PROXY values in production', () => {
-    process.env.NODE_ENV = 'production';
-    process.env.TEMPORAL_ADDRESS = 'temporal.example.com:7233';
-    process.env.TEMPORAL_NAMESPACE = 'tixkit.production';
-    process.env.TEMPORAL_TASK_QUEUE = 'tixkit-production';
+    setValidProductionConfig();
 
     process.env.TRUST_PROXY = '1';
     expect(loadConfig().trustProxy).toBe(1);
@@ -162,8 +199,7 @@ describe('API exposure config parsing', () => {
   });
 
   it('rejects missing production Temporal config', () => {
-    process.env.NODE_ENV = 'production';
-    process.env.TRUST_PROXY = '1';
+    setValidProductionConfig();
     delete process.env.TEMPORAL_ADDRESS;
     delete process.env.TEMPORAL_NAMESPACE;
     delete process.env.TEMPORAL_TASK_QUEUE;
@@ -174,10 +210,7 @@ describe('API exposure config parsing', () => {
   });
 
   it('rejects localhost Temporal addresses in production', () => {
-    process.env.NODE_ENV = 'production';
-    process.env.TRUST_PROXY = '1';
-    process.env.TEMPORAL_NAMESPACE = 'tixkit.production';
-    process.env.TEMPORAL_TASK_QUEUE = 'tixkit-production';
+    setValidProductionConfig();
 
     for (const address of ['localhost:7233', '127.0.0.1:7233', '[::1]:7233']) {
       process.env.TEMPORAL_ADDRESS = address;
@@ -214,10 +247,8 @@ describe('API exposure config parsing', () => {
     process.env.NODE_ENV = 'development';
     expect(loadConfig().rateLimitMax).toBe(1000);
 
-    process.env.NODE_ENV = 'production';
-    process.env.TEMPORAL_ADDRESS = 'temporal.example.com:7233';
-    process.env.TEMPORAL_NAMESPACE = 'tixkit.production';
-    process.env.TEMPORAL_TASK_QUEUE = 'tixkit-production';
+    setValidProductionConfig();
+    delete process.env.RATE_LIMIT_MAX;
     expect(loadConfig().rateLimitMax).toBe(100);
   });
 
@@ -267,7 +298,7 @@ describe('API exposure config parsing', () => {
     await app.close();
   });
 
-  it('defaults local CORS origins in development but not production', () => {
+  it('defaults local CORS origins in development but not production resolver output', () => {
     delete process.env.CORS_ALLOWED_ORIGINS;
     process.env.NODE_ENV = 'development';
 
@@ -278,11 +309,77 @@ describe('API exposure config parsing', () => {
       'http://127.0.0.1:3001',
     ]);
 
-    process.env.NODE_ENV = 'production';
-    process.env.TEMPORAL_ADDRESS = 'temporal.example.com:7233';
-    process.env.TEMPORAL_NAMESPACE = 'tixkit.production';
-    process.env.TEMPORAL_TASK_QUEUE = 'tixkit-production';
+    expect(resolveCorsAllowedOrigins(undefined, 'production')).toEqual([]);
+  });
 
-    expect(loadConfig().corsAllowedOrigins).toEqual([]);
+  it('rejects missing required production service configuration before defaults are applied', () => {
+    setValidProductionConfig();
+
+    for (const key of [
+      'DATABASE_URL',
+      'REDIS_URL',
+      'METRICS_BEARER_TOKEN',
+      'API_BASE_URL',
+      'CORS_ALLOWED_ORIGINS',
+      'STRIPE_SECRET_KEY',
+      'STRIPE_WEBHOOK_SECRET',
+      'S3_ENDPOINT',
+      'S3_BUCKET',
+      'S3_ACCESS_KEY_ID',
+      'S3_SECRET_ACCESS_KEY',
+      'S3_REGION',
+      'CLERK_SECRET_KEY',
+      'CLERK_PUBLISHABLE_KEY',
+      'CLERK_WEBHOOK_SECRET',
+    ] as const) {
+      setValidProductionConfig();
+      delete process.env[key];
+
+      expect(() => loadConfig(), key).toThrow(`Production config requires ${key}`);
+    }
+  });
+
+  it('rejects local production endpoints and default MinIO credentials', () => {
+    setValidProductionConfig();
+
+    for (const [key, value, message] of [
+      ['DATABASE_URL', 'postgres://tixkit:tixkit@localhost:5432/tixkit', 'DATABASE_URL'],
+      ['REDIS_URL', 'redis://127.0.0.1:6379', 'REDIS_URL'],
+      ['API_BASE_URL', 'http://localhost:4000', 'API_BASE_URL'],
+      ['S3_ENDPOINT', 'http://localhost:9000', 'S3_ENDPOINT'],
+      ['S3_ACCESS_KEY_ID', 'minioadmin', 'local default credentials for S3_ACCESS_KEY_ID'],
+      ['S3_SECRET_ACCESS_KEY', 'minioadmin', 'local default credentials for S3_SECRET_ACCESS_KEY'],
+    ] as const) {
+      setValidProductionConfig();
+      process.env[key] = value;
+
+      expect(() => loadConfig(), key).toThrow(message);
+    }
+  });
+
+  it('rejects dev auth and requires OIDC settings when OIDC is selected in production', () => {
+    setValidProductionConfig();
+    process.env.AUTH_PROVIDER = 'dev';
+    expect(() => loadConfig()).toThrow('AUTH_PROVIDER=dev is not allowed in production.');
+
+    setValidProductionConfig();
+    process.env.AUTH_PROVIDER = 'oidc';
+    delete process.env.OIDC_ISSUER_URL;
+    delete process.env.OIDC_AUDIENCE;
+    expect(() => loadConfig()).toThrow('Production config requires OIDC_ISSUER_URL, OIDC_AUDIENCE');
+
+    setValidProductionConfig();
+    process.env.AUTH_PROVIDER = 'oidc';
+    process.env.OIDC_ISSUER_URL = 'https://issuer.example.com';
+    process.env.OIDC_AUDIENCE = 'tixkit-admin';
+    delete process.env.CLERK_SECRET_KEY;
+    delete process.env.CLERK_PUBLISHABLE_KEY;
+    delete process.env.CLERK_WEBHOOK_SECRET;
+
+    expect(loadConfig()).toMatchObject({
+      authProvider: 'oidc',
+      oidcIssuerUrl: 'https://issuer.example.com',
+      oidcAudience: 'tixkit-admin',
+    });
   });
 });

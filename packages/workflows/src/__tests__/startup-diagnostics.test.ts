@@ -29,6 +29,15 @@ function restoreEnv(key: keyof typeof originalEnv, value: string | undefined): v
   process.env[key] = value;
 }
 
+function setValidProductionConfig(): void {
+  process.env.DATABASE_URL = 'postgres://tixkit:secret@db.example.com:5432/tixkit';
+  process.env.NODE_ENV = 'production';
+  process.env.REDIS_URL = 'rediss://redis.example.com:6379';
+  process.env.TEMPORAL_ADDRESS = 'temporal.example.com:7233';
+  process.env.TEMPORAL_NAMESPACE = 'tixkit.production';
+  process.env.TEMPORAL_TASK_QUEUE = 'tixkit-production';
+}
+
 describe('buildWorkerStartupFailureMessage', () => {
   it('redacts database URL credentials from the original error text', () => {
     const dbUser = Buffer.from('Y2hlY2tvdXR1c2Vy', 'base64').toString('utf-8');
@@ -72,7 +81,7 @@ describe('buildWorkerStartupFailureMessage', () => {
 
 describe('worker Temporal config', () => {
   it('rejects missing production Temporal config', () => {
-    process.env.NODE_ENV = 'production';
+    setValidProductionConfig();
     delete process.env.TEMPORAL_ADDRESS;
     delete process.env.TEMPORAL_NAMESPACE;
     delete process.env.TEMPORAL_TASK_QUEUE;
@@ -83,9 +92,7 @@ describe('worker Temporal config', () => {
   });
 
   it('rejects localhost Temporal addresses in production', () => {
-    process.env.NODE_ENV = 'production';
-    process.env.TEMPORAL_NAMESPACE = 'tixkit.production';
-    process.env.TEMPORAL_TASK_QUEUE = 'tixkit-production';
+    setValidProductionConfig();
 
     for (const address of ['localhost:7233', '127.0.0.1:7233', '[::1]:7233']) {
       process.env.TEMPORAL_ADDRESS = address;
@@ -97,15 +104,35 @@ describe('worker Temporal config', () => {
   });
 
   it('accepts explicit managed Temporal config in production', () => {
-    process.env.NODE_ENV = 'production';
-    process.env.TEMPORAL_ADDRESS = 'temporal.example.com:7233';
-    process.env.TEMPORAL_NAMESPACE = 'tixkit.production';
-    process.env.TEMPORAL_TASK_QUEUE = 'tixkit-production';
+    setValidProductionConfig();
 
     expect(loadConfig()).toMatchObject({
       temporalAddress: 'temporal.example.com:7233',
       temporalNamespace: 'tixkit.production',
       temporalTaskQueue: 'tixkit-production',
     });
+  });
+
+  it('rejects missing production database and Redis config', () => {
+    for (const key of ['DATABASE_URL', 'REDIS_URL'] as const) {
+      setValidProductionConfig();
+      delete process.env[key];
+
+      expect(() => loadConfig(), key).toThrow(`Production worker config requires ${key}`);
+    }
+  });
+
+  it('rejects local production database and Redis endpoints', () => {
+    for (const [key, value] of [
+      ['DATABASE_URL', 'postgres://tixkit:tixkit@localhost:5432/tixkit'],
+      ['REDIS_URL', 'redis://127.0.0.1:6379'],
+    ] as const) {
+      setValidProductionConfig();
+      process.env[key] = value;
+
+      expect(() => loadConfig(), key).toThrow(
+        `Production worker config must not point to localhost for ${key}`,
+      );
+    }
   });
 });
