@@ -441,8 +441,8 @@ export const updateOrganizationSchema = z
 export const createBrandSchema = z
   .object({
     organizationId: ulidSchema,
-    name: z.string().min(1),
-    slug: z.string().min(1),
+    name: z.string().trim().min(1),
+    slug: z.string().trim().min(1),
     theme: z.record(z.string(), z.unknown()).optional(),
     whiteLabel: z.boolean().optional(),
   })

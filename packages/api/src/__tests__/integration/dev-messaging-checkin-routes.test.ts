@@ -899,10 +899,11 @@ describe('brand domain creation', () => {
   });
 
   it('POST /brands rejects organizations outside the principal tenant', async () => {
+    const outsideOrganizationId = '01J00000000000000000000001';
     const tables = {
       organizations: [
         {
-          id: 'org_other',
+          id: outsideOrganizationId,
           tenant_id: 'tnt_other',
           name: 'Other Org',
           slug: 'other',
@@ -917,9 +918,122 @@ describe('brand domain creation', () => {
     const res = await app.inject({
       method: 'POST',
       url: '/brands',
-      payload: { organizationId: 'org_other', name: 'Other Brand', slug: 'other-brand' },
+      payload: { organizationId: outsideOrganizationId, name: 'Other Brand', slug: 'other-brand' },
     });
     expect(res.statusCode).toBe(404);
+    await app.close();
+  });
+
+  it('POST /brands rejects malformed create payloads before inserting', async () => {
+    const organizationId = '01J00000000000000000000000';
+    const tables = {
+      organizations: [
+        {
+          id: organizationId,
+          tenant_id: 'tnt_1',
+          name: 'Org',
+          slug: 'org',
+          clerk_organization_id: null,
+          status: 'active',
+          created_at: new Date(),
+          updated_at: new Date(),
+        },
+      ],
+      brands: [],
+    };
+    const app = await setupApp(
+      tenantRoutes,
+      makePrincipal({ organizationIds: [organizationId] }),
+      tables,
+    );
+
+    const malformedPayloads = [
+      { organizationId, slug: 'missing-name' },
+      { organizationId, name: 'Missing Slug' },
+      { organizationId, name: '', slug: 'empty-name' },
+      { organizationId, name: '   ', slug: 'blank-name' },
+      { organizationId, name: 'Empty Slug', slug: '' },
+      { organizationId, name: 'Blank Slug', slug: '   ' },
+      {
+        organizationId,
+        name: 'Extra Field',
+        slug: 'extra-field',
+        unsupported: true,
+      },
+    ];
+
+    const responses = await Promise.all(
+      malformedPayloads.map((payload) =>
+        app.inject({
+          method: 'POST',
+          url: '/brands',
+          payload,
+        }),
+      ),
+    );
+
+    for (const res of responses) {
+      expect(res.statusCode).toBe(400);
+    }
+
+    expect(tables.brands).toHaveLength(0);
+
+    const validRes = await app.inject({
+      method: 'POST',
+      url: '/brands',
+      payload: { organizationId, name: 'Valid Brand', slug: 'valid-brand' },
+    });
+
+    expect(validRes.statusCode).toBe(201);
+    expect(tables.brands).toHaveLength(1);
+    await app.close();
+  });
+
+  it('POST /brands validates and creates a brand for an in-scope organization', async () => {
+    const organizationId = '01J00000000000000000000000';
+    const tables = {
+      organizations: [
+        {
+          id: organizationId,
+          tenant_id: 'tnt_1',
+          name: 'Org',
+          slug: 'org',
+          clerk_organization_id: null,
+          status: 'active',
+          created_at: new Date(),
+          updated_at: new Date(),
+        },
+      ],
+      brands: [],
+      audit_logs: [],
+    };
+    const app = await setupApp(
+      tenantRoutes,
+      makePrincipal({ organizationIds: [organizationId] }),
+      tables,
+    );
+
+    const res = await app.inject({
+      method: 'POST',
+      url: '/brands',
+      payload: {
+        organizationId,
+        name: '  Valid Brand  ',
+        slug: '  valid-brand  ',
+        theme: { color: 'blue' },
+        whiteLabel: true,
+      },
+    });
+
+    expect(res.statusCode).toBe(201);
+    expect(tables.brands).toHaveLength(1);
+    expect(tables.brands[0]).toMatchObject({
+      tenant_id: 'tnt_1',
+      organization_id: organizationId,
+      name: 'Valid Brand',
+      slug: 'valid-brand',
+      white_label: true,
+    });
     await app.close();
   });
 

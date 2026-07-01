@@ -7,11 +7,11 @@ import {
   PaymentAccountRepository,
   AuditLogRepository,
 } from '@tixkit/db';
-import type { CreateBrandInput } from '@tixkit/domain';
 import { ValidationError } from '@tixkit/domain';
 import { writeAuditLog } from '../../auth/audit.js';
 import {
   addBrandDomainSchema,
+  createBrandSchema,
   createOrganizationSchema,
   parseBody,
   updateBrandSchema,
@@ -306,7 +306,7 @@ export const tenantRoutes: FastifyPluginAsync = async (app) => {
   app.post('/brands', async (request, reply) => {
     const principal = request.principal!;
     ClerkAuthService.requirePermission(principal, 'settings.write');
-    const body = request.body as CreateBrandInput;
+    const body = parseBody(createBrandSchema, request.body);
 
     const organization = await new OrganizationRepository(db).findById(body.organizationId);
     if (!organization) throw new ValidationError('Organization not found');
