@@ -108,6 +108,54 @@ describe('EventProductsView', () => {
     expect(view.getByText('2 per order')).toBeInTheDocument();
   });
 
+  it('shows a retryable product load error when categories load successfully', async () => {
+    adminApiMock.listProductCategories.mockResolvedValue({
+      ok: true,
+      data: [category],
+    });
+    adminApiMock.listProducts.mockResolvedValue({
+      ok: false,
+      error: { code: 'products_unavailable', message: 'Products unavailable' },
+    });
+
+    const view = render(<EventProductsView eventId="evt_1" />);
+
+    await waitFor(() => {
+      expect(view.getByText('Failed to load products')).toBeInTheDocument();
+    });
+    expect(view.getByText('Products unavailable')).toBeInTheDocument();
+    expect(view.queryByText('No products yet')).not.toBeInTheDocument();
+    expect(view.getByText('Categories')).toBeInTheDocument();
+
+    fireEvent.click(view.getByRole('button', { name: 'Try again' }));
+    expect(adminApiMock.listProducts).toHaveBeenCalledTimes(2);
+    expect(adminApiMock.listProductCategories).toHaveBeenCalledTimes(1);
+  });
+
+  it('keeps loaded products visible when categories fail to load', async () => {
+    adminApiMock.listProductCategories.mockResolvedValue({
+      ok: false,
+      error: { code: 'categories_unavailable', message: 'Categories unavailable' },
+    });
+    adminApiMock.listProducts.mockResolvedValue({
+      ok: true,
+      data: [product],
+    });
+
+    const view = render(<EventProductsView eventId="evt_1" />);
+
+    await waitFor(() => {
+      expect(view.getByText('Festival T-shirt')).toBeInTheDocument();
+    });
+    expect(view.getByRole('alert')).toHaveTextContent('Failed to load product categories');
+    expect(view.getByRole('alert')).toHaveTextContent('Categories unavailable');
+    expect(view.getByText('Unknown category')).toBeInTheDocument();
+
+    fireEvent.click(view.getByRole('button', { name: 'Try again' }));
+    expect(adminApiMock.listProductCategories).toHaveBeenCalledTimes(2);
+    expect(adminApiMock.listProducts).toHaveBeenCalledTimes(1);
+  });
+
   it('creates categories through the admin API and refreshes category data', async () => {
     mockProductData();
     adminApiMock.createProductCategory.mockResolvedValue({

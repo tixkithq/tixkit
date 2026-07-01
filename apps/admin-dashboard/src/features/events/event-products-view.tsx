@@ -1,7 +1,7 @@
 'use client';
 
 import * as React from 'react';
-import { Loader2, MoreHorizontal, Package, Pencil, Plus, Tags } from 'lucide-react';
+import { AlertTriangle, Loader2, MoreHorizontal, Package, Pencil, Plus, Tags } from 'lucide-react';
 import { toast } from 'sonner';
 import {
   adminApi,
@@ -197,7 +197,6 @@ export function EventProductsView({ eventId }: { eventId: string }) {
   const categoryList = categories ?? [];
   const productList = products ?? [];
   const loading = categoriesLoading || productsLoading;
-  const loadError = productsError ?? categoriesError;
   const activeProducts = productList.filter((product) => product.status === 'active').length;
 
   const openCreateProduct = () => {
@@ -225,12 +224,12 @@ export function EventProductsView({ eventId }: { eventId: string }) {
     );
   }
 
-  if (loadError && productList.length === 0 && categoryList.length === 0) {
+  if (categoriesError && !productsError && productList.length === 0 && categoryList.length === 0) {
     return (
       <EmptyState
         icon={Package}
-        title="Failed to load products"
-        description={loadError.message}
+        title="Failed to load product categories"
+        description={categoriesError.message}
         action={<Button onClick={refetchAll}>Try again</Button>}
       />
     );
@@ -270,7 +269,32 @@ export function EventProductsView({ eventId }: { eventId: string }) {
         </Button>
       </div>
 
-      {productList.length === 0 ? (
+      {categoriesError && productList.length > 0 ? (
+        <div
+          role="alert"
+          className="flex flex-col gap-3 rounded-md border border-amber-300 bg-amber-50 p-4 text-sm text-amber-950 sm:flex-row sm:items-center sm:justify-between"
+        >
+          <div className="flex gap-3">
+            <AlertTriangle className="mt-0.5 size-4 shrink-0" />
+            <div>
+              <p className="font-medium">Failed to load product categories</p>
+              <p className="text-amber-800">{categoriesError.message}</p>
+            </div>
+          </div>
+          <Button variant="outline" size="sm" onClick={refetchCategories}>
+            Try again
+          </Button>
+        </div>
+      ) : null}
+
+      {productsError ? (
+        <EmptyState
+          icon={Package}
+          title="Failed to load products"
+          description={productsError.message}
+          action={<Button onClick={refetchProducts}>Try again</Button>}
+        />
+      ) : productList.length === 0 ? (
         <EmptyState
           icon={Package}
           title="No products yet"
