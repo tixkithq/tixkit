@@ -469,10 +469,25 @@ type Order struct {
 
 type OrderDetail struct {
 	Order
-	LineItems    []OrderLineItem      `json:"lineItems,omitempty"`
-	Timeline     []OrderTimelineEvent `json:"timeline,omitempty"`
-	Invoice      *Invoice             `json:"invoice,omitempty"`
-	TaxSnapshots []TaxSnapshot        `json:"taxSnapshots,omitempty"`
+	LineItems        []OrderLineItem      `json:"lineItems,omitempty"`
+	Attendees        []Attendee           `json:"attendees,omitempty"`
+	Timeline         []OrderTimelineEvent `json:"timeline,omitempty"`
+	Invoice          *Invoice             `json:"invoice,omitempty"`
+	TaxSnapshots     []TaxSnapshot        `json:"taxSnapshots,omitempty"`
+	CheckoutAnswers  OrderCheckoutAnswers `json:"checkoutAnswers,omitempty"`
+	ConsentSnapshots FlexibleObject       `json:"consentSnapshots,omitempty"`
+	Refunds          []Refund             `json:"refunds,omitempty"`
+	DeliveryStatus   OrderDeliveryStatus  `json:"deliveryStatus,omitempty"`
+}
+
+type OrderCheckoutAnswers struct {
+	BuyerFields    FlexibleObject `json:"buyerFields,omitempty"`
+	AttendeeFields FlexibleObject `json:"attendeeFields,omitempty"`
+}
+
+type OrderDeliveryStatus struct {
+	Email   string `json:"email,omitempty"`
+	Tickets string `json:"tickets,omitempty"`
 }
 
 type OrderLineItem struct {

@@ -345,6 +345,56 @@ func TestBoxOfficeOrderSendsIdempotencyHeader(t *testing.T) {
 	}
 }
 
+func TestOrderGetDecodesEnrichedDetail(t *testing.T) {
+	t.Parallel()
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			t.Fatalf("method = %s", r.Method)
+		}
+		if r.URL.Path != "/v1/orders/ord_1" {
+			t.Fatalf("path = %s", r.URL.Path)
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"id":              "ord_1",
+			"eventId":         "evt_1",
+			"orderNumber":     "1001",
+			"status":          "paid",
+			"currency":        "USD",
+			"buyerEmail":      "buyer@example.com",
+			"lineItems":       []map[string]any{{"id": "li_1", "description": "General Admission", "quantity": 1}},
+			"attendees":       []map[string]any{{"id": "att_1", "eventId": "evt_1", "orderId": "ord_1", "ticketTypeId": "tt_1", "email": "buyer@example.com", "status": "registered"}},
+			"taxSnapshots":    []map[string]any{{"id": "tax_1", "taxCents": 100}},
+			"checkoutAnswers": map[string]any{"buyerFields": map[string]any{"q_consent": true}, "attendeeFields": map[string]any{"tt_1": []any{map[string]any{"q_name": "Ada"}}}},
+			"consentSnapshots": map[string]any{
+				"q_consent": map[string]any{"consentVersion": "v1"},
+			},
+			"refunds":        []map[string]any{{"id": "rf_1", "orderId": "ord_1", "amountCents": 500, "currency": "USD", "status": "succeeded", "reason": "customer_request"}},
+			"timeline":       []map[string]any{{"id": "evt_1", "type": "order.created", "description": "Order created"}},
+			"deliveryStatus": map[string]any{"email": "pending", "tickets": "issued"},
+		})
+	}))
+	defer server.Close()
+
+	client := testClient(t, server.URL)
+	result, err := client.Orders.Get(context.Background(), "ord_1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(result.Attendees) != 1 || result.Attendees[0].ID != "att_1" {
+		t.Fatalf("attendees = %#v", result.Attendees)
+	}
+	if len(result.Refunds) != 1 || result.Refunds[0].ID != "rf_1" {
+		t.Fatalf("refunds = %#v", result.Refunds)
+	}
+	if got := result.CheckoutAnswers.BuyerFields["q_consent"]; got != true {
+		t.Fatalf("buyer fields = %#v", result.CheckoutAnswers.BuyerFields)
+	}
+	if result.DeliveryStatus.Email != "pending" || result.DeliveryStatus.Tickets != "issued" {
+		t.Fatalf("delivery status = %#v", result.DeliveryStatus)
+	}
+}
+
 func TestOrderRefundSendsLifecycleFlagsAndDecodesQueuedResponse(t *testing.T) {
 	t.Parallel()
 

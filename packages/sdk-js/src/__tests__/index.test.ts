@@ -13,6 +13,7 @@ import {
   type EmailTemplateDocument,
   type OfflineManifest,
   type OAuthApplication,
+  type OrderDetail,
   type PrivacyRequestInput,
   type PublicAvailabilityItem,
   type SmsTemplateDocument,
@@ -2410,6 +2411,48 @@ describe('TixkitClient new resource methods', () => {
     await c.orders.list({ limit: 50, organizationId: 'org_1', eventId: 'evt_1' });
     const call = getCall(fm);
     expect(call.url).toBe('https://api.test/v1/orders?limit=50&organizationId=org_1&eventId=evt_1');
+  });
+
+  it('orders.get returns the enriched order detail contract', async () => {
+    expectTypeOf<TixkitClient['orders']['get']>().returns.resolves.toEqualTypeOf<OrderDetail>();
+    const fm = mockFetch(200, {
+      id: 'ord_1',
+      eventId: 'evt_1',
+      checkoutSessionId: 'cs_1',
+      orderNumber: '1001',
+      status: 'paid',
+      currency: 'USD',
+      subtotalCents: 2500,
+      discountCents: 0,
+      taxCents: 0,
+      feeCents: 0,
+      totalCents: 2500,
+      refundedCents: 0,
+      buyerEmail: 'buyer@example.com',
+      createdAt: '2026-07-01T00:00:00.000Z',
+      updatedAt: '2026-07-01T00:00:00.000Z',
+      lineItems: [],
+      attendees: [],
+      taxSnapshots: [],
+      checkoutAnswers: { buyerFields: {}, attendeeFields: {} },
+      consentSnapshots: {},
+      refunds: [],
+      timeline: [],
+      deliveryStatus: { email: 'pending', tickets: 'not_issued' },
+    });
+    const c = new TixkitClient({
+      apiKey: 'tk_test_123',
+      apiBaseUrl: 'https://api.test',
+      maxRetries: 0,
+    });
+
+    const result = await c.orders.get('ord_1');
+    const call = getCall(fm);
+
+    expect(call.url).toBe('https://api.test/v1/orders/ord_1');
+    expect(result.checkoutAnswers).toEqual({ buyerFields: {}, attendeeFields: {} });
+    expect(result.deliveryStatus).toEqual({ email: 'pending', tickets: 'not_issued' });
+    expect(result.refunds).toEqual([]);
   });
 
   it('orders.refund sends lifecycle flags and returns queued refund status', async () => {

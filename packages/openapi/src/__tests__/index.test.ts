@@ -1061,6 +1061,34 @@ describe('openApiSpec', () => {
   });
 
   it('documents implemented status codes and required idempotency headers', () => {
+    expect(
+      openApiSpec.paths['/orders/{orderId}'].get.responses['200'].content['application/json']
+        .schema,
+    ).toEqual({ $ref: '#/components/schemas/OrderDetail' });
+    expect(openApiSpec.components.schemas.Order.properties).not.toHaveProperty('attendees');
+    expect(openApiSpec.components.schemas.Order.properties).not.toHaveProperty('refunds');
+    const orderDetailProperties = openApiSpec.components.schemas.OrderDetail.allOf[1].properties;
+    expect(orderDetailProperties).toMatchObject({
+      attendees: { type: 'array', items: { $ref: '#/components/schemas/Attendee' } },
+      refunds: { type: 'array', items: { $ref: '#/components/schemas/Refund' } },
+      checkoutAnswers: {
+        type: 'object',
+        properties: {
+          buyerFields: { type: 'object', additionalProperties: true },
+          attendeeFields: { type: 'object', additionalProperties: true },
+        },
+        required: ['buyerFields', 'attendeeFields'],
+      },
+      consentSnapshots: { type: 'object', additionalProperties: true },
+      deliveryStatus: {
+        type: 'object',
+        properties: {
+          email: { type: 'string', enum: ['pending', 'not_applicable'] },
+          tickets: { type: 'string', enum: ['issued', 'not_issued'] },
+        },
+        required: ['email', 'tickets'],
+      },
+    });
     expect(openApiSpec.paths['/orders/{orderId}/refunds'].post.responses).toHaveProperty('202');
     expect(openApiSpec.paths['/orders/{orderId}/refunds'].post.responses).not.toHaveProperty('201');
     expect(openApiSpec.paths['/orders/{orderId}/refunds'].post.parameters).toContainEqual({

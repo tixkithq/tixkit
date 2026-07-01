@@ -730,6 +730,43 @@ pub struct Order {
 
 #[derive(Debug, Clone, Serialize, serde::Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
+pub struct OrderDetail {
+    pub id: String,
+    pub event_id: String,
+    pub status: String,
+    pub currency: Option<String>,
+    pub total_cents: Option<i64>,
+    pub sales_channel: Option<String>,
+    pub tender_type: Option<String>,
+    pub line_items: Vec<Value>,
+    pub attendees: Vec<Attendee>,
+    pub timeline: Vec<Value>,
+    pub invoice: Option<Value>,
+    pub tax_snapshots: Vec<Value>,
+    pub checkout_answers: OrderCheckoutAnswers,
+    pub consent_snapshots: Map<String, Value>,
+    pub refunds: Vec<Refund>,
+    pub delivery_status: OrderDeliveryStatus,
+    #[serde(flatten)]
+    pub extra: Map<String, Value>,
+}
+
+#[derive(Debug, Clone, Serialize, serde::Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct OrderCheckoutAnswers {
+    pub buyer_fields: Map<String, Value>,
+    pub attendee_fields: Map<String, Value>,
+}
+
+#[derive(Debug, Clone, Serialize, serde::Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct OrderDeliveryStatus {
+    pub email: String,
+    pub tickets: String,
+}
+
+#[derive(Debug, Clone, Serialize, serde::Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
 pub struct Ticket {
     pub id: String,
     pub tenant_id: Option<String>,
@@ -842,6 +879,19 @@ pub struct RefundQueued {
     pub refund_amount: i64,
     pub status: String,
     pub message: String,
+}
+
+#[derive(Debug, Clone, Serialize, serde::Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct Refund {
+    pub id: String,
+    pub order_id: Option<String>,
+    pub amount_cents: Option<i64>,
+    pub currency: Option<String>,
+    pub status: Option<String>,
+    pub reason: Option<String>,
+    #[serde(flatten)]
+    pub extra: Map<String, Value>,
 }
 
 pub type JsonObject = Map<String, Value>;
@@ -1241,7 +1291,7 @@ impl OrderResource<'_> {
             .await
     }
 
-    pub async fn get(&self, order_id: &str) -> Result<Order, TixkitError> {
+    pub async fn get(&self, order_id: &str) -> Result<OrderDetail, TixkitError> {
         self.client
             .request(
                 reqwest::Method::GET,
@@ -2169,6 +2219,64 @@ mod tests {
 
         assert_eq!(result.order.sales_channel.as_deref(), Some("box_office"));
         assert_eq!(result.order.tender_type.as_deref(), Some("manual_card"));
+    }
+
+    #[tokio::test]
+    async fn decodes_enriched_order_detail() {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/v1/orders/ord_1"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                "id": "ord_1",
+                "eventId": "evt_1",
+                "orderNumber": "1001",
+                "status": "paid",
+                "currency": "USD",
+                "buyerEmail": "buyer@example.com",
+                "lineItems": [{"id": "li_1", "description": "General Admission", "quantity": 1}],
+                "attendees": [{
+                    "id": "att_1",
+                    "eventId": "evt_1",
+                    "orderId": "ord_1",
+                    "ticketTypeId": "tt_1",
+                    "email": "buyer@example.com",
+                    "status": "registered"
+                }],
+                "taxSnapshots": [{"id": "tax_1", "taxCents": 100}],
+                "checkoutAnswers": {
+                    "buyerFields": {"q_consent": true},
+                    "attendeeFields": {"tt_1": [{"q_name": "Ada"}]}
+                },
+                "consentSnapshots": {"q_consent": {"consentVersion": "v1"}},
+                "refunds": [{
+                    "id": "rf_1",
+                    "orderId": "ord_1",
+                    "amountCents": 500,
+                    "currency": "USD",
+                    "status": "succeeded",
+                    "reason": "customer_request"
+                }],
+                "timeline": [{"id": "evt_1", "type": "order.created", "description": "Order created"}],
+                "deliveryStatus": {"email": "pending", "tickets": "issued"}
+            })))
+            .mount(&server)
+            .await;
+
+        let result = client(&server)
+            .await
+            .orders()
+            .get("ord_1")
+            .await
+            .expect("order detail");
+
+        assert_eq!(result.attendees[0].id, "att_1");
+        assert_eq!(result.refunds[0].id, "rf_1");
+        assert_eq!(
+            result.checkout_answers.buyer_fields.get("q_consent"),
+            Some(&Value::Bool(true))
+        );
+        assert_eq!(result.delivery_status.email, "pending");
+        assert_eq!(result.delivery_status.tickets, "issued");
     }
 
     #[tokio::test]

@@ -1578,18 +1578,66 @@ const rawOpenApiSpec = {
           paidAt: { type: 'string', format: 'date-time' },
           refundedAt: { type: 'string', format: 'date-time' },
           cancelledAt: { type: 'string', format: 'date-time' },
-          lineItems: {
-            type: 'array',
-            items: { $ref: '#/components/schemas/OrderLineItem' },
-          },
-          invoice: { $ref: '#/components/schemas/Invoice' },
-          taxSnapshots: { type: 'array', items: { $ref: '#/components/schemas/TaxSnapshot' } },
-          timeline: {
-            type: 'array',
-            items: { $ref: '#/components/schemas/OrderTimelineEvent' },
-          },
         },
         required: ['id', 'orderNumber', 'status', 'currency', 'totalCents', 'buyerEmail'],
+      },
+      OrderDetail: {
+        allOf: [
+          { $ref: '#/components/schemas/Order' },
+          {
+            type: 'object',
+            properties: {
+              lineItems: {
+                type: 'array',
+                items: { $ref: '#/components/schemas/OrderLineItem' },
+              },
+              attendees: {
+                type: 'array',
+                items: { $ref: '#/components/schemas/Attendee' },
+              },
+              invoice: { $ref: '#/components/schemas/Invoice' },
+              taxSnapshots: {
+                type: 'array',
+                items: { $ref: '#/components/schemas/TaxSnapshot' },
+              },
+              checkoutAnswers: {
+                type: 'object',
+                properties: {
+                  buyerFields: { type: 'object', additionalProperties: true },
+                  attendeeFields: { type: 'object', additionalProperties: true },
+                },
+                required: ['buyerFields', 'attendeeFields'],
+              },
+              consentSnapshots: { type: 'object', additionalProperties: true },
+              refunds: {
+                type: 'array',
+                items: { $ref: '#/components/schemas/Refund' },
+              },
+              timeline: {
+                type: 'array',
+                items: { $ref: '#/components/schemas/OrderTimelineEvent' },
+              },
+              deliveryStatus: {
+                type: 'object',
+                properties: {
+                  email: { type: 'string', enum: ['pending', 'not_applicable'] },
+                  tickets: { type: 'string', enum: ['issued', 'not_issued'] },
+                },
+                required: ['email', 'tickets'],
+              },
+            },
+            required: [
+              'lineItems',
+              'attendees',
+              'taxSnapshots',
+              'checkoutAnswers',
+              'consentSnapshots',
+              'refunds',
+              'timeline',
+              'deliveryStatus',
+            ],
+          },
+        ],
       },
       OrderPage: {
         type: 'object',
@@ -4917,7 +4965,9 @@ const rawOpenApiSpec = {
         responses: {
           '200': {
             description: 'Order details',
-            content: { 'application/json': { schema: { $ref: '#/components/schemas/Order' } } },
+            content: {
+              'application/json': { schema: { $ref: '#/components/schemas/OrderDetail' } },
+            },
           },
         },
       },

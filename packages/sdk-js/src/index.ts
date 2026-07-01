@@ -805,6 +805,24 @@ export type OrderTimelineEvent = {
   createdAt: string;
 };
 
+export type OrderDetail = Order & {
+  lineItems: OrderLineItem[];
+  attendees: Attendee[];
+  timeline: OrderTimelineEvent[];
+  invoice?: Invoice;
+  taxSnapshots: TaxSnapshot[];
+  checkoutAnswers: {
+    buyerFields: Record<string, unknown>;
+    attendeeFields: Record<string, unknown>;
+  };
+  consentSnapshots: Record<string, unknown>;
+  refunds: Refund[];
+  deliveryStatus: {
+    email: 'pending' | 'not_applicable';
+    tickets: 'issued' | 'not_issued';
+  };
+};
+
 export type Attendee = {
   id: string;
   tenantId: string;
@@ -1229,6 +1247,21 @@ export type RefundQueued = {
   refundAmount: number;
   status: 'pending' | string;
   message: string;
+};
+
+export type Refund = {
+  id: string;
+  tenantId?: string;
+  orderId: string;
+  paymentIntentId?: string;
+  provider?: string;
+  providerRefundId?: string;
+  status: string;
+  reason: string;
+  currency: string;
+  amountCents: number;
+  createdAt?: string;
+  updatedAt?: string;
 };
 
 export type PaymentAccount = {
@@ -2248,14 +2281,7 @@ class OrderResource {
     return this.client.request('GET', '/orders', { params: paginationParams(params) });
   }
 
-  async get(orderId: string): Promise<
-    Order & {
-      lineItems: OrderLineItem[];
-      timeline: OrderTimelineEvent[];
-      invoice?: Invoice;
-      taxSnapshots?: TaxSnapshot[];
-    }
-  > {
+  async get(orderId: string): Promise<OrderDetail> {
     return this.client.request('GET', `/orders/${orderId}`);
   }
 
