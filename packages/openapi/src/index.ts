@@ -5148,8 +5148,9 @@ const rawOpenApiSpec = {
     '/events/{eventId}/check-in-lists': {
       get: {
         summary: 'List check-in lists',
-        security: [{ BearerAuth: [] }],
+        security: [{ ScannerDeviceAuth: [] }, { BearerAuth: [] }],
         parameters: [
+          { $ref: '#/components/parameters/OptionalScannerDeviceSecret' },
           { $ref: '#/components/parameters/Cursor' },
           { $ref: '#/components/parameters/Limit' },
         ],

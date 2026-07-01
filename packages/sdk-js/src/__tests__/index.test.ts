@@ -1044,6 +1044,30 @@ describe('TixkitClient new resource methods', () => {
     expect(call.method).toBe('GET');
   });
 
+  it('checkInLists.list forwards scanner headers with pagination', async () => {
+    const fm = mockFetch(200, { items: [], nextCursor: null, hasMore: false });
+    const c = new TixkitClient({
+      apiBaseUrl: 'https://api.test',
+      maxRetries: 0,
+    });
+
+    await c.checkInLists.list('evt_1', {
+      cursor: 'cil_0',
+      limit: 25,
+      headers: {
+        'X-Device-Id': 'sd_public_1',
+        'X-Device-Secret': 'scanner-secret',
+      },
+    });
+
+    const call = getCall(fm);
+    expect(call.url).toBe('https://api.test/v1/events/evt_1/check-in-lists?cursor=cil_0&limit=25');
+    expect(call.method).toBe('GET');
+    expect(call.headers.Authorization).toBeUndefined();
+    expect(call.headers['X-Device-Id']).toBe('sd_public_1');
+    expect(call.headers['X-Device-Secret']).toBe('scanner-secret');
+  });
+
   it('checkIns.syncBacklog uses the synchronous route when the whole backlog fits', async () => {
     const fm = mockFetch(200, {
       accepted: 1,

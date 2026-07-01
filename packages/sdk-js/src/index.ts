@@ -1534,6 +1534,10 @@ export type PaginationParams = {
   limit?: number;
 };
 
+export type CheckInListListParams = PaginationParams & {
+  headers?: Record<string, string>;
+};
+
 export type CheckoutSessionGetOptions = {
   clientToken?: string;
   paymentIntentClientSecret?: string;
@@ -2393,9 +2397,11 @@ class AttendeeResource {
 
 class CheckInListResource {
   constructor(private client: TixkitClient) {}
-  async list(eventId: string, params?: PaginationParams): Promise<PageResult<CheckInList>> {
+  async list(eventId: string, params?: CheckInListListParams): Promise<PageResult<CheckInList>> {
+    const { headers, ...queryParams } = params ?? {};
     return this.client.request('GET', `/events/${eventId}/check-in-lists`, {
-      params: paginationParams(params),
+      params: paginationParams(queryParams),
+      headers,
     });
   }
   async getManifest(

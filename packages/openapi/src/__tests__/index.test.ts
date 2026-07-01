@@ -324,6 +324,13 @@ describe('openApiSpec', () => {
 
   it('documents scanner manifest and check-in list contracts', () => {
     expect(openApiSpec.paths['/events/{eventId}/check-in-lists']).toBeDefined();
+    expect(openApiSpec.paths['/events/{eventId}/check-in-lists'].get.security).toEqual([
+      { ScannerDeviceAuth: [] },
+      { BearerAuth: [] },
+    ]);
+    expect(openApiSpec.paths['/events/{eventId}/check-in-lists'].get.parameters).toContainEqual({
+      $ref: '#/components/parameters/OptionalScannerDeviceSecret',
+    });
     expect(
       openApiSpec.paths['/events/{eventId}/check-in-lists'].get.responses['200'].content[
         'application/json'
