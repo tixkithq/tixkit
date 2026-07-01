@@ -1776,6 +1776,48 @@ describe('reporting routes', () => {
     await app.close();
   });
 
+  it('POST /exports rejects malformed date filters before queueing a job', async () => {
+    const app = await setupApp(reportingRoutes, makePrincipal());
+    const res = await app.inject({
+      method: 'POST',
+      url: '/exports',
+      headers: { 'idempotency-key': 'export-key-invalid-date-filter' },
+      payload: {
+        eventId: 'evt_1',
+        type: 'sales',
+        format: 'csv',
+        filters: { from: 'not-a-date' },
+      },
+    });
+
+    expect(res.statusCode).toBe(400);
+    expect(dbState.exportJobs).toHaveLength(0);
+    expect(dbState.exportEvents).toHaveLength(0);
+    expect(dbState.startExportCalled).toBe(false);
+    await app.close();
+  });
+
+  it('POST /exports rejects unsupported filter keys for the export type', async () => {
+    const app = await setupApp(reportingRoutes, makePrincipal());
+    const res = await app.inject({
+      method: 'POST',
+      url: '/exports',
+      headers: { 'idempotency-key': 'export-key-unsupported-filter' },
+      payload: {
+        eventId: 'evt_1',
+        type: 'tax',
+        format: 'csv',
+        filters: { status: 'paid' },
+      },
+    });
+
+    expect(res.statusCode).toBe(400);
+    expect(dbState.exportJobs).toHaveLength(0);
+    expect(dbState.exportEvents).toHaveLength(0);
+    expect(dbState.startExportCalled).toBe(false);
+    await app.close();
+  });
+
   it('POST /exports rejects tenant-wide export creation for event-scoped API keys', async () => {
     const principal = makePrincipal({
       type: 'api_key',

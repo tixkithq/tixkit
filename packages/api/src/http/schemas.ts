@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { ValidationError, WEBHOOK_EVENT_TYPES } from '@tixkit/domain';
+import { createExportRequestSchema, ValidationError, WEBHOOK_EVENT_TYPES } from '@tixkit/domain';
 
 // Reusable primitives
 const ulidSchema = z.string().min(1);
@@ -779,14 +779,7 @@ export const completeResaleListingSchema = z
   .strict();
 
 // Export schema
-export const createExportSchema = z
-  .object({
-    eventId: ulidSchema.optional(),
-    type: z.enum(['attendees', 'orders', 'scan_logs', 'sales', 'tax', 'tickets']),
-    format: z.enum(['csv', 'xlsx', 'json']),
-    filters: z.record(z.string(), z.unknown()).optional(),
-  })
-  .strict();
+export const createExportSchema = createExportRequestSchema;
 
 // Question schemas
 const questionTypeSchema = z.enum([

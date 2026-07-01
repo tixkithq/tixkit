@@ -1659,9 +1659,7 @@ describe('T30 export failure recovery', () => {
     expect(String(dbState.exportEvents[0].payload)).toContain('S3 upload timed out');
   });
 
-  it('generateExportActivity returns a retryable error result when generation fails', async () => {
-    // Force a failure by making the export job lookup throw via a corrupted
-    // filters payload that JSON.parse cannot handle.
+  it('generateExportActivity returns a non-retryable error result for malformed persisted filters', async () => {
     dbState.exportJob = {
       ...dbState.exportJob,
       filters: '{not valid json',
@@ -1675,9 +1673,57 @@ describe('T30 export failure recovery', () => {
 
     expect(result.ok).toBe(false);
     if (!result.ok) {
-      expect(result.errorCode).toBe('EXPORT_GENERATION_FAILED');
-      expect(result.retryable).toBe(true);
+      expect(result.errorCode).toBe('EXPORT_FAILED');
+      expect(result.message).toBe('Invalid export filters');
+      expect(result.retryable).toBe(false);
     }
+  });
+
+  it('generateExportActivity returns a non-retryable error result for unsupported persisted filters', async () => {
+    dbState.exportJob = {
+      ...dbState.exportJob,
+      type: 'tax',
+      filters: JSON.stringify({ status: 'paid' }),
+    };
+
+    const result = await generateExportActivity({
+      exportId: 'exp_1',
+      type: 'tax',
+      format: 'csv',
+    });
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.errorCode).toBe('EXPORT_FAILED');
+      expect(result.message).toBe('Invalid export filters');
+      expect(result.retryable).toBe(false);
+    }
+    expect(dbState.updateCalls).not.toContainEqual(
+      expect.objectContaining({ table: 'export_jobs', status: 'completed' }),
+    );
+  });
+
+  it('generateExportActivity returns a non-retryable error result for invalid persisted date filters', async () => {
+    dbState.exportJob = {
+      ...dbState.exportJob,
+      filters: JSON.stringify({ from: '2026-02-31' }),
+    };
+
+    const result = await generateExportActivity({
+      exportId: 'exp_1',
+      type: 'attendees',
+      format: 'csv',
+    });
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.errorCode).toBe('EXPORT_FAILED');
+      expect(result.message).toBe('Invalid export filters');
+      expect(result.retryable).toBe(false);
+    }
+    expect(dbState.updateCalls).not.toContainEqual(
+      expect.objectContaining({ table: 'export_jobs', status: 'completed' }),
+    );
   });
 
   it('a failed export can be retried by re-running generateExportActivity after the job is reset to processing', async () => {

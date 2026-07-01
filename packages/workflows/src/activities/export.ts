@@ -2,6 +2,11 @@ import { createDb, type Database } from '@tixkit/db';
 import { PutObjectCommand, S3Client, type S3ClientConfig } from '@aws-sdk/client-s3';
 import { Redis } from 'ioredis';
 import { ulid } from 'ulid';
+import {
+  parseExportFilterDateBoundary,
+  parseExportFilters,
+  type ExportFilters,
+} from '@tixkit/domain';
 import type { WorkflowActivityResult } from '../shared/types.js';
 import { okResult, errResult } from '../shared/types.js';
 
@@ -246,14 +251,6 @@ async function toXlsx(rows: Record<string, unknown>[]): Promise<string> {
   }
 }
 
-type ExportFilters = {
-  from?: string;
-  to?: string;
-  status?: string;
-  ticketTypeId?: string;
-  checkInStatus?: 'checked_in' | 'not_checked_in';
-};
-
 type ExportQuestion = {
   id: string;
   label: string;
@@ -378,14 +375,6 @@ function buildQuestionColumns(questions: ExportQuestion[]): {
   return { headers, valuesFor };
 }
 
-function parseDateFilterBoundary(value: string, boundary: 'start' | 'end'): Date {
-  if (/^\d{4}-\d{2}-\d{2}$/.test(value)) {
-    return new Date(boundary === 'start' ? `${value}T00:00:00.000Z` : `${value}T23:59:59.999Z`);
-  }
-
-  return new Date(value);
-}
-
 function applyDateFilter<T extends Record<string, unknown>>(
   query: T[],
   filters: ExportFilters,
@@ -393,20 +382,32 @@ function applyDateFilter<T extends Record<string, unknown>>(
 ): T[] {
   let result = query;
   if (filters.from) {
-    const from = parseDateFilterBoundary(filters.from, 'start');
+    const from = parseExportFilterDateBoundary(filters.from, 'start');
     result = result.filter((row) => {
       const value = row[dateField];
       return (value instanceof Date || typeof value === 'string') && new Date(value) >= from;
     });
   }
   if (filters.to) {
-    const to = parseDateFilterBoundary(filters.to, 'end');
+    const to = parseExportFilterDateBoundary(filters.to, 'end');
     result = result.filter((row) => {
       const value = row[dateField];
       return (value instanceof Date || typeof value === 'string') && new Date(value) <= to;
     });
   }
   return result;
+}
+
+function readPersistedExportFilters(type: string, persistedFilters: unknown) {
+  try {
+    const decoded =
+      typeof persistedFilters === 'string'
+        ? JSON.parse(persistedFilters)
+        : (persistedFilters ?? {});
+    return { ok: true as const, filters: parseExportFilters(type, decoded) };
+  } catch {
+    return { ok: false as const };
+  }
 }
 
 export async function generateExportActivity(input: {
@@ -423,8 +424,11 @@ export async function generateExportActivity(input: {
     const tenantId = String(exportJob.tenant_id);
     const eventId = typeof exportJob.event_id === 'string' ? exportJob.event_id : undefined;
 
-    const filters: ExportFilters =
-      typeof exportJob.filters === 'string' ? JSON.parse(exportJob.filters) : {};
+    const filterResult = readPersistedExportFilters(input.type, exportJob.filters);
+    if (!filterResult.ok) {
+      return errResult('EXPORT_FAILED', 'Invalid export filters', false);
+    }
+    const { filters } = filterResult;
 
     let rows: Record<string, unknown>[] = [];
 
