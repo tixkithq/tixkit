@@ -293,16 +293,14 @@ test.describe('admin settings validation', () => {
     }
   });
 
-  test('profile gated actions stay inactive and pass axe', async ({ page }, testInfo) => {
+  test('profile routes edits to identity provider and pass axe', async ({ page }, testInfo) => {
     await requireReachable(page, adminBaseUrl, 'admin dashboard');
 
     await page.goto(`${adminBaseUrl}/settings/profile`);
     await expect(page.getByRole('heading', { name: 'Profile' })).toBeVisible();
-
-    const avatar = page.getByRole('button', { name: 'Change Avatar' });
-    if (await avatar.isVisible().catch(() => false)) {
-      await expect(avatar).toHaveAttribute('aria-disabled', 'true');
-    }
+    await expect(page.getByText('Upload Avatar')).toHaveCount(0);
+    await expect(page.locator('#profile-avatar-upload')).toHaveCount(0);
+    await expect(page.getByText(/Uploaded avatar artifact/)).toHaveCount(0);
 
     const save = page.getByRole('button', { name: 'Save Changes' });
     if (await save.isVisible().catch(() => false)) {
