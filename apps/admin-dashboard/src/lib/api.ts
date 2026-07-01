@@ -1131,6 +1131,11 @@ export type AdminBrand = {
   updatedAt?: string;
 };
 
+export type AdminBootstrapContext = {
+  organizations: AdminOrganization[];
+  brands: AdminBrand[];
+};
+
 export type TeamMemberRole = 'owner' | 'admin' | 'organizer' | 'viewer';
 export type TeamMemberStatus = 'active' | 'invited' | 'disabled';
 
@@ -1536,6 +1541,7 @@ export type AdminApi = {
   /** Resolves the authenticated Tixkit principal + permissions (`GET /v1/me`). */
   getPrincipal(token?: string): Promise<ApiResult<TixkitPrincipal>>;
 
+  getBootstrapContext(): Promise<ApiResult<AdminBootstrapContext>>;
   listOrganizations(): Promise<ApiResult<AdminOrganization[]>>;
   updateOrganization(
     organizationId: string,
@@ -3558,6 +3564,26 @@ export const adminApi: AdminApi = {
   },
 
   // ---- Tenant / settings ----
+  async getBootstrapContext() {
+    return withFixture(
+      async () => {
+        const result = await request<AdminBootstrapContext>('/v1/bootstrap-context', {
+          method: 'GET',
+        });
+        if (!result.ok) return result;
+
+        const data = asRecord(result.data);
+        const organizations = Array.isArray(data.organizations) ? data.organizations : [];
+        const brands = Array.isArray(data.brands) ? data.brands : [];
+        return ok({
+          organizations: organizations.map((org) => normalizeOrganization(asRecord(org))),
+          brands: brands.map((brand) => normalizeBrand(asRecord(brand))),
+        });
+      },
+      () => ok({ organizations: fixtureOrganizations, brands: fixtureBrands }),
+    );
+  },
+
   async listOrganizations() {
     return withFixture(
       async () => {

@@ -563,6 +563,88 @@ describe('tenant settings list permission gates', () => {
     await app.close();
   });
 
+  it('GET /bootstrap-context returns scoped context for events.write without settings.write', async () => {
+    const app = await setupApp(
+      tenantRoutes,
+      makePrincipal({ organizationIds: ['org_1'], scopes: ['events.write'] }),
+      {
+        organizations: [
+          organizationRow({
+            id: 'org_1',
+            box_office_settings: JSON.stringify({
+              enabled: false,
+              allowedTenderTypes: ['cash'],
+              requireBuyerEmail: true,
+              receiptMode: 'print',
+            }),
+          }),
+          organizationRow({ id: 'org_other' }),
+        ],
+        brands: [
+          brandRow({
+            id: 'brd_1',
+            organization_id: 'org_1',
+            theme: JSON.stringify({ primaryColor: '#123456' }),
+            payment_account_id: 'pa_1',
+          }),
+          brandRow({ id: 'brd_other', organization_id: 'org_other' }),
+        ],
+        brand_domains: [
+          {
+            id: 'bdom_1',
+            brand_id: 'brd_1',
+            domain: 'tickets.example.test',
+            is_primary: 1,
+            is_verified: 1,
+            ssl_status: 'active',
+            created_at: new Date('2026-06-01T00:00:00.000Z'),
+            updated_at: new Date('2026-06-01T00:00:00.000Z'),
+          },
+        ],
+      },
+    );
+    const res = await app.inject({ method: 'GET', url: '/bootstrap-context' });
+    expect(res.statusCode).toBe(200);
+    expect(res.json()).toEqual({
+      organizations: [
+        expect.objectContaining({
+          id: 'org_1',
+          tenantId: 'tnt_1',
+          name: 'Org 1',
+          slug: 'org-1',
+          status: 'active',
+        }),
+      ],
+      brands: [
+        expect.objectContaining({
+          id: 'brd_1',
+          tenantId: 'tnt_1',
+          organizationId: 'org_1',
+          name: 'Brand1',
+          slug: 'brand1',
+          status: 'active',
+          theme: {},
+          domains: [],
+          whiteLabel: false,
+        }),
+      ],
+    });
+    expect(res.json().organizations[0]).not.toHaveProperty('boxOfficeSettings');
+    expect(res.json().brands[0]).not.toHaveProperty('paymentAccountId');
+    await app.close();
+  });
+
+  it('GET /bootstrap-context rejects principals without dashboard permissions', async () => {
+    const app = await setupApp(tenantRoutes, makePrincipal({ scopes: [] }), {
+      organizations: [organizationRow()],
+      brands: [brandRow()],
+    });
+    const res = await app.inject({ method: 'GET', url: '/bootstrap-context' });
+    expect(res.statusCode).toBe(403);
+    expect(res.json().message).toContain('events.read');
+    await app.close();
+  });
+
   it('GET /organizations remains scoped for principals with settings.write', async () => {
     const app = await setupApp(
       tenantRoutes,
@@ -615,6 +697,76 @@ describe('tenant settings list permission gates', () => {
     expect(res.json()).toEqual([
       expect.objectContaining({
         id: 'brd_1',
+        whiteLabel: true,
+        domains: [
+          expect.objectContaining({
+            brandId: 'brd_1',
+            domain: 'tickets.example.test',
+            isPrimary: true,
+            isVerified: false,
+            sslStatus: 'pending',
+          }),
+        ],
+      }),
+    ]);
+    await app.close();
+  });
+
+  it('GET /bootstrap-context includes settings details for settings.write principals', async () => {
+    const app = await setupApp(
+      tenantRoutes,
+      makePrincipal({ organizationIds: ['org_1'], scopes: ['settings.write'] }),
+      {
+        organizations: [
+          organizationRow({
+            id: 'org_1',
+            box_office_settings: JSON.stringify({
+              enabled: false,
+              allowedTenderTypes: ['cash'],
+              requireBuyerEmail: true,
+              receiptMode: 'print',
+            }),
+          }),
+        ],
+        brands: [
+          brandRow({
+            id: 'brd_1',
+            organization_id: 'org_1',
+            theme: JSON.stringify({ primaryColor: '#123456' }),
+            white_label: 1,
+          }),
+        ],
+        brand_domains: [
+          {
+            id: 'bdom_1',
+            brand_id: 'brd_1',
+            domain: 'tickets.example.test',
+            is_primary: 1,
+            is_verified: 0,
+            ssl_status: 'pending',
+            created_at: new Date('2026-06-01T00:00:00.000Z'),
+            updated_at: new Date('2026-06-01T00:00:00.000Z'),
+          },
+        ],
+      },
+    );
+    const res = await app.inject({ method: 'GET', url: '/bootstrap-context' });
+    expect(res.statusCode).toBe(200);
+    expect(res.json().organizations).toEqual([
+      expect.objectContaining({
+        id: 'org_1',
+        boxOfficeSettings: {
+          enabled: false,
+          allowedTenderTypes: ['cash'],
+          requireBuyerEmail: true,
+          receiptMode: 'print',
+        },
+      }),
+    ]);
+    expect(res.json().brands).toEqual([
+      expect.objectContaining({
+        id: 'brd_1',
+        theme: { primaryColor: '#123456' },
         whiteLabel: true,
         domains: [
           expect.objectContaining({

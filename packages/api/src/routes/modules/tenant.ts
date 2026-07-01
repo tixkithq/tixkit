@@ -70,6 +70,24 @@ function requireAnyPermission(principal: Principal, permissions: Permission[]): 
   }
 }
 
+const dashboardContextPermissions: Permission[] = [
+  'events.read',
+  'events.write',
+  'tickets.write',
+  'orders.read',
+  'orders.write',
+  'refunds.write',
+  'attendees.read',
+  'attendees.write',
+  'checkins.read',
+  'checkins.write',
+  'messages.write',
+  'reports.read',
+  'settings.write',
+  'developers.write',
+  'billing.write',
+];
+
 function serializePaymentAccount(account: PaymentAccountRow, onboardingUrl?: string) {
   return {
     id: account.id,
@@ -89,6 +107,32 @@ function serializePaymentAccount(account: PaymentAccountRow, onboardingUrl?: str
     updatedAt:
       account.updated_at instanceof Date ? account.updated_at.toISOString() : account.updated_at,
     ...(onboardingUrl ? { onboardingUrl } : {}),
+  };
+}
+
+function serializeBootstrapOrganization(row: Record<string, unknown>, includeSettings: boolean) {
+  if (includeSettings) return serializeOrganization(row);
+  return {
+    id: row.id,
+    tenantId: row.tenant_id,
+    name: row.name,
+    slug: row.slug,
+    status: row.status,
+  };
+}
+
+function serializeBootstrapBrand(row: Record<string, unknown>, includeSettings: boolean) {
+  if (includeSettings) return serializeBrand(row);
+  return {
+    id: row.id,
+    tenantId: row.tenant_id,
+    organizationId: row.organization_id,
+    name: row.name,
+    slug: row.slug,
+    status: row.status,
+    theme: {},
+    domains: [],
+    whiteLabel: false,
   };
 }
 
@@ -174,6 +218,26 @@ export const tenantRoutes: FastifyPluginAsync = async (app) => {
   const db = app.context.db;
   const audit = () => new AuditLogRepository(db);
 
+  async function scopedOrganizationsFor(principal: Principal) {
+    const orgs = await new OrganizationRepository(db).findByTenant(principal.tenantId);
+    return principal.type === 'system'
+      ? orgs
+      : orgs.filter((org) => principal.organizationIds.includes(org.id));
+  }
+
+  async function scopedBrandsFor(principal: Principal) {
+    const brands = await new BrandRepository(db).findByTenant(principal.tenantId);
+    return principal.type === 'system'
+      ? brands
+      : brands.filter(
+          (brand) =>
+            principal.organizationIds.includes(brand.organization_id) &&
+            (!principal.brandIds ||
+              principal.brandIds.length === 0 ||
+              principal.brandIds.includes(brand.id)),
+        );
+  }
+
   app.post('/organizations', async (request, reply) => {
     const principal = request.principal!;
     ClerkAuthService.requirePermission(principal, 'settings.write');
@@ -195,15 +259,48 @@ export const tenantRoutes: FastifyPluginAsync = async (app) => {
   app.get('/organizations', async (request) => {
     const principal = request.principal!;
     ClerkAuthService.requirePermission(principal, 'settings.write');
-    const repo = new OrganizationRepository(db);
-    const orgs = await repo.findByTenant(principal.tenantId);
-    // Filter by principal's organizations to prevent cross-org data exposure
-    // within the same tenant. System principals see all orgs.
-    const scopedOrganizations =
-      principal.type === 'system'
-        ? orgs
-        : orgs.filter((org) => principal.organizationIds.includes(org.id));
+    const scopedOrganizations = await scopedOrganizationsFor(principal);
     return scopedOrganizations.map(serializeOrganization);
+  });
+
+  app.get('/bootstrap-context', async (request) => {
+    const principal = request.principal!;
+    requireAnyPermission(principal, dashboardContextPermissions);
+    const includeSettings = ClerkAuthService.hasPermission(principal, 'settings.write');
+    const [organizations, brands] = await Promise.all([
+      scopedOrganizationsFor(principal),
+      scopedBrandsFor(principal),
+    ]);
+    const brandIds = includeSettings ? brands.map((brand) => String(brand.id)) : [];
+    const domains =
+      brandIds.length > 0
+        ? await db
+            .selectFrom('brand_domains')
+            .selectAll()
+            .where('brand_id', 'in', brandIds)
+            .execute()
+        : [];
+    const domainsByBrandId = new Map<string, Array<Record<string, unknown>>>();
+    for (const domain of domains) {
+      const brandId = String(domain.brand_id);
+      const current = domainsByBrandId.get(brandId) ?? [];
+      current.push(domain);
+      domainsByBrandId.set(brandId, current);
+    }
+
+    return {
+      organizations: organizations.map((organization) =>
+        serializeBootstrapOrganization(organization, includeSettings),
+      ),
+      brands: brands.map((brand) => {
+        const serialized = serializeBootstrapBrand(brand, includeSettings);
+        return includeSettings
+          ? Object.assign(serialized, {
+              domains: (domainsByBrandId.get(String(brand.id)) ?? []).map(serializeBrandDomain),
+            })
+          : serialized;
+      }),
+    };
   });
 
   app.patch('/organizations/:organizationId', async (request) => {
@@ -463,20 +560,7 @@ export const tenantRoutes: FastifyPluginAsync = async (app) => {
   app.get('/brands', async (request) => {
     const principal = request.principal!;
     ClerkAuthService.requirePermission(principal, 'settings.write');
-    const brandRepo = new BrandRepository(db);
-    const brands = await brandRepo.findByTenant(principal.tenantId);
-    // Filter by principal's organizations to prevent cross-org data exposure.
-    // System principals see all brands.
-    const scopedBrands =
-      principal.type === 'system'
-        ? brands
-        : brands.filter(
-            (brand) =>
-              principal.organizationIds.includes(brand.organization_id) &&
-              (!principal.brandIds ||
-                principal.brandIds.length === 0 ||
-                principal.brandIds.includes(brand.id)),
-          );
+    const scopedBrands = await scopedBrandsFor(principal);
     const brandIds = scopedBrands.map((brand) => String(brand.id));
     const domains =
       brandIds.length > 0

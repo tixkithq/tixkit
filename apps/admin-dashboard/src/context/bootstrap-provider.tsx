@@ -59,30 +59,20 @@ export function BootstrapProvider({ children }: { children: React.ReactNode }) {
 
     async function bootstrap() {
       try {
-        const [orgResult, brandResult] = await Promise.all([
-          adminApi.listOrganizations(),
-          adminApi.listBrands(),
-        ]);
+        const contextResult = await adminApi.getBootstrapContext();
 
         if (cancelled) return;
 
-        if (!orgResult.ok) {
-          setError(orgResult.error.message);
+        if (!contextResult.ok) {
+          setError(contextResult.error.message);
           setOrganizations([]);
           setBrands([]);
           return;
         }
 
-        if (!brandResult.ok) {
-          setError(brandResult.error.message);
-          setOrganizations(orgResult.data);
-          setBrands([]);
-          return;
-        }
-
         setError(null);
-        setOrganizations(orgResult.data);
-        setBrands(brandResult.data);
+        setOrganizations(contextResult.data.organizations);
+        setBrands(contextResult.data.brands);
       } catch (e) {
         if (cancelled) return;
         setError(e instanceof Error ? e.message : 'Failed to load organization context.');

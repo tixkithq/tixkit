@@ -1997,6 +1997,66 @@ const rawOpenApiSpec = {
         },
         required: ['id', 'tenantId', 'organizationId', 'name', 'slug', 'status'],
       },
+      BootstrapOrganization: {
+        type: 'object',
+        properties: {
+          id: { type: 'string' },
+          tenantId: { type: 'string' },
+          name: { type: 'string' },
+          slug: { type: 'string' },
+          status: { type: 'string' },
+          boxOfficeSettings: { $ref: '#/components/schemas/BoxOfficeSettings' },
+        },
+        required: ['id', 'tenantId', 'name', 'slug', 'status'],
+      },
+      BootstrapBrand: {
+        type: 'object',
+        properties: {
+          id: { type: 'string' },
+          tenantId: { type: 'string' },
+          organizationId: { type: 'string' },
+          name: { type: 'string' },
+          slug: { type: 'string' },
+          status: { type: 'string' },
+          theme: { type: 'object' },
+          domains: {
+            type: 'array',
+            items: { $ref: '#/components/schemas/BrandDomain' },
+          },
+          whiteLabel: { type: 'boolean' },
+          paymentAccountId: {
+            type: 'string',
+            nullable: true,
+            description:
+              'Payment account bound to this brand. Present only when the principal can read settings details.',
+          },
+        },
+        required: [
+          'id',
+          'tenantId',
+          'organizationId',
+          'name',
+          'slug',
+          'status',
+          'theme',
+          'domains',
+          'whiteLabel',
+        ],
+      },
+      BootstrapContext: {
+        type: 'object',
+        properties: {
+          organizations: {
+            type: 'array',
+            items: { $ref: '#/components/schemas/BootstrapOrganization' },
+          },
+          brands: {
+            type: 'array',
+            items: { $ref: '#/components/schemas/BootstrapBrand' },
+          },
+        },
+        required: ['organizations', 'brands'],
+      },
       BrandDomain: {
         type: 'object',
         properties: {
@@ -2999,6 +3059,32 @@ const rawOpenApiSpec = {
         { url: 'http://localhost:4000', description: 'Local operational root' },
       ],
       get: { summary: 'Health check', responses: { '200': { description: 'OK' } } },
+    },
+    '/bootstrap-context': {
+      get: {
+        summary: 'Get scoped admin bootstrap context',
+        description:
+          'Returns the organizations and brands visible to the current principal for dashboard scope selection. Principals with settings.write receive settings details; other dashboard operators receive minimal scoped identity only.',
+        security: [{ BearerAuth: [] }],
+        responses: {
+          '200': {
+            description: 'Scoped dashboard bootstrap context',
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/BootstrapContext' },
+              },
+            },
+          },
+          '401': {
+            description: 'Unauthorized',
+            content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } },
+          },
+          '403': {
+            description: 'Forbidden',
+            content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } },
+          },
+        },
+      },
     },
     '/organizations': {
       get: {

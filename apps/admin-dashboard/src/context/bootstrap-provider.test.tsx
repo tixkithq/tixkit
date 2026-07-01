@@ -18,63 +18,62 @@ afterEach(() => {
 
 describe('BootstrapProvider', () => {
   it('does not silently select the first organization or brand when multiple choices exist', async () => {
-    vi.spyOn(adminApi, 'listOrganizations').mockResolvedValue({
+    vi.spyOn(adminApi, 'getBootstrapContext').mockResolvedValue({
       ok: true,
-      data: [
-        {
-          id: 'org_1',
-          tenantId: 'tnt_1',
-          name: 'Org One',
-          slug: 'one',
-          status: 'active',
-          boxOfficeSettings: {
-            enabled: true,
-            allowedTenderTypes: ['cash', 'manual_card', 'comp'],
-            requireBuyerEmail: false,
-            receiptMode: 'email',
+      data: {
+        organizations: [
+          {
+            id: 'org_1',
+            tenantId: 'tnt_1',
+            name: 'Org One',
+            slug: 'one',
+            status: 'active',
+            boxOfficeSettings: {
+              enabled: true,
+              allowedTenderTypes: ['cash', 'manual_card', 'comp'],
+              requireBuyerEmail: false,
+              receiptMode: 'email',
+            },
           },
-        },
-        {
-          id: 'org_2',
-          tenantId: 'tnt_1',
-          name: 'Org Two',
-          slug: 'two',
-          status: 'active',
-          boxOfficeSettings: {
-            enabled: true,
-            allowedTenderTypes: ['cash', 'manual_card', 'comp'],
-            requireBuyerEmail: false,
-            receiptMode: 'email',
+          {
+            id: 'org_2',
+            tenantId: 'tnt_1',
+            name: 'Org Two',
+            slug: 'two',
+            status: 'active',
+            boxOfficeSettings: {
+              enabled: true,
+              allowedTenderTypes: ['cash', 'manual_card', 'comp'],
+              requireBuyerEmail: false,
+              receiptMode: 'email',
+            },
           },
-        },
-      ],
-    });
-    vi.spyOn(adminApi, 'listBrands').mockResolvedValue({
-      ok: true,
-      data: [
-        {
-          id: 'brd_1',
-          tenantId: 'tnt_1',
-          organizationId: 'org_1',
-          name: 'Brand One',
-          slug: 'brand-one',
-          status: 'active',
-          theme: {},
-          domains: [],
-          whiteLabel: false,
-        },
-        {
-          id: 'brd_2',
-          tenantId: 'tnt_1',
-          organizationId: 'org_2',
-          name: 'Brand Two',
-          slug: 'brand-two',
-          status: 'active',
-          theme: {},
-          domains: [],
-          whiteLabel: false,
-        },
-      ],
+        ],
+        brands: [
+          {
+            id: 'brd_1',
+            tenantId: 'tnt_1',
+            organizationId: 'org_1',
+            name: 'Brand One',
+            slug: 'brand-one',
+            status: 'active',
+            theme: {},
+            domains: [],
+            whiteLabel: false,
+          },
+          {
+            id: 'brd_2',
+            tenantId: 'tnt_1',
+            organizationId: 'org_2',
+            name: 'Brand Two',
+            slug: 'brand-two',
+            status: 'active',
+            theme: {},
+            domains: [],
+            whiteLabel: false,
+          },
+        ],
+      },
     });
 
     const { result } = renderHook(useBootstrapHook, { wrapper });

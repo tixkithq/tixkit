@@ -86,6 +86,16 @@ describe('openApiSpec', () => {
 
   it('documents tenant settings lists as runtime array responses', () => {
     expect(
+      openApiSpec.paths['/bootstrap-context'].get.responses['200'].content['application/json']
+        .schema,
+    ).toEqual({ $ref: '#/components/schemas/BootstrapContext' });
+    expect(openApiSpec.components.schemas.BootstrapContext.properties.organizations.items).toEqual({
+      $ref: '#/components/schemas/BootstrapOrganization',
+    });
+    expect(openApiSpec.components.schemas.BootstrapOrganization.required).not.toContain(
+      'boxOfficeSettings',
+    );
+    expect(
       openApiSpec.paths['/organizations'].get.responses['200'].content['application/json'].schema,
     ).toEqual({ type: 'array', items: { $ref: '#/components/schemas/Organization' } });
     expect(openApiSpec.paths['/organizations'].get.parameters).toBeUndefined();
