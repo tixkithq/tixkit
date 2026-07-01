@@ -55,6 +55,7 @@ function createMockDb(tables: Record<string, unknown> = {}): unknown {
   };
   function createQuery(table: string) {
     const filters: Array<[string, string, unknown]> = [];
+    const joins: Array<[string, string, string]> = [];
     let countAlias: string | null = null;
     const query = {
       select: (selection?: unknown) => {
@@ -74,7 +75,16 @@ function createMockDb(tables: Record<string, unknown> = {}): unknown {
         return query;
       },
       selectAll: () => query,
-      innerJoin: () => query,
+      innerJoin: (...args: unknown[]) => {
+        if (
+          typeof args[0] === 'string' &&
+          typeof args[1] === 'string' &&
+          typeof args[2] === 'string'
+        ) {
+          joins.push([args[0], args[1], args[2]]);
+        }
+        return query;
+      },
       where: (...args: unknown[]) => {
         if (typeof args[0] === 'string' && typeof args[1] === 'string') {
           filters.push([args[0], args[1], args[2]]);
@@ -86,7 +96,30 @@ function createMockDb(tables: Record<string, unknown> = {}): unknown {
       forUpdate: () => query,
       fn: { sum: () => 'sum', countAll: () => 'count' },
       rows() {
-        return getRows(table).filter((row) =>
+        let rows = getRows(table);
+        for (const [joinedTable, leftColumn, rightColumn] of joins) {
+          if (table === 'attendees' && joinedTable === 'events') {
+            rows = rows.flatMap((row) => {
+              const joined = getRows('events').find((event) =>
+                mockValuesEqual(
+                  getMockColumnValue(event, leftColumn),
+                  getMockColumnValue(row, rightColumn),
+                ),
+              );
+              if (!joined) return [];
+              return [
+                {
+                  ...row,
+                  'events.id': joined.id,
+                  'events.organization_id': joined.organization_id,
+                  'events.brand_id': joined.brand_id,
+                  'events.tenant_id': joined.tenant_id,
+                },
+              ];
+            });
+          }
+        }
+        return rows.filter((row) =>
           filters.every(([column, op, value]) => {
             const rowValue = getMockColumnValue(row, column);
             if (op === '=') return mockValuesEqual(rowValue, value);
@@ -4122,6 +4155,38 @@ describe('ticket transfer and attendee update', () => {
           created_at: new Date(),
           updated_at: new Date(),
         },
+        {
+          id: 'att_other_org',
+          tenant_id: 'tnt_1',
+          order_id: 'ord_other',
+          event_id: 'evt_other_org',
+          ticket_type_id: 'tt_other',
+          ticket_id: 'tkt_other',
+          first_name: 'Grace',
+          last_name: 'Hopper',
+          email: 'grace@test.com',
+          status: 'confirmed',
+          phone: null,
+          custom_answers: null,
+          checked_in_at: null,
+          check_in_device_id: null,
+          created_at: new Date(),
+          updated_at: new Date(),
+        },
+      ],
+      events: [
+        {
+          id: 'evt_1',
+          tenant_id: 'tnt_1',
+          organization_id: 'org_1',
+          brand_id: 'brd_1',
+        },
+        {
+          id: 'evt_other_org',
+          tenant_id: 'tnt_1',
+          organization_id: 'org_other',
+          brand_id: 'brd_other',
+        },
       ],
     };
     const app = await setupApp(checkInRoutes, makePrincipal(), tables);
@@ -4133,6 +4198,7 @@ describe('ticket transfer and attendee update', () => {
     const body = res.json();
     expect(body.items).toHaveLength(1);
     expect(body.items[0].id).toBe('att_1');
+    expect(body.items.map((item: { id: string }) => item.id)).not.toContain('att_other_org');
     await app.close();
   });
 
