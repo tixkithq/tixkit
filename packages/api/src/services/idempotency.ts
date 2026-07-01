@@ -79,6 +79,13 @@ export async function withIdempotency(
       // eslint-disable-next-line no-await-in-loop -- idempotency replay must poll sequentially until the winning request commits its response.
       const existing = await findRecord(db, input.key, input.tenantId);
       if (!existing) return null;
+      const status = existing.status ?? 'completed';
+      if (status === 'completed') {
+        if (existing.request_hash !== input.requestHash) {
+          throw new IdempotencyConflictError(input.key);
+        }
+        return { status: existing.response_status, body: JSON.parse(existing.response_body) };
+      }
       if (isExpired(existing)) {
         // eslint-disable-next-line no-await-in-loop -- expired records must be removed before this key can be reserved again.
         await deleteRecord(db, existing.id);
@@ -86,9 +93,6 @@ export async function withIdempotency(
       }
       if (existing.request_hash !== input.requestHash) {
         throw new IdempotencyConflictError(input.key);
-      }
-      if ((existing.status ?? 'completed') === 'completed') {
-        return { status: existing.response_status, body: JSON.parse(existing.response_body) };
       }
       if (Date.now() >= deadline) break;
       // eslint-disable-next-line no-await-in-loop -- backoff is intentionally sequential between replay polling attempts.

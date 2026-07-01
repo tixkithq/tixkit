@@ -237,7 +237,7 @@ describe('withIdempotency', () => {
     expect(handler).not.toHaveBeenCalled();
   });
 
-  it('does not replay an expired completed record and persists a new response', async () => {
+  it('replays an expired completed record instead of rerunning the handler', async () => {
     const reqHash = hashRequest({ cart: { items: ['fresh'] } });
     const { db, records } = createMockDb([
       {
@@ -264,14 +264,47 @@ describe('withIdempotency', () => {
       handler,
     );
 
-    expect(result.status).toBe(201);
-    expect(result.body).toEqual({ id: 'fresh' });
-    expect(handler).toHaveBeenCalledOnce();
+    expect(result.status).toBe(200);
+    expect(result.body).toEqual({ id: 'stale' });
+    expect(handler).not.toHaveBeenCalled();
     expect(records).toHaveLength(1);
-    expect(records[0]?.id).not.toBe('idm_expired_completed');
+    expect(records[0]?.id).toBe('idm_expired_completed');
     expect(records[0]?.status).toBe('completed');
-    expect(records[0]?.response_status).toBe(201);
-    expect(JSON.parse(records[0]?.response_body as string)).toEqual({ id: 'fresh' });
+    expect(records[0]?.response_status).toBe(200);
+    expect(JSON.parse(records[0]?.response_body as string)).toEqual({ id: 'stale' });
+  });
+
+  it('throws conflict for changed payloads even when the completed record is expired', async () => {
+    const { db, records } = createMockDb([
+      {
+        id: 'idm_expired_completed_changed',
+        key: 'idem-expired-completed-changed',
+        tenant_id: 'tnt_1',
+        request_hash: hashRequest({ cart: { items: ['original'] } }),
+        response_status: 201,
+        response_body: JSON.stringify({ id: 'original-session' }),
+        status: 'completed',
+        expires_at: new Date(Date.now() - 1_000),
+      },
+    ]);
+
+    const handler = vi.fn(async () => ({ status: 201, body: { id: 'changed-session' } }));
+
+    await expect(
+      withIdempotency(
+        db,
+        {
+          key: 'idem-expired-completed-changed',
+          tenantId: 'tnt_1',
+          requestHash: hashRequest({ cart: { items: ['changed'] } }),
+        },
+        handler,
+      ),
+    ).rejects.toThrow(IdempotencyConflictError);
+
+    expect(handler).not.toHaveBeenCalled();
+    expect(records).toHaveLength(1);
+    expect(records[0]?.id).toBe('idm_expired_completed_changed');
   });
 
   it('does not treat an expired in-progress record as stuck and persists a new response', async () => {
@@ -442,7 +475,7 @@ describe('withIdempotency', () => {
     ).rejects.toThrow(IdempotencyConflictError);
   });
 
-  it('does not replay an expired insert race winner and retries reservation', async () => {
+  it('replays an expired completed insert race winner', async () => {
     const reqHash = hashRequest({ foo: 'bar' });
     const { db, records } = createMockDb([], {
       failCount: 1,
@@ -472,13 +505,13 @@ describe('withIdempotency', () => {
       handler,
     );
 
-    expect(result.status).toBe(201);
-    expect(result.body).toEqual({ id: 'fresh-after-race' });
-    expect(handler).toHaveBeenCalledOnce();
+    expect(result.status).toBe(200);
+    expect(result.body).toEqual({ id: 'stale-winner' });
+    expect(handler).not.toHaveBeenCalled();
     expect(records).toHaveLength(1);
-    expect(records[0]?.id).not.toBe('idm_expired_winner');
+    expect(records[0]?.id).toBe('idm_expired_winner');
     expect(records[0]?.status).toBe('completed');
-    expect(records[0]?.response_status).toBe(201);
+    expect(records[0]?.response_status).toBe(200);
   });
 
   it('persists handler failures as completed idempotent error responses', async () => {
