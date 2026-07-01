@@ -38,6 +38,7 @@ import {
   AccessCodeRequiredError,
   CheckoutExpiredError,
   ResaleError,
+  accessRuleMatches,
   validateTicketPurchase,
   validateResalePrice,
   validateAnswers,
@@ -628,16 +629,20 @@ function toIsoString(value: Date | string | null): string | undefined {
   return value instanceof Date ? value.toISOString() : value;
 }
 
-function accessRuleMatches(
+function accessRuleRowMatches(
   row: AccessRuleRow,
   input: { accessCode?: string; buyerEmail?: string; now: Date },
 ): boolean {
-  if (row.expires_at && input.now > new Date(row.expires_at)) return false;
-  if (row.max_uses != null && Number(row.uses_count) >= Number(row.max_uses)) return false;
-  if (row.type === 'allowlist') {
-    return Boolean(input.buyerEmail) && row.value.toLowerCase() === input.buyerEmail!.toLowerCase();
-  }
-  return Boolean(input.accessCode) && row.value === input.accessCode;
+  return accessRuleMatches(
+    {
+      type: row.type,
+      value: row.value,
+      maxUses: row.max_uses,
+      usesCount: row.uses_count,
+      expiresAt: row.expires_at,
+    },
+    input,
+  );
 }
 
 function parseStringArray(value: string | string[] | null): string[] | undefined {
@@ -1423,7 +1428,7 @@ export const checkoutRoutes: FastifyPluginAsync = async (app) => {
           });
           if (ttRecord.visibility === 'locked' || ttRecord.requires_access_code) {
             const matchedAccessRule = itemAccessRules?.find((row) =>
-              accessRuleMatches(row, {
+              accessRuleRowMatches(row, {
                 accessCode: body.accessCode,
                 buyerEmail: body.buyer?.email,
                 now: new Date(answeredAt),

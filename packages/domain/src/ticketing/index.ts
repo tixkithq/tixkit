@@ -156,7 +156,7 @@ export type PurchasableTicketType = {
 };
 
 export type AccessRuleRecord = {
-  type: 'access_code' | 'voucher' | 'allowlist';
+  type: 'access_code' | 'code' | 'voucher' | 'allowlist' | 'email_domain';
   value: string;
   maxUses?: number | null;
   usesCount: number;
@@ -176,6 +176,40 @@ export type ValidateTicketPurchaseInput = {
 function toDate(value?: Date | string | null): Date | undefined {
   if (value === undefined || value === null) return undefined;
   return value instanceof Date ? value : new Date(value);
+}
+
+function normalizeEmail(value: string): string {
+  return value.trim().toLowerCase();
+}
+
+export function normalizeEmailDomainAccessRuleValue(value: string): string {
+  return value.trim().toLowerCase().replace(/^@+/, '');
+}
+
+export function accessRuleMatches(
+  rule: AccessRuleRecord,
+  input: { accessCode?: string; buyerEmail?: string; now: Date },
+): boolean {
+  const expiresAt = toDate(rule.expiresAt);
+  if (expiresAt && input.now > expiresAt) return false;
+  if (rule.maxUses != null && rule.usesCount >= rule.maxUses) return false;
+
+  if (rule.type === 'allowlist') {
+    return (
+      Boolean(input.buyerEmail) && normalizeEmail(rule.value) === normalizeEmail(input.buyerEmail!)
+    );
+  }
+
+  if (rule.type === 'email_domain') {
+    if (!input.buyerEmail) return false;
+    const domain = normalizeEmailDomainAccessRuleValue(rule.value);
+    const email = normalizeEmail(input.buyerEmail);
+    const atIndex = email.lastIndexOf('@');
+    if (!domain || atIndex < 0 || atIndex === email.length - 1) return false;
+    return email.slice(atIndex + 1) === domain;
+  }
+
+  return Boolean(input.accessCode) && rule.value === input.accessCode;
 }
 
 /**
@@ -239,17 +273,13 @@ export function validateTicketPurchase(input: ValidateTicketPurchaseInput): void
       throw new AccessCodeRequiredError(tt.id);
     }
     const rules = input.accessRules ?? [];
-    const matched = rules.some((rule) => {
-      const expiresAt = toDate(rule.expiresAt);
-      if (expiresAt && now > expiresAt) return false;
-      if (rule.maxUses != null && rule.usesCount >= rule.maxUses) return false;
-      if (rule.type === 'allowlist') {
-        return (
-          Boolean(input.buyerEmail) && rule.value.toLowerCase() === input.buyerEmail!.toLowerCase()
-        );
-      }
-      return Boolean(input.accessCode) && rule.value === input.accessCode;
-    });
+    const matched = rules.some((rule) =>
+      accessRuleMatches(rule, {
+        accessCode: input.accessCode,
+        buyerEmail: input.buyerEmail,
+        now,
+      }),
+    );
     if (!matched) {
       throw new AccessCodeRequiredError(tt.id);
     }

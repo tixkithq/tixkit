@@ -10,7 +10,7 @@ import {
   ProductRepository,
   EventOccurrenceRepository,
 } from '@tixkit/db';
-import { NotFoundError, ValidationError } from '@tixkit/domain';
+import { accessRuleMatches, NotFoundError, ValidationError } from '@tixkit/domain';
 import type { AccessRuleRecord } from '@tixkit/domain';
 import {
   parseJsonValue,
@@ -134,21 +134,6 @@ function isDuplicateInsert(error: unknown): boolean {
     record.errno === 1062 ||
     /duplicate|unique/i.test(record.message ?? '')
   );
-}
-
-function accessRuleUnlocks(
-  rule: AccessRuleRecord,
-  input: { accessCode?: string; buyerEmail?: string; now: Date },
-): boolean {
-  const expiresAt = toDate(rule.expiresAt);
-  if (expiresAt && input.now > expiresAt) return false;
-  if (rule.maxUses != null && rule.usesCount >= rule.maxUses) return false;
-  if (rule.type === 'allowlist') {
-    return (
-      Boolean(input.buyerEmail) && rule.value.toLowerCase() === input.buyerEmail!.toLowerCase()
-    );
-  }
-  return Boolean(input.accessCode) && rule.value === input.accessCode;
 }
 
 /**
@@ -555,7 +540,7 @@ export const publicRoutes: FastifyPluginAsync = async (app) => {
             expiresAt: rule.expires_at,
           }));
         const unlocked = rules.some((rule) =>
-          accessRuleUnlocks(rule, { accessCode, buyerEmail, now }),
+          accessRuleMatches(rule, { accessCode, buyerEmail, now }),
         );
         if (unlocked) {
           unlockedTicketTypeIds.push(ticketType.id);

@@ -14,7 +14,13 @@ import {
   ProductRepository,
   type Database,
 } from '@tixkit/db';
-import { NotFoundError, ResaleError, ValidationError, validateResalePrice } from '@tixkit/domain';
+import {
+  NotFoundError,
+  ResaleError,
+  ValidationError,
+  normalizeEmailDomainAccessRuleValue,
+  validateResalePrice,
+} from '@tixkit/domain';
 import { withIdempotency, hashRequest } from '../../services/idempotency.js';
 import { ulid } from 'ulid';
 import {
@@ -55,6 +61,14 @@ type AccessRuleInput = {
 };
 type NormalizedAccessRule = AccessRuleInput & { value: string };
 
+function accessRuleKey(rule: { type: string; value: string }): string {
+  const value =
+    rule.type === 'email_domain'
+      ? normalizeEmailDomainAccessRuleValue(rule.value)
+      : rule.value.trim().toLowerCase();
+  return `${rule.type}:${value}`;
+}
+
 function requireEventAccess(principal: Principal, event: Record<string, unknown>, eventId: string) {
   ClerkAuthService.requireResourceTenant(principal, event, 'Event', eventId);
   ClerkAuthService.requireOrganizationScope(principal, event.organization_id as string | undefined);
@@ -65,11 +79,17 @@ function requireEventAccess(principal: Principal, event: Record<string, unknown>
 function normalizeAccessRules(rules: AccessRuleInput[] = []): NormalizedAccessRule[] {
   const normalized = rules.map((rule) => ({
     ...rule,
-    value: rule.value.trim(),
+    value:
+      rule.type === 'email_domain'
+        ? normalizeEmailDomainAccessRuleValue(rule.value)
+        : rule.value.trim(),
   }));
   const keys = new Set<string>();
   for (const rule of normalized) {
-    const key = `${rule.type}:${rule.value.toLowerCase()}`;
+    if (!rule.value) {
+      throw new ValidationError('Access rule value is required');
+    }
+    const key = accessRuleKey(rule);
     if (keys.has(key)) {
       throw new ValidationError(`Duplicate access rule value: ${rule.value}`);
     }
@@ -86,11 +106,9 @@ async function assertNoExistingAccessRuleDuplicates(
   if (rules.length === 0) return;
   const existing = await accessRuleRepo.findByTicketType(ticketTypeId);
   const existingKeys = new Set(
-    existing.map((rule) => `${rule.type}:${String(rule.value).trim().toLowerCase()}`),
+    existing.map((rule) => accessRuleKey({ type: String(rule.type), value: String(rule.value) })),
   );
-  const duplicate = rules.find((rule) =>
-    existingKeys.has(`${rule.type}:${rule.value.toLowerCase()}`),
-  );
+  const duplicate = rules.find((rule) => existingKeys.has(accessRuleKey(rule)));
   if (duplicate) {
     throw new ValidationError(`Access rule already exists: ${duplicate.value}`);
   }
@@ -837,6 +855,7 @@ export const ticketingRoutes: FastifyPluginAsync = async (app) => {
     ClerkAuthService.requirePermission(principal, 'tickets.write');
     const { ticketTypeId } = request.params as { ticketTypeId: string };
     const body = parseBody(createAccessRuleSchema, request.body);
+    const [accessRuleInput] = normalizeAccessRules([body]);
     const repo = new TicketTypeRepository(db);
     const ticketType = await repo.findById(ticketTypeId);
     if (!ticketType) throw new NotFoundError('TicketType', ticketTypeId);
@@ -845,10 +864,10 @@ export const ticketingRoutes: FastifyPluginAsync = async (app) => {
 
     const accessRule = await new AccessRuleRepository(db).create({
       ticketTypeId,
-      type: body.type,
-      value: body.value.trim(),
-      maxUses: body.maxUses ?? undefined,
-      expiresAt: body.expiresAt ? new Date(body.expiresAt) : undefined,
+      type: accessRuleInput.type,
+      value: accessRuleInput.value,
+      maxUses: accessRuleInput.maxUses ?? undefined,
+      expiresAt: accessRuleInput.expiresAt ? new Date(accessRuleInput.expiresAt) : undefined,
     });
     return reply.status(201).send(serializeAccessRule(accessRule));
   });

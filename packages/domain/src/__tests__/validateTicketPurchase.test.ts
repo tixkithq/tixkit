@@ -301,6 +301,66 @@ describe('validateTicketPurchase', () => {
       ).not.toThrow();
     });
 
+    it('accepts email-domain rule without leading at sign', () => {
+      const rules: AccessRuleRecord[] = [
+        { type: 'email_domain', value: 'example.com', usesCount: 0 },
+      ];
+      expect(() =>
+        validateTicketPurchase({
+          ticketType: makeTicketType({ visibility: 'locked' }),
+          quantity: 1,
+          buyerEmail: 'buyer@example.com',
+          accessRules: rules,
+          now: fixedNow,
+        }),
+      ).not.toThrow();
+    });
+
+    it('accepts email-domain rule with leading at sign', () => {
+      const rules: AccessRuleRecord[] = [
+        { type: 'email_domain', value: '@example.com', usesCount: 0 },
+      ];
+      expect(() =>
+        validateTicketPurchase({
+          ticketType: makeTicketType({ visibility: 'locked' }),
+          quantity: 1,
+          buyerEmail: 'Buyer@Example.com',
+          accessRules: rules,
+          now: fixedNow,
+        }),
+      ).not.toThrow();
+    });
+
+    it('rejects other domains for email-domain rules', () => {
+      const rules: AccessRuleRecord[] = [
+        { type: 'email_domain', value: 'example.com', usesCount: 0 },
+      ];
+      expect(() =>
+        validateTicketPurchase({
+          ticketType: makeTicketType({ visibility: 'locked' }),
+          quantity: 1,
+          buyerEmail: 'buyer@other.com',
+          accessRules: rules,
+          now: fixedNow,
+        }),
+      ).toThrow(AccessCodeRequiredError);
+    });
+
+    it('rejects subdomains for email-domain rules', () => {
+      const rules: AccessRuleRecord[] = [
+        { type: 'email_domain', value: 'example.com', usesCount: 0 },
+      ];
+      expect(() =>
+        validateTicketPurchase({
+          ticketType: makeTicketType({ visibility: 'locked' }),
+          quantity: 1,
+          buyerEmail: 'buyer@sub.example.com',
+          accessRules: rules,
+          now: fixedNow,
+        }),
+      ).toThrow(AccessCodeRequiredError);
+    });
+
     it('accepts requiresAccessCode ticket with valid code', () => {
       const rules: AccessRuleRecord[] = [
         { type: 'access_code', value: 'PROMO', usesCount: 5, maxUses: 100 },

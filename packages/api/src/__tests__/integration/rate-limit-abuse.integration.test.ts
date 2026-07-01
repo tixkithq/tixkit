@@ -104,11 +104,15 @@ function ticketTypeRow(id: string, eventId: string): Row {
   };
 }
 
-function accessRuleRow(ticketTypeId: string, value: string): Row {
+function accessRuleRow(
+  ticketTypeId: string,
+  value: string,
+  type: 'access_code' | 'email_domain' = 'access_code',
+): Row {
   return {
     id: `acr_${ticketTypeId}`,
     ticket_type_id: ticketTypeId,
-    type: 'access_code',
+    type,
     value,
     max_uses: null,
     uses_count: 0,
@@ -121,9 +125,17 @@ function accessRuleRow(ticketTypeId: string, value: string): Row {
 async function buildRateLimitedPublicApp() {
   const app = Fastify({ logger: false, trustProxy: true });
   const db = createMockDb({
-    events: [eventRow('evt_alpha'), eventRow('evt_beta')],
-    ticket_types: [ticketTypeRow('tt_alpha', 'evt_alpha'), ticketTypeRow('tt_beta', 'evt_beta')],
-    access_rules: [accessRuleRow('tt_alpha', 'ALPHA'), accessRuleRow('tt_beta', 'BETA')],
+    events: [eventRow('evt_alpha'), eventRow('evt_beta'), eventRow('evt_domain')],
+    ticket_types: [
+      ticketTypeRow('tt_alpha', 'evt_alpha'),
+      ticketTypeRow('tt_beta', 'evt_beta'),
+      ticketTypeRow('tt_domain', 'evt_domain'),
+    ],
+    access_rules: [
+      accessRuleRow('tt_alpha', 'ALPHA'),
+      accessRuleRow('tt_beta', 'BETA'),
+      accessRuleRow('tt_domain', 'example.com', 'email_domain'),
+    ],
   });
 
   app.decorate('context', {
@@ -277,6 +289,35 @@ describe('public access-code abuse rate limiting', () => {
       abusiveRequesterStatuses.filter((status) => status === 429).length,
     ).toBeGreaterThanOrEqual(1);
     expect(separateRequesterResponse.statusCode).toBe(400);
+  });
+
+  it('unlocks a public ticket with a matching buyer email domain', async () => {
+    const app = await buildRateLimitedPublicApp();
+    apps.push(app);
+
+    const accepted = await app.inject({
+      method: 'POST',
+      url: '/public/events/evt_domain/access-code',
+      headers: { 'x-forwarded-for': '203.0.113.30' },
+      payload: {
+        ticketTypeIds: ['tt_domain'],
+        buyerEmail: 'Buyer@Example.com',
+      },
+    });
+
+    const rejected = await app.inject({
+      method: 'POST',
+      url: '/public/events/evt_domain/access-code',
+      headers: { 'x-forwarded-for': '203.0.113.31' },
+      payload: {
+        ticketTypeIds: ['tt_domain'],
+        buyerEmail: 'buyer@other.com',
+      },
+    });
+
+    expect(accepted.statusCode).toBe(200);
+    expect(accepted.json()).toEqual({ valid: true, ticketTypeIds: ['tt_domain'] });
+    expect(rejected.statusCode).toBe(400);
   });
 
   it('isolates authenticated abuse buckets by tenant instead of shared IP', async () => {
