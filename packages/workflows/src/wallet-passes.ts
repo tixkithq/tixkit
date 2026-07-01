@@ -59,10 +59,6 @@ const ONE_PIXEL_PNG = Buffer.from(
   'base64',
 );
 
-function hasAny(env: NodeJS.ProcessEnv, keys: string[]): boolean {
-  return keys.some((key) => typeof env[key] === 'string' && env[key]!.trim().length > 0);
-}
-
 function required(env: NodeJS.ProcessEnv, keys: string[]): string[] {
   return keys.filter((key) => !env[key] || env[key]!.trim().length === 0);
 }
@@ -116,7 +112,6 @@ function signJwt(claims: Record<string, unknown>, privateKey: string): string {
 }
 
 export function loadWalletPassConfig(env: NodeJS.ProcessEnv = process.env): WalletPassConfig {
-  const nodeEnv = env.NODE_ENV ?? 'development';
   const apiBaseUrl = normalizeApiV1BaseUrl(env.API_BASE_URL ?? 'http://localhost:4000');
 
   const appleKeys = [
@@ -134,14 +129,8 @@ export function loadWalletPassConfig(env: NodeJS.ProcessEnv = process.env): Wall
     'GOOGLE_WALLET_ORIGIN',
   ];
 
-  const appleRequested =
-    env.APPLE_WALLET_ENABLED === 'true' ||
-    (nodeEnv === 'production' && env.APPLE_WALLET_ENABLED !== 'false') ||
-    hasAny(env, appleKeys);
-  const googleRequested =
-    env.GOOGLE_WALLET_ENABLED === 'true' ||
-    (nodeEnv === 'production' && env.GOOGLE_WALLET_ENABLED !== 'false') ||
-    hasAny(env, googleKeys);
+  const appleRequested = env.APPLE_WALLET_ENABLED === 'true';
+  const googleRequested = env.GOOGLE_WALLET_ENABLED === 'true';
 
   const missingApple = appleRequested ? required(env, appleKeys) : [];
   const missingGoogle = googleRequested ? required(env, googleKeys) : [];

@@ -201,6 +201,8 @@ describe('issueTicketsActivity', () => {
     dbState.destroy.mockClear();
     delete process.env.E2E_FAIL_TICKET_ISSUE_ACTIVITY_ONCE;
     delete process.env.E2E_FAIL_TICKET_ISSUE_ACTIVITY_ONCE_KEY;
+    delete process.env.APPLE_WALLET_ENABLED;
+    delete process.env.GOOGLE_WALLET_ENABLED;
   });
 
   it('injects one non-production ticket issue activity failure for provider-backed retry proof', async () => {
@@ -271,6 +273,23 @@ describe('issueTicketsActivity', () => {
     expect(pdfText).not.toContain('signed_qr_payload_1');
     expect(pdfText).not.toContain('buyer@example.com');
     expect(pdfText).not.toContain('ada@example.com');
+  });
+
+  it('continues ticket issuance when optional wallet pass configuration is incomplete', async () => {
+    process.env.APPLE_WALLET_ENABLED = 'true';
+
+    const result = await issueTicketsActivity({
+      orderId: 'ord_1',
+      toEmail: 'buyer@example.com',
+      tenantId: 'tnt_1',
+      brandId: 'brd_1',
+    });
+
+    expect(result).toEqual({ ok: true, value: { issued: 1, jobId: 'emj_1' } });
+    expect(dbState.createdJobs).toHaveLength(1);
+    expect(dbState.createdJobs[0].variables).toMatchObject({
+      walletPasses: [],
+    });
   });
 
   it('can retry a transient ticket email queue failure without duplicate jobs', async () => {

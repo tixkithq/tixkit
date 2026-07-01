@@ -2605,15 +2605,21 @@ export async function issueTicketsActivity(input: {
     ]);
     const ticketTypesById = new Map(ticketTypes.map((ticketType) => [ticketType.id, ticketType]));
     const attendeesById = new Map(attendees.map((attendee) => [attendee.id, attendee]));
-    const walletPassLinks = await ensureWalletPassesForTickets(db, {
-      tickets,
-      ticketTypesById,
-      attendeesById,
-      order,
-      event,
-      brand,
-      tenantId: input.tenantId,
-    });
+    let walletPassLinks: TicketWalletPassLink[] = [];
+    try {
+      walletPassLinks = await ensureWalletPassesForTickets(db, {
+        tickets,
+        ticketTypesById,
+        attendeesById,
+        order,
+        event,
+        brand,
+        tenantId: input.tenantId,
+      });
+    } catch {
+      // Wallet passes are optional; ticket PDFs and transactional email remain authoritative.
+      walletPassLinks = [];
+    }
 
     const pdfAttachments = await Promise.all(
       tickets.map(async (ticket) => {

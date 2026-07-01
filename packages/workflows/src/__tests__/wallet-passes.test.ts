@@ -56,13 +56,36 @@ function testCertificates() {
 }
 
 describe('wallet pass generation', () => {
-  it('fails closed in production when signing configuration is missing', () => {
+  it('does not request wallet providers by default in production', () => {
+    const config = loadWalletPassConfig({
+      NODE_ENV: 'production',
+      API_BASE_URL: 'https://api.example.test',
+    } as NodeJS.ProcessEnv);
+
+    expect(config.apple).toBeUndefined();
+    expect(config.google).toBeUndefined();
+  });
+
+  it('fails closed when wallet providers are explicitly enabled without signing configuration', () => {
     expect(() =>
       loadWalletPassConfig({
         NODE_ENV: 'production',
         API_BASE_URL: 'https://api.example.test',
+        APPLE_WALLET_ENABLED: 'true',
       } as NodeJS.ProcessEnv),
     ).toThrow(/Wallet pass signing configuration is incomplete/);
+  });
+
+  it('honors explicit wallet provider disables in production', () => {
+    const config = loadWalletPassConfig({
+      NODE_ENV: 'production',
+      API_BASE_URL: 'https://api.example.test',
+      APPLE_WALLET_ENABLED: 'false',
+      GOOGLE_WALLET_ENABLED: 'false',
+    } as NodeJS.ProcessEnv);
+
+    expect(config.apple).toBeUndefined();
+    expect(config.google).toBeUndefined();
   });
 
   it('generates an Apple pass manifest, signature, and QR barcode payload', () => {
