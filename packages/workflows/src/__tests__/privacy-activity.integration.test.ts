@@ -26,6 +26,7 @@ function buildPrivacyRetentionIds(suffix: string) {
     eventId: `evt_priv_${suffix}`,
     poolId: `pool_priv_${suffix}`,
     ticketTypeId: `tt_priv_${suffix}`,
+    waitlistEntryId: `wl_priv_${suffix}`,
     checkoutSessionId: `cs_priv_${suffix}`,
     orderId: `ord_priv_${suffix}`,
     attendeeId: `att_priv_${suffix}`,
@@ -39,6 +40,7 @@ function buildPrivacyRetentionIds(suffix: string) {
     otherEventId: `evt_priv_other_${suffix}`,
     otherPoolId: `pool_priv_other_${suffix}`,
     otherTicketTypeId: `tt_priv_other_${suffix}`,
+    otherWaitlistEntryId: `wl_priv_other_${suffix}`,
     otherCheckoutSessionId: `cs_priv_other_${suffix}`,
     otherOrderId: `ord_priv_other_${suffix}`,
     otherAttendeeId: `att_priv_other_${suffix}`,
@@ -279,6 +281,54 @@ async function seedPrivacyRetentionFixture(db: Database, ids: FixtureIds, suffix
       sort_order: 0,
       requires_access_code: false,
       access_code_hint: null,
+      created_at: now,
+      updated_at: now,
+    })
+    .execute();
+  await db
+    .insertInto('waitlist_entries')
+    .values({
+      id: ids.waitlistEntryId,
+      tenant_id: ids.tenantId,
+      organization_id: ids.organizationId,
+      brand_id: ids.brandId,
+      event_id: ids.eventId,
+      ticket_type_id: ids.ticketTypeId,
+      buyer_email: 'buyer@test.com',
+      buyer_first_name: 'Ada',
+      buyer_last_name: 'Lovelace',
+      buyer_phone: '+15550000001',
+      quantity: 2,
+      status: 'joined',
+      offer_expires_at: null,
+      claim_token_hash: null,
+      offered_at: null,
+      claimed_at: null,
+      cancelled_at: null,
+      created_at: now,
+      updated_at: now,
+    })
+    .execute();
+  await db
+    .insertInto('waitlist_entries')
+    .values({
+      id: ids.otherWaitlistEntryId,
+      tenant_id: ids.tenantId,
+      organization_id: ids.otherOrganizationId,
+      brand_id: ids.otherBrandId,
+      event_id: ids.otherEventId,
+      ticket_type_id: ids.otherTicketTypeId,
+      buyer_email: 'buyer@test.com',
+      buyer_first_name: 'Other',
+      buyer_last_name: 'Scope',
+      buyer_phone: '+15550000009',
+      quantity: 1,
+      status: 'joined',
+      offer_expires_at: null,
+      claim_token_hash: null,
+      offered_at: null,
+      claimed_at: null,
+      cancelled_at: null,
       created_at: now,
       updated_at: now,
     })
@@ -629,6 +679,10 @@ async function cleanupPrivacyRetentionFixture(db: Database, ids: FixtureIds) {
     .where('id', 'in', [ids.checkoutSessionId, ids.otherCheckoutSessionId])
     .execute();
   await db
+    .deleteFrom('waitlist_entries')
+    .where('id', 'in', [ids.waitlistEntryId, ids.otherWaitlistEntryId])
+    .execute();
+  await db
     .deleteFrom('ticket_types')
     .where('id', 'in', [ids.ticketTypeId, ids.otherTicketTypeId])
     .execute();
@@ -697,11 +751,13 @@ describe.each(driverCases)('privacy retention activity integration: $driver', ({
       checkoutSession,
       auditLog,
       privacyRequest,
+      waitlistEntry,
       otherOrder,
       otherAttendee,
       otherTicket,
       otherInvoice,
       otherCheckoutSession,
+      otherWaitlistEntry,
     ] = await Promise.all([
       db.selectFrom('orders').selectAll().where('id', '=', ids.orderId).executeTakeFirstOrThrow(),
       db
@@ -736,6 +792,11 @@ describe.each(driverCases)('privacy retention activity integration: $driver', ({
         .where('id', '=', ids.requestId)
         .executeTakeFirstOrThrow(),
       db
+        .selectFrom('waitlist_entries')
+        .selectAll()
+        .where('id', '=', ids.waitlistEntryId)
+        .executeTakeFirstOrThrow(),
+      db
         .selectFrom('orders')
         .selectAll()
         .where('id', '=', ids.otherOrderId)
@@ -759,6 +820,11 @@ describe.each(driverCases)('privacy retention activity integration: $driver', ({
         .selectFrom('checkout_sessions')
         .selectAll()
         .where('id', '=', ids.otherCheckoutSessionId)
+        .executeTakeFirstOrThrow(),
+      db
+        .selectFrom('waitlist_entries')
+        .selectAll()
+        .where('id', '=', ids.otherWaitlistEntryId)
         .executeTakeFirstOrThrow(),
     ]);
 
@@ -841,8 +907,20 @@ describe.each(driverCases)('privacy retention activity integration: $driver', ({
     expect(resultPayload).toMatchObject({
       ordersRedacted: 1,
       attendeesRedacted: 2,
+      waitlistEntriesRedacted: 1,
       ticketsTouched: 1,
     });
+    expect(waitlistEntry).toMatchObject({
+      id: ids.waitlistEntryId,
+      buyer_first_name: null,
+      buyer_last_name: null,
+      buyer_phone: null,
+      quantity: 2,
+      status: 'joined',
+    });
+    expect(String(waitlistEntry.buyer_email)).toMatch(
+      /^erased\+[a-f0-9]{16}@privacy\.tixkit\.invalid$/,
+    );
 
     expect(otherOrder).toMatchObject({
       id: ids.otherOrderId,
@@ -869,6 +947,12 @@ describe.each(driverCases)('privacy retention activity integration: $driver', ({
     expect(parseJsonColumn(otherCheckoutSession.buyer)).toMatchObject({
       email: 'buyer@test.com',
       firstName: 'Other',
+    });
+    expect(otherWaitlistEntry).toMatchObject({
+      id: ids.otherWaitlistEntryId,
+      buyer_email: 'buyer@test.com',
+      buyer_first_name: 'Other',
+      buyer_phone: '+15550000009',
     });
   });
 

@@ -10,6 +10,7 @@ const dbState = vi.hoisted(() => ({
   attendees: [] as Row[],
   tickets: [] as Row[],
   invoices: [] as Row[],
+  waitlistEntries: [] as Row[],
   auditLogs: [] as Row[],
   checkoutSessions: [] as Row[],
   updates: [] as Array<{ table: string; filters: Filter[]; values: Row }>,
@@ -55,6 +56,7 @@ function rowsFor(table: string): Row[] {
   if (table === 'attendees') return dbState.attendees;
   if (table === 'tickets') return dbState.tickets;
   if (table === 'invoices') return dbState.invoices;
+  if (table === 'waitlist_entries') return dbState.waitlistEntries;
   if (table === 'audit_logs') return dbState.auditLogs;
   if (table === 'checkout_sessions') return dbState.checkoutSessions;
   return [];
@@ -388,6 +390,68 @@ describe('processPrivacyRequestActivity', () => {
         updated_at: new Date('2026-06-01T09:00:00.000Z'),
       },
     ];
+    dbState.waitlistEntries = [
+      {
+        id: 'wl_1',
+        tenant_id: 'tnt_1',
+        organization_id: 'org_1',
+        brand_id: 'brd_1',
+        event_id: 'evt_1',
+        ticket_type_id: 'tt_1',
+        buyer_email: 'buyer@test.com',
+        buyer_first_name: 'Ada',
+        buyer_last_name: 'Lovelace',
+        buyer_phone: '+15550000001',
+        quantity: 2,
+        status: 'joined',
+        offer_expires_at: null,
+        offered_at: null,
+        claimed_at: null,
+        cancelled_at: null,
+        created_at: new Date('2026-06-01T09:00:00.000Z'),
+        updated_at: new Date('2026-06-01T09:00:00.000Z'),
+      },
+      {
+        id: 'wl_other_org',
+        tenant_id: 'tnt_1',
+        organization_id: 'org_other',
+        brand_id: 'brd_other',
+        event_id: 'evt_other',
+        ticket_type_id: 'tt_other',
+        buyer_email: 'buyer@test.com',
+        buyer_first_name: 'Other',
+        buyer_last_name: 'Scope',
+        buyer_phone: '+15550000009',
+        quantity: 1,
+        status: 'joined',
+        offer_expires_at: null,
+        offered_at: null,
+        claimed_at: null,
+        cancelled_at: null,
+        created_at: new Date('2026-06-01T09:00:00.000Z'),
+        updated_at: new Date('2026-06-01T09:00:00.000Z'),
+      },
+      {
+        id: 'wl_other_tenant',
+        tenant_id: 'tnt_other',
+        organization_id: 'org_1',
+        brand_id: 'brd_1',
+        event_id: 'evt_1',
+        ticket_type_id: 'tt_1',
+        buyer_email: 'buyer@test.com',
+        buyer_first_name: 'Other',
+        buyer_last_name: 'Tenant',
+        buyer_phone: '+15550000008',
+        quantity: 1,
+        status: 'joined',
+        offer_expires_at: null,
+        offered_at: null,
+        claimed_at: null,
+        cancelled_at: null,
+        created_at: new Date('2026-06-01T09:00:00.000Z'),
+        updated_at: new Date('2026-06-01T09:00:00.000Z'),
+      },
+    ];
     dbState.auditLogs = [
       {
         id: 'aud_1',
@@ -492,6 +556,29 @@ describe('processPrivacyRequestActivity', () => {
       phone: '+15550000008',
       custom_answers: JSON.stringify({ shouldStay: true }),
     });
+    expect(dbState.waitlistEntries[0]).toMatchObject({
+      id: 'wl_1',
+      buyer_first_name: null,
+      buyer_last_name: null,
+      buyer_phone: null,
+      quantity: 2,
+      status: 'joined',
+    });
+    expect(String(dbState.waitlistEntries[0].buyer_email)).toMatch(
+      /^erased\+[a-f0-9]{16}@privacy\.tixkit\.invalid$/,
+    );
+    expect(dbState.waitlistEntries[1]).toMatchObject({
+      id: 'wl_other_org',
+      buyer_email: 'buyer@test.com',
+      buyer_first_name: 'Other',
+      buyer_phone: '+15550000009',
+    });
+    expect(dbState.waitlistEntries[2]).toMatchObject({
+      id: 'wl_other_tenant',
+      buyer_email: 'buyer@test.com',
+      buyer_first_name: 'Other',
+      buyer_phone: '+15550000008',
+    });
 
     expect(dbState.tickets).toHaveLength(1);
     expect(dbState.tickets[0]).toMatchObject({
@@ -528,6 +615,7 @@ describe('processPrivacyRequestActivity', () => {
     expect(JSON.parse(String(request?.result))).toMatchObject({
       ordersRedacted: 1,
       attendeesRedacted: 2,
+      waitlistEntriesRedacted: 1,
       ticketsTouched: 1,
     });
     expect(dbState.destroy).toHaveBeenCalledTimes(1);
@@ -980,7 +1068,7 @@ describe('processPrivacyRequestActivity', () => {
     const request = dbState.privacyRequests.find((row) => row.id === 'prv_export_1');
     const exportPayload = JSON.parse(String(request?.result));
     expect(exportPayload.retentionPolicy).toContain(
-      'Financial ledgers, audit logs, invoices, tax snapshots, and fraud-prevention records are retained',
+      'buyer, attendee, and waitlist contact fields are exportable and erasable',
     );
     expect(exportPayload.orders).toEqual([
       expect.objectContaining({
@@ -1006,6 +1094,19 @@ describe('processPrivacyRequestActivity', () => {
     ]);
     expect(exportPayload.tickets).toEqual([
       expect.objectContaining({ id: 'tkt_1', status: 'issued' }),
+    ]);
+    expect(exportPayload.waitlistEntries).toEqual([
+      expect.objectContaining({
+        id: 'wl_1',
+        eventId: 'evt_1',
+        ticketTypeId: 'tt_1',
+        buyerEmail: 'buyer@test.com',
+        buyerFirstName: 'Ada',
+        buyerLastName: 'Lovelace',
+        buyerPhone: '+15550000001',
+        quantity: 2,
+        status: 'joined',
+      }),
     ]);
     expect(dbState.destroy).toHaveBeenCalledTimes(1);
   });

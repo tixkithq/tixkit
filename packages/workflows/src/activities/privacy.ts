@@ -24,6 +24,27 @@ type BrandPrivacyRow = {
   id: string;
 };
 
+type WaitlistEntryPrivacyRow = {
+  id: string;
+  tenant_id: string;
+  organization_id: string;
+  brand_id: string;
+  event_id: string;
+  ticket_type_id: string;
+  buyer_email: string;
+  buyer_first_name: string | null;
+  buyer_last_name: string | null;
+  buyer_phone: string | null;
+  quantity: number;
+  status: string;
+  offer_expires_at: Date | null;
+  offered_at: Date | null;
+  claimed_at: Date | null;
+  cancelled_at: Date | null;
+  created_at: Date;
+  updated_at: Date;
+};
+
 function isErasedPrivacyEmail(value: string | null | undefined): boolean {
   return /^erased\+[a-f0-9]{16}@privacy\.tixkit\.invalid$/.test(value ?? '');
 }
@@ -129,10 +150,47 @@ function baseAttendeeQuery(db: Database, request: PrivacyRequestRow) {
   return query;
 }
 
+function baseWaitlistEntryQuery(db: Database, request: PrivacyRequestRow) {
+  let query = db
+    .selectFrom('waitlist_entries')
+    .select([
+      'id',
+      'tenant_id',
+      'organization_id',
+      'brand_id',
+      'event_id',
+      'ticket_type_id',
+      'buyer_email',
+      'buyer_first_name',
+      'buyer_last_name',
+      'buyer_phone',
+      'quantity',
+      'status',
+      'offer_expires_at',
+      'offered_at',
+      'claimed_at',
+      'cancelled_at',
+      'created_at',
+      'updated_at',
+    ])
+    .where('tenant_id', '=', request.tenant_id)
+    .where('organization_id', '=', request.organization_id);
+
+  if (request.brand_id) query = query.where('brand_id', '=', request.brand_id);
+  if (request.subject_email) {
+    query = query.where('buyer_email', '=', request.subject_email);
+  } else {
+    query = query.where('id', '=', `privacy-request:${request.id}:no-subject-email`);
+  }
+
+  return query;
+}
+
 async function buildPrivacyExport(db: Database, request: PrivacyRequestRow) {
-  const [orders, attendees] = await Promise.all([
+  const [orders, attendees, waitlistEntries] = await Promise.all([
     baseOrderQuery(db, request).execute(),
     baseAttendeeQuery(db, request).execute(),
+    baseWaitlistEntryQuery(db, request).execute() as Promise<WaitlistEntryPrivacyRow[]>,
   ]);
   const attendeeIds = attendees.map((attendee) => String(attendee.id));
   const tickets =
@@ -160,7 +218,7 @@ async function buildPrivacyExport(db: Database, request: PrivacyRequestRow) {
   return {
     generatedAt: new Date().toISOString(),
     retentionPolicy:
-      'Financial ledgers, audit logs, invoices, tax snapshots, and fraud-prevention records are retained; buyer and attendee contact fields are exportable and erasable.',
+      'Financial ledgers, audit logs, invoices, tax snapshots, and fraud-prevention records are retained; buyer, attendee, and waitlist contact fields are exportable and erasable.',
     subject: {
       type: request.subject_type,
       id: request.subject_id,
@@ -198,14 +256,32 @@ async function buildPrivacyExport(db: Database, request: PrivacyRequestRow) {
       createdAt: attendee.created_at,
       updatedAt: attendee.updated_at,
     })),
+    waitlistEntries: waitlistEntries.map((entry) => ({
+      id: entry.id,
+      eventId: entry.event_id,
+      ticketTypeId: entry.ticket_type_id,
+      buyerEmail: entry.buyer_email,
+      buyerFirstName: entry.buyer_first_name,
+      buyerLastName: entry.buyer_last_name,
+      buyerPhone: entry.buyer_phone,
+      quantity: Number(entry.quantity),
+      status: entry.status,
+      offerExpiresAt: entry.offer_expires_at,
+      offeredAt: entry.offered_at,
+      claimedAt: entry.claimed_at,
+      cancelledAt: entry.cancelled_at,
+      createdAt: entry.created_at,
+      updatedAt: entry.updated_at,
+    })),
     tickets,
   };
 }
 
 async function erasePrivacyData(db: Database, request: PrivacyRequestRow) {
-  const [orders, attendees] = await Promise.all([
+  const [orders, attendees, waitlistEntries] = await Promise.all([
     baseOrderQuery(db, request).execute(),
     baseAttendeeQuery(db, request).execute(),
+    baseWaitlistEntryQuery(db, request).execute() as Promise<WaitlistEntryPrivacyRow[]>,
   ]);
   const now = new Date();
   const orderIds = orders.map((order) => String(order.id));
@@ -343,6 +419,23 @@ async function erasePrivacyData(db: Database, request: PrivacyRequestRow) {
     ),
   );
 
+  await Promise.all(
+    waitlistEntries.map((entry) =>
+      db
+        .updateTable('waitlist_entries')
+        .set({
+          buyer_email: erasedEmail(entry.buyer_email, `waitlist:${entry.id}`),
+          buyer_first_name: null,
+          buyer_last_name: null,
+          buyer_phone: null,
+          updated_at: now,
+        })
+        .where('id', '=', entry.id)
+        .where('tenant_id', '=', request.tenant_id)
+        .execute(),
+    ),
+  );
+
   const ticketsTouched =
     attendeeIds.length === 0
       ? 0
@@ -379,6 +472,7 @@ async function erasePrivacyData(db: Database, request: PrivacyRequestRow) {
     erasedAt: now.toISOString(),
     ordersRedacted: orderIds.length,
     attendeesRedacted: attendeeIds.length,
+    waitlistEntriesRedacted: waitlistEntries.length,
     ticketsTouched,
   };
 }
