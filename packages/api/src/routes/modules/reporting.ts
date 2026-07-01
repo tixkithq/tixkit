@@ -637,60 +637,74 @@ export const reportingRoutes: FastifyPluginAsync = async (app) => {
       requireReportEventAccess(principal, event, body.eventId);
     }
 
+    const requestHash = hashRequest({
+      type: body.type,
+      format: body.format,
+      eventId: body.eventId,
+      filters: body.filters,
+    });
+    const exportId = `exp_${hashRequest({
+      tenantId: principal.tenantId,
+      idempotencyKey,
+      requestHash,
+    }).slice(0, 26)}`;
+
     const result = await withIdempotency(
       db,
       {
         key: idempotencyKey,
         tenantId: principal.tenantId,
-        requestHash: hashRequest({
-          type: body.type,
-          format: body.format,
-          eventId: body.eventId,
-          filters: body.filters,
-        }),
+        requestHash,
       },
       async () => {
-        // Start the Temporal ExportWorkflow
-        const exportId = `exp_${ulid()}`;
         const createdAt = new Date();
 
-        await db.transaction().execute(async (trx) => {
-          await trx
-            .insertInto('export_jobs')
-            .values({
-              id: exportId,
-              tenant_id: principal.tenantId,
-              event_id: body.eventId ?? null,
-              type: body.type,
-              format: body.format,
-              status: 'pending',
-              file_url: null,
-              requested_by: principal.id,
-              filters: body.filters ? JSON.stringify(body.filters) : null,
-              created_at: createdAt,
-              completed_at: null,
-            })
-            .execute();
+        const existingExport = await db
+          .selectFrom('export_jobs')
+          .selectAll()
+          .where('id', '=', exportId)
+          .where('tenant_id', '=', principal.tenantId)
+          .executeTakeFirst();
 
-          await trx
-            .insertInto('export_job_events')
-            .values({
-              id: `eev_${ulid()}`,
-              tenant_id: principal.tenantId,
-              export_job_id: exportId,
-              status: 'pending',
-              payload: JSON.stringify({
-                exportId,
-                eventId: body.eventId,
+        if (!existingExport) {
+          await db.transaction().execute(async (trx) => {
+            await trx
+              .insertInto('export_jobs')
+              .values({
+                id: exportId,
+                tenant_id: principal.tenantId,
+                event_id: body.eventId ?? null,
                 type: body.type,
                 format: body.format,
                 status: 'pending',
-                createdAt,
-              }),
-              created_at: createdAt,
-            })
-            .execute();
-        });
+                file_url: null,
+                requested_by: principal.id,
+                filters: body.filters ? JSON.stringify(body.filters) : null,
+                created_at: createdAt,
+                completed_at: null,
+              })
+              .execute();
+
+            await trx
+              .insertInto('export_job_events')
+              .values({
+                id: `eev_${ulid()}`,
+                tenant_id: principal.tenantId,
+                export_job_id: exportId,
+                status: 'pending',
+                payload: JSON.stringify({
+                  exportId,
+                  eventId: body.eventId,
+                  type: body.type,
+                  format: body.format,
+                  status: 'pending',
+                  createdAt,
+                }),
+                created_at: createdAt,
+              })
+              .execute();
+          });
+        }
 
         await app.context.temporalClient.startExport({
           exportId,

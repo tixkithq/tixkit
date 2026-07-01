@@ -195,16 +195,23 @@ export class TemporalClient {
 
   async startExport(input: Omit<ExportWorkflowInput, 'version'>) {
     const workflowId = exportWorkflowId(input.exportId);
-    return this.client.workflow.start(exportWorkflow, {
-      taskQueue: config.temporalTaskQueue,
-      workflowId,
-      args: [
-        {
-          version: EXPORT_WORKFLOW_VERSION,
-          ...input,
-        } satisfies ExportWorkflowInput,
-      ],
-    });
+    try {
+      return await this.client.workflow.start(exportWorkflow, {
+        taskQueue: config.temporalTaskQueue,
+        workflowId,
+        args: [
+          {
+            version: EXPORT_WORKFLOW_VERSION,
+            ...input,
+          } satisfies ExportWorkflowInput,
+        ],
+      });
+    } catch (err) {
+      if (isWorkflowAlreadyStartedError(err)) {
+        return this.client.workflow.getHandle(workflowId);
+      }
+      throw err;
+    }
   }
 
   async waitForExport(exportId: string): Promise<{ status: string; fileUrl?: string }> {

@@ -63,6 +63,7 @@ const dbState = vi.hoisted(() => ({
   startRefundInput: null as Record<string, unknown> | null,
   startExportCalled: false,
   startExportInput: null as Record<string, unknown> | null,
+  startExportFailuresRemaining: 0,
   exportJobs: [] as Record<string, unknown>[],
   exportEvents: [] as Record<string, unknown>[],
   idempotencyCheck: null as Record<string, unknown> | null,
@@ -336,6 +337,10 @@ function createMockTemporalClient() {
     startExport: vi.fn(async (input: Record<string, unknown>) => {
       dbState.startExportCalled = true;
       dbState.startExportInput = input;
+      if (dbState.startExportFailuresRemaining > 0) {
+        dbState.startExportFailuresRemaining -= 1;
+        throw new Error('Temporal unavailable');
+      }
     }),
     waitForExport: vi.fn(async (exportId: string) => {
       const job = dbState.exportJobs.find((item) => item.id === exportId);
@@ -1061,6 +1066,7 @@ describe('reporting routes', () => {
     dbState.exportEvents = [];
     dbState.startExportCalled = false;
     dbState.startExportInput = null;
+    dbState.startExportFailuresRemaining = 0;
     dbState.idempotencyCheck = null;
   });
 
@@ -1897,6 +1903,52 @@ describe('reporting routes', () => {
     expect(dbState.startExportCalled).toBe(true);
     expect(dbState.startExportInput).toMatchObject({
       exportId: body.exportId,
+      type: 'attendees',
+      format: 'csv',
+      requestedBy: 'usr_1',
+      tenantId: 'tnt_1',
+    });
+    await app.close();
+  });
+
+  it('POST /exports retries workflow start for the existing job after a transient start failure', async () => {
+    dbState.startExportFailuresRemaining = 1;
+    const app = await setupApp(reportingRoutes, makePrincipal());
+    const payload = {
+      eventId: 'evt_1',
+      type: 'attendees',
+      format: 'csv',
+      filters: { status: 'active' },
+    };
+
+    const failed = await app.inject({
+      method: 'POST',
+      url: '/exports',
+      headers: { 'idempotency-key': 'export-key-retry-start' },
+      payload,
+    });
+    expect(failed.statusCode).toBe(500);
+    expect(dbState.exportJobs).toHaveLength(1);
+    expect(dbState.exportEvents).toHaveLength(1);
+    const exportId = dbState.exportJobs[0].id;
+    expect(exportId).toMatch(/^exp_/);
+
+    dbState.startExportCalled = false;
+    dbState.startExportInput = null;
+    const retried = await app.inject({
+      method: 'POST',
+      url: '/exports',
+      headers: { 'idempotency-key': 'export-key-retry-start' },
+      payload,
+    });
+
+    expect(retried.statusCode).toBe(202);
+    expect(retried.json()).toEqual({ exportId, status: 'pending' });
+    expect(dbState.exportJobs).toHaveLength(1);
+    expect(dbState.exportEvents).toHaveLength(1);
+    expect(dbState.startExportCalled).toBe(true);
+    expect(dbState.startExportInput).toMatchObject({
+      exportId,
       type: 'attendees',
       format: 'csv',
       requestedBy: 'usr_1',
