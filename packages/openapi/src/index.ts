@@ -1418,7 +1418,10 @@ const rawOpenApiSpec = {
       CreateUploadArtifact: {
         type: 'object',
         properties: {
-          purpose: { type: 'string', enum: ['checkout_answer', 'brand_logo', 'user_avatar'] },
+          purpose: {
+            type: 'string',
+            enum: ['checkout_answer', 'brand_logo', 'user_avatar', 'content_email_image'],
+          },
           fileName: { type: 'string', minLength: 1, maxLength: 255 },
           contentType: { type: 'string', minLength: 1, maxLength: 255 },
           sizeBytes: { type: 'integer', minimum: 1 },

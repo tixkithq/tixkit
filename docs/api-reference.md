@@ -395,11 +395,11 @@ File-type questions use completed upload artifact answers created through signed
 | ------ | -------------------------------------------------- | ---------------------------------- | -------------------------------------------------------------------------------- |
 | `POST` | `/v1/public/events/:eventId/upload-artifacts`      | public                             | Create a checkout-answer upload ticket for a published event                     |
 | `POST` | `/v1/public/upload-artifacts/:artifactId/complete` | public token                       | Complete and scan a public checkout-answer upload                                |
-| `POST` | `/v1/upload-artifacts`                             | `events.write` or `settings.write` | Create a signed upload ticket for checkout answers, brand logos, or user avatars |
+| `POST` | `/v1/upload-artifacts`                             | `events.write` or `settings.write` | Create a signed upload ticket for checkout answers, brand logos, user avatars, or inline email images |
 | `POST` | `/v1/upload-artifacts/:artifactId/complete`        | owner tenant                       | Complete and scan an authenticated upload                                        |
 | `GET`  | `/v1/upload-artifacts/:artifactId/download`        | owner tenant                       | Return a short-lived signed download URL for a completed clean artifact          |
 
-Supported purposes are `checkout_answer`, `brand_logo`, and `user_avatar`. The API validates declared content type and byte size before signing a PUT URL, validates the stored object again on completion, scans for malware, and only accepts file checkout answers that reference a completed clean `upl_...` artifact.
+Supported purposes are `checkout_answer`, `brand_logo`, `user_avatar`, and `content_email_image`. The API validates declared content type and byte size before signing a PUT URL, validates the stored object again on completion, scans for malware, and only accepts file checkout answers that reference a completed clean `upl_...` artifact.
 
 ### Orders & Refunds
 

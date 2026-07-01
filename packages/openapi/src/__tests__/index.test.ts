@@ -965,6 +965,16 @@ describe('openApiSpec', () => {
   });
 
   it('requires public upload completion tokens without requiring them for authenticated completion', () => {
+    expect(openApiSpec.components.schemas.CreateUploadArtifact).toMatchObject({
+      required: ['purpose', 'fileName', 'contentType', 'sizeBytes'],
+      properties: {
+        purpose: {
+          type: 'string',
+          enum: ['checkout_answer', 'brand_logo', 'user_avatar', 'content_email_image'],
+        },
+      },
+    });
+
     expect(openApiSpec.components.schemas.PublicCreateUploadArtifact).toMatchObject({
       required: ['fileName', 'contentType', 'sizeBytes', 'questionId'],
       properties: {

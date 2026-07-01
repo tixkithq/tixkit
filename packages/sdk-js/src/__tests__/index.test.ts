@@ -15,6 +15,7 @@ import {
   type OAuthApplication,
   type PublicAvailabilityItem,
   type SmsTemplateDocument,
+  type UploadPurpose,
   type WebhookEvent,
 } from '../index.js';
 
@@ -2447,6 +2448,8 @@ describe('TixkitClient new resource methods', () => {
   });
 
   it('uploads.create sends a signed upload ticket request', async () => {
+    expectTypeOf<'content_email_image'>().toExtend<UploadPurpose>();
+
     const fm = mockFetch(201, {
       artifactId: 'upl_1',
       uploadUrl: 'https://s3.test/upload',
@@ -2460,21 +2463,21 @@ describe('TixkitClient new resource methods', () => {
       maxRetries: 0,
     });
     await c.uploads.create({
-      purpose: 'brand_logo',
-      fileName: 'logo.png',
+      purpose: 'content_email_image',
+      fileName: 'hero.png',
       contentType: 'image/png',
       sizeBytes: 1234,
-      brandId: 'brd_1',
+      eventId: 'evt_1',
     });
     const call = getCall(fm);
     expect(call.url).toBe('https://api.test/v1/upload-artifacts');
     expect(call.method).toBe('POST');
     expect(JSON.parse(call.body)).toEqual({
-      purpose: 'brand_logo',
-      fileName: 'logo.png',
+      purpose: 'content_email_image',
+      fileName: 'hero.png',
       contentType: 'image/png',
       sizeBytes: 1234,
-      brandId: 'brd_1',
+      eventId: 'evt_1',
     });
   });
 

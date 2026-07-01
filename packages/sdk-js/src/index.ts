@@ -238,7 +238,7 @@ export type CheckoutWalletPasses = {
   tickets: CheckoutWalletPassTicket[];
 };
 
-export type UploadPurpose = 'checkout_answer' | 'brand_logo' | 'user_avatar';
+export type UploadPurpose = 'checkout_answer' | 'brand_logo' | 'user_avatar' | 'content_email_image';
 
 export type CreateUploadArtifactInput = {
   purpose: UploadPurpose;
