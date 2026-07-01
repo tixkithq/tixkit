@@ -85,6 +85,7 @@ jobs:
       - run: bun run build
       - run: bun run --env-file=.env.local db:migrate
       - run: bun run --env-file=.env.local db:migrate:mysql
+      - run: bun run deploy:check
       - run: bun run iac:lint
       - run: bun run iac:template >/tmp/tixkit-rendered.yaml
       - name: Smoke rendered manifest

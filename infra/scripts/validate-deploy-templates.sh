@@ -15,10 +15,43 @@ require_file infra/fly/api.toml
 require_file infra/render.yaml
 require_file infra/helm/tixkit/values.yaml
 require_file infra/docker-compose.yml
+require_file .github/workflows/release-dry-run.yml
+require_file .github/workflows/trusted-release-dry-run.yml
 require_file Dockerfile.api
 require_file Dockerfile.worker
 require_file Dockerfile.checkout
 require_file Dockerfile.admin
+
+require_workflow_step_order() {
+  local workflow="$1"
+  local before_step="$2"
+  local after_step="$3"
+  local failure_message="$4"
+
+  awk -v before_step="${before_step}" -v after_step="${after_step}" '
+    $0 ~ "^[[:space:]]*- run:[[:space:]]*" before_step "[[:space:]]*$" && before_line == 0 {
+      before_line = NR
+    }
+    $0 ~ "^[[:space:]]*- run:[[:space:]]*" after_step "[[:space:]]*$" && after_line == 0 {
+      after_line = NR
+    }
+    END {
+      exit before_line > 0 && after_line > 0 && before_line < after_line ? 0 : 1
+    }
+  ' "${workflow}" || fail "${failure_message}"
+}
+
+require_workflow_step_order \
+  .github/workflows/release-dry-run.yml \
+  'bun run deploy:check' \
+  'bun run iac:lint' \
+  'public release dry-run workflow must run bun run deploy:check before bun run iac:lint'
+
+require_workflow_step_order \
+  .github/workflows/trusted-release-dry-run.yml \
+  'bun run deploy:check' \
+  'bun run iac:lint' \
+  'trusted release dry-run workflow must run bun run deploy:check before bun run iac:lint'
 
 validate_runtime_image_pins() {
   local dockerfile
