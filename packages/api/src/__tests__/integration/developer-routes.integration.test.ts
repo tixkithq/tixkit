@@ -33,6 +33,51 @@ function createApiKeyListDb(rows: Record<string, unknown>[]) {
   };
 }
 
+function createScopedCredentialListDb(tables: Record<string, Record<string, unknown>[]>) {
+  const limitCalls: Record<string, number[]> = {};
+  const compare = (rowValue: unknown, operator: string, value: unknown) => {
+    if (operator === '=') return rowValue === value;
+    if (operator === '>') return String(rowValue) > String(value);
+    if (operator === 'in') return Array.isArray(value) && value.includes(rowValue);
+    throw new Error(`Unsupported scoped credential test operator: ${operator}`);
+  };
+
+  const db = {
+    limitCalls,
+    selectFrom(table: string) {
+      const predicates: QueryPredicate[] = [];
+      let rowLimit: number | undefined;
+      const query = {
+        select() {
+          return query;
+        },
+        where(column: string, operator: string, value: unknown) {
+          predicates.push((row) => compare(row[column], operator, value));
+          return query;
+        },
+        orderBy() {
+          return query;
+        },
+        limit(limit: number) {
+          limitCalls[table] ??= [];
+          limitCalls[table].push(limit);
+          rowLimit = limit;
+          return query;
+        },
+        execute() {
+          const rows = [...(tables[table] ?? [])]
+            .filter((row) => predicates.every((predicate) => predicate(row)))
+            // eslint-disable-next-line unicorn/no-array-sort -- this is a fresh filtered array and sorting models SQL orderBy.
+            .sort((left, right) => String(left.id).localeCompare(String(right.id)));
+          return Promise.resolve(rowLimit === undefined ? rows : rows.slice(0, rowLimit));
+        },
+      };
+      return query;
+    },
+  };
+  return db;
+}
+
 type QueryPredicate = (row: Record<string, unknown>) => boolean;
 type QueryCondition = { column: string; operator: string; value: unknown };
 type ExpressionBuilder = {
@@ -420,6 +465,156 @@ describe('developer routes integration', () => {
     expect(body.items[0]).not.toHaveProperty('hashed_key');
     expect(body.items[0]).not.toHaveProperty('hashedKey');
 
+    await app.close();
+  });
+
+  it('bounds event-scoped API key listing before resource filtering', async () => {
+    const principal: Principal = {
+      type: 'api_key',
+      id: 'key_parent',
+      tenantId: 'tnt_1',
+      organizationIds: ['org_1'],
+      scopes: ['developers.write'],
+      eventIds: ['evt_allowed'],
+    };
+    const db = createScopedCredentialListDb({
+      api_keys: [
+        {
+          id: 'ak_001_other',
+          tenant_id: 'tnt_1',
+          organization_id: 'org_1',
+          name: 'Other event',
+          key_prefix: 'tk_0001',
+          scopes: JSON.stringify(['events.read']),
+          brand_ids: null,
+          event_ids: JSON.stringify(['evt_other']),
+          last_used_at: null,
+          expires_at: null,
+          revoked_at: null,
+          created_at: new Date('2026-06-01T00:00:00Z'),
+          updated_at: new Date('2026-06-01T00:00:00Z'),
+        },
+        {
+          id: 'ak_002_allowed',
+          tenant_id: 'tnt_1',
+          organization_id: 'org_1',
+          name: 'Allowed event',
+          key_prefix: 'tk_0002',
+          scopes: JSON.stringify(['events.read']),
+          brand_ids: null,
+          event_ids: JSON.stringify(['evt_allowed']),
+          last_used_at: null,
+          expires_at: null,
+          revoked_at: null,
+          created_at: new Date('2026-06-02T00:00:00Z'),
+          updated_at: new Date('2026-06-02T00:00:00Z'),
+        },
+        {
+          id: 'ak_003_allowed_next',
+          tenant_id: 'tnt_1',
+          organization_id: 'org_1',
+          name: 'Allowed next page',
+          key_prefix: 'tk_0003',
+          scopes: JSON.stringify(['events.read']),
+          brand_ids: null,
+          event_ids: JSON.stringify(['evt_allowed']),
+          last_used_at: null,
+          expires_at: null,
+          revoked_at: null,
+          created_at: new Date('2026-06-03T00:00:00Z'),
+          updated_at: new Date('2026-06-03T00:00:00Z'),
+        },
+      ],
+    });
+    const app = await setupDeveloperRouteApp(principal, db);
+
+    const response = await app.inject({ method: 'GET', url: '/api-keys?limit=1' });
+    const body = response.json() as { items: Array<{ id: string }>; hasMore: boolean };
+
+    expect(response.statusCode).toBe(200);
+    expect(body.items).toEqual([expect.objectContaining({ id: 'ak_002_allowed' })]);
+    expect(body.hasMore).toBe(true);
+    expect(db.limitCalls.api_keys).toEqual([2, 2]);
+    expect(db.limitCalls.api_keys.every((limit) => limit <= 2)).toBe(true);
+    await app.close();
+  });
+
+  it('bounds brand-scoped scanner device listing before resource filtering', async () => {
+    const principal: Principal = {
+      type: 'api_key',
+      id: 'key_parent',
+      tenantId: 'tnt_1',
+      organizationIds: ['org_1'],
+      scopes: ['developers.write'],
+      brandIds: ['brd_allowed'],
+    };
+    const db = createScopedCredentialListDb({
+      events: [
+        {
+          id: 'evt_other',
+          tenant_id: 'tnt_1',
+          organization_id: 'org_1',
+          brand_id: 'brd_other',
+        },
+        {
+          id: 'evt_allowed',
+          tenant_id: 'tnt_1',
+          organization_id: 'org_1',
+          brand_id: 'brd_allowed',
+        },
+      ],
+      scanner_devices: [
+        {
+          id: 'sd_001_other',
+          tenant_id: 'tnt_1',
+          organization_id: 'org_1',
+          name: 'Other scanner',
+          device_id: 'dev_other',
+          event_ids: JSON.stringify(['evt_other']),
+          scopes: JSON.stringify(['checkins.read']),
+          status: 'active',
+          last_seen_at: null,
+          created_at: new Date('2026-06-01T00:00:00Z'),
+          updated_at: new Date('2026-06-01T00:00:00Z'),
+        },
+        {
+          id: 'sd_002_allowed',
+          tenant_id: 'tnt_1',
+          organization_id: 'org_1',
+          name: 'Allowed scanner',
+          device_id: 'dev_allowed',
+          event_ids: JSON.stringify(['evt_allowed']),
+          scopes: JSON.stringify(['checkins.read']),
+          status: 'active',
+          last_seen_at: null,
+          created_at: new Date('2026-06-02T00:00:00Z'),
+          updated_at: new Date('2026-06-02T00:00:00Z'),
+        },
+        {
+          id: 'sd_003_allowed_next',
+          tenant_id: 'tnt_1',
+          organization_id: 'org_1',
+          name: 'Allowed scanner next page',
+          device_id: 'dev_allowed_next',
+          event_ids: JSON.stringify(['evt_allowed']),
+          scopes: JSON.stringify(['checkins.read']),
+          status: 'active',
+          last_seen_at: null,
+          created_at: new Date('2026-06-03T00:00:00Z'),
+          updated_at: new Date('2026-06-03T00:00:00Z'),
+        },
+      ],
+    });
+    const app = await setupDeveloperRouteApp(principal, db);
+
+    const response = await app.inject({ method: 'GET', url: '/scanner-devices?limit=1' });
+    const body = response.json() as { items: Array<{ id: string }>; hasMore: boolean };
+
+    expect(response.statusCode).toBe(200);
+    expect(body.items).toEqual([expect.objectContaining({ id: 'sd_002_allowed' })]);
+    expect(body.hasMore).toBe(true);
+    expect(db.limitCalls.scanner_devices).toEqual([2, 2]);
+    expect(db.limitCalls.scanner_devices.every((limit) => limit <= 2)).toBe(true);
     await app.close();
   });
 

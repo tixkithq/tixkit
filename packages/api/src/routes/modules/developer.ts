@@ -26,10 +26,17 @@ import {
 const SENSITIVE_API_KEY_FIELDS = ['hashed_key'] as const;
 const SENSITIVE_DEVICE_FIELDS = ['hashed_secret'] as const;
 const DEFAULT_SCANNER_DEVICE_SCOPES = ['checkins.read', 'checkins.write'] as const;
+const SCOPED_CREDENTIAL_SCAN_BATCH_MULTIPLIER = 10;
+const SCOPED_CREDENTIAL_SCAN_MAX_ROWS = 500;
 type Principal = NonNullable<FastifyRequest['principal']>;
 type ScopedCredentialRow = {
+  id: string;
   brand_ids?: unknown;
   event_ids?: unknown;
+};
+type CredentialListQuery<T extends ScopedCredentialRow> = {
+  limit(limit: number): CredentialListQuery<T>;
+  execute(): Promise<T[]>;
 };
 
 function sanitize<T extends Record<string, unknown>>(
@@ -187,6 +194,46 @@ export const developerRoutes: FastifyPluginAsync = async (app) => {
     return rows.filter((row) => canManageScopedCredentialRow(principal, row, eventBrandIds));
   }
 
+  async function listManageableScopedCredentialPage<T extends ScopedCredentialRow>(
+    principal: Principal,
+    pagination: { cursor?: string; limit: number },
+    buildQuery: (cursor?: string) => CredentialListQuery<T>,
+  ) {
+    if (!hasScopedResourceBounds(principal)) {
+      return buildQuery(pagination.cursor)
+        .limit(pagination.limit + 1)
+        .execute();
+    }
+
+    const batchSize = pagination.limit + 1;
+    const maxRowsToScan = Math.max(
+      batchSize,
+      Math.min(
+        SCOPED_CREDENTIAL_SCAN_MAX_ROWS,
+        batchSize * SCOPED_CREDENTIAL_SCAN_BATCH_MULTIPLIER,
+      ),
+    );
+    const authorizedRows: T[] = [];
+    let scannedRows = 0;
+    let cursor = pagination.cursor;
+
+    while (authorizedRows.length <= pagination.limit && scannedRows < maxRowsToScan) {
+      const currentLimit = Math.min(batchSize, maxRowsToScan - scannedRows);
+      const rows = await buildQuery(cursor).limit(currentLimit).execute();
+      if (rows.length === 0) break;
+
+      scannedRows += rows.length;
+      authorizedRows.push(...(await filterManageableScopedCredentialRows(principal, rows)));
+
+      if (rows.length < currentLimit) break;
+      const nextCursor = rows.at(-1)?.id;
+      if (!nextCursor || nextCursor === cursor) break;
+      cursor = nextCursor;
+    }
+
+    return authorizedRows;
+  }
+
   async function assertBrandIds(principal: Principal, brandIds?: string[]) {
     if (!brandIds) return;
     const repo = new BrandRepository(db);
@@ -260,38 +307,44 @@ export const developerRoutes: FastifyPluginAsync = async (app) => {
     const principal = request.principal!;
     ClerkAuthService.requirePermission(principal, 'developers.write');
     const pagination = parsePagination(request.query);
-    let query = db
-      .selectFrom('api_keys')
-      .select([
-        'id',
-        'tenant_id',
-        'organization_id',
-        'name',
-        'key_prefix',
-        'scopes',
-        'brand_ids',
-        'event_ids',
-        'last_used_at',
-        'expires_at',
-        'revoked_at',
-        'created_at',
-        'updated_at',
-      ])
-      .where('tenant_id', '=', principal.tenantId)
-      .orderBy('id', 'asc');
-    // Filter by principal's organizations to prevent cross-org data exposure
-    // within the same tenant. System principals bypass this filter.
-    // Fail closed: a non-system principal with no org memberships sees nothing.
     if (principal.type !== 'system') {
       if (principal.organizationIds.length === 0) {
         return pageEnvelope([], pagination.limit);
       }
-      query = query.where('organization_id', 'in', principal.organizationIds);
     }
-    if (pagination.cursor) query = query.where('id', '>', pagination.cursor);
-    if (!hasScopedResourceBounds(principal)) query = query.limit(pagination.limit + 1);
-    const keys = await query.execute();
-    const authorizedKeys = await filterManageableScopedCredentialRows(principal, keys);
+    const buildQuery = (cursor?: string) => {
+      let query = db
+        .selectFrom('api_keys')
+        .select([
+          'id',
+          'tenant_id',
+          'organization_id',
+          'name',
+          'key_prefix',
+          'scopes',
+          'brand_ids',
+          'event_ids',
+          'last_used_at',
+          'expires_at',
+          'revoked_at',
+          'created_at',
+          'updated_at',
+        ])
+        .where('tenant_id', '=', principal.tenantId)
+        .orderBy('id', 'asc');
+      // Filter by principal's organizations to prevent cross-org data exposure
+      // within the same tenant. System principals bypass this filter.
+      if (principal.type !== 'system') {
+        query = query.where('organization_id', 'in', principal.organizationIds);
+      }
+      if (cursor) query = query.where('id', '>', cursor);
+      return query;
+    };
+    const authorizedKeys = await listManageableScopedCredentialPage(
+      principal,
+      pagination,
+      buildQuery,
+    );
 
     return pageEnvelope(
       authorizedKeys.map((row) => serializeApiKey(row)),
@@ -368,30 +421,35 @@ export const developerRoutes: FastifyPluginAsync = async (app) => {
     if (principal.type !== 'system' && principal.organizationIds.length === 0) {
       return pageEnvelope([], pagination.limit);
     }
-    let query = db
-      .selectFrom('scanner_devices')
-      .select([
-        'id',
-        'tenant_id',
-        'organization_id',
-        'name',
-        'device_id',
-        'event_ids',
-        'scopes',
-        'status',
-        'last_seen_at',
-        'created_at',
-        'updated_at',
-      ])
-      .where('tenant_id', '=', principal.tenantId)
-      .orderBy('id', 'asc');
-    if (pagination.cursor) query = query.where('id', '>', pagination.cursor);
-    if (principal.type !== 'system') {
-      query = query.where('organization_id', 'in', principal.organizationIds);
-    }
-    if (!hasScopedResourceBounds(principal)) query = query.limit(pagination.limit + 1);
-    const rows = await query.execute();
-    const authorizedRows = await filterManageableScopedCredentialRows(principal, rows);
+    const buildQuery = (cursor?: string) => {
+      let query = db
+        .selectFrom('scanner_devices')
+        .select([
+          'id',
+          'tenant_id',
+          'organization_id',
+          'name',
+          'device_id',
+          'event_ids',
+          'scopes',
+          'status',
+          'last_seen_at',
+          'created_at',
+          'updated_at',
+        ])
+        .where('tenant_id', '=', principal.tenantId)
+        .orderBy('id', 'asc');
+      if (cursor) query = query.where('id', '>', cursor);
+      if (principal.type !== 'system') {
+        query = query.where('organization_id', 'in', principal.organizationIds);
+      }
+      return query;
+    };
+    const authorizedRows = await listManageableScopedCredentialPage(
+      principal,
+      pagination,
+      buildQuery,
+    );
     return pageEnvelope(
       authorizedRows.map((row) => serializeScannerDevice(row)),
       pagination.limit,
