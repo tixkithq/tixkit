@@ -781,6 +781,124 @@ describe('ClerkAuthService API key auth', () => {
     expect(tables.api_keys[0].last_used_at).toBeInstanceOf(Date);
   });
 
+  it('filters unknown API key permissions before constructing the principal', async () => {
+    const rawKey = 'tk_filtered_scopes';
+    const { db, tables } = createAuthDb({
+      api_keys: [
+        {
+          id: 'key_filtered',
+          tenant_id: 'tnt_1',
+          organization_id: 'org_1',
+          hashed_key: hash(rawKey),
+          scopes: JSON.stringify(['events.read', 'unknown.permission', 123, 'orders.write']),
+          brand_ids: null,
+          event_ids: null,
+          expires_at: null,
+          revoked_at: null,
+        },
+      ],
+    });
+
+    const service = new ClerkAuthService('sk_test_auth', db as never);
+    const result = await service.authenticateApiKey(request({ authorization: `Bearer ${rawKey}` }));
+
+    expect(result.principal.scopes).toEqual(['events.read', 'orders.write']);
+    expect(tables.api_keys[0].last_used_at).toBeInstanceOf(Date);
+  });
+
+  it('rejects malformed persisted API key principal fields before recording use', async () => {
+    const cases = [
+      {
+        name: 'malformed scopes JSON',
+        row: { scopes: '{not-json', brand_ids: null, event_ids: null },
+        message: 'Invalid API key scopes',
+      },
+      {
+        name: 'non-array scopes JSON',
+        row: { scopes: JSON.stringify('events.read'), brand_ids: null, event_ids: null },
+        message: 'Invalid API key scopes',
+      },
+      {
+        name: 'malformed brand_ids JSON',
+        row: {
+          scopes: JSON.stringify(['events.read']),
+          brand_ids: '{not-json',
+          event_ids: null,
+        },
+        message: 'Invalid API key brand_ids',
+      },
+      {
+        name: 'non-array brand_ids JSON',
+        row: {
+          scopes: JSON.stringify(['events.read']),
+          brand_ids: JSON.stringify('brd_1'),
+          event_ids: null,
+        },
+        message: 'Invalid API key brand_ids',
+      },
+      {
+        name: 'non-string brand_ids entry',
+        row: {
+          scopes: JSON.stringify(['events.read']),
+          brand_ids: JSON.stringify(['brd_1', 123]),
+          event_ids: null,
+        },
+        message: 'Invalid API key brand_ids',
+      },
+      {
+        name: 'malformed event_ids JSON',
+        row: {
+          scopes: JSON.stringify(['events.read']),
+          brand_ids: null,
+          event_ids: '{not-json',
+        },
+        message: 'Invalid API key event_ids',
+      },
+      {
+        name: 'non-array event_ids JSON',
+        row: {
+          scopes: JSON.stringify(['events.read']),
+          brand_ids: null,
+          event_ids: JSON.stringify({ id: 'evt_1' }),
+        },
+        message: 'Invalid API key event_ids',
+      },
+      {
+        name: 'non-string event_ids entry',
+        row: {
+          scopes: JSON.stringify(['events.read']),
+          brand_ids: null,
+          event_ids: JSON.stringify(['evt_1', false]),
+        },
+        message: 'Invalid API key event_ids',
+      },
+    ];
+
+    for (const testCase of cases) {
+      const keySuffix = testCase.name.replace(/[^a-z0-9]+/gi, '_').toLowerCase();
+      const rawKey = `tk_${keySuffix}`;
+      const { db, tables } = createAuthDb({
+        api_keys: [
+          {
+            id: `key_${keySuffix}`,
+            tenant_id: 'tnt_1',
+            organization_id: 'org_1',
+            hashed_key: hash(rawKey),
+            expires_at: null,
+            revoked_at: null,
+            ...testCase.row,
+          },
+        ],
+      });
+      const service = new ClerkAuthService('sk_test_auth', db as never);
+
+      await expect(
+        service.authenticateApiKey(request({ authorization: `Bearer ${rawKey}` })),
+      ).rejects.toThrow(testCase.message);
+      expect(tables.api_keys[0].last_used_at).toBeUndefined();
+    }
+  });
+
   it('rejects a previously valid API key immediately after revocation', async () => {
     const rawKey = 'tk_revoke_after_use';
     const { db, tables } = createAuthDb({

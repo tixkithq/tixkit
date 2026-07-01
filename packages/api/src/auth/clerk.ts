@@ -52,8 +52,38 @@ export const ALL_PERMISSIONS: Permission[] = [
   'developers.write',
   'billing.write',
 ];
+const API_KEY_PERMISSIONS = new Set<Permission>(ALL_PERMISSIONS);
 const DEFAULT_SCANNER_DEVICE_SCOPES: Permission[] = ['checkins.read', 'checkins.write'];
 const SCANNER_DEVICE_PERMISSIONS = new Set<Permission>(DEFAULT_SCANNER_DEVICE_SCOPES);
+
+function parsePersistedArray(value: unknown, fieldName: string): unknown[] {
+  try {
+    const parsed = typeof value === 'string' ? JSON.parse(value) : value;
+    if (!Array.isArray(parsed)) {
+      throw new UnauthorizedError(`Invalid API key ${fieldName}`);
+    }
+    return parsed;
+  } catch (err) {
+    if (err instanceof UnauthorizedError) throw err;
+    throw new UnauthorizedError(`Invalid API key ${fieldName}`);
+  }
+}
+
+function parseApiKeyScopes(value: unknown): Permission[] {
+  return parsePersistedArray(value, 'scopes').filter(
+    (scope): scope is Permission =>
+      typeof scope === 'string' && API_KEY_PERMISSIONS.has(scope as Permission),
+  );
+}
+
+function parseApiKeyResourceIds(value: unknown, fieldName: string): Ulid[] | undefined {
+  if (value == null || value === '') return undefined;
+  const parsed = parsePersistedArray(value, fieldName);
+  if (!parsed.every((id) => typeof id === 'string')) {
+    throw new UnauthorizedError(`Invalid API key ${fieldName}`);
+  }
+  return parsed.length > 0 ? (parsed as Ulid[]) : undefined;
+}
 
 function parseScannerDeviceScopes(value: unknown): Permission[] {
   if (value == null || value === '') return [...DEFAULT_SCANNER_DEVICE_SCOPES];
@@ -459,20 +489,15 @@ export class ClerkAuthService {
       throw new UnauthorizedError('API key has expired');
     }
 
-    // Update last used
+    const scopes = parseApiKeyScopes(apiKey.scopes);
+    const brandIds = parseApiKeyResourceIds(apiKey.brand_ids, 'brand_ids');
+    const eventIds = parseApiKeyResourceIds(apiKey.event_ids, 'event_ids');
+
     await this.db
       .updateTable('api_keys')
       .set({ last_used_at: new Date() })
       .where('id', '=', apiKey.id)
       .execute();
-
-    const scopes = JSON.parse(apiKey.scopes as string) as Permission[];
-    const brandIds = apiKey.brand_ids
-      ? (JSON.parse(apiKey.brand_ids as string) as Ulid[])
-      : undefined;
-    const eventIds = apiKey.event_ids
-      ? (JSON.parse(apiKey.event_ids as string) as Ulid[])
-      : undefined;
 
     const principal: Principal = {
       type: 'api_key',
