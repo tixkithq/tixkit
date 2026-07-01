@@ -62,8 +62,10 @@ export function WebhooksView() {
   const [replayOpen, setReplayOpen] = React.useState(false);
   const [replayEndpoint, setReplayEndpoint] = React.useState<AdminWebhookEndpoint | null>(null);
   const [replayEvents, setReplayEvents] = React.useState<AdminWebhookEvent[]>([]);
+  const [replayError, setReplayError] = React.useState<string | null>(null);
   const [replayLoading, setReplayLoading] = React.useState(false);
   const [replayingDeliveryId, setReplayingDeliveryId] = React.useState<string | null>(null);
+  const replayRequestIdRef = React.useRef(0);
   const { data, loading, error, refetch } = useAdminData(() => adminApi.listWebhookEndpoints());
 
   const endpoints = data ?? [];
@@ -78,18 +80,32 @@ export function WebhooksView() {
     setDrawerOpen(true);
   };
 
-  const openReplay = async (endpoint: AdminWebhookEndpoint) => {
-    setReplayEndpoint(endpoint);
-    setReplayOpen(true);
+  const loadReplayEvents = React.useCallback(async (endpoint: AdminWebhookEndpoint) => {
+    const requestId = replayRequestIdRef.current + 1;
+    replayRequestIdRef.current = requestId;
     setReplayEvents([]);
+    setReplayError(null);
     setReplayLoading(true);
     const result = await adminApi.listWebhookEvents(endpoint.id);
+    if (replayRequestIdRef.current !== requestId) return;
     setReplayLoading(false);
     if (result.ok) {
       setReplayEvents(result.data);
     } else {
+      setReplayError(result.error.message);
       toast.error(result.error.message);
     }
+  }, []);
+
+  const openReplay = (endpoint: AdminWebhookEndpoint) => {
+    setReplayEndpoint(endpoint);
+    setReplayOpen(true);
+    void loadReplayEvents(endpoint);
+  };
+
+  const retryReplayEvents = () => {
+    if (!replayEndpoint) return;
+    void loadReplayEvents(replayEndpoint);
   };
 
   const handleReplayEvent = async (event: AdminWebhookEvent) => {
@@ -237,7 +253,12 @@ export function WebhooksView() {
                 <TableCell>
                   <DropdownMenu>
                     <DropdownMenuTrigger asChild>
-                      <Button variant="ghost" size="icon" className="size-8">
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="size-8"
+                        aria-label={`Webhook actions for ${endpoint.url}`}
+                      >
                         <MoreHorizontal className="size-4" />
                       </Button>
                     </DropdownMenuTrigger>
@@ -294,6 +315,22 @@ export function WebhooksView() {
           {replayLoading ? (
             <div className="flex items-center justify-center py-10">
               <LoaderCircle className="size-6 animate-spin text-muted-foreground" />
+            </div>
+          ) : replayError ? (
+            <div className="space-y-4 py-6">
+              <div className="space-y-2">
+                <p className="text-sm font-medium text-foreground">Failed to load webhook events</p>
+                <p className="text-sm text-muted-foreground">{replayError}</p>
+              </div>
+              <DialogFooter>
+                <Button onClick={retryReplayEvents}>
+                  <RotateCcw className="size-4" />
+                  Try again
+                </Button>
+                <Button variant="outline" onClick={() => setReplayOpen(false)}>
+                  Close
+                </Button>
+              </DialogFooter>
             </div>
           ) : replayEvents.length === 0 ? (
             <div className="space-y-4 py-6">
