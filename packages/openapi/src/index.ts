@@ -2614,6 +2614,21 @@ const rawOpenApiSpec = {
         },
         required: ['exportId', 'status'],
       },
+      ExportJob: {
+        type: 'object',
+        properties: {
+          exportId: { type: 'string' },
+          eventId: { type: 'string' },
+          type: { type: 'string' },
+          format: { type: 'string' },
+          status: { type: 'string', enum: ['pending', 'processing', 'completed', 'failed'] },
+          fileUrl: { type: 'string', nullable: true },
+          downloadUrl: { type: 'string', nullable: true },
+          createdAt: { type: 'string', format: 'date-time' },
+          completedAt: { type: 'string', format: 'date-time', nullable: true },
+        },
+        required: ['exportId', 'type', 'format', 'status', 'createdAt'],
+      },
       AuditLogPage: {
         type: 'object',
         properties: {
@@ -6361,21 +6376,7 @@ const rawOpenApiSpec = {
             description: 'Export job status',
             content: {
               'application/json': {
-                schema: {
-                  type: 'object',
-                  properties: {
-                    exportId: { type: 'string' },
-                    eventId: { type: 'string' },
-                    type: { type: 'string' },
-                    format: { type: 'string' },
-                    status: { type: 'string', enum: ['pending', 'completed', 'failed'] },
-                    fileUrl: { type: 'string', nullable: true },
-                    downloadUrl: { type: 'string', nullable: true },
-                    createdAt: { type: 'string', format: 'date-time' },
-                    completedAt: { type: 'string', format: 'date-time', nullable: true },
-                  },
-                  required: ['exportId', 'type', 'format', 'status', 'createdAt'],
-                },
+                schema: { $ref: '#/components/schemas/ExportJob' },
               },
             },
           },

@@ -478,6 +478,22 @@ describe('openApiSpec', () => {
     expect(openApiSpec.components.schemas.CreateTicketTypeBatch.required).toContain('ticketType');
   });
 
+  it('documents live export job statuses separately from queued export responses', () => {
+    expect(openApiSpec.components.schemas.ExportJobQueued.properties.status.enum).toEqual([
+      'pending',
+    ]);
+    expect(openApiSpec.components.schemas.ExportJob.properties.status.enum).toEqual([
+      'pending',
+      'processing',
+      'completed',
+      'failed',
+    ]);
+    expect(
+      openApiSpec.paths['/exports/{exportId}'].get.responses['200'].content['application/json']
+        .schema,
+    ).toEqual({ $ref: '#/components/schemas/ExportJob' });
+  });
+
   it('documents public availability ticket and product rows', () => {
     const schemas = openApiSpec.components.schemas;
     expect(schemas.PublicAvailabilityItem).toEqual({
