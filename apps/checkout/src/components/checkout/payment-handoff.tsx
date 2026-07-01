@@ -21,17 +21,29 @@ type Props = {
 
 // Stripe.js is loaded lazily and only when a payment is actually in flight.
 let stripePromise: Promise<Stripe | null> | null = null;
-async function getStripe(): Promise<Stripe | null> {
+let stripePromiseKey: string | null = null;
+async function getStripe(options?: { reset?: boolean }): Promise<Stripe | null> {
+  const publishableKey = process.env.NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY;
+  if (!publishableKey) {
+    stripePromise = null;
+    stripePromiseKey = null;
+    return null;
+  }
+
+  if (options?.reset || stripePromiseKey !== publishableKey) {
+    stripePromise = null;
+    stripePromiseKey = publishableKey;
+  }
+
   if (!stripePromise) {
-    const publishableKey = process.env.NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY;
-    if (!publishableKey) {
-      stripePromise = Promise.resolve(null);
-      return stripePromise;
-    }
     const { loadStripe } = await import('@stripe/stripe-js');
     stripePromise = loadStripe(publishableKey);
+    stripePromiseKey = publishableKey;
   }
-  return stripePromise;
+
+  const stripe = await stripePromise;
+  if (!stripe) stripePromise = null;
+  return stripe;
 }
 
 type PaymentElementLike = {
@@ -70,14 +82,20 @@ export function PaymentHandoff({
   const [status, setStatus] = useState<'mounting' | 'ready' | 'error'>('mounting');
   const [mountError, setMountError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
+  const [mountAttempt, setMountAttempt] = useState(0);
   const isLocalCapture = isLocalCaptureClientSecret(clientSecret);
 
   useEffect(() => {
     let cancelled = false;
 
     async function mount() {
+      setMountError(null);
+      setSubmitting(false);
+      setStatus('mounting');
+      stripeRef.current = null;
+      elementsRef.current = null;
+
       if (isLocalCapture) {
-        setMountError(null);
         setStatus('ready');
         return;
       }
@@ -85,7 +103,7 @@ export function PaymentHandoff({
       const container = containerRef.current;
       if (!container) return;
       try {
-        const stripe = await getStripe();
+        const stripe = await getStripe({ reset: mountAttempt > 0 });
         if (!stripe || cancelled) {
           if (!cancelled) {
             setMountError('Payment processor could not be loaded. Please try again.');
@@ -135,7 +153,13 @@ export function PaymentHandoff({
       paymentElementRef.current = null;
       elementsRef.current = null;
     };
-  }, [billingDetails, clientSecret, isLocalCapture, onError]);
+  }, [billingDetails, clientSecret, isLocalCapture, mountAttempt, onError]);
+
+  function handleRetryMount() {
+    setMountError(null);
+    setStatus('mounting');
+    setMountAttempt((attempt) => attempt + 1);
+  }
 
   async function handlePay() {
     if (isLocalCapture) {
@@ -208,7 +232,18 @@ export function PaymentHandoff({
         <Alert variant="destructive">
           <AlertCircleIcon />
           <AlertTitle>Payment unavailable</AlertTitle>
-          <AlertDescription>{mountError}</AlertDescription>
+          <AlertDescription className="space-y-3">
+            <p>{mountError}</p>
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              className="w-fit"
+              onClick={handleRetryMount}
+            >
+              Retry payment form
+            </Button>
+          </AlertDescription>
         </Alert>
       ) : null}
 
