@@ -275,6 +275,25 @@ describe('publicApi.getAvailability', () => {
   });
 });
 
+describe('publicApi.getResaleListings', () => {
+  it('passes pagination parameters for direct resale listing lookup', async () => {
+    const fetchMock = vi.fn(
+      async () =>
+        new Response(JSON.stringify({ items: [], nextCursor: null, hasMore: false }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        }),
+    );
+    vi.stubGlobal('fetch', fetchMock);
+
+    await publicApi.getResaleListings('evt_1', undefined, { cursor: 'lst_50', limit: 50 });
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const [url] = fetchMock.mock.calls[0] as unknown as [string, RequestInit];
+    expect(url).toContain('/public/events/evt_1/resale-listings?cursor=lst_50&limit=50');
+  });
+});
+
 describe('publicApi.validateAccessCode', () => {
   it('posts selected ticket types and access code to the public validator', async () => {
     const fetchMock = vi.fn(

@@ -88,6 +88,25 @@ function productFilterMatches(item: AvailabilityItem, productFilter: Set<string>
   return !!item.productId && productFilter.has(item.productId);
 }
 
+async function findPublicResaleListing(
+  eventId: string,
+  resaleListingId: string,
+  signal: AbortSignal,
+): Promise<CheckoutPublicResaleListing | undefined> {
+  let cursor: string | null | undefined;
+  do {
+    const page = await publicApi.getResaleListings(
+      eventId,
+      signal,
+      cursor ? { cursor } : undefined,
+    );
+    const listing = page.items.find((item) => item.id === resaleListingId);
+    if (listing) return listing;
+    cursor = page.nextCursor;
+  } while (cursor);
+  return undefined;
+}
+
 type Phase = 'select' | 'confirm' | 'payment' | 'completed';
 
 function emitCheckoutEvent(
@@ -473,17 +492,14 @@ export default function CheckoutFlow({
       setQuestionsError(null);
       setQuestionsLoading(false);
       try {
-        const [loadedEvent, loadedAvailability, resaleListings] = await Promise.all([
+        const [loadedEvent, loadedAvailability, selectedResaleListing] = await Promise.all([
           publicApi.getEvent(eventId, controller.signal),
           publicApi.getAvailability(eventId, controller.signal, productFilterParam),
           resaleListingId
-            ? publicApi.getResaleListings(eventId, controller.signal)
-            : Promise.resolve({ items: [] }),
+            ? findPublicResaleListing(eventId, resaleListingId, controller.signal)
+            : Promise.resolve(undefined),
         ]);
         if (cancelled) return;
-        const selectedResaleListing = resaleListingId
-          ? resaleListings.items.find((listing) => listing.id === resaleListingId)
-          : undefined;
         if (resaleListingId && !selectedResaleListing) {
           throw new CheckoutApiError(
             'RESALE_LISTING_UNAVAILABLE',

@@ -523,9 +523,14 @@ export const publicApi = {
   async getResaleListings(
     eventId: string,
     signal?: AbortSignal,
+    params?: { cursor?: string | null; limit?: number },
   ): Promise<CheckoutResaleListingsResponse> {
+    const queryParams = new URLSearchParams();
+    if (params?.cursor) queryParams.set('cursor', params.cursor);
+    if (params?.limit) queryParams.set('limit', String(params.limit));
+    const query = queryParams.toString();
     return apiRequest<CheckoutResaleListingsResponse>(
-      `/public/events/${encodeURIComponent(eventId)}/resale-listings`,
+      `/public/events/${encodeURIComponent(eventId)}/resale-listings${query ? `?${query}` : ''}`,
       { signal },
     );
   },

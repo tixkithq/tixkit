@@ -244,4 +244,81 @@ describe('CheckoutFlow buyer validation', () => {
       );
     });
   });
+
+  it('finds a direct resale listing beyond the first public listing page', async () => {
+    publicApiMock.getAvailability.mockResolvedValue([]);
+    publicApiMock.getResaleListings
+      .mockResolvedValueOnce({
+        items: [
+          {
+            id: 'lst_1',
+            eventId: 'evt_checkout',
+            ticketTypeId: 'tt_general',
+            ticketTypeName: 'General Admission',
+            status: 'listed',
+            priceCents: 5500,
+            currency: 'USD',
+            faceValueCents: 5000,
+            createdAt: '2026-06-01T00:00:00.000Z',
+            updatedAt: '2026-06-01T00:00:00.000Z',
+          },
+        ],
+        nextCursor: 'lst_1',
+        hasMore: true,
+      })
+      .mockResolvedValueOnce({
+        items: [
+          {
+            id: 'lst_51',
+            eventId: 'evt_checkout',
+            ticketTypeId: 'tt_vip',
+            ticketTypeName: 'VIP',
+            status: 'listed',
+            priceCents: 7500,
+            currency: 'USD',
+            faceValueCents: 7000,
+            createdAt: '2026-06-01T00:00:00.000Z',
+            updatedAt: '2026-06-01T00:00:00.000Z',
+          },
+        ],
+        nextCursor: null,
+        hasMore: false,
+      });
+    checkoutApiMock.createSession.mockResolvedValue({
+      id: 'cs_1',
+      eventId: 'evt_checkout',
+      brandId: 'brd_1',
+      status: 'open',
+      currency: 'USD',
+      clientToken: 'token_1',
+      quote: {
+        subtotalCents: 7500,
+        discountCents: 0,
+        taxCents: 0,
+        feeCents: 0,
+        totalCents: 7500,
+      },
+      expiresAt: '2026-06-01T00:10:00.000Z',
+    });
+    const view = renderCheckoutFlow({ resaleListingId: 'lst_51' });
+
+    expect(await view.findAllByText('Resale ticket - VIP')).not.toHaveLength(0);
+    expect(publicApiMock.getResaleListings).toHaveBeenCalledTimes(2);
+    expect(publicApiMock.getResaleListings.mock.calls[0][2]).toBeUndefined();
+    expect(publicApiMock.getResaleListings.mock.calls[1][2]).toEqual({ cursor: 'lst_1' });
+    fireEvent.change(view.getByLabelText(/Email/), {
+      target: { value: 'buyer@example.com' },
+    });
+    fireEvent.click(view.getByRole('button', { name: 'Continue' }));
+
+    await waitFor(() => {
+      expect(checkoutApiMock.createSession).toHaveBeenCalledWith(
+        expect.objectContaining({
+          eventId: 'evt_checkout',
+          items: [{ resaleListingId: 'lst_51', quantity: 1 }],
+          buyer: expect.objectContaining({ email: 'buyer@example.com' }),
+        }),
+      );
+    });
+  });
 });
