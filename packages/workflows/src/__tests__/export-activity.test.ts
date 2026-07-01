@@ -431,6 +431,36 @@ describe('uploadFileActivity', () => {
     });
   });
 
+  it('builds file URLs from path-style S3-compatible endpoints', async () => {
+    process.env.NODE_ENV = 'production';
+    process.env.S3_EXPORT_BUCKET = 'exports-bucket';
+    process.env.S3_EXPORT_REGION = 'auto';
+    process.env.S3_ENDPOINT = 'https://storage.example.test/object-api';
+    process.env.S3_FORCE_PATH_STYLE = 'true';
+
+    const result = await uploadFileActivity({
+      exportId: 'exp_1',
+      data: 'id,name\n1,Test',
+      format: 'csv',
+    });
+
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.value.fileUrl).toBe(
+        'https://storage.example.test/object-api/exports-bucket/exports/exp_1.csv',
+      );
+    }
+    expect(s3Mock.constructorConfigs[0]).toEqual({
+      region: 'auto',
+      endpoint: 'https://storage.example.test/object-api',
+      forcePathStyle: true,
+    });
+    expect(s3Mock.putObjectInputs[0]).toMatchObject({
+      Bucket: 'exports-bucket',
+      Key: 'exports/exp_1.csv',
+    });
+  });
+
   it('uses the existing shared S3 bucket and region env when export-specific values are unset', async () => {
     process.env.NODE_ENV = 'production';
     process.env.S3_BUCKET = 'shared-bucket';
@@ -587,6 +617,24 @@ describe('notifyExportCompleteActivity', () => {
     expect(dbState.updateCalls).toHaveLength(0);
     expect(dbState.exportEvents).toHaveLength(0);
     expect(dbState.createdJobs).toHaveLength(0);
+  });
+
+  it('accepts loopback S3-compatible export file URLs for local object storage', async () => {
+    const result = await notifyExportCompleteActivity({
+      exportId: 'exp_1',
+      fileUrl: 'http://localhost:9000/exports-bucket/exports/exp_1.csv',
+      requestedBy: 'usr_1',
+      tenantId: 'tnt_1',
+    });
+
+    expect(result.ok).toBe(true);
+    expect(dbState.updateCalls).toContainEqual(
+      expect.objectContaining({
+        table: 'export_jobs',
+        status: 'completed',
+        file_url: 'http://localhost:9000/exports-bucket/exports/exp_1.csv',
+      }),
+    );
   });
 
   it('queues an admin notification email with the file URL', async () => {

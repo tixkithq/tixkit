@@ -983,6 +983,19 @@ describe('order routes', () => {
     expect(completed.statusCode).toBe(302);
     expect(completed.headers.location).toBe('https://exports.example.test/exp_3.csv');
 
+    dbState.exportJobs[0] = {
+      ...dbState.exportJobs[0],
+      file_url: 'http://localhost:9000/exports-bucket/exports/exp_3.csv',
+    };
+    const localObjectStorage = await app.inject({
+      method: 'GET',
+      url: '/exports/exp_3/download',
+    });
+    expect(localObjectStorage.statusCode).toBe(302);
+    expect(localObjectStorage.headers.location).toBe(
+      'http://localhost:9000/exports-bucket/exports/exp_3.csv',
+    );
+
     dbState.exportJobs[0] = { ...dbState.exportJobs[0], status: 'processing', file_url: null };
     const pending = await app.inject({ method: 'GET', url: '/exports/exp_3/download' });
     expect(pending.statusCode).toBe(409);

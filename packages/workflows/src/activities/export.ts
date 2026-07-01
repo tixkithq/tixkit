@@ -11,7 +11,11 @@ function isValidExportFileUrl(value: unknown): value is string {
   if (typeof value !== 'string') return false;
   try {
     const url = new URL(value);
-    return url.protocol === 'https:';
+    if (url.protocol === 'https:') return true;
+    return (
+      url.protocol === 'http:' &&
+      (url.hostname === 'localhost' || url.hostname === '127.0.0.1' || url.hostname === '[::1]')
+    );
   } catch {
     return false;
   }
@@ -31,6 +35,38 @@ function exportContentType(format: string) {
     return 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
   }
   return 'text/csv';
+}
+
+function encodeS3Key(key: string) {
+  return key.split('/').map(encodeURIComponent).join('/');
+}
+
+function appendUrlPath(url: URL, ...segments: string[]) {
+  const existing = url.pathname.replace(/\/+$/, '');
+  const appended = segments.filter(Boolean).join('/');
+  url.pathname = `${existing}/${appended}`.replace(/\/{2,}/g, '/');
+  return url;
+}
+
+function buildS3FileUrl(input: {
+  bucket: string;
+  region: string;
+  key: string;
+  endpoint?: string;
+  forcePathStyle: boolean;
+}) {
+  const encodedKey = encodeS3Key(input.key);
+  if (!input.endpoint) {
+    return `https://${input.bucket}.s3.${input.region}.amazonaws.com/${encodedKey}`;
+  }
+
+  const endpointUrl = new URL(input.endpoint);
+  if (input.forcePathStyle) {
+    return appendUrlPath(endpointUrl, encodeURIComponent(input.bucket), encodedKey).toString();
+  }
+
+  endpointUrl.hostname = `${input.bucket}.${endpointUrl.hostname}`;
+  return appendUrlPath(endpointUrl, encodedKey).toString();
 }
 
 type ExportJobStatus = 'pending' | 'processing' | 'completed' | 'failed';
@@ -672,7 +708,15 @@ export async function uploadFileActivity(input: {
     const bucket = process.env.S3_EXPORT_BUCKET ?? process.env.S3_BUCKET ?? 'tixkit-exports';
     const region = process.env.S3_EXPORT_REGION ?? process.env.S3_REGION ?? 'us-east-1';
     const key = `exports/${input.exportId}.${input.format}`;
-    const fileUrl = `https://${bucket}.s3.${region}.amazonaws.com/${key}`;
+    const s3Endpoint = process.env.S3_ENDPOINT;
+    const forcePathStyle = process.env.S3_FORCE_PATH_STYLE === 'true';
+    const fileUrl = buildS3FileUrl({
+      bucket,
+      region,
+      key,
+      endpoint: s3Endpoint,
+      forcePathStyle,
+    });
 
     if (!isLocalExportStorageMode()) {
       const accessKeyId = process.env.S3_ACCESS_KEY_ID;
@@ -686,10 +730,9 @@ export async function uploadFileActivity(input: {
       }
 
       const s3Config: S3ClientConfig = { region };
-      const s3Endpoint = process.env.S3_ENDPOINT;
       if (s3Endpoint) {
         s3Config.endpoint = s3Endpoint;
-        s3Config.forcePathStyle = process.env.S3_FORCE_PATH_STYLE === 'true';
+        s3Config.forcePathStyle = forcePathStyle;
       }
       if (accessKeyId && secretAccessKey) {
         s3Config.credentials = { accessKeyId, secretAccessKey };
