@@ -77,7 +77,7 @@ services:
     name: tixkit-admin
     env: docker
     dockerfilePath: ./Dockerfile.admin
-    healthCheckPath: /
+    healthCheckPath: /health
     envVars:
       - key: NODE_ENV
         value: production

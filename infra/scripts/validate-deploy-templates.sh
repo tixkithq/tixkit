@@ -598,7 +598,15 @@ checkout_health_route="$(next_app_route_file_for_path apps/checkout/src/app "${c
   fail "infra/render.yaml tixkit-checkout healthCheckPath ${checkout_health_path} must map to a static Next app route"
 require_file "${checkout_health_route}"
 
-require_file apps/admin-dashboard/src/app/health/route.ts
+admin_health_path="$(render_service_health_check_path tixkit-admin)" ||
+  fail 'infra/render.yaml must set tixkit-admin healthCheckPath'
+test "${admin_health_path}" = '/health' ||
+  fail 'infra/render.yaml must set tixkit-admin healthCheckPath to /health'
+admin_health_route="$(next_app_route_file_for_path apps/admin-dashboard/src/app "${admin_health_path}")" ||
+  fail "infra/render.yaml tixkit-admin healthCheckPath ${admin_health_path} must map to a static Next app route"
+test "${admin_health_route}" = 'apps/admin-dashboard/src/app/health/route.ts' ||
+  fail 'infra/render.yaml tixkit-admin healthCheckPath must map to apps/admin-dashboard/src/app/health/route.ts'
+require_file "${admin_health_route}"
 
 grep -Eq "^[[:space:]]*trustProxy:[[:space:]]*'1'[[:space:]]*$" infra/helm/tixkit/values.yaml ||
   fail 'infra/helm/tixkit/values.yaml must set API trustProxy to bounded hop count 1'
