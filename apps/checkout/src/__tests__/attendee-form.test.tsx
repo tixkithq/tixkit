@@ -109,6 +109,78 @@ describe('AttendeeForm dynamic question types', () => {
     expect(view.getByLabelText(/Guest name/)).toBeInTheDocument();
   });
 
+  it('uses unique DOM ids for repeated buyer and attendee questions', () => {
+    const question: CheckoutQuestion = {
+      id: 'q_name',
+      label: 'Legal name',
+      type: 'text',
+      required: true,
+      appliesTo: 'attendee',
+    };
+    const view = render(
+      createAttendeeForm({
+        buyerQuestions: [question],
+        buyerAnswers: {},
+        onBuyerAnswersChange: () => {},
+        attendeeQuestionGroups: [
+          {
+            lineId: 'line_1',
+            ticketTypeId: 'tt_1',
+            ticketName: 'General Admission',
+            quantity: 2,
+            questions: [question],
+          },
+        ],
+        attendeeAnswers: {},
+        onAttendeeAnswersChange: () => {},
+      }),
+    );
+
+    const controls = view.getAllByLabelText(/Legal name/);
+    const ids = controls.map((control) => control.id);
+
+    expect(controls).toHaveLength(3);
+    expect(new Set(ids).size).toBe(ids.length);
+    expect(ids).toEqual([
+      'q_buyer-q_name',
+      'q_attendee-line_1-0-q_name',
+      'q_attendee-line_1-1-q_name',
+    ]);
+  });
+
+  it('keeps attendee answer keys stable while labels target unique inputs', () => {
+    const question: CheckoutQuestion = {
+      id: 'q_name',
+      label: 'Legal name',
+      type: 'text',
+      required: true,
+      appliesTo: 'attendee',
+    };
+    const onChange = vi.fn();
+    const view = render(
+      createAttendeeForm({
+        attendeeQuestionGroups: [
+          {
+            lineId: 'line_1',
+            ticketTypeId: 'tt_1',
+            ticketName: 'General Admission',
+            quantity: 2,
+            questions: [question],
+          },
+        ],
+        attendeeAnswers: {},
+        onAttendeeAnswersChange: onChange,
+      }),
+    );
+
+    const [, secondAttendeeInput] = view.getAllByLabelText(/Legal name/);
+    fireEvent.change(secondAttendeeInput, { target: { value: 'Ada Lovelace' } });
+
+    expect(onChange).toHaveBeenCalledWith({
+      'line_1:1:q_name': 'Ada Lovelace',
+    });
+  });
+
   it('uploads file question answers as upload artifacts', async () => {
     const question: CheckoutQuestion = {
       id: 'q_file',

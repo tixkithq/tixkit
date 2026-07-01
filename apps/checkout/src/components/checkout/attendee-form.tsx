@@ -137,6 +137,7 @@ export function AttendeeForm({
               <DynamicQuestionField
                 key={q.id}
                 question={q}
+                fieldId={`buyer-${q.id}`}
                 value={buyerAnswers[q.id] ?? ''}
                 disabled={disabled}
                 eventId={eventId}
@@ -173,6 +174,7 @@ export function AttendeeForm({
                       <DynamicQuestionField
                         key={key}
                         question={q}
+                        fieldId={`attendee-${group.lineId}-${i}-${q.id}`}
                         value={attendeeAnswers[key] ?? ''}
                         disabled={disabled}
                         eventId={eventId}
@@ -196,12 +198,14 @@ export function AttendeeForm({
 
 function DynamicQuestionField({
   question,
+  fieldId,
   value,
   disabled,
   eventId,
   onChange,
 }: {
   question: CheckoutQuestion;
+  fieldId: string;
   value: CheckoutAnswerValue | '';
   disabled: boolean;
   eventId?: string;
@@ -209,7 +213,7 @@ function DynamicQuestionField({
 }) {
   const [uploading, setUploading] = useState(false);
   const [uploadError, setUploadError] = useState<string | null>(null);
-  const id = `q_${question.id}`;
+  const id = `q_${fieldId.replace(/[^A-Za-z0-9_-]/g, '_')}`;
   const stringValue = typeof value === 'string' ? value : '';
   const label = (
     <Label htmlFor={id}>
