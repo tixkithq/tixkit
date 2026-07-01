@@ -23,5 +23,11 @@ export async function privacyRequestWorkflow(
   input: PrivacyRequestWorkflowInput,
 ): Promise<{ status: string }> {
   const result = await processPrivacyRequestActivity({ requestId: input.requestId });
-  return { status: result.ok ? result.value.status : 'failed' };
+  if (result.ok) {
+    return { status: result.value.status };
+  }
+  if (result.retryable) {
+    throw new Error(`Privacy request failed (${result.errorCode}): ${result.message}`);
+  }
+  return { status: 'failed' };
 }

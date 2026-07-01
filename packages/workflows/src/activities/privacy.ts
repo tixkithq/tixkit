@@ -493,6 +493,17 @@ export async function processPrivacyRequestActivity(input: {
     if (request.status === 'completed') {
       return okResult({ requestId: input.requestId, status: 'completed' });
     }
+    if (request.request_type !== 'erasure' && request.request_type !== 'export') {
+      const message = `Unsupported privacy request type: ${String(request.request_type)}`;
+      try {
+        await repo.markFailed(input.requestId, message);
+      } catch (error) {
+        const retryMessage =
+          error instanceof Error ? error.message : 'Unknown privacy request failure';
+        return errResult('privacy_request_failed', retryMessage, true);
+      }
+      return errResult('privacy_request_invalid_type', message);
+    }
 
     await repo.markProcessing(input.requestId);
     const result =
@@ -503,8 +514,7 @@ export async function processPrivacyRequestActivity(input: {
     return okResult({ requestId: input.requestId, status: 'completed' });
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Unknown privacy request failure';
-    await repo.markFailed(input.requestId, message).catch(() => undefined);
-    return errResult('privacy_request_failed', message, false);
+    return errResult('privacy_request_failed', message, true);
   } finally {
     await db.destroy();
   }

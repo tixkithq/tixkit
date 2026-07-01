@@ -52,6 +52,16 @@ describe('privacyRequestWorkflow', () => {
     expect(result).toEqual({ status: 'failed' });
   });
 
+  it('throws when the privacy activity returns a retryable failure', async () => {
+    setActivity('processPrivacyRequestActivity', async () =>
+      errResult('privacy_request_failed', 'database unavailable', true),
+    );
+
+    await expect(privacyRequestWorkflow({ version: 1, requestId: 'prv_1' })).rejects.toThrow(
+      'Privacy request failed (privacy_request_failed): database unavailable',
+    );
+  });
+
   it('uses a stable workflow id convention', () => {
     expect(privacyRequestWorkflowId('prv_1')).toBe('privacy-request:prv_1');
   });

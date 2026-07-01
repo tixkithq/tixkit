@@ -15,6 +15,7 @@ const dbState = vi.hoisted(() => ({
   checkoutSessions: [] as Row[],
   updates: [] as Array<{ table: string; filters: Filter[]; values: Row }>,
   repositoryCalls: [] as Array<{ method: string; id: string }>,
+  repositoryFailures: {} as Partial<Record<string, Error>>,
   destroy: vi.fn(),
 }));
 
@@ -140,10 +141,13 @@ function createUpdate(table: string) {
 vi.mock('@tixkit/db', () => {
   class PrivacyRequestRepository {
     async findById(id: string) {
+      if (dbState.repositoryFailures.findById) throw dbState.repositoryFailures.findById;
       return dbState.privacyRequests.find((row) => row.id === id);
     }
 
     async markProcessing(id: string) {
+      if (dbState.repositoryFailures.markProcessing)
+        throw dbState.repositoryFailures.markProcessing;
       dbState.repositoryCalls.push({ method: 'markProcessing', id });
       const request = dbState.privacyRequests.find((row) => row.id === id);
       if (request) request.status = 'processing';
@@ -151,6 +155,7 @@ vi.mock('@tixkit/db', () => {
     }
 
     async markCompleted(id: string, result: Row) {
+      if (dbState.repositoryFailures.markCompleted) throw dbState.repositoryFailures.markCompleted;
       dbState.repositoryCalls.push({ method: 'markCompleted', id });
       const request = dbState.privacyRequests.find((row) => row.id === id);
       if (request) {
@@ -163,6 +168,7 @@ vi.mock('@tixkit/db', () => {
     }
 
     async markFailed(id: string, error: string) {
+      if (dbState.repositoryFailures.markFailed) throw dbState.repositoryFailures.markFailed;
       dbState.repositoryCalls.push({ method: 'markFailed', id });
       const request = dbState.privacyRequests.find((row) => row.id === id);
       if (request) {
@@ -192,6 +198,7 @@ describe('processPrivacyRequestActivity', () => {
     dbState.destroy.mockClear();
     dbState.updates = [];
     dbState.repositoryCalls = [];
+    dbState.repositoryFailures = {};
     dbState.brands = [
       {
         id: 'brd_1',
@@ -647,6 +654,59 @@ describe('processPrivacyRequestActivity', () => {
       email: 'buyer@test.com',
       first_name: 'Ada',
       custom_answers: JSON.stringify({ company: '<script>alert(1)</script>' }),
+    });
+    expect(dbState.destroy).toHaveBeenCalledTimes(1);
+  });
+
+  it('returns retryable failures without terminally marking the request failed', async () => {
+    dbState.repositoryFailures.markCompleted = new Error('database write unavailable');
+
+    const result = await processPrivacyRequestActivity({ requestId: 'prv_export_1' });
+
+    expect(result).toMatchObject({
+      ok: false,
+      errorCode: 'privacy_request_failed',
+      message: 'database write unavailable',
+      retryable: true,
+    });
+    expect(dbState.repositoryCalls).toEqual([{ method: 'markProcessing', id: 'prv_export_1' }]);
+    expect(dbState.privacyRequests.find((row) => row.id === 'prv_export_1')).toMatchObject({
+      status: 'processing',
+      error: null,
+      completed_at: null,
+    });
+    expect(dbState.destroy).toHaveBeenCalledTimes(1);
+  });
+
+  it('marks unsupported persisted request types failed without retrying them', async () => {
+    dbState.privacyRequests.push({
+      id: 'prv_invalid_1',
+      tenant_id: 'tnt_1',
+      organization_id: 'org_1',
+      brand_id: 'brd_1',
+      request_type: 'legacy_subject_download',
+      subject_type: 'buyer',
+      subject_id: null,
+      subject_email: 'buyer@test.com',
+      status: 'pending',
+      result: null,
+      error: null,
+      completed_at: null,
+    });
+
+    const result = await processPrivacyRequestActivity({ requestId: 'prv_invalid_1' });
+
+    expect(result).toMatchObject({
+      ok: false,
+      errorCode: 'privacy_request_invalid_type',
+      message: 'Unsupported privacy request type: legacy_subject_download',
+      retryable: false,
+    });
+    expect(dbState.repositoryCalls).toEqual([{ method: 'markFailed', id: 'prv_invalid_1' }]);
+    expect(dbState.privacyRequests.find((row) => row.id === 'prv_invalid_1')).toMatchObject({
+      status: 'failed',
+      error: 'Unsupported privacy request type: legacy_subject_download',
+      completed_at: new Date('2026-06-28T12:00:00.000Z'),
     });
     expect(dbState.destroy).toHaveBeenCalledTimes(1);
   });
