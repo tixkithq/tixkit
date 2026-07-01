@@ -271,4 +271,43 @@ describe('ConfirmationClient', () => {
     expect(screen.getByText('What happens next')).toBeInTheDocument();
     expect(checkoutApiMock.getSession).toHaveBeenCalledTimes(3);
   });
+
+  it('retries a retryable initial confirmation load failure before showing an error', async () => {
+    vi.useFakeTimers();
+    navigationState.searchParams = new URLSearchParams(
+      'sessionId=cs_1&orderId=ord_1&orderNumber=TK-1001&redirect_status=succeeded',
+    );
+    const transientError = new Error('temporary gateway failure');
+    checkoutApiMock.getSession
+      .mockRejectedValueOnce(transientError)
+      .mockResolvedValueOnce(confirmedSession);
+    isRetryableMock.mockReturnValue(true);
+
+    render(<ConfirmationClient />);
+    await flushAsyncWork();
+
+    expect(isRetryableMock).toHaveBeenCalledWith(transientError);
+    expect(screen.queryByText('Could not load order details')).not.toBeInTheDocument();
+    expect(screen.getByText('Processing your payment')).toBeInTheDocument();
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(2000);
+    });
+
+    expect(screen.getByText('What happens next')).toBeInTheDocument();
+    expect(checkoutApiMock.getSession).toHaveBeenCalledTimes(2);
+  });
+
+  it('keeps non-retryable initial confirmation load failures terminal', async () => {
+    const terminalError = new Error('Confirmation link is no longer valid');
+    checkoutApiMock.getSession.mockRejectedValueOnce(terminalError);
+    isRetryableMock.mockReturnValue(false);
+
+    render(<ConfirmationClient />);
+
+    expect(await screen.findByText('Could not load order details')).toBeVisible();
+    expect(screen.getByText('Confirmation link is no longer valid')).toBeVisible();
+    expect(isRetryableMock).toHaveBeenCalledWith(terminalError);
+    expect(checkoutApiMock.getSession).toHaveBeenCalledTimes(1);
+  });
 });

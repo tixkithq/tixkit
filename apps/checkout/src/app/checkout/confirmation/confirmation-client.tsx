@@ -152,6 +152,7 @@ export default function ConfirmationClient() {
       const token = getSessionToken(sessionId);
 
       try {
+        setError(null);
         const loaded = await loadSession(sessionId, token, paymentIntentClientSecret);
         if (cancelled) return;
         // If the session is pending, start polling.
@@ -160,7 +161,12 @@ export default function ConfirmationClient() {
           startPolling(sessionId, token, paymentIntentClientSecret);
         }
       } catch (err) {
-        if (!cancelled) setError(userFacingMessage(err));
+        if (cancelled) return;
+        if (isRetryable(err)) {
+          startPolling(sessionId, token, paymentIntentClientSecret);
+          return;
+        }
+        setError(userFacingMessage(err));
       } finally {
         if (!cancelled) setLoading(false);
       }
