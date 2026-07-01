@@ -1017,11 +1017,28 @@ export async function processPendingBulkSyncJobs(
   options: BulkSyncWorkerOptions = {},
 ): Promise<number> {
   const limit = options.limit ?? 25;
+  const workerId = options.workerId ?? `api-${process.pid}`;
   const now = new Date();
   const rows = (await db
     .selectFrom('offline_check_in_sync_jobs')
     .selectAll()
     .where('status', 'in', ['receiving', 'failed', 'processing'])
+    .whereRef('chunks_received', '>=', 'total_chunks')
+    .where('attempt_count', '<', BULK_SYNC_MAX_ATTEMPTS)
+    .where((eb) =>
+      eb.or([
+        eb('leased_until', 'is', null),
+        eb('leased_until', '<=', now),
+        eb('lease_owner', '=', workerId),
+      ]),
+    )
+    .where((eb) =>
+      eb.or([
+        eb('status', '<>', 'failed'),
+        eb('next_attempt_at', 'is', null),
+        eb('next_attempt_at', '<=', now),
+      ]),
+    )
     .orderBy('updated_at', 'asc')
     .limit(limit)
     .execute()) as BulkSyncJobRow[];
@@ -1033,12 +1050,12 @@ export async function processPendingBulkSyncJobs(
     if (
       job.leased_until &&
       new Date(job.leased_until).getTime() > now.getTime() &&
-      job.lease_owner !== options.workerId
+      job.lease_owner !== workerId
     ) {
       continue;
     }
     // eslint-disable-next-line no-await-in-loop -- worker claims are intentionally bounded and sequential.
-    await processPendingBulkSyncChunks(db, job.id, options);
+    await processPendingBulkSyncChunks(db, job.id, { ...options, workerId });
     processed += 1;
   }
   return processed;

@@ -191,6 +191,10 @@ function buildOfflineSyncMockDb(overrides: OfflineSyncMockOverrides = {}) {
         );
         return q;
       },
+      whereRef(left: string, op: string, right: string) {
+        conditions.push({ column: left, op: op === '>=' ? 'ref>=' : op, value: right });
+        return q;
+      },
       orderBy() {
         return q;
       },
@@ -2294,6 +2298,127 @@ describe('bulk offline sync endpoint', () => {
         rows_processed: 2,
       }),
     );
+
+    await app.close();
+  });
+
+  it('processes ready jobs when older incomplete jobs fill the worker limit', async () => {
+    const { app, db, inserts } = await setupBulkApp();
+    const job = await createBulkJob(app);
+
+    for (const sequence of [1, 2]) {
+      // eslint-disable-next-line no-await-in-loop -- chunk uploads intentionally create a ready job after stale rows.
+      const response = await app.inject({
+        method: 'PUT',
+        url: `/check-ins/bulk-sync-jobs/${job.id}/chunks/${sequence}`,
+        headers: { 'Idempotency-Key': `idem_bulk_ready_after_incomplete_${sequence}` },
+        payload: {
+          scans: [
+            {
+              qrHash: sequence === 1 ? 'hash_1' : 'missing_hash',
+              scannedAt: `2026-06-01T12:0${sequence}:00.000Z`,
+              offline: true,
+            },
+          ],
+        },
+      });
+      expect(response.statusCode).toBe(202);
+    }
+
+    const readyJob = inserts.find(
+      (insert) => insert.table === 'offline_check_in_sync_jobs',
+    )!.values;
+    Object.assign(readyJob, {
+      updated_at: new Date('2026-06-01T12:10:00.000Z'),
+    });
+    inserts.unshift(
+      {
+        table: 'offline_check_in_sync_jobs',
+        values: {
+          ...readyJob,
+          id: 'bsj_incomplete_1',
+          status: 'receiving',
+          chunks_received: 0,
+          total_chunks: 2,
+          updated_at: new Date('2026-06-01T12:00:00.000Z'),
+        },
+      },
+      {
+        table: 'offline_check_in_sync_jobs',
+        values: {
+          ...readyJob,
+          id: 'bsj_incomplete_2',
+          status: 'receiving',
+          chunks_received: 1,
+          total_chunks: 2,
+          updated_at: new Date('2026-06-01T12:01:00.000Z'),
+        },
+      },
+    );
+
+    const processed = await processPendingBulkSyncJobs(db as unknown as Database, {
+      workerId: 'ready-worker',
+      limit: 1,
+    });
+
+    expect(processed).toBe(1);
+    expect(inserts.filter((insert) => insert.table === 'scan_logs')).toHaveLength(2);
+    expect(readyJob).toEqual(expect.objectContaining({ status: 'completed', rows_processed: 2 }));
+
+    await app.close();
+  });
+
+  it('processes ready jobs when older failed jobs are still in backoff', async () => {
+    const { app, db, inserts } = await setupBulkApp();
+    const job = await createBulkJob(app);
+
+    for (const sequence of [1, 2]) {
+      // eslint-disable-next-line no-await-in-loop -- chunk uploads intentionally create a ready job after backoff rows.
+      const response = await app.inject({
+        method: 'PUT',
+        url: `/check-ins/bulk-sync-jobs/${job.id}/chunks/${sequence}`,
+        headers: { 'Idempotency-Key': `idem_bulk_ready_after_backoff_${sequence}` },
+        payload: {
+          scans: [
+            {
+              qrHash: sequence === 1 ? 'hash_1' : 'missing_hash',
+              scannedAt: `2026-06-01T12:0${sequence}:00.000Z`,
+              offline: true,
+            },
+          ],
+        },
+      });
+      expect(response.statusCode).toBe(202);
+    }
+
+    const readyJob = inserts.find(
+      (insert) => insert.table === 'offline_check_in_sync_jobs',
+    )!.values;
+    Object.assign(readyJob, {
+      updated_at: new Date('2026-06-01T12:10:00.000Z'),
+    });
+    inserts.unshift({
+      table: 'offline_check_in_sync_jobs',
+      values: {
+        ...readyJob,
+        id: 'bsj_failed_backoff',
+        status: 'failed',
+        failure_message: 'Bulk sync chunk processing failed',
+        chunks_received: 2,
+        total_chunks: 2,
+        next_attempt_at: new Date(Date.now() + 15 * 60 * 1000),
+        updated_at: new Date('2026-06-01T12:00:00.000Z'),
+      },
+    });
+
+    const processed = await processPendingBulkSyncJobs(db as unknown as Database, {
+      workerId: 'ready-worker',
+      limit: 1,
+    });
+
+    expect(processed).toBe(1);
+    expect(inserts.filter((insert) => insert.table === 'scan_logs')).toHaveLength(2);
+    expect(readyJob).toEqual(expect.objectContaining({ status: 'completed', rows_processed: 2 }));
 
     await app.close();
   });
