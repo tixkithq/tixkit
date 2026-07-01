@@ -44,6 +44,84 @@ vi.mock('recharts', () => ({
   YAxis: () => null,
 }));
 
+vi.mock('@/components/ui/select', async () => {
+  const React = await vi.importActual<typeof import('react')>('react');
+  const SelectContext = React.createContext<{
+    value: string;
+    onValueChange: (value: string) => void;
+    items: { value: string; label: string }[];
+    registerItem: (value: string, label: string) => void;
+  } | null>(null);
+
+  function Select({
+    value,
+    onValueChange,
+    children,
+  }: {
+    value: string;
+    onValueChange: (value: string) => void;
+    children: React.ReactNode;
+  }) {
+    const [items, setItems] = React.useState<{ value: string; label: string }[]>([]);
+    const registerItem = React.useCallback((value: string, label: string) => {
+      setItems((current) =>
+        current.some((item) => item.value === value) ? current : [...current, { value, label }],
+      );
+    }, []);
+
+    return (
+      <SelectContext.Provider value={{ value, onValueChange, items, registerItem }}>
+        {children}
+      </SelectContext.Provider>
+    );
+  }
+
+  function SelectTrigger({
+    className,
+    ...props
+  }: {
+    className?: string;
+    children?: React.ReactNode;
+    'aria-label'?: string;
+  }) {
+    const context = React.useContext(SelectContext);
+    return (
+      <select
+        className={className}
+        value={context?.value ?? ''}
+        onChange={(event) => context?.onValueChange(event.target.value)}
+        {...props}
+      >
+        <option value="" />
+        {(context?.items ?? []).map((item) => (
+          <option key={item.value} value={item.value}>
+            {item.label}
+          </option>
+        ))}
+      </select>
+    );
+  }
+
+  function SelectValue() {
+    return null;
+  }
+
+  function SelectContent({ children }: { children: React.ReactNode }) {
+    return children;
+  }
+
+  function SelectItem({ value, children }: { value: string; children: React.ReactNode }) {
+    const context = React.useContext(SelectContext);
+    const registerItem = context?.registerItem;
+    React.useEffect(() => {
+      registerItem?.(value, String(children));
+    }, [value, children, registerItem]);
+    return null;
+  }
+
+  return { Select, SelectContent, SelectItem, SelectTrigger, SelectValue };
+});
+
 vi.mock('@/components/ui/tabs', () => {
   const TabsContext = React.createContext<{
     value?: string;
@@ -282,6 +360,36 @@ describe('ReportsView', () => {
     fireEvent.click(view.getByRole('tab', { name: 'Affiliate' }));
     expect(await view.findAllByText('Select workspace')).not.toHaveLength(0);
     expect(adminApiMock.getAffiliateReport).not.toHaveBeenCalled();
+  });
+
+  it('loads affiliate reporting on the global reports route without selecting an event', async () => {
+    const view = render(<ReportsView />);
+
+    const renderedTabs = await view.findAllByRole('tab');
+    expect(renderedTabs.map((tab) => tab.textContent)).toEqual(
+      expect.arrayContaining(['Sales', 'Tax', 'Attendance', 'Promo', 'Conversion', 'Affiliate']),
+    );
+    expect(
+      view.getByText('Pick an event to view event-scoped reporting tabs.'),
+    ).toBeInTheDocument();
+    expect(adminApiMock.getSalesReport).not.toHaveBeenCalled();
+
+    fireEvent.click(view.getByRole('tab', { name: 'Affiliate' }));
+
+    expect(await view.findAllByText('Select workspace')).not.toHaveLength(0);
+    expect(adminApiMock.getAffiliateReport).not.toHaveBeenCalled();
+
+    await view.findByRole('option', { name: 'Demo Org' });
+    fireEvent.change(view.getByRole('combobox', { name: 'Select workspace' }), {
+      target: { value: 'org_1' },
+    });
+
+    await waitFor(() => {
+      expect(adminApiMock.getAffiliateReport).toHaveBeenCalledWith('org_1');
+    });
+    expect(await view.findByText('Ada Partners')).toBeInTheDocument();
+    expect(view.getByText('ADA')).toBeInTheDocument();
+    expect(adminApiMock.getSalesReport).not.toHaveBeenCalled();
   });
 
   it('loads report APIs only after their tab is selected', async () => {

@@ -238,17 +238,14 @@ export function ReportsView({ eventId }: ReportsViewProps) {
     );
   }
 
-  if (!eventId && events.length === 0) {
-    return (
-      <EmptyState
-        icon={BarChart3}
-        title="No events to report on"
-        description="Create an event first to view sales, tax, attendance, promo, conversion, and affiliate reports."
-      />
-    );
-  }
-
   const currency = salesState.data?.currency ?? selectedEvent?.currency ?? 'USD';
+  const selectEventPrompt = (
+    <EmptyState
+      icon={BarChart3}
+      title="Select an event"
+      description="Pick an event to view event-scoped reporting tabs."
+    />
+  );
 
   return (
     <div className="space-y-6">
@@ -331,69 +328,81 @@ export function ReportsView({ eventId }: ReportsViewProps) {
 
       {lastExport ? <ExportStatusNotice exportJob={lastExport} /> : null}
 
-      {!selectedEventId ? (
-        <EmptyState
-          icon={BarChart3}
-          title="Select an event"
-          description="Pick an event to view reporting tabs."
-        />
-      ) : (
-        <Tabs value={activeTab} onValueChange={(value) => setActiveTab(value as ReportTab)}>
-          <TabsList className="flex h-auto w-full flex-wrap justify-start">
-            <TabsTrigger value="sales">Sales</TabsTrigger>
-            <TabsTrigger value="tax">Tax</TabsTrigger>
-            <TabsTrigger value="attendance">Attendance</TabsTrigger>
-            <TabsTrigger value="promo">Promo</TabsTrigger>
-            <TabsTrigger value="conversion">Conversion</TabsTrigger>
-            <TabsTrigger value="affiliate">Affiliate</TabsTrigger>
-          </TabsList>
+      <Tabs value={activeTab} onValueChange={(value) => setActiveTab(value as ReportTab)}>
+        <TabsList className="flex h-auto w-full flex-wrap justify-start">
+          <TabsTrigger value="sales">Sales</TabsTrigger>
+          <TabsTrigger value="tax">Tax</TabsTrigger>
+          <TabsTrigger value="attendance">Attendance</TabsTrigger>
+          <TabsTrigger value="promo">Promo</TabsTrigger>
+          <TabsTrigger value="conversion">Conversion</TabsTrigger>
+          <TabsTrigger value="affiliate">Affiliate</TabsTrigger>
+        </TabsList>
 
-          <TabsContent value="sales">
+        <TabsContent value="sales">
+          {!selectedEventId ? (
+            selectEventPrompt
+          ) : (
             <ReportLoadState
               state={salesState}
               render={(report) => <SalesReportPanel report={report} />}
             />
-          </TabsContent>
-          <TabsContent value="tax">
+          )}
+        </TabsContent>
+        <TabsContent value="tax">
+          {!selectedEventId ? (
+            selectEventPrompt
+          ) : (
             <ReportLoadState
               state={taxState}
               render={(report) => <TaxReportPanel report={report} />}
             />
-          </TabsContent>
-          <TabsContent value="attendance">
+          )}
+        </TabsContent>
+        <TabsContent value="attendance">
+          {!selectedEventId ? (
+            selectEventPrompt
+          ) : (
             <ReportLoadState
               state={attendanceState}
               render={(report) => <AttendanceReportPanel report={report} />}
             />
-          </TabsContent>
-          <TabsContent value="promo">
+          )}
+        </TabsContent>
+        <TabsContent value="promo">
+          {!selectedEventId ? (
+            selectEventPrompt
+          ) : (
             <ReportLoadState
               state={promoState}
               render={(report) => <PromoReportPanel report={report} currency={currency} />}
             />
-          </TabsContent>
-          <TabsContent value="conversion">
+          )}
+        </TabsContent>
+        <TabsContent value="conversion">
+          {!selectedEventId ? (
+            selectEventPrompt
+          ) : (
             <ReportLoadState
               state={conversionState}
               render={(report) => <ConversionReportPanel report={report} />}
             />
-          </TabsContent>
-          <TabsContent value="affiliate">
-            {!selectedOrganizationId ? (
-              <EmptyState
-                icon={Users}
-                title="Select workspace"
-                description="Choose a workspace before loading affiliate reporting."
-              />
-            ) : (
-              <ReportLoadState
-                state={affiliateState}
-                render={(report) => <AffiliateReportPanel report={report} />}
-              />
-            )}
-          </TabsContent>
-        </Tabs>
-      )}
+          )}
+        </TabsContent>
+        <TabsContent value="affiliate">
+          {!selectedOrganizationId ? (
+            <EmptyState
+              icon={Users}
+              title="Select workspace"
+              description="Choose a workspace before loading affiliate reporting."
+            />
+          ) : (
+            <ReportLoadState
+              state={affiliateState}
+              render={(report) => <AffiliateReportPanel report={report} />}
+            />
+          )}
+        </TabsContent>
+      </Tabs>
     </div>
   );
 }
