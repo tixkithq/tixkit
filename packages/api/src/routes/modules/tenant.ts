@@ -531,9 +531,9 @@ export const tenantRoutes: FastifyPluginAsync = async (app) => {
       ClerkAuthService.requireOrganizationScope(principal, organizationId);
 
       const paymentAccounts = new PaymentAccountRepository(db);
-      const existing = await paymentAccounts.findByOrganization(organizationId);
-      const activeStripe = existing.find(
-        (account) => account.provider === 'stripe_connect' || account.provider === 'stripe',
+      const activeStripe = await paymentAccounts.findByOrganizationAndProvider(
+        organizationId,
+        'stripe_connect',
       );
       const stripe = stripeClientFromContext(app.context);
       if (!stripe) {
@@ -653,7 +653,7 @@ export const tenantRoutes: FastifyPluginAsync = async (app) => {
       if (account.organization_id !== organizationId) {
         throw new ValidationError('Payment account does not belong to the organization');
       }
-      if (account.provider !== 'stripe_connect' && account.provider !== 'stripe') {
+      if (account.provider !== 'stripe_connect') {
         throw new ValidationError('Payment account is not a Stripe Connect account');
       }
 

@@ -1410,6 +1410,90 @@ describe('brand domain creation', () => {
     await app.close();
   });
 
+  it('POST /organizations/:organizationId/payment-accounts/stripe-connect ignores legacy Stripe accounts', async () => {
+    const tables = {
+      organizations: [
+        {
+          id: 'org_1',
+          tenant_id: 'tnt_1',
+          name: 'Org',
+          slug: 'org',
+          clerk_organization_id: null,
+          status: 'active',
+          created_at: new Date(),
+          updated_at: new Date(),
+        },
+      ],
+      payment_accounts: [
+        {
+          id: 'pa_legacy',
+          tenant_id: 'tnt_1',
+          organization_id: 'org_1',
+          provider: 'stripe',
+          provider_account_id: 'acct_legacy',
+          status: 'active',
+          default_currency: 'USD',
+          details_submitted: true,
+          charges_enabled: true,
+          payouts_enabled: true,
+          requirements: JSON.stringify({}),
+          disabled_reason: null,
+          created_at: new Date(),
+          updated_at: new Date(),
+        },
+        {
+          id: 'pa_connect',
+          tenant_id: 'tnt_1',
+          organization_id: 'org_1',
+          provider: 'stripe_connect',
+          provider_account_id: 'acct_connect',
+          status: 'pending',
+          default_currency: 'USD',
+          details_submitted: false,
+          charges_enabled: false,
+          payouts_enabled: false,
+          requirements: JSON.stringify({ currently_due: ['business_profile.url'] }),
+          disabled_reason: null,
+          created_at: new Date(),
+          updated_at: new Date(),
+        },
+      ],
+    };
+    const stripe = {
+      accounts: {
+        create: vi.fn(),
+      },
+      accountLinks: {
+        create: vi.fn(async () => ({ url: 'https://connect.stripe.test/onboard/acct_connect' })),
+      },
+    };
+    const app = await setupApp(tenantRoutes, makePrincipal(), tables, { stripe });
+    const res = await app.inject({
+      method: 'POST',
+      url: '/organizations/org_1/payment-accounts/stripe-connect',
+    });
+
+    expect(res.statusCode).toBe(200);
+    expect(res.json()).toMatchObject({
+      id: 'pa_connect',
+      provider: 'stripe_connect',
+      providerAccountId: 'acct_connect',
+      onboardingUrl: 'https://connect.stripe.test/onboard/acct_connect',
+    });
+    expect(stripe.accounts.create).not.toHaveBeenCalled();
+    expect(stripe.accountLinks.create).toHaveBeenCalledWith({
+      account: 'acct_connect',
+      type: 'account_onboarding',
+      refresh_url: expect.stringContaining(
+        '/settings/payments?organizationId=org_1&stripeConnect=refresh',
+      ),
+      return_url: expect.stringContaining(
+        '/settings/payments?organizationId=org_1&stripeConnect=return',
+      ),
+    });
+    await app.close();
+  });
+
   it('POST /organizations/:organizationId/payment-accounts/stripe-connect recovers when concurrent first-create wins', async () => {
     const tables = {
       organizations: [
@@ -1574,6 +1658,60 @@ describe('brand domain creation', () => {
         '/settings/payments?organizationId=org_1&stripeConnect=return',
       ),
     });
+    await app.close();
+  });
+
+  it('POST /organizations/:organizationId/payment-accounts/:paymentAccountId/stripe-connect/refresh rejects legacy Stripe accounts', async () => {
+    const tables = {
+      organizations: [
+        {
+          id: 'org_1',
+          tenant_id: 'tnt_1',
+          name: 'Org',
+          slug: 'org',
+          clerk_organization_id: null,
+          status: 'active',
+          created_at: new Date(),
+          updated_at: new Date(),
+        },
+      ],
+      payment_accounts: [
+        {
+          id: 'pa_legacy',
+          tenant_id: 'tnt_1',
+          organization_id: 'org_1',
+          provider: 'stripe',
+          provider_account_id: 'acct_legacy',
+          status: 'active',
+          default_currency: 'USD',
+          details_submitted: true,
+          charges_enabled: true,
+          payouts_enabled: true,
+          requirements: JSON.stringify({}),
+          disabled_reason: null,
+          created_at: new Date(),
+          updated_at: new Date(),
+        },
+      ],
+    };
+    const stripe = {
+      accounts: {
+        retrieve: vi.fn(),
+      },
+      accountLinks: {
+        create: vi.fn(),
+      },
+    };
+    const app = await setupApp(tenantRoutes, makePrincipal(), tables, { stripe });
+    const res = await app.inject({
+      method: 'POST',
+      url: '/organizations/org_1/payment-accounts/pa_legacy/stripe-connect/refresh',
+    });
+
+    expect(res.statusCode).toBe(400);
+    expect(res.json().message).toContain('Stripe Connect account');
+    expect(stripe.accounts.retrieve).not.toHaveBeenCalled();
+    expect(stripe.accountLinks.create).not.toHaveBeenCalled();
     await app.close();
   });
 
