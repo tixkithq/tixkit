@@ -61,6 +61,23 @@ function buildResaleIdempotencyKey(eventId: string): string {
   return `resale_${eventId}_${random}`;
 }
 
+async function copyClaimLinkToClipboard(claimUrl: string): Promise<boolean> {
+  const clipboard = globalThis.navigator?.clipboard;
+  if (typeof clipboard?.writeText !== 'function') {
+    toast.error('Claim link ready. Copy it manually from the row.');
+    return false;
+  }
+
+  try {
+    await clipboard.writeText(claimUrl);
+    toast.success('Claim link copied');
+    return true;
+  } catch {
+    toast.error('Claim link ready. Copy it manually from the row.');
+    return false;
+  }
+}
+
 export function EventTicketsView({ eventId }: { eventId: string }) {
   const [drawerOpen, setDrawerOpen] = React.useState(false);
   const [editingTicket, setEditingTicket] = React.useState<AdminTicketType | undefined>(undefined);
@@ -136,8 +153,8 @@ export function EventTicketsView({ eventId }: { eventId: string }) {
       ...current,
       [entry.id]: claimUrl,
     }));
-    await navigator.clipboard?.writeText(claimUrl).catch(() => undefined);
     toast.success('Waitlist offer created');
+    await copyClaimLinkToClipboard(claimUrl);
     void refetchWaitlist();
   };
 
@@ -901,7 +918,7 @@ function WaitlistTable({
                 <TableHead>Qty</TableHead>
                 <TableHead>Status</TableHead>
                 <TableHead>Offer</TableHead>
-                <TableHead className="w-[120px]">
+                <TableHead className="w-[260px]">
                   <span className="sr-only">Actions</span>
                 </TableHead>
               </TableRow>
@@ -931,18 +948,27 @@ function WaitlistTable({
                     </TableCell>
                     <TableCell>
                       {claimUrl ? (
-                        <Button
-                          type="button"
-                          variant="outline"
-                          size="sm"
-                          onClick={() => {
-                            void navigator.clipboard?.writeText(claimUrl);
-                            toast.success('Claim link copied');
-                          }}
-                        >
-                          <Copy className="size-4" />
-                          Copy
-                        </Button>
+                        <div className="flex max-w-[260px] flex-col gap-2">
+                          <Button
+                            type="button"
+                            variant="outline"
+                            size="sm"
+                            className="w-fit"
+                            onClick={() => {
+                              void copyClaimLinkToClipboard(claimUrl);
+                            }}
+                          >
+                            <Copy className="size-4" />
+                            Copy
+                          </Button>
+                          <Input
+                            readOnly
+                            aria-label={`Claim link for ${entry.email}`}
+                            className="h-8 text-xs"
+                            value={claimUrl}
+                            onFocus={(event) => event.currentTarget.select()}
+                          />
+                        </div>
                       ) : (
                         <Button
                           type="button"

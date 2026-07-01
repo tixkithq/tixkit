@@ -1,6 +1,7 @@
 import { fireEvent, render, waitFor, within } from '@testing-library/react';
 import '@testing-library/jest-dom/vitest';
 import * as React from 'react';
+import { toast } from 'sonner';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { EventTicketsView } from './event-tickets-view';
 
@@ -137,6 +138,31 @@ const resaleListing = {
   updatedAt: '2026-08-15T12:00:00.000Z',
 };
 
+const waitlistEntry = {
+  id: 'wle_1',
+  eventId: 'evt_1',
+  ticketTypeId: 'tt_friday',
+  email: 'waitlist-buyer@example.com',
+  firstName: 'Waitlist',
+  lastName: 'Buyer',
+  quantity: 2,
+  status: 'joined' as const,
+  createdAt: '2026-08-15T12:00:00.000Z',
+  updatedAt: '2026-08-15T12:00:00.000Z',
+};
+
+const originalClipboardDescriptor = Object.getOwnPropertyDescriptor(navigator, 'clipboard');
+
+function createDeferred<T>() {
+  let resolve!: (value: T | PromiseLike<T>) => void;
+  let reject!: (reason?: unknown) => void;
+  const promise = new Promise<T>((promiseResolve, promiseReject) => {
+    resolve = promiseResolve;
+    reject = promiseReject;
+  });
+  return { promise, resolve, reject };
+}
+
 function mockEventTicketsData() {
   adminApiMock.listTicketTypes.mockResolvedValue({
     ok: true,
@@ -189,8 +215,26 @@ function mockEventTicketsData() {
   });
 }
 
+function mockWaitlistData() {
+  adminApiMock.listWaitlist.mockResolvedValue({
+    ok: true,
+    data: {
+      items: [waitlistEntry],
+      settings: {
+        autoOfferEnabled: true,
+        offerTtlMinutes: 1440,
+      },
+    },
+  });
+}
+
 afterEach(() => {
   document.body.innerHTML = '';
+  if (originalClipboardDescriptor) {
+    Object.defineProperty(navigator, 'clipboard', originalClipboardDescriptor);
+  } else {
+    Reflect.deleteProperty(navigator, 'clipboard');
+  }
   vi.clearAllMocks();
 });
 
@@ -260,6 +304,141 @@ describe('EventTicketsView occurrences', () => {
       3 * 60 * 60 * 1000,
     );
     expect(adminApiMock.listEventOccurrences).toHaveBeenCalledTimes(2);
+  });
+});
+
+describe('EventTicketsView waitlist claim links', () => {
+  it('reports claim-link copy only after the clipboard write succeeds', async () => {
+    const claimUrl = 'https://checkout.tixkit.test/claim/wle_1';
+    const deferredWrite = createDeferred<void>();
+    const writeText = vi.fn(() => deferredWrite.promise);
+    Object.defineProperty(navigator, 'clipboard', {
+      configurable: true,
+      value: { writeText },
+    });
+    mockEventTicketsData();
+    mockWaitlistData();
+    adminApiMock.offerWaitlistEntry.mockResolvedValue({
+      ok: true,
+      data: {
+        entry: {
+          ...waitlistEntry,
+          status: 'offered',
+          offeredAt: '2026-08-15T12:05:00.000Z',
+          offerExpiresAt: '2026-08-16T12:05:00.000Z',
+        },
+        claimToken: 'claim_token_wle_1',
+        claimUrl,
+      },
+    });
+
+    const view = render(<EventTicketsView eventId="evt_1" />);
+
+    const row = (await view.findByText(waitlistEntry.email)).closest('tr');
+    expect(row).not.toBeNull();
+    fireEvent.click(within(row as HTMLTableRowElement).getByRole('button', { name: 'Offer' }));
+
+    await waitFor(() => {
+      expect(adminApiMock.offerWaitlistEntry).toHaveBeenCalledWith('evt_1', waitlistEntry.id);
+    });
+    await waitFor(() => {
+      expect(view.getByLabelText(`Claim link for ${waitlistEntry.email}`)).toHaveValue(claimUrl);
+    });
+
+    expect(writeText).toHaveBeenCalledWith(claimUrl);
+    expect(toast.success).toHaveBeenCalledWith('Waitlist offer created');
+    expect(toast.success).not.toHaveBeenCalledWith('Claim link copied');
+
+    deferredWrite.resolve();
+
+    await waitFor(() => {
+      expect(toast.success).toHaveBeenCalledWith('Claim link copied');
+    });
+  });
+
+  it('keeps the claim link available when offer-time clipboard access is unavailable', async () => {
+    const claimUrl = 'https://checkout.tixkit.test/claim/manual-copy';
+    Object.defineProperty(navigator, 'clipboard', {
+      configurable: true,
+      value: undefined,
+    });
+    mockEventTicketsData();
+    mockWaitlistData();
+    adminApiMock.offerWaitlistEntry.mockResolvedValue({
+      ok: true,
+      data: {
+        entry: {
+          ...waitlistEntry,
+          status: 'offered',
+          offeredAt: '2026-08-15T12:05:00.000Z',
+          offerExpiresAt: '2026-08-16T12:05:00.000Z',
+        },
+        claimToken: 'claim_token_manual_copy',
+        claimUrl,
+      },
+    });
+
+    const view = render(<EventTicketsView eventId="evt_1" />);
+
+    const row = (await view.findByText(waitlistEntry.email)).closest('tr');
+    expect(row).not.toBeNull();
+    fireEvent.click(within(row as HTMLTableRowElement).getByRole('button', { name: 'Offer' }));
+
+    await waitFor(() => {
+      expect(view.getByLabelText(`Claim link for ${waitlistEntry.email}`)).toHaveValue(claimUrl);
+    });
+    expect(toast.success).toHaveBeenCalledWith('Waitlist offer created');
+    expect(toast.success).not.toHaveBeenCalledWith('Claim link copied');
+    expect(toast.error).toHaveBeenCalledWith('Claim link ready. Copy it manually from the row.');
+  });
+
+  it('does not show copy success when the row Copy button clipboard write is rejected', async () => {
+    const claimUrl = 'https://checkout.tixkit.test/claim/rejected-copy';
+    const writeText = vi
+      .fn()
+      .mockResolvedValueOnce(undefined)
+      .mockRejectedValueOnce(new Error('denied'));
+    Object.defineProperty(navigator, 'clipboard', {
+      configurable: true,
+      value: { writeText },
+    });
+    mockEventTicketsData();
+    mockWaitlistData();
+    adminApiMock.offerWaitlistEntry.mockResolvedValue({
+      ok: true,
+      data: {
+        entry: {
+          ...waitlistEntry,
+          status: 'offered',
+          offeredAt: '2026-08-15T12:05:00.000Z',
+          offerExpiresAt: '2026-08-16T12:05:00.000Z',
+        },
+        claimToken: 'claim_token_rejected_copy',
+        claimUrl,
+      },
+    });
+
+    const view = render(<EventTicketsView eventId="evt_1" />);
+
+    const row = (await view.findByText(waitlistEntry.email)).closest('tr');
+    expect(row).not.toBeNull();
+    fireEvent.click(within(row as HTMLTableRowElement).getByRole('button', { name: 'Offer' }));
+
+    const claimInput = await view.findByLabelText(`Claim link for ${waitlistEntry.email}`);
+    expect(claimInput).toHaveValue(claimUrl);
+    await waitFor(() => {
+      expect(toast.success).toHaveBeenCalledWith('Claim link copied');
+    });
+
+    vi.mocked(toast.success).mockClear();
+    vi.mocked(toast.error).mockClear();
+    fireEvent.click(view.getByRole('button', { name: 'Copy' }));
+
+    await waitFor(() => {
+      expect(writeText).toHaveBeenCalledTimes(2);
+    });
+    expect(toast.success).not.toHaveBeenCalledWith('Claim link copied');
+    expect(toast.error).toHaveBeenCalledWith('Claim link ready. Copy it manually from the row.');
   });
 });
 
