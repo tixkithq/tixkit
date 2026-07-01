@@ -7,6 +7,7 @@ import { toast } from 'sonner';
 
 const useAdminDataMock = vi.hoisted(() => vi.fn());
 const useBootstrapMock = vi.hoisted(() => vi.fn());
+const usePermissionsMock = vi.hoisted(() => vi.fn());
 
 vi.mock('@/hooks/use-admin-data', () => ({
   useAdminData: useAdminDataMock,
@@ -14,6 +15,10 @@ vi.mock('@/hooks/use-admin-data', () => ({
 
 vi.mock('@/context/bootstrap-provider', () => ({
   useBootstrap: useBootstrapMock,
+}));
+
+vi.mock('@/context/permission-provider', () => ({
+  usePermissions: usePermissionsMock,
 }));
 
 vi.mock('./create-event-drawer', () => ({
@@ -63,6 +68,11 @@ function setClipboard(clipboard: Clipboard | undefined) {
 
 function mockLoadedEventDetail() {
   useBootstrapMock.mockReturnValue({ brands: [] });
+  usePermissionsMock.mockReturnValue({
+    can: vi.fn(() => true),
+    loading: false,
+    error: null,
+  });
   useAdminDataMock
     .mockReturnValueOnce({ data: event, loading: false, error: null, refetch: vi.fn() })
     .mockReturnValueOnce({ data: [], loading: false, error: null, refetch: vi.fn() })
@@ -124,6 +134,31 @@ describe('EventDetailView', () => {
     expect(toast.success).not.toHaveBeenCalled();
     expect(toast.error).toHaveBeenCalledWith(
       'Unable to copy public event link. Select and copy it manually.',
+    );
+  });
+
+  it('hides the Messages quick link without messages.write', async () => {
+    mockLoadedEventDetail();
+    usePermissionsMock.mockReturnValue({
+      can: vi.fn((permission: string) => permission !== 'messages.write'),
+      loading: false,
+      error: null,
+    });
+
+    const view = render(<EventDetailView eventId="evt_1" />);
+
+    expect(await view.findByRole('link', { name: 'Tickets' })).toBeInTheDocument();
+    expect(view.queryByRole('link', { name: 'Messages' })).not.toBeInTheDocument();
+  });
+
+  it('shows the Messages quick link with messages.write', async () => {
+    mockLoadedEventDetail();
+
+    const view = render(<EventDetailView eventId="evt_1" />);
+
+    expect(await view.findByRole('link', { name: 'Messages' })).toHaveAttribute(
+      'href',
+      '/events/evt_1/messages',
     );
   });
 });

@@ -37,6 +37,7 @@ import { useAdminData } from '@/hooks/use-admin-data';
 import { formatCurrency, formatDate, formatNumber } from '@/lib/format';
 import { publicEventUrl } from '@/lib/event-links';
 import { useBootstrap } from '@/context/bootstrap-provider';
+import { usePermissions } from '@/context/permission-provider';
 import { CreateEventDrawer } from './create-event-drawer';
 
 const EMPTY_MARKETING_INTEGRATIONS: AdminMarketingIntegration[] = [];
@@ -58,6 +59,7 @@ export function EventDetailView({ eventId }: { eventId: string }) {
     [eventId],
   );
   const { brands } = useBootstrap();
+  const { can } = usePermissions();
   const [editOpen, setEditOpen] = React.useState(false);
 
   if (loading) {
@@ -116,7 +118,9 @@ export function EventDetailView({ eventId }: { eventId: string }) {
     { title: 'Event Page', icon: PenTool, href: routes.eventContentEventPage(eventId) },
     { title: 'Attendees', icon: Users, href: routes.eventAttendees(eventId) },
     { title: 'Check-in', icon: QrCode, href: routes.eventCheckIn(eventId) },
-    { title: 'Messages', icon: MessageSquare, href: routes.eventMessages(eventId) },
+    ...(can('messages.write')
+      ? [{ title: 'Messages', icon: MessageSquare, href: routes.eventMessages(eventId) }]
+      : []),
     { title: 'Reports', icon: BarChart3, href: routes.eventReports(eventId) },
   ];
 
