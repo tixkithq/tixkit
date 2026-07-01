@@ -1183,6 +1183,23 @@ export const checkoutRoutes: FastifyPluginAsync = async (app) => {
             listingExpiry && listingExpiry < defaultReservationExpiry
               ? listingExpiry
               : defaultReservationExpiry;
+          const eventQuestions: Question[] = (
+            (await db
+              .selectFrom('questions')
+              .selectAll()
+              .where('event_id', '=', body.eventId)
+              .execute()) as QuestionRow[]
+          )
+            .filter(isVisibleCheckoutQuestion)
+            .map((question) => toDomainQuestion(question));
+          const answeredAt = new Date().toISOString();
+          const buyerFields = normalizeValidAnswers(
+            applicableQuestions(eventQuestions, 'buyer'),
+            body.buyerFields ?? {},
+            'Buyer question',
+            answeredAt,
+          );
+          await assertCompletedUploadArtifacts(db, event.tenant_id, body.eventId, buyerFields);
 
           const priceCents = Number(listing.price_cents);
           const quote = {
@@ -1215,36 +1232,58 @@ export const checkoutRoutes: FastifyPluginAsync = async (app) => {
             items: [{ resaleListingId: listingId, quantity: 1 }],
             affiliateCode: body.affiliateCode,
             trackingId: body.trackingId,
-            buyerFields: body.buyerFields ?? {},
+            buyerFields,
           };
-          const session = await db.transaction().execute(async (trx) => {
-            const reserved = await new TicketListingRepository(trx).reserveForCheckout({
-              tenantId: event.tenant_id,
-              listingId,
-              checkoutSessionId: sessionId,
-              reservedUntil,
-              now,
+          let sessionCreated = false;
+          try {
+            const session = await db.transaction().execute(async (trx) => {
+              const reserved = await new TicketListingRepository(trx).reserveForCheckout({
+                tenantId: event.tenant_id,
+                listingId,
+                checkoutSessionId: sessionId,
+                reservedUntil,
+                now,
+              });
+              if (!reserved) {
+                throw new ValidationError(`Ticket listing ${listingId} is no longer available`);
+              }
+              const created = await new CheckoutSessionRepository(trx).create({
+                id: sessionId,
+                tenantId: event.tenant_id,
+                eventId: body.eventId,
+                brandId: event.brand_id,
+                currency: quote.currency,
+                cart: cart as Record<string, unknown>,
+                buyer: (body.buyer as Record<string, unknown>) ?? {},
+                quote,
+                expiresAt: reservedUntil,
+                idempotencyKey,
+                successUrl: body.successUrl,
+                cancelUrl: body.cancelUrl,
+              });
+              sessionCreated = true;
+              return created;
             });
-            if (!reserved) {
-              throw new ValidationError(`Ticket listing ${listingId} is no longer available`);
-            }
-            return new CheckoutSessionRepository(trx).create({
-              id: sessionId,
-              tenantId: event.tenant_id,
-              eventId: body.eventId,
-              brandId: event.brand_id,
-              currency: quote.currency,
-              cart: cart as Record<string, unknown>,
-              buyer: (body.buyer as Record<string, unknown>) ?? {},
-              quote,
-              expiresAt: reservedUntil,
-              idempotencyKey,
-              successUrl: body.successUrl,
-              cancelUrl: body.cancelUrl,
-            });
-          });
 
-          return { status: 201, body: publicCheckoutSession(session) };
+            await claimCheckoutUploadArtifacts(db, event.tenant_id, body.eventId, cart, sessionId);
+
+            return { status: 201, body: publicCheckoutSession(session) };
+          } catch (err) {
+            await Promise.allSettled([
+              new TicketListingRepository(db).releaseCheckoutReservation({
+                tenantId: event.tenant_id,
+                listingId,
+                checkoutSessionId: sessionId,
+              }),
+              compensateCheckoutSessionCreation({
+                db,
+                releaseHoldsForSession: async () => undefined,
+                checkoutSessionId: sessionId,
+                sessionCreated,
+              }),
+            ]);
+            throw err;
+          }
         }
 
         const ttRepo = new TicketTypeRepository(db);

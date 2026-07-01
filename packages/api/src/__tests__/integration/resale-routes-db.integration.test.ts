@@ -323,6 +323,7 @@ async function cleanupAll(database: Database): Promise<void> {
   await database.deleteFrom('order_timeline_events').where('order_id', '=', ORDER_ID).execute();
   await database.deleteFrom('orders').where('tenant_id', '=', TENANT_ID).execute();
   await database.deleteFrom('checkout_sessions').where('tenant_id', '=', TENANT_ID).execute();
+  await database.deleteFrom('questions').where('event_id', '=', EVENT_ID).execute();
   await database.deleteFrom('ticket_types').where('event_id', '=', EVENT_ID).execute();
   await database.deleteFrom('inventory_pools').where('event_id', '=', EVENT_ID).execute();
   await database.deleteFrom('events').where('id', '=', EVENT_ID).execute();
@@ -334,6 +335,12 @@ async function cleanupAll(database: Database): Promise<void> {
 async function resetListings(database: Database): Promise<void> {
   await database.deleteFrom('ticket_listings').where('tenant_id', '=', TENANT_ID).execute();
   await database.deleteFrom('idempotency_records').where('tenant_id', '=', TENANT_ID).execute();
+  await database.deleteFrom('questions').where('event_id', '=', EVENT_ID).execute();
+  await database
+    .deleteFrom('checkout_sessions')
+    .where('tenant_id', '=', TENANT_ID)
+    .where('id', '!=', CHECKOUT_SESSION_ID)
+    .execute();
   await database.deleteFrom('order_timeline_events').where('order_id', '=', ORDER_ID).execute();
   await database
     .deleteFrom('wallet_passes')
@@ -658,6 +665,185 @@ describeWithIntegrationDatabase(
       });
       expect(publicList.statusCode).toBe(200);
       expect(publicList.json().items).toHaveLength(0);
+    });
+
+    it('rejects a resale checkout when a required buyer question is missing', async () => {
+      const questionId = `q_resale_required_${RUN_ID}`;
+      const now = new Date();
+      await db
+        .insertInto('questions')
+        .values({
+          id: questionId,
+          event_id: EVENT_ID,
+          ticket_type_id: null,
+          type: 'text',
+          label: 'Legal buyer name',
+          description: null,
+          required: true,
+          applies_to: 'buyer',
+          options: null,
+          placeholder: null,
+          validation_pattern: null,
+          conditional_visibility: null,
+          status: 'active',
+          is_hidden: false,
+          hidden_at: null,
+          deleted_at: null,
+          sort_order: 0,
+          is_consent_field: false,
+          consent_text: null,
+          consent_version: null,
+          created_at: now,
+          updated_at: now,
+        })
+        .execute();
+
+      const create = await app.inject({
+        method: 'POST',
+        url: `/tickets/${TICKET_ID}/resale-listings`,
+        headers: { 'Idempotency-Key': `resale_db_required_listing_${RUN_ID}` },
+        payload: { priceCents: 5500 },
+      });
+      expect(create.statusCode).toBe(201);
+      const listingId = create.json().id as string;
+
+      const missing = await app.inject({
+        method: 'POST',
+        url: '/checkout/sessions',
+        headers: { 'Idempotency-Key': `resale_db_required_checkout_${RUN_ID}` },
+        payload: {
+          eventId: EVENT_ID,
+          items: [{ resaleListingId: listingId, quantity: 1 }],
+          buyer: {
+            email: 'resale-required-buyer@example.com',
+            firstName: 'Required',
+            lastName: 'Buyer',
+          },
+        },
+      });
+
+      expect(missing.statusCode).toBe(400);
+      expect(JSON.stringify(missing.json())).toContain('Buyer question validation failed');
+
+      const sessions = await db
+        .selectFrom('checkout_sessions')
+        .select('id')
+        .where('tenant_id', '=', TENANT_ID)
+        .where('id', '!=', CHECKOUT_SESSION_ID)
+        .execute();
+      expect(sessions).toHaveLength(0);
+
+      const listing = await db
+        .selectFrom('ticket_listings')
+        .select(['reserved_checkout_session_id', 'reserved_until'])
+        .where('id', '=', listingId)
+        .executeTakeFirstOrThrow();
+      expect(listing.reserved_checkout_session_id).toBeNull();
+      expect(listing.reserved_until).toBeNull();
+    });
+
+    it('normalizes resale buyer consent answers and skips hidden buyer answers', async () => {
+      const consentQuestionId = `q_resale_consent_${RUN_ID}`;
+      const hiddenQuestionId = `q_resale_hidden_${RUN_ID}`;
+      const now = new Date();
+      await db
+        .insertInto('questions')
+        .values([
+          {
+            id: consentQuestionId,
+            event_id: EVENT_ID,
+            ticket_type_id: null,
+            type: 'waiver',
+            label: 'Resale waiver',
+            description: null,
+            required: true,
+            applies_to: 'buyer',
+            options: null,
+            placeholder: null,
+            validation_pattern: null,
+            conditional_visibility: null,
+            status: 'active',
+            is_hidden: false,
+            hidden_at: null,
+            deleted_at: null,
+            sort_order: 0,
+            is_consent_field: true,
+            consent_text: 'I accept the resale purchase terms.',
+            consent_version: 'resale-v2',
+            created_at: now,
+            updated_at: now,
+          },
+          {
+            id: hiddenQuestionId,
+            event_id: EVENT_ID,
+            ticket_type_id: null,
+            type: 'text',
+            label: 'Hidden resale prompt',
+            description: null,
+            required: true,
+            applies_to: 'buyer',
+            options: null,
+            placeholder: null,
+            validation_pattern: null,
+            conditional_visibility: null,
+            status: 'hidden',
+            is_hidden: true,
+            hidden_at: now,
+            deleted_at: null,
+            sort_order: 1,
+            is_consent_field: false,
+            consent_text: null,
+            consent_version: null,
+            created_at: now,
+            updated_at: now,
+          },
+        ])
+        .execute();
+
+      const create = await app.inject({
+        method: 'POST',
+        url: `/tickets/${TICKET_ID}/resale-listings`,
+        headers: { 'Idempotency-Key': `resale_db_consent_listing_${RUN_ID}` },
+        payload: { priceCents: 5500 },
+      });
+      expect(create.statusCode).toBe(201);
+      const listingId = create.json().id as string;
+
+      const checkout = await app.inject({
+        method: 'POST',
+        url: '/checkout/sessions',
+        headers: { 'Idempotency-Key': `resale_db_consent_checkout_${RUN_ID}` },
+        payload: {
+          eventId: EVENT_ID,
+          items: [{ resaleListingId: listingId, quantity: 1 }],
+          buyer: {
+            email: 'resale-consent-buyer@example.com',
+            firstName: 'Consent',
+            lastName: 'Buyer',
+          },
+          buyerFields: {
+            [consentQuestionId]: true,
+            [hiddenQuestionId]: 'do not persist',
+          },
+        },
+      });
+
+      expect(checkout.statusCode).toBe(201);
+      const storedSession = await db
+        .selectFrom('checkout_sessions')
+        .select('cart')
+        .where('id', '=', checkout.json().id)
+        .executeTakeFirstOrThrow();
+      const cart = (
+        typeof storedSession.cart === 'string' ? JSON.parse(storedSession.cart) : storedSession.cart
+      ) as { buyerFields: Record<string, unknown> };
+      expect(cart.buyerFields[consentQuestionId]).toEqual({
+        accepted: true,
+        consentText: 'I accept the resale purchase terms.',
+        consentVersion: 'resale-v2',
+        consentedAt: expect.any(String),
+      });
+      expect(cart.buyerFields[hiddenQuestionId]).toBeUndefined();
     });
 
     it('rejects staff-created resale checkout when the buyer is the original ticket owner', async () => {
