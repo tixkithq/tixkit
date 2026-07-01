@@ -107,6 +107,94 @@ describe('validateEmailTemplate', () => {
     expect(result.issues.some((issue) => issue.code === 'missing_image_alt')).toBe(true);
   });
 
+  it('blocks unsafe canonical block image URLs', () => {
+    const unsafeUrls = [
+      'data:image/png;base64,iVBORw0KGgo=',
+      'javascript:alert(1)',
+      'http://localhost/hero.png',
+      'https://assets.local/hero.png',
+      'https://mail.internal/hero.png',
+      'http://10.0.0.8/hero.png',
+      'http://172.16.4.5/hero.png',
+      'http://192.168.1.20/hero.png',
+    ];
+
+    for (const imageUrl of unsafeUrls) {
+      const template = createDefaultEmailTemplate({
+        blocks: [
+          {
+            type: 'event_hero',
+            headline: '{{event.title}}',
+            imageUrl,
+            imageAlt: 'Event hero',
+            ctaLabel: 'Open',
+            ctaUrl: '{{event.publicUrl}}',
+          },
+          {
+            type: 'unsubscribe_footer',
+            body: 'Manage preferences',
+            unsubscribeUrl: '{{brand.supportUrl}}',
+          },
+        ],
+      });
+
+      const result = validateEmailTemplate(template);
+
+      expect(result.valid).toBe(false);
+      expect(result.issues).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            code: 'unsafe_image',
+            field: 'blocks.0.imageUrl',
+          }),
+        ]),
+      );
+    }
+  });
+
+  it('validates rendered QR-code image destinations while allowing ticket QR merge tags', () => {
+    const safeTemplate = createDefaultEmailTemplate({
+      blocks: [
+        {
+          type: 'qr_code',
+          title: 'Ticket QR',
+          imageUrl: '{{ticket.qrCodeUrl}}',
+          imageAlt: 'Ticket QR code',
+        },
+        {
+          type: 'unsubscribe_footer',
+          body: 'Manage preferences',
+          unsubscribeUrl: '{{brand.supportUrl}}',
+        },
+      ],
+    });
+    const unsafeTemplate = createDefaultEmailTemplate({
+      blocks: [
+        {
+          type: 'qr_code',
+          title: 'Ticket QR',
+          imageUrl: 'http://127.0.0.1/qr.png',
+          imageAlt: 'Ticket QR code',
+        },
+        {
+          type: 'unsubscribe_footer',
+          body: 'Manage preferences',
+          unsubscribeUrl: '{{brand.supportUrl}}',
+        },
+      ],
+    });
+
+    expect(validateEmailTemplate(safeTemplate).valid).toBe(true);
+    expect(validateEmailTemplate(unsafeTemplate).issues).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          code: 'unsafe_image',
+          field: 'blocks.0.imageUrl',
+        }),
+      ]),
+    );
+  });
+
   it('blocks unsafe raw HTML', () => {
     const template = createDefaultEmailTemplate({
       blocks: [

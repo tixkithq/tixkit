@@ -320,6 +320,9 @@ export function validateEmailTemplate(
   for (const issue of validateLinks(document, Boolean(options.allowPrivateLinks))) {
     issues.push(issue);
   }
+  for (const issue of validateImageSources(document, Boolean(options.allowPrivateLinks))) {
+    issues.push(issue);
+  }
 
   for (const issue of validateHtmlSafety(document.editor.contentHtml, {
     code: 'unsafe_editor_html',
@@ -678,6 +681,25 @@ function validateLinks(
   return issues;
 }
 
+function validateImageSources(
+  document: EmailTemplateDocument,
+  allowPrivate: boolean,
+): ContentValidationIssue[] {
+  const issues: ContentValidationIssue[] = [];
+  for (const image of imageSourceFields(document)) {
+    const withExampleContext = decodeHtmlAttributeValue(renderUrl(image.url, sampleContext()));
+    if (!isAllowedDestination(withExampleContext, allowPrivate)) {
+      issues.push({
+        code: 'unsafe_image',
+        message: `${image.field} must be an http(s) URL and may not target private hosts`,
+        severity: 'error',
+        field: image.field,
+      });
+    }
+  }
+  return issues;
+}
+
 function validateHtmlSafety(
   html: string,
   issue: Pick<ContentValidationIssue, 'code' | 'field' | 'message'> & {
@@ -816,6 +838,19 @@ function linkFields(document: EmailTemplateDocument): { field: string; url: stri
   });
   links.push(...htmlLinkFields(document.editor.contentHtml, 'editor.contentHtml'));
   return links;
+}
+
+function imageSourceFields(document: EmailTemplateDocument): { field: string; url: string }[] {
+  const images: { field: string; url: string }[] = [];
+  document.blocks.forEach((block, index) => {
+    if (block.type === 'event_hero' && block.imageUrl) {
+      images.push({ field: `blocks.${index}.imageUrl`, url: block.imageUrl });
+    }
+    if (block.type === 'qr_code') {
+      images.push({ field: `blocks.${index}.imageUrl`, url: block.imageUrl });
+    }
+  });
+  return images;
 }
 
 function htmlLinkFields(html: string, field: string): { field: string; url: string }[] {
