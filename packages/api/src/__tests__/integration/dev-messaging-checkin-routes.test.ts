@@ -4786,6 +4786,181 @@ describe('ticket transfer and attendee update', () => {
     await app.close();
   });
 
+  it('POST /tickets/:ticketId/transfer reissues a scannable ticket and revokes stale credentials', async () => {
+    const now = new Date('2026-01-01T00:00:00.000Z');
+    const tables = {
+      attendees: [
+        {
+          id: 'att_1',
+          tenant_id: 'tnt_1',
+          order_id: 'ord_1',
+          event_id: 'evt_1',
+          ticket_type_id: 'tt_1',
+          event_occurrence_id: null,
+          ticket_id: 'tkt_1',
+          first_name: 'Ada',
+          last_name: 'Lovelace',
+          email: 'ada@example.com',
+          phone: null,
+          status: 'confirmed',
+          custom_answers: null,
+          checked_in_at: null,
+          check_in_device_id: null,
+          created_at: now,
+          updated_at: now,
+        },
+      ],
+      tickets: [
+        {
+          id: 'tkt_1',
+          tenant_id: 'tnt_1',
+          order_id: 'ord_1',
+          attendee_id: 'att_1',
+          event_id: 'evt_1',
+          ticket_type_id: 'tt_1',
+          event_occurrence_id: null,
+          status: 'valid',
+          code: 'OLD-CODE',
+          qr_payload: 'payload:tkt_1',
+          qr_hash: 'hash:tkt_1',
+          transferred_to_email: null,
+          transferred_at: null,
+          checked_in_at: null,
+          checked_in_by_device_id: null,
+          wallet_pass_id: 'wp_1',
+          created_at: now,
+          updated_at: now,
+        },
+      ],
+      events: [
+        {
+          id: 'evt_1',
+          tenant_id: 'tnt_1',
+          organization_id: 'org_1',
+          brand_id: 'brd_1',
+          status: 'published',
+          slug: 'evt',
+          title: 'Event',
+          timezone: 'UTC',
+          starts_at: now,
+          visibility: 'public',
+          seo: '{}',
+          created_at: now,
+          updated_at: now,
+        },
+      ],
+      check_in_lists: [
+        {
+          id: 'cil_1',
+          event_id: 'evt_1',
+          name: 'Main entrance',
+          ticket_type_ids: JSON.stringify(['tt_1']),
+          event_occurrence_id: null,
+          status: 'active',
+          created_at: now,
+          updated_at: now,
+        },
+      ],
+      wallet_passes: [
+        {
+          id: 'wp_1',
+          ticket_id: 'tkt_1',
+          status: 'active',
+          revoked_at: null,
+          updated_at: now,
+        },
+      ],
+      order_timeline_events: [] as Record<string, unknown>[],
+      idempotency_records: [] as Record<string, unknown>[],
+      scan_logs: [] as Record<string, unknown>[],
+    };
+    const qrService = {
+      generate: (ticketId: string) => ({
+        code: `CODE:${ticketId}`,
+        payload: `payload:${ticketId}`,
+        hash: `hash:${ticketId}`,
+      }),
+      hashPayload: (payload: string) => payload.replace('payload:', 'hash:'),
+      getQrPayload: (payload: string) => ({
+        valid: payload.startsWith('payload:'),
+        ticketId: payload.replace('payload:', ''),
+      }),
+    };
+    const app = await setupApp(checkInRoutes, makePrincipal(), tables, { qrService });
+
+    const transfer = await app.inject({
+      method: 'POST',
+      url: '/tickets/tkt_1/transfer',
+      headers: { 'Idempotency-Key': 'transfer_1' },
+      payload: { toEmail: 'new@example.com' },
+    });
+    expect(transfer.statusCode).toBe(200);
+    const transferredBody = transfer.json();
+    expect(transferredBody.id).not.toBe('tkt_1');
+    expect(transferredBody.status).toBe('valid');
+    expect(transferredBody.qrPayload).toBe(`payload:${transferredBody.id}`);
+
+    const replay = await app.inject({
+      method: 'POST',
+      url: '/tickets/tkt_1/transfer',
+      headers: { 'Idempotency-Key': 'transfer_1' },
+      payload: { toEmail: 'new@example.com' },
+    });
+    expect(replay.statusCode).toBe(200);
+    expect(replay.json().id).toBe(transferredBody.id);
+
+    const tickets = tables.tickets as Record<string, unknown>[];
+    expect(tickets).toHaveLength(2);
+    expect(tickets.find((ticket) => ticket.id === 'tkt_1')).toMatchObject({
+      status: 'transferred',
+      transferred_to_email: 'new@example.com',
+    });
+    expect(tickets.find((ticket) => ticket.id === transferredBody.id)).toMatchObject({
+      status: 'valid',
+      attendee_id: transferredBody.attendeeId,
+      qr_payload: transferredBody.qrPayload,
+      qr_hash: transferredBody.qrHash,
+    });
+    expect((tables.wallet_passes as Record<string, unknown>[])[0]).toMatchObject({
+      status: 'revoked',
+    });
+    expect(tables.order_timeline_events).toHaveLength(1);
+
+    const oldScan = await app.inject({
+      method: 'POST',
+      url: '/check-ins/scan',
+      payload: {
+        checkInListId: 'cil_1',
+        qrPayload: 'payload:tkt_1',
+        deviceId: 'dev_1',
+        scannedAt: now.toISOString(),
+      },
+    });
+    expect(oldScan.statusCode).toBe(200);
+    expect(oldScan.json()).toMatchObject({ outcome: 'revoked', ticketId: 'tkt_1' });
+
+    const newScan = await app.inject({
+      method: 'POST',
+      url: '/check-ins/scan',
+      payload: {
+        checkInListId: 'cil_1',
+        qrPayload: transferredBody.qrPayload,
+        deviceId: 'dev_1',
+        scannedAt: new Date(now.getTime() + 1000).toISOString(),
+      },
+    });
+    expect(newScan.statusCode).toBe(200);
+    expect(newScan.json()).toMatchObject({
+      outcome: 'accepted',
+      ticketId: transferredBody.id,
+    });
+    expect(tickets.find((ticket) => ticket.id === transferredBody.id)).toMatchObject({
+      status: 'checked_in',
+    });
+
+    await app.close();
+  });
+
   it('PATCH /attendees/:attendeeId updates attendee fields', async () => {
     const tables = {
       attendees: [

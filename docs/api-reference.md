@@ -420,7 +420,7 @@ Refund body: `{ "amountCents"?, "reason", "voidTickets"?, "restoreInventory"? }`
 | `GET`   | `/v1/events/:eventId/attendees`                              | `attendees.read`  | List attendees for an event                                  |
 | `GET`   | `/v1/attendees`                                              | `attendees.read`  | List attendees across tenant                                 |
 | `PATCH` | `/v1/attendees/:attendeeId`                                  | `attendees.write` | Update attendee fields                                       |
-| `POST`  | `/v1/tickets/:ticketId/transfer`                             | `attendees.write` | Transfer ticket to new email (requires `Idempotency-Key`)    |
+| `POST`  | `/v1/tickets/:ticketId/transfer`                             | `attendees.write` | Transfer ticket to a new email by issuing a fresh credential and revoking stale wallet passes (requires `Idempotency-Key`) |
 | `GET`   | `/v1/events/:eventId/check-in-lists`                         | `checkins.read`   | List check-in lists                                          |
 | `GET`   | `/v1/events/:eventId/check-in-lists/:checkInListId/manifest` | `checkins.read`   | Download offline manifest (ticket QR hashes)                 |
 | `POST`  | `/v1/check-ins/scan`                                         | `checkins.write`  | Online scan (recommended `Idempotency-Key`)                  |

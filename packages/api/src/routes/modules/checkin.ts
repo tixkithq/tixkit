@@ -9,6 +9,7 @@ import {
   CheckInListRepository,
   ScanLogRepository,
   AttendeeRepository,
+  OrderRepository,
   getDriver,
 } from '@tixkit/db';
 import { sql } from 'kysely';
@@ -320,17 +321,100 @@ export const checkInRoutes: FastifyPluginAsync = async (app) => {
         requestHash: hashRequest({ ticketId, toEmail: body.toEmail }),
       },
       async () => {
-        const transferredAt = new Date();
-        const transferred = await ticketRepo.transferIfValid(ticketId, body.toEmail, transferredAt);
-        if (!transferred) {
-          const currentTicket = await ticketRepo.findById(ticketId);
-          const currentStatus = currentTicket?.status ?? ticket.status;
-          throw new ValidationError(`Ticket status is ${currentStatus}, cannot transfer`);
-        }
+        const reissuedTicket = await db.transaction().execute(async (trx) => {
+          const txDb = trx as typeof db;
+          const txTicketRepo = new TicketRepository(txDb);
+          const txAttendeeRepo = new AttendeeRepository(txDb);
+          const txOrderRepo = new OrderRepository(txDb);
+          const now = new Date();
 
-        const updated = await ticketRepo.findById(ticketId);
+          const sourceTicket = await txTicketRepo.findById(ticketId);
+          if (
+            !sourceTicket ||
+            sourceTicket.tenant_id !== principal.tenantId ||
+            sourceTicket.event_id !== ticket.event_id
+          ) {
+            throw new NotFoundError('Ticket', ticketId);
+          }
+          if (sourceTicket.status !== 'valid') {
+            throw new ValidationError(`Ticket status is ${sourceTicket.status}, cannot transfer`);
+          }
 
-        return { status: 200, body: updated! };
+          const sourceAttendee = await txAttendeeRepo.findById(sourceTicket.attendee_id as string);
+          if (
+            !sourceAttendee ||
+            sourceAttendee.tenant_id !== principal.tenantId ||
+            sourceAttendee.event_id !== sourceTicket.event_id
+          ) {
+            throw new ValidationError(`Ticket ${ticketId} is not attached to a valid attendee`);
+          }
+
+          const recipientAttendee = await txAttendeeRepo.create({
+            tenantId: principal.tenantId,
+            orderId: sourceTicket.order_id as string,
+            eventId: sourceTicket.event_id as string,
+            ticketTypeId: sourceTicket.ticket_type_id as string,
+            eventOccurrenceId: (sourceTicket.event_occurrence_id as string | null) ?? undefined,
+            email: body.toEmail,
+            customAnswers: {
+              transferSourceTicketId: sourceTicket.id,
+              transferSourceAttendeeId: sourceAttendee.id,
+              transferRecipientEmail: body.toEmail,
+            },
+          });
+
+          const recipientTicketId = `tkt_${ulid()}`;
+          const qr = app.context.qrService.generate(recipientTicketId);
+          const recipientTicket = await txTicketRepo.create({
+            id: recipientTicketId,
+            tenantId: principal.tenantId,
+            orderId: sourceTicket.order_id as string,
+            attendeeId: recipientAttendee.id as string,
+            eventId: sourceTicket.event_id as string,
+            ticketTypeId: sourceTicket.ticket_type_id as string,
+            eventOccurrenceId: (sourceTicket.event_occurrence_id as string | null) ?? undefined,
+            code: qr.code,
+            qrPayload: qr.payload,
+            qrHash: qr.hash,
+          });
+
+          await txAttendeeRepo.update(recipientAttendee.id as string, {
+            ticket_id: recipientTicket.id,
+            status: 'confirmed',
+          });
+
+          const transferred = await txTicketRepo.transferIfValid(ticketId, body.toEmail, now);
+          if (!transferred) {
+            const currentTicket = await txTicketRepo.findById(ticketId);
+            const currentStatus = currentTicket?.status ?? sourceTicket.status;
+            throw new ValidationError(`Ticket status is ${currentStatus}, cannot transfer`);
+          }
+
+          await txDb
+            .updateTable('wallet_passes')
+            .set({ status: 'revoked', revoked_at: now, updated_at: now })
+            .where('ticket_id', '=', ticketId)
+            .where('status', '=', 'active')
+            .execute();
+
+          await txOrderRepo.addTimelineEvent(
+            sourceTicket.order_id as string,
+            'ticket.transferred',
+            `Ticket ${sourceTicket.id} transferred to ${body.toEmail}`,
+            {
+              sourceTicketId: sourceTicket.id,
+              sourceAttendeeId: sourceAttendee.id,
+              recipientTicketId: recipientTicket.id,
+              recipientAttendeeId: recipientAttendee.id,
+              recipientEmail: body.toEmail,
+            },
+            principal.id,
+          );
+
+          return recipientTicket;
+        });
+
+        return { status: 200, body: reissuedTicket };
       },
     );
 
