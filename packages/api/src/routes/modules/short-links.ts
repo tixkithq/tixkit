@@ -75,7 +75,10 @@ export const shortLinkRoutes: FastifyPluginAsync = async (app) => {
     const principal = request.principal!;
     ClerkAuthService.requirePermission(principal, 'messages.write');
     const repo = new ShortLinkRepository(db);
-    const links = await repo.listByTenant(principal.tenantId);
+    const scopedBrandIds = principal.brandIds?.length ? principal.brandIds : undefined;
+    const links = scopedBrandIds
+      ? await repo.listByTenantAndBrands(principal.tenantId, scopedBrandIds)
+      : await repo.listByTenant(principal.tenantId);
     return {
       links: links.map((row) => ({
         id: row.id,
@@ -94,7 +97,14 @@ export const shortLinkRoutes: FastifyPluginAsync = async (app) => {
     const repo = new ShortLinkRepository(db);
     const link = await repo.findById(id);
     if (!link || link.tenant_id !== principal.tenantId) {
-      throw new ValidationError('Short link not found', { field: 'id' });
+      throw new NotFoundError('ShortLink', id);
+    }
+    if (
+      principal.brandIds?.length &&
+      (!link.brand_id ||
+        !principal.brandIds.includes(link.brand_id as (typeof principal.brandIds)[number]))
+    ) {
+      throw new NotFoundError('ShortLink', id);
     }
     const aggregate = await repo.getClickAggregate(id);
     return { id, totalClicks: aggregate.totalClicks, byDay: aggregate.byDay };

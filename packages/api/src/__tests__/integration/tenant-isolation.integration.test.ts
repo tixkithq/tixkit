@@ -1649,6 +1649,74 @@ describe('brand and event scope denial', () => {
     await app.close();
   });
 
+  it('GET /short-links hides other-brand and brandless links from brand-scoped keys', async () => {
+    const principal = makePrincipal({
+      type: 'api_key',
+      id: 'ak_brand_scoped',
+      brandIds: ['brd_A'],
+      scopes: ['messages.write'],
+    });
+    const tables: Tables = {
+      short_links: [
+        {
+          id: 'slk_A',
+          tenant_id: 'tnt_1',
+          brand_id: 'brd_A',
+          slug: 'brand-a',
+          destination_url: 'https://example.com/a',
+          utm_params: null,
+          clicks: 2,
+          expires_at: null,
+          created_at: new Date('2026-06-01T00:00:00.000Z'),
+          updated_at: new Date('2026-06-01T00:00:00.000Z'),
+        },
+        {
+          id: 'slk_B',
+          tenant_id: 'tnt_1',
+          brand_id: 'brd_B',
+          slug: 'brand-b',
+          destination_url: 'https://example.com/b',
+          utm_params: null,
+          clicks: 5,
+          expires_at: null,
+          created_at: new Date('2026-06-01T00:00:00.000Z'),
+          updated_at: new Date('2026-06-01T00:00:00.000Z'),
+        },
+        {
+          id: 'slk_tenant',
+          tenant_id: 'tnt_1',
+          brand_id: null,
+          slug: 'tenant-wide',
+          destination_url: 'https://example.com/tenant',
+          utm_params: null,
+          clicks: 1,
+          expires_at: null,
+          created_at: new Date('2026-06-01T00:00:00.000Z'),
+          updated_at: new Date('2026-06-01T00:00:00.000Z'),
+        },
+      ],
+    };
+    const app = await setupApp(shortLinkRoutes, principal, tables);
+
+    const listRes = await app.inject({ method: 'GET', url: '/short-links' });
+    expect(listRes.statusCode).toBe(200);
+    expect(listRes.json().links.map((link: { id: string }) => link.id)).toEqual(['slk_A']);
+
+    const otherBrandClicks = await app.inject({
+      method: 'GET',
+      url: '/short-links/slk_B/clicks',
+    });
+    expect(otherBrandClicks.statusCode).toBe(404);
+
+    const brandlessClicks = await app.inject({
+      method: 'GET',
+      url: '/short-links/slk_tenant/clicks',
+    });
+    expect(brandlessClicks.statusCode).toBe(404);
+
+    await app.close();
+  });
+
   it('PATCH /brands/:brandId returns 404 for brand-scoped key accessing another same-org brand', async () => {
     const principal = makePrincipal({
       type: 'api_key',

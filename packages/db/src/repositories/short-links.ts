@@ -68,6 +68,18 @@ export class ShortLinkRepository extends BaseRepository {
       .execute();
   }
 
+  async listByTenantAndBrands(tenantId: string, brandIds: string[], limit = 50) {
+    if (brandIds.length === 0) return [];
+    return this.db
+      .selectFrom('short_links')
+      .selectAll()
+      .where('tenant_id', '=', tenantId)
+      .where('brand_id', 'in', brandIds)
+      .orderBy('created_at', 'desc')
+      .limit(limit)
+      .execute();
+  }
+
   async slugExists(slug: string): Promise<boolean> {
     const row = await this.db
       .selectFrom('short_links')
