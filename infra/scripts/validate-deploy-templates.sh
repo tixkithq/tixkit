@@ -14,6 +14,38 @@ require_file() {
 require_file infra/fly/api.toml
 require_file infra/render.yaml
 require_file infra/helm/tixkit/values.yaml
+require_file infra/docker-compose.yml
+require_file Dockerfile.api
+require_file Dockerfile.worker
+require_file Dockerfile.checkout
+require_file Dockerfile.admin
+
+validate_runtime_image_pins() {
+  local dockerfile
+  local latest_tag_pattern
+  latest_tag_pattern='(^|[^[:alnum:]_.-]):lates''t([^[:alnum:]_.-]|$)'
+  for dockerfile in Dockerfile.api Dockerfile.worker Dockerfile.checkout Dockerfile.admin; do
+    awk '
+      /^[[:space:]]*FROM[[:space:]]+/ && $0 !~ /@sha256:[0-9a-f]{64}/ {
+        exit 1
+      }
+    ' "${dockerfile}" || fail "${dockerfile} must pin every FROM image with @sha256 digest"
+  done
+
+  if grep -REn "${latest_tag_pattern}" \
+    Dockerfile.api Dockerfile.worker Dockerfile.checkout Dockerfile.admin \
+    infra/helm/tixkit/values.yaml infra/docker-compose.yml infra/scripts >/dev/null; then
+    fail 'runtime image references must not use mutable latest tags'
+  fi
+
+  if grep -REn 'minio/(minio|mc):[^[:space:]]+' \
+    infra/helm/tixkit/values.yaml infra/docker-compose.yml infra/scripts |
+    grep -v '@sha256:' >/dev/null; then
+    fail 'MinIO server/client image references must include @sha256 digests'
+  fi
+}
+
+validate_runtime_image_pins
 
 render_service_health_check_path() {
   local service_name="$1"
