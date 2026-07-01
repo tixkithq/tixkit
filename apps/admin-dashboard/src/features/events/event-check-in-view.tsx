@@ -46,9 +46,10 @@ export function EventCheckInView({ eventId }: { eventId: string }) {
     error: checkInListsError,
     refetch: refetchLists,
   } = useAdminData(() => adminApi.listCheckInLists(eventId), [eventId]);
+  const attendeeQuery = manualSearch.trim();
   const { data: attendeesData, error: attendeesError } = useAdminData(
-    () => adminApi.listAttendees({ eventId }),
-    [eventId],
+    () => adminApi.listAttendees({ eventId, limit: attendeeQuery ? 25 : 10, query: attendeeQuery }),
+    [eventId, attendeeQuery],
   );
 
   const event = eventData;
@@ -136,15 +137,6 @@ export function EventCheckInView({ eventId }: { eventId: string }) {
     );
   }
 
-  const normalizedManualSearch = manualSearch.trim().toLowerCase();
-  const filteredAttendees = normalizedManualSearch
-    ? attendees.filter(
-        (a) =>
-          a.name.toLowerCase().includes(normalizedManualSearch) ||
-          a.email?.toLowerCase().includes(normalizedManualSearch) ||
-          a.ticketId.toLowerCase().includes(normalizedManualSearch),
-      )
-    : attendees.slice(0, 10);
   const displayedCheckIns = event.checkIns + acceptedScanCount;
 
   return (
@@ -268,14 +260,14 @@ export function EventCheckInView({ eventId }: { eventId: string }) {
               <p className="py-4 text-center text-sm text-destructive">
                 Failed to load attendees: {attendeesError.message}
               </p>
-            ) : filteredAttendees.length === 0 ? (
+            ) : attendees.length === 0 ? (
               <p className="py-4 text-center text-sm text-muted-foreground">No attendees found</p>
             ) : (
               <ul
-                aria-label={normalizedManualSearch ? 'Matching attendees' : 'Recent attendees'}
+                aria-label={attendeeQuery ? 'Matching attendees' : 'Recent attendees'}
                 className="max-h-64 space-y-1 overflow-y-auto"
               >
-                {filteredAttendees.map((attendee) => (
+                {attendees.map((attendee) => (
                   <li
                     key={attendee.id}
                     className="flex flex-col gap-1 rounded-md border p-2 text-sm sm:flex-row sm:items-center sm:justify-between"

@@ -156,6 +156,10 @@ const DEVICE_CLOCK_STALE_WARNING_MS = 180 * 24 * 60 * 60 * 1000;
 const scheduledBulkSyncJobs = new Set<string>();
 const pendingBulkSyncJobSchedules = new Set<string>();
 
+function escapeLikePattern(value: string): string {
+  return value.replace(/[\\%_]/g, (character) => `\\${character}`);
+}
+
 function requireEventAccess(principal: Principal, event: Record<string, unknown>, eventId: string) {
   ClerkAuthService.requireResourceTenant(principal, event, 'Event', eventId);
   ClerkAuthService.requireOrganizationScope(principal, event.organization_id as string | undefined);
@@ -177,8 +181,12 @@ export const checkInRoutes: FastifyPluginAsync = async (app) => {
     const principal = request.principal!;
     ClerkAuthService.requirePermission(principal, 'attendees.read');
     const { eventId } = request.params as { eventId: string };
-    const { eventOccurrenceId } = request.query as { eventOccurrenceId?: string };
+    const { eventOccurrenceId, query: rawQuery } = request.query as {
+      eventOccurrenceId?: string;
+      query?: string;
+    };
     const pagination = parsePagination(request.query);
+    const searchQuery = typeof rawQuery === 'string' ? rawQuery.trim() : '';
     const event = await loadEvent(eventId);
     requireEventAccess(principal, event, eventId);
     let query = db
@@ -189,6 +197,17 @@ export const checkInRoutes: FastifyPluginAsync = async (app) => {
       .orderBy('id', 'asc')
       .limit(pagination.limit + 1);
     if (eventOccurrenceId) query = query.where('event_occurrence_id', '=', eventOccurrenceId);
+    if (searchQuery) {
+      const pattern = `%${escapeLikePattern(searchQuery)}%`;
+      query = query.where((eb) =>
+        eb.or([
+          eb('first_name', 'ilike', pattern),
+          eb('last_name', 'ilike', pattern),
+          eb('email', 'ilike', pattern),
+          eb('ticket_id', 'ilike', pattern),
+        ]),
+      );
+    }
     if (pagination.cursor) query = query.where('id', '>', pagination.cursor);
     const rows = await query.execute();
     return pageEnvelope(

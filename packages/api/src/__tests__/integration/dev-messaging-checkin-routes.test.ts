@@ -47,6 +47,31 @@ const likePatternMatches = (rowValue: unknown, pattern: unknown): boolean => {
   return new RegExp(regex).test(rowValue);
 };
 
+type MockCondition =
+  | { type: 'comparison'; column: string; op: string; value: unknown }
+  | { type: 'or'; conditions: MockCondition[] };
+
+const mockConditionMatches = (row: Record<string, unknown>, condition: MockCondition): boolean => {
+  if (condition.type === 'or') {
+    return condition.conditions.some((child) => mockConditionMatches(row, child));
+  }
+
+  const rowValue = getMockColumnValue(row, condition.column);
+  if (condition.op === '=') return mockValuesEqual(rowValue, condition.value);
+  if (condition.op === 'in' && Array.isArray(condition.value)) {
+    return condition.value.includes(rowValue);
+  }
+  if (condition.op === 'is')
+    return condition.value === null ? rowValue === null : rowValue === condition.value;
+  if (condition.op === 'is not') {
+    return condition.value === null ? rowValue !== null : rowValue !== condition.value;
+  }
+  if (condition.op === 'like' || condition.op === 'ilike') {
+    return likePatternMatches(rowValue, condition.value);
+  }
+  return true;
+};
+
 function createMockDb(tables: Record<string, unknown> = {}): unknown {
   const tableState = tables as Record<string, unknown>;
   const getRows = (table: string): Record<string, unknown>[] => {
@@ -54,9 +79,21 @@ function createMockDb(tables: Record<string, unknown> = {}): unknown {
     return tableState[table] as Record<string, unknown>[];
   };
   function createQuery(table: string) {
-    const filters: Array<[string, string, unknown]> = [];
+    const filters: MockCondition[] = [];
     const joins: Array<[string, string, string]> = [];
     let countAlias: string | null = null;
+    let rowLimit: number | null = null;
+    const expressionBuilder = Object.assign(
+      (column: string, op: string, value: unknown): MockCondition => ({
+        type: 'comparison',
+        column,
+        op,
+        value,
+      }),
+      {
+        or: (conditions: MockCondition[]): MockCondition => ({ type: 'or', conditions }),
+      },
+    );
     const query = {
       select: (selection?: unknown) => {
         if (typeof selection === 'function') {
@@ -87,12 +124,17 @@ function createMockDb(tables: Record<string, unknown> = {}): unknown {
       },
       where: (...args: unknown[]) => {
         if (typeof args[0] === 'string' && typeof args[1] === 'string') {
-          filters.push([args[0], args[1], args[2]]);
+          filters.push({ type: 'comparison', column: args[0], op: args[1], value: args[2] });
+        } else if (typeof args[0] === 'function') {
+          filters.push(args[0](expressionBuilder));
         }
         return query;
       },
       orderBy: () => query,
-      limit: () => query,
+      limit: (limit: number) => {
+        rowLimit = limit;
+        return query;
+      },
       forUpdate: () => query,
       fn: { sum: () => 'sum', countAll: () => 'count' },
       rows() {
@@ -119,17 +161,10 @@ function createMockDb(tables: Record<string, unknown> = {}): unknown {
             });
           }
         }
-        return rows.filter((row) =>
-          filters.every(([column, op, value]) => {
-            const rowValue = getMockColumnValue(row, column);
-            if (op === '=') return mockValuesEqual(rowValue, value);
-            if (op === 'in' && Array.isArray(value)) return value.includes(rowValue);
-            if (op === 'is') return value === null ? rowValue === null : rowValue === value;
-            if (op === 'is not') return value === null ? rowValue !== null : rowValue !== value;
-            if (op === 'like') return likePatternMatches(rowValue, value);
-            return true;
-          }),
+        const filtered = rows.filter((row) =>
+          filters.every((condition) => mockConditionMatches(row, condition)),
         );
+        return rowLimit == null ? filtered : filtered.slice(0, rowLimit);
       },
       async executeTakeFirst() {
         if (countAlias) return { [countAlias]: query.rows().length };
@@ -4526,6 +4561,74 @@ describe('ticket transfer and attendee update', () => {
     expect(body.items).toHaveLength(1);
     expect(body.items[0].id).toBe('att_1');
     expect(body.items.map((item: { id: string }) => item.id)).not.toContain('att_other_org');
+    await app.close();
+  });
+
+  it('GET /events/:eventId/attendees searches before pagination', async () => {
+    const event = {
+      id: 'evt_1',
+      tenant_id: 'tnt_1',
+      organization_id: 'org_1',
+      brand_id: 'brd_1',
+      status: 'published',
+      slug: 'evt',
+      title: 'Event',
+      timezone: 'UTC',
+      starts_at: new Date(),
+      visibility: 'public',
+      seo: '{}',
+    };
+    const attendees = Array.from({ length: 60 }, (_, index) => ({
+      id: `att_${String(index).padStart(2, '0')}`,
+      tenant_id: 'tnt_1',
+      order_id: `ord_${index}`,
+      event_id: 'evt_1',
+      ticket_type_id: 'tt_general',
+      ticket_id: `TKT-GEN-${index}`,
+      first_name: 'General',
+      last_name: `Guest ${index}`,
+      email: `guest-${index}@example.test`,
+      status: 'confirmed',
+      phone: null,
+      custom_answers: null,
+      checked_in_at: null,
+      check_in_device_id: null,
+      created_at: new Date(),
+      updated_at: new Date(),
+    }));
+    attendees.push({
+      id: 'att_target',
+      tenant_id: 'tnt_1',
+      order_id: 'ord_target',
+      event_id: 'evt_1',
+      ticket_type_id: 'tt_vip',
+      ticket_id: 'TKT-TARGET-999',
+      first_name: 'Target',
+      last_name: 'Guest',
+      email: 'target@example.test',
+      status: 'confirmed',
+      phone: null,
+      custom_answers: null,
+      checked_in_at: null,
+      check_in_device_id: null,
+      created_at: new Date(),
+      updated_at: new Date(),
+    });
+
+    const app = await setupApp(checkInRoutes, makePrincipal(), { attendees, events: [event] });
+    const byEmail = await app.inject({
+      method: 'GET',
+      url: '/events/evt_1/attendees?query=target%40example.test&limit=1',
+    });
+    expect(byEmail.statusCode).toBe(200);
+    expect(byEmail.json().items.map((item: { id: string }) => item.id)).toEqual(['att_target']);
+
+    const byTicket = await app.inject({
+      method: 'GET',
+      url: '/events/evt_1/attendees?query=TKT-TARGET&limit=1',
+    });
+    expect(byTicket.statusCode).toBe(200);
+    expect(byTicket.json().items.map((item: { id: string }) => item.id)).toEqual(['att_target']);
     await app.close();
   });
 

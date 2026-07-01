@@ -74,6 +74,12 @@ export function CheckInView() {
     setAcceptedScanCount(0);
   }, [selectedEventId]);
 
+  React.useEffect(() => {
+    if (!selectedEventId && events.length === 1) {
+      setSelectedEventId(events[0].id);
+    }
+  }, [events, selectedEventId]);
+
   // Auto-select the only active check-in list when one is available.
   React.useEffect(() => {
     if (!selectedCheckInListId && checkInLists.length === 1) {
@@ -336,21 +342,13 @@ function ManualLookup({
   onSearchChange: (value: string) => void;
 }) {
   const manualSearchId = React.useId();
+  const attendeeQuery = search.trim();
   const { data, loading, error } = useAdminData(
-    () => adminApi.listAttendees({ eventId }),
-    [eventId],
+    () => adminApi.listAttendees({ eventId, limit: attendeeQuery ? 25 : 10, query: attendeeQuery }),
+    [eventId, attendeeQuery],
   );
 
   const attendees = data?.items ?? [];
-  const normalizedSearch = search.trim().toLowerCase();
-  const filtered = normalizedSearch
-    ? attendees.filter(
-        (a) =>
-          a.name.toLowerCase().includes(normalizedSearch) ||
-          a.email?.toLowerCase().includes(normalizedSearch) ||
-          a.ticketId.toLowerCase().includes(normalizedSearch),
-      )
-    : attendees.slice(0, 10);
 
   if (loading) return <Skeleton className="h-32 w-full" />;
   if (error) return <ApiErrorState error={error} className="border-0 bg-transparent p-0" />;
@@ -368,14 +366,14 @@ function ManualLookup({
         value={search}
         onChange={(e) => onSearchChange(e.target.value)}
       />
-      {filtered.length === 0 ? (
+      {attendees.length === 0 ? (
         <p className="py-4 text-center text-sm text-muted-foreground">No attendees found</p>
       ) : (
         <ul
-          aria-label={normalizedSearch ? 'Matching attendees' : 'Recent attendees'}
+          aria-label={attendeeQuery ? 'Matching attendees' : 'Recent attendees'}
           className="max-h-64 space-y-1 overflow-y-auto"
         >
-          {filtered.map((attendee) => (
+          {attendees.map((attendee) => (
             <li
               key={attendee.id}
               className="flex flex-col gap-1 rounded-md border p-2 text-sm sm:flex-row sm:items-center sm:justify-between"

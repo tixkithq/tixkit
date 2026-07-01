@@ -1704,7 +1704,7 @@ export type AdminApi = {
   refundOrder(orderId: string, input: RefundOrderInput): Promise<ApiResult<RefundOrderResult>>;
 
   listAttendees(
-    input: PageCursor & { eventId?: string },
+    input: PageCursor & { eventId?: string; query?: string },
   ): Promise<ApiResult<PageResult<AdminAttendeeListItem>>>;
   updateAttendee(
     attendeeId: string,
@@ -5172,6 +5172,8 @@ export const adminApi: AdminApi = {
         if (input.cursor) params.set('cursor', input.cursor);
         if (input.limit) params.set('limit', String(input.limit));
         if (input.eventId) params.set('eventId', input.eventId);
+        const trimmedQuery = input.query?.trim();
+        if (trimmedQuery) params.set('query', trimmedQuery);
         const qs = params.toString();
         const path = input.eventId ? `/v1/events/${input.eventId}/attendees` : '/v1/attendees';
         const result = await request<PageResult<AdminAttendeeListItem>>(
@@ -5190,6 +5192,15 @@ export const adminApi: AdminApi = {
       () => {
         let attendees = fixtureAttendees;
         if (input.eventId) attendees = attendees.filter((a) => a.eventId === input.eventId);
+        const normalizedQuery = input.query?.trim().toLowerCase();
+        if (normalizedQuery) {
+          attendees = attendees.filter(
+            (attendee) =>
+              attendee.name.toLowerCase().includes(normalizedQuery) ||
+              attendee.email?.toLowerCase().includes(normalizedQuery) ||
+              attendee.ticketId.toLowerCase().includes(normalizedQuery),
+          );
+        }
         return ok(paginate(attendees, input.cursor, input.limit));
       },
     );

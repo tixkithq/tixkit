@@ -6,6 +6,7 @@ import {
   normalizeAdminAttendeeListItem,
   normalizeLiveCheckInScanResult,
 } from '@/lib/api';
+import { CheckInView } from './scan-view';
 import { EventCheckInView } from '@/features/events/event-check-in-view';
 
 afterEach(() => {
@@ -217,38 +218,115 @@ describe('Check-in scan result', () => {
         },
       ],
     });
-    vi.spyOn(adminApi, 'listAttendees').mockResolvedValue({
+    const searchedAttendee = normalizeAdminAttendeeListItem({
+      id: 'att_live_1',
+      eventId: 'evt_1',
+      orderId: 'ord_1',
+      ticketId: 'tkt_live_1',
+      ticketTypeId: 'tt_vip',
+      firstName: 'Avery',
+      lastName: 'Stone',
+      email: 'avery@example.test',
+      status: 'active',
+      checkedInAt: '2026-06-29T12:04:00.000Z',
+      createdAt: '2026-06-29T11:00:00.000Z',
+    });
+    const listAttendees = vi.spyOn(adminApi, 'listAttendees').mockImplementation(async (input) => ({
       ok: true,
       data: {
-        items: [
-          normalizeAdminAttendeeListItem({
-            id: 'att_live_1',
-            eventId: 'evt_1',
-            orderId: 'ord_1',
-            ticketId: 'tkt_live_1',
-            ticketTypeId: 'tt_vip',
-            firstName: 'Avery',
-            lastName: 'Stone',
-            email: 'avery@example.test',
-            status: 'active',
-            checkedInAt: '2026-06-29T12:04:00.000Z',
-            createdAt: '2026-06-29T11:00:00.000Z',
-          }),
-        ],
-        total: 1,
+        items: input.query?.trim() ? [searchedAttendee] : [],
+        total: input.query?.trim() ? 1 : 0,
       },
-    });
+    }));
 
     render(<EventCheckInView eventId="evt_1" />);
+
+    const manualSearch = await screen.findByPlaceholderText('Search by name, email, or ticket ID');
+    fireEvent.change(manualSearch, { target: { value: 'avery' } });
 
     expect(await screen.findByText('Avery Stone')).toBeInTheDocument();
     expect(screen.getByText('tt_vip')).toBeInTheDocument();
     expect(screen.getByText('Checked in')).toBeInTheDocument();
+    await waitFor(() => {
+      expect(listAttendees).toHaveBeenCalledWith({ eventId: 'evt_1', limit: 25, query: 'avery' });
+    });
+  });
 
-    const manualSearch = screen.getByPlaceholderText('Search by name, email, or ticket ID');
-    fireEvent.change(manualSearch, { target: { value: 'avery' } });
+  it('uses server-backed attendee search on the standalone check-in page', async () => {
+    vi.spyOn(adminApi, 'listEvents').mockResolvedValue({
+      ok: true,
+      data: {
+        items: [
+          {
+            id: 'evt_1',
+            title: 'Spring Gala',
+            slug: 'spring-gala',
+            status: 'published',
+            startsAt: '2026-07-01T19:00:00.000Z',
+            endsAt: '2026-07-01T23:00:00.000Z',
+            timezone: 'America/New_York',
+            venueName: 'Main Hall',
+            city: 'New York',
+            visibility: 'public',
+            seo: {},
+            currency: 'USD',
+            resalePolicy: { enabled: false, maxMultiplier: 1 },
+            grossSalesCents: 250000,
+            ticketsSold: 25,
+            capacity: 100,
+            checkIns: 10,
+            updatedAt: '2026-06-29T12:00:00.000Z',
+          },
+        ],
+        total: 1,
+      },
+    });
+    vi.spyOn(adminApi, 'listCheckInLists').mockResolvedValue({
+      ok: true,
+      data: [
+        {
+          id: 'cil_1',
+          eventId: 'evt_1',
+          name: 'Main Door',
+          ticketTypeIds: ['tt_1'],
+          status: 'active',
+        },
+      ],
+    });
+    const searchedAttendee = normalizeAdminAttendeeListItem({
+      id: 'att_live_2',
+      eventId: 'evt_1',
+      orderId: 'ord_2',
+      ticketId: 'tkt_live_2',
+      ticketTypeId: 'tt_ga',
+      firstName: 'Jordan',
+      lastName: 'Lee',
+      email: 'jordan@example.test',
+      status: 'active',
+      checkedInAt: null,
+      createdAt: '2026-06-29T11:00:00.000Z',
+    });
+    const listAttendees = vi.spyOn(adminApi, 'listAttendees').mockImplementation(async (input) => ({
+      ok: true,
+      data: {
+        items: input.query?.trim() ? [searchedAttendee] : [],
+        total: input.query?.trim() ? 1 : 0,
+      },
+    }));
 
-    expect(await screen.findByText('Avery Stone')).toBeInTheDocument();
+    render(<CheckInView />);
+
+    const manualSearch = await screen.findByPlaceholderText('Search by name, email, or ticket ID');
+    fireEvent.change(manualSearch, { target: { value: 'jordan@example.test' } });
+
+    expect(await screen.findByText('Jordan Lee')).toBeInTheDocument();
+    await waitFor(() => {
+      expect(listAttendees).toHaveBeenCalledWith({
+        eventId: 'evt_1',
+        limit: 25,
+        query: 'jordan@example.test',
+      });
+    });
   });
 
   it('updates the visible checked-in summary after an accepted scan', async () => {
