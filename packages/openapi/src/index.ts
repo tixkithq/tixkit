@@ -5954,9 +5954,10 @@ const rawOpenApiSpec = {
                 type: 'object',
                 properties: {
                   email: { type: 'string', format: 'email' },
-                  role: { type: 'string', enum: ['owner', 'admin', 'organizer', 'viewer'] },
+                  role: { type: 'string', enum: ['admin', 'organizer', 'viewer'] },
                 },
                 required: ['email'],
+                additionalProperties: false,
               },
             },
           },

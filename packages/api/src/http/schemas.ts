@@ -438,6 +438,13 @@ export const updateOrganizationSchema = z
   })
   .strict();
 
+export const createOrganizationInvitationSchema = z
+  .object({
+    email: z.string().trim().toLowerCase().email(),
+    role: z.enum(['admin', 'organizer', 'viewer']).optional().default('viewer'),
+  })
+  .strict();
+
 export const createBrandSchema = z
   .object({
     organizationId: ulidSchema,

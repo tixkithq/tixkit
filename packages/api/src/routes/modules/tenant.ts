@@ -13,6 +13,7 @@ import { ForbiddenError, ValidationError } from '@tixkit/domain';
 import { writeAuditLog } from '../../auth/audit.js';
 import {
   addBrandDomainSchema,
+  createOrganizationInvitationSchema,
   createBrandSchema,
   createOrganizationSchema,
   parseBody,
@@ -272,18 +273,17 @@ export const tenantRoutes: FastifyPluginAsync = async (app) => {
   app.post('/organizations/:organizationId/members/invitations', async (request, reply) => {
     const principal = request.principal!;
     ClerkAuthService.requirePermission(principal, 'settings.write');
+    if (principal.type !== 'user') {
+      throw new ForbiddenError('Organization member invitations require a user principal');
+    }
     const { organizationId } = request.params as { organizationId: string };
     const organization = await new OrganizationRepository(db).findById(organizationId);
     if (!organization) throw new ValidationError('Organization not found');
     ClerkAuthService.requireResourceTenant(principal, organization, 'Organization', organizationId);
     ClerkAuthService.requireOrganizationScope(principal, organizationId);
 
-    const body = request.body as { email?: string; role?: string };
-    const email = body.email?.trim().toLowerCase();
-    if (!email) throw new ValidationError('Email is required');
-    const role = ['owner', 'admin', 'organizer', 'viewer'].includes(body.role ?? '')
-      ? body.role!
-      : 'viewer';
+    const body = parseBody(createOrganizationInvitationSchema, request.body);
+    const { email, role } = body;
 
     const member = await new OrganizationMemberRepository(db).invite({
       tenantId: principal.tenantId,

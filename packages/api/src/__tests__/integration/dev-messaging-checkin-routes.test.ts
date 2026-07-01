@@ -282,6 +282,30 @@ function makePrincipal(overrides: Partial<Principal> = {}): Principal {
   };
 }
 
+function invitationTables() {
+  const userProfiles: Record<string, unknown>[] = [];
+  const organizationMembers: Record<string, unknown>[] = [];
+  const auditLogs: Record<string, unknown>[] = [];
+
+  return {
+    organizations: [
+      {
+        id: 'org_1',
+        tenant_id: 'tnt_1',
+        name: 'Org',
+        slug: 'org',
+        clerk_organization_id: null,
+        status: 'active',
+        created_at: new Date(),
+        updated_at: new Date(),
+      },
+    ],
+    user_profiles: userProfiles,
+    organization_members: organizationMembers,
+    audit_logs: auditLogs,
+  };
+}
+
 function publishedSmsContentRows(now: Date) {
   return {
     document: {
@@ -1038,37 +1062,88 @@ describe('brand domain creation', () => {
   });
 
   it('POST /organizations/:organizationId/members/invitations persists an invited member', async () => {
-    const tables = {
-      organizations: [
-        {
-          id: 'org_1',
-          tenant_id: 'tnt_1',
-          name: 'Org',
-          slug: 'org',
-          clerk_organization_id: null,
-          status: 'active',
-          created_at: new Date(),
-          updated_at: new Date(),
-        },
-      ],
-      user_profiles: [],
-      organization_members: [],
-    };
+    const tables = invitationTables();
     const app = await setupApp(tenantRoutes, makePrincipal(), tables);
     const res = await app.inject({
       method: 'POST',
       url: '/organizations/org_1/members/invitations',
-      payload: { email: 'teammate@example.com', role: 'viewer' },
+      payload: { email: '  Teammate@Example.COM  ', role: 'organizer' },
     });
     expect(res.statusCode).toBe(201);
     expect(res.json()).toMatchObject({
       organizationId: 'org_1',
       email: 'teammate@example.com',
-      role: 'viewer',
+      role: 'organizer',
       status: 'invited',
     });
     expect(tables.user_profiles).toHaveLength(1);
+    expect(tables.user_profiles[0]).toMatchObject({ email: 'teammate@example.com' });
     expect(tables.organization_members).toHaveLength(1);
+    expect(tables.organization_members[0]).toMatchObject({ role: 'organizer' });
+    await app.close();
+  });
+
+  it('POST /organizations/:organizationId/members/invitations rejects malformed email', async () => {
+    const tables = invitationTables();
+    const app = await setupApp(tenantRoutes, makePrincipal(), tables);
+    const res = await app.inject({
+      method: 'POST',
+      url: '/organizations/org_1/members/invitations',
+      payload: { email: 'not-an-email', role: 'viewer' },
+    });
+    expect(res.statusCode).toBe(400);
+    expect(res.json().message).toContain('email');
+    expect(tables.user_profiles).toHaveLength(0);
+    expect(tables.organization_members).toHaveLength(0);
+    await app.close();
+  });
+
+  it('POST /organizations/:organizationId/members/invitations rejects invalid roles', async () => {
+    const tables = invitationTables();
+    const app = await setupApp(tenantRoutes, makePrincipal(), tables);
+    const res = await app.inject({
+      method: 'POST',
+      url: '/organizations/org_1/members/invitations',
+      payload: { email: 'teammate@example.com', role: 'super_admin' },
+    });
+    expect(res.statusCode).toBe(400);
+    expect(res.json().message).toContain('role');
+    expect(tables.user_profiles).toHaveLength(0);
+    expect(tables.organization_members).toHaveLength(0);
+    await app.close();
+  });
+
+  it('POST /organizations/:organizationId/members/invitations rejects owner invitations', async () => {
+    const tables = invitationTables();
+    const app = await setupApp(tenantRoutes, makePrincipal(), tables);
+    const res = await app.inject({
+      method: 'POST',
+      url: '/organizations/org_1/members/invitations',
+      payload: { email: 'owner@example.com', role: 'owner' },
+    });
+    expect(res.statusCode).toBe(400);
+    expect(res.json().message).toContain('role');
+    expect(tables.user_profiles).toHaveLength(0);
+    expect(tables.organization_members).toHaveLength(0);
+    await app.close();
+  });
+
+  it('POST /organizations/:organizationId/members/invitations rejects API key principals', async () => {
+    const tables = invitationTables();
+    const app = await setupApp(
+      tenantRoutes,
+      makePrincipal({ type: 'api_key', id: 'key_1', scopes: ['settings.write'] }),
+      tables,
+    );
+    const res = await app.inject({
+      method: 'POST',
+      url: '/organizations/org_1/members/invitations',
+      payload: { email: 'teammate@example.com', role: 'viewer' },
+    });
+    expect(res.statusCode).toBe(403);
+    expect(res.json().message).toContain('user principal');
+    expect(tables.user_profiles).toHaveLength(0);
+    expect(tables.organization_members).toHaveLength(0);
     await app.close();
   });
 
