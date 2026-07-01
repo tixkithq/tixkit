@@ -93,6 +93,7 @@ describe('openApiSpec', () => {
   it('uses implemented developer route paths', () => {
     expect(openApiSpec.paths['/api-keys']).toBeDefined();
     expect(openApiSpec.paths['/scanner-devices']).toBeDefined();
+    expect(openApiSpec.paths['/oauth-applications']).toBeDefined();
     expect(openApiSpec.paths['/scanner-devices/{deviceId}/revoke']).toBeDefined();
     expect(openApiSpec.paths['/scanner-devices/{deviceId}/revoke'].post.responses).toHaveProperty(
       '200',
@@ -109,6 +110,12 @@ describe('openApiSpec', () => {
       openApiSpec.paths['/scanner-devices'].post.requestBody.content['application/json'].schema
         .properties.scopes.default,
     ).toEqual(['checkins.read', 'checkins.write']);
+    expect(
+      Object.keys(
+        openApiSpec.paths['/oauth-applications'].post.requestBody.content['application/json'].schema
+          .properties,
+      ).sort(),
+    ).toEqual(['name', 'organizationId', 'redirectUris', 'scopes']);
     expect(openApiSpec.paths).not.toHaveProperty('/developer/api-keys');
   });
 

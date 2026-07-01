@@ -7639,7 +7639,6 @@ const rawOpenApiSpec = {
                   name: { type: 'string' },
                   redirectUris: { type: 'array', items: { type: 'string', format: 'uri' } },
                   scopes: { type: 'array', items: { type: 'string' } },
-                  tokenExpirationSeconds: { type: 'integer' },
                 },
                 required: ['organizationId', 'name', 'redirectUris', 'scopes'],
               },
