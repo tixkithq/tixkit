@@ -1,9 +1,10 @@
 import type { FastifyPluginAsync } from 'fastify';
+import type { Principal } from '@tixkit/domain';
 import { Buffer } from 'node:buffer';
 import { randomUUID } from 'node:crypto';
 import { ClerkAuthService } from '../../auth/clerk.js';
 import { WebhookEndpointRepository, WebhookEventRepository } from '@tixkit/db';
-import { NotFoundError, ValidationError } from '@tixkit/domain';
+import { ForbiddenError, NotFoundError, ValidationError } from '@tixkit/domain';
 import {
   pageEnvelope,
   parsePagination,
@@ -16,6 +17,15 @@ import {
   parseBody,
 } from '../../http/schemas.js';
 
+const scopedWebhookEndpointManagementMessage =
+  'Scoped principals cannot manage organization-wide webhook endpoints';
+
+function requireOrganizationWideWebhookEndpointPrincipal(principal: Principal) {
+  if (principal.brandIds?.length || principal.eventIds?.length) {
+    throw new ForbiddenError(scopedWebhookEndpointManagementMessage);
+  }
+}
+
 export const webhookRoutes: FastifyPluginAsync = async (app) => {
   const db = app.context.db;
   const temporalClient = app.context.temporalClient;
@@ -23,6 +33,7 @@ export const webhookRoutes: FastifyPluginAsync = async (app) => {
   app.post('/webhook-endpoints', async (request, reply) => {
     const principal = request.principal!;
     ClerkAuthService.requirePermission(principal, 'developers.write');
+    requireOrganizationWideWebhookEndpointPrincipal(principal);
     const body = parseBody(createWebhookEndpointSchema, request.body);
 
     ClerkAuthService.requireOrganizationScope(principal, body.organizationId);
@@ -43,6 +54,7 @@ export const webhookRoutes: FastifyPluginAsync = async (app) => {
   app.patch('/webhook-endpoints/:endpointId', async (request) => {
     const principal = request.principal!;
     ClerkAuthService.requirePermission(principal, 'developers.write');
+    requireOrganizationWideWebhookEndpointPrincipal(principal);
     const { endpointId } = request.params as { endpointId: string };
     const body = parseBody(updateWebhookEndpointSchema, request.body);
     const repo = new WebhookEndpointRepository(db);
@@ -63,6 +75,7 @@ export const webhookRoutes: FastifyPluginAsync = async (app) => {
   app.get('/webhook-endpoints', async (request) => {
     const principal = request.principal!;
     ClerkAuthService.requirePermission(principal, 'developers.write');
+    requireOrganizationWideWebhookEndpointPrincipal(principal);
     const pagination = parsePagination(request.query);
     // Query across all principal.organizationIds, not just the first.
     let query = db
@@ -98,6 +111,7 @@ export const webhookRoutes: FastifyPluginAsync = async (app) => {
   app.get('/webhook-endpoints/:endpointId/events', async (request) => {
     const principal = request.principal!;
     ClerkAuthService.requirePermission(principal, 'developers.write');
+    requireOrganizationWideWebhookEndpointPrincipal(principal);
     const { endpointId } = request.params as { endpointId: string };
     const pagination = parsePagination(request.query);
 
@@ -159,6 +173,7 @@ export const webhookRoutes: FastifyPluginAsync = async (app) => {
   app.post('/webhook-events/:eventId/replay', async (request, reply) => {
     const principal = request.principal!;
     ClerkAuthService.requirePermission(principal, 'developers.write');
+    requireOrganizationWideWebhookEndpointPrincipal(principal);
     const { eventId } = request.params as { eventId: string };
 
     const eventRepo = new WebhookEventRepository(db);
@@ -194,6 +209,7 @@ export const webhookRoutes: FastifyPluginAsync = async (app) => {
   app.post('/webhook-endpoints/:endpointId/events/:eventId/replay', async (request, reply) => {
     const principal = request.principal!;
     ClerkAuthService.requirePermission(principal, 'developers.write');
+    requireOrganizationWideWebhookEndpointPrincipal(principal);
     const { endpointId, eventId } = request.params as { endpointId: string; eventId: string };
 
     const endpointRepo = new WebhookEndpointRepository(db);

@@ -338,6 +338,8 @@ function createWebhookEndpointListDb(rows: Record<string, unknown>[]) {
 
 const scopedOAuthAppManagementMessage =
   'Scoped principals cannot manage organization-wide OAuth applications';
+const scopedWebhookEndpointManagementMessage =
+  'Scoped principals cannot manage organization-wide webhook endpoints';
 
 function createOAuthApplicationAccessGuardDb() {
   return {
@@ -349,6 +351,20 @@ function createOAuthApplicationAccessGuardDb() {
     }),
     updateTable: vi.fn(() => {
       throw new Error('OAuth application update must not run for scoped principals');
+    }),
+  };
+}
+
+function createWebhookEndpointAccessGuardDb() {
+  return {
+    insertInto: vi.fn(() => {
+      throw new Error('Webhook endpoint insert must not run for scoped principals');
+    }),
+    selectFrom: vi.fn(() => {
+      throw new Error('Webhook endpoint select must not run for scoped principals');
+    }),
+    updateTable: vi.fn(() => {
+      throw new Error('Webhook endpoint update must not run for scoped principals');
     }),
   };
 }
@@ -716,6 +732,54 @@ describe('developer routes integration', () => {
     expect(response.statusCode).toBe(400);
     expect(db.selectFrom).not.toHaveBeenCalled();
     expect(db.updateTable).not.toHaveBeenCalled();
+    await app.close();
+  });
+
+  it('blocks scoped principals from managing organization-wide webhook endpoints before side effects', async () => {
+    const principal: Principal = {
+      type: 'api_key',
+      id: 'key_parent',
+      tenantId: 'tnt_1',
+      organizationIds: ['org_1'],
+      scopes: ['developers.write'],
+      eventIds: ['evt_1'],
+    };
+    const db = createWebhookEndpointAccessGuardDb();
+    const app = await setupWebhookRouteApp(principal, db);
+    const requests = [
+      {
+        method: 'POST',
+        url: '/webhook-endpoints',
+        payload: {
+          organizationId: 'org_1',
+          url: 'https://hooks.example.com/tixkit',
+          events: ['order.paid'],
+        },
+      },
+      {
+        method: 'PATCH',
+        url: '/webhook-endpoints/wh_1',
+        payload: { status: 'disabled' },
+      },
+      { method: 'GET', url: '/webhook-endpoints' },
+      { method: 'GET', url: '/webhook-endpoints/wh_1/events?limit=10' },
+      { method: 'POST', url: '/webhook-events/whe_1/replay' },
+      { method: 'POST', url: '/webhook-endpoints/wh_1/events/whe_1/replay' },
+    ] as const;
+
+    for (const request of requests) {
+      const response = await app.inject(request);
+
+      expect(response.statusCode).toBe(403);
+      expect(response.json()).toMatchObject({
+        code: 'FORBIDDEN',
+        message: scopedWebhookEndpointManagementMessage,
+      });
+    }
+    expect(db.insertInto).not.toHaveBeenCalled();
+    expect(db.selectFrom).not.toHaveBeenCalled();
+    expect(db.updateTable).not.toHaveBeenCalled();
+
     await app.close();
   });
 
