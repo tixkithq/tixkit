@@ -1704,7 +1704,7 @@ export type AdminApi = {
   refundOrder(orderId: string, input: RefundOrderInput): Promise<ApiResult<RefundOrderResult>>;
 
   listAttendees(
-    input: PageCursor & { eventId?: string; query?: string },
+    input: PageCursor & { eventId?: string; query?: string; checkInListId?: string },
   ): Promise<ApiResult<PageResult<AdminAttendeeListItem>>>;
   updateAttendee(
     attendeeId: string,
@@ -5172,6 +5172,7 @@ export const adminApi: AdminApi = {
         if (input.cursor) params.set('cursor', input.cursor);
         if (input.limit) params.set('limit', String(input.limit));
         if (input.eventId) params.set('eventId', input.eventId);
+        if (input.checkInListId) params.set('checkInListId', input.checkInListId);
         const trimmedQuery = input.query?.trim();
         if (trimmedQuery) params.set('query', trimmedQuery);
         const qs = params.toString();

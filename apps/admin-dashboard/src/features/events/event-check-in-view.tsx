@@ -48,8 +48,16 @@ export function EventCheckInView({ eventId }: { eventId: string }) {
   } = useAdminData(() => adminApi.listCheckInLists(eventId), [eventId]);
   const attendeeQuery = manualSearch.trim();
   const { data: attendeesData, error: attendeesError } = useAdminData(
-    () => adminApi.listAttendees({ eventId, limit: attendeeQuery ? 25 : 10, query: attendeeQuery }),
-    [eventId, attendeeQuery],
+    () =>
+      selectedCheckInListId
+        ? adminApi.listAttendees({
+            eventId,
+            checkInListId: selectedCheckInListId,
+            limit: attendeeQuery ? 25 : 10,
+            query: attendeeQuery,
+          })
+        : Promise.resolve({ ok: true as const, data: { items: [], total: 0 } }),
+    [eventId, selectedCheckInListId, attendeeQuery],
   );
 
   const event = eventData;

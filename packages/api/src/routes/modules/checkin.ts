@@ -181,14 +181,27 @@ export const checkInRoutes: FastifyPluginAsync = async (app) => {
     const principal = request.principal!;
     ClerkAuthService.requirePermission(principal, 'attendees.read');
     const { eventId } = request.params as { eventId: string };
-    const { eventOccurrenceId, query: rawQuery } = request.query as {
+    const {
+      eventOccurrenceId,
+      query: rawQuery,
+      checkInListId,
+    } = request.query as {
       eventOccurrenceId?: string;
       query?: string;
+      checkInListId?: string;
     };
     const pagination = parsePagination(request.query);
     const searchQuery = typeof rawQuery === 'string' ? rawQuery.trim() : '';
     const event = await loadEvent(eventId);
     requireEventAccess(principal, event, eventId);
+    let selectedList: CheckInListRow | undefined;
+    if (checkInListId) {
+      const listRepo = new CheckInListRepository(db);
+      const list = await listRepo.findById(checkInListId);
+      if (!list || list.event_id !== eventId) throw new NotFoundError('CheckInList', checkInListId);
+      if (list.status !== 'active') throw new ValidationError('Check-in list is not active');
+      selectedList = list;
+    }
     let query = db
       .selectFrom('attendees')
       .selectAll()
@@ -196,6 +209,15 @@ export const checkInRoutes: FastifyPluginAsync = async (app) => {
       .where('tenant_id', '=', principal.tenantId)
       .orderBy('id', 'asc')
       .limit(pagination.limit + 1);
+    if (selectedList) {
+      const allowedTicketTypeIds = parseJsonValue<string[]>(selectedList.ticket_type_ids, []);
+      if (allowedTicketTypeIds.length > 0) {
+        query = query.where('ticket_type_id', 'in', allowedTicketTypeIds);
+      }
+      if (selectedList.event_occurrence_id) {
+        query = query.where('event_occurrence_id', '=', selectedList.event_occurrence_id);
+      }
+    }
     if (eventOccurrenceId) query = query.where('event_occurrence_id', '=', eventOccurrenceId);
     if (searchQuery) {
       const pattern = `%${escapeLikePattern(searchQuery)}%`;

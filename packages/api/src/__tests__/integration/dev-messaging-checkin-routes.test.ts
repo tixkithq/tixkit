@@ -4632,6 +4632,107 @@ describe('ticket transfer and attendee update', () => {
     await app.close();
   });
 
+  it('GET /events/:eventId/attendees scopes results to selected check-in list', async () => {
+    const event = {
+      id: 'evt_1',
+      tenant_id: 'tnt_1',
+      organization_id: 'org_1',
+      brand_id: 'brd_1',
+      status: 'published',
+      slug: 'evt',
+      title: 'Event',
+      timezone: 'UTC',
+      starts_at: new Date(),
+      visibility: 'public',
+      seo: '{}',
+    };
+    const attendees = [
+      {
+        id: 'att_vip_occurrence',
+        tenant_id: 'tnt_1',
+        order_id: 'ord_vip',
+        event_id: 'evt_1',
+        event_occurrence_id: 'occ_1',
+        ticket_type_id: 'tt_vip',
+        ticket_id: 'TKT-VIP-1',
+        first_name: 'Vip',
+        last_name: 'Guest',
+        email: 'vip@example.test',
+        status: 'confirmed',
+        phone: null,
+        custom_answers: null,
+        checked_in_at: null,
+        check_in_device_id: null,
+        created_at: new Date(),
+        updated_at: new Date(),
+      },
+      {
+        id: 'att_wrong_ticket_type',
+        tenant_id: 'tnt_1',
+        order_id: 'ord_general',
+        event_id: 'evt_1',
+        event_occurrence_id: 'occ_1',
+        ticket_type_id: 'tt_general',
+        ticket_id: 'TKT-GEN-1',
+        first_name: 'General',
+        last_name: 'Guest',
+        email: 'general@example.test',
+        status: 'confirmed',
+        phone: null,
+        custom_answers: null,
+        checked_in_at: null,
+        check_in_device_id: null,
+        created_at: new Date(),
+        updated_at: new Date(),
+      },
+      {
+        id: 'att_wrong_occurrence',
+        tenant_id: 'tnt_1',
+        order_id: 'ord_vip_2',
+        event_id: 'evt_1',
+        event_occurrence_id: 'occ_2',
+        ticket_type_id: 'tt_vip',
+        ticket_id: 'TKT-VIP-2',
+        first_name: 'Other',
+        last_name: 'Occurrence',
+        email: 'other@example.test',
+        status: 'confirmed',
+        phone: null,
+        custom_answers: null,
+        checked_in_at: null,
+        check_in_device_id: null,
+        created_at: new Date(),
+        updated_at: new Date(),
+      },
+    ];
+    const checkInLists = [
+      {
+        id: 'cil_vip_occurrence',
+        event_id: 'evt_1',
+        name: 'VIP Occurrence',
+        ticket_type_ids: JSON.stringify(['tt_vip']),
+        event_occurrence_id: 'occ_1',
+        status: 'active',
+        created_at: new Date(),
+        updated_at: new Date(),
+      },
+    ];
+
+    const app = await setupApp(checkInRoutes, makePrincipal(), {
+      attendees,
+      check_in_lists: checkInLists,
+      events: [event],
+    });
+    const res = await app.inject({
+      method: 'GET',
+      url: '/events/evt_1/attendees?checkInListId=cil_vip_occurrence&limit=10',
+    });
+
+    expect(res.statusCode).toBe(200);
+    expect(res.json().items.map((item: { id: string }) => item.id)).toEqual(['att_vip_occurrence']);
+    await app.close();
+  });
+
   it('POST /tickets/:ticketId/transfer requires Idempotency-Key', async () => {
     const tables = {
       tickets: [

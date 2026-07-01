@@ -248,7 +248,12 @@ describe('Check-in scan result', () => {
     expect(screen.getByText('tt_vip')).toBeInTheDocument();
     expect(screen.getByText('Checked in')).toBeInTheDocument();
     await waitFor(() => {
-      expect(listAttendees).toHaveBeenCalledWith({ eventId: 'evt_1', limit: 25, query: 'avery' });
+      expect(listAttendees).toHaveBeenCalledWith({
+        eventId: 'evt_1',
+        checkInListId: 'cil_1',
+        limit: 25,
+        query: 'avery',
+      });
     });
   });
 
@@ -323,6 +328,7 @@ describe('Check-in scan result', () => {
     await waitFor(() => {
       expect(listAttendees).toHaveBeenCalledWith({
         eventId: 'evt_1',
+        checkInListId: 'cil_1',
         limit: 25,
         query: 'jordan@example.test',
       });

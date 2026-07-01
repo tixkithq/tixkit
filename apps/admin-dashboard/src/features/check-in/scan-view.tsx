@@ -241,6 +241,7 @@ export function CheckInView() {
             <CardContent className="space-y-4">
               <ManualLookup
                 eventId={selectedEventId}
+                checkInListId={selectedCheckInListId}
                 search={manualSearch}
                 onSearchChange={setManualSearch}
               />
@@ -334,18 +335,26 @@ function ScanResult({ result }: { result: CheckInScanResult }) {
 
 function ManualLookup({
   eventId,
+  checkInListId,
   search,
   onSearchChange,
 }: {
   eventId: string;
+  checkInListId: string;
   search: string;
   onSearchChange: (value: string) => void;
 }) {
   const manualSearchId = React.useId();
   const attendeeQuery = search.trim();
   const { data, loading, error } = useAdminData(
-    () => adminApi.listAttendees({ eventId, limit: attendeeQuery ? 25 : 10, query: attendeeQuery }),
-    [eventId, attendeeQuery],
+    () =>
+      adminApi.listAttendees({
+        eventId,
+        checkInListId,
+        limit: attendeeQuery ? 25 : 10,
+        query: attendeeQuery,
+      }),
+    [eventId, checkInListId, attendeeQuery],
   );
 
   const attendees = data?.items ?? [];
