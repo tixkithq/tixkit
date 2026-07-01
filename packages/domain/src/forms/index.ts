@@ -157,7 +157,12 @@ export function validateQuestionDefinition(input: QuestionDefinitionValidationIn
     }
   }
 
-  if (input.isConsentField) {
+  const isWaiver = input.type === 'waiver';
+  if (isWaiver && input.isConsentField === false) {
+    errors.push('Waiver questions must be consent fields');
+  }
+
+  if (input.isConsentField || isWaiver) {
     if (!CONSENT_TYPES.has(input.type)) {
       errors.push('Consent fields must use checkbox or waiver question types');
     }
@@ -248,7 +253,7 @@ export function normalizeQuestionAnswers(
     const answer = answers[question.id];
     if (isAnswerEmpty(answer)) continue;
 
-    if (question.isConsentField && isConsentAccepted(answer)) {
+    if ((question.isConsentField || question.type === 'waiver') && isConsentAccepted(answer)) {
       normalized[question.id] = {
         accepted: true,
         consentText: question.consentText ?? question.label,
@@ -357,7 +362,11 @@ export function validateAnswers(
         break;
       case 'checkbox':
       case 'waiver':
-        if (question.isConsentField && question.required && !isConsentAccepted(answer)) {
+        if (
+          question.required &&
+          (question.isConsentField || question.type === 'waiver') &&
+          !isConsentAccepted(answer)
+        ) {
           errors.push({ questionId: question.id, message: `${question.label} must be accepted` });
         }
         break;

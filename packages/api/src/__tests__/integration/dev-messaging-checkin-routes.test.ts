@@ -4860,6 +4860,47 @@ describe('custom questions CRUD', () => {
     await app.close();
   });
 
+  it('POST /events/:eventId/questions requires waiver consent metadata and stores consent semantics', async () => {
+    const rejected = await setupApp(questionRoutes, makePrincipal(), { events: [event] });
+    const missingConsent = await rejected.inject({
+      method: 'POST',
+      url: '/events/evt_1/questions',
+      payload: { type: 'waiver', label: 'Liability waiver', appliesTo: 'buyer' },
+    });
+    expect(missingConsent.statusCode).toBe(400);
+    expect(missingConsent.json().message).toContain('Consent fields require consent text');
+    await rejected.close();
+
+    const tables = { events: [event], questions: [] };
+    const app = await setupApp(questionRoutes, makePrincipal(), tables);
+    const accepted = await app.inject({
+      method: 'POST',
+      url: '/events/evt_1/questions',
+      payload: {
+        type: 'waiver',
+        label: 'Liability waiver',
+        appliesTo: 'buyer',
+        isConsentField: false,
+        consentText: 'I accept the liability waiver.',
+      },
+    });
+
+    expect(accepted.statusCode).toBe(201);
+    expect(accepted.json()).toMatchObject({
+      type: 'waiver',
+      isConsentField: true,
+      consentText: 'I accept the liability waiver.',
+      consentVersion: '1',
+    });
+    expect((tables.questions as Array<Record<string, unknown>>)[0]).toMatchObject({
+      type: 'waiver',
+      is_consent_field: true,
+      consent_text: 'I accept the liability waiver.',
+      consent_version: '1',
+    });
+    await app.close();
+  });
+
   it('POST /events/:eventId/questions validates option-bearing types', async () => {
     const app = await setupApp(questionRoutes, makePrincipal(), { events: [event] });
     const missingOptions = await app.inject({
@@ -4968,6 +5009,52 @@ describe('custom questions CRUD', () => {
     });
     expect(accepted.statusCode).toBe(200);
     expect(accepted.json().consentVersion).toBe('v2');
+    await app.close();
+  });
+
+  it('PATCH /questions/:questionId preserves waiver consent semantics', async () => {
+    const tables = {
+      questions: [
+        customQuestionRow({
+          type: 'waiver',
+          label: 'Legacy waiver',
+          required: true,
+          is_consent_field: false,
+          consent_text: null,
+          consent_version: null,
+        }),
+      ],
+      events: [event],
+    };
+    const app = await setupApp(questionRoutes, makePrincipal(), tables);
+    const rejected = await app.inject({
+      method: 'PATCH',
+      url: '/questions/q_1',
+      payload: { label: 'Renamed waiver' },
+    });
+    expect(rejected.statusCode).toBe(400);
+    expect(rejected.json().message).toContain('Consent fields require consent text');
+
+    const accepted = await app.inject({
+      method: 'PATCH',
+      url: '/questions/q_1',
+      payload: {
+        consentText: 'I accept the updated waiver.',
+        consentVersion: 'v1',
+      },
+    });
+    expect(accepted.statusCode).toBe(200);
+    expect(accepted.json()).toMatchObject({
+      type: 'waiver',
+      isConsentField: true,
+      consentText: 'I accept the updated waiver.',
+      consentVersion: 'v1',
+    });
+    expect((tables.questions as Array<Record<string, unknown>>)[0]).toMatchObject({
+      is_consent_field: true,
+      consent_text: 'I accept the updated waiver.',
+      consent_version: 'v1',
+    });
     await app.close();
   });
 
@@ -6197,6 +6284,47 @@ describe('checkout question validation', () => {
       accepted: true,
       consentText: 'I agree to receive event updates.',
       consentVersion: 'v2',
+      consentedAt: expect.any(String),
+    });
+  });
+
+  it('requires explicit acceptance for legacy waiver questions', async () => {
+    const tables = {
+      events: [baseEvent],
+      ticket_types: [baseTicketType],
+      checkout_sessions: [],
+      idempotency_records: [],
+      questions: [
+        checkoutQuestion({
+          id: 'q_waiver',
+          type: 'waiver',
+          label: 'Liability waiver',
+          applies_to: 'buyer',
+          is_consent_field: false,
+          consent_text: 'I accept the liability waiver.',
+          consent_version: 'v1',
+        }),
+      ],
+    };
+
+    const rejected = await postCheckoutSession(tables, {
+      buyerFields: { q_waiver: false },
+    });
+    expect(rejected.statusCode).toBe(400);
+    expect(rejected.json().message).toContain('Liability waiver must be accepted');
+
+    const accepted = await postCheckoutSession(tables, {
+      buyerFields: { q_waiver: true },
+    });
+    expect(accepted.statusCode).toBe(201);
+    const storedSession = (tables.checkout_sessions as Array<{ cart: string }>).at(-1);
+    const cart = JSON.parse(storedSession?.cart ?? '{}') as {
+      buyerFields: Record<string, unknown>;
+    };
+    expect(cart.buyerFields.q_waiver).toEqual({
+      accepted: true,
+      consentText: 'I accept the liability waiver.',
+      consentVersion: 'v1',
       consentedAt: expect.any(String),
     });
   });

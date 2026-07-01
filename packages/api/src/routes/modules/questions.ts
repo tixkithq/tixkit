@@ -96,7 +96,7 @@ export const questionRoutes: FastifyPluginAsync = async (app) => {
     await loadScopedTicketType(eventId, body.ticketTypeId);
     await requireConditionalReference(eventId, body.conditionalVisibility);
 
-    const isConsentField = body.isConsentField ?? false;
+    const isConsentField = body.type === 'waiver' ? true : (body.isConsentField ?? false);
     const consentVersion = isConsentField ? (body.consentVersion ?? '1') : null;
     const options = normalizeOptions(body.options);
     assertQuestionDefinition({
@@ -259,12 +259,17 @@ export const questionRoutes: FastifyPluginAsync = async (app) => {
           );
     const finalTicketTypeId =
       body.ticketTypeId !== undefined ? body.ticketTypeId : question.ticket_type_id;
-    const finalIsConsentField = body.isConsentField ?? question.is_consent_field;
+    const finalIsConsentField =
+      finalType === 'waiver' ? true : (body.isConsentField ?? question.is_consent_field);
     const finalConsentText =
       body.consentText !== undefined ? body.consentText : question.consent_text;
     let finalConsentVersion =
       body.consentVersion !== undefined ? body.consentVersion : question.consent_version;
-    if (finalIsConsentField && !finalConsentVersion && body.isConsentField === true) {
+    if (
+      finalIsConsentField &&
+      !finalConsentVersion &&
+      (body.isConsentField === true || finalType === 'waiver')
+    ) {
       finalConsentVersion = '1';
     }
 
@@ -314,11 +319,14 @@ export const questionRoutes: FastifyPluginAsync = async (app) => {
         : null;
     }
     if (body.sortOrder !== undefined) updateData.sort_order = body.sortOrder;
-    if (body.isConsentField !== undefined) {
-      updateData.is_consent_field = body.isConsentField;
-      if (body.isConsentField && !question.consent_version) {
-        updateData.consent_version = finalConsentVersion;
-      }
+    if (
+      body.isConsentField !== undefined ||
+      (finalType === 'waiver' && question.is_consent_field !== true)
+    ) {
+      updateData.is_consent_field = finalIsConsentField;
+    }
+    if (finalIsConsentField && !question.consent_version && finalConsentVersion) {
+      updateData.consent_version = finalConsentVersion;
     }
     if (body.consentText !== undefined) updateData.consent_text = body.consentText;
     if (body.consentVersion !== undefined) updateData.consent_version = body.consentVersion;
