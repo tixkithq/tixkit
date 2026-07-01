@@ -15,6 +15,52 @@ require_file infra/fly/api.toml
 require_file infra/render.yaml
 require_file infra/helm/tixkit/values.yaml
 
+render_service_health_check_path() {
+  local service_name="$1"
+
+  awk -v service_name="${service_name}" '
+    /^  - type: / {
+      in_service = 0
+    }
+    $0 == "    name: " service_name {
+      in_service = 1
+      found_service = 1
+      next
+    }
+    in_service && /^[[:space:]]*healthCheckPath:/ {
+      sub(/^[[:space:]]*healthCheckPath:[[:space:]]*/, "")
+      sub(/[[:space:]]*$/, "")
+      print
+      found_path = 1
+      exit
+    }
+    END {
+      exit found_service && found_path ? 0 : 1
+    }
+  ' infra/render.yaml
+}
+
+next_app_route_file_for_path() {
+  local app_root="$1"
+  local route_path="$2"
+
+  route_path="${route_path%/}"
+  if [[ -z "${route_path}" ]]; then
+    route_path="/"
+  fi
+  if [[ ! "${route_path}" =~ ^/[A-Za-z0-9/_-]*$ ]]; then
+    return 1
+  fi
+
+  local route_segments="${route_path#/}"
+  if [[ -z "${route_segments}" ]]; then
+    printf '%s/route.ts\n' "${app_root}"
+    return 0
+  fi
+
+  printf '%s/%s/route.ts\n' "${app_root}" "${route_segments}"
+}
+
 expected_cors_origins='https://checkout.example.com,https://admin.example.com'
 expected_render_api_origin='https://tixkit-api.onrender.com'
 expected_render_checkout_api_base_url="${expected_render_api_origin}/v1"
@@ -207,6 +253,14 @@ awk -v checkout_api_base_url="${expected_render_checkout_api_base_url}" \
   }
 ' infra/render.yaml ||
   fail "infra/render.yaml must set tixkit-checkout NEXT_PUBLIC_TIXKIT_API_BASE_URL=${expected_render_checkout_api_base_url} and tixkit-admin NEXT_PUBLIC_ADMIN_API_BASE_URL=${expected_render_api_origin}"
+
+checkout_health_path="$(render_service_health_check_path tixkit-checkout)" ||
+  fail 'infra/render.yaml must set tixkit-checkout healthCheckPath'
+test "${checkout_health_path}" = '/health' ||
+  fail 'infra/render.yaml must set tixkit-checkout healthCheckPath to /health'
+checkout_health_route="$(next_app_route_file_for_path apps/checkout/src/app "${checkout_health_path}")" ||
+  fail "infra/render.yaml tixkit-checkout healthCheckPath ${checkout_health_path} must map to a static Next app route"
+require_file "${checkout_health_route}"
 
 grep -Eq "^[[:space:]]*trustProxy:[[:space:]]*'1'[[:space:]]*$" infra/helm/tixkit/values.yaml ||
   fail 'infra/helm/tixkit/values.yaml must set API trustProxy to bounded hop count 1'
