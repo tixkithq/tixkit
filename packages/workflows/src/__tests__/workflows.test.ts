@@ -51,7 +51,7 @@ import { refundWorkflow } from '../workflows/refund.js';
 import { exportWorkflow } from '../workflows/export.js';
 import { webhookDeliveryWorkflow } from '../workflows/webhook-delivery.js';
 import { holdExpirationWorkflow } from '../workflows/hold-expiration.js';
-import { notificationDeliveryWorkflow } from '../workflows/notification.js';
+import { notificationDeliveryWorkflow, smsDeliveryWorkflow } from '../workflows/notification.js';
 import { paymentReconciliationWorkflow } from '../workflows/payment-reconciliation.js';
 import { clerkIdentitySyncWorkflow } from '../workflows/clerk-identity-sync.js';
 import { privacyRequestWorkflow } from '../workflows/privacy.js';
@@ -125,6 +125,18 @@ function makeNotificationDeliveryInput(overrides: Record<string, unknown> = {}) 
     toEmail: 'buyer@test.com',
     variables: { orderId: 'ord_1', notificationType: 'transactional' },
     providerRouteId: 'epr_1',
+    notificationType: 'transactional' as const,
+    ...overrides,
+  };
+}
+
+function makeSmsDeliveryInput(overrides: Record<string, unknown> = {}) {
+  return {
+    version: 1,
+    jobId: 'sms_test_1',
+    tenantId: 'tnt_1',
+    brandId: 'brd_1',
+    providerRouteId: 'spr_1',
     notificationType: 'transactional' as const,
     ...overrides,
   };
@@ -206,6 +218,7 @@ const defaultActivities = {
       text: 'Your tickets are attached.',
     }),
   sendEmailActivity: async () => okResult({ deliveryId: 'emd_1', provider: 'capture' }),
+  sendSmsActivity: async () => okResult({ deliveryId: 'smd_1', provider: 'capture' }),
   generateExportActivity: async () => okResult({ data: 'id\n1', rowCount: 1 }),
   uploadFileActivity: async () => okResult({ fileUrl: 'https://exports.example.test/exp_1.csv' }),
   markExportFailedActivity: async () => okResult({ failed: true }),
@@ -972,6 +985,46 @@ describe('notificationDeliveryWorkflow', () => {
     );
 
     await expect(notificationDeliveryWorkflow(makeNotificationDeliveryInput())).resolves.toEqual({
+      status: 'failed',
+    });
+  });
+});
+
+describe('smsDeliveryWorkflow', () => {
+  beforeEach(() => {
+    resetState();
+    Object.entries(defaultActivities).forEach(([name, impl]) => setActivity(name, impl));
+  });
+
+  it('throws retryable SMS send failures so provider outages are retried', async () => {
+    const sendAttempts: Array<Record<string, unknown>> = [];
+    setActivity('sendSmsActivity', async (input) => {
+      sendAttempts.push(input);
+      return errResult('SMS_SEND_FAILED', 'All SMS providers failed', true);
+    });
+
+    await expect(smsDeliveryWorkflow(makeSmsDeliveryInput())).rejects.toThrow(
+      'SMS delivery failed (SMS_SEND_FAILED): All SMS providers failed',
+    );
+    expect(sendAttempts).toHaveLength(1);
+  });
+
+  it('suppresses SMS sends when consent is required', async () => {
+    setActivity('sendSmsActivity', async () =>
+      errResult('SMS_CONSENT_REQUIRED', 'SMS consent is required before sending', false),
+    );
+
+    await expect(smsDeliveryWorkflow(makeSmsDeliveryInput())).resolves.toEqual({
+      status: 'suppressed',
+    });
+  });
+
+  it('keeps non-retryable SMS send failures failed without throwing', async () => {
+    setActivity('sendSmsActivity', async () =>
+      errResult('SMS_RECIPIENT_INVALID', 'Recipient phone number is invalid', false),
+    );
+
+    await expect(smsDeliveryWorkflow(makeSmsDeliveryInput())).resolves.toEqual({
       status: 'failed',
     });
   });

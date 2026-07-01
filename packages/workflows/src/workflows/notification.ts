@@ -83,6 +83,16 @@ function handleDeliveryActivityFailure(
   return { status: 'failed' };
 }
 
+function handleSmsDeliveryActivityFailure(
+  result: Extract<WorkflowActivityResult<unknown>, { ok: false }>,
+): { status: 'failed' | 'suppressed' } {
+  if (result.errorCode === 'SMS_CONSENT_REQUIRED') {
+    return { status: 'suppressed' };
+  }
+
+  return handleDeliveryActivityFailure('SMS delivery', result);
+}
+
 export async function notificationDeliveryWorkflow(
   input: NotificationDeliveryWorkflowInput,
 ): Promise<{ status: string }> {
@@ -156,7 +166,7 @@ export async function smsDeliveryWorkflow(
   });
 
   if (!sendResult.ok) {
-    return { status: sendResult.errorCode === 'SMS_CONSENT_REQUIRED' ? 'suppressed' : 'failed' };
+    return handleSmsDeliveryActivityFailure(sendResult);
   }
 
   return { status: 'sent' };
