@@ -62,6 +62,15 @@ describe('validateAnswers', () => {
     expect(validateAnswers(questions, { q_1: '+1 (555) 123-4567' }).valid).toBe(true);
   });
 
+  it('validates date type with strict calendar dates', () => {
+    const questions = [makeQuestion({ id: 'q_1', type: 'date', required: true })];
+    expect(validateAnswers(questions, { q_1: '2026-07-01' }).valid).toBe(true);
+    expect(validateAnswers(questions, { q_1: 'not-a-date' }).valid).toBe(false);
+    expect(validateAnswers(questions, { q_1: '2026-2-03' }).valid).toBe(false);
+    expect(validateAnswers(questions, { q_1: '2026-02-30' }).valid).toBe(false);
+    expect(validateAnswers(questions, { q_1: { date: '2026-07-01' } }).valid).toBe(false);
+  });
+
   it('validates select option membership', () => {
     const questions = [
       makeQuestion({ id: 'q_1', type: 'select', options: ['A', 'B'], required: true }),
