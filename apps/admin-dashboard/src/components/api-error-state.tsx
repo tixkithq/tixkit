@@ -35,7 +35,7 @@ export function ApiErrorState({ error, onRetry, title, className }: ApiErrorStat
 
   return (
     <div
-      className={`flex flex-col items-center justify-center gap-3 rounded-lg border border-destructive/30 bg-destructive/5 p-10 text-center ${className ?? ''}`}
+      className={`flex flex-col items-center justify-center gap-3 rounded-lg border border-destructive/30 bg-background p-10 text-center ${className ?? ''}`}
     >
       <div className="flex size-10 items-center justify-center rounded-full bg-destructive/10">
         <AlertCircle className="size-5 text-destructive" />

@@ -392,6 +392,43 @@ describe('ReportsView', () => {
     expect(adminApiMock.getSalesReport).not.toHaveBeenCalled();
   });
 
+  it('shows a retryable error when affiliate workspaces fail to load', async () => {
+    adminApiMock.listOrganizations.mockResolvedValueOnce({
+      ok: false,
+      error: {
+        code: 'workspace_unavailable',
+        message: 'Workspaces unavailable',
+        status: 500,
+      },
+    });
+
+    const view = render(<ReportsView />);
+
+    await view.findByText('Pick an event to view event-scoped reporting tabs.');
+    fireEvent.click(view.getByRole('tab', { name: 'Affiliate' }));
+
+    expect(await view.findByText('Unable to load workspaces')).toBeInTheDocument();
+    expect(view.getByText('Workspaces unavailable')).toBeInTheDocument();
+    expect(
+      view.queryByText('Choose a workspace before loading affiliate reporting.'),
+    ).not.toBeInTheDocument();
+    expect(view.getByRole('combobox', { name: 'Select workspace' })).toBeDisabled();
+    expect(adminApiMock.getAffiliateReport).not.toHaveBeenCalled();
+
+    fireEvent.click(view.getByRole('button', { name: 'Try again' }));
+
+    await view.findByRole('option', { name: 'Demo Org' });
+    expect(view.getByRole('combobox', { name: 'Select workspace' })).toBeEnabled();
+    fireEvent.change(view.getByRole('combobox', { name: 'Select workspace' }), {
+      target: { value: 'org_1' },
+    });
+
+    await waitFor(() => {
+      expect(adminApiMock.getAffiliateReport).toHaveBeenCalledWith('org_1');
+    });
+    expect(await view.findByText('Ada Partners')).toBeInTheDocument();
+  });
+
   it('loads report APIs only after their tab is selected', async () => {
     const view = render(<ReportsView eventId="evt_1" />);
 

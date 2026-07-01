@@ -119,6 +119,7 @@ export function ReportsView({ eventId }: ReportsViewProps) {
   const organizationsState = useAdminData(() => adminApi.listOrganizations());
   const events = eventsState.data?.items ?? [];
   const organizations = organizationsState.data ?? [];
+  const workspaceSelectDisabled = organizationsState.loading || Boolean(organizationsState.error);
   const selectedEvent = events.find((event) => event.id === selectedEventId);
 
   const range = React.useMemo(
@@ -272,8 +273,16 @@ export function ReportsView({ eventId }: ReportsViewProps) {
           <div className="grid gap-2">
             <span className="text-sm font-medium">Workspace</span>
             <Select value={selectedOrganizationId} onValueChange={setSelectedOrganizationId}>
-              <SelectTrigger className="w-full max-w-xs" aria-label="Select workspace">
-                <SelectValue placeholder="Select workspace" />
+              <SelectTrigger
+                className="w-full max-w-xs"
+                aria-label="Select workspace"
+                disabled={workspaceSelectDisabled}
+              >
+                <SelectValue
+                  placeholder={
+                    organizationsState.loading ? 'Loading workspaces...' : 'Select workspace'
+                  }
+                />
               </SelectTrigger>
               <SelectContent>
                 {organizations.map((organization) => (
@@ -389,7 +398,15 @@ export function ReportsView({ eventId }: ReportsViewProps) {
           )}
         </TabsContent>
         <TabsContent value="affiliate">
-          {!selectedOrganizationId ? (
+          {organizationsState.error ? (
+            <ApiErrorState
+              error={organizationsState.error}
+              onRetry={organizationsState.refetch}
+              title="Unable to load workspaces"
+            />
+          ) : organizationsState.loading ? (
+            <ReportSkeleton />
+          ) : !selectedOrganizationId ? (
             <EmptyState
               icon={Users}
               title="Select workspace"

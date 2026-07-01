@@ -403,6 +403,62 @@ test.describe('admin export workflow coverage', () => {
     await expectNoAxeViolations(page, testInfo);
   });
 
+  test('admin reports show retryable affiliate workspace load failures', async ({
+    consoleErrors,
+    page,
+  }, testInfo) => {
+    await requireReachable(page, adminBaseUrl, 'admin dashboard');
+    await requireReachable(page, `${apiBaseUrl}/health`, 'api');
+
+    await page.route(`${apiBaseUrl}/v1/organizations`, async (route) => {
+      await route.fulfill({
+        status: 500,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          error: {
+            code: 'workspace_unavailable',
+            message: 'Workspaces unavailable',
+          },
+        }),
+      });
+    });
+
+    for (const viewport of [
+      { name: 'desktop', size: { width: 1280, height: 900 } },
+      { name: 'mobile', size: mobileReportViewport },
+    ]) {
+      await page.setViewportSize(viewport.size);
+      await page.goto(`${adminBaseUrl}/reports`);
+      await expect(page.getByRole('heading', { name: 'Reports' })).toBeVisible();
+
+      await page.getByRole('tab', { name: 'Affiliate' }).click();
+
+      const affiliatePanel = page.getByLabel('Affiliate');
+      await expect(page.getByText('Unable to load workspaces')).toBeVisible();
+      await expect(affiliatePanel.getByText('Workspaces unavailable')).toBeVisible();
+      await expect(affiliatePanel.getByRole('button', { name: 'Try again' })).toBeVisible();
+      await expect(
+        affiliatePanel.getByText('Choose a workspace before loading affiliate reporting.'),
+      ).toBeHidden();
+      await attachScreenshot(
+        page,
+        testInfo,
+        `admin-affiliate-workspace-load-error-${viewport.name}`,
+      );
+    }
+
+    for (let index = consoleErrors.length - 1; index >= 0; index -= 1) {
+      if (
+        consoleErrors[index].includes('Failed to load resource') &&
+        consoleErrors[index].includes('/v1/organizations')
+      ) {
+        consoleErrors.splice(index, 1);
+      }
+    }
+
+    await expectNoAxeViolations(page, testInfo);
+  });
+
   test('admin reports render tax and attendance browser edge states', async ({
     page,
     request,
