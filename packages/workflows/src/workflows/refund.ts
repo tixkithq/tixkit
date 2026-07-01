@@ -65,6 +65,14 @@ export type RefundWorkflowInput = {
   nonce: string;
 };
 
+export type RefundWorkflowResult = {
+  status: 'completed' | 'failed';
+  notificationStatus?: 'queued' | 'skipped' | 'failed';
+  notificationErrorCode?: string;
+  notificationErrorMessage?: string;
+  notificationRetryable?: boolean;
+};
+
 function handleRequiredActivityFailure(
   activityContext: string,
   result: Extract<WorkflowActivityResult<unknown>, { ok: false }>,
@@ -76,7 +84,19 @@ function handleRequiredActivityFailure(
   return { status: 'failed' };
 }
 
-export async function refundWorkflow(input: RefundWorkflowInput): Promise<{ status: string }> {
+function notificationFailureResult(
+  result: Extract<WorkflowActivityResult<unknown>, { ok: false }>,
+): RefundWorkflowResult {
+  return {
+    status: 'completed',
+    notificationStatus: 'failed',
+    notificationErrorCode: result.errorCode,
+    notificationErrorMessage: result.message,
+    notificationRetryable: result.retryable,
+  };
+}
+
+export async function refundWorkflow(input: RefundWorkflowInput): Promise<RefundWorkflowResult> {
   // Determine if this is a full refund (amount covers remaining refundable balance).
   const orderTotal = input.orderTotalCents;
   const alreadyRefunded = input.alreadyRefundedCents ?? 0;
@@ -144,8 +164,11 @@ export async function refundWorkflow(input: RefundWorkflowInput): Promise<{ stat
     providerRefundId: refundResult.ok ? refundResult.value.providerRefundId : undefined,
   });
   if (!notifyResult.ok) {
-    return handleRequiredActivityFailure('Refund notification', notifyResult);
+    return notificationFailureResult(notifyResult);
   }
 
-  return { status: 'completed' };
+  return {
+    status: 'completed',
+    notificationStatus: notifyResult.value.notified ? 'queued' : 'skipped',
+  };
 }

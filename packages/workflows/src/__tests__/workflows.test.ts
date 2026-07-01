@@ -911,24 +911,36 @@ describe('refundWorkflow', () => {
     expect(result.status).toBe('failed');
   });
 
-  it('throws when refund notification returns a retryable error', async () => {
+  it('completes when refund notification returns a retryable error after refund side effects', async () => {
     setActivity('notifyRefundActivity', async () =>
       errResult('NOTIFY_RETRYABLE', 'Email queue unavailable', true),
     );
 
-    await expect(refundWorkflow(makeRefundInput())).rejects.toThrow(
-      'Refund notification failed (NOTIFY_RETRYABLE): Email queue unavailable',
-    );
+    const result = await refundWorkflow(makeRefundInput());
+
+    expect(result).toEqual({
+      status: 'completed',
+      notificationStatus: 'failed',
+      notificationErrorCode: 'NOTIFY_RETRYABLE',
+      notificationErrorMessage: 'Email queue unavailable',
+      notificationRetryable: true,
+    });
   });
 
-  it('fails when refund notification returns a non-retryable error', async () => {
+  it('completes when refund notification returns a non-retryable error after refund side effects', async () => {
     setActivity('notifyRefundActivity', async () =>
       errResult('NOTIFY_INVALID', 'Invalid recipient', false),
     );
 
     const result = await refundWorkflow(makeRefundInput());
 
-    expect(result.status).toBe('failed');
+    expect(result).toEqual({
+      status: 'completed',
+      notificationStatus: 'failed',
+      notificationErrorCode: 'NOTIFY_INVALID',
+      notificationErrorMessage: 'Invalid recipient',
+      notificationRetryable: false,
+    });
   });
 
   it('completes when refund notification is gracefully skipped', async () => {
