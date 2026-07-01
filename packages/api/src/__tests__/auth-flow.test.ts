@@ -27,6 +27,7 @@ vi.mock('jose', () => ({
 
 type Row = Record<string, unknown>;
 type Tables = Record<string, Row[]>;
+const ACCEPTED_ORGANIZATION_MEMBER_AT = '2026-01-01T00:00:00.000Z';
 
 function makePrincipal(overrides: Partial<Principal> = {}): Principal {
   return {
@@ -52,6 +53,17 @@ function columnKey(column: string): string {
   return column.split('.').at(-1) ?? column;
 }
 
+function organizationMember(userId: string, organizationId: string, tenantId = 'tnt_1'): Row {
+  return {
+    id: `member_${tenantId}_${organizationId}_${userId}`,
+    tenant_id: tenantId,
+    organization_id: organizationId,
+    user_id: userId,
+    role: 'member',
+    accepted_at: ACCEPTED_ORGANIZATION_MEMBER_AT,
+  };
+}
+
 function createAuthDb(initialTables: Tables) {
   const tables = initialTables;
   const updates: Array<{ table: string; values: Row; ids: string[] }> = [];
@@ -70,6 +82,7 @@ function createAuthDb(initialTables: Tables) {
       if (operator === '=') return actual === value;
       if (operator === '!=') return actual !== value;
       if (operator === 'is') return value === null ? actual === null : actual === value;
+      if (operator === 'is not') return value === null ? actual !== null : actual !== value;
       if (operator === 'in') return Array.isArray(value) && value.includes(actual);
       return false;
     });
@@ -200,7 +213,7 @@ describe('ClerkAuthService signed-in user auth', () => {
           permission: 'orders.read',
         },
       ],
-      organization_members: [{ user_id: 'usr_1', organization_id: 'org_1' }],
+      organization_members: [organizationMember('usr_1', 'org_1')],
     });
 
     const service = new ClerkAuthService('sk_test_auth', db as never);
@@ -219,6 +232,38 @@ describe('ClerkAuthService signed-in user auth', () => {
       organizationIds: ['org_1'],
       scopes: ['events.read', 'orders.read'],
     });
+  });
+
+  it('excludes pending and cross-tenant organization memberships from Clerk principals', async () => {
+    vi.mocked(verifyToken).mockResolvedValue({ sub: 'clerk_user_1' } as never);
+    const { db } = createAuthDb({
+      user_profiles: [
+        {
+          id: 'usr_1',
+          tenant_id: 'tnt_1',
+          clerk_user_id: 'clerk_user_1',
+          status: 'active',
+        },
+      ],
+      permission_grants: [],
+      organization_members: [
+        organizationMember('usr_1', 'org_accepted', 'tnt_1'),
+        {
+          ...organizationMember('usr_1', 'org_pending', 'tnt_1'),
+          accepted_at: null,
+        },
+        organizationMember('usr_1', 'org_other_tenant', 'tnt_2'),
+      ],
+    });
+
+    const service = new ClerkAuthService('sk_test_auth', db as never);
+    const result = await service.authenticateRequest(
+      request({ authorization: 'Bearer clerk_session_token' }),
+    );
+
+    expect(result.principal.organizationIds).toEqual(['org_accepted']);
+    expect(result.principal.organizationIds).not.toContain('org_pending');
+    expect(result.principal.organizationIds).not.toContain('org_other_tenant');
   });
 
   it('maps event-scoped Clerk user permission grants to principal eventIds', async () => {
@@ -242,7 +287,7 @@ describe('ClerkAuthService signed-in user auth', () => {
           scope_id: 'evt_A',
         },
       ],
-      organization_members: [{ user_id: 'usr_1', organization_id: 'org_1' }],
+      organization_members: [organizationMember('usr_1', 'org_1')],
     });
 
     const service = new ClerkAuthService('sk_test_auth', db as never);
@@ -280,7 +325,7 @@ describe('ClerkAuthService signed-in user auth', () => {
           scope_id: 'brd_A',
         },
       ],
-      organization_members: [{ user_id: 'usr_1', organization_id: 'org_1' }],
+      organization_members: [organizationMember('usr_1', 'org_1')],
     });
 
     const service = new ClerkAuthService('sk_test_auth', db as never);
@@ -387,7 +432,7 @@ describe('ClerkAuthService signed-in user auth', () => {
           permission: 'settings.write',
         },
       ],
-      organization_members: [{ user_id: 'usr_2', organization_id: 'org_2' }],
+      organization_members: [organizationMember('usr_2', 'org_2', 'tnt_2')],
     });
 
     const service = new ClerkAuthService('sk_test_auth', db as never);
@@ -429,7 +474,7 @@ describe('ClerkAuthService signed-in user auth', () => {
           permission: 'reports.read',
         },
       ],
-      organization_members: [{ user_id: 'usr_2', organization_id: 'org_2' }],
+      organization_members: [organizationMember('usr_2', 'org_2', 'tnt_2')],
     });
 
     const service = new ClerkAuthService('sk_test_auth', db as never);
@@ -589,7 +634,7 @@ describe('OIDCAdapter signed-in user auth', () => {
           status: 'active',
         },
       ],
-      organization_members: [{ user_id: 'usr_1', organization_id: 'org_1' }],
+      organization_members: [organizationMember('usr_1', 'org_1')],
     });
 
     await expect(
@@ -621,7 +666,7 @@ describe('OIDCAdapter signed-in user auth', () => {
           permission: 'events.read',
         },
       ],
-      organization_members: [{ user_id: 'usr_1', organization_id: 'org_1' }],
+      organization_members: [organizationMember('usr_1', 'org_1')],
     });
 
     await expect(
@@ -635,6 +680,70 @@ describe('OIDCAdapter signed-in user auth', () => {
         scopes: ['events.read'],
       },
     });
+  });
+
+  it('excludes pending and cross-tenant organization memberships from OIDC principals', async () => {
+    vi.mocked(jwtVerify).mockResolvedValue({
+      payload: {
+        sub: 'oidc_user_1',
+      },
+    } as never);
+    const { db } = createAuthDb({
+      user_profiles: [
+        {
+          id: 'usr_1',
+          tenant_id: 'tnt_1',
+          clerk_user_id: 'oidc:https://issuer.example.test:oidc_user_1',
+          status: 'active',
+        },
+      ],
+      permission_grants: [],
+      organization_members: [
+        organizationMember('usr_1', 'org_accepted', 'tnt_1'),
+        {
+          ...organizationMember('usr_1', 'org_pending', 'tnt_1'),
+          accepted_at: null,
+        },
+        organizationMember('usr_1', 'org_other_tenant', 'tnt_2'),
+      ],
+    });
+
+    await expect(
+      createOidcAdapter(db).authenticateUser(request({ authorization: 'Bearer oidc_token' })),
+    ).resolves.toMatchObject({
+      principal: {
+        organizationIds: ['org_accepted'],
+      },
+    });
+  });
+
+  it('rejects requested OIDC organizations when membership is still pending', async () => {
+    vi.mocked(jwtVerify).mockResolvedValue({
+      payload: {
+        sub: 'oidc_user_1',
+        org_id: 'org_pending',
+      },
+    } as never);
+    const { db } = createAuthDb({
+      user_profiles: [
+        {
+          id: 'usr_1',
+          tenant_id: 'tnt_1',
+          clerk_user_id: 'oidc:https://issuer.example.test:oidc_user_1',
+          status: 'active',
+        },
+      ],
+      organization_members: [
+        {
+          ...organizationMember('usr_1', 'org_pending', 'tnt_1'),
+          accepted_at: null,
+        },
+      ],
+    });
+
+    await expect(
+      createOidcAdapter(db).authenticateUser(request({ authorization: 'Bearer oidc_token' })),
+    ).rejects.toThrow('Active OIDC organization does not map to Tixkit membership');
   });
 });
 

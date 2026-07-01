@@ -148,10 +148,16 @@ export class OIDCAdapter extends ClerkAdapter {
         .selectAll()
         .where('organization_id', '=', requestedOrg)
         .where(
+          'tenant_id',
+          'in',
+          profiles.map((profile) => profile.tenant_id),
+        )
+        .where(
           'user_id',
           'in',
           profiles.map((profile) => profile.id),
         )
+        .where('accepted_at', 'is not', null)
         .executeTakeFirst();
       const matchedProfile = membership
         ? profiles.find((profile) => profile.id === membership.user_id)
@@ -187,7 +193,9 @@ export class OIDCAdapter extends ClerkAdapter {
       this.db
         .selectFrom('organization_members')
         .selectAll()
+        .where('tenant_id', '=', userProfile.tenant_id)
         .where('user_id', '=', userProfile.id)
+        .where('accepted_at', 'is not', null)
         .execute(),
     ]);
 

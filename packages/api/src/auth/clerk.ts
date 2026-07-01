@@ -379,7 +379,9 @@ export class ClerkAuthService {
       const memberships = await this.db
         .selectFrom('organization_members')
         .selectAll()
+        .where('tenant_id', '=', userProfile.tenant_id)
         .where('user_id', '=', userProfile.id)
+        .where('accepted_at', 'is not', null)
         .execute();
 
       const organizationIds = memberships.map((m) => m.organization_id as Ulid);
