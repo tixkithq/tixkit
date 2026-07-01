@@ -55,6 +55,8 @@ type ResaleFormState = {
   error?: string;
 };
 
+type WalletPassStatus = 'idle' | 'loading' | 'ready' | 'missing_token' | 'error';
+
 function createResaleIdempotencyKey(sessionId: string, ticketId: string): string {
   const random =
     typeof crypto !== 'undefined' && 'randomUUID' in crypto
@@ -92,6 +94,9 @@ export default function ConfirmationClient() {
 
   const [session, setSession] = useState<CheckoutSession | null>(null);
   const [walletPasses, setWalletPasses] = useState<CheckoutWalletPassTicket[]>([]);
+  const [walletPassStatus, setWalletPassStatus] = useState<WalletPassStatus>('idle');
+  const [walletPassError, setWalletPassError] = useState<string | null>(null);
+  const [walletPassRetryCount, setWalletPassRetryCount] = useState(0);
   const [resaleForms, setResaleForms] = useState<Record<string, ResaleFormState>>({});
   const [event, setEvent] = useState<PublicEvent | null>(null);
   const [loading, setLoading] = useState(true);
@@ -232,18 +237,31 @@ export default function ConfirmationClient() {
     async function loadWalletPasses() {
       if (confirmationState !== 'confirmed' || !sessionId) {
         setWalletPasses([]);
+        setWalletPassStatus('idle');
+        setWalletPassError(null);
         return;
       }
       const token = getSessionToken(sessionId);
       if (!token) {
         setWalletPasses([]);
+        setWalletPassStatus('missing_token');
+        setWalletPassError(null);
         return;
       }
+      setWalletPassStatus('loading');
+      setWalletPassError(null);
       try {
         const result = await checkoutApi.getWalletPasses(sessionId, token);
-        if (!cancelled) setWalletPasses(result.tickets);
-      } catch {
-        if (!cancelled) setWalletPasses([]);
+        if (!cancelled) {
+          setWalletPasses(result.tickets);
+          setWalletPassStatus('ready');
+        }
+      } catch (err) {
+        if (!cancelled) {
+          setWalletPasses([]);
+          setWalletPassStatus('error');
+          setWalletPassError(userFacingMessage(err));
+        }
       }
     }
 
@@ -251,7 +269,11 @@ export default function ConfirmationClient() {
     return () => {
       cancelled = true;
     };
-  }, [confirmationState, sessionId]);
+  }, [confirmationState, sessionId, walletPassRetryCount]);
+
+  const retryWalletPasses = useCallback(() => {
+    setWalletPassRetryCount((current) => current + 1);
+  }, []);
 
   const setResaleForm = useCallback((ticketId: string, patch: Partial<ResaleFormState>) => {
     setResaleForms((current) => {
@@ -488,7 +510,44 @@ export default function ConfirmationClient() {
               </CardContent>
             </Card>
 
-            {walletPasses.length > 0 ? (
+            {walletPassStatus === 'loading' ? (
+              <Card>
+                <CardContent className="flex items-center gap-3 py-5 text-sm text-muted-foreground">
+                  <LoaderCircleIcon className="size-4 animate-spin" />
+                  Loading ticket actions...
+                </CardContent>
+              </Card>
+            ) : null}
+
+            {walletPassStatus === 'missing_token' ? (
+              <Alert>
+                <AlertCircleIcon />
+                <AlertTitle>Wallet and resale actions unavailable</AlertTitle>
+                <AlertDescription>
+                  Open this confirmation in the original checkout browser to access wallet passes
+                  and resale actions for these tickets.
+                </AlertDescription>
+              </Alert>
+            ) : null}
+
+            {walletPassStatus === 'error' ? (
+              <Alert variant="destructive">
+                <AlertCircleIcon />
+                <AlertTitle>Wallet and resale actions could not load</AlertTitle>
+                <AlertDescription className="space-y-3">
+                  <p>
+                    {walletPassError ||
+                      'Ticket wallet and resale actions are temporarily unavailable.'}
+                  </p>
+                  <Button type="button" variant="outline" size="sm" onClick={retryWalletPasses}>
+                    <RefreshCwIcon className="size-4" />
+                    Try again
+                  </Button>
+                </AlertDescription>
+              </Alert>
+            ) : null}
+
+            {walletPassStatus === 'ready' && walletPasses.length > 0 ? (
               <Card>
                 <CardHeader>
                   <CardTitle className="flex items-center gap-2">

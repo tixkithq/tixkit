@@ -171,6 +171,40 @@ describe('ConfirmationClient', () => {
     expect(await screen.findByText('ord_1')).toBeInTheDocument();
   });
 
+  it('shows a retryable wallet action error and reloads actions after retry', async () => {
+    checkoutApiMock.getWalletPasses
+      .mockRejectedValueOnce(new Error('Wallet passes are temporarily unavailable'))
+      .mockResolvedValueOnce({ tickets: [resaleTicket] });
+
+    render(<ConfirmationClient />);
+
+    expect(await screen.findByText('Wallet and resale actions could not load')).toBeVisible();
+    expect(screen.getByText('Wallet passes are temporarily unavailable')).toBeVisible();
+    expect(screen.queryByText('Add to Wallet')).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Try again' }));
+
+    expect(await screen.findByText('Add to Wallet')).toBeVisible();
+    expect(screen.getByRole('button', { name: 'List for resale' })).toBeVisible();
+    expect(checkoutApiMock.getWalletPasses).toHaveBeenCalledTimes(2);
+  });
+
+  it('shows original-browser guidance when confirmed wallet actions have no session token', async () => {
+    window.sessionStorage.clear();
+
+    render(<ConfirmationClient />);
+
+    expect(await screen.findByText('What happens next')).toBeInTheDocument();
+    expect(await screen.findByText('Wallet and resale actions unavailable')).toBeVisible();
+    expect(
+      screen.getByText(
+        'Open this confirmation in the original checkout browser to access wallet passes and resale actions for these tickets.',
+      ),
+    ).toBeVisible();
+    expect(screen.queryByText('Add to Wallet')).not.toBeInTheDocument();
+    expect(checkoutApiMock.getWalletPasses).not.toHaveBeenCalled();
+  });
+
   it('emits order_completed once when event details resolve after a completed session', async () => {
     let resolveEvent!: (value: Awaited<ReturnType<typeof publicApi.getEvent>>) => void;
     publicApiMock.getEvent.mockReturnValueOnce(

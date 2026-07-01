@@ -626,6 +626,148 @@ test.describe('paid checkout capture workflow', () => {
     expect(state.walletPassCount).toBe(0);
   });
 
+  test('Wallet actions show retryable load failures on confirmation', async ({ page }) => {
+    await requireReachable(page, checkoutBaseUrl, 'checkout app');
+
+    await page.addInitScript(() => {
+      const originalFetch = window.fetch.bind(window);
+      const sessionId = 'cs_wallet_retry';
+      let walletRequests = 0;
+
+      window.sessionStorage.setItem(`tk:session:${sessionId}`, 'tok_wallet_retry');
+      Object.defineProperty(window, '__walletPassRequests', {
+        configurable: true,
+        get: () => walletRequests,
+      });
+
+      window.fetch = async (input, init) => {
+        const url =
+          typeof input === 'string' ? input : input instanceof Request ? input.url : String(input);
+
+        if (url.includes(`/v1/checkout/sessions/${sessionId}/wallet-passes`)) {
+          walletRequests += 1;
+          if (walletRequests === 1) {
+            return new Response(
+              JSON.stringify({
+                error: {
+                  code: 'wallet_passes_unavailable',
+                  message: 'Wallet passes are temporarily unavailable',
+                },
+              }),
+              {
+                status: 503,
+                headers: { 'Content-Type': 'application/json' },
+              },
+            );
+          }
+
+          return new Response(
+            JSON.stringify({
+              tickets: [
+                {
+                  ticketId: 'tkt_wallet_retry',
+                  ticketCode: 'TK-WALLET-1',
+                  faceValueCents: 2500,
+                  currency: 'USD',
+                  resaleEnabled: true,
+                  resaleMaxPriceCents: 3000,
+                  appleUrl: 'https://wallet.example.test/apple.pkpass',
+                  googleUrl: 'https://pay.google.com/gp/v/save/mock',
+                },
+              ],
+            }),
+            {
+              status: 200,
+              headers: { 'Content-Type': 'application/json' },
+            },
+          );
+        }
+
+        if (url.includes(`/v1/checkout/sessions/${sessionId}`)) {
+          return new Response(
+            JSON.stringify({
+              id: sessionId,
+              eventId: 'evt_wallet_retry',
+              brandId: 'brand_platform',
+              status: 'completed',
+              currency: 'USD',
+              quote: {
+                subtotalCents: 2500,
+                discountCents: 0,
+                taxCents: 0,
+                feeCents: 0,
+                totalCents: 2500,
+              },
+              expiresAt: '2026-07-01T00:00:00.000Z',
+              orderId: 'ord_wallet_retry',
+            }),
+            {
+              status: 200,
+              headers: { 'Content-Type': 'application/json' },
+            },
+          );
+        }
+
+        if (url.includes('/v1/public/events/evt_wallet_retry')) {
+          return new Response(
+            JSON.stringify({
+              id: 'evt_wallet_retry',
+              title: 'Wallet Retry Night',
+              status: 'published',
+              timezone: 'America/New_York',
+              startsAt: '2026-07-17T19:00:00.000Z',
+              brandId: 'brand_platform',
+            }),
+            {
+              status: 200,
+              headers: { 'Content-Type': 'application/json' },
+            },
+          );
+        }
+
+        if (url.includes('/v1/public/brands/brand_platform')) {
+          return new Response(
+            JSON.stringify({
+              id: 'brand_platform',
+              name: 'Tixkit',
+              theme: {},
+              legalUrls: {},
+              whiteLabel: false,
+            }),
+            {
+              status: 200,
+              headers: { 'Content-Type': 'application/json' },
+            },
+          );
+        }
+
+        return originalFetch(input, init);
+      };
+    });
+
+    await page.goto(
+      `${checkoutBaseUrl}/checkout/confirmation?sessionId=cs_wallet_retry&orderId=ord_wallet_retry&orderNumber=TK-WALLET-1`,
+    );
+
+    const alert = page.getByRole('alert').filter({
+      hasText: 'Wallet and resale actions could not load',
+    });
+    await expect(alert).toBeVisible();
+    await expect(alert.getByText('Wallet passes are temporarily unavailable')).toBeVisible();
+
+    await alert.getByRole('button', { name: 'Try again' }).click();
+
+    await expect(page.getByText('Add to Wallet')).toBeVisible();
+    await expect(page.getByRole('button', { name: 'List for resale' })).toBeVisible();
+    await expect
+      .poll(async () =>
+        page.evaluate(
+          () => (window as typeof window & { __walletPassRequests?: number }).__walletPassRequests,
+        ),
+      )
+      .toBe(2);
+  });
+
   test('renders Apple and Google Wallet actions backed by signed pass artifacts', async ({
     browserName,
     page,
