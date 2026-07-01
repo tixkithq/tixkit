@@ -9,6 +9,7 @@ import {
   type CheckoutAnswers,
   type CheckoutAnswerValue,
   isCheckoutQuestionVisible,
+  questionPatternValidationMessage,
 } from '@/lib/checkout-questions';
 
 export type AttendeeAnswers = CheckoutAnswers;
@@ -216,6 +217,12 @@ function DynamicQuestionField({
   const id = `q_${fieldId.replace(/[^A-Za-z0-9_-]/g, '_')}`;
   const descriptionId = question.description ? `${id}_description` : undefined;
   const stringValue = typeof value === 'string' ? value : '';
+  const updatePatternValidity = (
+    control: HTMLInputElement | HTMLTextAreaElement,
+    nextValue = control.value,
+  ) => {
+    control.setCustomValidity(questionPatternValidationMessage(question, nextValue));
+  };
   const requiredMarker = question.required ? <span className="text-destructive"> *</span> : null;
   const label = (
     <Label htmlFor={id}>
@@ -262,7 +269,11 @@ function DynamicQuestionField({
           id={id}
           name={question.id}
           value={stringValue}
-          onChange={(e) => onChange(e.target.value)}
+          onChange={(e) => {
+            updatePatternValidity(e.currentTarget, e.currentTarget.value);
+            onChange(e.currentTarget.value);
+          }}
+          onInvalid={(e) => updatePatternValidity(e.currentTarget)}
           disabled={disabled}
           placeholder={question.placeholder}
           required={question.required}
@@ -437,7 +448,11 @@ function DynamicQuestionField({
                 : 'text'
         }
         value={stringValue}
-        onChange={(e) => onChange(e.target.value)}
+        onChange={(e) => {
+          updatePatternValidity(e.currentTarget, e.currentTarget.value);
+          onChange(e.currentTarget.value);
+        }}
+        onInvalid={(e) => updatePatternValidity(e.currentTarget)}
         disabled={disabled}
         placeholder={question.placeholder}
         required={question.required}

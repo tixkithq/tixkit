@@ -1055,6 +1055,21 @@ describe('openApiSpec', () => {
     });
   });
 
+  it('documents validation patterns on public checkout questions', () => {
+    expect(
+      openApiSpec.paths['/public/events/{eventId}/questions'].get.responses['200'].content[
+        'application/json'
+      ].schema,
+    ).toEqual({ $ref: '#/components/schemas/PublicQuestionsResponse' });
+    expect(openApiSpec.components.schemas.PublicQuestionsResponse.properties).toMatchObject({
+      buyerQuestions: { type: 'array', items: { $ref: '#/components/schemas/Question' } },
+      attendeeQuestions: { type: 'array', items: { $ref: '#/components/schemas/Question' } },
+    });
+    expect(openApiSpec.components.schemas.Question.properties.validationPattern).toEqual({
+      type: 'string',
+    });
+  });
+
   it('documents audit logging and GDPR privacy request routes', () => {
     expect(
       openApiSpec.paths['/audit-logs'].get.responses['200'].content['application/json'].schema,

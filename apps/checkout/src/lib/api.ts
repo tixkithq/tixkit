@@ -310,6 +310,7 @@ export type CheckoutQuestion = {
   isConsentField?: boolean;
   consentText?: string;
   consentVersion?: string;
+  validationPattern?: string;
 };
 
 export type QuestionsResponse = {

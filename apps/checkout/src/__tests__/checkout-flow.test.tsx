@@ -183,9 +183,42 @@ describe('CheckoutFlow buyer validation', () => {
     fireEvent.change(view.getByLabelText(/Email/), {
       target: { value: 'buyer@example.com' },
     });
+    fireEvent.click(view.getByLabelText(/I agree to the photo policy/));
+    fireEvent.click(view.getByLabelText(/I agree to the photo policy/));
     fireEvent.click(view.getByRole('button', { name: 'Continue' }));
 
     expect(await view.findByText('Please check I agree to the photo policy.')).toBeInTheDocument();
+    expect(checkoutApiMock.createSession).not.toHaveBeenCalled();
+  });
+
+  it('blocks checkout before the API when a buyer question fails its validation pattern', async () => {
+    publicApiMock.getQuestions.mockResolvedValue({
+      buyerQuestions: [
+        {
+          id: 'q_member',
+          label: 'Member ID',
+          type: 'text',
+          required: true,
+          appliesTo: 'buyer',
+          validationPattern: '^MEM-[0-9]{4}$',
+        },
+      ],
+      attendeeQuestions: [],
+    });
+    const view = renderCheckoutFlow();
+
+    await view.findByText('General Admission');
+    await view.findByText('Member ID');
+    fireEvent.click(view.getByRole('button', { name: 'Increase General Admission quantity' }));
+    fireEvent.change(view.getByLabelText(/Email/), {
+      target: { value: 'buyer@example.com' },
+    });
+    fireEvent.change(view.getByLabelText(/Member ID/), {
+      target: { value: 'BAD' },
+    });
+    fireEvent.click(view.getByRole('button', { name: 'Continue' }));
+
+    expect(await view.findByText('Member ID format is invalid.')).toBeInTheDocument();
     expect(checkoutApiMock.createSession).not.toHaveBeenCalled();
   });
 

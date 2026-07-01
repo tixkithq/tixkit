@@ -583,6 +583,7 @@ export const publicRoutes: FastifyPluginAsync = async (app) => {
         isConsentField: q.is_consent_field,
         consentText: q.consent_text ?? undefined,
         consentVersion: q.consent_version ?? undefined,
+        validationPattern: q.validation_pattern ?? undefined,
         conditionalVisibility: parseJsonValue(q.conditional_visibility, undefined),
         sortOrder: q.sort_order,
       }));

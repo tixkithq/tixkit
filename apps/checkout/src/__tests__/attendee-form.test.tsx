@@ -306,6 +306,40 @@ describe('AttendeeForm dynamic question types', () => {
     expect(view.getByText('None')).toBeInTheDocument();
   });
 
+  it('applies server validation patterns to text-like questions before submit', () => {
+    const question: CheckoutQuestion = {
+      id: 'q_member_id',
+      label: 'Member ID',
+      type: 'text',
+      required: true,
+      appliesTo: 'buyer',
+      validationPattern: '^MEM-[0-9]{4}$',
+    };
+    const onChange = vi.fn();
+    function PatternHarness() {
+      const [answers, setAnswers] = React.useState<AttendeeAnswers>({});
+      return createAttendeeForm({
+        buyerQuestions: [question],
+        buyerAnswers: answers,
+        onBuyerAnswersChange: (nextAnswers) => {
+          setAnswers(nextAnswers);
+          onChange(nextAnswers);
+        },
+      });
+    }
+
+    const view = render(<PatternHarness />);
+
+    const input = view.getByLabelText(/Member ID/) as HTMLInputElement;
+    fireEvent.change(input, { target: { value: 'BAD' } });
+    fireEvent.invalid(input);
+
+    expect(input.validationMessage).toBe('Member ID format is invalid');
+    fireEvent.change(input, { target: { value: 'MEM-1234' } });
+    expect(input.validationMessage).toBe('');
+    expect(onChange).toHaveBeenLastCalledWith({ q_member_id: 'MEM-1234' });
+  });
+
   it('renders HTML-looking question text as escaped content', () => {
     const questions: CheckoutQuestion[] = [
       {

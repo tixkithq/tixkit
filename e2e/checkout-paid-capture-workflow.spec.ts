@@ -272,6 +272,19 @@ test.describe('paid checkout capture workflow', () => {
       }),
       201,
     );
+    await expectJsonResponse(
+      await request.post(`${apiBaseUrl}/v1/events/${event.id}/questions`, {
+        data: {
+          type: 'text',
+          label: 'Member ID',
+          description: 'Use the MEM-1234 format.',
+          required: true,
+          appliesTo: 'buyer',
+          validationPattern: '^MEM-[0-9]{4}$',
+        },
+      }),
+      201,
+    );
 
     for (const viewport of [
       { name: 'desktop', width: 1440, height: 1000 },
@@ -286,9 +299,19 @@ test.describe('paid checkout capture workflow', () => {
       await expect(requiredCheckbox).toHaveAttribute('required', '');
       await expect(requiredCheckbox).toHaveAttribute('aria-required', 'true');
       await expect(requiredCheckbox).toHaveAccessibleDescription('Required for entry.');
+      const memberId = page.getByLabel(/Member ID\s+\*/);
+      await expect(memberId).toBeVisible();
       await page.getByLabel('Email').fill(`checkbox-ui+${suffix}@example.com`);
       await page.getByLabel('First name').fill('Checkbox');
       await page.getByLabel('Last name').fill('Buyer');
+      await memberId.fill('BAD');
+      await requiredCheckbox.check();
+      await page.getByRole('button', { name: 'Continue' }).click();
+      await expect(memberId).toHaveJSProperty('validationMessage', 'Member ID format is invalid');
+      await expect(page.getByText('Member ID format is invalid.')).toBeVisible();
+      await memberId.fill('MEM-1234');
+      await expect(memberId).toHaveJSProperty('validationMessage', '');
+      await requiredCheckbox.uncheck();
       await page.getByRole('button', { name: 'Continue' }).click();
       await expect(page.getByText('Please check I agree to the venue photo policy.')).toBeVisible();
       await attachScreenshot(page, testInfo, `hosted-required-checkbox-${viewport.name}`);

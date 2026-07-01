@@ -10,6 +10,8 @@ export type UploadArtifactAnswer = {
 export type CheckoutAnswerValue = string | string[] | boolean | UploadArtifactAnswer;
 export type CheckoutAnswers = Record<string, CheckoutAnswerValue>;
 
+const PATTERN_VALIDATION_TYPES = new Set(['text', 'textarea', 'email', 'phone', 'date']);
+
 export function isAnswerEmpty(answer: unknown): boolean {
   return (
     answer === undefined ||
@@ -17,6 +19,16 @@ export function isAnswerEmpty(answer: unknown): boolean {
     answer === '' ||
     (Array.isArray(answer) && answer.length === 0)
   );
+}
+
+export function isRequiredCheckoutAnswerMissing(
+  question: CheckoutQuestion,
+  answer: unknown,
+): boolean {
+  if (question.type === 'checkbox' || question.type === 'waiver') {
+    return answer !== true && answer !== 'true';
+  }
+  return isAnswerEmpty(answer);
 }
 
 function answerValues(answer: unknown): string[] {
@@ -60,4 +72,20 @@ export function normalizeCheckoutAnswers(
       return [questionId, answer];
     }),
   );
+}
+
+export function questionPatternValidationMessage(
+  question: CheckoutQuestion,
+  answer: unknown,
+): string {
+  if (!question.validationPattern || !PATTERN_VALIDATION_TYPES.has(question.type)) return '';
+  if (isAnswerEmpty(answer)) return '';
+  const value = String(answer);
+  try {
+    return new RegExp(question.validationPattern).test(value)
+      ? ''
+      : `${question.label} format is invalid`;
+  } catch {
+    return `${question.label} format is invalid`;
+  }
 }

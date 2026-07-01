@@ -2029,6 +2029,7 @@ describe('public checkout questions', () => {
           type: 'select',
           label: 'Bring guest?',
           options: JSON.stringify(['yes', 'no']),
+          validation_pattern: '^(yes|no)$',
           required: true,
           sort_order: 1,
         }),
@@ -2037,6 +2038,7 @@ describe('public checkout questions', () => {
           applies_to: 'attendee',
           label: 'Guest name',
           required: true,
+          validation_pattern: '^[A-Za-z ]+$',
           conditional_visibility: JSON.stringify({
             field: 'q_parent',
             operator: 'equals',
@@ -2050,10 +2052,15 @@ describe('public checkout questions', () => {
     const res = await app.inject({ method: 'GET', url: '/public/events/evt_1/questions' });
     expect(res.statusCode).toBe(200);
     const body = res.json();
-    expect(body.buyerQuestions[0]).toMatchObject({ id: 'q_parent', appliesTo: 'buyer' });
+    expect(body.buyerQuestions[0]).toMatchObject({
+      id: 'q_parent',
+      appliesTo: 'buyer',
+      validationPattern: '^(yes|no)$',
+    });
     expect(body.attendeeQuestions[0]).toMatchObject({
       id: 'q_child',
       appliesTo: 'attendee',
+      validationPattern: '^[A-Za-z ]+$',
       conditionalVisibility: { field: 'q_parent', operator: 'equals', value: 'yes' },
     });
     await app.close();

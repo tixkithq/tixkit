@@ -44,8 +44,9 @@ import { storeSessionToken, getSessionToken } from '@/lib/session-token';
 import { formatCurrency, formatDateTime } from '@/lib/format';
 import { parseItemsParam, parseProductFilterParam } from '@/lib/checkout-query';
 import {
-  isAnswerEmpty,
+  isRequiredCheckoutAnswerMissing,
   normalizeCheckoutAnswers,
+  questionPatternValidationMessage,
   visibleCheckoutQuestions,
 } from '@/lib/checkout-questions';
 import { trackMarketingEvent, type MarketingEventItem } from '@/lib/marketing';
@@ -376,14 +377,17 @@ export default function CheckoutFlow({
             ticketQuestions.map((q) => [q.id, attendeeAnswers[`${lineId}:${i}:${q.id}`]]),
           );
           for (const q of visibleCheckoutQuestions(ticketQuestions, answersForAttendee)) {
-            if (!q.required) continue;
             const key = `${lineId}:${i}:${q.id}`;
             const answer = attendeeAnswers[key];
-            if (isAnswerEmpty(answer)) {
+            if (q.required && isRequiredCheckoutAnswerMissing(q, answer)) {
               if (q.type === 'checkbox') {
                 return `Please check ${q.label} for ${ticketType?.name ?? 'this ticket'} attendee ${i + 1}.`;
               }
               return `Please complete ${q.label} for ${ticketType?.name ?? 'this ticket'} attendee ${i + 1}.`;
+            }
+            const patternError = questionPatternValidationMessage(q, answer);
+            if (patternError) {
+              return `${patternError} for ${ticketType?.name ?? 'this ticket'} attendee ${i + 1}.`;
             }
           }
         }
@@ -391,14 +395,15 @@ export default function CheckoutFlow({
 
       // Validate required buyer questions.
       for (const q of visibleCheckoutQuestions(questions.buyerQuestions, buyerAnswers)) {
-        if (!q.required) continue;
         const answer = buyerAnswers[q.id];
-        if (isAnswerEmpty(answer)) {
+        if (q.required && isRequiredCheckoutAnswerMissing(q, answer)) {
           if (q.type === 'checkbox') {
             return `Please check ${q.label}.`;
           }
           return `Please complete ${q.label}.`;
         }
+        const patternError = questionPatternValidationMessage(q, answer);
+        if (patternError) return `${patternError}.`;
       }
     }
 
