@@ -1125,6 +1125,12 @@ export type AdminBrand = {
     [key: string]: unknown;
   };
   domains: AdminBrandDomain[];
+  supportUrl?: string;
+  legalUrls: {
+    terms?: string;
+    privacy?: string;
+    refundPolicy?: string;
+  };
   whiteLabel: boolean;
   paymentAccountId?: string | null;
   createdAt?: string;
@@ -1491,6 +1497,8 @@ export type UpdateBrandInput = {
   name?: string;
   slug?: string;
   theme?: AdminBrand['theme'];
+  supportUrl?: string;
+  legalUrls?: AdminBrand['legalUrls'];
   whiteLabel?: boolean;
   paymentAccountId?: string | null;
 };
@@ -2094,6 +2102,7 @@ function normalizeBrand(value: Record<string, unknown>): AdminBrand {
   const domains = Array.isArray(value.domains)
     ? value.domains.map((domain) => normalizeBrandDomain(asRecord(domain)))
     : [];
+  const legalUrls = parseJsonRecord(value.legalUrls ?? value.legal_urls);
   return {
     id: String(value.id),
     tenantId: String(value.tenantId ?? value.tenant_id ?? ''),
@@ -2103,6 +2112,12 @@ function normalizeBrand(value: Record<string, unknown>): AdminBrand {
     status,
     theme: parseJsonRecord(value.theme),
     domains,
+    supportUrl: stringValue(value.supportUrl ?? value.support_url, undefined),
+    legalUrls: {
+      terms: stringValue(legalUrls.terms, undefined),
+      privacy: stringValue(legalUrls.privacy, undefined),
+      refundPolicy: stringValue(legalUrls.refundPolicy, undefined),
+    },
     whiteLabel: Boolean(value.whiteLabel ?? value.white_label),
     paymentAccountId:
       stringValue(value.paymentAccountId ?? value.payment_account_id, undefined) ?? null,
@@ -3323,6 +3338,8 @@ const fixtureBrands: AdminBrand[] = [
     status: 'draft',
     theme: { primaryColor: '#222222' },
     domains: fixtureBrandDomains,
+    supportUrl: undefined,
+    legalUrls: {},
     whiteLabel: false,
     createdAt: iso(-30),
     updatedAt: iso(0),

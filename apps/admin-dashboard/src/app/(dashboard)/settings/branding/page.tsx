@@ -31,6 +31,10 @@ function BrandingPageContent() {
   const [brand, setBrand] = React.useState<AdminBrand | null>(null);
   const [brandName, setBrandName] = React.useState('');
   const [primaryColor, setPrimaryColor] = React.useState('#222222');
+  const [supportUrl, setSupportUrl] = React.useState('');
+  const [termsUrl, setTermsUrl] = React.useState('');
+  const [privacyUrl, setPrivacyUrl] = React.useState('');
+  const [refundPolicyUrl, setRefundPolicyUrl] = React.useState('');
   const [domain, setDomain] = React.useState('');
   const [domains, setDomains] = React.useState<AdminBrandDomain[]>([]);
   const [loading, setLoading] = React.useState(true);
@@ -61,6 +65,10 @@ function BrandingPageContent() {
         ? selectedBrand.theme.primaryColor
         : '#222222',
     );
+    setSupportUrl(selectedBrand?.supportUrl ?? '');
+    setTermsUrl(selectedBrand?.legalUrls?.terms ?? '');
+    setPrivacyUrl(selectedBrand?.legalUrls?.privacy ?? '');
+    setRefundPolicyUrl(selectedBrand?.legalUrls?.refundPolicy ?? '');
     setDomains(selectedBrand?.domains ?? []);
     setLoading(false);
   }, [availableBrands, bootstrapError, bootstrapLoading, brandId]);
@@ -105,11 +113,21 @@ function BrandingPageContent() {
     }
 
     setSaving(true);
+    const nextSupportUrl = supportUrl.trim();
+    const nextTermsUrl = termsUrl.trim();
+    const nextPrivacyUrl = privacyUrl.trim();
+    const nextRefundPolicyUrl = refundPolicyUrl.trim();
     const result = await adminApi.updateBrand(brand.id, {
       name: nextBrandName,
       theme: {
         ...brand.theme,
         primaryColor,
+      },
+      supportUrl: nextSupportUrl || undefined,
+      legalUrls: {
+        ...(nextTermsUrl ? { terms: nextTermsUrl } : {}),
+        ...(nextPrivacyUrl ? { privacy: nextPrivacyUrl } : {}),
+        ...(nextRefundPolicyUrl ? { refundPolicy: nextRefundPolicyUrl } : {}),
       },
     });
     setSaving(false);
@@ -121,6 +139,10 @@ function BrandingPageContent() {
 
     setBrand(result.data);
     setBrandName(result.data.name);
+    setSupportUrl(result.data.supportUrl ?? '');
+    setTermsUrl(result.data.legalUrls.terms ?? '');
+    setPrivacyUrl(result.data.legalUrls.privacy ?? '');
+    setRefundPolicyUrl(result.data.legalUrls.refundPolicy ?? '');
     toast.success('Brand settings saved');
   };
 
@@ -287,6 +309,60 @@ function BrandingPageContent() {
                     className="w-32"
                   />
                 </div>
+              </div>
+            </CardContent>
+          </Card>
+          <Card>
+            <CardHeader>
+              <CardTitle>Legal & Support Links</CardTitle>
+              <CardDescription>
+                Buyer-facing links shown in checkout and event page footers.
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="grid gap-4 md:grid-cols-2">
+              <div className="space-y-2">
+                <Label htmlFor="brand-support-url">Support URL</Label>
+                <Input
+                  id="brand-support-url"
+                  type="url"
+                  inputMode="url"
+                  placeholder="https://example.com/support"
+                  value={supportUrl}
+                  onChange={(event) => setSupportUrl(event.target.value)}
+                />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="brand-terms-url">Terms URL</Label>
+                <Input
+                  id="brand-terms-url"
+                  type="url"
+                  inputMode="url"
+                  placeholder="https://example.com/terms"
+                  value={termsUrl}
+                  onChange={(event) => setTermsUrl(event.target.value)}
+                />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="brand-privacy-url">Privacy URL</Label>
+                <Input
+                  id="brand-privacy-url"
+                  type="url"
+                  inputMode="url"
+                  placeholder="https://example.com/privacy"
+                  value={privacyUrl}
+                  onChange={(event) => setPrivacyUrl(event.target.value)}
+                />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="brand-refund-policy-url">Refund policy URL</Label>
+                <Input
+                  id="brand-refund-policy-url"
+                  type="url"
+                  inputMode="url"
+                  placeholder="https://example.com/refunds"
+                  value={refundPolicyUrl}
+                  onChange={(event) => setRefundPolicyUrl(event.target.value)}
+                />
               </div>
             </CardContent>
           </Card>

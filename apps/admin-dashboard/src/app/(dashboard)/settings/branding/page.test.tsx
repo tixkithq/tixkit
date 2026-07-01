@@ -14,6 +14,8 @@ const bootstrapState = vi.hoisted(() => ({
         status: 'active',
         theme: { primaryColor: '#222222' },
         domains: [],
+        supportUrl: undefined,
+        legalUrls: {},
         whiteLabel: false,
       },
     ],
@@ -82,6 +84,8 @@ describe('BrandingPage', () => {
         ...bootstrapState.value.availableBrands[0],
         name: 'Festival Ops',
         theme: { primaryColor: '#123456' },
+        supportUrl: undefined,
+        legalUrls: {},
       },
     });
 
@@ -103,6 +107,54 @@ describe('BrandingPage', () => {
       name: 'Festival Ops',
       theme: {
         primaryColor: '#123456',
+      },
+      supportUrl: undefined,
+      legalUrls: {},
+    });
+    expect(toastMock.success).toHaveBeenCalledWith('Brand settings saved');
+  });
+
+  it('saves buyer-facing legal and support URLs with the brand settings payload', async () => {
+    apiMock.updateBrand.mockResolvedValue({
+      ok: true,
+      data: {
+        ...bootstrapState.value.availableBrands[0],
+        supportUrl: 'https://help.example.test',
+        legalUrls: {
+          terms: 'https://legal.example.test/terms',
+          privacy: 'https://legal.example.test/privacy',
+          refundPolicy: 'https://legal.example.test/refunds',
+        },
+      },
+    });
+
+    render(<BrandingPage />);
+
+    fireEvent.change(await screen.findByLabelText('Support URL'), {
+      target: { value: ' https://help.example.test ' },
+    });
+    fireEvent.change(screen.getByLabelText('Terms URL'), {
+      target: { value: 'https://legal.example.test/terms' },
+    });
+    fireEvent.change(screen.getByLabelText('Privacy URL'), {
+      target: { value: 'https://legal.example.test/privacy' },
+    });
+    fireEvent.change(screen.getByLabelText('Refund policy URL'), {
+      target: { value: 'https://legal.example.test/refunds' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Save Changes' }));
+
+    await waitFor(() => expect(apiMock.updateBrand).toHaveBeenCalledTimes(1));
+    expect(apiMock.updateBrand).toHaveBeenCalledWith('brd_1', {
+      name: 'Tixkit Dev',
+      theme: {
+        primaryColor: '#222222',
+      },
+      supportUrl: 'https://help.example.test',
+      legalUrls: {
+        terms: 'https://legal.example.test/terms',
+        privacy: 'https://legal.example.test/privacy',
+        refundPolicy: 'https://legal.example.test/refunds',
       },
     });
     expect(toastMock.success).toHaveBeenCalledWith('Brand settings saved');

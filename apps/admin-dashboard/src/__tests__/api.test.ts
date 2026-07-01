@@ -54,10 +54,22 @@ describe('AdminApi settings fixtures', () => {
 
     const updateResult = await adminApi.updateBrand(brand.id, {
       theme: { ...brand.theme, primaryColor: '#111111' },
+      supportUrl: 'https://help.example.test',
+      legalUrls: {
+        terms: 'https://legal.example.test/terms',
+        privacy: 'https://legal.example.test/privacy',
+        refundPolicy: 'https://legal.example.test/refunds',
+      },
     });
     expect(updateResult.ok).toBe(true);
     if (updateResult.ok) {
       expect(updateResult.data.theme.primaryColor).toBe('#111111');
+      expect(updateResult.data.supportUrl).toBe('https://help.example.test');
+      expect(updateResult.data.legalUrls).toEqual({
+        terms: 'https://legal.example.test/terms',
+        privacy: 'https://legal.example.test/privacy',
+        refundPolicy: 'https://legal.example.test/refunds',
+      });
     }
 
     const domainResult = await adminApi.addBrandDomain(brand.id, 'tickets.example.test');
