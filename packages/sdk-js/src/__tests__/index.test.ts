@@ -1297,19 +1297,50 @@ describe('TixkitClient new resource methods', () => {
     expect(call.method).toBe('GET');
   });
 
-  it('exports.download sends GET', async () => {
-    const fm = mockFetch(200, {
-      downloadUrl: 'https://s3.example/file.csv',
-      expiresAt: '2026-01-01',
-    });
+  it('exports.getEvents returns the raw SSE response without JSON parsing', async () => {
+    const fm = vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+      new Response('event: export.updated\ndata: {"status":"completed"}\n\n', {
+        status: 200,
+        headers: { 'Content-Type': 'text/event-stream' },
+      }),
+    );
     const c = new TixkitClient({
       apiKey: '***********',
       apiBaseUrl: 'https://api.test',
       maxRetries: 0,
     });
-    await c.exports.download('exp_1');
+
+    const response = await c.exports.getEvents('exp_1', { lastEventId: 'evt_99' });
+
     const call = getCall(fm);
+    expect(response.headers.get('Content-Type')).toBe('text/event-stream');
+    await expect(response.text()).resolves.toContain('export.updated');
+    expect(call.url).toBe('https://api.test/v1/exports/exp_1/events');
+    expect(call.method).toBe('GET');
+    expect(call.headers.Accept).toBe('text/event-stream');
+    expect(call.headers['Last-Event-ID']).toBe('evt_99');
+  });
+
+  it('exports.download returns the raw redirect response without JSON parsing', async () => {
+    const fm = vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+      new Response(null, {
+        status: 302,
+        headers: { Location: 'https://s3.example/file.csv' },
+      }),
+    );
+    const c = new TixkitClient({
+      apiKey: '***********',
+      apiBaseUrl: 'https://api.test',
+      maxRetries: 0,
+    });
+
+    const response = await c.exports.download('exp_1');
+
+    const call = getCall(fm);
+    expect(response.status).toBe(302);
+    expect(response.headers.get('Location')).toBe('https://s3.example/file.csv');
     expect(call.url).toBe('https://api.test/v1/exports/exp_1/download');
+    expect(call.method).toBe('GET');
   });
 
   it('reports.conversion returns persisted widget view counts from the API contract', async () => {

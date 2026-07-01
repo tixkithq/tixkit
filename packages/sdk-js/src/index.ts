@@ -1756,6 +1756,97 @@ export class TixkitClient {
 
     throw lastError ?? new Error('Request failed');
   }
+
+  async requestRaw(
+    method: string,
+    path: string,
+    options?: {
+      body?: unknown;
+      params?: Record<string, string>;
+      idempotencyKey?: string;
+      headers?: Record<string, string>;
+      successStatuses?: number[];
+    },
+  ): Promise<Response> {
+    const url = new URL(`${this.apiBaseUrl}/v1${path}`);
+
+    if (options?.params) {
+      for (const [key, value] of Object.entries(options.params)) {
+        url.searchParams.set(key, value);
+      }
+    }
+
+    const hasBody = options?.body !== undefined;
+    const headers: Record<string, string> = {
+      'X-Tixkit-Version': this.apiVersion,
+    };
+
+    if (this.apiKey) {
+      headers.Authorization = `Bearer ${this.apiKey}`;
+    }
+    if (hasBody) {
+      headers['Content-Type'] = 'application/json';
+    }
+    if (options?.idempotencyKey) {
+      headers['Idempotency-Key'] = options.idempotencyKey;
+    }
+    if (options?.headers) {
+      Object.assign(headers, options.headers);
+    }
+
+    let lastError: Error | null = null;
+    const attempts = this.maxRetries + 1;
+    const retryableRequest = isSafeMethod(method) || Boolean(options?.idempotencyKey);
+    const successStatuses = new Set(options?.successStatuses ?? []);
+
+    for (let attempt = 0; attempt < attempts; attempt++) {
+      try {
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), this.timeout);
+
+        let response: Response;
+        try {
+          // eslint-disable-next-line no-await-in-loop -- retries must run sequentially so backoff and previous response state are respected.
+          response = await fetch(url.toString(), {
+            method,
+            headers,
+            body: hasBody ? JSON.stringify(options.body) : undefined,
+            signal: controller.signal,
+          });
+        } finally {
+          clearTimeout(timeoutId);
+        }
+
+        if (!response.ok && !successStatuses.has(response.status)) {
+          // eslint-disable-next-line no-await-in-loop -- each retry attempt must consume its own error response before deciding whether to retry.
+          const responseText = await response.text();
+          throw createApiErrorFromResponse(response.status, parseErrorResponse(responseText));
+        }
+
+        return response;
+      } catch (err) {
+        lastError = err instanceof Error ? err : new Error(String(err));
+
+        if (!retryableRequest) {
+          throw err;
+        }
+
+        if (err instanceof TixkitApiError) {
+          if (err.statusCode >= 400 && err.statusCode < 500) {
+            throw err;
+          }
+        }
+
+        if (attempt < attempts - 1) {
+          const backoffMs = Math.min(1000 * Math.pow(2, attempt), 10000);
+          // eslint-disable-next-line no-await-in-loop -- retry backoff is intentionally sequential between attempts.
+          await new Promise((resolve) => setTimeout(resolve, backoffMs));
+        }
+      }
+    }
+
+    throw lastError ?? new Error('Request failed');
+  }
 }
 
 function isBrowserRuntime(): boolean {
@@ -2707,11 +2798,18 @@ class ExportResource {
   async get(exportId: string): Promise<ExportJob> {
     return this.client.request('GET', `/exports/${exportId}`);
   }
-  async getEvents(exportId: string): Promise<unknown> {
-    return this.client.request('GET', `/exports/${exportId}/events`);
+  async getEvents(exportId: string, options?: { lastEventId?: string }): Promise<Response> {
+    return this.client.requestRaw('GET', `/exports/${exportId}/events`, {
+      headers: {
+        Accept: 'text/event-stream',
+        ...(options?.lastEventId ? { 'Last-Event-ID': options.lastEventId } : {}),
+      },
+    });
   }
-  async download(exportId: string): Promise<{ downloadUrl: string; expiresAt: string }> {
-    return this.client.request('GET', `/exports/${exportId}/download`);
+  async download(exportId: string): Promise<Response> {
+    return this.client.requestRaw('GET', `/exports/${exportId}/download`, {
+      successStatuses: [302],
+    });
   }
 }
 
