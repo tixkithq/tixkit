@@ -1,8 +1,9 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import ConfirmationClient from '@/app/checkout/confirmation/confirmation-client';
 import {
   checkoutApi,
+  isRetryable,
   publicApi,
   type CheckoutSession,
   type CheckoutWalletPassTicket,
@@ -34,6 +35,7 @@ vi.mock('@/lib/api', () => ({
     getWalletPasses: vi.fn(),
     createResaleListing: vi.fn(),
   },
+  isRetryable: vi.fn(),
   publicApi: {
     getEvent: vi.fn(),
   },
@@ -46,6 +48,7 @@ const checkoutApiMock = checkoutApi as unknown as {
   getWalletPasses: ReturnType<typeof vi.fn>;
   createResaleListing: ReturnType<typeof vi.fn>;
 };
+const isRetryableMock = isRetryable as unknown as ReturnType<typeof vi.fn>;
 
 const publicApiMock = publicApi as unknown as {
   getEvent: ReturnType<typeof vi.fn>;
@@ -68,6 +71,17 @@ const confirmedSession: CheckoutSession = {
   orderId: 'ord_1',
 };
 
+const pendingSession: CheckoutSession = {
+  ...confirmedSession,
+  status: 'pending_payment',
+};
+
+async function flushAsyncWork() {
+  await act(async () => {
+    await Promise.resolve();
+  });
+}
+
 const resaleTicket: CheckoutWalletPassTicket = {
   ticketId: 'tkt_1',
   ticketCode: 'TK-1001-A',
@@ -85,6 +99,7 @@ describe('ConfirmationClient', () => {
       'sessionId=cs_1&orderId=ord_1&orderNumber=TK-1001',
     );
     storeSessionToken('cs_1', 'tok_1');
+    isRetryableMock.mockReturnValue(false);
     checkoutApiMock.getSession.mockResolvedValue(confirmedSession);
     checkoutApiMock.getWalletPasses.mockResolvedValue({ tickets: [resaleTicket] });
     checkoutApiMock.createResaleListing.mockResolvedValue({
@@ -106,6 +121,10 @@ describe('ConfirmationClient', () => {
       startsAt: '2026-07-17T19:00:00.000Z',
       brandId: 'brand_platform',
     });
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
   });
 
   it('associates invalid resale price errors with the price input and announces them', async () => {
@@ -150,5 +169,34 @@ describe('ConfirmationClient', () => {
     render(<ConfirmationClient />);
 
     expect(await screen.findByText('ord_1')).toBeInTheDocument();
+  });
+
+  it('continues polling after one retryable confirmation load failure', async () => {
+    vi.useFakeTimers();
+    const transientError = new Error('temporary gateway failure');
+    checkoutApiMock.getSession
+      .mockResolvedValueOnce(pendingSession)
+      .mockRejectedValueOnce(transientError)
+      .mockResolvedValueOnce(confirmedSession);
+    isRetryableMock.mockReturnValue(true);
+
+    render(<ConfirmationClient />);
+    await flushAsyncWork();
+
+    expect(screen.getByText('Processing your payment')).toBeInTheDocument();
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(2000);
+    });
+
+    expect(isRetryableMock).toHaveBeenCalledWith(transientError);
+    expect(screen.queryByText('Could not load order details')).not.toBeInTheDocument();
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(4000);
+    });
+
+    expect(screen.getByText('What happens next')).toBeInTheDocument();
+    expect(checkoutApiMock.getSession).toHaveBeenCalledTimes(3);
   });
 });

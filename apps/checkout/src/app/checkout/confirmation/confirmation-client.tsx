@@ -27,6 +27,7 @@ import { Label } from '@/components/ui/label';
 import { BrandFooter } from '@/components/checkout/brand-footer';
 import {
   checkoutApi,
+  isRetryable,
   publicApi,
   userFacingMessage,
   type CheckoutPaymentCompensation,
@@ -180,7 +181,12 @@ export default function ConfirmationClient() {
             startPolling(id, token, stripeClientSecret);
           }
         } catch (err) {
-          if (!cancelled) setError(userFacingMessage(err));
+          if (cancelled) return;
+          if (isRetryable(err)) {
+            startPolling(id, token, stripeClientSecret);
+            return;
+          }
+          setError(userFacingMessage(err));
         }
       }, delay);
     }
