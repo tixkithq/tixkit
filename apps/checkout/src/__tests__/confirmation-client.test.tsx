@@ -171,6 +171,44 @@ describe('ConfirmationClient', () => {
     expect(await screen.findByText('ord_1')).toBeInTheDocument();
   });
 
+  it('emits order_completed once when event details resolve after a completed session', async () => {
+    let resolveEvent!: (value: Awaited<ReturnType<typeof publicApi.getEvent>>) => void;
+    publicApiMock.getEvent.mockReturnValueOnce(
+      new Promise((resolve) => {
+        resolveEvent = resolve;
+      }),
+    );
+    const postMessageSpy = vi.spyOn(window, 'postMessage').mockImplementation(() => {});
+
+    render(<ConfirmationClient />);
+
+    resolveEvent({
+      id: 'evt_1',
+      title: 'All Access Chicago',
+      status: 'published',
+      timezone: 'America/Chicago',
+      startsAt: '2026-07-17T19:00:00.000Z',
+      brandId: 'brand_platform',
+    });
+
+    await waitFor(() => {
+      expect(screen.getByText('What happens next')).toBeInTheDocument();
+    });
+    await flushAsyncWork();
+
+    expect(postMessageSpy).toHaveBeenCalledTimes(1);
+    expect(postMessageSpy).toHaveBeenCalledWith(
+      expect.objectContaining({
+        source: 'tixkit-checkout',
+        event: 'order_completed',
+        sessionId: 'cs_1',
+        orderId: 'ord_1',
+        eventId: 'evt_1',
+      }),
+      '*',
+    );
+  });
+
   it('continues polling after one retryable confirmation load failure', async () => {
     vi.useFakeTimers();
     const transientError = new Error('temporary gateway failure');

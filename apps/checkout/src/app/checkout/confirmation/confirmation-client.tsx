@@ -99,6 +99,7 @@ export default function ConfirmationClient() {
   const [, setPollCount] = useState(0);
   const pollCountRef = useRef(0);
   const pollTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const completedEmissionKeysRef = useRef<Set<string>>(new Set());
 
   const brand: ResolvedBrand = useResolvedBrand(
     useMemo(
@@ -207,6 +208,9 @@ export default function ConfirmationClient() {
 
   useEffect(() => {
     if (confirmationState !== 'confirmed' || !sessionId) return;
+    const completedKey = `${sessionId}:${orderId || session?.orderId || 'unknown'}`;
+    if (completedEmissionKeysRef.current.has(completedKey)) return;
+    completedEmissionKeysRef.current.add(completedKey);
     if (session) {
       trackMarketingEvent(event?.marketingIntegrations, 'purchase', {
         eventId: session.eventId,
