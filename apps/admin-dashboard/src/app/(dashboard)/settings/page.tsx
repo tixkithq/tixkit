@@ -20,18 +20,21 @@ const settingsSections: Array<{
     description: 'Workspace name, slug, and account-level details.',
     href: routes.settingsWorkspace,
     icon: Building2,
+    requiredPermission: 'settings.write',
   },
   {
     title: 'Brand',
     description: 'Checkout identity, theme colors, and custom domains.',
     href: routes.settingsBranding,
     icon: ImageIcon,
+    requiredPermission: 'settings.write',
   },
   {
     title: 'Members',
     description: 'Invite people and manage workspace roles.',
     href: routes.settingsMembers,
     icon: Users,
+    requiredPermission: 'settings.write',
   },
   {
     title: 'Payments',

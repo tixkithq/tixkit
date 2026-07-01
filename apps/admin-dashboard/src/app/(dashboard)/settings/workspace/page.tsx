@@ -15,6 +15,7 @@ import {
 } from '@/components/ui/select';
 import { Switch } from '@/components/ui/switch';
 import { EmptyState } from '@/components/empty-state';
+import { PermissionGuard } from '@/components/permission-guard';
 import { adminApi, type AdminBoxOfficeSettings, type AdminOrganization } from '@/lib/api';
 import { Building2 } from 'lucide-react';
 import { toast } from 'sonner';
@@ -46,6 +47,14 @@ function cloneBoxOfficeSettings(settings?: AdminBoxOfficeSettings): AdminBoxOffi
 }
 
 export default function WorkspacePage() {
+  return (
+    <PermissionGuard required="settings.write">
+      <WorkspacePageContent />
+    </PermissionGuard>
+  );
+}
+
+function WorkspacePageContent() {
   const {
     organizations,
     organizationId,

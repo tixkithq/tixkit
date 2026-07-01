@@ -1,4 +1,5 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import * as React from 'react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const bootstrapState = vi.hoisted(() => ({
@@ -33,12 +34,21 @@ const toastMock = vi.hoisted(() => ({
   error: vi.fn(),
 }));
 
+const guardMock = vi.hoisted(() => ({
+  allowed: true,
+}));
+
 vi.mock('@/context/bootstrap-provider', () => ({
   useBootstrap: () => bootstrapState.value,
 }));
 
 vi.mock('@/lib/api', () => ({
   adminApi: apiMock,
+}));
+
+vi.mock('@/components/permission-guard', () => ({
+  PermissionGuard: ({ children }: { children: React.ReactNode }) =>
+    guardMock.allowed ? <>{children}</> : <div>Access denied</div>,
 }));
 
 vi.mock('sonner', () => ({
@@ -50,6 +60,19 @@ import BrandingPage from './page';
 describe('BrandingPage', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    guardMock.allowed = true;
+  });
+
+  it('does not mount brand settings when settings permission is denied', () => {
+    guardMock.allowed = false;
+
+    render(<BrandingPage />);
+
+    expect(screen.getByText('Access denied')).toBeInTheDocument();
+    expect(screen.queryByLabelText('Brand Name')).not.toBeInTheDocument();
+    expect(apiMock.updateBrand).not.toHaveBeenCalled();
+    expect(apiMock.addBrandDomain).not.toHaveBeenCalled();
+    expect(apiMock.uploadArtifact).not.toHaveBeenCalled();
   });
 
   it('saves edited brand name with the brand settings payload', async () => {

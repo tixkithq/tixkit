@@ -8,11 +8,20 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Badge } from '@/components/ui/badge';
 import { Label } from '@/components/ui/label';
 import { EmptyState } from '@/components/empty-state';
+import { PermissionGuard } from '@/components/permission-guard';
 import { adminApi, type AdminBrand, type AdminBrandDomain } from '@/lib/api';
 import { toast } from 'sonner';
 import { useBootstrap } from '@/context/bootstrap-provider';
 
 export default function BrandingPage() {
+  return (
+    <PermissionGuard required="settings.write">
+      <BrandingPageContent />
+    </PermissionGuard>
+  );
+}
+
+function BrandingPageContent() {
   const {
     availableBrands,
     brandId,

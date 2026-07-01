@@ -15,9 +15,24 @@ const settingsNav: Array<{
   icon: ComponentType<{ className?: string }>;
   requiredPermission?: TixkitPermission;
 }> = [
-  { title: 'Workspace', href: routes.settingsWorkspace, icon: Building2 },
-  { title: 'Brand', href: routes.settingsBranding, icon: ImageIcon },
-  { title: 'Members', href: routes.settingsMembers, icon: Users },
+  {
+    title: 'Workspace',
+    href: routes.settingsWorkspace,
+    icon: Building2,
+    requiredPermission: 'settings.write',
+  },
+  {
+    title: 'Brand',
+    href: routes.settingsBranding,
+    icon: ImageIcon,
+    requiredPermission: 'settings.write',
+  },
+  {
+    title: 'Members',
+    href: routes.settingsMembers,
+    icon: Users,
+    requiredPermission: 'settings.write',
+  },
   {
     title: 'Payments',
     href: routes.settingsPayments,

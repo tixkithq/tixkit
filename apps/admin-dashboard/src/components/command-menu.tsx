@@ -173,6 +173,7 @@ export function CommandMenu() {
       href: routes.settingsWorkspace,
       icon: Building2,
       keywords: ['workspace', 'organization', 'tenant'],
+      requiredPermission: 'settings.write',
     },
     {
       id: 'settings-appearance',

@@ -1,4 +1,5 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import * as React from 'react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const testState = vi.hoisted(() => {
@@ -37,12 +38,21 @@ const toastMock = vi.hoisted(() => ({
   error: vi.fn(),
 }));
 
+const guardMock = vi.hoisted(() => ({
+  allowed: true,
+}));
+
 vi.mock('@/context/bootstrap-provider', () => ({
   useBootstrap: () => testState.bootstrapState.value,
 }));
 
 vi.mock('@/lib/api', () => ({
   adminApi: apiMock,
+}));
+
+vi.mock('@/components/permission-guard', () => ({
+  PermissionGuard: ({ children }: { children: React.ReactNode }) =>
+    guardMock.allowed ? <>{children}</> : <div>Access denied</div>,
 }));
 
 vi.mock('sonner', () => ({
@@ -54,6 +64,17 @@ import WorkspacePage from './page';
 describe('WorkspacePage', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    guardMock.allowed = true;
+  });
+
+  it('does not mount workspace settings when settings permission is denied', () => {
+    guardMock.allowed = false;
+
+    render(<WorkspacePage />);
+
+    expect(screen.getByText('Access denied')).toBeInTheDocument();
+    expect(screen.queryByLabelText('Workspace Name')).not.toBeInTheDocument();
+    expect(apiMock.updateOrganization).not.toHaveBeenCalled();
   });
 
   it('saves workspace identity and box-office policy together', async () => {

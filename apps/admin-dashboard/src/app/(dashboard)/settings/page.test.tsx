@@ -26,6 +26,10 @@ describe('SettingsPage', () => {
   });
 
   it('uses workspace and members terminology with canonical settings routes', () => {
+    permissionsMock.can.mockImplementation(
+      (permission?: string) => !permission || permission === 'settings.write',
+    );
+
     render(<SettingsPage />);
 
     expect(screen.getByRole('link', { name: /Workspace/ })).toHaveAttribute(
@@ -40,11 +44,22 @@ describe('SettingsPage', () => {
     expect(screen.queryByRole('link', { name: /Team/ })).not.toBeInTheDocument();
   });
 
-  it('hides billing-gated settings cards without billing permission', () => {
+  it('hides settings-write and billing-gated settings cards without matching permission', () => {
     render(<SettingsPage />);
 
+    expect(screen.queryByRole('link', { name: /Workspace/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole('link', { name: /Brand/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole('link', { name: /Members/ })).not.toBeInTheDocument();
     expect(screen.queryByRole('link', { name: /Payments/ })).not.toBeInTheDocument();
     expect(screen.queryByRole('link', { name: /Billing/ })).not.toBeInTheDocument();
+    expect(screen.getByRole('link', { name: /Profile/ })).toHaveAttribute(
+      'href',
+      '/settings/profile',
+    );
+    expect(screen.getByRole('link', { name: /Appearance/ })).toHaveAttribute(
+      'href',
+      '/settings/appearance',
+    );
   });
 
   it('shows billing-gated settings cards with billing permission', () => {
@@ -69,7 +84,7 @@ describe('SettingsLayout', () => {
     navigationMock.pathname = '/settings';
   });
 
-  it('hides billing-gated local navigation without billing permission', () => {
+  it('hides settings-write and billing-gated local navigation without matching permission', () => {
     render(
       <SettingsLayout>
         <div>Settings content</div>
@@ -77,8 +92,19 @@ describe('SettingsLayout', () => {
     );
 
     expect(screen.getByText('Settings content')).toBeInTheDocument();
+    expect(screen.queryByRole('link', { name: /Workspace/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole('link', { name: /Brand/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole('link', { name: /Members/ })).not.toBeInTheDocument();
     expect(screen.queryByRole('link', { name: /Payments/ })).not.toBeInTheDocument();
     expect(screen.queryByRole('link', { name: /Billing/ })).not.toBeInTheDocument();
+    expect(screen.getByRole('link', { name: /Profile/ })).toHaveAttribute(
+      'href',
+      '/settings/profile',
+    );
+    expect(screen.getByRole('link', { name: /Appearance/ })).toHaveAttribute(
+      'href',
+      '/settings/appearance',
+    );
   });
 
   it('shows billing-gated local navigation with billing permission', () => {
