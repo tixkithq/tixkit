@@ -29,6 +29,7 @@ const RAW_ED25519_PUBLIC_KEY_DER_PREFIX = Buffer.from('302a300506032b6570032100'
 const TELNYX_WEBHOOK_TIMESTAMP_TOLERANCE_SECONDS = 5 * 60;
 const TERMINAL_DELIVERY_STATUSES = new Set(['delivered', 'failed']);
 const DELIVERY_STATUS_EVENT_TYPES = new Set(['message.sent', 'message.finalized']);
+const FAILED_RECIPIENT_STATUSES = new Set(['failed', 'delivery_failed', 'sending_failed']);
 
 export const telnyxWebhookRoutes: FastifyPluginAsync = async (app) => {
   const db = app.context.db;
@@ -376,15 +377,15 @@ function telnyxDeliveryUpdate(
     };
   }
 
-  const failureReason =
-    payload?.errors?.[0]?.detail ??
-    payload?.errors?.[0]?.title ??
-    recipientStatus ??
-    'Delivery failed';
+  const failureReason = payload?.errors?.[0]?.detail ?? payload?.errors?.[0]?.title;
+  if (!failureReason && (!recipientStatus || !FAILED_RECIPIENT_STATUSES.has(recipientStatus))) {
+    return {};
+  }
+
   return {
     status: 'failed',
     failed_at: new Date(),
-    failure_reason: failureReason,
+    failure_reason: failureReason ?? recipientStatus ?? 'Delivery failed',
   };
 }
 

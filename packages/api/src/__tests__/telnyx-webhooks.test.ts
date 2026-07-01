@@ -455,6 +455,98 @@ describe('Telnyx SMS webhook route', () => {
     await app.close();
   });
 
+  it('stores delivery-unconfirmed finalized events without failing delivery or revoking consent', async () => {
+    const state: TelnyxWebhookTestState = {
+      delivery: {
+        id: 'smd_1',
+        tenant_id: 'tnt_1',
+        job_id: 'smj_1',
+        provider: 'telnyx',
+        provider_message_id: 'telnyx_msg_1',
+        status: 'sent',
+      },
+      job: {
+        id: 'smj_1',
+        tenant_id: 'tnt_1',
+        to_phone: '+15550000001',
+      },
+      insertedEvents: [],
+      deliveryUpdates: [],
+      consentUpdates: [],
+    };
+    const app = await setupTelnyxApp(createMockDb(state) as Database);
+
+    const res = await app.inject(
+      signedTelnyxSmsRequest(routePrivateKey, {
+        data: {
+          id: 'telnyx_evt_unconfirmed',
+          event_type: 'message.finalized',
+          payload: {
+            id: 'telnyx_msg_1',
+            to: [{ status: 'delivery_unconfirmed' }],
+          },
+        },
+      }),
+    );
+
+    expect(res.statusCode).toBe(200);
+    expect(state.deliveryUpdates).toHaveLength(0);
+    expect(state.consentUpdates).toHaveLength(0);
+    expect(state.delivery).toMatchObject({ status: 'sent' });
+    expect(state.insertedEvents[0]).toMatchObject({
+      provider_event_id: 'telnyx_evt_unconfirmed',
+      provider_message_id: 'telnyx_msg_1',
+    });
+
+    await app.close();
+  });
+
+  it('stores finalized events with no recipient status or errors without failing delivery', async () => {
+    const state: TelnyxWebhookTestState = {
+      delivery: {
+        id: 'smd_1',
+        tenant_id: 'tnt_1',
+        job_id: 'smj_1',
+        provider: 'telnyx',
+        provider_message_id: 'telnyx_msg_1',
+        status: 'sent',
+      },
+      job: {
+        id: 'smj_1',
+        tenant_id: 'tnt_1',
+        to_phone: '+15550000001',
+      },
+      insertedEvents: [],
+      deliveryUpdates: [],
+      consentUpdates: [],
+    };
+    const app = await setupTelnyxApp(createMockDb(state) as Database);
+
+    const res = await app.inject(
+      signedTelnyxSmsRequest(routePrivateKey, {
+        data: {
+          id: 'telnyx_evt_missing_status',
+          event_type: 'message.finalized',
+          payload: {
+            id: 'telnyx_msg_1',
+            to: [{}],
+          },
+        },
+      }),
+    );
+
+    expect(res.statusCode).toBe(200);
+    expect(state.deliveryUpdates).toHaveLength(0);
+    expect(state.consentUpdates).toHaveLength(0);
+    expect(state.delivery).toMatchObject({ status: 'sent' });
+    expect(state.insertedEvents[0]).toMatchObject({
+      provider_event_id: 'telnyx_evt_missing_status',
+      provider_message_id: 'telnyx_msg_1',
+    });
+
+    await app.close();
+  });
+
   it('returns a retryable error without storing a status event when delivery is not ready', async () => {
     const state = {
       insertedEvents: [] as Record<string, unknown>[],
