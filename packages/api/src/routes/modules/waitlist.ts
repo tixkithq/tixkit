@@ -44,6 +44,17 @@ export function hashWaitlistClaimToken(token: string): string {
   return createHash('sha256').update(token).digest('hex');
 }
 
+export function calculateWaitlistOfferAvailability(input: {
+  totalCapacity: number;
+  soldCount: number;
+  activeHoldsQuantity: number;
+  activeOffersQuantity: number;
+}): number {
+  return (
+    input.totalCapacity - input.soldCount - input.activeHoldsQuantity - input.activeOffersQuantity
+  );
+}
+
 function publicEntry(row: {
   id: string;
   event_id: string;
@@ -268,47 +279,90 @@ export const waitlistRoutes: FastifyPluginAsync = async (app) => {
     ClerkAuthService.requireBrandScope(principal, event.brand_id);
     ClerkAuthService.requireEventScope(principal, eventId);
 
-    const entry = await db
-      .selectFrom('waitlist_entries')
-      .selectAll()
-      .where('id', '=', entryId)
-      .where('event_id', '=', eventId)
-      .executeTakeFirst();
-    if (!entry) throw new NotFoundError('WaitlistEntry', entryId);
-    if (entry.status !== 'joined')
-      throw new ValidationError('Only joined waitlist entries can be offered');
-
-    const ticketType = await db
-      .selectFrom('ticket_types')
-      .selectAll()
-      .where('id', '=', entry.ticket_type_id)
-      .executeTakeFirstOrThrow();
-    const availability = await app.context.inventoryService.getAvailability(
-      ticketType.inventory_pool_id,
-    );
-    if (availability.available < entry.quantity) {
-      throw new ValidationError('Not enough freed capacity to issue this waitlist offer');
-    }
-
     const token = randomBytes(24).toString('base64url');
-    const now = new Date();
-    const expiresInMinutes =
-      body.expiresInMinutes ?? Number(event.waitlist_offer_ttl_minutes ?? 60 * 24);
-    const offerExpiresAt = new Date(now.getTime() + expiresInMinutes * 60_000);
-    const updateQuery = db
-      .updateTable('waitlist_entries')
-      .set({
-        status: 'offered',
-        claim_token_hash: hashWaitlistClaimToken(token),
-        offer_expires_at: offerExpiresAt,
-        offered_at: now,
-        updated_at: now,
-      })
-      .where('id', '=', entryId);
-    const updated =
-      getDriver() === 'postgres'
-        ? await updateQuery.returningAll().executeTakeFirstOrThrow()
-        : await updateQuery.execute().then(() => loadWaitlistEntry(db, entryId));
+    const updated = await db.transaction().execute(async (trx) => {
+      const now = new Date();
+      const entry = await trx
+        .selectFrom('waitlist_entries')
+        .selectAll()
+        .where('id', '=', entryId)
+        .where('event_id', '=', eventId)
+        .forUpdate()
+        .executeTakeFirst();
+      if (!entry) throw new NotFoundError('WaitlistEntry', entryId);
+      if (entry.status !== 'joined') {
+        throw new ValidationError('Only joined waitlist entries can be offered');
+      }
+
+      const ticketType = await trx
+        .selectFrom('ticket_types')
+        .selectAll()
+        .where('id', '=', entry.ticket_type_id)
+        .executeTakeFirstOrThrow();
+      const pool = await trx
+        .selectFrom('inventory_pools')
+        .select(['total_capacity', 'sold_count'])
+        .where('id', '=', ticketType.inventory_pool_id)
+        .forUpdate()
+        .executeTakeFirstOrThrow();
+      const activeHolds = await trx
+        .selectFrom('checkout_holds')
+        .select(({ fn }) => fn.sum<number>('quantity').as('quantity'))
+        .where('inventory_pool_id', '=', ticketType.inventory_pool_id)
+        .where('status', '=', 'active')
+        .where('expires_at', '>', now)
+        .executeTakeFirst();
+      const activeOffers = await trx
+        .selectFrom('waitlist_entries as active_entry')
+        .innerJoin(
+          'ticket_types as active_ticket_type',
+          'active_ticket_type.id',
+          'active_entry.ticket_type_id',
+        )
+        .select(({ fn }) => fn.sum<number>('active_entry.quantity').as('quantity'))
+        .where('active_ticket_type.inventory_pool_id', '=', ticketType.inventory_pool_id)
+        .where('active_entry.status', '=', 'offered')
+        .where('active_entry.offer_expires_at', '>', now)
+        .executeTakeFirst();
+
+      const available = calculateWaitlistOfferAvailability({
+        totalCapacity: Number(pool.total_capacity),
+        soldCount: Number(pool.sold_count),
+        activeHoldsQuantity: Number(activeHolds?.quantity ?? 0),
+        activeOffersQuantity: Number(activeOffers?.quantity ?? 0),
+      });
+      if (available < Number(entry.quantity)) {
+        throw new ValidationError('Not enough freed capacity to issue this waitlist offer');
+      }
+
+      const expiresInMinutes =
+        body.expiresInMinutes ?? Number(event.waitlist_offer_ttl_minutes ?? 60 * 24);
+      const offerExpiresAt = new Date(now.getTime() + expiresInMinutes * 60_000);
+      const updateQuery = trx
+        .updateTable('waitlist_entries')
+        .set({
+          status: 'offered',
+          claim_token_hash: hashWaitlistClaimToken(token),
+          offer_expires_at: offerExpiresAt,
+          offered_at: now,
+          updated_at: now,
+        })
+        .where('id', '=', entryId)
+        .where('status', '=', 'joined');
+      if (getDriver() === 'postgres') {
+        return updateQuery.returningAll().executeTakeFirstOrThrow();
+      }
+
+      const result = await updateQuery.executeTakeFirst();
+      if (Number(result.numUpdatedRows ?? 0) !== 1) {
+        throw new ValidationError('Only joined waitlist entries can be offered');
+      }
+      return trx
+        .selectFrom('waitlist_entries')
+        .selectAll()
+        .where('id', '=', entryId)
+        .executeTakeFirstOrThrow();
+    });
 
     return { entry: publicEntry(updated), claimToken: token };
   });
