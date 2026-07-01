@@ -147,6 +147,18 @@ export class PricingEngine {
       );
     }
 
+    if (
+      appliedDiscount?.ticketTypeIds?.length &&
+      (appliedDiscount.type === 'free_ticket' || appliedDiscount.value > 0) &&
+      !pricedLines.some(
+        (line) =>
+          line.ticketTypeId !== undefined &&
+          appliedDiscount.ticketTypeIds?.includes(line.ticketTypeId),
+      )
+    ) {
+      throw new DiscountInvalidError(appliedDiscount.code, 'not applicable to selected items');
+    }
+
     let remainingDiscountCap = appliedDiscount?.maxDiscountCents ?? Number.POSITIVE_INFINITY;
 
     for (const line of pricedLines) {

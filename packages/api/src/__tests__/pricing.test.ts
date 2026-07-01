@@ -29,6 +29,16 @@ describe('PricingEngine', () => {
     maxPerOrder: 5,
   };
 
+  const generalAdmissionTicket: TicketTypeForPricing = {
+    id: 'tt_ga',
+    name: 'General Admission',
+    kind: 'paid',
+    priceCents: 5000,
+    currency: 'USD',
+    minPerOrder: 1,
+    maxPerOrder: 10,
+  };
+
   const donationTicket: TicketTypeForPricing = {
     id: 'tt_donation',
     name: 'Donation',
@@ -43,6 +53,7 @@ describe('PricingEngine', () => {
   const ticketTypes = new Map([
     ['tt_free', freeTicket],
     ['tt_paid', paidTicket],
+    ['tt_ga', generalAdmissionTicket],
     ['tt_donation', donationTicket],
   ]);
 
@@ -234,6 +245,82 @@ describe('PricingEngine', () => {
     expect(quote.subtotalCents).toBe(20000);
     expect(quote.discountCents).toBe(4000);
     expect(quote.totalCents).toBe(16000);
+  });
+
+  it('rejects ticket-restricted discounts when no selected ticket is eligible', () => {
+    const discount = {
+      id: 'dc_vip_only',
+      eventId: 'evt_1',
+      code: 'VIP20',
+      type: 'percentage' as const,
+      value: 2000,
+      currency: 'USD',
+      ticketTypeIds: ['tt_paid'],
+      maxUses: 100,
+      usesCount: 0,
+      status: 'active' as const,
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    };
+
+    expect(() =>
+      pricingEngine.calculate({
+        currency: 'USD',
+        cart: { items: [{ ticketTypeId: 'tt_ga', quantity: 2 }], discountCode: 'VIP20' },
+        ticketTypes,
+        taxRules: [],
+        feeRules: [],
+        discountCodes: [discount],
+      }),
+    ).toThrow(/not applicable to selected items/);
+  });
+
+  it('applies ticket-restricted discounts only to eligible lines in mixed carts', () => {
+    const discount = {
+      id: 'dc_vip_mixed',
+      eventId: 'evt_1',
+      code: 'VIP20',
+      type: 'percentage' as const,
+      value: 2000,
+      currency: 'USD',
+      ticketTypeIds: ['tt_paid'],
+      maxUses: 100,
+      usesCount: 0,
+      status: 'active' as const,
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    };
+
+    const quote = pricingEngine.calculate({
+      currency: 'USD',
+      cart: {
+        items: [
+          { ticketTypeId: 'tt_paid', quantity: 1 },
+          { ticketTypeId: 'tt_ga', quantity: 2 },
+        ],
+        discountCode: 'VIP20',
+      },
+      ticketTypes,
+      taxRules: [],
+      feeRules: [],
+      discountCodes: [discount],
+    });
+
+    expect(quote.subtotalCents).toBe(20000);
+    expect(quote.discountCents).toBe(2000);
+    expect(quote.totalCents).toBe(18000);
+    expect(quote.lineItems).toEqual([
+      expect.objectContaining({
+        ticketTypeId: 'tt_paid',
+        subtotalCents: 10000,
+        discountCents: 2000,
+      }),
+      expect.objectContaining({
+        ticketTypeId: 'tt_ga',
+        subtotalCents: 10000,
+        discountCents: 0,
+      }),
+    ]);
   });
 
   it('should apply fixed amount discount correctly', () => {
