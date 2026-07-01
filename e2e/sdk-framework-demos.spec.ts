@@ -290,6 +290,25 @@ test('Astro demo renders widget iframe, checkout handoff, lifecycle, and verifie
   await expect(page.getByTestId('checkout-handoff-url')).toContainText('eventId=evt_demo');
   await expect(page.getByTestId('checkout-handoff-url')).toContainText(CHECKOUT_ORIGIN);
 
+  await page.evaluate(() => {
+    window.dispatchEvent(
+      new MessageEvent('message', {
+        data: { type: 'order_completed', eventId: 'evt_demo', orderId: 'ord_empty_origin' },
+      }),
+    );
+  });
+  await expect(page.getByLabel('Tixkit lifecycle events')).toHaveText('No events yet');
+
+  await page.evaluate(() => {
+    window.dispatchEvent(
+      new MessageEvent('message', {
+        origin: 'https://evil.example.test',
+        data: { type: 'order_completed', eventId: 'evt_demo', orderId: 'ord_evil' },
+      }),
+    );
+  });
+  await expect(page.getByLabel('Tixkit lifecycle events')).toHaveText('No events yet');
+
   await page.evaluate((origin) => {
     window.dispatchEvent(
       new MessageEvent('message', {
