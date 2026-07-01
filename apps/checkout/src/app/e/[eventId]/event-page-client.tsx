@@ -274,8 +274,8 @@ export default function EventPageClient({
                 const soldOut = ticket.status === 'sold_out' || ticket.available <= 0;
                 return (
                   <li key={ticket.ticketTypeId}>
-                    <Card className="flex flex-row items-center justify-between gap-4 py-4">
-                      <CardContent className="flex flex-1 flex-col gap-1">
+                    <Card className="flex flex-col gap-4 py-4 sm:flex-row sm:items-center sm:justify-between">
+                      <CardContent className="flex w-full flex-1 flex-col gap-1">
                         <div className="flex flex-wrap items-center gap-2">
                           <span className="font-medium">{ticket.name}</span>
                           {soldOut ? (
@@ -288,7 +288,7 @@ export default function EventPageClient({
                           <p className="text-sm text-muted-foreground">{ticket.description}</p>
                         ) : null}
                       </CardContent>
-                      <div className="px-6 text-right">
+                      <div className="w-full px-6 text-left sm:w-auto sm:text-right">
                         <div className="font-semibold">
                           {ticket.kind === 'free'
                             ? 'Free'
@@ -314,8 +314,8 @@ export default function EventPageClient({
             <ul className="space-y-3">
               {resaleListings.map((listing) => (
                 <li key={listing.id}>
-                  <Card className="flex flex-row items-center justify-between gap-4 py-4">
-                    <CardContent className="flex flex-1 flex-col gap-1">
+                  <Card className="flex flex-col gap-4 py-4 sm:flex-row sm:items-center sm:justify-between">
+                    <CardContent className="flex w-full flex-1 flex-col gap-1">
                       <div className="flex flex-wrap items-center gap-2">
                         <span className="font-medium">
                           {listing.ticketTypeName
@@ -330,7 +330,7 @@ export default function EventPageClient({
                         </p>
                       ) : null}
                     </CardContent>
-                    <div className="flex flex-col items-end gap-2 px-6 text-right">
+                    <div className="flex w-full flex-col items-start gap-2 px-6 text-left sm:w-auto sm:items-end sm:text-right">
                       <div className="font-semibold">
                         {formatCurrency(listing.priceCents, listing.currency)}
                       </div>

@@ -131,6 +131,67 @@ describe('EventPageClient escaping', () => {
     );
   });
 
+  it('uses mobile-first vertical cards for long ticket and resale names', async () => {
+    const event: PublicEvent = {
+      id: 'evt_mobile',
+      title: 'Mobile Layout Fest',
+      status: 'published',
+      timezone: 'America/Chicago',
+      startsAt: '2026-07-17T19:00:00.000Z',
+      brandId: 'brd_1',
+    };
+    const primaryName = 'General Admission With A Very Long Buyer-Facing Ticket Name';
+    const resaleName = 'VIP Balcony Resale Listing With Long Section Details';
+    publicApiMock.getEvent.mockResolvedValue(event);
+    publicApiMock.getEventPage.mockResolvedValue(null);
+    publicApiMock.getAvailability.mockResolvedValue([
+      {
+        type: 'ticket',
+        ticketTypeId: 'tt_mobile',
+        name: primaryName,
+        description: 'Long description for mobile layout validation.',
+        kind: 'paid',
+        priceCents: 2500,
+        currency: 'USD',
+        minPerOrder: 1,
+        maxPerOrder: 4,
+        available: 10,
+        status: 'active',
+      },
+    ]);
+    publicApiMock.getResaleListings.mockResolvedValue({
+      items: [
+        {
+          id: 'lst_mobile',
+          eventId: 'evt_mobile',
+          ticketTypeId: 'tt_mobile',
+          ticketTypeName: resaleName,
+          status: 'listed',
+          priceCents: 5500,
+          currency: 'USD',
+          faceValueCents: 5000,
+          createdAt: '2026-06-01T00:00:00.000Z',
+          updatedAt: '2026-06-01T00:00:00.000Z',
+        },
+      ],
+    });
+    publicApiMock.getBrand.mockRejectedValue(new Error('brand unavailable'));
+
+    const view = render(React.createElement(EventPageClient, { eventId: 'evt_mobile' }));
+
+    const primaryCard = (await view.findByText(primaryName)).closest('[data-slot="card"]');
+    const resaleCard = (await view.findByText(`Resale ticket - ${resaleName}`)).closest(
+      '[data-slot="card"]',
+    );
+
+    expect(primaryCard).toHaveClass('flex-col');
+    expect(primaryCard).toHaveClass('sm:flex-row');
+    expect(resaleCard).toHaveClass('flex-col');
+    expect(resaleCard).toHaveClass('sm:flex-row');
+    expect(view.getByText('$25.00').parentElement).toHaveClass('w-full', 'text-left');
+    expect(view.getByText('$55.00').parentElement).toHaveClass('w-full', 'items-start');
+  });
+
   it('sanitizes published event-page HTML before injecting it', async () => {
     const event: PublicEvent = {
       id: 'evt_content',
