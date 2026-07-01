@@ -131,6 +131,7 @@ export function tixkitWidgetIframeAttributes(
 export function parseTixkitWidgetMessage(
   message: { origin: string; data: unknown },
   expectedOrigin?: string,
+  expectedEventId?: string,
 ): TixkitWidgetPostMessage | null {
   if (expectedOrigin && message.origin !== expectedOrigin) return null;
   if (!message.data || typeof message.data !== 'object') return null;
@@ -138,10 +139,12 @@ export function parseTixkitWidgetMessage(
   const raw = message.data as Record<string, unknown>;
   const type = raw.type ?? raw.event;
   if (!isTixkitCheckoutEvent(type)) return null;
+  const eventId = typeof raw.eventId === 'string' ? raw.eventId : undefined;
+  if (expectedEventId && eventId && eventId !== expectedEventId) return null;
 
   return {
     type,
-    eventId: typeof raw.eventId === 'string' ? raw.eventId : undefined,
+    eventId,
     orderId: typeof raw.orderId === 'string' ? raw.orderId : undefined,
     raw,
   };

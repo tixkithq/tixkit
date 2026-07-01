@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { checkoutUrl, checkoutWidgetUrl } from '../client.js';
+import { checkoutUrl, checkoutWidgetUrl, parseTixkitWidgetMessage } from '../client.js';
 
 describe('Remix client helpers', () => {
   it('builds a checkoutUrl with event, items, and optional params', () => {
@@ -66,5 +66,37 @@ describe('Remix client helpers', () => {
       event: 'evt_1',
     });
     expect(url).toContain('https://custom.widget.com/checkout?eventId=evt_1');
+  });
+
+  it('filters widget postMessages by expected event id when present', () => {
+    expect(
+      parseTixkitWidgetMessage(
+        {
+          origin: 'https://checkout.example.test',
+          data: { type: 'order_completed', eventId: 'evt_2' },
+        },
+        'https://checkout.example.test',
+        'evt_1',
+      ),
+    ).toBeNull();
+
+    expect(
+      parseTixkitWidgetMessage(
+        {
+          origin: 'https://checkout.example.test',
+          data: { type: 'order_completed', eventId: 'evt_1' },
+        },
+        'https://checkout.example.test',
+        'evt_1',
+      ),
+    ).toMatchObject({ type: 'order_completed', eventId: 'evt_1' });
+
+    expect(
+      parseTixkitWidgetMessage(
+        { origin: 'https://checkout.example.test', data: { type: 'loaded' } },
+        'https://checkout.example.test',
+        'evt_1',
+      ),
+    ).toMatchObject({ type: 'loaded' });
   });
 });

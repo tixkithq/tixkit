@@ -316,6 +316,38 @@ describe('SvelteKit client helpers', () => {
     ).toBeNull();
   });
 
+  it('filters Svelte widget postMessages by expected event id when present', () => {
+    expect(
+      parseTixkitWidgetMessage(
+        {
+          origin: 'https://checkout.example.test',
+          data: { type: 'order_completed', eventId: 'evt_2' },
+        },
+        'https://checkout.example.test',
+        'evt_1',
+      ),
+    ).toBeNull();
+
+    expect(
+      parseTixkitWidgetMessage(
+        {
+          origin: 'https://checkout.example.test',
+          data: { type: 'order_completed', eventId: 'evt_1' },
+        },
+        'https://checkout.example.test',
+        'evt_1',
+      ),
+    ).toMatchObject({ type: 'order_completed', eventId: 'evt_1' });
+
+    expect(
+      parseTixkitWidgetMessage(
+        { origin: 'https://checkout.example.test', data: { type: 'loaded' } },
+        'https://checkout.example.test',
+        'evt_1',
+      ),
+    ).toMatchObject({ type: 'loaded' });
+  });
+
   it('ships a Svelte 5 widget component subpath backed by client helpers', async () => {
     const componentSource = await import('node:fs').then((fs) =>
       fs.readFileSync(new URL('../TixkitWidget.svelte', import.meta.url), 'utf-8'),
@@ -327,7 +359,7 @@ describe('SvelteKit client helpers', () => {
     expect(componentSource).toContain('let {');
     expect(componentSource).toContain('$props()');
     expect(componentSource).toContain('tixkitWidgetIframeAttributes');
-    expect(componentSource).toContain('parseTixkitWidgetMessage');
+    expect(componentSource).toContain('parseTixkitWidgetMessage(message, expectedOrigin, event)');
     expect(componentSource).toContain('<svelte:window onmessage={handleMessage} />');
     expect(componentSource).toContain('<iframe');
     expect(declarationSource).toContain('export type TixkitWidgetProps');

@@ -65,7 +65,7 @@
   let iframeStyle = $derived(`width:100%;height:${height};border:0;display:block;${style}`);
 
   function handleMessage(message: { origin: string; data: unknown }) {
-    const payload = parseTixkitWidgetMessage(message, expectedOrigin);
+    const payload = parseTixkitWidgetMessage(message, expectedOrigin, event);
     if (!payload) return;
 
     onEvent?.(payload);
