@@ -59,6 +59,82 @@ test.describe('admin settings validation', () => {
     await expectNoAxeViolations(page, testInfo);
   });
 
+  test('payments return URL refreshes Stripe Connect status', async ({ page }, testInfo) => {
+    await requireReachable(page, adminBaseUrl, 'admin dashboard');
+
+    const paymentAccountsUrl = `${apiBaseUrl}/v1/organizations/${devOrganizationId}/payment-accounts`;
+    const pendingAccount = {
+      id: 'pa_e2e_return',
+      organizationId: devOrganizationId,
+      provider: 'stripe_connect',
+      providerAccountId: 'acct_e2e_return',
+      status: 'pending',
+      defaultCurrency: 'USD',
+      detailsSubmitted: false,
+      chargesEnabled: false,
+      payoutsEnabled: false,
+      requirements: {},
+      disabledReason: null,
+    };
+    const activeAccount = {
+      ...pendingAccount,
+      status: 'active',
+      detailsSubmitted: true,
+      chargesEnabled: true,
+      payoutsEnabled: true,
+      updatedAt: new Date().toISOString(),
+    };
+    let refreshRequests = 0;
+
+    await page.route(paymentAccountsUrl, async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify([pendingAccount]),
+      });
+    });
+    await page.route(
+      `${paymentAccountsUrl}/${pendingAccount.id}/stripe-connect/refresh`,
+      async (route) => {
+        if (route.request().method() === 'OPTIONS') {
+          await route.fulfill({
+            status: 204,
+            headers: {
+              'access-control-allow-origin': '*',
+              'access-control-allow-methods': 'POST, OPTIONS',
+              'access-control-allow-headers': 'authorization, content-type',
+            },
+          });
+          return;
+        }
+        expect(route.request().method()).toBe('POST');
+        refreshRequests += 1;
+        await route.fulfill({
+          status: 200,
+          contentType: 'application/json',
+          body: JSON.stringify(activeAccount),
+        });
+      },
+    );
+    await page.addInitScript(
+      (selection) => {
+        window.localStorage.setItem('tixkit:selected-organization-id', selection.organizationId);
+      },
+      { organizationId: devOrganizationId },
+    );
+
+    await page.goto(
+      `${adminBaseUrl}/settings/payments?organizationId=${devOrganizationId}&stripeConnect=return`,
+    );
+
+    await expect(page.getByRole('status')).toContainText(
+      'Stripe account active after onboarding refresh.',
+    );
+    await expect(page).toHaveURL(`${adminBaseUrl}/settings/payments`);
+    expect(refreshRequests).toBe(1);
+    await attachScreenshot(page, testInfo, 'settings-payments-stripe-return-refresh');
+  });
+
   test('workspace settings persist box-office policy with axe and CDP proof', async ({
     browserName,
     page,

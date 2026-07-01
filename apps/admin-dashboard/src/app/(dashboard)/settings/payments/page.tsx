@@ -1,6 +1,7 @@
 'use client';
 
 import * as React from 'react';
+import { usePathname, useRouter, useSearchParams } from 'next/navigation';
 import { Wallet, CheckCircle2, Clock3, Link2, RefreshCw } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
@@ -22,7 +23,19 @@ import {
 import { toast } from 'sonner';
 import { useBootstrap } from '@/context/bootstrap-provider';
 
+type StripeConnectReturnNotice = {
+  tone: 'success' | 'error';
+  message: string;
+};
+
+function isStripeConnectReturnAction(value: string | null): value is 'return' | 'refresh' {
+  return value === 'return' || value === 'refresh';
+}
+
 export default function PaymentsPage() {
+  const router = useRouter();
+  const pathname = usePathname();
+  const searchParams = useSearchParams();
   const {
     organizations,
     organizationId,
@@ -43,6 +56,11 @@ export default function PaymentsPage() {
   const [selectedBrandId, setSelectedBrandId] = React.useState<string>('');
   const [bindingBrand, setBindingBrand] = React.useState(false);
   const [refreshingAccountId, setRefreshingAccountId] = React.useState<string | null>(null);
+  const [stripeConnectReturnNotice, setStripeConnectReturnNotice] =
+    React.useState<StripeConnectReturnNotice | null>(null);
+  const handledStripeConnectReturnRef = React.useRef<string | null>(null);
+  const stripeConnectAction = searchParams.get('stripeConnect');
+  const stripeConnectOrganizationId = searchParams.get('organizationId');
 
   const upsertAccount = React.useCallback((nextAccount: AdminPaymentAccount) => {
     setAccounts((current) => {
@@ -104,6 +122,83 @@ export default function PaymentsPage() {
   React.useEffect(() => {
     void loadPayments();
   }, [loadPayments]);
+
+  const clearStripeConnectReturnParams = React.useCallback(() => {
+    const nextSearchParams = new URLSearchParams(searchParams.toString());
+    nextSearchParams.delete('stripeConnect');
+    nextSearchParams.delete('organizationId');
+    const nextQuery = nextSearchParams.toString();
+    router.replace(nextQuery ? `${pathname}?${nextQuery}` : pathname, { scroll: false });
+  }, [pathname, router, searchParams]);
+
+  const connectedAccount = accounts.find(
+    (account) => account.provider === 'stripe_connect' || account.provider === 'stripe',
+  );
+
+  React.useEffect(() => {
+    if (
+      bootstrapLoading ||
+      loading ||
+      !isStripeConnectReturnAction(stripeConnectAction) ||
+      !organization ||
+      stripeConnectOrganizationId !== organization.id
+    ) {
+      return;
+    }
+
+    const returnKey = `${organization.id}:${stripeConnectAction}:${connectedAccount?.id ?? 'none'}`;
+    if (handledStripeConnectReturnRef.current === returnKey) {
+      return;
+    }
+    handledStripeConnectReturnRef.current = returnKey;
+
+    const refreshReturnedAccount = async () => {
+      if (!connectedAccount) {
+        const message =
+          'Stripe returned to this workspace, but no connected payment account was found. Start Connect again or contact support.';
+        setStripeConnectReturnNotice({ tone: 'error', message });
+        toast.error(message);
+        clearStripeConnectReturnParams();
+        return;
+      }
+
+      setRefreshingAccountId(connectedAccount.id);
+      const result = await adminApi.refreshStripeConnectAccount(
+        organization.id,
+        connectedAccount.id,
+      );
+      setRefreshingAccountId(null);
+
+      if (!result.ok) {
+        if (result.error.message.includes('not configured')) {
+          setNotConfigured(true);
+        }
+        const message = `Stripe Connect status refresh failed: ${result.error.message}`;
+        setStripeConnectReturnNotice({ tone: 'error', message });
+        toast.error(message);
+        clearStripeConnectReturnParams();
+        return;
+      }
+
+      upsertAccount(result.data);
+      setNotConfigured(false);
+      const message = `Stripe account ${result.data.status} after onboarding refresh.`;
+      setStripeConnectReturnNotice({ tone: 'success', message });
+      toast.success(message);
+      clearStripeConnectReturnParams();
+    };
+
+    void refreshReturnedAccount();
+  }, [
+    bootstrapLoading,
+    clearStripeConnectReturnParams,
+    connectedAccount,
+    loading,
+    organization,
+    stripeConnectAction,
+    stripeConnectOrganizationId,
+    upsertAccount,
+  ]);
 
   const handleConnect = async () => {
     if (!organization) {
@@ -197,9 +292,6 @@ export default function PaymentsPage() {
     setSelectedPaymentAccountId(brand?.paymentAccountId ?? 'none');
   };
 
-  const connectedAccount = accounts.find(
-    (account) => account.provider === 'stripe_connect' || account.provider === 'stripe',
-  );
   const isActive = connectedAccount?.status === 'active';
   const isRefreshingConnected = refreshingAccountId === connectedAccount?.id;
   const requirements = connectedAccount?.requirements ?? {};
@@ -225,6 +317,18 @@ export default function PaymentsPage() {
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
+            {stripeConnectReturnNotice ? (
+              <div
+                role={stripeConnectReturnNotice.tone === 'error' ? 'alert' : 'status'}
+                className={
+                  stripeConnectReturnNotice.tone === 'error'
+                    ? 'rounded-md border border-destructive/30 bg-destructive/10 p-3'
+                    : 'rounded-md border border-emerald-500/30 bg-emerald-500/10 p-3'
+                }
+              >
+                <p className="text-sm font-medium">{stripeConnectReturnNotice.message}</p>
+              </div>
+            ) : null}
             {bootstrapLoading || loading ? (
               <p className="text-sm text-muted-foreground">Loading payment settings...</p>
             ) : error ? (
