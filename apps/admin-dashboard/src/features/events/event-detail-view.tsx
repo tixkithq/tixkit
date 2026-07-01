@@ -95,8 +95,18 @@ export function EventDetailView({ eventId }: { eventId: string }) {
   const shareUrl = publicEventUrl(event, brands);
 
   const copyShareUrl = async () => {
-    await navigator.clipboard?.writeText(shareUrl);
-    toast.success('Public event link copied');
+    const writeText = navigator.clipboard?.writeText;
+    if (!writeText) {
+      toast.error('Copy unavailable. Select and copy the public event URL manually.');
+      return;
+    }
+
+    try {
+      await writeText.call(navigator.clipboard, shareUrl);
+      toast.success('Public event link copied');
+    } catch {
+      toast.error('Unable to copy public event link. Select and copy it manually.');
+    }
   };
 
   const quickLinks = [

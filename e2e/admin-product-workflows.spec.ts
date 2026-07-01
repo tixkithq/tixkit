@@ -430,6 +430,67 @@ test.describe('admin product workflow coverage', () => {
     await expectAdminPrimaryRouteMatrix(page, testInfo);
   });
 
+  test('event detail Copy link reports clipboard failures and success accurately', async ({
+    page,
+    request,
+  }, testInfo) => {
+    await requireReachable(page, adminBaseUrl, 'admin dashboard');
+    await requireReachable(page, `${apiBaseUrl}/health`, 'api');
+    await setAdminScope(page, await bootstrapAdminScope(page));
+
+    const suffix = `${testInfo.workerIndex}-${Date.now()}`;
+    const { event } = await seedFreeCheckoutEvent(request, `copy-link-${suffix}`);
+    await page.goto(`${adminBaseUrl}/events/${event.id}`);
+    await expect(page.getByRole('heading', { name: event.title })).toBeVisible();
+    const publicEventHref = await page
+      .getByRole('link', { name: 'Open public page' })
+      .getAttribute('href');
+    expect(publicEventHref).toBeTruthy();
+
+    await page.evaluate(() => {
+      Object.defineProperty(navigator, 'clipboard', {
+        configurable: true,
+        value: undefined,
+      });
+    });
+    await page.getByRole('button', { name: 'Copy link' }).click();
+    await expect(
+      page.getByText('Copy unavailable. Select and copy the public event URL manually.'),
+    ).toBeVisible();
+
+    await page.evaluate(() => {
+      Object.defineProperty(navigator, 'clipboard', {
+        configurable: true,
+        value: {
+          writeText: () => Promise.reject(new Error('clipboard denied')),
+        },
+      });
+    });
+    await page.getByRole('button', { name: 'Copy link' }).click();
+    await expect(
+      page.getByText('Unable to copy public event link. Select and copy it manually.'),
+    ).toBeVisible();
+
+    await page.evaluate(() => {
+      Object.defineProperty(navigator, 'clipboard', {
+        configurable: true,
+        value: {
+          writeText: (value: string) => {
+            window.sessionStorage.setItem('copied-event-link', value);
+            return Promise.resolve();
+          },
+        },
+      });
+    });
+    await page.getByRole('button', { name: 'Copy link' }).click();
+    await expect(page.getByText('Public event link copied')).toBeVisible();
+    await expect
+      .poll(() => page.evaluate(() => window.sessionStorage.getItem('copied-event-link')))
+      .toBe(publicEventHref);
+
+    await attachScreenshot(page, testInfo, 'admin-event-detail-copy-link');
+  });
+
   test('admin can manage waitlist settings and issue a manual offer', async ({
     page,
     request,
