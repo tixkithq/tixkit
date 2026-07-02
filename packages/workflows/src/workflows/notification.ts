@@ -7,6 +7,7 @@ const {
   checkSuppressionActivity,
   checkConsentActivity,
   renderTemplateActivity,
+  markEmailJobSuppressedActivity,
 } = proxyActivities<{
   sendEmailActivity(input: {
     jobId: string;
@@ -40,6 +41,11 @@ const {
   }): Promise<
     WorkflowActivityResult<{ subject: string; html: string; text?: string; segments?: number }>
   >;
+  markEmailJobSuppressedActivity(input: {
+    jobId: string;
+    tenantId: string;
+    reason: 'suppression' | 'consent';
+  }): Promise<WorkflowActivityResult<{ suppressed: true }>>;
 }>({
   startToCloseTimeout: '30 seconds',
   retry: {
@@ -119,6 +125,14 @@ export async function notificationDeliveryWorkflow(
   }
 
   if (suppressionResult.value.suppressed && input.notificationType !== 'transactional') {
+    const markResult = await markEmailJobSuppressedActivity({
+      jobId: input.jobId,
+      tenantId: input.tenantId,
+      reason: 'suppression',
+    });
+    if (!markResult.ok) {
+      return handleDeliveryActivityFailure('Email suppression status update', markResult);
+    }
     return { status: 'suppressed' };
   }
 
@@ -135,6 +149,14 @@ export async function notificationDeliveryWorkflow(
     }
 
     if (!consentResult.value.allowed) {
+      const markResult = await markEmailJobSuppressedActivity({
+        jobId: input.jobId,
+        tenantId: input.tenantId,
+        reason: 'consent',
+      });
+      if (!markResult.ok) {
+        return handleDeliveryActivityFailure('Email suppression status update', markResult);
+      }
       return { status: 'suppressed' };
     }
   }

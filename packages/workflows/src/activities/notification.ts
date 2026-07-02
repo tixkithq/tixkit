@@ -179,6 +179,36 @@ export async function checkConsentActivity(input: {
   }
 }
 
+export async function markEmailJobSuppressedActivity(input: {
+  jobId: string;
+  tenantId: string;
+  reason: 'suppression' | 'consent';
+}): Promise<WorkflowActivityResult<{ suppressed: true }>> {
+  const db = createDb();
+  try {
+    const jobRepo = new EmailJobRepository(db);
+    const job = await jobRepo.findById(input.jobId);
+    if (!job || job.tenant_id !== input.tenantId) {
+      return errResult('EMAIL_JOB_NOT_FOUND', 'Email job not found', false);
+    }
+
+    if (job.status === 'sent') {
+      return errResult('EMAIL_JOB_ALREADY_SENT', 'Email job was already sent', false);
+    }
+
+    await jobRepo.update(input.jobId, { status: 'suppressed' });
+    return okResult({ suppressed: true });
+  } catch (err) {
+    return errResult(
+      'EMAIL_JOB_SUPPRESSION_UPDATE_FAILED',
+      err instanceof Error ? err.message : 'Unknown error',
+      true,
+    );
+  } finally {
+    await db.destroy();
+  }
+}
+
 export async function checkSmsConsentActivity(input: {
   phone: string;
   tenantId: string;

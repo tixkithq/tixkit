@@ -211,6 +211,7 @@ const defaultActivities = {
   notifyRefundActivity: async () => okResult({ notified: true, jobId: 'emj_3' }),
   checkSuppressionActivity: async () => okResult({ suppressed: false }),
   checkConsentActivity: async () => okResult({ allowed: true }),
+  markEmailJobSuppressedActivity: async () => okResult({ suppressed: true }),
   renderTemplateActivity: async () =>
     okResult({
       subject: 'Your tickets',
@@ -1021,6 +1022,34 @@ describe('notificationDeliveryWorkflow', () => {
     });
   });
 
+  it('marks non-transactional suppressed email jobs before returning suppressed', async () => {
+    const markAttempts: Array<Record<string, unknown>> = [];
+    const sendAttempts: Array<Record<string, unknown>> = [];
+    setActivity('checkSuppressionActivity', async () => okResult({ suppressed: true }));
+    setActivity('markEmailJobSuppressedActivity', async (input) => {
+      markAttempts.push(input);
+      return okResult({ suppressed: true });
+    });
+    setActivity('sendEmailActivity', async (input) => {
+      sendAttempts.push(input);
+      return okResult({ deliveryId: 'emd_1', provider: 'capture' });
+    });
+
+    await expect(
+      notificationDeliveryWorkflow(makeNotificationDeliveryInput({ notificationType: 'bulk' })),
+    ).resolves.toEqual({
+      status: 'suppressed',
+    });
+    expect(markAttempts).toEqual([
+      {
+        jobId: 'emj_test_1',
+        tenantId: 'tnt_1',
+        reason: 'suppression',
+      },
+    ]);
+    expect(sendAttempts).toHaveLength(0);
+  });
+
   it('throws retryable consent check failures so temporary lookup errors are retried', async () => {
     setActivity('checkConsentActivity', async () =>
       errResult('CONSENT_LOOKUP_FAILED', 'Consent database unavailable', true),
@@ -1046,8 +1075,13 @@ describe('notificationDeliveryWorkflow', () => {
   });
 
   it('suppresses non-transactional emails when consent is denied', async () => {
+    const markAttempts: Array<Record<string, unknown>> = [];
     const sendAttempts: Array<Record<string, unknown>> = [];
     setActivity('checkConsentActivity', async () => okResult({ allowed: false }));
+    setActivity('markEmailJobSuppressedActivity', async (input) => {
+      markAttempts.push(input);
+      return okResult({ suppressed: true });
+    });
     setActivity('sendEmailActivity', async (input) => {
       sendAttempts.push(input);
       return okResult({ deliveryId: 'emd_1', provider: 'capture' });
@@ -1058,7 +1092,27 @@ describe('notificationDeliveryWorkflow', () => {
     ).resolves.toEqual({
       status: 'suppressed',
     });
+    expect(markAttempts).toEqual([
+      {
+        jobId: 'emj_test_1',
+        tenantId: 'tnt_1',
+        reason: 'consent',
+      },
+    ]);
     expect(sendAttempts).toHaveLength(0);
+  });
+
+  it('throws retryable suppressed-job update failures instead of leaving queued jobs silent', async () => {
+    setActivity('checkSuppressionActivity', async () => okResult({ suppressed: true }));
+    setActivity('markEmailJobSuppressedActivity', async () =>
+      errResult('EMAIL_JOB_SUPPRESSION_UPDATE_FAILED', 'database timeout', true),
+    );
+
+    await expect(
+      notificationDeliveryWorkflow(makeNotificationDeliveryInput({ notificationType: 'bulk' })),
+    ).rejects.toThrow(
+      'Email suppression status update failed (EMAIL_JOB_SUPPRESSION_UPDATE_FAILED): database timeout',
+    );
   });
 
   it('waits until scheduledAt before delivering scheduled notification jobs', async () => {
