@@ -58,17 +58,29 @@ describe.each(driverCases)('short-links integration: $driver', ({ driver, url })
     expect(await repo.slugExists('abc1234')).toBe(true);
     expect(await repo.slugExists('nope')).toBe(false);
 
-    await repo.recordClick(created.id, tenantId, new Date('2026-06-28T10:00:00Z'));
-    await repo.recordClick(created.id, tenantId, new Date('2026-06-28T11:00:00Z'));
-    await repo.recordClick(created.id, tenantId, new Date('2026-06-29T09:00:00Z'));
+    const clickTimes = [
+      ...Array.from(
+        { length: 12 },
+        (_, hour) => new Date(`2026-06-28T${String(hour).padStart(2, '0')}:00:00Z`),
+      ),
+      ...Array.from(
+        { length: 7 },
+        (_, hour) => new Date(`2026-06-29T${String(hour).padStart(2, '0')}:00:00Z`),
+      ),
+      new Date('2026-06-30T09:00:00Z'),
+    ];
+    await Promise.all(clickTimes.map((at) => repo.recordClick(created.id, tenantId, at)));
 
     const aggregate = await repo.getClickAggregate(created.id);
-    expect(aggregate.totalClicks).toBe(3);
-    expect(aggregate.byDay['2026-06-28']).toBe(2);
-    expect(aggregate.byDay['2026-06-29']).toBe(1);
+    expect(aggregate.totalClicks).toBe(20);
+    expect(aggregate.byDay).toEqual({
+      '2026-06-28': 12,
+      '2026-06-29': 7,
+      '2026-06-30': 1,
+    });
 
     const refreshed = await repo.findById(created.id);
-    expect(refreshed?.clicks).toBe(3);
+    expect(refreshed?.clicks).toBe(20);
   });
 
   it('enforces slug uniqueness', async () => {

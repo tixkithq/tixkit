@@ -298,6 +298,41 @@ function normalizeCartItems(
   return [...normalized.values()];
 }
 
+function assertCheckoutLineItemQuantityBounds(
+  items: CartInput['items'],
+  ticketTypes: Map<string, { id: string; min_per_order: number; max_per_order: number }>,
+  products: Map<string, { id: string; max_per_order: number }>,
+): void {
+  for (const item of items) {
+    if (item.ticketTypeId) {
+      const ticketType = ticketTypes.get(item.ticketTypeId);
+      if (!ticketType) throw new NotFoundError('TicketType', item.ticketTypeId);
+      if (item.quantity < ticketType.min_per_order) {
+        throw new ValidationError(
+          `Ticket type ${ticketType.id} requires a minimum of ${ticketType.min_per_order} per order`,
+        );
+      }
+      if (item.quantity > ticketType.max_per_order) {
+        throw new ValidationError(
+          `Ticket type ${ticketType.id} allows a maximum of ${ticketType.max_per_order} per order`,
+        );
+      }
+      continue;
+    }
+
+    if (!item.productId) {
+      throw new ValidationError('Cart item must include ticketTypeId or productId');
+    }
+    const product = products.get(item.productId);
+    if (!product) throw new NotFoundError('Product', item.productId);
+    if (item.quantity < 1 || item.quantity > product.max_per_order) {
+      throw new ValidationError(
+        `Product ${product.id} allows a maximum of ${product.max_per_order} per order`,
+      );
+    }
+  }
+}
+
 function cartItemWithoutAttendeeFields(
   item: CartInput['items'][number],
 ): CartInput['items'][number] {
@@ -1341,6 +1376,9 @@ export const checkoutRoutes: FastifyPluginAsync = async (app) => {
           });
         }
 
+        const normalizedItems = normalizeCartItems(body.items, ttById, productById);
+        assertCheckoutLineItemQuantityBounds(normalizedItems, ttById, productById);
+
         // Load the event's custom questions and validate attendee answers.
         const questionRows = await db
           .selectFrom('questions')
@@ -1381,7 +1419,6 @@ export const checkoutRoutes: FastifyPluginAsync = async (app) => {
           }
         }
 
-        const normalizedItems = normalizeCartItems(body.items, ttById, productById);
         const ttMap = new Map<string, TicketTypeForPricing>();
         for (const tt of ticketTypes) {
           ttMap.set(tt.id, {

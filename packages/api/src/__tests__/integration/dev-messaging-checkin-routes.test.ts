@@ -6819,6 +6819,33 @@ describe('checkout question validation', () => {
     expect(res.json().message).toContain('Attendee name is required');
   });
 
+  it('rejects quantities above max-per-order before attendee question fanout', async () => {
+    const tables = {
+      events: [baseEvent],
+      ticket_types: [{ ...baseTicketType, max_per_order: 1 }],
+      checkout_sessions: [],
+      idempotency_records: [],
+      questions: [
+        checkoutQuestion({ id: 'q_attendee_name', label: 'Attendee name', applies_to: 'attendee' }),
+      ],
+    };
+
+    const res = await postCheckoutSession(tables, {
+      items: [
+        {
+          ticketTypeId: 'tt_1',
+          quantity: 2,
+          attendeeFields: [{ q_attendee_name: 'Ada Lovelace' }],
+        },
+      ],
+    });
+
+    expect(res.statusCode).toBe(400);
+    expect(res.json().message).toContain('Ticket type tt_1 allows a maximum of 1 per order');
+    expect(res.json().message).not.toContain('Attendee name is required');
+    expect(tables.checkout_sessions).toHaveLength(0);
+  });
+
   it('rejects malformed stored select question options without leaking parser errors', async () => {
     const tables = {
       events: [baseEvent],

@@ -49,9 +49,13 @@ export const ScannerDeviceScopesMigration: Migration = {
       await sql`
         if col_length('scanner_devices', 'scopes') is null
           alter table scanner_devices add scopes nvarchar(max) null;
+      `.execute(db);
+      await sql`
         update scanner_devices
           set scopes = ${DEFAULT_SCANNER_DEVICE_SCOPES}
           where scopes is null;
+      `.execute(db);
+      await sql`
         alter table scanner_devices alter column scopes nvarchar(max) not null;
       `.execute(db);
       return;

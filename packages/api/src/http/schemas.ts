@@ -668,6 +668,7 @@ export const sendMessageSchema = z
     smsTemplateKey: messageTemplateKeySchema.optional(),
     audience: z.enum(['all', 'checked_in', 'not_checked_in', 'specific']),
     attendeeIds: z.array(ulidSchema).max(5_000).optional(),
+    scheduledAt: iso8601Schema.optional(),
     variables: boundedMessageRecordSchema.optional(),
     channel: z.enum(['email', 'sms', 'both']),
   })

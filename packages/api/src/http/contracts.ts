@@ -218,6 +218,21 @@ export function serializeEventOccurrenceStatus(status: unknown) {
   return null;
 }
 
+export function serializeBrandSenderIdentity(row: Record<string, unknown>) {
+  return {
+    id: row.id,
+    tenantId: row.tenant_id,
+    brandId: row.brand_id,
+    email: row.email,
+    name: row.name,
+    replyToEmail: row.reply_to_email ?? undefined,
+    verified: boolValue(row.verified),
+    verifiedAt: toIso(row.verified_at as Date | string | null | undefined),
+    createdAt: toIso(row.created_at as Date | string | null | undefined),
+    updatedAt: toIso(row.updated_at as Date | string | null | undefined),
+  };
+}
+
 export function serializeMarketingIntegration(
   row: Record<string, unknown>,
   options: { public?: boolean } = {},

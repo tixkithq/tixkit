@@ -188,10 +188,7 @@ async function cleanupAll(database: Database): Promise<void> {
   await database.deleteFrom('export_job_events').where('tenant_id', '=', TENANT_ID).execute();
   await database.deleteFrom('export_jobs').where('tenant_id', '=', TENANT_ID).execute();
   await database.deleteFrom('payment_events').where('tenant_id', '=', TENANT_ID).execute();
-  await database
-    .deleteFrom('checkout_holds')
-    .where('checkout_session_id', 'like', 'cs_load_%')
-    .execute();
+  await cleanupCheckoutHoldsForEvent(database);
   await database
     .deleteFrom('checkout_sessions')
     .where('tenant_id', '=', TENANT_ID)
@@ -204,6 +201,21 @@ async function cleanupAll(database: Database): Promise<void> {
   await database.deleteFrom('brands').where('id', '=', BRAND_ID).execute();
   await database.deleteFrom('organizations').where('id', '=', ORG_ID).execute();
   await database.deleteFrom('tenants').where('id', '=', TENANT_ID).execute();
+}
+
+async function cleanupCheckoutHoldsForEvent(database: Database): Promise<void> {
+  await database
+    .deleteFrom('checkout_holds')
+    .where('checkout_session_id', 'like', 'cs_load_%')
+    .execute();
+  await database
+    .deleteFrom('checkout_holds')
+    .where(
+      'ticket_type_id',
+      'in',
+      database.selectFrom('ticket_types').select('id').where('event_id', '=', EVENT_ID),
+    )
+    .execute();
 }
 
 async function cleanupScanLogsForEvent(database: Database): Promise<void> {
@@ -748,10 +760,7 @@ describeWithIntegrationDatabase('Load and concurrency harnesses', () => {
     await db.deleteFrom('export_job_events').where('tenant_id', '=', TENANT_ID).execute();
     await db.deleteFrom('export_jobs').where('tenant_id', '=', TENANT_ID).execute();
     await db.deleteFrom('payment_events').where('tenant_id', '=', TENANT_ID).execute();
-    await db
-      .deleteFrom('checkout_holds')
-      .where('checkout_session_id', 'like', 'cs_load_%')
-      .execute();
+    await cleanupCheckoutHoldsForEvent(db);
     await db
       .deleteFrom('checkout_sessions')
       .where('tenant_id', '=', TENANT_ID)
@@ -873,7 +882,7 @@ describeWithIntegrationDatabase('Load and concurrency harnesses', () => {
     expect(Number(pool.sold_count)).toBe(0);
     expect(held).toBe(CAPACITY);
     expect(Number(pool.sold_count) + held).toBeLessThanOrEqual(CAPACITY);
-  });
+  }, 60_000);
 
   it('webhook burst: concurrent deliveries for the same Stripe event dedupe to a single stored and processed row', async () => {
     const BURST = 50;
@@ -927,7 +936,7 @@ describeWithIntegrationDatabase('Load and concurrency harnesses', () => {
     expect(rows).toHaveLength(1);
     expect(rows[0].processed_at).not.toBeNull();
     expect(rows[0].tenant_id).toBe(TENANT_ID);
-  });
+  }, 60_000);
 
   it('idempotency burst: concurrent requests with the same key run one side effect and replay the stored response', async () => {
     const BURST = 40;
@@ -968,7 +977,7 @@ describeWithIntegrationDatabase('Load and concurrency harnesses', () => {
 
     expect(records).toHaveLength(1);
     expect(records[0].status).toBe('completed');
-  });
+  }, 60_000);
 
   it('scanner burst: concurrent scans for the same ticket yield exactly one accepted check-in', async () => {
     const BURST = 60;

@@ -13,7 +13,7 @@ import type { Database } from '@tixkit/db';
 import { ValidationError, NotFoundError } from '@tixkit/domain';
 import { config } from '../config/index.js';
 
-export type UploadPurpose = 'checkout_answer' | 'brand_logo' | 'user_avatar';
+export type UploadPurpose = 'checkout_answer' | 'brand_logo' | 'user_avatar' | 'content_email_image';
 
 export type CreateUploadInput = {
   tenantId: string;
@@ -66,6 +66,11 @@ const PURPOSE_LIMITS: Record<
     maxSizeBytes: 2 * 1024 * 1024,
     contentTypes: new Set(['image/jpeg', 'image/png', 'image/webp']),
     prefix: 'avatars',
+  },
+  content_email_image: {
+    maxSizeBytes: 5 * 1024 * 1024,
+    contentTypes: new Set(['image/jpeg', 'image/png', 'image/webp', 'image/gif']),
+    prefix: 'content-email-images',
   },
 };
 

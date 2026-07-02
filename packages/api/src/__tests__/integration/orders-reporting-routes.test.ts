@@ -99,21 +99,107 @@ function rowMatchesWheres(
 
 function createMockDb(): unknown {
   function createQuery(table: string) {
+    type SelectMarker = { kind: 'countAll' | 'sum'; column?: string; alias: string };
+    const selectBuilder = {
+      fn: {
+        countAll: () => ({
+          as: (alias: string): SelectMarker => ({ kind: 'countAll', alias }),
+        }),
+        sum: (column: string) => ({
+          as: (alias: string): SelectMarker => ({ kind: 'sum', column, alias }),
+        }),
+      },
+    };
+    const normalizeSelect = (cols: unknown): unknown[] => {
+      if (typeof cols === 'function') {
+        const selected = (cols as (builder: typeof selectBuilder) => unknown)(selectBuilder);
+        return Array.isArray(selected) ? selected : [selected];
+      }
+      return Array.isArray(cols) ? cols : [cols];
+    };
+    const matchingOrders = () =>
+      dbState.orders.filter((order) => rowMatchesWheres(order, query.wheres));
+    const orderForJoin = (orderId: unknown) =>
+      dbState.orders.find((order) => order.id === orderId) ?? null;
+    const withJoinedOrder = (row: Record<string, unknown>) => {
+      const order = orderForJoin(row.order_id);
+      return order
+        ? {
+            ...row,
+            ...Object.fromEntries(
+              Object.entries(row).map(([key, value]) => [`${table}.${key}`, value]),
+            ),
+            ...Object.fromEntries(
+              Object.entries(order).map(([key, value]) => [`orders.${key}`, value]),
+            ),
+          }
+        : null;
+    };
+    const hasAggregateSelect = () =>
+      query.cols.some(
+        (col): col is SelectMarker =>
+          typeof col === 'object' &&
+          col !== null &&
+          'kind' in col &&
+          (col.kind === 'countAll' || col.kind === 'sum'),
+      );
+    const aggregateRows = (rows: Record<string, unknown>[]) => {
+      const result: Record<string, unknown> = {};
+      for (const col of query.cols) {
+        if (
+          typeof col === 'object' &&
+          col !== null &&
+          'kind' in col &&
+          (col.kind === 'countAll' || col.kind === 'sum')
+        ) {
+          const marker = col as SelectMarker;
+          if (marker.kind === 'countAll') {
+            result[marker.alias] = rows.length;
+          } else {
+            const column = marker.column?.includes('.')
+              ? marker.column.split('.').at(-1)!
+              : marker.column;
+            result[marker.alias] = rows.reduce(
+              (sum, row) => sum + Number(row[column ?? ''] ?? 0),
+              0,
+            );
+          }
+        }
+      }
+      return result;
+    };
     const query = {
-      cols: [] as string[],
+      cols: [] as unknown[],
       wheres: [] as Array<{ column: string; op: string; value: unknown }>,
-      select: (cols: string[]) => {
-        query.cols = cols;
+      joins: [] as string[],
+      order: null as { column: string; direction: 'asc' | 'desc' } | null,
+      rowLimit: null as number | null,
+      groupColumn: null as string | null,
+      select: (cols: unknown) => {
+        query.cols = normalizeSelect(cols);
         return query;
       },
       selectAll: () => query,
-      innerJoin: () => query,
+      innerJoin: (joinedTable: string) => {
+        query.joins.push(joinedTable);
+        return query;
+      },
       where: (column: string, op: string, value: unknown) => {
         query.wheres.push({ column, op, value });
         return query;
       },
-      orderBy: () => query,
-      limit: () => query,
+      orderBy: (column: string, direction: 'asc' | 'desc' = 'asc') => {
+        query.order = { column, direction };
+        return query;
+      },
+      limit: (limit: number) => {
+        query.rowLimit = limit;
+        return query;
+      },
+      groupBy: (column: string) => {
+        query.groupColumn = column;
+        return query;
+      },
       forUpdate: () => query,
       fn: {
         sum: () => 'sum',
@@ -122,9 +208,14 @@ function createMockDb(): unknown {
       async executeTakeFirst() {
         dbState.queryWheres.push({ table, wheres: [...query.wheres] });
         if (table === 'tickets') {
+          const rows = query.joins.includes('orders')
+            ? dbState.tickets
+                .map((ticket) => withJoinedOrder(ticket))
+                .filter((ticket): ticket is Record<string, unknown> => Boolean(ticket))
+                .filter((ticket) => rowMatchesWheres(ticket, query.wheres))
+            : dbState.tickets.filter((ticket) => rowMatchesWheres(ticket, query.wheres));
           return {
-            count: dbState.tickets.filter((ticket) => rowMatchesWheres(ticket, query.wheres))
-              .length,
+            count: rows.length,
           };
         }
         if (table === 'attendees') {
@@ -134,13 +225,24 @@ function createMockDb(): unknown {
           };
         }
         if (table === 'orders') {
+          const rows = matchingOrders().sort((a, b) => {
+            if (!query.order) return 0;
+            const column = query.order.column.includes('.')
+              ? query.order.column.split('.').at(-1)!
+              : query.order.column;
+            const left = new Date(a[column] as string | Date).getTime();
+            const right = new Date(b[column] as string | Date).getTime();
+            return query.order.direction === 'desc' ? right - left : left - right;
+          });
+          if (hasAggregateSelect()) return aggregateRows(rows);
           if (query.wheres.some((where) => where.column === 'id' || where.column === 'orders.id')) {
             return (
               dbState.orders.find((order) => rowMatchesWheres(order, query.wheres)) ?? dbState.order
             );
           }
+          if (query.rowLimit === 1) return rows[0];
           return {
-            count: dbState.orders.filter((order) => rowMatchesWheres(order, query.wheres)).length,
+            count: rows.length,
           };
         }
         if (table === 'events') return dbState.event;
@@ -167,7 +269,15 @@ function createMockDb(): unknown {
             ).length,
           };
         }
-        if (table === 'order_line_items') return undefined;
+        if (table === 'order_line_items') {
+          const rows = query.joins.includes('orders')
+            ? dbState.lineItems
+                .map((lineItem) => withJoinedOrder(lineItem))
+                .filter((lineItem): lineItem is Record<string, unknown> => Boolean(lineItem))
+                .filter((lineItem) => rowMatchesWheres(lineItem, query.wheres))
+            : dbState.lineItems.filter((lineItem) => rowMatchesWheres(lineItem, query.wheres));
+          return hasAggregateSelect() ? aggregateRows(rows) : rows[0];
+        }
         if (table === 'email_jobs') return undefined;
         if (table === 'email_provider_routes') return { id: 'epr_1' };
         if (table === 'notification_templates as template') return { id: 'ntv_1' };
@@ -181,8 +291,21 @@ function createMockDb(): unknown {
       },
       async execute() {
         dbState.queryWheres.push({ table, wheres: [...query.wheres] });
-        if (table === 'orders')
-          return dbState.orders.filter((order) => rowMatchesWheres(order, query.wheres));
+        if (table === 'orders') {
+          const rows = matchingOrders();
+          if (query.groupColumn === 'sales_channel') {
+            const grouped = new Map<string, Record<string, unknown>[]>();
+            for (const order of rows) {
+              const key = String(order.sales_channel ?? 'online');
+              grouped.set(key, [...(grouped.get(key) ?? []), order]);
+            }
+            return [...grouped.entries()].map(([salesChannel, groupedRows]) => ({
+              sales_channel: salesChannel === 'undefined' ? undefined : salesChannel,
+              ...aggregateRows(groupedRows),
+            }));
+          }
+          return rows;
+        }
         if (table === 'order_line_items') {
           return dbState.lineItems.filter((lineItem) => rowMatchesWheres(lineItem, query.wheres));
         }
@@ -1145,10 +1268,12 @@ describe('reporting routes', () => {
       expect.objectContaining({
         table: 'tickets',
         wheres: expect.arrayContaining([
-          { column: 'tenant_id', op: '=', value: 'tnt_1' },
-          { column: 'event_id', op: '=', value: 'evt_1' },
-          { column: 'order_id', op: 'in', value: ['ord_1'] },
-          { column: 'status', op: 'in', value: ['valid', 'checked_in'] },
+          { column: 'tickets.tenant_id', op: '=', value: 'tnt_1' },
+          { column: 'tickets.event_id', op: '=', value: 'evt_1' },
+          { column: 'tickets.status', op: 'in', value: ['valid', 'checked_in'] },
+          { column: 'orders.tenant_id', op: '=', value: 'tnt_1' },
+          { column: 'orders.event_id', op: '=', value: 'evt_1' },
+          { column: 'orders.status', op: 'in', value: ['paid', 'partially_refunded', 'refunded'] },
         ]),
       }),
     );
@@ -1284,8 +1409,10 @@ describe('reporting routes', () => {
       expect.objectContaining({
         table: 'order_line_items',
         wheres: expect.arrayContaining([
-          { column: 'order_id', op: 'in', value: ['ord_1'] },
-          { column: 'ticket_type_id', op: 'is not', value: null },
+          { column: 'order_line_items.ticket_type_id', op: 'is not', value: null },
+          { column: 'orders.tenant_id', op: '=', value: 'tnt_1' },
+          { column: 'orders.event_id', op: '=', value: 'evt_1' },
+          { column: 'orders.status', op: 'in', value: ['paid', 'partially_refunded', 'refunded'] },
         ]),
       }),
     );

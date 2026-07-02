@@ -134,6 +134,98 @@ function isAnswerEmpty(answer: unknown): boolean {
 
 const OPTION_BEARING_TYPES = new Set<QuestionType>(['select', 'multiselect']);
 const CONSENT_TYPES = new Set<QuestionType>(['checkbox', 'waiver']);
+const MAX_VALIDATION_PATTERN_LENGTH = 200;
+
+type PatternSafetyResult =
+  | { safe: true; regex: RegExp }
+  | { safe: false; reason: 'invalid' | 'too_long' | 'unsafe' };
+
+type RegexGroupFrame = {
+  hasNestedQuantifierRisk: boolean;
+};
+
+function isQuantifierStart(char: string | undefined): boolean {
+  return char === '*' || char === '+' || char === '?' || char === '{';
+}
+
+function hasUnsafeRegexStructure(pattern: string): boolean {
+  const groups: RegexGroupFrame[] = [];
+  let escaped = false;
+  let inCharacterClass = false;
+
+  for (let index = 0; index < pattern.length; index += 1) {
+    const char = pattern[index];
+
+    if (escaped) {
+      if (/\d/.test(char) || char === 'k') return true;
+      escaped = false;
+      continue;
+    }
+
+    if (char === '\\') {
+      escaped = true;
+      continue;
+    }
+
+    if (inCharacterClass) {
+      if (char === ']') inCharacterClass = false;
+      continue;
+    }
+
+    if (char === '[') {
+      inCharacterClass = true;
+      continue;
+    }
+
+    if (char === '(') {
+      const next = pattern[index + 1];
+      const mode = pattern[index + 2];
+      if (next === '?' && (mode === '=' || mode === '!' || mode === '<')) return true;
+      groups.push({ hasNestedQuantifierRisk: false });
+      continue;
+    }
+
+    if (char === ')') {
+      const frame = groups.pop();
+      if (!frame) continue;
+      if (frame.hasNestedQuantifierRisk && isQuantifierStart(pattern[index + 1])) return true;
+      if (
+        groups.length > 0 &&
+        (frame.hasNestedQuantifierRisk || isQuantifierStart(pattern[index + 1]))
+      ) {
+        groups[groups.length - 1].hasNestedQuantifierRisk = true;
+      }
+      continue;
+    }
+
+    if (char === '|') {
+      if (groups.length > 0) groups[groups.length - 1].hasNestedQuantifierRisk = true;
+      continue;
+    }
+
+    if (isQuantifierStart(char) && groups.length > 0) {
+      groups[groups.length - 1].hasNestedQuantifierRisk = true;
+    }
+  }
+
+  return false;
+}
+
+function compileValidationPattern(pattern: string): PatternSafetyResult {
+  if (pattern.length > MAX_VALIDATION_PATTERN_LENGTH) {
+    return { safe: false, reason: 'too_long' };
+  }
+
+  if (hasUnsafeRegexStructure(pattern)) {
+    return { safe: false, reason: 'unsafe' };
+  }
+
+  try {
+    return { safe: true, regex: new RegExp(pattern) };
+  } catch {
+    return { safe: false, reason: 'invalid' };
+  }
+}
 
 export function validateQuestionDefinition(input: QuestionDefinitionValidationInput): string[] {
   const errors: string[] = [];
@@ -184,10 +276,15 @@ export function validateQuestionDefinition(input: QuestionDefinitionValidationIn
   }
 
   if (input.validationPattern) {
-    try {
-      RegExp(input.validationPattern);
-    } catch {
+    const pattern = compileValidationPattern(input.validationPattern);
+    if (!pattern.safe && pattern.reason === 'invalid') {
       errors.push('Validation pattern must be a valid regular expression');
+    } else if (!pattern.safe && pattern.reason === 'too_long') {
+      errors.push(
+        `Validation pattern must be ${MAX_VALIDATION_PATTERN_LENGTH} characters or fewer`,
+      );
+    } else if (!pattern.safe) {
+      errors.push('Validation pattern uses unsupported regular expression features');
     }
   }
 
@@ -374,13 +471,9 @@ export function validateAnswers(
 
     // Pattern validation
     if (question.validationPattern && typeof answer === 'string') {
-      try {
-        const regex = new RegExp(question.validationPattern);
-        if (!regex.test(answer)) {
-          errors.push({ questionId: question.id, message: `${question.label} format is invalid` });
-        }
-      } catch {
-        // Invalid regex pattern on the question; skip validation
+      const pattern = compileValidationPattern(question.validationPattern);
+      if (!pattern.safe || !pattern.regex.test(answer)) {
+        errors.push({ questionId: question.id, message: `${question.label} format is invalid` });
       }
     }
   }

@@ -18,7 +18,12 @@ import {
 } from '../../services/uploads.js';
 import { parseBody } from '../../http/schemas.js';
 
-const uploadPurposeSchema = z.enum(['checkout_answer', 'brand_logo', 'user_avatar']);
+const uploadPurposeSchema = z.enum([
+  'checkout_answer',
+  'brand_logo',
+  'user_avatar',
+  'content_email_image',
+]);
 
 const createUploadSchema = z
   .object({
@@ -131,6 +136,15 @@ function requireUploadArtifactAccess(
     return;
   }
 
+  if (artifact.purpose === 'content_email_image') {
+    if (operation === 'complete') {
+      ClerkAuthService.requirePermission(principal, 'events.write');
+      return;
+    }
+    requireAnyPermission(principal, ['events.read', 'events.write']);
+    return;
+  }
+
   throw new ForbiddenError('Upload artifact purpose is not supported');
 }
 
@@ -224,6 +238,24 @@ export const uploadRoutes: FastifyPluginAsync = async (app) => {
       if (hasCheckoutQuestionMetadata(body.metadata)) {
         throw new ValidationError('metadata.questionId is not allowed for user avatar uploads');
       }
+    } else if (body.purpose === 'content_email_image') {
+      ClerkAuthService.requirePermission(principal, 'events.write');
+      if (!eventId) throw new ValidationError('eventId is required for content email images');
+      if (hasCheckoutQuestionMetadata(body.metadata)) {
+        throw new ValidationError('metadata.questionId is not allowed for content email images');
+      }
+      const event = await new EventRepository(db).findById(eventId);
+      if (!event) throw new NotFoundError('Event', eventId);
+      ClerkAuthService.requireResourceTenant(principal, event, 'Event', eventId);
+      ClerkAuthService.requireOrganizationScope(principal, event.organization_id);
+      ClerkAuthService.requireBrandScope(principal, event.brand_id);
+      ClerkAuthService.requireEventScope(principal, eventId);
+      if (brandId && brandId !== event.brand_id) {
+        throw new ValidationError('brandId must match the event brand for content email images');
+      }
+      tenantId = event.tenant_id;
+      organizationId = event.organization_id;
+      brandId = event.brand_id;
     }
 
     const result = await createUploadArtifact(db, {

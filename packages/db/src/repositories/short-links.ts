@@ -93,36 +93,40 @@ export class ShortLinkRepository extends BaseRepository {
   async recordClick(shortLinkId: string, tenantId: string, at: Date = new Date()) {
     const clickId = `clk_${ulid()}`;
     const bucket = dayBucket(at);
-    const dbAny = this.db as any;
-    await dbAny
-      .insertInto('link_clicks')
-      .values({
-        id: clickId,
-        short_link_id: shortLinkId,
-        tenant_id: tenantId,
-        day_bucket: bucket,
-        created_at: at,
-      })
-      .execute();
-    await dbAny
-      .updateTable('short_links')
-      .set({ clicks: sql`clicks + 1`, updated_at: at })
-      .where('id', '=', shortLinkId)
-      .execute();
+    await this.db.transaction().execute(async (trx) => {
+      const trxAny = trx as any;
+      await trxAny
+        .insertInto('link_clicks')
+        .values({
+          id: clickId,
+          short_link_id: shortLinkId,
+          tenant_id: tenantId,
+          day_bucket: bucket,
+          created_at: at,
+        })
+        .execute();
+      await trxAny
+        .updateTable('short_links')
+        .set({ clicks: sql`clicks + 1`, updated_at: at })
+        .where('id', '=', shortLinkId)
+        .execute();
+    });
   }
 
   async getClickAggregate(shortLinkId: string) {
     const rows = await this.db
       .selectFrom('link_clicks')
-      .select(['day_bucket'])
+      .select(({ fn }) => ['day_bucket', fn.countAll<number>().as('clicks')])
       .where('short_link_id', '=', shortLinkId)
+      .groupBy('day_bucket')
       .execute();
     const byDay: Record<string, number> = {};
     let totalClicks = 0;
     for (const row of rows) {
       const day = row.day_bucket as string;
-      byDay[day] = (byDay[day] ?? 0) + 1;
-      totalClicks += 1;
+      const clicks = Number(row.clicks ?? 0);
+      byDay[day] = clicks;
+      totalClicks += clicks;
     }
     return { totalClicks, byDay };
   }

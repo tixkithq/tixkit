@@ -1096,6 +1096,108 @@ describe('upload artifact routes', () => {
     await app.close();
   });
 
+  it('creates content email image uploads scoped to the event brand', async () => {
+    const { db, tables } = createMockDb({
+      events: [
+        {
+          id: 'evt_1',
+          tenant_id: 'tnt_1',
+          organization_id: 'org_1',
+          brand_id: 'brd_1',
+          status: 'draft',
+        },
+      ],
+    });
+    const app = await setupUploadApp(db, uploadRoutes, makePrincipal({ scopes: ['events.write'] }));
+
+    const res = await app.inject({
+      method: 'POST',
+      url: '/upload-artifacts',
+      payload: {
+        purpose: 'content_email_image',
+        brandId: 'brd_1',
+        eventId: 'evt_1',
+        fileName: 'hero.png',
+        contentType: 'image/png',
+        sizeBytes: 12,
+        metadata: { source: 'admin_email_editor', contentDocumentId: 'cdoc_1' },
+      },
+    });
+
+    expect(res.statusCode).toBe(201);
+    expect(tables.upload_artifacts).toHaveLength(1);
+    expect(tables.upload_artifacts[0]).toMatchObject({
+      tenant_id: 'tnt_1',
+      organization_id: 'org_1',
+      brand_id: 'brd_1',
+      event_id: 'evt_1',
+      purpose: 'content_email_image',
+      content_type: 'image/png',
+    });
+    expect(String(tables.upload_artifacts[0]?.object_key)).toContain('content-email-images');
+    expect(signedUrlInputs).toHaveLength(1);
+    await app.close();
+  });
+
+  it('rejects content email image uploads outside the event brand scope', async () => {
+    const { db, tables } = createMockDb({
+      events: [
+        {
+          id: 'evt_1',
+          tenant_id: 'tnt_1',
+          organization_id: 'org_1',
+          brand_id: 'brd_1',
+          status: 'draft',
+        },
+      ],
+    });
+    const app = await setupUploadApp(db, uploadRoutes, makePrincipal({ scopes: ['events.write'] }));
+
+    const missingEvent = await app.inject({
+      method: 'POST',
+      url: '/upload-artifacts',
+      payload: {
+        purpose: 'content_email_image',
+        brandId: 'brd_1',
+        fileName: 'hero.png',
+        contentType: 'image/png',
+        sizeBytes: 12,
+      },
+    });
+    const mismatchedBrand = await app.inject({
+      method: 'POST',
+      url: '/upload-artifacts',
+      payload: {
+        purpose: 'content_email_image',
+        brandId: 'brd_other',
+        eventId: 'evt_1',
+        fileName: 'hero.png',
+        contentType: 'image/png',
+        sizeBytes: 12,
+      },
+    });
+    const checkoutMetadata = await app.inject({
+      method: 'POST',
+      url: '/upload-artifacts',
+      payload: {
+        purpose: 'content_email_image',
+        brandId: 'brd_1',
+        eventId: 'evt_1',
+        fileName: 'hero.png',
+        contentType: 'image/png',
+        sizeBytes: 12,
+        metadata: { questionId: 'q_file' },
+      },
+    });
+
+    expect(missingEvent.statusCode).toBe(400);
+    expect(mismatchedBrand.statusCode).toBe(400);
+    expect(checkoutMetadata.statusCode).toBe(400);
+    expect(tables.upload_artifacts).toHaveLength(0);
+    expect(signedUrlInputs).toHaveLength(0);
+    await app.close();
+  });
+
   it('rejects authenticated user-avatar uploads with checkout event scope or question metadata', async () => {
     const { db, tables } = createMockDb();
     const app = await setupUploadApp(db);

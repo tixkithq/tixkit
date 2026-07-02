@@ -138,6 +138,15 @@ describe('validateAnswers', () => {
     expect(validateAnswers(questions, { q_1: '1234' }).valid).toBe(true);
   });
 
+  it('rejects stored unsafe regex patterns without executing them', () => {
+    const questions = [
+      makeQuestion({ id: 'q_1', type: 'text', validationPattern: '^(a+)+$', required: true }),
+    ];
+    const result = validateAnswers(questions, { q_1: `${'a'.repeat(32)}!` });
+    expect(result.valid).toBe(false);
+    expect(result.errors[0].message).toBe('Full Name format is invalid');
+  });
+
   it('skips required conditional questions when the condition is not met', () => {
     const questions = [
       makeQuestion({
@@ -232,5 +241,18 @@ describe('validateQuestionDefinition', () => {
     });
     expect(errors).toContain('A question cannot conditionally depend on itself');
     expect(errors).toContain('Validation pattern must be a valid regular expression');
+  });
+
+  it('rejects unsafe custom regex validation patterns', () => {
+    expect(validateQuestionDefinition({ type: 'text', validationPattern: '^(a+)+$' })).toContain(
+      'Validation pattern uses unsupported regular expression features',
+    );
+    expect(validateQuestionDefinition({ type: 'text', validationPattern: '^\\d{4}$' })).toEqual([]);
+  });
+
+  it('caps custom regex validation pattern length', () => {
+    expect(
+      validateQuestionDefinition({ type: 'text', validationPattern: `^${'a'.repeat(201)}$` }),
+    ).toContain('Validation pattern must be 200 characters or fewer');
   });
 });
