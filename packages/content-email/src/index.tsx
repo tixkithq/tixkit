@@ -21,6 +21,7 @@ import {
 } from '@tixkit/content-core';
 import {
   isAllowedDestination,
+  MERGE_TAG_REGISTRY,
   renderMergeTags,
   validateMergeTags,
   type MergeTagContext,
@@ -28,6 +29,7 @@ import {
 } from '@tixkit/domain';
 
 export const REACT_EMAIL_EDITOR_PACKAGE = '@react-email/editor' as const;
+export { MERGE_TAG_REGISTRY };
 
 export type EmailTemplateCategory = 'transactional' | 'bulk' | 'staff' | 'system';
 
@@ -217,7 +219,13 @@ export function createDefaultEmailTemplate(
     schemaVersion: 1,
     editor: {
       provider: REACT_EMAIL_EDITOR_PACKAGE,
-      contentHtml: '<h1>{{event.title}}</h1><p>Hi {{recipient.name}}, your tickets are ready.</p>',
+      contentHtml: [
+        '<h1>{{event.title}}</h1>',
+        '<p>Hi {{recipient.name}}, your tickets are ready.</p>',
+        '<p>{{ticket.type}} - {{order.total}}</p>',
+        '<p>Ticket code: {{ticket.code}}</p>',
+        '<p><img src="{{ticket.qrCodeUrl}}" alt="Ticket QR code" /></p>',
+      ].join(''),
     },
     settings: {
       templateKey: 'order-confirmed',
@@ -242,7 +250,13 @@ export function createDefaultEmailTemplate(
       {
         type: 'ticket_summary',
         title: 'Ticket summary',
-        body: '{{ticket.type}} · {{order.total}}',
+        body: '{{ticket.type}} · {{order.total}} · {{ticket.code}}',
+      },
+      {
+        type: 'qr_code',
+        title: 'Ticket QR code',
+        imageUrl: '{{ticket.qrCodeUrl}}',
+        imageAlt: 'Ticket QR code',
       },
       {
         type: 'unsubscribe_footer',
@@ -401,14 +415,16 @@ export async function renderEmailTemplate(
     ? renderPlain(document.settings.previewText, context)
     : undefined;
   if (document.editor.contentJson) {
+    const editorHtml = renderHtml(document.editor.contentHtml, context);
+    const editorHtmlWithFooter = appendEditorUnsubscribeFooter(editorHtml, document, context);
+    const editorText =
+      document.editor.contentText?.trim() || plainTextFromHtml(editorHtml) || '';
+    const editorTextWithFooter = appendEditorUnsubscribeText(editorText, document, context);
     return {
       subject,
       previewText,
-      html: renderHtml(document.editor.contentHtml, context),
-      text: renderPlain(
-        plainTextFromHtml(document.editor.contentHtml) || document.editor.contentText?.trim() || '',
-        context,
-      ),
+      html: editorHtmlWithFooter,
+      text: renderPlain(editorTextWithFooter, context),
       validation,
     };
   }
@@ -430,6 +446,51 @@ export async function renderEmailTemplate(
   );
 
   return { subject, previewText, html, text, validation };
+}
+
+function appendEditorUnsubscribeFooter(
+  html: string,
+  document: EmailTemplateDocument,
+  context: MergeTagContext,
+): string {
+  if (document.settings.category !== 'bulk') return html;
+  const footer = document.blocks.find(
+    (block): block is Extract<EmailTemplateBlock, { type: 'unsubscribe_footer' }> =>
+      block.type === 'unsubscribe_footer',
+  );
+  if (!footer) return html;
+  const href = renderUrl(footer.unsubscribeUrl, context);
+  if (!href || html.includes(href)) return html;
+  const footerHtml = [
+    '<table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" style="margin-top:24px">',
+    '<tbody><tr><td style="border-top:1px solid #e2e8f0;color:#64748b;font-size:12px;line-height:18px;padding:20px 0 0">',
+    `<p style="margin:0 0 8px">${renderHtml(footer.body, context)}</p>`,
+    `<a href="${escapeHtmlAttribute(href)}" style="color:#475569;text-decoration:underline">Manage preferences</a>`,
+    '</td></tr></tbody></table>',
+  ].join('');
+  if (/<\/body>/i.test(html)) {
+    return html.replace(/<\/body>/i, `${footerHtml}</body>`);
+  }
+  return `${html}${footerHtml}`;
+}
+
+function appendEditorUnsubscribeText(
+  text: string,
+  document: EmailTemplateDocument,
+  context: MergeTagContext,
+): string {
+  if (document.settings.category !== 'bulk') return text;
+  const footer = document.blocks.find(
+    (block): block is Extract<EmailTemplateBlock, { type: 'unsubscribe_footer' }> =>
+      block.type === 'unsubscribe_footer',
+  );
+  if (!footer) return text;
+  const href = renderUrl(footer.unsubscribeUrl, context);
+  if (!href || text.includes(href)) return text;
+  const footerText = [renderPlain(footer.body, context), `Manage preferences: ${href}`]
+    .filter(Boolean)
+    .join('\n');
+  return [text.trim(), footerText].filter(Boolean).join('\n\n');
 }
 
 export function createEmailTestSend(
@@ -497,14 +558,15 @@ function EmailTemplate({
 
 function renderBlock(block: EmailTemplateBlock, context: MergeTagContext): React.ReactNode {
   switch (block.type) {
-    case 'event_hero':
+    case 'event_hero': {
+      const imageUrl = block.imageUrl ? renderUrl(block.imageUrl, context).trim() : '';
       return React.createElement(
         Section,
         { style: { backgroundColor: '#ffffff', borderRadius: '8px', padding: '28px' } },
-        block.imageUrl
+        imageUrl
           ? React.createElement(Img, {
               alt: block.imageAlt ?? '',
-              src: renderUrl(block.imageUrl, context),
+              src: imageUrl,
               style: { borderRadius: '6px', marginBottom: '20px', width: '100%' },
             })
           : undefined,
@@ -520,6 +582,7 @@ function renderBlock(block: EmailTemplateBlock, context: MergeTagContext): React
             )
           : undefined,
       );
+    }
     case 'ticket_summary':
       return React.createElement(
         Section,
@@ -540,17 +603,21 @@ function renderBlock(block: EmailTemplateBlock, context: MergeTagContext): React
           ),
         ),
       );
-    case 'qr_code':
+    case 'qr_code': {
+      const imageUrl = renderUrl(block.imageUrl, context).trim();
       return React.createElement(
         Section,
         { style: { backgroundColor: '#ffffff', padding: '24px 28px', textAlign: 'center' } },
         React.createElement(Heading, { as: 'h2' }, renderPlain(block.title, context)),
-        React.createElement(Img, {
-          alt: block.imageAlt ?? '',
-          src: renderUrl(block.imageUrl, context),
-          style: { margin: '0 auto', maxWidth: '220px' },
-        }),
+        imageUrl
+          ? React.createElement(Img, {
+              alt: block.imageAlt ?? '',
+              src: imageUrl,
+              style: { margin: '0 auto', maxWidth: '220px' },
+            })
+          : undefined,
       );
+    }
     case 'calendar_button':
       return React.createElement(
         Section,
@@ -609,7 +676,7 @@ function collectTemplateStrings(document: EmailTemplateDocument): string[] {
     document.settings.previewText ?? '',
     document.settings.sender.fromName ?? '',
     document.editor.contentHtml,
-    document.editor.contentJson ? '' : (document.editor.contentText ?? ''),
+    document.editor.contentText ?? '',
   ];
   if (document.editor.contentJson) {
     return values.filter(Boolean);
@@ -990,6 +1057,14 @@ function renderHtml(template: string, context: MergeTagContext): string {
 
 function renderUrl(template: string, context: MergeTagContext): string {
   return renderMergeTags(template, context, { channel: 'email', escape: 'plain' });
+}
+
+function escapeHtmlAttribute(value: string): string {
+  return value
+    .replaceAll('&', '&amp;')
+    .replaceAll('"', '&quot;')
+    .replaceAll('<', '&lt;')
+    .replaceAll('>', '&gt;');
 }
 
 function plainTextFromHtml(html: string): string {

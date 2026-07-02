@@ -15,25 +15,34 @@ import {
 import {
   Archive,
   CalendarDays,
-  ChevronLeft,
   Copy,
-  ExternalLink,
   Eye,
+  ExternalLink,
   FileJson,
   ImageIcon,
   LayoutTemplate,
   ListChecks,
   MapPin,
-  MoreHorizontal,
-  Palette,
   PanelRightClose,
-  PanelRightOpen,
   Save,
-  Send,
   Ticket,
   Type,
 } from 'lucide-react';
 import { toast } from 'sonner';
+import {
+  type DropdownMenuItemConfig,
+  EditorChrome,
+  EditorLeftRail,
+  type EditorMode,
+  EditorTopBar,
+  InsertPopoverButton,
+  InsertPopoverItem,
+  InspectorPanel,
+  InspectorReopenButton,
+  MobileInsertButton,
+  cn,
+  inputClassName,
+} from '@tixkit/content-editor-shell';
 import {
   createDefaultEventPageDocument,
   normalizeEventPageDocument,
@@ -53,6 +62,12 @@ import {
 type AutosaveState = 'idle' | 'saving' | 'saved' | 'error';
 type EditorPreview = { label: string; format: 'html' | 'text'; output: string };
 type InsertActionId = 'text' | 'image' | 'tickets' | 'schedule' | 'venue' | 'button';
+type EventPageVariableKind = 'event' | 'ticket' | 'brand' | 'link' | 'system';
+type EventPageVariablePresentation = {
+  label: string;
+  preview: string;
+  kind: EventPageVariableKind;
+};
 type InspectorPanelId =
   | 'block'
   | 'page'
@@ -80,10 +95,112 @@ const eventPageInsertActions: InsertAction[] = [
   { id: 'button', label: 'Button', icon: <ExternalLink className="size-4" /> },
 ];
 
-const darkInputClassName =
-  'w-full rounded-md border border-white/10 bg-white/5 px-2.5 py-1.5 text-sm text-white outline-none focus:border-white/35 disabled:cursor-not-allowed disabled:opacity-50';
 const canvasInputClassName =
-  'w-full rounded-sm border-0 bg-transparent p-0 shadow-none outline-none transition placeholder:text-black/35 focus:outline-none focus-visible:outline-none disabled:cursor-not-allowed disabled:opacity-70';
+  'w-full rounded-sm border-0 bg-transparent p-0 shadow-none outline-none transition placeholder:text-muted-foreground/50 focus:outline-none focus-visible:outline-none disabled:cursor-not-allowed disabled:opacity-70';
+
+const eventPageMergeTagPattern = /\{\{\s*([a-zA-Z0-9_.]+)\s*\}\}/g;
+
+const eventPageVariableKeys = [
+  'event.title',
+  'event.startsAt',
+  'event.endsAt',
+  'event.timezone',
+  'event.venueName',
+  'event.checkoutUrl',
+  'event.publicUrl',
+  'brand.name',
+  'ticket.name',
+  'ticket.priceLabel',
+] as const;
+
+const eventPageVariablePresentations: Record<string, EventPageVariablePresentation> = {
+  'event.title': {
+    label: 'Event name',
+    preview: 'Sample Summer Showcase',
+    kind: 'event',
+  },
+  'event.startsAt': {
+    label: 'Event date',
+    preview: 'Sat, Aug 15 at 8:00 PM',
+    kind: 'event',
+  },
+  'event.endsAt': {
+    label: 'Event end time',
+    preview: 'Sat, Aug 15 at 11:00 PM',
+    kind: 'event',
+  },
+  'event.timezone': {
+    label: 'Event timezone',
+    preview: 'America/New_York',
+    kind: 'event',
+  },
+  'event.venueName': {
+    label: 'Venue',
+    preview: 'River North Hall',
+    kind: 'event',
+  },
+  'event.checkoutUrl': {
+    label: 'Checkout link',
+    preview: 'ticket checkout',
+    kind: 'link',
+  },
+  'event.publicUrl': {
+    label: 'Event page',
+    preview: 'public event page',
+    kind: 'link',
+  },
+  'brand.name': {
+    label: 'Brand name',
+    preview: 'Tixkit',
+    kind: 'brand',
+  },
+  'ticket.name': {
+    label: 'Ticket name',
+    preview: 'General Admission',
+    kind: 'ticket',
+  },
+  'ticket.priceLabel': {
+    label: 'Ticket price',
+    preview: '$35.00',
+    kind: 'ticket',
+  },
+};
+
+function fallbackEventPageVariableKind(key: string): EventPageVariableKind {
+  if (key.startsWith('event.')) return key.endsWith('Url') ? 'link' : 'event';
+  if (key.startsWith('ticket.') || key.startsWith('tickets.')) return 'ticket';
+  if (key.startsWith('brand.')) return 'brand';
+  if (key.endsWith('Url') || key.endsWith('Link')) return 'link';
+  return 'system';
+}
+
+function eventPageVariablePresentation(key: string): EventPageVariablePresentation {
+  const fallbackLabel = key
+    .split('.')
+    .filter(Boolean)
+    .map((part) => part.replace(/([a-z])([A-Z])/g, '$1 $2'))
+    .join(' ');
+  return (
+    eventPageVariablePresentations[key] ?? {
+      label: fallbackLabel || 'Dynamic value',
+      preview: fallbackLabel || 'dynamic value',
+      kind: fallbackEventPageVariableKind(key),
+    }
+  );
+}
+
+function mergeTagKeys(value: string): string[] {
+  return Array.from(value.matchAll(eventPageMergeTagPattern), (match) => match[1]).filter(
+    (key, index, keys) => key && keys.indexOf(key) === index,
+  );
+}
+
+function friendlyMergeTagText(value: string): string {
+  return value.replace(eventPageMergeTagPattern, (_tag, key: string) => {
+    const presentation = eventPageVariablePresentation(key);
+    return presentation.preview;
+  });
+}
 
 function listItemsFromResponse<T>(value: unknown): T[] {
   if (Array.isArray(value)) return value as T[];
@@ -351,17 +468,22 @@ function blockLabel(block: EventPageBlock): string {
 }
 
 function blockSummary(block: EventPageBlock): string {
+  const previewText = (value: string | undefined) => friendlyMergeTagText(value ?? '');
   switch (block.type) {
     case 'hero':
-      return block.body ? `${block.headline} - ${block.body}` : block.headline;
+      return block.body
+        ? `${previewText(block.headline)} - ${previewText(block.body)}`
+        : previewText(block.headline);
     case 'event_details':
       return `${block.items.length} details`;
     case 'tickets':
-      return block.body ?? block.title;
+      return previewText(block.body ?? block.title);
     case 'schedule':
       return `${block.items.length} schedule items`;
     case 'venue_map':
-      return block.address ? `${block.venueName} - ${block.address}` : block.venueName;
+      return block.address
+        ? `${previewText(block.venueName)} - ${previewText(block.address)}`
+        : previewText(block.venueName);
     case 'faq':
       return `${block.items.length} questions`;
     case 'products':
@@ -370,7 +492,7 @@ function blockSummary(block: EventPageBlock): string {
     case 'speakers':
       return `${block.items.length} entries`;
     case 'button':
-      return block.label;
+      return previewText(block.label);
     case 'social_links':
       return `${block.links.length} links`;
     case 'custom_embed':
@@ -378,7 +500,9 @@ function blockSummary(block: EventPageBlock): string {
     case 'divider':
       return 'Divider';
     case 'rich_text':
-      return tipTapImageAttrs(block) ? 'Image content' : tipTapText(block) || 'Structured content';
+      return tipTapImageAttrs(block)
+        ? 'Image content'
+        : previewText(tipTapText(block)) || 'Structured content';
   }
 }
 
@@ -547,20 +671,6 @@ function updateBlockInEditor(editor: Editor, blockId: string, nextBlock: EventPa
   });
 }
 
-function autosaveLabel(state: AutosaveState): string {
-  if (state === 'saving') return 'Saving';
-  if (state === 'saved') return 'Saved';
-  if (state === 'error') return 'Save failed';
-  return 'Ready';
-}
-
-function autosaveClassName(state: AutosaveState): string {
-  if (state === 'saving') return 'border-amber-400/40 bg-amber-400/10 text-amber-100';
-  if (state === 'saved') return 'border-emerald-400/40 bg-emerald-400/10 text-emerald-100';
-  if (state === 'error') return 'border-red-400/40 bg-red-400/10 text-red-100';
-  return 'border-cyan-400/40 bg-cyan-400/10 text-cyan-100';
-}
-
 function formatDate(value?: string) {
   if (!value) return 'Not recorded';
   const date = new Date(value);
@@ -582,27 +692,60 @@ function BlockTextField({
   onChange: (value: string) => void;
   value: string;
 }) {
+  const variableKeys = mergeTagKeys(value);
+  const variableHint = variableKeys.length > 0 ? <VariablePreviewHint keys={variableKeys} /> : null;
+
   if (multiline) {
     return (
-      <textarea
-        aria-label={label}
-        className={`${canvasInputClassName} ${className} resize-none overflow-hidden`}
-        disabled={disabled}
-        onChange={(event) => onChange(event.currentTarget.value)}
-        rows={3}
-        value={value}
-      />
+      <span className="block space-y-2">
+        <textarea
+          aria-label={label}
+          className={`${canvasInputClassName} ${className} resize-none overflow-hidden`}
+          disabled={disabled}
+          onChange={(event) => onChange(event.currentTarget.value)}
+          rows={3}
+          value={value}
+        />
+        {variableHint}
+      </span>
     );
   }
 
   return (
-    <input
-      aria-label={label}
-      className={`${canvasInputClassName} ${className}`}
-      disabled={disabled}
-      onChange={(event) => onChange(event.currentTarget.value)}
-      value={value}
-    />
+    <span className="block space-y-2">
+      <input
+        aria-label={label}
+        className={`${canvasInputClassName} ${className}`}
+        disabled={disabled}
+        onChange={(event) => onChange(event.currentTarget.value)}
+        value={value}
+      />
+      {variableHint}
+    </span>
+  );
+}
+
+function VariablePreviewHint({ keys }: { keys: string[] }) {
+  return (
+    <span className="flex flex-wrap items-center gap-1.5 text-[0.68rem] font-medium leading-5 text-black/45">
+      <span>Dynamic values</span>
+      {keys.map((key) => {
+        const presentation = eventPageVariablePresentation(key);
+        return (
+          <span
+            className={`tixkit-variable-kind-badge tixkit-variable-kind-badge--${presentation.kind} inline-flex max-w-full items-center gap-1 rounded-md border px-1.5 py-0.5`}
+            key={key}
+            title={presentation.label}
+          >
+            <span>{presentation.label}</span>
+            <span aria-hidden="true" className="opacity-60">
+              /
+            </span>
+            <span className="truncate">{presentation.preview}</span>
+          </span>
+        );
+      })}
+    </span>
   );
 }
 
@@ -640,7 +783,7 @@ function EventPageBlockNodeView(props: NodeViewProps) {
     >
       <div className="mb-4 flex items-center justify-between gap-3 text-xs text-black/45">
         <span className="font-medium uppercase">{blockLabel(block)}</span>
-        <span className="font-mono">{block.id}</span>
+        {props.selected && <span className="rounded-full bg-black/5 px-2 py-0.5">Selected</span>}
       </div>
       <BlockNodeContent block={block} disabled={disabled} updateBlock={updateBlock} />
     </NodeViewWrapper>
@@ -1040,16 +1183,16 @@ function PreviewDrawer({ onClose, preview }: { onClose: () => void; preview: Edi
   return (
     <aside
       aria-label="Event page preview"
-      className="fixed inset-y-0 right-0 z-50 flex w-full max-w-xl flex-col border-l border-white/10 bg-neutral-950 text-white shadow-2xl"
+      className="fixed inset-y-0 right-0 z-50 flex w-full max-w-xl flex-col border-l bg-background text-foreground shadow-2xl"
       data-testid="preview-drawer"
     >
-      <div className="flex items-center justify-between gap-3 border-b border-white/10 px-4 py-3">
+      <div className="flex items-center justify-between gap-3 border-b px-4 py-3">
         <div>
           <p className="text-sm font-semibold">{preview.label}</p>
-          <p className="text-xs text-white/45">{preview.format.toUpperCase()}</p>
+          <p className="text-xs text-muted-foreground">{preview.format.toUpperCase()}</p>
         </div>
         <button
-          className="rounded-md border border-white/10 px-3 py-1.5 text-sm hover:bg-white/10"
+          className="rounded-md border px-3 py-1.5 text-sm transition-colors hover:bg-accent"
           onClick={onClose}
           type="button"
         >
@@ -1057,7 +1200,7 @@ function PreviewDrawer({ onClose, preview }: { onClose: () => void; preview: Edi
         </button>
       </div>
       <div className="min-h-0 flex-1 overflow-auto p-4">
-        <pre className="whitespace-pre-wrap rounded-md border border-white/10 bg-white/5 p-4 text-sm leading-6 text-white/80">
+        <pre className="whitespace-pre-wrap rounded-md border bg-muted/30 p-4 text-sm leading-6 text-muted-foreground">
           {preview.output}
         </pre>
       </div>
@@ -1075,7 +1218,7 @@ export function EventPagePersistedEditorView({ eventId }: { eventId: string }) {
   const [inspectorPanelId, setInspectorPanelId] = React.useState<InspectorPanelId>('block');
   const [inspectorCollapsed, setInspectorCollapsed] = React.useState(false);
   const [insertDrawerOpen, setInsertDrawerOpen] = React.useState(false);
-  const [moreActionsOpen, setMoreActionsOpen] = React.useState(false);
+  const [editorMode, setEditorMode] = React.useState<EditorMode>('editor');
   const [preview, setPreview] = React.useState<EditorPreview>();
   const [previewOpen, setPreviewOpen] = React.useState(false);
   const [autosave, setAutosave] = React.useState<AutosaveState>('idle');
@@ -1171,7 +1314,6 @@ export function EventPagePersistedEditorView({ eventId }: { eventId: string }) {
 
   function openMenuInspectorPanel(panelId: InspectorPanelId) {
     openInspectorPanel(panelId);
-    setMoreActionsOpen(false);
   }
 
   const load = React.useCallback(async () => {
@@ -1480,7 +1622,7 @@ export function EventPagePersistedEditorView({ eventId }: { eventId: string }) {
 
   if (loading) {
     return (
-      <div className="flex min-h-svh items-center justify-center bg-neutral-950 text-sm text-white/65">
+      <div className="flex min-h-svh items-center justify-center bg-background text-sm text-muted-foreground">
         Loading event-page editor...
       </div>
     );
@@ -1488,15 +1630,17 @@ export function EventPagePersistedEditorView({ eventId }: { eventId: string }) {
 
   if (error || !event || !document || !draft || !eventPageDocument || !preview) {
     return (
-      <section className="flex min-h-svh items-center justify-center bg-neutral-950 p-6 text-white">
-        <div className="w-full max-w-lg space-y-4 rounded-lg border border-white/10 bg-white/5 p-6">
+      <section className="flex min-h-svh items-center justify-center bg-background p-6 text-foreground">
+        <div className="w-full max-w-lg space-y-4 rounded-lg border bg-card p-6 text-card-foreground">
           <div className="space-y-1">
-            <p className="text-sm text-white/50">Event page editor</p>
+            <p className="text-sm text-muted-foreground">Event page editor</p>
             <h1 className="text-2xl font-semibold">Unable to load editor</h1>
           </div>
-          <p className="text-sm text-red-200">{error ?? 'Hosted page editor could not load.'}</p>
+          <p className="text-sm text-destructive">
+            {error ?? 'Hosted page editor could not load.'}
+          </p>
           <button
-            className="rounded-md border border-white/15 px-3 py-2 text-sm hover:bg-white/10"
+            className="rounded-md border px-3 py-2 text-sm transition-colors hover:bg-accent"
             onClick={() => void load()}
             type="button"
           >
@@ -1513,41 +1657,45 @@ export function EventPagePersistedEditorView({ eventId }: { eventId: string }) {
   const history = versionSummaries(versions);
   const selectedBlockControls = (() => {
     if (!selectedBlock) {
-      return <p className="text-xs text-white/45">Select content in the canvas.</p>;
+      return <p className="text-xs text-muted-foreground">Select content in the canvas.</p>;
     }
 
     if (selectedBlock.type === 'hero') {
+      const variableKeys = mergeTagKeys(selectedBlock.ctaUrl ?? '');
       return (
-        <label className="space-y-1.5 text-xs font-medium text-white/55">
-          Hero CTA URL
-          <input
-            aria-label="Hero CTA URL"
-            className={darkInputClassName}
-            disabled={!canEdit}
-            onChange={(change) =>
-              updateSelectedEventPageBlock({
-                ...selectedBlock,
-                ctaUrl: change.currentTarget.value,
-              })
-            }
-            value={selectedBlock.ctaUrl ?? ''}
-          />
-        </label>
+        <div className="space-y-2">
+          <label className="space-y-1.5 text-xs font-medium text-muted-foreground">
+            Hero CTA URL
+            <input
+              aria-label="Hero CTA URL"
+              className={inputClassName}
+              disabled={!canEdit}
+              onChange={(change) =>
+                updateSelectedEventPageBlock({
+                  ...selectedBlock,
+                  ctaUrl: change.currentTarget.value,
+                })
+              }
+              value={selectedBlock.ctaUrl ?? ''}
+            />
+          </label>
+          {variableKeys.length > 0 && <VariablePreviewHint keys={variableKeys} />}
+        </div>
       );
     }
 
     if (selectedBlock.type === 'rich_text') {
       const imageAttrs = tipTapImageAttrs(selectedBlock);
       if (!imageAttrs) {
-        return <p className="text-xs text-white/45">{blockSummary(selectedBlock)}</p>;
+        return <p className="text-xs text-muted-foreground">{blockSummary(selectedBlock)}</p>;
       }
       return (
         <div className="space-y-3">
-          <label className="space-y-1.5 text-xs font-medium text-white/55">
+          <label className="space-y-1.5 text-xs font-medium text-muted-foreground">
             Image URL
             <input
               aria-label="Image URL"
-              className={darkInputClassName}
+              className={inputClassName}
               disabled={!canEdit}
               onChange={(change) =>
                 updateSelectedEventPageBlock({
@@ -1558,11 +1706,11 @@ export function EventPagePersistedEditorView({ eventId }: { eventId: string }) {
               value={imageAttrs.src}
             />
           </label>
-          <label className="space-y-1.5 text-xs font-medium text-white/55">
+          <label className="space-y-1.5 text-xs font-medium text-muted-foreground">
             Image alt text
             <input
               aria-label="Image alt text"
-              className={darkInputClassName}
+              className={inputClassName}
               disabled={!canEdit}
               onChange={(change) =>
                 updateSelectedEventPageBlock({
@@ -1579,11 +1727,11 @@ export function EventPagePersistedEditorView({ eventId }: { eventId: string }) {
 
     if (selectedBlock.type === 'venue_map') {
       return (
-        <label className="space-y-1.5 text-xs font-medium text-white/55">
+        <label className="space-y-1.5 text-xs font-medium text-muted-foreground">
           Map URL
           <input
             aria-label="Map URL"
-            className={darkInputClassName}
+            className={inputClassName}
             disabled={!canEdit}
             onChange={(change) =>
               updateSelectedEventPageBlock({
@@ -1598,23 +1746,27 @@ export function EventPagePersistedEditorView({ eventId }: { eventId: string }) {
     }
 
     if (selectedBlock.type === 'button') {
+      const variableKeys = mergeTagKeys(selectedBlock.url);
       return (
-        <label className="space-y-1.5 text-xs font-medium text-white/55">
-          Button URL
-          <input
-            aria-label="Button URL"
-            className={darkInputClassName}
-            disabled={!canEdit}
-            onChange={(change) =>
-              updateSelectedEventPageBlock({ ...selectedBlock, url: change.currentTarget.value })
-            }
-            value={selectedBlock.url}
-          />
-        </label>
+        <div className="space-y-2">
+          <label className="space-y-1.5 text-xs font-medium text-muted-foreground">
+            Button URL
+            <input
+              aria-label="Button URL"
+              className={inputClassName}
+              disabled={!canEdit}
+              onChange={(change) =>
+                updateSelectedEventPageBlock({ ...selectedBlock, url: change.currentTarget.value })
+              }
+              value={selectedBlock.url}
+            />
+          </label>
+          {variableKeys.length > 0 && <VariablePreviewHint keys={variableKeys} />}
+        </div>
       );
     }
 
-    return <p className="text-xs text-white/45">{blockSummary(selectedBlock)}</p>;
+    return <p className="text-xs text-muted-foreground">{blockSummary(selectedBlock)}</p>;
   })();
   const inspectorHeading: Record<InspectorPanelId, { eyebrow: string; title: string }> = {
     block: { eyebrow: 'Selected block', title: selectedBlockLabel },
@@ -1627,231 +1779,161 @@ export function EventPagePersistedEditorView({ eventId }: { eventId: string }) {
     issues: { eyebrow: 'Publish blockers', title: 'Validation' },
   };
 
+  const moreActionsItems: DropdownMenuItemConfig[] = [
+    {
+      id: 'save',
+      label: 'Save draft',
+      icon: <Save className="size-4" />,
+      onClick: () => void saveDraft(),
+      disabled: Boolean(archivedReason) || autosave === 'saving',
+      separatorAfter: true,
+    },
+    {
+      id: 'preview',
+      label: 'Open preview',
+      icon: <Eye className="size-4" />,
+      onClick: () => void previewSavedDraft(),
+      disabled: Boolean(archivedReason) || autosave === 'saving',
+    },
+    {
+      id: 'public',
+      label: 'View public page',
+      icon: <ExternalLink className="size-4" />,
+      onClick: () => viewPublicPage(),
+      disabled: Boolean(archivedReason),
+    },
+    {
+      id: 'variables',
+      label: 'Variables',
+      icon: <Type className="size-4" />,
+      onClick: () => openMenuInspectorPanel('variables'),
+    },
+    {
+      id: 'history',
+      label: 'Version history',
+      icon: <Copy className="size-4" />,
+      onClick: () => openMenuInspectorPanel('history'),
+    },
+    {
+      id: 'details',
+      label: 'Page details',
+      icon: <ListChecks className="size-4" />,
+      onClick: () => openMenuInspectorPanel('page'),
+      separatorAfter: true,
+    },
+    {
+      id: 'structure',
+      label: 'Page structure',
+      icon: <LayoutTemplate className="size-4" />,
+      onClick: () => openMenuInspectorPanel('body'),
+    },
+    {
+      id: 'json',
+      label: 'View JSON',
+      icon: <FileJson className="size-4" />,
+      onClick: () => openMenuInspectorPanel('code'),
+    },
+    {
+      id: 'review',
+      label: 'Review blockers',
+      icon: <Eye className="size-4" />,
+      onClick: () => openMenuInspectorPanel('issues'),
+      separatorAfter: true,
+    },
+    {
+      id: 'duplicate',
+      label: 'Duplicate page',
+      icon: <Copy className="size-4" />,
+      onClick: () => void duplicateDocument(),
+      disabled: Boolean(archivedReason),
+      separatorAfter: true,
+    },
+    {
+      id: 'archive',
+      label: 'Archive page',
+      icon: <Archive className="size-4" />,
+      onClick: () => void archiveDocument(),
+      destructive: true,
+    },
+  ];
+
   return (
-    <section
-      className="h-screen min-h-screen overflow-hidden bg-neutral-950 text-white"
-      data-channel="event-page"
-      data-testid="content-editor-shell"
-    >
-      <header className="grid h-16 grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-2 border-b border-white/10 px-3 sm:gap-4 sm:px-4">
-        <a
-          aria-label="Back to event"
-          className="inline-flex size-9 items-center justify-center rounded-md border border-white/10 text-white/70 hover:bg-white/10 hover:text-white"
-          href={`/events/${event.id}`}
-        >
-          <ChevronLeft className="size-4" />
-        </a>
-        <div className="hidden min-w-0 text-center md:block">
-          <div className="flex min-w-0 items-center justify-center gap-2 text-sm text-white/55">
-            <h1 className="truncate text-sm font-semibold text-white">Hosted page editor</h1>
-            <span>/</span>
-            <button
-              className="min-w-0 truncate font-semibold text-white"
-              disabled={!canEdit}
-              onClick={() => openInspectorPanel('page')}
-              type="button"
-            >
-              {document.name}
-            </button>
-            <span className="rounded-md bg-white/10 px-2 py-0.5 text-xs text-white/70">
-              {document.status}
-            </span>
-            <span
-              className={`rounded-md border px-2 py-0.5 text-xs ${autosaveClassName(autosave)}`}
-            >
-              {autosaveLabel(autosave)}
-            </span>
-          </div>
-          {(notice || actionError) && (
-            <p
-              className={`mt-1 truncate text-xs ${actionError ? 'text-red-200' : 'text-white/45'}`}
-            >
-              {actionError ?? notice}
-            </p>
-          )}
-        </div>
-        <div className="flex min-w-0 items-center justify-end gap-1.5 sm:gap-2">
-          <button
-            aria-label="Open preview"
-            className="inline-flex size-9 items-center justify-center rounded-md border border-white/10 text-white/70 hover:bg-white/10 hover:text-white disabled:cursor-not-allowed disabled:opacity-40"
-            disabled={Boolean(archivedReason)}
-            onClick={() => void previewSavedDraft()}
-            title={archivedReason}
-            type="button"
-          >
-            <Eye className="size-4" />
-          </button>
-          <button
-            aria-label="Test send unavailable"
-            className="inline-flex size-9 items-center justify-center gap-2 rounded-md border border-white/10 text-sm font-medium text-white/45 disabled:cursor-not-allowed disabled:opacity-60 sm:w-auto sm:px-3"
-            disabled
-            title="Hosted pages use preview and public routes instead of test sends."
-            type="button"
-          >
-            <Send className="size-4" />
-            <span className="hidden sm:inline">Send test</span>
-          </button>
-          <div className="relative">
-            <button
-              aria-label="More actions"
-              aria-expanded={moreActionsOpen}
-              className="inline-flex size-9 list-none items-center justify-center rounded-md border border-white/10 text-white/70 hover:bg-white/10 hover:text-white"
-              onClick={() => setMoreActionsOpen((open) => !open)}
-              type="button"
-            >
-              <MoreHorizontal className="size-4" />
-            </button>
-            {moreActionsOpen && (
-              <div className="absolute right-0 top-11 z-30 w-56 rounded-lg border border-white/10 bg-neutral-900 p-1 text-sm shadow-2xl">
-                <button
-                  className="flex w-full items-center gap-2 rounded-md px-2 py-2 text-left text-white/80 hover:bg-white/10"
-                  onClick={() => openMenuInspectorPanel('body')}
-                  type="button"
-                >
-                  <LayoutTemplate className="size-4" />
-                  Open structure panel
-                </button>
-                <button
-                  className="flex w-full items-center gap-2 rounded-md px-2 py-2 text-left text-white/80 hover:bg-white/10"
-                  onClick={() => openMenuInspectorPanel('variables')}
-                  type="button"
-                >
-                  <Type className="size-4" />
-                  Open variables panel
-                </button>
-                <button
-                  className="flex w-full items-center gap-2 rounded-md px-2 py-2 text-left text-white/80 hover:bg-white/10"
-                  onClick={() => openMenuInspectorPanel('history')}
-                  type="button"
-                >
-                  <Save className="size-4" />
-                  Open version history
-                </button>
-                <button
-                  className="flex w-full items-center gap-2 rounded-md px-2 py-2 text-left text-white/80 hover:bg-white/10"
-                  onClick={() => openMenuInspectorPanel('page')}
-                  type="button"
-                >
-                  <ListChecks className="size-4" />
-                  Page details
-                </button>
-                <button
-                  className="flex w-full items-center gap-2 rounded-md px-2 py-2 text-left text-white/80 hover:bg-white/10"
-                  onClick={() => openMenuInspectorPanel('theme')}
-                  type="button"
-                >
-                  <Palette className="size-4" />
-                  Theme details
-                </button>
-                <button
-                  className="flex w-full items-center gap-2 rounded-md px-2 py-2 text-left text-white/80 hover:bg-white/10"
-                  onClick={() => openMenuInspectorPanel('code')}
-                  type="button"
-                >
-                  <FileJson className="size-4" />
-                  View JSON payload
-                </button>
-                <button
-                  className="flex w-full items-center gap-2 rounded-md px-2 py-2 text-left text-white/80 hover:bg-white/10"
-                  onClick={() => openMenuInspectorPanel('issues')}
-                  type="button"
-                >
-                  <Eye className="size-4" />
-                  Review blockers
-                </button>
-                <button
-                  className="flex w-full items-center gap-2 rounded-md px-2 py-2 text-left text-white/80 hover:bg-white/10 disabled:cursor-not-allowed disabled:opacity-40"
-                  disabled={Boolean(archivedReason)}
-                  onClick={() => {
-                    setMoreActionsOpen(false);
-                    void saveDraft();
-                  }}
-                  type="button"
-                >
-                  <Save className="size-4" />
-                  Save draft
-                </button>
-                <button
-                  className="flex w-full items-center gap-2 rounded-md px-2 py-2 text-left text-white/80 hover:bg-white/10 disabled:cursor-not-allowed disabled:opacity-40"
-                  disabled={Boolean(archivedReason)}
-                  onClick={() => {
-                    setMoreActionsOpen(false);
-                    viewPublicPage();
-                  }}
-                  type="button"
-                >
-                  <ExternalLink className="size-4" />
-                  View public page
-                </button>
-                <div className="my-1 border-t border-white/10" />
-                <button
-                  className="flex w-full items-center gap-2 rounded-md px-2 py-2 text-left text-white/80 hover:bg-white/10 disabled:cursor-not-allowed disabled:opacity-40"
-                  disabled={Boolean(archivedReason)}
-                  onClick={() => {
-                    setMoreActionsOpen(false);
-                    void duplicateDocument();
-                  }}
-                  type="button"
-                >
-                  <Copy className="size-4" />
-                  Duplicate page
-                </button>
-                <button
-                  className="flex w-full items-center gap-2 rounded-md px-2 py-2 text-left text-red-200 hover:bg-red-500/10 disabled:cursor-not-allowed disabled:opacity-40"
-                  onClick={() => {
-                    setMoreActionsOpen(false);
-                    void archiveDocument();
-                  }}
-                  type="button"
-                >
-                  <Archive className="size-4" />
-                  Archive page
-                </button>
-              </div>
-            )}
-          </div>
-          <button
-            aria-label={archivedReason ? 'Publish unavailable' : undefined}
-            className="inline-flex h-9 items-center gap-2 rounded-md bg-white px-3 text-sm font-semibold text-black hover:bg-white/90 disabled:cursor-not-allowed disabled:opacity-50 sm:px-4"
-            disabled={Boolean(archivedReason)}
-            onClick={() => void publishDraft()}
-            title={archivedReason}
-            type="button"
-          >
-            Publish
-          </button>
-        </div>
-      </header>
-
-      <div
-        className={`grid h-[calc(100vh-4rem)] min-h-0 grid-cols-1 ${
-          inspectorCollapsed
-            ? 'lg:grid-cols-[4rem_minmax(0,1fr)]'
-            : 'lg:grid-cols-[4rem_minmax(0,1fr)_22rem]'
-        }`}
-      >
-        <aside
-          aria-label="Insert content"
-          className="hidden flex-col items-center gap-2 border-r border-white/10 bg-neutral-950 px-2 py-5 lg:flex"
-        >
-          {eventPageInsertActions.map((action) => (
-            <button
-              aria-label={`Insert ${action.label}`}
-              className="inline-flex size-10 items-center justify-center rounded-md border border-white/10 text-white/60 hover:bg-white/10 hover:text-white disabled:cursor-not-allowed disabled:opacity-40"
-              disabled={!canEdit}
-              key={action.id}
-              onClick={() => insertEventPageAction(action.id)}
-              title={action.label}
-              type="button"
-            >
-              {action.icon}
-            </button>
-          ))}
-        </aside>
-
+    <EditorChrome
+      channel="event-page"
+      testId="content-editor-shell"
+      topBar={
+        <EditorTopBar
+          autosave={autosave}
+          backHref={`/events/${event.id}`}
+          channelLabel="Page"
+          documentName={document.name}
+          error={actionError}
+          moreActions={moreActionsItems}
+          notice={notice}
+          onDocumentNameClick={() => openInspectorPanel('page')}
+          onPublish={() => void publishDraft()}
+          publishDisabled={Boolean(archivedReason)}
+          status={document.status}
+        />
+      }
+      leftRail={
+        <EditorLeftRail
+          insertsDisabled={!canEdit}
+          mode={editorMode}
+          onModeChange={(mode) => {
+            setEditorMode(mode);
+            if (mode === 'preview') void previewSavedDraft();
+          }}
+          inserts={
+            <>
+              <InsertPopoverButton
+                disabled={!canEdit}
+                icon={<Type className="size-4" />}
+                label="Text"
+              >
+                <InsertPopoverItem label="Text" onClick={() => insertEventPageAction('text')} />
+              </InsertPopoverButton>
+              <InsertPopoverButton
+                disabled={!canEdit}
+                icon={<ImageIcon className="size-4" />}
+                label="Image"
+              >
+                <InsertPopoverItem label="Image" onClick={() => insertEventPageAction('image')} />
+              </InsertPopoverButton>
+              <InsertPopoverButton
+                disabled={!canEdit}
+                icon={<LayoutTemplate className="size-4" />}
+                label="Components"
+              >
+                <InsertPopoverItem
+                  icon={<Ticket className="size-4" />}
+                  label="Tickets"
+                  onClick={() => insertEventPageAction('tickets')}
+                />
+                <InsertPopoverItem
+                  icon={<CalendarDays className="size-4" />}
+                  label="Schedule"
+                  onClick={() => insertEventPageAction('schedule')}
+                />
+                <InsertPopoverItem
+                  icon={<MapPin className="size-4" />}
+                  label="Venue"
+                  onClick={() => insertEventPageAction('venue')}
+                />
+                <InsertPopoverItem
+                  icon={<ExternalLink className="size-4" />}
+                  label="Button"
+                  onClick={() => insertEventPageAction('button')}
+                />
+              </InsertPopoverButton>
+            </>
+          }
+        />
+      }
+      canvas={
         <main
           aria-label="Event page editable document"
-          className="min-h-0 min-w-0 overflow-auto bg-white text-black lg:rounded-tl-3xl"
+          className="min-h-0 min-w-0 flex-1 overflow-auto bg-muted/30 lg:rounded-tl-3xl"
           data-testid="editor-canvas"
         >
           <div className="mx-auto min-h-full w-full max-w-5xl px-5 py-8 sm:px-6">
@@ -1859,254 +1941,225 @@ export function EventPagePersistedEditorView({ eventId }: { eventId: string }) {
               {pageEditor ? (
                 <EditorContent editor={pageEditor} />
               ) : (
-                <p className="text-sm text-black/45">Preparing editor...</p>
+                <p className="text-sm text-muted-foreground">Preparing editor...</p>
               )}
             </div>
           </div>
         </main>
+      }
+      inspector={
+        inspectorCollapsed ? null : (
+          <InspectorPanel
+            eyebrow={inspectorHeading[inspectorPanelId].eyebrow}
+            onClose={() => setInspectorCollapsed(true)}
+            title={inspectorHeading[inspectorPanelId].title}
+          >
+            {inspectorPanelId === 'block' && (
+              <div className="space-y-4">
+                {selectedBlockControls}
+                <div className="space-y-2 border-t border-border pt-4">
+                  {eventPageDocument.blocks.map((block) => (
+                    <button
+                      className={cn(
+                        'w-full rounded-md border px-3 py-2 text-left text-xs transition-colors',
+                        block.id === selectedBlockId
+                          ? 'border-foreground/20 bg-accent text-accent-foreground'
+                          : 'border-border text-muted-foreground hover:bg-accent',
+                      )}
+                      key={block.id}
+                      onClick={() => selectBlock(block.id)}
+                      type="button"
+                    >
+                      <span className="block font-medium">{blockLabel(block)}</span>
+                      <span className="mt-1 block truncate opacity-70">{blockSummary(block)}</span>
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
 
-        <aside
-          aria-label="Event page inspector"
-          className={`fixed inset-x-0 bottom-0 z-40 max-h-[78vh] min-h-0 overflow-auto rounded-t-2xl border-t border-white/10 bg-neutral-950 p-4 shadow-2xl lg:static lg:col-span-1 lg:max-h-none lg:rounded-none lg:border-l lg:border-t-0 lg:shadow-none ${
-            inspectorCollapsed ? 'hidden' : ''
-          }`}
-        >
-          <div className="flex items-start justify-between gap-3 border-b border-white/10 pb-4">
-            <div className="min-w-0">
-              <p className="text-xs uppercase tracking-wide text-white/40">
-                {inspectorHeading[inspectorPanelId].eyebrow}
+            {inspectorPanelId === 'page' && (
+              <div className="space-y-4">
+                <div className="space-y-3">
+                  <label className="space-y-1.5 text-xs font-medium text-muted-foreground">
+                    Public path
+                    <input
+                      aria-label="Public path"
+                      className={inputClassName}
+                      disabled={!canEdit}
+                      onChange={(change) =>
+                        updateEventPageSettings((current) => ({
+                          ...current,
+                          settings: {
+                            ...current.settings,
+                            publicPath: change.currentTarget.value,
+                          },
+                        }))
+                      }
+                      value={eventPageDocument.settings.publicPath ?? ''}
+                    />
+                  </label>
+                  <label className="space-y-1.5 text-xs font-medium text-muted-foreground">
+                    Locale
+                    <input
+                      aria-label="Locale"
+                      className={inputClassName}
+                      disabled={!canEdit}
+                      onChange={(change) =>
+                        updateEventPageSettings((current) => ({
+                          ...current,
+                          settings: { ...current.settings, locale: change.currentTarget.value },
+                        }))
+                      }
+                      value={eventPageDocument.settings.locale}
+                    />
+                  </label>
+                </div>
+                <dl className="space-y-3 text-xs">
+                  <div className="flex justify-between gap-4 border-b border-border pb-3">
+                    <dt className="text-muted-foreground">CTA</dt>
+                    <dd className="font-medium text-foreground">
+                      {ticketCtaLabel(eventPageDocument)}
+                    </dd>
+                  </div>
+                </dl>
+              </div>
+            )}
+
+            {inspectorPanelId === 'body' && (
+              <ol className="space-y-2">
+                {eventPageDocument.blocks.map((block) => (
+                  <li className="rounded-md border p-3 text-xs" key={block.id}>
+                    <div className="font-medium text-foreground">{blockLabel(block)}</div>
+                    <div className="mt-1 truncate text-muted-foreground">{blockSummary(block)}</div>
+                  </li>
+                ))}
+              </ol>
+            )}
+
+            {inspectorPanelId === 'theme' && (
+              <p className="rounded-md border bg-muted/30 p-3 text-xs leading-5 text-muted-foreground">
+                Full-width responsive sections, checkout-first content density, and event metadata
+                inherited from the canonical event record.
               </p>
-              <h2 className="mt-1 truncate font-semibold">
-                {inspectorHeading[inspectorPanelId].title}
-              </h2>
+            )}
+
+            {inspectorPanelId === 'code' && (
+              <pre className="max-h-[42rem] overflow-auto rounded-md border bg-muted/30 p-3 text-xs leading-5 text-muted-foreground">
+                {JSON.stringify(eventPageDocument, null, 2)}
+              </pre>
+            )}
+
+            {inspectorPanelId === 'variables' && (
+              <div className="grid gap-2">
+                {eventPageVariableKeys.map((key) => {
+                  const presentation = eventPageVariablePresentation(key);
+                  return (
+                    <div
+                      aria-label={`Dynamic value ${presentation.label}`}
+                      className="rounded-md border p-3 text-xs"
+                      key={key}
+                    >
+                      <div className="flex items-center justify-between gap-3">
+                        <span className="font-medium text-foreground">{presentation.label}</span>
+                        <span
+                          className={`tixkit-variable-kind-badge tixkit-variable-kind-badge--${presentation.kind} rounded-md border px-1.5 py-0.5 text-[0.68rem] font-semibold uppercase`}
+                        >
+                          {presentation.kind}
+                        </span>
+                      </div>
+                      <p className="mt-1 truncate text-muted-foreground">
+                        {presentation.preview}
+                      </p>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+
+            {inspectorPanelId === 'history' && (
+              <ol className="space-y-2">
+                {history.map((version) => (
+                  <li className="rounded-md border p-3 text-xs" key={version.id}>
+                    <div className="font-medium text-foreground">{version.label}</div>
+                    <div className="mt-1 text-muted-foreground">
+                      {formatDate(version.timestamp)}
+                    </div>
+                  </li>
+                ))}
+              </ol>
+            )}
+
+            {inspectorPanelId === 'issues' && (
+              <div className="space-y-3">
+                {draft.validation.issues.length === 0 ? (
+                  <p className="rounded-md border border-emerald-400/40 bg-emerald-50 p-3 text-xs text-emerald-700 dark:bg-emerald-950/30 dark:text-emerald-300">
+                    No publish blockers.
+                  </p>
+                ) : (
+                  <ul className="space-y-2">
+                    {draft.validation.issues.map((issue) => (
+                      <li
+                        className="rounded-md border border-red-300 bg-red-50 p-3 text-xs text-red-800 dark:border-red-800/70 dark:bg-red-950/40 dark:text-red-200"
+                        key={`${issue.code}-${issue.message}`}
+                      >
+                        <strong>{issue.code}</strong>
+                        <p className="mt-1 opacity-80">{issue.message}</p>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </div>
+            )}
+          </InspectorPanel>
+        )
+      }
+      reopenInspectorButton={
+        inspectorCollapsed ? (
+          <InspectorReopenButton onClick={() => setInspectorCollapsed(false)} />
+        ) : undefined
+      }
+    >
+      <MobileInsertButton disabled={!canEdit} onClick={() => setInsertDrawerOpen(true)} />
+      {insertDrawerOpen && (
+        <aside
+          aria-label="Mobile insert content"
+          className="fixed inset-x-0 bottom-0 z-50 max-h-[78vh] overflow-auto rounded-t-2xl border-t bg-background p-4 text-foreground shadow-2xl lg:hidden"
+        >
+          <div className="flex items-start justify-between gap-3 border-b pb-4">
+            <div>
+              <p className="text-xs uppercase tracking-wide text-muted-foreground">Insert</p>
+              <h2 className="mt-1 font-semibold">Add page content</h2>
             </div>
             <button
-              aria-label="Collapse inspector"
-              className="inline-flex h-9 items-center justify-center rounded-md border border-white/10 text-white/60 hover:bg-white/10 hover:text-white"
-              onClick={() => setInspectorCollapsed(true)}
-              title="Collapse inspector"
+              aria-label="Close insert menu"
+              className="inline-flex h-9 items-center justify-center rounded-md border px-2 text-muted-foreground transition-colors hover:bg-accent hover:text-accent-foreground"
+              onClick={() => setInsertDrawerOpen(false)}
               type="button"
             >
               <PanelRightClose className="size-4" />
             </button>
           </div>
-
-          {inspectorPanelId === 'block' && (
-            <section className="mt-6 space-y-4 text-sm">
-              {selectedBlockControls}
-              <div className="space-y-2 border-t border-white/10 pt-4">
-                {eventPageDocument.blocks.map((block) => (
-                  <button
-                    className={`w-full rounded-md border px-3 py-2 text-left text-xs ${
-                      block.id === selectedBlockId
-                        ? 'border-white/30 bg-white text-black'
-                        : 'border-white/10 text-white/70 hover:bg-white/10'
-                    }`}
-                    key={block.id}
-                    onClick={() => selectBlock(block.id)}
-                    type="button"
-                  >
-                    <span className="block font-medium">{blockLabel(block)}</span>
-                    <span className="mt-1 block truncate opacity-70">{blockSummary(block)}</span>
-                  </button>
-                ))}
-              </div>
-            </section>
-          )}
-
-          {inspectorPanelId === 'page' && (
-            <section className="mt-6 space-y-4 text-sm">
-              <div className="space-y-3">
-                <label className="space-y-1.5 text-xs font-medium text-white/55">
-                  Public path
-                  <input
-                    aria-label="Public path"
-                    className={darkInputClassName}
-                    disabled={!canEdit}
-                    onChange={(change) =>
-                      updateEventPageSettings((current) => ({
-                        ...current,
-                        settings: {
-                          ...current.settings,
-                          publicPath: change.currentTarget.value,
-                        },
-                      }))
-                    }
-                    value={eventPageDocument.settings.publicPath ?? ''}
-                  />
-                </label>
-                <label className="space-y-1.5 text-xs font-medium text-white/55">
-                  Locale
-                  <input
-                    aria-label="Locale"
-                    className={darkInputClassName}
-                    disabled={!canEdit}
-                    onChange={(change) =>
-                      updateEventPageSettings((current) => ({
-                        ...current,
-                        settings: { ...current.settings, locale: change.currentTarget.value },
-                      }))
-                    }
-                    value={eventPageDocument.settings.locale}
-                  />
-                </label>
-              </div>
-              <dl className="space-y-3 text-xs">
-                <div className="flex justify-between gap-4 border-b border-white/10 pb-3">
-                  <dt className="text-white/45">CTA</dt>
-                  <dd className="font-medium text-white/80">{ticketCtaLabel(eventPageDocument)}</dd>
-                </div>
-              </dl>
-            </section>
-          )}
-
-          {inspectorPanelId === 'body' && (
-            <section className="mt-6 space-y-4 text-sm">
-              <ol className="space-y-2">
-                {eventPageDocument.blocks.map((block) => (
-                  <li className="rounded-md border border-white/10 p-3 text-xs" key={block.id}>
-                    <div className="font-medium text-white">{blockLabel(block)}</div>
-                    <div className="mt-1 truncate text-white/45">{blockSummary(block)}</div>
-                  </li>
-                ))}
-              </ol>
-            </section>
-          )}
-
-          {inspectorPanelId === 'theme' && (
-            <section className="mt-6 space-y-4 text-sm">
-              <p className="rounded-md border border-white/10 bg-white/5 p-3 text-xs leading-5 text-white/60">
-                Full-width responsive sections, checkout-first content density, and event metadata
-                inherited from the canonical event record.
-              </p>
-            </section>
-          )}
-
-          {inspectorPanelId === 'code' && (
-            <section className="mt-6 space-y-4 text-sm">
-              <pre className="max-h-[42rem] overflow-auto rounded-md border border-white/10 bg-white/5 p-3 text-xs leading-5 text-white/75">
-                {JSON.stringify(eventPageDocument, null, 2)}
-              </pre>
-            </section>
-          )}
-
-          {inspectorPanelId === 'variables' && (
-            <section className="mt-6 space-y-4 text-sm">
-              <div className="grid gap-2">
-                {['event.title', 'event.startsAt', 'event.venueName', 'event.checkoutUrl'].map(
-                  (key) => (
-                    <code
-                      className="rounded-md border border-white/10 px-2 py-1.5 text-xs"
-                      key={key}
-                    >
-                      {`{{${key}}}`}
-                    </code>
-                  ),
-                )}
-              </div>
-            </section>
-          )}
-
-          {inspectorPanelId === 'history' && (
-            <section className="mt-6 space-y-4 text-sm">
-              <ol className="space-y-2">
-                {history.map((version) => (
-                  <li className="rounded-md border border-white/10 p-3 text-xs" key={version.id}>
-                    <div className="font-medium text-white">{version.label}</div>
-                    <div className="mt-1 text-white/45">{formatDate(version.timestamp)}</div>
-                  </li>
-                ))}
-              </ol>
-            </section>
-          )}
-
-          {inspectorPanelId === 'issues' && (
-            <section className="mt-6 space-y-4 text-sm">
-              {draft.validation.issues.length === 0 ? (
-                <p className="rounded-md border border-emerald-400/30 bg-emerald-400/10 p-3 text-xs text-emerald-100">
-                  No publish blockers.
-                </p>
-              ) : (
-                <ul className="space-y-2">
-                  {draft.validation.issues.map((issue) => (
-                    <li
-                      className="rounded-md border border-white/10 p-3 text-xs"
-                      key={`${issue.code}-${issue.message}`}
-                    >
-                      <strong className="text-white">{issue.code}</strong>
-                      <p className="mt-1 text-white/60">{issue.message}</p>
-                    </li>
-                  ))}
-                </ul>
-              )}
-            </section>
-          )}
-        </aside>
-
-        {inspectorCollapsed && (
-          <button
-            aria-label="Open inspector"
-            className="fixed bottom-4 right-4 z-20 inline-flex h-10 items-center gap-2 rounded-md border border-white/10 bg-neutral-950 px-3 text-sm font-medium text-white/80 shadow-2xl hover:bg-neutral-900 hover:text-white"
-            onClick={() => setInspectorCollapsed(false)}
-            type="button"
-          >
-            <PanelRightOpen className="size-4" />
-            Inspector
-          </button>
-        )}
-
-        <button
-          aria-label="Open insert menu"
-          className="fixed bottom-4 left-16 z-20 inline-flex h-10 items-center gap-2 rounded-md border border-white/10 bg-neutral-950 px-3 text-sm font-medium text-white/80 shadow-2xl hover:bg-neutral-900 hover:text-white lg:hidden"
-          disabled={!canEdit}
-          onClick={() => setInsertDrawerOpen(true)}
-          type="button"
-        >
-          <LayoutTemplate className="size-4" />
-          Insert
-        </button>
-
-        {insertDrawerOpen && (
-          <aside
-            aria-label="Mobile insert content"
-            className="fixed inset-x-0 bottom-0 z-50 max-h-[78vh] overflow-auto rounded-t-2xl border-t border-white/10 bg-neutral-950 p-4 text-white shadow-2xl lg:hidden"
-          >
-            <div className="flex items-start justify-between gap-3 border-b border-white/10 pb-4">
-              <div>
-                <p className="text-xs uppercase tracking-wide text-white/40">Insert</p>
-                <h2 className="mt-1 font-semibold">Add page content</h2>
-              </div>
+          <div className="mt-4 grid gap-2">
+            {eventPageInsertActions.map((action) => (
               <button
-                aria-label="Close insert menu"
-                className="inline-flex h-9 items-center justify-center rounded-md border border-white/10 px-2 text-white/60 hover:bg-white/10 hover:text-white"
-                onClick={() => setInsertDrawerOpen(false)}
+                className="flex min-h-11 items-center gap-3 rounded-md border px-3 py-2 text-left text-sm font-medium text-foreground transition-colors hover:bg-accent disabled:pointer-events-none disabled:opacity-50"
+                disabled={!canEdit}
+                key={action.id}
+                onClick={() => {
+                  setInsertDrawerOpen(false);
+                  insertEventPageAction(action.id);
+                }}
                 type="button"
               >
-                <PanelRightClose className="size-4" />
+                {action.icon}
+                {action.label}
               </button>
-            </div>
-            <div className="mt-4 grid gap-2">
-              {eventPageInsertActions.map((action) => (
-                <button
-                  className="flex min-h-11 items-center gap-3 rounded-md border border-white/10 px-3 py-2 text-left text-sm font-medium text-white/85 hover:bg-white/10 disabled:cursor-not-allowed disabled:opacity-40"
-                  disabled={!canEdit}
-                  key={action.id}
-                  onClick={() => {
-                    setInsertDrawerOpen(false);
-                    insertEventPageAction(action.id);
-                  }}
-                  type="button"
-                >
-                  {action.icon}
-                  {action.label}
-                </button>
-              ))}
-            </div>
-          </aside>
-        )}
-      </div>
-
+            ))}
+          </div>
+        </aside>
+      )}
       {previewOpen && <PreviewDrawer onClose={() => setPreviewOpen(false)} preview={preview} />}
-    </section>
+    </EditorChrome>
   );
 }

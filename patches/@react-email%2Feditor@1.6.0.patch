@@ -1,0 +1,555 @@
+diff --git a/dist/extension-DOs2qXSe.cjs b/dist/extension-DOs2qXSe.cjs
+index 7f206062..a54a63b9 100644
+--- a/dist/extension-DOs2qXSe.cjs
++++ b/dist/extension-DOs2qXSe.cjs
+@@ -142,18 +142,25 @@ function createImageExtension(options) {
+ 			return [createImageFileHandlerPlugin(editor, options.uploadImage)];
+ 		},
+ 		renderToReactEmail: ({ node, style }) => {
++			const src = typeof node.attrs?.src === "string" ? node.attrs.src.trim() : "";
++			if (!src) return null;
++			const alignment = node.attrs?.align || node.attrs?.alignment;
+ 			const img = /* @__PURE__ */ (0, react_jsx_runtime.jsx)(react_email.Img, {
+ 				alt: node.attrs?.alt ?? "",
+ 				height: node.attrs?.height === "auto" ? void 0 : node.attrs?.height,
+-				src: node.attrs?.src ?? "",
++				src,
+ 				style,
+ 				width: node.attrs?.width === "auto" ? void 0 : node.attrs?.width
+ 			});
+-			if (node.attrs?.href) return /* @__PURE__ */ (0, react_jsx_runtime.jsx)(react_email.Link, {
++			const image = node.attrs?.href ? /* @__PURE__ */ (0, react_jsx_runtime.jsx)(react_email.Link, {
+ 				href: node.attrs.href,
+ 				children: img
+-			});
+-			return img;
++			}) : img;
++			if (alignment) return /* @__PURE__ */ (0, react_jsx_runtime.jsx)(react_email.Row, { children: /* @__PURE__ */ (0, react_jsx_runtime.jsx)(react_email.Column, {
++				align: alignment,
++				children: image
++			}) });
++			return image;
+ 		}
+ 	});
+ }
+diff --git a/dist/extension-Dw-hZZaA.mjs b/dist/extension-Dw-hZZaA.mjs
+index b9717807..aede94c5 100644
+--- a/dist/extension-Dw-hZZaA.mjs
++++ b/dist/extension-Dw-hZZaA.mjs
+@@ -1,5 +1,5 @@
+ import { t as EmailNode } from "./email-node-otH4jZmS.mjs";
+-import { Img, Link } from "react-email";
++import { Column, Img, Link, Row } from "react-email";
+ import { jsx } from "react/jsx-runtime";
+ import { NodeSelection, Plugin, PluginKey } from "@tiptap/pm/state";
+ //#region src/plugins/image/upload-flow.ts
+@@ -141,22 +141,29 @@ function createImageExtension(options) {
+ 			return [createImageFileHandlerPlugin(editor, options.uploadImage)];
+ 		},
+ 		renderToReactEmail: ({ node, style }) => {
++			const src = typeof node.attrs?.src === "string" ? node.attrs.src.trim() : "";
++			if (!src) return null;
++			const alignment = node.attrs?.align || node.attrs?.alignment;
+ 			const img = /* @__PURE__ */ jsx(Img, {
+ 				alt: node.attrs?.alt ?? "",
+ 				height: node.attrs?.height === "auto" ? void 0 : node.attrs?.height,
+-				src: node.attrs?.src ?? "",
++				src,
+ 				style,
+ 				width: node.attrs?.width === "auto" ? void 0 : node.attrs?.width
+ 			});
+-			if (node.attrs?.href) return /* @__PURE__ */ jsx(Link, {
++			const image = node.attrs?.href ? /* @__PURE__ */ jsx(Link, {
+ 				href: node.attrs.href,
+ 				children: img
+-			});
+-			return img;
++			}) : img;
++			if (alignment) return /* @__PURE__ */ jsx(Row, { children: /* @__PURE__ */ jsx(Column, {
++				align: alignment,
++				children: image
++			}) });
++			return image;
+ 		}
+ 	});
+ }
+ //#endregion
+ export { createImageExtension as t };
+ 
+-//# sourceMappingURL=extension-Dw-hZZaA.mjs.map
+\ No newline at end of file
++//# sourceMappingURL=extension-Dw-hZZaA.mjs.map
+diff --git a/dist/extensions-BqwPx8uI.mjs b/dist/extensions-BqwPx8uI.mjs
+index 36e731b1..6e996b24 100644
+--- a/dist/extensions-BqwPx8uI.mjs
++++ b/dist/extensions-BqwPx8uI.mjs
+@@ -65,7 +65,7 @@ const AlignmentAttribute = Extension.create({
+ 	addCommands() {
+ 		return { setAlignment: (alignment) => ({ commands }) => {
+ 			if (!this.options.alignments.includes(alignment)) return false;
+-			return this.options.types.every((type) => commands.updateAttributes(type, { alignment }));
++			return this.options.types.reduce((updated, type) => commands.updateAttributes(type, { alignment }) || updated, false);
+ 		} };
+ 	},
+ 	addKeyboardShortcuts() {
+@@ -140,11 +140,13 @@ const Body$1 = EmailNode.create({
+ 	},
+ 	renderToReactEmail({ children, node, style }) {
+ 		const inlineStyles = inlineCssToJs(node.attrs?.style);
++		const textAlign = node.attrs?.align || node.attrs?.alignment;
+ 		return /* @__PURE__ */ jsx("div", {
+ 			className: node.attrs?.class || void 0,
+ 			style: {
+ 				...style,
+-				...inlineStyles
++				...inlineStyles,
++				...getTextAlignment(textAlign)
+ 			},
+ 			children
+ 		});
+@@ -608,12 +610,14 @@ const Container$1 = EmailNode.create({
+ 	},
+ 	renderToReactEmail({ children, node, style }) {
+ 		const inlineStyles = inlineCssToJs(node.attrs?.style);
++		const containerAlignment = node.attrs?.align || node.attrs?.alignment || style.align || "center";
+ 		return /* @__PURE__ */ jsx(Container, {
+ 			className: node.attrs?.class || void 0,
+-			align: style.align || "center",
++			align: containerAlignment,
+ 			style: {
+ 				...style,
+ 				...inlineStyles,
++				align: containerAlignment,
+ 				width: "100%",
+ 				maxWidth: style?.width ?? style?.maxWidth
+ 			},
+@@ -1767,4 +1771,4 @@ const StarterKit = Extension.create({
+ //#endregion
+ export { Code as A, Italic as C, Div as D, Divider as E, Body$1 as F, Blockquote as I, AlignmentAttribute as L, Button$1 as M, BulletList as N, Container$1 as O, Bold as P, processStylesForUnlink as S, HardBreak as T, OrderedList as _, skipTrailingNodeMeta as a, Link$1 as b, TableCell as c, Sup as d, StyleAttribute as f, Paragraph as g, PreviewText as h, TrailingNode as i, ClassAttribute as j, CodeBlockPrism as k, TableHeader as l, Section$1 as m, Uppercase as n, Text$1 as o, Strike as p, Underline as r, Table as s, StarterKit as t, TableRow as u, MaxNesting as v, Heading$2 as w, PreservedStyle as x, ListItem as y };
+ 
+-//# sourceMappingURL=extensions-BqwPx8uI.mjs.map
+\ No newline at end of file
++//# sourceMappingURL=extensions-BqwPx8uI.mjs.map
+diff --git a/dist/extensions-CTxZOddq.cjs b/dist/extensions-CTxZOddq.cjs
+index 749bc8e8..31c7cfd6 100644
+--- a/dist/extensions-CTxZOddq.cjs
++++ b/dist/extensions-CTxZOddq.cjs
+@@ -82,7 +82,7 @@ const AlignmentAttribute = _tiptap_core.Extension.create({
+ 	addCommands() {
+ 		return { setAlignment: (alignment) => ({ commands }) => {
+ 			if (!this.options.alignments.includes(alignment)) return false;
+-			return this.options.types.every((type) => commands.updateAttributes(type, { alignment }));
++			return this.options.types.reduce((updated, type) => commands.updateAttributes(type, { alignment }) || updated, false);
+ 		} };
+ 	},
+ 	addKeyboardShortcuts() {
+@@ -157,11 +157,13 @@ const Body = require_email_node.EmailNode.create({
+ 	},
+ 	renderToReactEmail({ children, node, style }) {
+ 		const inlineStyles = require_email_node.inlineCssToJs(node.attrs?.style);
++		const textAlign = node.attrs?.align || node.attrs?.alignment;
+ 		return /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
+ 			className: node.attrs?.class || void 0,
+ 			style: {
+ 				...style,
+-				...inlineStyles
++				...inlineStyles,
++				...getTextAlignment(textAlign)
+ 			},
+ 			children
+ 		});
+@@ -625,12 +627,14 @@ const Container = require_email_node.EmailNode.create({
+ 	},
+ 	renderToReactEmail({ children, node, style }) {
+ 		const inlineStyles = require_email_node.inlineCssToJs(node.attrs?.style);
++		const containerAlignment = node.attrs?.align || node.attrs?.alignment || style.align || "center";
+ 		return /* @__PURE__ */ (0, react_jsx_runtime.jsx)(react_email.Container, {
+ 			className: node.attrs?.class || void 0,
+-			align: style.align || "center",
++			align: containerAlignment,
+ 			style: {
+ 				...style,
+ 				...inlineStyles,
++				align: containerAlignment,
+ 				width: "100%",
+ 				maxWidth: style?.width ?? style?.maxWidth
+ 			},
+diff --git a/dist/focus-scopes-BQxOyP_e.mjs b/dist/focus-scopes-BQxOyP_e.mjs
+index 96012014..f5870356 100644
+--- a/dist/focus-scopes-BQxOyP_e.mjs
++++ b/dist/focus-scopes-BQxOyP_e.mjs
+@@ -346,6 +346,7 @@ const ColumnsColumn = EmailNode.create({
+ 		const width = node.attrs?.width;
+ 		return /* @__PURE__ */ jsx(Column, {
+ 			className: node.attrs?.class || void 0,
++			align: node.attrs?.align || node.attrs?.alignment || void 0,
+ 			style: {
+ 				...style,
+ 				...inlineStyles,
+@@ -464,4 +465,4 @@ const FocusScopes = Extension.create({
+ //#endregion
+ export { TABLE_ATTRIBUTES as _, COLUMN_PARENT_TYPES as a, createStandardAttributes as b, MAX_COLUMNS_DEPTH as c, getColumnsDepth as d, hasPrismThemeLoaded as f, LAYOUT_ATTRIBUTES as g, COMMON_HTML_ATTRIBUTES as h, focusScopePluginKey as i, ThreeColumns as l, removePrismTheme as m, createFocusScopePlugin as n, ColumnsColumn as o, loadPrismTheme as p, createFocusScopesStorage as r, FourColumns as s, FocusScopes as t, TwoColumns as u, TABLE_CELL_ATTRIBUTES as v, TABLE_HEADER_ATTRIBUTES as y };
+ 
+-//# sourceMappingURL=focus-scopes-BQxOyP_e.mjs.map
+\ No newline at end of file
++//# sourceMappingURL=focus-scopes-BQxOyP_e.mjs.map
+diff --git a/dist/focus-scopes-DAOOs7gX.cjs b/dist/focus-scopes-DAOOs7gX.cjs
+index 98a1818e..31dcfd7c 100644
+--- a/dist/focus-scopes-DAOOs7gX.cjs
++++ b/dist/focus-scopes-DAOOs7gX.cjs
+@@ -368,6 +368,7 @@ const ColumnsColumn = require_email_node.EmailNode.create({
+ 		const width = node.attrs?.width;
+ 		return /* @__PURE__ */ (0, react_jsx_runtime.jsx)(react_email.Column, {
+ 			className: node.attrs?.class || void 0,
++			align: node.attrs?.align || node.attrs?.alignment || void 0,
+ 			style: {
+ 				...style,
+ 				...inlineStyles,
+diff --git a/dist/index.cjs b/dist/index.cjs
+index 67232336..2b3504f4 100644
+--- a/dist/index.cjs
++++ b/dist/index.cjs
+@@ -186,7 +186,7 @@ function EmailEditorReadyBridge({ onReadyRef }) {
+ 	}, [editor, onReadyRef]);
+ 	return null;
+ }
+-const EmailEditor = (0, react.forwardRef)(({ content, onUpdate, onReady, theme = "basic", editable = true, placeholder, bubbleMenu, extensions: extensionsProp, onUploadImage, className, children }, ref) => {
++const EmailEditor = (0, react.forwardRef)(({ content, onUpdate, onReady, theme = "basic", editable = true, placeholder, bubbleMenu, slashCommand, extensions: extensionsProp, onUploadImage, className, children }, ref) => {
+ 	const onUpdateRef = (0, react.useRef)(onUpdate);
+ 	onUpdateRef.current = onUpdate;
+ 	const onReadyRef = (0, react.useRef)(onReady);
+@@ -229,12 +229,16 @@ const EmailEditor = (0, react.forwardRef)(({ content, onUpdate, onReady, theme =
+ 			/* @__PURE__ */ (0, react_jsx_runtime.jsx)(EmailEditorReadyBridge, { onReadyRef }),
+ 			/* @__PURE__ */ (0, react_jsx_runtime.jsx)(require_root.BubbleMenu, {
+ 				hideWhenActiveNodes: bubbleMenu?.hideWhenActiveNodes ?? ["button", "horizontalRule"],
+-				hideWhenActiveMarks: bubbleMenu?.hideWhenActiveMarks ?? ["link"]
++				hideWhenActiveMarks: bubbleMenu?.hideWhenActiveMarks ?? ["link"],
++				placement: bubbleMenu?.placement,
++				offset: bubbleMenu?.offset,
++				trigger: bubbleMenu?.trigger,
++				children: bubbleMenu?.children
+ 			}),
+ 			/* @__PURE__ */ (0, react_jsx_runtime.jsx)(require_root.BubbleMenu.LinkDefault, {}),
+ 			/* @__PURE__ */ (0, react_jsx_runtime.jsx)(require_root.BubbleMenu.ButtonDefault, {}),
+ 			/* @__PURE__ */ (0, react_jsx_runtime.jsx)(require_root.BubbleMenu.ImageDefault, {}),
+-			/* @__PURE__ */ (0, react_jsx_runtime.jsx)(require_root.SlashCommandRoot, {}),
++			/* @__PURE__ */ (0, react_jsx_runtime.jsx)(require_root.SlashCommandRoot, { ...slashCommand }),
+ 			children
+ 		]
+ 	}, typeof theme === "string" ? theme : JSON.stringify(theme));
+diff --git a/dist/index.d.cts b/dist/index.d.cts
+index 12f8999e..f8e21c16 100644
+--- a/dist/index.d.cts
++++ b/dist/index.d.cts
+@@ -1,4 +1,6 @@
+ import { r as EditorThemeInput } from "./types-DUTo2zJ5.cjs";
++import { a as SlashCommandRootProps } from "./types-ALwc36ll.cjs";
++import { TriggerFn } from "./ui/index.cjs";
+ import { Content, Editor, Extensions, JSONContent } from "@tiptap/core";
+ import * as _$react from "react";
+ import { ReactNode } from "react";
+@@ -24,7 +26,12 @@ interface EmailEditorProps {
+   bubbleMenu?: {
+     hideWhenActiveNodes?: string[];
+     hideWhenActiveMarks?: string[];
++    placement?: 'top' | 'bottom';
++    offset?: number;
++    trigger?: TriggerFn;
++    children?: ReactNode;
+   };
++  slashCommand?: SlashCommandRootProps;
+   extensions?: Extensions;
+   onUploadImage?: (file: File) => Promise<{
+     url: string;
+@@ -35,4 +42,4 @@ interface EmailEditorProps {
+ declare const EmailEditor: _$react.ForwardRefExoticComponent<EmailEditorProps & _$react.RefAttributes<EmailEditorRef>>;
+ //#endregion
+ export { EmailEditor, type EmailEditorProps, type EmailEditorRef };
+-//# sourceMappingURL=index.d.cts.map
+\ No newline at end of file
++//# sourceMappingURL=index.d.cts.map
+diff --git a/dist/index.d.mts b/dist/index.d.mts
+index 9120ce68..630c687c 100644
+--- a/dist/index.d.mts
++++ b/dist/index.d.mts
+@@ -1,4 +1,6 @@
+ import { r as EditorThemeInput } from "./types-8PZgYQuK.mjs";
++import { a as SlashCommandRootProps } from "./types-BG5XsXt9.mjs";
++import { TriggerFn } from "./ui/index.mjs";
+ import * as _$react from "react";
+ import { ReactNode } from "react";
+ import { Content, Editor, Extensions, JSONContent } from "@tiptap/core";
+@@ -24,7 +26,12 @@ interface EmailEditorProps {
+   bubbleMenu?: {
+     hideWhenActiveNodes?: string[];
+     hideWhenActiveMarks?: string[];
++    placement?: 'top' | 'bottom';
++    offset?: number;
++    trigger?: TriggerFn;
++    children?: ReactNode;
+   };
++  slashCommand?: SlashCommandRootProps;
+   extensions?: Extensions;
+   onUploadImage?: (file: File) => Promise<{
+     url: string;
+@@ -35,4 +42,4 @@ interface EmailEditorProps {
+ declare const EmailEditor: _$react.ForwardRefExoticComponent<EmailEditorProps & _$react.RefAttributes<EmailEditorRef>>;
+ //#endregion
+ export { EmailEditor, type EmailEditorProps, type EmailEditorRef };
+-//# sourceMappingURL=index.d.mts.map
+\ No newline at end of file
++//# sourceMappingURL=index.d.mts.map
+diff --git a/dist/index.mjs b/dist/index.mjs
+index 9af90e2b..0f095dc4 100644
+--- a/dist/index.mjs
++++ b/dist/index.mjs
+@@ -184,7 +184,7 @@ function EmailEditorReadyBridge({ onReadyRef }) {
+ 	}, [editor, onReadyRef]);
+ 	return null;
+ }
+-const EmailEditor = forwardRef(({ content, onUpdate, onReady, theme = "basic", editable = true, placeholder, bubbleMenu, extensions: extensionsProp, onUploadImage, className, children }, ref) => {
++const EmailEditor = forwardRef(({ content, onUpdate, onReady, theme = "basic", editable = true, placeholder, bubbleMenu, slashCommand, extensions: extensionsProp, onUploadImage, className, children }, ref) => {
+ 	const onUpdateRef = useRef(onUpdate);
+ 	onUpdateRef.current = onUpdate;
+ 	const onReadyRef = useRef(onReady);
+@@ -227,12 +227,16 @@ const EmailEditor = forwardRef(({ content, onUpdate, onReady, theme = "basic", e
+ 			/* @__PURE__ */ jsx(EmailEditorReadyBridge, { onReadyRef }),
+ 			/* @__PURE__ */ jsx(BubbleMenu, {
+ 				hideWhenActiveNodes: bubbleMenu?.hideWhenActiveNodes ?? ["button", "horizontalRule"],
+-				hideWhenActiveMarks: bubbleMenu?.hideWhenActiveMarks ?? ["link"]
++				hideWhenActiveMarks: bubbleMenu?.hideWhenActiveMarks ?? ["link"],
++				placement: bubbleMenu?.placement,
++				offset: bubbleMenu?.offset,
++				trigger: bubbleMenu?.trigger,
++				children: bubbleMenu?.children
+ 			}),
+ 			/* @__PURE__ */ jsx(BubbleMenu.LinkDefault, {}),
+ 			/* @__PURE__ */ jsx(BubbleMenu.ButtonDefault, {}),
+ 			/* @__PURE__ */ jsx(BubbleMenu.ImageDefault, {}),
+-			/* @__PURE__ */ jsx(SlashCommandRoot, {}),
++			/* @__PURE__ */ jsx(SlashCommandRoot, { ...slashCommand }),
+ 			children
+ 		]
+ 	}, typeof theme === "string" ? theme : JSON.stringify(theme));
+@@ -241,4 +245,4 @@ EmailEditor.displayName = "EmailEditor";
+ //#endregion
+ export { EmailEditor };
+ 
+-//# sourceMappingURL=index.mjs.map
+\ No newline at end of file
++//# sourceMappingURL=index.mjs.map
+diff --git a/dist/root-Du2rkPmp.cjs b/dist/root-Du2rkPmp.cjs
+index 44266ab4..3f575b23 100644
+--- a/dist/root-Du2rkPmp.cjs
++++ b/dist/root-Du2rkPmp.cjs
+@@ -2057,6 +2057,35 @@ function isAtMaxColumnsDepth(editor) {
+ 	const { from } = editor.state.selection;
+ 	return require_focus_scopes.getColumnsDepth(editor.state.doc, from) >= 3;
+ }
++function replaceSlashRangeWithNode(editor, range, node) {
++	if (!node) return false;
++	const { state, view } = editor;
++	let from = range.from;
++	let to = range.to;
++	const $from = state.doc.resolve(range.from);
++	for (let depth = $from.depth; depth >= 1; depth--) {
++		if ($from.node(depth).type.name !== "paragraph") continue;
++		from = $from.before(depth);
++		to = $from.after(depth);
++		break;
++	}
++	view.dispatch(state.tr.replaceWith(from, to, node).scrollIntoView());
++	return true;
++}
++function createColumnsLayoutNode(editor, count) {
++	const { schema } = editor.state;
++	const parentType = {
++		2: "twoColumns",
++		3: "threeColumns",
++		4: "fourColumns"
++	}[count];
++	const parent = schema.nodes[parentType];
++	const column = schema.nodes.columnsColumn;
++	const paragraph = schema.nodes.paragraph;
++	if (!parent || !column || !paragraph) return null;
++	const emptyColumn = () => column.create(null, paragraph.create());
++	return parent.create(null, Array.from({ length: count }, emptyColumn));
++}
+ function updateScrollView(container, item) {
+ 	const containerRect = container.getBoundingClientRect();
+ 	const itemRect = item.getBoundingClientRect();
+@@ -2145,7 +2174,7 @@ function CommandList({ items, query, selectedIndex, onSelect }) {
+ 				const currentIndex = flatIndex++;
+ 				return /* @__PURE__ */ (0, react_jsx_runtime.jsx)(CommandItem, {
+ 					item,
+-					onSelect: () => onSelect(currentIndex),
++					onSelect: () => onSelect(items.indexOf(item)),
+ 					selected: currentIndex === selectedIndex
+ 				}, item.title);
+ 			})] }, group.category))
+@@ -2254,7 +2283,9 @@ const BUTTON = {
+ 	category: "Layout",
+ 	searchTerms: ["button"],
+ 	command: ({ editor, range }) => {
+-		editor.chain().focus().deleteRange(range).setButton().run();
++		editor.commands.focus();
++		const button = editor.state.schema.nodes.button?.create(null, editor.state.schema.text("Button"));
++		replaceSlashRangeWithNode(editor, range, button);
+ 	}
+ };
+ const DIVIDER = {
+@@ -2282,7 +2313,9 @@ const SECTION = {
+ 		"container"
+ 	],
+ 	command: ({ editor, range }) => {
+-		editor.chain().focus().deleteRange(range).insertSection().run();
++		editor.commands.focus();
++		const section = editor.state.schema.nodes.section?.create(null, editor.state.schema.nodes.paragraph?.create());
++		replaceSlashRangeWithNode(editor, range, section);
+ 	}
+ };
+ const TWO_COLUMNS = {
+@@ -2303,7 +2336,9 @@ const TWO_COLUMNS = {
+ 		"2"
+ 	],
+ 	command: ({ editor, range }) => {
+-		editor.chain().focus().deleteRange(range).insertColumns(2).run();
++		editor.commands.focus();
++		if (isAtMaxColumnsDepth(editor)) return;
++		replaceSlashRangeWithNode(editor, range, createColumnsLayoutNode(editor, 2));
+ 	}
+ };
+ const THREE_COLUMNS = {
+@@ -2323,7 +2358,9 @@ const THREE_COLUMNS = {
+ 		"3"
+ 	],
+ 	command: ({ editor, range }) => {
+-		editor.chain().focus().deleteRange(range).insertColumns(3).run();
++		editor.commands.focus();
++		if (isAtMaxColumnsDepth(editor)) return;
++		replaceSlashRangeWithNode(editor, range, createColumnsLayoutNode(editor, 3));
+ 	}
+ };
+ const FOUR_COLUMNS = {
+@@ -2343,7 +2380,9 @@ const FOUR_COLUMNS = {
+ 		"4"
+ 	],
+ 	command: ({ editor, range }) => {
+-		editor.chain().focus().deleteRange(range).insertColumns(4).run();
++		editor.commands.focus();
++		if (isAtMaxColumnsDepth(editor)) return;
++		replaceSlashRangeWithNode(editor, range, createColumnsLayoutNode(editor, 4));
+ 	}
+ };
+ const defaultSlashCommands = [
+diff --git a/dist/root-DzSo_3jb.mjs b/dist/root-DzSo_3jb.mjs
+index 8179cdbf..6d776619 100644
+--- a/dist/root-DzSo_3jb.mjs
++++ b/dist/root-DzSo_3jb.mjs
+@@ -2055,6 +2055,35 @@ function isAtMaxColumnsDepth(editor) {
+ 	const { from } = editor.state.selection;
+ 	return getColumnsDepth(editor.state.doc, from) >= 3;
+ }
++function replaceSlashRangeWithNode(editor, range, node) {
++	if (!node) return false;
++	const { state, view } = editor;
++	let from = range.from;
++	let to = range.to;
++	const $from = state.doc.resolve(range.from);
++	for (let depth = $from.depth; depth >= 1; depth--) {
++		if ($from.node(depth).type.name !== "paragraph") continue;
++		from = $from.before(depth);
++		to = $from.after(depth);
++		break;
++	}
++	view.dispatch(state.tr.replaceWith(from, to, node).scrollIntoView());
++	return true;
++}
++function createColumnsLayoutNode(editor, count) {
++	const { schema } = editor.state;
++	const parentType = {
++		2: "twoColumns",
++		3: "threeColumns",
++		4: "fourColumns"
++	}[count];
++	const parent = schema.nodes[parentType];
++	const column = schema.nodes.columnsColumn;
++	const paragraph = schema.nodes.paragraph;
++	if (!parent || !column || !paragraph) return null;
++	const emptyColumn = () => column.create(null, paragraph.create());
++	return parent.create(null, Array.from({ length: count }, emptyColumn));
++}
+ function updateScrollView(container, item) {
+ 	const containerRect = container.getBoundingClientRect();
+ 	const itemRect = item.getBoundingClientRect();
+@@ -2143,7 +2172,7 @@ function CommandList({ items, query, selectedIndex, onSelect }) {
+ 				const currentIndex = flatIndex++;
+ 				return /* @__PURE__ */ jsx(CommandItem, {
+ 					item,
+-					onSelect: () => onSelect(currentIndex),
++					onSelect: () => onSelect(items.indexOf(item)),
+ 					selected: currentIndex === selectedIndex
+ 				}, item.title);
+ 			})] }, group.category))
+@@ -2252,7 +2281,9 @@ const BUTTON = {
+ 	category: "Layout",
+ 	searchTerms: ["button"],
+ 	command: ({ editor, range }) => {
+-		editor.chain().focus().deleteRange(range).setButton().run();
++		editor.commands.focus();
++		const button = editor.state.schema.nodes.button?.create(null, editor.state.schema.text("Button"));
++		replaceSlashRangeWithNode(editor, range, button);
+ 	}
+ };
+ const DIVIDER = {
+@@ -2280,7 +2311,9 @@ const SECTION = {
+ 		"container"
+ 	],
+ 	command: ({ editor, range }) => {
+-		editor.chain().focus().deleteRange(range).insertSection().run();
++		editor.commands.focus();
++		const section = editor.state.schema.nodes.section?.create(null, editor.state.schema.nodes.paragraph?.create());
++		replaceSlashRangeWithNode(editor, range, section);
+ 	}
+ };
+ const TWO_COLUMNS = {
+@@ -2301,7 +2334,9 @@ const TWO_COLUMNS = {
+ 		"2"
+ 	],
+ 	command: ({ editor, range }) => {
+-		editor.chain().focus().deleteRange(range).insertColumns(2).run();
++		editor.commands.focus();
++		if (isAtMaxColumnsDepth(editor)) return;
++		replaceSlashRangeWithNode(editor, range, createColumnsLayoutNode(editor, 2));
+ 	}
+ };
+ const THREE_COLUMNS = {
+@@ -2321,7 +2356,9 @@ const THREE_COLUMNS = {
+ 		"3"
+ 	],
+ 	command: ({ editor, range }) => {
+-		editor.chain().focus().deleteRange(range).insertColumns(3).run();
++		editor.commands.focus();
++		if (isAtMaxColumnsDepth(editor)) return;
++		replaceSlashRangeWithNode(editor, range, createColumnsLayoutNode(editor, 3));
+ 	}
+ };
+ const FOUR_COLUMNS = {
+@@ -2341,7 +2378,9 @@ const FOUR_COLUMNS = {
+ 		"4"
+ 	],
+ 	command: ({ editor, range }) => {
+-		editor.chain().focus().deleteRange(range).insertColumns(4).run();
++		editor.commands.focus();
++		if (isAtMaxColumnsDepth(editor)) return;
++		replaceSlashRangeWithNode(editor, range, createColumnsLayoutNode(editor, 4));
+ 	}
+ };
+ const defaultSlashCommands = [
+@@ -2524,4 +2563,4 @@ function SlashCommandRoot({ items: itemsProp, filterItems: filterItemsProp, char
+ //#endregion
+ export { BubbleMenuButtonToolbar as $, BubbleMenuImageUnlink as A, ChevronDownIcon as At, BubbleMenuNodeSelector as B, BubbleMenuLinkDefault as C, Heading2Icon as Ct, BubbleMenuLinkForm as D, Columns3Icon as Dt, BubbleMenuLinkOpenLink as E, Columns4Icon as Et, RootWithDefault as F, AlignLeftIcon as Ft, BubbleMenuItalic as G, NodeSelectorRoot as H, BubbleMenuUppercase as I, AlignCenterIcon as It, EditorFocusScope as J, BubbleMenuItemGroup as K, BubbleMenuUnderline as L, BubbleMenuImageForm as M, CaseUpperIcon as Mt, BubbleMenuImageEditLink as N, BoldIcon as Nt, BubbleMenuLinkEditLink as O, Columns2Icon as Ot, BubbleMenuButtonDefault as P, AlignRightIcon as Pt, BubbleMenuButtonUnlink as Q, bubbleMenuTriggers as R, BubbleMenuSeparator as S, Heading3Icon as St, BubbleMenuLinkToolbar as T, ExternalLinkIcon as Tt, NodeSelectorTrigger as U, NodeSelectorContent as V, BubbleMenuLinkSelector as W, FocusScopeContext as X, EditorFocusScopeProvider as Y, useEditorFocusScope as Z, TWO_COLUMNS as _, MousePointerIcon as _t, BUTTON as a, BubbleMenuAlignCenter as at, isInsideNode as b, LinkIcon as bt, FOUR_COLUMNS as c, UnlinkIcon as ct, H3 as d, TextIcon as dt, BubbleMenuButtonForm as et, NUMBERED_LIST as f, StrikethroughIcon as ft, THREE_COLUMNS as g, PencilIcon as gt, TEXT as h, Rows2Icon as ht, BULLET_LIST as i, BubbleMenuAlignLeft as it, BubbleMenuImageToolbar as j, CheckIcon as jt, BubbleMenuImageDefault as k, CodeIcon as kt, H1 as l, UnderlineIcon as lt, SECTION as m, SplitSquareVerticalIcon as mt, filterAndRankItems as n, BubbleMenuBold as nt, CODE as o, BubbleMenuItem as ot, QUOTE as p, SquareCodeIcon as pt, BubbleMenuCode as q, scoreItem as r, BubbleMenuAlignRight as rt, DIVIDER as s, useBubbleMenuContext as st, SlashCommandRoot as t, BubbleMenuButtonEditLink as tt, H2 as u, TextQuoteIcon as ut, defaultSlashCommands as v, ListOrderedIcon as vt, BubbleMenuLinkUnlink as w, Heading1Icon as wt, BubbleMenu$1 as x, ItalicIcon as xt, isAtMaxColumnsDepth as y, ListIcon as yt, BubbleMenuStrike as z };
+ 
+-//# sourceMappingURL=root-DzSo_3jb.mjs.map
+\ No newline at end of file
++//# sourceMappingURL=root-DzSo_3jb.mjs.map

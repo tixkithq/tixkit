@@ -26,6 +26,7 @@ const context = {
   },
   ticket: {
     type: 'General Admission',
+    code: 'TKT-123',
     qrCodeUrl: 'https://tickets.example.test/qr/TKT-123.png',
   },
   order: {
@@ -284,6 +285,24 @@ describe('validateEmailTemplate', () => {
     expect(result.valid).toBe(true);
   });
 
+  it('validates required merge tags preserved in editor content text fallbacks', () => {
+    const template = createDefaultEmailTemplate({
+      editor: {
+        provider: REACT_EMAIL_EDITOR_PACKAGE,
+        contentHtml: '',
+        contentText: 'Hi {{recipient.name}}, {{event.title}} tickets are ready.',
+        contentJson: { type: 'doc' },
+      },
+    });
+
+    const result = validateEmailTemplate(template);
+
+    expect(result.valid).toBe(true);
+    expect(result.issues).not.toEqual(
+      expect.arrayContaining([expect.objectContaining({ code: 'missing_required_variable' })]),
+    );
+  });
+
   it('accepts full React Email editor documents with safe metadata and styles', async () => {
     const template = createDefaultEmailTemplate({
       editor: {
@@ -301,7 +320,7 @@ describe('validateEmailTemplate', () => {
           '</body>',
           '</html>',
         ].join(''),
-        contentText: 'HI {{RECIPIENT.NAME}}, {{EVENT.TITLE}} TICKETS ARE READY.',
+        contentText: 'Hi {{recipient.name}}, {{event.title}} tickets are ready.',
         contentJson: { type: 'doc' },
       },
     });
@@ -536,8 +555,49 @@ describe('renderEmailTemplate', () => {
     expect(first.subject).toBe('Your <script>alert(1)</script> tickets are ready');
     expect(first.html).toContain('&lt;script&gt;alert(1)&lt;/script&gt;');
     expect(first.text).toContain('Ada Lovelace');
+    expect(first.html).toContain('General Admission');
+    expect(first.html).toContain('TKT-123');
+    expect(first.html).toContain('https://tickets.example.test/qr/TKT-123.png');
+    expect(first.text).toContain('TKT-123');
     expect(second.html).toBe(first.html);
     expect(second.text).toBe(first.text);
+  });
+
+  it('appends the brand unsubscribe footer to bulk React Email editor exports', async () => {
+    const template = createDefaultEmailTemplate({
+      editor: {
+        provider: REACT_EMAIL_EDITOR_PACKAGE,
+        contentHtml:
+          '<!DOCTYPE html><html><body><table role="presentation"><tbody><tr><td><p>{{event.title}}</p><p>Hi {{recipient.name}}</p></td></tr></tbody></table></body></html>',
+        contentText: '{{event.title}}\nHi {{recipient.name}}',
+        contentJson: { type: 'doc' },
+      },
+      settings: {
+        templateKey: 'marketing-blast',
+        subject: 'Updates for {{recipient.name}}',
+        locale: 'en',
+        category: 'bulk',
+        sender: { fromEmail: 'news@example.test' },
+      },
+      blocks: [
+        {
+          type: 'unsubscribe_footer',
+          body: 'You are receiving this because you subscribed to {{brand.name}} updates.',
+          unsubscribeUrl: '{{brand.supportUrl}}',
+        },
+      ],
+    });
+
+    const rendered = await renderEmailTemplate(template, context);
+
+    expect(rendered.validation.valid).toBe(true);
+    expect(rendered.html).toContain('role="presentation"');
+    expect(rendered.html).toContain('https://help.example.test/preferences');
+    expect(rendered.html).toContain('Manage preferences');
+    expect(rendered.html.indexOf('Manage preferences')).toBeLessThan(
+      rendered.html.indexOf('</body>'),
+    );
+    expect(rendered.text).toContain('Manage preferences: https://help.example.test/preferences');
   });
 
   it('returns validation issues instead of rendering invalid templates', async () => {
@@ -586,6 +646,16 @@ describe('renderEmailTemplate', () => {
     expect(rendered.html).toContain('Save this date');
     expect(rendered.html).toContain('https://tickets.example.test/qr/TKT-123.png');
     expect(rendered.text).toContain('Save this date');
+  });
+
+  it('does not render blank image sources when image merge tags are unresolved', async () => {
+    const template = createDefaultEmailTemplate();
+
+    const rendered = await renderEmailTemplate(template, {});
+
+    expect(rendered.validation.valid).toBe(true);
+    expect(rendered.html).not.toMatch(/\ssrc=(["'])\1/);
+    expect(rendered.html).not.toContain('src=""');
   });
 
   it('renders safe raw HTML blocks without React Email child conflicts', async () => {

@@ -4,55 +4,85 @@ import * as React from 'react';
 import { createPortal } from 'react-dom';
 import {
   Archive,
-  CalendarDays,
-  ChevronLeft,
   Code,
-  Columns2,
   Copy,
   Eye,
   Image,
-  Link,
-  MapPin,
-  Minus,
-  MoreHorizontal,
-  Palette,
   PanelRightClose,
-  PanelRightOpen,
-  QrCode,
-  ReceiptText,
   Save,
   Send,
-  Share2,
-  Sparkles,
-  Ticket,
-  Type,
   Variable,
 } from 'lucide-react';
 import { EmailEditor, type EmailEditorProps, type EmailEditorRef } from '@react-email/editor';
-import { Inspector } from '@react-email/editor/ui';
+import {
+  AlignCenterIcon,
+  AlignLeftIcon,
+  AlignRightIcon,
+  BubbleMenu,
+  Inspector,
+  type TriggerFn,
+} from '@react-email/editor/ui';
+import { NodeSelection } from '@tiptap/pm/state';
+import { useCurrentEditor, useEditorState } from '@tiptap/react';
 import { toast } from 'sonner';
+import {
+  type DropdownMenuItemConfig,
+  EditorChrome,
+  EditorLeftRail,
+  type EditorMode,
+  EditorTopBar,
+  InspectorPanel,
+  InspectorReopenButton,
+  MetadataBar,
+  MetadataField,
+  inputClassName,
+} from '@tixkit/content-editor-shell';
 import {
   REACT_EMAIL_EDITOR_PACKAGE,
   createDefaultEmailTemplate,
   normalizeEmailTemplateDocument,
-  renderEmailTemplate,
   validateEditorExport,
   validateEmailTemplate,
   type EmailTemplateDocument,
-  type RenderedEmailTemplate,
 } from '@tixkit/content-email';
+import { MERGE_TAG_REGISTRY } from '@tixkit/domain';
 import type { ContentValidationIssue } from '@tixkit/content-core';
 import {
   adminApi,
+  type AdminBrand,
   type AdminContentDocument,
   type AdminContentDocumentVersion,
   type AdminContentRenderOutput,
+  type AdminBrandSenderIdentity,
   type AdminEventDetail,
+  type SendMessageInput,
 } from '@/lib/api';
+import { Button } from '@/components/ui/button';
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog';
+import {
+  applyMergeTagPreviewsToEditorContent,
+  createBrandEmailEditorTheme,
+  createEmailSlashCommands,
+  mergeTagCanvasAttributeValue,
+  mergeTagLiteral,
+  tixkitInlineStyleMarkName,
+  tixkitMergeTagMarkName,
+  useEmailEditorExtensions,
+  variablePresentation,
+} from './email-editor-extensions';
 
 type AutosaveState = 'idle' | 'saving' | 'saved' | 'error';
 type EmailReviewState = 'idle' | 'checking' | 'checked' | 'error';
-type EmailInspectorPanelId = 'style' | 'components' | 'variables' | 'history' | 'issues' | 'json';
+type EmailInspectorPanelId = 'style' | 'variables' | 'details' | 'history' | 'issues' | 'json';
+type EmailAudience = SendMessageInput['audience'];
+type EmailSendMode = 'now' | 'scheduled';
 
 type EditorPreview = {
   label: string;
@@ -60,158 +90,38 @@ type EditorPreview = {
   format: 'html' | 'text';
 };
 
-type InsertAction = {
-  id: 'text' | 'image' | 'components' | 'variables';
-  label: string;
-  icon: React.ReactNode;
-};
-
-type EmailComponentInsert = {
-  id:
-    | 'button'
-    | 'divider'
-    | 'section-columns'
-    | 'event-hero'
-    | 'ticket-summary'
-    | 'order-summary'
-    | 'qr-code'
-    | 'calendar'
-    | 'venue'
-    | 'social-links'
-    | 'footer'
-    | 'raw-html';
-  label: string;
-  description: string;
-  icon: React.ReactNode;
-  html: string;
-};
-
-const emailInsertActions: InsertAction[] = [
-  { id: 'text', label: 'Text', icon: <Type className="size-4" /> },
-  { id: 'image', label: 'Image', icon: <Image className="size-4" /> },
-  { id: 'components', label: 'Components', icon: <Sparkles className="size-4" /> },
-  { id: 'variables', label: 'Variables', icon: <Variable className="size-4" /> },
-];
-
-const emailComponentInserts: EmailComponentInsert[] = [
-  {
-    id: 'event-hero',
-    label: 'Event hero',
-    description: 'Headline, attendee greeting, and primary ticket CTA.',
-    icon: <Sparkles className="size-4" />,
-    html: [
-      '<h1>{{event.title}}</h1>',
-      '<p>Hi {{recipient.name}}, your tickets are ready.</p>',
-      '<p><a href="{{event.checkoutUrl}}">View tickets</a></p>',
-    ].join(''),
-  },
-  {
-    id: 'section-columns',
-    label: 'Section / columns',
-    description: 'Two-column email section for schedule and venue details.',
-    icon: <Columns2 className="size-4" />,
-    html: [
-      '<table role="presentation" width="100%">',
-      '<tr>',
-      '<td width="50%"><p>{{event.startsAt}}</p></td>',
-      '<td width="50%"><p>{{event.venueName}}</p></td>',
-      '</tr>',
-      '</table>',
-    ].join(''),
-  },
-  {
-    id: 'ticket-summary',
-    label: 'Ticket summary',
-    description: 'Ticket type and order total for transactional mail.',
-    icon: <Ticket className="size-4" />,
-    html: '<p><strong>{{ticket.type}}</strong><br />{{order.total}}</p>',
-  },
-  {
-    id: 'order-summary',
-    label: 'Order summary',
-    description: 'Compact order ID and payment total block.',
-    icon: <ReceiptText className="size-4" />,
-    html: '<p>Order {{order.id}}<br />Total {{order.total}}</p>',
-  },
-  {
-    id: 'qr-code',
-    label: 'QR code',
-    description: 'Ticket QR image with safe merge-tag URL.',
-    icon: <QrCode className="size-4" />,
-    html: '<p><img src="{{ticket.qrCodeUrl}}" alt="Ticket QR code" /></p>',
-  },
-  {
-    id: 'calendar',
-    label: 'Calendar button',
-    description: 'Link attendees to the public event page.',
-    icon: <CalendarDays className="size-4" />,
-    html: '<p><a href="{{event.publicUrl}}">Add to calendar</a></p>',
-  },
-  {
-    id: 'venue',
-    label: 'Venue block',
-    description: 'Date, time, and venue merge tags.',
-    icon: <MapPin className="size-4" />,
-    html: '<p>{{event.startsAt}}<br />{{event.venueName}}</p>',
-  },
-  {
-    id: 'button',
-    label: 'Button',
-    description: 'Provider-safe link styled by the email renderer.',
-    icon: <Link className="size-4" />,
-    html: '<p><a href="{{event.checkoutUrl}}">Buy tickets</a></p>',
-  },
-  {
-    id: 'divider',
-    label: 'Divider',
-    description: 'Horizontal separator between content sections.',
-    icon: <Minus className="size-4" />,
-    html: '<hr />',
-  },
-  {
-    id: 'social-links',
-    label: 'Social links',
-    description: 'Reusable brand and support links.',
-    icon: <Share2 className="size-4" />,
-    html: '<p><a href="{{event.publicUrl}}">Event page</a> - <a href="{{brand.supportUrl}}">Support</a></p>',
-  },
-  {
-    id: 'footer',
-    label: 'Footer',
-    description: 'Brand footer for transactional context.',
-    icon: <PanelRightClose className="size-4" />,
-    html: '<p>You are receiving this because you purchased or manage tickets with {{brand.name}}.</p>',
-  },
-  {
-    id: 'raw-html',
-    label: 'Raw HTML',
-    description: 'Validated HTML handoff for advanced imports.',
-    icon: <Code className="size-4" />,
-    html: '<p data-tixkit-raw-html="true">Paste reviewed HTML here.</p>',
-  },
-];
-
-const emailVariableInserts = [
+type EmailTemplateChoice = AdminContentDocument;
+const fallbackEmailVariableInserts = [
   'event.title',
   'event.startsAt',
+  'event.endsAt',
+  'event.timezone',
   'event.venueName',
+  'event.venueCity',
   'event.checkoutUrl',
   'event.publicUrl',
+  'brand.name',
+  'brand.supportUrl',
   'recipient.name',
+  'recipient.email',
+  'recipient.phone',
+  'attendee.name',
+  'attendee.checkedIn',
   'ticket.type',
+  'ticket.code',
   'ticket.qrCodeUrl',
   'order.id',
   'order.total',
-  'brand.name',
-  'brand.supportUrl',
+  'refund.amount',
+  'review.platform',
 ];
 
-const emailCategoryOptions = ['transactional', 'bulk', 'staff', 'system'] as const;
+const emailVariableInserts =
+  Array.isArray(MERGE_TAG_REGISTRY) && MERGE_TAG_REGISTRY.length > 0
+    ? MERGE_TAG_REGISTRY.map((variable) => variable.key)
+    : fallbackEmailVariableInserts;
 
-const textInputClassName =
-  'h-10 w-full min-w-0 rounded-sm border-0 bg-transparent px-0 text-sm font-medium text-black outline-none transition placeholder:text-black/35 focus:outline-none focus-visible:outline-none disabled:cursor-not-allowed disabled:opacity-60';
-const darkInputClassName =
-  'h-9 w-full rounded-md border border-white/10 bg-white/5 px-3 text-sm text-white outline-none transition placeholder:text-white/35 focus:border-white/35 disabled:cursor-not-allowed disabled:opacity-50';
+const emailCategoryOptions = ['transactional', 'bulk', 'staff', 'system'] as const;
 
 function listItemsFromResponse<T>(value: unknown): T[] {
   if (Array.isArray(value)) return value as T[];
@@ -224,6 +134,7 @@ function listItemsFromResponse<T>(value: unknown): T[] {
 }
 
 function sampleContext(event: AdminEventDetail): Record<string, unknown> {
+  const brandName = event.title.trim() || 'Event';
   return {
     event: {
       title: event.title,
@@ -233,8 +144,8 @@ function sampleContext(event: AdminEventDetail): Record<string, unknown> {
       publicUrl: `https://events.example.test/e/${event.id}`,
     },
     brand: {
-      name: 'Tixkit',
-      supportUrl: 'https://help.example.test/preferences',
+      name: brandName,
+      supportUrl: `https://events.example.test/e/${event.id}/preferences`,
     },
     recipient: {
       name: 'Ada Lovelace',
@@ -242,6 +153,7 @@ function sampleContext(event: AdminEventDetail): Record<string, unknown> {
     },
     ticket: {
       type: 'General Admission',
+      code: 'TKT-123',
       qrCodeUrl: 'https://tickets.example.test/qr/preview.png',
     },
     order: {
@@ -251,7 +163,375 @@ function sampleContext(event: AdminEventDetail): Record<string, unknown> {
   };
 }
 
-function defaultEmailDocument(event?: AdminEventDetail): EmailTemplateDocument {
+type EmailBubbleSelectionState = {
+  cursor?: number;
+  from: number;
+  key: string | null;
+  scope?: 'node' | 'row' | 'text';
+  style?: {
+    color?: string;
+    fontSize?: string;
+    lineHeight?: string;
+  };
+  to: number;
+};
+
+type EmailSelectionRestoreDetail = EmailBubbleSelectionState & {
+  focusEditor?: boolean;
+};
+
+type EmailSelectionFormatDetail = {
+  alignment?: 'left' | 'center' | 'right';
+  patch?: {
+    color?: string;
+    fontSize?: string;
+    lineHeight?: string;
+  };
+};
+
+const emailBubbleHiddenNodes = ['horizontalRule'];
+const emailBubbleNodeSelectionNodes = ['button', 'image', 'section', 'columnsColumn'];
+const emailBubbleControlFocusWindowMs = 2500;
+const emailBubbleControlSelector =
+  '[data-tixkit-email-bubble-controls="true"], .tixkit-email-bubble-control';
+let lastEmailBubbleControlInteractionAt = 0;
+
+function emailBubbleInteractionTime(): number {
+  return globalThis.performance?.now() ?? Date.now();
+}
+
+function markEmailBubbleControlInteraction() {
+  lastEmailBubbleControlInteractionAt = emailBubbleInteractionTime();
+}
+
+function hasRecentEmailBubbleControlInteraction(): boolean {
+  return (
+    emailBubbleInteractionTime() - lastEmailBubbleControlInteractionAt <
+    emailBubbleControlFocusWindowMs
+  );
+}
+
+function emailBubbleControlTarget(target: EventTarget | null): HTMLElement | null {
+  return target instanceof HTMLElement ? target.closest(emailBubbleControlSelector) : null;
+}
+
+const emailBubbleMenuTrigger: TriggerFn = ({ editor, state }) => {
+  const { selection } = state;
+  if (
+    selection instanceof NodeSelection &&
+    emailBubbleHiddenNodes.includes(selection.node.type.name)
+  ) {
+    return false;
+  }
+  if (
+    selection instanceof NodeSelection &&
+    emailBubbleNodeSelectionNodes.includes(selection.node.type.name)
+  ) {
+    return true;
+  }
+  if (selection.empty) {
+    const { $from } = selection;
+    for (let depth = $from.depth; depth > 0; depth -= 1) {
+      if (emailBubbleNodeSelectionNodes.includes($from.node(depth).type.name)) return true;
+    }
+  }
+
+  for (const nodeName of emailBubbleHiddenNodes) {
+    if (editor.isActive(nodeName)) return false;
+    const { $from } = selection;
+    for (let depth = $from.depth; depth > 0; depth -= 1) {
+      if ($from.node(depth).type.name === nodeName) return false;
+    }
+  }
+
+  if (editor.isActive('link')) return false;
+  if (selection.content().size > 0) return true;
+  if (!selection.empty) return false;
+
+  const activeElement = editor.view.dom.ownerDocument.activeElement;
+  const focusIsInBubbleMenu =
+    activeElement instanceof HTMLElement && Boolean(activeElement.closest('[data-re-bubble-menu]'));
+  if (
+    !editor.view.hasFocus() &&
+    !focusIsInBubbleMenu &&
+    !hasRecentEmailBubbleControlInteraction()
+  ) {
+    return false;
+  }
+
+  const parent = selection.$from.parent;
+  return parent.inlineContent && parent.content.size > 0;
+};
+
+function inlineControlValue(value: string | undefined, suffix: 'px' | '%'): string {
+  if (!value) return '';
+  return value.replace(new RegExp(`${suffix}$`, 'i'), '');
+}
+
+function isEmailBubbleSelectionState(value: unknown): value is EmailBubbleSelectionState {
+  if (!value || typeof value !== 'object') return false;
+  const candidate = value as Partial<EmailBubbleSelectionState>;
+  return typeof candidate.from === 'number' && typeof candidate.to === 'number';
+}
+
+function TixkitEmailBubbleMenu() {
+  const { editor } = useCurrentEditor();
+  const [nodeSelectorOpen, setNodeSelectorOpen] = React.useState(false);
+  const [linkSelectorOpen, setLinkSelectorOpen] = React.useState(false);
+  const [selection, setSelection] = React.useState<EmailBubbleSelectionState | null>(null);
+  const lastSelectionRef = React.useRef<EmailBubbleSelectionState | null>(null);
+  const isCodeActive = useEditorState({
+    editor,
+    selector: ({ editor: activeEditor }) => activeEditor?.isActive('code') ?? false,
+  });
+
+  React.useEffect(() => {
+    const dom = editor?.view.dom;
+    if (!dom) return undefined;
+    const handleSelectionState = (event: Event) => {
+      const detail = (event as CustomEvent<unknown>).detail;
+      if (isEmailBubbleSelectionState(detail)) {
+        lastSelectionRef.current = detail;
+        setSelection(detail);
+        return;
+      }
+      if (hasRecentEmailBubbleControlInteraction()) {
+        setSelection(lastSelectionRef.current);
+        return;
+      }
+      lastSelectionRef.current = null;
+      setSelection(null);
+    };
+    dom.addEventListener('tixkit-email-selection-state', handleSelectionState);
+    return () => {
+      dom.removeEventListener('tixkit-email-selection-state', handleSelectionState);
+    };
+  }, [editor]);
+
+  const dispatchSelectionFormat = React.useCallback(
+    (detail: EmailSelectionFormatDetail) => {
+      editor?.view.dom.dispatchEvent(
+        new CustomEvent('tixkit-email-selection-format', {
+          bubbles: true,
+          cancelable: true,
+          detail,
+        }),
+      );
+    },
+    [editor],
+  );
+
+  const handleNodeSelectorOpenChange = React.useCallback((open: boolean) => {
+    setNodeSelectorOpen(open);
+    if (open) setLinkSelectorOpen(false);
+  }, []);
+
+  const handleLinkSelectorOpenChange = React.useCallback((open: boolean) => {
+    setLinkSelectorOpen(open);
+    if (open) setNodeSelectorOpen(false);
+  }, []);
+
+  const restoreBubbleSelection = React.useCallback(() => {
+    markEmailBubbleControlInteraction();
+    const currentSelection = selection ?? lastSelectionRef.current;
+    if (!editor || !currentSelection) return;
+    const restore = () => {
+      editor.view.dom.dispatchEvent(
+        new CustomEvent('tixkit-email-selection-restore', {
+          bubbles: true,
+          detail: {
+            ...currentSelection,
+            focusEditor: false,
+          } satisfies EmailSelectionRestoreDetail,
+        }),
+      );
+    };
+    restore();
+    window.requestAnimationFrame(restore);
+    window.setTimeout(restore, 0);
+  }, [editor, selection]);
+
+  const openVariableMenu = React.useCallback(() => {
+    restoreBubbleSelection();
+    editor?.view.dom.dispatchEvent(
+      new CustomEvent('tixkit-email-variable-menu-open', {
+        bubbles: true,
+        cancelable: true,
+      }),
+    );
+  }, [editor, restoreBubbleSelection]);
+
+  React.useEffect(() => {
+    const dom = editor?.view.dom;
+    const ownerDocument = dom?.ownerDocument;
+    if (!dom || !ownerDocument) return undefined;
+
+    const handleNativeBubbleControlInteraction = (event: Event) => {
+      if (!emailBubbleControlTarget(event.target)) return;
+      markEmailBubbleControlInteraction();
+      const currentSelection = lastSelectionRef.current;
+      if (!currentSelection) return;
+      dom.dispatchEvent(
+        new CustomEvent('tixkit-email-selection-restore', {
+          bubbles: true,
+          detail: {
+            ...currentSelection,
+            focusEditor: false,
+          } satisfies EmailSelectionRestoreDetail,
+        }),
+      );
+    };
+
+    ownerDocument.addEventListener('click', handleNativeBubbleControlInteraction, true);
+    ownerDocument.addEventListener('focusin', handleNativeBubbleControlInteraction, true);
+    ownerDocument.addEventListener('input', handleNativeBubbleControlInteraction, true);
+    ownerDocument.addEventListener('mousedown', handleNativeBubbleControlInteraction, true);
+    ownerDocument.addEventListener('pointerdown', handleNativeBubbleControlInteraction, true);
+    return () => {
+      ownerDocument.removeEventListener('click', handleNativeBubbleControlInteraction, true);
+      ownerDocument.removeEventListener('focusin', handleNativeBubbleControlInteraction, true);
+      ownerDocument.removeEventListener('input', handleNativeBubbleControlInteraction, true);
+      ownerDocument.removeEventListener('mousedown', handleNativeBubbleControlInteraction, true);
+      ownerDocument.removeEventListener('pointerdown', handleNativeBubbleControlInteraction, true);
+    };
+  }, [editor]);
+
+  const handleBubbleInputInteraction = React.useCallback(
+    (event: React.SyntheticEvent<HTMLElement>) => {
+      event.stopPropagation();
+      event.nativeEvent.stopImmediatePropagation();
+      restoreBubbleSelection();
+    },
+    [restoreBubbleSelection],
+  );
+
+  const style = selection?.style ?? {};
+  const colorValue = /^#[0-9a-f]{6}$/i.test(style.color ?? '') ? style.color : '#111827';
+  const isNodeSelection = selection?.scope === 'node';
+
+  return (
+    <>
+      <BubbleMenu.NodeSelector
+        open={nodeSelectorOpen}
+        onOpenChange={handleNodeSelectorOpenChange}
+      />
+      {isCodeActive ? (
+        <BubbleMenu.Code />
+      ) : (
+        <>
+          {!isNodeSelection && (
+            <>
+              <BubbleMenu.LinkSelector
+                open={linkSelectorOpen}
+                onOpenChange={handleLinkSelectorOpenChange}
+              />
+              <BubbleMenu.ItemGroup>
+                <BubbleMenu.Bold />
+                <BubbleMenu.Italic />
+                <BubbleMenu.Underline />
+                <BubbleMenu.Strike />
+                <BubbleMenu.Code />
+                <BubbleMenu.Uppercase />
+              </BubbleMenu.ItemGroup>
+            </>
+          )}
+          {!isNodeSelection && selection?.key && (
+            <BubbleMenu.ItemGroup>
+              <BubbleMenu.Item
+                isActive={false}
+                name="Variable options"
+                onCommand={openVariableMenu}
+              >
+                <Variable className="size-4" />
+              </BubbleMenu.Item>
+            </BubbleMenu.ItemGroup>
+          )}
+          <BubbleMenu.ItemGroup>
+            <BubbleMenu.Item
+              isActive={false}
+              name="Align left"
+              onCommand={() => dispatchSelectionFormat({ alignment: 'left' })}
+            >
+              <AlignLeftIcon />
+            </BubbleMenu.Item>
+            <BubbleMenu.Item
+              isActive={false}
+              name="Align center"
+              onCommand={() => dispatchSelectionFormat({ alignment: 'center' })}
+            >
+              <AlignCenterIcon />
+            </BubbleMenu.Item>
+            <BubbleMenu.Item
+              isActive={false}
+              name="Align right"
+              onCommand={() => dispatchSelectionFormat({ alignment: 'right' })}
+            >
+              <AlignRightIcon />
+            </BubbleMenu.Item>
+          </BubbleMenu.ItemGroup>
+          {!isNodeSelection && (
+            <BubbleMenu.ItemGroup className="tixkit-email-bubble-controls">
+              <span
+                className="tixkit-email-bubble-controls__inputs"
+                data-tixkit-email-bubble-controls="true"
+                onClickCapture={handleBubbleInputInteraction}
+                onFocusCapture={handleBubbleInputInteraction}
+                onMouseDownCapture={handleBubbleInputInteraction}
+                onPointerDownCapture={handleBubbleInputInteraction}
+              >
+                <input
+                  aria-label="Selection color"
+                  className="tixkit-email-bubble-control tixkit-email-bubble-control--color"
+                  onChange={(event) => {
+                    const nextColor = event.currentTarget.value;
+                    if (/^#[0-9a-f]{6}$/i.test(nextColor)) {
+                      dispatchSelectionFormat({ patch: { color: nextColor } });
+                    }
+                  }}
+                  onClick={handleBubbleInputInteraction}
+                  onMouseDown={handleBubbleInputInteraction}
+                  type="color"
+                  value={colorValue}
+                />
+                <input
+                  aria-label="Selection text size"
+                  className="tixkit-email-bubble-control tixkit-email-bubble-control--number"
+                  inputMode="numeric"
+                  onChange={(event) => {
+                    const trimmed = event.currentTarget.value.trim();
+                    dispatchSelectionFormat({ patch: { fontSize: trimmed ? `${trimmed}px` : '' } });
+                  }}
+                  onClick={handleBubbleInputInteraction}
+                  onMouseDown={handleBubbleInputInteraction}
+                  placeholder="Size"
+                  value={inlineControlValue(style.fontSize, 'px')}
+                />
+                <input
+                  aria-label="Selection line height"
+                  className="tixkit-email-bubble-control tixkit-email-bubble-control--number"
+                  inputMode="numeric"
+                  onChange={(event) => {
+                    const trimmed = event.currentTarget.value.trim();
+                    dispatchSelectionFormat({ patch: { lineHeight: trimmed ? `${trimmed}%` : '' } });
+                  }}
+                  onClick={handleBubbleInputInteraction}
+                  onMouseDown={handleBubbleInputInteraction}
+                  placeholder="Line"
+                  value={inlineControlValue(style.lineHeight, '%')}
+                />
+              </span>
+            </BubbleMenu.ItemGroup>
+          )}
+        </>
+      )}
+    </>
+  );
+}
+
+function defaultEmailDocument(
+  event?: AdminEventDetail,
+  senderIdentity?: AdminBrandSenderIdentity,
+): EmailTemplateDocument {
   return createDefaultEmailTemplate({
     editor: {
       provider: REACT_EMAIL_EDITOR_PACKAGE,
@@ -259,12 +539,15 @@ function defaultEmailDocument(event?: AdminEventDetail): EmailTemplateDocument {
         '<h1>{{event.title}}</h1>',
         '<p>Hi {{recipient.name}}, your tickets are ready.</p>',
         '<p>{{ticket.type}} - {{order.total}}</p>',
+        '<p>Ticket code: {{ticket.code}}</p>',
+        '<p><img src="{{ticket.qrCodeUrl}}" alt="Ticket QR code" /></p>',
         '<p>You are receiving this because you purchased or manage tickets with {{brand.name}}.</p>',
       ].join(''),
       contentText: [
         '{{event.title}}',
         'Hi {{recipient.name}}, your tickets are ready.',
         '{{ticket.type}} - {{order.total}}',
+        'Ticket code: {{ticket.code}}',
         'You are receiving this because you purchased or manage tickets with {{brand.name}}.',
       ].join('\n\n'),
     },
@@ -277,9 +560,9 @@ function defaultEmailDocument(event?: AdminEventDetail): EmailTemplateDocument {
       locale: 'en',
       category: 'transactional',
       sender: {
-        fromEmail: 'tickets@example.test',
-        fromName: '{{brand.name}}',
-        replyToEmail: 'support@example.test',
+        fromEmail: senderIdentity?.email ?? '',
+        fromName: senderIdentity?.name || '{{brand.name}}',
+        replyToEmail: senderIdentity?.replyToEmail,
       },
     },
     blocks: [
@@ -293,7 +576,13 @@ function defaultEmailDocument(event?: AdminEventDetail): EmailTemplateDocument {
       {
         type: 'ticket_summary',
         title: 'Ticket summary',
-        body: '{{ticket.type}} - {{order.total}}',
+        body: '{{ticket.type}} - {{order.total}} - {{ticket.code}}',
+      },
+      {
+        type: 'qr_code',
+        title: 'Ticket QR code',
+        imageUrl: '{{ticket.qrCodeUrl}}',
+        imageAlt: 'Ticket QR code',
       },
       {
         type: 'unsubscribe_footer',
@@ -304,24 +593,26 @@ function defaultEmailDocument(event?: AdminEventDetail): EmailTemplateDocument {
   });
 }
 
-async function previewFromRendered(
-  document: EmailTemplateDocument,
-  event: AdminEventDetail,
-): Promise<EditorPreview> {
-  const rendered = await renderEmailTemplate(document, sampleContext(event));
-  return previewFromEmailOutput('React Email preview', rendered);
+function previewFromEditorDocument(label: string, document: EmailTemplateDocument): EditorPreview {
+  const html = document.editor.contentHtml.trim();
+  const text = document.editor.contentText?.trim();
+  return {
+    label,
+    format: html ? 'html' : 'text',
+    output: html || text || '',
+  };
 }
 
 function previewFromEmailOutput(
   label: string,
-  output: Pick<RenderedEmailTemplate, 'subject' | 'html' | 'text'> | AdminContentRenderOutput,
+  output: Pick<AdminContentRenderOutput, 'html' | 'text'>,
 ): EditorPreview {
   const text = output.text?.trim();
   const html = output.html?.trim();
   return {
     label,
     format: html ? 'html' : 'text',
-    output: `Subject: ${output.subject ?? ''}\n\n${text || html || ''}`,
+    output: text || html || '',
   };
 }
 
@@ -360,32 +651,6 @@ function duplicateDocumentName(name: string): string {
   return name.endsWith(suffix) ? name : `${name.slice(0, 160 - suffix.length)}${suffix}`;
 }
 
-function autosaveLabel(state: AutosaveState): string {
-  switch (state) {
-    case 'saving':
-      return 'Saving';
-    case 'saved':
-      return 'Saved';
-    case 'error':
-      return 'Save failed';
-    case 'idle':
-      return 'Ready';
-  }
-}
-
-function autosaveClassName(state: AutosaveState): string {
-  switch (state) {
-    case 'saving':
-      return 'border-amber-400/40 bg-amber-400/10 text-amber-100';
-    case 'saved':
-      return 'border-emerald-400/40 bg-emerald-400/10 text-emerald-100';
-    case 'error':
-      return 'border-red-400/40 bg-red-400/10 text-red-100';
-    case 'idle':
-      return 'border-cyan-400/40 bg-cyan-400/10 text-cyan-100';
-  }
-}
-
 function validationIssueKey(issue: ContentValidationIssue): string {
   return `${issue.code}:${issue.field ?? ''}:${issue.message}:${issue.severity}`;
 }
@@ -415,16 +680,168 @@ function hasBlockingIssues(issues: ContentValidationIssue[]): boolean {
   return issues.some((issue) => issue.severity === 'error');
 }
 
-function issueBadgeClassName(issue: ContentValidationIssue): string {
-  return issue.severity === 'error'
-    ? 'border-red-400/40 bg-red-400/10 text-red-100'
-    : 'border-amber-400/40 bg-amber-400/10 text-amber-100';
+function waitForReviewAnalysis(ms: number): Promise<void> {
+  if (ms <= 0) return Promise.resolve();
+  return new Promise((resolve) => {
+    window.setTimeout(resolve, ms);
+  });
+}
+
+function verifiedSenderIdentities(identities: AdminBrandSenderIdentity[]) {
+  return identities.filter((identity) => identity.verified && identity.email.trim());
+}
+
+function findVerifiedSenderIdentity(
+  identities: AdminBrandSenderIdentity[],
+  fromEmail?: string,
+): AdminBrandSenderIdentity | undefined {
+  const normalizedFromEmail = fromEmail?.trim().toLowerCase();
+  if (!normalizedFromEmail) return verifiedSenderIdentities(identities)[0];
+  return verifiedSenderIdentities(identities).find(
+    (identity) => identity.email.trim().toLowerCase() === normalizedFromEmail,
+  );
+}
+
+function applySenderIdentity(
+  document: EmailTemplateDocument,
+  identity: AdminBrandSenderIdentity,
+): EmailTemplateDocument {
+  return {
+    ...document,
+    settings: {
+      ...document.settings,
+      sender: {
+        ...document.settings.sender,
+        fromEmail: identity.email,
+        fromName: identity.name || document.settings.sender.fromName,
+        replyToEmail: identity.replyToEmail,
+      },
+    },
+  };
+}
+
+function senderIdentityIssues(
+  document: EmailTemplateDocument,
+  identities: AdminBrandSenderIdentity[],
+): ContentValidationIssue[] {
+  if (findVerifiedSenderIdentity(identities, document.settings.sender.fromEmail)) return [];
+  const verifiedCount = verifiedSenderIdentities(identities).length;
+  return [
+    {
+      code: verifiedCount > 0 ? 'email_sender_identity_mismatch' : 'email_sender_identity_missing',
+      field: 'settings.sender.fromEmail',
+      message:
+        verifiedCount > 0
+          ? 'Choose a verified sender identity for this brand before sending.'
+          : 'This brand has no verified email sender identity. Verify a sender before sending.',
+      severity: 'error',
+    },
+  ];
+}
+
+function ensureBulkUnsubscribeFooter(document: EmailTemplateDocument): EmailTemplateDocument {
+  if (document.settings.category !== 'bulk') return document;
+  if (document.blocks.some((block) => block.type === 'unsubscribe_footer')) return document;
+  return {
+    ...document,
+    blocks: [
+      ...document.blocks,
+      {
+        type: 'unsubscribe_footer',
+        body: 'You are receiving this because you subscribed to updates from {{brand.name}}.',
+        unsubscribeUrl: '{{brand.supportUrl}}',
+      },
+    ],
+  };
 }
 
 function NativeEmailInspector({ host }: { host: HTMLElement | null }) {
+  const { editor } = useCurrentEditor();
+  const lastSelectionRef = React.useRef<EmailBubbleSelectionState | null>(null);
+
+  React.useEffect(() => {
+    const dom = editor?.view.dom;
+    if (!dom) return undefined;
+    const handleSelectionState = (event: Event) => {
+      const detail = (event as CustomEvent<unknown>).detail;
+      if (isEmailBubbleSelectionState(detail)) lastSelectionRef.current = detail;
+    };
+    dom.addEventListener('tixkit-email-selection-state', handleSelectionState);
+    return () => {
+      dom.removeEventListener('tixkit-email-selection-state', handleSelectionState);
+    };
+  }, [editor]);
+
+  const preserveSelectionForTarget = React.useCallback(
+    (target: EventTarget | null, event?: { preventDefault: () => void; type?: string }) => {
+      const selection = lastSelectionRef.current;
+      const dom = editor?.view.dom;
+      if (!selection || !dom) return;
+      const allowsNativeFocus =
+        target instanceof HTMLElement &&
+        Boolean(target.closest('input, textarea, select, [contenteditable="true"]'));
+      if (!allowsNativeFocus && event?.type !== 'focusin' && event?.type !== 'input') {
+        event?.preventDefault();
+      }
+      const restoreSelection = () => {
+        dom.dispatchEvent(
+          new CustomEvent('tixkit-email-selection-restore', {
+            bubbles: true,
+            detail: {
+              ...selection,
+              focusEditor: !allowsNativeFocus,
+            } satisfies EmailSelectionRestoreDetail,
+          }),
+        );
+      };
+      restoreSelection();
+      window.requestAnimationFrame(restoreSelection);
+      window.setTimeout(restoreSelection, 0);
+      window.setTimeout(restoreSelection, 60);
+    },
+    [editor],
+  );
+
+  React.useEffect(() => {
+    const handleInspectorInteraction = (event: Event) => {
+      if (
+        event.target instanceof HTMLElement &&
+        event.target.closest('[data-tixkit-email-inspector="true"]')
+      ) {
+        preserveSelectionForTarget(event.target, event);
+      }
+    };
+    document.addEventListener('click', handleInspectorInteraction, true);
+    document.addEventListener('focusin', handleInspectorInteraction, true);
+    document.addEventListener('input', handleInspectorInteraction, true);
+    document.addEventListener('mousedown', handleInspectorInteraction, true);
+    document.addEventListener('pointerdown', handleInspectorInteraction, true);
+    return () => {
+      document.removeEventListener('click', handleInspectorInteraction, true);
+      document.removeEventListener('focusin', handleInspectorInteraction, true);
+      document.removeEventListener('input', handleInspectorInteraction, true);
+      document.removeEventListener('mousedown', handleInspectorInteraction, true);
+      document.removeEventListener('pointerdown', handleInspectorInteraction, true);
+    };
+  }, [preserveSelectionForTarget]);
+
+  const preserveEditorSelection = React.useCallback(
+    (event: React.SyntheticEvent<HTMLElement>) => {
+      preserveSelectionForTarget(event.target, event);
+    },
+    [preserveSelectionForTarget],
+  );
+
   if (!host) return null;
   return createPortal(
-    <div className="tixkit-email-native-inspector">
+    <div
+      className="tixkit-email-native-inspector"
+      onClickCapture={preserveEditorSelection}
+      onFocusCapture={preserveEditorSelection}
+      onInputCapture={preserveEditorSelection}
+      onMouseDownCapture={preserveEditorSelection}
+      onPointerDownCapture={preserveEditorSelection}
+    >
       <Inspector.Root aria-label="React Email style inspector">
         <div className="space-y-1 border-b border-border pb-3">
           <p className="text-xs uppercase tracking-wide text-muted-foreground">Selection</p>
@@ -435,7 +852,6 @@ function NativeEmailInspector({ host }: { host: HTMLElement | null }) {
         <div className="space-y-5">
           <Inspector.Document />
           <Inspector.Node />
-          <Inspector.Text />
         </div>
       </Inspector.Root>
     </div>,
@@ -444,20 +860,75 @@ function NativeEmailInspector({ host }: { host: HTMLElement | null }) {
 }
 
 function initialEditorContent(document: EmailTemplateDocument): EmailEditorProps['content'] {
-  return (document.editor.contentJson ??
-    document.editor.contentHtml) as EmailEditorProps['content'];
+  const contentJson = document.editor.contentJson;
+  const contentHtml = document.editor.contentHtml;
+  if (contentJson && !(isSinglePlainTextParagraphJson(contentJson) && hasStructuredEditorHtml(contentHtml))) {
+    return applyMergeTagPreviewsToEditorContent(contentJson as EmailEditorProps['content']);
+  }
+  return applyMergeTagPreviewsToEditorContent(contentHtml as EmailEditorProps['content']);
+}
+
+function isSinglePlainTextParagraphJson(value: unknown): boolean {
+  if (!value || typeof value !== 'object') return false;
+  const doc = value as { content?: unknown; type?: unknown };
+  if (doc.type !== 'doc' || !Array.isArray(doc.content) || doc.content.length !== 1) return false;
+  const paragraph = doc.content[0] as { content?: unknown; type?: unknown };
+  if (paragraph.type !== 'paragraph') return false;
+  if (!Array.isArray(paragraph.content) || paragraph.content.length === 0) return true;
+  return paragraph.content.every((child) => {
+    if (!child || typeof child !== 'object') return false;
+    const node = child as { type?: unknown };
+    return node.type === 'text' || node.type === 'hardBreak';
+  });
+}
+
+function hasStructuredEditorHtml(value: string | null | undefined): boolean {
+  const html = value?.trim();
+  if (!html) return false;
+  const blockMatches = html.match(/<(?:h[1-6]|p|ul|ol|li|blockquote|table|section|article|div|hr|img|a)\b/gi) ?? [];
+  return (
+    blockMatches.length > 1 ||
+    /<(?:h[1-6]|ul|ol|blockquote|table|section|article|hr|img)\b/i.test(html)
+  );
+}
+
+function scheduledAtFromInput(mode: EmailSendMode, value: string): string | undefined {
+  if (mode !== 'scheduled' || !value.trim()) return undefined;
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return undefined;
+  return date.toISOString();
+}
+
+function audienceLabel(audience: EmailAudience): string {
+  if (audience === 'checked_in') return 'Checked in attendees';
+  if (audience === 'not_checked_in') return 'Not checked in attendees';
+  if (audience === 'specific') return 'Specific attendees';
+  return 'All attendees';
 }
 
 function withEditorExport(
   document: EmailTemplateDocument,
   exported: { html: string; text: string; json: Record<string, unknown> },
 ): EmailTemplateDocument {
-  const contentText = plainTextFromHtml(exported.html) || exported.text.trim();
+  const exportedHtml = canonicalizeMergeTagPreviewHtml(exported.html.trim());
+  const jsonText = tipTapPlainTextFromJson(exported.json);
+  const missingMergeTagLiterals = mergeTagLiteralsFromJson(exported.json).filter(
+    (literal) => !exportedHtml.includes(literal),
+  );
+  const jsonHtml =
+    missingMergeTagLiterals.length > 0 || hasTixkitInlineStyleMarks(exported.json)
+      ? tipTapHtmlFromJson(exported.json)
+      : '';
+  const canonicalHtml = jsonHtml || exportedHtml;
+  const htmlText = plainTextFromHtml(canonicalHtml);
+  const contentText = jsonText || exported.text.trim() || htmlText;
+  const contentHtml =
+    canonicalHtml && (htmlText || !jsonText) ? canonicalHtml : htmlFromPlainText(contentText);
   return {
     ...document,
     editor: {
       ...document.editor,
-      contentHtml: exported.html,
+      contentHtml,
       contentText,
       contentJson: exported.json,
     },
@@ -504,6 +975,303 @@ function plainTextFromHtml(html: string): string {
     .trim();
 }
 
+function tipTapPlainTextFromJson(value: unknown): string {
+  if (!value || typeof value !== 'object') return '';
+  const node = value as { content?: unknown; marks?: unknown; text?: unknown; type?: unknown };
+  if (typeof node.text === 'string') {
+    const mergeTagKey = mergeTagKeyFromJsonMarks(node.marks);
+    return mergeTagKey ? mergeTagLiteral(mergeTagKey) : node.text;
+  }
+  if (node.type === 'hardBreak') return '\n';
+  if (!Array.isArray(node.content)) return '';
+  const parts = node.content
+    .map((child) => tipTapPlainTextFromJson(child))
+    .filter((part) => part.length > 0);
+  const separator =
+    node.type === 'doc' ||
+    node.type === 'container' ||
+    node.type === 'bulletList' ||
+    node.type === 'orderedList' ||
+    node.type === 'listItem'
+      ? '\n'
+      : '';
+  return parts.join(separator).replace(/[ \t]{2,}/g, ' ').replace(/\n{3,}/g, '\n\n').trim();
+}
+
+function mergeTagKeyFromJsonMarks(marks: unknown): string | null {
+  if (!Array.isArray(marks)) return null;
+  for (const mark of marks) {
+    if (!mark || typeof mark !== 'object') continue;
+    const typedMark = mark as { attrs?: { key?: unknown }; type?: unknown };
+    if (typedMark.type !== tixkitMergeTagMarkName) continue;
+    const key = typedMark.attrs?.key;
+    if (typeof key === 'string' && key.trim()) return key.trim();
+  }
+  return null;
+}
+
+function mergeTagLiteralsFromJson(value: unknown): string[] {
+  const literals = new Set<string>();
+  const visit = (nodeValue: unknown) => {
+    if (!nodeValue || typeof nodeValue !== 'object') return;
+    if (Array.isArray(nodeValue)) {
+      for (const child of nodeValue) visit(child);
+      return;
+    }
+    const node = nodeValue as TipTapJsonNode;
+    const mergeTagKey = mergeTagKeyFromJsonMarks(node.marks);
+    if (mergeTagKey) literals.add(mergeTagLiteral(mergeTagKey));
+    if (Array.isArray(node.content)) {
+      for (const child of node.content) visit(child);
+    }
+  };
+  visit(value);
+  return Array.from(literals);
+}
+
+function hasTixkitInlineStyleMarks(value: unknown): boolean {
+  let found = false;
+  const visit = (nodeValue: unknown) => {
+    if (found || !nodeValue || typeof nodeValue !== 'object') return;
+    if (Array.isArray(nodeValue)) {
+      for (const child of nodeValue) visit(child);
+      return;
+    }
+    const node = nodeValue as TipTapJsonNode;
+    if (Array.isArray(node.marks)) {
+      found = node.marks.some(
+        (mark) =>
+          mark &&
+          typeof mark === 'object' &&
+          (mark as { type?: unknown }).type === tixkitInlineStyleMarkName,
+      );
+      if (found) return;
+    }
+    if (Array.isArray(node.content)) {
+      for (const child of node.content) visit(child);
+    }
+  };
+  visit(value);
+  return found;
+}
+
+type TipTapJsonNode = {
+  attrs?: Record<string, unknown>;
+  content?: unknown;
+  marks?: unknown;
+  text?: unknown;
+  type?: unknown;
+};
+
+function tipTapHtmlFromJson(value: unknown): string {
+  const html = tipTapNodeHtml(value);
+  return html.trim();
+}
+
+function tipTapNodeHtml(value: unknown): string {
+  if (!value || typeof value !== 'object') return '';
+  if (Array.isArray(value)) return value.map((child) => tipTapNodeHtml(child)).join('');
+  const node = value as TipTapJsonNode;
+  if (typeof node.text === 'string') return tipTapTextHtml(node.text, node.marks);
+  if (node.type === 'hardBreak') return '<br>';
+
+  const children = Array.isArray(node.content)
+    ? node.content.map((child) => tipTapNodeHtml(child)).join('')
+    : '';
+  switch (node.type) {
+    case 'doc':
+    case 'container':
+      return children;
+    case 'paragraph':
+      return `<p${tipTapBlockAttributes(node.attrs)}>${children}</p>`;
+    case 'heading': {
+      const level = tipTapHeadingLevel(node.attrs);
+      return `<h${level}${tipTapBlockAttributes(node.attrs)}>${children}</h${level}>`;
+    }
+    case 'bulletList':
+      return `<ul>${children}</ul>`;
+    case 'orderedList':
+      return `<ol>${children}</ol>`;
+    case 'listItem':
+      return `<li>${children}</li>`;
+    default:
+      return children;
+  }
+}
+
+function tipTapTextHtml(text: string, marks: unknown): string {
+  const mergeTagKey = mergeTagKeyFromJsonMarks(marks);
+  const sourceText = mergeTagKey ? mergeTagLiteral(mergeTagKey) : text;
+  let html = escapeHtml(sourceText);
+  if (!Array.isArray(marks)) return html;
+  for (const mark of marks) {
+    if (!mark || typeof mark !== 'object') continue;
+    const typedMark = mark as { attrs?: Record<string, unknown>; type?: unknown };
+    if (typedMark.type === tixkitMergeTagMarkName) continue;
+    if (typedMark.type === tixkitInlineStyleMarkName) {
+      const style = inlineStyleAttribute(typedMark.attrs);
+      if (style) html = `<span style="${escapeHtmlAttribute(style)}">${html}</span>`;
+      continue;
+    }
+    if (typedMark.type === 'bold' || typedMark.type === 'strong') {
+      html = `<strong>${html}</strong>`;
+      continue;
+    }
+    if (typedMark.type === 'italic' || typedMark.type === 'em') {
+      html = `<em>${html}</em>`;
+      continue;
+    }
+    if (typedMark.type === 'strike') {
+      html = `<s>${html}</s>`;
+      continue;
+    }
+    if (typedMark.type === 'link') {
+      const href = typeof typedMark.attrs?.href === 'string' ? typedMark.attrs.href : '';
+      if (href.trim()) html = `<a href="${escapeHtmlAttribute(href.trim())}">${html}</a>`;
+    }
+  }
+  return html;
+}
+
+function tipTapBlockAttributes(attrs: Record<string, unknown> | undefined): string {
+  const alignment = tipTapAlignment(attrs);
+  return alignment ? ` style="text-align: ${alignment}"` : '';
+}
+
+function tipTapAlignment(attrs: Record<string, unknown> | undefined): string | null {
+  const value =
+    typeof attrs?.textAlign === 'string'
+      ? attrs.textAlign
+      : typeof attrs?.align === 'string'
+        ? attrs.align
+        : typeof attrs?.alignment === 'string'
+          ? attrs.alignment
+          : '';
+  if (value === 'left' || value === 'center' || value === 'right') return value;
+  return null;
+}
+
+function tipTapHeadingLevel(attrs: Record<string, unknown> | undefined): 1 | 2 | 3 | 4 | 5 | 6 {
+  const level = typeof attrs?.level === 'number' ? attrs.level : 1;
+  if (level === 2 || level === 3 || level === 4 || level === 5 || level === 6) return level;
+  return 1;
+}
+
+function inlineStyleAttribute(attrs: Record<string, unknown> | undefined): string {
+  const style: string[] = [];
+  if (typeof attrs?.color === 'string' && attrs.color.trim()) {
+    style.push(`color: ${attrs.color.trim()}`);
+  }
+  if (typeof attrs?.fontSize === 'string' && attrs.fontSize.trim()) {
+    style.push(`font-size: ${attrs.fontSize.trim()}`);
+  }
+  if (typeof attrs?.lineHeight === 'string' && attrs.lineHeight.trim()) {
+    style.push(`line-height: ${attrs.lineHeight.trim()}`);
+  }
+  return style.join('; ');
+}
+
+function canonicalizeMergeTagPreviewHtml(html: string): string {
+  if (!html.trim()) return '';
+  if (typeof DOMParser === 'undefined') {
+    return html.replace(
+      /(<span\b[^>]*\bdata-tixkit-merge-tag=["']([^"']+)["'][^>]*>)([\s\S]*?)(<\/span>)/gi,
+      (_match, opening: string, key: string, _content: string, closing: string) =>
+        `${opening}${mergeTagLiteral(key.trim())}${closing}`,
+    );
+  }
+
+  const parser = new DOMParser();
+  const parsed = parser.parseFromString(html, 'text/html');
+  for (const element of Array.from(parsed.querySelectorAll<HTMLElement>('[data-tixkit-merge-attr-src]'))) {
+    const key = element.dataset.tixkitMergeAttrSrc;
+    if (!key?.trim()) continue;
+    element.setAttribute('src', mergeTagLiteral(key.trim()));
+    element.removeAttribute('data-tixkit-merge-attr-src');
+  }
+  for (const element of Array.from(parsed.querySelectorAll<HTMLElement>('[data-tixkit-merge-attr-href]'))) {
+    const key = element.dataset.tixkitMergeAttrHref;
+    if (!key?.trim()) continue;
+    element.setAttribute('href', mergeTagLiteral(key.trim()));
+    element.removeAttribute('data-tixkit-merge-attr-href');
+  }
+  for (const element of Array.from(parsed.querySelectorAll<HTMLElement>('[src], [href]'))) {
+    for (const attribute of ['src', 'href'] as const) {
+      const value = element.getAttribute(attribute);
+      if (!value) continue;
+      for (const key of emailVariableInserts) {
+        if (value === mergeTagCanvasAttributeValue(key)) {
+          element.setAttribute(attribute, mergeTagLiteral(key));
+          break;
+        }
+      }
+    }
+  }
+  for (const element of Array.from(parsed.querySelectorAll<HTMLElement>('[data-tixkit-merge-tag]'))) {
+    const key = element.dataset.tixkitMergeTag || element.dataset.variableKey;
+    if (!key?.trim()) continue;
+    element.textContent = mergeTagLiteral(key.trim());
+    element.removeAttribute('data-tixkit-merge-tag');
+    element.removeAttribute('data-variable-key');
+    element.removeAttribute('data-variable-kind');
+    element.removeAttribute('data-variable-label');
+    element.removeAttribute('data-variable-preview');
+    element.removeAttribute('data-variable-detail');
+    element.removeAttribute('key');
+    element.removeAttribute('kind');
+    element.removeAttribute('label');
+    element.removeAttribute('preview');
+    element.removeAttribute('title');
+    const classNames = element.className
+      .split(/\s+/)
+      .filter((className) => className && className !== 'tixkit-email-variable-chip');
+    if (classNames.length > 0) {
+      element.className = classNames.join(' ');
+    } else {
+      element.removeAttribute('class');
+    }
+  }
+  for (const element of Array.from(
+    parsed.querySelectorAll<HTMLElement>('[data-tixkit-inline-style]'),
+  )) {
+    element.removeAttribute('data-tixkit-inline-style');
+  }
+
+  const trimmed = html.trim();
+  if (/<html[\s>]/i.test(trimmed)) {
+    const doctype = /^<!doctype/i.test(trimmed) ? '<!DOCTYPE html>' : '';
+    return `${doctype}${parsed.documentElement.outerHTML}`;
+  }
+  return parsed.body.innerHTML;
+}
+
+function htmlFromPlainText(text: string): string {
+  if (!text.trim()) return '';
+  return text
+    .split(/\n{2,}|\n/)
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .map((line) => `<p>${escapeHtml(line)}</p>`)
+    .join('');
+}
+
+function escapeHtml(value: string): string {
+  return value
+    .replaceAll('&', '&amp;')
+    .replaceAll('<', '&lt;')
+    .replaceAll('>', '&gt;')
+    .replaceAll('"', '&quot;')
+    .replaceAll("'", '&#39;');
+}
+
+function escapeHtmlAttribute(value: string): string {
+  return value
+    .replaceAll('&', '&amp;')
+    .replaceAll('"', '&quot;')
+    .replaceAll('<', '&lt;')
+    .replaceAll('>', '&gt;');
+}
+
 function PreviewDrawer({ onClose, preview }: { onClose: () => void; preview: EditorPreview }) {
   return (
     <aside
@@ -533,29 +1301,82 @@ function PreviewDrawer({ onClose, preview }: { onClose: () => void; preview: Edi
 
 export function EmailPersistedEditorView({ eventId }: { eventId: string }) {
   const [event, setEvent] = React.useState<AdminEventDetail>();
+  const [brand, setBrand] = React.useState<AdminBrand>();
   const [document, setDocument] = React.useState<AdminContentDocument>();
   const [draft, setDraft] = React.useState<AdminContentDocumentVersion>();
   const [versions, setVersions] = React.useState<AdminContentDocumentVersion[]>([]);
   const [emailDocument, setEmailDocument] = React.useState<EmailTemplateDocument>();
+  const [senderIdentities, setSenderIdentities] = React.useState<AdminBrandSenderIdentity[]>([]);
+  const [templateChoices, setTemplateChoices] = React.useState<EmailTemplateChoice[]>([]);
   const [inspectorPanelId, setInspectorPanelId] = React.useState<EmailInspectorPanelId>('style');
   const [inspectorCollapsed, setInspectorCollapsed] = React.useState(false);
-  const [insertDrawerOpen, setInsertDrawerOpen] = React.useState(false);
-  const [moreActionsOpen, setMoreActionsOpen] = React.useState(false);
+  const [editorMode, setEditorMode] = React.useState<EditorMode>('editor');
+  const [editorRevision, setEditorRevision] = React.useState(0);
+  const [audience, setAudience] = React.useState<EmailAudience>('all');
+  const [sendMode, setSendMode] = React.useState<EmailSendMode>('now');
+  const [scheduledAt, setScheduledAt] = React.useState('');
   const [reviewIssues, setReviewIssues] = React.useState<ContentValidationIssue[]>([]);
   const [reviewState, setReviewState] = React.useState<EmailReviewState>('idle');
   const [nativeInspectorHost, setNativeInspectorHost] = React.useState<HTMLElement | null>(null);
   const [recipient, setRecipient] = React.useState('ada@example.test');
   const [preview, setPreview] = React.useState<EditorPreview>();
   const [previewOpen, setPreviewOpen] = React.useState(false);
+  const [templatePickerOpen, setTemplatePickerOpen] = React.useState(false);
+  const [testDialogOpen, setTestDialogOpen] = React.useState(false);
+  const [reviewDialogOpen, setReviewDialogOpen] = React.useState(false);
+  const [reviewConfirmed, setReviewConfirmed] = React.useState(false);
   const [autosave, setAutosave] = React.useState<AutosaveState>('idle');
   const [loading, setLoading] = React.useState(true);
   const [error, setError] = React.useState<string>();
   const [actionError, setActionError] = React.useState<string>();
   const [notice, setNotice] = React.useState<string>();
   const editorCanvasRef = React.useRef<HTMLElement | null>(null);
-  const inspectorRef = React.useRef<HTMLElement | null>(null);
+  const inspectorRef = React.useRef<HTMLDivElement | null>(null);
   const operationIdRef = React.useRef(0);
   const emailEditorRef = React.useRef<EmailEditorRef | null>(null);
+  const [brandTheme, setBrandTheme] = React.useState(() => createBrandEmailEditorTheme());
+  const emailExtensions = useEmailEditorExtensions({
+    mergeTags: emailVariableInserts,
+    theme: brandTheme,
+  });
+  const emailSlashCommands = React.useMemo(
+    () =>
+      createEmailSlashCommands({
+        mergeTags: emailVariableInserts,
+        brandName: brand?.name ?? event?.title ?? 'Tixkit',
+      }),
+    [brand?.name, event?.title],
+  );
+  const emailSlashCommand = React.useMemo(
+    () => ({ items: emailSlashCommands }),
+    [emailSlashCommands],
+  );
+  const uploadInlineEmailImage = React.useCallback(
+    async (file: File): Promise<{ url: string }> => {
+      if (!event?.brandId || !event.id) {
+        throw new Error('Email image uploads require an event and brand context.');
+      }
+      const result = await adminApi.uploadArtifact({
+        purpose: 'content_email_image',
+        file,
+        brandId: event.brandId,
+        eventId: event.id,
+        metadata: {
+          source: 'admin_email_editor',
+          contentDocumentId: document?.id,
+          templateKey: emailDocument?.settings.templateKey,
+        },
+      });
+      if (!result.ok) {
+        throw new Error(resultMessage(result.error, 'Unable to upload email image'));
+      }
+      if (!result.data.downloadUrl) {
+        throw new Error('Uploaded email image did not return a download URL.');
+      }
+      return { url: result.data.downloadUrl };
+    },
+    [document?.id, emailDocument?.settings.templateKey, event?.brandId, event?.id],
+  );
 
   function nextOperationId() {
     operationIdRef.current += 1;
@@ -593,6 +1414,43 @@ export function EmailPersistedEditorView({ eventId }: { eventId: string }) {
       return;
     }
 
+    const senderIdentitiesResult = await adminApi.listBrandEmailSenderIdentities(
+      loadedEvent.brandId,
+    );
+    if (!senderIdentitiesResult.ok) {
+      setError(resultMessage(senderIdentitiesResult.error, 'Unable to load email senders'));
+      setLoading(false);
+      return;
+    }
+    const loadedSenderIdentities = listItemsFromResponse<AdminBrandSenderIdentity>(
+      senderIdentitiesResult.data,
+    ).filter((identity) => identity.brandId === loadedEvent.brandId);
+    const defaultSenderIdentity = verifiedSenderIdentities(loadedSenderIdentities)[0];
+    const brandsResult = await adminApi.listBrands();
+    let loadedBrand: AdminBrand | undefined;
+    if (brandsResult.ok) {
+      loadedBrand = listItemsFromResponse<AdminBrand>(brandsResult.data).find(
+        (brand) => brand.id === loadedEvent.brandId,
+      );
+      setBrandTheme(
+        createBrandEmailEditorTheme({
+          primaryColor:
+            typeof loadedBrand?.theme.primaryColor === 'string'
+              ? loadedBrand.theme.primaryColor
+              : undefined,
+          fontFamily:
+            typeof loadedBrand?.theme.fontFamily === 'string'
+              ? loadedBrand.theme.fontFamily
+              : undefined,
+          radius:
+            typeof loadedBrand?.theme.radius === 'string' ||
+            typeof loadedBrand?.theme.radius === 'number'
+              ? loadedBrand.theme.radius
+              : undefined,
+        }),
+      );
+    }
+
     const documentsResult = await adminApi.listContentDocuments({
       channel: 'email',
       brandId: loadedEvent.brandId,
@@ -626,6 +1484,21 @@ export function EmailPersistedEditorView({ eventId }: { eventId: string }) {
       loadedDocument = createResult.data;
     }
 
+    const templatesResult = await adminApi.listContentDocuments({
+      channel: 'email',
+      brandId: loadedEvent.brandId,
+      limit: 100,
+    });
+    const loadedTemplateChoices = templatesResult.ok
+      ? listItemsFromResponse<AdminContentDocument>(templatesResult.data).filter(
+          (item) =>
+            item.channel === 'email' &&
+            item.brandId === loadedEvent.brandId &&
+            item.id !== loadedDocument.id &&
+            item.status !== 'archived',
+        )
+      : [];
+
     const versionsResult = await adminApi.listContentVersions(loadedDocument.id);
     if (!versionsResult.ok) {
       setError(resultMessage(versionsResult.error, 'Unable to load email versions'));
@@ -636,14 +1509,13 @@ export function EmailPersistedEditorView({ eventId }: { eventId: string }) {
     let loadedVersions = listItemsFromResponse<AdminContentDocumentVersion>(versionsResult.data);
     let loadedDraft = latestDraft(loadedVersions, loadedDocument);
     if (!loadedDraft) {
-      const initialDocument = defaultEmailDocument(loadedEvent);
-      const initialPreview = await renderEmailTemplate(initialDocument, sampleContext(loadedEvent));
+      const initialDocument = defaultEmailDocument(loadedEvent, defaultSenderIdentity);
       const saveResult = await adminApi.saveContentVersion(loadedDocument.id, {
         contentJson: initialDocument,
         subject: initialDocument.settings.subject,
         previewText: initialDocument.settings.previewText,
-        renderedHtml: initialPreview.html,
-        renderedText: initialPreview.text,
+        renderedHtml: initialDocument.editor.contentHtml,
+        renderedText: initialDocument.editor.contentText ?? '',
       });
       if (!saveResult.ok) {
         setError(resultMessage(saveResult.error, 'Unable to create the initial email draft'));
@@ -660,14 +1532,29 @@ export function EmailPersistedEditorView({ eventId }: { eventId: string }) {
       setLoading(false);
       return;
     }
+    const currentSenderIdentity = findVerifiedSenderIdentity(
+      loadedSenderIdentities,
+      normalized.settings.sender.fromEmail,
+    );
+    const normalizedWithSender = currentSenderIdentity
+      ? applySenderIdentity(normalized, currentSenderIdentity)
+      : normalized;
 
     setEvent(loadedEvent);
+    setBrand(loadedBrand);
     setDocument(loadedDocument);
     setDraft(loadedDraft);
     setVersions(loadedVersions);
-    setEmailDocument(normalized);
-    setPreview(await previewFromRendered(normalized, loadedEvent));
-    setReviewIssues(validateEmailTemplate(normalized, { provider: 'resend' }).issues);
+    setSenderIdentities(loadedSenderIdentities);
+    setTemplateChoices(loadedTemplateChoices);
+    setEmailDocument(normalizedWithSender);
+    setPreview(previewFromEditorDocument('Editor snapshot', normalizedWithSender));
+    setReviewIssues(
+      mergeValidationIssues([
+        ...validateEmailTemplate(normalizedWithSender, { provider: 'resend' }).issues,
+        ...senderIdentityIssues(normalizedWithSender, loadedSenderIdentities),
+      ]),
+    );
     setReviewState('checked');
     setAutosave('saved');
     setLoading(false);
@@ -704,7 +1591,7 @@ export function EmailPersistedEditorView({ eventId }: { eventId: string }) {
         '[data-re-inspector-breadcrumb-button], [data-re-inspector-label]',
       );
       for (const node of contrastNodes) {
-        node.style.color = 'rgb(229 229 229)';
+        node.style.removeProperty('color');
       }
       const inputs = inspector.querySelectorAll<HTMLInputElement>(
         'input[data-re-inspector-input], input[data-re-inspector-color-trigger], input[data-re-inspector-color-hex]',
@@ -747,7 +1634,6 @@ export function EmailPersistedEditorView({ eventId }: { eventId: string }) {
 
   function openMenuInspectorPanel(panelId: EmailInspectorPanelId) {
     openInspectorPanel(panelId);
-    setMoreActionsOpen(false);
   }
 
   function updateEmailDocument(nextDocument: EmailTemplateDocument) {
@@ -770,7 +1656,7 @@ export function EmailPersistedEditorView({ eventId }: { eventId: string }) {
     });
   }
 
-  function insertEditorContent(content: string) {
+  function insertEditorText(content: string) {
     if (isArchived) return;
     const editor = emailEditorRef.current?.editor;
     if (!editor) return;
@@ -779,39 +1665,42 @@ export function EmailPersistedEditorView({ eventId }: { eventId: string }) {
   }
 
   function insertEmailVariable(variableKey: string) {
-    insertEditorContent(`{{${variableKey}}}`);
+    insertEditorText(`{{${variableKey}}}`);
   }
 
-  function insertEmailComponent(componentId: EmailComponentInsert['id']) {
-    const component = emailComponentInserts.find((item) => item.id === componentId);
-    if (!component) return;
-    insertEditorContent(component.html);
+  function insertBrandLogo() {
+    if (isArchived) return;
+    const logoUrl = typeof brand?.theme.logoUrl === 'string' ? brand.theme.logoUrl.trim() : '';
+    if (!logoUrl) return;
+    const editor = emailEditorRef.current?.editor;
+    if (!editor) return;
+    const logoAlt = `${brand?.name ?? 'Brand'} logo`;
+    type EditorCommandChain = ReturnType<typeof editor.chain> & {
+      setImage?: (attrs: { src: string; alt: string; alignment?: string }) => EditorCommandChain;
+    };
+    const chain = editor.chain().focus() as EditorCommandChain;
+    if (typeof chain.setImage === 'function') {
+      chain.setImage({ src: logoUrl, alt: logoAlt, alignment: 'center' }).run();
+    } else {
+      chain
+        .insertContent({
+          type: 'image',
+          attrs: { src: logoUrl, alt: logoAlt, alignment: 'center' },
+        })
+        .run();
+    }
+    markDraftDirty();
   }
 
-  function insertEmailAction(actionId: InsertAction['id']) {
-    if (actionId === 'variables') {
-      openInspectorPanel('variables');
-      return;
-    }
-    if (actionId === 'text') {
-      insertEditorContent('<p>Add attendee-ready copy here.</p>');
-      return;
-    }
-    if (actionId === 'components') {
-      openInspectorPanel('components');
-      return;
-    }
-    if (actionId === 'image') {
-      insertEditorContent('<img src="{{ticket.qrCodeUrl}}" alt="Ticket QR code" />');
-    }
-  }
-
-  async function reviewCurrentDraft(options: { openPanel?: boolean } = {}) {
+  async function reviewCurrentDraft(
+    options: { analysisDelayMs?: number; openPanel?: boolean } = {},
+  ) {
     if (!emailDocument) return undefined;
     setReviewState('checking');
     if (options.openPanel !== false) openInspectorPanel('issues');
     let editorSnapshot: EmailTemplateDocument | undefined;
     try {
+      await waitForReviewAnalysis(options.analysisDelayMs ?? 0);
       editorSnapshot = await snapshotFromEditor(emailDocument);
     } catch (reviewError) {
       setReviewState('error');
@@ -826,6 +1715,7 @@ export function EmailPersistedEditorView({ eventId }: { eventId: string }) {
     const issues = mergeValidationIssues([
       ...templateValidation.issues,
       ...exportValidation.issues,
+      ...senderIdentityIssues(editorSnapshot, senderIdentities),
     ]);
     setEmailDocument(editorSnapshot);
     setReviewIssues(issues);
@@ -852,15 +1742,20 @@ export function EmailPersistedEditorView({ eventId }: { eventId: string }) {
       return undefined;
     }
     if (!editorSnapshot) return undefined;
-    const rendered = await renderEmailTemplate(editorSnapshot, sampleContext(event));
-    setReviewIssues(rendered.validation.issues);
+    const validation = validateEmailTemplate(editorSnapshot, { provider: 'resend' });
+    setReviewIssues(
+      mergeValidationIssues([
+        ...validation.issues,
+        ...senderIdentityIssues(editorSnapshot, senderIdentities),
+      ]),
+    );
     setReviewState('checked');
     const result = await adminApi.saveContentVersion(document.id, {
       contentJson: editorSnapshot,
       subject: editorSnapshot.settings.subject,
       previewText: editorSnapshot.settings.previewText,
-      renderedHtml: rendered.html,
-      renderedText: rendered.text,
+      renderedHtml: editorSnapshot.editor.contentHtml,
+      renderedText: editorSnapshot.editor.contentText ?? '',
     });
     if (!isCurrentOperation(operationId)) return undefined;
     if (!result.ok) {
@@ -874,7 +1769,7 @@ export function EmailPersistedEditorView({ eventId }: { eventId: string }) {
       result.data,
       ...current.filter((version) => version.id !== result.data.id),
     ]);
-    setPreview(previewFromEmailOutput('React Email preview', rendered));
+    setPreview(previewFromEditorDocument('Editor snapshot', editorSnapshot));
     setAutosave('saved');
     setActionError(undefined);
     setNotice(`Saved draft v${result.data.versionNumber}`);
@@ -905,39 +1800,114 @@ export function EmailPersistedEditorView({ eventId }: { eventId: string }) {
     setNotice('Preview rendered from the saved content version');
   }
 
+  async function handleModeChange(mode: EditorMode) {
+    setEditorMode(mode);
+    if (mode === 'preview') {
+      void previewSavedDraft();
+      return;
+    }
+    if (mode !== 'code' || !emailDocument) return;
+    try {
+      const currentExport = await snapshotFromEditor(emailDocument);
+      if (currentExport) setEmailDocument(currentExport);
+    } catch (codeExportError) {
+      setAutosave('error');
+      setActionError(
+        codeExportError instanceof Error ? codeExportError.message : 'Unable to export email',
+      );
+    }
+  }
+
+  async function openReviewDialog() {
+    if (!document || !event || !emailDocument || isArchived) return;
+    setActionError(undefined);
+    setReviewConfirmed(false);
+    setReviewDialogOpen(true);
+    const review = await reviewCurrentDraft({ analysisDelayMs: 220, openPanel: false });
+    if (!review) return;
+    if (hasBlockingIssues(review.issues)) {
+      setAutosave('error');
+      setActionError('Resolve email review blockers before sending.');
+      setInspectorPanelId('issues');
+      return;
+    }
+    const sendAt = scheduledAtFromInput(sendMode, scheduledAt);
+    if (sendMode === 'scheduled' && !sendAt) {
+      setAutosave('error');
+      setActionError('Choose a valid scheduled send time.');
+      return;
+    }
+    setActionError(undefined);
+  }
+
   async function publishDraft() {
-    if (!document || !emailDocument || isArchived) return;
+    if (!document || !event || !emailDocument || isArchived) return;
     const review = await reviewCurrentDraft({ openPanel: false });
     if (!review) return;
     if (hasBlockingIssues(review.issues)) {
       setAutosave('error');
-      setActionError('Resolve email publish blockers before publishing.');
+      setActionError('Resolve email review blockers before sending.');
       setInspectorPanelId('issues');
+      setReviewDialogOpen(false);
+      return;
+    }
+    const sendAt = scheduledAtFromInput(sendMode, scheduledAt);
+    if (sendMode === 'scheduled' && !sendAt) {
+      setAutosave('error');
+      setActionError('Choose a valid scheduled send time.');
+      setReviewDialogOpen(false);
       return;
     }
     const operationId = nextOperationId();
     const saved = await saveDraft(operationId, review.document);
     if (!saved) return;
-    const result = await adminApi.publishContentVersion(document.id, saved.version.id);
+    const publishResult = await adminApi.publishContentVersion(document.id, saved.version.id);
     if (!isCurrentOperation(operationId)) return;
-    if (!result.ok) {
+    if (!publishResult.ok) {
       setAutosave('error');
-      setActionError(resultMessage(result.error, 'Unable to publish email draft'));
+      setActionError(resultMessage(publishResult.error, 'Unable to prepare email campaign'));
       return;
     }
-    setDocument(result.data.document);
-    setDraft(result.data.version);
+    const sendResult = await adminApi.sendMessage(event.id, {
+      channel: 'email',
+      emailTemplateKey: saved.document.settings.templateKey,
+      audience,
+      scheduledAt: sendAt,
+    });
+    if (!isCurrentOperation(operationId)) return;
+    if (!sendResult.ok) {
+      setAutosave('error');
+      setActionError(resultMessage(sendResult.error, 'Unable to create email campaign'));
+      return;
+    }
+    setReviewDialogOpen(false);
+    setReviewConfirmed(false);
+    setDocument(publishResult.data.document);
+    setDraft(publishResult.data.version);
     setVersions((current) => [
-      result.data.version,
-      ...current.filter((version) => version.id !== result.data.version.id),
+      publishResult.data.version,
+      ...current.filter((version) => version.id !== publishResult.data.version.id),
     ]);
     setActionError(undefined);
-    setNotice(`Published v${result.data.version.versionNumber}`);
-    toast.success('Email template published');
+    setNotice(
+      sendAt
+        ? `Scheduled ${audienceLabel(audience).toLowerCase()} for ${new Date(sendAt).toLocaleString()}`
+        : `Queued ${audienceLabel(audience).toLowerCase()}`,
+    );
+    toast.success(sendAt ? 'Email campaign scheduled' : 'Email campaign queued');
   }
 
   async function sendTest() {
     if (!document || !emailDocument || isArchived) return;
+    const recipients = recipient
+      .split(/[\n,;]+/)
+      .map((value) => value.trim())
+      .filter(Boolean);
+    if (recipients.length === 0) {
+      setAutosave('error');
+      setActionError('Enter at least one test recipient.');
+      return;
+    }
     const review = await reviewCurrentDraft({ openPanel: false });
     if (!review) return;
     if (hasBlockingIssues(review.issues)) {
@@ -949,27 +1919,75 @@ export function EmailPersistedEditorView({ eventId }: { eventId: string }) {
     const operationId = nextOperationId();
     const saved = await saveDraft(operationId, review.document);
     if (!saved) return;
-    const result = await adminApi.testSendContent(document.id, {
-      versionId: saved.version.id,
-      recipient,
-      context: event ? sampleContext(event) : undefined,
-    });
-    if (!isCurrentOperation(operationId)) return;
-    if (!result.ok) {
+    const capturedRecipients: string[] = [];
+    for (const testRecipient of recipients) {
+      const result = await adminApi.testSendContent(document.id, {
+        versionId: saved.version.id,
+        recipient: testRecipient,
+        context: event ? sampleContext(event) : undefined,
+      });
+      if (!isCurrentOperation(operationId)) return;
+      if (!result.ok) {
+        setAutosave('error');
+        setActionError(resultMessage(result.error, 'Unable to capture email test send'));
+        return;
+      }
+      capturedRecipients.push(result.data.testSend.recipient);
+    }
+    setTestDialogOpen(false);
+    setActionError(undefined);
+    setNotice(
+      capturedRecipients.length === 1
+        ? `Captured test send to ${capturedRecipients[0]}`
+        : `Captured ${capturedRecipients.length} test sends`,
+    );
+    toast.success('Email test send captured');
+  }
+
+  async function applyTemplateChoice(template: EmailTemplateChoice) {
+    if (!event || !emailDocument || isArchived) return;
+    setActionError(undefined);
+    const versionsResult = await adminApi.listContentVersions(template.id);
+    if (!versionsResult.ok) {
       setAutosave('error');
-      setActionError(resultMessage(result.error, 'Unable to capture email test send'));
+      setActionError(resultMessage(versionsResult.error, 'Unable to load template versions'));
       return;
     }
-    setActionError(undefined);
-    setNotice(`Captured test send to ${result.data.testSend.recipient}`);
-    toast.success('Email test send captured');
+    const templateVersion = latestVersion(
+      listItemsFromResponse<AdminContentDocumentVersion>(versionsResult.data),
+    );
+    if (!templateVersion) {
+      setAutosave('error');
+      setActionError('Selected template has no saved versions.');
+      return;
+    }
+    const templateDocument = normalizeEmailTemplateDocument(templateVersion.contentJson);
+    if (!templateDocument) {
+      setAutosave('error');
+      setActionError('Selected template is not canonical React Email JSON.');
+      return;
+    }
+    const nextDocument = ensureBulkUnsubscribeFooter({
+      ...templateDocument,
+      settings: {
+        ...templateDocument.settings,
+        sender: emailDocument.settings.sender,
+      },
+    });
+    setEmailDocument(nextDocument);
+    setPreview(previewFromEditorDocument('Editor snapshot', nextDocument));
+    setEditorMode('editor');
+    setEditorRevision((current) => current + 1);
+    setTemplatePickerOpen(false);
+    markDraftDirty();
+    setNotice(`Applied template ${template.name}`);
   }
 
   async function archiveDocument() {
     if (!document) return;
     if (
       !window.confirm(
-        'Archive this email template? Editing, publishing, previews, and test sends will be disabled.',
+        'Archive this email template? Editing, review, previews, and test sends will be disabled.',
       )
     ) {
       return;
@@ -1040,623 +2058,827 @@ export function EmailPersistedEditorView({ eventId }: { eventId: string }) {
   const history = versionSummaries(versions);
   const issuePanelIssues = reviewState === 'idle' ? draft.validation.issues : reviewIssues;
   const issuePanelTitle = reviewState === 'checked' ? 'Current draft review' : 'Saved draft review';
+  const verifiedSenders = verifiedSenderIdentities(senderIdentities);
+  const selectedSenderIdentity = findVerifiedSenderIdentity(
+    senderIdentities,
+    emailDocument.settings.sender.fromEmail,
+  );
   const inspectorHeading: Record<EmailInspectorPanelId, { eyebrow: string; title: string }> = {
-    style: { eyebrow: 'Page style', title: 'React Email inspector' },
-    components: { eyebrow: 'Components', title: 'Insert email sections' },
-    variables: { eyebrow: 'Variables', title: 'Insert merge tags' },
+    style: { eyebrow: 'Page style', title: 'Email template' },
+    variables: { eyebrow: 'Variables', title: 'Merge tags' },
+    details: { eyebrow: 'Template details', title: 'Settings' },
     history: { eyebrow: 'Version history', title: `${history.length} versions` },
-    issues: { eyebrow: 'Publish blockers', title: issuePanelTitle },
+    issues: { eyebrow: 'Review checks', title: issuePanelTitle },
     json: { eyebrow: 'Editor JSON', title: 'Saved payload' },
   };
 
+  const moreActionsItems: DropdownMenuItemConfig[] = [
+    {
+      id: 'save',
+      label: 'Save draft',
+      icon: <Save className="size-4" />,
+      onClick: () => void saveDraft(),
+      disabled: Boolean(archivedReason) || autosave === 'saving',
+      separatorAfter: true,
+    },
+    {
+      id: 'test',
+      label: 'Send test',
+      icon: <Send className="size-4" />,
+      onClick: () => setTestDialogOpen(true),
+      disabled: Boolean(archivedReason),
+    },
+    {
+      id: 'variables',
+      label: 'Variables',
+      icon: <Variable className="size-4" />,
+      onClick: () => openMenuInspectorPanel('variables'),
+    },
+    {
+      id: 'templates',
+      label: 'Pick template',
+      icon: <Copy className="size-4" />,
+      onClick: () => setTemplatePickerOpen(true),
+      disabled: Boolean(archivedReason) || templateChoices.length === 0,
+    },
+    {
+      id: 'history',
+      label: 'Version history',
+      icon: <Copy className="size-4" />,
+      onClick: () => openMenuInspectorPanel('history'),
+    },
+    {
+      id: 'details',
+      label: 'Template details',
+      icon: <Code className="size-4" />,
+      onClick: () => openMenuInspectorPanel('details'),
+      separatorAfter: true,
+    },
+    {
+      id: 'json',
+      label: 'View JSON',
+      icon: <Code className="size-4" />,
+      onClick: () => openMenuInspectorPanel('json'),
+    },
+    {
+      id: 'review',
+      label: 'Review blockers',
+      icon: <Eye className="size-4" />,
+      onClick: () => void reviewCurrentDraft(),
+      disabled: reviewState === 'checking',
+      separatorAfter: true,
+    },
+    {
+      id: 'duplicate',
+      label: 'Duplicate',
+      icon: <Copy className="size-4" />,
+      onClick: () => void duplicateDocument(),
+      disabled: Boolean(archivedReason),
+    },
+    {
+      id: 'archive',
+      label: 'Archive',
+      icon: <Archive className="size-4" />,
+      onClick: () => void archiveDocument(),
+      destructive: true,
+    },
+  ];
+  const reviewBlockingIssues = reviewIssues.filter((issue) => issue.severity === 'error');
+  const reviewWarningIssues = reviewIssues.filter((issue) => issue.severity !== 'error');
+  const reviewScheduledAt = scheduledAtFromInput(sendMode, scheduledAt);
+  const reviewHasInvalidSchedule = sendMode === 'scheduled' && !reviewScheduledAt;
+  const reviewIsAnalyzing = reviewState === 'checking';
+  const reviewAnalysisFailed = reviewState === 'error';
+  const reviewCanConfirm =
+    reviewState === 'checked' &&
+    reviewBlockingIssues.length === 0 &&
+    !reviewHasInvalidSchedule &&
+    autosave !== 'saving';
+  const reviewSendTimeLabel =
+    sendMode === 'scheduled' && reviewScheduledAt
+      ? new Date(reviewScheduledAt).toLocaleString()
+      : 'Now';
+  const variableInsertItems = emailVariableInserts.map((key) => ({
+    key,
+    presentation: variablePresentation(key),
+  }));
+
   return (
-    <section
-      aria-label="Email content editor"
-      className="h-screen min-h-screen overflow-hidden bg-neutral-950 text-white"
-      data-channel="email"
-      data-testid="content-editor-shell"
-    >
-      <header className="grid h-16 grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-2 border-b border-white/10 px-3 sm:gap-4 sm:px-4">
-        <a
-          aria-label="Back to event"
-          className="inline-flex size-9 items-center justify-center rounded-md border border-white/10 text-white/70 hover:bg-white/10 hover:text-white"
-          href={`/events/${event.id}`}
-        >
-          <ChevronLeft className="size-4" />
-        </a>
-        <div className="hidden min-w-0 text-center md:block">
-          <div className="flex min-w-0 items-center justify-center gap-2 text-sm text-white/55">
-            <h1 className="truncate text-sm font-semibold text-white">Email template editor</h1>
-            <span>/</span>
-            <button
-              className="min-w-0 truncate font-semibold text-white"
-              disabled={!canEdit}
-              onClick={() => openInspectorPanel('style')}
-              type="button"
-            >
-              {document.name}
-            </button>
-            <span className="rounded-md bg-white/10 px-2 py-0.5 text-xs text-white/70">
-              {document.status}
-            </span>
-            <span
-              className={`rounded-md border px-2 py-0.5 text-xs ${autosaveClassName(autosave)}`}
-            >
-              {autosaveLabel(autosave)}
-            </span>
-          </div>
-          {(notice || actionError) && (
-            <p
-              className={`mt-1 truncate text-xs ${actionError ? 'text-red-200' : 'text-white/60'}`}
-            >
-              {actionError ?? notice}
-            </p>
-          )}
-        </div>
-        <div className="flex min-w-0 items-center justify-end gap-1.5 sm:gap-2">
-          <button
-            aria-label="Open preview"
-            className="inline-flex size-9 items-center justify-center rounded-md border border-white/10 text-white/70 hover:bg-white/10 hover:text-white disabled:cursor-not-allowed disabled:opacity-40"
-            disabled={Boolean(archivedReason)}
-            onClick={() => void previewSavedDraft()}
-            title={archivedReason}
-            type="button"
-          >
-            <Eye className="size-4" />
-          </button>
-          <div className="relative">
-            <button
-              aria-label="More actions"
-              aria-expanded={moreActionsOpen}
-              className="inline-flex size-9 list-none items-center justify-center rounded-md border border-white/10 text-white/70 hover:bg-white/10 hover:text-white"
-              onClick={() => setMoreActionsOpen((open) => !open)}
-              type="button"
-            >
-              <MoreHorizontal className="size-4" />
-            </button>
-            {moreActionsOpen && (
-              <div className="absolute right-0 top-11 z-30 w-56 rounded-lg border border-white/10 bg-neutral-900 p-1 text-sm shadow-2xl">
-                <button
-                  className="flex w-full items-center gap-2 rounded-md px-2 py-2 text-left text-white/80 hover:bg-white/10"
-                  onClick={() => openMenuInspectorPanel('variables')}
-                  type="button"
-                >
-                  <Variable className="size-4" />
-                  Open variables panel
-                </button>
-                <button
-                  className="flex w-full items-center gap-2 rounded-md px-2 py-2 text-left text-white/80 hover:bg-white/10"
-                  onClick={() => openMenuInspectorPanel('history')}
-                  type="button"
-                >
-                  <Save className="size-4" />
-                  Open version history
-                </button>
-                <button
-                  className="flex w-full items-center gap-2 rounded-md px-2 py-2 text-left text-white/80 hover:bg-white/10"
-                  onClick={() => openMenuInspectorPanel('style')}
-                  type="button"
-                >
-                  <Palette className="size-4" />
-                  Template details
-                </button>
-                <button
-                  className="flex w-full items-center gap-2 rounded-md px-2 py-2 text-left text-white/80 hover:bg-white/10"
-                  onClick={() => openMenuInspectorPanel('json')}
-                  type="button"
-                >
-                  <Code className="size-4" />
-                  View JSON payload
-                </button>
-                <button
-                  className="flex w-full items-center gap-2 rounded-md px-2 py-2 text-left text-white/80 hover:bg-white/10 disabled:cursor-not-allowed disabled:opacity-40"
-                  disabled={reviewState === 'checking'}
-                  onClick={() => {
-                    setMoreActionsOpen(false);
-                    void reviewCurrentDraft();
-                  }}
-                  type="button"
-                >
-                  <Eye className="size-4" />
-                  Review blockers
-                </button>
-                <button
-                  aria-label="Send test"
-                  className="flex w-full items-center gap-2 rounded-md px-2 py-2 text-left text-white/80 hover:bg-white/10 disabled:cursor-not-allowed disabled:opacity-40"
-                  disabled={Boolean(archivedReason)}
-                  onClick={() => {
-                    setMoreActionsOpen(false);
-                    void sendTest();
-                  }}
-                  type="button"
-                >
-                  <Send className="size-4" />
-                  Send test
-                </button>
-                <button
-                  className="flex w-full items-center gap-2 rounded-md px-2 py-2 text-left text-white/80 hover:bg-white/10 disabled:cursor-not-allowed disabled:opacity-40"
-                  disabled={Boolean(archivedReason)}
-                  onClick={() => {
-                    setMoreActionsOpen(false);
-                    void saveDraft();
-                  }}
-                  type="button"
-                >
-                  <Save className="size-4" />
-                  Save draft
-                </button>
-                <div className="my-1 border-t border-white/10" />
-                <button
-                  className="flex w-full items-center gap-2 rounded-md px-2 py-2 text-left text-white/80 hover:bg-white/10 disabled:cursor-not-allowed disabled:opacity-40"
-                  disabled={Boolean(archivedReason)}
-                  onClick={() => {
-                    setMoreActionsOpen(false);
-                    void duplicateDocument();
-                  }}
-                  type="button"
-                >
-                  <Copy className="size-4" />
-                  Duplicate template
-                </button>
-                <button
-                  className="flex w-full items-center gap-2 rounded-md px-2 py-2 text-left text-red-200 hover:bg-red-500/10 disabled:cursor-not-allowed disabled:opacity-40"
-                  onClick={() => {
-                    setMoreActionsOpen(false);
-                    void archiveDocument();
-                  }}
-                  type="button"
-                >
-                  <Archive className="size-4" />
-                  Archive template
-                </button>
-              </div>
-            )}
-          </div>
-          <button
-            className="inline-flex h-9 items-center gap-2 rounded-md bg-white px-3 text-sm font-semibold text-black hover:bg-white/90 disabled:cursor-not-allowed disabled:opacity-50 sm:px-4"
-            disabled={Boolean(archivedReason)}
-            onClick={() => void publishDraft()}
-            type="button"
-          >
-            Publish
-          </button>
-        </div>
-      </header>
-
-      <div
-        className={`grid h-[calc(100vh-4rem)] min-h-0 grid-cols-1 ${
-          inspectorCollapsed
-            ? 'lg:grid-cols-[4rem_minmax(0,1fr)]'
-            : 'lg:grid-cols-[4rem_minmax(0,1fr)_22rem]'
-        }`}
-      >
-        <aside
-          aria-label="Insert content"
-          className="hidden flex-col items-center gap-2 border-r border-white/10 bg-neutral-950 px-2 py-5 lg:flex"
-        >
-          {emailInsertActions.map((action) => (
-            <button
-              aria-label={`Insert ${action.label}`}
-              className="inline-flex size-10 items-center justify-center rounded-md border border-white/10 text-white/60 hover:bg-white/10 hover:text-white disabled:cursor-not-allowed disabled:opacity-40"
-              disabled={!canEdit}
-              key={action.id}
-              onClick={() => insertEmailAction(action.id)}
-              title={action.label}
-              type="button"
-            >
-              {action.icon}
-            </button>
-          ))}
-        </aside>
-
+    <EditorChrome
+      channel="email"
+      testId="content-editor-shell"
+      topBar={
+        <EditorTopBar
+          autosave={autosave}
+          backHref={`/events/${event.id}`}
+          channelLabel="Email"
+          documentName={document.name}
+          error={actionError}
+          moreActions={moreActionsItems}
+          notice={notice}
+          onDocumentNameClick={() => openInspectorPanel('style')}
+          onPublish={() => void openReviewDialog()}
+          publishDisabled={Boolean(archivedReason)}
+          publishLabel="Review"
+          status={document.status}
+        />
+      }
+      leftRail={
+        <EditorLeftRail
+          hiddenModes={{ preview: true }}
+          insertsDisabled
+          mode={editorMode}
+          onModeChange={(mode) => void handleModeChange(mode)}
+          inserts={null}
+        />
+      }
+      canvas={
         <section
           aria-label="email template editable document"
-          className="min-h-0 min-w-0 overflow-auto bg-white text-black lg:rounded-tl-3xl"
+          className="min-h-0 min-w-0 flex-1 overflow-auto bg-muted/30 lg:rounded-tl-3xl"
           data-testid="editor-canvas"
           ref={editorCanvasRef}
         >
-          <div className="mx-auto min-h-full w-full max-w-5xl px-5 py-8 sm:px-6 sm:py-10">
-            <div
-              className="tixkit-editor-metadata mx-auto grid w-full max-w-[600px] border-b border-black/10"
-              data-testid="email-metadata-bar"
-            >
-              <label className="grid min-h-12 grid-cols-[6rem_minmax(0,1fr)] items-center gap-4 border-t border-black/10 text-sm text-black/55">
-                From
-                <input
-                  aria-label="From"
-                  className={textInputClassName}
-                  disabled={!canEdit}
-                  onChange={(change) => {
-                    updateEmailDocument({
-                      ...emailDocument,
-                      settings: {
-                        ...emailDocument.settings,
-                        sender: {
-                          ...emailDocument.settings.sender,
-                          fromEmail: change.currentTarget.value,
-                        },
-                      },
-                    });
-                  }}
-                  type="email"
-                  value={emailDocument.settings.sender.fromEmail ?? ''}
-                />
-              </label>
-              <label className="grid min-h-12 grid-cols-[6rem_minmax(0,1fr)] items-center gap-4 border-t border-black/10 text-sm text-black/55">
-                Reply-To
-                <input
-                  aria-label="Reply-To"
-                  className={textInputClassName}
-                  disabled={!canEdit}
-                  onChange={(change) => {
-                    updateEmailDocument({
-                      ...emailDocument,
-                      settings: {
-                        ...emailDocument.settings,
-                        sender: {
-                          ...emailDocument.settings.sender,
-                          replyToEmail: change.currentTarget.value,
-                        },
-                      },
-                    });
-                  }}
-                  type="email"
-                  value={emailDocument.settings.sender.replyToEmail ?? ''}
-                />
-              </label>
-              <label className="grid min-h-12 grid-cols-[6rem_minmax(0,1fr)] items-center gap-4 border-t border-black/10 text-sm text-black/55">
-                Subject
-                <input
-                  aria-label="Subject"
-                  className={textInputClassName}
-                  disabled={!canEdit}
-                  onChange={(change) => {
-                    updateEmailDocument({
-                      ...emailDocument,
-                      settings: {
-                        ...emailDocument.settings,
-                        subject: change.currentTarget.value,
-                      },
-                    });
-                  }}
-                  placeholder="Subject"
-                  value={emailDocument.settings.subject}
-                />
-              </label>
-              <label className="grid min-h-12 grid-cols-[6rem_minmax(0,1fr)] items-center gap-4 border-t border-black/10 text-sm text-black/55">
-                Preview text
-                <input
-                  aria-label="Preview text"
-                  className={textInputClassName}
-                  disabled={!canEdit}
-                  onChange={(change) => {
-                    updateEmailDocument({
-                      ...emailDocument,
-                      settings: {
-                        ...emailDocument.settings,
-                        previewText: change.currentTarget.value,
-                      },
-                    });
-                  }}
-                  placeholder="Preview text"
-                  value={emailDocument.settings.previewText ?? ''}
-                />
-              </label>
-            </div>
-
-            <div className="mx-auto mt-8 w-full max-w-[600px]">
-              <EmailEditor
-                key={draft.id}
-                ref={emailEditorRef}
-                bubbleMenu={{ hideWhenActiveNodes: ['button', 'horizontalRule'] }}
-                className="tixkit-react-email-editor"
-                content={initialEditorContent(emailDocument)}
-                editable={canEdit}
-                onReady={(ref) => {
-                  emailEditorRef.current = ref;
-                }}
-                onUpdate={(ref) => {
-                  emailEditorRef.current = ref;
-                  markDraftDirty();
-                }}
-                placeholder="Write the email..."
-              >
-                <NativeEmailInspector host={nativeInspectorHost} />
-              </EmailEditor>
-            </div>
-          </div>
-        </section>
-
-        <aside
-          aria-label="Email inspector"
-          className={`fixed inset-x-0 bottom-0 z-40 max-h-[78vh] min-h-0 overflow-auto rounded-t-2xl border-t border-white/10 bg-neutral-950 p-4 shadow-2xl lg:static lg:col-span-1 lg:max-h-none lg:rounded-none lg:border-l lg:border-t-0 lg:shadow-none ${
-            inspectorCollapsed ? 'hidden' : ''
-          }`}
-          ref={inspectorRef}
-        >
-          <div className="flex items-start justify-between gap-3 border-b border-white/10 pb-4">
-            <div className="min-w-0">
-              <p className="text-xs uppercase tracking-wide text-white/60">
-                {inspectorHeading[inspectorPanelId].eyebrow}
-              </p>
-              <h2 className="mt-1 truncate font-semibold">
-                {inspectorHeading[inspectorPanelId].title}
-              </h2>
-            </div>
-            <button
-              aria-label="Collapse inspector"
-              className="inline-flex h-9 items-center justify-center rounded-md border border-white/10 text-white/60 hover:bg-white/10 hover:text-white"
-              onClick={() => setInspectorCollapsed(true)}
-              title="Collapse inspector"
-              type="button"
-            >
-              <PanelRightClose className="size-4" />
-            </button>
-          </div>
-
-          {inspectorPanelId === 'style' && (
-            <section className="mt-6 space-y-5 text-sm">
-              <div
-                className="min-h-[24rem]"
-                data-testid="native-email-inspector-host"
-                ref={setNativeInspectorHost}
-              />
-              <label className="space-y-1.5 text-xs font-medium text-white/55">
-                Test recipient
-                <input
-                  aria-label="Test recipient"
-                  className={darkInputClassName}
-                  disabled={!canEdit}
-                  onChange={(change) => setRecipient(change.currentTarget.value)}
-                  type="email"
-                  value={recipient}
-                />
-              </label>
-              <label className="space-y-1.5 text-xs font-medium text-white/55">
-                Template key
-                <input
-                  aria-label="Template key"
-                  className={darkInputClassName}
-                  disabled={!canEdit}
-                  onChange={(change) =>
-                    updateEmailDocument({
-                      ...emailDocument,
-                      settings: {
-                        ...emailDocument.settings,
-                        templateKey: change.currentTarget.value,
-                      },
-                    })
-                  }
-                  value={emailDocument.settings.templateKey}
-                />
-              </label>
-              <label className="space-y-1.5 text-xs font-medium text-white/55">
-                Locale
-                <input
-                  aria-label="Locale"
-                  className={darkInputClassName}
-                  disabled={!canEdit}
-                  onChange={(change) =>
-                    updateEmailDocument({
-                      ...emailDocument,
-                      settings: {
-                        ...emailDocument.settings,
-                        locale: change.currentTarget.value,
-                      },
-                    })
-                  }
-                  value={emailDocument.settings.locale}
-                />
-              </label>
-              <label className="space-y-1.5 text-xs font-medium text-white/55">
-                Category
+          <div className="mx-auto min-h-full w-full max-w-[648px] px-5 py-6 sm:px-6">
+            <MetadataBar>
+              <label className="flex items-center gap-2 py-1.5">
+                <span className="shrink-0 text-xs font-medium text-muted-foreground">From</span>
                 <select
-                  aria-label="Category"
-                  className={darkInputClassName}
-                  disabled={!canEdit}
-                  onChange={(change) =>
-                    updateEmailDocument({
-                      ...emailDocument,
-                      settings: {
-                        ...emailDocument.settings,
-                        category: change.currentTarget
-                          .value as EmailTemplateDocument['settings']['category'],
-                      },
-                    })
-                  }
-                  value={emailDocument.settings.category}
+                  aria-label="Verified sender"
+                  className="min-w-0 flex-1 border-none bg-transparent text-sm text-foreground outline-none disabled:opacity-50"
+                  disabled={!canEdit || verifiedSenders.length === 0}
+                  onChange={(change) => {
+                    const identity = verifiedSenders.find(
+                      (sender) => sender.id === change.currentTarget.value,
+                    );
+                    if (!identity) return;
+                    updateEmailDocument(applySenderIdentity(emailDocument, identity));
+                  }}
+                  value={selectedSenderIdentity?.id ?? ''}
                 >
-                  {emailCategoryOptions.map((category) => (
-                    <option className="bg-neutral-950 text-white" key={category} value={category}>
-                      {category}
+                  {verifiedSenders.length === 0 ? (
+                    <option className="bg-background text-foreground" value="">
+                      No verified senders
+                    </option>
+                  ) : null}
+                  {verifiedSenders.map((sender) => (
+                    <option className="bg-background text-foreground" key={sender.id} value={sender.id}>
+                      {sender.name ? `${sender.name} <${sender.email}>` : sender.email}
                     </option>
                   ))}
                 </select>
               </label>
-              <dl className="space-y-3 text-xs">
-                <div className="flex justify-between gap-4 border-b border-white/10 pb-3">
-                  <dt className="text-white/60">Brand scope</dt>
-                  <dd className="max-w-[12rem] truncate font-mono text-white/80">
-                    {document.brandId}
-                  </dd>
-                </div>
-                <div className="flex justify-between gap-4 border-b border-white/10 pb-3">
-                  <dt className="text-white/60">Event scope</dt>
-                  <dd className="max-w-[12rem] truncate font-mono text-white/80">
-                    {document.eventId ?? 'brand'}
-                  </dd>
-                </div>
-              </dl>
-            </section>
-          )}
-          {inspectorPanelId === 'components' && (
-            <section className="mt-6 space-y-4 text-sm">
-              <div className="grid gap-2">
-                {emailComponentInserts.map((component) => (
-                  <button
-                    className="rounded-md border border-white/10 px-3 py-2 text-left text-white/80 hover:bg-white/10 disabled:cursor-not-allowed disabled:opacity-40"
-                    disabled={!canEdit}
-                    key={component.id}
-                    onClick={() => insertEmailComponent(component.id)}
-                    type="button"
-                  >
-                    <span className="flex items-center gap-2 text-sm font-medium text-white">
-                      {component.icon}
-                      <span>{component.label}</span>
-                    </span>
-                    <span className="mt-1 block text-xs text-white/60">
-                      {component.description}
-                    </span>
-                  </button>
-                ))}
+              <label className="flex items-center gap-2 border-t border-border/60 py-1.5">
+                <span className="shrink-0 text-xs font-medium text-muted-foreground">Reply-To</span>
+                <select
+                  aria-label="Reply-To"
+                  className="min-w-0 flex-1 border-none bg-transparent text-sm text-foreground outline-none disabled:opacity-50"
+                  disabled={!canEdit || !selectedSenderIdentity}
+                  onChange={(change) =>
+                    updateEmailDocument({
+                      ...emailDocument,
+                      settings: {
+                        ...emailDocument.settings,
+                        sender: {
+                          ...emailDocument.settings.sender,
+                          replyToEmail: change.currentTarget.value || undefined,
+                        },
+                      },
+                    })
+                  }
+                  value={emailDocument.settings.sender.replyToEmail ?? ''}
+                >
+                  <option className="bg-background text-foreground" value="">
+                    Use From address
+                  </option>
+                  {selectedSenderIdentity?.replyToEmail ? (
+                    <option
+                      className="bg-background text-foreground"
+                      value={selectedSenderIdentity.replyToEmail}
+                    >
+                      {selectedSenderIdentity.replyToEmail}
+                    </option>
+                  ) : null}
+                </select>
+              </label>
+              <label className="flex items-center gap-2 border-t border-border/60 py-1.5">
+                <span className="shrink-0 text-xs font-medium text-muted-foreground">To</span>
+                <select
+                  aria-label="Audience"
+                  className="min-w-0 flex-1 border-none bg-transparent text-sm text-foreground outline-none disabled:opacity-50"
+                  disabled={!canEdit}
+                  onChange={(change) => setAudience(change.currentTarget.value as EmailAudience)}
+                  value={audience}
+                >
+                  <option className="bg-background text-foreground" value="all">
+                    All attendees
+                  </option>
+                  <option className="bg-background text-foreground" value="checked_in">
+                    Checked in
+                  </option>
+                  <option className="bg-background text-foreground" value="not_checked_in">
+                    Not checked in
+                  </option>
+                  <option className="bg-background text-foreground" value="specific">
+                    Specific attendees
+                  </option>
+                </select>
+              </label>
+              <div className="flex items-center gap-2 border-t border-border/60 py-1.5">
+                <span className="shrink-0 text-xs font-medium text-muted-foreground">
+                  Subscribe to
+                </span>
+                <span className="min-w-0 flex-1 truncate text-sm text-foreground">
+                  {emailDocument.settings.category === 'bulk'
+                    ? `${brand?.name ?? event.title} updates`
+                    : 'Transactional ticket messages'}
+                </span>
               </div>
-            </section>
-          )}
-
-          {inspectorPanelId === 'variables' && (
-            <section className="mt-6 space-y-4 text-sm">
-              <div className="grid gap-2">
-                {emailVariableInserts.map((key) => (
-                  <button
-                    className="rounded-md border border-white/10 px-3 py-2 text-left font-mono text-xs text-white/80 hover:bg-white/10 disabled:cursor-not-allowed disabled:opacity-40"
+              <label className="flex items-center gap-2 border-t border-border/60 py-1.5">
+                <span className="shrink-0 text-xs font-medium text-muted-foreground">When</span>
+                <select
+                  aria-label="Send timing"
+                  className="w-28 border-none bg-transparent text-sm text-foreground outline-none disabled:opacity-50"
+                  disabled={!canEdit}
+                  onChange={(change) => setSendMode(change.currentTarget.value as EmailSendMode)}
+                  value={sendMode}
+                >
+                  <option className="bg-background text-foreground" value="now">
+                    Now
+                  </option>
+                  <option className="bg-background text-foreground" value="scheduled">
+                    Scheduled
+                  </option>
+                </select>
+                {sendMode === 'scheduled' && (
+                  <input
+                    aria-label="Scheduled send time"
+                    className="min-w-0 flex-1 border-none bg-transparent text-sm text-foreground outline-none disabled:opacity-50"
                     disabled={!canEdit}
-                    key={key}
-                    onClick={() => insertEmailVariable(key)}
-                    type="button"
-                  >
-                    {`{{${key}}}`}
-                  </button>
-                ))}
-              </div>
-            </section>
-          )}
+                    onChange={(change) => setScheduledAt(change.currentTarget.value)}
+                    type="datetime-local"
+                    value={scheduledAt}
+                  />
+                )}
+              </label>
+              <MetadataField
+                disabled={!canEdit}
+                label="Subject"
+                onChange={(value) =>
+                  updateEmailDocument({
+                    ...emailDocument,
+                    settings: { ...emailDocument.settings, subject: value },
+                  })
+                }
+                placeholder="Subject"
+                value={emailDocument.settings.subject}
+              />
+              <MetadataField
+                collapsible
+                defaultOpen={false}
+                disabled={!canEdit}
+                label="Preview text"
+                onChange={(value) =>
+                  updateEmailDocument({
+                    ...emailDocument,
+                    settings: { ...emailDocument.settings, previewText: value },
+                  })
+                }
+                placeholder="Preview text"
+                value={emailDocument.settings.previewText ?? ''}
+              />
+            </MetadataBar>
 
-          {inspectorPanelId === 'history' && (
-            <section className="mt-6 space-y-4 text-sm">
-              <ol className="space-y-2">
-                {history.map((version) => (
-                  <li className="rounded-md border border-white/10 p-3 text-xs" key={version.id}>
-                    <div className="font-medium text-white">{version.label}</div>
-                    <div className="mt-1 text-white/60">{version.timestamp}</div>
-                  </li>
-                ))}
-              </ol>
-            </section>
-          )}
-
-          {inspectorPanelId === 'issues' && (
-            <section className="mt-6 space-y-4 text-sm">
-              <button
-                className="inline-flex h-9 w-full items-center justify-center gap-2 rounded-md border border-white/10 text-sm font-medium text-white/80 hover:bg-white/10 disabled:cursor-not-allowed disabled:opacity-40"
-                disabled={!canEdit || reviewState === 'checking'}
-                onClick={() => void reviewCurrentDraft()}
-                type="button"
+            <div className="mt-6">
+              {editorMode === 'code' ? (
+                <div className="grid gap-4 rounded-lg bg-zinc-950 p-4 text-xs text-zinc-100 shadow-sm ring-1 ring-border/50">
+                  <section>
+                    <h2 className="mb-2 text-sm font-semibold text-white">Exported HTML</h2>
+                    <pre className="max-h-72 overflow-auto whitespace-pre-wrap leading-5">
+                      {emailDocument.editor.contentHtml}
+                    </pre>
+                  </section>
+                  <section>
+                    <h2 className="mb-2 text-sm font-semibold text-white">Editor JSON</h2>
+                    <pre className="max-h-72 overflow-auto whitespace-pre-wrap leading-5">
+                      {JSON.stringify(emailDocument.editor.contentJson ?? emailDocument, null, 2)}
+                    </pre>
+                  </section>
+                </div>
+              ) : (
+              <EmailEditor
+                bubbleMenu={{
+                  hideWhenActiveNodes: emailBubbleHiddenNodes,
+                  placement: 'top',
+                  offset: 18,
+                  trigger: emailBubbleMenuTrigger,
+                  children: <TixkitEmailBubbleMenu />,
+                }}
+                className="tixkit-react-email-editor rounded-lg bg-white shadow-sm ring-1 ring-border/50 dark:bg-zinc-950"
+                content={initialEditorContent(emailDocument)}
+                editable={canEdit}
+                extensions={emailExtensions}
+                key={`${draft.id}:${editorRevision}`}
+                onUploadImage={uploadInlineEmailImage}
+                slashCommand={emailSlashCommand}
+                onUpdate={(ref) => {
+                  emailEditorRef.current = ref;
+                  markDraftDirty();
+                }}
+                onReady={(ref) => {
+                  emailEditorRef.current = ref;
+                }}
+                placeholder="Write the email..."
+                ref={emailEditorRef}
+                theme={brandTheme}
               >
-                <Eye className="size-4" />
-                {reviewState === 'checking' ? 'Reviewing...' : 'Review current draft'}
-              </button>
-              {reviewState === 'error' && (
-                <p className="rounded-md border border-red-400/30 bg-red-400/10 p-3 text-xs text-red-100">
-                  Unable to review the current email draft.
+                <NativeEmailInspector host={nativeInspectorHost} />
+              </EmailEditor>
+              )}
+            </div>
+          </div>
+        </section>
+      }
+      inspector={
+        inspectorCollapsed ? null : (
+          <div
+            className="h-full"
+            data-tixkit-email-inspector="true"
+            ref={inspectorRef}
+          >
+            <InspectorPanel
+              eyebrow={inspectorHeading[inspectorPanelId].eyebrow}
+              onClose={() => setInspectorCollapsed(true)}
+              title={inspectorHeading[inspectorPanelId].title}
+            >
+              {inspectorPanelId === 'style' && (
+                <div
+                  className="min-h-[16rem]"
+                  data-testid="native-email-inspector-host"
+                  ref={setNativeInspectorHost}
+                />
+              )}
+
+              {inspectorPanelId === 'details' && (
+                <div className="space-y-3">
+                  <label className="space-y-1.5 text-xs font-medium text-muted-foreground">
+                    Template key
+                    <input
+                      aria-label="Template key"
+                      className={inputClassName}
+                      disabled={!canEdit}
+                      onChange={(change) =>
+                        updateEmailDocument({
+                          ...emailDocument,
+                          settings: {
+                            ...emailDocument.settings,
+                            templateKey: change.currentTarget.value,
+                          },
+                        })
+                      }
+                      value={emailDocument.settings.templateKey}
+                    />
+                  </label>
+                  <label className="space-y-1.5 text-xs font-medium text-muted-foreground">
+                    Locale
+                    <input
+                      aria-label="Locale"
+                      className={inputClassName}
+                      disabled={!canEdit}
+                      onChange={(change) =>
+                        updateEmailDocument({
+                          ...emailDocument,
+                          settings: {
+                            ...emailDocument.settings,
+                            locale: change.currentTarget.value,
+                          },
+                        })
+                      }
+                      value={emailDocument.settings.locale}
+                    />
+                  </label>
+                  <label className="space-y-1.5 text-xs font-medium text-muted-foreground">
+                    Category
+                    <select
+                      aria-label="Category"
+                      className={inputClassName}
+                      disabled={!canEdit}
+                      onChange={(change) => {
+                        const category = change.currentTarget
+                          .value as EmailTemplateDocument['settings']['category'];
+                        updateEmailDocument(
+                          ensureBulkUnsubscribeFooter({
+                            ...emailDocument,
+                            settings: {
+                              ...emailDocument.settings,
+                              category,
+                            },
+                          }),
+                        );
+                      }}
+                      value={emailDocument.settings.category}
+                    >
+                      {emailCategoryOptions.map((category) => (
+                        <option
+                          className="bg-background text-foreground"
+                          key={category}
+                          value={category}
+                        >
+                          {category}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  <dl className="space-y-2 pt-2 text-xs">
+                    <div className="flex justify-between gap-4 border-b border-border pb-2">
+                      <dt className="text-muted-foreground">Brand scope</dt>
+                      <dd className="max-w-[12rem] truncate font-mono text-foreground/80">
+                        {document.brandId}
+                      </dd>
+                    </div>
+                    <div className="flex justify-between gap-4 border-b border-border pb-2">
+                      <dt className="text-muted-foreground">Event scope</dt>
+                      <dd className="max-w-[12rem] truncate font-mono text-foreground/80">
+                        {document.eventId ?? 'brand'}
+                      </dd>
+                    </div>
+                  </dl>
+                </div>
+              )}
+
+              {inspectorPanelId === 'variables' && (
+                <div className="space-y-2">
+                  {typeof brand?.theme.logoUrl === 'string' && brand.theme.logoUrl.trim() ? (
+                    <button
+                      className="flex w-full items-center gap-2 rounded-md border px-2.5 py-2 text-left text-xs font-medium text-foreground transition-colors hover:bg-accent disabled:pointer-events-none disabled:opacity-50"
+                      disabled={!canEdit}
+                      onClick={insertBrandLogo}
+                      type="button"
+                    >
+                      <Image className="size-4" />
+                      Brand logo
+                    </button>
+                  ) : null}
+                  {variableInsertItems.map(({ key, presentation }) => (
+                    <button
+                      aria-label={`Insert ${presentation.label}`}
+                      className="flex w-full items-center justify-between gap-3 rounded-md border px-2.5 py-2 text-left text-xs text-foreground transition-colors hover:bg-accent disabled:pointer-events-none disabled:opacity-50"
+                      disabled={!canEdit}
+                      key={key}
+                      onClick={() => insertEmailVariable(key)}
+                      type="button"
+                    >
+                      <span className="min-w-0">
+                        <span className="block truncate font-medium">{presentation.label}</span>
+                        <span className="block truncate text-muted-foreground">
+                          {presentation.preview}
+                        </span>
+                      </span>
+                      <span
+                        className={`shrink-0 rounded-md border px-1.5 py-0.5 font-medium capitalize tixkit-variable-kind-badge tixkit-variable-kind-badge--${presentation.kind}`}
+                      >
+                        {presentation.kind}
+                      </span>
+                    </button>
+                  ))}
+                </div>
+              )}
+
+              {inspectorPanelId === 'history' && (
+                <ol className="space-y-2">
+                  {history.map((version) => (
+                    <li className="rounded-md border p-3 text-xs" key={version.id}>
+                      <div className="font-medium text-foreground">{version.label}</div>
+                      <div className="mt-1 text-muted-foreground">{version.timestamp}</div>
+                    </li>
+                  ))}
+                </ol>
+              )}
+
+              {inspectorPanelId === 'issues' && (
+                <div className="space-y-3">
+                  <button
+                    className="inline-flex h-9 w-full items-center justify-center gap-2 rounded-md border text-sm font-medium text-foreground transition-colors hover:bg-accent disabled:pointer-events-none disabled:opacity-50"
+                    disabled={!canEdit || reviewState === 'checking'}
+                    onClick={() => void reviewCurrentDraft()}
+                    type="button"
+                  >
+                    <Eye className="size-4" />
+                    {reviewState === 'checking' ? 'Reviewing...' : 'Review current draft'}
+                  </button>
+                  {reviewState === 'error' && (
+                    <p className="rounded-md border border-red-300 bg-red-50 p-3 text-xs text-red-800 dark:border-red-900/60 dark:bg-red-950/30 dark:text-red-200">
+                      Unable to review the current email draft.
+                    </p>
+                  )}
+                  {issuePanelIssues.length === 0 ? (
+                    <p className="rounded-md border border-emerald-400/40 bg-emerald-50 p-3 text-xs text-emerald-700 dark:bg-emerald-950/30 dark:text-emerald-300">
+                      No review blockers.
+                    </p>
+                  ) : (
+                    <ul className="space-y-2">
+                      {issuePanelIssues.map((issue) => (
+                        <li
+                          className={`rounded-md border p-3 text-xs ${
+                            issue.severity === 'error'
+                              ? 'border-red-300 bg-red-50 text-red-800 dark:border-red-900/60 dark:bg-red-950/30 dark:text-red-200'
+                              : 'border-amber-400/40 bg-amber-50 text-amber-700 dark:bg-amber-950/30 dark:text-amber-300'
+                          }`}
+                          key={validationIssueKey(issue)}
+                        >
+                          <div className="flex items-center justify-between gap-3">
+                            <strong>{issue.code}</strong>
+                            <span className="uppercase tracking-wide">{issue.severity}</span>
+                          </div>
+                          <p
+                            className={`mt-1 ${
+                              issue.severity === 'error'
+                                ? 'text-red-900 dark:text-red-100'
+                                : 'text-amber-900 dark:text-amber-100'
+                            }`}
+                          >
+                            {issue.message}
+                          </p>
+                          {issue.field && (
+                            <p
+                              className={`mt-2 font-mono ${
+                                issue.severity === 'error'
+                                  ? 'text-red-950 dark:text-red-100'
+                                  : 'text-amber-950 dark:text-amber-100'
+                              }`}
+                            >
+                              {issue.field}
+                            </p>
+                          )}
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                </div>
+              )}
+
+              {inspectorPanelId === 'json' && (
+                <pre className="max-h-[42rem] overflow-auto rounded-md border bg-muted/30 p-3 text-xs leading-5 text-muted-foreground">
+                  {JSON.stringify(emailDocument, null, 2)}
+                </pre>
+              )}
+            </InspectorPanel>
+          </div>
+        )
+      }
+      reopenInspectorButton={
+        inspectorCollapsed ? (
+          <InspectorReopenButton onClick={() => setInspectorCollapsed(false)} />
+        ) : undefined
+      }
+    >
+      {previewOpen && <PreviewDrawer onClose={() => setPreviewOpen(false)} preview={preview} />}
+      <Dialog open={testDialogOpen} onOpenChange={setTestDialogOpen}>
+        <DialogContent className="sm:max-w-lg">
+          <DialogHeader>
+            <DialogTitle>Send test email</DialogTitle>
+            <DialogDescription>
+              Send the current draft to one or more test recipients before review.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-2">
+            <label className="space-y-1.5 text-sm font-medium text-foreground">
+              Recipients
+              <textarea
+                aria-label="Test recipients"
+                className={`${inputClassName} min-h-28 resize-y`}
+                disabled={!canEdit || autosave === 'saving'}
+                onChange={(change) => setRecipient(change.currentTarget.value)}
+                onKeyDown={(keyboardEvent) => {
+                  if ((keyboardEvent.metaKey || keyboardEvent.ctrlKey) && keyboardEvent.key === 'Enter') {
+                    keyboardEvent.preventDefault();
+                    void sendTest();
+                  }
+                }}
+                placeholder="ada@example.test, grace@example.test"
+                value={recipient}
+              />
+            </label>
+            <p className="text-xs text-muted-foreground">
+              Separate addresses with commas or line breaks.
+            </p>
+          </div>
+          <DialogFooter>
+            <Button
+              onClick={() => setTestDialogOpen(false)}
+              type="button"
+              variant="outline"
+            >
+              Cancel
+            </Button>
+            <Button
+              disabled={!canEdit || autosave === 'saving'}
+              onClick={() => void sendTest()}
+              type="button"
+            >
+              Send test
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+      <Dialog open={templatePickerOpen} onOpenChange={setTemplatePickerOpen}>
+        <DialogContent className="sm:max-w-2xl">
+          <DialogHeader>
+            <DialogTitle>Pick a template</DialogTitle>
+            <DialogDescription>
+              Start from another email template saved for this brand.
+            </DialogDescription>
+          </DialogHeader>
+          {templateChoices.length === 0 ? (
+            <p className="rounded-md border bg-muted/20 p-3 text-sm text-muted-foreground">
+              No brand email templates are available yet.
+            </p>
+          ) : (
+            <div className="max-h-[28rem] space-y-2 overflow-auto">
+              {templateChoices.map((template) => (
+                <div
+                  className="flex items-start justify-between gap-3 rounded-md border p-3"
+                  key={template.id}
+                >
+                  <div className="min-w-0 space-y-1">
+                    <div className="truncate text-sm font-medium text-foreground">
+                      {template.name}
+                    </div>
+                    <div className="flex flex-wrap gap-2 text-xs text-muted-foreground">
+                      <span className="font-mono">{template.key}</span>
+                      <span>{template.locale}</span>
+                      <span>{template.status}</span>
+                      {template.eventId ? <span>event template</span> : <span>brand template</span>}
+                    </div>
+                  </div>
+                  <Button
+                    disabled={!canEdit}
+                    onClick={() => void applyTemplateChoice(template)}
+                    type="button"
+                    variant="outline"
+                  >
+                    Apply
+                  </Button>
+                </div>
+              ))}
+            </div>
+          )}
+          <DialogFooter>
+            <Button onClick={() => setTemplatePickerOpen(false)} type="button" variant="outline">
+              Close
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+      <Dialog
+        open={reviewDialogOpen}
+        onOpenChange={(open) => {
+          setReviewDialogOpen(open);
+          if (!open) setReviewConfirmed(false);
+        }}
+      >
+        <DialogContent className="sm:max-w-xl">
+          <DialogHeader>
+            <DialogTitle>Ready to send?</DialogTitle>
+            <DialogDescription>
+              Review the campaign details and checks before this email is queued.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4">
+            <dl className="grid gap-2 rounded-md border bg-muted/20 p-3 text-sm sm:grid-cols-[7rem_1fr]">
+              <dt className="text-muted-foreground">Audience</dt>
+              <dd className="font-medium text-foreground">{audienceLabel(audience)}</dd>
+              <dt className="text-muted-foreground">When</dt>
+              <dd className="font-medium text-foreground">{reviewSendTimeLabel}</dd>
+              <dt className="text-muted-foreground">From</dt>
+              <dd className="font-medium text-foreground">
+                {selectedSenderIdentity
+                  ? selectedSenderIdentity.name
+                    ? `${selectedSenderIdentity.name} <${selectedSenderIdentity.email}>`
+                    : selectedSenderIdentity.email
+                  : 'No verified sender'}
+              </dd>
+              <dt className="text-muted-foreground">Subject</dt>
+              <dd className="font-medium text-foreground">{emailDocument.settings.subject}</dd>
+              <dt className="text-muted-foreground">Template</dt>
+              <dd className="font-mono text-xs text-foreground">
+                {emailDocument.settings.templateKey}
+              </dd>
+            </dl>
+            <div className="space-y-2">
+              <h3 className="text-sm font-medium text-foreground">Preflight checks</h3>
+              <div
+                className={
+                  reviewAnalysisFailed
+                    ? 'rounded-md border border-red-300 bg-red-50 p-3 text-sm text-red-800 dark:border-red-900/60 dark:bg-red-950/30 dark:text-red-200'
+                    : reviewIsAnalyzing
+                      ? 'rounded-md border border-sky-400/40 bg-sky-50 p-3 text-sm text-sky-800 dark:border-sky-900/60 dark:bg-sky-950/30 dark:text-sky-200'
+                      : 'rounded-md border border-sky-400/40 bg-sky-50 p-3 text-sm text-sky-800 dark:border-sky-900/60 dark:bg-sky-950/30 dark:text-sky-200'
+                }
+                role="status"
+              >
+                <div className="font-medium">
+                  {reviewAnalysisFailed
+                    ? 'Content analysis failed'
+                    : reviewIsAnalyzing
+                      ? 'Analyzing your content...'
+                      : 'Content analysis complete'}
+                </div>
+                <p className="mt-1 opacity-80">
+                  {reviewAnalysisFailed
+                    ? 'Review the error message and try again before sending.'
+                    : reviewIsAnalyzing
+                      ? 'Checking the current editor export, links, sender, audience, and unsubscribe requirements from the React Email output.'
+                      : 'The current editor export, links, sender, audience, and unsubscribe requirements were checked from the saved React Email output.'}
+                </p>
+              </div>
+              {reviewHasInvalidSchedule && (
+                <p className="rounded-md border border-red-300 bg-red-50 p-3 text-sm text-red-800 dark:border-red-900/60 dark:bg-red-950/30 dark:text-red-200">
+                  Choose a valid scheduled send time before confirming.
                 </p>
               )}
-              {issuePanelIssues.length === 0 ? (
-                <p className="rounded-md border border-emerald-400/30 bg-emerald-400/10 p-3 text-xs text-emerald-100">
-                  No publish blockers.
+              {reviewState !== 'checked' ? null : reviewBlockingIssues.length === 0 ? (
+                <p className="rounded-md border border-emerald-400/40 bg-emerald-50 p-3 text-sm text-emerald-700 dark:bg-emerald-950/30 dark:text-emerald-300">
+                  No blocking issues found.
                 </p>
               ) : (
                 <ul className="space-y-2">
-                  {issuePanelIssues.map((issue) => (
+                  {reviewBlockingIssues.map((issue) => (
                     <li
-                      className={`rounded-md border p-3 text-xs ${issueBadgeClassName(issue)}`}
+                      className="rounded-md border border-red-300 bg-red-50 p-3 text-sm text-red-800 dark:border-red-900/60 dark:bg-red-950/30 dark:text-red-200"
                       key={validationIssueKey(issue)}
                     >
-                      <div className="flex items-center justify-between gap-3">
-                        <strong>{issue.code}</strong>
-                        <span className="uppercase tracking-wide">{issue.severity}</span>
-                      </div>
+                      <div className="font-medium">{issue.code}</div>
                       <p className="mt-1 opacity-80">{issue.message}</p>
-                      {issue.field && <p className="mt-2 font-mono opacity-60">{issue.field}</p>}
                     </li>
                   ))}
                 </ul>
               )}
-            </section>
-          )}
-
-          {inspectorPanelId === 'json' && (
-            <section className="mt-6 space-y-4 text-sm">
-              <pre className="max-h-[42rem] overflow-auto rounded-md border border-white/10 bg-white/5 p-3 text-xs leading-5 text-white/75">
-                {JSON.stringify(emailDocument, null, 2)}
-              </pre>
-            </section>
-          )}
-        </aside>
-
-        {inspectorCollapsed && (
-          <button
-            aria-label="Open inspector"
-            className="fixed bottom-4 right-4 z-20 inline-flex h-10 items-center gap-2 rounded-md border border-white/10 bg-neutral-950 px-3 text-sm font-medium text-white/80 shadow-2xl hover:bg-neutral-900 hover:text-white"
-            onClick={() => setInspectorCollapsed(false)}
-            type="button"
-          >
-            <PanelRightOpen className="size-4" />
-            Inspector
-          </button>
-        )}
-
-        <button
-          aria-label="Open insert menu"
-          className="fixed bottom-4 left-16 z-20 inline-flex h-10 items-center gap-2 rounded-md border border-white/10 bg-neutral-950 px-3 text-sm font-medium text-white/80 shadow-2xl hover:bg-neutral-900 hover:text-white lg:hidden"
-          disabled={!canEdit}
-          onClick={() => setInsertDrawerOpen(true)}
-          type="button"
-        >
-          <Sparkles className="size-4" />
-          Insert
-        </button>
-
-        {insertDrawerOpen && (
-          <aside
-            aria-label="Mobile insert content"
-            className="fixed inset-x-0 bottom-0 z-50 max-h-[78vh] overflow-auto rounded-t-2xl border-t border-white/10 bg-neutral-950 p-4 text-white shadow-2xl lg:hidden"
-          >
-            <div className="flex items-start justify-between gap-3 border-b border-white/10 pb-4">
-              <div>
-                <p className="text-xs uppercase tracking-wide text-white/60">Insert</p>
-                <h2 className="mt-1 font-semibold">Add email content</h2>
+              {reviewState === 'checked' && reviewWarningIssues.length > 0 && (
+                <ul className="space-y-2">
+                  {reviewWarningIssues.map((issue) => (
+                    <li
+                      className="rounded-md border border-amber-400/40 bg-amber-50 p-3 text-sm text-amber-700 dark:bg-amber-950/30 dark:text-amber-300"
+                      key={validationIssueKey(issue)}
+                    >
+                      <div className="font-medium">{issue.code}</div>
+                      <p className="mt-1 opacity-80">{issue.message}</p>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
+            <div className="rounded-md border p-3 text-sm">
+              <div className="flex items-center justify-between gap-3">
+                <div>
+                  <div className="font-medium text-foreground">
+                    {sendMode === 'scheduled' ? 'Slide to schedule' : 'Slide to send'}
+                  </div>
+                  <p className="text-muted-foreground">
+                    Confirms the reviewed email, audience, and send time.
+                  </p>
+                </div>
+                <span className="rounded-full bg-muted px-2 py-1 text-xs font-medium text-foreground">
+                  {reviewConfirmed ? 'Confirmed' : 'Locked'}
+                </span>
               </div>
-              <button
-                aria-label="Close insert menu"
-                className="inline-flex h-9 items-center justify-center rounded-md border border-white/10 px-2 text-white/60 hover:bg-white/10 hover:text-white"
-                onClick={() => setInsertDrawerOpen(false)}
-                type="button"
-              >
-                <PanelRightClose className="size-4" />
-              </button>
+              <input
+                aria-label="Slide to confirm email campaign send"
+                className="mt-3 h-2 w-full accent-foreground"
+                disabled={!reviewCanConfirm}
+                max="100"
+                min="0"
+                onChange={(change) =>
+                  setReviewConfirmed(Number(change.currentTarget.value) >= 100)
+                }
+                type="range"
+                value={reviewConfirmed ? 100 : 0}
+              />
             </div>
-            <div className="mt-4 grid gap-2">
-              {emailInsertActions.map((action) => (
-                <button
-                  className="flex min-h-11 items-center gap-3 rounded-md border border-white/10 px-3 py-2 text-left text-sm font-medium text-white/85 hover:bg-white/10 disabled:cursor-not-allowed disabled:opacity-40"
-                  disabled={!canEdit}
-                  key={action.id}
-                  onClick={() => {
-                    setInsertDrawerOpen(false);
-                    insertEmailAction(action.id);
-                  }}
-                  type="button"
-                >
-                  {action.icon}
-                  {action.label}
-                </button>
-              ))}
-            </div>
-          </aside>
-        )}
-      </div>
-
-      {previewOpen && <PreviewDrawer onClose={() => setPreviewOpen(false)} preview={preview} />}
-    </section>
+          </div>
+          <DialogFooter>
+            <Button
+              onClick={() => {
+                setReviewDialogOpen(false);
+                setReviewConfirmed(false);
+              }}
+              type="button"
+              variant="outline"
+            >
+              Cancel
+            </Button>
+            <Button
+              disabled={
+                !reviewConfirmed || !reviewCanConfirm
+              }
+              onClick={() => void publishDraft()}
+              type="button"
+            >
+              {sendMode === 'scheduled' ? 'Schedule email' : 'Send email'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    </EditorChrome>
   );
 }

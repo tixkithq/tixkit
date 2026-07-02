@@ -97,5 +97,8 @@
     "estree-util-value-to-estree": "3.5.0",
     "yaml": "2.9.0",
     "@vanilla-extract/integration": "8.0.10"
+  },
+  "patchedDependencies": {
+    "@react-email/editor@1.6.0": "patches/@react-email%2Feditor@1.6.0.patch"
   }
 }

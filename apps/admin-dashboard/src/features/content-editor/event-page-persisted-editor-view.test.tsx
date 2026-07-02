@@ -1,4 +1,4 @@
-import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import '@testing-library/jest-dom/vitest';
 import * as React from 'react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
@@ -106,17 +106,28 @@ function ok<T>(data: T) {
 }
 
 function openEventPageMoreActions() {
-  fireEvent.click(screen.getByRole('button', { name: 'More actions' }));
+  const trigger = screen.getByRole('button', { name: 'More actions' });
+  fireEvent.pointerDown(trigger);
+  fireEvent.mouseDown(trigger);
+  fireEvent.click(trigger);
+  fireEvent.keyDown(trigger, { key: 'Enter', code: 'Enter' });
+  fireEvent.keyDown(trigger, { key: 'ArrowDown', code: 'ArrowDown' });
 }
 
 function clickEventPageSaveDraft() {
   openEventPageMoreActions();
-  fireEvent.click(screen.getByRole('button', { name: 'Save draft' }));
+  fireEvent.click(screen.getByRole('menuitem', { name: 'Save draft' }));
 }
 
 function clickEventPageViewPublicPage() {
   openEventPageMoreActions();
-  fireEvent.click(screen.getByRole('button', { name: 'View public page' }));
+  fireEvent.click(screen.getByRole('menuitem', { name: 'View public page' }));
+}
+
+function clickMobileInsertItem(itemName: string) {
+  fireEvent.click(screen.getByRole('button', { name: 'Insert' }));
+  const drawer = screen.getByRole('complementary', { name: 'Mobile insert content' });
+  fireEvent.click(within(drawer).getByRole('button', { name: itemName }));
 }
 
 describe('EventPagePersistedEditorView', () => {
@@ -157,13 +168,13 @@ describe('EventPagePersistedEditorView', () => {
 
     expect(await screen.findByLabelText('Page headline')).toBeInTheDocument();
     expect(screen.queryByTestId('event-page-metadata-bar')).not.toBeInTheDocument();
-    expect(screen.getByRole('complementary', { name: 'Insert content' })).toBeInTheDocument();
+    expect(screen.getByRole('navigation', { name: 'Editor tools' })).toBeInTheDocument();
     expect(screen.getByText('Selected block')).toBeInTheDocument();
     expect(screen.getByRole('heading', { name: 'Hero' })).toBeInTheDocument();
-    fireEvent.click(screen.getByRole('button', { name: 'Collapse inspector' }));
-    expect(screen.getByRole('button', { name: 'Open inspector' })).toBeInTheDocument();
-    fireEvent.click(screen.getByRole('button', { name: 'Open inspector' }));
-    expect(screen.getByRole('button', { name: 'Collapse inspector' })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Close sidebar' }));
+    expect(screen.getByRole('button', { name: 'Inspector' })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Inspector' }));
+    expect(screen.getByRole('button', { name: 'Close sidebar' })).toBeInTheDocument();
 
     const headline = screen.getByLabelText('Page headline');
     fireEvent.change(headline, {
@@ -172,23 +183,30 @@ describe('EventPagePersistedEditorView', () => {
     fireEvent.change(screen.getByLabelText('Page summary'), {
       target: { value: 'Updated page copy for {{event.title}}.' },
     });
+    expect(await screen.findAllByText('Dynamic values')).not.toHaveLength(0);
+    expect(screen.getByText('Event name')).toBeInTheDocument();
+    expect(screen.getByText('Sample Summer Showcase')).toBeInTheDocument();
     fireEvent.change(screen.getByLabelText('Ticket CTA label'), {
       target: { value: 'Reserve tickets' },
     });
     openEventPageMoreActions();
-    expect(screen.getByRole('button', { name: 'More actions' })).toHaveAttribute(
-      'aria-expanded',
-      'true',
-    );
-    fireEvent.click(screen.getByRole('button', { name: 'Open version history' }));
+    expect(screen.getByRole('menuitem', { name: 'Variables' })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Variables' }));
+    expect(screen.getByText('Merge tags')).toBeInTheDocument();
+    expect(screen.getByLabelText('Dynamic value Event name')).toBeInTheDocument();
+    expect(screen.getByLabelText('Dynamic value Checkout link')).toBeInTheDocument();
+    expect(screen.queryByText('{{event.title}}')).not.toBeInTheDocument();
+    openEventPageMoreActions();
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Version history' }));
     expect(screen.getByText('Version history')).toBeInTheDocument();
     openEventPageMoreActions();
-    fireEvent.click(screen.getByRole('button', { name: 'Page details' }));
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Page details' }));
     expect(screen.getByText('Page details')).toBeInTheDocument();
     openEventPageMoreActions();
-    fireEvent.click(screen.getByRole('button', { name: 'Review blockers' }));
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Review blockers' }));
     expect(screen.getByText('Publish blockers')).toBeInTheDocument();
-    fireEvent.click(screen.getByRole('button', { name: 'Open preview' }));
+    openEventPageMoreActions();
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Open preview' }));
 
     await waitFor(() => {
       expect(adminApiMock.saveContentVersion).toHaveBeenCalledWith(
@@ -214,15 +232,13 @@ describe('EventPagePersistedEditorView', () => {
 
     expect(screen.getByTestId('preview-drawer')).toHaveTextContent('Updated page copy');
 
-    expect(screen.getByRole('button', { name: 'Test send unavailable' })).toBeDisabled();
-
     fireEvent.click(screen.getByRole('button', { name: 'Publish' }));
     await waitFor(() => {
       expect(adminApiMock.publishContentVersion).toHaveBeenCalledWith('cdoc_event_page', 'cver_2');
     });
 
     openEventPageMoreActions();
-    fireEvent.click(screen.getByRole('button', { name: 'Archive page' }));
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Archive page' }));
     await waitFor(() => {
       expect(adminApiMock.archiveContentDocument).toHaveBeenCalledWith('cdoc_event_page');
     });
@@ -272,7 +288,7 @@ describe('EventPagePersistedEditorView', () => {
     expect(screen.getByText('Opened public page')).toBeInTheDocument();
 
     openEventPageMoreActions();
-    fireEvent.click(screen.getByRole('button', { name: 'Page details' }));
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Page details' }));
     fireEvent.change(screen.getByLabelText('Public path'), {
       target: { value: 'javascript:alert(1)' },
     });
@@ -289,12 +305,12 @@ describe('EventPagePersistedEditorView', () => {
 
     await screen.findByLabelText('Page headline');
 
-    fireEvent.click(screen.getByRole('button', { name: 'Insert Text' }));
-    fireEvent.click(screen.getByRole('button', { name: 'Insert Image' }));
-    fireEvent.click(screen.getByRole('button', { name: 'Insert Tickets' }));
-    fireEvent.click(screen.getByRole('button', { name: 'Insert Schedule' }));
-    fireEvent.click(screen.getByRole('button', { name: 'Insert Venue' }));
-    fireEvent.click(screen.getByRole('button', { name: 'Insert Button' }));
+    clickMobileInsertItem('Text');
+    clickMobileInsertItem('Image');
+    clickMobileInsertItem('Tickets');
+    clickMobileInsertItem('Schedule');
+    clickMobileInsertItem('Venue');
+    clickMobileInsertItem('Button');
 
     fireEvent.change(screen.getByLabelText('Button label'), {
       target: { value: 'Join the list' },
@@ -364,7 +380,7 @@ describe('EventPagePersistedEditorView', () => {
 
     await screen.findByLabelText('Page headline');
     openEventPageMoreActions();
-    fireEvent.click(screen.getByRole('button', { name: 'Archive page' }));
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Archive page' }));
 
     expect(adminApiMock.archiveContentDocument).not.toHaveBeenCalled();
     editable.unmount();
@@ -383,12 +399,15 @@ describe('EventPagePersistedEditorView', () => {
     render(React.createElement(EventPagePersistedEditorView, { eventId: 'evt_1' }));
 
     expect(await screen.findByLabelText('Page headline')).toBeDisabled();
-    expect(screen.getByRole('button', { name: 'Open preview' })).toBeDisabled();
-    expect(screen.getByRole('button', { name: 'Publish unavailable' })).toBeDisabled();
-    expect(screen.getByRole('button', { name: 'Test send unavailable' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Publish' })).toBeDisabled();
     openEventPageMoreActions();
-    expect(screen.getByRole('button', { name: 'Save draft' })).toBeDisabled();
-    expect(screen.getByRole('button', { name: 'View public page' })).toBeDisabled();
+    expect(screen.getByRole('menuitem', { name: 'Save draft' })).toHaveAttribute('data-disabled');
+    expect(screen.getByRole('menuitem', { name: 'Open preview' })).toHaveAttribute(
+      'data-disabled',
+    );
+    expect(screen.getByRole('menuitem', { name: 'View public page' })).toHaveAttribute(
+      'data-disabled',
+    );
   });
 
   it('creates the event-scoped event-page document and initial canonical draft when none exists', async () => {
@@ -512,7 +531,7 @@ describe('EventPagePersistedEditorView', () => {
     fireEvent.change(headline, { target: { value: 'Duplicate-ready hosted page' } });
 
     openEventPageMoreActions();
-    fireEvent.click(screen.getByRole('button', { name: 'Duplicate page' }));
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Duplicate page' }));
 
     await waitFor(() => {
       expect(adminApiMock.duplicateContentDocument).toHaveBeenCalledWith('cdoc_event_page', {

@@ -34,13 +34,32 @@ export {
   MetadataBar,
   MetadataField,
   type MetadataFieldProps,
-  // Primitives
-  Popover,
-  type PopoverProps,
-  DropdownMenu,
-  type DropdownMenuProps,
-  type DropdownMenuItem,
+  // Types
+  type DropdownMenuItemConfig,
   // Badges
   AutosaveBadge,
   StatusBadge,
 } from './chrome.js';
+export {
+  // UI primitives (shadcn-style, Radix-based)
+  Button,
+  Input,
+  Popover,
+  PopoverTrigger,
+  PopoverContent,
+  DropdownMenu,
+  DropdownMenuTrigger,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuLabel,
+  Tooltip,
+  TooltipTrigger,
+  TooltipContent,
+  TooltipProvider,
+  inputClassName,
+  type ButtonProps,
+  type ButtonVariant,
+  type ButtonSize,
+} from './ui.js';
+export { cn } from './cn.js';

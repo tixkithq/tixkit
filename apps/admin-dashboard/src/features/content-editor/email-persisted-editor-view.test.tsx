@@ -1,9 +1,21 @@
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import '@testing-library/jest-dom/vitest';
 import * as React from 'react';
+import { generateJSON } from '@tiptap/core';
+import { StarterKit } from '@react-email/editor/extensions';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { REACT_EMAIL_EDITOR_PACKAGE, createDefaultEmailTemplate } from '@tixkit/content-email';
 import { EmailPersistedEditorView } from './email-persisted-editor-view';
+import {
+  TixkitMergeTag,
+  applyMergeTagPreviewsToEditorContent,
+  createEmailSlashCommands,
+  emailEditorStarterKitOptions,
+  mergeTagCanvasAttributeValue,
+  tixkitInlineStyleMarkName,
+  tixkitMergeTagMarkName,
+  variablePresentation,
+} from './email-editor-extensions';
 
 const adminApiMock = vi.hoisted(() => ({
   getEvent: vi.fn(),
@@ -13,9 +25,13 @@ const adminApiMock = vi.hoisted(() => ({
   saveContentVersion: vi.fn(),
   previewContent: vi.fn(),
   publishContentVersion: vi.fn(),
+  sendMessage: vi.fn(),
   duplicateContentDocument: vi.fn(),
   archiveContentDocument: vi.fn(),
   testSendContent: vi.fn(),
+  uploadArtifact: vi.fn(),
+  listBrandEmailSenderIdentities: vi.fn(),
+  listBrands: vi.fn(),
 }));
 
 const toastMock = vi.hoisted(() => ({
@@ -25,6 +41,10 @@ const toastMock = vi.hoisted(() => ({
 const editorMockHelpers = vi.hoisted(() => ({
   textFromHtml(value: string): string {
     return value
+      .replace(
+        /<span\b[^>]*\bdata-tixkit-merge-tag=["']([^"']+)["'][^>]*>[\s\S]*?<\/span>/gi,
+        (_match, key: string) => ` {{${key.trim()}}} `,
+      )
       .replace(/<img\b[^>]*alt="([^"]*)"[^>]*>/gi, ' $1 ')
       .replace(/<[^>]*>/g, ' ')
       .replace(/\s+/g, ' ')
@@ -33,7 +53,42 @@ const editorMockHelpers = vi.hoisted(() => ({
   textFromContent(content: unknown): string {
     if (typeof content === 'string') return editorMockHelpers.textFromHtml(content);
     if (!content || typeof content !== 'object') return '';
-    return JSON.stringify(content);
+    return editorMockHelpers.textFromJsonNode(content);
+  },
+  textFromJsonNode(value: unknown): string {
+    if (!value || typeof value !== 'object') return '';
+    const node = value as {
+      content?: unknown;
+      marks?: unknown;
+      text?: unknown;
+      type?: unknown;
+    };
+    if (typeof node.text === 'string') {
+      const mergeTagMark = Array.isArray(node.marks)
+        ? node.marks.find(
+            (mark) =>
+              mark &&
+              typeof mark === 'object' &&
+              (mark as { type?: unknown }).type === 'tixkitMergeTag',
+          )
+        : undefined;
+      const mergeTagKey =
+        mergeTagMark && typeof mergeTagMark === 'object'
+          ? (mergeTagMark as { attrs?: { key?: unknown } }).attrs?.key
+          : undefined;
+      return typeof mergeTagKey === 'string' && mergeTagKey.trim()
+        ? `{{${mergeTagKey.trim()}}}`
+        : node.text;
+    }
+    if (node.type === 'hardBreak') return '\n';
+    if (!Array.isArray(node.content)) return '';
+    return node.content
+      .map((child) => editorMockHelpers.textFromJsonNode(child))
+      .filter(Boolean)
+      .join(node.type === 'doc' ? '\n' : '')
+      .replace(/[ \t]{2,}/g, ' ')
+      .replace(/\n{3,}/g, '\n\n')
+      .trim();
   },
   escapeHtml(value: string): string {
     return value
@@ -42,6 +97,16 @@ const editorMockHelpers = vi.hoisted(() => ({
       .replaceAll('>', '&gt;')
       .replaceAll('"', '&quot;');
   },
+}));
+
+const editorMockState = vi.hoisted(() => ({
+  shellOnlyExport: false,
+  exportedHtml: undefined as string | undefined,
+  exportedText: undefined as string | undefined,
+  exportedJson: undefined as Record<string, unknown> | undefined,
+  alignmentCalls: [] as string[],
+  slashCommandItems: [] as Array<{ title?: string; description?: string; category?: string }>,
+  lastTheme: undefined as unknown,
 }));
 
 vi.mock('@/lib/api', () => ({
@@ -60,13 +125,21 @@ vi.mock('@react-email/editor', async () => {
       {
         content,
         editable = true,
+        onUploadImage,
         onReady,
         onUpdate,
+        slashCommand,
+        theme,
       }: {
         content?: unknown;
         editable?: boolean;
+        onUploadImage?: (file: File) => Promise<{ url: string }>;
         onReady?: (ref: unknown) => void;
         onUpdate?: (ref: unknown) => void;
+        slashCommand?: {
+          items?: Array<{ title?: string; description?: string; category?: string }>;
+        };
+        theme?: unknown;
       },
       ref,
     ) => {
@@ -78,35 +151,98 @@ vi.mock('@react-email/editor', async () => {
       const onUpdateRef = ReactModule.useRef(onUpdate);
       const didMountRef = ReactModule.useRef(false);
       const editor = ReactModule.useMemo(
-        () => ({
-          chain() {
-            const chainApi = {
-              focus: () => chainApi,
-              insertContent: (next: string) => {
-                setValue((current) => `${current} ${editorMockHelpers.textFromHtml(next)}`.trim());
-                return chainApi;
+        () => {
+          const tr = {
+            docChanged: false,
+            setNodeMarkup: (
+              _position: number,
+              _type: unknown,
+              attrs: { align?: string; alignment?: string },
+            ) => {
+              tr.docChanged = true;
+              editorMockState.alignmentCalls.push(attrs.align ?? attrs.alignment ?? '');
+              return tr;
+            },
+          };
+          return {
+            chain() {
+              const chainApi = {
+                focus: () => chainApi,
+                insertContent: (next: unknown) => {
+                  setValue((current) =>
+                    `${current} ${
+                      typeof next === 'string'
+                        ? editorMockHelpers.textFromHtml(next)
+                        : editorMockHelpers.textFromContent(next)
+                    }`.trim(),
+                  );
+                  return chainApi;
+                },
+                setImage: (attrs: { src: string; alt?: string }) => {
+                  setValue((current) => `${current} ${attrs.src} ${attrs.alt ?? ''}`.trim());
+                  return chainApi;
+                },
+                setAlignment: (alignment: string) => {
+                  editorMockState.alignmentCalls.push(alignment);
+                  return chainApi;
+                },
+                run: () => true,
+              };
+              return chainApi;
+            },
+            commands: {
+              setAlignment: (alignment: string) => {
+                editorMockState.alignmentCalls.push(alignment);
+                return true;
               },
-              run: () => true,
-            };
-            return chainApi;
-          },
-        }),
+            },
+            state: {
+              doc: {
+                nodesBetween: (
+                  _from: number,
+                  _to: number,
+                  callback: (node: { attrs: Record<string, unknown>; isTextblock: boolean }, position: number) => void,
+                ) => callback({ attrs: { alignment: 'left' }, isTextblock: true }, 0),
+              },
+              selection: {
+                $from: {
+                  before: () => 0,
+                  depth: 1,
+                  node: () => ({ attrs: { alignment: 'left' }, isTextblock: true }),
+                },
+                empty: true,
+                from: 0,
+                to: 0,
+              },
+              tr,
+            },
+            view: {
+              dispatch: () => undefined,
+              focus: () => undefined,
+            },
+          };
+        },
         [],
       );
       const editorRef = ReactModule.useMemo(
         () => ({
           getEmail: async () => ({
-            html: `<p>${editorMockHelpers.escapeHtml(valueRef.current)}</p>`,
-            text: valueRef.current,
+            html:
+              editorMockState.exportedHtml ??
+              (editorMockState.shellOnlyExport
+                ? '<!DOCTYPE html><html><body><p><br /></p></body></html>'
+                : `<p>${editorMockHelpers.escapeHtml(valueRef.current)}</p>`),
+            text: editorMockState.exportedText ?? (editorMockState.shellOnlyExport ? '' : valueRef.current),
           }),
           getEmailHTML: async () => `<p>${editorMockHelpers.escapeHtml(valueRef.current)}</p>`,
           getEmailText: async () => valueRef.current,
-          getJSON: () => ({
-            type: 'doc',
-            content: valueRef.current
-              ? [{ type: 'paragraph', content: [{ type: 'text', text: valueRef.current }] }]
-              : [],
-          }),
+          getJSON: () =>
+            editorMockState.exportedJson ?? {
+              type: 'doc',
+              content: valueRef.current
+                ? [{ type: 'paragraph', content: [{ type: 'text', text: valueRef.current }] }]
+                : [],
+            },
           editor,
         }),
         [editor],
@@ -123,6 +259,12 @@ vi.mock('@react-email/editor', async () => {
         onUpdateRef.current = onUpdate;
       }, [onUpdate]);
       ReactModule.useEffect(() => {
+        editorMockState.slashCommandItems = slashCommand?.items ?? [];
+      }, [slashCommand]);
+      ReactModule.useEffect(() => {
+        editorMockState.lastTheme = theme;
+      }, [theme]);
+      ReactModule.useEffect(() => {
         onReadyRef.current?.(editorRef);
       }, [editorRef]);
       ReactModule.useEffect(() => {
@@ -134,17 +276,36 @@ vi.mock('@react-email/editor', async () => {
       }, [editorRef, value]);
 
       return ReactModule.createElement(
-        'div',
-        {
-          'aria-label': 'Email body',
-          contentEditable: editable,
-          role: 'textbox',
-          suppressContentEditableWarning: true,
-          onInput: (event: React.FormEvent<HTMLDivElement>) => {
-            setValue(event.currentTarget.textContent ?? '');
+        ReactModule.Fragment,
+        null,
+        ReactModule.createElement(
+          'button',
+          {
+            type: 'button',
+            onClick: async () => {
+              const upload = await onUploadImage?.(
+                new File(['image-bytes'], 'inline-email-image.png', { type: 'image/png' }),
+              );
+              if (upload?.url) setValue((current) => `${current} ${upload.url}`.trim());
+            },
           },
-        },
-        value,
+          'Mock image upload',
+        ),
+        ReactModule.createElement(
+          'div',
+          {
+            'aria-label': 'Email body',
+            contentEditable: editable,
+            role: 'textbox',
+            suppressContentEditableWarning: true,
+            onInput: (event: React.FormEvent<HTMLDivElement>) => {
+              const nextValue = event.currentTarget.textContent ?? '';
+              valueRef.current = nextValue;
+              setValue(nextValue);
+            },
+          },
+          value,
+        ),
       );
     },
   );
@@ -207,6 +368,56 @@ const event = {
   brandId: 'brd_1',
 };
 
+const senderIdentity = {
+  id: 'bsi_1',
+  tenantId: 'tnt_1',
+  brandId: 'brd_1',
+  email: 'tickets@example.test',
+  name: 'Tixkit',
+  replyToEmail: 'support@example.test',
+  verified: true,
+  verifiedAt: '2026-06-29T00:00:00.000Z',
+  createdAt: '2026-06-29T00:00:00.000Z',
+  updatedAt: '2026-06-29T00:00:00.000Z',
+};
+
+const brand = {
+  id: 'brd_1',
+  tenantId: 'tnt_1',
+  organizationId: 'org_1',
+  name: 'All Access Chicago',
+  slug: 'all-access-chicago',
+  status: 'active',
+  theme: {
+    primaryColor: '#111827',
+    logoUrl: 'https://assets.example.test/brand/logo.png',
+  },
+  domains: [],
+  whiteLabel: true,
+  createdAt: '2026-06-29T00:00:00.000Z',
+  updatedAt: '2026-06-29T00:00:00.000Z',
+};
+
+const secondBrand = {
+  ...brand,
+  id: 'brd_2',
+  name: 'Riverside Presents',
+  slug: 'riverside-presents',
+  theme: {
+    primaryColor: '#0f766e',
+    logoUrl: 'https://assets.example.test/riverside/logo.png',
+  },
+};
+
+const secondBrandSenderIdentity = {
+  ...senderIdentity,
+  id: 'bsi_2',
+  brandId: 'brd_2',
+  email: 'riverside@example.test',
+  name: 'Riverside Presents',
+  replyToEmail: 'hello@riverside.example.test',
+};
+
 const document = {
   id: 'cdoc_email',
   tenantId: 'tnt_1',
@@ -246,22 +457,117 @@ const savedVersion = {
   versionNumber: 2,
 };
 
+const emailDocumentWithoutFooter = {
+  ...emailDocument,
+  blocks: emailDocument.blocks.filter((block) => block.type !== 'unsubscribe_footer'),
+};
+
+const versionWithoutFooter = {
+  ...version,
+  id: 'cver_no_footer',
+  contentJson: emailDocumentWithoutFooter,
+};
+
+const brandTemplateDocument = {
+  ...document,
+  id: 'cdoc_brand_template',
+  eventId: undefined,
+  key: 'brand-announcement',
+  name: 'Brand announcement',
+  currentDraftVersionId: 'cver_brand_template',
+};
+
+const secondBrandTemplateDocument = {
+  ...brandTemplateDocument,
+  id: 'cdoc_second_brand_template',
+  brandId: 'brd_2',
+  key: 'riverside-announcement',
+  name: 'Riverside announcement',
+  currentDraftVersionId: 'cver_second_brand_template',
+};
+
+const brandTemplateEmailDocument = createDefaultEmailTemplate({
+  editor: {
+    provider: REACT_EMAIL_EDITOR_PACKAGE,
+    contentHtml: '<h1>Brand update</h1><p>News for {{recipient.name}}.</p>',
+    contentText: 'Brand update\nNews for {{recipient.name}}.',
+    contentJson: {
+      type: 'doc',
+      content: [{ type: 'paragraph', content: [{ type: 'text', text: 'Brand update' }] }],
+    },
+  },
+  settings: {
+    templateKey: 'brand-announcement',
+    subject: 'Brand update for {{recipient.name}}',
+    previewText: 'A quick update from {{brand.name}}.',
+    locale: 'en',
+    category: 'bulk',
+    sender: {
+      fromEmail: 'other@example.test',
+      fromName: 'Other sender',
+      replyToEmail: 'other-reply@example.test',
+    },
+  },
+});
+
+const brandTemplateVersion = {
+  ...version,
+  id: 'cver_brand_template',
+  documentId: 'cdoc_brand_template',
+  contentJson: brandTemplateEmailDocument,
+  subject: brandTemplateEmailDocument.settings.subject,
+  previewText: brandTemplateEmailDocument.settings.previewText,
+};
+
 function ok<T>(data: T) {
   return { ok: true as const, data };
 }
 
 function openEmailMoreActions() {
-  fireEvent.click(screen.getByRole('button', { name: 'More actions' }));
+  const trigger = screen.getByRole('button', { name: 'More actions' });
+  fireEvent.pointerDown(trigger);
+  fireEvent.mouseDown(trigger);
+  fireEvent.click(trigger);
+  fireEvent.keyDown(trigger, { key: 'Enter', code: 'Enter' });
+  fireEvent.keyDown(trigger, { key: 'ArrowDown', code: 'ArrowDown' });
 }
 
 function clickEmailSaveDraft() {
   openEmailMoreActions();
-  fireEvent.click(screen.getByRole('button', { name: 'Save draft' }));
+  fireEvent.click(screen.getByRole('menuitem', { name: 'Save draft' }));
+}
+
+function clickMoreAction(name: string) {
+  openEmailMoreActions();
+  fireEvent.click(screen.getByRole('menuitem', { name }));
+}
+
+async function confirmReviewSend(buttonName = 'Send email') {
+  fireEvent.click(screen.getByRole('button', { name: 'Review' }));
+  expect(await screen.findByRole('dialog', { name: 'Ready to send?' })).toBeInTheDocument();
+  expect(screen.getByText('Preflight checks')).toBeInTheDocument();
+  expect(await screen.findByText('Analyzing your content...')).toBeInTheDocument();
+  expect(screen.getByRole('button', { name: buttonName })).toBeDisabled();
+  expect(await screen.findByText('Content analysis complete')).toBeInTheDocument();
+  expect(await screen.findByText('No blocking issues found.')).toBeInTheDocument();
+  expect(adminApiMock.sendMessage).not.toHaveBeenCalled();
+  expect(screen.getByRole('button', { name: buttonName })).toBeDisabled();
+  fireEvent.change(screen.getByLabelText('Slide to confirm email campaign send'), {
+    target: { value: '100' },
+  });
+  fireEvent.click(screen.getByRole('button', { name: buttonName }));
 }
 
 describe('EmailPersistedEditorView', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    editorMockState.shellOnlyExport = false;
+    editorMockState.exportedHtml = undefined;
+    editorMockState.exportedText = undefined;
+    editorMockState.exportedJson = undefined;
+    editorMockState.alignmentCalls = [];
+    editorMockState.slashCommandItems = [];
+    editorMockState.lastTheme = undefined;
     vi.stubGlobal(
       'confirm',
       vi.fn(() => true),
@@ -285,6 +591,26 @@ describe('EmailPersistedEditorView', () => {
       ok({
         document: { ...document, status: 'published', publishedVersionId: 'cver_2' },
         version: { ...savedVersion, status: 'published' },
+      }),
+    );
+    adminApiMock.sendMessage.mockResolvedValue(
+      ok({
+        id: 'msg_1',
+        eventId: 'evt_1',
+        name: 'order-confirmed',
+        emailTemplateKey: 'order-confirmed',
+        channel: 'email',
+        status: 'queued',
+        audience: 'all_attendees',
+        audienceKey: 'all',
+        audienceAttendeeIds: [],
+        audienceLabel: 'All attendees',
+        queuedCount: 1,
+        sentCount: 0,
+        deliveredCount: 0,
+        failedCount: 0,
+        suppressedCount: 0,
+        createdAt: '2026-06-29T00:00:00.000Z',
       }),
     );
     adminApiMock.duplicateContentDocument.mockResolvedValue(
@@ -311,42 +637,308 @@ describe('EmailPersistedEditorView', () => {
         },
       }),
     );
+    adminApiMock.listBrandEmailSenderIdentities.mockResolvedValue(ok([senderIdentity]));
+    adminApiMock.listBrands.mockResolvedValue(ok([brand]));
+    adminApiMock.uploadArtifact.mockResolvedValue(
+      ok({
+        artifactId: 'upl_email_image',
+        status: 'uploaded',
+        scanStatus: 'clean',
+        downloadUrl: 'https://assets.example.test/content-email-images/inline-email-image.png',
+      }),
+    );
   });
 
-  it('loads an existing email document and persists preview, publish, and test-send actions', async () => {
+  it('maps merge tags to friendly preview presentations for canvas chips', () => {
+    expect(variablePresentation('event.title')).toEqual({
+      label: 'Event name',
+      preview: 'Sample Summer Showcase',
+      kind: 'event',
+    });
+    expect(variablePresentation('recipient.name')).toEqual({
+      label: 'Attendee name',
+      preview: 'Ada Lovelace',
+      kind: 'recipient',
+    });
+    expect(variablePresentation('ticket.type')).toEqual({
+      label: 'Ticket type',
+      preview: 'General Admission',
+      kind: 'ticket',
+    });
+    expect(variablePresentation('order.total')).toEqual({
+      label: 'Order total',
+      preview: '$84.00',
+      kind: 'order',
+    });
+    expect(variablePresentation('brand.name')).toEqual({
+      label: 'Brand name',
+      preview: 'All Access Chicago',
+      kind: 'brand',
+    });
+    expect(variablePresentation('event.publicUrl')).toEqual({
+      label: 'Event page',
+      preview: 'public event page',
+      kind: 'link',
+    });
+    expect(variablePresentation('review.platform')).toEqual({
+      label: 'Review platform',
+      preview: 'Google',
+      kind: 'system',
+    });
+    expect(mergeTagCanvasAttributeValue('ticket.qrCodeUrl')).toMatch(/^data:image\/svg\+xml,/);
+    expect(
+      applyMergeTagPreviewsToEditorContent(
+        '<p><img src="{{ticket.qrCodeUrl}}" alt="Ticket QR code"></p>',
+      ),
+    ).toContain('data-tixkit-merge-attr-src="ticket.qrCodeUrl"');
+    const jsonPreview = applyMergeTagPreviewsToEditorContent({
+      type: 'doc',
+      content: [
+        {
+          type: 'image',
+          attrs: {
+            src: '{{ticket.qrCodeUrl}}',
+            alt: 'Ticket QR code',
+          },
+        },
+      ],
+    }) as {
+      content: Array<{ attrs: Record<string, unknown> }>;
+    };
+    expect(jsonPreview.content[0]?.attrs.src).toBe(
+      mergeTagCanvasAttributeValue('ticket.qrCodeUrl'),
+    );
+    expect(jsonPreview.content[0]?.attrs['data-tixkit-merge-attr-src']).toBe(
+      'ticket.qrCodeUrl',
+    );
+  });
+
+  it('configures native email alignment for text, media, body, and layout nodes', () => {
+    expect(emailEditorStarterKitOptions.AlignmentAttribute.types).toEqual(
+      expect.arrayContaining([
+        'body',
+        'container',
+        'heading',
+        'paragraph',
+        'button',
+        'image',
+        'section',
+        'columnsColumn',
+        'table',
+      ]),
+    );
+  });
+
+  it('parses persisted variable preview chips with their canonical merge tag attrs', () => {
+    const json = generateJSON(
+      [
+        '<p>',
+        '<span class="tixkit-email-variable-chip" data-tixkit-merge-tag="event.title" data-variable-key="event.title" data-variable-kind="event" data-variable-label="Event name" data-variable-preview="Sample Summer Showcase">Sample Summer Showcase</span>',
+        ' welcomes ',
+        '<span class="tixkit-email-variable-chip" data-tixkit-merge-tag="recipient.name" data-variable-key="recipient.name" data-variable-kind="recipient" data-variable-label="Attendee name" data-variable-preview="Ada Lovelace">Ada Lovelace</span>',
+        ' with ',
+        '<span class="tixkit-email-variable-chip" data-tixkit-merge-tag="ticket.type" data-variable-key="ticket.type" data-variable-kind="ticket" data-variable-label="Ticket type" data-variable-preview="General Admission">General Admission</span>',
+        '.</p>',
+      ].join(''),
+      [StarterKit.configure(emailEditorStarterKitOptions), TixkitMergeTag],
+    );
+    const markedText: Array<Record<string, unknown>> = [];
+    const visit = (value: unknown) => {
+      if (!value || typeof value !== 'object') return;
+      const node = value as {
+        content?: unknown;
+        marks?: unknown;
+        text?: unknown;
+      };
+      if (typeof node.text === 'string' && Array.isArray(node.marks)) {
+        const mark = node.marks.find(
+          (candidate) =>
+            candidate &&
+            typeof candidate === 'object' &&
+            (candidate as { type?: unknown }).type === tixkitMergeTagMarkName,
+        );
+        if (mark && typeof mark === 'object') {
+          markedText.push({
+            ...((mark as { attrs?: Record<string, unknown> }).attrs ?? {}),
+            text: node.text,
+          });
+        }
+      }
+      if (Array.isArray(node.content)) node.content.forEach(visit);
+    };
+    visit(json);
+
+    expect(markedText).toEqual([
+      {
+        key: 'event.title',
+        kind: 'event',
+        label: 'Event name',
+        preview: 'Sample Summer Showcase',
+        text: 'Sample Summer Showcase',
+      },
+      {
+        key: 'recipient.name',
+        kind: 'recipient',
+        label: 'Attendee name',
+        preview: 'Ada Lovelace',
+        text: 'Ada Lovelace',
+      },
+      {
+        key: 'ticket.type',
+        kind: 'ticket',
+        label: 'Ticket type',
+        preview: 'General Admission',
+        text: 'General Admission',
+      },
+    ]);
+  });
+
+  it('keeps selection alignment out of the inspector controls', async () => {
+    render(React.createElement(EmailPersistedEditorView, { eventId: 'evt_1' }));
+
+    await screen.findByTestId('native-email-inspector-host');
+
+    expect(screen.queryByRole('button', { name: 'Align left' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Align center' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Align right' })).not.toBeInTheDocument();
+    expect(screen.queryByText('Typography')).not.toBeInTheDocument();
+    expect(screen.queryByText('Align')).not.toBeInTheDocument();
+  });
+
+  it('builds slash variable commands with friendly labels and canonical inserts', () => {
+    const commands = createEmailSlashCommands({
+      mergeTags: ['event.title'],
+      brandName: 'All Access Chicago',
+    });
+    const eventName = commands.find(
+      (command) => command.category === 'Variables' && command.title === 'Event name',
+    );
+    const insertContent = vi.fn(() => ({ run: vi.fn(() => true) }));
+    const deleteRange = vi.fn(() => ({ insertContent }));
+    const focus = vi.fn(() => ({ deleteRange }));
+    const editor = { chain: () => ({ focus }) };
+
+    expect(eventName).toMatchObject({
+      title: 'Event name',
+      description: 'Sample Summer Showcase',
+      searchTerms: expect.arrayContaining(['event.title', 'event', 'Event name']),
+    });
+
+    eventName?.command({
+      editor: editor as unknown as Parameters<NonNullable<typeof eventName>['command']>[0]['editor'],
+      range: { from: 1, to: 14 },
+    });
+
+    expect(deleteRange).toHaveBeenCalledWith({ from: 1, to: 14 });
+    expect(insertContent).toHaveBeenCalledWith('{{event.title}}');
+  });
+
+  it('keeps slash variable command titles unique when labels repeat', () => {
+    const commands = createEmailSlashCommands({
+      mergeTags: ['recipient.name', 'attendee.name', 'event.title'],
+      brandName: 'All Access Chicago',
+    }).filter((command) => command.category === 'Variables');
+
+    expect(commands.map((command) => command.title)).toEqual([
+      'Attendee name (recipient.name)',
+      'Attendee name (attendee.name)',
+      'Event name',
+    ]);
+  });
+
+  it('builds the Ticket QR slash command with a canvas-safe preview image source', () => {
+    const commands = createEmailSlashCommands({
+      mergeTags: ['ticket.qrCodeUrl'],
+      brandName: 'All Access Chicago',
+    });
+    const ticketQr = commands.find(
+      (command) => command.category === 'Tixkit' && command.title === 'Ticket QR',
+    );
+    const run = vi.fn(() => true);
+    const setImage = vi.fn(() => ({ run }));
+    const deleteRange = vi.fn(() => ({ setImage }));
+    const focus = vi.fn(() => ({ deleteRange }));
+    const editor = { chain: () => ({ focus }) };
+
+    ticketQr?.command({
+      editor: editor as unknown as Parameters<NonNullable<typeof ticketQr>['command']>[0]['editor'],
+      range: { from: 1, to: 14 },
+    });
+
+    expect(setImage).toHaveBeenCalledWith({
+      src: mergeTagCanvasAttributeValue('ticket.qrCodeUrl'),
+      alt: 'Ticket QR code',
+      alignment: 'center',
+    });
+    expect(run).toHaveBeenCalled();
+  });
+
+  it('passes Tixkit slash commands into the native editor', async () => {
+    render(React.createElement(EmailPersistedEditorView, { eventId: 'evt_1' }));
+
+    await screen.findByTestId('native-email-inspector-host');
+
+    expect(editorMockState.slashCommandItems).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          category: 'Variables',
+          title: 'Event name',
+          description: 'Sample Summer Showcase',
+        }),
+        expect.objectContaining({
+          category: 'Tixkit',
+          title: 'Ticket QR',
+        }),
+      ]),
+    );
+    expect(editorMockState.slashCommandItems).not.toEqual(
+      expect.arrayContaining([expect.objectContaining({ title: '{{event.title}}' })]),
+    );
+  });
+
+  it('loads an existing email document and persists save, publish, and test-send actions', async () => {
     render(React.createElement(EmailPersistedEditorView, { eventId: 'evt_1' }));
 
     expect(await screen.findByTestId('email-metadata-bar')).toBeInTheDocument();
-    expect(screen.getByRole('complementary', { name: 'Insert content' })).toBeInTheDocument();
-    expect(screen.getByText('React Email inspector')).toBeInTheDocument();
+    expect(screen.getByRole('navigation', { name: 'Editor tools' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Preview' })).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Code' })).toBeInTheDocument();
+    expect(screen.getByLabelText('Verified sender')).toHaveValue('bsi_1');
+    expect(screen.getByLabelText('Reply-To')).toHaveValue('support@example.test');
+    expect(screen.getByLabelText('Audience')).toHaveValue('all');
+    expect(screen.getByText('Transactional ticket messages')).toBeInTheDocument();
+    expect(screen.getByLabelText('Send timing')).toHaveValue('now');
     expect(screen.getByTestId('native-email-inspector-host')).toBeInTheDocument();
-    fireEvent.click(screen.getByRole('button', { name: 'Collapse inspector' }));
-    expect(screen.getByRole('button', { name: 'Open inspector' })).toBeInTheDocument();
-    fireEvent.click(screen.getByRole('button', { name: 'Insert Variables' }));
-    expect(screen.getByText('Insert merge tags')).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: '{{brand.name}}' })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Collapse inspector' })).toBeInTheDocument();
-    fireEvent.click(screen.getByRole('button', { name: 'Collapse inspector' }));
-    fireEvent.click(screen.getByRole('button', { name: 'Open inspector' }));
-    expect(screen.getByRole('button', { name: 'Collapse inspector' })).toBeInTheDocument();
-    openEmailMoreActions();
-    fireEvent.click(screen.getByRole('button', { name: 'Open version history' }));
+    expect(screen.queryByRole('button', { name: 'Align left' })).not.toBeInTheDocument();
+    expect(screen.queryByText('Typography')).not.toBeInTheDocument();
+    expect(screen.queryByLabelText('Template key')).not.toBeInTheDocument();
+    expect(screen.queryByLabelText('Locale')).not.toBeInTheDocument();
+    expect(screen.queryByLabelText('Category')).not.toBeInTheDocument();
+    expect(screen.queryByText('Brand scope')).not.toBeInTheDocument();
+    expect(screen.queryByText('Event scope')).not.toBeInTheDocument();
+    expect(screen.queryByLabelText('Test recipients')).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Close sidebar' }));
+    expect(screen.getByRole('button', { name: 'Inspector' })).toBeInTheDocument();
+    clickMoreAction('Variables');
+    expect(screen.getByText('Merge tags')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Insert Brand name' })).toHaveTextContent(
+      'All Access Chicago',
+    );
+    fireEvent.click(screen.getByRole('button', { name: 'Close sidebar' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Inspector' }));
+    clickMoreAction('Version history');
     expect(screen.getByText('Version history')).toBeInTheDocument();
-    openEmailMoreActions();
-    fireEvent.click(screen.getByRole('button', { name: 'Open variables panel' }));
-    expect(screen.getByText('Insert merge tags')).toBeInTheDocument();
-    openEmailMoreActions();
-    fireEvent.click(screen.getByRole('button', { name: 'Template details' }));
-    expect(screen.getByText('React Email inspector')).toBeInTheDocument();
-    openEmailMoreActions();
-    fireEvent.click(screen.getByRole('button', { name: 'View JSON payload' }));
+    clickMoreAction('Variables');
+    expect(screen.getByText('Merge tags')).toBeInTheDocument();
+    clickMoreAction('Template details');
+    expect(screen.getByText('Settings')).toBeInTheDocument();
+    expect(screen.queryByLabelText('Test recipients')).not.toBeInTheDocument();
+    clickMoreAction('View JSON');
     expect(screen.getByText('Saved payload')).toBeInTheDocument();
-    openEmailMoreActions();
-    fireEvent.click(screen.getByRole('button', { name: 'Review blockers' }));
+    clickMoreAction('Review blockers');
     expect(await screen.findByText('Current draft review')).toBeInTheDocument();
-    openEmailMoreActions();
-    fireEvent.click(screen.getByRole('button', { name: 'Template details' }));
-    expect(screen.getByText('React Email inspector')).toBeInTheDocument();
+    clickMoreAction('Template details');
+    expect(screen.getByText('Settings')).toBeInTheDocument();
 
     const subject = await screen.findByLabelText('Subject');
     fireEvent.change(subject, {
@@ -362,9 +954,10 @@ describe('EmailPersistedEditorView', () => {
       target: { value: 'staff' },
     });
     const canvas = screen.getByRole('textbox', { name: 'Email body' });
-    canvas.textContent = 'Updated saved email for {{recipient.name}}.';
+    canvas.textContent =
+      'Updated saved email for {{recipient.name}}. Manage preferences: {{brand.supportUrl}}.';
     fireEvent.input(canvas);
-    fireEvent.click(screen.getByRole('button', { name: 'Open preview' }));
+    clickEmailSaveDraft();
 
     await waitFor(() => {
       expect(adminApiMock.saveContentVersion).toHaveBeenCalledWith(
@@ -381,27 +974,44 @@ describe('EmailPersistedEditorView', () => {
             }),
             editor: expect.objectContaining({
               contentJson: expect.objectContaining({ type: 'doc' }),
-              contentText: 'Updated saved email for {{recipient.name}}.',
+              contentText:
+                'Updated saved email for {{recipient.name}}. Manage preferences: {{brand.supportUrl}}.',
             }),
           }),
-          renderedHtml: expect.stringContaining('Updated saved email for Ada Lovelace.'),
+          renderedHtml:
+            '<p>Updated saved email for {{recipient.name}}. Manage preferences: {{brand.supportUrl}}.</p>',
+          renderedText:
+            'Updated saved email for {{recipient.name}}. Manage preferences: {{brand.supportUrl}}.',
         }),
       );
-      expect(adminApiMock.previewContent).toHaveBeenCalledWith(
-        'cdoc_email',
-        expect.objectContaining({ versionId: 'cver_2' }),
+    });
+    expect(adminApiMock.previewContent).not.toHaveBeenCalled();
+    expect(screen.queryByTestId('preview-drawer')).not.toBeInTheDocument();
+
+    await confirmReviewSend();
+    await waitFor(() => {
+      expect(adminApiMock.publishContentVersion).toHaveBeenCalledWith('cdoc_email', 'cver_2');
+      expect(adminApiMock.sendMessage).toHaveBeenCalledWith(
+        'evt_1',
+        expect.objectContaining({
+          channel: 'email',
+          emailTemplateKey: 'door-reminder',
+          audience: 'all',
+        }),
       );
     });
 
-    expect(screen.getByTestId('preview-drawer')).toHaveTextContent('Updated saved email');
-
-    fireEvent.click(screen.getByRole('button', { name: 'Publish' }));
-    await waitFor(() => {
-      expect(adminApiMock.publishContentVersion).toHaveBeenCalledWith('cdoc_email', 'cver_2');
+    clickMoreAction('Send test');
+    expect(screen.getByRole('dialog', { name: 'Send test email' })).toBeInTheDocument();
+    expect(screen.getByLabelText('Test recipients')).toHaveValue('ada@example.test');
+    fireEvent.change(screen.getByLabelText('Test recipients'), {
+      target: { value: 'ada@example.test\ngrace@example.test' },
     });
-
-    openEmailMoreActions();
-    fireEvent.click(screen.getByRole('button', { name: 'Send test' }));
+    fireEvent.keyDown(screen.getByLabelText('Test recipients'), {
+      code: 'Enter',
+      ctrlKey: true,
+      key: 'Enter',
+    });
     await waitFor(() => {
       expect(adminApiMock.testSendContent).toHaveBeenCalledWith(
         'cdoc_email',
@@ -410,15 +1020,139 @@ describe('EmailPersistedEditorView', () => {
           recipient: 'ada@example.test',
         }),
       );
+      expect(adminApiMock.testSendContent).toHaveBeenCalledWith(
+        'cdoc_email',
+        expect.objectContaining({
+          versionId: 'cver_2',
+          recipient: 'grace@example.test',
+        }),
+      );
     });
 
-    openEmailMoreActions();
-    fireEvent.click(screen.getByRole('button', { name: 'Archive template' }));
+    clickMoreAction('Archive');
     await waitFor(() => {
       expect(adminApiMock.archiveContentDocument).toHaveBeenCalledWith('cdoc_email');
     });
     expect(screen.getByText('Archived email template')).toBeInTheDocument();
   }, 10000);
+
+  it('falls back to editor JSON when React Email returns shell-only HTML', async () => {
+    editorMockState.shellOnlyExport = true;
+    render(React.createElement(EmailPersistedEditorView, { eventId: 'evt_1' }));
+
+    const canvas = await screen.findByRole('textbox', { name: 'Email body' });
+    canvas.textContent =
+      'Hi {{recipient.name}}, your {{event.title}} tickets are ready. Manage preferences: {{brand.supportUrl}}.';
+    fireEvent.input(canvas);
+    clickEmailSaveDraft();
+
+    await waitFor(() => {
+      expect(adminApiMock.saveContentVersion).toHaveBeenCalledWith(
+        'cdoc_email',
+        expect.objectContaining({
+          contentJson: expect.objectContaining({
+            editor: expect.objectContaining({
+              contentHtml:
+                '<p>Hi {{recipient.name}}, your {{event.title}} tickets are ready. Manage preferences: {{brand.supportUrl}}.</p>',
+              contentText:
+                'Hi {{recipient.name}}, your {{event.title}} tickets are ready. Manage preferences: {{brand.supportUrl}}.',
+              contentJson: expect.objectContaining({ type: 'doc' }),
+            }),
+          }),
+          renderedHtml:
+            '<p>Hi {{recipient.name}}, your {{event.title}} tickets are ready. Manage preferences: {{brand.supportUrl}}.</p>',
+          renderedText:
+            'Hi {{recipient.name}}, your {{event.title}} tickets are ready. Manage preferences: {{brand.supportUrl}}.',
+        }),
+      );
+    });
+  });
+
+  it('canonicalizes preview variable and inline style markup before saving', async () => {
+    editorMockState.exportedHtml =
+      `<p>Hi <span data-tixkit-inline-style="true" style="color: #0f766e"><span key="recipient.name" kind="recipient" label="Attendee name" preview="Ada Lovelace" class="tixkit-email-variable-chip" data-tixkit-merge-tag="recipient.name" data-variable-key="recipient.name" data-variable-kind="recipient" data-variable-label="Attendee name" data-variable-preview="Ada Lovelace" data-variable-detail="Attendee name - {{recipient.name}}" title="Attendee name: {{recipient.name}}">Ada Lovelace</span></span>.</p><p><img src="${mergeTagCanvasAttributeValue('ticket.qrCodeUrl')}" data-tixkit-merge-attr-src="ticket.qrCodeUrl" alt="Ticket QR code"></p>`;
+    editorMockState.exportedText = 'Hi {{recipient.name}}.';
+    render(React.createElement(EmailPersistedEditorView, { eventId: 'evt_1' }));
+
+    await screen.findByRole('textbox', { name: 'Email body' });
+    clickEmailSaveDraft();
+
+    await waitFor(() => {
+      expect(adminApiMock.saveContentVersion).toHaveBeenCalledWith(
+        'cdoc_email',
+        expect.objectContaining({
+          renderedHtml:
+            '<p>Hi <span style="color: #0f766e"><span>{{recipient.name}}</span></span>.</p><p><img src="{{ticket.qrCodeUrl}}" alt="Ticket QR code"></p>',
+          contentJson: expect.objectContaining({
+            editor: expect.objectContaining({
+              contentHtml:
+                '<p>Hi <span style="color: #0f766e"><span>{{recipient.name}}</span></span>.</p><p><img src="{{ticket.qrCodeUrl}}" alt="Ticket QR code"></p>',
+              contentText: expect.stringContaining('{{recipient.name}}'),
+            }),
+          }),
+        }),
+      );
+    });
+    const savePayload = adminApiMock.saveContentVersion.mock.calls.at(-1)?.[1];
+    expect(savePayload?.renderedHtml).not.toContain('data-tixkit');
+    expect(savePayload?.renderedHtml).not.toContain('key="recipient.name"');
+    expect(savePayload?.renderedHtml).not.toContain('Ada Lovelace');
+    expect(savePayload?.renderedHtml).not.toContain('data:image/svg+xml');
+  });
+
+  it('persists inline styles from editor JSON when package HTML drops custom marks', async () => {
+    editorMockState.exportedHtml = '<p>Hi {{recipient.name}}.</p>';
+    editorMockState.exportedText = 'Hi {{recipient.name}}.';
+    editorMockState.exportedJson = {
+      type: 'doc',
+      content: [
+        {
+          type: 'paragraph',
+          content: [
+            { type: 'text', text: 'Hi ' },
+            {
+              type: 'text',
+              text: 'Ada Lovelace',
+              marks: [
+                {
+                  type: tixkitMergeTagMarkName,
+                  attrs: {
+                    key: 'recipient.name',
+                    kind: 'recipient',
+                    label: 'Attendee name',
+                    preview: 'Ada Lovelace',
+                  },
+                },
+                {
+                  type: tixkitInlineStyleMarkName,
+                  attrs: {
+                    color: '#0f766e',
+                    fontSize: '18px',
+                    lineHeight: '140%',
+                  },
+                },
+              ],
+            },
+            { type: 'text', text: '.' },
+          ],
+        },
+      ],
+    };
+    render(React.createElement(EmailPersistedEditorView, { eventId: 'evt_1' }));
+
+    await screen.findByRole('textbox', { name: 'Email body' });
+    clickEmailSaveDraft();
+
+    await waitFor(() => {
+      const savePayload = adminApiMock.saveContentVersion.mock.calls.at(-1)?.[1];
+      expect(savePayload?.renderedHtml).toContain(
+        '<span style="color: #0f766e; font-size: 18px; line-height: 140%">{{recipient.name}}</span>',
+      );
+      expect(savePayload?.contentJson.editor.contentHtml).toContain(
+        '<span style="color: #0f766e; font-size: 18px; line-height: 140%">{{recipient.name}}</span>',
+      );
+    });
+  });
 
   it('loads email content documents from array and keyed API response shapes', async () => {
     adminApiMock.listContentDocuments.mockResolvedValueOnce(ok([document]));
@@ -434,6 +1168,8 @@ describe('EmailPersistedEditorView', () => {
       vi.fn(() => true),
     );
     adminApiMock.getEvent.mockResolvedValue(ok(event));
+    adminApiMock.listBrandEmailSenderIdentities.mockResolvedValue(ok([senderIdentity]));
+    adminApiMock.listBrands.mockResolvedValue(ok([brand]));
     adminApiMock.listContentDocuments.mockResolvedValue(ok({ cdoc_email: document }));
     adminApiMock.listContentVersions.mockResolvedValue(ok({ items: [version] }));
     adminApiMock.saveContentVersion.mockResolvedValue(ok(savedVersion));
@@ -453,8 +1189,7 @@ describe('EmailPersistedEditorView', () => {
     const editable = render(React.createElement(EmailPersistedEditorView, { eventId: 'evt_1' }));
 
     await screen.findByLabelText('Subject');
-    fireEvent.click(screen.getByLabelText('More actions'));
-    fireEvent.click(screen.getByRole('button', { name: 'Archive template' }));
+    clickMoreAction('Archive');
 
     expect(adminApiMock.archiveContentDocument).not.toHaveBeenCalled();
     editable.unmount();
@@ -465,6 +1200,8 @@ describe('EmailPersistedEditorView', () => {
       vi.fn(() => true),
     );
     adminApiMock.getEvent.mockResolvedValue(ok(event));
+    adminApiMock.listBrandEmailSenderIdentities.mockResolvedValue(ok([senderIdentity]));
+    adminApiMock.listBrands.mockResolvedValue(ok([brand]));
     adminApiMock.listContentDocuments.mockResolvedValue(
       ok({ items: [{ ...document, status: 'archived' }] }),
     );
@@ -473,10 +1210,10 @@ describe('EmailPersistedEditorView', () => {
     render(React.createElement(EmailPersistedEditorView, { eventId: 'evt_1' }));
 
     expect(await screen.findByLabelText('Subject')).toBeDisabled();
-    expect(screen.getByRole('button', { name: 'Open preview' })).toBeDisabled();
-    expect(screen.getByRole('button', { name: 'Publish' })).toBeDisabled();
+    expect(screen.queryByRole('button', { name: 'Preview' })).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Review' })).toBeDisabled();
     openEmailMoreActions();
-    expect(screen.getByRole('button', { name: 'Send test' })).toBeDisabled();
+    expect(screen.getByRole('menuitem', { name: 'Send test' })).toHaveAttribute('aria-disabled', 'true');
   });
 
   it('creates the event-scoped email document and initial canonical draft when none exists', async () => {
@@ -540,7 +1277,7 @@ describe('EmailPersistedEditorView', () => {
 
     expect(screen.queryByText('Saved draft v2')).not.toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole('button', { name: 'Publish' }));
+    await confirmReviewSend();
     await waitFor(() => {
       expect(adminApiMock.publishContentVersion).toHaveBeenCalledWith('cdoc_email', 'cver_fresh');
     });
@@ -587,17 +1324,16 @@ describe('EmailPersistedEditorView', () => {
     );
   });
 
-  it('adds editor-authored images and reusable components from the insert rail', async () => {
+  it('enables native editor commands and code mode without the legacy insert rail', async () => {
     render(React.createElement(EmailPersistedEditorView, { eventId: 'evt_1' }));
 
     await screen.findByRole('textbox', { name: 'Email body' });
 
-    fireEvent.click(screen.getByRole('button', { name: 'Insert Image' }));
-    fireEvent.click(screen.getByRole('button', { name: 'Insert Components' }));
-    expect(screen.getByText('Insert email sections')).toBeInTheDocument();
-    fireEvent.click(screen.getByRole('button', { name: /QR code/ }));
-    fireEvent.click(screen.getByRole('button', { name: /Calendar button/ }));
-    fireEvent.click(screen.getByRole('button', { name: /Ticket summary/ }));
+    expect(screen.queryByRole('button', { name: 'Insert Image' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Insert Components' })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Code' }));
+    expect(screen.getByText('Exported HTML')).toBeInTheDocument();
+    expect(screen.getByText('Editor JSON')).toBeInTheDocument();
     clickEmailSaveDraft();
 
     await waitFor(() => {
@@ -606,14 +1342,38 @@ describe('EmailPersistedEditorView', () => {
         expect.objectContaining({
           contentJson: expect.objectContaining({
             editor: expect.objectContaining({
-              contentText: expect.stringMatching(/Ticket QR code[\s\S]*Add to calendar/),
-              contentJson: expect.objectContaining({ type: 'doc' }),
+              provider: REACT_EMAIL_EDITOR_PACKAGE,
             }),
+            settings: expect.objectContaining({ templateKey: 'order-confirmed' }),
           }),
-          renderedHtml: expect.stringMatching(/Add to calendar[\s\S]*General Admission/),
+          renderedHtml: expect.stringContaining('{{event.title}}'),
         }),
       );
     });
+  });
+
+  it('uploads inline email images through tenant-scoped content artifacts', async () => {
+    render(React.createElement(EmailPersistedEditorView, { eventId: 'evt_1' }));
+
+    const canvas = await screen.findByRole('textbox', { name: 'Email body' });
+    fireEvent.click(screen.getByRole('button', { name: 'Mock image upload' }));
+
+    await waitFor(() => {
+      expect(adminApiMock.uploadArtifact).toHaveBeenCalledWith({
+        purpose: 'content_email_image',
+        file: expect.any(File),
+        brandId: 'brd_1',
+        eventId: 'evt_1',
+        metadata: {
+          source: 'admin_email_editor',
+          contentDocumentId: 'cdoc_email',
+          templateKey: 'order-confirmed',
+        },
+      });
+    });
+    expect(canvas).toHaveTextContent(
+      'https://assets.example.test/content-email-images/inline-email-image.png',
+    );
   });
 
   it('reviews the current email export and blocks publish with local validation errors', async () => {
@@ -626,35 +1386,181 @@ describe('EmailPersistedEditorView', () => {
     fireEvent.input(canvas);
 
     openEmailMoreActions();
-    fireEvent.click(screen.getByRole('button', { name: 'Review blockers' }));
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Review blockers' }));
 
     expect(await screen.findByText('missing_subject')).toBeInTheDocument();
     expect(screen.getByText('unknown_variable')).toBeInTheDocument();
     expect(screen.getByText('Current draft review')).toBeInTheDocument();
 
     openEmailMoreActions();
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Send test' }));
+    expect(screen.getByRole('dialog', { name: 'Send test email' })).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: 'Send test' }));
 
     expect(
       await screen.findByText('Resolve email test-send blockers before sending a test.'),
     ).toBeInTheDocument();
     expect(adminApiMock.testSendContent).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
 
-    fireEvent.click(screen.getByRole('button', { name: 'Publish' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Review' }));
 
     expect(
-      await screen.findByText('Resolve email publish blockers before publishing.'),
+      await screen.findByText('Resolve email review blockers before sending.'),
     ).toBeInTheDocument();
     expect(adminApiMock.publishContentVersion).not.toHaveBeenCalled();
+  });
+
+  it('blocks review when the brand has no verified email sender identity', async () => {
+    adminApiMock.listBrandEmailSenderIdentities.mockResolvedValue(ok([]));
+
+    render(React.createElement(EmailPersistedEditorView, { eventId: 'evt_1' }));
+
+    expect(await screen.findByLabelText('Verified sender')).toBeDisabled();
+    fireEvent.click(screen.getByRole('button', { name: 'Review' }));
+
+    expect(
+      await screen.findByText('Resolve email review blockers before sending.'),
+    ).toBeInTheDocument();
+    expect(screen.getByRole('dialog', { name: 'Ready to send?' })).toBeInTheDocument();
+    expect(screen.getAllByText('email_sender_identity_missing').length).toBeGreaterThan(0);
+    expect(screen.getByRole('button', { name: 'Send email' })).toBeDisabled();
+    expect(adminApiMock.publishContentVersion).not.toHaveBeenCalled();
+    expect(adminApiMock.sendMessage).not.toHaveBeenCalled();
+  });
+
+  it('auto-adds an unsubscribe footer when switching an editor draft to bulk', async () => {
+    adminApiMock.listContentVersions.mockResolvedValue(ok({ items: [versionWithoutFooter] }));
+
+    render(React.createElement(EmailPersistedEditorView, { eventId: 'evt_1' }));
+
+    await screen.findByTestId('email-metadata-bar');
+    clickMoreAction('Template details');
+    fireEvent.change(await screen.findByLabelText('Category'), { target: { value: 'bulk' } });
+    clickEmailSaveDraft();
+
+    await waitFor(() => {
+      expect(adminApiMock.saveContentVersion).toHaveBeenCalledWith(
+        'cdoc_email',
+        expect.objectContaining({
+          contentJson: expect.objectContaining({
+            settings: expect.objectContaining({ category: 'bulk' }),
+            blocks: expect.arrayContaining([
+              expect.objectContaining({
+                type: 'unsubscribe_footer',
+                unsubscribeUrl: '{{brand.supportUrl}}',
+              }),
+            ]),
+          }),
+        }),
+      );
+    });
+  });
+
+  it('applies a saved brand email template while preserving the verified sender', async () => {
+    adminApiMock.listContentDocuments
+      .mockResolvedValueOnce(ok({ items: [document] }))
+      .mockResolvedValueOnce(ok({ items: [document, brandTemplateDocument] }));
+    adminApiMock.listContentVersions
+      .mockResolvedValueOnce(ok({ items: [version] }))
+      .mockResolvedValueOnce(ok({ items: [brandTemplateVersion] }));
+
+    render(React.createElement(EmailPersistedEditorView, { eventId: 'evt_1' }));
+
+    await screen.findByLabelText('Subject');
+    clickMoreAction('Pick template');
+    expect(await screen.findByRole('dialog', { name: 'Pick a template' })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Apply' }));
+
+    await waitFor(() => {
+      expect(screen.getByLabelText('Subject')).toHaveValue('Brand update for {{recipient.name}}');
+    });
+
+    clickEmailSaveDraft();
+
+    await waitFor(() => {
+      expect(adminApiMock.saveContentVersion).toHaveBeenCalledWith(
+        'cdoc_email',
+        expect.objectContaining({
+          subject: 'Brand update for {{recipient.name}}',
+          previewText: 'A quick update from {{brand.name}}.',
+          contentJson: expect.objectContaining({
+            settings: expect.objectContaining({
+              templateKey: 'brand-announcement',
+              subject: 'Brand update for {{recipient.name}}',
+              previewText: 'A quick update from {{brand.name}}.',
+              category: 'bulk',
+              sender: expect.objectContaining({
+                fromEmail: 'tickets@example.test',
+                replyToEmail: 'support@example.test',
+              }),
+            }),
+          }),
+        }),
+      );
+    });
+  });
+
+  it('keeps brand-scoped senders, templates, and assets isolated across brands', async () => {
+    adminApiMock.listBrandEmailSenderIdentities.mockResolvedValue(
+      ok([secondBrandSenderIdentity, senderIdentity]),
+    );
+    adminApiMock.listBrands.mockResolvedValue(ok([secondBrand, brand]));
+    adminApiMock.listContentDocuments
+      .mockResolvedValueOnce(ok({ items: [document] }))
+      .mockResolvedValueOnce(
+        ok({ items: [document, secondBrandTemplateDocument, brandTemplateDocument] }),
+      );
+
+    render(React.createElement(EmailPersistedEditorView, { eventId: 'evt_1' }));
+
+    const senderSelect = (await screen.findByLabelText('Verified sender')) as HTMLSelectElement;
+    expect(adminApiMock.listBrandEmailSenderIdentities).toHaveBeenCalledWith('brd_1');
+    expect(adminApiMock.listContentDocuments).toHaveBeenNthCalledWith(2, {
+      brandId: 'brd_1',
+      channel: 'email',
+      limit: 100,
+    });
+    expect(senderSelect).toHaveValue('bsi_1');
+    expect(Array.from(senderSelect.options).map((option) => option.textContent)).toEqual([
+      'Tixkit <tickets@example.test>',
+    ]);
+    await waitFor(() => {
+      expect(editorMockState.lastTheme).toEqual(
+        expect.objectContaining({
+          styles: expect.objectContaining({
+            button: expect.objectContaining({ backgroundColor: '#111827' }),
+            h1: expect.objectContaining({ color: '#111827' }),
+          }),
+        }),
+      );
+    });
+    expect(JSON.stringify(editorMockState.lastTheme)).not.toContain('#0f766e');
+    expect(screen.queryByText(/reseller|admin white-label|white label controls/i)).not.toBeInTheDocument();
+
+    clickMoreAction('Pick template');
+    expect(await screen.findByRole('dialog', { name: 'Pick a template' })).toBeInTheDocument();
+    expect(screen.getByText('Brand announcement')).toBeInTheDocument();
+    expect(screen.queryByText('Riverside announcement')).not.toBeInTheDocument();
+    fireEvent.click(screen.getAllByRole('button', { name: 'Close' })[0]);
+
+    const canvas = screen.getByRole('textbox', { name: 'Email body' });
+    clickMoreAction('Variables');
+    fireEvent.click(screen.getByRole('button', { name: 'Brand logo' }));
+
+    expect(canvas).toHaveTextContent('https://assets.example.test/brand/logo.png');
+    expect(canvas).not.toHaveTextContent('https://assets.example.test/riverside/logo.png');
   });
 
   it('inserts the selected variable token into the active email block', async () => {
     render(React.createElement(EmailPersistedEditorView, { eventId: 'evt_1' }));
 
     const canvas = await screen.findByRole('textbox', { name: 'Email body' });
-    fireEvent.click(screen.getByRole('button', { name: 'Insert Variables' }));
-    fireEvent.click(screen.getByRole('button', { name: '{{brand.name}}' }));
+    clickMoreAction('Variables');
+    fireEvent.click(screen.getByRole('button', { name: 'Brand logo' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Insert Brand name' }));
 
+    expect(canvas).toHaveTextContent('https://assets.example.test/brand/logo.png');
     expect(canvas).toHaveTextContent('{{brand.name}}');
     expect(canvas.textContent).not.toContain('{{recipient.name}} {{recipient.name}}');
   });
@@ -667,8 +1573,7 @@ describe('EmailPersistedEditorView', () => {
       target: { value: 'Duplicate-ready tickets for {{event.title}}' },
     });
 
-    fireEvent.click(screen.getByLabelText('More actions'));
-    fireEvent.click(screen.getByRole('button', { name: 'Duplicate template' }));
+    clickMoreAction('Duplicate');
 
     await waitFor(() => {
       expect(adminApiMock.duplicateContentDocument).toHaveBeenCalledWith('cdoc_email', {

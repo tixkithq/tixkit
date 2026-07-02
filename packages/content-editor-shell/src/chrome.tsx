@@ -1,156 +1,47 @@
 'use client';
 
 import * as React from 'react';
-import { ChevronLeft, Eye, MoreHorizontal, PanelRightClose, Pencil, SquarePen } from 'lucide-react';
+import {
+  ChevronLeft,
+  Code,
+  Eye,
+  MoreHorizontal,
+  PanelRightClose,
+  Pencil,
+  SquarePen,
+} from 'lucide-react';
 import type { ContentEditorAutosaveState } from './shell.js';
+import { cn } from './cn.js';
+import {
+  Button,
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+  Tooltip,
+  TooltipTrigger,
+  TooltipContent,
+} from './ui.js';
 
 /* ------------------------------------------------------------------ */
-/*  Tiny hooks                                                         */
+/*  Types                                                              */
 /* ------------------------------------------------------------------ */
 
-/** Close on outside-click or Escape. Returns a ref to attach to the panel. */
-function useDismiss(onClose: () => void) {
-  const ref = React.useRef<HTMLDivElement>(null);
-  React.useEffect(() => {
-    if (!ref.current) return;
-    const controller = new AbortController();
-    document.addEventListener(
-      'pointerdown',
-      (event) => {
-        if (ref.current && !ref.current.contains(event.target as Node)) onClose();
-      },
-      { signal: controller.signal },
-    );
-    document.addEventListener(
-      'keydown',
-      (event) => {
-        if (event.key === 'Escape') onClose();
-      },
-      { signal: controller.signal },
-    );
-    return () => controller.abort();
-  }, [onClose]);
-  return ref;
-}
+export type EditorMode = 'editor' | 'preview' | 'code';
 
-/* ------------------------------------------------------------------ */
-/*  Popover primitive                                                  */
-/* ------------------------------------------------------------------ */
-
-export type PopoverProps = {
-  /** Render the trigger button */
-  trigger: (props: { open: boolean; toggle: () => void }) => React.ReactNode;
-  /** Popover body */
-  children: (props: { close: () => void }) => React.ReactNode;
-  /** Panel alignment relative to trigger */
-  align?: 'start' | 'end';
-  /** Panel position relative to trigger */
-  side?: 'right' | 'bottom';
-  /** Panel min width */
-  panelMinWidth?: number;
-  /** Called when popover closes */
-  onClose?: () => void;
-};
-
-export function Popover({
-  trigger,
-  children,
-  align = 'start',
-  side = 'bottom',
-  panelMinWidth = 200,
-  onClose,
-}: PopoverProps) {
-  const [open, setOpen] = React.useState(false);
-  const close = React.useCallback(() => {
-    setOpen(false);
-    onClose?.();
-  }, [onClose]);
-  const dismissRef = useDismiss(close);
-
-  const alignClass = align === 'end' ? 'right-0' : side === 'right' ? 'left-full top-0' : 'left-0';
-  const sideClass = side === 'right' ? 'ml-1' : 'top-full mt-1';
-
-  return (
-    <div className="relative">
-      {trigger({ open, toggle: () => setOpen((v) => !v) })}
-      {open && (
-        <div
-          className={`absolute z-50 ${alignClass} ${sideClass} animate-in fade-in zoom-in-95 rounded-lg border bg-popover p-1 text-popover-foreground shadow-md`}
-          ref={dismissRef}
-          style={{ minWidth: panelMinWidth }}
-        >
-          {children({ close })}
-        </div>
-      )}
-    </div>
-  );
-}
-
-/* ------------------------------------------------------------------ */
-/*  Dropdown menu primitive                                            */
-/* ------------------------------------------------------------------ */
-
-export type DropdownMenuItem = {
+export type DropdownMenuItemConfig = {
   id: string;
   label: string;
   icon?: React.ReactNode;
   onClick: () => void;
   disabled?: boolean;
   destructive?: boolean;
-  /** Render a separator after this item */
   separatorAfter?: boolean;
 };
-
-export type DropdownMenuProps = {
-  trigger?: React.ReactNode;
-  items: DropdownMenuItem[];
-  align?: 'start' | 'end';
-};
-
-export function DropdownMenu({ trigger, items, align = 'end' }: DropdownMenuProps) {
-  return (
-    <Popover
-      align={align}
-      panelMinWidth={224}
-      trigger={({ toggle, open }) => (
-        <button
-          aria-expanded={open}
-          aria-label="More actions"
-          className="inline-flex size-9 items-center justify-center rounded-md border text-muted-foreground transition-colors hover:bg-accent hover:text-accent-foreground"
-          onClick={toggle}
-          title="More actions"
-          type="button"
-        >
-          {trigger ?? <MoreHorizontal className="size-4" />}
-        </button>
-      )}
-    >
-      {({ close }) => (
-        <div className="py-0.5">
-          {items.map((item) => (
-            <React.Fragment key={item.id}>
-              <button
-                className={`flex w-full items-center gap-2.5 rounded-md px-2.5 py-2 text-left text-sm transition-colors hover:bg-accent disabled:pointer-events-none disabled:opacity-50 ${
-                  item.destructive ? 'text-destructive hover:bg-destructive/10' : 'text-foreground'
-                }`}
-                disabled={item.disabled}
-                onClick={() => {
-                  item.onClick();
-                  close();
-                }}
-                type="button"
-              >
-                {item.icon && <span className="shrink-0">{item.icon}</span>}
-                <span className="min-w-0 truncate">{item.label}</span>
-              </button>
-              {item.separatorAfter && <div className="my-1 h-px bg-border" />}
-            </React.Fragment>
-          ))}
-        </div>
-      )}
-    </Popover>
-  );
-}
 
 /* ------------------------------------------------------------------ */
 /*  Badges                                                             */
@@ -165,31 +56,29 @@ export function AutosaveBadge({ state }: { state: ContentEditorAutosaveState }) 
         : state === 'error'
           ? 'Save failed'
           : 'Ready';
-  const tone =
+  const tone = cn(
+    'rounded-md border px-2 py-0.5 text-xs font-medium',
     state === 'error'
       ? 'border-destructive/30 bg-destructive/5 text-destructive'
       : state === 'saving'
-        ? 'border-amber-300/50 bg-amber-50 text-amber-700 dark:bg-amber-950/30 dark:text-amber-300'
+        ? 'border-amber-400/40 bg-amber-50 text-amber-700 dark:bg-amber-950/30 dark:text-amber-300'
         : state === 'saved'
-          ? 'border-emerald-300/50 bg-emerald-50 text-emerald-700 dark:bg-emerald-950/30 dark:text-emerald-300'
-          : 'border-border bg-muted text-muted-foreground';
-  return (
-    <span className={`rounded-md border px-2 py-0.5 text-xs font-medium ${tone}`}>{label}</span>
+          ? 'border-emerald-400/40 bg-emerald-50 text-emerald-700 dark:bg-emerald-950/30 dark:text-emerald-300'
+          : 'border-border bg-muted text-muted-foreground',
   );
+  return <span className={tone}>{label}</span>;
 }
 
 export function StatusBadge({ status }: { status: string }) {
-  const tone =
+  const tone = cn(
+    'rounded-md border px-2 py-0.5 text-xs font-medium capitalize',
     status === 'published'
-      ? 'border-emerald-300/50 bg-emerald-50 text-emerald-700 dark:bg-emerald-950/30 dark:text-emerald-300'
+      ? 'border-emerald-400/40 bg-emerald-50 text-emerald-700 dark:bg-emerald-950/30 dark:text-emerald-300'
       : status === 'archived'
         ? 'border-destructive/30 bg-destructive/5 text-destructive'
-        : 'border-border bg-muted text-muted-foreground';
-  return (
-    <span className={`rounded-md border px-2 py-0.5 text-xs font-medium capitalize ${tone}`}>
-      {status}
-    </span>
+        : 'border-border bg-muted text-muted-foreground',
   );
+  return <span className={tone}>{status}</span>;
 }
 
 /* ------------------------------------------------------------------ */
@@ -198,7 +87,6 @@ export function StatusBadge({ status }: { status: string }) {
 
 export type EditorTopBarProps = {
   backHref: string;
-  /** Breadcrumb label, e.g. "Templates" or "Pages" */
   channelLabel: string;
   documentName: string;
   status: string;
@@ -206,11 +94,10 @@ export type EditorTopBarProps = {
   onDocumentNameClick?: () => void;
   notice?: string;
   error?: string;
-  moreActions: DropdownMenuItem[];
+  moreActions: DropdownMenuItemConfig[];
   onPublish: () => void;
   publishDisabled?: boolean;
   publishLabel?: string;
-  /** Extra action buttons rendered before More actions */
   secondaryActions?: React.ReactNode;
 };
 
@@ -230,7 +117,11 @@ export function EditorTopBar({
   secondaryActions,
 }: EditorTopBarProps) {
   return (
-    <header className="relative z-10 flex h-[60px] items-center justify-between border-b px-3 sm:px-4">
+    <div
+      aria-label="Editor header"
+      className="relative z-10 flex h-[60px] shrink-0 items-center justify-between border-b px-3 sm:px-4"
+      role="region"
+    >
       {/* Left: back + breadcrumb + name + status + autosave */}
       <div className="flex min-w-0 items-center gap-1.5 text-sm">
         <a
@@ -240,10 +131,10 @@ export function EditorTopBar({
         >
           <ChevronLeft className="size-4" />
         </a>
-        <span className="text-muted-foreground">{channelLabel}</span>
-        <span className="text-muted-foreground/50">/</span>
+        <span className="hidden text-muted-foreground sm:inline">{channelLabel}</span>
+        <span className="hidden text-muted-foreground/50 sm:inline">/</span>
         <button
-          className="min-w-0 truncate font-semibold text-foreground transition-colors hover:text-muted-foreground"
+          className="min-w-0 truncate font-semibold text-foreground transition-colors hover:text-muted-foreground disabled:opacity-60"
           disabled={!onDocumentNameClick}
           onClick={onDocumentNameClick}
           type="button"
@@ -254,12 +145,13 @@ export function EditorTopBar({
         <AutosaveBadge state={autosave} />
       </div>
 
-      {/* Center: notice / error (absolute, so it doesn't push layout) */}
+      {/* Center: notice / error */}
       {(notice || error) && (
         <p
-          className={`absolute left-1/2 top-1/2 hidden -translate-x-1/2 -translate-y-1/2 truncate text-xs lg:block ${
-            error ? 'text-destructive' : 'text-muted-foreground'
-          }`}
+          className={cn(
+            'absolute left-1/2 top-1/2 hidden -translate-x-1/2 -translate-y-1/2 truncate text-xs lg:block',
+            error ? 'text-destructive' : 'text-muted-foreground',
+          )}
         >
           {error ?? notice}
         </p>
@@ -268,17 +160,34 @@ export function EditorTopBar({
       {/* Right: actions */}
       <div className="flex shrink-0 items-center gap-1.5">
         {secondaryActions}
-        <DropdownMenu align="end" items={moreActions} />
-        <button
-          className="inline-flex h-9 items-center gap-2 rounded-md bg-primary px-3 text-sm font-semibold text-primary-foreground transition-colors hover:bg-primary/90 disabled:pointer-events-none disabled:opacity-50 sm:px-4"
-          disabled={publishDisabled}
-          onClick={onPublish}
-          type="button"
-        >
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <Button aria-label="More actions" size="icon" variant="outline">
+              <MoreHorizontal className="size-4" />
+            </Button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="end" className="w-56">
+            {moreActions.map((item) => (
+              <React.Fragment key={item.id}>
+                <DropdownMenuItem
+                  disabled={item.disabled}
+                  key={`${item.id}-item`}
+                  onClick={item.onClick}
+                  variant={item.destructive ? 'destructive' : 'default'}
+                >
+                  {item.icon}
+                  <span className="min-w-0 truncate">{item.label}</span>
+                </DropdownMenuItem>
+                {item.separatorAfter && <DropdownMenuSeparator key={`${item.id}-separator`} />}
+              </React.Fragment>
+            ))}
+          </DropdownMenuContent>
+        </DropdownMenu>
+        <Button disabled={publishDisabled} onClick={onPublish} size="sm">
           {publishLabel}
-        </button>
+        </Button>
       </div>
-    </header>
+    </div>
   );
 }
 
@@ -286,15 +195,13 @@ export function EditorTopBar({
 /*  Editor left rail                                                   */
 /* ------------------------------------------------------------------ */
 
-export type EditorMode = 'editor' | 'preview';
-
 export type EditorLeftRailProps = {
   mode: EditorMode;
   onModeChange: (mode: EditorMode) => void;
-  /** Insert popover buttons rendered at the bottom of the rail */
   inserts: React.ReactNode;
-  /** Disable insert buttons (e.g. archived) */
   insertsDisabled?: boolean;
+  disabledModes?: Partial<Record<EditorMode, boolean>>;
+  hiddenModes?: Partial<Record<EditorMode, boolean>>;
 };
 
 export function EditorLeftRail({
@@ -302,6 +209,8 @@ export function EditorLeftRail({
   onModeChange,
   inserts,
   insertsDisabled,
+  disabledModes,
+  hiddenModes,
 }: EditorLeftRailProps) {
   return (
     <nav
@@ -312,26 +221,41 @@ export function EditorLeftRail({
       <div className="flex flex-col items-center gap-1">
         <RailToggleButton
           active={mode === 'editor'}
+          disabled={disabledModes?.editor}
           label="Editor"
           onClick={() => onModeChange('editor')}
         >
           <Pencil className="size-4" />
         </RailToggleButton>
+        {!hiddenModes?.preview && (
+          <RailToggleButton
+            active={mode === 'preview'}
+            disabled={disabledModes?.preview}
+            label="Preview"
+            onClick={() => onModeChange('preview')}
+          >
+            <Eye className="size-4" />
+          </RailToggleButton>
+        )}
         <RailToggleButton
-          active={mode === 'preview'}
-          label="Preview"
-          onClick={() => onModeChange('preview')}
+          active={mode === 'code'}
+          disabled={disabledModes?.code}
+          label="Code"
+          onClick={() => onModeChange('code')}
         >
-          <Eye className="size-4" />
+          <Code className="size-4" />
         </RailToggleButton>
       </div>
 
-      {/* Spacer pushes inserts to bottom */}
+      {/* Spacer */}
       <div className="flex-1" />
 
       {/* Insert popover buttons at bottom */}
       <div
-        className={`flex flex-col items-center gap-1 ${insertsDisabled ? 'pointer-events-none opacity-40' : ''}`}
+        className={cn(
+          'flex flex-col items-center gap-1',
+          insertsDisabled && 'pointer-events-none opacity-40',
+        )}
       >
         {inserts}
       </div>
@@ -342,29 +266,37 @@ export function EditorLeftRail({
 function RailToggleButton({
   active,
   children,
+  disabled,
   label,
   onClick,
 }: {
   active: boolean;
   children: React.ReactNode;
+  disabled?: boolean;
   label: string;
   onClick: () => void;
 }) {
   return (
-    <button
-      aria-label={label}
-      aria-pressed={active}
-      className={`inline-flex size-8 items-center justify-center rounded-md border transition-colors ${
-        active
-          ? 'border-foreground/20 bg-accent text-accent-foreground'
-          : 'border-transparent text-muted-foreground hover:bg-accent hover:text-accent-foreground'
-      }`}
-      onClick={onClick}
-      title={label}
-      type="button"
-    >
-      {children}
-    </button>
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <button
+          aria-label={label}
+          aria-pressed={active}
+          className={cn(
+            'inline-flex size-8 items-center justify-center rounded-md border transition-colors disabled:pointer-events-none disabled:opacity-50',
+            active
+              ? 'border-foreground/20 bg-accent text-accent-foreground'
+              : 'border-transparent text-muted-foreground hover:bg-accent hover:text-accent-foreground',
+          )}
+          disabled={disabled}
+          onClick={onClick}
+          type="button"
+        >
+          {children}
+        </button>
+      </TooltipTrigger>
+      <TooltipContent side="right">{label}</TooltipContent>
+    </Tooltip>
   );
 }
 
@@ -376,36 +308,34 @@ export type InsertPopoverButtonProps = {
   label: string;
   icon: React.ReactNode;
   disabled?: boolean;
-  /** Popover panel content */
   children: React.ReactNode;
 };
 
 export function InsertPopoverButton({ label, icon, disabled, children }: InsertPopoverButtonProps) {
   return (
-    <Popover
-      align="start"
-      panelMinWidth={220}
-      side="right"
-      trigger={({ toggle, open }) => (
-        <button
-          aria-expanded={open}
-          aria-label={`Insert ${label}`}
-          className="inline-flex size-8 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-accent-foreground disabled:pointer-events-none disabled:opacity-40"
-          disabled={disabled}
-          onClick={toggle}
-          title={label}
-          type="button"
-        >
-          {icon}
-        </button>
-      )}
-    >
-      {() => <div className="py-0.5">{children}</div>}
+    <Popover>
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <PopoverTrigger asChild>
+            <button
+              aria-label={`Insert ${label}`}
+              className="inline-flex size-8 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-accent-foreground disabled:pointer-events-none disabled:opacity-40"
+              disabled={disabled}
+              type="button"
+            >
+              {icon}
+            </button>
+          </PopoverTrigger>
+        </TooltipTrigger>
+        <TooltipContent side="right">{label}</TooltipContent>
+      </Tooltip>
+      <PopoverContent align="start" className="w-56 p-1" side="right" sideOffset={8}>
+        {children}
+      </PopoverContent>
     </Popover>
   );
 }
 
-/** A single item inside an insert popover. */
 export function InsertPopoverItem({
   icon,
   label,
@@ -421,7 +351,7 @@ export function InsertPopoverItem({
       onClick={onClick}
       type="button"
     >
-      {icon && <span className="shrink-0 text-muted-foreground">{icon}</span>}
+      {icon && <span className="shrink-0 text-muted-foreground [&_svg]:size-4">{icon}</span>}
       <span className="min-w-0 truncate">{label}</span>
     </button>
   );
@@ -437,7 +367,6 @@ export type InspectorPanelProps = {
   onClose: () => void;
   children: React.ReactNode;
   footer?: React.ReactNode;
-  /** Extra header actions (e.g. theme/css toggle buttons) */
   headerActions?: React.ReactNode;
 };
 
@@ -451,7 +380,6 @@ export function InspectorPanel({
 }: InspectorPanelProps) {
   return (
     <div className="flex h-full flex-col">
-      {/* Header */}
       <div className="flex items-start justify-between gap-3 border-b px-4 py-3">
         <div className="min-w-0">
           {eyebrow && (
@@ -463,22 +391,24 @@ export function InspectorPanel({
         </div>
         <div className="flex shrink-0 items-center gap-1">
           {headerActions}
-          <button
-            aria-label="Close sidebar"
-            className="inline-flex size-7 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-accent-foreground"
-            onClick={onClose}
-            title="Close sidebar"
-            type="button"
-          >
-            <PanelRightClose className="size-4" />
-          </button>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <button
+                aria-label="Close sidebar"
+                className="inline-flex size-7 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-accent-foreground"
+                onClick={onClose}
+                type="button"
+              >
+                <PanelRightClose className="size-4" />
+              </button>
+            </TooltipTrigger>
+            <TooltipContent side="left">Close sidebar</TooltipContent>
+          </Tooltip>
         </div>
       </div>
 
-      {/* Scrollable body */}
       <div className="min-h-0 flex-1 overflow-y-auto px-4 py-4">{children}</div>
 
-      {/* Optional footer */}
       {footer && <div className="border-t px-4 py-3">{footer}</div>}
     </div>
   );
@@ -494,7 +424,6 @@ export type MetadataFieldProps = {
   placeholder?: string;
   disabled?: boolean;
   onChange: (value: string) => void;
-  /** Start collapsed (user clicks label to expand) */
   collapsible?: boolean;
   defaultOpen?: boolean;
   type?: 'text' | 'email';
@@ -575,10 +504,10 @@ export type EditorChromeProps = {
   topBar: React.ReactNode;
   leftRail: React.ReactNode;
   canvas: React.ReactNode;
-  /** Right inspector panel; pass null to hide */
   inspector: React.ReactNode | null;
-  /** Floating button to re-open inspector when closed */
   reopenInspectorButton?: React.ReactNode;
+  /** Floating mobile-only buttons */
+  children?: React.ReactNode;
 };
 
 export function EditorChrome({
@@ -589,6 +518,7 @@ export function EditorChrome({
   canvas,
   inspector,
   reopenInspectorButton,
+  children,
 }: EditorChromeProps) {
   const hasInspector = inspector !== null;
   return (
@@ -600,9 +530,7 @@ export function EditorChrome({
       {topBar}
       <div className="flex min-h-0 flex-1">
         {leftRail}
-        <div className={`flex min-w-0 flex-1 flex-col overflow-hidden ${hasInspector ? '' : ''}`}>
-          {canvas}
-        </div>
+        <div className="flex min-w-0 flex-1 flex-col overflow-hidden">{canvas}</div>
         {hasInspector && (
           <aside
             aria-label="Inspector"
@@ -613,31 +541,28 @@ export function EditorChrome({
         )}
       </div>
       {reopenInspectorButton}
+      {children}
     </section>
   );
 }
 
 /* ------------------------------------------------------------------ */
-/*  Inspector reopen button (floating)                                 */
+/*  Floating buttons                                                   */
 /* ------------------------------------------------------------------ */
 
 export function InspectorReopenButton({ onClick }: { onClick: () => void }) {
   return (
-    <button
-      aria-label="Open inspector"
-      className="fixed bottom-4 right-4 z-30 inline-flex h-9 items-center gap-2 rounded-md border bg-background px-3 text-sm font-medium text-foreground shadow-lg transition-colors hover:bg-accent"
+    <Button
+      className="fixed bottom-4 right-4 z-30 shadow-lg"
       onClick={onClick}
-      type="button"
+      size="sm"
+      variant="outline"
     >
       <SquarePen className="size-4" />
       Inspector
-    </button>
+    </Button>
   );
 }
-
-/* ------------------------------------------------------------------ */
-/*  Reopen inserts button (mobile)                                     */
-/* ------------------------------------------------------------------ */
 
 export function MobileInsertButton({
   label = 'Insert',
@@ -649,15 +574,15 @@ export function MobileInsertButton({
   disabled?: boolean;
 }) {
   return (
-    <button
-      aria-label="Open insert menu"
-      className="fixed bottom-4 left-20 z-30 inline-flex h-9 items-center gap-2 rounded-md border bg-background px-3 text-sm font-medium text-foreground shadow-lg transition-colors hover:bg-accent disabled:pointer-events-none disabled:opacity-50 lg:hidden"
+    <Button
+      className="fixed bottom-4 left-20 z-30 shadow-lg lg:hidden"
       disabled={disabled}
       onClick={onClick}
-      type="button"
+      size="sm"
+      variant="outline"
     >
       <SquarePen className="size-4" />
       {label}
-    </button>
+    </Button>
   );
 }
