@@ -637,6 +637,41 @@ describe('finalizeOrderActivity inventory holds', () => {
     expect(dbState.destroy).toHaveBeenCalledTimes(1);
   });
 
+  it('claims only the waitlist offer reserved by the finalized checkout session', async () => {
+    dbState.tables.checkout_sessions.cs_1.cart = JSON.stringify({
+      items: [{ ticketTypeId: 'tt_1', quantity: 1 }],
+      buyerFields: {},
+      attendeeFields: {},
+      waitlistEntryId: 'wle_1',
+    });
+    dbState.tables.waitlist_entries = {
+      wle_1: {
+        id: 'wle_1',
+        tenant_id: 'tnt_1',
+        event_id: 'evt_1',
+        status: 'reserved',
+        reserved_checkout_session_id: 'cs_1',
+        reserved_until: new Date(Date.now() + 60_000),
+        claimed_at: null,
+      },
+    };
+
+    const result = await finalizeOrderActivity({
+      checkoutSessionId: 'cs_1',
+      tenantId: 'tnt_1',
+      paymentIntentId: 'pi_provider_1',
+    });
+
+    expect(result.ok).toBe(true);
+    expect(dbState.tables.waitlist_entries.wle_1).toMatchObject({
+      status: 'claimed',
+      reserved_checkout_session_id: null,
+      reserved_until: null,
+    });
+    expect(dbState.tables.waitlist_entries.wle_1.claimed_at).toBeInstanceOf(Date);
+    expect(dbState.destroy).toHaveBeenCalledTimes(1);
+  });
+
   it('finalizes attendee records from sanitized cart item answers before legacy ticket-type answers', async () => {
     dbState.tables.checkout_sessions.cs_1.cart = JSON.stringify({
       items: [
@@ -1021,6 +1056,20 @@ describe('releaseHoldActivity checkout session status', () => {
   });
 
   it('releases active holds and expires the checkout session after payment timeout', async () => {
+    dbState.tables.checkout_sessions.cs_1.cart = JSON.stringify({
+      items: [{ ticketTypeId: 'tt_1', quantity: 1 }],
+      waitlistEntryId: 'wle_1',
+    });
+    dbState.tables.waitlist_entries = {
+      wle_1: {
+        id: 'wle_1',
+        tenant_id: 'tnt_1',
+        status: 'reserved',
+        reserved_checkout_session_id: 'cs_1',
+        reserved_until: new Date(Date.now() + 60_000),
+      },
+    };
+
     const result = await releaseHoldActivity({
       checkoutSessionId: 'cs_1',
       checkoutSessionStatus: 'expired',
@@ -1030,6 +1079,11 @@ describe('releaseHoldActivity checkout session status', () => {
     expect(dbState.tables.checkout_holds.hld_1.status).toBe('released');
     expect(dbState.tables.checkout_sessions.cs_1.status).toBe('expired');
     expect(dbState.tables.inventory_pools.pool_1.sold_count).toBe(0);
+    expect(dbState.tables.waitlist_entries.wle_1).toMatchObject({
+      status: 'offered',
+      reserved_checkout_session_id: null,
+      reserved_until: null,
+    });
     expect(dbState.destroy).toHaveBeenCalledTimes(1);
   });
 

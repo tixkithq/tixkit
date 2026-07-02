@@ -615,9 +615,117 @@ function assertWaitlistOfferUsable(
   if (claimedItem.quantity > entry.quantity) {
     throw new ValidationError('Checkout quantity exceeds the waitlist offer quantity');
   }
-  if (input.buyerEmail && input.buyerEmail.trim().toLowerCase() !== entry.buyer_email) {
+  if (!input.buyerEmail) {
+    throw new ValidationError('Waitlist offer requires the checkout buyer email');
+  }
+  if (input.buyerEmail.trim().toLowerCase() !== entry.buyer_email) {
     throw new ValidationError('Waitlist offer email does not match the checkout buyer');
   }
+}
+
+function normalizeCheckoutBuyer(
+  buyer: CreateCheckoutSessionInput['buyer'],
+): CreateCheckoutSessionInput['buyer'] | undefined {
+  if (!buyer) return undefined;
+  const normalizedEmail = buyer.email?.trim().toLowerCase();
+  return {
+    ...buyer,
+    ...(normalizedEmail ? { email: normalizedEmail } : {}),
+  };
+}
+
+async function releaseExpiredWaitlistReservation(input: {
+  db: Database;
+  entryId: string;
+  tenantId: string;
+  now: Date;
+}): Promise<boolean> {
+  const result = await input.db
+    .updateTable('waitlist_entries')
+    .set({
+      status: 'offered',
+      reserved_checkout_session_id: null,
+      reserved_until: null,
+      updated_at: input.now,
+    })
+    .where('id', '=', input.entryId)
+    .where('tenant_id', '=', input.tenantId)
+    .where('status', '=', 'reserved')
+    .where('reserved_until', '<=', input.now)
+    .executeTakeFirst();
+  return Number((result as { numUpdatedRows?: bigint | number }).numUpdatedRows ?? 0) > 0;
+}
+
+async function reserveWaitlistOfferForCheckout(input: {
+  db: Database;
+  entryId: string;
+  tenantId: string;
+  eventId: string;
+  checkoutSessionId: string;
+  reservedUntil: Date;
+  now: Date;
+}): Promise<void> {
+  await releaseExpiredWaitlistReservation(input);
+  const result = await input.db
+    .updateTable('waitlist_entries')
+    .set({
+      status: 'reserved',
+      reserved_checkout_session_id: input.checkoutSessionId,
+      reserved_until: input.reservedUntil,
+      updated_at: input.now,
+    })
+    .where('id', '=', input.entryId)
+    .where('tenant_id', '=', input.tenantId)
+    .where('event_id', '=', input.eventId)
+    .where('status', '=', 'offered')
+    .executeTakeFirst();
+  if (Number((result as { numUpdatedRows?: bigint | number }).numUpdatedRows ?? 0) === 0) {
+    throw new ValidationError('Waitlist offer is already reserved');
+  }
+}
+
+async function releaseWaitlistCheckoutReservation(input: {
+  db: Database;
+  entryId: string;
+  tenantId: string;
+  checkoutSessionId: string;
+  now?: Date;
+}): Promise<void> {
+  const now = input.now ?? new Date();
+  await input.db
+    .updateTable('waitlist_entries')
+    .set({
+      status: 'offered',
+      reserved_checkout_session_id: null,
+      reserved_until: null,
+      updated_at: now,
+    })
+    .where('id', '=', input.entryId)
+    .where('tenant_id', '=', input.tenantId)
+    .where('reserved_checkout_session_id', '=', input.checkoutSessionId)
+    .where('status', '=', 'reserved')
+    .execute();
+}
+
+async function updateWaitlistReservationExpiry(input: {
+  db: Database;
+  entryId: string;
+  tenantId: string;
+  checkoutSessionId: string;
+  reservedUntil: Date;
+  now: Date;
+}): Promise<void> {
+  await input.db
+    .updateTable('waitlist_entries')
+    .set({
+      reserved_until: input.reservedUntil,
+      updated_at: input.now,
+    })
+    .where('id', '=', input.entryId)
+    .where('tenant_id', '=', input.tenantId)
+    .where('reserved_checkout_session_id', '=', input.checkoutSessionId)
+    .where('status', '=', 'reserved')
+    .execute();
 }
 
 type DiscountCodeRow = {
@@ -1119,10 +1227,14 @@ export const checkoutRoutes: FastifyPluginAsync = async (app) => {
   app.post('/checkout/sessions', async (request, reply) => {
     const isDev = process.env.NODE_ENV === 'development';
     const body = parseBody(createCheckoutSessionSchema(isDev), request.body);
+    const checkoutBuyer = normalizeCheckoutBuyer(body.buyer);
     const idempotencyKey = requireIdempotencyKey(request);
 
     if (!body.items || body.items.length === 0) {
       throw new ValidationError('Checkout requires at least one item');
+    }
+    if (body.waitlistClaimToken && !checkoutBuyer?.email) {
+      throw new ValidationError('Waitlist offer requires the checkout buyer email');
     }
 
     const eventRepo = new EventRepository(db);
@@ -1140,7 +1252,7 @@ export const checkoutRoutes: FastifyPluginAsync = async (app) => {
       {
         key: idempotencyKey,
         tenantId: event.tenant_id,
-        requestHash: hashRequest(body),
+        requestHash: hashRequest({ ...body, buyer: checkoutBuyer }),
       },
       async () => {
         const resaleItems = body.items.filter((item) => item.resaleListingId);
@@ -1212,7 +1324,7 @@ export const checkoutRoutes: FastifyPluginAsync = async (app) => {
           ) {
             throw new ValidationError(`Ticket listing ${listingId} is already reserved`);
           }
-          const buyerEmail = body.buyer?.email?.trim().toLowerCase();
+          const buyerEmail = checkoutBuyer?.email;
           if (
             buyerEmail &&
             typeof listing.seller_buyer_email === 'string' &&
@@ -1299,7 +1411,7 @@ export const checkoutRoutes: FastifyPluginAsync = async (app) => {
                 brandId: event.brand_id,
                 currency: quote.currency,
                 cart: cart as Record<string, unknown>,
-                buyer: (body.buyer as Record<string, unknown>) ?? {},
+                buyer: (checkoutBuyer as Record<string, unknown>) ?? {},
                 quote,
                 expiresAt: reservedUntil,
                 idempotencyKey,
@@ -1379,10 +1491,28 @@ export const checkoutRoutes: FastifyPluginAsync = async (app) => {
           throw new NotFoundError('WaitlistOffer', 'claim');
         }
         if (waitlistEntry) {
+          const now = new Date();
+          if (
+            waitlistEntry.status === 'reserved' &&
+            waitlistEntry.reserved_until &&
+            new Date(waitlistEntry.reserved_until) <= now
+          ) {
+            const released = await releaseExpiredWaitlistReservation({
+              db,
+              entryId: waitlistEntry.id,
+              tenantId: event.tenant_id,
+              now,
+            });
+            if (released) {
+              waitlistEntry.status = 'offered';
+              waitlistEntry.reserved_checkout_session_id = null;
+              waitlistEntry.reserved_until = null;
+            }
+          }
           assertWaitlistOfferUsable(waitlistEntry, {
             eventId: body.eventId,
             items: body.items,
-            buyerEmail: body.buyer?.email,
+            buyerEmail: checkoutBuyer?.email,
           });
         }
 
@@ -1510,14 +1640,14 @@ export const checkoutRoutes: FastifyPluginAsync = async (app) => {
             quantity: item.quantity,
             unitAmountCents: item.unitAmountCents,
             accessCode: body.accessCode,
-            buyerEmail: body.buyer?.email,
+            buyerEmail: checkoutBuyer?.email,
             accessRules: accessRuleValidationRecords(itemAccessRules),
           });
           if (ttRecord.visibility === 'locked' || ttRecord.requires_access_code) {
             const matchedAccessRule = itemAccessRules?.find((row) =>
               accessRuleRowMatches(row, {
                 accessCode: body.accessCode,
-                buyerEmail: body.buyer?.email,
+                buyerEmail: checkoutBuyer?.email,
                 now: new Date(answeredAt),
               }),
             );
@@ -1587,7 +1717,21 @@ export const checkoutRoutes: FastifyPluginAsync = async (app) => {
         // Reserve inventory across every pool the cart draws from.
         const sessionRepo = new CheckoutSessionRepository(db);
         let sessionCreated = false;
+        let waitlistReserved = false;
         try {
+          if (waitlistEntry) {
+            await reserveWaitlistOfferForCheckout({
+              db,
+              entryId: waitlistEntry.id,
+              tenantId: event.tenant_id,
+              eventId: body.eventId,
+              checkoutSessionId: sessionId,
+              reservedUntil: new Date(Date.now() + 10 * 60 * 1000),
+              now: new Date(answeredAt),
+            });
+            waitlistReserved = true;
+          }
+
           const reservation =
             reservationItems.length > 0
               ? await inventoryService.reserveCart({
@@ -1595,6 +1739,17 @@ export const checkoutRoutes: FastifyPluginAsync = async (app) => {
                   checkoutSessionId: sessionId,
                 })
               : { primaryHoldId: null, expiresAt: new Date(Date.now() + 10 * 60 * 1000) };
+
+          if (waitlistEntry) {
+            await updateWaitlistReservationExpiry({
+              db,
+              entryId: waitlistEntry.id,
+              tenantId: event.tenant_id,
+              checkoutSessionId: sessionId,
+              reservedUntil: reservation.expiresAt,
+              now: new Date(),
+            });
+          }
 
           const session = await sessionRepo.create({
             id: sessionId,
@@ -1604,7 +1759,7 @@ export const checkoutRoutes: FastifyPluginAsync = async (app) => {
             holdId: reservation.primaryHoldId ?? undefined,
             currency: quote.currency,
             cart: cart as Record<string, unknown>,
-            buyer: (body.buyer as Record<string, unknown>) ?? {},
+            buyer: (checkoutBuyer as Record<string, unknown>) ?? {},
             quote: quote as Record<string, unknown>,
             expiresAt: reservation.expiresAt,
             idempotencyKey,
@@ -1622,6 +1777,14 @@ export const checkoutRoutes: FastifyPluginAsync = async (app) => {
             checkoutSessionId: sessionId,
             sessionCreated,
           });
+          if (waitlistEntry && waitlistReserved) {
+            await releaseWaitlistCheckoutReservation({
+              db,
+              entryId: waitlistEntry.id,
+              tenantId: event.tenant_id,
+              checkoutSessionId: sessionId,
+            });
+          }
           throw error;
         }
       },
@@ -1896,7 +2059,28 @@ export const checkoutRoutes: FastifyPluginAsync = async (app) => {
         cancelUrl: 'cancel_url',
       },
     );
-    if (updateData.buyer) updateData.buyer = JSON.stringify(updateData.buyer);
+    if (updateData.buyer) {
+      const cart = parseJsonValue<{ waitlistEntryId?: string }>(session.cart, {});
+      const nextBuyer = normalizeCheckoutBuyer(
+        updateData.buyer as CreateCheckoutSessionInput['buyer'],
+      );
+      if (cart.waitlistEntryId) {
+        if (!nextBuyer?.email) {
+          throw new ValidationError('Waitlist checkout buyer email cannot be removed');
+        }
+        const waitlistEntry = await db
+          .selectFrom('waitlist_entries')
+          .select(['buyer_email'])
+          .where('id', '=', cart.waitlistEntryId)
+          .where('tenant_id', '=', session.tenant_id)
+          .executeTakeFirst();
+        if (!waitlistEntry) throw new NotFoundError('WaitlistOffer', cart.waitlistEntryId);
+        if (nextBuyer.email !== waitlistEntry.buyer_email) {
+          throw new ValidationError('Waitlist checkout buyer email cannot be changed');
+        }
+      }
+      updateData.buyer = JSON.stringify(nextBuyer ?? {});
+    }
     const updated = await repo.update(sessionId, updateData);
     return publicCheckoutSession(updated);
   });

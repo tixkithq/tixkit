@@ -13,6 +13,8 @@ import { EventResalePolicyMigration } from '../../migrations/0038_event_resale_p
 import { ResaleCheckoutReservationsMigration } from '../../migrations/0039_resale_checkout_reservations.js';
 import { ScannerDeviceScopesMigration } from '../../migrations/0040_scanner_device_scopes.js';
 import { UploadArtifactConsumptionMigration } from '../../migrations/0041_upload_artifact_consumption.js';
+import { AccessRuleRedemptionsMigration } from '../../migrations/0042_access_rule_redemptions.js';
+import { WaitlistCheckoutReservationsMigration } from '../../migrations/0043_waitlist_checkout_reservations.js';
 
 const offlineCheckInBulkSyncMigrationPath = new URL(
   '../../migrations/0034_offline_check_in_bulk_sync.ts',
@@ -179,7 +181,7 @@ describe('OrderSalesChannelMigration', () => {
   it('is registered with the production migrator provider', async () => {
     const migrations = await new TixkitMigrationProvider().getMigrations();
 
-    expect(Object.keys(migrations).at(-1)).toBe('0041_upload_artifact_consumption');
+    expect(Object.keys(migrations).at(-1)).toBe('0043_waitlist_checkout_reservations');
     expect(migrations['0031_order_sales_channel']).toBe(OrderSalesChannelMigration);
     expect(migrations['0032_scan_logs_ticket_index']).toBe(ScanLogsTicketIndexMigration);
     expect(migrations['0033_email_jobs_template_version_fk']).toBe(
@@ -199,6 +201,10 @@ describe('OrderSalesChannelMigration', () => {
     );
     expect(migrations['0040_scanner_device_scopes']).toBe(ScannerDeviceScopesMigration);
     expect(migrations['0041_upload_artifact_consumption']).toBe(UploadArtifactConsumptionMigration);
+    expect(migrations['0042_access_rule_redemptions']).toBe(AccessRuleRedemptionsMigration);
+    expect(migrations['0043_waitlist_checkout_reservations']).toBe(
+      WaitlistCheckoutReservationsMigration,
+    );
   });
 
   it('keeps event resale policy columns portable across supported SQL drivers', () => {

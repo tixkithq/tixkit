@@ -15,6 +15,7 @@ import { questionRoutes } from '../../routes/modules/questions.js';
 import { authRoutes } from '../../routes/modules/auth.js';
 import { publicRoutes } from '../../routes/modules/public.js';
 import { PricingEngine } from '../../services/pricing.js';
+import { hashWaitlistClaimToken } from '../../routes/modules/waitlist.js';
 
 const getMockColumnValue = (row: Record<string, unknown>, column: string) =>
   row[column] ?? row[column.split('.').at(-1) ?? column];
@@ -24,6 +25,24 @@ const mockValuesEqual = (rowValue: unknown, filterValue: unknown): boolean => {
     return rowValue === (filterValue ? 1 : 0);
   }
   return rowValue === filterValue;
+};
+
+const mockValuesCompare = (rowValue: unknown, filterValue: unknown): number | null => {
+  const left =
+    rowValue instanceof Date
+      ? rowValue.getTime()
+      : typeof rowValue === 'string' && filterValue instanceof Date
+        ? new Date(rowValue).getTime()
+        : rowValue;
+  const right =
+    filterValue instanceof Date
+      ? filterValue.getTime()
+      : typeof filterValue === 'string' && rowValue instanceof Date
+        ? new Date(filterValue).getTime()
+        : filterValue;
+  if (typeof left === 'number' && typeof right === 'number') return left - right;
+  if (typeof left === 'string' && typeof right === 'string') return left.localeCompare(right);
+  return null;
 };
 
 const likePatternMatches = (rowValue: unknown, pattern: unknown): boolean => {
@@ -58,6 +77,23 @@ const mockConditionMatches = (row: Record<string, unknown>, condition: MockCondi
 
   const rowValue = getMockColumnValue(row, condition.column);
   if (condition.op === '=') return mockValuesEqual(rowValue, condition.value);
+  if (condition.op === '!=') return !mockValuesEqual(rowValue, condition.value);
+  if (condition.op === '<') {
+    const compared = mockValuesCompare(rowValue, condition.value);
+    return compared == null ? false : compared < 0;
+  }
+  if (condition.op === '<=') {
+    const compared = mockValuesCompare(rowValue, condition.value);
+    return compared == null ? false : compared <= 0;
+  }
+  if (condition.op === '>') {
+    const compared = mockValuesCompare(rowValue, condition.value);
+    return compared == null ? false : compared > 0;
+  }
+  if (condition.op === '>=') {
+    const compared = mockValuesCompare(rowValue, condition.value);
+    return compared == null ? false : compared >= 0;
+  }
   if (condition.op === 'in' && Array.isArray(condition.value)) {
     return condition.value.includes(rowValue);
   }
@@ -212,6 +248,23 @@ function createMockDb(tables: Record<string, unknown> = {}): unknown {
             filters.every(([column, op, value]) => {
               const rowValue = getMockColumnValue(row, column);
               if (op === '=') return mockValuesEqual(rowValue, value);
+              if (op === '!=') return !mockValuesEqual(rowValue, value);
+              if (op === '<') {
+                const compared = mockValuesCompare(rowValue, value);
+                return compared == null ? false : compared < 0;
+              }
+              if (op === '<=') {
+                const compared = mockValuesCompare(rowValue, value);
+                return compared == null ? false : compared <= 0;
+              }
+              if (op === '>') {
+                const compared = mockValuesCompare(rowValue, value);
+                return compared == null ? false : compared > 0;
+              }
+              if (op === '>=') {
+                const compared = mockValuesCompare(rowValue, value);
+                return compared == null ? false : compared >= 0;
+              }
               if (op === 'in' && Array.isArray(value)) return value.includes(rowValue);
               if (op === 'is') return value === null ? rowValue === null : rowValue === value;
               if (op === 'is not') return value === null ? rowValue !== null : rowValue !== value;
@@ -6570,6 +6623,155 @@ describe('checkout pricing tamper resistance', () => {
 
     expect(res.statusCode).toBe(404);
     expect(tables.checkout_sessions).toEqual([]);
+  });
+
+  it('requires the offered buyer email before reserving a waitlist claim', async () => {
+    const reserveCart = vi.fn(async () => ({
+      primaryHoldId: 'hld_waitlist',
+      expiresAt: new Date(Date.now() + 600_000),
+    }));
+    const tables = pricingTables({
+      waitlist_entries: [
+        {
+          id: 'wle_1',
+          tenant_id: 'tnt_1',
+          organization_id: 'org_1',
+          brand_id: 'brd_1',
+          event_id: 'evt_pricing',
+          ticket_type_id: 'tt_paid',
+          buyer_email: 'buyer@test.com',
+          buyer_first_name: 'Ada',
+          buyer_last_name: 'Lovelace',
+          buyer_phone: null,
+          quantity: 2,
+          status: 'offered',
+          offer_expires_at: new Date(Date.now() + 600_000),
+          claim_token_hash: hashWaitlistClaimToken('claim-token-123456'),
+          reserved_checkout_session_id: null,
+          reserved_until: null,
+          offered_at: new Date(),
+          claimed_at: null,
+          cancelled_at: null,
+          created_at: new Date(),
+          updated_at: new Date(),
+        },
+      ],
+    });
+    const app = await setupApp(checkoutRoutes, makePrincipal(), tables, {
+      pricingEngine: new PricingEngine(),
+      inventoryService: { reserveCart },
+    });
+
+    const res = await app.inject({
+      method: 'POST',
+      url: '/checkout/sessions',
+      headers: { 'idempotency-key': 'waitlist_missing_email' },
+      payload: {
+        eventId: 'evt_pricing',
+        waitlistClaimToken: 'claim-token-123456',
+        items: [{ ticketTypeId: 'tt_paid', quantity: 1 }],
+      },
+    });
+
+    expect(res.statusCode).toBe(400);
+    expect(res.json().message).toContain('Waitlist offer requires the checkout buyer email');
+    expect(reserveCart).not.toHaveBeenCalled();
+    expect(tables.checkout_sessions).toEqual([]);
+    expect(
+      ((tables as Record<string, unknown>).waitlist_entries as Array<Record<string, unknown>>)[0],
+    ).toMatchObject({
+      status: 'offered',
+      reserved_checkout_session_id: null,
+    });
+    await app.close();
+  });
+
+  it('binds one open checkout session to a waitlist claim token and blocks another hold', async () => {
+    const holdExpiry = new Date(Date.now() + 600_000);
+    const reserveCart = vi.fn(async () => ({
+      primaryHoldId: 'hld_waitlist',
+      expiresAt: holdExpiry,
+    }));
+    const tables = pricingTables({
+      waitlist_entries: [
+        {
+          id: 'wle_1',
+          tenant_id: 'tnt_1',
+          organization_id: 'org_1',
+          brand_id: 'brd_1',
+          event_id: 'evt_pricing',
+          ticket_type_id: 'tt_paid',
+          buyer_email: 'buyer@test.com',
+          buyer_first_name: 'Ada',
+          buyer_last_name: 'Lovelace',
+          buyer_phone: null,
+          quantity: 2,
+          status: 'offered',
+          offer_expires_at: new Date(Date.now() + 600_000),
+          claim_token_hash: hashWaitlistClaimToken('claim-token-123456'),
+          reserved_checkout_session_id: null,
+          reserved_until: null,
+          offered_at: new Date(),
+          claimed_at: null,
+          cancelled_at: null,
+          created_at: new Date(),
+          updated_at: new Date(),
+        },
+      ],
+    });
+    const app = await setupApp(checkoutRoutes, makePrincipal(), tables, {
+      pricingEngine: new PricingEngine(),
+      inventoryService: { reserveCart },
+    });
+
+    const first = await app.inject({
+      method: 'POST',
+      url: '/checkout/sessions',
+      headers: { 'idempotency-key': 'waitlist_first' },
+      payload: {
+        eventId: 'evt_pricing',
+        buyer: { email: 'BUYER@Test.com' },
+        waitlistClaimToken: 'claim-token-123456',
+        items: [{ ticketTypeId: 'tt_paid', quantity: 1 }],
+      },
+    });
+    const second = await app.inject({
+      method: 'POST',
+      url: '/checkout/sessions',
+      headers: { 'idempotency-key': 'waitlist_second' },
+      payload: {
+        eventId: 'evt_pricing',
+        buyer: { email: 'buyer@test.com' },
+        waitlistClaimToken: 'claim-token-123456',
+        items: [{ ticketTypeId: 'tt_paid', quantity: 1 }],
+      },
+    });
+
+    expect(first.statusCode).toBe(201);
+    expect(second.statusCode).toBe(400);
+    expect(second.json().message).toContain('Waitlist offer is not available');
+    expect(reserveCart).toHaveBeenCalledTimes(1);
+    expect(tables.checkout_sessions).toHaveLength(1);
+    const storedSession = (tables.checkout_sessions as Array<{ id: string; buyer: string }>)[0];
+    expect(JSON.parse(storedSession.buyer)).toMatchObject({ email: 'buyer@test.com' });
+    expect(
+      ((tables as Record<string, unknown>).waitlist_entries as Array<Record<string, unknown>>)[0],
+    ).toMatchObject({
+      status: 'reserved',
+      reserved_checkout_session_id: storedSession.id,
+      reserved_until: holdExpiry,
+    });
+
+    const patch = await app.inject({
+      method: 'PATCH',
+      url: `/checkout/sessions/${storedSession.id}`,
+      headers: { 'x-checkout-session-token': first.json().clientToken },
+      payload: { buyer: { email: 'attacker@test.com' } },
+    });
+    expect(patch.statusCode).toBe(400);
+    expect(patch.json().message).toContain('Waitlist checkout buyer email cannot be changed');
+
+    await app.close();
   });
 
   it('rejects client-supplied unit amounts for paid tickets', async () => {

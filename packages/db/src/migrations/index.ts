@@ -40,3 +40,4 @@ export { ResaleCheckoutReservationsMigration } from './0039_resale_checkout_rese
 export { ScannerDeviceScopesMigration } from './0040_scanner_device_scopes.js';
 export { UploadArtifactConsumptionMigration } from './0041_upload_artifact_consumption.js';
 export { AccessRuleRedemptionsMigration } from './0042_access_rule_redemptions.js';
+export { WaitlistCheckoutReservationsMigration } from './0043_waitlist_checkout_reservations.js';

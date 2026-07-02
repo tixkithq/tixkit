@@ -16,6 +16,15 @@ function waitlistClaimUrl(token: string): string {
   return url.toString();
 }
 
+function parseStoredJson<T>(value: unknown, fallback: T): T {
+  if (typeof value !== 'string') return fallback;
+  try {
+    return JSON.parse(value) as T;
+  } catch {
+    return fallback;
+  }
+}
+
 export async function expireStaleHoldsActivity(): Promise<
   WorkflowActivityResult<{ expiredCount: number }>
 > {
@@ -48,13 +57,43 @@ export async function expireStaleSessionsActivity(): Promise<
 > {
   const db = createDb();
   try {
-    const result = await db
-      .updateTable('checkout_sessions')
-      .set({ status: 'expired', updated_at: new Date() })
+    const now = new Date();
+    const expiredSessions = await db
+      .selectFrom('checkout_sessions')
+      .select(['id', 'tenant_id', 'cart'])
       .where('status', '=', 'open')
-      .where('expires_at', '<', new Date())
+      .where('expires_at', '<', now)
       .where('payment_intent_id', 'is', null)
       .execute();
+
+    const result = await db.transaction().execute(async (trx) => {
+      for (const session of expiredSessions) {
+        const cart = parseStoredJson<{ waitlistEntryId?: string }>(session.cart, {});
+        if (!cart.waitlistEntryId) continue;
+        // eslint-disable-next-line no-await-in-loop -- each reservation release is tied to the expired session row.
+        await trx
+          .updateTable('waitlist_entries')
+          .set({
+            status: 'offered',
+            reserved_checkout_session_id: null,
+            reserved_until: null,
+            updated_at: now,
+          })
+          .where('id', '=', cart.waitlistEntryId)
+          .where('tenant_id', '=', session.tenant_id)
+          .where('reserved_checkout_session_id', '=', session.id)
+          .where('status', '=', 'reserved')
+          .execute();
+      }
+
+      return trx
+        .updateTable('checkout_sessions')
+        .set({ status: 'expired', updated_at: now })
+        .where('status', '=', 'open')
+        .where('expires_at', '<', now)
+        .where('payment_intent_id', 'is', null)
+        .execute();
+    });
     return okResult({
       expiredCount: Number(
         (result[0] as { numUpdatedRows?: bigint } | undefined)?.numUpdatedRows ?? 0,

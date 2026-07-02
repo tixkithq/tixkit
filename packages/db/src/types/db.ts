@@ -562,6 +562,8 @@ export interface WaitlistEntryTable {
   status: string;
   offer_expires_at: Timestamp | null;
   claim_token_hash: string | null;
+  reserved_checkout_session_id: string | null;
+  reserved_until: Timestamp | null;
   offered_at: Timestamp | null;
   claimed_at: Timestamp | null;
   cancelled_at: Timestamp | null;

@@ -1829,13 +1829,16 @@ export async function finalizeOrderActivity(input: {
             .updateTable('waitlist_entries')
             .set({
               status: 'claimed',
+              reserved_checkout_session_id: null,
+              reserved_until: null,
               claimed_at: now,
               updated_at: now,
             })
             .where('id', '=', cart.waitlistEntryId)
             .where('tenant_id', '=', input.tenantId)
             .where('event_id', '=', session.event_id)
-            .where('status', '=', 'offered')
+            .where('status', '=', 'reserved')
+            .where('reserved_checkout_session_id', '=', input.checkoutSessionId)
             .executeTakeFirst();
           const changedRows = Number(
             (waitlistClaim as { numUpdatedRows?: bigint }).numUpdatedRows ?? 0,
@@ -2502,6 +2505,7 @@ export async function releaseHoldActivity(input: {
         if (session) {
           const cart = parseStoredJson<{
             items?: Array<{ resaleListingId?: string }>;
+            waitlistEntryId?: string;
           }>(session.cart);
           const resaleListingIds = [
             ...new Set(
@@ -2522,6 +2526,21 @@ export async function releaseHoldActivity(input: {
               .where('id', 'in', resaleListingIds)
               .where('reserved_checkout_session_id', '=', input.checkoutSessionId)
               .where('status', '=', 'listed')
+              .execute();
+          }
+          if (cart.waitlistEntryId) {
+            await trx
+              .updateTable('waitlist_entries')
+              .set({
+                status: 'offered',
+                reserved_checkout_session_id: null,
+                reserved_until: null,
+                updated_at: now,
+              })
+              .where('id', '=', cart.waitlistEntryId)
+              .where('tenant_id', '=', session.tenant_id)
+              .where('reserved_checkout_session_id', '=', input.checkoutSessionId)
+              .where('status', '=', 'reserved')
               .execute();
           }
         }
