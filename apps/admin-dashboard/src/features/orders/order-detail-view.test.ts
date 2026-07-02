@@ -269,4 +269,88 @@ describe('OrderDetailView', () => {
     expect(screen.getByText('pending')).toBeInTheDocument();
     expect(screen.getByText('Order Created')).toBeInTheDocument();
   });
+
+  it('keeps long order detail text inside responsive row containers', () => {
+    const longOrderId = 'ord_very_long_mobile_reference_1234567890abcdef1234567890abcdef';
+    const longEmail =
+      'extremely.long.attendee.email.address.with.no.breaks.1234567890@example-subdomain-with-long-name.test';
+    const longLineItem =
+      'VIP table package with a very long merchandise bundle description and operational fulfillment notes';
+    const longRefundReason =
+      'Refund requested after a very long support escalation reference that should wrap inside the ledger row';
+
+    orderState.data = makeOrder({
+      id: longOrderId,
+      buyerEmail: longEmail,
+      lineItems: [
+        {
+          id: 'oli_long',
+          orderId: longOrderId,
+          ticketTypeId: 'tt_vip',
+          description: longLineItem,
+          quantity: 1,
+          unitPriceCents: 12_000,
+          subtotalCents: 12_000,
+          discountCents: 1_000,
+          taxCents: 800,
+          feeCents: 400,
+          totalCents: 12_200,
+          currency: 'USD',
+          createdAt: '2026-01-01T10:00:00.000Z',
+          updatedAt: '2026-01-01T10:00:00.000Z',
+        },
+      ],
+      attendees: [
+        {
+          id: 'att_long',
+          orderId: longOrderId,
+          eventId: 'evt_1',
+          ticketTypeId: 'tt_vip',
+          ticketId: 'tkt_1',
+          firstName: '',
+          lastName: '',
+          name: '',
+          email: longEmail,
+          ticketTypeName: 'VIP table package with a long ticket type name',
+          status: 'checked_in',
+          createdAt: '2026-01-01T10:00:00.000Z',
+        },
+      ],
+      refunds: [
+        {
+          id: 'ref_long',
+          orderId: longOrderId,
+          amountCents: 3_000,
+          currency: 'USD',
+          status: 'succeeded',
+          reason: longRefundReason,
+          createdAt: '2026-01-02T10:00:00.000Z',
+          updatedAt: '2026-01-02T10:00:00.000Z',
+        },
+      ],
+      timeline: [
+        {
+          id: 'otl_long',
+          orderId: longOrderId,
+          type: 'order.paid',
+          description:
+            'Payment captured after a long gateway authorization reference that should wrap cleanly',
+          createdAt: '2026-01-01T10:05:00.000Z',
+        },
+      ],
+    });
+
+    const { container } = render(React.createElement(OrderDetailView, { orderId: longOrderId }));
+
+    expect(screen.getByRole('heading', { name: longOrderId })).toHaveClass('break-all');
+    const longEmailNodes = screen.getAllByText(longEmail, { selector: 'p' });
+    expect(longEmailNodes).toHaveLength(2);
+    expect(longEmailNodes[0]).toHaveClass('break-all');
+    expect(longEmailNodes[1]).toHaveClass('break-words');
+    expect(screen.getByText(longLineItem)).toHaveClass('break-words');
+    expect(screen.getByText(longRefundReason)).toHaveClass('break-words');
+    expect(screen.getByText('checked_in')).toHaveClass('shrink-0');
+    expect(screen.getByText('$122.00')).toHaveClass('shrink-0');
+    expect(container.querySelectorAll('.min-w-0').length).toBeGreaterThanOrEqual(6);
+  });
 });

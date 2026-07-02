@@ -103,17 +103,19 @@ export function OrderDetailView({ orderId }: { orderId: string }) {
         </Link>
       </Button>
 
-      <div className="flex flex-wrap items-start justify-between gap-2">
-        <div className="space-y-1">
-          <div className="flex items-center gap-3">
-            <h1 className="text-2xl font-bold tracking-tight font-mono">{order.id}</h1>
-            <OrderStatusBadge status={order.status} />
+      <div className="flex flex-col items-start justify-between gap-3 sm:flex-row">
+        <div className="min-w-0 space-y-1">
+          <div className="flex min-w-0 flex-wrap items-center gap-3">
+            <h1 className="break-all font-mono text-2xl font-bold tracking-tight">{order.id}</h1>
+            <div className="shrink-0">
+              <OrderStatusBadge status={order.status} />
+            </div>
           </div>
-          <p className="text-sm text-muted-foreground">
+          <p className="break-words text-sm text-muted-foreground">
             {order.eventTitle} · {formatDate(order.createdAt)}
           </p>
         </div>
-        <div className="flex gap-2">
+        <div className="flex shrink-0 gap-2">
           {canCancel && (
             <Button variant="outline" onClick={() => setCancelOpen(true)}>
               <Ban className="size-4" />
@@ -136,10 +138,10 @@ export function OrderDetailView({ orderId }: { orderId: string }) {
           </CardHeader>
           <CardContent className="space-y-3">
             <div className="flex items-center gap-3">
-              <User className="size-5 text-muted-foreground" />
-              <div>
-                <p className="font-medium">{order.buyerName ?? 'Unknown'}</p>
-                <p className="text-sm text-muted-foreground">{order.buyerEmail}</p>
+              <User className="size-5 shrink-0 text-muted-foreground" />
+              <div className="min-w-0">
+                <p className="break-words font-medium">{order.buyerName ?? 'Unknown'}</p>
+                <p className="break-all text-sm text-muted-foreground">{order.buyerEmail}</p>
               </div>
             </div>
             <div className="border-t pt-3">
@@ -163,7 +165,9 @@ export function OrderDetailView({ orderId }: { orderId: string }) {
               </div>
               <div className="flex justify-between text-sm">
                 <span className="text-muted-foreground">Payment</span>
-                <Badge variant="outline">{order.paymentProvider ?? '—'}</Badge>
+                <Badge variant="outline" className="shrink-0">
+                  {order.paymentProvider ?? '—'}
+                </Badge>
               </div>
             </div>
           </CardContent>
@@ -181,19 +185,23 @@ export function OrderDetailView({ orderId }: { orderId: string }) {
                 {attendees.map((attendee) => (
                   <div
                     key={attendee.id}
-                    className="flex items-center justify-between rounded-lg border p-3"
+                    className="flex items-start justify-between gap-3 rounded-lg border p-3"
                   >
-                    <div className="flex items-center gap-3">
-                      <Mail className="size-4 text-muted-foreground" />
-                      <div>
-                        <p className="text-sm font-medium">{attendeeDisplayName(attendee)}</p>
-                        <p className="text-xs text-muted-foreground">
+                    <div className="flex min-w-0 items-start gap-3">
+                      <Mail className="mt-0.5 size-4 shrink-0 text-muted-foreground" />
+                      <div className="min-w-0">
+                        <p className="break-words text-sm font-medium">
+                          {attendeeDisplayName(attendee)}
+                        </p>
+                        <p className="break-words text-xs text-muted-foreground">
                           {attendee.ticketTypeName ?? attendee.ticketTypeId ?? 'Ticket'}
                           {attendee.email && ` · ${attendee.email}`}
                         </p>
                       </div>
                     </div>
-                    <Badge variant="outline">{attendee.status}</Badge>
+                    <Badge variant="outline" className="shrink-0">
+                      {attendee.status}
+                    </Badge>
                   </div>
                 ))}
               </div>
@@ -214,23 +222,23 @@ export function OrderDetailView({ orderId }: { orderId: string }) {
               {order.lineItems.map((item) => (
                 <div
                   key={item.id}
-                  className="flex items-center justify-between rounded-lg border p-3 text-sm"
+                  className="flex items-start justify-between gap-3 rounded-lg border p-3 text-sm"
                 >
-                  <div>
-                    <p className="font-medium">{item.description}</p>
-                    <p className="text-muted-foreground">
+                  <div className="min-w-0">
+                    <p className="break-words font-medium">{item.description}</p>
+                    <p className="break-words text-muted-foreground">
                       Qty {item.quantity} · Unit{' '}
                       {formatCurrency(item.unitPriceCents, item.currency)}
                     </p>
                     {(item.discountCents > 0 || item.taxCents > 0 || item.feeCents > 0) && (
-                      <p className="text-xs text-muted-foreground">
+                      <p className="break-words text-xs text-muted-foreground">
                         Discount {formatCurrency(item.discountCents, item.currency)} · Tax{' '}
                         {formatCurrency(item.taxCents, item.currency)} · Fees{' '}
                         {formatCurrency(item.feeCents, item.currency)}
                       </p>
                     )}
                   </div>
-                  <span className="font-medium">
+                  <span className="shrink-0 font-medium">
                     {formatCurrency(item.totalCents, item.currency)}
                   </span>
                 </div>
@@ -287,13 +295,13 @@ export function OrderDetailView({ orderId }: { orderId: string }) {
                     key={refund.id}
                     className="flex items-start justify-between gap-3 rounded-lg border p-3 text-sm"
                   >
-                    <div>
-                      <p className="font-medium">{refund.reason || refund.id}</p>
-                      <p className="text-xs text-muted-foreground">
+                    <div className="min-w-0">
+                      <p className="break-words font-medium">{refund.reason || refund.id}</p>
+                      <p className="break-words text-xs text-muted-foreground">
                         {formatDateTime(refund.createdAt)}
                       </p>
                     </div>
-                    <div className="text-right">
+                    <div className="shrink-0 text-right">
                       <p className="font-medium">
                         -{formatCurrency(refund.amountCents, refund.currency)}
                       </p>
@@ -393,11 +401,11 @@ function TimelineItem({
 }) {
   return (
     <div className="flex items-center gap-3">
-      <div className="flex size-8 items-center justify-center rounded-full bg-muted">
+      <div className="flex size-8 shrink-0 items-center justify-center rounded-full bg-muted">
         <Icon className="size-4 text-muted-foreground" />
       </div>
-      <div className="flex-1">
-        <p className="text-sm font-medium">{label}</p>
+      <div className="min-w-0 flex-1">
+        <p className="break-words text-sm font-medium">{label}</p>
         <p className="text-xs text-muted-foreground">{formatDateTime(date)}</p>
       </div>
     </div>
@@ -408,8 +416,8 @@ function AnswerList({ title, entries }: { title: string; entries: Array<[string,
   return (
     <div className="space-y-2">
       <div className="flex items-center gap-2 text-sm font-medium">
-        <ClipboardList className="size-4 text-muted-foreground" />
-        {title}
+        <ClipboardList className="size-4 shrink-0 text-muted-foreground" />
+        <span className="min-w-0 break-words">{title}</span>
       </div>
       {entries.length === 0 ? (
         <p className="text-sm text-muted-foreground">No answers captured.</p>
@@ -417,7 +425,7 @@ function AnswerList({ title, entries }: { title: string; entries: Array<[string,
         <div className="space-y-2">
           {entries.map(([key, value]) => (
             <div key={key} className="rounded-lg border p-3 text-sm">
-              <p className="font-medium">{key}</p>
+              <p className="break-words font-medium">{key}</p>
               <p className="mt-1 break-words text-muted-foreground">{formatUnknown(value)}</p>
             </div>
           ))}
@@ -437,12 +445,14 @@ function DeliveryRow({
   value: string;
 }) {
   return (
-    <div className="flex items-center justify-between rounded-lg border p-3 text-sm">
-      <div className="flex items-center gap-2">
-        <Icon className="size-4 text-muted-foreground" />
-        <span>{label}</span>
+    <div className="flex items-center justify-between gap-3 rounded-lg border p-3 text-sm">
+      <div className="flex min-w-0 items-center gap-2">
+        <Icon className="size-4 shrink-0 text-muted-foreground" />
+        <span className="min-w-0 break-words">{label}</span>
       </div>
-      <Badge variant="outline">{value.replace(/_/g, ' ')}</Badge>
+      <Badge variant="outline" className="shrink-0">
+        {value.replace(/_/g, ' ')}
+      </Badge>
     </div>
   );
 }

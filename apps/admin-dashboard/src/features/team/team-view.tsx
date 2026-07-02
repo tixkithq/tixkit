@@ -178,22 +178,25 @@ export function TeamView() {
         <div className="space-y-3">
           {members.map((member) => (
             <Card key={member.id}>
-              <CardContent className="flex items-center justify-between p-4">
-                <div className="flex items-center gap-3">
-                  <Avatar className="size-10">
+              <CardContent className="flex flex-col items-start justify-between gap-3 p-4 sm:flex-row sm:items-center">
+                <div className="flex min-w-0 items-start gap-3">
+                  <Avatar className="size-10 shrink-0">
                     <AvatarFallback>{getDisplayNameInitials(member.name)}</AvatarFallback>
                   </Avatar>
-                  <div>
-                    <p className="font-medium">{member.name}</p>
-                    <p className="text-sm text-muted-foreground">{member.email}</p>
+                  <div className="min-w-0">
+                    <p className="break-words font-medium">{member.name}</p>
+                    <p className="break-all text-sm text-muted-foreground">{member.email}</p>
                   </div>
                 </div>
-                <div className="flex items-center gap-3">
+                <div className="flex flex-wrap items-center gap-3 sm:shrink-0 sm:justify-end">
                   <div className="flex items-center gap-1 text-sm text-muted-foreground">
-                    <Shield className="size-4" />
-                    {roleLabels[member.role]}
+                    <Shield className="size-4 shrink-0" />
+                    <span>{roleLabels[member.role]}</span>
                   </div>
-                  <Badge variant={member.status === 'active' ? 'default' : 'secondary'}>
+                  <Badge
+                    variant={member.status === 'active' ? 'default' : 'secondary'}
+                    className="shrink-0"
+                  >
                     {member.status}
                   </Badge>
                 </div>

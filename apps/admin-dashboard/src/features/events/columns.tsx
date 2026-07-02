@@ -3,7 +3,7 @@
 import * as React from 'react';
 import Link from 'next/link';
 import { type ColumnDef } from '@tanstack/react-table';
-import { MoreHorizontal, Eye, Pencil, Globe, Pause, Archive, Play } from 'lucide-react';
+import { MoreHorizontal, Eye, Pencil, Globe, Pause, Archive } from 'lucide-react';
 import { type AdminEventListItem, type EventStatus, adminApi } from '@/lib/api';
 import { routes } from '@/lib/routes';
 import { formatCurrency, formatDate, formatNumber } from '@/lib/format';
@@ -202,5 +202,3 @@ function getAvailableStatusActions(
   }
   return actions;
 }
-
-export { Play };

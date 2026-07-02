@@ -11,6 +11,7 @@ const brand: AdminBrand = {
   status: 'active',
   theme: {},
   domains: [],
+  legalUrls: {},
   whiteLabel: false,
 };
 

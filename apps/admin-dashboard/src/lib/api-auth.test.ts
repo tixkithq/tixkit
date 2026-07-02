@@ -6,6 +6,7 @@ const originalClerkPublishableKey = process.env.CLERK_PUBLISHABLE_KEY;
 const originalNextPublicClerkPublishableKey = process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY;
 const originalAuthProvider = process.env.AUTH_PROVIDER;
 const originalNextPublicAuthProvider = process.env.NEXT_PUBLIC_AUTH_PROVIDER;
+const originalE2eLocalAdminAuth = process.env.E2E_LOCAL_ADMIN_AUTH;
 
 function enableClerk() {
   process.env.AUTH_PROVIDER = 'clerk';
@@ -19,6 +20,7 @@ function disableClerk() {
   delete process.env.NEXT_PUBLIC_AUTH_PROVIDER;
   delete process.env.CLERK_PUBLISHABLE_KEY;
   delete process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY;
+  delete process.env.E2E_LOCAL_ADMIN_AUTH;
 }
 
 function restoreClerkEnv() {
@@ -44,6 +46,12 @@ function restoreClerkEnv() {
     delete process.env.NEXT_PUBLIC_AUTH_PROVIDER;
   } else {
     process.env.NEXT_PUBLIC_AUTH_PROVIDER = originalNextPublicAuthProvider;
+  }
+
+  if (originalE2eLocalAdminAuth === undefined) {
+    delete process.env.E2E_LOCAL_ADMIN_AUTH;
+  } else {
+    process.env.E2E_LOCAL_ADMIN_AUTH = originalE2eLocalAdminAuth;
   }
 }
 
@@ -78,6 +86,16 @@ describe('getAdminApiAuthHeaders', () => {
       expect(usesLocalDevAuth()).toBe(false);
     },
   );
+
+  it('allows explicit e2e local admin auth outside development', () => {
+    vi.stubEnv('NODE_ENV', 'production');
+    process.env.AUTH_PROVIDER = 'dev';
+    process.env.NEXT_PUBLIC_AUTH_PROVIDER = 'dev';
+    process.env.E2E_LOCAL_ADMIN_AUTH = '1';
+
+    expect(authProvider()).toBe('dev');
+    expect(usesLocalDevAuth()).toBe(true);
+  });
 
   it('attaches the active Clerk session token when Clerk is configured', async () => {
     enableClerk();

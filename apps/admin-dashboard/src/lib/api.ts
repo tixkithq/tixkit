@@ -850,6 +850,7 @@ type BackendMessageCampaign = {
   suppressedRecipients?: number;
   consentExclusions?: number;
   skippedRecipients?: number;
+  scheduledAt?: string;
   createdAt?: string;
   updatedAt?: string;
   emailJobs?: unknown[];
@@ -912,6 +913,7 @@ function normalizeMessageCampaign(campaign: BackendMessageCampaign): AdminMessag
     deliveredCount,
     failedCount,
     suppressedCount,
+    scheduledAt: campaign.scheduledAt,
     createdAt: campaign.createdAt ?? new Date().toISOString(),
   };
 }
@@ -1108,6 +1110,19 @@ export type AdminBrandDomain = {
   isPrimary: boolean;
   isVerified: boolean;
   sslStatus: 'pending' | 'active' | 'failed';
+  createdAt?: string;
+  updatedAt?: string;
+};
+
+export type AdminBrandSenderIdentity = {
+  id: string;
+  tenantId: string;
+  brandId: string;
+  email: string;
+  name: string;
+  replyToEmail?: string;
+  verified: boolean;
+  verifiedAt?: string;
   createdAt?: string;
   updatedAt?: string;
 };
@@ -1429,6 +1444,7 @@ type SendMessageAudience = 'all' | 'checked_in' | 'not_checked_in' | 'specific';
 type SendMessageBaseInput = {
   audience: SendMessageAudience;
   attendeeIds?: string[];
+  scheduledAt?: string;
   variables?: Record<string, unknown>;
 };
 
@@ -1503,7 +1519,11 @@ export type UpdateBrandInput = {
   paymentAccountId?: string | null;
 };
 
-export type AdminUploadPurpose = 'checkout_answer' | 'brand_logo' | 'user_avatar';
+export type AdminUploadPurpose =
+  | 'checkout_answer'
+  | 'brand_logo'
+  | 'user_avatar'
+  | 'content_email_image';
 
 export type CreateUploadArtifactInput = {
   purpose: AdminUploadPurpose;
@@ -1562,6 +1582,7 @@ export type AdminApi = {
     domain: string,
     isPrimary?: boolean,
   ): Promise<ApiResult<AdminBrandDomain>>;
+  listBrandEmailSenderIdentities(brandId: string): Promise<ApiResult<AdminBrandSenderIdentity[]>>;
   listTeamMembers(organizationId: string): Promise<ApiResult<AdminTeamMember[]>>;
   inviteTeamMember(
     organizationId: string,
@@ -2092,6 +2113,21 @@ function normalizeBrandDomain(value: Record<string, unknown>): AdminBrandDomain 
     isPrimary: Boolean(value.isPrimary ?? value.is_primary),
     isVerified: Boolean(value.isVerified ?? value.is_verified),
     sslStatus: sslStatus === 'active' || sslStatus === 'failed' ? sslStatus : 'pending',
+    createdAt: stringValue(value.createdAt ?? value.created_at, undefined),
+    updatedAt: stringValue(value.updatedAt ?? value.updated_at, undefined),
+  };
+}
+
+function normalizeBrandSenderIdentity(value: Record<string, unknown>): AdminBrandSenderIdentity {
+  return {
+    id: String(value.id),
+    tenantId: String(value.tenantId ?? value.tenant_id ?? ''),
+    brandId: String(value.brandId ?? value.brand_id ?? ''),
+    email: stringValue(value.email, ''),
+    name: stringValue(value.name, ''),
+    replyToEmail: stringValue(value.replyToEmail ?? value.reply_to_email, undefined),
+    verified: Boolean(value.verified),
+    verifiedAt: stringValue(value.verifiedAt ?? value.verified_at, undefined),
     createdAt: stringValue(value.createdAt ?? value.created_at, undefined),
     updatedAt: stringValue(value.updatedAt ?? value.updated_at, undefined),
   };
@@ -3328,6 +3364,21 @@ const fixtureBrandDomains: AdminBrandDomain[] = [
   },
 ];
 
+const fixtureBrandSenderIdentities: AdminBrandSenderIdentity[] = [
+  {
+    id: 'bsi_demo',
+    tenantId: 'tenant_demo',
+    brandId: 'brd_demo',
+    email: 'tickets@events.localhost',
+    name: 'Tixkit',
+    replyToEmail: 'support@events.localhost',
+    verified: true,
+    verifiedAt: iso(-7),
+    createdAt: iso(-7),
+    updatedAt: iso(0),
+  },
+];
+
 const fixtureBrands: AdminBrand[] = [
   {
     id: 'brd_demo',
@@ -3684,6 +3735,21 @@ export const adminApi: AdminApi = {
         brand.domains = [brandDomain, ...brand.domains];
         return ok(brandDomain);
       },
+    );
+  },
+
+  async listBrandEmailSenderIdentities(brandId) {
+    return withFixture(
+      async () => {
+        const result = await request<AdminBrandSenderIdentity[]>(
+          `/v1/brands/${brandId}/email-sender-identities`,
+          { method: 'GET' },
+        );
+        return result.ok
+          ? ok(result.data.map((identity) => normalizeBrandSenderIdentity(asRecord(identity))))
+          : result;
+      },
+      () => ok(fixtureBrandSenderIdentities.filter((identity) => identity.brandId === brandId)),
     );
   },
 
@@ -5587,6 +5653,7 @@ export const adminApi: AdminApi = {
           deliveredCount: 0,
           failedCount: 0,
           suppressedCount: 0,
+          scheduledAt: input.scheduledAt,
           createdAt: iso(0),
         };
         fixtureMessages.unshift(campaign);

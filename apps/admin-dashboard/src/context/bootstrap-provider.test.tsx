@@ -59,6 +59,7 @@ describe('BootstrapProvider', () => {
             status: 'active',
             theme: {},
             domains: [],
+            legalUrls: {},
             whiteLabel: false,
           },
           {
@@ -70,6 +71,7 @@ describe('BootstrapProvider', () => {
             status: 'active',
             theme: {},
             domains: [],
+            legalUrls: {},
             whiteLabel: false,
           },
         ],

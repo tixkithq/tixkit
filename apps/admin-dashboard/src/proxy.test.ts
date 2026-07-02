@@ -19,6 +19,7 @@ const originalAuthProvider = process.env.AUTH_PROVIDER;
 const originalNextPublicAuthProvider = process.env.NEXT_PUBLIC_AUTH_PROVIDER;
 const originalClerkPublishableKey = process.env.CLERK_PUBLISHABLE_KEY;
 const originalNextPublicClerkPublishableKey = process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY;
+const originalE2eLocalAdminAuth = process.env.E2E_LOCAL_ADMIN_AUTH;
 
 function restoreEnv() {
   if (originalNodeEnv === undefined) {
@@ -50,6 +51,12 @@ function restoreEnv() {
   } else {
     process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY = originalNextPublicClerkPublishableKey;
   }
+
+  if (originalE2eLocalAdminAuth === undefined) {
+    delete process.env.E2E_LOCAL_ADMIN_AUTH;
+  } else {
+    process.env.E2E_LOCAL_ADMIN_AUTH = originalE2eLocalAdminAuth;
+  }
 }
 
 function configureAuthEnv(nodeEnv: string | undefined) {
@@ -61,6 +68,7 @@ function configureAuthEnv(nodeEnv: string | undefined) {
   process.env.AUTH_PROVIDER = 'dev';
   process.env.NEXT_PUBLIC_AUTH_PROVIDER = 'dev';
   process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY = 'pk_test_valid';
+  delete process.env.E2E_LOCAL_ADMIN_AUTH;
   delete process.env.CLERK_PUBLISHABLE_KEY;
 }
 
@@ -104,5 +112,17 @@ describe('admin dashboard proxy auth provider gating', () => {
     expect(response).toEqual({ type: 'clerk' });
     expect(clerkProxyMock).toHaveBeenCalledTimes(1);
     expect(nextResponseNextMock).not.toHaveBeenCalled();
+  });
+
+  it('skips Clerk for explicit e2e local admin auth outside development', async () => {
+    configureAuthEnv('production');
+    process.env.E2E_LOCAL_ADMIN_AUTH = '1';
+    const proxy = await loadProxy();
+
+    const response = proxy({} as NextRequest, {} as NextFetchEvent);
+
+    expect(response).toEqual({ type: 'next' });
+    expect(nextResponseNextMock).toHaveBeenCalledTimes(1);
+    expect(clerkProxyMock).not.toHaveBeenCalled();
   });
 });
