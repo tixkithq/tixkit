@@ -104,6 +104,10 @@ function tokenHashMatches(expected: string | null, candidate: string): boolean {
   );
 }
 
+function normalizeDiscountCode(code: string): string {
+  return code.trim().toUpperCase();
+}
+
 function toResaleValidationError(error: unknown): never {
   if (error instanceof ResaleError) {
     throw new ValidationError(error.message);
@@ -1392,6 +1396,9 @@ export const checkoutRoutes: FastifyPluginAsync = async (app) => {
           .where('event_id', '=', body.eventId)
           .execute();
         const eventQuestions = toVisibleDomainQuestions(questionRows as QuestionRow[]);
+        const normalizedDiscountCode = body.discountCode
+          ? normalizeDiscountCode(body.discountCode)
+          : undefined;
 
         const sessionId = `cs_${ulid()}`;
         const answeredAt = new Date().toISOString();
@@ -1552,7 +1559,7 @@ export const checkoutRoutes: FastifyPluginAsync = async (app) => {
             unitAmountCents: i.unitAmountCents,
             attendeeFields: i.attendeeFields,
           })),
-          discountCode: body.discountCode,
+          discountCode: normalizedDiscountCode,
           accessRuleRedemptions:
             accessRuleRedemptionsByRule.size > 0
               ? [...accessRuleRedemptionsByRule.values()]

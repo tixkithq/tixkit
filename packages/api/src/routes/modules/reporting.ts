@@ -20,6 +20,10 @@ import { config } from '../../config/index.js';
 
 const exportEventChannel = (exportId: string) => `tixkit:export-job:${exportId}:events`;
 
+function normalizeDiscountCode(code: string): string {
+  return code.trim().toUpperCase();
+}
+
 function parseDateFilterBoundary(value: string, boundary: 'start' | 'end'): Date {
   let date: Date;
 
@@ -568,19 +572,29 @@ export const reportingRoutes: FastifyPluginAsync = async (app) => {
     }
     const eventOrders = await eventOrdersQuery.execute();
 
+    const codeSummaries: Record<string, { code: string; usesCount: number }> = {};
     const codeStats: Record<
       string,
       { discountAmountCents: number; revenueAttributedCents: number }
     > = {};
     for (const dc of discountCodes) {
-      codeStats[dc.code] = { discountAmountCents: 0, revenueAttributedCents: 0 };
+      const code = normalizeDiscountCode(dc.code);
+      codeSummaries[code] ??= { code, usesCount: 0 };
+      codeSummaries[code].usesCount += Number(dc.uses_count);
+      codeStats[code] ??= {
+        discountAmountCents: 0,
+        revenueAttributedCents: 0,
+      };
     }
 
     for (const order of eventOrders) {
       if (order.cart) {
         try {
           const cart = typeof order.cart === 'string' ? JSON.parse(order.cart) : order.cart;
-          const discountCode = cart?.discountCode;
+          const discountCode =
+            typeof cart?.discountCode === 'string'
+              ? normalizeDiscountCode(cart.discountCode)
+              : undefined;
           if (discountCode && codeStats[discountCode]) {
             codeStats[discountCode].discountAmountCents += Number(order.discount_cents);
             codeStats[discountCode].revenueAttributedCents += Math.max(
@@ -594,11 +608,14 @@ export const reportingRoutes: FastifyPluginAsync = async (app) => {
       }
     }
 
-    const discountCodesReport = discountCodes.map((dc) => {
-      const stats = codeStats[dc.code] || { discountAmountCents: 0, revenueAttributedCents: 0 };
+    const discountCodesReport = Object.values(codeSummaries).map((summary) => {
+      const stats = codeStats[summary.code] || {
+        discountAmountCents: 0,
+        revenueAttributedCents: 0,
+      };
       return {
-        code: dc.code,
-        usesCount: Number(dc.uses_count),
+        code: summary.code,
+        usesCount: summary.usesCount,
         discountAmountCents: stats.discountAmountCents,
         revenueAttributedCents: stats.revenueAttributedCents,
       };

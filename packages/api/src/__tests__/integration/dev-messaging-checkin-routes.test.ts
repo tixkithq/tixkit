@@ -6494,7 +6494,7 @@ describe('checkout pricing tamper resistance', () => {
 
   it('quotes from server-side ticket, discount, tax, and fee rows', async () => {
     const tables = pricingTables();
-    const res = await postPricingCheckoutSession({ discountCode: 'SAVE25' }, tables);
+    const res = await postPricingCheckoutSession({ discountCode: ' save25 ' }, tables);
 
     expect(res.statusCode).toBe(201);
     const body = res.json();
@@ -6507,7 +6507,9 @@ describe('checkout pricing tamper resistance', () => {
       totalCents: 16800,
     });
 
-    const storedSession = (tables.checkout_sessions as Array<{ quote: string }>)[0];
+    const storedSession = (tables.checkout_sessions as Array<{ cart: string; quote: string }>)[0];
+    const storedCart = JSON.parse(storedSession.cart) as Record<string, unknown>;
+    expect(storedCart.discountCode).toBe('SAVE25');
     const storedQuote = JSON.parse(storedSession.quote) as Record<string, unknown>;
     expect(storedQuote).toMatchObject({
       subtotalCents: 20000,

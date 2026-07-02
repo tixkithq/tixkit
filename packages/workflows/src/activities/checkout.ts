@@ -33,6 +33,10 @@ const TEMPORAL_TASK_QUEUE = process.env.TEMPORAL_TASK_QUEUE ?? 'tixkit';
 let cachedClient: Client | null = null;
 const e2eTicketIssueFailures = new Set<string>();
 
+function normalizeDiscountCode(code: string): string {
+  return code.trim().toUpperCase();
+}
+
 type CheckoutHoldRow = {
   id: string;
   inventory_pool_id: string;
@@ -1726,15 +1730,18 @@ export async function finalizeOrderActivity(input: {
         // makes the consumption a no-op. The DB check constraint
         // uses_count <= max_uses is the final backstop against race conditions.
         if (cart.discountCode && quote.discountCents > 0) {
-          const discount = await trx
+          const canonicalDiscountCode = normalizeDiscountCode(cart.discountCode);
+          const eventDiscounts = await trx
             .selectFrom('discount_codes')
             .selectAll()
             .where('event_id', '=', session.event_id)
-            .where('code', '=', cart.discountCode.toUpperCase())
             .forUpdate()
-            .executeTakeFirst();
+            .execute();
+          const matchingDiscounts = eventDiscounts.filter(
+            (discount) => normalizeDiscountCode(String(discount.code)) === canonicalDiscountCode,
+          );
 
-          if (!discount) {
+          if (matchingDiscounts.length === 0) {
             return {
               ok: false,
               errorCode: 'DISCOUNT_INVALID',
@@ -1742,6 +1749,15 @@ export async function finalizeOrderActivity(input: {
               retryable: false,
             };
           }
+          if (matchingDiscounts.length > 1) {
+            return {
+              ok: false,
+              errorCode: 'DISCOUNT_INVALID',
+              message: `Discount code ${cart.discountCode} is not unique`,
+              retryable: false,
+            };
+          }
+          const discount = matchingDiscounts[0]!;
 
           const existingRedemption = await trx
             .selectFrom('discount_redemptions')

@@ -247,6 +247,61 @@ describe('PricingEngine', () => {
     expect(quote.totalCents).toBe(16000);
   });
 
+  it('applies discount codes by canonical identity regardless of stored or entered case', () => {
+    const discount = {
+      id: 'dc_lowercase',
+      eventId: 'evt_1',
+      code: 'save20',
+      type: 'percentage' as const,
+      value: 2000,
+      currency: 'USD',
+      maxUses: 100,
+      usesCount: 0,
+      status: 'active' as const,
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    };
+
+    const quote = pricingEngine.calculate({
+      currency: 'USD',
+      cart: { items: [{ ticketTypeId: 'tt_paid', quantity: 2 }], discountCode: ' Save20 ' },
+      ticketTypes,
+      taxRules: [],
+      feeRules: [],
+      discountCodes: [discount],
+    });
+
+    expect(quote.discountCents).toBe(4000);
+    expect(quote.totalCents).toBe(16000);
+  });
+
+  it('rejects case-colliding discount codes instead of choosing an arbitrary row', () => {
+    const baseDiscount = {
+      eventId: 'evt_1',
+      type: 'percentage' as const,
+      currency: 'USD',
+      maxUses: 100,
+      usesCount: 0,
+      status: 'active' as const,
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    };
+
+    expect(() =>
+      pricingEngine.calculate({
+        currency: 'USD',
+        cart: { items: [{ ticketTypeId: 'tt_paid', quantity: 1 }], discountCode: 'save20' },
+        ticketTypes,
+        taxRules: [],
+        feeRules: [],
+        discountCodes: [
+          { ...baseDiscount, id: 'dc_uppercase', code: 'SAVE20', value: 2000 },
+          { ...baseDiscount, id: 'dc_lowercase', code: 'save20', value: 5000 },
+        ],
+      }),
+    ).toThrow(/code is not unique/);
+  });
+
   it('rejects ticket-restricted discounts when no selected ticket is eligible', () => {
     const discount = {
       id: 'dc_vip_only',

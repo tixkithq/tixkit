@@ -1097,6 +1097,61 @@ describe('finalizeOrderActivity promo code redemption', () => {
     });
   });
 
+  it('redeems the quoted promo code when the stored row has noncanonical case', async () => {
+    seedCheckoutWithDiscount({
+      holdExpiresAt: new Date(Date.now() + 60_000),
+      discountCode: 'EARLYBIRD',
+      storedCode: 'earlybird',
+      usesCount: 0,
+      maxUses: 10,
+      status: 'active',
+    });
+    seedTrustedPaymentIntent({ amountCents: 900 });
+
+    const result = await finalizeOrderActivity({
+      checkoutSessionId: 'cs_1',
+      tenantId: 'tnt_1',
+      paymentIntentId: 'pi_provider_1',
+    });
+
+    expect(result.ok).toBe(true);
+    expect(dbState.tables.discount_codes.dc_1.uses_count).toBe(1);
+    expect(Object.values(dbState.tables.discount_redemptions)).toHaveLength(1);
+  });
+
+  it('rejects case-colliding promo code rows before consuming usage', async () => {
+    seedCheckoutWithDiscount({
+      holdExpiresAt: new Date(Date.now() + 60_000),
+      discountCode: 'EARLYBIRD',
+      storedCode: 'EARLYBIRD',
+      usesCount: 0,
+      maxUses: 10,
+      status: 'active',
+    });
+    dbState.tables.discount_codes.dc_2 = {
+      ...dbState.tables.discount_codes.dc_1,
+      id: 'dc_2',
+      code: 'earlybird',
+      uses_count: 0,
+    };
+    seedTrustedPaymentIntent({ amountCents: 900 });
+
+    const result = await finalizeOrderActivity({
+      checkoutSessionId: 'cs_1',
+      tenantId: 'tnt_1',
+      paymentIntentId: 'pi_provider_1',
+    });
+
+    expect(result).toMatchObject({
+      ok: false,
+      errorCode: 'DISCOUNT_INVALID',
+      retryable: false,
+    });
+    expect(dbState.tables.discount_codes.dc_1.uses_count).toBe(0);
+    expect(dbState.tables.discount_codes.dc_2.uses_count).toBe(0);
+    expect(Object.values(dbState.tables.discount_redemptions ?? {})).toHaveLength(0);
+  });
+
   it('is idempotent on duplicate finalize/retry - does not double-increment uses_count', async () => {
     seedCheckoutWithDiscount({
       holdExpiresAt: new Date(Date.now() + 60_000),
@@ -1477,6 +1532,7 @@ function makeCheckoutFree() {
 function seedCheckoutWithDiscount(input: {
   holdExpiresAt: Date;
   discountCode: string;
+  storedCode?: string;
   usesCount: number;
   maxUses: number;
   status: string;
@@ -1558,7 +1614,7 @@ function seedCheckoutWithDiscount(input: {
       dc_1: {
         id: 'dc_1',
         event_id: 'evt_1',
-        code: input.discountCode.toUpperCase(),
+        code: input.storedCode ?? input.discountCode.toUpperCase(),
         type: 'percentage',
         value: 1000,
         currency: 'USD',

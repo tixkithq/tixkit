@@ -11,6 +11,10 @@ import type {
 import { ulid } from 'ulid';
 import { DiscountInvalidError, ValidationError } from '@tixkit/domain';
 
+function normalizeDiscountCode(code: string): string {
+  return code.trim().toUpperCase();
+}
+
 export type TicketTypeForPricing = {
   id: string;
   name: string;
@@ -324,8 +328,12 @@ export class PricingEngine {
     subtotalCents: number,
     currency: CurrencyCode,
   ): DiscountCode | null {
-    const upperCode = code.toUpperCase();
-    const discount = codes.find((d) => d.code.toUpperCase() === upperCode);
+    const normalizedCode = normalizeDiscountCode(code);
+    const matchingDiscounts = codes.filter((d) => normalizeDiscountCode(d.code) === normalizedCode);
+    if (matchingDiscounts.length > 1) {
+      throw new DiscountInvalidError(code, 'code is not unique');
+    }
+    const discount = matchingDiscounts[0];
     if (!discount) {
       throw new DiscountInvalidError(code, 'code not found');
     }

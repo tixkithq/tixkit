@@ -3,6 +3,10 @@ import { ulid } from 'ulid';
 import type { ExpressionBuilder } from 'kysely';
 import type { DB } from '../types/db.js';
 
+function normalizeDiscountCode(code: string): string {
+  return code.trim().toUpperCase();
+}
+
 export class DiscountCodeRepository extends BaseRepository {
   async create(input: {
     eventId: string;
@@ -24,7 +28,7 @@ export class DiscountCodeRepository extends BaseRepository {
       {
         id,
         event_id: input.eventId,
-        code: input.code,
+        code: normalizeDiscountCode(input.code),
         type: input.type,
         value: input.value,
         currency: input.currency,
@@ -48,7 +52,7 @@ export class DiscountCodeRepository extends BaseRepository {
       .selectFrom('discount_codes')
       .selectAll()
       .where('event_id', '=', eventId)
-      .where('code', '=', code.toUpperCase())
+      .where('code', '=', normalizeDiscountCode(code))
       .executeTakeFirst();
   }
 
