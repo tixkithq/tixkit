@@ -83,6 +83,31 @@ export const questionRoutes: FastifyPluginAsync = async (app) => {
     if (!source || source.event_id !== eventId) {
       throw new ValidationError('Conditional visibility source question must belong to this event');
     }
+    if (isHiddenQuestion(source)) {
+      throw new ValidationError('Conditional visibility source question must be active');
+    }
+  };
+
+  const requireNoActiveConditionalDependents = async (
+    eventId: string,
+    sourceQuestionId: string,
+  ) => {
+    const questions = await db
+      .selectFrom('questions')
+      .selectAll()
+      .where('event_id', '=', eventId)
+      .execute();
+    const dependent = questions.find(
+      (candidate) =>
+        candidate.id !== sourceQuestionId &&
+        !isHiddenQuestion(candidate) &&
+        questionDependsOn(candidate, sourceQuestionId),
+    );
+    if (dependent) {
+      throw new ConflictError(
+        'Question has active conditional dependents and cannot be hidden or deleted',
+      );
+    }
   };
 
   app.post('/events/:eventId/questions', async (request, reply) => {
@@ -354,6 +379,7 @@ export const questionRoutes: FastifyPluginAsync = async (app) => {
     if (!question) throw new NotFoundError('Question', questionId);
     const event = await loadEvent(question.event_id);
     requireEventAccess(principal, event, question.event_id);
+    await requireNoActiveConditionalDependents(question.event_id, questionId);
 
     const hasHistoricalAnswers = await questionHasHistoricalAnswers(
       db,
@@ -402,6 +428,14 @@ function softDeleteQuestionData(row: Record<string, unknown>): Record<string, un
   if ('hidden_at' in row) updateData.hidden_at = new Date();
   if ('deleted_at' in row) updateData.deleted_at = new Date();
   return Object.keys(updateData).length > 1 ? updateData : null;
+}
+
+function questionDependsOn(row: Record<string, unknown>, sourceQuestionId: string): boolean {
+  const conditionalVisibility = parseJsonValue<{ field?: unknown } | undefined>(
+    row.conditional_visibility,
+    undefined,
+  );
+  return conditionalVisibility?.field === sourceQuestionId;
 }
 
 async function questionHasHistoricalAnswers(

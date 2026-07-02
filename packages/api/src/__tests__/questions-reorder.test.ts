@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 import type { Principal } from '@tixkit/domain';
 import type { Database } from '@tixkit/db';
 import type { AppContext } from '../app.js';
+import { registerErrorHandler } from '../app.js';
 import { questionRoutes } from '../routes/modules/questions.js';
 
 type QuestionRow = {
@@ -22,6 +23,10 @@ type QuestionRow = {
   is_consent_field: boolean;
   consent_text: string | null;
   consent_version: string | null;
+  status?: string;
+  is_hidden?: boolean;
+  hidden_at?: Date | null;
+  deleted_at?: Date | null;
   created_at: Date;
   updated_at: Date;
 };
@@ -135,6 +140,119 @@ function createQuestionReorderDb(rows: QuestionRow[], failOnQuestionId?: string)
   return mockDb;
 }
 
+function rowMatchesWhereCalls(row: Record<string, unknown>, calls: unknown[][]) {
+  return calls.every(([field, operator, value]) => {
+    if (operator === '=') return row[String(field)] === value;
+    if (operator === 'in' && Array.isArray(value)) return value.includes(row[String(field)]);
+    return true;
+  });
+}
+
+function createQuestionMutationDb(rows: QuestionRow[]) {
+  const event = {
+    id: 'evt_1',
+    tenant_id: 'tnt_1',
+    organization_id: 'org_1',
+    brand_id: 'brd_1',
+  };
+  const deletedQuestionIds: string[] = [];
+  const updatedQuestionIds: string[] = [];
+  const insertedQuestions: Record<string, unknown>[] = [];
+
+  const createQuery = (table: string) => {
+    const whereCalls: unknown[][] = [];
+    const query = {
+      selectAll: () => query,
+      where: (...args: unknown[]) => {
+        whereCalls.push(args);
+        return query;
+      },
+      orderBy: () => query,
+      limit: () => query,
+      async executeTakeFirst() {
+        if (table === 'events') {
+          return whereCalls.some((call) => call[0] === 'id' && call[2] === event.id)
+            ? event
+            : undefined;
+        }
+        if (table === 'questions') {
+          return rows.find((row) => rowMatchesWhereCalls(row, whereCalls));
+        }
+        return undefined;
+      },
+      async execute() {
+        if (table !== 'questions') return [];
+        return rows.filter((row) => rowMatchesWhereCalls(row, whereCalls));
+      },
+    };
+    return query;
+  };
+
+  const mockDb = {
+    selectFrom: createQuery,
+    insertInto: (table: string) => ({
+      values(value: Record<string, unknown>) {
+        return {
+          returningAll: () => ({
+            executeTakeFirstOrThrow: async () => {
+              if (table === 'questions') insertedQuestions.push(value);
+              return value;
+            },
+          }),
+        };
+      },
+    }),
+    updateTable: (table: string) => ({
+      set() {
+        const whereCalls: unknown[][] = [];
+        const update = {
+          where: (...args: unknown[]) => {
+            whereCalls.push(args);
+            return update;
+          },
+          returningAll: () => ({
+            executeTakeFirstOrThrow: async () => {
+              const questionId = whereCalls.find((call) => call[0] === 'id')?.[2];
+              if (table === 'questions' && typeof questionId === 'string') {
+                updatedQuestionIds.push(questionId);
+                return rows.find((row) => row.id === questionId);
+              }
+              throw new Error('No updated row');
+            },
+          }),
+          async execute() {
+            const questionId = whereCalls.find((call) => call[0] === 'id')?.[2];
+            if (table === 'questions' && typeof questionId === 'string') {
+              updatedQuestionIds.push(questionId);
+            }
+            return [];
+          },
+        };
+        return update;
+      },
+    }),
+    deleteFrom: (table: string) => {
+      const whereCalls: unknown[][] = [];
+      const deletion = {
+        where: (...args: unknown[]) => {
+          whereCalls.push(args);
+          return deletion;
+        },
+        async execute() {
+          const questionId = whereCalls.find((call) => call[0] === 'id')?.[2];
+          if (table === 'questions' && typeof questionId === 'string') {
+            deletedQuestionIds.push(questionId);
+          }
+          return [];
+        },
+      };
+      return deletion;
+    },
+  };
+
+  return { mockDb, deletedQuestionIds, updatedQuestionIds, insertedQuestions };
+}
+
 function makePrincipal(): Principal {
   return {
     type: 'user',
@@ -147,6 +265,7 @@ function makePrincipal(): Principal {
 
 async function buildQuestionApp(db: Database) {
   const app = Fastify();
+  registerErrorHandler(app);
   app.decorate('context', {
     db,
     pricingEngine: {},
@@ -240,6 +359,90 @@ describe('question reorder route', () => {
       ['q_second', 1],
     ]);
 
+    await app.close();
+  });
+});
+
+describe('question conditional visibility guards', () => {
+  it('rejects creating a conditional question from a hidden source question', async () => {
+    const rows = [question('q_source', 0), { ...question('q_hidden', 1), is_hidden: true }];
+    const { mockDb, insertedQuestions } = createQuestionMutationDb(rows);
+    const app = await buildQuestionApp(mockDb as unknown as Database);
+
+    const res = await app.inject({
+      method: 'POST',
+      url: '/events/evt_1/questions',
+      payload: {
+        type: 'text',
+        label: 'Dependent',
+        appliesTo: 'buyer',
+        required: true,
+        conditionalVisibility: {
+          field: 'q_hidden',
+          operator: 'equals',
+          value: 'yes',
+        },
+      },
+    });
+
+    expect(res.statusCode).toBe(400);
+    expect(res.json().error.message).toBe('Conditional visibility source question must be active');
+    expect(insertedQuestions).toHaveLength(0);
+    await app.close();
+  });
+
+  it('rejects updating a conditional question to use a deleted source question', async () => {
+    const rows = [
+      question('q_dependent', 0),
+      { ...question('q_deleted', 1), deleted_at: new Date('2026-01-02T00:00:00.000Z') },
+    ];
+    const { mockDb, updatedQuestionIds } = createQuestionMutationDb(rows);
+    const app = await buildQuestionApp(mockDb as unknown as Database);
+
+    const res = await app.inject({
+      method: 'PATCH',
+      url: '/questions/q_dependent',
+      payload: {
+        conditionalVisibility: {
+          field: 'q_deleted',
+          operator: 'not_equals',
+          value: 'no',
+        },
+      },
+    });
+
+    expect(res.statusCode).toBe(400);
+    expect(res.json().error.message).toBe('Conditional visibility source question must be active');
+    expect(updatedQuestionIds).toHaveLength(0);
+    await app.close();
+  });
+
+  it('rejects deleting a source question while an active dependent references it', async () => {
+    const rows = [
+      question('q_source', 0),
+      {
+        ...question('q_dependent', 1),
+        conditional_visibility: JSON.stringify({
+          field: 'q_source',
+          operator: 'equals',
+          value: 'yes',
+        }),
+      },
+    ];
+    const { mockDb, deletedQuestionIds, updatedQuestionIds } = createQuestionMutationDb(rows);
+    const app = await buildQuestionApp(mockDb as unknown as Database);
+
+    const res = await app.inject({
+      method: 'DELETE',
+      url: '/questions/q_source',
+    });
+
+    expect(res.statusCode).toBe(409);
+    expect(res.json().error.message).toBe(
+      'Question has active conditional dependents and cannot be hidden or deleted',
+    );
+    expect(deletedQuestionIds).toHaveLength(0);
+    expect(updatedQuestionIds).toHaveLength(0);
     await app.close();
   });
 });

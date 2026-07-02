@@ -11,7 +11,7 @@ import {
   EventOccurrenceRepository,
 } from '@tixkit/db';
 import { accessRuleMatches, NotFoundError, ValidationError } from '@tixkit/domain';
-import type { AccessRuleRecord } from '@tixkit/domain';
+import type { AccessRuleRecord, Question } from '@tixkit/domain';
 import {
   parseJsonValue,
   serializeEventOccurrenceStatus,
@@ -567,26 +567,29 @@ export const publicRoutes: FastifyPluginAsync = async (app) => {
       .orderBy('sort_order', 'asc')
       .execute();
 
-    const serialized = questions
-      .filter((q) => !isHiddenQuestion(q))
-      .map((q) => ({
-        id: q.id,
-        eventId: q.event_id,
-        ticketTypeId: q.ticket_type_id ?? undefined,
-        type: q.type,
-        label: q.label,
-        description: q.description ?? undefined,
-        required: q.required,
-        appliesTo: q.applies_to,
-        options: parseJsonValue<string[] | undefined>(q.options, undefined),
-        placeholder: q.placeholder ?? undefined,
-        isConsentField: q.is_consent_field,
-        consentText: q.consent_text ?? undefined,
-        consentVersion: q.consent_version ?? undefined,
-        validationPattern: q.validation_pattern ?? undefined,
-        conditionalVisibility: parseJsonValue(q.conditional_visibility, undefined),
-        sortOrder: q.sort_order,
-      }));
+    const visibleQuestions = questions.filter((q) => !isHiddenQuestion(q));
+    const visibleQuestionIds = new Set(visibleQuestions.map((q) => String(q.id)));
+    const serialized = visibleQuestions.map((q) => ({
+      id: q.id,
+      eventId: q.event_id,
+      ticketTypeId: q.ticket_type_id ?? undefined,
+      type: q.type,
+      label: q.label,
+      description: q.description ?? undefined,
+      required: q.required,
+      appliesTo: q.applies_to,
+      options: parseJsonValue<string[] | undefined>(q.options, undefined),
+      placeholder: q.placeholder ?? undefined,
+      isConsentField: q.is_consent_field,
+      consentText: q.consent_text ?? undefined,
+      consentVersion: q.consent_version ?? undefined,
+      validationPattern: q.validation_pattern ?? undefined,
+      conditionalVisibility: parseQuestionConditionalVisibility(
+        q.conditional_visibility,
+        visibleQuestionIds,
+      ),
+      sortOrder: q.sort_order,
+    }));
 
     return {
       buyerQuestions: serialized
@@ -607,4 +610,35 @@ function isHiddenQuestion(row: Record<string, unknown>): boolean {
     row.hidden_at != null ||
     row.deleted_at != null
   );
+}
+
+function parseQuestionConditionalVisibility(
+  value: unknown,
+  visibleQuestionIds: ReadonlySet<string>,
+): Question['conditionalVisibility'] | undefined {
+  const parsed = parseJsonValue<unknown>(value, undefined);
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return undefined;
+
+  const condition = parsed as Record<string, unknown>;
+  if (
+    typeof condition.field !== 'string' ||
+    typeof condition.operator !== 'string' ||
+    typeof condition.value !== 'string'
+  ) {
+    return undefined;
+  }
+  if (
+    condition.operator !== 'equals' &&
+    condition.operator !== 'not_equals' &&
+    condition.operator !== 'contains'
+  ) {
+    return undefined;
+  }
+  if (!visibleQuestionIds.has(condition.field)) return undefined;
+
+  return {
+    field: condition.field,
+    operator: condition.operator,
+    value: condition.value,
+  };
 }

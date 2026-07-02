@@ -2089,6 +2089,45 @@ describe('public checkout questions', () => {
     ]);
     await app.close();
   });
+
+  it('strips conditionalVisibility when the source question is hidden from public checkout', async () => {
+    const app = await setupApp(publicRoutes, makePrincipal(), {
+      events: [publishedEvent],
+      questions: [
+        customQuestionRow({
+          id: 'q_hidden_source',
+          label: 'Hidden source',
+          applies_to: 'buyer',
+          status: 'hidden',
+          is_hidden: true,
+          hidden_at: new Date('2026-06-01T00:00:00.000Z'),
+        }),
+        customQuestionRow({
+          id: 'q_required_dependent',
+          label: 'Required dependent',
+          applies_to: 'buyer',
+          required: true,
+          conditional_visibility: JSON.stringify({
+            field: 'q_hidden_source',
+            operator: 'equals',
+            value: 'yes',
+          }),
+        }),
+      ],
+    });
+
+    const res = await app.inject({ method: 'GET', url: '/public/events/evt_1/questions' });
+    expect(res.statusCode).toBe(200);
+    expect(res.json().buyerQuestions).toEqual([
+      expect.objectContaining({
+        id: 'q_required_dependent',
+        appliesTo: 'buyer',
+        required: true,
+      }),
+    ]);
+    expect(res.json().buyerQuestions[0]).not.toHaveProperty('conditionalVisibility');
+    await app.close();
+  });
 });
 
 describe('public access code validation', () => {
@@ -6883,6 +6922,45 @@ describe('checkout question validation', () => {
 
     expect(res.statusCode).toBe(400);
     expect(res.json().message).toContain('Guest name is required');
+  });
+
+  it('fails required buyer validation when a conditional source question is hidden', async () => {
+    const tables = {
+      events: [baseEvent],
+      ticket_types: [baseTicketType],
+      checkout_sessions: [],
+      idempotency_records: [],
+      questions: [
+        checkoutQuestion({
+          id: 'q_hidden_parent',
+          type: 'select',
+          label: 'Hidden parent',
+          options: JSON.stringify(['yes', 'no']),
+          applies_to: 'buyer',
+          status: 'hidden',
+          is_hidden: true,
+          hidden_at: new Date('2026-06-01T00:00:00.000Z'),
+        }),
+        checkoutQuestion({
+          id: 'q_required_child',
+          label: 'Required child',
+          applies_to: 'buyer',
+          conditional_visibility: JSON.stringify({
+            field: 'q_hidden_parent',
+            operator: 'equals',
+            value: 'yes',
+          }),
+        }),
+      ],
+    };
+
+    const res = await postCheckoutSession(tables, {
+      buyerFields: {},
+    });
+
+    expect(res.statusCode).toBe(400);
+    expect(res.json().message).toContain('Required child is required');
+    expect(tables.checkout_sessions).toHaveLength(0);
   });
 
   it('ignores hidden and deleted required buyer questions during session validation', async () => {

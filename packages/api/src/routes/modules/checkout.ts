@@ -484,6 +484,7 @@ function parseQuestionOptions(q: QuestionRow): string[] | undefined {
 
 function parseQuestionConditionalVisibility(
   value: string | null,
+  visibleQuestionIds: ReadonlySet<string>,
 ): Question['conditionalVisibility'] | undefined {
   const parsed = parseJsonValue<unknown>(value, undefined);
   if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return undefined;
@@ -503,6 +504,7 @@ function parseQuestionConditionalVisibility(
   ) {
     return undefined;
   }
+  if (!visibleQuestionIds.has(condition.field)) return undefined;
 
   return {
     field: condition.field,
@@ -511,7 +513,7 @@ function parseQuestionConditionalVisibility(
   };
 }
 
-function toDomainQuestion(q: QuestionRow): Question {
+function toDomainQuestion(q: QuestionRow, visibleQuestionIds: ReadonlySet<string>): Question {
   return {
     id: q.id,
     eventId: q.event_id,
@@ -526,12 +528,21 @@ function toDomainQuestion(q: QuestionRow): Question {
     options: parseQuestionOptions(q),
     placeholder: q.placeholder ?? undefined,
     validationPattern: q.validation_pattern ?? undefined,
-    conditionalVisibility: parseQuestionConditionalVisibility(q.conditional_visibility),
+    conditionalVisibility: parseQuestionConditionalVisibility(
+      q.conditional_visibility,
+      visibleQuestionIds,
+    ),
     sortOrder: q.sort_order,
     isConsentField: q.is_consent_field,
     consentText: q.consent_text ?? undefined,
     consentVersion: q.consent_version ?? undefined,
   };
+}
+
+function toVisibleDomainQuestions(rows: QuestionRow[]): Question[] {
+  const visibleRows = rows.filter(isVisibleCheckoutQuestion);
+  const visibleQuestionIds = new Set(visibleRows.map((row) => row.id));
+  return visibleRows.map((row) => toDomainQuestion(row, visibleQuestionIds));
 }
 
 function applicableQuestions(
@@ -874,19 +885,16 @@ export const checkoutRoutes: FastifyPluginAsync = async (app) => {
           const occurrenceById = new Map(
             occurrenceRows.map((occurrence) => [occurrence.id, occurrence]),
           );
-          const eventQuestions: Question[] = (
-            (await db
-              .selectFrom('questions')
-              .selectAll()
-              .where('event_id', '=', eventId)
-              .execute()) as QuestionRow[]
-          )
-            .filter(isVisibleCheckoutQuestion)
-            .map((question) => toDomainQuestion(question));
+          const questionRows = (await db
+            .selectFrom('questions')
+            .selectAll()
+            .where('event_id', '=', eventId)
+            .execute()) as QuestionRow[];
+          const visibleEventQuestions = toVisibleDomainQuestions(questionRows);
           const sessionId = `cs_${ulid()}`;
           const answeredAt = new Date().toISOString();
           const buyerFields = normalizeValidAnswers(
-            applicableQuestions(eventQuestions, 'buyer'),
+            applicableQuestions(visibleEventQuestions, 'buyer'),
             body.buyerFields ?? {},
             'Buyer question',
             answeredAt,
@@ -909,7 +917,7 @@ export const checkoutRoutes: FastifyPluginAsync = async (app) => {
               );
             }
             const itemQuestions = applicableQuestions(
-              eventQuestions,
+              visibleEventQuestions,
               'attendee',
               item.ticketTypeId,
             );
@@ -979,7 +987,7 @@ export const checkoutRoutes: FastifyPluginAsync = async (app) => {
           ]);
           const attendeeFields = normalizeAttendeeFieldsForCartItems(
             normalizedItems,
-            eventQuestions,
+            visibleEventQuestions,
             answeredAt,
           );
           const cart: CartInput = {
@@ -1218,15 +1226,13 @@ export const checkoutRoutes: FastifyPluginAsync = async (app) => {
             listingExpiry && listingExpiry < defaultReservationExpiry
               ? listingExpiry
               : defaultReservationExpiry;
-          const eventQuestions: Question[] = (
+          const eventQuestions = toVisibleDomainQuestions(
             (await db
               .selectFrom('questions')
               .selectAll()
               .where('event_id', '=', body.eventId)
-              .execute()) as QuestionRow[]
-          )
-            .filter(isVisibleCheckoutQuestion)
-            .map((question) => toDomainQuestion(question));
+              .execute()) as QuestionRow[],
+          );
           const answeredAt = new Date().toISOString();
           const buyerFields = normalizeValidAnswers(
             applicableQuestions(eventQuestions, 'buyer'),
@@ -1385,9 +1391,7 @@ export const checkoutRoutes: FastifyPluginAsync = async (app) => {
           .selectAll()
           .where('event_id', '=', body.eventId)
           .execute();
-        const eventQuestions: Question[] = (questionRows as QuestionRow[])
-          .filter(isVisibleCheckoutQuestion)
-          .map((q) => toDomainQuestion(q));
+        const eventQuestions = toVisibleDomainQuestions(questionRows as QuestionRow[]);
 
         const sessionId = `cs_${ulid()}`;
         const answeredAt = new Date().toISOString();
