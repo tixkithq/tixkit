@@ -114,15 +114,15 @@ describe('admin dashboard proxy auth provider gating', () => {
     expect(nextResponseNextMock).not.toHaveBeenCalled();
   });
 
-  it('skips Clerk for explicit e2e local admin auth outside development', async () => {
+  it('uses Clerk when explicit e2e local admin auth is set outside development', async () => {
     configureAuthEnv('production');
     process.env.E2E_LOCAL_ADMIN_AUTH = '1';
     const proxy = await loadProxy();
 
     const response = proxy({} as NextRequest, {} as NextFetchEvent);
 
-    expect(response).toEqual({ type: 'next' });
-    expect(nextResponseNextMock).toHaveBeenCalledTimes(1);
-    expect(clerkProxyMock).not.toHaveBeenCalled();
+    expect(response).toEqual({ type: 'clerk' });
+    expect(clerkProxyMock).toHaveBeenCalledTimes(1);
+    expect(nextResponseNextMock).not.toHaveBeenCalled();
   });
 });

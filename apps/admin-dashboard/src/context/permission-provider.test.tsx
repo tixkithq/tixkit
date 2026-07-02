@@ -30,6 +30,9 @@ const authState = vi.hoisted(() => ({
   } as MockAuthState,
 }));
 
+const originalNodeEnv = process.env.NODE_ENV;
+const originalE2eLocalAdminAuth = process.env.E2E_LOCAL_ADMIN_AUTH;
+
 vi.mock('@clerk/nextjs', () => ({
   useAuth: () => authState.current,
 }));
@@ -48,10 +51,21 @@ afterEach(() => {
   delete process.env.AUTH_PROVIDER;
   delete process.env.NEXT_PUBLIC_AUTH_PROVIDER;
   delete process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY;
+  if (originalNodeEnv === undefined) {
+    Reflect.deleteProperty(process.env, 'NODE_ENV');
+  } else {
+    Reflect.set(process.env, 'NODE_ENV', originalNodeEnv);
+  }
+  if (originalE2eLocalAdminAuth === undefined) {
+    delete process.env.E2E_LOCAL_ADMIN_AUTH;
+  } else {
+    process.env.E2E_LOCAL_ADMIN_AUTH = originalE2eLocalAdminAuth;
+  }
 });
 
 describe('PermissionProvider (local dev, no Clerk key)', () => {
   beforeEach(() => {
+    Reflect.set(process.env, 'NODE_ENV', 'development');
     delete process.env.AUTH_PROVIDER;
     delete process.env.NEXT_PUBLIC_AUTH_PROVIDER;
     delete process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY;
@@ -66,8 +80,29 @@ describe('PermissionProvider (local dev, no Clerk key)', () => {
   });
 });
 
+describe('PermissionProvider (production, no Clerk key)', () => {
+  beforeEach(() => {
+    Reflect.set(process.env, 'NODE_ENV', 'production');
+    process.env.AUTH_PROVIDER = 'dev';
+    process.env.NEXT_PUBLIC_AUTH_PROVIDER = 'dev';
+    process.env.E2E_LOCAL_ADMIN_AUTH = '1';
+    delete process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY;
+  });
+
+  it('fails closed instead of granting local-dev permissions', () => {
+    const { result } = renderHook(usePermissionsHook, { wrapper });
+
+    expect(result.current.loading).toBe(false);
+    expect(result.current.permissions).toEqual([]);
+    expect(result.current.can('billing.write')).toBe(false);
+    expect(result.current.can('developers.write')).toBe(false);
+    expect(result.current.error).toBe('Dashboard authentication is not configured.');
+  });
+});
+
 describe('PermissionProvider (production, Clerk key present)', () => {
   beforeEach(() => {
+    Reflect.set(process.env, 'NODE_ENV', 'production');
     process.env.AUTH_PROVIDER = 'clerk';
     process.env.NEXT_PUBLIC_AUTH_PROVIDER = 'clerk';
     process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY = 'pk_test_123';

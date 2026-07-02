@@ -35,10 +35,7 @@ export function authProvider(): string {
 }
 
 export function usesLocalDevAuth(): boolean {
-  return (
-    authProvider() === 'dev' &&
-    (process.env.NODE_ENV === 'development' || process.env.E2E_LOCAL_ADMIN_AUTH === '1')
-  );
+  return authProvider() === 'dev' && process.env.NODE_ENV === 'development';
 }
 
 export function hasClerkKey(): boolean {

@@ -87,14 +87,14 @@ describe('getAdminApiAuthHeaders', () => {
     },
   );
 
-  it('allows explicit e2e local admin auth outside development', () => {
+  it('ignores explicit e2e local admin auth outside development', () => {
     vi.stubEnv('NODE_ENV', 'production');
     process.env.AUTH_PROVIDER = 'dev';
     process.env.NEXT_PUBLIC_AUTH_PROVIDER = 'dev';
     process.env.E2E_LOCAL_ADMIN_AUTH = '1';
 
     expect(authProvider()).toBe('dev');
-    expect(usesLocalDevAuth()).toBe(true);
+    expect(usesLocalDevAuth()).toBe(false);
   });
 
   it('attaches the active Clerk session token when Clerk is configured', async () => {

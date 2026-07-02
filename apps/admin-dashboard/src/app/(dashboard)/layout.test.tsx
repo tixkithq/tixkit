@@ -171,7 +171,7 @@ describe('DashboardLayout auth handoff', () => {
     expect(screen.getByText('Dashboard authentication is not configured')).toBeInTheDocument();
   });
 
-  it('renders the dashboard shell with explicit e2e local admin auth', async () => {
+  it('fails closed with explicit e2e local admin auth outside development', async () => {
     vi.stubEnv('NODE_ENV', 'production');
     process.env.AUTH_PROVIDER = 'dev';
     process.env.NEXT_PUBLIC_AUTH_PROVIDER = 'dev';
@@ -185,8 +185,9 @@ describe('DashboardLayout auth handoff', () => {
 
     expect(mocks.auth).not.toHaveBeenCalled();
     expect(mocks.getPrincipal).not.toHaveBeenCalled();
-    expect(screen.getByTestId('authenticated-layout')).toBeInTheDocument();
-    expect(screen.getByTestId('dashboard-child')).toBeInTheDocument();
+    expect(screen.queryByTestId('authenticated-layout')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('dashboard-child')).not.toBeInTheDocument();
+    expect(screen.getByText('Dashboard authentication is not configured')).toBeInTheDocument();
   });
 
   it('redirects signed-out Clerk users to sign-in before calling the Tixkit API', async () => {

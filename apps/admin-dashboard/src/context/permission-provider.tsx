@@ -3,7 +3,7 @@
 import { createContext, useContext, useEffect, useMemo, useState } from 'react';
 import { useAuth } from '@clerk/nextjs';
 import { LOCAL_DEV_PERMISSIONS, type TixkitPermission, hasPermission } from '@/lib/permissions';
-import { hasClerkKey } from '@/lib/auth';
+import { hasClerkKey, usesLocalDevAuth } from '@/lib/auth';
 import { adminApi } from '@/lib/api';
 
 type PermissionContextValue = {
@@ -42,7 +42,7 @@ function cacheKeyForPrincipal(input: {
 }
 
 async function resolvePermissions(cacheKey: PrincipalCacheKey): Promise<TixkitPermission[]> {
-  if (!hasClerkKey()) {
+  if (usesLocalDevAuth()) {
     return LOCAL_DEV_PERMISSIONS;
   }
 
@@ -112,6 +112,20 @@ function LocalPermissionProvider({ children }: { children: React.ReactNode }) {
       can: (permission?: TixkitPermission) => hasPermission(LOCAL_DEV_PERMISSIONS, permission),
       loading: false,
       error: null,
+    }),
+    [],
+  );
+
+  return <PermissionContext value={value}>{children}</PermissionContext>;
+}
+
+function UnavailablePermissionProvider({ children }: { children: React.ReactNode }) {
+  const value = useMemo<PermissionContextValue>(
+    () => ({
+      permissions: [],
+      can: () => false,
+      loading: false,
+      error: 'Dashboard authentication is not configured.',
     }),
     [],
   );
@@ -191,11 +205,9 @@ function ClerkPermissionProvider({ children }: { children: React.ReactNode }) {
 }
 
 export function PermissionProvider({ children }: { children: React.ReactNode }) {
-  return hasClerkKey() ? (
-    <ClerkPermissionProvider>{children}</ClerkPermissionProvider>
-  ) : (
-    <LocalPermissionProvider>{children}</LocalPermissionProvider>
-  );
+  if (hasClerkKey()) return <ClerkPermissionProvider>{children}</ClerkPermissionProvider>;
+  if (usesLocalDevAuth()) return <LocalPermissionProvider>{children}</LocalPermissionProvider>;
+  return <UnavailablePermissionProvider>{children}</UnavailablePermissionProvider>;
 }
 
 export function usePermissions() {

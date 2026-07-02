@@ -2,7 +2,7 @@
 
 import { createContext, useContext, useMemo } from 'react';
 import { useUser } from '@clerk/nextjs';
-import { type AdminUser, LOCAL_DEV_USER, hasClerkKey } from '@/lib/auth';
+import { type AdminUser, LOCAL_DEV_USER, hasClerkKey, usesLocalDevAuth } from '@/lib/auth';
 
 const AdminUserContext = createContext<AdminUser>(LOCAL_DEV_USER);
 
@@ -29,10 +29,10 @@ function LocalUserProvider({ children }: { children: React.ReactNode }) {
 }
 
 export function AdminUserProvider({ children }: { children: React.ReactNode }) {
-  return hasClerkKey() ? (
-    <ClerkUserProvider>{children}</ClerkUserProvider>
-  ) : (
-    <LocalUserProvider>{children}</LocalUserProvider>
+  if (hasClerkKey()) return <ClerkUserProvider>{children}</ClerkUserProvider>;
+  if (usesLocalDevAuth()) return <LocalUserProvider>{children}</LocalUserProvider>;
+  return (
+    <AdminUserContext value={{ name: '', email: '', imageUrl: null }}>{children}</AdminUserContext>
   );
 }
 

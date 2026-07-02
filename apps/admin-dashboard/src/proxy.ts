@@ -15,9 +15,7 @@ function hasUsableClerkPublishableKey(): boolean {
     (hasKey ? 'clerk' : undefined) ??
     (process.env.NODE_ENV === 'development' ? 'dev' : 'clerk')
   ).toLowerCase();
-  const allowLocalAdminAuth =
-    process.env.NODE_ENV === 'development' || process.env.E2E_LOCAL_ADMIN_AUTH === '1';
-  if (allowLocalAdminAuth && provider === 'dev') return false;
+  if (process.env.NODE_ENV === 'development' && provider === 'dev') return false;
 
   return hasKey;
 }
