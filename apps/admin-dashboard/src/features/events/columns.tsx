@@ -30,6 +30,7 @@ export type EventAction = {
 export function getEventColumns(
   onEdit?: (event: AdminEventListItem) => void,
   onAction?: (action: EventAction) => void,
+  canWrite = false,
 ): ColumnDef<AdminEventListItem>[] {
   return [
     {
@@ -132,7 +133,7 @@ export function getEventColumns(
           }
         };
 
-        const statusActions = getAvailableStatusActions(event.status);
+        const statusActions = canWrite ? getAvailableStatusActions(event.status) : [];
 
         return (
           <>
@@ -151,23 +152,27 @@ export function getEventColumns(
                     View
                   </Link>
                 </DropdownMenuItem>
-                <DropdownMenuItem onClick={() => onEdit?.(event)}>
-                  <Pencil className="size-4" />
-                  Edit
-                </DropdownMenuItem>
-                <DropdownMenuSeparator />
-                {statusActions.map((action) => (
-                  <DropdownMenuItem
-                    key={action.type}
-                    onClick={() => {
-                      setActionType(action.type);
-                      setConfirmOpen(true);
-                    }}
-                  >
-                    {action.icon}
-                    {action.label}
-                  </DropdownMenuItem>
-                ))}
+                {canWrite && (
+                  <>
+                    <DropdownMenuItem onClick={() => onEdit?.(event)}>
+                      <Pencil className="size-4" />
+                      Edit
+                    </DropdownMenuItem>
+                    <DropdownMenuSeparator />
+                    {statusActions.map((action) => (
+                      <DropdownMenuItem
+                        key={action.type}
+                        onClick={() => {
+                          setActionType(action.type);
+                          setConfirmOpen(true);
+                        }}
+                      >
+                        {action.icon}
+                        {action.label}
+                      </DropdownMenuItem>
+                    ))}
+                  </>
+                )}
               </DropdownMenuContent>
             </DropdownMenu>
             <ConfirmDialog

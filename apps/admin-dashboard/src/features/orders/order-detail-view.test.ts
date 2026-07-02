@@ -13,6 +13,10 @@ const orderState = vi.hoisted(() => ({
   refetch: vi.fn(),
 }));
 
+const permissionsMock = vi.hoisted(() => ({
+  can: vi.fn(),
+}));
+
 if (typeof window === 'undefined') {
   const dom = new JSDOM('<!doctype html><html><body></body></html>');
   Object.assign(globalThis, {
@@ -38,6 +42,10 @@ vi.mock('sonner', () => ({
 
 vi.mock('@/hooks/use-admin-data', () => ({
   useAdminData: () => orderState,
+}));
+
+vi.mock('@/context/permission-provider', () => ({
+  usePermissions: () => permissionsMock,
 }));
 
 vi.mock('@/components/confirm-dialog', () => ({
@@ -171,6 +179,7 @@ beforeEach(() => {
   orderState.loading = false;
   orderState.error = null;
   orderState.refetch.mockClear();
+  permissionsMock.can.mockReturnValue(true);
 });
 
 describe('attendeeDisplayName', () => {
@@ -352,5 +361,26 @@ describe('OrderDetailView', () => {
     expect(screen.getByText('checked_in')).toHaveClass('shrink-0');
     expect(screen.getByText('$122.00')).toHaveClass('shrink-0');
     expect(container.querySelectorAll('.min-w-0').length).toBeGreaterThanOrEqual(6);
+  });
+
+  it('hides cancel and refund actions when the user only has read access', () => {
+    permissionsMock.can.mockReturnValue(false);
+    orderState.data = makeOrder({ status: 'paid' });
+
+    render(React.createElement(OrderDetailView, { orderId: 'ord_1' }));
+
+    expect(screen.getByText('Alice Buyer')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Cancel' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Refund' })).not.toBeInTheDocument();
+  });
+
+  it('requires separate refund permission for refund actions', () => {
+    permissionsMock.can.mockImplementation((permission?: string) => permission === 'orders.write');
+    orderState.data = makeOrder({ status: 'paid' });
+
+    render(React.createElement(OrderDetailView, { orderId: 'ord_1' }));
+
+    expect(screen.getByRole('button', { name: 'Cancel' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Refund' })).not.toBeInTheDocument();
   });
 });

@@ -22,7 +22,10 @@ import { ConfirmDialog } from '@/components/confirm-dialog';
 import { RefundDialog } from './refund-dialog';
 import { toast } from 'sonner';
 
-export function getOrderColumns(onRefetch?: () => void): ColumnDef<AdminOrderListItem>[] {
+export function getOrderColumns(
+  onRefetch?: () => void,
+  options: { canCancelOrders?: boolean; canRefundOrders?: boolean } = {},
+): ColumnDef<AdminOrderListItem>[] {
   return [
     {
       id: 'select',
@@ -106,8 +109,11 @@ export function getOrderColumns(onRefetch?: () => void): ColumnDef<AdminOrderLis
         const [refundOpen, setRefundOpen] = React.useState(false);
         const [pending, setPending] = React.useState(false);
 
-        const canCancel = order.status === 'pending' || order.status === 'paid';
-        const canRefund = order.status === 'paid' || order.status === 'partially_refunded';
+        const canCancel =
+          Boolean(options.canCancelOrders) && (order.status === 'pending' || order.status === 'paid');
+        const canRefund =
+          Boolean(options.canRefundOrders) &&
+          (order.status === 'paid' || order.status === 'partially_refunded');
 
         const handleCancel = async () => {
           setPending(true);

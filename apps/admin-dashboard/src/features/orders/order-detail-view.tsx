@@ -11,6 +11,7 @@ import { Skeleton } from '@/components/ui/skeleton';
 import { Badge } from '@/components/ui/badge';
 import { ConfirmDialog } from '@/components/confirm-dialog';
 import { RefundDialog } from './refund-dialog';
+import { usePermissions } from '@/context/permission-provider';
 import { useAdminData } from '@/hooks/use-admin-data';
 import { formatCurrency, formatDate, formatDateTime } from '@/lib/format';
 import { OrderStatusBadge } from '@/features/events/event-status-badge';
@@ -37,6 +38,7 @@ export function OrderDetailView({ orderId }: { orderId: string }) {
   const [cancelOpen, setCancelOpen] = React.useState(false);
   const [refundOpen, setRefundOpen] = React.useState(false);
   const [pending, setPending] = React.useState(false);
+  const { can } = usePermissions();
   const {
     data: order,
     loading,
@@ -88,8 +90,9 @@ export function OrderDetailView({ orderId }: { orderId: string }) {
     );
   }
 
-  const canCancel = order.status === 'pending' || order.status === 'paid';
-  const canRefund = order.status === 'paid' || order.status === 'partially_refunded';
+  const canCancel = can('orders.write') && (order.status === 'pending' || order.status === 'paid');
+  const canRefund =
+    can('refunds.write') && (order.status === 'paid' || order.status === 'partially_refunded');
   const buyerAnswers = Object.entries(order.checkoutAnswers?.buyerFields ?? {});
   const attendeeAnswers = Object.entries(order.checkoutAnswers?.attendeeFields ?? {});
   const consentSnapshots = Object.entries(order.consentSnapshots ?? {});

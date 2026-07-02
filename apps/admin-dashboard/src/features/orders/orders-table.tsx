@@ -8,6 +8,7 @@ import { EmptyState } from '@/components/empty-state';
 import { Skeleton } from '@/components/ui/skeleton';
 import { DataTable } from '@/components/data-table/data-table';
 import { type DataTableFilter } from '@/components/data-table/toolbar';
+import { usePermissions } from '@/context/permission-provider';
 import { useAdminData } from '@/hooks/use-admin-data';
 import { getOrderColumns } from './columns';
 
@@ -25,11 +26,17 @@ const statusFilters: DataTableFilter = {
 };
 
 export function OrdersTable() {
+  const { can } = usePermissions();
   const { data, loading, error, refetch } = useAdminData(() => adminApi.listOrders());
 
   const orders = data?.items ?? [];
+  const canCancelOrders = can('orders.write');
+  const canRefundOrders = can('refunds.write');
 
-  const columns = React.useMemo(() => getOrderColumns(() => refetch()), [refetch]);
+  const columns = React.useMemo(
+    () => getOrderColumns(() => refetch(), { canCancelOrders, canRefundOrders }),
+    [canCancelOrders, canRefundOrders, refetch],
+  );
 
   if (loading) return <OrdersTableSkeleton />;
 
