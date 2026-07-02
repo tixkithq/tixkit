@@ -1,6 +1,7 @@
 import { fireEvent, render, screen } from '@testing-library/react';
 import '@testing-library/jest-dom/vitest';
 import { describe, expect, it, vi } from 'vitest';
+import { EditorChrome } from './chrome.js';
 import { ContentEditorShell } from './shell.js';
 import { createContentEditorFixture, fixtureChannelLabel } from './fixtures.js';
 
@@ -117,6 +118,29 @@ describe('ContentEditorShell', () => {
 
     fireEvent.click(screen.getByRole('button', { name: 'Open inspector' }));
     expect(screen.getByRole('button', { name: 'Settings' })).toBeInTheDocument();
+  });
+
+  it('keeps inspector content available as a mobile bottom sheet', () => {
+    render(
+      <EditorChrome
+        canvas={<main>Canvas</main>}
+        channel="event_page"
+        inspector={<section>Inspector content</section>}
+        leftRail={<nav aria-label="Editor tools">Tools</nav>}
+        topBar={<header>Top bar</header>}
+      />,
+    );
+
+    const inspector = screen.getByRole('complementary', { name: 'Inspector' });
+    expect(inspector).not.toHaveClass('hidden');
+    expect(inspector).toHaveClass(
+      'fixed',
+      'inset-x-0',
+      'bottom-0',
+      'h-[min(78svh,42rem)]',
+      'lg:static',
+      'lg:w-80',
+    );
   });
 
   it('disables publish and surfaces blockers for invalid drafts', () => {

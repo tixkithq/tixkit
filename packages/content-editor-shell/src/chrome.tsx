@@ -534,7 +534,7 @@ export function EditorChrome({
         {hasInspector && (
           <aside
             aria-label="Inspector"
-            className="hidden w-80 shrink-0 border-l bg-background lg:block xl:w-[22rem]"
+            className="fixed inset-x-0 bottom-0 z-40 h-[min(78svh,42rem)] overflow-hidden rounded-t-2xl border-t bg-background shadow-2xl lg:static lg:z-auto lg:h-auto lg:w-80 lg:shrink-0 lg:rounded-none lg:border-t-0 lg:border-l lg:shadow-none xl:w-[22rem]"
           >
             {inspector}
           </aside>
