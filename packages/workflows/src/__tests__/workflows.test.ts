@@ -1489,20 +1489,47 @@ describe('exportWorkflow', () => {
     });
   });
 
-  it('throws retryable generation failures without marking the export failed', async () => {
-    let markedFailed = false;
-    setActivity('generateExportActivity', async () =>
-      errResult('EXPORT_FAILED', 'Database unavailable', true),
-    );
-    setActivity('markExportFailedActivity', async () => {
-      markedFailed = true;
+  it('retries retryable generation failures before continuing', async () => {
+    let attempts = 0;
+    setActivity('generateExportActivity', async () => {
+      attempts += 1;
+      if (attempts < 3) {
+        return errResult('EXPORT_FAILED', 'Database unavailable', true);
+      }
+      return okResult({ data: 'id\n1', rowCount: 1 });
+    });
+
+    const result = await exportWorkflow(input);
+
+    expect(result).toEqual({
+      status: 'completed',
+      fileUrl: 'https://exports.example.test/exp_1.csv',
+    });
+    expect(attempts).toBe(3);
+    expect(mockState.sleeps).toEqual(['10 seconds', '20 seconds']);
+  });
+
+  it('marks the export failed after retryable generation failures are exhausted', async () => {
+    let attempts = 0;
+    let failedInput: Record<string, unknown> | undefined;
+    setActivity('generateExportActivity', async () => {
+      attempts += 1;
+      return errResult('EXPORT_FAILED', 'Database unavailable', true);
+    });
+    setActivity('markExportFailedActivity', async (activityInput: Record<string, unknown>) => {
+      failedInput = activityInput;
       return okResult({ failed: true });
     });
 
-    await expect(exportWorkflow(input)).rejects.toThrow(
-      'Export generation failed (EXPORT_FAILED): Database unavailable',
-    );
-    expect(markedFailed).toBe(false);
+    const result = await exportWorkflow(input);
+
+    expect(result.status).toBe('failed');
+    expect(attempts).toBe(3);
+    expect(mockState.sleeps).toEqual(['10 seconds', '20 seconds']);
+    expect(failedInput).toMatchObject({
+      exportId: 'exp_1',
+      reason: 'Database unavailable',
+    });
   });
 
   it('marks the export failed when upload returns a non-retryable failure', async () => {
@@ -1524,34 +1551,50 @@ describe('exportWorkflow', () => {
     });
   });
 
-  it('throws retryable upload failures without marking the export failed', async () => {
-    let markedFailed = false;
-    setActivity('uploadFileActivity', async () => errResult('UPLOAD_FAILED', 'S3 timeout', true));
-    setActivity('markExportFailedActivity', async () => {
-      markedFailed = true;
+  it('marks the export failed after retryable upload failures are exhausted', async () => {
+    let attempts = 0;
+    let failedInput: Record<string, unknown> | undefined;
+    setActivity('uploadFileActivity', async () => {
+      attempts += 1;
+      return errResult('UPLOAD_FAILED', 'S3 timeout', true);
+    });
+    setActivity('markExportFailedActivity', async (activityInput: Record<string, unknown>) => {
+      failedInput = activityInput;
       return okResult({ failed: true });
     });
 
-    await expect(exportWorkflow(input)).rejects.toThrow(
-      'Export upload failed (UPLOAD_FAILED): S3 timeout',
-    );
-    expect(markedFailed).toBe(false);
+    const result = await exportWorkflow(input);
+
+    expect(result.status).toBe('failed');
+    expect(attempts).toBe(3);
+    expect(mockState.sleeps).toEqual(['10 seconds', '20 seconds']);
+    expect(failedInput).toMatchObject({
+      exportId: 'exp_1',
+      reason: 'S3 timeout',
+    });
   });
 
-  it('throws retryable completion notification failures without marking the export failed', async () => {
-    let markedFailed = false;
-    setActivity('notifyExportCompleteActivity', async () =>
-      errResult('EXPORT_NOTIFICATION_FAILED', 'Database unavailable', true),
-    );
-    setActivity('markExportFailedActivity', async () => {
-      markedFailed = true;
+  it('marks the export failed after retryable completion notification failures are exhausted', async () => {
+    let attempts = 0;
+    let failedInput: Record<string, unknown> | undefined;
+    setActivity('notifyExportCompleteActivity', async () => {
+      attempts += 1;
+      return errResult('EXPORT_NOTIFICATION_FAILED', 'Database unavailable', true);
+    });
+    setActivity('markExportFailedActivity', async (activityInput: Record<string, unknown>) => {
+      failedInput = activityInput;
       return okResult({ failed: true });
     });
 
-    await expect(exportWorkflow(input)).rejects.toThrow(
-      'Export completion notification failed (EXPORT_NOTIFICATION_FAILED): Database unavailable',
-    );
-    expect(markedFailed).toBe(false);
+    const result = await exportWorkflow(input);
+
+    expect(result.status).toBe('failed');
+    expect(attempts).toBe(3);
+    expect(mockState.sleeps).toEqual(['10 seconds', '20 seconds']);
+    expect(failedInput).toMatchObject({
+      exportId: 'exp_1',
+      reason: 'Database unavailable',
+    });
   });
 });
 
