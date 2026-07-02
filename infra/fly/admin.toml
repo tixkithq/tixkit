@@ -5,8 +5,8 @@ primary_region = "iad"
 dockerfile = "Dockerfile.admin"
 
 [build.args]
-NEXT_PUBLIC_ADMIN_API_BASE_URL = "https://api.example.com"
-NEXT_PUBLIC_API_BASE_URL = "https://api.example.com/v1"
+NEXT_PUBLIC_ADMIN_API_BASE_URL = "https://tixkit-api.fly.dev"
+NEXT_PUBLIC_API_BASE_URL = "https://tixkit-api.fly.dev/v1"
 
 [http_service]
 internal_port = 3001
@@ -18,5 +18,5 @@ min_machines_running = 1
 [env]
 NODE_ENV = "production"
 PORT = "3001"
-NEXT_PUBLIC_ADMIN_API_BASE_URL = "https://api.example.com"
-NEXT_PUBLIC_API_BASE_URL = "https://api.example.com/v1"
+NEXT_PUBLIC_ADMIN_API_BASE_URL = "https://tixkit-api.fly.dev"
+NEXT_PUBLIC_API_BASE_URL = "https://tixkit-api.fly.dev/v1"

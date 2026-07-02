@@ -2,12 +2,12 @@ global:
   imageRegistry: ghcr.io/your-org/tixkit
   imagePullPolicy: IfNotPresent
   environment: production
-  apiBaseUrl: https://api.example.com
-  checkoutUrl: https://checkout.example.com
-  adminUrl: https://admin.example.com
+  apiBaseUrl: https://api.tixkit.com
+  checkoutUrl: https://checkout.tixkit.com
+  adminUrl: https://admin.tixkit.com
   corsAllowedOrigins:
-    - https://checkout.example.com
-    - https://admin.example.com
+    - https://checkout.tixkit.com
+    - https://admin.tixkit.com
 
 secrets:
   create: true
@@ -127,9 +127,9 @@ ingress:
   enabled: false
   className: nginx
   tlsSecretName: tixkit-tls
-  apiHost: api.example.com
-  checkoutHost: checkout.example.com
-  adminHost: admin.example.com
+  apiHost: api.tixkit.com
+  checkoutHost: checkout.tixkit.com
+  adminHost: admin.tixkit.com
   blockPublicMetrics: true
 
 postgres:

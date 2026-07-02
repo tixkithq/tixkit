@@ -26,7 +26,7 @@ services:
       - key: TRUST_PROXY
         value: 1
       - key: CORS_ALLOWED_ORIGINS
-        value: https://checkout.example.com,https://admin.example.com
+        value: https://tixkit-checkout.onrender.com,https://tixkit-admin.onrender.com
       - key: TEMPORAL_ADDRESS
         sync: false
       - key: TEMPORAL_NAMESPACE

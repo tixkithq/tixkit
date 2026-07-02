@@ -26,6 +26,12 @@ RUN test -n "${NEXT_PUBLIC_ADMIN_API_BASE_URL}" && \
   case "${NEXT_PUBLIC_API_BASE_URL}" in \
     http://localhost*|http://127.*|http://0.0.0.0*) exit 1 ;; \
   esac && \
+  case "${NEXT_PUBLIC_ADMIN_API_BASE_URL}" in \
+    https://example.com|https://example.com/*|https://*.example.com|https://*.example.com/*) exit 1 ;; \
+  esac && \
+  case "${NEXT_PUBLIC_API_BASE_URL}" in \
+    https://example.com|https://example.com/*|https://*.example.com|https://*.example.com/*) exit 1 ;; \
+  esac && \
   bun run build
 
 EXPOSE 3001

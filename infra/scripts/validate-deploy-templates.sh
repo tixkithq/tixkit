@@ -22,6 +22,15 @@ require_file Dockerfile.worker
 require_file Dockerfile.checkout
 require_file Dockerfile.admin
 
+reject_placeholder_production_origins() {
+  if grep -REn '(^|[^[:alnum:]_-])([[:alnum:].-]+\.)?example\.com([^[:alnum:]_-]|$)' \
+    infra/fly infra/render.yaml infra/helm/tixkit/values.yaml infra/helm/tixkit/templates >/dev/null; then
+    fail 'production deploy descriptors must not contain example.com placeholder origins'
+  fi
+}
+
+reject_placeholder_production_origins
+
 require_workflow_step_order() {
   local workflow="$1"
   local before_step="$2"
@@ -131,6 +140,9 @@ validate_runtime_image_pins() {
 validate_runtime_image_pins
 
 validate_frontend_public_api_build_config() {
+  local expected_fly_api_origin='https://tixkit-api.fly.dev'
+  local expected_fly_api_base_url="${expected_fly_api_origin}/v1"
+
   grep -Eq '^ARG NEXT_PUBLIC_TIXKIT_API_BASE_URL$' Dockerfile.checkout ||
     fail 'Dockerfile.checkout must declare NEXT_PUBLIC_TIXKIT_API_BASE_URL as a build arg'
   grep -Eq '^ENV NEXT_PUBLIC_TIXKIT_API_BASE_URL=\$\{NEXT_PUBLIC_TIXKIT_API_BASE_URL\}$' Dockerfile.checkout ||
@@ -141,6 +153,8 @@ validate_frontend_public_api_build_config() {
     fail 'Dockerfile.checkout must require an HTTPS public API origin before build'
   grep -Fq 'http://localhost*|http://127.*|http://0.0.0.0*' Dockerfile.checkout ||
     fail 'Dockerfile.checkout must reject local public API origins before build'
+  grep -Fq 'https://example.com|https://example.com/*|https://*.example.com|https://*.example.com/*' Dockerfile.checkout ||
+    fail 'Dockerfile.checkout must reject example.com placeholder public API origins before build'
 
   for variable in NEXT_PUBLIC_ADMIN_API_BASE_URL NEXT_PUBLIC_API_BASE_URL; do
     grep -Eq "^ARG ${variable}$" Dockerfile.admin ||
@@ -154,8 +168,10 @@ validate_frontend_public_api_build_config() {
     fail 'Dockerfile.admin must require HTTPS public API origins before build'
   grep -Fq 'http://localhost*|http://127.*|http://0.0.0.0*' Dockerfile.admin ||
     fail 'Dockerfile.admin must reject local public API origins before build'
+  grep -Fq 'https://example.com|https://example.com/*|https://*.example.com|https://*.example.com/*' Dockerfile.admin ||
+    fail 'Dockerfile.admin must reject example.com placeholder public API origins before build'
 
-  awk '
+  awk -v expected_api_base_url="${expected_fly_api_base_url}" '
     /^\[build\.args\]$/ {
       in_build_args = 1
       in_env = 0
@@ -170,10 +186,10 @@ validate_frontend_public_api_build_config() {
       in_build_args = 0
       in_env = 0
     }
-    in_build_args && /^NEXT_PUBLIC_TIXKIT_API_BASE_URL = "https:\/\/api\.example\.com\/v1"$/ {
+    in_build_args && $0 == "NEXT_PUBLIC_TIXKIT_API_BASE_URL = \"" expected_api_base_url "\"" {
       build_arg = 1
     }
-    in_env && /^NEXT_PUBLIC_TIXKIT_API_BASE_URL = "https:\/\/api\.example\.com\/v1"$/ {
+    in_env && $0 == "NEXT_PUBLIC_TIXKIT_API_BASE_URL = \"" expected_api_base_url "\"" {
       runtime_env = 1
     }
     END {
@@ -182,7 +198,8 @@ validate_frontend_public_api_build_config() {
   ' infra/fly/checkout.toml ||
     fail 'infra/fly/checkout.toml must pass NEXT_PUBLIC_TIXKIT_API_BASE_URL as both a build arg and runtime env'
 
-  awk '
+  awk -v expected_api_origin="${expected_fly_api_origin}" \
+    -v expected_api_base_url="${expected_fly_api_base_url}" '
     /^\[build\.args\]$/ {
       in_build_args = 1
       in_env = 0
@@ -197,16 +214,16 @@ validate_frontend_public_api_build_config() {
       in_build_args = 0
       in_env = 0
     }
-    in_build_args && /^NEXT_PUBLIC_ADMIN_API_BASE_URL = "https:\/\/api\.example\.com"$/ {
+    in_build_args && $0 == "NEXT_PUBLIC_ADMIN_API_BASE_URL = \"" expected_api_origin "\"" {
       admin_build_arg = 1
     }
-    in_build_args && /^NEXT_PUBLIC_API_BASE_URL = "https:\/\/api\.example\.com\/v1"$/ {
+    in_build_args && $0 == "NEXT_PUBLIC_API_BASE_URL = \"" expected_api_base_url "\"" {
       api_build_arg = 1
     }
-    in_env && /^NEXT_PUBLIC_ADMIN_API_BASE_URL = "https:\/\/api\.example\.com"$/ {
+    in_env && $0 == "NEXT_PUBLIC_ADMIN_API_BASE_URL = \"" expected_api_origin "\"" {
       admin_runtime_env = 1
     }
-    in_env && /^NEXT_PUBLIC_API_BASE_URL = "https:\/\/api\.example\.com\/v1"$/ {
+    in_env && $0 == "NEXT_PUBLIC_API_BASE_URL = \"" expected_api_base_url "\"" {
       api_runtime_env = 1
     }
     END {
@@ -410,17 +427,24 @@ require_rendered_component_image_digest() {
     fail "rendered Helm ${component} image must match ${expected_ref_pattern} and include @sha256:<64 lowercase hex chars>"
 }
 
-expected_cors_origins='https://checkout.example.com,https://admin.example.com'
+expected_fly_cors_origins='https://tixkit-checkout.fly.dev,https://tixkit-admin.fly.dev'
 expected_render_api_origin='https://tixkit-api.onrender.com'
+expected_render_checkout_origin='https://tixkit-checkout.onrender.com'
+expected_render_admin_origin='https://tixkit-admin.onrender.com'
+expected_render_cors_origins="${expected_render_checkout_origin},${expected_render_admin_origin}"
 expected_render_checkout_api_base_url="${expected_render_api_origin}/v1"
+expected_helm_api_origin='https://api.tixkit.com'
+expected_helm_checkout_origin='https://checkout.tixkit.com'
+expected_helm_admin_origin='https://admin.tixkit.com'
+expected_helm_cors_origins="${expected_helm_checkout_origin},${expected_helm_admin_origin}"
 
 grep -Eq '^[[:space:]]*TRUST_PROXY[[:space:]]*=[[:space:]]*"1"[[:space:]]*$' infra/fly/api.toml ||
   fail 'infra/fly/api.toml must set API TRUST_PROXY to bounded hop count "1"'
 
-grep -Eq '^[[:space:]]*CORS_ALLOWED_ORIGINS[[:space:]]*=[[:space:]]*"https://checkout\.example\.com,https://admin\.example\.com"[[:space:]]*$' infra/fly/api.toml ||
-  fail "infra/fly/api.toml must set API CORS_ALLOWED_ORIGINS to ${expected_cors_origins}"
+grep -Fq "CORS_ALLOWED_ORIGINS = \"${expected_fly_cors_origins}\"" infra/fly/api.toml ||
+  fail "infra/fly/api.toml must set API CORS_ALLOWED_ORIGINS to ${expected_fly_cors_origins}"
 
-awk '
+awk -v expected_cors_origins="${expected_render_cors_origins}" '
   function reset_service_state() {
     pending_trust_proxy_value = 0
     pending_cors_origins_value = 0
@@ -487,7 +511,10 @@ awk '
     next
   }
   in_api && pending_cors_origins_value && /^[[:space:]]*value:/ {
-    if ($0 !~ /^[[:space:]]*value:[[:space:]]*https:\/\/checkout\.example\.com,https:\/\/admin\.example\.com[[:space:]]*$/) {
+    value = $0
+    sub(/^[[:space:]]*value:[[:space:]]*/, "", value)
+    sub(/[[:space:]]*$/, "", value)
+    if (value != expected_cors_origins) {
       bad_cors_origins_value = 1
     }
     pending_cors_origins_value = 0
@@ -526,7 +553,7 @@ awk '
     exit found_api && found_worker ? 0 : 1
   }
 ' infra/render.yaml ||
-  fail "infra/render.yaml must set tixkit-api TRUST_PROXY=1, CORS_ALLOWED_ORIGINS=${expected_cors_origins}, and explicit TEMPORAL_ADDRESS/TEMPORAL_NAMESPACE/TEMPORAL_TASK_QUEUE=tixkit-production for tixkit-api and tixkit-worker"
+  fail "infra/render.yaml must set tixkit-api TRUST_PROXY=1, CORS_ALLOWED_ORIGINS=${expected_render_cors_origins}, and explicit TEMPORAL_ADDRESS/TEMPORAL_NAMESPACE/TEMPORAL_TASK_QUEUE=tixkit-production for tixkit-api and tixkit-worker"
 
 awk '
   function reset_service_state() {
@@ -758,25 +785,101 @@ grep -Eq '^[[:space:]]*TEMPORAL_TASK_QUEUE:[[:space:]]*\{\{[[:space:]]*\.Values\
 require_helm_frontend_probe_values checkout /health
 require_helm_frontend_probe_values admin /health
 
-awk '
-  /^[[:space:]]*corsAllowedOrigins:$/ {
+awk -v api_origin="${expected_helm_api_origin}" \
+  -v checkout_origin="${expected_helm_checkout_origin}" \
+  -v admin_origin="${expected_helm_admin_origin}" '
+  function strip(value) {
+    sub(/^[[:space:]]*/, "", value)
+    sub(/[[:space:]]*$/, "", value)
+    gsub(/^["'\'']|["'\'']$/, "", value)
+    return value
+  }
+  $0 == "global:" {
+    in_global = 1
+    next
+  }
+  in_global && /^[^[:space:]]/ {
+    in_global = 0
+  }
+  in_global && /^[[:space:]]*apiBaseUrl:/ {
+    value = $0
+    sub(/^[[:space:]]*apiBaseUrl:[[:space:]]*/, "", value)
+    if (strip(value) == api_origin) {
+      api_base = 1
+    }
+    next
+  }
+  in_global && /^[[:space:]]*checkoutUrl:/ {
+    value = $0
+    sub(/^[[:space:]]*checkoutUrl:[[:space:]]*/, "", value)
+    if (strip(value) == checkout_origin) {
+      checkout_url = 1
+    }
+    next
+  }
+  in_global && /^[[:space:]]*adminUrl:/ {
+    value = $0
+    sub(/^[[:space:]]*adminUrl:[[:space:]]*/, "", value)
+    if (strip(value) == admin_origin) {
+      admin_url = 1
+    }
+    next
+  }
+  in_global && /^[[:space:]]*corsAllowedOrigins:$/ {
     in_cors = 1
     next
   }
   in_cors && /^[^[:space:]]/ {
     in_cors = 0
   }
-  in_cors && /^[[:space:]]*-[[:space:]]*https:\/\/checkout\.example\.com[[:space:]]*$/ {
-    checkout = 1
+  in_cors && /^[[:space:]]*-[[:space:]]*/ {
+    value = $0
+    sub(/^[[:space:]]*-[[:space:]]*/, "", value)
+    value = strip(value)
+    if (value == checkout_origin) {
+      checkout_cors = 1
+    }
+    if (value == admin_origin) {
+      admin_cors = 1
+    }
   }
-  in_cors && /^[[:space:]]*-[[:space:]]*https:\/\/admin\.example\.com[[:space:]]*$/ {
-    admin = 1
+  $0 == "ingress:" {
+    in_ingress = 1
+    next
+  }
+  in_ingress && /^[^[:space:]]/ {
+    in_ingress = 0
+  }
+  in_ingress && /^[[:space:]]*apiHost:/ {
+    value = $0
+    sub(/^[[:space:]]*apiHost:[[:space:]]*/, "", value)
+    if (strip(value) == "api.tixkit.com") {
+      api_host = 1
+    }
+    next
+  }
+  in_ingress && /^[[:space:]]*checkoutHost:/ {
+    value = $0
+    sub(/^[[:space:]]*checkoutHost:[[:space:]]*/, "", value)
+    if (strip(value) == "checkout.tixkit.com") {
+      checkout_host = 1
+    }
+    next
+  }
+  in_ingress && /^[[:space:]]*adminHost:/ {
+    value = $0
+    sub(/^[[:space:]]*adminHost:[[:space:]]*/, "", value)
+    if (strip(value) == "admin.tixkit.com") {
+      admin_host = 1
+    }
+    next
   }
   END {
-    exit checkout && admin ? 0 : 1
+    exit api_base && checkout_url && admin_url && checkout_cors && admin_cors &&
+      api_host && checkout_host && admin_host ? 0 : 1
   }
 ' infra/helm/tixkit/values.yaml ||
-  fail "infra/helm/tixkit/values.yaml must include API CORS origins ${expected_cors_origins}"
+  fail "infra/helm/tixkit/values.yaml must set production API/admin/checkout origins and CORS origins to ${expected_helm_cors_origins}"
 
 if command -v helm >/dev/null 2>&1; then
   rendered_chart="$(helm template tixkit infra/helm/tixkit --namespace tixkit)"
@@ -810,8 +913,16 @@ if command -v helm >/dev/null 2>&1; then
   rendered_config="$(helm template tixkit infra/helm/tixkit --namespace tixkit --show-only templates/configmap.yaml)"
   printf '%s\n' "${rendered_config}" | grep -Eq '^[[:space:]]*TRUST_PROXY:[[:space:]]*"1"[[:space:]]*$' ||
     fail 'rendered Helm ConfigMap must set API TRUST_PROXY to bounded hop count 1'
-  printf '%s\n' "${rendered_config}" | grep -Eq '^[[:space:]]*CORS_ALLOWED_ORIGINS:[[:space:]]*"https://checkout\.example\.com,https://admin\.example\.com"[[:space:]]*$' ||
-    fail "rendered Helm ConfigMap must set API CORS_ALLOWED_ORIGINS to ${expected_cors_origins}"
+  printf '%s\n' "${rendered_config}" | grep -Fq "API_BASE_URL: \"${expected_helm_api_origin}\"" ||
+    fail "rendered Helm ConfigMap must set API_BASE_URL to ${expected_helm_api_origin}"
+  printf '%s\n' "${rendered_config}" | grep -Fq "CORS_ALLOWED_ORIGINS: \"${expected_helm_cors_origins}\"" ||
+    fail "rendered Helm ConfigMap must set API CORS_ALLOWED_ORIGINS to ${expected_helm_cors_origins}"
+  printf '%s\n' "${rendered_config}" | grep -Fq "NEXT_PUBLIC_TIXKIT_API_BASE_URL: \"${expected_helm_api_origin}/v1\"" ||
+    fail "rendered Helm ConfigMap must set NEXT_PUBLIC_TIXKIT_API_BASE_URL to ${expected_helm_api_origin}/v1"
+  printf '%s\n' "${rendered_config}" | grep -Fq "NEXT_PUBLIC_ADMIN_API_BASE_URL: \"${expected_helm_api_origin}\"" ||
+    fail "rendered Helm ConfigMap must set NEXT_PUBLIC_ADMIN_API_BASE_URL to ${expected_helm_api_origin}"
+  printf '%s\n' "${rendered_config}" | grep -Fq "NEXT_PUBLIC_CHECKOUT_URL: \"${expected_helm_checkout_origin}\"" ||
+    fail "rendered Helm ConfigMap must set NEXT_PUBLIC_CHECKOUT_URL to ${expected_helm_checkout_origin}"
   printf '%s\n' "${rendered_config}" | grep -Eq '^[[:space:]]*TEMPORAL_TASK_QUEUE:[[:space:]]*"tixkit-production"[[:space:]]*$' ||
     fail 'rendered Helm ConfigMap must set TEMPORAL_TASK_QUEUE to tixkit-production'
 else
