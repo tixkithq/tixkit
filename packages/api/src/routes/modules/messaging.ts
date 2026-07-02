@@ -400,11 +400,6 @@ export const messagingRoutes: FastifyPluginAsync = async (app) => {
 
     const body = parsed.data;
     const scheduledAt = body.scheduledAt ? new Date(body.scheduledAt) : undefined;
-    if (scheduledAt && scheduledAt.getTime() <= Date.now()) {
-      throw new ValidationError('scheduledAt must be in the future', {
-        field: 'scheduledAt',
-      });
-    }
 
     if (body.audience === 'specific' && (!body.attendeeIds || body.attendeeIds.length === 0)) {
       throw new ValidationError('attendeeIds is required when audience is specific', {
@@ -423,6 +418,12 @@ export const messagingRoutes: FastifyPluginAsync = async (app) => {
         requestHash: hashRequest({ eventId, body }),
       },
       async () => {
+        if (scheduledAt && scheduledAt.getTime() <= Date.now()) {
+          throw new ValidationError('scheduledAt must be in the future', {
+            field: 'scheduledAt',
+          });
+        }
+
         const event = await loadAuthorizedEvent(eventId, principal, db);
 
         const audienceResolution = await resolveMessageAudience({

@@ -2840,6 +2840,137 @@ describe('messaging endpoint', () => {
     await app.close();
   });
 
+  it('POST /events/:eventId/messages replays scheduled campaigns after their scheduledAt passes', async () => {
+    const now = new Date('2026-07-02T02:00:00.000Z');
+    const scheduledAt = new Date(now.getTime() + 60_000).toISOString();
+    const smsContent = publishedSmsContentRows(now);
+    const tables = {
+      events: [
+        {
+          id: 'evt_1',
+          tenant_id: 'tnt_1',
+          organization_id: 'org_1',
+          brand_id: 'brd_1',
+          status: 'published',
+          slug: 'evt',
+          title: 'Event',
+          timezone: 'UTC',
+          starts_at: now,
+          visibility: 'public',
+          seo: '{}',
+        },
+      ],
+      attendees: [
+        {
+          id: 'att_1',
+          tenant_id: 'tnt_1',
+          order_id: 'ord_1',
+          event_id: 'evt_1',
+          ticket_type_id: 'tt_1',
+          ticket_id: 'tkt_1',
+          first_name: 'Ada',
+          last_name: 'Lovelace',
+          email: 'ada@test.com',
+          phone: '+15550000002',
+          status: 'confirmed',
+          custom_answers: null,
+          checked_in_at: null,
+          check_in_device_id: null,
+          created_at: now,
+          updated_at: now,
+        },
+      ],
+      message_consents: [
+        {
+          id: 'msc_1',
+          tenant_id: 'tnt_1',
+          attendee_id: 'att_1',
+          email: 'ada@test.com',
+          phone: '+15550000002',
+          email_opt_in: true,
+          sms_opt_in: true,
+          consent_text: 'Updates',
+          consent_version: 'v1',
+          consented_at: now,
+          revoked_at: null,
+          created_at: now,
+        },
+      ],
+      sms_provider_routes: [
+        {
+          id: 'spr_1',
+          tenant_id: 'tnt_1',
+          brand_id: 'brd_1',
+          provider_type: 'capture',
+          credentials_ref: 'capture',
+          sender_identity_id: 'ssi_1',
+          priority: 0,
+          is_fallback: false,
+          rate_limit_per_hour: null,
+          allowed_categories: JSON.stringify(['bulk']),
+          status: 'active',
+          smoke_send_verified: true,
+          webhook_url: null,
+          created_at: now,
+          updated_at: now,
+        },
+      ],
+      content_documents: [smsContent.document],
+      content_document_versions: [smsContent.version],
+      idempotency_records: [],
+      sms_jobs: [],
+    };
+    const app = await setupApp(messagingRoutes, makePrincipal(), tables);
+    const nowSpy = vi.spyOn(Date, 'now').mockReturnValue(now.getTime());
+    const payload = {
+      smsTemplateKey: 'attendee-message',
+      audience: 'all',
+      channel: 'sms',
+      variables: { body: 'Update' },
+      scheduledAt,
+    };
+
+    try {
+      const first = await app.inject({
+        method: 'POST',
+        url: '/events/evt_1/messages',
+        headers: { 'Idempotency-Key': 'msg_scheduled_replay' },
+        payload,
+      });
+      expect(first.statusCode).toBe(202);
+      expect(first.json()).toMatchObject({
+        campaignId: 'msg_scheduled_replay',
+        status: 'queued',
+        queuedSmsJobs: 1,
+        scheduledAt,
+      });
+
+      nowSpy.mockReturnValue(new Date(scheduledAt).getTime() + 60_000);
+      const replay = await app.inject({
+        method: 'POST',
+        url: '/events/evt_1/messages',
+        headers: { 'Idempotency-Key': 'msg_scheduled_replay' },
+        payload,
+      });
+      expect(replay.statusCode).toBe(202);
+      expect(replay.json()).toEqual(first.json());
+      expect(tables.sms_jobs).toHaveLength(1);
+
+      const firstUsePastSchedule = await app.inject({
+        method: 'POST',
+        url: '/events/evt_1/messages',
+        headers: { 'Idempotency-Key': 'msg_scheduled_past_first_use' },
+        payload,
+      });
+      expect(firstUsePastSchedule.statusCode).toBe(400);
+      expect(firstUsePastSchedule.json().message).toBe('scheduledAt must be in the future');
+      expect(tables.sms_jobs).toHaveLength(1);
+    } finally {
+      nowSpy.mockRestore();
+      await app.close();
+    }
+  });
+
   it('POST /events/:eventId/messages excludes same-event attendees from another tenant', async () => {
     const now = new Date();
     const smsContent = publishedSmsContentRows(now);
