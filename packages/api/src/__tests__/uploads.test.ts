@@ -1096,7 +1096,7 @@ describe('upload artifact routes', () => {
     await app.close();
   });
 
-  it('creates content email image uploads scoped to the event brand', async () => {
+  it('allows messages.write principals to create content email image uploads scoped to the event brand', async () => {
     const { db, tables } = createMockDb({
       events: [
         {
@@ -1107,8 +1107,22 @@ describe('upload artifact routes', () => {
           status: 'draft',
         },
       ],
+      content_documents: [
+        {
+          id: 'cdoc_1',
+          tenant_id: 'tnt_1',
+          organization_id: 'org_1',
+          brand_id: 'brd_1',
+          event_id: 'evt_1',
+          channel: 'email',
+        },
+      ],
     });
-    const app = await setupUploadApp(db, uploadRoutes, makePrincipal({ scopes: ['events.write'] }));
+    const app = await setupUploadApp(
+      db,
+      uploadRoutes,
+      makePrincipal({ scopes: ['messages.write'] }),
+    );
 
     const res = await app.inject({
       method: 'POST',
@@ -1139,7 +1153,7 @@ describe('upload artifact routes', () => {
     await app.close();
   });
 
-  it('rejects content email image uploads outside the event brand scope', async () => {
+  it('rejects content email image uploads without messages.write', async () => {
     const { db, tables } = createMockDb({
       events: [
         {
@@ -1152,6 +1166,115 @@ describe('upload artifact routes', () => {
       ],
     });
     const app = await setupUploadApp(db, uploadRoutes, makePrincipal({ scopes: ['events.write'] }));
+
+    const res = await app.inject({
+      method: 'POST',
+      url: '/upload-artifacts',
+      payload: {
+        purpose: 'content_email_image',
+        brandId: 'brd_1',
+        eventId: 'evt_1',
+        fileName: 'hero.png',
+        contentType: 'image/png',
+        sizeBytes: 12,
+      },
+    });
+
+    expect(res.statusCode).toBe(403);
+    expect(tables.upload_artifacts).toHaveLength(0);
+    expect(signedUrlInputs).toHaveLength(0);
+    await app.close();
+  });
+
+  it('requires content email image metadata documents to match the same email document scope', async () => {
+    const event = {
+      id: 'evt_1',
+      tenant_id: 'tnt_1',
+      organization_id: 'org_1',
+      brand_id: 'brd_1',
+      status: 'draft',
+    };
+    const basePayload = {
+      purpose: 'content_email_image',
+      brandId: 'brd_1',
+      eventId: 'evt_1',
+      fileName: 'hero.png',
+      contentType: 'image/png',
+      sizeBytes: 12,
+    };
+
+    const wrongChannelDb = createMockDb({
+      events: [event],
+      content_documents: [
+        {
+          id: 'cdoc_sms',
+          tenant_id: 'tnt_1',
+          organization_id: 'org_1',
+          brand_id: 'brd_1',
+          event_id: 'evt_1',
+          channel: 'sms',
+        },
+      ],
+    });
+    const wrongChannelApp = await setupUploadApp(
+      wrongChannelDb.db,
+      uploadRoutes,
+      makePrincipal({ scopes: ['messages.write'] }),
+    );
+    const wrongChannel = await wrongChannelApp.inject({
+      method: 'POST',
+      url: '/upload-artifacts',
+      payload: { ...basePayload, metadata: { contentDocumentId: 'cdoc_sms' } },
+    });
+    expect(wrongChannel.statusCode).toBe(400);
+    expect(wrongChannelDb.tables.upload_artifacts).toHaveLength(0);
+    await wrongChannelApp.close();
+
+    const wrongEventDb = createMockDb({
+      events: [event],
+      content_documents: [
+        {
+          id: 'cdoc_other_event',
+          tenant_id: 'tnt_1',
+          organization_id: 'org_1',
+          brand_id: 'brd_1',
+          event_id: 'evt_other',
+          channel: 'email',
+        },
+      ],
+    });
+    const wrongEventApp = await setupUploadApp(
+      wrongEventDb.db,
+      uploadRoutes,
+      makePrincipal({ scopes: ['messages.write'] }),
+    );
+    const wrongEvent = await wrongEventApp.inject({
+      method: 'POST',
+      url: '/upload-artifacts',
+      payload: { ...basePayload, metadata: { contentDocumentId: 'cdoc_other_event' } },
+    });
+    expect(wrongEvent.statusCode).toBe(404);
+    expect(wrongEventDb.tables.upload_artifacts).toHaveLength(0);
+    await wrongEventApp.close();
+  });
+
+  it('rejects content email image uploads outside the event brand scope', async () => {
+    const { db, tables } = createMockDb({
+      events: [
+        {
+          id: 'evt_1',
+          tenant_id: 'tnt_1',
+          organization_id: 'org_1',
+          brand_id: 'brd_1',
+          status: 'draft',
+        },
+      ],
+    });
+    const app = await setupUploadApp(
+      db,
+      uploadRoutes,
+      makePrincipal({ scopes: ['messages.write'] }),
+    );
 
     const missingEvent = await app.inject({
       method: 'POST',
@@ -1195,6 +1318,57 @@ describe('upload artifact routes', () => {
     expect(checkoutMetadata.statusCode).toBe(400);
     expect(tables.upload_artifacts).toHaveLength(0);
     expect(signedUrlInputs).toHaveLength(0);
+    await app.close();
+  });
+
+  it('allows messages.write principals to complete and download scoped content email image artifacts', async () => {
+    const { db } = createMockDb({
+      upload_artifacts: [
+        {
+          id: 'upl_email_pending',
+          tenant_id: 'tnt_1',
+          organization_id: 'org_1',
+          brand_id: 'brd_1',
+          event_id: 'evt_1',
+          purpose: 'content_email_image',
+          status: 'pending',
+          scan_status: 'pending',
+          bucket: 'tixkit',
+          object_key: 'uploads/tnt_1/content-email-images/evt_1/staging/upl_email_pending.png',
+          content_type: 'image/png',
+          file_name: 'hero.png',
+          size_bytes: 12,
+          expires_at: new Date(Date.now() + 60_000),
+        },
+      ],
+    });
+    const app = await setupUploadApp(
+      db,
+      uploadRoutes,
+      makePrincipal({ scopes: ['messages.write'] }),
+    );
+    const imageBytes = new Uint8Array(12);
+    s3Send
+      .mockResolvedValueOnce({ ContentLength: 12, ContentType: 'image/png' })
+      .mockResolvedValueOnce({
+        Body: { transformToByteArray: async () => imageBytes },
+        ContentType: 'image/png',
+      })
+      .mockResolvedValueOnce({})
+      .mockResolvedValueOnce({});
+
+    const complete = await app.inject({
+      method: 'POST',
+      url: '/upload-artifacts/upl_email_pending/complete',
+    });
+    expect(complete.statusCode).toBe(200);
+
+    const download = await app.inject({
+      method: 'GET',
+      url: '/upload-artifacts/upl_email_pending/download',
+    });
+    expect(download.statusCode).toBe(200);
+    expect(signedUrlInputs).toHaveLength(1);
     await app.close();
   });
 

@@ -64,6 +64,17 @@ function checkoutQuestionIdFromMetadata(metadata: Record<string, unknown> | unde
   return questionId;
 }
 
+function contentDocumentIdFromMetadata(
+  metadata: Record<string, unknown> | undefined,
+): string | undefined {
+  const contentDocumentId = metadata?.contentDocumentId;
+  if (contentDocumentId === undefined) return undefined;
+  if (typeof contentDocumentId !== 'string' || contentDocumentId.length === 0) {
+    throw new ValidationError('metadata.contentDocumentId must be a non-empty string');
+  }
+  return contentDocumentId;
+}
+
 async function requireCheckoutFileQuestion(
   db: Database,
   eventId: string,
@@ -85,6 +96,38 @@ async function requireCheckoutFileQuestion(
     question.deleted_at
   ) {
     throw new ValidationError('questionId must reference an active file question for this event');
+  }
+}
+
+async function requireContentEmailDocument(
+  db: Database,
+  documentId: string,
+  expected: {
+    tenantId: string;
+    organizationId: string;
+    brandId: string;
+    eventId: string;
+  },
+): Promise<void> {
+  const document = await db
+    .selectFrom('content_documents')
+    .select(['id', 'tenant_id', 'organization_id', 'brand_id', 'event_id', 'channel'])
+    .where('id', '=', documentId)
+    .executeTakeFirst();
+
+  if (!document) throw new NotFoundError('ContentDocument', documentId);
+  if (document.channel !== 'email') {
+    throw new ValidationError(
+      'metadata.contentDocumentId must reference an email content document',
+    );
+  }
+  if (
+    document.tenant_id !== expected.tenantId ||
+    document.organization_id !== expected.organizationId ||
+    document.brand_id !== expected.brandId ||
+    document.event_id !== expected.eventId
+  ) {
+    throw new NotFoundError('ContentDocument', documentId);
   }
 }
 
@@ -137,11 +180,7 @@ function requireUploadArtifactAccess(
   }
 
   if (artifact.purpose === 'content_email_image') {
-    if (operation === 'complete') {
-      ClerkAuthService.requirePermission(principal, 'events.write');
-      return;
-    }
-    requireAnyPermission(principal, ['events.read', 'events.write']);
+    ClerkAuthService.requirePermission(principal, 'messages.write');
     return;
   }
 
@@ -239,11 +278,12 @@ export const uploadRoutes: FastifyPluginAsync = async (app) => {
         throw new ValidationError('metadata.questionId is not allowed for user avatar uploads');
       }
     } else if (body.purpose === 'content_email_image') {
-      ClerkAuthService.requirePermission(principal, 'events.write');
+      ClerkAuthService.requirePermission(principal, 'messages.write');
       if (!eventId) throw new ValidationError('eventId is required for content email images');
       if (hasCheckoutQuestionMetadata(body.metadata)) {
         throw new ValidationError('metadata.questionId is not allowed for content email images');
       }
+      const contentDocumentId = contentDocumentIdFromMetadata(body.metadata);
       const event = await new EventRepository(db).findById(eventId);
       if (!event) throw new NotFoundError('Event', eventId);
       ClerkAuthService.requireResourceTenant(principal, event, 'Event', eventId);
@@ -256,6 +296,14 @@ export const uploadRoutes: FastifyPluginAsync = async (app) => {
       tenantId = event.tenant_id;
       organizationId = event.organization_id;
       brandId = event.brand_id;
+      if (contentDocumentId) {
+        await requireContentEmailDocument(db, contentDocumentId, {
+          tenantId,
+          organizationId,
+          brandId,
+          eventId,
+        });
+      }
     }
 
     const result = await createUploadArtifact(db, {
