@@ -332,6 +332,7 @@ All routes below require authentication. Most mutations are tenant-scoped and ad
 | `POST`  | `/v1/brands`                                                                                  | `settings.write` | Create brand                                                     |
 | `PATCH` | `/v1/brands/:brandId`                                                                         | `settings.write` | Update brand (name, theme, whiteLabel, legalUrls)                |
 | `POST`  | `/v1/brands/:brandId/domains`                                                                 | `settings.write` | Add custom domain                                                |
+| `GET`   | `/v1/brands/:brandId/email-sender-identities`                                                | `settings.write` | List brand email sender identities                               |
 | `GET`   | `/v1/brands`                                                                                  | `settings.write` | List brands in tenant                                            |
 | `GET`   | `/v1/organizations/:organizationId/payment-accounts`                                          | `billing.write`  | List payment accounts                                            |
 | `POST`  | `/v1/organizations/:organizationId/payment-accounts/stripe-connect`                           | `billing.write`  | Register/return Stripe Connect account                           |
@@ -340,7 +341,7 @@ All routes below require authentication. Most mutations are tenant-scoped and ad
 
 Payment account responses include Connect lifecycle fields: `detailsSubmitted`, `chargesEnabled`, `payoutsEnabled`, `requirements`, `disabledReason`, and optional `onboardingUrl`.
 
-Custom domains are a paid white-label feature. A domain must be verified and have active SSL before checkout resolves `https://{domain}/{eventSlug}`. Pending or unverified domains do not resolve event root slugs.
+Custom domains are a paid managed-cloud brand/white-label feature. A domain must be verified and have active SSL before checkout resolves `https://{domain}/{eventSlug}`. Pending or unverified domains do not resolve event root slugs. OSS builds can keep brand-scoped customer-facing output, but reseller/admin white-label controls are not exposed.
 
 ### Events
 

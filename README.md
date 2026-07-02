@@ -191,7 +191,7 @@ Highlights:
 - **Wallet passes**: Apple and Google Wallet are disabled by default locally and fail closed in production if enabled without signing material.
 - **Storage**: S3-compatible, pointing at local MinIO by default.
 
-See [`docs/pluggable-auth-guide.md`](docs/pluggable-auth-guide.md) and [`docs/clerk-setup-guide.md`](docs/clerk-setup-guide.md) for auth, and the [deploy guide](docs/deploy-guide.md) for production configuration.
+See [`docs/pluggable-auth-guide.md`](docs/pluggable-auth-guide.md) and [`docs/clerk-setup-guide.md`](docs/clerk-setup-guide.md) for auth, and the [production deployment guide](docs/production-deployment-guide.md) for production configuration.
 
 ---
 
@@ -271,7 +271,7 @@ Signature verification helpers ship in the SDKs. See the [webhook guide](docs/we
 - **Containers:** `Dockerfile.api`, `Dockerfile.admin`, `Dockerfile.checkout`, and `Dockerfile.worker`.
 - **Kubernetes:** a Helm chart in `infra/helm/tixkit`. Lint it with `bun run iac:lint` and render it with `bun run iac:template`.
 - **Databases:** Postgres is the reference engine; MySQL is a tier-1, tested parity engine. See [`docs/managed-database-compatibility.md`](docs/managed-database-compatibility.md).
-- **Guides:** [deploy guide](docs/deploy-guide.md), [production deployment guide](docs/production-deployment-guide.md), [Temporal operations](docs/temporal-operations-guide.md), and [incident runbooks](docs/incident-runbooks.md).
+- **Guides:** [production deployment guide](docs/production-deployment-guide.md), [Temporal operations](docs/temporal-operations-guide.md), and [incident runbooks](docs/incident-runbooks.md).
 
 ---
 
@@ -296,7 +296,7 @@ End-to-end suites run across three browsers and include accessibility assertions
 - [Widget embed guide](docs/widget-embed-guide.md)
 - [Webhook guide](docs/webhook-guide.md)
 - [Pluggable auth guide](docs/pluggable-auth-guide.md)
-- [Deploy guide](docs/deploy-guide.md) and [production deployment guide](docs/production-deployment-guide.md)
+- [Production deployment guide](docs/production-deployment-guide.md)
 - [Managed database compatibility](docs/managed-database-compatibility.md)
 - [Email and SMS deliverability runbook](docs/email-sms-deliverability-runbook.md)
 - [Accessibility conformance statement](docs/accessibility-conformance-statement.md)

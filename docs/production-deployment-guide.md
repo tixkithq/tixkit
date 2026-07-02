@@ -25,9 +25,95 @@ The local development contract is defined in `.env.local.example`, `package.json
 
 The API, worker, checkout app, and admin dashboard are the four deployable Tixkit processes. They can be co-located or deployed independently behind a load balancer.
 
-## Managed Deploy Path Status
+## Managed Deploy Paths
 
-Phase 4 adoption gap (C-054): Tixkit does not yet ship a packaged "Tixkit Cloud" path or one-click deploy templates. The target state is either a documented managed offering or deploy templates for at least two providers such as Railway, Render, or Fly.io. Those templates must provision or connect the four Tixkit processes, run migrations, configure secrets, and include a smoke validation step.
+Tixkit can be deployed with the Helm chart, the root Dockerfiles, or provider-specific templates. Every deploy path must run the same four processes: API, worker, checkout, and admin dashboard.
+
+### Root Docker Images
+
+Root Dockerfiles are provided for each process:
+
+| Process  | Dockerfile            | Default start command                             |
+| -------- | --------------------- | ------------------------------------------------- |
+| API      | `Dockerfile.api`      | `bun run --filter @tixkit/api start`              |
+| Worker   | `Dockerfile.worker`   | `bun run --filter @tixkit/workflows start:worker` |
+| Checkout | `Dockerfile.checkout` | `bun run --filter @tixkit/checkout start`         |
+| Admin    | `Dockerfile.admin`    | `bun run --filter @tixkit/admin-dashboard start`  |
+
+Each image uses `oven/bun:1.3`, installs workspace dependencies with the frozen lockfile, builds the workspace, and starts the target app. Validate syntax locally with:
+
+```bash
+docker build --check -f Dockerfile.api .
+docker build --check -f Dockerfile.worker .
+docker build --check -f Dockerfile.checkout .
+docker build --check -f Dockerfile.admin .
+```
+
+Frontend images require public API origins at build time because Next.js inlines `NEXT_PUBLIC_*` values into the browser bundle. Build checkout and admin images with non-local API origins:
+
+```bash
+docker build \
+  --build-arg NEXT_PUBLIC_TIXKIT_API_BASE_URL=https://api.example.com/v1 \
+  -f Dockerfile.checkout .
+
+docker build \
+  --build-arg NEXT_PUBLIC_ADMIN_API_BASE_URL=https://api.example.com \
+  --build-arg NEXT_PUBLIC_API_BASE_URL=https://api.example.com/v1 \
+  -f Dockerfile.admin .
+```
+
+### Railway
+
+Railway supports monorepo deployments via Nixpacks. Each runtime process should be a separate service.
+
+1. Create a Railway project from the Tixkit repository.
+2. Add services for each process:
+   - **API**: build from the repo root, start command `bun run --filter @tixkit/api start`
+   - **Worker**: build from the repo root, start command `bun run --filter @tixkit/workflows start:worker`
+   - **Checkout**: build from the repo root, start command `bun run --filter @tixkit/checkout start`
+   - **Admin**: build from the repo root, start command `bun run --filter @tixkit/admin-dashboard start`
+3. Add managed PostgreSQL and Redis resources.
+4. Configure the production environment variables from this guide on each service.
+5. Run migrations with `bun run db:migrate` as a one-off command before serving traffic.
+6. Deploy and run the post-deploy smoke validation below.
+
+### Fly.io
+
+Fly.io deploys with one `fly.toml` per app. Templates live in `infra/fly/api.toml`, `infra/fly/worker.toml`, `infra/fly/checkout.toml`, and `infra/fly/admin.toml`.
+
+1. Install the Fly CLI: `curl -L https://fly.io/install.sh | sh`
+2. Create apps:
+   ```bash
+   fly apps create tixkit-api
+   fly apps create tixkit-worker
+   fly apps create tixkit-checkout
+   fly apps create tixkit-admin
+   ```
+3. Set secrets for each app:
+   ```bash
+   fly secrets set --app tixkit-api DATABASE_URL="..." REDIS_URL="..." TEMPORAL_ADDRESS="..."
+   ```
+4. Deploy each app:
+   ```bash
+   fly deploy --config infra/fly/api.toml
+   fly deploy --config infra/fly/worker.toml
+   fly deploy --config infra/fly/checkout.toml
+   fly deploy --config infra/fly/admin.toml
+   ```
+5. Run migrations from the API app before serving traffic:
+   ```bash
+   fly ssh console --app tixkit-api --command "bun run db:migrate"
+   ```
+
+### Render
+
+Render supports monorepo deployments via the blueprint at `infra/render.yaml`.
+
+1. Connect the Tixkit repository to Render.
+2. Use `infra/render.yaml` to create the API, worker, checkout, and admin services.
+3. Let the blueprint create managed PostgreSQL and Key Value resources, or connect existing managed services.
+4. Configure the production environment variables from this guide on each service.
+5. Run migrations from a Render shell before serving traffic.
 
 ## Infrastructure-As-Code
 
@@ -86,8 +172,9 @@ Copy `.env.local.example` as the starting point. Required-for-production variabl
 | `PROMETHEUS_PUSHGATEWAY_URL`         | no                   | Optional Pushgateway URL for worker activity metrics when workers cannot be scraped                               |
 | `METRICS_BEARER_TOKEN`               | yes                  | Bearer token required for API `GET /metrics` in production. Prometheus must send `Authorization: Bearer <token>`. |
 | `API_BASE_URL`                       | yes                  | Public API origin, e.g. `https://api.example.com`                                                                 |
-| `NEXT_PUBLIC_TIXKIT_API_BASE_URL`    | yes (checkout)       | Public API origin with `/v1` suffix                                                                               |
-| `NEXT_PUBLIC_ADMIN_API_BASE_URL`     | yes (admin)          | Public API origin                                                                                                 |
+| `NEXT_PUBLIC_TIXKIT_API_BASE_URL`    | yes (checkout)       | Public API origin with `/v1` suffix; required at frontend image build time and runtime                             |
+| `NEXT_PUBLIC_ADMIN_API_BASE_URL`     | yes (admin)          | Public API origin; required at admin image build time and runtime                                                  |
+| `NEXT_PUBLIC_API_BASE_URL`           | yes (admin legacy)   | Public API origin with `/v1` suffix; required for admin image builds that still consume the legacy public variable |
 | `CORS_ALLOWED_ORIGINS`               | yes                  | Comma-separated browser origins allowed to make credentialed API requests, e.g. checkout and admin origins        |
 | `TRUST_PROXY`                        | yes (behind ingress) | Fastify trusted proxy setting for `X-Forwarded-For`; use ingress/controller CIDRs or trusted hop count            |
 
@@ -98,6 +185,8 @@ Copy `.env.local.example` as the starting point. Required-for-production variabl
 | `DATABASE_URL`       | yes      | Postgres connection string                   |
 | `DATABASE_URL_MYSQL` | no       | MySQL connection string (Tier-1 deployments) |
 | `REDIS_URL`          | yes      | Redis connection string                      |
+
+Bundled Helm backing services are for self-hosted deployments and must keep Postgres, Redis, and Temporal images pinned with `@sha256` digests in `infra/helm/tixkit/values.yaml`; `bun run deploy:check` rejects tag-only image refs.
 
 ### Signing And Hashing
 
@@ -119,10 +208,11 @@ Phase 4 compatibility gap (C-056): managed Postgres/MySQL compatibility needs fo
 
 ### Temporal
 
-| Variable             | Required | Description                                                 |
-| -------------------- | -------- | ----------------------------------------------------------- |
-| `TEMPORAL_ADDRESS`   | yes      | Temporal cluster address, e.g. `mycluster.tmprl.cloud:7233` |
-| `TEMPORAL_NAMESPACE` | yes      | Temporal namespace, e.g. `mytenant.production`              |
+| Variable              | Required | Description                                                       |
+| --------------------- | -------- | ----------------------------------------------------------------- |
+| `TEMPORAL_ADDRESS`    | yes      | Temporal cluster address, e.g. `mycluster.tmprl.cloud:7233`       |
+| `TEMPORAL_NAMESPACE`  | yes      | Temporal namespace, e.g. `mytenant.production`                    |
+| `TEMPORAL_TASK_QUEUE` | yes      | Task queue used by the API and workers, e.g. `tixkit-production`  |
 
 ### Auth (Clerk)
 
