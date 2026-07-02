@@ -45,6 +45,57 @@ type WaitlistEntryPrivacyRow = {
   updated_at: Date;
 };
 
+type EmailJobPrivacyRow = {
+  id: string;
+  brand_id: string;
+  template_key: string;
+  to_email: string;
+  to_name: string | null;
+  variables: string;
+  status: string;
+  priority: string;
+  scheduled_at: Date | null;
+  created_at: Date;
+  updated_at: Date;
+};
+
+type SmsJobPrivacyRow = {
+  id: string;
+  brand_id: string;
+  to_phone: string;
+  body: string;
+  template_key: string | null;
+  variables: string;
+  status: string;
+  priority: string;
+  scheduled_at: Date | null;
+  created_at: Date;
+  updated_at: Date;
+};
+
+type EmailSuppressionPrivacyRow = {
+  id: string;
+  email: string;
+  reason: string;
+  bounce_type: string | null;
+  source: string;
+  created_at: Date;
+};
+
+type MessageConsentPrivacyRow = {
+  id: string;
+  attendee_id: string;
+  email: string;
+  phone: string | null;
+  email_opt_in: boolean;
+  sms_opt_in: boolean;
+  consent_text: string;
+  consent_version: string;
+  consented_at: Date;
+  revoked_at: Date | null;
+  created_at: Date;
+};
+
 function isErasedPrivacyEmail(value: string | null | undefined): boolean {
   return /^erased\+[a-f0-9]{16}@privacy\.tixkit\.invalid$/.test(value ?? '');
 }
@@ -53,6 +104,13 @@ function erasedEmail(input: string | null | undefined, fallback: string): string
   const source = input && input.length > 0 ? input.toLowerCase() : fallback;
   const digest = createHash('sha256').update(source).digest('hex').slice(0, 16);
   return `erased+${digest}@privacy.tixkit.invalid`;
+}
+
+function erasedPhone(input: string | null | undefined, fallback: string): string {
+  const source = input && input.length > 0 ? input : fallback;
+  const digest = createHash('sha256').update(source).digest('hex').slice(0, 12);
+  const numeric = String(BigInt(`0x${digest}`) % 10_000_000_000n).padStart(10, '0');
+  return `+1${numeric}`;
 }
 
 function normalizeJson(value: unknown): unknown {
@@ -64,10 +122,249 @@ function normalizeJson(value: unknown): unknown {
   }
 }
 
-function redactJsonValue(value: unknown, replacementEmail: string): unknown {
+function uniqueStrings(values: Array<string | null | undefined>): string[] {
+  return [...new Set(values.filter((value): value is string => Boolean(value)))];
+}
+
+async function scopedBrandIdsForRequest(
+  db: Database,
+  request: PrivacyRequestRow,
+): Promise<string[]> {
+  if (request.brand_id) return [request.brand_id];
+  return (
+    (await db
+      .selectFrom('brands')
+      .select(['id'])
+      .where('tenant_id', '=', request.tenant_id)
+      .where('organization_id', '=', request.organization_id)
+      .execute()) as BrandPrivacyRow[]
+  ).map((brand) => brand.id);
+}
+
+function collectSubjectEmails(
+  request: PrivacyRequestRow,
+  orders: Array<{ buyer_email: unknown }>,
+  attendees: Array<{ email: unknown }>,
+  waitlistEntries: Array<{ buyer_email: unknown }>,
+) {
+  return uniqueStrings([
+    request.subject_email,
+    ...orders.map((order) => String(order.buyer_email ?? '') || null),
+    ...attendees.map((attendee) => String(attendee.email ?? '') || null),
+    ...waitlistEntries.map((entry) => String(entry.buyer_email ?? '') || null),
+  ]).filter((email) => !isErasedPrivacyEmail(email));
+}
+
+function collectSubjectPhones(
+  orders: Array<{ buyer_phone: unknown }>,
+  attendees: Array<{ phone: unknown }>,
+  waitlistEntries: Array<{ buyer_phone: unknown }>,
+) {
+  return uniqueStrings([
+    ...orders.map((order) => String(order.buyer_phone ?? '') || null),
+    ...attendees.map((attendee) => String(attendee.phone ?? '') || null),
+    ...waitlistEntries.map((entry) => String(entry.buyer_phone ?? '') || null),
+  ]);
+}
+
+function containsAnyJsonString(value: unknown, needles: string[]): boolean {
+  return needles.some((needle) => jsonContainsString(value, needle));
+}
+
+function mergeRowsById<T extends { id: string }>(rows: T[]): T[] {
+  const merged = new Map<string, T>();
+  for (const row of rows) merged.set(row.id, row);
+  return [...merged.values()];
+}
+
+async function collectMessagingPrivacyRows(
+  db: Database,
+  request: PrivacyRequestRow,
+  input: {
+    scopedBrandIds: string[];
+    subjectEmails: string[];
+    subjectPhones: string[];
+    attendeeIds: string[];
+  },
+) {
+  const { attendeeIds, scopedBrandIds, subjectEmails, subjectPhones } = input;
+  const emailJobQueries: Array<Promise<EmailJobPrivacyRow[]>> = [];
+  const smsJobQueries: Array<Promise<SmsJobPrivacyRow[]>> = [];
+  const messageConsentQueries: Array<Promise<MessageConsentPrivacyRow[]>> = [];
+
+  if (scopedBrandIds.length > 0 && subjectEmails.length > 0) {
+    emailJobQueries.push(
+      db
+        .selectFrom('email_jobs')
+        .select([
+          'id',
+          'brand_id',
+          'template_key',
+          'to_email',
+          'to_name',
+          'variables',
+          'status',
+          'priority',
+          'scheduled_at',
+          'created_at',
+          'updated_at',
+        ])
+        .where('tenant_id', '=', request.tenant_id)
+        .where('brand_id', 'in', scopedBrandIds)
+        .where('to_email', 'in', subjectEmails)
+        .execute() as Promise<EmailJobPrivacyRow[]>,
+    );
+  }
+
+  if (scopedBrandIds.length > 0) {
+    for (const attendeeId of attendeeIds) {
+      emailJobQueries.push(
+        db
+          .selectFrom('email_jobs')
+          .select([
+            'id',
+            'brand_id',
+            'template_key',
+            'to_email',
+            'to_name',
+            'variables',
+            'status',
+            'priority',
+            'scheduled_at',
+            'created_at',
+            'updated_at',
+          ])
+          .where('tenant_id', '=', request.tenant_id)
+          .where('brand_id', 'in', scopedBrandIds)
+          .where('variables', 'like', `%${attendeeId}%`)
+          .execute() as Promise<EmailJobPrivacyRow[]>,
+      );
+    }
+  }
+
+  if (scopedBrandIds.length > 0 && subjectPhones.length > 0) {
+    smsJobQueries.push(
+      db
+        .selectFrom('sms_jobs')
+        .select([
+          'id',
+          'brand_id',
+          'to_phone',
+          'body',
+          'template_key',
+          'variables',
+          'status',
+          'priority',
+          'scheduled_at',
+          'created_at',
+          'updated_at',
+        ])
+        .where('tenant_id', '=', request.tenant_id)
+        .where('brand_id', 'in', scopedBrandIds)
+        .where('to_phone', 'in', subjectPhones)
+        .execute() as Promise<SmsJobPrivacyRow[]>,
+    );
+  }
+
+  if (scopedBrandIds.length > 0) {
+    for (const attendeeId of attendeeIds) {
+      smsJobQueries.push(
+        db
+          .selectFrom('sms_jobs')
+          .select([
+            'id',
+            'brand_id',
+            'to_phone',
+            'body',
+            'template_key',
+            'variables',
+            'status',
+            'priority',
+            'scheduled_at',
+            'created_at',
+            'updated_at',
+          ])
+          .where('tenant_id', '=', request.tenant_id)
+          .where('brand_id', 'in', scopedBrandIds)
+          .where('variables', 'like', `%${attendeeId}%`)
+          .execute() as Promise<SmsJobPrivacyRow[]>,
+      );
+    }
+  }
+
+  if (attendeeIds.length > 0) {
+    messageConsentQueries.push(
+      db
+        .selectFrom('message_consents')
+        .select([
+          'id',
+          'attendee_id',
+          'email',
+          'phone',
+          'email_opt_in',
+          'sms_opt_in',
+          'consent_text',
+          'consent_version',
+          'consented_at',
+          'revoked_at',
+          'created_at',
+        ])
+        .where('tenant_id', '=', request.tenant_id)
+        .where('attendee_id', 'in', attendeeIds)
+        .execute() as Promise<MessageConsentPrivacyRow[]>,
+    );
+  }
+
+  const emailSuppressions =
+    subjectEmails.length === 0
+      ? []
+      : ((await db
+          .selectFrom('email_suppressions')
+          .select(['id', 'email', 'reason', 'bounce_type', 'source', 'created_at'])
+          .where('tenant_id', '=', request.tenant_id)
+          .where('email', 'in', subjectEmails)
+          .execute()) as EmailSuppressionPrivacyRow[]);
+
+  const [emailJobResults, smsJobResults, messageConsentResults] = await Promise.all([
+    Promise.all(emailJobQueries),
+    Promise.all(smsJobQueries),
+    Promise.all(messageConsentQueries),
+  ]);
+
+  const needles = [...attendeeIds, ...subjectEmails, ...subjectPhones];
+  const emailJobs = mergeRowsById(emailJobResults.flat()).filter(
+    (job) => subjectEmails.includes(job.to_email) || containsAnyJsonString(job.variables, needles),
+  );
+  const smsJobs = mergeRowsById(smsJobResults.flat()).filter(
+    (job) => subjectPhones.includes(job.to_phone) || containsAnyJsonString(job.variables, needles),
+  );
+  const messageConsents = mergeRowsById(messageConsentResults.flat());
+
+  return {
+    emailJobs,
+    smsJobs,
+    emailSuppressions,
+    messageConsents,
+  };
+}
+
+function redactJsonValue(
+  value: unknown,
+  replacementEmail: string,
+  options: {
+    replacementPhone?: string | null;
+    subjectEmails?: string[];
+    subjectPhones?: string[];
+  } = {},
+): unknown {
   const parsed = normalizeJson(value);
   if (Array.isArray(parsed)) {
-    return parsed.map((entry) => redactJsonValue(entry, replacementEmail));
+    return parsed.map((entry) => redactJsonValue(entry, replacementEmail, options));
+  }
+  if (typeof parsed === 'string') {
+    if (options.subjectEmails?.includes(parsed)) return replacementEmail;
+    if (options.subjectPhones?.includes(parsed)) return options.replacementPhone ?? null;
+    return parsed;
   }
   if (!parsed || typeof parsed !== 'object') return parsed;
 
@@ -76,15 +373,16 @@ function redactJsonValue(value: unknown, replacementEmail: string): unknown {
     const normalizedKey = key.toLowerCase();
     if (normalizedKey.includes('email')) {
       redacted[key] = replacementEmail;
+    } else if (normalizedKey.includes('phone')) {
+      redacted[key] = options.replacementPhone ?? null;
     } else if (
-      normalizedKey.includes('phone') ||
       normalizedKey.includes('name') ||
       normalizedKey.includes('taxid') ||
       normalizedKey.includes('tax_id')
     ) {
       redacted[key] = null;
     } else {
-      redacted[key] = redactJsonValue(entry, replacementEmail);
+      redacted[key] = redactJsonValue(entry, replacementEmail, options);
     }
   }
   return redacted;
@@ -193,6 +491,15 @@ async function buildPrivacyExport(db: Database, request: PrivacyRequestRow) {
     baseWaitlistEntryQuery(db, request).execute() as Promise<WaitlistEntryPrivacyRow[]>,
   ]);
   const attendeeIds = attendees.map((attendee) => String(attendee.id));
+  const scopedBrandIds = await scopedBrandIdsForRequest(db, request);
+  const subjectEmails = collectSubjectEmails(request, orders, attendees, waitlistEntries);
+  const subjectPhones = collectSubjectPhones(orders, attendees, waitlistEntries);
+  const messaging = await collectMessagingPrivacyRows(db, request, {
+    attendeeIds,
+    scopedBrandIds,
+    subjectEmails,
+    subjectPhones,
+  });
   const tickets =
     attendeeIds.length === 0
       ? []
@@ -218,7 +525,7 @@ async function buildPrivacyExport(db: Database, request: PrivacyRequestRow) {
   return {
     generatedAt: new Date().toISOString(),
     retentionPolicy:
-      'Financial ledgers, audit logs, invoices, tax snapshots, and fraud-prevention records are retained; buyer, attendee, and waitlist contact fields are exportable and erasable.',
+      'Financial ledgers, audit logs, invoices, tax snapshots, and fraud-prevention records are retained; buyer, attendee, waitlist, messaging contact, and messaging consent fields are exportable and erasable.',
     subject: {
       type: request.subject_type,
       id: request.subject_id,
@@ -274,6 +581,55 @@ async function buildPrivacyExport(db: Database, request: PrivacyRequestRow) {
       updatedAt: entry.updated_at,
     })),
     tickets,
+    messaging: {
+      emailJobs: messaging.emailJobs.map((job) => ({
+        id: job.id,
+        brandId: job.brand_id,
+        templateKey: job.template_key,
+        toEmail: job.to_email,
+        toName: job.to_name,
+        variables: normalizeJson(job.variables),
+        status: job.status,
+        priority: job.priority,
+        scheduledAt: job.scheduled_at,
+        createdAt: job.created_at,
+        updatedAt: job.updated_at,
+      })),
+      smsJobs: messaging.smsJobs.map((job) => ({
+        id: job.id,
+        brandId: job.brand_id,
+        toPhone: job.to_phone,
+        body: job.body,
+        templateKey: job.template_key,
+        variables: normalizeJson(job.variables),
+        status: job.status,
+        priority: job.priority,
+        scheduledAt: job.scheduled_at,
+        createdAt: job.created_at,
+        updatedAt: job.updated_at,
+      })),
+      emailSuppressions: messaging.emailSuppressions.map((suppression) => ({
+        id: suppression.id,
+        email: suppression.email,
+        reason: suppression.reason,
+        bounceType: suppression.bounce_type,
+        source: suppression.source,
+        createdAt: suppression.created_at,
+      })),
+      messageConsents: messaging.messageConsents.map((consent) => ({
+        id: consent.id,
+        attendeeId: consent.attendee_id,
+        email: consent.email,
+        phone: consent.phone,
+        emailOptIn: consent.email_opt_in,
+        smsOptIn: consent.sms_opt_in,
+        consentText: consent.consent_text,
+        consentVersion: consent.consent_version,
+        consentedAt: consent.consented_at,
+        revokedAt: consent.revoked_at,
+        createdAt: consent.created_at,
+      })),
+    },
   };
 }
 
@@ -287,17 +643,20 @@ async function erasePrivacyData(db: Database, request: PrivacyRequestRow) {
   const orderIds = orders.map((order) => String(order.id));
   const attendeeIds = attendees.map((attendee) => String(attendee.id));
   const redactedSubjectEmail = erasedEmail(request.subject_email, `privacy:${request.id}`);
+  const subjectEmails = collectSubjectEmails(request, orders, attendees, waitlistEntries);
+  const subjectPhones = collectSubjectPhones(orders, attendees, waitlistEntries);
+  const redactedPhone = erasedPhone(
+    subjectPhones[0] ?? request.subject_email,
+    `privacy:${request.id}`,
+  );
   const buyerOrderId = request.subject_type === 'buyer' ? request.subject_id : null;
-  const scopedBrandIds = request.brand_id
-    ? [request.brand_id]
-    : (
-        (await db
-          .selectFrom('brands')
-          .select(['id'])
-          .where('tenant_id', '=', request.tenant_id)
-          .where('organization_id', '=', request.organization_id)
-          .execute()) as BrandPrivacyRow[]
-      ).map((brand) => brand.id);
+  const scopedBrandIds = await scopedBrandIdsForRequest(db, request);
+  const messaging = await collectMessagingPrivacyRows(db, request, {
+    attendeeIds,
+    scopedBrandIds,
+    subjectEmails,
+    subjectPhones,
+  });
 
   await Promise.all(
     orders.map(async (order) => {
@@ -361,7 +720,12 @@ async function erasePrivacyData(db: Database, request: PrivacyRequestRow) {
         db
           .updateTable('checkout_sessions')
           .set({
-            buyer: JSON.stringify(redactJsonValue(session.buyer, redactedSubjectEmail)),
+            buyer: JSON.stringify(
+              redactJsonValue(session.buyer, redactedSubjectEmail, {
+                subjectEmails,
+                subjectPhones,
+              }),
+            ),
             updated_at: now,
           })
           .where('id', '=', session.id)
@@ -391,7 +755,12 @@ async function erasePrivacyData(db: Database, request: PrivacyRequestRow) {
           db
             .updateTable('checkout_sessions')
             .set({
-              buyer: JSON.stringify(redactJsonValue(session.buyer, redactedSubjectEmail)),
+              buyer: JSON.stringify(
+                redactJsonValue(session.buyer, redactedSubjectEmail, {
+                  subjectEmails,
+                  subjectPhones,
+                }),
+              ),
               updated_at: now,
             })
             .where('id', '=', session.id)
@@ -436,6 +805,78 @@ async function erasePrivacyData(db: Database, request: PrivacyRequestRow) {
     ),
   );
 
+  const emailJobUpdates = await Promise.all(
+    messaging.emailJobs.map((job) =>
+      db
+        .updateTable('email_jobs')
+        .set({
+          to_email: erasedEmail(job.to_email, `email_job:${job.id}`),
+          to_name: null,
+          variables: JSON.stringify(
+            redactJsonValue(job.variables, redactedSubjectEmail, {
+              replacementPhone: redactedPhone,
+              subjectEmails,
+              subjectPhones,
+            }),
+          ),
+          updated_at: now,
+        })
+        .where('id', '=', job.id)
+        .where('tenant_id', '=', request.tenant_id)
+        .execute(),
+    ),
+  );
+
+  const smsJobUpdates = await Promise.all(
+    messaging.smsJobs.map((job) =>
+      db
+        .updateTable('sms_jobs')
+        .set({
+          to_phone: erasedPhone(job.to_phone, `sms_job:${job.id}`),
+          body: '[redacted by privacy request]',
+          variables: JSON.stringify(
+            redactJsonValue(job.variables, redactedSubjectEmail, {
+              replacementPhone: redactedPhone,
+              subjectEmails,
+              subjectPhones,
+            }),
+          ),
+          updated_at: now,
+        })
+        .where('id', '=', job.id)
+        .where('tenant_id', '=', request.tenant_id)
+        .execute(),
+    ),
+  );
+
+  const emailSuppressionUpdates = await Promise.all(
+    messaging.emailSuppressions.map((suppression) =>
+      db
+        .updateTable('email_suppressions')
+        .set({
+          email: erasedEmail(suppression.email, `email_suppression:${suppression.id}`),
+        })
+        .where('id', '=', suppression.id)
+        .where('tenant_id', '=', request.tenant_id)
+        .execute(),
+    ),
+  );
+
+  const messageConsentUpdates = await Promise.all(
+    messaging.messageConsents.map((consent) =>
+      db
+        .updateTable('message_consents')
+        .set({
+          email: erasedEmail(consent.email, `message_consent:${consent.id}`),
+          phone: consent.phone ? erasedPhone(consent.phone, `message_consent:${consent.id}`) : null,
+          consent_text: '[redacted by privacy request]',
+        })
+        .where('id', '=', consent.id)
+        .where('tenant_id', '=', request.tenant_id)
+        .execute(),
+    ),
+  );
+
   const ticketsTouched =
     attendeeIds.length === 0
       ? 0
@@ -474,6 +915,10 @@ async function erasePrivacyData(db: Database, request: PrivacyRequestRow) {
     attendeesRedacted: attendeeIds.length,
     waitlistEntriesRedacted: waitlistEntries.length,
     ticketsTouched,
+    emailJobsRedacted: countUpdatedRows(emailJobUpdates.flat()),
+    smsJobsRedacted: countUpdatedRows(smsJobUpdates.flat()),
+    emailSuppressionsRedacted: countUpdatedRows(emailSuppressionUpdates.flat()),
+    messageConsentsRedacted: countUpdatedRows(messageConsentUpdates.flat()),
   };
 }
 

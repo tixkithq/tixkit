@@ -13,6 +13,10 @@ const dbState = vi.hoisted(() => ({
   waitlistEntries: [] as Row[],
   auditLogs: [] as Row[],
   checkoutSessions: [] as Row[],
+  emailJobs: [] as Row[],
+  smsJobs: [] as Row[],
+  emailSuppressions: [] as Row[],
+  messageConsents: [] as Row[],
   updates: [] as Array<{ table: string; filters: Filter[]; values: Row }>,
   repositoryCalls: [] as Array<{ method: string; id: string }>,
   repositoryFailures: {} as Partial<Record<string, Error>>,
@@ -60,6 +64,10 @@ function rowsFor(table: string): Row[] {
   if (table === 'waitlist_entries') return dbState.waitlistEntries;
   if (table === 'audit_logs') return dbState.auditLogs;
   if (table === 'checkout_sessions') return dbState.checkoutSessions;
+  if (table === 'email_jobs') return dbState.emailJobs;
+  if (table === 'sms_jobs') return dbState.smsJobs;
+  if (table === 'email_suppressions') return dbState.emailSuppressions;
+  if (table === 'message_consents') return dbState.messageConsents;
   return [];
 }
 
@@ -485,6 +493,139 @@ describe('processPrivacyRequestActivity', () => {
         updated_at: new Date('2026-06-01T09:00:00.000Z'),
       },
     ];
+    dbState.emailJobs = [
+      {
+        id: 'emj_1',
+        tenant_id: 'tnt_1',
+        brand_id: 'brd_1',
+        template_key: 'order_confirmation',
+        to_email: 'buyer@test.com',
+        to_name: 'Ada Lovelace',
+        variables: JSON.stringify({
+          attendeeId: 'att_1',
+          email: 'buyer@test.com',
+          phone: '+15550000001',
+          nested: { fullName: 'Ada Lovelace' },
+        }),
+        status: 'pending',
+        priority: 'normal',
+        scheduled_at: null,
+        created_at: new Date('2026-06-01T09:00:00.000Z'),
+        updated_at: new Date('2026-06-01T09:00:00.000Z'),
+      },
+      {
+        id: 'emj_other_brand',
+        tenant_id: 'tnt_1',
+        brand_id: 'brd_other',
+        template_key: 'order_confirmation',
+        to_email: 'buyer@test.com',
+        to_name: 'Other Scope',
+        variables: JSON.stringify({ attendeeId: 'att_1', email: 'buyer@test.com' }),
+        status: 'pending',
+        priority: 'normal',
+        scheduled_at: null,
+        created_at: new Date('2026-06-01T09:00:00.000Z'),
+        updated_at: new Date('2026-06-01T09:00:00.000Z'),
+      },
+    ];
+    dbState.smsJobs = [
+      {
+        id: 'sms_1',
+        tenant_id: 'tnt_1',
+        brand_id: 'brd_1',
+        to_phone: '+15550000001',
+        body: 'Hi Ada Lovelace, your ticket is ready',
+        template_key: 'order_confirmation_sms',
+        variables: JSON.stringify({
+          attendeeId: 'att_1',
+          email: 'buyer@test.com',
+          phone: '+15550000001',
+        }),
+        status: 'pending',
+        priority: 'normal',
+        scheduled_at: null,
+        created_at: new Date('2026-06-01T09:00:00.000Z'),
+        updated_at: new Date('2026-06-01T09:00:00.000Z'),
+      },
+      {
+        id: 'sms_other_brand',
+        tenant_id: 'tnt_1',
+        brand_id: 'brd_other',
+        to_phone: '+15550000001',
+        body: 'Other scope',
+        template_key: 'order_confirmation_sms',
+        variables: JSON.stringify({ attendeeId: 'att_1', phone: '+15550000001' }),
+        status: 'pending',
+        priority: 'normal',
+        scheduled_at: null,
+        created_at: new Date('2026-06-01T09:00:00.000Z'),
+        updated_at: new Date('2026-06-01T09:00:00.000Z'),
+      },
+    ];
+    dbState.emailSuppressions = [
+      {
+        id: 'sup_1',
+        tenant_id: 'tnt_1',
+        email: 'buyer@test.com',
+        reason: 'bounce',
+        bounce_type: 'hard',
+        source: 'provider',
+        created_at: new Date('2026-06-01T09:00:00.000Z'),
+      },
+      {
+        id: 'sup_other_tenant',
+        tenant_id: 'tnt_other',
+        email: 'buyer@test.com',
+        reason: 'bounce',
+        bounce_type: 'hard',
+        source: 'provider',
+        created_at: new Date('2026-06-01T09:00:00.000Z'),
+      },
+    ];
+    dbState.messageConsents = [
+      {
+        id: 'mcon_1',
+        tenant_id: 'tnt_1',
+        attendee_id: 'att_1',
+        email: 'buyer@test.com',
+        phone: '+15550000001',
+        email_opt_in: true,
+        sms_opt_in: true,
+        consent_text: 'Ada Lovelace consented with buyer@test.com and +15550000001',
+        consent_version: 'v1',
+        consented_at: new Date('2026-06-01T09:00:00.000Z'),
+        revoked_at: null,
+        created_at: new Date('2026-06-01T09:00:00.000Z'),
+      },
+      {
+        id: 'mcon_other_tenant',
+        tenant_id: 'tnt_other',
+        attendee_id: 'att_1',
+        email: 'buyer@test.com',
+        phone: '+15550000001',
+        email_opt_in: true,
+        sms_opt_in: true,
+        consent_text: 'Other tenant',
+        consent_version: 'v1',
+        consented_at: new Date('2026-06-01T09:00:00.000Z'),
+        revoked_at: null,
+        created_at: new Date('2026-06-01T09:00:00.000Z'),
+      },
+      {
+        id: 'mcon_same_email_other_attendee',
+        tenant_id: 'tnt_1',
+        attendee_id: 'att_other_scope',
+        email: 'buyer@test.com',
+        phone: '+15550000001',
+        email_opt_in: true,
+        sms_opt_in: true,
+        consent_text: 'Same email but not scoped attendee',
+        consent_version: 'v1',
+        consented_at: new Date('2026-06-01T09:00:00.000Z'),
+        revoked_at: null,
+        created_at: new Date('2026-06-01T09:00:00.000Z'),
+      },
+    ];
   });
 
   it('redacts direct buyer and attendee PII while retaining commerce and audit records', async () => {
@@ -613,6 +754,66 @@ describe('processPrivacyRequestActivity', () => {
       lastName: null,
       phone: null,
     });
+    expect(dbState.emailJobs[0]).toMatchObject({
+      id: 'emj_1',
+      to_name: null,
+    });
+    expect(String(dbState.emailJobs[0].to_email)).toMatch(
+      /^erased\+[a-f0-9]{16}@privacy\.tixkit\.invalid$/,
+    );
+    expect(JSON.parse(String(dbState.emailJobs[0].variables))).toMatchObject({
+      attendeeId: 'att_1',
+      email: expect.stringMatching(/^erased\+[a-f0-9]{16}@privacy\.tixkit\.invalid$/),
+      phone: expect.stringMatching(/^\+1\d{10}$/),
+      nested: { fullName: null },
+    });
+    expect(dbState.emailJobs[1]).toMatchObject({
+      id: 'emj_other_brand',
+      to_email: 'buyer@test.com',
+      to_name: 'Other Scope',
+    });
+    expect(dbState.smsJobs[0]).toMatchObject({
+      id: 'sms_1',
+      body: '[redacted by privacy request]',
+    });
+    expect(String(dbState.smsJobs[0].to_phone)).toMatch(/^\+1\d{10}$/);
+    expect(JSON.parse(String(dbState.smsJobs[0].variables))).toMatchObject({
+      attendeeId: 'att_1',
+      email: expect.stringMatching(/^erased\+[a-f0-9]{16}@privacy\.tixkit\.invalid$/),
+      phone: expect.stringMatching(/^\+1\d{10}$/),
+    });
+    expect(dbState.smsJobs[1]).toMatchObject({
+      id: 'sms_other_brand',
+      to_phone: '+15550000001',
+      body: 'Other scope',
+    });
+    expect(String(dbState.emailSuppressions[0].email)).toMatch(
+      /^erased\+[a-f0-9]{16}@privacy\.tixkit\.invalid$/,
+    );
+    expect(dbState.emailSuppressions[1]).toMatchObject({
+      id: 'sup_other_tenant',
+      email: 'buyer@test.com',
+    });
+    expect(dbState.messageConsents[0]).toMatchObject({
+      id: 'mcon_1',
+      consent_text: '[redacted by privacy request]',
+    });
+    expect(String(dbState.messageConsents[0].email)).toMatch(
+      /^erased\+[a-f0-9]{16}@privacy\.tixkit\.invalid$/,
+    );
+    expect(String(dbState.messageConsents[0].phone)).toMatch(/^\+1\d{10}$/);
+    expect(dbState.messageConsents[1]).toMatchObject({
+      id: 'mcon_other_tenant',
+      email: 'buyer@test.com',
+      phone: '+15550000001',
+      consent_text: 'Other tenant',
+    });
+    expect(dbState.messageConsents[2]).toMatchObject({
+      id: 'mcon_same_email_other_attendee',
+      email: 'buyer@test.com',
+      phone: '+15550000001',
+      consent_text: 'Same email but not scoped attendee',
+    });
 
     const request = dbState.privacyRequests.find((row) => row.id === 'prv_erase_1');
     expect(request).toMatchObject({ status: 'completed', error: null });
@@ -624,6 +825,10 @@ describe('processPrivacyRequestActivity', () => {
       attendeesRedacted: 2,
       waitlistEntriesRedacted: 1,
       ticketsTouched: 1,
+      emailJobsRedacted: 1,
+      smsJobsRedacted: 1,
+      emailSuppressionsRedacted: 1,
+      messageConsentsRedacted: 1,
     });
     expect(dbState.destroy).toHaveBeenCalledTimes(1);
   });
@@ -1128,7 +1333,7 @@ describe('processPrivacyRequestActivity', () => {
     const request = dbState.privacyRequests.find((row) => row.id === 'prv_export_1');
     const exportPayload = JSON.parse(String(request?.result));
     expect(exportPayload.retentionPolicy).toContain(
-      'buyer, attendee, and waitlist contact fields are exportable and erasable',
+      'buyer, attendee, waitlist, messaging contact, and messaging consent fields are exportable and erasable',
     );
     expect(exportPayload.orders).toEqual([
       expect.objectContaining({
@@ -1166,6 +1371,40 @@ describe('processPrivacyRequestActivity', () => {
         buyerPhone: '+15550000001',
         quantity: 2,
         status: 'joined',
+      }),
+    ]);
+    expect(exportPayload.messaging.emailJobs).toEqual([
+      expect.objectContaining({
+        id: 'emj_1',
+        brandId: 'brd_1',
+        toEmail: 'buyer@test.com',
+        toName: 'Ada Lovelace',
+        variables: expect.objectContaining({ attendeeId: 'att_1', email: 'buyer@test.com' }),
+      }),
+    ]);
+    expect(exportPayload.messaging.smsJobs).toEqual([
+      expect.objectContaining({
+        id: 'sms_1',
+        brandId: 'brd_1',
+        toPhone: '+15550000001',
+        body: 'Hi Ada Lovelace, your ticket is ready',
+        variables: expect.objectContaining({ attendeeId: 'att_1', phone: '+15550000001' }),
+      }),
+    ]);
+    expect(exportPayload.messaging.emailSuppressions).toEqual([
+      expect.objectContaining({
+        id: 'sup_1',
+        email: 'buyer@test.com',
+        reason: 'bounce',
+      }),
+    ]);
+    expect(exportPayload.messaging.messageConsents).toEqual([
+      expect.objectContaining({
+        id: 'mcon_1',
+        attendeeId: 'att_1',
+        email: 'buyer@test.com',
+        phone: '+15550000001',
+        consentText: 'Ada Lovelace consented with buyer@test.com and +15550000001',
       }),
     ]);
     expect(dbState.destroy).toHaveBeenCalledTimes(1);
