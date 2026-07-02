@@ -399,6 +399,12 @@ export const messagingRoutes: FastifyPluginAsync = async (app) => {
     }
 
     const body = parsed.data;
+    const scheduledAt = body.scheduledAt ? new Date(body.scheduledAt) : undefined;
+    if (scheduledAt && scheduledAt.getTime() <= Date.now()) {
+      throw new ValidationError('scheduledAt must be in the future', {
+        field: 'scheduledAt',
+      });
+    }
 
     if (body.audience === 'specific' && (!body.attendeeIds || body.attendeeIds.length === 0)) {
       throw new ValidationError('attendeeIds is required when audience is specific', {
@@ -518,6 +524,7 @@ export const messagingRoutes: FastifyPluginAsync = async (app) => {
                     },
                     providerRouteId: emailRoute.id,
                     priority: 'low',
+                    scheduledAt,
                     idempotencyKey: jobKey,
                   }));
                 if (job.status !== 'suppressed') {
@@ -608,6 +615,7 @@ export const messagingRoutes: FastifyPluginAsync = async (app) => {
                   },
                   providerRouteId: smsRoute.id,
                   priority: 'low',
+                  scheduledAt,
                   idempotencyKey: jobKey,
                 }));
               if (job.status !== 'suppressed') {
@@ -641,6 +649,7 @@ export const messagingRoutes: FastifyPluginAsync = async (app) => {
                 variables: job.variables,
                 providerRouteId: job.providerRouteId,
                 notificationType,
+                scheduledAt: scheduledAt?.toISOString(),
               }),
             ),
           );
@@ -656,6 +665,7 @@ export const messagingRoutes: FastifyPluginAsync = async (app) => {
                 brandId: event.brand_id,
                 providerRouteId: smsRouteId,
                 notificationType,
+                scheduledAt: scheduledAt?.toISOString(),
               }),
             ),
           );
@@ -673,6 +683,7 @@ export const messagingRoutes: FastifyPluginAsync = async (app) => {
             audienceCount: audienceResolution.attendees.length,
             queuedEmailJobs: queuedEmailJobs.length,
             queuedSmsJobs: queuedSmsJobIds.length,
+            scheduledAt: scheduledAt?.toISOString(),
             suppressedRecipients: audienceResolution.suppressedRecipients,
             consentExclusions: audienceResolution.consentExclusions,
             skippedRecipients: audienceResolution.skippedRecipients,
@@ -1392,6 +1403,12 @@ function buildCampaignSummaries(input: {
         const updated = new Date(String(job.updated_at)).getTime();
         return Number.isFinite(updated) && updated > latest ? updated : latest;
       }, 0);
+      const scheduledAt = jobs.reduce<number | undefined>((earliest, job) => {
+        if (!job.scheduled_at) return earliest;
+        const scheduled = new Date(String(job.scheduled_at)).getTime();
+        if (!Number.isFinite(scheduled)) return earliest;
+        return earliest === undefined || scheduled < earliest ? scheduled : earliest;
+      }, undefined);
 
       return {
         id,
@@ -1418,6 +1435,7 @@ function buildCampaignSummaries(input: {
         suppressedRecipients,
         consentExclusions,
         skippedRecipients,
+        scheduledAt: scheduledAt === undefined ? undefined : new Date(scheduledAt).toISOString(),
         createdAt: toIso(Number.isFinite(createdAt) ? new Date(createdAt) : firstJob.created_at),
         updatedAt: toIso(updatedAt > 0 ? new Date(updatedAt) : firstJob.updated_at),
       };

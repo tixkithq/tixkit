@@ -79,16 +79,16 @@ export function EventMessagesView({ eventId }: { eventId: string }) {
       <div className="space-y-3">
         {campaigns.map((campaign) => (
           <Card key={campaign.id}>
-            <CardContent className="flex items-center justify-between p-4">
-              <div className="flex items-center gap-3">
+            <CardContent className="flex flex-col items-start justify-between gap-3 p-4 sm:flex-row sm:items-center">
+              <div className="flex min-w-0 items-start gap-3">
                 {campaign.channel === 'email' ? (
-                  <Mail className="size-5 text-muted-foreground" />
+                  <Mail className="mt-0.5 size-5 shrink-0 text-muted-foreground" />
                 ) : (
-                  <Smartphone className="size-5 text-muted-foreground" />
+                  <Smartphone className="mt-0.5 size-5 shrink-0 text-muted-foreground" />
                 )}
-                <div>
-                  <p className="font-medium">{campaign.name}</p>
-                  <p className="text-sm text-muted-foreground">
+                <div className="min-w-0">
+                  <p className="break-words font-medium">{campaign.name}</p>
+                  <p className="break-words text-sm text-muted-foreground">
                     {campaign.audienceLabel} · {campaign.queuedCount} queued
                     {campaign.sentCount > 0 && ` · ${campaign.sentCount} sent`}
                     {campaign.deliveredCount > 0 && ` · ${campaign.deliveredCount} delivered`}
@@ -97,14 +97,17 @@ export function EventMessagesView({ eventId }: { eventId: string }) {
                   </p>
                 </div>
               </div>
-              <div className="flex items-center gap-3">
+              <div className="flex flex-wrap items-center gap-3 sm:shrink-0 sm:justify-end">
                 <span className="text-sm text-muted-foreground">
                   {formatDate(campaign.createdAt)}
                 </span>
-                <Badge variant="outline">{campaign.status}</Badge>
+                <Badge variant="outline" className="shrink-0">
+                  {campaign.status}
+                </Badge>
                 <Button
                   size="sm"
                   variant="outline"
+                  className="shrink-0"
                   onClick={() => setSelectedCampaignId(campaign.id)}
                 >
                   Details

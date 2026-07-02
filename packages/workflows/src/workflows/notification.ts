@@ -1,4 +1,4 @@
-import { proxyActivities } from '@temporalio/workflow';
+import { proxyActivities, sleep } from '@temporalio/workflow';
 import type { WorkflowActivityResult } from '../shared/types.js';
 
 const {
@@ -61,6 +61,7 @@ export type NotificationDeliveryWorkflowInput = {
   variables: Record<string, unknown>;
   providerRouteId: string;
   notificationType: 'transactional' | 'bulk' | 'staff' | 'system';
+  scheduledAt?: string;
 };
 
 export type SmsDeliveryWorkflowInput = {
@@ -70,7 +71,16 @@ export type SmsDeliveryWorkflowInput = {
   brandId: string;
   providerRouteId: string;
   notificationType: 'transactional' | 'bulk' | 'staff' | 'system';
+  scheduledAt?: string;
 };
+
+async function waitForSchedule(scheduledAt?: string) {
+  if (!scheduledAt) return;
+  const delayMs = new Date(scheduledAt).getTime() - Date.now();
+  if (delayMs > 0) {
+    await sleep(delayMs);
+  }
+}
 
 function handleDeliveryActivityFailure(
   activityContext: string,
@@ -96,6 +106,8 @@ function handleSmsDeliveryActivityFailure(
 export async function notificationDeliveryWorkflow(
   input: NotificationDeliveryWorkflowInput,
 ): Promise<{ status: string }> {
+  await waitForSchedule(input.scheduledAt);
+
   // Step 1: Check suppression
   const suppressionResult = await checkSuppressionActivity({
     email: input.toEmail,
@@ -159,6 +171,8 @@ export async function notificationDeliveryWorkflow(
 export async function smsDeliveryWorkflow(
   input: SmsDeliveryWorkflowInput,
 ): Promise<{ status: string }> {
+  await waitForSchedule(input.scheduledAt);
+
   const sendResult = await sendSmsActivity({
     jobId: input.jobId,
     providerRouteId: input.providerRouteId,

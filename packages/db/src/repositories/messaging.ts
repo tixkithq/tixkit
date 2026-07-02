@@ -259,6 +259,7 @@ export class EmailJobRepository extends BaseRepository {
     variables: Record<string, unknown>;
     providerRouteId: string;
     priority?: string;
+    scheduledAt?: string | Date;
     idempotencyKey: string;
     status?: string;
   }) {
@@ -278,7 +279,7 @@ export class EmailJobRepository extends BaseRepository {
         provider_route_id: input.providerRouteId,
         status: input.status ?? 'queued',
         priority: input.priority ?? 'normal',
-        scheduled_at: null,
+        scheduled_at: input.scheduledAt ? new Date(input.scheduledAt) : null,
         idempotency_key: input.idempotencyKey,
         workflow_id: null,
         created_at: now,
@@ -595,6 +596,7 @@ export class SmsJobRepository extends BaseRepository {
     variables?: Record<string, unknown>;
     providerRouteId: string;
     priority?: string;
+    scheduledAt?: string | Date;
     idempotencyKey: string;
     status?: string;
   }) {
@@ -613,7 +615,7 @@ export class SmsJobRepository extends BaseRepository {
         provider_route_id: input.providerRouteId,
         status: input.status ?? 'queued',
         priority: input.priority ?? 'normal',
-        scheduled_at: null,
+        scheduled_at: input.scheduledAt ? new Date(input.scheduledAt) : null,
         idempotency_key: input.idempotencyKey,
         workflow_id: null,
         created_at: now,

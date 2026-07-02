@@ -339,6 +339,7 @@ export type SendMessageInput = {
   templateKey: TemplateKey;
   audience: 'all' | 'checked_in' | 'not_checked_in' | 'specific';
   attendeeIds?: Ulid[];
+  scheduledAt?: ISO8601Date;
   variables?: Record<string, unknown>;
   channel: 'email' | 'sms' | 'both';
 };

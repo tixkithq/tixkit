@@ -5,7 +5,7 @@ const mockState = vi.hoisted(() => ({
   signals: {} as Record<string, (...args: any[]) => void>,
   conditionResult: true as boolean,
   patchedResult: true as boolean,
-  sleeps: [] as string[],
+  sleeps: [] as Array<string | number>,
   childStarts: [] as Array<{ workflow: unknown; options: Record<string, unknown> }>,
   continueAsNewInputs: [] as unknown[],
   proxyActivityOptions: [] as Array<Record<string, unknown>>,
@@ -34,7 +34,7 @@ vi.mock('@temporalio/workflow', () => ({
   },
   condition: async (fn: () => boolean, _timeout?: string) => fn() || mockState.conditionResult,
   patched: () => mockState.patchedResult,
-  sleep: async (duration: string) => {
+  sleep: async (duration: string | number) => {
     mockState.sleeps.push(duration);
   },
   startChild: async (workflow: unknown, options: Record<string, unknown>) => {
@@ -1059,6 +1059,27 @@ describe('notificationDeliveryWorkflow', () => {
       status: 'suppressed',
     });
     expect(sendAttempts).toHaveLength(0);
+  });
+
+  it('waits until scheduledAt before delivering scheduled notification jobs', async () => {
+    const sendAttempts: Array<Record<string, unknown>> = [];
+    setActivity('sendEmailActivity', async (input) => {
+      sendAttempts.push(input);
+      return okResult({ deliveryId: 'emd_1', provider: 'capture' });
+    });
+
+    await expect(
+      notificationDeliveryWorkflow(
+        makeNotificationDeliveryInput({
+          scheduledAt: new Date(Date.now() + 60_000).toISOString(),
+        }),
+      ),
+    ).resolves.toEqual({ status: 'sent' });
+
+    expect(mockState.sleeps).toHaveLength(1);
+    expect(typeof mockState.sleeps[0]).toBe('number');
+    expect(Number(mockState.sleeps[0])).toBeGreaterThan(0);
+    expect(sendAttempts).toHaveLength(1);
   });
 });
 

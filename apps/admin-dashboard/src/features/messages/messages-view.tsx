@@ -30,7 +30,12 @@ export function MessagesView() {
   const [selectedEventId, setSelectedEventId] = React.useState<string>('');
   const [selectedCampaignId, setSelectedCampaignId] = React.useState<string>('');
 
-  const { data: eventsData } = useAdminData(() => adminApi.listEvents());
+  const {
+    data: eventsData,
+    loading: eventsLoading,
+    error: eventsError,
+    refetch: refetchEvents,
+  } = useAdminData(() => adminApi.listEvents());
   const events = eventsData?.items ?? [];
 
   const { data, loading, error, refetch } = useAdminData(
@@ -50,6 +55,7 @@ export function MessagesView() {
     <div className="space-y-6">
       <div className="flex flex-wrap items-center justify-between gap-2">
         <Select
+          disabled={eventsLoading || Boolean(eventsError)}
           value={selectedEventId}
           onValueChange={(value) => {
             setSelectedEventId(value);
@@ -67,13 +73,28 @@ export function MessagesView() {
             ))}
           </SelectContent>
         </Select>
-        <Button onClick={() => setDialogOpen(true)} disabled={!selectedEventId}>
+        <Button
+          onClick={() => setDialogOpen(true)}
+          disabled={!selectedEventId || eventsLoading || Boolean(eventsError)}
+        >
           <Plus className="size-4" />
           New campaign
         </Button>
       </div>
 
-      {!selectedEventId ? (
+      {eventsLoading ? (
+        <div className="space-y-3">
+          <Skeleton className="h-16 w-full" />
+          <Skeleton className="h-24 w-full" />
+        </div>
+      ) : eventsError ? (
+        <EmptyState
+          icon={MessageSquare}
+          title="Failed to load events"
+          description={eventsError.message}
+          action={<Button onClick={refetchEvents}>Try again</Button>}
+        />
+      ) : !selectedEventId ? (
         <EmptyState
           icon={MessageSquare}
           title="Select an event"
@@ -108,16 +129,16 @@ export function MessagesView() {
         <div className="space-y-3">
           {campaigns.map((campaign) => (
             <Card key={campaign.id}>
-              <CardContent className="flex items-center justify-between p-4">
-                <div className="flex items-center gap-3">
+              <CardContent className="flex flex-col items-start justify-between gap-3 p-4 sm:flex-row sm:items-center">
+                <div className="flex min-w-0 items-start gap-3">
                   {campaign.channel === 'email' ? (
-                    <Mail className="size-5 text-muted-foreground" />
+                    <Mail className="mt-0.5 size-5 shrink-0 text-muted-foreground" />
                   ) : (
-                    <Smartphone className="size-5 text-muted-foreground" />
+                    <Smartphone className="mt-0.5 size-5 shrink-0 text-muted-foreground" />
                   )}
-                  <div>
-                    <p className="font-medium">{campaign.name}</p>
-                    <p className="text-sm text-muted-foreground">
+                  <div className="min-w-0">
+                    <p className="break-words font-medium">{campaign.name}</p>
+                    <p className="break-words text-sm text-muted-foreground">
                       {campaign.audienceLabel} · {campaign.queuedCount} queued
                       {campaign.sentCount > 0 && ` · ${campaign.sentCount} sent`}
                       {campaign.deliveredCount > 0 && ` · ${campaign.deliveredCount} delivered`}
@@ -126,14 +147,17 @@ export function MessagesView() {
                     </p>
                   </div>
                 </div>
-                <div className="flex items-center gap-3">
+                <div className="flex flex-wrap items-center gap-3 sm:shrink-0 sm:justify-end">
                   <span className="text-sm text-muted-foreground">
                     {formatDate(campaign.createdAt)}
                   </span>
-                  <Badge variant="outline">{campaign.status}</Badge>
+                  <Badge variant="outline" className="shrink-0">
+                    {campaign.status}
+                  </Badge>
                   <Button
                     size="sm"
                     variant="outline"
+                    className="shrink-0"
                     onClick={() => setSelectedCampaignId(campaign.id)}
                   >
                     Details
@@ -219,16 +243,19 @@ export function MessageCampaignDetailPanel({
           rows={jobsState.data ?? []}
           loading={jobsState.loading}
           error={jobsState.error?.message}
+          onRetry={jobsState.refetch}
         />
         <DeliveryLogTable
           rows={deliveriesState.data ?? []}
           loading={deliveriesState.loading}
           error={deliveriesState.error?.message}
+          onRetry={deliveriesState.refetch}
         />
         <ProviderEventTable
           rows={providerEventsState.data ?? []}
           loading={providerEventsState.loading}
           error={providerEventsState.error?.message}
+          onRetry={providerEventsState.refetch}
         />
       </CardContent>
     </Card>
@@ -248,16 +275,19 @@ function JobTable({
   rows,
   loading,
   error,
+  onRetry,
 }: {
   rows: AdminMessageJob[];
   loading: boolean;
   error?: string;
+  onRetry: () => void;
 }) {
   return (
     <RecordTable
       title="Jobs"
       loading={loading}
       error={error}
+      onRetry={onRetry}
       rows={rows.map((row) => ({
         id: stringField(row.job, 'id'),
         channel: row.channel,
@@ -273,16 +303,19 @@ function DeliveryLogTable({
   rows,
   loading,
   error,
+  onRetry,
 }: {
   rows: AdminMessageDeliveryLog[];
   loading: boolean;
   error?: string;
+  onRetry: () => void;
 }) {
   return (
     <RecordTable
       title="Delivery logs"
       loading={loading}
       error={error}
+      onRetry={onRetry}
       rows={rows.map((row) => ({
         id: stringField(row.delivery, 'id'),
         channel: row.channel,
@@ -300,16 +333,19 @@ function ProviderEventTable({
   rows,
   loading,
   error,
+  onRetry,
 }: {
   rows: AdminMessageProviderEvent[];
   loading: boolean;
   error?: string;
+  onRetry: () => void;
 }) {
   return (
     <RecordTable
       title="Provider events"
       loading={loading}
       error={error}
+      onRetry={onRetry}
       rows={rows.map((row) => ({
         id: stringField(row.event, 'id') || stringField(row.event, 'provider_event_id'),
         channel: row.channel,
@@ -325,11 +361,13 @@ function RecordTable({
   title,
   loading,
   error,
+  onRetry,
   rows,
 }: {
   title: string;
   loading: boolean;
   error?: string;
+  onRetry: () => void;
   rows: Array<{ id: string; channel: string; status: string; subject: string; updatedAt: string }>;
 }) {
   return (
@@ -339,7 +377,12 @@ function RecordTable({
         <Badge variant={error ? 'destructive' : 'outline'}>{error ? 'error' : rows.length}</Badge>
       </div>
       {error ? (
-        <p className="p-3 text-sm text-destructive">{error}</p>
+        <div className="flex flex-wrap items-center justify-between gap-3 p-3">
+          <p className="text-sm text-destructive">{error}</p>
+          <Button size="sm" variant="outline" onClick={onRetry}>
+            Try again
+          </Button>
+        </div>
       ) : loading ? (
         <div className="space-y-2 p-3">
           <Skeleton className="h-5 w-full" />

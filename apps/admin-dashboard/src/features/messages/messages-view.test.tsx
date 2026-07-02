@@ -5,7 +5,7 @@ import { JSDOM } from 'jsdom';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { EventMessagesView } from '@/features/events/event-messages-view';
 import { MessageFormDialog } from './message-form';
-import { MessageCampaignDetailPanel } from './messages-view';
+import { MessageCampaignDetailPanel, MessagesView } from './messages-view';
 
 if (typeof window === 'undefined') {
   const dom = new JSDOM('<!doctype html><html><body></body></html>');
@@ -40,6 +40,7 @@ afterEach(() => {
 });
 
 type MessagesAdminApiMock = {
+  listEvents: ReturnType<typeof vi.fn>;
   getEvent: ReturnType<typeof vi.fn>;
   listContentDocuments: ReturnType<typeof vi.fn>;
   listMessages: ReturnType<typeof vi.fn>;
@@ -56,6 +57,7 @@ function getAdminApiMock(): MessagesAdminApiMock {
     messagesAdminApiMock?: MessagesAdminApiMock;
   };
   globalWithMock.messagesAdminApiMock ??= {
+    listEvents: vi.fn(),
     getEvent: vi.fn(),
     listContentDocuments: vi.fn(),
     listMessages: vi.fn(),
@@ -196,6 +198,44 @@ function mockContentDocuments(input?: {
       return Promise.resolve({ ok: true, data: { items, nextCursor: null, hasMore: false } });
     },
   );
+}
+
+function messageCampaign(
+  overrides: Partial<{
+    id: string;
+    eventId: string;
+    name: string;
+    channel: 'email' | 'sms';
+    status: 'draft' | 'scheduled' | 'queued' | 'sending' | 'sent' | 'failed' | 'cancelled';
+    audience: 'all_attendees' | 'checked_in' | 'not_checked_in' | 'specific';
+    audienceKey: string;
+    audienceAttendeeIds: string[];
+    audienceLabel: string;
+    queuedCount: number;
+    sentCount: number;
+    deliveredCount: number;
+    failedCount: number;
+    suppressedCount: number;
+    createdAt: string;
+  }> = {},
+) {
+  return {
+    id: overrides.id ?? 'msg_1',
+    eventId: overrides.eventId ?? 'evt_1',
+    name: overrides.name ?? 'checked-in-campaign',
+    channel: overrides.channel ?? 'email',
+    status: overrides.status ?? 'queued',
+    audience: overrides.audience ?? 'all_attendees',
+    audienceKey: overrides.audienceKey ?? 'all',
+    audienceAttendeeIds: overrides.audienceAttendeeIds ?? [],
+    audienceLabel: overrides.audienceLabel ?? 'All attendees',
+    queuedCount: overrides.queuedCount ?? 2,
+    sentCount: overrides.sentCount ?? 0,
+    deliveredCount: overrides.deliveredCount ?? 0,
+    failedCount: overrides.failedCount ?? 0,
+    suppressedCount: overrides.suppressedCount ?? 0,
+    createdAt: overrides.createdAt ?? '2026-01-01T00:00:00.000Z',
+  };
 }
 
 describe('MessageFormDialog', () => {
@@ -376,23 +416,11 @@ describe('EventMessagesView', () => {
     adminApiMock.listMessages.mockResolvedValue({
       ok: true,
       data: [
-        {
-          id: 'msg_1',
-          eventId: 'evt_1',
-          name: 'checked-in-campaign',
-          channel: 'email',
-          status: 'queued',
-          audience: 'all_attendees',
+        messageCampaign({
+          audienceLabel: 'Custom audience (2 attendees)',
           audienceKey: 'specific',
           audienceAttendeeIds: ['att_1', 'att_2'],
-          audienceLabel: 'Custom audience (2 attendees)',
-          queuedCount: 2,
-          sentCount: 0,
-          deliveredCount: 0,
-          failedCount: 0,
-          suppressedCount: 0,
-          createdAt: '2026-01-01T00:00:00.000Z',
-        },
+        }),
       ],
     });
 
@@ -402,6 +430,122 @@ describe('EventMessagesView', () => {
       expect(view.getByText('checked-in-campaign')).toBeInTheDocument();
     });
     expect(view.getByText('Custom audience (2 attendees) · 2 queued')).toBeInTheDocument();
+  });
+
+  it('uses a mobile-safe campaign card layout for long campaign metadata', async () => {
+    const longName =
+      'Very long campaign name for mobile operations staff reviewing narrow message cards';
+    const longAudience =
+      'Custom audience with a long persisted label for multiple attendee segments and suppressions';
+    adminApiMock.listMessages.mockResolvedValue({
+      ok: true,
+      data: [
+        messageCampaign({
+          name: longName,
+          audienceLabel: longAudience,
+          status: 'scheduled',
+        }),
+      ],
+    });
+
+    const view = render(<EventMessagesView eventId="evt_1" />);
+
+    await waitFor(() => {
+      expect(view.getByText(longName)).toBeInTheDocument();
+    });
+    expect(view.getByText(longName)).toHaveClass('break-words');
+    expect(view.getByText(`${longAudience} · 2 queued`)).toHaveClass('break-words');
+    expect(view.getByText('scheduled')).toHaveClass('shrink-0');
+    expect(view.getByRole('button', { name: 'Details' })).toHaveClass('shrink-0');
+    expect(
+      view.container.querySelector('.flex-col.items-start.justify-between.gap-3'),
+    ).toBeInTheDocument();
+    expect(view.container.querySelectorAll('.min-w-0').length).toBeGreaterThanOrEqual(1);
+  });
+});
+
+describe('MessagesView', () => {
+  it('shows a retryable event-load error instead of the select-event empty state', async () => {
+    adminApiMock.listEvents
+      .mockResolvedValueOnce({
+        ok: false,
+        error: {
+          code: 'events_unavailable',
+          message: 'Events unavailable',
+        },
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        data: {
+          items: [{ id: 'evt_1', title: 'Demo Event' }],
+          nextCursor: null,
+          hasMore: false,
+        },
+      });
+    adminApiMock.listMessages.mockResolvedValue({
+      ok: true,
+      data: [],
+    });
+
+    const view = render(<MessagesView />);
+
+    await waitFor(() => {
+      expect(view.getByText('Failed to load events')).toBeInTheDocument();
+    });
+    expect(view.getByText('Events unavailable')).toBeInTheDocument();
+    expect(
+      view.queryByText('Choose an event to view and create message campaigns for its attendees.'),
+    ).not.toBeInTheDocument();
+    expect(view.getAllByRole('button', { name: 'New campaign' })[0]).toBeDisabled();
+
+    fireEvent.click(view.getByRole('button', { name: 'Try again' }));
+
+    await waitFor(() => {
+      expect(adminApiMock.listEvents).toHaveBeenCalledTimes(2);
+      expect(view.getByText('Demo Event')).toBeInTheDocument();
+    });
+
+    fireEvent.change(view.container.querySelector('select')!, { target: { value: 'evt_1' } });
+
+    await waitFor(() => {
+      expect(adminApiMock.listMessages).toHaveBeenCalledWith('evt_1');
+    });
+    expect(view.getAllByRole('button', { name: 'New campaign' })[0]).not.toBeDisabled();
+  });
+
+  it('uses the same mobile-safe campaign card layout in the global messages view', async () => {
+    const longName =
+      'Very long global campaign name for administrators checking campaigns from a phone';
+    const longAudience = 'Custom audience label with enough words to wrap inside a mobile card';
+    adminApiMock.listEvents.mockResolvedValue({
+      ok: true,
+      data: {
+        items: [{ id: 'evt_1', title: 'Demo Event' }],
+        nextCursor: null,
+        hasMore: false,
+      },
+    });
+    adminApiMock.listMessages.mockResolvedValue({
+      ok: true,
+      data: [messageCampaign({ name: longName, audienceLabel: longAudience })],
+    });
+
+    const view = render(<MessagesView />);
+
+    await waitFor(() => {
+      expect(adminApiMock.listEvents).toHaveBeenCalled();
+    });
+    fireEvent.change(view.container.querySelector('select')!, { target: { value: 'evt_1' } });
+
+    await waitFor(() => {
+      expect(view.getByText(longName)).toBeInTheDocument();
+    });
+    expect(view.getByText(longName)).toHaveClass('break-words');
+    expect(view.getByText(`${longAudience} · 2 queued`)).toHaveClass('break-words');
+    expect(view.getByRole('button', { name: 'Details' })).toHaveClass('shrink-0');
+    expect(
+      view.container.querySelector('.flex-col.items-start.justify-between.gap-3'),
+    ).toBeInTheDocument();
   });
 });
 
@@ -494,5 +638,88 @@ describe('MessageCampaignDetailPanel', () => {
     expect(view.getByText('emd_1')).toBeInTheDocument();
     expect(view.getByText('epe_1')).toBeInTheDocument();
     expect(view.getAllByText('delivered').length).toBeGreaterThanOrEqual(2);
+  });
+
+  it('retries a failed jobs table without reloading other campaign detail tables', async () => {
+    adminApiMock.getMessage.mockResolvedValue({
+      ok: true,
+      data: {
+        id: 'msg_1',
+        eventId: 'evt_1',
+        name: 'admin-campaign',
+        channel: 'email',
+        status: 'sent',
+        audience: 'all_attendees',
+        audienceKey: 'all',
+        audienceAttendeeIds: [],
+        audienceLabel: 'All attendees',
+        queuedCount: 1,
+        sentCount: 1,
+        deliveredCount: 0,
+        failedCount: 0,
+        suppressedCount: 0,
+        createdAt: '2026-01-01T00:00:00.000Z',
+        templateKey: 'admin-campaign',
+        queuedEmailJobs: 1,
+        queuedSmsJobs: 0,
+        suppressedRecipients: 0,
+        consentExclusions: 0,
+        skippedRecipients: 0,
+        emailJobs: [],
+        smsJobs: [],
+        emailDeliveries: [],
+        smsDeliveries: [],
+      },
+    });
+    adminApiMock.listMessageJobs
+      .mockResolvedValueOnce({
+        ok: false,
+        error: {
+          code: 'jobs_unavailable',
+          message: 'Jobs unavailable',
+        },
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        data: [
+          {
+            eventId: 'evt_1',
+            campaignId: 'msg_1',
+            channel: 'email',
+            job: {
+              id: 'emj_retry',
+              status: 'queued',
+              recipient: 'b***@example.test',
+              updated_at: '2026-01-01T00:00:00.000Z',
+            },
+          },
+        ],
+      });
+    adminApiMock.listMessageDeliveryLogs.mockResolvedValue({
+      ok: true,
+      data: [],
+    });
+    adminApiMock.listMessageProviderEvents.mockResolvedValue({
+      ok: true,
+      data: [],
+    });
+
+    const view = render(<MessageCampaignDetailPanel eventId="evt_1" campaignId="msg_1" />);
+
+    await waitFor(() => {
+      expect(view.getByText('Jobs unavailable')).toBeInTheDocument();
+    });
+    expect(view.getByText('Delivery logs')).toBeInTheDocument();
+    expect(view.getByText('Provider events')).toBeInTheDocument();
+
+    fireEvent.click(view.getByRole('button', { name: 'Try again' }));
+
+    await waitFor(() => {
+      expect(adminApiMock.listMessageJobs).toHaveBeenCalledTimes(2);
+      expect(view.getByText('emj_retry')).toBeInTheDocument();
+    });
+    expect(adminApiMock.getMessage).toHaveBeenCalledTimes(1);
+    expect(adminApiMock.listMessageDeliveryLogs).toHaveBeenCalledTimes(1);
+    expect(adminApiMock.listMessageProviderEvents).toHaveBeenCalledTimes(1);
   });
 });
