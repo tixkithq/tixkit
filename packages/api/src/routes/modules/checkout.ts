@@ -1088,6 +1088,7 @@ export const checkoutRoutes: FastifyPluginAsync = async (app) => {
             reservationItems.push({
               inventoryPoolId: ttRecord.inventory_pool_id,
               ticketTypeId: ttRecord.id,
+              ...(item.occurrenceId ? { occurrenceId: item.occurrenceId } : {}),
               quantity: item.quantity,
             });
           }
@@ -1660,6 +1661,7 @@ export const checkoutRoutes: FastifyPluginAsync = async (app) => {
           reservationItems.push({
             inventoryPoolId: ttRecord.inventory_pool_id,
             ticketTypeId: ttRecord.id,
+            ...(item.occurrenceId ? { occurrenceId: item.occurrenceId } : {}),
             quantity: item.quantity,
           });
         }

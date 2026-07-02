@@ -15,16 +15,28 @@ type Pool = {
   hold_ttl_seconds: number;
 };
 
+type Occurrence = {
+  id: string;
+  capacity: number | null;
+};
+
 type Hold = {
   id: string;
   inventory_pool_id: string;
   checkout_session_id: string;
   ticket_type_id: string;
+  event_occurrence_id: string | null;
   quantity: number;
   expires_at: Date;
   status: string;
   created_at: Date;
   updated_at: Date;
+};
+
+type Ticket = {
+  id: string;
+  event_occurrence_id: string | null;
+  status: string;
 };
 
 class MockTable {
@@ -43,6 +55,8 @@ class MockTable {
   selectFrom() {
     const conds: Array<{ col: string; op: string; val: any }> = [];
     let sumCol: string | null = null;
+    let countAlias: string | null = null;
+    let groupCol: string | null = null;
     let idOnly = false;
 
     const chain: any = {
@@ -50,6 +64,15 @@ class MockTable {
       select: (arg: any) => {
         if (typeof arg === 'string') {
           if (arg === 'id') idOnly = true;
+        } else if (typeof arg === 'function') {
+          const selected = arg({
+            fn: {
+              countAll: () => ({
+                as: (alias: string) => ({ countAlias: alias }),
+              }),
+            },
+          });
+          if (selected?.countAlias) countAlias = selected.countAlias;
         } else if (arg && arg.sumColumn) {
           sumCol = arg.sumColumn;
         }
@@ -60,17 +83,21 @@ class MockTable {
         return chain;
       },
       forUpdate: () => chain,
+      groupBy: (col: string) => {
+        groupCol = col;
+        return chain;
+      },
       executeTakeFirst: () => {
-        const rows = this.getRows(conds, sumCol, idOnly);
+        const rows = this.getRows(conds, sumCol, countAlias, groupCol, idOnly);
         return Promise.resolve(rows[0] ?? undefined);
       },
       executeTakeFirstOrThrow: () => {
-        const rows = this.getRows(conds, sumCol, idOnly);
+        const rows = this.getRows(conds, sumCol, countAlias, groupCol, idOnly);
         if (!rows[0]) throw new Error('not found');
         return Promise.resolve(rows[0]);
       },
       execute: () => {
-        const rows = this.getRows(conds, sumCol, idOnly);
+        const rows = this.getRows(conds, sumCol, countAlias, groupCol, idOnly);
         return Promise.resolve(rows);
       },
     };
@@ -80,14 +107,41 @@ class MockTable {
   private getRows(
     conds: Array<{ col: string; op: string; val: any }>,
     sumCol: string | null,
+    countAlias: string | null,
+    groupCol: string | null,
     idOnly: boolean,
   ) {
     let rows = [...this.rows.values()];
     rows = rows.filter((r) => this.matches(r, conds));
+    if (groupCol && sumCol) {
+      const grouped = new Map<string, number>();
+      for (const row of rows) {
+        const key = row[groupCol];
+        if (key === null || key === undefined) continue;
+        grouped.set(key, (grouped.get(key) ?? 0) + Number(row[sumCol] ?? 0));
+      }
+      return [...grouped.entries()].map(([key, total]) => ({
+        [groupCol]: key,
+        total_held: total,
+      }));
+    }
+    if (groupCol && countAlias) {
+      const grouped = new Map<string, number>();
+      for (const row of rows) {
+        const key = row[groupCol];
+        if (key === null || key === undefined) continue;
+        grouped.set(key, (grouped.get(key) ?? 0) + 1);
+      }
+      return [...grouped.entries()].map(([key, total]) => ({
+        [groupCol]: key,
+        [countAlias]: total,
+      }));
+    }
     if (sumCol) {
       const total = rows.reduce((s, r) => s + Number(r[sumCol] ?? 0), 0);
       return [{ total_held: total }];
     }
+    if (countAlias) return [{ [countAlias]: rows.length }];
     if (idOnly) return rows.map((r) => ({ id: r.id }));
     return rows;
   }
@@ -146,15 +200,25 @@ class MockTable {
 function createMockDb() {
   const pools = new Map<string, Pool>();
   const holds = new Map<string, Hold>();
+  const occurrences = new Map<string, Occurrence>();
+  const tickets = new Map<string, Ticket>();
 
   const poolTable = new MockTable(pools);
   const holdTable = new MockTable(holds);
+  const occurrenceTable = new MockTable(occurrences);
+  const ticketTable = new MockTable(tickets);
+
+  const tableFor = (table: string): MockTable => {
+    if (table === 'inventory_pools') return poolTable;
+    if (table === 'checkout_holds') return holdTable;
+    if (table === 'event_occurrences') return occurrenceTable;
+    if (table === 'tickets') return ticketTable;
+    throw new Error(`unsupported mock table ${table}`);
+  };
 
   const baseApi = {
-    selectFrom: (table: string) =>
-      table === 'inventory_pools' ? poolTable.selectFrom() : holdTable.selectFrom(),
-    updateTable: (table: string) =>
-      table === 'inventory_pools' ? poolTable.updateTable() : holdTable.updateTable(),
+    selectFrom: (table: string) => tableFor(table).selectFrom(),
+    updateTable: (table: string) => tableFor(table).updateTable(),
     insertInto: (table: string) =>
       table === 'checkout_holds'
         ? holdTable.insertInto()
@@ -170,6 +234,10 @@ function createMockDb() {
       execute: async (fn: (trx: any) => Promise<any>) => {
         const poolSnapshot = new Map([...pools.entries()].map(([id, row]) => [id, { ...row }]));
         const holdSnapshot = new Map([...holds.entries()].map(([id, row]) => [id, { ...row }]));
+        const occurrenceSnapshot = new Map(
+          [...occurrences.entries()].map(([id, row]) => [id, { ...row }]),
+        );
+        const ticketSnapshot = new Map([...tickets.entries()].map(([id, row]) => [id, { ...row }]));
         try {
           return await fn(baseApi);
         } catch (err) {
@@ -177,6 +245,10 @@ function createMockDb() {
           for (const [id, row] of poolSnapshot) pools.set(id, row);
           holds.clear();
           for (const [id, row] of holdSnapshot) holds.set(id, row);
+          occurrences.clear();
+          for (const [id, row] of occurrenceSnapshot) occurrences.set(id, row);
+          tickets.clear();
+          for (const [id, row] of ticketSnapshot) tickets.set(id, row);
           throw err;
         }
       },
@@ -198,6 +270,7 @@ function createMockDb() {
       inventory_pool_id: 'pool_1',
       checkout_session_id: 'cs_1',
       ticket_type_id: 'tt_1',
+      event_occurrence_id: null,
       quantity: 1,
       expires_at: new Date(Date.now() + 300_000),
       status: 'active',
@@ -207,14 +280,35 @@ function createMockDb() {
     } as Hold);
   }
 
+  function addOccurrence(o: Partial<Occurrence> & { id: string }) {
+    occurrences.set(o.id, {
+      capacity: null,
+      ...o,
+    } as Occurrence);
+  }
+
+  function addTicket(t: Partial<Ticket> & { id: string }) {
+    tickets.set(t.id, {
+      event_occurrence_id: null,
+      status: 'valid',
+      ...t,
+    } as Ticket);
+  }
+
   return {
     db,
     addPool,
     addHold,
+    addOccurrence,
+    addTicket,
     getPool: (id: string) => pools.get(id),
     getHold: (id: string) => holds.get(id),
+    getOccurrence: (id: string) => occurrences.get(id),
+    getTicket: (id: string) => tickets.get(id),
     pools,
     holds,
+    occurrences,
+    tickets,
   };
 }
 
@@ -317,6 +411,46 @@ describe('InventoryService', () => {
       ).rejects.toThrow(InventoryExhaustedError);
 
       expect(mock.holds.size).toBe(0);
+    });
+
+    it('persists occurrence ids on hold rows', async () => {
+      mock.addPool({ id: 'pool_1', total_capacity: 10, sold_count: 0 });
+      mock.addOccurrence({ id: 'occ_1', capacity: 10 });
+
+      const result = await service.reserveCart({
+        items: [
+          { inventoryPoolId: 'pool_1', ticketTypeId: 'tt_1', occurrenceId: 'occ_1', quantity: 2 },
+        ],
+        checkoutSessionId: 'cs_1',
+      });
+
+      expect(result.holds[0].occurrenceId).toBe('occ_1');
+      const hold = mock.getHold(result.holds[0].holdId)!;
+      expect(hold.event_occurrence_id).toBe('occ_1');
+    });
+
+    it('rejects reservations that exceed occurrence capacity while pool capacity remains', async () => {
+      mock.addPool({ id: 'pool_1', total_capacity: 100, sold_count: 0 });
+      mock.addOccurrence({ id: 'occ_1', capacity: 3 });
+      mock.addTicket({ id: 'tkt_1', event_occurrence_id: 'occ_1', status: 'valid' });
+      mock.addHold({
+        id: 'hld_existing',
+        inventory_pool_id: 'pool_1',
+        event_occurrence_id: 'occ_1',
+        quantity: 1,
+        status: 'active',
+      });
+
+      await expect(
+        service.reserveCart({
+          items: [
+            { inventoryPoolId: 'pool_1', ticketTypeId: 'tt_1', occurrenceId: 'occ_1', quantity: 2 },
+          ],
+          checkoutSessionId: 'cs_2',
+        }),
+      ).rejects.toThrow(InventoryExhaustedError);
+
+      expect(mock.holds.size).toBe(1);
     });
   });
 
@@ -574,6 +708,47 @@ describe('InventoryService', () => {
     it('returns zeros for non-existent pool', async () => {
       const avail = await service.getAvailability('nonexistent');
       expect(avail).toEqual({ total: 0, sold: 0, reserved: 0, available: 0 });
+    });
+
+    it('calculates occurrence availability from capacity, active holds, and usable tickets', async () => {
+      mock.addOccurrence({ id: 'occ_1', capacity: 5 });
+      mock.addOccurrence({ id: 'occ_unlimited', capacity: null });
+      mock.addHold({
+        id: 'hld_active',
+        event_occurrence_id: 'occ_1',
+        quantity: 2,
+        status: 'active',
+      });
+      mock.addHold({
+        id: 'hld_stale',
+        event_occurrence_id: 'occ_1',
+        quantity: 1,
+        status: 'active',
+        expires_at: new Date(Date.now() - 10_000),
+      });
+      mock.addTicket({ id: 'tkt_valid', event_occurrence_id: 'occ_1', status: 'valid' });
+      mock.addTicket({ id: 'tkt_checked', event_occurrence_id: 'occ_1', status: 'checked_in' });
+      mock.addTicket({
+        id: 'tkt_transferred',
+        event_occurrence_id: 'occ_1',
+        status: 'transferred',
+      });
+
+      const availability = await service.getOccurrenceAvailabilityBatch(['occ_1', 'occ_unlimited']);
+
+      expect(mock.getHold('hld_stale')!.status).toBe('expired');
+      expect(availability.get('occ_1')).toEqual({
+        total: 5,
+        sold: 2,
+        reserved: 2,
+        available: 1,
+      });
+      expect(availability.get('occ_unlimited')).toEqual({
+        total: null,
+        sold: 0,
+        reserved: 0,
+        available: null,
+      });
     });
   });
 

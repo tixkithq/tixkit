@@ -1,7 +1,7 @@
 import { expect, it, beforeAll, afterAll, beforeEach } from 'vitest';
 import { createDb, type Database } from '@tixkit/db';
 import { InventoryService } from '../../services/inventory.js';
-import { HoldExpiredError } from '@tixkit/domain';
+import { HoldExpiredError, InventoryExhaustedError } from '@tixkit/domain';
 import { ulid } from 'ulid';
 import {
   describeWithIntegrationDatabase,
@@ -107,6 +107,7 @@ async function cleanupEvent(database: Database): Promise<void> {
     .execute();
   await database.deleteFrom('checkout_sessions').where('id', 'like', 'cs_conc_%').execute();
   await database.deleteFrom('ticket_types').where('event_id', '=', EVENT_ID).execute();
+  await database.deleteFrom('event_occurrences').where('event_id', '=', EVENT_ID).execute();
   await database.deleteFrom('inventory_pools').where('event_id', '=', EVENT_ID).execute();
   await database.deleteFrom('events').where('id', '=', EVENT_ID).execute();
   await database.deleteFrom('brands').where('id', '=', BRAND_ID).execute();
@@ -133,7 +134,33 @@ async function createPool(database: Database, capacity: number, ttl = 300): Prom
   return poolId;
 }
 
-async function createTicketType(database: Database, poolId: string): Promise<string> {
+async function createOccurrence(database: Database, capacity: number | null): Promise<string> {
+  const occurrenceId = `occ_conc_${ulid().slice(-10)}`;
+  await database
+    .insertInto('event_occurrences')
+    .values({
+      id: occurrenceId,
+      event_id: EVENT_ID,
+      title: `Occurrence ${occurrenceId}`,
+      starts_at: new Date(Date.now() + 86400000),
+      ends_at: new Date(Date.now() + 90000000),
+      timezone: 'UTC',
+      venue: null,
+      capacity,
+      sort_order: 0,
+      status: 'scheduled',
+      created_at: new Date(),
+      updated_at: new Date(),
+    })
+    .execute();
+  return occurrenceId;
+}
+
+async function createTicketType(
+  database: Database,
+  poolId: string,
+  occurrenceId?: string,
+): Promise<string> {
   const ticketTypeId = `tt_conc_${ulid().slice(-10)}`;
   await database
     .insertInto('ticket_types')
@@ -156,6 +183,7 @@ async function createTicketType(database: Database, poolId: string): Promise<str
       sort_order: 0,
       requires_access_code: false,
       access_code_hint: null,
+      event_occurrence_id: occurrenceId ?? null,
       created_at: new Date(),
       updated_at: new Date(),
     })
@@ -167,6 +195,7 @@ async function createCheckoutSession(
   database: Database,
   _poolId: string,
   ticketTypeId: string,
+  occurrenceId?: string,
 ): Promise<string> {
   const sessionId = `cs_conc_${ulid().slice(-10)}`;
   await database
@@ -179,7 +208,9 @@ async function createCheckoutSession(
       status: 'open',
       hold_id: `hld_${ulid()}`,
       currency: 'USD',
-      cart: JSON.stringify({ items: [{ ticketTypeId, quantity: 1 }] }),
+      cart: JSON.stringify({
+        items: [{ ticketTypeId, ...(occurrenceId ? { occurrenceId } : {}), quantity: 1 }],
+      }),
       buyer: JSON.stringify({ email: 'test@example.com' }),
       quote: JSON.stringify({
         totalCents: 1000,
@@ -224,6 +255,7 @@ describeWithIntegrationDatabase('InventoryService concurrency', () => {
       .execute();
     await db.deleteFrom('checkout_sessions').where('id', 'like', 'cs_conc_%').execute();
     await db.deleteFrom('ticket_types').where('event_id', '=', EVENT_ID).execute();
+    await db.deleteFrom('event_occurrences').where('event_id', '=', EVENT_ID).execute();
     await db.deleteFrom('inventory_pools').where('event_id', '=', EVENT_ID).execute();
   });
 
@@ -277,6 +309,55 @@ describeWithIntegrationDatabase('InventoryService concurrency', () => {
     expect(Number(pool.sold_count)).toBe(0);
     expect(held).toBe(CAPACITY);
     expect(Number(pool.sold_count) + held).toBeLessThanOrEqual(CAPACITY);
+  });
+
+  it('prevents oversell when concurrent carts exceed occurrence capacity before pool capacity', async () => {
+    const OCCURRENCE_CAPACITY = 2;
+    const CONCURRENT_CLIENTS = 6;
+    const poolId = await createPool(db, 20);
+    const occurrenceId = await createOccurrence(db, OCCURRENCE_CAPACITY);
+    const ticketTypeId = await createTicketType(db, poolId, occurrenceId);
+
+    const sessionIds: string[] = [];
+    for (let i = 0; i < CONCURRENT_CLIENTS; i++) {
+      // eslint-disable-next-line no-await-in-loop -- setup creates distinct persisted sessions before concurrent occurrence reservations start.
+      sessionIds.push(await createCheckoutSession(db, poolId, ticketTypeId, occurrenceId));
+    }
+
+    const results = await Promise.allSettled(
+      sessionIds.map((sessionId) =>
+        inventoryService.reserveCart({
+          items: [{ inventoryPoolId: poolId, ticketTypeId, occurrenceId, quantity: 1 }],
+          checkoutSessionId: sessionId,
+        }),
+      ),
+    );
+
+    const succeeded = results.filter((result) => result.status === 'fulfilled').length;
+    const failed = results.filter((result) => result.status === 'rejected');
+
+    expect(succeeded).toBe(OCCURRENCE_CAPACITY);
+    expect(failed).toHaveLength(CONCURRENT_CLIENTS - OCCURRENCE_CAPACITY);
+    for (const result of failed) {
+      expect(result.reason).toBeInstanceOf(InventoryExhaustedError);
+    }
+
+    const occurrenceHolds = await db
+      .selectFrom('checkout_holds')
+      .select(db.fn.sum('quantity').as('total'))
+      .where('event_occurrence_id', '=', occurrenceId)
+      .where('status', '=', 'active')
+      .executeTakeFirst();
+
+    const poolHolds = await db
+      .selectFrom('checkout_holds')
+      .select(db.fn.sum('quantity').as('total'))
+      .where('inventory_pool_id', '=', poolId)
+      .where('status', '=', 'active')
+      .executeTakeFirst();
+
+    expect(Number(occurrenceHolds?.total ?? 0)).toBe(OCCURRENCE_CAPACITY);
+    expect(Number(poolHolds?.total ?? 0)).toBe(OCCURRENCE_CAPACITY);
   });
 
   it('prevents oversell when concurrent finalizations convert holds', async () => {

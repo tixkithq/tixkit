@@ -10,11 +10,18 @@ export type HoldResult = {
 export type CartReservationItem = {
   inventoryPoolId: string;
   ticketTypeId: string;
+  occurrenceId?: string;
   quantity: number;
 };
 
 export type CartReservationResult = {
-  holds: { holdId: string; inventoryPoolId: string; ticketTypeId: string; quantity: number }[];
+  holds: {
+    holdId: string;
+    inventoryPoolId: string;
+    ticketTypeId: string;
+    occurrenceId?: string;
+    quantity: number;
+  }[];
   primaryHoldId: string;
   expiresAt: Date;
 };
@@ -24,6 +31,13 @@ export type InventoryAvailability = {
   sold: number;
   reserved: number;
   available: number;
+};
+
+export type OccurrenceAvailability = {
+  total: number | null;
+  sold: number;
+  reserved: number;
+  available: number | null;
 };
 
 const emptyAvailability = (): InventoryAvailability => ({
@@ -56,6 +70,7 @@ export class InventoryService {
     // Aggregate requested quantity per pool.
     const perPool = new Map<string, number>();
     const itemsByPool = new Map<string, CartReservationItem[]>();
+    const perOccurrence = new Map<string, number>();
     for (const item of input.items) {
       if (item.quantity <= 0) {
         throw new ValidationError(
@@ -66,6 +81,12 @@ export class InventoryService {
       const poolItems = itemsByPool.get(item.inventoryPoolId) ?? [];
       poolItems.push(item);
       itemsByPool.set(item.inventoryPoolId, poolItems);
+      if (item.occurrenceId) {
+        perOccurrence.set(
+          item.occurrenceId,
+          (perOccurrence.get(item.occurrenceId) ?? 0) + item.quantity,
+        );
+      }
     }
 
     return this.db.transaction().execute(async (trx) => {
@@ -111,7 +132,85 @@ export class InventoryService {
         if (available < requested) {
           throw new InventoryExhaustedError(poolId, requested, available);
         }
+      }
 
+      // Lock occurrence rows after pools in a deterministic order. Occurrence
+      // capacity is independent from pool capacity, so both limits must pass
+      // before any hold row is inserted.
+      // eslint-disable-next-line unicorn/no-array-sort -- sorting a fresh array gives deterministic lock order without mutating shared input.
+      const occurrenceIds = [...perOccurrence.keys()].sort();
+      if (occurrenceIds.length > 0) {
+        const occurrenceRows = [];
+        for (const occurrenceId of occurrenceIds) {
+          // eslint-disable-next-line no-await-in-loop -- deterministic sequential occurrence locking prevents deadlocks.
+          const row = await trx
+            .selectFrom('event_occurrences')
+            .select(['id', 'capacity'])
+            .where('id', '=', occurrenceId)
+            .forUpdate()
+            .executeTakeFirst();
+          if (!row) {
+            throw new ValidationError(`Event occurrence ${occurrenceId} is not available`);
+          }
+          occurrenceRows.push(row);
+        }
+
+        await trx
+          .updateTable('checkout_holds')
+          .set({ status: 'expired', updated_at: now })
+          .where('event_occurrence_id', 'in', occurrenceIds)
+          .where('status', '=', 'active')
+          .where('expires_at', '<', now)
+          .execute();
+
+        const activeOccurrenceHolds = await trx
+          .selectFrom('checkout_holds')
+          .select(['event_occurrence_id'])
+          .select(trx.fn.sum('quantity').as('total_held'))
+          .where('event_occurrence_id', 'in', occurrenceIds)
+          .where('status', '=', 'active')
+          .groupBy('event_occurrence_id')
+          .execute();
+
+        const activeTickets = await trx
+          .selectFrom('tickets')
+          .select(['event_occurrence_id'])
+          .select((eb) => eb.fn.countAll<number>().as('total_sold'))
+          .where('event_occurrence_id', 'in', occurrenceIds)
+          .where('status', 'in', ['valid', 'checked_in'])
+          .groupBy('event_occurrence_id')
+          .execute();
+
+        const heldByOccurrence = new Map<string, number>();
+        for (const hold of activeOccurrenceHolds) {
+          if (!hold.event_occurrence_id) continue;
+          heldByOccurrence.set(hold.event_occurrence_id, Number(hold.total_held ?? 0));
+        }
+
+        const soldByOccurrence = new Map<string, number>();
+        for (const ticket of activeTickets) {
+          if (!ticket.event_occurrence_id) continue;
+          soldByOccurrence.set(ticket.event_occurrence_id, Number(ticket.total_sold ?? 0));
+        }
+
+        for (const occurrence of occurrenceRows) {
+          if (occurrence.capacity === null) continue;
+          const requested = perOccurrence.get(occurrence.id)!;
+          const held = heldByOccurrence.get(occurrence.id) ?? 0;
+          const sold = soldByOccurrence.get(occurrence.id) ?? 0;
+          const available = Number(occurrence.capacity) - sold - held;
+          if (available < requested) {
+            throw new InventoryExhaustedError(occurrence.id, requested, available);
+          }
+        }
+      }
+
+      for (const poolId of poolIds) {
+        const pool = await trx
+          .selectFrom('inventory_pools')
+          .selectAll()
+          .where('id', '=', poolId)
+          .executeTakeFirstOrThrow();
         const ttl = input.holdTtlSeconds ?? pool.hold_ttl_seconds;
         const expiresAt = new Date(now.getTime() + ttl * 1000);
         if (!earliestExpiry || expiresAt < earliestExpiry) earliestExpiry = expiresAt;
@@ -126,6 +225,7 @@ export class InventoryService {
               inventory_pool_id: poolId,
               checkout_session_id: input.checkoutSessionId,
               ticket_type_id: item.ticketTypeId,
+              event_occurrence_id: item.occurrenceId ?? null,
               quantity: item.quantity,
               expires_at: expiresAt,
               status: 'active',
@@ -137,6 +237,7 @@ export class InventoryService {
             holdId,
             inventoryPoolId: poolId,
             ticketTypeId: item.ticketTypeId,
+            occurrenceId: item.occurrenceId,
             quantity: item.quantity,
           });
         }
@@ -245,6 +346,7 @@ export class InventoryService {
   async reserveInventory(input: {
     inventoryPoolId: string;
     ticketTypeId: string;
+    occurrenceId?: string;
     quantity: number;
     checkoutSessionId: string;
     holdTtlSeconds?: number;
@@ -301,6 +403,7 @@ export class InventoryService {
           inventory_pool_id: input.inventoryPoolId,
           checkout_session_id: input.checkoutSessionId,
           ticket_type_id: input.ticketTypeId,
+          event_occurrence_id: input.occurrenceId ?? null,
           quantity: input.quantity,
           expires_at: expiresAt,
           status: 'active',
@@ -524,6 +627,75 @@ export class InventoryService {
           sold: pool.sold_count,
           reserved,
           available: pool.total_capacity - pool.sold_count - reserved,
+        });
+      }
+
+      return availability;
+    });
+  }
+
+  async getOccurrenceAvailabilityBatch(
+    eventOccurrenceIds: readonly string[],
+  ): Promise<Map<string, OccurrenceAvailability>> {
+    const occurrenceIds = [...new Set(eventOccurrenceIds.filter((id) => id.length > 0))];
+    const availability = new Map<string, OccurrenceAvailability>();
+    if (occurrenceIds.length === 0) return availability;
+
+    return this.db.transaction().execute(async (trx) => {
+      const occurrences = await trx
+        .selectFrom('event_occurrences')
+        .select(['id', 'capacity'])
+        .where('id', 'in', occurrenceIds)
+        .execute();
+
+      const now = new Date();
+      await trx
+        .updateTable('checkout_holds')
+        .set({ status: 'expired', updated_at: now })
+        .where('event_occurrence_id', 'in', occurrenceIds)
+        .where('status', '=', 'active')
+        .where('expires_at', '<', now)
+        .execute();
+
+      const activeHolds = await trx
+        .selectFrom('checkout_holds')
+        .select(['event_occurrence_id'])
+        .select(trx.fn.sum('quantity').as('total_held'))
+        .where('event_occurrence_id', 'in', occurrenceIds)
+        .where('status', '=', 'active')
+        .groupBy('event_occurrence_id')
+        .execute();
+
+      const activeTickets = await trx
+        .selectFrom('tickets')
+        .select(['event_occurrence_id'])
+        .select((eb) => eb.fn.countAll<number>().as('total_sold'))
+        .where('event_occurrence_id', 'in', occurrenceIds)
+        .where('status', 'in', ['valid', 'checked_in'])
+        .groupBy('event_occurrence_id')
+        .execute();
+
+      const reservedByOccurrence = new Map<string, number>();
+      for (const hold of activeHolds) {
+        if (!hold.event_occurrence_id) continue;
+        reservedByOccurrence.set(hold.event_occurrence_id, Number(hold.total_held ?? 0));
+      }
+
+      const soldByOccurrence = new Map<string, number>();
+      for (const ticket of activeTickets) {
+        if (!ticket.event_occurrence_id) continue;
+        soldByOccurrence.set(ticket.event_occurrence_id, Number(ticket.total_sold ?? 0));
+      }
+
+      for (const occurrence of occurrences) {
+        const total = occurrence.capacity === null ? null : Number(occurrence.capacity);
+        const reserved = reservedByOccurrence.get(occurrence.id) ?? 0;
+        const sold = soldByOccurrence.get(occurrence.id) ?? 0;
+        availability.set(occurrence.id, {
+          total,
+          sold,
+          reserved,
+          available: total === null ? null : total - sold - reserved,
         });
       }
 

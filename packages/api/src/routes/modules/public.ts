@@ -367,7 +367,17 @@ export const publicRoutes: FastifyPluginAsync = async (app) => {
     const ticketTypes = await ttRepo.findPublicOrRequestedByEvent(eventId, requestedProducts);
     const products = await new ProductRepository(db).findByEvent(eventId);
     const inventoryPoolIds = [...new Set(ticketTypes.map((tt) => tt.inventory_pool_id))];
-    const availabilityByPool = await inventoryService.getAvailabilityBatch(inventoryPoolIds);
+    const occurrenceIds = [
+      ...new Set(
+        ticketTypes
+          .map((tt) => tt.event_occurrence_id)
+          .filter((id): id is string => typeof id === 'string' && id.length > 0),
+      ),
+    ];
+    const [availabilityByPool, availabilityByOccurrence] = await Promise.all([
+      inventoryService.getAvailabilityBatch(inventoryPoolIds),
+      inventoryService.getOccurrenceAvailabilityBatch(occurrenceIds),
+    ]);
 
     const results: Record<string, unknown>[] = ticketTypes.map((tt) => {
       const availability = availabilityByPool.get(tt.inventory_pool_id) ?? {
@@ -376,6 +386,13 @@ export const publicRoutes: FastifyPluginAsync = async (app) => {
         reserved: 0,
         available: 0,
       };
+      const occurrenceAvailability = tt.event_occurrence_id
+        ? availabilityByOccurrence.get(tt.event_occurrence_id)
+        : undefined;
+      const available =
+        occurrenceAvailability?.available === null || occurrenceAvailability === undefined
+          ? availability.available
+          : Math.min(availability.available, occurrenceAvailability.available);
       return {
         ticketTypeId: tt.id,
         eventOccurrenceId: tt.event_occurrence_id ?? undefined,
@@ -386,8 +403,8 @@ export const publicRoutes: FastifyPluginAsync = async (app) => {
         minimumPriceCents: tt.minimum_price_cents ? Number(tt.minimum_price_cents) : undefined,
         minPerOrder: tt.min_per_order,
         maxPerOrder: tt.max_per_order,
-        available: availability.available,
-        status: availability.available > 0 ? tt.status : 'sold_out',
+        available,
+        status: available > 0 ? tt.status : 'sold_out',
         requiresAccessCode: tt.requires_access_code,
         accessCodeHint: tt.access_code_hint ?? undefined,
         description: tt.description ?? undefined,

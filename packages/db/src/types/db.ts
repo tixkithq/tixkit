@@ -283,6 +283,7 @@ export interface CheckoutHoldTable {
   inventory_pool_id: string;
   checkout_session_id: string;
   ticket_type_id: string;
+  event_occurrence_id: string | null;
   quantity: number;
   expires_at: Timestamp;
   status: string;
