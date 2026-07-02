@@ -439,6 +439,7 @@ async function compensateCheckoutSessionCreation(input: {
   await Promise.allSettled([
     releaseCheckoutUploadArtifactClaims(input.db, input.checkoutSessionId),
     input.releaseHoldsForSession(input.checkoutSessionId),
+    new DiscountCodeRepository(input.db).releasePendingCheckoutReservation(input.checkoutSessionId),
     input.sessionCreated
       ? input.db
           .updateTable('checkout_sessions')
@@ -448,6 +449,29 @@ async function compensateCheckoutSessionCreation(input: {
           .execute()
       : Promise.resolve(),
   ]);
+}
+
+async function reserveCheckoutDiscount(input: {
+  db: Database;
+  eventId: string;
+  tenantId: string;
+  checkoutSessionId: string;
+  discountCode?: string;
+  discountCents: number;
+  now: Date;
+}): Promise<void> {
+  if (!input.discountCode || input.discountCents <= 0) return;
+
+  const reservation = await new DiscountCodeRepository(input.db).reserveForCheckout({
+    eventId: input.eventId,
+    tenantId: input.tenantId,
+    checkoutSessionId: input.checkoutSessionId,
+    code: input.discountCode,
+    now: input.now,
+  });
+  if (!reservation.ok) {
+    throw new ValidationError(reservation.message, { code: reservation.errorCode });
+  }
 }
 
 type QuestionRow = {
@@ -1741,6 +1765,15 @@ export const checkoutRoutes: FastifyPluginAsync = async (app) => {
                   checkoutSessionId: sessionId,
                 })
               : { primaryHoldId: null, expiresAt: new Date(Date.now() + 10 * 60 * 1000) };
+          await reserveCheckoutDiscount({
+            db,
+            eventId: body.eventId,
+            tenantId: event.tenant_id,
+            checkoutSessionId: sessionId,
+            discountCode: cart.discountCode,
+            discountCents: quote.discountCents,
+            now: new Date(answeredAt),
+          });
 
           if (waitlistEntry) {
             await updateWaitlistReservationExpiry({

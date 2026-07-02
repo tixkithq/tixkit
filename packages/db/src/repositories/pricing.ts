@@ -7,6 +7,10 @@ function normalizeDiscountCode(code: string): string {
   return code.trim().toUpperCase();
 }
 
+export type DiscountReservationResult =
+  | { ok: true; discountCodeId: string; existing: boolean }
+  | { ok: false; errorCode: 'DISCOUNT_INVALID' | 'DISCOUNT_EXHAUSTED'; message: string };
+
 export class DiscountCodeRepository extends BaseRepository {
   async create(input: {
     eventId: string;
@@ -74,6 +78,169 @@ export class DiscountCodeRepository extends BaseRepository {
       }),
     );
   }
+
+  async reserveForCheckout(input: {
+    eventId: string;
+    tenantId: string;
+    checkoutSessionId: string;
+    code: string;
+    now?: Date;
+  }): Promise<DiscountReservationResult> {
+    return this.db.transaction().execute(async (trx): Promise<DiscountReservationResult> => {
+      const existingRedemption = await trx
+        .selectFrom('discount_redemptions')
+        .select(['id', 'discount_code_id'])
+        .where('checkout_session_id', '=', input.checkoutSessionId)
+        .executeTakeFirst();
+      if (existingRedemption) {
+        return { ok: true, discountCodeId: existingRedemption.discount_code_id, existing: true };
+      }
+
+      const canonicalCode = normalizeDiscountCode(input.code);
+      const eventDiscounts = await trx
+        .selectFrom('discount_codes')
+        .selectAll()
+        .where('event_id', '=', input.eventId)
+        .forUpdate()
+        .execute();
+      const matchingDiscounts = eventDiscounts.filter(
+        (discount) => normalizeDiscountCode(String(discount.code)) === canonicalCode,
+      );
+
+      if (matchingDiscounts.length === 0) {
+        return {
+          ok: false,
+          errorCode: 'DISCOUNT_INVALID',
+          message: `Discount code ${input.code} not found`,
+        };
+      }
+      if (matchingDiscounts.length > 1) {
+        return {
+          ok: false,
+          errorCode: 'DISCOUNT_INVALID',
+          message: `Discount code ${input.code} is not unique`,
+        };
+      }
+
+      const discount = matchingDiscounts[0]!;
+      const now = input.now ?? new Date();
+      if (discount.status !== 'active') {
+        return {
+          ok: false,
+          errorCode: 'DISCOUNT_INVALID',
+          message: `Discount code ${input.code} status is ${discount.status}`,
+        };
+      }
+      if (discount.valid_from && new Date(discount.valid_from) > now) {
+        return {
+          ok: false,
+          errorCode: 'DISCOUNT_INVALID',
+          message: `Discount code ${input.code} not yet valid`,
+        };
+      }
+      if (discount.valid_until && new Date(discount.valid_until) < now) {
+        return {
+          ok: false,
+          errorCode: 'DISCOUNT_INVALID',
+          message: `Discount code ${input.code} expired`,
+        };
+      }
+      if (Number(discount.uses_count) >= Number(discount.max_uses)) {
+        return {
+          ok: false,
+          errorCode: 'DISCOUNT_EXHAUSTED',
+          message: `Discount code ${input.code} max uses reached`,
+        };
+      }
+
+      const redemptionId = `dred_${ulid()}`;
+      try {
+        await trx
+          .insertInto('discount_redemptions')
+          .values({
+            id: redemptionId,
+            discount_code_id: discount.id,
+            event_id: input.eventId,
+            checkout_session_id: input.checkoutSessionId,
+            order_id: null,
+            tenant_id: input.tenantId,
+            created_at: now,
+          })
+          .execute();
+      } catch (err) {
+        if (!isUniqueConstraintError(err)) throw err;
+        const existing = await trx
+          .selectFrom('discount_redemptions')
+          .select(['discount_code_id'])
+          .where('checkout_session_id', '=', input.checkoutSessionId)
+          .executeTakeFirst();
+        if (!existing) throw err;
+        return { ok: true, discountCodeId: existing.discount_code_id, existing: true };
+      }
+
+      const update = await trx
+        .updateTable('discount_codes')
+        .set((eb) => ({
+          uses_count: eb('uses_count', '+', 1),
+          updated_at: now,
+        }))
+        .where('id', '=', discount.id)
+        .where('uses_count', '<', Number(discount.max_uses))
+        .executeTakeFirst();
+      if (Number(update.numUpdatedRows ?? 0) !== 1) {
+        await trx.deleteFrom('discount_redemptions').where('id', '=', redemptionId).execute();
+        return {
+          ok: false,
+          errorCode: 'DISCOUNT_EXHAUSTED',
+          message: `Discount code ${input.code} max uses reached`,
+        };
+      }
+
+      return { ok: true, discountCodeId: discount.id, existing: false };
+    });
+  }
+
+  async releasePendingCheckoutReservation(
+    checkoutSessionId: string,
+  ): Promise<{ released: boolean }> {
+    return this.db.transaction().execute(async (trx) => {
+      const redemption = await trx
+        .selectFrom('discount_redemptions')
+        .select(['id', 'discount_code_id'])
+        .where('checkout_session_id', '=', checkoutSessionId)
+        .where('order_id', 'is', null)
+        .forUpdate()
+        .executeTakeFirst();
+      if (!redemption) return { released: false };
+
+      await trx.deleteFrom('discount_redemptions').where('id', '=', redemption.id).execute();
+      await trx
+        .updateTable('discount_codes')
+        .set((eb) => ({
+          uses_count: eb('uses_count', '-', 1),
+          updated_at: new Date(),
+        }))
+        .where('id', '=', redemption.discount_code_id)
+        .where('uses_count', '>', 0)
+        .execute();
+
+      return { released: true };
+    });
+  }
+}
+
+function isUniqueConstraintError(err: unknown): boolean {
+  const error = err as { code?: unknown; errno?: unknown; number?: unknown };
+  return (
+    error.code === '23505' ||
+    error.code === 'ER_DUP_ENTRY' ||
+    error.code === 'SQLITE_CONSTRAINT' ||
+    error.code === 'SQLITE_CONSTRAINT_PRIMARYKEY' ||
+    error.code === 'SQLITE_CONSTRAINT_UNIQUE' ||
+    error.errno === 1062 ||
+    error.number === 2601 ||
+    error.number === 2627
+  );
 }
 
 export class TaxRuleRepository extends BaseRepository {

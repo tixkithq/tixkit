@@ -1,5 +1,5 @@
 import { createHash, randomBytes } from 'node:crypto';
-import { createDb, EmailJobRepository } from '@tixkit/db';
+import { createDb, EmailJobRepository, type Database } from '@tixkit/db';
 import type { WorkflowActivityResult } from '../shared/types.js';
 import { okResult, errResult } from '../shared/types.js';
 
@@ -23,6 +23,32 @@ function parseStoredJson<T>(value: unknown, fallback: T): T {
   } catch {
     return fallback;
   }
+}
+
+async function releasePendingDiscountReservation(
+  db: Database,
+  checkoutSessionId: string,
+  now: Date,
+): Promise<void> {
+  const redemption = await db
+    .selectFrom('discount_redemptions')
+    .select(['id', 'discount_code_id'])
+    .where('checkout_session_id', '=', checkoutSessionId)
+    .where('order_id', 'is', null)
+    .forUpdate()
+    .executeTakeFirst();
+  if (!redemption) return;
+
+  await db.deleteFrom('discount_redemptions').where('id', '=', redemption.id).execute();
+  await db
+    .updateTable('discount_codes')
+    .set((eb) => ({
+      uses_count: eb('uses_count', '-', 1),
+      updated_at: now,
+    }))
+    .where('id', '=', redemption.discount_code_id)
+    .where('uses_count', '>', 0)
+    .execute();
 }
 
 export async function expireStaleHoldsActivity(): Promise<
@@ -69,6 +95,8 @@ export async function expireStaleSessionsActivity(): Promise<
     const result = await db.transaction().execute(async (trx) => {
       for (const session of expiredSessions) {
         const cart = parseStoredJson<{ waitlistEntryId?: string }>(session.cart, {});
+        // eslint-disable-next-line no-await-in-loop -- each discount release is tied to the expired session row.
+        await releasePendingDiscountReservation(trx, session.id, now);
         if (!cart.waitlistEntryId) continue;
         // eslint-disable-next-line no-await-in-loop -- each reservation release is tied to the expired session row.
         await trx

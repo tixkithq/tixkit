@@ -1124,11 +1124,11 @@ describe('finalizeOrderActivity promo code redemption', () => {
     dbState.destroy.mockClear();
   });
 
-  it('consumes a valid promo code on first finalize, incrementing uses_count', async () => {
+  it('attaches a reserved promo code on first finalize without incrementing uses_count', async () => {
     seedCheckoutWithDiscount({
       holdExpiresAt: new Date(Date.now() + 60_000),
       discountCode: 'EARLYBIRD',
-      usesCount: 0,
+      usesCount: 1,
       maxUses: 10,
       status: 'active',
     });
@@ -1143,20 +1143,22 @@ describe('finalizeOrderActivity promo code redemption', () => {
     expect(result.ok).toBe(true);
     expect(dbState.tables.discount_codes.dc_1.uses_count).toBe(1);
     expect(Object.values(dbState.tables.discount_redemptions)).toHaveLength(1);
+    const orderId = result.ok ? result.value.orderId : undefined;
     expect(dbState.tables.discount_redemptions).toMatchObject({
       [Object.keys(dbState.tables.discount_redemptions)[0]]: {
         discount_code_id: 'dc_1',
         checkout_session_id: 'cs_1',
+        order_id: orderId,
       },
     });
   });
 
-  it('redeems the quoted promo code when the stored row has noncanonical case', async () => {
+  it('attaches the quoted promo reservation when the stored row has noncanonical case', async () => {
     seedCheckoutWithDiscount({
       holdExpiresAt: new Date(Date.now() + 60_000),
       discountCode: 'EARLYBIRD',
       storedCode: 'earlybird',
-      usesCount: 0,
+      usesCount: 1,
       maxUses: 10,
       status: 'active',
     });
@@ -1170,24 +1172,20 @@ describe('finalizeOrderActivity promo code redemption', () => {
 
     expect(result.ok).toBe(true);
     expect(dbState.tables.discount_codes.dc_1.uses_count).toBe(1);
-    expect(Object.values(dbState.tables.discount_redemptions)).toHaveLength(1);
+    expect(dbState.tables.discount_redemptions.dred_1.order_id).toBe(
+      result.ok ? result.value.orderId : undefined,
+    );
   });
 
-  it('rejects case-colliding promo code rows before consuming usage', async () => {
+  it('rejects a mismatched promo reservation before creating an order', async () => {
     seedCheckoutWithDiscount({
       holdExpiresAt: new Date(Date.now() + 60_000),
       discountCode: 'EARLYBIRD',
-      storedCode: 'EARLYBIRD',
-      usesCount: 0,
+      storedCode: 'OTHER',
+      usesCount: 1,
       maxUses: 10,
       status: 'active',
     });
-    dbState.tables.discount_codes.dc_2 = {
-      ...dbState.tables.discount_codes.dc_1,
-      id: 'dc_2',
-      code: 'earlybird',
-      uses_count: 0,
-    };
     seedTrustedPaymentIntent({ amountCents: 900 });
 
     const result = await finalizeOrderActivity({
@@ -1201,16 +1199,16 @@ describe('finalizeOrderActivity promo code redemption', () => {
       errorCode: 'DISCOUNT_INVALID',
       retryable: false,
     });
-    expect(dbState.tables.discount_codes.dc_1.uses_count).toBe(0);
-    expect(dbState.tables.discount_codes.dc_2.uses_count).toBe(0);
-    expect(Object.values(dbState.tables.discount_redemptions ?? {})).toHaveLength(0);
+    expect(dbState.tables.discount_codes.dc_1.uses_count).toBe(1);
+    expect(dbState.tables.discount_redemptions.dred_1.order_id).toBeNull();
+    expect(Object.values(dbState.tables.orders)).toHaveLength(0);
   });
 
   it('is idempotent on duplicate finalize/retry - does not double-increment uses_count', async () => {
     seedCheckoutWithDiscount({
       holdExpiresAt: new Date(Date.now() + 60_000),
       discountCode: 'EARLYBIRD',
-      usesCount: 0,
+      usesCount: 1,
       maxUses: 10,
       status: 'active',
     });
@@ -1245,13 +1243,14 @@ describe('finalizeOrderActivity promo code redemption', () => {
     expect(dbState.tables.discount_codes.dc_1.uses_count).toBe(1);
   });
 
-  it('rejects an exhausted promo code (uses_count >= max_uses)', async () => {
+  it('rejects a discounted checkout without a pre-payment promo reservation', async () => {
     seedCheckoutWithDiscount({
       holdExpiresAt: new Date(Date.now() + 60_000),
       discountCode: 'SOLDOUT',
       usesCount: 5,
       maxUses: 5,
       status: 'active',
+      reserveDiscount: false,
     });
     seedTrustedPaymentIntent({ amountCents: 900 });
 
@@ -1263,61 +1262,12 @@ describe('finalizeOrderActivity promo code redemption', () => {
 
     expect(result).toMatchObject({
       ok: false,
-      errorCode: 'DISCOUNT_EXHAUSTED',
+      errorCode: 'DISCOUNT_NOT_RESERVED',
       retryable: false,
     });
     expect(dbState.tables.discount_codes.dc_1.uses_count).toBe(5);
     expect(Object.values(dbState.tables.discount_redemptions ?? {})).toHaveLength(0);
     expect(Object.values(dbState.tables.orders)).toHaveLength(0);
-  });
-
-  it('rejects an inactive promo code', async () => {
-    seedCheckoutWithDiscount({
-      holdExpiresAt: new Date(Date.now() + 60_000),
-      discountCode: 'INACTIVE',
-      usesCount: 0,
-      maxUses: 10,
-      status: 'paused',
-    });
-    seedTrustedPaymentIntent({ amountCents: 900 });
-
-    const result = await finalizeOrderActivity({
-      checkoutSessionId: 'cs_1',
-      tenantId: 'tnt_1',
-      paymentIntentId: 'pi_provider_1',
-    });
-
-    expect(result).toMatchObject({
-      ok: false,
-      errorCode: 'DISCOUNT_INVALID',
-      retryable: false,
-    });
-    expect(dbState.tables.discount_codes.dc_1.uses_count).toBe(0);
-    expect(Object.values(dbState.tables.discount_redemptions ?? {})).toHaveLength(0);
-  });
-
-  it('rejects an expired promo code (valid_until in the past)', async () => {
-    seedCheckoutWithDiscount({
-      holdExpiresAt: new Date(Date.now() + 60_000),
-      discountCode: 'EXPIRED',
-      usesCount: 0,
-      maxUses: 10,
-      status: 'active',
-      validUntil: new Date(Date.now() - 86_400_000).toISOString(),
-    });
-    seedTrustedPaymentIntent({ amountCents: 900 });
-
-    const result = await finalizeOrderActivity({
-      checkoutSessionId: 'cs_1',
-      tenantId: 'tnt_1',
-      paymentIntentId: 'pi_provider_1',
-    });
-
-    expect(result).toMatchObject({
-      ok: false,
-      errorCode: 'DISCOUNT_INVALID',
-      retryable: false,
-    });
   });
 
   it('does not consume a discount code when no discountCode in cart', async () => {
@@ -1591,7 +1541,9 @@ function seedCheckoutWithDiscount(input: {
   maxUses: number;
   status: string;
   validUntil?: string;
+  reserveDiscount?: boolean;
 }) {
+  const createdAt = new Date();
   dbState.tables = {
     orders: {},
     order_line_items: {},
@@ -1599,7 +1551,20 @@ function seedCheckoutWithDiscount(input: {
     tickets: {},
     message_consents: {},
     order_timeline_events: {},
-    discount_redemptions: {},
+    discount_redemptions:
+      input.reserveDiscount === false
+        ? {}
+        : {
+            dred_1: {
+              id: 'dred_1',
+              discount_code_id: 'dc_1',
+              event_id: 'evt_1',
+              checkout_session_id: 'cs_1',
+              order_id: null,
+              tenant_id: 'tnt_1',
+              created_at: createdAt,
+            },
+          },
     checkout_sessions: {
       cs_1: {
         id: 'cs_1',
@@ -1680,8 +1645,8 @@ function seedCheckoutWithDiscount(input: {
         max_discount_cents: null,
         ticket_type_ids: null,
         status: input.status,
-        created_at: new Date(),
-        updated_at: new Date(),
+        created_at: createdAt,
+        updated_at: createdAt,
       },
     },
     questions: {},

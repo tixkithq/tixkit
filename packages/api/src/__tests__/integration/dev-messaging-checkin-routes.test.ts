@@ -220,7 +220,13 @@ function createMockDb(tables: Record<string, unknown> = {}): unknown {
 
   function createUpdate(table: string) {
     return {
-      set: (values: Record<string, unknown>) => {
+      set: (
+        values:
+          | Record<string, unknown>
+          | ((
+              eb: (column: string, operator: string, value: unknown) => unknown,
+            ) => Record<string, unknown>),
+      ) => {
         const rows = getRows(table);
         const filters: Array<[string, string, unknown]> = [];
         const query = {
@@ -271,7 +277,18 @@ function createMockDb(tables: Record<string, unknown> = {}): unknown {
               return true;
             }),
           );
-          for (const row of matching) Object.assign(row, values);
+          for (const row of matching) {
+            const resolved =
+              typeof values === 'function'
+                ? values((column, operator, value) => {
+                    const rowValue = getMockColumnValue(row, column);
+                    if (operator === '+') return Number(rowValue ?? 0) + Number(value);
+                    if (operator === '-') return Number(rowValue ?? 0) - Number(value);
+                    return value;
+                  })
+                : values;
+            Object.assign(row, resolved);
+          }
           return matching;
         };
         return query;
@@ -6769,6 +6786,7 @@ describe('checkout pricing tamper resistance', () => {
       fee_rules: [feeRule],
       questions: [],
       checkout_sessions: [],
+      discount_redemptions: [],
       idempotency_records: [],
       ...overrides,
     };
@@ -6811,7 +6829,13 @@ describe('checkout pricing tamper resistance', () => {
       totalCents: 16800,
     });
 
-    const storedSession = (tables.checkout_sessions as Array<{ cart: string; quote: string }>)[0];
+    const storedSession = (
+      tables.checkout_sessions as Array<{
+        id: string;
+        cart: string;
+        quote: string;
+      }>
+    )[0];
     const storedCart = JSON.parse(storedSession.cart) as Record<string, unknown>;
     expect(storedCart.discountCode).toBe('SAVE25');
     const storedQuote = JSON.parse(storedSession.quote) as Record<string, unknown>;
@@ -6822,6 +6846,29 @@ describe('checkout pricing tamper resistance', () => {
       feeCents: 300,
       totalCents: 16800,
     });
+    expect(tables.discount_codes[0]).toMatchObject({ uses_count: 1 });
+    expect(tables.discount_redemptions).toMatchObject([
+      {
+        discount_code_id: 'dc_save25',
+        checkout_session_id: storedSession.id,
+        order_id: null,
+        tenant_id: 'tnt_1',
+      },
+    ]);
+  });
+
+  it('rejects exhausted discount capacity during checkout session creation', async () => {
+    const tables = pricingTables({
+      discount_codes: [{ ...discountCode, max_uses: 1, uses_count: 1 }],
+      discount_redemptions: [],
+    });
+    const res = await postPricingCheckoutSession({ discountCode: 'SAVE25' }, tables);
+
+    expect(res.statusCode).toBe(400);
+    expect(res.json().message).toContain('max uses reached');
+    expect(tables.checkout_sessions).toHaveLength(0);
+    expect(tables.discount_redemptions).toHaveLength(0);
+    expect(tables.discount_codes[0]).toMatchObject({ uses_count: 1 });
   });
 
   it('persists matched access-rule redemptions for locked checkout sessions', async () => {
