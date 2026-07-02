@@ -222,7 +222,7 @@ export function CommandMenu() {
     href: routes.checkIn,
     icon: QrCode,
     keywords: ['check-in', 'scan', 'qr'],
-    requiredPermission: 'attendees.write',
+    requiredPermission: 'checkins.write',
   };
 
   const renderItem = (item: CommandMenuItem) => {

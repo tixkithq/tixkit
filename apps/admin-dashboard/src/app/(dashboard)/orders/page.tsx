@@ -1,19 +1,22 @@
+import { PermissionGuard } from '@/components/permission-guard';
 import { OrdersTable } from '@/features/orders/orders-table';
 import { PaymentCompensationsPanel } from '@/features/orders/payment-compensations-panel';
 
 export default function Page() {
   return (
-    <div className="space-y-6">
-      <div className="flex flex-wrap items-center justify-between gap-2">
-        <div className="space-y-1">
-          <h1 className="text-2xl font-bold tracking-tight">Orders</h1>
-          <p className="text-sm text-muted-foreground">
-            Track payments, refunds, and attendee purchases
-          </p>
+    <PermissionGuard required="orders.read">
+      <div className="space-y-6">
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <div className="space-y-1">
+            <h1 className="text-2xl font-bold tracking-tight">Orders</h1>
+            <p className="text-sm text-muted-foreground">
+              Track payments, refunds, and attendee purchases
+            </p>
+          </div>
         </div>
+        <PaymentCompensationsPanel />
+        <OrdersTable />
       </div>
-      <PaymentCompensationsPanel />
-      <OrdersTable />
-    </div>
+    </PermissionGuard>
   );
 }

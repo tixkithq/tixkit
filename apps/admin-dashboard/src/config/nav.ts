@@ -47,7 +47,7 @@ export const sidebarData: SidebarData = {
           title: 'Check-in',
           url: '/check-in',
           icon: QrCode,
-          requiredPermission: 'attendees.write',
+          requiredPermission: 'checkins.write',
         },
       ],
     },
