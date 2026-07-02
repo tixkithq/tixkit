@@ -1516,11 +1516,10 @@ describe('exportWorkflow', () => {
     tenantId: 'tnt_1',
   };
 
-  it('completes and returns the generated file URL', async () => {
+  it('completes without returning the internal file URL', async () => {
     const result = await exportWorkflow(input);
     expect(result).toEqual({
       status: 'completed',
-      fileUrl: 'https://exports.example.test/exp_1.csv',
     });
   });
 
@@ -1557,7 +1556,6 @@ describe('exportWorkflow', () => {
 
     expect(result).toEqual({
       status: 'completed',
-      fileUrl: 'https://exports.example.test/exp_1.csv',
     });
     expect(attempts).toBe(3);
     expect(mockState.sleeps).toEqual(['10 seconds', '20 seconds']);

@@ -63,9 +63,7 @@ async function runExportStep<T>(
   return result!;
 }
 
-export async function exportWorkflow(
-  input: ExportWorkflowInput,
-): Promise<{ status: string; fileUrl?: string }> {
+export async function exportWorkflow(input: ExportWorkflowInput): Promise<{ status: string }> {
   const genResult = await runExportStep(() =>
     generateExportActivity({
       exportId: input.exportId,
@@ -106,5 +104,5 @@ export async function exportWorkflow(
     return { status: 'failed' };
   }
 
-  return { status: 'completed', fileUrl: uploadResult.value.fileUrl };
+  return { status: 'completed' };
 }

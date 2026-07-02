@@ -599,6 +599,10 @@ describe('notifyExportCompleteActivity', () => {
       status: 'completed',
     });
     expect(String(dbState.exportEvents[0].payload)).toContain('/v1/exports/exp_1/download');
+    expect(String(dbState.exportEvents[0].payload)).not.toContain('fileUrl');
+    expect(String(dbState.exportEvents[0].payload)).not.toContain(
+      'https://bucket.s3.amazonaws.com/exports/exp_1.csv',
+    );
   });
 
   it('rejects unsafe completed export file URLs before persistence', async () => {
@@ -637,7 +641,7 @@ describe('notifyExportCompleteActivity', () => {
     );
   });
 
-  it('queues an admin notification email with the file URL', async () => {
+  it('queues an admin notification email with the scoped download route', async () => {
     await notifyExportCompleteActivity({
       exportId: 'exp_1',
       fileUrl: 'https://bucket.s3.amazonaws.com/exports/exp_1.csv',
@@ -656,8 +660,9 @@ describe('notifyExportCompleteActivity', () => {
     });
     expect(dbState.createdJobs[0].variables).toMatchObject({
       exportId: 'exp_1',
-      fileUrl: 'https://bucket.s3.amazonaws.com/exports/exp_1.csv',
+      downloadUrl: '/v1/exports/exp_1/download',
     });
+    expect(dbState.createdJobs[0].variables).not.toHaveProperty('fileUrl');
   });
 
   it('still marks export as completed when no user email is found', async () => {

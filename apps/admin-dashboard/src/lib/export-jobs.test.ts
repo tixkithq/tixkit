@@ -14,7 +14,6 @@ vi.mock('@/lib/api', () => ({
     type: value.type,
     format: value.format,
     status: value.status,
-    fileUrl: value.fileUrl ?? value.file_url,
     downloadUrl: value.downloadUrl ?? value.download_url,
     createdAt: value.createdAt ?? value.created_at,
     completedAt: value.completedAt ?? value.completed_at,

@@ -494,7 +494,7 @@ function createMockTemporalClient() {
           created_at: completedAt,
         });
       }
-      return { status: 'completed', fileUrl: `https://exports.example.test/${exportId}.csv` };
+      return { status: 'completed' };
     }),
     startNotificationDelivery: vi.fn(),
     startCheckoutSession: vi.fn(),
@@ -916,7 +916,7 @@ describe('order routes', () => {
     expect(res.statusCode).toBe(200);
     const body = res.json();
     expect(body.status).toBe('completed');
-    expect(body.fileUrl).toBe('https://exports.example.test/exp_2.csv');
+    expect(body.fileUrl).toBeUndefined();
     expect(body.downloadUrl).toBe('/v1/exports/exp_2/download');
     await app.close();
   });
@@ -975,6 +975,8 @@ describe('order routes', () => {
     expect(res.body).toContain('"status":"pending"');
     expect(res.body).toContain('"status":"completed"');
     expect(res.body).toContain('"downloadUrl":"/v1/exports/exp_stream/download"');
+    expect(res.body).not.toContain('"fileUrl"');
+    expect(res.body).not.toContain('https://exports.example.test/exp_stream.csv');
     await app.close();
   });
 
@@ -1011,6 +1013,7 @@ describe('order routes', () => {
         payload: JSON.stringify({
           exportId: 'exp_replay',
           status: 'completed',
+          fileUrl: 'https://exports.example.test/exp_replay.csv',
           downloadUrl: '/v1/exports/exp_replay/download',
         }),
         created_at: new Date('2026-06-01T00:01:00Z'),
@@ -1027,6 +1030,9 @@ describe('order routes', () => {
     expect(res.body).not.toContain('"status":"pending"');
     expect(res.body).toContain('id: eev_00000000000000000000000002');
     expect(res.body).toContain('"status":"completed"');
+    expect(res.body).toContain('"downloadUrl":"/v1/exports/exp_replay/download"');
+    expect(res.body).not.toContain('"fileUrl"');
+    expect(res.body).not.toContain('https://exports.example.test/exp_replay.csv');
     await app.close();
   });
 
@@ -1109,7 +1115,9 @@ describe('order routes', () => {
     const app = await setupApp(reportingRoutes, makePrincipal());
     const completed = await app.inject({ method: 'GET', url: '/exports/exp_3/download' });
     expect(completed.statusCode).toBe(302);
-    expect(completed.headers.location).toBe('https://exports.example.test/exp_3.csv');
+    expect(completed.headers.location).not.toBe('https://exports.example.test/exp_3.csv');
+    expect(completed.headers.location).toContain('/exports/exp_3.csv');
+    expect(completed.headers.location).toContain('X-Amz-Signature=');
 
     dbState.exportJobs[0] = {
       ...dbState.exportJobs[0],
@@ -1120,9 +1128,11 @@ describe('order routes', () => {
       url: '/exports/exp_3/download',
     });
     expect(localObjectStorage.statusCode).toBe(302);
-    expect(localObjectStorage.headers.location).toBe(
+    expect(localObjectStorage.headers.location).not.toBe(
       'http://localhost:9000/exports-bucket/exports/exp_3.csv',
     );
+    expect(localObjectStorage.headers.location).toContain('/exports/exp_3.csv');
+    expect(localObjectStorage.headers.location).toContain('X-Amz-Signature=');
 
     dbState.exportJobs[0] = { ...dbState.exportJobs[0], status: 'processing', file_url: null };
     const pending = await app.inject({ method: 'GET', url: '/exports/exp_3/download' });

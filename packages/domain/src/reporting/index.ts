@@ -262,7 +262,6 @@ export type ExportRequest = {
   type: ExportType;
   format: ExportFormat;
   status: 'pending' | 'processing' | 'completed' | 'failed';
-  fileUrl?: string;
   requestedBy: Ulid;
   createdAt: ISO8601Date;
   completedAt?: ISO8601Date;

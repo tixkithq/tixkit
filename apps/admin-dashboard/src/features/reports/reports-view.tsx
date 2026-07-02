@@ -703,7 +703,7 @@ function ReportSkeleton() {
 }
 
 function ExportStatusNotice({ exportJob }: { exportJob: AdminExportJob }) {
-  const href = exportJob.downloadUrl ?? exportJob.fileUrl;
+  const href = exportJob.downloadUrl;
   const exportTypeLabel =
     EXPORT_OPTIONS.find((option) => option.type === exportJob.type)?.label ?? 'Export';
   return (

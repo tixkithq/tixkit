@@ -1,6 +1,8 @@
 import type { FastifyPluginAsync } from 'fastify';
 import { PassThrough } from 'node:stream';
 import { Redis } from 'ioredis';
+import { GetObjectCommand, S3Client, type S3ClientConfig } from '@aws-sdk/client-s3';
+import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import { ClerkAuthService } from '../../auth/clerk.js';
 import { EventRepository, type Database } from '@tixkit/db';
 import {
@@ -55,6 +57,39 @@ function isValidExportFileUrl(value: unknown): value is string {
   } catch {
     return false;
   }
+}
+
+function exportDownloadUrl(exportId: unknown): string | undefined {
+  return typeof exportId === 'string' && exportId.length > 0
+    ? `/v1/exports/${exportId}/download`
+    : undefined;
+}
+
+function exportStorageConfig(): { bucket: string; s3Config: S3ClientConfig } {
+  const bucket = process.env.S3_EXPORT_BUCKET ?? process.env.S3_BUCKET ?? 'tixkit-exports';
+  const region = process.env.S3_EXPORT_REGION ?? process.env.S3_REGION ?? 'us-east-1';
+  const s3Config: S3ClientConfig = { region };
+  const endpoint = process.env.S3_ENDPOINT;
+  if (endpoint) {
+    s3Config.endpoint = endpoint;
+    s3Config.forcePathStyle = process.env.S3_FORCE_PATH_STYLE === 'true';
+  }
+
+  const accessKeyId = process.env.S3_ACCESS_KEY_ID ?? config.s3AccessKeyId;
+  const secretAccessKey = process.env.S3_SECRET_ACCESS_KEY ?? config.s3SecretAccessKey;
+  if (accessKeyId && secretAccessKey) {
+    s3Config.credentials = { accessKeyId, secretAccessKey };
+  }
+
+  return { bucket, s3Config };
+}
+
+async function createScopedExportDownloadUrl(row: Record<string, unknown>): Promise<string> {
+  const { bucket, s3Config } = exportStorageConfig();
+  const key = `exports/${String(row.id)}.${String(row.format)}`;
+  return getSignedUrl(new S3Client(s3Config), new GetObjectCommand({ Bucket: bucket, Key: key }), {
+    expiresIn: 900,
+  });
 }
 
 function requireReportEventAccess(
@@ -890,22 +925,23 @@ export const reportingRoutes: FastifyPluginAsync = async (app) => {
       throw new ConflictError('Export is not ready for download');
     }
 
-    return reply.redirect(exportJob.file_url);
+    return reply.redirect(await createScopedExportDownloadUrl(exportJob));
   });
 };
 
 function serializeExportJob(row: Record<string, unknown>) {
   const status = String(row.status);
-  const fileUrl =
-    status === 'completed' && isValidExportFileUrl(row.file_url) ? row.file_url : undefined;
+  const downloadUrl =
+    status === 'completed' && isValidExportFileUrl(row.file_url)
+      ? exportDownloadUrl(row.id)
+      : undefined;
   return {
     exportId: row.id,
     eventId: row.event_id ?? undefined,
     type: row.type,
     format: row.format,
     status,
-    fileUrl,
-    downloadUrl: fileUrl ? `/v1/exports/${row.id}/download` : undefined,
+    downloadUrl,
     createdAt: row.created_at,
     completedAt: row.completed_at ?? undefined,
   };
@@ -916,10 +952,24 @@ function isTerminalExportStatus(status: unknown) {
 }
 
 function parseExportEventPayload(payload: unknown) {
-  if (typeof payload === 'string') {
-    return JSON.parse(payload) as Record<string, unknown>;
+  const parsed =
+    typeof payload === 'string'
+      ? (JSON.parse(payload) as Record<string, unknown>)
+      : (payload as Record<string, unknown>);
+  const {
+    fileUrl: _fileUrl,
+    file_url: _fileUrlSnake,
+    download_url: _downloadUrlSnake,
+    ...sanitized
+  } = parsed;
+  if (sanitized.status === 'completed') {
+    const downloadUrl = exportDownloadUrl(sanitized.exportId ?? sanitized.export_id);
+    if (downloadUrl) sanitized.downloadUrl = downloadUrl;
+  } else {
+    delete sanitized.downloadUrl;
+    delete sanitized.download_url;
   }
-  return payload as Record<string, unknown>;
+  return sanitized;
 }
 
 async function loadExportJobEvents(

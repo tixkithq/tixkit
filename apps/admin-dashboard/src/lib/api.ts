@@ -1209,7 +1209,6 @@ export type AdminExportJob = {
   type?: AdminExportType;
   format?: AdminExportFormat;
   status: 'pending' | 'processing' | 'completed' | 'failed';
-  fileUrl?: string;
   downloadUrl?: string;
   createdAt?: string;
   completedAt?: string;
@@ -2723,7 +2722,6 @@ export function normalizeExportJob(
     type,
     format,
     status,
-    fileUrl: stringValue(value.fileUrl ?? value.file_url, undefined),
     downloadUrl: downloadUrl?.startsWith('/v1/')
       ? `${getAdminApiBaseUrl()}${downloadUrl}`
       : downloadUrl,

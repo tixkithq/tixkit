@@ -2316,7 +2316,9 @@ describe('brand and event scope denial', () => {
     const res = await app.inject({ method: 'GET', url: '/exports/exp_1/download' });
 
     expect(res.statusCode).toBe(302);
-    expect(res.headers.location).toBe('https://exports.example.test/exp_1.csv');
+    expect(res.headers.location).not.toBe('https://exports.example.test/exp_1.csv');
+    expect(res.headers.location).toContain('/exports/exp_1.csv');
+    expect(res.headers.location).toContain('X-Amz-Signature=');
     await app.close();
   });
 

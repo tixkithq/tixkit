@@ -82,7 +82,6 @@ type ExportJobEventPayload = {
   type: string;
   format: string;
   status: ExportJobStatus;
-  fileUrl?: string;
   downloadUrl?: string;
   reason?: string;
   createdAt: Date | string;
@@ -100,16 +99,17 @@ function serializeExportJobEventPayload(
   reason?: string,
 ): ExportJobEventPayload {
   const status = String(row.status) as ExportJobStatus;
-  const fileUrl =
-    status === 'completed' && isValidExportFileUrl(row.file_url) ? row.file_url : undefined;
+  const downloadUrl =
+    status === 'completed' && isValidExportFileUrl(row.file_url)
+      ? `/v1/exports/${row.id}/download`
+      : undefined;
   return {
     exportId: String(row.id),
     eventId: typeof row.event_id === 'string' ? row.event_id : undefined,
     type: String(row.type),
     format: String(row.format),
     status,
-    fileUrl,
-    downloadUrl: fileUrl ? `/v1/exports/${row.id}/download` : undefined,
+    downloadUrl,
     reason,
     createdAt: row.created_at as Date | string,
     completedAt: row.completed_at as Date | string | null | undefined,
@@ -805,7 +805,9 @@ export async function notifyExportCompleteActivity(input: {
       fileUrl: input.fileUrl,
     });
 
-    // Queue an admin notification email with the file URL.
+    const downloadUrl = `/v1/exports/${input.exportId}/download`;
+
+    // Queue an admin notification email with the scoped download route.
     // Look up the requesting user's email.
     if (input.tenantId && input.requestedBy) {
       const user = await db
@@ -848,7 +850,7 @@ export async function notifyExportCompleteActivity(input: {
             toEmail: user.email,
             variables: {
               exportId: input.exportId,
-              fileUrl: input.fileUrl,
+              downloadUrl,
               notificationType: 'staff',
             },
             providerRouteId: route.id,
@@ -883,7 +885,7 @@ export async function notifyExportCompleteActivity(input: {
                     toEmail: user.email,
                     variables: {
                       exportId: input.exportId,
-                      fileUrl: input.fileUrl,
+                      downloadUrl,
                       notificationType: 'staff',
                     },
                     providerRouteId: route.id,

@@ -214,7 +214,7 @@ export class TemporalClient {
     }
   }
 
-  async waitForExport(exportId: string): Promise<{ status: string; fileUrl?: string }> {
+  async waitForExport(exportId: string): Promise<{ status: string }> {
     const handle = this.client.workflow.getHandle(exportWorkflowId(exportId));
     return handle.result();
   }

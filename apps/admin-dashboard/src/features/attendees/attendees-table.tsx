@@ -150,7 +150,7 @@ export function AttendeesTable() {
 }
 
 function ExportStatusNotice({ exportJob }: { exportJob: AdminExportJob }) {
-  const href = exportJob.downloadUrl ?? exportJob.fileUrl;
+  const href = exportJob.downloadUrl;
   return (
     <div className="mb-4 flex flex-wrap items-center justify-between gap-3 rounded-md border bg-muted/30 p-3 text-sm">
       <span>
