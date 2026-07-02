@@ -77,6 +77,32 @@ validate_runtime_image_pins() {
     fail 'MinIO server/client image references must include @sha256 digests'
   fi
 
+  local helm_image_key
+  for helm_image_key in postgres.image redis.image temporal.image temporal.postgresqlImage; do
+    awk -v component="${helm_image_key%%.*}" -v key="${helm_image_key#*.}" '
+      $0 == component ":" {
+        in_component = 1
+        next
+      }
+      in_component && /^[^[:space:]]/ {
+        in_component = 0
+      }
+      in_component && $0 ~ "^[[:space:]]*" key ":[[:space:]]*" {
+        value = $0
+        sub("^[[:space:]]*" key ":[[:space:]]*", "", value)
+        gsub(/^["'\'']|["'\'']$/, "", value)
+        found = 1
+        if (value !~ /@sha256:[0-9a-f]{64}$/) {
+          bad = 1
+        }
+      }
+      END {
+        exit found && !bad ? 0 : 1
+      }
+    ' infra/helm/tixkit/values.yaml ||
+      fail "infra/helm/tixkit/values.yaml must pin ${helm_image_key} with @sha256:<64 lowercase hex chars>"
+  done
+
   if grep -Eq '^[[:space:]]*imageTag:' infra/helm/tixkit/values.yaml; then
     fail 'first-party Helm images must use per-component imageDigest values instead of global imageTag'
   fi
@@ -103,6 +129,94 @@ validate_runtime_image_pins() {
 }
 
 validate_runtime_image_pins
+
+validate_frontend_public_api_build_config() {
+  grep -Eq '^ARG NEXT_PUBLIC_TIXKIT_API_BASE_URL$' Dockerfile.checkout ||
+    fail 'Dockerfile.checkout must declare NEXT_PUBLIC_TIXKIT_API_BASE_URL as a build arg'
+  grep -Eq '^ENV NEXT_PUBLIC_TIXKIT_API_BASE_URL=\$\{NEXT_PUBLIC_TIXKIT_API_BASE_URL\}$' Dockerfile.checkout ||
+    fail 'Dockerfile.checkout must export NEXT_PUBLIC_TIXKIT_API_BASE_URL before build'
+  grep -Fq 'test -n "${NEXT_PUBLIC_TIXKIT_API_BASE_URL}"' Dockerfile.checkout ||
+    fail 'Dockerfile.checkout must reject missing NEXT_PUBLIC_TIXKIT_API_BASE_URL before build'
+  grep -Fq 'https://*) ;;' Dockerfile.checkout ||
+    fail 'Dockerfile.checkout must require an HTTPS public API origin before build'
+  grep -Fq 'http://localhost*|http://127.*|http://0.0.0.0*' Dockerfile.checkout ||
+    fail 'Dockerfile.checkout must reject local public API origins before build'
+
+  for variable in NEXT_PUBLIC_ADMIN_API_BASE_URL NEXT_PUBLIC_API_BASE_URL; do
+    grep -Eq "^ARG ${variable}$" Dockerfile.admin ||
+      fail "Dockerfile.admin must declare ${variable} as a build arg"
+    grep -Eq "^ENV ${variable}=\\$\\{${variable}\\}$" Dockerfile.admin ||
+      fail "Dockerfile.admin must export ${variable} before build"
+    grep -Fq "test -n \"\${${variable}}\"" Dockerfile.admin ||
+      fail "Dockerfile.admin must reject missing ${variable} before build"
+  done
+  grep -Fq 'https://*) ;;' Dockerfile.admin ||
+    fail 'Dockerfile.admin must require HTTPS public API origins before build'
+  grep -Fq 'http://localhost*|http://127.*|http://0.0.0.0*' Dockerfile.admin ||
+    fail 'Dockerfile.admin must reject local public API origins before build'
+
+  awk '
+    /^\[build\.args\]$/ {
+      in_build_args = 1
+      in_env = 0
+      next
+    }
+    /^\[env\]$/ {
+      in_build_args = 0
+      in_env = 1
+      next
+    }
+    /^\[/ {
+      in_build_args = 0
+      in_env = 0
+    }
+    in_build_args && /^NEXT_PUBLIC_TIXKIT_API_BASE_URL = "https:\/\/api\.example\.com\/v1"$/ {
+      build_arg = 1
+    }
+    in_env && /^NEXT_PUBLIC_TIXKIT_API_BASE_URL = "https:\/\/api\.example\.com\/v1"$/ {
+      runtime_env = 1
+    }
+    END {
+      exit build_arg && runtime_env ? 0 : 1
+    }
+  ' infra/fly/checkout.toml ||
+    fail 'infra/fly/checkout.toml must pass NEXT_PUBLIC_TIXKIT_API_BASE_URL as both a build arg and runtime env'
+
+  awk '
+    /^\[build\.args\]$/ {
+      in_build_args = 1
+      in_env = 0
+      next
+    }
+    /^\[env\]$/ {
+      in_build_args = 0
+      in_env = 1
+      next
+    }
+    /^\[/ {
+      in_build_args = 0
+      in_env = 0
+    }
+    in_build_args && /^NEXT_PUBLIC_ADMIN_API_BASE_URL = "https:\/\/api\.example\.com"$/ {
+      admin_build_arg = 1
+    }
+    in_build_args && /^NEXT_PUBLIC_API_BASE_URL = "https:\/\/api\.example\.com\/v1"$/ {
+      api_build_arg = 1
+    }
+    in_env && /^NEXT_PUBLIC_ADMIN_API_BASE_URL = "https:\/\/api\.example\.com"$/ {
+      admin_runtime_env = 1
+    }
+    in_env && /^NEXT_PUBLIC_API_BASE_URL = "https:\/\/api\.example\.com\/v1"$/ {
+      api_runtime_env = 1
+    }
+    END {
+      exit admin_build_arg && api_build_arg && admin_runtime_env && api_runtime_env ? 0 : 1
+    }
+  ' infra/fly/admin.toml ||
+    fail 'infra/fly/admin.toml must pass admin public API origins as build args and runtime env'
+}
+
+validate_frontend_public_api_build_config
 
 render_service_health_check_path() {
   local service_name="$1"
@@ -268,6 +382,32 @@ require_rendered_frontend_probes() {
     }
   ' ||
     fail "rendered Helm ${component} deployment must include readinessProbe and livenessProbe on ${expected_path}"
+}
+
+require_rendered_component_image_digest() {
+  local rendered_chart="$1"
+  local component="$2"
+  local expected_ref_pattern="$3"
+
+  printf '%s\n' "${rendered_chart}" | awk -v component="${component}" -v expected_ref_pattern="${expected_ref_pattern}" '
+    /^[[:space:]]*app.kubernetes.io\/component:[[:space:]]*/ {
+      in_component = $2 == component
+      next
+    }
+    in_component && /^[[:space:]]*image:[[:space:]]*/ {
+      value = $0
+      sub(/^[[:space:]]*image:[[:space:]]*/, "", value)
+      gsub(/^"|"$/, "", value)
+      found = 1
+      if (value !~ expected_ref_pattern || value !~ /@sha256:[0-9a-f]{64}$/) {
+        bad = 1
+      }
+    }
+    END {
+      exit found && !bad ? 0 : 1
+    }
+  ' ||
+    fail "rendered Helm ${component} image must match ${expected_ref_pattern} and include @sha256:<64 lowercase hex chars>"
 }
 
 expected_cors_origins='https://checkout.example.com,https://admin.example.com'
@@ -610,6 +750,10 @@ require_file "${admin_health_route}"
 
 grep -Eq "^[[:space:]]*trustProxy:[[:space:]]*'1'[[:space:]]*$" infra/helm/tixkit/values.yaml ||
   fail 'infra/helm/tixkit/values.yaml must set API trustProxy to bounded hop count 1'
+grep -Eq '^[[:space:]]*temporalTaskQueue:[[:space:]]*tixkit-production[[:space:]]*$' infra/helm/tixkit/values.yaml ||
+  fail 'infra/helm/tixkit/values.yaml must set secrets.temporalTaskQueue to tixkit-production'
+grep -Eq '^[[:space:]]*TEMPORAL_TASK_QUEUE:[[:space:]]*\{\{[[:space:]]*\.Values\.secrets\.temporalTaskQueue[[:space:]]*\|[[:space:]]*quote[[:space:]]*\}\}[[:space:]]*$' infra/helm/tixkit/templates/configmap.yaml ||
+  fail 'infra/helm/tixkit/templates/configmap.yaml must render TEMPORAL_TASK_QUEUE from secrets.temporalTaskQueue'
 
 require_helm_frontend_probe_values checkout /health
 require_helm_frontend_probe_values admin /health
@@ -656,6 +800,10 @@ if command -v helm >/dev/null 2>&1; then
     printf '%s\n' "${first_party_images}" | grep -Eq "^ghcr\\.io/your-org/tixkit/${component}@sha256:[0-9a-f]{64}$" ||
       fail "rendered Helm chart must include digest-addressed first-party image ${component}"
   done
+  require_rendered_component_image_digest "${rendered_chart}" postgres '^postgres:16-alpine@sha256:[0-9a-f]{64}$'
+  require_rendered_component_image_digest "${rendered_chart}" redis '^redis:7-alpine@sha256:[0-9a-f]{64}$'
+  require_rendered_component_image_digest "${rendered_chart}" temporal-postgres '^postgres:16-alpine@sha256:[0-9a-f]{64}$'
+  require_rendered_component_image_digest "${rendered_chart}" temporal '^temporalio/auto-setup:1\.24@sha256:[0-9a-f]{64}$'
   require_rendered_frontend_probes "${rendered_chart}" checkout /health
   require_rendered_frontend_probes "${rendered_chart}" admin /health
 
@@ -664,6 +812,8 @@ if command -v helm >/dev/null 2>&1; then
     fail 'rendered Helm ConfigMap must set API TRUST_PROXY to bounded hop count 1'
   printf '%s\n' "${rendered_config}" | grep -Eq '^[[:space:]]*CORS_ALLOWED_ORIGINS:[[:space:]]*"https://checkout\.example\.com,https://admin\.example\.com"[[:space:]]*$' ||
     fail "rendered Helm ConfigMap must set API CORS_ALLOWED_ORIGINS to ${expected_cors_origins}"
+  printf '%s\n' "${rendered_config}" | grep -Eq '^[[:space:]]*TEMPORAL_TASK_QUEUE:[[:space:]]*"tixkit-production"[[:space:]]*$' ||
+    fail 'rendered Helm ConfigMap must set TEMPORAL_TASK_QUEUE to tixkit-production'
 else
   printf '%s\n' 'helm not found; skipped rendered Helm TRUST_PROXY validation' >&2
 fi

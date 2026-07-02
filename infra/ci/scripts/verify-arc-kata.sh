@@ -7,6 +7,36 @@ runner_image_dockerfile="${repo_root}/infra/ci/arc/runner-image/Dockerfile"
 install_script="${repo_root}/infra/ci/scripts/install-arc.sh"
 mssql_manifest="${repo_root}/infra/ci/k8s/trusted-ci-mssql.yaml"
 
+require_runner_values_block() {
+  local block_name="$1"
+  local block_regex="$2"
+  local block
+  block="$(awk -v pattern="${block_regex}" '
+    $0 ~ pattern {
+      found = 1
+    }
+    found {
+      print
+      if ($0 ~ /^      - name: / && $0 !~ pattern) {
+        exit
+      }
+    }
+  ' "${runner_values}")"
+
+  if [[ -z "${block}" ]] || ! grep -q 'resources:' <<<"${block}"; then
+    printf 'ARC runner values %s container must define resources.\n' "${block_name}" >&2
+    return 1
+  fi
+
+  local required_resource
+  for required_resource in 'requests:' 'limits:' 'cpu:' 'memory:' 'ephemeral-storage:'; do
+    if ! grep -q "${required_resource}" <<<"${block}"; then
+      printf 'ARC runner values %s container resources must include %s.\n' "${block_name}" "${required_resource}" >&2
+      return 1
+    fi
+  done
+}
+
 verify_arc_supply_chain_pins() {
   local unpinned_images
   unpinned_images="$(awk '/^[[:space:]]*image: / && $0 !~ /@sha256:[0-9a-f]{64}/ { print FILENAME ":" FNR ":" $0 }' "${runner_values}")"
@@ -29,6 +59,17 @@ verify_arc_supply_chain_pins() {
     printf 'ARC runner dind sidecar must disable the containerd overlay snapshotter for Kata compatibility.\n' >&2
     return 1
   fi
+
+  require_runner_values_block 'init-dind-externals' '^[[:space:]]*- name: init-dind-externals$'
+  require_runner_values_block 'dind' '^[[:space:]]*- name: dind$'
+
+  local required_empty_dir_limit
+  for required_empty_dir_limit in 'sizeLimit: 80Gi' 'sizeLimit: 1Gi' 'sizeLimit: 2Gi'; do
+    if ! grep -q "${required_empty_dir_limit}" "${runner_values}"; then
+      printf 'ARC runner emptyDir volumes must include %s.\n' "${required_empty_dir_limit}" >&2
+      return 1
+    fi
+  done
 
   if ! grep -qE '^FROM .+@sha256:[0-9a-f]{64}$' "${runner_image_dockerfile}"; then
     printf 'ARC runner image Dockerfile must pin its base image by sha256 digest.\n' >&2

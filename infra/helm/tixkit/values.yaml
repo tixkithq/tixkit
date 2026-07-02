@@ -17,6 +17,7 @@ secrets:
   redisUrl: redis://tixkit-redis:6379
   temporalAddress: tixkit-temporal:7233
   temporalNamespace: default
+  temporalTaskQueue: tixkit-production
   clerkSecretKey: ''
   clerkPublishableKey: ''
   clerkWebhookSecret: ''
@@ -133,7 +134,7 @@ ingress:
 
 postgres:
   enabled: true
-  image: postgres:16-alpine
+  image: postgres:16-alpine@sha256:e013e867e712fec275706a6c51c966f0bb0c93cfa8f51000f85a15f9865a28cb
   storageSize: 20Gi
   user: tixkit
   password: tixkit
@@ -141,12 +142,12 @@ postgres:
 
 redis:
   enabled: true
-  image: redis:7-alpine
+  image: redis:7-alpine@sha256:6ab0b6e7381779332f97b8ca76193e45b0756f38d4c0dcda72dbb3c32061ab99
 
 temporal:
   enabled: true
-  image: temporalio/auto-setup:1.24
-  postgresqlImage: postgres:16-alpine
+  image: temporalio/auto-setup:1.24@sha256:98cdb6b5e02d64cb933864a9ba91cb66065eb320623a0dafdf44beba535bca88
+  postgresqlImage: postgres:16-alpine@sha256:e013e867e712fec275706a6c51c966f0bb0c93cfa8f51000f85a15f9865a28cb
   postgresqlStorageSize: 10Gi
 
 minio:

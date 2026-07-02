@@ -12,6 +12,8 @@ out/
 **/out/
 .next/
 **/.next/
+**/dist-e2e-*/
+**/dist-e2e-webpack-*/
 .astro/
 **/.astro/
 .nuxt/

@@ -4,6 +4,9 @@ primary_region = "iad"
 [build]
 dockerfile = "Dockerfile.checkout"
 
+[build.args]
+NEXT_PUBLIC_TIXKIT_API_BASE_URL = "https://api.example.com/v1"
+
 [http_service]
 internal_port = 3000
 force_https = true
@@ -14,3 +17,4 @@ min_machines_running = 1
 [env]
 NODE_ENV = "production"
 PORT = "3000"
+NEXT_PUBLIC_TIXKIT_API_BASE_URL = "https://api.example.com/v1"

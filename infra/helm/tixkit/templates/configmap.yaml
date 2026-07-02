@@ -13,6 +13,7 @@ data:
   NEXT_PUBLIC_ADMIN_API_BASE_URL: {{ .Values.global.apiBaseUrl | quote }}
   NEXT_PUBLIC_CHECKOUT_URL: {{ .Values.global.checkoutUrl | quote }}
   TEMPORAL_NAMESPACE: {{ .Values.secrets.temporalNamespace | quote }}
+  TEMPORAL_TASK_QUEUE: {{ .Values.secrets.temporalTaskQueue | quote }}
   OFFLINE_MANIFEST_KEY_ID: {{ .Values.secrets.offlineManifestKeyId | quote }}
   S3_BUCKET: {{ .Values.secrets.s3Bucket | quote }}
   S3_REGION: {{ .Values.secrets.s3Region | quote }}
