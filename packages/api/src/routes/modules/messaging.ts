@@ -630,6 +630,8 @@ export const messagingRoutes: FastifyPluginAsync = async (app) => {
           );
         }
 
+        const startFailedEmailJobIds: string[] = [];
+        const startFailedSmsJobIds: string[] = [];
         if (queuedEmailJobs.length > 0) {
           const emailTemplateKey = templateKeys.emailTemplateKey;
           if (!emailTemplateKey) {
@@ -637,9 +639,9 @@ export const messagingRoutes: FastifyPluginAsync = async (app) => {
               field: 'emailTemplateKey',
             });
           }
-          await Promise.all(
-            queuedEmailJobs.map((job) =>
-              app.context.temporalClient.startNotificationDelivery({
+          const emailStartResults = await Promise.allSettled(
+            queuedEmailJobs.map(async (job) => {
+              await app.context.temporalClient.startNotificationDelivery({
                 jobId: job.jobId,
                 tenantId: principal.tenantId,
                 brandId: event.brand_id,
@@ -651,27 +653,46 @@ export const messagingRoutes: FastifyPluginAsync = async (app) => {
                 providerRouteId: job.providerRouteId,
                 notificationType,
                 scheduledAt: scheduledAt?.toISOString(),
-              }),
-            ),
+              });
+              return job.jobId;
+            }),
           );
+          for (let index = 0; index < emailStartResults.length; index++) {
+            if (emailStartResults[index].status === 'fulfilled') continue;
+            const jobId = queuedEmailJobs[index].jobId;
+            startFailedEmailJobIds.push(jobId);
+            // eslint-disable-next-line no-await-in-loop -- each failed start must be durably marked before the campaign response is persisted.
+            await new EmailJobRepository(db).update(jobId, { status: 'start_failed' });
+          }
         }
 
         if (body.channel === 'sms' || body.channel === 'both') {
           const smsRouteId = await getSmsProviderRouteId(db, event.brand_id, notificationType);
-          await Promise.all(
-            queuedSmsJobIds.map((jobId) =>
-              app.context.temporalClient.startSmsDelivery({
+          const smsStartResults = await Promise.allSettled(
+            queuedSmsJobIds.map(async (jobId) => {
+              await app.context.temporalClient.startSmsDelivery({
                 jobId,
                 tenantId: principal.tenantId,
                 brandId: event.brand_id,
                 providerRouteId: smsRouteId,
                 notificationType,
                 scheduledAt: scheduledAt?.toISOString(),
-              }),
-            ),
+              });
+              return jobId;
+            }),
           );
+          for (let index = 0; index < smsStartResults.length; index++) {
+            if (smsStartResults[index].status === 'fulfilled') continue;
+            const jobId = queuedSmsJobIds[index];
+            startFailedSmsJobIds.push(jobId);
+            // eslint-disable-next-line no-await-in-loop -- each failed start must be durably marked before the campaign response is persisted.
+            await new SmsJobRepository(db).update(jobId, { status: 'start_failed' });
+          }
         }
 
+        const startedEmailJobs = queuedEmailJobs.length - startFailedEmailJobIds.length;
+        const startedSmsJobs = queuedSmsJobIds.length - startFailedSmsJobIds.length;
+        const startFailedJobs = startFailedEmailJobIds.length + startFailedSmsJobIds.length;
         return {
           status: 202,
           body: {
@@ -680,10 +701,17 @@ export const messagingRoutes: FastifyPluginAsync = async (app) => {
             emailTemplateKey: templateKeys.emailTemplateKey,
             smsTemplateKey: templateKeys.smsTemplateKey,
             channel: body.channel,
-            status: queuedEmailJobs.length + queuedSmsJobIds.length > 0 ? 'queued' : 'suppressed',
+            status:
+              startFailedJobs > 0
+                ? 'failed'
+                : queuedEmailJobs.length + queuedSmsJobIds.length > 0
+                  ? 'queued'
+                  : 'suppressed',
             audienceCount: audienceResolution.attendees.length,
-            queuedEmailJobs: queuedEmailJobs.length,
-            queuedSmsJobs: queuedSmsJobIds.length,
+            queuedEmailJobs: startedEmailJobs,
+            queuedSmsJobs: startedSmsJobs,
+            startFailedEmailJobs: startFailedEmailJobIds.length,
+            startFailedSmsJobs: startFailedSmsJobIds.length,
             scheduledAt: scheduledAt?.toISOString(),
             suppressedRecipients: audienceResolution.suppressedRecipients,
             consentExclusions: audienceResolution.consentExclusions,
@@ -1466,7 +1494,7 @@ function sortNewestFirst<T>(items: T[], createdAt: (item: T) => unknown) {
 
 function campaignStatus(statuses: string[]) {
   if (statuses.length === 0) return 'no_recipients';
-  if (statuses.some((status) => status === 'failed')) return 'failed';
+  if (statuses.some((status) => status === 'failed' || status === 'start_failed')) return 'failed';
   if (statuses.every((status) => status === 'suppressed')) return 'suppressed';
   if (statuses.every((status) => status === 'sent')) return 'sent';
   if (statuses.some((status) => status === 'processing')) return 'processing';
