@@ -530,6 +530,24 @@ export class SmsSenderIdentityRepository extends BaseRepository {
 }
 
 export class SmsProviderRouteRepository extends BaseRepository {
+  private async assertSenderIdentityScopedToRoute(input: {
+    tenantId: string;
+    brandId: string;
+    senderIdentityId: string;
+  }) {
+    const sender = await this.db
+      .selectFrom('sms_sender_identities')
+      .selectAll()
+      .where('id', '=', input.senderIdentityId)
+      .executeTakeFirst();
+
+    if (!sender || sender.tenant_id !== input.tenantId || sender.brand_id !== input.brandId) {
+      throw new Error(
+        'SMS provider route sender identity must belong to the same tenant and brand',
+      );
+    }
+  }
+
   async create(input: {
     tenantId: string;
     brandId: string;
@@ -542,6 +560,8 @@ export class SmsProviderRouteRepository extends BaseRepository {
     rateLimitPerHour?: number;
     webhookUrl?: string;
   }) {
+    await this.assertSenderIdentityScopedToRoute(input);
+
     const id = `spr_${ulid()}`;
     const now = new Date();
     return this.insertReturning(

@@ -650,8 +650,16 @@ export async function sendSmsActivity(input: {
 
     const selectorRouteCandidates = await Promise.all(
       routes.map(async (route) => {
+        if (route.tenant_id !== job.tenant_id || route.brand_id !== job.brand_id) return undefined;
         const sender = await senderRepo.findById(route.sender_identity_id);
-        if (!sender || !sender.verified) return undefined;
+        if (
+          !sender ||
+          !sender.verified ||
+          sender.tenant_id !== job.tenant_id ||
+          sender.brand_id !== job.brand_id
+        ) {
+          return undefined;
+        }
         return {
           id: route.id,
           transport: buildSmsTransport(route.provider_type, route.credentials_ref),

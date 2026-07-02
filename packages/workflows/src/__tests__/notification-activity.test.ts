@@ -144,8 +144,8 @@ vi.mock('@tixkit/db', () => {
   }
 
   class SmsSenderIdentityRepository {
-    async findById() {
-      return dbState.smsSender;
+    async findById(id: string) {
+      return dbState.smsSender?.id === id ? dbState.smsSender : undefined;
     }
   }
 
@@ -222,6 +222,8 @@ function activeEmailRoute(overrides: Record<string, unknown> = {}) {
 function activeSmsRoute(overrides: Record<string, unknown> = {}) {
   return {
     id: 'spr_1',
+    tenant_id: 'tnt_1',
+    brand_id: 'brd_1',
     provider_type: 'telnyx',
     credentials_ref: 'cred_sms',
     sender_identity_id: 'ssi_1',
@@ -504,8 +506,35 @@ describe('notification activity deliverability gating', () => {
     dbState.smsRoutes = [activeSmsRoute()];
     dbState.smsSender = {
       id: 'ssi_1',
+      tenant_id: 'tnt_1',
+      brand_id: 'brd_1',
       sender: '+15550000002',
       verified: false,
+    };
+
+    const result = await sendSmsActivity({
+      jobId: 'smj_1',
+      providerRouteId: 'spr_1',
+      notificationType: 'bulk',
+    });
+
+    expect(result).toMatchObject({
+      ok: false,
+      errorCode: 'NO_SMS_PROVIDER_ROUTE',
+      retryable: false,
+    });
+    expect(dbState.smsDeliveries).toHaveLength(0);
+    expect(dbState.renderArtifacts).toHaveLength(0);
+  });
+
+  it('fails closed when an SMS provider route uses a sender from another brand', async () => {
+    dbState.smsRoutes = [activeSmsRoute()];
+    dbState.smsSender = {
+      id: 'ssi_1',
+      tenant_id: 'tnt_1',
+      brand_id: 'brd_other',
+      sender: '+15550000002',
+      verified: true,
     };
 
     const result = await sendSmsActivity({
@@ -581,6 +610,8 @@ describe('notification activity deliverability gating', () => {
     dbState.smsRoutes = [activeSmsRoute({ provider_type: 'capture' })];
     dbState.smsSender = {
       id: 'ssi_1',
+      tenant_id: 'tnt_1',
+      brand_id: 'brd_1',
       sender: '+15550000002',
       verified: true,
     };
