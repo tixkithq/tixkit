@@ -291,6 +291,7 @@ describe('OrderDetailView', () => {
     orderState.data = makeOrder({
       id: longOrderId,
       buyerEmail: longEmail,
+      status: 'paid',
       lineItems: [
         {
           id: 'oli_long',
@@ -351,15 +352,30 @@ describe('OrderDetailView', () => {
 
     const { container } = render(React.createElement(OrderDetailView, { orderId: longOrderId }));
 
+    expect(container.firstElementChild).toHaveClass('overflow-x-hidden');
     expect(screen.getByRole('heading', { name: longOrderId })).toHaveClass('break-all');
+    expect(screen.getByRole('button', { name: 'Refund' }).parentElement).toHaveClass(
+      'w-full',
+      'flex-wrap',
+      'sm:w-auto',
+    );
     const longEmailNodes = screen.getAllByText(longEmail, { selector: 'p' });
     expect(longEmailNodes).toHaveLength(2);
     expect(longEmailNodes[0]).toHaveClass('break-all');
     expect(longEmailNodes[1]).toHaveClass('break-words');
     expect(screen.getByText(longLineItem)).toHaveClass('break-words');
+    expect(screen.getByText(longLineItem).closest('div[class*="rounded-lg"]')).toHaveClass(
+      'flex-col',
+      'sm:flex-row',
+    );
     expect(screen.getByText(longRefundReason)).toHaveClass('break-words');
-    expect(screen.getByText('checked_in')).toHaveClass('shrink-0');
-    expect(screen.getByText('$122.00')).toHaveClass('shrink-0');
+    expect(screen.getByText(longRefundReason).closest('div[class*="rounded-lg"]')).toHaveClass(
+      'flex-col',
+      'sm:flex-row',
+    );
+    expect(screen.getByText('checked_in')).toHaveClass('w-fit', 'shrink-0', 'break-all');
+    expect(screen.getByText('$122.00')).toHaveClass('shrink-0', 'self-start');
+    expect(screen.getByText('sent')).toHaveClass('w-fit', 'shrink-0', 'break-all');
     expect(container.querySelectorAll('.min-w-0').length).toBeGreaterThanOrEqual(6);
   });
 

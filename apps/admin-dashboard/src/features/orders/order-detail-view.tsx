@@ -98,7 +98,7 @@ export function OrderDetailView({ orderId }: { orderId: string }) {
   const consentSnapshots = Object.entries(order.consentSnapshots ?? {});
 
   return (
-    <div className="space-y-6">
+    <div className="min-w-0 space-y-6 overflow-x-hidden">
       <Button variant="ghost" asChild>
         <Link href={routes.orders} prefetch={false}>
           <ArrowLeft className="size-4" />
@@ -118,7 +118,7 @@ export function OrderDetailView({ orderId }: { orderId: string }) {
             {order.eventTitle} · {formatDate(order.createdAt)}
           </p>
         </div>
-        <div className="flex shrink-0 gap-2">
+        <div className="flex w-full flex-wrap gap-2 sm:w-auto sm:shrink-0 sm:justify-end">
           {canCancel && (
             <Button variant="outline" onClick={() => setCancelOpen(true)}>
               <Ban className="size-4" />
@@ -148,27 +148,29 @@ export function OrderDetailView({ orderId }: { orderId: string }) {
               </div>
             </div>
             <div className="border-t pt-3">
-              <div className="flex justify-between text-sm">
-                <span className="text-muted-foreground">Total</span>
-                <span className="font-medium">
+              <div className="flex min-w-0 items-start justify-between gap-3 text-sm">
+                <span className="min-w-0 break-words text-muted-foreground">Total</span>
+                <span className="shrink-0 font-medium">
                   {formatCurrency(order.totalCents, order.currency)}
                 </span>
               </div>
               {order.refundedCents > 0 && (
-                <div className="flex justify-between text-sm">
-                  <span className="text-muted-foreground">Refunded</span>
-                  <span className="font-medium text-red-600 dark:text-red-400">
+                <div className="flex min-w-0 items-start justify-between gap-3 text-sm">
+                  <span className="min-w-0 break-words text-muted-foreground">Refunded</span>
+                  <span className="shrink-0 font-medium text-red-600 dark:text-red-400">
                     -{formatCurrency(order.refundedCents, order.currency)}
                   </span>
                 </div>
               )}
-              <div className="flex justify-between text-sm">
-                <span className="text-muted-foreground">Attendees</span>
-                <span className="font-medium">{attendees.length || order.attendeeCount}</span>
+              <div className="flex min-w-0 items-start justify-between gap-3 text-sm">
+                <span className="min-w-0 break-words text-muted-foreground">Attendees</span>
+                <span className="shrink-0 font-medium">
+                  {attendees.length || order.attendeeCount}
+                </span>
               </div>
-              <div className="flex justify-between text-sm">
-                <span className="text-muted-foreground">Payment</span>
-                <Badge variant="outline" className="shrink-0">
+              <div className="flex min-w-0 items-start justify-between gap-3 text-sm">
+                <span className="min-w-0 break-words text-muted-foreground">Payment</span>
+                <Badge variant="outline" className="max-w-full shrink-0 break-all text-right">
                   {order.paymentProvider ?? '—'}
                 </Badge>
               </div>
@@ -188,9 +190,9 @@ export function OrderDetailView({ orderId }: { orderId: string }) {
                 {attendees.map((attendee) => (
                   <div
                     key={attendee.id}
-                    className="flex items-start justify-between gap-3 rounded-lg border p-3"
+                    className="flex flex-col gap-3 rounded-lg border p-3 sm:flex-row sm:items-start sm:justify-between"
                   >
-                    <div className="flex min-w-0 items-start gap-3">
+                    <div className="flex w-full min-w-0 items-start gap-3">
                       <Mail className="mt-0.5 size-4 shrink-0 text-muted-foreground" />
                       <div className="min-w-0">
                         <p className="break-words text-sm font-medium">
@@ -202,7 +204,7 @@ export function OrderDetailView({ orderId }: { orderId: string }) {
                         </p>
                       </div>
                     </div>
-                    <Badge variant="outline" className="shrink-0">
+                    <Badge variant="outline" className="w-fit max-w-full shrink-0 break-all">
                       {attendee.status}
                     </Badge>
                   </div>
@@ -225,7 +227,7 @@ export function OrderDetailView({ orderId }: { orderId: string }) {
               {order.lineItems.map((item) => (
                 <div
                   key={item.id}
-                  className="flex items-start justify-between gap-3 rounded-lg border p-3 text-sm"
+                  className="flex flex-col gap-2 rounded-lg border p-3 text-sm sm:flex-row sm:items-start sm:justify-between"
                 >
                   <div className="min-w-0">
                     <p className="break-words font-medium">{item.description}</p>
@@ -241,7 +243,7 @@ export function OrderDetailView({ orderId }: { orderId: string }) {
                       </p>
                     )}
                   </div>
-                  <span className="shrink-0 font-medium">
+                  <span className="shrink-0 self-start font-medium sm:self-auto">
                     {formatCurrency(item.totalCents, item.currency)}
                   </span>
                 </div>
@@ -296,7 +298,7 @@ export function OrderDetailView({ orderId }: { orderId: string }) {
                 {order.refunds.map((refund) => (
                   <div
                     key={refund.id}
-                    className="flex items-start justify-between gap-3 rounded-lg border p-3 text-sm"
+                    className="flex flex-col gap-3 rounded-lg border p-3 text-sm sm:flex-row sm:items-start sm:justify-between"
                   >
                     <div className="min-w-0">
                       <p className="break-words font-medium">{refund.reason || refund.id}</p>
@@ -304,11 +306,13 @@ export function OrderDetailView({ orderId }: { orderId: string }) {
                         {formatDateTime(refund.createdAt)}
                       </p>
                     </div>
-                    <div className="shrink-0 text-right">
+                    <div className="shrink-0 text-left sm:text-right">
                       <p className="font-medium">
                         -{formatCurrency(refund.amountCents, refund.currency)}
                       </p>
-                      <Badge variant="outline">{refund.status}</Badge>
+                      <Badge variant="outline" className="max-w-full break-all">
+                        {refund.status}
+                      </Badge>
                     </div>
                   </div>
                 ))}
@@ -403,7 +407,7 @@ function TimelineItem({
   icon: React.ElementType;
 }) {
   return (
-    <div className="flex items-center gap-3">
+    <div className="flex items-start gap-3">
       <div className="flex size-8 shrink-0 items-center justify-center rounded-full bg-muted">
         <Icon className="size-4 text-muted-foreground" />
       </div>
@@ -448,12 +452,12 @@ function DeliveryRow({
   value: string;
 }) {
   return (
-    <div className="flex items-center justify-between gap-3 rounded-lg border p-3 text-sm">
-      <div className="flex min-w-0 items-center gap-2">
+    <div className="flex flex-col gap-3 rounded-lg border p-3 text-sm sm:flex-row sm:items-center sm:justify-between">
+      <div className="flex w-full min-w-0 items-center gap-2">
         <Icon className="size-4 shrink-0 text-muted-foreground" />
         <span className="min-w-0 break-words">{label}</span>
       </div>
-      <Badge variant="outline" className="shrink-0">
+      <Badge variant="outline" className="w-fit max-w-full shrink-0 break-all">
         {value.replace(/_/g, ' ')}
       </Badge>
     </div>
