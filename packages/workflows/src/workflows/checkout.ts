@@ -6,6 +6,7 @@ import {
   proxyActivities,
   startChild,
   patched,
+  sleep,
 } from '@temporalio/workflow';
 import type { BoxOfficeTenderType, SalesChannel } from '@tixkit/domain';
 import type { WorkflowActivityResult } from '../shared/types.js';
@@ -82,6 +83,7 @@ const {
     organizationId: string;
     eventType: string;
     payload: Record<string, unknown>;
+    idempotencyKey?: string;
   }): Promise<
     WorkflowActivityResult<{
       eventId: string;
@@ -140,11 +142,45 @@ function throwIfRetryableFinalizeFailure(
   }
 }
 
-function throwIfFulfillmentFailure(activityName: string, result: WorkflowActivityResult<unknown>) {
-  if (!result.ok) {
-    throw new Error(
-      `Checkout fulfillment ${activityName} failed (${result.errorCode}): ${result.message}`,
-    );
+function throwFulfillmentFailure(
+  activityName: string,
+  result: Extract<WorkflowActivityResult<unknown>, { ok: false }>,
+  suffix = '',
+): never {
+  throw new Error(
+    `Checkout fulfillment ${activityName} failed (${result.errorCode}): ${result.message}${suffix}`,
+  );
+}
+
+const CHECKOUT_FULFILLMENT_MAX_ATTEMPTS = 5;
+const CHECKOUT_FULFILLMENT_RETRY_DELAY = '5 seconds';
+
+async function runCheckoutFulfillmentStep<T>(
+  activityName: string,
+  runActivity: () => Promise<WorkflowActivityResult<T>>,
+): Promise<T> {
+  let attempt = 1;
+
+  while (true) {
+    // eslint-disable-next-line no-await-in-loop -- fulfillment recovery must preserve step order.
+    const result = await runActivity();
+    if (result.ok) return result.value;
+
+    if (!result.retryable) {
+      throwFulfillmentFailure(activityName, result);
+    }
+
+    if (attempt >= CHECKOUT_FULFILLMENT_MAX_ATTEMPTS) {
+      throwFulfillmentFailure(
+        activityName,
+        result,
+        ` (attempts exhausted after ${attempt} attempts)`,
+      );
+    }
+
+    // eslint-disable-next-line no-await-in-loop -- Temporal sleep records a durable retry boundary.
+    await sleep(CHECKOUT_FULFILLMENT_RETRY_DELAY);
+    attempt += 1;
   }
 }
 
@@ -159,15 +195,18 @@ export async function checkoutSessionWorkflow(
   let cancelled = false;
 
   async function emitOrderWebhook(orderId: string) {
-    const emitResult = await emitWebhookEventActivity({
-      tenantId: input.tenantId,
-      organizationId: input.organizationId,
-      eventType: 'order.paid',
-      payload: { orderId, eventId: input.eventId, checkoutSessionId: input.checkoutSessionId },
-    });
-    if (emitResult.ok && emitResult.value.deliveries.length > 0) {
+    const emitResult = await runCheckoutFulfillmentStep('webhook emission', () =>
+      emitWebhookEventActivity({
+        tenantId: input.tenantId,
+        organizationId: input.organizationId,
+        eventType: 'order.paid',
+        payload: { orderId, eventId: input.eventId, checkoutSessionId: input.checkoutSessionId },
+        idempotencyKey: `checkout-order-paid:${orderId}`,
+      }),
+    );
+    if (emitResult.deliveries.length > 0) {
       await Promise.all(
-        emitResult.value.deliveries.map((delivery) =>
+        emitResult.deliveries.map((delivery) =>
           startChild(webhookDeliveryWorkflow, {
             workflowId: `webhook-delivery:${delivery.eventId}:${delivery.endpointId}`,
             args: [
@@ -187,6 +226,28 @@ export async function checkoutSessionWorkflow(
         ),
       );
     }
+  }
+
+  async function fulfillFinalizedOrder(orderId: string) {
+    await runCheckoutFulfillmentStep('confirmation email', () =>
+      sendConfirmationEmailActivity({
+        orderId,
+        toEmail: input.buyerEmail,
+        tenantId: input.tenantId,
+        brandId: input.brandId,
+      }),
+    );
+
+    await runCheckoutFulfillmentStep('ticket issuance', () =>
+      issueTicketsActivity({
+        orderId,
+        toEmail: input.buyerEmail,
+        tenantId: input.tenantId,
+        brandId: input.brandId,
+      }),
+    );
+
+    await emitOrderWebhook(orderId);
   }
 
   async function compensateOrphanPayment(compensationInput: {
@@ -274,23 +335,7 @@ export async function checkoutSessionWorkflow(
       return { status: 'failed' };
     }
 
-    const emailResult = await sendConfirmationEmailActivity({
-      orderId: finalizeResult.value.orderId,
-      toEmail: input.buyerEmail,
-      tenantId: input.tenantId,
-      brandId: input.brandId,
-    });
-    throwIfFulfillmentFailure('confirmation email', emailResult);
-
-    const ticketResult = await issueTicketsActivity({
-      orderId: finalizeResult.value.orderId,
-      toEmail: input.buyerEmail,
-      tenantId: input.tenantId,
-      brandId: input.brandId,
-    });
-    throwIfFulfillmentFailure('ticket issuance', ticketResult);
-
-    await emitOrderWebhook(finalizeResult.value.orderId);
+    await fulfillFinalizedOrder(finalizeResult.value.orderId);
 
     state = { status: 'completed', holdId: input.holdId, orderId: finalizeResult.value.orderId };
     return { orderId: finalizeResult.value.orderId, status: 'completed' };
@@ -425,23 +470,7 @@ export async function checkoutSessionWorkflow(
     return { status: 'failed' };
   }
 
-  const emailResult = await sendConfirmationEmailActivity({
-    orderId: finalizeResult.value.orderId,
-    toEmail: input.buyerEmail,
-    tenantId: input.tenantId,
-    brandId: input.brandId,
-  });
-  throwIfFulfillmentFailure('confirmation email', emailResult);
-
-  const ticketResult = await issueTicketsActivity({
-    orderId: finalizeResult.value.orderId,
-    toEmail: input.buyerEmail,
-    tenantId: input.tenantId,
-    brandId: input.brandId,
-  });
-  throwIfFulfillmentFailure('ticket issuance', ticketResult);
-
-  await emitOrderWebhook(finalizeResult.value.orderId);
+  await fulfillFinalizedOrder(finalizeResult.value.orderId);
 
   state = {
     status: 'completed',

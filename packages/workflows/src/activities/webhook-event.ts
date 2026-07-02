@@ -8,6 +8,7 @@ export async function emitWebhookEventActivity(input: {
   organizationId: string;
   eventType: string;
   payload: Record<string, unknown>;
+  idempotencyKey?: string;
 }): Promise<
   WorkflowActivityResult<{
     eventId: string;
@@ -25,6 +26,7 @@ export async function emitWebhookEventActivity(input: {
       organizationId: input.organizationId,
       type: input.eventType,
       payload: input.payload,
+      idempotencyKey: input.idempotencyKey,
     });
 
     const deliveries = endpoints.map((endpoint) => ({

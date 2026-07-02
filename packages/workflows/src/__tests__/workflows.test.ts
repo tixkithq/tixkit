@@ -315,13 +315,18 @@ describe('checkoutSessionWorkflow', () => {
     expect(released).toBe(false);
   });
 
-  it('throws when free checkout confirmation email returns a retryable error', async () => {
+  it('retries free checkout confirmation email before ticket issuance and webhook delivery', async () => {
+    let emailCalls = 0;
     let issueTicketsCalled = false;
     let webhookCalled = false;
 
-    setActivity('sendConfirmationEmailActivity', async () =>
-      errResult('EMAIL_QUEUE_FAILED', 'database temporarily unavailable', true),
-    );
+    setActivity('sendConfirmationEmailActivity', async () => {
+      emailCalls += 1;
+      if (emailCalls === 1) {
+        return errResult('EMAIL_QUEUE_FAILED', 'database temporarily unavailable', true);
+      }
+      return okResult({ jobId: 'emj_1', status: 'queued' });
+    });
     setActivity('issueTicketsActivity', async () => {
       issueTicketsCalled = true;
       return okResult({ issued: 2, jobId: 'emj_2' });
@@ -331,11 +336,13 @@ describe('checkoutSessionWorkflow', () => {
       return okResult({ eventId: 'evt_1', deliveries: [] });
     });
 
-    await expect(checkoutSessionWorkflow(makeCheckoutInput({ isFreeOrder: true }))).rejects.toThrow(
-      'Checkout fulfillment confirmation email failed (EMAIL_QUEUE_FAILED): database temporarily unavailable',
-    );
-    expect(issueTicketsCalled).toBe(false);
-    expect(webhookCalled).toBe(false);
+    const result = await checkoutSessionWorkflow(makeCheckoutInput({ isFreeOrder: true }));
+
+    expect(result).toEqual({ orderId: 'ord_test_1', status: 'completed' });
+    expect(emailCalls).toBe(2);
+    expect(mockState.sleeps).toEqual(['5 seconds']);
+    expect(issueTicketsCalled).toBe(true);
+    expect(webhookCalled).toBe(true);
   });
 
   it('completes a paid order when payment succeeds', async () => {
@@ -345,23 +352,28 @@ describe('checkoutSessionWorkflow', () => {
     expect(result.orderId).toBe('ord_test_1');
   });
 
-  it('throws when paid checkout ticket issuance returns a retryable error before webhook', async () => {
+  it('retries paid checkout ticket issuance before webhook delivery', async () => {
+    let ticketCalls = 0;
     let webhookCalled = false;
 
-    setActivity('issueTicketsActivity', async () =>
-      errResult('TICKET_ISSUE_FAILED', 'database temporarily unavailable', true),
-    );
+    setActivity('issueTicketsActivity', async () => {
+      ticketCalls += 1;
+      if (ticketCalls === 1) {
+        return errResult('TICKET_ISSUE_FAILED', 'database temporarily unavailable', true);
+      }
+      return okResult({ issued: 2, jobId: 'emj_2' });
+    });
     setActivity('emitWebhookEventActivity', async () => {
       webhookCalled = true;
       return okResult({ eventId: 'evt_1', deliveries: [] });
     });
 
-    await expect(
-      checkoutSessionWorkflow(makeCheckoutInput({ isFreeOrder: false })),
-    ).rejects.toThrow(
-      'Checkout fulfillment ticket issuance failed (TICKET_ISSUE_FAILED): database temporarily unavailable',
-    );
-    expect(webhookCalled).toBe(false);
+    const result = await checkoutSessionWorkflow(makeCheckoutInput({ isFreeOrder: false }));
+
+    expect(result).toEqual({ orderId: 'ord_test_1', status: 'completed' });
+    expect(ticketCalls).toBe(2);
+    expect(mockState.sleeps).toEqual(['5 seconds']);
+    expect(webhookCalled).toBe(true);
   });
 
   it('passes quoted fee cents to payment intent creation', async () => {
@@ -404,16 +416,25 @@ describe('checkoutSessionWorkflow', () => {
   });
 
   it('schedules webhook delivery children without secret material', async () => {
-    setActivity('emitWebhookEventActivity', async () =>
-      okResult({
+    let webhookInput: Record<string, unknown> | undefined;
+    setActivity('emitWebhookEventActivity', async (input) => {
+      webhookInput = input;
+      return okResult({
         eventId: 'whe_1',
         deliveries: [{ endpointId: 'wh_1', eventId: 'whe_1', url: 'https://example.test/webhook' }],
-      }),
-    );
+      });
+    });
 
     const result = await checkoutSessionWorkflow(makeCheckoutInput({ isFreeOrder: true }));
 
     expect(result.status).toBe('completed');
+    expect(webhookInput).toEqual({
+      tenantId: 'tnt_1',
+      organizationId: 'org_1',
+      eventType: 'order.paid',
+      payload: { orderId: 'ord_test_1', eventId: 'evt_1', checkoutSessionId: 'cs_test_1' },
+      idempotencyKey: 'checkout-order-paid:ord_test_1',
+    });
     expect(mockState.childStarts).toHaveLength(1);
     expect(mockState.childStarts[0]?.options).toEqual({
       workflowId: 'webhook-delivery:whe_1:wh_1',
@@ -428,6 +449,30 @@ describe('checkoutSessionWorkflow', () => {
       ],
     });
     expect(JSON.stringify(mockState.childStarts[0]?.options)).not.toContain('secret');
+  });
+
+  it('retries retryable checkout webhook event creation with the same fulfillment key', async () => {
+    let webhookCalls = 0;
+    const idempotencyKeys: unknown[] = [];
+
+    setActivity('emitWebhookEventActivity', async (input) => {
+      webhookCalls += 1;
+      idempotencyKeys.push(input.idempotencyKey);
+      if (webhookCalls === 1) {
+        return errResult('WEBHOOK_EVENT_CREATE_FAILED', 'database temporarily unavailable', true);
+      }
+      return okResult({ eventId: 'whe_1', deliveries: [] });
+    });
+
+    const result = await checkoutSessionWorkflow(makeCheckoutInput({ isFreeOrder: true }));
+
+    expect(result).toEqual({ orderId: 'ord_test_1', status: 'completed' });
+    expect(webhookCalls).toBe(2);
+    expect(idempotencyKeys).toEqual([
+      'checkout-order-paid:ord_test_1',
+      'checkout-order-paid:ord_test_1',
+    ]);
+    expect(mockState.sleeps).toEqual(['5 seconds']);
   });
 
   it('fails when payment intent creation fails and releases hold', async () => {

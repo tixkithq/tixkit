@@ -1,6 +1,6 @@
 import { BaseRepository } from './base.js';
 import { ulid } from 'ulid';
-import { randomBytes } from 'node:crypto';
+import { createHash, randomBytes } from 'node:crypto';
 
 export class WebhookEndpointRepository extends BaseRepository {
   async create(input: {
@@ -66,22 +66,48 @@ export class WebhookEventRepository extends BaseRepository {
     organizationId: string;
     type: string;
     payload: Record<string, unknown>;
+    idempotencyKey?: string;
   }) {
-    const id = `whe_${ulid()}`;
+    const id = input.idempotencyKey
+      ? stableWebhookEventId({
+          tenantId: input.tenantId,
+          organizationId: input.organizationId,
+          type: input.type,
+          idempotencyKey: input.idempotencyKey,
+        })
+      : `whe_${ulid()}`;
+    if (input.idempotencyKey) {
+      const existingEvent = await this.findById(id);
+      if (existingEvent) return existingEvent;
+    }
+
     const now = new Date();
-    return this.insertReturning(
-      'webhook_events',
-      {
+    try {
+      return await this.insertReturning(
+        'webhook_events',
+        {
+          id,
+          tenant_id: input.tenantId,
+          organization_id: input.organizationId,
+          type: input.type,
+          payload: JSON.stringify(input.payload),
+          status: 'pending',
+          created_at: now,
+        },
         id,
-        tenant_id: input.tenantId,
-        organization_id: input.organizationId,
-        type: input.type,
-        payload: JSON.stringify(input.payload),
-        status: 'pending',
-        created_at: now,
-      },
-      id,
-    );
+      );
+    } catch (err) {
+      if (!input.idempotencyKey || !isUniqueConstraintError(err)) {
+        throw err;
+      }
+
+      const existingEvent = await this.findById(id);
+      if (!existingEvent) {
+        throw err;
+      }
+
+      return existingEvent;
+    }
   }
 
   async findById(id: string) {
@@ -297,8 +323,24 @@ function isUniqueConstraintError(err: unknown): boolean {
   return (
     error.code === '23505' ||
     error.code === 'ER_DUP_ENTRY' ||
+    error.code === 'SQLITE_CONSTRAINT' ||
+    error.code === 'SQLITE_CONSTRAINT_PRIMARYKEY' ||
+    error.code === 'SQLITE_CONSTRAINT_UNIQUE' ||
     error.errno === 1062 ||
     error.number === 2601 ||
     error.number === 2627
   );
+}
+
+function stableWebhookEventId(input: {
+  tenantId: string;
+  organizationId: string;
+  type: string;
+  idempotencyKey: string;
+}): string {
+  const digest = createHash('sha256')
+    .update(`${input.tenantId}:${input.organizationId}:${input.type}:${input.idempotencyKey}`)
+    .digest('base64url')
+    .slice(0, 22);
+  return `whe_${digest}`;
 }
