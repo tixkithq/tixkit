@@ -130,6 +130,17 @@ export function EditableBlockBody({
     case 'hero':
       return (
         <div className="tk-ep-hero" data-block-id={block.id}>
+          {block.eyebrow !== undefined && (
+            <EditableText
+              as="p"
+              className="tk-ep-eyebrow"
+              disabled={disabled}
+              placeholder="Eyebrow text"
+              ariaLabel="Eyebrow text"
+              value={block.eyebrow}
+              onChange={(eyebrow) => onChange({ ...block, eyebrow })}
+            />
+          )}
           <EditableText
             as="h1"
             className="tk-ep-hero__headline"
@@ -151,6 +162,13 @@ export function EditableBlockBody({
               onChange={(body) => onChange({ ...block, body })}
             />
           )}
+          {block.imageUrl ? (
+            <img
+              src={block.imageUrl}
+              alt={block.imageAlt ?? ''}
+              loading="lazy"
+            />
+          ) : null}
           {block.ctaLabel !== undefined && (
             <span className="tk-ep-button">
               <EditableText
@@ -193,6 +211,7 @@ export function EditableBlockBody({
               .map((ticket) => (
                 <li key={ticket.id}>
                   <strong>{ticket.name}</strong>
+                  {ticket.description ? <span>{ticket.description}</span> : null}
                   {ticket.priceLabel ? <span>{ticket.priceLabel}</span> : null}
                 </li>
               ))}
@@ -250,6 +269,7 @@ export function EditableBlockBody({
               <li key={`${item.title}-${index}`}>
                 <strong>{item.title}</strong>
                 <time>{item.startsAt}</time>
+                {item.venueName ? <span>{item.venueName}</span> : null}
               </li>
             ))}
           </ol>
@@ -303,6 +323,7 @@ export function EditableBlockBody({
               .map((product) => (
                 <li key={product.id}>
                   <strong>{product.name}</strong>
+                  {product.description ? <span>{product.description}</span> : null}
                   {product.priceLabel ? <span>{product.priceLabel}</span> : null}
                 </li>
               ))}
@@ -310,30 +331,6 @@ export function EditableBlockBody({
         </div>
       );
     case 'sponsors':
-      return (
-        <div className={BLOCK_SURFACE_CLASS[block.type]} data-block-id={block.id}>
-          <EditableText
-            as="h2"
-            className="tk-ep-section__title"
-            disabled={disabled}
-            placeholder="Section title"
-            ariaLabel={BLOCK_LABELS[block.type]}
-            value={block.title}
-            onChange={(title) => onChange({ ...block, title })}
-          />
-          <ul>
-            {block.items.map((item) => (
-              <li key={item.name}>
-                <strong>{item.name}</strong>
-                {item.url ? <a href={item.url}>Open</a> : null}
-                {item.imageUrl ? (
-                  <img src={item.imageUrl} alt={item.imageAlt ?? item.name} loading="lazy" />
-                ) : null}
-              </li>
-            ))}
-          </ul>
-        </div>
-      );
     case 'speakers':
       return (
         <div className={BLOCK_SURFACE_CLASS[block.type]} data-block-id={block.id}>
@@ -347,16 +344,27 @@ export function EditableBlockBody({
             onChange={(title) => onChange({ ...block, title })}
           />
           <ul>
-            {block.items.map((item) => (
-              <li key={item.name}>
-                <strong>{item.name}</strong>
-                {item.role ? <span>{item.role}</span> : null}
-                {item.bio ? <p>{item.bio}</p> : null}
-                {item.imageUrl ? (
-                  <img src={item.imageUrl} alt={item.imageAlt ?? item.name} loading="lazy" />
-                ) : null}
-              </li>
-            ))}
+            {block.items.map((rawItem) => {
+              const item = rawItem as {
+                name: string;
+                role?: string;
+                bio?: string;
+                url?: string;
+                imageUrl?: string;
+                imageAlt?: string;
+              };
+              return (
+                <li key={item.name}>
+                  <strong>{item.name}</strong>
+                  {item.role ? <span>{item.role}</span> : null}
+                  {item.bio ? <p>{item.bio}</p> : null}
+                  {item.url ? <a href={item.url}>Open</a> : null}
+                  {item.imageUrl ? (
+                    <img src={item.imageUrl} alt={item.imageAlt ?? item.name} loading="lazy" />
+                  ) : null}
+                </li>
+              );
+            })}
           </ul>
         </div>
       );
@@ -415,6 +423,7 @@ export function EditableBlockBody({
               onChange={(address) => onChange({ ...block, address })}
             />
           )}
+          {block.mapUrl ? <a href={block.mapUrl}>Open map</a> : null}
         </div>
       );
     case 'button':
