@@ -1,4 +1,4 @@
-import type { JSONContent } from '@tiptap/core';
+import { Extension, Mark, mergeAttributes, type JSONContent } from '@tiptap/core';
 import Image from '@tiptap/extension-image';
 import Link from '@tiptap/extension-link';
 import StarterKit from '@tiptap/starter-kit';
@@ -17,6 +17,68 @@ import {
 
 export const TIPTAP_EVENT_PAGE_PROVIDER = '@tiptap/core' as const;
 export const EVENT_PAGE_SCHEMA_VERSION = 1 as const;
+export const EVENT_PAGE_INLINE_STYLE_MARK = 'eventPageInlineStyle' as const;
+
+export const EVENT_PAGE_FONT_FAMILY_OPTIONS = [
+  { label: 'Brand default', value: '' },
+  { label: 'Inter', value: 'Inter, Arial, sans-serif' },
+  { label: 'Arial', value: 'Arial, Helvetica, sans-serif' },
+  { label: 'Georgia', value: 'Georgia, serif' },
+  { label: 'Times', value: 'Times New Roman, Times, serif' },
+  { label: 'Verdana', value: 'Verdana, Geneva, sans-serif' },
+  { label: 'Mono', value: 'Courier New, Courier, monospace' },
+] as const;
+
+const allowedEventPageFontFamilies = new Set<string>(
+  EVENT_PAGE_FONT_FAMILY_OPTIONS.map((option) => option.value).filter(Boolean),
+);
+const allowedEventPageTextAlignments = new Set(['left', 'center', 'right']);
+
+export function isAllowedEventPageFontFamily(value: unknown): value is string {
+  return typeof value === 'string' && allowedEventPageFontFamilies.has(value.trim());
+}
+
+function isAllowedEventPageColor(value: unknown): value is string {
+  return typeof value === 'string' && /^#[0-9a-f]{6}$/i.test(value.trim());
+}
+
+function isAllowedEventPageFontSize(value: unknown): value is string {
+  if (typeof value !== 'string') return false;
+  const match = value.trim().match(/^(\d{1,3})px$/);
+  if (!match) return false;
+  const size = Number(match[1]);
+  return Number.isInteger(size) && size >= 8 && size <= 96;
+}
+
+function isAllowedEventPageLineHeight(value: unknown): value is string {
+  if (typeof value !== 'string') return false;
+  const match = value.trim().match(/^(\d{2,3})%$/);
+  if (!match) return false;
+  const lineHeight = Number(match[1]);
+  return Number.isInteger(lineHeight) && lineHeight >= 80 && lineHeight <= 240;
+}
+
+function isAllowedEventPageTextAlignment(value: unknown): value is string {
+  return typeof value === 'string' && allowedEventPageTextAlignments.has(value.trim());
+}
+
+function eventPageInlineStyleAttribute(attrs: {
+  color?: unknown;
+  fontFamily?: unknown;
+  fontSize?: unknown;
+  lineHeight?: unknown;
+}): string | undefined {
+  const declarations: string[] = [];
+  const color = typeof attrs.color === 'string' ? attrs.color.trim() : '';
+  if (isAllowedEventPageColor(color)) declarations.push(`color: ${color}`);
+  const fontFamily = typeof attrs.fontFamily === 'string' ? attrs.fontFamily.trim() : '';
+  if (isAllowedEventPageFontFamily(fontFamily)) declarations.push(`font-family: ${fontFamily}`);
+  const fontSize = typeof attrs.fontSize === 'string' ? attrs.fontSize.trim() : '';
+  if (isAllowedEventPageFontSize(fontSize)) declarations.push(`font-size: ${fontSize}`);
+  const lineHeight = typeof attrs.lineHeight === 'string' ? attrs.lineHeight.trim() : '';
+  if (isAllowedEventPageLineHeight(lineHeight)) declarations.push(`line-height: ${lineHeight}`);
+  return declarations.length > 0 ? declarations.join('; ') : undefined;
+}
 
 export type EventPageDiscoveryMetadata = {
   summary: string;
@@ -173,6 +235,175 @@ export type EventPageValidationOptions = {
   allowUnsafeEmbeds?: boolean;
 };
 
+export type ResolveEventPageOptions = EventPageValidationOptions & {
+  mode?: 'edit' | 'preview' | 'public' | 'server';
+};
+
+export type ResolvedEventPageSettings = {
+  locale: string;
+  publicPath?: string;
+  ticketCtaLabel: string;
+  discovery: EventPageDiscoveryMetadata;
+};
+
+export type ResolvedEventPageDetailItem = { label: string; value: string };
+export type ResolvedEventPageScheduleItem = {
+  title: string;
+  startsAt: string;
+  endsAt?: string;
+  timezone?: string;
+  venueName?: string;
+};
+export type ResolvedEventPageFaqItem = { question: string; answer: string };
+export type ResolvedEventPageLogoItem = {
+  name: string;
+  role?: string;
+  bio?: string;
+  url?: string;
+  imageUrl?: string;
+  imageAlt?: string;
+};
+export type ResolvedEventPageLink = { label: string; url: string };
+
+export type ResolvedEventPageBlock =
+  | { type: 'rich_text'; id: string; html: string; text: string }
+  | {
+      type: 'hero';
+      id: string;
+      eyebrow?: string;
+      headline: string;
+      body?: string;
+      imageUrl?: string;
+      imageAlt?: string;
+      ctaLabel?: string;
+      ctaUrl?: string;
+    }
+  | { type: 'event_details'; id: string; title: string; items: ResolvedEventPageDetailItem[] }
+  | {
+      type: 'tickets';
+      id: string;
+      title: string;
+      body?: string;
+      ctaLabel?: string;
+      tickets: EventPageTicket[];
+      checkoutUrl?: string;
+    }
+  | {
+      type: 'products';
+      id: string;
+      title: string;
+      body?: string;
+      products: EventPageProduct[];
+    }
+  | { type: 'schedule'; id: string; title: string; items: ResolvedEventPageScheduleItem[] }
+  | {
+      type: 'venue_map';
+      id: string;
+      title: string;
+      venueName: string;
+      address?: string;
+      mapUrl?: string;
+    }
+  | { type: 'faq'; id: string; title: string; items: ResolvedEventPageFaqItem[] }
+  | { type: 'sponsors'; id: string; title: string; items: ResolvedEventPageLogoItem[] }
+  | { type: 'speakers'; id: string; title: string; items: ResolvedEventPageLogoItem[] }
+  | { type: 'button'; id: string; label: string; url: string; style?: 'primary' | 'secondary' }
+  | { type: 'divider'; id: string }
+  | { type: 'social_links'; id: string; title?: string; links: ResolvedEventPageLink[] }
+  | { type: 'custom_embed'; id: string; html: string; allowed: boolean };
+
+export type ResolvedEventPage = {
+  schemaVersion: typeof EVENT_PAGE_SCHEMA_VERSION;
+  settings: ResolvedEventPageSettings;
+  blocks: ResolvedEventPageBlock[];
+  discovery: EventPageDiscoveryCard;
+  validation: ContentValidationResult;
+};
+
+export const EventPageInlineStyle = Mark.create({
+  name: EVENT_PAGE_INLINE_STYLE_MARK,
+
+  addAttributes() {
+    return {
+      fontFamily: {
+        default: null,
+        parseHTML: (element) => {
+          const fontFamily = element.style.fontFamily;
+          return isAllowedEventPageFontFamily(fontFamily) ? fontFamily : null;
+        },
+      },
+      color: {
+        default: null,
+        parseHTML: (element) => {
+          const color = element.style.color;
+          return isAllowedEventPageColor(color) ? color : null;
+        },
+      },
+      fontSize: {
+        default: null,
+        parseHTML: (element) => {
+          const fontSize = element.style.fontSize;
+          return isAllowedEventPageFontSize(fontSize) ? fontSize : null;
+        },
+      },
+      lineHeight: {
+        default: null,
+        parseHTML: (element) => {
+          const lineHeight = element.style.lineHeight;
+          return isAllowedEventPageLineHeight(lineHeight) ? lineHeight : null;
+        },
+      },
+    };
+  },
+
+  parseHTML() {
+    return [{ tag: 'span[data-event-page-inline-style]' }];
+  },
+
+  renderHTML({ HTMLAttributes, mark }) {
+    const safeHTMLAttributes = { ...HTMLAttributes };
+    delete safeHTMLAttributes.fontFamily;
+    delete safeHTMLAttributes.color;
+    delete safeHTMLAttributes.fontSize;
+    delete safeHTMLAttributes.lineHeight;
+    return [
+      'span',
+      mergeAttributes(safeHTMLAttributes, {
+        'data-event-page-inline-style': 'true',
+        style: eventPageInlineStyleAttribute(mark.attrs),
+      }),
+      0,
+    ];
+  },
+});
+
+export const EventPageTextAlignment = Extension.create({
+  name: 'eventPageTextAlignment',
+
+  addGlobalAttributes() {
+    return [
+      {
+        types: ['heading', 'paragraph'],
+        attributes: {
+          textAlign: {
+            default: null,
+            parseHTML: (element) => {
+              const textAlign = element.style.textAlign;
+              return isAllowedEventPageTextAlignment(textAlign) ? textAlign : null;
+            },
+            renderHTML: (attributes) => {
+              const textAlign = attributes.textAlign;
+              return isAllowedEventPageTextAlignment(textAlign)
+                ? { style: `text-align: ${textAlign.trim()}` }
+                : {};
+            },
+          },
+        },
+      },
+    ];
+  },
+});
+
 const tiptapExtensions = [
   StarterKit.configure({
     heading: { levels: [1, 2, 3] },
@@ -187,6 +418,8 @@ const tiptapExtensions = [
   Image.configure({
     allowBase64: false,
   }),
+  EventPageInlineStyle,
+  EventPageTextAlignment,
 ];
 
 export function createDefaultEventPageDocument(input: {
@@ -373,33 +606,416 @@ export function validateEventPageDocument(
   };
 }
 
+export function resolveEventPageDocument(
+  document: EventPageDocument,
+  context: EventPageRenderContext,
+  options: ResolveEventPageOptions = {},
+): ResolvedEventPage {
+  const validation = validateEventPageDocument(document, options);
+  const discovery = discoveryCard(document, context);
+  const settings = resolveEventPageSettings(document, context);
+  if (!validation.valid) {
+    return { schemaVersion: document.schemaVersion, settings, blocks: [], discovery, validation };
+  }
+  const blocks = document.blocks.map((block) => resolveBlock(block, context, options));
+  return { schemaVersion: document.schemaVersion, settings, blocks, discovery, validation };
+}
+
+export function renderResolvedEventPageHtml(resolved: ResolvedEventPage): string {
+  if (!resolved.validation.valid) return '';
+  return `<div class="tixkit-event-page" data-schema-version="${resolved.schemaVersion}">${resolved.blocks
+    .map((block) => resolvedBlockHtml(block))
+    .join('')}</div>`;
+}
+
+export function renderResolvedEventPageHeadless(
+  resolved: ResolvedEventPage,
+): EventPageHeadlessBlock[] {
+  return resolved.blocks.map((block) => resolvedBlockHeadless(block));
+}
+
+export function renderResolvedEventPageText(resolved: ResolvedEventPage): string {
+  return toPlainText(renderResolvedEventPageHeadless(resolved));
+}
+
 export function renderEventPageDocument(
   document: EventPageDocument,
   context: EventPageRenderContext,
   options: EventPageValidationOptions = {},
 ): RenderedEventPage {
-  const validation = validateEventPageDocument(document, options);
-  if (!validation.valid) {
+  const resolved = resolveEventPageDocument(document, context, options);
+  if (!resolved.validation.valid) {
     return {
       html: '',
       text: '',
       headless: [],
-      discovery: discoveryCard(document, context),
-      validation,
+      discovery: resolved.discovery,
+      validation: resolved.validation,
     };
   }
-
-  const headless = document.blocks.map((block) => renderHeadlessBlock(block, context, options));
-  const html = `<div class="tixkit-event-page" data-schema-version="${EVENT_PAGE_SCHEMA_VERSION}">${headless
-    .map((block) => block.html ?? '')
-    .join('')}</div>`;
   return {
-    html,
-    text: toPlainText(headless),
-    headless,
-    discovery: discoveryCard(document, context),
-    validation,
+    html: renderResolvedEventPageHtml(resolved),
+    text: renderResolvedEventPageText(resolved),
+    headless: renderResolvedEventPageHeadless(resolved),
+    discovery: resolved.discovery,
+    validation: resolved.validation,
   };
+}
+
+function resolveEventPageSettings(
+  document: EventPageDocument,
+  context: MergeTagContext,
+): ResolvedEventPageSettings {
+  return {
+    locale: document.settings.locale,
+    publicPath: document.settings.publicPath
+      ? safeRenderedUrl(document.settings.publicPath, context, {})
+      : undefined,
+    ticketCtaLabel: renderPlain(document.settings.ticketCtaLabel, context),
+    discovery: {
+      summary: renderPlain(document.settings.discovery.summary, context),
+      category: document.settings.discovery.category,
+      tags: document.settings.discovery.tags,
+      coverImageUrl: document.settings.discovery.coverImageUrl
+        ? safeRenderedUrl(document.settings.discovery.coverImageUrl, context, {})
+        : undefined,
+      socialImageUrl: document.settings.discovery.socialImageUrl
+        ? safeRenderedUrl(document.settings.discovery.socialImageUrl, context, {})
+        : undefined,
+      seoTitle: document.settings.discovery.seoTitle
+        ? renderPlain(document.settings.discovery.seoTitle, context)
+        : undefined,
+      seoDescription: document.settings.discovery.seoDescription
+        ? renderPlain(document.settings.discovery.seoDescription, context)
+        : undefined,
+    },
+  };
+}
+
+function resolveBlock(
+  block: EventPageBlock,
+  context: EventPageRenderContext,
+  options: EventPageValidationOptions,
+): ResolvedEventPageBlock {
+  switch (block.type) {
+    case 'hero': {
+      const imageUrl = block.imageUrl
+        ? safeRenderedUrl(block.imageUrl, context, options)
+        : undefined;
+      const ctaUrl = block.ctaUrl ? safeRenderedUrl(block.ctaUrl, context, options) : undefined;
+      return {
+        type: 'hero',
+        id: block.id,
+        eyebrow: block.eyebrow ? renderPlain(block.eyebrow, context) : undefined,
+        headline: renderPlain(block.headline, context),
+        body: block.body ? renderPlain(block.body, context) : undefined,
+        imageUrl,
+        imageAlt: block.imageAlt ? renderPlain(block.imageAlt, context) : undefined,
+        ctaLabel: block.ctaLabel ? renderPlain(block.ctaLabel, context) : undefined,
+        ctaUrl,
+      };
+    }
+    case 'rich_text': {
+      const html = sanitizeEventPageHtml(renderTipTap(block.content, context));
+      return { type: 'rich_text', id: block.id, html, text: stripTags(html) };
+    }
+    case 'event_details': {
+      return {
+        type: 'event_details',
+        id: block.id,
+        title: renderPlain(block.title, context),
+        items: block.items.map((item) => ({
+          label: renderPlain(item.label, context),
+          value: renderPlain(item.value, context),
+        })),
+      };
+    }
+    case 'tickets': {
+      const tickets = (context.tickets ?? []).filter((ticket) => ticket.status !== 'hidden');
+      const checkoutUrl = context.event?.checkoutUrl
+        ? safeRenderedUrl(context.event.checkoutUrl, context, options)
+        : undefined;
+      return {
+        type: 'tickets',
+        id: block.id,
+        title: renderPlain(block.title, context),
+        body: block.body ? renderPlain(block.body, context) : undefined,
+        ctaLabel: block.ctaLabel ? renderPlain(block.ctaLabel, context) : undefined,
+        tickets,
+        checkoutUrl,
+      };
+    }
+    case 'products': {
+      const productIds = new Set(block.productIds);
+      return {
+        type: 'products',
+        id: block.id,
+        title: renderPlain(block.title, context),
+        body: block.body ? renderPlain(block.body, context) : undefined,
+        products: (context.products ?? []).filter((product) => productIds.has(product.id)),
+      };
+    }
+    case 'schedule': {
+      return {
+        type: 'schedule',
+        id: block.id,
+        title: renderPlain(block.title, context),
+        items: block.items.map((item) => ({
+          title: renderPlain(item.title, context),
+          startsAt: renderPlain(item.startsAt, context),
+          endsAt: item.endsAt ? renderPlain(item.endsAt, context) : undefined,
+          timezone: item.timezone ? renderPlain(item.timezone, context) : undefined,
+          venueName: item.venueName ? renderPlain(item.venueName, context) : undefined,
+        })),
+      };
+    }
+    case 'venue_map': {
+      return {
+        type: 'venue_map',
+        id: block.id,
+        title: renderPlain(block.title, context),
+        venueName: renderPlain(block.venueName, context),
+        address: block.address ? renderPlain(block.address, context) : undefined,
+        mapUrl: block.mapUrl ? safeRenderedUrl(block.mapUrl, context, options) : undefined,
+      };
+    }
+    case 'faq': {
+      return {
+        type: 'faq',
+        id: block.id,
+        title: renderPlain(block.title, context),
+        items: block.items.map((item) => ({
+          question: renderPlain(item.question, context),
+          answer: renderPlain(item.answer, context),
+        })),
+      };
+    }
+    case 'sponsors':
+    case 'speakers': {
+      return {
+        type: block.type,
+        id: block.id,
+        title: renderPlain(block.title, context),
+        items: block.items.map((item) => renderItem(item, context, options)),
+      };
+    }
+    case 'button': {
+      return {
+        type: 'button',
+        id: block.id,
+        label: renderPlain(block.label, context),
+        url: safeRenderedUrl(block.url, context, options),
+        style: block.style,
+      };
+    }
+    case 'divider':
+      return { type: 'divider', id: block.id };
+    case 'social_links': {
+      return {
+        type: 'social_links',
+        id: block.id,
+        title: block.title ? renderPlain(block.title, context) : undefined,
+        links: block.links.map((link) => ({
+          label: renderPlain(link.label, context),
+          url: safeRenderedUrl(link.url, context, options),
+        })),
+      };
+    }
+    case 'custom_embed': {
+      const allowed = Boolean(options.allowUnsafeEmbeds) && block.allowUnsafeEmbed;
+      return {
+        type: 'custom_embed',
+        id: block.id,
+        html: allowed ? sanitizeEventPageHtml(block.html) : '',
+        allowed,
+      };
+    }
+  }
+}
+
+function resolvedBlockHtml(block: ResolvedEventPageBlock): string {
+  switch (block.type) {
+    case 'hero': {
+      return [
+        `<section class="tk-ep-hero" data-block-id="${escapeAttr(block.id)}">`,
+        block.eyebrow ? `<p class="tk-ep-eyebrow">${escapeHtml(block.eyebrow)}</p>` : '',
+        `<h1>${escapeHtml(block.headline)}</h1>`,
+        block.body ? `<p>${escapeHtml(block.body)}</p>` : '',
+        block.imageUrl
+          ? `<img src="${escapeAttr(block.imageUrl)}" alt="${escapeAttr(block.imageAlt ?? '')}" loading="lazy" />`
+          : '',
+        block.ctaLabel && block.ctaUrl
+          ? `<a class="tk-ep-button" href="${escapeAttr(block.ctaUrl)}">${escapeHtml(block.ctaLabel)}</a>`
+          : '',
+        '</section>',
+      ].join('');
+    }
+    case 'rich_text':
+      return `<section class="tk-ep-rich-text" data-block-id="${escapeAttr(block.id)}">${block.html}</section>`;
+    case 'event_details': {
+      return `<section class="tk-ep-details" data-block-id="${escapeAttr(block.id)}"><h2>${escapeHtml(block.title)}</h2><dl>${block.items
+        .map(
+          (item) =>
+            `<div><dt>${escapeHtml(item.label)}</dt><dd>${escapeHtml(item.value)}</dd></div>`,
+        )
+        .join('')}</dl></section>`;
+    }
+    case 'tickets': {
+      return `<section class="tk-ep-tickets" data-block-id="${escapeAttr(block.id)}"><h2>${escapeHtml(block.title)}</h2>${block.body ? `<p>${escapeHtml(block.body)}</p>` : ''}<ul>${block.tickets
+        .map(
+          (ticket) =>
+            `<li><strong>${escapeHtml(ticket.name)}</strong>${ticket.description ? `<span>${escapeHtml(ticket.description)}</span>` : ''}${ticket.priceLabel ? `<span>${escapeHtml(ticket.priceLabel)}</span>` : ''}</li>`,
+        )
+        .join(
+          '',
+        )}</ul>${block.ctaLabel && block.checkoutUrl ? `<a class="tk-ep-button" href="${escapeAttr(block.checkoutUrl)}">${escapeHtml(block.ctaLabel)}</a>` : ''}</section>`;
+    }
+    case 'products': {
+      return `<section class="tk-ep-products" data-block-id="${escapeAttr(block.id)}"><h2>${escapeHtml(block.title)}</h2>${block.body ? `<p>${escapeHtml(block.body)}</p>` : ''}<ul>${block.products
+        .map(
+          (product) =>
+            `<li><strong>${escapeHtml(product.name)}</strong>${product.description ? `<span>${escapeHtml(product.description)}</span>` : ''}${product.priceLabel ? `<span>${escapeHtml(product.priceLabel)}</span>` : ''}</li>`,
+        )
+        .join('')}</ul></section>`;
+    }
+    case 'schedule': {
+      return `<section class="tk-ep-schedule" data-block-id="${escapeAttr(block.id)}"><h2>${escapeHtml(block.title)}</h2><ol>${block.items
+        .map(
+          (item) =>
+            `<li><strong>${escapeHtml(item.title)}</strong><time>${escapeHtml(item.startsAt)}</time>${item.venueName ? `<span>${escapeHtml(item.venueName)}</span>` : ''}</li>`,
+        )
+        .join('')}</ol></section>`;
+    }
+    case 'venue_map': {
+      return `<section class="tk-ep-venue" data-block-id="${escapeAttr(block.id)}"><h2>${escapeHtml(block.title)}</h2><p><strong>${escapeHtml(block.venueName)}</strong></p>${block.address ? `<p>${escapeHtml(block.address)}</p>` : ''}${block.mapUrl ? `<a href="${escapeAttr(block.mapUrl)}">Open map</a>` : ''}</section>`;
+    }
+    case 'faq': {
+      return `<section class="tk-ep-faq" data-block-id="${escapeAttr(block.id)}"><h2>${escapeHtml(block.title)}</h2>${block.items
+        .map(
+          (item) =>
+            `<details><summary>${escapeHtml(item.question)}</summary><p>${escapeHtml(item.answer)}</p></details>`,
+        )
+        .join('')}</section>`;
+    }
+    case 'sponsors':
+    case 'speakers': {
+      return `<section class="tk-ep-${block.type}" data-block-id="${escapeAttr(block.id)}"><h2>${escapeHtml(block.title)}</h2><ul>${block.items
+        .map(
+          (item) =>
+            `<li><strong>${escapeHtml(item.name)}</strong>${item.role ? `<span>${escapeHtml(item.role)}</span>` : ''}${item.bio ? `<p>${escapeHtml(item.bio)}</p>` : ''}${item.url ? `<a href="${escapeAttr(item.url)}">Open</a>` : ''}${item.imageUrl ? `<img src="${escapeAttr(item.imageUrl)}" alt="${escapeAttr(item.imageAlt ?? item.name)}" loading="lazy" />` : ''}</li>`,
+        )
+        .join('')}</ul></section>`;
+    }
+    case 'button': {
+      return `<section class="tk-ep-action" data-block-id="${escapeAttr(block.id)}"><a class="tk-ep-button tk-ep-button-${escapeAttr(block.style ?? 'primary')}" href="${escapeAttr(block.url)}">${escapeHtml(block.label)}</a></section>`;
+    }
+    case 'divider':
+      return `<hr class="tk-ep-divider" data-block-id="${escapeAttr(block.id)}" />`;
+    case 'social_links': {
+      return `<section class="tk-ep-social" data-block-id="${escapeAttr(block.id)}">${block.title ? `<h2>${escapeHtml(block.title)}</h2>` : ''}<ul>${block.links
+        .map((link) => `<li><a href="${escapeAttr(link.url)}">${escapeHtml(link.label)}</a></li>`)
+        .join('')}</ul></section>`;
+    }
+    case 'custom_embed':
+      return block.html
+        ? `<section class="tk-ep-embed" data-block-id="${escapeAttr(block.id)}">${block.html}</section>`
+        : '';
+  }
+}
+
+function resolvedBlockHeadless(block: ResolvedEventPageBlock): EventPageHeadlessBlock {
+  switch (block.type) {
+    case 'hero':
+      return {
+        type: block.type,
+        id: block.id,
+        title: block.headline,
+        text: block.body,
+        html: resolvedBlockHtml(block),
+        imageUrl: block.imageUrl,
+        imageAlt: block.imageAlt,
+      };
+    case 'rich_text':
+      return { type: block.type, id: block.id, html: resolvedBlockHtml(block), text: block.text };
+    case 'event_details':
+      return {
+        type: block.type,
+        id: block.id,
+        title: block.title,
+        html: resolvedBlockHtml(block),
+        items: block.items,
+      };
+    case 'tickets':
+      return {
+        type: block.type,
+        id: block.id,
+        title: block.title,
+        text: block.body,
+        html: resolvedBlockHtml(block),
+        items: block.tickets,
+      };
+    case 'products':
+      return {
+        type: block.type,
+        id: block.id,
+        title: block.title,
+        html: resolvedBlockHtml(block),
+        items: block.products,
+      };
+    case 'schedule':
+      return {
+        type: block.type,
+        id: block.id,
+        title: block.title,
+        html: resolvedBlockHtml(block),
+        items: block.items,
+      };
+    case 'venue_map':
+      return {
+        type: block.type,
+        id: block.id,
+        title: block.title,
+        html: resolvedBlockHtml(block),
+        links: block.mapUrl ? [{ label: 'Open map', url: block.mapUrl }] : [],
+      };
+    case 'faq':
+      return {
+        type: block.type,
+        id: block.id,
+        title: block.title,
+        html: resolvedBlockHtml(block),
+        items: block.items,
+      };
+    case 'sponsors':
+    case 'speakers':
+      return {
+        type: block.type,
+        id: block.id,
+        title: block.title,
+        html: resolvedBlockHtml(block),
+        items: block.items,
+      };
+    case 'button':
+      return {
+        type: block.type,
+        id: block.id,
+        title: block.label,
+        html: resolvedBlockHtml(block),
+        links: [{ label: block.label, url: block.url }],
+      };
+    case 'divider':
+      return { type: block.type, id: block.id, html: resolvedBlockHtml(block) };
+    case 'social_links':
+      return {
+        type: block.type,
+        id: block.id,
+        title: block.title,
+        html: resolvedBlockHtml(block),
+        links: block.links,
+      };
+    case 'custom_embed':
+      return { type: block.type, id: block.id, html: resolvedBlockHtml(block) };
+  }
 }
 
 export function sanitizeEventPageHtml(html: string): string {
@@ -411,12 +1027,46 @@ export function sanitizeEventPageHtml(html: string): string {
     )
     .replace(/<(script|object|embed|form|svg|math|base|link|meta|style|template)\b[^>]*\/?>/gi, '')
     .replace(/[\s/]+on[a-z][\w:-]*(?:\s*=\s*(?:"[^"]*"|'[^']*'|`[^`]*`|[^\s"'`=<>]+))?/gi, '')
-    .replace(/[\s/]+(srcdoc|style)\s*=\s*("[^"]*"|'[^']*'|`[^`]*`|[^\s"'`=<>]*)/gi, '')
+    .replace(
+      /[\s/]+(srcdoc|style)\s*=\s*("[^"]*"|'[^']*'|`[^`]*`|[^\s"'`=<>]*)/gi,
+      (_attribute: string, name: string, rawValue: string) => {
+        if (name.toLowerCase() !== 'style') return '';
+        return safeEventPageStyleAttribute(rawValue) ?? '';
+      },
+    )
     .replace(
       /[\s/]+(href|src|data|action|formaction|xlink:href)\s*=\s*("[^"]*"|'[^']*'|`[^`]*`|[^\s"'`=<>]*)/gi,
       (attribute: string, _name: string, rawValue: string) =>
         hasUnsafeHtmlUrlScheme(rawValue) ? '' : attribute,
     );
+}
+
+function safeEventPageStyleAttribute(rawValue: string): string | undefined {
+  const declarations = stripAttributeQuotes(rawValue)
+    .split(';')
+    .map((declaration) => declaration.trim())
+    .filter(Boolean);
+  const attrs: Record<string, string> = {};
+  for (const declaration of declarations) {
+    const [rawProperty, ...rawValueParts] = declaration.split(':');
+    const property = rawProperty?.trim().toLowerCase();
+    const value = rawValueParts.join(':').trim();
+    if (!property || !value) continue;
+    if (property === 'color' && isAllowedEventPageColor(value)) attrs.color = value;
+    if (property === 'font-family' && isAllowedEventPageFontFamily(value)) attrs.fontFamily = value;
+    if (property === 'font-size' && isAllowedEventPageFontSize(value)) attrs.fontSize = value;
+    if (property === 'line-height' && isAllowedEventPageLineHeight(value)) attrs.lineHeight = value;
+    if (property === 'text-align' && isAllowedEventPageTextAlignment(value)) {
+      attrs.textAlign = value;
+    }
+  }
+  const declarationsToKeep: string[] = [];
+  if (attrs.color) declarationsToKeep.push(`color: ${attrs.color}`);
+  if (attrs.fontFamily) declarationsToKeep.push(`font-family: ${attrs.fontFamily}`);
+  if (attrs.fontSize) declarationsToKeep.push(`font-size: ${attrs.fontSize}`);
+  if (attrs.lineHeight) declarationsToKeep.push(`line-height: ${attrs.lineHeight}`);
+  if (attrs.textAlign) declarationsToKeep.push(`text-align: ${attrs.textAlign}`);
+  return declarationsToKeep.length > 0 ? ` style="${declarationsToKeep.join('; ')}"` : undefined;
 }
 
 function hasUnsafeHtmlUrlScheme(rawValue: string): boolean {
@@ -484,218 +1134,6 @@ export function normalizeEventPageDocument(value: unknown): EventPageDocument | 
   return value as EventPageDocument;
 }
 
-function renderHeadlessBlock(
-  block: EventPageBlock,
-  context: EventPageRenderContext,
-  options: EventPageValidationOptions,
-): EventPageHeadlessBlock {
-  switch (block.type) {
-    case 'hero': {
-      const title = renderPlain(block.headline, context);
-      const body = block.body ? renderPlain(block.body, context) : undefined;
-      const imageUrl = block.imageUrl
-        ? safeRenderedUrl(block.imageUrl, context, options)
-        : undefined;
-      const ctaUrl = block.ctaUrl ? safeRenderedUrl(block.ctaUrl, context, options) : undefined;
-      const html = [
-        `<section class="tk-ep-hero" data-block-id="${escapeAttr(block.id)}">`,
-        block.eyebrow
-          ? `<p class="tk-ep-eyebrow">${escapeHtml(renderPlain(block.eyebrow, context))}</p>`
-          : '',
-        `<h1>${escapeHtml(title)}</h1>`,
-        body ? `<p>${escapeHtml(body)}</p>` : '',
-        imageUrl
-          ? `<img src="${escapeAttr(imageUrl)}" alt="${escapeAttr(renderPlain(block.imageAlt ?? '', context))}" loading="lazy" />`
-          : '',
-        block.ctaLabel && ctaUrl
-          ? `<a class="tk-ep-button" href="${escapeAttr(ctaUrl)}">${escapeHtml(renderPlain(block.ctaLabel, context))}</a>`
-          : '',
-        '</section>',
-      ].join('');
-      return {
-        type: block.type,
-        id: block.id,
-        title,
-        text: body,
-        html,
-        imageUrl,
-        imageAlt: block.imageAlt,
-      };
-    }
-    case 'rich_text': {
-      const html = `<section class="tk-ep-rich-text" data-block-id="${escapeAttr(block.id)}">${sanitizeEventPageHtml(renderTipTap(block.content, context))}</section>`;
-      return { type: block.type, id: block.id, html, text: stripTags(html) };
-    }
-    case 'event_details': {
-      const items = block.items.map((item) => ({
-        label: renderPlain(item.label, context),
-        value: renderPlain(item.value, context),
-      }));
-      const html = `<section class="tk-ep-details" data-block-id="${escapeAttr(block.id)}"><h2>${escapeHtml(renderPlain(block.title, context))}</h2><dl>${items
-        .map(
-          (item) =>
-            `<div><dt>${escapeHtml(item.label)}</dt><dd>${escapeHtml(item.value)}</dd></div>`,
-        )
-        .join('')}</dl></section>`;
-      return {
-        type: block.type,
-        id: block.id,
-        title: renderPlain(block.title, context),
-        html,
-        items,
-      };
-    }
-    case 'tickets': {
-      const tickets = (context.tickets ?? []).filter((ticket) => ticket.status !== 'hidden');
-      const checkoutUrl = context.event?.checkoutUrl
-        ? safeRenderedUrl(context.event.checkoutUrl, context, options)
-        : undefined;
-      const html = `<section class="tk-ep-tickets" data-block-id="${escapeAttr(block.id)}"><h2>${escapeHtml(renderPlain(block.title, context))}</h2>${block.body ? `<p>${escapeHtml(renderPlain(block.body, context))}</p>` : ''}<ul>${tickets
-        .map(
-          (ticket) =>
-            `<li><strong>${escapeHtml(ticket.name)}</strong>${ticket.description ? `<span>${escapeHtml(ticket.description)}</span>` : ''}${ticket.priceLabel ? `<span>${escapeHtml(ticket.priceLabel)}</span>` : ''}</li>`,
-        )
-        .join(
-          '',
-        )}</ul>${block.ctaLabel && checkoutUrl ? `<a class="tk-ep-button" href="${escapeAttr(checkoutUrl)}">${escapeHtml(renderPlain(block.ctaLabel, context))}</a>` : ''}</section>`;
-      return {
-        type: block.type,
-        id: block.id,
-        title: renderPlain(block.title, context),
-        text: block.body ? renderPlain(block.body, context) : undefined,
-        html,
-        items: tickets,
-      };
-    }
-    case 'products': {
-      const productIds = new Set(block.productIds);
-      const products = (context.products ?? []).filter((product) => productIds.has(product.id));
-      const html = `<section class="tk-ep-products" data-block-id="${escapeAttr(block.id)}"><h2>${escapeHtml(renderPlain(block.title, context))}</h2>${block.body ? `<p>${escapeHtml(renderPlain(block.body, context))}</p>` : ''}<ul>${products
-        .map(
-          (product) =>
-            `<li><strong>${escapeHtml(product.name)}</strong>${product.description ? `<span>${escapeHtml(product.description)}</span>` : ''}${product.priceLabel ? `<span>${escapeHtml(product.priceLabel)}</span>` : ''}</li>`,
-        )
-        .join('')}</ul></section>`;
-      return {
-        type: block.type,
-        id: block.id,
-        title: renderPlain(block.title, context),
-        html,
-        items: products,
-      };
-    }
-    case 'schedule': {
-      const items = block.items.map((item) => ({
-        title: renderPlain(item.title, context),
-        startsAt: renderPlain(item.startsAt, context),
-        endsAt: item.endsAt ? renderPlain(item.endsAt, context) : undefined,
-        timezone: item.timezone ? renderPlain(item.timezone, context) : undefined,
-        venueName: item.venueName ? renderPlain(item.venueName, context) : undefined,
-      }));
-      const html = `<section class="tk-ep-schedule" data-block-id="${escapeAttr(block.id)}"><h2>${escapeHtml(renderPlain(block.title, context))}</h2><ol>${items
-        .map(
-          (item) =>
-            `<li><strong>${escapeHtml(item.title)}</strong><time>${escapeHtml(item.startsAt)}</time>${item.venueName ? `<span>${escapeHtml(item.venueName)}</span>` : ''}</li>`,
-        )
-        .join('')}</ol></section>`;
-      return {
-        type: block.type,
-        id: block.id,
-        title: renderPlain(block.title, context),
-        html,
-        items,
-      };
-    }
-    case 'venue_map': {
-      const mapUrl = block.mapUrl ? safeRenderedUrl(block.mapUrl, context, options) : undefined;
-      const html = `<section class="tk-ep-venue" data-block-id="${escapeAttr(block.id)}"><h2>${escapeHtml(renderPlain(block.title, context))}</h2><p><strong>${escapeHtml(renderPlain(block.venueName, context))}</strong></p>${block.address ? `<p>${escapeHtml(renderPlain(block.address, context))}</p>` : ''}${mapUrl ? `<a href="${escapeAttr(mapUrl)}">Open map</a>` : ''}</section>`;
-      return {
-        type: block.type,
-        id: block.id,
-        title: renderPlain(block.title, context),
-        html,
-        links: mapUrl ? [{ label: 'Open map', url: mapUrl }] : [],
-      };
-    }
-    case 'faq': {
-      const items = block.items.map((item) => ({
-        question: renderPlain(item.question, context),
-        answer: renderPlain(item.answer, context),
-      }));
-      const html = `<section class="tk-ep-faq" data-block-id="${escapeAttr(block.id)}"><h2>${escapeHtml(renderPlain(block.title, context))}</h2>${items
-        .map(
-          (item) =>
-            `<details><summary>${escapeHtml(item.question)}</summary><p>${escapeHtml(item.answer)}</p></details>`,
-        )
-        .join('')}</section>`;
-      return {
-        type: block.type,
-        id: block.id,
-        title: renderPlain(block.title, context),
-        html,
-        items,
-      };
-    }
-    case 'sponsors':
-    case 'speakers': {
-      const items = block.items.map((item) => renderItem(item, context, options));
-      const html = `<section class="tk-ep-${block.type}" data-block-id="${escapeAttr(block.id)}"><h2>${escapeHtml(renderPlain(block.title, context))}</h2><ul>${items
-        .map(
-          (item) =>
-            `<li><strong>${escapeHtml(item.name)}</strong>${item.role ? `<span>${escapeHtml(item.role)}</span>` : ''}${item.bio ? `<p>${escapeHtml(item.bio)}</p>` : ''}${item.url ? `<a href="${escapeAttr(item.url)}">Open</a>` : ''}${item.imageUrl ? `<img src="${escapeAttr(item.imageUrl)}" alt="${escapeAttr(item.imageAlt ?? item.name)}" loading="lazy" />` : ''}</li>`,
-        )
-        .join('')}</ul></section>`;
-      return {
-        type: block.type,
-        id: block.id,
-        title: renderPlain(block.title, context),
-        html,
-        items,
-      };
-    }
-    case 'button': {
-      const url = safeRenderedUrl(block.url, context, options);
-      const html = `<section class="tk-ep-action" data-block-id="${escapeAttr(block.id)}"><a class="tk-ep-button tk-ep-button-${escapeAttr(block.style ?? 'primary')}" href="${escapeAttr(url)}">${escapeHtml(renderPlain(block.label, context))}</a></section>`;
-      return {
-        type: block.type,
-        id: block.id,
-        title: renderPlain(block.label, context),
-        html,
-        links: [{ label: renderPlain(block.label, context), url }],
-      };
-    }
-    case 'divider':
-      return {
-        type: block.type,
-        id: block.id,
-        html: `<hr class="tk-ep-divider" data-block-id="${escapeAttr(block.id)}" />`,
-      };
-    case 'social_links': {
-      const links = block.links.map((link) => ({
-        label: renderPlain(link.label, context),
-        url: safeRenderedUrl(link.url, context, options),
-      }));
-      const html = `<section class="tk-ep-social" data-block-id="${escapeAttr(block.id)}">${block.title ? `<h2>${escapeHtml(renderPlain(block.title, context))}</h2>` : ''}<ul>${links
-        .map((link) => `<li><a href="${escapeAttr(link.url)}">${escapeHtml(link.label)}</a></li>`)
-        .join('')}</ul></section>`;
-      return {
-        type: block.type,
-        id: block.id,
-        title: block.title ? renderPlain(block.title, context) : undefined,
-        html,
-        links,
-      };
-    }
-    case 'custom_embed': {
-      const html =
-        options.allowUnsafeEmbeds && block.allowUnsafeEmbed
-          ? `<section class="tk-ep-embed" data-block-id="${escapeAttr(block.id)}">${sanitizeEventPageHtml(block.html)}</section>`
-          : '';
-      return { type: block.type, id: block.id, html };
-    }
-  }
-}
-
 function renderTipTap(content: JSONContent, context: MergeTagContext): string {
   const renderedContent = renderMergeTagsInJson(content, context);
   return renderToHTMLString({ extensions: tiptapExtensions, content: renderedContent });
@@ -750,7 +1188,14 @@ function walkTipTap(
     'hardBreak',
     'image',
   ]);
-  const allowedMarks = new Set(['bold', 'italic', 'strike', 'link', 'code']);
+  const allowedMarks = new Set([
+    'bold',
+    'italic',
+    'strike',
+    'link',
+    'code',
+    EVENT_PAGE_INLINE_STYLE_MARK,
+  ]);
   if (value.type && !allowedNodes.has(value.type)) {
     issues.push({
       code: 'unsupported_tiptap_node',
@@ -769,6 +1214,20 @@ function walkTipTap(
         field,
       });
     }
+  }
+  if (
+    (value.type === 'heading' || value.type === 'paragraph') &&
+    isRecord(value.attrs) &&
+    value.attrs.textAlign !== undefined &&
+    value.attrs.textAlign !== null &&
+    !isAllowedEventPageTextAlignment(value.attrs.textAlign)
+  ) {
+    issues.push({
+      code: 'unsupported_text_alignment',
+      message: 'Event-page text alignment must be left, center, or right',
+      severity: 'error',
+      field: `${field}.attrs.textAlign`,
+    });
   }
   if (value.type === 'image') {
     const attrs = isRecord(value.attrs) ? value.attrs : {};
@@ -811,6 +1270,56 @@ function walkTipTap(
           severity: 'error',
           field,
         });
+      }
+      if (mark.type === EVENT_PAGE_INLINE_STYLE_MARK && isRecord(mark.attrs)) {
+        if (
+          mark.attrs.fontFamily !== undefined &&
+          mark.attrs.fontFamily !== null &&
+          !isAllowedEventPageFontFamily(mark.attrs.fontFamily)
+        ) {
+          issues.push({
+            code: 'unsupported_font_family',
+            message: 'Selected event-page font family is not in the approved font catalog',
+            severity: 'error',
+            field,
+          });
+        }
+        if (
+          mark.attrs.color !== undefined &&
+          mark.attrs.color !== null &&
+          !isAllowedEventPageColor(mark.attrs.color)
+        ) {
+          issues.push({
+            code: 'unsupported_text_color',
+            message: 'Selected event-page text color must be a safe hex color',
+            severity: 'error',
+            field,
+          });
+        }
+        if (
+          mark.attrs.fontSize !== undefined &&
+          mark.attrs.fontSize !== null &&
+          !isAllowedEventPageFontSize(mark.attrs.fontSize)
+        ) {
+          issues.push({
+            code: 'unsupported_font_size',
+            message: 'Selected event-page font size must be between 8px and 96px',
+            severity: 'error',
+            field,
+          });
+        }
+        if (
+          mark.attrs.lineHeight !== undefined &&
+          mark.attrs.lineHeight !== null &&
+          !isAllowedEventPageLineHeight(mark.attrs.lineHeight)
+        ) {
+          issues.push({
+            code: 'unsupported_line_height',
+            message: 'Selected event-page line height must be between 80% and 240%',
+            severity: 'error',
+            field,
+          });
+        }
       }
       if (mark.type === 'link' && isRecord(mark.attrs) && typeof mark.attrs.href === 'string') {
         validateMergeTags(mark.attrs.href).unknownTags.forEach((tag) =>
@@ -933,9 +1442,11 @@ function linkFields(block: EventPageBlock): { field: string; url: string }[] {
     case 'social_links':
       return block.links.map((link, index) => ({ field: `links.${index}.url`, url: link.url }));
     case 'sponsors':
-      return block.items.flatMap((item, index) =>
-        item.url ? [{ field: `items.${index}.url`, url: item.url }] : [],
-      );
+    case 'speakers':
+      return block.items.flatMap((item, index) => {
+        const url = (item as { url?: string }).url;
+        return url ? [{ field: `items.${index}.url`, url }] : [];
+      });
     default:
       return [];
   }

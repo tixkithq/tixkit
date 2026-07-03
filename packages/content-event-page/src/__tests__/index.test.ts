@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  EVENT_PAGE_INLINE_STYLE_MARK,
   TIPTAP_EVENT_PAGE_PROVIDER,
   createDefaultEventPageDocument,
   normalizeEventPageDocument,
@@ -150,6 +151,62 @@ describe('renderEventPageDocument', () => {
     expect(rendered.html).toContain('Welcome All Access Chicago');
     expect(rendered.html).toContain('&lt;script&gt;alert(1)&lt;/script&gt;');
     expect(rendered.html).not.toContain('<script>alert(1)</script>');
+  });
+
+  it('renders approved rich-text inline styles and strips arbitrary style CSS', () => {
+    const document = createDefaultEventPageDocument({
+      eventId: 'evt_demo_001',
+      eventTitle: 'All Access Chicago',
+      eventDescription: 'Safe copy',
+      checkoutUrl: 'https://checkout.example.test/checkout?eventId=evt_demo_001',
+    });
+    document.blocks.push({
+      type: 'rich_text',
+      id: 'story',
+      content: {
+        type: 'doc',
+        content: [
+          {
+            type: 'paragraph',
+            attrs: { textAlign: 'center' },
+            content: [
+              {
+                type: 'text',
+                text: 'Styled page copy',
+                marks: [
+                  {
+                    type: EVENT_PAGE_INLINE_STYLE_MARK,
+                    attrs: {
+                      color: '#0f766e',
+                      fontFamily: 'Georgia, serif',
+                      fontSize: '18px',
+                      lineHeight: '140%',
+                    },
+                  },
+                ],
+              },
+            ],
+          },
+        ],
+      },
+    });
+
+    const rendered = renderEventPageDocument(document, context);
+
+    expect(rendered.validation.valid).toBe(true);
+    expect(rendered.html).toContain('data-event-page-inline-style="true"');
+    expect(rendered.html).toContain('style="text-align: center"');
+    expect(rendered.html).toContain(
+      'style="color: #0f766e; font-family: Georgia, serif; font-size: 18px; line-height: 140%"',
+    );
+    expect(sanitizeEventPageHtml('<span style="position:fixed;color:red">Bad</span>')).toBe(
+      '<span>Bad</span>',
+    );
+    expect(
+      sanitizeEventPageHtml(
+        '<p style="position:fixed;text-align:center;color:#0f766e;font-size:18px;line-height:140%">Good</p>',
+      ),
+    ).toBe('<p style="color: #0f766e; font-size: 18px; line-height: 140%; text-align: center">Good</p>');
   });
 
   it('rejects rich-text images with unsafe URLs or missing alt text', () => {
