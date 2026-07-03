@@ -33,10 +33,15 @@ import {
 import {
   normalizeEventPageDocument,
   renderEventPageDocument,
+  renderResolvedEventPageHeadless,
+  renderResolvedEventPageHtml,
+  renderResolvedEventPageText,
+  resolveEventPageDocument,
   validateEventPageDocument,
   type EventPageDiscoveryCard,
   type EventPageHeadlessBlock,
   type EventPageRenderContext,
+  type ResolvedEventPage,
 } from '@tixkit/content-event-page';
 import {
   normalizeSmsTemplateDocument,
@@ -79,6 +84,7 @@ type PublicContentPage = {
     html: string;
     text: string;
     headless: EventPageHeadlessBlock[];
+    renderModel: ResolvedEventPage;
     discovery: EventPageDiscoveryCard;
   };
 };
@@ -383,6 +389,22 @@ async function renderDocumentPreview(
       validation: rendered.validation,
     };
   }
+  if (channel === 'event_page') {
+    const document = normalizeEventPageDocument(content.contentJson);
+    if (!document) {
+      throw new ValidationError('Event-page preview requires canonical event-page JSON', {
+        code: 'invalid_event_page_document',
+      });
+    }
+    const rendered = renderEventPageDocument(document, context as EventPageRenderContext);
+    return {
+      output: {
+        html: rendered.html,
+        text: rendered.text,
+      },
+      validation: rendered.validation,
+    };
+  }
   const output = renderPreview(channel, RENDER_CONTRACTS[channel], content, context, optOutToken);
   const validation = validateContentVersion(
     {
@@ -587,10 +609,10 @@ function toPublicContentPage(input: {
       eventId: input.document.eventId,
     });
   }
-  const rendered = renderEventPageDocument(pageDocument, input.context);
-  if (!rendered.validation.valid) {
+  const renderModel = resolveEventPageDocument(pageDocument, input.context);
+  if (!renderModel.validation.valid) {
     throw new ValidationError('Published event page has render blockers', {
-      issues: rendered.validation.issues,
+      issues: renderModel.validation.issues,
       eventId: input.document.eventId,
     });
   }
@@ -608,15 +630,16 @@ function toPublicContentPage(input: {
       versionNumber: input.version.versionNumber,
       subject: input.version.subject,
       previewText: input.version.previewText,
-      renderedHtml: rendered.html,
-      renderedText: rendered.text,
+      renderedHtml: renderResolvedEventPageHtml(renderModel),
+      renderedText: renderResolvedEventPageText(renderModel),
       publishedAt: input.version.publishedAt,
     },
     page: {
-      html: rendered.html,
-      text: rendered.text,
-      headless: rendered.headless,
-      discovery: rendered.discovery,
+      html: renderResolvedEventPageHtml(renderModel),
+      text: renderResolvedEventPageText(renderModel),
+      headless: renderResolvedEventPageHeadless(renderModel),
+      renderModel,
+      discovery: renderModel.discovery,
     },
   };
 }
@@ -810,18 +833,29 @@ export const contentRoutes: FastifyPluginAsync = async (app) => {
       document.channel === 'sms' ? normalizeSmsTemplateDocument(body.contentJson) : undefined;
     const emailDocument =
       document.channel === 'email' ? normalizeEmailTemplateDocument(body.contentJson) : undefined;
+    const eventPageDocument =
+      document.channel === 'event_page' ? normalizeEventPageDocument(body.contentJson) : undefined;
     const renderedEmail = emailDocument ? await renderEmailTemplate(emailDocument, {}) : undefined;
+    const renderedEventPage = eventPageDocument
+      ? renderEventPageDocument(eventPageDocument, {} as EventPageRenderContext)
+      : undefined;
     const version = await repo().createVersion({
       documentId,
       subject: emailDocument ? emailDocument.settings.subject : body.subject,
       previewText: emailDocument ? emailDocument.settings.previewText : body.previewText,
       contentJson: body.contentJson,
-      renderedHtml: renderedEmail ? renderedEmail.html : body.renderedHtml,
+      renderedHtml: renderedEmail
+        ? renderedEmail.html
+        : renderedEventPage
+          ? renderedEventPage.html
+          : body.renderedHtml,
       renderedText: renderedEmail
         ? renderedEmail.text
         : smsDocument
           ? smsDocument.editor.body
-          : body.renderedText,
+          : renderedEventPage
+            ? renderedEventPage.text
+            : body.renderedText,
       variables: variableDefinitionsForChannel(document.channel),
       validation,
       createdBy: request.principal!.id,

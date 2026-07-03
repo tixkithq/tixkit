@@ -230,7 +230,7 @@ function emailDocumentJson(overrides: Parameters<typeof createDefaultEmailTempla
   return createDefaultEmailTemplate({
     editor: {
       provider: REACT_EMAIL_EDITOR_PACKAGE,
-      contentHtml: '<h1>{{event.title}}</h1><p>Hi {{recipient.name}}</p>',
+      contentHtml: '<h1>{{event.title}}</h1><p>Hi {{recipient.name}}, order {{order.id}}.</p>',
     },
     settings: {
       templateKey: 'order-confirmed',
@@ -255,7 +255,7 @@ function emailDocumentJson(overrides: Parameters<typeof createDefaultEmailTempla
       {
         type: 'ticket_summary',
         title: 'Ticket summary',
-        body: '{{ticket.type}} - {{order.total}}',
+        body: 'Order {{order.id}} - {{ticket.type}} - {{order.total}}',
       },
       {
         type: 'unsubscribe_footer',
@@ -1154,6 +1154,87 @@ describe('content routes', () => {
     );
   });
 
+  it('renders event-page previews from canonical JSON, ignoring caller-supplied renderedHtml', async () => {
+    const eventPageDocument = eventPageJson();
+    const { db } = createContentDb({
+      brands: [{ id: 'brd_1', tenant_id: 'tnt_1', organization_id: 'org_1' }],
+      content_documents: [
+        documentRow({
+          id: 'cdoc_event_page',
+          channel: 'event_page',
+          key: 'main',
+          name: 'Main event page',
+        }),
+      ],
+      content_document_versions: [],
+      content_render_artifacts: [],
+    });
+    const app = await setupContentApp(db, principal);
+
+    const save = await app.inject({
+      method: 'POST',
+      url: '/content-documents/cdoc_event_page/versions',
+      payload: {
+        contentJson: eventPageDocument,
+        renderedHtml: '<script>alert(1)</script><p>caller-supplied stale html</p>',
+        renderedText: 'caller-supplied stale text',
+      },
+    });
+
+    expect(save.statusCode).toBe(201);
+    expect(save.json().renderedHtml).not.toContain('caller-supplied stale html');
+    expect(save.json().renderedHtml).not.toContain('<script>');
+    expect(save.json().renderedText).not.toContain('caller-supplied stale text');
+
+    const preview = await app.inject({
+      method: 'POST',
+      url: '/content-documents/cdoc_event_page/preview',
+      payload: { versionId: save.json().id },
+    });
+
+    expect(preview.statusCode).toBe(200);
+    expect(preview.json().output.html).not.toContain('caller-supplied stale html');
+    expect(preview.json().output.html).not.toContain('<script>');
+  });
+
+  it('event-page preview output matches canonical renderEventPageDocument output', async () => {
+    const eventPageDocument = eventPageJson();
+    const { db } = createContentDb({
+      brands: [{ id: 'brd_1', tenant_id: 'tnt_1', organization_id: 'org_1' }],
+      content_documents: [
+        documentRow({
+          id: 'cdoc_event_page',
+          channel: 'event_page',
+          key: 'main',
+          name: 'Main event page',
+        }),
+      ],
+      content_document_versions: [],
+      content_render_artifacts: [],
+    });
+    const app = await setupContentApp(db, principal);
+
+    const save = await app.inject({
+      method: 'POST',
+      url: '/content-documents/cdoc_event_page/versions',
+      payload: { contentJson: eventPageDocument },
+    });
+    expect(save.statusCode).toBe(201);
+
+    const preview = await app.inject({
+      method: 'POST',
+      url: '/content-documents/cdoc_event_page/preview',
+      payload: {
+        versionId: save.json().id,
+        context: { event: { title: 'Published page' } },
+      },
+    });
+
+    expect(preview.statusCode).toBe(200);
+    expect(preview.json().output.html).toContain('class="tixkit-event-page"');
+    expect(preview.json().output.html).toContain('Published page');
+  });
+
   it('fails closed for SMS test sends without an active verified provider route', async () => {
     const smsTransport = new TestCaptureSmsTransport();
     const smsDocument = createDefaultSmsTemplate({
@@ -1477,6 +1558,22 @@ describe('content routes', () => {
       expect(payload.version.renderedHtml).not.toContain('Hidden comp');
       expect(JSON.stringify(payload)).not.toContain('tnt_1');
       expect(JSON.stringify(payload)).not.toContain('stored html must not render');
+      expect(payload.page.renderModel.schemaVersion).toBe(1);
+      expect(payload.page.renderModel.validation.valid).toBe(true);
+      expect(payload.page.renderModel.blocks.map((block: { type: string }) => block.type)).toEqual([
+        'hero',
+        'event_details',
+        'tickets',
+        'schedule',
+        'venue_map',
+        'faq',
+      ]);
+      expect(
+        payload.page.renderModel.blocks.some(
+          (block: { type: string; tickets?: { id: string }[] }) =>
+            block.type === 'tickets' && block.tickets?.some((ticket) => ticket.id === 'tt_vip'),
+        ),
+      ).toBe(true);
     }
   });
 
