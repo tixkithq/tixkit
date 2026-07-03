@@ -459,6 +459,117 @@ describe('upload artifact service', () => {
     });
   });
 
+  it('rejects image uploads whose bytes do not match the declared content type', async () => {
+    const pngMagic = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
+    const fakeBytes = Buffer.from('not a real image');
+    for (const purpose of ['brand_logo', 'user_avatar', 'content_email_image'] as const) {
+      const { db, tables } = createMockDb();
+      const artifact = await createUploadArtifact(db, {
+        tenantId: 'tnt_1',
+        eventId: 'evt_1',
+        purpose,
+        fileName: 'fake.png',
+        contentType: 'image/png',
+        sizeBytes: fakeBytes.length,
+      });
+      s3Send
+        .mockResolvedValueOnce({ ContentLength: fakeBytes.length, ContentType: 'image/png' })
+        .mockResolvedValueOnce({
+          Body: { transformToByteArray: async () => new Uint8Array(fakeBytes) },
+        })
+        .mockResolvedValueOnce({});
+
+      await expect(completeUploadArtifact(db, artifact.artifactId)).rejects.toThrow(
+        'Uploaded image content does not match declared content type: image/png',
+      );
+      expect(tables.upload_artifacts[0]).toMatchObject({
+        status: 'rejected',
+        scan_status: 'blocked',
+      });
+      expect(tables.upload_artifacts[0].scan_result).toBe(
+        'Uploaded image content does not match declared content type: image/png',
+      );
+    }
+
+    const validPng = Buffer.concat([pngMagic, Buffer.alloc(64)]);
+    const { db, tables } = createMockDb();
+    const validArtifact = await createUploadArtifact(db, {
+      tenantId: 'tnt_1',
+      eventId: 'evt_1',
+      purpose: 'brand_logo',
+      fileName: 'logo.png',
+      contentType: 'image/png',
+      sizeBytes: validPng.length,
+    });
+    s3Send
+      .mockResolvedValueOnce({ ContentLength: validPng.length, ContentType: 'image/png' })
+      .mockResolvedValueOnce({
+        Body: { transformToByteArray: async () => new Uint8Array(validPng) },
+      })
+      .mockResolvedValueOnce({})
+      .mockResolvedValueOnce({});
+    await expect(completeUploadArtifact(db, validArtifact.artifactId)).resolves.toEqual({
+      artifactId: validArtifact.artifactId,
+      status: 'uploaded',
+      scanStatus: 'clean',
+    });
+    expect(tables.upload_artifacts[0]).toMatchObject({ status: 'uploaded' });
+  });
+
+  it('accepts valid JPEG, WebP, and GIF image bytes for content_email_image', async () => {
+    const jpegMagic = Buffer.from([0xff, 0xd8, 0xff, 0xe0]);
+    const webpMagic = Buffer.concat([
+      Buffer.from([0x52, 0x49, 0x46, 0x46]),
+      Buffer.alloc(4),
+      Buffer.from([0x57, 0x45, 0x42, 0x50]),
+    ]);
+    const gifMagic = Buffer.from([0x47, 0x49, 0x46, 0x38, 0x39, 0x61]);
+    const cases = [
+      { name: 'jpeg', bytes: Buffer.concat([jpegMagic, Buffer.alloc(64)]), type: 'image/jpeg' },
+      { name: 'webp', bytes: Buffer.concat([webpMagic, Buffer.alloc(64)]), type: 'image/webp' },
+      { name: 'gif', bytes: Buffer.concat([gifMagic, Buffer.alloc(64)]), type: 'image/gif' },
+    ];
+    for (const c of cases) {
+      const { db, tables } = createMockDb();
+      const artifact = await createUploadArtifact(db, {
+        tenantId: 'tnt_1',
+        eventId: 'evt_1',
+        purpose: 'content_email_image',
+        fileName: `image.${c.name}`,
+        contentType: c.type,
+        sizeBytes: c.bytes.length,
+      });
+      s3Send
+        .mockResolvedValueOnce({ ContentLength: c.bytes.length, ContentType: c.type })
+        .mockResolvedValueOnce({
+          Body: { transformToByteArray: async () => new Uint8Array(c.bytes) },
+        })
+        .mockResolvedValueOnce({})
+        .mockResolvedValueOnce({});
+      await expect(completeUploadArtifact(db, artifact.artifactId)).resolves.toEqual({
+        artifactId: artifact.artifactId,
+        status: 'uploaded',
+        scanStatus: 'clean',
+      });
+      expect(tables.upload_artifacts[0]).toMatchObject({ status: 'uploaded' });
+    }
+  });
+
+  it('rejects SVG content type for brand_logo uploads', async () => {
+    const { db, tables } = createMockDb();
+    await expect(
+      createUploadArtifact(db, {
+        tenantId: 'tnt_1',
+        brandId: 'brd_1',
+        purpose: 'brand_logo',
+        fileName: 'logo.svg',
+        contentType: 'image/svg+xml',
+        sizeBytes: 100,
+      }),
+    ).rejects.toThrow('Unsupported upload content type: image/svg+xml');
+    expect(tables.upload_artifacts).toHaveLength(0);
+  });
+
   it('returns already-clean uploaded artifacts without trusting or rescanning the old staging key', async () => {
     const { db } = createMockDb({
       upload_artifacts: [
@@ -1347,7 +1458,9 @@ describe('upload artifact routes', () => {
       uploadRoutes,
       makePrincipal({ scopes: ['messages.write'] }),
     );
-    const imageBytes = new Uint8Array(12);
+    const imageBytes = new Uint8Array([
+      0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00, 0x00, 0x00, 0x00,
+    ]);
     s3Send
       .mockResolvedValueOnce({ ContentLength: 12, ContentType: 'image/png' })
       .mockResolvedValueOnce({

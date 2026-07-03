@@ -13,7 +13,11 @@ import type { Database } from '@tixkit/db';
 import { ValidationError, NotFoundError } from '@tixkit/domain';
 import { config } from '../config/index.js';
 
-export type UploadPurpose = 'checkout_answer' | 'brand_logo' | 'user_avatar' | 'content_email_image';
+export type UploadPurpose =
+  | 'checkout_answer'
+  | 'brand_logo'
+  | 'user_avatar'
+  | 'content_email_image';
 
 export type CreateUploadInput = {
   tenantId: string;
@@ -59,7 +63,7 @@ const PURPOSE_LIMITS: Record<
   },
   brand_logo: {
     maxSizeBytes: 2 * 1024 * 1024,
-    contentTypes: new Set(['image/jpeg', 'image/png', 'image/svg+xml', 'image/webp']),
+    contentTypes: new Set(['image/jpeg', 'image/png', 'image/webp']),
     prefix: 'brand-logos',
   },
   user_avatar: {
@@ -118,6 +122,48 @@ function assertUploadAllowed(
     input.sizeBytes > limits.maxSizeBytes
   ) {
     throw new ValidationError(`Upload exceeds ${limits.maxSizeBytes} byte limit`);
+  }
+}
+
+const IMAGE_MAGIC_BYTES: Record<string, (buf: Buffer) => boolean> = {
+  'image/jpeg': (buf) => buf.length >= 3 && buf[0] === 0xff && buf[1] === 0xd8 && buf[2] === 0xff,
+  'image/png': (buf) =>
+    buf.length >= 8 &&
+    buf[0] === 0x89 &&
+    buf[1] === 0x50 &&
+    buf[2] === 0x4e &&
+    buf[3] === 0x47 &&
+    buf[4] === 0x0d &&
+    buf[5] === 0x0a &&
+    buf[6] === 0x1a &&
+    buf[7] === 0x0a,
+  'image/webp': (buf) =>
+    buf.length >= 12 &&
+    buf[0] === 0x52 &&
+    buf[1] === 0x49 &&
+    buf[2] === 0x46 &&
+    buf[3] === 0x46 &&
+    buf[8] === 0x57 &&
+    buf[9] === 0x45 &&
+    buf[10] === 0x42 &&
+    buf[11] === 0x50,
+  'image/gif': (buf) =>
+    buf.length >= 6 &&
+    buf[0] === 0x47 &&
+    buf[1] === 0x49 &&
+    buf[2] === 0x46 &&
+    buf[3] === 0x38 &&
+    (buf[4] === 0x37 || buf[4] === 0x39) &&
+    buf[5] === 0x61,
+};
+
+function validateImageBytes(contentType: string, buffer: Buffer): void {
+  const checker = IMAGE_MAGIC_BYTES[contentType];
+  if (!checker) return;
+  if (!checker(buffer)) {
+    throw new ValidationError(
+      `Uploaded image content does not match declared content type: ${contentType}`,
+    );
   }
 }
 
@@ -475,6 +521,16 @@ export async function completeUploadArtifact(
       .execute();
     await tryDeleteUploadObject(s3, artifact.bucket, stagingObjectKey);
     throw new ValidationError('Uploaded file failed malware scan');
+  }
+
+  try {
+    validateImageBytes(artifact.content_type, buffer);
+  } catch (error) {
+    if (!(error instanceof ValidationError)) throw error;
+    const result = error.message;
+    await markUploadArtifactRejected(db, artifact.id, result);
+    await tryDeleteUploadObject(s3, artifact.bucket, stagingObjectKey);
+    throw new ValidationError(result);
   }
 
   const finalObjectKey = finalObjectKeyFromStaging(stagingObjectKey);

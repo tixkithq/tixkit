@@ -271,7 +271,7 @@ function BrandingPageContent() {
                 <Input
                   id="brand-logo-upload"
                   type="file"
-                  accept="image/png,image/jpeg,image/webp,image/svg+xml"
+                  accept="image/png,image/jpeg,image/webp"
                   className="sr-only"
                   onChange={(event) => {
                     void handleLogoUpload(event.target.files?.[0]);
