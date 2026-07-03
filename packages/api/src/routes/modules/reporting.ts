@@ -357,52 +357,81 @@ export const reportingRoutes: FastifyPluginAsync = async (app) => {
       typeof query.from === 'string' ? parseDateFilterBoundary(query.from, 'start') : undefined;
     const to = typeof query.to === 'string' ? parseDateFilterBoundary(query.to, 'end') : undefined;
 
-    let orderQuery = db
+    // Aggregate tax snapshots via SQL join instead of materializing all order rows.
+    let taxSnapshotQuery = db
+      .selectFrom('order_tax_snapshots')
+      .innerJoin('orders', 'order_tax_snapshots.order_id', 'orders.id')
+      .select(({ fn }) => [
+        'order_tax_snapshots.tax_rule_name',
+        'order_tax_snapshots.rate',
+        fn.sum<number>('order_tax_snapshots.taxable_amount_cents').as('taxable_amount_cents'),
+        fn.sum<number>('order_tax_snapshots.tax_cents').as('tax_cents'),
+      ])
+      .where('orders.event_id', '=', eventId)
+      .where('orders.tenant_id', '=', principal.tenantId)
+      .where('orders.status', 'in', ['paid', 'partially_refunded', 'refunded']);
+    if (eventScope.organizationId)
+      taxSnapshotQuery = taxSnapshotQuery.where(
+        'orders.organization_id',
+        '=',
+        eventScope.organizationId,
+      );
+    if (eventScope.brandId)
+      taxSnapshotQuery = taxSnapshotQuery.where('orders.brand_id', '=', eventScope.brandId);
+    if (from) taxSnapshotQuery = taxSnapshotQuery.where('orders.created_at', '>=', from);
+    if (to) taxSnapshotQuery = taxSnapshotQuery.where('orders.created_at', '<=', to);
+    const taxSnapshotRows = await taxSnapshotQuery
+      .groupBy(['order_tax_snapshots.tax_rule_name', 'order_tax_snapshots.rate'])
+      .execute();
+
+    // Fallback: aggregate line items via SQL join if no tax snapshots exist.
+    let lineItemQuery = db
+      .selectFrom('order_line_items')
+      .innerJoin('orders', 'order_line_items.order_id', 'orders.id')
+      .select(({ fn }) => [
+        fn.sum<number>('order_line_items.subtotal_cents').as('subtotal_cents'),
+        fn.sum<number>('order_line_items.discount_cents').as('discount_cents'),
+        fn.sum<number>('order_line_items.tax_cents').as('tax_cents'),
+      ])
+      .where('orders.event_id', '=', eventId)
+      .where('orders.tenant_id', '=', principal.tenantId)
+      .where('orders.status', 'in', ['paid', 'partially_refunded', 'refunded']);
+    if (eventScope.organizationId)
+      lineItemQuery = lineItemQuery.where('orders.organization_id', '=', eventScope.organizationId);
+    if (eventScope.brandId)
+      lineItemQuery = lineItemQuery.where('orders.brand_id', '=', eventScope.brandId);
+    if (from) lineItemQuery = lineItemQuery.where('orders.created_at', '>=', from);
+    if (to) lineItemQuery = lineItemQuery.where('orders.created_at', '<=', to);
+    const lineItemAgg =
+      taxSnapshotRows.length === 0 ? await lineItemQuery.executeTakeFirst() : undefined;
+
+    const totalTax =
+      taxSnapshotRows.length > 0
+        ? taxSnapshotRows.reduce((sum, r) => sum + Number(r.tax_cents), 0)
+        : Number(lineItemAgg?.tax_cents ?? 0);
+    const taxableBase =
+      taxSnapshotRows.length > 0
+        ? taxSnapshotRows.reduce((sum, r) => sum + Number(r.taxable_amount_cents), 0)
+        : Number(lineItemAgg?.subtotal_cents ?? 0) - Number(lineItemAgg?.discount_cents ?? 0);
+
+    // Fetch currency from a single scoped order row.
+    let currencyQuery = db
       .selectFrom('orders')
-      .selectAll()
+      .select('currency')
       .where('event_id', '=', eventId)
       .where('tenant_id', '=', principal.tenantId)
       .where('status', 'in', ['paid', 'partially_refunded', 'refunded']);
     if (eventScope.organizationId)
-      orderQuery = orderQuery.where('organization_id', '=', eventScope.organizationId);
-    if (eventScope.brandId) orderQuery = orderQuery.where('brand_id', '=', eventScope.brandId);
-    if (from) orderQuery = orderQuery.where('created_at', '>=', from);
-    if (to) orderQuery = orderQuery.where('created_at', '<=', to);
-    const orders = await orderQuery.execute();
+      currencyQuery = currencyQuery.where('organization_id', '=', eventScope.organizationId);
+    if (eventScope.brandId)
+      currencyQuery = currencyQuery.where('brand_id', '=', eventScope.brandId);
+    if (from) currencyQuery = currencyQuery.where('created_at', '>=', from);
+    if (to) currencyQuery = currencyQuery.where('created_at', '<=', to);
+    const currencyRow = await currencyQuery
+      .orderBy('created_at', 'desc')
+      .limit(1)
+      .executeTakeFirst();
 
-    // Line items store the actual tax snapshot but not tax_rule_id. Report one
-    // actual bucket instead of redistributing collected tax across configured
-    // rules, which would fabricate per-rule precision. If the event has a
-    // single configured rule, the aggregate can be attributed to that rule.
-    const orderIds = orders.map((o) => o.id);
-    const taxSnapshots =
-      orderIds.length === 0
-        ? []
-        : await db
-            .selectFrom('order_tax_snapshots')
-            .select(['tax_rule_name', 'rate', 'taxable_amount_cents', 'tax_cents'])
-            .where('order_id', 'in', orderIds)
-            .execute();
-    const lineItems =
-      orderIds.length === 0
-        ? []
-        : await db
-            .selectFrom('order_line_items')
-            .select(['subtotal_cents', 'discount_cents', 'tax_cents'])
-            .where('order_id', 'in', orderIds)
-            .execute();
-
-    const totalTax =
-      taxSnapshots.length > 0
-        ? taxSnapshots.reduce((sum, snapshot) => sum + Number(snapshot.tax_cents), 0)
-        : lineItems.reduce((sum, li) => sum + Number(li.tax_cents), 0);
-    const taxableBase =
-      taxSnapshots.length > 0
-        ? taxSnapshots.reduce((sum, snapshot) => sum + Number(snapshot.taxable_amount_cents), 0)
-        : lineItems.reduce(
-            (sum, li) => sum + Number(li.subtotal_cents) - Number(li.discount_cents),
-            0,
-          );
     const taxRules = await db
       .selectFrom('tax_rules')
       .select(['name', 'rate'])
@@ -410,32 +439,13 @@ export const reportingRoutes: FastifyPluginAsync = async (app) => {
       .execute();
     const soleRule = taxRules.length === 1 ? taxRules[0] : undefined;
     const breakdown =
-      taxSnapshots.length > 0
-        ? Object.values(
-            taxSnapshots.reduce<
-              Record<
-                string,
-                {
-                  taxRuleName: string;
-                  rate: number;
-                  taxableAmountCents: number;
-                  taxCollectedCents: number;
-                }
-              >
-            >((acc, snapshot) => {
-              const key = `${snapshot.tax_rule_name}:${snapshot.rate}`;
-              const existing = acc[key] ?? {
-                taxRuleName: String(snapshot.tax_rule_name),
-                rate: Number(snapshot.rate),
-                taxableAmountCents: 0,
-                taxCollectedCents: 0,
-              };
-              existing.taxableAmountCents += Number(snapshot.taxable_amount_cents);
-              existing.taxCollectedCents += Number(snapshot.tax_cents);
-              acc[key] = existing;
-              return acc;
-            }, {}),
-          )
+      taxSnapshotRows.length > 0
+        ? taxSnapshotRows.map((r) => ({
+            taxRuleName: String(r.tax_rule_name),
+            rate: Number(r.rate),
+            taxableAmountCents: Number(r.taxable_amount_cents),
+            taxCollectedCents: Number(r.tax_cents),
+          }))
         : totalTax > 0 || taxableBase > 0
           ? [
               {
@@ -449,7 +459,7 @@ export const reportingRoutes: FastifyPluginAsync = async (app) => {
 
     return {
       eventId,
-      currency: orders[0]?.currency ?? event.currency ?? 'USD',
+      currency: currencyRow?.currency ?? event.currency ?? 'USD',
       totalTaxCollectedCents: totalTax,
       breakdown,
     };
@@ -539,7 +549,7 @@ export const reportingRoutes: FastifyPluginAsync = async (app) => {
     // Get all discount codes for the event.
     const discountCodes = await db
       .selectFrom('discount_codes')
-      .selectAll()
+      .select(['id', 'code', 'uses_count'])
       .where('event_id', '=', eventId)
       .execute();
 
@@ -688,50 +698,69 @@ export const reportingRoutes: FastifyPluginAsync = async (app) => {
     const { organizationId } = request.params as { organizationId: string };
     ClerkAuthService.requireOrganizationScope(principal, organizationId);
 
-    const affiliates = await db
+    // Single join query instead of N+1 per-affiliate queries.
+    const rows = await db
       .selectFrom('affiliates')
-      .selectAll()
-      .where('tenant_id', '=', principal.tenantId)
-      .where('organization_id', '=', organizationId)
+      .leftJoin('attributions', 'attributions.affiliate_id', 'affiliates.id')
+      .leftJoin('orders', (join) =>
+        join
+          .onRef('orders.id', '=', 'attributions.order_id')
+          .on('orders.tenant_id', '=', principal.tenantId)
+          .on('orders.organization_id', '=', organizationId),
+      )
+      .select([
+        'affiliates.id as affiliateId',
+        'affiliates.code',
+        'affiliates.name',
+        'orders.id as orderId',
+        'orders.total_cents',
+        'orders.refunded_cents',
+        'attributions.commission_cents',
+      ])
+      .where('affiliates.tenant_id', '=', principal.tenantId)
+      .where('affiliates.organization_id', '=', organizationId)
       .execute();
-    const affiliatesReport = await Promise.all(
-      affiliates.map(async (aff) => {
-        const attributions = await db
-          .selectFrom('attributions')
-          .selectAll()
-          .where('affiliate_id', '=', aff.id)
-          .execute();
-        // Compute real revenue by joining attributions with orders.
-        const orderIds = attributions.map((a) => a.order_id);
-        const attributedOrders =
-          orderIds.length === 0
-            ? []
-            : await db
-                .selectFrom('orders')
-                .select(['id', 'total_cents', 'refunded_cents'])
-                .where('id', 'in', orderIds)
-                .where('tenant_id', '=', principal.tenantId)
-                .where('organization_id', '=', organizationId)
-                .execute();
-        const attributedOrderIds = new Set(attributedOrders.map((order) => order.id));
-        const referralsCount = attributedOrderIds.size;
-        const revenueAttributedCents = attributedOrders.reduce(
-          (sum, o) => sum + Math.max(0, Number(o.total_cents) - Number(o.refunded_cents)),
+
+    const affiliateMap = new Map<
+      string,
+      {
+        affiliateId: string;
+        code: string;
+        name: string;
+        attributedOrderIds: Set<string>;
+        revenueAttributedCents: number;
+        commissionCents: number;
+      }
+    >();
+
+    for (const row of rows) {
+      const aff = affiliateMap.get(row.affiliateId) ?? {
+        affiliateId: row.affiliateId,
+        code: row.code,
+        name: row.name,
+        attributedOrderIds: new Set<string>(),
+        revenueAttributedCents: 0,
+        commissionCents: 0,
+      };
+      if (row.orderId && !aff.attributedOrderIds.has(row.orderId)) {
+        aff.attributedOrderIds.add(row.orderId);
+        aff.revenueAttributedCents += Math.max(
           0,
+          Number(row.total_cents ?? 0) - Number(row.refunded_cents ?? 0),
         );
-        const commissionCents = attributions
-          .filter((attribution) => attributedOrderIds.has(attribution.order_id))
-          .reduce((sum, a) => sum + Number(a.commission_cents), 0);
-        return {
-          affiliateId: aff.id,
-          code: aff.code,
-          name: aff.name,
-          referralsCount,
-          revenueAttributedCents,
-          commissionCents,
-        };
-      }),
-    );
+        aff.commissionCents += Number(row.commission_cents ?? 0);
+      }
+      affiliateMap.set(row.affiliateId, aff);
+    }
+
+    const affiliatesReport = Array.from(affiliateMap.values()).map((aff) => ({
+      affiliateId: aff.affiliateId,
+      code: aff.code,
+      name: aff.name,
+      referralsCount: aff.attributedOrderIds.size,
+      revenueAttributedCents: aff.revenueAttributedCents,
+      commissionCents: aff.commissionCents,
+    }));
 
     return { organizationId, affiliates: affiliatesReport };
   });

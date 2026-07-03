@@ -184,6 +184,10 @@ function createMockDb(): unknown {
         query.joins.push(joinedTable);
         return query;
       },
+      leftJoin: (joinedTable: string) => {
+        query.joins.push(joinedTable);
+        return query;
+      },
       where: (column: string, op: string, value: unknown) => {
         query.wheres.push({ column, op, value });
         return query;
@@ -387,7 +391,51 @@ function createMockDb(): unknown {
                     organization_id: 'org_1',
                   },
                 ];
-          return affiliates.filter((affiliate) => rowMatchesWheres(affiliate, query.wheres));
+          const scopedAffiliates = affiliates.filter((affiliate) =>
+            rowMatchesWheres(affiliate, query.wheres),
+          );
+          if (query.joins.includes('attributions') && query.joins.includes('orders')) {
+            const tenantWhere = query.wheres.find((w) => w.column === 'affiliates.tenant_id');
+            const orgWhere = query.wheres.find((w) => w.column === 'affiliates.organization_id');
+            const tenantId = tenantWhere?.value as string;
+            const orgId = orgWhere?.value as string;
+            const joinedRows: Record<string, unknown>[] = [];
+            for (const aff of scopedAffiliates) {
+              const affAttributions = dbState.attributions.filter(
+                (attr) => attr.affiliate_id === aff.id,
+              );
+              if (affAttributions.length === 0) {
+                joinedRows.push({
+                  affiliateId: aff.id,
+                  code: aff.code,
+                  name: aff.name,
+                  orderId: null,
+                  total_cents: null,
+                  refunded_cents: null,
+                  commission_cents: null,
+                });
+              }
+              for (const attr of affAttributions) {
+                const order = dbState.orders.find(
+                  (o) =>
+                    o.id === attr.order_id &&
+                    o.tenant_id === tenantId &&
+                    o.organization_id === orgId,
+                );
+                joinedRows.push({
+                  affiliateId: aff.id,
+                  code: aff.code,
+                  name: aff.name,
+                  orderId: order?.id ?? null,
+                  total_cents: order?.total_cents ?? null,
+                  refunded_cents: order?.refunded_cents ?? null,
+                  commission_cents: attr.commission_cents,
+                });
+              }
+            }
+            return joinedRows;
+          }
+          return scopedAffiliates;
         }
         if (table === 'attributions') {
           const attributions =
@@ -1892,15 +1940,10 @@ describe('reporting routes', () => {
     expect(body.affiliates[0].commissionCents).toBe(150);
     expect(dbState.queryWheres).toContainEqual(
       expect.objectContaining({
-        table: 'orders',
+        table: 'affiliates',
         wheres: expect.arrayContaining([
-          {
-            column: 'id',
-            op: 'in',
-            value: ['ord_1', 'ord_over_refunded', 'ord_other_org', 'ord_other_tenant'],
-          },
-          { column: 'tenant_id', op: '=', value: 'tnt_1' },
-          { column: 'organization_id', op: '=', value: 'org_1' },
+          { column: 'affiliates.tenant_id', op: '=', value: 'tnt_1' },
+          { column: 'affiliates.organization_id', op: '=', value: 'org_1' },
         ]),
       }),
     );
