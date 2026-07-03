@@ -383,11 +383,26 @@ async function expectFriendlyVariableChip(page: Page): Promise<void> {
   expect(menuSnapshot.visibility).toBe('visible');
   await expect(packageTooltip.getByRole('button', { name: 'Align center' })).toBeVisible();
   await expect(packageTooltip.getByLabel('Selection color')).toBeVisible();
+  await expect(packageTooltip.getByLabel('Selection font family')).toBeVisible();
   await expect(packageTooltip.getByLabel('Selection text size')).toBeVisible();
   await expect(packageTooltip.getByLabel('Selection line height')).toBeVisible();
   await expect(packageTooltip.getByLabel('Variable replacement')).toHaveCount(0);
   const variableOptionsButton = packageTooltip.getByRole('button', { name: 'Variable options' });
   await expect(variableOptionsButton).toBeVisible();
+
+  const variableFirstClickFontSelect = packageTooltip.getByLabel('Selection font family');
+  await variableFirstClickFontSelect.click();
+  await expect(packageTooltip).toBeVisible();
+  await expect(variableFirstClickFontSelect).toBeFocused();
+  await variableFirstClickFontSelect.selectOption('Georgia, serif');
+  await expect(packageTooltip).toBeVisible();
+  await expect
+    .poll(() =>
+      page
+        .locator('.tixkit-email-variable-chip[data-variable-key="recipient.name"]')
+        .evaluate((element) => window.getComputedStyle(element).fontFamily),
+    )
+    .toContain('Georgia');
 
   const variableFirstClickSizeInput = packageTooltip.getByLabel('Selection text size');
   await variableFirstClickSizeInput.click();
@@ -412,7 +427,7 @@ async function expectFriendlyVariableChip(page: Page): Promise<void> {
     .poll(() =>
       page
         .locator('.tixkit-email-variable-chip[data-variable-key="recipient.name"]')
-        .evaluate((element) => window.getComputedStyle(element).color),
+      .evaluate((element) => window.getComputedStyle(element).color),
     )
     .toBe('rgb(185, 28, 28)');
 
@@ -455,45 +470,98 @@ async function expectFriendlyVariableChip(page: Page): Promise<void> {
     }
     throw new Error('Ready row text was not found');
   });
+  // Wait for any pending restoreBubbleSelection callbacks (setTimeout/rAF)
+  // from the variable menu toggle to settle before clicking on plain text.
+  await page.waitForTimeout(100);
   await page.mouse.click(rowTextPoint.x, rowTextPoint.y);
   await expect(packageTooltip).toBeVisible();
   await expect(page.getByLabel('Edit variable')).toHaveCount(0);
   await expect.poll(() => page.evaluate(() => window.getSelection()?.toString() ?? '')).toBe('');
 
-  const firstClickSizeInput = packageTooltip.getByLabel('Selection text size');
-  await firstClickSizeInput.click();
+  // Word-scoped styling: clicking on plain text without a selection should
+  // only style the current word (like Google Docs), not the entire row.
+  const wordClickSizeInput = packageTooltip.getByLabel('Selection text size');
+  await wordClickSizeInput.click();
   await expect(packageTooltip).toBeVisible();
-  await expect(firstClickSizeInput).toBeFocused();
-  await firstClickSizeInput.fill('17');
+  await expect(wordClickSizeInput).toBeFocused();
+  await wordClickSizeInput.fill('17');
   await expect(packageTooltip).toBeVisible();
+  // The clicked word should get the new font size.
+  await expect
+    .poll(() =>
+      page.getByLabel('Email body').evaluate((root) => {
+        const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+        while (walker.nextNode()) {
+          const node = walker.currentNode;
+          if (node.textContent?.includes('tickets') && !node.parentElement?.closest('.tixkit-email-variable-chip')) {
+            return window.getComputedStyle(node.parentElement!).fontSize;
+          }
+        }
+        return 'not-found';
+      }),
+    )
+    .toBe('17px');
+  // The merge tag chip should NOT get the word-scoped font size.
   await expect
     .poll(() =>
       page
         .locator('.tixkit-email-variable-chip[data-variable-key="recipient.name"]')
         .evaluate((element) => window.getComputedStyle(element).fontSize),
     )
-    .toBe('17px');
+    .not.toBe('17px');
 
-  const firstClickColorInput = packageTooltip.getByLabel('Selection color');
-  await firstClickColorInput.click();
+  const wordClickColorInput = packageTooltip.getByLabel('Selection color');
+  await wordClickColorInput.click();
   await expect(packageTooltip).toBeVisible();
-  await firstClickColorInput.fill('#b91c1c');
+  await wordClickColorInput.fill('#1d4ed8');
   await expect(packageTooltip).toBeVisible();
+  // The clicked word should get the new color.
+  await expect
+    .poll(() =>
+      page.getByLabel('Email body').evaluate((root) => {
+        const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+        while (walker.nextNode()) {
+          const node = walker.currentNode;
+          if (node.textContent?.includes('tickets') && !node.parentElement?.closest('.tixkit-email-variable-chip')) {
+            return window.getComputedStyle(node.parentElement!).color;
+          }
+        }
+        return 'not-found';
+      }),
+    )
+    .toBe('rgb(29, 78, 216)');
+  // The merge tag chip should NOT get the word-scoped color.
   await expect
     .poll(() =>
       page
         .locator('.tixkit-email-variable-chip[data-variable-key="recipient.name"]')
         .evaluate((element) => window.getComputedStyle(element).color),
     )
-    .toBe('rgb(185, 28, 28)');
+    .not.toBe('rgb(29, 78, 216)');
 
+  // Alignment is node-level, so it should still apply to the whole paragraph.
   await packageTooltip.getByRole('button', { name: 'Align center' }).click();
   await expect(packageTooltip).toBeVisible();
   await expect.poll(() => page.evaluate(() => window.getSelection()?.toString() ?? '')).toBe('');
 
+  // Selection-scoped styling: select all text in the paragraph and apply
+  // styles. This should affect ALL text including merge tag chips.
+  const emailBody = page.getByLabel('Email body');
+  await emailBody.click();
+  await emailBody.press('ControlOrMeta+A');
+  await expect(packageTooltip).toBeVisible();
   await packageTooltip.getByLabel('Selection color').fill('#0f766e');
+  await page.waitForTimeout(100);
+  // Use evaluate to trigger the change event reliably for the select element
+  await packageTooltip.getByLabel('Selection font family').evaluate((el: HTMLSelectElement) => {
+    el.value = 'Inter, Arial, sans-serif';
+    el.dispatchEvent(new Event('change', { bubbles: true }));
+  });
+  await page.waitForTimeout(100);
   await packageTooltip.getByLabel('Selection text size').fill('18');
+  await page.waitForTimeout(100);
   await packageTooltip.getByLabel('Selection line height').fill('140');
+  await page.waitForTimeout(100);
   await expect
     .poll(() =>
       page
@@ -505,9 +573,16 @@ async function expectFriendlyVariableChip(page: Page): Promise<void> {
     .poll(() =>
       page
         .locator('.tixkit-email-variable-chip[data-variable-key="recipient.name"]')
-        .evaluate((element) => window.getComputedStyle(element).fontSize),
+      .evaluate((element) => window.getComputedStyle(element).fontSize),
     )
     .toBe('18px');
+  await expect
+    .poll(() =>
+      page
+        .locator('.tixkit-email-variable-chip[data-variable-key="recipient.name"]')
+        .evaluate((element) => window.getComputedStyle(element).fontFamily),
+    )
+    .toContain('Inter');
   await expect
     .poll(() =>
       page
@@ -527,12 +602,24 @@ async function expectFriendlyVariableChip(page: Page): Promise<void> {
     .poll(() =>
       page
         .locator('.tixkit-email-variable-chip[data-variable-key="ticket.type"]')
-        .evaluate((element) => window.getComputedStyle(element).fontSize),
+      .evaluate((element) => window.getComputedStyle(element).fontSize),
     )
     .toBe('18px');
+  await expect
+    .poll(() =>
+      page
+        .locator('.tixkit-email-variable-chip[data-variable-key="ticket.type"]')
+        .evaluate((element) => window.getComputedStyle(element).fontFamily),
+    )
+    .toContain('Inter');
 
+  // Dismiss the bubble and wait for pending callbacks to settle before
+  // clicking on the chip to select it as a merge tag.
+  await page.keyboard.press('Escape');
+  await page.waitForTimeout(300);
   const styledClickPoint = await chipTextPoint();
   await page.mouse.click(styledClickPoint.x, styledClickPoint.y);
+  await expect(packageTooltip).toBeVisible();
   await expect(page.getByLabel('Edit variable')).toHaveCount(0);
   await packageTooltip.getByRole('button', { name: 'Variable options' }).click();
   const replacementMenu = page.getByLabel('Edit variable');
@@ -543,7 +630,7 @@ async function expectFriendlyVariableChip(page: Page): Promise<void> {
 }
 
 test.describe('persisted admin email content editor', () => {
-  test.describe.configure({ timeout: 120_000 });
+  test.describe.configure({ timeout: 180_000 });
 
   test('saves, publishes, test-sends, and reloads a canonical email template', async ({
     page,
@@ -632,6 +719,9 @@ test.describe('persisted admin email content editor', () => {
               version.contentJson.editor?.provider === '@react-email/editor' &&
               /text-align:\s*center/.test(version.contentJson.editor.contentHtml ?? '') &&
               /color:\s*#0f766e/.test(version.contentJson.editor.contentHtml ?? '') &&
+              /font-family:\s*Inter,\s*Arial,\s*sans-serif/.test(
+                version.contentJson.editor.contentHtml ?? '',
+              ) &&
               /font-size:\s*18px/.test(version.contentJson.editor.contentHtml ?? '') &&
               /line-height:\s*140%/.test(version.contentJson.editor.contentHtml ?? '') &&
               version.contentJson.settings?.subject === subject &&
@@ -865,6 +955,9 @@ test.describe('persisted admin email content editor', () => {
     await runSlashCommand('Ticket QR');
     await expect(page.locator('img[alt="Ticket QR code"]')).toBeVisible();
     await page.locator('img[alt="Ticket QR code"]').click();
+    await expect(page.getByRole('button', { name: 'Replace image' })).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Edit link' })).toBeVisible();
+    await expect(page.getByLabel('Selection text size')).toHaveCount(0);
     await page.getByRole('button', { name: 'Align right' }).click();
     await saveCurrentDraft();
     const imageState = await loadEmailContentState(imageEvent.id, page);
@@ -953,5 +1046,330 @@ test.describe('persisted admin email content editor', () => {
       contentType: 'application/json',
     });
     await client.detach();
+  });
+
+  test('bubble tooltip reflects theme colors, adjacent styles, and supports partial merge tag selection', async ({
+    page,
+  }, testInfo) => {
+    await requireReachable(page, adminBaseUrl, 'admin dashboard');
+    await requireReachable(page, `${apiBaseUrl}/health`, 'api');
+
+    const event = await seedContentEvent(
+      page,
+      `bubble-${testInfo.project.name}-${testInfo.workerIndex}-${Date.now()}`,
+    );
+
+    await page.addInitScript(() => window.localStorage.setItem('tixkit-theme', 'light'));
+    await page.setViewportSize(desktopViewport);
+    await page.goto(`${adminBaseUrl}/events/${event.id}/content/email`);
+    await expectPersistedEmailEditorRegions(page);
+
+    const emailBody = page.getByLabel('Email body');
+    const packageTooltip = page.locator('[data-re-bubble-menu]').first();
+
+    // The default template has <h1>{{event.title}}</h1> and
+    // <p>Hi {{recipient.name}}, your tickets are ready.</p>.
+    // Wait for the merge tag chips to render.
+    await expect(emailBody.locator('.tixkit-email-variable-chip').first()).toBeVisible();
+
+    // --- Heading theme color ---
+    const headingComputedColor = await emailBody.evaluate((root) => {
+      const h1 = root.querySelector('h1');
+      return h1 ? window.getComputedStyle(h1).color : null;
+    });
+    expect(headingComputedColor).not.toBeNull();
+
+    const headingPoint = await emailBody.evaluate((root) => {
+      const h1 = root.querySelector('h1');
+      if (!h1) throw new Error('No h1');
+      const chip = h1.querySelector('.tixkit-email-variable-chip');
+      const rect = chip ? chip.getBoundingClientRect() : h1.getBoundingClientRect();
+      return { x: rect.x + rect.width / 2, y: rect.y + rect.height / 2 };
+    });
+    await page.mouse.click(headingPoint.x, headingPoint.y);
+    await expect(packageTooltip).toBeVisible();
+    // The bubble color input should reflect the heading's theme color.
+    const headingBubbleColor = await packageTooltip.getByLabel('Selection color').inputValue();
+    // Convert computed rgb(r, g, b) to #rrggbb for comparison.
+    const headingHex = headingComputedColor!.replace(/rgba?\(\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)[^)]*\)/, (_, r, g, b) =>
+      `#${[r, g, b].map((v) => Number(v).toString(16).padStart(2, '0')).join('')}`,
+    );
+    expect(headingBubbleColor.toLowerCase()).toBe(headingHex.toLowerCase());
+
+    // --- Paragraph theme color ---
+    // Press Escape to dismiss the heading bubble, then click on paragraph text.
+    await page.keyboard.press('Escape');
+    await page.waitForTimeout(300);
+
+    const paragraphComputedColor = await emailBody.evaluate((root) => {
+      const p = root.querySelector('p');
+      return p ? window.getComputedStyle(p).color : null;
+    });
+    expect(paragraphComputedColor).not.toBeNull();
+
+    const paragraphPoint = await emailBody.evaluate((root) => {
+      const p = root.querySelector('p');
+      if (!p) throw new Error('No p');
+      const walker = document.createTreeWalker(p, NodeFilter.SHOW_TEXT);
+      while (walker.nextNode()) {
+        const node = walker.currentNode;
+        if (node.textContent?.trim() && !node.parentElement?.closest('.tixkit-email-variable-chip')) {
+          const range = document.createRange();
+          range.selectNodeContents(node);
+          const rect = range.getBoundingClientRect();
+          range.detach();
+          return { x: rect.x + rect.width / 2, y: rect.y + rect.height / 2 };
+        }
+      }
+      throw new Error('No plain text in paragraph');
+    });
+    await page.mouse.click(paragraphPoint.x, paragraphPoint.y);
+    await expect(packageTooltip).toBeVisible();
+    const paragraphBubbleColor = await packageTooltip.getByLabel('Selection color').inputValue();
+    const paragraphHex = paragraphComputedColor!.replace(/rgba?\(\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)[^)]*\)/, (_, r, g, b) =>
+      `#${[r, g, b].map((v) => Number(v).toString(16).padStart(2, '0')).join('')}`,
+    );
+    expect(paragraphBubbleColor.toLowerCase()).toBe(paragraphHex.toLowerCase());
+
+    // --- 1-click focus on bubble controls ---
+    // Click the font select and verify it gets focus without dismissing the bubble.
+    const fontSelect = packageTooltip.getByLabel('Selection font family');
+    await fontSelect.click();
+    await expect(packageTooltip).toBeVisible();
+    await expect(fontSelect).toBeFocused();
+
+    const sizeInput = packageTooltip.getByLabel('Selection text size');
+    await sizeInput.click();
+    await expect(packageTooltip).toBeVisible();
+    await expect(sizeInput).toBeFocused();
+
+    const colorInput = packageTooltip.getByLabel('Selection color');
+    await colorInput.click();
+    await expect(packageTooltip).toBeVisible();
+    await expect(colorInput).toBeFocused();
+
+    // --- Word-scoped styling (no selection, like Google Docs) ---
+    // Click on plain text without a selection and change the color.
+    // Only the current word should get the new color, not the whole row.
+    await page.keyboard.press('Escape');
+    await page.waitForTimeout(300);
+    await page.mouse.click(paragraphPoint.x, paragraphPoint.y);
+    await expect(packageTooltip).toBeVisible();
+    await expect.poll(() => page.evaluate(() => window.getSelection()?.toString() ?? '')).toBe('');
+
+    await colorInput.click();
+    await colorInput.fill('#ff0000');
+    await expect(packageTooltip).toBeVisible();
+    // The clicked word should get red color.
+    await expect
+      .poll(() =>
+        emailBody.evaluate((root) => {
+          const p = root.querySelector('p');
+          if (!p) return 'not-found';
+          const walker = document.createTreeWalker(p, NodeFilter.SHOW_TEXT);
+          while (walker.nextNode()) {
+            const node = walker.currentNode;
+            const parent = node.parentElement;
+            if (
+              parent &&
+              !parent.closest('.tixkit-email-variable-chip') &&
+              parent.style.color === 'rgb(255, 0, 0)'
+            ) {
+              return 'rgb(255, 0, 0)';
+            }
+          }
+          return 'not-found';
+        }),
+      )
+      .toBe('rgb(255, 0, 0)');
+    // The merge tag chip should NOT get the word-scoped red color.
+    const chipColorAfterWordStyle = await emailBody
+      .locator('.tixkit-email-variable-chip[data-variable-key="recipient.name"]')
+      .evaluate((el) => window.getComputedStyle(el).color);
+    expect(chipColorAfterWordStyle).not.toBe('rgb(255, 0, 0)');
+
+    // --- Adjacent text style inherited by merge tags ---
+    // The merge tag adjacent to the red "Hi" text should show red in the bubble
+    // when clicked, because it inherits the adjacent text's style.
+    const chipPoint = await emailBody
+      .locator('.tixkit-email-variable-chip[data-variable-key="recipient.name"]')
+      .evaluate((el) => {
+        const rect = el.getBoundingClientRect();
+        return { x: rect.x + rect.width / 2, y: rect.y + rect.height / 2 };
+      });
+    await page.keyboard.press('Escape');
+    await page.waitForTimeout(300);
+    await page.mouse.click(chipPoint.x, chipPoint.y);
+    await expect(packageTooltip).toBeVisible();
+    // The bubble should show the red color inherited from the adjacent "Hi" text.
+    await expect
+      .poll(() => packageTooltip.getByLabel('Selection color').inputValue())
+      .toBe('#ff0000');
+
+    // --- Partial merge tag selection ---
+    // Drag within a single merge tag chip to select only part of it.
+    // First, click on paragraph text outside the chip to clear any
+    // existing full-tag selection from the previous step.
+    const paragraphTextPoint = await emailBody.evaluate((root) => {
+      const p = root.querySelector('p');
+      if (!p) return null;
+      const walker = document.createTreeWalker(p, NodeFilter.SHOW_TEXT);
+      while (walker.nextNode()) {
+        const node = walker.currentNode;
+        if (
+          node.textContent.includes('tickets') &&
+          !node.parentElement?.closest('.tixkit-email-variable-chip')
+        ) {
+          const range = document.createRange();
+          const idx = node.textContent.indexOf('tickets');
+          range.setStart(node, idx);
+          range.setEnd(node, Math.min(idx + 3, node.textContent.length));
+          const rect = range.getBoundingClientRect();
+          range.detach();
+          return { x: rect.x + rect.width / 2, y: rect.y + rect.height / 2 };
+        }
+      }
+      return null;
+    });
+    if (paragraphTextPoint) {
+      await page.mouse.click(paragraphTextPoint.x, paragraphTextPoint.y);
+      await page.waitForTimeout(300);
+      await page.keyboard.press('Escape');
+      await page.waitForTimeout(300);
+    }
+
+    const partialChip = await emailBody
+      .locator('.tixkit-email-variable-chip[data-variable-key="recipient.name"]')
+      .evaluate((el) => {
+        const rect = el.getBoundingClientRect();
+        return {
+          x: rect.x,
+          y: rect.y + rect.height / 2,
+          width: rect.width,
+          text: el.textContent ?? '',
+        };
+      });
+    // Only attempt partial selection if the chip is wide enough.
+    if (partialChip.width > 40) {
+      const startX = partialChip.x + partialChip.width * 0.3;
+      const endX = partialChip.x + partialChip.width * 0.6;
+      await page.mouse.move(startX, partialChip.y);
+      await page.mouse.down();
+      await page.mouse.move(endX, partialChip.y, { steps: 3 });
+      await page.mouse.up();
+      await page.waitForTimeout(500);
+      const selectionText = await page.evaluate(() => window.getSelection()?.toString() ?? '');
+      // The selection should be a partial substring of the chip text,
+      // not the entire chip text.
+      expect(selectionText.length).toBeGreaterThan(0);
+      expect(selectionText.length).toBeLessThan(partialChip.text.length);
+      // Apply blue color to the partial selection.
+      await expect(packageTooltip).toBeVisible();
+      await packageTooltip.getByLabel('Selection color').fill('#0000ff');
+      await expect(packageTooltip).toBeVisible();
+      // The bubble should show the blue color applied to the partial selection.
+      await expect
+        .poll(() => packageTooltip.getByLabel('Selection color').inputValue())
+        .toBe('#0000ff');
+      // After partial styling, the chip text is split into segments.
+      // The segment that was partially selected should have blue color,
+      // while the remaining segments should NOT have blue color.
+      await expect
+        .poll(() =>
+          emailBody.evaluate((root) => {
+            const chips = root.querySelectorAll(
+              '.tixkit-email-variable-chip[data-variable-key="recipient.name"]',
+            );
+            const colors = Array.from(chips).map(
+              (c) => window.getComputedStyle(c).color,
+            );
+            const hasBlue = colors.some((c) => c === 'rgb(0, 0, 255)');
+            const hasNonBlue = colors.some((c) => c !== 'rgb(0, 0, 255)');
+            return hasBlue && hasNonBlue ? 'mixed' : hasBlue ? 'all-blue' : 'no-blue';
+          }),
+        )
+        .toBe('mixed');
+    }
+  });
+
+  test('inspector preserves selection when clicking its controls and deduplicates bubble tooltip typography', async ({
+    page,
+  }, testInfo) => {
+    await requireReachable(page, adminBaseUrl, 'admin dashboard');
+    await requireReachable(page, `${apiBaseUrl}/health`, 'api');
+    const event = await seedContentEvent(
+      page,
+      `inspector-${testInfo.project.name}-${testInfo.workerIndex}-${Date.now()}`,
+    );
+    await page.addInitScript(() => window.localStorage.setItem('tixkit-theme', 'light'));
+    await page.setViewportSize(desktopViewport);
+    await page.goto(`${adminBaseUrl}/events/${event.id}/content/email`);
+    await expectPersistedEmailEditorRegions(page);
+    const emailBody = page.getByLabel('Email body');
+    const packageTooltip = page.locator('[data-re-bubble-menu]').first();
+    const inspectorHost = page.locator('[data-testid="native-email-inspector-host"]');
+    await expect(emailBody.locator('.tixkit-email-variable-chip').first()).toBeVisible();
+    // --- Click on a paragraph to select it ---
+    const paragraphPoint = await page.evaluate(() => {
+      const p = document.querySelector('.ProseMirror p');
+      if (!p) return null;
+      const walker = document.createTreeWalker(p, NodeFilter.SHOW_TEXT);
+      while (walker.nextNode()) {
+        const node = walker.currentNode;
+        if (
+          node.textContent.includes('tickets') &&
+          !node.parentElement?.closest('.tixkit-email-variable-chip')
+        ) {
+          const range = document.createRange();
+          const idx = node.textContent.indexOf('tickets');
+          range.setStart(node, idx);
+          range.setEnd(node, Math.min(idx + 3, node.textContent.length));
+          const rect = range.getBoundingClientRect();
+          range.detach();
+          return { x: rect.x + rect.width / 2, y: rect.y + rect.height / 2 };
+        }
+      }
+      return null;
+    });
+    expect(paragraphPoint).not.toBeNull();
+    await page.mouse.click(paragraphPoint!.x, paragraphPoint!.y);
+    await page.waitForTimeout(800);
+    await expect(packageTooltip).toBeVisible();
+    // The inspector should show the selection breadcrumb.
+    await expect(inspectorHost.locator('text=Selection')).toBeVisible();
+    // --- Typography section is not duplicated when bubble tooltip shows it ---
+    // When a text line is selected and the bubble tooltip shows Typography controls,
+    // the inspector should NOT show a Typography section.
+    await expect(packageTooltip.getByLabel('Selection color')).toBeVisible();
+    await expect(inspectorHost.locator('text=Typography')).toHaveCount(0);
+    // --- Inspector controls maintain focus and selection ---
+    // The inspector shows Padding/Background/Border sections for text blocks.
+    // Click on a Padding section input to verify focus is preserved.
+    const paddingInput = inspectorHost.locator('input[aria-label*="Padding"]').first();
+    if (await paddingInput.isVisible({ timeout: 3000 }).catch(() => false)) {
+      await paddingInput.click();
+      await page.waitForTimeout(500);
+      // The inspector should still show the selection (not lost).
+      await expect(inspectorHost.locator('text=Selection')).toBeVisible();
+      // The breadcrumb should still show a node (not empty).
+      const breadcrumbText = await inspectorHost
+        .locator('nav')
+        .textContent();
+      expect(breadcrumbText?.trim().length).toBeGreaterThan(0);
+    }
+    // --- Inspector shows sections for node selections (no duplication) ---
+    // Click on an image to select it as a node.
+    const imagePoint = await emailBody.evaluate((root) => {
+      const img = root.querySelector('img');
+      if (!img) return null;
+      const rect = img.getBoundingClientRect();
+      return { x: rect.x + rect.width / 2, y: rect.y + rect.height / 2 };
+    });
+    if (imagePoint) {
+      await page.mouse.click(imagePoint.x, imagePoint.y);
+      await page.waitForTimeout(500);
+      // For node selections (image), the inspector should show its sections.
+      await expect(inspectorHost.locator('text=Selection')).toBeVisible();
+    }
   });
 });

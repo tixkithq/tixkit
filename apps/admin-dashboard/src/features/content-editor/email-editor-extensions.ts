@@ -20,6 +20,7 @@ import {
   Image,
   MapPin,
   QrCode,
+  Share2,
   Ticket,
   Variable,
 } from 'lucide-react';
@@ -28,6 +29,7 @@ import { defaultSlashCommands, type SlashCommandItem } from '@react-email/editor
 type BrandEmailEditorThemeInput = {
   primaryColor?: string;
   fontFamily?: string;
+  preset?: 'brand' | 'minimal' | 'basic';
   radius?: string | number;
 };
 
@@ -73,6 +75,15 @@ type MergeTagPreviewPluginState = {
 const mergeTagPreviewPluginKey = new PluginKey<MergeTagPreviewPluginState>(
   'tixkitMergeTagPreview',
 );
+
+// Set briefly after a chip click so `apply` doesn't clear the active state
+// when a stray selectionchange event fires before the browser settles.
+let chipClickGuardUntil = 0;
+// The merge tag key from the most recent chip click, used as a fallback
+// by openVariableMenu when the activeRange has been cleared by a stale
+// selectionchange after the guard expired.
+let lastChipClickKey: string | null = null;
+let lastChipClickRange: { from: number; to: number } | null = null;
 
 const variablePresentations: Record<string, EmailVariablePresentation> = {
   'event.title': {
@@ -223,6 +234,20 @@ function cssLength(value: string | number | undefined, fallback: string): string
   return fallback;
 }
 
+export function sanitizeEmailFontFamily(value: unknown): string | null {
+  if (typeof value !== 'string') return null;
+  const fontFamily = value.trim();
+  if (!fontFamily || fontFamily.length > 180) return null;
+  if (/[;{}<>]/.test(fontFamily)) return null;
+  return fontFamily
+    .split(',')
+    .map((part) => part.trim())
+    .filter(Boolean)
+    .every((part) => /^['"]?[a-z0-9 ._-]+['"]?$/i.test(part))
+    ? fontFamily
+    : null;
+}
+
 function humanizeVariableKey(key: string): string {
   return key
     .replace(/([a-z])([A-Z])/g, '$1 $2')
@@ -266,12 +291,17 @@ function textAlignFromAttribute(value: unknown): React.CSSProperties | undefined
 
 function inlineStyleMarkStyle(attrs: {
   color?: unknown;
+  fontFamily?: unknown;
   fontSize?: unknown;
   lineHeight?: unknown;
 }): string {
   const declarations: string[] = [];
   if (typeof attrs.color === 'string' && attrs.color.trim()) {
     declarations.push(`color: ${attrs.color.trim()}`);
+  }
+  const fontFamily = sanitizeEmailFontFamily(attrs.fontFamily);
+  if (fontFamily) {
+    declarations.push(`font-family: ${fontFamily}`);
   }
   if (typeof attrs.fontSize === 'string' && attrs.fontSize.trim()) {
     declarations.push(`font-size: ${cssLength(attrs.fontSize.trim(), '')}`);
@@ -534,8 +564,18 @@ function isEmailInspectorTarget(target: EventTarget | null): boolean {
   );
 }
 
+function hasActiveEmailBubbleControlInteraction(): boolean {
+  const until = Number(
+    globalThis.document?.documentElement.getAttribute(
+      'data-tixkit-email-bubble-control-until',
+    ) ?? '0',
+  );
+  return Date.now() < until;
+}
+
 type InlineStyleAttrs = {
   color?: string;
+  fontFamily?: string;
   fontSize?: string;
   lineHeight?: string;
 };
@@ -557,26 +597,187 @@ function cleanInlineStyleAttrs(attrs: InlineStyleAttrs): InlineStyleAttrs {
   );
 }
 
-function selectedInlineStyleAttrsFromView(
+function readInlineStyleMark(mark: { attrs: Record<string, unknown> } | undefined): InlineStyleAttrs {
+  if (!mark) return {};
+  return cleanInlineStyleAttrs({
+    color: mark.attrs.color as string | undefined,
+    fontFamily: mark.attrs.fontFamily as string | undefined,
+    fontSize: mark.attrs.fontSize as string | undefined,
+    lineHeight: mark.attrs.lineHeight as string | undefined,
+  });
+}
+
+function nodeInlineStyleAttrs(node: { attrs?: Record<string, unknown> } | null | undefined): InlineStyleAttrs {
+  if (!node?.attrs?.style || typeof node.attrs.style !== 'string') return {};
+  const style = inlineStyleToReactStyle(node.attrs.style);
+  if (!style) return {};
+  return cleanInlineStyleAttrs({
+    color: style.color as string | undefined,
+    fontFamily: style.fontFamily as string | undefined,
+    fontSize: style.fontSize as string | undefined,
+    lineHeight: style.lineHeight as string | undefined,
+  });
+}
+
+function rgbToHex(rgb: string): string | undefined {
+  const match = rgb.match(/rgba?\(\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)/);
+  if (!match) return undefined;
+  const r = parseInt(match[1], 10);
+  const g = parseInt(match[2], 10);
+  const b = parseInt(match[3], 10);
+  return `#${[r, g, b].map((v) => v.toString(16).padStart(2, '0')).join('')}`;
+}
+
+function computedStyleFromDom(view: EditorView, position: number): InlineStyleAttrs {
+  try {
+    const pos = Math.max(0, Math.min(position, view.state.doc.content.size));
+    const domInfo = view.domAtPos(pos);
+    let el =
+      domInfo.node instanceof HTMLElement
+        ? domInfo.node
+        : domInfo.node.parentElement;
+    if (!el) return {};
+    const themedEl = el.closest<HTMLElement>('h1, h2, h3, h4, h5, h6, p, [class*="node-h"], [class*="node-paragraph"]');
+    if (themedEl) el = themedEl;
+    const cs = globalThis.window.getComputedStyle(el);
+    const fontSizePx = parseFloat(cs.fontSize);
+    const lineHeightPx = parseFloat(cs.lineHeight);
+    const lineHeight =
+      fontSizePx > 0 && lineHeightPx > 0
+        ? `${Math.round((lineHeightPx / fontSizePx) * 100)}%`
+        : undefined;
+    return cleanInlineStyleAttrs({
+      color: rgbToHex(cs.color),
+      fontFamily: cs.fontFamily,
+      fontSize: Number.isFinite(fontSizePx) ? `${Math.round(fontSizePx)}px` : undefined,
+      lineHeight,
+    });
+  } catch {
+    return {};
+  }
+}
+
+function markOnlyStyleAttrsFromView(
   view: EditorView,
   from: number,
   to: number,
 ): InlineStyleAttrs {
   const markType = view.state.schema.marks[tixkitInlineStyleMarkName];
   if (!markType || from === to) return {};
-  let attrs: InlineStyleAttrs = {};
+  let attrs: InlineStyleAttrs | null = null;
   view.state.doc.nodesBetween(from, to, (node) => {
-    if (!node.isText) return;
+    if (!node.isText) return true;
+    if (attrs !== null) return false;
     const mark = node.marks.find((candidate) => candidate.type === markType);
-    if (!mark) return;
-    attrs = cleanInlineStyleAttrs({
-      color: attrs.color ?? mark.attrs.color,
-      fontSize: attrs.fontSize ?? mark.attrs.fontSize,
-      lineHeight: attrs.lineHeight ?? mark.attrs.lineHeight,
-    });
-    return false;
+    if (mark) {
+      attrs = readInlineStyleMark(mark);
+      return false;
+    }
+    return true;
   });
-  return attrs;
+  return attrs ?? {};
+}
+
+function selectedInlineStyleAttrsFromView(
+  view: EditorView,
+  from: number,
+  to: number,
+): InlineStyleAttrs {
+  const baseStyle = computedStyleFromDom(view, from);
+  return { ...baseStyle, ...markOnlyStyleAttrsFromView(view, from, to) };
+}
+
+function inlineStyleAttrsAtCursor(
+  state: EditorView['state'],
+  position: number,
+  view?: EditorView,
+): InlineStyleAttrs {
+  const markType = state.schema.marks[tixkitInlineStyleMarkName];
+  if (!markType) return {};
+  const resolved = state.doc.resolve(Math.max(0, Math.min(position, state.doc.content.size)));
+  if (!resolved.parent.inlineContent) return {};
+  const parent = resolved.parent;
+  const parentOffset = resolved.parentOffset;
+  const baseStyle = view ? computedStyleFromDom(view, position) : nodeInlineStyleAttrs(parent);
+  let childOffset = 0;
+  for (let i = 0; i < parent.childCount; i += 1) {
+    const child = parent.child(i);
+    const childEnd = childOffset + child.nodeSize;
+    if (child.isText && parentOffset >= childOffset && parentOffset <= childEnd) {
+      const mark = child.marks.find((candidate) => candidate.type === markType);
+      if (mark) return { ...baseStyle, ...readInlineStyleMark(mark) };
+      // Only check adjacent nodes for merge tags that inherit surrounding styles.
+      // Regular unmarked text should just return the base (theme) style.
+      const mergeTagType = state.schema.marks[tixkitMergeTagMarkName];
+      const hasMergeTagMark = mergeTagType
+        ? child.marks.some((m) => m.type === mergeTagType)
+        : false;
+      if (!hasMergeTagMark) return baseStyle;
+      for (let j = i - 1; j >= 0; j -= 1) {
+        const prev = parent.child(j);
+        if (!prev.isText || !prev.textContent.trim()) continue;
+        const prevMark = prev.marks.find((candidate) => candidate.type === markType);
+        if (prevMark) return { ...baseStyle, ...readInlineStyleMark(prevMark) };
+        break;
+      }
+      for (let j = i + 1; j < parent.childCount; j += 1) {
+        const next = parent.child(j);
+        if (!next.isText || !next.textContent.trim()) continue;
+        const nextMark = next.marks.find((candidate) => candidate.type === markType);
+        if (nextMark) return { ...baseStyle, ...readInlineStyleMark(nextMark) };
+        break;
+      }
+      return baseStyle;
+    }
+    childOffset = childEnd;
+  }
+  const nodeBefore = resolved.nodeBefore;
+  if (nodeBefore?.isText) {
+    const mark = nodeBefore.marks.find((candidate) => candidate.type === markType);
+    return { ...baseStyle, ...(mark ? readInlineStyleMark(mark) : {}) };
+  }
+  const nodeAfter = resolved.nodeAfter;
+  if (nodeAfter?.isText) {
+    const mark = nodeAfter.marks.find((candidate) => candidate.type === markType);
+    return { ...baseStyle, ...(mark ? readInlineStyleMark(mark) : {}) };
+  }
+  return baseStyle;
+}
+
+function findWordRangeAtPosition(
+  state: EditorView['state'],
+  position: number,
+): { from: number; to: number } | null {
+  const resolved = state.doc.resolve(Math.max(0, Math.min(position, state.doc.content.size)));
+  if (!resolved.parent.inlineContent || resolved.parent.content.size === 0) return null;
+  const parentStart = resolved.start();
+  const text = resolved.parent.textContent;
+  const offset = Math.max(0, Math.min(position - parentStart, text.length));
+  let wordStart = offset;
+  let wordEnd = offset;
+  while (wordStart > 0 && !/\s/.test(text[wordStart - 1])) wordStart -= 1;
+  while (wordEnd < text.length && !/\s/.test(text[wordEnd])) wordEnd += 1;
+  if (wordStart === wordEnd) {
+    let fwd = wordEnd;
+    while (fwd < text.length && /\s/.test(text[fwd])) fwd += 1;
+    let fwdEnd = fwd;
+    while (fwdEnd < text.length && !/\s/.test(text[fwdEnd])) fwdEnd += 1;
+    if (fwd < fwdEnd) {
+      wordStart = fwd;
+      wordEnd = fwdEnd;
+    } else {
+      let bwd = wordStart;
+      while (bwd > 0 && /\s/.test(text[bwd - 1])) bwd -= 1;
+      let bwdStart = bwd;
+      while (bwdStart > 0 && !/\s/.test(text[bwdStart - 1])) bwdStart -= 1;
+      if (bwdStart < bwd) {
+        wordStart = bwdStart;
+        wordEnd = bwd;
+      }
+    }
+  }
+  if (wordStart === wordEnd) return null;
+  return { from: parentStart + wordStart, to: parentStart + wordEnd };
 }
 
 function preservedTextSelectionOrRange(
@@ -608,7 +809,7 @@ function applyInlineStyleToRange(input: {
   const markType = state.schema.marks[tixkitInlineStyleMarkName];
   if (!markType || input.from === input.to) return;
   const nextAttrs = cleanInlineStyleAttrs({
-    ...selectedInlineStyleAttrsFromView(input.view, input.from, input.to),
+    ...markOnlyStyleAttrsFromView(input.view, input.from, input.to),
     ...input.patch,
   });
   let transaction = state.tr.removeMark(input.from, input.to, markType);
@@ -905,7 +1106,7 @@ function findSelectedMergeTagRange(
   const range = findMergeTagRangeAtPosition(state, selection.from);
   if (!range) return null;
   if (selection.empty) return null;
-  return range.from <= selection.from && range.to >= selection.to ? range : null;
+  return range.from === selection.from && range.to === selection.to ? range : null;
 }
 
 function findCursorMergeTagRange(
@@ -914,7 +1115,7 @@ function findCursorMergeTagRange(
   const { selection } = state;
   if (!selection.empty) return null;
   const range = findMergeTagRangeAtPosition(state, selection.from);
-  return range ? { ...range, scope: 'text' } : null;
+  return range ? { ...range, cursor: selection.from, scope: 'text' } : null;
 }
 
 function findSelectedTextRange(
@@ -927,10 +1128,40 @@ function findSelectedTextRange(
   const from = Math.max(0, Math.min(selection.from, state.doc.content.size));
   const to = Math.max(from, Math.min(selection.to, state.doc.content.size));
   if (from === to) return null;
-  const fromPosition = state.doc.resolve(from);
-  const toPosition = state.doc.resolve(to);
-  if (!fromPosition.parent.inlineContent || !toPosition.parent.inlineContent) return null;
-  return { from, key: null, scope: 'text', to };
+  // When the selection spans block boundaries (e.g. AllSelection starts at 0
+  // and ends at doc.content.size), the resolved positions sit at the doc level
+  // which is not inline content. Adjust to the first/last textblock content.
+  let adjustedFrom = from;
+  let adjustedTo = to;
+  const fromPosition = state.doc.resolve(adjustedFrom);
+  if (!fromPosition.parent.inlineContent) {
+    let found = false;
+    state.doc.nodesBetween(from, to, (node, pos) => {
+      if (found) return false;
+      if (node.isTextblock) {
+        adjustedFrom = pos + 1;
+        found = true;
+        return false;
+      }
+      return true;
+    });
+    if (!found) return null;
+  }
+  const toPosition = state.doc.resolve(adjustedTo);
+  if (!toPosition.parent.inlineContent) {
+    let found = false;
+    state.doc.nodesBetween(adjustedFrom, to, (node, pos) => {
+      if (node.isTextblock) {
+        adjustedTo = pos + node.nodeSize - 1;
+        found = true;
+        return false;
+      }
+      return true;
+    });
+    if (!found) return null;
+  }
+  if (adjustedFrom >= adjustedTo) return null;
+  return { from: adjustedFrom, key: null, scope: 'text', to: adjustedTo };
 }
 
 function findCursorTextRowRange(
@@ -996,6 +1227,39 @@ function createFloatingVariableMenu(input: {
     findCursorMergeTagRange(input.view.state) ??
     findCursorTextRowRange(input.view.state) ??
     findSelectedAlignableNodeRange(input.view.state);
+
+  const activeRangeFromSelectionDetail = (
+    detail: unknown,
+  ): NonNullable<MergeTagPreviewPluginState['active']> | null => {
+    if (!detail || typeof detail !== 'object') return null;
+    const candidate = detail as {
+      cursor?: unknown;
+      from?: unknown;
+      key?: unknown;
+      nodeName?: unknown;
+      scope?: unknown;
+      to?: unknown;
+    };
+    if (typeof candidate.from !== 'number' || typeof candidate.to !== 'number') return null;
+    const from = Math.max(0, Math.min(candidate.from, input.view.state.doc.content.size));
+    const to = Math.max(from, Math.min(candidate.to, input.view.state.doc.content.size));
+    if (from === to) return null;
+    const scope =
+      candidate.scope === 'node' || candidate.scope === 'row' || candidate.scope === 'text'
+        ? candidate.scope
+        : undefined;
+    return {
+      cursor: typeof candidate.cursor === 'number' ? candidate.cursor : undefined,
+      from,
+      key: typeof candidate.key === 'string' && candidate.key.trim() ? candidate.key.trim() : null,
+      nodeName:
+        typeof candidate.nodeName === 'string' && candidate.nodeName.trim()
+          ? candidate.nodeName.trim()
+          : undefined,
+      scope,
+      to,
+    };
+  };
 
   const removeMenu = () => {
     menu?.remove();
@@ -1084,28 +1348,35 @@ function createFloatingVariableMenu(input: {
     input.view.focus();
   };
 
-  const openVariableMenu = () => {
-    const currentActive = currentActiveRange();
-    if (!currentActive?.key || currentActive.scope === 'node') {
-      removeMenu();
-      return;
-    }
-    const exactRange = findMergeTagRangeAtPosition(input.view.state, currentActive.from);
-    if (!exactRange || exactRange.key !== currentActive.key) {
-      removeMenu();
-      return;
-    }
-    if (
+  const isMenuForRange = (range: { from: number; key: string; to: number }) =>
+    Boolean(
       menu &&
-      menu.dataset.variableKey === exactRange.key &&
-      menu.dataset.variableFrom === String(exactRange.from) &&
-      menu.dataset.variableTo === String(exactRange.to)
-    ) {
+        menu.dataset.variableKey === range.key &&
+        menu.dataset.variableFrom === String(range.from) &&
+        menu.dataset.variableTo === String(range.to),
+    );
+
+  const openVariableMenu = (mode: 'open' | 'toggle') => {
+    const currentActive = currentActiveRange();
+    const fallbackActive = !currentActive?.key && lastChipClickKey
+      ? { key: lastChipClickKey, from: lastChipClickRange?.from ?? 0, to: lastChipClickRange?.to ?? 0, scope: 'text' as const }
+      : null;
+    const effectiveActive = currentActive?.key ? currentActive : fallbackActive;
+    if (!effectiveActive?.key || effectiveActive.scope === 'node') {
+      removeMenu();
+      return;
+    }
+    const exactRange = findMergeTagRangeAtPosition(input.view.state, effectiveActive.from);
+    if (!exactRange || exactRange.key !== effectiveActive.key) {
+      removeMenu();
+      return;
+    }
+    if (mode === 'toggle' && isMenuForRange(exactRange)) {
       removeMenu();
       return;
     }
     activeRange = {
-      ...currentActive,
+      ...effectiveActive,
       from: exactRange.from,
       key: exactRange.key,
       scope: 'text',
@@ -1124,23 +1395,38 @@ function createFloatingVariableMenu(input: {
     positionMenu();
   };
 
-  const applyStyle = (patch: InlineStyleAttrs) => {
-    const currentActive = currentActiveRange();
+  const applyStyle = (
+    patch: InlineStyleAttrs,
+    requestedActive?: NonNullable<MergeTagPreviewPluginState['active']> | null,
+  ) => {
+    const currentActive = requestedActive ?? currentActiveRange();
     if (!currentActive || currentActive.scope === 'node') return;
     const currentRange = resolveTextRange(currentActive);
     if (!currentRange) return;
+    let styleFrom = currentRange.from;
+    let styleTo = currentRange.to;
+    if (currentRange.scope === 'row' && currentRange.cursor !== undefined) {
+      const wordRange = findWordRangeAtPosition(input.view.state, currentRange.cursor);
+      if (wordRange) {
+        styleFrom = wordRange.from;
+        styleTo = wordRange.to;
+      }
+    }
     applyInlineStyleToRange({
       cursor: currentRange.cursor,
-      from: currentRange.from,
+      from: styleFrom,
       patch,
       scope: currentRange.scope,
-      to: currentRange.to,
+      to: styleTo,
       view: input.view,
     });
   };
 
-  const applyAlignment = (alignment: InlineTextAlignment) => {
-    const currentActive = currentActiveRange();
+  const applyAlignment = (
+    alignment: InlineTextAlignment,
+    requestedActive?: NonNullable<MergeTagPreviewPluginState['active']> | null,
+  ) => {
+    const currentActive = requestedActive ?? currentActiveRange();
     if (!currentActive) return;
     if (currentActive.scope === 'node') {
       applyNodeAlignmentToRange({
@@ -1167,18 +1453,22 @@ function createFloatingVariableMenu(input: {
     const detail = (event as CustomEvent<{
       alignment?: InlineTextAlignment;
       patch?: InlineStyleAttrs;
+      selection?: unknown;
       variableKey?: string;
     }>).detail;
     if (!detail || typeof detail !== 'object') return;
     event.preventDefault();
-    if (detail.patch) applyStyle(detail.patch);
-    if (detail.alignment) applyAlignment(detail.alignment);
+    const requestedActive = activeRangeFromSelectionDetail(detail.selection);
+    if (detail.patch) applyStyle(detail.patch, requestedActive);
+    if (detail.alignment) applyAlignment(detail.alignment, requestedActive);
     if (detail.variableKey) selectNextVariable(detail.variableKey);
   };
 
   const handleVariableMenuOpen = (event: Event) => {
+    const detail = (event as CustomEvent<{ mode?: 'open' | 'toggle' }>).detail;
+    if (detail?.mode !== 'open' && detail?.mode !== 'toggle') return;
     event.preventDefault();
-    openVariableMenu();
+    openVariableMenu(detail.mode);
   };
 
   const handleSelectionRestore = (event: Event) => {
@@ -1225,9 +1515,12 @@ function createFloatingVariableMenu(input: {
       if (detail.focusEditor !== false) input.view.focus();
       return;
     }
-    const active = detail.key
+    const mergeTagRange = detail.key
       ? findMergeTagRangeAtPosition(input.view.state, from)
-      : { from, key: null, to };
+      : null;
+    const active = mergeTagRange
+      ? { ...mergeTagRange, cursor: mergeTagRange.from + 1, scope: 'text' as const }
+      : { from, key: null as string | null, scope: 'text' as const, to };
     if (!active) return;
     const transaction = input.view.state.tr
       .setSelection(TextSelection.create(input.view.state.doc, active.from, active.to))
@@ -1251,11 +1544,13 @@ function createFloatingVariableMenu(input: {
               style:
                 activeRange.scope === 'node'
                   ? {}
-                  : selectedInlineStyleAttrsFromView(
-                      input.view,
-                      activeRange.from,
-                      activeRange.to,
-                    ),
+                  : activeRange.cursor !== undefined
+                    ? inlineStyleAttrsAtCursor(input.view.state, activeRange.cursor, input.view)
+                    : selectedInlineStyleAttrsFromView(
+                        input.view,
+                        activeRange.from,
+                        activeRange.to,
+                      ),
               to: activeRange.to,
             }
           : null,
@@ -1401,6 +1696,10 @@ export const TixkitInlineStyle = Mark.create({
         default: null,
         parseHTML: (element) => element.style.fontSize || null,
       },
+      fontFamily: {
+        default: null,
+        parseHTML: (element) => element.style.fontFamily || null,
+      },
       lineHeight: {
         default: null,
         parseHTML: (element) => element.style.lineHeight || null,
@@ -1409,12 +1708,27 @@ export const TixkitInlineStyle = Mark.create({
   },
 
   parseHTML() {
-    return [{ tag: 'span[data-tixkit-inline-style]' }];
+    return [
+      { tag: 'span[data-tixkit-inline-style]' },
+      {
+        tag: 'span[style]',
+        getAttrs: (element) => {
+          if (!(element instanceof HTMLElement)) return false;
+          return element.style.color ||
+            element.style.fontFamily ||
+            element.style.fontSize ||
+            element.style.lineHeight
+            ? null
+            : false;
+        },
+      },
+    ];
   },
 
   renderHTML({ HTMLAttributes, mark }) {
     const safeHTMLAttributes = { ...HTMLAttributes };
     delete safeHTMLAttributes.color;
+    delete safeHTMLAttributes.fontFamily;
     delete safeHTMLAttributes.fontSize;
     delete safeHTMLAttributes.lineHeight;
     return [
@@ -1445,7 +1759,57 @@ function createMergeTagPreviewExtension(mergeTags: readonly string[]) {
                 | { active?: MergeTagPreviewPluginState['active'] }
                 | undefined;
               if (meta && 'active' in meta) return { active: meta.active ?? null };
-              if (transaction.selectionSet) return { active: null };
+              if (transaction.selectionSet) {
+                if (pluginState.active && (hasActiveEmailBubbleControlInteraction() || Date.now() < chipClickGuardUntil)) {
+                  if (
+                    pluginState.active.scope === 'row' &&
+                    transaction.selection.empty
+                  ) {
+                    const $from = transaction.selection.$from;
+                    if ($from.parent.inlineContent && $from.parent.content.size > 0) {
+                      return {
+                        active: {
+                          ...pluginState.active,
+                          cursor: transaction.selection.from,
+                          from: $from.start(),
+                          to: $from.end(),
+                        },
+                      };
+                    }
+                  }
+                  // If the cursor moved outside the active merge tag range
+                  // during the interaction window, switch to row scope so
+                  // word-scoped styling targets the new cursor position.
+                  if (
+                    pluginState.active.scope === 'text' &&
+                    pluginState.active.key &&
+                    transaction.selection.empty
+                  ) {
+                    const mergeTagRange = findMergeTagRangeAtPosition(
+                      { doc: transaction.doc } as EditorView['state'],
+                      transaction.selection.from,
+                    );
+                    const cursorInsideMergeTag =
+                      mergeTagRange && mergeTagRange.key === pluginState.active.key;
+                    if (!cursorInsideMergeTag) {
+                      const $from = transaction.selection.$from;
+                      if ($from.parent.inlineContent && $from.parent.content.size > 0) {
+                        return {
+                          active: {
+                            cursor: transaction.selection.from,
+                            from: $from.start(),
+                            key: null,
+                            scope: 'row',
+                            to: $from.end(),
+                          },
+                        };
+                      }
+                    }
+                  }
+                  return pluginState;
+                }
+                return { active: null };
+              }
               if (!pluginState.active || !transaction.docChanged) return pluginState;
               const from = transaction.mapping.map(pluginState.active.from, -1);
               const to = transaction.mapping.map(pluginState.active.to, 1);
@@ -1470,9 +1834,9 @@ function createMergeTagPreviewExtension(mergeTags: readonly string[]) {
                   target instanceof HTMLElement
                     ? target.closest<HTMLElement>('.tixkit-email-variable-chip')
                     : null;
-                const position = view.posAtCoords({ left: event.clientX, top: event.clientY });
-                if (!position) return false;
                 if (!token) {
+                  const position = view.posAtCoords({ left: event.clientX, top: event.clientY });
+                  if (!position) return false;
                   view.dispatch(
                     view.state.tr.setMeta(mergeTagPreviewPluginKey, {
                       active: null,
@@ -1480,9 +1844,42 @@ function createMergeTagPreviewExtension(mergeTags: readonly string[]) {
                   );
                   return false;
                 }
-                const range = findMergeTagRangeAtPosition(view.state, position.pos);
+                // If the user has a partial text selection (from a drag),
+                // don't snap to the full merge tag - let the selection stand.
+                const { selection } = view.state;
+                if (!selection.empty && selection.from !== selection.to) {
+                  return false;
+                }
+                const mergeTagKey = token.getAttribute('data-tixkit-merge-tag');
+                const approxPos = view.posAtDOM(token, 0);
+                const markType = view.state.schema.marks[tixkitMergeTagMarkName];
+                let bestRange: { from: number; key: string; to: number } | null = null;
+                let bestDist = Infinity;
+                if (mergeTagKey && markType) {
+                  view.state.doc.nodesBetween(0, view.state.doc.content.size, (node, pos) => {
+                    if (!node.isText) return true;
+                    const mark = node.marks.find((m) => m.type === markType);
+                    if (mark && (mark.attrs as { key?: string }).key === mergeTagKey) {
+                      const dist = Math.abs(pos - approxPos);
+                      if (dist < bestDist) {
+                        bestDist = dist;
+                        bestRange = { from: pos, key: mergeTagKey, to: pos + node.nodeSize };
+                      }
+                    }
+                    return true;
+                  });
+                }
+                const range = bestRange ?? findMergeTagRangeAtPosition(view.state, approxPos);
                 if (!range) return false;
                 const { from, key, to } = range;
+                chipClickGuardUntil = Date.now() + 500;
+                lastChipClickKey = key;
+                lastChipClickRange = { from, to };
+                view.dispatch(
+                  view.state.tr.setMeta(mergeTagPreviewPluginKey, {
+                    active: { cursor: from + 1, from, key, scope: 'text', to },
+                  }),
+                );
                 selectVariableToken({ from, key, to, view });
                 view.dom.dispatchEvent(
                   new CustomEvent('tixkit-email-variable-activate', {
@@ -1490,11 +1887,7 @@ function createMergeTagPreviewExtension(mergeTags: readonly string[]) {
                     detail: { from, key, to },
                   }),
                 );
-                view.dispatch(
-                  view.state.tr.setMeta(mergeTagPreviewPluginKey, {
-                    active: { from, key, to },
-                  }),
-                );
+                event.preventDefault();
                 window.setTimeout(() => {
                   const closeOnOutsidePointerDown = (outsideEvent: PointerEvent) => {
                     if (
@@ -1529,9 +1922,16 @@ function createMergeTagPreviewExtension(mergeTags: readonly string[]) {
               },
               keydown(view, event) {
                 if (event.key === 'Escape') {
+                  lastChipClickKey = null;
+                  lastChipClickRange = null;
                   view.dispatch(
                     view.state.tr.setMeta(mergeTagPreviewPluginKey, {
                       active: null,
+                    }),
+                  );
+                  view.dom.dispatchEvent(
+                    new CustomEvent('tixkit-email-selection-clear', {
+                      bubbles: true,
                     }),
                   );
                   return true;
@@ -1550,7 +1950,7 @@ function createMergeTagPreviewExtension(mergeTags: readonly string[]) {
                 );
                 view.dispatch(
                   view.state.tr.setMeta(mergeTagPreviewPluginKey, {
-                    active: { from, key, to },
+                    active: { cursor: from + 1, from, key, scope: 'text', to },
                   }),
                 );
                 return true;
@@ -1605,7 +2005,11 @@ function createMergeTagPreviewExtension(mergeTags: readonly string[]) {
                   findCursorMergeTagRange(currentView.state) ??
                   findCursorTextRowRange(currentView.state) ??
                   findSelectedAlignableNodeRange(currentView.state);
-                if (!active && previousActive && floatingMenu.containsActiveElement()) {
+                if (
+                  !active &&
+                  previousActive &&
+                  (floatingMenu.containsActiveElement() || hasActiveEmailBubbleControlInteraction())
+                ) {
                   active = previousActive;
                 }
                 if (
@@ -1634,11 +2038,88 @@ function createMergeTagPreviewExtension(mergeTags: readonly string[]) {
 export function createBrandEmailEditorTheme(
   brandTheme?: BrandEmailEditorThemeInput,
 ): EditorThemeInput {
+  const preset = brandTheme?.preset ?? 'brand';
   const primaryColor = brandTheme?.primaryColor?.trim() || '#111827';
   const fontFamily =
     brandTheme?.fontFamily?.trim() ||
     'ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif';
   const radius = cssLength(brandTheme?.radius, '8px');
+  if (preset === 'minimal') {
+    return createTheme({
+      body: {
+        backgroundColor: '#ffffff',
+        color: '#18181b',
+        fontFamily,
+        width: '600px',
+        padding: '24px',
+        borderRadius: '0px',
+      },
+      button: {
+        backgroundColor: '#18181b',
+        borderRadius: '6px',
+        color: '#ffffff',
+        fontSize: '14px',
+        fontWeight: '600',
+        padding: '10px 16px',
+        textDecoration: 'none',
+      },
+      h1: {
+        color: '#18181b',
+        fontSize: '28px',
+        lineHeight: '1.15',
+        fontWeight: '700',
+      },
+      h2: {
+        color: '#27272a',
+        fontSize: '20px',
+        lineHeight: '1.3',
+        fontWeight: '650',
+      },
+      paragraph: {
+        color: '#3f3f46',
+        fontSize: '15px',
+        lineHeight: '1.65',
+      },
+    });
+  }
+  if (preset === 'basic') {
+    return createTheme({
+      body: {
+        backgroundColor: '#f4f4f5',
+        color: '#18181b',
+        fontFamily,
+        width: '600px',
+        padding: '32px',
+        borderRadius: '10px',
+      },
+      button: {
+        backgroundColor: primaryColor,
+        borderRadius: radius,
+        color: '#ffffff',
+        fontSize: '14px',
+        fontWeight: '600',
+        padding: '12px 18px',
+        textDecoration: 'none',
+      },
+      h1: {
+        color: primaryColor,
+        fontSize: '30px',
+        lineHeight: '1.15',
+        fontWeight: '700',
+      },
+      h2: {
+        color: '#18181b',
+        fontSize: '21px',
+        lineHeight: '1.28',
+        fontWeight: '650',
+      },
+      paragraph: {
+        color: '#3f3f46',
+        fontSize: '15px',
+        lineHeight: '1.7',
+      },
+    });
+  }
   return createTheme({
     body: {
       backgroundColor: '#ffffff',
@@ -1800,7 +2281,38 @@ export function createEmailSlashCommands(input: {
       },
     },
     {
-      title: 'Unsubscribe footer',
+      title: 'Social Links',
+      description: 'Add share and support links',
+      icon: React.createElement(Share2, { className: 'size-4' }),
+      category: 'Tixkit',
+      searchTerms: ['social', 'links', 'follow', 'share', 'support'],
+      command: ({ editor, range }) => {
+        editor
+          .chain()
+          .focus()
+          .deleteRange(range)
+          .insertContent({
+            type: 'paragraph',
+            content: [
+              { type: 'text', text: 'Follow us: ' },
+              {
+                type: 'text',
+                text: 'Event page',
+                marks: [{ type: 'link', attrs: { href: '{{event.publicUrl}}' } }],
+              },
+              { type: 'text', text: ' | ' },
+              {
+                type: 'text',
+                text: 'Support',
+                marks: [{ type: 'link', attrs: { href: '{{brand.supportUrl}}' } }],
+              },
+            ],
+          })
+          .run();
+      },
+    },
+    {
+      title: 'Unsubscribe Footer',
       description: 'Add a brand footer with an unsubscribe link',
       icon: React.createElement(Ticket, { className: 'size-4' }),
       category: 'Tixkit',

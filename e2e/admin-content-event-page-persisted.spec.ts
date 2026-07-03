@@ -74,6 +74,19 @@ type PublicContentPage = {
       body?: string;
       label?: string;
     }>;
+    renderModel: {
+      schemaVersion: number;
+      blocks: Array<{
+        type: string;
+        id: string;
+        headline?: string;
+        body?: string;
+        ctaLabel?: string;
+        html?: string;
+        text?: string;
+      }>;
+      validation: { valid: boolean; issues: Array<{ severity: string; message: string }> };
+    };
     discovery: {
       title: string;
       summary: string;
@@ -182,6 +195,9 @@ async function expectEventPageDocumentCanvasPresentation(page: Page): Promise<vo
   expect(snapshot.legacyCardClass).toBeNull();
   expect(snapshot.background).not.toBe('rgb(9, 9, 11)');
   expect(snapshot.text).toContain('Tickets');
+  // The admin canvas renders through the shared .tk-ep-* class contract.
+  await expect(canvas.locator('.tixkit-event-page').first()).toBeVisible();
+  await expect(canvas.locator('.tk-ep-hero').first()).toHaveAttribute('data-block-id', 'hero');
 }
 
 test.describe('persisted admin event-page content editor', () => {
@@ -214,6 +230,11 @@ test.describe('persisted admin event-page content editor', () => {
     await page.getByRole('button', { name: 'Open preview' }).click();
     await expect(page.getByTestId('preview-drawer')).toContainText(headline);
     await expect(page.getByTestId('preview-drawer')).toContainText(summary);
+    // The admin preview renders the shared event-page surface (parity with checkout).
+    await expect(page.getByTestId('preview-surface').locator('.tixkit-event-page')).toBeVisible();
+    await expect(
+      page.getByTestId('preview-surface').locator('.tk-ep-hero'),
+    ).toHaveAttribute('data-block-id', 'hero');
 
     await page.getByRole('button', { name: 'Publish' }).click();
     await expect(page.getByText(/Published v\d+/)).toBeVisible();
@@ -260,6 +281,17 @@ test.describe('persisted admin event-page content editor', () => {
     expect(
       publicPage.page.headless.some((block) => block.type === 'hero' && block.title === headline),
     ).toBe(true);
+    // The public API returns the canonical render model shared by every surface.
+    expect(publicPage.page.renderModel.schemaVersion).toBe(1);
+    expect(publicPage.page.renderModel.validation.valid).toBe(true);
+    expect(
+      publicPage.page.renderModel.blocks.some(
+        (block) => block.type === 'hero' && block.id === 'hero',
+      ),
+    ).toBe(true);
+    expect(
+      publicPage.page.renderModel.blocks.some((block) => block.type === 'tickets'),
+    ).toBe(true);
 
     await page.goto(`${checkoutBaseUrl}/e/${encodeURIComponent(event.id)}`);
     await expect(page.getByText(event.title, { exact: true }).first()).toBeVisible();
@@ -267,6 +299,14 @@ test.describe('persisted admin event-page content editor', () => {
     await expect(page.getByTestId('published-event-page')).toContainText(headline);
     await expect(page.getByTestId('published-event-page')).toContainText(summary);
     await expect(page.getByTestId('published-event-page')).toContainText(ctaLabel);
+    // The checkout public page renders the shared event-page surface from renderModel.
+    await expect(page.locator('[data-testid="published-event-page"] .tixkit-event-page')).toBeVisible();
+    await expect(
+      page.locator('[data-testid="published-event-page"] .tk-ep-hero'),
+    ).toHaveAttribute('data-block-id', 'hero');
+    await expect(
+      page.locator('[data-testid="published-event-page"] .tk-ep-tickets'),
+    ).toHaveAttribute('data-block-id', 'tickets');
     await attachScreenshot(page, testInfo, 'checkout-event-page-published-content-desktop');
     await expectNoAxeViolations(page, testInfo);
 
@@ -313,9 +353,9 @@ test.describe('persisted admin event-page content editor', () => {
     await expectNoAxeViolations(page, testInfo);
 
     await page.reload();
-    await expect(page.getByLabel('Page headline')).toHaveValue(headline);
-    await expect(page.getByLabel('Page summary')).toHaveValue(summary);
-    await expect(page.getByLabel('Ticket CTA label')).toHaveValue(ctaLabel);
+    await expect(page.getByLabel('Page headline')).toHaveText(headline);
+    await expect(page.getByLabel('Page summary')).toHaveText(summary);
+    await expect(page.getByLabel('Ticket CTA label')).toHaveText(ctaLabel);
 
     await page.setViewportSize(mobileViewport);
     await page.goto(`${adminBaseUrl}/events/${event.id}/content/event-page`);
@@ -352,8 +392,8 @@ test.describe('persisted admin event-page content editor', () => {
     const selectors = {
       shell: '[data-testid="content-editor-shell"]',
       canvas: '[data-testid="editor-canvas"]',
-      headline: 'input',
-      summary: 'textarea',
+      headline: '[aria-label="Page headline"]',
+      summary: '[aria-label="Page summary"]',
     } as const;
     const boxes = Object.fromEntries(
       await Promise.all(

@@ -8,6 +8,7 @@ import {
   Copy,
   Eye,
   Image,
+  Palette,
   PanelRightClose,
   Save,
   Send,
@@ -19,6 +20,7 @@ import {
   AlignLeftIcon,
   AlignRightIcon,
   BubbleMenu,
+  EditorFocusScope,
   Inspector,
   type TriggerFn,
 } from '@react-email/editor/ui';
@@ -39,13 +41,15 @@ import {
 } from '@tixkit/content-editor-shell';
 import {
   REACT_EMAIL_EDITOR_PACKAGE,
+  applyEmailGlobalCssToHtml,
   createDefaultEmailTemplate,
   normalizeEmailTemplateDocument,
+  stripEmailGlobalCssFromHtml,
   validateEditorExport,
   validateEmailTemplate,
   type EmailTemplateDocument,
 } from '@tixkit/content-email';
-import { MERGE_TAG_REGISTRY } from '@tixkit/domain';
+import { MERGE_TAG_REGISTRY, getTemplateLifecycle } from '@tixkit/domain';
 import type { ContentValidationIssue } from '@tixkit/content-core';
 import {
   adminApi,
@@ -72,6 +76,7 @@ import {
   createEmailSlashCommands,
   mergeTagCanvasAttributeValue,
   mergeTagLiteral,
+  sanitizeEmailFontFamily,
   tixkitInlineStyleMarkName,
   tixkitMergeTagMarkName,
   useEmailEditorExtensions,
@@ -83,6 +88,7 @@ type EmailReviewState = 'idle' | 'checking' | 'checked' | 'error';
 type EmailInspectorPanelId = 'style' | 'variables' | 'details' | 'history' | 'issues' | 'json';
 type EmailAudience = SendMessageInput['audience'];
 type EmailSendMode = 'now' | 'scheduled';
+type EmailThemePreset = 'brand' | 'minimal' | 'basic';
 
 type EditorPreview = {
   label: string;
@@ -167,9 +173,11 @@ type EmailBubbleSelectionState = {
   cursor?: number;
   from: number;
   key: string | null;
+  nodeName?: string;
   scope?: 'node' | 'row' | 'text';
   style?: {
     color?: string;
+    fontFamily?: string;
     fontSize?: string;
     lineHeight?: string;
   };
@@ -184,9 +192,11 @@ type EmailSelectionFormatDetail = {
   alignment?: 'left' | 'center' | 'right';
   patch?: {
     color?: string;
+    fontFamily?: string;
     fontSize?: string;
     lineHeight?: string;
   };
+  selection?: EmailBubbleSelectionState;
 };
 
 const emailBubbleHiddenNodes = ['horizontalRule'];
@@ -194,7 +204,9 @@ const emailBubbleNodeSelectionNodes = ['button', 'image', 'section', 'columnsCol
 const emailBubbleControlFocusWindowMs = 2500;
 const emailBubbleControlSelector =
   '[data-tixkit-email-bubble-controls="true"], .tixkit-email-bubble-control';
+const emailBubbleControlUntilAttribute = 'data-tixkit-email-bubble-control-until';
 let lastEmailBubbleControlInteractionAt = 0;
+let latestEmailBubbleSelection: EmailBubbleSelectionState | null = null;
 
 function emailBubbleInteractionTime(): number {
   return globalThis.performance?.now() ?? Date.now();
@@ -202,17 +214,36 @@ function emailBubbleInteractionTime(): number {
 
 function markEmailBubbleControlInteraction() {
   lastEmailBubbleControlInteractionAt = emailBubbleInteractionTime();
+  globalThis.document?.documentElement.setAttribute(
+    emailBubbleControlUntilAttribute,
+    String(Date.now() + emailBubbleControlFocusWindowMs),
+  );
 }
 
 function hasRecentEmailBubbleControlInteraction(): boolean {
+  const sharedUntil = Number(
+    globalThis.document?.documentElement.getAttribute(emailBubbleControlUntilAttribute) ?? '0',
+  );
   return (
     emailBubbleInteractionTime() - lastEmailBubbleControlInteractionAt <
-    emailBubbleControlFocusWindowMs
+      emailBubbleControlFocusWindowMs ||
+    Date.now() < sharedUntil
   );
 }
 
 function emailBubbleControlTarget(target: EventTarget | null): HTMLElement | null {
   return target instanceof HTMLElement ? target.closest(emailBubbleControlSelector) : null;
+}
+
+function rememberEmailBubbleSelection(selection: EmailBubbleSelectionState | null) {
+  latestEmailBubbleSelection = selection;
+}
+
+function currentEmailBubbleSelection(
+  selection: EmailBubbleSelectionState | null,
+  refSelection: EmailBubbleSelectionState | null,
+): EmailBubbleSelectionState | null {
+  return selection ?? refSelection ?? latestEmailBubbleSelection;
 }
 
 const emailBubbleMenuTrigger: TriggerFn = ({ editor, state }) => {
@@ -227,6 +258,9 @@ const emailBubbleMenuTrigger: TriggerFn = ({ editor, state }) => {
     selection instanceof NodeSelection &&
     emailBubbleNodeSelectionNodes.includes(selection.node.type.name)
   ) {
+    return true;
+  }
+  if (hasRecentEmailBubbleControlInteraction() && latestEmailBubbleSelection) {
     return true;
   }
   if (selection.empty) {
@@ -268,6 +302,16 @@ function inlineControlValue(value: string | undefined, suffix: 'px' | '%'): stri
   return value.replace(new RegExp(`${suffix}$`, 'i'), '');
 }
 
+const emailBubbleFontOptions = [
+  { label: 'Brand default', value: '' },
+  { label: 'Inter', value: 'Inter, Arial, sans-serif' },
+  { label: 'Arial', value: 'Arial, Helvetica, sans-serif' },
+  { label: 'Georgia', value: 'Georgia, serif' },
+  { label: 'Times', value: 'Times New Roman, Times, serif' },
+  { label: 'Verdana', value: 'Verdana, Geneva, sans-serif' },
+  { label: 'Mono', value: 'Courier New, Courier, monospace' },
+] as const;
+
 function isEmailBubbleSelectionState(value: unknown): value is EmailBubbleSelectionState {
   if (!value || typeof value !== 'object') return false;
   const candidate = value as Partial<EmailBubbleSelectionState>;
@@ -279,11 +323,44 @@ function TixkitEmailBubbleMenu() {
   const [nodeSelectorOpen, setNodeSelectorOpen] = React.useState(false);
   const [linkSelectorOpen, setLinkSelectorOpen] = React.useState(false);
   const [selection, setSelection] = React.useState<EmailBubbleSelectionState | null>(null);
+  const variableSelectKeyRef = React.useRef<string | null>(null);
   const lastSelectionRef = React.useRef<EmailBubbleSelectionState | null>(null);
   const isCodeActive = useEditorState({
     editor,
     selector: ({ editor: activeEditor }) => activeEditor?.isActive('code') ?? false,
   });
+
+  // The BubbleMenu from @tiptap/react portals to document.body, so the
+  // library's EditorFocusScope (Radix Slot) never attaches to the actual
+  // [data-re-bubble-menu] element. Register it as a focus scope manually so
+  // the FocusScopes extension skips clearing the selection on focusout.
+  React.useEffect(() => {
+    if (!editor) return;
+    const focusScope = editor.extensionStorage?.focusScope;
+    if (!focusScope?.registerScope) return;
+
+    let registeredEl: HTMLElement | null = null;
+    let observer: MutationObserver | null = null;
+
+    const tryRegister = () => {
+      const bubbleEl = document.querySelector<HTMLElement>('[data-re-bubble-menu]');
+      if (bubbleEl && bubbleEl !== registeredEl) {
+        if (registeredEl) focusScope.unregisterScope(registeredEl);
+        focusScope.registerScope(bubbleEl);
+        registeredEl = bubbleEl;
+      }
+    };
+
+    tryRegister();
+
+    observer = new MutationObserver(() => tryRegister());
+    observer.observe(document.body, { childList: true, subtree: true });
+
+    return () => {
+      observer?.disconnect();
+      if (registeredEl) focusScope.unregisterScope(registeredEl);
+    };
+  }, [editor]);
 
   React.useEffect(() => {
     const dom = editor?.view.dom;
@@ -292,33 +369,106 @@ function TixkitEmailBubbleMenu() {
       const detail = (event as CustomEvent<unknown>).detail;
       if (isEmailBubbleSelectionState(detail)) {
         lastSelectionRef.current = detail;
+        rememberEmailBubbleSelection(detail);
         setSelection(detail);
         return;
       }
       if (hasRecentEmailBubbleControlInteraction()) {
-        setSelection(lastSelectionRef.current);
+        setSelection(currentEmailBubbleSelection(null, lastSelectionRef.current));
         return;
       }
       lastSelectionRef.current = null;
+      rememberEmailBubbleSelection(null);
       setSelection(null);
     };
     dom.addEventListener('tixkit-email-selection-state', handleSelectionState);
+    const handleSelectionClear = () => {
+      lastSelectionRef.current = null;
+      rememberEmailBubbleSelection(null);
+      setSelection(null);
+    };
+    dom.addEventListener('tixkit-email-selection-clear', handleSelectionClear);
+    // Direct listener for variable selection (from chip clicks) — bypasses
+    // the plugin state chain to reliably set selection.key.
+    const handleVariableSelect = (event: Event) => {
+      const detail = (event as CustomEvent<{ from: number; key: string; to: number }>).detail;
+      if (!detail || typeof detail.from !== 'number' || typeof detail.to !== 'number') return;
+      variableSelectKeyRef.current = detail.key;
+      // Don't call setSelection here — handleSelectionState already sets
+      // selection with the correct style info. We only set the ref as a
+      // fallback for the render condition when selection.key is null.
+      lastSelectionRef.current = {
+        cursor: detail.from + 1,
+        from: detail.from,
+        key: detail.key,
+        scope: 'text',
+        to: detail.to,
+      };
+      rememberEmailBubbleSelection(lastSelectionRef.current);
+    };
+    dom.addEventListener('tixkit-email-variable-select', handleVariableSelect);
+    const handleSelectionClearWithRef = () => {
+      variableSelectKeyRef.current = null;
+    };
+    dom.addEventListener('tixkit-email-selection-clear', handleSelectionClearWithRef);
     return () => {
       dom.removeEventListener('tixkit-email-selection-state', handleSelectionState);
+      dom.removeEventListener('tixkit-email-selection-clear', handleSelectionClear);
+      dom.removeEventListener('tixkit-email-selection-clear', handleSelectionClearWithRef);
+      dom.removeEventListener('tixkit-email-variable-select', handleVariableSelect);
     };
   }, [editor]);
 
-  const dispatchSelectionFormat = React.useCallback(
-    (detail: EmailSelectionFormatDetail) => {
+  const dispatchSelectionRestore = React.useCallback(
+    (currentSelection: EmailBubbleSelectionState) => {
+      lastSelectionRef.current = currentSelection;
+      rememberEmailBubbleSelection(currentSelection);
       editor?.view.dom.dispatchEvent(
-        new CustomEvent('tixkit-email-selection-format', {
+        new CustomEvent('tixkit-email-selection-restore', {
           bubbles: true,
-          cancelable: true,
-          detail,
+          detail: {
+            ...currentSelection,
+            focusEditor: false,
+          } satisfies EmailSelectionRestoreDetail,
         }),
       );
     },
     [editor],
+  );
+
+  const dispatchSelectionFormat = React.useCallback(
+    (detail: EmailSelectionFormatDetail) => {
+      const currentSelection = currentEmailBubbleSelection(selection, lastSelectionRef.current);
+      if (currentSelection) {
+        markEmailBubbleControlInteraction();
+        dispatchSelectionRestore(currentSelection);
+      }
+      editor?.view.dom.dispatchEvent(
+        new CustomEvent('tixkit-email-selection-format', {
+          bubbles: true,
+          cancelable: true,
+          detail: currentSelection ? { ...detail, selection: currentSelection } : detail,
+        }),
+      );
+      if (currentSelection) {
+        window.requestAnimationFrame(() => dispatchSelectionRestore(currentSelection));
+        window.setTimeout(() => dispatchSelectionRestore(currentSelection), 0);
+        window.setTimeout(() => dispatchSelectionRestore(currentSelection), 60);
+      }
+    },
+    [dispatchSelectionRestore, editor, selection],
+  );
+
+  const formatCurrentSelection = React.useCallback(
+    (detail: EmailSelectionFormatDetail) => {
+      markEmailBubbleControlInteraction();
+      const currentSelection = currentEmailBubbleSelection(selection, lastSelectionRef.current);
+      if (currentSelection) {
+        dispatchSelectionRestore(currentSelection);
+      }
+      dispatchSelectionFormat(detail);
+    },
+    [dispatchSelectionFormat, dispatchSelectionRestore, selection],
   );
 
   const handleNodeSelectorOpenChange = React.useCallback((open: boolean) => {
@@ -333,30 +483,25 @@ function TixkitEmailBubbleMenu() {
 
   const restoreBubbleSelection = React.useCallback(() => {
     markEmailBubbleControlInteraction();
-    const currentSelection = selection ?? lastSelectionRef.current;
+    const currentSelection = currentEmailBubbleSelection(selection, lastSelectionRef.current);
     if (!editor || !currentSelection) return;
     const restore = () => {
-      editor.view.dom.dispatchEvent(
-        new CustomEvent('tixkit-email-selection-restore', {
-          bubbles: true,
-          detail: {
-            ...currentSelection,
-            focusEditor: false,
-          } satisfies EmailSelectionRestoreDetail,
-        }),
-      );
+      dispatchSelectionRestore(currentSelection);
     };
     restore();
     window.requestAnimationFrame(restore);
     window.setTimeout(restore, 0);
-  }, [editor, selection]);
+  }, [dispatchSelectionRestore, editor, selection]);
 
-  const openVariableMenu = React.useCallback(() => {
-    restoreBubbleSelection();
+  const toggleVariableMenu = React.useCallback(() => {
+    // Only restore bubble selection if we don't have a variable select key
+    // from a recent chip click (which would be overridden by the restore).
+    if (!variableSelectKeyRef.current) restoreBubbleSelection();
     editor?.view.dom.dispatchEvent(
       new CustomEvent('tixkit-email-variable-menu-open', {
         bubbles: true,
         cancelable: true,
+        detail: { mode: 'toggle' },
       }),
     );
   }, [editor, restoreBubbleSelection]);
@@ -367,19 +512,38 @@ function TixkitEmailBubbleMenu() {
     if (!dom || !ownerDocument) return undefined;
 
     const handleNativeBubbleControlInteraction = (event: Event) => {
-      if (!emailBubbleControlTarget(event.target)) return;
+      const control = emailBubbleControlTarget(event.target);
+      if (!control) return;
       markEmailBubbleControlInteraction();
-      const currentSelection = lastSelectionRef.current;
+      const currentSelection = currentEmailBubbleSelection(selection, lastSelectionRef.current);
+      if (event.type === 'pointerdown' || event.type === 'mousedown') {
+        if (
+          control instanceof HTMLInputElement ||
+          control instanceof HTMLSelectElement ||
+          control instanceof HTMLTextAreaElement
+        ) {
+          // Let native inputs receive their first click normally; the stored range below
+          // keeps the editor selection alive while focus moves into the control.
+          window.requestAnimationFrame(() => control.focus({ preventScroll: true }));
+        } else {
+          event.preventDefault();
+          event.stopImmediatePropagation();
+        }
+      }
       if (!currentSelection) return;
-      dom.dispatchEvent(
-        new CustomEvent('tixkit-email-selection-restore', {
-          bubbles: true,
-          detail: {
-            ...currentSelection,
-            focusEditor: false,
-          } satisfies EmailSelectionRestoreDetail,
-        }),
-      );
+      const restore = () =>
+        dom.dispatchEvent(
+          new CustomEvent('tixkit-email-selection-restore', {
+            bubbles: true,
+            detail: {
+              ...currentSelection,
+              focusEditor: false,
+            } satisfies EmailSelectionRestoreDetail,
+          }),
+        );
+      restore();
+      window.requestAnimationFrame(restore);
+      window.setTimeout(restore, 0);
     };
 
     ownerDocument.addEventListener('click', handleNativeBubbleControlInteraction, true);
@@ -394,20 +558,77 @@ function TixkitEmailBubbleMenu() {
       ownerDocument.removeEventListener('mousedown', handleNativeBubbleControlInteraction, true);
       ownerDocument.removeEventListener('pointerdown', handleNativeBubbleControlInteraction, true);
     };
-  }, [editor]);
+  }, [editor, selection]);
 
-  const handleBubbleInputInteraction = React.useCallback(
-    (event: React.SyntheticEvent<HTMLElement>) => {
+  const handleBubbleControlInteraction = React.useCallback(
+    (event: React.SyntheticEvent<HTMLElement>, options?: { preventDefault?: boolean }) => {
+      if (options?.preventDefault) {
+        event.preventDefault();
+      }
       event.stopPropagation();
-      event.nativeEvent.stopImmediatePropagation();
       restoreBubbleSelection();
     },
     [restoreBubbleSelection],
   );
+  const handleBubbleInputPress = React.useCallback(
+    (event: React.MouseEvent<HTMLElement> | React.PointerEvent<HTMLElement>) => {
+      const target = event.target;
+      if (
+        !(
+          target instanceof HTMLInputElement ||
+          target instanceof HTMLSelectElement ||
+          target instanceof HTMLTextAreaElement
+        )
+      ) {
+        handleBubbleControlInteraction(event, { preventDefault: true });
+        return;
+      }
+      event.stopPropagation();
+      markEmailBubbleControlInteraction();
+      window.requestAnimationFrame(() => target.focus({ preventScroll: true }));
+    },
+    [handleBubbleControlInteraction],
+  );
 
   const style = selection?.style ?? {};
   const colorValue = /^#[0-9a-f]{6}$/i.test(style.color ?? '') ? style.color : '#111827';
-  const isNodeSelection = selection?.scope === 'node';
+  const isNodeSelection =
+    selection?.scope === 'node' ||
+    emailBubbleNodeSelectionNodes.some((nodeName) => editor?.isActive(nodeName) ?? false);
+  const isImageSelection = selection?.nodeName === 'image' || (editor?.isActive('image') ?? false);
+  const replaceSelectedImage = React.useCallback(() => {
+    restoreBubbleSelection();
+    type EditorCommands = NonNullable<typeof editor>['commands'] & {
+      uploadImage?: () => boolean;
+    };
+    const commands = editor?.commands as EditorCommands | undefined;
+    commands?.uploadImage?.();
+  }, [editor, restoreBubbleSelection]);
+  const applySelectionColor = React.useCallback(
+    (nextColor: string) => {
+      restoreBubbleSelection();
+      if (/^#[0-9a-f]{6}$/i.test(nextColor)) {
+        formatCurrentSelection({ patch: { color: nextColor } });
+      }
+    },
+    [formatCurrentSelection, restoreBubbleSelection],
+  );
+  const applySelectionTextSize = React.useCallback(
+    (nextValue: string) => {
+      restoreBubbleSelection();
+      const trimmed = nextValue.trim();
+      formatCurrentSelection({ patch: { fontSize: trimmed ? `${trimmed}px` : '' } });
+    },
+    [formatCurrentSelection, restoreBubbleSelection],
+  );
+  const applySelectionLineHeight = React.useCallback(
+    (nextValue: string) => {
+      restoreBubbleSelection();
+      const trimmed = nextValue.trim();
+      formatCurrentSelection({ patch: { lineHeight: trimmed ? `${trimmed}%` : '' } });
+    },
+    [formatCurrentSelection, restoreBubbleSelection],
+  );
 
   return (
     <>
@@ -435,74 +656,99 @@ function TixkitEmailBubbleMenu() {
               </BubbleMenu.ItemGroup>
             </>
           )}
-          {!isNodeSelection && selection?.key && (
+          {!isNodeSelection && (selection?.key || variableSelectKeyRef.current) && (
             <BubbleMenu.ItemGroup>
               <BubbleMenu.Item
                 isActive={false}
                 name="Variable options"
-                onCommand={openVariableMenu}
+                onCommand={toggleVariableMenu}
               >
                 <Variable className="size-4" />
               </BubbleMenu.Item>
             </BubbleMenu.ItemGroup>
           )}
+          {isImageSelection && (
+            <BubbleMenu.ItemGroup>
+              <BubbleMenu.Item
+                isActive={false}
+                name="Replace image"
+                onCommand={replaceSelectedImage}
+              >
+                <Image className="size-4" />
+              </BubbleMenu.Item>
+            </BubbleMenu.ItemGroup>
+          )}
           <BubbleMenu.ItemGroup>
-            <BubbleMenu.Item
-              isActive={false}
-              name="Align left"
-              onCommand={() => dispatchSelectionFormat({ alignment: 'left' })}
-            >
-              <AlignLeftIcon />
-            </BubbleMenu.Item>
-            <BubbleMenu.Item
-              isActive={false}
-              name="Align center"
-              onCommand={() => dispatchSelectionFormat({ alignment: 'center' })}
-            >
-              <AlignCenterIcon />
-            </BubbleMenu.Item>
-            <BubbleMenu.Item
-              isActive={false}
-              name="Align right"
-              onCommand={() => dispatchSelectionFormat({ alignment: 'right' })}
-            >
-              <AlignRightIcon />
-            </BubbleMenu.Item>
-          </BubbleMenu.ItemGroup>
+              <BubbleMenu.Item
+                isActive={false}
+                name="Align left"
+                onCommand={() => formatCurrentSelection({ alignment: 'left' })}
+              >
+                <AlignLeftIcon />
+              </BubbleMenu.Item>
+              <BubbleMenu.Item
+                isActive={false}
+                name="Align center"
+                onCommand={() => formatCurrentSelection({ alignment: 'center' })}
+              >
+                <AlignCenterIcon />
+              </BubbleMenu.Item>
+              <BubbleMenu.Item
+                isActive={false}
+                name="Align right"
+                onCommand={() => formatCurrentSelection({ alignment: 'right' })}
+              >
+                <AlignRightIcon />
+              </BubbleMenu.Item>
+            </BubbleMenu.ItemGroup>
           {!isNodeSelection && (
             <BubbleMenu.ItemGroup className="tixkit-email-bubble-controls">
               <span
                 className="tixkit-email-bubble-controls__inputs"
                 data-tixkit-email-bubble-controls="true"
-                onClickCapture={handleBubbleInputInteraction}
-                onFocusCapture={handleBubbleInputInteraction}
-                onMouseDownCapture={handleBubbleInputInteraction}
-                onPointerDownCapture={handleBubbleInputInteraction}
+                onClickCapture={handleBubbleControlInteraction}
+                onFocusCapture={handleBubbleControlInteraction}
+                onMouseDownCapture={handleBubbleInputPress}
+                onPointerDownCapture={handleBubbleInputPress}
               >
                 <input
                   aria-label="Selection color"
                   className="tixkit-email-bubble-control tixkit-email-bubble-control--color"
-                  onChange={(event) => {
-                    const nextColor = event.currentTarget.value;
-                    if (/^#[0-9a-f]{6}$/i.test(nextColor)) {
-                      dispatchSelectionFormat({ patch: { color: nextColor } });
-                    }
-                  }}
-                  onClick={handleBubbleInputInteraction}
-                  onMouseDown={handleBubbleInputInteraction}
+                  onChange={(event) => applySelectionColor(event.currentTarget.value)}
+                  onClick={handleBubbleControlInteraction}
+                  onInput={(event) => applySelectionColor(event.currentTarget.value)}
+                  onMouseDown={handleBubbleControlInteraction}
+                  onPointerDown={handleBubbleControlInteraction}
                   type="color"
                   value={colorValue}
                 />
+                <select
+                  aria-label="Selection font family"
+                  className="tixkit-email-bubble-control tixkit-email-bubble-control--font"
+                  onChange={(event) => {
+                    restoreBubbleSelection();
+                    formatCurrentSelection({ patch: { fontFamily: event.currentTarget.value } });
+                  }}
+                  onClick={handleBubbleControlInteraction}
+                  onMouseDown={handleBubbleControlInteraction}
+                  onPointerDown={handleBubbleControlInteraction}
+                  value={style.fontFamily ?? ''}
+                >
+                  {emailBubbleFontOptions.map((option) => (
+                    <option key={option.label} value={option.value}>
+                      {option.label}
+                    </option>
+                  ))}
+                </select>
                 <input
                   aria-label="Selection text size"
                   className="tixkit-email-bubble-control tixkit-email-bubble-control--number"
                   inputMode="numeric"
-                  onChange={(event) => {
-                    const trimmed = event.currentTarget.value.trim();
-                    dispatchSelectionFormat({ patch: { fontSize: trimmed ? `${trimmed}px` : '' } });
-                  }}
-                  onClick={handleBubbleInputInteraction}
-                  onMouseDown={handleBubbleInputInteraction}
+                  onChange={(event) => applySelectionTextSize(event.currentTarget.value)}
+                  onClick={handleBubbleControlInteraction}
+                  onInput={(event) => applySelectionTextSize(event.currentTarget.value)}
+                  onMouseDown={handleBubbleControlInteraction}
+                  onPointerDown={handleBubbleControlInteraction}
                   placeholder="Size"
                   value={inlineControlValue(style.fontSize, 'px')}
                 />
@@ -510,12 +756,11 @@ function TixkitEmailBubbleMenu() {
                   aria-label="Selection line height"
                   className="tixkit-email-bubble-control tixkit-email-bubble-control--number"
                   inputMode="numeric"
-                  onChange={(event) => {
-                    const trimmed = event.currentTarget.value.trim();
-                    dispatchSelectionFormat({ patch: { lineHeight: trimmed ? `${trimmed}%` : '' } });
-                  }}
-                  onClick={handleBubbleInputInteraction}
-                  onMouseDown={handleBubbleInputInteraction}
+                  onChange={(event) => applySelectionLineHeight(event.currentTarget.value)}
+                  onClick={handleBubbleControlInteraction}
+                  onInput={(event) => applySelectionLineHeight(event.currentTarget.value)}
+                  onMouseDown={handleBubbleControlInteraction}
+                  onPointerDown={handleBubbleControlInteraction}
                   placeholder="Line"
                   value={inlineControlValue(style.lineHeight, '%')}
                 />
@@ -538,16 +783,16 @@ function defaultEmailDocument(
       contentHtml: [
         '<h1>{{event.title}}</h1>',
         '<p>Hi {{recipient.name}}, your tickets are ready.</p>',
-        '<p>{{ticket.type}} - {{order.total}}</p>',
-        '<p>Ticket code: {{ticket.code}}</p>',
+        '<p>Order {{order.id}} - {{order.total}}</p>',
+        '<p>{{ticket.type}} - {{ticket.code}}</p>',
         '<p><img src="{{ticket.qrCodeUrl}}" alt="Ticket QR code" /></p>',
         '<p>You are receiving this because you purchased or manage tickets with {{brand.name}}.</p>',
       ].join(''),
       contentText: [
         '{{event.title}}',
         'Hi {{recipient.name}}, your tickets are ready.',
-        '{{ticket.type}} - {{order.total}}',
-        'Ticket code: {{ticket.code}}',
+        'Order {{order.id}} - {{order.total}}',
+        '{{ticket.type}} - {{ticket.code}}',
         'You are receiving this because you purchased or manage tickets with {{brand.name}}.',
       ].join('\n\n'),
     },
@@ -576,7 +821,7 @@ function defaultEmailDocument(
       {
         type: 'ticket_summary',
         title: 'Ticket summary',
-        body: '{{ticket.type}} - {{order.total}} - {{ticket.code}}',
+        body: 'Order {{order.id}} - {{order.total}} - {{ticket.type}} - {{ticket.code}}',
       },
       {
         type: 'qr_code',
@@ -755,16 +1000,37 @@ function ensureBulkUnsubscribeFooter(document: EmailTemplateDocument): EmailTemp
   };
 }
 
+const inspectorNodeSectionLayout: Record<string, string[]> = {
+  image: ['attributes', 'size', 'link', 'padding', 'border'],
+  button: ['link', 'typography', 'size', 'padding', 'border', 'background'],
+  section: ['background', 'padding', 'border'],
+  div: ['background', 'padding', 'border'],
+  codeBlock: ['attributes', 'padding', 'border'],
+  footer: ['typography', 'padding', 'background'],
+  twoColumns: ['columnSpacing', 'typography', 'padding', 'background', 'border'],
+  threeColumns: ['columnSpacing', 'typography', 'padding', 'background', 'border'],
+  fourColumns: ['columnSpacing', 'typography', 'padding', 'background', 'border'],
+};
+const inspectorDefaultSections = ['typography', 'padding', 'background', 'border'];
+function inspectorSectionTypesForNode(nodeType: string): string[] {
+  return inspectorNodeSectionLayout[nodeType] ?? inspectorDefaultSections;
+}
+
 function NativeEmailInspector({ host }: { host: HTMLElement | null }) {
   const { editor } = useCurrentEditor();
   const lastSelectionRef = React.useRef<EmailBubbleSelectionState | null>(null);
+  const [isTextSelection, setIsTextSelection] = React.useState(false);
 
   React.useEffect(() => {
     const dom = editor?.view.dom;
     if (!dom) return undefined;
     const handleSelectionState = (event: Event) => {
       const detail = (event as CustomEvent<unknown>).detail;
-      if (isEmailBubbleSelectionState(detail)) lastSelectionRef.current = detail;
+      if (isEmailBubbleSelectionState(detail)) {
+        lastSelectionRef.current = detail;
+        rememberEmailBubbleSelection(detail);
+        setIsTextSelection(detail.scope !== 'node');
+      }
     };
     dom.addEventListener('tixkit-email-selection-state', handleSelectionState);
     return () => {
@@ -775,8 +1041,10 @@ function NativeEmailInspector({ host }: { host: HTMLElement | null }) {
   const preserveSelectionForTarget = React.useCallback(
     (target: EventTarget | null, event?: { preventDefault: () => void; type?: string }) => {
       const selection = lastSelectionRef.current;
+      const currentSelection = selection ?? latestEmailBubbleSelection;
       const dom = editor?.view.dom;
-      if (!selection || !dom) return;
+      if (!currentSelection || !dom) return;
+      markEmailBubbleControlInteraction();
       const allowsNativeFocus =
         target instanceof HTMLElement &&
         Boolean(target.closest('input, textarea, select, [contenteditable="true"]'));
@@ -788,7 +1056,7 @@ function NativeEmailInspector({ host }: { host: HTMLElement | null }) {
           new CustomEvent('tixkit-email-selection-restore', {
             bubbles: true,
             detail: {
-              ...selection,
+              ...currentSelection,
               focusEditor: !allowsNativeFocus,
             } satisfies EmailSelectionRestoreDetail,
           }),
@@ -832,16 +1100,32 @@ function NativeEmailInspector({ host }: { host: HTMLElement | null }) {
     [preserveSelectionForTarget],
   );
 
+  // Register the inspector host element as a focus scope so the FocusScopes
+  // extension does not clear the editor selection when focus moves to an
+  // inspector control. The EditorFocusScope wrapper may not reliably attach
+  // via Radix Slot inside a portal, so we register the host directly.
+  React.useEffect(() => {
+    if (!editor || !host) return;
+    const focusScope = editor.extensionStorage?.focusScope;
+    if (!focusScope?.registerScope) return;
+    focusScope.registerScope(host);
+    return () => {
+      focusScope.unregisterScope(host);
+    };
+  }, [editor, host]);
+
   if (!host) return null;
   return createPortal(
-    <div
-      className="tixkit-email-native-inspector"
-      onClickCapture={preserveEditorSelection}
-      onFocusCapture={preserveEditorSelection}
-      onInputCapture={preserveEditorSelection}
-      onMouseDownCapture={preserveEditorSelection}
-      onPointerDownCapture={preserveEditorSelection}
-    >
+    <EditorFocusScope>
+      <div
+        className="tixkit-email-native-inspector"
+        data-tixkit-email-inspector="true"
+        onClickCapture={preserveEditorSelection}
+        onFocusCapture={preserveEditorSelection}
+        onInputCapture={preserveEditorSelection}
+        onMouseDownCapture={preserveEditorSelection}
+        onPointerDownCapture={preserveEditorSelection}
+      >
       <Inspector.Root aria-label="React Email style inspector">
         <div className="space-y-1 border-b border-border pb-3">
           <p className="text-xs uppercase tracking-wide text-muted-foreground">Selection</p>
@@ -851,10 +1135,38 @@ function NativeEmailInspector({ host }: { host: HTMLElement | null }) {
         </div>
         <div className="space-y-5">
           <Inspector.Document />
-          <Inspector.Node />
+          {isTextSelection ? (
+            <Inspector.Node>
+              {(context) => {
+                const sectionTypes = inspectorSectionTypesForNode(context.nodeType)
+                  .filter((type) => type !== 'typography');
+                return sectionTypes.map((type) => {
+                  switch (type) {
+                    case 'attributes':
+                      return <Inspector.Attributes key={type} {...context} />;
+                    case 'size':
+                      return <Inspector.Size key={type} {...context} />;
+                    case 'padding':
+                      return <Inspector.Padding key={type} {...context} />;
+                    case 'columnSpacing':
+                      return <Inspector.ColumnSpacing key={type} {...context} />;
+                    case 'background':
+                      return <Inspector.Background key={type} {...context} />;
+                    case 'border':
+                      return <Inspector.Border key={type} {...context} />;
+                    default:
+                      return null;
+                  }
+                });
+              }}
+            </Inspector.Node>
+          ) : (
+            <Inspector.Node />
+          )}
         </div>
       </Inspector.Root>
-    </div>,
+      </div>
+    </EditorFocusScope>,
     host,
   );
 }
@@ -922,8 +1234,9 @@ function withEditorExport(
   const canonicalHtml = jsonHtml || exportedHtml;
   const htmlText = plainTextFromHtml(canonicalHtml);
   const contentText = jsonText || exported.text.trim() || htmlText;
-  const contentHtml =
+  const baseContentHtml =
     canonicalHtml && (htmlText || !jsonText) ? canonicalHtml : htmlFromPlainText(contentText);
+  const contentHtml = applyEmailGlobalCssToHtml(baseContentHtml, document.editor.globalCss);
   return {
     ...document,
     editor: {
@@ -1162,6 +1475,10 @@ function inlineStyleAttribute(attrs: Record<string, unknown> | undefined): strin
   if (typeof attrs?.color === 'string' && attrs.color.trim()) {
     style.push(`color: ${attrs.color.trim()}`);
   }
+  if (typeof attrs?.fontFamily === 'string' && attrs.fontFamily.trim()) {
+    const fontFamily = sanitizeEmailFontFamily(attrs.fontFamily);
+    if (fontFamily) style.push(`font-family: ${fontFamily}`);
+  }
   if (typeof attrs?.fontSize === 'string' && attrs.fontSize.trim()) {
     style.push(`font-size: ${attrs.fontSize.trim()}`);
   }
@@ -1325,6 +1642,7 @@ export function EmailPersistedEditorView({ eventId }: { eventId: string }) {
   const [testDialogOpen, setTestDialogOpen] = React.useState(false);
   const [reviewDialogOpen, setReviewDialogOpen] = React.useState(false);
   const [reviewConfirmed, setReviewConfirmed] = React.useState(false);
+  const [emailThemePreset, setEmailThemePreset] = React.useState<EmailThemePreset>('brand');
   const [autosave, setAutosave] = React.useState<AutosaveState>('idle');
   const [loading, setLoading] = React.useState(true);
   const [error, setError] = React.useState<string>();
@@ -1334,7 +1652,26 @@ export function EmailPersistedEditorView({ eventId }: { eventId: string }) {
   const inspectorRef = React.useRef<HTMLDivElement | null>(null);
   const operationIdRef = React.useRef(0);
   const emailEditorRef = React.useRef<EmailEditorRef | null>(null);
-  const [brandTheme, setBrandTheme] = React.useState(() => createBrandEmailEditorTheme());
+  const brandTheme = React.useMemo(
+    () =>
+      createBrandEmailEditorTheme({
+        preset: emailThemePreset,
+        primaryColor:
+          typeof brand?.theme.primaryColor === 'string' ? brand.theme.primaryColor : undefined,
+        fontFamily:
+          typeof brand?.theme.fontFamily === 'string' ? brand.theme.fontFamily : undefined,
+        radius:
+          typeof brand?.theme.radius === 'string' || typeof brand?.theme.radius === 'number'
+            ? brand.theme.radius
+            : undefined,
+      }),
+    [
+      brand?.theme.fontFamily,
+      brand?.theme.primaryColor,
+      brand?.theme.radius,
+      emailThemePreset,
+    ],
+  );
   const emailExtensions = useEmailEditorExtensions({
     mergeTags: emailVariableInserts,
     theme: brandTheme,
@@ -1431,23 +1768,6 @@ export function EmailPersistedEditorView({ eventId }: { eventId: string }) {
     if (brandsResult.ok) {
       loadedBrand = listItemsFromResponse<AdminBrand>(brandsResult.data).find(
         (brand) => brand.id === loadedEvent.brandId,
-      );
-      setBrandTheme(
-        createBrandEmailEditorTheme({
-          primaryColor:
-            typeof loadedBrand?.theme.primaryColor === 'string'
-              ? loadedBrand.theme.primaryColor
-              : undefined,
-          fontFamily:
-            typeof loadedBrand?.theme.fontFamily === 'string'
-              ? loadedBrand.theme.fontFamily
-              : undefined,
-          radius:
-            typeof loadedBrand?.theme.radius === 'string' ||
-            typeof loadedBrand?.theme.radius === 'number'
-              ? loadedBrand.theme.radius
-              : undefined,
-        }),
       );
     }
 
@@ -1642,12 +1962,55 @@ export function EmailPersistedEditorView({ eventId }: { eventId: string }) {
     markDraftDirty();
   }
 
+  function applyEmailThemePreset(nextPreset: EmailThemePreset) {
+    if (isArchived) return;
+    if (nextPreset === emailThemePreset) return;
+    setEmailThemePreset(nextPreset);
+    setEditorRevision((current) => current + 1);
+    markDraftDirty();
+  }
+
+  function updateCodeHtml(nextHtml: string) {
+    if (!emailDocument || isArchived) return;
+    const contentHtml = stripEmailGlobalCssFromHtml(nextHtml);
+    const contentText = plainTextFromHtml(contentHtml);
+    updateEmailDocument({
+      ...emailDocument,
+      editor: {
+        ...emailDocument.editor,
+        contentHtml,
+        contentText,
+        contentJson: undefined,
+      },
+      blocks: projectEditorTextToLegacyBlocks(emailDocument.blocks, contentText),
+    });
+  }
+
+  async function copyCodeHtml() {
+    if (!emailDocument) return;
+    try {
+      await navigator.clipboard.writeText(emailDocument.editor.contentHtml);
+      setNotice('Copied email HTML');
+      setActionError(undefined);
+    } catch {
+      setActionError('Unable to copy email HTML');
+    }
+  }
+
   async function snapshotFromEditor(
     snapshot = emailDocument,
   ): Promise<EmailTemplateDocument | undefined> {
     if (!snapshot) return undefined;
     const ref = emailEditorRef.current;
-    if (!ref) return snapshot;
+    if (!ref) {
+      const contentHtml = applyEmailGlobalCssToHtml(
+        stripEmailGlobalCssFromHtml(snapshot.editor.contentHtml),
+        snapshot.editor.globalCss,
+      );
+      return contentHtml === snapshot.editor.contentHtml
+        ? snapshot
+        : { ...snapshot, editor: { ...snapshot.editor, contentHtml } };
+    }
     const exported = await ref.getEmail();
     return withEditorExport(snapshot, {
       html: exported.html,
@@ -1801,15 +2164,27 @@ export function EmailPersistedEditorView({ eventId }: { eventId: string }) {
   }
 
   async function handleModeChange(mode: EditorMode) {
-    setEditorMode(mode);
+    if (mode === editorMode) return;
     if (mode === 'preview') {
+      setEditorMode(mode);
       void previewSavedDraft();
       return;
     }
-    if (mode !== 'code' || !emailDocument) return;
+    if (mode === 'editor') {
+      if (editorMode === 'code') {
+        setEditorRevision((current) => current + 1);
+      }
+      setEditorMode(mode);
+      return;
+    }
+    if (mode !== 'code' || !emailDocument) {
+      setEditorMode(mode);
+      return;
+    }
     try {
       const currentExport = await snapshotFromEditor(emailDocument);
       if (currentExport) setEmailDocument(currentExport);
+      setEditorMode(mode);
     } catch (codeExportError) {
       setAutosave('error');
       setActionError(
@@ -2102,6 +2477,35 @@ export function EmailPersistedEditorView({ eventId }: { eventId: string }) {
       disabled: Boolean(archivedReason) || templateChoices.length === 0,
     },
     {
+      id: 'theme-preset',
+      label: 'Theme preset',
+      icon: <Palette className="size-4" />,
+      onClick: () => {},
+      disabled: Boolean(archivedReason),
+      separatorAfter: true,
+      activeChildId: emailThemePreset,
+      children: [
+        {
+          id: 'brand',
+          label: 'Brand',
+          onClick: () => applyEmailThemePreset('brand'),
+          disabled: Boolean(archivedReason),
+        },
+        {
+          id: 'minimal',
+          label: 'Minimal',
+          onClick: () => applyEmailThemePreset('minimal'),
+          disabled: Boolean(archivedReason),
+        },
+        {
+          id: 'basic',
+          label: 'Basic',
+          onClick: () => applyEmailThemePreset('basic'),
+          disabled: Boolean(archivedReason),
+        },
+      ],
+    },
+    {
       id: 'history',
       label: 'Version history',
       icon: <Copy className="size-4" />,
@@ -2353,11 +2757,57 @@ export function EmailPersistedEditorView({ eventId }: { eventId: string }) {
               {editorMode === 'code' ? (
                 <div className="grid gap-4 rounded-lg bg-zinc-950 p-4 text-xs text-zinc-100 shadow-sm ring-1 ring-border/50">
                   <section>
-                    <h2 className="mb-2 text-sm font-semibold text-white">Exported HTML</h2>
-                    <pre className="max-h-72 overflow-auto whitespace-pre-wrap leading-5">
-                      {emailDocument.editor.contentHtml}
-                    </pre>
+                    <div className="mb-2 flex items-center justify-between gap-3">
+                      <h2 className="text-sm font-semibold text-white">Email HTML</h2>
+                      <Button
+                        className="h-8 border-zinc-700 bg-zinc-900 px-3 text-xs text-zinc-100 hover:bg-zinc-800"
+                        onClick={() => void copyCodeHtml()}
+                        type="button"
+                        variant="outline"
+                      >
+                        Copy HTML
+                      </Button>
+                    </div>
+                    <textarea
+                      aria-label="Email HTML code"
+                      className="min-h-80 w-full resize-y rounded-md border border-zinc-800 bg-black p-3 font-mono text-xs leading-5 text-zinc-100 outline-none transition focus:border-zinc-500 focus:ring-2 focus:ring-zinc-600 disabled:cursor-not-allowed disabled:opacity-70"
+                      disabled={!canEdit}
+                      onChange={(change) => updateCodeHtml(change.currentTarget.value)}
+                      spellCheck={false}
+                      value={emailDocument.editor.contentHtml}
+                    />
+                    <p className="mt-2 text-xs text-zinc-400">
+                      Edits update the draft HTML. Return to Editor to reload the canvas from this HTML.
+                    </p>
                   </section>
+                  <details className="group/section">
+                    <summary className="mb-2 flex cursor-pointer items-center gap-2 text-sm font-semibold text-white">
+                      <span>Global CSS</span>
+                      <span className="text-xs font-normal text-zinc-500 group-open/section:hidden">
+                        (click to expand)
+                      </span>
+                    </summary>
+                    <textarea
+                      aria-label="Global CSS"
+                      className="mt-1 min-h-32 w-full resize-y rounded-md border border-zinc-800 bg-black p-3 font-mono text-xs leading-5 text-zinc-100 outline-none transition focus:border-zinc-500 focus:ring-2 focus:ring-zinc-600 disabled:cursor-not-allowed disabled:opacity-70"
+                      disabled={!canEdit}
+                      onChange={(change) =>
+                        updateEmailDocument({
+                          ...emailDocument,
+                          editor: {
+                            ...emailDocument.editor,
+                            globalCss: change.currentTarget.value,
+                          },
+                        })
+                      }
+                      placeholder=".button { text-transform: uppercase; }"
+                      spellCheck={false}
+                      value={emailDocument.editor.globalCss ?? ''}
+                    />
+                    <p className="mt-2 text-xs text-zinc-400">
+                      Injected once into the email HTML head. Validated for unsafe rules before publish.
+                    </p>
+                  </details>
                   <section>
                     <h2 className="mb-2 text-sm font-semibold text-white">Editor JSON</h2>
                     <pre className="max-h-72 overflow-auto whitespace-pre-wrap leading-5">
@@ -2412,11 +2862,13 @@ export function EmailPersistedEditorView({ eventId }: { eventId: string }) {
               title={inspectorHeading[inspectorPanelId].title}
             >
               {inspectorPanelId === 'style' && (
-                <div
-                  className="min-h-[16rem]"
-                  data-testid="native-email-inspector-host"
-                  ref={setNativeInspectorHost}
-                />
+                <div className="space-y-4">
+                  <div
+                    className="min-h-[16rem]"
+                    data-testid="native-email-inspector-host"
+                    ref={setNativeInspectorHost}
+                  />
+                </div>
               )}
 
               {inspectorPanelId === 'details' && (
@@ -2502,6 +2954,42 @@ export function EmailPersistedEditorView({ eventId }: { eventId: string }) {
                         {document.eventId ?? 'brand'}
                       </dd>
                     </div>
+                    {getTemplateLifecycle(
+                      emailDocument.settings.templateKey as Parameters<typeof getTemplateLifecycle>[0],
+                    ) ? (
+                      <>
+                        <div className="flex justify-between gap-4 border-b border-border pb-2">
+                          <dt className="text-muted-foreground">Lifecycle family</dt>
+                          <dd className="max-w-[12rem] truncate text-foreground/80">
+                            {
+                              getTemplateLifecycle(
+                                emailDocument.settings.templateKey as Parameters<typeof getTemplateLifecycle>[0],
+                              )!.family
+                            }
+                          </dd>
+                        </div>
+                        <div className="flex justify-between gap-4 border-b border-border pb-2">
+                          <dt className="text-muted-foreground">Tier</dt>
+                          <dd className="max-w-[12rem] truncate text-foreground/80">
+                            {
+                              getTemplateLifecycle(
+                                emailDocument.settings.templateKey as Parameters<typeof getTemplateLifecycle>[0],
+                              )!.tier
+                            }
+                          </dd>
+                        </div>
+                        <div className="flex justify-between gap-4 border-b border-border pb-2">
+                          <dt className="text-muted-foreground">Audience</dt>
+                          <dd className="max-w-[12rem] truncate text-foreground/80">
+                            {
+                              getTemplateLifecycle(
+                                emailDocument.settings.templateKey as Parameters<typeof getTemplateLifecycle>[0],
+                              )!.defaultAudience
+                            }
+                          </dd>
+                        </div>
+                      </>
+                    ) : null}
                   </dl>
                 </div>
               )}

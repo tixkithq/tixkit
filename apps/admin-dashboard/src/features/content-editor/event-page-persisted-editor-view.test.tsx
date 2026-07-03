@@ -5,6 +5,15 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { createDefaultEventPageDocument } from '@tixkit/content-event-page';
 import { EventPagePersistedEditorView } from './event-page-persisted-editor-view';
 
+/**
+ * Simulate typing into a contentEditable EditableText element.
+ * Sets textContent and fires an input event so the onInput handler picks it up.
+ */
+function editEditableText(element: HTMLElement, text: string) {
+  element.textContent = text;
+  fireEvent.input(element);
+}
+
 const adminApiMock = vi.hoisted(() => ({
   getEvent: vi.fn(),
   listContentDocuments: vi.fn(),
@@ -167,6 +176,11 @@ describe('EventPagePersistedEditorView', () => {
     render(React.createElement(EventPagePersistedEditorView, { eventId: 'evt_1' }));
 
     expect(await screen.findByLabelText('Page headline')).toBeInTheDocument();
+    // The admin canvas renders through the shared .tk-ep-* class contract.
+    const canvas = screen.getByTestId('editor-canvas');
+    expect(canvas.querySelector('.tixkit-event-page')).not.toBeNull();
+    expect(canvas.querySelector('.tk-ep-hero')?.getAttribute('data-block-id')).toBe('hero');
+    expect(canvas.querySelector('.tk-ep-tickets')?.getAttribute('data-block-id')).toBe('tickets');
     expect(screen.queryByTestId('event-page-metadata-bar')).not.toBeInTheDocument();
     expect(screen.getByRole('navigation', { name: 'Editor tools' })).toBeInTheDocument();
     expect(screen.getByText('Selected block')).toBeInTheDocument();
@@ -177,18 +191,9 @@ describe('EventPagePersistedEditorView', () => {
     expect(screen.getByRole('button', { name: 'Close sidebar' })).toBeInTheDocument();
 
     const headline = screen.getByLabelText('Page headline');
-    fireEvent.change(headline, {
-      target: { value: 'Updated hosted page' },
-    });
-    fireEvent.change(screen.getByLabelText('Page summary'), {
-      target: { value: 'Updated page copy for {{event.title}}.' },
-    });
-    expect(await screen.findAllByText('Dynamic values')).not.toHaveLength(0);
-    expect(screen.getByText('Event name')).toBeInTheDocument();
-    expect(screen.getByText('Sample Summer Showcase')).toBeInTheDocument();
-    fireEvent.change(screen.getByLabelText('Ticket CTA label'), {
-      target: { value: 'Reserve tickets' },
-    });
+    editEditableText(headline, 'Updated hosted page');
+    editEditableText(screen.getByLabelText('Page summary'), 'Updated page copy for {{event.title}}.');
+    editEditableText(screen.getByLabelText('Ticket CTA label'), 'Reserve tickets');
     openEventPageMoreActions();
     expect(screen.getByRole('menuitem', { name: 'Variables' })).toBeInTheDocument();
     fireEvent.click(screen.getByRole('menuitem', { name: 'Variables' }));
@@ -231,6 +236,17 @@ describe('EventPagePersistedEditorView', () => {
     });
 
     expect(screen.getByTestId('preview-drawer')).toHaveTextContent('Updated page copy');
+    // Preview renders the shared event-page surface (parity with checkout public page).
+    const previewSurface = screen.getByTestId('preview-surface');
+    expect(previewSurface.querySelector('.tixkit-event-page')).not.toBeNull();
+    expect(previewSurface.querySelector('.tk-ep-hero')?.getAttribute('data-block-id')).toBe(
+      'hero',
+    );
+    // Raw HTML/text debug output is secondary, not the primary preview UX.
+    expect(screen.queryByTestId('preview-html')).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: 'HTML' }));
+    expect(screen.getByTestId('preview-html').tagName).toBe('PRE');
+    expect(screen.getByTestId('preview-html')).toHaveTextContent('Updated hosted page');
 
     fireEvent.click(screen.getByRole('button', { name: 'Publish' }));
     await waitFor(() => {
@@ -251,7 +267,7 @@ describe('EventPagePersistedEditorView', () => {
     adminApiMock.listContentDocuments.mockResolvedValueOnce(ok([document]));
     const first = render(React.createElement(EventPagePersistedEditorView, { eventId: 'evt_1' }));
 
-    expect(await screen.findByLabelText('Page headline')).toHaveValue('All Access Chicago');
+    expect(await screen.findByLabelText('Page headline')).toHaveTextContent('All Access Chicago');
     expect(adminApiMock.createContentDocument).not.toHaveBeenCalled();
     first.unmount();
 
@@ -267,7 +283,7 @@ describe('EventPagePersistedEditorView', () => {
 
     render(React.createElement(EventPagePersistedEditorView, { eventId: 'evt_1' }));
 
-    expect(await screen.findByLabelText('Page headline')).toHaveValue('All Access Chicago');
+    expect(await screen.findByLabelText('Page headline')).toHaveTextContent('All Access Chicago');
     expect(adminApiMock.createContentDocument).not.toHaveBeenCalled();
   });
 
@@ -312,9 +328,7 @@ describe('EventPagePersistedEditorView', () => {
     clickMobileInsertItem('Venue');
     clickMobileInsertItem('Button');
 
-    fireEvent.change(screen.getByLabelText('Button label'), {
-      target: { value: 'Join the list' },
-    });
+    editEditableText(screen.getByLabelText('Button label'), 'Join the list');
     clickEventPageSaveDraft();
 
     await waitFor(() => {
@@ -398,7 +412,10 @@ describe('EventPagePersistedEditorView', () => {
 
     render(React.createElement(EventPagePersistedEditorView, { eventId: 'evt_1' }));
 
-    expect(await screen.findByLabelText('Page headline')).toBeDisabled();
+    expect(await screen.findByLabelText('Page headline')).toHaveAttribute(
+      'contenteditable',
+      'false',
+    );
     expect(screen.getByRole('button', { name: 'Publish' })).toBeDisabled();
     openEventPageMoreActions();
     expect(screen.getByRole('menuitem', { name: 'Save draft' })).toHaveAttribute('data-disabled');
@@ -459,11 +476,11 @@ describe('EventPagePersistedEditorView', () => {
     render(React.createElement(EventPagePersistedEditorView, { eventId: 'evt_1' }));
 
     const headline = await screen.findByLabelText('Page headline');
-    fireEvent.change(headline, { target: { value: 'Stale hosted page' } });
+    editEditableText(headline, 'Stale hosted page');
     clickEventPageSaveDraft();
     await waitFor(() => expect(screen.getByText('Saving')).toBeInTheDocument());
 
-    fireEvent.change(headline, { target: { value: 'Fresh hosted page' } });
+    editEditableText(headline, 'Fresh hosted page');
     await waitFor(() => expect(screen.getByText('Ready')).toBeInTheDocument());
 
     await act(async () => {
@@ -503,14 +520,14 @@ describe('EventPagePersistedEditorView', () => {
     render(React.createElement(EventPagePersistedEditorView, { eventId: 'evt_1' }));
 
     const headline = await screen.findByLabelText('Page headline');
-    fireEvent.change(headline, { target: { value: 'Retryable hosted page' } });
+    editEditableText(headline, 'Retryable hosted page');
     clickEventPageSaveDraft();
 
     expect(await screen.findByText('Injected event-page save outage')).toBeInTheDocument();
     expect(screen.getByText('Save failed')).toBeInTheDocument();
-    expect(screen.getByLabelText('Page headline')).toHaveValue('Retryable hosted page');
+    expect(screen.getByLabelText('Page headline')).toHaveTextContent('Retryable hosted page');
 
-    fireEvent.change(headline, { target: { value: 'Recovered hosted page' } });
+    editEditableText(headline, 'Recovered hosted page');
     expect(screen.queryByText('Injected event-page save outage')).not.toBeInTheDocument();
     expect(screen.getByText('Ready')).toBeInTheDocument();
 
@@ -528,7 +545,7 @@ describe('EventPagePersistedEditorView', () => {
     render(React.createElement(EventPagePersistedEditorView, { eventId: 'evt_1' }));
 
     const headline = await screen.findByLabelText('Page headline');
-    fireEvent.change(headline, { target: { value: 'Duplicate-ready hosted page' } });
+    editEditableText(headline, 'Duplicate-ready hosted page');
 
     openEventPageMoreActions();
     fireEvent.click(screen.getByRole('menuitem', { name: 'Duplicate page' }));

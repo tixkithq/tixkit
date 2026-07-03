@@ -13,6 +13,9 @@ import {
   type NodeViewProps,
 } from '@tiptap/react';
 import {
+  AlignCenter,
+  AlignLeft,
+  AlignRight,
   Archive,
   CalendarDays,
   Copy,
@@ -44,23 +47,38 @@ import {
   inputClassName,
 } from '@tixkit/content-editor-shell';
 import {
+  EVENT_PAGE_FONT_FAMILY_OPTIONS,
+  EVENT_PAGE_INLINE_STYLE_MARK,
+  EventPageInlineStyle,
+  EventPageTextAlignment,
   createDefaultEventPageDocument,
+  isAllowedEventPageFontFamily,
   normalizeEventPageDocument,
   renderEventPageDocument,
+  renderResolvedEventPageHtml,
+  renderResolvedEventPageText,
+  resolveEventPageDocument,
   TIPTAP_EVENT_PAGE_PROVIDER,
   type EventPageBlock,
   type EventPageDocument,
+  type EventPageRenderContext,
+  type ResolvedEventPage,
 } from '@tixkit/content-event-page';
+import { EditableBlockBody, EventPageSurface } from '@tixkit/content-event-page-react';
 import {
   adminApi,
   type AdminContentDocument,
   type AdminContentDocumentVersion,
-  type AdminContentRenderOutput,
   type AdminEventDetail,
 } from '@/lib/api';
 
 type AutosaveState = 'idle' | 'saving' | 'saved' | 'error';
-type EditorPreview = { label: string; format: 'html' | 'text'; output: string };
+type EditorPreview = {
+  label: string;
+  renderModel: ResolvedEventPage;
+  html: string;
+  text: string;
+};
 type InsertActionId = 'text' | 'image' | 'tickets' | 'schedule' | 'venue' | 'button';
 type EventPageVariableKind = 'event' | 'ticket' | 'brand' | 'link' | 'system';
 type EventPageVariablePresentation = {
@@ -84,6 +102,17 @@ type InsertAction = {
   icon: React.ReactNode;
 };
 
+type EventPageBlockViewContextValue = {
+  sampleContext: EventPageRenderContext;
+  renderRichTextBlock: (input: {
+    block: Extract<EventPageBlock, { type: 'rich_text' }>;
+    disabled: boolean;
+    onChange: (block: EventPageBlock) => void;
+  }) => React.ReactNode;
+};
+
+const EventPageBlockViewContext = React.createContext<EventPageBlockViewContextValue | null>(null);
+
 const EVENT_PAGE_BLOCK_NODE = 'eventPageBlock';
 
 const eventPageInsertActions: InsertAction[] = [
@@ -94,9 +123,6 @@ const eventPageInsertActions: InsertAction[] = [
   { id: 'venue', label: 'Venue', icon: <MapPin className="size-4" /> },
   { id: 'button', label: 'Button', icon: <ExternalLink className="size-4" /> },
 ];
-
-const canvasInputClassName =
-  'w-full rounded-sm border-0 bg-transparent p-0 shadow-none outline-none transition placeholder:text-muted-foreground/50 focus:outline-none focus-visible:outline-none disabled:cursor-not-allowed disabled:opacity-70';
 
 const eventPageMergeTagPattern = /\{\{\s*([a-zA-Z0-9_.]+)\s*\}\}/g;
 
@@ -212,7 +238,7 @@ function listItemsFromResponse<T>(value: unknown): T[] {
   );
 }
 
-function sampleContext(event: AdminEventDetail): Record<string, unknown> {
+function sampleContext(event: AdminEventDetail): EventPageRenderContext {
   return {
     event: {
       title: event.title,
@@ -232,6 +258,13 @@ function sampleContext(event: AdminEventDetail): Record<string, unknown> {
         name: 'General Admission',
         status: 'active',
         priceLabel: '$35.00',
+      },
+    ],
+    products: [
+      {
+        id: 'prod_preview_shirt',
+        name: 'Event T-Shirt',
+        priceLabel: '$25.00',
       },
     ],
   };
@@ -256,11 +289,12 @@ function defaultEventPageDocument(event: AdminEventDetail): EventPageDocument {
 }
 
 function previewFromRendered(document: EventPageDocument, event: AdminEventDetail): EditorPreview {
-  const rendered = renderEventPageDocument(document, sampleContext(event));
+  const resolved = resolveEventPageDocument(document, sampleContext(event));
   return {
     label: 'TipTap event-page preview',
-    format: 'html',
-    output: rendered.text || rendered.html,
+    renderModel: resolved,
+    html: renderResolvedEventPageHtml(resolved),
+    text: renderResolvedEventPageText(resolved),
   };
 }
 
@@ -268,14 +302,6 @@ function publicPageUrl(document: EventPageDocument, event: AdminEventDetail): st
   const rendered = renderEventPageDocument(document, sampleContext(event));
   const publicPath = rendered.discovery.publicPath;
   return publicPath && publicPath !== '#' ? publicPath : undefined;
-}
-
-function previewFromApiOutput(output: AdminContentRenderOutput): EditorPreview {
-  return {
-    label: 'Saved event-page preview',
-    format: output.html ? 'html' : 'text',
-    output: output.text ?? output.html ?? '',
-  };
 }
 
 function heroBlock(document: EventPageDocument) {
@@ -677,54 +703,6 @@ function formatDate(value?: string) {
   return Number.isNaN(date.getTime()) ? value : date.toLocaleString();
 }
 
-function BlockTextField({
-  className,
-  disabled,
-  label,
-  multiline = false,
-  onChange,
-  value,
-}: {
-  className: string;
-  disabled: boolean;
-  label: string;
-  multiline?: boolean;
-  onChange: (value: string) => void;
-  value: string;
-}) {
-  const variableKeys = mergeTagKeys(value);
-  const variableHint = variableKeys.length > 0 ? <VariablePreviewHint keys={variableKeys} /> : null;
-
-  if (multiline) {
-    return (
-      <span className="block space-y-2">
-        <textarea
-          aria-label={label}
-          className={`${canvasInputClassName} ${className} resize-none overflow-hidden`}
-          disabled={disabled}
-          onChange={(event) => onChange(event.currentTarget.value)}
-          rows={3}
-          value={value}
-        />
-        {variableHint}
-      </span>
-    );
-  }
-
-  return (
-    <span className="block space-y-2">
-      <input
-        aria-label={label}
-        className={`${canvasInputClassName} ${className}`}
-        disabled={disabled}
-        onChange={(event) => onChange(event.currentTarget.value)}
-        value={value}
-      />
-      {variableHint}
-    </span>
-  );
-}
-
 function VariablePreviewHint({ keys }: { keys: string[] }) {
   return (
     <span className="flex flex-wrap items-center gap-1.5 text-[0.68rem] font-medium leading-5 text-black/45">
@@ -749,7 +727,322 @@ function VariablePreviewHint({ keys }: { keys: string[] }) {
   );
 }
 
+function sameJsonContent(left: JSONContent, right: JSONContent): boolean {
+  return JSON.stringify(left) === JSON.stringify(right);
+}
+
+type EventPageRichTextSelectionStyle = {
+  color?: string;
+  fontFamily?: string;
+  fontSize?: string;
+  lineHeight?: string;
+};
+
+type EventPageAlignment = 'left' | 'center' | 'right';
+
+function cleanEventPageSelectionStyle(
+  attrs: EventPageRichTextSelectionStyle,
+): EventPageRichTextSelectionStyle {
+  return Object.fromEntries(
+    Object.entries(attrs).filter((entry): entry is [keyof EventPageRichTextSelectionStyle, string] =>
+      Boolean(entry[1]?.trim()),
+    ),
+  );
+}
+
+function eventPageInlineControlValue(value: string | undefined, suffix: 'px' | '%'): string {
+  if (!value) return '';
+  return value.replace(new RegExp(`${suffix}$`, 'i'), '');
+}
+
+function isEventPageTextAlignment(value: unknown): value is EventPageAlignment {
+  return value === 'left' || value === 'center' || value === 'right';
+}
+
+function EventPageRichTextEditor({
+  block,
+  disabled,
+  updateBlock,
+}: {
+  block: Extract<EventPageBlock, { type: 'rich_text' }>;
+  disabled: boolean;
+  updateBlock: (nextBlock: EventPageBlock) => void;
+}) {
+  const syncingFromParentRef = React.useRef(false);
+  const selectedRangeRef = React.useRef<{ from: number; to: number } | null>(null);
+  const selectedStyleRef = React.useRef<EventPageRichTextSelectionStyle>({});
+  const [selectedStyle, setSelectedStyle] = React.useState<EventPageRichTextSelectionStyle>({});
+  const [selectedAlignment, setSelectedAlignment] = React.useState<EventPageAlignment | ''>('');
+  const [bubblePosition, setBubblePosition] = React.useState<{ left: number; top: number } | null>(
+    null,
+  );
+
+  const updateBubbleState = React.useCallback((editor: Editor) => {
+    if (editor.state.selection.empty) {
+      setBubblePosition(null);
+      return;
+    }
+    selectedRangeRef.current = {
+      from: editor.state.selection.from,
+      to: editor.state.selection.to,
+    };
+    const start = editor.view.coordsAtPos(editor.state.selection.from);
+    const end = editor.view.coordsAtPos(editor.state.selection.to);
+    setBubblePosition({
+      left: Math.max(8, Math.min(start.left, end.left)),
+      top: Math.max(8, Math.min(start.top, end.top) - 44),
+    });
+    const markAttrs = editor.getAttributes(EVENT_PAGE_INLINE_STYLE_MARK);
+    const nextStyle = cleanEventPageSelectionStyle({
+      color: typeof markAttrs.color === 'string' ? markAttrs.color : undefined,
+      fontFamily: isAllowedEventPageFontFamily(markAttrs.fontFamily)
+        ? markAttrs.fontFamily
+        : undefined,
+      fontSize: typeof markAttrs.fontSize === 'string' ? markAttrs.fontSize : undefined,
+      lineHeight: typeof markAttrs.lineHeight === 'string' ? markAttrs.lineHeight : undefined,
+    });
+    selectedStyleRef.current = nextStyle;
+    setSelectedStyle(nextStyle);
+    const paragraphTextAlign = editor.getAttributes('paragraph').textAlign;
+    const headingTextAlign = editor.getAttributes('heading').textAlign;
+    const textAlign = isEventPageTextAlignment(paragraphTextAlign)
+      ? paragraphTextAlign
+      : isEventPageTextAlignment(headingTextAlign)
+        ? headingTextAlign
+        : '';
+    setSelectedAlignment(textAlign);
+  }, []);
+
+  const richTextEditor = useEditor({
+    extensions: eventPageRichTextExtensions,
+    content: block.content,
+    editable: !disabled,
+    immediatelyRender: false,
+    editorProps: {
+      attributes: {
+        'aria-label': 'Rich text content',
+        class: 'tixkit-event-page-rich-text-editor focus:outline-none',
+      },
+    },
+    onSelectionUpdate: ({ editor }) => {
+      updateBubbleState(editor);
+    },
+    onTransaction: ({ editor }) => updateBubbleState(editor),
+    onUpdate: ({ editor }) => {
+      if (syncingFromParentRef.current) return;
+      updateBlock({ ...block, content: editor.getJSON() as JSONContent });
+    },
+  });
+
+  React.useEffect(() => {
+    richTextEditor?.setEditable(!disabled);
+  }, [disabled, richTextEditor]);
+
+  React.useEffect(() => {
+    if (!richTextEditor || sameJsonContent(richTextEditor.getJSON() as JSONContent, block.content)) {
+      return;
+    }
+    syncingFromParentRef.current = true;
+    richTextEditor.commands.setContent(block.content, { emitUpdate: false });
+    syncingFromParentRef.current = false;
+  }, [block.content, richTextEditor]);
+
+  const preserveRichTextSelection = React.useCallback(() => {
+    if (!richTextEditor || richTextEditor.state.selection.empty) return;
+    selectedRangeRef.current = {
+      from: richTextEditor.state.selection.from,
+      to: richTextEditor.state.selection.to,
+    };
+  }, [richTextEditor]);
+
+  const restoreRichTextSelection = React.useCallback(() => {
+    if (!richTextEditor) return null;
+    const selectedRange = selectedRangeRef.current;
+    if (!selectedRange || selectedRange.from >= selectedRange.to) return null;
+    richTextEditor.chain().focus().setTextSelection(selectedRange).run();
+    return selectedRange;
+  }, [richTextEditor]);
+
+  const applySelectionStyle = React.useCallback(
+    (patch: EventPageRichTextSelectionStyle) => {
+      if (!richTextEditor) return;
+      const selectedRange = restoreRichTextSelection();
+      if (!selectedRange) return;
+      const nextStyle = cleanEventPageSelectionStyle({
+        ...selectedStyleRef.current,
+        ...patch,
+      });
+      if (nextStyle.fontFamily && !isAllowedEventPageFontFamily(nextStyle.fontFamily)) return;
+      if (Object.keys(nextStyle).length > 0) {
+        richTextEditor.commands.setMark(EVENT_PAGE_INLINE_STYLE_MARK, nextStyle);
+      } else {
+        richTextEditor.commands.unsetMark(EVENT_PAGE_INLINE_STYLE_MARK);
+      }
+      selectedStyleRef.current = nextStyle;
+      setSelectedStyle(nextStyle);
+      updateBubbleState(richTextEditor);
+    },
+    [restoreRichTextSelection, richTextEditor, updateBubbleState],
+  );
+
+  const applyTextAlignment = React.useCallback(
+    (textAlign: EventPageAlignment) => {
+      if (!richTextEditor) return;
+      const selectedRange = restoreRichTextSelection();
+      if (!selectedRange) return;
+      richTextEditor.commands.command(({ state, tr, dispatch }) => {
+        let changed = false;
+        state.doc.nodesBetween(selectedRange.from, selectedRange.to, (node, pos) => {
+          if (node.type.name !== 'paragraph' && node.type.name !== 'heading') return;
+          tr.setNodeMarkup(pos, undefined, { ...node.attrs, textAlign });
+          changed = true;
+        });
+        if (!changed) return false;
+        dispatch?.(tr);
+        return true;
+      });
+      setSelectedAlignment(textAlign);
+      updateBubbleState(richTextEditor);
+    },
+    [restoreRichTextSelection, richTextEditor, updateBubbleState],
+  );
+
+  const handleBubbleInputPress = React.useCallback(
+    (event: React.MouseEvent<HTMLElement> | React.PointerEvent<HTMLElement>) => {
+      event.stopPropagation();
+      preserveRichTextSelection();
+    },
+    [preserveRichTextSelection],
+  );
+
+  if (!richTextEditor) {
+    return (
+      <div className="min-h-24 rounded-md border border-dashed border-black/10 bg-black/[0.02]" />
+    );
+  }
+
+  return (
+    <div
+      className="space-y-2"
+      onClick={(event) => event.stopPropagation()}
+      onMouseDown={(event) => event.stopPropagation()}
+      onPointerDown={(event) => event.stopPropagation()}
+    >
+      {bubblePosition && (
+        <div
+          className="tixkit-event-page-bubble-menu"
+          style={{
+            left: bubblePosition.left,
+            top: bubblePosition.top,
+          }}
+        >
+          <div className="tixkit-event-page-bubble-menu__group" aria-label="Selection alignment">
+            {[
+              { alignment: 'left' as const, icon: <AlignLeft className="size-4" />, label: 'Align left' },
+              {
+                alignment: 'center' as const,
+                icon: <AlignCenter className="size-4" />,
+                label: 'Align center',
+              },
+              {
+                alignment: 'right' as const,
+                icon: <AlignRight className="size-4" />,
+                label: 'Align right',
+              },
+            ].map((option) => (
+              <button
+                aria-label={option.label}
+                aria-pressed={selectedAlignment === option.alignment}
+                className="tixkit-event-page-bubble-menu__button"
+                key={option.alignment}
+                onClick={() => applyTextAlignment(option.alignment)}
+                onMouseDown={handleBubbleInputPress}
+                onPointerDown={handleBubbleInputPress}
+                type="button"
+              >
+                {option.icon}
+              </button>
+            ))}
+          </div>
+          <label className="tixkit-event-page-bubble-menu__field">
+            <span className="sr-only">Selection color</span>
+            <input
+              aria-label="Selection color"
+              className="tixkit-event-page-bubble-menu__control tixkit-event-page-bubble-menu__control--color"
+              onChange={(event) => applySelectionStyle({ color: event.currentTarget.value })}
+              onInput={(event) => applySelectionStyle({ color: event.currentTarget.value })}
+              onMouseDown={handleBubbleInputPress}
+              onPointerDown={handleBubbleInputPress}
+              type="color"
+              value={/^#[0-9a-f]{6}$/i.test(selectedStyle.color ?? '') ? selectedStyle.color : '#111827'}
+            />
+          </label>
+          <label className="tixkit-event-page-bubble-menu__field">
+            <span className="sr-only">Selection font family</span>
+            <select
+              aria-label="Selection font family"
+              className="tixkit-event-page-bubble-menu__control tixkit-event-page-bubble-menu__control--select"
+              onChange={(event) => applySelectionStyle({ fontFamily: event.currentTarget.value })}
+              onMouseDown={handleBubbleInputPress}
+              onPointerDown={handleBubbleInputPress}
+              value={selectedStyle.fontFamily ?? ''}
+            >
+              {EVENT_PAGE_FONT_FAMILY_OPTIONS.map((option) => (
+                <option key={option.label} value={option.value}>
+                  {option.label}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="tixkit-event-page-bubble-menu__field">
+            <span className="sr-only">Selection text size</span>
+            <input
+              aria-label="Selection text size"
+              className="tixkit-event-page-bubble-menu__control tixkit-event-page-bubble-menu__control--number"
+              inputMode="numeric"
+              onChange={(event) => {
+                const value = event.currentTarget.value.trim();
+                applySelectionStyle({ fontSize: value ? `${value}px` : '' });
+              }}
+              onInput={(event) => {
+                const value = event.currentTarget.value.trim();
+                applySelectionStyle({ fontSize: value ? `${value}px` : '' });
+              }}
+              onMouseDown={handleBubbleInputPress}
+              onPointerDown={handleBubbleInputPress}
+              placeholder="Size"
+              value={eventPageInlineControlValue(selectedStyle.fontSize, 'px')}
+            />
+          </label>
+          <label className="tixkit-event-page-bubble-menu__field">
+            <span className="sr-only">Selection line height</span>
+            <input
+              aria-label="Selection line height"
+              className="tixkit-event-page-bubble-menu__control tixkit-event-page-bubble-menu__control--number"
+              inputMode="numeric"
+              onChange={(event) => {
+                const value = event.currentTarget.value.trim();
+                applySelectionStyle({ lineHeight: value ? `${value}%` : '' });
+              }}
+              onInput={(event) => {
+                const value = event.currentTarget.value.trim();
+                applySelectionStyle({ lineHeight: value ? `${value}%` : '' });
+              }}
+              onMouseDown={handleBubbleInputPress}
+              onPointerDown={handleBubbleInputPress}
+              placeholder="Line"
+              value={eventPageInlineControlValue(selectedStyle.lineHeight, '%')}
+            />
+          </label>
+        </div>
+      )}
+      <EditorContent editor={richTextEditor} />
+    </div>
+  );
+}
+
 function EventPageBlockNodeView(props: NodeViewProps) {
+  const ctx = React.useContext(EventPageBlockViewContext);
   const block = props.node.attrs.block as EventPageBlock | undefined;
   const disabled = !props.editor.isEditable;
 
@@ -775,7 +1068,7 @@ function EventPageBlockNodeView(props: NodeViewProps) {
   return (
     <NodeViewWrapper
       as="section"
-      className={`group relative rounded-lg border bg-white p-5 transition ${frameClassName}`}
+      className={`tk-ep-section group relative rounded-lg border bg-white p-5 transition ${frameClassName}`}
       contentEditable={false}
       data-block-id={block.id}
       data-block-type={block.type}
@@ -785,344 +1078,16 @@ function EventPageBlockNodeView(props: NodeViewProps) {
         <span className="font-medium uppercase">{blockLabel(block)}</span>
         {props.selected && <span className="rounded-full bg-black/5 px-2 py-0.5">Selected</span>}
       </div>
-      <BlockNodeContent block={block} disabled={disabled} updateBlock={updateBlock} />
+      {ctx && (
+        <EditableBlockBody
+          block={block}
+          disabled={disabled}
+          sampleContext={ctx.sampleContext}
+          onChange={updateBlock}
+          renderRichTextBlock={ctx.renderRichTextBlock}
+        />
+      )}
     </NodeViewWrapper>
-  );
-}
-
-function BlockNodeContent({
-  block,
-  disabled,
-  updateBlock,
-}: {
-  block: EventPageBlock;
-  disabled: boolean;
-  updateBlock: (nextBlock: EventPageBlock) => void;
-}) {
-  if (block.type === 'hero') {
-    return (
-      <div className="space-y-5">
-        <BlockTextField
-          className="max-w-4xl text-5xl font-semibold leading-tight text-black"
-          disabled={disabled}
-          label="Page headline"
-          onChange={(value) => updateBlock({ ...block, headline: value })}
-          value={block.headline}
-        />
-        <BlockTextField
-          className="max-w-3xl whitespace-pre-wrap text-base leading-7 text-black/60"
-          disabled={disabled}
-          label="Page summary"
-          multiline
-          onChange={(value) => updateBlock({ ...block, body: value })}
-          value={block.body ?? ''}
-        />
-        <div className="inline-flex min-h-10 max-w-full items-center rounded-md bg-black px-4 py-2 text-sm font-semibold text-white">
-          <BlockTextField
-            className="min-w-20 text-white"
-            disabled={disabled}
-            label="Hero CTA label"
-            onChange={(value) => updateBlock({ ...block, ctaLabel: value })}
-            value={block.ctaLabel ?? ''}
-          />
-        </div>
-      </div>
-    );
-  }
-
-  if (block.type === 'tickets') {
-    return (
-      <section className="space-y-3">
-        <BlockTextField
-          className="text-2xl font-semibold text-black"
-          disabled={disabled}
-          label="Ticket block title"
-          onChange={(value) => updateBlock({ ...block, title: value })}
-          value={block.title}
-        />
-        {block.body && <p className="max-w-2xl text-sm leading-6 text-black/55">{block.body}</p>}
-        <div className="inline-flex min-h-10 items-center rounded-md border border-black/15 px-4 py-2 text-sm font-semibold">
-          <BlockTextField
-            className="min-w-24 text-black"
-            disabled={disabled}
-            label="Ticket CTA label"
-            onChange={(value) => updateBlock({ ...block, ctaLabel: value })}
-            value={block.ctaLabel ?? 'Get tickets'}
-          />
-        </div>
-      </section>
-    );
-  }
-
-  if (block.type === 'rich_text') {
-    const imageAttrs = tipTapImageAttrs(block);
-    if (imageAttrs) {
-      return imageAttrs.src ? (
-        <img
-          alt={imageAttrs.alt}
-          className="max-h-96 w-full rounded-md object-cover"
-          src={imageAttrs.src}
-        />
-      ) : (
-        <div className="flex min-h-48 items-center justify-center rounded-md border border-dashed bg-black/[0.03] text-sm font-medium text-black/45">
-          Add an image URL
-        </div>
-      );
-    }
-
-    return (
-      <BlockTextField
-        className="whitespace-pre-wrap text-base leading-7 text-black/75"
-        disabled={disabled}
-        label="Rich text content"
-        multiline
-        onChange={(value) => updateBlock({ ...block, content: textContentNode(value) })}
-        value={tipTapText(block)}
-      />
-    );
-  }
-
-  if (block.type === 'event_details') {
-    return (
-      <section className="space-y-4">
-        <BlockTextField
-          className="text-2xl font-semibold text-black"
-          disabled={disabled}
-          label="Event details title"
-          onChange={(value) => updateBlock({ ...block, title: value })}
-          value={block.title}
-        />
-        <dl className="grid gap-x-8 gap-y-3 text-sm md:grid-cols-2">
-          {block.items.map((item, itemIndex) => (
-            <div className="border-t border-black/10 pt-3" key={`${item.label}-${itemIndex}`}>
-              <dt className="font-medium text-black/45">{item.label}</dt>
-              <dd className="mt-1 text-black">{item.value}</dd>
-            </div>
-          ))}
-        </dl>
-      </section>
-    );
-  }
-
-  if (block.type === 'schedule') {
-    const firstItem = block.items[0] ?? {
-      title: 'Schedule item',
-      startsAt: '',
-    };
-    return (
-      <section className="space-y-4">
-        <BlockTextField
-          className="text-2xl font-semibold text-black"
-          disabled={disabled}
-          label="Schedule title"
-          onChange={(value) => updateBlock({ ...block, title: value })}
-          value={block.title}
-        />
-        <div className="grid gap-3 md:grid-cols-[minmax(0,1fr)_13rem]">
-          <BlockTextField
-            className="text-base font-medium text-black"
-            disabled={disabled}
-            label="Schedule item title"
-            onChange={(value) =>
-              updateBlock({
-                ...block,
-                items: [{ ...firstItem, title: value }, ...block.items.slice(1)],
-              })
-            }
-            value={firstItem.title}
-          />
-          <label className="space-y-1.5 text-xs font-medium text-black/45">
-            Starts
-            <input
-              aria-label="Schedule start time"
-              className="w-full rounded-md border border-black/10 px-2.5 py-1.5 text-sm"
-              disabled={disabled}
-              onChange={(change) =>
-                updateBlock({
-                  ...block,
-                  items: [
-                    { ...firstItem, startsAt: change.currentTarget.value },
-                    ...block.items.slice(1),
-                  ],
-                })
-              }
-              value={firstItem.startsAt}
-            />
-          </label>
-        </div>
-      </section>
-    );
-  }
-
-  if (block.type === 'venue_map') {
-    return (
-      <section className="space-y-4">
-        <BlockTextField
-          className="text-2xl font-semibold text-black"
-          disabled={disabled}
-          label="Venue title"
-          onChange={(value) => updateBlock({ ...block, title: value })}
-          value={block.title}
-        />
-        <div className="grid gap-3 md:grid-cols-2">
-          <BlockTextField
-            className="text-base font-medium text-black"
-            disabled={disabled}
-            label="Venue name"
-            onChange={(value) => updateBlock({ ...block, venueName: value })}
-            value={block.venueName}
-          />
-          <BlockTextField
-            className="text-sm text-black/55"
-            disabled={disabled}
-            label="Venue address"
-            onChange={(value) => updateBlock({ ...block, address: value })}
-            value={block.address ?? ''}
-          />
-        </div>
-      </section>
-    );
-  }
-
-  if (block.type === 'faq') {
-    return (
-      <section className="space-y-4">
-        <BlockTextField
-          className="text-2xl font-semibold text-black"
-          disabled={disabled}
-          label="FAQ title"
-          onChange={(value) => updateBlock({ ...block, title: value })}
-          value={block.title}
-        />
-        <div className="divide-y divide-black/10">
-          {block.items.map((item, itemIndex) => (
-            <div className="space-y-1 py-3" key={`${item.question}-${itemIndex}`}>
-              <p className="font-medium text-black">{item.question}</p>
-              <p className="text-sm text-black/55">{item.answer}</p>
-            </div>
-          ))}
-        </div>
-      </section>
-    );
-  }
-
-  if (block.type === 'products') {
-    return (
-      <section className="space-y-3">
-        <BlockTextField
-          className="text-2xl font-semibold text-black"
-          disabled={disabled}
-          label="Products title"
-          onChange={(value) => updateBlock({ ...block, title: value })}
-          value={block.title}
-        />
-        <BlockTextField
-          className="whitespace-pre-wrap text-base leading-7 text-black/55"
-          disabled={disabled}
-          label="Products body"
-          multiline
-          onChange={(value) => updateBlock({ ...block, body: value })}
-          value={block.body ?? ''}
-        />
-        <p className="text-sm font-medium text-black">{block.productIds.length} linked products</p>
-      </section>
-    );
-  }
-
-  if (block.type === 'sponsors') {
-    return (
-      <section className="space-y-4">
-        <BlockTextField
-          className="text-2xl font-semibold text-black"
-          disabled={disabled}
-          label="Sponsors title"
-          onChange={(value) => updateBlock({ ...block, title: value })}
-          value={block.title}
-        />
-        <div className="flex flex-wrap gap-x-6 gap-y-3 text-sm font-medium text-black">
-          {block.items.map((item, itemIndex) =>
-            item.url ? (
-              <a className="underline-offset-4 hover:underline" href={item.url} key={item.name}>
-                {item.name}
-              </a>
-            ) : (
-              <span key={`${item.name}-${itemIndex}`}>{item.name}</span>
-            ),
-          )}
-        </div>
-      </section>
-    );
-  }
-
-  if (block.type === 'speakers') {
-    return (
-      <section className="space-y-4">
-        <BlockTextField
-          className="text-2xl font-semibold text-black"
-          disabled={disabled}
-          label="Speakers title"
-          onChange={(value) => updateBlock({ ...block, title: value })}
-          value={block.title}
-        />
-        <div className="divide-y divide-black/10">
-          {block.items.map((item, itemIndex) => (
-            <div className="py-3" key={`${item.name}-${itemIndex}`}>
-              <p className="font-medium text-black">{item.name}</p>
-              {item.role && <p className="text-sm text-black/55">{item.role}</p>}
-              {item.bio && <p className="mt-1 text-sm leading-6 text-black/55">{item.bio}</p>}
-            </div>
-          ))}
-        </div>
-      </section>
-    );
-  }
-
-  if (block.type === 'button') {
-    return (
-      <div className="inline-flex min-h-10 max-w-full items-center rounded-md bg-black px-4 py-2 text-sm font-semibold text-white">
-        <BlockTextField
-          className="min-w-20 text-white"
-          disabled={disabled}
-          label="Button label"
-          onChange={(value) => updateBlock({ ...block, label: value })}
-          value={block.label}
-        />
-      </div>
-    );
-  }
-
-  if (block.type === 'divider') {
-    return <hr className="border-black/15" />;
-  }
-
-  if (block.type === 'social_links') {
-    return (
-      <nav aria-label="Event page social links" className="space-y-3">
-        {block.title && <h2 className="text-2xl font-semibold text-black">{block.title}</h2>}
-        <div className="flex flex-wrap gap-3 text-sm">
-          {block.links.map((link, linkIndex) => (
-            <a
-              className="font-medium underline-offset-4 hover:underline"
-              href={link.url}
-              key={`${link.label}-${linkIndex}`}
-            >
-              {link.label}
-            </a>
-          ))}
-        </div>
-      </nav>
-    );
-  }
-
-  return (
-    <BlockTextField
-      className="font-mono text-xs leading-5 text-black/55"
-      disabled={disabled}
-      label="Custom embed HTML"
-      multiline
-      onChange={(value) => updateBlock({ ...block, html: value })}
-      value={block.html}
-    />
   );
 }
 
@@ -1162,7 +1127,7 @@ const EventPageBlockNode = Node.create({
   },
 });
 
-const eventPageEditorExtensions = [
+const eventPageRichTextExtensions = [
   StarterKit.configure({
     heading: { levels: [1, 2, 3] },
     link: false,
@@ -1176,10 +1141,17 @@ const eventPageEditorExtensions = [
   Image.configure({
     allowBase64: false,
   }),
+  EventPageInlineStyle,
+  EventPageTextAlignment,
+];
+
+const eventPageEditorExtensions = [
+  ...eventPageRichTextExtensions,
   EventPageBlockNode,
 ];
 
 function PreviewDrawer({ onClose, preview }: { onClose: () => void; preview: EditorPreview }) {
+  const [debugTab, setDebugTab] = React.useState<'rendered' | 'html' | 'text'>('rendered');
   return (
     <aside
       aria-label="Event page preview"
@@ -1189,7 +1161,9 @@ function PreviewDrawer({ onClose, preview }: { onClose: () => void; preview: Edi
       <div className="flex items-center justify-between gap-3 border-b px-4 py-3">
         <div>
           <p className="text-sm font-semibold">{preview.label}</p>
-          <p className="text-xs text-muted-foreground">{preview.format.toUpperCase()}</p>
+          <p className="text-xs text-muted-foreground">
+            {preview.renderModel.validation.valid ? 'Valid' : 'Publish blockers'}
+          </p>
         </div>
         <button
           className="rounded-md border px-3 py-1.5 text-sm transition-colors hover:bg-accent"
@@ -1199,10 +1173,36 @@ function PreviewDrawer({ onClose, preview }: { onClose: () => void; preview: Edi
           Close
         </button>
       </div>
+      <div className="flex gap-1 border-b px-4 py-2">
+        {(['rendered', 'html', 'text'] as const).map((tab) => (
+          <button
+            key={tab}
+            type="button"
+            className={`rounded-md px-3 py-1 text-xs transition-colors ${
+              debugTab === tab
+                ? 'bg-primary text-primary-foreground'
+                : 'text-muted-foreground hover:bg-accent'
+            }`}
+            onClick={() => setDebugTab(tab)}
+            aria-pressed={debugTab === tab}
+          >
+            {tab === 'rendered' ? 'Rendered' : tab.toUpperCase()}
+          </button>
+        ))}
+      </div>
       <div className="min-h-0 flex-1 overflow-auto p-4">
-        <pre className="whitespace-pre-wrap rounded-md border bg-muted/30 p-4 text-sm leading-6 text-muted-foreground">
-          {preview.output}
-        </pre>
+        {debugTab === 'rendered' ? (
+          <div data-testid="preview-surface">
+            <EventPageSurface resolvedPage={preview.renderModel} mode="preview" />
+          </div>
+        ) : (
+          <pre
+            data-testid={`preview-${debugTab}`}
+            className="whitespace-pre-wrap rounded-md border bg-muted/30 p-4 text-xs leading-5 text-muted-foreground"
+          >
+            {debugTab === 'html' ? preview.html : preview.text}
+          </pre>
+        )}
       </div>
     </aside>
   );
@@ -1465,6 +1465,43 @@ export function EventPagePersistedEditorView({ eventId }: { eventId: string }) {
     }
   }
 
+  const renderRichTextBlock = React.useCallback(
+    ({
+      block,
+      disabled,
+      onChange,
+    }: {
+      block: Extract<EventPageBlock, { type: 'rich_text' }>;
+      disabled: boolean;
+      onChange: (block: EventPageBlock) => void;
+    }) => {
+      const imageAttrs = tipTapImageAttrs(block);
+      if (imageAttrs) {
+        return imageAttrs.src ? (
+          <img
+            alt={imageAttrs.alt}
+            className="max-h-96 w-full rounded-md object-cover"
+            src={imageAttrs.src}
+          />
+        ) : (
+          <div className="flex min-h-48 items-center justify-center rounded-md border border-dashed bg-black/[0.03] text-sm font-medium text-black/45">
+            Add an image URL
+          </div>
+        );
+      }
+      return <EventPageRichTextEditor block={block} disabled={disabled} updateBlock={onChange} />;
+    },
+    [],
+  );
+
+  const blockViewContextValue = React.useMemo<EventPageBlockViewContextValue | null>(() => {
+    if (!event) return null;
+    return {
+      sampleContext: sampleContext(event),
+      renderRichTextBlock,
+    };
+  }, [event, renderRichTextBlock]);
+
   function insertEventPageAction(actionId: InsertActionId) {
     if (!event || !eventPageDocument || !pageEditor || isArchived) return;
     const currentDocument = snapshotFromEditor(eventPageDocument) ?? eventPageDocument;
@@ -1507,11 +1544,7 @@ export function EventPagePersistedEditorView({ eventId }: { eventId: string }) {
       result.data,
       ...current.filter((version) => version.id !== result.data.id),
     ]);
-    setPreview({
-      label: 'TipTap event-page preview',
-      format: 'html',
-      output: rendered.text || rendered.html,
-    });
+    setPreview(previewFromRendered(editorSnapshot, event));
     setAutosave('saved');
     setActionError(undefined);
     setNotice(`Saved draft v${result.data.versionNumber}`);
@@ -1536,7 +1569,13 @@ export function EventPagePersistedEditorView({ eventId }: { eventId: string }) {
       setActionError(resultMessage(result.error, 'Unable to preview event-page draft'));
       return;
     }
-    setPreview(previewFromApiOutput(result.data.output));
+    const resolved = resolveEventPageDocument(saved.document, sampleContext(event));
+    setPreview({
+      label: 'Saved event-page preview',
+      renderModel: resolved,
+      html: result.data.output.html ?? renderResolvedEventPageHtml(resolved),
+      text: result.data.output.text ?? renderResolvedEventPageText(resolved),
+    });
     setPreviewOpen(true);
     setActionError(undefined);
     setNotice('Preview rendered from the saved content version');
@@ -1937,9 +1976,11 @@ export function EventPagePersistedEditorView({ eventId }: { eventId: string }) {
           data-testid="editor-canvas"
         >
           <div className="mx-auto min-h-full w-full max-w-5xl px-5 py-8 sm:px-6">
-            <div>
-              {pageEditor ? (
-                <EditorContent editor={pageEditor} />
+            <div className="tixkit-event-page" data-mode="edit">
+              {pageEditor && blockViewContextValue ? (
+                <EventPageBlockViewContext.Provider value={blockViewContextValue}>
+                  <EditorContent editor={pageEditor} />
+                </EventPageBlockViewContext.Provider>
               ) : (
                 <p className="text-sm text-muted-foreground">Preparing editor...</p>
               )}

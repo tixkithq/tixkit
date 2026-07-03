@@ -317,7 +317,8 @@ vi.mock('@react-email/editor', async () => {
 const emailDocument = createDefaultEmailTemplate({
   editor: {
     provider: REACT_EMAIL_EDITOR_PACKAGE,
-    contentHtml: '<h1>{{event.title}}</h1><p>Hi {{recipient.name}}, your tickets are ready.</p>',
+    contentHtml:
+      '<h1>{{event.title}}</h1><p>Hi {{recipient.name}}, your tickets are ready.</p><p>Order {{order.id}} - {{order.total}}</p>',
   },
   settings: {
     templateKey: 'order-confirmed',
@@ -342,7 +343,7 @@ const emailDocument = createDefaultEmailTemplate({
     {
       type: 'ticket_summary',
       title: 'Ticket summary',
-      body: '{{ticket.type}} - {{order.total}}',
+      body: 'Order {{order.id}} - {{order.total}} - {{ticket.type}}',
     },
     {
       type: 'unsubscribe_footer',
@@ -873,6 +874,62 @@ describe('EmailPersistedEditorView', () => {
     expect(run).toHaveBeenCalled();
   });
 
+  it('includes Resend-parity slash commands for social links, unsubscribe, HTML, and variables', () => {
+    const commands = createEmailSlashCommands({
+      mergeTags: ['event.title'],
+      brandName: 'All Access Chicago',
+    });
+
+    expect(commands).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ title: 'Social Links', category: 'Tixkit' }),
+        expect.objectContaining({ title: 'Unsubscribe Footer', category: 'Tixkit' }),
+        expect.objectContaining({ title: 'HTML', category: 'Advanced' }),
+        expect.objectContaining({ title: 'Variable', category: 'Tixkit' }),
+      ]),
+    );
+  });
+
+  it('builds the Social Links slash command with canonical event and brand URLs', () => {
+    const commands = createEmailSlashCommands({
+      mergeTags: ['event.publicUrl', 'brand.supportUrl'],
+      brandName: 'All Access Chicago',
+    });
+    const socialLinks = commands.find(
+      (command) => command.category === 'Tixkit' && command.title === 'Social Links',
+    );
+    const run = vi.fn(() => true);
+    const insertContent = vi.fn(() => ({ run }));
+    const deleteRange = vi.fn(() => ({ insertContent }));
+    const focus = vi.fn(() => ({ deleteRange }));
+    const editor = { chain: () => ({ focus }) };
+
+    socialLinks?.command({
+      editor:
+        editor as unknown as Parameters<NonNullable<typeof socialLinks>['command']>[0]['editor'],
+      range: { from: 1, to: 14 },
+    });
+
+    expect(insertContent).toHaveBeenCalledWith({
+      type: 'paragraph',
+      content: [
+        { type: 'text', text: 'Follow us: ' },
+        {
+          type: 'text',
+          text: 'Event page',
+          marks: [{ type: 'link', attrs: { href: '{{event.publicUrl}}' } }],
+        },
+        { type: 'text', text: ' | ' },
+        {
+          type: 'text',
+          text: 'Support',
+          marks: [{ type: 'link', attrs: { href: '{{brand.supportUrl}}' } }],
+        },
+      ],
+    });
+    expect(run).toHaveBeenCalled();
+  });
+
   it('passes Tixkit slash commands into the native editor', async () => {
     render(React.createElement(EmailPersistedEditorView, { eventId: 'evt_1' }));
 
@@ -888,6 +945,14 @@ describe('EmailPersistedEditorView', () => {
         expect.objectContaining({
           category: 'Tixkit',
           title: 'Ticket QR',
+        }),
+        expect.objectContaining({
+          category: 'Tixkit',
+          title: 'Social Links',
+        }),
+        expect.objectContaining({
+          category: 'Tixkit',
+          title: 'Unsubscribe Footer',
         }),
       ]),
     );
@@ -1127,6 +1192,7 @@ describe('EmailPersistedEditorView', () => {
                   type: tixkitInlineStyleMarkName,
                   attrs: {
                     color: '#0f766e',
+                    fontFamily: '"Times New Roman", Times, serif',
                     fontSize: '18px',
                     lineHeight: '140%',
                   },
@@ -1146,11 +1212,35 @@ describe('EmailPersistedEditorView', () => {
     await waitFor(() => {
       const savePayload = adminApiMock.saveContentVersion.mock.calls.at(-1)?.[1];
       expect(savePayload?.renderedHtml).toContain(
-        '<span style="color: #0f766e; font-size: 18px; line-height: 140%">{{recipient.name}}</span>',
+        '<span style="color: #0f766e; font-family: &quot;Times New Roman&quot;, Times, serif; font-size: 18px; line-height: 140%">{{recipient.name}}</span>',
       );
       expect(savePayload?.contentJson.editor.contentHtml).toContain(
-        '<span style="color: #0f766e; font-size: 18px; line-height: 140%">{{recipient.name}}</span>',
+        '<span style="color: #0f766e; font-family: &quot;Times New Roman&quot;, Times, serif; font-size: 18px; line-height: 140%">{{recipient.name}}</span>',
       );
+    });
+  });
+
+  it('persists Code mode Global CSS into the saved editor HTML', async () => {
+    render(React.createElement(EmailPersistedEditorView, { eventId: 'evt_1' }));
+
+    await screen.findByRole('textbox', { name: 'Email body' });
+    fireEvent.click(screen.getByRole('button', { name: 'Code' }));
+    const globalCss = await screen.findByLabelText('Global CSS');
+    fireEvent.change(globalCss, {
+      target: { value: '.ticket-code { letter-spacing: 0.08em; }' },
+    });
+    clickEmailSaveDraft();
+
+    await waitFor(() => {
+      const savePayload = adminApiMock.saveContentVersion.mock.calls.at(-1)?.[1];
+      expect(savePayload?.contentJson.editor.globalCss).toBe(
+        '.ticket-code { letter-spacing: 0.08em; }',
+      );
+      expect(savePayload?.renderedHtml).toContain('data-tixkit-global-css="true"');
+      expect(savePayload?.renderedHtml).toContain(
+        '.ticket-code { letter-spacing: 0.08em; }',
+      );
+      expect(savePayload?.renderedHtml.match(/data-tixkit-global-css/g)).toHaveLength(1);
     });
   });
 
@@ -1332,8 +1422,13 @@ describe('EmailPersistedEditorView', () => {
     expect(screen.queryByRole('button', { name: 'Insert Image' })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Insert Components' })).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: 'Code' }));
-    expect(screen.getByText('Exported HTML')).toBeInTheDocument();
+    expect(await screen.findByText('Email HTML')).toBeInTheDocument();
     expect(screen.getByText('Editor JSON')).toBeInTheDocument();
+    fireEvent.change(screen.getByRole('textbox', { name: 'Email HTML code' }), {
+      target: {
+        value: '<h1>{{event.title}}</h1><p>Edited from code mode for {{recipient.name}}.</p>',
+      },
+    });
     clickEmailSaveDraft();
 
     await waitFor(() => {
@@ -1346,7 +1441,7 @@ describe('EmailPersistedEditorView', () => {
             }),
             settings: expect.objectContaining({ templateKey: 'order-confirmed' }),
           }),
-          renderedHtml: expect.stringContaining('{{event.title}}'),
+          renderedHtml: expect.stringContaining('Edited from code mode for {{recipient.name}}.'),
         }),
       );
     });
@@ -1536,6 +1631,20 @@ describe('EmailPersistedEditorView', () => {
       );
     });
     expect(JSON.stringify(editorMockState.lastTheme)).not.toContain('#0f766e');
+    openEmailMoreActions();
+    fireEvent.click(screen.getByRole('menuitem', { name: /Theme preset/ }));
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Minimal' }));
+    await waitFor(() => {
+      expect(editorMockState.lastTheme).toEqual(
+        expect.objectContaining({
+          styles: expect.objectContaining({
+            body: expect.objectContaining({ borderRadius: '0px', padding: '24px' }),
+            button: expect.objectContaining({ backgroundColor: '#18181b' }),
+            h1: expect.objectContaining({ color: '#18181b' }),
+          }),
+        }),
+      );
+    });
     expect(screen.queryByText(/reseller|admin white-label|white label controls/i)).not.toBeInTheDocument();
 
     clickMoreAction('Pick template');
