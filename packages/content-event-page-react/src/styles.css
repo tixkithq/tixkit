@@ -1,0 +1,210 @@
+/*
+ * Shared event page stylesheet.
+ *
+ * Imported by the admin dashboard and checkout app so the canvas, preview
+ * drawer, and public hosted page share one visual contract. The server HTML
+ * renderer (packages/content-event-page) emits the same class names, so
+ * API-rendered HTML and React-rendered pages are visually compatible.
+ *
+ * Brand theming flows through --tk-brand-* tokens; event page blocks own
+ * their own stable namespaced classes and do not depend on app-specific
+ * Tailwind prose styles for layout.
+ */
+
+.tixkit-event-page {
+  --tk-ep-bg: var(--tk-brand-bg, #ffffff);
+  --tk-ep-fg: var(--tk-brand-fg, #111111);
+  --tk-ep-muted: color-mix(in srgb, var(--tk-ep-fg), transparent 38%);
+  --tk-ep-border: color-mix(in srgb, var(--tk-ep-fg), transparent 86%);
+  --tk-ep-accent: var(--tk-brand-accent, #111111);
+  --tk-ep-accent-fg: var(--tk-brand-accent-fg, #ffffff);
+  --tk-ep-radius: var(--tk-brand-radius, 14px);
+  --tk-ep-font-body: var(--tk-brand-font-body, Inter, system-ui, sans-serif);
+  --tk-ep-font-heading: var(--tk-brand-font-heading, var(--tk-ep-font-body));
+
+  background: var(--tk-ep-bg);
+  color: var(--tk-ep-fg);
+  font-family: var(--tk-ep-font-body);
+  line-height: 1.6;
+}
+
+.tk-ep-section,
+.tixkit-event-page > section,
+.tixkit-event-page > hr {
+  max-width: 720px;
+  margin-inline: auto;
+  padding-block: 1.25rem;
+}
+
+.tixkit-event-page h1,
+.tixkit-event-page h2,
+.tixkit-event-page h3 {
+  font-family: var(--tk-ep-font-heading);
+  line-height: 1.25;
+}
+
+.tixkit-event-page h1 {
+  font-size: clamp(1.75rem, 4vw, 2.5rem);
+  letter-spacing: -0.01em;
+}
+
+.tixkit-event-page h2 {
+  font-size: 1.25rem;
+  font-weight: 600;
+}
+
+.tk-ep-eyebrow {
+  color: var(--tk-ep-muted);
+  font-size: 0.8rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  margin: 0 0 0.5rem;
+}
+
+.tk-ep-hero img,
+.tixkit-event-page img {
+  max-width: 100%;
+  height: auto;
+  border-radius: var(--tk-ep-radius);
+}
+
+.tk-ep-button,
+.tixkit-event-page a {
+  color: var(--tk-ep-accent);
+}
+
+.tk-ep-button {
+  display: inline-block;
+  background: var(--tk-ep-accent);
+  color: var(--tk-ep-accent-fg);
+  border-radius: var(--tk-ep-radius);
+  padding: 0.6rem 1.1rem;
+  text-decoration: none;
+  font-weight: 600;
+}
+
+.tk-ep-button:hover {
+  filter: brightness(0.95);
+}
+
+.tk-ep-button-secondary {
+  background: transparent;
+  color: var(--tk-ep-accent);
+  border: 1px solid var(--tk-ep-border);
+}
+
+.tk-ep-divider {
+  border: none;
+  border-top: 1px solid var(--tk-ep-border);
+}
+
+.tixkit-event-page dl {
+  display: grid;
+  gap: 0.5rem;
+}
+
+.tixkit-event-page dl > div {
+  display: flex;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.tixkit-event-page dt {
+  color: var(--tk-ep-muted);
+}
+
+.tixkit-event-page ul,
+.tixkit-event-page ol {
+  display: grid;
+  gap: 0.5rem;
+  padding-inline-start: 1.25rem;
+}
+
+.tixkit-event-page details > summary {
+  cursor: pointer;
+  font-weight: 500;
+}
+
+.tixkit-event-page details > p {
+  color: var(--tk-ep-muted);
+  margin: 0.5rem 0 0;
+}
+
+.tk-ep-embed {
+  border: 1px solid var(--tk-ep-border);
+  border-radius: var(--tk-ep-radius);
+  overflow: hidden;
+}
+
+/* ---- Admin canvas edit-mode affordances ---- */
+
+.tk-ep-section {
+  position: relative;
+  border: 1px solid var(--tk-ep-border);
+  border-radius: var(--tk-ep-radius);
+  padding: 1.25rem;
+  cursor: pointer;
+  transition: border-color 0.15s, box-shadow 0.15s;
+}
+
+.tk-ep-section:hover {
+  border-color: color-mix(in srgb, var(--tk-ep-fg), transparent 60%);
+}
+
+.tk-ep-section--selected {
+  border-color: var(--tk-ep-fg);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--tk-ep-fg), transparent 70%);
+}
+
+.tk-ep-section__label {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 0.7rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--tk-ep-muted);
+  margin-bottom: 0.75rem;
+}
+
+.tk-ep-section__badge {
+  background: color-mix(in srgb, var(--tk-ep-fg), transparent 90%);
+  border-radius: 999px;
+  padding: 0.1rem 0.5rem;
+  font-size: 0.65rem;
+}
+
+.tk-ep-section__content {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.tk-ep-section__content [contenteditable] {
+  outline: none;
+  border-radius: 4px;
+  min-width: 2rem;
+}
+
+.tk-ep-section__content [contenteditable]:focus {
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--tk-ep-accent), transparent 70%);
+}
+
+.tk-ep-section__content [contenteditable][data-placeholder]:empty::before {
+  content: attr(data-placeholder);
+  color: color-mix(in srgb, var(--tk-ep-fg), transparent 60%);
+}
+
+@media (max-width: 640px) {
+  .tk-ep-section,
+  .tixkit-event-page > section,
+  .tixkit-event-page > hr {
+    padding-inline: 1rem;
+  }
+
+  .tixkit-event-page dl > div {
+    flex-direction: column;
+    gap: 0.15rem;
+  }
+}
