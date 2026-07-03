@@ -1,8 +1,10 @@
 import { describe, expect, it } from 'vitest';
 import {
   REACT_EMAIL_EDITOR_PACKAGE,
+  applyEmailGlobalCssToHtml,
   createDefaultEmailTemplate,
   createEmailTestSend,
+  getEmailTemplateLifecycleIssues,
   normalizeEmailTemplateDocument,
   renderEmailTemplate,
   validateEditorExport,
@@ -330,6 +332,53 @@ describe('validateEmailTemplate', () => {
     expect(rendered.validation.valid).toBe(true);
     expect(rendered.text).toContain('Hi Ada Lovelace, All Access Chicago tickets are ready.');
     expect(rendered.html).toContain('Hi Ada Lovelace, All Access Chicago tickets are ready.');
+  });
+
+  it('applies managed Global CSS to editor HTML output', async () => {
+    const template = createDefaultEmailTemplate({
+      editor: {
+        provider: REACT_EMAIL_EDITOR_PACKAGE,
+        contentHtml:
+          '<!DOCTYPE html><html><head></head><body><h1>{{event.title}}</h1><p>Hi {{recipient.name}}, your ticket is <span class="ticket-code">{{ticket.code}}</span>.</p></body></html>',
+        contentText: '{{event.title}} Hi {{recipient.name}}, your ticket is {{ticket.code}}.',
+        contentJson: { type: 'doc' },
+        globalCss: '.ticket-code { letter-spacing: 0.08em; }',
+      },
+    });
+
+    const rendered = await renderEmailTemplate(template, context);
+
+    expect(rendered.validation.valid).toBe(true);
+    expect(rendered.html).toContain('data-tixkit-global-css="true"');
+    expect(rendered.html).toContain('.ticket-code { letter-spacing: 0.08em; }');
+    expect(rendered.html).toContain('TKT-123');
+    expect(applyEmailGlobalCssToHtml(rendered.html, template.editor.globalCss).match(/data-tixkit-global-css/g)).toHaveLength(1);
+  });
+
+  it('blocks unsafe Global CSS before render', async () => {
+    const template = createDefaultEmailTemplate({
+      editor: {
+        provider: REACT_EMAIL_EDITOR_PACKAGE,
+        contentHtml: '<p>{{ticket.code}}</p>',
+        contentText: '{{ticket.code}}',
+        contentJson: { type: 'doc' },
+        globalCss: '@import "https://evil.example/style.css"; .x{background:url(javascript:alert(1))}',
+      },
+    });
+
+    const validation = validateEmailTemplate(template);
+    const rendered = await renderEmailTemplate(template, context);
+
+    expect(validation.valid).toBe(false);
+    expect(validation.issues).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          code: 'unsafe_global_css',
+          field: 'editor.globalCss',
+        }),
+      ]),
+    );
+    expect(rendered.html).toBe('');
   });
 
   it('blocks SVG, namespaced URLs, srcdoc, and unsafe inline styles in editor exports', () => {
@@ -835,7 +884,7 @@ describe('createEmailTestSend', () => {
       idempotencyKey: 'test-send-1',
     });
 
-    expect(send.templateKey).toBe('order-confirmed');
+    expect(send.templateKey).toBe('custom');
     expect(send.templateVersionId).toBe('cv_1');
     expect(send.subject).toBe(rendered.subject);
     expect(send.html).toBe(rendered.html);
@@ -850,5 +899,78 @@ describe('validateEditorExport', () => {
 
     expect(result.valid).toBe(false);
     expect(result.issues[0]?.code).toBe('unknown_variable');
+  });
+});
+
+describe('getEmailTemplateLifecycleIssues', () => {
+  it('returns no issues for a custom/unknown template key', () => {
+    const template = createDefaultEmailTemplate();
+    expect(getEmailTemplateLifecycleIssues(template)).toEqual([]);
+  });
+
+  it('flags missing required lifecycle variables for a known key', () => {
+    const template = createDefaultEmailTemplate({
+      editor: {
+        provider: REACT_EMAIL_EDITOR_PACKAGE,
+        contentHtml: '<p>Hi {{recipient.name}}</p>',
+      },
+      settings: {
+        templateKey: 'order-confirmed',
+        subject: 'Hi {{recipient.name}}',
+        locale: 'en',
+        category: 'transactional',
+        sender: { fromEmail: 'tickets@example.test' },
+      },
+      blocks: [
+        { type: 'event_hero', headline: '{{event.title}}', body: 'Hi {{recipient.name}}' },
+      ],
+    });
+
+    const issues = getEmailTemplateLifecycleIssues(template);
+    expect(issues.length).toBe(2);
+    // eslint-disable-next-line unicorn/no-array-sort -- ES2023 toSorted is not available in this package's TS lib target.
+    expect(issues.map((i) => i.field).sort()).toEqual(['order.id', 'order.total']);
+    expect(issues.every((i) => i.severity === 'error')).toBe(true);
+    expect(issues.every((i) => i.code === 'missing_lifecycle_variable')).toBe(true);
+  });
+
+  it('returns no issues when all required lifecycle variables are present', () => {
+    const template = createDefaultEmailTemplate({
+      editor: {
+        provider: REACT_EMAIL_EDITOR_PACKAGE,
+        contentHtml: [
+          '<h1>{{event.title}}</h1>',
+          '<p>Hi {{recipient.name}}, order {{order.id}} total {{order.total}}</p>',
+        ].join(''),
+      },
+      settings: {
+        templateKey: 'order-confirmed',
+        subject: 'Your {{event.title}} order is confirmed',
+        locale: 'en',
+        category: 'transactional',
+        sender: { fromEmail: 'tickets@example.test' },
+      },
+    });
+
+    expect(getEmailTemplateLifecycleIssues(template)).toEqual([]);
+  });
+
+  it('is wired into validateEmailTemplate as a publish blocker', () => {
+    const template = createDefaultEmailTemplate({
+      settings: {
+        templateKey: 'order-confirmed',
+        subject: 'Hi {{recipient.name}}',
+        locale: 'en',
+        category: 'transactional',
+        sender: { fromEmail: 'tickets@example.test' },
+      },
+      blocks: [
+        { type: 'event_hero', headline: '{{event.title}}', body: 'Hi {{recipient.name}}' },
+      ],
+    });
+
+    const result = validateEmailTemplate(template);
+    expect(result.valid).toBe(false);
+    expect(result.issues.some((i) => i.code === 'missing_lifecycle_variable')).toBe(true);
   });
 });

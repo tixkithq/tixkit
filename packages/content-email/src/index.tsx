@@ -24,8 +24,11 @@ import {
   MERGE_TAG_REGISTRY,
   renderMergeTags,
   validateMergeTags,
+  getTemplateLifecycle,
+  P0_TEMPLATE_KEYS,
   type MergeTagContext,
   type SendEmailInput,
+  type TemplateKey,
 } from '@tixkit/domain';
 
 export const REACT_EMAIL_EDITOR_PACKAGE = '@react-email/editor' as const;
@@ -106,6 +109,7 @@ export type EmailTemplateDocument = {
     provider: typeof REACT_EMAIL_EDITOR_PACKAGE;
     contentHtml: string;
     contentText?: string;
+    globalCss?: string;
     contentJson?: Record<string, unknown>;
   };
   settings: EmailTemplateSettings;
@@ -142,6 +146,12 @@ export function normalizeEmailTemplateDocument(value: unknown): EmailTemplateDoc
   if (
     document.editor.contentText !== undefined &&
     typeof document.editor.contentText !== 'string'
+  ) {
+    return undefined;
+  }
+  if (
+    document.editor.globalCss !== undefined &&
+    typeof document.editor.globalCss !== 'string'
   ) {
     return undefined;
   }
@@ -212,6 +222,62 @@ const buttonStyle = {
   textDecoration: 'none',
 } satisfies React.CSSProperties;
 
+export const EMAIL_GLOBAL_CSS_STYLE_ID = 'tixkit-email-global-css';
+const emailGlobalCssStylePattern =
+  /<style\b[^>]*(?:data-tixkit-global-css=["']true["']|id=["']tixkit-email-global-css["'])[^>]*>[\s\S]*?<\/style>/gi;
+const emailGlobalCssMaxLength = 8000;
+
+function normalizedEmailGlobalCss(css: string | undefined): string {
+  return typeof css === 'string' ? css.replace(/\r\n?/g, '\n').trim() : '';
+}
+
+function styleElementText(css: string): string {
+  return css.replace(/<\/style/gi, '<\\/style');
+}
+
+export function stripEmailGlobalCssFromHtml(html: string): string {
+  return html.replace(emailGlobalCssStylePattern, '').trim();
+}
+
+export function applyEmailGlobalCssToHtml(html: string, css: string | undefined): string {
+  const baseHtml = stripEmailGlobalCssFromHtml(html);
+  const globalCss = normalizedEmailGlobalCss(css);
+  if (!globalCss) return baseHtml;
+  const styleTag = `<style id="${EMAIL_GLOBAL_CSS_STYLE_ID}" data-tixkit-global-css="true">${styleElementText(globalCss)}</style>`;
+  if (/<\/head>/i.test(baseHtml)) {
+    return baseHtml.replace(/<\/head>/i, `${styleTag}</head>`);
+  }
+  return `${styleTag}${baseHtml}`;
+}
+
+function validateEmailGlobalCss(css: string | undefined): ContentValidationIssue[] {
+  const globalCss = normalizedEmailGlobalCss(css);
+  if (!globalCss) return [];
+  const issues: ContentValidationIssue[] = [];
+  if (globalCss.length > emailGlobalCssMaxLength) {
+    issues.push({
+      code: 'unsafe_global_css',
+      message: `Global CSS must be ${emailGlobalCssMaxLength} characters or fewer`,
+      severity: 'error',
+      field: 'editor.globalCss',
+    });
+  }
+  if (
+    /<\/?\s*(?:script|style|iframe|object|embed|svg|math|link|meta|base)\b/i.test(globalCss) ||
+    /(?:expression\s*\(|url\s*\(\s*['"]?\s*(?:javascript|data|vbscript):|@import\b)/i.test(
+      globalCss,
+    )
+  ) {
+    issues.push({
+      code: 'unsafe_global_css',
+      message: 'Global CSS contains unsafe rules or markup',
+      severity: 'error',
+      field: 'editor.globalCss',
+    });
+  }
+  return issues;
+}
+
 export function createDefaultEmailTemplate(
   overrides: Partial<EmailTemplateDocument> = {},
 ): EmailTemplateDocument {
@@ -228,7 +294,7 @@ export function createDefaultEmailTemplate(
       ].join(''),
     },
     settings: {
-      templateKey: 'order-confirmed',
+      templateKey: 'custom',
       subject: 'Your {{event.title}} tickets are ready',
       previewText: 'Everything you need before arrival.',
       locale: 'en',
@@ -279,6 +345,231 @@ export function createDefaultEmailTemplate(
   };
 }
 
+/**
+ * Returns a canonical default `EmailTemplateDocument` for a registered template
+ * lifecycle key, built from the lifecycle registry metadata in `@tixkit/domain`
+ * (subject/category/preview) plus per-family default blocks that reference the
+ * key's required merge tags. These defaults are the seedable Phase-2 source for
+ * editable content documents; they are intentionally provider- and brand-agnostic
+ * (sender/links use placeholder merge tags resolved at send time).
+ *
+ * Source of truth: docs/email-template-lifecycle.md.
+ */
+export function createDefaultEmailTemplateForKey(key: TemplateKey): EmailTemplateDocument {
+  const lifecycle = getTemplateLifecycle(key);
+  if (!lifecycle) {
+    throw new Error(`No lifecycle metadata registered for template key: ${key}`);
+  }
+  return {
+    schemaVersion: 1,
+    editor: {
+      provider: REACT_EMAIL_EDITOR_PACKAGE,
+      contentHtml: '<h1>{{event.title}}</h1><p>Hi {{recipient.name}},</p>',
+    },
+    settings: {
+      templateKey: key,
+      subject: lifecycle.defaultSubject,
+      previewText: lifecycle.defaultPreviewText,
+      locale: 'en',
+      category: lifecycle.category,
+      sender: {
+        fromEmail: 'tickets@example.test',
+        fromName: '{{brand.name}}',
+        replyToEmail: 'support@example.test',
+      },
+    },
+    blocks: defaultBlocksForKey(key),
+  };
+}
+
+function defaultBlocksForKey(key: TemplateKey): EmailTemplateBlock[] {
+  switch (key) {
+    case 'order-confirmed':
+      return [
+        {
+          type: 'event_hero',
+          headline: '{{event.title}}',
+          body: 'Hi {{recipient.name}}, your order is confirmed.',
+          ctaLabel: 'Manage order',
+          ctaUrl: '{{order.manageUrl}}',
+        },
+        {
+          type: 'order_summary',
+          title: 'Order summary',
+          rows: [
+            { label: 'Order ID', value: '{{order.id}}' },
+            { label: 'Total', value: '{{order.total}}' },
+          ],
+        },
+      ];
+    case 'tickets-issued':
+      return [
+        {
+          type: 'event_hero',
+          headline: '{{event.title}}',
+          body: 'Hi {{recipient.name}}, your tickets are ready.',
+          ctaLabel: 'Download tickets',
+          ctaUrl: '{{ticket.pdfUrl}}',
+        },
+        {
+          type: 'ticket_summary',
+          title: 'Ticket',
+          body: '{{ticket.type}} - Code {{ticket.code}}',
+        },
+        {
+          type: 'qr_code',
+          title: 'Your ticket QR',
+          imageUrl: '{{ticket.qrCodeUrl}}',
+          imageAlt: 'Ticket QR code',
+        },
+        {
+          type: 'calendar_button',
+          label: 'Add to Apple Wallet',
+          url: '{{ticket.walletAppleUrl}}',
+        },
+      ];
+    case 'payment-failed':
+      return [
+        {
+          type: 'event_hero',
+          headline: '{{event.title}}',
+          body: 'Hi {{recipient.name}}, your payment could not be completed.',
+        },
+        {
+          type: 'order_summary',
+          title: 'Order summary',
+          rows: [{ label: 'Order ID', value: '{{order.id}}' }],
+        },
+        { type: 'calendar_button', label: 'Retry payment', url: '{{order.retryUrl}}' },
+        { type: 'calendar_button', label: 'Get support', url: '{{brand.supportUrl}}' },
+      ];
+    case 'order-cancelled':
+      return [
+        {
+          type: 'event_hero',
+          headline: '{{event.title}}',
+          body: 'Hi {{recipient.name}}, your order was cancelled.',
+        },
+        {
+          type: 'order_summary',
+          title: 'Order summary',
+          rows: [{ label: 'Order ID', value: '{{order.id}}' }],
+        },
+      ];
+    case 'order-refunded':
+      return [
+        {
+          type: 'event_hero',
+          headline: 'Refund issued',
+          body: 'Hi {{recipient.name}}, your refund has been issued.',
+        },
+        {
+          type: 'order_summary',
+          title: 'Refund summary',
+          rows: [
+            { label: 'Order ID', value: '{{order.id}}' },
+            { label: 'Refund amount', value: '{{refund.amount}}' },
+          ],
+        },
+      ];
+    case 'event-updated':
+      return [
+        {
+          type: 'event_hero',
+          headline: '{{event.title}}',
+          body: 'Hi {{recipient.name}}, event details have been updated.',
+        },
+        { type: 'ticket_summary', title: 'What changed', body: '{{event.changeSummary}}' },
+      ];
+    case 'event-cancelled':
+      return [
+        {
+          type: 'event_hero',
+          headline: '{{event.title}}',
+          body: 'Hi {{recipient.name}}, this event has been cancelled.',
+        },
+        { type: 'calendar_button', label: 'Refund policy', url: '{{event.refundPolicyUrl}}' },
+      ];
+    case 'event-reminder':
+      return [
+        {
+          type: 'event_hero',
+          headline: '{{event.title}}',
+          body: 'Hi {{recipient.name}}, your event is coming up.',
+        },
+        {
+          type: 'order_summary',
+          title: 'Event details',
+          rows: [
+            { label: 'Starts', value: '{{event.startsAt}}' },
+            { label: 'Venue', value: '{{event.venueName}}' },
+          ],
+        },
+        {
+          type: 'qr_code',
+          title: 'Your ticket QR',
+          imageUrl: '{{ticket.qrCodeUrl}}',
+          imageAlt: 'Ticket QR code',
+        },
+      ];
+    case 'attendee-message':
+      return [
+        {
+          type: 'event_hero',
+          headline: '{{event.title}}',
+          body: 'Hi {{recipient.name}}, you have a message from the organizer.',
+        },
+        {
+          type: 'unsubscribe_footer',
+          body: 'You are receiving this because you purchased tickets with {{brand.name}}.',
+          unsubscribeUrl: '{{brand.supportUrl}}',
+        },
+      ];
+    case 'staff-order-notification':
+      return [
+        {
+          type: 'event_hero',
+          headline: '{{event.title}}',
+          body: 'Hi {{recipient.name}}, a new order was placed.',
+        },
+        {
+          type: 'order_summary',
+          title: 'Order summary',
+          rows: [{ label: 'Order ID', value: '{{order.id}}' }],
+        },
+        { type: 'calendar_button', label: 'Open dashboard', url: '{{dashboard.url}}' },
+      ];
+    case 'checkin-device-invited':
+      return [
+        {
+          type: 'event_hero',
+          headline: '{{event.title}}',
+          body: 'Hi {{recipient.name}}, you are invited to scan for this event.',
+        },
+        { type: 'calendar_button', label: 'Open scanner', url: '{{device.inviteUrl}}' },
+      ];
+    default:
+      // P1/P2 keys are not seeded yet; provide a minimal generic block so the
+      // function stays total over the full TemplateKey union.
+      return [
+        {
+          type: 'event_hero',
+          headline: '{{event.title}}',
+          body: 'Hi {{recipient.name}},',
+        },
+      ];
+  }
+}
+
+/**
+ * Seedable default email template document for every P0 lifecycle key.
+ * Use this to bootstrap editable content documents per brand/event scope.
+ */
+export const P0_EMAIL_TEMPLATE_DEFAULTS: Readonly<Record<TemplateKey, EmailTemplateDocument>> =
+  Object.fromEntries(
+    P0_TEMPLATE_KEYS.map((key) => [key, createDefaultEmailTemplateForKey(key)]),
+  ) as Readonly<Record<TemplateKey, EmailTemplateDocument>>;
+
 export function validateEmailTemplate(
   document: EmailTemplateDocument,
   options: {
@@ -300,6 +591,7 @@ export function validateEmailTemplate(
   );
   issues.push(...base.issues);
   issues.push(...validateRequiredMergeTags(renderedForValidation));
+  issues.push(...getEmailTemplateLifecycleIssues(document));
 
   if (!document.settings.sender.fromEmail || !isEmailLike(document.settings.sender.fromEmail)) {
     issues.push({
@@ -338,12 +630,19 @@ export function validateEmailTemplate(
     issues.push(issue);
   }
 
-  for (const issue of validateHtmlSafety(document.editor.contentHtml, {
-    code: 'unsafe_editor_html',
-    field: 'editor.contentHtml',
-    message: 'Editor HTML may not contain active HTML, scripting attributes, or unsafe URLs',
-    allowEmailDocumentShell: true,
-  })) {
+  for (const issue of validateEmailGlobalCss(document.editor.globalCss)) {
+    issues.push(issue);
+  }
+
+  for (const issue of validateHtmlSafety(
+    applyEmailGlobalCssToHtml(document.editor.contentHtml, document.editor.globalCss),
+    {
+      code: 'unsafe_editor_html',
+      field: 'editor.contentHtml',
+      message: 'Editor HTML may not contain active HTML, scripting attributes, or unsafe URLs',
+      allowEmailDocumentShell: true,
+    },
+  )) {
     issues.push(issue);
   }
 
@@ -415,7 +714,10 @@ export async function renderEmailTemplate(
     ? renderPlain(document.settings.previewText, context)
     : undefined;
   if (document.editor.contentJson) {
-    const editorHtml = renderHtml(document.editor.contentHtml, context);
+    const editorHtml = renderHtml(
+      applyEmailGlobalCssToHtml(document.editor.contentHtml, document.editor.globalCss),
+      context,
+    );
     const editorHtmlWithFooter = appendEditorUnsubscribeFooter(editorHtml, document, context);
     const editorText =
       document.editor.contentText?.trim() || plainTextFromHtml(editorHtml) || '';
@@ -677,6 +979,7 @@ function collectTemplateStrings(document: EmailTemplateDocument): string[] {
     document.settings.sender.fromName ?? '',
     document.editor.contentHtml,
     document.editor.contentText ?? '',
+    document.editor.globalCss ?? '',
   ];
   if (document.editor.contentJson) {
     return values.filter(Boolean);
@@ -697,6 +1000,29 @@ function validateRequiredMergeTags(template: string): ContentValidationIssue[] {
       field: tag,
     }),
   );
+}
+
+/**
+ * Check that the email template includes every merge-tag variable the lifecycle
+ * registry marks as required for its template key. Returns error-severity issues
+ * for any missing required variable. Custom/unknown keys produce no issues.
+ */
+export function getEmailTemplateLifecycleIssues(
+  document: EmailTemplateDocument,
+): ContentValidationIssue[] {
+  const lifecycle = getTemplateLifecycle(document.settings.templateKey as TemplateKey);
+  if (!lifecycle) return [];
+  const content = collectTemplateStrings(document).join('\n');
+  return lifecycle.requiredVariables
+    .filter((variable) => !content.includes(`{{${variable}}}`))
+    .map(
+      (variable): ContentValidationIssue => ({
+        code: 'missing_lifecycle_variable',
+        message: `{{${variable}}} is required for ${lifecycle.name} (${lifecycle.family})`,
+        severity: 'error',
+        field: variable,
+      }),
+    );
 }
 
 function stringsFromBlock(block: EmailTemplateBlock): string[] {
@@ -1090,8 +1416,17 @@ function sampleContext(): MergeTagContext {
     event: {
       title: 'All Access Chicago',
       startsAt: '2026-07-17 19:00',
+      endsAt: '2026-07-17 23:00',
+      timezone: 'America/Chicago',
+      venueName: 'The Grand Hall',
+      venueCity: 'Brooklyn',
       publicUrl: 'https://events.example.test/e/all-access-chicago',
       checkoutUrl: 'https://checkout.example.test/checkout?eventId=evt_demo_001',
+      doorTime: '2026-07-17 18:00',
+      mapUrl: 'https://maps.example.test/the-grand-hall',
+      refundPolicyUrl: 'https://help.example.test/refunds',
+      changeSummary: 'Venue moved to The Forum',
+      cancellationReason: 'Unforeseen weather',
     },
     brand: {
       name: 'Tixkit',
@@ -1100,16 +1435,38 @@ function sampleContext(): MergeTagContext {
     recipient: {
       name: 'Ada Lovelace',
       email: 'ada@example.test',
+      phone: '+15551234567',
     },
     ticket: {
       type: 'General Admission',
       code: 'TKT-123',
       qrCodeUrl: 'https://tickets.example.test/qr/TKT-123.png',
+      pdfUrl: 'https://tickets.example.test/pdf/TKT-123.pdf',
+      walletAppleUrl: 'https://tickets.example.test/pass/apple/TKT-123.pkpass',
+      walletGoogleUrl: 'https://pay.google.com/gp/v/save/abc123',
     },
     order: {
       id: 'ord_123',
       total: '$35.00',
+      manageUrl: 'https://checkout.example.test/orders/ord_123',
+      receiptUrl: 'https://checkout.example.test/receipts/ord_123',
+      retryUrl: 'https://checkout.example.test/checkout?retry=ord_123',
+      cancellationReason: 'Cancelled by organizer',
+      creditStatus: 'Full credit issued',
+      buyerName: 'Ada Lovelace',
+      buyerEmail: 'ada@example.test',
     },
+    refund: {
+      amount: '$20.00',
+      processingEta: '5-10 business days',
+      processedAt: '2026-07-10 12:00',
+    },
+    device: {
+      inviteUrl: 'https://scan.example.test/invite/dev_1',
+      permissionScope: 'checkins.write',
+      expiresAt: '2026-07-17 19:00',
+    },
+    dashboard: { url: 'https://admin.example.test/events/evt_demo_001' },
   };
 }
 
