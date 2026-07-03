@@ -15,11 +15,13 @@
     "embed:generate": "bun run src/index.ts embed:generate",
     "quickstart": "bun run src/index.ts quickstart",
     "seed:sample-data": "bun run src/index.ts seed:sample-data",
+    "seed:email-templates": "bun run src/index.ts seed:email-templates",
     "setup:check": "bun run src/index.ts setup:check",
     "dev:webhooks": "bun run src/index.ts dev:webhooks",
     "clean": "rm -rf dist"
   },
   "dependencies": {
+    "@tixkit/content-email": "workspace:*",
     "@tixkit/db": "workspace:*",
     "@tixkit/domain": "workspace:*",
     "zod": "^4.4.3"

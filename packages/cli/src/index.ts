@@ -2,6 +2,7 @@ import path from 'node:path';
 import { validateEnvFile, formatValidationResult } from './setup-check.js';
 import { runDevWebhooks, formatWebhookResult } from './dev-webhooks.js';
 import { seedSampleData } from './seed-sample-data.js';
+import { seedEmailTemplateDefaults } from './seed-email-templates.js';
 import { runQuickstart } from './quickstart.js';
 import {
   scaffold,
@@ -32,6 +33,7 @@ function help(): string {
     '  setup:check          Validate .env.local for required and mode-specific values',
     '  dev:webhooks         Start Stripe CLI webhook forwarding for local development',
     '  seed:sample-data     Seed idempotent sample tenant / event / order data',
+    '  seed:email-templates Seed P0 email template defaults for a brand/event scope',
     '  quickstart           Start local infrastructure, apps, and sample data',
     '',
     'Options for init:',
@@ -201,6 +203,28 @@ async function main(): Promise<void> {
 
     case 'seed:sample-data': {
       const result = await seedSampleData();
+      console.log(result.message);
+      process.exit(result.ok ? 0 : 1);
+    }
+    case 'seed:email-templates': {
+      const tenantId = parseArg('--tenant-id', '');
+      const organizationId = parseArg('--organization-id', '');
+      const brandId = parseArg('--brand-id', '');
+      if (!tenantId || !organizationId || !brandId) {
+        console.log(
+          'Usage: tixkit seed:email-templates --tenant-id <id> --organization-id <id> --brand-id <id> [--event-id <id>] [--created-by <id>]',
+        );
+        process.exit(1);
+      }
+      const eventId = parseArg('--event-id', '');
+      const createdBy = parseArg('--created-by', '');
+      const result = await seedEmailTemplateDefaults({
+        tenantId,
+        organizationId,
+        brandId,
+        eventId: eventId || undefined,
+        createdBy: createdBy || undefined,
+      });
       console.log(result.message);
       process.exit(result.ok ? 0 : 1);
     }
