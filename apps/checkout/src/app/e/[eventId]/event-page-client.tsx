@@ -31,6 +31,7 @@ import { brandThemeStyle, type ResolvedBrand } from '@/lib/brand';
 import { useResolvedBrand } from '@/lib/use-brand';
 import { formatCurrency, formatDateTime } from '@/lib/format';
 import { trackMarketingEvent } from '@/lib/marketing';
+import { EventPageSurface } from '@tixkit/content-event-page-react';
 
 type Props = {
   eventId?: string;
@@ -146,7 +147,10 @@ export default function EventPageClient({
   const hasActiveTickets = visibleTickets.some((t) => t.status === 'active');
   const startsAt = event ? formatDateTime(event.startsAt, event.timezone) : null;
   const venueName = event?.venue?.name;
-  const publishedContentHasH1 = /<h1(?:\s|>)/i.test(contentPage?.page.html ?? '');
+  const renderModel = contentPage?.page.renderModel;
+  const publishedContentHasH1 =
+    Boolean(renderModel?.blocks.some((block) => block.type === 'hero')) ||
+    /<h1(?:\s|>)/i.test(contentPage?.page.html ?? '');
   const eventTitle = event?.title ?? 'Event';
 
   useEffect(() => {
@@ -258,13 +262,23 @@ export default function EventPageClient({
         </header>
 
         {contentPage ? (
-          <article
-            className="prose prose-neutral max-w-none dark:prose-invert"
-            data-testid="published-event-page"
-            dangerouslySetInnerHTML={{
-              __html: sanitizePublishedEventPageHtml(contentPage.page.html),
-            }}
-          />
+          renderModel ? (
+            <div data-testid="published-event-page">
+              <EventPageSurface
+                resolvedPage={renderModel}
+                mode="public"
+                onTicketCtaClick={() => goToCheckout()}
+              />
+            </div>
+          ) : (
+            <article
+              className="prose prose-neutral max-w-none dark:prose-invert"
+              data-testid="published-event-page"
+              dangerouslySetInnerHTML={{
+                __html: sanitizePublishedEventPageHtml(contentPage.page.html),
+              }}
+            />
+          )
         ) : null}
 
         <Separator />

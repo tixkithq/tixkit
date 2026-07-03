@@ -4,6 +4,11 @@ import { cleanup, fireEvent, render, waitFor } from '@testing-library/react';
 import React from 'react';
 import EventPageClient from '@/app/e/[eventId]/event-page-client';
 import { publicApi, type AvailabilityItem, type PublicEvent } from '@/lib/api';
+import {
+  createDefaultEventPageDocument,
+  resolveEventPageDocument,
+  type EventPageRenderContext,
+} from '@tixkit/content-event-page';
 
 const push = vi.fn();
 
@@ -377,5 +382,171 @@ describe('EventPageClient escaping', () => {
       expect.any(AbortSignal),
     );
     expect(publicApi.getEventPage).not.toHaveBeenCalled();
+  });
+
+  it('renders the shared event page surface from page.renderModel and routes the ticket CTA to checkout', async () => {
+    const event: PublicEvent = {
+      id: 'evt_render_model',
+      title: 'All Access Chicago',
+      status: 'published',
+      timezone: 'America/Chicago',
+      startsAt: '2026-07-17T19:00:00.000Z',
+      brandId: 'brd_1',
+    };
+    const renderContext: EventPageRenderContext = {
+      event: {
+        title: 'All Access Chicago',
+        startsAt: '2026-07-17T19:00:00.000Z',
+        timezone: 'America/Chicago',
+        checkoutUrl: 'https://checkout.example.test/checkout?eventId=evt_render_model',
+        venueName: 'The Salt Shed',
+      },
+      tickets: [
+        {
+          id: 'tt_ga',
+          name: 'General Admission',
+          status: 'active',
+          priceLabel: '$35.00',
+        },
+      ],
+    };
+    const document = createDefaultEventPageDocument({
+      eventId: 'evt_render_model',
+      eventTitle: 'All Access Chicago',
+      eventDescription: 'A full night of access.',
+      checkoutUrl: 'https://checkout.example.test/checkout?eventId=evt_render_model',
+    });
+    const renderModel = resolveEventPageDocument(document, renderContext);
+
+    publicApiMock.getEvent.mockResolvedValue(event);
+    publicApiMock.getAvailability.mockResolvedValue([]);
+    publicApiMock.getBrand.mockRejectedValue(new Error('brand unavailable'));
+    publicApiMock.getEventPage.mockResolvedValue({
+      document: {
+        eventId: 'evt_render_model',
+        channel: 'event_page',
+        key: 'main',
+        name: 'Main event page',
+        locale: 'en',
+        updatedAt: '2026-06-01T00:00:00.000Z',
+      },
+      version: { versionNumber: 1 },
+      page: {
+        html: '<div class="tixkit-event-page"></div>',
+        text: 'All Access Chicago',
+        headless: [],
+        renderModel,
+        discovery: { title: 'All Access Chicago', summary: 'A full night of access.', tags: [] },
+      },
+    });
+
+    const view = render(
+      React.createElement(EventPageClient, { eventId: 'evt_render_model' }),
+    );
+
+    await waitFor(() => {
+      expect(view.getByTestId('published-event-page').querySelector('.tixkit-event-page')).not.toBeNull();
+    });
+    const surface = view.getByTestId('published-event-page').querySelector('.tixkit-event-page');
+    expect(surface?.querySelector('.tk-ep-hero')?.getAttribute('data-block-id')).toBe('hero');
+    expect(surface?.querySelector('.tk-ep-tickets')?.getAttribute('data-block-id')).toBe('tickets');
+    expect(surface?.textContent).toContain('General Admission');
+
+    fireEvent.click(surface!.querySelector('.tk-ep-tickets .tk-ep-button')!);
+    expect(push).toHaveBeenCalledWith(
+      expect.stringContaining('/checkout?eventId=evt_render_model'),
+    );
+  });
+
+  it('renders the event title as p (not h1) when renderModel has a hero block', async () => {
+    const event: PublicEvent = {
+      id: 'evt_h1_dedup',
+      title: 'Dedup Test Event',
+      status: 'published',
+      timezone: 'America/Chicago',
+      startsAt: '2026-07-17T19:00:00.000Z',
+      brandId: 'brd_1',
+    };
+    const renderContext: EventPageRenderContext = {
+      event: {
+        title: 'Dedup Test Event',
+        startsAt: '2026-07-17T19:00:00.000Z',
+        timezone: 'America/Chicago',
+        checkoutUrl: 'https://checkout.example.test/checkout?eventId=evt_h1_dedup',
+      },
+      tickets: [],
+    };
+    const document = createDefaultEventPageDocument({
+      eventId: 'evt_h1_dedup',
+      eventTitle: 'Dedup Test Event',
+      eventDescription: 'Testing h1 dedup.',
+      checkoutUrl: 'https://checkout.example.test/checkout?eventId=evt_h1_dedup',
+    });
+    const renderModel = resolveEventPageDocument(document, renderContext);
+
+    publicApiMock.getEvent.mockResolvedValue(event);
+    publicApiMock.getAvailability.mockResolvedValue([]);
+    publicApiMock.getBrand.mockRejectedValue(new Error('brand unavailable'));
+    publicApiMock.getEventPage.mockResolvedValue({
+      document: {
+        eventId: 'evt_h1_dedup',
+        channel: 'event_page',
+        key: 'main',
+        name: 'Main event page',
+        locale: 'en',
+        updatedAt: '2026-06-01T00:00:00.000Z',
+      },
+      version: { versionNumber: 1 },
+      page: {
+        html: '<div class="tixkit-event-page"></div>',
+        text: 'Dedup Test Event',
+        headless: [],
+        renderModel,
+        discovery: { title: 'Dedup Test Event', summary: 'Testing h1 dedup.', tags: [] },
+      },
+    });
+
+    const view = render(
+      React.createElement(EventPageClient, { eventId: 'evt_h1_dedup' }),
+    );
+
+    await waitFor(() => {
+      expect(view.getByTestId('published-event-page').querySelector('.tixkit-event-page')).not.toBeNull();
+    });
+    // The event title should be a <p>, not an <h1>, because the hero block has the <h1>.
+    const titleElements = view.getAllByText('Dedup Test Event');
+    const titleP = titleElements.find((el) => el.tagName === 'P');
+    expect(titleP).toBeTruthy();
+    expect(titleP?.tagName).toBe('P');
+    // The hero block's <h1> should be the only <h1> on the page.
+    const surface = view.getByTestId('published-event-page').querySelector('.tixkit-event-page');
+    const h1s = surface?.querySelectorAll('h1');
+    expect(h1s?.length).toBe(1);
+    expect(h1s?.[0]?.textContent).toContain('Dedup Test Event');
+  });
+
+  it('renders the event title as h1 when no content page exists (no hero block)', async () => {
+    const event: PublicEvent = {
+      id: 'evt_no_content',
+      title: 'No Content Event',
+      status: 'published',
+      timezone: 'America/Chicago',
+      startsAt: '2026-07-17T19:00:00.000Z',
+      brandId: 'brd_1',
+    };
+    publicApiMock.getEvent.mockResolvedValue(event);
+    publicApiMock.getEventPage.mockResolvedValue(null);
+    publicApiMock.getAvailability.mockResolvedValue([]);
+    publicApiMock.getBrand.mockRejectedValue(new Error('brand unavailable'));
+
+    const view = render(
+      React.createElement(EventPageClient, { eventId: 'evt_no_content' }),
+    );
+
+    await waitFor(() => {
+      expect(view.getByText('No Content Event')).toBeInTheDocument();
+    });
+    const titleElement = view.getByText('No Content Event');
+    expect(titleElement.tagName).toBe('H1');
   });
 });
