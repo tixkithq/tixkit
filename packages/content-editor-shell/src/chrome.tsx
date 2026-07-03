@@ -18,6 +18,9 @@ import {
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuSeparator,
+  DropdownMenuSub,
+  DropdownMenuSubTrigger,
+  DropdownMenuSubContent,
   DropdownMenuTrigger,
   Popover,
   PopoverContent,
@@ -41,6 +44,8 @@ export type DropdownMenuItemConfig = {
   disabled?: boolean;
   destructive?: boolean;
   separatorAfter?: boolean;
+  children?: DropdownMenuItemConfig[];
+  activeChildId?: string;
 };
 
 /* ------------------------------------------------------------------ */
@@ -169,15 +174,40 @@ export function EditorTopBar({
           <DropdownMenuContent align="end" className="w-56">
             {moreActions.map((item) => (
               <React.Fragment key={item.id}>
-                <DropdownMenuItem
-                  disabled={item.disabled}
-                  key={`${item.id}-item`}
-                  onClick={item.onClick}
-                  variant={item.destructive ? 'destructive' : 'default'}
-                >
-                  {item.icon}
-                  <span className="min-w-0 truncate">{item.label}</span>
-                </DropdownMenuItem>
+                {item.children ? (
+                  <DropdownMenuSub>
+                    <DropdownMenuSubTrigger disabled={item.disabled}>
+                      {item.icon}
+                      <span className="min-w-0 truncate">{item.label}</span>
+                    </DropdownMenuSubTrigger>
+                    <DropdownMenuSubContent className="w-40">
+                      {item.children.map((child) => (
+                        <DropdownMenuItem
+                          key={child.id}
+                          disabled={child.disabled}
+                          onClick={child.onClick}
+                          variant={child.destructive ? 'destructive' : 'default'}
+                        >
+                          {child.activeChildId === child.id && (
+                            <span className="size-2 shrink-0 rounded-full bg-primary" />
+                          )}
+                          {child.activeChildId !== child.id && child.icon}
+                          <span className="min-w-0 truncate">{child.label}</span>
+                        </DropdownMenuItem>
+                      ))}
+                    </DropdownMenuSubContent>
+                  </DropdownMenuSub>
+                ) : (
+                  <DropdownMenuItem
+                    disabled={item.disabled}
+                    key={`${item.id}-item`}
+                    onClick={item.onClick}
+                    variant={item.destructive ? 'destructive' : 'default'}
+                  >
+                    {item.icon}
+                    <span className="min-w-0 truncate">{item.label}</span>
+                  </DropdownMenuItem>
+                )}
                 {item.separatorAfter && <DropdownMenuSeparator key={`${item.id}-separator`} />}
               </React.Fragment>
             ))}
