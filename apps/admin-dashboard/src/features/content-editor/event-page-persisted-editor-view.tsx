@@ -924,7 +924,9 @@ function EventPageRichTextEditor({
   return (
     <div
       className="space-y-2"
+      role="presentation"
       onClick={(event) => event.stopPropagation()}
+      onKeyDown={(event) => event.stopPropagation()}
       onMouseDown={(event) => event.stopPropagation()}
       onPointerDown={(event) => event.stopPropagation()}
     >

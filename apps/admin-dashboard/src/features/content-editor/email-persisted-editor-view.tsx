@@ -3255,7 +3255,7 @@ export function EmailPersistedEditorView({ eventId }: { eventId: string }) {
             </dl>
             <div className="space-y-2">
               <h3 className="text-sm font-medium text-foreground">Preflight checks</h3>
-              <div
+              <output
                 className={
                   reviewAnalysisFailed
                     ? 'rounded-md border border-red-300 bg-red-50 p-3 text-sm text-red-800 dark:border-red-900/60 dark:bg-red-950/30 dark:text-red-200'
@@ -3263,7 +3263,6 @@ export function EmailPersistedEditorView({ eventId }: { eventId: string }) {
                       ? 'rounded-md border border-sky-400/40 bg-sky-50 p-3 text-sm text-sky-800 dark:border-sky-900/60 dark:bg-sky-950/30 dark:text-sky-200'
                       : 'rounded-md border border-sky-400/40 bg-sky-50 p-3 text-sm text-sky-800 dark:border-sky-900/60 dark:bg-sky-950/30 dark:text-sky-200'
                 }
-                role="status"
               >
                 <div className="font-medium">
                   {reviewAnalysisFailed
@@ -3279,7 +3278,7 @@ export function EmailPersistedEditorView({ eventId }: { eventId: string }) {
                       ? 'Checking the current editor export, links, sender, audience, and unsubscribe requirements from the React Email output.'
                       : 'The current editor export, links, sender, audience, and unsubscribe requirements were checked from the saved React Email output.'}
                 </p>
-              </div>
+              </output>
               {reviewHasInvalidSchedule && (
                 <p className="rounded-md border border-red-300 bg-red-50 p-3 text-sm text-red-800 dark:border-red-900/60 dark:bg-red-950/30 dark:text-red-200">
                   Choose a valid scheduled send time before confirming.

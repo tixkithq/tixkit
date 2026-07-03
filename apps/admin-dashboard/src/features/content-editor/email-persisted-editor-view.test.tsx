@@ -760,7 +760,7 @@ describe('EmailPersistedEditorView', () => {
         );
         if (mark && typeof mark === 'object') {
           markedText.push({
-            ...((mark as { attrs?: Record<string, unknown> }).attrs ?? {}),
+            ...(mark as { attrs?: Record<string, unknown> }).attrs,
             text: node.text,
           });
         }
