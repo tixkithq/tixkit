@@ -41,7 +41,7 @@ export function CheckInView() {
     refetch: refetchEvents,
   } = useAdminData(() => adminApi.listEvents());
 
-  const events = eventsData?.items ?? [];
+  const events = React.useMemo(() => eventsData?.items ?? [], [eventsData]);
   const selectedEvent = events.find((e) => e.id === selectedEventId);
 
   const {

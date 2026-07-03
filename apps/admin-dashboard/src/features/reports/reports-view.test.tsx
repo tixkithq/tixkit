@@ -92,7 +92,7 @@ vi.mock('@/components/ui/select', async () => {
         onChange={(event) => context?.onValueChange(event.target.value)}
         {...props}
       >
-        <option value="" />
+        <option value="">All</option>
         {(context?.items ?? []).map((item) => (
           <option key={item.value} value={item.value}>
             {item.label}
