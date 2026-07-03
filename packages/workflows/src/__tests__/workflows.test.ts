@@ -221,6 +221,8 @@ const defaultActivities = {
   sendEmailActivity: async () => okResult({ deliveryId: 'emd_1', provider: 'capture' }),
   sendSmsActivity: async () => okResult({ deliveryId: 'smd_1', provider: 'capture' }),
   generateExportActivity: async () => okResult({ data: 'id\n1', rowCount: 1 }),
+  generateAndUploadExportActivity: async () =>
+    okResult({ fileUrl: 'https://exports.example.test/exp_1.csv', rowCount: 1 }),
   uploadFileActivity: async () => okResult({ fileUrl: 'https://exports.example.test/exp_1.csv' }),
   markExportFailedActivity: async () => okResult({ failed: true }),
   notifyExportCompleteActivity: async () => okResult({ notified: true }),
@@ -1568,9 +1570,38 @@ describe('exportWorkflow', () => {
     });
   });
 
+  it('never passes raw export data between activities', async () => {
+    const activityCalls: Array<{ name: string; input: Record<string, unknown> }> = [];
+    setActivity(
+      'generateAndUploadExportActivity',
+      async (activityInput: Record<string, unknown>) => {
+        activityCalls.push({ name: 'generateAndUploadExportActivity', input: activityInput });
+        return okResult({ fileUrl: 'https://exports.example.test/exp_1.csv', rowCount: 42 });
+      },
+    );
+    setActivity('notifyExportCompleteActivity', async (activityInput: Record<string, unknown>) => {
+      activityCalls.push({ name: 'notifyExportCompleteActivity', input: activityInput });
+      return okResult({ notified: true });
+    });
+
+    const result = await exportWorkflow(input);
+    expect(result.status).toBe('completed');
+
+    const genCall = activityCalls.find((c) => c.name === 'generateAndUploadExportActivity');
+    expect(genCall?.input).not.toHaveProperty('data');
+    expect(genCall?.input).toMatchObject({ exportId: 'exp_1', type: 'attendees', format: 'csv' });
+
+    const notifyCall = activityCalls.find((c) => c.name === 'notifyExportCompleteActivity');
+    expect(notifyCall?.input).not.toHaveProperty('data');
+    expect(notifyCall?.input).toMatchObject({
+      exportId: 'exp_1',
+      fileUrl: 'https://exports.example.test/exp_1.csv',
+    });
+  });
+
   it('marks the export failed when generation returns a non-retryable failure', async () => {
     let failedInput: Record<string, unknown> | undefined;
-    setActivity('generateExportActivity', async () =>
+    setActivity('generateAndUploadExportActivity', async () =>
       errResult('EXPORT_FAILED', 'Invalid export filters', false),
     );
     setActivity('markExportFailedActivity', async (activityInput: Record<string, unknown>) => {
@@ -1589,12 +1620,12 @@ describe('exportWorkflow', () => {
 
   it('retries retryable generation failures before continuing', async () => {
     let attempts = 0;
-    setActivity('generateExportActivity', async () => {
+    setActivity('generateAndUploadExportActivity', async () => {
       attempts += 1;
       if (attempts < 3) {
         return errResult('EXPORT_FAILED', 'Database unavailable', true);
       }
-      return okResult({ data: 'id\n1', rowCount: 1 });
+      return okResult({ fileUrl: 'https://exports.example.test/exp_1.csv', rowCount: 1 });
     });
 
     const result = await exportWorkflow(input);
@@ -1609,7 +1640,7 @@ describe('exportWorkflow', () => {
   it('marks the export failed after retryable generation failures are exhausted', async () => {
     let attempts = 0;
     let failedInput: Record<string, unknown> | undefined;
-    setActivity('generateExportActivity', async () => {
+    setActivity('generateAndUploadExportActivity', async () => {
       attempts += 1;
       return errResult('EXPORT_FAILED', 'Database unavailable', true);
     });
@@ -1631,8 +1662,8 @@ describe('exportWorkflow', () => {
 
   it('marks the export failed when upload returns a non-retryable failure', async () => {
     let failedInput: Record<string, unknown> | undefined;
-    setActivity('uploadFileActivity', async () =>
-      errResult('UPLOAD_FAILED', 'Invalid S3 credentials', false),
+    setActivity('generateAndUploadExportActivity', async () =>
+      errResult('FILE_UPLOAD_FAILED', 'Invalid S3 credentials', false),
     );
     setActivity('markExportFailedActivity', async (activityInput: Record<string, unknown>) => {
       failedInput = activityInput;
@@ -1651,9 +1682,9 @@ describe('exportWorkflow', () => {
   it('marks the export failed after retryable upload failures are exhausted', async () => {
     let attempts = 0;
     let failedInput: Record<string, unknown> | undefined;
-    setActivity('uploadFileActivity', async () => {
+    setActivity('generateAndUploadExportActivity', async () => {
       attempts += 1;
-      return errResult('UPLOAD_FAILED', 'S3 timeout', true);
+      return errResult('FILE_UPLOAD_FAILED', 'S3 timeout', true);
     });
     setActivity('markExportFailedActivity', async (activityInput: Record<string, unknown>) => {
       failedInput = activityInput;

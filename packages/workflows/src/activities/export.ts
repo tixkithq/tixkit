@@ -709,51 +709,72 @@ export async function uploadFileActivity(input: {
   format: string;
 }): Promise<WorkflowActivityResult<{ fileUrl: string }>> {
   try {
-    const bucket = process.env.S3_EXPORT_BUCKET ?? process.env.S3_BUCKET ?? 'tixkit-exports';
-    const region = process.env.S3_EXPORT_REGION ?? process.env.S3_REGION ?? 'us-east-1';
-    const key = `exports/${input.exportId}.${input.format}`;
-    const s3Endpoint = process.env.S3_ENDPOINT;
-    const forcePathStyle = process.env.S3_FORCE_PATH_STYLE === 'true';
-    const fileUrl = buildS3FileUrl({
-      bucket,
-      region,
-      key,
-      endpoint: s3Endpoint,
-      forcePathStyle,
-    });
+    const fileUrl = await uploadExportData(input.exportId, input.data, input.format);
+    return okResult({ fileUrl });
+  } catch (err) {
+    return errResult(
+      'FILE_UPLOAD_FAILED',
+      err instanceof Error ? err.message : 'Unknown error',
+      true,
+    );
+  }
+}
 
-    if (!isLocalExportStorageMode()) {
-      const accessKeyId = process.env.S3_ACCESS_KEY_ID;
-      const secretAccessKey = process.env.S3_SECRET_ACCESS_KEY;
-      if ((accessKeyId && !secretAccessKey) || (!accessKeyId && secretAccessKey)) {
-        return errResult(
-          'FILE_UPLOAD_FAILED',
-          'S3_ACCESS_KEY_ID and S3_SECRET_ACCESS_KEY must be configured together',
-          false,
-        );
-      }
+async function uploadExportData(exportId: string, data: string, format: string): Promise<string> {
+  const bucket = process.env.S3_EXPORT_BUCKET ?? process.env.S3_BUCKET ?? 'tixkit-exports';
+  const region = process.env.S3_EXPORT_REGION ?? process.env.S3_REGION ?? 'us-east-1';
+  const key = `exports/${exportId}.${format}`;
+  const s3Endpoint = process.env.S3_ENDPOINT;
+  const forcePathStyle = process.env.S3_FORCE_PATH_STYLE === 'true';
+  const fileUrl = buildS3FileUrl({
+    bucket,
+    region,
+    key,
+    endpoint: s3Endpoint,
+    forcePathStyle,
+  });
 
-      const s3Config: S3ClientConfig = { region };
-      if (s3Endpoint) {
-        s3Config.endpoint = s3Endpoint;
-        s3Config.forcePathStyle = forcePathStyle;
-      }
-      if (accessKeyId && secretAccessKey) {
-        s3Config.credentials = { accessKeyId, secretAccessKey };
-      }
-
-      const s3 = new S3Client(s3Config);
-      await s3.send(
-        new PutObjectCommand({
-          Bucket: bucket,
-          Key: key,
-          Body: input.data,
-          ContentType: exportContentType(input.format),
-        }),
-      );
+  if (!isLocalExportStorageMode()) {
+    const accessKeyId = process.env.S3_ACCESS_KEY_ID;
+    const secretAccessKey = process.env.S3_SECRET_ACCESS_KEY;
+    if ((accessKeyId && !secretAccessKey) || (!accessKeyId && secretAccessKey)) {
+      throw new Error('S3_ACCESS_KEY_ID and S3_SECRET_ACCESS_KEY must be configured together');
     }
 
-    return okResult({ fileUrl });
+    const s3Config: S3ClientConfig = { region };
+    if (s3Endpoint) {
+      s3Config.endpoint = s3Endpoint;
+      s3Config.forcePathStyle = forcePathStyle;
+    }
+    if (accessKeyId && secretAccessKey) {
+      s3Config.credentials = { accessKeyId, secretAccessKey };
+    }
+
+    const s3 = new S3Client(s3Config);
+    await s3.send(
+      new PutObjectCommand({
+        Bucket: bucket,
+        Key: key,
+        Body: data,
+        ContentType: exportContentType(format),
+      }),
+    );
+  }
+
+  return fileUrl;
+}
+
+export async function generateAndUploadExportActivity(input: {
+  exportId: string;
+  type: string;
+  format: string;
+}): Promise<WorkflowActivityResult<{ fileUrl: string; rowCount: number }>> {
+  const genResult = await generateExportActivity(input);
+  if (!genResult.ok) return genResult;
+
+  try {
+    const fileUrl = await uploadExportData(input.exportId, genResult.value.data, input.format);
+    return okResult({ fileUrl, rowCount: genResult.value.rowCount });
   } catch (err) {
     return errResult(
       'FILE_UPLOAD_FAILED',
