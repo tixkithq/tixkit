@@ -28,6 +28,7 @@
     "@tixkit/content-core": "workspace:*",
     "@tixkit/content-email": "workspace:*",
     "@tixkit/content-event-page": "workspace:*",
+    "@tixkit/content-event-page-react": "workspace:*",
     "@tixkit/content-editor-shell": "workspace:*",
     "@tixkit/content-message": "workspace:*",
     "@tixkit/domain": "workspace:*",

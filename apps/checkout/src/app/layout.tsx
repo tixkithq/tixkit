@@ -1,5 +1,6 @@
 import type { ReactNode } from 'react';
 import { ThemeProvider } from '@/components/theme-provider';
+import '@tixkit/content-event-page-react/styles.css';
 import './globals.css';
 
 export const metadata = {

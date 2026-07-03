@@ -28,6 +28,8 @@ const nextConfig = {
   transpilePackages: [
     '@tixkit/content-email',
     '@tixkit/content-editor-shell',
+    '@tixkit/content-event-page-react',
+    '@tixkit/content-event-page',
     '@tixkit/js',
     '@tixkit/next',
   ],

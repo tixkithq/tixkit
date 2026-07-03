@@ -15,6 +15,8 @@
  *
  */
 
+import type { ResolvedEventPage } from '@tixkit/content-event-page';
+
 export type PublicEvent = {
   id: string;
   slug?: string;
@@ -110,6 +112,7 @@ export type PublicContentPage = {
     html: string;
     text: string;
     headless: PublicEventPageBlock[];
+    renderModel?: ResolvedEventPage;
     discovery: PublicEventDiscoveryCard;
   };
 };

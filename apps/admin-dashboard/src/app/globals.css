@@ -1,5 +1,6 @@
 @import 'tailwindcss';
 @import 'tw-animate-css';
+@import '@tixkit/content-event-page-react/styles.css';
 @import '@react-email/editor/themes/default.css';
 @import '@react-email/editor/styles/bubble-menu.css';
 @import '@react-email/editor/styles/slash-command.css';
@@ -369,6 +370,15 @@
     padding: 0 0.375rem;
   }
 
+  [data-re-bubble-menu] .tixkit-email-bubble-control--font {
+    width: 7.25rem;
+    padding: 0 0.375rem;
+  }
+
+  [data-re-bubble-menu] .tixkit-email-bubble-control--font option {
+    color: rgb(24 24 27);
+  }
+
   [data-re-bubble-menu] .tixkit-email-bubble-control::placeholder {
     color: rgb(212 212 216 / 70%);
   }
@@ -615,6 +625,107 @@
   .tixkit-event-page-builder .ProseMirror {
     display: grid;
     gap: 1rem;
+  }
+
+  .tixkit-event-page-rich-text-editor {
+    min-height: 6rem;
+    width: 100%;
+    border-radius: 0.375rem;
+    color: rgb(0 0 0 / 75%);
+    font-size: 1rem;
+    line-height: 1.75;
+    outline: none;
+  }
+
+  .tixkit-event-page-rich-text-editor p {
+    margin: 0;
+  }
+
+  .tixkit-event-page-rich-text-editor p + p {
+    margin-top: 0.75rem;
+  }
+
+  .tixkit-event-page-bubble-menu {
+    position: fixed;
+    z-index: 50;
+    display: inline-flex;
+    align-items: center;
+    gap: 0.25rem;
+    max-width: calc(100vw - 1rem);
+    border: 1px solid rgb(63 63 70);
+    border-radius: 0.5rem;
+    background: rgb(24 24 27);
+    padding: 0.25rem;
+    color: rgb(250 250 250);
+    font-family: system-ui, -apple-system, sans-serif;
+    font-size: 12px;
+    line-height: 1;
+    box-shadow: 0 18px 40px rgb(15 23 42 / 25%);
+  }
+
+  .tixkit-event-page-bubble-menu__group {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.125rem;
+    padding-right: 0.125rem;
+  }
+
+  .tixkit-event-page-bubble-menu__field {
+    display: inline-flex;
+    align-items: center;
+  }
+
+  .tixkit-event-page-bubble-menu__button,
+  .tixkit-event-page-bubble-menu__control {
+    height: 1.75rem;
+    border: 1px solid rgb(255 255 255 / 14%);
+    border-radius: 0.25rem;
+    background: rgb(255 255 255 / 6%);
+    color: rgb(245 245 245);
+    font-family: system-ui, -apple-system, sans-serif;
+    font-size: 0.75rem;
+    line-height: 1;
+    outline: none;
+  }
+
+  .tixkit-event-page-bubble-menu__button {
+    display: inline-flex;
+    width: 1.75rem;
+    align-items: center;
+    justify-content: center;
+    padding: 0;
+  }
+
+  .tixkit-event-page-bubble-menu__button:hover,
+  .tixkit-event-page-bubble-menu__button[aria-pressed="true"] {
+    background: rgb(255 255 255 / 14%);
+  }
+
+  .tixkit-event-page-bubble-menu__control {
+    padding: 0 0.375rem;
+  }
+
+  .tixkit-event-page-bubble-menu__control:focus,
+  .tixkit-event-page-bubble-menu__button:focus-visible {
+    border-color: rgb(255 255 255 / 32%);
+    box-shadow: 0 0 0 2px rgb(255 255 255 / 10%);
+  }
+
+  .tixkit-event-page-bubble-menu__control--color {
+    width: 1.75rem;
+    padding: 0.1875rem;
+  }
+
+  .tixkit-event-page-bubble-menu__control--number {
+    width: 3.25rem;
+  }
+
+  .tixkit-event-page-bubble-menu__control--select {
+    width: 7.75rem;
+  }
+
+  .tixkit-event-page-bubble-menu__control--select option {
+    color: rgb(24 24 27);
   }
 
   .tixkit-event-page-builder .ProseMirror-selectednode {
