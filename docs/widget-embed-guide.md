@@ -125,6 +125,8 @@ Event marketing integrations are configured in the admin event detail page or th
 
 Hosted checkout/event pages and widget host flows emit these ecommerce events:
 
+Hosted event pages render through the shared event-page renderer (the same resolver/render model as the admin canvas and admin preview drawer), so widget/marketing integrations see the same published page surface attendees see. Event pages use canonical structured `EventPageDocument` JSON, not raw HTML, and `@react-email/editor` is not involved in event-page rendering. See `docs/event-page-renderer-parity-implementation-plan.md`.
+
 | Tixkit event              | GA4              | Meta Pixel         | Generic pixel parameter   |
 | ------------------------- | ---------------- | ------------------ | ------------------------- |
 | Event page or widget view | `view_item`      | `PageView`         | `tk_event=view_item`      |

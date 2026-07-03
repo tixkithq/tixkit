@@ -68,26 +68,30 @@ The Phase 6 content-studio foundation stores event pages, email templates, SMS t
 
 Authenticated routes:
 
-| Method | Path                                                            | Purpose                                                                                                                                                    |
-| ------ | --------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `GET`  | `/v1/content-documents`                                         | List scoped content documents. Optional filters: `channel`, `brandId`, `eventId`, `limit`.                                                                 |
-| `POST` | `/v1/content-documents`                                         | Create a document for `event_page`, `email`, or `sms`. Stubbed future channels such as `imessage` and `social_invite` fail closed with `VALIDATION_ERROR`. |
-| `GET`  | `/v1/content-documents/:documentId`                             | Fetch a scoped content document.                                                                                                                           |
-| `GET`  | `/v1/content-documents/:documentId/versions`                    | List saved versions.                                                                                                                                       |
-| `POST` | `/v1/content-documents/:documentId/versions`                    | Save a draft version and persist validation issues.                                                                                                        |
-| `POST` | `/v1/content-documents/:documentId/preview`                     | Render a preview through the shared renderer.                                                                                                              |
-| `POST` | `/v1/content-documents/:documentId/versions/:versionId/publish` | Publish a valid version. Invalid versions return publish blockers.                                                                                         |
-| `POST` | `/v1/content-documents/:documentId/duplicate`                   | Duplicate a scoped document as an unpublished draft copy with fresh version IDs.                                                                           |
-| `POST` | `/v1/content-documents/:documentId/archive`                     | Archive a document.                                                                                                                                        |
-| `POST` | `/v1/content-documents/:documentId/test-sends`                  | Capture a renderer-backed test send without faking provider delivery.                                                                                      |
+| Method | Path                                                            | Purpose                                                                                                                                                                                                                                                             |
+| ------ | --------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `GET`  | `/v1/content-documents`                                         | List scoped content documents. Optional filters: `channel`, `brandId`, `eventId`, `limit`.                                                                                                                                                                          |
+| `POST` | `/v1/content-documents`                                         | Create a document for `event_page`, `email`, or `sms`. Stubbed future channels such as `imessage` and `social_invite` fail closed with `VALIDATION_ERROR`.                                                                                                          |
+| `GET`  | `/v1/content-documents/:documentId`                             | Fetch a scoped content document.                                                                                                                                                                                                                                    |
+| `GET`  | `/v1/content-documents/:documentId/versions`                    | List saved versions.                                                                                                                                                                                                                                                |
+| `POST` | `/v1/content-documents/:documentId/versions`                    | Save a draft version and persist validation issues.                                                                                                                                                                                                                 |
+| `POST` | `/v1/content-documents/:documentId/preview`                     | Render a preview through the shared renderer. For event pages the preview returns `html`, `text`, `headless` blocks, `renderModel` (the resolved page model), and `discovery` metadata, all derived from the same canonical `EventPageDocument` and render context. |
+| `POST` | `/v1/content-documents/:documentId/versions/:versionId/publish` | Publish a valid version. Invalid versions return publish blockers.                                                                                                                                                                                                  |
+| `POST` | `/v1/content-documents/:documentId/duplicate`                   | Duplicate a scoped document as an unpublished draft copy with fresh version IDs.                                                                                                                                                                                    |
+| `POST` | `/v1/content-documents/:documentId/archive`                     | Archive a document.                                                                                                                                                                                                                                                 |
+| `POST` | `/v1/content-documents/:documentId/test-sends`                  | Capture a renderer-backed test send without faking provider delivery.                                                                                                                                                                                               |
 
 Public route:
 
-| Method | Path                                      | Purpose                                                                                                                                                                                    |
-| ------ | ----------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `GET`  | `/v1/public/events/:eventId/content-page` | Fetch allowlisted published event-page content for a published event. Optional `locale`; response excludes tenant, organization, brand, draft, validation, variable, and creator metadata. |
+| Method | Path                                      | Purpose                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
+| ------ | ----------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `GET`  | `/v1/public/events/:eventId/content-page` | Fetch allowlisted published event-page content for a published, publicly readable event. Optional `locale`; response excludes tenant, organization, brand, draft, validation, variable, and creator metadata. The `page` payload exposes `html`, `text`, `headless` blocks, `renderModel` (the resolved page model for first-party rendering), and `discovery` metadata, all generated from the same canonical `EventPageDocument` and render context. Public routes never return draft, archived, private, or unpublished content. |
 
 Permission rules follow the existing product scopes: event pages use `events.read`/`events.write`, while email and SMS templates use `messages.write`.
+
+### Event Page Renderer Parity
+
+Event pages use canonical structured `EventPageDocument` JSON with typed `EventPageBlock[]` blocks as the source of truth, not raw HTML. One resolver/render model powers the admin canvas, admin preview drawer, checkout hosted event page, server HTML artifact, headless API payload, and discovery-card metadata through a shared event-page renderer. `@react-email/editor` is for email templates only and is not used for event pages. The admin preview renders the same shared surface, not a raw HTML/text debug output. The public `renderModel` is the resolved page model intended for first-party rendering; `html`, `text`, `headless`, and `discovery` remain available for API consumers, SDKs, embeds, and crawlers. See `docs/event-page-renderer-parity-implementation-plan.md` for the full contract.
 
 ## Pagination
 
@@ -332,7 +336,7 @@ All routes below require authentication. Most mutations are tenant-scoped and ad
 | `POST`  | `/v1/brands`                                                                                  | `settings.write` | Create brand                                                     |
 | `PATCH` | `/v1/brands/:brandId`                                                                         | `settings.write` | Update brand (name, theme, whiteLabel, legalUrls)                |
 | `POST`  | `/v1/brands/:brandId/domains`                                                                 | `settings.write` | Add custom domain                                                |
-| `GET`   | `/v1/brands/:brandId/email-sender-identities`                                                | `settings.write` | List brand email sender identities                               |
+| `GET`   | `/v1/brands/:brandId/email-sender-identities`                                                 | `settings.write` | List brand email sender identities                               |
 | `GET`   | `/v1/brands`                                                                                  | `settings.write` | List brands in tenant                                            |
 | `GET`   | `/v1/organizations/:organizationId/payment-accounts`                                          | `billing.write`  | List payment accounts                                            |
 | `POST`  | `/v1/organizations/:organizationId/payment-accounts/stripe-connect`                           | `billing.write`  | Register/return Stripe Connect account                           |
@@ -364,10 +368,12 @@ Event slug contract:
 
 ### Public Event Routes
 
-| Method | Path                              | Auth | Description                                                                    |
-| ------ | --------------------------------- | ---- | ------------------------------------------------------------------------------ |
-| `GET`  | `/v1/public/events/:eventId`      | none | Get a published public/unlisted event by ID for shared hosted checkout pages   |
-| `GET`  | `/v1/public/events/by-slug/:slug` | none | Get a published public/unlisted event by slug for verified custom-domain pages |
+| Method | Path                                        | Auth | Description                                                                                                                                                                                                                                                      |
+| ------ | ------------------------------------------- | ---- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `GET`  | `/v1/public/events/:eventId`                | none | Get a published public/unlisted event by ID for shared hosted checkout pages                                                                                                                                                                                     |
+| `GET`  | `/v1/public/events/by-slug/:slug`           | none | Get a published public/unlisted event by slug for verified custom-domain pages                                                                                                                                                                                   |
+| `GET`  | `/v1/public/events/:eventId/page`           | none | Published event page payload (`html`, `text`, `headless`, `renderModel`, `discovery`) from the shared event-page renderer. Verified custom-domain slug variants resolve via `by-slug/:slug/page?host=...`. Only published, publicly readable events are exposed. |
+| `GET`  | `/v1/public/events/:eventId/discovery-card` | none | Structured discovery-card metadata derived from event fields and the page hero block, not from parsing arbitrary rich text.                                                                                                                                      |
 
 ### Ticketing & Inventory
 
@@ -392,13 +398,13 @@ File-type questions use completed upload artifact answers created through signed
 
 ### Upload Artifacts
 
-| Method | Path                                               | Scope                              | Description                                                                      |
-| ------ | -------------------------------------------------- | ---------------------------------- | -------------------------------------------------------------------------------- |
-| `POST` | `/v1/public/events/:eventId/upload-artifacts`      | public                             | Create a checkout-answer upload ticket for a published event                     |
-| `POST` | `/v1/public/upload-artifacts/:artifactId/complete` | public token                       | Complete and scan a public checkout-answer upload                                |
+| Method | Path                                               | Scope                              | Description                                                                                           |
+| ------ | -------------------------------------------------- | ---------------------------------- | ----------------------------------------------------------------------------------------------------- |
+| `POST` | `/v1/public/events/:eventId/upload-artifacts`      | public                             | Create a checkout-answer upload ticket for a published event                                          |
+| `POST` | `/v1/public/upload-artifacts/:artifactId/complete` | public token                       | Complete and scan a public checkout-answer upload                                                     |
 | `POST` | `/v1/upload-artifacts`                             | `events.write` or `settings.write` | Create a signed upload ticket for checkout answers, brand logos, user avatars, or inline email images |
-| `POST` | `/v1/upload-artifacts/:artifactId/complete`        | owner tenant                       | Complete and scan an authenticated upload                                        |
-| `GET`  | `/v1/upload-artifacts/:artifactId/download`        | owner tenant                       | Return a short-lived signed download URL for a completed clean artifact          |
+| `POST` | `/v1/upload-artifacts/:artifactId/complete`        | owner tenant                       | Complete and scan an authenticated upload                                                             |
+| `GET`  | `/v1/upload-artifacts/:artifactId/download`        | owner tenant                       | Return a short-lived signed download URL for a completed clean artifact                               |
 
 Supported purposes are `checkout_answer`, `brand_logo`, `user_avatar`, and `content_email_image`. The API validates declared content type and byte size before signing a PUT URL, validates the stored object again on completion, scans for malware, and only accepts file checkout answers that reference a completed clean `upl_...` artifact.
 
@@ -416,20 +422,20 @@ Refund body: `{ "amountCents"?, "reason", "voidTickets"?, "restoreInventory"? }`
 
 ### Attendees & Check-in
 
-| Method  | Path                                                         | Scope             | Description                                                  |
-| ------- | ------------------------------------------------------------ | ----------------- | ------------------------------------------------------------ |
-| `GET`   | `/v1/events/:eventId/attendees`                              | `attendees.read`  | List attendees for an event                                  |
-| `GET`   | `/v1/attendees`                                              | `attendees.read`  | List attendees across tenant                                 |
-| `PATCH` | `/v1/attendees/:attendeeId`                                  | `attendees.write` | Update attendee fields                                       |
+| Method  | Path                                                         | Scope             | Description                                                                                                                |
+| ------- | ------------------------------------------------------------ | ----------------- | -------------------------------------------------------------------------------------------------------------------------- |
+| `GET`   | `/v1/events/:eventId/attendees`                              | `attendees.read`  | List attendees for an event                                                                                                |
+| `GET`   | `/v1/attendees`                                              | `attendees.read`  | List attendees across tenant                                                                                               |
+| `PATCH` | `/v1/attendees/:attendeeId`                                  | `attendees.write` | Update attendee fields                                                                                                     |
 | `POST`  | `/v1/tickets/:ticketId/transfer`                             | `attendees.write` | Transfer ticket to a new email by issuing a fresh credential and revoking stale wallet passes (requires `Idempotency-Key`) |
-| `GET`   | `/v1/events/:eventId/check-in-lists`                         | `checkins.read`   | List check-in lists                                          |
-| `GET`   | `/v1/events/:eventId/check-in-lists/:checkInListId/manifest` | `checkins.read`   | Download offline manifest (ticket QR hashes)                 |
-| `POST`  | `/v1/check-ins/scan`                                         | `checkins.write`  | Online scan (recommended `Idempotency-Key`)                  |
-| `POST`  | `/v1/check-ins/sync`                                         | `checkins.write`  | Offline scan sync (requires `Idempotency-Key`)               |
-| `POST`  | `/v1/check-ins/bulk-sync-jobs`                               | `checkins.write`  | Create async offline sync job (requires `Idempotency-Key`)   |
-| `PUT`   | `/v1/check-ins/bulk-sync-jobs/:jobId/chunks/:sequence`       | `checkins.write`  | Upload async offline sync chunk (requires `Idempotency-Key`) |
-| `GET`   | `/v1/check-ins/bulk-sync-jobs/:jobId`                        | `checkins.read`   | Poll async offline sync job status                           |
-| `GET`   | `/v1/check-ins/bulk-sync-jobs/:jobId/chunks`                 | `checkins.read`   | List async offline sync chunk summaries                      |
+| `GET`   | `/v1/events/:eventId/check-in-lists`                         | `checkins.read`   | List check-in lists                                                                                                        |
+| `GET`   | `/v1/events/:eventId/check-in-lists/:checkInListId/manifest` | `checkins.read`   | Download offline manifest (ticket QR hashes)                                                                               |
+| `POST`  | `/v1/check-ins/scan`                                         | `checkins.write`  | Online scan (recommended `Idempotency-Key`)                                                                                |
+| `POST`  | `/v1/check-ins/sync`                                         | `checkins.write`  | Offline scan sync (requires `Idempotency-Key`)                                                                             |
+| `POST`  | `/v1/check-ins/bulk-sync-jobs`                               | `checkins.write`  | Create async offline sync job (requires `Idempotency-Key`)                                                                 |
+| `PUT`   | `/v1/check-ins/bulk-sync-jobs/:jobId/chunks/:sequence`       | `checkins.write`  | Upload async offline sync chunk (requires `Idempotency-Key`)                                                               |
+| `GET`   | `/v1/check-ins/bulk-sync-jobs/:jobId`                        | `checkins.read`   | Poll async offline sync job status                                                                                         |
+| `GET`   | `/v1/check-ins/bulk-sync-jobs/:jobId/chunks`                 | `checkins.read`   | List async offline sync chunk summaries                                                                                    |
 
 Offline sync accepts up to 100,000 scans per request. Scan outcomes: `accepted`, `duplicate`, `not_found`, `already_checked_in`, `invalid_list`, `wrong_event`. Scan logs are persisted with `deviceId`, `scannedAt`, `qrHash`, and `metadata`.
 
@@ -486,23 +492,23 @@ Privacy requests accept `organizationId`, optional `brandId`, `subjectType` (`bu
 
 ### Developer & Webhooks
 
-| Method   | Path                                       | Scope              | Description                                                                |
-| -------- | ------------------------------------------ | ------------------ | -------------------------------------------------------------------------- |
-| `POST`   | `/v1/api-keys`                             | `developers.write` | Create API key (raw key returned once)                                     |
-| `GET`    | `/v1/api-keys`                             | `developers.write` | List API keys                                                              |
-| `DELETE` | `/v1/api-keys/:keyId`                      | `developers.write` | Revoke API key                                                             |
-| `POST`   | `/v1/scanner-devices`                      | `developers.write` | Create scanner device with explicit check-in scopes (secret returned once) |
-| `GET`    | `/v1/scanner-devices`                      | `developers.write` | List scanner devices                                                       |
-| `POST`   | `/v1/scanner-devices/:deviceId/revoke`     | `developers.write` | Revoke scanner device                                                      |
-| `POST`   | `/v1/oauth-applications`                   | `developers.write` | Create OAuth app (`clientId`/`clientSecret` returned once)                 |
-| `GET`    | `/v1/oauth-applications`                   | `developers.write` | List OAuth apps                                                            |
-| `DELETE` | `/v1/oauth-applications/:appId`            | `developers.write` | Revoke OAuth app                                                           |
-| `POST`   | `/v1/webhook-endpoints`                    | `developers.write` | Create webhook endpoint (secret returned once)                             |
-| `PATCH`  | `/v1/webhook-endpoints/:endpointId`        | `developers.write` | Update endpoint                                                            |
-| `GET`    | `/v1/webhook-endpoints`                    | `developers.write` | List endpoints                                                             |
-| `GET`    | `/v1/webhook-endpoints/:endpointId/events` | `developers.write` | List delivery events for endpoint                                          |
+| Method   | Path                                                       | Scope              | Description                                                                |
+| -------- | ---------------------------------------------------------- | ------------------ | -------------------------------------------------------------------------- |
+| `POST`   | `/v1/api-keys`                                             | `developers.write` | Create API key (raw key returned once)                                     |
+| `GET`    | `/v1/api-keys`                                             | `developers.write` | List API keys                                                              |
+| `DELETE` | `/v1/api-keys/:keyId`                                      | `developers.write` | Revoke API key                                                             |
+| `POST`   | `/v1/scanner-devices`                                      | `developers.write` | Create scanner device with explicit check-in scopes (secret returned once) |
+| `GET`    | `/v1/scanner-devices`                                      | `developers.write` | List scanner devices                                                       |
+| `POST`   | `/v1/scanner-devices/:deviceId/revoke`                     | `developers.write` | Revoke scanner device                                                      |
+| `POST`   | `/v1/oauth-applications`                                   | `developers.write` | Create OAuth app (`clientId`/`clientSecret` returned once)                 |
+| `GET`    | `/v1/oauth-applications`                                   | `developers.write` | List OAuth apps                                                            |
+| `DELETE` | `/v1/oauth-applications/:appId`                            | `developers.write` | Revoke OAuth app                                                           |
+| `POST`   | `/v1/webhook-endpoints`                                    | `developers.write` | Create webhook endpoint (secret returned once)                             |
+| `PATCH`  | `/v1/webhook-endpoints/:endpointId`                        | `developers.write` | Update endpoint                                                            |
+| `GET`    | `/v1/webhook-endpoints`                                    | `developers.write` | List endpoints                                                             |
+| `GET`    | `/v1/webhook-endpoints/:endpointId/events`                 | `developers.write` | List delivery events for endpoint                                          |
 | `POST`   | `/v1/webhook-endpoints/:endpointId/events/:eventId/replay` | `developers.write` | Re-queue a webhook event to one endpoint                                   |
-| `POST`   | `/v1/webhook-events/:eventId/replay`       | `developers.write` | Re-queue a webhook event to active endpoints                               |
+| `POST`   | `/v1/webhook-events/:eventId/replay`                       | `developers.write` | Re-queue a webhook event to active endpoints                               |
 
 ## Inbound Webhook Routes (provider)
 
