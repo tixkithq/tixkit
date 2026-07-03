@@ -33,8 +33,30 @@ vi.mock('@tixkit/db', () => {
           filters.push({ col, op, val });
           return query;
         },
+        forUpdate() {
+          return query;
+        },
         async execute() {
           return getRows(table).filter((row) => matches(row, filters));
+        },
+        async executeTakeFirst() {
+          return getRows(table).find((row) => matches(row, filters)) ?? undefined;
+        },
+      };
+      return query;
+    },
+    deleteFrom: (table: string) => {
+      const filters: Array<{ col: string; op: string; val: any }> = [];
+      const query = {
+        where(col: string, op: string, val: any) {
+          filters.push({ col, op, val });
+          return query;
+        },
+        async execute() {
+          const rows = getRows(table);
+          const toDelete = new Set(rows.filter((row) => matches(row, filters)).map((r) => r));
+          dbState.tables[table] = rows.filter((r) => !toDelete.has(r));
+          return undefined;
         },
       };
       return query;
@@ -43,8 +65,16 @@ vi.mock('@tixkit/db', () => {
       const filters: Array<{ col: string; op: string; val: any }> = [];
       let updates: MockRow = {};
       const query = {
-        set(values: MockRow) {
-          updates = values;
+        set(values: MockRow | ((eb: (col: string, _op: string, val: any) => any) => MockRow)) {
+          updates = typeof values === 'function'
+            ? values((col, op, val) => {
+                if (op === '-') {
+                  const currentRow = getRows(table).find((row) => matches(row, filters));
+                  return (currentRow?.[col] ?? 0) - val;
+                }
+                return val;
+              })
+            : values;
           return query;
         },
         where(col: string, op: string, val: any) {

@@ -20,8 +20,23 @@ const dbState = vi.hoisted(() => ({
     event_id: 'evt_1',
     brand_id: 'brd_1',
     buyer_email: 'buyer@test.com',
+    buyer_first_name: 'Jordan',
+    buyer_last_name: 'Lee',
     payment_intent_id: 'pi_1',
   } as Record<string, unknown>,
+  event: {
+    id: 'evt_1',
+    title: 'Founders Summit',
+    starts_at: new Date('2027-05-12T18:30:00.000Z'),
+    timezone: 'America/New_York',
+    venue: JSON.stringify({ name: 'Main Hall', city: 'New York' }),
+  } as Record<string, unknown>,
+  brand: { id: 'brd_1', name: 'Northstar Events' } as Record<string, unknown>,
+  createdJobs: [] as Record<string, unknown>[],
+  publishedTemplate:
+    { version: { id: 'ntv_1' }, document: { id: 'cdoc_1' } } as
+      | { version: { id: string }; document: { id: string } }
+      | undefined,
   lineItems: [] as Record<string, unknown>[],
   tickets: [] as Record<string, unknown>[],
   checkoutHolds: [] as Record<string, unknown>[],
@@ -121,7 +136,13 @@ vi.mock('@tixkit/db', () => {
   }
   class EmailJobRepository {
     async create(input: Record<string, unknown>) {
+      dbState.createdJobs.push(input);
       return { id: 'emj_1', ...input };
+    }
+  }
+  class ContentRepository {
+    async findPublishedEmailTemplate() {
+      return dbState.publishedTemplate;
     }
   }
 
@@ -152,6 +173,8 @@ vi.mock('@tixkit/db', () => {
         if (table === 'email_provider_routes') return { id: 'epr_1' };
         if (table === 'notification_templates as template') return { id: 'ntv_1' };
         if (table === 'orders') return matches(dbState.order, filters) ? dbState.order : undefined;
+        if (table === 'events') return dbState.event;
+        if (table === 'brands') return dbState.brand;
         if (table === 'payment_accounts') return dbState.paymentAccount;
         if (table === 'payment_intents') return dbState.paymentIntent;
         if (table === 'refunds') return dbState.refunds.find((row) => matches(row, filters));
@@ -292,6 +315,7 @@ vi.mock('@tixkit/db', () => {
     PaymentIntentRepository,
     RefundRepository,
     EmailJobRepository,
+    ContentRepository,
   };
 });
 
@@ -1013,8 +1037,22 @@ describe('notifyRefundActivity - idempotency key includes providerRefundId', () 
       event_id: 'evt_1',
       brand_id: 'brd_1',
       buyer_email: 'buyer@test.com',
+      buyer_first_name: 'Jordan',
+      buyer_last_name: 'Lee',
       payment_intent_id: 'pi_1',
     };
+    dbState.refunds = [
+      {
+        id: 'rfd_1',
+        provider_refund_id: 're_stripe_abc',
+        amount_cents: 5000,
+        currency: 'USD',
+        status: 'succeeded',
+        created_at: new Date('2027-01-15T10:00:00.000Z'),
+      },
+    ];
+    dbState.publishedTemplate = { version: { id: 'ntv_1' }, document: { id: 'cdoc_1' } };
+    dbState.createdJobs = [];
   });
 
   it('uses providerRefundId in the idempotency key so partial refunds get separate notifications', async () => {
@@ -1030,5 +1068,16 @@ describe('notifyRefundActivity - idempotency key includes providerRefundId', () 
       expect(result.value.notified).toBe(true);
       expect(result.value.jobId).toBeDefined();
     }
+    expect(dbState.createdJobs).toHaveLength(1);
+    // C-101: the order-refunded email job carries a MergeTagContext so lifecycle
+    // merge tags (recipient/event/order/refund) resolve at send time.
+    expect(dbState.createdJobs[0].variables).toMatchObject({
+      notificationType: 'transactional',
+      event: { title: 'Founders Summit' },
+      brand: { name: 'Northstar Events' },
+      recipient: { name: 'Jordan Lee', email: 'buyer@test.com' },
+      order: { id: 'TK-1001' },
+      refund: { amount: '$50.00' },
+    });
   });
 });

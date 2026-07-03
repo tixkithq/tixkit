@@ -4,6 +4,7 @@ import {
   PaymentCompensationRepository,
   PaymentIntentRepository,
   OrderRepository,
+  ContentRepository,
 } from '@tixkit/db';
 import { ulid } from 'ulid';
 import { QrService } from '@tixkit/domain/tickets';
@@ -25,6 +26,7 @@ import {
   loadWalletPassConfig,
   type WalletPassArtifact,
 } from '../wallet-passes.js';
+import { buildTransactionalMergeTagContext } from './messaging-context.js';
 
 const TEMPORAL_ADDRESS = process.env.TEMPORAL_ADDRESS ?? 'localhost:7233';
 const TEMPORAL_NAMESPACE = process.env.TEMPORAL_NAMESPACE ?? 'default';
@@ -2395,28 +2397,37 @@ export async function sendConfirmationEmailActivity(input: {
       .orderBy('priority', 'asc')
       .executeTakeFirst();
 
-    const templateVersion = await db
-      .selectFrom('notification_templates as template')
-      .innerJoin('notification_template_versions as version', 'version.template_id', 'template.id')
-      .select(['version.id'])
-      .where('template.tenant_id', '=', input.tenantId)
-      .where('template.key', '=', 'order-confirmed')
-      .where('version.is_default', '=', true)
-      .executeTakeFirst();
-    if (!templateVersion) {
+    const publishedTemplate = await new ContentRepository(db).findPublishedEmailTemplate({
+      tenantId: input.tenantId,
+      brandId: input.brandId,
+      eventId: order.event_id,
+      key: 'order-confirmed',
+    });
+    if (!publishedTemplate) {
       return okResult({ status: 'skipped' });
     }
     if (!route) {
       return okResult({ status: 'skipped' });
     }
 
+    const [event, brand] = await Promise.all([
+      db
+        .selectFrom('events')
+        .select(['id', 'title', 'starts_at', 'timezone', 'venue'])
+        .where('id', '=', order.event_id)
+        .executeTakeFirst(),
+      db.selectFrom('brands').select(['id', 'name']).where('id', '=', input.brandId).executeTakeFirst(),
+    ]);
+    const context = buildTransactionalMergeTagContext({ order, event, brand });
+
     const job = await new EmailJobRepository(db).create({
       tenantId: input.tenantId,
       brandId: input.brandId,
       templateKey: 'order-confirmed',
-      templateVersionId: templateVersion.id,
+      templateVersionId: publishedTemplate.version.id,
       toEmail: input.toEmail,
       variables: {
+        ...context,
         orderNumber: order.order_number,
         orderId: input.orderId,
         eventId: order.event_id,
@@ -2433,9 +2444,10 @@ export async function sendConfirmationEmailActivity(input: {
       tenantId: input.tenantId,
       brandId: input.brandId,
       templateKey: 'order-confirmed',
-      templateVersionId: templateVersion.id,
+      templateVersionId: publishedTemplate.version.id,
       toEmail: input.toEmail,
       variables: {
+        ...context,
         orderNumber: order.order_number,
         orderId: input.orderId,
         eventId: order.event_id,
@@ -2681,27 +2693,40 @@ export async function issueTicketsActivity(input: {
       .orderBy('priority', 'asc')
       .executeTakeFirst();
 
-    const templateVersion = await db
-      .selectFrom('notification_templates as template')
-      .innerJoin('notification_template_versions as version', 'version.template_id', 'template.id')
-      .select(['version.id'])
-      .where('template.tenant_id', '=', input.tenantId)
-      .where('template.key', '=', 'tickets-issued')
-      .where('version.is_default', '=', true)
-      .executeTakeFirst();
+    const publishedTemplate = await new ContentRepository(db).findPublishedEmailTemplate({
+      tenantId: input.tenantId,
+      brandId: input.brandId,
+      eventId: order?.event_id,
+      key: 'tickets-issued',
+    });
 
-    if (!route || !templateVersion) {
+    if (!route || !publishedTemplate) {
       // No route or template configured; skip email but mark tickets as issued.
       return okResult({ issued: tickets.length });
     }
+
+    const firstTicket = tickets[0];
+    const context = order
+      ? buildTransactionalMergeTagContext({
+          order,
+          event,
+          brand,
+          ticket: firstTicket,
+          ticketTypeName: firstTicket
+            ? (ticketTypesById.get(firstTicket.ticket_type_id ?? '')?.name ?? null)
+            : null,
+          walletPassLinks,
+        })
+      : {};
 
     const job = await new EmailJobRepository(db).create({
       tenantId: input.tenantId,
       brandId: input.brandId,
       templateKey: 'tickets-issued',
-      templateVersionId: templateVersion.id,
+      templateVersionId: publishedTemplate.version.id,
       toEmail: input.toEmail,
       variables: {
+        ...context,
         orderId: input.orderId,
         orderNumber: order?.order_number,
         ticketCount: tickets.length,
@@ -2720,9 +2745,10 @@ export async function issueTicketsActivity(input: {
       tenantId: input.tenantId,
       brandId: input.brandId,
       templateKey: 'tickets-issued',
-      templateVersionId: templateVersion.id,
+      templateVersionId: publishedTemplate.version.id,
       toEmail: input.toEmail,
       variables: {
+        ...context,
         orderId: input.orderId,
         orderNumber: order?.order_number,
         ticketCount: tickets.length,

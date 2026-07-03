@@ -1,5 +1,10 @@
 import { createDb, type Database } from '@tixkit/db';
-import { OrderRepository, PaymentIntentRepository, RefundRepository } from '@tixkit/db';
+import {
+  OrderRepository,
+  PaymentIntentRepository,
+  RefundRepository,
+  ContentRepository,
+} from '@tixkit/db';
 import { withSpan } from '@tixkit/shared';
 import { Connection, Client } from '@temporalio/client';
 import Stripe from 'stripe';
@@ -8,6 +13,7 @@ import type { NotificationDeliveryWorkflowInput } from '../workflows/notificatio
 import { notificationWorkflowId, NOTIFICATION_WORKFLOW_VERSION } from '../shared/types.js';
 import type { WorkflowActivityResult } from '../shared/types.js';
 import { okResult, errResult } from '../shared/types.js';
+import { buildTransactionalMergeTagContext } from './messaging-context.js';
 
 const TEMPORAL_ADDRESS = process.env.TEMPORAL_ADDRESS ?? 'localhost:7233';
 const TEMPORAL_NAMESPACE = process.env.TEMPORAL_NAMESPACE ?? 'default';
@@ -997,19 +1003,34 @@ export async function notifyRefundActivity(input: {
       .orderBy('priority', 'asc')
       .executeTakeFirst();
 
-    const templateVersion = await db
-      .selectFrom('notification_templates as template')
-      .innerJoin('notification_template_versions as version', 'version.template_id', 'template.id')
-      .select(['version.id'])
-      .where('template.tenant_id', '=', input.tenantId)
-      .where('template.key', '=', 'order-refunded')
-      .where('version.is_default', '=', true)
-      .executeTakeFirst();
+    const publishedTemplate = await new ContentRepository(db).findPublishedEmailTemplate({
+      tenantId: input.tenantId,
+      brandId: input.brandId,
+      eventId: order.event_id,
+      key: 'order-refunded',
+    });
 
-    if (!route || !templateVersion) {
+    if (!route || !publishedTemplate) {
       // No route or template configured; skip gracefully.
       return okResult({ notified: false });
     }
+
+    const [event, brand, refundRow] = await Promise.all([
+      db
+        .selectFrom('events')
+        .select(['id', 'title', 'starts_at', 'timezone', 'venue'])
+        .where('id', '=', order.event_id)
+        .executeTakeFirst(),
+      db.selectFrom('brands').select(['id', 'name']).where('id', '=', input.brandId).executeTakeFirst(),
+      input.providerRefundId
+        ? db
+            .selectFrom('refunds')
+            .select(['amount_cents', 'currency', 'status', 'created_at'])
+            .where('provider_refund_id', '=', input.providerRefundId)
+            .executeTakeFirst()
+        : Promise.resolve(undefined),
+    ]);
+    const context = buildTransactionalMergeTagContext({ order, event, brand, refund: refundRow });
 
     const job = await new (
       await import('@tixkit/db')
@@ -1017,9 +1038,10 @@ export async function notifyRefundActivity(input: {
       tenantId: input.tenantId,
       brandId: input.brandId,
       templateKey: 'order-refunded',
-      templateVersionId: templateVersion.id,
+      templateVersionId: publishedTemplate.version.id,
       toEmail: input.toEmail,
       variables: {
+        ...context,
         orderId: input.orderId,
         orderNumber: order.order_number,
         refundedCents: Number(order.refunded_cents),
@@ -1036,9 +1058,10 @@ export async function notifyRefundActivity(input: {
       tenantId: input.tenantId,
       brandId: input.brandId,
       templateKey: 'order-refunded',
-      templateVersionId: templateVersion.id,
+      templateVersionId: publishedTemplate.version.id,
       toEmail: input.toEmail,
       variables: {
+        ...context,
         orderId: input.orderId,
         orderNumber: order.order_number,
         refundedCents: Number(order.refunded_cents),

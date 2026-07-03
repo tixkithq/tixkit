@@ -10,7 +10,10 @@ vi.mock('@temporalio/client', () => ({
 const dbState = vi.hoisted(() => ({
   existingJob: undefined as { id: string; status: string } | undefined,
   providerRoute: undefined as { id: string } | undefined,
-  templateVersion: { id: 'ntv_default' } as { id: string } | undefined,
+  publishedTemplate:
+    { version: { id: 'ntv_default' }, document: { id: 'cdoc_1' } } as
+      | { version: { id: string }; document: { id: string } }
+      | undefined,
   createJobErrorOnce: undefined as Error | undefined,
   createdJobs: [] as Record<string, unknown>[],
   order: {
@@ -18,6 +21,12 @@ const dbState = vi.hoisted(() => ({
     order_number: 'TK-1001',
     event_id: 'evt_1',
     currency: 'USD',
+    total_cents: 4500,
+    refunded_cents: 0,
+    buyer_email: 'buyer@example.com',
+    buyer_first_name: 'Jordan',
+    buyer_last_name: 'Lee',
+    buyer_phone: '+15551234567',
   },
   event: {
     id: 'evt_1',
@@ -76,6 +85,12 @@ vi.mock('@tixkit/db', () => {
     }
   }
 
+  class ContentRepository {
+    async findPublishedEmailTemplate() {
+      return dbState.publishedTemplate;
+    }
+  }
+
   function createQuery(table: string) {
     const query = {
       innerJoin() {
@@ -96,7 +111,6 @@ vi.mock('@tixkit/db', () => {
       async executeTakeFirst() {
         if (table === 'email_jobs') return dbState.existingJob;
         if (table === 'email_provider_routes') return dbState.providerRoute;
-        if (table === 'notification_templates as template') return dbState.templateVersion;
         if (table === 'events') return dbState.event;
         if (table === 'brands') return dbState.brand;
         return undefined;
@@ -119,6 +133,7 @@ vi.mock('@tixkit/db', () => {
     EmailJobRepository,
     OrderRepository,
     PaymentIntentRepository,
+    ContentRepository,
   };
 });
 
@@ -129,7 +144,7 @@ describe('sendConfirmationEmailActivity', () => {
   beforeEach(() => {
     dbState.existingJob = undefined;
     dbState.providerRoute = undefined;
-    dbState.templateVersion = { id: 'ntv_default' };
+    dbState.publishedTemplate = { version: { id: 'ntv_default' }, document: { id: 'cdoc_1' } };
     dbState.createJobErrorOnce = undefined;
     dbState.createdJobs = [];
     dbState.tickets = [];
@@ -158,6 +173,21 @@ describe('sendConfirmationEmailActivity', () => {
     expect(dbState.destroy).toHaveBeenCalledTimes(1);
   });
 
+  it('skips when no published email content template is configured for the scope', async () => {
+    dbState.providerRoute = { id: 'epr_1' };
+    dbState.publishedTemplate = undefined;
+
+    const result = await sendConfirmationEmailActivity({
+      orderId: 'ord_1',
+      toEmail: 'buyer@example.com',
+      tenantId: 'tnt_1',
+      brandId: 'brd_1',
+    });
+
+    expect(result).toEqual({ ok: true, value: { status: 'skipped' } });
+    expect(dbState.createdJobs).toEqual([]);
+  });
+
   it('queues with the persisted provider route id when delivery is configured', async () => {
     dbState.providerRoute = { id: 'epr_1' };
 
@@ -178,6 +208,13 @@ describe('sendConfirmationEmailActivity', () => {
         idempotencyKey: 'order-confirmed:ord_1',
       },
     ]);
+    expect(dbState.createdJobs[0].variables).toMatchObject({
+      notificationType: 'transactional',
+      event: { title: 'Founders Summit', venueName: 'Main Hall', venueCity: 'New York' },
+      brand: { name: 'Northstar Events' },
+      recipient: { name: 'Jordan Lee', email: 'buyer@example.com' },
+      order: { id: 'TK-1001', total: '$45.00', buyerName: 'Jordan Lee' },
+    });
   });
 });
 
@@ -185,7 +222,7 @@ describe('issueTicketsActivity', () => {
   beforeEach(() => {
     dbState.existingJob = undefined;
     dbState.providerRoute = { id: 'epr_1' };
-    dbState.templateVersion = { id: 'ntv_default' };
+    dbState.publishedTemplate = { version: { id: 'ntv_default' }, document: { id: 'cdoc_1' } };
     dbState.createJobErrorOnce = undefined;
     dbState.createdJobs = [];
     dbState.tickets = [
@@ -273,6 +310,17 @@ describe('issueTicketsActivity', () => {
     expect(pdfText).not.toContain('signed_qr_payload_1');
     expect(pdfText).not.toContain('buyer@example.com');
     expect(pdfText).not.toContain('ada@example.com');
+
+    // C-101: the tickets-issued email job carries a MergeTagContext so lifecycle
+    // merge tags resolve at send time (event/brand/recipient/order/ticket).
+    expect(dbState.createdJobs[0].variables).toMatchObject({
+      notificationType: 'transactional',
+      event: { title: 'Founders Summit' },
+      brand: { name: 'Northstar Events' },
+      recipient: { name: 'Jordan Lee', email: 'buyer@example.com' },
+      order: { id: 'TK-1001', total: '$45.00' },
+      ticket: { type: 'General Admission', code: 'TK-ABC123' },
+    });
   });
 
   it('continues ticket issuance when optional wallet pass configuration is incomplete', async () => {
