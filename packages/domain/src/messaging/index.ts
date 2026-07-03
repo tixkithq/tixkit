@@ -1,7 +1,9 @@
 import type { BaseEntity, ISO8601Date, TenantScopedEntity, Ulid } from '../shared/index.js';
+import type { TemplateKey } from './template-lifecycles.js';
 
 export * from './merge-tags.js';
 export * from './short-links.js';
+export * from './template-lifecycles.js';
 
 export type EmailTransportStatus =
   | 'accepted'
@@ -323,16 +325,6 @@ export type MessageProviderEventLog = {
   eventId: Ulid;
   event: SmsProviderEvent;
 };
-
-export type TemplateKey =
-  | 'order-confirmed'
-  | 'tickets-issued'
-  | 'order-refunded'
-  | 'event-updated'
-  | 'event-cancelled'
-  | 'attendee-message'
-  | 'staff-order-notification'
-  | 'checkin-device-invited';
 
 export type SendMessageInput = {
   eventId: Ulid;

@@ -29,6 +29,11 @@ export type MergeTagEventContext = {
   venueCity?: string;
   publicUrl?: string;
   checkoutUrl?: string;
+  doorTime?: string;
+  mapUrl?: string;
+  refundPolicyUrl?: string;
+  changeSummary?: string;
+  cancellationReason?: string;
 };
 
 export type MergeTagBrandContext = {
@@ -51,11 +56,74 @@ export type MergeTagTicketContext = {
   type?: string;
   code?: string;
   qrCodeUrl?: string;
+  pdfUrl?: string;
+  walletAppleUrl?: string;
+  walletGoogleUrl?: string;
+  transferUrl?: string;
 };
 
 export type MergeTagOrderContext = {
   id?: string;
   total?: string;
+  manageUrl?: string;
+  receiptUrl?: string;
+  retryUrl?: string;
+  cancellationReason?: string;
+  creditStatus?: string;
+  buyerName?: string;
+  buyerEmail?: string;
+};
+
+export type MergeTagRefundContext = {
+  amount?: string;
+  processingEta?: string;
+  processedAt?: string;
+};
+
+export type MergeTagDeviceContext = {
+  inviteUrl?: string;
+  permissionScope?: string;
+  expiresAt?: string;
+};
+
+export type MergeTagDashboardContext = {
+  url?: string;
+};
+
+export type MergeTagWaitlistContext = {
+  position?: string;
+  inviteUrl?: string;
+  expiresAt?: string;
+};
+
+export type MergeTagChargebackContext = {
+  id?: string;
+  amount?: string;
+  dueAt?: string;
+  evidenceUrl?: string;
+};
+
+export type MergeTagPayoutContext = {
+  amount?: string;
+  eta?: string;
+  account?: string;
+  period?: string;
+};
+
+export type MergeTagWebhookContext = {
+  endpointUrl?: string;
+  attempts?: string;
+};
+
+export type MergeTagIntegrationContext = {
+  name?: string;
+  reconnectUrl?: string;
+};
+
+export type MergeTagSalesDigestContext = {
+  revenue?: string;
+  orders?: string;
+  topTicketType?: string;
 };
 
 export type MergeTagContext = {
@@ -65,8 +133,16 @@ export type MergeTagContext = {
   attendee?: MergeTagAttendeeContext;
   ticket?: MergeTagTicketContext;
   order?: MergeTagOrderContext;
-  refund?: { amount?: string };
+  refund?: MergeTagRefundContext;
   review?: { platform?: string };
+  device?: MergeTagDeviceContext;
+  dashboard?: MergeTagDashboardContext;
+  waitlist?: MergeTagWaitlistContext;
+  chargeback?: MergeTagChargebackContext;
+  payout?: MergeTagPayoutContext;
+  webhook?: MergeTagWebhookContext;
+  integration?: MergeTagIntegrationContext;
+  salesDigest?: MergeTagSalesDigestContext;
   customAnswers?: Record<string, string>;
 };
 
@@ -141,6 +217,160 @@ export const MERGE_TAG_REGISTRY: readonly MergeTagVariable[] = [
   { key: 'order.total', description: 'Order total (formatted)', example: '$45.00' },
   { key: 'refund.amount', description: 'Refund amount (formatted)', example: '$20.00' },
   { key: 'review.platform', description: 'Review platform name', example: 'Google' },
+  // Event lifecycle (P0 template gaps closed)
+  { key: 'event.doorTime', description: 'Event door/opening time', example: '2026-07-04 18:00' },
+  {
+    key: 'event.mapUrl',
+    description: 'Venue map URL',
+    example: 'https://maps.example.test/venue',
+  },
+  {
+    key: 'event.refundPolicyUrl',
+    description: 'Event refund policy URL',
+    example: 'https://help.example.test/refunds',
+  },
+  {
+    key: 'event.changeSummary',
+    description: 'Summary of what changed for an event update',
+    example: 'Venue moved from The Grand Hall to The Forum',
+  },
+  {
+    key: 'event.cancellationReason',
+    description: 'Reason an event was cancelled',
+    example: 'Unforeseen weather conditions',
+  },
+  // Order lifecycle (P0 template gaps closed)
+  {
+    key: 'order.manageUrl',
+    description: 'Buyer order management URL',
+    example: 'https://checkout.example.test/orders/ord_123',
+  },
+  {
+    key: 'order.receiptUrl',
+    description: 'Order receipt URL',
+    example: 'https://checkout.example.test/receipts/ord_123',
+  },
+  {
+    key: 'order.retryUrl',
+    description: 'Checkout retry URL after a failed payment',
+    example: 'https://checkout.example.test/checkout?eventId=evt_1&retry=ord_123',
+  },
+  {
+    key: 'order.cancellationReason',
+    description: 'Reason an order was cancelled',
+    example: 'Cancelled by organizer before event',
+  },
+  {
+    key: 'order.creditStatus',
+    description: 'Credit/refund status after a cancellation',
+    example: 'Full credit issued',
+  },
+  { key: 'order.buyerName', description: 'Buyer display name', example: 'Jordan Lee' },
+  { key: 'order.buyerEmail', description: 'Buyer email address', example: 'jordan@example.test' },
+  // Ticket lifecycle (P0 template gaps closed)
+  {
+    key: 'ticket.pdfUrl',
+    description: 'Ticket PDF download URL',
+    example: 'https://tickets.example.test/pdf/TKT-ABC123.pdf',
+  },
+  {
+    key: 'ticket.walletAppleUrl',
+    description: 'Apple Wallet pass add URL',
+    example: 'https://tickets.example.test/pass/apple/TKT-ABC123.pkpass',
+  },
+  {
+    key: 'ticket.walletGoogleUrl',
+    description: 'Google Wallet pass save URL',
+    example: 'https://pay.google.com/gp/v/save/abc123',
+  },
+  // Refund lifecycle (P0 template gaps closed)
+  {
+    key: 'refund.processingEta',
+    description: 'Refund processing estimate',
+    example: '5-10 business days',
+  },
+  {
+    key: 'refund.processedAt',
+    description: 'Refund processed date/time',
+    example: '2026-07-10 12:00',
+  },
+  // Staff / device lifecycle (P0 template gaps closed)
+  {
+    key: 'device.inviteUrl',
+    description: 'Check-in device invite URL',
+    example: 'https://scan.example.test/invite/dev_123',
+  },
+  { key: 'device.permissionScope', description: 'Scanner permission scope', example: 'checkins.write' },
+  {
+    key: 'device.expiresAt',
+    description: 'Device invite expiration',
+    example: '2026-07-04 19:00',
+  },
+  {
+    key: 'dashboard.url',
+    description: 'Admin dashboard URL',
+    example: 'https://admin.example.test/events/evt_1',
+  },
+  // P1/P2 lifecycle variables (C-104)
+  {
+    key: 'ticket.transferUrl',
+    description: 'Ticket transfer claim URL',
+    example: 'https://checkout.example.test/transfer/tkt_1/claim',
+  },
+  { key: 'waitlist.position', description: 'Waitlist queue position', example: '12' },
+  {
+    key: 'waitlist.inviteUrl',
+    description: 'Private waitlist purchase URL',
+    example: 'https://checkout.example.test/waitlist/claim/abc',
+  },
+  {
+    key: 'waitlist.expiresAt',
+    description: 'Waitlist hold expiration',
+    example: '2026-07-04 19:00',
+  },
+  { key: 'chargeback.id', description: 'Chargeback dispute reference', example: 'dp_1' },
+  {
+    key: 'chargeback.amount',
+    description: 'Disputed amount (formatted)',
+    example: '$45.00',
+  },
+  {
+    key: 'chargeback.dueAt',
+    description: 'Chargeback evidence due date',
+    example: '2026-07-18',
+  },
+  {
+    key: 'chargeback.evidenceUrl',
+    description: 'Chargeback evidence submission URL',
+    example: 'https://admin.example.test/disputes/dp_1',
+  },
+  { key: 'payout.amount', description: 'Payout amount (formatted)', example: '$1,250.00' },
+  { key: 'payout.eta', description: 'Payout arrival estimate', example: '2-3 business days' },
+  { key: 'payout.account', description: 'Payout account label', example: 'Bank ••••4242' },
+  {
+    key: 'payout.period',
+    description: 'Payout reporting period',
+    example: 'June 2026',
+  },
+  {
+    key: 'webhook.endpointUrl',
+    description: 'Failing webhook endpoint URL',
+    example: 'https://hooks.example.test/integrations/stripe',
+  },
+  { key: 'webhook.attempts', description: 'Webhook delivery attempts', example: '5' },
+  { key: 'integration.name', description: 'Integration name', example: 'Stripe' },
+  {
+    key: 'integration.reconnectUrl',
+    description: 'Integration reconnect URL',
+    example: 'https://admin.example.test/integrations/stripe/reconnect',
+  },
+  { key: 'salesDigest.revenue', description: 'Daily sales revenue (formatted)', example: '$4,320.00' },
+  { key: 'salesDigest.orders', description: 'Daily order count', example: '38' },
+  {
+    key: 'salesDigest.topTicketType',
+    description: 'Top-selling ticket type',
+    example: 'General Admission',
+  },
 ];
 
 const REGISTRY_KEYS = new Set(MERGE_TAG_REGISTRY.map((v) => v.key));
@@ -152,8 +382,23 @@ const CUSTOM_ANSWER_PATTERN = /^customAnswers\.([a-zA-Z0-9_-]+)$/;
 const URL_TAG_KEYS = new Set([
   'event.publicUrl',
   'event.checkoutUrl',
+  'event.mapUrl',
+  'event.refundPolicyUrl',
   'brand.supportUrl',
   'ticket.qrCodeUrl',
+  'ticket.pdfUrl',
+  'ticket.walletAppleUrl',
+  'ticket.walletGoogleUrl',
+  'order.manageUrl',
+  'order.receiptUrl',
+  'order.retryUrl',
+  'device.inviteUrl',
+  'dashboard.url',
+  'ticket.transferUrl',
+  'waitlist.inviteUrl',
+  'chargeback.evidenceUrl',
+  'webhook.endpointUrl',
+  'integration.reconnectUrl',
 ]);
 
 export function htmlEscape(input: string): string {
@@ -232,8 +477,88 @@ function resolveTag(key: string, context: MergeTagContext): string | undefined {
       return context.order?.total;
     case 'refund.amount':
       return context.refund?.amount;
+    case 'refund.processingEta':
+      return context.refund?.processingEta;
+    case 'refund.processedAt':
+      return context.refund?.processedAt;
     case 'review.platform':
       return context.review?.platform;
+    case 'event.doorTime':
+      return context.event?.doorTime;
+    case 'event.mapUrl':
+      return context.event?.mapUrl;
+    case 'event.refundPolicyUrl':
+      return context.event?.refundPolicyUrl;
+    case 'event.changeSummary':
+      return context.event?.changeSummary;
+    case 'event.cancellationReason':
+      return context.event?.cancellationReason;
+    case 'order.manageUrl':
+      return context.order?.manageUrl;
+    case 'order.receiptUrl':
+      return context.order?.receiptUrl;
+    case 'order.retryUrl':
+      return context.order?.retryUrl;
+    case 'order.cancellationReason':
+      return context.order?.cancellationReason;
+    case 'order.creditStatus':
+      return context.order?.creditStatus;
+    case 'order.buyerName':
+      return context.order?.buyerName;
+    case 'order.buyerEmail':
+      return context.order?.buyerEmail;
+    case 'ticket.pdfUrl':
+      return context.ticket?.pdfUrl;
+    case 'ticket.walletAppleUrl':
+      return context.ticket?.walletAppleUrl;
+    case 'ticket.walletGoogleUrl':
+      return context.ticket?.walletGoogleUrl;
+    case 'device.inviteUrl':
+      return context.device?.inviteUrl;
+    case 'device.permissionScope':
+      return context.device?.permissionScope;
+    case 'device.expiresAt':
+      return context.device?.expiresAt;
+    case 'dashboard.url':
+      return context.dashboard?.url;
+    case 'ticket.transferUrl':
+      return context.ticket?.transferUrl;
+    case 'waitlist.position':
+      return context.waitlist?.position;
+    case 'waitlist.inviteUrl':
+      return context.waitlist?.inviteUrl;
+    case 'waitlist.expiresAt':
+      return context.waitlist?.expiresAt;
+    case 'chargeback.id':
+      return context.chargeback?.id;
+    case 'chargeback.amount':
+      return context.chargeback?.amount;
+    case 'chargeback.dueAt':
+      return context.chargeback?.dueAt;
+    case 'chargeback.evidenceUrl':
+      return context.chargeback?.evidenceUrl;
+    case 'payout.amount':
+      return context.payout?.amount;
+    case 'payout.eta':
+      return context.payout?.eta;
+    case 'payout.account':
+      return context.payout?.account;
+    case 'payout.period':
+      return context.payout?.period;
+    case 'webhook.endpointUrl':
+      return context.webhook?.endpointUrl;
+    case 'webhook.attempts':
+      return context.webhook?.attempts;
+    case 'integration.name':
+      return context.integration?.name;
+    case 'integration.reconnectUrl':
+      return context.integration?.reconnectUrl;
+    case 'salesDigest.revenue':
+      return context.salesDigest?.revenue;
+    case 'salesDigest.orders':
+      return context.salesDigest?.orders;
+    case 'salesDigest.topTicketType':
+      return context.salesDigest?.topTicketType;
     default:
       return undefined;
   }

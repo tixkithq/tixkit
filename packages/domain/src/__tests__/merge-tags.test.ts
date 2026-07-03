@@ -52,6 +52,238 @@ describe('merge-tag registry', () => {
   });
 });
 
+describe('P0 lifecycle merge-tag variables', () => {
+  const p0Variables = [
+    'event.doorTime',
+    'event.mapUrl',
+    'event.refundPolicyUrl',
+    'event.changeSummary',
+    'event.cancellationReason',
+    'order.manageUrl',
+    'order.receiptUrl',
+    'order.retryUrl',
+    'order.cancellationReason',
+    'order.creditStatus',
+    'order.buyerName',
+    'order.buyerEmail',
+    'ticket.pdfUrl',
+    'ticket.walletAppleUrl',
+    'ticket.walletGoogleUrl',
+    'refund.processingEta',
+    'refund.processedAt',
+    'device.inviteUrl',
+    'device.permissionScope',
+    'device.expiresAt',
+    'dashboard.url',
+  ];
+
+  it('registers every P0 lifecycle gap variable', () => {
+    const keys = new Set(MERGE_TAG_REGISTRY.map((v) => v.key));
+    for (const key of p0Variables) {
+      expect(keys.has(key), `missing registry entry for {{${key}}}`).toBe(true);
+    }
+  });
+
+  it('resolves P0 lifecycle variables from context', () => {
+    const ctx: MergeTagContext = {
+      ...baseContext,
+      event: {
+        ...baseContext.event,
+        doorTime: '2026-07-04 18:00',
+        mapUrl: 'https://maps.example.test/venue',
+        refundPolicyUrl: 'https://help.example.test/refunds',
+        changeSummary: 'Venue moved to The Forum',
+        cancellationReason: 'Weather',
+      },
+      order: {
+        ...baseContext.order,
+        manageUrl: 'https://checkout.example.test/orders/ORD-123',
+        receiptUrl: 'https://checkout.example.test/receipts/ORD-123',
+        retryUrl: 'https://checkout.example.test/checkout?retry=ORD-123',
+        cancellationReason: 'Organizer cancelled',
+        creditStatus: 'Full credit issued',
+        buyerName: 'Jordan Lee',
+        buyerEmail: 'jordan@example.test',
+      },
+      ticket: {
+        ...baseContext.ticket,
+        pdfUrl: 'https://tickets.example.test/pdf/TKT-ABC123.pdf',
+        walletAppleUrl: 'https://tickets.example.test/pass/apple/TKT-ABC123.pkpass',
+        walletGoogleUrl: 'https://pay.google.com/gp/v/save/abc',
+      },
+      refund: {
+        amount: '$20.00',
+        processingEta: '5-10 business days',
+        processedAt: '2026-07-10 12:00',
+      },
+      device: {
+        inviteUrl: 'https://scan.example.test/invite/dev_1',
+        permissionScope: 'checkins.write',
+        expiresAt: '2026-07-04 19:00',
+      },
+      dashboard: { url: 'https://admin.example.test/events/evt_1' },
+    };
+
+    const out = renderMergeTags(
+      [
+        'Doors {{event.doorTime}} at {{event.venueName}}.',
+        'Map {{event.mapUrl}}. Refunds {{event.refundPolicyUrl}}.',
+        'Update {{event.changeSummary}}. Cancelled {{event.cancellationReason}}.',
+        'Manage {{order.manageUrl}}. Receipt {{order.receiptUrl}}. Retry {{order.retryUrl}}.',
+        'Cancel reason {{order.cancellationReason}}. Credit {{order.creditStatus}}.',
+        'Buyer {{order.buyerName}} <{{order.buyerEmail}}>.',
+        'PDF {{ticket.pdfUrl}}. Apple {{ticket.walletAppleUrl}}. Google {{ticket.walletGoogleUrl}}.',
+        'Refund ETA {{refund.processingEta}} processed {{refund.processedAt}}.',
+        'Invite {{device.inviteUrl}} scope {{device.permissionScope}} expires {{device.expiresAt}}.',
+        'Dashboard {{dashboard.url}}.',
+      ].join(' '),
+      ctx,
+      { channel: 'email' },
+    );
+
+    expect(out).toContain('Doors 2026-07-04 18:00 at The Grand Hall.');
+    expect(out).toContain('Map https://maps.example.test/venue.');
+    expect(out).toContain('Refunds https://help.example.test/refunds.');
+    expect(out).toContain('Update Venue moved to The Forum.');
+    expect(out).toContain('Cancelled Weather.');
+    expect(out).toContain('Manage https://checkout.example.test/orders/ORD-123.');
+    expect(out).toContain('Receipt https://checkout.example.test/receipts/ORD-123.');
+    expect(out).toContain('Retry https://checkout.example.test/checkout?retry=ORD-123.');
+    expect(out).toContain('Cancel reason Organizer cancelled.');
+    expect(out).toContain('Credit Full credit issued.');
+    expect(out).toContain('Buyer Jordan Lee <jordan@example.test>.');
+    expect(out).toContain('PDF https://tickets.example.test/pdf/TKT-ABC123.pdf.');
+    expect(out).toContain('Apple https://tickets.example.test/pass/apple/TKT-ABC123.pkpass.');
+    expect(out).toContain('Google https://pay.google.com/gp/v/save/abc.');
+    expect(out).toContain('Refund ETA 5-10 business days processed 2026-07-10 12:00.');
+    expect(out).toContain(
+      'Invite https://scan.example.test/invite/dev_1 scope checkins.write expires 2026-07-04 19:00.',
+    );
+    expect(out).toContain('Dashboard https://admin.example.test/events/evt_1.');
+  });
+
+  it('falls back to empty for unresolved P0 lifecycle variables', () => {
+    const out = renderMergeTags(
+      'PDF {{ticket.pdfUrl}} wallet {{ticket.walletAppleUrl}} dashboard {{dashboard.url}}',
+      baseContext,
+      { channel: 'email' },
+    );
+    expect(out).toBe('PDF  wallet  dashboard ');
+  });
+
+  it('rejects non-http(s) values for P0 lifecycle URL tags', () => {
+    const ctx: MergeTagContext = {
+      ...baseContext,
+      ticket: {
+        ...baseContext.ticket,
+        pdfUrl: 'javascript:alert(1)',
+        walletAppleUrl: 'data:text/html,<script>alert(1)</script>',
+        walletGoogleUrl: 'ftp://evil.example/pass',
+      },
+      order: { ...baseContext.order, manageUrl: 'javascript:alert(1)', retryUrl: 'data:text/plain,x' },
+      device: { inviteUrl: 'file:///etc/passwd', permissionScope: 'x', expiresAt: 'x' },
+    };
+    const out = renderMergeTags(
+      '{{ticket.pdfUrl}}|{{ticket.walletAppleUrl}}|{{ticket.walletGoogleUrl}}|{{order.manageUrl}}|{{order.retryUrl}}|{{device.inviteUrl}}',
+      ctx,
+      { channel: 'email' },
+    );
+    expect(out).toBe('|||||');
+  });
+});
+
+describe('P1/P2 lifecycle merge-tag variables', () => {
+  const p1p2Variables = [
+    'ticket.transferUrl',
+    'waitlist.position',
+    'waitlist.inviteUrl',
+    'waitlist.expiresAt',
+    'chargeback.id',
+    'chargeback.amount',
+    'chargeback.dueAt',
+    'chargeback.evidenceUrl',
+    'payout.amount',
+    'payout.eta',
+    'payout.account',
+    'payout.period',
+    'webhook.endpointUrl',
+    'webhook.attempts',
+    'integration.name',
+    'integration.reconnectUrl',
+    'salesDigest.revenue',
+    'salesDigest.orders',
+    'salesDigest.topTicketType',
+  ];
+
+  it('registers every P1/P2 lifecycle variable', () => {
+    const keys = new Set(MERGE_TAG_REGISTRY.map((v) => v.key));
+    for (const key of p1p2Variables) {
+      expect(keys.has(key), `missing registry entry for {{${key}}}`).toBe(true);
+    }
+  });
+
+  it('resolves P1/P2 lifecycle variables from context', () => {
+    const ctx: MergeTagContext = {
+      ...baseContext,
+      ticket: { ...baseContext.ticket, transferUrl: 'https://checkout.example.test/transfer/tkt_1/claim' },
+      waitlist: {
+        position: '12',
+        inviteUrl: 'https://checkout.example.test/waitlist/claim/abc',
+        expiresAt: '2026-07-04 19:00',
+      },
+      chargeback: {
+        id: 'dp_1',
+        amount: '$45.00',
+        dueAt: '2026-07-18',
+        evidenceUrl: 'https://admin.example.test/disputes/dp_1',
+      },
+      payout: { amount: '$1,250.00', eta: '2-3 business days', account: 'Bank ••••4242', period: 'June 2026' },
+      webhook: { endpointUrl: 'https://hooks.example.test/integrations/stripe', attempts: '5' },
+      integration: { name: 'Stripe', reconnectUrl: 'https://admin.example.test/integrations/stripe/reconnect' },
+      salesDigest: { revenue: '$4,320.00', orders: '38', topTicketType: 'General Admission' },
+    };
+
+    const out = renderMergeTags(
+      [
+        'Transfer {{ticket.transferUrl}}.',
+        'Waitlist pos {{waitlist.position}} invite {{waitlist.inviteUrl}} exp {{waitlist.expiresAt}}.',
+        'Chargeback {{chargeback.id}} {{chargeback.amount}} due {{chargeback.dueAt}} evidence {{chargeback.evidenceUrl}}.',
+        'Payout {{payout.amount}} eta {{payout.eta}} account {{payout.account}} period {{payout.period}}.',
+        'Webhook {{webhook.endpointUrl}} attempts {{webhook.attempts}}.',
+        'Integration {{integration.name}} reconnect {{integration.reconnectUrl}}.',
+        'Digest revenue {{salesDigest.revenue}} orders {{salesDigest.orders}} top {{salesDigest.topTicketType}}.',
+      ].join(' '),
+      ctx,
+      { channel: 'email' },
+    );
+
+    expect(out).toContain('Transfer https://checkout.example.test/transfer/tkt_1/claim.');
+    expect(out).toContain('Waitlist pos 12 invite https://checkout.example.test/waitlist/claim/abc exp 2026-07-04 19:00.');
+    expect(out).toContain('Chargeback dp_1 $45.00 due 2026-07-18 evidence https://admin.example.test/disputes/dp_1.');
+    expect(out).toContain('Payout $1,250.00 eta 2-3 business days account Bank ••••4242 period June 2026.');
+    expect(out).toContain('Webhook https://hooks.example.test/integrations/stripe attempts 5.');
+    expect(out).toContain('Integration Stripe reconnect https://admin.example.test/integrations/stripe/reconnect.');
+    expect(out).toContain('Digest revenue $4,320.00 orders 38 top General Admission.');
+  });
+
+  it('rejects non-http(s) values for P1/P2 URL tags', () => {
+    const ctx: MergeTagContext = {
+      ...baseContext,
+      ticket: { ...baseContext.ticket, transferUrl: 'javascript:alert(1)' },
+      waitlist: { inviteUrl: 'data:text/html,<script>' },
+      chargeback: { evidenceUrl: 'file:///etc/passwd' },
+      webhook: { endpointUrl: 'ftp://evil.example' },
+      integration: { reconnectUrl: 'vbscript:msgbox(1)' },
+    };
+    const out = renderMergeTags(
+      '{{ticket.transferUrl}}|{{waitlist.inviteUrl}}|{{chargeback.evidenceUrl}}|{{webhook.endpointUrl}}|{{integration.reconnectUrl}}',
+      ctx,
+      { channel: 'email' },
+    );
+    expect(out).toBe('||||');
+  });
+});
+
 describe('renderMergeTags - email', () => {
   it('resolves whitelisted tags and HTML-escapes values', () => {
     const ctx: MergeTagContext = {
