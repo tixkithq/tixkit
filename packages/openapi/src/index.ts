@@ -666,9 +666,10 @@ const rawOpenApiSpec = {
                 type: 'array',
                 items: { $ref: '#/components/schemas/PublicEventPageBlock' },
               },
+              renderModel: { $ref: '#/components/schemas/ResolvedEventPage' },
               discovery: { $ref: '#/components/schemas/PublicEventDiscoveryCard' },
             },
-            required: ['html', 'text', 'headless', 'discovery'],
+            required: ['html', 'text', 'headless', 'renderModel', 'discovery'],
           },
         },
         required: ['document', 'version', 'page'],
@@ -697,6 +698,77 @@ const rawOpenApiSpec = {
           items: { type: 'array', items: { type: 'object', additionalProperties: true } },
         },
         required: ['type', 'id'],
+      },
+      ResolvedEventPage: {
+        type: 'object',
+        description:
+          'Canonical render model produced by resolveEventPageDocument. Shared by the admin canvas/preview, checkout public page, and headless consumers so every surface renders from one resolved representation.',
+        properties: {
+          schemaVersion: { type: 'integer' },
+          settings: {
+            type: 'object',
+            additionalProperties: true,
+            description: 'Resolved page-level settings (locale, fonts, discovery, social links).',
+          },
+          blocks: {
+            type: 'array',
+            items: { $ref: '#/components/schemas/ResolvedEventPageBlock' },
+          },
+          discovery: { $ref: '#/components/schemas/PublicEventDiscoveryCard' },
+          validation: {
+            type: 'object',
+            properties: {
+              valid: { type: 'boolean' },
+              severity: { type: 'string', enum: ['error', 'warning'] },
+              issues: {
+                type: 'array',
+                items: {
+                  type: 'object',
+                  properties: {
+                    severity: { type: 'string', enum: ['error', 'warning'] },
+                    code: { type: 'string' },
+                    message: { type: 'string' },
+                    field: { type: 'string' },
+                  },
+                  required: ['code', 'message', 'severity'],
+                },
+              },
+            },
+            required: ['valid', 'severity', 'issues'],
+          },
+        },
+        required: ['schemaVersion', 'settings', 'blocks', 'discovery', 'validation'],
+      },
+      ResolvedEventPageBlock: {
+        type: 'object',
+        description:
+          'A single resolved event-page block (hero, tickets, schedule, rich_text, etc.) with merge tags expanded and child entities (tickets, products, speakers) mapped in.',
+        properties: {
+          type: {
+            type: 'string',
+            enum: [
+              'hero',
+              'event_details',
+              'tickets',
+              'schedule',
+              'venue_map',
+              'faq',
+              'products',
+              'sponsors',
+              'speakers',
+              'button',
+              'social_links',
+              'custom_embed',
+              'rich_text',
+              'divider',
+            ],
+          },
+          id: { type: 'string' },
+          html: { type: 'string', description: 'Sanitized, merge-tag-resolved HTML fragment.' },
+          text: { type: 'string' },
+        },
+        required: ['type', 'id'],
+        additionalProperties: true,
       },
       PublicEventDiscoveryCard: {
         type: 'object',

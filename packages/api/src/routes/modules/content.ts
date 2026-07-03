@@ -617,6 +617,9 @@ function toPublicContentPage(input: {
     });
   }
 
+  const html = renderResolvedEventPageHtml(renderModel);
+  const text = renderResolvedEventPageText(renderModel);
+
   return {
     document: {
       eventId: input.document.eventId,
@@ -630,13 +633,13 @@ function toPublicContentPage(input: {
       versionNumber: input.version.versionNumber,
       subject: input.version.subject,
       previewText: input.version.previewText,
-      renderedHtml: renderResolvedEventPageHtml(renderModel),
-      renderedText: renderResolvedEventPageText(renderModel),
+      renderedHtml: html,
+      renderedText: text,
       publishedAt: input.version.publishedAt,
     },
     page: {
-      html: renderResolvedEventPageHtml(renderModel),
-      text: renderResolvedEventPageText(renderModel),
+      html,
+      text,
       headless: renderResolvedEventPageHeadless(renderModel),
       renderModel,
       discovery: renderModel.discovery,

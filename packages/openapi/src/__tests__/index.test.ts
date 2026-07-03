@@ -857,8 +857,12 @@ describe('openApiSpec', () => {
       'html',
       'text',
       'headless',
+      'renderModel',
       'discovery',
     ]);
+    expect(
+      openApiSpec.components.schemas.PublicContentPage.properties.page.properties.renderModel,
+    ).toEqual({ $ref: '#/components/schemas/ResolvedEventPage' });
   });
 
   it('documents checkout tracking separately from affiliate attribution', () => {
