@@ -654,7 +654,7 @@ describe('EmailPersistedEditorView', () => {
         artifactId: 'upl_email_image',
         status: 'uploaded',
         scanStatus: 'clean',
-        downloadUrl: 'https://assets.example.test/content-email-images/inline-email-image.png',
+        downloadUrl: 'https://api.example.test/v1/public/content-email-images/upl_email_image',
       }),
     );
   });
@@ -1476,7 +1476,7 @@ describe('EmailPersistedEditorView', () => {
       });
     });
     expect(canvas).toHaveTextContent(
-      'https://assets.example.test/content-email-images/inline-email-image.png',
+      'https://api.example.test/v1/public/content-email-images/upl_email_image',
     );
   });
 

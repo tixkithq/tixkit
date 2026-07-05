@@ -9,6 +9,7 @@ import {
   cleanupExpiredUploadArtifacts,
   completeUploadArtifact,
   createUploadArtifact,
+  getContentEmailImageArtifact,
   getUploadArtifactDownloadUrl,
   scanUploadBuffer,
 } from '../services/uploads.js';
@@ -1481,8 +1482,164 @@ describe('upload artifact routes', () => {
       url: '/upload-artifacts/upl_email_pending/download',
     });
     expect(download.statusCode).toBe(200);
-    expect(signedUrlInputs).toHaveLength(1);
+    expect(signedUrlInputs).toHaveLength(0);
+    expect(download.json()).toMatchObject({
+      downloadUrl: '/v1/public/content-email-images/upl_email_pending',
+      durable: true,
+    });
     await app.close();
+  });
+
+  it('serves content email images via the public route with inline disposition and long cache lifetime', async () => {
+    const { Readable } = await import('node:stream');
+    const { db } = createMockDb({
+      upload_artifacts: [
+        {
+          id: 'upl_email_clean',
+          tenant_id: 'tnt_1',
+          organization_id: 'org_1',
+          brand_id: 'brd_1',
+          event_id: 'evt_1',
+          purpose: 'content_email_image',
+          status: 'uploaded',
+          scan_status: 'clean',
+          bucket: 'tixkit',
+          object_key: 'uploads/tnt_1/content-email-images/evt_1/final/upl_email_clean.png',
+          content_type: 'image/png',
+          file_name: 'hero.png',
+          size_bytes: 12,
+        },
+      ],
+    });
+    const app = await setupUploadApp(db, publicUploadRoutes);
+    const imageStream = Readable.from([Buffer.from('image-data')]);
+    s3Send.mockResolvedValueOnce({ Body: imageStream, ContentType: 'image/png' });
+
+    const res = await app.inject({
+      method: 'GET',
+      url: '/public/content-email-images/upl_email_clean',
+    });
+
+    expect(res.statusCode).toBe(200);
+    expect(res.headers['content-type']).toBe('image/png');
+    expect(res.headers['content-disposition']).toContain('inline');
+    expect(res.headers['content-disposition']).toContain('hero.png');
+    expect(res.headers['cache-control']).toContain('max-age=31536000');
+    expect(res.headers['cache-control']).toContain('immutable');
+    await app.close();
+  });
+
+  it('rejects non-content-email-image artifacts via the public content email image route', async () => {
+    const { db } = createMockDb({
+      upload_artifacts: [
+        {
+          id: 'upl_checkout_clean',
+          tenant_id: 'tnt_1',
+          organization_id: 'org_1',
+          brand_id: 'brd_1',
+          event_id: 'evt_1',
+          purpose: 'checkout_answer',
+          status: 'uploaded',
+          scan_status: 'clean',
+          bucket: 'tixkit',
+          object_key: 'uploads/tnt_1/checkout-answers/evt_1/final/upl_checkout_clean.txt',
+          content_type: 'text/plain',
+          file_name: 'answer.txt',
+        },
+      ],
+    });
+    const app = await setupUploadApp(db, publicUploadRoutes);
+
+    const res = await app.inject({
+      method: 'GET',
+      url: '/public/content-email-images/upl_checkout_clean',
+    });
+
+    expect(res.statusCode).toBe(404);
+    expect(s3Send).not.toHaveBeenCalled();
+    await app.close();
+  });
+
+  it('rejects pending or non-clean content email images via the public route', async () => {
+    const { db } = createMockDb({
+      upload_artifacts: [
+        {
+          id: 'upl_email_pending',
+          tenant_id: 'tnt_1',
+          organization_id: 'org_1',
+          brand_id: 'brd_1',
+          event_id: 'evt_1',
+          purpose: 'content_email_image',
+          status: 'pending',
+          scan_status: 'pending',
+          bucket: 'tixkit',
+          object_key: 'uploads/tnt_1/content-email-images/evt_1/staging/upl_email_pending.png',
+          content_type: 'image/png',
+          file_name: 'hero.png',
+          size_bytes: 12,
+          expires_at: new Date(Date.now() + 60_000),
+        },
+      ],
+    });
+    const app = await setupUploadApp(db, publicUploadRoutes);
+
+    const res = await app.inject({
+      method: 'GET',
+      url: '/public/content-email-images/upl_email_pending',
+    });
+
+    expect(res.statusCode).toBe(404);
+    expect(s3Send).not.toHaveBeenCalled();
+    await app.close();
+  });
+
+  it('getContentEmailImageArtifact returns artifact metadata for clean content_email_image', async () => {
+    const { db } = createMockDb({
+      upload_artifacts: [
+        {
+          id: 'upl_email_clean',
+          tenant_id: 'tnt_1',
+          organization_id: 'org_1',
+          brand_id: 'brd_1',
+          event_id: 'evt_1',
+          purpose: 'content_email_image',
+          status: 'uploaded',
+          scan_status: 'clean',
+          bucket: 'tixkit',
+          object_key: 'uploads/tnt_1/content-email-images/evt_1/final/upl_email_clean.png',
+          content_type: 'image/png',
+          file_name: 'hero.png',
+        },
+      ],
+    });
+
+    const artifact = await getContentEmailImageArtifact(db, 'upl_email_clean');
+    expect(artifact).toMatchObject({
+      bucket: 'tixkit',
+      objectKey: 'uploads/tnt_1/content-email-images/evt_1/final/upl_email_clean.png',
+      contentType: 'image/png',
+      fileName: 'hero.png',
+    });
+  });
+
+  it('getContentEmailImageArtifact rejects non-content-email-image artifacts', async () => {
+    const { db } = createMockDb({
+      upload_artifacts: [
+        {
+          id: 'upl_checkout',
+          tenant_id: 'tnt_1',
+          purpose: 'checkout_answer',
+          status: 'uploaded',
+          scan_status: 'clean',
+          bucket: 'tixkit',
+          object_key: 'uploads/tnt_1/checkout-answers/evt_1/final/upl_checkout.txt',
+          content_type: 'text/plain',
+          file_name: 'answer.txt',
+        },
+      ],
+    });
+
+    await expect(getContentEmailImageArtifact(db, 'upl_checkout')).rejects.toThrow();
   });
 
   it('rejects authenticated user-avatar uploads with checkout event scope or question metadata', async () => {

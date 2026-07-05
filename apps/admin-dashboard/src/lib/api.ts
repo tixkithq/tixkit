@@ -3934,9 +3934,13 @@ export const adminApi: AdminApi = {
           `/v1/upload-artifacts/${completeResult.data.artifactId}/download`,
           { method: 'GET' },
         );
+        const rawDownloadUrl = downloadResult.ok ? downloadResult.data.downloadUrl : undefined;
+        const downloadUrl = rawDownloadUrl?.startsWith('/v1/')
+          ? `${getAdminApiBaseUrl()}${rawDownloadUrl}`
+          : rawDownloadUrl;
         return ok({
           ...completeResult.data,
-          downloadUrl: downloadResult.ok ? downloadResult.data.downloadUrl : undefined,
+          downloadUrl,
         });
       },
       () =>

@@ -584,6 +584,65 @@ export async function getUploadArtifactDownloadUrl(
   );
 }
 
+export type ContentEmailImageArtifact = {
+  bucket: string;
+  objectKey: string;
+  contentType: string;
+  fileName: string;
+};
+
+export async function getContentEmailImageArtifact(
+  db: Database,
+  artifactId: string,
+): Promise<ContentEmailImageArtifact> {
+  const artifact = await db
+    .selectFrom('upload_artifacts')
+    .selectAll()
+    .where('id', '=', artifactId)
+    .executeTakeFirst();
+  if (
+    !artifact ||
+    artifact.purpose !== 'content_email_image' ||
+    artifact.status !== 'uploaded' ||
+    artifact.scan_status !== 'clean'
+  ) {
+    throw new NotFoundError('UploadArtifact', artifactId);
+  }
+  return {
+    bucket: artifact.bucket,
+    objectKey: artifact.object_key,
+    contentType: artifact.content_type,
+    fileName: artifact.file_name,
+  };
+}
+
+export async function streamContentEmailImage(
+  db: Database,
+  artifactId: string,
+): Promise<{
+  stream: NodeJS.ReadableStream;
+  contentType: string;
+  fileName: string;
+}> {
+  const artifact = await getContentEmailImageArtifact(db, artifactId);
+  const s3 = createS3Client();
+  const response = await s3.send(
+    new GetObjectCommand({
+      Bucket: artifact.bucket,
+      Key: artifact.objectKey,
+    }),
+  );
+  const body = response.Body;
+  if (!body || typeof body !== 'object' || !('pipe' in body)) {
+    throw new Error('Unexpected S3 response body type for content email image');
+  }
+  return {
+    stream: body as unknown as NodeJS.ReadableStream,
+    contentType: artifact.contentType,
+    fileName: artifact.fileName,
+  };
+}
+
 function uploadArtifactAnswerEntries(answers: Record<string, unknown>): Array<[string, string]> {
   return Object.entries(answers)
     .filter((entry): entry is [string, { artifactId: string }] =>
