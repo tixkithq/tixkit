@@ -10,6 +10,7 @@ import { DataTable } from '@/components/data-table/data-table';
 import { type DataTableFilter } from '@/components/data-table/toolbar';
 import { usePermissions } from '@/context/permission-provider';
 import { useAdminData } from '@/hooks/use-admin-data';
+import { useDebouncedValue } from '@/hooks/use-debounced-search';
 import { getOrderColumns } from './columns';
 
 const statusFilters: DataTableFilter = {
@@ -26,8 +27,13 @@ const statusFilters: DataTableFilter = {
 };
 
 export function OrdersTable() {
+  const [searchInput, setSearchInput] = React.useState('');
+  const debouncedSearch = useDebouncedValue(searchInput, 300);
   const { can } = usePermissions();
-  const { data, loading, error, refetch } = useAdminData(() => adminApi.listOrders());
+  const { data, loading, error, refetch } = useAdminData(
+    () => adminApi.listOrders(debouncedSearch.trim() ? { search: debouncedSearch.trim() } : undefined),
+    [debouncedSearch],
+  );
 
   const orders = data?.items ?? [];
   const canCancelOrders = can('orders.write');
@@ -38,7 +44,7 @@ export function OrdersTable() {
     [canCancelOrders, canRefundOrders, refetch],
   );
 
-  if (loading) return <OrdersTableSkeleton />;
+  if (loading && orders.length === 0) return <OrdersTableSkeleton />;
 
   if (error && orders.length === 0) {
     return (
@@ -56,14 +62,20 @@ export function OrdersTable() {
       columns={columns}
       data={orders}
       getRowId={(row) => row.id}
-      searchPlaceholder="Search orders..."
-      searchKey="buyerEmail"
+      searchPlaceholder="Search orders by buyer email..."
+      onServerSearch={setSearchInput}
+      serverSearchValue={searchInput}
+      serverSearchLoading={loading}
       filters={[statusFilters]}
       emptyState={
         <EmptyState
           icon={ShoppingCart}
-          title="No orders yet"
-          description="Orders will appear here once attendees start buying tickets."
+          title={searchInput ? 'No matching orders' : 'No orders yet'}
+          description={
+            searchInput
+              ? 'Try a different search term.'
+              : 'Orders will appear here once attendees start buying tickets.'
+          }
         />
       }
     />

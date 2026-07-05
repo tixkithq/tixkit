@@ -18,6 +18,7 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 import { useAdminData } from '@/hooks/use-admin-data';
+import { useAllEvents } from '@/hooks/use-all-events';
 import { cn } from '@/lib/utils';
 
 const EMPTY_CHECK_IN_LISTS: AdminCheckInList[] = [];
@@ -35,13 +36,12 @@ export function CheckInView() {
   const ticketInputId = React.useId();
 
   const {
-    data: eventsData,
+    events,
     loading: eventsLoading,
     error: eventsError,
     refetch: refetchEvents,
-  } = useAdminData(() => adminApi.listEvents());
+  } = useAllEvents();
 
-  const events = React.useMemo(() => eventsData?.items ?? [], [eventsData]);
   const selectedEvent = events.find((e) => e.id === selectedEventId);
 
   const {

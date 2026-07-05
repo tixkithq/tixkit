@@ -18,13 +18,11 @@ import {
   type AdminAffiliateReport,
   type AdminAttendanceReport,
   type AdminConversionReport,
-  type AdminEventListItem,
   type AdminExportJob,
   type AdminExportType,
   type AdminPromoReport,
   type AdminSalesReportSummary,
   type AdminTaxReport,
-  type PageResult,
   adminApi,
 } from '@/lib/api';
 import { ApiErrorState } from '@/components/api-error-state';
@@ -50,6 +48,7 @@ import {
 } from '@/components/ui/table';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { useAdminData } from '@/hooks/use-admin-data';
+import { useAllEvents } from '@/hooks/use-all-events';
 import { formatCurrency, formatDate, formatNumber } from '@/lib/format';
 import { subscribeToExportJob } from '@/lib/export-jobs';
 import { toast } from 'sonner';
@@ -92,10 +91,6 @@ function emptyResult<T>(): Promise<{ ok: true; data: T | null }> {
   return Promise.resolve({ ok: true as const, data: null });
 }
 
-function emptyPage<T>(): Promise<{ ok: true; data: PageResult<T> }> {
-  return Promise.resolve({ ok: true as const, data: { items: [], total: 0 } });
-}
-
 export function ReportsView({ eventId }: ReportsViewProps) {
   const [selectedEventId, setSelectedEventId] = React.useState<string>(eventId ?? '');
   const [activeTab, setActiveTab] = React.useState<ReportTab>('sales');
@@ -112,12 +107,11 @@ export function ReportsView({ eventId }: ReportsViewProps) {
     if (eventId) setSelectedEventId(eventId);
   }, [eventId]);
 
-  const eventsState = useAdminData(
-    () => (eventId ? emptyPage<AdminEventListItem>() : adminApi.listEvents()),
-    [eventId],
-  );
+  const allEvents = useAllEvents();
   const organizationsState = useAdminData(() => adminApi.listOrganizations());
-  const events = eventsState.data?.items ?? [];
+  const events = eventId ? [] : allEvents.events;
+  const eventsLoading = eventId ? false : allEvents.loading;
+  const eventsError = eventId ? undefined : allEvents.error;
   const organizations = organizationsState.data ?? [];
   const workspaceSelectDisabled = organizationsState.loading || Boolean(organizationsState.error);
   const selectedEvent = events.find((event) => event.id === selectedEventId);
@@ -229,13 +223,13 @@ export function ReportsView({ eventId }: ReportsViewProps) {
     });
   };
 
-  if (eventsState.loading && !eventId) {
+  if (eventsLoading && !eventId) {
     return <Skeleton className="h-96 w-full" />;
   }
 
-  if (eventsState.error && !eventId) {
+  if (eventsError && !eventId) {
     return (
-      <ApiErrorState error={eventsState.error} onRetry={eventsState.refetch} className="h-96" />
+      <ApiErrorState error={eventsError} onRetry={allEvents.refetch} className="h-96" />
     );
   }
 

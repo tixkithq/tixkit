@@ -10,6 +10,7 @@ import { DataTable } from '@/components/data-table/data-table';
 import { type DataTableFilter } from '@/components/data-table/toolbar';
 import { usePermissions } from '@/context/permission-provider';
 import { useAdminData } from '@/hooks/use-admin-data';
+import { useDebouncedValue } from '@/hooks/use-debounced-search';
 import { getEventColumns } from './columns';
 import { CreateEventDrawer } from './create-event-drawer';
 
@@ -27,8 +28,13 @@ const statusFilters: DataTableFilter = {
 export function EventsTable() {
   const [drawerOpen, setDrawerOpen] = React.useState(false);
   const [editingEvent, setEditingEvent] = React.useState<AdminEventListItem | undefined>(undefined);
+  const [searchInput, setSearchInput] = React.useState('');
+  const debouncedSearch = useDebouncedValue(searchInput, 300);
   const { can } = usePermissions();
-  const { data, loading, error, refetch } = useAdminData(() => adminApi.listEvents());
+  const { data, loading, error, refetch } = useAdminData(
+    () => adminApi.listEvents(debouncedSearch.trim() ? { search: debouncedSearch.trim() } : undefined),
+    [debouncedSearch],
+  );
 
   const events = data?.items ?? [];
   const canWriteEvents = can('events.write');
@@ -52,7 +58,7 @@ export function EventsTable() {
     setDrawerOpen(true);
   };
 
-  if (loading) {
+  if (loading && events.length === 0) {
     return <EventsTableSkeleton />;
   }
 
@@ -74,7 +80,9 @@ export function EventsTable() {
         data={events}
         getRowId={(row) => row.id}
         searchPlaceholder="Search events..."
-        searchKey="title"
+        onServerSearch={setSearchInput}
+        serverSearchValue={searchInput}
+        serverSearchLoading={loading}
         filters={[statusFilters]}
         toolbarActions={
           canWriteEvents ? (
@@ -87,14 +95,16 @@ export function EventsTable() {
         emptyState={
           <EmptyState
             icon={Ticket}
-            title="No events yet"
+            title={searchInput ? 'No matching events' : 'No events yet'}
             description={
-              canWriteEvents
-                ? 'Create your first event to start selling tickets and tracking attendance.'
-                : 'Events will appear here once your workspace starts publishing them.'
+              searchInput
+                ? 'Try a different search term.'
+                : canWriteEvents
+                  ? 'Create your first event to start selling tickets and tracking attendance.'
+                  : 'Events will appear here once your workspace starts publishing them.'
             }
             action={
-              canWriteEvents ? (
+              canWriteEvents && !searchInput ? (
                 <Button onClick={handleCreate}>
                   <Plus className="size-4" />
                   Create event

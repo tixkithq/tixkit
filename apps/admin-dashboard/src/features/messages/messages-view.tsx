@@ -22,6 +22,7 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 import { useAdminData } from '@/hooks/use-admin-data';
+import { useAllEvents } from '@/hooks/use-all-events';
 import { formatDate } from '@/lib/format';
 import { MessageFormDialog } from './message-form';
 
@@ -31,12 +32,11 @@ export function MessagesView() {
   const [selectedCampaignId, setSelectedCampaignId] = React.useState<string>('');
 
   const {
-    data: eventsData,
+    events,
     loading: eventsLoading,
     error: eventsError,
     refetch: refetchEvents,
-  } = useAdminData(() => adminApi.listEvents());
-  const events = eventsData?.items ?? [];
+  } = useAllEvents();
 
   const { data, loading, error, refetch } = useAdminData(
     () =>

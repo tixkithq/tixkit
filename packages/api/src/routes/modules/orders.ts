@@ -100,9 +100,10 @@ export const orderRoutes: FastifyPluginAsync = async (app) => {
       .orderBy('id', 'asc')
       .limit(pagination.limit + 1);
 
-    const { organizationId, eventId } = request.query as {
+    const { organizationId, eventId, search } = request.query as {
       organizationId?: string;
       eventId?: string;
+      search?: string;
     };
     if (organizationId) {
       ClerkAuthService.requireOrganizationScope(principal, organizationId);
@@ -110,6 +111,9 @@ export const orderRoutes: FastifyPluginAsync = async (app) => {
     }
     if (eventId) {
       query = query.where('event_id', '=', eventId);
+    }
+    if (search && search.trim().length > 0) {
+      query = query.where('buyer_email', 'ilike', `%${search.trim()}%`);
     }
     if (pagination.cursor) query = query.where('id', '>', pagination.cursor);
     if (principal.brandIds && principal.brandIds.length > 0) {

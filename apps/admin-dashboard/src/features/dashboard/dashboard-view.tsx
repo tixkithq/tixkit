@@ -13,16 +13,17 @@ import { Skeleton } from '@/components/ui/skeleton';
 import { EventStatusBadge } from '@/features/events/event-status-badge';
 import { OrderStatusBadge } from '@/features/events/event-status-badge';
 import { useAdminData } from '@/hooks/use-admin-data';
+import { useAllEvents } from '@/hooks/use-all-events';
 import { formatCurrency, formatNumber, formatDate } from '@/lib/format';
 
 export function DashboardView() {
   const [drawerOpen, setDrawerOpen] = React.useState(false);
   const {
-    data: eventsData,
+    events,
     loading: eventsLoading,
     error: eventsError,
     refetch: refetchEvents,
-  } = useAdminData(() => adminApi.listEvents());
+  } = useAllEvents();
   const {
     data: ordersData,
     loading: ordersLoading,
@@ -30,7 +31,6 @@ export function DashboardView() {
     refetch: refetchOrders,
   } = useAdminData(() => adminApi.listOrders({ limit: 5 }));
 
-  const events = eventsData?.items ?? [];
   const recentOrders = ordersData?.items ?? [];
 
   const grossSales = events.reduce((sum, e) => sum + e.grossSalesCents, 0);

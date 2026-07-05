@@ -40,6 +40,12 @@ type DataTableProps<TData, TValue> = {
   renderToolbar?: (table: TanstackTable<TData>) => React.ReactNode;
   renderPagination?: (table: TanstackTable<TData>) => React.ReactNode;
   showPagination?: boolean;
+  /** Server-side search: when provided, the search input calls this callback. */
+  onServerSearch?: (value: string) => void;
+  /** Controlled search value for server-side search mode. */
+  serverSearchValue?: string;
+  /** Shows a loading spinner in the search input during server-side search. */
+  serverSearchLoading?: boolean;
 };
 
 export function DataTable<TData, TValue>({
@@ -54,6 +60,9 @@ export function DataTable<TData, TValue>({
   renderToolbar,
   renderPagination,
   showPagination = true,
+  onServerSearch,
+  serverSearchValue,
+  serverSearchLoading,
 }: DataTableProps<TData, TValue>) {
   const [rowSelection, setRowSelection] = React.useState({});
   const [columnVisibility, setColumnVisibility] = React.useState<VisibilityState>({});
@@ -84,7 +93,7 @@ export function DataTable<TData, TValue>({
   });
 
   const showToolbar =
-    renderToolbar || searchKey || (filters && filters.length > 0) || toolbarActions;
+    renderToolbar || searchKey || onServerSearch || (filters && filters.length > 0) || toolbarActions;
 
   return (
     <div className="space-y-4">
@@ -97,6 +106,9 @@ export function DataTable<TData, TValue>({
             searchPlaceholder={searchPlaceholder}
             searchKey={searchKey}
             filters={filters}
+            onServerSearch={onServerSearch}
+            serverSearchValue={serverSearchValue}
+            serverSearchLoading={serverSearchLoading}
           >
             {toolbarActions}
           </DataTableToolbar>

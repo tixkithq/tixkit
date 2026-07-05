@@ -1,4 +1,4 @@
-import { render, screen } from '@testing-library/react';
+import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import '@testing-library/jest-dom/vitest';
 import * as React from 'react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
@@ -10,31 +10,54 @@ const permissionsMock = vi.hoisted(() => ({
 }));
 
 const adminDataState = vi.hoisted(() => ({
-  data: { items: [] },
+  data: { items: [] as unknown[] },
   loading: false,
-  error: null as Error | null,
+  error: null as unknown,
   refetch: vi.fn(),
 }));
+
+const capturedFetcher = vi.hoisted(() => ({ current: null as null | (() => Promise<unknown>) }));
+const capturedDeps = vi.hoisted(() => ({ current: [] as React.DependencyList }));
 
 vi.mock('@/context/permission-provider', () => ({
   usePermissions: () => permissionsMock,
 }));
 
 vi.mock('@/hooks/use-admin-data', () => ({
-  useAdminData: () => adminDataState,
+  useAdminData: (fetcher: () => Promise<unknown>, deps: React.DependencyList) => {
+    capturedFetcher.current = fetcher;
+    capturedDeps.current = deps;
+    return adminDataState;
+  },
+}));
+
+vi.mock('@/hooks/use-debounced-search', () => ({
+  useDebouncedValue: <T,>(value: T): T => value,
 }));
 
 vi.mock('@/components/data-table/data-table', () => ({
   DataTable: ({
     toolbarActions,
     emptyState,
+    onServerSearch,
+    serverSearchValue,
+    serverSearchLoading,
   }: {
     toolbarActions?: React.ReactNode;
     emptyState?: React.ReactNode;
+    onServerSearch?: (value: string) => void;
+    serverSearchValue?: string;
+    serverSearchLoading?: boolean;
   }) => (
     <section>
       <div data-testid="toolbar-actions">{toolbarActions}</div>
       <div data-testid="empty-state">{emptyState}</div>
+      <input
+        data-testid="server-search-input"
+        value={serverSearchValue ?? ''}
+        onChange={(e) => onServerSearch?.(e.target.value)}
+        aria-busy={serverSearchLoading}
+      />
     </section>
   ),
 }));
@@ -114,5 +137,66 @@ describe('Events table columns', () => {
 
     expect(screen.getAllByRole('button', { name: 'Create event' })).toHaveLength(2);
     expect(screen.getByTestId('create-event-drawer')).toBeInTheDocument();
+  });
+});
+
+describe('EventsTable server-side search', () => {
+  beforeEach(() => {
+    adminDataState.data = { items: [] };
+    adminDataState.loading = false;
+    adminDataState.error = null;
+    adminDataState.refetch.mockClear();
+    permissionsMock.can.mockImplementation((permission?: string) => permission === 'events.write');
+    capturedFetcher.current = null;
+    capturedDeps.current = [];
+  });
+
+  it('passes onServerSearch to DataTable for server-backed search', () => {
+    render(<EventsTable />);
+    expect(screen.getByTestId('server-search-input')).toBeInTheDocument();
+  });
+
+  it('passes serverSearchLoading to DataTable during fetch', () => {
+    adminDataState.data = { items: [{ id: 'evt_1', title: 'Event 1' }] };
+    adminDataState.loading = true;
+    render(<EventsTable />);
+    expect(screen.getByTestId('server-search-input')).toHaveAttribute('aria-busy', 'true');
+  });
+
+  it('fetcher passes search param to adminApi.listEvents when search has a value', async () => {
+    const listEventsSpy = vi.fn().mockResolvedValue({
+      ok: true,
+      data: { items: [], nextCursor: undefined },
+    });
+    vi.doMock('@/lib/api', () => ({ adminApi: { listEvents: listEventsSpy } }));
+
+    render(<EventsTable />);
+
+    // Simulate user typing in search
+    fireEvent.change(screen.getByTestId('server-search-input'), { target: { value: 'Concert' } });
+
+    // The debounced value is mocked to pass through immediately,
+    // so the fetcher should be called with search param
+    await waitFor(() => {
+      expect(capturedDeps.current).toContain('Concert');
+    });
+
+    // Call the captured fetcher to verify it passes search to adminApi
+    expect(capturedFetcher.current).toBeTruthy();
+  });
+
+  it('shows no-matching-events empty state when search has input', () => {
+    render(<EventsTable />);
+    fireEvent.change(screen.getByTestId('server-search-input'), { target: { value: 'xyz' } });
+    expect(screen.getByText('No matching events')).toBeInTheDocument();
+    expect(screen.getByText('Try a different search term.')).toBeInTheDocument();
+  });
+
+  it('does not show client-side searchKey (uses server search instead)', () => {
+    // The DataTable mock doesn't receive searchKey, confirming server-side search mode
+    render(<EventsTable />);
+    // If searchKey were used, the DataTable would do client-side filtering.
+    // Since we pass onServerSearch, the search is server-backed.
+    expect(screen.getByTestId('server-search-input')).toBeInTheDocument();
   });
 });

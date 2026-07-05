@@ -197,10 +197,16 @@ export const eventRoutes: FastifyPluginAsync = async (app) => {
       .orderBy('id', 'asc')
       .limit(pagination.limit + 1);
 
-    const { organizationId } = request.query as { organizationId?: string };
+    const { organizationId, search } = request.query as {
+      organizationId?: string;
+      search?: string;
+    };
     if (organizationId) {
       ClerkAuthService.requireOrganizationScope(principal, organizationId);
       query = query.where('organization_id', '=', organizationId);
+    }
+    if (search && search.trim().length > 0) {
+      query = query.where('title', 'ilike', `%${search.trim()}%`);
     }
     if (pagination.cursor) query = query.where('id', '>', pagination.cursor);
     if (principal.brandIds && principal.brandIds.length > 0) {

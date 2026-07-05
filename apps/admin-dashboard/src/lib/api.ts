@@ -1602,7 +1602,7 @@ export type AdminApi = {
     metadata?: Record<string, unknown>;
   }): Promise<ApiResult<CompletedUploadArtifact>>;
 
-  listEvents(input?: PageCursor): Promise<ApiResult<PageResult<AdminEventListItem>>>;
+  listEvents(input?: PageCursor & { search?: string }): Promise<ApiResult<PageResult<AdminEventListItem>>>;
   getEvent(eventId: string): Promise<ApiResult<AdminEventDetail>>;
   createEvent(input: CreateEventInput): Promise<ApiResult<AdminEventDetail>>;
   updateEvent(eventId: string, input: UpdateEventInput): Promise<ApiResult<AdminEventDetail>>;
@@ -1718,7 +1718,7 @@ export type AdminApi = {
   deleteCheckoutQuestion(questionId: string): Promise<ApiResult<void>>;
 
   listOrders(
-    input?: PageCursor & { eventId?: string },
+    input?: PageCursor & { eventId?: string; search?: string },
   ): Promise<ApiResult<PageResult<AdminOrderListItem>>>;
   createBoxOfficeOrder(
     eventId: string,
@@ -3953,15 +3953,27 @@ export const adminApi: AdminApi = {
   async listEvents(input) {
     return withFixture(
       async () => {
+        const params = new URLSearchParams();
+        if (input?.cursor) params.set('cursor', input.cursor);
+        if (input?.limit) params.set('limit', String(input.limit));
+        if (input?.search) params.set('search', input.search);
+        const qs = params.toString();
         const result = await request<PageResult<AdminEventListItem> | AdminEventListItem[]>(
-          '/v1/events',
+          `/v1/events${qs ? `?${qs}` : ''}`,
           {
             method: 'GET',
           },
         );
         return result.ok ? ok(normalizeEventPage(result.data)) : result;
       },
-      () => ok(paginate(fixtureEvents, input?.cursor, input?.limit)),
+      () => {
+        let events = fixtureEvents;
+        if (input?.search) {
+          const q = input.search.toLowerCase();
+          events = events.filter((e) => e.title.toLowerCase().includes(q));
+        }
+        return ok(paginate(events, input?.cursor, input?.limit));
+      },
     );
   },
 
@@ -5141,6 +5153,7 @@ export const adminApi: AdminApi = {
         if (input?.cursor) params.set('cursor', input.cursor);
         if (input?.limit) params.set('limit', String(input.limit));
         if (input?.eventId) params.set('eventId', input.eventId);
+        if (input?.search) params.set('search', input.search);
         const qs = params.toString();
         return request<PageResult<AdminOrderListItem>>(`/v1/orders${qs ? `?${qs}` : ''}`, {
           method: 'GET',
@@ -5149,6 +5162,10 @@ export const adminApi: AdminApi = {
       () => {
         let orders = fixtureOrders;
         if (input?.eventId) orders = orders.filter((o) => o.eventId === input.eventId);
+        if (input?.search) {
+          const q = input.search.toLowerCase();
+          orders = orders.filter((o) => o.buyerEmail.toLowerCase().includes(q));
+        }
         return ok(paginate(orders, input?.cursor, input?.limit));
       },
     );
