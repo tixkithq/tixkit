@@ -2,6 +2,7 @@ import type { ReactNode } from 'react';
 import { auth } from '@clerk/nextjs/server';
 import { redirect } from 'next/navigation';
 import { hasClerkKey, usesLocalDevAuth } from '@/lib/auth';
+import { PermissionProvider } from '@/context/permission-provider';
 
 type PrincipalError = {
   code: string;
@@ -84,5 +85,5 @@ export default async function EditorLayout({ children }: { children: ReactNode }
     }
   }
 
-  return children;
+  return <PermissionProvider>{children}</PermissionProvider>;
 }

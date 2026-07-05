@@ -1,4 +1,5 @@
 import { render, screen } from '@testing-library/react';
+import * as React from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const mocks = vi.hoisted(() => ({
@@ -20,6 +21,10 @@ vi.mock('@/lib/api', () => ({
     getPrincipal: mocks.getPrincipal,
   },
   getAdminApiBaseUrl: () => 'http://localhost:4100',
+}));
+
+vi.mock('@/context/permission-provider', () => ({
+  PermissionProvider: ({ children }: { children: React.ReactNode }) => <>{children}</>,
 }));
 
 import EditorLayout from './layout';

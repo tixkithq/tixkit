@@ -61,6 +61,7 @@ import {
   type AdminEventDetail,
   type SendMessageInput,
 } from '@/lib/api';
+import { usePermissions } from '@/context/permission-provider';
 import { Button } from '@/components/ui/button';
 import {
   Dialog,
@@ -186,6 +187,11 @@ type EmailBubbleSelectionState = {
 
 type EmailSelectionRestoreDetail = EmailBubbleSelectionState & {
   focusEditor?: boolean;
+  // When true, the restore only refreshes the merge-tag plugin's `active`
+  // selection state without re-setting the editor's ProseMirror selection.
+  // Used by inspector controls so a `text`-scoped stored selection does not
+  // unmount the inspector (and steal focus from the clicked input).
+  softRestore?: boolean;
 };
 
 type EmailSelectionFormatDetail = {
@@ -1050,22 +1056,31 @@ function NativeEmailInspector({ host }: { host: HTMLElement | null }) {
         Boolean(target.closest('input, textarea, select, [contenteditable="true"]'));
       if (!allowsNativeFocus && event?.type !== 'focusin' && event?.type !== 'input') {
         event?.preventDefault();
+        // For non-focusable targets (e.g. icon buttons), keep the editor
+        // selection alive with a soft restore that only refreshes the
+        // merge-tag plugin state without changing the ProseMirror selection.
+        const restoreSelection = () => {
+          dom.dispatchEvent(
+            new CustomEvent('tixkit-email-selection-restore', {
+              bubbles: true,
+              detail: {
+                ...currentSelection,
+                focusEditor: !allowsNativeFocus,
+                softRestore: true,
+              } satisfies EmailSelectionRestoreDetail,
+            }),
+          );
+        };
+        restoreSelection();
+        window.requestAnimationFrame(restoreSelection);
+        window.setTimeout(restoreSelection, 0);
+        window.setTimeout(restoreSelection, 60);
       }
-      const restoreSelection = () => {
-        dom.dispatchEvent(
-          new CustomEvent('tixkit-email-selection-restore', {
-            bubbles: true,
-            detail: {
-              ...currentSelection,
-              focusEditor: !allowsNativeFocus,
-            } satisfies EmailSelectionRestoreDetail,
-          }),
-        );
-      };
-      restoreSelection();
-      window.requestAnimationFrame(restoreSelection);
-      window.setTimeout(restoreSelection, 0);
-      window.setTimeout(restoreSelection, 60);
+      // For focusable inputs/selects/textareas, do NOT dispatch any restore:
+      // the inspector host is registered as a FocusScopes scope, so the editor
+      // selection is preserved automatically, and dispatching restore events
+      // here would trigger useEditorState re-renders that churn the inspector
+      // sections and steal focus from the input the user clicked/typed in.
     },
     [editor],
   );
@@ -1109,7 +1124,41 @@ function NativeEmailInspector({ host }: { host: HTMLElement | null }) {
     const focusScope = editor.extensionStorage?.focusScope;
     if (!focusScope?.registerScope) return;
     focusScope.registerScope(host);
+
+    // The FocusScopes extension attaches a bubble-phase `focusout` listener on
+    // the editor's contenteditable element (`view.dom`) that clears the
+    // selection and sets `editor.isFocused = false` when focus leaves the
+    // editor. The `isInsideScope` check should skip this for registered scopes,
+    // but the plugin's internal `scopeRefs` can get out of sync (e.g. when the
+    // editor re-creates its ProseMirror plugins), causing the inspector host
+    // to be missing from the active scope set. When that happens, clicking an
+    // inspector input unmounts the inspector (because `isFocused` flips to
+    // false) and focus falls to `<body>` instead of the input.
+    //
+    // To make inspector interactions robust regardless of the plugin's
+    // internal state, install a capture-phase `focusout` interceptor on the
+    // editor DOM's parent. When focus is moving from the editor to an element
+    // inside the inspector host, stop propagation so the FocusScopes
+    // `handleFocusOut` never fires, keeping `isFocused = true` and the
+    // inspector mounted.
+    const editorDom = editor.view.dom;
+    const editorParent = editorDom.parentElement;
+    const focusOutInterceptor = (event: FocusEvent) => {
+      if (event.target !== editorDom) return;
+      const related = event.relatedTarget;
+      if (related instanceof Node && host.contains(related)) {
+        event.stopImmediatePropagation();
+        event.stopPropagation();
+      }
+    };
+    if (editorParent) {
+      editorParent.addEventListener('focusout', focusOutInterceptor, true);
+    }
+
     return () => {
+      if (editorParent) {
+        editorParent.removeEventListener('focusout', focusOutInterceptor, true);
+      }
       focusScope.unregisterScope(host);
     };
   }, [editor, host]);
@@ -1892,7 +1941,8 @@ export function EmailPersistedEditorView({ eventId }: { eventId: string }) {
   }, []);
 
   const isArchived = document?.status === 'archived';
-  const canEdit = !isArchived;
+  const { can } = usePermissions();
+  const canEdit = !isArchived && can('messages.write');
 
   React.useEffect(() => {
     const canvas = editorCanvasRef.current;

@@ -24,6 +24,7 @@ import {
   type AdminContentDocumentVersion,
   type AdminEventDetail,
 } from '@/lib/api';
+import { usePermissions } from '@/context/permission-provider';
 
 const smsInsertActions: ContentEditorInsertAction[] = [
   { id: 'variable', label: 'Variable', icon: 'variable' },
@@ -193,7 +194,8 @@ export function SmsPersistedEditorView({ eventId }: { eventId: string }) {
   const [notice, setNotice] = React.useState<string>();
   const operationIdRef = React.useRef(0);
   const isArchived = document?.status === 'archived';
-  const canEdit = !isArchived;
+  const { can } = usePermissions();
+  const canEdit = !isArchived && can('messages.write');
   const archivedReason = isArchived ? 'Archived templates are read-only.' : undefined;
 
   function nextOperationId() {

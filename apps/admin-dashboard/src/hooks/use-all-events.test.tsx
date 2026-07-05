@@ -3,7 +3,21 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { useAllEvents } from './use-all-events';
 
 function makeEvent(id: string, title: string) {
-  return { id, title, status: 'published', currency: 'USD', grossSalesCents: 0, ticketsSold: 0, checkIns: 0 };
+  return {
+    id,
+    title,
+    status: 'published' as const,
+    startsAt: '2026-07-05T00:00:00Z',
+    timezone: 'UTC',
+    visibility: 'public' as const,
+    seo: { title: '', description: '' },
+    currency: 'USD',
+    grossSalesCents: 0,
+    ticketsSold: 0,
+    resalePolicy: { enabled: false, maxMultiplier: 1 },
+    checkIns: 0,
+    updatedAt: '2026-07-05T00:00:00Z',
+  };
 }
 
 vi.mock('@/lib/api', () => ({

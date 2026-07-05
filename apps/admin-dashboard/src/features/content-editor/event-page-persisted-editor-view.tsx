@@ -71,6 +71,7 @@ import {
   type AdminContentDocumentVersion,
   type AdminEventDetail,
 } from '@/lib/api';
+import { usePermissions } from '@/context/permission-provider';
 
 type AutosaveState = 'idle' | 'saving' | 'saved' | 'error';
 type EditorPreview = {
@@ -1233,7 +1234,8 @@ export function EventPagePersistedEditorView({ eventId }: { eventId: string }) {
   const hydratingEditorRef = React.useRef(false);
   const hydratedDraftIdRef = React.useRef<string | undefined>(undefined);
   const isArchived = document?.status === 'archived';
-  const canEdit = Boolean(document) && !isArchived;
+  const { can } = usePermissions();
+  const canEdit = Boolean(document) && !isArchived && can('events.write');
 
   const pageEditor = useEditor({
     extensions: eventPageEditorExtensions,
