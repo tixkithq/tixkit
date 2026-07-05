@@ -1473,31 +1473,43 @@ function createFloatingVariableMenu(input: {
 
   const handleSelectionRestore = (event: Event) => {
     const detail = (event as CustomEvent<
-      (MergeTagPreviewPluginState['active'] & { focusEditor?: boolean }) | null
+      (MergeTagPreviewPluginState['active'] & {
+        focusEditor?: boolean;
+        softRestore?: boolean;
+      }) | null
     >).detail;
     if (!detail) return;
     const from = Math.max(0, Math.min(detail.from, input.view.state.doc.content.size));
     const to = Math.max(from, Math.min(detail.to, input.view.state.doc.content.size));
     if (from === to) return;
+    // `softRestore` keeps the merge-tag plugin's `active` selection state alive
+    // (so the bubble menu and chip decorations stay anchored) WITHOUT re-setting
+    // the editor's ProseMirror selection. This matters for inspector controls:
+    // a hard `setSelection` for a `text`-scoped range would make the editor's
+    // selection non-empty, which causes the React Email `useInspector` selector
+    // to return "text" and `InspectorNode` to unmount its sections mid-focus,
+    // stealing focus from the input the user just clicked.
+    const softRestore = detail.softRestore === true;
     if (detail.scope === 'node') {
       const node = input.view.state.doc.nodeAt(from);
       if (!node) return;
-      let transaction = input.view.state.tr.setMeta(mergeTagPreviewPluginKey, {
-        active: {
-          from,
-          key: null,
-          nodeName: detail.nodeName ?? node.type.name,
-          scope: 'node',
-          to: Math.min(from + node.nodeSize, input.view.state.doc.content.size),
-        },
-      });
-      try {
-        transaction = transaction.setSelection(NodeSelection.create(transaction.doc, from));
-      } catch {
-        // Non-selectable structural nodes still restore the plugin selection state above.
+      const active = {
+        from,
+        key: null,
+        nodeName: detail.nodeName ?? node.type.name,
+        scope: 'node' as const,
+        to: Math.min(from + node.nodeSize, input.view.state.doc.content.size),
+      };
+      let transaction = input.view.state.tr.setMeta(mergeTagPreviewPluginKey, { active });
+      if (!softRestore) {
+        try {
+          transaction = transaction.setSelection(NodeSelection.create(transaction.doc, from));
+        } catch {
+          // Non-selectable structural nodes still restore the plugin selection state above.
+        }
       }
       input.view.dispatch(transaction);
-      if (detail.focusEditor !== false) input.view.focus();
+      if (!softRestore && detail.focusEditor !== false) input.view.focus();
       return;
     }
     if (detail.scope === 'row') {
@@ -1512,7 +1524,7 @@ function createFloatingVariableMenu(input: {
           },
         }),
       );
-      if (detail.focusEditor !== false) input.view.focus();
+      if (!softRestore && detail.focusEditor !== false) input.view.focus();
       return;
     }
     const mergeTagRange = detail.key
@@ -1522,6 +1534,10 @@ function createFloatingVariableMenu(input: {
       ? { ...mergeTagRange, cursor: mergeTagRange.from + 1, scope: 'text' as const }
       : { from, key: null as string | null, scope: 'text' as const, to };
     if (!active) return;
+    if (softRestore) {
+      input.view.dispatch(input.view.state.tr.setMeta(mergeTagPreviewPluginKey, { active }));
+      return;
+    }
     const transaction = input.view.state.tr
       .setSelection(TextSelection.create(input.view.state.doc, active.from, active.to))
       .setMeta(mergeTagPreviewPluginKey, { active });
