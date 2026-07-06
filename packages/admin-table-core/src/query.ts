@@ -55,6 +55,8 @@ export type AdminTablePage<T> = {
     search?: string;
     sort: AdminTableSort[];
     filters: Record<string, AdminTableFilterValue>;
+    rejectedFilters?: string[];
+    rejectedSort?: string[];
   };
 };
 

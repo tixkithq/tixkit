@@ -18,10 +18,13 @@ import {
   DEFAULT_CURSOR_VERSION,
   getColumn,
   getServerFieldMap,
+  getFilterableColumns,
+  getSortableFields,
   validateSortField,
   validateFilterField,
   hasActiveFilters,
 } from '@tixkit/admin-table-core';
+import { ValidationError } from '@tixkit/domain';
 
 // ---------------------------------------------------------------------------
 // Configuration
@@ -40,6 +43,10 @@ export type TableQueryConfig<T> = {
   serialize: (row: Record<string, unknown>) => T;
   /** Custom filter handlers for computed/virtual fields (e.g. refundState). */
   customFilters?: Record<string, (q: any, value: AdminTableFilterValue, driver: string) => any>;
+  /** Custom facet handlers for computed/virtual fields (e.g. refundState, checkInStatus). */
+  customFacets?: Record<string, (q: any, driver: string) => Promise<AdminTableFacet>>;
+  /** When true, unknown filter/sort fields cause a 400 instead of being silently dropped. */
+  strictValidation?: boolean;
 };
 
 // ---------------------------------------------------------------------------
@@ -51,16 +58,16 @@ export async function executeTableQuery<T>(
   config: TableQueryConfig<T>,
   query: AdminTableQuery,
 ): Promise<AdminTablePage<T>> {
-  const { schema, tableName, tenantId, scope = {}, serialize, customFilters } = config;
+  const { schema, tableName, tenantId, scope = {}, serialize, customFilters, customFacets, strictValidation = false } = config;
   const driver = getDriver();
   const serverFieldMap = getServerFieldMap(schema);
   const limit = Math.min(query.limit ?? schema.defaultPageSize, schema.maxPageSize);
 
   // Validate sort fields against schema whitelist
-  const sort = validateSort(query, schema);
+  const { sort, rejected: rejectedSort } = validateSort(query, schema, strictValidation);
 
   // Validate filter fields against schema whitelist
-  const filters = validateFilters(query, schema);
+  const { filters, rejected: rejectedFilters } = validateFilters(query, schema, strictValidation);
 
   // Apply search to searchable fields
   const search = query.search?.trim() || undefined;
@@ -177,7 +184,19 @@ export async function executeTableQuery<T>(
   let facets: Record<string, AdminTableFacet> | undefined;
   if (query.includeFacets) {
     facets = {};
+    const customFacetFields = customFacets ? Object.keys(customFacets) : [];
+
+    // Process custom facets first (may overlap with schema facetFields or be additional)
+    for (const facetField of customFacetFields) {
+      if (!customFacets?.[facetField]) continue;
+      // Build facet query with all filters EXCEPT this field's own filter
+      const facetQuery = applyFilters(buildBaseQuery(), facetField);
+      facets[facetField] = await customFacets[facetField](facetQuery, driver);
+    }
+
+    // Process remaining schema facet fields that don't have custom handlers
     for (const facetField of schema.facetFields) {
+      if (customFacets?.[facetField]) continue; // already handled above
       const column = getColumn(schema, facetField);
       if (!column || !column.facet) continue;
       const serverField = serverFieldMap[facetField] ?? facetField;
@@ -222,6 +241,8 @@ export async function executeTableQuery<T>(
       search,
       sort,
       filters: filters ?? {},
+      ...(rejectedFilters.length > 0 ? { rejectedFilters } : {}),
+      ...(rejectedSort.length > 0 ? { rejectedSort } : {}),
     },
   };
 }
@@ -230,31 +251,56 @@ export async function executeTableQuery<T>(
 // Helpers
 // ---------------------------------------------------------------------------
 
-function validateSort(query: AdminTableQuery, schema: TableSchema): AdminTableSort[] {
+function validateSort(
+  query: AdminTableQuery,
+  schema: TableSchema,
+  strict?: boolean,
+): { sort: AdminTableSort[]; rejected: string[] } {
   if (!query.sort || query.sort.length === 0) {
-    return [schema.defaultSort];
+    return { sort: [schema.defaultSort], rejected: [] };
   }
   const valid: AdminTableSort[] = [];
+  const rejected: string[] = [];
   for (const s of query.sort) {
     if (validateSortField(schema, s.field)) {
       valid.push(s);
+    } else {
+      rejected.push(s.field);
     }
   }
-  return valid.length > 0 ? valid : [schema.defaultSort];
+  if (strict && rejected.length > 0) {
+    const allowed = getSortableFields(schema).join(', ') || '(none)';
+    throw new ValidationError(
+      `Unknown or non-sortable fields: ${rejected.join(', ')}. Allowed sort fields: ${allowed}`,
+    );
+  }
+  return { sort: valid.length > 0 ? valid : [schema.defaultSort], rejected };
 }
 
 function validateFilters(
   query: AdminTableQuery,
   schema: TableSchema,
-): Record<string, AdminTableFilterValue> | undefined {
-  if (!query.filters) return undefined;
+  strict?: boolean,
+): { filters: Record<string, AdminTableFilterValue> | undefined; rejected: string[] } {
+  if (!query.filters) return { filters: undefined, rejected: [] };
   const valid: Record<string, AdminTableFilterValue> = {};
+  const rejected: string[] = [];
   for (const [field, value] of Object.entries(query.filters)) {
     if (validateFilterField(schema, field, value.type)) {
       valid[field] = value;
+    } else {
+      rejected.push(field);
     }
   }
-  return Object.keys(valid).length > 0 ? valid : undefined;
+  if (strict && rejected.length > 0) {
+    const allowed = getFilterableColumns(schema)
+      .map((c) => `${c.id}(${c.filterType})`)
+      .join(', ') || '(none)';
+    throw new ValidationError(
+      `Unknown or type-mismatched filter fields: ${rejected.join(', ')}. Allowed filter fields: ${allowed}`,
+    );
+  }
+  return { filters: Object.keys(valid).length > 0 ? valid : undefined, rejected };
 }
 
 function applyTextSearch(

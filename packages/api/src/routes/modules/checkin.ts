@@ -252,6 +252,7 @@ export const checkInRoutes: FastifyPluginAsync = async (app) => {
         tenantId: principal.tenantId,
         scope,
         serialize: serializeAttendee,
+        strictValidation: true,
         customFilters: {
           checkInStatus: (q, value) => {
             if (value.type !== 'select' || value.values.length === 0) return q;
@@ -271,6 +272,25 @@ export const checkInRoutes: FastifyPluginAsync = async (app) => {
                 .filter(Boolean);
               return eb.or(conditions);
             });
+          },
+        },
+        customFacets: {
+          checkInStatus: async (q) => {
+            const checkInCounts = (await q
+              .select([
+                sql`case when checked_in_at is not null then 'checked_in' when status = 'refunded' then 'revoked' else 'not_checked_in' end`.as(
+                  'check_in_status',
+                ),
+                sql`count(*)`.as('total'),
+              ])
+              .groupBy('check_in_status')
+              .execute()) as Array<{ check_in_status: string; total: number }>;
+            return {
+              rows: checkInCounts.map((r) => ({
+                value: r.check_in_status,
+                total: Number(r.total),
+              })),
+            };
           },
         },
       },
@@ -344,7 +364,7 @@ export const checkInRoutes: FastifyPluginAsync = async (app) => {
     }
     const { query: tableQuery } = paramsToQuery(attendeesTableSchema, searchParams);
 
-    // Execute the table query with custom checkInStatus filter
+    // Execute the table query with custom checkInStatus filter and facet
     const result = await executeTableQuery(
       db,
       {
@@ -353,6 +373,7 @@ export const checkInRoutes: FastifyPluginAsync = async (app) => {
         tenantId: principal.tenantId,
         scope,
         serialize: serializeAttendee,
+        strictValidation: true,
         customFilters: {
           checkInStatus: (q, value) => {
             if (value.type !== 'select' || value.values.length === 0) return q;
@@ -372,6 +393,25 @@ export const checkInRoutes: FastifyPluginAsync = async (app) => {
                 .filter(Boolean);
               return eb.or(conditions);
             });
+          },
+        },
+        customFacets: {
+          checkInStatus: async (q) => {
+            const checkInCounts = (await q
+              .select([
+                sql`case when checked_in_at is not null then 'checked_in' when status = 'refunded' then 'revoked' else 'not_checked_in' end`.as(
+                  'check_in_status',
+                ),
+                sql`count(*)`.as('total'),
+              ])
+              .groupBy('check_in_status')
+              .execute()) as Array<{ check_in_status: string; total: number }>;
+            return {
+              rows: checkInCounts.map((r) => ({
+                value: r.check_in_status,
+                total: Number(r.total),
+              })),
+            };
           },
         },
       },
@@ -416,67 +456,9 @@ export const checkInRoutes: FastifyPluginAsync = async (app) => {
       };
     });
 
-    // Compute checkInStatus facet manually (computed field, not a direct DB column)
-    let facets = result.facets;
-    if (tableQuery.includeFacets && !facets?.checkInStatus) {
-      facets = facets ?? {};
-      let checkInBaseQuery = db
-        .selectFrom('attendees')
-        .where('tenant_id', '=', principal.tenantId) as any;
-      for (const [field, value] of Object.entries(scope)) {
-        if (Array.isArray(value)) {
-          checkInBaseQuery = checkInBaseQuery.where(field, 'in', value);
-        } else {
-          checkInBaseQuery = checkInBaseQuery.where(field, '=', value);
-        }
-      }
-      if (tableQuery.search) {
-        const search = tableQuery.search.trim();
-        checkInBaseQuery = checkInBaseQuery.where((eb: any) =>
-          eb.or([
-            eb('first_name', 'ilike', `%${search}%`),
-            eb('last_name', 'ilike', `%${search}%`),
-            eb('email', 'ilike', `%${search}%`),
-          ]),
-        );
-      }
-      if (tableQuery.filters) {
-        for (const [field, value] of Object.entries(tableQuery.filters)) {
-          if (field === 'checkInStatus') continue;
-          const column = attendeesTableSchema.columns.find((c) => c.id === field);
-          if (!column) continue;
-          const serverField = column.serverField ?? field;
-          if (value.type === 'select') {
-            checkInBaseQuery = checkInBaseQuery.where(serverField, 'in', value.values);
-          } else if (value.type === 'date_range') {
-            if (value.from)
-              checkInBaseQuery = checkInBaseQuery.where(serverField, '>=', new Date(value.from));
-            if (value.to)
-              checkInBaseQuery = checkInBaseQuery.where(serverField, '<=', new Date(value.to));
-          }
-        }
-      }
-      const checkInCounts = (await checkInBaseQuery
-        .select([
-          sql`case when checked_in_at is not null then 'checked_in' when status = 'refunded' then 'revoked' else 'not_checked_in' end`.as(
-            'check_in_status',
-          ),
-          sql`count(*)`.as('total'),
-        ])
-        .groupBy('check_in_status')
-        .execute()) as Array<{ check_in_status: string; total: number }>;
-      facets.checkInStatus = {
-        rows: checkInCounts.map((r) => ({
-          value: r.check_in_status,
-          total: Number(r.total),
-        })),
-      };
-    }
-
     return {
       ...result,
       items,
-      facets,
     } as AdminTablePage<unknown>;
   });
 

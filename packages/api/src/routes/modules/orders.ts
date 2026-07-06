@@ -177,13 +177,14 @@ export const orderRoutes: FastifyPluginAsync = async (app) => {
     }
     const { query: tableQuery } = paramsToQuery(ordersTableSchema, searchParams);
 
-    // Execute the table query with custom refundState filter
+    // Execute the table query with custom refundState filter and facet
     const result = await executeTableQuery(db, {
       tableName: 'orders',
       schema: ordersTableSchema,
       tenantId: principal.tenantId,
       scope,
       serialize: serializeOrder,
+      strictValidation: true,
       customFilters: {
         refundState: (q, value) => {
           if (value.type === 'boolean') {
@@ -192,6 +193,20 @@ export const orderRoutes: FastifyPluginAsync = async (app) => {
               : q.where('refunded_cents', '=', 0);
           }
           return q;
+        },
+      },
+      customFacets: {
+        refundState: async (q) => {
+          const refundCounts = await q
+            .select([
+              sql`case when refunded_cents > 0 then true else false end`.as('is_refunded'),
+              sql`count(*)`.as('total'),
+            ])
+            .groupBy('is_refunded')
+            .execute() as Array<{ is_refunded: boolean; total: number }>;
+          return {
+            rows: refundCounts.map((r) => ({ value: r.is_refunded, total: Number(r.total) })),
+          };
         },
       },
     }, tableQuery);
@@ -219,61 +234,9 @@ export const orderRoutes: FastifyPluginAsync = async (app) => {
       };
     });
 
-    // Compute refundState facet manually (boolean facet on a computed field)
-    let facets = result.facets;
-    if (tableQuery.includeFacets && !facets?.refundState) {
-      facets = facets ?? {};
-      // Build a count query with all filters EXCEPT refundState
-      let refundBaseQuery = db
-        .selectFrom('orders')
-        .where('tenant_id', '=', principal.tenantId) as any;
-      for (const [field, value] of Object.entries(scope)) {
-        if (Array.isArray(value)) {
-          refundBaseQuery = refundBaseQuery.where(field, 'in', value);
-        } else {
-          refundBaseQuery = refundBaseQuery.where(field, '=', value);
-        }
-      }
-      // Apply search and other filters except refundState
-      if (tableQuery.search) {
-        const search = tableQuery.search.trim();
-        refundBaseQuery = refundBaseQuery.where('buyer_email', 'ilike', `%${search}%`);
-      }
-      if (tableQuery.filters) {
-        for (const [field, value] of Object.entries(tableQuery.filters)) {
-          if (field === 'refundState') continue;
-          const column = ordersTableSchema.columns.find((c) => c.id === field);
-          if (!column) continue;
-          const serverField = column.serverField ?? field;
-          if (value.type === 'select') {
-            refundBaseQuery = refundBaseQuery.where(serverField, 'in', value.values);
-          } else if (value.type === 'boolean') {
-            refundBaseQuery = refundBaseQuery.where(serverField, '=', value.value);
-          } else if (value.type === 'date_range') {
-            if (value.from) refundBaseQuery = refundBaseQuery.where(serverField, '>=', new Date(value.from));
-            if (value.to) refundBaseQuery = refundBaseQuery.where(serverField, '<=', new Date(value.to));
-          } else if (value.type === 'number_range') {
-            if (value.min !== undefined) refundBaseQuery = refundBaseQuery.where(serverField, '>=', value.min);
-            if (value.max !== undefined) refundBaseQuery = refundBaseQuery.where(serverField, '<=', value.max);
-          }
-        }
-      }
-      const refundCounts = await refundBaseQuery
-        .select([
-          sql`case when refunded_cents > 0 then true else false end`.as('is_refunded'),
-          sql`count(*)`.as('total'),
-        ])
-        .groupBy('is_refunded')
-        .execute() as Array<{ is_refunded: boolean; total: number }>;
-      facets.refundState = {
-        rows: refundCounts.map((r) => ({ value: r.is_refunded, total: Number(r.total) })),
-      };
-    }
-
     return {
       ...result,
       items,
-      facets,
     } as AdminTablePage<unknown>;
   });
 
