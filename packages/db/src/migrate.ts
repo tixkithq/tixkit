@@ -45,6 +45,7 @@ import { UploadArtifactConsumptionMigration } from './migrations/0041_upload_art
 import { AccessRuleRedemptionsMigration } from './migrations/0042_access_rule_redemptions.js';
 import { WaitlistCheckoutReservationsMigration } from './migrations/0043_waitlist_checkout_reservations.js';
 import { CheckoutHoldOccurrencesMigration } from './migrations/0044_checkout_hold_occurrences.js';
+import { TableQueryIndexesMigration } from './migrations/0045_table_query_indexes.js';
 
 const INITIAL_MIGRATION_NAME = '0001_initial';
 const MIGRATION_TABLE = 'kysely_migration';
@@ -213,6 +214,7 @@ export class TixkitMigrationProvider implements MigrationProvider {
       '0042_access_rule_redemptions': AccessRuleRedemptionsMigration,
       '0043_waitlist_checkout_reservations': WaitlistCheckoutReservationsMigration,
       '0044_checkout_hold_occurrences': CheckoutHoldOccurrencesMigration,
+      '0045_table_query_indexes': TableQueryIndexesMigration,
     };
   }
 }

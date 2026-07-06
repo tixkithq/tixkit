@@ -66,3 +66,5 @@ export {
 
 export { ShortLinkRepository } from './short-links.js';
 export { ContentRepository } from './content.js';
+export { executeTableQuery, assertServerField } from './table-query.js';
+export type { TableQueryConfig } from './table-query.js';

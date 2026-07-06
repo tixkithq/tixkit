@@ -371,6 +371,32 @@ export class ContentRepository extends BaseRepository {
     return this.toVersion(row);
   }
 
+  /**
+   * Update an existing version's content fields in place (used by migrations).
+   */
+  async updateVersionContent(input: {
+    versionId: string;
+    contentJson: unknown;
+    renderedHtml?: string;
+    renderedText?: string;
+    subject?: string;
+    previewText?: string;
+  }): Promise<void> {
+    const updates: Record<string, unknown> = {
+      content_json: JSON.stringify(input.contentJson),
+    };
+    if (input.renderedHtml !== undefined) updates.rendered_html = input.renderedHtml;
+    if (input.renderedText !== undefined) updates.rendered_text = input.renderedText;
+    if (input.subject !== undefined) updates.subject = input.subject;
+    if (input.previewText !== undefined) updates.preview_text = input.previewText;
+
+    await (this.db as any)
+      .updateTable('content_document_versions')
+      .set(updates)
+      .where('id', '=', input.versionId)
+      .execute();
+  }
+
   async publishVersion(input: {
     documentId: string;
     versionId: string;

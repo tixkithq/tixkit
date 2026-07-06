@@ -15,6 +15,8 @@ import { ScannerDeviceScopesMigration } from '../../migrations/0040_scanner_devi
 import { UploadArtifactConsumptionMigration } from '../../migrations/0041_upload_artifact_consumption.js';
 import { AccessRuleRedemptionsMigration } from '../../migrations/0042_access_rule_redemptions.js';
 import { WaitlistCheckoutReservationsMigration } from '../../migrations/0043_waitlist_checkout_reservations.js';
+import { CheckoutHoldOccurrencesMigration } from '../../migrations/0044_checkout_hold_occurrences.js';
+import { TableQueryIndexesMigration } from '../../migrations/0045_table_query_indexes.js';
 
 const offlineCheckInBulkSyncMigrationPath = new URL(
   '../../migrations/0034_offline_check_in_bulk_sync.ts',
@@ -181,7 +183,7 @@ describe('OrderSalesChannelMigration', () => {
   it('is registered with the production migrator provider', async () => {
     const migrations = await new TixkitMigrationProvider().getMigrations();
 
-    expect(Object.keys(migrations).at(-1)).toBe('0043_waitlist_checkout_reservations');
+    expect(Object.keys(migrations).at(-1)).toBe('0045_table_query_indexes');
     expect(migrations['0031_order_sales_channel']).toBe(OrderSalesChannelMigration);
     expect(migrations['0032_scan_logs_ticket_index']).toBe(ScanLogsTicketIndexMigration);
     expect(migrations['0033_email_jobs_template_version_fk']).toBe(
@@ -204,6 +206,12 @@ describe('OrderSalesChannelMigration', () => {
     expect(migrations['0042_access_rule_redemptions']).toBe(AccessRuleRedemptionsMigration);
     expect(migrations['0043_waitlist_checkout_reservations']).toBe(
       WaitlistCheckoutReservationsMigration,
+    );
+    expect(migrations['0044_checkout_hold_occurrences']).toBe(
+      CheckoutHoldOccurrencesMigration,
+    );
+    expect(migrations['0045_table_query_indexes']).toBe(
+      TableQueryIndexesMigration,
     );
   });
 
