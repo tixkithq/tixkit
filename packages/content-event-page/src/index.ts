@@ -138,7 +138,33 @@ export type EventPageBlock =
   | { type: 'button'; id: string; label: string; url: string; style?: 'primary' | 'secondary' }
   | { type: 'divider'; id: string }
   | { type: 'social_links'; id: string; title?: string; links: EventPageLink[] }
-  | { type: 'custom_embed'; id: string; html: string; allowUnsafeEmbed: boolean };
+  | { type: 'custom_embed'; id: string; html: string; allowUnsafeEmbed: boolean }
+  | {
+      type: 'event_header';
+      id: string;
+      badgeLabel?: string;
+      descriptionOverride?: string;
+      showBadge?: boolean;
+      showDate?: boolean;
+      showVenue?: boolean;
+      showDescription?: boolean;
+    }
+  | {
+      type: 'resale_tickets';
+      id: string;
+      title: string;
+      ctaLabel?: string;
+      emptyStateText?: string;
+      showVerifiedBadge?: boolean;
+    }
+  | {
+      type: 'brand_footer';
+      id: string;
+      showSupport?: boolean;
+      showTerms?: boolean;
+      showPrivacy?: boolean;
+      showRefund?: boolean;
+    };
 
 export type EventPageDetailItem = {
   label: string;
@@ -194,9 +220,17 @@ export type EventPageProduct = {
   priceLabel?: string;
 };
 
+export type EventPageResaleListing = {
+  id: string;
+  ticketTypeName?: string;
+  priceLabel: string;
+  expiresAt?: string;
+};
+
 export type EventPageRenderContext = MergeTagContext & {
   tickets?: EventPageTicket[];
   products?: EventPageProduct[];
+  resaleListings?: EventPageResaleListing[];
 };
 
 export type EventPageHeadlessBlock = {
@@ -310,7 +344,32 @@ export type ResolvedEventPageBlock =
   | { type: 'button'; id: string; label: string; url: string; style?: 'primary' | 'secondary' }
   | { type: 'divider'; id: string }
   | { type: 'social_links'; id: string; title?: string; links: ResolvedEventPageLink[] }
-  | { type: 'custom_embed'; id: string; html: string; allowed: boolean };
+  | { type: 'custom_embed'; id: string; html: string; allowed: boolean }
+  | {
+      type: 'event_header';
+      id: string;
+      badgeLabel?: string;
+      title: string;
+      description?: string;
+      startsAt?: string;
+      timezone?: string;
+      venueName?: string;
+      showBadge: boolean;
+      showDate: boolean;
+      showVenue: boolean;
+      showDescription: boolean;
+    }
+  | {
+      type: 'resale_tickets';
+      id: string;
+      title: string;
+      ctaLabel?: string;
+      emptyStateText?: string;
+      showVerifiedBadge: boolean;
+      listings: EventPageResaleListing[];
+      checkoutUrl?: string;
+    }
+  | { type: 'brand_footer'; id: string; links: ResolvedEventPageLink[] };
 
 export type ResolvedEventPage = {
   schemaVersion: typeof EVENT_PAGE_SCHEMA_VERSION;
@@ -475,6 +534,14 @@ export function createDefaultEventPageDocument(input: {
     },
     blocks: [
       {
+        type: 'event_header',
+        id: 'header',
+        showBadge: true,
+        showDate: true,
+        showVenue: true,
+        showDescription: true,
+      },
+      {
         type: 'hero',
         id: 'hero',
         eyebrow: input.brandName ?? '{{brand.name}}',
@@ -536,6 +603,22 @@ export function createDefaultEventPageDocument(input: {
               'Tickets are delivered by email after checkout and can be opened from your confirmation page.',
           },
         ],
+      },
+      {
+        type: 'resale_tickets',
+        id: 'resale',
+        title: 'Resale tickets',
+        ctaLabel: 'Buy resale',
+        emptyStateText: 'No resale tickets available.',
+        showVerifiedBadge: true,
+      },
+      {
+        type: 'brand_footer',
+        id: 'footer',
+        showSupport: true,
+        showTerms: true,
+        showPrivacy: true,
+        showRefund: true,
       },
     ],
   };
@@ -830,6 +913,83 @@ function resolveBlock(
         allowed,
       };
     }
+    case 'event_header': {
+      const showBadge = block.showBadge ?? true;
+      const showDate = block.showDate ?? true;
+      const showVenue = block.showVenue ?? true;
+      const showDescription = block.showDescription ?? true;
+      return {
+        type: 'event_header',
+        id: block.id,
+        badgeLabel: showBadge
+          ? block.badgeLabel
+            ? renderPlain(block.badgeLabel, context)
+            : context.brand?.name
+          : undefined,
+        title: context.event?.title ?? '',
+        description: showDescription
+          ? block.descriptionOverride
+            ? renderPlain(block.descriptionOverride, context)
+            : context.event?.description
+          : undefined,
+        startsAt: showDate ? context.event?.startsAt : undefined,
+        timezone: showDate ? context.event?.timezone : undefined,
+        venueName: showVenue ? context.event?.venueName : undefined,
+        showBadge,
+        showDate,
+        showVenue,
+        showDescription,
+      };
+    }
+    case 'resale_tickets': {
+      const checkoutUrl = context.event?.checkoutUrl
+        ? safeRenderedUrl(context.event.checkoutUrl, context, options)
+        : undefined;
+      return {
+        type: 'resale_tickets',
+        id: block.id,
+        title: renderPlain(block.title, context),
+        ctaLabel: block.ctaLabel ? renderPlain(block.ctaLabel, context) : undefined,
+        emptyStateText: block.emptyStateText
+          ? renderPlain(block.emptyStateText, context)
+          : undefined,
+        showVerifiedBadge: block.showVerifiedBadge ?? true,
+        listings: (context.resaleListings ?? []).filter(Boolean),
+        checkoutUrl,
+      };
+    }
+    case 'brand_footer': {
+      const showSupport = block.showSupport ?? true;
+      const showTerms = block.showTerms ?? true;
+      const showPrivacy = block.showPrivacy ?? true;
+      const showRefund = block.showRefund ?? true;
+      const links: ResolvedEventPageLink[] = [];
+      if (showSupport && context.brand?.supportUrl) {
+        links.push({
+          label: 'Support',
+          url: safeRenderedUrl(context.brand.supportUrl, context, options),
+        });
+      }
+      if (showTerms && context.brand?.termsUrl) {
+        links.push({
+          label: 'Terms',
+          url: safeRenderedUrl(context.brand.termsUrl, context, options),
+        });
+      }
+      if (showPrivacy && context.brand?.privacyUrl) {
+        links.push({
+          label: 'Privacy',
+          url: safeRenderedUrl(context.brand.privacyUrl, context, options),
+        });
+      }
+      if (showRefund && context.brand?.refundUrl) {
+        links.push({
+          label: 'Refund',
+          url: safeRenderedUrl(context.brand.refundUrl, context, options),
+        });
+      }
+      return { type: 'brand_footer', id: block.id, links };
+    }
   }
 }
 
@@ -920,6 +1080,55 @@ function resolvedBlockHtml(block: ResolvedEventPageBlock): string {
       return block.html
         ? `<section class="tk-ep-embed" data-block-id="${escapeAttr(block.id)}">${block.html}</section>`
         : '';
+    case 'event_header': {
+      const meta: string[] = [];
+      if (block.showDate && block.startsAt) {
+        meta.push(
+          `<div><dt>Date</dt><dd>${escapeHtml(block.startsAt)}</dd></div>`,
+        );
+      }
+      if (block.showDate && block.timezone) {
+        meta.push(
+          `<div><dt>Timezone</dt><dd>${escapeHtml(block.timezone)}</dd></div>`,
+        );
+      }
+      if (block.showVenue && block.venueName) {
+        meta.push(
+          `<div><dt>Venue</dt><dd>${escapeHtml(block.venueName)}</dd></div>`,
+        );
+      }
+      return [
+        `<section class="tk-ep-header" data-block-id="${escapeAttr(block.id)}">`,
+        block.showBadge && block.badgeLabel
+          ? `<p class="tk-ep-badge">${escapeHtml(block.badgeLabel)}</p>`
+          : '',
+        `<p class="tk-ep-header__title">${escapeHtml(block.title)}</p>`,
+        block.showDescription && block.description
+          ? `<p class="tk-ep-header__description">${escapeHtml(block.description)}</p>`
+          : '',
+        meta.length > 0 ? `<dl class="tk-ep-header__meta">${meta.join('')}</dl>` : '',
+        '</section>',
+      ].join('');
+    }
+    case 'resale_tickets': {
+      const list =
+        block.listings.length > 0
+          ? `<ul>${block.listings
+              .map(
+                (listing) =>
+                  `<li><strong>${escapeHtml(listing.ticketTypeName ? `Resale ticket - ${listing.ticketTypeName}` : 'Resale ticket')}</strong><span>1 available</span>${listing.priceLabel ? `<span>${escapeHtml(listing.priceLabel)}</span>` : ''}${listing.expiresAt ? `<span>Expires ${escapeHtml(listing.expiresAt)}</span>` : ''}</li>`,
+              )
+              .join('')}</ul>`
+          : `<p>${escapeHtml(block.emptyStateText ?? 'No resale tickets available.')}</p>`;
+      return `<section class="tk-ep-resale" data-block-id="${escapeAttr(block.id)}"><div class="tk-ep-resale__header"><h2>${escapeHtml(block.title)}</h2>${block.showVerifiedBadge ? '<span class="tk-ep-badge tk-ep-badge--verified">Verified listings</span>' : ''}</div>${list}${block.ctaLabel && block.checkoutUrl ? `<a class="tk-ep-button" href="${escapeAttr(block.checkoutUrl)}">${escapeHtml(block.ctaLabel)}</a>` : ''}</section>`;
+    }
+    case 'brand_footer': {
+      return block.links.length > 0
+        ? `<footer class="tk-ep-footer" data-block-id="${escapeAttr(block.id)}"><ul class="tk-ep-footer__links">${block.links
+            .map((link) => `<li><a href="${escapeAttr(link.url)}">${escapeHtml(link.label)}</a></li>`)
+            .join('')}</ul></footer>`
+        : `<footer class="tk-ep-footer" data-block-id="${escapeAttr(block.id)}"></footer>`;
+    }
   }
 }
 
@@ -1015,6 +1224,29 @@ function resolvedBlockHeadless(block: ResolvedEventPageBlock): EventPageHeadless
       };
     case 'custom_embed':
       return { type: block.type, id: block.id, html: resolvedBlockHtml(block) };
+    case 'event_header':
+      return {
+        type: block.type,
+        id: block.id,
+        title: block.title,
+        text: block.description,
+        html: resolvedBlockHtml(block),
+      };
+    case 'resale_tickets':
+      return {
+        type: block.type,
+        id: block.id,
+        title: block.title,
+        html: resolvedBlockHtml(block),
+        items: block.listings,
+      };
+    case 'brand_footer':
+      return {
+        type: block.type,
+        id: block.id,
+        html: resolvedBlockHtml(block),
+        links: block.links,
+      };
   }
 }
 
@@ -1131,7 +1363,47 @@ export function normalizeEventPageDocument(value: unknown): EventPageDocument | 
     return undefined;
   }
   if (!isRecord(value.settings) || !Array.isArray(value.blocks)) return undefined;
-  return value as EventPageDocument;
+  const rawBlocks = value.blocks as EventPageBlock[];
+  const hasHeader = rawBlocks.some((block) => isRecord(block) && block.type === 'event_header');
+  const hasResale = rawBlocks.some(
+    (block) => isRecord(block) && block.type === 'resale_tickets',
+  );
+  const hasFooter = rawBlocks.some((block) => isRecord(block) && block.type === 'brand_footer');
+  if (hasHeader && hasResale && hasFooter) {
+    return value as EventPageDocument;
+  }
+  const blocks: EventPageBlock[] = [...rawBlocks];
+  if (!hasHeader) {
+    blocks.unshift({
+      type: 'event_header',
+      id: 'header',
+      showBadge: true,
+      showDate: true,
+      showVenue: true,
+      showDescription: true,
+    });
+  }
+  if (!hasResale) {
+    blocks.push({
+      type: 'resale_tickets',
+      id: 'resale',
+      title: 'Resale tickets',
+      ctaLabel: 'Buy resale',
+      emptyStateText: 'No resale tickets available.',
+      showVerifiedBadge: true,
+    });
+  }
+  if (!hasFooter) {
+    blocks.push({
+      type: 'brand_footer',
+      id: 'footer',
+      showSupport: true,
+      showTerms: true,
+      showPrivacy: true,
+      showRefund: true,
+    });
+  }
+  return { ...(value as EventPageDocument), blocks };
 }
 
 function renderTipTap(content: JSONContent, context: MergeTagContext): string {
@@ -1549,6 +1821,12 @@ function stringsFromBlock(block: EventPageBlock): string[] {
       return [block.title ?? '', ...block.links.flatMap((link) => [link.label, link.url])];
     case 'custom_embed':
       return [block.html];
+    case 'event_header':
+      return [block.badgeLabel ?? '', block.descriptionOverride ?? ''];
+    case 'resale_tickets':
+      return [block.title, block.ctaLabel ?? '', block.emptyStateText ?? ''];
+    case 'brand_footer':
+      return [];
   }
 }
 

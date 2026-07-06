@@ -51,12 +51,15 @@ describe('createDefaultEventPageDocument', () => {
 
     expect(document.editor.provider).toBe(TIPTAP_EVENT_PAGE_PROVIDER);
     expect(document.blocks.map((block) => block.type)).toEqual([
+      'event_header',
       'hero',
       'event_details',
       'tickets',
       'schedule',
       'venue_map',
       'faq',
+      'resale_tickets',
+      'brand_footer',
     ]);
     expect(validateEventPageDocument(document).valid).toBe(true);
   });
@@ -241,11 +244,11 @@ describe('renderEventPageDocument', () => {
       expect.arrayContaining([
         expect.objectContaining({
           code: 'unsafe_image',
-          field: 'blocks.6.content.content.0.attrs.src',
+          field: 'blocks.9.content.content.0.attrs.src',
         }),
         expect.objectContaining({
           code: 'missing_image_alt',
-          field: 'blocks.6.content.content.0.attrs.alt',
+          field: 'blocks.9.content.content.0.attrs.alt',
         }),
       ]),
     );

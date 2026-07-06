@@ -254,6 +254,86 @@ export function EventPageBlockView({ block, onTicketCtaClick }: BlockViewProps) 
           dangerouslySetInnerHTML={{ __html: block.html }}
         />
       ) : null;
+    case 'event_header':
+      return (
+        <section className="tk-ep-header" data-block-id={block.id}>
+          {block.showBadge && block.badgeLabel ? (
+            <p className="tk-ep-badge">{block.badgeLabel}</p>
+          ) : null}
+          <p className="tk-ep-header__title">{block.title}</p>
+          {block.showDescription && block.description ? (
+            <p className="tk-ep-header__description">{block.description}</p>
+          ) : null}
+          {block.showDate || block.showVenue ? (
+            <dl className="tk-ep-header__meta">
+              {block.showDate && block.startsAt ? (
+                <div>
+                  <dt>Date</dt>
+                  <dd>{block.startsAt}</dd>
+                </div>
+              ) : null}
+              {block.showDate && block.timezone ? (
+                <div>
+                  <dt>Timezone</dt>
+                  <dd>{block.timezone}</dd>
+                </div>
+              ) : null}
+              {block.showVenue && block.venueName ? (
+                <div>
+                  <dt>Venue</dt>
+                  <dd>{block.venueName}</dd>
+                </div>
+              ) : null}
+            </dl>
+          ) : null}
+        </section>
+      );
+    case 'resale_tickets':
+      return (
+        <section className="tk-ep-resale" data-block-id={block.id}>
+          <div className="tk-ep-resale__header">
+            <h2>{block.title}</h2>
+            {block.showVerifiedBadge ? (
+              <span className="tk-ep-badge tk-ep-badge--verified">Verified listings</span>
+            ) : null}
+          </div>
+          {block.listings.length > 0 ? (
+            <ul>
+              {block.listings.map((listing) => (
+                <li key={listing.id}>
+                  <strong>
+                    {listing.ticketTypeName ? `Resale ticket - ${listing.ticketTypeName}` : 'Resale ticket'}
+                  </strong>
+                  <span>1 available</span>
+                  {listing.priceLabel ? <span>{listing.priceLabel}</span> : null}
+                  {listing.expiresAt ? <span>Expires {listing.expiresAt}</span> : null}
+                </li>
+              ))}
+            </ul>
+          ) : (
+            <p>{block.emptyStateText ?? 'No resale tickets available.'}</p>
+          )}
+          {block.ctaLabel && block.checkoutUrl ? (
+            <a className="tk-ep-button" href={block.checkoutUrl}>
+              {block.ctaLabel}
+            </a>
+          ) : null}
+        </section>
+      );
+    case 'brand_footer':
+      return block.links.length > 0 ? (
+        <footer className="tk-ep-footer" data-block-id={block.id}>
+          <ul className="tk-ep-footer__links">
+            {block.links.map((link) => (
+              <li key={link.url}>
+                <a href={link.url}>{link.label}</a>
+              </li>
+            ))}
+          </ul>
+        </footer>
+      ) : (
+        <footer className="tk-ep-footer" data-block-id={block.id} />
+      );
     default: {
       const exhaustive: never = block;
       return exhaustive;

@@ -117,6 +117,27 @@ export type PublicContentPage = {
   };
 };
 
+export type DraftPreviewPage = {
+  document: {
+    eventId: string;
+    channel: 'event_page';
+    key: string;
+    name: string;
+    locale: string;
+    updatedAt: string;
+  };
+  version: {
+    versionNumber: number;
+    status: string;
+    subject?: string;
+    previewText?: string;
+  };
+  contentJson: unknown;
+  context: Record<string, unknown>;
+  renderModel?: ResolvedEventPage;
+  validation: { valid: boolean; severity: string; issues: unknown[] };
+};
+
 export type CheckoutQuote = {
   totalCents: number;
   subtotalCents: number;
@@ -506,6 +527,18 @@ export const publicApi = {
     if (locale) params.set('locale', locale);
     return apiRequest<PublicContentPage>(
       `/public/events/by-slug/${encodeURIComponent(slug)}/page?${params.toString()}`,
+      { signal },
+    );
+  },
+
+  async getDraftPreview(
+    eventId: string,
+    token: string,
+    signal?: AbortSignal,
+  ): Promise<DraftPreviewPage> {
+    const params = new URLSearchParams({ token });
+    return apiRequest<DraftPreviewPage>(
+      `/public/events/${encodeURIComponent(eventId)}/draft-preview?${params.toString()}`,
       { signal },
     );
   },

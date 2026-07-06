@@ -420,6 +420,50 @@ Supported purposes are `checkout_answer`, `brand_logo`, `user_avatar`, and `cont
 
 Refund body: `{ "amountCents"?, "reason", "voidTickets"?, "restoreInventory"? }`. If `amountCents` is omitted, refunds the remaining refundable balance. The workflow processes the provider refund, updates the ledger, voids tickets (if `voidTickets`), optionally restores inventory, and notifies the buyer. Returns `202` with `{ status: "pending" }`.
 
+#### Admin Table Query Parameters
+
+`GET /v1/orders` supports server-backed filtering, sorting, cursor pagination, and facet metadata via flat URL query parameters. Parameters are validated against a server-owned schema; unknown fields are ignored.
+
+| Parameter         | Type         | Description                                          |
+| ----------------- | ------------ | ---------------------------------------------------- |
+| `search`          | string       | Text search on buyer email (case-insensitive)        |
+| `status`          | CSV string   | Filter by order status (e.g. `paid,failed`)           |
+| `salesChannel`    | CSV string   | Filter by sales channel (`online`, `box_office`)      |
+| `paymentProvider` | CSV string   | Filter by payment provider (`stripe`, `free`, `manual`) |
+| `refundState`     | boolean      | Filter by refund state (`true` = refunded, `false` = not) |
+| `totalCentsMin`   | number       | Minimum total in cents                               |
+| `totalCentsMax`   | number       | Maximum total in cents                               |
+| `createdAtFrom`   | ISO date     | Filter orders created after this date                |
+| `createdAtTo`     | ISO date     | Filter orders created before this date               |
+| `eventId`         | CSV string   | Filter by event ID(s)                                |
+| `sort`            | CSV string   | Sort field and direction (e.g. `createdAt:desc`)     |
+| `limit`           | integer      | Page size (default 50, max 100)                      |
+| `cursor`          | string       | Opaque cursor for pagination                         |
+| `direction`       | string       | Pagination direction (`next` or `prev`)              |
+| `includeFacets`   | boolean      | Include facet metadata in the response               |
+
+The response includes `items`, `nextCursor`, `prevCursor`, `total`, `filterTotal`, `facets`, and `applied` fields. Facets provide option counts for `status`, `salesChannel`, `paymentProvider`, `refundState`, and `eventId`, plus min/max ranges for `totalCents` and `createdAt`. Cursor pagination is stable under concurrent inserts.
+
+`GET /v1/attendees` supports the same server-backed filtering, sorting, cursor pagination, and facet metadata via flat URL query parameters.
+
+| Parameter         | Type         | Description                                                       |
+| ----------------- | ------------ | ----------------------------------------------------------------- |
+| `search`          | string       | Text search on attendee first name, last name, and email          |
+| `status`          | CSV string   | Filter by attendee status (`active`, `cancelled`, `refunded`, `transferred`) |
+| `checkInStatus`   | CSV string   | Filter by check-in status (`checked_in`, `not_checked_in`, `revoked`) |
+| `createdAtFrom`   | ISO date     | Filter attendees registered after this date                       |
+| `createdAtTo`     | ISO date     | Filter attendees registered before this date                      |
+| `checkedInAtFrom` | ISO date     | Filter attendees checked in after this date                       |
+| `checkedInAtTo`   | ISO date     | Filter attendees checked in before this date                      |
+| `eventId`         | CSV string   | Filter by event ID(s)                                             |
+| `sort`            | CSV string   | Sort field and direction (e.g. `createdAt:desc`)                  |
+| `limit`           | integer      | Page size (default 50, max 100)                                   |
+| `cursor`          | string       | Opaque cursor for pagination                                      |
+| `direction`       | string       | Pagination direction (`next` or `prev`)                           |
+| `includeFacets`   | boolean      | Include facet metadata in the response                            |
+
+The response includes `items`, `nextCursor`, `prevCursor`, `total`, `filterTotal`, `facets`, and `applied` fields. Facets provide option counts for `status`, `eventId`, and `checkInStatus` (computed from `checked_in_at` and `status`), plus min/max ranges for `createdAt`. Each item is enriched with `eventTitle` and `ticketTypeName`.
+
 ### Attendees & Check-in
 
 | Method  | Path                                                         | Scope             | Description                                                                                                                |

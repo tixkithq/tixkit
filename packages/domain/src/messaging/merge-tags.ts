@@ -34,11 +34,15 @@ export type MergeTagEventContext = {
   refundPolicyUrl?: string;
   changeSummary?: string;
   cancellationReason?: string;
+  description?: string;
 };
 
 export type MergeTagBrandContext = {
   name?: string;
   supportUrl?: string;
+  termsUrl?: string;
+  privacyUrl?: string;
+  refundUrl?: string;
 };
 
 export type MergeTagRecipientContext = {
@@ -186,11 +190,31 @@ export const MERGE_TAG_REGISTRY: readonly MergeTagVariable[] = [
     description: 'Hosted checkout URL',
     example: 'https://checkout.example.test/checkout?eventId=evt_1',
   },
+  {
+    key: 'event.description',
+    description: 'Event description / long-form summary',
+    example: 'A full night of music and access.',
+  },
   { key: 'brand.name', description: 'Brand/organizer name', example: 'Acme Events' },
   {
     key: 'brand.supportUrl',
     description: 'Brand support URL',
     example: 'https://help.example.test',
+  },
+  {
+    key: 'brand.termsUrl',
+    description: 'Brand terms of service URL',
+    example: 'https://example.test/terms',
+  },
+  {
+    key: 'brand.privacyUrl',
+    description: 'Brand privacy policy URL',
+    example: 'https://example.test/privacy',
+  },
+  {
+    key: 'brand.refundUrl',
+    description: 'Brand refund policy URL',
+    example: 'https://example.test/refunds',
   },
   {
     key: 'recipient.name',
@@ -385,6 +409,9 @@ const URL_TAG_KEYS = new Set([
   'event.mapUrl',
   'event.refundPolicyUrl',
   'brand.supportUrl',
+  'brand.termsUrl',
+  'brand.privacyUrl',
+  'brand.refundUrl',
   'ticket.qrCodeUrl',
   'ticket.pdfUrl',
   'ticket.walletAppleUrl',
@@ -447,10 +474,18 @@ function resolveTag(key: string, context: MergeTagContext): string | undefined {
       return context.event?.publicUrl;
     case 'event.checkoutUrl':
       return context.event?.checkoutUrl;
+    case 'event.description':
+      return context.event?.description;
     case 'brand.name':
       return context.brand?.name;
     case 'brand.supportUrl':
       return context.brand?.supportUrl;
+    case 'brand.termsUrl':
+      return context.brand?.termsUrl;
+    case 'brand.privacyUrl':
+      return context.brand?.privacyUrl;
+    case 'brand.refundUrl':
+      return context.brand?.refundUrl;
     case 'recipient.name':
       return context.recipient?.name;
     case 'recipient.email':

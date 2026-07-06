@@ -42,6 +42,9 @@ const BLOCK_LABELS: Record<EventPageBlock['type'], string> = {
   social_links: 'Social links',
   custom_embed: 'Custom embed',
   rich_text: 'Rich text',
+  event_header: 'Event header',
+  resale_tickets: 'Resale tickets',
+  brand_footer: 'Brand footer',
 };
 
 const BLOCK_SURFACE_CLASS: Record<EventPageBlock['type'], string> = {
@@ -59,6 +62,9 @@ const BLOCK_SURFACE_CLASS: Record<EventPageBlock['type'], string> = {
   divider: 'tk-ep-divider',
   social_links: 'tk-ep-social',
   custom_embed: 'tk-ep-embed',
+  event_header: 'tk-ep-header',
+  resale_tickets: 'tk-ep-resale',
+  brand_footer: 'tk-ep-footer',
 };
 
 /**
@@ -482,6 +488,90 @@ export function EditableBlockBody({
           />
         </div>
       );
+    case 'event_header':
+      return (
+        <div className="tk-ep-header" data-block-id={block.id}>
+          <EditableText
+            as="p"
+            className="tk-ep-badge"
+            disabled={disabled}
+            placeholder="Badge label (defaults to brand name)"
+            ariaLabel="Badge label"
+            value={block.badgeLabel ?? ''}
+            onChange={(badgeLabel) => onChange({ ...block, badgeLabel })}
+          />
+          <p className="tk-ep-header__title">
+            {sampleContext.event?.title ?? 'Event title'}
+          </p>
+          <EditableText
+            as="p"
+            multiline
+            className="tk-ep-header__description"
+            disabled={disabled}
+            placeholder="Description override (defaults to event description)"
+            ariaLabel="Description override"
+            value={block.descriptionOverride ?? ''}
+            onChange={(descriptionOverride) => onChange({ ...block, descriptionOverride })}
+          />
+        </div>
+      );
+    case 'resale_tickets':
+      return (
+        <div className="tk-ep-resale" data-block-id={block.id}>
+          <EditableText
+            as="h2"
+            className="tk-ep-resale__title"
+            disabled={disabled}
+            placeholder="Resale section title"
+            ariaLabel="Resale tickets title"
+            value={block.title}
+            onChange={(title) => onChange({ ...block, title })}
+          />
+          <ul>
+            {(sampleContext.resaleListings ?? []).map((listing) => (
+              <li key={listing.id}>
+                <strong>
+                  {listing.ticketTypeName ? `Resale ticket - ${listing.ticketTypeName}` : 'Resale ticket'}
+                </strong>
+                {listing.priceLabel ? <span>{listing.priceLabel}</span> : null}
+              </li>
+            ))}
+          </ul>
+          <EditableText
+            className="tk-ep-button__label"
+            disabled={disabled}
+            placeholder="Resale CTA label"
+            ariaLabel="Resale CTA label"
+            value={block.ctaLabel ?? ''}
+            onChange={(ctaLabel) => onChange({ ...block, ctaLabel })}
+          />
+        </div>
+      );
+    case 'brand_footer': {
+      const brand = sampleContext.brand;
+      const links: { label: string; url: string }[] = [];
+      if (brand?.supportUrl) links.push({ label: 'Support', url: brand.supportUrl });
+      if (brand?.termsUrl) links.push({ label: 'Terms', url: brand.termsUrl });
+      if (brand?.privacyUrl) links.push({ label: 'Privacy', url: brand.privacyUrl });
+      if (brand?.refundUrl) links.push({ label: 'Refund', url: brand.refundUrl });
+      return (
+        <div className="tk-ep-footer" data-block-id={block.id}>
+          {links.length > 0 ? (
+            <ul className="tk-ep-footer__links">
+              {links.map((link) => (
+                <li key={link.url}>
+                  <a href={link.url}>{link.label}</a>
+                </li>
+              ))}
+            </ul>
+          ) : (
+            <p className="tk-ep-footer__empty text-sm text-black/40">
+              Configure brand support and legal URLs to populate the footer.
+            </p>
+          )}
+        </div>
+      );
+    }
     default: {
       const exhaustive: never = block;
       return exhaustive;
