@@ -255,8 +255,6 @@ async function expectPersistedEmailEditorRegions(
   await expect(page.getByLabel('Email body')).toBeVisible();
   await expect(page.getByLabel('Verified sender')).toBeVisible();
   await expect(page.getByLabel('Reply-To')).toBeVisible();
-  await expect(page.getByLabel('Audience')).toBeVisible();
-  await expect(page.getByLabel('Send timing')).toBeVisible();
   await expect(page.locator('[data-testid="content-editor-shell"]').first()).toBeVisible();
   await expect(page.locator('[data-testid="editor-canvas"]').first()).toBeVisible();
   await expect(page.getByRole('button', { name: 'Preview', exact: true })).toHaveCount(0);
@@ -692,6 +690,9 @@ test.describe('persisted admin email content editor', () => {
 
     await page.getByRole('button', { name: 'Review', exact: true }).click();
     await expect(page.getByRole('dialog', { name: 'Ready to send?' })).toBeVisible();
+    await expect(page.getByText('Campaign settings')).toBeVisible();
+    await expect(page.getByLabel('Audience')).toBeVisible();
+    await expect(page.getByLabel('Send timing')).toBeVisible();
     await expect(page.getByText('Content analysis complete')).toBeVisible();
     await expect(page.getByRole('button', { name: 'Send email' })).toBeDisabled();
     await page.getByLabel('Slide to confirm email campaign send').fill('100');

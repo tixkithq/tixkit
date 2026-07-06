@@ -226,6 +226,9 @@ test.describe('admin check-in workflows', () => {
     await page.goto(`${adminBaseUrl}/events/${event.id}/check-in`);
     await expect(page.getByRole('heading', { name: 'Check-in' })).toBeVisible();
     await expect(page.getByText(checkInList.name)).toBeVisible();
+    // Camera mode is the default when the browser supports it; switch to
+    // Manual so the scanner input is visible for the e2e test.
+    await page.getByRole('tab', { name: 'Manual' }).click();
     await expect(page.getByRole('button', { name: 'Scan' })).toBeDisabled();
 
     const scannerInput = page.getByPlaceholder('Enter QR code or ticket ID');
