@@ -1,5 +1,5 @@
 import Fastify from 'fastify';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import type {
   EmailTransport,
   Principal,
@@ -1561,12 +1561,15 @@ describe('content routes', () => {
       expect(payload.page.renderModel.schemaVersion).toBe(1);
       expect(payload.page.renderModel.validation.valid).toBe(true);
       expect(payload.page.renderModel.blocks.map((block: { type: string }) => block.type)).toEqual([
+        'event_header',
         'hero',
         'event_details',
         'tickets',
         'schedule',
         'venue_map',
         'faq',
+        'resale_tickets',
+        'brand_footer',
       ]);
       expect(
         payload.page.renderModel.blocks.some(
@@ -1897,5 +1900,235 @@ describe('content routes', () => {
     expect(response.json().message ?? response.json().error?.message).toContain(
       'valid event-page document',
     );
+  });
+});
+
+describe('event-page draft-preview token', () => {
+  const tokenSecret = 'test-preview-token-secret-for-draft-preview';
+  const draftPrincipal: Principal = {
+    type: 'user',
+    id: 'usr_1',
+    tenantId: 'tnt_1',
+    organizationIds: ['org_1'],
+    scopes: ['events.read', 'events.write', 'messages.write'],
+  };
+
+  function seedDraftPreviewDb() {
+    return createContentDb({
+      events: [
+        {
+          id: 'evt_1',
+          tenant_id: 'tnt_1',
+          organization_id: 'org_1',
+          brand_id: 'brd_1',
+          slug: 'draft-preview',
+          title: 'Draft Preview Event',
+          description: 'A draft preview description.',
+          status: 'published',
+          visibility: 'public',
+          starts_at: new Date('2026-07-17T19:00:00.000Z'),
+          ends_at: null,
+          timezone: 'America/Chicago',
+          venue: JSON.stringify({ name: 'The Salt Shed', city: 'Chicago' }),
+        },
+      ],
+      ticket_types: [
+        {
+          id: 'tt_ga',
+          event_id: 'evt_1',
+          name: 'General Admission',
+          description: 'Standing room',
+          kind: 'paid',
+          status: 'active',
+          visibility: 'public',
+          currency: 'USD',
+          price_cents: 3500,
+          minimum_price_cents: null,
+        },
+      ],
+      brands: [
+        {
+          id: 'brd_1',
+          tenant_id: 'tnt_1',
+          organization_id: 'org_1',
+          name: 'Tixkit',
+          slug: 'tixkit',
+          status: 'active',
+          theme: '{}',
+          email_identity_id: null,
+          sms_identity_id: null,
+          payment_account_id: null,
+          support_url: 'https://help.example.test',
+          legal_urls: JSON.stringify({
+            terms: 'https://example.test/terms',
+            privacy: 'https://example.test/privacy',
+            refundPolicy: 'https://example.test/refunds',
+          }),
+          white_label: true,
+          created_at: new Date('2026-06-01T00:00:00.000Z'),
+          updated_at: new Date('2026-06-01T00:00:00.000Z'),
+        },
+      ],
+      content_documents: [
+        documentRow({
+          id: 'cdoc_draft',
+          channel: 'event_page',
+          event_id: 'evt_1',
+          key: 'main',
+          name: 'Draft event page',
+          status: 'draft',
+          current_draft_version_id: 'cver_draft',
+          published_version_id: null,
+        }),
+      ],
+      content_document_versions: [
+        versionRow({
+          id: 'cver_draft',
+          document_id: 'cdoc_draft',
+          version_number: 1,
+          status: 'draft',
+          subject: 'Draft Preview Event',
+          preview_text: 'A draft preview description.',
+          content_json: JSON.stringify(
+            eventPageJson({
+              eventId: 'evt_1',
+              eventTitle: 'Draft Preview Event',
+              eventDescription: 'A draft preview description.',
+            }),
+          ),
+          validation: JSON.stringify({ valid: true, severity: 'warning', issues: [] }),
+        }),
+      ],
+    });
+  }
+
+  it('mints a signed preview token for an event-page draft', async () => {
+    vi.stubEnv('TIXKIT_PREVIEW_TOKEN_SECRET', tokenSecret);
+    const { db } = seedDraftPreviewDb();
+    const app = await setupContentApp(db, draftPrincipal);
+
+    const response = await app.inject({
+      method: 'POST',
+      url: '/content-documents/cdoc_draft/preview-token',
+      payload: {},
+    });
+
+    expect(response.statusCode).toBe(200);
+    const payload = response.json();
+    expect(payload.token).toBeTruthy();
+    expect(payload.url).toContain('/e/evt_1?token=');
+    expect(payload.url).toContain('edit=1');
+    expect(payload.expiresAt).toBeTruthy();
+    expect(payload.versionId).toBe('cver_draft');
+  });
+
+  it('serves a draft preview via the public endpoint with a valid token', async () => {
+    vi.stubEnv('TIXKIT_PREVIEW_TOKEN_SECRET', tokenSecret);
+    const { db } = seedDraftPreviewDb();
+
+    const adminApp = await setupContentApp(db, draftPrincipal);
+    const mintResponse = await adminApp.inject({
+      method: 'POST',
+      url: '/content-documents/cdoc_draft/preview-token',
+      payload: {},
+    });
+    expect(mintResponse.statusCode).toBe(200);
+    const { token } = mintResponse.json();
+
+    const publicApp = await setupPublicContentApp(db);
+    const previewResponse = await publicApp.inject({
+      method: 'GET',
+      url: `/public/events/evt_1/draft-preview?token=${encodeURIComponent(token)}`,
+    });
+
+    expect(previewResponse.statusCode).toBe(200);
+    const preview = previewResponse.json();
+    expect(preview.contentJson).toBeTruthy();
+    expect(preview.contentJson.blocks).toBeTruthy();
+    expect(preview.context).toBeTruthy();
+    expect(preview.context.event.title).toBe('Draft Preview Event');
+    expect(preview.context.event.description).toBe('A draft preview description.');
+    expect(preview.context.brand.name).toBe('Tixkit');
+    expect(preview.context.brand.termsUrl).toBe('https://example.test/terms');
+    expect(preview.renderModel).toBeTruthy();
+    expect(preview.validation.valid).toBe(true);
+  });
+
+  it('rejects a draft-preview request with a tampered token', async () => {
+    vi.stubEnv('TIXKIT_PREVIEW_TOKEN_SECRET', tokenSecret);
+    const { db } = seedDraftPreviewDb();
+
+    const adminApp = await setupContentApp(db, draftPrincipal);
+    const mintResponse = await adminApp.inject({
+      method: 'POST',
+      url: '/content-documents/cdoc_draft/preview-token',
+      payload: {},
+    });
+    const { token } = mintResponse.json();
+    const tampered = `${token.slice(0, -4)}XXXX`;
+
+    const publicApp = await setupPublicContentApp(db);
+    const response = await publicApp.inject({
+      method: 'GET',
+      url: `/public/events/evt_1/draft-preview?token=${encodeURIComponent(tampered)}`,
+    });
+
+    expect(response.statusCode).toBe(404);
+  });
+
+  it('rejects a draft-preview request when the token event does not match the URL', async () => {
+    vi.stubEnv('TIXKIT_PREVIEW_TOKEN_SECRET', tokenSecret);
+    const { db } = seedDraftPreviewDb();
+
+    const adminApp = await setupContentApp(db, draftPrincipal);
+    const mintResponse = await adminApp.inject({
+      method: 'POST',
+      url: '/content-documents/cdoc_draft/preview-token',
+      payload: {},
+    });
+    const { token } = mintResponse.json();
+
+    const publicApp = await setupPublicContentApp(db);
+    const response = await publicApp.inject({
+      method: 'GET',
+      url: `/public/events/evt_wrong/draft-preview?token=${encodeURIComponent(token)}`,
+    });
+
+    expect(response.statusCode).toBe(404);
+  });
+
+  it('rejects a draft-preview request with a token signed by a different secret', async () => {
+    vi.stubEnv('TIXKIT_PREVIEW_TOKEN_SECRET', tokenSecret);
+    const { db } = seedDraftPreviewDb();
+
+    const adminApp = await setupContentApp(db, draftPrincipal);
+    const mintResponse = await adminApp.inject({
+      method: 'POST',
+      url: '/content-documents/cdoc_draft/preview-token',
+      payload: {},
+    });
+    const { token } = mintResponse.json();
+
+    vi.stubEnv('TIXKIT_PREVIEW_TOKEN_SECRET', 'a-completely-different-secret');
+    const publicApp = await setupPublicContentApp(db);
+    const response = await publicApp.inject({
+      method: 'GET',
+      url: `/public/events/evt_1/draft-preview?token=${encodeURIComponent(token)}`,
+    });
+
+    expect(response.statusCode).toBe(404);
+  });
+
+  it('rejects a draft-preview request without a token', async () => {
+    vi.stubEnv('TIXKIT_PREVIEW_TOKEN_SECRET', tokenSecret);
+    const { db } = seedDraftPreviewDb();
+    const publicApp = await setupPublicContentApp(db);
+
+    const response = await publicApp.inject({
+      method: 'GET',
+      url: '/public/events/evt_1/draft-preview',
+    });
+
+    expect(response.statusCode).toBe(404);
   });
 });

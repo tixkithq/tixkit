@@ -7,8 +7,24 @@ import { eventRoutes } from '../routes/modules/events.js';
 
 function createEventListDb(rows: Record<string, unknown>[]) {
   const whereCalls: unknown[][] = [];
+  let countAlias: string | null = null;
   const query = {
     selectAll() {
+      return query;
+    },
+    select(selection?: unknown) {
+      if (typeof selection === 'function') {
+        selection({
+          fn: {
+            countAll: () => ({
+              as: (alias: string) => {
+                countAlias = alias;
+                return alias;
+              },
+            }),
+          },
+        });
+      }
       return query;
     },
     where(...args: unknown[]) {
@@ -21,16 +37,37 @@ function createEventListDb(rows: Record<string, unknown>[]) {
     limit() {
       return query;
     },
+    async execute() {
+      return rows;
+    },
+    async executeTakeFirst() {
+      if (countAlias) return { [countAlias]: rows.length };
+      return rows[0];
+    },
+  };
+  // Mock query for stats aggregation tables (orders, tickets) – returns empty
+  // results so computeEventStats produces zeroes without breaking the test.
+  const emptyStatsQuery = {
+    select() {
+      return emptyStatsQuery;
+    },
+    where(...args: unknown[]) {
+      whereCalls.push(args);
+      return emptyStatsQuery;
+    },
+    groupBy() {
+      return emptyStatsQuery;
+    },
     execute() {
-      return Promise.resolve(rows);
+      return Promise.resolve([]);
     },
   };
   return {
     whereCalls,
     db: {
       selectFrom(table: string) {
-        expect(table).toBe('events');
-        return query;
+        if (table === 'events') return query;
+        return emptyStatsQuery;
       },
     } as unknown as Database,
   };

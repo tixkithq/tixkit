@@ -71,8 +71,21 @@ function createDelete(_table: string) {
 function createMockDb(tables: Tables = {}): unknown {
   function createQuery(table: string) {
     const wheres: Array<{ column: string; op: string; value: unknown }> = [];
+    let countAlias: string | null = null;
     const q = {
-      select() {
+      select(selection?: unknown) {
+        if (typeof selection === 'function') {
+          selection({
+            fn: {
+              countAll: () => ({
+                as: (alias: string) => {
+                  countAlias = alias;
+                  return alias;
+                },
+              }),
+            },
+          });
+        }
         return q;
       },
       selectAll() {
@@ -99,6 +112,7 @@ function createMockDb(tables: Tables = {}): unknown {
         countAll: () => 'count',
       },
       async executeTakeFirst() {
+        if (countAlias) return { [countAlias]: (tables[table] ?? []).filter((r) => matchesWheres(r, wheres)).length };
         return (tables[table] ?? []).find((row) => matchesWheres(row, wheres));
       },
       async executeTakeFirstOrThrow() {
@@ -2084,6 +2098,10 @@ describe('brand and event scope denial', () => {
       scopes: ['attendees.read'],
     });
     const tables: Tables = {
+      events: [
+        eventRow({ id: 'evt_A', organization_id: 'org_1' }),
+        eventRow({ id: 'evt_B', organization_id: 'org_1' }),
+      ],
       attendees: [
         attendeeRow({
           id: 'att_A',
@@ -2116,6 +2134,10 @@ describe('brand and event scope denial', () => {
       scopes: ['attendees.read'],
     });
     const tables: Tables = {
+      events: [
+        eventRow({ id: 'evt_A', organization_id: 'org_1', brand_id: 'brd_A' }),
+        eventRow({ id: 'evt_B', organization_id: 'org_1', brand_id: 'brd_B' }),
+      ],
       attendees: [
         attendeeRow({
           id: 'att_A',
@@ -2707,5 +2729,112 @@ describe('scanner device auth denial', () => {
       code: 'FORBIDDEN',
       statusCode: 403,
     });
+  });
+});
+
+// ===========================================================================
+// 3. organizationId/brandId query-param scope guards on list routes
+// ===========================================================================
+
+describe('organizationId/brandId query-param scope guards', () => {
+  it('GET /attendees?organizationId=org_B returns 404 for an org outside principal scope', async () => {
+    const principal = makePrincipal({ organizationIds: ['org_A'] });
+    const app = await setupApp(checkInRoutes, principal, { attendees: [], events: [] });
+    const res = await app.inject({ method: 'GET', url: '/attendees?organizationId=org_B' });
+    expect(res.statusCode).toBe(404);
+    await app.close();
+  });
+
+  it('GET /attendees?brandId=brd_other returns 404 for a brand outside principal scope', async () => {
+    const principal = makePrincipal({ organizationIds: ['org_A'], brandIds: ['brd_1'] });
+    const app = await setupApp(checkInRoutes, principal, { attendees: [], events: [] });
+    const res = await app.inject({ method: 'GET', url: '/attendees?brandId=brd_other' });
+    expect(res.statusCode).toBe(404);
+    await app.close();
+  });
+
+  it('GET /api-keys?organizationId=org_B returns 404 for an org outside principal scope', async () => {
+    const principal = makePrincipal({ organizationIds: ['org_A'] });
+    const app = await setupApp(developerRoutes, principal, { api_keys: [] });
+    const res = await app.inject({ method: 'GET', url: '/api-keys?organizationId=org_B' });
+    expect(res.statusCode).toBe(404);
+    await app.close();
+  });
+
+  it('GET /webhook-endpoints?organizationId=org_B returns 404 for an org outside principal scope', async () => {
+    const principal = makePrincipal({ organizationIds: ['org_A'] });
+    const app = await setupApp(webhookRoutes, principal, { webhook_endpoints: [] });
+    const res = await app.inject({
+      method: 'GET',
+      url: '/webhook-endpoints?organizationId=org_B',
+    });
+    expect(res.statusCode).toBe(404);
+    await app.close();
+  });
+
+  it('GET /payment-compensations?organizationId=org_B returns 404 for an org outside principal scope', async () => {
+    const principal = makePrincipal({ organizationIds: ['org_A'] });
+    const app = await setupApp(orderRoutes, principal, {});
+    const res = await app.inject({
+      method: 'GET',
+      url: '/payment-compensations?organizationId=org_B',
+    });
+    expect(res.statusCode).toBe(404);
+    await app.close();
+  });
+
+  it('GET /payment-compensations?brandId=brd_other returns 404 for a brand outside principal scope', async () => {
+    const principal = makePrincipal({ organizationIds: ['org_A'], brandIds: ['brd_1'] });
+    const app = await setupApp(orderRoutes, principal, {});
+    const res = await app.inject({
+      method: 'GET',
+      url: '/payment-compensations?brandId=brd_other',
+    });
+    expect(res.statusCode).toBe(404);
+    await app.close();
+  });
+
+  it('GET /content-documents?organizationId=org_B returns 404 for an org outside principal scope', async () => {
+    const principal = makePrincipal({ organizationIds: ['org_A'] });
+    const app = await setupApp(contentRoutes, principal, { content_documents: [] });
+    const res = await app.inject({
+      method: 'GET',
+      url: '/content-documents?organizationId=org_B',
+    });
+    expect(res.statusCode).toBe(404);
+    await app.close();
+  });
+
+  it('GET /api-keys?organizationId=org_A narrows to org_A keys for a multi-org principal', async () => {
+    const principal = makePrincipal({ organizationIds: ['org_A', 'org_B'] });
+    const app = await setupApp(developerRoutes, principal, {
+      api_keys: [
+        apiKeyRow({ id: 'ak_A', organization_id: 'org_A' }),
+        apiKeyRow({ id: 'ak_B', organization_id: 'org_B' }),
+      ],
+    });
+    const res = await app.inject({ method: 'GET', url: '/api-keys?organizationId=org_A' });
+    expect(res.statusCode).toBe(200);
+    const keyIds = res.json().items?.map((k: { id: string }) => k.id) ?? [];
+    expect(keyIds).toEqual(['ak_A']);
+    await app.close();
+  });
+
+  it('GET /webhook-endpoints?organizationId=org_A narrows to org_A endpoints for a multi-org principal', async () => {
+    const principal = makePrincipal({ organizationIds: ['org_A', 'org_B'] });
+    const app = await setupApp(webhookRoutes, principal, {
+      webhook_endpoints: [
+        webhookEndpointRow({ id: 'wh_A', organization_id: 'org_A' }),
+        webhookEndpointRow({ id: 'wh_B', organization_id: 'org_B' }),
+      ],
+    });
+    const res = await app.inject({
+      method: 'GET',
+      url: '/webhook-endpoints?organizationId=org_A',
+    });
+    expect(res.statusCode).toBe(200);
+    const ids = res.json().items?.map((w: { id: string }) => w.id) ?? [];
+    expect(ids).toEqual(['wh_A']);
+    await app.close();
   });
 });

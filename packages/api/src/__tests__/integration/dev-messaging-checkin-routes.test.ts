@@ -5120,14 +5120,14 @@ describe('ticket transfer and attendee update', () => {
     const app = await setupApp(checkInRoutes, makePrincipal(), { attendees, events: [event] });
     const byEmail = await app.inject({
       method: 'GET',
-      url: '/events/evt_1/attendees?query=target%40example.test&limit=1',
+      url: '/events/evt_1/attendees?search=target%40example.test&limit=1',
     });
     expect(byEmail.statusCode).toBe(200);
     expect(byEmail.json().items.map((item: { id: string }) => item.id)).toEqual(['att_target']);
 
     const byTicket = await app.inject({
       method: 'GET',
-      url: '/events/evt_1/attendees?query=TKT-TARGET&limit=1',
+      url: '/events/evt_1/attendees?search=TKT-TARGET&limit=1',
     });
     expect(byTicket.statusCode).toBe(200);
     expect(byTicket.json().items.map((item: { id: string }) => item.id)).toEqual(['att_target']);
