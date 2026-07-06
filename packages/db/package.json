@@ -34,9 +34,9 @@
     "reset:mysql": "DB_DRIVER=mysql tsx src/reset.ts",
     "reset:mssql": "DB_DRIVER=mssql tsx src/reset.ts",
     "test:unit": "vitest run src/__tests__/unit",
-    "test:integration": "vitest run src/__tests__/integration/db.integration.test.ts",
-    "test:mysql": "DB_INTEGRATION_DRIVER=mysql vitest run src/__tests__/integration/db.integration.test.ts",
-    "test:mssql": "DB_INTEGRATION_DRIVER=mssql vitest run src/__tests__/integration/db.integration.test.ts",
+    "test:integration": "vitest run src/__tests__/integration",
+    "test:mysql": "DB_INTEGRATION_DRIVER=mysql vitest run src/__tests__/integration",
+    "test:mssql": "DB_INTEGRATION_DRIVER=mssql vitest run src/__tests__/integration",
     "clean": "rm -rf dist"
   },
   "dependencies": {
