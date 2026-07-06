@@ -30,8 +30,8 @@ vi.mock('@/config/nav', () => ({
   },
 }));
 
-vi.mock('./app-title', () => ({
-  AppTitle: () => <div>Tixkit Admin</div>,
+vi.mock('./workspace-switcher', () => ({
+  WorkspaceSwitcher: () => <div>Tixkit Admin</div>,
 }));
 
 vi.mock('./nav-group', () => ({
@@ -45,7 +45,7 @@ vi.mock('./nav-user', () => ({
 import { AppSidebar } from './app-sidebar';
 
 describe('AppSidebar', () => {
-  it('keeps the sidebar header focused on the app title', () => {
+  it('renders the workspace switcher in the sidebar header', () => {
     render(<AppSidebar />);
 
     const header = screen.getByTestId('sidebar-header');

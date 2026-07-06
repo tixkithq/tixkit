@@ -1,7 +1,7 @@
 'use client';
 
 import Link from 'next/link';
-import { BadgeCheck, Building2, ChevronsUpDown, LogOut, Settings } from 'lucide-react';
+import { BadgeCheck, ChevronsUpDown, LogOut, Settings } from 'lucide-react';
 import useDialogState from '@/hooks/use-dialog-state';
 import { useAdminUser } from '@/context/admin-user-provider';
 import { getDisplayNameInitials } from '@/lib/utils';
@@ -74,12 +74,6 @@ export function NavUser() {
                   <Link href="/settings/profile" prefetch={false}>
                     <BadgeCheck />
                     Profile
-                  </Link>
-                </DropdownMenuItem>
-                <DropdownMenuItem asChild>
-                  <Link href="/settings/workspace" prefetch={false}>
-                    <Building2 />
-                    Workspace
                   </Link>
                 </DropdownMenuItem>
                 <DropdownMenuItem asChild>

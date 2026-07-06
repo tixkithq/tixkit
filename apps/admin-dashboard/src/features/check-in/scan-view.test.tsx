@@ -9,6 +9,20 @@ import {
 import { CheckInView } from './scan-view';
 import { EventCheckInView } from '@/features/events/event-check-in-view';
 
+vi.mock('@/context/bootstrap-provider', () => ({
+  useBootstrap: () => ({
+    organizations: [{ id: 'org_demo', name: 'Tixkit' }],
+    brands: [{ id: 'brd_demo', organizationId: 'org_demo', name: 'Tixkit', theme: {} }],
+    availableBrands: [{ id: 'brd_demo', organizationId: 'org_demo', name: 'Tixkit', theme: {} }],
+    organizationId: 'org_demo',
+    brandId: 'brd_demo',
+    setOrganizationId: vi.fn(),
+    setBrandId: vi.fn(),
+    loading: false,
+    error: null,
+  }),
+}));
+
 afterEach(() => {
   vi.restoreAllMocks();
 });
@@ -234,8 +248,10 @@ describe('Check-in scan result', () => {
     const listAttendees = vi.spyOn(adminApi, 'listAttendees').mockImplementation(async (input) => ({
       ok: true,
       data: {
-        items: input.query?.trim() ? [searchedAttendee] : [],
-        total: input.query?.trim() ? 1 : 0,
+        items: input.search?.trim() ? [searchedAttendee] : [],
+        total: input.search?.trim() ? 1 : 0,
+        nextCursor: undefined,
+        filterTotal: 0,
       },
     }));
 
@@ -252,7 +268,7 @@ describe('Check-in scan result', () => {
         eventId: 'evt_1',
         checkInListId: 'cil_1',
         limit: 25,
-        query: 'avery',
+        search: 'avery',
       });
     });
   });
@@ -314,8 +330,10 @@ describe('Check-in scan result', () => {
     const listAttendees = vi.spyOn(adminApi, 'listAttendees').mockImplementation(async (input) => ({
       ok: true,
       data: {
-        items: input.query?.trim() ? [searchedAttendee] : [],
-        total: input.query?.trim() ? 1 : 0,
+        items: input.search?.trim() ? [searchedAttendee] : [],
+        total: input.search?.trim() ? 1 : 0,
+        nextCursor: undefined,
+        filterTotal: 0,
       },
     }));
 
@@ -330,7 +348,7 @@ describe('Check-in scan result', () => {
         eventId: 'evt_1',
         checkInListId: 'cil_1',
         limit: 25,
-        query: 'jordan@example.test',
+        search: 'jordan@example.test',
       });
     });
   });
@@ -373,7 +391,7 @@ describe('Check-in scan result', () => {
     });
     vi.spyOn(adminApi, 'listAttendees').mockResolvedValue({
       ok: true,
-      data: { items: [], total: 0 },
+      data: { items: [], total: 0, nextCursor: undefined, filterTotal: 0 },
     });
     vi.spyOn(adminApi, 'scanTicket').mockResolvedValue({
       ok: true,

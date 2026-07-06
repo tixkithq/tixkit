@@ -1,0 +1,260 @@
+'use client';
+
+import * as React from 'react';
+import { BrowserMultiFormatReader, type IScannerControls } from '@zxing/browser';
+import type { Result } from '@zxing/library';
+import { CameraOff, Loader2, RefreshCw, ScanLine } from 'lucide-react';
+import { Button } from '@/components/ui/button';
+import type { CheckInScanResult } from '@/lib/api';
+
+export type CameraScannerProps = {
+  /**
+   * Invoked with each freshly decoded QR payload. The scanner pauses for
+   * `cooldownMs` after a successful decode so the same code is not re-scanned
+   * while the attendee holds their phone in view.
+   */
+  onScan: (qrPayload: string) => Promise<CheckInScanResult | null>;
+  /** Ignore decodes while true (e.g. a manual scan is in flight). */
+  disabled?: boolean;
+  /** Cooldown after each accepted decode, in milliseconds. */
+  cooldownMs?: number;
+};
+
+type CameraStatus =
+  | 'starting'
+  | 'scanning'
+  | 'paused'
+  | 'denied'
+  | 'unsupported'
+  | 'error';
+
+const COOLDOWN_DEFAULT_MS = 1500;
+
+/**
+ * Detects whether the current environment can access a camera. Guarded so it
+ * never throws during SSR or in jsdom (where `navigator.mediaDevices` is
+ * undefined).
+ */
+export function isCameraSupported(): boolean {
+  if (typeof navigator === 'undefined') return false;
+  if (!navigator.mediaDevices) return false;
+  if (typeof navigator.mediaDevices.getUserMedia !== 'function') return false;
+  if (typeof window !== 'undefined' && window.isSecureContext === false) return false;
+  return true;
+}
+
+/**
+ * Live camera QR scanner built on @zxing/browser. Auto-starts on mount when a
+ * camera is available, releases the stream on unmount, and degrades to a
+ * graceful fallback message when the browser lacks camera support or the user
+ * denies permission.
+ */
+export function CameraScanner({
+  onScan,
+  disabled = false,
+  cooldownMs = COOLDOWN_DEFAULT_MS,
+}: CameraScannerProps) {
+  const videoRef = React.useRef<HTMLVideoElement | null>(null);
+  const controlsRef = React.useRef<IScannerControls | null>(null);
+  const lastScanRef = React.useRef<{ payload: string; at: number } | null>(null);
+  const disabledRef = React.useRef(disabled);
+  const onScanRef = React.useRef(onScan);
+
+  const [status, setStatus] = React.useState<CameraStatus>(() =>
+    isCameraSupported() ? 'starting' : 'unsupported',
+  );
+  const [errorMessage, setErrorMessage] = React.useState<string | null>(null);
+  const [retryNonce, setRetryNonce] = React.useState(0);
+
+  React.useEffect(() => {
+    disabledRef.current = disabled;
+  }, [disabled]);
+
+  React.useEffect(() => {
+    onScanRef.current = onScan;
+  }, [onScan]);
+
+  React.useEffect(() => {
+    if (!isCameraSupported()) {
+      setStatus('unsupported');
+      return;
+    }
+
+    let cancelled = false;
+    let controls: IScannerControls | null = null;
+    setStatus('starting');
+    setErrorMessage(null);
+
+    const reader = new BrowserMultiFormatReader();
+    const video = videoRef.current;
+
+    void reader
+      .decodeFromVideoDevice(undefined, video ?? undefined, (result: Result | undefined) => {
+        if (cancelled || disabledRef.current || !result) return;
+        const payload = result.getText();
+        if (!payload.trim()) return;
+        const now = Date.now();
+        const last = lastScanRef.current;
+        if (last && last.payload === payload && now - last.at < cooldownMs) return;
+        lastScanRef.current = { payload, at: now };
+        setStatus('paused');
+        void onScanRef.current(payload).finally(() => {
+          if (!cancelled) setStatus('scanning');
+        });
+      })
+      .then((resolvedControls) => {
+        if (cancelled) {
+          resolvedControls.stop();
+          return;
+        }
+        controls = resolvedControls;
+        controlsRef.current = resolvedControls;
+        setStatus('scanning');
+      })
+      .catch((error: unknown) => {
+        if (cancelled) return;
+        classifyCameraError(error, { setStatus, setErrorMessage });
+      });
+
+    return () => {
+      cancelled = true;
+      controls?.stop();
+      controlsRef.current = null;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [cooldownMs, retryNonce]);
+
+  const handleRetry = React.useCallback(() => {
+    setRetryNonce((n) => n + 1);
+  }, []);
+
+  if (status === 'unsupported') {
+    return (
+      <CameraFallback
+        icon={CameraOff}
+        title="Camera not available"
+        description="This browser does not expose a usable camera, or the page is not served over HTTPS. Switch to Manual entry to type the ticket ID."
+      />
+    );
+  }
+
+  if (status === 'denied') {
+    return (
+      <CameraFallback
+        icon={CameraOff}
+        title="Camera permission denied"
+        description="Enable camera access in your browser settings, then retry or switch to Manual entry."
+        onRetry={handleRetry}
+      />
+    );
+  }
+
+  if (status === 'error') {
+    return (
+      <CameraFallback
+        icon={CameraOff}
+        title="Camera error"
+        description={errorMessage ?? 'Unable to start the camera.'}
+        onRetry={handleRetry}
+      />
+    );
+  }
+
+  const showOverlay = status === 'starting' || status === 'paused';
+
+  return (
+    <div
+      className="relative w-full overflow-hidden rounded-lg border bg-black aspect-[4/3]"
+      data-testid="camera-viewport"
+      data-camera-status={status}
+    >
+      <video
+        ref={videoRef}
+        className="size-full object-cover"
+        muted
+        playsInline
+        autoPlay
+        data-testid="camera-video"
+      />
+      {/* Reticle */}
+      <div
+        aria-hidden="true"
+        className="pointer-events-none absolute inset-0 flex items-center justify-center"
+      >
+        <div className="h-2/3 w-2/3 max-w-[260px] rounded-xl border-2 border-white/80 shadow-[0_0_0_9999px_rgba(0,0,0,0.35)]" />
+      </div>
+      <div className="pointer-events-none absolute left-3 top-3 flex items-center gap-2 rounded-full bg-black/60 px-3 py-1 text-xs font-medium text-white">
+        <ScanLine className="size-3.5" />
+        {status === 'starting'
+          ? 'Starting camera…'
+          : status === 'paused'
+            ? 'Processing…'
+            : 'Point at a QR code'}
+      </div>
+      {showOverlay && (
+        <div className="absolute inset-0 flex items-center justify-center bg-black/40">
+          <Loader2 className="size-8 animate-spin text-white" aria-label="Loading" />
+        </div>
+      )}
+    </div>
+  );
+}
+
+function CameraFallback({
+  icon: Icon,
+  title,
+  description,
+  onRetry,
+}: {
+  icon: typeof CameraOff;
+  title: string;
+  description: string;
+  onRetry?: () => void;
+}) {
+  return (
+    <div
+      className="flex flex-col items-center justify-center gap-3 rounded-lg border border-dashed p-8 text-center"
+      data-testid="camera-fallback"
+    >
+      <div className="flex size-10 items-center justify-center rounded-full bg-muted">
+        <Icon className="size-5 text-muted-foreground" />
+      </div>
+      <div className="space-y-1">
+        <p className="font-medium">{title}</p>
+        <p className="text-sm text-muted-foreground">{description}</p>
+      </div>
+      {onRetry && (
+        <Button variant="outline" size="sm" onClick={onRetry} className="mt-1 gap-1.5">
+          <RefreshCw className="size-3.5" />
+          Retry camera
+        </Button>
+      )}
+    </div>
+  );
+}
+
+function classifyCameraError(
+  error: unknown,
+  handlers: {
+    setStatus: (status: CameraStatus) => void;
+    setErrorMessage: (message: string | null) => void;
+  },
+): void {
+  const name = (error as { name?: string } | null)?.name;
+  if (name === 'NotAllowedError' || name === 'SecurityError') {
+    handlers.setStatus('denied');
+    return;
+  }
+  if (name === 'NotFoundError' || name === 'OverconstrainedError') {
+    handlers.setStatus('unsupported');
+    handlers.setErrorMessage('No camera device was found on this device.');
+    return;
+  }
+  if (name === 'NotReadableError') {
+    handlers.setStatus('error');
+    handlers.setErrorMessage('The camera is in use by another application.');
+    return;
+  }
+  handlers.setStatus('error');
+  handlers.setErrorMessage(error instanceof Error ? error.message : 'Unable to start camera.');
+}

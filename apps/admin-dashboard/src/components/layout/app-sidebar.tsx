@@ -9,16 +9,16 @@ import {
   SidebarRail,
 } from '@/components/ui/sidebar';
 import { sidebarData } from '@/config/nav';
-import { AppTitle } from './app-title';
 import { NavGroup } from './nav-group';
 import { NavUser } from './nav-user';
+import { WorkspaceSwitcher } from './workspace-switcher';
 
 export function AppSidebar() {
   const { collapsible, variant } = useLayout();
   return (
     <Sidebar collapsible={collapsible} variant={variant}>
       <SidebarHeader>
-        <AppTitle />
+        <WorkspaceSwitcher />
       </SidebarHeader>
       <SidebarContent>
         {sidebarData.navGroups.map((props) => (

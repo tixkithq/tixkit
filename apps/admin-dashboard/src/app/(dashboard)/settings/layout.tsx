@@ -62,9 +62,9 @@ export default function SettingsLayout({ children }: { children: ReactNode }) {
           Manage your account, workspace, and platform configuration
         </p>
       </div>
-      <div className="flex flex-col gap-8 lg:flex-row">
-        <nav className="lg:w-56 lg:shrink-0">
-          <ul className="flex flex-row flex-wrap gap-1 lg:flex-col">
+      <div className="flex flex-col gap-8">
+        <nav>
+          <ul className="flex flex-row flex-wrap gap-1">
             {visibleSettingsNav.map((item) => {
               const isActive = pathname === item.href || pathname.startsWith(`${item.href}/`);
               return (

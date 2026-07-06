@@ -1,3 +1,7 @@
+const checkoutFrameSrc = process.env.PUBLIC_CHECKOUT_URL?.trim()
+  ? new URL(process.env.PUBLIC_CHECKOUT_URL).origin
+  : 'http://localhost:3000';
+
 const adminSecurityHeaders = [
   {
     key: 'Content-Security-Policy',
@@ -12,7 +16,7 @@ const adminSecurityHeaders = [
       "style-src 'self' 'unsafe-inline'",
       "script-src 'self' 'unsafe-inline' 'unsafe-eval' https://*.clerk.accounts.dev https://*.clerk.com",
       "connect-src 'self' http://localhost:* http://127.0.0.1:* https:",
-      "frame-src 'self' https://*.clerk.accounts.dev https://*.clerk.com",
+      `frame-src 'self' ${checkoutFrameSrc} https://*.clerk.accounts.dev https://*.clerk.com`,
       "worker-src 'self' blob:",
     ].join('; '),
   },

@@ -1,10 +1,8 @@
 'use client';
 
 import * as React from 'react';
-import { QrCode, Search, CheckCircle2, XCircle, AlertCircle } from 'lucide-react';
-import { type AdminCheckInList, type CheckInScanResult, adminApi } from '@/lib/api';
-import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
+import { QrCode, Search } from 'lucide-react';
+import { type AdminCheckInList, adminApi } from '@/lib/api';
 import { Label } from '@/components/ui/label';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { EmptyState } from '@/components/empty-state';
@@ -17,30 +15,38 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
-import { useAdminData } from '@/hooks/use-admin-data';
+import { Input } from '@/components/ui/input';
+import { useAdminQuery } from '@/hooks/use-admin-table-data';
 import { useAllEvents } from '@/hooks/use-all-events';
+import { useBootstrap } from '@/context/bootstrap-provider';
 import { cn } from '@/lib/utils';
+import { useTicketScanner } from './use-ticket-scanner';
+import { ScannerPanel } from './scanner-panel';
+import { CreateCheckInListDialog } from './create-check-in-list-dialog';
 
 const EMPTY_CHECK_IN_LISTS: AdminCheckInList[] = [];
 
 export function CheckInView() {
   const [selectedEventId, setSelectedEventId] = React.useState<string>('');
   const [selectedCheckInListId, setSelectedCheckInListId] = React.useState<string>('');
-  const [qrPayload, setQrPayload] = React.useState('');
-  const [scanning, setScanning] = React.useState(false);
-  const [lastResult, setLastResult] = React.useState<CheckInScanResult | null>(null);
   const [manualSearch, setManualSearch] = React.useState('');
-  const [acceptedScanCount, setAcceptedScanCount] = React.useState(0);
   const eventSelectLabelId = React.useId();
   const checkInListLabelId = React.useId();
-  const ticketInputId = React.useId();
+  const { organizationId, brandId } = useBootstrap();
 
   const {
     events,
     loading: eventsLoading,
     error: eventsError,
     refetch: refetchEvents,
-  } = useAllEvents();
+  } = useAllEvents({ organizationId, brandId });
+
+  // Reset the selected event/check-in list when the workspace/brand scope changes
+  // so the selector does not retain an event that is no longer in the narrowed list.
+  React.useEffect(() => {
+    setSelectedEventId('');
+    setSelectedCheckInListId('');
+  }, [organizationId, brandId]);
 
   const selectedEvent = events.find((e) => e.id === selectedEventId);
 
@@ -49,7 +55,8 @@ export function CheckInView() {
     loading: checkInListsLoading,
     error: checkInListsError,
     refetch: refetchLists,
-  } = useAdminData(
+  } = useAdminQuery(
+    ['listCheckInLists', selectedEventId],
     () =>
       selectedEventId
         ? adminApi.listCheckInLists(selectedEventId)
@@ -57,21 +64,22 @@ export function CheckInView() {
             ok: true as const,
             data: EMPTY_CHECK_IN_LISTS,
           }),
-    [selectedEventId],
   );
 
   const checkInLists = checkInListsData ?? EMPTY_CHECK_IN_LISTS;
-  const trimmedQrPayload = qrPayload.trim();
-  const canScan =
-    Boolean(selectedEventId && selectedCheckInListId && trimmedQrPayload) && !scanning;
 
-  // Reset the selected check-in list whenever the event changes.
+  const scanner = useTicketScanner({
+    eventId: selectedEventId,
+    checkInListId: selectedCheckInListId,
+    enabled: Boolean(selectedEventId && selectedCheckInListId),
+  });
+
+  // Reset the selected check-in list and scanner state whenever the event changes.
   React.useEffect(() => {
     setSelectedCheckInListId('');
-    setQrPayload('');
-    setLastResult(null);
     setManualSearch('');
-    setAcceptedScanCount(0);
+    scanner.reset();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedEventId]);
 
   React.useEffect(() => {
@@ -86,40 +94,6 @@ export function CheckInView() {
       setSelectedCheckInListId(checkInLists[0].id);
     }
   }, [checkInLists, selectedCheckInListId]);
-
-  const handleScan = async () => {
-    if (!selectedEventId || !selectedCheckInListId || !trimmedQrPayload || scanning) return;
-    setScanning(true);
-    try {
-      const result = await adminApi.scanTicket({
-        eventId: selectedEventId,
-        checkInListId: selectedCheckInListId,
-        qrPayload: trimmedQrPayload,
-        scannedAt: new Date().toISOString(),
-      });
-      if (result.ok) {
-        setLastResult(result.data);
-        if (result.data.status === 'accepted') {
-          setAcceptedScanCount((count) => count + 1);
-        }
-        setQrPayload('');
-      } else {
-        setLastResult({
-          status: 'invalid',
-          message: result.error.message,
-          scannedAt: new Date().toISOString(),
-        });
-      }
-    } catch (error) {
-      setLastResult({
-        status: 'invalid',
-        message: error instanceof Error ? error.message : 'Unable to scan this ticket.',
-        scannedAt: new Date().toISOString(),
-      });
-    } finally {
-      setScanning(false);
-    }
-  };
 
   if (eventsLoading) {
     return (
@@ -174,62 +148,50 @@ export function CheckInView() {
               className="border-0 bg-transparent p-0"
             />
           ) : checkInLists.length === 0 ? (
-            <p className="text-sm text-muted-foreground">
-              No active check-in lists for this event. Create a check-in list before scanning.
-            </p>
+            <div className="flex flex-col gap-3">
+              <p className="text-sm text-muted-foreground">
+                No active check-in lists for this event. Create a check-in list before scanning.
+              </p>
+              <CreateCheckInListDialog eventId={selectedEventId} onCreated={refetchLists} />
+            </div>
           ) : (
-            <Select value={selectedCheckInListId} onValueChange={setSelectedCheckInListId}>
-              <SelectTrigger className="w-full max-w-xs" aria-labelledby={checkInListLabelId}>
-                <SelectValue placeholder="Choose a check-in list" />
-              </SelectTrigger>
-              <SelectContent>
-                {checkInLists.map((list) => (
-                  <SelectItem key={list.id} value={list.id}>
-                    {list.name}
-                  </SelectItem>
+            <div className="flex items-center gap-2">
+              <Select value={selectedCheckInListId} onValueChange={setSelectedCheckInListId}>
+                <SelectTrigger className="w-full max-w-xs" aria-labelledby={checkInListLabelId}>
+                  <SelectValue placeholder="Choose a check-in list" />
+                </SelectTrigger>
+                <SelectContent>
+                  {checkInLists.map((list) => (
+                    <SelectItem key={list.id} value={list.id}>
+                      {list.name}
+                    </SelectItem>
                 ))}
-              </SelectContent>
-            </Select>
+                </SelectContent>
+              </Select>
+              <CreateCheckInListDialog
+                eventId={selectedEventId}
+                onCreated={refetchLists}
+                triggerLabel=""
+                triggerVariant="outline"
+                triggerSize="icon"
+              />
+            </div>
           )}
         </div>
       )}
 
       {selectedEventId && selectedCheckInListId && (
         <div className="grid gap-6 lg:grid-cols-2">
-          <Card>
-            <CardHeader>
-              <CardTitle className="flex items-center gap-2">
-                <QrCode className="size-5" />
-                Scan Ticket
-              </CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              <form
-                className="flex flex-col gap-2 sm:flex-row"
-                onSubmit={(submitEvent) => {
-                  submitEvent.preventDefault();
-                  void handleScan();
-                }}
-              >
-                <Label htmlFor={ticketInputId} className="sr-only">
-                  Ticket QR or ID
-                </Label>
-                <Input
-                  id={ticketInputId}
-                  autoComplete="off"
-                  inputMode="text"
-                  disabled={scanning}
-                  placeholder="Enter QR code or ticket ID"
-                  value={qrPayload}
-                  onChange={(e) => setQrPayload(e.target.value)}
-                />
-                <Button type="submit" disabled={!canScan} aria-busy={scanning}>
-                  {scanning ? 'Scanning...' : 'Scan'}
-                </Button>
-              </form>
-              {lastResult && <ScanResult result={lastResult} />}
-            </CardContent>
-          </Card>
+          {/* key forces the panel to reset its internal input/mode when the
+          event or check-in list changes. */}
+          <ScannerPanel
+            key={`${selectedEventId}:${selectedCheckInListId}`}
+            eventId={selectedEventId}
+            checkInListId={selectedCheckInListId}
+            scanning={scanner.scanning}
+            lastResult={scanner.lastResult}
+            onScan={scanner.scan}
+          />
 
           <Card>
             <CardHeader>
@@ -267,69 +229,15 @@ export function CheckInView() {
               </div>
               <div className="space-y-1">
                 <p className="text-sm text-muted-foreground">Checked In</p>
-                <p className="text-2xl font-bold">{selectedEvent.checkIns + acceptedScanCount}</p>
+                <p className="text-2xl font-bold">
+                  {selectedEvent.checkIns + scanner.acceptedScanCount}
+                </p>
               </div>
             </div>
           </CardContent>
         </Card>
       )}
     </div>
-  );
-}
-
-function ScanResult({ result }: { result: CheckInScanResult }) {
-  const config = {
-    accepted: {
-      icon: CheckCircle2,
-      className: 'border-emerald-500/30 bg-emerald-500/10 text-emerald-700 dark:text-emerald-400',
-    },
-    duplicate: {
-      icon: AlertCircle,
-      className: 'border-amber-500/30 bg-amber-500/10 text-amber-700 dark:text-amber-400',
-    },
-    invalid: {
-      icon: XCircle,
-      className: 'border-red-500/30 bg-red-500/10 text-red-700 dark:text-red-400',
-    },
-    revoked: {
-      icon: XCircle,
-      className: 'border-red-500/30 bg-red-500/10 text-red-700 dark:text-red-400',
-    },
-    wrong_event: {
-      icon: AlertCircle,
-      className: 'border-amber-500/30 bg-amber-500/10 text-amber-700 dark:text-amber-400',
-    },
-    wrong_list: {
-      icon: AlertCircle,
-      className: 'border-amber-500/30 bg-amber-500/10 text-amber-700 dark:text-amber-400',
-    },
-  };
-
-  const { icon: Icon, className } = config[result.status];
-
-  return (
-    <output
-      aria-live="polite"
-      aria-atomic="true"
-      className={cn('flex items-start gap-3 rounded-lg border p-4', className)}
-    >
-      <Icon aria-hidden="true" className="mt-0.5 size-5 shrink-0" />
-      <span className="space-y-1">
-        <span className="block font-medium capitalize">{result.status.replace(/_/g, ' ')}</span>
-        <span className="block text-sm">
-          {result.status === 'accepted'
-            ? result.attendee
-              ? `${result.attendee.name} has been checked in.`
-              : (result.message ?? 'Check-in successful')
-            : result.message}
-        </span>
-        {result.attendee && result.status !== 'accepted' && (
-          <span className="block text-xs text-muted-foreground">
-            Attendee: {result.attendee.name} ({result.attendee.ticketTypeName})
-          </span>
-        )}
-      </span>
-    </output>
   );
 }
 
@@ -346,15 +254,15 @@ function ManualLookup({
 }) {
   const manualSearchId = React.useId();
   const attendeeQuery = search.trim();
-  const { data, loading, error } = useAdminData(
+  const { data, loading, error } = useAdminQuery(
+    ['listAttendees', eventId, checkInListId, attendeeQuery],
     () =>
       adminApi.listAttendees({
         eventId,
         checkInListId,
         limit: attendeeQuery ? 25 : 10,
-        query: attendeeQuery,
+        search: attendeeQuery,
       }),
-    [eventId, checkInListId, attendeeQuery],
   );
 
   const attendees = data?.items ?? [];

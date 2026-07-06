@@ -4,6 +4,7 @@ import { ClerkProvider } from '@clerk/nextjs';
 import { ThemeProvider } from '@/context/theme-provider';
 import { DirectionProvider } from '@/context/direction-provider';
 import { AdminUserProvider } from '@/context/admin-user-provider';
+import { QueryProvider } from '@/context/query-provider';
 import { Toaster } from '@/components/ui/sonner';
 import { clerkPublishableKey, hasClerkKey } from '@/lib/auth';
 import './globals.css';
@@ -23,10 +24,12 @@ export default async function RootLayout({ children }: { children: ReactNode }) 
   const content = (
     <ThemeProvider>
       <DirectionProvider>
-        <AdminUserProvider>
-          {children}
-          <Toaster />
-        </AdminUserProvider>
+        <QueryProvider>
+          <AdminUserProvider>
+            {children}
+            <Toaster />
+          </AdminUserProvider>
+        </QueryProvider>
       </DirectionProvider>
     </ThemeProvider>
   );
