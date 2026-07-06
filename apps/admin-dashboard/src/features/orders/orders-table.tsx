@@ -6,7 +6,7 @@ import { ShoppingCart } from 'lucide-react';
 import { type AdminOrderListItem, adminApi } from '@/lib/api';
 import { ordersTableSchema } from '@/lib/table-schemas';
 import { EmptyState } from '@/components/empty-state';
-import { DataTableV2, useUrlTableState } from '@/components/data-table';
+import { DataTable, useUrlTableState } from '@/components/data-table';
 import { StatusCell, MoneyCell, TimestampCell, TextCell } from '@/components/data-table/cells';
 import { useAdminTableData } from '@/hooks/use-admin-table-data';
 import { usePermissions } from '@/context/permission-provider';
@@ -39,7 +39,7 @@ export function OrdersTable() {
   );
 
   return (
-    <DataTableV2
+    <DataTable
       schema={ordersTableSchema}
       columns={columns}
       data={data}

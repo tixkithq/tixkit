@@ -9,7 +9,7 @@ import {
   SheetDescription,
 } from '@/components/ui/sheet';
 
-type DataTableV2RowSheetProps = {
+type DataTableRowSheetProps = {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   /** Ref to the element that had focus before the sheet opened (for restore). */
@@ -28,14 +28,14 @@ type DataTableV2RowSheetProps = {
  * - Escape closes the sheet (via Radix Dialog).
  * - Works on mobile (390x844) via Radix Sheet responsive sizing.
  */
-export function DataTableV2RowSheet({
+export function DataTableRowSheet({
   open,
   onOpenChange,
   focusReturnRef,
   children,
   title = 'Details',
   description,
-}: DataTableV2RowSheetProps) {
+}: DataTableRowSheetProps) {
   const contentRef = React.useRef<HTMLDivElement | null>(null);
 
   // Restore focus when sheet closes

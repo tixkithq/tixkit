@@ -5,7 +5,7 @@ import { Users } from 'lucide-react';
 import { type AdminAttendeeListItem, adminApi } from '@/lib/api';
 import { attendeesTableSchema } from '@/lib/table-schemas';
 import { EmptyState } from '@/components/empty-state';
-import { DataTableV2, useMemoryTableState } from '@/components/data-table';
+import { DataTable, useMemoryTableState } from '@/components/data-table';
 import { TextCell, TimestampCell } from '@/components/data-table/cells';
 import { useAdminTableData } from '@/hooks/use-admin-table-data';
 import { getAttendeeColumns } from '@/features/attendees/columns';
@@ -34,7 +34,7 @@ export function EventAttendeesView({ eventId }: { eventId: string }) {
 
   return (
     <>
-      <DataTableV2
+      <DataTable
         schema={attendeesTableSchema}
         columns={columns}
         data={data}

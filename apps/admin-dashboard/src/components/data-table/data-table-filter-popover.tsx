@@ -24,7 +24,7 @@ import {
   CommandSeparator,
 } from '@/components/ui/command';
 
-type DataTableV2FilterPopoverProps = {
+type DataTableFilterPopoverProps = {
   schema: TableSchema;
   column: ColumnSpec;
   value: AdminTableFilterValue | undefined;
@@ -32,12 +32,12 @@ type DataTableV2FilterPopoverProps = {
   facet?: AdminTableFacet;
 };
 
-export function DataTableV2FilterPopover({
+export function DataTableFilterPopover({
   column,
   value,
   onChange,
   facet,
-}: DataTableV2FilterPopoverProps) {
+}: DataTableFilterPopoverProps) {
   const isActive = value !== undefined && !isEmptyValue(value);
   const selectedCount = getSelectedCount(value);
 

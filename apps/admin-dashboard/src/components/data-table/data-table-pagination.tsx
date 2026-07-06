@@ -13,7 +13,7 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 
-type DataTableV2PaginationProps = {
+type DataTablePaginationProps = {
   schema: TableSchema;
   query: AdminTableQuery;
   onQueryChange: (updater: (prev: AdminTableQuery) => AdminTableQuery) => void;
@@ -22,14 +22,14 @@ type DataTableV2PaginationProps = {
   className?: string;
 };
 
-export function DataTableV2Pagination({
+export function DataTablePagination({
   schema,
   query,
   onQueryChange,
   data,
   loading,
   className,
-}: DataTableV2PaginationProps) {
+}: DataTablePaginationProps) {
   const limit = query.limit ?? schema.defaultPageSize;
   const hasNext = Boolean(data?.nextCursor);
   const hasPrev = Boolean(data?.prevCursor) || Boolean(query.cursor);

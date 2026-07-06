@@ -1,14 +1,14 @@
 import { describe, it, expect, vi } from 'vitest';
 import { render, screen, fireEvent } from '@testing-library/react';
 import * as React from 'react';
-import { DataTableV2RowSheet } from '@/components/data-table/data-table-row-sheet';
+import { DataTableRowSheet } from '@/components/data-table/data-table-row-sheet';
 
-describe('DataTableV2RowSheet', () => {
+describe('DataTableRowSheet', () => {
   it('renders children when open', () => {
     render(
-      <DataTableV2RowSheet open={true} onOpenChange={() => {}}>
+      <DataTableRowSheet open={true} onOpenChange={() => {}}>
         <div data-testid="sheet-content">Row details</div>
-      </DataTableV2RowSheet>,
+      </DataTableRowSheet>,
     );
     expect(screen.getByTestId('sheet-content')).toBeInTheDocument();
     expect(screen.getByText('Row details')).toBeInTheDocument();
@@ -16,23 +16,23 @@ describe('DataTableV2RowSheet', () => {
 
   it('does not render children when closed', () => {
     render(
-      <DataTableV2RowSheet open={false} onOpenChange={() => {}}>
+      <DataTableRowSheet open={false} onOpenChange={() => {}}>
         <div data-testid="sheet-content">Row details</div>
-      </DataTableV2RowSheet>,
+      </DataTableRowSheet>,
     );
     expect(screen.queryByTestId('sheet-content')).not.toBeInTheDocument();
   });
 
   it('renders title and description', () => {
     render(
-      <DataTableV2RowSheet
+      <DataTableRowSheet
         open={true}
         onOpenChange={() => {}}
         title="Order Details"
         description="Quick view of order information"
       >
         <div>Content</div>
-      </DataTableV2RowSheet>,
+      </DataTableRowSheet>,
     );
     expect(screen.getByText('Order Details')).toBeInTheDocument();
     expect(screen.getByText('Quick view of order information')).toBeInTheDocument();
@@ -41,9 +41,9 @@ describe('DataTableV2RowSheet', () => {
   it('calls onOpenChange when Escape is pressed', () => {
     const onOpenChange = vi.fn();
     render(
-      <DataTableV2RowSheet open={true} onOpenChange={onOpenChange}>
+      <DataTableRowSheet open={true} onOpenChange={onOpenChange}>
         <div>Content</div>
-      </DataTableV2RowSheet>,
+      </DataTableRowSheet>,
     );
     // Radix Dialog handles Escape at the document level
     fireEvent.keyDown(document.body, { key: 'Escape' });
@@ -59,13 +59,13 @@ describe('DataTableV2RowSheet', () => {
           <button ref={ref} onClick={() => setOpen(true)} data-testid="trigger">
             Open sheet
           </button>
-          <DataTableV2RowSheet
+          <DataTableRowSheet
             open={open}
             onOpenChange={setOpen}
             focusReturnRef={ref}
           >
             <div>Content</div>
-          </DataTableV2RowSheet>
+          </DataTableRowSheet>
         </div>
       );
     };

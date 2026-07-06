@@ -5,19 +5,19 @@ import type { AdminTableFilterValue } from '@tixkit/admin-table-core';
 import { Badge } from '@/components/ui/badge';
 import { cn } from '@/lib/utils';
 
-type DataTableV2FilterChipProps = {
+type DataTableFilterChipProps = {
   label: string;
   value: AdminTableFilterValue;
   onRemove: () => void;
   className?: string;
 };
 
-export function DataTableV2FilterChip({
+export function DataTableFilterChip({
   label,
   value,
   onRemove,
   className,
-}: DataTableV2FilterChipProps) {
+}: DataTableFilterChipProps) {
   const displayValue = formatFilterValue(value);
   if (!displayValue) return null;
 

@@ -53,7 +53,7 @@ vi.mock('@/components/data-table', async (importOriginal) => {
       resetFilters: vi.fn(),
       hasActiveFilters: false,
     }),
-    DataTableV2: ({
+    DataTable: ({
       toolbarActions,
       emptyState,
     }: {

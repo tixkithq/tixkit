@@ -15,7 +15,7 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { DataTableV2, useMemoryTableState } from '@/components/data-table';
+import { DataTable, useMemoryTableState } from '@/components/data-table';
 import { TextCell, TimestampCell } from '@/components/data-table/cells';
 import { useAdminTableData } from '@/hooks/use-admin-table-data';
 import { useBootstrap } from '@/context/bootstrap-provider';
@@ -209,7 +209,7 @@ export function AuditLogView() {
           <h2 className="text-lg font-semibold">Audit events</h2>
           <p className="text-sm text-muted-foreground">Privileged mutation history by scope.</p>
         </div>
-        <DataTableV2
+        <DataTable
           schema={auditLogTableSchema}
           columns={auditLogColumns}
           data={audit.data}
@@ -284,7 +284,7 @@ export function AuditLogView() {
         <Button onClick={submitPrivacyRequest} disabled={submitting}>
           {submitting ? 'Queuing...' : `Queue ${requestType}`}
         </Button>
-        <DataTableV2
+        <DataTable
           schema={privacyRequestTableSchema}
           columns={privacyRequestColumns}
           data={privacy.data}

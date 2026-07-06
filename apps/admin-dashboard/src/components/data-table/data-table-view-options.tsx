@@ -12,11 +12,11 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 
-type DataTableV2ViewOptionsProps<TData> = {
+type DataTableViewOptionsProps<TData> = {
   table: Table<TData>;
 };
 
-export function DataTableV2ViewOptions<TData>({ table }: DataTableV2ViewOptionsProps<TData>) {
+export function DataTableViewOptions<TData>({ table }: DataTableViewOptionsProps<TData>) {
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
@@ -36,9 +36,9 @@ export function DataTableV2ViewOptions<TData>({ table }: DataTableV2ViewOptionsP
               <Checkbox
                 checked={column.getIsVisible()}
                 onCheckedChange={(value) => column.toggleVisibility(!!value)}
-                id={`v2-col-${column.id}`}
+                id={`col-${column.id}`}
               />
-              <label htmlFor={`v2-col-${column.id}`} className="flex-1 cursor-pointer text-sm">
+              <label htmlFor={`col-${column.id}`} className="flex-1 cursor-pointer text-sm">
                 {column.columnDef.meta?.title ?? column.id}
               </label>
             </div>

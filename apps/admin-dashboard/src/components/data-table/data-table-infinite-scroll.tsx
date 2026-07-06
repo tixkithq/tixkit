@@ -3,7 +3,7 @@
 import * as React from 'react';
 import { Loader2 } from 'lucide-react';
 
-type DataTableV2InfiniteScrollProps = {
+type DataTableInfiniteScrollProps = {
   hasNextPage: boolean;
   isFetching: boolean;
   onLoadMore: () => void;
@@ -16,12 +16,12 @@ type DataTableV2InfiniteScrollProps = {
  * Place at the bottom of a table. When the sentinel enters the viewport,
  * `onLoadMore` is called. Shows a loading spinner while fetching.
  */
-export function DataTableV2InfiniteScroll({
+export function DataTableInfiniteScroll({
   hasNextPage,
   isFetching,
   onLoadMore,
   className,
-}: DataTableV2InfiniteScrollProps) {
+}: DataTableInfiniteScrollProps) {
   const sentinelRef = React.useRef<HTMLDivElement | null>(null);
 
   React.useEffect(() => {

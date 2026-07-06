@@ -6,7 +6,7 @@ import { type AdminEventListItem, adminApi } from '@/lib/api';
 import { eventsTableSchema } from '@/lib/table-schemas';
 import { Button } from '@/components/ui/button';
 import { EmptyState } from '@/components/empty-state';
-import { DataTableV2, useUrlTableState } from '@/components/data-table';
+import { DataTable, useUrlTableState } from '@/components/data-table';
 import { TimestampCell } from '@/components/data-table/cells';
 import { useAdminTableData } from '@/hooks/use-admin-table-data';
 import { usePermissions } from '@/context/permission-provider';
@@ -56,7 +56,7 @@ export function EventsTable() {
 
   return (
     <>
-      <DataTableV2
+      <DataTable
         schema={eventsTableSchema}
         columns={columns}
         data={data}

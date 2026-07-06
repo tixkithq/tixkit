@@ -42,7 +42,7 @@ vi.mock('@/hooks/use-admin-table-data', () => ({
 }));
 
 vi.mock('@/components/data-table/data-table', () => ({
-  DataTableV2: ({
+  DataTable: ({
     emptyState,
     loading,
     error,
@@ -115,7 +115,7 @@ describe('Orders table columns', () => {
   });
 });
 
-describe('OrdersTable with DataTableV2', () => {
+describe('OrdersTable with DataTable', () => {
   beforeEach(() => {
     adminTableDataState.data = { items: [] };
     adminTableDataState.items = [];

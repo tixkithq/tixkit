@@ -11,11 +11,11 @@ import type {
 import { hasActiveFilters, isFilterEmpty } from '@tixkit/admin-table-core';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import { DataTableV2FilterPopover } from './data-table-filter-popover';
-import { DataTableV2ViewOptions } from './data-table-view-options';
+import { DataTableFilterPopover } from './data-table-filter-popover';
+import { DataTableViewOptions } from './data-table-view-options';
 import { useReactTable } from '@tanstack/react-table';
 
-type DataTableV2ToolbarProps = {
+type DataTableToolbarProps = {
   schema: TableSchema;
   query: AdminTableQuery;
   onQueryChange: (updater: (prev: AdminTableQuery) => AdminTableQuery) => void;
@@ -26,7 +26,7 @@ type DataTableV2ToolbarProps = {
   table?: ReturnType<typeof useReactTable>;
 };
 
-export function DataTableV2Toolbar({
+export function DataTableToolbar({
   schema,
   query,
   onQueryChange,
@@ -34,7 +34,7 @@ export function DataTableV2Toolbar({
   loading,
   children,
   table,
-}: DataTableV2ToolbarProps) {
+}: DataTableToolbarProps) {
   const filters = query.filters ?? {};
   const hasFilters = hasActiveFilters(query);
 
@@ -95,7 +95,7 @@ export function DataTableV2Toolbar({
         )}
 
         {popoverFilters.map((column) => (
-          <DataTableV2FilterPopover
+          <DataTableFilterPopover
             key={column.id}
             schema={schema}
             column={column}
@@ -114,7 +114,7 @@ export function DataTableV2Toolbar({
       </div>
       <div className="flex items-center gap-2">
         {children}
-        {table && <DataTableV2ViewOptions table={table} />}
+        {table && <DataTableViewOptions table={table} />}
       </div>
     </div>
   );

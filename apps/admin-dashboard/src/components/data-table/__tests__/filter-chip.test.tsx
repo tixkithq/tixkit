@@ -1,11 +1,11 @@
 import { describe, it, expect, vi } from 'vitest';
 import { render, screen, fireEvent } from '@testing-library/react';
-import { DataTableV2FilterChip } from '@/components/data-table/data-table-filter-chip';
+import { DataTableFilterChip } from '@/components/data-table/data-table-filter-chip';
 
-describe('DataTableV2FilterChip', () => {
+describe('DataTableFilterChip', () => {
   it('renders select filter chip', () => {
     render(
-      <DataTableV2FilterChip
+      <DataTableFilterChip
         label="Status"
         value={{ type: 'select', values: ['paid', 'failed'] }}
         onRemove={() => {}}
@@ -17,7 +17,7 @@ describe('DataTableV2FilterChip', () => {
 
   it('renders boolean filter chip', () => {
     render(
-      <DataTableV2FilterChip
+      <DataTableFilterChip
         label="Refunded"
         value={{ type: 'boolean', value: true }}
         onRemove={() => {}}
@@ -28,7 +28,7 @@ describe('DataTableV2FilterChip', () => {
 
   it('renders text filter chip', () => {
     render(
-      <DataTableV2FilterChip
+      <DataTableFilterChip
         label="Email"
         value={{ type: 'text', value: 'test@test.com' }}
         onRemove={() => {}}
@@ -39,7 +39,7 @@ describe('DataTableV2FilterChip', () => {
 
   it('renders date range filter chip', () => {
     render(
-      <DataTableV2FilterChip
+      <DataTableFilterChip
         label="Created"
         value={{ type: 'date_range', from: '2026-01-01', to: '2026-02-01' }}
         onRemove={() => {}}
@@ -51,7 +51,7 @@ describe('DataTableV2FilterChip', () => {
 
   it('renders number range filter chip', () => {
     render(
-      <DataTableV2FilterChip
+      <DataTableFilterChip
         label="Total"
         value={{ type: 'number_range', min: 100, max: 500 }}
         onRemove={() => {}}
@@ -64,7 +64,7 @@ describe('DataTableV2FilterChip', () => {
   it('calls onRemove when remove button is clicked', async () => {
     const onRemove = vi.fn();
     render(
-      <DataTableV2FilterChip
+      <DataTableFilterChip
         label="Status"
         value={{ type: 'select', values: ['paid'] }}
         onRemove={onRemove}
@@ -76,7 +76,7 @@ describe('DataTableV2FilterChip', () => {
 
   it('returns null for empty text filter', () => {
     const { container } = render(
-      <DataTableV2FilterChip
+      <DataTableFilterChip
         label="Email"
         value={{ type: 'text', value: '' }}
         onRemove={() => {}}

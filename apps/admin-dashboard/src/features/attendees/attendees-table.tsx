@@ -6,7 +6,7 @@ import { type AdminAttendeeListItem, type AdminExportJob, adminApi } from '@/lib
 import { attendeesTableSchema } from '@/lib/table-schemas';
 import { Button } from '@/components/ui/button';
 import { EmptyState } from '@/components/empty-state';
-import { DataTableV2, useUrlTableState } from '@/components/data-table';
+import { DataTable, useUrlTableState } from '@/components/data-table';
 import {
   TextCell,
   TimestampCell,
@@ -95,7 +95,7 @@ export function AttendeesTable() {
   return (
     <>
       {lastExport && <ExportStatusNotice exportJob={lastExport} />}
-      <DataTableV2
+      <DataTable
         schema={attendeesTableSchema}
         columns={columns}
         data={data}

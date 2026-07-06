@@ -20,11 +20,11 @@ import {
 } from '@/components/ui/table';
 import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
-import { DataTableV2Toolbar } from './data-table-toolbar';
-import { DataTableV2Pagination } from './data-table-pagination';
-import { DataTableV2RowSheet } from './data-table-row-sheet';
+import { DataTableToolbar } from './data-table-toolbar';
+import { DataTablePagination } from './data-table-pagination';
+import { DataTableRowSheet } from './data-table-row-sheet';
 
-type DataTableV2Props<TData> = {
+type DataTableProps<TData> = {
   schema: TableSchema;
   columns: ColumnDef<TData>[];
   data: AdminTablePage<TData> | undefined;
@@ -45,7 +45,7 @@ type DataTableV2Props<TData> = {
   filterTotal?: number;
 };
 
-export function DataTableV2<TData>({
+export function DataTable<TData>({
   schema,
   columns,
   data,
@@ -60,7 +60,7 @@ export function DataTableV2<TData>({
   renderRowSheet,
   showPagination = true,
   showToolbar = true,
-}: DataTableV2Props<TData>) {
+}: DataTableProps<TData>) {
   const [rowSheetOpen, setRowSheetOpen] = React.useState(false);
   const [selectedRow, setSelectedRow] = React.useState<TData | null>(null);
   const rowClickRef = React.useRef<HTMLElement | null>(null);
@@ -106,7 +106,7 @@ export function DataTableV2<TData>({
   return (
     <div className="space-y-4">
       {showToolbar && (
-        <DataTableV2Toolbar
+        <DataTableToolbar
           schema={schema}
           query={query}
           onQueryChange={onQueryChange}
@@ -114,7 +114,7 @@ export function DataTableV2<TData>({
           loading={loading}
         >
           {toolbarActions}
-        </DataTableV2Toolbar>
+        </DataTableToolbar>
       )}
 
       {error && items.length === 0 ? (
@@ -132,7 +132,7 @@ export function DataTableV2<TData>({
           )}
         </div>
       ) : loading && items.length === 0 ? (
-        <DataTableV2Skeleton columnCount={columns.length} />
+        <DataTableSkeleton columnCount={columns.length} />
       ) : (
         <div className="rounded-md border">
           <Table>
@@ -212,7 +212,7 @@ export function DataTableV2<TData>({
       )}
 
       {showPagination && !showEmptyState && (
-        <DataTableV2Pagination
+        <DataTablePagination
           query={query}
           onQueryChange={onQueryChange}
           data={data}
@@ -222,19 +222,19 @@ export function DataTableV2<TData>({
       )}
 
       {renderRowSheet && (
-        <DataTableV2RowSheet
+        <DataTableRowSheet
           open={rowSheetOpen}
           onOpenChange={setRowSheetOpen}
           focusReturnRef={rowClickRef}
         >
           {renderRowSheet(selectedRow)}
-        </DataTableV2RowSheet>
+        </DataTableRowSheet>
       )}
     </div>
   );
 }
 
-function DataTableV2Skeleton({ columnCount }: { columnCount: number }) {
+function DataTableSkeleton({ columnCount }: { columnCount: number }) {
   return (
     <div className="rounded-md border">
       <div className="flex items-center gap-2 border-b p-2">
