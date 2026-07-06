@@ -5,12 +5,50 @@ import {
   BrandRepository,
   PrivacyRequestRepository,
   type Database,
+  executeTableQuery,
 } from '@tixkit/db';
+import {
+  col,
+  defineTable,
+  paramsToQuery,
+  type AdminTablePage,
+} from '@tixkit/admin-table-core';
 import { NotFoundError, ValidationError, type Principal } from '@tixkit/domain';
 import { ClerkAuthService } from '../../auth/clerk.js';
 import { writeAuditLog } from '../../auth/audit.js';
-import { pageEnvelope, parseJsonValue, parsePagination, toIso } from '../../http/contracts.js';
+import { parseJsonValue, toIso } from '../../http/contracts.js';
 import { hashRequest, withIdempotency } from '../../services/idempotency.js';
+
+// ---------------------------------------------------------------------------
+// Server-owned table schemas for audit logs and privacy requests
+// ---------------------------------------------------------------------------
+
+const auditLogTableSchema = defineTable('audit_logs', {
+  primaryKey: 'id',
+  defaultSort: { field: 'createdAt', direction: 'desc' },
+  columns: [
+    col.id('id').serverField('id'),
+    col.enum('action', []).serverField('action').facet(),
+    col.enum('resourceType', []).serverField('resource_type').facet(),
+    col.text('actorId').serverField('actor_id').filterable(),
+    col.dateTime('createdAt').serverField('created_at').sortable().filterable().facet(),
+  ],
+});
+
+const PRIVACY_REQUEST_STATUS_PRESETS = ['pending', 'processing', 'completed', 'failed'] as const;
+
+const privacyRequestTableSchema = defineTable('privacy_requests', {
+  primaryKey: 'id',
+  defaultSort: { field: 'createdAt', direction: 'desc' },
+  columns: [
+    col.id('id').serverField('id'),
+    col.enum('requestType', ['export', 'erasure']).serverField('request_type').facet(),
+    col.status('status', PRIVACY_REQUEST_STATUS_PRESETS).serverField('status').sortable().facet(),
+    col.enum('subjectType', ['buyer', 'attendee']).serverField('subject_type').facet(),
+    col.dateTime('createdAt').serverField('created_at').sortable().filterable().facet(),
+    col.dateTime('completedAt').serverField('completed_at').filterable(),
+  ],
+});
 
 const privacyRequestSchema = z
   .object({
@@ -116,58 +154,83 @@ export const privacyRoutes: FastifyPluginAsync = async (app) => {
   app.get('/audit-logs', async (request) => {
     const principal = request.principal!;
     ClerkAuthService.requirePermission(principal, 'settings.write');
-    const pagination = parsePagination(request.query);
-    const query = request.query as Record<string, unknown>;
-    const organizationId =
-      typeof query.organizationId === 'string' ? query.organizationId : undefined;
-    const brandId = typeof query.brandId === 'string' ? query.brandId : undefined;
+
+    const rawQuery = request.query as Record<string, string | undefined>;
+    const { organizationId, brandId } = rawQuery;
 
     if (organizationId) ClerkAuthService.requireOrganizationScope(principal, organizationId);
     if (brandId) ClerkAuthService.requireBrandScope(principal, brandId);
+
     if (principal.type !== 'system' && principal.organizationIds.length === 0) {
-      return pageEnvelope([], pagination.limit);
+      return { items: [], nextCursor: undefined, total: 0, filterTotal: 0 } as AdminTablePage<unknown>;
     }
 
-    const rows = await auditRepo().listByTenant(principal.tenantId, {
-      organizationIds: principal.type === 'system' ? undefined : principal.organizationIds,
-      organizationId,
-      brandId,
-      action: typeof query.action === 'string' ? query.action : undefined,
-      resourceType: typeof query.resourceType === 'string' ? query.resourceType : undefined,
-      actorId: typeof query.actorId === 'string' ? query.actorId : undefined,
-      cursor: pagination.cursor,
-      limit: pagination.limit,
-    });
+    const scope: Record<string, string | string[]> = {};
+    if (organizationId) {
+      scope.organization_id = organizationId;
+    } else if (principal.type !== 'system') {
+      scope.organization_id = principal.organizationIds;
+    }
+    if (brandId) scope.brand_id = brandId;
 
-    return pageEnvelope(rows.map(serializeAuditLog), pagination.limit);
+    const searchParams = new URLSearchParams();
+    for (const [key, value] of Object.entries(rawQuery)) {
+      if (value !== undefined && key !== 'organizationId' && key !== 'brandId') {
+        searchParams.set(key, value);
+      }
+    }
+    const { query: tableQuery } = paramsToQuery(auditLogTableSchema, searchParams);
+
+    const result = await executeTableQuery(db, {
+      tableName: 'audit_logs',
+      schema: auditLogTableSchema,
+      tenantId: principal.tenantId,
+      scope,
+      serialize: serializeAuditLog,
+    }, tableQuery);
+
+    return result as AdminTablePage<unknown>;
   });
 
   app.get('/privacy/requests', async (request) => {
     const principal = request.principal!;
     ClerkAuthService.requirePermission(principal, 'settings.write');
-    const pagination = parsePagination(request.query);
-    const query = request.query as Record<string, unknown>;
-    const organizationId =
-      typeof query.organizationId === 'string' ? query.organizationId : undefined;
-    const brandId = typeof query.brandId === 'string' ? query.brandId : undefined;
+
+    const rawQuery = request.query as Record<string, string | undefined>;
+    const { organizationId, brandId } = rawQuery;
 
     if (organizationId) ClerkAuthService.requireOrganizationScope(principal, organizationId);
     if (brandId) ClerkAuthService.requireBrandScope(principal, brandId);
+
     if (principal.type !== 'system' && principal.organizationIds.length === 0) {
-      return pageEnvelope([], pagination.limit);
+      return { items: [], nextCursor: undefined, total: 0, filterTotal: 0 } as AdminTablePage<unknown>;
     }
 
-    const rows = await privacyRepo().listByTenant(principal.tenantId, {
-      organizationIds: principal.type === 'system' ? undefined : principal.organizationIds,
-      organizationId,
-      brandId,
-      requestType: typeof query.requestType === 'string' ? query.requestType : undefined,
-      status: typeof query.status === 'string' ? query.status : undefined,
-      cursor: pagination.cursor,
-      limit: pagination.limit,
-    });
+    const scope: Record<string, string | string[]> = {};
+    if (organizationId) {
+      scope.organization_id = organizationId;
+    } else if (principal.type !== 'system') {
+      scope.organization_id = principal.organizationIds;
+    }
+    if (brandId) scope.brand_id = brandId;
 
-    return pageEnvelope(rows.map(serializePrivacyRequest), pagination.limit);
+    const searchParams = new URLSearchParams();
+    for (const [key, value] of Object.entries(rawQuery)) {
+      if (value !== undefined && key !== 'organizationId' && key !== 'brandId') {
+        searchParams.set(key, value);
+      }
+    }
+    const { query: tableQuery } = paramsToQuery(privacyRequestTableSchema, searchParams);
+
+    const result = await executeTableQuery(db, {
+      tableName: 'privacy_requests',
+      schema: privacyRequestTableSchema,
+      tenantId: principal.tenantId,
+      scope,
+      serialize: serializePrivacyRequest,
+    }, tableQuery);
+
+    return result as AdminTablePage<unknown>;
   });
 
   app.get('/privacy/requests/:requestId', async (request) => {

@@ -178,6 +178,9 @@ export function serializeEvent(row: Record<string, unknown>) {
     coverImageUrl: row.cover_image_url ?? undefined,
     externalUrl: row.external_url ?? undefined,
     resalePolicy: serializeResalePolicy(row),
+    grossSalesCents: Number(row.gross_sales_cents ?? 0),
+    ticketsSold: Number(row.tickets_sold ?? 0),
+    checkIns: Number(row.check_ins ?? 0),
     createdAt: toIso(row.created_at as Date | string),
     updatedAt: toIso(row.updated_at as Date | string),
   };
@@ -348,6 +351,7 @@ export function serializeOrder(row: Record<string, unknown>) {
     organizationId: row.organization_id,
     brandId: row.brand_id,
     eventId: row.event_id,
+    eventTitle: row.event_title ?? row.eventTitle ?? '',
     checkoutSessionId: row.checkout_session_id,
     orderNumber: row.order_number,
     status: row.status,

@@ -307,6 +307,10 @@ export const developerRoutes: FastifyPluginAsync = async (app) => {
     const principal = request.principal!;
     ClerkAuthService.requirePermission(principal, 'developers.write');
     const pagination = parsePagination(request.query);
+    const { organizationId } = request.query as { organizationId?: string };
+    if (organizationId) {
+      ClerkAuthService.requireOrganizationScope(principal, organizationId);
+    }
     if (principal.type !== 'system') {
       if (principal.organizationIds.length === 0) {
         return pageEnvelope([], pagination.limit);
@@ -336,6 +340,9 @@ export const developerRoutes: FastifyPluginAsync = async (app) => {
       // within the same tenant. System principals bypass this filter.
       if (principal.type !== 'system') {
         query = query.where('organization_id', 'in', principal.organizationIds);
+      }
+      if (organizationId) {
+        query = query.where('organization_id', '=', organizationId);
       }
       if (cursor) query = query.where('id', '>', cursor);
       return query;

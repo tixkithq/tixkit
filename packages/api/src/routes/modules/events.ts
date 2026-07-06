@@ -7,14 +7,19 @@ import {
   EventRepository,
   EventOccurrenceRepository,
   AuditLogRepository,
+  executeTableQuery,
 } from '@tixkit/db';
+import {
+  col,
+  defineTable,
+  paramsToQuery,
+  type AdminTablePage,
+} from '@tixkit/admin-table-core';
 import { NotFoundError, ValidationError } from '@tixkit/domain';
 import { SCANNER_CONTRACT_VERSION, DEFAULT_CODE_FORMAT } from '@tixkit/domain';
 import type { CodeFormat } from '@tixkit/domain';
 import { writeAuditLog } from '../../auth/audit.js';
 import {
-  pageEnvelope,
-  parsePagination,
   serializeEvent,
   serializeEventOccurrence,
   serializeMarketingIntegration,
@@ -129,6 +134,88 @@ function isMarketingIntegrationEventProviderDuplicateInsert(error: unknown): boo
   return false;
 }
 
+/**
+ * Batch-compute sales stats (gross sales, tickets sold, check-ins) for a set
+ * of event IDs. Returns a map of event_id -> stats that can be merged into
+ * event rows before serialization.
+ */
+async function computeEventStats(
+  db: import('@tixkit/db').Database,
+  tenantId: string,
+  eventIds: string[],
+): Promise<Map<string, { gross_sales_cents: number; tickets_sold: number; check_ins: number }>> {
+  if (eventIds.length === 0) return new Map();
+
+  const [salesRows, ticketRows, checkInRows] = await Promise.all([
+    db
+      .selectFrom('orders')
+      .select(({ fn }) => [
+        'event_id',
+        fn.sum<number>('total_cents').as('gross_sales_cents'),
+      ])
+      .where('tenant_id', '=', tenantId)
+      .where('event_id', 'in', eventIds)
+      .where('status', 'in', ['paid', 'partially_refunded', 'refunded'])
+      .groupBy('event_id')
+      .execute(),
+    db
+      .selectFrom('tickets')
+      .select(({ fn }) => ['event_id', fn.countAll<number>().as('tickets_sold')])
+      .where('tenant_id', '=', tenantId)
+      .where('event_id', 'in', eventIds)
+      .where('status', 'in', ['valid', 'checked_in'])
+      .groupBy('event_id')
+      .execute(),
+    db
+      .selectFrom('tickets')
+      .select(({ fn }) => ['event_id', fn.countAll<number>().as('check_ins')])
+      .where('tenant_id', '=', tenantId)
+      .where('event_id', 'in', eventIds)
+      .where('status', '=', 'checked_in')
+      .groupBy('event_id')
+      .execute(),
+  ]);
+
+  const stats = new Map<
+    string,
+    { gross_sales_cents: number; tickets_sold: number; check_ins: number }
+  >();
+  for (const id of eventIds) {
+    stats.set(id, { gross_sales_cents: 0, tickets_sold: 0, check_ins: 0 });
+  }
+  for (const row of salesRows) {
+    const entry = stats.get(row.event_id as string);
+    if (entry) entry.gross_sales_cents = Number(row.gross_sales_cents ?? 0);
+  }
+  for (const row of ticketRows) {
+    const entry = stats.get(row.event_id as string);
+    if (entry) entry.tickets_sold = Number(row.tickets_sold ?? 0);
+  }
+  for (const row of checkInRows) {
+    const entry = stats.get(row.event_id as string);
+    if (entry) entry.check_ins = Number(row.check_ins ?? 0);
+  }
+  return stats;
+}
+
+// ---------------------------------------------------------------------------
+// Events table schema (server-owned)
+// ---------------------------------------------------------------------------
+
+const EVENT_STATUS_PRESETS = ['draft', 'published', 'paused', 'archived'] as const;
+
+const eventsTableSchema = defineTable('events', {
+  primaryKey: 'id',
+  defaultSort: { field: 'createdAt', direction: 'desc' },
+  columns: [
+    col.id('id').serverField('id'),
+    col.status('status', EVENT_STATUS_PRESETS).serverField('status').sortable().facet(),
+    col.text('title').serverField('title').filterable(),
+    col.dateTime('startsAt').serverField('starts_at').sortable().filterable().facet(),
+    col.dateTime('createdAt').serverField('created_at').sortable().filterable().facet(),
+  ],
+});
+
 export const eventRoutes: FastifyPluginAsync = async (app) => {
   const db = app.context.db;
   const audit = () => new AuditLogRepository(db);
@@ -186,43 +273,67 @@ export const eventRoutes: FastifyPluginAsync = async (app) => {
   app.get('/events', async (request) => {
     const principal = request.principal!;
     ClerkAuthService.requirePermission(principal, 'events.read');
-    const pagination = parsePagination(request.query);
-    if (principal.type !== 'system' && principal.organizationIds.length === 0) {
-      return pageEnvelope([], pagination.limit);
-    }
-    let query = db
-      .selectFrom('events')
-      .selectAll()
-      .where('tenant_id', '=', principal.tenantId)
-      .orderBy('id', 'asc')
-      .limit(pagination.limit + 1);
 
-    const { organizationId, search } = request.query as {
-      organizationId?: string;
-      search?: string;
-    };
+    const rawQuery = request.query as Record<string, string | undefined>;
+    const { organizationId, brandId } = rawQuery;
+
+    if (organizationId) ClerkAuthService.requireOrganizationScope(principal, organizationId);
+    if (brandId) ClerkAuthService.requireBrandScope(principal, brandId);
+
+    if (principal.type !== 'system' && principal.organizationIds.length === 0) {
+      return { items: [], nextCursor: undefined, total: 0, filterTotal: 0 } as AdminTablePage<unknown>;
+    }
+
+    const scope: Record<string, string | string[]> = {};
     if (organizationId) {
-      ClerkAuthService.requireOrganizationScope(principal, organizationId);
-      query = query.where('organization_id', '=', organizationId);
+      scope.organization_id = organizationId;
+    } else if (principal.type !== 'system') {
+      scope.organization_id = principal.organizationIds;
     }
-    if (search && search.trim().length > 0) {
-      query = query.where('title', 'ilike', `%${search.trim()}%`);
-    }
-    if (pagination.cursor) query = query.where('id', '>', pagination.cursor);
-    if (principal.brandIds && principal.brandIds.length > 0) {
-      query = query.where('brand_id', 'in', principal.brandIds);
+    if (brandId) {
+      scope.brand_id = brandId;
+    } else if (principal.brandIds && principal.brandIds.length > 0) {
+      scope.brand_id = principal.brandIds;
     }
     if (principal.eventIds && principal.eventIds.length > 0) {
-      query = query.where('id', 'in', principal.eventIds);
+      scope.id = principal.eventIds;
     }
-    if (principal.type !== 'system') {
-      query = query.where('organization_id', 'in', principal.organizationIds);
+
+    const searchParams = new URLSearchParams();
+    for (const [key, value] of Object.entries(rawQuery)) {
+      if (value !== undefined && key !== 'organizationId' && key !== 'brandId') {
+        searchParams.set(key, value);
+      }
     }
-    const rows = await query.execute();
-    return pageEnvelope(
-      rows.map((row) => serializeEvent(row)),
-      pagination.limit,
-    );
+    const { query: tableQuery } = paramsToQuery(eventsTableSchema, searchParams);
+
+    const result = await executeTableQuery(db, {
+      tableName: 'events',
+      schema: eventsTableSchema,
+      tenantId: principal.tenantId,
+      scope,
+      serialize: serializeEvent,
+    }, tableQuery);
+
+    // Enrich with event stats
+    const eventIds = result.items.map((e) => (e as Record<string, unknown>).id as string);
+    if (eventIds.length > 0) {
+      const stats = await computeEventStats(db, principal.tenantId, eventIds);
+      const enrichedItems = result.items.map((item) => {
+        const event = item as Record<string, unknown>;
+        const stat = stats.get(event.id as string);
+        if (!stat) return event;
+        return {
+          ...event,
+          grossSalesCents: stat.gross_sales_cents,
+          ticketsSold: stat.tickets_sold,
+          checkIns: stat.check_ins,
+        };
+      });
+      return { ...result, items: enrichedItems } as AdminTablePage<unknown>;
+    }
+
+    return result as AdminTablePage<unknown>;
   });
 
   app.get('/events/:eventId', async (request) => {
@@ -236,7 +347,8 @@ export const eventRoutes: FastifyPluginAsync = async (app) => {
     ClerkAuthService.requireOrganizationScope(principal, event.organization_id);
     ClerkAuthService.requireBrandScope(principal, event.brand_id);
     ClerkAuthService.requireEventScope(principal, eventId);
-    return serializeEvent(event);
+    const stats = await computeEventStats(db, principal.tenantId, [eventId]);
+    return serializeEvent({ ...event, ...stats.get(eventId) });
   });
 
   app.get('/events/:eventId/occurrences', async (request) => {

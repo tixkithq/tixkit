@@ -736,6 +736,13 @@ export const bulkSyncChunkSchema = z
   })
   .strict();
 
+export const createCheckInListSchema = z
+  .object({
+    name: z.string().min(1).max(100),
+    ticketTypeIds: z.array(z.string().min(1)).optional().default([]),
+  })
+  .strict();
+
 export const updateAttendeeSchema = z
   .object({
     firstName: z.string().nullable().optional(),

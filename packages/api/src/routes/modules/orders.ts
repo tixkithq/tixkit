@@ -1,6 +1,18 @@
 import type { FastifyPluginAsync } from 'fastify';
+import { sql } from 'kysely';
 import { ClerkAuthService } from '../../auth/clerk.js';
-import { OrderRepository, AuditLogRepository, PaymentCompensationRepository } from '@tixkit/db';
+import {
+  OrderRepository,
+  AuditLogRepository,
+  PaymentCompensationRepository,
+  executeTableQuery,
+} from '@tixkit/db';
+import {
+  col,
+  defineTable,
+  paramsToQuery,
+  type AdminTablePage,
+} from '@tixkit/admin-table-core';
 import { NotFoundError, ValidationError } from '@tixkit/domain';
 import { writeAuditLog } from '../../auth/audit.js';
 import { withIdempotency, hashRequest } from '../../services/idempotency.js';
@@ -17,6 +29,39 @@ import {
   parseJsonValue,
 } from '../../http/contracts.js';
 import { refundSchema, parseBody } from '../../http/schemas.js';
+
+// ---------------------------------------------------------------------------
+// Orders table schema (server-owned, defines allowed filter/sort/sheet fields)
+// ---------------------------------------------------------------------------
+
+const ORDER_STATUS_PRESETS = [
+  'pending',
+  'paid',
+  'failed',
+  'cancelled',
+  'refunded',
+  'partially_refunded',
+] as const;
+
+const SALES_CHANNEL_OPTIONS = ['online', 'box_office'] as const;
+
+const PAYMENT_PROVIDER_OPTIONS = ['stripe', 'free', 'manual'] as const;
+
+const ordersTableSchema = defineTable('orders', {
+  primaryKey: 'id',
+  defaultSort: { field: 'createdAt', direction: 'desc' },
+  columns: [
+    col.id('id').serverField('id'),
+    col.enum('eventId', []).serverField('event_id').facet(),
+    col.status('status', ORDER_STATUS_PRESETS).serverField('status').sortable().facet(),
+    col.enum('salesChannel', SALES_CHANNEL_OPTIONS).serverField('sales_channel').facet(),
+    col.enum('paymentProvider', PAYMENT_PROVIDER_OPTIONS).serverField('payment_provider').facet(),
+    col.boolean('refundState').serverField('refunded_cents').facet(),
+    col.money('totalCents').serverField('total_cents').filterable().facet(),
+    col.dateTime('createdAt').serverField('created_at').sortable().filterable().facet(),
+    col.text('buyerEmail').serverField('buyer_email').filterable().paramAlias('search'),
+  ],
+});
 
 function serializePaymentCompensation(row: {
   id: string;
@@ -65,15 +110,21 @@ export const orderRoutes: FastifyPluginAsync = async (app) => {
     const principal = request.principal!;
     ClerkAuthService.requirePermission(principal, 'orders.read');
     const pagination = parsePagination(request.query);
-    const { status, checkoutSessionId } = request.query as {
+    const { status, checkoutSessionId, organizationId, brandId } = request.query as {
       status?: string;
       checkoutSessionId?: string;
+      organizationId?: string;
+      brandId?: string;
     };
+    if (organizationId) ClerkAuthService.requireOrganizationScope(principal, organizationId);
+    if (brandId) ClerkAuthService.requireBrandScope(principal, brandId);
     const repo = new PaymentCompensationRepository(db);
     const rows = await repo.listForTenant({
       tenantId: principal.tenantId,
-      organizationIds: principal.type === 'system' ? undefined : principal.organizationIds,
-      brandIds: principal.brandIds,
+      organizationIds: organizationId
+        ? [organizationId]
+        : (principal.type === 'system' ? undefined : principal.organizationIds),
+      brandIds: brandId ? [brandId] : principal.brandIds,
       eventIds: principal.eventIds,
       status,
       checkoutSessionId,
@@ -89,47 +140,141 @@ export const orderRoutes: FastifyPluginAsync = async (app) => {
   app.get('/orders', async (request) => {
     const principal = request.principal!;
     ClerkAuthService.requirePermission(principal, 'orders.read');
-    const pagination = parsePagination(request.query);
-    if (principal.type !== 'system' && principal.organizationIds.length === 0) {
-      return pageEnvelope([], pagination.limit);
-    }
-    let query = db
-      .selectFrom('orders')
-      .selectAll()
-      .where('tenant_id', '=', principal.tenantId)
-      .orderBy('id', 'asc')
-      .limit(pagination.limit + 1);
 
-    const { organizationId, eventId, search } = request.query as {
-      organizationId?: string;
-      eventId?: string;
-      search?: string;
-    };
+    const rawQuery = request.query as Record<string, string | undefined>;
+    const { organizationId, brandId } = rawQuery;
+
+    // Permission scope checks for explicit org/brand params
+    if (organizationId) ClerkAuthService.requireOrganizationScope(principal, organizationId);
+    if (brandId) ClerkAuthService.requireBrandScope(principal, brandId);
+
+    if (principal.type !== 'system' && principal.organizationIds.length === 0) {
+      return { items: [], nextCursor: undefined, total: 0, filterTotal: 0 } as AdminTablePage<unknown>;
+    }
+
+    // Build scope: tenant + principal org/brand/event restrictions + explicit org/brand
+    const scope: Record<string, string | string[]> = {};
     if (organizationId) {
-      ClerkAuthService.requireOrganizationScope(principal, organizationId);
-      query = query.where('organization_id', '=', organizationId);
+      scope.organization_id = organizationId;
+    } else if (principal.type !== 'system') {
+      scope.organization_id = principal.organizationIds;
     }
-    if (eventId) {
-      query = query.where('event_id', '=', eventId);
-    }
-    if (search && search.trim().length > 0) {
-      query = query.where('buyer_email', 'ilike', `%${search.trim()}%`);
-    }
-    if (pagination.cursor) query = query.where('id', '>', pagination.cursor);
-    if (principal.brandIds && principal.brandIds.length > 0) {
-      query = query.where('brand_id', 'in', principal.brandIds);
+    if (brandId) {
+      scope.brand_id = brandId;
+    } else if (principal.brandIds && principal.brandIds.length > 0) {
+      scope.brand_id = principal.brandIds;
     }
     if (principal.eventIds && principal.eventIds.length > 0) {
-      query = query.where('event_id', 'in', principal.eventIds);
+      scope.event_id = principal.eventIds;
     }
-    if (principal.type !== 'system') {
-      query = query.where('organization_id', 'in', principal.organizationIds);
+
+    // Parse flat query params into AdminTableQuery using the server-owned schema
+    const searchParams = new URLSearchParams();
+    for (const [key, value] of Object.entries(rawQuery)) {
+      if (value !== undefined && key !== 'organizationId' && key !== 'brandId') {
+        searchParams.set(key, value);
+      }
     }
-    const rows = await query.execute();
-    return pageEnvelope(
-      rows.map((row) => serializeOrder(row)),
-      pagination.limit,
-    );
+    const { query: tableQuery } = paramsToQuery(ordersTableSchema, searchParams);
+
+    // Execute the table query with custom refundState filter
+    const result = await executeTableQuery(db, {
+      tableName: 'orders',
+      schema: ordersTableSchema,
+      tenantId: principal.tenantId,
+      scope,
+      serialize: serializeOrder,
+      customFilters: {
+        refundState: (q, value) => {
+          if (value.type === 'boolean') {
+            return value.value
+              ? q.where('refunded_cents', '>', 0)
+              : q.where('refunded_cents', '=', 0);
+          }
+          return q;
+        },
+      },
+    }, tableQuery);
+
+    // Fetch event titles for the current page items (separate from the table query)
+    const eventIds = [...new Set(result.items.map((o) => (o as Record<string, unknown>).eventId).filter(Boolean))] as string[];
+    const eventTitles = new Map<string, string>();
+    if (eventIds.length > 0) {
+      const events = await db
+        .selectFrom('events')
+        .select(['id', 'title'])
+        .where('id', 'in', eventIds)
+        .execute();
+      for (const event of events) {
+        eventTitles.set(event.id, event.title);
+      }
+    }
+
+    // Enrich items with event titles
+    const items = result.items.map((item) => {
+      const order = item as Record<string, unknown>;
+      return {
+        ...order,
+        eventTitle: eventTitles.get(order.eventId as string) ?? '',
+      };
+    });
+
+    // Compute refundState facet manually (boolean facet on a computed field)
+    let facets = result.facets;
+    if (tableQuery.includeFacets && !facets?.refundState) {
+      facets = facets ?? {};
+      // Build a count query with all filters EXCEPT refundState
+      let refundBaseQuery = db
+        .selectFrom('orders')
+        .where('tenant_id', '=', principal.tenantId) as any;
+      for (const [field, value] of Object.entries(scope)) {
+        if (Array.isArray(value)) {
+          refundBaseQuery = refundBaseQuery.where(field, 'in', value);
+        } else {
+          refundBaseQuery = refundBaseQuery.where(field, '=', value);
+        }
+      }
+      // Apply search and other filters except refundState
+      if (tableQuery.search) {
+        const search = tableQuery.search.trim();
+        refundBaseQuery = refundBaseQuery.where('buyer_email', 'ilike', `%${search}%`);
+      }
+      if (tableQuery.filters) {
+        for (const [field, value] of Object.entries(tableQuery.filters)) {
+          if (field === 'refundState') continue;
+          const column = ordersTableSchema.columns.find((c) => c.id === field);
+          if (!column) continue;
+          const serverField = column.serverField ?? field;
+          if (value.type === 'select') {
+            refundBaseQuery = refundBaseQuery.where(serverField, 'in', value.values);
+          } else if (value.type === 'boolean') {
+            refundBaseQuery = refundBaseQuery.where(serverField, '=', value.value);
+          } else if (value.type === 'date_range') {
+            if (value.from) refundBaseQuery = refundBaseQuery.where(serverField, '>=', new Date(value.from));
+            if (value.to) refundBaseQuery = refundBaseQuery.where(serverField, '<=', new Date(value.to));
+          } else if (value.type === 'number_range') {
+            if (value.min !== undefined) refundBaseQuery = refundBaseQuery.where(serverField, '>=', value.min);
+            if (value.max !== undefined) refundBaseQuery = refundBaseQuery.where(serverField, '<=', value.max);
+          }
+        }
+      }
+      const refundCounts = await refundBaseQuery
+        .select([
+          sql`case when refunded_cents > 0 then true else false end`.as('is_refunded'),
+          sql`count(*)`.as('total'),
+        ])
+        .groupBy('is_refunded')
+        .execute() as Array<{ is_refunded: boolean; total: number }>;
+      facets.refundState = {
+        rows: refundCounts.map((r) => ({ value: r.is_refunded, total: Number(r.total) })),
+      };
+    }
+
+    return {
+      ...result,
+      items,
+      facets,
+    } as AdminTablePage<unknown>;
   });
 
   app.get('/orders/:orderId', async (request) => {
@@ -144,7 +289,7 @@ export const orderRoutes: FastifyPluginAsync = async (app) => {
     ClerkAuthService.requireBrandScope(principal, order.brand_id);
     ClerkAuthService.requireEventScope(principal, order.event_id);
 
-    const [lineItems, timeline, attendees, refunds, checkoutSession, invoice, taxSnapshots] =
+    const [lineItems, timeline, attendees, refunds, checkoutSession, invoice, taxSnapshots, eventData] =
       await Promise.all([
         repo.getLineItems(orderId),
         repo.getTimeline(orderId),
@@ -164,6 +309,7 @@ export const orderRoutes: FastifyPluginAsync = async (app) => {
           : Promise.resolve(undefined),
         db.selectFrom('invoices').selectAll().where('order_id', '=', orderId).executeTakeFirst(),
         db.selectFrom('order_tax_snapshots').selectAll().where('order_id', '=', orderId).execute(),
+        db.selectFrom('events').select('title').where('id', '=', order.event_id).executeTakeFirst(),
       ]);
     const cart = parseJsonValue(checkoutSession?.cart, {}) as Record<string, unknown>;
     const buyerFields =
@@ -186,7 +332,7 @@ export const orderRoutes: FastifyPluginAsync = async (app) => {
     );
 
     return {
-      ...serializeOrder(order),
+      ...serializeOrder({ ...order, event_title: eventData?.title }),
       lineItems: lineItems.map((row) => serializeOrderLineItem(row)),
       attendees: attendees.map((row) => serializeAttendee(row)),
       invoice: invoice ? serializeInvoice(invoice) : undefined,

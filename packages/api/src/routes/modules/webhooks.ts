@@ -77,6 +77,10 @@ export const webhookRoutes: FastifyPluginAsync = async (app) => {
     ClerkAuthService.requirePermission(principal, 'developers.write');
     requireOrganizationWideWebhookEndpointPrincipal(principal);
     const pagination = parsePagination(request.query);
+    const { organizationId } = request.query as { organizationId?: string };
+    if (organizationId) {
+      ClerkAuthService.requireOrganizationScope(principal, organizationId);
+    }
     // Query across all principal.organizationIds, not just the first.
     let query = db
       .selectFrom('webhook_endpoints')
@@ -95,11 +99,16 @@ export const webhookRoutes: FastifyPluginAsync = async (app) => {
       .orderBy('id', 'asc')
       .limit(pagination.limit + 1);
     if (pagination.cursor) query = query.where('id', '>', pagination.cursor);
-    if (principal.organizationIds.length > 0) {
-      query = query.where('organization_id', 'in', principal.organizationIds);
-    } else {
-      // Fail-closed: no orgs means no endpoints visible.
-      query = query.where('organization_id', 'in', ['__none__']);
+    if (principal.type !== 'system') {
+      if (principal.organizationIds.length > 0) {
+        query = query.where('organization_id', 'in', principal.organizationIds);
+      } else {
+        // Fail-closed: no orgs means no endpoints visible.
+        query = query.where('organization_id', 'in', ['__none__']);
+      }
+    }
+    if (organizationId) {
+      query = query.where('organization_id', '=', organizationId);
     }
     const rows = await query.execute();
     return pageEnvelope(

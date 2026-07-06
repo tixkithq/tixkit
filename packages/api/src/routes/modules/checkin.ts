@@ -11,8 +11,10 @@ import {
   AttendeeRepository,
   OrderRepository,
   getDriver,
+  executeTableQuery,
 } from '@tixkit/db';
 import { sql } from 'kysely';
+import { col, defineTable, paramsToQuery, type AdminTablePage } from '@tixkit/admin-table-core';
 import { NotFoundError, ValidationError } from '@tixkit/domain';
 import type { ScanRequest, SyncScanInput } from '@tixkit/domain';
 import { withIdempotency, hashRequest } from '../../services/idempotency.js';
@@ -29,6 +31,7 @@ import {
 } from '../../http/contracts.js';
 import {
   createBulkSyncJobSchema,
+  createCheckInListSchema,
   bulkSyncChunkSchema,
   MAX_BULK_OFFLINE_SYNC_TOTAL_SCANS,
   OFFLINE_SYNC_JSON_BODY_LIMIT_BYTES,
@@ -157,9 +160,29 @@ const DEVICE_CLOCK_STALE_WARNING_MS = 180 * 24 * 60 * 60 * 1000;
 const scheduledBulkSyncJobs = new Set<string>();
 const pendingBulkSyncJobSchedules = new Set<string>();
 
-function escapeLikePattern(value: string): string {
-  return value.replace(/[\\%_]/g, (character) => `\\${character}`);
-}
+// ---------------------------------------------------------------------------
+// Attendees table schema (server-owned, defines allowed filter/sort/sheet fields)
+// ---------------------------------------------------------------------------
+
+const ATTENDEE_STATUS_PRESETS = ['active', 'cancelled', 'refunded', 'transferred'] as const;
+const CHECK_IN_STATUS_PRESETS = ['checked_in', 'not_checked_in', 'revoked'] as const;
+
+const attendeesTableSchema = defineTable('attendees', {
+  primaryKey: 'id',
+  defaultSort: { field: 'createdAt', direction: 'desc' },
+  columns: [
+    col.id('id').serverField('id'),
+    col.enum('eventId', []).serverField('event_id').facet(),
+    col.status('status', ATTENDEE_STATUS_PRESETS).serverField('status').sortable().facet(),
+    col.enum('checkInStatus', CHECK_IN_STATUS_PRESETS),
+    col.dateTime('createdAt').serverField('created_at').sortable().filterable().facet(),
+    col.dateTime('checkedInAt').serverField('checked_in_at').filterable(),
+    col.text('firstName').serverField('first_name').filterable(),
+    col.text('lastName').serverField('last_name').filterable(),
+    col.text('email').serverField('email').filterable(),
+    col.text('ticketId').serverField('ticket_id').filterable(),
+  ],
+});
 
 function requireEventAccess(principal: Principal, event: Record<string, unknown>, eventId: string) {
   ClerkAuthService.requireResourceTenant(principal, event, 'Event', eventId);
@@ -182,19 +205,16 @@ export const checkInRoutes: FastifyPluginAsync = async (app) => {
     const principal = request.principal!;
     ClerkAuthService.requirePermission(principal, 'attendees.read');
     const { eventId } = request.params as { eventId: string };
-    const {
-      eventOccurrenceId,
-      query: rawQuery,
-      checkInListId,
-    } = request.query as {
+    const { checkInListId, eventOccurrenceId } = request.query as {
       eventOccurrenceId?: string;
-      query?: string;
       checkInListId?: string;
     };
-    const pagination = parsePagination(request.query);
-    const searchQuery = typeof rawQuery === 'string' ? rawQuery.trim() : '';
     const event = await loadEvent(eventId);
     requireEventAccess(principal, event, eventId);
+
+    // Build scope: event_id + check-in list constraints + occurrence filter
+    const scope: Record<string, string | string[]> = { event_id: eventId };
+
     let selectedList: CheckInListRow | undefined;
     if (checkInListId) {
       const listRepo = new CheckInListRepository(db);
@@ -203,74 +223,261 @@ export const checkInRoutes: FastifyPluginAsync = async (app) => {
       if (list.status !== 'active') throw new ValidationError('Check-in list is not active');
       selectedList = list;
     }
-    let query = db
-      .selectFrom('attendees')
-      .selectAll()
-      .where('event_id', '=', eventId)
-      .where('tenant_id', '=', principal.tenantId)
-      .orderBy('id', 'asc')
-      .limit(pagination.limit + 1);
     if (selectedList) {
       const allowedTicketTypeIds = parseJsonValue<string[]>(selectedList.ticket_type_ids, []);
       if (allowedTicketTypeIds.length > 0) {
-        query = query.where('ticket_type_id', 'in', allowedTicketTypeIds);
+        scope.ticket_type_id = allowedTicketTypeIds;
       }
       if (selectedList.event_occurrence_id) {
-        query = query.where('event_occurrence_id', '=', selectedList.event_occurrence_id);
+        scope.event_occurrence_id = selectedList.event_occurrence_id;
       }
     }
-    if (eventOccurrenceId) query = query.where('event_occurrence_id', '=', eventOccurrenceId);
-    if (searchQuery) {
-      const pattern = `%${escapeLikePattern(searchQuery)}%`;
-      query = query.where((eb) =>
-        eb.or([
-          eb('first_name', 'ilike', pattern),
-          eb('last_name', 'ilike', pattern),
-          eb('email', 'ilike', pattern),
-          eb('ticket_id', 'ilike', pattern),
-        ]),
-      );
+    if (eventOccurrenceId) scope.event_occurrence_id = eventOccurrenceId;
+
+    // Parse table query params (search, filters, sort, cursor, etc.)
+    const searchParams = new URLSearchParams();
+    for (const [key, value] of Object.entries(
+      request.query as Record<string, string | undefined>,
+    )) {
+      if (value === undefined || key === 'checkInListId' || key === 'eventOccurrenceId') continue;
+      searchParams.set(key, value);
     }
-    if (pagination.cursor) query = query.where('id', '>', pagination.cursor);
-    const rows = await query.execute();
-    return pageEnvelope(
-      rows.map((row) => serializeAttendee(row)),
-      pagination.limit,
+    const { query: tableQuery } = paramsToQuery(attendeesTableSchema, searchParams);
+
+    const result = await executeTableQuery(
+      db,
+      {
+        tableName: 'attendees',
+        schema: attendeesTableSchema,
+        tenantId: principal.tenantId,
+        scope,
+        serialize: serializeAttendee,
+        customFilters: {
+          checkInStatus: (q, value) => {
+            if (value.type !== 'select' || value.values.length === 0) return q;
+            return q.where((eb: any) => {
+              const conditions = value.values
+                .map((v: string) => {
+                  if (v === 'checked_in') return eb('checked_in_at', 'is not', null);
+                  if (v === 'not_checked_in')
+                    return eb.and([
+                      eb('checked_in_at', 'is', null),
+                      eb('status', '<>', 'refunded'),
+                    ]);
+                  if (v === 'revoked')
+                    return eb.and([eb('status', '=', 'refunded'), eb('checked_in_at', 'is', null)]);
+                  return null;
+                })
+                .filter(Boolean);
+              return eb.or(conditions);
+            });
+          },
+        },
+      },
+      tableQuery,
     );
+
+    return result as AdminTablePage<unknown>;
   });
 
   app.get('/attendees', async (request) => {
     const principal = request.principal!;
     ClerkAuthService.requirePermission(principal, 'attendees.read');
-    const pagination = parsePagination(request.query);
-    let query = db
-      .selectFrom('attendees')
-      .innerJoin('events', 'events.id', 'attendees.event_id')
-      .selectAll('attendees')
-      .where('attendees.tenant_id', '=', principal.tenantId)
-      .orderBy('id', 'asc')
-      .limit(pagination.limit + 1);
+
+    const rawQuery = request.query as Record<string, string | undefined>;
+    const { organizationId, brandId } = rawQuery;
+
+    if (organizationId) ClerkAuthService.requireOrganizationScope(principal, organizationId);
+    if (brandId) ClerkAuthService.requireBrandScope(principal, brandId);
+
+    if (principal.type !== 'system' && principal.organizationIds.length === 0) {
+      return {
+        items: [],
+        nextCursor: undefined,
+        total: 0,
+        filterTotal: 0,
+      } as AdminTablePage<unknown>;
+    }
+
+    // Pre-query event IDs that match org/brand scope (attendees table has no org/brand columns)
+    let eventScopeQuery = db
+      .selectFrom('events')
+      .select('id')
+      .where('tenant_id', '=', principal.tenantId);
     if (principal.type !== 'system') {
-      if (principal.organizationIds.length === 0) {
-        return pageEnvelope([], pagination.limit);
-      }
-      query = query.where('events.organization_id', 'in', principal.organizationIds);
+      eventScopeQuery = eventScopeQuery.where('organization_id', 'in', principal.organizationIds);
     }
     if (principal.brandIds && principal.brandIds.length > 0) {
-      query = query.where('events.brand_id', 'in', principal.brandIds);
+      eventScopeQuery = eventScopeQuery.where('brand_id', 'in', principal.brandIds);
     }
     if (principal.eventIds && principal.eventIds.length > 0) {
-      query = query.where('attendees.event_id', 'in', principal.eventIds);
+      eventScopeQuery = eventScopeQuery.where('id', 'in', principal.eventIds);
     }
-    const { eventOccurrenceId } = request.query as { eventOccurrenceId?: string };
-    if (eventOccurrenceId)
-      query = query.where('attendees.event_occurrence_id', '=', eventOccurrenceId);
-    if (pagination.cursor) query = query.where('id', '>', pagination.cursor);
-    const rows = await query.execute();
-    return pageEnvelope(
-      rows.map((row) => serializeAttendee(row)),
-      pagination.limit,
+    if (organizationId) {
+      eventScopeQuery = eventScopeQuery.where('organization_id', '=', organizationId);
+    }
+    if (brandId) {
+      eventScopeQuery = eventScopeQuery.where('brand_id', '=', brandId);
+    }
+    const scopedEvents = await eventScopeQuery.execute();
+    const scopedEventIds = scopedEvents.map((e) => e.id);
+
+    if (scopedEventIds.length === 0) {
+      return {
+        items: [],
+        nextCursor: undefined,
+        total: 0,
+        filterTotal: 0,
+      } as AdminTablePage<unknown>;
+    }
+
+    const scope: Record<string, string | string[]> = {
+      event_id: scopedEventIds,
+    };
+
+    // Parse flat query params into AdminTableQuery using the server-owned schema
+    const searchParams = new URLSearchParams();
+    for (const [key, value] of Object.entries(rawQuery)) {
+      if (value !== undefined && key !== 'organizationId' && key !== 'brandId') {
+        searchParams.set(key, value);
+      }
+    }
+    const { query: tableQuery } = paramsToQuery(attendeesTableSchema, searchParams);
+
+    // Execute the table query with custom checkInStatus filter
+    const result = await executeTableQuery(
+      db,
+      {
+        tableName: 'attendees',
+        schema: attendeesTableSchema,
+        tenantId: principal.tenantId,
+        scope,
+        serialize: serializeAttendee,
+        customFilters: {
+          checkInStatus: (q, value) => {
+            if (value.type !== 'select' || value.values.length === 0) return q;
+            return q.where((eb: any) => {
+              const conditions = value.values
+                .map((v: string) => {
+                  if (v === 'checked_in') return eb('checked_in_at', 'is not', null);
+                  if (v === 'not_checked_in')
+                    return eb.and([
+                      eb('checked_in_at', 'is', null),
+                      eb('status', '<>', 'refunded'),
+                    ]);
+                  if (v === 'revoked')
+                    return eb.and([eb('status', '=', 'refunded'), eb('checked_in_at', 'is', null)]);
+                  return null;
+                })
+                .filter(Boolean);
+              return eb.or(conditions);
+            });
+          },
+        },
+      },
+      tableQuery,
     );
+
+    // Enrich with event titles and ticket type names
+    const eventIds = [
+      ...new Set(result.items.map((a) => (a as Record<string, unknown>).eventId).filter(Boolean)),
+    ] as string[];
+    const eventTitles = new Map<string, string>();
+    if (eventIds.length > 0) {
+      const events = await db
+        .selectFrom('events')
+        .select(['id', 'title'])
+        .where('id', 'in', eventIds)
+        .execute();
+      for (const event of events) eventTitles.set(event.id, event.title);
+    }
+
+    const ticketTypeIds = [
+      ...new Set(
+        result.items.map((a) => (a as Record<string, unknown>).ticketTypeId).filter(Boolean),
+      ),
+    ] as string[];
+    const ticketTypeNames = new Map<string, string>();
+    if (ticketTypeIds.length > 0) {
+      const ticketTypes = await db
+        .selectFrom('ticket_types')
+        .select(['id', 'name'])
+        .where('id', 'in', ticketTypeIds)
+        .execute();
+      for (const tt of ticketTypes) ticketTypeNames.set(tt.id, tt.name);
+    }
+
+    const items = result.items.map((item) => {
+      const attendee = item as Record<string, unknown>;
+      return {
+        ...attendee,
+        eventTitle: eventTitles.get(attendee.eventId as string) ?? '',
+        ticketTypeName: ticketTypeNames.get(attendee.ticketTypeId as string) ?? 'Ticket',
+      };
+    });
+
+    // Compute checkInStatus facet manually (computed field, not a direct DB column)
+    let facets = result.facets;
+    if (tableQuery.includeFacets && !facets?.checkInStatus) {
+      facets = facets ?? {};
+      let checkInBaseQuery = db
+        .selectFrom('attendees')
+        .where('tenant_id', '=', principal.tenantId) as any;
+      for (const [field, value] of Object.entries(scope)) {
+        if (Array.isArray(value)) {
+          checkInBaseQuery = checkInBaseQuery.where(field, 'in', value);
+        } else {
+          checkInBaseQuery = checkInBaseQuery.where(field, '=', value);
+        }
+      }
+      if (tableQuery.search) {
+        const search = tableQuery.search.trim();
+        checkInBaseQuery = checkInBaseQuery.where((eb: any) =>
+          eb.or([
+            eb('first_name', 'ilike', `%${search}%`),
+            eb('last_name', 'ilike', `%${search}%`),
+            eb('email', 'ilike', `%${search}%`),
+          ]),
+        );
+      }
+      if (tableQuery.filters) {
+        for (const [field, value] of Object.entries(tableQuery.filters)) {
+          if (field === 'checkInStatus') continue;
+          const column = attendeesTableSchema.columns.find((c) => c.id === field);
+          if (!column) continue;
+          const serverField = column.serverField ?? field;
+          if (value.type === 'select') {
+            checkInBaseQuery = checkInBaseQuery.where(serverField, 'in', value.values);
+          } else if (value.type === 'date_range') {
+            if (value.from)
+              checkInBaseQuery = checkInBaseQuery.where(serverField, '>=', new Date(value.from));
+            if (value.to)
+              checkInBaseQuery = checkInBaseQuery.where(serverField, '<=', new Date(value.to));
+          }
+        }
+      }
+      const checkInCounts = (await checkInBaseQuery
+        .select([
+          sql`case when checked_in_at is not null then 'checked_in' when status = 'refunded' then 'revoked' else 'not_checked_in' end`.as(
+            'check_in_status',
+          ),
+          sql`count(*)`.as('total'),
+        ])
+        .groupBy('check_in_status')
+        .execute()) as Array<{ check_in_status: string; total: number }>;
+      facets.checkInStatus = {
+        rows: checkInCounts.map((r) => ({
+          value: r.check_in_status,
+          total: Number(r.total),
+        })),
+      };
+    }
+
+    return {
+      ...result,
+      items,
+      facets,
+    } as AdminTablePage<unknown>;
   });
 
   app.patch('/attendees/:attendeeId', async (request) => {
@@ -442,10 +649,29 @@ export const checkInRoutes: FastifyPluginAsync = async (app) => {
     );
   });
 
+  app.post('/events/:eventId/check-in-lists', async (request, reply) => {
+    const principal = request.principal!;
+    ClerkAuthService.requirePermission(principal, 'checkins.write');
+    const { eventId } = request.params as { eventId: string };
+    const body = parseBody(createCheckInListSchema, request.body);
+    const event = await loadEvent(eventId);
+    requireEventAccess(principal, event, eventId);
+    const repo = new CheckInListRepository(db);
+    const list = await repo.create({
+      eventId,
+      name: body.name,
+      ticketTypeIds: body.ticketTypeIds ?? [],
+    });
+    return reply.status(201).send(serializeCheckInList(list));
+  });
+
   app.get('/events/:eventId/check-in-lists/:checkInListId/manifest', async (request) => {
     const principal = request.principal!;
     ClerkAuthService.requirePermission(principal, 'checkins.read');
-    const { eventId, checkInListId } = request.params as { eventId: string; checkInListId: string };
+    const { eventId, checkInListId } = request.params as {
+      eventId: string;
+      checkInListId: string;
+    };
     const event = await loadEvent(eventId);
     requireEventAccess(principal, event, eventId);
 
@@ -735,7 +961,10 @@ export const checkInRoutes: FastifyPluginAsync = async (app) => {
     async (request, reply) => {
       const principal = request.principal!;
       ClerkAuthService.requirePermission(principal, 'checkins.write');
-      const { jobId, sequence } = request.params as { jobId: string; sequence: string };
+      const { jobId, sequence } = request.params as {
+        jobId: string;
+        sequence: string;
+      };
       const body = parseBody(bulkSyncChunkSchema, request.body) as {
         scans: { qrHash: string; scannedAt: string; offline: boolean }[];
       };
@@ -1202,7 +1431,11 @@ async function claimBulkSyncJobLease(
   db: Database,
   jobId: string,
   options: BulkSyncWorkerOptions,
-): Promise<{ job: BulkSyncJobRow; workerId: string; lockWaitMs: number } | null> {
+): Promise<{
+  job: BulkSyncJobRow;
+  workerId: string;
+  lockWaitMs: number;
+} | null> {
   const workerId = options.workerId ?? `api-${process.pid}`;
   const now = new Date();
   const leasedUntil = new Date(now.getTime() + BULK_SYNC_WORKER_LEASE_MS);
@@ -1636,7 +1869,10 @@ async function processOfflineSyncBatch(input: {
 
   return {
     ...counts,
-    results: results.map((result) => ({ qrHash: result.qrHash, outcome: result.outcome })),
+    results: results.map((result) => ({
+      qrHash: result.qrHash,
+      outcome: result.outcome,
+    })),
     errorSamples,
     metrics: {
       rowsProcessed: input.scans.length,
@@ -1871,7 +2107,11 @@ export async function processScan(input: {
     input.requireVerifiedTicketId &&
     (!input.verification?.valid || !input.verification.ticketId)
   ) {
-    return { outcome: 'invalid', qrHash: input.qrHash, metadata: { reason: 'signature_invalid' } };
+    return {
+      outcome: 'invalid',
+      qrHash: input.qrHash,
+      metadata: { reason: 'signature_invalid' },
+    };
   }
 
   const ticket = input.requireVerifiedTicketId
@@ -1893,7 +2133,11 @@ export async function processScan(input: {
     };
   }
   if (ticket.event_id !== input.list.event_id) {
-    return { outcome: 'wrong_event', ticketId: ticket.id, qrHash: input.qrHash };
+    return {
+      outcome: 'wrong_event',
+      ticketId: ticket.id,
+      qrHash: input.qrHash,
+    };
   }
   if (
     input.list.event_occurrence_id &&
@@ -1918,7 +2162,11 @@ export async function processScan(input: {
   }
   if (ticket.status === 'valid') {
     const won = await input.ticketRepo.checkInIfValid(ticket.id, input.deviceId, input.scannedAt);
-    return { outcome: won ? 'accepted' : 'duplicate', ticketId: ticket.id, qrHash: input.qrHash };
+    return {
+      outcome: won ? 'accepted' : 'duplicate',
+      ticketId: ticket.id,
+      qrHash: input.qrHash,
+    };
   }
   return { outcome: 'duplicate', ticketId: ticket.id, qrHash: input.qrHash };
 }

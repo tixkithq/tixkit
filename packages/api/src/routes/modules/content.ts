@@ -11,6 +11,7 @@ import {
   type ContentChannel,
   type ContentDocument,
   type ContentDocumentVersion,
+  type ContentValidationResult,
   type RenderOutput,
 } from '@tixkit/content-core';
 import {
@@ -20,6 +21,7 @@ import {
   EventRepository,
   SmsProviderRouteRepository,
   SmsSenderIdentityRepository,
+  TicketListingRepository,
   TicketTypeRepository,
   type Database,
 } from '@tixkit/db';
@@ -59,6 +61,7 @@ import {
   type EmailTemplateDocument,
   type RenderedEmailTemplate,
 } from '@tixkit/content-email';
+import { signPayload, verifySignature } from '@tixkit/shared';
 import { ClerkAuthService } from '../../auth/clerk.js';
 
 const contentChannelSchema = z.enum(['event_page', 'email', 'sms', 'imessage', 'social_invite']);
@@ -88,6 +91,86 @@ type PublicContentPage = {
     discovery: EventPageDiscoveryCard;
   };
 };
+
+type DraftPreviewPage = {
+  document: {
+    eventId: string;
+    channel: 'event_page';
+    key: string;
+    name: string;
+    locale: string;
+    updatedAt: string;
+  };
+  version: {
+    versionNumber: number;
+    status: string;
+    subject?: string;
+    previewText?: string;
+  };
+  contentJson: unknown;
+  context: EventPageRenderContext;
+  renderModel: ResolvedEventPage;
+  validation: ContentValidationResult;
+};
+
+type PreviewTokenPayload = {
+  documentId: string;
+  versionId: string;
+  eventId: string;
+  exp: number;
+};
+
+const PREVIEW_TOKEN_TTL_SECONDS = 900;
+
+function previewTokenSecret(): string {
+  const secret = process.env.TIXKIT_PREVIEW_TOKEN_SECRET?.trim();
+  if (!secret) throw new Error('TIXKIT_PREVIEW_TOKEN_SECRET is not configured');
+  return secret;
+}
+
+function mintPreviewToken(input: {
+  documentId: string;
+  versionId: string;
+  eventId: string;
+  ttlSeconds?: number;
+}): { token: string; expiresAt: string } {
+  const exp = Math.floor(Date.now() / 1000) + (input.ttlSeconds ?? PREVIEW_TOKEN_TTL_SECONDS);
+  const payload: PreviewTokenPayload = {
+    documentId: input.documentId,
+    versionId: input.versionId,
+    eventId: input.eventId,
+    exp,
+  };
+  const payloadStr = JSON.stringify(payload);
+  const signature = signPayload(payloadStr, previewTokenSecret());
+  const token = `${Buffer.from(payloadStr).toString('base64url')}.${Buffer.from(signature).toString('base64url')}`;
+  return { token, expiresAt: new Date(exp * 1000).toISOString() };
+}
+
+function verifyPreviewToken(token: string): PreviewTokenPayload | undefined {
+  const parts = token.split('.');
+  if (parts.length !== 2) return undefined;
+  const [payloadB64, sigB64] = parts;
+  let payloadStr: string;
+  let signature: string;
+  try {
+    payloadStr = Buffer.from(payloadB64, 'base64url').toString('utf8');
+    signature = Buffer.from(sigB64, 'base64url').toString('utf8');
+  } catch {
+    return undefined;
+  }
+  if (!verifySignature(payloadStr, signature, previewTokenSecret())) return undefined;
+  let payload: PreviewTokenPayload;
+  try {
+    payload = JSON.parse(payloadStr) as PreviewTokenPayload;
+  } catch {
+    return undefined;
+  }
+  if (typeof payload.exp !== 'number' || payload.exp < Math.floor(Date.now() / 1000)) {
+    return undefined;
+  }
+  return payload;
+}
 
 const createDocumentSchema = z
   .object({
@@ -147,6 +230,7 @@ const duplicateDocumentSchema = z
 const listDocumentsQuerySchema = z
   .object({
     channel: contentChannelSchema.optional(),
+    organizationId: z.string().min(1).optional(),
     brandId: z.string().min(1).optional(),
     eventId: z.string().min(1).optional(),
     limit: z
@@ -751,6 +835,8 @@ export const contentRoutes: FastifyPluginAsync = async (app) => {
     const query = parseQuery(listDocumentsQuerySchema, request.query);
     const channel = query.channel;
     requireContentListPermission(principal, channel);
+    if (query.organizationId)
+      ClerkAuthService.requireOrganizationScope(principal, query.organizationId);
     if (query.brandId) ClerkAuthService.requireBrandScope(principal, query.brandId);
     if (query.eventId) ClerkAuthService.requireEventScope(principal, query.eventId);
     if (principal.type !== 'system' && principal.organizationIds.length === 0) {
@@ -758,7 +844,9 @@ export const contentRoutes: FastifyPluginAsync = async (app) => {
     }
     const documents = await repo().listDocuments({
       tenantId: principal.tenantId,
-      organizationIds: principal.type === 'system' ? undefined : principal.organizationIds,
+      organizationIds: query.organizationId
+        ? [query.organizationId]
+        : (principal.type === 'system' ? undefined : principal.organizationIds),
       brandIds: principal.brandIds,
       eventIds: principal.eventIds,
       channel,
@@ -909,6 +997,53 @@ export const contentRoutes: FastifyPluginAsync = async (app) => {
     return { channel: document.channel, output, validation, renderArtifact };
   });
 
+  app.post('/content-documents/:documentId/preview-token', async (request) => {
+    const { documentId } = request.params as { documentId: string };
+    const document = await loadAuthorizedDocument(
+      repo(),
+      db,
+      request.principal!,
+      documentId,
+      'read',
+    );
+    if (document.channel !== 'event_page' || !document.eventId) {
+      throw new NotFoundError('ContentDocument', documentId);
+    }
+    const body = parseBody(
+      z.object({ versionId: z.string().min(1).optional() }).strict(),
+      request.body,
+    );
+    let versionId = body.versionId;
+    if (!versionId) {
+      if (document.currentDraftVersionId) {
+        versionId = document.currentDraftVersionId;
+      } else {
+        const versions = await repo().listVersions(documentId);
+        const latest = versions.find((v) => v.status === 'draft') ?? versions[0];
+        if (!latest) throw new NotFoundError('ContentDocumentVersion', documentId);
+        versionId = latest.id;
+      }
+    } else {
+      const version = await repo().findVersionById(versionId);
+      if (!version || version.documentId !== documentId) {
+        throw new NotFoundError('ContentDocumentVersion', versionId);
+      }
+    }
+    const { token, expiresAt } = mintPreviewToken({
+      documentId,
+      versionId,
+      eventId: document.eventId,
+    });
+    const baseUrl =
+      process.env.PUBLIC_CHECKOUT_URL?.trim() ||
+      process.env.CHECKOUT_PUBLIC_URL?.trim() ||
+      'https://checkout.tixkit.com';
+    const url = new URL(`/e/${encodeURIComponent(document.eventId)}`, baseUrl);
+    url.searchParams.set('token', token);
+    url.searchParams.set('edit', '1');
+    return { token, url: url.toString(), expiresAt, versionId };
+  });
+
   app.post('/content-documents/:documentId/versions/:versionId/publish', async (request) => {
     const { documentId, versionId } = request.params as { documentId: string; versionId: string };
     const document = await loadAuthorizedDocument(
@@ -1028,6 +1163,53 @@ export const contentRoutes: FastifyPluginAsync = async (app) => {
     });
     return reply.status(202).send({ testSend: send, output, renderArtifact });
   });
+
+  app.post('/content-documents/migrate-event-page-chrome', async (request) => {
+    const principal = request.principal!;
+    requireContentListPermission(principal, 'event_page');
+
+    const documents = await repo().listDocuments({
+      tenantId: principal.tenantId,
+      channel: 'event_page',
+      organizationIds:
+        principal.type === 'system' ? undefined : principal.organizationIds,
+      limit: 1000,
+    });
+
+    let versionsChecked = 0;
+    let versionsMigrated = 0;
+    const migrated: { documentId: string; versionId: string; versionNumber: number }[] = [];
+
+    for (const doc of documents) {
+      const versions = await repo().listVersions(doc.id);
+      for (const version of versions) {
+        versionsChecked += 1;
+        const normalized = normalizeEventPageDocument(version.contentJson);
+        if (!normalized) continue;
+        const before = JSON.stringify(version.contentJson);
+        const after = JSON.stringify(normalized);
+        if (before === after) continue;
+
+        await repo().updateVersionContent({
+          versionId: version.id,
+          contentJson: normalized,
+        });
+        versionsMigrated += 1;
+        migrated.push({
+          documentId: doc.id,
+          versionId: version.id,
+          versionNumber: version.versionNumber,
+        });
+      }
+    }
+
+    return {
+      documentsScanned: documents.length,
+      versionsChecked,
+      versionsMigrated,
+      migrated,
+    };
+  });
 };
 
 function principalTenant(principal: Principal): string {
@@ -1042,18 +1224,33 @@ export const publicContentRoutes: FastifyPluginAsync = async (app) => {
       id: string;
       slug?: string | null;
       title: string;
+      description?: string | null;
       starts_at?: Date | string | null;
       ends_at?: Date | string | null;
       timezone?: string | null;
       venue?: unknown;
+      brand_id?: string | null;
+      tenant_id?: string;
     },
     host?: string,
   ): Promise<EventPageRenderContext> {
     const venue = venueContext(event.venue);
     const tickets = await new TicketTypeRepository(db).findPublicByEvent(event.id);
+    const brand = event.brand_id
+      ? await new BrandRepository(db).findById(event.brand_id)
+      : undefined;
+    const legalUrls = brand ? parseJsonValue<Record<string, unknown>>(brand.legal_urls, {}) : {};
+    const resaleListings = event.tenant_id
+      ? await new TicketListingRepository(db).findPublicAvailableByEvent({
+          tenantId: event.tenant_id,
+          eventId: event.id,
+          limit: 50,
+        })
+      : [];
     return {
       event: {
         title: event.title,
+        description: event.description ?? undefined,
         startsAt: event.starts_at ? new Date(event.starts_at).toISOString() : undefined,
         endsAt: event.ends_at ? new Date(event.ends_at).toISOString() : undefined,
         timezone: event.timezone ?? undefined,
@@ -1062,12 +1259,30 @@ export const publicContentRoutes: FastifyPluginAsync = async (app) => {
         publicUrl: publicEventUrl(event, host),
         checkoutUrl: checkoutUrl(event.id, host),
       },
+      brand: brand
+        ? {
+            name: brand.name,
+            supportUrl: brand.support_url ?? undefined,
+            termsUrl: typeof legalUrls.terms === 'string' ? legalUrls.terms : undefined,
+            privacyUrl: typeof legalUrls.privacy === 'string' ? legalUrls.privacy : undefined,
+            refundUrl:
+              typeof legalUrls.refundPolicy === 'string' ? legalUrls.refundPolicy : undefined,
+          }
+        : undefined,
       tickets: tickets.map((ticket) => ({
         id: ticket.id,
         name: ticket.name,
         description: ticket.description ?? undefined,
         status: ticket.status === 'sold_out' ? 'sold_out' : 'active',
         priceLabel: priceLabel(ticket),
+      })),
+      resaleListings: resaleListings.map((listing) => ({
+        id: listing.id,
+        priceLabel: new Intl.NumberFormat('en-US', {
+          style: 'currency',
+          currency: listing.currency,
+        }).format(Number(listing.price_cents) / 100),
+        expiresAt: listing.expires_at ? new Date(listing.expires_at).toISOString() : undefined,
       })),
     };
   }
@@ -1086,6 +1301,59 @@ export const publicContentRoutes: FastifyPluginAsync = async (app) => {
     });
     if (!result) throw new NotFoundError('ContentDocument', eventId);
     return toPublicContentPage({ ...result, context: await contextForEvent(event, host) });
+  }
+
+  async function loadDraftPreview(
+    eventId: string,
+    token: string,
+    host?: string,
+  ): Promise<DraftPreviewPage> {
+    const payload = verifyPreviewToken(token);
+    if (!payload || payload.eventId !== eventId) throw new NotFoundError('Event', eventId);
+    const event = await new EventRepository(db).findById(eventId);
+    if (!event) throw new NotFoundError('Event', eventId);
+    const contentRepo = new ContentRepository(db);
+    const version = await contentRepo.findVersionById(payload.versionId);
+    if (!version) throw new NotFoundError('ContentDocumentVersion', payload.versionId);
+    const document = await contentRepo.findDocumentById(version.documentId);
+    if (
+      !document ||
+      document.channel !== 'event_page' ||
+      document.eventId !== eventId ||
+      document.id !== payload.documentId ||
+      document.tenantId !== event.tenant_id
+    ) {
+      throw new NotFoundError('ContentDocument', eventId);
+    }
+    const pageDocument = normalizeEventPageDocument(version.contentJson);
+    if (!pageDocument) {
+      throw new ValidationError('Draft preview requires canonical event-page JSON', {
+        code: 'invalid_event_page_document',
+        eventId,
+      });
+    }
+    const context = await contextForEvent(event, host);
+    const renderModel = resolveEventPageDocument(pageDocument, context);
+    return {
+      document: {
+        eventId: document.eventId!,
+        channel: 'event_page',
+        key: document.key,
+        name: document.name,
+        locale: document.locale,
+        updatedAt: document.updatedAt,
+      },
+      version: {
+        versionNumber: version.versionNumber,
+        status: version.status,
+        subject: version.subject,
+        previewText: version.previewText,
+      },
+      contentJson: pageDocument,
+      context,
+      renderModel,
+      validation: renderModel.validation,
+    };
   }
 
   async function resolveEventBySlug(
@@ -1151,5 +1419,14 @@ export const publicContentRoutes: FastifyPluginAsync = async (app) => {
     const { eventId } = request.params as { eventId: string };
     const { locale } = request.query as { locale?: string };
     return (await loadPublicPage(eventId, locale)).page.discovery;
+  });
+
+  app.get('/public/events/:eventId/draft-preview', async (request) => {
+    const { eventId } = request.params as { eventId: string };
+    const query = request.query as { token?: unknown; host?: unknown };
+    const token = firstQueryParam(query.token);
+    if (!token) throw new NotFoundError('Event', eventId);
+    const host = normalizeHost(query.host);
+    return loadDraftPreview(eventId, token, host);
   });
 };
