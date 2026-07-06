@@ -4621,6 +4621,44 @@ const rawOpenApiSpec = {
         },
       },
     },
+    '/public/content-email-images/{artifactId}': {
+      get: {
+        summary: 'Download a content email image (public, durable, cacheable)',
+        description:
+          'Streams a content email image artifact by ID. Responses are cached immutably for one year.',
+        parameters: [
+          { name: 'artifactId', in: 'path', required: true, schema: { type: 'string' } },
+        ],
+        responses: {
+          '200': {
+            description: 'Image binary stream',
+            headers: {
+              'Content-Type': {
+                schema: { type: 'string' },
+                description: 'MIME type of the stored image',
+              },
+              'Content-Disposition': {
+                schema: { type: 'string' },
+                description: 'inline; filename=...',
+              },
+              'Cache-Control': {
+                schema: { type: 'string' },
+                description: 'public, max-age=31536000, immutable',
+              },
+            },
+            content: {
+              'application/octet-stream': {
+                schema: { type: 'string', format: 'binary' },
+              },
+            },
+          },
+          '404': {
+            description: 'Image artifact not found',
+            content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } },
+          },
+        },
+      },
+    },
     '/events/{eventId}/box-office/orders': {
       post: {
         summary: 'Create a box-office order (admin, Idempotency-Key required)',
@@ -5431,6 +5469,56 @@ const rawOpenApiSpec = {
             content: {
               'application/json': { schema: { $ref: '#/components/schemas/CheckInListPage' } },
             },
+          },
+        },
+      },
+      post: {
+        summary: 'Create a check-in list',
+        security: [{ BearerAuth: [] }, { ApiKey: [] }],
+        parameters: [
+          { name: 'eventId', in: 'path', required: true, schema: { type: 'string' } },
+        ],
+        requestBody: {
+          required: true,
+          content: {
+            'application/json': {
+              schema: {
+                type: 'object',
+                properties: {
+                  name: { type: 'string', minLength: 1, maxLength: 100 },
+                  ticketTypeIds: {
+                    type: 'array',
+                    items: { type: 'string' },
+                    description: 'Optional list of ticket type IDs to scope the check-in list',
+                  },
+                },
+                required: ['name'],
+              },
+            },
+          },
+        },
+        responses: {
+          '201': {
+            description: 'Check-in list created',
+            content: {
+              'application/json': { schema: { $ref: '#/components/schemas/CheckInList' } },
+            },
+          },
+          '400': {
+            description: 'Validation error',
+            content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } },
+          },
+          '401': {
+            description: 'Authentication required',
+            content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } },
+          },
+          '403': {
+            description: 'Missing checkins.write permission',
+            content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } },
+          },
+          '404': {
+            description: 'Event not found',
+            content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } },
           },
         },
       },
@@ -7148,6 +7236,49 @@ const rawOpenApiSpec = {
         },
       },
     },
+    '/content-documents/migrate-event-page-chrome': {
+      post: {
+        summary: 'One-time migration: append chrome blocks to older event-page versions',
+        security: [{ BearerAuth: [] }],
+        responses: {
+          '200': {
+            description: 'Migration summary',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  properties: {
+                    documentsScanned: { type: 'integer' },
+                    versionsChecked: { type: 'integer' },
+                    versionsMigrated: { type: 'integer' },
+                    migrated: {
+                      type: 'array',
+                      items: {
+                        type: 'object',
+                        properties: {
+                          documentId: { type: 'string' },
+                          versionId: { type: 'string' },
+                          versionNumber: { type: 'integer' },
+                        },
+                      },
+                    },
+                  },
+                  required: ['documentsScanned', 'versionsChecked', 'versionsMigrated', 'migrated'],
+                },
+              },
+            },
+          },
+          '401': {
+            description: 'Unauthorized',
+            content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } },
+          },
+          '403': {
+            description: 'Forbidden',
+            content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } },
+          },
+        },
+      },
+    },
     '/content-documents/{documentId}': {
       get: {
         summary: 'Get a content document',
@@ -7322,6 +7453,51 @@ const rawOpenApiSpec = {
         },
       },
     },
+    '/content-documents/{documentId}/preview-token': {
+      post: {
+        summary: 'Mint a signed draft-preview token for in-place editing',
+        security: [{ BearerAuth: [] }],
+        parameters: [
+          { name: 'documentId', in: 'path', required: true, schema: { type: 'string' } },
+        ],
+        requestBody: {
+          required: false,
+          content: {
+            'application/json': {
+              schema: {
+                type: 'object',
+                properties: {
+                  versionId: { type: 'string' },
+                },
+              },
+            },
+          },
+        },
+        responses: {
+          '200': {
+            description: 'Signed preview token with checkout edit-overlay URL',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  properties: {
+                    token: { type: 'string' },
+                    url: { type: 'string' },
+                    expiresAt: { type: 'string', format: 'date-time' },
+                    versionId: { type: 'string' },
+                  },
+                  required: ['token', 'url', 'expiresAt', 'versionId'],
+                },
+              },
+            },
+          },
+          '404': {
+            description: 'Document or draft version not found',
+            content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } },
+          },
+        },
+      },
+    },
     '/content-documents/{documentId}/versions/{versionId}/publish': {
       post: {
         summary: 'Publish a content document version',
@@ -7455,6 +7631,42 @@ const rawOpenApiSpec = {
           },
           '404': {
             description: 'No published event page',
+            content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } },
+          },
+        },
+      },
+    },
+    '/public/events/{eventId}/draft-preview': {
+      get: {
+        summary: 'Load a signed draft preview for in-place event-page editing',
+        parameters: [
+          { name: 'eventId', in: 'path', required: true, schema: { type: 'string' } },
+          { name: 'token', in: 'query', required: true, schema: { type: 'string' } },
+        ],
+        responses: {
+          '200': {
+            description: 'Draft event-page content with real context for editing',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  properties: {
+                    contentJson: { type: 'object', additionalProperties: true },
+                    context: { type: 'object', additionalProperties: true },
+                    validation: { $ref: '#/components/schemas/ContentValidationResult' },
+                    versionId: { type: 'string' },
+                  },
+                  required: ['contentJson', 'context', 'validation', 'versionId'],
+                },
+              },
+            },
+          },
+          '401': {
+            description: 'Invalid or expired preview token',
+            content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } },
+          },
+          '404': {
+            description: 'Event or draft not found',
             content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } },
           },
         },
