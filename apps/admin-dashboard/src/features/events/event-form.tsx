@@ -160,7 +160,9 @@ export function buildEventUpdatePayload(
     payload.description = values.description;
   if (hasChangedField(values, dirtyFields, initialValues, 'currency'))
     payload.currency = values.currency;
-  if (hasChangedField(values, dirtyFields, initialValues, 'status')) payload.status = values.status;
+  // Status is intentionally excluded from the PATCH payload. The API requires
+  // dedicated /publish, /pause, /archive endpoints for status transitions.
+  // The form's onSubmit handler calls these endpoints separately after the PATCH.
   if (hasChangedField(values, dirtyFields, initialValues, 'visibility'))
     payload.visibility = values.visibility;
 
@@ -340,6 +342,21 @@ export function EventForm({ event, onSuccess, onCancel }: EventFormProps) {
         : await adminApi.createEvent(createInput);
 
       if (result.ok) {
+        // When editing an event and the status changed, call the dedicated
+        // endpoint (publish/pause/archive) after the PATCH succeeds.
+        if (event && values.status && values.status !== event.status) {
+          const statusResult = await (async () => {
+            if (values.status === 'published') return adminApi.publishEvent(event.id);
+            if (values.status === 'paused') return adminApi.pauseEvent(event.id);
+            if (values.status === 'archived') return adminApi.archiveEvent(event.id);
+            return null;
+          })();
+          if (statusResult && !statusResult.ok) {
+            toast.error(`Event saved but status change failed: ${statusResult.error.message}`);
+            onSuccess?.(result.data);
+            return;
+          }
+        }
         toast.success(event ? 'Event updated' : 'Event created');
         onSuccess?.(result.data);
       } else {

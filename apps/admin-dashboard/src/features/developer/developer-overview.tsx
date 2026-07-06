@@ -8,22 +8,30 @@ import { routes } from '@/lib/routes';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Skeleton } from '@/components/ui/skeleton';
-import { useAdminData } from '@/hooks/use-admin-data';
+import { useAdminQuery } from '@/hooks/use-admin-table-data';
+import { useBootstrap } from '@/context/bootstrap-provider';
 import { ApiErrorState } from '@/components/api-error-state';
 
 export function DeveloperOverview() {
+  const { organizationId } = useBootstrap();
   const {
     data: apiKeys,
     loading: keysLoading,
     error: keysError,
     refetch: refetchKeys,
-  } = useAdminData(() => adminApi.listApiKeys());
+  } = useAdminQuery(
+    ['listApiKeys', organizationId],
+    () => adminApi.listApiKeys(organizationId ? { organizationId } : undefined),
+  );
   const {
     data: webhooks,
     loading: webhooksLoading,
     error: webhooksError,
     refetch: refetchWebhooks,
-  } = useAdminData(() => adminApi.listWebhookEndpoints());
+  } = useAdminQuery(
+    ['listWebhookEndpoints', organizationId],
+    () => adminApi.listWebhookEndpoints(organizationId ? { organizationId } : undefined),
+  );
 
   const activeKeys = (apiKeys ?? []).length;
   const activeWebhooks = (webhooks ?? []).filter((w) => w.status === 'active').length;

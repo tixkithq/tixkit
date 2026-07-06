@@ -21,8 +21,9 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
-import { useAdminData } from '@/hooks/use-admin-data';
+import { useAdminQuery } from '@/hooks/use-admin-table-data';
 import { useAllEvents } from '@/hooks/use-all-events';
+import { useBootstrap } from '@/context/bootstrap-provider';
 import { formatDate } from '@/lib/format';
 import { MessageFormDialog } from './message-form';
 
@@ -31,14 +32,16 @@ export function MessagesView() {
   const [selectedEventId, setSelectedEventId] = React.useState<string>('');
   const [selectedCampaignId, setSelectedCampaignId] = React.useState<string>('');
 
+  const { organizationId, brandId } = useBootstrap();
   const {
     events,
     loading: eventsLoading,
     error: eventsError,
     refetch: refetchEvents,
-  } = useAllEvents();
+  } = useAllEvents({ organizationId, brandId });
 
-  const { data, loading, error, refetch } = useAdminData(
+  const { data, loading, error, refetch } = useAdminQuery(
+    ['listMessages', selectedEventId],
     () =>
       selectedEventId
         ? adminApi.listMessages(selectedEventId)
@@ -46,8 +49,14 @@ export function MessagesView() {
             ok: true as const,
             data: [] as AdminMessageCampaign[],
           }),
-    [selectedEventId],
   );
+
+  // Reset the selected event/campaign when the workspace/brand scope changes so
+  // the selector does not retain an event that is no longer in the narrowed list.
+  React.useEffect(() => {
+    setSelectedEventId('');
+    setSelectedCampaignId('');
+  }, [organizationId, brandId]);
 
   const campaigns = data ?? [];
 
@@ -190,21 +199,21 @@ export function MessageCampaignDetailPanel({
   eventId: string;
   campaignId: string;
 }) {
-  const detailState = useAdminData(
+  const detailState = useAdminQuery(
+    ['getMessage', eventId, campaignId],
     () => adminApi.getMessage(eventId, campaignId),
-    [eventId, campaignId],
   );
-  const jobsState = useAdminData(
+  const jobsState = useAdminQuery(
+    ['listMessageJobs', eventId, campaignId],
     () => adminApi.listMessageJobs(eventId, campaignId),
-    [eventId, campaignId],
   );
-  const deliveriesState = useAdminData(
+  const deliveriesState = useAdminQuery(
+    ['listMessageDeliveryLogs', eventId, campaignId],
     () => adminApi.listMessageDeliveryLogs(eventId, campaignId),
-    [eventId, campaignId],
   );
-  const providerEventsState = useAdminData(
+  const providerEventsState = useAdminQuery(
+    ['listMessageProviderEvents', eventId, campaignId],
     () => adminApi.listMessageProviderEvents(eventId, campaignId),
-    [eventId, campaignId],
   );
   const detail = detailState.data;
 

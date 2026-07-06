@@ -18,8 +18,26 @@ const compensationState = vi.hoisted<PaymentCompensationState>(() => ({
   refetch: vi.fn(),
 }));
 
-vi.mock('@/hooks/use-admin-data', () => ({
-  useAdminData: () => compensationState,
+vi.mock('@/hooks/use-admin-table-data', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/hooks/use-admin-table-data')>();
+  return {
+    ...actual,
+    useAdminQuery: () => compensationState,
+  };
+});
+
+vi.mock('@/context/bootstrap-provider', () => ({
+  useBootstrap: () => ({
+    organizations: [],
+    brands: [],
+    organizationId: undefined,
+    brandId: undefined,
+    availableBrands: [],
+    setOrganizationId: vi.fn(),
+    setBrandId: vi.fn(),
+    loading: false,
+    error: null,
+  }),
 }));
 
 function makeCompensation(

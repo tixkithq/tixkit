@@ -1,21 +1,8 @@
 'use client';
 
 import * as React from 'react';
-import { mergeAttributes, Node, type Editor, type JSONContent } from '@tiptap/core';
-import Image from '@tiptap/extension-image';
-import Link from '@tiptap/extension-link';
-import StarterKit from '@tiptap/starter-kit';
+import { type JSONContent } from '@tiptap/core';
 import {
-  EditorContent,
-  NodeViewWrapper,
-  ReactNodeViewRenderer,
-  useEditor,
-  type NodeViewProps,
-} from '@tiptap/react';
-import {
-  AlignCenter,
-  AlignLeft,
-  AlignRight,
   Archive,
   CalendarDays,
   Copy,
@@ -47,12 +34,7 @@ import {
   inputClassName,
 } from '@tixkit/content-editor-shell';
 import {
-  EVENT_PAGE_FONT_FAMILY_OPTIONS,
-  EVENT_PAGE_INLINE_STYLE_MARK,
-  EventPageInlineStyle,
-  EventPageTextAlignment,
   createDefaultEventPageDocument,
-  isAllowedEventPageFontFamily,
   normalizeEventPageDocument,
   renderEventPageDocument,
   renderResolvedEventPageHtml,
@@ -64,7 +46,7 @@ import {
   type EventPageRenderContext,
   type ResolvedEventPage,
 } from '@tixkit/content-event-page';
-import { EditableBlockBody, EventPageSurface } from '@tixkit/content-event-page-react';
+import { EventPageSurface } from '@tixkit/content-event-page-react';
 import {
   adminApi,
   type AdminContentDocument,
@@ -102,19 +84,6 @@ type InsertAction = {
   label: string;
   icon: React.ReactNode;
 };
-
-type EventPageBlockViewContextValue = {
-  sampleContext: EventPageRenderContext;
-  renderRichTextBlock: (input: {
-    block: Extract<EventPageBlock, { type: 'rich_text' }>;
-    disabled: boolean;
-    onChange: (block: EventPageBlock) => void;
-  }) => React.ReactNode;
-};
-
-const EventPageBlockViewContext = React.createContext<EventPageBlockViewContextValue | null>(null);
-
-const EVENT_PAGE_BLOCK_NODE = 'eventPageBlock';
 
 const eventPageInsertActions: InsertAction[] = [
   { id: 'text', label: 'Text', icon: <Type className="size-4" /> },
@@ -491,6 +460,12 @@ function blockLabel(block: EventPageBlock): string {
       return 'Social links';
     case 'custom_embed':
       return 'Custom embed';
+    case 'event_header':
+      return 'Event header';
+    case 'resale_tickets':
+      return 'Resale tickets';
+    case 'brand_footer':
+      return 'Brand footer';
   }
 }
 
@@ -530,6 +505,12 @@ function blockSummary(block: EventPageBlock): string {
       return tipTapImageAttrs(block)
         ? 'Image content'
         : previewText(tipTapText(block)) || 'Structured content';
+    case 'event_header':
+      return block.badgeLabel ? previewText(block.badgeLabel) : 'Event metadata header';
+    case 'resale_tickets':
+      return previewText(block.title);
+    case 'brand_footer':
+      return 'Footer links';
   }
 }
 
@@ -568,24 +549,6 @@ function duplicateDocumentName(name: string): string {
   return name.endsWith(suffix) ? name : `${name.slice(0, 160 - suffix.length)}${suffix}`;
 }
 
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
-}
-
-function cloneBlock(block: EventPageBlock): EventPageBlock {
-  return JSON.parse(JSON.stringify(block)) as EventPageBlock;
-}
-
-function eventPageEditorContent(document: EventPageDocument): JSONContent {
-  return {
-    type: 'doc',
-    content: document.blocks.map((block) => ({
-      type: EVENT_PAGE_BLOCK_NODE,
-      attrs: { block },
-    })),
-  };
-}
-
 function editorDocumentFromBlocks(blocks: EventPageBlock[]): JSONContent {
   const content = blocks
     .flatMap((block) => {
@@ -604,22 +567,6 @@ function editorDocumentFromBlocks(blocks: EventPageBlock[]): JSONContent {
     type: 'doc',
     content: content.length > 0 ? content : [{ type: 'paragraph' }],
   };
-}
-
-function isEventPageBlock(value: unknown): value is EventPageBlock {
-  return isRecord(value) && typeof value.id === 'string' && typeof value.type === 'string';
-}
-
-function blocksFromEditor(editor: Editor, fallback: EventPageDocument): EventPageBlock[] {
-  const json = editor.getJSON() as JSONContent;
-  const blocks =
-    json.content
-      ?.flatMap((node) => {
-        const block = isRecord(node.attrs) ? node.attrs.block : undefined;
-        return isEventPageBlock(block) ? [cloneBlock(block)] : [];
-      })
-      .filter((block) => block.id.trim()) ?? [];
-  return blocks.length > 0 ? blocks : fallback.blocks;
 }
 
 function withEditorBlocks(
@@ -657,47 +604,6 @@ function withEditorBlocks(
   };
 }
 
-function findBlockPosition(editor: Editor, blockId: string): number | undefined {
-  let position: number | undefined;
-  editor.state.doc.descendants((node, pos) => {
-    if (node.type.name !== EVENT_PAGE_BLOCK_NODE) return true;
-    const block = node.attrs.block;
-    if (isEventPageBlock(block) && block.id === blockId) {
-      position = pos;
-      return false;
-    }
-    return true;
-  });
-  return position;
-}
-
-function selectedBlockIdFromEditor(editor: Editor): string | undefined {
-  const { from } = editor.state.selection;
-  let selectedId: string | undefined;
-  editor.state.doc.descendants((node, pos) => {
-    if (node.type.name !== EVENT_PAGE_BLOCK_NODE) return true;
-    const block = node.attrs.block;
-    const inRange = from >= pos && from <= pos + node.nodeSize;
-    if (inRange && isEventPageBlock(block)) {
-      selectedId = block.id;
-      return false;
-    }
-    return true;
-  });
-  return selectedId;
-}
-
-function updateBlockInEditor(editor: Editor, blockId: string, nextBlock: EventPageBlock): boolean {
-  const position = findBlockPosition(editor, blockId);
-  if (position === undefined) return false;
-  return editor.commands.command(({ state, tr, dispatch }) => {
-    const node = state.doc.nodeAt(position);
-    if (!node || node.type.name !== EVENT_PAGE_BLOCK_NODE) return false;
-    dispatch?.(tr.setNodeMarkup(position, undefined, { ...node.attrs, block: nextBlock }));
-    return true;
-  });
-}
-
 function formatDate(value?: string) {
   if (!value) return 'Not recorded';
   const date = new Date(value);
@@ -727,432 +633,6 @@ function VariablePreviewHint({ keys }: { keys: string[] }) {
     </span>
   );
 }
-
-function sameJsonContent(left: JSONContent, right: JSONContent): boolean {
-  return JSON.stringify(left) === JSON.stringify(right);
-}
-
-type EventPageRichTextSelectionStyle = {
-  color?: string;
-  fontFamily?: string;
-  fontSize?: string;
-  lineHeight?: string;
-};
-
-type EventPageAlignment = 'left' | 'center' | 'right';
-
-function cleanEventPageSelectionStyle(
-  attrs: EventPageRichTextSelectionStyle,
-): EventPageRichTextSelectionStyle {
-  return Object.fromEntries(
-    Object.entries(attrs).filter((entry): entry is [keyof EventPageRichTextSelectionStyle, string] =>
-      Boolean(entry[1]?.trim()),
-    ),
-  );
-}
-
-function eventPageInlineControlValue(value: string | undefined, suffix: 'px' | '%'): string {
-  if (!value) return '';
-  return value.replace(new RegExp(`${suffix}$`, 'i'), '');
-}
-
-function isEventPageTextAlignment(value: unknown): value is EventPageAlignment {
-  return value === 'left' || value === 'center' || value === 'right';
-}
-
-function EventPageRichTextEditor({
-  block,
-  disabled,
-  updateBlock,
-}: {
-  block: Extract<EventPageBlock, { type: 'rich_text' }>;
-  disabled: boolean;
-  updateBlock: (nextBlock: EventPageBlock) => void;
-}) {
-  const syncingFromParentRef = React.useRef(false);
-  const selectedRangeRef = React.useRef<{ from: number; to: number } | null>(null);
-  const selectedStyleRef = React.useRef<EventPageRichTextSelectionStyle>({});
-  const [selectedStyle, setSelectedStyle] = React.useState<EventPageRichTextSelectionStyle>({});
-  const [selectedAlignment, setSelectedAlignment] = React.useState<EventPageAlignment | ''>('');
-  const [bubblePosition, setBubblePosition] = React.useState<{ left: number; top: number } | null>(
-    null,
-  );
-
-  const updateBubbleState = React.useCallback((editor: Editor) => {
-    if (editor.state.selection.empty) {
-      setBubblePosition(null);
-      return;
-    }
-    selectedRangeRef.current = {
-      from: editor.state.selection.from,
-      to: editor.state.selection.to,
-    };
-    const start = editor.view.coordsAtPos(editor.state.selection.from);
-    const end = editor.view.coordsAtPos(editor.state.selection.to);
-    setBubblePosition({
-      left: Math.max(8, Math.min(start.left, end.left)),
-      top: Math.max(8, Math.min(start.top, end.top) - 44),
-    });
-    const markAttrs = editor.getAttributes(EVENT_PAGE_INLINE_STYLE_MARK);
-    const nextStyle = cleanEventPageSelectionStyle({
-      color: typeof markAttrs.color === 'string' ? markAttrs.color : undefined,
-      fontFamily: isAllowedEventPageFontFamily(markAttrs.fontFamily)
-        ? markAttrs.fontFamily
-        : undefined,
-      fontSize: typeof markAttrs.fontSize === 'string' ? markAttrs.fontSize : undefined,
-      lineHeight: typeof markAttrs.lineHeight === 'string' ? markAttrs.lineHeight : undefined,
-    });
-    selectedStyleRef.current = nextStyle;
-    setSelectedStyle(nextStyle);
-    const paragraphTextAlign = editor.getAttributes('paragraph').textAlign;
-    const headingTextAlign = editor.getAttributes('heading').textAlign;
-    const textAlign = isEventPageTextAlignment(paragraphTextAlign)
-      ? paragraphTextAlign
-      : isEventPageTextAlignment(headingTextAlign)
-        ? headingTextAlign
-        : '';
-    setSelectedAlignment(textAlign);
-  }, []);
-
-  const richTextEditor = useEditor({
-    extensions: eventPageRichTextExtensions,
-    content: block.content,
-    editable: !disabled,
-    immediatelyRender: false,
-    editorProps: {
-      attributes: {
-        'aria-label': 'Rich text content',
-        class: 'tixkit-event-page-rich-text-editor focus:outline-none',
-      },
-    },
-    onSelectionUpdate: ({ editor }) => {
-      updateBubbleState(editor);
-    },
-    onTransaction: ({ editor }) => updateBubbleState(editor),
-    onUpdate: ({ editor }) => {
-      if (syncingFromParentRef.current) return;
-      updateBlock({ ...block, content: editor.getJSON() as JSONContent });
-    },
-  });
-
-  React.useEffect(() => {
-    richTextEditor?.setEditable(!disabled);
-  }, [disabled, richTextEditor]);
-
-  React.useEffect(() => {
-    if (!richTextEditor || sameJsonContent(richTextEditor.getJSON() as JSONContent, block.content)) {
-      return;
-    }
-    syncingFromParentRef.current = true;
-    richTextEditor.commands.setContent(block.content, { emitUpdate: false });
-    syncingFromParentRef.current = false;
-  }, [block.content, richTextEditor]);
-
-  const preserveRichTextSelection = React.useCallback(() => {
-    if (!richTextEditor || richTextEditor.state.selection.empty) return;
-    selectedRangeRef.current = {
-      from: richTextEditor.state.selection.from,
-      to: richTextEditor.state.selection.to,
-    };
-  }, [richTextEditor]);
-
-  const restoreRichTextSelection = React.useCallback(() => {
-    if (!richTextEditor) return null;
-    const selectedRange = selectedRangeRef.current;
-    if (!selectedRange || selectedRange.from >= selectedRange.to) return null;
-    richTextEditor.chain().focus().setTextSelection(selectedRange).run();
-    return selectedRange;
-  }, [richTextEditor]);
-
-  const applySelectionStyle = React.useCallback(
-    (patch: EventPageRichTextSelectionStyle) => {
-      if (!richTextEditor) return;
-      const selectedRange = restoreRichTextSelection();
-      if (!selectedRange) return;
-      const nextStyle = cleanEventPageSelectionStyle({
-        ...selectedStyleRef.current,
-        ...patch,
-      });
-      if (nextStyle.fontFamily && !isAllowedEventPageFontFamily(nextStyle.fontFamily)) return;
-      if (Object.keys(nextStyle).length > 0) {
-        richTextEditor.commands.setMark(EVENT_PAGE_INLINE_STYLE_MARK, nextStyle);
-      } else {
-        richTextEditor.commands.unsetMark(EVENT_PAGE_INLINE_STYLE_MARK);
-      }
-      selectedStyleRef.current = nextStyle;
-      setSelectedStyle(nextStyle);
-      updateBubbleState(richTextEditor);
-    },
-    [restoreRichTextSelection, richTextEditor, updateBubbleState],
-  );
-
-  const applyTextAlignment = React.useCallback(
-    (textAlign: EventPageAlignment) => {
-      if (!richTextEditor) return;
-      const selectedRange = restoreRichTextSelection();
-      if (!selectedRange) return;
-      richTextEditor.commands.command(({ state, tr, dispatch }) => {
-        let changed = false;
-        state.doc.nodesBetween(selectedRange.from, selectedRange.to, (node, pos) => {
-          if (node.type.name !== 'paragraph' && node.type.name !== 'heading') return;
-          tr.setNodeMarkup(pos, undefined, { ...node.attrs, textAlign });
-          changed = true;
-        });
-        if (!changed) return false;
-        dispatch?.(tr);
-        return true;
-      });
-      setSelectedAlignment(textAlign);
-      updateBubbleState(richTextEditor);
-    },
-    [restoreRichTextSelection, richTextEditor, updateBubbleState],
-  );
-
-  const handleBubbleInputPress = React.useCallback(
-    (event: React.MouseEvent<HTMLElement> | React.PointerEvent<HTMLElement>) => {
-      event.stopPropagation();
-      preserveRichTextSelection();
-    },
-    [preserveRichTextSelection],
-  );
-
-  if (!richTextEditor) {
-    return (
-      <div className="min-h-24 rounded-md border border-dashed border-black/10 bg-black/[0.02]" />
-    );
-  }
-
-  return (
-    <div
-      className="space-y-2"
-      role="presentation"
-      onClick={(event) => event.stopPropagation()}
-      onKeyDown={(event) => event.stopPropagation()}
-      onMouseDown={(event) => event.stopPropagation()}
-      onPointerDown={(event) => event.stopPropagation()}
-    >
-      {bubblePosition && (
-        <div
-          className="tixkit-event-page-bubble-menu"
-          style={{
-            left: bubblePosition.left,
-            top: bubblePosition.top,
-          }}
-        >
-          <div className="tixkit-event-page-bubble-menu__group" aria-label="Selection alignment">
-            {[
-              { alignment: 'left' as const, icon: <AlignLeft className="size-4" />, label: 'Align left' },
-              {
-                alignment: 'center' as const,
-                icon: <AlignCenter className="size-4" />,
-                label: 'Align center',
-              },
-              {
-                alignment: 'right' as const,
-                icon: <AlignRight className="size-4" />,
-                label: 'Align right',
-              },
-            ].map((option) => (
-              <button
-                aria-label={option.label}
-                aria-pressed={selectedAlignment === option.alignment}
-                className="tixkit-event-page-bubble-menu__button"
-                key={option.alignment}
-                onClick={() => applyTextAlignment(option.alignment)}
-                onMouseDown={handleBubbleInputPress}
-                onPointerDown={handleBubbleInputPress}
-                type="button"
-              >
-                {option.icon}
-              </button>
-            ))}
-          </div>
-          <label className="tixkit-event-page-bubble-menu__field">
-            <span className="sr-only">Selection color</span>
-            <input
-              aria-label="Selection color"
-              className="tixkit-event-page-bubble-menu__control tixkit-event-page-bubble-menu__control--color"
-              onChange={(event) => applySelectionStyle({ color: event.currentTarget.value })}
-              onInput={(event) => applySelectionStyle({ color: event.currentTarget.value })}
-              onMouseDown={handleBubbleInputPress}
-              onPointerDown={handleBubbleInputPress}
-              type="color"
-              value={/^#[0-9a-f]{6}$/i.test(selectedStyle.color ?? '') ? selectedStyle.color : '#111827'}
-            />
-          </label>
-          <label className="tixkit-event-page-bubble-menu__field">
-            <span className="sr-only">Selection font family</span>
-            <select
-              aria-label="Selection font family"
-              className="tixkit-event-page-bubble-menu__control tixkit-event-page-bubble-menu__control--select"
-              onChange={(event) => applySelectionStyle({ fontFamily: event.currentTarget.value })}
-              onMouseDown={handleBubbleInputPress}
-              onPointerDown={handleBubbleInputPress}
-              value={selectedStyle.fontFamily ?? ''}
-            >
-              {EVENT_PAGE_FONT_FAMILY_OPTIONS.map((option) => (
-                <option key={option.label} value={option.value}>
-                  {option.label}
-                </option>
-              ))}
-            </select>
-          </label>
-          <label className="tixkit-event-page-bubble-menu__field">
-            <span className="sr-only">Selection text size</span>
-            <input
-              aria-label="Selection text size"
-              className="tixkit-event-page-bubble-menu__control tixkit-event-page-bubble-menu__control--number"
-              inputMode="numeric"
-              onChange={(event) => {
-                const value = event.currentTarget.value.trim();
-                applySelectionStyle({ fontSize: value ? `${value}px` : '' });
-              }}
-              onInput={(event) => {
-                const value = event.currentTarget.value.trim();
-                applySelectionStyle({ fontSize: value ? `${value}px` : '' });
-              }}
-              onMouseDown={handleBubbleInputPress}
-              onPointerDown={handleBubbleInputPress}
-              placeholder="Size"
-              value={eventPageInlineControlValue(selectedStyle.fontSize, 'px')}
-            />
-          </label>
-          <label className="tixkit-event-page-bubble-menu__field">
-            <span className="sr-only">Selection line height</span>
-            <input
-              aria-label="Selection line height"
-              className="tixkit-event-page-bubble-menu__control tixkit-event-page-bubble-menu__control--number"
-              inputMode="numeric"
-              onChange={(event) => {
-                const value = event.currentTarget.value.trim();
-                applySelectionStyle({ lineHeight: value ? `${value}%` : '' });
-              }}
-              onInput={(event) => {
-                const value = event.currentTarget.value.trim();
-                applySelectionStyle({ lineHeight: value ? `${value}%` : '' });
-              }}
-              onMouseDown={handleBubbleInputPress}
-              onPointerDown={handleBubbleInputPress}
-              placeholder="Line"
-              value={eventPageInlineControlValue(selectedStyle.lineHeight, '%')}
-            />
-          </label>
-        </div>
-      )}
-      <EditorContent editor={richTextEditor} />
-    </div>
-  );
-}
-
-function EventPageBlockNodeView(props: NodeViewProps) {
-  const ctx = React.useContext(EventPageBlockViewContext);
-  const block = props.node.attrs.block as EventPageBlock | undefined;
-  const disabled = !props.editor.isEditable;
-
-  if (!block) {
-    return (
-      <NodeViewWrapper className="rounded-md border border-red-200 bg-red-50 p-4 text-sm text-red-700">
-        Unsupported event page block
-      </NodeViewWrapper>
-    );
-  }
-
-  const selectSelf = () => {
-    const position = props.getPos();
-    if (typeof position === 'number') props.editor.commands.setNodeSelection(position);
-  };
-  const updateBlock = (nextBlock: EventPageBlock) => {
-    props.updateAttributes({ block: nextBlock });
-  };
-  const frameClassName = props.selected
-    ? 'border-black shadow-[0_0_0_2px_rgba(0,0,0,0.14)]'
-    : 'border-black/10 hover:border-black/25';
-
-  return (
-    <NodeViewWrapper
-      as="section"
-      className={`tk-ep-section group relative rounded-lg border bg-white p-5 transition ${frameClassName}`}
-      contentEditable={false}
-      data-block-id={block.id}
-      data-block-type={block.type}
-      onClick={selectSelf}
-    >
-      <div className="mb-4 flex items-center justify-between gap-3 text-xs text-black/45">
-        <span className="font-medium uppercase">{blockLabel(block)}</span>
-        {props.selected && <span className="rounded-full bg-black/5 px-2 py-0.5">Selected</span>}
-      </div>
-      {ctx && (
-        <EditableBlockBody
-          block={block}
-          disabled={disabled}
-          sampleContext={ctx.sampleContext}
-          onChange={updateBlock}
-          renderRichTextBlock={ctx.renderRichTextBlock}
-        />
-      )}
-    </NodeViewWrapper>
-  );
-}
-
-const EventPageBlockNode = Node.create({
-  name: EVENT_PAGE_BLOCK_NODE,
-  group: 'block',
-  atom: true,
-  selectable: true,
-  draggable: true,
-
-  addAttributes() {
-    return {
-      block: {
-        default: null,
-        rendered: false,
-      },
-    };
-  },
-
-  parseHTML() {
-    return [{ tag: 'section[data-event-page-block]' }];
-  },
-
-  renderHTML({ node, HTMLAttributes }) {
-    const block = node.attrs.block as EventPageBlock | undefined;
-    return [
-      'section',
-      mergeAttributes(HTMLAttributes, {
-        'data-event-page-block': block?.type ?? 'unknown',
-        'data-block-id': block?.id ?? '',
-      }),
-    ];
-  },
-
-  addNodeView() {
-    return ReactNodeViewRenderer(EventPageBlockNodeView);
-  },
-});
-
-const eventPageRichTextExtensions = [
-  StarterKit.configure({
-    heading: { levels: [1, 2, 3] },
-    link: false,
-    codeBlock: false,
-    horizontalRule: false,
-  }),
-  Link.configure({
-    openOnClick: false,
-    HTMLAttributes: { rel: 'noopener noreferrer', target: '_blank' },
-  }),
-  Image.configure({
-    allowBase64: false,
-  }),
-  EventPageInlineStyle,
-  EventPageTextAlignment,
-];
-
-const eventPageEditorExtensions = [
-  ...eventPageRichTextExtensions,
-  EventPageBlockNode,
-];
-
 function PreviewDrawer({ onClose, preview }: { onClose: () => void; preview: EditorPreview }) {
   const [debugTab, setDebugTab] = React.useState<'rendered' | 'html' | 'text'>('rendered');
   return (
@@ -1231,69 +711,77 @@ export function EventPagePersistedEditorView({ eventId }: { eventId: string }) {
   const [notice, setNotice] = React.useState<string>();
   const operationIdRef = React.useRef(0);
   const documentRef = React.useRef<EventPageDocument | undefined>(undefined);
-  const hydratingEditorRef = React.useRef(false);
-  const hydratedDraftIdRef = React.useRef<string | undefined>(undefined);
   const isArchived = document?.status === 'archived';
   const { can } = usePermissions();
   const canEdit = Boolean(document) && !isArchived && can('events.write');
 
-  const pageEditor = useEditor({
-    extensions: eventPageEditorExtensions,
-    content: { type: 'doc', content: [] },
-    editable: false,
-    immediatelyRender: false,
-    editorProps: {
-      attributes: {
-        'aria-label': 'Event page editor canvas',
-        class: 'tixkit-event-page-builder focus:outline-none',
-      },
-    },
-    onSelectionUpdate: ({ editor }) => {
-      const blockId = selectedBlockIdFromEditor(editor);
-      if (blockId) setSelectedBlockId(blockId);
-    },
-    onUpdate: ({ editor }) => {
-      if (hydratingEditorRef.current || !documentRef.current) return;
-      const nextDocument = withEditorBlocks(
-        documentRef.current,
-        blocksFromEditor(editor, documentRef.current),
+  const [previewUrl, setPreviewUrl] = React.useState<string | undefined>(undefined);
+  const [previewError, setPreviewError] = React.useState<string | undefined>(undefined);
+  const iframeRef = React.useRef<HTMLIFrameElement | null>(null);
+  const suppressIframeUpdateRef = React.useRef(false);
+
+  const ADMIN_SOURCE = 'tixkit-event-page-admin';
+  const EDITOR_SOURCE = 'tixkit-event-page-editor';
+
+  const iframeOrigin = React.useMemo(() => {
+    if (!previewUrl) return null;
+    try {
+      return new URL(previewUrl).origin;
+    } catch {
+      return null;
+    }
+  }, [previewUrl]);
+
+  const sendMessageToIframe = React.useCallback(
+    (message: Record<string, unknown>) => {
+      const iframe = iframeRef.current;
+      if (!iframe?.contentWindow) return;
+      iframe.contentWindow.postMessage(
+        { source: ADMIN_SOURCE, ...message },
+        iframeOrigin ?? '*',
       );
-      documentRef.current = nextDocument;
-      setEventPageDocument(nextDocument);
-      markDraftDirty();
     },
-  });
+    [iframeOrigin],
+  );
+
+  React.useEffect(() => {
+    function handleMessage(event: MessageEvent) {
+      if (iframeOrigin && event.origin !== iframeOrigin) return;
+      const data = event.data;
+      if (!data || typeof data !== 'object') return;
+      const msg = data as Record<string, unknown>;
+      if (msg.source !== EDITOR_SOURCE) return;
+      if (msg.type === 'ready') {
+        if (eventPageDocument) {
+          sendMessageToIframe({
+            type: 'update-document',
+            document: eventPageDocument,
+            selectedBlockId,
+          });
+        }
+        return;
+      }
+      if (msg.type === 'selection-change' && typeof msg.blockId === 'string') {
+        setSelectedBlockId(msg.blockId as string);
+        return;
+      }
+      if (msg.type === 'block-change' && typeof msg.blockId === 'string' && msg.block) {
+        suppressIframeUpdateRef.current = true;
+        updateEventPageSettings((current) => ({
+          ...current,
+          blocks: current.blocks.map((b) =>
+            b.id === (msg.blockId as string) ? (msg.block as EventPageBlock) : b,
+          ),
+        }));
+      }
+    }
+    window.addEventListener('message', handleMessage);
+    return () => window.removeEventListener('message', handleMessage);
+  }, [eventPageDocument, sendMessageToIframe, iframeOrigin, selectedBlockId]);
 
   React.useEffect(() => {
     documentRef.current = eventPageDocument;
   }, [eventPageDocument]);
-
-  React.useEffect(() => {
-    pageEditor?.setEditable(canEdit);
-  }, [canEdit, pageEditor]);
-
-  React.useEffect(() => {
-    if (!pageEditor || !eventPageDocument || !draft) return;
-    if (hydratedDraftIdRef.current === draft.id) return;
-    const draftId = draft.id;
-    hydratingEditorRef.current = true;
-    let cancelled = false;
-    queueMicrotask(() => {
-      if (cancelled || pageEditor.isDestroyed) return;
-      pageEditor.commands.setContent(eventPageEditorContent(eventPageDocument), {
-        emitUpdate: false,
-      });
-      hydratedDraftIdRef.current = draftId;
-      setSelectedBlockId(eventPageDocument.blocks[0]?.id);
-      hydratingEditorRef.current = false;
-    });
-    return () => {
-      cancelled = true;
-      if (hydratedDraftIdRef.current !== draftId) {
-        hydratingEditorRef.current = false;
-      }
-    };
-  }, [draft, eventPageDocument, pageEditor]);
 
   function nextOperationId() {
     operationIdRef.current += 1;
@@ -1325,7 +813,6 @@ export function EventPagePersistedEditorView({ eventId }: { eventId: string }) {
     setError(undefined);
     setActionError(undefined);
     setNotice(undefined);
-    hydratedDraftIdRef.current = undefined;
 
     const eventResult = await adminApi.getEvent(eventId);
     if (!eventResult.ok) {
@@ -1418,6 +905,19 @@ export function EventPagePersistedEditorView({ eventId }: { eventId: string }) {
     setPreview(previewFromRendered(normalized, loadedEvent));
     setAutosave('saved');
     setLoading(false);
+
+    setPreviewError(undefined);
+    const tokenResult = await adminApi.mintPreviewToken(loadedDocument.id);
+    if (tokenResult.ok) {
+      setPreviewUrl(tokenResult.data.url);
+    } else {
+      setPreviewError(
+        resultMessage(
+          tokenResult.error,
+          'Unable to mint preview token. Check that TIXKIT_PREVIEW_TOKEN_SECRET and PUBLIC_CHECKOUT_URL are configured.',
+        ),
+      );
+    }
   }, [eventId]);
 
   React.useEffect(() => {
@@ -1433,8 +933,7 @@ export function EventPagePersistedEditorView({ eventId }: { eventId: string }) {
 
   function snapshotFromEditor(snapshot = eventPageDocument): EventPageDocument | undefined {
     if (!snapshot) return undefined;
-    if (!pageEditor) return snapshot;
-    return withEditorBlocks(snapshot, blocksFromEditor(pageEditor, snapshot));
+    return withEditorBlocks(snapshot, snapshot.blocks);
   }
 
   function updateEventPageSettings(update: (document: EventPageDocument) => EventPageDocument) {
@@ -1443,82 +942,49 @@ export function EventPagePersistedEditorView({ eventId }: { eventId: string }) {
     documentRef.current = nextDocument;
     setEventPageDocument(nextDocument);
     markDraftDirty();
+    if (!suppressIframeUpdateRef.current) {
+      sendMessageToIframe({
+        type: 'update-document',
+        document: nextDocument,
+        selectedBlockId,
+      });
+    }
+    suppressIframeUpdateRef.current = false;
   }
 
   function selectBlock(blockId: string) {
     setSelectedBlockId(blockId);
     openInspectorPanel('block');
-    if (!pageEditor) return;
-    const position = findBlockPosition(pageEditor, blockId);
-    if (position !== undefined) pageEditor.commands.setNodeSelection(position);
+    sendMessageToIframe({ type: 'select-block', blockId });
   }
 
   function updateSelectedEventPageBlock(nextBlock: EventPageBlock) {
-    if (
-      !pageEditor ||
-      !selectedBlockId ||
-      !updateBlockInEditor(pageEditor, selectedBlockId, nextBlock)
-    ) {
-      if (!eventPageDocument || !selectedBlockId) return;
-      updateEventPageSettings((current) =>
-        withEditorBlocks(
-          current,
-          current.blocks.map((block) => (block.id === selectedBlockId ? nextBlock : block)),
-        ),
-      );
-    }
+    if (!eventPageDocument || !selectedBlockId) return;
+    const nextDocument: EventPageDocument = {
+      ...eventPageDocument,
+      blocks: eventPageDocument.blocks.map((block) =>
+        block.id === selectedBlockId ? nextBlock : block,
+      ),
+    };
+    documentRef.current = nextDocument;
+    setEventPageDocument(nextDocument);
+    markDraftDirty();
+    sendMessageToIframe({
+      type: 'update-block',
+      blockId: selectedBlockId,
+      block: nextBlock,
+    });
   }
 
-  const renderRichTextBlock = React.useCallback(
-    ({
-      block,
-      disabled,
-      onChange,
-    }: {
-      block: Extract<EventPageBlock, { type: 'rich_text' }>;
-      disabled: boolean;
-      onChange: (block: EventPageBlock) => void;
-    }) => {
-      const imageAttrs = tipTapImageAttrs(block);
-      if (imageAttrs) {
-        return imageAttrs.src ? (
-          <img
-            alt={imageAttrs.alt}
-            className="max-h-96 w-full rounded-md object-cover"
-            src={imageAttrs.src}
-          />
-        ) : (
-          <div className="flex min-h-48 items-center justify-center rounded-md border border-dashed bg-black/[0.03] text-sm font-medium text-black/45">
-            Add an image URL
-          </div>
-        );
-      }
-      return <EventPageRichTextEditor block={block} disabled={disabled} updateBlock={onChange} />;
-    },
-    [],
-  );
-
-  const blockViewContextValue = React.useMemo<EventPageBlockViewContextValue | null>(() => {
-    if (!event) return null;
-    return {
-      sampleContext: sampleContext(event),
-      renderRichTextBlock,
-    };
-  }, [event, renderRichTextBlock]);
-
   function insertEventPageAction(actionId: InsertActionId) {
-    if (!event || !eventPageDocument || !pageEditor || isArchived) return;
+    if (!event || !eventPageDocument || isArchived) return;
     const currentDocument = snapshotFromEditor(eventPageDocument) ?? eventPageDocument;
     const inserted = createInsertedBlock(actionId, currentDocument, event);
     if (!inserted) return;
-    pageEditor
-      .chain()
-      .focus()
-      .insertContentAt(pageEditor.state.doc.content.size, {
-        type: EVENT_PAGE_BLOCK_NODE,
-        attrs: { block: inserted },
-      })
-      .run();
+    updateEventPageSettings((current) => ({
+      ...current,
+      blocks: [...current.blocks, inserted],
+    }));
     selectBlock(inserted.id);
   }
 
@@ -1976,20 +1442,37 @@ export function EventPagePersistedEditorView({ eventId }: { eventId: string }) {
       canvas={
         <main
           aria-label="Event page editable document"
-          className="min-h-0 min-w-0 flex-1 overflow-auto bg-muted/30 lg:rounded-tl-3xl"
+          className="min-h-0 min-w-0 flex-1 overflow-hidden bg-muted/30 lg:rounded-tl-3xl"
           data-testid="editor-canvas"
         >
-          <div className="mx-auto min-h-full w-full max-w-5xl px-5 py-8 sm:px-6">
-            <div className="tixkit-event-page" data-mode="edit">
-              {pageEditor && blockViewContextValue ? (
-                <EventPageBlockViewContext.Provider value={blockViewContextValue}>
-                  <EditorContent editor={pageEditor} />
-                </EventPageBlockViewContext.Provider>
-              ) : (
-                <p className="text-sm text-muted-foreground">Preparing editor...</p>
-              )}
+          {previewUrl ? (
+            <iframe
+              ref={iframeRef}
+              src={previewUrl}
+              className="h-full w-full border-0"
+              data-testid="editor-iframe"
+              title="Event page editor canvas"
+              sandbox="allow-scripts allow-same-origin allow-forms allow-popups"
+            />
+          ) : previewError ? (
+            <div className="flex h-full items-center justify-center p-8">
+              <div className="max-w-md space-y-3 text-center">
+                <p className="text-sm font-medium text-destructive">Editor canvas unavailable</p>
+                <p className="text-xs text-muted-foreground">{previewError}</p>
+                <button
+                  className="rounded-md border px-3 py-2 text-xs transition-colors hover:bg-accent"
+                  onClick={() => void load()}
+                  type="button"
+                >
+                  Retry
+                </button>
+              </div>
             </div>
-          </div>
+          ) : (
+            <div className="flex h-full items-center justify-center">
+              <p className="text-sm text-muted-foreground">Preparing editor...</p>
+            </div>
+          )}
         </main>
       }
       inspector={

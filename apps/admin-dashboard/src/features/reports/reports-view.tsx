@@ -47,8 +47,9 @@ import {
   TableRow,
 } from '@/components/ui/table';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { useAdminData } from '@/hooks/use-admin-data';
+import { useAdminQuery } from '@/hooks/use-admin-table-data';
 import { useAllEvents } from '@/hooks/use-all-events';
+import { useBootstrap } from '@/context/bootstrap-provider';
 import { formatCurrency, formatDate, formatNumber } from '@/lib/format';
 import { subscribeToExportJob } from '@/lib/export-jobs';
 import { toast } from 'sonner';
@@ -97,6 +98,7 @@ export function ReportsView({ eventId }: ReportsViewProps) {
   const [exportingType, setExportingType] = React.useState<AdminExportType | null>(null);
   const [lastExport, setLastExport] = React.useState<AdminExportJob | null>(null);
   const [selectedOrganizationId, setSelectedOrganizationId] = React.useState('');
+  const { organizationId: bootstrapOrgId, brandId: bootstrapBrandId } = useBootstrap();
   const exportSubscriptionRef = React.useRef<(() => void) | null>(null);
   const [from, setFrom] = React.useState<Date | undefined>(
     () => new Date(Date.now() - 30 * 86_400_000),
@@ -106,9 +108,19 @@ export function ReportsView({ eventId }: ReportsViewProps) {
   React.useEffect(() => {
     if (eventId) setSelectedEventId(eventId);
   }, [eventId]);
+  // Reset the selected event when the workspace/brand scope changes so the
+  // selector does not retain an event that is no longer in the narrowed list.
+  // Skip when an eventId prop pins the selection.
+  React.useEffect(() => {
+    if (eventId) return;
+    setSelectedEventId('');
+  }, [bootstrapOrgId, bootstrapBrandId, eventId]);
 
-  const allEvents = useAllEvents();
-  const organizationsState = useAdminData(() => adminApi.listOrganizations());
+  const allEvents = useAllEvents({
+    organizationId: bootstrapOrgId,
+    brandId: bootstrapBrandId,
+  });
+  const organizationsState = useAdminQuery(['listOrganizations'], () => adminApi.listOrganizations());
   const events = eventId ? [] : allEvents.events;
   const eventsLoading = eventId ? false : allEvents.loading;
   const eventsError = eventId ? undefined : allEvents.error;
@@ -125,47 +137,47 @@ export function ReportsView({ eventId }: ReportsViewProps) {
   );
   const selectedRangeKey = `${range.from ?? ''}:${range.to ?? ''}`;
 
-  const salesState = useAdminData(
+  const salesState = useAdminQuery(
+    ['getSalesReport', activeTab, selectedEventId, selectedRangeKey],
     () =>
       selectedEventId && activeTab === 'sales'
         ? adminApi.getSalesReport(selectedEventId, range)
         : emptyResult<AdminSalesReportSummary>(),
-    [activeTab, selectedEventId, selectedRangeKey],
   );
-  const taxState = useAdminData(
+  const taxState = useAdminQuery(
+    ['getTaxReport', activeTab, selectedEventId, selectedRangeKey],
     () =>
       selectedEventId && activeTab === 'tax'
         ? adminApi.getTaxReport(selectedEventId, range)
         : emptyResult<AdminTaxReport>(),
-    [activeTab, selectedEventId, selectedRangeKey],
   );
-  const attendanceState = useAdminData(
+  const attendanceState = useAdminQuery(
+    ['getAttendanceReport', activeTab, selectedEventId],
     () =>
       selectedEventId && activeTab === 'attendance'
         ? adminApi.getAttendanceReport(selectedEventId)
         : emptyResult<AdminAttendanceReport>(),
-    [activeTab, selectedEventId],
   );
-  const promoState = useAdminData(
+  const promoState = useAdminQuery(
+    ['getPromoReport', activeTab, selectedEventId],
     () =>
       selectedEventId && activeTab === 'promo'
         ? adminApi.getPromoReport(selectedEventId)
         : emptyResult<AdminPromoReport>(),
-    [activeTab, selectedEventId],
   );
-  const conversionState = useAdminData(
+  const conversionState = useAdminQuery(
+    ['getConversionReport', activeTab, selectedEventId],
     () =>
       selectedEventId && activeTab === 'conversion'
         ? adminApi.getConversionReport(selectedEventId)
         : emptyResult<AdminConversionReport>(),
-    [activeTab, selectedEventId],
   );
-  const affiliateState = useAdminData(
+  const affiliateState = useAdminQuery(
+    ['getAffiliateReport', activeTab, selectedOrganizationId],
     () =>
       selectedOrganizationId && activeTab === 'affiliate'
         ? adminApi.getAffiliateReport(selectedOrganizationId)
         : emptyResult<AdminAffiliateReport>(),
-    [activeTab, selectedOrganizationId],
   );
 
   React.useEffect(() => {

@@ -67,7 +67,18 @@ export function getOrderColumns(
     {
       accessorKey: 'eventTitle',
       header: ({ column }) => <DataTableColumnHeader column={column} title="Event" />,
-      cell: ({ row }) => row.original.eventTitle,
+      cell: ({ row }) =>
+        row.original.eventTitle ? (
+          <Link
+            href={routes.eventDetail(row.original.eventId)}
+            prefetch={false}
+            className="text-sm font-medium hover:underline"
+          >
+            {row.original.eventTitle}
+          </Link>
+        ) : (
+          <span className="text-sm text-muted-foreground">—</span>
+        ),
       meta: { title: 'Event' },
     },
     {

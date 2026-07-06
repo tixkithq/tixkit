@@ -20,8 +20,26 @@ vi.mock('@/lib/api', async () => {
   };
 });
 
-vi.mock('@/hooks/use-admin-data', () => ({
-  useAdminData: useAdminDataMock,
+vi.mock('@/hooks/use-admin-table-data', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/hooks/use-admin-table-data')>();
+  return {
+    ...actual,
+    useAdminQuery: useAdminDataMock,
+  };
+});
+
+vi.mock('@/context/bootstrap-provider', () => ({
+  useBootstrap: () => ({
+    organizations: [],
+    brands: [],
+    organizationId: undefined,
+    brandId: undefined,
+    availableBrands: [],
+    setOrganizationId: vi.fn(),
+    setBrandId: vi.fn(),
+    loading: false,
+    error: null,
+  }),
 }));
 
 vi.mock('./webhook-form', () => ({

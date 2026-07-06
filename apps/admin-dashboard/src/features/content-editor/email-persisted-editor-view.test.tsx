@@ -555,6 +555,9 @@ function clickMoreAction(name: string) {
 async function confirmReviewSend(buttonName = 'Send email') {
   fireEvent.click(screen.getByRole('button', { name: 'Review' }));
   expect(await screen.findByRole('dialog', { name: 'Ready to send?' })).toBeInTheDocument();
+  expect(screen.getByText('Campaign settings')).toBeInTheDocument();
+  expect(screen.getByLabelText('Audience')).toBeInTheDocument();
+  expect(screen.getByLabelText('Send timing')).toBeInTheDocument();
   expect(screen.getByText('Preflight checks')).toBeInTheDocument();
   expect(await screen.findByText('Analyzing your content...')).toBeInTheDocument();
   expect(screen.getByRole('button', { name: buttonName })).toBeDisabled();
@@ -979,9 +982,9 @@ describe('EmailPersistedEditorView', () => {
     expect(screen.getByRole('button', { name: 'Code' })).toBeInTheDocument();
     expect(screen.getByLabelText('Verified sender')).toHaveValue('bsi_1');
     expect(screen.getByLabelText('Reply-To')).toHaveValue('support@example.test');
-    expect(screen.getByLabelText('Audience')).toHaveValue('all');
-    expect(screen.getByText('Transactional ticket messages')).toBeInTheDocument();
-    expect(screen.getByLabelText('Send timing')).toHaveValue('now');
+    expect(screen.queryByLabelText('Audience')).not.toBeInTheDocument();
+    expect(screen.queryByText('Transactional ticket messages')).not.toBeInTheDocument();
+    expect(screen.queryByLabelText('Send timing')).not.toBeInTheDocument();
     expect(screen.getByTestId('native-email-inspector-host')).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Align left' })).not.toBeInTheDocument();
     expect(screen.queryByText('Typography')).not.toBeInTheDocument();

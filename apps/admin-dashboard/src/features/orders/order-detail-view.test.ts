@@ -40,9 +40,13 @@ vi.mock('sonner', () => ({
   },
 }));
 
-vi.mock('@/hooks/use-admin-data', () => ({
-  useAdminData: () => orderState,
-}));
+vi.mock('@/hooks/use-admin-table-data', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/hooks/use-admin-table-data')>();
+  return {
+    ...actual,
+    useAdminQuery: () => orderState,
+  };
+});
 
 vi.mock('@/context/permission-provider', () => ({
   usePermissions: () => permissionsMock,

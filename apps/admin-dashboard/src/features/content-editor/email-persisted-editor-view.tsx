@@ -2608,10 +2608,6 @@ export function EmailPersistedEditorView({ eventId }: { eventId: string }) {
     reviewBlockingIssues.length === 0 &&
     !reviewHasInvalidSchedule &&
     autosave !== 'saving';
-  const reviewSendTimeLabel =
-    sendMode === 'scheduled' && reviewScheduledAt
-      ? new Date(reviewScheduledAt).toLocaleString()
-      : 'Now';
   const variableInsertItems = emailVariableInserts.map((key) => ({
     key,
     presentation: variablePresentation(key),
@@ -2714,66 +2710,6 @@ export function EmailPersistedEditorView({ eventId }: { eventId: string }) {
                     </option>
                   ) : null}
                 </select>
-              </label>
-              <label className="flex items-center gap-2 border-t border-border/60 py-1.5">
-                <span className="shrink-0 text-xs font-medium text-muted-foreground">To</span>
-                <select
-                  aria-label="Audience"
-                  className="min-w-0 flex-1 border-none bg-transparent text-sm text-foreground outline-none disabled:opacity-50"
-                  disabled={!canEdit}
-                  onChange={(change) => setAudience(change.currentTarget.value as EmailAudience)}
-                  value={audience}
-                >
-                  <option className="bg-background text-foreground" value="all">
-                    All attendees
-                  </option>
-                  <option className="bg-background text-foreground" value="checked_in">
-                    Checked in
-                  </option>
-                  <option className="bg-background text-foreground" value="not_checked_in">
-                    Not checked in
-                  </option>
-                  <option className="bg-background text-foreground" value="specific">
-                    Specific attendees
-                  </option>
-                </select>
-              </label>
-              <div className="flex items-center gap-2 border-t border-border/60 py-1.5">
-                <span className="shrink-0 text-xs font-medium text-muted-foreground">
-                  Subscribe to
-                </span>
-                <span className="min-w-0 flex-1 truncate text-sm text-foreground">
-                  {emailDocument.settings.category === 'bulk'
-                    ? `${brand?.name ?? event.title} updates`
-                    : 'Transactional ticket messages'}
-                </span>
-              </div>
-              <label className="flex items-center gap-2 border-t border-border/60 py-1.5">
-                <span className="shrink-0 text-xs font-medium text-muted-foreground">When</span>
-                <select
-                  aria-label="Send timing"
-                  className="w-28 border-none bg-transparent text-sm text-foreground outline-none disabled:opacity-50"
-                  disabled={!canEdit}
-                  onChange={(change) => setSendMode(change.currentTarget.value as EmailSendMode)}
-                  value={sendMode}
-                >
-                  <option className="bg-background text-foreground" value="now">
-                    Now
-                  </option>
-                  <option className="bg-background text-foreground" value="scheduled">
-                    Scheduled
-                  </option>
-                </select>
-                {sendMode === 'scheduled' && (
-                  <input
-                    aria-label="Scheduled send time"
-                    className="min-w-0 flex-1 border-none bg-transparent text-sm text-foreground outline-none disabled:opacity-50"
-                    disabled={!canEdit}
-                    onChange={(change) => setScheduledAt(change.currentTarget.value)}
-                    type="datetime-local"
-                    value={scheduledAt}
-                  />
-                )}
               </label>
               <MetadataField
                 disabled={!canEdit}
@@ -3283,11 +3219,70 @@ export function EmailPersistedEditorView({ eventId }: { eventId: string }) {
             </DialogDescription>
           </DialogHeader>
           <div className="space-y-4">
+            <div className="space-y-3 rounded-md border bg-muted/20 p-3">
+              <h3 className="text-sm font-medium text-foreground">Campaign settings</h3>
+              <label className="flex items-center gap-2 py-1">
+                <span className="w-28 shrink-0 text-xs font-medium text-muted-foreground">To</span>
+                <select
+                  aria-label="Audience"
+                  className="min-w-0 flex-1 rounded-md border bg-background px-2 py-1.5 text-sm text-foreground outline-none focus:ring-2 focus:ring-ring disabled:opacity-50"
+                  disabled={!canEdit}
+                  onChange={(change) => setAudience(change.currentTarget.value as EmailAudience)}
+                  value={audience}
+                >
+                  <option className="bg-background text-foreground" value="all">
+                    All attendees
+                  </option>
+                  <option className="bg-background text-foreground" value="checked_in">
+                    Checked in
+                  </option>
+                  <option className="bg-background text-foreground" value="not_checked_in">
+                    Not checked in
+                  </option>
+                  <option className="bg-background text-foreground" value="specific">
+                    Specific attendees
+                  </option>
+                </select>
+              </label>
+              <div className="flex items-center gap-2 py-1">
+                <span className="w-28 shrink-0 text-xs font-medium text-muted-foreground">
+                  Subscribe to
+                </span>
+                <span className="min-w-0 flex-1 truncate text-sm text-foreground">
+                  {emailDocument.settings.category === 'bulk'
+                    ? `${brand?.name ?? event.title} updates`
+                    : 'Transactional ticket messages'}
+                </span>
+              </div>
+              <label className="flex items-center gap-2 py-1">
+                <span className="w-28 shrink-0 text-xs font-medium text-muted-foreground">When</span>
+                <select
+                  aria-label="Send timing"
+                  className="w-28 rounded-md border bg-background px-2 py-1.5 text-sm text-foreground outline-none focus:ring-2 focus:ring-ring disabled:opacity-50"
+                  disabled={!canEdit}
+                  onChange={(change) => setSendMode(change.currentTarget.value as EmailSendMode)}
+                  value={sendMode}
+                >
+                  <option className="bg-background text-foreground" value="now">
+                    Now
+                  </option>
+                  <option className="bg-background text-foreground" value="scheduled">
+                    Scheduled
+                  </option>
+                </select>
+                {sendMode === 'scheduled' && (
+                  <input
+                    aria-label="Scheduled send time"
+                    className="min-w-0 flex-1 rounded-md border bg-background px-2 py-1.5 text-sm text-foreground outline-none focus:ring-2 focus:ring-ring disabled:opacity-50"
+                    disabled={!canEdit}
+                    onChange={(change) => setScheduledAt(change.currentTarget.value)}
+                    type="datetime-local"
+                    value={scheduledAt}
+                  />
+                )}
+              </label>
+            </div>
             <dl className="grid gap-2 rounded-md border bg-muted/20 p-3 text-sm sm:grid-cols-[7rem_1fr]">
-              <dt className="text-muted-foreground">Audience</dt>
-              <dd className="font-medium text-foreground">{audienceLabel(audience)}</dd>
-              <dt className="text-muted-foreground">When</dt>
-              <dd className="font-medium text-foreground">{reviewSendTimeLabel}</dd>
               <dt className="text-muted-foreground">From</dt>
               <dd className="font-medium text-foreground">
                 {selectedSenderIdentity

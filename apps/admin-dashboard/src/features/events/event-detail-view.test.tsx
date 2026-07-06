@@ -9,9 +9,13 @@ const useAdminDataMock = vi.hoisted(() => vi.fn());
 const useBootstrapMock = vi.hoisted(() => vi.fn());
 const usePermissionsMock = vi.hoisted(() => vi.fn());
 
-vi.mock('@/hooks/use-admin-data', () => ({
-  useAdminData: useAdminDataMock,
-}));
+vi.mock('@/hooks/use-admin-table-data', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/hooks/use-admin-table-data')>();
+  return {
+    ...actual,
+    useAdminQuery: useAdminDataMock,
+  };
+});
 
 vi.mock('@/context/bootstrap-provider', () => ({
   useBootstrap: useBootstrapMock,

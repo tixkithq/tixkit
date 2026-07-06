@@ -10,7 +10,7 @@ import {
   type CreateProductInput,
   type UpdateProductInput,
 } from '@/lib/api';
-import { useAdminData } from '@/hooks/use-admin-data';
+import { useAdminQuery } from '@/hooks/use-admin-table-data';
 import { formatCurrency, formatDateTime, formatNumber } from '@/lib/format';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -183,13 +183,13 @@ export function EventProductsView({ eventId }: { eventId: string }) {
     loading: categoriesLoading,
     error: categoriesError,
     refetch: refetchCategories,
-  } = useAdminData(() => adminApi.listProductCategories(eventId), [eventId]);
+  } = useAdminQuery(['listProductCategories', eventId], () => adminApi.listProductCategories(eventId));
   const {
     data: products,
     loading: productsLoading,
     error: productsError,
     refetch: refetchProducts,
-  } = useAdminData(() => adminApi.listProducts(eventId), [eventId]);
+  } = useAdminQuery(['listProducts', eventId], () => adminApi.listProducts(eventId));
   const [categoryDialogOpen, setCategoryDialogOpen] = React.useState(false);
   const [productSheetOpen, setProductSheetOpen] = React.useState(false);
   const [editingProduct, setEditingProduct] = React.useState<AdminProduct | undefined>();

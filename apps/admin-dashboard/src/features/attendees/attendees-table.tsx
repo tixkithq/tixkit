@@ -3,39 +3,22 @@
 import * as React from 'react';
 import { Download, Users } from 'lucide-react';
 import { type AdminAttendeeListItem, type AdminExportJob, adminApi } from '@/lib/api';
+import { attendeesTableSchema } from '@/lib/table-schemas';
 import { Button } from '@/components/ui/button';
 import { EmptyState } from '@/components/empty-state';
-import { Skeleton } from '@/components/ui/skeleton';
-import { DataTable } from '@/components/data-table/data-table';
-import { type DataTableFilter } from '@/components/data-table/toolbar';
-import { useAdminData } from '@/hooks/use-admin-data';
+import { DataTableV2, useUrlTableState } from '@/components/data-table';
+import {
+  TextCell,
+  TimestampCell,
+} from '@/components/data-table/cells';
+import { useAdminTableData } from '@/hooks/use-admin-table-data';
 import { usePermissions } from '@/context/permission-provider';
+import { useBootstrap } from '@/context/bootstrap-provider';
 import { getAttendeeColumns } from './columns';
 import { AttendeeFormDialog } from './attendee-form';
 import { subscribeToExportJob } from '@/lib/export-jobs';
 import { toast } from 'sonner';
-
-const statusFilters: DataTableFilter = {
-  columnId: 'status',
-  title: 'Status',
-  options: [
-    { label: 'Active', value: 'active' },
-    { label: 'Cancelled', value: 'cancelled' },
-    { label: 'Refunded', value: 'refunded' },
-    { label: 'Transferred', value: 'transferred' },
-  ],
-};
-
-const checkInFilters: DataTableFilter = {
-  columnId: 'checkInStatus',
-  title: 'Check-in',
-  options: [
-    { label: 'Not Checked In', value: 'not_checked_in' },
-    { label: 'Checked In', value: 'checked_in' },
-    { label: 'Duplicate', value: 'duplicate' },
-    { label: 'Revoked', value: 'revoked' },
-  ],
-};
+import { AttendeeStatusBadge, CheckInStatusBadge } from '@/features/events/event-status-badge';
 
 export function AttendeesTable() {
   const [editingAttendee, setEditingAttendee] = React.useState<AdminAttendeeListItem | null>(null);
@@ -43,10 +26,20 @@ export function AttendeesTable() {
   const [exporting, setExporting] = React.useState(false);
   const [lastExport, setLastExport] = React.useState<AdminExportJob | null>(null);
   const exportSubscriptionRef = React.useRef<(() => void) | null>(null);
-  const { data, loading, error, refetch } = useAdminData(() => adminApi.listAttendees({}));
+  const { organizationId, brandId } = useBootstrap();
+  const { query, updateQuery } = useUrlTableState(attendeesTableSchema);
   const { can } = usePermissions();
 
-  const attendees = data?.items ?? [];
+  const { data, loading, error, refetch } = useAdminTableData<AdminAttendeeListItem>({
+    schema: attendeesTableSchema,
+    query,
+    fetcher: (tableQuery) =>
+      adminApi.listAttendees({
+        ...tableQuery,
+        organizationId: organizationId || undefined,
+        brandId: brandId || undefined,
+      }),
+  });
 
   const columns = React.useMemo(
     () =>
@@ -96,36 +89,29 @@ export function AttendeesTable() {
     });
   };
 
-  if (loading) return <AttendeesTableSkeleton />;
-
-  if (error && attendees.length === 0) {
-    return (
-      <EmptyState
-        icon={Users}
-        title="Failed to load attendees"
-        description={error.message}
-        action={<Button onClick={refetch}>Try again</Button>}
-      />
-    );
-  }
+  const attendees = data?.items ?? [];
+  const canExport = can('attendees.read') && !exporting && attendees.length > 0;
 
   return (
     <>
       {lastExport && <ExportStatusNotice exportJob={lastExport} />}
-      <DataTable
+      <DataTableV2
+        schema={attendeesTableSchema}
         columns={columns}
-        data={attendees}
+        data={data}
+        query={query}
+        onQueryChange={updateQuery}
+        loading={loading}
+        error={error ? { message: error.message } : undefined}
+        onRetry={() => refetch()}
         getRowId={(row) => row.id}
-        searchPlaceholder="Search attendees..."
-        searchKey="name"
-        filters={[statusFilters, checkInFilters]}
         toolbarActions={
           <Button
             size="sm"
             variant="outline"
             className="h-9"
             onClick={handleExport}
-            disabled={attendees.length === 0 || !can('attendees.read') || exporting}
+            disabled={!canExport}
           >
             <Download className="size-4" />
             {exporting ? 'Exporting...' : 'Export'}
@@ -138,6 +124,9 @@ export function AttendeesTable() {
             description="Attendees are added automatically as orders are completed."
           />
         }
+        renderRowSheet={(row) =>
+          row ? <AttendeeRowSheetContent attendee={row} /> : null
+        }
       />
       <AttendeeFormDialog
         attendee={editingAttendee}
@@ -146,6 +135,71 @@ export function AttendeesTable() {
         onSuccess={refetch}
       />
     </>
+  );
+}
+
+function AttendeeRowSheetContent({ attendee }: { attendee: AdminAttendeeListItem }) {
+  return (
+    <div className="space-y-4">
+      <div className="space-y-2">
+        <h3 className="text-lg font-semibold">{attendee.name}</h3>
+        {attendee.email && (
+          <p className="text-sm text-muted-foreground">{attendee.email}</p>
+        )}
+      </div>
+      <dl className="grid grid-cols-2 gap-3 text-sm">
+        <div>
+          <dt className="text-muted-foreground">Event</dt>
+          <dd className="mt-1">
+            <TextCell value={attendee.eventTitle} />
+          </dd>
+        </div>
+        <div>
+          <dt className="text-muted-foreground">Ticket Type</dt>
+          <dd className="mt-1">
+            <TextCell value={attendee.ticketTypeName} />
+          </dd>
+        </div>
+        <div>
+          <dt className="text-muted-foreground">Status</dt>
+          <dd className="mt-1">
+            <AttendeeStatusBadge status={attendee.status} />
+          </dd>
+        </div>
+        <div>
+          <dt className="text-muted-foreground">Check-in</dt>
+          <dd className="mt-1">
+            <CheckInStatusBadge status={attendee.checkInStatus} />
+          </dd>
+        </div>
+        <div>
+          <dt className="text-muted-foreground">Registered</dt>
+          <dd className="mt-1">
+            <TimestampCell value={attendee.createdAt} showTime />
+          </dd>
+        </div>
+        {attendee.checkedInAt && (
+          <div>
+            <dt className="text-muted-foreground">Checked In</dt>
+            <dd className="mt-1">
+              <TimestampCell value={attendee.checkedInAt} showTime />
+            </dd>
+          </div>
+        )}
+        <div>
+          <dt className="text-muted-foreground">Order ID</dt>
+          <dd className="mt-1">
+            <TextCell value={attendee.orderId} />
+          </dd>
+        </div>
+        <div>
+          <dt className="text-muted-foreground">Ticket ID</dt>
+          <dd className="mt-1">
+            <TextCell value={attendee.ticketId} />
+          </dd>
+        </div>
+      </dl>
+    </div>
   );
 }
 
@@ -164,19 +218,6 @@ function ExportStatusNotice({ exportJob }: { exportJob: AdminExportJob }) {
           </a>
         </Button>
       )}
-    </div>
-  );
-}
-
-function AttendeesTableSkeleton() {
-  return (
-    <div className="space-y-4">
-      <Skeleton className="h-9 w-[250px]" />
-      <div className="rounded-md border">
-        {Array.from({ length: 5 }).map((_, i) => (
-          <Skeleton key={i} className="h-12 w-full" />
-        ))}
-      </div>
     </div>
   );
 }

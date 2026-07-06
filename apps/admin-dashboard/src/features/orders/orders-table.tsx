@@ -1,41 +1,35 @@
 'use client';
 
 import * as React from 'react';
+import Link from 'next/link';
 import { ShoppingCart } from 'lucide-react';
-import { adminApi } from '@/lib/api';
-import { Button } from '@/components/ui/button';
+import { type AdminOrderListItem, adminApi } from '@/lib/api';
+import { ordersTableSchema } from '@/lib/table-schemas';
 import { EmptyState } from '@/components/empty-state';
-import { Skeleton } from '@/components/ui/skeleton';
-import { DataTable } from '@/components/data-table/data-table';
-import { type DataTableFilter } from '@/components/data-table/toolbar';
+import { DataTableV2, useUrlTableState } from '@/components/data-table';
+import { StatusCell, MoneyCell, TimestampCell, TextCell } from '@/components/data-table/cells';
+import { useAdminTableData } from '@/hooks/use-admin-table-data';
 import { usePermissions } from '@/context/permission-provider';
-import { useAdminData } from '@/hooks/use-admin-data';
-import { useDebouncedValue } from '@/hooks/use-debounced-search';
+import { useBootstrap } from '@/context/bootstrap-provider';
+import { routes } from '@/lib/routes';
 import { getOrderColumns } from './columns';
 
-const statusFilters: DataTableFilter = {
-  columnId: 'status',
-  title: 'Status',
-  options: [
-    { label: 'Pending', value: 'pending' },
-    { label: 'Paid', value: 'paid' },
-    { label: 'Failed', value: 'failed' },
-    { label: 'Cancelled', value: 'cancelled' },
-    { label: 'Refunded', value: 'refunded' },
-    { label: 'Partially Refunded', value: 'partially_refunded' },
-  ],
-};
-
 export function OrdersTable() {
-  const [searchInput, setSearchInput] = React.useState('');
-  const debouncedSearch = useDebouncedValue(searchInput, 300);
   const { can } = usePermissions();
-  const { data, loading, error, refetch } = useAdminData(
-    () => adminApi.listOrders(debouncedSearch.trim() ? { search: debouncedSearch.trim() } : undefined),
-    [debouncedSearch],
-  );
+  const { organizationId, brandId } = useBootstrap();
+  const { query, updateQuery } = useUrlTableState(ordersTableSchema);
 
-  const orders = data?.items ?? [];
+  const { data, loading, error, refetch } = useAdminTableData<AdminOrderListItem>({
+    schema: ordersTableSchema,
+    query,
+    fetcher: (tableQuery) =>
+      adminApi.listOrders({
+        ...tableQuery,
+        organizationId: organizationId || undefined,
+        brandId: brandId || undefined,
+      }),
+  });
+
   const canCancelOrders = can('orders.write');
   const canRefundOrders = can('refunds.write');
 
@@ -44,53 +38,99 @@ export function OrdersTable() {
     [canCancelOrders, canRefundOrders, refetch],
   );
 
-  if (loading && orders.length === 0) return <OrdersTableSkeleton />;
-
-  if (error && orders.length === 0) {
-    return (
-      <EmptyState
-        icon={ShoppingCart}
-        title="Failed to load orders"
-        description={error.message}
-        action={<Button onClick={refetch}>Try again</Button>}
-      />
-    );
-  }
-
   return (
-    <DataTable
+    <DataTableV2
+      schema={ordersTableSchema}
       columns={columns}
-      data={orders}
+      data={data}
+      query={query}
+      onQueryChange={updateQuery}
+      loading={loading}
+      error={error ? { message: error.message } : undefined}
+      onRetry={() => refetch()}
       getRowId={(row) => row.id}
-      searchPlaceholder="Search orders by buyer email..."
-      onServerSearch={setSearchInput}
-      serverSearchValue={searchInput}
-      serverSearchLoading={loading}
-      filters={[statusFilters]}
       emptyState={
         <EmptyState
           icon={ShoppingCart}
-          title={searchInput ? 'No matching orders' : 'No orders yet'}
-          description={
-            searchInput
-              ? 'Try a different search term.'
-              : 'Orders will appear here once attendees start buying tickets.'
-          }
+          title="No orders yet"
+          description="Orders will appear here once attendees start buying tickets."
         />
+      }
+      renderRowSheet={(row) =>
+        row ? <OrderRowSheetContent order={row} /> : null
       }
     />
   );
 }
 
-function OrdersTableSkeleton() {
+function OrderRowSheetContent({ order }: { order: AdminOrderListItem }) {
   return (
     <div className="space-y-4">
-      <Skeleton className="h-9 w-[250px]" />
-      <div className="rounded-md border">
-        {Array.from({ length: 5 }).map((_, i) => (
-          <Skeleton key={i} className="h-12 w-full" />
-        ))}
+      <div className="space-y-2">
+        <h3 className="text-lg font-semibold">Order {order.id}</h3>
+        <Link
+          href={routes.orderDetail(order.id)}
+          prefetch={false}
+          className="text-sm text-primary hover:underline"
+        >
+          View full order details →
+        </Link>
       </div>
+      <dl className="grid grid-cols-2 gap-3 text-sm">
+        <div>
+          <dt className="text-muted-foreground">Status</dt>
+          <dd className="mt-1">
+            <StatusCell value={order.status} domain="order" />
+          </dd>
+        </div>
+        <div>
+          <dt className="text-muted-foreground">Total</dt>
+          <dd className="mt-1">
+            <MoneyCell cents={order.totalCents} currency={order.currency} />
+          </dd>
+        </div>
+        <div>
+          <dt className="text-muted-foreground">Buyer</dt>
+          <dd className="mt-1">
+            <TextCell value={order.buyerEmail} />
+          </dd>
+        </div>
+        <div>
+          <dt className="text-muted-foreground">Event</dt>
+          <dd className="mt-1">
+            <TextCell value={order.eventTitle} />
+          </dd>
+        </div>
+        <div>
+          <dt className="text-muted-foreground">Sales Channel</dt>
+          <dd className="mt-1">
+            <TextCell value={order.salesChannel} />
+          </dd>
+        </div>
+        <div>
+          <dt className="text-muted-foreground">Payment Provider</dt>
+          <dd className="mt-1">
+            <TextCell value={order.paymentProvider} />
+          </dd>
+        </div>
+        <div>
+          <dt className="text-muted-foreground">Created</dt>
+          <dd className="mt-1">
+            <TimestampCell value={order.createdAt} showTime />
+          </dd>
+        </div>
+        <div>
+          <dt className="text-muted-foreground">Refunded</dt>
+          <dd className="mt-1">
+            {order.refundedCents > 0 ? (
+              <MoneyCell cents={order.refundedCents} currency={order.currency} />
+            ) : (
+              <TextCell value={null} />
+            )}
+          </dd>
+        </div>
+      </dl>
     </div>
   );
 }
+

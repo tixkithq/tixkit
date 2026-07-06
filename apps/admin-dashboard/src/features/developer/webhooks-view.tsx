@@ -42,7 +42,8 @@ import {
 } from '@/components/ui/dialog';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { WebhookFormDrawer } from './webhook-form';
-import { useAdminData } from '@/hooks/use-admin-data';
+import { useAdminQuery } from '@/hooks/use-admin-table-data';
+import { useBootstrap } from '@/context/bootstrap-provider';
 import { formatDateTime } from '@/lib/format';
 import { toast } from 'sonner';
 
@@ -66,7 +67,11 @@ export function WebhooksView() {
   const [replayLoading, setReplayLoading] = React.useState(false);
   const [replayingDeliveryId, setReplayingDeliveryId] = React.useState<string | null>(null);
   const replayRequestIdRef = React.useRef(0);
-  const { data, loading, error, refetch } = useAdminData(() => adminApi.listWebhookEndpoints());
+  const { organizationId } = useBootstrap();
+  const { data, loading, error, refetch } = useAdminQuery(
+    ['listWebhookEndpoints', organizationId],
+    () => adminApi.listWebhookEndpoints(organizationId ? { organizationId } : undefined),
+  );
 
   const endpoints = data ?? [];
 

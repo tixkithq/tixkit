@@ -1,15 +1,14 @@
 'use client';
 
 import * as React from 'react';
-import { QrCode, Search, CheckCircle2, XCircle, AlertCircle } from 'lucide-react';
-import { type AdminCheckInList, type CheckInScanResult, adminApi } from '@/lib/api';
-import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
+import { QrCode, Search } from 'lucide-react';
+import { adminApi } from '@/lib/api';
 import { Label } from '@/components/ui/label';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { EmptyState } from '@/components/empty-state';
 import { ApiErrorState } from '@/components/api-error-state';
 import { Skeleton } from '@/components/ui/skeleton';
+import { Input } from '@/components/ui/input';
 import {
   Select,
   SelectContent,
@@ -17,21 +16,18 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
-import { useAdminData } from '@/hooks/use-admin-data';
+import { useAdminQuery } from '@/hooks/use-admin-table-data';
 import { cn } from '@/lib/utils';
+import { useTicketScanner } from '../check-in/use-ticket-scanner';
+import { ScannerPanel } from '../check-in/scanner-panel';
+import { CreateCheckInListDialog } from '../check-in/create-check-in-list-dialog';
 
-const EMPTY_CHECK_IN_LISTS: AdminCheckInList[] = [];
+const EMPTY_CHECK_IN_LISTS: never[] = [];
 
 export function EventCheckInView({ eventId }: { eventId: string }) {
   const [selectedCheckInListId, setSelectedCheckInListId] = React.useState<string>('');
-  const [qrPayload, setQrPayload] = React.useState('');
-  const [scanning, setScanning] = React.useState(false);
-  const [lastResult, setLastResult] = React.useState<CheckInScanResult | null>(null);
   const [manualSearch, setManualSearch] = React.useState('');
-  const [acceptedScanCount, setAcceptedScanCount] = React.useState(0);
   const checkInListLabelId = React.useId();
-  const ticketInputId = React.useId();
-  const scanStatusId = React.useId();
   const manualSearchId = React.useId();
 
   const {
@@ -39,31 +35,40 @@ export function EventCheckInView({ eventId }: { eventId: string }) {
     loading: eventLoading,
     error: eventError,
     refetch: refetchEvent,
-  } = useAdminData(() => adminApi.getEvent(eventId), [eventId]);
+  } = useAdminQuery(['getEvent', eventId], () => adminApi.getEvent(eventId));
   const {
     data: checkInListsData,
     loading: checkInListsLoading,
     error: checkInListsError,
     refetch: refetchLists,
-  } = useAdminData(() => adminApi.listCheckInLists(eventId), [eventId]);
+  } = useAdminQuery(['listCheckInLists', eventId], () => adminApi.listCheckInLists(eventId));
   const attendeeQuery = manualSearch.trim();
-  const { data: attendeesData, error: attendeesError } = useAdminData(
+  const { data: attendeesData, error: attendeesError } = useAdminQuery(
+    ['listAttendees', eventId, selectedCheckInListId, attendeeQuery],
     () =>
       selectedCheckInListId
         ? adminApi.listAttendees({
             eventId,
             checkInListId: selectedCheckInListId,
             limit: attendeeQuery ? 25 : 10,
-            query: attendeeQuery,
+            search: attendeeQuery,
           })
-        : Promise.resolve({ ok: true as const, data: { items: [], total: 0 } }),
-    [eventId, selectedCheckInListId, attendeeQuery],
+        : Promise.resolve({
+            ok: true as const,
+            data: { items: [], total: 0, nextCursor: undefined, filterTotal: 0 },
+          }),
   );
 
   const event = eventData;
   const attendees = attendeesData?.items ?? [];
   const checkInLists = checkInListsData ?? EMPTY_CHECK_IN_LISTS;
-  const trimmedQrPayload = qrPayload.trim();
+
+  const scanner = useTicketScanner({
+    eventId,
+    checkInListId: selectedCheckInListId,
+    enabled: Boolean(selectedCheckInListId),
+  });
+
   const scanBlockedReason = checkInListsLoading
     ? 'Loading check-in lists.'
     : checkInLists.length === 0
@@ -71,13 +76,11 @@ export function EventCheckInView({ eventId }: { eventId: string }) {
       : !selectedCheckInListId
         ? 'Choose a check-in list before scanning.'
         : undefined;
-  const canScan = Boolean(trimmedQrPayload) && !scanBlockedReason && !scanning;
 
   React.useEffect(() => {
-    setAcceptedScanCount(0);
-    setQrPayload('');
-    setLastResult(null);
+    scanner.reset();
     setManualSearch('');
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [eventId]);
 
   // Auto-select the only active check-in list when one is available.
@@ -92,40 +95,6 @@ export function EventCheckInView({ eventId }: { eventId: string }) {
       setSelectedCheckInListId(checkInLists[0].id);
     }
   }, [checkInLists, selectedCheckInListId]);
-
-  const handleScan = async () => {
-    if (!selectedCheckInListId || !trimmedQrPayload || scanBlockedReason || scanning) return;
-    setScanning(true);
-    try {
-      const result = await adminApi.scanTicket({
-        eventId,
-        checkInListId: selectedCheckInListId,
-        qrPayload: trimmedQrPayload,
-        scannedAt: new Date().toISOString(),
-      });
-      if (result.ok) {
-        setLastResult(result.data);
-        if (result.data.status === 'accepted') {
-          setAcceptedScanCount((count) => count + 1);
-        }
-        setQrPayload('');
-      } else {
-        setLastResult({
-          status: 'invalid',
-          message: result.error.message,
-          scannedAt: new Date().toISOString(),
-        });
-      }
-    } catch (error) {
-      setLastResult({
-        status: 'invalid',
-        message: error instanceof Error ? error.message : 'Unable to scan this ticket.',
-        scannedAt: new Date().toISOString(),
-      });
-    } finally {
-      setScanning(false);
-    }
-  };
 
   if (eventLoading) {
     return <Skeleton className="h-96 w-full" />;
@@ -145,7 +114,7 @@ export function EventCheckInView({ eventId }: { eventId: string }) {
     );
   }
 
-  const displayedCheckIns = event.checkIns + acceptedScanCount;
+  const displayedCheckIns = event.checkIns + scanner.acceptedScanCount;
 
   return (
     <div className="space-y-6">
@@ -184,66 +153,47 @@ export function EventCheckInView({ eventId }: { eventId: string }) {
             className="border-0 bg-transparent p-0"
           />
         ) : checkInLists.length === 0 ? (
-          <p className="text-sm text-muted-foreground">
-            No active check-in lists for this event. Create a check-in list before scanning.
-          </p>
+          <div className="flex flex-col gap-3">
+            <p className="text-sm text-muted-foreground">
+              No active check-in lists for this event. Create a check-in list before scanning.
+            </p>
+            <CreateCheckInListDialog eventId={eventId} onCreated={refetchLists} />
+          </div>
         ) : (
-          <Select value={selectedCheckInListId} onValueChange={setSelectedCheckInListId}>
-            <SelectTrigger className="w-full max-w-xs" aria-labelledby={checkInListLabelId}>
-              <SelectValue placeholder="Choose a check-in list" />
-            </SelectTrigger>
-            <SelectContent>
-              {checkInLists.map((list) => (
-                <SelectItem key={list.id} value={list.id}>
-                  {list.name}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
+          <div className="flex items-center gap-2">
+            <Select value={selectedCheckInListId} onValueChange={setSelectedCheckInListId}>
+              <SelectTrigger className="w-full max-w-xs" aria-labelledby={checkInListLabelId}>
+                <SelectValue placeholder="Choose a check-in list" />
+              </SelectTrigger>
+              <SelectContent>
+                {checkInLists.map((list) => (
+                  <SelectItem key={list.id} value={list.id}>
+                    {list.name}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            <CreateCheckInListDialog
+              eventId={eventId}
+              onCreated={refetchLists}
+              triggerLabel=""
+              triggerVariant="outline"
+              triggerSize="icon"
+            />
+          </div>
         )}
       </div>
 
       <div className="grid gap-6 lg:grid-cols-2">
-        <Card>
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2">
-              <QrCode className="size-5" />
-              Scan Ticket
-            </CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            {scanBlockedReason && (
-              <p id={scanStatusId} className="text-sm text-muted-foreground">
-                {scanBlockedReason}
-              </p>
-            )}
-            <form
-              className="flex flex-col gap-2 sm:flex-row"
-              onSubmit={(submitEvent) => {
-                submitEvent.preventDefault();
-                void handleScan();
-              }}
-            >
-              <Label htmlFor={ticketInputId} className="sr-only">
-                Ticket QR or ID
-              </Label>
-              <Input
-                id={ticketInputId}
-                autoComplete="off"
-                inputMode="text"
-                aria-describedby={scanBlockedReason ? scanStatusId : undefined}
-                disabled={Boolean(scanBlockedReason) || scanning}
-                placeholder="Enter QR code or ticket ID"
-                value={qrPayload}
-                onChange={(e) => setQrPayload(e.target.value)}
-              />
-              <Button type="submit" disabled={!canScan} aria-busy={scanning}>
-                {scanning ? 'Scanning...' : 'Scan'}
-              </Button>
-            </form>
-            {lastResult && <ScanResult result={lastResult} />}
-          </CardContent>
-        </Card>
+        <ScannerPanel
+          key={`${eventId}:${selectedCheckInListId}`}
+          eventId={eventId}
+          checkInListId={selectedCheckInListId}
+          scanBlockedReason={scanBlockedReason}
+          scanning={scanner.scanning}
+          lastResult={scanner.lastResult}
+          onScan={scanner.scan}
+        />
 
         <Card>
           <CardHeader>
@@ -302,61 +252,5 @@ export function EventCheckInView({ eventId }: { eventId: string }) {
         </Card>
       </div>
     </div>
-  );
-}
-
-function ScanResult({ result }: { result: CheckInScanResult }) {
-  const config = {
-    accepted: {
-      icon: CheckCircle2,
-      className: 'border-emerald-500/30 bg-emerald-500/10 text-emerald-700 dark:text-emerald-400',
-    },
-    duplicate: {
-      icon: AlertCircle,
-      className: 'border-amber-500/30 bg-amber-500/10 text-amber-700 dark:text-amber-400',
-    },
-    invalid: {
-      icon: XCircle,
-      className: 'border-red-500/30 bg-red-500/10 text-red-700 dark:text-red-400',
-    },
-    revoked: {
-      icon: XCircle,
-      className: 'border-red-500/30 bg-red-500/10 text-red-700 dark:text-red-400',
-    },
-    wrong_event: {
-      icon: AlertCircle,
-      className: 'border-amber-500/30 bg-amber-500/10 text-amber-700 dark:text-amber-400',
-    },
-    wrong_list: {
-      icon: AlertCircle,
-      className: 'border-amber-500/30 bg-amber-500/10 text-amber-700 dark:text-amber-400',
-    },
-  };
-
-  const { icon: Icon, className } = config[result.status];
-
-  return (
-    <output
-      aria-live="polite"
-      aria-atomic="true"
-      className={cn('flex items-start gap-3 rounded-lg border p-4', className)}
-    >
-      <Icon aria-hidden="true" className="mt-0.5 size-5 shrink-0" />
-      <span className="space-y-1">
-        <span className="block font-medium capitalize">{result.status.replace(/_/g, ' ')}</span>
-        <span className="block text-sm">
-          {result.status === 'accepted'
-            ? result.attendee
-              ? `${result.attendee.name} has been checked in.`
-              : (result.message ?? 'Check-in successful')
-            : result.message}
-        </span>
-        {result.attendee && result.status !== 'accepted' && (
-          <span className="block text-xs text-muted-foreground">
-            Attendee: {result.attendee.name} ({result.attendee.ticketTypeName})
-          </span>
-        )}
-      </span>
-    </output>
   );
 }

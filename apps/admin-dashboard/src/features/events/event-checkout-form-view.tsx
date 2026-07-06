@@ -43,7 +43,7 @@ import {
 } from '@/components/ui/sheet';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Textarea } from '@/components/ui/textarea';
-import { useAdminData } from '@/hooks/use-admin-data';
+import { useAdminQuery } from '@/hooks/use-admin-table-data';
 import { toast } from 'sonner';
 
 const allTicketsValue = '__all__';
@@ -253,8 +253,8 @@ export function EventCheckoutFormView({ eventId }: { eventId: string }) {
     loading,
     error,
     refetch,
-  } = useAdminData(() => adminApi.listCheckoutQuestions(eventId), [eventId]);
-  const { data: ticketTypes } = useAdminData(() => adminApi.listTicketTypes(eventId), [eventId]);
+  } = useAdminQuery(['listCheckoutQuestions', eventId], () => adminApi.listCheckoutQuestions(eventId));
+  const { data: ticketTypes } = useAdminQuery(['listTicketTypes', eventId], () => adminApi.listTicketTypes(eventId));
   const [drawerOpen, setDrawerOpen] = React.useState(false);
   const [editingQuestion, setEditingQuestion] = React.useState<AdminCheckoutQuestion>();
   const [deleteTarget, setDeleteTarget] = React.useState<AdminCheckoutQuestion>();

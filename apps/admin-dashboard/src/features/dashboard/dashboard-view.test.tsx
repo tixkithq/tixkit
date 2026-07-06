@@ -12,6 +12,20 @@ vi.mock('@/lib/api', () => ({
   },
 }));
 
+vi.mock('@/context/bootstrap-provider', () => ({
+  useBootstrap: () => ({
+    organizations: [],
+    brands: [],
+    organizationId: undefined,
+    brandId: undefined,
+    availableBrands: [],
+    setOrganizationId: vi.fn(),
+    setBrandId: vi.fn(),
+    loading: false,
+    error: null,
+  }),
+}));
+
 vi.mock('@/lib/auth', () => ({
   hasClerkKey: () => false,
   LOCAL_DEV_USER: { name: 'Dev', email: 'dev@localhost', imageUrl: null },

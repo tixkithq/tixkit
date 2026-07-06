@@ -4,15 +4,24 @@ import * as React from 'react';
 import { AlertTriangle, RefreshCw } from 'lucide-react';
 import { adminApi, type AdminPaymentCompensation } from '@/lib/api';
 import { formatCurrency } from '@/lib/format';
-import { useAdminData } from '@/hooks/use-admin-data';
+import { useAdminQuery } from '@/hooks/use-admin-table-data';
+import { useBootstrap } from '@/context/bootstrap-provider';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
 
 export function PaymentCompensationsPanel() {
-  const { data, loading, error, refetch } = useAdminData(() =>
-    adminApi.listPaymentCompensations({ status: 'manual_review', limit: 5 }),
+  const { organizationId, brandId } = useBootstrap();
+  const { data, loading, error, refetch } = useAdminQuery(
+    ['listPaymentCompensations', organizationId, brandId],
+    () =>
+      adminApi.listPaymentCompensations({
+        status: 'manual_review',
+        limit: 5,
+        ...(organizationId ? { organizationId } : {}),
+        ...(brandId ? { brandId } : {}),
+      }),
   );
   const compensations = data?.items ?? [];
 

@@ -163,7 +163,6 @@ describe('buildEventUpdatePayload', () => {
           seoDescription: true,
           seoImageUrl: true,
           visibility: true,
-          status: true,
           slug: true,
         },
       ),
@@ -188,7 +187,6 @@ describe('buildEventUpdatePayload', () => {
         imageUrl: 'https://example.com/seo.jpg',
       },
       visibility: 'private',
-      status: 'published',
     });
   });
 });

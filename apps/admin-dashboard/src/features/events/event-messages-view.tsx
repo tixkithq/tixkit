@@ -8,7 +8,7 @@ import { Card, CardContent } from '@/components/ui/card';
 import { EmptyState } from '@/components/empty-state';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Badge } from '@/components/ui/badge';
-import { useAdminData } from '@/hooks/use-admin-data';
+import { useAdminQuery } from '@/hooks/use-admin-table-data';
 import { formatDate } from '@/lib/format';
 import { MessageFormDialog } from '@/features/messages/message-form';
 import { MessageCampaignDetailPanel } from '@/features/messages/messages-view';
@@ -16,9 +16,9 @@ import { MessageCampaignDetailPanel } from '@/features/messages/messages-view';
 export function EventMessagesView({ eventId }: { eventId: string }) {
   const [dialogOpen, setDialogOpen] = React.useState(false);
   const [selectedCampaignId, setSelectedCampaignId] = React.useState<string>('');
-  const { data, loading, error, refetch } = useAdminData(
+  const { data, loading, error, refetch } = useAdminQuery(
+    ['listMessages', eventId],
     () => adminApi.listMessages(eventId),
-    [eventId],
   );
 
   const campaigns = data ?? [];

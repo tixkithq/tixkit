@@ -1,4 +1,4 @@
-import { render, screen, fireEvent } from '@testing-library/react';
+import { render, screen } from '@testing-library/react';
 import '@testing-library/jest-dom/vitest';
 import * as React from 'react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
@@ -9,52 +9,65 @@ const permissionsMock = vi.hoisted(() => ({
   can: vi.fn(),
 }));
 
-const adminDataState = vi.hoisted(() => ({
-  data: { items: [] as unknown[] },
+const adminTableDataState = vi.hoisted(() => ({
+  data: { items: [] as unknown[] } as Record<string, unknown> | undefined,
+  items: [] as unknown[],
   loading: false,
-  error: null as unknown,
+  error: undefined as { code: string; message: string; status?: number } | undefined,
   refetch: vi.fn(),
+  isFetching: false,
+  isPlaceholderData: false,
 }));
-
-const capturedDeps = vi.hoisted(() => ({ current: [] as React.DependencyList }));
 
 vi.mock('@/context/permission-provider', () => ({
   usePermissions: () => permissionsMock,
 }));
 
-vi.mock('@/hooks/use-admin-data', () => ({
-  useAdminData: (_fetcher: () => Promise<unknown>, deps: React.DependencyList) => {
-    capturedDeps.current = deps;
-    return adminDataState;
-  },
+vi.mock('@/context/bootstrap-provider', () => ({
+  useBootstrap: () => ({
+    organizations: [],
+    brands: [],
+    organizationId: undefined,
+    brandId: undefined,
+    availableBrands: [],
+    setOrganizationId: vi.fn(),
+    setBrandId: vi.fn(),
+    loading: false,
+    error: null,
+  }),
 }));
 
-vi.mock('@/hooks/use-debounced-search', () => ({
-  useDebouncedValue: <T,>(value: T): T => value,
+vi.mock('@/hooks/use-admin-table-data', () => ({
+  useAdminTableData: () => adminTableDataState,
 }));
 
 vi.mock('@/components/data-table/data-table', () => ({
-  DataTable: ({
-    onServerSearch,
-    serverSearchValue,
-    serverSearchLoading,
+  DataTableV2: ({
     emptyState,
+    loading,
+    error,
   }: {
-    onServerSearch?: (value: string) => void;
-    serverSearchValue?: string;
-    serverSearchLoading?: boolean;
     emptyState?: React.ReactNode;
+    loading?: boolean;
+    error?: { message: string };
   }) => (
     <section>
-      <input
-        data-testid="server-search-input"
-        value={serverSearchValue ?? ''}
-        onChange={(e) => onServerSearch?.(e.target.value)}
-        aria-busy={serverSearchLoading}
-      />
+      {loading && <div data-testid="loading-skeleton">Loading...</div>}
+      {error && <div data-testid="error-state">{error.message}</div>}
       <div data-testid="empty-state">{emptyState}</div>
     </section>
   ),
+}));
+
+vi.mock('@/components/data-table/stores/url-adapter', () => ({
+  useUrlTableState: () => ({
+    query: {},
+    rejectedParams: [],
+    updateQuery: vi.fn(),
+    setQuery: vi.fn(),
+    resetFilters: vi.fn(),
+    hasRejectedParams: false,
+  }),
 }));
 
 describe('Orders table columns', () => {
@@ -102,38 +115,33 @@ describe('Orders table columns', () => {
   });
 });
 
-describe('OrdersTable server-side search', () => {
+describe('OrdersTable with DataTableV2', () => {
   beforeEach(() => {
-    adminDataState.data = { items: [] };
-    adminDataState.loading = false;
-    adminDataState.error = null;
-    adminDataState.refetch.mockClear();
-    permissionsMock.can.mockImplementation((p?: string) => p === 'orders.write' || p === 'refunds.write');
-    capturedDeps.current = [];
+    adminTableDataState.data = { items: [] };
+    adminTableDataState.items = [];
+    adminTableDataState.loading = false;
+    adminTableDataState.error = undefined;
+    adminTableDataState.refetch.mockClear();
+    permissionsMock.can.mockImplementation(
+      (p?: string) => p === 'orders.write' || p === 'refunds.write',
+    );
   });
 
-  it('passes onServerSearch to DataTable for server-backed search', () => {
+  it('renders empty state when no orders', () => {
     render(<OrdersTable />);
-    expect(screen.getByTestId('server-search-input')).toBeInTheDocument();
+    expect(screen.getByTestId('empty-state')).toBeInTheDocument();
+    expect(screen.getByText('No orders yet')).toBeInTheDocument();
   });
 
-  it('passes serverSearchLoading to DataTable during fetch', () => {
-    adminDataState.data = { items: [{ id: 'ord_1' }] };
-    adminDataState.loading = true;
+  it('renders loading state during fetch', () => {
+    adminTableDataState.loading = true;
     render(<OrdersTable />);
-    expect(screen.getByTestId('server-search-input')).toHaveAttribute('aria-busy', 'true');
+    expect(screen.getByTestId('loading-skeleton')).toBeInTheDocument();
   });
 
-  it('updates debounced search deps when user types', () => {
+  it('renders error state when fetch fails', () => {
+    adminTableDataState.error = { code: 'fetch_error', message: 'Network error' };
     render(<OrdersTable />);
-    fireEvent.change(screen.getByTestId('server-search-input'), { target: { value: 'test@example.com' } });
-    expect(capturedDeps.current).toContain('test@example.com');
-  });
-
-  it('shows no-matching-orders empty state when search has input', () => {
-    render(<OrdersTable />);
-    fireEvent.change(screen.getByTestId('server-search-input'), { target: { value: 'xyz' } });
-    expect(screen.getByText('No matching orders')).toBeInTheDocument();
-    expect(screen.getByText('Try a different search term.')).toBeInTheDocument();
+    expect(screen.getByTestId('error-state')).toBeInTheDocument();
   });
 });

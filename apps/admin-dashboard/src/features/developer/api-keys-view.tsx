@@ -22,7 +22,8 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import { MoreHorizontal, Ban } from 'lucide-react';
-import { useAdminData } from '@/hooks/use-admin-data';
+import { useAdminQuery } from '@/hooks/use-admin-table-data';
+import { useBootstrap } from '@/context/bootstrap-provider';
 import { formatDateTime } from '@/lib/format';
 import { ApiKeyFormDialog, RevokeApiKeyDialog } from './api-key-form';
 
@@ -30,7 +31,11 @@ export function ApiKeysView() {
   const [createOpen, setCreateOpen] = React.useState(false);
   const [revokingKey, setRevokingKey] = React.useState<AdminApiKey | null>(null);
   const [revokeOpen, setRevokeOpen] = React.useState(false);
-  const { data, loading, error, refetch } = useAdminData(() => adminApi.listApiKeys());
+  const { organizationId } = useBootstrap();
+  const { data, loading, error, refetch } = useAdminQuery(
+    ['listApiKeys', organizationId],
+    () => adminApi.listApiKeys(organizationId ? { organizationId } : undefined),
+  );
 
   const apiKeys = data ?? [];
 

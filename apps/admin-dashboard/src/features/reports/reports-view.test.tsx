@@ -180,6 +180,20 @@ vi.mock('@/lib/export-jobs', () => ({
   subscribeToExportJob: vi.fn(() => vi.fn()),
 }));
 
+vi.mock('@/context/bootstrap-provider', () => ({
+  useBootstrap: () => ({
+    organizations: [],
+    brands: [],
+    organizationId: undefined,
+    brandId: undefined,
+    availableBrands: [],
+    setOrganizationId: vi.fn(),
+    setBrandId: vi.fn(),
+    loading: false,
+    error: null,
+  }),
+}));
+
 type ReportsAdminApiMock = {
   listEvents: ReturnType<typeof vi.fn>;
   listOrganizations: ReturnType<typeof vi.fn>;

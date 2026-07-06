@@ -33,7 +33,7 @@ import { Switch } from '@/components/ui/switch';
 import { Skeleton } from '@/components/ui/skeleton';
 import { toast } from 'sonner';
 import { EventStatusBadge, TicketTypeStatusBadge, OrderStatusBadge } from './event-status-badge';
-import { useAdminData } from '@/hooks/use-admin-data';
+import { useAdminQuery } from '@/hooks/use-admin-table-data';
 import { formatCurrency, formatDate, formatNumber } from '@/lib/format';
 import { publicEventUrl } from '@/lib/event-links';
 import { useBootstrap } from '@/context/bootstrap-provider';
@@ -48,15 +48,15 @@ export function EventDetailView({ eventId }: { eventId: string }) {
     loading,
     error,
     refetch,
-  } = useAdminData(() => adminApi.getEvent(eventId), [eventId]);
-  const { data: ticketTypes } = useAdminData(() => adminApi.listTicketTypes(eventId), [eventId]);
-  const { data: ordersData } = useAdminData(
-    () => adminApi.listOrders({ eventId, limit: 5 }),
-    [eventId],
+  } = useAdminQuery(['getEvent', eventId], () => adminApi.getEvent(eventId));
+  const { data: ticketTypes } = useAdminQuery(['listTicketTypes', eventId], () => adminApi.listTicketTypes(eventId));
+  const { data: ordersData } = useAdminQuery(
+    ['listOrders', eventId],
+    () => adminApi.listOrders({ filters: { eventId: { type: 'select', values: [eventId] } }, limit: 5 }),
   );
-  const { data: marketingIntegrations, refetch: refetchMarketing } = useAdminData(
+  const { data: marketingIntegrations, refetch: refetchMarketing } = useAdminQuery(
+    ['listMarketingIntegrations', eventId],
     () => adminApi.listMarketingIntegrations(eventId),
-    [eventId],
   );
   const { brands } = useBootstrap();
   const { can } = usePermissions();

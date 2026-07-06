@@ -3,6 +3,7 @@
 import { type Table } from '@tanstack/react-table';
 import { SlidersHorizontal } from 'lucide-react';
 import { Button } from '@/components/ui/button';
+import { Checkbox } from '@/components/ui/checkbox';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -10,13 +11,12 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
-import { Checkbox } from '@/components/ui/checkbox';
 
-type DataTableViewOptionsProps<TData> = {
+type DataTableV2ViewOptionsProps<TData> = {
   table: Table<TData>;
 };
 
-export function DataTableViewOptions<TData>({ table }: DataTableViewOptionsProps<TData>) {
+export function DataTableV2ViewOptions<TData>({ table }: DataTableV2ViewOptionsProps<TData>) {
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
@@ -31,20 +31,18 @@ export function DataTableViewOptions<TData>({ table }: DataTableViewOptionsProps
         {table
           .getAllColumns()
           .filter((column) => typeof column.accessorFn !== 'undefined' && column.getCanHide())
-          .map((column) => {
-            return (
-              <div key={column.id} className="flex items-center gap-2 px-2 py-1.5">
-                <Checkbox
-                  checked={column.getIsVisible()}
-                  onCheckedChange={(value) => column.toggleVisibility(!!value)}
-                  id={`col-${column.id}`}
-                />
-                <label htmlFor={`col-${column.id}`} className="flex-1 text-sm cursor-pointer">
-                  {column.columnDef.meta?.title ?? column.id}
-                </label>
-              </div>
-            );
-          })}
+          .map((column) => (
+            <div key={column.id} className="flex items-center gap-2 px-2 py-1.5">
+              <Checkbox
+                checked={column.getIsVisible()}
+                onCheckedChange={(value) => column.toggleVisibility(!!value)}
+                id={`v2-col-${column.id}`}
+              />
+              <label htmlFor={`v2-col-${column.id}`} className="flex-1 cursor-pointer text-sm">
+                {column.columnDef.meta?.title ?? column.id}
+              </label>
+            </div>
+          ))}
       </DropdownMenuContent>
     </DropdownMenu>
   );

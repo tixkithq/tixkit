@@ -2,7 +2,7 @@
 
 import * as React from 'react';
 import Link from 'next/link';
-import { ArrowLeft, Ban, RotateCcw, Mail, User, ClipboardList, Truck } from 'lucide-react';
+import { ArrowLeft, Ban, RotateCcw, Mail, User, ClipboardList, Truck, Calendar } from 'lucide-react';
 import { adminApi } from '@/lib/api';
 import { routes } from '@/lib/routes';
 import { Button } from '@/components/ui/button';
@@ -12,7 +12,7 @@ import { Badge } from '@/components/ui/badge';
 import { ConfirmDialog } from '@/components/confirm-dialog';
 import { RefundDialog } from './refund-dialog';
 import { usePermissions } from '@/context/permission-provider';
-import { useAdminData } from '@/hooks/use-admin-data';
+import { useAdminQuery } from '@/hooks/use-admin-table-data';
 import { formatCurrency, formatDate, formatDateTime } from '@/lib/format';
 import { OrderStatusBadge } from '@/features/events/event-status-badge';
 import { toast } from 'sonner';
@@ -44,7 +44,7 @@ export function OrderDetailView({ orderId }: { orderId: string }) {
     loading,
     error,
     refetch,
-  } = useAdminData(() => adminApi.getOrder(orderId), [orderId]);
+  } = useAdminQuery(['getOrder', orderId], () => adminApi.getOrder(orderId));
   const attendees = order?.attendees ?? [];
 
   const handleCancel = async () => {
@@ -115,7 +115,20 @@ export function OrderDetailView({ orderId }: { orderId: string }) {
             </div>
           </div>
           <p className="break-words text-sm text-muted-foreground">
-            {order.eventTitle} · {formatDate(order.createdAt)}
+            {order.eventTitle ? (
+              <Link
+                href={routes.eventDetail(order.eventId)}
+                prefetch={false}
+                className="inline-flex items-center gap-1 font-medium text-foreground hover:underline"
+              >
+                <Calendar className="size-3.5 shrink-0" />
+                {order.eventTitle}
+              </Link>
+            ) : (
+              <span className="text-muted-foreground">No event linked</span>
+            )}
+            {' · '}
+            {formatDate(order.createdAt)}
           </p>
         </div>
         <div className="flex w-full flex-wrap gap-2 sm:w-auto sm:shrink-0 sm:justify-end">

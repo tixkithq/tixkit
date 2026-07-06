@@ -12,24 +12,38 @@ import { ApiErrorState } from '@/components/api-error-state';
 import { Skeleton } from '@/components/ui/skeleton';
 import { EventStatusBadge } from '@/features/events/event-status-badge';
 import { OrderStatusBadge } from '@/features/events/event-status-badge';
-import { useAdminData } from '@/hooks/use-admin-data';
+import { useBootstrap } from '@/context/bootstrap-provider';
+import { useAdminQuery } from '@/hooks/use-admin-table-data';
 import { useAllEvents } from '@/hooks/use-all-events';
 import { formatCurrency, formatNumber, formatDate } from '@/lib/format';
 
 export function DashboardView() {
   const [drawerOpen, setDrawerOpen] = React.useState(false);
+  const { organizationId, brandId } = useBootstrap();
   const {
     events,
     loading: eventsLoading,
     error: eventsError,
     refetch: refetchEvents,
-  } = useAllEvents();
+  } = useAllEvents({ organizationId, brandId });
   const {
     data: ordersData,
     loading: ordersLoading,
     error: ordersError,
     refetch: refetchOrders,
-  } = useAdminData(() => adminApi.listOrders({ limit: 5 }));
+  } = useAdminQuery(
+    ['listOrders', organizationId, brandId],
+    () => {
+      const params: {
+        limit: number;
+        organizationId?: string;
+        brandId?: string;
+      } = { limit: 5 };
+      if (organizationId) params.organizationId = organizationId;
+      if (brandId) params.brandId = brandId;
+      return adminApi.listOrders(params);
+    },
+  );
 
   const recentOrders = ordersData?.items ?? [];
 

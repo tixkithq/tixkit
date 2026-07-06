@@ -14,6 +14,9 @@
 import { getAdminApiBaseUrl, request, withFixture } from './api-http';
 export { getAdminApiAuthHeaders, getAdminApiBaseUrl } from './api-http';
 export { hasClerkKey } from '@/lib/auth';
+import type { AdminTableQuery, AdminTablePage } from '@tixkit/admin-table-core';
+import { queryToParams } from '@tixkit/admin-table-core';
+import { ordersTableSchema, attendeesTableSchema, auditLogTableSchema, privacyRequestTableSchema, eventsTableSchema } from './table-schemas';
 
 // ---------------------------------------------------------------------------
 // Result / pagination envelopes
@@ -402,6 +405,8 @@ export type OrderStatus =
 
 export type AdminOrderListItem = {
   id: string;
+  organizationId?: string;
+  brandId?: string;
   eventId: string;
   eventTitle: string;
   buyerName?: string;
@@ -1019,6 +1024,7 @@ export type ApiKeyStatus = 'active' | 'revoked' | 'expired';
 
 export type AdminApiKey = {
   id: string;
+  organizationId?: string;
   name: string;
   keyPrefix: string;
   lastUsedAt?: string;
@@ -1048,6 +1054,7 @@ export type WebhookEventType =
 
 export type AdminWebhookEndpoint = {
   id: string;
+  organizationId?: string;
   url: string;
   description?: string;
   events: WebhookEventType[];
@@ -1602,7 +1609,12 @@ export type AdminApi = {
     metadata?: Record<string, unknown>;
   }): Promise<ApiResult<CompletedUploadArtifact>>;
 
-  listEvents(input?: PageCursor & { search?: string }): Promise<ApiResult<PageResult<AdminEventListItem>>>;
+  listEvents(
+    input?: AdminTableQuery & {
+      organizationId?: string;
+      brandId?: string;
+    },
+  ): Promise<ApiResult<AdminTablePage<AdminEventListItem>>>;
   getEvent(eventId: string): Promise<ApiResult<AdminEventDetail>>;
   createEvent(input: CreateEventInput): Promise<ApiResult<AdminEventDetail>>;
   updateEvent(eventId: string, input: UpdateEventInput): Promise<ApiResult<AdminEventDetail>>;
@@ -1718,32 +1730,50 @@ export type AdminApi = {
   deleteCheckoutQuestion(questionId: string): Promise<ApiResult<void>>;
 
   listOrders(
-    input?: PageCursor & { eventId?: string; search?: string },
-  ): Promise<ApiResult<PageResult<AdminOrderListItem>>>;
+    input?: AdminTableQuery & {
+      organizationId?: string;
+      brandId?: string;
+    },
+  ): Promise<ApiResult<AdminTablePage<AdminOrderListItem>>>;
   createBoxOfficeOrder(
     eventId: string,
     input: AdminBoxOfficeOrderInput,
   ): Promise<ApiResult<AdminBoxOfficeOrderResult>>;
   listPaymentCompensations(
-    input?: PageCursor & { status?: string; checkoutSessionId?: string },
+    input?: PageCursor & {
+      status?: string;
+      checkoutSessionId?: string;
+      organizationId?: string;
+      brandId?: string;
+    },
   ): Promise<ApiResult<PageResult<AdminPaymentCompensation>>>;
   getOrder(orderId: string): Promise<ApiResult<AdminOrderDetail>>;
   cancelOrder(orderId: string): Promise<ApiResult<AdminOrderListItem>>;
   refundOrder(orderId: string, input: RefundOrderInput): Promise<ApiResult<RefundOrderResult>>;
 
   listAttendees(
-    input: PageCursor & { eventId?: string; query?: string; checkInListId?: string },
-  ): Promise<ApiResult<PageResult<AdminAttendeeListItem>>>;
+    input: AdminTableQuery & {
+      organizationId?: string;
+      brandId?: string;
+      eventId?: string;
+      checkInListId?: string;
+    },
+  ): Promise<ApiResult<AdminTablePage<AdminAttendeeListItem>>>;
   updateAttendee(
     attendeeId: string,
     input: UpdateAttendeeInput,
   ): Promise<ApiResult<AdminAttendeeListItem>>;
   listCheckInLists(eventId: string): Promise<ApiResult<AdminCheckInList[]>>;
+  createCheckInList(
+    eventId: string,
+    input: { name: string; ticketTypeIds?: string[] },
+  ): Promise<ApiResult<AdminCheckInList>>;
   scanTicket(input: ScanTicketInput): Promise<ApiResult<CheckInScanResult>>;
 
   listContentDocuments(input?: {
     limit?: number;
     channel?: AdminContentChannel;
+    organizationId?: string;
     brandId?: string;
     eventId?: string;
   }): Promise<ApiResult<PageResult<AdminContentDocument>>>;
@@ -1770,6 +1800,20 @@ export type AdminApi = {
       optOutToken?: string;
     },
   ): Promise<ApiResult<AdminContentPreview>>;
+  mintPreviewToken(
+    documentId: string,
+    input?: { versionId?: string },
+  ): Promise<
+    ApiResult<{ token: string; url: string; expiresAt: string; versionId: string }>
+  >;
+  migrateEventPageChrome(): Promise<
+    ApiResult<{
+      documentsScanned: number;
+      versionsChecked: number;
+      versionsMigrated: number;
+      migrated: { documentId: string; versionId: string; versionNumber: number }[];
+    }>
+  >;
   publishContentVersion(
     documentId: string,
     versionId: string,
@@ -1841,31 +1885,28 @@ export type AdminApi = {
   }): Promise<ApiResult<AdminExportJob>>;
   getExport(exportId: string): Promise<ApiResult<AdminExportJob>>;
   listAuditLogs(
-    input?: PageCursor & {
+    input?: AdminTableQuery & {
       organizationId?: string;
       brandId?: string;
-      action?: string;
-      resourceType?: string;
-      actorId?: string;
     },
-  ): Promise<ApiResult<PageResult<AdminAuditLog>>>;
+  ): Promise<ApiResult<AdminTablePage<AdminAuditLog>>>;
   listPrivacyRequests(
-    input?: PageCursor & {
+    input?: AdminTableQuery & {
       organizationId?: string;
       brandId?: string;
-      requestType?: 'export' | 'erasure';
-      status?: 'pending' | 'processing' | 'completed' | 'failed';
     },
-  ): Promise<ApiResult<PageResult<AdminPrivacyRequest>>>;
+  ): Promise<ApiResult<AdminTablePage<AdminPrivacyRequest>>>;
   getPrivacyRequest(requestId: string): Promise<ApiResult<AdminPrivacyRequest>>;
   createPrivacyExport(input: CreatePrivacyRequestInput): Promise<ApiResult<AdminPrivacyRequest>>;
   createPrivacyErasure(input: CreatePrivacyRequestInput): Promise<ApiResult<AdminPrivacyRequest>>;
 
-  listApiKeys(): Promise<ApiResult<AdminApiKey[]>>;
+  listApiKeys(input?: { organizationId?: string }): Promise<ApiResult<AdminApiKey[]>>;
   createApiKey(input: CreateApiKeyInput): Promise<ApiResult<AdminApiKey>>;
   revokeApiKey(apiKeyId: string): Promise<ApiResult<AdminApiKey>>;
 
-  listWebhookEndpoints(): Promise<ApiResult<AdminWebhookEndpoint[]>>;
+  listWebhookEndpoints(
+    input?: { organizationId?: string },
+  ): Promise<ApiResult<AdminWebhookEndpoint[]>>;
   createWebhookEndpoint(
     input: CreateWebhookEndpointInput,
   ): Promise<ApiResult<AdminWebhookEndpoint>>;
@@ -2402,16 +2443,6 @@ function normalizeTicketListingPage(
   };
 }
 
-function normalizeEventPage(
-  value: PageResult<AdminEventListItem> | AdminEventListItem[],
-): PageResult<AdminEventListItem> {
-  const page = unwrapPage(value);
-  return {
-    ...page,
-    items: page.items.map((item) => normalizeEvent(item)),
-  };
-}
-
 function normalizeQuestion(
   value: Partial<AdminCheckoutQuestion> & Record<string, unknown>,
 ): AdminCheckoutQuestion {
@@ -2786,6 +2817,8 @@ const daysFromNow = (d: number) => iso(d * 86_400_000);
 const fixtureEvents: AdminEventDetail[] = [
   {
     id: 'evt_demo_001',
+    organizationId: 'org_demo',
+    brandId: 'brd_demo',
     title: 'Summer Music Festival 2026',
     slug: 'summer-music-festival-2026',
     status: 'published',
@@ -2819,6 +2852,8 @@ const fixtureEvents: AdminEventDetail[] = [
   },
   {
     id: 'evt_demo_002',
+    organizationId: 'org_demo',
+    brandId: 'brd_demo',
     title: 'TechConf 2026',
     slug: 'techconf-2026',
     status: 'published',
@@ -2847,6 +2882,8 @@ const fixtureEvents: AdminEventDetail[] = [
   },
   {
     id: 'evt_demo_003',
+    organizationId: 'org_demo',
+    brandId: 'brd_demo',
     title: 'Local Food Tasting',
     slug: 'local-food-tasting',
     status: 'draft',
@@ -2872,6 +2909,8 @@ const fixtureEvents: AdminEventDetail[] = [
   },
   {
     id: 'evt_demo_004',
+    organizationId: 'org_demo',
+    brandId: 'brd_demo',
     title: 'Indie Game Showcase',
     slug: 'indie-game-showcase',
     status: 'paused',
@@ -2898,6 +2937,8 @@ const fixtureEvents: AdminEventDetail[] = [
   },
   {
     id: 'evt_demo_005',
+    organizationId: 'org_demo',
+    brandId: 'brd_demo',
     title: 'Annual Charity Gala',
     slug: 'annual-charity-gala',
     status: 'archived',
@@ -3210,6 +3251,7 @@ const fixtureAttendees: AdminAttendeeListItem[] = [
 const fixtureApiKeys: AdminApiKey[] = [
   {
     id: 'key_001',
+    organizationId: 'org_demo',
     name: 'Production Server',
     keyPrefix: 'tk_live_ab',
     scopes: [],
@@ -3219,6 +3261,7 @@ const fixtureApiKeys: AdminApiKey[] = [
   },
   {
     id: 'key_002',
+    organizationId: 'org_demo',
     name: 'CI/CD Pipeline',
     keyPrefix: 'tk_test_cd',
     scopes: [],
@@ -3231,6 +3274,7 @@ const fixtureApiKeys: AdminApiKey[] = [
 const fixtureWebhooks: AdminWebhookEndpoint[] = [
   {
     id: 'wh_001',
+    organizationId: 'org_demo',
     url: 'https://example.com/webhooks/tixkit',
     description: 'Production webhook handler',
     events: ['order.created', 'order.paid', 'order.refunded'],
@@ -3241,6 +3285,7 @@ const fixtureWebhooks: AdminWebhookEndpoint[] = [
   },
   {
     id: 'wh_002',
+    organizationId: 'org_demo',
     url: 'https://staging.example.com/hooks',
     description: 'Staging webhook handler',
     events: ['ticket.issued', 'ticket.checked_in'],
@@ -3603,15 +3648,6 @@ function paginate<T>(items: T[], cursor?: string, limit?: number): PageResult<T>
   };
 }
 
-function buildQuery(input?: PageCursor & Record<string, string | number | undefined>): string {
-  const params = new URLSearchParams();
-  for (const [key, value] of Object.entries(input ?? {})) {
-    if (value !== undefined) params.set(key, String(value));
-  }
-  const qs = params.toString();
-  return qs ? `?${qs}` : '';
-}
-
 function adminIdempotencyKey(prefix: string): string {
   return newIdempotencyKey(prefix);
 }
@@ -3957,26 +3993,38 @@ export const adminApi: AdminApi = {
   async listEvents(input) {
     return withFixture(
       async () => {
-        const params = new URLSearchParams();
-        if (input?.cursor) params.set('cursor', input.cursor);
-        if (input?.limit) params.set('limit', String(input.limit));
-        if (input?.search) params.set('search', input.search);
+        const { organizationId, brandId, ...tableQuery } = input ?? {};
+        const params = queryToParams(eventsTableSchema, tableQuery);
+        if (organizationId) params.set('organizationId', organizationId);
+        if (brandId) params.set('brandId', brandId);
         const qs = params.toString();
-        const result = await request<PageResult<AdminEventListItem> | AdminEventListItem[]>(
+        const result = await request<AdminTablePage<AdminEventListItem>>(
           `/v1/events${qs ? `?${qs}` : ''}`,
-          {
-            method: 'GET',
-          },
+          { method: 'GET' },
         );
-        return result.ok ? ok(normalizeEventPage(result.data)) : result;
+        return result.ok
+          ? ok({ ...result.data, items: result.data.items.map((item) => normalizeEvent(item)) })
+          : result;
       },
       () => {
         let events = fixtureEvents;
+        if (input?.organizationId) {
+          events = events.filter((e) => e.organizationId === input.organizationId);
+        }
+        if (input?.brandId) {
+          events = events.filter((e) => e.brandId === input.brandId);
+        }
+        if (input?.filters) {
+          if (input.filters.status?.type === 'select') {
+            events = events.filter((e) => input.filters!.status!.type === 'select' && input.filters!.status!.values.includes(e.status));
+          }
+        }
         if (input?.search) {
           const q = input.search.toLowerCase();
           events = events.filter((e) => e.title.toLowerCase().includes(q));
         }
-        return ok(paginate(events, input?.cursor, input?.limit));
+        const page = paginate(events, input?.cursor, input?.limit);
+        return ok({ ...page, total: events.length, filterTotal: events.length } as AdminTablePage<AdminEventListItem>);
       },
     );
   },
@@ -5153,24 +5201,73 @@ export const adminApi: AdminApi = {
   async listOrders(input) {
     return withFixture(
       () => {
-        const params = new URLSearchParams();
-        if (input?.cursor) params.set('cursor', input.cursor);
-        if (input?.limit) params.set('limit', String(input.limit));
-        if (input?.eventId) params.set('eventId', input.eventId);
-        if (input?.search) params.set('search', input.search);
+        const { organizationId, brandId, ...tableQuery } = input ?? {};
+        const params = queryToParams(ordersTableSchema, tableQuery);
+        if (organizationId) params.set('organizationId', organizationId);
+        if (brandId) params.set('brandId', brandId);
         const qs = params.toString();
-        return request<PageResult<AdminOrderListItem>>(`/v1/orders${qs ? `?${qs}` : ''}`, {
+        return request<AdminTablePage<AdminOrderListItem>>(`/v1/orders${qs ? `?${qs}` : ''}`, {
           method: 'GET',
         });
       },
       () => {
         let orders = fixtureOrders;
-        if (input?.eventId) orders = orders.filter((o) => o.eventId === input.eventId);
-        if (input?.search) {
-          const q = input.search.toLowerCase();
+        const tableInput = input ?? {};
+        if (input?.organizationId) {
+          orders = orders.filter((o) => {
+            const event = fixtureEvents.find((e) => e.id === o.eventId);
+            return event?.organizationId === input.organizationId;
+          });
+        }
+        if (input?.brandId) {
+          orders = orders.filter((o) => {
+            const event = fixtureEvents.find((e) => e.id === o.eventId);
+            return event?.brandId === input.brandId;
+          });
+        }
+        // Apply table filters
+        if (tableInput.filters) {
+          if (tableInput.filters.eventId?.type === 'select') {
+            const ids = tableInput.filters.eventId.values;
+            orders = orders.filter((o) => ids.includes(o.eventId));
+          }
+          if (tableInput.filters.status?.type === 'select') {
+            const statuses = tableInput.filters.status.values;
+            orders = orders.filter((o) => statuses.includes(o.status));
+          }
+          if (tableInput.filters.salesChannel?.type === 'select') {
+            const channels = tableInput.filters.salesChannel.values;
+            orders = orders.filter((o) => o.salesChannel && channels.includes(o.salesChannel));
+          }
+          if (tableInput.filters.paymentProvider?.type === 'select') {
+            const providers = tableInput.filters.paymentProvider.values;
+            orders = orders.filter((o) => o.paymentProvider && providers.includes(o.paymentProvider));
+          }
+          if (tableInput.filters.refundState?.type === 'boolean') {
+            orders = orders.filter((o) =>
+              tableInput.filters!.refundState!.type === 'boolean' &&
+              tableInput.filters!.refundState!.value
+                ? o.refundedCents > 0
+                : o.refundedCents === 0,
+            );
+          }
+          if (tableInput.filters.totalCents?.type === 'number_range') {
+            const { min, max } = tableInput.filters.totalCents;
+            orders = orders.filter(
+              (o) => (min === undefined || o.totalCents >= min) && (max === undefined || o.totalCents <= max),
+            );
+          }
+        }
+        if (tableInput.search) {
+          const q = tableInput.search.toLowerCase();
           orders = orders.filter((o) => o.buyerEmail.toLowerCase().includes(q));
         }
-        return ok(paginate(orders, input?.cursor, input?.limit));
+        const page = paginate(orders, tableInput.cursor, tableInput.limit);
+        return ok({
+          ...page,
+          total: orders.length,
+          filterTotal: orders.length,
+        } as AdminTablePage<AdminOrderListItem>);
       },
     );
   },
@@ -5192,6 +5289,8 @@ export const adminApi: AdminApi = {
         if (input?.limit) params.set('limit', String(input.limit));
         if (input?.status) params.set('status', input.status);
         if (input?.checkoutSessionId) params.set('checkoutSessionId', input.checkoutSessionId);
+        if (input?.organizationId) params.set('organizationId', input.organizationId);
+        if (input?.brandId) params.set('brandId', input.brandId);
         const qs = params.toString();
         return request<PageResult<AdminPaymentCompensation>>(
           `/v1/payment-compensations${qs ? `?${qs}` : ''}`,
@@ -5270,20 +5369,18 @@ export const adminApi: AdminApi = {
   async listAttendees(input) {
     return withFixture(
       async () => {
-        const params = new URLSearchParams();
-        if (input.cursor) params.set('cursor', input.cursor);
-        if (input.limit) params.set('limit', String(input.limit));
-        if (input.eventId) params.set('eventId', input.eventId);
-        if (input.checkInListId) params.set('checkInListId', input.checkInListId);
-        const trimmedQuery = input.query?.trim();
-        if (trimmedQuery) params.set('query', trimmedQuery);
+        const { organizationId, brandId, eventId, checkInListId, ...tableQuery } = input;
+        const params = queryToParams(attendeesTableSchema, tableQuery);
+        if (organizationId) params.set('organizationId', organizationId);
+        if (brandId) params.set('brandId', brandId);
+        if (checkInListId) params.set('checkInListId', checkInListId);
         const qs = params.toString();
-        const path = input.eventId ? `/v1/events/${input.eventId}/attendees` : '/v1/attendees';
-        const result = await request<PageResult<AdminAttendeeListItem>>(
+        const path = eventId
+          ? `/v1/events/${eventId}/attendees`
+          : '/v1/attendees';
+        const result = await request<AdminTablePage<AdminAttendeeListItem>>(
           `${path}${qs ? `?${qs}` : ''}`,
-          {
-            method: 'GET',
-          },
+          { method: 'GET' },
         );
         return result.ok
           ? ok({
@@ -5293,18 +5390,76 @@ export const adminApi: AdminApi = {
           : result;
       },
       () => {
+        if (input.eventId) {
+          // Event-scoped fixture fallback
+          let attendees = fixtureAttendees.filter((a) => a.eventId === input.eventId);
+          if (input.search) {
+            const q = input.search.toLowerCase();
+            attendees = attendees.filter(
+              (a) =>
+                a.name.toLowerCase().includes(q) ||
+                a.email?.toLowerCase().includes(q),
+            );
+          }
+          if (input.filters) {
+            if (input.filters.status?.type === 'select') {
+              const statuses = input.filters.status.values;
+              attendees = attendees.filter((a) => statuses.includes(a.status));
+            }
+            if (input.filters.checkInStatus?.type === 'select') {
+              const statuses = input.filters.checkInStatus.values;
+              attendees = attendees.filter((a) => statuses.includes(a.checkInStatus));
+            }
+          }
+          const page = paginate(attendees, input.cursor, input.limit);
+          return ok({
+            ...page,
+            total: attendees.length,
+            filterTotal: attendees.length,
+          } as AdminTablePage<AdminAttendeeListItem>);
+        }
+        // Admin table fixture fallback
         let attendees = fixtureAttendees;
-        if (input.eventId) attendees = attendees.filter((a) => a.eventId === input.eventId);
-        const normalizedQuery = input.query?.trim().toLowerCase();
-        if (normalizedQuery) {
+        if (input.organizationId) {
+          attendees = attendees.filter((a) => {
+            const event = fixtureEvents.find((e) => e.id === a.eventId);
+            return event?.organizationId === input.organizationId;
+          });
+        }
+        if (input.brandId) {
+          attendees = attendees.filter((a) => {
+            const event = fixtureEvents.find((e) => e.id === a.eventId);
+            return event?.brandId === input.brandId;
+          });
+        }
+        if (input.filters) {
+          if (input.filters.eventId?.type === 'select') {
+            const ids = input.filters.eventId.values;
+            attendees = attendees.filter((a) => ids.includes(a.eventId));
+          }
+          if (input.filters.status?.type === 'select') {
+            const statuses = input.filters.status.values;
+            attendees = attendees.filter((a) => statuses.includes(a.status));
+          }
+          if (input.filters.checkInStatus?.type === 'select') {
+            const statuses = input.filters.checkInStatus.values;
+            attendees = attendees.filter((a) => statuses.includes(a.checkInStatus));
+          }
+        }
+        if (input.search) {
+          const q = input.search.toLowerCase();
           attendees = attendees.filter(
-            (attendee) =>
-              attendee.name.toLowerCase().includes(normalizedQuery) ||
-              attendee.email?.toLowerCase().includes(normalizedQuery) ||
-              attendee.ticketId.toLowerCase().includes(normalizedQuery),
+            (a) =>
+              a.name.toLowerCase().includes(q) ||
+              a.email?.toLowerCase().includes(q),
           );
         }
-        return ok(paginate(attendees, input.cursor, input.limit));
+        const page = paginate(attendees, input.cursor, input.limit);
+        return ok({
+          ...page,
+          total: attendees.length,
+          filterTotal: attendees.length,
+        } as AdminTablePage<AdminAttendeeListItem>);
       },
     );
   },
@@ -5338,6 +5493,39 @@ export const adminApi: AdminApi = {
         return result.ok ? ok(unwrapItems(result.data)) : result;
       },
       () => ok(fixtureCheckInLists[eventId] ?? []),
+    );
+  },
+
+  async createCheckInList(eventId, input) {
+    return withFixture(
+      async () => {
+        const result = await request<AdminCheckInList>(
+          `/v1/events/${eventId}/check-in-lists`,
+          {
+            method: 'POST',
+            body: JSON.stringify({
+              name: input.name,
+              ticketTypeIds: input.ticketTypeIds ?? [],
+            }),
+          },
+        );
+        return result;
+      },
+      () => {
+        const now = new Date().toISOString();
+        const list: AdminCheckInList = {
+          id: `cil_${Date.now()}`,
+          eventId,
+          name: input.name,
+          ticketTypeIds: input.ticketTypeIds ?? [],
+          status: 'active',
+          createdAt: now,
+          updatedAt: now,
+        };
+        const existing = fixtureCheckInLists[eventId] ?? [];
+        fixtureCheckInLists[eventId] = [...existing, list];
+        return ok(list);
+      },
     );
   },
 
@@ -5423,6 +5611,7 @@ export const adminApi: AdminApi = {
         const params = new URLSearchParams();
         if (input?.limit) params.set('limit', String(input.limit));
         if (input?.channel) params.set('channel', input.channel);
+        if (input?.organizationId) params.set('organizationId', input.organizationId);
         if (input?.brandId) params.set('brandId', input.brandId);
         if (input?.eventId) params.set('eventId', input.eventId);
         const qs = params.toString();
@@ -5514,6 +5703,39 @@ export const adminApi: AdminApi = {
         err<AdminContentPreview>(
           apiError('fixture_unavailable', 'Content previews require the live API', 503),
         ),
+    );
+  },
+
+  async mintPreviewToken(documentId, input) {
+    return withFixture(
+      () =>
+        request<{ token: string; url: string; expiresAt: string; versionId: string }>(
+          `/v1/content-documents/${documentId}/preview-token`,
+          { method: 'POST', body: JSON.stringify(input ?? {}) },
+        ),
+      () =>
+        err<{ token: string; url: string; expiresAt: string; versionId: string }>(
+          apiError('fixture_unavailable', 'Preview tokens require the live API', 503),
+        ),
+    );
+  },
+
+  async migrateEventPageChrome() {
+    return withFixture(
+      () =>
+        request<{
+          documentsScanned: number;
+          versionsChecked: number;
+          versionsMigrated: number;
+          migrated: { documentId: string; versionId: string; versionNumber: number }[];
+        }>('/v1/content-documents/migrate-event-page-chrome', { method: 'POST' }),
+      () =>
+        err<{
+          documentsScanned: number;
+          versionsChecked: number;
+          versionsMigrated: number;
+          migrated: { documentId: string; versionId: string; versionNumber: number }[];
+        }>(apiError('fixture_unavailable', 'Migration requires the live API', 503)),
     );
   },
 
@@ -5905,32 +6127,76 @@ export const adminApi: AdminApi = {
   async listAuditLogs(input) {
     return withFixture(
       async () => {
-        const result = await request<PageResult<AdminAuditLog>>(
-          `/v1/audit-logs${buildQuery(input)}`,
-          {
-            method: 'GET',
-          },
+        const { organizationId, brandId, ...tableQuery } = input ?? {};
+        const params = queryToParams(auditLogTableSchema, tableQuery);
+        if (organizationId) params.set('organizationId', organizationId);
+        if (brandId) params.set('brandId', brandId);
+        const qs = params.toString();
+        const result = await request<AdminTablePage<AdminAuditLog>>(
+          `/v1/audit-logs${qs ? `?${qs}` : ''}`,
+          { method: 'GET' },
         );
         return result.ok
           ? ok({ ...result.data, items: result.data.items.map(normalizeAuditLog) })
           : result;
       },
-      () => ok(paginate(fixtureAuditLogs, input?.cursor, input?.limit)),
+      () => {
+        let rows = fixtureAuditLogs;
+        if (input?.organizationId) {
+          rows = rows.filter((r) => r.organizationId === input.organizationId);
+        }
+        if (input?.brandId) {
+          rows = rows.filter((r) => r.brandId === input.brandId);
+        }
+        if (input?.filters) {
+          if (input.filters.action?.type === 'select') {
+            rows = rows.filter((r) => input.filters!.action!.type === 'select' && input.filters!.action!.values.includes(r.action));
+          }
+          if (input.filters.resourceType?.type === 'select') {
+            rows = rows.filter((r) => input.filters!.resourceType!.type === 'select' && input.filters!.resourceType!.values.includes(r.resourceType));
+          }
+        }
+        const page = paginate(rows, input?.cursor, input?.limit);
+        return ok({ ...page, total: rows.length, filterTotal: rows.length } as AdminTablePage<AdminAuditLog>);
+      },
     );
   },
 
   async listPrivacyRequests(input) {
     return withFixture(
       async () => {
-        const result = await request<PageResult<AdminPrivacyRequest>>(
-          `/v1/privacy/requests${buildQuery(input)}`,
+        const { organizationId, brandId, ...tableQuery } = input ?? {};
+        const params = queryToParams(privacyRequestTableSchema, tableQuery);
+        if (organizationId) params.set('organizationId', organizationId);
+        if (brandId) params.set('brandId', brandId);
+        const qs = params.toString();
+        const result = await request<AdminTablePage<AdminPrivacyRequest>>(
+          `/v1/privacy/requests${qs ? `?${qs}` : ''}`,
           { method: 'GET' },
         );
         return result.ok
           ? ok({ ...result.data, items: result.data.items.map(normalizePrivacyRequest) })
           : result;
       },
-      () => ok(paginate(fixturePrivacyRequests, input?.cursor, input?.limit)),
+      () => {
+        let rows = fixturePrivacyRequests;
+        if (input?.organizationId) {
+          rows = rows.filter((r) => r.organizationId === input.organizationId);
+        }
+        if (input?.brandId) {
+          rows = rows.filter((r) => r.brandId === input.brandId);
+        }
+        if (input?.filters) {
+          if (input.filters.status?.type === 'select') {
+            rows = rows.filter((r) => input.filters!.status!.type === 'select' && input.filters!.status!.values.includes(r.status));
+          }
+          if (input.filters.requestType?.type === 'select') {
+            rows = rows.filter((r) => input.filters!.requestType!.type === 'select' && input.filters!.requestType!.values.includes(r.requestType));
+          }
+        }
+        const page = paginate(rows, input?.cursor, input?.limit);
+        return ok({ ...page, total: rows.length, filterTotal: rows.length } as AdminTablePage<AdminPrivacyRequest>);
+      },
     );
   },
 
@@ -6013,15 +6279,24 @@ export const adminApi: AdminApi = {
   },
 
   // ---- API Keys ----
-  async listApiKeys() {
+  async listApiKeys(input) {
     return withFixture(
       async () => {
-        const result = await request<PageResult<AdminApiKey> | AdminApiKey[]>('/v1/api-keys', {
-          method: 'GET',
-        });
+        const params = new URLSearchParams();
+        if (input?.organizationId) params.set('organizationId', input.organizationId);
+        const qs = params.toString();
+        const result = await request<PageResult<AdminApiKey> | AdminApiKey[]>(
+          `/v1/api-keys${qs ? `?${qs}` : ''}`,
+          { method: 'GET' },
+        );
         return result.ok ? ok(unwrapItems(result.data)) : result;
       },
-      () => ok(fixtureApiKeys),
+      () =>
+        ok(
+          input?.organizationId
+            ? fixtureApiKeys.filter((k) => k.organizationId === input.organizationId)
+            : fixtureApiKeys,
+        ),
     );
   },
 
@@ -6080,16 +6355,24 @@ export const adminApi: AdminApi = {
   },
 
   // ---- Webhooks ----
-  async listWebhookEndpoints() {
+  async listWebhookEndpoints(input) {
     return withFixture(
       async () => {
+        const params = new URLSearchParams();
+        if (input?.organizationId) params.set('organizationId', input.organizationId);
+        const qs = params.toString();
         const result = await request<PageResult<AdminWebhookEndpoint> | AdminWebhookEndpoint[]>(
-          '/v1/webhook-endpoints',
+          `/v1/webhook-endpoints${qs ? `?${qs}` : ''}`,
           { method: 'GET' },
         );
         return result.ok ? ok(unwrapItems(result.data)) : result;
       },
-      () => ok(fixtureWebhooks),
+      () =>
+        ok(
+          input?.organizationId
+            ? fixtureWebhooks.filter((w) => w.organizationId === input.organizationId)
+            : fixtureWebhooks,
+        ),
     );
   },
 

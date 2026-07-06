@@ -3,40 +3,36 @@
 import * as React from 'react';
 import { Plus, Ticket } from 'lucide-react';
 import { type AdminEventListItem, adminApi } from '@/lib/api';
+import { eventsTableSchema } from '@/lib/table-schemas';
 import { Button } from '@/components/ui/button';
 import { EmptyState } from '@/components/empty-state';
-import { Skeleton } from '@/components/ui/skeleton';
-import { DataTable } from '@/components/data-table/data-table';
-import { type DataTableFilter } from '@/components/data-table/toolbar';
+import { DataTableV2, useUrlTableState } from '@/components/data-table';
+import { TimestampCell } from '@/components/data-table/cells';
+import { useAdminTableData } from '@/hooks/use-admin-table-data';
 import { usePermissions } from '@/context/permission-provider';
-import { useAdminData } from '@/hooks/use-admin-data';
-import { useDebouncedValue } from '@/hooks/use-debounced-search';
+import { useBootstrap } from '@/context/bootstrap-provider';
 import { getEventColumns } from './columns';
 import { CreateEventDrawer } from './create-event-drawer';
-
-const statusFilters: DataTableFilter = {
-  columnId: 'status',
-  title: 'Status',
-  options: [
-    { label: 'Draft', value: 'draft' },
-    { label: 'Published', value: 'published' },
-    { label: 'Paused', value: 'paused' },
-    { label: 'Archived', value: 'archived' },
-  ],
-};
+import { formatDateTime } from '@/lib/format';
 
 export function EventsTable() {
   const [drawerOpen, setDrawerOpen] = React.useState(false);
   const [editingEvent, setEditingEvent] = React.useState<AdminEventListItem | undefined>(undefined);
-  const [searchInput, setSearchInput] = React.useState('');
-  const debouncedSearch = useDebouncedValue(searchInput, 300);
   const { can } = usePermissions();
-  const { data, loading, error, refetch } = useAdminData(
-    () => adminApi.listEvents(debouncedSearch.trim() ? { search: debouncedSearch.trim() } : undefined),
-    [debouncedSearch],
-  );
+  const { organizationId, brandId } = useBootstrap();
+  const { query, updateQuery } = useUrlTableState(eventsTableSchema);
 
-  const events = data?.items ?? [];
+  const { data, loading, error, refetch } = useAdminTableData<AdminEventListItem>({
+    schema: eventsTableSchema,
+    query,
+    fetcher: (tableQuery) =>
+      adminApi.listEvents({
+        ...tableQuery,
+        organizationId: organizationId || undefined,
+        brandId: brandId || undefined,
+      }),
+  });
+
   const canWriteEvents = can('events.write');
 
   const columns = React.useMemo(
@@ -58,32 +54,18 @@ export function EventsTable() {
     setDrawerOpen(true);
   };
 
-  if (loading && events.length === 0) {
-    return <EventsTableSkeleton />;
-  }
-
-  if (error && events.length === 0) {
-    return (
-      <EmptyState
-        icon={Ticket}
-        title="Failed to load events"
-        description={error.message}
-        action={<Button onClick={refetch}>Try again</Button>}
-      />
-    );
-  }
-
   return (
     <>
-      <DataTable
+      <DataTableV2
+        schema={eventsTableSchema}
         columns={columns}
-        data={events}
+        data={data}
+        query={query}
+        onQueryChange={updateQuery}
+        loading={loading}
+        error={error ? { message: error.message } : undefined}
+        onRetry={() => refetch()}
         getRowId={(row) => row.id}
-        searchPlaceholder="Search events..."
-        onServerSearch={setSearchInput}
-        serverSearchValue={searchInput}
-        serverSearchLoading={loading}
-        filters={[statusFilters]}
         toolbarActions={
           canWriteEvents ? (
             <Button size="sm" className="h-9" onClick={handleCreate}>
@@ -95,16 +77,14 @@ export function EventsTable() {
         emptyState={
           <EmptyState
             icon={Ticket}
-            title={searchInput ? 'No matching events' : 'No events yet'}
+            title="No events yet"
             description={
-              searchInput
-                ? 'Try a different search term.'
-                : canWriteEvents
-                  ? 'Create your first event to start selling tickets and tracking attendance.'
-                  : 'Events will appear here once your workspace starts publishing them.'
+              canWriteEvents
+                ? 'Create your first event to start selling tickets and tracking attendance.'
+                : 'Events will appear here once your workspace starts publishing them.'
             }
             action={
-              canWriteEvents && !searchInput ? (
+              canWriteEvents ? (
                 <Button onClick={handleCreate}>
                   <Plus className="size-4" />
                   Create event
@@ -112,6 +92,9 @@ export function EventsTable() {
               ) : undefined
             }
           />
+        }
+        renderRowSheet={(row) =>
+          row ? <EventRowSheet event={row} /> : null
         }
       />
       {canWriteEvents && (
@@ -126,18 +109,38 @@ export function EventsTable() {
   );
 }
 
-function EventsTableSkeleton() {
+function EventRowSheet({ event }: { event: AdminEventListItem }) {
   return (
     <div className="space-y-4">
-      <div className="flex items-center justify-between">
-        <Skeleton className="h-9 w-[250px]" />
-        <Skeleton className="h-9 w-[120px]" />
-      </div>
-      <div className="rounded-md border">
-        {Array.from({ length: 5 }).map((_, i) => (
-          <Skeleton key={i} className="h-12 w-full" />
-        ))}
-      </div>
+      <h3 className="text-lg font-semibold">{event.title}</h3>
+      <dl className="grid grid-cols-2 gap-3 text-sm">
+        <div>
+          <dt className="text-muted-foreground">Status</dt>
+          <dd className="mt-1 capitalize">{event.status}</dd>
+        </div>
+        <div>
+          <dt className="text-muted-foreground">Starts</dt>
+          <dd className="mt-1">
+            <TimestampCell value={event.startsAt} showTime />
+          </dd>
+        </div>
+        <div>
+          <dt className="text-muted-foreground">Venue</dt>
+          <dd className="mt-1">{event.venueName || '-'}</dd>
+        </div>
+        <div>
+          <dt className="text-muted-foreground">City</dt>
+          <dd className="mt-1">{event.city || '-'}</dd>
+        </div>
+        <div>
+          <dt className="text-muted-foreground">Tickets Sold</dt>
+          <dd className="mt-1">{event.ticketsSold ?? 0}</dd>
+        </div>
+        <div>
+          <dt className="text-muted-foreground">Gross Sales</dt>
+          <dd className="mt-1">{formatDateTime(event.startsAt)}</dd>
+        </div>
+      </dl>
     </div>
   );
 }

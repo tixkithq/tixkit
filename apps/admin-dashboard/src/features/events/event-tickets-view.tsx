@@ -43,7 +43,7 @@ import {
   DropdownMenuLabel,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
-import { useAdminData } from '@/hooks/use-admin-data';
+import { useAdminQuery } from '@/hooks/use-admin-table-data';
 import { formatCurrency, formatNumber, formatDateTime } from '@/lib/format';
 import { BoxOfficeOrderPanel } from './box-office-order-panel';
 import { TicketTypeStatusBadge } from './event-status-badge';
@@ -81,34 +81,36 @@ async function copyClaimLinkToClipboard(claimUrl: string): Promise<boolean> {
 export function EventTicketsView({ eventId }: { eventId: string }) {
   const [drawerOpen, setDrawerOpen] = React.useState(false);
   const [editingTicket, setEditingTicket] = React.useState<AdminTicketType | undefined>(undefined);
-  const { data, loading, error, refetch } = useAdminData(
+  const { data, loading, error, refetch } = useAdminQuery(
+    ['listTicketTypes', eventId],
     () => adminApi.listTicketTypes(eventId),
-    [eventId],
   );
   const {
     data: waitlistData,
     loading: waitlistLoading,
     error: waitlistError,
     refetch: refetchWaitlist,
-  } = useAdminData(() => adminApi.listWaitlist(eventId), [eventId]);
+  } = useAdminQuery(['listWaitlist', eventId], () => adminApi.listWaitlist(eventId));
   const {
     data: occurrencesData,
     loading: occurrencesLoading,
     error: occurrencesError,
     refetch: refetchOccurrences,
-  } = useAdminData(() => adminApi.listEventOccurrences(eventId), [eventId]);
+  } = useAdminQuery(['listEventOccurrences', eventId], () => adminApi.listEventOccurrences(eventId));
   const {
     data: resalePolicy,
     loading: resalePolicyLoading,
     error: resalePolicyError,
     refetch: refetchResalePolicy,
-  } = useAdminData(() => adminApi.getResalePolicy(eventId), [eventId]);
+  } = useAdminQuery(['getResalePolicy', eventId], () => adminApi.getResalePolicy(eventId));
   const {
     data: resaleListingsData,
     loading: resaleListingsLoading,
     error: resaleListingsError,
     refetch: refetchResaleListings,
-  } = useAdminData(() => adminApi.listResaleListings(eventId, { limit: 25 }), [eventId]);
+  } = useAdminQuery(['listResaleListings', eventId], () =>
+    adminApi.listResaleListings(eventId, { limit: 25 }),
+  );
   const [offeringEntryId, setOfferingEntryId] = React.useState<string | null>(null);
   const [claimUrlByEntryId, setClaimUrlByEntryId] = React.useState<Record<string, string>>({});
 
