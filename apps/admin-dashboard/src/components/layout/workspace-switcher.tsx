@@ -69,7 +69,10 @@ export function WorkspaceSwitcher() {
     <SidebarMenu>
       <SidebarMenuItem>
         <div
-          className={cn('flex items-center gap-2 px-2 py-2', isCollapsed && 'justify-center px-1')}
+          className={cn(
+            'flex items-center gap-2 px-2 py-2',
+            isCollapsed && 'flex-col justify-center px-0',
+          )}
         >
           {hasSwitcherMenu ? (
             <DropdownMenu>
@@ -171,7 +174,7 @@ export function WorkspaceSwitcher() {
             size="icon"
             aria-label={isCollapsed ? 'Expand sidebar' : 'Collapse sidebar'}
             title={isCollapsed ? 'Expand sidebar' : 'Collapse sidebar'}
-            className="size-8 shrink-0"
+            className={cn('size-8 shrink-0', isCollapsed && 'mx-auto')}
             onClick={toggleSidebar}
           >
             <ToggleIcon aria-hidden="true" className="size-4" />

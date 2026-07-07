@@ -56,14 +56,14 @@ export function StyleInspector({
       data-testid="native-email-inspector-host"
       data-tixkit-email-inspector="true"
     >
-      <div className="flex min-h-0 flex-1 flex-col">
-        <div className="border-b px-4 py-3">
-          <p className="text-xs uppercase tracking-wide text-muted-foreground">Page style</p>
-          <div className="mt-1 text-sm font-semibold text-foreground">
-            <Inspector.Breadcrumb />
+      <Inspector.Root aria-label="React Email style inspector" className="flex min-h-0 flex-1">
+        <div className="flex min-h-0 flex-1 flex-col">
+          <div className="border-b px-4 py-3">
+            <p className="text-xs uppercase tracking-wide text-muted-foreground">Page style</p>
+            <div className="mt-1 text-sm font-semibold text-foreground">
+              <Inspector.Breadcrumb />
+            </div>
           </div>
-        </div>
-        <Inspector.Root aria-label="React Email style inspector">
           <div className="min-h-0 flex-1 overflow-auto px-4 py-4">
             <div className="space-y-5">
               <Inspector.Document />
@@ -92,62 +92,64 @@ export function StyleInspector({
               </Inspector.Node>
             </div>
           </div>
-        </Inspector.Root>
-        <div className="space-y-2 border-t p-3">
-          <div className="rounded-md border">
-            <button
-              aria-expanded={themeOpen}
-              className="flex w-full items-center justify-between px-3 py-2 text-left text-sm font-medium"
-              onClick={() => setThemeOpen((open) => !open)}
-              type="button"
-            >
-              Edit theme
-              <span className="text-xs capitalize text-muted-foreground">{themePreset}</span>
-            </button>
-            {themeOpen ? (
-              <div className="flex gap-2 border-t p-3">
-                {(['brand', 'minimal', 'basic'] as const).map((preset) => (
-                  <button
-                    className={presetButtonClass(themePreset === preset)}
+          <div className="space-y-2 border-t p-3">
+            <div className="rounded-md border">
+              <button
+                aria-expanded={themeOpen}
+                className="flex w-full items-center justify-between px-3 py-2 text-left text-sm font-medium"
+                onClick={() => setThemeOpen((open) => !open)}
+                type="button"
+              >
+                Edit theme
+                <span className="text-xs capitalize text-muted-foreground">{themePreset}</span>
+              </button>
+              {themeOpen ? (
+                <div className="flex gap-2 border-t p-3">
+                  {(['brand', 'minimal', 'basic'] as const).map((preset) => (
+                    <button
+                      className={presetButtonClass(themePreset === preset)}
+                      disabled={disabled}
+                      key={preset}
+                      onClick={() => onThemePresetChange(preset)}
+                      type="button"
+                    >
+                      {preset}
+                    </button>
+                  ))}
+                </div>
+              ) : null}
+            </div>
+            <div className="rounded-md border">
+              <button
+                aria-expanded={cssOpen}
+                className="flex w-full items-center justify-between px-3 py-2 text-left text-sm font-medium"
+                onClick={() => setCssOpen((open) => !open)}
+                type="button"
+              >
+                Global CSS
+                <span className="text-xs text-muted-foreground">
+                  {globalCss.trim() ? 'Custom' : 'None'}
+                </span>
+              </button>
+              {cssOpen ? (
+                <div className="border-t p-3">
+                  <textarea
+                    aria-label="Global CSS"
+                    className="min-h-28 w-full resize-y rounded-md border bg-background px-3 py-2 font-mono text-xs text-foreground outline-none focus:ring-2 focus:ring-ring disabled:opacity-50"
                     disabled={disabled}
-                    key={preset}
-                    onClick={() => onThemePresetChange(preset)}
-                    type="button"
-                  >
-                    {preset}
-                  </button>
-                ))}
-              </div>
-            ) : null}
-          </div>
-          <div className="rounded-md border">
-            <button
-              aria-expanded={cssOpen}
-              className="flex w-full items-center justify-between px-3 py-2 text-left text-sm font-medium"
-              onClick={() => setCssOpen((open) => !open)}
-              type="button"
-            >
-              Global CSS
-              <span className="text-xs text-muted-foreground">{globalCss.trim() ? 'Custom' : 'None'}</span>
-            </button>
-            {cssOpen ? (
-              <div className="border-t p-3">
-                <textarea
-                  aria-label="Global CSS"
-                  className="min-h-28 w-full resize-y rounded-md border bg-background px-3 py-2 font-mono text-xs text-foreground outline-none focus:ring-2 focus:ring-ring disabled:opacity-50"
-                  disabled={disabled}
-                  onChange={(event) => onGlobalCssChange(event.currentTarget.value)}
-                  placeholder=".email-root { }"
-                  value={globalCss}
-                />
-                <p className="mt-2 text-xs text-muted-foreground">
-                  Scoped CSS is applied to rendered email HTML before preview, test, and publish.
-                </p>
-              </div>
-            ) : null}
+                    onChange={(event) => onGlobalCssChange(event.currentTarget.value)}
+                    placeholder=".email-root { }"
+                    value={globalCss}
+                  />
+                  <p className="mt-2 text-xs text-muted-foreground">
+                    Scoped CSS is applied to rendered email HTML before preview, test, and publish.
+                  </p>
+                </div>
+              ) : null}
+            </div>
           </div>
         </div>
-      </div>
+      </Inspector.Root>
     </aside>
   );
 }

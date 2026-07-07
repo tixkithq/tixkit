@@ -78,6 +78,7 @@ export function SurfaceText<C extends React.ElementType = 'span'>({
       suppressContentEditableWarning: true,
       'data-editable-field': field,
       'data-placeholder': placeholder,
+      role: multiline ? 'textbox' : undefined,
       'aria-label': ariaLabel,
       'aria-multiline': multiline || undefined,
       'aria-disabled': ctx.disabled || undefined,

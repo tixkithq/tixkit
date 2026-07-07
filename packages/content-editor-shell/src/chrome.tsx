@@ -69,7 +69,7 @@ export function AutosaveBadge({ state }: { state: ContentEditorAutosaveState }) 
         ? 'border-amber-400/40 bg-amber-50 text-amber-700 dark:bg-amber-950/30 dark:text-amber-300'
         : state === 'saved'
           ? 'border-emerald-400/40 bg-emerald-50 text-emerald-700 dark:bg-emerald-950/30 dark:text-emerald-300'
-          : 'border-border bg-muted text-muted-foreground',
+          : 'border-border bg-muted text-foreground',
   );
   return <span className={tone}>{label}</span>;
 }
@@ -81,7 +81,7 @@ export function StatusBadge({ status }: { status: string }) {
       ? 'border-emerald-400/40 bg-emerald-50 text-emerald-700 dark:bg-emerald-950/30 dark:text-emerald-300'
       : status === 'archived'
         ? 'border-destructive/30 bg-destructive/5 text-destructive'
-        : 'border-border bg-muted text-muted-foreground',
+        : 'border-border bg-muted text-foreground',
   );
   return <span className={tone}>{status}</span>;
 }
@@ -122,10 +122,9 @@ export function EditorTopBar({
   secondaryActions,
 }: EditorTopBarProps) {
   return (
-    <div
+    <section
       aria-label="Editor header"
       className="relative z-10 flex h-[60px] shrink-0 items-center justify-between border-b px-3 sm:px-4"
-      role="region"
     >
       {/* Left: back + breadcrumb + name + status + autosave */}
       <div className="flex min-w-0 items-center gap-1.5 text-sm">
@@ -217,7 +216,7 @@ export function EditorTopBar({
           {publishLabel}
         </Button>
       </div>
-    </div>
+    </section>
   );
 }
 

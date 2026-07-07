@@ -111,7 +111,7 @@ export function InsertPalette({
   const variableGroups = groupedBy(variables, (item) => item.kind);
 
   return (
-    <div className="pointer-events-none absolute left-3 top-1/2 z-20 -translate-y-1/2">
+    <div className="pointer-events-none absolute right-full top-1/2 z-20 mr-3 -translate-y-1/2">
       <div className="pointer-events-auto flex flex-col items-center gap-1 rounded-md border bg-background p-1 shadow-lg">
         <button
           aria-label="Insert text"
@@ -151,7 +151,7 @@ export function InsertPalette({
         </button>
       </div>
       {open ? (
-        <div className="pointer-events-auto absolute left-12 top-0 w-72 rounded-md border bg-popover p-2 text-popover-foreground shadow-xl">
+        <div className="pointer-events-auto absolute right-12 top-0 w-72 rounded-md border bg-popover p-2 text-popover-foreground shadow-xl">
           {open === 'text' ? (
             <div className="space-y-1">
               {textItems.map((item) => (

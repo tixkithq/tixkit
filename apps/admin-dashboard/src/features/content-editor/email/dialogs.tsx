@@ -204,9 +204,7 @@ export function EmailDialogs({
                   </div>
                   <div className="flex justify-between gap-4 border-b border-border pb-2">
                     <dt className="text-muted-foreground">Tier</dt>
-                    <dd className="max-w-[12rem] truncate text-foreground/80">
-                      {lifecycle.tier}
-                    </dd>
+                    <dd className="max-w-[12rem] truncate text-foreground/80">{lifecycle.tier}</dd>
                   </div>
                   <div className="flex justify-between gap-4 border-b border-border pb-2">
                     <dt className="text-muted-foreground">Audience</dt>
@@ -219,7 +217,11 @@ export function EmailDialogs({
             </dl>
           </div>
           <DialogFooter>
-            <Button onClick={() => onDetailsDialogOpenChange(false)} type="button" variant="outline">
+            <Button
+              onClick={() => onDetailsDialogOpenChange(false)}
+              type="button"
+              variant="outline"
+            >
               Close
             </Button>
           </DialogFooter>
@@ -246,7 +248,11 @@ export function EmailDialogs({
             </ol>
           )}
           <DialogFooter>
-            <Button onClick={() => onHistoryDialogOpenChange(false)} type="button" variant="outline">
+            <Button
+              onClick={() => onHistoryDialogOpenChange(false)}
+              type="button"
+              variant="outline"
+            >
               Close
             </Button>
           </DialogFooter>
@@ -354,7 +360,11 @@ export function EmailDialogs({
             </div>
           )}
           <DialogFooter>
-            <Button onClick={() => onTemplatePickerOpenChange(false)} type="button" variant="outline">
+            <Button
+              onClick={() => onTemplatePickerOpenChange(false)}
+              type="button"
+              variant="outline"
+            >
               Close
             </Button>
           </DialogFooter>
@@ -397,9 +407,6 @@ export function EmailDialogs({
                   <option className="bg-background text-foreground" value="not_checked_in">
                     Not checked in
                   </option>
-                  <option className="bg-background text-foreground" value="specific">
-                    Specific attendees
-                  </option>
                 </select>
               </label>
               <div className="flex items-center gap-2 py-1">
@@ -413,7 +420,9 @@ export function EmailDialogs({
                 </span>
               </div>
               <label className="flex items-center gap-2 py-1">
-                <span className="w-28 shrink-0 text-xs font-medium text-muted-foreground">When</span>
+                <span className="w-28 shrink-0 text-xs font-medium text-muted-foreground">
+                  When
+                </span>
                 <select
                   aria-label="Send timing"
                   className="w-28 rounded-md border bg-background px-2 py-1.5 text-sm text-foreground outline-none focus:ring-2 focus:ring-ring disabled:opacity-50"
@@ -559,7 +568,11 @@ export function EmailDialogs({
             >
               Cancel
             </Button>
-            <Button disabled={!reviewConfirmed || !reviewCanConfirm} onClick={onPublish} type="button">
+            <Button
+              disabled={!reviewConfirmed || !reviewCanConfirm}
+              onClick={onPublish}
+              type="button"
+            >
               {sendMode === 'scheduled' ? 'Schedule email' : 'Send email'}
             </Button>
           </DialogFooter>

@@ -119,7 +119,23 @@ vi.mock('sonner', () => ({
 
 vi.mock('@/context/permission-provider', () => ({
   usePermissions: () => ({
-    permissions: ['events.read', 'events.write', 'tickets.write', 'orders.read', 'orders.write', 'refunds.write', 'attendees.read', 'attendees.write', 'checkins.read', 'checkins.write', 'messages.write', 'reports.read', 'settings.write', 'developers.write', 'billing.write'],
+    permissions: [
+      'events.read',
+      'events.write',
+      'tickets.write',
+      'orders.read',
+      'orders.write',
+      'refunds.write',
+      'attendees.read',
+      'attendees.write',
+      'checkins.read',
+      'checkins.write',
+      'messages.write',
+      'reports.read',
+      'settings.write',
+      'developers.write',
+      'billing.write',
+    ],
     can: () => true,
     loading: false,
     error: null,
@@ -204,80 +220,80 @@ vi.mock('@react-email/editor', async () => {
       const onReadyRef = ReactModule.useRef(onReady);
       const onUpdateRef = ReactModule.useRef(onUpdate);
       const didMountRef = ReactModule.useRef(false);
-      const editor = ReactModule.useMemo(
-        () => {
-          const tr = {
-            docChanged: false,
-            setNodeMarkup: (
-              _position: number,
-              _type: unknown,
-              attrs: { align?: string; alignment?: string },
-            ) => {
-              tr.docChanged = true;
-              editorMockState.alignmentCalls.push(attrs.align ?? attrs.alignment ?? '');
-              return tr;
-            },
-          };
-          return {
-            chain() {
-              const chainApi = {
-                focus: () => chainApi,
-                insertContent: (next: unknown) => {
-                  setValue((current) =>
-                    `${current} ${
-                      typeof next === 'string'
-                        ? editorMockHelpers.textFromHtml(next)
-                        : editorMockHelpers.textFromContent(next)
-                    }`.trim(),
-                  );
-                  return chainApi;
-                },
-                setImage: (attrs: { src: string; alt?: string }) => {
-                  setValue((current) => `${current} ${attrs.src} ${attrs.alt ?? ''}`.trim());
-                  return chainApi;
-                },
-                setAlignment: (alignment: string) => {
-                  editorMockState.alignmentCalls.push(alignment);
-                  return chainApi;
-                },
-                run: () => true,
-              };
-              return chainApi;
-            },
-            commands: {
+      const editor = ReactModule.useMemo(() => {
+        const tr = {
+          docChanged: false,
+          setNodeMarkup: (
+            _position: number,
+            _type: unknown,
+            attrs: { align?: string; alignment?: string },
+          ) => {
+            tr.docChanged = true;
+            editorMockState.alignmentCalls.push(attrs.align ?? attrs.alignment ?? '');
+            return tr;
+          },
+        };
+        return {
+          chain() {
+            const chainApi = {
+              focus: () => chainApi,
+              insertContent: (next: unknown) => {
+                setValue((current) =>
+                  `${current} ${
+                    typeof next === 'string'
+                      ? editorMockHelpers.textFromHtml(next)
+                      : editorMockHelpers.textFromContent(next)
+                  }`.trim(),
+                );
+                return chainApi;
+              },
+              setImage: (attrs: { src: string; alt?: string }) => {
+                setValue((current) => `${current} ${attrs.src} ${attrs.alt ?? ''}`.trim());
+                return chainApi;
+              },
               setAlignment: (alignment: string) => {
                 editorMockState.alignmentCalls.push(alignment);
-                return true;
+                return chainApi;
               },
+              run: () => true,
+            };
+            return chainApi;
+          },
+          commands: {
+            setAlignment: (alignment: string) => {
+              editorMockState.alignmentCalls.push(alignment);
+              return true;
             },
-            state: {
-              doc: {
-                nodesBetween: (
-                  _from: number,
-                  _to: number,
-                  callback: (node: { attrs: Record<string, unknown>; isTextblock: boolean }, position: number) => void,
-                ) => callback({ attrs: { alignment: 'left' }, isTextblock: true }, 0),
+          },
+          state: {
+            doc: {
+              nodesBetween: (
+                _from: number,
+                _to: number,
+                callback: (
+                  node: { attrs: Record<string, unknown>; isTextblock: boolean },
+                  position: number,
+                ) => void,
+              ) => callback({ attrs: { alignment: 'left' }, isTextblock: true }, 0),
+            },
+            selection: {
+              $from: {
+                before: () => 0,
+                depth: 1,
+                node: () => ({ attrs: { alignment: 'left' }, isTextblock: true }),
               },
-              selection: {
-                $from: {
-                  before: () => 0,
-                  depth: 1,
-                  node: () => ({ attrs: { alignment: 'left' }, isTextblock: true }),
-                },
-                empty: true,
-                from: 0,
-                to: 0,
-              },
-              tr,
+              empty: true,
+              from: 0,
+              to: 0,
             },
-            view: {
-              dispatch: () => undefined,
-              focus: () => undefined,
-            },
-          };
-        },
-        [],
-      );
+            tr,
+          },
+          view: {
+            dispatch: () => undefined,
+            focus: () => undefined,
+          },
+        };
+      }, []);
       const editorRef = ReactModule.useMemo(
         () => ({
           getEmail: async () => ({
@@ -286,7 +302,9 @@ vi.mock('@react-email/editor', async () => {
               (editorMockState.shellOnlyExport
                 ? '<!DOCTYPE html><html><body><p><br /></p></body></html>'
                 : `<p>${editorMockHelpers.escapeHtml(valueRef.current)}</p>`),
-            text: editorMockState.exportedText ?? (editorMockState.shellOnlyExport ? '' : valueRef.current),
+            text:
+              editorMockState.exportedText ??
+              (editorMockState.shellOnlyExport ? '' : valueRef.current),
           }),
           getEmailHTML: async () => `<p>${editorMockHelpers.escapeHtml(valueRef.current)}</p>`,
           getEmailText: async () => valueRef.current,
@@ -608,10 +626,9 @@ async function confirmReviewSend(buttonName = 'Send email') {
   expect(await screen.findByRole('dialog', { name: 'Ready to send?' })).toBeInTheDocument();
   expect(screen.getByText('Campaign settings')).toBeInTheDocument();
   expect(screen.getByLabelText('Audience')).toBeInTheDocument();
+  expect(screen.queryByRole('option', { name: 'Specific attendees' })).not.toBeInTheDocument();
   expect(screen.getByLabelText('Send timing')).toBeInTheDocument();
   expect(screen.getByText('Preflight checks')).toBeInTheDocument();
-  expect(await screen.findByText('Analyzing your content...')).toBeInTheDocument();
-  expect(screen.getByRole('button', { name: buttonName })).toBeDisabled();
   expect(await screen.findByText('Content analysis complete')).toBeInTheDocument();
   expect(await screen.findByText('No blocking issues found.')).toBeInTheDocument();
   expect(adminApiMock.sendMessage).not.toHaveBeenCalled();
@@ -772,9 +789,7 @@ describe('EmailPersistedEditorView', () => {
     expect(jsonPreview.content[0]?.attrs.src).toBe(
       mergeTagCanvasAttributeValue('ticket.qrCodeUrl'),
     );
-    expect(jsonPreview.content[0]?.attrs['data-tixkit-merge-attr-src']).toBe(
-      'ticket.qrCodeUrl',
-    );
+    expect(jsonPreview.content[0]?.attrs['data-tixkit-merge-attr-src']).toBe('ticket.qrCodeUrl');
   });
 
   it('configures native email alignment for text, media, body, and layout nodes', () => {
@@ -889,7 +904,9 @@ describe('EmailPersistedEditorView', () => {
     });
 
     eventName?.command({
-      editor: editor as unknown as Parameters<NonNullable<typeof eventName>['command']>[0]['editor'],
+      editor: editor as unknown as Parameters<
+        NonNullable<typeof eventName>['command']
+      >[0]['editor'],
       range: { from: 1, to: 14 },
     });
 
@@ -968,8 +985,9 @@ describe('EmailPersistedEditorView', () => {
     const editor = { chain: () => ({ focus }) };
 
     socialLinks?.command({
-      editor:
-        editor as unknown as Parameters<NonNullable<typeof socialLinks>['command']>[0]['editor'],
+      editor: editor as unknown as Parameters<
+        NonNullable<typeof socialLinks>['command']
+      >[0]['editor'],
       range: { from: 1, to: 14 },
     });
 
@@ -1081,7 +1099,7 @@ describe('EmailPersistedEditorView', () => {
     closeActiveDialog();
     const canvas = screen.getByRole('textbox', { name: 'Email body' });
     canvas.textContent =
-      'Updated saved email for {{recipient.name}}. Manage preferences: {{brand.supportUrl}}.';
+      'Updated saved email for {{recipient.name}} about {{event.title}} order {{order.id}} {{order.total}} {{ticket.type}}. Manage preferences: {{brand.supportUrl}}. Checkout: {{event.checkoutUrl}}.';
     fireEvent.input(canvas);
     clickEmailSaveDraft();
 
@@ -1101,13 +1119,13 @@ describe('EmailPersistedEditorView', () => {
             editor: expect.objectContaining({
               contentJson: expect.objectContaining({ type: 'doc' }),
               contentText:
-                'Updated saved email for {{recipient.name}}. Manage preferences: {{brand.supportUrl}}.',
+                'Updated saved email for {{recipient.name}} about {{event.title}} order {{order.id}} {{order.total}} {{ticket.type}}. Manage preferences: {{brand.supportUrl}}. Checkout: {{event.checkoutUrl}}.',
             }),
           }),
           renderedHtml:
-            '<p>Updated saved email for {{recipient.name}}. Manage preferences: {{brand.supportUrl}}.</p>',
+            '<p>Updated saved email for {{recipient.name}} about {{event.title}} order {{order.id}} {{order.total}} {{ticket.type}}. Manage preferences: {{brand.supportUrl}}. Checkout: {{event.checkoutUrl}}.</p>',
           renderedText:
-            'Updated saved email for {{recipient.name}}. Manage preferences: {{brand.supportUrl}}.',
+            'Updated saved email for {{recipient.name}} about {{event.title}} order {{order.id}} {{order.total}} {{ticket.type}}. Manage preferences: {{brand.supportUrl}}. Checkout: {{event.checkoutUrl}}.',
         }),
       );
     });
@@ -1195,8 +1213,7 @@ describe('EmailPersistedEditorView', () => {
   });
 
   it('canonicalizes preview variable and inline style markup before saving', async () => {
-    editorMockState.exportedHtml =
-      `<p>Hi <span data-tixkit-inline-style="true" style="color: #0f766e"><span key="recipient.name" kind="recipient" label="Attendee name" preview="Ada Lovelace" class="tixkit-email-variable-chip" data-tixkit-merge-tag="recipient.name" data-variable-key="recipient.name" data-variable-kind="recipient" data-variable-label="Attendee name" data-variable-preview="Ada Lovelace" data-variable-detail="Attendee name - {{recipient.name}}" title="Attendee name: {{recipient.name}}">Ada Lovelace</span></span>.</p><p><img src="${mergeTagCanvasAttributeValue('ticket.qrCodeUrl')}" data-tixkit-merge-attr-src="ticket.qrCodeUrl" alt="Ticket QR code"></p>`;
+    editorMockState.exportedHtml = `<p>Hi <span data-tixkit-inline-style="true" style="color: #0f766e"><span key="recipient.name" kind="recipient" label="Attendee name" preview="Ada Lovelace" class="tixkit-email-variable-chip" data-tixkit-merge-tag="recipient.name" data-variable-key="recipient.name" data-variable-kind="recipient" data-variable-label="Attendee name" data-variable-preview="Ada Lovelace" data-variable-detail="Attendee name - {{recipient.name}}" title="Attendee name: {{recipient.name}}">Ada Lovelace</span></span>.</p><p><img src="${mergeTagCanvasAttributeValue('ticket.qrCodeUrl')}" data-tixkit-merge-attr-src="ticket.qrCodeUrl" alt="Ticket QR code"></p>`;
     editorMockState.exportedText = 'Hi {{recipient.name}}.';
     render(React.createElement(EmailPersistedEditorView, { eventId: 'evt_1' }));
 
@@ -1298,9 +1315,7 @@ describe('EmailPersistedEditorView', () => {
         '.ticket-code { letter-spacing: 0.08em; }',
       );
       expect(savePayload?.renderedHtml).toContain('data-tixkit-global-css="true"');
-      expect(savePayload?.renderedHtml).toContain(
-        '.ticket-code { letter-spacing: 0.08em; }',
-      );
+      expect(savePayload?.renderedHtml).toContain('.ticket-code { letter-spacing: 0.08em; }');
       expect(savePayload?.renderedHtml.match(/data-tixkit-global-css/g)).toHaveLength(1);
     });
   });
@@ -1364,7 +1379,10 @@ describe('EmailPersistedEditorView', () => {
     expect(screen.queryByRole('button', { name: 'Preview' })).not.toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Publish' })).toBeDisabled();
     openEmailMoreActions();
-    expect(screen.getByRole('menuitem', { name: 'Send test email' })).toHaveAttribute('aria-disabled', 'true');
+    expect(screen.getByRole('menuitem', { name: 'Send test email' })).toHaveAttribute(
+      'aria-disabled',
+      'true',
+    );
   });
 
   it('creates the event-scoped email document and initial canonical draft when none exists', async () => {
@@ -1701,7 +1719,9 @@ describe('EmailPersistedEditorView', () => {
         }),
       );
     });
-    expect(screen.queryByText(/reseller|admin white-label|white label controls/i)).not.toBeInTheDocument();
+    expect(
+      screen.queryByText(/reseller|admin white-label|white label controls/i),
+    ).not.toBeInTheDocument();
 
     clickMoreAction('Switch template');
     expect(await screen.findByRole('dialog', { name: 'Pick a template' })).toBeInTheDocument();

@@ -1,16 +1,8 @@
 'use client';
 
 import * as React from 'react';
-import {
-  Archive,
-  Code,
-  Copy,
-  Eye,
-  Palette,
-  Pencil,
-  Save,
-  Send,
-} from 'lucide-react';
+import dynamic from 'next/dynamic';
+import { Archive, Code, Copy, Eye, Palette, Pencil, Save, Send } from 'lucide-react';
 import { EmailEditor, type EmailEditorRef } from '@react-email/editor';
 import { toast } from 'sonner';
 import {
@@ -75,7 +67,7 @@ import {
 import { EnvelopeHeader, applySenderIdentity } from './email/envelope-header';
 import { InsertPalette } from './email/insert-palette';
 import { PreviewDrawer, type EmailEditorPreview } from './email/preview-drawer';
-import { StyleInspector, type EmailThemePreset } from './email/style-inspector';
+import type { EmailThemePreset, StyleInspectorProps } from './email/style-inspector';
 import {
   audienceLabel,
   emailVariableInserts,
@@ -93,6 +85,11 @@ type EmailReviewState = 'idle' | 'checking' | 'checked' | 'error';
 type EditorPreview = EmailEditorPreview;
 
 type EmailTemplateChoice = AdminContentDocument;
+
+const StyleInspector = dynamic<StyleInspectorProps>(
+  () => import('./email/style-inspector').then((module) => module.StyleInspector),
+  { ssr: false },
+);
 
 export function EmailPersistedEditorView({ eventId }: { eventId: string }) {
   const [event, setEvent] = React.useState<AdminEventDetail>();
@@ -143,12 +140,7 @@ export function EmailPersistedEditorView({ eventId }: { eventId: string }) {
             ? brand.theme.radius
             : undefined,
       }),
-    [
-      brand?.theme.fontFamily,
-      brand?.theme.primaryColor,
-      brand?.theme.radius,
-      emailThemePreset,
-    ],
+    [brand?.theme.fontFamily, brand?.theme.primaryColor, brand?.theme.radius, emailThemePreset],
   );
   const emailExtensions = useEmailEditorExtensions({
     mergeTags: emailVariableInserts,
@@ -444,9 +436,7 @@ export function EmailPersistedEditorView({ eventId }: { eventId: string }) {
     });
   }
 
-  async function reviewCurrentDraft(
-    options: { analysisDelayMs?: number } = {},
-  ) {
+  async function reviewCurrentDraft(options: { analysisDelayMs?: number } = {}) {
     if (!emailDocument) return undefined;
     setReviewState('checking');
     let editorSnapshot: EmailTemplateDocument | undefined;
@@ -587,6 +577,11 @@ export function EmailPersistedEditorView({ eventId }: { eventId: string }) {
     setActionError(undefined);
     setReviewConfirmed(false);
     setReviewDialogOpen(true);
+    if (audience === 'specific') {
+      setAutosave('error');
+      setActionError('Choose an audience with an available recipient selection.');
+      return;
+    }
     const review = await reviewCurrentDraft({ analysisDelayMs: 220 });
     if (!review) return;
     if (hasBlockingIssues(review.issues)) {
@@ -605,6 +600,12 @@ export function EmailPersistedEditorView({ eventId }: { eventId: string }) {
 
   async function publishDraft() {
     if (!document || !event || !emailDocument || isArchived) return;
+    if (audience === 'specific') {
+      setAutosave('error');
+      setActionError('Choose an audience with an available recipient selection.');
+      setReviewDialogOpen(true);
+      return;
+    }
     const review = await reviewCurrentDraft();
     if (!review) return;
     if (hasBlockingIssues(review.issues)) {
@@ -966,6 +967,7 @@ export function EmailPersistedEditorView({ eventId }: { eventId: string }) {
         { mode: 'code' as const, label: 'Code', icon: <Code className="size-4" /> },
       ].map((item) => (
         <button
+          aria-label={item.label}
           aria-pressed={editorMode === item.mode}
           className={`inline-flex items-center gap-1.5 rounded px-2.5 text-sm font-medium transition-colors disabled:pointer-events-none disabled:opacity-50 ${
             editorMode === item.mode
@@ -1017,7 +1019,7 @@ export function EmailPersistedEditorView({ eventId }: { eventId: string }) {
       canvas={
         <section
           aria-label="email template editable document"
-          className="min-h-0 min-w-0 flex-1 overflow-auto bg-muted/30 lg:rounded-tl-3xl"
+          className="min-h-0 min-w-0 flex-1 overflow-auto bg-muted/30 lg:pr-80 lg:rounded-tl-3xl xl:pr-[22rem]"
           data-testid="editor-canvas"
           ref={editorCanvasRef}
         >

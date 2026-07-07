@@ -61,7 +61,7 @@ export function EnvelopeHeader({
       className="mb-3 overflow-hidden rounded-md border border-border bg-background"
       data-testid="email-metadata-bar"
     >
-      <div className="grid min-h-11 grid-cols-[84px_minmax(0,1fr)_96px_minmax(0,1fr)] items-center gap-2 border-b border-border/70 px-4 py-2">
+      <div className="grid min-h-11 grid-cols-[84px_minmax(0,1fr)_84px_minmax(0,1fr)] items-center gap-x-4 gap-y-2 border-b border-border/70 px-4 py-2">
         <label className="text-xs font-medium text-muted-foreground" htmlFor="email-envelope-from">
           From
         </label>
@@ -90,11 +90,11 @@ export function EnvelopeHeader({
             </option>
           ))}
         </select>
-        <span className="text-right text-xs font-medium text-muted-foreground">Reply-To</span>
+        <span className="text-left text-xs font-medium text-muted-foreground">Reply-To</span>
         {replyToOpen ? (
           <input
             aria-label="Reply-To"
-            className="min-w-0 border-none bg-transparent text-right text-sm text-foreground outline-none placeholder:text-muted-foreground/70 disabled:opacity-50"
+            className="min-w-0 border-none bg-transparent text-left text-sm text-foreground outline-none placeholder:text-muted-foreground/70 disabled:opacity-50"
             disabled={disabled}
             onChange={(change) =>
               onChange({
@@ -115,7 +115,7 @@ export function EnvelopeHeader({
         ) : (
           <button
             aria-label="Reply-To"
-            className="min-w-0 truncate text-right text-sm text-muted-foreground transition-colors hover:text-foreground disabled:cursor-not-allowed disabled:opacity-50"
+            className="min-w-0 truncate text-left text-sm text-muted-foreground transition-colors hover:text-foreground disabled:cursor-not-allowed disabled:opacity-50"
             disabled={disabled}
             onClick={() => setReplyToOpen(true)}
             type="button"
@@ -124,7 +124,7 @@ export function EnvelopeHeader({
           </button>
         )}
       </div>
-      <div className="grid min-h-11 grid-cols-[84px_minmax(0,1fr)_96px_minmax(0,1fr)] items-center gap-2 px-4 py-2">
+      <div className="grid min-h-11 grid-cols-[84px_minmax(0,1fr)_84px_minmax(0,1fr)] items-center gap-x-4 gap-y-2 px-4 py-2">
         <label
           className="text-xs font-medium text-muted-foreground"
           htmlFor="email-envelope-subject"
@@ -148,11 +148,11 @@ export function EnvelopeHeader({
           placeholder="Subject"
           value={emailDocument.settings.subject}
         />
-        <span className="text-right text-xs font-medium text-muted-foreground">Preview</span>
+        <span className="text-left text-xs font-medium text-muted-foreground">Preview</span>
         {previewOpen ? (
           <input
             aria-label="Preview text"
-            className="min-w-0 border-none bg-transparent text-right text-sm text-foreground outline-none placeholder:text-muted-foreground/70 disabled:opacity-50"
+            className="min-w-0 border-none bg-transparent text-left text-sm text-foreground outline-none placeholder:text-muted-foreground/70 disabled:opacity-50"
             disabled={disabled}
             onChange={(change) =>
               onChange({
@@ -169,7 +169,7 @@ export function EnvelopeHeader({
         ) : (
           <button
             aria-label="Preview text"
-            className="min-w-0 truncate text-right text-sm text-muted-foreground transition-colors hover:text-foreground disabled:cursor-not-allowed disabled:opacity-50"
+            className="min-w-0 truncate text-left text-sm text-muted-foreground transition-colors hover:text-foreground disabled:cursor-not-allowed disabled:opacity-50"
             disabled={disabled}
             onClick={() => setPreviewOpen(true)}
             type="button"

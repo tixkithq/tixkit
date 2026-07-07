@@ -99,13 +99,7 @@ type EventPageVariablePresentation = {
   preview: string;
   kind: EventPageVariableKind;
 };
-type InspectorPanelId =
-  | 'block'
-  | 'page'
-  | 'code'
-  | 'variables'
-  | 'history'
-  | 'issues';
+type InspectorPanelId = 'block' | 'page' | 'code' | 'variables' | 'history' | 'issues';
 
 type InsertAction = {
   id: InsertActionId;
@@ -873,6 +867,9 @@ export function EventPagePersistedEditorView({ eventId }: { eventId: string }) {
   const [previewError, setPreviewError] = React.useState<string | undefined>(undefined);
   const iframeRef = React.useRef<HTMLIFrameElement | null>(null);
   const suppressIframeUpdateRef = React.useRef(false);
+  const updateEventPageSettingsRef = React.useRef<
+    (update: (document: EventPageDocument) => EventPageDocument) => void
+  >(() => undefined);
 
   const ADMIN_SOURCE = 'tixkit-event-page-admin';
   const EDITOR_SOURCE = 'tixkit-event-page-editor';
@@ -890,10 +887,7 @@ export function EventPagePersistedEditorView({ eventId }: { eventId: string }) {
     (message: Record<string, unknown>) => {
       const iframe = iframeRef.current;
       if (!iframe?.contentWindow) return;
-      iframe.contentWindow.postMessage(
-        { source: ADMIN_SOURCE, ...message },
-        iframeOrigin ?? '*',
-      );
+      iframe.contentWindow.postMessage({ source: ADMIN_SOURCE, ...message }, iframeOrigin ?? '*');
     },
     [iframeOrigin],
   );
@@ -921,7 +915,7 @@ export function EventPagePersistedEditorView({ eventId }: { eventId: string }) {
       }
       if (msg.type === 'block-change' && typeof msg.blockId === 'string' && msg.block) {
         suppressIframeUpdateRef.current = true;
-        updateEventPageSettings((current) => ({
+        updateEventPageSettingsRef.current((current) => ({
           ...current,
           blocks: current.blocks.map((b) =>
             b.id === (msg.blockId as string) ? (msg.block as EventPageBlock) : b,
@@ -931,7 +925,7 @@ export function EventPagePersistedEditorView({ eventId }: { eventId: string }) {
       }
       if (msg.type === 'blocks-reorder' && Array.isArray(msg.blocks)) {
         suppressIframeUpdateRef.current = true;
-        updateEventPageSettings((current) => ({
+        updateEventPageSettingsRef.current((current) => ({
           ...current,
           blocks: msg.blocks as EventPageBlock[],
         }));
@@ -940,7 +934,7 @@ export function EventPagePersistedEditorView({ eventId }: { eventId: string }) {
       if (msg.type === 'block-delete' && typeof msg.blockId === 'string') {
         suppressIframeUpdateRef.current = true;
         const deletedId = msg.blockId as string;
-        updateEventPageSettings((current) => {
+        updateEventPageSettingsRef.current((current) => {
           const blocks = current.blocks.filter((b) => b.id !== deletedId);
           const nextSelected = blocks.find((b) => b.id !== deletedId)?.id;
           if (nextSelected) {
@@ -955,7 +949,7 @@ export function EventPagePersistedEditorView({ eventId }: { eventId: string }) {
         suppressIframeUpdateRef.current = true;
         const originalId = msg.blockId as string;
         const duplicate = msg.block as EventPageBlock;
-        updateEventPageSettings((current) => {
+        updateEventPageSettingsRef.current((current) => {
           const index = current.blocks.findIndex((b) => b.id === originalId);
           if (index < 0) return current;
           const blocks = [
@@ -1145,6 +1139,10 @@ export function EventPagePersistedEditorView({ eventId }: { eventId: string }) {
     }
     suppressIframeUpdateRef.current = false;
   }
+
+  React.useEffect(() => {
+    updateEventPageSettingsRef.current = updateEventPageSettings;
+  });
 
   function selectBlock(blockId: string) {
     setSelectedBlockId(blockId);
@@ -1472,7 +1470,10 @@ export function EventPagePersistedEditorView({ eventId }: { eventId: string }) {
     return <p className="text-xs text-muted-foreground">{blockSummary(selectedBlock)}</p>;
   })();
   const inspectorHeading: Record<InspectorPanelId, { eyebrow: string; title: string }> = {
-    block: { eyebrow: selectedBlock ? `Page / ${selectedBlockLabel}` : 'Page', title: selectedBlockLabel },
+    block: {
+      eyebrow: selectedBlock ? `Page / ${selectedBlockLabel}` : 'Page',
+      title: selectedBlockLabel,
+    },
     page: { eyebrow: 'Page / Settings', title: heroHeadline(eventPageDocument) },
     code: { eyebrow: 'More / Code', title: 'Saved payload' },
     variables: { eyebrow: 'More / Variables', title: 'Merge tags' },
@@ -1779,14 +1780,16 @@ export function EventPagePersistedEditorView({ eventId }: { eventId: string }) {
                         'w-full rounded-md border px-3 py-2 text-left text-xs transition-colors',
                         block.id === selectedBlockId
                           ? 'border-foreground/20 bg-accent text-accent-foreground'
-                          : 'border-border text-muted-foreground hover:bg-accent',
+                          : 'border-border text-foreground hover:bg-accent',
                       )}
                       key={block.id}
                       onClick={() => selectBlock(block.id)}
                       type="button"
                     >
                       <span className="block font-medium">{blockLabel(block)}</span>
-                      <span className="mt-1 block truncate opacity-70">{blockSummary(block)}</span>
+                      <span className="mt-1 block truncate text-foreground/80">
+                        {blockSummary(block)}
+                      </span>
                     </button>
                   ))}
                 </div>
@@ -2026,9 +2029,7 @@ export function EventPagePersistedEditorView({ eventId }: { eventId: string }) {
                           {presentation.kind}
                         </span>
                       </div>
-                      <p className="mt-1 truncate text-muted-foreground">
-                        {presentation.preview}
-                      </p>
+                      <p className="mt-1 truncate text-muted-foreground">{presentation.preview}</p>
                     </div>
                   );
                 })}

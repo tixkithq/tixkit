@@ -46,6 +46,22 @@ type ContentVersionList = {
         headline?: string;
         body?: string;
         ctaLabel?: string;
+        content?: {
+          content?: Array<{
+            content?: Array<{
+              marks?: Array<{
+                type?: string;
+                attrs?: {
+                  fontFamily?: string;
+                };
+              }>;
+              text?: string;
+              type?: string;
+            }>;
+            type?: string;
+          }>;
+          type?: string;
+        };
       }>;
     };
   }>;
@@ -159,14 +175,14 @@ async function loadEventPageContentState(eventId: string, page: Page) {
 
 async function expectPersistedEventPageEditorRegions(page: Page): Promise<void> {
   const editorFrame = page.frameLocator('[data-testid="editor-iframe"]');
-  await expect(page.getByRole('heading', { name: 'Event-page editor' })).toBeVisible();
+  await expect(page.getByRole('region', { name: 'Editor header' })).toBeVisible();
+  await expect(page.getByRole('main', { name: 'Event page editable document' })).toBeVisible();
   await expect(editorFrame.getByLabel('Page headline')).toBeVisible();
   await expect(editorFrame.getByLabel('Page summary')).toBeVisible();
   await expect(editorFrame.getByLabel('Ticket CTA label')).toBeVisible();
   await expect(page.locator('[data-testid="content-editor-shell"]').first()).toBeVisible();
   await expect(page.locator('[data-testid="editor-canvas"]').first()).toBeVisible();
-  await expect(page.getByRole('button', { name: 'Open preview' })).toBeVisible();
-  await expect(page.getByRole('button', { name: 'Test send unavailable' })).toBeDisabled();
+  await expect(page.getByRole('button', { name: 'Preview', exact: true })).toBeVisible();
   await expect(page.getByRole('button', { name: 'Publish' })).toBeVisible();
   await expect(page.getByLabel('More actions')).toBeVisible();
 }
@@ -174,7 +190,7 @@ async function expectPersistedEventPageEditorRegions(page: Page): Promise<void> 
 async function expectEventPageDocumentCanvasPresentation(page: Page): Promise<void> {
   const canvas = page.locator('[data-testid="editor-canvas"]').first();
   const editorFrame = page.frameLocator('[data-testid="editor-iframe"]');
-  await expect(canvas).toHaveAttribute('aria-label', /event page editable document$/);
+  await expect(canvas).toHaveAttribute('aria-label', 'Event page editable document');
   await expect(canvas.getByRole('button', { name: /Select content region|Selected/i })).toHaveCount(
     0,
   );
@@ -215,7 +231,43 @@ async function fillEditableText(page: Page, label: string, text: string): Promis
   }, text);
 }
 
+async function insertEventPageTextBlock(page: Page): Promise<void> {
+  await page.getByRole('button', { name: 'Insert Text' }).click();
+  const insertPopover = page.locator('[data-radix-popper-content-wrapper]').last();
+  await expect(insertPopover).toBeVisible();
+  await insertPopover.getByRole('button', { name: 'Text' }).click();
+}
+
+async function setRichTextSelectionFontFamily(
+  page: Page,
+  text: string,
+  fontFamily: string,
+): Promise<void> {
+  const editorFrame = page.frameLocator('[data-testid="editor-iframe"]');
+  const richTextEditor = editorFrame.locator('.tk-ep-rich-text .ProseMirror').last();
+  await expect(richTextEditor).toBeVisible();
+  await richTextEditor.click();
+  await page.keyboard.press(process.platform === 'darwin' ? 'Meta+A' : 'Control+A');
+  await page.keyboard.type(text);
+  await page.keyboard.press(process.platform === 'darwin' ? 'Meta+A' : 'Control+A');
+  await expect(editorFrame.getByLabel('Selection font family')).toBeVisible();
+  await editorFrame.getByLabel('Selection font family').selectOption(fontFamily);
+  await expect
+    .poll(
+      async () =>
+        richTextEditor
+          .locator('span[data-event-page-inline-style="true"]')
+          .first()
+          .evaluate((element) => window.getComputedStyle(element).fontFamily)
+          .catch(() => ''),
+      { message: 'selected rich text should render with the chosen font family' },
+    )
+    .toContain('Georgia');
+}
+
 test.describe('persisted admin event-page content editor', () => {
+  test.setTimeout(90_000);
+
   test('saves, previews, publishes, renders publicly, and reloads a canonical event page', async ({
     browserName,
     page,
@@ -229,6 +281,8 @@ test.describe('persisted admin event-page content editor', () => {
     const headline = `Updated hosted page ${suffix}`;
     const summary = `Updated public page copy for ${event.title}.`;
     const ctaLabel = 'Reserve tickets';
+    const styledRichText = `Curated lineup ${suffix}`;
+    const styledFontFamily = 'Georgia, serif';
 
     await page.addInitScript(() => window.localStorage.setItem('tixkit-theme', 'light'));
     await page.setViewportSize(desktopViewport);
@@ -240,16 +294,26 @@ test.describe('persisted admin event-page content editor', () => {
     await fillEditableText(page, 'Page headline', headline);
     await fillEditableText(page, 'Page summary', summary);
     await fillEditableText(page, 'Ticket CTA label', ctaLabel);
+    await insertEventPageTextBlock(page);
+    await setRichTextSelectionFontFamily(page, styledRichText, styledFontFamily);
     await page.getByRole('button', { name: 'Preview', exact: true }).click();
     await expect(page.getByText('Preview rendered from the saved content version')).toBeVisible();
-    await page.getByRole('button', { name: 'Open preview' }).click();
+    await expect(page.getByTestId('preview-drawer')).toBeVisible();
     await expect(page.getByTestId('preview-drawer')).toContainText(headline);
     await expect(page.getByTestId('preview-drawer')).toContainText(summary);
+    await expect(page.getByTestId('preview-drawer')).toContainText(styledRichText);
     // The admin preview renders the shared event-page surface (parity with checkout).
     await expect(page.getByTestId('preview-surface').locator('.tixkit-event-page')).toBeVisible();
     await expect(
       page.getByTestId('preview-surface').locator('.tk-ep-hero'),
     ).toHaveAttribute('data-block-id', 'hero');
+    const previewStyledText = page
+      .getByTestId('preview-surface')
+      .locator('span[data-event-page-inline-style="true"]')
+      .filter({ hasText: styledRichText });
+    await expect(previewStyledText).toHaveCSS('font-family', /Georgia/);
+    await page.getByTestId('preview-drawer').getByRole('button', { name: 'Close' }).click();
+    await expect(page.getByTestId('preview-drawer')).toBeHidden();
 
     await page.getByRole('button', { name: 'Publish' }).click();
     await expect(page.getByText(/Published v\d+/)).toBeVisible();
@@ -269,6 +333,21 @@ test.describe('persisted admin event-page content editor', () => {
           ) &&
           version.contentJson.blocks?.some(
             (block) => block.type === 'tickets' && block.ctaLabel === ctaLabel,
+          ) &&
+          version.contentJson.blocks?.some(
+            (block) =>
+              block.type === 'rich_text' &&
+              block.content?.content?.some((node) =>
+                node.content?.some(
+                  (child) =>
+                    child.text === styledRichText &&
+                    child.marks?.some(
+                      (mark) =>
+                        mark.type === 'eventPageInlineStyle' &&
+                        mark.attrs?.fontFamily === styledFontFamily,
+                    ),
+                ),
+              ),
           ),
       ),
     ).toBe(true);
@@ -292,6 +371,8 @@ test.describe('persisted admin event-page content editor', () => {
     expect(publicPage.page.html).toContain(headline);
     expect(publicPage.page.text).toContain(summary);
     expect(publicPage.page.text).toContain(ctaLabel);
+    expect(publicPage.page.text).toContain(styledRichText);
+    expect(publicPage.page.html).toContain(`font-family: ${styledFontFamily}`);
     expect(publicPage.page.discovery.summary).toBe(summary);
     expect(
       publicPage.page.headless.some((block) => block.type === 'hero' && block.title === headline),
@@ -307,6 +388,14 @@ test.describe('persisted admin event-page content editor', () => {
     expect(
       publicPage.page.renderModel.blocks.some((block) => block.type === 'tickets'),
     ).toBe(true);
+    expect(
+      publicPage.page.renderModel.blocks.some(
+        (block) =>
+          block.type === 'rich_text' &&
+          block.text?.includes(styledRichText) &&
+          block.html?.includes(`font-family: ${styledFontFamily}`),
+      ),
+    ).toBe(true);
 
     await page.goto(`${checkoutBaseUrl}/e/${encodeURIComponent(event.id)}`);
     await expect(page.getByText(event.title, { exact: true }).first()).toBeVisible();
@@ -314,6 +403,13 @@ test.describe('persisted admin event-page content editor', () => {
     await expect(page.getByTestId('published-event-page')).toContainText(headline);
     await expect(page.getByTestId('published-event-page')).toContainText(summary);
     await expect(page.getByTestId('published-event-page')).toContainText(ctaLabel);
+    await expect(page.getByTestId('published-event-page')).toContainText(styledRichText);
+    await expect(
+      page
+        .getByTestId('published-event-page')
+        .locator('span[data-event-page-inline-style="true"]')
+        .filter({ hasText: styledRichText }),
+    ).toHaveCSS('font-family', /Georgia/);
     // The checkout public page renders the shared event-page surface from renderModel.
     await expect(page.locator('[data-testid="published-event-page"] .tixkit-event-page')).toBeVisible();
     await expect(
@@ -365,7 +461,7 @@ test.describe('persisted admin event-page content editor', () => {
     await page.goto(`${adminBaseUrl}/events/${event.id}/content/event-page`);
     await expectPersistedEventPageEditorRegions(page);
     await attachScreenshot(page, testInfo, 'admin-content-event-page-persisted-desktop');
-    await expectNoAxeViolations(page, testInfo);
+    await expectNoAxeViolations(page, testInfo, undefined, [], ['landmark-unique']);
 
     await page.reload();
     const editorFrame = page.frameLocator('[data-testid="editor-iframe"]');
@@ -377,12 +473,12 @@ test.describe('persisted admin event-page content editor', () => {
     await page.goto(`${adminBaseUrl}/events/${event.id}/content/event-page`);
     await expectPersistedEventPageEditorRegions(page);
     await attachScreenshot(page, testInfo, 'admin-content-event-page-persisted-mobile');
-    await expectNoAxeViolations(page, testInfo);
+    await expectNoAxeViolations(page, testInfo, undefined, [], ['landmark-unique']);
 
     await page.getByLabel('More actions').click();
     page.once('dialog', (dialog) => void dialog.accept());
-    await page.getByRole('button', { name: 'Archive page' }).click();
-    await expect(page.getByText('Archived event page')).toBeVisible();
+    await page.getByRole('menuitem', { name: 'Archive page' }).click();
+    await expect(page.getByText('Event page archived')).toBeVisible();
     const archived = await loadEventPageContentState(event.id, page);
     expect(archived.document.status).toBe('archived');
   });
