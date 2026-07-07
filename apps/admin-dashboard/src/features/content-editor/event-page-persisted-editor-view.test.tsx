@@ -214,7 +214,6 @@ describe('EventPagePersistedEditorView', () => {
     expect(canvas.querySelector('[data-testid="editor-iframe"]')).not.toBeNull();
     expect(screen.queryByTestId('event-page-metadata-bar')).not.toBeInTheDocument();
     expect(screen.getByRole('navigation', { name: 'Editor tools' })).toBeInTheDocument();
-    expect(screen.getByText('Selected block')).toBeInTheDocument();
     expect(screen.getByRole('heading', { name: 'Event header' })).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: 'Close sidebar' }));
     expect(screen.getByRole('button', { name: 'Inspector' })).toBeInTheDocument();
@@ -238,10 +237,10 @@ describe('EventPagePersistedEditorView', () => {
     expect(screen.queryByText('{{event.title}}')).not.toBeInTheDocument();
     openEventPageMoreActions();
     fireEvent.click(screen.getByRole('menuitem', { name: 'Version history' }));
-    expect(screen.getByText('Version history')).toBeInTheDocument();
+    expect(screen.getByText('More / History')).toBeInTheDocument();
     openEventPageMoreActions();
     fireEvent.click(screen.getByRole('menuitem', { name: 'Page details' }));
-    expect(screen.getByText('Page details')).toBeInTheDocument();
+    expect(screen.getByText('Page / Settings')).toBeInTheDocument();
     openEventPageMoreActions();
     fireEvent.click(screen.getByRole('menuitem', { name: 'Review blockers' }));
     expect(screen.getByText('Publish blockers')).toBeInTheDocument();

@@ -9,7 +9,6 @@ import {
   Eye,
   Image,
   Palette,
-  PanelRightClose,
   Save,
   Send,
   Variable,
@@ -35,8 +34,6 @@ import {
   EditorTopBar,
   InspectorPanel,
   InspectorReopenButton,
-  MetadataBar,
-  MetadataField,
   inputClassName,
 } from '@tixkit/content-editor-shell';
 import {
@@ -62,15 +59,6 @@ import {
   type SendMessageInput,
 } from '@/lib/api';
 import { usePermissions } from '@/context/permission-provider';
-import { Button } from '@/components/ui/button';
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from '@/components/ui/dialog';
 import {
   applyMergeTagPreviewsToEditorContent,
   createBrandEmailEditorTheme,
@@ -83,6 +71,10 @@ import {
   useEmailEditorExtensions,
   variablePresentation,
 } from './email-editor-extensions';
+import { EmailCodeView } from './email/code-view';
+import { EmailDialogs } from './email/dialogs';
+import { EnvelopeHeader, applySenderIdentity } from './email/envelope-header';
+import { PreviewDrawer, type EmailEditorPreview } from './email/preview-drawer';
 
 type AutosaveState = 'idle' | 'saving' | 'saved' | 'error';
 type EmailReviewState = 'idle' | 'checking' | 'checked' | 'error';
@@ -91,11 +83,7 @@ type EmailAudience = SendMessageInput['audience'];
 type EmailSendMode = 'now' | 'scheduled';
 type EmailThemePreset = 'brand' | 'minimal' | 'basic';
 
-type EditorPreview = {
-  label: string;
-  output: string;
-  format: 'html' | 'text';
-};
+type EditorPreview = EmailEditorPreview;
 
 type EmailTemplateChoice = AdminContentDocument;
 const fallbackEmailVariableInserts = [
@@ -953,24 +941,6 @@ function findVerifiedSenderIdentity(
   );
 }
 
-function applySenderIdentity(
-  document: EmailTemplateDocument,
-  identity: AdminBrandSenderIdentity,
-): EmailTemplateDocument {
-  return {
-    ...document,
-    settings: {
-      ...document.settings,
-      sender: {
-        ...document.settings.sender,
-        fromEmail: identity.email,
-        fromName: identity.name || document.settings.sender.fromName,
-        replyToEmail: identity.replyToEmail,
-      },
-    },
-  };
-}
-
 function senderIdentityIssues(
   document: EmailTemplateDocument,
   identities: AdminBrandSenderIdentity[],
@@ -1636,33 +1606,6 @@ function escapeHtmlAttribute(value: string): string {
     .replaceAll('"', '&quot;')
     .replaceAll('<', '&lt;')
     .replaceAll('>', '&gt;');
-}
-
-function PreviewDrawer({ onClose, preview }: { onClose: () => void; preview: EditorPreview }) {
-  return (
-    <aside
-      className="fixed inset-y-0 right-0 z-50 flex w-full max-w-xl flex-col border-l bg-background text-foreground shadow-2xl"
-      data-testid="preview-drawer"
-    >
-      <div className="flex h-14 items-center justify-between border-b px-4">
-        <div>
-          <p className="text-xs uppercase tracking-wide text-muted-foreground">{preview.format}</p>
-          <h2 className="text-sm font-semibold">{preview.label}</h2>
-        </div>
-        <button
-          aria-label="Close preview"
-          className="inline-flex size-8 items-center justify-center rounded-md border text-muted-foreground transition-colors hover:bg-accent hover:text-accent-foreground"
-          onClick={onClose}
-          type="button"
-        >
-          <PanelRightClose className="size-4" />
-        </button>
-      </div>
-      <pre className="min-h-0 flex-1 overflow-auto whitespace-pre-wrap p-4 text-sm leading-6 text-muted-foreground">
-        {preview.output}
-      </pre>
-    </aside>
-  );
 }
 
 export function EmailPersistedEditorView({ eventId }: { eventId: string }) {
@@ -2650,157 +2593,30 @@ export function EmailPersistedEditorView({ eventId }: { eventId: string }) {
           ref={editorCanvasRef}
         >
           <div className="mx-auto min-h-full w-full max-w-[648px] px-5 py-6 sm:px-6">
-            <MetadataBar>
-              <label className="flex items-center gap-2 py-1.5">
-                <span className="shrink-0 text-xs font-medium text-muted-foreground">From</span>
-                <select
-                  aria-label="Verified sender"
-                  className="min-w-0 flex-1 border-none bg-transparent text-sm text-foreground outline-none disabled:opacity-50"
-                  disabled={!canEdit || verifiedSenders.length === 0}
-                  onChange={(change) => {
-                    const identity = verifiedSenders.find(
-                      (sender) => sender.id === change.currentTarget.value,
-                    );
-                    if (!identity) return;
-                    updateEmailDocument(applySenderIdentity(emailDocument, identity));
-                  }}
-                  value={selectedSenderIdentity?.id ?? ''}
-                >
-                  {verifiedSenders.length === 0 ? (
-                    <option className="bg-background text-foreground" value="">
-                      No verified senders
-                    </option>
-                  ) : null}
-                  {verifiedSenders.map((sender) => (
-                    <option className="bg-background text-foreground" key={sender.id} value={sender.id}>
-                      {sender.name ? `${sender.name} <${sender.email}>` : sender.email}
-                    </option>
-                  ))}
-                </select>
-              </label>
-              <label className="flex items-center gap-2 border-t border-border/60 py-1.5">
-                <span className="shrink-0 text-xs font-medium text-muted-foreground">Reply-To</span>
-                <select
-                  aria-label="Reply-To"
-                  className="min-w-0 flex-1 border-none bg-transparent text-sm text-foreground outline-none disabled:opacity-50"
-                  disabled={!canEdit || !selectedSenderIdentity}
-                  onChange={(change) =>
-                    updateEmailDocument({
-                      ...emailDocument,
-                      settings: {
-                        ...emailDocument.settings,
-                        sender: {
-                          ...emailDocument.settings.sender,
-                          replyToEmail: change.currentTarget.value || undefined,
-                        },
-                      },
-                    })
-                  }
-                  value={emailDocument.settings.sender.replyToEmail ?? ''}
-                >
-                  <option className="bg-background text-foreground" value="">
-                    Use From address
-                  </option>
-                  {selectedSenderIdentity?.replyToEmail ? (
-                    <option
-                      className="bg-background text-foreground"
-                      value={selectedSenderIdentity.replyToEmail}
-                    >
-                      {selectedSenderIdentity.replyToEmail}
-                    </option>
-                  ) : null}
-                </select>
-              </label>
-              <MetadataField
-                disabled={!canEdit}
-                label="Subject"
-                onChange={(value) =>
-                  updateEmailDocument({
-                    ...emailDocument,
-                    settings: { ...emailDocument.settings, subject: value },
-                  })
-                }
-                placeholder="Subject"
-                value={emailDocument.settings.subject}
-              />
-              <MetadataField
-                collapsible
-                defaultOpen={false}
-                disabled={!canEdit}
-                label="Preview text"
-                onChange={(value) =>
-                  updateEmailDocument({
-                    ...emailDocument,
-                    settings: { ...emailDocument.settings, previewText: value },
-                  })
-                }
-                placeholder="Preview text"
-                value={emailDocument.settings.previewText ?? ''}
-              />
-            </MetadataBar>
+            <EnvelopeHeader
+              disabled={!canEdit}
+              emailDocument={emailDocument}
+              onChange={updateEmailDocument}
+              senderIdentities={verifiedSenders}
+            />
 
             <div className="mt-6">
               {editorMode === 'code' ? (
-                <div className="grid gap-4 rounded-lg bg-zinc-950 p-4 text-xs text-zinc-100 shadow-sm ring-1 ring-border/50">
-                  <section>
-                    <div className="mb-2 flex items-center justify-between gap-3">
-                      <h2 className="text-sm font-semibold text-white">Email HTML</h2>
-                      <Button
-                        className="h-8 border-zinc-700 bg-zinc-900 px-3 text-xs text-zinc-100 hover:bg-zinc-800"
-                        onClick={() => void copyCodeHtml()}
-                        type="button"
-                        variant="outline"
-                      >
-                        Copy HTML
-                      </Button>
-                    </div>
-                    <textarea
-                      aria-label="Email HTML code"
-                      className="min-h-80 w-full resize-y rounded-md border border-zinc-800 bg-black p-3 font-mono text-xs leading-5 text-zinc-100 outline-none transition focus:border-zinc-500 focus:ring-2 focus:ring-zinc-600 disabled:cursor-not-allowed disabled:opacity-70"
-                      disabled={!canEdit}
-                      onChange={(change) => updateCodeHtml(change.currentTarget.value)}
-                      spellCheck={false}
-                      value={emailDocument.editor.contentHtml}
-                    />
-                    <p className="mt-2 text-xs text-zinc-400">
-                      Edits update the draft HTML. Return to Editor to reload the canvas from this HTML.
-                    </p>
-                  </section>
-                  <details className="group/section">
-                    <summary className="mb-2 flex cursor-pointer items-center gap-2 text-sm font-semibold text-white">
-                      <span>Global CSS</span>
-                      <span className="text-xs font-normal text-zinc-500 group-open/section:hidden">
-                        (click to expand)
-                      </span>
-                    </summary>
-                    <textarea
-                      aria-label="Global CSS"
-                      className="mt-1 min-h-32 w-full resize-y rounded-md border border-zinc-800 bg-black p-3 font-mono text-xs leading-5 text-zinc-100 outline-none transition focus:border-zinc-500 focus:ring-2 focus:ring-zinc-600 disabled:cursor-not-allowed disabled:opacity-70"
-                      disabled={!canEdit}
-                      onChange={(change) =>
-                        updateEmailDocument({
-                          ...emailDocument,
-                          editor: {
-                            ...emailDocument.editor,
-                            globalCss: change.currentTarget.value,
-                          },
-                        })
-                      }
-                      placeholder=".button { text-transform: uppercase; }"
-                      spellCheck={false}
-                      value={emailDocument.editor.globalCss ?? ''}
-                    />
-                    <p className="mt-2 text-xs text-zinc-400">
-                      Injected once into the email HTML head. Validated for unsafe rules before publish.
-                    </p>
-                  </details>
-                  <section>
-                    <h2 className="mb-2 text-sm font-semibold text-white">Editor JSON</h2>
-                    <pre className="max-h-72 overflow-auto whitespace-pre-wrap leading-5">
-                      {JSON.stringify(emailDocument.editor.contentJson ?? emailDocument, null, 2)}
-                    </pre>
-                  </section>
-                </div>
+                <EmailCodeView
+                  canEdit={canEdit}
+                  emailDocument={emailDocument}
+                  onCopyHtml={() => void copyCodeHtml()}
+                  onGlobalCssChange={(globalCss) =>
+                    updateEmailDocument({
+                      ...emailDocument,
+                      editor: {
+                        ...emailDocument.editor,
+                        globalCss,
+                      },
+                    })
+                  }
+                  onHtmlChange={updateCodeHtml}
+                />
               ) : (
               <EmailEditor
                 bubbleMenu={{
@@ -3107,310 +2923,41 @@ export function EmailPersistedEditorView({ eventId }: { eventId: string }) {
       }
     >
       {previewOpen && <PreviewDrawer onClose={() => setPreviewOpen(false)} preview={preview} />}
-      <Dialog open={testDialogOpen} onOpenChange={setTestDialogOpen}>
-        <DialogContent className="sm:max-w-lg">
-          <DialogHeader>
-            <DialogTitle>Send test email</DialogTitle>
-            <DialogDescription>
-              Send the current draft to one or more test recipients before review.
-            </DialogDescription>
-          </DialogHeader>
-          <div className="space-y-2">
-            <label className="space-y-1.5 text-sm font-medium text-foreground">
-              Recipients
-              <textarea
-                aria-label="Test recipients"
-                className={`${inputClassName} min-h-28 resize-y`}
-                disabled={!canEdit || autosave === 'saving'}
-                onChange={(change) => setRecipient(change.currentTarget.value)}
-                onKeyDown={(keyboardEvent) => {
-                  if ((keyboardEvent.metaKey || keyboardEvent.ctrlKey) && keyboardEvent.key === 'Enter') {
-                    keyboardEvent.preventDefault();
-                    void sendTest();
-                  }
-                }}
-                placeholder="ada@example.test, grace@example.test"
-                value={recipient}
-              />
-            </label>
-            <p className="text-xs text-muted-foreground">
-              Separate addresses with commas or line breaks.
-            </p>
-          </div>
-          <DialogFooter>
-            <Button
-              onClick={() => setTestDialogOpen(false)}
-              type="button"
-              variant="outline"
-            >
-              Cancel
-            </Button>
-            <Button
-              disabled={!canEdit || autosave === 'saving'}
-              onClick={() => void sendTest()}
-              type="button"
-            >
-              Send test
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-      <Dialog open={templatePickerOpen} onOpenChange={setTemplatePickerOpen}>
-        <DialogContent className="sm:max-w-2xl">
-          <DialogHeader>
-            <DialogTitle>Pick a template</DialogTitle>
-            <DialogDescription>
-              Start from another email template saved for this brand.
-            </DialogDescription>
-          </DialogHeader>
-          {templateChoices.length === 0 ? (
-            <p className="rounded-md border bg-muted/20 p-3 text-sm text-muted-foreground">
-              No brand email templates are available yet.
-            </p>
-          ) : (
-            <div className="max-h-[28rem] space-y-2 overflow-auto">
-              {templateChoices.map((template) => (
-                <div
-                  className="flex items-start justify-between gap-3 rounded-md border p-3"
-                  key={template.id}
-                >
-                  <div className="min-w-0 space-y-1">
-                    <div className="truncate text-sm font-medium text-foreground">
-                      {template.name}
-                    </div>
-                    <div className="flex flex-wrap gap-2 text-xs text-muted-foreground">
-                      <span className="font-mono">{template.key}</span>
-                      <span>{template.locale}</span>
-                      <span>{template.status}</span>
-                      {template.eventId ? <span>event template</span> : <span>brand template</span>}
-                    </div>
-                  </div>
-                  <Button
-                    disabled={!canEdit}
-                    onClick={() => void applyTemplateChoice(template)}
-                    type="button"
-                    variant="outline"
-                  >
-                    Apply
-                  </Button>
-                </div>
-              ))}
-            </div>
-          )}
-          <DialogFooter>
-            <Button onClick={() => setTemplatePickerOpen(false)} type="button" variant="outline">
-              Close
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-      <Dialog
-        open={reviewDialogOpen}
-        onOpenChange={(open) => {
-          setReviewDialogOpen(open);
-          if (!open) setReviewConfirmed(false);
-        }}
-      >
-        <DialogContent className="sm:max-w-xl">
-          <DialogHeader>
-            <DialogTitle>Ready to send?</DialogTitle>
-            <DialogDescription>
-              Review the campaign details and checks before this email is queued.
-            </DialogDescription>
-          </DialogHeader>
-          <div className="space-y-4">
-            <div className="space-y-3 rounded-md border bg-muted/20 p-3">
-              <h3 className="text-sm font-medium text-foreground">Campaign settings</h3>
-              <label className="flex items-center gap-2 py-1">
-                <span className="w-28 shrink-0 text-xs font-medium text-muted-foreground">To</span>
-                <select
-                  aria-label="Audience"
-                  className="min-w-0 flex-1 rounded-md border bg-background px-2 py-1.5 text-sm text-foreground outline-none focus:ring-2 focus:ring-ring disabled:opacity-50"
-                  disabled={!canEdit}
-                  onChange={(change) => setAudience(change.currentTarget.value as EmailAudience)}
-                  value={audience}
-                >
-                  <option className="bg-background text-foreground" value="all">
-                    All attendees
-                  </option>
-                  <option className="bg-background text-foreground" value="checked_in">
-                    Checked in
-                  </option>
-                  <option className="bg-background text-foreground" value="not_checked_in">
-                    Not checked in
-                  </option>
-                  <option className="bg-background text-foreground" value="specific">
-                    Specific attendees
-                  </option>
-                </select>
-              </label>
-              <div className="flex items-center gap-2 py-1">
-                <span className="w-28 shrink-0 text-xs font-medium text-muted-foreground">
-                  Subscribe to
-                </span>
-                <span className="min-w-0 flex-1 truncate text-sm text-foreground">
-                  {emailDocument.settings.category === 'bulk'
-                    ? `${brand?.name ?? event.title} updates`
-                    : 'Transactional ticket messages'}
-                </span>
-              </div>
-              <label className="flex items-center gap-2 py-1">
-                <span className="w-28 shrink-0 text-xs font-medium text-muted-foreground">When</span>
-                <select
-                  aria-label="Send timing"
-                  className="w-28 rounded-md border bg-background px-2 py-1.5 text-sm text-foreground outline-none focus:ring-2 focus:ring-ring disabled:opacity-50"
-                  disabled={!canEdit}
-                  onChange={(change) => setSendMode(change.currentTarget.value as EmailSendMode)}
-                  value={sendMode}
-                >
-                  <option className="bg-background text-foreground" value="now">
-                    Now
-                  </option>
-                  <option className="bg-background text-foreground" value="scheduled">
-                    Scheduled
-                  </option>
-                </select>
-                {sendMode === 'scheduled' && (
-                  <input
-                    aria-label="Scheduled send time"
-                    className="min-w-0 flex-1 rounded-md border bg-background px-2 py-1.5 text-sm text-foreground outline-none focus:ring-2 focus:ring-ring disabled:opacity-50"
-                    disabled={!canEdit}
-                    onChange={(change) => setScheduledAt(change.currentTarget.value)}
-                    type="datetime-local"
-                    value={scheduledAt}
-                  />
-                )}
-              </label>
-            </div>
-            <dl className="grid gap-2 rounded-md border bg-muted/20 p-3 text-sm sm:grid-cols-[7rem_1fr]">
-              <dt className="text-muted-foreground">From</dt>
-              <dd className="font-medium text-foreground">
-                {selectedSenderIdentity
-                  ? selectedSenderIdentity.name
-                    ? `${selectedSenderIdentity.name} <${selectedSenderIdentity.email}>`
-                    : selectedSenderIdentity.email
-                  : 'No verified sender'}
-              </dd>
-              <dt className="text-muted-foreground">Subject</dt>
-              <dd className="font-medium text-foreground">{emailDocument.settings.subject}</dd>
-              <dt className="text-muted-foreground">Template</dt>
-              <dd className="font-mono text-xs text-foreground">
-                {emailDocument.settings.templateKey}
-              </dd>
-            </dl>
-            <div className="space-y-2">
-              <h3 className="text-sm font-medium text-foreground">Preflight checks</h3>
-              <output
-                className={
-                  reviewAnalysisFailed
-                    ? 'rounded-md border border-red-300 bg-red-50 p-3 text-sm text-red-800 dark:border-red-900/60 dark:bg-red-950/30 dark:text-red-200'
-                    : reviewIsAnalyzing
-                      ? 'rounded-md border border-sky-400/40 bg-sky-50 p-3 text-sm text-sky-800 dark:border-sky-900/60 dark:bg-sky-950/30 dark:text-sky-200'
-                      : 'rounded-md border border-sky-400/40 bg-sky-50 p-3 text-sm text-sky-800 dark:border-sky-900/60 dark:bg-sky-950/30 dark:text-sky-200'
-                }
-              >
-                <div className="font-medium">
-                  {reviewAnalysisFailed
-                    ? 'Content analysis failed'
-                    : reviewIsAnalyzing
-                      ? 'Analyzing your content...'
-                      : 'Content analysis complete'}
-                </div>
-                <p className="mt-1 opacity-80">
-                  {reviewAnalysisFailed
-                    ? 'Review the error message and try again before sending.'
-                    : reviewIsAnalyzing
-                      ? 'Checking the current editor export, links, sender, audience, and unsubscribe requirements from the React Email output.'
-                      : 'The current editor export, links, sender, audience, and unsubscribe requirements were checked from the saved React Email output.'}
-                </p>
-              </output>
-              {reviewHasInvalidSchedule && (
-                <p className="rounded-md border border-red-300 bg-red-50 p-3 text-sm text-red-800 dark:border-red-900/60 dark:bg-red-950/30 dark:text-red-200">
-                  Choose a valid scheduled send time before confirming.
-                </p>
-              )}
-              {reviewState !== 'checked' ? null : reviewBlockingIssues.length === 0 ? (
-                <p className="rounded-md border border-emerald-400/40 bg-emerald-50 p-3 text-sm text-emerald-700 dark:bg-emerald-950/30 dark:text-emerald-300">
-                  No blocking issues found.
-                </p>
-              ) : (
-                <ul className="space-y-2">
-                  {reviewBlockingIssues.map((issue) => (
-                    <li
-                      className="rounded-md border border-red-300 bg-red-50 p-3 text-sm text-red-800 dark:border-red-900/60 dark:bg-red-950/30 dark:text-red-200"
-                      key={validationIssueKey(issue)}
-                    >
-                      <div className="font-medium">{issue.code}</div>
-                      <p className="mt-1 opacity-80">{issue.message}</p>
-                    </li>
-                  ))}
-                </ul>
-              )}
-              {reviewState === 'checked' && reviewWarningIssues.length > 0 && (
-                <ul className="space-y-2">
-                  {reviewWarningIssues.map((issue) => (
-                    <li
-                      className="rounded-md border border-amber-400/40 bg-amber-50 p-3 text-sm text-amber-700 dark:bg-amber-950/30 dark:text-amber-300"
-                      key={validationIssueKey(issue)}
-                    >
-                      <div className="font-medium">{issue.code}</div>
-                      <p className="mt-1 opacity-80">{issue.message}</p>
-                    </li>
-                  ))}
-                </ul>
-              )}
-            </div>
-            <div className="rounded-md border p-3 text-sm">
-              <div className="flex items-center justify-between gap-3">
-                <div>
-                  <div className="font-medium text-foreground">
-                    {sendMode === 'scheduled' ? 'Slide to schedule' : 'Slide to send'}
-                  </div>
-                  <p className="text-muted-foreground">
-                    Confirms the reviewed email, audience, and send time.
-                  </p>
-                </div>
-                <span className="rounded-full bg-muted px-2 py-1 text-xs font-medium text-foreground">
-                  {reviewConfirmed ? 'Confirmed' : 'Locked'}
-                </span>
-              </div>
-              <input
-                aria-label="Slide to confirm email campaign send"
-                className="mt-3 h-2 w-full accent-foreground"
-                disabled={!reviewCanConfirm}
-                max="100"
-                min="0"
-                onChange={(change) =>
-                  setReviewConfirmed(Number(change.currentTarget.value) >= 100)
-                }
-                type="range"
-                value={reviewConfirmed ? 100 : 0}
-              />
-            </div>
-          </div>
-          <DialogFooter>
-            <Button
-              onClick={() => {
-                setReviewDialogOpen(false);
-                setReviewConfirmed(false);
-              }}
-              type="button"
-              variant="outline"
-            >
-              Cancel
-            </Button>
-            <Button
-              disabled={
-                !reviewConfirmed || !reviewCanConfirm
-              }
-              onClick={() => void publishDraft()}
-              type="button"
-            >
-              {sendMode === 'scheduled' ? 'Schedule email' : 'Send email'}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+      <EmailDialogs
+        audience={audience}
+        autosave={autosave}
+        brand={brand}
+        canEdit={canEdit}
+        emailDocument={emailDocument}
+        event={event}
+        onApplyTemplate={(template) => void applyTemplateChoice(template)}
+        onAudienceChange={setAudience}
+        onPublish={() => void publishDraft()}
+        onRecipientChange={setRecipient}
+        onReviewConfirmedChange={setReviewConfirmed}
+        onReviewDialogOpenChange={setReviewDialogOpen}
+        onScheduledAtChange={setScheduledAt}
+        onSendModeChange={setSendMode}
+        onSendTest={() => void sendTest()}
+        onTemplatePickerOpenChange={setTemplatePickerOpen}
+        onTestDialogOpenChange={setTestDialogOpen}
+        recipient={recipient}
+        reviewAnalysisFailed={reviewAnalysisFailed}
+        reviewBlockingIssues={reviewBlockingIssues}
+        reviewCanConfirm={reviewCanConfirm}
+        reviewConfirmed={reviewConfirmed}
+        reviewDialogOpen={reviewDialogOpen}
+        reviewHasInvalidSchedule={reviewHasInvalidSchedule}
+        reviewIsAnalyzing={reviewIsAnalyzing}
+        reviewState={reviewState}
+        reviewWarningIssues={reviewWarningIssues}
+        scheduledAt={scheduledAt}
+        selectedSenderIdentity={selectedSenderIdentity}
+        sendMode={sendMode}
+        templateChoices={templateChoices}
+        templatePickerOpen={templatePickerOpen}
+        testDialogOpen={testDialogOpen}
+      />
     </EditorChrome>
   );
 }
