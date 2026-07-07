@@ -368,10 +368,14 @@ export const orderRoutes: FastifyPluginAsync = async (app) => {
       .send(JSON.stringify(body));
   });
 
-  app.post('/orders/:orderId/cancel', async (request) => {
+  app.post('/orders/:orderId/cancel', async (request, reply) => {
     const principal = request.principal!;
     ClerkAuthService.requirePermission(principal, 'orders.write');
     const { orderId } = request.params as { orderId: string };
+    const idempotencyKey = request.headers['idempotency-key'];
+    if (typeof idempotencyKey !== 'string') {
+      throw new ValidationError('Idempotency-Key header is required for order cancellation');
+    }
     const repo = new OrderRepository(db);
     const order = await repo.findById(orderId);
     if (!order) throw new NotFoundError('Order', orderId);
@@ -380,26 +384,44 @@ export const orderRoutes: FastifyPluginAsync = async (app) => {
     ClerkAuthService.requireBrandScope(principal, order.brand_id);
     ClerkAuthService.requireEventScope(principal, order.event_id);
 
-    if (order.status === 'paid' || order.status === 'partially_refunded') {
-      throw new ValidationError('Cannot cancel a paid order. Use refund instead.');
-    }
+    const result = await withIdempotency(
+      db,
+      {
+        key: idempotencyKey,
+        tenantId: principal.tenantId,
+        requestHash: hashRequest({ orderId, action: 'cancel' }),
+      },
+      async () => {
+        if (order.status === 'cancelled') {
+          return { status: 200, body: serializeOrder(order) };
+        }
+        if (order.status === 'paid' || order.status === 'partially_refunded') {
+          throw new ValidationError('Cannot cancel a paid order. Use refund instead.');
+        }
 
-    const updated = await repo.update(orderId, { status: 'cancelled', cancelled_at: new Date() });
-    await repo.addTimelineEvent(
-      orderId,
-      'order.cancelled',
-      'Order cancelled',
-      undefined,
-      principal.id,
+        const updated = await repo.update(orderId, {
+          status: 'cancelled',
+          cancelled_at: new Date(),
+        });
+        await repo.addTimelineEvent(
+          orderId,
+          'order.cancelled',
+          'Order cancelled',
+          undefined,
+          principal.id,
+        );
+        await writeAuditLog(new AuditLogRepository(db), request, principal, {
+          action: 'order.cancelled',
+          organizationId: order.organization_id,
+          brandId: order.brand_id,
+          resourceType: 'Order',
+          resourceId: orderId,
+        });
+        return { status: 200, body: serializeOrder(updated) };
+      },
     );
-    await writeAuditLog(new AuditLogRepository(db), request, principal, {
-      action: 'order.cancelled',
-      organizationId: order.organization_id,
-      brandId: order.brand_id,
-      resourceType: 'Order',
-      resourceId: orderId,
-    });
-    return serializeOrder(updated);
+
+    return reply.status(result.status).send(result.body);
   });
 
   app.post('/orders/:orderId/refunds', async (request, reply) => {

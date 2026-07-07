@@ -59,6 +59,8 @@ const dbState = vi.hoisted(() => ({
   }>,
   timeline: [] as Record<string, unknown>[],
   timelineEvents: [] as Record<string, unknown>[],
+  auditLogs: [] as Record<string, unknown>[],
+  idempotencyRecords: [] as Record<string, unknown>[],
   updatedOrder: null as Record<string, unknown> | null,
   startRefundCalled: false,
   startRefundInput: null as Record<string, unknown> | null,
@@ -251,7 +253,12 @@ function createMockDb(): unknown {
           };
         }
         if (table === 'events') return dbState.event;
-        if (table === 'idempotency_records') return dbState.idempotencyCheck;
+        if (table === 'idempotency_records') {
+          return (
+            dbState.idempotencyCheck ??
+            dbState.idempotencyRecords.find((record) => rowMatchesWheres(record, query.wheres))
+          );
+        }
         if (table === 'export_jobs') return dbState.exportJobs[0];
         if (table === 'checkout_sessions') {
           if (
@@ -455,16 +462,28 @@ function createMockDb(): unknown {
   }
 
   function createUpdate(table: string) {
+    const wheres: Array<{ column: string; op: string; value: unknown }> = [];
     return {
       set: (values: Record<string, unknown>) => {
         if (table === 'orders') dbState.updatedOrder = { ...dbState.order, ...values };
         return {
-          where: () => ({
-            returningAll: () => ({
-              executeTakeFirstOrThrow: async () => dbState.updatedOrder ?? dbState.order,
-            }),
-            execute: async () => [],
-          }),
+          where: (column: string, op: string, value: unknown) => {
+            wheres.push({ column, op, value });
+            return {
+              returningAll: () => ({
+                executeTakeFirstOrThrow: async () => dbState.updatedOrder ?? dbState.order,
+              }),
+              execute: async () => {
+                if (table === 'idempotency_records') {
+                  const record = dbState.idempotencyRecords.find((candidate) =>
+                    rowMatchesWheres(candidate, wheres),
+                  );
+                  if (record) Object.assign(record, values);
+                }
+                return [];
+              },
+            };
+          },
         };
       },
     };
@@ -474,9 +493,17 @@ function createMockDb(): unknown {
     return {
       values: (vals: Record<string, unknown>) => ({
         returningAll: () => ({
-          executeTakeFirstOrThrow: async () => ({ id: 'new_1', ...vals }),
+          executeTakeFirstOrThrow: async () => {
+            const row = { id: 'new_1', ...vals };
+            if (table === 'order_timeline_events') dbState.timelineEvents.push(row);
+            if (table === 'audit_logs') dbState.auditLogs.push(row);
+            return row;
+          },
         }),
         execute: async () => {
+          if (table === 'idempotency_records') {
+            dbState.idempotencyRecords.push(vals);
+          }
           if (table === 'export_jobs') {
             dbState.exportJobs.push(vals);
           }
@@ -625,6 +652,8 @@ describe('order routes', () => {
     dbState.attendees = [];
     dbState.refunds = [];
     dbState.timelineEvents = [];
+    dbState.auditLogs = [];
+    dbState.idempotencyRecords = [];
     dbState.checkoutSession = null;
     dbState.checkoutSessions = [];
     dbState.events = [];
@@ -734,8 +763,22 @@ describe('order routes', () => {
     const res = await app.inject({
       method: 'POST',
       url: '/orders/ord_1/cancel',
+      headers: { 'idempotency-key': 'cancel-key-1' },
     });
     expect(res.statusCode).toBe(400);
+    await app.close();
+  });
+
+  it('POST /orders/:orderId/cancel requires Idempotency-Key', async () => {
+    dbState.order.status = 'draft';
+    const app = await setupApp(orderRoutes, makePrincipal());
+    const res = await app.inject({
+      method: 'POST',
+      url: '/orders/ord_1/cancel',
+    });
+
+    expect(res.statusCode).toBe(400);
+    expect(res.json().message).toContain('Idempotency-Key');
     await app.close();
   });
 
@@ -745,10 +788,81 @@ describe('order routes', () => {
     const res = await app.inject({
       method: 'POST',
       url: '/orders/ord_1/cancel',
+      headers: { 'idempotency-key': 'cancel-key-1' },
     });
     expect(res.statusCode).toBe(200);
     const body = res.json();
     expect(body.status).toBe('cancelled');
+    await app.close();
+  });
+
+  it('POST /orders/:orderId/cancel replays the same idempotency key without duplicate lifecycle evidence', async () => {
+    dbState.order.status = 'draft';
+    const app = await setupApp(orderRoutes, makePrincipal());
+
+    const first = await app.inject({
+      method: 'POST',
+      url: '/orders/ord_1/cancel',
+      headers: { 'idempotency-key': 'cancel-key-1' },
+    });
+
+    expect(first.statusCode).toBe(200);
+    expect(first.json().status).toBe('cancelled');
+    expect(dbState.timelineEvents.filter((event) => event.type === 'order.cancelled')).toHaveLength(
+      1,
+    );
+    expect(dbState.auditLogs.filter((log) => log.action === 'order.cancelled')).toHaveLength(1);
+
+    dbState.order = { ...dbState.order, ...dbState.updatedOrder };
+    dbState.orders = [dbState.order];
+    dbState.updatedOrder = null;
+
+    const second = await app.inject({
+      method: 'POST',
+      url: '/orders/ord_1/cancel',
+      headers: { 'idempotency-key': 'cancel-key-1' },
+    });
+
+    expect(second.statusCode).toBe(200);
+    expect(second.json()).toEqual(first.json());
+    expect(dbState.timelineEvents.filter((event) => event.type === 'order.cancelled')).toHaveLength(
+      1,
+    );
+    expect(dbState.auditLogs.filter((log) => log.action === 'order.cancelled')).toHaveLength(1);
+    await app.close();
+  });
+
+  it('POST /orders/:orderId/cancel rejects same-key reuse for a different order', async () => {
+    dbState.order.status = 'draft';
+    const app = await setupApp(orderRoutes, makePrincipal());
+
+    const first = await app.inject({
+      method: 'POST',
+      url: '/orders/ord_1/cancel',
+      headers: { 'idempotency-key': 'cancel-key-1' },
+    });
+    expect(first.statusCode).toBe(200);
+
+    dbState.order = {
+      ...dbState.order,
+      id: 'ord_2',
+      order_number: 'TK-1002',
+      status: 'draft',
+    };
+    dbState.orders = [dbState.order];
+    dbState.updatedOrder = null;
+
+    const conflict = await app.inject({
+      method: 'POST',
+      url: '/orders/ord_2/cancel',
+      headers: { 'idempotency-key': 'cancel-key-1' },
+    });
+
+    expect(conflict.statusCode).toBe(409);
+    expect(conflict.json().message).toContain('Idempotency key cancel-key-1');
+    expect(dbState.timelineEvents.filter((event) => event.type === 'order.cancelled')).toHaveLength(
+      1,
+    );
     await app.close();
   });
 
