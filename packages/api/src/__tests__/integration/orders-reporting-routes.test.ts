@@ -515,10 +515,30 @@ function createMockDb(): unknown {
     };
   }
 
+  function createDelete(table: string) {
+    const wheres: Array<{ column: string; op: string; value: unknown }> = [];
+    return {
+      where: (column: string, op: string, value: unknown) => {
+        wheres.push({ column, op, value });
+        return {
+          execute: async () => {
+            if (table === 'idempotency_records') {
+              dbState.idempotencyRecords = dbState.idempotencyRecords.filter(
+                (record) => !rowMatchesWheres(record, wheres),
+              );
+            }
+            return [];
+          },
+        };
+      },
+    };
+  }
+
   const db = {
     selectFrom: createQuery,
     updateTable: createUpdate,
     insertInto: createInsert,
+    deleteFrom: createDelete,
     transaction: () => ({
       execute: async (fn: (trx: typeof db) => Promise<unknown>) => fn(db),
     }),
@@ -1705,6 +1725,68 @@ describe('reporting routes', () => {
         wheres: expect.arrayContaining([
           { column: 'created_at', op: '>=', value: new Date('2026-06-01T00:00:00.000Z') },
           { column: 'created_at', op: '<=', value: new Date('2026-06-01T23:59:59.999Z') },
+        ]),
+      }),
+    );
+    await app.close();
+  });
+
+  it('GET /events/:eventId/reports/sales reuses cached aggregates for the same scoped range', async () => {
+    const app = await setupApp(reportingRoutes, makePrincipal());
+    const first = await app.inject({ method: 'GET', url: '/events/evt_1/reports/sales' });
+    expect(first.statusCode).toBe(200);
+    expect(first.json().grossSalesCents).toBe(10700);
+
+    dbState.queryWheres = [];
+    dbState.orders = [
+      {
+        ...dbState.order,
+        id: 'ord_new',
+        total_cents: 99_900,
+        fee_cents: 0,
+        tax_cents: 0,
+      },
+    ];
+
+    const second = await app.inject({ method: 'GET', url: '/events/evt_1/reports/sales' });
+    expect(second.statusCode).toBe(200);
+    expect(second.json().grossSalesCents).toBe(10700);
+    const aggregateTables = new Set(['orders', 'refunds', 'tickets', 'order_line_items']);
+    expect(dbState.queryWheres.filter(({ table }) => aggregateTables.has(table))).toHaveLength(0);
+    await app.close();
+  });
+
+  it('GET /events/:eventId/reports/sales bypasses cache for a different date range', async () => {
+    const app = await setupApp(reportingRoutes, makePrincipal());
+    const first = await app.inject({ method: 'GET', url: '/events/evt_1/reports/sales' });
+    expect(first.statusCode).toBe(200);
+    expect(first.json().grossSalesCents).toBe(10700);
+
+    dbState.queryWheres = [];
+    dbState.orders = [
+      {
+        ...dbState.order,
+        id: 'ord_later',
+        total_cents: 99_900,
+        fee_cents: 0,
+        tax_cents: 0,
+        created_at: new Date('2026-06-02T12:00:00.000Z'),
+      },
+    ];
+
+    const second = await app.inject({
+      method: 'GET',
+      url: '/events/evt_1/reports/sales?from=2026-06-02&to=2026-06-02',
+    });
+
+    expect(second.statusCode).toBe(200);
+    expect(second.json().grossSalesCents).toBe(99_900);
+    expect(dbState.queryWheres).toContainEqual(
+      expect.objectContaining({
+        table: 'orders',
+        wheres: expect.arrayContaining([
+          { column: 'created_at', op: '>=', value: new Date('2026-06-02T00:00:00.000Z') },
+          { column: 'created_at', op: '<=', value: new Date('2026-06-02T23:59:59.999Z') },
         ]),
       }),
     );

@@ -530,13 +530,34 @@ export default function CheckoutFlow({
       setQuestionsError(null);
       setQuestionsLoading(false);
       try {
-        const [loadedEvent, loadedAvailability, selectedResaleListing] = await Promise.all([
-          publicApi.getEvent(eventId, controller.signal),
-          publicApi.getAvailability(eventId, controller.signal, productFilterParam),
-          resaleListingId
-            ? findPublicResaleListing(eventId, resaleListingId, controller.signal)
-            : Promise.resolve(undefined),
-        ]);
+        let loadedEvent: Awaited<ReturnType<typeof publicApi.getEvent>>;
+        let loadedAvailability: Awaited<ReturnType<typeof publicApi.getAvailability>>;
+        let selectedResaleListing:
+          | Awaited<ReturnType<typeof findPublicResaleListing>>
+          | undefined
+          | null;
+        let loadedQuestions: Awaited<ReturnType<typeof publicApi.getQuestions>> | null = null;
+
+        try {
+          const bootstrap = await publicApi.getCheckoutBootstrap(eventId, controller.signal, {
+            products: productFilterParam,
+            resaleListingId,
+          });
+          loadedEvent = bootstrap.event;
+          loadedAvailability = bootstrap.availability;
+          selectedResaleListing = bootstrap.resaleListing ?? undefined;
+          loadedQuestions = bootstrap.questions;
+        } catch (bootstrapError) {
+          if (controller.signal.aborted) throw bootstrapError;
+          [loadedEvent, loadedAvailability, selectedResaleListing] = await Promise.all([
+            publicApi.getEvent(eventId, controller.signal),
+            publicApi.getAvailability(eventId, controller.signal, productFilterParam),
+            resaleListingId
+              ? findPublicResaleListing(eventId, resaleListingId, controller.signal)
+              : Promise.resolve(undefined),
+          ]);
+        }
+
         if (cancelled) return;
         if (resaleListingId && !selectedResaleListing) {
           throw new CheckoutApiError(
@@ -581,24 +602,28 @@ export default function CheckoutFlow({
           return next;
         });
 
-        if (!cancelled) setInitialLoading(false);
-
         // Required checkout fields are server-authoritative. If the question
         // metadata cannot load, keep checkout blocked until a retry succeeds.
-        setQuestionsLoading(true);
-        try {
-          const loadedQuestions = await publicApi.getQuestions(eventId, controller.signal);
-          if (!cancelled) {
-            setQuestions(loadedQuestions);
-            setQuestionsError(null);
+        if (loadedQuestions) {
+          setQuestions(loadedQuestions);
+          setQuestionsError(null);
+        } else {
+          if (!cancelled) setInitialLoading(false);
+          setQuestionsLoading(true);
+          try {
+            loadedQuestions = await publicApi.getQuestions(eventId, controller.signal);
+            if (!cancelled) {
+              setQuestions(loadedQuestions);
+              setQuestionsError(null);
+            }
+          } catch (err) {
+            if (!cancelled && !controller.signal.aborted) {
+              setQuestions(null);
+              setQuestionsError(userFacingMessage(err));
+            }
+          } finally {
+            if (!cancelled) setQuestionsLoading(false);
           }
-        } catch (err) {
-          if (!cancelled && !controller.signal.aborted) {
-            setQuestions(null);
-            setQuestionsError(userFacingMessage(err));
-          }
-        } finally {
-          if (!cancelled) setQuestionsLoading(false);
         }
       } catch (err) {
         if (cancelled || controller.signal.aborted) return;

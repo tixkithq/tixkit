@@ -275,6 +275,64 @@ describe('publicApi.getAvailability', () => {
   });
 });
 
+describe('publicApi.getCheckoutBootstrap', () => {
+  it('passes bootstrap filters and normalizes nested metadata', async () => {
+    const fetchMock = vi.fn(
+      async () =>
+        new Response(
+          JSON.stringify({
+            event: {
+              id: 'evt_1',
+              title: 'Event',
+              status: 'published',
+              timezone: 'America/Chicago',
+              startsAt: '2026-07-17T19:00:00.000Z',
+            },
+            availability: [
+              {
+                ticketTypeId: 'tt_hidden',
+                name: 'Hidden',
+                kind: 'paid',
+                priceCents: 2500,
+                currency: 'USD',
+                minPerOrder: 1,
+                maxPerOrder: 4,
+                available: 3,
+                status: 'active',
+              },
+            ],
+            questions: {
+              buyerQuestions: [{ id: 'q_1', label: 'Company', type: 'text', appliesTo: 'buyer' }],
+            },
+            resaleListing: null,
+          }),
+          {
+            status: 200,
+            headers: { 'Content-Type': 'application/json' },
+          },
+        ),
+    );
+    vi.stubGlobal('fetch', fetchMock);
+
+    const result = await publicApi.getCheckoutBootstrap('evt_1', undefined, {
+      products: 'tt_hidden',
+      resaleListingId: 'lst_1',
+    });
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const [url] = fetchMock.mock.calls[0] as unknown as [string, RequestInit];
+    expect(url).toContain(
+      '/public/events/evt_1/bootstrap?products=tt_hidden&resaleListingId=lst_1',
+    );
+    expect(result.availability).toHaveLength(1);
+    expect(result.questions).toEqual({
+      buyerQuestions: [{ id: 'q_1', label: 'Company', type: 'text', appliesTo: 'buyer' }],
+      attendeeQuestions: [],
+    });
+    expect(result.resaleListing).toBeNull();
+  });
+});
+
 describe('publicApi.getResaleListings', () => {
   it('passes pagination parameters for direct resale listing lookup', async () => {
     const fetchMock = vi.fn(

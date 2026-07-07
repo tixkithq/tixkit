@@ -4,11 +4,10 @@ import { z } from 'zod';
 import {
   AccessRuleRepository,
   EventRepository,
-  TicketTypeRepository,
   TicketListingRepository,
   BrandRepository,
-  ProductRepository,
   EventOccurrenceRepository,
+  type Database,
 } from '@tixkit/db';
 import { accessRuleMatches, NotFoundError, ValidationError } from '@tixkit/domain';
 import type { AccessRuleRecord, Question } from '@tixkit/domain';
@@ -137,6 +136,484 @@ function isDuplicateInsert(error: unknown): boolean {
   );
 }
 
+export type PublicEventRow = {
+  id: string;
+  tenant_id: string;
+  organization_id: string;
+  brand_id: string;
+  slug: string;
+  title: string;
+  description: string | null;
+  status: string;
+  timezone: string;
+  starts_at: Date | string;
+  ends_at: Date | string | null;
+  venue: string | null;
+  visibility: string | null;
+  cover_image_url?: string | null;
+  resale_enabled?: boolean | number;
+  resale_max_multiplier?: number;
+  resale_max_absolute_cents?: number | null;
+  public_revision?: Date | string | null;
+};
+
+export type PublicAvailabilityItem = Record<string, unknown>;
+
+type PublicAvailabilityMetadata = {
+  ticketTypes: Array<Record<string, any>>;
+  products: Array<Record<string, any>>;
+};
+
+type PublicAvailabilityMetadataCacheEntry = {
+  expiresAt: number;
+  value: PublicAvailabilityMetadata;
+};
+
+export type PublicAvailabilityMetadataCache = Map<string, PublicAvailabilityMetadataCacheEntry>;
+
+const DEFAULT_PUBLIC_AVAILABILITY_METADATA_CACHE_TTL_MS = 60_000;
+const MAX_PUBLIC_AVAILABILITY_METADATA_CACHE_TTL_MS = 300_000;
+const MAX_PUBLIC_AVAILABILITY_METADATA_CACHE_ENTRIES = 512;
+
+export function createPublicAvailabilityMetadataCache(): PublicAvailabilityMetadataCache {
+  return new Map();
+}
+
+function publicAvailabilityMetadataCacheTtlMs(): number {
+  const raw = process.env.PUBLIC_AVAILABILITY_METADATA_CACHE_TTL_MS;
+  if (!raw) return DEFAULT_PUBLIC_AVAILABILITY_METADATA_CACHE_TTL_MS;
+  const parsed = Number.parseInt(raw, 10);
+  if (!Number.isFinite(parsed)) return DEFAULT_PUBLIC_AVAILABILITY_METADATA_CACHE_TTL_MS;
+  return Math.min(Math.max(parsed, 0), MAX_PUBLIC_AVAILABILITY_METADATA_CACHE_TTL_MS);
+}
+
+function publicAvailabilityMetadataCacheKey(eventId: string, requested: readonly string[]): string {
+  return JSON.stringify({ eventId, requested: [...requested].sort() });
+}
+
+function clonePublicAvailabilityMetadata(
+  value: PublicAvailabilityMetadata,
+): PublicAvailabilityMetadata {
+  return {
+    ticketTypes: value.ticketTypes.map((row) => ({ ...row })),
+    products: value.products.map((row) => ({ ...row })),
+  };
+}
+
+function rememberPublicAvailabilityMetadata(
+  cache: PublicAvailabilityMetadataCache,
+  key: string,
+  value: PublicAvailabilityMetadata,
+  expiresAt: number,
+): void {
+  cache.set(key, { expiresAt, value: clonePublicAvailabilityMetadata(value) });
+  while (cache.size > MAX_PUBLIC_AVAILABILITY_METADATA_CACHE_ENTRIES) {
+    const oldestKey = cache.keys().next().value;
+    if (typeof oldestKey !== 'string') break;
+    cache.delete(oldestKey);
+  }
+}
+
+export async function loadPublicEventById(db: Database, eventId: string): Promise<PublicEventRow> {
+  const event = await db
+    .selectFrom('events')
+    .select([
+      'id',
+      'tenant_id',
+      'organization_id',
+      'brand_id',
+      'slug',
+      'title',
+      'description',
+      'status',
+      'timezone',
+      'starts_at',
+      'ends_at',
+      'venue',
+      'visibility',
+      'cover_image_url',
+      'resale_enabled',
+      'resale_max_multiplier',
+      'resale_max_absolute_cents',
+      'public_revision',
+    ])
+    .where('id', '=', eventId)
+    .executeTakeFirst();
+  if (!event || !isPubliclyReadableEvent(event)) throw new NotFoundError('Event', eventId);
+  return event as PublicEventRow;
+}
+
+export async function loadPublicMarketingIntegrations(db: Database, eventId: string) {
+  return db
+    .selectFrom('marketing_integrations')
+    .select(['provider', 'config', 'consent_required', 'status'])
+    .where('event_id', '=', eventId)
+    .where('status', '=', 'active')
+    .execute();
+}
+
+export function serializePublicEvent(
+  event: PublicEventRow,
+  marketingIntegrations: Record<string, unknown>[],
+) {
+  return {
+    id: event.id,
+    slug: event.slug,
+    title: event.title,
+    description: event.description,
+    status: event.status,
+    timezone: event.timezone,
+    startsAt: event.starts_at,
+    endsAt: event.ends_at,
+    venue: parseJsonValue(event.venue, null),
+    brandId: event.brand_id,
+    coverImageUrl: event.cover_image_url ?? undefined,
+    marketingIntegrations: marketingIntegrations.map((row) =>
+      serializeMarketingIntegration(row, { public: true }),
+    ),
+  };
+}
+
+async function loadPublicAvailabilityMetadata(
+  db: Database,
+  eventId: string,
+  requested: readonly string[],
+  cache?: PublicAvailabilityMetadataCache,
+): Promise<PublicAvailabilityMetadata> {
+  const ttlMs = publicAvailabilityMetadataCacheTtlMs();
+  const key = cache && ttlMs > 0 ? publicAvailabilityMetadataCacheKey(eventId, requested) : null;
+  const now = Date.now();
+  if (cache && key) {
+    const cached = cache.get(key);
+    if (cached && cached.expiresAt > now) return clonePublicAvailabilityMetadata(cached.value);
+    if (cached) cache.delete(key);
+  }
+
+  let ticketTypeQuery = db
+    .selectFrom('ticket_types')
+    .select([
+      'id',
+      'event_occurrence_id',
+      'name',
+      'description',
+      'kind',
+      'status',
+      'visibility',
+      'currency',
+      'price_cents',
+      'minimum_price_cents',
+      'sales_start_at',
+      'sales_end_at',
+      'min_per_order',
+      'max_per_order',
+      'inventory_pool_id',
+      'requires_access_code',
+      'access_code_hint',
+    ])
+    .where('event_id', '=', eventId)
+    .where('status', 'in', ['active', 'sold_out']);
+
+  ticketTypeQuery =
+    requested.length > 0
+      ? ticketTypeQuery.where((eb) =>
+          eb.or([eb('visibility', '=', 'public'), eb('id', 'in', requested)]),
+        )
+      : ticketTypeQuery.where('visibility', '=', 'public');
+
+  const [ticketTypes, products] = await Promise.all([
+    ticketTypeQuery.orderBy('sort_order', 'asc').orderBy('id', 'asc').execute(),
+    db
+      .selectFrom('products')
+      .select([
+        'id',
+        'name',
+        'description',
+        'price_cents',
+        'currency',
+        'max_per_order',
+        'available_from',
+        'available_until',
+        'status',
+      ])
+      .where('event_id', '=', eventId)
+      .orderBy('sort_order', 'asc')
+      .orderBy('id', 'asc')
+      .execute(),
+  ]);
+  const metadata = {
+    ticketTypes: ticketTypes.map((row) => ({ ...row })),
+    products: products.map((row) => ({ ...row })),
+  };
+  if (cache && key) rememberPublicAvailabilityMetadata(cache, key, metadata, now + ttlMs);
+  return clonePublicAvailabilityMetadata(metadata);
+}
+
+export async function loadPublicAvailability(
+  db: Database,
+  inventoryService: {
+    getAvailabilityBatch: (inventoryPoolIds: readonly string[]) => Promise<Map<string, any>>;
+    getOccurrenceAvailabilityBatch: (occurrenceIds: readonly string[]) => Promise<Map<string, any>>;
+  },
+  eventId: string,
+  requestedProducts: string[],
+  metadataCache?: PublicAvailabilityMetadataCache,
+): Promise<PublicAvailabilityItem[]> {
+  const requested = [...new Set(requestedProducts.filter(Boolean))];
+  const { ticketTypes, products } = await loadPublicAvailabilityMetadata(
+    db,
+    eventId,
+    requested,
+    metadataCache,
+  );
+
+  const inventoryPoolIds = [...new Set(ticketTypes.map((tt) => tt.inventory_pool_id))];
+  const occurrenceIds = [
+    ...new Set(
+      ticketTypes
+        .map((tt) => tt.event_occurrence_id)
+        .filter((id): id is string => typeof id === 'string' && id.length > 0),
+    ),
+  ];
+  const [availabilityByPool, availabilityByOccurrence] = await Promise.all([
+    inventoryService.getAvailabilityBatch(inventoryPoolIds),
+    inventoryService.getOccurrenceAvailabilityBatch(occurrenceIds),
+  ]);
+
+  const results: PublicAvailabilityItem[] = ticketTypes.map((tt) => {
+    const availability = availabilityByPool.get(tt.inventory_pool_id) ?? {
+      total: 0,
+      sold: 0,
+      reserved: 0,
+      available: 0,
+    };
+    const occurrenceAvailability = tt.event_occurrence_id
+      ? availabilityByOccurrence.get(tt.event_occurrence_id)
+      : undefined;
+    const available =
+      occurrenceAvailability?.available === null || occurrenceAvailability === undefined
+        ? availability.available
+        : Math.min(availability.available, occurrenceAvailability.available);
+    return {
+      ticketTypeId: tt.id,
+      eventOccurrenceId: tt.event_occurrence_id ?? undefined,
+      name: tt.name,
+      kind: tt.kind,
+      priceCents: Number(tt.price_cents),
+      currency: tt.currency,
+      minimumPriceCents: tt.minimum_price_cents ? Number(tt.minimum_price_cents) : undefined,
+      minPerOrder: tt.min_per_order,
+      maxPerOrder: tt.max_per_order,
+      available,
+      status: available > 0 ? tt.status : 'sold_out',
+      requiresAccessCode: tt.requires_access_code,
+      accessCodeHint: tt.access_code_hint ?? undefined,
+      description: tt.description ?? undefined,
+      salesStartAt: tt.sales_start_at,
+      salesEndAt: tt.sales_end_at,
+    };
+  });
+  const now = new Date();
+  for (const product of products) {
+    const availableFrom = toDate(product.available_from);
+    const availableUntil = toDate(product.available_until);
+    const unavailable =
+      product.status !== 'active' ||
+      (availableFrom && now < availableFrom) ||
+      (availableUntil && now > availableUntil);
+    if (unavailable) continue;
+    results.push({
+      type: 'product',
+      productId: product.id,
+      name: product.name,
+      kind: 'product',
+      priceCents: Number(product.price_cents),
+      currency: product.currency,
+      minPerOrder: 1,
+      maxPerOrder: product.max_per_order,
+      available: product.max_per_order,
+      status: product.status,
+      requiresAccessCode: false,
+      description: product.description ?? undefined,
+      salesStartAt: product.available_from,
+      salesEndAt: product.available_until,
+    });
+  }
+  return results;
+}
+
+export async function loadPublicCheckoutQuestions(db: Database, eventId: string) {
+  const questions = await db
+    .selectFrom('questions')
+    .select([
+      'id',
+      'event_id',
+      'ticket_type_id',
+      'type',
+      'label',
+      'description',
+      'required',
+      'applies_to',
+      'options',
+      'placeholder',
+      'is_consent_field',
+      'consent_text',
+      'consent_version',
+      'validation_pattern',
+      'conditional_visibility',
+      'sort_order',
+      'status',
+      'is_hidden',
+      'hidden_at',
+      'deleted_at',
+    ])
+    .where('event_id', '=', eventId)
+    .orderBy('sort_order', 'asc')
+    .execute();
+
+  const visibleQuestions = questions.filter((q) => !isHiddenQuestion(q));
+  const visibleQuestionIds = new Set(visibleQuestions.map((q) => String(q.id)));
+  const serialized = visibleQuestions.map((q) => ({
+    id: q.id,
+    eventId: q.event_id,
+    ticketTypeId: q.ticket_type_id ?? undefined,
+    type: q.type,
+    label: q.label,
+    description: q.description ?? undefined,
+    required: q.required,
+    appliesTo: q.applies_to,
+    options: parseJsonValue<string[] | undefined>(q.options, undefined),
+    placeholder: q.placeholder ?? undefined,
+    isConsentField: q.is_consent_field,
+    consentText: q.consent_text ?? undefined,
+    consentVersion: q.consent_version ?? undefined,
+    validationPattern: q.validation_pattern ?? undefined,
+    conditionalVisibility: parseQuestionConditionalVisibility(
+      q.conditional_visibility,
+      visibleQuestionIds,
+    ),
+    sortOrder: q.sort_order,
+  }));
+
+  return {
+    buyerQuestions: serialized
+      .filter((q) => q.appliesTo === 'buyer' || q.appliesTo === 'both')
+      .map((q) => Object.assign({}, q, { appliesTo: 'buyer' as const })),
+    attendeeQuestions: serialized
+      .filter((q) => q.appliesTo === 'attendee' || q.appliesTo === 'both')
+      .map((q) => Object.assign({}, q, { appliesTo: 'attendee' as const })),
+  };
+}
+
+async function loadPublicResaleListingById(db: Database, event: PublicEventRow, listingId: string) {
+  if (!serializeResalePolicy(event).enabled) return null;
+
+  const now = new Date();
+  const listing = await db
+    .selectFrom('ticket_listings')
+    .innerJoin('tickets', 'tickets.id', 'ticket_listings.ticket_id')
+    .innerJoin('ticket_types', 'ticket_types.id', 'tickets.ticket_type_id')
+    .select([
+      'ticket_listings.id as id',
+      'ticket_listings.event_id as event_id',
+      'ticket_types.id as ticket_type_id',
+      'ticket_types.name as ticket_type_name',
+      'ticket_listings.status as status',
+      'ticket_listings.price_cents as price_cents',
+      'ticket_listings.currency as currency',
+      'ticket_listings.face_value_cents as face_value_cents',
+      'ticket_listings.expires_at as expires_at',
+      'ticket_listings.created_at as created_at',
+      'ticket_listings.updated_at as updated_at',
+    ])
+    .where('ticket_listings.tenant_id', '=', event.tenant_id)
+    .where('ticket_listings.event_id', '=', event.id)
+    .where('ticket_listings.id', '=', listingId)
+    .where('ticket_listings.status', '=', 'listed')
+    .where((eb) =>
+      eb.or([
+        eb('ticket_listings.expires_at', 'is', null),
+        eb('ticket_listings.expires_at', '>', now),
+      ]),
+    )
+    .where((eb) =>
+      eb.or([
+        eb('ticket_listings.reserved_checkout_session_id', 'is', null),
+        eb('ticket_listings.reserved_until', 'is', null),
+        eb('ticket_listings.reserved_until', '<=', now),
+      ]),
+    )
+    .executeTakeFirst();
+  if (!listing) return null;
+  return {
+    id: listing.id,
+    eventId: listing.event_id,
+    ticketTypeId: listing.ticket_type_id,
+    ticketTypeName: listing.ticket_type_name,
+    status: listing.status,
+    priceCents: Number(listing.price_cents),
+    currency: listing.currency,
+    faceValueCents: Number(listing.face_value_cents),
+    expiresAt: listing.expires_at ?? undefined,
+    createdAt: listing.created_at,
+    updatedAt: listing.updated_at,
+  };
+}
+
+export async function loadPublicResaleListings(
+  db: Database,
+  event: PublicEventRow,
+  page: { cursor?: string; limit: number },
+) {
+  if (!serializeResalePolicy(event).enabled) {
+    return { items: [], nextCursor: null, hasMore: false };
+  }
+
+  const listings = await new TicketListingRepository(db).findPublicAvailableByEvent({
+    tenantId: event.tenant_id,
+    eventId: event.id,
+    limit: page.limit + 1,
+    cursor: page.cursor,
+  });
+  const listed = listings.slice(0, page.limit);
+  const ticketIds = [...new Set(listed.map((listing) => String(listing.ticket_id)))];
+  const rows =
+    ticketIds.length > 0
+      ? await db
+          .selectFrom('tickets')
+          .innerJoin('ticket_types', 'ticket_types.id', 'tickets.ticket_type_id')
+          .select([
+            'tickets.id as ticket_id',
+            'ticket_types.id as ticket_type_id',
+            'ticket_types.name as ticket_type_name',
+          ])
+          .where('tickets.tenant_id', '=', event.tenant_id)
+          .where('tickets.id', 'in', ticketIds)
+          .execute()
+      : [];
+  const ticketTypeByTicket = new Map(rows.map((row) => [row.ticket_id, row]));
+
+  return {
+    items: listed.map((listing) => {
+      const ticketType = ticketTypeByTicket.get(listing.ticket_id);
+      return {
+        id: listing.id,
+        eventId: listing.event_id,
+        ticketTypeId: ticketType?.ticket_type_id,
+        ticketTypeName: ticketType?.ticket_type_name,
+        status: listing.status,
+        priceCents: Number(listing.price_cents),
+        currency: listing.currency,
+        faceValueCents: Number(listing.face_value_cents),
+        expiresAt: listing.expires_at ?? undefined,
+        createdAt: listing.created_at,
+        updatedAt: listing.updated_at,
+      };
+    }),
+    nextCursor: listings.length > page.limit ? listed.at(-1)?.id : null,
+    hasMore: listings.length > page.limit,
+  };
+}
+
 /**
  * Public, unauthenticated buyer-facing routes. Only published events and
  * publicly-visible ticket types are exposed. Hidden ticket types are excluded
@@ -146,32 +623,13 @@ function isDuplicateInsert(error: unknown): boolean {
 export const publicRoutes: FastifyPluginAsync = async (app) => {
   const db = app.context.db;
   const inventoryService = app.context.inventoryService;
+  const availabilityMetadataCache = createPublicAvailabilityMetadataCache();
 
   app.get('/public/events/:eventId', async (request) => {
     const { eventId } = request.params as { eventId: string };
-    const event = await new EventRepository(db).findById(eventId);
-    if (!event || !isPubliclyReadableEvent(event)) throw new NotFoundError('Event', eventId);
-    const marketingIntegrations = await db
-      .selectFrom('marketing_integrations')
-      .selectAll()
-      .where('event_id', '=', eventId)
-      .where('status', '=', 'active')
-      .execute();
-    return {
-      id: event.id,
-      slug: event.slug,
-      title: event.title,
-      description: event.description,
-      status: event.status,
-      timezone: event.timezone,
-      startsAt: event.starts_at,
-      endsAt: event.ends_at,
-      venue: parseJsonValue(event.venue, null),
-      brandId: event.brand_id,
-      marketingIntegrations: marketingIntegrations.map((row) =>
-        serializeMarketingIntegration(row, { public: true }),
-      ),
-    };
+    const event = await loadPublicEventById(db, eventId);
+    const marketingIntegrations = await loadPublicMarketingIntegrations(db, eventId);
+    return serializePublicEvent(event, marketingIntegrations);
   });
 
   app.get('/public/events/by-slug/:slug', async (request) => {
@@ -181,7 +639,7 @@ export const publicRoutes: FastifyPluginAsync = async (app) => {
 
     const brandDomain = await db
       .selectFrom('brand_domains')
-      .selectAll()
+      .select(['brand_id', 'is_verified', 'ssl_status'])
       .where('domain', '=', host)
       .where('is_verified', '=', true)
       .where('ssl_status', '=', 'active')
@@ -196,7 +654,7 @@ export const publicRoutes: FastifyPluginAsync = async (app) => {
 
     const brand = await db
       .selectFrom('brands')
-      .selectAll()
+      .select(['id', 'white_label'])
       .where('id', '=', brandDomain.brand_id)
       .executeTakeFirst();
     if (!brand || !boolValue(brand.white_label)) throw new NotFoundError('Event', slug);
@@ -209,14 +667,14 @@ export const publicRoutes: FastifyPluginAsync = async (app) => {
 
     const tenant = await db
       .selectFrom('tenants')
-      .selectAll()
+      .select(['id', 'plan'])
       .where('id', '=', event.tenant_id)
       .executeTakeFirst();
     if (!tenant || tenant.plan === 'free') throw new NotFoundError('Event', slug);
 
     const marketingIntegrations = await db
       .selectFrom('marketing_integrations')
-      .selectAll()
+      .select(['provider', 'config', 'consent_required', 'status'])
       .where('event_id', '=', event.id)
       .where('status', '=', 'active')
       .execute();
@@ -239,14 +697,8 @@ export const publicRoutes: FastifyPluginAsync = async (app) => {
 
   app.get('/public/events/:eventId/marketing-integrations', async (request) => {
     const { eventId } = request.params as { eventId: string };
-    const event = await new EventRepository(db).findById(eventId);
-    if (!event || !isPubliclyReadableEvent(event)) throw new NotFoundError('Event', eventId);
-    const rows = await db
-      .selectFrom('marketing_integrations')
-      .selectAll()
-      .where('event_id', '=', eventId)
-      .where('status', '=', 'active')
-      .execute();
+    await loadPublicEventById(db, eventId);
+    const rows = await loadPublicMarketingIntegrations(db, eventId);
     return {
       items: rows.map((row) => serializeMarketingIntegration(row, { public: true })),
       nextCursor: null,
@@ -359,142 +811,49 @@ export const publicRoutes: FastifyPluginAsync = async (app) => {
     const requestedProducts = parseRequestedProducts(
       (request.query as { products?: unknown }).products,
     );
-    const event = await new EventRepository(db).findById(eventId);
-    if (!event || !isPubliclyReadableEvent(event)) throw new NotFoundError('Event', eventId);
+    await loadPublicEventById(db, eventId);
+    return loadPublicAvailability(
+      db,
+      inventoryService,
+      eventId,
+      requestedProducts,
+      availabilityMetadataCache,
+    );
+  });
 
-    const ttRepo = new TicketTypeRepository(db);
-    // Public listings include public ticket types. Explicit product filters may
-    // also reveal hidden ticket IDs for direct-link/widget purchase flows.
-    const ticketTypes = await ttRepo.findPublicOrRequestedByEvent(eventId, requestedProducts);
-    const products = await new ProductRepository(db).findByEvent(eventId);
-    const inventoryPoolIds = [...new Set(ticketTypes.map((tt) => tt.inventory_pool_id))];
-    const occurrenceIds = [
-      ...new Set(
-        ticketTypes
-          .map((tt) => tt.event_occurrence_id)
-          .filter((id): id is string => typeof id === 'string' && id.length > 0),
+  app.get('/public/events/:eventId/bootstrap', async (request) => {
+    const { eventId } = request.params as { eventId: string };
+    const query = request.query as { products?: unknown; resaleListingId?: unknown };
+    const requestedProducts = parseRequestedProducts(query.products);
+    const resaleListingId = firstQueryParam(query.resaleListingId).trim() || undefined;
+    const event = await loadPublicEventById(db, eventId);
+    const [marketingIntegrations, availability, questions, resaleListing] = await Promise.all([
+      loadPublicMarketingIntegrations(db, eventId),
+      loadPublicAvailability(
+        db,
+        inventoryService,
+        eventId,
+        requestedProducts,
+        availabilityMetadataCache,
       ),
-    ];
-    const [availabilityByPool, availabilityByOccurrence] = await Promise.all([
-      inventoryService.getAvailabilityBatch(inventoryPoolIds),
-      inventoryService.getOccurrenceAvailabilityBatch(occurrenceIds),
+      loadPublicCheckoutQuestions(db, eventId),
+      resaleListingId
+        ? loadPublicResaleListingById(db, event, resaleListingId)
+        : Promise.resolve(null),
     ]);
-
-    const results: Record<string, unknown>[] = ticketTypes.map((tt) => {
-      const availability = availabilityByPool.get(tt.inventory_pool_id) ?? {
-        total: 0,
-        sold: 0,
-        reserved: 0,
-        available: 0,
-      };
-      const occurrenceAvailability = tt.event_occurrence_id
-        ? availabilityByOccurrence.get(tt.event_occurrence_id)
-        : undefined;
-      const available =
-        occurrenceAvailability?.available === null || occurrenceAvailability === undefined
-          ? availability.available
-          : Math.min(availability.available, occurrenceAvailability.available);
-      return {
-        ticketTypeId: tt.id,
-        eventOccurrenceId: tt.event_occurrence_id ?? undefined,
-        name: tt.name,
-        kind: tt.kind,
-        priceCents: Number(tt.price_cents),
-        currency: tt.currency,
-        minimumPriceCents: tt.minimum_price_cents ? Number(tt.minimum_price_cents) : undefined,
-        minPerOrder: tt.min_per_order,
-        maxPerOrder: tt.max_per_order,
-        available,
-        status: available > 0 ? tt.status : 'sold_out',
-        requiresAccessCode: tt.requires_access_code,
-        accessCodeHint: tt.access_code_hint ?? undefined,
-        description: tt.description ?? undefined,
-        salesStartAt: tt.sales_start_at,
-        salesEndAt: tt.sales_end_at,
-      };
-    });
-    const now = new Date();
-    for (const product of products) {
-      const availableFrom = toDate(product.available_from);
-      const availableUntil = toDate(product.available_until);
-      const unavailable =
-        product.status !== 'active' ||
-        (availableFrom && now < availableFrom) ||
-        (availableUntil && now > availableUntil);
-      if (unavailable) continue;
-      results.push({
-        type: 'product',
-        productId: product.id,
-        name: product.name,
-        kind: 'product',
-        priceCents: Number(product.price_cents),
-        currency: product.currency,
-        minPerOrder: 1,
-        maxPerOrder: product.max_per_order,
-        available: product.max_per_order,
-        status: product.status,
-        requiresAccessCode: false,
-        description: product.description ?? undefined,
-        salesStartAt: product.available_from,
-        salesEndAt: product.available_until,
-      });
-    }
-    return results;
+    return {
+      event: serializePublicEvent(event, marketingIntegrations),
+      availability,
+      questions,
+      resaleListing,
+    };
   });
 
   app.get('/public/events/:eventId/resale-listings', async (request) => {
     const { eventId } = request.params as { eventId: string };
     const page = parsePublicPageParams(request.query as { cursor?: unknown; limit?: unknown });
-    const event = await new EventRepository(db).findById(eventId);
-    if (!event || !isPubliclyReadableEvent(event)) throw new NotFoundError('Event', eventId);
-    if (!serializeResalePolicy(event).enabled) {
-      return { items: [], nextCursor: null, hasMore: false };
-    }
-
-    const listings = await new TicketListingRepository(db).findPublicAvailableByEvent({
-      tenantId: event.tenant_id,
-      eventId,
-      limit: page.limit + 1,
-      cursor: page.cursor,
-    });
-    const listed = listings.slice(0, page.limit);
-    const ticketIds = [...new Set(listed.map((listing) => String(listing.ticket_id)))];
-    const rows =
-      ticketIds.length > 0
-        ? await db
-            .selectFrom('tickets')
-            .innerJoin('ticket_types', 'ticket_types.id', 'tickets.ticket_type_id')
-            .select([
-              'tickets.id as ticket_id',
-              'ticket_types.id as ticket_type_id',
-              'ticket_types.name as ticket_type_name',
-            ])
-            .where('tickets.tenant_id', '=', event.tenant_id)
-            .where('tickets.id', 'in', ticketIds)
-            .execute()
-        : [];
-    const ticketTypeByTicket = new Map(rows.map((row) => [row.ticket_id, row]));
-
-    return {
-      items: listed.map((listing) => {
-        const ticketType = ticketTypeByTicket.get(listing.ticket_id);
-        return {
-          id: listing.id,
-          eventId: listing.event_id,
-          ticketTypeId: ticketType?.ticket_type_id,
-          ticketTypeName: ticketType?.ticket_type_name,
-          status: listing.status,
-          priceCents: Number(listing.price_cents),
-          currency: listing.currency,
-          faceValueCents: Number(listing.face_value_cents),
-          expiresAt: listing.expires_at ?? undefined,
-          createdAt: listing.created_at,
-          updatedAt: listing.updated_at,
-        };
-      }),
-      nextCursor: listings.length > page.limit ? listed.at(-1)?.id : null,
-      hasMore: listings.length > page.limit,
-    };
+    const event = await loadPublicEventById(db, eventId);
+    return loadPublicResaleListings(db, event, page);
   });
 
   app.post(
@@ -534,7 +893,7 @@ export const publicRoutes: FastifyPluginAsync = async (app) => {
 
       const ticketTypes = await db
         .selectFrom('ticket_types')
-        .selectAll()
+        .select(['id'])
         .where('event_id', '=', eventId)
         .where('id', 'in', ticketTypeIds)
         .where('status', 'in', ['active', 'sold_out'])
@@ -575,37 +934,39 @@ export const publicRoutes: FastifyPluginAsync = async (app) => {
 
   app.get('/public/events/:eventId/revision', async (request) => {
     const { eventId } = request.params as { eventId: string };
-    const event = await new EventRepository(db).findById(eventId);
-    if (!event || !isPubliclyReadableEvent(event)) throw new NotFoundError('Event', eventId);
+    const event = await loadPublicEventById(db, eventId);
+    if (event.public_revision) {
+      return {
+        revision:
+          event.public_revision instanceof Date
+            ? event.public_revision.toISOString()
+            : String(event.public_revision),
+      };
+    }
 
-    const [eventRow, questionRow, ticketTypeRow, eventPageRow, occurrenceRow] =
-      await Promise.all([
-        db
-          .selectFrom('events')
-          .select('updated_at')
-          .where('id', '=', eventId)
-          .executeTakeFirst(),
-        db
-          .selectFrom('questions')
-          .select(db.fn.max('updated_at').as('max_updated'))
-          .where('event_id', '=', eventId)
-          .executeTakeFirst(),
-        db
-          .selectFrom('ticket_types')
-          .select(db.fn.max('updated_at').as('max_updated'))
-          .where('event_id', '=', eventId)
-          .executeTakeFirst(),
-        db
-          .selectFrom('event_pages')
-          .select(db.fn.max('updated_at').as('max_updated'))
-          .where('event_id', '=', eventId)
-          .executeTakeFirst(),
-        db
-          .selectFrom('event_occurrences')
-          .select(db.fn.max('updated_at').as('max_updated'))
-          .where('event_id', '=', eventId)
-          .executeTakeFirst(),
-      ]);
+    const [eventRow, questionRow, ticketTypeRow, eventPageRow, occurrenceRow] = await Promise.all([
+      db.selectFrom('events').select('updated_at').where('id', '=', eventId).executeTakeFirst(),
+      db
+        .selectFrom('questions')
+        .select(db.fn.max('updated_at').as('max_updated'))
+        .where('event_id', '=', eventId)
+        .executeTakeFirst(),
+      db
+        .selectFrom('ticket_types')
+        .select(db.fn.max('updated_at').as('max_updated'))
+        .where('event_id', '=', eventId)
+        .executeTakeFirst(),
+      db
+        .selectFrom('event_pages')
+        .select(db.fn.max('updated_at').as('max_updated'))
+        .where('event_id', '=', eventId)
+        .executeTakeFirst(),
+      db
+        .selectFrom('event_occurrences')
+        .select(db.fn.max('updated_at').as('max_updated'))
+        .where('event_id', '=', eventId)
+        .executeTakeFirst(),
+    ]);
 
     const candidates = [
       eventRow?.updated_at,
@@ -622,48 +983,8 @@ export const publicRoutes: FastifyPluginAsync = async (app) => {
 
   app.get('/public/events/:eventId/questions', async (request) => {
     const { eventId } = request.params as { eventId: string };
-    const event = await new EventRepository(db).findById(eventId);
-    if (!event || !isPubliclyReadableEvent(event)) throw new NotFoundError('Event', eventId);
-
-    const questions = await db
-      .selectFrom('questions')
-      .selectAll()
-      .where('event_id', '=', eventId)
-      .orderBy('sort_order', 'asc')
-      .execute();
-
-    const visibleQuestions = questions.filter((q) => !isHiddenQuestion(q));
-    const visibleQuestionIds = new Set(visibleQuestions.map((q) => String(q.id)));
-    const serialized = visibleQuestions.map((q) => ({
-      id: q.id,
-      eventId: q.event_id,
-      ticketTypeId: q.ticket_type_id ?? undefined,
-      type: q.type,
-      label: q.label,
-      description: q.description ?? undefined,
-      required: q.required,
-      appliesTo: q.applies_to,
-      options: parseJsonValue<string[] | undefined>(q.options, undefined),
-      placeholder: q.placeholder ?? undefined,
-      isConsentField: q.is_consent_field,
-      consentText: q.consent_text ?? undefined,
-      consentVersion: q.consent_version ?? undefined,
-      validationPattern: q.validation_pattern ?? undefined,
-      conditionalVisibility: parseQuestionConditionalVisibility(
-        q.conditional_visibility,
-        visibleQuestionIds,
-      ),
-      sortOrder: q.sort_order,
-    }));
-
-    return {
-      buyerQuestions: serialized
-        .filter((q) => q.appliesTo === 'buyer' || q.appliesTo === 'both')
-        .map((q) => Object.assign({}, q, { appliesTo: 'buyer' as const })),
-      attendeeQuestions: serialized
-        .filter((q) => q.appliesTo === 'attendee' || q.appliesTo === 'both')
-        .map((q) => Object.assign({}, q, { appliesTo: 'attendee' as const })),
-    };
+    await loadPublicEventById(db, eventId);
+    return loadPublicCheckoutQuestions(db, eventId);
   });
 };
 

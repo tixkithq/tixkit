@@ -120,7 +120,10 @@ function createMockDb(tables: Tables = {}): unknown {
         countAll: () => 'count',
       },
       async executeTakeFirst() {
-        if (countAlias) return { [countAlias]: (tables[table] ?? []).filter((r) => matchesWheres(r, wheres)).length };
+        if (countAlias)
+          return {
+            [countAlias]: (tables[table] ?? []).filter((r) => matchesWheres(r, wheres)).length,
+          };
         return (tables[table] ?? []).find((row) => matchesWheres(row, wheres));
       },
       async executeTakeFirstOrThrow() {
@@ -679,6 +682,66 @@ describe('tenant settings list permission gates', () => {
     const res = await app.inject({ method: 'GET', url: '/organizations' });
     expect(res.statusCode).toBe(200);
     expect(res.json().map((org: { id: string }) => org.id)).toEqual(['org_1']);
+    await app.close();
+  });
+
+  it('POST /organizations rejects brand-scoped principals', async () => {
+    const tables: Tables = { organizations: [] };
+    const app = await setupApp(
+      tenantRoutes,
+      makePrincipal({
+        type: 'api_key',
+        id: 'ak_brand_scoped',
+        organizationIds: ['org_1'],
+        brandIds: ['brd_1'],
+        scopes: ['settings.write'],
+      }),
+      tables,
+    );
+
+    const res = await app.inject({
+      method: 'POST',
+      url: '/organizations',
+      payload: {
+        name: 'Scoped Org',
+        slug: 'scoped-org',
+        clerkOrganizationId: 'clerk_org_scoped',
+      },
+    });
+
+    expect(res.statusCode).toBe(403);
+    expect(res.json().message).toContain('Scoped principals cannot create tenant organizations');
+    expect(tables.organizations).toEqual([]);
+    await app.close();
+  });
+
+  it('POST /organizations rejects event-scoped principals', async () => {
+    const tables: Tables = { organizations: [] };
+    const app = await setupApp(
+      tenantRoutes,
+      makePrincipal({
+        type: 'api_key',
+        id: 'ak_event_scoped',
+        organizationIds: ['org_1'],
+        eventIds: ['evt_1'],
+        scopes: ['settings.write'],
+      }),
+      tables,
+    );
+
+    const res = await app.inject({
+      method: 'POST',
+      url: '/organizations',
+      payload: {
+        name: 'Event Scoped Org',
+        slug: 'event-scoped-org',
+        clerkOrganizationId: 'clerk_org_event_scoped',
+      },
+    });
+
+    expect(res.statusCode).toBe(403);
+    expect(res.json().message).toContain('Scoped principals cannot create tenant organizations');
+    expect(tables.organizations).toEqual([]);
     await app.close();
   });
 

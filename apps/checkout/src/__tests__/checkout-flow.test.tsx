@@ -27,6 +27,7 @@ vi.mock('@/lib/api', () => {
     publicApi: {
       getEvent: vi.fn(),
       getAvailability: vi.fn(),
+      getCheckoutBootstrap: vi.fn(),
       getResaleListings: vi.fn(),
       getQuestions: vi.fn(),
       getBrand: vi.fn(),
@@ -42,12 +43,40 @@ vi.mock('@/lib/api', () => {
   };
 });
 
+type MockedCallable<TArgs extends unknown[], TResult> = ((...args: TArgs) => TResult) & {
+  mockResolvedValue(value: Awaited<TResult>): MockedCallable<TArgs, TResult>;
+  mockResolvedValueOnce(value: Awaited<TResult>): MockedCallable<TArgs, TResult>;
+  mockRejectedValue(value: unknown): MockedCallable<TArgs, TResult>;
+  mockRejectedValueOnce(value: unknown): MockedCallable<TArgs, TResult>;
+  mockImplementation(fn: (...args: TArgs) => TResult): MockedCallable<TArgs, TResult>;
+  mock: { calls: TArgs[] };
+};
+
 const publicApiMock = publicApi as unknown as {
-  getEvent: ReturnType<typeof vi.fn>;
-  getAvailability: ReturnType<typeof vi.fn>;
-  getResaleListings: ReturnType<typeof vi.fn>;
-  getQuestions: ReturnType<typeof vi.fn>;
-  getBrand: ReturnType<typeof vi.fn>;
+  getEvent: MockedCallable<
+    Parameters<typeof publicApi.getEvent>,
+    ReturnType<typeof publicApi.getEvent>
+  >;
+  getAvailability: MockedCallable<
+    Parameters<typeof publicApi.getAvailability>,
+    ReturnType<typeof publicApi.getAvailability>
+  >;
+  getCheckoutBootstrap: MockedCallable<
+    Parameters<typeof publicApi.getCheckoutBootstrap>,
+    ReturnType<typeof publicApi.getCheckoutBootstrap>
+  >;
+  getResaleListings: MockedCallable<
+    Parameters<typeof publicApi.getResaleListings>,
+    ReturnType<typeof publicApi.getResaleListings>
+  >;
+  getQuestions: MockedCallable<
+    Parameters<typeof publicApi.getQuestions>,
+    ReturnType<typeof publicApi.getQuestions>
+  >;
+  getBrand: MockedCallable<
+    Parameters<typeof publicApi.getBrand>,
+    ReturnType<typeof publicApi.getBrand>
+  >;
 };
 const checkoutApiMock = checkoutApi as unknown as {
   createSession: ReturnType<typeof vi.fn>;
@@ -102,6 +131,33 @@ describe('CheckoutFlow buyer validation', () => {
       buyerQuestions: [],
       attendeeQuestions: [],
     });
+    publicApiMock.getCheckoutBootstrap.mockImplementation(
+      async (
+        eventId: string,
+        signal?: AbortSignal,
+        input?: { products?: string; resaleListingId?: string },
+      ) => {
+        const [loadedEvent, loadedAvailability, questions] = await Promise.all([
+          publicApiMock.getEvent(eventId, signal),
+          publicApiMock.getAvailability(eventId, signal, input?.products),
+          publicApiMock.getQuestions(eventId, signal),
+        ]);
+        let resaleListing = null;
+        let cursor: string | undefined;
+        while (input?.resaleListingId) {
+          const page = await publicApiMock.getResaleListings(
+            eventId,
+            signal,
+            cursor ? { cursor } : undefined,
+          );
+          resaleListing =
+            page.items.find((item: { id: string }) => item.id === input.resaleListingId) ?? null;
+          if (resaleListing || !page.hasMore || !page.nextCursor) break;
+          cursor = page.nextCursor;
+        }
+        return { event: loadedEvent, availability: loadedAvailability, questions, resaleListing };
+      },
+    );
     publicApiMock.getBrand.mockRejectedValue(new Error('brand unavailable'));
   });
 
@@ -133,6 +189,7 @@ describe('CheckoutFlow buyer validation', () => {
   });
 
   it('blocks checkout with a retryable error when question metadata fails to load', async () => {
+    publicApiMock.getCheckoutBootstrap.mockRejectedValueOnce(new Error('bootstrap unavailable'));
     publicApiMock.getQuestions
       .mockRejectedValueOnce(new Error('question metadata unavailable'))
       .mockResolvedValueOnce({

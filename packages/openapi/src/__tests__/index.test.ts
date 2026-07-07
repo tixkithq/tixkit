@@ -880,25 +880,30 @@ describe('openApiSpec', () => {
       ].schema,
     ).toEqual({ $ref: '#/components/schemas/PublicContentPage' });
     expect(
-      openApiSpec.paths['/public/events/{eventId}/discovery-card'].get.responses['200'].content[
+      openApiSpec.paths['/public/events/{eventId}/bootstrap'].get.responses['200'].content[
         'application/json'
       ].schema,
-    ).toEqual({ $ref: '#/components/schemas/PublicEventDiscoveryCard' });
+    ).toEqual({ $ref: '#/components/schemas/PublicCheckoutBootstrap' });
     expect(
-      openApiSpec.paths['/public/events/{eventId}/draft-preview'].get.responses['200'].content[
+      openApiSpec.paths['/public/events/{eventId}/page-bootstrap'].get.responses['200'].content[
         'application/json'
       ].schema,
-    ).toEqual({ $ref: '#/components/schemas/DraftPreviewPage' });
+    ).toEqual({ $ref: '#/components/schemas/PublicEventPageBootstrap' });
     expect(
-      openApiSpec.paths['/public/events/{eventId}'].get.responses['200'].content[
-        'application/json'
-      ].schema,
+      openApiSpec.paths['/public/events/{eventId}'].get.responses['200'].content['application/json']
+        .schema,
     ).toEqual({ $ref: '#/components/schemas/PublicEvent' });
     expect(
       openApiSpec.paths['/public/events/by-slug/{slug}'].get.responses['200'].content[
         'application/json'
       ].schema,
     ).toEqual({ $ref: '#/components/schemas/PublicEvent' });
+    expect(openApiSpec.components.schemas.PublicCheckoutBootstrap.properties.event).toEqual({
+      $ref: '#/components/schemas/PublicEvent',
+    });
+    expect(openApiSpec.components.schemas.PublicEventPageBootstrap.properties.event).toEqual({
+      $ref: '#/components/schemas/PublicEvent',
+    });
     expect(openApiSpec.components.schemas.PublicEvent.required).toEqual([
       'id',
       'slug',
@@ -911,7 +916,9 @@ describe('openApiSpec', () => {
     ]);
     expect(openApiSpec.components.schemas.PublicEvent.properties).not.toHaveProperty('currency');
     expect(openApiSpec.components.schemas.PublicEvent.properties).not.toHaveProperty('visibility');
-    expect(openApiSpec.components.schemas.PublicEvent.properties).not.toHaveProperty('resalePolicy');
+    expect(openApiSpec.components.schemas.PublicEvent.properties).not.toHaveProperty(
+      'resalePolicy',
+    );
     expect(
       openApiSpec.components.schemas.PublicEvent.properties.marketingIntegrations.items,
     ).toEqual({
@@ -920,6 +927,20 @@ describe('openApiSpec', () => {
     expect(openApiSpec.components.schemas.PublicMarketingIntegration.properties).not.toHaveProperty(
       'tenantId',
     );
+    expect(
+      openApiSpec.paths['/public/events/by-slug/{slug}/page-bootstrap'].get.responses['200']
+        .content['application/json'].schema,
+    ).toEqual({ $ref: '#/components/schemas/PublicEventPageBootstrap' });
+    expect(
+      openApiSpec.paths['/public/events/{eventId}/discovery-card'].get.responses['200'].content[
+        'application/json'
+      ].schema,
+    ).toEqual({ $ref: '#/components/schemas/PublicEventDiscoveryCard' });
+    expect(
+      openApiSpec.paths['/public/events/{eventId}/draft-preview'].get.responses['200'].content[
+        'application/json'
+      ].schema,
+    ).toEqual({ $ref: '#/components/schemas/DraftPreviewPage' });
     expect(
       openApiSpec.paths['/public/events/{eventId}/draft-preview'].get.responses,
     ).not.toHaveProperty('401');
@@ -1076,6 +1097,49 @@ describe('openApiSpec', () => {
         { $ref: '#/components/parameters/PaymentIntentClientSecret' },
       ]),
     );
+  });
+
+  it('documents checkout session updates with their runtime request body', () => {
+    const route = openApiSpec.paths['/checkout/sessions/{sessionId}'].patch;
+    expect(route.parameters).toEqual(
+      expect.arrayContaining([
+        { name: 'sessionId', in: 'path', required: true, schema: { type: 'string' } },
+        { $ref: '#/components/parameters/CheckoutSessionToken' },
+      ]),
+    );
+    expect(route.requestBody.content['application/json'].schema).toEqual({
+      $ref: '#/components/schemas/CheckoutSessionUpdateInput',
+    });
+    expect(openApiSpec.components.schemas.CheckoutSessionUpdateInput.properties).toEqual({
+      buyer: {
+        type: 'object',
+        properties: {
+          email: { type: 'string', format: 'email' },
+          firstName: { type: 'string' },
+          lastName: { type: 'string' },
+          phone: { type: 'string' },
+        },
+      },
+      successUrl: { type: 'string', format: 'uri' },
+      cancelUrl: { type: 'string', format: 'uri' },
+    });
+  });
+
+  it('documents attendee updates with their runtime request body', () => {
+    const route = openApiSpec.paths['/attendees/{attendeeId}'].patch;
+    expect(route.requestBody.content['application/json'].schema).toEqual({
+      $ref: '#/components/schemas/AttendeeUpdateInput',
+    });
+    expect(openApiSpec.components.schemas.AttendeeUpdateInput.properties).toEqual({
+      firstName: { type: ['string', 'null'] },
+      lastName: { type: ['string', 'null'] },
+      email: { type: 'string', format: 'email' },
+      phone: { type: ['string', 'null'] },
+      status: {
+        type: 'string',
+        enum: ['pending', 'confirmed', 'cancelled', 'refunded', 'checked_in'],
+      },
+    });
   });
 
   it('documents implemented order list filters', () => {

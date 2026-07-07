@@ -186,7 +186,7 @@ describe('API contract helpers', () => {
 describe('API error envelope', () => {
   it('accepts the documented offline sync payload size with the route-specific body limit', async () => {
     const app = Fastify({ logger: false, bodyLimit: OFFLINE_SYNC_JSON_BODY_LIMIT_BYTES });
-    registerJsonBodyParser(app);
+    registerJsonBodyParser(app, { captureRawBody: true });
     app.post('/offline-sync-payload', async (request) => ({
       scans: (request.body as { scans: unknown[] }).scans.length,
       rawBodyLength: (request as unknown as { rawBody: string }).rawBody.length,
@@ -222,7 +222,7 @@ describe('API error envelope', () => {
 
   it('accepts empty JSON POST bodies without throwing parser errors', async () => {
     const app = Fastify({ logger: false });
-    registerJsonBodyParser(app);
+    registerJsonBodyParser(app, { captureRawBody: true });
     app.post('/empty', async (request) => ({
       body: request.body ?? null,
       rawBody: (request as unknown as { rawBody: string }).rawBody,
@@ -237,6 +237,26 @@ describe('API error envelope', () => {
 
     expect(response.statusCode).toBe(200);
     expect(response.json()).toEqual({ body: null, rawBody: '' });
+    await app.close();
+  });
+
+  it('does not retain raw JSON bodies unless raw capture is explicitly enabled', async () => {
+    const app = Fastify({ logger: false });
+    registerJsonBodyParser(app);
+    app.post('/json', async (request) => ({
+      body: request.body,
+      hasRawBody: (request as unknown as { rawBody?: string }).rawBody !== undefined,
+    }));
+
+    const response = await app.inject({
+      method: 'POST',
+      url: '/json',
+      headers: { 'content-type': 'application/json' },
+      payload: JSON.stringify({ ok: true }),
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toEqual({ body: { ok: true }, hasRawBody: false });
     await app.close();
   });
 

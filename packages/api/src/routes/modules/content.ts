@@ -23,6 +23,7 @@ import {
   SmsSenderIdentityRepository,
   TicketListingRepository,
   TicketTypeRepository,
+  bumpEventPublicRevision,
   type Database,
 } from '@tixkit/db';
 import {
@@ -63,6 +64,15 @@ import {
 } from '@tixkit/content-email';
 import { signPayload, verifySignature } from '@tixkit/shared';
 import { ClerkAuthService } from '../../auth/clerk.js';
+import {
+  createPublicAvailabilityMetadataCache,
+  loadPublicAvailability,
+  loadPublicEventById,
+  loadPublicMarketingIntegrations,
+  loadPublicResaleListings,
+  serializePublicEvent,
+  type PublicEventRow,
+} from './public.js';
 
 const contentChannelSchema = z.enum(['event_page', 'email', 'sms', 'imessage', 'social_invite']);
 
@@ -113,6 +123,20 @@ type DraftPreviewPage = {
   validation: ContentValidationResult;
 };
 
+type PublicEventPageBootstrap = {
+  event: ReturnType<typeof serializePublicEvent>;
+  contentPage: PublicContentPage | null;
+  availability: Awaited<ReturnType<typeof loadPublicAvailability>>;
+  resaleListings: Awaited<ReturnType<typeof loadPublicResaleListings>>;
+};
+
+type PublicContentPageCacheEntry = {
+  expiresAt: number;
+  value: PublicContentPage;
+};
+
+type PublicContentPageCache = Map<string, PublicContentPageCacheEntry>;
+
 type PreviewTokenPayload = {
   documentId: string;
   versionId: string;
@@ -120,6 +144,9 @@ type PreviewTokenPayload = {
   exp: number;
 };
 
+const DEFAULT_PUBLIC_CONTENT_PAGE_CACHE_TTL_MS = 60_000;
+const MAX_PUBLIC_CONTENT_PAGE_CACHE_TTL_MS = 300_000;
+const MAX_PUBLIC_CONTENT_PAGE_CACHE_ENTRIES = 256;
 const PREVIEW_TOKEN_TTL_SECONDS = 900;
 
 function previewTokenSecret(): string {
@@ -674,6 +701,63 @@ function checksumRenderOutput(output: RenderOutput): string {
     .digest('hex');
 }
 
+function publicContentPageCacheTtlMs(): number {
+  const raw = process.env.PUBLIC_CONTENT_PAGE_CACHE_TTL_MS;
+  if (!raw) return DEFAULT_PUBLIC_CONTENT_PAGE_CACHE_TTL_MS;
+  const parsed = Number.parseInt(raw, 10);
+  if (!Number.isFinite(parsed)) return DEFAULT_PUBLIC_CONTENT_PAGE_CACHE_TTL_MS;
+  return Math.min(Math.max(parsed, 0), MAX_PUBLIC_CONTENT_PAGE_CACHE_TTL_MS);
+}
+
+function clonePublicContentPage(value: PublicContentPage): PublicContentPage {
+  return JSON.parse(JSON.stringify(value)) as PublicContentPage;
+}
+
+function publicContentPageCacheKey(input: {
+  event: PublicEventRow;
+  document: ContentDocument;
+  version: ContentDocumentVersion;
+  host?: string;
+}): string {
+  return JSON.stringify({
+    eventId: input.event.id,
+    publicRevision: input.event.public_revision ?? null,
+    documentId: input.document.id,
+    documentUpdatedAt: input.document.updatedAt,
+    versionId: input.version.id,
+    publishedAt: input.version.publishedAt ?? null,
+    host: input.host ?? '',
+  });
+}
+
+function readPublicContentPageCache(
+  cache: PublicContentPageCache,
+  key: string,
+  now: number,
+): PublicContentPage | undefined {
+  const cached = cache.get(key);
+  if (!cached) return undefined;
+  if (cached.expiresAt <= now) {
+    cache.delete(key);
+    return undefined;
+  }
+  return clonePublicContentPage(cached.value);
+}
+
+function rememberPublicContentPage(
+  cache: PublicContentPageCache,
+  key: string,
+  value: PublicContentPage,
+  expiresAt: number,
+): void {
+  cache.set(key, { expiresAt, value: clonePublicContentPage(value) });
+  while (cache.size > MAX_PUBLIC_CONTENT_PAGE_CACHE_ENTRIES) {
+    const oldestKey = cache.keys().next().value;
+    if (typeof oldestKey !== 'string') break;
+    cache.delete(oldestKey);
+  }
+}
+
 function toPublicContentPage(input: {
   document: ContentDocument;
   version: ContentDocumentVersion;
@@ -846,7 +930,9 @@ export const contentRoutes: FastifyPluginAsync = async (app) => {
       tenantId: principal.tenantId,
       organizationIds: query.organizationId
         ? [query.organizationId]
-        : (principal.type === 'system' ? undefined : principal.organizationIds),
+        : principal.type === 'system'
+          ? undefined
+          : principal.organizationIds,
       brandIds: principal.brandIds,
       eventIds: principal.eventIds,
       channel,
@@ -1063,7 +1149,11 @@ export const contentRoutes: FastifyPluginAsync = async (app) => {
         issues: version.validation.issues,
       });
     }
-    return repo().publishVersion({ documentId, versionId });
+    const published = await repo().publishVersion({ documentId, versionId });
+    if (document.channel === 'event_page' && document.eventId) {
+      await bumpEventPublicRevision(db, document.eventId);
+    }
+    return published;
   });
 
   app.post('/content-documents/:documentId/archive', async (request) => {
@@ -1171,8 +1261,7 @@ export const contentRoutes: FastifyPluginAsync = async (app) => {
     const documents = await repo().listDocuments({
       tenantId: principal.tenantId,
       channel: 'event_page',
-      organizationIds:
-        principal.type === 'system' ? undefined : principal.organizationIds,
+      organizationIds: principal.type === 'system' ? undefined : principal.organizationIds,
       limit: 1000,
     });
 
@@ -1218,6 +1307,8 @@ function principalTenant(principal: Principal): string {
 
 export const publicContentRoutes: FastifyPluginAsync = async (app) => {
   const db = app.context.db;
+  const availabilityMetadataCache = createPublicAvailabilityMetadataCache();
+  const publicContentPageCache: PublicContentPageCache = new Map();
 
   async function contextForEvent(
     event: {
@@ -1294,13 +1385,77 @@ export const publicContentRoutes: FastifyPluginAsync = async (app) => {
   ): Promise<PublicContentPage> {
     const event = await new EventRepository(db).findById(eventId);
     if (!event || !isPubliclyReadableEvent(event)) throw new NotFoundError('Event', eventId);
+    return loadPublicPageForEvent(event, locale, host);
+  }
+
+  async function loadPublicPageForEvent(
+    event: PublicEventRow,
+    locale?: string,
+    host?: string,
+  ): Promise<PublicContentPage> {
     const result = await new ContentRepository(db).findPublishedEventPage({
       tenantId: event.tenant_id,
-      eventId,
+      eventId: event.id,
       locale,
     });
-    if (!result) throw new NotFoundError('ContentDocument', eventId);
-    return toPublicContentPage({ ...result, context: await contextForEvent(event, host) });
+    if (!result) throw new NotFoundError('ContentDocument', event.id);
+    const ttlMs = publicContentPageCacheTtlMs();
+    const cacheKey =
+      ttlMs > 0
+        ? publicContentPageCacheKey({
+            event,
+            document: result.document,
+            version: result.version,
+            host,
+          })
+        : null;
+    const now = Date.now();
+    if (cacheKey) {
+      const cached = readPublicContentPageCache(publicContentPageCache, cacheKey, now);
+      if (cached) return cached;
+    }
+    const page = toPublicContentPage({ ...result, context: await contextForEvent(event, host) });
+    if (cacheKey) rememberPublicContentPage(publicContentPageCache, cacheKey, page, now + ttlMs);
+    return page;
+  }
+
+  async function loadOptionalPublicPage(
+    event: PublicEventRow,
+    locale?: string,
+    host?: string,
+  ): Promise<PublicContentPage | null> {
+    try {
+      return await loadPublicPageForEvent(event, locale, host);
+    } catch (err) {
+      if (err instanceof NotFoundError) return null;
+      throw err;
+    }
+  }
+
+  async function loadEventPageBootstrap(
+    event: PublicEventRow,
+    locale?: string,
+    host?: string,
+  ): Promise<PublicEventPageBootstrap> {
+    const [marketingIntegrations, contentPage, availability, resaleListings] = await Promise.all([
+      loadPublicMarketingIntegrations(db, event.id),
+      loadOptionalPublicPage(event, locale, host),
+      loadPublicAvailability(
+        db,
+        app.context.inventoryService,
+        event.id,
+        [],
+        availabilityMetadataCache,
+      ),
+      loadPublicResaleListings(db, event, { limit: 50 }),
+    ]);
+
+    return {
+      event: serializePublicEvent(event, marketingIntegrations),
+      contentPage,
+      availability,
+      resaleListings,
+    };
   }
 
   async function loadDraftPreview(
@@ -1402,6 +1557,13 @@ export const publicContentRoutes: FastifyPluginAsync = async (app) => {
     return loadPublicPage(eventId, locale);
   });
 
+  app.get('/public/events/:eventId/page-bootstrap', async (request) => {
+    const { eventId } = request.params as { eventId: string };
+    const { locale } = request.query as { locale?: string };
+    const event = await loadPublicEventById(db, eventId);
+    return loadEventPageBootstrap(event, locale);
+  });
+
   app.get('/public/events/:eventId/content-page', async (request) => {
     const { eventId } = request.params as { eventId: string };
     const { locale } = request.query as { locale?: string };
@@ -1413,6 +1575,14 @@ export const publicContentRoutes: FastifyPluginAsync = async (app) => {
     const query = request.query as { host?: unknown; locale?: string };
     const event = await resolveEventBySlug(slug, query.host);
     return loadPublicPage(event.id, query.locale, event.host);
+  });
+
+  app.get('/public/events/by-slug/:slug/page-bootstrap', async (request) => {
+    const { slug } = request.params as { slug: string };
+    const query = request.query as { host?: unknown; locale?: string };
+    const resolved = await resolveEventBySlug(slug, query.host);
+    const event = await loadPublicEventById(db, resolved.id);
+    return loadEventPageBootstrap(event, query.locale, resolved.host);
   });
 
   app.get('/public/events/:eventId/discovery-card', async (request) => {

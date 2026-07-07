@@ -1,7 +1,7 @@
 import type { FastifyPluginAsync } from 'fastify';
 import { ulid } from 'ulid';
 import { ClerkAuthService } from '../../auth/clerk.js';
-import { EventRepository, type Database } from '@tixkit/db';
+import { EventRepository, bumpEventPublicRevision, type Database } from '@tixkit/db';
 import {
   ConflictError,
   NotFoundError,
@@ -163,6 +163,7 @@ export const questionRoutes: FastifyPluginAsync = async (app) => {
       })
       .returningAll()
       .executeTakeFirstOrThrow();
+    await bumpEventPublicRevision(db, eventId, now);
 
     return reply.status(201).send(serializeQuestion(question));
   });
@@ -218,15 +219,17 @@ export const questionRoutes: FastifyPluginAsync = async (app) => {
     }
 
     await db.transaction().execute(async (trx) => {
+      const revision = new Date();
       for (const question of body.questions) {
         // eslint-disable-next-line no-await-in-loop -- reorder updates run sequentially on one transaction connection for deterministic rollback behavior.
         await trx
           .updateTable('questions')
-          .set({ sort_order: question.sortOrder, updated_at: new Date() })
+          .set({ sort_order: question.sortOrder, updated_at: revision })
           .where('event_id', '=', eventId)
           .where('id', '=', question.id)
           .execute();
       }
+      await bumpEventPublicRevision(trx, eventId, revision);
     });
 
     const rows = await db
@@ -363,6 +366,7 @@ export const questionRoutes: FastifyPluginAsync = async (app) => {
       .where('id', '=', questionId)
       .returningAll()
       .executeTakeFirstOrThrow();
+    await bumpEventPublicRevision(db, question.event_id, updateData.updated_at as Date);
 
     return serializeQuestion(updated);
   });
@@ -394,10 +398,12 @@ export const questionRoutes: FastifyPluginAsync = async (app) => {
         );
       }
       await db.updateTable('questions').set(softDeleteData).where('id', '=', questionId).execute();
+      await bumpEventPublicRevision(db, question.event_id);
       return reply.status(204).send();
     }
 
     await db.deleteFrom('questions').where('id', '=', questionId).execute();
+    await bumpEventPublicRevision(db, question.event_id);
     return reply.status(204).send();
   });
 };

@@ -13,6 +13,7 @@ import {
   col,
   defineTable,
   paramsToQuery,
+  type AdminTableQuery,
   type AdminTablePage,
 } from '@tixkit/admin-table-core';
 import { NotFoundError, ValidationError } from '@tixkit/domain';
@@ -143,10 +144,7 @@ async function computeEventStats(
   const [salesRows, ticketRows, checkInRows] = await Promise.all([
     db
       .selectFrom('orders')
-      .select(({ fn }) => [
-        'event_id',
-        fn.sum<number>('total_cents').as('gross_sales_cents'),
-      ])
+      .select(({ fn }) => ['event_id', fn.sum<number>('total_cents').as('gross_sales_cents')])
       .where('tenant_id', '=', tenantId)
       .where('event_id', 'in', eventIds)
       .where('status', 'in', ['paid', 'partially_refunded', 'refunded'])
@@ -209,6 +207,45 @@ const eventsTableSchema = defineTable('events', {
     col.dateTime('createdAt').serverField('created_at').sortable().filterable().facet(),
   ],
 });
+
+const eventListColumns = [
+  'id',
+  'tenant_id',
+  'organization_id',
+  'brand_id',
+  'slug',
+  'title',
+  'description',
+  'status',
+  'currency',
+  'timezone',
+  'starts_at',
+  'ends_at',
+  'venue',
+  'visibility',
+  'seo',
+  'capacity',
+  'cover_image_url',
+  'external_url',
+  'resale_enabled',
+  'resale_max_multiplier',
+  'resale_max_absolute_cents',
+  'created_at',
+  'updated_at',
+] as const;
+
+function parseStrictTableQuery(
+  schema: Parameters<typeof paramsToQuery>[0],
+  params: URLSearchParams,
+): AdminTableQuery {
+  const { query, rejected } = paramsToQuery(schema, params);
+  if (rejected.length > 0) {
+    throw new ValidationError(`Invalid table query parameters: ${rejected.join(', ')}`, {
+      rejected,
+    });
+  }
+  return query;
+}
 
 export const eventRoutes: FastifyPluginAsync = async (app) => {
   const db = app.context.db;
@@ -275,7 +312,12 @@ export const eventRoutes: FastifyPluginAsync = async (app) => {
     if (brandId) ClerkAuthService.requireBrandScope(principal, brandId);
 
     if (principal.type !== 'system' && principal.organizationIds.length === 0) {
-      return { items: [], nextCursor: undefined, total: 0, filterTotal: 0 } as AdminTablePage<unknown>;
+      return {
+        items: [],
+        nextCursor: undefined,
+        total: 0,
+        filterTotal: 0,
+      } as AdminTablePage<unknown>;
     }
 
     const scope: Record<string, string | string[]> = {};
@@ -299,15 +341,20 @@ export const eventRoutes: FastifyPluginAsync = async (app) => {
         searchParams.set(key, value);
       }
     }
-    const { query: tableQuery } = paramsToQuery(eventsTableSchema, searchParams);
+    const tableQuery = parseStrictTableQuery(eventsTableSchema, searchParams);
 
-    const result = await executeTableQuery(db, {
-      tableName: 'events',
-      schema: eventsTableSchema,
-      tenantId: principal.tenantId,
-      scope,
-      serialize: serializeEvent,
-    }, tableQuery);
+    const result = await executeTableQuery(
+      db,
+      {
+        tableName: 'events',
+        schema: eventsTableSchema,
+        tenantId: principal.tenantId,
+        scope,
+        serialize: serializeEvent,
+        selectFields: eventListColumns,
+      },
+      tableQuery,
+    );
 
     // Enrich with event stats
     const eventIds = result.items.map((e) => (e as Record<string, unknown>).id as string);

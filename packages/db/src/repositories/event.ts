@@ -1,6 +1,18 @@
 import { BaseRepository } from './base.js';
 import { ulid } from 'ulid';
 
+export async function bumpEventPublicRevision(
+  db: { updateTable: (table: 'events') => any },
+  eventId: string,
+  revision: Date = new Date(),
+): Promise<void> {
+  await db
+    .updateTable('events')
+    .set({ public_revision: revision })
+    .where('id', '=', eventId)
+    .execute();
+}
+
 export class EventRepository extends BaseRepository {
   async create(input: {
     tenantId: string;
@@ -43,6 +55,7 @@ export class EventRepository extends BaseRepository {
         capacity: input.capacity ?? null,
         cover_image_url: input.coverImageUrl ?? null,
         external_url: input.externalUrl ?? null,
+        public_revision: now,
         created_at: now,
         updated_at: now,
       },
@@ -109,11 +122,21 @@ export class EventRepository extends BaseRepository {
   }
 
   async update(id: string, input: Record<string, unknown>) {
-    return this.updateReturning('events', id, { ...input, updated_at: new Date() });
+    const now = new Date();
+    return this.updateReturning('events', id, {
+      ...input,
+      public_revision: now,
+      updated_at: now,
+    });
   }
 
   async updateStatus(id: string, status: string) {
-    return this.updateReturning('events', id, { status, updated_at: new Date() });
+    const now = new Date();
+    return this.updateReturning('events', id, {
+      status,
+      public_revision: now,
+      updated_at: now,
+    });
   }
 }
 
@@ -131,7 +154,7 @@ export class EventOccurrenceRepository extends BaseRepository {
   }) {
     const id = `occ_${ulid()}`;
     const now = new Date();
-    return this.insertReturning(
+    const occurrence = await this.insertReturning(
       'event_occurrences',
       {
         id,
@@ -149,6 +172,8 @@ export class EventOccurrenceRepository extends BaseRepository {
       },
       id,
     );
+    await bumpEventPublicRevision(this.db, input.eventId, now);
+    return occurrence;
   }
 
   async findById(id: string) {
@@ -170,7 +195,13 @@ export class EventOccurrenceRepository extends BaseRepository {
   }
 
   async update(id: string, input: Record<string, unknown>) {
-    return this.updateReturning('event_occurrences', id, { ...input, updated_at: new Date() });
+    const now = new Date();
+    const occurrence = await this.updateReturning('event_occurrences', id, {
+      ...input,
+      updated_at: now,
+    });
+    await bumpEventPublicRevision(this.db, occurrence.event_id, now);
+    return occurrence;
   }
 }
 
@@ -196,7 +227,7 @@ export class TicketTypeRepository extends BaseRepository {
   }) {
     const id = `tt_${ulid()}`;
     const now = new Date();
-    return this.insertReturning(
+    const ticketType = await this.insertReturning(
       'ticket_types',
       {
         id,
@@ -223,6 +254,8 @@ export class TicketTypeRepository extends BaseRepository {
       },
       id,
     );
+    await bumpEventPublicRevision(this.db, input.eventId, now);
+    return ticketType;
   }
 
   async findById(id: string) {
@@ -267,7 +300,13 @@ export class TicketTypeRepository extends BaseRepository {
   }
 
   async update(id: string, input: Record<string, unknown>) {
-    return this.updateReturning('ticket_types', id, { ...input, updated_at: new Date() });
+    const now = new Date();
+    const ticketType = await this.updateReturning('ticket_types', id, {
+      ...input,
+      updated_at: now,
+    });
+    await bumpEventPublicRevision(this.db, ticketType.event_id, now);
+    return ticketType;
   }
 }
 
@@ -435,7 +474,7 @@ export class ProductRepository extends BaseRepository {
   }) {
     const id = `prd_${ulid()}`;
     const now = new Date();
-    return this.insertReturning(
+    const product = await this.insertReturning(
       'products',
       {
         id,
@@ -455,6 +494,8 @@ export class ProductRepository extends BaseRepository {
       },
       id,
     );
+    await bumpEventPublicRevision(this.db, input.eventId, now);
+    return product;
   }
 
   async findById(id: string) {
@@ -473,6 +514,9 @@ export class ProductRepository extends BaseRepository {
   }
 
   async update(id: string, input: Record<string, unknown>) {
-    return this.updateReturning('products', id, { ...input, updated_at: new Date() });
+    const now = new Date();
+    const product = await this.updateReturning('products', id, { ...input, updated_at: now });
+    await bumpEventPublicRevision(this.db, product.event_id, now);
+    return product;
   }
 }

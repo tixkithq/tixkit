@@ -94,7 +94,7 @@ function RichTextBubbleMenu({ editor }: { editor: Editor }) {
         className="tk-ep-bubble__select"
         value={currentFontFamily}
         onChange={(e) => setFontFamily(e.target.value)}
-        aria-label="Font family"
+        aria-label="Selection font family"
       >
         {EVENT_PAGE_FONT_FAMILY_OPTIONS.map((opt) => (
           <option key={opt.value} value={opt.value}>
@@ -160,6 +160,11 @@ export function EventPageRichTextEditor({
   onChangeRef.current = onChange;
 
   const editor = useEditor({
+    editorProps: {
+      attributes: {
+        'aria-label': 'Rich text content',
+      },
+    },
     extensions: [
       StarterKit.configure({
         heading: false,
@@ -198,7 +203,11 @@ export function EventPageRichTextEditor({
   return (
     <>
       <RichTextBubbleMenu editor={editor} />
-      <EditorContent editor={editor} className="tk-ep-rich-text__content" />
+      <EditorContent
+        editor={editor}
+        className="tk-ep-rich-text__content"
+        aria-label="Rich text content"
+      />
     </>
   );
 }

@@ -211,6 +211,7 @@ export interface EventTable {
   resale_max_multiplier: Generated<number>;
   resale_max_absolute_cents: number | null;
   code_format: string | null;
+  public_revision: Timestamp | null;
   created_at: Timestamp;
   updated_at: Timestamp;
 }

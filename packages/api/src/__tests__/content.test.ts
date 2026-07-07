@@ -305,7 +305,7 @@ async function setupContentApp(
   return app;
 }
 
-async function setupPublicContentApp(db: Database) {
+async function setupPublicContentApp(db: Database, overrides: Partial<AppContext> = {}) {
   const app = Fastify();
   app.decorate('context', {
     db,
@@ -316,6 +316,7 @@ async function setupPublicContentApp(db: Database) {
     temporalClient: {},
     emailTransport: new TestCaptureEmailTransport(),
     smsTransport: new TestCaptureSmsTransport(),
+    ...overrides,
   } as unknown as AppContext);
   await app.register(publicContentRoutes);
   return app;
@@ -1578,6 +1579,193 @@ describe('content routes', () => {
         ),
       ).toBe(true);
     }
+  });
+
+  it('caches rendered public event pages by event public revision', async () => {
+    const event = {
+      id: 'evt_render_cache',
+      tenant_id: 'tnt_1',
+      organization_id: 'org_1',
+      brand_id: 'brd_1',
+      slug: 'render-cache',
+      title: 'Render cache',
+      status: 'published',
+      visibility: 'public',
+      starts_at: new Date('2026-07-17T19:00:00.000Z'),
+      ends_at: null,
+      timezone: 'America/Chicago',
+      venue: null,
+      public_revision: new Date('2026-06-01T00:00:00.000Z'),
+    };
+    const ticket = {
+      id: 'tt_cache',
+      event_id: 'evt_render_cache',
+      name: 'Original GA',
+      description: 'Standing room',
+      kind: 'paid',
+      status: 'active',
+      visibility: 'public',
+      currency: 'USD',
+      price_cents: 3500,
+      minimum_price_cents: null,
+    };
+    const { db } = createContentDb({
+      events: [event],
+      ticket_types: [ticket],
+      content_documents: [
+        documentRow({
+          id: 'cdoc_render_cache',
+          channel: 'event_page',
+          event_id: 'evt_render_cache',
+          key: 'main',
+          name: 'Main event page',
+          status: 'published',
+          published_version_id: 'cver_render_cache',
+        }),
+      ],
+      content_document_versions: [
+        versionRow({
+          id: 'cver_render_cache',
+          document_id: 'cdoc_render_cache',
+          version_number: 3,
+          status: 'published',
+          subject: 'Render cache',
+          preview_text: 'Preview copy',
+          content_json: JSON.stringify(eventPageJson()),
+          rendered_html: '<main>stored html must not render</main>',
+          rendered_text: 'stored text must not render',
+          variables: JSON.stringify([]),
+          validation: JSON.stringify({ valid: true, severity: 'warning', issues: [] }),
+          created_by: 'usr_private',
+          published_at: new Date('2026-06-02T00:00:00.000Z'),
+        }),
+      ],
+    });
+    const app = await setupPublicContentApp(db);
+
+    const first = await app.inject({
+      method: 'GET',
+      url: '/public/events/evt_render_cache/page',
+    });
+    ticket.name = 'Updated GA';
+    const second = await app.inject({
+      method: 'GET',
+      url: '/public/events/evt_render_cache/page',
+    });
+    event.public_revision = new Date('2026-06-01T00:00:01.000Z');
+    const third = await app.inject({
+      method: 'GET',
+      url: '/public/events/evt_render_cache/page',
+    });
+
+    expect(first.statusCode).toBe(200);
+    expect(second.statusCode).toBe(200);
+    expect(third.statusCode).toBe(200);
+    expect(first.json().version.renderedHtml).toContain('Original GA');
+    expect(second.json().version.renderedHtml).toContain('Original GA');
+    expect(second.json().version.renderedHtml).not.toContain('Updated GA');
+    expect(third.json().version.renderedHtml).toContain('Updated GA');
+    await app.close();
+  });
+
+  it('returns event-page bootstrap data in one public response', async () => {
+    const getAvailabilityBatch = vi.fn(async (poolIds: readonly string[]) => {
+      expect(poolIds).toEqual(['inv_ga']);
+      return new Map([['inv_ga', { total: 20, sold: 5, reserved: 4, available: 11 }]]);
+    });
+    const getOccurrenceAvailabilityBatch = vi.fn(async (occurrenceIds: readonly string[]) => {
+      expect(occurrenceIds).toEqual([]);
+      return new Map<string, unknown>();
+    });
+    const { db } = createContentDb({
+      events: [
+        {
+          id: 'evt_1',
+          tenant_id: 'tnt_1',
+          organization_id: 'org_1',
+          brand_id: 'brd_1',
+          slug: 'published-page',
+          title: 'Published page',
+          description: 'Preview copy',
+          status: 'published',
+          visibility: 'public',
+          timezone: 'America/Chicago',
+          starts_at: '2026-07-17T19:00:00.000Z',
+          ends_at: null,
+          venue: null,
+          resale_enabled: false,
+        },
+      ],
+      ticket_types: [
+        {
+          id: 'tt_ga',
+          event_id: 'evt_1',
+          event_occurrence_id: null,
+          name: 'General Admission',
+          description: null,
+          kind: 'paid',
+          status: 'active',
+          visibility: 'public',
+          currency: 'USD',
+          price_cents: 3500,
+          minimum_price_cents: null,
+          sales_start_at: null,
+          sales_end_at: null,
+          min_per_order: 1,
+          max_per_order: 4,
+          inventory_pool_id: 'inv_ga',
+          requires_access_code: false,
+          access_code_hint: null,
+        },
+      ],
+      products: [],
+      marketing_integrations: [],
+      content_documents: [
+        documentRow({
+          id: 'cdoc_public',
+          channel: 'event_page',
+          event_id: 'evt_1',
+          key: 'main',
+          name: 'Main event page',
+          status: 'published',
+          published_version_id: 'cver_public',
+        }),
+      ],
+      content_document_versions: [
+        versionRow({
+          id: 'cver_public',
+          document_id: 'cdoc_public',
+          version_number: 1,
+          status: 'published',
+          content_json: JSON.stringify(eventPageJson()),
+          validation: JSON.stringify({ valid: true, severity: 'warning', issues: [] }),
+          published_at: new Date('2026-06-02T00:00:00.000Z'),
+        }),
+      ],
+    });
+    const app = await setupPublicContentApp(db, {
+      inventoryService: {
+        getAvailabilityBatch,
+        getOccurrenceAvailabilityBatch,
+      },
+    } as unknown as Partial<AppContext>);
+
+    const response = await app.inject({
+      method: 'GET',
+      url: '/public/events/evt_1/page-bootstrap',
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toMatchObject({
+      event: { id: 'evt_1', title: 'Published page' },
+      availability: [{ ticketTypeId: 'tt_ga', available: 11, status: 'active' }],
+      contentPage: {
+        document: { eventId: 'evt_1', channel: 'event_page' },
+        page: { text: expect.stringContaining('Published page') },
+      },
+      resaleListings: { items: [], nextCursor: null, hasMore: false },
+    });
+    await app.close();
   });
 
   it('fails closed for private events and stale published event-page versions', async () => {

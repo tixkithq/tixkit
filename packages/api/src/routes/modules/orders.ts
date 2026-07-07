@@ -11,6 +11,7 @@ import {
   col,
   defineTable,
   paramsToQuery,
+  type AdminTableQuery,
   type AdminTablePage,
 } from '@tixkit/admin-table-core';
 import { NotFoundError, ValidationError } from '@tixkit/domain';
@@ -62,6 +63,159 @@ const ordersTableSchema = defineTable('orders', {
     col.text('buyerEmail').serverField('buyer_email').filterable().paramAlias('search'),
   ],
 });
+
+const orderListColumns = [
+  'id',
+  'tenant_id',
+  'organization_id',
+  'brand_id',
+  'event_id',
+  'checkout_session_id',
+  'order_number',
+  'status',
+  'currency',
+  'subtotal_cents',
+  'discount_cents',
+  'tax_cents',
+  'fee_cents',
+  'total_cents',
+  'refunded_cents',
+  'buyer_email',
+  'buyer_first_name',
+  'buyer_last_name',
+  'buyer_phone',
+  'payment_intent_id',
+  'payment_provider',
+  'sales_channel',
+  'operator_id',
+  'tender_type',
+  'paid_at',
+  'refunded_at',
+  'cancelled_at',
+  'created_at',
+  'updated_at',
+] as const;
+
+const orderDetailAttendeeColumns = [
+  'id',
+  'tenant_id',
+  'order_id',
+  'event_id',
+  'ticket_type_id',
+  'event_occurrence_id',
+  'ticket_id',
+  'first_name',
+  'last_name',
+  'email',
+  'phone',
+  'status',
+  'custom_answers',
+  'checked_in_at',
+  'check_in_device_id',
+  'created_at',
+  'updated_at',
+] as const;
+
+const orderDetailRefundColumns = [
+  'id',
+  'tenant_id',
+  'order_id',
+  'payment_intent_id',
+  'provider',
+  'provider_refund_id',
+  'amount_cents',
+  'currency',
+  'status',
+  'reason',
+  'metadata',
+  'created_at',
+  'updated_at',
+] as const;
+
+const orderInvoiceColumns = [
+  'id',
+  'order_id',
+  'tenant_id',
+  'organization_id',
+  'brand_id',
+  'event_id',
+  'invoice_number',
+  'status',
+  'currency',
+  'subtotal_cents',
+  'discount_cents',
+  'tax_cents',
+  'fee_cents',
+  'total_cents',
+  'refunded_cents',
+  'buyer_email',
+  'buyer_name',
+  'buyer_tax_id',
+  'seller_name',
+  'seller_tax_id',
+  'reverse_charge',
+  'issued_at',
+  'voided_at',
+  'metadata',
+  'created_at',
+  'updated_at',
+] as const;
+
+const orderLineItemColumns = [
+  'id',
+  'order_id',
+  'ticket_type_id',
+  'event_occurrence_id',
+  'product_id',
+  'resale_listing_id',
+  'attendee_id',
+  'description',
+  'quantity',
+  'unit_price_cents',
+  'subtotal_cents',
+  'discount_cents',
+  'tax_cents',
+  'fee_cents',
+  'total_cents',
+  'currency',
+  'created_at',
+  'updated_at',
+] as const;
+
+const orderTaxSnapshotColumns = [
+  'id',
+  'order_id',
+  'order_line_item_id',
+  'event_id',
+  'tax_rule_id',
+  'tax_rule_name',
+  'rate',
+  'type',
+  'applied_to',
+  'jurisdiction_country',
+  'jurisdiction_region',
+  'taxable_amount_cents',
+  'tax_cents',
+  'currency',
+  'inclusive',
+  'provider',
+  'provider_calculation_id',
+  'metadata',
+  'created_at',
+] as const;
+
+function parseStrictTableQuery(
+  schema: Parameters<typeof paramsToQuery>[0],
+  params: URLSearchParams,
+): AdminTableQuery {
+  const { query, rejected } = paramsToQuery(schema, params);
+  if (rejected.length > 0) {
+    throw new ValidationError(`Invalid table query parameters: ${rejected.join(', ')}`, {
+      rejected,
+    });
+  }
+  return query;
+}
 
 function serializePaymentCompensation(row: {
   id: string;
@@ -123,7 +277,9 @@ export const orderRoutes: FastifyPluginAsync = async (app) => {
       tenantId: principal.tenantId,
       organizationIds: organizationId
         ? [organizationId]
-        : (principal.type === 'system' ? undefined : principal.organizationIds),
+        : principal.type === 'system'
+          ? undefined
+          : principal.organizationIds,
       brandIds: brandId ? [brandId] : principal.brandIds,
       eventIds: principal.eventIds,
       status,
@@ -149,7 +305,12 @@ export const orderRoutes: FastifyPluginAsync = async (app) => {
     if (brandId) ClerkAuthService.requireBrandScope(principal, brandId);
 
     if (principal.type !== 'system' && principal.organizationIds.length === 0) {
-      return { items: [], nextCursor: undefined, total: 0, filterTotal: 0 } as AdminTablePage<unknown>;
+      return {
+        items: [],
+        nextCursor: undefined,
+        total: 0,
+        filterTotal: 0,
+      } as AdminTablePage<unknown>;
     }
 
     // Build scope: tenant + principal org/brand/event restrictions + explicit org/brand
@@ -175,44 +336,51 @@ export const orderRoutes: FastifyPluginAsync = async (app) => {
         searchParams.set(key, value);
       }
     }
-    const { query: tableQuery } = paramsToQuery(ordersTableSchema, searchParams);
+    const tableQuery = parseStrictTableQuery(ordersTableSchema, searchParams);
 
     // Execute the table query with custom refundState filter and facet
-    const result = await executeTableQuery(db, {
-      tableName: 'orders',
-      schema: ordersTableSchema,
-      tenantId: principal.tenantId,
-      scope,
-      serialize: serializeOrder,
-      strictValidation: true,
-      customFilters: {
-        refundState: (q, value) => {
-          if (value.type === 'boolean') {
-            return value.value
-              ? q.where('refunded_cents', '>', 0)
-              : q.where('refunded_cents', '=', 0);
-          }
-          return q;
+    const result = await executeTableQuery(
+      db,
+      {
+        tableName: 'orders',
+        schema: ordersTableSchema,
+        tenantId: principal.tenantId,
+        scope,
+        serialize: serializeOrder,
+        selectFields: orderListColumns,
+        strictValidation: true,
+        customFilters: {
+          refundState: (q, value) => {
+            if (value.type === 'boolean') {
+              return value.value
+                ? q.where('refunded_cents', '>', 0)
+                : q.where('refunded_cents', '=', 0);
+            }
+            return q;
+          },
+        },
+        customFacets: {
+          refundState: async (q) => {
+            const refundCounts = (await q
+              .select([
+                sql`case when refunded_cents > 0 then true else false end`.as('is_refunded'),
+                sql`count(*)`.as('total'),
+              ])
+              .groupBy('is_refunded')
+              .execute()) as Array<{ is_refunded: boolean; total: number }>;
+            return {
+              rows: refundCounts.map((r) => ({ value: r.is_refunded, total: Number(r.total) })),
+            };
+          },
         },
       },
-      customFacets: {
-        refundState: async (q) => {
-          const refundCounts = await q
-            .select([
-              sql`case when refunded_cents > 0 then true else false end`.as('is_refunded'),
-              sql`count(*)`.as('total'),
-            ])
-            .groupBy('is_refunded')
-            .execute() as Array<{ is_refunded: boolean; total: number }>;
-          return {
-            rows: refundCounts.map((r) => ({ value: r.is_refunded, total: Number(r.total) })),
-          };
-        },
-      },
-    }, tableQuery);
+      tableQuery,
+    );
 
     // Fetch event titles for the current page items (separate from the table query)
-    const eventIds = [...new Set(result.items.map((o) => (o as Record<string, unknown>).eventId).filter(Boolean))] as string[];
+    const eventIds = [
+      ...new Set(result.items.map((o) => (o as Record<string, unknown>).eventId).filter(Boolean)),
+    ] as string[];
     const eventTitles = new Map<string, string>();
     if (eventIds.length > 0) {
       const events = await db
@@ -252,28 +420,48 @@ export const orderRoutes: FastifyPluginAsync = async (app) => {
     ClerkAuthService.requireBrandScope(principal, order.brand_id);
     ClerkAuthService.requireEventScope(principal, order.event_id);
 
-    const [lineItems, timeline, attendees, refunds, checkoutSession, invoice, taxSnapshots, eventData] =
-      await Promise.all([
-        repo.getLineItems(orderId),
-        repo.getTimeline(orderId),
-        db.selectFrom('attendees').selectAll().where('order_id', '=', orderId).execute(),
-        db
-          .selectFrom('refunds')
-          .selectAll()
-          .where('order_id', '=', orderId)
-          .orderBy('created_at', 'asc')
-          .execute(),
-        order.checkout_session_id
-          ? db
-              .selectFrom('checkout_sessions')
-              .selectAll()
-              .where('id', '=', order.checkout_session_id)
-              .executeTakeFirst()
-          : Promise.resolve(undefined),
-        db.selectFrom('invoices').selectAll().where('order_id', '=', orderId).executeTakeFirst(),
-        db.selectFrom('order_tax_snapshots').selectAll().where('order_id', '=', orderId).execute(),
-        db.selectFrom('events').select('title').where('id', '=', order.event_id).executeTakeFirst(),
-      ]);
+    const [
+      lineItems,
+      timeline,
+      attendees,
+      refunds,
+      checkoutSession,
+      invoice,
+      taxSnapshots,
+      eventData,
+    ] = await Promise.all([
+      repo.getLineItems(orderId),
+      repo.getTimeline(orderId),
+      db
+        .selectFrom('attendees')
+        .select(orderDetailAttendeeColumns)
+        .where('order_id', '=', orderId)
+        .execute(),
+      db
+        .selectFrom('refunds')
+        .select(orderDetailRefundColumns)
+        .where('order_id', '=', orderId)
+        .orderBy('created_at', 'asc')
+        .execute(),
+      order.checkout_session_id
+        ? db
+            .selectFrom('checkout_sessions')
+            .select(['cart'])
+            .where('id', '=', order.checkout_session_id)
+            .executeTakeFirst()
+        : Promise.resolve(undefined),
+      db
+        .selectFrom('invoices')
+        .select(orderInvoiceColumns)
+        .where('order_id', '=', orderId)
+        .executeTakeFirst(),
+      db
+        .selectFrom('order_tax_snapshots')
+        .select(orderTaxSnapshotColumns)
+        .where('order_id', '=', orderId)
+        .execute(),
+      db.selectFrom('events').select('title').where('id', '=', order.event_id).executeTakeFirst(),
+    ]);
     const cart = parseJsonValue(checkoutSession?.cart, {}) as Record<string, unknown>;
     const buyerFields =
       cart.buyerFields && typeof cart.buyerFields === 'object'
@@ -326,9 +514,21 @@ export const orderRoutes: FastifyPluginAsync = async (app) => {
     ClerkAuthService.requireEventScope(principal, order.event_id);
 
     const [invoice, lineItems, taxSnapshots] = await Promise.all([
-      db.selectFrom('invoices').selectAll().where('order_id', '=', orderId).executeTakeFirst(),
-      db.selectFrom('order_line_items').selectAll().where('order_id', '=', orderId).execute(),
-      db.selectFrom('order_tax_snapshots').selectAll().where('order_id', '=', orderId).execute(),
+      db
+        .selectFrom('invoices')
+        .select(orderInvoiceColumns)
+        .where('order_id', '=', orderId)
+        .executeTakeFirst(),
+      db
+        .selectFrom('order_line_items')
+        .select(orderLineItemColumns)
+        .where('order_id', '=', orderId)
+        .execute(),
+      db
+        .selectFrom('order_tax_snapshots')
+        .select(orderTaxSnapshotColumns)
+        .where('order_id', '=', orderId)
+        .execute(),
     ]);
     if (!invoice) throw new NotFoundError('Invoice', orderId);
     return {
@@ -350,9 +550,21 @@ export const orderRoutes: FastifyPluginAsync = async (app) => {
     ClerkAuthService.requireBrandScope(principal, order.brand_id);
     ClerkAuthService.requireEventScope(principal, order.event_id);
     const [invoice, lineItems, taxSnapshots] = await Promise.all([
-      db.selectFrom('invoices').selectAll().where('order_id', '=', orderId).executeTakeFirst(),
-      db.selectFrom('order_line_items').selectAll().where('order_id', '=', orderId).execute(),
-      db.selectFrom('order_tax_snapshots').selectAll().where('order_id', '=', orderId).execute(),
+      db
+        .selectFrom('invoices')
+        .select(orderInvoiceColumns)
+        .where('order_id', '=', orderId)
+        .executeTakeFirst(),
+      db
+        .selectFrom('order_line_items')
+        .select(orderLineItemColumns)
+        .where('order_id', '=', orderId)
+        .execute(),
+      db
+        .selectFrom('order_tax_snapshots')
+        .select(orderTaxSnapshotColumns)
+        .where('order_id', '=', orderId)
+        .execute(),
     ]);
     if (!invoice) throw new NotFoundError('Invoice', orderId);
     const body = {

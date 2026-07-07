@@ -132,6 +132,20 @@ describe('Generated client compile validation (T33)', () => {
     expect(output).toContain('remaining');
   });
 
+  it('generated types include checkout session and attendee update request bodies', async () => {
+    const output = await generateTypes();
+
+    expect(output).toContain('CheckoutSessionUpdateInput');
+    expect(output).toContain('AttendeeUpdateInput');
+    expect(output).toContain('/checkout/sessions/{sessionId}');
+    expect(output).toContain('/attendees/{attendeeId}');
+    expect(output).toContain('successUrl?: string');
+    expect(output).toContain('cancelUrl?: string');
+    expect(output).toContain(
+      'status?: "pending" | "confirmed" | "cancelled" | "refunded" | "checked_in"',
+    );
+  });
+
   // Cleanup temp files after all tests.
   it('cleanup', () => {
     if (existsSync(tmpDir)) rmSync(tmpDir, { recursive: true, force: true });

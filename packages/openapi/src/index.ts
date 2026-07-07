@@ -706,6 +706,38 @@ const rawOpenApiSpec = {
         },
         required: ['document', 'version', 'contentJson', 'context', 'renderModel', 'validation'],
       },
+      PublicCheckoutBootstrap: {
+        type: 'object',
+        properties: {
+          event: { $ref: '#/components/schemas/PublicEvent' },
+          availability: {
+            type: 'array',
+            items: { $ref: '#/components/schemas/PublicAvailabilityItem' },
+          },
+          questions: { $ref: '#/components/schemas/PublicQuestionsResponse' },
+          resaleListing: {
+            nullable: true,
+            oneOf: [{ $ref: '#/components/schemas/PublicTicketListing' }],
+          },
+        },
+        required: ['event', 'availability', 'questions', 'resaleListing'],
+      },
+      PublicEventPageBootstrap: {
+        type: 'object',
+        properties: {
+          event: { $ref: '#/components/schemas/PublicEvent' },
+          contentPage: {
+            nullable: true,
+            oneOf: [{ $ref: '#/components/schemas/PublicContentPage' }],
+          },
+          availability: {
+            type: 'array',
+            items: { $ref: '#/components/schemas/PublicAvailabilityItem' },
+          },
+          resaleListings: { $ref: '#/components/schemas/PublicTicketListingPage' },
+        },
+        required: ['event', 'contentPage', 'availability', 'resaleListings'],
+      },
       PublicMarketingIntegration: {
         type: 'object',
         properties: {
@@ -1540,6 +1572,22 @@ const rawOpenApiSpec = {
         },
         required: ['id', 'eventId', 'status', 'currency', 'quote', 'expiresAt'],
       },
+      CheckoutSessionUpdateInput: {
+        type: 'object',
+        properties: {
+          buyer: {
+            type: 'object',
+            properties: {
+              email: { type: 'string', format: 'email' },
+              firstName: { type: 'string' },
+              lastName: { type: 'string' },
+              phone: { type: 'string' },
+            },
+          },
+          successUrl: { type: 'string', format: 'uri' },
+          cancelUrl: { type: 'string', format: 'uri' },
+        },
+      },
       CheckoutWalletPasses: {
         type: 'object',
         properties: {
@@ -2293,6 +2341,19 @@ const rawOpenApiSpec = {
           updatedAt: { type: 'string', format: 'date-time' },
         },
         required: ['id', 'tenantId', 'orderId', 'eventId', 'ticketTypeId', 'email', 'status'],
+      },
+      AttendeeUpdateInput: {
+        type: 'object',
+        properties: {
+          firstName: { type: ['string', 'null'] },
+          lastName: { type: ['string', 'null'] },
+          email: { type: 'string', format: 'email' },
+          phone: { type: ['string', 'null'] },
+          status: {
+            type: 'string',
+            enum: ['pending', 'confirmed', 'cancelled', 'refunded', 'checked_in'],
+          },
+        },
       },
       AttendeePage: {
         type: 'object',
@@ -3525,7 +3586,9 @@ const rawOpenApiSpec = {
         responses: {
           '201': {
             description: 'Event created',
-            content: { 'application/json': { schema: { $ref: '#/components/schemas/Event' } } },
+            content: {
+              'application/json': { schema: { $ref: '#/components/schemas/PublicEvent' } },
+            },
           },
         },
       },
@@ -3537,7 +3600,9 @@ const rawOpenApiSpec = {
         responses: {
           '200': {
             description: 'Event details',
-            content: { 'application/json': { schema: { $ref: '#/components/schemas/Event' } } },
+            content: {
+              'application/json': { schema: { $ref: '#/components/schemas/PublicEvent' } },
+            },
           },
         },
       },
@@ -4386,7 +4451,7 @@ const rawOpenApiSpec = {
         responses: {
           '200': {
             description: 'Event details (hidden ticket types excluded)',
-            content: { 'application/json': { schema: { $ref: '#/components/schemas/PublicEvent' } } },
+            content: { 'application/json': { schema: { $ref: '#/components/schemas/Event' } } },
           },
         },
       },
@@ -4394,9 +4459,7 @@ const rawOpenApiSpec = {
     '/public/events/{eventId}/revision': {
       get: {
         summary: 'Get the latest public checkout revision for an event',
-        parameters: [
-          { name: 'eventId', in: 'path', required: true, schema: { type: 'string' } },
-        ],
+        parameters: [{ name: 'eventId', in: 'path', required: true, schema: { type: 'string' } }],
         responses: {
           '200': {
             description: 'Latest public event revision timestamp or null',
@@ -4434,7 +4497,7 @@ const rawOpenApiSpec = {
         responses: {
           '200': {
             description: 'Event details for the verified custom-domain slug',
-            content: { 'application/json': { schema: { $ref: '#/components/schemas/PublicEvent' } } },
+            content: { 'application/json': { schema: { $ref: '#/components/schemas/Event' } } },
           },
           '404': { description: 'No matching published event for the custom domain' },
         },
@@ -4465,6 +4528,43 @@ const rawOpenApiSpec = {
                 },
               },
             },
+          },
+        },
+      },
+    },
+    '/public/events/{eventId}/bootstrap': {
+      get: {
+        summary: 'Get public checkout bootstrap data',
+        parameters: [
+          { name: 'eventId', in: 'path', required: true, schema: { type: 'string' } },
+          {
+            name: 'products',
+            in: 'query',
+            required: false,
+            schema: { type: 'string' },
+            description:
+              'Comma-delimited product or direct-link ticket IDs to reveal in buyer-facing availability.',
+          },
+          {
+            name: 'resaleListingId',
+            in: 'query',
+            required: false,
+            schema: { type: 'string' },
+            description: 'Optional resale listing to preload with the checkout bootstrap payload.',
+          },
+        ],
+        responses: {
+          '200': {
+            description: 'First-load checkout metadata, availability, questions, and resale data',
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/PublicCheckoutBootstrap' },
+              },
+            },
+          },
+          '404': {
+            description: 'Event or resale listing not found',
+            content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } },
           },
         },
       },
@@ -5089,6 +5189,14 @@ const rawOpenApiSpec = {
       patch: {
         summary: 'Update checkout session',
         parameters: [{ $ref: '#/components/parameters/CheckoutSessionToken' }],
+        requestBody: {
+          required: true,
+          content: {
+            'application/json': {
+              schema: { $ref: '#/components/schemas/CheckoutSessionUpdateInput' },
+            },
+          },
+        },
         responses: {
           '200': {
             description: 'Checkout session updated',
@@ -5433,6 +5541,14 @@ const rawOpenApiSpec = {
       patch: {
         summary: 'Update attendee',
         security: [{ BearerAuth: [] }],
+        requestBody: {
+          required: true,
+          content: {
+            'application/json': {
+              schema: { $ref: '#/components/schemas/AttendeeUpdateInput' },
+            },
+          },
+        },
         responses: {
           '200': {
             description: 'Attendee updated',
@@ -7758,6 +7874,29 @@ const rawOpenApiSpec = {
         },
       },
     },
+    '/public/events/{eventId}/page-bootstrap': {
+      get: {
+        summary: 'Get public hosted event-page bootstrap data',
+        parameters: [
+          { name: 'eventId', in: 'path', required: true, schema: { type: 'string' } },
+          { name: 'locale', in: 'query', schema: { type: 'string' } },
+        ],
+        responses: {
+          '200': {
+            description: 'First-load hosted event-page content, availability, and resale data',
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/PublicEventPageBootstrap' },
+              },
+            },
+          },
+          '404': {
+            description: 'Event not found or not publicly readable',
+            content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } },
+          },
+        },
+      },
+    },
     '/public/events/{eventId}/content-page': {
       get: {
         summary: 'Compatibility alias for the published content-studio event page',
@@ -7819,6 +7958,30 @@ const rawOpenApiSpec = {
             content: {
               'application/json': {
                 schema: { $ref: '#/components/schemas/PublicContentPage' },
+              },
+            },
+          },
+          '404': {
+            description: 'No verified custom-domain event page',
+            content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } },
+          },
+        },
+      },
+    },
+    '/public/events/by-slug/{slug}/page-bootstrap': {
+      get: {
+        summary: 'Get public hosted event-page bootstrap data by custom-domain slug',
+        parameters: [
+          { name: 'slug', in: 'path', required: true, schema: { type: 'string' } },
+          { name: 'host', in: 'query', required: true, schema: { type: 'string' } },
+          { name: 'locale', in: 'query', schema: { type: 'string' } },
+        ],
+        responses: {
+          '200': {
+            description: 'First-load hosted event-page content for the verified host and slug',
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/PublicEventPageBootstrap' },
               },
             },
           },

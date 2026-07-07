@@ -25,6 +25,7 @@ import {
   type PublicContentPage,
   type AvailabilityItem,
   type CheckoutPublicResaleListing,
+  type PublicEventPageBootstrap,
   userFacingMessage,
 } from '@/lib/api';
 import { brandThemeStyle, type ResolvedBrand } from '@/lib/brand';
@@ -46,6 +47,7 @@ type Props = {
   presetDiscountCode?: string;
   trackingId?: string;
   affiliateCode?: string;
+  initialBootstrap?: PublicEventPageBootstrap | null;
 };
 
 export default function EventPageClient({
@@ -60,14 +62,21 @@ export default function EventPageClient({
   presetDiscountCode,
   trackingId,
   affiliateCode,
+  initialBootstrap,
 }: Props) {
   const router = useRouter();
-  const [event, setEvent] = useState<PublicEvent | null>(null);
-  const [contentPage, setContentPage] = useState<PublicContentPage | null>(null);
-  const [availability, setAvailability] = useState<AvailabilityItem[]>([]);
-  const [resaleListings, setResaleListings] = useState<CheckoutPublicResaleListing[]>([]);
+  const [event, setEvent] = useState<PublicEvent | null>(() => initialBootstrap?.event ?? null);
+  const [contentPage, setContentPage] = useState<PublicContentPage | null>(
+    () => initialBootstrap?.contentPage ?? null,
+  );
+  const [availability, setAvailability] = useState<AvailabilityItem[]>(
+    () => initialBootstrap?.availability ?? [],
+  );
+  const [resaleListings, setResaleListings] = useState<CheckoutPublicResaleListing[]>(
+    () => initialBootstrap?.resaleListings.items ?? [],
+  );
   const [resaleListingsError, setResaleListingsError] = useState<string | null>(null);
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(() => !initialBootstrap);
   const [error, setError] = useState<string | null>(null);
   const [notFound, setNotFound] = useState(false);
 
@@ -86,6 +95,18 @@ export default function EventPageClient({
   );
 
   useEffect(() => {
+    if (initialBootstrap) {
+      setEvent(initialBootstrap.event);
+      setContentPage(initialBootstrap.contentPage);
+      setAvailability(initialBootstrap.availability);
+      setResaleListings(initialBootstrap.resaleListings.items);
+      setResaleListingsError(null);
+      setLoading(false);
+      setError(null);
+      setNotFound(false);
+      return;
+    }
+
     let cancelled = false;
     const controller = new AbortController();
 
@@ -95,30 +116,54 @@ export default function EventPageClient({
       setError(null);
       setResaleListingsError(null);
       try {
-        const loadedEvent = eventId
-          ? await publicApi.getEvent(eventId, controller.signal)
-          : await publicApi.getEventBySlug(eventSlug!, customDomainHost!, controller.signal);
-        const loadContentPage =
-          eventSlug && customDomainHost
-            ? () => publicApi.getEventPageBySlug(eventSlug, customDomainHost, controller.signal)
-            : () => publicApi.getEventPage(loadedEvent.id, controller.signal);
-        const [loadedAvailability, loadedContentPage, loadedResaleListings] = await Promise.all([
-          publicApi.getAvailability(loadedEvent.id, controller.signal),
-          loadContentPage().catch((err) => {
-            if (err instanceof CheckoutApiError && err.status === 404) return null;
-            throw err;
-          }),
-          publicApi
-            .getResaleListings(loadedEvent.id, controller.signal)
-            .then((response) => ({ items: response.items, error: null }))
-            .catch((err) => {
-              if (controller.signal.aborted) throw err;
-              if (err instanceof CheckoutApiError && err.status === 404) {
-                return { items: [], error: null };
-              }
-              return { items: [], error: userFacingMessage(err) };
+        let loadedEvent: PublicEvent;
+        let loadedAvailability: AvailabilityItem[];
+        let loadedContentPage: PublicContentPage | null;
+        let loadedResaleListings: {
+          items: CheckoutPublicResaleListing[];
+          error: string | null;
+        };
+
+        try {
+          const bootstrap = eventId
+            ? await publicApi.getEventPageBootstrap(eventId, controller.signal)
+            : await publicApi.getEventPageBootstrapBySlug(
+                eventSlug!,
+                customDomainHost!,
+                controller.signal,
+              );
+          loadedEvent = bootstrap.event;
+          loadedAvailability = bootstrap.availability;
+          loadedContentPage = bootstrap.contentPage;
+          loadedResaleListings = { items: bootstrap.resaleListings.items, error: null };
+        } catch (bootstrapError) {
+          if (controller.signal.aborted) throw bootstrapError;
+          loadedEvent = eventId
+            ? await publicApi.getEvent(eventId, controller.signal)
+            : await publicApi.getEventBySlug(eventSlug!, customDomainHost!, controller.signal);
+          const loadContentPage =
+            eventSlug && customDomainHost
+              ? () => publicApi.getEventPageBySlug(eventSlug, customDomainHost, controller.signal)
+              : () => publicApi.getEventPage(loadedEvent.id, controller.signal);
+          [loadedAvailability, loadedContentPage, loadedResaleListings] = await Promise.all([
+            publicApi.getAvailability(loadedEvent.id, controller.signal),
+            loadContentPage().catch((err) => {
+              if (err instanceof CheckoutApiError && err.status === 404) return null;
+              throw err;
             }),
-        ]);
+            publicApi
+              .getResaleListings(loadedEvent.id, controller.signal)
+              .then((response) => ({ items: response.items, error: null }))
+              .catch((err) => {
+                if (controller.signal.aborted) throw err;
+                if (err instanceof CheckoutApiError && err.status === 404) {
+                  return { items: [], error: null };
+                }
+                return { items: [], error: userFacingMessage(err) };
+              }),
+          ]);
+        }
+
         if (cancelled) return;
         setEvent(loadedEvent);
         setContentPage(loadedContentPage);
@@ -139,7 +184,7 @@ export default function EventPageClient({
       cancelled = true;
       controller.abort();
     };
-  }, [customDomainHost, eventId, eventSlug]);
+  }, [customDomainHost, eventId, eventSlug, initialBootstrap]);
 
   const visibleTickets = useMemo(
     () => availability.filter((t) => t.status === 'active' || t.status === 'sold_out'),

@@ -23,6 +23,12 @@ export type SeededPaidPromoCheckoutEvent = SeededPaidCheckoutEvent & {
   discountCode: { id: string; code: string; discountCents: number };
 };
 
+export type SeededAdminAttendeeTableRow = SeededCheckoutEvent & {
+  attendee: { id: string; email: string; name: string; status: 'active' };
+  order: { id: string; orderNumber: string };
+  ticket: { id: string };
+};
+
 export async function seedPublishedEventPageContent(input: {
   event: { id: string; title: string };
   suffix: string;
@@ -497,6 +503,183 @@ export async function seedFreeCheckoutEvent(
   await seedPublishedEventPageContent({ event, suffix });
 
   return { event, ticketType, product };
+}
+
+export async function seedAdminAttendeeTableRow(
+  request: APIRequestContext,
+  suffix: string,
+): Promise<SeededAdminAttendeeTableRow> {
+  const seeded = await seedFreeCheckoutEvent(request, suffix);
+  const safeSuffix = compactIdPart(suffix, 18);
+  const checkoutSessionId = `cks_adm_${safeSuffix}`.slice(0, 32);
+  const orderId = `ord_adm_${safeSuffix}`.slice(0, 32);
+  const lineItemId = `oli_adm_${safeSuffix}`.slice(0, 32);
+  const attendeeId = `att_adm_${safeSuffix}`.slice(0, 32);
+  const ticketId = `tkt_adm_${safeSuffix}`.slice(0, 32);
+  const holdId = `hld_adm_${safeSuffix}`.slice(0, 32);
+  const email = `attendee-${safeSuffix}@example.com`;
+  const firstName = 'Active';
+  const lastName = 'Attendee';
+  const now = new Date();
+  const expiresAt = new Date(now.getTime() + 30 * 60_000);
+  const orderNumber = `TK-ADM-${safeSuffix}`.slice(0, 50);
+
+  await withE2eDb(async (db) => {
+    await db.transaction().execute(async (trx) => {
+      await trx
+        .insertInto('checkout_sessions')
+        .values({
+          id: checkoutSessionId,
+          tenant_id: devTenantId,
+          event_id: seeded.event.id,
+          brand_id: devBrandId,
+          status: 'completed',
+          hold_id: holdId,
+          currency: 'USD',
+          cart: JSON.stringify({
+            items: [{ ticketTypeId: seeded.ticketType.id, quantity: 1 }],
+            buyerFields: {},
+            attendeeFields: {},
+          }),
+          buyer: JSON.stringify({
+            email,
+            firstName,
+            lastName,
+          }),
+          quote: JSON.stringify({
+            subtotalCents: 0,
+            discountCents: 0,
+            taxCents: 0,
+            feeCents: 0,
+            totalCents: 0,
+            currency: 'USD',
+          }),
+          payment_intent_id: null,
+          order_id: orderId,
+          success_url: null,
+          cancel_url: null,
+          expires_at: expiresAt,
+          idempotency_key: `e2e-admin-attendee-${safeSuffix}`,
+          client_token: `e2e-admin-attendee-token-${safeSuffix}`,
+          created_at: now,
+          updated_at: now,
+        })
+        .execute();
+
+      await trx
+        .insertInto('orders')
+        .values({
+          id: orderId,
+          tenant_id: devTenantId,
+          organization_id: devOrganizationId,
+          brand_id: devBrandId,
+          event_id: seeded.event.id,
+          checkout_session_id: checkoutSessionId,
+          order_number: orderNumber,
+          status: 'paid',
+          currency: 'USD',
+          subtotal_cents: 0,
+          discount_cents: 0,
+          tax_cents: 0,
+          fee_cents: 0,
+          total_cents: 0,
+          refunded_cents: 0,
+          buyer_email: email,
+          buyer_first_name: firstName,
+          buyer_last_name: lastName,
+          buyer_phone: null,
+          payment_intent_id: null,
+          payment_provider: 'free',
+          paid_at: now,
+          refunded_at: null,
+          cancelled_at: null,
+          created_at: now,
+          updated_at: now,
+        })
+        .execute();
+
+      await trx
+        .insertInto('attendees')
+        .values({
+          id: attendeeId,
+          tenant_id: devTenantId,
+          order_id: orderId,
+          event_id: seeded.event.id,
+          ticket_type_id: seeded.ticketType.id,
+          ticket_id: null,
+          first_name: firstName,
+          last_name: lastName,
+          email,
+          phone: null,
+          status: 'active',
+          custom_answers: null,
+          checked_in_at: null,
+          check_in_device_id: null,
+          created_at: now,
+          updated_at: now,
+        })
+        .execute();
+
+      await trx
+        .insertInto('tickets')
+        .values({
+          id: ticketId,
+          tenant_id: devTenantId,
+          order_id: orderId,
+          attendee_id: attendeeId,
+          event_id: seeded.event.id,
+          ticket_type_id: seeded.ticketType.id,
+          status: 'valid',
+          code: `ADM-${safeSuffix}`,
+          qr_payload: `tixkit:ticket:${ticketId}`,
+          qr_hash: `hash-${ticketId}`,
+          transferred_to_email: null,
+          transferred_at: null,
+          checked_in_at: null,
+          checked_in_by_device_id: null,
+          wallet_pass_id: null,
+          created_at: now,
+          updated_at: now,
+        })
+        .execute();
+
+      await trx
+        .updateTable('attendees')
+        .set({ ticket_id: ticketId, updated_at: now })
+        .where('id', '=', attendeeId)
+        .execute();
+
+      await trx
+        .insertInto('order_line_items')
+        .values({
+          id: lineItemId,
+          order_id: orderId,
+          ticket_type_id: seeded.ticketType.id,
+          product_id: null,
+          resale_listing_id: null,
+          attendee_id: attendeeId,
+          description: seeded.ticketType.name,
+          quantity: 1,
+          unit_price_cents: 0,
+          subtotal_cents: 0,
+          discount_cents: 0,
+          tax_cents: 0,
+          fee_cents: 0,
+          total_cents: 0,
+          currency: 'USD',
+          created_at: now,
+          updated_at: now,
+        })
+        .execute();
+    });
+  });
+
+  return {
+    ...seeded,
+    attendee: { id: attendeeId, email, name: `${firstName} ${lastName}`, status: 'active' },
+    order: { id: orderId, orderNumber },
+    ticket: { id: ticketId },
+  };
 }
 
 export async function seedPaidCheckoutEvent(

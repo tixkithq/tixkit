@@ -18,6 +18,8 @@ import { WaitlistCheckoutReservationsMigration } from '../../migrations/0043_wai
 import { CheckoutHoldOccurrencesMigration } from '../../migrations/0044_checkout_hold_occurrences.js';
 import { TableQueryIndexesMigration } from '../../migrations/0045_table_query_indexes.js';
 import { OrganizationClerkIdUniqueMigration } from '../../migrations/0046_organization_clerk_id_unique.js';
+import { EventPublicRevisionMigration } from '../../migrations/0047_event_public_revision.js';
+import { HotQueryIndexesMigration } from '../../migrations/0048_hot_query_indexes.js';
 
 const offlineCheckInBulkSyncMigrationPath = new URL(
   '../../migrations/0034_offline_check_in_bulk_sync.ts',
@@ -184,7 +186,7 @@ describe('OrderSalesChannelMigration', () => {
   it('is registered with the production migrator provider', async () => {
     const migrations = await new TixkitMigrationProvider().getMigrations();
 
-    expect(Object.keys(migrations).at(-1)).toBe('0046_organization_clerk_id_unique');
+    expect(Object.keys(migrations).at(-1)).toBe('0048_hot_query_indexes');
     expect(migrations['0031_order_sales_channel']).toBe(OrderSalesChannelMigration);
     expect(migrations['0032_scan_logs_ticket_index']).toBe(ScanLogsTicketIndexMigration);
     expect(migrations['0033_email_jobs_template_version_fk']).toBe(
@@ -213,6 +215,57 @@ describe('OrderSalesChannelMigration', () => {
     expect(migrations['0046_organization_clerk_id_unique']).toBe(
       OrganizationClerkIdUniqueMigration,
     );
+    expect(migrations['0047_event_public_revision']).toBe(EventPublicRevisionMigration);
+    expect(migrations['0048_hot_query_indexes']).toBe(HotQueryIndexesMigration);
+  });
+
+  it('creates composite hot-query indexes for public and reporting reads', async () => {
+    const db = new FakeOrderSalesChannelDb();
+
+    await HotQueryIndexesMigration.up(db as never);
+
+    expect(db.createdIndexes).toEqual([
+      {
+        indexName: 'idx_content_documents_event_channel_status_locale',
+        tableName: 'content_documents',
+        columnNames: ['event_id', 'channel', 'status', 'locale'],
+      },
+      {
+        indexName: 'idx_event_pages_event_locale_default',
+        tableName: 'event_pages',
+        columnNames: ['event_id', 'locale', 'is_default'],
+      },
+      {
+        indexName: 'idx_questions_event_status_sort',
+        tableName: 'questions',
+        columnNames: ['event_id', 'status', 'sort_order', 'id'],
+      },
+      {
+        indexName: 'idx_checkout_sessions_tenant_event_status',
+        tableName: 'checkout_sessions',
+        columnNames: ['tenant_id', 'event_id', 'status'],
+      },
+      {
+        indexName: 'idx_refunds_order_status_created',
+        tableName: 'refunds',
+        columnNames: ['order_id', 'status', 'created_at'],
+      },
+      {
+        indexName: 'idx_orders_report_event_status_created',
+        tableName: 'orders',
+        columnNames: ['tenant_id', 'event_id', 'status', 'created_at', 'id'],
+      },
+      {
+        indexName: 'idx_order_line_items_order_ticket',
+        tableName: 'order_line_items',
+        columnNames: ['order_id', 'ticket_type_id'],
+      },
+      {
+        indexName: 'idx_order_tax_snapshots_order_rule',
+        tableName: 'order_tax_snapshots',
+        columnNames: ['order_id', 'tax_rule_name', 'rate'],
+      },
+    ]);
   });
 
   it('keeps event resale policy columns portable across supported SQL drivers', () => {

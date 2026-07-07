@@ -342,6 +342,20 @@ export type QuestionsResponse = {
   attendeeQuestions: CheckoutQuestion[];
 };
 
+export type PublicCheckoutBootstrap = {
+  event: PublicEvent;
+  availability: AvailabilityItem[];
+  questions: QuestionsResponse;
+  resaleListing?: CheckoutPublicResaleListing | null;
+};
+
+export type PublicEventPageBootstrap = {
+  event: PublicEvent;
+  contentPage: PublicContentPage | null;
+  availability: AvailabilityItem[];
+  resaleListings: CheckoutResaleListingsResponse;
+};
+
 export type AccessCodeValidationResponse = {
   valid: true;
   ticketTypeIds: string[];
@@ -531,6 +545,55 @@ export const publicApi = {
     );
   },
 
+  async getEventPageBootstrap(
+    eventId: string,
+    signal?: AbortSignal,
+    locale?: string,
+  ): Promise<PublicEventPageBootstrap> {
+    const params = new URLSearchParams();
+    if (locale) params.set('locale', locale);
+    const query = params.toString();
+    const response = await apiRequest<{
+      event: PublicEvent;
+      contentPage?: PublicContentPage | null;
+      availability?: AvailabilityItem[];
+      resaleListings?: CheckoutResaleListingsResponse;
+    }>(
+      `/public/events/${encodeURIComponent(eventId)}/page-bootstrap${query ? `?${query}` : ''}`,
+      { signal },
+    );
+    return {
+      event: response.event,
+      contentPage: response.contentPage ?? null,
+      availability: Array.isArray(response.availability) ? response.availability : [],
+      resaleListings: response.resaleListings ?? { items: [], nextCursor: null, hasMore: false },
+    };
+  },
+
+  async getEventPageBootstrapBySlug(
+    slug: string,
+    host: string,
+    signal?: AbortSignal,
+    locale?: string,
+  ): Promise<PublicEventPageBootstrap> {
+    const params = new URLSearchParams({ host });
+    if (locale) params.set('locale', locale);
+    const response = await apiRequest<{
+      event: PublicEvent;
+      contentPage?: PublicContentPage | null;
+      availability?: AvailabilityItem[];
+      resaleListings?: CheckoutResaleListingsResponse;
+    }>(`/public/events/by-slug/${encodeURIComponent(slug)}/page-bootstrap?${params.toString()}`, {
+      signal,
+    });
+    return {
+      event: response.event,
+      contentPage: response.contentPage ?? null,
+      availability: Array.isArray(response.availability) ? response.availability : [],
+      resaleListings: response.resaleListings ?? { items: [], nextCursor: null, hasMore: false },
+    };
+  },
+
   async getDraftPreview(
     eventId: string,
     token: string,
@@ -555,6 +618,31 @@ export const publicApi = {
       `/public/events/${encodeURIComponent(eventId)}/availability${query ? `?${query}` : ''}`,
       { signal },
     );
+  },
+
+  async getCheckoutBootstrap(
+    eventId: string,
+    signal?: AbortSignal,
+    input?: { products?: string; resaleListingId?: string },
+  ): Promise<PublicCheckoutBootstrap> {
+    const params = new URLSearchParams();
+    if (input?.products) params.set('products', input.products);
+    if (input?.resaleListingId) params.set('resaleListingId', input.resaleListingId);
+    const query = params.toString();
+    const response = await apiRequest<{
+      event: PublicEvent;
+      availability?: AvailabilityItem[];
+      questions?: unknown;
+      resaleListing?: CheckoutPublicResaleListing | null;
+    }>(`/public/events/${encodeURIComponent(eventId)}/bootstrap${query ? `?${query}` : ''}`, {
+      signal,
+    });
+    return {
+      event: response.event,
+      availability: Array.isArray(response.availability) ? response.availability : [],
+      questions: normalizeQuestionsResponse(response.questions),
+      resaleListing: response.resaleListing ?? null,
+    };
   },
 
   async getResaleListings(

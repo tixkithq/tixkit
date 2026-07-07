@@ -3,7 +3,12 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { cleanup, fireEvent, render, waitFor } from '@testing-library/react';
 import React from 'react';
 import EventPageClient from '@/app/e/[eventId]/event-page-client';
-import { publicApi, type AvailabilityItem, type PublicEvent } from '@/lib/api';
+import {
+  publicApi,
+  type AvailabilityItem,
+  type PublicEvent,
+  type PublicEventPageBootstrap,
+} from '@/lib/api';
 import {
   createDefaultEventPageDocument,
   resolveEventPageDocument,
@@ -40,6 +45,8 @@ vi.mock('@/lib/api', () => {
       getEventBySlug: vi.fn(),
       getEventPage: vi.fn(),
       getEventPageBySlug: vi.fn(),
+      getEventPageBootstrap: vi.fn(),
+      getEventPageBootstrapBySlug: vi.fn(),
       getAvailability: vi.fn(),
       getResaleListings: vi.fn(),
       getBrand: vi.fn(),
@@ -49,14 +56,49 @@ vi.mock('@/lib/api', () => {
   };
 });
 
+type MockedCallable<TArgs extends unknown[], TResult> = ((...args: TArgs) => TResult) & {
+  mockResolvedValue(value: unknown): MockedCallable<TArgs, TResult>;
+  mockRejectedValue(value: unknown): MockedCallable<TArgs, TResult>;
+  mockImplementation(fn: (...args: TArgs) => TResult): MockedCallable<TArgs, TResult>;
+};
+
 const publicApiMock = publicApi as unknown as {
-  getEvent: ReturnType<typeof vi.fn>;
-  getEventBySlug: ReturnType<typeof vi.fn>;
-  getEventPage: ReturnType<typeof vi.fn>;
-  getEventPageBySlug: ReturnType<typeof vi.fn>;
-  getAvailability: ReturnType<typeof vi.fn>;
-  getResaleListings: ReturnType<typeof vi.fn>;
-  getBrand: ReturnType<typeof vi.fn>;
+  getEvent: MockedCallable<
+    Parameters<typeof publicApi.getEvent>,
+    ReturnType<typeof publicApi.getEvent>
+  >;
+  getEventBySlug: MockedCallable<
+    Parameters<typeof publicApi.getEventBySlug>,
+    ReturnType<typeof publicApi.getEventBySlug>
+  >;
+  getEventPage: MockedCallable<
+    Parameters<typeof publicApi.getEventPage>,
+    ReturnType<typeof publicApi.getEventPage>
+  >;
+  getEventPageBySlug: MockedCallable<
+    Parameters<typeof publicApi.getEventPageBySlug>,
+    ReturnType<typeof publicApi.getEventPageBySlug>
+  >;
+  getEventPageBootstrap: MockedCallable<
+    Parameters<typeof publicApi.getEventPageBootstrap>,
+    ReturnType<typeof publicApi.getEventPageBootstrap>
+  >;
+  getEventPageBootstrapBySlug: MockedCallable<
+    Parameters<typeof publicApi.getEventPageBootstrapBySlug>,
+    ReturnType<typeof publicApi.getEventPageBootstrapBySlug>
+  >;
+  getAvailability: MockedCallable<
+    Parameters<typeof publicApi.getAvailability>,
+    ReturnType<typeof publicApi.getAvailability>
+  >;
+  getResaleListings: MockedCallable<
+    Parameters<typeof publicApi.getResaleListings>,
+    ReturnType<typeof publicApi.getResaleListings>
+  >;
+  getBrand: MockedCallable<
+    Parameters<typeof publicApi.getBrand>,
+    ReturnType<typeof publicApi.getBrand>
+  >;
 };
 
 afterEach(() => {
@@ -67,6 +109,61 @@ describe('EventPageClient escaping', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     publicApiMock.getResaleListings.mockResolvedValue({ items: [] });
+    publicApiMock.getEventPageBootstrap.mockImplementation(async (eventId, signal) => {
+      const [event, contentPage, availability, resaleListings] = await Promise.all([
+        publicApiMock.getEvent(eventId, signal),
+        publicApiMock.getEventPage(eventId, signal),
+        publicApiMock.getAvailability(eventId, signal),
+        publicApiMock.getResaleListings(eventId, signal),
+      ]);
+      return { event, contentPage, availability, resaleListings };
+    });
+    publicApiMock.getEventPageBootstrapBySlug.mockImplementation(async (slug, host, signal) => {
+      const event = await publicApiMock.getEventBySlug(slug, host, signal);
+      const [contentPage, availability, resaleListings] = await Promise.all([
+        publicApiMock.getEventPageBySlug(slug, host, signal),
+        publicApiMock.getAvailability(event.id, signal),
+        publicApiMock.getResaleListings(event.id, signal),
+      ]);
+      return { event, contentPage, availability, resaleListings };
+    });
+  });
+
+  it('hydrates from server-provided bootstrap data without a client bootstrap request', async () => {
+    const initialBootstrap: PublicEventPageBootstrap = {
+      event: {
+        id: 'evt_server_bootstrap',
+        title: 'Server Rendered Event',
+        status: 'published',
+        timezone: 'America/Chicago',
+        startsAt: '2026-07-17T19:00:00.000Z',
+      },
+      contentPage: null,
+      availability: [
+        {
+          type: 'ticket',
+          ticketTypeId: 'tt_server',
+          name: 'General Admission',
+          kind: 'paid',
+          priceCents: 4500,
+          currency: 'USD',
+          minPerOrder: 1,
+          maxPerOrder: 4,
+          available: 120,
+          status: 'active',
+        },
+      ],
+      resaleListings: { items: [], nextCursor: null, hasMore: false },
+    };
+
+    render(
+      React.createElement(EventPageClient, { eventId: 'evt_server_bootstrap', initialBootstrap }),
+    );
+
+    await waitFor(() => expect(document.body.textContent).toContain('Server Rendered Event'));
+    expect(document.body.textContent).toContain('General Admission');
+    expect(publicApiMock.getEventPageBootstrap).not.toHaveBeenCalled();
+    expect(publicApiMock.getEvent).not.toHaveBeenCalled();
   });
 
   it('renders HTML-looking event and ticket copy as text', async () => {
