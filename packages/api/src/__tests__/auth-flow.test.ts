@@ -96,6 +96,7 @@ function createAuthDb(initialTables: Tables) {
         conditions.push({ column, operator, value });
         return query;
       },
+      limit: () => query,
       async execute() {
         return rowsFor(table).filter((row) => matches(row, conditions));
       },
@@ -447,6 +448,47 @@ describe('ClerkAuthService signed-in user auth', () => {
       scopes: ['settings.write'],
       clerkOrganizationId: 'clerk_org_2',
     });
+  });
+
+  it('rejects active Clerk organization claims mapped to multiple tenants', async () => {
+    vi.mocked(verifyToken).mockResolvedValue({
+      sub: 'clerk_user_1',
+      org_id: 'clerk_org_shared',
+    } as never);
+    const { db } = createAuthDb({
+      user_profiles: [
+        {
+          id: 'usr_1',
+          tenant_id: 'tnt_1',
+          clerk_user_id: 'clerk_user_1',
+          status: 'active',
+        },
+        {
+          id: 'usr_2',
+          tenant_id: 'tnt_2',
+          clerk_user_id: 'clerk_user_1',
+          status: 'active',
+        },
+      ],
+      organizations: [
+        {
+          id: 'org_1',
+          tenant_id: 'tnt_1',
+          clerk_organization_id: 'clerk_org_shared',
+        },
+        {
+          id: 'org_2',
+          tenant_id: 'tnt_2',
+          clerk_organization_id: 'clerk_org_shared',
+        },
+      ],
+    });
+
+    const service = new ClerkAuthService('sk_test_auth', db as never);
+
+    await expect(
+      service.authenticateRequest(request({ authorization: 'Bearer clerk_session_token' })),
+    ).rejects.toThrow('Active organization maps to multiple Tixkit tenants');
   });
 
   it('uses X-Tenant-Id to disambiguate multi-tenant users without an active Clerk org', async () => {

@@ -365,11 +365,16 @@ export class ClerkAuthService {
       let userProfile = profiles[0];
 
       if (org_id) {
-        const org = await this.db
+        const organizations = await this.db
           .selectFrom('organizations')
           .selectAll()
           .where('clerk_organization_id', '=', org_id)
-          .executeTakeFirst();
+          .limit(2)
+          .execute();
+        if (organizations.length > 1) {
+          throw new UnauthorizedError('Active organization maps to multiple Tixkit tenants');
+        }
+        const org = organizations[0];
         const match = org ? profiles.find((p) => p.tenant_id === org.tenant_id) : undefined;
         if (match) {
           userProfile = match;

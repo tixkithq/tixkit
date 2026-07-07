@@ -498,6 +498,35 @@ describe.each(driverCases)('database integration: $driver', ({ driver, url }) =>
     ).rejects.toThrow();
   });
 
+  it('enforces globally unique non-null Clerk organization IDs', async () => {
+    const { tenant } = await createCatalog(db);
+    const otherTenant = await new TenantRepository(db).create({
+      name: 'Other Tenant',
+      plan: 'pro',
+    });
+
+    await new OrganizationRepository(db).create({
+      tenantId: tenant.id,
+      name: 'Clerk Org One',
+      slug: 'clerk-org-one',
+      clerkOrganizationId: 'clerk_org_shared',
+    });
+    await new OrganizationRepository(db).create({
+      tenantId: otherTenant.id,
+      name: 'Nullable Clerk Org',
+      slug: 'nullable-clerk-org',
+    });
+
+    await expect(
+      new OrganizationRepository(db).create({
+        tenantId: otherTenant.id,
+        name: 'Duplicate Clerk Org',
+        slug: 'duplicate-clerk-org',
+        clerkOrganizationId: 'clerk_org_shared',
+      }),
+    ).rejects.toThrow();
+  });
+
   it('rejects orphaned checkout sessions through foreign keys', async () => {
     await expect(
       db

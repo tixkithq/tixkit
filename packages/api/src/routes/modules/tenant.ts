@@ -1,5 +1,6 @@
 import type { FastifyPluginAsync } from 'fastify';
 import { ClerkAuthService } from '../../auth/clerk.js';
+import type { AppContext } from '../../app.js';
 import type { Permission, Principal } from '@tixkit/domain';
 import {
   OrganizationRepository,
@@ -203,6 +204,28 @@ function isDuplicateInsert(error: unknown): boolean {
   );
 }
 
+async function requireUniqueClerkOrganizationId(
+  db: AppContext['db'],
+  clerkOrganizationId: string | null | undefined,
+  currentOrganizationId?: string,
+): Promise<void> {
+  if (clerkOrganizationId == null) return;
+  const trimmed = clerkOrganizationId.trim();
+  if (trimmed === '') return;
+
+  let query = db
+    .selectFrom('organizations')
+    .select(['id'])
+    .where('clerk_organization_id', '=', trimmed);
+  if (currentOrganizationId) {
+    query = query.where('id', '!=', currentOrganizationId);
+  }
+  const existing = await query.executeTakeFirst();
+  if (existing) {
+    throw new ValidationError('Clerk organization ID is already assigned to another organization');
+  }
+}
+
 function stripeClientFromContext(
   context: unknown,
 ): Pick<Stripe, 'accounts' | 'accountLinks'> | null {
@@ -242,6 +265,7 @@ export const tenantRoutes: FastifyPluginAsync = async (app) => {
     const principal = request.principal!;
     ClerkAuthService.requirePermission(principal, 'settings.write');
     const body = parseBody(createOrganizationSchema, request.body);
+    await requireUniqueClerkOrganizationId(db, body.clerkOrganizationId);
 
     const repo = new OrganizationRepository(db);
     const createInput = {
@@ -251,7 +275,17 @@ export const tenantRoutes: FastifyPluginAsync = async (app) => {
       clerkOrganizationId: body.clerkOrganizationId,
       boxOfficeSettings: body.boxOfficeSettings,
     };
-    const org = await repo.create(createInput);
+    let org;
+    try {
+      org = await repo.create(createInput);
+    } catch (err) {
+      if (isDuplicateInsert(err)) {
+        throw new ValidationError(
+          'Clerk organization ID is already assigned to another organization',
+        );
+      }
+      throw err;
+    }
 
     return reply.status(201).send(serializeOrganization(org));
   });
@@ -313,16 +347,27 @@ export const tenantRoutes: FastifyPluginAsync = async (app) => {
     ClerkAuthService.requireOrganizationScope(principal, organizationId);
 
     const body = parseBody(updateOrganizationSchema, request.body);
-    const updated = await new OrganizationRepository(db).update(organizationId, {
-      ...(typeof body.name === 'string' ? { name: body.name.trim() } : {}),
-      ...(typeof body.slug === 'string' ? { slug: body.slug.trim() } : {}),
-      ...(body.clerkOrganizationId !== undefined
-        ? { clerk_organization_id: body.clerkOrganizationId }
-        : {}),
-      ...(body.boxOfficeSettings !== undefined
-        ? { box_office_settings: JSON.stringify(body.boxOfficeSettings) }
-        : {}),
-    });
+    await requireUniqueClerkOrganizationId(db, body.clerkOrganizationId, organizationId);
+    let updated;
+    try {
+      updated = await new OrganizationRepository(db).update(organizationId, {
+        ...(typeof body.name === 'string' ? { name: body.name.trim() } : {}),
+        ...(typeof body.slug === 'string' ? { slug: body.slug.trim() } : {}),
+        ...(body.clerkOrganizationId !== undefined
+          ? { clerk_organization_id: body.clerkOrganizationId }
+          : {}),
+        ...(body.boxOfficeSettings !== undefined
+          ? { box_office_settings: JSON.stringify(body.boxOfficeSettings) }
+          : {}),
+      });
+    } catch (err) {
+      if (isDuplicateInsert(err)) {
+        throw new ValidationError(
+          'Clerk organization ID is already assigned to another organization',
+        );
+      }
+      throw err;
+    }
     await writeAuditLog(audit(), request, principal, {
       action: 'organization.updated',
       organizationId,

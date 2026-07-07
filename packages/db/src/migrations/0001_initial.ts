@@ -31,6 +31,24 @@ function jsonType(): ColumnDataType | Expression<unknown> {
   return 'jsonb';
 }
 
+async function createUniqueClerkOrganizationIndex(db: Database): Promise<void> {
+  if (isMssql()) {
+    await sql`
+      create unique index uniq_organizations_clerk_organization_id
+      on organizations (clerk_organization_id)
+      where clerk_organization_id is not null
+    `.execute(db);
+    return;
+  }
+
+  await db.schema
+    .createIndex('uniq_organizations_clerk_organization_id')
+    .on('organizations')
+    .columns(['clerk_organization_id'])
+    .unique()
+    .execute();
+}
+
 function textType(): ColumnDataType | Expression<unknown> {
   if (isMssql()) return sql`nvarchar(max)`;
 
@@ -1328,6 +1346,7 @@ export const InitialMigration: Migration = {
       .on('organizations')
       .columns(['tenant_id'])
       .execute();
+    await createUniqueClerkOrganizationIndex(db);
     await db.schema.createIndex('idx_brands_tenant').on('brands').columns(['tenant_id']).execute();
     await db.schema
       .createIndex('idx_brands_org')

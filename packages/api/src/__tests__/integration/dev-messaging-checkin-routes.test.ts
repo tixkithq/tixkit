@@ -831,6 +831,83 @@ describe('OAuth application CRUD', () => {
 });
 
 describe('brand domain creation', () => {
+  it('POST /organizations rejects duplicate Clerk organization IDs', async () => {
+    const tables = {
+      organizations: [
+        {
+          id: 'org_2',
+          tenant_id: 'tnt_2',
+          name: 'Other Org',
+          slug: 'other-org',
+          clerk_organization_id: 'clerk_org_shared',
+          box_office_settings: {},
+          status: 'active',
+          created_at: new Date(),
+          updated_at: new Date(),
+        },
+      ],
+    };
+    const app = await setupApp(tenantRoutes, makePrincipal(), tables);
+    const res = await app.inject({
+      method: 'POST',
+      url: '/organizations',
+      payload: {
+        name: 'New Org',
+        slug: 'new-org',
+        clerkOrganizationId: 'clerk_org_shared',
+      },
+    });
+    expect(res.statusCode).toBe(400);
+    expect(res.json()).toMatchObject({
+      error: 'Bad Request',
+      message: 'Clerk organization ID is already assigned to another organization',
+    });
+    await app.close();
+  });
+
+  it('PATCH /organizations/:organizationId rejects duplicate Clerk organization IDs', async () => {
+    const tables = {
+      organizations: [
+        {
+          id: 'org_1',
+          tenant_id: 'tnt_1',
+          name: 'Current Org',
+          slug: 'current-org',
+          clerk_organization_id: null,
+          box_office_settings: {},
+          status: 'active',
+          created_at: new Date(),
+          updated_at: new Date(),
+        },
+        {
+          id: 'org_2',
+          tenant_id: 'tnt_2',
+          name: 'Other Org',
+          slug: 'other-org',
+          clerk_organization_id: 'clerk_org_shared',
+          box_office_settings: {},
+          status: 'active',
+          created_at: new Date(),
+          updated_at: new Date(),
+        },
+      ],
+    };
+    const app = await setupApp(tenantRoutes, makePrincipal(), tables);
+    const res = await app.inject({
+      method: 'PATCH',
+      url: '/organizations/org_1',
+      payload: {
+        clerkOrganizationId: 'clerk_org_shared',
+      },
+    });
+    expect(res.statusCode).toBe(400);
+    expect(res.json()).toMatchObject({
+      error: 'Bad Request',
+      message: 'Clerk organization ID is already assigned to another organization',
+    });
+    await app.close();
+  });
+
   it('PATCH /organizations/:organizationId updates organization settings', async () => {
     const tables = {
       organizations: [
