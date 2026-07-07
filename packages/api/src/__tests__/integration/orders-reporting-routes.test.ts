@@ -5,6 +5,7 @@ import type { Database } from '@tixkit/db';
 import type { AppContext } from '../../app.js';
 import { orderRoutes } from '../../routes/modules/orders.js';
 import { reportingRoutes } from '../../routes/modules/reporting.js';
+import { hashRequest } from '../../services/idempotency.js';
 
 const dbState = vi.hoisted(() => ({
   order: {
@@ -780,6 +781,89 @@ describe('order routes', () => {
     expect(body.status).toBe('pending');
     expect(dbState.startRefundCalled).toBe(true);
     expect(dbState.startRefundInput).toHaveProperty('nonce');
+    await app.close();
+  });
+
+  it('POST /orders/:orderId/refunds replays completed idempotency after order state changes', async () => {
+    dbState.order.status = 'refunded';
+    dbState.order.refunded_cents = 10700;
+    dbState.idempotencyCheck = {
+      id: 'idm_refund_replay',
+      key: 'refund-replay-key',
+      tenant_id: 'tnt_1',
+      request_hash: hashRequest({
+        orderId: 'ord_1',
+        amountCents: null,
+        reason: 'Customer request',
+        voidTickets: true,
+        restoreInventory: false,
+      }),
+      response_status: 202,
+      response_body: JSON.stringify({
+        orderId: 'ord_1',
+        refundAmount: 10700,
+        status: 'pending',
+        message: 'Refund workflow started',
+      }),
+      status: 'completed',
+      expires_at: new Date('2026-08-02T00:00:00.000Z'),
+    };
+    const app = await setupApp(orderRoutes, makePrincipal());
+
+    const res = await app.inject({
+      method: 'POST',
+      url: '/orders/ord_1/refunds',
+      headers: { 'idempotency-key': 'refund-replay-key' },
+      payload: { reason: 'Customer request' },
+    });
+
+    expect(res.statusCode).toBe(202);
+    expect(res.json()).toEqual({
+      orderId: 'ord_1',
+      refundAmount: 10700,
+      status: 'pending',
+      message: 'Refund workflow started',
+    });
+    expect(dbState.startRefundCalled).toBe(false);
+    await app.close();
+  });
+
+  it('POST /orders/:orderId/refunds detects same-key body conflicts before mutable state validation', async () => {
+    dbState.order.status = 'refunded';
+    dbState.order.refunded_cents = 10700;
+    dbState.idempotencyCheck = {
+      id: 'idm_refund_replay',
+      key: 'refund-replay-key',
+      tenant_id: 'tnt_1',
+      request_hash: hashRequest({
+        orderId: 'ord_1',
+        amountCents: null,
+        reason: 'Customer request',
+        voidTickets: true,
+        restoreInventory: false,
+      }),
+      response_status: 202,
+      response_body: JSON.stringify({
+        orderId: 'ord_1',
+        refundAmount: 10700,
+        status: 'pending',
+        message: 'Refund workflow started',
+      }),
+      status: 'completed',
+      expires_at: new Date('2026-08-02T00:00:00.000Z'),
+    };
+    const app = await setupApp(orderRoutes, makePrincipal());
+
+    const res = await app.inject({
+      method: 'POST',
+      url: '/orders/ord_1/refunds',
+      headers: { 'idempotency-key': 'refund-replay-key' },
+      payload: { reason: 'Changed reason' },
+    });
+
+    expect(res.statusCode).toBe(409);
+    expect(res.json().message).toContain('Idempotency key refund-replay-key');
+    expect(dbState.startRefundCalled).toBe(false);
     await app.close();
   });
 

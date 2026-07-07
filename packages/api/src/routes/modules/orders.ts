@@ -424,21 +424,6 @@ export const orderRoutes: FastifyPluginAsync = async (app) => {
     ClerkAuthService.requireBrandScope(principal, order.brand_id);
     ClerkAuthService.requireEventScope(principal, order.event_id);
 
-    if (order.status !== 'paid' && order.status !== 'partially_refunded') {
-      throw new ValidationError('Order is not in a refundable state');
-    }
-
-    const refundAmount =
-      body.amountCents ?? Number(order.total_cents) - Number(order.refunded_cents);
-    const alreadyRefunded = Number(order.refunded_cents);
-
-    if (refundAmount <= 0) {
-      throw new ValidationError('Refund amount must be positive');
-    }
-    if (alreadyRefunded + refundAmount > Number(order.total_cents)) {
-      throw new ValidationError('Refund amount exceeds order total');
-    }
-
     const result = await withIdempotency(
       db,
       {
@@ -446,13 +431,28 @@ export const orderRoutes: FastifyPluginAsync = async (app) => {
         tenantId: principal.tenantId,
         requestHash: hashRequest({
           orderId,
-          amountCents: refundAmount,
+          amountCents: body.amountCents ?? null,
           reason: body.reason,
           voidTickets: body.voidTickets ?? true,
           restoreInventory: body.restoreInventory ?? false,
         }),
       },
       async () => {
+        if (order.status !== 'paid' && order.status !== 'partially_refunded') {
+          throw new ValidationError('Order is not in a refundable state');
+        }
+
+        const refundAmount =
+          body.amountCents ?? Number(order.total_cents) - Number(order.refunded_cents);
+        const alreadyRefunded = Number(order.refunded_cents);
+
+        if (refundAmount <= 0) {
+          throw new ValidationError('Refund amount must be positive');
+        }
+        if (alreadyRefunded + refundAmount > Number(order.total_cents)) {
+          throw new ValidationError('Refund amount exceeds order total');
+        }
+
         await app.context.temporalClient.startRefund({
           orderId: order.id,
           amountCents: refundAmount,
