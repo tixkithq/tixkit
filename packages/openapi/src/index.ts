@@ -674,6 +674,38 @@ const rawOpenApiSpec = {
         },
         required: ['document', 'version', 'page'],
       },
+      DraftPreviewPage: {
+        type: 'object',
+        properties: {
+          document: {
+            type: 'object',
+            properties: {
+              eventId: { type: 'string' },
+              channel: { type: 'string', enum: ['event_page'] },
+              key: { type: 'string' },
+              name: { type: 'string' },
+              locale: { type: 'string' },
+              updatedAt: { type: 'string', format: 'date-time' },
+            },
+            required: ['eventId', 'channel', 'key', 'name', 'locale', 'updatedAt'],
+          },
+          version: {
+            type: 'object',
+            properties: {
+              versionNumber: { type: 'integer' },
+              status: { type: 'string' },
+              subject: { type: 'string' },
+              previewText: { type: 'string' },
+            },
+            required: ['versionNumber', 'status'],
+          },
+          contentJson: { type: 'object', additionalProperties: true },
+          context: { type: 'object', additionalProperties: true },
+          renderModel: { $ref: '#/components/schemas/ResolvedEventPage' },
+          validation: { $ref: '#/components/schemas/ContentValidationResult' },
+        },
+        required: ['document', 'version', 'contentJson', 'context', 'renderModel', 'validation'],
+      },
       PublicEventRevision: {
         type: 'object',
         properties: {
@@ -7710,31 +7742,19 @@ const rawOpenApiSpec = {
         parameters: [
           { name: 'eventId', in: 'path', required: true, schema: { type: 'string' } },
           { name: 'token', in: 'query', required: true, schema: { type: 'string' } },
+          { name: 'host', in: 'query', schema: { type: 'string' } },
         ],
         responses: {
           '200': {
             description: 'Draft event-page content with real context for editing',
             content: {
               'application/json': {
-                schema: {
-                  type: 'object',
-                  properties: {
-                    contentJson: { type: 'object', additionalProperties: true },
-                    context: { type: 'object', additionalProperties: true },
-                    validation: { $ref: '#/components/schemas/ContentValidationResult' },
-                    versionId: { type: 'string' },
-                  },
-                  required: ['contentJson', 'context', 'validation', 'versionId'],
-                },
+                schema: { $ref: '#/components/schemas/DraftPreviewPage' },
               },
             },
           },
-          '401': {
-            description: 'Invalid or expired preview token',
-            content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } },
-          },
           '404': {
-            description: 'Event or draft not found',
+            description: 'Event, draft, or preview token not found',
             content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } },
           },
         },

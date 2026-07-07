@@ -885,6 +885,17 @@ describe('openApiSpec', () => {
       ].schema,
     ).toEqual({ $ref: '#/components/schemas/PublicEventDiscoveryCard' });
     expect(
+      openApiSpec.paths['/public/events/{eventId}/draft-preview'].get.responses['200'].content[
+        'application/json'
+      ].schema,
+    ).toEqual({ $ref: '#/components/schemas/DraftPreviewPage' });
+    expect(
+      openApiSpec.paths['/public/events/{eventId}/draft-preview'].get.responses,
+    ).not.toHaveProperty('401');
+    expect(
+      openApiSpec.paths['/public/events/{eventId}/draft-preview'].get.responses['404'].description,
+    ).toContain('preview token');
+    expect(
       openApiSpec.components.schemas.PublicContentPage.properties.document.properties,
     ).not.toHaveProperty('tenantId');
     expect(
@@ -900,6 +911,32 @@ describe('openApiSpec', () => {
     expect(
       openApiSpec.components.schemas.PublicContentPage.properties.page.properties.renderModel,
     ).toEqual({ $ref: '#/components/schemas/ResolvedEventPage' });
+    expect(openApiSpec.components.schemas.DraftPreviewPage.required).toEqual([
+      'document',
+      'version',
+      'contentJson',
+      'context',
+      'renderModel',
+      'validation',
+    ]);
+    expect(openApiSpec.components.schemas.DraftPreviewPage.properties.document.required).toEqual([
+      'eventId',
+      'channel',
+      'key',
+      'name',
+      'locale',
+      'updatedAt',
+    ]);
+    expect(openApiSpec.components.schemas.DraftPreviewPage.properties.version.required).toEqual([
+      'versionNumber',
+      'status',
+    ]);
+    expect(openApiSpec.components.schemas.DraftPreviewPage.properties).not.toHaveProperty(
+      'versionId',
+    );
+    expect(openApiSpec.components.schemas.DraftPreviewPage.properties.renderModel).toEqual({
+      $ref: '#/components/schemas/ResolvedEventPage',
+    });
   });
 
   it('documents checkout tracking separately from affiliate attribution', () => {

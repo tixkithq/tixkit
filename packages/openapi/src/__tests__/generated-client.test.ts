@@ -67,6 +67,7 @@ describe('Generated client compile validation (T33)', () => {
       '/public/events/{eventId}/page',
       '/public/events/{eventId}/content-page',
       '/public/events/{eventId}/discovery-card',
+      '/public/events/{eventId}/draft-preview',
       '/public/events/{eventId}/revision',
       '/public/events/{eventId}/resale-listings',
       '/public/events/by-slug/{slug}/page',
@@ -82,6 +83,7 @@ describe('Generated client compile validation (T33)', () => {
 
     for (const schema of [
       'PublicContentPage',
+      'DraftPreviewPage',
       'PublicEventDiscoveryCard',
       'PublicEventRevision',
       'PublicTicketListing',
@@ -95,6 +97,11 @@ describe('Generated client compile validation (T33)', () => {
 
     expect(output).toContain('"X-Checkout-Session-Token"');
     expect(output).toContain('"Idempotency-Key"');
+    expect(output).toContain('DraftPreviewPage');
+    expect(output).toContain('renderModel: components["schemas"]["ResolvedEventPage"]');
+    expect(output).toContain('version: {');
+    expect(output).toContain('versionNumber: number');
+    expect(output).toContain('status: string');
   });
 
   it('generated types preserve public availability product rows', async () => {
