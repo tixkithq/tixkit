@@ -18,6 +18,7 @@ import {
 export const TIPTAP_EVENT_PAGE_PROVIDER = '@tiptap/core' as const;
 export const EVENT_PAGE_SCHEMA_VERSION = 1 as const;
 export const EVENT_PAGE_INLINE_STYLE_MARK = 'eventPageInlineStyle' as const;
+export const EVENT_PAGE_BLOCK_NODE = 'eventPageBlock' as const;
 
 export const EVENT_PAGE_FONT_FAMILY_OPTIONS = [
   { label: 'Brand default', value: '' },
@@ -36,6 +37,68 @@ const allowedEventPageTextAlignments = new Set(['left', 'center', 'right']);
 
 export function isAllowedEventPageFontFamily(value: unknown): value is string {
   return typeof value === 'string' && allowedEventPageFontFamilies.has(value.trim());
+}
+
+/**
+ * Map of approved font family values to their Google Font family name.
+ * Only fonts that require an external stylesheet load are included;
+ * system fonts (Arial, Georgia, Times, Verdana, Courier) are omitted.
+ */
+const GOOGLE_FONT_MAP: Record<string, string> = {
+  'Inter, Arial, sans-serif': 'Inter',
+};
+
+/**
+ * Scan an EventPageDocument for font families used in rich_text block inline
+ * style marks. Returns a deduplicated array of approved font family values.
+ */
+export function collectUsedFontFamilies(document: EventPageDocument): string[] {
+  const found = new Set<string>();
+  for (const block of document.blocks) {
+    if (block.type !== 'rich_text') continue;
+    visitTipTapMarks(block.content, (mark) => {
+      if (
+        mark.type === EVENT_PAGE_INLINE_STYLE_MARK &&
+        isRecord(mark.attrs) &&
+        typeof mark.attrs.fontFamily === 'string' &&
+        isAllowedEventPageFontFamily(mark.attrs.fontFamily)
+      ) {
+        found.add(mark.attrs.fontFamily.trim());
+      }
+    });
+  }
+  return Array.from(found);
+}
+
+/**
+ * Generate Google Font `<link>` tags for the font families used in a document.
+ * Only approved fonts that require external loading (e.g. Inter) are included;
+ * system fonts are silently skipped.
+ */
+export function googleFontLinkTags(fontFamilies: string[]): string {
+  const googleFonts = new Set<string>();
+  for (const family of fontFamilies) {
+    const googleName = GOOGLE_FONT_MAP[family.trim()];
+    if (googleName) googleFonts.add(googleName);
+  }
+  if (googleFonts.size === 0) return '';
+  const families = Array.from(googleFonts)
+    .map((name) => `family=${name.replace(/ /g, '+')}:wght@400;500;600;700`)
+    .join('&');
+  return `<link rel="preconnect" href="https://fonts.googleapis.com" /><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin /><link href="https://fonts.googleapis.com/css2?${families}&display=swap" rel="stylesheet" />`;
+}
+
+function visitTipTapMarks(value: JSONContent, fn: (mark: JSONContent) => void): void {
+  if (Array.isArray(value.marks)) {
+    for (const mark of value.marks) {
+      fn(mark);
+    }
+  }
+  if (Array.isArray(value.content)) {
+    for (const child of value.content) {
+      visitTipTapMarks(child, fn);
+    }
+  }
 }
 
 function isAllowedEventPageColor(value: unknown): value is string {
@@ -481,6 +544,52 @@ const tiptapExtensions = [
   EventPageTextAlignment,
 ];
 
+/**
+ * Build a unified TipTap node tree from typed blocks. Each block becomes an
+ * `eventPageBlock` node with the full block data stored in `attrs.block`.
+ * This is the "projection" from the canonical typed model to the authoring
+ * surface: `editor.document` becomes the single node tree that serializes
+ * back to `blocks[]` on snapshot.
+ */
+export function blocksToEditorDocument(blocks: EventPageBlock[]): JSONContent {
+  return {
+    type: 'doc',
+    content: blocks.map((block) => ({
+      type: EVENT_PAGE_BLOCK_NODE,
+      attrs: { block: structuredClone(block) },
+    })),
+  };
+}
+
+/**
+ * Serialize a unified TipTap node tree back to typed blocks. Each
+ * `eventPageBlock` node's `attrs.block` is extracted as a typed block.
+ * Returns `undefined` if the document is not in the unified format (i.e.,
+ * does not contain `eventPageBlock` nodes).
+ */
+export function editorDocumentToBlocks(document: JSONContent): EventPageBlock[] | undefined {
+  if (!Array.isArray(document.content)) return undefined;
+  const blocks: EventPageBlock[] = [];
+  let foundBlockNode = false;
+  for (const node of document.content) {
+    if (node.type === EVENT_PAGE_BLOCK_NODE && isRecord(node.attrs) && isRecord(node.attrs.block)) {
+      foundBlockNode = true;
+      blocks.push(node.attrs.block as EventPageBlock);
+    }
+  }
+  return foundBlockNode ? blocks : undefined;
+}
+
+/**
+ * Returns true if the editor document is in the unified format (contains
+ * `eventPageBlock` nodes). Old documents have a plain paragraph summary
+ * instead.
+ */
+export function isUnifiedEditorDocument(document: JSONContent): boolean {
+  if (!Array.isArray(document.content)) return false;
+  return document.content.some((node) => node.type === EVENT_PAGE_BLOCK_NODE);
+}
+
 export function createDefaultEventPageDocument(input: {
   eventId: string;
   eventTitle: string;
@@ -512,27 +621,7 @@ export function createDefaultEventPageDocument(input: {
   );
   const checkoutUrl = input.checkoutUrl?.trim() || '{{event.checkoutUrl}}';
 
-  return {
-    schemaVersion: EVENT_PAGE_SCHEMA_VERSION,
-    editor: {
-      provider: TIPTAP_EVENT_PAGE_PROVIDER,
-      document: docFromText(summary),
-    },
-    settings: {
-      locale: 'en',
-      publicPath: input.publicUrl ?? undefined,
-      ticketCtaLabel: 'Get tickets',
-      discovery: {
-        summary,
-        category: input.category ?? undefined,
-        tags: input.tags ?? [],
-        coverImageUrl: input.coverImageUrl ?? undefined,
-        socialImageUrl: input.coverImageUrl ?? undefined,
-        seoTitle: input.eventTitle,
-        seoDescription: summary,
-      },
-    },
-    blocks: [
+  const blocks: EventPageBlock[] = [
       {
         type: 'event_header',
         id: 'header',
@@ -620,7 +709,29 @@ export function createDefaultEventPageDocument(input: {
         showPrivacy: true,
         showRefund: true,
       },
-    ],
+    ];
+
+  return {
+    schemaVersion: EVENT_PAGE_SCHEMA_VERSION,
+    editor: {
+      provider: TIPTAP_EVENT_PAGE_PROVIDER,
+      document: blocksToEditorDocument(blocks),
+    },
+    settings: {
+      locale: 'en',
+      publicPath: input.publicUrl ?? undefined,
+      ticketCtaLabel: 'Get tickets',
+      discovery: {
+        summary,
+        category: input.category ?? undefined,
+        tags: input.tags ?? [],
+        coverImageUrl: input.coverImageUrl ?? undefined,
+        socialImageUrl: input.coverImageUrl ?? undefined,
+        seoTitle: input.eventTitle,
+        seoDescription: summary,
+      },
+    },
+    blocks,
   };
 }
 
@@ -1369,7 +1480,8 @@ export function normalizeEventPageDocument(value: unknown): EventPageDocument | 
     (block) => isRecord(block) && block.type === 'resale_tickets',
   );
   const hasFooter = rawBlocks.some((block) => isRecord(block) && block.type === 'brand_footer');
-  if (hasHeader && hasResale && hasFooter) {
+  const isUnified = isUnifiedEditorDocument(editor.document as JSONContent);
+  if (hasHeader && hasResale && hasFooter && isUnified) {
     return value as EventPageDocument;
   }
   const blocks: EventPageBlock[] = [...rawBlocks];
@@ -1403,7 +1515,14 @@ export function normalizeEventPageDocument(value: unknown): EventPageDocument | 
       showRefund: true,
     });
   }
-  return { ...(value as EventPageDocument), blocks };
+  const result: EventPageDocument = { ...(value as EventPageDocument), blocks };
+  if (!isUnified) {
+    result.editor = {
+      provider: TIPTAP_EVENT_PAGE_PROVIDER,
+      document: blocksToEditorDocument(blocks),
+    };
+  }
+  return result;
 }
 
 function renderTipTap(content: JSONContent, context: MergeTagContext): string {
@@ -1459,6 +1578,7 @@ function walkTipTap(
     'blockquote',
     'hardBreak',
     'image',
+    EVENT_PAGE_BLOCK_NODE,
   ]);
   const allowedMarks = new Set([
     'bold',
@@ -1885,13 +2005,6 @@ function toPlainText(blocks: EventPageHeadlessBlock[]): string {
     .join('\n')
     .replace(/\n{3,}/g, '\n\n')
     .trim();
-}
-
-function docFromText(text: string): JSONContent {
-  return {
-    type: 'doc',
-    content: [{ type: 'paragraph', content: [{ type: 'text', text }] }],
-  };
 }
 
 function isoOrTemplate(value: string | Date | null | undefined, fallback: string): string {

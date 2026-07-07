@@ -15,6 +15,8 @@ export type EventPageEditorSurfaceProps = {
   onSelectBlock?: (blockId: string) => void;
   onChangeBlock?: (blockId: string, block: EventPageBlock) => void;
   onReorderBlocks?: (blocks: EventPageBlock[]) => void;
+  onDeleteBlock?: (blockId: string) => void;
+  onDuplicateBlock?: (blockId: string) => void;
   /**
    * Optional slot for rendering rich_text blocks with a WYSIWYG editor (e.g.
    * the admin's TipTap-based rich text editor). When omitted, rich_text blocks
@@ -79,9 +81,26 @@ export function EventPageEditorSurface({
   disabled = false,
   onSelectBlock,
   onChangeBlock,
+  onReorderBlocks,
+  onDeleteBlock,
+  onDuplicateBlock,
   renderRichTextBlock,
 }: EventPageEditorSurfaceProps) {
   const change = (blockId: string, patch: EventPageBlock) => onChangeBlock?.(blockId, patch);
+
+  const moveBlock = (blockId: string, direction: 'up' | 'down') => {
+    if (!onReorderBlocks) return;
+    const blocks = [...document.blocks];
+    const index = blocks.findIndex((b) => b.id === blockId);
+    if (index < 0) return;
+    const target = direction === 'up' ? index - 1 : index + 1;
+    if (target < 0 || target >= blocks.length) return;
+    [blocks[index], blocks[target]] = [blocks[target], blocks[index]];
+    onReorderBlocks(blocks);
+  };
+
+  const chromeTypes = new Set(['event_header', 'resale_tickets', 'brand_footer']);
+  const hasContentBlocks = document.blocks.some((b) => !chromeTypes.has(b.type));
 
   return (
     <div
@@ -90,7 +109,19 @@ export function EventPageEditorSurface({
       data-mode="edit"
       data-testid="tixkit-event-page-editor"
     >
-      {document.blocks.map((block) => {
+      {!hasContentBlocks && (
+        <div
+          className="tk-ep-empty-state"
+          data-testid="tk-ep-empty-state"
+          contentEditable={false}
+        >
+          <p className="tk-ep-empty-state__title">Start building your event page</p>
+          <p className="tk-ep-empty-state__hint">
+            Use the insert menu to add a hero section, tickets, text, and more.
+          </p>
+        </div>
+      )}
+      {document.blocks.map((block, index) => {
         const selected = block.id === selectedBlockId;
         const label = BLOCK_LABELS[block.type];
         return (
@@ -102,6 +133,12 @@ export function EventPageEditorSurface({
             selected={selected}
             disabled={disabled}
             onSelect={onSelectBlock}
+            onDelete={onDeleteBlock}
+            onDuplicate={onDuplicateBlock}
+            onMoveUp={(id) => moveBlock(id, 'up')}
+            onMoveDown={(id) => moveBlock(id, 'down')}
+            canMoveUp={index > 0}
+            canMoveDown={index < document.blocks.length - 1}
           >
             <EditableBlockBody
               block={block}
@@ -135,7 +172,7 @@ export function EditableBlockBody({
   switch (block.type) {
     case 'hero':
       return (
-        <div className="tk-ep-hero" data-block-id={block.id}>
+        <section className="tk-ep-hero" data-block-id={block.id}>
           {block.eyebrow !== undefined && (
             <EditableText
               as="p"
@@ -176,7 +213,12 @@ export function EditableBlockBody({
             />
           ) : null}
           {block.ctaLabel !== undefined && (
-            <span className="tk-ep-button">
+            <a
+              className="tk-ep-button"
+              href={block.ctaUrl ?? '#'}
+              contentEditable={false}
+              onClick={(e) => e.preventDefault()}
+            >
               <EditableText
                 className="tk-ep-button__label"
                 disabled={disabled}
@@ -185,13 +227,13 @@ export function EditableBlockBody({
                 value={block.ctaLabel}
                 onChange={(ctaLabel) => onChange({ ...block, ctaLabel })}
               />
-            </span>
+            </a>
           )}
-        </div>
+        </section>
       );
     case 'tickets':
       return (
-        <div className="tk-ep-tickets" data-block-id={block.id}>
+        <section className="tk-ep-tickets" data-block-id={block.id}>
           <EditableText
             as="h2"
             className="tk-ep-tickets__title"
@@ -223,7 +265,13 @@ export function EditableBlockBody({
               ))}
           </ul>
           {block.ctaLabel !== undefined && (
-            <span className="tk-ep-button">
+            // eslint-disable-next-line jsx-a11y/anchor-is-valid -- editor placeholder anchor for DOM parity with public surface
+            <a
+              className="tk-ep-button"
+              href="#"
+              contentEditable={false}
+              onClick={(e) => e.preventDefault()}
+            >
               <EditableText
                 className="tk-ep-button__label"
                 disabled={disabled}
@@ -232,13 +280,13 @@ export function EditableBlockBody({
                 value={block.ctaLabel}
                 onChange={(ctaLabel) => onChange({ ...block, ctaLabel })}
               />
-            </span>
+            </a>
           )}
-        </div>
+        </section>
       );
     case 'event_details':
       return (
-        <div className="tk-ep-details" data-block-id={block.id}>
+        <section className="tk-ep-details" data-block-id={block.id}>
           <EditableText
             as="h2"
             className="tk-ep-section__title"
@@ -256,11 +304,11 @@ export function EditableBlockBody({
               </div>
             ))}
           </dl>
-        </div>
+        </section>
       );
     case 'schedule':
       return (
-        <div className="tk-ep-schedule" data-block-id={block.id}>
+        <section className="tk-ep-schedule" data-block-id={block.id}>
           <EditableText
             as="h2"
             className="tk-ep-section__title"
@@ -279,11 +327,11 @@ export function EditableBlockBody({
               </li>
             ))}
           </ol>
-        </div>
+        </section>
       );
     case 'faq':
       return (
-        <div className="tk-ep-faq" data-block-id={block.id}>
+        <section className="tk-ep-faq" data-block-id={block.id}>
           <EditableText
             as="h2"
             className="tk-ep-section__title"
@@ -299,11 +347,11 @@ export function EditableBlockBody({
               <p>{item.answer}</p>
             </details>
           ))}
-        </div>
+        </section>
       );
     case 'products':
       return (
-        <div className="tk-ep-products" data-block-id={block.id}>
+        <section className="tk-ep-products" data-block-id={block.id}>
           <EditableText
             as="h2"
             className="tk-ep-section__title"
@@ -334,12 +382,12 @@ export function EditableBlockBody({
                 </li>
               ))}
           </ul>
-        </div>
+        </section>
       );
     case 'sponsors':
     case 'speakers':
       return (
-        <div className={BLOCK_SURFACE_CLASS[block.type]} data-block-id={block.id}>
+        <section className={BLOCK_SURFACE_CLASS[block.type]} data-block-id={block.id}>
           <EditableText
             as="h2"
             className="tk-ep-section__title"
@@ -372,11 +420,11 @@ export function EditableBlockBody({
               );
             })}
           </ul>
-        </div>
+        </section>
       );
     case 'social_links':
       return (
-        <div className="tk-ep-social" data-block-id={block.id}>
+        <section className="tk-ep-social" data-block-id={block.id}>
           {block.title !== undefined && (
             <EditableText
               as="h2"
@@ -395,11 +443,11 @@ export function EditableBlockBody({
               </li>
             ))}
           </ul>
-        </div>
+        </section>
       );
     case 'venue_map':
       return (
-        <div className="tk-ep-venue" data-block-id={block.id}>
+        <section className="tk-ep-venue" data-block-id={block.id}>
           <EditableText
             as="h2"
             className="tk-ep-venue__title"
@@ -430,12 +478,17 @@ export function EditableBlockBody({
             />
           )}
           {block.mapUrl ? <a href={block.mapUrl}>Open map</a> : null}
-        </div>
+        </section>
       );
     case 'button':
       return (
-        <div className="tk-ep-action" data-block-id={block.id}>
-          <span className={`tk-ep-button tk-ep-button-${block.style ?? 'primary'}`}>
+        <section className="tk-ep-action" data-block-id={block.id}>
+          <a
+            className={`tk-ep-button tk-ep-button-${block.style ?? 'primary'}`}
+            href={block.url}
+            contentEditable={false}
+            onClick={(e) => e.preventDefault()}
+          >
             <EditableText
               className="tk-ep-button__label"
               disabled={disabled}
@@ -444,14 +497,21 @@ export function EditableBlockBody({
               value={block.label}
               onChange={(label) => onChange({ ...block, label })}
             />
-          </span>
-        </div>
+          </a>
+        </section>
       );
     case 'divider':
       return <hr className="tk-ep-divider" data-block-id={block.id} />;
     case 'custom_embed':
       return (
-        <div className="tk-ep-embed" data-block-id={block.id}>
+        <section className="tk-ep-embed" data-block-id={block.id}>
+          {block.allowUnsafeEmbed && block.html ? (
+            <div
+              className="tk-ep-embed__preview"
+              contentEditable={false}
+              dangerouslySetInnerHTML={{ __html: block.html }}
+            />
+          ) : null}
           <EditableText
             as="p"
             multiline
@@ -462,18 +522,18 @@ export function EditableBlockBody({
             value={block.html}
             onChange={(html) => onChange({ ...block, html })}
           />
-        </div>
+        </section>
       );
     case 'rich_text':
       if (renderRichTextBlock) {
         return (
-          <div className="tk-ep-rich-text" data-block-id={block.id}>
+          <section className="tk-ep-rich-text" data-block-id={block.id}>
             {renderRichTextBlock({ block, disabled, onChange })}
-          </div>
+          </section>
         );
       }
       return (
-        <div className="tk-ep-rich-text" data-block-id={block.id}>
+        <section className="tk-ep-rich-text" data-block-id={block.id}>
           <EditableText
             as="div"
             multiline
@@ -486,78 +546,146 @@ export function EditableBlockBody({
               onChange({ ...block, content: { type: 'doc', content: [{ type: 'paragraph', content: [{ type: 'text', text }] }] } })
             }
           />
-        </div>
+        </section>
       );
-    case 'event_header':
+    case 'event_header': {
+      const showBadge = block.showBadge ?? true;
+      const showDescription = block.showDescription ?? true;
+      const showDate = block.showDate ?? true;
+      const showVenue = block.showVenue ?? true;
+      const event = sampleContext.event;
       return (
-        <div className="tk-ep-header" data-block-id={block.id}>
-          <EditableText
-            as="p"
-            className="tk-ep-badge"
-            disabled={disabled}
-            placeholder="Badge label (defaults to brand name)"
-            ariaLabel="Badge label"
-            value={block.badgeLabel ?? ''}
-            onChange={(badgeLabel) => onChange({ ...block, badgeLabel })}
-          />
+        <section className="tk-ep-header" data-block-id={block.id}>
+          {showBadge && (
+            <EditableText
+              as="p"
+              className="tk-ep-badge"
+              disabled={disabled}
+              placeholder="Badge label (defaults to brand name)"
+              ariaLabel="Badge label"
+              value={block.badgeLabel ?? ''}
+              onChange={(badgeLabel) => onChange({ ...block, badgeLabel })}
+            />
+          )}
           <p className="tk-ep-header__title">
-            {sampleContext.event?.title ?? 'Event title'}
+            {event?.title ?? 'Event title'}
           </p>
-          <EditableText
-            as="p"
-            multiline
-            className="tk-ep-header__description"
-            disabled={disabled}
-            placeholder="Description override (defaults to event description)"
-            ariaLabel="Description override"
-            value={block.descriptionOverride ?? ''}
-            onChange={(descriptionOverride) => onChange({ ...block, descriptionOverride })}
-          />
-        </div>
+          {showDescription && (
+            <EditableText
+              as="p"
+              multiline
+              className="tk-ep-header__description"
+              disabled={disabled}
+              placeholder="Description override (defaults to event description)"
+              ariaLabel="Description override"
+              value={block.descriptionOverride ?? ''}
+              onChange={(descriptionOverride) => onChange({ ...block, descriptionOverride })}
+            />
+          )}
+          {(showDate || showVenue) && (
+            <dl className="tk-ep-header__meta" contentEditable={false}>
+              {showDate && event?.startsAt ? (
+                <div>
+                  <dt>Date</dt>
+                  <dd>{event.startsAt}</dd>
+                </div>
+              ) : null}
+              {showDate && event?.timezone ? (
+                <div>
+                  <dt>Timezone</dt>
+                  <dd>{event.timezone}</dd>
+                </div>
+              ) : null}
+              {showVenue && event?.venueName ? (
+                <div>
+                  <dt>Venue</dt>
+                  <dd>{event.venueName}</dd>
+                </div>
+              ) : null}
+            </dl>
+          )}
+        </section>
       );
-    case 'resale_tickets':
+    }
+    case 'resale_tickets': {
+      const showVerifiedBadge = block.showVerifiedBadge ?? true;
+      const listings = sampleContext.resaleListings ?? [];
       return (
-        <div className="tk-ep-resale" data-block-id={block.id}>
-          <EditableText
-            as="h2"
-            className="tk-ep-resale__title"
-            disabled={disabled}
-            placeholder="Resale section title"
-            ariaLabel="Resale tickets title"
-            value={block.title}
-            onChange={(title) => onChange({ ...block, title })}
-          />
-          <ul>
-            {(sampleContext.resaleListings ?? []).map((listing) => (
-              <li key={listing.id}>
-                <strong>
-                  {listing.ticketTypeName ? `Resale ticket - ${listing.ticketTypeName}` : 'Resale ticket'}
-                </strong>
-                {listing.priceLabel ? <span>{listing.priceLabel}</span> : null}
-              </li>
-            ))}
-          </ul>
-          <EditableText
-            className="tk-ep-button__label"
-            disabled={disabled}
-            placeholder="Resale CTA label"
-            ariaLabel="Resale CTA label"
-            value={block.ctaLabel ?? ''}
-            onChange={(ctaLabel) => onChange({ ...block, ctaLabel })}
-          />
-        </div>
+        <section className="tk-ep-resale" data-block-id={block.id}>
+          <div className="tk-ep-resale__header" contentEditable={false}>
+            <EditableText
+              as="h2"
+              className="tk-ep-resale__title"
+              disabled={disabled}
+              placeholder="Resale section title"
+              ariaLabel="Resale tickets title"
+              value={block.title}
+              onChange={(title) => onChange({ ...block, title })}
+            />
+            {showVerifiedBadge ? (
+              <span className="tk-ep-badge tk-ep-badge--verified">Verified listings</span>
+            ) : null}
+          </div>
+          {listings.length > 0 ? (
+            <ul contentEditable={false}>
+              {listings.map((listing) => (
+                <li key={listing.id}>
+                  <strong>
+                    {listing.ticketTypeName ? `Resale ticket - ${listing.ticketTypeName}` : 'Resale ticket'}
+                  </strong>
+                  <span>1 available</span>
+                  {listing.priceLabel ? <span>{listing.priceLabel}</span> : null}
+                  {listing.expiresAt ? <span>Expires {listing.expiresAt}</span> : null}
+                </li>
+              ))}
+            </ul>
+          ) : (
+            <EditableText
+              as="p"
+              className="tk-ep-resale__empty"
+              disabled={disabled}
+              placeholder="Empty state text"
+              ariaLabel="Resale empty state"
+              value={block.emptyStateText ?? ''}
+              onChange={(emptyStateText) => onChange({ ...block, emptyStateText })}
+            />
+          )}
+          {block.ctaLabel !== undefined && (
+            // eslint-disable-next-line jsx-a11y/anchor-is-valid -- editor placeholder anchor for DOM parity with public surface
+            <a
+              className="tk-ep-button"
+              href="#"
+              contentEditable={false}
+              onClick={(e) => e.preventDefault()}
+            >
+              <EditableText
+                className="tk-ep-button__label"
+                disabled={disabled}
+                placeholder="Resale CTA label"
+                ariaLabel="Resale CTA label"
+                value={block.ctaLabel ?? ''}
+                onChange={(ctaLabel) => onChange({ ...block, ctaLabel })}
+              />
+            </a>
+          )}
+        </section>
       );
+    }
     case 'brand_footer': {
       const brand = sampleContext.brand;
+      const showSupport = block.showSupport ?? true;
+      const showTerms = block.showTerms ?? true;
+      const showPrivacy = block.showPrivacy ?? true;
+      const showRefund = block.showRefund ?? true;
       const links: { label: string; url: string }[] = [];
-      if (brand?.supportUrl) links.push({ label: 'Support', url: brand.supportUrl });
-      if (brand?.termsUrl) links.push({ label: 'Terms', url: brand.termsUrl });
-      if (brand?.privacyUrl) links.push({ label: 'Privacy', url: brand.privacyUrl });
-      if (brand?.refundUrl) links.push({ label: 'Refund', url: brand.refundUrl });
+      if (showSupport && brand?.supportUrl) links.push({ label: 'Support', url: brand.supportUrl });
+      if (showTerms && brand?.termsUrl) links.push({ label: 'Terms', url: brand.termsUrl });
+      if (showPrivacy && brand?.privacyUrl) links.push({ label: 'Privacy', url: brand.privacyUrl });
+      if (showRefund && brand?.refundUrl) links.push({ label: 'Refund', url: brand.refundUrl });
       return (
-        <div className="tk-ep-footer" data-block-id={block.id}>
+        <footer className="tk-ep-footer" data-block-id={block.id}>
           {links.length > 0 ? (
-            <ul className="tk-ep-footer__links">
+            <ul className="tk-ep-footer__links" contentEditable={false}>
               {links.map((link) => (
                 <li key={link.url}>
                   <a href={link.url}>{link.label}</a>
@@ -569,7 +697,7 @@ export function EditableBlockBody({
               Configure brand support and legal URLs to populate the footer.
             </p>
           )}
-        </div>
+        </footer>
       );
     }
     default: {

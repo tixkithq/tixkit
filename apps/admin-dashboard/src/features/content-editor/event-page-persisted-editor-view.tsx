@@ -5,16 +5,28 @@ import { type JSONContent } from '@tiptap/core';
 import {
   Archive,
   CalendarDays,
+  Code2,
   Copy,
   Eye,
   ExternalLink,
   FileJson,
+  PanelBottom,
+  Heading,
+  HelpCircle,
   ImageIcon,
+  Info,
   LayoutTemplate,
   ListChecks,
   MapPin,
+  Mic,
+  Minus,
   PanelRightClose,
+  PanelLeftClose,
+  Repeat,
   Save,
+  Share2,
+  ShoppingBag,
+  Sparkles,
   Ticket,
   Type,
 } from 'lucide-react';
@@ -62,7 +74,25 @@ type EditorPreview = {
   html: string;
   text: string;
 };
-type InsertActionId = 'text' | 'image' | 'tickets' | 'schedule' | 'venue' | 'button';
+type InsertActionId =
+  | 'text'
+  | 'image'
+  | 'hero'
+  | 'event_details'
+  | 'tickets'
+  | 'products'
+  | 'schedule'
+  | 'venue'
+  | 'faq'
+  | 'sponsors'
+  | 'speakers'
+  | 'button'
+  | 'divider'
+  | 'social_links'
+  | 'custom_embed'
+  | 'event_header'
+  | 'resale_tickets'
+  | 'brand_footer';
 type EventPageVariableKind = 'event' | 'ticket' | 'brand' | 'link' | 'system';
 type EventPageVariablePresentation = {
   label: string;
@@ -72,8 +102,6 @@ type EventPageVariablePresentation = {
 type InspectorPanelId =
   | 'block'
   | 'page'
-  | 'body'
-  | 'theme'
   | 'code'
   | 'variables'
   | 'history'
@@ -88,10 +116,22 @@ type InsertAction = {
 const eventPageInsertActions: InsertAction[] = [
   { id: 'text', label: 'Text', icon: <Type className="size-4" /> },
   { id: 'image', label: 'Image', icon: <ImageIcon className="size-4" /> },
+  { id: 'hero', label: 'Hero', icon: <Sparkles className="size-4" /> },
+  { id: 'event_details', label: 'Event details', icon: <Info className="size-4" /> },
   { id: 'tickets', label: 'Tickets', icon: <Ticket className="size-4" /> },
+  { id: 'products', label: 'Products', icon: <ShoppingBag className="size-4" /> },
   { id: 'schedule', label: 'Schedule', icon: <CalendarDays className="size-4" /> },
   { id: 'venue', label: 'Venue', icon: <MapPin className="size-4" /> },
+  { id: 'faq', label: 'FAQ', icon: <HelpCircle className="size-4" /> },
+  { id: 'sponsors', label: 'Sponsors', icon: <LayoutTemplate className="size-4" /> },
+  { id: 'speakers', label: 'Speakers', icon: <Mic className="size-4" /> },
   { id: 'button', label: 'Button', icon: <ExternalLink className="size-4" /> },
+  { id: 'divider', label: 'Divider', icon: <Minus className="size-4" /> },
+  { id: 'social_links', label: 'Social links', icon: <Share2 className="size-4" /> },
+  { id: 'custom_embed', label: 'Custom embed', icon: <Code2 className="size-4" /> },
+  { id: 'event_header', label: 'Event header', icon: <Heading className="size-4" /> },
+  { id: 'resale_tickets', label: 'Resale tickets', icon: <Repeat className="size-4" /> },
+  { id: 'brand_footer', label: 'Brand footer', icon: <PanelBottom className="size-4" /> },
 ];
 
 const eventPageMergeTagPattern = /\{\{\s*([a-zA-Z0-9_.]+)\s*\}\}/g;
@@ -425,6 +465,120 @@ function createInsertedBlock(
       type: 'button',
       label: 'Buy tickets',
       url: '{{event.checkoutUrl}}',
+    };
+  }
+  if (actionId === 'hero') {
+    return {
+      id: nextBlockId(document, 'hero'),
+      type: 'hero',
+      eyebrow: '{{brand.name}}',
+      headline: event.title,
+      body: event.description ?? 'Event page headline.',
+      ctaLabel: 'Get tickets',
+      ctaUrl: '{{event.checkoutUrl}}',
+    };
+  }
+  if (actionId === 'event_details') {
+    return {
+      id: nextBlockId(document, 'details'),
+      type: 'event_details',
+      title: 'Event details',
+      items: [
+        { label: 'Starts', value: '{{event.startsAt}}' },
+        { label: 'Ends', value: '{{event.endsAt}}' },
+        { label: 'Timezone', value: '{{event.timezone}}' },
+      ],
+    };
+  }
+  if (actionId === 'products') {
+    return {
+      id: nextBlockId(document, 'products'),
+      type: 'products',
+      title: 'Products',
+      body: 'Event merchandise and add-ons.',
+      productIds: [],
+    };
+  }
+  if (actionId === 'faq') {
+    return {
+      id: nextBlockId(document, 'faq'),
+      type: 'faq',
+      title: 'FAQ',
+      items: [
+        {
+          question: 'How do I get my tickets?',
+          answer:
+            'Tickets are delivered by email after checkout and can be opened from your confirmation page.',
+        },
+      ],
+    };
+  }
+  if (actionId === 'sponsors') {
+    return {
+      id: nextBlockId(document, 'sponsors'),
+      type: 'sponsors',
+      title: 'Sponsors',
+      items: [],
+    };
+  }
+  if (actionId === 'speakers') {
+    return {
+      id: nextBlockId(document, 'speakers'),
+      type: 'speakers',
+      title: 'Speakers',
+      items: [],
+    };
+  }
+  if (actionId === 'divider') {
+    return {
+      id: nextBlockId(document, 'divider'),
+      type: 'divider',
+    };
+  }
+  if (actionId === 'social_links') {
+    return {
+      id: nextBlockId(document, 'social'),
+      type: 'social_links',
+      title: 'Follow',
+      links: [],
+    };
+  }
+  if (actionId === 'custom_embed') {
+    return {
+      id: nextBlockId(document, 'embed'),
+      type: 'custom_embed',
+      html: '',
+      allowUnsafeEmbed: false,
+    };
+  }
+  if (actionId === 'event_header') {
+    return {
+      id: nextBlockId(document, 'header'),
+      type: 'event_header',
+      showBadge: true,
+      showDate: true,
+      showVenue: true,
+      showDescription: true,
+    };
+  }
+  if (actionId === 'resale_tickets') {
+    return {
+      id: nextBlockId(document, 'resale'),
+      type: 'resale_tickets',
+      title: 'Resale tickets',
+      ctaLabel: 'Buy resale',
+      emptyStateText: 'No resale tickets available.',
+      showVerifiedBadge: true,
+    };
+  }
+  if (actionId === 'brand_footer') {
+    return {
+      id: nextBlockId(document, 'footer'),
+      type: 'brand_footer',
+      showSupport: true,
+      showTerms: true,
+      showPrivacy: true,
+      showRefund: true,
     };
   }
   return undefined;
@@ -773,6 +927,50 @@ export function EventPagePersistedEditorView({ eventId }: { eventId: string }) {
             b.id === (msg.blockId as string) ? (msg.block as EventPageBlock) : b,
           ),
         }));
+        return;
+      }
+      if (msg.type === 'blocks-reorder' && Array.isArray(msg.blocks)) {
+        suppressIframeUpdateRef.current = true;
+        updateEventPageSettings((current) => ({
+          ...current,
+          blocks: msg.blocks as EventPageBlock[],
+        }));
+        return;
+      }
+      if (msg.type === 'block-delete' && typeof msg.blockId === 'string') {
+        suppressIframeUpdateRef.current = true;
+        const deletedId = msg.blockId as string;
+        updateEventPageSettings((current) => {
+          const blocks = current.blocks.filter((b) => b.id !== deletedId);
+          const nextSelected = blocks.find((b) => b.id !== deletedId)?.id;
+          if (nextSelected) {
+            setSelectedBlockId(nextSelected);
+            sendMessageToIframe({ type: 'select-block', blockId: nextSelected });
+          }
+          return { ...current, blocks };
+        });
+        return;
+      }
+      if (msg.type === 'block-duplicate' && typeof msg.blockId === 'string') {
+        suppressIframeUpdateRef.current = true;
+        const originalId = msg.blockId as string;
+        updateEventPageSettings((current) => {
+          const index = current.blocks.findIndex((b) => b.id === originalId);
+          if (index < 0) return current;
+          const original = current.blocks[index];
+          const duplicate = {
+            ...original,
+            id: `${original.type}-${crypto.randomUUID()}`,
+          } as EventPageBlock;
+          const blocks = [
+            ...current.blocks.slice(0, index + 1),
+            duplicate,
+            ...current.blocks.slice(index + 1),
+          ];
+          setSelectedBlockId(duplicate.id);
+          return { ...current, blocks };
+        });
+        return;
       }
     }
     window.addEventListener('message', handleMessage);
@@ -1278,14 +1476,12 @@ export function EventPagePersistedEditorView({ eventId }: { eventId: string }) {
     return <p className="text-xs text-muted-foreground">{blockSummary(selectedBlock)}</p>;
   })();
   const inspectorHeading: Record<InspectorPanelId, { eyebrow: string; title: string }> = {
-    block: { eyebrow: 'Selected block', title: selectedBlockLabel },
-    page: { eyebrow: 'Page details', title: heroHeadline(eventPageDocument) },
-    body: { eyebrow: 'Page structure', title: `${eventPageDocument.blocks.length} blocks` },
-    theme: { eyebrow: 'Theme', title: 'Hosted page' },
-    code: { eyebrow: 'Editor JSON', title: 'Saved payload' },
-    variables: { eyebrow: 'Variables', title: 'Merge tags' },
-    history: { eyebrow: 'Version history', title: `${history.length} versions` },
-    issues: { eyebrow: 'Publish blockers', title: 'Validation' },
+    block: { eyebrow: selectedBlock ? `Page / ${selectedBlockLabel}` : 'Page', title: selectedBlockLabel },
+    page: { eyebrow: 'Page / Settings', title: heroHeadline(eventPageDocument) },
+    code: { eyebrow: 'More / Code', title: 'Saved payload' },
+    variables: { eyebrow: 'More / Variables', title: 'Merge tags' },
+    history: { eyebrow: 'More / History', title: `${history.length} versions` },
+    issues: { eyebrow: 'More / Review', title: 'Publish blockers' },
   };
 
   const moreActionsItems: DropdownMenuItemConfig[] = [
@@ -1328,13 +1524,6 @@ export function EventPagePersistedEditorView({ eventId }: { eventId: string }) {
       label: 'Page details',
       icon: <ListChecks className="size-4" />,
       onClick: () => openMenuInspectorPanel('page'),
-      separatorAfter: true,
-    },
-    {
-      id: 'structure',
-      label: 'Page structure',
-      icon: <LayoutTemplate className="size-4" />,
-      onClick: () => openMenuInspectorPanel('body'),
     },
     {
       id: 'json',
@@ -1411,14 +1600,66 @@ export function EventPagePersistedEditorView({ eventId }: { eventId: string }) {
               </InsertPopoverButton>
               <InsertPopoverButton
                 disabled={!canEdit}
-                icon={<LayoutTemplate className="size-4" />}
-                label="Components"
+                icon={<Sparkles className="size-4" />}
+                label="Content"
+              >
+                <InsertPopoverItem
+                  icon={<Sparkles className="size-4" />}
+                  label="Hero"
+                  onClick={() => insertEventPageAction('hero')}
+                />
+                <InsertPopoverItem
+                  icon={<Info className="size-4" />}
+                  label="Event details"
+                  onClick={() => insertEventPageAction('event_details')}
+                />
+                <InsertPopoverItem
+                  icon={<ExternalLink className="size-4" />}
+                  label="Button"
+                  onClick={() => insertEventPageAction('button')}
+                />
+                <InsertPopoverItem
+                  icon={<Minus className="size-4" />}
+                  label="Divider"
+                  onClick={() => insertEventPageAction('divider')}
+                />
+                <InsertPopoverItem
+                  icon={<HelpCircle className="size-4" />}
+                  label="FAQ"
+                  onClick={() => insertEventPageAction('faq')}
+                />
+                <InsertPopoverItem
+                  icon={<Share2 className="size-4" />}
+                  label="Social links"
+                  onClick={() => insertEventPageAction('social_links')}
+                />
+              </InsertPopoverButton>
+              <InsertPopoverButton
+                disabled={!canEdit}
+                icon={<Ticket className="size-4" />}
+                label="Commerce"
               >
                 <InsertPopoverItem
                   icon={<Ticket className="size-4" />}
                   label="Tickets"
                   onClick={() => insertEventPageAction('tickets')}
                 />
+                <InsertPopoverItem
+                  icon={<ShoppingBag className="size-4" />}
+                  label="Products"
+                  onClick={() => insertEventPageAction('products')}
+                />
+                <InsertPopoverItem
+                  icon={<Repeat className="size-4" />}
+                  label="Resale tickets"
+                  onClick={() => insertEventPageAction('resale_tickets')}
+                />
+              </InsertPopoverButton>
+              <InsertPopoverButton
+                disabled={!canEdit}
+                icon={<CalendarDays className="size-4" />}
+                label="Event"
+              >
                 <InsertPopoverItem
                   icon={<CalendarDays className="size-4" />}
                   label="Schedule"
@@ -1430,9 +1671,35 @@ export function EventPagePersistedEditorView({ eventId }: { eventId: string }) {
                   onClick={() => insertEventPageAction('venue')}
                 />
                 <InsertPopoverItem
-                  icon={<ExternalLink className="size-4" />}
-                  label="Button"
-                  onClick={() => insertEventPageAction('button')}
+                  icon={<LayoutTemplate className="size-4" />}
+                  label="Sponsors"
+                  onClick={() => insertEventPageAction('sponsors')}
+                />
+                <InsertPopoverItem
+                  icon={<Mic className="size-4" />}
+                  label="Speakers"
+                  onClick={() => insertEventPageAction('speakers')}
+                />
+              </InsertPopoverButton>
+              <InsertPopoverButton
+                disabled={!canEdit}
+                icon={<Code2 className="size-4" />}
+                label="Advanced"
+              >
+                <InsertPopoverItem
+                  icon={<Code2 className="size-4" />}
+                  label="Custom embed"
+                  onClick={() => insertEventPageAction('custom_embed')}
+                />
+                <InsertPopoverItem
+                  icon={<Heading className="size-4" />}
+                  label="Event header"
+                  onClick={() => insertEventPageAction('event_header')}
+                />
+                <InsertPopoverItem
+                  icon={<PanelBottom className="size-4" />}
+                  label="Brand footer"
+                  onClick={() => insertEventPageAction('brand_footer')}
                 />
               </InsertPopoverButton>
             </>
@@ -1482,9 +1749,33 @@ export function EventPagePersistedEditorView({ eventId }: { eventId: string }) {
             onClose={() => setInspectorCollapsed(true)}
             title={inspectorHeading[inspectorPanelId].title}
           >
+            {inspectorPanelId !== 'block' && (
+              <button
+                className="mb-3 inline-flex items-center gap-1 text-xs font-medium text-muted-foreground transition-colors hover:text-foreground"
+                onClick={() => openInspectorPanel('block')}
+                type="button"
+              >
+                <PanelLeftClose className="size-3 rotate-180" />
+                Back to block
+              </button>
+            )}
+
             {inspectorPanelId === 'block' && (
               <div className="space-y-4">
                 {selectedBlockControls}
+                {draft.validation.issues.length > 0 && (
+                  <button
+                    className="w-full rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-left text-xs text-amber-800 transition-colors hover:bg-amber-100 dark:border-amber-800/70 dark:bg-amber-950/40 dark:text-amber-200"
+                    onClick={() => openInspectorPanel('issues')}
+                    type="button"
+                  >
+                    <span className="font-medium">
+                      {draft.validation.issues.length} publish blocker
+                      {draft.validation.issues.length === 1 ? '' : 's'}
+                    </span>
+                    <span className="mt-0.5 block opacity-80">Tap to review</span>
+                  </button>
+                )}
                 <div className="space-y-2 border-t border-border pt-4">
                   {eventPageDocument.blocks.map((block) => (
                     <button
@@ -1543,6 +1834,167 @@ export function EventPagePersistedEditorView({ eventId }: { eventId: string }) {
                     />
                   </label>
                 </div>
+
+                <div className="space-y-3 border-t border-border pt-4">
+                  <p className="text-xs font-semibold text-foreground">Discovery &amp; SEO</p>
+                  <label className="space-y-1.5 text-xs font-medium text-muted-foreground">
+                    SEO title
+                    <input
+                      aria-label="SEO title"
+                      className={inputClassName}
+                      disabled={!canEdit}
+                      placeholder="Defaults to hero headline"
+                      onChange={(change) =>
+                        updateEventPageSettings((current) => ({
+                          ...current,
+                          settings: {
+                            ...current.settings,
+                            discovery: {
+                              ...current.settings.discovery,
+                              seoTitle: change.currentTarget.value || undefined,
+                            },
+                          },
+                        }))
+                      }
+                      value={eventPageDocument.settings.discovery.seoTitle ?? ''}
+                    />
+                  </label>
+                  <label className="space-y-1.5 text-xs font-medium text-muted-foreground">
+                    SEO description
+                    <input
+                      aria-label="SEO description"
+                      className={inputClassName}
+                      disabled={!canEdit}
+                      placeholder="Defaults to page summary"
+                      onChange={(change) =>
+                        updateEventPageSettings((current) => ({
+                          ...current,
+                          settings: {
+                            ...current.settings,
+                            discovery: {
+                              ...current.settings.discovery,
+                              seoDescription: change.currentTarget.value || undefined,
+                            },
+                          },
+                        }))
+                      }
+                      value={eventPageDocument.settings.discovery.seoDescription ?? ''}
+                    />
+                  </label>
+                  <label className="space-y-1.5 text-xs font-medium text-muted-foreground">
+                    Summary
+                    <input
+                      aria-label="Page summary"
+                      className={inputClassName}
+                      disabled={!canEdit}
+                      onChange={(change) =>
+                        updateEventPageSettings((current) => ({
+                          ...current,
+                          settings: {
+                            ...current.settings,
+                            discovery: {
+                              ...current.settings.discovery,
+                              summary: change.currentTarget.value,
+                            },
+                          },
+                        }))
+                      }
+                      value={eventPageDocument.settings.discovery.summary}
+                    />
+                  </label>
+                  <label className="space-y-1.5 text-xs font-medium text-muted-foreground">
+                    Category
+                    <input
+                      aria-label="Discovery category"
+                      className={inputClassName}
+                      disabled={!canEdit}
+                      placeholder="e.g. Music, Sports, Theater"
+                      onChange={(change) =>
+                        updateEventPageSettings((current) => ({
+                          ...current,
+                          settings: {
+                            ...current.settings,
+                            discovery: {
+                              ...current.settings.discovery,
+                              category: change.currentTarget.value || undefined,
+                            },
+                          },
+                        }))
+                      }
+                      value={eventPageDocument.settings.discovery.category ?? ''}
+                    />
+                  </label>
+                  <label className="space-y-1.5 text-xs font-medium text-muted-foreground">
+                    Tags (comma-separated)
+                    <input
+                      aria-label="Discovery tags"
+                      className={inputClassName}
+                      disabled={!canEdit}
+                      placeholder="e.g. summer, outdoor, family-friendly"
+                      onChange={(change) =>
+                        updateEventPageSettings((current) => ({
+                          ...current,
+                          settings: {
+                            ...current.settings,
+                            discovery: {
+                              ...current.settings.discovery,
+                              tags: change.currentTarget.value
+                                .split(',')
+                                .map((t) => t.trim())
+                                .filter(Boolean),
+                            },
+                          },
+                        }))
+                      }
+                      value={eventPageDocument.settings.discovery.tags.join(', ')}
+                    />
+                  </label>
+                  <label className="space-y-1.5 text-xs font-medium text-muted-foreground">
+                    Cover image URL
+                    <input
+                      aria-label="Cover image URL"
+                      className={inputClassName}
+                      disabled={!canEdit}
+                      placeholder="Defaults to hero image"
+                      onChange={(change) =>
+                        updateEventPageSettings((current) => ({
+                          ...current,
+                          settings: {
+                            ...current.settings,
+                            discovery: {
+                              ...current.settings.discovery,
+                              coverImageUrl: change.currentTarget.value || undefined,
+                            },
+                          },
+                        }))
+                      }
+                      value={eventPageDocument.settings.discovery.coverImageUrl ?? ''}
+                    />
+                  </label>
+                  <label className="space-y-1.5 text-xs font-medium text-muted-foreground">
+                    Social image URL
+                    <input
+                      aria-label="Social share image URL"
+                      className={inputClassName}
+                      disabled={!canEdit}
+                      placeholder="Defaults to cover image"
+                      onChange={(change) =>
+                        updateEventPageSettings((current) => ({
+                          ...current,
+                          settings: {
+                            ...current.settings,
+                            discovery: {
+                              ...current.settings.discovery,
+                              socialImageUrl: change.currentTarget.value || undefined,
+                            },
+                          },
+                        }))
+                      }
+                      value={eventPageDocument.settings.discovery.socialImageUrl ?? ''}
+                    />
+                  </label>
+                </div>
+
                 <dl className="space-y-3 text-xs">
                   <div className="flex justify-between gap-4 border-b border-border pb-3">
                     <dt className="text-muted-foreground">CTA</dt>
@@ -1552,24 +2004,6 @@ export function EventPagePersistedEditorView({ eventId }: { eventId: string }) {
                   </div>
                 </dl>
               </div>
-            )}
-
-            {inspectorPanelId === 'body' && (
-              <ol className="space-y-2">
-                {eventPageDocument.blocks.map((block) => (
-                  <li className="rounded-md border p-3 text-xs" key={block.id}>
-                    <div className="font-medium text-foreground">{blockLabel(block)}</div>
-                    <div className="mt-1 truncate text-muted-foreground">{blockSummary(block)}</div>
-                  </li>
-                ))}
-              </ol>
-            )}
-
-            {inspectorPanelId === 'theme' && (
-              <p className="rounded-md border bg-muted/30 p-3 text-xs leading-5 text-muted-foreground">
-                Full-width responsive sections, checkout-first content density, and event metadata
-                inherited from the canonical event record.
-              </p>
             )}
 
             {inspectorPanelId === 'code' && (
@@ -1622,20 +2056,61 @@ export function EventPagePersistedEditorView({ eventId }: { eventId: string }) {
               <div className="space-y-3">
                 {draft.validation.issues.length === 0 ? (
                   <p className="rounded-md border border-emerald-400/40 bg-emerald-50 p-3 text-xs text-emerald-700 dark:bg-emerald-950/30 dark:text-emerald-300">
-                    No publish blockers.
+                    No publish blockers. The page is ready to publish.
                   </p>
                 ) : (
-                  <ul className="space-y-2">
-                    {draft.validation.issues.map((issue) => (
-                      <li
-                        className="rounded-md border border-red-300 bg-red-50 p-3 text-xs text-red-800 dark:border-red-800/70 dark:bg-red-950/40 dark:text-red-200"
-                        key={`${issue.code}-${issue.message}`}
-                      >
-                        <strong>{issue.code}</strong>
-                        <p className="mt-1 opacity-80">{issue.message}</p>
-                      </li>
-                    ))}
-                  </ul>
+                  (() => {
+                    const groups: Record<string, typeof draft.validation.issues> = {};
+                    for (const issue of draft.validation.issues) {
+                      const groupKey = issue.code.replace(/_.+$/, '');
+                      (groups[groupKey] ??= []).push(issue);
+                    }
+                    const groupLabels: Record<string, string> = {
+                      unknown: 'Unknown variables',
+                      unsafe: 'Unsafe content',
+                      missing: 'Missing fields',
+                      unsupported: 'Unsupported features',
+                      missingHero: 'Required blocks',
+                      missingTickets: 'Required blocks',
+                      missingBlockId: 'Block integrity',
+                      customEmbed: 'Custom embeds',
+                    };
+                    return (
+                      <div className="space-y-3">
+                        <p className="text-xs font-medium text-muted-foreground">
+                          {draft.validation.issues.length} issue
+                          {draft.validation.issues.length === 1 ? '' : 's'} must be resolved before
+                          publishing.
+                        </p>
+                        {Object.entries(groups).map(([groupKey, groupIssues]) => (
+                          <div key={groupKey} className="space-y-1.5">
+                            <p className="text-xs font-semibold text-foreground">
+                              {groupLabels[groupKey] ?? groupKey}
+                              <span className="ml-1 text-muted-foreground">
+                                ({groupIssues.length})
+                              </span>
+                            </p>
+                            <ul className="space-y-1.5">
+                              {groupIssues.map((issue, index) => (
+                                <li
+                                  className="rounded-md border border-red-300 bg-red-50 p-2.5 text-xs text-red-800 dark:border-red-800/70 dark:bg-red-950/40 dark:text-red-200"
+                                  key={`${issue.code}-${issue.message}-${index}`}
+                                >
+                                  <strong>{issue.code}</strong>
+                                  <p className="mt-0.5 opacity-80">{issue.message}</p>
+                                  {issue.field && (
+                                    <p className="mt-0.5 font-mono text-[0.65rem] opacity-60">
+                                      {issue.field}
+                                    </p>
+                                  )}
+                                </li>
+                              ))}
+                            </ul>
+                          </div>
+                        ))}
+                      </div>
+                    );
+                  })()
                 )}
               </div>
             )}

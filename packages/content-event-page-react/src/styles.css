@@ -12,13 +12,13 @@
  */
 
 .tixkit-event-page {
-  --tk-ep-bg: var(--tk-brand-bg, #ffffff);
-  --tk-ep-fg: var(--tk-brand-fg, #111111);
+  --tk-ep-bg: var(--background, var(--tk-brand-bg, #ffffff));
+  --tk-ep-fg: var(--foreground, var(--tk-brand-fg, #111111));
   --tk-ep-muted: color-mix(in srgb, var(--tk-ep-fg), transparent 38%);
-  --tk-ep-border: color-mix(in srgb, var(--tk-ep-fg), transparent 86%);
-  --tk-ep-accent: var(--tk-brand-accent, #111111);
-  --tk-ep-accent-fg: var(--tk-brand-accent-fg, #ffffff);
-  --tk-ep-radius: var(--tk-brand-radius, 14px);
+  --tk-ep-border: var(--border, color-mix(in srgb, var(--tk-ep-fg), transparent 86%));
+  --tk-ep-accent: var(--primary, var(--tk-brand-accent, #111111));
+  --tk-ep-accent-fg: var(--primary-foreground, var(--tk-brand-accent-fg, #ffffff));
+  --tk-ep-radius: var(--radius, var(--tk-brand-radius, 14px));
   --tk-ep-font-body: var(--tk-brand-font-body, Inter, system-ui, sans-serif);
   --tk-ep-font-heading: var(--tk-brand-font-heading, var(--tk-ep-font-body));
 
@@ -194,6 +194,133 @@
 .tk-ep-section__content [contenteditable][data-placeholder]:empty::before {
   content: attr(data-placeholder);
   color: color-mix(in srgb, var(--tk-ep-fg), transparent 60%);
+}
+
+/* ---- Bubble menu for rich text editing ---- */
+
+.tk-ep-bubble {
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+  background: var(--tk-ep-fg);
+  color: var(--tk-ep-bg);
+  border-radius: 8px;
+  padding: 0.3rem 0.4rem;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+  font-size: 0.8rem;
+}
+
+.tk-ep-bubble__btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 1.6rem;
+  height: 1.6rem;
+  border: none;
+  border-radius: 4px;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+  font-weight: 600;
+  font-size: 0.8rem;
+  padding: 0 0.35rem;
+  transition: background 0.1s;
+}
+
+.tk-ep-bubble__btn:hover {
+  background: color-mix(in srgb, currentColor, transparent 85%);
+}
+
+.tk-ep-bubble__btn[aria-pressed="true"] {
+  background: color-mix(in srgb, currentColor, transparent 70%);
+}
+
+.tk-ep-bubble__select {
+  border: none;
+  border-radius: 4px;
+  background: transparent;
+  color: inherit;
+  font-size: 0.75rem;
+  padding: 0.15rem 0.3rem;
+  cursor: pointer;
+  outline: none;
+}
+
+.tk-ep-bubble__select option {
+  background: var(--tk-ep-fg);
+  color: var(--tk-ep-bg);
+}
+
+.tk-ep-bubble__divider {
+  width: 1px;
+  height: 1.2rem;
+  background: color-mix(in srgb, currentColor, transparent 70%);
+  margin: 0 0.15rem;
+}
+
+/* ---- Block management actions ---- */
+
+.tk-ep-section__actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.2rem;
+  margin-left: auto;
+}
+
+.tk-ep-section__action {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 1.4rem;
+  height: 1.4rem;
+  border: 1px solid var(--tk-ep-border);
+  border-radius: 4px;
+  background: transparent;
+  color: var(--tk-ep-muted);
+  cursor: pointer;
+  font-size: 0.7rem;
+  padding: 0 0.3rem;
+  transition: all 0.1s;
+}
+
+.tk-ep-section__action:hover:not(:disabled) {
+  background: var(--tk-ep-bg);
+  color: var(--tk-ep-fg);
+  border-color: var(--tk-ep-fg);
+}
+
+.tk-ep-section__action:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.tk-ep-section__action--danger:hover:not(:disabled) {
+  border-color: #dc2626;
+  color: #dc2626;
+}
+
+/* ---- Empty state ---- */
+
+.tk-ep-empty-state {
+  max-width: 720px;
+  margin: 2rem auto;
+  padding: 2rem;
+  text-align: center;
+  border: 1px dashed var(--tk-ep-border);
+  border-radius: var(--tk-ep-radius);
+}
+
+.tk-ep-empty-state__title {
+  font-size: 1.1rem;
+  font-weight: 600;
+  color: var(--tk-ep-fg);
+  margin: 0 0 0.5rem;
+}
+
+.tk-ep-empty-state__hint {
+  font-size: 0.85rem;
+  color: var(--tk-ep-muted);
+  margin: 0;
 }
 
 @media (max-width: 640px) {

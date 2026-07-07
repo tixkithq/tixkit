@@ -269,3 +269,34 @@ describe('EditableBlockBody (standalone export)', () => {
     expect(slot).toHaveBeenCalledTimes(1);
   });
 });
+
+describe('Empty-state fast starts', () => {
+  it('shows empty state when document has only chrome blocks', () => {
+    const doc = createDefaultEventPageDocument({
+      eventId: 'e1',
+      eventTitle: 'Test Event',
+    });
+    // Remove all content blocks, leaving only chrome (header, resale, footer)
+    const chromeTypes = new Set(['event_header', 'resale_tickets', 'brand_footer']);
+    doc.blocks = doc.blocks.filter((b) => chromeTypes.has(b.type));
+
+    const { container } = render(
+      <EventPageEditorSurface document={doc} sampleContext={context} disabled={false} />,
+    );
+
+    expect(container.querySelector('[data-testid="tk-ep-empty-state"]')).not.toBeNull();
+  });
+
+  it('does not show empty state when document has content blocks', () => {
+    const doc = createDefaultEventPageDocument({
+      eventId: 'e1',
+      eventTitle: 'Test Event',
+    });
+
+    const { container } = render(
+      <EventPageEditorSurface document={doc} sampleContext={context} disabled={false} />,
+    );
+
+    expect(container.querySelector('[data-testid="tk-ep-empty-state"]')).toBeNull();
+  });
+});
