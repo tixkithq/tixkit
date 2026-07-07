@@ -150,6 +150,10 @@ type BulkSyncWorkerOptions = {
   workerId?: string;
   limit?: number;
 };
+type BulkSyncJobClaim = {
+  workerId: string;
+  attemptCount: number;
+};
 
 const OFFLINE_SYNC_DB_CHUNK_SIZE = 500;
 export const MAX_OFFLINE_MANIFEST_TICKETS = 50_000;
@@ -1457,6 +1461,7 @@ async function claimBulkSyncJobLease(
 ): Promise<{
   job: BulkSyncJobRow;
   workerId: string;
+  attemptCount: number;
   lockWaitMs: number;
 } | null> {
   const workerId = options.workerId ?? `api-${process.pid}`;
@@ -1502,7 +1507,35 @@ async function claimBulkSyncJobLease(
   if (!claimed) return null;
   if (claimed.status === 'completed') return null;
 
-  return { job: claimed, workerId, lockWaitMs };
+  return {
+    job: claimed,
+    workerId,
+    attemptCount: countValue(claimed.attempt_count ?? 0),
+    lockWaitMs,
+  };
+}
+
+async function heartbeatBulkSyncJobLease(
+  db: Database,
+  jobId: string,
+  claim: BulkSyncJobClaim,
+): Promise<boolean> {
+  const now = new Date();
+  const result = (await db
+    .updateTable('offline_check_in_sync_jobs')
+    .set({
+      status: 'processing',
+      failure_message: null,
+      last_heartbeat_at: now,
+      leased_until: new Date(now.getTime() + BULK_SYNC_WORKER_LEASE_MS),
+      updated_at: now,
+    })
+    .where('id', '=', jobId)
+    .where('status', '=', 'processing')
+    .where('lease_owner', '=', claim.workerId)
+    .where('attempt_count', '=', claim.attemptCount)
+    .executeTakeFirst()) as { numUpdatedRows?: bigint | number | string } | undefined;
+  return countValue(result?.numUpdatedRows ?? 0) > 0;
 }
 
 async function processBulkSyncJob(
@@ -1514,216 +1547,231 @@ async function processBulkSyncJob(
   if (!claim) return false;
   const processingStartedAt = new Date();
   const transactionStartedAt = performance.now();
-  return db.transaction().execute(async (trx) => {
-    let jobQuery = trx.selectFrom('offline_check_in_sync_jobs').selectAll().where('id', '=', jobId);
-    if (getDriver() === 'postgres') {
-      jobQuery = jobQuery.forUpdate();
-    }
-    const job = (await jobQuery.executeTakeFirst()) as BulkSyncJobRow | undefined;
-    if (!job || job.status === 'completed') return false;
-    if (job.lease_owner && job.lease_owner !== claim.workerId) return false;
-    if (job.chunks_received < job.total_chunks) return false;
-
-    const list = await new CheckInListRepository(trx as Database).findById(job.check_in_list_id);
-    if (!list) throw new NotFoundError('CheckInList', job.check_in_list_id);
-    if (list.status !== 'active') throw new ValidationError('Check-in list is not active');
-
-    const chunks = (await trx
-      .selectFrom('offline_check_in_sync_chunks')
-      .selectAll()
-      .where('job_id', '=', job.id)
-      .where('tenant_id', '=', job.tenant_id)
-      .orderBy('sequence', 'asc')
-      .execute()) as BulkSyncChunkRow[];
-    if (chunks.length < job.total_chunks) return false;
-    if (job.total_scans !== null) {
-      const uploadedScanCount = chunks.reduce(
-        (total, chunk) => total + countValue(chunk.scan_count),
-        0,
-      );
-      if (uploadedScanCount !== job.total_scans) {
-        throw new ValidationError('Uploaded chunk scans do not match job totalScans');
+  try {
+    return await db.transaction().execute(async (trx) => {
+      let jobQuery = trx
+        .selectFrom('offline_check_in_sync_jobs')
+        .selectAll()
+        .where('id', '=', jobId);
+      if (getDriver() === 'postgres') {
+        jobQuery = jobQuery.forUpdate();
       }
-    }
-    if (chunks.some((chunk) => chunk.payload === null)) {
-      throw new ValidationError('Bulk sync chunk payload is unavailable for retry');
-    }
+      const job = (await jobQuery.executeTakeFirst()) as BulkSyncJobRow | undefined;
+      if (!job || job.status === 'completed') return false;
+      if (job.lease_owner && job.lease_owner !== claim.workerId) return false;
+      if (countValue(job.attempt_count ?? 0) !== claim.attemptCount) return false;
+      if (job.chunks_received < job.total_chunks) return false;
 
-    const now = new Date();
-    await trx
-      .updateTable('offline_check_in_sync_chunks')
-      .set((eb) => ({
-        status: 'processing',
-        attempt_count: eb('attempt_count', '+', 1),
-        failure_message: null,
-        locked_at: now,
-        updated_at: now,
-      }))
-      .where('job_id', '=', job.id)
-      .where('tenant_id', '=', job.tenant_id)
-      .where('status', 'in', ['uploaded', 'processing', 'failed'])
-      .execute();
-    await trx
-      .updateTable('offline_check_in_sync_jobs')
-      .set({
-        status: 'processing',
-        failure_message: null,
-        last_heartbeat_at: now,
-        leased_until: new Date(now.getTime() + BULK_SYNC_WORKER_LEASE_MS),
-        updated_at: now,
-      })
-      .where('id', '=', job.id)
-      .execute();
+      const list = await new CheckInListRepository(trx as Database).findById(job.check_in_list_id);
+      if (!list) throw new NotFoundError('CheckInList', job.check_in_list_id);
+      if (list.status !== 'active') throw new ValidationError('Check-in list is not active');
 
-    const orderedScans = chunks.flatMap((chunk) =>
-      parseJsonValue<NormalizedOfflineScan[]>(chunk.payload, []).map((scan, index) =>
-        Object.assign({}, scan, {
-          scannedAt: new Date(scan.scannedAtIso),
-          chunkSequence: chunk.sequence,
-          chunkScanIndex: index,
-        }),
-      ),
-    );
-    // eslint-disable-next-line unicorn/no-array-sort -- deterministic global offline conflict resolution requires a full-job sort.
-    orderedScans.sort(
-      (a, b) =>
-        a.scannedAt.getTime() - b.scannedAt.getTime() ||
-        (a.chunkSequence ?? 0) - (b.chunkSequence ?? 0) ||
-        (a.chunkScanIndex ?? 0) - (b.chunkScanIndex ?? 0),
-    );
-
-    const chunkSummaries = new Map<
-      number,
-      {
-        accepted: number;
-        duplicates: number;
-        invalid: number;
-        clockWarnings: number;
-        errorSamples: BulkSyncErrorSample[];
-      }
-    >();
-    for (const chunk of chunks) {
-      chunkSummaries.set(chunk.sequence, {
-        accepted: 0,
-        duplicates: 0,
-        invalid: 0,
-        clockWarnings: 0,
-        errorSamples: [],
-      });
-    }
-    let accepted = 0;
-    let duplicates = 0;
-    let invalid = 0;
-    const metrics: OfflineSyncBatchMetrics = {
-      rowsProcessed: 0,
-      clockWarnings: 0,
-      scanLogInsertDurationMs: 0,
-      ticketUpdateDurationMs: 0,
-      attendeeUpdateDurationMs: 0,
-    };
-    const sampleErrors: BulkSyncErrorSample[] = [];
-
-    for (let offset = 0; offset < orderedScans.length; offset += BULK_SYNC_PROCESSING_BATCH_SIZE) {
-      const scanBatch = orderedScans.slice(offset, offset + BULK_SYNC_PROCESSING_BATCH_SIZE);
-      // eslint-disable-next-line no-await-in-loop -- each sorted batch observes claims made earlier in the same transaction.
-      const result = await processOfflineSyncBatch({
-        db: trx as Database,
-        tenantId: job.tenant_id,
-        list,
-        checkInListId: job.check_in_list_id,
-        deviceId: job.device_id,
-        scans: scanBatch,
-      });
-      accepted += result.accepted;
-      duplicates += result.duplicates;
-      invalid += result.invalid;
-      metrics.rowsProcessed += result.metrics.rowsProcessed;
-      metrics.clockWarnings += result.metrics.clockWarnings;
-      metrics.scanLogInsertDurationMs += result.metrics.scanLogInsertDurationMs;
-      metrics.ticketUpdateDurationMs += result.metrics.ticketUpdateDurationMs;
-      metrics.attendeeUpdateDurationMs += result.metrics.attendeeUpdateDurationMs;
-      sampleErrors.push(...result.errorSamples);
-
-      for (const [index, scanResult] of result.results.entries()) {
-        const scan = scanBatch[index];
-        const sequence = scan.chunkSequence ?? 1;
-        const summary = chunkSummaries.get(sequence);
-        if (!summary) continue;
-        if (scanResult.outcome === 'accepted') summary.accepted += 1;
-        else if (scanResult.outcome === 'duplicate') summary.duplicates += 1;
-        else summary.invalid += 1;
-        if (scan.clockWarning) summary.clockWarnings += 1;
-      }
-      for (const errorSample of result.errorSamples) {
-        const summary = chunkSummaries.get(errorSample.sequence);
-        if (summary && summary.errorSamples.length < BULK_SYNC_ERROR_SAMPLE_LIMIT) {
-          summary.errorSamples.push(errorSample);
+      const chunks = (await trx
+        .selectFrom('offline_check_in_sync_chunks')
+        .selectAll()
+        .where('job_id', '=', job.id)
+        .where('tenant_id', '=', job.tenant_id)
+        .orderBy('sequence', 'asc')
+        .execute()) as BulkSyncChunkRow[];
+      if (chunks.length < job.total_chunks) return false;
+      if (job.total_scans !== null) {
+        const uploadedScanCount = chunks.reduce(
+          (total, chunk) => total + countValue(chunk.scan_count),
+          0,
+        );
+        if (uploadedScanCount !== job.total_scans) {
+          throw new ValidationError('Uploaded chunk scans do not match job totalScans');
         }
       }
-    }
+      if (chunks.some((chunk) => chunk.payload === null)) {
+        throw new ValidationError('Bulk sync chunk payload is unavailable for retry');
+      }
 
-    const completedAt = new Date();
-    for (const chunk of chunks) {
-      const summary = chunkSummaries.get(chunk.sequence)!;
-      // eslint-disable-next-line no-await-in-loop -- per-chunk summaries are bounded by totalChunks and kept explicit for portability.
+      const now = new Date();
       await trx
         .updateTable('offline_check_in_sync_chunks')
-        .set({
-          status: 'processed',
-          accepted_count: summary.accepted,
-          duplicate_count: summary.duplicates,
-          invalid_count: summary.invalid,
-          clock_warning_count: summary.clockWarnings,
-          sample_errors: JSON.stringify(
-            summary.errorSamples.slice(0, BULK_SYNC_ERROR_SAMPLE_LIMIT),
-          ),
-          payload: null,
+        .set((eb) => ({
+          status: 'processing',
+          attempt_count: eb('attempt_count', '+', 1),
           failure_message: null,
-          processed_at: completedAt,
-          updated_at: completedAt,
-        })
-        .where('id', '=', chunk.id)
+          locked_at: now,
+          updated_at: now,
+        }))
+        .where('job_id', '=', job.id)
         .where('tenant_id', '=', job.tenant_id)
-        .where('status', '=', 'processing')
+        .where('status', 'in', ['uploaded', 'processing', 'failed'])
         .execute();
-    }
+      if (!(await heartbeatBulkSyncJobLease(trx as Database, job.id, claim))) return false;
 
-    const processingDurationMs = completedAt.getTime() - processingStartedAt.getTime();
-    const transactionDurationMs = Math.round(performance.now() - transactionStartedAt);
-    await trx
-      .updateTable('offline_check_in_sync_jobs')
-      .set({
-        chunks_processed: job.total_chunks,
-        accepted_count: accepted,
-        duplicate_count: duplicates,
-        invalid_count: invalid,
-        clock_warning_count: metrics.clockWarnings,
-        sample_errors: JSON.stringify(sampleErrors.slice(0, BULK_SYNC_ERROR_SAMPLE_LIMIT)),
-        status: 'completed',
-        failure_message: null,
-        lease_owner: null,
-        leased_until: null,
-        next_attempt_at: null,
-        last_heartbeat_at: completedAt,
-        processing_completed_at: completedAt,
-        processing_duration_ms: processingDurationMs,
-        transaction_duration_ms: transactionDurationMs,
-        lock_wait_ms: claim.lockWaitMs,
-        scan_log_insert_duration_ms: metrics.scanLogInsertDurationMs,
-        ticket_update_duration_ms: metrics.ticketUpdateDurationMs,
-        attendee_update_duration_ms: metrics.attendeeUpdateDurationMs,
-        rows_processed: metrics.rowsProcessed,
-        updated_at: completedAt,
-        completed_at: completedAt,
-      })
-      .where('id', '=', job.id)
-      .execute();
+      const orderedScans = chunks.flatMap((chunk) =>
+        parseJsonValue<NormalizedOfflineScan[]>(chunk.payload, []).map((scan, index) =>
+          Object.assign({}, scan, {
+            scannedAt: new Date(scan.scannedAtIso),
+            chunkSequence: chunk.sequence,
+            chunkScanIndex: index,
+          }),
+        ),
+      );
+      // eslint-disable-next-line unicorn/no-array-sort -- deterministic global offline conflict resolution requires a full-job sort.
+      orderedScans.sort(
+        (a, b) =>
+          a.scannedAt.getTime() - b.scannedAt.getTime() ||
+          (a.chunkSequence ?? 0) - (b.chunkSequence ?? 0) ||
+          (a.chunkScanIndex ?? 0) - (b.chunkScanIndex ?? 0),
+      );
 
+      const chunkSummaries = new Map<
+        number,
+        {
+          accepted: number;
+          duplicates: number;
+          invalid: number;
+          clockWarnings: number;
+          errorSamples: BulkSyncErrorSample[];
+        }
+      >();
+      for (const chunk of chunks) {
+        chunkSummaries.set(chunk.sequence, {
+          accepted: 0,
+          duplicates: 0,
+          invalid: 0,
+          clockWarnings: 0,
+          errorSamples: [],
+        });
+      }
+      let accepted = 0;
+      let duplicates = 0;
+      let invalid = 0;
+      const metrics: OfflineSyncBatchMetrics = {
+        rowsProcessed: 0,
+        clockWarnings: 0,
+        scanLogInsertDurationMs: 0,
+        ticketUpdateDurationMs: 0,
+        attendeeUpdateDurationMs: 0,
+      };
+      const sampleErrors: BulkSyncErrorSample[] = [];
+
+      for (
+        let offset = 0;
+        offset < orderedScans.length;
+        offset += BULK_SYNC_PROCESSING_BATCH_SIZE
+      ) {
+        const scanBatch = orderedScans.slice(offset, offset + BULK_SYNC_PROCESSING_BATCH_SIZE);
+        // eslint-disable-next-line no-await-in-loop -- each batch refreshes and verifies the active claim before durable side effects.
+        if (!(await heartbeatBulkSyncJobLease(trx as Database, job.id, claim))) return false;
+        // eslint-disable-next-line no-await-in-loop -- each sorted batch observes claims made earlier in the same transaction.
+        const result = await processOfflineSyncBatch({
+          db: trx as Database,
+          tenantId: job.tenant_id,
+          list,
+          checkInListId: job.check_in_list_id,
+          deviceId: job.device_id,
+          scans: scanBatch,
+          syncJobId: job.id,
+        });
+        accepted += result.accepted;
+        duplicates += result.duplicates;
+        invalid += result.invalid;
+        metrics.rowsProcessed += result.metrics.rowsProcessed;
+        metrics.clockWarnings += result.metrics.clockWarnings;
+        metrics.scanLogInsertDurationMs += result.metrics.scanLogInsertDurationMs;
+        metrics.ticketUpdateDurationMs += result.metrics.ticketUpdateDurationMs;
+        metrics.attendeeUpdateDurationMs += result.metrics.attendeeUpdateDurationMs;
+        sampleErrors.push(...result.errorSamples);
+
+        for (const [index, scanResult] of result.results.entries()) {
+          const scan = scanBatch[index];
+          const sequence = scan.chunkSequence ?? 1;
+          const summary = chunkSummaries.get(sequence);
+          if (!summary) continue;
+          if (scanResult.outcome === 'accepted') summary.accepted += 1;
+          else if (scanResult.outcome === 'duplicate') summary.duplicates += 1;
+          else summary.invalid += 1;
+          if (scan.clockWarning) summary.clockWarnings += 1;
+        }
+        for (const errorSample of result.errorSamples) {
+          const summary = chunkSummaries.get(errorSample.sequence);
+          if (summary && summary.errorSamples.length < BULK_SYNC_ERROR_SAMPLE_LIMIT) {
+            summary.errorSamples.push(errorSample);
+          }
+        }
+      }
+
+      const completedAt = new Date();
+      for (const chunk of chunks) {
+        const summary = chunkSummaries.get(chunk.sequence)!;
+        // eslint-disable-next-line no-await-in-loop -- per-chunk summaries are bounded by totalChunks and kept explicit for portability.
+        await trx
+          .updateTable('offline_check_in_sync_chunks')
+          .set({
+            status: 'processed',
+            accepted_count: summary.accepted,
+            duplicate_count: summary.duplicates,
+            invalid_count: summary.invalid,
+            clock_warning_count: summary.clockWarnings,
+            sample_errors: JSON.stringify(
+              summary.errorSamples.slice(0, BULK_SYNC_ERROR_SAMPLE_LIMIT),
+            ),
+            payload: null,
+            failure_message: null,
+            processed_at: completedAt,
+            updated_at: completedAt,
+          })
+          .where('id', '=', chunk.id)
+          .where('tenant_id', '=', job.tenant_id)
+          .where('status', '=', 'processing')
+          .execute();
+      }
+
+      if (!(await heartbeatBulkSyncJobLease(trx as Database, job.id, claim))) return false;
+      const processingDurationMs = completedAt.getTime() - processingStartedAt.getTime();
+      const transactionDurationMs = Math.round(performance.now() - transactionStartedAt);
+      const completed = (await trx
+        .updateTable('offline_check_in_sync_jobs')
+        .set({
+          chunks_processed: job.total_chunks,
+          accepted_count: accepted,
+          duplicate_count: duplicates,
+          invalid_count: invalid,
+          clock_warning_count: metrics.clockWarnings,
+          sample_errors: JSON.stringify(sampleErrors.slice(0, BULK_SYNC_ERROR_SAMPLE_LIMIT)),
+          status: 'completed',
+          failure_message: null,
+          lease_owner: null,
+          leased_until: null,
+          next_attempt_at: null,
+          last_heartbeat_at: completedAt,
+          processing_completed_at: completedAt,
+          processing_duration_ms: processingDurationMs,
+          transaction_duration_ms: transactionDurationMs,
+          lock_wait_ms: claim.lockWaitMs,
+          scan_log_insert_duration_ms: metrics.scanLogInsertDurationMs,
+          ticket_update_duration_ms: metrics.ticketUpdateDurationMs,
+          attendee_update_duration_ms: metrics.attendeeUpdateDurationMs,
+          rows_processed: metrics.rowsProcessed,
+          updated_at: completedAt,
+          completed_at: completedAt,
+        })
+        .where('id', '=', job.id)
+        .where('status', '=', 'processing')
+        .where('lease_owner', '=', claim.workerId)
+        .where('attempt_count', '=', claim.attemptCount)
+        .executeTakeFirst()) as { numUpdatedRows?: bigint | number | string } | undefined;
+
+      return countValue(completed?.numUpdatedRows ?? 0) > 0;
+    });
+  } catch (error) {
+    await markBulkSyncJobFailed(db, jobId, error, claim);
     return true;
-  });
+  }
 }
 
-async function markBulkSyncJobFailed(db: Database, jobId: string, _error?: unknown): Promise<void> {
+async function markBulkSyncJobFailed(
+  db: Database,
+  jobId: string,
+  _error?: unknown,
+  claim?: BulkSyncJobClaim,
+): Promise<void> {
   const job = (await db
     .selectFrom('offline_check_in_sync_jobs')
     .selectAll()
@@ -1750,7 +1798,7 @@ async function markBulkSyncJobFailed(db: Database, jobId: string, _error?: unkno
     .where('tenant_id', '=', job.tenant_id)
     .where('status', 'in', ['uploaded', 'processing', 'failed'])
     .execute();
-  await db
+  let jobUpdate = db
     .updateTable('offline_check_in_sync_jobs')
     .set({
       status: 'failed',
@@ -1762,8 +1810,14 @@ async function markBulkSyncJobFailed(db: Database, jobId: string, _error?: unkno
       last_heartbeat_at: now,
       updated_at: now,
     })
-    .where('id', '=', jobId)
-    .execute();
+    .where('id', '=', jobId);
+  if (claim) {
+    jobUpdate = jobUpdate
+      .where('status', '=', 'processing')
+      .where('lease_owner', '=', claim.workerId)
+      .where('attempt_count', '=', claim.attemptCount);
+  }
+  await jobUpdate.execute();
 }
 
 function resolveCheckInDeviceId(
@@ -1786,6 +1840,7 @@ async function processOfflineSyncBatch(input: {
   checkInListId: string;
   deviceId: string;
   scans: NormalizedOfflineScan[];
+  syncJobId?: string;
   resultSequence?: number;
 }): Promise<{
   accepted: number;
@@ -1862,6 +1917,7 @@ async function processOfflineSyncBatch(input: {
     deviceId: input.deviceId,
     scans: input.scans,
     results,
+    syncJobId: input.syncJobId,
   });
   const scanLogInsertDurationMs = Math.round(performance.now() - scanLogInsertStartedAt);
 
@@ -2081,6 +2137,7 @@ async function bulkInsertOfflineScanLogs(input: {
   deviceId: string;
   scans: NormalizedOfflineScan[];
   results: OfflineScanResult[];
+  syncJobId?: string;
 }): Promise<void> {
   for (let offset = 0; offset < input.scans.length; offset += OFFLINE_SYNC_DB_CHUNK_SIZE) {
     const scanChunk = input.scans.slice(offset, offset + OFFLINE_SYNC_DB_CHUNK_SIZE);
@@ -2088,7 +2145,9 @@ async function bulkInsertOfflineScanLogs(input: {
       const result = input.results[offset + index];
       const metadata = metadataWithClockWarning(result.metadata, scan);
       return {
-        id: `scan_${ulid()}`,
+        id: input.syncJobId
+          ? bulkOfflineScanLogId(input.syncJobId, scan, offset + index)
+          : `scan_${ulid()}`,
         tenant_id: input.tenantId,
         check_in_list_id: input.checkInListId,
         device_id: input.deviceId,
@@ -2107,6 +2166,20 @@ async function bulkInsertOfflineScanLogs(input: {
     // eslint-disable-next-line no-await-in-loop -- chunked inserts keep max-sized sync under query parameter limits.
     await input.db.insertInto('scan_logs').values(rows).execute();
   }
+}
+
+function bulkOfflineScanLogId(
+  syncJobId: string,
+  scan: NormalizedOfflineScan,
+  fallbackIndex: number,
+): string {
+  const sequence = scan.chunkSequence ?? 0;
+  const scanIndex = scan.chunkScanIndex ?? fallbackIndex;
+  const digest = createHash('sha256')
+    .update(`${syncJobId}:${sequence}:${scanIndex}`)
+    .digest('hex')
+    .slice(0, 26);
+  return `scan_bulk_${digest}`;
 }
 
 export async function processScan(input: {

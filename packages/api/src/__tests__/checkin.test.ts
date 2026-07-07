@@ -78,6 +78,7 @@ type OfflineSyncMockOverrides = {
   checkInSucceeds?: boolean;
   existingIdempotency?: Record<string, unknown> | null;
   failScanLogInsert?: boolean;
+  onBulkSyncJobClaimed?: (job: Record<string, unknown>) => Promise<void> | void;
   onUnclaimedBulkSyncJob?: () => Promise<void> | void;
 };
 
@@ -347,6 +348,9 @@ function buildOfflineSyncMockDb(overrides: OfflineSyncMockOverrides = {}) {
               return null;
             }
             applyMockUpdate(table, conditions, pendingValues);
+            if (table === 'offline_check_in_sync_jobs' && pendingValues.status === 'processing') {
+              await overrides.onBulkSyncJobClaimed?.(matched);
+            }
             return matched;
           }),
         }),
@@ -2296,6 +2300,61 @@ describe('bulk offline sync endpoint', () => {
         lease_owner: null,
         leased_until: null,
         rows_processed: 2,
+      }),
+    );
+
+    await app.close();
+  });
+
+  it('does not let a stale worker overwrite or replay a replacement worker result', async () => {
+    let replacementStarted = false;
+    let replacementFinished = false;
+    let dbForReplacement: unknown;
+    let replacementJobId = '';
+    const { app, db, inserts } = await setupBulkApp({
+      onBulkSyncJobClaimed: async (claimedJob) => {
+        if (claimedJob.lease_owner !== 'worker-a' || replacementStarted) return;
+        replacementStarted = true;
+        claimedJob.leased_until = new Date(Date.now() - 60_000);
+        await processPendingBulkSyncChunks(dbForReplacement as Database, replacementJobId, {
+          workerId: 'worker-b',
+        });
+        replacementFinished = true;
+      },
+    });
+    dbForReplacement = db;
+    const job = await createBulkJob(app);
+    replacementJobId = job.id;
+
+    for (const [sequence, qrHash] of [
+      [1, 'hash_1'],
+      [2, 'missing_hash'],
+    ] as const) {
+      // eslint-disable-next-line no-await-in-loop -- sequence-specific setup makes the stale claim scenario explicit.
+      const response = await app.inject({
+        method: 'PUT',
+        url: `/check-ins/bulk-sync-jobs/${job.id}/chunks/${sequence}`,
+        headers: { 'Idempotency-Key': `idem_bulk_stale_worker_${sequence}` },
+        payload: {
+          scans: [{ qrHash, scannedAt: '2026-06-01T12:00:00.000Z', offline: true }],
+        },
+      });
+      expect(response.statusCode).toBe(202);
+    }
+
+    await processPendingBulkSyncChunks(db as unknown as Database, job.id, { workerId: 'worker-a' });
+
+    const jobRow = inserts.find((insert) => insert.table === 'offline_check_in_sync_jobs')!.values;
+    expect(replacementStarted).toBe(true);
+    expect(replacementFinished).toBe(true);
+    expect(inserts.filter((insert) => insert.table === 'scan_logs')).toHaveLength(2);
+    expect(jobRow).toEqual(
+      expect.objectContaining({
+        status: 'completed',
+        lease_owner: null,
+        leased_until: null,
+        rows_processed: 2,
+        attempt_count: 2,
       }),
     );
 
