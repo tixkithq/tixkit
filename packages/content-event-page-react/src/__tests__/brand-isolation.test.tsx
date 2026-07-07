@@ -1,8 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import { render } from '@testing-library/react';
 import {
-  EventPageEditorSurface,
   EventPageSurface,
+  type SurfaceEditing,
 } from '../index.js';
 import {
   createDefaultEventPageDocument,
@@ -100,18 +100,19 @@ describe('Two-brand isolation', () => {
     expect(titleB).toBe('Brand B Event');
   });
 
-  it('editor surface does not render white-label or reseller controls', () => {
+  it('edit surface does not render white-label or reseller controls', () => {
     const doc = createDefaultEventPageDocument({
       eventId: 'e1',
       eventTitle: 'Test Event',
     });
-
+    const resolved = resolveEventPageDocument(doc, brandA, { mode: 'edit' });
+    const editing: SurfaceEditing = {
+      document: doc,
+      disabled: false,
+      onChangeBlock: () => {},
+    };
     const { container } = render(
-      <EventPageEditorSurface
-        document={doc}
-        sampleContext={brandA}
-        disabled={false}
-      />,
+      <EventPageSurface resolvedPage={resolved} mode="edit" editing={editing} />,
     );
 
     // The OSS editor surface should not contain white-label controls
@@ -120,28 +121,35 @@ describe('Two-brand isolation', () => {
     expect(container.querySelector('.tk-admin-chrome')).toBeNull();
     // The surface should render the standard event-page classes
     expect(container.querySelector('.tixkit-event-page')).not.toBeNull();
-    expect(container.querySelector('.tk-ep-section')).not.toBeNull();
+    expect(container.querySelector('[data-block-id]')).not.toBeNull();
   });
 
-  it('editor surface produces identical DOM structure regardless of brand context', () => {
+  it('edit surface produces identical block structure regardless of brand context', () => {
     const doc = createDefaultEventPageDocument({
       eventId: 'e1',
       eventTitle: 'Test Event',
     });
+    const editing: SurfaceEditing = {
+      document: doc,
+      disabled: false,
+      onChangeBlock: () => {},
+    };
+    const resolvedA = resolveEventPageDocument(doc, brandA, { mode: 'edit' });
+    const resolvedB = resolveEventPageDocument(doc, brandB, { mode: 'edit' });
 
     const { container: containerA } = render(
-      <EventPageEditorSurface document={doc} sampleContext={brandA} disabled={false} />,
+      <EventPageSurface resolvedPage={resolvedA} mode="edit" editing={editing} />,
     );
     const { container: containerB } = render(
-      <EventPageEditorSurface document={doc} sampleContext={brandB} disabled={false} />,
+      <EventPageSurface resolvedPage={resolvedB} mode="edit" editing={editing} />,
     );
 
     // The block structure should be identical regardless of brand
-    const blocksA = Array.from(containerA.querySelectorAll('.tk-ep-section')).map((el) =>
-      el.getAttribute('data-block-type'),
+    const blocksA = Array.from(containerA.querySelectorAll('[data-block-id]')).map((el) =>
+      el.getAttribute('data-block-id'),
     );
-    const blocksB = Array.from(containerB.querySelectorAll('.tk-ep-section')).map((el) =>
-      el.getAttribute('data-block-type'),
+    const blocksB = Array.from(containerB.querySelectorAll('[data-block-id]')).map((el) =>
+      el.getAttribute('data-block-id'),
     );
 
     expect(blocksA).toEqual(blocksB);

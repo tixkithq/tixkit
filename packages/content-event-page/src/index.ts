@@ -808,7 +808,9 @@ export function resolveEventPageDocument(
   const validation = validateEventPageDocument(document, options);
   const discovery = discoveryCard(document, context);
   const settings = resolveEventPageSettings(document, context);
-  if (!validation.valid) {
+  // Edit mode renders invalid drafts so editors can see and fix blockers.
+  // Public/preview/server keep the empty-blocks contract for invalid docs.
+  if (!validation.valid && options.mode !== 'edit') {
     return { schemaVersion: document.schemaVersion, settings, blocks: [], discovery, validation };
   }
   const blocks = document.blocks.map((block) => resolveBlock(block, context, options));

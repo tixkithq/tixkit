@@ -28,7 +28,6 @@
   line-height: 1.6;
 }
 
-.tk-ep-section,
 .tixkit-event-page > section,
 .tixkit-event-page > hr {
   max-width: 720px;
@@ -136,66 +135,6 @@
   overflow: hidden;
 }
 
-/* ---- Admin canvas edit-mode affordances ---- */
-
-.tk-ep-section {
-  position: relative;
-  border: 1px solid var(--tk-ep-border);
-  border-radius: var(--tk-ep-radius);
-  padding: 1.25rem;
-  cursor: pointer;
-  transition: border-color 0.15s, box-shadow 0.15s;
-}
-
-.tk-ep-section:hover {
-  border-color: color-mix(in srgb, var(--tk-ep-fg), transparent 60%);
-}
-
-.tk-ep-section--selected {
-  border-color: var(--tk-ep-fg);
-  box-shadow: 0 0 0 2px color-mix(in srgb, var(--tk-ep-fg), transparent 70%);
-}
-
-.tk-ep-section__label {
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
-  font-size: 0.7rem;
-  font-weight: 600;
-  text-transform: uppercase;
-  letter-spacing: 0.06em;
-  color: var(--tk-ep-muted);
-  margin-bottom: 0.75rem;
-}
-
-.tk-ep-section__badge {
-  background: color-mix(in srgb, var(--tk-ep-fg), transparent 90%);
-  border-radius: 999px;
-  padding: 0.1rem 0.5rem;
-  font-size: 0.65rem;
-}
-
-.tk-ep-section__content {
-  display: flex;
-  flex-direction: column;
-  gap: 0.75rem;
-}
-
-.tk-ep-section__content [contenteditable] {
-  outline: none;
-  border-radius: 4px;
-  min-width: 2rem;
-}
-
-.tk-ep-section__content [contenteditable]:focus {
-  box-shadow: 0 0 0 2px color-mix(in srgb, var(--tk-ep-accent), transparent 70%);
-}
-
-.tk-ep-section__content [contenteditable][data-placeholder]:empty::before {
-  content: attr(data-placeholder);
-  color: color-mix(in srgb, var(--tk-ep-fg), transparent 60%);
-}
-
 /* ---- Bubble menu for rich text editing ---- */
 
 .tk-ep-bubble {
@@ -258,47 +197,6 @@
   margin: 0 0.15rem;
 }
 
-/* ---- Block management actions ---- */
-
-.tk-ep-section__actions {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.2rem;
-  margin-left: auto;
-}
-
-.tk-ep-section__action {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  min-width: 1.4rem;
-  height: 1.4rem;
-  border: 1px solid var(--tk-ep-border);
-  border-radius: 4px;
-  background: transparent;
-  color: var(--tk-ep-muted);
-  cursor: pointer;
-  font-size: 0.7rem;
-  padding: 0 0.3rem;
-  transition: all 0.1s;
-}
-
-.tk-ep-section__action:hover:not(:disabled) {
-  background: var(--tk-ep-bg);
-  color: var(--tk-ep-fg);
-  border-color: var(--tk-ep-fg);
-}
-
-.tk-ep-section__action:disabled {
-  opacity: 0.4;
-  cursor: not-allowed;
-}
-
-.tk-ep-section__action--danger:hover:not(:disabled) {
-  border-color: #dc2626;
-  color: #dc2626;
-}
-
 /* ---- Empty state ---- */
 
 .tk-ep-empty-state {
@@ -323,8 +221,141 @@
   margin: 0;
 }
 
+/* ---- Edit-mode inline editable affordances (non-layout only) ---- */
+
+[data-mode="edit"] [contenteditable="true"] {
+  outline: none;
+  border-radius: 4px;
+  min-width: 2rem;
+  caret-color: var(--tk-ep-accent);
+}
+
+[data-mode="edit"] [contenteditable="true"]:focus {
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--tk-ep-accent), transparent 70%);
+}
+
+[data-mode="edit"] [contenteditable="true"][data-placeholder]:empty::before {
+  content: attr(data-placeholder);
+  color: color-mix(in srgb, var(--tk-ep-fg), transparent 60%);
+}
+
+/* ---- Editor overlay chrome (Puck-style, never participates in layout) ---- */
+
+.tk-ep-overlay {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  z-index: 10;
+}
+
+.tk-ep-overlay__slot {
+  pointer-events: none;
+}
+
+.tk-ep-overlay__hit {
+  position: absolute;
+  inset: 0;
+  cursor: pointer;
+  border: none;
+  background: transparent;
+  padding: 0;
+  margin: 0;
+  border-radius: var(--tk-ep-radius);
+  font: inherit;
+}
+
+.tk-ep-overlay__hit:focus-visible {
+  outline: none;
+}
+
+.tk-ep-overlay__hit--selected {
+  cursor: default;
+}
+
+.tk-ep-overlay__hover {
+  position: absolute;
+  inset: 0;
+  border: 1px solid color-mix(in srgb, var(--tk-ep-fg), transparent 60%);
+  border-radius: var(--tk-ep-radius);
+  pointer-events: none;
+}
+
+.tk-ep-overlay__selected {
+  position: absolute;
+  inset: 0;
+  border: 1px solid var(--tk-ep-fg);
+  border-radius: var(--tk-ep-radius);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--tk-ep-fg), transparent 70%);
+  pointer-events: none;
+}
+
+.tk-ep-overlay__toolbar {
+  position: absolute;
+  bottom: 100%;
+  left: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  margin-bottom: 0.35rem;
+  padding: 0.25rem 0.4rem;
+  background: var(--tk-ep-fg);
+  color: var(--tk-ep-bg);
+  border-radius: 6px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+  font-size: 0.72rem;
+  pointer-events: auto;
+  white-space: nowrap;
+}
+
+.tk-ep-overlay__toolbar--below {
+  bottom: auto;
+  top: 100%;
+  margin-bottom: 0;
+  margin-top: 0.35rem;
+}
+
+.tk-ep-overlay__toolbar-label {
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.tk-ep-overlay__toolbar-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.2rem;
+}
+
+.tk-ep-overlay__action {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 1.5rem;
+  height: 1.5rem;
+  border: none;
+  border-radius: 4px;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+  font-size: 0.72rem;
+  padding: 0 0.3rem;
+  transition: background 0.1s;
+}
+
+.tk-ep-overlay__action:hover:not(:disabled) {
+  background: color-mix(in srgb, currentColor, transparent 85%);
+}
+
+.tk-ep-overlay__action:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.tk-ep-overlay__action--danger:hover:not(:disabled) {
+  color: #fca5a5;
+}
+
 @media (max-width: 640px) {
-  .tk-ep-section,
   .tixkit-event-page > section,
   .tixkit-event-page > hr {
     padding-inline: 1rem;
