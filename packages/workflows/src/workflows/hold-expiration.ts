@@ -37,15 +37,9 @@ export type HoldExpirationWorkflowInput = {
 
 export const DEFAULT_HOLD_EXPIRATION_CONTINUE_AS_NEW_ITERATIONS = 1_440;
 
-function throwIfPrivacyRetentionFailed(
-  result: WorkflowActivityResult<{
-    inspectedCount: number;
-    repairedCount: number;
-    skippedCount: number;
-  }>,
-) {
+function throwIfMaintenanceFailed(label: string, result: WorkflowActivityResult<unknown>) {
   if (!result.ok && result.retryable) {
-    throw new Error(`Privacy retention repair failed (${result.errorCode}): ${result.message}`);
+    throw new Error(`${label} failed (${result.errorCode}): ${result.message}`);
   }
 }
 
@@ -70,15 +64,18 @@ export async function holdExpirationWorkflow(input?: HoldExpirationWorkflowInput
       return;
     }
     // eslint-disable-next-line no-await-in-loop -- scheduled maintenance workflow intentionally runs one tick at a time for deterministic history.
-    await expireStaleHoldsActivity();
+    const staleHoldsResult = await expireStaleHoldsActivity();
+    throwIfMaintenanceFailed('Stale hold expiration', staleHoldsResult);
     // eslint-disable-next-line no-await-in-loop -- stale sessions expire after stale holds in the same deterministic tick.
-    await expireStaleSessionsActivity();
+    const staleSessionsResult = await expireStaleSessionsActivity();
+    throwIfMaintenanceFailed('Stale session expiration', staleSessionsResult);
     // eslint-disable-next-line no-await-in-loop -- waitlist maintenance follows inventory cleanup so newly freed capacity can be offered.
-    await processWaitlistOffersActivity();
+    const waitlistOffersResult = await processWaitlistOffersActivity();
+    throwIfMaintenanceFailed('Waitlist offer processing', waitlistOffersResult);
     if (patched('privacy-retention-maintenance-v1')) {
       // eslint-disable-next-line no-await-in-loop -- privacy retention repair runs once per deterministic maintenance tick.
       const privacyRetentionResult = await enforcePrivacyRetentionActivity();
-      throwIfPrivacyRetentionFailed(privacyRetentionResult);
+      throwIfMaintenanceFailed('Privacy retention repair', privacyRetentionResult);
     }
     iterations += 1;
     if (maxIterations !== undefined && iterations >= maxIterations) {

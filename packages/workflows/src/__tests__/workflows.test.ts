@@ -1867,6 +1867,79 @@ describe('holdExpirationWorkflow', () => {
     expect(mockState.continueAsNewInputs).toEqual([]);
   });
 
+  it('throws retryable stale-hold expiration failures before later maintenance runs', async () => {
+    const calls: string[] = [];
+    setActivity('expireStaleHoldsActivity', async () => {
+      calls.push('holds');
+      return errResult('stale_holds_failed', 'database unavailable', true);
+    });
+    setActivity('expireStaleSessionsActivity', async () => {
+      calls.push('sessions');
+      return okResult({ expiredCount: 1 });
+    });
+    setActivity('processWaitlistOffersActivity', async () => {
+      calls.push('waitlist');
+      return okResult({ expiredCount: 1, offeredCount: 1, queuedEmailCount: 1 });
+    });
+
+    await expect(holdExpirationWorkflow({ maxIterations: 1 })).rejects.toThrow(
+      'Stale hold expiration failed (stale_holds_failed): database unavailable',
+    );
+
+    expect(calls).toEqual(['holds']);
+    expect(mockState.sleeps).toEqual([]);
+  });
+
+  it('throws retryable stale-session expiration failures before waitlist maintenance runs', async () => {
+    const calls: string[] = [];
+    setActivity('expireStaleHoldsActivity', async () => {
+      calls.push('holds');
+      return okResult({ expiredCount: 1 });
+    });
+    setActivity('expireStaleSessionsActivity', async () => {
+      calls.push('sessions');
+      return errResult('stale_sessions_failed', 'database unavailable', true);
+    });
+    setActivity('processWaitlistOffersActivity', async () => {
+      calls.push('waitlist');
+      return okResult({ expiredCount: 1, offeredCount: 1, queuedEmailCount: 1 });
+    });
+
+    await expect(holdExpirationWorkflow({ maxIterations: 1 })).rejects.toThrow(
+      'Stale session expiration failed (stale_sessions_failed): database unavailable',
+    );
+
+    expect(calls).toEqual(['holds', 'sessions']);
+    expect(mockState.sleeps).toEqual([]);
+  });
+
+  it('throws retryable waitlist maintenance failures before privacy maintenance runs', async () => {
+    const calls: string[] = [];
+    setActivity('expireStaleHoldsActivity', async () => {
+      calls.push('holds');
+      return okResult({ expiredCount: 1 });
+    });
+    setActivity('expireStaleSessionsActivity', async () => {
+      calls.push('sessions');
+      return okResult({ expiredCount: 1 });
+    });
+    setActivity('processWaitlistOffersActivity', async () => {
+      calls.push('waitlist');
+      return errResult('waitlist_offers_failed', 'database unavailable', true);
+    });
+    setActivity('enforcePrivacyRetentionActivity', async () => {
+      calls.push('privacy');
+      return okResult({ inspectedCount: 1, repairedCount: 1, skippedCount: 0 });
+    });
+
+    await expect(holdExpirationWorkflow({ maxIterations: 1 })).rejects.toThrow(
+      'Waitlist offer processing failed (waitlist_offers_failed): database unavailable',
+    );
+
+    expect(calls).toEqual(['holds', 'sessions', 'waitlist']);
+    expect(mockState.sleeps).toEqual([]);
+  });
+
   it('continues as new after the configured production rollover threshold', async () => {
     const calls: string[] = [];
     setActivity('expireStaleHoldsActivity', async () => {
