@@ -3,7 +3,10 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { cleanup, fireEvent, render, waitFor } from '@testing-library/react';
 import * as React from 'react';
 import EventPageEditOverlay from '@/app/e/[eventId]/event-page-edit-overlay';
-import { createDefaultEventPageDocument, type EventPageRenderContext } from '@tixkit/content-event-page';
+import {
+  createDefaultEventPageDocument,
+  type EventPageRenderContext,
+} from '@tixkit/content-event-page';
 
 const postMessageMock = vi.fn();
 
@@ -73,6 +76,19 @@ function seedDraft() {
   return doc;
 }
 
+function defaultEventPageDocument() {
+  return createDefaultEventPageDocument({
+    eventId: 'e1',
+    eventTitle: 'All Access Chicago',
+    eventDescription: 'A full night.',
+    checkoutUrl: 'https://checkout.test/checkout?eventId=e1',
+  });
+}
+
+function headlineField(container: HTMLElement): HTMLElement {
+  return container.querySelector('[data-editable-field="headline"]') as HTMLElement;
+}
+
 beforeEach(() => {
   postMessageMock.mockClear();
   Object.defineProperty(window, 'parent', {
@@ -98,7 +114,7 @@ describe('EventPageEditOverlay postMessage resolver loop', () => {
   it('sends block-change when a SurfaceText commit fires', async () => {
     const { container } = await renderOverlay();
     postMessageMock.mockClear();
-    const headline = container.querySelector('[data-editable-field="headline"]') as HTMLElement;
+    const headline = headlineField(container);
     headline.textContent = 'Updated headline';
     fireEvent.input(headline);
     await waitFor(() => {
@@ -112,22 +128,22 @@ describe('EventPageEditOverlay postMessage resolver loop', () => {
   it('does not echo block-change when receiving an update-block from the parent', async () => {
     const { container } = await renderOverlay();
     // First, a real user edit sends block-change.
-    const headline = container.querySelector('[data-editable-field="headline"]') as HTMLElement;
+    const headline = headlineField(container);
     headline.textContent = 'From user';
     fireEvent.input(headline);
     await waitFor(() => expect(postMessageMock).toHaveBeenCalled());
     postMessageMock.mockClear();
 
     // Parent echoes an update-block with the same block (simulating the round-trip).
-    const heroBlock = createDefaultEventPageDocument({
-      eventId: 'e1',
-      eventTitle: 'All Access Chicago',
-      eventDescription: 'A full night.',
-      checkoutUrl: 'https://checkout.test/checkout?eventId=e1',
-    }).blocks.find((b) => b.type === 'hero')!;
+    const heroBlock = defaultEventPageDocument().blocks.find((b) => b.type === 'hero')!;
     window.dispatchEvent(
       new MessageEvent('message', {
-        data: { source: PARENT_SOURCE, type: 'update-block', blockId: 'hero', block: { ...heroBlock, headline: 'From user' } },
+        data: {
+          source: PARENT_SOURCE,
+          type: 'update-block',
+          blockId: 'hero',
+          block: { ...heroBlock, headline: 'From user' },
+        },
       }),
     );
     // Allow any re-render to settle; no block-change should be echoed back.
@@ -136,5 +152,80 @@ describe('EventPageEditOverlay postMessage resolver loop', () => {
       ([msg]) => msg && msg.type === 'block-change',
     );
     expect(blockChangeCalls).toHaveLength(0);
+  });
+
+  it('posts the first inline edit after receiving an update-block from the parent', async () => {
+    const { container } = await renderOverlay();
+    postMessageMock.mockClear();
+
+    const heroBlock = defaultEventPageDocument().blocks.find((b) => b.type === 'hero')!;
+    window.dispatchEvent(
+      new MessageEvent('message', {
+        data: {
+          source: PARENT_SOURCE,
+          type: 'update-block',
+          blockId: 'hero',
+          block: { ...heroBlock, headline: 'Inspector headline' },
+        },
+      }),
+    );
+    await waitFor(() =>
+      expect(headlineField(container).textContent).toContain('Inspector headline'),
+    );
+
+    const headline = headlineField(container);
+    headline.textContent = 'Iframe headline';
+    fireEvent.input(headline);
+
+    await waitFor(() => {
+      expect(postMessageMock).toHaveBeenCalledWith(
+        expect.objectContaining({
+          type: 'block-change',
+          blockId: 'hero',
+          block: expect.objectContaining({ headline: 'Iframe headline' }),
+        }),
+        '*',
+      );
+    });
+  });
+
+  it('posts the first inline edit after receiving an update-document from the parent', async () => {
+    const { container } = await renderOverlay();
+    postMessageMock.mockClear();
+
+    const nextDocument = {
+      ...defaultEventPageDocument(),
+      blocks: defaultEventPageDocument().blocks.map((block) =>
+        block.id === 'hero' ? { ...block, headline: 'Document headline' } : block,
+      ),
+    };
+    window.dispatchEvent(
+      new MessageEvent('message', {
+        data: {
+          source: PARENT_SOURCE,
+          type: 'update-document',
+          document: nextDocument,
+          selectedBlockId: 'hero',
+        },
+      }),
+    );
+    await waitFor(() =>
+      expect(headlineField(container).textContent).toContain('Document headline'),
+    );
+
+    const headline = headlineField(container);
+    headline.textContent = 'Iframe document headline';
+    fireEvent.input(headline);
+
+    await waitFor(() => {
+      expect(postMessageMock).toHaveBeenCalledWith(
+        expect.objectContaining({
+          type: 'block-change',
+          blockId: 'hero',
+          block: expect.objectContaining({ headline: 'Iframe document headline' }),
+        }),
+        '*',
+      );
+    });
   });
 });

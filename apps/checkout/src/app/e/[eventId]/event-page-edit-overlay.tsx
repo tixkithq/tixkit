@@ -1,18 +1,11 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import {
-  AlertCircleIcon,
-} from 'lucide-react';
+import { AlertCircleIcon } from 'lucide-react';
 import { Skeleton } from '@/components/ui/skeleton';
 import { EmptyState } from '@/components/empty-state';
 import { Button } from '@/components/ui/button';
-import {
-  publicApi,
-  CheckoutApiError,
-  type DraftPreviewPage,
-  userFacingMessage,
-} from '@/lib/api';
+import { publicApi, CheckoutApiError, type DraftPreviewPage, userFacingMessage } from '@/lib/api';
 import { brandThemeStyle, type ResolvedBrand } from '@/lib/brand';
 import { useResolvedBrand } from '@/lib/use-brand';
 import {
@@ -84,7 +77,10 @@ function isParentToEditorMessage(value: unknown): value is ParentToEditorMessage
 function parentOriginAllowlist(): string[] {
   const raw = process.env.NEXT_PUBLIC_ADMIN_ORIGIN?.trim();
   if (!raw) return [];
-  return raw.split(',').map((o) => o.trim()).filter(Boolean);
+  return raw
+    .split(',')
+    .map((o) => o.trim())
+    .filter(Boolean);
 }
 
 function isAllowedParentOrigin(origin: string): boolean {
@@ -106,7 +102,6 @@ export default function EventPageEditOverlay({ eventId, token, brandId }: Props)
   const [selectedBlockId, setSelectedBlockId] = useState<string | undefined>(undefined);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const suppressChangeRef = useRef(false);
   const tokenRef = useRef(token);
   const canvasContainerRef = useRef<HTMLDivElement>(null);
 
@@ -180,20 +175,14 @@ export default function EventPageEditOverlay({ eventId, token, brandId }: Props)
           break;
         case 'update-block':
           if (!document) return;
-          suppressChangeRef.current = true;
           setDocument({
             ...document,
-            blocks: document.blocks.map((b) =>
-              b.id === message.blockId ? message.block : b,
-            ),
+            blocks: document.blocks.map((b) => (b.id === message.blockId ? message.block : b)),
           });
           break;
         case 'update-document':
-          suppressChangeRef.current = true;
           setDocument(message.document);
-          setSelectedBlockId(
-            message.selectedBlockId ?? message.document.blocks[0]?.id,
-          );
+          setSelectedBlockId(message.selectedBlockId ?? message.document.blocks[0]?.id);
           break;
         case 'reload':
           tokenRef.current = message.token;
@@ -212,10 +201,7 @@ export default function EventPageEditOverlay({ eventId, token, brandId }: Props)
         ...document,
         blocks: document.blocks.map((b) => (b.id === blockId ? block : b)),
       });
-      if (!suppressChangeRef.current) {
-        sendMessage({ source: EDITOR_SOURCE, type: 'block-change', blockId, block });
-      }
-      suppressChangeRef.current = false;
+      sendMessage({ source: EDITOR_SOURCE, type: 'block-change', blockId, block });
     },
     [document, sendMessage],
   );
