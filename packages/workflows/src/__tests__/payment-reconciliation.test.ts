@@ -19,6 +19,10 @@ const mockState = vi.hoisted(() => ({
   refunds: [] as Record<string, unknown>[],
   createdRefunds: [] as Record<string, unknown>[],
   compensations: [] as Record<string, unknown>[],
+  ledgerUpdates: [] as Record<string, unknown>[],
+  ticketVoids: [] as Record<string, unknown>[],
+  inventoryRestores: [] as Record<string, unknown>[],
+  refundNotifications: [] as Record<string, unknown>[],
   paymentIntentLookups: [] as Array<{ provider: string; providerIntentId: string }>,
   updates: [] as Array<{ table: string; id: string; input: Record<string, unknown> }>,
   timeline: [] as Array<{ orderId: string; type: string; description: string }>,
@@ -28,6 +32,25 @@ vi.mock('../activities/checkout.js', () => ({
   compensateOrphanPaymentActivity: async (input: Record<string, unknown>) => {
     mockState.compensations.push(input);
     return { ok: true, value: { status: 'succeeded', action: 'refund', compensationId: 'pcmp_1' } };
+  },
+}));
+
+vi.mock('../activities/refund.js', () => ({
+  updateLedgerActivity: async (input: Record<string, unknown>) => {
+    mockState.ledgerUpdates.push(input);
+    return { ok: true, value: { balanced: true } };
+  },
+  voidTicketsActivity: async (input: Record<string, unknown>) => {
+    mockState.ticketVoids.push(input);
+    return { ok: true, value: { voidedCount: 2, voidedTicketIds: ['tic_1', 'tic_2'] } };
+  },
+  restoreInventoryActivity: async (input: Record<string, unknown>) => {
+    mockState.inventoryRestores.push(input);
+    return { ok: true, value: { restored: 2 } };
+  },
+  notifyRefundActivity: async (input: Record<string, unknown>) => {
+    mockState.refundNotifications.push(input);
+    return { ok: true, value: { notified: true, jobId: 'job_refund_1' } };
   },
 }));
 
@@ -109,6 +132,10 @@ describe('reconcilePaymentActivity', () => {
     mockState.refunds = [];
     mockState.createdRefunds = [];
     mockState.compensations = [];
+    mockState.ledgerUpdates = [];
+    mockState.ticketVoids = [];
+    mockState.inventoryRestores = [];
+    mockState.refundNotifications = [];
     mockState.paymentIntentLookups = [];
     mockState.updates = [];
     mockState.timeline = [];
@@ -440,6 +467,8 @@ describe('reconcileRefundActivity', () => {
     mockState.order = {
       id: 'ord_1',
       tenant_id: 'tnt_1',
+      brand_id: 'brd_1',
+      buyer_email: 'buyer@example.test',
       total_cents: 10000,
       refunded_cents: 0,
       currency: 'USD',
@@ -448,6 +477,10 @@ describe('reconcileRefundActivity', () => {
     mockState.refunds = [];
     mockState.createdRefunds = [];
     mockState.compensations = [];
+    mockState.ledgerUpdates = [];
+    mockState.ticketVoids = [];
+    mockState.inventoryRestores = [];
+    mockState.refundNotifications = [];
     mockState.updates = [];
     mockState.timeline = [];
   });
@@ -486,6 +519,53 @@ describe('reconcileRefundActivity', () => {
       input: expect.objectContaining({ refunded_cents: 5000 }),
     });
     expect(mockState.timeline).toHaveLength(0);
+  });
+
+  it('applies refund side effects for a full external Stripe refund', async () => {
+    const result = await reconcileRefundActivity({
+      providerEventId: 'evt_refund_full',
+      provider: 'stripe',
+      eventType: 'refund.created',
+      data: { id: 're_full', payment_intent: 'pi_provider_1', amount: 10000, status: 'succeeded' },
+    });
+
+    expect(result).toMatchObject({
+      ok: true,
+      value: { orderId: 'ord_1', status: 'refunded' },
+    });
+    expect(mockState.createdRefunds).toContainEqual(
+      expect.objectContaining({
+        providerRefundId: 're_full',
+        amountCents: 10000,
+        status: 'succeeded',
+      }),
+    );
+    expect(mockState.ledgerUpdates).toContainEqual({
+      orderId: 'ord_1',
+      refundAmountCents: 10000,
+      providerRefundId: 're_full',
+    });
+    expect(mockState.ticketVoids).toContainEqual({
+      orderId: 'ord_1',
+      amountCents: 10000,
+      isFullRefund: true,
+      providerRefundId: 're_full',
+    });
+    expect(mockState.inventoryRestores).toContainEqual({
+      orderId: 'ord_1',
+      amountCents: 10000,
+      isFullRefund: true,
+      providerRefundId: 're_full',
+      voidedTicketIds: ['tic_1', 'tic_2'],
+    });
+    expect(mockState.refundNotifications).toContainEqual({
+      orderId: 'ord_1',
+      toEmail: 'buyer@example.test',
+      tenantId: 'tnt_1',
+      brandId: 'brd_1',
+      providerRefundId: 're_full',
+    });
+    expect(result.ok && result.value.webhookEvent?.eventType).toBe('order.refunded');
   });
 
   it.each(['failed', 'pending'])(
@@ -623,8 +703,19 @@ describe('reconcileRefundActivity', () => {
       ok: true,
       value: { orderId: 'ord_1', status: 'partially_refunded' },
     });
-    expect(mockState.createdRefunds).toHaveLength(0);
-    expect(mockState.refunds).toHaveLength(0);
+    expect(mockState.createdRefunds).toContainEqual(
+      expect.objectContaining({
+        providerRefundId: 'ch_1:5000',
+        amountCents: 5000,
+        status: 'succeeded',
+      }),
+    );
+    expect(mockState.refunds).toHaveLength(1);
+    expect(mockState.ledgerUpdates).toContainEqual({
+      orderId: 'ord_1',
+      refundAmountCents: 5000,
+      providerRefundId: 'ch_1:5000',
+    });
     expect(mockState.updates).toContainEqual({
       table: 'orders',
       id: 'ord_1',
@@ -648,13 +739,6 @@ describe('reconcileRefundActivity', () => {
       value: { orderId: 'ord_1', status: 'partially_refunded' },
     });
     expect(mockState.createdRefunds).toHaveLength(1);
-    expect(mockState.createdRefunds).toContainEqual(
-      expect.objectContaining({
-        providerRefundId: 're_1',
-        amountCents: 5000,
-        status: 'succeeded',
-      }),
-    );
     expect(mockState.refunds).toHaveLength(1);
     expect(mockState.order).toMatchObject({
       refunded_cents: 5000,

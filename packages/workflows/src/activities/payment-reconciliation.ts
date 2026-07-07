@@ -9,6 +9,12 @@ import {
 import type { WorkflowActivityResult } from '../shared/types.js';
 import { okResult, errResult } from '../shared/types.js';
 import { compensateOrphanPaymentActivity } from './checkout.js';
+import {
+  notifyRefundActivity,
+  restoreInventoryActivity,
+  updateLedgerActivity,
+  voidTicketsActivity,
+} from './refund.js';
 
 async function findPaymentIntentForProviderEvent(
   repo: PaymentIntentRepository,
@@ -325,6 +331,61 @@ async function updateRefundReconciliationState(
   return reconciledStatus;
 }
 
+async function applySucceededRefundSideEffects(input: {
+  order: ReconciledOrderContext & {
+    total_cents: number | string | bigint;
+    buyer_email?: string | null;
+    brand_id?: string | null;
+  };
+  refundAmountCents: number;
+  totalRefundedCents: number;
+  providerRefundId: string;
+}): Promise<void> {
+  const ledgerResult = await updateLedgerActivity({
+    orderId: input.order.id,
+    refundAmountCents: input.refundAmountCents,
+    providerRefundId: input.providerRefundId,
+  });
+  if (!ledgerResult.ok) {
+    throw new Error(`Refund ledger side effect failed: ${ledgerResult.errorCode}`);
+  }
+
+  const isFullRefund = input.totalRefundedCents >= Number(input.order.total_cents);
+  const voidResult = await voidTicketsActivity({
+    orderId: input.order.id,
+    amountCents: input.refundAmountCents,
+    isFullRefund,
+    providerRefundId: input.providerRefundId,
+  });
+  if (!voidResult.ok) {
+    throw new Error(`Refund ticket side effect failed: ${voidResult.errorCode}`);
+  }
+
+  const restoreResult = await restoreInventoryActivity({
+    orderId: input.order.id,
+    amountCents: input.refundAmountCents,
+    isFullRefund,
+    providerRefundId: input.providerRefundId,
+    voidedTicketIds: voidResult.value.voidedTicketIds,
+  });
+  if (!restoreResult.ok) {
+    throw new Error(`Refund inventory side effect failed: ${restoreResult.errorCode}`);
+  }
+
+  if (input.order.buyer_email && input.order.brand_id) {
+    const notifyResult = await notifyRefundActivity({
+      orderId: input.order.id,
+      toEmail: input.order.buyer_email,
+      tenantId: input.order.tenant_id,
+      brandId: input.order.brand_id,
+      providerRefundId: input.providerRefundId,
+    });
+    if (!notifyResult.ok && notifyResult.retryable) {
+      throw new Error(`Refund notification side effect failed: ${notifyResult.errorCode}`);
+    }
+  }
+}
+
 export async function reconcileRefundActivity(input: {
   providerEventId: string;
   provider: string;
@@ -372,6 +433,25 @@ export async function reconcileRefundActivity(input: {
       const reconciledRefunded = Math.min(Number(order.total_cents), aggregateRefunded);
       const reconciledStatus =
         reconciledRefunded >= Number(order.total_cents) ? 'refunded' : 'partially_refunded';
+      const refundDelta = Math.max(0, reconciledRefunded - sumSucceededRefunds(existingRefunds));
+      const providerRefundId =
+        refundOrCharge.refund_id ?? `${refundOrCharge.id}:${reconciledRefunded}`;
+      if (
+        refundDelta > 0 &&
+        !existingRefunds.some((r) => r.provider_refund_id === providerRefundId)
+      ) {
+        await refundRepo.create({
+          tenantId: order.tenant_id,
+          orderId: order.id,
+          paymentIntentId: dbPi.id,
+          provider: 'stripe',
+          providerRefundId,
+          amountCents: refundDelta,
+          currency: order.currency,
+          reason: 'Stripe webhook',
+          status: 'succeeded',
+        });
+      }
       if (
         reconciledRefunded > 0 &&
         (reconciledRefunded !== Number(order.refunded_cents) || reconciledStatus !== order.status)
@@ -382,6 +462,19 @@ export async function reconcileRefundActivity(input: {
           order,
           reconciledRefunded,
         );
+        if (refundDelta > 0) {
+          await applySucceededRefundSideEffects({
+            order,
+            refundAmountCents: refundDelta,
+            totalRefundedCents: reconciledRefunded,
+            providerRefundId,
+          });
+          await orderRepo.addTimelineEvent(
+            order.id,
+            'order.refunded',
+            `Refunded ${refundDelta} cents via Stripe`,
+          );
+        }
         return okResult({
           orderId: order.id,
           status,
@@ -421,7 +514,16 @@ export async function reconcileRefundActivity(input: {
     }
     const providerRefundId = refundOrCharge.refund_id ?? refundOrCharge.id;
     let createdRefund = false;
-    if (!existingRefunds.some((r) => r.provider_refund_id === providerRefundId)) {
+    const alreadyCoveredByAggregateRefund = existingRefunds.some(
+      (refund) =>
+        typeof refund.provider_refund_id === 'string' &&
+        refund.provider_refund_id.includes(':') &&
+        Number(refund.amount_cents) === refundAmount,
+    );
+    if (
+      !existingRefunds.some((r) => r.provider_refund_id === providerRefundId) &&
+      !alreadyCoveredByAggregateRefund
+    ) {
       await refundRepo.create({
         tenantId: order.tenant_id,
         orderId: order.id,
@@ -439,6 +541,14 @@ export async function reconcileRefundActivity(input: {
     const allRefunds = await refundRepo.findByOrder(order.id);
     const newRefunded = Math.min(Number(order.total_cents), sumSucceededRefunds(allRefunds));
     const newStatus = await updateRefundReconciliationState(db, orderRepo, order, newRefunded);
+    if (!alreadyCoveredByAggregateRefund) {
+      await applySucceededRefundSideEffects({
+        order,
+        refundAmountCents: refundAmount,
+        totalRefundedCents: newRefunded,
+        providerRefundId,
+      });
+    }
     if (createdRefund) {
       await orderRepo.addTimelineEvent(
         order.id,
