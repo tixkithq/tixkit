@@ -32,6 +32,7 @@ import { useResolvedBrand } from '@/lib/use-brand';
 import { formatCurrency, formatDateTime } from '@/lib/format';
 import { trackMarketingEvent } from '@/lib/marketing';
 import { EventPageSurface } from '@tixkit/content-event-page-react';
+import { RefreshNotifier } from '@/components/refresh-notifier';
 
 type Props = {
   eventId?: string;
@@ -220,6 +221,7 @@ export default function EventPageClient({
 
   return (
     <SurfaceShell brand={brand}>
+      <RefreshNotifier eventId={eventId ?? event?.id} />
       <div className="mx-auto w-full max-w-3xl space-y-8 px-4 py-10 sm:px-6">
         <header className="space-y-4">
           <Badge variant="secondary" className="gap-1.5">

@@ -50,6 +50,7 @@ import {
   visibleCheckoutQuestions,
 } from '@/lib/checkout-questions';
 import { trackMarketingEvent, type MarketingEventItem } from '@/lib/marketing';
+import { RefreshNotifier } from '@/components/refresh-notifier';
 
 type Props = {
   initialEventId: string;
@@ -956,6 +957,7 @@ export default function CheckoutFlow({
 
   return (
     <Surface brand={brand}>
+      <RefreshNotifier eventId={eventId} />
       <div className="mx-auto w-full max-w-5xl space-y-6 px-4 py-8 sm:px-6">
         <header className="space-y-3">
           <div className="flex flex-wrap items-center justify-between gap-3">

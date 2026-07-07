@@ -572,6 +572,53 @@ export const publicRoutes: FastifyPluginAsync = async (app) => {
     },
   );
 
+  app.get('/public/events/:eventId/revision', async (request) => {
+    const { eventId } = request.params as { eventId: string };
+    const event = await new EventRepository(db).findById(eventId);
+    if (!event || !isPubliclyReadableEvent(event)) throw new NotFoundError('Event', eventId);
+
+    const [eventRow, questionRow, ticketTypeRow, eventPageRow, occurrenceRow] =
+      await Promise.all([
+        db
+          .selectFrom('events')
+          .select('updated_at')
+          .where('id', '=', eventId)
+          .executeTakeFirst(),
+        db
+          .selectFrom('questions')
+          .select(db.fn.max('updated_at').as('max_updated'))
+          .where('event_id', '=', eventId)
+          .executeTakeFirst(),
+        db
+          .selectFrom('ticket_types')
+          .select(db.fn.max('updated_at').as('max_updated'))
+          .where('event_id', '=', eventId)
+          .executeTakeFirst(),
+        db
+          .selectFrom('event_pages')
+          .select(db.fn.max('updated_at').as('max_updated'))
+          .where('event_id', '=', eventId)
+          .executeTakeFirst(),
+        db
+          .selectFrom('event_occurrences')
+          .select(db.fn.max('updated_at').as('max_updated'))
+          .where('event_id', '=', eventId)
+          .executeTakeFirst(),
+      ]);
+
+    const candidates = [
+      eventRow?.updated_at,
+      questionRow?.max_updated,
+      ticketTypeRow?.max_updated,
+      eventPageRow?.max_updated,
+      occurrenceRow?.max_updated,
+    ]
+      .filter((v) => v != null)
+      .map((v) => (v instanceof Date ? v.toISOString() : String(v)));
+
+    return { revision: candidates.length > 0 ? candidates.sort().at(-1)! : null };
+  });
+
   app.get('/public/events/:eventId/questions', async (request) => {
     const { eventId } = request.params as { eventId: string };
     const event = await new EventRepository(db).findById(eventId);

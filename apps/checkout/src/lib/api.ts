@@ -598,6 +598,14 @@ export const publicApi = {
     return normalizeQuestionsResponse(response);
   },
 
+  async getEventRevision(eventId: string, signal?: AbortSignal): Promise<string | null> {
+    const response = await apiRequest<{ revision: string | null }>(
+      `/public/events/${encodeURIComponent(eventId)}/revision`,
+      { signal },
+    );
+    return response.revision;
+  },
+
   async uploadCheckoutArtifact(
     eventId: string,
     file: File,

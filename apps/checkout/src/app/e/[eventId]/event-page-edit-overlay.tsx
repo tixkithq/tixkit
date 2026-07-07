@@ -24,6 +24,7 @@ import {
   type EventPageDocument,
   type EventPageRenderContext,
 } from '@tixkit/content-event-page';
+import { EventPageRichTextEditor } from '@/components/event-page-rich-text-editor';
 
 const EDITOR_SOURCE = 'tixkit-event-page-editor';
 const PARENT_SOURCE = 'tixkit-event-page-admin';
@@ -36,6 +37,21 @@ type EditorToParentMessage =
       type: 'block-change';
       blockId: string;
       block: EventPageBlock;
+    }
+  | {
+      source: typeof EDITOR_SOURCE;
+      type: 'blocks-reorder';
+      blocks: EventPageBlock[];
+    }
+  | {
+      source: typeof EDITOR_SOURCE;
+      type: 'block-delete';
+      blockId: string;
+    }
+  | {
+      source: typeof EDITOR_SOURCE;
+      type: 'block-duplicate';
+      blockId: string;
     };
 
 type ParentToEditorMessage =
@@ -206,6 +222,48 @@ export default function EventPageEditOverlay({ eventId, token, brandId }: Props)
     [sendMessage],
   );
 
+  const handleReorderBlocks = useCallback(
+    (blocks: EventPageBlock[]) => {
+      if (!document) return;
+      setDocument({ ...document, blocks });
+      sendMessage({ source: EDITOR_SOURCE, type: 'blocks-reorder', blocks });
+    },
+    [document, sendMessage],
+  );
+
+  const handleDeleteBlock = useCallback(
+    (blockId: string) => {
+      if (!document) return;
+      const blocks = document.blocks.filter((b) => b.id !== blockId);
+      setDocument({ ...document, blocks });
+      setSelectedBlockId(blocks[0]?.id);
+      sendMessage({ source: EDITOR_SOURCE, type: 'block-delete', blockId });
+    },
+    [document, sendMessage],
+  );
+
+  const handleDuplicateBlock = useCallback(
+    (blockId: string) => {
+      if (!document) return;
+      const index = document.blocks.findIndex((b) => b.id === blockId);
+      if (index < 0) return;
+      const original = document.blocks[index];
+      const duplicate = {
+        ...original,
+        id: `${original.type}-${crypto.randomUUID()}`,
+      } as EventPageBlock;
+      const blocks = [
+        ...document.blocks.slice(0, index + 1),
+        duplicate,
+        ...document.blocks.slice(index + 1),
+      ];
+      setDocument({ ...document, blocks });
+      setSelectedBlockId(duplicate.id);
+      sendMessage({ source: EDITOR_SOURCE, type: 'block-duplicate', blockId });
+    },
+    [document, sendMessage],
+  );
+
   if (loading) {
     return (
       <SurfaceShell brand={brand}>
@@ -251,6 +309,12 @@ export default function EventPageEditOverlay({ eventId, token, brandId }: Props)
             disabled={false}
             onSelectBlock={handleSelectBlock}
             onChangeBlock={handleChangeBlock}
+            onReorderBlocks={handleReorderBlocks}
+            onDeleteBlock={handleDeleteBlock}
+            onDuplicateBlock={handleDuplicateBlock}
+            renderRichTextBlock={({ block, disabled, onChange }) => (
+              <EventPageRichTextEditor block={block} disabled={disabled} onChange={onChange} />
+            )}
           />
         </div>
         {draft && !draft.validation.valid && (
