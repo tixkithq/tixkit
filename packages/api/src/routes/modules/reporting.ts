@@ -107,6 +107,16 @@ function requireReportEventAccess(
   ClerkAuthService.requireEventScope(principal, eventId);
 }
 
+function requireUnscopedOrganizationReportPrincipal(principal: Principal) {
+  if (principal.type === 'system') return;
+
+  const hasBrandScope = Array.isArray(principal.brandIds) && principal.brandIds.length > 0;
+  const hasEventScope = Array.isArray(principal.eventIds) && principal.eventIds.length > 0;
+  if (hasBrandScope || hasEventScope) {
+    throw new ValidationError('Resource-scoped principals cannot access organization-wide reports');
+  }
+}
+
 export const reportingRoutes: FastifyPluginAsync = async (app) => {
   const db = app.context.db;
 
@@ -697,6 +707,7 @@ export const reportingRoutes: FastifyPluginAsync = async (app) => {
     ClerkAuthService.requirePermission(principal, 'reports.read');
     const { organizationId } = request.params as { organizationId: string };
     ClerkAuthService.requireOrganizationScope(principal, organizationId);
+    requireUnscopedOrganizationReportPrincipal(principal);
 
     // Single join query instead of N+1 per-affiliate queries.
     const rows = await db

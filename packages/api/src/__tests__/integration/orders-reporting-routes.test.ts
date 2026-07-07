@@ -1950,6 +1950,40 @@ describe('reporting routes', () => {
     await app.close();
   });
 
+  it('GET /organizations/:organizationId/reports/affiliate rejects event-scoped API keys', async () => {
+    const principal = makePrincipal({
+      type: 'api_key',
+      id: 'ak_affiliate_event_scoped',
+      eventIds: ['evt_1'],
+      scopes: ['reports.read'],
+    });
+    const app = await setupApp(reportingRoutes, principal);
+    const res = await app.inject({ method: 'GET', url: '/organizations/org_1/reports/affiliate' });
+
+    expect(res.statusCode).toBe(400);
+    expect(dbState.queryWheres).not.toContainEqual(
+      expect.objectContaining({ table: 'affiliates' }),
+    );
+    await app.close();
+  });
+
+  it('GET /organizations/:organizationId/reports/affiliate rejects brand-scoped API keys', async () => {
+    const principal = makePrincipal({
+      type: 'api_key',
+      id: 'ak_affiliate_brand_scoped',
+      brandIds: ['brd_1'],
+      scopes: ['reports.read'],
+    });
+    const app = await setupApp(reportingRoutes, principal);
+    const res = await app.inject({ method: 'GET', url: '/organizations/org_1/reports/affiliate' });
+
+    expect(res.statusCode).toBe(400);
+    expect(dbState.queryWheres).not.toContainEqual(
+      expect.objectContaining({ table: 'affiliates' }),
+    );
+    await app.close();
+  });
+
   it('POST /exports requires Idempotency-Key', async () => {
     const app = await setupApp(reportingRoutes, makePrincipal());
     const res = await app.inject({
