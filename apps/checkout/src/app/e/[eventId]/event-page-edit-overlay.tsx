@@ -16,10 +16,15 @@ import {
 import { brandThemeStyle, type ResolvedBrand } from '@/lib/brand';
 import { useResolvedBrand } from '@/lib/use-brand';
 import {
-  EventPageEditorSurface,
+  EventPageSurface,
+  EditorOverlayLayer,
+  BLOCK_LABELS,
+  moveBlockInDocument,
+  type SurfaceEditing,
 } from '@tixkit/content-event-page-react';
 import {
   normalizeEventPageDocument,
+  resolveEventPageDocument,
   type EventPageBlock,
   type EventPageDocument,
   type EventPageRenderContext,
@@ -103,6 +108,7 @@ export default function EventPageEditOverlay({ eventId, token, brandId }: Props)
   const [error, setError] = useState<string | null>(null);
   const suppressChangeRef = useRef(false);
   const tokenRef = useRef(token);
+  const canvasContainerRef = useRef<HTMLDivElement>(null);
 
   const brand: ResolvedBrand = useResolvedBrand(
     useMemo(
@@ -222,11 +228,13 @@ export default function EventPageEditOverlay({ eventId, token, brandId }: Props)
     [sendMessage],
   );
 
-  const handleReorderBlocks = useCallback(
-    (blocks: EventPageBlock[]) => {
+  const handleMoveBlock = useCallback(
+    (blockId: string, direction: 'up' | 'down') => {
       if (!document) return;
-      setDocument({ ...document, blocks });
-      sendMessage({ source: EDITOR_SOURCE, type: 'blocks-reorder', blocks });
+      const next = moveBlockInDocument(document, blockId, direction);
+      if (next === document) return;
+      setDocument(next);
+      sendMessage({ source: EDITOR_SOURCE, type: 'blocks-reorder', blocks: next.blocks });
     },
     [document, sendMessage],
   );
@@ -262,6 +270,29 @@ export default function EventPageEditOverlay({ eventId, token, brandId }: Props)
       sendMessage({ source: EDITOR_SOURCE, type: 'block-duplicate', blockId });
     },
     [document, sendMessage],
+  );
+
+  const resolved = useMemo(
+    () =>
+      document && context
+        ? resolveEventPageDocument(document, context, { allowUnsafeEmbeds: true, mode: 'edit' })
+        : null,
+    [document, context],
+  );
+
+  const editing = useMemo<SurfaceEditing | null>(
+    () =>
+      document
+        ? {
+            document,
+            disabled: false,
+            onChangeBlock: handleChangeBlock,
+            renderRichTextBlock: ({ block, disabled, onChange }) => (
+              <EventPageRichTextEditor block={block} disabled={disabled} onChange={onChange} />
+            ),
+          }
+        : null,
+    [document, handleChangeBlock],
   );
 
   if (loading) {
@@ -301,21 +332,30 @@ export default function EventPageEditOverlay({ eventId, token, brandId }: Props)
   return (
     <SurfaceShell brand={brand}>
       <div className="mx-auto w-full max-w-5xl px-5 py-8 sm:px-6">
-        <div className="tixkit-event-page" data-mode="edit" data-testid="edit-overlay-surface">
-          <EventPageEditorSurface
-            document={document}
-            sampleContext={context}
-            selectedBlockId={selectedBlockId}
-            disabled={false}
-            onSelectBlock={handleSelectBlock}
-            onChangeBlock={handleChangeBlock}
-            onReorderBlocks={handleReorderBlocks}
-            onDeleteBlock={handleDeleteBlock}
-            onDuplicateBlock={handleDuplicateBlock}
-            renderRichTextBlock={({ block, disabled, onChange }) => (
-              <EventPageRichTextEditor block={block} disabled={disabled} onChange={onChange} />
-            )}
-          />
+        <div
+          className="tk-ep-canvas"
+          ref={canvasContainerRef}
+          style={{ position: 'relative' }}
+          data-testid="edit-overlay-surface"
+        >
+          {resolved && editing ? (
+            <>
+              <EventPageSurface resolvedPage={resolved} mode="edit" editing={editing} />
+              <EditorOverlayLayer
+                canvasRef={canvasContainerRef}
+                blocks={document.blocks.map((block) => ({
+                  id: block.id,
+                  type: block.type,
+                  label: BLOCK_LABELS[block.type],
+                }))}
+                selectedBlockId={selectedBlockId}
+                onSelectBlock={handleSelectBlock}
+                onDeleteBlock={handleDeleteBlock}
+                onDuplicateBlock={handleDuplicateBlock}
+                onMoveBlock={handleMoveBlock}
+              />
+            </>
+          ) : null}
         </div>
         {draft && !draft.validation.valid && (
           <div className="mt-6 rounded-md border border-amber-300 bg-amber-50 p-4 text-sm text-amber-800 dark:border-amber-800/70 dark:bg-amber-950/40 dark:text-amber-200">

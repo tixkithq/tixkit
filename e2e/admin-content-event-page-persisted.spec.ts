@@ -158,10 +158,11 @@ async function loadEventPageContentState(eventId: string, page: Page) {
 }
 
 async function expectPersistedEventPageEditorRegions(page: Page): Promise<void> {
+  const editorFrame = page.frameLocator('[data-testid="editor-iframe"]');
   await expect(page.getByRole('heading', { name: 'Event-page editor' })).toBeVisible();
-  await expect(page.getByLabel('Page headline')).toBeVisible();
-  await expect(page.getByLabel('Page summary')).toBeVisible();
-  await expect(page.getByLabel('Ticket CTA label')).toBeVisible();
+  await expect(editorFrame.getByLabel('Page headline')).toBeVisible();
+  await expect(editorFrame.getByLabel('Page summary')).toBeVisible();
+  await expect(editorFrame.getByLabel('Ticket CTA label')).toBeVisible();
   await expect(page.locator('[data-testid="content-editor-shell"]').first()).toBeVisible();
   await expect(page.locator('[data-testid="editor-canvas"]').first()).toBeVisible();
   await expect(page.getByRole('button', { name: 'Open preview' })).toBeVisible();
@@ -172,6 +173,7 @@ async function expectPersistedEventPageEditorRegions(page: Page): Promise<void> 
 
 async function expectEventPageDocumentCanvasPresentation(page: Page): Promise<void> {
   const canvas = page.locator('[data-testid="editor-canvas"]').first();
+  const editorFrame = page.frameLocator('[data-testid="editor-iframe"]');
   await expect(canvas).toHaveAttribute('aria-label', /event page editable document$/);
   await expect(canvas.getByRole('button', { name: /Select content region|Selected/i })).toHaveCount(
     0,
@@ -189,15 +191,28 @@ async function expectEventPageDocumentCanvasPresentation(page: Page): Promise<vo
     return {
       legacyCardClass: legacyCard?.getAttribute('class') ?? null,
       background: window.getComputedStyle(node).backgroundColor,
-      text: node.textContent ?? '',
     };
   });
   expect(snapshot.legacyCardClass).toBeNull();
   expect(snapshot.background).not.toBe('rgb(9, 9, 11)');
-  expect(snapshot.text).toContain('Tickets');
-  // The admin canvas renders through the shared .tk-ep-* class contract.
-  await expect(canvas.locator('.tixkit-event-page').first()).toBeVisible();
-  await expect(canvas.locator('.tk-ep-hero').first()).toHaveAttribute('data-block-id', 'hero');
+  // The admin canvas renders through the shared .tk-ep-* class contract (inside the edit iframe).
+  await expect(editorFrame.locator('.tixkit-event-page').first()).toBeVisible();
+  await expect(editorFrame.locator('.tk-ep-hero').first()).toHaveAttribute('data-block-id', 'hero');
+  await expect(editorFrame.locator('body')).toContainText('Tickets');
+}
+
+/**
+ * Fill a contenteditable editable field inside the editor iframe.
+ * SurfaceText commits on input, so set textContent and dispatch a native input event.
+ */
+async function fillEditableText(page: Page, label: string, text: string): Promise<void> {
+  const editorFrame = page.frameLocator('[data-testid="editor-iframe"]');
+  const el = editorFrame.getByLabel(label);
+  await el.click();
+  await el.evaluate((node, value) => {
+    node.textContent = value;
+    node.dispatchEvent(new Event('input', { bubbles: true }));
+  }, text);
 }
 
 test.describe('persisted admin event-page content editor', () => {
@@ -222,9 +237,9 @@ test.describe('persisted admin event-page content editor', () => {
     await expect(page.locator('html')).not.toHaveClass(/dark/);
     await expectEventPageDocumentCanvasPresentation(page);
 
-    await page.getByLabel('Page headline').fill(headline);
-    await page.getByLabel('Page summary').fill(summary);
-    await page.getByLabel('Ticket CTA label').fill(ctaLabel);
+    await fillEditableText(page, 'Page headline', headline);
+    await fillEditableText(page, 'Page summary', summary);
+    await fillEditableText(page, 'Ticket CTA label', ctaLabel);
     await page.getByRole('button', { name: 'Preview', exact: true }).click();
     await expect(page.getByText('Preview rendered from the saved content version')).toBeVisible();
     await page.getByRole('button', { name: 'Open preview' }).click();
@@ -353,9 +368,10 @@ test.describe('persisted admin event-page content editor', () => {
     await expectNoAxeViolations(page, testInfo);
 
     await page.reload();
-    await expect(page.getByLabel('Page headline')).toHaveText(headline);
-    await expect(page.getByLabel('Page summary')).toHaveText(summary);
-    await expect(page.getByLabel('Ticket CTA label')).toHaveText(ctaLabel);
+    const editorFrame = page.frameLocator('[data-testid="editor-iframe"]');
+    await expect(editorFrame.getByLabel('Page headline')).toHaveText(headline);
+    await expect(editorFrame.getByLabel('Page summary')).toHaveText(summary);
+    await expect(editorFrame.getByLabel('Ticket CTA label')).toHaveText(ctaLabel);
 
     await page.setViewportSize(mobileViewport);
     await page.goto(`${adminBaseUrl}/events/${event.id}/content/event-page`);
