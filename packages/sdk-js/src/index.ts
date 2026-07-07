@@ -489,6 +489,10 @@ export type PublicContentPage = {
   };
 };
 
+export type PublicEventRevision = {
+  revision: string | null;
+};
+
 export type PublicEventPageBlock = {
   type: string;
   id: string;
@@ -3187,6 +3191,9 @@ class PublicResource {
   constructor(private client: TixkitClient) {}
   async getEvent(eventId: string): Promise<Event> {
     return this.client.request('GET', `/public/events/${eventId}`);
+  }
+  async getEventRevision(eventId: string): Promise<PublicEventRevision> {
+    return this.client.request('GET', `/public/events/${eventId}/revision`);
   }
   async getEventPage(eventId: string, params?: { locale?: string }): Promise<PublicContentPage> {
     return this.client.request('GET', `/public/events/${eventId}/page`, {

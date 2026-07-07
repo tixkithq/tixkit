@@ -484,8 +484,10 @@ describe('openApiSpec', () => {
     expect(openApiSpec.paths['/content-documents/{documentId}/preview']).toBeDefined();
     expect(openApiSpec.paths['/public/events/{eventId}/page']).toBeDefined();
     expect(openApiSpec.paths['/public/events/{eventId}/content-page']).toBeDefined();
+    expect(openApiSpec.paths['/public/events/{eventId}/revision']).toBeDefined();
     expect(openApiSpec.paths['/public/events/by-slug/{slug}/page']).toBeDefined();
     expect(openApiSpec.paths['/public/events/{eventId}/discovery-card']).toBeDefined();
+    expect(openApiSpec.paths['/public/brand-logos/{artifactId}']).toBeDefined();
     expect(openApiSpec.paths['/webhook-events/{eventId}/replay']).toBeDefined();
     expect(
       openApiSpec.paths['/webhook-endpoints/{endpointId}/events/{eventId}/replay'],
@@ -495,6 +497,41 @@ describe('openApiSpec', () => {
       'accessRules',
     ]);
     expect(openApiSpec.components.schemas.CreateTicketTypeBatch.required).toContain('ticketType');
+  });
+
+  it('documents public event revisions and immutable brand logo streams', () => {
+    expect(openApiSpec.components.schemas.PublicEventRevision).toEqual({
+      type: 'object',
+      properties: {
+        revision: { type: 'string', nullable: true, format: 'date-time' },
+      },
+      required: ['revision'],
+    });
+    expect(
+      openApiSpec.paths['/public/events/{eventId}/revision'].get.responses['200'].content[
+        'application/json'
+      ].schema,
+    ).toEqual({ $ref: '#/components/schemas/PublicEventRevision' });
+    expect(openApiSpec.paths['/public/events/{eventId}/revision'].get.parameters).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ name: 'eventId', in: 'path', required: true }),
+      ]),
+    );
+
+    const brandLogoResponse =
+      openApiSpec.paths['/public/brand-logos/{artifactId}'].get.responses['200'];
+    expect(brandLogoResponse.content['application/octet-stream'].schema).toEqual({
+      type: 'string',
+      format: 'binary',
+    });
+    expect(brandLogoResponse.headers['Cache-Control'].description).toBe(
+      'public, max-age=31536000, immutable',
+    );
+    expect(openApiSpec.paths['/public/brand-logos/{artifactId}'].get.parameters).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ name: 'artifactId', in: 'path', required: true }),
+      ]),
+    );
   });
 
   it('documents live export job statuses separately from queued export responses', () => {

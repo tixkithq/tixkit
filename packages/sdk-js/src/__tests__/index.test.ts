@@ -2568,6 +2568,17 @@ describe('TixkitClient new resource methods', () => {
     expect(call.url).toBe('https://api.test/v1/public/events/evt_1');
   });
 
+  it('public.getEventRevision sends GET without auth', async () => {
+    const fm = mockFetch(200, { revision: '2026-07-07T04:31:00.000Z' });
+    const c = new TixkitClient({ apiBaseUrl: 'https://api.test', maxRetries: 0 });
+    const revision = await c.public.getEventRevision('evt_1');
+
+    expect(revision).toEqual({ revision: '2026-07-07T04:31:00.000Z' });
+    const call = getCall(fm);
+    expect(call.url).toBe('https://api.test/v1/public/events/evt_1/revision');
+    expect(call.method).toBe('GET');
+  });
+
   it('public.listResaleListings sends public GET with pagination', async () => {
     const fm = mockFetch(200, { items: [{ id: 'lst_1', status: 'listed' }] });
     const c = new TixkitClient({ apiBaseUrl: 'https://api.test', maxRetries: 0 });

@@ -67,8 +67,10 @@ describe('Generated client compile validation (T33)', () => {
       '/public/events/{eventId}/page',
       '/public/events/{eventId}/content-page',
       '/public/events/{eventId}/discovery-card',
+      '/public/events/{eventId}/revision',
       '/public/events/{eventId}/resale-listings',
       '/public/events/by-slug/{slug}/page',
+      '/public/brand-logos/{artifactId}',
       '/s/{slug}',
       '/tickets/{ticketId}/resale-listings',
       '/checkout/sessions/{sessionId}/tickets/{ticketId}/resale-listing',
@@ -81,6 +83,7 @@ describe('Generated client compile validation (T33)', () => {
     for (const schema of [
       'PublicContentPage',
       'PublicEventDiscoveryCard',
+      'PublicEventRevision',
       'PublicTicketListing',
       'PublicTicketListingPage',
       'TicketListing',

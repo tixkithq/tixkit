@@ -674,6 +674,13 @@ const rawOpenApiSpec = {
         },
         required: ['document', 'version', 'page'],
       },
+      PublicEventRevision: {
+        type: 'object',
+        properties: {
+          revision: { type: 'string', nullable: true, format: 'date-time' },
+        },
+        required: ['revision'],
+      },
       PublicEventPageBlock: {
         type: 'object',
         properties: {
@@ -4303,6 +4310,28 @@ const rawOpenApiSpec = {
         },
       },
     },
+    '/public/events/{eventId}/revision': {
+      get: {
+        summary: 'Get the latest public checkout revision for an event',
+        parameters: [
+          { name: 'eventId', in: 'path', required: true, schema: { type: 'string' } },
+        ],
+        responses: {
+          '200': {
+            description: 'Latest public event revision timestamp or null',
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/PublicEventRevision' },
+              },
+            },
+          },
+          '404': {
+            description: 'Event not found or not publicly readable',
+            content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } },
+          },
+        },
+      },
+    },
     '/public/events/by-slug/{slug}': {
       get: {
         summary: 'Get public event details by slug for a verified custom domain (no auth)',
@@ -4653,6 +4682,44 @@ const rawOpenApiSpec = {
           },
           '404': {
             description: 'Image artifact not found',
+            content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } },
+          },
+        },
+      },
+    },
+    '/public/brand-logos/{artifactId}': {
+      get: {
+        summary: 'Download a brand logo (public, durable, cacheable)',
+        description:
+          'Streams a brand logo artifact by ID. Responses are cached immutably for one year.',
+        parameters: [
+          { name: 'artifactId', in: 'path', required: true, schema: { type: 'string' } },
+        ],
+        responses: {
+          '200': {
+            description: 'Brand logo binary stream',
+            headers: {
+              'Content-Type': {
+                schema: { type: 'string' },
+                description: 'MIME type of the stored logo',
+              },
+              'Content-Disposition': {
+                schema: { type: 'string' },
+                description: 'inline; filename=...',
+              },
+              'Cache-Control': {
+                schema: { type: 'string' },
+                description: 'public, max-age=31536000, immutable',
+              },
+            },
+            content: {
+              'application/octet-stream': {
+                schema: { type: 'string', format: 'binary' },
+              },
+            },
+          },
+          '404': {
+            description: 'Brand logo artifact not found',
             content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } },
           },
         },
