@@ -3,6 +3,7 @@
 import * as React from 'react';
 import type { EmailEditorProps } from '@react-email/editor';
 import { Extension, Mark, mergeAttributes } from '@tiptap/core';
+import type { Editor } from '@tiptap/core';
 import { Heading as TiptapHeading } from '@tiptap/extension-heading';
 import { NodeSelection, Plugin, PluginKey, TextSelection } from '@tiptap/pm/state';
 import { Decoration, DecorationSet, type EditorView } from '@tiptap/pm/view';
@@ -709,10 +710,10 @@ function inlineStyleAttrsAtCursor(
       // Only check adjacent nodes for merge tags that inherit surrounding styles.
       // Regular unmarked text should just return the base (theme) style.
       const mergeTagType = state.schema.marks[tixkitMergeTagMarkName];
-      const hasMergeTagMark = mergeTagType
+      const childHasMergeTagMark = mergeTagType
         ? child.marks.some((m) => m.type === mergeTagType)
         : false;
-      if (!hasMergeTagMark) return baseStyle;
+      if (!childHasMergeTagMark) return baseStyle;
       for (let j = i - 1; j >= 0; j -= 1) {
         const prev = parent.child(j);
         if (!prev.isText || !prev.textContent.trim()) continue;
@@ -2208,8 +2209,7 @@ export function createEmailSlashCommands(input: {
       category: 'Media',
       searchTerms: ['image', 'upload', 'asset', 'logo'],
       command: ({ editor, range }) => {
-        editor.chain().focus().deleteRange(range).run();
-        editor.commands.uploadImage();
+        insertEmailComponent(editor, customItems[0], range);
       },
     },
     {
@@ -2220,7 +2220,7 @@ export function createEmailSlashCommands(input: {
       searchTerms: ['merge', 'tag', 'personalize', 'variable'],
       command: ({ editor, range }) => {
         const firstTag = input.mergeTags[0] ?? 'recipient.name';
-        editor.chain().focus().deleteRange(range).insertContent(`{{${firstTag}}}`).run();
+        insertMergeTag(editor, firstTag, range);
       },
     },
     {
@@ -2230,16 +2230,7 @@ export function createEmailSlashCommands(input: {
       category: 'Tixkit',
       searchTerms: ['qr', 'ticket', 'code', 'check in'],
       command: ({ editor, range }) => {
-        editor
-          .chain()
-          .focus()
-          .deleteRange(range)
-          .setImage({
-            src: mergeTagCanvasAttributeValue('ticket.qrCodeUrl'),
-            alt: 'Ticket QR code',
-            alignment: 'center',
-          })
-          .run();
+        insertEmailComponent(editor, customItems[2], range);
       },
     },
     {
@@ -2249,15 +2240,7 @@ export function createEmailSlashCommands(input: {
       category: 'Tixkit',
       searchTerms: ['ticket', 'order', 'summary'],
       command: ({ editor, range }) => {
-        editor
-          .chain()
-          .focus()
-          .deleteRange(range)
-          .insertContent({
-            type: 'paragraph',
-            content: [{ type: 'text', text: '{{ticket.type}} - {{order.total}}' }],
-          })
-          .run();
+        insertEmailComponent(editor, customItems[3], range);
       },
     },
     {
@@ -2267,15 +2250,7 @@ export function createEmailSlashCommands(input: {
       category: 'Tixkit',
       searchTerms: ['date', 'time', 'event', 'schedule'],
       command: ({ editor, range }) => {
-        editor
-          .chain()
-          .focus()
-          .deleteRange(range)
-          .insertContent({
-            type: 'paragraph',
-            content: [{ type: 'text', text: '{{event.startsAt}}' }],
-          })
-          .run();
+        insertEmailComponent(editor, customItems[4], range);
       },
     },
     {
@@ -2285,15 +2260,7 @@ export function createEmailSlashCommands(input: {
       category: 'Tixkit',
       searchTerms: ['venue', 'map', 'location'],
       command: ({ editor, range }) => {
-        editor
-          .chain()
-          .focus()
-          .deleteRange(range)
-          .insertContent({
-            type: 'paragraph',
-            content: [{ type: 'text', text: '{{event.venueName}}' }],
-          })
-          .run();
+        insertEmailComponent(editor, customItems[5], range);
       },
     },
     {
@@ -2303,28 +2270,7 @@ export function createEmailSlashCommands(input: {
       category: 'Tixkit',
       searchTerms: ['social', 'links', 'follow', 'share', 'support'],
       command: ({ editor, range }) => {
-        editor
-          .chain()
-          .focus()
-          .deleteRange(range)
-          .insertContent({
-            type: 'paragraph',
-            content: [
-              { type: 'text', text: 'Follow us: ' },
-              {
-                type: 'text',
-                text: 'Event page',
-                marks: [{ type: 'link', attrs: { href: '{{event.publicUrl}}' } }],
-              },
-              { type: 'text', text: ' | ' },
-              {
-                type: 'text',
-                text: 'Support',
-                marks: [{ type: 'link', attrs: { href: '{{brand.supportUrl}}' } }],
-              },
-            ],
-          })
-          .run();
+        insertEmailComponent(editor, customItems[6], range);
       },
     },
     {
@@ -2334,32 +2280,7 @@ export function createEmailSlashCommands(input: {
       category: 'Tixkit',
       searchTerms: ['unsubscribe', 'footer', 'bulk', 'compliance'],
       command: ({ editor, range }) => {
-        editor
-          .chain()
-          .focus()
-          .deleteRange(range)
-          .insertContent([
-            {
-              type: 'paragraph',
-              content: [
-                {
-                  type: 'text',
-                  text: `You are receiving this because you subscribed to ${input.brandName} updates.`,
-                },
-              ],
-            },
-            {
-              type: 'paragraph',
-              content: [
-                { type: 'text', text: 'Manage preferences: ' },
-                {
-                  type: 'text',
-                  text: '{{brand.supportUrl}}',
-                },
-              ],
-            },
-          ])
-          .run();
+        insertEmailComponent(editor, customItems[7], range);
       },
     },
     {
@@ -2369,16 +2290,7 @@ export function createEmailSlashCommands(input: {
       category: 'Advanced',
       searchTerms: ['html', 'code'],
       command: ({ editor, range }) => {
-        editor
-          .chain()
-          .focus()
-          .deleteRange(range)
-          .insertContent({
-            type: 'codeBlock',
-            attrs: { language: 'html' },
-            content: [{ type: 'text', text: '<p>{{event.title}}</p>' }],
-          })
-          .run();
+        insertEmailComponent(editor, customItems[8], range);
       },
     },
   ];
@@ -2408,9 +2320,143 @@ export function createEmailSlashCommands(input: {
           presentation.kind,
         ],
         command: ({ editor, range }) => {
-          editor.chain().focus().deleteRange(range).insertContent(`{{${tag}}}`).run();
+          insertMergeTag(editor, tag, range);
         },
       };
     }),
   ];
+}
+
+type EmailCommandRange = { from: number; to: number };
+
+type ImageCommandChain = ReturnType<Editor['chain']> & {
+  setImage?: (attrs: { alignment?: string; alt: string; src: string }) => ImageCommandChain;
+};
+
+type UploadImageCommands = Editor['commands'] & {
+  uploadImage?: () => boolean;
+};
+
+function commandChain(editor: Editor, range?: EmailCommandRange) {
+  const chain = editor.chain().focus();
+  return range ? chain.deleteRange(range) : chain;
+}
+
+export function insertMergeTag(editor: Editor, key: string, range?: EmailCommandRange) {
+  commandChain(editor, range).insertContent(`{{${key}}}`).run();
+}
+
+export function insertEmailComponent(
+  editor: Editor,
+  item: Pick<SlashCommandItem, 'title'>,
+  range?: EmailCommandRange,
+) {
+  switch (item.title) {
+    case 'Image upload':
+      commandChain(editor, range).run();
+      (editor.commands as UploadImageCommands).uploadImage?.();
+      return;
+    case 'Ticket QR': {
+      const chain = commandChain(editor, range) as ImageCommandChain;
+      if (typeof chain.setImage === 'function') {
+        chain
+          .setImage({
+            src: mergeTagCanvasAttributeValue('ticket.qrCodeUrl'),
+            alt: 'Ticket QR code',
+            alignment: 'center',
+          })
+          .run();
+      } else {
+        chain
+          .insertContent({
+            type: 'image',
+            attrs: {
+              src: mergeTagCanvasAttributeValue('ticket.qrCodeUrl'),
+              alt: 'Ticket QR code',
+              alignment: 'center',
+            },
+          })
+          .run();
+      }
+      return;
+    }
+    case 'Ticket summary':
+      commandChain(editor, range)
+        .insertContent({
+          type: 'paragraph',
+          content: [{ type: 'text', text: '{{ticket.type}} - {{order.total}}' }],
+        })
+        .run();
+      return;
+    case 'Event date':
+      commandChain(editor, range)
+        .insertContent({
+          type: 'paragraph',
+          content: [{ type: 'text', text: '{{event.startsAt}}' }],
+        })
+        .run();
+      return;
+    case 'Venue':
+      commandChain(editor, range)
+        .insertContent({
+          type: 'paragraph',
+          content: [{ type: 'text', text: '{{event.venueName}}' }],
+        })
+        .run();
+      return;
+    case 'Social Links':
+      commandChain(editor, range)
+        .insertContent({
+          type: 'paragraph',
+          content: [
+            { type: 'text', text: 'Follow us: ' },
+            {
+              type: 'text',
+              text: 'Event page',
+              marks: [{ type: 'link', attrs: { href: '{{event.publicUrl}}' } }],
+            },
+            { type: 'text', text: ' | ' },
+            {
+              type: 'text',
+              text: 'Support',
+              marks: [{ type: 'link', attrs: { href: '{{brand.supportUrl}}' } }],
+            },
+          ],
+        })
+        .run();
+      return;
+    case 'Unsubscribe Footer':
+      commandChain(editor, range)
+        .insertContent([
+          {
+            type: 'paragraph',
+            content: [
+              {
+                type: 'text',
+                text: 'You are receiving this because you subscribed to {{brand.name}} updates.',
+              },
+            ],
+          },
+          {
+            type: 'paragraph',
+            content: [
+              { type: 'text', text: 'Manage preferences: ' },
+              {
+                type: 'text',
+                text: '{{brand.supportUrl}}',
+              },
+            ],
+          },
+        ])
+        .run();
+      return;
+    case 'HTML':
+      commandChain(editor, range)
+        .insertContent({
+          type: 'codeBlock',
+          attrs: { language: 'html' },
+          content: [{ type: 'text', text: '<p>{{event.title}}</p>' }],
+        })
+        .run();
+  }
 }

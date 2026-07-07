@@ -1,7 +1,6 @@
 'use client';
 
 import * as React from 'react';
-import { MetadataBar, MetadataField } from '@tixkit/content-editor-shell';
 import type { EmailTemplateDocument } from '@tixkit/content-email';
 import type { AdminBrandSenderIdentity } from '@/lib/api';
 
@@ -45,18 +44,31 @@ export function EnvelopeHeader({
   senderIdentities,
   onChange,
 }: EnvelopeHeaderProps) {
+  const [replyToOpen, setReplyToOpen] = React.useState(
+    Boolean(emailDocument.settings.sender.replyToEmail),
+  );
+  const [previewOpen, setPreviewOpen] = React.useState(Boolean(emailDocument.settings.previewText));
   const selectedSender = selectedSenderIdentity(
     senderIdentities,
     emailDocument.settings.sender.fromEmail,
   );
+  const replyToValue = emailDocument.settings.sender.replyToEmail ?? '';
+  const previewTextValue = emailDocument.settings.previewText ?? '';
 
   return (
-    <MetadataBar>
-      <label className="flex items-center gap-2 py-1.5">
-        <span className="shrink-0 text-xs font-medium text-muted-foreground">From</span>
+    <section
+      aria-label="Email envelope"
+      className="mb-3 overflow-hidden rounded-md border border-border bg-background"
+      data-testid="email-metadata-bar"
+    >
+      <div className="grid min-h-11 grid-cols-[84px_minmax(0,1fr)_96px_minmax(0,1fr)] items-center gap-2 border-b border-border/70 px-4 py-2">
+        <label className="text-xs font-medium text-muted-foreground" htmlFor="email-envelope-from">
+          From
+        </label>
         <select
+          id="email-envelope-from"
           aria-label="Verified sender"
-          className="min-w-0 flex-1 border-none bg-transparent text-sm text-foreground outline-none disabled:opacity-50"
+          className="min-w-0 border-none bg-transparent text-sm text-foreground outline-none disabled:opacity-50"
           disabled={disabled || senderIdentities.length === 0}
           onChange={(change) => {
             const identity = senderIdentities.find(
@@ -78,63 +90,94 @@ export function EnvelopeHeader({
             </option>
           ))}
         </select>
-      </label>
-      <label className="flex items-center gap-2 border-t border-border/60 py-1.5">
-        <span className="shrink-0 text-xs font-medium text-muted-foreground">Reply-To</span>
-        <select
-          aria-label="Reply-To"
-          className="min-w-0 flex-1 border-none bg-transparent text-sm text-foreground outline-none disabled:opacity-50"
-          disabled={disabled || !selectedSender}
+        <span className="text-right text-xs font-medium text-muted-foreground">Reply-To</span>
+        {replyToOpen ? (
+          <input
+            aria-label="Reply-To"
+            className="min-w-0 border-none bg-transparent text-right text-sm text-foreground outline-none placeholder:text-muted-foreground/70 disabled:opacity-50"
+            disabled={disabled}
+            onChange={(change) =>
+              onChange({
+                ...emailDocument,
+                settings: {
+                  ...emailDocument.settings,
+                  sender: {
+                    ...emailDocument.settings.sender,
+                    replyToEmail: change.currentTarget.value || undefined,
+                  },
+                },
+              })
+            }
+            placeholder="Use From address"
+            type="email"
+            value={replyToValue}
+          />
+        ) : (
+          <button
+            aria-label="Reply-To"
+            className="min-w-0 truncate text-right text-sm text-muted-foreground transition-colors hover:text-foreground disabled:cursor-not-allowed disabled:opacity-50"
+            disabled={disabled}
+            onClick={() => setReplyToOpen(true)}
+            type="button"
+          >
+            {replyToValue || 'Use From address'}
+          </button>
+        )}
+      </div>
+      <div className="grid min-h-11 grid-cols-[84px_minmax(0,1fr)_96px_minmax(0,1fr)] items-center gap-2 px-4 py-2">
+        <label
+          className="text-xs font-medium text-muted-foreground"
+          htmlFor="email-envelope-subject"
+        >
+          Subject
+        </label>
+        <input
+          id="email-envelope-subject"
+          aria-label="Subject"
+          className="min-w-0 border-none bg-transparent text-sm text-foreground outline-none placeholder:text-muted-foreground/70 disabled:opacity-50"
+          disabled={disabled}
           onChange={(change) =>
             onChange({
               ...emailDocument,
               settings: {
                 ...emailDocument.settings,
-                sender: {
-                  ...emailDocument.settings.sender,
-                  replyToEmail: change.currentTarget.value || undefined,
-                },
+                subject: change.currentTarget.value,
               },
             })
           }
-          value={emailDocument.settings.sender.replyToEmail ?? ''}
-        >
-          <option className="bg-background text-foreground" value="">
-            Use From address
-          </option>
-          {selectedSender?.replyToEmail ? (
-            <option className="bg-background text-foreground" value={selectedSender.replyToEmail}>
-              {selectedSender.replyToEmail}
-            </option>
-          ) : null}
-        </select>
-      </label>
-      <MetadataField
-        disabled={disabled}
-        label="Subject"
-        onChange={(value) =>
-          onChange({
-            ...emailDocument,
-            settings: { ...emailDocument.settings, subject: value },
-          })
-        }
-        placeholder="Subject"
-        value={emailDocument.settings.subject}
-      />
-      <MetadataField
-        collapsible
-        defaultOpen={false}
-        disabled={disabled}
-        label="Preview text"
-        onChange={(value) =>
-          onChange({
-            ...emailDocument,
-            settings: { ...emailDocument.settings, previewText: value },
-          })
-        }
-        placeholder="Preview text"
-        value={emailDocument.settings.previewText ?? ''}
-      />
-    </MetadataBar>
+          placeholder="Subject"
+          value={emailDocument.settings.subject}
+        />
+        <span className="text-right text-xs font-medium text-muted-foreground">Preview</span>
+        {previewOpen ? (
+          <input
+            aria-label="Preview text"
+            className="min-w-0 border-none bg-transparent text-right text-sm text-foreground outline-none placeholder:text-muted-foreground/70 disabled:opacity-50"
+            disabled={disabled}
+            onChange={(change) =>
+              onChange({
+                ...emailDocument,
+                settings: {
+                  ...emailDocument.settings,
+                  previewText: change.currentTarget.value,
+                },
+              })
+            }
+            placeholder="Preview text"
+            value={previewTextValue}
+          />
+        ) : (
+          <button
+            aria-label="Preview text"
+            className="min-w-0 truncate text-right text-sm text-muted-foreground transition-colors hover:text-foreground disabled:cursor-not-allowed disabled:opacity-50"
+            disabled={disabled}
+            onClick={() => setPreviewOpen(true)}
+            type="button"
+          >
+            {previewTextValue || 'Add preview text'}
+          </button>
+        )}
+      </div>
+    </section>
   );
 }

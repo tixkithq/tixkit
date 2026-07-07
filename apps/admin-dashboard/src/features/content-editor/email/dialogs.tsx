@@ -4,6 +4,7 @@ import * as React from 'react';
 import type { ContentValidationIssue } from '@tixkit/content-core';
 import type { EmailTemplateDocument } from '@tixkit/content-email';
 import { inputClassName } from '@tixkit/content-editor-shell';
+import { getTemplateLifecycle } from '@tixkit/domain';
 import { Button } from '@/components/ui/button';
 import {
   Dialog,
@@ -20,21 +21,37 @@ import type {
   AdminEventDetail,
   SendMessageInput,
 } from '@/lib/api';
+import { emailCategoryOptions, validationIssueKey } from './document-rules';
 
 type AutosaveState = 'idle' | 'saving' | 'saved' | 'error';
 type EmailAudience = SendMessageInput['audience'];
 type EmailReviewState = 'idle' | 'checking' | 'checked' | 'error';
 type EmailSendMode = 'now' | 'scheduled';
+type EmailVersionSummary = {
+  id: string;
+  label: string;
+  timestamp: string;
+};
 
 export type EmailDialogsProps = {
   audience: EmailAudience;
   autosave: AutosaveState;
   brand?: AdminBrand;
   canEdit: boolean;
+  detailsDialogOpen: boolean;
+  document: AdminContentDocument;
   emailDocument: EmailTemplateDocument;
   event: AdminEventDetail;
+  history: EmailVersionSummary[];
+  historyDialogOpen: boolean;
+  jsonDialogOpen: boolean;
   onApplyTemplate: (template: AdminContentDocument) => void;
   onAudienceChange: (audience: EmailAudience) => void;
+  onCategoryChange: (category: EmailTemplateDocument['settings']['category']) => void;
+  onDetailsDialogOpenChange: (open: boolean) => void;
+  onHistoryDialogOpenChange: (open: boolean) => void;
+  onJsonDialogOpenChange: (open: boolean) => void;
+  onLocaleChange: (locale: string) => void;
   onPublish: () => void;
   onRecipientChange: (recipient: string) => void;
   onReviewConfirmedChange: (confirmed: boolean) => void;
@@ -42,6 +59,7 @@ export type EmailDialogsProps = {
   onScheduledAtChange: (value: string) => void;
   onSendModeChange: (mode: EmailSendMode) => void;
   onSendTest: () => void;
+  onTemplateKeyChange: (templateKey: string) => void;
   onTemplatePickerOpenChange: (open: boolean) => void;
   onTestDialogOpenChange: (open: boolean) => void;
   recipient: string;
@@ -62,19 +80,25 @@ export type EmailDialogsProps = {
   testDialogOpen: boolean;
 };
 
-function validationIssueKey(issue: ContentValidationIssue): string {
-  return `${issue.code}:${issue.field ?? ''}:${issue.message}:${issue.severity}`;
-}
-
 export function EmailDialogs({
   audience,
   autosave,
   brand,
   canEdit,
+  detailsDialogOpen,
+  document,
   emailDocument,
   event,
+  history,
+  historyDialogOpen,
+  jsonDialogOpen,
   onApplyTemplate,
   onAudienceChange,
+  onCategoryChange,
+  onDetailsDialogOpenChange,
+  onHistoryDialogOpenChange,
+  onJsonDialogOpenChange,
+  onLocaleChange,
   onPublish,
   onRecipientChange,
   onReviewConfirmedChange,
@@ -82,6 +106,7 @@ export function EmailDialogs({
   onScheduledAtChange,
   onSendModeChange,
   onSendTest,
+  onTemplateKeyChange,
   onTemplatePickerOpenChange,
   onTestDialogOpenChange,
   recipient,
@@ -101,8 +126,148 @@ export function EmailDialogs({
   templatePickerOpen,
   testDialogOpen,
 }: EmailDialogsProps) {
+  const lifecycle = getTemplateLifecycle(
+    emailDocument.settings.templateKey as Parameters<typeof getTemplateLifecycle>[0],
+  );
+
   return (
     <>
+      <Dialog open={detailsDialogOpen} onOpenChange={onDetailsDialogOpenChange}>
+        <DialogContent className="sm:max-w-lg">
+          <DialogHeader>
+            <DialogTitle>Template details</DialogTitle>
+            <DialogDescription>
+              Manage lifecycle metadata and delivery classification for this template.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-3">
+            <label className="space-y-1.5 text-sm font-medium text-foreground">
+              Template key
+              <input
+                aria-label="Template key"
+                className={inputClassName}
+                disabled={!canEdit}
+                onChange={(change) => onTemplateKeyChange(change.currentTarget.value)}
+                value={emailDocument.settings.templateKey}
+              />
+            </label>
+            <label className="space-y-1.5 text-sm font-medium text-foreground">
+              Locale
+              <input
+                aria-label="Locale"
+                className={inputClassName}
+                disabled={!canEdit}
+                onChange={(change) => onLocaleChange(change.currentTarget.value)}
+                value={emailDocument.settings.locale}
+              />
+            </label>
+            <label className="space-y-1.5 text-sm font-medium text-foreground">
+              Category
+              <select
+                aria-label="Category"
+                className={inputClassName}
+                disabled={!canEdit}
+                onChange={(change) =>
+                  onCategoryChange(
+                    change.currentTarget.value as EmailTemplateDocument['settings']['category'],
+                  )
+                }
+                value={emailDocument.settings.category}
+              >
+                {emailCategoryOptions.map((category) => (
+                  <option className="bg-background text-foreground" key={category} value={category}>
+                    {category}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <dl className="space-y-2 pt-2 text-xs">
+              <div className="flex justify-between gap-4 border-b border-border pb-2">
+                <dt className="text-muted-foreground">Brand scope</dt>
+                <dd className="max-w-[12rem] truncate font-mono text-foreground/80">
+                  {document.brandId}
+                </dd>
+              </div>
+              <div className="flex justify-between gap-4 border-b border-border pb-2">
+                <dt className="text-muted-foreground">Event scope</dt>
+                <dd className="max-w-[12rem] truncate font-mono text-foreground/80">
+                  {document.eventId ?? 'brand'}
+                </dd>
+              </div>
+              {lifecycle ? (
+                <>
+                  <div className="flex justify-between gap-4 border-b border-border pb-2">
+                    <dt className="text-muted-foreground">Lifecycle family</dt>
+                    <dd className="max-w-[12rem] truncate text-foreground/80">
+                      {lifecycle.family}
+                    </dd>
+                  </div>
+                  <div className="flex justify-between gap-4 border-b border-border pb-2">
+                    <dt className="text-muted-foreground">Tier</dt>
+                    <dd className="max-w-[12rem] truncate text-foreground/80">
+                      {lifecycle.tier}
+                    </dd>
+                  </div>
+                  <div className="flex justify-between gap-4 border-b border-border pb-2">
+                    <dt className="text-muted-foreground">Audience</dt>
+                    <dd className="max-w-[12rem] truncate text-foreground/80">
+                      {lifecycle.defaultAudience}
+                    </dd>
+                  </div>
+                </>
+              ) : null}
+            </dl>
+          </div>
+          <DialogFooter>
+            <Button onClick={() => onDetailsDialogOpenChange(false)} type="button" variant="outline">
+              Close
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+      <Dialog open={historyDialogOpen} onOpenChange={onHistoryDialogOpenChange}>
+        <DialogContent className="sm:max-w-lg">
+          <DialogHeader>
+            <DialogTitle>Version history</DialogTitle>
+            <DialogDescription>Review saved versions for this template.</DialogDescription>
+          </DialogHeader>
+          {history.length === 0 ? (
+            <p className="rounded-md border bg-muted/20 p-3 text-sm text-muted-foreground">
+              No saved versions yet.
+            </p>
+          ) : (
+            <ol className="max-h-[28rem] space-y-2 overflow-auto">
+              {history.map((version) => (
+                <li className="rounded-md border p-3 text-sm" key={version.id}>
+                  <div className="font-medium text-foreground">{version.label}</div>
+                  <div className="mt-1 text-xs text-muted-foreground">{version.timestamp}</div>
+                </li>
+              ))}
+            </ol>
+          )}
+          <DialogFooter>
+            <Button onClick={() => onHistoryDialogOpenChange(false)} type="button" variant="outline">
+              Close
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+      <Dialog open={jsonDialogOpen} onOpenChange={onJsonDialogOpenChange}>
+        <DialogContent className="sm:max-w-3xl">
+          <DialogHeader>
+            <DialogTitle>Editor JSON</DialogTitle>
+            <DialogDescription>Inspect the canonical saved email payload.</DialogDescription>
+          </DialogHeader>
+          <pre className="max-h-[34rem] overflow-auto rounded-md border bg-muted/30 p-3 text-xs leading-5 text-muted-foreground">
+            {JSON.stringify(emailDocument, null, 2)}
+          </pre>
+          <DialogFooter>
+            <Button onClick={() => onJsonDialogOpenChange(false)} type="button" variant="outline">
+              Close
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
       <Dialog open={testDialogOpen} onOpenChange={onTestDialogOpenChange}>
         <DialogContent className="sm:max-w-lg">
           <DialogHeader>

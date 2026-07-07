@@ -249,14 +249,16 @@ export function EditorLeftRail({
     >
       {/* Mode toggle at top */}
       <div className="flex flex-col items-center gap-1">
-        <RailToggleButton
-          active={mode === 'editor'}
-          disabled={disabledModes?.editor}
-          label="Editor"
-          onClick={() => onModeChange('editor')}
-        >
-          <Pencil className="size-4" />
-        </RailToggleButton>
+        {!hiddenModes?.editor && (
+          <RailToggleButton
+            active={mode === 'editor'}
+            disabled={disabledModes?.editor}
+            label="Editor"
+            onClick={() => onModeChange('editor')}
+          >
+            <Pencil className="size-4" />
+          </RailToggleButton>
+        )}
         {!hiddenModes?.preview && (
           <RailToggleButton
             active={mode === 'preview'}
@@ -267,14 +269,16 @@ export function EditorLeftRail({
             <Eye className="size-4" />
           </RailToggleButton>
         )}
-        <RailToggleButton
-          active={mode === 'code'}
-          disabled={disabledModes?.code}
-          label="Code"
-          onClick={() => onModeChange('code')}
-        >
-          <Code className="size-4" />
-        </RailToggleButton>
+        {!hiddenModes?.code && (
+          <RailToggleButton
+            active={mode === 'code'}
+            disabled={disabledModes?.code}
+            label="Code"
+            onClick={() => onModeChange('code')}
+          >
+            <Code className="size-4" />
+          </RailToggleButton>
+        )}
       </div>
 
       {/* Spacer */}

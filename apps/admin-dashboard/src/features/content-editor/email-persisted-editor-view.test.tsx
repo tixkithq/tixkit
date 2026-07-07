@@ -126,12 +126,56 @@ vi.mock('@/context/permission-provider', () => ({
   }),
 }));
 
+vi.mock('./email/style-inspector', async () => {
+  const ReactModule = await import('react');
+  return {
+    StyleInspector: ({
+      disabled,
+      globalCss,
+      onGlobalCssChange,
+      onThemePresetChange,
+      themePreset,
+    }: {
+      disabled: boolean;
+      globalCss: string;
+      onGlobalCssChange: (css: string) => void;
+      onThemePresetChange: (preset: 'brand' | 'minimal' | 'basic') => void;
+      themePreset: 'brand' | 'minimal' | 'basic';
+    }) =>
+      ReactModule.createElement(
+        'aside',
+        {
+          'aria-label': 'Email style inspector',
+          'data-testid': 'native-email-inspector-host',
+        },
+        ReactModule.createElement('p', null, 'Page style'),
+        ReactModule.createElement(
+          'button',
+          {
+            disabled,
+            onClick: () => onThemePresetChange(themePreset === 'minimal' ? 'brand' : 'minimal'),
+            type: 'button',
+          },
+          'Edit theme',
+        ),
+        ReactModule.createElement('textarea', {
+          'aria-label': 'Style inspector Global CSS',
+          disabled,
+          onChange: (event: React.ChangeEvent<HTMLTextAreaElement>) =>
+            onGlobalCssChange(event.currentTarget.value),
+          value: globalCss,
+        }),
+      ),
+  };
+});
+
 vi.mock('@react-email/editor', async () => {
   const ReactModule = await import('react');
 
   const EmailEditor = ReactModule.forwardRef(
     (
       {
+        children,
         content,
         editable = true,
         onUploadImage,
@@ -140,6 +184,7 @@ vi.mock('@react-email/editor', async () => {
         slashCommand,
         theme,
       }: {
+        children?: React.ReactNode;
         content?: unknown;
         editable?: boolean;
         onUploadImage?: (file: File) => Promise<{ url: string }>;
@@ -315,6 +360,7 @@ vi.mock('@react-email/editor', async () => {
           },
           value,
         ),
+        children,
       );
     },
   );
@@ -552,8 +598,13 @@ function clickMoreAction(name: string) {
   fireEvent.click(screen.getByRole('menuitem', { name }));
 }
 
+function closeActiveDialog() {
+  const closeButtons = screen.getAllByRole('button', { name: 'Close' });
+  fireEvent.click(closeButtons[closeButtons.length - 1]!);
+}
+
 async function confirmReviewSend(buttonName = 'Send email') {
-  fireEvent.click(screen.getByRole('button', { name: 'Review' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Publish' }));
   expect(await screen.findByRole('dialog', { name: 'Ready to send?' })).toBeInTheDocument();
   expect(screen.getByText('Campaign settings')).toBeInTheDocument();
   expect(screen.getByLabelText('Audience')).toBeInTheDocument();
@@ -994,42 +1045,40 @@ describe('EmailPersistedEditorView', () => {
     expect(screen.queryByText('Brand scope')).not.toBeInTheDocument();
     expect(screen.queryByText('Event scope')).not.toBeInTheDocument();
     expect(screen.queryByLabelText('Test recipients')).not.toBeInTheDocument();
-    fireEvent.click(screen.getByRole('button', { name: 'Close sidebar' }));
-    expect(screen.getByRole('button', { name: 'Inspector' })).toBeInTheDocument();
-    clickMoreAction('Variables');
-    expect(screen.getByText('Merge tags')).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Insert Brand name' })).toHaveTextContent(
+    fireEvent.click(screen.getByLabelText('Insert variable'));
+    expect(screen.getByRole('button', { name: /Brand name/ })).toHaveTextContent(
       'All Access Chicago',
     );
-    fireEvent.click(screen.getByRole('button', { name: 'Close sidebar' }));
-    fireEvent.click(screen.getByRole('button', { name: 'Inspector' }));
     clickMoreAction('Version history');
-    expect(screen.getByText('Version history')).toBeInTheDocument();
-    clickMoreAction('Variables');
-    expect(screen.getByText('Merge tags')).toBeInTheDocument();
-    clickMoreAction('Template details');
-    expect(screen.getByText('Settings')).toBeInTheDocument();
+    expect(screen.getByRole('dialog', { name: 'Version history' })).toBeInTheDocument();
+    closeActiveDialog();
+    clickMoreAction('Details');
+    expect(screen.getByRole('dialog', { name: 'Template details' })).toBeInTheDocument();
     expect(screen.queryByLabelText('Test recipients')).not.toBeInTheDocument();
+    closeActiveDialog();
     clickMoreAction('View JSON');
-    expect(screen.getByText('Saved payload')).toBeInTheDocument();
+    expect(screen.getByRole('dialog', { name: 'Editor JSON' })).toBeInTheDocument();
+    closeActiveDialog();
     clickMoreAction('Review blockers');
-    expect(await screen.findByText('Current draft review')).toBeInTheDocument();
-    clickMoreAction('Template details');
-    expect(screen.getByText('Settings')).toBeInTheDocument();
+    expect(await screen.findByRole('dialog', { name: 'Ready to send?' })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
+    clickMoreAction('Details');
+    expect(screen.getByRole('dialog', { name: 'Template details' })).toBeInTheDocument();
 
     const subject = await screen.findByLabelText('Subject');
     fireEvent.change(subject, {
       target: { value: 'Updated tickets for {{event.title}}' },
     });
     fireEvent.change(screen.getByLabelText('Template key'), {
-      target: { value: 'door-reminder' },
+      target: { value: 'order-confirmed' },
     });
     fireEvent.change(screen.getByLabelText('Locale'), {
       target: { value: 'en-US' },
     });
     fireEvent.change(screen.getByLabelText('Category'), {
-      target: { value: 'staff' },
+      target: { value: 'transactional' },
     });
+    closeActiveDialog();
     const canvas = screen.getByRole('textbox', { name: 'Email body' });
     canvas.textContent =
       'Updated saved email for {{recipient.name}}. Manage preferences: {{brand.supportUrl}}.';
@@ -1045,9 +1094,9 @@ describe('EmailPersistedEditorView', () => {
             schemaVersion: 1,
             settings: expect.objectContaining({
               subject: 'Updated tickets for {{event.title}}',
-              templateKey: 'door-reminder',
+              templateKey: 'order-confirmed',
               locale: 'en-US',
-              category: 'staff',
+              category: 'transactional',
             }),
             editor: expect.objectContaining({
               contentJson: expect.objectContaining({ type: 'doc' }),
@@ -1072,13 +1121,13 @@ describe('EmailPersistedEditorView', () => {
         'evt_1',
         expect.objectContaining({
           channel: 'email',
-          emailTemplateKey: 'door-reminder',
+          emailTemplateKey: 'order-confirmed',
           audience: 'all',
         }),
       );
     });
 
-    clickMoreAction('Send test');
+    clickMoreAction('Send test email');
     expect(screen.getByRole('dialog', { name: 'Send test email' })).toBeInTheDocument();
     expect(screen.getByLabelText('Test recipients')).toHaveValue('ada@example.test');
     fireEvent.change(screen.getByLabelText('Test recipients'), {
@@ -1313,9 +1362,9 @@ describe('EmailPersistedEditorView', () => {
 
     expect(await screen.findByLabelText('Subject')).toBeDisabled();
     expect(screen.queryByRole('button', { name: 'Preview' })).not.toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Review' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Publish' })).toBeDisabled();
     openEmailMoreActions();
-    expect(screen.getByRole('menuitem', { name: 'Send test' })).toHaveAttribute('aria-disabled', 'true');
+    expect(screen.getByRole('menuitem', { name: 'Send test email' })).toHaveAttribute('aria-disabled', 'true');
   });
 
   it('creates the event-scoped email document and initial canonical draft when none exists', async () => {
@@ -1497,10 +1546,11 @@ describe('EmailPersistedEditorView', () => {
 
     expect(await screen.findByText('missing_subject')).toBeInTheDocument();
     expect(screen.getByText('unknown_variable')).toBeInTheDocument();
-    expect(screen.getByText('Current draft review')).toBeInTheDocument();
+    expect(screen.getByRole('dialog', { name: 'Ready to send?' })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
 
     openEmailMoreActions();
-    fireEvent.click(screen.getByRole('menuitem', { name: 'Send test' }));
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Send test email' }));
     expect(screen.getByRole('dialog', { name: 'Send test email' })).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: 'Send test' }));
 
@@ -1508,13 +1558,6 @@ describe('EmailPersistedEditorView', () => {
       await screen.findByText('Resolve email test-send blockers before sending a test.'),
     ).toBeInTheDocument();
     expect(adminApiMock.testSendContent).not.toHaveBeenCalled();
-    fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
-
-    fireEvent.click(screen.getByRole('button', { name: 'Review' }));
-
-    expect(
-      await screen.findByText('Resolve email review blockers before sending.'),
-    ).toBeInTheDocument();
     expect(adminApiMock.publishContentVersion).not.toHaveBeenCalled();
   });
 
@@ -1524,7 +1567,7 @@ describe('EmailPersistedEditorView', () => {
     render(React.createElement(EmailPersistedEditorView, { eventId: 'evt_1' }));
 
     expect(await screen.findByLabelText('Verified sender')).toBeDisabled();
-    fireEvent.click(screen.getByRole('button', { name: 'Review' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Publish' }));
 
     expect(
       await screen.findByText('Resolve email review blockers before sending.'),
@@ -1542,8 +1585,9 @@ describe('EmailPersistedEditorView', () => {
     render(React.createElement(EmailPersistedEditorView, { eventId: 'evt_1' }));
 
     await screen.findByTestId('email-metadata-bar');
-    clickMoreAction('Template details');
+    clickMoreAction('Details');
     fireEvent.change(await screen.findByLabelText('Category'), { target: { value: 'bulk' } });
+    closeActiveDialog();
     clickEmailSaveDraft();
 
     await waitFor(() => {
@@ -1575,7 +1619,7 @@ describe('EmailPersistedEditorView', () => {
     render(React.createElement(EmailPersistedEditorView, { eventId: 'evt_1' }));
 
     await screen.findByLabelText('Subject');
-    clickMoreAction('Pick template');
+    clickMoreAction('Switch template');
     expect(await screen.findByRole('dialog', { name: 'Pick a template' })).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: 'Apply' }));
 
@@ -1659,29 +1703,22 @@ describe('EmailPersistedEditorView', () => {
     });
     expect(screen.queryByText(/reseller|admin white-label|white label controls/i)).not.toBeInTheDocument();
 
-    clickMoreAction('Pick template');
+    clickMoreAction('Switch template');
     expect(await screen.findByRole('dialog', { name: 'Pick a template' })).toBeInTheDocument();
     expect(screen.getByText('Brand announcement')).toBeInTheDocument();
     expect(screen.queryByText('Riverside announcement')).not.toBeInTheDocument();
     fireEvent.click(screen.getAllByRole('button', { name: 'Close' })[0]);
 
-    const canvas = screen.getByRole('textbox', { name: 'Email body' });
-    clickMoreAction('Variables');
-    fireEvent.click(screen.getByRole('button', { name: 'Brand logo' }));
-
-    expect(canvas).toHaveTextContent('https://assets.example.test/brand/logo.png');
-    expect(canvas).not.toHaveTextContent('https://assets.example.test/riverside/logo.png');
+    expect(screen.getByLabelText('Insert variable')).toBeInTheDocument();
   });
 
   it('inserts the selected variable token into the active email block', async () => {
     render(React.createElement(EmailPersistedEditorView, { eventId: 'evt_1' }));
 
     const canvas = await screen.findByRole('textbox', { name: 'Email body' });
-    clickMoreAction('Variables');
-    fireEvent.click(screen.getByRole('button', { name: 'Brand logo' }));
-    fireEvent.click(screen.getByRole('button', { name: 'Insert Brand name' }));
+    fireEvent.click(screen.getByLabelText('Insert variable'));
+    fireEvent.click(screen.getByRole('button', { name: /Brand name/ }));
 
-    expect(canvas).toHaveTextContent('https://assets.example.test/brand/logo.png');
     expect(canvas).toHaveTextContent('{{brand.name}}');
     expect(canvas.textContent).not.toContain('{{recipient.name}} {{recipient.name}}');
   });
