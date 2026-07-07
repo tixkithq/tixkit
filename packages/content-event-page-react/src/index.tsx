@@ -9,11 +9,7 @@ import type { SurfaceEditing } from './editing/context.js';
 
 export { SurfaceText } from './editing/SurfaceText.js';
 export type { SurfaceTextProps } from './editing/SurfaceText.js';
-export {
-  SurfaceEditingContext,
-  useEditableBlock,
-  useSurfaceEditing,
-} from './editing/context.js';
+export { SurfaceEditingContext, useEditableBlock, useSurfaceEditing } from './editing/context.js';
 export type { SurfaceEditing, EditableBlockHandle } from './editing/context.js';
 export { EditorOverlayLayer } from './editing/EditorOverlayLayer.js';
 export type { EditorOverlayLayerProps } from './editing/EditorOverlayLayer.js';
@@ -58,9 +54,7 @@ export function EventPageSurface({
   // Public/preview hide invalid pages; edit renders drafts so blockers are visible.
   if (!isEditing && !resolvedPage.validation.valid) return null;
 
-  const hasContentBlocks = resolvedPage.blocks.some(
-    (block) => !CHROME_BLOCK_TYPES.has(block.type),
-  );
+  const hasContentBlocks = resolvedPage.blocks.some((block) => !CHROME_BLOCK_TYPES.has(block.type));
 
   const surface = (
     <div
@@ -113,7 +107,9 @@ export function EventPageBlockView({ block, onTicketCtaClick }: BlockViewProps) 
               blockId={block.id}
               field="eyebrow"
               value={rawHero?.eyebrow ?? block.eyebrow ?? ''}
-              onCommit={(eyebrow) => rawHero && editing?.onChangeBlock(block.id, { ...rawHero, eyebrow })}
+              onCommit={(eyebrow) =>
+                rawHero && editing?.onChangeBlock(block.id, { ...rawHero, eyebrow })
+              }
               placeholder="Eyebrow text"
               ariaLabel="Eyebrow text"
             />
@@ -123,7 +119,9 @@ export function EventPageBlockView({ block, onTicketCtaClick }: BlockViewProps) 
             blockId={block.id}
             field="headline"
             value={rawHero?.headline ?? block.headline}
-            onCommit={(headline) => rawHero && editing?.onChangeBlock(block.id, { ...rawHero, headline })}
+            onCommit={(headline) =>
+              rawHero && editing?.onChangeBlock(block.id, { ...rawHero, headline })
+            }
             placeholder="Page headline"
             ariaLabel="Page headline"
           />
@@ -140,11 +138,7 @@ export function EventPageBlockView({ block, onTicketCtaClick }: BlockViewProps) 
             />
           ) : null}
           {block.imageUrl ? (
-            <img
-              src={block.imageUrl}
-              alt={block.imageAlt ?? ''}
-              loading="lazy"
-            />
+            <img src={block.imageUrl} alt={block.imageAlt ?? ''} loading="lazy" />
           ) : null}
           {block.ctaLabel && block.ctaUrl ? (
             <SurfaceText
@@ -155,13 +149,20 @@ export function EventPageBlockView({ block, onTicketCtaClick }: BlockViewProps) 
               href={block.ctaUrl}
               onClick={
                 editing
-                  ? (event) => { event.preventDefault(); }
+                  ? (event) => {
+                      event.preventDefault();
+                    }
                   : onTicketCtaClick
-                    ? (event) => { event.preventDefault(); onTicketCtaClick({ blockId: block.id }); }
+                    ? (event) => {
+                        event.preventDefault();
+                        onTicketCtaClick({ blockId: block.id });
+                      }
                     : undefined
               }
               value={rawHero?.ctaLabel ?? block.ctaLabel ?? ''}
-              onCommit={(ctaLabel) => rawHero && editing?.onChangeBlock(block.id, { ...rawHero, ctaLabel })}
+              onCommit={(ctaLabel) =>
+                rawHero && editing?.onChangeBlock(block.id, { ...rawHero, ctaLabel })
+              }
               placeholder="Hero CTA label"
               ariaLabel="Hero CTA label"
             />
@@ -203,7 +204,9 @@ export function EventPageBlockView({ block, onTicketCtaClick }: BlockViewProps) 
             blockId={block.id}
             field="title"
             value={rawDetails?.title ?? block.title}
-            onCommit={(title) => rawDetails && editing?.onChangeBlock(block.id, { ...rawDetails, title })}
+            onCommit={(title) =>
+              rawDetails && editing?.onChangeBlock(block.id, { ...rawDetails, title })
+            }
             placeholder="Section title"
             ariaLabel="Event details title"
           />
@@ -228,7 +231,9 @@ export function EventPageBlockView({ block, onTicketCtaClick }: BlockViewProps) 
             blockId={block.id}
             field="title"
             value={rawTickets?.title ?? block.title}
-            onCommit={(title) => rawTickets && editing?.onChangeBlock(block.id, { ...rawTickets, title })}
+            onCommit={(title) =>
+              rawTickets && editing?.onChangeBlock(block.id, { ...rawTickets, title })
+            }
             placeholder="Tickets title"
             ariaLabel="Tickets title"
           />
@@ -239,7 +244,9 @@ export function EventPageBlockView({ block, onTicketCtaClick }: BlockViewProps) 
               field="body"
               multiline
               value={rawTickets?.body ?? block.body ?? ''}
-              onCommit={(body) => rawTickets && editing?.onChangeBlock(block.id, { ...rawTickets, body })}
+              onCommit={(body) =>
+                rawTickets && editing?.onChangeBlock(block.id, { ...rawTickets, body })
+              }
               placeholder="Tickets body"
               ariaLabel="Tickets body"
             />
@@ -262,13 +269,20 @@ export function EventPageBlockView({ block, onTicketCtaClick }: BlockViewProps) 
               href={block.checkoutUrl}
               onClick={
                 editing
-                  ? (event) => { event.preventDefault(); }
+                  ? (event) => {
+                      event.preventDefault();
+                    }
                   : onTicketCtaClick
-                    ? (event) => { event.preventDefault(); onTicketCtaClick({ blockId: block.id }); }
+                    ? (event) => {
+                        event.preventDefault();
+                        onTicketCtaClick({ blockId: block.id });
+                      }
                     : undefined
               }
               value={rawTickets?.ctaLabel ?? block.ctaLabel ?? ''}
-              onCommit={(ctaLabel) => rawTickets && editing?.onChangeBlock(block.id, { ...rawTickets, ctaLabel })}
+              onCommit={(ctaLabel) =>
+                rawTickets && editing?.onChangeBlock(block.id, { ...rawTickets, ctaLabel })
+              }
               placeholder="Ticket CTA label"
               ariaLabel="Ticket CTA label"
             />
@@ -286,7 +300,9 @@ export function EventPageBlockView({ block, onTicketCtaClick }: BlockViewProps) 
             blockId={block.id}
             field="title"
             value={rawProducts?.title ?? block.title}
-            onCommit={(title) => rawProducts && editing?.onChangeBlock(block.id, { ...rawProducts, title })}
+            onCommit={(title) =>
+              rawProducts && editing?.onChangeBlock(block.id, { ...rawProducts, title })
+            }
             placeholder="Section title"
             ariaLabel="Products title"
           />
@@ -297,7 +313,9 @@ export function EventPageBlockView({ block, onTicketCtaClick }: BlockViewProps) 
               field="body"
               multiline
               value={rawProducts?.body ?? block.body ?? ''}
-              onCommit={(body) => rawProducts && editing?.onChangeBlock(block.id, { ...rawProducts, body })}
+              onCommit={(body) =>
+                rawProducts && editing?.onChangeBlock(block.id, { ...rawProducts, body })
+              }
               placeholder="Products body"
               ariaLabel="Products body"
             />
@@ -324,7 +342,9 @@ export function EventPageBlockView({ block, onTicketCtaClick }: BlockViewProps) 
             blockId={block.id}
             field="title"
             value={rawSchedule?.title ?? block.title}
-            onCommit={(title) => rawSchedule && editing?.onChangeBlock(block.id, { ...rawSchedule, title })}
+            onCommit={(title) =>
+              rawSchedule && editing?.onChangeBlock(block.id, { ...rawSchedule, title })
+            }
             placeholder="Section title"
             ariaLabel="Schedule title"
           />
@@ -350,7 +370,9 @@ export function EventPageBlockView({ block, onTicketCtaClick }: BlockViewProps) 
             blockId={block.id}
             field="title"
             value={rawVenue?.title ?? block.title}
-            onCommit={(title) => rawVenue && editing?.onChangeBlock(block.id, { ...rawVenue, title })}
+            onCommit={(title) =>
+              rawVenue && editing?.onChangeBlock(block.id, { ...rawVenue, title })
+            }
             placeholder="Venue title"
             ariaLabel="Venue title"
           />
@@ -360,7 +382,9 @@ export function EventPageBlockView({ block, onTicketCtaClick }: BlockViewProps) 
               blockId={block.id}
               field="venueName"
               value={rawVenue?.venueName ?? block.venueName}
-              onCommit={(venueName) => rawVenue && editing?.onChangeBlock(block.id, { ...rawVenue, venueName })}
+              onCommit={(venueName) =>
+                rawVenue && editing?.onChangeBlock(block.id, { ...rawVenue, venueName })
+              }
               placeholder="Venue name"
               ariaLabel="Venue name"
             />
@@ -372,7 +396,9 @@ export function EventPageBlockView({ block, onTicketCtaClick }: BlockViewProps) 
               field="address"
               multiline
               value={rawVenue?.address ?? block.address ?? ''}
-              onCommit={(address) => rawVenue && editing?.onChangeBlock(block.id, { ...rawVenue, address })}
+              onCommit={(address) =>
+                rawVenue && editing?.onChangeBlock(block.id, { ...rawVenue, address })
+              }
               placeholder="Venue address"
               ariaLabel="Venue address"
             />
@@ -447,7 +473,9 @@ export function EventPageBlockView({ block, onTicketCtaClick }: BlockViewProps) 
             blockId={block.id}
             field="title"
             value={rawSponsors?.title ?? block.title}
-            onCommit={(title) => rawSponsors && editing?.onChangeBlock(block.id, { ...rawSponsors, title })}
+            onCommit={(title) =>
+              rawSponsors && editing?.onChangeBlock(block.id, { ...rawSponsors, title })
+            }
             placeholder="Section title"
             ariaLabel="Sponsors title"
           />
@@ -489,7 +517,9 @@ export function EventPageBlockView({ block, onTicketCtaClick }: BlockViewProps) 
             blockId={block.id}
             field="title"
             value={rawSpeakers?.title ?? block.title}
-            onCommit={(title) => rawSpeakers && editing?.onChangeBlock(block.id, { ...rawSpeakers, title })}
+            onCommit={(title) =>
+              rawSpeakers && editing?.onChangeBlock(block.id, { ...rawSpeakers, title })
+            }
             placeholder="Section title"
             ariaLabel="Speakers title"
           />
@@ -521,7 +551,9 @@ export function EventPageBlockView({ block, onTicketCtaClick }: BlockViewProps) 
                       rawSpeakers &&
                       editing?.onChangeBlock(block.id, {
                         ...rawSpeakers,
-                        items: rawSpeakers.items.map((it, i) => (i === index ? { ...it, role } : it)),
+                        items: rawSpeakers.items.map((it, i) =>
+                          i === index ? { ...it, role } : it,
+                        ),
                       })
                     }
                     placeholder="Role"
@@ -539,7 +571,9 @@ export function EventPageBlockView({ block, onTicketCtaClick }: BlockViewProps) 
                       rawSpeakers &&
                       editing?.onChangeBlock(block.id, {
                         ...rawSpeakers,
-                        items: rawSpeakers.items.map((it, i) => (i === index ? { ...it, bio } : it)),
+                        items: rawSpeakers.items.map((it, i) =>
+                          i === index ? { ...it, bio } : it,
+                        ),
                       })
                     }
                     placeholder="Bio"
@@ -567,9 +601,17 @@ export function EventPageBlockView({ block, onTicketCtaClick }: BlockViewProps) 
             blockId={block.id}
             field="label"
             href={block.url}
-            onClick={editing ? (event) => { event.preventDefault(); } : undefined}
+            onClick={
+              editing
+                ? (event) => {
+                    event.preventDefault();
+                  }
+                : undefined
+            }
             value={rawButton?.label ?? block.label}
-            onCommit={(label) => rawButton && editing?.onChangeBlock(block.id, { ...rawButton, label })}
+            onCommit={(label) =>
+              rawButton && editing?.onChangeBlock(block.id, { ...rawButton, label })
+            }
             placeholder="Button label"
             ariaLabel="Button label"
           />
@@ -589,7 +631,9 @@ export function EventPageBlockView({ block, onTicketCtaClick }: BlockViewProps) 
               blockId={block.id}
               field="title"
               value={rawSocial?.title ?? block.title ?? ''}
-              onCommit={(title) => rawSocial && editing?.onChangeBlock(block.id, { ...rawSocial, title })}
+              onCommit={(title) =>
+                rawSocial && editing?.onChangeBlock(block.id, { ...rawSocial, title })
+              }
               placeholder="Section title"
               ariaLabel="Social links title"
             />
@@ -602,7 +646,13 @@ export function EventPageBlockView({ block, onTicketCtaClick }: BlockViewProps) 
                   blockId={block.id}
                   field={`links.${index}.label`}
                   href={link.url}
-                  onClick={editing ? (event) => { event.preventDefault(); } : undefined}
+                  onClick={
+                    editing
+                      ? (event) => {
+                          event.preventDefault();
+                        }
+                      : undefined
+                  }
                   value={rawSocial?.links[index]?.label ?? link.label}
                   onCommit={(label) =>
                     rawSocial &&
@@ -642,7 +692,9 @@ export function EventPageBlockView({ block, onTicketCtaClick }: BlockViewProps) 
               blockId={block.id}
               field="badgeLabel"
               value={rawHeader?.badgeLabel ?? block.badgeLabel ?? ''}
-              onCommit={(badgeLabel) => rawHeader && editing?.onChangeBlock(block.id, { ...rawHeader, badgeLabel })}
+              onCommit={(badgeLabel) =>
+                rawHeader && editing?.onChangeBlock(block.id, { ...rawHeader, badgeLabel })
+              }
               placeholder="Badge label (defaults to brand name)"
               ariaLabel="Badge label"
             />
@@ -656,7 +708,9 @@ export function EventPageBlockView({ block, onTicketCtaClick }: BlockViewProps) 
               field="descriptionOverride"
               multiline
               value={rawHeader?.descriptionOverride ?? block.description ?? ''}
-              onCommit={(descriptionOverride) => rawHeader && editing?.onChangeBlock(block.id, { ...rawHeader, descriptionOverride })}
+              onCommit={(descriptionOverride) =>
+                rawHeader && editing?.onChangeBlock(block.id, { ...rawHeader, descriptionOverride })
+              }
               placeholder="Description override (defaults to event description)"
               ariaLabel="Description override"
             />
@@ -697,7 +751,9 @@ export function EventPageBlockView({ block, onTicketCtaClick }: BlockViewProps) 
               blockId={block.id}
               field="title"
               value={rawResale?.title ?? block.title}
-              onCommit={(title) => rawResale && editing?.onChangeBlock(block.id, { ...rawResale, title })}
+              onCommit={(title) =>
+                rawResale && editing?.onChangeBlock(block.id, { ...rawResale, title })
+              }
               placeholder="Resale section title"
               ariaLabel="Resale tickets title"
             />
@@ -710,7 +766,9 @@ export function EventPageBlockView({ block, onTicketCtaClick }: BlockViewProps) 
               {block.listings.map((listing) => (
                 <li key={listing.id}>
                   <strong>
-                    {listing.ticketTypeName ? `Resale ticket - ${listing.ticketTypeName}` : 'Resale ticket'}
+                    {listing.ticketTypeName
+                      ? `Resale ticket - ${listing.ticketTypeName}`
+                      : 'Resale ticket'}
                   </strong>
                   <span>1 available</span>
                   {listing.priceLabel ? <span>{listing.priceLabel}</span> : null}
@@ -724,8 +782,12 @@ export function EventPageBlockView({ block, onTicketCtaClick }: BlockViewProps) 
               blockId={block.id}
               field="emptyStateText"
               multiline
-              value={rawResale?.emptyStateText ?? block.emptyStateText ?? ''}
-              onCommit={(emptyStateText) => rawResale && editing?.onChangeBlock(block.id, { ...rawResale, emptyStateText })}
+              value={
+                rawResale?.emptyStateText ?? block.emptyStateText ?? 'No resale tickets available.'
+              }
+              onCommit={(emptyStateText) =>
+                rawResale && editing?.onChangeBlock(block.id, { ...rawResale, emptyStateText })
+              }
               placeholder="Empty state text"
               ariaLabel="Resale empty state"
             />
@@ -737,9 +799,17 @@ export function EventPageBlockView({ block, onTicketCtaClick }: BlockViewProps) 
               blockId={block.id}
               field="ctaLabel"
               href={block.checkoutUrl}
-              onClick={editing ? (event) => { event.preventDefault(); } : undefined}
+              onClick={
+                editing
+                  ? (event) => {
+                      event.preventDefault();
+                    }
+                  : undefined
+              }
               value={rawResale?.ctaLabel ?? block.ctaLabel ?? ''}
-              onCommit={(ctaLabel) => rawResale && editing?.onChangeBlock(block.id, { ...rawResale, ctaLabel })}
+              onCommit={(ctaLabel) =>
+                rawResale && editing?.onChangeBlock(block.id, { ...rawResale, ctaLabel })
+              }
               placeholder="Resale CTA label"
               ariaLabel="Resale CTA label"
             />

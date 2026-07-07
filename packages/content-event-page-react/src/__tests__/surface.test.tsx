@@ -75,6 +75,27 @@ describe('EventPageSurface', () => {
     expect(screen.queryByText('Hidden comp')).toBeNull();
   });
 
+  it('renders the default resale empty state when no custom text is resolved', () => {
+    const document = createDefaultEventPageDocument({
+      eventId: 'evt_demo_001',
+      eventTitle: 'All Access Chicago',
+      eventDescription: 'A full night of access.',
+      checkoutUrl: 'https://checkout.example.test/checkout?eventId=evt_demo_001',
+    });
+    const resaleBlock = document.blocks.find((block) => block.type === 'resale_tickets');
+    if (resaleBlock?.type === 'resale_tickets') {
+      delete resaleBlock.emptyStateText;
+    }
+    const resolved = resolveEventPageDocument(document, {
+      ...context,
+      resaleListings: [],
+    });
+
+    render(<EventPageSurface resolvedPage={resolved} />);
+
+    expect(screen.getByText('No resale tickets available.')).not.toBeNull();
+  });
+
   it('renders the ticket CTA and invokes onTicketCtaClick without navigating', () => {
     const clicks: { blockId: string }[] = [];
     const { container } = render(
@@ -84,9 +105,7 @@ describe('EventPageSurface', () => {
       />,
     );
 
-    const ticketsCta = container.querySelector<HTMLAnchorElement>(
-      '.tk-ep-tickets .tk-ep-button',
-    );
+    const ticketsCta = container.querySelector<HTMLAnchorElement>('.tk-ep-tickets .tk-ep-button');
     expect(ticketsCta?.getAttribute('href')).toBe(
       'https://checkout.example.test/checkout?eventId=evt_demo_001',
     );
@@ -122,9 +141,7 @@ describe('EventPageSurface', () => {
         content: [
           {
             type: 'paragraph',
-            content: [
-              { type: 'text', text: 'Welcome <script>alert(1)</script>' },
-            ],
+            content: [{ type: 'text', text: 'Welcome <script>alert(1)</script>' }],
           },
         ],
       },
@@ -148,7 +165,10 @@ describe('EventPageSurface', () => {
     document.blocks.push({
       type: 'rich_text',
       id: 'story',
-      content: { type: 'doc', content: [{ type: 'paragraph', content: [{ type: 'text', text: 'Inner' }] }] },
+      content: {
+        type: 'doc',
+        content: [{ type: 'paragraph', content: [{ type: 'text', text: 'Inner' }] }],
+      },
     });
     const resolved = resolveEventPageDocument(document, context);
     const { container } = render(<EventPageSurface resolvedPage={resolved} />);
@@ -245,9 +265,7 @@ describe('EventPageSurface', () => {
         content: [
           {
             type: 'paragraph',
-            content: [
-              { type: 'text', text: '<img src="x" onerror="alert(1)">' },
-            ],
+            content: [{ type: 'text', text: '<img src="x" onerror="alert(1)">' }],
           },
         ],
       },

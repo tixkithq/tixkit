@@ -440,12 +440,12 @@ describe('EventPageClient escaping', () => {
       },
     });
 
-    const view = render(
-      React.createElement(EventPageClient, { eventId: 'evt_render_model' }),
-    );
+    const view = render(React.createElement(EventPageClient, { eventId: 'evt_render_model' }));
 
     await waitFor(() => {
-      expect(view.getByTestId('published-event-page').querySelector('.tixkit-event-page')).not.toBeNull();
+      expect(
+        view.getByTestId('published-event-page').querySelector('.tixkit-event-page'),
+      ).not.toBeNull();
     });
     const surface = view.getByTestId('published-event-page').querySelector('.tixkit-event-page');
     expect(surface?.querySelector('.tk-ep-hero')?.getAttribute('data-block-id')).toBe('hero');
@@ -456,6 +456,68 @@ describe('EventPageClient escaping', () => {
     expect(push).toHaveBeenCalledWith(
       expect.stringContaining('/checkout?eventId=evt_render_model'),
     );
+  });
+
+  it('renders the default resale empty state from page.renderModel', async () => {
+    const event: PublicEvent = {
+      id: 'evt_resale_empty_render_model',
+      title: 'All Access Chicago',
+      status: 'published',
+      timezone: 'America/Chicago',
+      startsAt: '2026-07-17T19:00:00.000Z',
+      brandId: 'brd_1',
+    };
+    const renderContext: EventPageRenderContext = {
+      event: {
+        title: 'All Access Chicago',
+        startsAt: '2026-07-17T19:00:00.000Z',
+        timezone: 'America/Chicago',
+        checkoutUrl: 'https://checkout.example.test/checkout?eventId=evt_resale_empty_render_model',
+      },
+      tickets: [],
+      resaleListings: [],
+    };
+    const document = createDefaultEventPageDocument({
+      eventId: 'evt_resale_empty_render_model',
+      eventTitle: 'All Access Chicago',
+      eventDescription: 'A full night of access.',
+      checkoutUrl: 'https://checkout.example.test/checkout?eventId=evt_resale_empty_render_model',
+    });
+    const resaleBlock = document.blocks.find((block) => block.type === 'resale_tickets');
+    if (resaleBlock?.type === 'resale_tickets') {
+      delete resaleBlock.emptyStateText;
+    }
+    const renderModel = resolveEventPageDocument(document, renderContext);
+
+    publicApiMock.getEvent.mockResolvedValue(event);
+    publicApiMock.getAvailability.mockResolvedValue([]);
+    publicApiMock.getBrand.mockRejectedValue(new Error('brand unavailable'));
+    publicApiMock.getEventPage.mockResolvedValue({
+      document: {
+        eventId: 'evt_resale_empty_render_model',
+        channel: 'event_page',
+        key: 'main',
+        name: 'Main event page',
+        locale: 'en',
+        updatedAt: '2026-06-01T00:00:00.000Z',
+      },
+      version: { versionNumber: 1 },
+      page: {
+        html: '<div class="tixkit-event-page"></div>',
+        text: 'All Access Chicago',
+        headless: [],
+        renderModel,
+        discovery: { title: 'All Access Chicago', summary: 'A full night of access.', tags: [] },
+      },
+    });
+
+    const view = render(
+      React.createElement(EventPageClient, { eventId: 'evt_resale_empty_render_model' }),
+    );
+
+    await waitFor(() => {
+      expect(view.getByText('No resale tickets available.')).not.toBeNull();
+    });
   });
 
   it('renders the event title as p (not h1) when renderModel has a hero block', async () => {
@@ -506,12 +568,12 @@ describe('EventPageClient escaping', () => {
       },
     });
 
-    const view = render(
-      React.createElement(EventPageClient, { eventId: 'evt_h1_dedup' }),
-    );
+    const view = render(React.createElement(EventPageClient, { eventId: 'evt_h1_dedup' }));
 
     await waitFor(() => {
-      expect(view.getByTestId('published-event-page').querySelector('.tixkit-event-page')).not.toBeNull();
+      expect(
+        view.getByTestId('published-event-page').querySelector('.tixkit-event-page'),
+      ).not.toBeNull();
     });
     // The event title should be a <p>, not an <h1>, because the hero block has the <h1>.
     const titleElements = view.getAllByText('Dedup Test Event');
@@ -539,9 +601,7 @@ describe('EventPageClient escaping', () => {
     publicApiMock.getAvailability.mockResolvedValue([]);
     publicApiMock.getBrand.mockRejectedValue(new Error('brand unavailable'));
 
-    const view = render(
-      React.createElement(EventPageClient, { eventId: 'evt_no_content' }),
-    );
+    const view = render(React.createElement(EventPageClient, { eventId: 'evt_no_content' }));
 
     await waitFor(() => {
       expect(view.getByText('No Content Event')).toBeInTheDocument();
