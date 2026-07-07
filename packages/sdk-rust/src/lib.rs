@@ -1330,7 +1330,7 @@ impl CheckInResource<'_> {
         self.client
             .request(
                 reqwest::Method::POST,
-                "/check-ins",
+                "/check-ins/scan",
                 RequestOptions::body(input).idempotency_key(Some(idempotency_key.into())),
             )
             .await
@@ -1621,6 +1621,39 @@ mod tests {
             .expect("resale checkout session");
 
         assert_eq!(result.id, "cs_resale");
+    }
+
+    #[tokio::test]
+    async fn builds_check_in_scan_request_with_idempotency_header() {
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/v1/check-ins/scan"))
+            .and(header("idempotency-key", "idem_scan_1"))
+            .and(body_json(json!({
+                "ticketCode": "TIX-123",
+                "deviceId": "dev_1"
+            })))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                "status": "accepted",
+                "ticketId": "tkt_1"
+            })))
+            .mount(&server)
+            .await;
+
+        let result = client(&server)
+            .await
+            .check_ins()
+            .scan(
+                json!({
+                    "ticketCode": "TIX-123",
+                    "deviceId": "dev_1"
+                }),
+                "idem_scan_1",
+            )
+            .await
+            .expect("check-in scan");
+
+        assert_eq!(result["status"], "accepted");
     }
 
     #[tokio::test]

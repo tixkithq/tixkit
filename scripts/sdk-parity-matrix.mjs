@@ -31,6 +31,7 @@ const checks = [
       '/orders/${orderId}/refunds',
       'X-Checkout-Session-Token',
       'Idempotency-Key',
+      '/check-ins/scan',
     ],
   },
   {
