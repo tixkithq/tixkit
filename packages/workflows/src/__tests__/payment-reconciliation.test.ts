@@ -518,6 +518,10 @@ describe('reconcileRefundActivity', () => {
       id: 'ord_1',
       input: expect.objectContaining({ refunded_cents: 5000 }),
     });
+    expect(mockState.ledgerUpdates).toEqual([]);
+    expect(mockState.ticketVoids).toEqual([]);
+    expect(mockState.inventoryRestores).toEqual([]);
+    expect(mockState.refundNotifications).toEqual([]);
     expect(mockState.timeline).toHaveLength(0);
   });
 
@@ -688,6 +692,10 @@ describe('reconcileRefundActivity', () => {
     expect(mockState.createdRefunds).toHaveLength(0);
     expect(mockState.refunds).toHaveLength(1);
     expect(mockState.refunds[0]).toMatchObject({ provider_refund_id: 're_existing' });
+    expect(mockState.ledgerUpdates).toEqual([]);
+    expect(mockState.ticketVoids).toEqual([]);
+    expect(mockState.inventoryRestores).toEqual([]);
+    expect(mockState.refundNotifications).toEqual([]);
     expect(mockState.timeline).toHaveLength(0);
   });
 
@@ -749,10 +757,22 @@ describe('reconcileRefundActivity', () => {
         .filter((update) => update.table === 'orders')
         .map((update) => update.input.refunded_cents),
     ).not.toContain(10000);
-    expect(mockState.timeline).toContainEqual({
-      orderId: 'ord_1',
-      type: 'order.refunded',
-      description: 'Refunded 5000 cents via Stripe',
-    });
+    expect(mockState.timeline).toEqual([
+      {
+        orderId: 'ord_1',
+        type: 'order.refunded',
+        description: 'Refunded 5000 cents via Stripe',
+      },
+    ]);
+    expect(mockState.ledgerUpdates).toEqual([
+      {
+        orderId: 'ord_1',
+        refundAmountCents: 5000,
+        providerRefundId: 'ch_1:5000',
+      },
+    ]);
+    expect(mockState.ticketVoids).toHaveLength(1);
+    expect(mockState.inventoryRestores).toHaveLength(1);
+    expect(mockState.refundNotifications).toHaveLength(1);
   });
 });

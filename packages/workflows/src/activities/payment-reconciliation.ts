@@ -540,7 +540,7 @@ export async function reconcileRefundActivity(input: {
     const allRefunds = await refundRepo.findByOrder(order.id);
     const newRefunded = Math.min(Number(order.total_cents), sumSucceededRefunds(allRefunds));
     const newStatus = await updateRefundReconciliationState(db, orderRepo, order, newRefunded);
-    if (!alreadyCoveredByAggregateRefund) {
+    if (createdRefund) {
       await applySucceededRefundSideEffects({
         order,
         refundAmountCents: refundAmount,
