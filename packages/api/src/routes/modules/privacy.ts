@@ -15,7 +15,7 @@ import {
   type AdminTableQuery,
   type AdminTablePage,
 } from '@tixkit/admin-table-core';
-import { NotFoundError, ValidationError, type Principal } from '@tixkit/domain';
+import { ForbiddenError, NotFoundError, ValidationError, type Principal } from '@tixkit/domain';
 import { ClerkAuthService } from '../../auth/clerk.js';
 import { writeAuditLog } from '../../auth/audit.js';
 import { parseJsonValue, toIso } from '../../http/contracts.js';
@@ -161,7 +161,13 @@ async function assertPrivacyScope(
   input: { organizationId: string; brandId?: string },
 ): Promise<void> {
   ClerkAuthService.requireOrganizationScope(principal, input.organizationId);
-  if (!input.brandId) return;
+  ClerkAuthService.requireNoEventScope(principal, 'privacy requests');
+  if (!input.brandId) {
+    if (principal.brandIds && principal.brandIds.length > 0) {
+      throw new ForbiddenError('Brand-scoped principals must provide brandId for privacy requests');
+    }
+    return;
+  }
 
   const brand = await new BrandRepository(db).findById(input.brandId);
   if (!brand) throw new NotFoundError('Brand', input.brandId);
@@ -171,6 +177,18 @@ async function assertPrivacyScope(
   if (brand.organization_id !== input.organizationId) {
     throw new ValidationError('Brand does not belong to the requested organization');
   }
+}
+
+function scopedBrandIdsForPrivacyList(
+  principal: Principal,
+  brandId?: string,
+): string | string[] | undefined {
+  ClerkAuthService.requireNoEventScope(principal, 'privacy and audit lists');
+  if (brandId) {
+    ClerkAuthService.requireBrandScope(principal, brandId);
+    return brandId;
+  }
+  return principal.brandIds && principal.brandIds.length > 0 ? principal.brandIds : undefined;
 }
 
 function serializeAuditLog(row: Record<string, unknown>) {
@@ -224,7 +242,7 @@ export const privacyRoutes: FastifyPluginAsync = async (app) => {
     const { organizationId, brandId } = rawQuery;
 
     if (organizationId) ClerkAuthService.requireOrganizationScope(principal, organizationId);
-    if (brandId) ClerkAuthService.requireBrandScope(principal, brandId);
+    const brandScope = scopedBrandIdsForPrivacyList(principal, brandId);
 
     if (principal.type !== 'system' && principal.organizationIds.length === 0) {
       return {
@@ -241,7 +259,7 @@ export const privacyRoutes: FastifyPluginAsync = async (app) => {
     } else if (principal.type !== 'system') {
       scope.organization_id = principal.organizationIds;
     }
-    if (brandId) scope.brand_id = brandId;
+    if (brandScope) scope.brand_id = brandScope;
 
     const searchParams = new URLSearchParams();
     for (const [key, value] of Object.entries(rawQuery)) {
@@ -275,7 +293,7 @@ export const privacyRoutes: FastifyPluginAsync = async (app) => {
     const { organizationId, brandId } = rawQuery;
 
     if (organizationId) ClerkAuthService.requireOrganizationScope(principal, organizationId);
-    if (brandId) ClerkAuthService.requireBrandScope(principal, brandId);
+    const brandScope = scopedBrandIdsForPrivacyList(principal, brandId);
 
     if (principal.type !== 'system' && principal.organizationIds.length === 0) {
       return {
@@ -292,7 +310,7 @@ export const privacyRoutes: FastifyPluginAsync = async (app) => {
     } else if (principal.type !== 'system') {
       scope.organization_id = principal.organizationIds;
     }
-    if (brandId) scope.brand_id = brandId;
+    if (brandScope) scope.brand_id = brandScope;
 
     const searchParams = new URLSearchParams();
     for (const [key, value] of Object.entries(rawQuery)) {
@@ -327,6 +345,10 @@ export const privacyRoutes: FastifyPluginAsync = async (app) => {
       throw new NotFoundError('PrivacyRequest', requestId);
     }
     ClerkAuthService.requireOrganizationScope(principal, row.organization_id);
+    ClerkAuthService.requireNoEventScope(principal, 'privacy requests');
+    if (principal.brandIds && principal.brandIds.length > 0 && !row.brand_id) {
+      throw new NotFoundError('PrivacyRequest', requestId);
+    }
     if (row.brand_id) ClerkAuthService.requireBrandScope(principal, row.brand_id);
     return serializePrivacyRequest(row);
   });

@@ -487,6 +487,46 @@ function exportJobRow(overrides: Row = {}): Row {
   };
 }
 
+function privacyRequestRow(overrides: Row = {}): Row {
+  return {
+    id: 'prv_1',
+    tenant_id: 'tnt_1',
+    organization_id: 'org_1',
+    brand_id: 'brd_1',
+    request_type: 'export',
+    subject_type: 'buyer',
+    subject_id: null,
+    subject_email: 'buyer@example.test',
+    status: 'pending',
+    requested_by: 'usr_1',
+    result: null,
+    error: null,
+    created_at: new Date('2026-06-01T00:00:00.000Z'),
+    completed_at: null,
+    ...overrides,
+  };
+}
+
+function auditLogRow(overrides: Row = {}): Row {
+  return {
+    id: 'audit_1',
+    tenant_id: 'tnt_1',
+    organization_id: 'org_1',
+    brand_id: 'brd_1',
+    actor_type: 'user',
+    actor_id: 'usr_1',
+    action: 'privacy.export.requested',
+    resource_type: 'PrivacyRequest',
+    resource_id: 'prv_1',
+    diff_summary: null,
+    request_id: null,
+    ip: null,
+    user_agent: null,
+    created_at: new Date('2026-06-01T00:00:00.000Z'),
+    ...overrides,
+  };
+}
+
 function contentDocumentRow(overrides: Row = {}): Row {
   return {
     id: 'cdoc_1',
@@ -1266,6 +1306,148 @@ describe('privacy idempotency recovery', () => {
     expect(startPrivacyRequest).toHaveBeenCalledTimes(2);
     expect(startPrivacyRequest).toHaveBeenNthCalledWith(1, { requestId });
     expect(startPrivacyRequest).toHaveBeenNthCalledWith(2, { requestId });
+    await app.close();
+  });
+});
+
+describe('privacy scoped principal boundaries', () => {
+  it('POST /privacy/data-exports rejects brand-scoped principals that omit brandId', async () => {
+    const startPrivacyRequest = vi.fn();
+    const tables: Tables = {
+      organizations: [organizationRow()],
+      brands: [brandRow({ id: 'brd_A' })],
+      privacy_requests: [],
+      idempotency_records: [],
+      audit_logs: [],
+    };
+    const principal = makePrincipal({
+      type: 'api_key',
+      id: 'ak_brand_scoped',
+      brandIds: ['brd_A'],
+      scopes: ['settings.write'],
+    });
+    const app = await setupApp(privacyRoutes, principal, tables, {
+      temporalClient: { startPrivacyRequest },
+    });
+
+    const res = await app.inject({
+      method: 'POST',
+      url: '/privacy/data-exports',
+      headers: { 'idempotency-key': 'privacy-brandless-export' },
+      payload: {
+        organizationId: 'org_1',
+        subjectType: 'buyer',
+        subjectEmail: 'buyer@example.test',
+      },
+    });
+
+    expect(res.statusCode).toBe(403);
+    expect(tables.privacy_requests).toHaveLength(0);
+    expect(tables.idempotency_records).toHaveLength(0);
+    expect(startPrivacyRequest).not.toHaveBeenCalled();
+    await app.close();
+  });
+
+  it('POST /privacy/erasures allows brand-scoped principals for an allowed brandId', async () => {
+    const startPrivacyRequest = vi.fn();
+    const tables: Tables = {
+      organizations: [organizationRow()],
+      brands: [brandRow({ id: 'brd_A' })],
+      privacy_requests: [],
+      idempotency_records: [],
+      audit_logs: [],
+    };
+    const principal = makePrincipal({
+      type: 'api_key',
+      id: 'ak_brand_scoped',
+      brandIds: ['brd_A'],
+      scopes: ['settings.write'],
+    });
+    const app = await setupApp(privacyRoutes, principal, tables, {
+      temporalClient: { startPrivacyRequest },
+    });
+
+    const res = await app.inject({
+      method: 'POST',
+      url: '/privacy/erasures',
+      headers: { 'idempotency-key': 'privacy-brand-erasure' },
+      payload: {
+        organizationId: 'org_1',
+        brandId: 'brd_A',
+        subjectType: 'buyer',
+        subjectEmail: 'buyer@example.test',
+      },
+    });
+
+    expect(res.statusCode).toBe(202);
+    expect(res.json()).toMatchObject({ brandId: 'brd_A', subjectEmail: 'buyer@example.test' });
+    expect(tables.privacy_requests).toHaveLength(1);
+    expect(tables.privacy_requests[0]).toMatchObject({ brand_id: 'brd_A' });
+    expect(startPrivacyRequest).toHaveBeenCalledTimes(1);
+    await app.close();
+  });
+
+  it('GET /privacy/requests defaults brand-scoped principals to their allowed brand rows', async () => {
+    const principal = makePrincipal({
+      type: 'api_key',
+      id: 'ak_brand_scoped',
+      brandIds: ['brd_A'],
+      scopes: ['settings.write'],
+    });
+    const tables: Tables = {
+      privacy_requests: [
+        privacyRequestRow({ id: 'prv_A', brand_id: 'brd_A' }),
+        privacyRequestRow({ id: 'prv_B', brand_id: 'brd_B' }),
+        privacyRequestRow({ id: 'prv_org', brand_id: null }),
+      ],
+    };
+    const app = await setupApp(privacyRoutes, principal, tables);
+
+    const res = await app.inject({ method: 'GET', url: '/privacy/requests' });
+
+    expect(res.statusCode).toBe(200);
+    expect(res.json().items.map((item: { id: string }) => item.id)).toEqual(['prv_A']);
+    await app.close();
+  });
+
+  it('GET /audit-logs defaults brand-scoped principals to their allowed brand rows', async () => {
+    const principal = makePrincipal({
+      type: 'api_key',
+      id: 'ak_brand_scoped',
+      brandIds: ['brd_A'],
+      scopes: ['settings.write'],
+    });
+    const tables: Tables = {
+      audit_logs: [
+        auditLogRow({ id: 'audit_A', brand_id: 'brd_A' }),
+        auditLogRow({ id: 'audit_B', brand_id: 'brd_B' }),
+        auditLogRow({ id: 'audit_org', brand_id: null }),
+      ],
+    };
+    const app = await setupApp(privacyRoutes, principal, tables);
+
+    const res = await app.inject({ method: 'GET', url: '/audit-logs' });
+
+    expect(res.statusCode).toBe(200);
+    expect(res.json().items.map((item: { id: string }) => item.id)).toEqual(['audit_A']);
+    await app.close();
+  });
+
+  it('GET /privacy/requests/:requestId hides org-wide rows from brand-scoped principals', async () => {
+    const principal = makePrincipal({
+      type: 'api_key',
+      id: 'ak_brand_scoped',
+      brandIds: ['brd_A'],
+      scopes: ['settings.write'],
+    });
+    const tables: Tables = {
+      privacy_requests: [privacyRequestRow({ id: 'prv_org', brand_id: null })],
+    };
+    const app = await setupApp(privacyRoutes, principal, tables);
+
+    const res = await app.inject({ method: 'GET', url: '/privacy/requests/prv_org' });
+
+    expect(res.statusCode).toBe(404);
     await app.close();
   });
 });
