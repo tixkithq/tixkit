@@ -92,6 +92,7 @@ function createAuthDb(initialTables: Tables) {
     const query = {
       selectAll: () => query,
       select: () => query,
+      innerJoin: () => query,
       where(column: string, operator: string, value: unknown) {
         conditions.push({ column, operator, value });
         return query;
@@ -1011,6 +1012,79 @@ describe('ClerkAuthService API key auth', () => {
     await expect(
       service.authenticateApiKey(request({ authorization: 'Bearer tk_expired' })),
     ).rejects.toThrow('API key has expired');
+  });
+});
+
+describe('ClerkAuthService OAuth access-token auth', () => {
+  it('authenticates valid OAuth access tokens and records use', async () => {
+    const rawToken = 'tk_oat_valid';
+    const { db, tables } = createAuthDb({
+      oauth_access_tokens: [
+        {
+          id: 'oat_1',
+          token_id: 'oat_1',
+          tenant_id: 'tnt_1',
+          organization_id: 'org_1',
+          oauth_application_id: 'oapp_1',
+          token_hash: hash(rawToken),
+          scopes: JSON.stringify(['events.read', 'orders.read']),
+          expires_at: new Date(Date.now() + 60_000),
+          revoked_at: null,
+          app_status: 'active',
+        },
+      ],
+    });
+    const service = new ClerkAuthService('sk_test_auth', db as never);
+
+    const result = await service.authenticateOAuthAccessToken(
+      request({ authorization: `Bearer ${rawToken}` }),
+    );
+
+    expect(result.principal).toMatchObject({
+      type: 'api_key',
+      id: 'oat_1',
+      tenantId: 'tnt_1',
+      organizationIds: ['org_1'],
+      scopes: ['events.read', 'orders.read'],
+    });
+    expect(tables.oauth_access_tokens[0].updated_at).toBeInstanceOf(Date);
+  });
+
+  it('rejects malformed persisted OAuth access-token scopes before recording use', async () => {
+    const cases = [
+      { name: 'malformed JSON', scopes: '{not-json' },
+      { name: 'JSON string', scopes: JSON.stringify('billing.write') },
+      { name: 'JSON object', scopes: JSON.stringify({ scope: 'billing.write' }) },
+      { name: 'non-string entry', scopes: JSON.stringify(['events.read', 123]) },
+      { name: 'unknown permission', scopes: JSON.stringify(['events.read', 'unknown.permission']) },
+    ];
+
+    for (const testCase of cases) {
+      const tokenSuffix = testCase.name.replace(/[^a-z0-9]+/gi, '_').toLowerCase();
+      const rawToken = `tk_oat_${tokenSuffix}`;
+      const { db, tables } = createAuthDb({
+        oauth_access_tokens: [
+          {
+            id: `oat_${tokenSuffix}`,
+            token_id: `oat_${tokenSuffix}`,
+            tenant_id: 'tnt_1',
+            organization_id: 'org_1',
+            oauth_application_id: 'oapp_1',
+            token_hash: hash(rawToken),
+            scopes: testCase.scopes,
+            expires_at: new Date(Date.now() + 60_000),
+            revoked_at: null,
+            app_status: 'active',
+          },
+        ],
+      });
+      const service = new ClerkAuthService('sk_test_auth', db as never);
+
+      await expect(
+        service.authenticateOAuthAccessToken(request({ authorization: `Bearer ${rawToken}` })),
+      ).rejects.toThrow('Invalid OAuth token scopes');
+      expect(tables.oauth_access_tokens[0].updated_at).toBeUndefined();
+    }
   });
 });
 

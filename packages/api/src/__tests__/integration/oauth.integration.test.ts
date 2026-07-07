@@ -133,6 +133,22 @@ function authorizationCodeRow(overrides: Row = {}): Row {
   };
 }
 
+function refreshTokenRow(overrides: Row = {}): Row {
+  return {
+    id: 'ort_1',
+    oauth_application_id: 'oapp_1',
+    tenant_id: 'tnt_1',
+    organization_id: 'org_1',
+    token_hash: hashSecret('tk_ort_legacy'),
+    scopes: JSON.stringify(['events.read']),
+    expires_at: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000),
+    revoked_at: null,
+    created_at: new Date('2026-06-01T00:00:00Z'),
+    updated_at: new Date('2026-06-01T00:00:00Z'),
+    ...overrides,
+  };
+}
+
 function makePrincipal(): Principal {
   return {
     type: 'user',
@@ -348,6 +364,63 @@ describe('OAuth authorization code redemption', () => {
     expect(tables.oauth_authorization_codes?.[0]?.consumed_at).toBeInstanceOf(Date);
     expect(tables.oauth_refresh_tokens).toHaveLength(1);
     expect(tables.oauth_access_tokens).toHaveLength(1);
+    await app.close();
+  });
+
+  it('rejects malformed persisted authorization-code scopes before consuming the code', async () => {
+    const tables: Tables = {
+      oauth_applications: [oauthApplicationRow()],
+      oauth_authorization_codes: [authorizationCodeRow({ scopes: JSON.stringify('events.read') })],
+      oauth_refresh_tokens: [],
+      oauth_access_tokens: [],
+    };
+    const app = await setupOAuthApp(tables);
+
+    const res = await app.inject({
+      method: 'POST',
+      url: '/oauth/token',
+      payload: {
+        grant_type: 'authorization_code',
+        client_id: 'tk_oauth_legacy',
+        client_secret: 'tk_secret_legacy',
+        code: 'tk_oac_legacy',
+        redirect_uri: 'https://example.com/callback',
+      },
+    });
+
+    expect(res.statusCode).toBe(401);
+    expect(res.json().message).toBe('Invalid OAuth token scopes');
+    expect(tables.oauth_authorization_codes?.[0]?.consumed_at).toBeNull();
+    expect(tables.oauth_refresh_tokens).toHaveLength(0);
+    expect(tables.oauth_access_tokens).toHaveLength(0);
+    await app.close();
+  });
+
+  it('rejects malformed persisted refresh-token scopes before issuing access tokens', async () => {
+    const tables: Tables = {
+      oauth_applications: [oauthApplicationRow()],
+      oauth_authorization_codes: [],
+      oauth_refresh_tokens: [
+        refreshTokenRow({ scopes: JSON.stringify(['events.read', 'unknown.permission']) }),
+      ],
+      oauth_access_tokens: [],
+    };
+    const app = await setupOAuthApp(tables);
+
+    const res = await app.inject({
+      method: 'POST',
+      url: '/oauth/token',
+      payload: {
+        grant_type: 'refresh_token',
+        client_id: 'tk_oauth_legacy',
+        client_secret: 'tk_secret_legacy',
+        refresh_token: 'tk_ort_legacy',
+      },
+    });
+
+    expect(res.statusCode).toBe(401);
+    expect(res.json().message).toBe('Invalid OAuth token scopes');
+    expect(tables.oauth_access_tokens).toHaveLength(0);
     await app.close();
   });
 });

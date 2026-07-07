@@ -3,9 +3,10 @@ import { getDriver, type Database } from '@tixkit/db';
 import { createHash, randomBytes } from 'node:crypto';
 import { z } from 'zod';
 import { ulid } from 'ulid';
-import { ClerkAuthService } from '../../auth/clerk.js';
+import { ClerkAuthService, parseOAuthScopes } from '../../auth/clerk.js';
 import { parseJsonValue } from '../../http/contracts.js';
 import { oauthRedirectUrlSchema, parseBody } from '../../http/schemas.js';
+import type { Permission } from '@tixkit/domain';
 import { ForbiddenError, UnauthorizedError, ValidationError } from '@tixkit/domain';
 
 const authorizeQuerySchema = z
@@ -68,17 +69,18 @@ async function loadClient(db: Database, clientId: string, clientSecret?: string)
 function assertScopesAllowed(
   requestedScopes: string[],
   allowedScopes: string[],
-  principalScopes?: string[],
+  principalScopes?: Permission[],
 ) {
   const requested = requestedScopes.length > 0 ? requestedScopes : allowedScopes;
+  const requestedPermissions = parseOAuthScopes(JSON.stringify(requested));
   const allowed = new Set(allowedScopes);
   const principalAllowed = principalScopes ? new Set(principalScopes) : undefined;
-  for (const scope of requested) {
+  for (const scope of requestedPermissions) {
     if (!allowed.has(scope) || (principalAllowed && !principalAllowed.has(scope))) {
       throw new ForbiddenError(`OAuth scope is not allowed: ${scope}`);
     }
   }
-  return requested;
+  return requestedPermissions;
 }
 
 function assertPrincipalCanAuthorizeOrganizationWideOAuth(principal: {
@@ -162,6 +164,7 @@ export const oauthTokenRoutes: FastifyPluginAsync = async (app) => {
       ) {
         throw new UnauthorizedError('Invalid or expired authorization code');
       }
+      const codeScopes = parseOAuthScopes(code.scopes);
       const consumeQuery = db
         .updateTable('oauth_authorization_codes')
         .set({ consumed_at: now })
@@ -181,7 +184,7 @@ export const oauthTokenRoutes: FastifyPluginAsync = async (app) => {
       return issueTokens({
         db,
         oauthApp,
-        scopes: parseStringArray(consumedCode.scopes),
+        scopes: codeScopes,
         now,
       });
     }
@@ -200,7 +203,7 @@ export const oauthTokenRoutes: FastifyPluginAsync = async (app) => {
       db,
       oauthApp,
       refreshTokenId: refresh.id,
-      scopes: parseStringArray(refresh.scopes),
+      scopes: parseOAuthScopes(refresh.scopes),
       now,
     });
   });
@@ -229,7 +232,7 @@ export const oauthTokenRoutes: FastifyPluginAsync = async (app) => {
 async function issueTokens(input: {
   db: Database;
   oauthApp: Awaited<ReturnType<typeof loadClient>>;
-  scopes: string[];
+  scopes: Permission[];
   now: Date;
 }) {
   const refreshToken = newSecret('tk_ort');
@@ -259,7 +262,7 @@ async function issueAccessToken(input: {
   db: Database;
   oauthApp: Awaited<ReturnType<typeof loadClient>>;
   refreshTokenId: string;
-  scopes: string[];
+  scopes: Permission[];
   now: Date;
 }) {
   const accessToken = newSecret('tk_oat');

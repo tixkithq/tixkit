@@ -56,16 +56,16 @@ const API_KEY_PERMISSIONS = new Set<Permission>(ALL_PERMISSIONS);
 const DEFAULT_SCANNER_DEVICE_SCOPES: Permission[] = ['checkins.read', 'checkins.write'];
 const SCANNER_DEVICE_PERMISSIONS = new Set<Permission>(DEFAULT_SCANNER_DEVICE_SCOPES);
 
-function parsePersistedArray(value: unknown, fieldName: string): unknown[] {
+function parsePersistedArray(value: unknown, fieldName: string, subject = 'API key'): unknown[] {
   try {
     const parsed = typeof value === 'string' ? JSON.parse(value) : value;
     if (!Array.isArray(parsed)) {
-      throw new UnauthorizedError(`Invalid API key ${fieldName}`);
+      throw new UnauthorizedError(`Invalid ${subject} ${fieldName}`);
     }
     return parsed;
   } catch (err) {
     if (err instanceof UnauthorizedError) throw err;
-    throw new UnauthorizedError(`Invalid API key ${fieldName}`);
+    throw new UnauthorizedError(`Invalid ${subject} ${fieldName}`);
   }
 }
 
@@ -74,6 +74,17 @@ function parseApiKeyScopes(value: unknown): Permission[] {
     (scope): scope is Permission =>
       typeof scope === 'string' && API_KEY_PERMISSIONS.has(scope as Permission),
   );
+}
+
+export function parseOAuthScopes(value: unknown): Permission[] {
+  const parsed = parsePersistedArray(value, 'scopes', 'OAuth token');
+  if (!parsed.every((scope) => typeof scope === 'string')) {
+    throw new UnauthorizedError('Invalid OAuth token scopes');
+  }
+  if (!parsed.every((scope) => API_KEY_PERMISSIONS.has(scope as Permission))) {
+    throw new UnauthorizedError('Invalid OAuth token scopes');
+  }
+  return parsed as Permission[];
 }
 
 function parseApiKeyResourceIds(value: unknown, fieldName: string): Ulid[] | undefined {
@@ -551,13 +562,13 @@ export class ClerkAuthService {
       throw new UnauthorizedError('OAuth access token has expired');
     }
 
+    const scopes = parseOAuthScopes(accessToken.scopes);
     await this.db
       .updateTable('oauth_access_tokens')
       .set({ updated_at: new Date() })
       .where('id', '=', accessToken.token_id)
       .execute();
 
-    const scopes = JSON.parse(accessToken.scopes as string) as Permission[];
     return {
       principal: {
         type: 'api_key',
