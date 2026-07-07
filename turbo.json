@@ -1,6 +1,6 @@
 {
   "$schema": "https://turbo.build/schema.json",
-  "globalDependencies": ["tsconfig.base.json", ".env"],
+  "globalDependencies": ["tsconfig.base.json", ".env", ".env.local"],
   "globalEnv": [
     "NODE_ENV",
     "AUTH_PROVIDER",
@@ -26,7 +26,28 @@
     "OTEL_SDK_DISABLED",
     "PROMETHEUS_PUSHGATEWAY_URL",
     "LOG_LEVEL",
-    "PORT"
+    "PORT",
+    "TIXKIT_PREVIEW_TOKEN_SECRET",
+    "PUBLIC_CHECKOUT_URL",
+    "CHECKOUT_PUBLIC_URL",
+    "NEXT_PUBLIC_ADMIN_ORIGIN",
+    "NEXT_PUBLIC_CHECKOUT_URL",
+    "NEXT_PUBLIC_TIXKIT_CHECKOUT_URL",
+    "API_BASE_URL",
+    "NEXT_PUBLIC_TIXKIT_API_BASE_URL",
+    "NEXT_PUBLIC_ADMIN_API_BASE_URL",
+    "S3_REGION",
+    "STRIPE_CONNECT_CLIENT_ID",
+    "NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY",
+    "NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY",
+    "TELNYX_API_KEY",
+    "TELNYX_WEBHOOK_PUBLIC_KEY",
+    "TWILIO_ACCOUNT_SID",
+    "TWILIO_AUTH_TOKEN",
+    "VONAGE_API_KEY",
+    "VONAGE_API_SECRET",
+    "PLIVO_AUTH_ID",
+    "PLIVO_AUTH_TOKEN"
   ],
   "tasks": {
     "build": {
