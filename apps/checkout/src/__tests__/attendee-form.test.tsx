@@ -65,6 +65,40 @@ describe('AttendeeForm dynamic question types', () => {
     expect(onChange).toHaveBeenCalledWith(expect.objectContaining({ q_multi: ['Music'] }));
   });
 
+  it('marks required buyer multiselect groups visually and accessibly', () => {
+    const question: CheckoutQuestion = {
+      id: 'q_multi',
+      label: 'Interests',
+      description: 'Select every topic you want updates for.',
+      type: 'multiselect',
+      required: true,
+      appliesTo: 'buyer',
+      options: ['Music', 'Food', 'Art'],
+    };
+
+    const view = render(
+      createAttendeeForm({
+        buyerQuestions: [question],
+        buyerAnswers: {},
+        buyerQuestionErrors: {
+          q_multi: 'Choose at least one option for Interests.',
+        },
+        onBuyerAnswersChange: () => {},
+      }),
+    );
+
+    const group = view.getByRole('group', { name: /Interests/ });
+    const checkbox = view.getByLabelText('Music');
+
+    expect(group).toHaveAttribute('aria-required', 'true');
+    expect(group).toHaveAttribute('aria-invalid', 'true');
+    expect(group).toHaveAccessibleDescription(
+      /Select every topic you want updates for\.[\s\S]*Choose at least one option for Interests\./,
+    );
+    expect(checkbox).toHaveAttribute('aria-required', 'true');
+    expect(checkbox).toHaveAttribute('aria-invalid', 'true');
+  });
+
   it('renders conditional questions only when their condition matches', () => {
     const questions: CheckoutQuestion[] = [
       {

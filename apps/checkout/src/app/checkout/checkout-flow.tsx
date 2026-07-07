@@ -178,6 +178,8 @@ export default function CheckoutFlow({
   const [error, setError] = useState<string | null>(null);
   const [emailError, setEmailError] = useState<string | undefined>();
   const [validationError, setValidationError] = useState<string | null>(null);
+  const [buyerQuestionErrors, setBuyerQuestionErrors] = useState<Record<string, string>>({});
+  const [attendeeQuestionErrors, setAttendeeQuestionErrors] = useState<Record<string, string>>({});
   const [waitlistMessage, setWaitlistMessage] = useState<string | null>(null);
   const [waitlistTicketTypeIds, setWaitlistTicketTypeIds] = useState<Set<string>>(() => new Set());
   const [claimTicketTypeId, setClaimTicketTypeId] = useState<string | null>(null);
@@ -344,6 +346,9 @@ export default function CheckoutFlow({
 
   // Validate donation amounts and attendee questions before creating session.
   function validateCart(): string | null {
+    setBuyerQuestionErrors({});
+    setAttendeeQuestionErrors({});
+
     if (!questions) {
       return questionsError ?? 'Required checkout fields are still loading. Please try again.';
     }
@@ -381,14 +386,20 @@ export default function CheckoutFlow({
             const key = `${lineId}:${i}:${q.id}`;
             const answer = attendeeAnswers[key];
             if (q.required && isRequiredCheckoutAnswerMissing(q, answer)) {
-              if (q.type === 'checkbox') {
-                return `Please check ${q.label} for ${ticketType?.name ?? 'this ticket'} attendee ${i + 1}.`;
-              }
-              return `Please complete ${q.label} for ${ticketType?.name ?? 'this ticket'} attendee ${i + 1}.`;
+              const message =
+                q.type === 'checkbox'
+                  ? `Please check ${q.label} for ${ticketType?.name ?? 'this ticket'} attendee ${i + 1}.`
+                  : q.type === 'multiselect'
+                    ? `Choose at least one option for ${q.label} for ${ticketType?.name ?? 'this ticket'} attendee ${i + 1}.`
+                    : `Please complete ${q.label} for ${ticketType?.name ?? 'this ticket'} attendee ${i + 1}.`;
+              setAttendeeQuestionErrors({ [key]: message });
+              return message;
             }
             const patternError = questionPatternValidationMessage(q, answer);
             if (patternError) {
-              return `${patternError} for ${ticketType?.name ?? 'this ticket'} attendee ${i + 1}.`;
+              const message = `${patternError} for ${ticketType?.name ?? 'this ticket'} attendee ${i + 1}.`;
+              setAttendeeQuestionErrors({ [key]: message });
+              return message;
             }
           }
         }
@@ -398,13 +409,21 @@ export default function CheckoutFlow({
       for (const q of visibleCheckoutQuestions(questions.buyerQuestions, buyerAnswers)) {
         const answer = buyerAnswers[q.id];
         if (q.required && isRequiredCheckoutAnswerMissing(q, answer)) {
-          if (q.type === 'checkbox') {
-            return `Please check ${q.label}.`;
-          }
-          return `Please complete ${q.label}.`;
+          const message =
+            q.type === 'checkbox'
+              ? `Please check ${q.label}.`
+              : q.type === 'multiselect'
+                ? `Choose at least one option for ${q.label}.`
+                : `Please complete ${q.label}.`;
+          setBuyerQuestionErrors({ [q.id]: message });
+          return message;
         }
         const patternError = questionPatternValidationMessage(q, answer);
-        if (patternError) return `${patternError}.`;
+        if (patternError) {
+          const message = `${patternError}.`;
+          setBuyerQuestionErrors({ [q.id]: message });
+          return message;
+        }
       }
     }
 
@@ -1120,10 +1139,18 @@ export default function CheckoutFlow({
                       eventId={eventId}
                       buyerQuestions={questions.buyerQuestions}
                       buyerAnswers={buyerAnswers}
-                      onBuyerAnswersChange={setBuyerAnswers}
+                      buyerQuestionErrors={buyerQuestionErrors}
+                      onBuyerAnswersChange={(answers) => {
+                        setBuyerAnswers(answers);
+                        setBuyerQuestionErrors({});
+                      }}
                       attendeeQuestionGroups={attendeeQuestionGroups}
                       attendeeAnswers={attendeeAnswers}
-                      onAttendeeAnswersChange={setAttendeeAnswers}
+                      attendeeQuestionErrors={attendeeQuestionErrors}
+                      onAttendeeAnswersChange={(answers) => {
+                        setAttendeeAnswers(answers);
+                        setAttendeeQuestionErrors({});
+                      }}
                     />
                   ) : null}
                 </CardContent>

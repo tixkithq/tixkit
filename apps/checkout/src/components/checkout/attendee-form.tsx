@@ -31,12 +31,16 @@ type Props = {
   buyerQuestions?: CheckoutQuestion[];
   /** Buyer question answers keyed by question id. */
   buyerAnswers?: AttendeeAnswers;
+  /** Field-level validation messages keyed by question id. */
+  buyerQuestionErrors?: Record<string, string | undefined>;
   /** Callback when buyer question answers change. */
   onBuyerAnswersChange?: (answers: AttendeeAnswers) => void;
   /** Per-attendee question answers, keyed by `${lineId}:${attendeeIndex}`. */
   attendeeQuestionGroups?: AttendeeQuestionGroup[];
   /** Per-attendee answers keyed by `${lineId}:${attendeeIndex}:${questionId}`. */
   attendeeAnswers?: CheckoutAnswers;
+  /** Field-level validation messages keyed by `${lineId}:${attendeeIndex}:${questionId}`. */
+  attendeeQuestionErrors?: Record<string, string | undefined>;
   /** Callback when attendee answers change. */
   onAttendeeAnswersChange?: (answers: CheckoutAnswers) => void;
   eventId?: string;
@@ -54,9 +58,11 @@ export function AttendeeForm({
   emailError,
   buyerQuestions = EMPTY_BUYER_QUESTIONS,
   buyerAnswers = EMPTY_BUYER_ANSWERS,
+  buyerQuestionErrors,
   onBuyerAnswersChange,
   attendeeQuestionGroups = EMPTY_ATTENDEE_QUESTION_GROUPS,
   attendeeAnswers = EMPTY_ATTENDEE_ANSWERS,
+  attendeeQuestionErrors,
   onAttendeeAnswersChange,
   eventId,
 }: Props) {
@@ -140,6 +146,7 @@ export function AttendeeForm({
                 question={q}
                 fieldId={`buyer-${q.id}`}
                 value={buyerAnswers[q.id] ?? ''}
+                validationError={buyerQuestionErrors?.[q.id]}
                 disabled={disabled}
                 eventId={eventId}
                 onChange={(val) => onBuyerAnswersChange?.({ ...buyerAnswers, [q.id]: val })}
@@ -177,6 +184,7 @@ export function AttendeeForm({
                         question={q}
                         fieldId={`attendee-${group.lineId}-${i}-${q.id}`}
                         value={attendeeAnswers[key] ?? ''}
+                        validationError={attendeeQuestionErrors?.[key]}
                         disabled={disabled}
                         eventId={eventId}
                         onChange={(val) =>
@@ -201,6 +209,7 @@ function DynamicQuestionField({
   question,
   fieldId,
   value,
+  validationError,
   disabled,
   eventId,
   onChange,
@@ -208,6 +217,7 @@ function DynamicQuestionField({
   question: CheckoutQuestion;
   fieldId: string;
   value: CheckoutAnswerValue | '';
+  validationError?: string;
   disabled: boolean;
   eventId?: string;
   onChange: (value: CheckoutAnswerValue) => void;
@@ -216,6 +226,8 @@ function DynamicQuestionField({
   const [uploadError, setUploadError] = useState<string | null>(null);
   const id = `q_${fieldId.replace(/[^A-Za-z0-9_-]/g, '_')}`;
   const descriptionId = question.description ? `${id}_description` : undefined;
+  const errorId = validationError ? `${id}_error` : undefined;
+  const describedBy = [descriptionId, errorId].filter(Boolean).join(' ') || undefined;
   const stringValue = typeof value === 'string' ? value : '';
   const updatePatternValidity = (
     control: HTMLInputElement | HTMLTextAreaElement,
@@ -243,7 +255,7 @@ function DynamicQuestionField({
             disabled={disabled}
             required={question.required}
             aria-required={question.required || undefined}
-            aria-describedby={descriptionId}
+            aria-describedby={describedBy}
             onChange={(e) => onChange(e.target.checked)}
             className="size-4 rounded border-input accent-primary"
           />
@@ -277,7 +289,7 @@ function DynamicQuestionField({
           disabled={disabled}
           placeholder={question.placeholder}
           required={question.required}
-          aria-describedby={descriptionId}
+          aria-describedby={describedBy}
         />
         {question.description ? (
           <p id={descriptionId} className="text-xs text-muted-foreground">
@@ -299,7 +311,7 @@ function DynamicQuestionField({
           onChange={(e) => onChange(e.target.value)}
           disabled={disabled}
           required={question.required}
-          aria-describedby={descriptionId}
+          aria-describedby={describedBy}
           className="h-9 w-full rounded-md border border-input bg-transparent px-3 text-sm shadow-xs focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50"
         >
           <option value="">Select…</option>
@@ -336,8 +348,18 @@ function DynamicQuestionField({
     };
 
     return (
-      <fieldset className="grid gap-2" id={id} name={question.id} aria-describedby={descriptionId}>
-        {label}
+      <fieldset
+        className="grid gap-2"
+        id={id}
+        name={question.id}
+        aria-required={question.required || undefined}
+        aria-invalid={validationError ? true : undefined}
+        aria-describedby={describedBy}
+      >
+        <legend className="text-sm font-medium">
+          {question.label}
+          {requiredMarker}
+        </legend>
         <div className="space-y-2">
           {question.options?.map((opt) => {
             const optId = `${id}_${opt}`;
@@ -349,6 +371,8 @@ function DynamicQuestionField({
                   type="checkbox"
                   checked={selected.includes(opt)}
                   disabled={disabled}
+                  aria-required={question.required || undefined}
+                  aria-invalid={validationError ? true : undefined}
                   onChange={() => toggle(opt)}
                   className="size-4 rounded border-input accent-primary"
                 />
@@ -359,17 +383,16 @@ function DynamicQuestionField({
             );
           })}
         </div>
-        {/* Hidden input carries the joined value for form submission and
-            required-validation by the browser when no option is checked. */}
-        <input
-          type="hidden"
-          name={question.id}
-          value={selected.join(', ')}
-          required={question.required}
-        />
+        {/* Hidden input carries the joined value for form submission. */}
+        <input type="hidden" name={question.id} value={selected.join(', ')} />
         {question.description ? (
           <p id={descriptionId} className="text-xs text-muted-foreground">
             {question.description}
+          </p>
+        ) : null}
+        {validationError ? (
+          <p id={errorId} className="text-sm text-destructive">
+            {validationError}
           </p>
         ) : null}
       </fieldset>
@@ -389,7 +412,7 @@ function DynamicQuestionField({
           type="file"
           disabled={disabled || uploading || !eventId}
           required={question.required && !uploaded}
-          aria-describedby={descriptionId}
+          aria-describedby={describedBy}
           onChange={async (event) => {
             const file = event.target.files?.[0];
             if (!file || !eventId) return;
@@ -434,7 +457,7 @@ function DynamicQuestionField({
             disabled={disabled}
             required={question.required}
             aria-required={question.required || undefined}
-            aria-describedby={descriptionId}
+            aria-describedby={describedBy}
             onChange={(e) => onChange(e.target.checked)}
             className="size-4 rounded border-input accent-primary"
           />
@@ -473,7 +496,7 @@ function DynamicQuestionField({
         disabled={disabled}
         placeholder={question.placeholder}
         required={question.required}
-        aria-describedby={descriptionId}
+        aria-describedby={describedBy}
       />
       {question.description ? (
         <p id={descriptionId} className="text-xs text-muted-foreground">

@@ -191,6 +191,37 @@ describe('CheckoutFlow buyer validation', () => {
     expect(checkoutApiMock.createSession).not.toHaveBeenCalled();
   });
 
+  it('directs buyers to the missing required multiselect question', async () => {
+    publicApiMock.getQuestions.mockResolvedValue({
+      buyerQuestions: [
+        {
+          id: 'q_interests',
+          label: 'Interests',
+          description: 'Select every topic you want updates for.',
+          type: 'multiselect',
+          required: true,
+          appliesTo: 'buyer',
+          options: ['Music', 'Food'],
+        },
+      ],
+      attendeeQuestions: [],
+    });
+    const view = renderCheckoutFlow();
+
+    await view.findByText('General Admission');
+    await view.findByRole('group', { name: /Interests/ });
+    fireEvent.click(view.getByRole('button', { name: 'Increase General Admission quantity' }));
+    fireEvent.change(view.getByLabelText(/Email/), {
+      target: { value: 'buyer@example.com' },
+    });
+    fireEvent.click(view.getByRole('button', { name: 'Continue' }));
+
+    const message = 'Choose at least one option for Interests.';
+    expect(await view.findAllByText(message)).toHaveLength(2);
+    expect(view.getByRole('group', { name: /Interests/ })).toHaveAttribute('aria-invalid', 'true');
+    expect(checkoutApiMock.createSession).not.toHaveBeenCalled();
+  });
+
   it('blocks checkout before the API when a buyer question fails its validation pattern', async () => {
     publicApiMock.getQuestions.mockResolvedValue({
       buyerQuestions: [
