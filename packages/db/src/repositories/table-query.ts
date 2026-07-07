@@ -180,11 +180,16 @@ export async function executeTableQuery<T>(
   };
 
   // Apply cursor pagination
-  const applyCursor = (q: any, sortOrder: AdminTableSort[]): any => {
+  const applyCursor = (
+    q: any,
+    executionSortOrder: AdminTableSort[],
+    requestedSortOrder: AdminTableSort[],
+  ): any => {
     if (!query.cursor) return q;
     try {
       const payload = decodeCursor(query.cursor, DEFAULT_CURSOR_VERSION);
-      return applyKeysetPagination(q, payload, sortOrder, schema, serverFieldMap);
+      validateCursorSort(payload.s, requestedSortOrder);
+      return applyKeysetPagination(q, payload, executionSortOrder, schema, serverFieldMap);
     } catch (e) {
       if (e instanceof CursorError) {
         throw new ValidationError(`Invalid cursor: ${e.message}`, { field: 'cursor' });
@@ -200,7 +205,7 @@ export async function executeTableQuery<T>(
   );
   dataQuery = applyFilters(dataQuery);
   dataQuery = applySorting(dataQuery, effectiveSort);
-  dataQuery = applyCursor(dataQuery, effectiveSort);
+  dataQuery = applyCursor(dataQuery, effectiveSort, sort);
   dataQuery = dataQuery.limit(limit + 1);
 
   const rows: Selectable<any>[] = await dataQuery.execute();
@@ -459,6 +464,27 @@ function applyFilter(
 
     default:
       return q;
+  }
+}
+
+function validateCursorSort(
+  cursorSort: Array<{ f: string; d: 'asc' | 'desc'; v: string | number }>,
+  requestedSort: AdminTableSort[],
+): void {
+  if (cursorSort.length !== requestedSort.length) {
+    throw new CursorError('sort entries do not match requested sort');
+  }
+
+  for (let index = 0; index < requestedSort.length; index += 1) {
+    const cursorEntry = cursorSort[index];
+    const requestedEntry = requestedSort[index];
+    if (
+      !cursorEntry ||
+      cursorEntry.f !== requestedEntry.field ||
+      cursorEntry.d !== requestedEntry.direction
+    ) {
+      throw new CursorError('sort entries do not match requested sort');
+    }
   }
 }
 

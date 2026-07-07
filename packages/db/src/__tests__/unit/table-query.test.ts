@@ -162,6 +162,55 @@ describe('executeTableQuery cursor validation', () => {
     });
   });
 
+  it('rejects cursors whose sort field differs from the active sort', async () => {
+    const { db } = createRecordingDb();
+    const cursor = encodeCursor([{ field: 'status', direction: 'desc', value: 'paid' }], 'ord_1');
+
+    await expect(
+      executeTableQuery(
+        db as never,
+        {
+          tableName: 'orders',
+          schema: testSchema,
+          tenantId: 'tnt_1',
+          serialize: (row) => row,
+        },
+        { cursor },
+      ),
+    ).rejects.toMatchObject({
+      code: 'VALIDATION_ERROR',
+      statusCode: 400,
+      details: { field: 'cursor' },
+      message: 'Invalid cursor: sort entries do not match requested sort',
+    });
+  });
+
+  it('rejects cursors whose sort direction differs from the active sort', async () => {
+    const { db } = createRecordingDb();
+    const cursor = encodeCursor(
+      [{ field: 'createdAt', direction: 'asc', value: '2026-01-03T00:00:00.000Z' }],
+      'ord_3',
+    );
+
+    await expect(
+      executeTableQuery(
+        db as never,
+        {
+          tableName: 'orders',
+          schema: testSchema,
+          tenantId: 'tnt_1',
+          serialize: (row) => row,
+        },
+        { cursor },
+      ),
+    ).rejects.toMatchObject({
+      code: 'VALIDATION_ERROR',
+      statusCode: 400,
+      details: { field: 'cursor' },
+      message: 'Invalid cursor: sort entries do not match requested sort',
+    });
+  });
+
   it('reverses sort order and cursor comparison for previous pages', async () => {
     const { db, queries } = createRecordingDb();
     const cursor = encodeCursor(
