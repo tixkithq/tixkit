@@ -13,9 +13,9 @@
     "./styles.css": "./src/styles.css"
   },
   "scripts": {
-    "build": "tsc",
+    "build": "tsc -b",
     "lint": "oxlint src",
-    "typecheck": "tsc --noEmit",
+    "typecheck": "tsc -b",
     "test:unit": "vitest run",
     "clean": "rm -rf dist"
   },

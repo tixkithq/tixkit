@@ -2,12 +2,13 @@
   "name": "@tixkit/widget",
   "version": "0.1.0",
   "type": "module",
+  "sideEffects": false,
   "main": "./dist/tixkit-widget.js",
   "scripts": {
-    "build": "tsc --noEmit && esbuild src/index.ts --bundle --minify --format=esm --outfile=dist/tixkit-widget.js",
+    "build": "tsc -b --noEmit && esbuild src/index.ts --bundle --minify --format=esm --outfile=dist/tixkit-widget.js",
     "dev": "esbuild src/index.ts --bundle --format=esm --outfile=dist/tixkit-widget.js --watch",
     "lint": "oxlint src",
-    "typecheck": "tsc --noEmit",
+    "typecheck": "tsc -b",
     "test:unit": "vitest run",
     "clean": "rm -rf dist"
   },

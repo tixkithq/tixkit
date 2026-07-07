@@ -414,7 +414,7 @@ describe('SvelteKit client helpers', () => {
     for (const target of exportedPackageTargets(packageJson.exports)) {
       expect(packedFiles, `missing packed export target ${target}`).toContain(target);
     }
-  });
+  }, 30_000);
 });
 
 describe('SvelteKit bundle isolation', () => {

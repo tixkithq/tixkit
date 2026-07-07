@@ -6,11 +6,11 @@
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
   "scripts": {
-    "build": "tsc",
+    "build": "tsc -b",
     "dev": "tsx watch src/worker.ts",
     "start": "node dist/worker.js",
     "lint": "oxlint src",
-    "typecheck": "tsc --noEmit",
+    "typecheck": "tsc -b",
     "test:unit": "vitest run --exclude \"src/**/*.integration.test.ts\"",
     "test:integration": "vitest run src/**/*.integration.test.ts --maxWorkers=1",
     "test:mysql-tier1": "DB_INTEGRATION_DRIVER=mysql vitest run src/__tests__/mysql-tier1-parity.integration.test.ts --maxWorkers=1",

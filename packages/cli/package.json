@@ -7,9 +7,9 @@
   "license": "MIT",
   "main": "./src/index.ts",
   "scripts": {
-    "build": "tsc",
+    "build": "tsc -b",
     "lint": "oxlint src",
-    "typecheck": "tsc --noEmit",
+    "typecheck": "tsc -b",
     "test:unit": "vitest run src/__tests__",
     "init": "bun run src/index.ts init",
     "embed:generate": "bun run src/index.ts embed:generate",

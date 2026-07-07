@@ -21,6 +21,7 @@ require_file Dockerfile.api
 require_file Dockerfile.worker
 require_file Dockerfile.checkout
 require_file Dockerfile.admin
+require_file .dockerignore
 
 reject_placeholder_production_origins() {
   if grep -REn '(^|[^[:alnum:]_-])([[:alnum:].-]+\.)?example\.com([^[:alnum:]_-]|$)' \
@@ -138,6 +139,31 @@ validate_runtime_image_pins() {
 }
 
 validate_runtime_image_pins
+
+validate_runtime_image_context() {
+  local required_ignore
+  for required_ignore in .git '.env.*' node_modules graphify-out '**/__tests__'; do
+    grep -Fxq "${required_ignore}" .dockerignore ||
+      fail ".dockerignore must exclude ${required_ignore} from production build contexts"
+  done
+
+  local dockerfile
+  for dockerfile in Dockerfile.api Dockerfile.worker Dockerfile.checkout Dockerfile.admin; do
+    awk '
+      /^[[:space:]]*FROM[[:space:]]+/ {
+        stage += 1
+      }
+      stage > 1 && /^[[:space:]]*COPY[[:space:]]+(\.([[:space:]]+|$)|--[^[:space:]]+[[:space:]]+\.([[:space:]]+|$))/ {
+        exit 1
+      }
+    ' "${dockerfile}" || fail "${dockerfile} final runtime stage must not copy the full repository"
+
+    grep -Eq '^[[:space:]]*FROM[[:space:]].+[[:space:]]+AS[[:space:]]+runtime[[:space:]]*$' "${dockerfile}" ||
+      fail "${dockerfile} must define an explicit runtime stage"
+  done
+}
+
+validate_runtime_image_context
 
 validate_frontend_public_api_build_config() {
   local expected_fly_api_origin='https://tixkit-api.fly.dev'

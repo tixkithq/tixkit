@@ -24,9 +24,9 @@
     }
   },
   "scripts": {
-    "build": "tsc",
+    "build": "tsc -b",
     "lint": "oxlint src",
-    "typecheck": "tsc --noEmit",
+    "typecheck": "tsc -b",
     "migrate": "tsx src/migrate.ts",
     "migrate:mysql": "DB_DRIVER=mysql tsx src/migrate.ts",
     "migrate:mssql": "DB_DRIVER=mssql tsx src/migrate.ts",

@@ -32,6 +32,7 @@ jobs:
       - uses: ./.github/actions/setup-js
       - run: bun install --frozen-lockfile
       - run: bunx turbo run build
+      - run: bun run check:performance-budgets
 
   oss-export:
     name: OSS Export
@@ -260,9 +261,11 @@ jobs:
       - name: MySQL Tier 1 correctness suites
         run: |
           cd packages/api
-          DB_INTEGRATION_DRIVER=mysql bun vitest run src/__tests__/integration/inventory-concurrency.integration.test.ts src/__tests__/integration/load-harness.integration.test.ts
+          DB_INTEGRATION_DRIVER=mysql PERFORMANCE_METRICS_PATH=../../artifacts/performance/load-harness-metrics.json bun vitest run src/__tests__/integration/inventory-concurrency.integration.test.ts src/__tests__/integration/load-harness.integration.test.ts
           cd ../..
           DB_INTEGRATION_DRIVER=mysql bun --filter @tixkit/workflows test:mysql-tier1
+          PERFORMANCE_METRICS_PATH=artifacts/performance/load-harness-metrics.json bun run --cwd packages/workflows test:unit -- export-activity.test.ts
+          bun run check:performance-budgets -- --config performance-budgets.integration.json
       - run: DB_INTEGRATION_DRIVER=mysql bun run test:integration:serial
 
   integration-tests-mssql:
@@ -401,6 +404,19 @@ jobs:
         run: bunx turbo run build
       - name: Run Playwright ${{ matrix.browser }}
         run: bun run test:e2e -- --project=${{ matrix.browser }}
+      - name: Generate and check Lighthouse performance budgets
+        if: ${{ matrix.browser == 'chromium' }}
+        env:
+          RUN_LIGHTHOUSE_BUDGETS: '1'
+        run: bunx playwright test e2e/performance-lighthouse.spec.ts --project=chromium
+      - name: Upload Lighthouse reports
+        if: ${{ always() && matrix.browser == 'chromium' }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: lighthouse-performance-reports
+          path: artifacts/performance/lighthouse/
+          if-no-files-found: ignore
+          retention-days: 14
       - name: Upload Playwright report
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7

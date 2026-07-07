@@ -2,6 +2,7 @@
   "name": "@tixkit/next",
   "version": "0.1.0",
   "type": "module",
+  "sideEffects": false,
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
   "exports": {
@@ -23,9 +24,9 @@
     }
   },
   "scripts": {
-    "build": "tsc",
+    "build": "tsc -b",
     "lint": "oxlint src",
-    "typecheck": "tsc --noEmit",
+    "typecheck": "tsc -b",
     "test:unit": "vitest run",
     "clean": "rm -rf dist"
   },

@@ -87,6 +87,10 @@ const localApiEnv = {
   OFFLINE_MANIFEST_SIGNING_KEY:
     process.env.OFFLINE_MANIFEST_SIGNING_KEY ?? 'ci-offline-manifest-signing-key',
   OFFLINE_MANIFEST_KEY_ID: process.env.OFFLINE_MANIFEST_KEY_ID ?? 'manifest:ci',
+  TIXKIT_PREVIEW_TOKEN_SECRET:
+    process.env.TIXKIT_PREVIEW_TOKEN_SECRET ?? 'ci-preview-token-secret',
+  PUBLIC_CHECKOUT_URL: checkoutUrl,
+  CHECKOUT_PUBLIC_URL: checkoutUrl,
   ...s3Env,
   ...walletPassEnv,
   CORS_ALLOWED_ORIGINS: [
@@ -132,6 +136,8 @@ const adminPublicEnv = {
   NEXT_PUBLIC_TIXKIT_API_BASE_URL: `${apiUrl}/v1`,
   NEXT_PUBLIC_ADMIN_API_BASE_URL: apiUrl,
   NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY: clerkPublishableKey,
+  PUBLIC_CHECKOUT_URL: checkoutUrl,
+  NEXT_PUBLIC_CHECKOUT_URL: checkoutUrl,
   ...(useAdminDevServer ? { NEXT_DIST_DIR: adminNextDistDir } : {}),
   ...(useAdminDevServer ? { AUTH_PROVIDER: 'dev', NEXT_PUBLIC_AUTH_PROVIDER: 'dev' } : {}),
   ...(useLiveClerk && clerkPublishableKey ? { NEXT_PUBLIC_AUTH_PROVIDER: 'clerk' } : {}),
@@ -219,7 +225,7 @@ export default defineConfig({
     ? [
         {
           command:
-            'node scripts/playwright-ensure-s3-bucket.mjs && bun run --filter @tixkit/api build && bun run --filter @tixkit/api start',
+            'node scripts/playwright-ensure-s3-bucket.mjs && bun run --filter @tixkit/db migrate && bun run --filter @tixkit/api build && bun run --filter @tixkit/api start',
           env: localApiEnv,
           url: `${apiUrl}/health`,
           timeout: webServerTimeoutMs,

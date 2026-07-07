@@ -1,4 +1,4 @@
-FROM oven/bun:1.3.14@sha256:e10577f0db68676a7024391c6e5cb4b879ebd17188ab750cf10024a6d700e5c4
+FROM oven/bun:1.3.14@sha256:e10577f0db68676a7024391c6e5cb4b879ebd17188ab750cf10024a6d700e5c4 AS builder
 
 WORKDIR /app
 ENV NODE_ENV=production
@@ -20,6 +20,27 @@ RUN test -n "${NEXT_PUBLIC_TIXKIT_API_BASE_URL}" && \
     https://example.com|https://example.com/*|https://*.example.com|https://*.example.com/*) exit 1 ;; \
   esac && \
   bun run build
+RUN bun install --frozen-lockfile --production
+RUN mkdir -p /runtime/packages && \
+  for package_json in packages/*/package.json; do \
+    package_dir="${package_json%/package.json}"; \
+    mkdir -p "/runtime/${package_dir}"; \
+    cp "${package_json}" "/runtime/${package_dir}/package.json"; \
+    if [ -d "${package_dir}/dist" ]; then cp -R "${package_dir}/dist" "/runtime/${package_dir}/dist"; fi; \
+  done
+
+FROM oven/bun:1.3.14@sha256:e10577f0db68676a7024391c6e5cb4b879ebd17188ab750cf10024a6d700e5c4 AS runtime
+
+WORKDIR /app
+ENV NODE_ENV=production
+ENV PORT=3000
+
+COPY --from=builder /app/package.json /app/bun.lock /app/turbo.json ./
+COPY --from=builder /app/node_modules ./node_modules
+COPY --from=builder /runtime/packages ./packages
+COPY --from=builder /app/apps/checkout/package.json /app/apps/checkout/next.config.mjs ./apps/checkout/
+COPY --from=builder /app/apps/checkout/.next ./apps/checkout/.next
+COPY --from=builder /app/apps/checkout/public ./apps/checkout/public
 
 EXPOSE 3000
-CMD ["bun", "run", "--filter", "@tixkit/checkout", "start"]
+CMD ["bun", "--cwd", "apps/checkout", "next", "start"]

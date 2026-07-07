@@ -10,6 +10,8 @@ on:
       - 'packages/sdk-flutter/**'
       - 'packages/sdk-ios/**'
       - 'packages/sdk-android/**'
+      - 'packages/sdk-go/**'
+      - 'packages/sdk-rust/**'
       - 'docs/sdk-guides/**'
       - 'scripts/sdk-parity-matrix.mjs'
       - '.github/workflows/sdk-release-dry-run.yml'
@@ -125,5 +127,62 @@ jobs:
         if: always()
         with:
           name: android-sdk-dry-run-provenance
+          path: sdk-release-provenance/
+          if-no-files-found: error
+
+  go-sdk-dry-run:
+    name: Go SDK Dry Run
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
+        with:
+          go-version-file: packages/sdk-go/go.mod
+          cache-dependency-path: packages/sdk-go/go.mod
+      - name: Build, test, vet, and pack Go SDK
+        run: |
+          set -euo pipefail
+          mkdir -p sdk-release-provenance
+          (
+            cd packages/sdk-go
+            go list -m -json
+            go list ./...
+            test -z "$(gofmt -l *.go)"
+            go test ./...
+            go vet ./...
+            go build ./examples/...
+          ) 2>&1 | tee sdk-release-provenance/go-sdk-dry-run.log
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        if: always()
+        with:
+          name: go-sdk-dry-run-provenance
+          path: sdk-release-provenance/
+          if-no-files-found: error
+
+  rust-sdk-dry-run:
+    name: Rust SDK Dry Run
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+      - uses: dtolnay/rust-toolchain@fa04a1451ff1842e2626ccb99004d0195b455a88 # master
+        with:
+          toolchain: 1.93.0
+          components: clippy,rustfmt
+      - name: Build, test, lint, and package Rust SDK
+        run: |
+          set -euo pipefail
+          mkdir -p sdk-release-provenance
+          (
+            cd packages/sdk-rust
+            cargo fmt --check
+            cargo clippy --all-targets -- -D warnings
+            cargo test
+            cargo build --examples
+            cargo package --allow-dirty
+          ) 2>&1 | tee sdk-release-provenance/rust-sdk-dry-run.log
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        if: always()
+        with:
+          name: rust-sdk-dry-run-provenance
           path: sdk-release-provenance/
           if-no-files-found: error
