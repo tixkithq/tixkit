@@ -1817,21 +1817,6 @@ export function EventPagePersistedEditorView({ eventId }: { eventId: string }) {
                       value={eventPageDocument.settings.publicPath ?? ''}
                     />
                   </label>
-                  <label className="space-y-1.5 text-xs font-medium text-muted-foreground">
-                    Locale
-                    <input
-                      aria-label="Locale"
-                      className={inputClassName}
-                      disabled={!canEdit}
-                      onChange={(change) =>
-                        updateEventPageSettings((current) => ({
-                          ...current,
-                          settings: { ...current.settings, locale: change.currentTarget.value },
-                        }))
-                      }
-                      value={eventPageDocument.settings.locale}
-                    />
-                  </label>
                 </div>
 
                 <div className="space-y-3 border-t border-border pt-4">

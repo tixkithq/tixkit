@@ -268,6 +268,7 @@ describe('EventPagePersistedEditorView', () => {
     openEventPageMoreActions();
     fireEvent.click(screen.getByRole('menuitem', { name: 'Page details' }));
     expect(screen.getByText('Page / Settings')).toBeInTheDocument();
+    expect(screen.queryByLabelText('Locale')).not.toBeInTheDocument();
     openEventPageMoreActions();
     fireEvent.click(screen.getByRole('menuitem', { name: 'Review blockers' }));
     expect(screen.getByText('Publish blockers')).toBeInTheDocument();
@@ -372,6 +373,7 @@ describe('EventPagePersistedEditorView', () => {
 
     openEventPageMoreActions();
     fireEvent.click(screen.getByRole('menuitem', { name: 'Page details' }));
+    expect(screen.queryByLabelText('Locale')).not.toBeInTheDocument();
     fireEvent.change(screen.getByLabelText('Public path'), {
       target: { value: 'javascript:alert(1)' },
     });

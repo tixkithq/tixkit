@@ -531,17 +531,6 @@ const savedVersion = {
   versionNumber: 2,
 };
 
-const emailDocumentWithoutFooter = {
-  ...emailDocument,
-  blocks: emailDocument.blocks.filter((block) => block.type !== 'unsubscribe_footer'),
-};
-
-const versionWithoutFooter = {
-  ...version,
-  id: 'cver_no_footer',
-  contentJson: emailDocumentWithoutFooter,
-};
-
 const brandTemplateDocument = {
   ...document,
   id: 'cdoc_brand_template',
@@ -1072,7 +1061,15 @@ describe('EmailPersistedEditorView', () => {
     closeActiveDialog();
     clickMoreAction('Details');
     expect(screen.getByRole('dialog', { name: 'Template details' })).toBeInTheDocument();
+    expect(screen.getByText('Message purpose')).toBeInTheDocument();
+    expect(screen.getByText('Ticket transaction')).toBeInTheDocument();
+    expect(screen.getAllByText('All Access Chicago').length).toBeGreaterThan(0);
     expect(screen.queryByLabelText('Test recipients')).not.toBeInTheDocument();
+    expect(screen.queryByLabelText('Template key')).not.toBeInTheDocument();
+    expect(screen.queryByLabelText('Locale')).not.toBeInTheDocument();
+    expect(screen.queryByLabelText('Category')).not.toBeInTheDocument();
+    expect(screen.queryByText('Brand scope')).not.toBeInTheDocument();
+    expect(screen.queryByText('Event scope')).not.toBeInTheDocument();
     closeActiveDialog();
     clickMoreAction('View JSON');
     expect(screen.getByRole('dialog', { name: 'Editor JSON' })).toBeInTheDocument();
@@ -1082,19 +1079,13 @@ describe('EmailPersistedEditorView', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
     clickMoreAction('Details');
     expect(screen.getByRole('dialog', { name: 'Template details' })).toBeInTheDocument();
+    expect(screen.queryByLabelText('Template key')).not.toBeInTheDocument();
+    expect(screen.queryByLabelText('Locale')).not.toBeInTheDocument();
+    expect(screen.queryByLabelText('Category')).not.toBeInTheDocument();
 
     const subject = await screen.findByLabelText('Subject');
     fireEvent.change(subject, {
       target: { value: 'Updated tickets for {{event.title}}' },
-    });
-    fireEvent.change(screen.getByLabelText('Template key'), {
-      target: { value: 'order-confirmed' },
-    });
-    fireEvent.change(screen.getByLabelText('Locale'), {
-      target: { value: 'en-US' },
-    });
-    fireEvent.change(screen.getByLabelText('Category'), {
-      target: { value: 'transactional' },
     });
     closeActiveDialog();
     const canvas = screen.getByRole('textbox', { name: 'Email body' });
@@ -1113,7 +1104,7 @@ describe('EmailPersistedEditorView', () => {
             settings: expect.objectContaining({
               subject: 'Updated tickets for {{event.title}}',
               templateKey: 'order-confirmed',
-              locale: 'en-US',
+              locale: 'en',
               category: 'transactional',
             }),
             editor: expect.objectContaining({
@@ -1597,35 +1588,6 @@ describe('EmailPersistedEditorView', () => {
     expect(adminApiMock.sendMessage).not.toHaveBeenCalled();
   });
 
-  it('auto-adds an unsubscribe footer when switching an editor draft to bulk', async () => {
-    adminApiMock.listContentVersions.mockResolvedValue(ok({ items: [versionWithoutFooter] }));
-
-    render(React.createElement(EmailPersistedEditorView, { eventId: 'evt_1' }));
-
-    await screen.findByTestId('email-metadata-bar');
-    clickMoreAction('Details');
-    fireEvent.change(await screen.findByLabelText('Category'), { target: { value: 'bulk' } });
-    closeActiveDialog();
-    clickEmailSaveDraft();
-
-    await waitFor(() => {
-      expect(adminApiMock.saveContentVersion).toHaveBeenCalledWith(
-        'cdoc_email',
-        expect.objectContaining({
-          contentJson: expect.objectContaining({
-            settings: expect.objectContaining({ category: 'bulk' }),
-            blocks: expect.arrayContaining([
-              expect.objectContaining({
-                type: 'unsubscribe_footer',
-                unsubscribeUrl: '{{brand.supportUrl}}',
-              }),
-            ]),
-          }),
-        }),
-      );
-    });
-  });
-
   it('applies a saved brand email template while preserving the verified sender', async () => {
     adminApiMock.listContentDocuments
       .mockResolvedValueOnce(ok({ items: [document] }))
@@ -1664,6 +1626,12 @@ describe('EmailPersistedEditorView', () => {
                 replyToEmail: 'support@example.test',
               }),
             }),
+            blocks: expect.arrayContaining([
+              expect.objectContaining({
+                type: 'unsubscribe_footer',
+                unsubscribeUrl: '{{brand.supportUrl}}',
+              }),
+            ]),
           }),
         }),
       );

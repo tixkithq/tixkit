@@ -21,7 +21,7 @@ import type {
   AdminEventDetail,
   SendMessageInput,
 } from '@/lib/api';
-import { emailCategoryOptions, validationIssueKey } from './document-rules';
+import { validationIssueKey } from './document-rules';
 
 type AutosaveState = 'idle' | 'saving' | 'saved' | 'error';
 type EmailAudience = SendMessageInput['audience'];
@@ -32,6 +32,38 @@ type EmailVersionSummary = {
   label: string;
   timestamp: string;
 };
+
+type TemplateLifecycle = NonNullable<ReturnType<typeof getTemplateLifecycle>>;
+
+function audienceLabel(audience: TemplateLifecycle['defaultAudience']) {
+  switch (audience) {
+    case 'buyer':
+      return 'Ticket buyer';
+    case 'attendee':
+      return 'Attendee';
+    case 'staff':
+      return 'Staff';
+    case 'organizer':
+      return 'Organizer';
+    case 'developer':
+      return 'Developer';
+    case 'transfer_recipient':
+      return 'Transfer recipient';
+    case 'custom':
+      return 'Custom audience';
+  }
+}
+
+function tierLabel(tier: TemplateLifecycle['tier']) {
+  switch (tier) {
+    case 'P0':
+      return 'Critical delivery';
+    case 'P1':
+      return 'Standard delivery';
+    case 'P2':
+      return 'Optional delivery';
+  }
+}
 
 export type EmailDialogsProps = {
   audience: EmailAudience;
@@ -47,11 +79,9 @@ export type EmailDialogsProps = {
   jsonDialogOpen: boolean;
   onApplyTemplate: (template: AdminContentDocument) => void;
   onAudienceChange: (audience: EmailAudience) => void;
-  onCategoryChange: (category: EmailTemplateDocument['settings']['category']) => void;
   onDetailsDialogOpenChange: (open: boolean) => void;
   onHistoryDialogOpenChange: (open: boolean) => void;
   onJsonDialogOpenChange: (open: boolean) => void;
-  onLocaleChange: (locale: string) => void;
   onPublish: () => void;
   onRecipientChange: (recipient: string) => void;
   onReviewConfirmedChange: (confirmed: boolean) => void;
@@ -59,7 +89,6 @@ export type EmailDialogsProps = {
   onScheduledAtChange: (value: string) => void;
   onSendModeChange: (mode: EmailSendMode) => void;
   onSendTest: () => void;
-  onTemplateKeyChange: (templateKey: string) => void;
   onTemplatePickerOpenChange: (open: boolean) => void;
   onTestDialogOpenChange: (open: boolean) => void;
   recipient: string;
@@ -94,11 +123,9 @@ export function EmailDialogs({
   jsonDialogOpen,
   onApplyTemplate,
   onAudienceChange,
-  onCategoryChange,
   onDetailsDialogOpenChange,
   onHistoryDialogOpenChange,
   onJsonDialogOpenChange,
-  onLocaleChange,
   onPublish,
   onRecipientChange,
   onReviewConfirmedChange,
@@ -106,7 +133,6 @@ export function EmailDialogs({
   onScheduledAtChange,
   onSendModeChange,
   onSendTest,
-  onTemplateKeyChange,
   onTemplatePickerOpenChange,
   onTestDialogOpenChange,
   recipient,
@@ -137,79 +163,48 @@ export function EmailDialogs({
           <DialogHeader>
             <DialogTitle>Template details</DialogTitle>
             <DialogDescription>
-              Manage lifecycle metadata and delivery classification for this template.
+              Review where this template is used. Editing stays focused on message content, sender,
+              subject, and preview text.
             </DialogDescription>
           </DialogHeader>
           <div className="space-y-3">
-            <label className="space-y-1.5 text-sm font-medium text-foreground">
-              Template key
-              <input
-                aria-label="Template key"
-                className={inputClassName}
-                disabled={!canEdit}
-                onChange={(change) => onTemplateKeyChange(change.currentTarget.value)}
-                value={emailDocument.settings.templateKey}
-              />
-            </label>
-            <label className="space-y-1.5 text-sm font-medium text-foreground">
-              Locale
-              <input
-                aria-label="Locale"
-                className={inputClassName}
-                disabled={!canEdit}
-                onChange={(change) => onLocaleChange(change.currentTarget.value)}
-                value={emailDocument.settings.locale}
-              />
-            </label>
-            <label className="space-y-1.5 text-sm font-medium text-foreground">
-              Category
-              <select
-                aria-label="Category"
-                className={inputClassName}
-                disabled={!canEdit}
-                onChange={(change) =>
-                  onCategoryChange(
-                    change.currentTarget.value as EmailTemplateDocument['settings']['category'],
-                  )
-                }
-                value={emailDocument.settings.category}
-              >
-                {emailCategoryOptions.map((category) => (
-                  <option className="bg-background text-foreground" key={category} value={category}>
-                    {category}
-                  </option>
-                ))}
-              </select>
-            </label>
-            <dl className="space-y-2 pt-2 text-xs">
+            <dl className="space-y-2 text-sm">
               <div className="flex justify-between gap-4 border-b border-border pb-2">
-                <dt className="text-muted-foreground">Brand scope</dt>
-                <dd className="max-w-[12rem] truncate font-mono text-foreground/80">
-                  {document.brandId}
+                <dt className="text-muted-foreground">Brand</dt>
+                <dd className="max-w-[16rem] truncate text-foreground">
+                  {brand?.name ?? 'Current brand'}
                 </dd>
               </div>
               <div className="flex justify-between gap-4 border-b border-border pb-2">
-                <dt className="text-muted-foreground">Event scope</dt>
-                <dd className="max-w-[12rem] truncate font-mono text-foreground/80">
-                  {document.eventId ?? 'brand'}
+                <dt className="text-muted-foreground">Event</dt>
+                <dd className="max-w-[16rem] truncate text-foreground">
+                  {document.eventId ? event.title : 'Reusable brand template'}
+                </dd>
+              </div>
+              <div className="flex justify-between gap-4 border-b border-border pb-2">
+                <dt className="text-muted-foreground">Message purpose</dt>
+                <dd className="max-w-[16rem] truncate text-foreground">
+                  {emailDocument.settings.category === 'bulk'
+                    ? 'Marketing update'
+                    : emailDocument.settings.category === 'staff'
+                      ? 'Staff message'
+                      : emailDocument.settings.category === 'system'
+                        ? 'System notice'
+                        : 'Ticket transaction'}
                 </dd>
               </div>
               {lifecycle ? (
                 <>
                   <div className="flex justify-between gap-4 border-b border-border pb-2">
-                    <dt className="text-muted-foreground">Lifecycle family</dt>
-                    <dd className="max-w-[12rem] truncate text-foreground/80">
-                      {lifecycle.family}
+                    <dt className="text-muted-foreground">Send type</dt>
+                    <dd className="max-w-[16rem] truncate text-foreground">
+                      {audienceLabel(lifecycle.defaultAudience)}
                     </dd>
                   </div>
                   <div className="flex justify-between gap-4 border-b border-border pb-2">
-                    <dt className="text-muted-foreground">Tier</dt>
-                    <dd className="max-w-[12rem] truncate text-foreground/80">{lifecycle.tier}</dd>
-                  </div>
-                  <div className="flex justify-between gap-4 border-b border-border pb-2">
-                    <dt className="text-muted-foreground">Audience</dt>
-                    <dd className="max-w-[12rem] truncate text-foreground/80">
-                      {lifecycle.defaultAudience}
+                    <dt className="text-muted-foreground">Review level</dt>
+                    <dd className="max-w-[16rem] truncate text-foreground">
+                      {tierLabel(lifecycle.tier)}
                     </dd>
                   </div>
                 </>

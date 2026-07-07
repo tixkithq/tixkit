@@ -1145,29 +1145,9 @@ export function EmailPersistedEditorView({ eventId }: { eventId: string }) {
         jsonDialogOpen={jsonDialogOpen}
         onApplyTemplate={(template) => void applyTemplateChoice(template)}
         onAudienceChange={setAudience}
-        onCategoryChange={(category) =>
-          updateEmailDocument(
-            ensureBulkUnsubscribeFooter({
-              ...emailDocument,
-              settings: {
-                ...emailDocument.settings,
-                category,
-              },
-            }),
-          )
-        }
         onDetailsDialogOpenChange={setDetailsDialogOpen}
         onHistoryDialogOpenChange={setHistoryDialogOpen}
         onJsonDialogOpenChange={setJsonDialogOpen}
-        onLocaleChange={(locale) =>
-          updateEmailDocument({
-            ...emailDocument,
-            settings: {
-              ...emailDocument.settings,
-              locale,
-            },
-          })
-        }
         onPublish={() => void publishDraft()}
         onRecipientChange={setRecipient}
         onReviewConfirmedChange={setReviewConfirmed}
@@ -1175,15 +1155,6 @@ export function EmailPersistedEditorView({ eventId }: { eventId: string }) {
         onScheduledAtChange={setScheduledAt}
         onSendModeChange={setSendMode}
         onSendTest={() => void sendTest()}
-        onTemplateKeyChange={(templateKey) =>
-          updateEmailDocument({
-            ...emailDocument,
-            settings: {
-              ...emailDocument.settings,
-              templateKey,
-            },
-          })
-        }
         onTemplatePickerOpenChange={setTemplatePickerOpen}
         onTestDialogOpenChange={setTestDialogOpen}
         recipient={recipient}
