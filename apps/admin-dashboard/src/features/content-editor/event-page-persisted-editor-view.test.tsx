@@ -22,6 +22,17 @@ function simulateBlockChange(blockId: string, block: EventPageBlock) {
   });
 }
 
+function simulateBlockDuplicate(blockId: string, block: EventPageBlock) {
+  act(() => {
+    window.dispatchEvent(
+      new MessageEvent('message', {
+        data: { source: 'tixkit-event-page-editor', type: 'block-duplicate', blockId, block },
+        origin: MOCK_IFRAME_ORIGIN,
+      }),
+    );
+  });
+}
+
 /**
  * Wait for the editor to finish loading by waiting for the iframe to appear.
  */
@@ -427,6 +438,42 @@ describe('EventPagePersistedEditorView', () => {
             ]),
           }),
           renderedHtml: expect.stringContaining('Join the list'),
+        }),
+      );
+    });
+  });
+
+  it('persists edits to the exact duplicate block id sent by the iframe', async () => {
+    render(React.createElement(EventPagePersistedEditorView, { eventId: 'evt_1' }));
+
+    await waitForEditorLoad();
+
+    const heroBlock = eventPageDocument.blocks.find((b) => b.type === 'hero')!;
+    const duplicateBlock = {
+      ...heroBlock,
+      id: 'hero-iframe-copy',
+      headline: 'Iframe generated copy',
+    };
+    simulateBlockDuplicate(heroBlock.id, duplicateBlock);
+    simulateBlockChange(duplicateBlock.id, {
+      ...duplicateBlock,
+      headline: 'Edited iframe generated copy',
+    });
+    clickEventPageSaveDraft();
+
+    await waitFor(() => {
+      expect(adminApiMock.saveContentVersion).toHaveBeenCalledWith(
+        'cdoc_event_page',
+        expect.objectContaining({
+          contentJson: expect.objectContaining({
+            blocks: expect.arrayContaining([
+              expect.objectContaining({
+                id: 'hero-iframe-copy',
+                type: 'hero',
+                headline: 'Edited iframe generated copy',
+              }),
+            ]),
+          }),
         }),
       );
     });

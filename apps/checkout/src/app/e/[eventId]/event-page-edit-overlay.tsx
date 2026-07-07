@@ -50,6 +50,7 @@ type EditorToParentMessage =
       source: typeof EDITOR_SOURCE;
       type: 'block-duplicate';
       blockId: string;
+      block: EventPageBlock;
     };
 
 type ParentToEditorMessage =
@@ -253,7 +254,7 @@ export default function EventPageEditOverlay({ eventId, token, brandId }: Props)
       ];
       setDocument({ ...document, blocks });
       setSelectedBlockId(duplicate.id);
-      sendMessage({ source: EDITOR_SOURCE, type: 'block-duplicate', blockId });
+      sendMessage({ source: EDITOR_SOURCE, type: 'block-duplicate', blockId, block: duplicate });
     },
     [document, sendMessage],
   );

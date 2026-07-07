@@ -951,17 +951,13 @@ export function EventPagePersistedEditorView({ eventId }: { eventId: string }) {
         });
         return;
       }
-      if (msg.type === 'block-duplicate' && typeof msg.blockId === 'string') {
+      if (msg.type === 'block-duplicate' && typeof msg.blockId === 'string' && msg.block) {
         suppressIframeUpdateRef.current = true;
         const originalId = msg.blockId as string;
+        const duplicate = msg.block as EventPageBlock;
         updateEventPageSettings((current) => {
           const index = current.blocks.findIndex((b) => b.id === originalId);
           if (index < 0) return current;
-          const original = current.blocks[index];
-          const duplicate = {
-            ...original,
-            id: `${original.type}-${crypto.randomUUID()}`,
-          } as EventPageBlock;
           const blocks = [
             ...current.blocks.slice(0, index + 1),
             duplicate,

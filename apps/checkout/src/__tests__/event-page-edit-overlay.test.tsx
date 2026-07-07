@@ -41,6 +41,37 @@ vi.mock('@/components/event-page-rich-text-editor', () => ({
     React.createElement('div', { 'data-testid': `rich-text-${block.id}` }, 'WYSIWYG'),
 }));
 
+vi.mock('@tixkit/content-event-page-react', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@tixkit/content-event-page-react')>();
+  const ReactModule = await import('react');
+  return {
+    ...actual,
+    EditorOverlayLayer: ({
+      blocks,
+      onDuplicateBlock,
+    }: {
+      blocks: Array<{ id: string; label: string }>;
+      onDuplicateBlock: (blockId: string) => void;
+    }) =>
+      ReactModule.createElement(
+        'div',
+        { 'data-testid': 'editor-overlay-layer' },
+        blocks.map((block) =>
+          ReactModule.createElement(
+            'button',
+            {
+              key: block.id,
+              type: 'button',
+              'aria-label': `Duplicate ${block.label}`,
+              onClick: () => onDuplicateBlock(block.id),
+            },
+            `Duplicate ${block.label}`,
+          ),
+        ),
+      ),
+  };
+});
+
 vi.mock('next/navigation', () => ({ useRouter: () => ({ push: vi.fn() }) }));
 
 const context: EventPageRenderContext = {
@@ -223,6 +254,27 @@ describe('EventPageEditOverlay postMessage resolver loop', () => {
           type: 'block-change',
           blockId: 'hero',
           block: expect.objectContaining({ headline: 'Iframe document headline' }),
+        }),
+        '*',
+      );
+    });
+  });
+
+  it('posts the generated duplicate block so the parent keeps the iframe block id', async () => {
+    await renderOverlay();
+    postMessageMock.mockClear();
+
+    fireEvent.click(document.querySelector('[aria-label="Duplicate Hero"]')!);
+
+    await waitFor(() => {
+      expect(postMessageMock).toHaveBeenCalledWith(
+        expect.objectContaining({
+          type: 'block-duplicate',
+          blockId: 'hero',
+          block: expect.objectContaining({
+            type: 'hero',
+            id: expect.stringMatching(/^hero-/),
+          }),
         }),
         '*',
       );
