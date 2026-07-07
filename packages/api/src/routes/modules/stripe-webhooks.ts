@@ -72,22 +72,10 @@ export const stripeWebhookRoutes: FastifyPluginAsync = async (app) => {
       }
     }
 
-    if (event.type === 'account.updated') {
-      await syncStripeConnectAccount(db, event.data.object as Stripe.Account);
-      await eventRepo.markProcessed(storedEvent.id);
-    } else {
-      // Start the durable reconciliation workflow; never process payment state in
-      // the request handler. Reconciliation expects the inner Stripe object
-      // (PaymentIntent, Charge, etc.), not the whole event envelope.
-      await temporalClient.startPaymentReconciliation({
-        providerEventId: event.id,
-        provider: 'stripe',
-        eventType: event.type,
-        data: (event.data?.object ?? {}) as unknown as Record<string, unknown>,
-      });
-    }
-
-    // Signal the checkout workflow for payment lifecycle events so it can finalize or fail.
+    // Signal trusted checkout payment lifecycle events before reconciliation can
+    // mark this provider event processed. If the signal fails, Stripe retry must
+    // return here and retry the missing checkout signal instead of hitting the
+    // processed-event duplicate guard.
     if (
       event.type === 'payment_intent.succeeded' ||
       event.type === 'payment_intent.payment_failed'
@@ -124,6 +112,21 @@ export const stripeWebhookRoutes: FastifyPluginAsync = async (app) => {
           }
         }
       }
+    }
+
+    if (event.type === 'account.updated') {
+      await syncStripeConnectAccount(db, event.data.object as Stripe.Account);
+      await eventRepo.markProcessed(storedEvent.id);
+    } else {
+      // Start the durable reconciliation workflow; never process payment state in
+      // the request handler. Reconciliation expects the inner Stripe object
+      // (PaymentIntent, Charge, etc.), not the whole event envelope.
+      await temporalClient.startPaymentReconciliation({
+        providerEventId: event.id,
+        provider: 'stripe',
+        eventType: event.type,
+        data: (event.data?.object ?? {}) as unknown as Record<string, unknown>,
+      });
     }
 
     return reply.status(200).send({ received: true, duplicate: false });

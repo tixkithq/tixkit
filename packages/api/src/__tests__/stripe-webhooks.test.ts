@@ -316,8 +316,8 @@ describe('Stripe webhook route', () => {
     });
     expect(state.operations).toEqual([
       'insert:payment_events',
-      'start:payment-reconciliation',
       'signal:payment-succeeded',
+      'start:payment-reconciliation',
     ]);
     expect(temporalClient.startPaymentReconciliation).toHaveBeenCalledWith({
       providerEventId: 'evt_stripe_1',
@@ -382,13 +382,99 @@ describe('Stripe webhook route', () => {
       provider_event_id: 'evt_stripe_1',
       processed_at: null,
     });
+    expect(state.operations).toEqual(['insert:payment_events', 'signal:payment-succeeded']);
+    expect(temporalClient.startPaymentReconciliation).not.toHaveBeenCalled();
+    expect(temporalClient.signalPaymentSucceeded).toHaveBeenCalledWith('cs_1', 'pi_stripe_1');
+
+    await app.close();
+  });
+
+  it('retries a trusted checkout failed-payment signal before reconciliation can mark processed', async () => {
+    const state: StripeWebhookTestState = {
+      events: [],
+      checkoutSession: { id: 'cs_1', tenant_id: 'tnt_1' },
+      paymentIntent: {
+        id: 'pi_1',
+        tenant_id: 'tnt_1',
+        checkout_session_id: 'cs_1',
+        provider_intent_id: 'pi_stripe_1',
+        amount_cents: 1000,
+        currency: 'USD',
+        payment_account_id: null,
+      },
+      operations: [],
+    };
+    let failSignal = true;
+    const temporalClient = {
+      startPaymentReconciliation: vi.fn(async () => {
+        state.operations.push('start:payment-reconciliation');
+      }),
+      signalPaymentSucceeded: vi.fn(),
+      signalPaymentFailed: vi.fn(async () => {
+        state.operations.push('signal:payment-failed');
+        if (failSignal) {
+          failSignal = false;
+          throw new Error('Temporal failed-payment signal unavailable');
+        }
+      }),
+    };
+    const app = await setupStripeWebhookApp(createMockDb(state) as Database, temporalClient);
+    const payload = createStripePaymentIntentEvent({
+      id: 'evt_failed_1',
+      type: 'payment_intent.payment_failed',
+      data: {
+        object: {
+          id: 'pi_stripe_1',
+          amount: 1000,
+          currency: 'usd',
+          status: 'requires_payment_method',
+          metadata: { checkoutSessionId: 'cs_1' },
+          last_payment_error: { message: 'Card declined' },
+        },
+      },
+    });
+
+    const first = await app.inject({
+      method: 'POST',
+      url: '/',
+      headers: { 'content-type': 'application/json', 'stripe-signature': 'sig_test' },
+      payload,
+    });
+
+    expect(first.statusCode).toBe(503);
+    expect(first.json()).toMatchObject({
+      error: {
+        code: 'CHECKOUT_PAYMENT_SIGNAL_FAILED',
+        message: 'Temporal failed-payment signal unavailable',
+      },
+    });
+    expect(state.events).toHaveLength(1);
+    expect(state.events[0]).toMatchObject({
+      provider_event_id: 'evt_failed_1',
+      processed_at: null,
+    });
+    expect(temporalClient.startPaymentReconciliation).not.toHaveBeenCalled();
+    expect(state.operations).toEqual(['insert:payment_events', 'signal:payment-failed']);
+
+    const replay = await app.inject({
+      method: 'POST',
+      url: '/',
+      headers: { 'content-type': 'application/json', 'stripe-signature': 'sig_test' },
+      payload,
+    });
+
+    expect(replay.statusCode).toBe(200);
+    expect(replay.json()).toEqual({ received: true, duplicate: false });
+    expect(state.events[0]?.processed_at).toBeNull();
     expect(state.operations).toEqual([
       'insert:payment_events',
+      'signal:payment-failed',
+      'signal:payment-failed',
       'start:payment-reconciliation',
-      'signal:payment-succeeded',
     ]);
+    expect(temporalClient.signalPaymentFailed).toHaveBeenCalledTimes(2);
+    expect(temporalClient.signalPaymentFailed).toHaveBeenLastCalledWith('cs_1', 'Card declined');
     expect(temporalClient.startPaymentReconciliation).toHaveBeenCalledOnce();
-    expect(temporalClient.signalPaymentSucceeded).toHaveBeenCalledWith('cs_1', 'pi_stripe_1');
 
     await app.close();
   });
@@ -545,7 +631,7 @@ describe('Stripe webhook route', () => {
 
     expect(res.statusCode).toBe(200);
     expect(res.json()).toEqual({ received: true, duplicate: false });
-    expect(state.operations).toEqual(['start:payment-reconciliation', 'signal:payment-succeeded']);
+    expect(state.operations).toEqual(['signal:payment-succeeded', 'start:payment-reconciliation']);
     expect(state.events[0].processed_at).toBeNull();
 
     await app.close();
@@ -604,8 +690,8 @@ describe('Stripe webhook route', () => {
     expect(state.events[0]?.processed_at).toBeNull();
     expect(state.operations).toEqual([
       'insert-conflict:payment_events',
-      'start:payment-reconciliation',
       'signal:payment-succeeded',
+      'start:payment-reconciliation',
     ]);
     expect(temporalClient.startPaymentReconciliation).toHaveBeenCalledOnce();
     expect(temporalClient.signalPaymentSucceeded).toHaveBeenCalledOnce();
@@ -693,8 +779,8 @@ describe('Stripe webhook route', () => {
     expect(res.statusCode).toBe(500);
     expect(state.events).toHaveLength(1);
     expect(state.events[0]?.processed_at).toBeNull();
-    expect(state.operations).toEqual(['insert:payment_events', 'start:payment-reconciliation']);
-    expect(temporalClient.startPaymentReconciliation).toHaveBeenCalledOnce();
+    expect(state.operations).toEqual(['insert:payment_events']);
+    expect(temporalClient.startPaymentReconciliation).not.toHaveBeenCalled();
     expect(temporalClient.signalPaymentSucceeded).not.toHaveBeenCalled();
 
     await app.close();
