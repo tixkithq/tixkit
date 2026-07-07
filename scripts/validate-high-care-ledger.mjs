@@ -3,7 +3,16 @@ import { readFile } from 'node:fs/promises';
 import process from 'node:process';
 
 const DEFAULT_LEDGER_PATH = 'docs/completion/high-care-proof-ledger.md';
-const EXPECTED_BACKLOG_IDS = ['C-091', 'C-092', 'C-093', 'C-094', 'C-095', 'C-096', 'C-097', 'C-098'];
+const EXPECTED_BACKLOG_IDS = [
+  'C-091',
+  'C-092',
+  'C-093',
+  'C-094',
+  'C-095',
+  'C-096',
+  'C-097',
+  'C-098',
+];
 const ALLOWED_STATUSES = new Set(['Covered', 'Partial', 'Missing', 'Deferred', 'Managed']);
 const DATE_PATTERN = /^20\d{2}-\d{2}-\d{2}$/;
 const WORKSTREAM_PATTERN = /^WS\d+$/;
@@ -112,7 +121,9 @@ export function validateHighCareLedger(markdown) {
       errors.push(`${row.backlog}: invalid Summary status ${row.status}`);
     }
     if (row.status !== 'Covered') {
-      errors.push(`${row.backlog}: high-care Summary status must be Covered or the backlog must be reopened`);
+      errors.push(
+        `${row.backlog}: high-care Summary status must be Covered or the backlog must be reopened`,
+      );
     }
     if (!DATE_PATTERN.test(row.evidenceDate)) {
       errors.push(`${row.backlog}: Summary evidence date must be YYYY-MM-DD`);
@@ -203,7 +214,9 @@ export async function main(argv = process.argv.slice(2)) {
   const markdown = await readFile(path, 'utf8');
   const { errors, summaryRows } = validateHighCareLedger(markdown);
   if (errors.length > 0) {
-    throw new Error(`High-care proof ledger validation failed:\n${errors.map((error) => `- ${error}`).join('\n')}`);
+    throw new Error(
+      `High-care proof ledger validation failed:\n${errors.map((error) => `- ${error}`).join('\n')}`,
+    );
   }
   console.log(`Validated ${summaryRows.length} high-care ledger rows in ${path}`);
 }

@@ -26,12 +26,7 @@ const DEFAULT_REQUIRED_STATUS_CHECKS = [
   'Build, Migrate, Render, Smoke',
 ];
 
-const HUMAN_BYPASS_ACTOR_TYPES = new Set([
-  'OrganizationAdmin',
-  'RepositoryRole',
-  'Team',
-  'User',
-]);
+const HUMAN_BYPASS_ACTOR_TYPES = new Set(['OrganizationAdmin', 'RepositoryRole', 'Team', 'User']);
 
 function parseInlineArray(value) {
   const match = /^\[(.*)\]$/.exec(value.trim());
@@ -201,7 +196,9 @@ export function validatePublicRemoteRuleset(ruleset) {
   }
 
   const bypassActors = Array.isArray(ruleset.bypass_actors) ? ruleset.bypass_actors : [];
-  const integrationBypassActors = bypassActors.filter((actor) => actor.actor_type === 'Integration');
+  const integrationBypassActors = bypassActors.filter(
+    (actor) => actor.actor_type === 'Integration',
+  );
   if (integrationBypassActors.length !== 1) {
     errors.push('Ruleset must have exactly one Integration bypass actor for export automation');
   }
@@ -216,7 +213,13 @@ export function validatePublicRemoteRuleset(ruleset) {
 
   const rules = Array.isArray(ruleset.rules) ? ruleset.rules : [];
   const ruleTypes = new Set(rules.map((rule) => rule.type));
-  for (const requiredType of ['deletion', 'non_fast_forward', 'update', 'pull_request', 'required_status_checks']) {
+  for (const requiredType of [
+    'deletion',
+    'non_fast_forward',
+    'update',
+    'pull_request',
+    'required_status_checks',
+  ]) {
     if (!ruleTypes.has(requiredType)) {
       errors.push(`Ruleset must include ${requiredType} rule`);
     }
@@ -246,7 +249,9 @@ export function validatePublicRemoteRuleset(ruleset) {
         errors.push('Each required status check must have a context');
       }
       if (!Number.isInteger(check.integration_id) || check.integration_id <= 0) {
-        errors.push(`Status check ${check.context ?? '<missing>'} must be scoped to the export GitHub App integration`);
+        errors.push(
+          `Status check ${check.context ?? '<missing>'} must be scoped to the export GitHub App integration`,
+        );
       }
     }
   }
@@ -373,7 +378,9 @@ export async function main(argv = process.argv.slice(2)) {
     errors.push(...validateRequiredStatusChecksAgainstWorkflows(ruleset, workflowTexts));
   }
   if (errors.length > 0) {
-    throw new Error(`Public remote guardrail validation failed:\n${errors.map((error) => `- ${error}`).join('\n')}`);
+    throw new Error(
+      `Public remote guardrail validation failed:\n${errors.map((error) => `- ${error}`).join('\n')}`,
+    );
   }
 
   if (args.mode === 'write') {
@@ -386,7 +393,9 @@ export async function main(argv = process.argv.slice(2)) {
       ruleset,
       token: process.env.GITHUB_TOKEN,
     });
-    console.log(`Applied public remote ruleset ${result.name} (${result.id}) to ${args.owner}/${args.repo}`);
+    console.log(
+      `Applied public remote ruleset ${result.name} (${result.id}) to ${args.owner}/${args.repo}`,
+    );
   } else if (args.mode === 'print') {
     console.log(JSON.stringify(ruleset, null, 2));
   } else {

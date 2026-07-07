@@ -5,6 +5,56 @@ import process from 'node:process';
 const DEFAULT_BACKLOG_PATH = 'docs/completion/backlog.md';
 const STATUS_KEYS = ['Done', 'In progress', 'Open', 'Deferred', 'Partial'];
 const ID_PATTERN = /^C-\d{3}$/;
+const CRITICAL_EVIDENCE_RULES = new Map([
+  [
+    'C-035',
+    {
+      description: 'hosted CI, GitHub Actions, and branch protection',
+      patterns: [/hosted CI/i, /GitHub Actions|hosted runners/i, /branch protection/i],
+    },
+  ],
+  [
+    'C-036',
+    {
+      description: 'hosted Stripe secrets and non-skipped provider gates',
+      patterns: [/Stripe/i, /hosted/i, /non-skipped|not skip|provider gates/i],
+    },
+  ],
+  [
+    'C-037',
+    {
+      description:
+        'hosted release dry-run, managed backup/restore, and migration rollback rehearsal',
+      patterns: [
+        /hosted release dry-run/i,
+        /managed database|managed .*backup|backup\/restore/i,
+        /migration.*rollback|rollback rehearsal/i,
+      ],
+    },
+  ],
+  [
+    'C-069',
+    {
+      description:
+        'public remote ruleset application with the export GitHub App as the only bypass actor',
+      patterns: [/public remote/i, /ruleset/i, /GitHub App/i, /only bypass actor/i],
+    },
+  ],
+  [
+    'C-071',
+    {
+      description: 'dated PayPal deferral decision',
+      patterns: [/Deferred.*2026-06-30|dated 2026-06-30/i, /product decision/i, /PayPal/i],
+    },
+  ],
+  [
+    'C-082',
+    {
+      description: 'local matrix validation plus fresh hosted CI proof',
+      patterns: [/matrix validation|traceability matrix/i, /test:scripts/i, /fresh hosted CI/i],
+    },
+  ],
+]);
 
 function splitMarkdownRow(line) {
   const trimmed = line.trim();
@@ -108,6 +158,18 @@ function countStatuses(rows) {
   return counts;
 }
 
+function validateCriticalEvidence(row, errors) {
+  const rule = CRITICAL_EVIDENCE_RULES.get(row.id);
+  if (!rule) {
+    return;
+  }
+
+  const missingPatterns = rule.patterns.filter((pattern) => !pattern.test(row.evidence));
+  if (missingPatterns.length > 0) {
+    errors.push(`${row.id}: evidence must cite ${rule.description}`);
+  }
+}
+
 export function validateCompletionBacklog(markdown) {
   const { totalRows, statusCounts, nonDoneRows, ledgerRows } = parseCompletionBacklog(markdown);
   const errors = [];
@@ -130,11 +192,14 @@ export function validateCompletionBacklog(markdown) {
     if (ledgerById.has(row.id)) {
       errors.push(`${row.id}: duplicate Task Ledger row`);
     }
+    validateCriticalEvidence(row, errors);
     ledgerById.set(row.id, row);
   }
 
   if (totalRows !== null && totalRows !== ledgerRows.length) {
-    errors.push(`Current Summary total rows=${totalRows} does not match Task Ledger rows ${ledgerRows.length}`);
+    errors.push(
+      `Current Summary total rows=${totalRows} does not match Task Ledger rows ${ledgerRows.length}`,
+    );
   }
 
   if (statusCounts) {
@@ -162,7 +227,9 @@ export function validateCompletionBacklog(markdown) {
       errors.push(`${row.id}: Done row must not appear in Non-Done Items`);
     }
     if (row.status !== ledgerRow.status) {
-      errors.push(`${row.id}: Non-Done status ${row.status} does not match Task Ledger ${ledgerRow.status}`);
+      errors.push(
+        `${row.id}: Non-Done status ${row.status} does not match Task Ledger ${ledgerRow.status}`,
+      );
     }
     if (row.task !== ledgerRow.task) {
       errors.push(`${row.id}: Non-Done task does not match Task Ledger task`);
@@ -170,6 +237,7 @@ export function validateCompletionBacklog(markdown) {
     if (seenNonDoneIds.has(row.id)) {
       errors.push(`${row.id}: duplicate Non-Done row`);
     }
+    validateCriticalEvidence(row, errors);
     seenNonDoneIds.add(row.id);
   }
 
@@ -202,7 +270,9 @@ export async function main(argv = process.argv.slice(2)) {
   const markdown = await readFile(path, 'utf8');
   const { errors, ledgerRows } = validateCompletionBacklog(markdown);
   if (errors.length > 0) {
-    throw new Error(`Completion backlog validation failed:\n${errors.map((error) => `- ${error}`).join('\n')}`);
+    throw new Error(
+      `Completion backlog validation failed:\n${errors.map((error) => `- ${error}`).join('\n')}`,
+    );
   }
   console.log(`Validated ${ledgerRows.length} completion backlog rows in ${path}`);
 }

@@ -15,6 +15,7 @@ const REQUIRED_SECTIONS = [
 ];
 
 const REQUIRED_FINAL_EVIDENCE_ITEMS = [
+  'Validation that `docs/completion/final-evidence-checklist.md` passes `bun run validate:final-evidence-checklist`.',
   'Git status summary.',
   'Infrastructure status.',
   'Migration status for Postgres and MySQL.',
@@ -40,16 +41,40 @@ const REQUIRED_COMMAND_SNIPPETS = [
   'bun run guardrails:public-remote -- --apply <owner>/<public-repo>',
 ];
 
+const REQUIRED_EXTERNAL_GATE_SNIPPETS = [
+  'hosted GitHub Actions run is green',
+  'Branch protection for `refs/heads/main` requires pull-request and required-status-check rules',
+  'The hosted `Provider Tests (Stripe)` job runs (does not skip)',
+  'STRIPE_SECRET_KEY',
+  'STRIPE_WEBHOOK_SECRET',
+  'NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY',
+  'STRIPE_CONNECT_CLIENT_ID',
+  '.github/workflows/release-dry-run.yml` runs green on hosted CI',
+  'Managed Postgres backup',
+  'managed Postgres restore',
+  'managed MySQL backup',
+  'managed MySQL restore',
+  'restore-based rollback',
+  'RPO/RTO',
+  'docs/production-deployment-guide.md',
+  'docs/incident-runbooks.md',
+  'Deferred 2026-06-30 PayPal',
+  'fresh hosted CI validates the committed suite, `docs/completion/user-story-test-matrix.md`, `Validated 146 user-story rows`, and `78 evidence paths` without cached Turbo-only proof',
+  'export GitHub App as the only bypass actor',
+];
+
 const REQUIRED_PATHS = [
   '.github/workflows/ci.yml',
   '.github/workflows/release-dry-run.yml',
   '.github/workflows/sdk-release-dry-run.yml',
   'docs/completion/backlog.md',
+  'docs/completion/final-evidence-checklist.md',
   'docs/graphify-usage.md',
   'docs/incident-runbooks.md',
   'docs/production-deployment-guide.md',
   'docs/production-validation-harness.md',
   'scripts/export-oss.mjs',
+  'scripts/validate-final-evidence-checklist.mjs',
   'scripts/public-remote-guardrails.mjs',
 ];
 
@@ -58,18 +83,18 @@ const REQUIRED_PACKAGE_SCRIPTS = [
   'export:oss',
   'guardrails:public-remote',
   'validate:public-remote-guardrails',
+  'validate:final-evidence-checklist',
+  'validate:user-story-matrix',
+  'test:unit',
   'test:scripts',
 ];
 
-const PATH_PREFIXES = [
-  '.github/',
-  'apps/',
-  'docs/',
-  'e2e/',
-  'infra/',
-  'packages/',
-  'scripts/',
-];
+const REQUIRED_PACKAGE_SCRIPT_SNIPPETS = new Map([
+  ['test:scripts', ['validate:user-story-matrix', 'validate:final-evidence-checklist']],
+  ['test:unit', ['test:scripts']],
+]);
+
+const PATH_PREFIXES = ['.github/', 'apps/', 'docs/', 'e2e/', 'infra/', 'packages/', 'scripts/'];
 
 const PATH_EXTENSIONS = new Set([
   '.html',
@@ -157,7 +182,66 @@ async function readPackageScripts(rootDir) {
   return packageJson.scripts ?? {};
 }
 
-export function validateValidationRunbookContent(markdown, packageScripts = {}) {
+function extractWorkflowJobBlocks(workflowText) {
+  const blocks = [];
+  const lines = workflowText.split(/\r?\n/);
+  let current = null;
+
+  for (const line of lines) {
+    const jobMatch = /^  ([A-Za-z0-9_-]+):\s*$/.exec(line);
+    if (jobMatch) {
+      if (current) {
+        blocks.push(current);
+      }
+      current = { id: jobMatch[1], text: `${line}\n` };
+      continue;
+    }
+
+    if (current) {
+      if (/^\S/.test(line) && line.trim() !== '') {
+        blocks.push(current);
+        current = null;
+      } else {
+        current.text += `${line}\n`;
+      }
+    }
+  }
+
+  if (current) {
+    blocks.push(current);
+  }
+
+  return blocks;
+}
+
+function validateCiWorkflowCoverageGate(workflowText) {
+  const errors = [];
+  if (workflowText === null) {
+    return errors;
+  }
+
+  const unitTestJob = extractWorkflowJobBlocks(workflowText).find((block) =>
+    /^\s+name:\s+Unit Tests\s*$/m.test(block.text),
+  );
+  if (!unitTestJob) {
+    errors.push('CI workflow must emit the Unit Tests status check');
+    return errors;
+  }
+
+  if (!/\brun:\s+bun run test:(?:unit|scripts)\b/.test(unitTestJob.text)) {
+    errors.push(
+      'CI workflow Unit Tests job must run the root test:unit or test:scripts coverage gate',
+    );
+  }
+
+  return errors;
+}
+
+export function validateValidationRunbookContent(
+  markdown,
+  packageScripts = {},
+  { ciWorkflowText = null } = {},
+) {
   const errors = [];
 
   for (const section of REQUIRED_SECTIONS) {
@@ -183,20 +267,44 @@ export function validateValidationRunbookContent(markdown, packageScripts = {}) 
     }
   }
 
+  for (const snippet of REQUIRED_EXTERNAL_GATE_SNIPPETS) {
+    if (!markdown.includes(snippet)) {
+      errors.push(`Missing required external gate evidence: ${snippet}`);
+    }
+  }
+
   for (const script of REQUIRED_PACKAGE_SCRIPTS) {
     if (typeof packageScripts[script] !== 'string' || packageScripts[script].length === 0) {
       errors.push(`package.json is missing required script: ${script}`);
     }
   }
+  for (const [script, snippets] of REQUIRED_PACKAGE_SCRIPT_SNIPPETS) {
+    const command = packageScripts[script];
+    if (typeof command !== 'string') {
+      continue;
+    }
+    for (const snippet of snippets) {
+      if (!command.includes(snippet)) {
+        errors.push(`package.json script ${script} must include ${snippet}`);
+      }
+    }
+  }
+
+  errors.push(...validateCiWorkflowCoverageGate(ciWorkflowText));
 
   if (!markdown.includes('PUBLIC_EXPORT_GITHUB_APP_ID=<integration-id>')) {
-    errors.push('Public remote guardrail commands must document PUBLIC_EXPORT_GITHUB_APP_ID=<integration-id>');
+    errors.push(
+      'Public remote guardrail commands must document PUBLIC_EXPORT_GITHUB_APP_ID=<integration-id>',
+    );
   }
   if (!markdown.includes('GITHUB_TOKEN=<admin-token>')) {
     errors.push('Public remote guardrail apply command must document GITHUB_TOKEN=<admin-token>');
   }
 
-  return { errors, referencedPaths: unique([...REQUIRED_PATHS, ...collectBacktickedLocalPaths(markdown)]) };
+  return {
+    errors,
+    referencedPaths: unique([...REQUIRED_PATHS, ...collectBacktickedLocalPaths(markdown)]),
+  };
 }
 
 export async function validateValidationRunbookFiles({
@@ -206,7 +314,8 @@ export async function validateValidationRunbookFiles({
   const absoluteRoot = resolve(rootDir);
   const markdown = await readFile(join(absoluteRoot, runbookPath), 'utf8');
   const packageScripts = await readPackageScripts(absoluteRoot);
-  const result = validateValidationRunbookContent(markdown, packageScripts);
+  const ciWorkflowText = await readFile(join(absoluteRoot, '.github/workflows/ci.yml'), 'utf8');
+  const result = validateValidationRunbookContent(markdown, packageScripts, { ciWorkflowText });
   const errors = [...result.errors];
 
   for (const relativePath of result.referencedPaths) {
@@ -237,7 +346,9 @@ export async function main(argv = process.argv.slice(2)) {
   const { path } = parseArgs(argv);
   const { errors, referencedPaths } = await validateValidationRunbookFiles({ runbookPath: path });
   if (errors.length > 0) {
-    throw new Error(`Validation runbook check failed:\n${errors.map((error) => `- ${error}`).join('\n')}`);
+    throw new Error(
+      `Validation runbook check failed:\n${errors.map((error) => `- ${error}`).join('\n')}`,
+    );
   }
   console.log(`Validated ${path} with ${referencedPaths.length} local path references`);
 }

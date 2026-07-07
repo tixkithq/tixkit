@@ -161,22 +161,22 @@ Copy `.env.local.example` as the starting point. Required-for-production variabl
 
 ### Core
 
-| Variable                             | Required             | Description                                                                                                       |
-| ------------------------------------ | -------------------- | ----------------------------------------------------------------------------------------------------------------- |
-| `NODE_ENV`                           | yes                  | `production`                                                                                                      |
-| `PORT`                               | yes (API)            | API listen port, default `4000`                                                                                   |
-| `LOG_LEVEL`                          | no                   | `info` recommended                                                                                                |
-| `OTEL_EXPORTER_OTLP_ENDPOINT`        | yes                  | OTLP HTTP collector base URL, e.g. `https://otel.example.com`                                                     |
-| `OTEL_EXPORTER_OTLP_TRACES_ENDPOINT` | no                   | Explicit trace endpoint; overrides `<OTEL_EXPORTER_OTLP_ENDPOINT>/v1/traces`                                      |
-| `OTEL_SDK_DISABLED`                  | no                   | Set `true` only for local debugging                                                                               |
-| `PROMETHEUS_PUSHGATEWAY_URL`         | no                   | Optional Pushgateway URL for worker activity metrics when workers cannot be scraped                               |
-| `METRICS_BEARER_TOKEN`               | yes                  | Bearer token required for API `GET /metrics` in production. Prometheus must send `Authorization: Bearer <token>`. |
-| `API_BASE_URL`                       | yes                  | Public API origin, e.g. `https://api.example.com`                                                                 |
+| Variable                             | Required             | Description                                                                                                        |
+| ------------------------------------ | -------------------- | ------------------------------------------------------------------------------------------------------------------ |
+| `NODE_ENV`                           | yes                  | `production`                                                                                                       |
+| `PORT`                               | yes (API)            | API listen port, default `4000`                                                                                    |
+| `LOG_LEVEL`                          | no                   | `info` recommended                                                                                                 |
+| `OTEL_EXPORTER_OTLP_ENDPOINT`        | yes                  | OTLP HTTP collector base URL, e.g. `https://otel.example.com`                                                      |
+| `OTEL_EXPORTER_OTLP_TRACES_ENDPOINT` | no                   | Explicit trace endpoint; overrides `<OTEL_EXPORTER_OTLP_ENDPOINT>/v1/traces`                                       |
+| `OTEL_SDK_DISABLED`                  | no                   | Set `true` only for local debugging                                                                                |
+| `PROMETHEUS_PUSHGATEWAY_URL`         | no                   | Optional Pushgateway URL for worker activity metrics when workers cannot be scraped                                |
+| `METRICS_BEARER_TOKEN`               | yes                  | Bearer token required for API `GET /metrics` in production. Prometheus must send `Authorization: Bearer <token>`.  |
+| `API_BASE_URL`                       | yes                  | Public API origin, e.g. `https://api.example.com`                                                                  |
 | `NEXT_PUBLIC_TIXKIT_API_BASE_URL`    | yes (checkout)       | Public API origin with `/v1` suffix; required at frontend image build time and runtime                             |
 | `NEXT_PUBLIC_ADMIN_API_BASE_URL`     | yes (admin)          | Public API origin; required at admin image build time and runtime                                                  |
 | `NEXT_PUBLIC_API_BASE_URL`           | yes (admin legacy)   | Public API origin with `/v1` suffix; required for admin image builds that still consume the legacy public variable |
-| `CORS_ALLOWED_ORIGINS`               | yes                  | Comma-separated browser origins allowed to make credentialed API requests, e.g. checkout and admin origins        |
-| `TRUST_PROXY`                        | yes (behind ingress) | Fastify trusted proxy setting for `X-Forwarded-For`; use ingress/controller CIDRs or trusted hop count            |
+| `CORS_ALLOWED_ORIGINS`               | yes                  | Comma-separated browser origins allowed to make credentialed API requests, e.g. checkout and admin origins         |
+| `TRUST_PROXY`                        | yes (behind ingress) | Fastify trusted proxy setting for `X-Forwarded-For`; use ingress/controller CIDRs or trusted hop count             |
 
 ### Datastores
 
@@ -208,11 +208,11 @@ Phase 4 compatibility gap (C-056): managed Postgres/MySQL compatibility needs fo
 
 ### Temporal
 
-| Variable              | Required | Description                                                       |
-| --------------------- | -------- | ----------------------------------------------------------------- |
-| `TEMPORAL_ADDRESS`    | yes      | Temporal cluster address, e.g. `mycluster.tmprl.cloud:7233`       |
-| `TEMPORAL_NAMESPACE`  | yes      | Temporal namespace, e.g. `mytenant.production`                    |
-| `TEMPORAL_TASK_QUEUE` | yes      | Task queue used by the API and workers, e.g. `tixkit-production`  |
+| Variable              | Required | Description                                                      |
+| --------------------- | -------- | ---------------------------------------------------------------- |
+| `TEMPORAL_ADDRESS`    | yes      | Temporal cluster address, e.g. `mycluster.tmprl.cloud:7233`      |
+| `TEMPORAL_NAMESPACE`  | yes      | Temporal namespace, e.g. `mytenant.production`                   |
+| `TEMPORAL_TASK_QUEUE` | yes      | Task queue used by the API and workers, e.g. `tixkit-production` |
 
 ### Auth (Clerk)
 
