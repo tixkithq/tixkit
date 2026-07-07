@@ -278,6 +278,7 @@ export type CompletedUploadArtifact = {
 
 export type UploadArtifactDownload = {
   downloadUrl: string;
+  durable?: boolean;
 };
 
 export type WidgetImpressionInput = {

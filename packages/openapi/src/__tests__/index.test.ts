@@ -1125,6 +1125,27 @@ describe('openApiSpec', () => {
     ).toBe(false);
   });
 
+  it('documents durable upload artifact download responses', () => {
+    expect(openApiSpec.components.schemas.UploadArtifactDownload).toMatchObject({
+      required: ['downloadUrl'],
+      properties: {
+        downloadUrl: {
+          type: 'string',
+          description: expect.stringContaining('durable relative API path'),
+        },
+        durable: { type: 'boolean' },
+      },
+    });
+    expect(
+      openApiSpec.components.schemas.UploadArtifactDownload.properties.downloadUrl,
+    ).not.toHaveProperty('format');
+    expect(
+      openApiSpec.paths['/upload-artifacts/{artifactId}/download'].get.responses['200'].content[
+        'application/json'
+      ].schema,
+    ).toEqual({ $ref: '#/components/schemas/UploadArtifactDownload' });
+  });
+
   it('documents the atomic checkout-question reorder contract', () => {
     const path = openApiSpec.paths['/events/{eventId}/questions/reorder'];
     expect(path.post).toBeDefined();

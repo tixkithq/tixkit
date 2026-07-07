@@ -17,6 +17,7 @@ import {
   type PrivacyRequestInput,
   type PublicAvailabilityItem,
   type SmsTemplateDocument,
+  type UploadArtifactDownload,
   type UploadPurpose,
   type WebhookEvent,
 } from '../index.js';
@@ -2664,6 +2665,33 @@ describe('TixkitClient new resource methods', () => {
       contentType: 'image/png',
       sizeBytes: 1234,
       eventId: 'evt_1',
+    });
+  });
+
+  it('uploads.download returns durable relative URLs from the API contract', async () => {
+    expectTypeOf<UploadArtifactDownload>().toMatchTypeOf<{
+      downloadUrl: string;
+      durable?: boolean;
+    }>();
+    const fm = mockFetch(200, {
+      downloadUrl: '/v1/public/brand-logos/upl_logo_clean',
+      durable: true,
+    });
+    const c = new TixkitClient({
+      apiKey: 'tk_test_123',
+      apiBaseUrl: 'https://api.test',
+      maxRetries: 0,
+    });
+
+    const download = await c.uploads.download('upl_logo_clean');
+
+    expect(download).toEqual({
+      downloadUrl: '/v1/public/brand-logos/upl_logo_clean',
+      durable: true,
+    });
+    expect(getCall(fm)).toMatchObject({
+      url: 'https://api.test/v1/upload-artifacts/upl_logo_clean/download',
+      method: 'GET',
     });
   });
 

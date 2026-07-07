@@ -1556,7 +1556,11 @@ const rawOpenApiSpec = {
       UploadArtifactDownload: {
         type: 'object',
         properties: {
-          downloadUrl: { type: 'string', format: 'uri' },
+          downloadUrl: {
+            type: 'string',
+            description: 'Absolute signed URL or durable relative API path for public artifacts.',
+          },
+          durable: { type: 'boolean' },
         },
         required: ['downloadUrl'],
       },
