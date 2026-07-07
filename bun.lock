@@ -288,7 +288,6 @@
         "@tixkit/content-email": "workspace:*",
         "@tixkit/db": "workspace:*",
         "@tixkit/domain": "workspace:*",
-        "zod": "^4.4.3",
       },
       "devDependencies": {
         "@types/node": "^22.20.0",
@@ -575,7 +574,6 @@
         "@temporalio/client": "^1.18.0",
         "@temporalio/common": "^1.18.0",
         "@temporalio/interceptors-opentelemetry": "^1.18.1",
-        "@temporalio/testing": "^1.18.0",
         "@temporalio/worker": "^1.18.0",
         "@temporalio/workflow": "^1.18.0",
         "@tixkit/content-core": "workspace:*",
@@ -593,6 +591,7 @@
         "ulid": "^2.3.0",
       },
       "devDependencies": {
+        "@temporalio/testing": "^1.18.0",
         "@types/node": "^22.20.0",
         "@types/qrcode": "^1.5.6",
         "tsx": "^4.22.0",

@@ -23,8 +23,7 @@
   "dependencies": {
     "@tixkit/content-email": "workspace:*",
     "@tixkit/db": "workspace:*",
-    "@tixkit/domain": "workspace:*",
-    "zod": "^4.4.3"
+    "@tixkit/domain": "workspace:*"
   },
   "devDependencies": {
     "@types/node": "^22.20.0",
