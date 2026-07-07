@@ -275,6 +275,39 @@ describe('Email feedback webhook verification', () => {
     await app.close();
   });
 
+  it('retries provider-message feedback with payload tenant metadata until delivery is matched', async () => {
+    process.env.EMAIL_WEBHOOK_SECRET = 'whsec_email_test';
+    const state: EmailWebhookTestState = {
+      insertedEvents: [],
+      insertedSuppressions: [],
+      deliveryUpdates: [],
+      consentUpdates: [],
+    };
+    const app = await setupEmailWebhookApp(createMockDb(state) as Database);
+
+    const res = await app.inject(
+      signedEmailRequest({
+        id: 'postmark_evt_unmatched',
+        type: 'HardBounce',
+        message_id: 'postmark_msg_missing',
+        email: 'buyer@example.com',
+        metadata: {
+          tenantId: 'tnt_payload',
+        },
+      }),
+    );
+
+    expect(res.statusCode, res.body).toBe(503);
+    expect(res.headers['retry-after']).toBe('5');
+    expect(res.json().error.code).toBe('EMAIL_DELIVERY_NOT_READY');
+    expect(state.insertedEvents).toHaveLength(0);
+    expect(state.insertedSuppressions).toHaveLength(0);
+    expect(state.deliveryUpdates).toHaveLength(0);
+    expect(state.consentUpdates).toHaveLength(0);
+
+    await app.close();
+  });
+
   it('deduplicates repeated email provider events', async () => {
     process.env.EMAIL_WEBHOOK_SECRET = 'whsec_email_test';
     const state: EmailWebhookTestState = {

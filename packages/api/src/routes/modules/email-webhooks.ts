@@ -83,7 +83,7 @@ export const emailWebhookRoutes: FastifyPluginAsync = async (app) => {
           ? await deliveryRepo.findByProviderMessageId(provider, providerMessageId)
           : undefined;
 
-        if (providerMessageId && !delivery && !extractTrustedTenantId(body)) {
+        if (providerMessageId && !delivery) {
           return { duplicate: false, retryMissingDelivery: true };
         }
 
