@@ -828,114 +828,118 @@ export async function notifyExportCompleteActivity(input: {
 
     const downloadUrl = `/v1/exports/${input.exportId}/download`;
 
-    // Queue an admin notification email with the scoped download route.
-    // Look up the requesting user's email.
-    if (input.tenantId && input.requestedBy) {
-      const user = await db
-        .selectFrom('user_profiles')
-        .select(['email', 'tenant_id'])
-        .where('id', '=', input.requestedBy)
-        .executeTakeFirst();
-
-      if (user?.email) {
-        // Check for an active email provider route (use a platform default if no brand route).
-        const route = await db
-          .selectFrom('email_provider_routes')
-          .select(['id', 'brand_id'])
-          .where('tenant_id', '=', user.tenant_id)
-          .where('status', '=', 'active')
-          .where('smoke_send_verified', '=', true)
-          .orderBy('priority', 'asc')
+    try {
+      // Queue an admin notification email with the scoped download route.
+      // Look up the requesting user's email.
+      if (input.tenantId && input.requestedBy) {
+        const user = await db
+          .selectFrom('user_profiles')
+          .select(['email', 'tenant_id'])
+          .where('id', '=', input.requestedBy)
           .executeTakeFirst();
 
-        const templateVersion = await db
-          .selectFrom('notification_templates as template')
-          .innerJoin(
-            'notification_template_versions as version',
-            'version.template_id',
-            'template.id',
-          )
-          .select(['version.id'])
-          .where('template.tenant_id', '=', user.tenant_id)
-          .where('template.key', '=', 'staff-order-notification')
-          .where('version.is_default', '=', true)
-          .executeTakeFirst();
+        if (user?.email) {
+          // Check for an active email provider route (use a platform default if no brand route).
+          const route = await db
+            .selectFrom('email_provider_routes')
+            .select(['id', 'brand_id'])
+            .where('tenant_id', '=', user.tenant_id)
+            .where('status', '=', 'active')
+            .where('smoke_send_verified', '=', true)
+            .orderBy('priority', 'asc')
+            .executeTakeFirst();
 
-        if (route && templateVersion) {
-          const { EmailJobRepository } = await import('@tixkit/db');
-          const job = await new EmailJobRepository(db).create({
-            tenantId: user.tenant_id,
-            brandId: route.brand_id,
-            templateKey: 'staff-order-notification',
-            templateVersionId: templateVersion.id,
-            toEmail: user.email,
-            variables: {
-              exportId: input.exportId,
-              downloadUrl,
-              notificationType: 'staff',
-            },
-            providerRouteId: route.id,
-            priority: 'normal',
-            idempotencyKey: `export-complete:${input.exportId}`,
-          });
+          const templateVersion = await db
+            .selectFrom('notification_templates as template')
+            .innerJoin(
+              'notification_template_versions as version',
+              'version.template_id',
+              'template.id',
+            )
+            .select(['version.id'])
+            .where('template.tenant_id', '=', user.tenant_id)
+            .where('template.key', '=', 'staff-order-notification')
+            .where('version.is_default', '=', true)
+            .executeTakeFirst();
 
-          // Start the notification delivery workflow.
-          try {
-            const { Connection, Client } = await import('@temporalio/client');
-            const { notificationDeliveryWorkflow } = await import('../workflows/notification.js');
-            const { notificationWorkflowId, NOTIFICATION_WORKFLOW_VERSION } =
-              await import('../shared/types.js');
-            const temporalAddress = process.env.TEMPORAL_ADDRESS ?? 'localhost:7233';
-            const temporalNamespace = process.env.TEMPORAL_NAMESPACE ?? 'default';
-            const temporalTaskQueue = process.env.TEMPORAL_TASK_QUEUE ?? 'tixkit';
-            const connection = await Connection.connect({ address: temporalAddress });
-            const client = new Client({ connection, namespace: temporalNamespace });
-            const workflowId = notificationWorkflowId(job.id);
+          if (route && templateVersion) {
+            const { EmailJobRepository } = await import('@tixkit/db');
+            const job = await new EmailJobRepository(db).create({
+              tenantId: user.tenant_id,
+              brandId: route.brand_id,
+              templateKey: 'staff-order-notification',
+              templateVersionId: templateVersion.id,
+              toEmail: user.email,
+              variables: {
+                exportId: input.exportId,
+                downloadUrl,
+                notificationType: 'staff',
+              },
+              providerRouteId: route.id,
+              priority: 'normal',
+              idempotencyKey: `export-complete:${input.exportId}`,
+            });
+
+            // Start the notification delivery workflow.
             try {
-              await client.workflow.start(notificationDeliveryWorkflow, {
-                taskQueue: temporalTaskQueue,
-                workflowId,
-                args: [
-                  {
-                    version: NOTIFICATION_WORKFLOW_VERSION,
-                    jobId: job.id,
-                    tenantId: user.tenant_id,
-                    brandId: route.brand_id,
-                    templateKey: 'staff-order-notification',
-                    templateVersionId: templateVersion.id,
-                    toEmail: user.email,
-                    variables: {
-                      exportId: input.exportId,
-                      downloadUrl,
+              const { Connection, Client } = await import('@temporalio/client');
+              const { notificationDeliveryWorkflow } = await import('../workflows/notification.js');
+              const { notificationWorkflowId, NOTIFICATION_WORKFLOW_VERSION } =
+                await import('../shared/types.js');
+              const temporalAddress = process.env.TEMPORAL_ADDRESS ?? 'localhost:7233';
+              const temporalNamespace = process.env.TEMPORAL_NAMESPACE ?? 'default';
+              const temporalTaskQueue = process.env.TEMPORAL_TASK_QUEUE ?? 'tixkit';
+              const connection = await Connection.connect({ address: temporalAddress });
+              const client = new Client({ connection, namespace: temporalNamespace });
+              const workflowId = notificationWorkflowId(job.id);
+              try {
+                await client.workflow.start(notificationDeliveryWorkflow, {
+                  taskQueue: temporalTaskQueue,
+                  workflowId,
+                  args: [
+                    {
+                      version: NOTIFICATION_WORKFLOW_VERSION,
+                      jobId: job.id,
+                      tenantId: user.tenant_id,
+                      brandId: route.brand_id,
+                      templateKey: 'staff-order-notification',
+                      templateVersionId: templateVersion.id,
+                      toEmail: user.email,
+                      variables: {
+                        exportId: input.exportId,
+                        downloadUrl,
+                        notificationType: 'staff',
+                      },
+                      providerRouteId: route.id,
                       notificationType: 'staff',
                     },
-                    providerRouteId: route.id,
-                    notificationType: 'staff',
-                  },
-                ],
-              });
-            } catch (err) {
-              if (
-                !(
-                  err instanceof Error &&
-                  (err.name === 'WorkflowExecutionAlreadyStartedError' ||
-                    err.message.includes('already started'))
-                )
-              ) {
-                throw err;
+                  ],
+                });
+              } catch (err) {
+                if (
+                  !(
+                    err instanceof Error &&
+                    (err.name === 'WorkflowExecutionAlreadyStartedError' ||
+                      err.message.includes('already started'))
+                  )
+                ) {
+                  throw err;
+                }
               }
+            } catch {
+              // Non-fatal: email job is queued for later drainage.
             }
-          } catch {
-            // Non-fatal: email job is queued for later drainage.
           }
         }
       }
+    } catch {
+      return okResult({ notified: false });
     }
 
     return okResult({ notified: true });
   } catch (err) {
     return errResult(
-      'EXPORT_NOTIFICATION_FAILED',
+      'EXPORT_COMPLETION_FAILED',
       err instanceof Error ? err.message : 'Unknown error',
       true,
     );

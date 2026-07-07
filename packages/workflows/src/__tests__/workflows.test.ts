@@ -1763,12 +1763,32 @@ describe('exportWorkflow', () => {
     });
   });
 
-  it('marks the export failed after retryable completion notification failures are exhausted', async () => {
+  it('keeps completed exports completed after retryable notification failures are exhausted', async () => {
     let attempts = 0;
     let failedInput: Record<string, unknown> | undefined;
     setActivity('notifyExportCompleteActivity', async () => {
       attempts += 1;
       return errResult('EXPORT_NOTIFICATION_FAILED', 'Database unavailable', true);
+    });
+    setActivity('markExportFailedActivity', async (activityInput: Record<string, unknown>) => {
+      failedInput = activityInput;
+      return okResult({ failed: true });
+    });
+
+    const result = await exportWorkflow(input);
+
+    expect(result.status).toBe('completed');
+    expect(attempts).toBe(3);
+    expect(mockState.sleeps).toEqual(['10 seconds', '20 seconds']);
+    expect(failedInput).toBeUndefined();
+  });
+
+  it('marks the export failed after retryable completion persistence failures are exhausted', async () => {
+    let attempts = 0;
+    let failedInput: Record<string, unknown> | undefined;
+    setActivity('notifyExportCompleteActivity', async () => {
+      attempts += 1;
+      return errResult('EXPORT_COMPLETION_FAILED', 'Database unavailable', true);
     });
     setActivity('markExportFailedActivity', async (activityInput: Record<string, unknown>) => {
       failedInput = activityInput;

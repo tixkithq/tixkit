@@ -52,6 +52,7 @@ const dbState = vi.hoisted(() => ({
   providerRoute: { id: 'epr_1', brand_id: 'brd_1' } as Record<string, unknown> | null,
   templateVersion: { id: 'ntv_1' } as Record<string, unknown> | null,
   createdJobs: [] as Record<string, unknown>[],
+  emailJobCreateError: null as Error | null,
   exportEvents: [] as Record<string, unknown>[],
   scanLogSelects: [] as unknown[][],
   scanLogOrderBys: [] as Array<{ column: string; direction: string }>,
@@ -116,6 +117,7 @@ const dbState = vi.hoisted(() => ({
 vi.mock('@tixkit/db', () => {
   class EmailJobRepository {
     async create(input: Record<string, unknown>) {
+      if (dbState.emailJobCreateError) throw dbState.emailJobCreateError;
       dbState.createdJobs.push(input);
       return { id: 'emj_1', status: 'pending', ...input };
     }
@@ -564,6 +566,7 @@ describe('notifyExportCompleteActivity', () => {
     dbState.providerRoute = { id: 'epr_1', brand_id: 'brd_1' };
     dbState.templateVersion = { id: 'ntv_1' };
     dbState.createdJobs = [];
+    dbState.emailJobCreateError = null;
   });
 
   it('updates export job status to completed and sets file_url', async () => {
@@ -663,6 +666,34 @@ describe('notifyExportCompleteActivity', () => {
       downloadUrl: '/v1/exports/exp_1/download',
     });
     expect(dbState.createdJobs[0].variables).not.toHaveProperty('fileUrl');
+  });
+
+  it('keeps the completed export when notification job queueing fails', async () => {
+    dbState.emailJobCreateError = new Error('email job database unavailable');
+
+    const result = await notifyExportCompleteActivity({
+      exportId: 'exp_1',
+      fileUrl: 'https://bucket.s3.amazonaws.com/exports/exp_1.csv',
+      requestedBy: 'usr_1',
+      tenantId: 'tnt_1',
+    });
+
+    expect(result).toMatchObject({ ok: true, value: { notified: false } });
+    expect(dbState.updateCalls).toContainEqual(
+      expect.objectContaining({
+        table: 'export_jobs',
+        status: 'completed',
+        file_url: 'https://bucket.s3.amazonaws.com/exports/exp_1.csv',
+      }),
+    );
+    expect(dbState.exportEvents).toContainEqual(
+      expect.objectContaining({
+        tenant_id: 'tnt_1',
+        export_job_id: 'exp_1',
+        status: 'completed',
+      }),
+    );
+    expect(dbState.createdJobs).toHaveLength(0);
   });
 
   it('still marks export as completed when no user email is found', async () => {

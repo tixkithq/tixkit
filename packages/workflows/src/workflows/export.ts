@@ -78,6 +78,9 @@ export async function exportWorkflow(input: ExportWorkflowInput): Promise<{ stat
   );
 
   if (!notifyResult.ok) {
+    if (notifyResult.errorCode === 'EXPORT_NOTIFICATION_FAILED') {
+      return { status: 'completed' };
+    }
     await markExportFailedActivity({ exportId: input.exportId, reason: notifyResult.message });
     return { status: 'failed' };
   }
