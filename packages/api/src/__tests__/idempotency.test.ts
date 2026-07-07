@@ -97,6 +97,7 @@ type InsertFailureOptions =
 function createMockDb(
   existingRecords: Record<string, unknown>[] = [],
   insertFailure: InsertFailureOptions = false,
+  updateFailure: InsertFailureOptions = false,
 ) {
   const records = [...existingRecords];
   let remainingInsertFailures =
@@ -107,6 +108,14 @@ function createMockDb(
       : insertFailure.failCount;
   const beforeInsertFailure =
     typeof insertFailure === 'boolean' ? undefined : insertFailure.beforeFail;
+  let remainingUpdateFailures =
+    typeof updateFailure === 'boolean'
+      ? updateFailure
+        ? Number.POSITIVE_INFINITY
+        : 0
+      : updateFailure.failCount;
+  const beforeUpdateFailure =
+    typeof updateFailure === 'boolean' ? undefined : updateFailure.beforeFail;
 
   const chainable = {
     selectFrom(_table: string) {
@@ -153,6 +162,11 @@ function createMockDb(
             where(_col: string, _op: string, val: unknown) {
               return {
                 execute() {
+                  if (remainingUpdateFailures > 0) {
+                    remainingUpdateFailures -= 1;
+                    beforeUpdateFailure?.(records);
+                    return Promise.reject(new Error('temporary completion write failure'));
+                  }
                   const found = records.find((r) => r.id === val);
                   if (found) {
                     Object.assign(found, vals);
@@ -203,6 +217,45 @@ describe('withIdempotency', () => {
     expect(handler).toHaveBeenCalledOnce();
     expect(records[0]?.status).toBe('completed');
     expect(records[0]?.response_status).toBe(201);
+  });
+
+  it('retries completed response persistence after a transient update failure', async () => {
+    const requestHash = hashRequest({ export: 'sales' });
+    const { db, records } = createMockDb([], false, { failCount: 1 });
+    const handler = vi.fn(async () => ({ status: 202, body: { exportId: 'exp_1' } }));
+
+    const result = await withIdempotency(
+      db,
+      {
+        key: 'idem-completion-retry',
+        tenantId: 'tnt_1',
+        requestHash,
+      },
+      handler,
+    );
+
+    expect(result).toEqual({ status: 202, body: { exportId: 'exp_1' } });
+    expect(handler).toHaveBeenCalledOnce();
+    expect(records[0]).toMatchObject({
+      key: 'idem-completion-retry',
+      status: 'completed',
+      response_status: 202,
+      response_body: JSON.stringify({ exportId: 'exp_1' }),
+    });
+
+    const replayHandler = vi.fn(async () => ({ status: 202, body: { exportId: 'duplicate' } }));
+    const replayed = await withIdempotency(
+      db,
+      {
+        key: 'idem-completion-retry',
+        tenantId: 'tnt_1',
+        requestHash,
+      },
+      replayHandler,
+    );
+
+    expect(replayed).toEqual({ status: 202, body: { exportId: 'exp_1' } });
+    expect(replayHandler).not.toHaveBeenCalled();
   });
 
   it('replays the non-expired stored response on second use with same payload', async () => {

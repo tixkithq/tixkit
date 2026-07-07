@@ -19,6 +19,9 @@ type IdempotencyRecord = {
   status?: string;
 };
 
+const COMPLETION_UPDATE_MAX_ATTEMPTS = 3;
+const COMPLETION_UPDATE_BASE_DELAY_MS = 10;
+
 export function hashRequest(payload: unknown): string {
   return createHash('sha256')
     .update(stableStringify(payload ?? null))
@@ -153,35 +156,27 @@ export async function withIdempotency(
       await deleteRecord(db, recordId);
       throw err;
     }
-    await db
-      .updateTable('idempotency_records')
-      .set({
-        response_status: error.statusCode ?? 500,
-        response_body: JSON.stringify({
-          error: {
-            code: error.code ?? 'VALIDATION_ERROR',
-            message: error.message,
-          },
-        }),
-        status: 'completed',
-      })
-      .where('id', '=', recordId)
-      .execute();
+    await completeRecordWithRetry(db, recordId, {
+      response_status: error.statusCode ?? 500,
+      response_body: JSON.stringify({
+        error: {
+          code: error.code ?? 'VALIDATION_ERROR',
+          message: error.message,
+        },
+      }),
+      status: 'completed',
+    });
     throw err;
   }
 
   if (result.status >= 500) {
     await deleteRecord(db, recordId);
   } else {
-    await db
-      .updateTable('idempotency_records')
-      .set({
-        response_status: result.status,
-        response_body: JSON.stringify(result.body),
-        status: 'completed',
-      })
-      .where('id', '=', recordId)
-      .execute();
+    await completeRecordWithRetry(db, recordId, {
+      response_status: result.status,
+      response_body: JSON.stringify(result.body),
+      status: 'completed',
+    });
   }
 
   return result;
@@ -202,6 +197,33 @@ async function findRecord(
 
 async function deleteRecord(db: Database, recordId: string): Promise<void> {
   await db.deleteFrom('idempotency_records').where('id', '=', recordId).execute();
+}
+
+async function completeRecordWithRetry(
+  db: Database,
+  recordId: string,
+  values: {
+    response_status: number;
+    response_body: string;
+    status: 'completed';
+  },
+): Promise<void> {
+  let lastError: unknown;
+  for (let attempt = 0; attempt < COMPLETION_UPDATE_MAX_ATTEMPTS; attempt += 1) {
+    try {
+      // eslint-disable-next-line no-await-in-loop -- completion persistence must retry the same reserved idempotency record before surfacing failure.
+      await db.updateTable('idempotency_records').set(values).where('id', '=', recordId).execute();
+      return;
+    } catch (error) {
+      lastError = error;
+      if (attempt + 1 >= COMPLETION_UPDATE_MAX_ATTEMPTS) break;
+      const delayMs = COMPLETION_UPDATE_BASE_DELAY_MS * 2 ** attempt;
+      // eslint-disable-next-line no-await-in-loop -- bounded backoff keeps the original side-effect result recoverable for immediate retries.
+      await new Promise((resolve) => setTimeout(resolve, delayMs));
+    }
+  }
+
+  throw lastError;
 }
 
 function isExpired(record: IdempotencyRecord): boolean {
