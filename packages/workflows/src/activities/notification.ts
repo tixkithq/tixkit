@@ -209,6 +209,45 @@ export async function markEmailJobSuppressedActivity(input: {
   }
 }
 
+export async function markEmailJobFailedActivity(input: {
+  jobId: string;
+  tenantId: string;
+  activityContext: string;
+  errorCode: string;
+  message: string;
+}): Promise<WorkflowActivityResult<{ failed: true; errorCode: string; message: string }>> {
+  const db = createDb();
+  try {
+    const jobRepo = new EmailJobRepository(db);
+    const job = await jobRepo.findById(input.jobId);
+    if (!job || job.tenant_id !== input.tenantId) {
+      return errResult('EMAIL_JOB_NOT_FOUND', 'Email job not found', false);
+    }
+
+    if (job.status === 'sent') {
+      return errResult('EMAIL_JOB_ALREADY_SENT', 'Email job was already sent', false);
+    }
+
+    if (job.status === 'suppressed') {
+      return errResult('EMAIL_JOB_ALREADY_SUPPRESSED', 'Email job was already suppressed', false);
+    }
+
+    if (job.status !== 'failed') {
+      await jobRepo.update(input.jobId, { status: 'failed' });
+    }
+
+    return okResult({ failed: true, errorCode: input.errorCode, message: input.message });
+  } catch (err) {
+    return errResult(
+      'EMAIL_JOB_FAILURE_UPDATE_FAILED',
+      err instanceof Error ? err.message : 'Unknown error',
+      true,
+    );
+  } finally {
+    await db.destroy();
+  }
+}
+
 export async function checkSmsConsentActivity(input: {
   phone: string;
   tenantId: string;

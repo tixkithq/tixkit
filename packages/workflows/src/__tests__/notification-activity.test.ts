@@ -12,6 +12,7 @@ const dbState = vi.hoisted(() => ({
     to_email: 'buyer@example.com',
     to_name: 'Buyer',
     variables: JSON.stringify({ notificationType: 'bulk' }),
+    status: 'queued',
   },
   smsJob: {
     id: 'smj_1',
@@ -200,7 +201,7 @@ vi.mock('@tixkit/db', () => {
   };
 });
 
-const { renderTemplateActivity, sendEmailActivity, sendSmsActivity } =
+const { renderTemplateActivity, sendEmailActivity, sendSmsActivity, markEmailJobFailedActivity } =
   await import('../activities/notification.js');
 
 function activeEmailRoute(overrides: Record<string, unknown> = {}) {
@@ -241,6 +242,7 @@ describe('notification activity deliverability gating', () => {
   beforeEach(() => {
     dbState.emailJob.template_version_id = 'ntv_1';
     dbState.emailJob.variables = JSON.stringify({ notificationType: 'bulk' });
+    dbState.emailJob.status = 'queued';
     dbState.smsJob.variables = JSON.stringify({ contentVersionId: 'cver_1' });
     dbState.emailRoutes = [];
     dbState.smsRoutes = [];
@@ -462,6 +464,43 @@ describe('notification activity deliverability gating', () => {
       errorCode: 'CONTENT_TEMPLATE_SCOPE_REQUIRED',
       retryable: false,
     });
+  });
+
+  it('marks tenant-scoped email jobs failed for terminal workflow failures', async () => {
+    const result = await markEmailJobFailedActivity({
+      jobId: 'emj_1',
+      tenantId: 'tnt_1',
+      activityContext: 'Email render',
+      errorCode: 'EMAIL_TEMPLATE_INVALID',
+      message: 'Published email template is invalid',
+    });
+
+    expect(result).toMatchObject({
+      ok: true,
+      value: {
+        failed: true,
+        errorCode: 'EMAIL_TEMPLATE_INVALID',
+        message: 'Published email template is invalid',
+      },
+    });
+    expect(dbState.emailJobUpdates).toEqual([{ status: 'failed' }]);
+  });
+
+  it('does not mark email jobs failed across tenant boundaries', async () => {
+    const result = await markEmailJobFailedActivity({
+      jobId: 'emj_1',
+      tenantId: 'tnt_other',
+      activityContext: 'Email render',
+      errorCode: 'EMAIL_TEMPLATE_INVALID',
+      message: 'Published email template is invalid',
+    });
+
+    expect(result).toMatchObject({
+      ok: false,
+      errorCode: 'EMAIL_JOB_NOT_FOUND',
+      retryable: false,
+    });
+    expect(dbState.emailJobUpdates).toHaveLength(0);
   });
 
   it('fails closed when configured email routes lack smoke-send evidence', async () => {

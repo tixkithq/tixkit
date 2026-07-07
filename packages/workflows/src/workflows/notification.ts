@@ -8,6 +8,7 @@ const {
   checkConsentActivity,
   renderTemplateActivity,
   markEmailJobSuppressedActivity,
+  markEmailJobFailedActivity,
 } = proxyActivities<{
   sendEmailActivity(input: {
     jobId: string;
@@ -46,6 +47,13 @@ const {
     tenantId: string;
     reason: 'suppression' | 'consent';
   }): Promise<WorkflowActivityResult<{ suppressed: true }>>;
+  markEmailJobFailedActivity(input: {
+    jobId: string;
+    tenantId: string;
+    activityContext: string;
+    errorCode: string;
+    message: string;
+  }): Promise<WorkflowActivityResult<{ failed: true; errorCode: string; message: string }>>;
 }>({
   startToCloseTimeout: '30 seconds',
   retry: {
@@ -99,6 +107,30 @@ function handleDeliveryActivityFailure(
   return { status: 'failed' };
 }
 
+async function handleEmailDeliveryActivityFailure(
+  input: Pick<NotificationDeliveryWorkflowInput, 'jobId' | 'tenantId'>,
+  activityContext: string,
+  result: Extract<WorkflowActivityResult<unknown>, { ok: false }>,
+): Promise<{ status: 'failed' }> {
+  if (result.retryable) {
+    throw new Error(`${activityContext} failed (${result.errorCode}): ${result.message}`);
+  }
+
+  const markResult = await markEmailJobFailedActivity({
+    jobId: input.jobId,
+    tenantId: input.tenantId,
+    activityContext,
+    errorCode: result.errorCode,
+    message: result.message,
+  });
+
+  if (!markResult.ok) {
+    return handleDeliveryActivityFailure('Email failure status update', markResult);
+  }
+
+  return { status: 'failed' };
+}
+
 function handleSmsDeliveryActivityFailure(
   result: Extract<WorkflowActivityResult<unknown>, { ok: false }>,
 ): { status: 'failed' | 'suppressed' } {
@@ -121,7 +153,7 @@ export async function notificationDeliveryWorkflow(
   });
 
   if (!suppressionResult.ok) {
-    return handleDeliveryActivityFailure('Email suppression check', suppressionResult);
+    return handleEmailDeliveryActivityFailure(input, 'Email suppression check', suppressionResult);
   }
 
   if (suppressionResult.value.suppressed && input.notificationType !== 'transactional') {
@@ -131,7 +163,11 @@ export async function notificationDeliveryWorkflow(
       reason: 'suppression',
     });
     if (!markResult.ok) {
-      return handleDeliveryActivityFailure('Email suppression status update', markResult);
+      return handleEmailDeliveryActivityFailure(
+        input,
+        'Email suppression status update',
+        markResult,
+      );
     }
     return { status: 'suppressed' };
   }
@@ -145,7 +181,7 @@ export async function notificationDeliveryWorkflow(
     });
 
     if (!consentResult.ok) {
-      return handleDeliveryActivityFailure('Email consent check', consentResult);
+      return handleEmailDeliveryActivityFailure(input, 'Email consent check', consentResult);
     }
 
     if (!consentResult.value.allowed) {
@@ -155,7 +191,11 @@ export async function notificationDeliveryWorkflow(
         reason: 'consent',
       });
       if (!markResult.ok) {
-        return handleDeliveryActivityFailure('Email suppression status update', markResult);
+        return handleEmailDeliveryActivityFailure(
+          input,
+          'Email suppression status update',
+          markResult,
+        );
       }
       return { status: 'suppressed' };
     }
@@ -171,7 +211,7 @@ export async function notificationDeliveryWorkflow(
   });
 
   if (!renderResult.ok) {
-    return handleDeliveryActivityFailure('Email render', renderResult);
+    return handleEmailDeliveryActivityFailure(input, 'Email render', renderResult);
   }
 
   // Step 3: Send email with rendered content
@@ -184,7 +224,7 @@ export async function notificationDeliveryWorkflow(
   });
 
   if (!sendResult.ok) {
-    return handleDeliveryActivityFailure('Email delivery', sendResult);
+    return handleEmailDeliveryActivityFailure(input, 'Email delivery', sendResult);
   }
 
   return { status: 'sent' };

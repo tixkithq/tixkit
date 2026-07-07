@@ -212,6 +212,8 @@ const defaultActivities = {
   checkSuppressionActivity: async () => okResult({ suppressed: false }),
   checkConsentActivity: async () => okResult({ allowed: true }),
   markEmailJobSuppressedActivity: async () => okResult({ suppressed: true }),
+  markEmailJobFailedActivity: async () =>
+    okResult({ failed: true, errorCode: 'EMAIL_FAILURE', message: 'Email failed' }),
   renderTemplateActivity: async () =>
     okResult({
       subject: 'Your tickets',
@@ -1040,13 +1042,72 @@ describe('notificationDeliveryWorkflow', () => {
   });
 
   it('keeps non-retryable send failures failed without throwing', async () => {
+    const markAttempts: Array<Record<string, unknown>> = [];
     setActivity('sendEmailActivity', async () =>
       errResult('EMAIL_SENDER_NOT_VERIFIED', 'Sender identity is not verified', false),
     );
+    setActivity('markEmailJobFailedActivity', async (input) => {
+      markAttempts.push(input);
+      return okResult({
+        failed: true,
+        errorCode: String(input.errorCode),
+        message: String(input.message),
+      });
+    });
 
     await expect(notificationDeliveryWorkflow(makeNotificationDeliveryInput())).resolves.toEqual({
       status: 'failed',
     });
+    expect(markAttempts).toEqual([
+      {
+        jobId: 'emj_test_1',
+        tenantId: 'tnt_1',
+        activityContext: 'Email delivery',
+        errorCode: 'EMAIL_SENDER_NOT_VERIFIED',
+        message: 'Sender identity is not verified',
+      },
+    ]);
+  });
+
+  it('marks non-retryable render failures failed before returning failed', async () => {
+    const markAttempts: Array<Record<string, unknown>> = [];
+    setActivity('renderTemplateActivity', async () =>
+      errResult('EMAIL_TEMPLATE_INVALID', 'Published email template is invalid', false),
+    );
+    setActivity('markEmailJobFailedActivity', async (input) => {
+      markAttempts.push(input);
+      return okResult({
+        failed: true,
+        errorCode: String(input.errorCode),
+        message: String(input.message),
+      });
+    });
+
+    await expect(notificationDeliveryWorkflow(makeNotificationDeliveryInput())).resolves.toEqual({
+      status: 'failed',
+    });
+    expect(markAttempts).toEqual([
+      {
+        jobId: 'emj_test_1',
+        tenantId: 'tnt_1',
+        activityContext: 'Email render',
+        errorCode: 'EMAIL_TEMPLATE_INVALID',
+        message: 'Published email template is invalid',
+      },
+    ]);
+  });
+
+  it('throws retryable failed-job update failures instead of leaving queued jobs silent', async () => {
+    setActivity('renderTemplateActivity', async () =>
+      errResult('EMAIL_TEMPLATE_INVALID', 'Published email template is invalid', false),
+    );
+    setActivity('markEmailJobFailedActivity', async () =>
+      errResult('EMAIL_JOB_FAILURE_UPDATE_FAILED', 'database timeout', true),
+    );
+
+    await expect(notificationDeliveryWorkflow(makeNotificationDeliveryInput())).rejects.toThrow(
+      'Email failure status update failed (EMAIL_JOB_FAILURE_UPDATE_FAILED): database timeout',
+    );
   });
 
   it('throws retryable suppression check failures so temporary lookup errors are retried', async () => {
