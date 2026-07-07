@@ -32,57 +32,51 @@ import {
   updateEventSchema,
 } from '../../http/schemas.js';
 
-const marketingIntegrationSchema = z
-  .object({
-    provider: z.enum(['ga4', 'meta_pixel', 'generic_tag']),
-    config: z.record(z.string(), z.unknown()),
-    consentRequired: z.boolean().default(true),
-    status: z.enum(['active', 'disabled']).default('active'),
-  })
-  .strict()
-  .superRefine((value, ctx) => {
-    if (value.provider === 'ga4' && typeof value.config.measurementId !== 'string') {
-      ctx.addIssue({
-        code: z.ZodIssueCode.custom,
-        path: ['config', 'measurementId'],
-        message: 'measurementId is required for GA4 integrations',
-      });
-    }
-    if (value.provider === 'meta_pixel' && typeof value.config.pixelId !== 'string') {
-      ctx.addIssue({
-        code: z.ZodIssueCode.custom,
-        path: ['config', 'pixelId'],
-        message: 'pixelId is required for Meta Pixel integrations',
-      });
-    }
-    if (value.provider === 'generic_tag') {
-      const pixelUrl = value.config.pixelUrl;
-      if (typeof pixelUrl !== 'string') {
-        ctx.addIssue({
-          code: z.ZodIssueCode.custom,
-          path: ['config', 'pixelUrl'],
-          message: 'pixelUrl is required for generic tag integrations',
-        });
-        return;
-      }
-      try {
-        const parsed = new URL(pixelUrl);
-        if (parsed.protocol !== 'https:') {
-          ctx.addIssue({
-            code: z.ZodIssueCode.custom,
-            path: ['config', 'pixelUrl'],
-            message: 'pixelUrl must use https',
-          });
-        }
-      } catch {
-        ctx.addIssue({
-          code: z.ZodIssueCode.custom,
-          path: ['config', 'pixelUrl'],
-          message: 'pixelUrl must be a valid URL',
-        });
-      }
-    }
-  });
+const marketingIntegrationStatusSchema = z.enum(['active', 'disabled']).default('active');
+const marketingIntegrationConsentSchema = z.boolean().default(true);
+const marketingIntegrationSchema = z.discriminatedUnion('provider', [
+  z
+    .object({
+      provider: z.literal('ga4'),
+      config: z
+        .object({
+          measurementId: z.string().min(1, 'measurementId is required for GA4 integrations'),
+        })
+        .strict(),
+      consentRequired: marketingIntegrationConsentSchema,
+      status: marketingIntegrationStatusSchema,
+    })
+    .strict(),
+  z
+    .object({
+      provider: z.literal('meta_pixel'),
+      config: z
+        .object({
+          pixelId: z.string().min(1, 'pixelId is required for Meta Pixel integrations'),
+        })
+        .strict(),
+      consentRequired: marketingIntegrationConsentSchema,
+      status: marketingIntegrationStatusSchema,
+    })
+    .strict(),
+  z
+    .object({
+      provider: z.literal('generic_tag'),
+      config: z
+        .object({
+          pixelUrl: z
+            .string()
+            .url('pixelUrl must be a valid URL')
+            .refine((value) => new URL(value).protocol === 'https:', {
+              message: 'pixelUrl must use https',
+            }),
+        })
+        .strict(),
+      consentRequired: marketingIntegrationConsentSchema,
+      status: marketingIntegrationStatusSchema,
+    })
+    .strict(),
+]);
 
 const mssqlDuplicateInsertErrorNumbers = new Set([2601, 2627]);
 const marketingIntegrationEventProviderConstraint = 'uniq_marketing_integrations_event_provider';

@@ -25,6 +25,11 @@ type BoxOfficeSettings = {
   requireBuyerEmail: boolean;
   receiptMode: (typeof boxOfficeReceiptModes)[number];
 };
+type PublicMarketingIntegrationConfig =
+  | { measurementId: string }
+  | { pixelId: string }
+  | { pixelUrl: string }
+  | Record<string, never>;
 const defaultBoxOfficeSettings: BoxOfficeSettings = {
   enabled: true,
   allowedTenderTypes: [...boxOfficeTenderTypes],
@@ -94,6 +99,25 @@ export function toIso(value: Date | string | null | undefined): string | undefin
 
 function boolValue(value: unknown): boolean {
   return value === true || value === 1;
+}
+
+function publicMarketingIntegrationConfig(
+  provider: unknown,
+  value: unknown,
+): PublicMarketingIntegrationConfig {
+  const config = parseJsonValue<unknown>(value, {});
+  if (config == null || typeof config !== 'object' || Array.isArray(config)) return {};
+  const record = config as Record<string, unknown>;
+  if (provider === 'ga4' && typeof record.measurementId === 'string') {
+    return { measurementId: record.measurementId };
+  }
+  if (provider === 'meta_pixel' && typeof record.pixelId === 'string') {
+    return { pixelId: record.pixelId };
+  }
+  if (provider === 'generic_tag' && typeof record.pixelUrl === 'string') {
+    return { pixelUrl: record.pixelUrl };
+  }
+  return {};
 }
 
 export function parsePagination(query: unknown): PaginationInput {
@@ -240,9 +264,12 @@ export function serializeMarketingIntegration(
   row: Record<string, unknown>,
   options: { public?: boolean } = {},
 ) {
+  const config = options.public
+    ? publicMarketingIntegrationConfig(row.provider, row.config)
+    : parseJsonValue(row.config, {});
   const base = {
     provider: row.provider,
-    config: parseJsonValue(row.config, {}),
+    config,
     consentRequired: Boolean(row.consent_required),
     status: row.status,
   };

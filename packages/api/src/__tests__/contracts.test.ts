@@ -12,6 +12,7 @@ import {
   pageEnvelope,
   parsePagination,
   serializeBrandTheme,
+  serializeMarketingIntegration,
   serializeOrder,
 } from '../http/contracts.js';
 import { MAX_OFFLINE_SYNC_SCANS, OFFLINE_SYNC_JSON_BODY_LIMIT_BYTES } from '../http/schemas.js';
@@ -60,6 +61,44 @@ describe('API contract helpers', () => {
       primaryColor: '#222222',
       logoArtifactId: 'upl_logo',
       logoUrl: '/v1/public/brand-logos/upl_logo',
+    });
+  });
+
+  it('redacts non-public marketing integration config fields for anonymous contracts', () => {
+    expect(
+      serializeMarketingIntegration(
+        {
+          provider: 'ga4',
+          config: JSON.stringify({
+            measurementId: 'G-PUBLIC',
+            apiKey: 'secret-key',
+            accessToken: 'secret-token',
+          }),
+          consent_required: true,
+          status: 'active',
+        },
+        { public: true },
+      ),
+    ).toEqual({
+      provider: 'ga4',
+      config: { measurementId: 'G-PUBLIC' },
+      consentRequired: true,
+      status: 'active',
+    });
+
+    expect(
+      serializeMarketingIntegration(
+        {
+          provider: 'meta_pixel',
+          config: JSON.stringify({ pixelId: '123456', secret: 'do-not-return' }),
+          consent_required: false,
+          status: 'active',
+        },
+        { public: true },
+      ),
+    ).toMatchObject({
+      provider: 'meta_pixel',
+      config: { pixelId: '123456' },
     });
   });
 

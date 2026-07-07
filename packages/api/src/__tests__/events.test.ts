@@ -558,6 +558,27 @@ describe('event routes', () => {
     await app.close();
   });
 
+  it('rejects unsupported marketing integration config fields', async () => {
+    const { db, inserted } = createEventMutationDb({
+      event: baseEventRow({ status: 'published' }),
+    });
+    const app = await setupEventApp(db, writePrincipal);
+
+    const response = await app.inject({
+      method: 'PUT',
+      url: '/events/evt_1/marketing-integrations/ga4',
+      payload: {
+        config: { measurementId: 'G-TEST123', apiKey: 'secret-key' },
+        consentRequired: true,
+        status: 'active',
+      },
+    });
+
+    expect(response.statusCode).toBe(400);
+    expect(inserted).toHaveLength(0);
+    await app.close();
+  });
+
   it('lists only marketing integrations that match the authorized event scope', async () => {
     const scopedIntegration = {
       id: 'mkt_scoped',
