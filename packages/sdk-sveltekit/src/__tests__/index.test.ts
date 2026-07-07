@@ -1,6 +1,7 @@
 import { createHmac } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
-import { readFileSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it, vi } from 'vitest';
@@ -385,14 +386,23 @@ describe('SvelteKit client helpers', () => {
 
   it('packs every package export target', async () => {
     const packageJson = JSON.parse(readFileSync(path.join(packageRoot, 'package.json'), 'utf-8'));
-    const packJson = execFileSync('npm', ['pack', '--dry-run', '--json'], {
-      cwd: packageRoot,
-      encoding: 'utf-8',
-      env: {
-        ...process.env,
-        npm_config_loglevel: 'silent',
-      },
-    });
+    const npmCache = mkdtempSync(path.join(tmpdir(), 'tixkit-sveltekit-npm-cache-'));
+    let packJson: string;
+
+    try {
+      packJson = execFileSync('npm', ['pack', '--dry-run', '--json'], {
+        cwd: packageRoot,
+        encoding: 'utf-8',
+        env: {
+          ...process.env,
+          npm_config_cache: npmCache,
+          npm_config_loglevel: 'silent',
+        },
+      });
+    } finally {
+      rmSync(npmCache, { force: true, recursive: true });
+    }
+
     const [pack] = JSON.parse(packJson) as [{ files: Array<{ path: string }> }];
     const packedFiles = new Set(pack.files.map((file) => file.path));
 

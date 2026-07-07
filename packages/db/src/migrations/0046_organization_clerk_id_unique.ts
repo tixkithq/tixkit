@@ -6,6 +6,46 @@ function isMssql(): boolean {
   return process.env.DB_DRIVER === 'mssql';
 }
 
+function isMysql(): boolean {
+  return process.env.DB_DRIVER === 'mysql';
+}
+
+async function clerkOrganizationIndexExists(db: Kysely<unknown>): Promise<boolean> {
+  const indexName = 'uniq_organizations_clerk_organization_id';
+
+  if (isMssql()) {
+    const result = await sql<{ exists: number }>`
+      select 1 as [exists]
+      from sys.indexes
+      where name = ${indexName}
+    `.execute(db);
+    return result.rows.length > 0;
+  }
+
+  if (isMysql()) {
+    const result = await sql<{ exists: number }>`
+      select 1 as \`exists\`
+      from information_schema.statistics
+      where table_schema = database()
+        and table_name = 'organizations'
+        and index_name = ${indexName}
+      limit 1
+    `.execute(db);
+    return result.rows.length > 0;
+  }
+
+  const result = await sql<{ exists: boolean }>`
+    select exists (
+      select 1
+      from pg_indexes
+      where schemaname = current_schema()
+        and tablename = 'organizations'
+        and indexname = ${indexName}
+    ) as exists
+  `.execute(db);
+  return result.rows[0]?.exists === true;
+}
+
 async function assertNoDuplicateClerkOrganizationIds(db: Kysely<unknown>): Promise<void> {
   const result = isMssql()
     ? await sql<{ clerk_organization_id: string }>`
@@ -33,6 +73,8 @@ async function assertNoDuplicateClerkOrganizationIds(db: Kysely<unknown>): Promi
 }
 
 async function createUniqueClerkOrganizationIndex(db: Kysely<unknown>): Promise<void> {
+  if (await clerkOrganizationIndexExists(db)) return;
+
   if (isMssql()) {
     await sql`
       create unique index uniq_organizations_clerk_organization_id

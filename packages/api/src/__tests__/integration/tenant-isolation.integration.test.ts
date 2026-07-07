@@ -820,6 +820,46 @@ describe('tenant settings list permission gates', () => {
     await app.close();
   });
 
+  it('POST /organizations returns a serialized tenant-scoped organization contract', async () => {
+    const tables: Tables = { organizations: [] };
+    const app = await setupApp(
+      tenantRoutes,
+      makePrincipal({ organizationIds: [], scopes: ['settings.write'] }),
+      tables,
+    );
+
+    const res = await app.inject({
+      method: 'POST',
+      url: '/organizations',
+      payload: {
+        name: 'Serialized Org',
+        slug: 'serialized-org',
+        clerkOrganizationId: 'clerk_org_serialized',
+      },
+    });
+
+    expect(res.statusCode).toBe(201);
+    expect(res.json()).toEqual(
+      expect.objectContaining({
+        tenantId: 'tnt_1',
+        name: 'Serialized Org',
+        slug: 'serialized-org',
+        clerkOrganizationId: 'clerk_org_serialized',
+        status: 'active',
+      }),
+    );
+    expect(res.json()).not.toHaveProperty('tenant_id');
+    expect(res.json()).not.toHaveProperty('clerk_organization_id');
+    expect(tables.organizations).toHaveLength(1);
+    expect(tables.organizations[0]).toMatchObject({
+      tenant_id: 'tnt_1',
+      name: 'Serialized Org',
+      slug: 'serialized-org',
+      clerk_organization_id: 'clerk_org_serialized',
+    });
+    await app.close();
+  });
+
   it('POST /brands rejects brand-scoped principals', async () => {
     const tables: Tables = {
       organizations: [organizationRow({ id: 'org_1' })],
@@ -1448,6 +1488,40 @@ describe('privacy scoped principal boundaries', () => {
     const res = await app.inject({ method: 'GET', url: '/privacy/requests/prv_org' });
 
     expect(res.statusCode).toBe(404);
+    await app.close();
+  });
+
+  it('GET /privacy/requests/:requestId returns serialized request details without storage columns', async () => {
+    const tables: Tables = {
+      privacy_requests: [
+        privacyRequestRow({
+          id: 'prv_serialized',
+          organization_id: 'org_1',
+          brand_id: 'brd_1',
+          subject_email: 'buyer@example.test',
+          result: JSON.stringify({ exportedRecords: 12 }),
+          error: null,
+        }),
+      ],
+    };
+    const app = await setupApp(privacyRoutes, makePrincipal(), tables);
+
+    const res = await app.inject({ method: 'GET', url: '/privacy/requests/prv_serialized' });
+
+    expect(res.statusCode).toBe(200);
+    expect(res.json()).toEqual(
+      expect.objectContaining({
+        id: 'prv_serialized',
+        tenantId: 'tnt_1',
+        organizationId: 'org_1',
+        brandId: 'brd_1',
+        subjectEmail: 'buyer@example.test',
+        result: { exportedRecords: 12 },
+      }),
+    );
+    expect(res.json()).not.toHaveProperty('tenant_id');
+    expect(res.json()).not.toHaveProperty('organization_id');
+    expect(res.json()).not.toHaveProperty('subject_email');
     await app.close();
   });
 });

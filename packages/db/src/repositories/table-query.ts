@@ -91,6 +91,7 @@ async function mapWithConcurrency<TInput, TOutput>(
       while (nextIndex < inputs.length) {
         const index = nextIndex;
         nextIndex += 1;
+        // eslint-disable-next-line no-await-in-loop -- Each worker intentionally processes a bounded serial queue.
         results[index] = await mapper(inputs[index]);
       }
     }),
@@ -214,7 +215,10 @@ export async function executeTableQuery<T>(
   let pageRows = hasMore ? rows.slice(0, limit) : rows;
 
   if (query.direction === 'prev') {
-    pageRows = pageRows.reverse();
+    pageRows = pageRows.reduceRight<Selectable<any>[]>((items, row) => {
+      items.push(row);
+      return items;
+    }, []);
     hasMore = rows.length > limit;
   }
 
@@ -506,7 +510,7 @@ function applyKeysetPagination(
   const terms = sort.map((sortEntry, index) => ({
     serverField: serverFieldMap[sortEntry.field] ?? sortEntry.field,
     direction: sortEntry.direction,
-    value: payload.s[index]?.v,
+    value: normalizeCursorValueForColumn(schema, sortEntry.field, payload.s[index]?.v),
   }));
   terms.push({
     serverField: pkServer,
@@ -528,6 +532,22 @@ function applyKeysetPagination(
       }),
     ),
   );
+}
+
+function normalizeCursorValueForColumn(
+  schema: TableSchema,
+  field: string,
+  value: string | number | undefined,
+): string | number | Date | undefined {
+  const column = getColumn(schema, field);
+  if (
+    typeof value === 'string' &&
+    (column?.type === 'dateTime' || column?.type === 'relativeTime')
+  ) {
+    const parsed = new Date(value);
+    if (!Number.isNaN(parsed.getTime())) return parsed;
+  }
+  return value;
 }
 
 function reverseSort(sort: AdminTableSort[]): AdminTableSort[] {

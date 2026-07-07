@@ -12,6 +12,9 @@ const mockState = vi.hoisted(() => ({
 }));
 
 vi.mock('@temporalio/workflow', () => ({
+  ParentClosePolicy: {
+    PARENT_CLOSE_POLICY_ABANDON: 'PARENT_CLOSE_POLICY_ABANDON',
+  },
   proxyActivities: (options: Record<string, unknown>) => {
     mockState.proxyActivityOptions.push(options);
     return new Proxy(
@@ -442,6 +445,7 @@ describe('checkoutSessionWorkflow', () => {
     expect(mockState.childStarts).toHaveLength(1);
     expect(mockState.childStarts[0]?.options).toEqual({
       workflowId: 'webhook-delivery:whe_1:wh_1',
+      parentClosePolicy: 'PARENT_CLOSE_POLICY_ABANDON',
       args: [
         {
           version: 1,
@@ -1329,6 +1333,7 @@ describe('paymentReconciliationWorkflow', () => {
         workflow: webhookDeliveryWorkflow,
         options: {
           workflowId: 'webhook-delivery:whe_1:wh_1',
+          parentClosePolicy: 'PARENT_CLOSE_POLICY_ABANDON',
           args: [
             {
               version: 1,
@@ -1425,6 +1430,7 @@ describe('paymentReconciliationWorkflow', () => {
     });
     expect(mockState.childStarts[0]?.options).toMatchObject({
       workflowId: 'webhook-delivery:whe_stable:wh_1',
+      parentClosePolicy: 'PARENT_CLOSE_POLICY_ABANDON',
     });
   });
 

@@ -188,8 +188,7 @@ export const col = {
   /** Date-time field. Filterable as date_range. */
   dateTime: (id: string): ColumnBuilder => new ColumnBuilder(id, 'dateTime', 'date_range'),
   /** Relative-time field (displayed relative to now). Filterable as date_range. */
-  relativeTime: (id: string): ColumnBuilder =>
-    new ColumnBuilder(id, 'relativeTime', 'date_range'),
+  relativeTime: (id: string): ColumnBuilder => new ColumnBuilder(id, 'relativeTime', 'date_range'),
   /** ID field (monospace, non-filterable by default). */
   id: (id: string): ColumnBuilder => new ColumnBuilder(id, 'id'),
   /** URL field. */
@@ -211,13 +210,18 @@ export function defineTable(
   },
 ): TableSchema {
   const columns = config.columns.map((c) => c.build());
-  const defaultSort = config.defaultSort ?? { field: 'createdAt', direction: 'desc' as SortDirection };
+  const defaultSort = config.defaultSort ?? {
+    field: 'createdAt',
+    direction: 'desc' as SortDirection,
+  };
 
   // Validate default sort field: if it exists in columns, it must be sortable.
   // If it doesn't exist, it may be a server-side sort field (e.g. created_at).
   const sortCol = columns.find((c) => c.id === defaultSort.field);
   if (sortCol && !sortCol.sortable) {
-    throw new Error(`defineTable("${id}"): default sort field "${defaultSort.field}" is not sortable`);
+    throw new Error(
+      `defineTable("${id}"): default sort field "${defaultSort.field}" is not sortable`,
+    );
   }
 
   // Validate primary key exists
@@ -225,7 +229,9 @@ export function defineTable(
     throw new Error(`defineTable("${id}"): primary key "${config.primaryKey}" does not exist`);
   }
 
-  const searchableFields = columns.filter((c) => c.filterable && c.filterType === 'text').map((c) => c.id);
+  const searchableFields = columns
+    .filter((c) => c.filterable && c.filterType === 'text')
+    .map((c) => c.id);
   const facetFields = columns.filter((c) => c.facet).map((c) => c.id);
 
   return {

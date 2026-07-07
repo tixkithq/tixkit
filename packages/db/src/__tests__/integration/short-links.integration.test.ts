@@ -21,7 +21,7 @@ if (driverCases.length === 0) {
   it.skip('short-links integration (skipped: no DATABASE_URL configured)', () => {});
 }
 
-describe.each(driverCases)('short-links integration: $driver', ({ driver, url }) => {
+describe.sequential.each(driverCases)('short-links integration: $driver', ({ driver, url }) => {
   let db: Database;
   let tenantId: string;
 
@@ -69,7 +69,10 @@ describe.each(driverCases)('short-links integration: $driver', ({ driver, url })
       ),
       new Date('2026-06-30T09:00:00Z'),
     ];
-    await Promise.all(clickTimes.map((at) => repo.recordClick(created.id, tenantId, at)));
+    for (const at of clickTimes) {
+      // eslint-disable-next-line no-await-in-loop -- Serial clicks avoid MySQL row-lock deadlocks while preserving aggregate behavior.
+      await repo.recordClick(created.id, tenantId, at);
+    }
 
     const aggregate = await repo.getClickAggregate(created.id);
     expect(aggregate.totalClicks).toBe(20);

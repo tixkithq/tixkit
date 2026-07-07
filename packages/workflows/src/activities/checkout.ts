@@ -49,7 +49,7 @@ async function mapWithConcurrency<T, R>(
   mapper: (item: T, index: number) => Promise<R>,
 ): Promise<R[]> {
   if (items.length === 0) return [];
-  const results = new Array<R>(items.length);
+  const results = Array.from<R>({ length: items.length });
   let nextIndex = 0;
   const workerCount = Math.min(concurrency, items.length);
 
@@ -58,6 +58,7 @@ async function mapWithConcurrency<T, R>(
       while (nextIndex < items.length) {
         const index = nextIndex;
         nextIndex += 1;
+        // eslint-disable-next-line no-await-in-loop -- workers intentionally consume bounded concurrent work one item at a time.
         results[index] = await mapper(items[index] as T, index);
       }
     }),
@@ -1657,6 +1658,7 @@ export async function finalizeOrderActivity(input: {
               )
               .map((redemption) => [redemption.accessRuleId, redemption]),
           ).values(),
+          // eslint-disable-next-line unicorn/no-array-sort -- sorting a fresh array gives deterministic lock order without mutating shared input.
         ].sort((left, right) => left.accessRuleId.localeCompare(right.accessRuleId));
 
         /* eslint-disable no-await-in-loop -- access rule rows are locked in deterministic order to enforce limited-use caps. */

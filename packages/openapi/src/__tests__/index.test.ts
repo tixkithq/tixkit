@@ -129,12 +129,13 @@ describe('openApiSpec', () => {
       openApiSpec.paths['/scanner-devices'].post.requestBody.content['application/json'].schema
         .properties.scopes.default,
     ).toEqual(['checkins.read', 'checkins.write']);
-    expect(
-      Object.keys(
-        openApiSpec.paths['/oauth-applications'].post.requestBody.content['application/json'].schema
-          .properties,
-      ).sort(),
-    ).toEqual(['name', 'organizationId', 'redirectUris', 'scopes']);
+    const oauthApplicationFields = Object.keys(
+      openApiSpec.paths['/oauth-applications'].post.requestBody.content['application/json'].schema
+        .properties,
+    );
+    // eslint-disable-next-line unicorn/no-array-sort -- Sorting a fresh key array keeps this assertion stable without requiring ES2023 toSorted.
+    oauthApplicationFields.sort();
+    expect(oauthApplicationFields).toEqual(['name', 'organizationId', 'redirectUris', 'scopes']);
     expect(openApiSpec.paths).not.toHaveProperty('/developer/api-keys');
   });
 

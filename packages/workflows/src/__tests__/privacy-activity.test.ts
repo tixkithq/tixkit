@@ -1,7 +1,10 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 type Row = Record<string, unknown>;
-type Filter = { column: string; operator: string; value: unknown };
+type ColumnFilter = { column: string; operator: string; value: unknown };
+type JsonTextFilter = { kind: 'jsonTextContains'; column: string; pattern: string };
+type Filter = ColumnFilter | JsonTextFilter;
+type SqlRef = { kind: 'ref'; column: string };
 
 const dbState = vi.hoisted(() => ({
   privacyRequests: [] as Row[],
@@ -33,24 +36,32 @@ function rowValue(row: Row, column: string): unknown {
 
 function matchesFilters(row: Row, filters: Filter[]): boolean {
   return filters.every((filter) => {
-    const value = rowValue(row, filter.column);
-    if (filter.operator === 'in') {
-      return Array.isArray(filter.value) && filter.value.includes(value);
+    if ('kind' in filter) {
+      const value = rowValue(row, filter.column);
+      const text = typeof value === 'string' ? value : JSON.stringify(value);
+      if (typeof text !== 'string') return false;
+      const pattern = new RegExp(`^${filter.pattern.replaceAll('%', '.*')}$`);
+      return pattern.test(text);
     }
-    if (filter.operator === 'is not') {
-      return value !== filter.value;
+    const columnFilter = filter;
+    const value = rowValue(row, columnFilter.column);
+    if (columnFilter.operator === 'in') {
+      return Array.isArray(columnFilter.value) && columnFilter.value.includes(value);
     }
-    if (filter.operator === 'not like') {
-      if (typeof value !== 'string' || typeof filter.value !== 'string') return true;
-      const pattern = new RegExp(`^${filter.value.replaceAll('%', '.*')}$`);
+    if (columnFilter.operator === 'is not') {
+      return value !== columnFilter.value;
+    }
+    if (columnFilter.operator === 'not like') {
+      if (typeof value !== 'string' || typeof columnFilter.value !== 'string') return true;
+      const pattern = new RegExp(`^${columnFilter.value.replaceAll('%', '.*')}$`);
       return !pattern.test(value);
     }
-    if (filter.operator === 'like') {
-      if (typeof value !== 'string' || typeof filter.value !== 'string') return false;
-      const pattern = new RegExp(`^${filter.value.replaceAll('%', '.*')}$`);
+    if (columnFilter.operator === 'like') {
+      if (typeof value !== 'string' || typeof columnFilter.value !== 'string') return false;
+      const pattern = new RegExp(`^${columnFilter.value.replaceAll('%', '.*')}$`);
       return pattern.test(value);
     }
-    return value === filter.value;
+    return value === columnFilter.value;
   });
 }
 
@@ -103,6 +114,10 @@ function createQuery(table: string) {
       return query;
     },
     where(column: string, operator: string, value: unknown) {
+      if (typeof column === 'object' && column !== null) {
+        filters.push(column as Filter);
+        return query;
+      }
       filters.push({ column, operator, value });
       return query;
     },
@@ -147,6 +162,27 @@ function createUpdate(table: string) {
 }
 
 vi.mock('@tixkit/db', () => {
+  const sql = Object.assign(
+    (_strings: TemplateStringsArray, ...values: unknown[]) => {
+      const ref = values.find(
+        (value): value is SqlRef =>
+          typeof value === 'object' &&
+          value !== null &&
+          (value as Partial<SqlRef>).kind === 'ref' &&
+          typeof (value as Partial<SqlRef>).column === 'string',
+      );
+      const pattern = values.find((value): value is string => typeof value === 'string') ?? '';
+      return {
+        kind: 'jsonTextContains',
+        column: ref?.column ?? 'variables',
+        pattern,
+      } satisfies JsonTextFilter;
+    },
+    {
+      ref: (column: string): SqlRef => ({ kind: 'ref', column }),
+    },
+  );
+
   class PrivacyRequestRepository {
     async findById(id: string) {
       if (dbState.repositoryFailures.findById) throw dbState.repositoryFailures.findById;
@@ -194,7 +230,9 @@ vi.mock('@tixkit/db', () => {
       updateTable: createUpdate,
       destroy: dbState.destroy,
     }),
+    getDriver: () => 'postgres',
     PrivacyRequestRepository,
+    sql,
   };
 });
 

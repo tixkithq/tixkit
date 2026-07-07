@@ -269,10 +269,7 @@ describe('schema selectors', () => {
   it('getServerFieldMap maps column ids to serverField', () => {
     const schemaWithServerFields = defineTable('test2', {
       primaryKey: 'id',
-      columns: [
-        col.id('id').serverField('id'),
-        col.text('buyerEmail').serverField('buyer_email'),
-      ],
+      columns: [col.id('id').serverField('id'), col.text('buyerEmail').serverField('buyer_email')],
     });
     const map = getServerFieldMap(schemaWithServerFields);
     expect(map).toEqual({ id: 'id', buyerEmail: 'buyer_email' });
@@ -288,11 +285,7 @@ describe('schema selectors', () => {
 describe('validateSortField', () => {
   const schema = defineTable('test', {
     primaryKey: 'id',
-    columns: [
-      col.id('id'),
-      col.dateTime('createdAt').sortable(),
-      col.text('name'),
-    ],
+    columns: [col.id('id'), col.dateTime('createdAt').sortable(), col.text('name')],
   });
 
   it('returns true for sortable fields', () => {

@@ -160,8 +160,7 @@ export function buildTicketContext(
 ): MergeTagContext['ticket'] {
   if (!ticket) return undefined;
   const ticketId = stringValue(ticket.id);
-  const linksForTicket =
-    walletPassLinks?.filter((link) => link.ticketId === ticketId) ?? [];
+  const linksForTicket = walletPassLinks?.filter((link) => link.ticketId === ticketId) ?? [];
   return {
     type: stringValue(ticketTypeName),
     code: stringValue(ticket.code),

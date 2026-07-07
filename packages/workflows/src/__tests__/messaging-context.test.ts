@@ -123,9 +123,21 @@ describe('buildTicketContext', () => {
         { id: 'tkt_1', code: 'TK-ABC123', ticket_type_id: 'tt_1' },
         'General Admission',
         [
-          { ticketId: 'tkt_1', provider: 'apple', passUrl: 'https://passes.test/apple/tkt_1.pkpass' },
-          { ticketId: 'tkt_1', provider: 'google', passUrl: 'https://pay.google.com/gp/v/save/abc' },
-          { ticketId: 'tkt_2', provider: 'apple', passUrl: 'https://passes.test/apple/tkt_2.pkpass' },
+          {
+            ticketId: 'tkt_1',
+            provider: 'apple',
+            passUrl: 'https://passes.test/apple/tkt_1.pkpass',
+          },
+          {
+            ticketId: 'tkt_1',
+            provider: 'google',
+            passUrl: 'https://pay.google.com/gp/v/save/abc',
+          },
+          {
+            ticketId: 'tkt_2',
+            provider: 'apple',
+            passUrl: 'https://passes.test/apple/tkt_2.pkpass',
+          },
         ],
       ),
     ).toEqual({

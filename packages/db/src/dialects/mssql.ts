@@ -67,7 +67,9 @@ export function createMssqlDialect(url: string, pool: DbPoolConfig = {}): MssqlD
       options: {
         min: pool.min ?? 0,
         max: pool.max ?? 10,
-        ...(pool.idleTimeoutMillis !== undefined ? { idleTimeoutMillis: pool.idleTimeoutMillis } : {}),
+        ...(pool.idleTimeoutMillis !== undefined
+          ? { idleTimeoutMillis: pool.idleTimeoutMillis }
+          : {}),
         ...(pool.connectionTimeoutMillis !== undefined
           ? { acquireTimeoutMillis: pool.connectionTimeoutMillis }
           : {}),

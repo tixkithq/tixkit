@@ -75,10 +75,7 @@ describe('computeRangeFacet', () => {
       { amount: 200 },
       { amount: null },
     ];
-    const facet = computeRangeFacet(
-      rowsWithString as Array<Record<string, unknown>>,
-      'amount',
-    );
+    const facet = computeRangeFacet(rowsWithString as Array<Record<string, unknown>>, 'amount');
     expect(facet.min).toBe(100);
     expect(facet.max).toBe(200);
   });

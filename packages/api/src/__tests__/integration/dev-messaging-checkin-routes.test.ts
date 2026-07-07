@@ -330,6 +330,9 @@ function createMockDb(tables: Record<string, unknown> = {}): unknown {
               { code: '23505' },
             );
           }
+          if (table === 'checkout_sessions' && tableState.checkoutSessionInsertFailure) {
+            throw tableState.checkoutSessionInsertFailure;
+          }
           rows.push(row);
           return row;
         };
@@ -349,7 +352,7 @@ function createMockDb(tables: Record<string, unknown> = {}): unknown {
     selectFrom: createQuery,
     updateTable: createUpdate,
     insertInto: createInsert,
-    deleteFrom: createDelete,
+    deleteFrom: (table: string) => createDelete(table, tableState),
     transaction: () => ({
       execute: async (fn: (trx: unknown) => Promise<unknown>) => fn(mockDb),
     }),
@@ -358,9 +361,41 @@ function createMockDb(tables: Record<string, unknown> = {}): unknown {
   return mockDb;
 }
 
-function createDelete(_table: string) {
+function createDelete(table: string, tableState: Record<string, unknown>) {
+  const filters: Array<[string, string, unknown]> = [];
+  const query = {
+    where: (...args: unknown[]) => {
+      if (typeof args[0] === 'string' && typeof args[1] === 'string') {
+        filters.push([args[0], args[1], args[2]]);
+      }
+      return query;
+    },
+    async execute() {
+      const rows = (tableState[table] ?? []) as Record<string, unknown>[];
+      const shouldDelete = (row: Record<string, unknown>) =>
+        filters.every(([column, op, value]) => {
+          const rowValue = getMockColumnValue(row, column);
+          if (op === '=') return mockValuesEqual(rowValue, value);
+          if (op === 'is') return value === null ? rowValue === null : rowValue === value;
+          return false;
+        });
+      const deletedRows = rows.filter(shouldDelete);
+      tableState[table] = rows.filter((row) => !shouldDelete(row));
+      if (table === 'discount_redemptions') {
+        const discountRows = (tableState.discount_codes ?? []) as Record<string, unknown>[];
+        for (const deletedRow of deletedRows) {
+          const discount = discountRows.find((row) =>
+            mockValuesEqual(row.id, deletedRow.discount_code_id),
+          );
+          if (discount) {
+            discount.uses_count = Math.max(0, Number(discount.uses_count ?? 0) - 1);
+          }
+        }
+      }
+    },
+  };
   return {
-    where: () => ({ execute: async () => {} }),
+    where: query.where,
   };
 }
 
@@ -4641,6 +4676,7 @@ describe('messaging endpoint', () => {
     const app = await setupApp(messagingRoutes, makePrincipal(), tables);
     const res = await app.inject({ method: 'GET', url: '/events/evt_1/messages' });
     expect(res.statusCode).toBe(200);
+    // eslint-disable-next-line unicorn/no-array-sort -- sorting a fresh key array keeps response-shape assertions stable.
     expect(Object.keys(res.json()).sort()).toEqual(['items']);
     expect(res.json().items[0]).toMatchObject({
       id: 'msg_campaign',
@@ -4967,6 +5003,7 @@ describe('messaging endpoint', () => {
     const app = await setupApp(messagingRoutes, makePrincipal(), tables);
     const list = await app.inject({ method: 'GET', url: '/events/evt_1/messages/msg_jobs/jobs' });
     expect(list.statusCode).toBe(200);
+    // eslint-disable-next-line unicorn/no-array-sort -- sorting a fresh key array keeps response-shape assertions stable.
     expect(Object.keys(list.json()).sort()).toEqual(['items']);
     expect(list.json().items).toMatchObject([
       {
@@ -5081,6 +5118,7 @@ describe('messaging endpoint', () => {
       url: '/events/evt_1/messages/msg_logs/delivery-logs',
     });
     expect(list.statusCode).toBe(200);
+    // eslint-disable-next-line unicorn/no-array-sort -- sorting a fresh key array keeps response-shape assertions stable.
     expect(Object.keys(list.json()).sort()).toEqual(['items']);
     expect(list.json().items).toHaveLength(1);
     expect(list.json().items[0]).toMatchObject({ channel: 'sms', delivery: { id: 'smd_1' } });
@@ -5177,6 +5215,7 @@ describe('messaging endpoint', () => {
       url: '/events/evt_1/messages/msg_events/provider-events',
     });
     expect(list.statusCode).toBe(200);
+    // eslint-disable-next-line unicorn/no-array-sort -- sorting a fresh key array keeps response-shape assertions stable.
     expect(Object.keys(list.json()).sort()).toEqual(['items']);
     expect(list.json().items).toMatchObject([
       { channel: 'sms', event: { id: 'spe_1', event_type: 'message.sent' } },
@@ -7177,6 +7216,85 @@ describe('checkout pricing tamper resistance', () => {
     expect(tables.checkout_sessions).toHaveLength(0);
     expect(tables.discount_redemptions).toHaveLength(0);
     expect(tables.discount_codes[0]).toMatchObject({ uses_count: 1 });
+  });
+
+  it('rejects discount codes that do not apply to selected ticket types before reserving inventory', async () => {
+    const reserveCart = vi.fn(async () => ({
+      primaryHoldId: 'hld_discount_scope',
+      expiresAt: new Date(Date.now() + 600_000),
+    }));
+    const tables = pricingTables({
+      discount_codes: [
+        {
+          ...discountCode,
+          uses_count: 0,
+          ticket_type_ids: JSON.stringify(['tt_vip_only']),
+        },
+      ],
+      discount_redemptions: [],
+    });
+    const app = await setupApp(checkoutRoutes, makePrincipal(), tables, {
+      pricingEngine: new PricingEngine(),
+      inventoryService: { reserveCart },
+    });
+
+    const res = await app.inject({
+      method: 'POST',
+      url: '/checkout/sessions',
+      headers: { 'idempotency-key': 'discount_ticket_scope' },
+      payload: {
+        eventId: 'evt_pricing',
+        buyer: { email: 'buyer@test.com' },
+        items: [{ ticketTypeId: 'tt_paid', quantity: 1 }],
+        discountCode: 'SAVE25',
+      },
+    });
+
+    expect(res.statusCode).toBe(400);
+    expect(res.json().message).toContain('not applicable to selected items');
+    expect(reserveCart).not.toHaveBeenCalled();
+    expect(tables.checkout_sessions).toHaveLength(0);
+    expect(tables.discount_redemptions).toHaveLength(0);
+    expect(tables.discount_codes[0]).toMatchObject({ uses_count: 0 });
+    await app.close();
+  });
+
+  it('releases a reserved discount when checkout session persistence fails', async () => {
+    const releaseHoldsForSession = vi.fn(async () => {});
+    const tables = pricingTables({
+      checkout_sessions: [],
+      discount_redemptions: [],
+      checkoutSessionInsertFailure: new Error('checkout session insert failed after discount'),
+    });
+    const app = await setupApp(checkoutRoutes, makePrincipal(), tables, {
+      pricingEngine: new PricingEngine(),
+      inventoryService: {
+        reserveCart: vi.fn(async () => ({
+          primaryHoldId: 'hld_discount_atomicity',
+          expiresAt: new Date(Date.now() + 600_000),
+        })),
+        releaseHoldsForSession,
+      },
+    });
+
+    const res = await app.inject({
+      method: 'POST',
+      url: '/checkout/sessions',
+      headers: { 'idempotency-key': 'discount_session_atomicity' },
+      payload: {
+        eventId: 'evt_pricing',
+        buyer: { email: 'buyer@test.com' },
+        items: [{ ticketTypeId: 'tt_paid', quantity: 2 }],
+        discountCode: 'SAVE25',
+      },
+    });
+
+    expect(res.statusCode).toBe(500);
+    expect(tables.checkout_sessions).toHaveLength(0);
+    expect(tables.discount_codes[0]).toMatchObject({ uses_count: 0 });
+    expect(tables.discount_redemptions).toHaveLength(0);
+    expect(releaseHoldsForSession).toHaveBeenCalledWith(expect.stringMatching(/^cs_/));
+    await app.close();
   });
 
   it('persists matched access-rule redemptions for locked checkout sessions', async () => {

@@ -38,7 +38,7 @@ export async function webhookDeliveryWorkflow(
   const payloadStr = JSON.stringify(input.payload);
   let inProgressRechecks = 0;
 
-  for (let attempt = 1; attempt <= input.maxAttempts; ) {
+  for (let attempt = 1; attempt <= input.maxAttempts;) {
     // eslint-disable-next-line no-await-in-loop -- webhook retries must observe each attempt result before deciding whether to back off or dead-letter.
     const result = await deliverWebhookActivity({
       apiVersion: input.apiVersion,

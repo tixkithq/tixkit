@@ -78,12 +78,32 @@ export const TableQueryIndexesMigration: Migration = {
 
   async down(db): Promise<void> {
     await db.schema.dropIndex('idx_orders_tenant_created_id').on('orders').ifExists().execute();
-    await db.schema.dropIndex('idx_orders_tenant_event_created_id').on('orders').ifExists().execute();
-    await db.schema.dropIndex('idx_orders_tenant_status_created_id').on('orders').ifExists().execute();
+    await db.schema
+      .dropIndex('idx_orders_tenant_event_created_id')
+      .on('orders')
+      .ifExists()
+      .execute();
+    await db.schema
+      .dropIndex('idx_orders_tenant_status_created_id')
+      .on('orders')
+      .ifExists()
+      .execute();
     await db.schema.dropIndex('idx_orders_tenant_buyer_email').on('orders').ifExists().execute();
-    await db.schema.dropIndex('idx_attendees_tenant_event_created_id').on('attendees').ifExists().execute();
-    await db.schema.dropIndex('idx_attendees_tenant_event_status').on('attendees').ifExists().execute();
-    await db.schema.dropIndex('idx_audit_logs_tenant_org_created_id').on('audit_logs').ifExists().execute();
+    await db.schema
+      .dropIndex('idx_attendees_tenant_event_created_id')
+      .on('attendees')
+      .ifExists()
+      .execute();
+    await db.schema
+      .dropIndex('idx_attendees_tenant_event_status')
+      .on('attendees')
+      .ifExists()
+      .execute();
+    await db.schema
+      .dropIndex('idx_audit_logs_tenant_org_created_id')
+      .on('audit_logs')
+      .ifExists()
+      .execute();
     await db.schema
       .dropIndex('idx_privacy_requests_tenant_status_created_id')
       .on('privacy_requests')

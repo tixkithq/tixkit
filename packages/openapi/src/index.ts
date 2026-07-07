@@ -4451,7 +4451,9 @@ const rawOpenApiSpec = {
         responses: {
           '200': {
             description: 'Event details (hidden ticket types excluded)',
-            content: { 'application/json': { schema: { $ref: '#/components/schemas/Event' } } },
+            content: {
+              'application/json': { schema: { $ref: '#/components/schemas/PublicEvent' } },
+            },
           },
         },
       },
@@ -4497,7 +4499,9 @@ const rawOpenApiSpec = {
         responses: {
           '200': {
             description: 'Event details for the verified custom-domain slug',
-            content: { 'application/json': { schema: { $ref: '#/components/schemas/Event' } } },
+            content: {
+              'application/json': { schema: { $ref: '#/components/schemas/PublicEvent' } },
+            },
           },
           '404': { description: 'No matching published event for the custom domain' },
         },

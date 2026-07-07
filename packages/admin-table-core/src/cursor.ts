@@ -82,10 +82,7 @@ export function encodeCursor(
  *
  * @throws CursorError if the cursor is malformed or version-incompatible.
  */
-export function decodeCursor(
-  cursor: string,
-  expectedVersion?: number,
-): CursorPayload {
+export function decodeCursor(cursor: string, expectedVersion?: number): CursorPayload {
   const dotIndex = cursor.indexOf('.');
   if (dotIndex === -1) {
     throw new CursorError('Invalid cursor: missing version prefix');
@@ -140,10 +137,7 @@ export class CursorError extends Error {
   readonly receivedVersion?: number;
   readonly expectedVersion?: number;
 
-  constructor(
-    message: string,
-    details?: { receivedVersion?: number; expectedVersion?: number },
-  ) {
+  constructor(message: string, details?: { receivedVersion?: number; expectedVersion?: number }) {
     super(message);
     this.name = 'CursorError';
     if (details) {

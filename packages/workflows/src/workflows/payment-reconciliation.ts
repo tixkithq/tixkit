@@ -1,4 +1,4 @@
-import { proxyActivities, sleep, startChild } from '@temporalio/workflow';
+import { ParentClosePolicy, proxyActivities, sleep, startChild } from '@temporalio/workflow';
 import type { WorkflowActivityResult } from '../shared/types.js';
 import { WEBHOOK_DELIVERY_WORKFLOW_VERSION, webhookDeliveryWorkflowId } from '../shared/types.js';
 import { webhookDeliveryWorkflow } from './webhook-delivery.js';
@@ -187,6 +187,7 @@ export async function paymentReconciliationWorkflow(
         webhookEventResult.value.deliveries.map((delivery) =>
           startChild(webhookDeliveryWorkflow, {
             workflowId: webhookDeliveryWorkflowId(delivery.eventId, delivery.endpointId),
+            parentClosePolicy: ParentClosePolicy.PARENT_CLOSE_POLICY_ABANDON,
             args: [
               {
                 version: WEBHOOK_DELIVERY_WORKFLOW_VERSION,

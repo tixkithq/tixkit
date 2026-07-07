@@ -232,6 +232,7 @@ function createMockDb(): unknown {
           };
         }
         if (table === 'orders') {
+          // eslint-disable-next-line unicorn/no-array-sort -- matchingOrders returns a fresh array for test-only ordering.
           const rows = matchingOrders().sort((a, b) => {
             if (!query.order) return 0;
             const column = query.order.column.includes('.')
@@ -311,10 +312,12 @@ function createMockDb(): unknown {
               const key = String(order.sales_channel ?? 'online');
               grouped.set(key, [...(grouped.get(key) ?? []), order]);
             }
-            return [...grouped.entries()].map(([salesChannel, groupedRows]) => ({
-              sales_channel: salesChannel === 'undefined' ? undefined : salesChannel,
-              ...aggregateRows(groupedRows),
-            }));
+            return [...grouped.entries()].map(([salesChannel, groupedRows]) =>
+              Object.assign(
+                { sales_channel: salesChannel === 'undefined' ? undefined : salesChannel },
+                aggregateRows(groupedRows),
+              ),
+            );
           }
           return rows;
         }
@@ -1184,6 +1187,41 @@ describe('order routes', () => {
     expect(body.status).toBe('completed');
     expect(body.fileUrl).toBeUndefined();
     expect(body.downloadUrl).toBe('/v1/exports/exp_2/download');
+    await app.close();
+  });
+
+  it('GET /exports/:exportId never serializes storage fields', async () => {
+    dbState.exportJobs = [
+      {
+        id: 'exp_visible',
+        tenant_id: 'tnt_1',
+        event_id: 'evt_1',
+        type: 'orders',
+        format: 'json',
+        status: 'failed',
+        file_url: 'https://exports.example.test/failed.json',
+        requested_by: 'usr_1',
+        filters: JSON.stringify({ status: 'paid' }),
+        error: 'source query failed',
+        created_at: new Date('2026-06-01'),
+        completed_at: new Date('2026-06-01T00:01:00Z'),
+      },
+    ];
+    const app = await setupApp(reportingRoutes, makePrincipal());
+
+    const visible = await app.inject({ method: 'GET', url: '/exports/exp_visible' });
+    expect(visible.statusCode).toBe(200);
+    expect(visible.json()).toMatchObject({
+      exportId: 'exp_visible',
+      eventId: 'evt_1',
+      type: 'orders',
+      format: 'json',
+      status: 'failed',
+    });
+    expect(visible.json()).not.toHaveProperty('error');
+    expect(visible.json()).not.toHaveProperty('tenant_id');
+    expect(visible.json()).not.toHaveProperty('file_url');
+    expect(visible.json()).not.toHaveProperty('requested_by');
     await app.close();
   });
 

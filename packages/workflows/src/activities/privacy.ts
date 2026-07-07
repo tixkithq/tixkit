@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import { PrivacyRequestRepository, type Database } from '@tixkit/db';
+import { getDriver, PrivacyRequestRepository, sql, type Database } from '@tixkit/db';
 import type { WorkflowActivityResult } from '../shared/types.js';
 import { errResult, okResult } from '../shared/types.js';
 import { getActivityDb } from './activity-clients.js';
@@ -112,6 +112,15 @@ function erasedPhone(input: string | null | undefined, fallback: string): string
   const digest = createHash('sha256').update(source).digest('hex').slice(0, 12);
   const numeric = String(BigInt(`0x${digest}`) % 10_000_000_000n).padStart(10, '0');
   return `+1${numeric}`;
+}
+
+function jsonTextContains(column: string, value: string) {
+  const pattern = `%${value}%`;
+  const driver = getDriver();
+  if (driver === 'mysql') return sql<boolean>`cast(${sql.ref(column)} as char) like ${pattern}`;
+  if (driver === 'mssql')
+    return sql<boolean>`cast(${sql.ref(column)} as nvarchar(max)) like ${pattern}`;
+  return sql<boolean>`${sql.ref(column)}::text like ${pattern}`;
 }
 
 function normalizeJson(value: unknown): unknown {
@@ -237,7 +246,7 @@ async function collectMessagingPrivacyRows(
           ])
           .where('tenant_id', '=', request.tenant_id)
           .where('brand_id', 'in', scopedBrandIds)
-          .where('variables', 'like', `%${attendeeId}%`)
+          .where(jsonTextContains('variables', attendeeId))
           .execute() as Promise<EmailJobPrivacyRow[]>,
       );
     }
@@ -287,7 +296,7 @@ async function collectMessagingPrivacyRows(
           ])
           .where('tenant_id', '=', request.tenant_id)
           .where('brand_id', 'in', scopedBrandIds)
-          .where('variables', 'like', `%${attendeeId}%`)
+          .where(jsonTextContains('variables', attendeeId))
           .execute() as Promise<SmsJobPrivacyRow[]>,
       );
     }

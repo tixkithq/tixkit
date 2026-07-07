@@ -254,6 +254,50 @@ describe('orders table query route', () => {
     await app.close();
   });
 
+  it('keeps filters, sort, facets, and cursor together for paged order queries', async () => {
+    executeTableQueryMock.mockResolvedValue({
+      items: [],
+      nextCursor: 'next_cursor_value',
+      prevCursor: 'prev_cursor_value',
+      total: 10,
+      filterTotal: 2,
+      facets: {
+        status: { rows: [{ value: 'paid', total: 2 }] },
+      },
+      applied: {
+        search: 'buyer@example.com',
+        sort: [{ field: 'createdAt', direction: 'desc' }],
+        filters: {
+          status: { type: 'select', values: ['paid'] },
+          refundState: { type: 'boolean', value: false },
+        },
+      },
+    });
+
+    const app = await setupOrdersApp(makePrincipal(), db);
+    const res = await app.inject({
+      method: 'GET',
+      url: '/orders?search=buyer%40example.com&status=paid&refundState=false&sort=createdAt:desc&includeFacets=true&cursor=v1.cursor&direction=prev&limit=10',
+    });
+
+    expect(res.statusCode).toBe(200);
+    const [, , queryArg] = executeTableQueryMock.mock.calls[0];
+    expect(queryArg).toMatchObject({
+      search: 'buyer@example.com',
+      cursor: 'v1.cursor',
+      direction: 'prev',
+      limit: 10,
+      includeFacets: true,
+      sort: [{ field: 'createdAt', direction: 'desc' }],
+      filters: {
+        status: { type: 'select', values: ['paid'] },
+        refundState: { type: 'boolean', value: false },
+      },
+    });
+    expect(res.json().facets.status.rows).toEqual([{ value: 'paid', total: 2 }]);
+    await app.close();
+  });
+
   it('enables strictValidation in config', async () => {
     executeTableQueryMock.mockResolvedValue({
       items: [],
@@ -393,6 +437,47 @@ describe('orders table query route', () => {
 
     const [, configArg] = executeTableQueryMock.mock.calls[0];
     expect(configArg.scope.organization_id).toBe('org_1');
+    await app.close();
+  });
+
+  it.each([
+    [
+      'brand query param narrows a brand-scoped principal',
+      makePrincipal({ organizationIds: ['org_1'], brandIds: ['brd_1', 'brd_2'] }),
+      '/orders?brandId=brd_2',
+      { organization_id: ['org_1'], brand_id: 'brd_2' },
+    ],
+    [
+      'event-scoped principal keeps event scope when organization is narrowed',
+      makePrincipal({ organizationIds: ['org_1', 'org_2'], eventIds: ['evt_1'] }),
+      '/orders?organizationId=org_2',
+      { organization_id: 'org_2', event_id: ['evt_1'] },
+    ],
+    [
+      'brand and event scopes combine with explicit organization',
+      makePrincipal({
+        organizationIds: ['org_1', 'org_2'],
+        brandIds: ['brd_1'],
+        eventIds: ['evt_1'],
+      }),
+      '/orders?organizationId=org_1',
+      { organization_id: 'org_1', brand_id: ['brd_1'], event_id: ['evt_1'] },
+    ],
+  ])('%s', async (_name, principal, url, expectedScope) => {
+    executeTableQueryMock.mockResolvedValue({
+      items: [],
+      nextCursor: undefined,
+      total: 0,
+      filterTotal: 0,
+      facets: undefined,
+      applied: { sort: [], filters: {} },
+    });
+
+    const app = await setupOrdersApp(principal, db);
+    await app.inject({ method: 'GET', url });
+
+    const [, configArg] = executeTableQueryMock.mock.calls[0];
+    expect(configArg.scope).toMatchObject(expectedScope);
     await app.close();
   });
 });

@@ -88,6 +88,17 @@ describe('table query schema validation', () => {
   });
 });
 
+function makeExpressionBuilder() {
+  const eb = ((field: string, op: string, value: unknown) => ({ field, op, value })) as {
+    (field: string, op: string, value: unknown): unknown;
+    or: (items: unknown[]) => unknown;
+    and: (items: unknown[]) => unknown;
+  };
+  eb.or = (items) => ({ type: 'or', items });
+  eb.and = (items) => ({ type: 'and', items });
+  return eb;
+}
+
 function createRecordingDb() {
   type QueryRecord = {
     orderBy: Array<[string, string]>;
@@ -96,17 +107,6 @@ function createRecordingDb() {
     selectAllCalled: boolean;
   };
   const queries: QueryRecord[] = [];
-
-  const makeExpressionBuilder = () => {
-    const eb = ((field: string, op: string, value: unknown) => ({ field, op, value })) as {
-      (field: string, op: string, value: unknown): unknown;
-      or: (items: unknown[]) => unknown;
-      and: (items: unknown[]) => unknown;
-    };
-    eb.or = (items) => ({ type: 'or', items });
-    eb.and = (items) => ({ type: 'and', items });
-    return eb;
-  };
 
   const db = {
     selectFrom: () => {
@@ -279,22 +279,23 @@ describe('executeTableQuery cursor validation', () => {
       ['total_cents', 'desc'],
       ['id', 'desc'],
     ]);
+    const cursorDate = new Date('2026-01-03T00:00:00.000Z');
     expect(queries[0]?.whereExpressions).toContainEqual(
       expect.objectContaining({
         type: 'or',
         items: [
-          { field: 'created_at', op: '>', value: '2026-01-03T00:00:00.000Z' },
+          { field: 'created_at', op: '>', value: cursorDate },
           {
             type: 'and',
             items: [
-              { field: 'created_at', op: '=', value: '2026-01-03T00:00:00.000Z' },
+              { field: 'created_at', op: '=', value: cursorDate },
               { field: 'total_cents', op: '<', value: 2500 },
             ],
           },
           {
             type: 'and',
             items: [
-              { field: 'created_at', op: '=', value: '2026-01-03T00:00:00.000Z' },
+              { field: 'created_at', op: '=', value: cursorDate },
               { field: 'total_cents', op: '=', value: 2500 },
               { field: 'id', op: '<', value: 'ord_3' },
             ],

@@ -5,6 +5,7 @@ import {
   condition,
   proxyActivities,
   startChild,
+  ParentClosePolicy,
   patched,
   sleep,
 } from '@temporalio/workflow';
@@ -209,6 +210,7 @@ export async function checkoutSessionWorkflow(
         emitResult.deliveries.map((delivery) =>
           startChild(webhookDeliveryWorkflow, {
             workflowId: `webhook-delivery:${delivery.eventId}:${delivery.endpointId}`,
+            parentClosePolicy: ParentClosePolicy.PARENT_CLOSE_POLICY_ABANDON,
             args: [
               {
                 version: WEBHOOK_DELIVERY_WORKFLOW_VERSION,

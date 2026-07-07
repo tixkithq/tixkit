@@ -11,6 +11,9 @@ const EVENT_ID = `evt_wl_${RUN_ID}`;
 const POOL_ID = `pool_wl_${RUN_ID}`;
 const TICKET_TYPE_ID = `tt_wl_${RUN_ID}`;
 const SHARED_POOL_TICKET_TYPE_ID = `tt_wl_shared_${RUN_ID}`;
+const EMAIL_PROVIDER_ROUTE_ID = `epr_wl_${RUN_ID}`;
+const WAITLIST_TEMPLATE_ID = `nt_wl_${RUN_ID}`;
+const WAITLIST_TEMPLATE_VERSION_ID = `ntv_wl_${RUN_ID}`;
 
 const requestedDriver = process.env.DB_INTEGRATION_DRIVER;
 const dbUrl =
@@ -286,6 +289,57 @@ async function seedBaseRows(db: Database) {
     })
     .execute();
   await db
+    .insertInto('email_provider_routes')
+    .values({
+      id: EMAIL_PROVIDER_ROUTE_ID,
+      tenant_id: TENANT_ID,
+      brand_id: BRAND_ID,
+      provider_type: 'smtp',
+      credentials_ref: 'test-route',
+      sender_domain: 'example.com',
+      priority: 0,
+      is_fallback: false,
+      rate_limit_per_hour: null,
+      allowed_categories: JSON.stringify(['transactional']),
+      status: 'active',
+      smoke_send_verified: true,
+      created_at: new Date(),
+      updated_at: new Date(),
+    })
+    .execute();
+  await db
+    .insertInto('notification_templates')
+    .values({
+      id: WAITLIST_TEMPLATE_ID,
+      tenant_id: TENANT_ID,
+      brand_id: BRAND_ID,
+      key: 'waitlist-invite',
+      name: 'Waitlist invite',
+      description: null,
+      category: 'transactional',
+      variables: JSON.stringify({}),
+      current_version_id: WAITLIST_TEMPLATE_VERSION_ID,
+      created_at: new Date(),
+      updated_at: new Date(),
+    })
+    .execute();
+  await db
+    .insertInto('notification_template_versions')
+    .values({
+      id: WAITLIST_TEMPLATE_VERSION_ID,
+      template_id: WAITLIST_TEMPLATE_ID,
+      version: 1,
+      subject_template: 'Your waitlist spot is ready',
+      html_template: '<p>Your waitlist spot is ready.</p>',
+      text_template: 'Your waitlist spot is ready.',
+      locale: 'en',
+      is_default: true,
+      published_at: new Date(),
+      created_at: new Date(),
+      updated_at: new Date(),
+    })
+    .execute();
+  await db
     .insertInto('events')
     .values({
       id: EVENT_ID,
@@ -384,6 +438,12 @@ async function cleanupRows(db: Database) {
   await db.deleteFrom('ticket_types').where('event_id', '=', EVENT_ID).execute();
   await db.deleteFrom('inventory_pools').where('event_id', '=', EVENT_ID).execute();
   await db.deleteFrom('events').where('id', '=', EVENT_ID).execute();
+  await db.deleteFrom('email_provider_routes').where('id', '=', EMAIL_PROVIDER_ROUTE_ID).execute();
+  await db
+    .deleteFrom('notification_template_versions')
+    .where('id', '=', WAITLIST_TEMPLATE_VERSION_ID)
+    .execute();
+  await db.deleteFrom('notification_templates').where('id', '=', WAITLIST_TEMPLATE_ID).execute();
   await db.deleteFrom('brands').where('id', '=', BRAND_ID).execute();
   await db.deleteFrom('organizations').where('id', '=', ORG_ID).execute();
   await db.deleteFrom('tenants').where('id', '=', TENANT_ID).execute();

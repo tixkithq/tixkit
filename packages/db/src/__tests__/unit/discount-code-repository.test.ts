@@ -42,6 +42,19 @@ function createDiscountCodeDb() {
   return { db: db as unknown as Database, insertedRows, whereCalls };
 }
 
+function compareDiscountReservationRow(
+  row: Record<string, any>,
+  field: string,
+  operator: string,
+  value: unknown,
+) {
+  const rowValue = row[field];
+  if (operator === '<') return Number(rowValue) < Number(value);
+  if (operator === '>') return Number(rowValue) > Number(value);
+  if (operator === 'is') return value === null ? rowValue == null : rowValue === value;
+  return rowValue === value;
+}
+
 function createDiscountReservationDb() {
   const tables: Record<string, Record<string, any>> = {
     discount_codes: {
@@ -66,21 +79,13 @@ function createDiscountReservationDb() {
     return tables[table];
   }
 
-  function compare(row: Record<string, any>, field: string, operator: string, value: unknown) {
-    const rowValue = row[field];
-    if (operator === '<') return Number(rowValue) < Number(value);
-    if (operator === '>') return Number(rowValue) > Number(value);
-    if (operator === 'is') return value === null ? rowValue == null : rowValue === value;
-    return rowValue === value;
-  }
-
   function selectFrom(table: string) {
     const filters: Array<(row: Record<string, any>) => boolean> = [];
     const query = {
       selectAll: () => query,
       select: () => query,
       where(field: string, operator: string, value: unknown) {
-        filters.push((row) => compare(row, field, operator, value));
+        filters.push((row) => compareDiscountReservationRow(row, field, operator, value));
         return query;
       },
       forUpdate: () => query,
@@ -109,7 +114,7 @@ function createDiscountReservationDb() {
         return query;
       },
       where(field: string, operator: string, value: unknown) {
-        filters.push((row) => compare(row, field, operator, value));
+        filters.push((row) => compareDiscountReservationRow(row, field, operator, value));
         return query;
       },
       async execute() {
@@ -164,7 +169,7 @@ function createDiscountReservationDb() {
     const filters: Array<(row: Record<string, any>) => boolean> = [];
     const query = {
       where(field: string, operator: string, value: unknown) {
-        filters.push((row) => compare(row, field, operator, value));
+        filters.push((row) => compareDiscountReservationRow(row, field, operator, value));
         return query;
       },
       async execute() {

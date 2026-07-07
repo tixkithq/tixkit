@@ -56,11 +56,7 @@ describe('encodeCursor', () => {
   });
 
   it('supports custom version', () => {
-    const cursor = encodeCursor(
-      [{ field: 'createdAt', direction: 'desc', value: 123 }],
-      'id_1',
-      2,
-    );
+    const cursor = encodeCursor([{ field: 'createdAt', direction: 'desc', value: 123 }], 'id_1', 2);
     expect(cursor).toMatch(/^v2\./);
     const decoded = decodeCursor(cursor);
     expect(decoded.v).toBe(2);
@@ -92,11 +88,7 @@ describe('decodeCursor', () => {
   });
 
   it('throws on version mismatch when expectedVersion is provided', () => {
-    const cursor = encodeCursor(
-      [{ field: 'createdAt', direction: 'desc', value: 'x' }],
-      'id_1',
-      1,
-    );
+    const cursor = encodeCursor([{ field: 'createdAt', direction: 'desc', value: 'x' }], 'id_1', 1);
     expect(() => decodeCursor(cursor, 2)).toThrow(CursorError);
     expect(() => decodeCursor(cursor, 2)).toThrow('version mismatch');
   });

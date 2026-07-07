@@ -696,431 +696,448 @@ async function cleanupPrivacyRetentionFixture(db: Database, ids: FixtureIds) {
   await db.deleteFrom('tenants').where('id', '=', ids.tenantId).execute();
 }
 
-describe.each(driverCases)('privacy retention activity integration: $driver', ({ driver, url }) => {
-  let db: Database;
-  const seededFixtures = new Set<FixtureIds>();
-  const previousDriver = process.env.DB_DRIVER;
-  const previousDatabaseUrl = process.env.DATABASE_URL;
+describe.sequential.each(driverCases)(
+  'privacy retention activity integration: $driver',
+  ({ driver, url }) => {
+    let db: Database;
+    const seededFixtures = new Set<FixtureIds>();
+    const previousDriver = process.env.DB_DRIVER;
+    const previousDatabaseUrl = process.env.DATABASE_URL;
 
-  beforeAll(async () => {
-    process.env.DB_DRIVER = driver;
-    process.env.DATABASE_URL = url;
-    await runMigrations(url);
-    db = createDb(url);
-  }, 120_000);
+    beforeAll(async () => {
+      process.env.DB_DRIVER = driver;
+      process.env.DATABASE_URL = url;
+      await runMigrations(url);
+      db = createDb(url);
+    }, 120_000);
 
-  afterEach(async () => {
-    await Promise.all([...seededFixtures].map((ids) => cleanupPrivacyRetentionFixture(db, ids)));
-    seededFixtures.clear();
-  }, 60_000);
+    afterEach(async () => {
+      await Promise.all([...seededFixtures].map((ids) => cleanupPrivacyRetentionFixture(db, ids)));
+      seededFixtures.clear();
+    }, 60_000);
 
-  afterAll(async () => {
-    await db?.destroy();
-    if (previousDriver === undefined) {
-      delete process.env.DB_DRIVER;
-    } else {
-      process.env.DB_DRIVER = previousDriver;
-    }
-    if (previousDatabaseUrl === undefined) {
-      delete process.env.DATABASE_URL;
-    } else {
-      process.env.DATABASE_URL = previousDatabaseUrl;
-    }
-  }, 60_000);
+    afterAll(async () => {
+      await db?.destroy();
+      if (previousDriver === undefined) {
+        delete process.env.DB_DRIVER;
+      } else {
+        process.env.DB_DRIVER = previousDriver;
+      }
+      if (previousDatabaseUrl === undefined) {
+        delete process.env.DATABASE_URL;
+      } else {
+        process.env.DATABASE_URL = previousDatabaseUrl;
+      }
+    }, 60_000);
 
-  it('redacts direct PII while retaining financial, ticket, audit, and privacy ledgers', async () => {
-    const suffix = `${driver}_${randomUUID().replaceAll('-', '').slice(0, 6)}`;
-    const ids = buildPrivacyRetentionIds(suffix);
-    seededFixtures.add(ids);
-    await cleanupPrivacyRetentionFixture(db, ids);
-    await seedPrivacyRetentionFixture(db, ids, suffix);
+    it('redacts direct PII while retaining financial, ticket, audit, and privacy ledgers', async () => {
+      const suffix = `${driver}_${randomUUID().replaceAll('-', '').slice(0, 6)}`;
+      const ids = buildPrivacyRetentionIds(suffix);
+      seededFixtures.add(ids);
+      await cleanupPrivacyRetentionFixture(db, ids);
+      await seedPrivacyRetentionFixture(db, ids, suffix);
 
-    const result = await processPrivacyRequestActivity({ requestId: ids.requestId });
+      const result = await processPrivacyRequestActivity({ requestId: ids.requestId });
 
-    expect(result).toMatchObject({
-      ok: true,
-      value: { requestId: ids.requestId, status: 'completed' },
-    });
+      expect(result).toMatchObject({
+        ok: true,
+        value: { requestId: ids.requestId, status: 'completed' },
+      });
 
-    const [
-      order,
-      attendee,
-      secondAttendee,
-      ticket,
-      invoice,
-      checkoutSession,
-      auditLog,
-      privacyRequest,
-      waitlistEntry,
-      otherOrder,
-      otherAttendee,
-      otherTicket,
-      otherInvoice,
-      otherCheckoutSession,
-      otherWaitlistEntry,
-    ] = await Promise.all([
-      db.selectFrom('orders').selectAll().where('id', '=', ids.orderId).executeTakeFirstOrThrow(),
-      db
-        .selectFrom('attendees')
-        .selectAll()
-        .where('id', '=', ids.attendeeId)
-        .executeTakeFirstOrThrow(),
-      db
-        .selectFrom('attendees')
-        .selectAll()
-        .where('id', '=', ids.secondAttendeeId)
-        .executeTakeFirstOrThrow(),
-      db.selectFrom('tickets').selectAll().where('id', '=', ids.ticketId).executeTakeFirstOrThrow(),
-      db
-        .selectFrom('invoices')
-        .selectAll()
-        .where('id', '=', ids.invoiceId)
-        .executeTakeFirstOrThrow(),
-      db
-        .selectFrom('checkout_sessions')
-        .selectAll()
-        .where('id', '=', ids.checkoutSessionId)
-        .executeTakeFirstOrThrow(),
-      db
-        .selectFrom('audit_logs')
-        .selectAll()
-        .where('id', '=', ids.auditLogId)
-        .executeTakeFirstOrThrow(),
-      db
-        .selectFrom('privacy_requests')
-        .selectAll()
-        .where('id', '=', ids.requestId)
-        .executeTakeFirstOrThrow(),
-      db
-        .selectFrom('waitlist_entries')
-        .selectAll()
-        .where('id', '=', ids.waitlistEntryId)
-        .executeTakeFirstOrThrow(),
-      db
-        .selectFrom('orders')
-        .selectAll()
-        .where('id', '=', ids.otherOrderId)
-        .executeTakeFirstOrThrow(),
-      db
-        .selectFrom('attendees')
-        .selectAll()
-        .where('id', '=', ids.otherAttendeeId)
-        .executeTakeFirstOrThrow(),
-      db
-        .selectFrom('tickets')
-        .selectAll()
-        .where('id', '=', ids.otherTicketId)
-        .executeTakeFirstOrThrow(),
-      db
-        .selectFrom('invoices')
-        .selectAll()
-        .where('id', '=', ids.otherInvoiceId)
-        .executeTakeFirstOrThrow(),
-      db
-        .selectFrom('checkout_sessions')
-        .selectAll()
-        .where('id', '=', ids.otherCheckoutSessionId)
-        .executeTakeFirstOrThrow(),
-      db
-        .selectFrom('waitlist_entries')
-        .selectAll()
-        .where('id', '=', ids.otherWaitlistEntryId)
-        .executeTakeFirstOrThrow(),
-    ]);
+      const [
+        order,
+        attendee,
+        secondAttendee,
+        ticket,
+        invoice,
+        checkoutSession,
+        auditLog,
+        privacyRequest,
+        waitlistEntry,
+        otherOrder,
+        otherAttendee,
+        otherTicket,
+        otherInvoice,
+        otherCheckoutSession,
+        otherWaitlistEntry,
+      ] = await Promise.all([
+        db.selectFrom('orders').selectAll().where('id', '=', ids.orderId).executeTakeFirstOrThrow(),
+        db
+          .selectFrom('attendees')
+          .selectAll()
+          .where('id', '=', ids.attendeeId)
+          .executeTakeFirstOrThrow(),
+        db
+          .selectFrom('attendees')
+          .selectAll()
+          .where('id', '=', ids.secondAttendeeId)
+          .executeTakeFirstOrThrow(),
+        db
+          .selectFrom('tickets')
+          .selectAll()
+          .where('id', '=', ids.ticketId)
+          .executeTakeFirstOrThrow(),
+        db
+          .selectFrom('invoices')
+          .selectAll()
+          .where('id', '=', ids.invoiceId)
+          .executeTakeFirstOrThrow(),
+        db
+          .selectFrom('checkout_sessions')
+          .selectAll()
+          .where('id', '=', ids.checkoutSessionId)
+          .executeTakeFirstOrThrow(),
+        db
+          .selectFrom('audit_logs')
+          .selectAll()
+          .where('id', '=', ids.auditLogId)
+          .executeTakeFirstOrThrow(),
+        db
+          .selectFrom('privacy_requests')
+          .selectAll()
+          .where('id', '=', ids.requestId)
+          .executeTakeFirstOrThrow(),
+        db
+          .selectFrom('waitlist_entries')
+          .selectAll()
+          .where('id', '=', ids.waitlistEntryId)
+          .executeTakeFirstOrThrow(),
+        db
+          .selectFrom('orders')
+          .selectAll()
+          .where('id', '=', ids.otherOrderId)
+          .executeTakeFirstOrThrow(),
+        db
+          .selectFrom('attendees')
+          .selectAll()
+          .where('id', '=', ids.otherAttendeeId)
+          .executeTakeFirstOrThrow(),
+        db
+          .selectFrom('tickets')
+          .selectAll()
+          .where('id', '=', ids.otherTicketId)
+          .executeTakeFirstOrThrow(),
+        db
+          .selectFrom('invoices')
+          .selectAll()
+          .where('id', '=', ids.otherInvoiceId)
+          .executeTakeFirstOrThrow(),
+        db
+          .selectFrom('checkout_sessions')
+          .selectAll()
+          .where('id', '=', ids.otherCheckoutSessionId)
+          .executeTakeFirstOrThrow(),
+        db
+          .selectFrom('waitlist_entries')
+          .selectAll()
+          .where('id', '=', ids.otherWaitlistEntryId)
+          .executeTakeFirstOrThrow(),
+      ]);
 
-    expect(order).toMatchObject({
-      id: ids.orderId,
-      status: 'paid',
-      currency: 'USD',
-      total_cents: expect.anything(),
-      refunded_cents: expect.anything(),
-      buyer_first_name: null,
-      buyer_last_name: null,
-      buyer_phone: null,
-    });
-    expect(Number(order.total_cents)).toBe(12500);
-    expect(Number(order.refunded_cents)).toBe(2500);
-    expect(String(order.buyer_email)).toMatch(/^erased\+[a-f0-9]{16}@privacy\.tixkit\.invalid$/);
+      expect(order).toMatchObject({
+        id: ids.orderId,
+        status: 'paid',
+        currency: 'USD',
+        total_cents: expect.anything(),
+        refunded_cents: expect.anything(),
+        buyer_first_name: null,
+        buyer_last_name: null,
+        buyer_phone: null,
+      });
+      expect(Number(order.total_cents)).toBe(12500);
+      expect(Number(order.refunded_cents)).toBe(2500);
+      expect(String(order.buyer_email)).toMatch(/^erased\+[a-f0-9]{16}@privacy\.tixkit\.invalid$/);
 
-    expect(attendee).toMatchObject({
-      id: ids.attendeeId,
-      first_name: null,
-      last_name: null,
-      phone: null,
-      custom_answers: null,
-      status: 'registered',
-    });
-    expect(String(attendee.email)).toMatch(/^erased\+[a-f0-9]{16}@privacy\.tixkit\.invalid$/);
-    expect(secondAttendee).toMatchObject({
-      id: ids.secondAttendeeId,
-      first_name: null,
-      last_name: null,
-      phone: null,
-      custom_answers: null,
-      status: 'registered',
-    });
-    expect(String(secondAttendee.email)).toMatch(/^erased\+[a-f0-9]{16}@privacy\.tixkit\.invalid$/);
+      expect(attendee).toMatchObject({
+        id: ids.attendeeId,
+        first_name: null,
+        last_name: null,
+        phone: null,
+        custom_answers: null,
+        status: 'registered',
+      });
+      expect(String(attendee.email)).toMatch(/^erased\+[a-f0-9]{16}@privacy\.tixkit\.invalid$/);
+      expect(secondAttendee).toMatchObject({
+        id: ids.secondAttendeeId,
+        first_name: null,
+        last_name: null,
+        phone: null,
+        custom_answers: null,
+        status: 'registered',
+      });
+      expect(String(secondAttendee.email)).toMatch(
+        /^erased\+[a-f0-9]{16}@privacy\.tixkit\.invalid$/,
+      );
 
-    expect(ticket).toMatchObject({
-      id: ids.ticketId,
-      status: 'issued',
-      transferred_to_email: null,
-    });
-    expect(invoice).toMatchObject({
-      id: ids.invoiceId,
-      total_cents: 12500,
-      tax_cents: 700,
-      buyer_name: null,
-      buyer_tax_id: null,
-    });
-    expect(String(invoice.buyer_email)).toMatch(/^erased\+[a-f0-9]{16}@privacy\.tixkit\.invalid$/);
-    const checkoutBuyer = parseJsonColumn(checkoutSession.buyer);
-    expect(checkoutBuyer).toMatchObject({
-      email: expect.stringMatching(/^erased\+[a-f0-9]{16}@privacy\.tixkit\.invalid$/),
-      firstName: null,
-      lastName: null,
-      phone: null,
-    });
-    expect(auditLog).toMatchObject({
-      id: ids.auditLogId,
-      tenant_id: ids.tenantId,
-      organization_id: null,
-      action: 'privacy.erasure.requested',
-      resource_type: 'privacy_request',
-      resource_id: ids.requestId,
-    });
-    const auditSummary = parseJsonColumn(auditLog.diff_summary);
-    expect(auditSummary).toMatchObject({
-      subjectEmail: expect.stringMatching(/^erased\+[a-f0-9]{16}@privacy\.tixkit\.invalid$/),
-    });
-    expect(JSON.stringify(auditLog)).not.toContain('buyer@test.com');
+      expect(ticket).toMatchObject({
+        id: ids.ticketId,
+        status: 'issued',
+        transferred_to_email: null,
+      });
+      expect(invoice).toMatchObject({
+        id: ids.invoiceId,
+        total_cents: 12500,
+        tax_cents: 700,
+        buyer_name: null,
+        buyer_tax_id: null,
+      });
+      expect(String(invoice.buyer_email)).toMatch(
+        /^erased\+[a-f0-9]{16}@privacy\.tixkit\.invalid$/,
+      );
+      const checkoutBuyer = parseJsonColumn(checkoutSession.buyer);
+      expect(checkoutBuyer).toMatchObject({
+        email: expect.stringMatching(/^erased\+[a-f0-9]{16}@privacy\.tixkit\.invalid$/),
+        firstName: null,
+        lastName: null,
+        phone: null,
+      });
+      expect(auditLog).toMatchObject({
+        id: ids.auditLogId,
+        tenant_id: ids.tenantId,
+        organization_id: null,
+        action: 'privacy.erasure.requested',
+        resource_type: 'privacy_request',
+        resource_id: ids.requestId,
+      });
+      const auditSummary = parseJsonColumn(auditLog.diff_summary);
+      expect(auditSummary).toMatchObject({
+        subjectEmail: expect.stringMatching(/^erased\+[a-f0-9]{16}@privacy\.tixkit\.invalid$/),
+      });
+      expect(JSON.stringify(auditLog)).not.toContain('buyer@test.com');
 
-    expect(privacyRequest).toMatchObject({
-      id: ids.requestId,
-      status: 'completed',
-      error: null,
-    });
-    expect(String(privacyRequest.subject_email)).toMatch(
-      /^erased\+[a-f0-9]{16}@privacy\.tixkit\.invalid$/,
-    );
-    const resultPayload = parseJsonColumn(privacyRequest.result);
-    expect(resultPayload).toMatchObject({
-      ordersRedacted: 1,
-      attendeesRedacted: 2,
-      waitlistEntriesRedacted: 1,
-      ticketsTouched: 1,
-    });
-    expect(waitlistEntry).toMatchObject({
-      id: ids.waitlistEntryId,
-      buyer_first_name: null,
-      buyer_last_name: null,
-      buyer_phone: null,
-      quantity: 2,
-      status: 'joined',
-    });
-    expect(String(waitlistEntry.buyer_email)).toMatch(
-      /^erased\+[a-f0-9]{16}@privacy\.tixkit\.invalid$/,
-    );
-
-    expect(otherOrder).toMatchObject({
-      id: ids.otherOrderId,
-      buyer_email: 'buyer@test.com',
-      buyer_first_name: 'Other',
-      buyer_phone: '+15550000009',
-    });
-    expect(otherAttendee).toMatchObject({
-      id: ids.otherAttendeeId,
-      email: 'buyer@test.com',
-      first_name: 'Other',
-    });
-    expect(parseJsonColumn(otherAttendee.custom_answers)).toEqual({ shouldStay: true });
-    expect(otherTicket).toMatchObject({
-      id: ids.otherTicketId,
-      transferred_to_email: 'buyer@test.com',
-    });
-    expect(otherInvoice).toMatchObject({
-      id: ids.otherInvoiceId,
-      buyer_email: 'buyer@test.com',
-      buyer_name: 'Other Scope',
-      buyer_tax_id: 'US-999',
-    });
-    expect(parseJsonColumn(otherCheckoutSession.buyer)).toMatchObject({
-      email: 'buyer@test.com',
-      firstName: 'Other',
-    });
-    expect(otherWaitlistEntry).toMatchObject({
-      id: ids.otherWaitlistEntryId,
-      buyer_email: 'buyer@test.com',
-      buyer_first_name: 'Other',
-      buyer_phone: '+15550000009',
-    });
-  });
-
-  it('repairs legacy completed erasures from the scheduled retention activity', async () => {
-    const suffix = `${driver}_${randomUUID().replaceAll('-', '').slice(0, 6)}`;
-    const ids = buildPrivacyRetentionIds(suffix);
-    seededFixtures.add(ids);
-    await cleanupPrivacyRetentionFixture(db, ids);
-    await seedPrivacyRetentionFixture(db, ids, suffix);
-    await db
-      .updateTable('privacy_requests')
-      .set({
+      expect(privacyRequest).toMatchObject({
+        id: ids.requestId,
         status: 'completed',
-        brand_id: null,
-        subject_id: ids.orderId,
-        result: JSON.stringify({ legacy: true }),
-        completed_at: new Date('2026-06-20T12:00:00.000Z'),
-        created_at: new Date('2000-01-01T00:00:00.000Z'),
-      })
-      .where('id', '=', ids.requestId)
-      .execute();
-    await db
-      .updateTable('orders')
-      .set({
+        error: null,
+      });
+      expect(String(privacyRequest.subject_email)).toMatch(
+        /^erased\+[a-f0-9]{16}@privacy\.tixkit\.invalid$/,
+      );
+      const resultPayload = parseJsonColumn(privacyRequest.result);
+      expect(resultPayload).toMatchObject({
+        ordersRedacted: 1,
+        attendeesRedacted: 2,
+        waitlistEntriesRedacted: 1,
+        ticketsTouched: 1,
+      });
+      expect(waitlistEntry).toMatchObject({
+        id: ids.waitlistEntryId,
+        buyer_first_name: null,
+        buyer_last_name: null,
+        buyer_phone: null,
+        quantity: 2,
+        status: 'joined',
+      });
+      expect(String(waitlistEntry.buyer_email)).toMatch(
+        /^erased\+[a-f0-9]{16}@privacy\.tixkit\.invalid$/,
+      );
+
+      expect(otherOrder).toMatchObject({
+        id: ids.otherOrderId,
+        buyer_email: 'buyer@test.com',
+        buyer_first_name: 'Other',
+        buyer_phone: '+15550000009',
+      });
+      expect(otherAttendee).toMatchObject({
+        id: ids.otherAttendeeId,
+        email: 'buyer@test.com',
+        first_name: 'Other',
+      });
+      expect(parseJsonColumn(otherAttendee.custom_answers)).toEqual({ shouldStay: true });
+      expect(otherTicket).toMatchObject({
+        id: ids.otherTicketId,
+        transferred_to_email: 'buyer@test.com',
+      });
+      expect(otherInvoice).toMatchObject({
+        id: ids.otherInvoiceId,
+        buyer_email: 'buyer@test.com',
+        buyer_name: 'Other Scope',
+        buyer_tax_id: 'US-999',
+      });
+      expect(parseJsonColumn(otherCheckoutSession.buyer)).toMatchObject({
+        email: 'buyer@test.com',
+        firstName: 'Other',
+      });
+      expect(otherWaitlistEntry).toMatchObject({
+        id: ids.otherWaitlistEntryId,
+        buyer_email: 'buyer@test.com',
+        buyer_first_name: 'Other',
+        buyer_phone: '+15550000009',
+      });
+    });
+
+    it('repairs legacy completed erasures from the scheduled retention activity', async () => {
+      const suffix = `${driver}_${randomUUID().replaceAll('-', '').slice(0, 6)}`;
+      const ids = buildPrivacyRetentionIds(suffix);
+      seededFixtures.add(ids);
+      await cleanupPrivacyRetentionFixture(db, ids);
+      await seedPrivacyRetentionFixture(db, ids, suffix);
+      await db
+        .updateTable('privacy_requests')
+        .set({
+          status: 'completed',
+          brand_id: null,
+          subject_id: ids.orderId,
+          result: JSON.stringify({ legacy: true }),
+          completed_at: new Date('2026-06-20T12:00:00.000Z'),
+          created_at: new Date('2000-01-01T00:00:00.000Z'),
+        })
+        .where('id', '=', ids.requestId)
+        .execute();
+      await db
+        .updateTable('orders')
+        .set({
+          buyer_email: 'erased+aaaaaaaaaaaaaaaa@privacy.tixkit.invalid',
+          buyer_first_name: null,
+          buyer_last_name: null,
+          buyer_phone: null,
+        })
+        .where('id', '=', ids.orderId)
+        .execute();
+      await db
+        .updateTable('attendees')
+        .set({
+          email: 'erased+bbbbbbbbbbbbbbbb@privacy.tixkit.invalid',
+          first_name: null,
+          last_name: null,
+          phone: null,
+          custom_answers: null,
+        })
+        .where('id', 'in', [ids.attendeeId, ids.secondAttendeeId])
+        .execute();
+      await db
+        .updateTable('tickets')
+        .set({ transferred_to_email: null })
+        .where('id', '=', ids.ticketId)
+        .execute();
+      await db
+        .updateTable('invoices')
+        .set({
+          buyer_email: 'erased+cccccccccccccccc@privacy.tixkit.invalid',
+          buyer_name: 'Ada Lovelace',
+          buyer_tax_id: 'US-123',
+        })
+        .where('id', '=', ids.invoiceId)
+        .execute();
+      await db
+        .updateTable('checkout_sessions')
+        .set({
+          buyer: JSON.stringify({
+            email: 'erased+dddddddddddddddd@privacy.tixkit.invalid',
+            firstName: 'Ada',
+            lastName: 'Lovelace',
+            phone: '+15550000001',
+          }),
+        })
+        .where('id', '=', ids.checkoutSessionId)
+        .execute();
+
+      const result = await enforcePrivacyRetentionActivity({
+        batchSize: 1,
+        requestId: ids.requestId,
+      });
+
+      expect(result).toMatchObject({
+        ok: true,
+        value: { inspectedCount: 1, repairedCount: 1, skippedCount: 0 },
+      });
+
+      const [
+        order,
+        attendee,
+        ticket,
+        invoice,
+        checkoutSession,
+        auditLog,
+        privacyRequest,
+        otherOrder,
+      ] = await Promise.all([
+        db.selectFrom('orders').selectAll().where('id', '=', ids.orderId).executeTakeFirstOrThrow(),
+        db
+          .selectFrom('attendees')
+          .selectAll()
+          .where('id', '=', ids.attendeeId)
+          .executeTakeFirstOrThrow(),
+        db
+          .selectFrom('tickets')
+          .selectAll()
+          .where('id', '=', ids.ticketId)
+          .executeTakeFirstOrThrow(),
+        db
+          .selectFrom('invoices')
+          .selectAll()
+          .where('id', '=', ids.invoiceId)
+          .executeTakeFirstOrThrow(),
+        db
+          .selectFrom('checkout_sessions')
+          .selectAll()
+          .where('id', '=', ids.checkoutSessionId)
+          .executeTakeFirstOrThrow(),
+        db
+          .selectFrom('audit_logs')
+          .selectAll()
+          .where('id', '=', ids.auditLogId)
+          .executeTakeFirstOrThrow(),
+        db
+          .selectFrom('privacy_requests')
+          .selectAll()
+          .where('id', '=', ids.requestId)
+          .executeTakeFirstOrThrow(),
+        db
+          .selectFrom('orders')
+          .selectAll()
+          .where('id', '=', ids.otherOrderId)
+          .executeTakeFirstOrThrow(),
+      ]);
+
+      expect(order).toMatchObject({
+        id: ids.orderId,
         buyer_email: 'erased+aaaaaaaaaaaaaaaa@privacy.tixkit.invalid',
         buyer_first_name: null,
         buyer_last_name: null,
         buyer_phone: null,
-      })
-      .where('id', '=', ids.orderId)
-      .execute();
-    await db
-      .updateTable('attendees')
-      .set({
+      });
+      expect(attendee).toMatchObject({
+        id: ids.attendeeId,
         email: 'erased+bbbbbbbbbbbbbbbb@privacy.tixkit.invalid',
         first_name: null,
         last_name: null,
         phone: null,
         custom_answers: null,
-      })
-      .where('id', 'in', [ids.attendeeId, ids.secondAttendeeId])
-      .execute();
-    await db
-      .updateTable('tickets')
-      .set({ transferred_to_email: null })
-      .where('id', '=', ids.ticketId)
-      .execute();
-    await db
-      .updateTable('invoices')
-      .set({
-        buyer_email: 'erased+cccccccccccccccc@privacy.tixkit.invalid',
-        buyer_name: 'Ada Lovelace',
-        buyer_tax_id: 'US-123',
-      })
-      .where('id', '=', ids.invoiceId)
-      .execute();
-    await db
-      .updateTable('checkout_sessions')
-      .set({
-        buyer: JSON.stringify({
-          email: 'erased+dddddddddddddddd@privacy.tixkit.invalid',
-          firstName: 'Ada',
-          lastName: 'Lovelace',
-          phone: '+15550000001',
-        }),
-      })
-      .where('id', '=', ids.checkoutSessionId)
-      .execute();
-
-    const result = await enforcePrivacyRetentionActivity({
-      batchSize: 1,
-      requestId: ids.requestId,
+      });
+      expect(ticket).toMatchObject({ id: ids.ticketId, transferred_to_email: null });
+      expect(invoice).toMatchObject({
+        id: ids.invoiceId,
+        buyer_name: null,
+        buyer_tax_id: null,
+      });
+      expect(String(invoice.buyer_email)).toMatch(
+        /^erased\+[a-f0-9]{16}@privacy\.tixkit\.invalid$/,
+      );
+      expect(parseJsonColumn(checkoutSession.buyer)).toMatchObject({
+        email: expect.stringMatching(/^erased\+[a-f0-9]{16}@privacy\.tixkit\.invalid$/),
+        firstName: null,
+        lastName: null,
+        phone: null,
+      });
+      expect(parseJsonColumn(auditLog.diff_summary)).toMatchObject({
+        subjectEmail: expect.stringMatching(/^erased\+[a-f0-9]{16}@privacy\.tixkit\.invalid$/),
+      });
+      expect(JSON.stringify(auditLog)).not.toContain('buyer@test.com');
+      expect(privacyRequest).toMatchObject({ id: ids.requestId, status: 'completed', error: null });
+      expect(String(privacyRequest.subject_email)).toMatch(
+        /^erased\+[a-f0-9]{16}@privacy\.tixkit\.invalid$/,
+      );
+      expect(parseJsonColumn(privacyRequest.result)).toMatchObject({
+        ordersRedacted: 0,
+        attendeesRedacted: 0,
+        ticketsTouched: 0,
+      });
+      expect(otherOrder).toMatchObject({
+        id: ids.otherOrderId,
+        buyer_email: 'buyer@test.com',
+        buyer_first_name: 'Other',
+      });
     });
-
-    expect(result).toMatchObject({
-      ok: true,
-      value: { inspectedCount: 1, repairedCount: 1, skippedCount: 0 },
-    });
-
-    const [
-      order,
-      attendee,
-      ticket,
-      invoice,
-      checkoutSession,
-      auditLog,
-      privacyRequest,
-      otherOrder,
-    ] = await Promise.all([
-      db.selectFrom('orders').selectAll().where('id', '=', ids.orderId).executeTakeFirstOrThrow(),
-      db
-        .selectFrom('attendees')
-        .selectAll()
-        .where('id', '=', ids.attendeeId)
-        .executeTakeFirstOrThrow(),
-      db.selectFrom('tickets').selectAll().where('id', '=', ids.ticketId).executeTakeFirstOrThrow(),
-      db
-        .selectFrom('invoices')
-        .selectAll()
-        .where('id', '=', ids.invoiceId)
-        .executeTakeFirstOrThrow(),
-      db
-        .selectFrom('checkout_sessions')
-        .selectAll()
-        .where('id', '=', ids.checkoutSessionId)
-        .executeTakeFirstOrThrow(),
-      db
-        .selectFrom('audit_logs')
-        .selectAll()
-        .where('id', '=', ids.auditLogId)
-        .executeTakeFirstOrThrow(),
-      db
-        .selectFrom('privacy_requests')
-        .selectAll()
-        .where('id', '=', ids.requestId)
-        .executeTakeFirstOrThrow(),
-      db
-        .selectFrom('orders')
-        .selectAll()
-        .where('id', '=', ids.otherOrderId)
-        .executeTakeFirstOrThrow(),
-    ]);
-
-    expect(order).toMatchObject({
-      id: ids.orderId,
-      buyer_email: 'erased+aaaaaaaaaaaaaaaa@privacy.tixkit.invalid',
-      buyer_first_name: null,
-      buyer_last_name: null,
-      buyer_phone: null,
-    });
-    expect(attendee).toMatchObject({
-      id: ids.attendeeId,
-      email: 'erased+bbbbbbbbbbbbbbbb@privacy.tixkit.invalid',
-      first_name: null,
-      last_name: null,
-      phone: null,
-      custom_answers: null,
-    });
-    expect(ticket).toMatchObject({ id: ids.ticketId, transferred_to_email: null });
-    expect(invoice).toMatchObject({
-      id: ids.invoiceId,
-      buyer_name: null,
-      buyer_tax_id: null,
-    });
-    expect(String(invoice.buyer_email)).toMatch(/^erased\+[a-f0-9]{16}@privacy\.tixkit\.invalid$/);
-    expect(parseJsonColumn(checkoutSession.buyer)).toMatchObject({
-      email: expect.stringMatching(/^erased\+[a-f0-9]{16}@privacy\.tixkit\.invalid$/),
-      firstName: null,
-      lastName: null,
-      phone: null,
-    });
-    expect(parseJsonColumn(auditLog.diff_summary)).toMatchObject({
-      subjectEmail: expect.stringMatching(/^erased\+[a-f0-9]{16}@privacy\.tixkit\.invalid$/),
-    });
-    expect(JSON.stringify(auditLog)).not.toContain('buyer@test.com');
-    expect(privacyRequest).toMatchObject({ id: ids.requestId, status: 'completed', error: null });
-    expect(String(privacyRequest.subject_email)).toMatch(
-      /^erased\+[a-f0-9]{16}@privacy\.tixkit\.invalid$/,
-    );
-    expect(parseJsonColumn(privacyRequest.result)).toMatchObject({
-      ordersRedacted: 0,
-      attendeesRedacted: 0,
-      ticketsTouched: 0,
-    });
-    expect(otherOrder).toMatchObject({
-      id: ids.otherOrderId,
-      buyer_email: 'buyer@test.com',
-      buyer_first_name: 'Other',
-    });
-  });
-});
+  },
+);

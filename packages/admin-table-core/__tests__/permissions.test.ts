@@ -41,12 +41,7 @@ describe('filterSchemaByPermissions', () => {
 
   it('removes only the columns the actor lacks permission for', () => {
     const filtered = filterSchemaByPermissions(schema, ['orders.read.finance']);
-    expect(filtered.columns.map((c) => c.id)).toEqual([
-      'id',
-      'buyerEmail',
-      'status',
-      'totalCents',
-    ]);
+    expect(filtered.columns.map((c) => c.id)).toEqual(['id', 'buyerEmail', 'status', 'totalCents']);
     expect(filtered.columns.find((c) => c.id === 'internalNote')).toBeUndefined();
   });
 

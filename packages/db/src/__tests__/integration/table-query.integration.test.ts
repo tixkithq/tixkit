@@ -14,10 +14,7 @@ import {
   OrderRepository,
 } from '../../repositories/index.js';
 import { executeTableQuery } from '../../repositories/table-query.js';
-import {
-  col,
-  defineTable,
-} from '@tixkit/admin-table-core';
+import { col, defineTable } from '@tixkit/admin-table-core';
 import { ValidationError } from '@tixkit/domain';
 
 // ---------------------------------------------------------------------------
@@ -34,9 +31,7 @@ const allDriverCases: DriverCase[] = [
 
 const requestedDriver = process.env.DB_INTEGRATION_DRIVER;
 const driverCases = (
-  requestedDriver
-    ? allDriverCases.filter((c) => c.driver === requestedDriver)
-    : allDriverCases
+  requestedDriver ? allDriverCases.filter((c) => c.driver === requestedDriver) : allDriverCases
 ).filter((c) => c.url.length > 0);
 
 if (driverCases.length === 0) {
@@ -173,6 +168,8 @@ async function seedOrder(input: SeedOrderInput): Promise<Record<string, unknown>
     totalCents: input.totalCents,
     buyerEmail: input.buyerEmail,
     salesChannel: (input.salesChannel as 'online' | 'box_office') ?? 'online',
+    operatorId: input.salesChannel === 'box_office' ? 'usr_table_query_box_office' : undefined,
+    tenderType: input.salesChannel === 'box_office' ? 'cash' : undefined,
   });
   if (input.refundedCents && input.refundedCents > 0) {
     await orderRepo.update((order as Record<string, unknown>).id as string, {
@@ -207,7 +204,7 @@ function serializeOrder(row: Record<string, unknown>) {
 // Tests
 // ---------------------------------------------------------------------------
 
-describe.each(driverCases)('table-query integration: $driver', ({ driver, url }) => {
+describe.sequential.each(driverCases)('table-query integration: $driver', ({ driver, url }) => {
   let db: Database;
   let catalog: Catalog;
 
@@ -232,45 +229,90 @@ describe.each(driverCases)('table-query integration: $driver', ({ driver, url })
 
   describe('filters', () => {
     beforeEach(async () => {
-      await seedOrder({ db, catalog, id: 'ord_1', orderNumber: 'TK-001', status: 'paid', totalCents: 10_000, buyerEmail: 'alice@test.com' });
-      await seedOrder({ db, catalog, id: 'ord_2', orderNumber: 'TK-002', status: 'paid', totalCents: 5_000, buyerEmail: 'bob@test.com' });
-      await seedOrder({ db, catalog, id: 'ord_3', orderNumber: 'TK-003', status: 'failed', totalCents: 3_000, buyerEmail: 'carol@test.com' });
-      await seedOrder({ db, catalog, id: 'ord_4', orderNumber: 'TK-004', status: 'cancelled', totalCents: 7_500, buyerEmail: 'dave@test.com', salesChannel: 'box_office' });
+      await seedOrder({
+        db,
+        catalog,
+        id: 'ord_1',
+        orderNumber: 'TK-001',
+        status: 'paid',
+        totalCents: 10_000,
+        buyerEmail: 'alice@test.com',
+      });
+      await seedOrder({
+        db,
+        catalog,
+        id: 'ord_2',
+        orderNumber: 'TK-002',
+        status: 'paid',
+        totalCents: 5_000,
+        buyerEmail: 'bob@test.com',
+      });
+      await seedOrder({
+        db,
+        catalog,
+        id: 'ord_3',
+        orderNumber: 'TK-003',
+        status: 'failed',
+        totalCents: 3_000,
+        buyerEmail: 'carol@test.com',
+      });
+      await seedOrder({
+        db,
+        catalog,
+        id: 'ord_4',
+        orderNumber: 'TK-004',
+        status: 'cancelled',
+        totalCents: 7_500,
+        buyerEmail: 'dave@test.com',
+        salesChannel: 'box_office',
+      });
     });
 
     it('text filter: case-insensitive partial match on buyerEmail', async () => {
-      const result = await executeTableQuery(db, {
-        tableName: 'orders',
-        schema: testSchema,
-        tenantId: catalog.tenantId,
-        serialize: serializeOrder,
-      }, { search: 'ALICE', limit: 50 });
+      const result = await executeTableQuery(
+        db,
+        {
+          tableName: 'orders',
+          schema: testSchema,
+          tenantId: catalog.tenantId,
+          serialize: serializeOrder,
+        },
+        { search: 'ALICE', limit: 50 },
+      );
 
       expect(result.items).toHaveLength(1);
       expect((result.items[0] as Record<string, unknown>).buyerEmail).toBe('alice@test.com');
     });
 
     it('text filter: partial match on substring', async () => {
-      const result = await executeTableQuery(db, {
-        tableName: 'orders',
-        schema: testSchema,
-        tenantId: catalog.tenantId,
-        serialize: serializeOrder,
-      }, { search: '@test.com', limit: 50 });
+      const result = await executeTableQuery(
+        db,
+        {
+          tableName: 'orders',
+          schema: testSchema,
+          tenantId: catalog.tenantId,
+          serialize: serializeOrder,
+        },
+        { search: '@test.com', limit: 50 },
+      );
 
       expect(result.items).toHaveLength(4);
     });
 
     it('select filter: IN semantics for status', async () => {
-      const result = await executeTableQuery(db, {
-        tableName: 'orders',
-        schema: testSchema,
-        tenantId: catalog.tenantId,
-        serialize: serializeOrder,
-      }, {
-        limit: 50,
-        filters: { status: { type: 'select', values: ['paid', 'failed'] } },
-      });
+      const result = await executeTableQuery(
+        db,
+        {
+          tableName: 'orders',
+          schema: testSchema,
+          tenantId: catalog.tenantId,
+          serialize: serializeOrder,
+        },
+        {
+          limit: 50,
+          filters: { status: { type: 'select', values: ['paid', 'failed'] } },
+        },
+      );
 
       expect(result.items).toHaveLength(3);
       const statuses = result.items.map((i) => (i as Record<string, unknown>).status);
@@ -278,30 +320,38 @@ describe.each(driverCases)('table-query integration: $driver', ({ driver, url })
     });
 
     it('select filter: multi-value for salesChannel', async () => {
-      const result = await executeTableQuery(db, {
-        tableName: 'orders',
-        schema: testSchema,
-        tenantId: catalog.tenantId,
-        serialize: serializeOrder,
-      }, {
-        limit: 50,
-        filters: { salesChannel: { type: 'select', values: ['box_office'] } },
-      });
+      const result = await executeTableQuery(
+        db,
+        {
+          tableName: 'orders',
+          schema: testSchema,
+          tenantId: catalog.tenantId,
+          serialize: serializeOrder,
+        },
+        {
+          limit: 50,
+          filters: { salesChannel: { type: 'select', values: ['box_office'] } },
+        },
+      );
 
       expect(result.items).toHaveLength(1);
       expect((result.items[0] as Record<string, unknown>).salesChannel).toBe('box_office');
     });
 
     it('number_range filter: min only', async () => {
-      const result = await executeTableQuery(db, {
-        tableName: 'orders',
-        schema: testSchema,
-        tenantId: catalog.tenantId,
-        serialize: serializeOrder,
-      }, {
-        limit: 50,
-        filters: { totalCents: { type: 'number_range', min: 6_000 } },
-      });
+      const result = await executeTableQuery(
+        db,
+        {
+          tableName: 'orders',
+          schema: testSchema,
+          tenantId: catalog.tenantId,
+          serialize: serializeOrder,
+        },
+        {
+          limit: 50,
+          filters: { totalCents: { type: 'number_range', min: 6_000 } },
+        },
+      );
 
       expect(result.items).toHaveLength(2);
       const totals = result.items.map((i) => Number((i as Record<string, unknown>).totalCents));
@@ -309,15 +359,19 @@ describe.each(driverCases)('table-query integration: $driver', ({ driver, url })
     });
 
     it('number_range filter: max only', async () => {
-      const result = await executeTableQuery(db, {
-        tableName: 'orders',
-        schema: testSchema,
-        tenantId: catalog.tenantId,
-        serialize: serializeOrder,
-      }, {
-        limit: 50,
-        filters: { totalCents: { type: 'number_range', max: 5_000 } },
-      });
+      const result = await executeTableQuery(
+        db,
+        {
+          tableName: 'orders',
+          schema: testSchema,
+          tenantId: catalog.tenantId,
+          serialize: serializeOrder,
+        },
+        {
+          limit: 50,
+          filters: { totalCents: { type: 'number_range', max: 5_000 } },
+        },
+      );
 
       expect(result.items).toHaveLength(2);
       const totals = result.items.map((i) => Number((i as Record<string, unknown>).totalCents));
@@ -325,68 +379,98 @@ describe.each(driverCases)('table-query integration: $driver', ({ driver, url })
     });
 
     it('number_range filter: min and max inclusive', async () => {
-      const result = await executeTableQuery(db, {
-        tableName: 'orders',
-        schema: testSchema,
-        tenantId: catalog.tenantId,
-        serialize: serializeOrder,
-      }, {
-        limit: 50,
-        filters: { totalCents: { type: 'number_range', min: 3_000, max: 7_500 } },
-      });
+      const result = await executeTableQuery(
+        db,
+        {
+          tableName: 'orders',
+          schema: testSchema,
+          tenantId: catalog.tenantId,
+          serialize: serializeOrder,
+        },
+        {
+          limit: 50,
+          filters: { totalCents: { type: 'number_range', min: 3_000, max: 7_500 } },
+        },
+      );
 
-      expect(result.items).toHaveLength(2);
+      expect(result.items).toHaveLength(3);
     });
 
     it('custom boolean filter: refundState true', async () => {
-      await seedOrder({ db, catalog, id: 'ord_refunded', orderNumber: 'TK-REF', status: 'refunded', totalCents: 10_000, buyerEmail: 'ref@test.com', refundedCents: 10_000 });
+      await seedOrder({
+        db,
+        catalog,
+        id: 'ord_refunded',
+        orderNumber: 'TK-REF',
+        status: 'refunded',
+        totalCents: 10_000,
+        buyerEmail: 'ref@test.com',
+        refundedCents: 10_000,
+      });
 
-      const result = await executeTableQuery(db, {
-        tableName: 'orders',
-        schema: testSchema,
-        tenantId: catalog.tenantId,
-        serialize: serializeOrder,
-        customFilters: {
-          refundState: (q, value) => {
-            if (value.type === 'boolean') {
-              return value.value
-                ? q.where('refunded_cents', '>', 0)
-                : q.where('refunded_cents', '=', 0);
-            }
-            return q;
+      const result = await executeTableQuery(
+        db,
+        {
+          tableName: 'orders',
+          schema: testSchema,
+          tenantId: catalog.tenantId,
+          serialize: serializeOrder,
+          customFilters: {
+            refundState: (q, value) => {
+              if (value.type === 'boolean') {
+                return value.value
+                  ? q.where('refunded_cents', '>', 0)
+                  : q.where('refunded_cents', '=', 0);
+              }
+              return q;
+            },
           },
         },
-      }, {
-        limit: 50,
-        filters: { refundState: { type: 'boolean', value: true } },
-      });
+        {
+          limit: 50,
+          filters: { refundState: { type: 'boolean', value: true } },
+        },
+      );
 
       expect(result.items).toHaveLength(1);
       expect((result.items[0] as Record<string, unknown>).buyerEmail).toBe('ref@test.com');
     });
 
     it('custom boolean filter: refundState false', async () => {
-      await seedOrder({ db, catalog, id: 'ord_refunded', orderNumber: 'TK-REF', status: 'refunded', totalCents: 10_000, buyerEmail: 'ref@test.com', refundedCents: 10_000 });
+      await seedOrder({
+        db,
+        catalog,
+        id: 'ord_refunded',
+        orderNumber: 'TK-REF',
+        status: 'refunded',
+        totalCents: 10_000,
+        buyerEmail: 'ref@test.com',
+        refundedCents: 10_000,
+      });
 
-      const result = await executeTableQuery(db, {
-        tableName: 'orders',
-        schema: testSchema,
-        tenantId: catalog.tenantId,
-        serialize: serializeOrder,
-        customFilters: {
-          refundState: (q, value) => {
-            if (value.type === 'boolean') {
-              return value.value
-                ? q.where('refunded_cents', '>', 0)
-                : q.where('refunded_cents', '=', 0);
-            }
-            return q;
+      const result = await executeTableQuery(
+        db,
+        {
+          tableName: 'orders',
+          schema: testSchema,
+          tenantId: catalog.tenantId,
+          serialize: serializeOrder,
+          customFilters: {
+            refundState: (q, value) => {
+              if (value.type === 'boolean') {
+                return value.value
+                  ? q.where('refunded_cents', '>', 0)
+                  : q.where('refunded_cents', '=', 0);
+              }
+              return q;
+            },
           },
         },
-      }, {
-        limit: 50,
-        filters: { refundState: { type: 'boolean', value: false } },
-      });
+        {
+          limit: 50,
+          filters: { refundState: { type: 'boolean', value: false } },
+        },
+      );
 
       expect(result.items).toHaveLength(4);
     });
@@ -398,37 +482,79 @@ describe.each(driverCases)('table-query integration: $driver', ({ driver, url })
 
   describe('facets', () => {
     beforeEach(async () => {
-      await seedOrder({ db, catalog, id: 'ord_1', orderNumber: 'TK-001', status: 'paid', totalCents: 10_000, buyerEmail: 'alice@test.com' });
-      await seedOrder({ db, catalog, id: 'ord_2', orderNumber: 'TK-002', status: 'paid', totalCents: 5_000, buyerEmail: 'bob@test.com' });
-      await seedOrder({ db, catalog, id: 'ord_3', orderNumber: 'TK-003', status: 'failed', totalCents: 3_000, buyerEmail: 'carol@test.com' });
-      await seedOrder({ db, catalog, id: 'ord_4', orderNumber: 'TK-004', status: 'cancelled', totalCents: 7_500, buyerEmail: 'dave@test.com', salesChannel: 'box_office', refundedCents: 7_500 });
+      await seedOrder({
+        db,
+        catalog,
+        id: 'ord_1',
+        orderNumber: 'TK-001',
+        status: 'paid',
+        totalCents: 10_000,
+        buyerEmail: 'alice@test.com',
+      });
+      await seedOrder({
+        db,
+        catalog,
+        id: 'ord_2',
+        orderNumber: 'TK-002',
+        status: 'paid',
+        totalCents: 5_000,
+        buyerEmail: 'bob@test.com',
+      });
+      await seedOrder({
+        db,
+        catalog,
+        id: 'ord_3',
+        orderNumber: 'TK-003',
+        status: 'failed',
+        totalCents: 3_000,
+        buyerEmail: 'carol@test.com',
+      });
+      await seedOrder({
+        db,
+        catalog,
+        id: 'ord_4',
+        orderNumber: 'TK-004',
+        status: 'cancelled',
+        totalCents: 7_500,
+        buyerEmail: 'dave@test.com',
+        salesChannel: 'box_office',
+        refundedCents: 7_500,
+      });
     });
 
     it('select facet: correct group-by counts for status', async () => {
-      const result = await executeTableQuery(db, {
-        tableName: 'orders',
-        schema: testSchema,
-        tenantId: catalog.tenantId,
-        serialize: serializeOrder,
-      }, { limit: 50, includeFacets: true });
+      const result = await executeTableQuery(
+        db,
+        {
+          tableName: 'orders',
+          schema: testSchema,
+          tenantId: catalog.tenantId,
+          serialize: serializeOrder,
+        },
+        { limit: 50, includeFacets: true },
+      );
 
       const statusFacet = result.facets?.status;
       expect(statusFacet?.rows).toBeDefined();
       const paidRow = statusFacet!.rows!.find((r) => r.value === 'paid');
       const failedRow = statusFacet!.rows!.find((r) => r.value === 'failed');
-      const cancelledRow = statusFacet!.rows!.find((r) => r.value === 'cancelled');
+      const refundedRow = statusFacet!.rows!.find((r) => r.value === 'refunded');
       expect(paidRow?.total).toBe(2);
       expect(failedRow?.total).toBe(1);
-      expect(cancelledRow?.total).toBe(1);
+      expect(refundedRow?.total).toBe(1);
     });
 
     it('range facet: min and max for totalCents', async () => {
-      const result = await executeTableQuery(db, {
-        tableName: 'orders',
-        schema: testSchema,
-        tenantId: catalog.tenantId,
-        serialize: serializeOrder,
-      }, { limit: 50, includeFacets: true });
+      const result = await executeTableQuery(
+        db,
+        {
+          tableName: 'orders',
+          schema: testSchema,
+          tenantId: catalog.tenantId,
+          serialize: serializeOrder,
+        },
+        { limit: 50, includeFacets: true },
+      );
 
       const totalFacet = result.facets?.totalCents;
       expect(totalFacet?.min).toBe(3_000);
@@ -436,26 +562,33 @@ describe.each(driverCases)('table-query integration: $driver', ({ driver, url })
     });
 
     it('custom facet: refundState computed boolean counts', async () => {
-      const result = await executeTableQuery(db, {
-        tableName: 'orders',
-        schema: testSchema,
-        tenantId: catalog.tenantId,
-        serialize: serializeOrder,
-        customFacets: {
-          refundState: async (q) => {
-            const rows = await q
-              .select([
-                sql`case when refunded_cents > 0 then true else false end`.as('is_refunded'),
-                sql`count(*)`.as('total'),
-              ])
-              .groupBy('is_refunded')
-              .execute() as Array<{ is_refunded: boolean; total: number }>;
-            return {
-              rows: rows.map((r) => ({ value: r.is_refunded, total: Number(r.total) })),
-            };
+      const result = await executeTableQuery(
+        db,
+        {
+          tableName: 'orders',
+          schema: testSchema,
+          tenantId: catalog.tenantId,
+          serialize: serializeOrder,
+          customFacets: {
+            refundState: async (q) => {
+              const rows = (await q
+                .select([
+                  sql`case when refunded_cents > 0 then true else false end`.as('is_refunded'),
+                  sql`count(*)`.as('total'),
+                ])
+                .groupBy('is_refunded')
+                .execute()) as Array<{ is_refunded: boolean | number; total: number }>;
+              return {
+                rows: rows.map((r) => ({
+                  value: r.is_refunded === true || r.is_refunded === 1,
+                  total: Number(r.total),
+                })),
+              };
+            },
           },
         },
-      }, { limit: 50, includeFacets: true });
+        { limit: 50, includeFacets: true },
+      );
 
       const refundFacet = result.facets?.refundState;
       expect(refundFacet?.rows).toBeDefined();
@@ -466,16 +599,20 @@ describe.each(driverCases)('table-query integration: $driver', ({ driver, url })
     });
 
     it('three-pass: facet excludes own field filter but includes other filters', async () => {
-      const result = await executeTableQuery(db, {
-        tableName: 'orders',
-        schema: testSchema,
-        tenantId: catalog.tenantId,
-        serialize: serializeOrder,
-      }, {
-        limit: 50,
-        includeFacets: true,
-        filters: { status: { type: 'select', values: ['paid'] } },
-      });
+      const result = await executeTableQuery(
+        db,
+        {
+          tableName: 'orders',
+          schema: testSchema,
+          tenantId: catalog.tenantId,
+          serialize: serializeOrder,
+        },
+        {
+          limit: 50,
+          includeFacets: true,
+          filters: { status: { type: 'select', values: ['paid'] } },
+        },
+      );
 
       // status facet should show ALL statuses (not just paid) because the
       // three-pass strategy excludes the active status filter from the status facet query
@@ -483,26 +620,32 @@ describe.each(driverCases)('table-query integration: $driver', ({ driver, url })
       expect(statusFacet?.rows).toBeDefined();
       const paidRow = statusFacet!.rows!.find((r) => r.value === 'paid');
       const failedRow = statusFacet!.rows!.find((r) => r.value === 'failed');
-      const cancelledRow = statusFacet!.rows!.find((r) => r.value === 'cancelled');
+      const refundedRow = statusFacet!.rows!.find((r) => r.value === 'refunded');
       expect(paidRow?.total).toBe(2);
       expect(failedRow?.total).toBe(1);
-      expect(cancelledRow?.total).toBe(1);
+      expect(refundedRow?.total).toBe(1);
 
       // But the data items should only include paid orders
-      expect(result.items.every((i) => (i as Record<string, unknown>).status === 'paid')).toBe(true);
+      expect(result.items.every((i) => (i as Record<string, unknown>).status === 'paid')).toBe(
+        true,
+      );
     });
 
     it('facet includes other active filters', async () => {
-      const result = await executeTableQuery(db, {
-        tableName: 'orders',
-        schema: testSchema,
-        tenantId: catalog.tenantId,
-        serialize: serializeOrder,
-      }, {
-        limit: 50,
-        includeFacets: true,
-        filters: { salesChannel: { type: 'select', values: ['online'] } },
-      });
+      const result = await executeTableQuery(
+        db,
+        {
+          tableName: 'orders',
+          schema: testSchema,
+          tenantId: catalog.tenantId,
+          serialize: serializeOrder,
+        },
+        {
+          limit: 50,
+          includeFacets: true,
+          filters: { salesChannel: { type: 'select', values: ['online'] } },
+        },
+      );
 
       // status facet should only count online orders (3 out of 4)
       const statusFacet = result.facets?.status;
@@ -525,6 +668,7 @@ describe.each(driverCases)('table-query integration: $driver', ({ driver, url })
     beforeEach(async () => {
       // Create 5 orders with distinct created_at timestamps
       for (let i = 0; i < 5; i++) {
+        // eslint-disable-next-line no-await-in-loop -- deterministic seed order keeps cursor expectations readable.
         await seedOrder({
           db,
           catalog,
@@ -539,12 +683,16 @@ describe.each(driverCases)('table-query integration: $driver', ({ driver, url })
     });
 
     it('returns first page with nextCursor when more data exists', async () => {
-      const result = await executeTableQuery(db, {
-        tableName: 'orders',
-        schema: testSchema,
-        tenantId: catalog.tenantId,
-        serialize: serializeOrder,
-      }, { limit: 2 });
+      const result = await executeTableQuery(
+        db,
+        {
+          tableName: 'orders',
+          schema: testSchema,
+          tenantId: catalog.tenantId,
+          serialize: serializeOrder,
+        },
+        { limit: 2 },
+      );
 
       expect(result.items).toHaveLength(2);
       expect(result.nextCursor).toBeDefined();
@@ -555,53 +703,73 @@ describe.each(driverCases)('table-query integration: $driver', ({ driver, url })
     });
 
     it('nextCursor produces the next page with no overlap', async () => {
-      const page1 = await executeTableQuery(db, {
-        tableName: 'orders',
-        schema: testSchema,
-        tenantId: catalog.tenantId,
-        serialize: serializeOrder,
-      }, { limit: 2 });
+      const page1 = await executeTableQuery(
+        db,
+        {
+          tableName: 'orders',
+          schema: testSchema,
+          tenantId: catalog.tenantId,
+          serialize: serializeOrder,
+        },
+        { limit: 2 },
+      );
 
       expect(page1.nextCursor).toBeDefined();
 
-      const page2 = await executeTableQuery(db, {
-        tableName: 'orders',
-        schema: testSchema,
-        tenantId: catalog.tenantId,
-        serialize: serializeOrder,
-      }, { limit: 2, cursor: page1.nextCursor });
+      const page2 = await executeTableQuery(
+        db,
+        {
+          tableName: 'orders',
+          schema: testSchema,
+          tenantId: catalog.tenantId,
+          serialize: serializeOrder,
+        },
+        { limit: 2, cursor: page1.nextCursor },
+      );
 
       expect(page2.items).toHaveLength(2);
       const page1Ids = page1.items.map((i) => (i as Record<string, unknown>).id);
-      const page2Ids = page2.items.map((i) => (i as Record<string, unknown>).id);
-      expect(page1Ids.some((id) => page2Ids.includes(id))).toBe(false);
+      const page2Ids = new Set(page2.items.map((i) => (i as Record<string, unknown>).id));
+      expect(page1Ids.some((id) => page2Ids.has(id))).toBe(false);
       expect((page2.items[0] as Record<string, unknown>).buyerEmail).toBe('user3@test.com');
       expect((page2.items[1] as Record<string, unknown>).buyerEmail).toBe('user2@test.com');
     });
 
     it('prevCursor produces the previous page with no overlap', async () => {
-      const page1 = await executeTableQuery(db, {
-        tableName: 'orders',
-        schema: testSchema,
-        tenantId: catalog.tenantId,
-        serialize: serializeOrder,
-      }, { limit: 2 });
+      const page1 = await executeTableQuery(
+        db,
+        {
+          tableName: 'orders',
+          schema: testSchema,
+          tenantId: catalog.tenantId,
+          serialize: serializeOrder,
+        },
+        { limit: 2 },
+      );
 
-      const page2 = await executeTableQuery(db, {
-        tableName: 'orders',
-        schema: testSchema,
-        tenantId: catalog.tenantId,
-        serialize: serializeOrder,
-      }, { limit: 2, cursor: page1.nextCursor });
+      const page2 = await executeTableQuery(
+        db,
+        {
+          tableName: 'orders',
+          schema: testSchema,
+          tenantId: catalog.tenantId,
+          serialize: serializeOrder,
+        },
+        { limit: 2, cursor: page1.nextCursor },
+      );
 
       expect(page2.prevCursor).toBeDefined();
 
-      const page1Again = await executeTableQuery(db, {
-        tableName: 'orders',
-        schema: testSchema,
-        tenantId: catalog.tenantId,
-        serialize: serializeOrder,
-      }, { limit: 2, cursor: page2.prevCursor, direction: 'prev' });
+      const page1Again = await executeTableQuery(
+        db,
+        {
+          tableName: 'orders',
+          schema: testSchema,
+          tenantId: catalog.tenantId,
+          serialize: serializeOrder,
+        },
+        { limit: 2, cursor: page2.prevCursor, direction: 'prev' },
+      );
 
       const page2Ids = page2.items.map((i) => (i as Record<string, unknown>).id);
       const prevIds = page1Again.items.map((i) => (i as Record<string, unknown>).id);
@@ -616,12 +784,17 @@ describe.each(driverCases)('table-query integration: $driver', ({ driver, url })
       let cursor: string | undefined;
 
       for (let page = 0; page < 3; page++) {
-        const result = await executeTableQuery(db, {
-          tableName: 'orders',
-          schema: testSchema,
-          tenantId: catalog.tenantId,
-          serialize: serializeOrder,
-        }, { limit: 2, cursor });
+        // eslint-disable-next-line no-await-in-loop -- each page depends on the previous cursor.
+        const result = await executeTableQuery(
+          db,
+          {
+            tableName: 'orders',
+            schema: testSchema,
+            tenantId: catalog.tenantId,
+            serialize: serializeOrder,
+          },
+          { limit: 2, cursor },
+        );
 
         allItems.push(...result.items.map((i) => i as Record<string, unknown>));
         cursor = result.nextCursor;
@@ -633,21 +806,26 @@ describe.each(driverCases)('table-query integration: $driver', ({ driver, url })
       for (let i = 1; i < allItems.length; i++) {
         const prev = allItems[i - 1];
         const curr = allItems[i];
-        expect(new Date(curr.createdAt as string).getTime())
-          .toBeLessThanOrEqual(new Date(prev.createdAt as string).getTime());
+        expect(new Date(curr.createdAt as string).getTime()).toBeLessThanOrEqual(
+          new Date(prev.createdAt as string).getTime(),
+        );
       }
     });
 
     it('ascending sort produces reversed order', async () => {
-      const result = await executeTableQuery(db, {
-        tableName: 'orders',
-        schema: testSchema,
-        tenantId: catalog.tenantId,
-        serialize: serializeOrder,
-      }, {
-        limit: 50,
-        sort: [{ field: 'createdAt', direction: 'asc' }],
-      });
+      const result = await executeTableQuery(
+        db,
+        {
+          tableName: 'orders',
+          schema: testSchema,
+          tenantId: catalog.tenantId,
+          serialize: serializeOrder,
+        },
+        {
+          limit: 50,
+          sort: [{ field: 'createdAt', direction: 'asc' }],
+        },
+      );
 
       expect((result.items[0] as Record<string, unknown>).buyerEmail).toBe('user1@test.com');
       expect((result.items[4] as Record<string, unknown>).buyerEmail).toBe('user5@test.com');
@@ -660,76 +838,130 @@ describe.each(driverCases)('table-query integration: $driver', ({ driver, url })
 
   describe('combined interactions', () => {
     beforeEach(async () => {
-      await seedOrder({ db, catalog, id: 'ord_1', orderNumber: 'TK-001', status: 'paid', totalCents: 10_000, buyerEmail: 'alice@test.com', createdAt: new Date(2026, 0, 1) });
-      await seedOrder({ db, catalog, id: 'ord_2', orderNumber: 'TK-002', status: 'paid', totalCents: 5_000, buyerEmail: 'bob@test.com', createdAt: new Date(2026, 0, 2) });
-      await seedOrder({ db, catalog, id: 'ord_3', orderNumber: 'TK-003', status: 'failed', totalCents: 3_000, buyerEmail: 'carol@test.com', createdAt: new Date(2026, 0, 3) });
-      await seedOrder({ db, catalog, id: 'ord_4', orderNumber: 'TK-004', status: 'paid', totalCents: 15_000, buyerEmail: 'dave@test.com', salesChannel: 'box_office', createdAt: new Date(2026, 0, 4) });
+      await seedOrder({
+        db,
+        catalog,
+        id: 'ord_1',
+        orderNumber: 'TK-001',
+        status: 'paid',
+        totalCents: 10_000,
+        buyerEmail: 'alice@test.com',
+        createdAt: new Date(2026, 0, 1),
+      });
+      await seedOrder({
+        db,
+        catalog,
+        id: 'ord_2',
+        orderNumber: 'TK-002',
+        status: 'paid',
+        totalCents: 5_000,
+        buyerEmail: 'bob@test.com',
+        createdAt: new Date(2026, 0, 2),
+      });
+      await seedOrder({
+        db,
+        catalog,
+        id: 'ord_3',
+        orderNumber: 'TK-003',
+        status: 'failed',
+        totalCents: 3_000,
+        buyerEmail: 'carol@test.com',
+        createdAt: new Date(2026, 0, 3),
+      });
+      await seedOrder({
+        db,
+        catalog,
+        id: 'ord_4',
+        orderNumber: 'TK-004',
+        status: 'paid',
+        totalCents: 15_000,
+        buyerEmail: 'dave@test.com',
+        salesChannel: 'box_office',
+        createdAt: new Date(2026, 0, 4),
+      });
     });
 
     it('search + select filter + sort + cursor together', async () => {
-      const page1 = await executeTableQuery(db, {
-        tableName: 'orders',
-        schema: testSchema,
-        tenantId: catalog.tenantId,
-        serialize: serializeOrder,
-      }, {
-        limit: 1,
-        search: '@test.com',
-        sort: [{ field: 'createdAt', direction: 'asc' }],
-        filters: { status: { type: 'select', values: ['paid'] } },
-      });
+      const page1 = await executeTableQuery(
+        db,
+        {
+          tableName: 'orders',
+          schema: testSchema,
+          tenantId: catalog.tenantId,
+          serialize: serializeOrder,
+        },
+        {
+          limit: 1,
+          search: '@test.com',
+          sort: [{ field: 'createdAt', direction: 'asc' }],
+          filters: { status: { type: 'select', values: ['paid'] } },
+        },
+      );
 
       expect(page1.items).toHaveLength(1);
       expect((page1.items[0] as Record<string, unknown>).buyerEmail).toBe('alice@test.com');
       expect(page1.nextCursor).toBeDefined();
 
-      const page2 = await executeTableQuery(db, {
-        tableName: 'orders',
-        schema: testSchema,
-        tenantId: catalog.tenantId,
-        serialize: serializeOrder,
-      }, {
-        limit: 1,
-        search: '@test.com',
-        sort: [{ field: 'createdAt', direction: 'asc' }],
-        filters: { status: { type: 'select', values: ['paid'] } },
-        cursor: page1.nextCursor,
-      });
+      const page2 = await executeTableQuery(
+        db,
+        {
+          tableName: 'orders',
+          schema: testSchema,
+          tenantId: catalog.tenantId,
+          serialize: serializeOrder,
+        },
+        {
+          limit: 1,
+          search: '@test.com',
+          sort: [{ field: 'createdAt', direction: 'asc' }],
+          filters: { status: { type: 'select', values: ['paid'] } },
+          cursor: page1.nextCursor,
+        },
+      );
 
       expect(page2.items).toHaveLength(1);
       expect((page2.items[0] as Record<string, unknown>).buyerEmail).toBe('bob@test.com');
     });
 
     it('multiple filters of different types intersect correctly', async () => {
-      const result = await executeTableQuery(db, {
-        tableName: 'orders',
-        schema: testSchema,
-        tenantId: catalog.tenantId,
-        serialize: serializeOrder,
-      }, {
-        limit: 50,
-        filters: {
-          status: { type: 'select', values: ['paid'] },
-          totalCents: { type: 'number_range', min: 8_000 },
+      const result = await executeTableQuery(
+        db,
+        {
+          tableName: 'orders',
+          schema: testSchema,
+          tenantId: catalog.tenantId,
+          serialize: serializeOrder,
         },
-      });
+        {
+          limit: 50,
+          filters: {
+            status: { type: 'select', values: ['paid'] },
+            totalCents: { type: 'number_range', min: 8_000 },
+          },
+        },
+      );
 
       expect(result.items).toHaveLength(2);
+      // eslint-disable-next-line unicorn/no-array-sort -- sorting a fresh mapped array keeps the assertion deterministic.
       const emails = result.items.map((i) => (i as Record<string, unknown>).buyerEmail).sort();
       expect(emails).toEqual(['alice@test.com', 'dave@test.com']);
     });
 
     it('facet + filter on a different field', async () => {
-      const result = await executeTableQuery(db, {
-        tableName: 'orders',
-        schema: testSchema,
-        tenantId: catalog.tenantId,
-        serialize: serializeOrder,
-      }, {
-        limit: 50,
-        includeFacets: true,
-        filters: { status: { type: 'select', values: ['paid'] } },
-      });
+      const result = await executeTableQuery(
+        db,
+        {
+          tableName: 'orders',
+          schema: testSchema,
+          tenantId: catalog.tenantId,
+          serialize: serializeOrder,
+        },
+        {
+          limit: 50,
+          includeFacets: true,
+          filters: { status: { type: 'select', values: ['paid'] } },
+        },
+      );
 
       // salesChannel facet should reflect only paid orders
       const channelFacet = result.facets?.salesChannel;
@@ -747,66 +979,90 @@ describe.each(driverCases)('table-query integration: $driver', ({ driver, url })
 
   describe('strict validation', () => {
     beforeEach(async () => {
-      await seedOrder({ db, catalog, id: 'ord_1', orderNumber: 'TK-001', status: 'paid', totalCents: 10_000, buyerEmail: 'alice@test.com' });
+      await seedOrder({
+        db,
+        catalog,
+        id: 'ord_1',
+        orderNumber: 'TK-001',
+        status: 'paid',
+        totalCents: 10_000,
+        buyerEmail: 'alice@test.com',
+      });
     });
 
     it('rejects unknown filter field with 400', async () => {
       await expect(
-        executeTableQuery(db, {
-          tableName: 'orders',
-          schema: testSchema,
-          tenantId: catalog.tenantId,
-          serialize: serializeOrder,
-          strictValidation: true,
-        }, {
-          limit: 50,
-          filters: { unknownField: { type: 'text', value: 'test' } },
-        }),
+        executeTableQuery(
+          db,
+          {
+            tableName: 'orders',
+            schema: testSchema,
+            tenantId: catalog.tenantId,
+            serialize: serializeOrder,
+            strictValidation: true,
+          },
+          {
+            limit: 50,
+            filters: { unknownField: { type: 'text', value: 'test' } },
+          },
+        ),
       ).rejects.toThrow(ValidationError);
     });
 
     it('rejects filter type mismatch with 400', async () => {
       await expect(
-        executeTableQuery(db, {
-          tableName: 'orders',
-          schema: testSchema,
-          tenantId: catalog.tenantId,
-          serialize: serializeOrder,
-          strictValidation: true,
-        }, {
-          limit: 50,
-          // status is a 'select' filter, not 'text'
-          filters: { status: { type: 'text', value: 'paid' } },
-        }),
+        executeTableQuery(
+          db,
+          {
+            tableName: 'orders',
+            schema: testSchema,
+            tenantId: catalog.tenantId,
+            serialize: serializeOrder,
+            strictValidation: true,
+          },
+          {
+            limit: 50,
+            // status is a 'select' filter, not 'text'
+            filters: { status: { type: 'text', value: 'paid' } },
+          },
+        ),
       ).rejects.toThrow(ValidationError);
     });
 
     it('rejects unknown sort field with 400', async () => {
       await expect(
-        executeTableQuery(db, {
-          tableName: 'orders',
-          schema: testSchema,
-          tenantId: catalog.tenantId,
-          serialize: serializeOrder,
-          strictValidation: true,
-        }, {
-          limit: 50,
-          sort: [{ field: 'unknownField', direction: 'asc' }],
-        }),
+        executeTableQuery(
+          db,
+          {
+            tableName: 'orders',
+            schema: testSchema,
+            tenantId: catalog.tenantId,
+            serialize: serializeOrder,
+            strictValidation: true,
+          },
+          {
+            limit: 50,
+            sort: [{ field: 'unknownField', direction: 'asc' }],
+          },
+        ),
       ).rejects.toThrow(ValidationError);
     });
 
     it('silently drops unknown filter in lenient mode and surfaces in applied.rejectedFilters', async () => {
-      const result = await executeTableQuery(db, {
-        tableName: 'orders',
-        schema: testSchema,
-        tenantId: catalog.tenantId,
-        serialize: serializeOrder,
-        // strictValidation defaults to false
-      }, {
-        limit: 50,
-        filters: { unknownField: { type: 'text', value: 'test' } },
-      });
+      const result = await executeTableQuery(
+        db,
+        {
+          tableName: 'orders',
+          schema: testSchema,
+          tenantId: catalog.tenantId,
+          serialize: serializeOrder,
+          // strictValidation defaults to false
+        },
+        {
+          limit: 50,
+          filters: { unknownField: { type: 'text', value: 'test' } },
+        },
+      );
 
       expect(result.items).toHaveLength(1);
       expect(result.applied?.rejectedFilters).toEqual(['unknownField']);
@@ -814,15 +1070,19 @@ describe.each(driverCases)('table-query integration: $driver', ({ driver, url })
     });
 
     it('silently drops unknown sort in lenient mode and surfaces in applied.rejectedSort', async () => {
-      const result = await executeTableQuery(db, {
-        tableName: 'orders',
-        schema: testSchema,
-        tenantId: catalog.tenantId,
-        serialize: serializeOrder,
-      }, {
-        limit: 50,
-        sort: [{ field: 'unknownField', direction: 'asc' }],
-      });
+      const result = await executeTableQuery(
+        db,
+        {
+          tableName: 'orders',
+          schema: testSchema,
+          tenantId: catalog.tenantId,
+          serialize: serializeOrder,
+        },
+        {
+          limit: 50,
+          sort: [{ field: 'unknownField', direction: 'asc' }],
+        },
+      );
 
       // Falls back to default sort
       expect(result.applied?.sort).toEqual([{ field: 'createdAt', direction: 'desc' }]);
@@ -836,15 +1096,27 @@ describe.each(driverCases)('table-query integration: $driver', ({ driver, url })
 
   describe('scope isolation', () => {
     it('scope filters are applied before user filters', async () => {
-      await seedOrder({ db, catalog, id: 'ord_1', orderNumber: 'TK-001', status: 'paid', totalCents: 10_000, buyerEmail: 'alice@test.com' });
+      await seedOrder({
+        db,
+        catalog,
+        id: 'ord_1',
+        orderNumber: 'TK-001',
+        status: 'paid',
+        totalCents: 10_000,
+        buyerEmail: 'alice@test.com',
+      });
 
       // Use a wrong tenant_id in scope to get zero results
-      const result = await executeTableQuery(db, {
-        tableName: 'orders',
-        schema: testSchema,
-        tenantId: 'wrong_tenant',
-        serialize: serializeOrder,
-      }, { limit: 50 });
+      const result = await executeTableQuery(
+        db,
+        {
+          tableName: 'orders',
+          schema: testSchema,
+          tenantId: 'wrong_tenant',
+          serialize: serializeOrder,
+        },
+        { limit: 50, includeTotal: true },
+      );
 
       expect(result.items).toHaveLength(0);
       expect(result.total).toBe(0);

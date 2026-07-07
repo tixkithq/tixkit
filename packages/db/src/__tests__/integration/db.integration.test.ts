@@ -96,7 +96,7 @@ if (driverCases.length === 0) {
   it.skip('database integration (skipped: no DATABASE_URL or DATABASE_URL_MYSQL configured)', () => {});
 }
 
-describe.each(driverCases)('database integration: $driver', ({ driver, url }) => {
+describe.sequential.each(driverCases)('database integration: $driver', ({ driver, url }) => {
   let db: Database;
 
   beforeAll(async () => {

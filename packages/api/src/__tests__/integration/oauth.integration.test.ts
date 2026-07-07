@@ -363,6 +363,42 @@ describe('OAuth authorization code redemption', () => {
     await app.close();
   });
 
+  it('rejects an authorization code minted for another OAuth client before consuming it', async () => {
+    const tables: Tables = {
+      oauth_applications: [
+        oauthApplicationRow(),
+        oauthApplicationRow({
+          id: 'oapp_2',
+          client_id: 'tk_oauth_other',
+          client_secret_hash: hashSecret('tk_secret_other'),
+        }),
+      ],
+      oauth_authorization_codes: [authorizationCodeRow({ oauth_application_id: 'oapp_1' })],
+      oauth_refresh_tokens: [],
+      oauth_access_tokens: [],
+    };
+    const app = await setupOAuthApp(tables);
+
+    const res = await app.inject({
+      method: 'POST',
+      url: '/oauth/token',
+      payload: {
+        grant_type: 'authorization_code',
+        client_id: 'tk_oauth_other',
+        client_secret: 'tk_secret_other',
+        code: 'tk_oac_legacy',
+        redirect_uri: 'https://example.com/callback',
+      },
+    });
+
+    expect(res.statusCode).toBe(401);
+    expect(res.json().message).toBe('Invalid or expired authorization code');
+    expect(tables.oauth_authorization_codes?.[0]?.consumed_at).toBeNull();
+    expect(tables.oauth_refresh_tokens).toHaveLength(0);
+    expect(tables.oauth_access_tokens).toHaveLength(0);
+    await app.close();
+  });
+
   it('issues tokens for a valid authorization code redemption', async () => {
     const tables: Tables = {
       oauth_applications: [oauthApplicationRow()],
@@ -480,6 +516,39 @@ describe('OAuth authorization code redemption', () => {
 
     expect(res.statusCode).toBe(401);
     expect(res.json().message).toBe('Invalid OAuth token scopes');
+    expect(tables.oauth_access_tokens).toHaveLength(0);
+    await app.close();
+  });
+
+  it('rejects a refresh token minted for another OAuth client before issuing access tokens', async () => {
+    const tables: Tables = {
+      oauth_applications: [
+        oauthApplicationRow(),
+        oauthApplicationRow({
+          id: 'oapp_2',
+          client_id: 'tk_oauth_other',
+          client_secret_hash: hashSecret('tk_secret_other'),
+        }),
+      ],
+      oauth_authorization_codes: [],
+      oauth_refresh_tokens: [refreshTokenRow({ oauth_application_id: 'oapp_1' })],
+      oauth_access_tokens: [],
+    };
+    const app = await setupOAuthApp(tables);
+
+    const res = await app.inject({
+      method: 'POST',
+      url: '/oauth/token',
+      payload: {
+        grant_type: 'refresh_token',
+        client_id: 'tk_oauth_other',
+        client_secret: 'tk_secret_other',
+        refresh_token: 'tk_ort_legacy',
+      },
+    });
+
+    expect(res.statusCode).toBe(401);
+    expect(res.json().message).toBe('Invalid or expired refresh token');
     expect(tables.oauth_access_tokens).toHaveLength(0);
     await app.close();
   });

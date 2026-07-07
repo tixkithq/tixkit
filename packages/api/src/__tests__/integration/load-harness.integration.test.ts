@@ -818,7 +818,6 @@ describeWithIntegrationDatabase('Load and concurrency harnesses', () => {
     const payload = {
       config: {
         measurementId: `G-${RUN_ID}`,
-        sendPageView: true,
       },
       consentRequired: false,
       status: 'active',

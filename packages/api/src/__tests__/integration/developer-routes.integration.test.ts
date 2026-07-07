@@ -33,15 +33,15 @@ function createApiKeyListDb(rows: Record<string, unknown>[]) {
   };
 }
 
+function compareScopedCredentialValue(rowValue: unknown, operator: string, value: unknown) {
+  if (operator === '=') return rowValue === value;
+  if (operator === '>') return String(rowValue) > String(value);
+  if (operator === 'in') return Array.isArray(value) && value.includes(rowValue);
+  throw new Error(`Unsupported scoped credential test operator: ${operator}`);
+}
+
 function createScopedCredentialListDb(tables: Record<string, Record<string, unknown>[]>) {
   const limitCalls: Record<string, number[]> = {};
-  const compare = (rowValue: unknown, operator: string, value: unknown) => {
-    if (operator === '=') return rowValue === value;
-    if (operator === '>') return String(rowValue) > String(value);
-    if (operator === 'in') return Array.isArray(value) && value.includes(rowValue);
-    throw new Error(`Unsupported scoped credential test operator: ${operator}`);
-  };
-
   const db = {
     limitCalls,
     selectFrom(table: string) {
@@ -52,7 +52,7 @@ function createScopedCredentialListDb(tables: Record<string, Record<string, unkn
           return query;
         },
         where(column: string, operator: string, value: unknown) {
-          predicates.push((row) => compare(row[column], operator, value));
+          predicates.push((row) => compareScopedCredentialValue(row[column], operator, value));
           return query;
         },
         orderBy() {
@@ -484,6 +484,62 @@ describe('developer routes integration', () => {
     await app.close();
   });
 
+  it('creates API keys with one-time raw key disclosure and only stores hashed material', async () => {
+    const principal: Principal = {
+      type: 'user',
+      id: 'usr_1',
+      tenantId: 'tnt_1',
+      organizationIds: ['org_1'],
+      scopes: ['developers.write', 'events.read'],
+    };
+    const { db, tables } = createScannerDeviceLifecycleDb();
+    const app = await setupDeveloperRouteApp(principal, db);
+
+    const response = await app.inject({
+      method: 'POST',
+      url: '/api-keys',
+      payload: {
+        organizationId: 'org_1',
+        name: 'Read-only events key',
+        scopes: ['events.read'],
+        expiresAt: '2026-12-31T00:00:00.000Z',
+      },
+    });
+
+    expect(response.statusCode).toBe(201);
+    const body = response.json() as {
+      apiKey: string;
+      keyPrefix: string;
+      hashedKey?: string;
+      hashed_key?: string;
+    };
+    expect(body.apiKey).toMatch(/^tk_[a-f0-9]{64}$/);
+    expect(body.keyPrefix).toBe(body.apiKey.slice(0, 12));
+    expect(body.hashedKey).toBeUndefined();
+    expect(body.hashed_key).toBeUndefined();
+    expect(tables.api_keys).toHaveLength(1);
+    expect(tables.api_keys[0]).toMatchObject({
+      tenant_id: 'tnt_1',
+      organization_id: 'org_1',
+      name: 'Read-only events key',
+      key_prefix: body.keyPrefix,
+      scopes: JSON.stringify(['events.read']),
+      brand_ids: null,
+      event_ids: null,
+    });
+    expect(tables.api_keys[0].hashed_key).toEqual(expect.stringMatching(/^[a-f0-9]{64}$/));
+    expect(tables.api_keys[0].hashed_key).not.toBe(body.apiKey);
+    expect(tables.audit_logs).toEqual([
+      expect.objectContaining({
+        action: 'api_key.created',
+        resource_type: 'ApiKey',
+        resource_id: tables.api_keys[0].id,
+      }),
+    ]);
+
+    await app.close();
+  });
+
   it('bounds event-scoped API key listing before resource filtering', async () => {
     const principal: Principal = {
       type: 'api_key',
@@ -768,6 +824,7 @@ describe('developer routes integration', () => {
     ] as const;
 
     for (const request of requests) {
+      // eslint-disable-next-line no-await-in-loop -- Sequential injection keeps each route failure tied to its request.
       const response = await app.inject(request);
 
       expect(response.statusCode).toBe(403);
