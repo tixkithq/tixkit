@@ -57,9 +57,28 @@ describe('Phase 0: TipTap node surface pin', () => {
           { type: 'heading', attrs: { level: 2 }, content: [{ type: 'text', text: 'Heading 2' }] },
           { type: 'heading', attrs: { level: 3 }, content: [{ type: 'text', text: 'Heading 3' }] },
           { type: 'paragraph', content: [{ type: 'text', text: 'Paragraph text' }] },
-          { type: 'bulletList', content: [{ type: 'listItem', content: [{ type: 'paragraph', content: [{ type: 'text', text: 'Bullet' }] }] }] },
-          { type: 'orderedList', content: [{ type: 'listItem', content: [{ type: 'paragraph', content: [{ type: 'text', text: 'Ordered' }] }] }] },
-          { type: 'blockquote', content: [{ type: 'paragraph', content: [{ type: 'text', text: 'Quote' }] }] },
+          {
+            type: 'bulletList',
+            content: [
+              {
+                type: 'listItem',
+                content: [{ type: 'paragraph', content: [{ type: 'text', text: 'Bullet' }] }],
+              },
+            ],
+          },
+          {
+            type: 'orderedList',
+            content: [
+              {
+                type: 'listItem',
+                content: [{ type: 'paragraph', content: [{ type: 'text', text: 'Ordered' }] }],
+              },
+            ],
+          },
+          {
+            type: 'blockquote',
+            content: [{ type: 'paragraph', content: [{ type: 'text', text: 'Quote' }] }],
+          },
           { type: 'image', attrs: { src: 'https://cdn.test/img.png', alt: 'Alt text' } },
         ],
       },
@@ -100,7 +119,9 @@ describe('Phase 0: TipTap node surface pin', () => {
       type: 'rich_text',
       content: {
         type: 'doc',
-        content: [{ type: 'heading', attrs: { level: 4 }, content: [{ type: 'text', text: 'H4' }] }],
+        content: [
+          { type: 'heading', attrs: { level: 4 }, content: [{ type: 'text', text: 'H4' }] },
+        ],
       },
     });
     const result = validateEventPageDocument(doc);
@@ -129,7 +150,11 @@ describe('Phase 0: TipTap mark surface pin', () => {
               { type: 'text', text: 'bold', marks: [{ type: 'bold' }] },
               { type: 'text', text: 'italic', marks: [{ type: 'italic' }] },
               { type: 'text', text: 'strike', marks: [{ type: 'strike' }] },
-              { type: 'text', text: 'link', marks: [{ type: 'link', attrs: { href: 'https://example.test' } }] },
+              {
+                type: 'text',
+                text: 'link',
+                marks: [{ type: 'link', attrs: { href: 'https://example.test' } }],
+              },
               { type: 'text', text: 'code', marks: [{ type: 'code' }] },
             ],
           },
@@ -384,9 +409,21 @@ describe('Phase 0: text alignment extension pin', () => {
       content: {
         type: 'doc',
         content: [
-          { type: 'heading', attrs: { level: 2, textAlign: 'center' }, content: [{ type: 'text', text: 'Centered' }] },
-          { type: 'paragraph', attrs: { textAlign: 'right' }, content: [{ type: 'text', text: 'Right' }] },
-          { type: 'paragraph', attrs: { textAlign: 'left' }, content: [{ type: 'text', text: 'Left' }] },
+          {
+            type: 'heading',
+            attrs: { level: 2, textAlign: 'center' },
+            content: [{ type: 'text', text: 'Centered' }],
+          },
+          {
+            type: 'paragraph',
+            attrs: { textAlign: 'right' },
+            content: [{ type: 'text', text: 'Right' }],
+          },
+          {
+            type: 'paragraph',
+            attrs: { textAlign: 'left' },
+            content: [{ type: 'text', text: 'Left' }],
+          },
         ],
       },
     });
@@ -407,7 +444,11 @@ describe('Phase 0: text alignment extension pin', () => {
       content: {
         type: 'doc',
         content: [
-          { type: 'paragraph', attrs: { textAlign: 'justify' }, content: [{ type: 'text', text: 'Justify' }] },
+          {
+            type: 'paragraph',
+            attrs: { textAlign: 'justify' },
+            content: [{ type: 'text', text: 'Justify' }],
+          },
         ],
       },
     });
@@ -583,18 +624,54 @@ describe('Per-document Google Font loading', () => {
   it('collectUsedFontFamilies deduplicates repeated font families', () => {
     const doc = createDefaultEventPageDocument({ eventId: 'e1', eventTitle: 'T' });
     doc.blocks = [
-      { type: 'rich_text', id: 'rt1', content: {
-        type: 'doc', content: [
-          { type: 'paragraph', content: [
-            { type: 'text', text: 'A', marks: [{ type: EVENT_PAGE_INLINE_STYLE_MARK, attrs: { fontFamily: 'Inter, Arial, sans-serif' } }] },
-          ] },
-        ] } },
-      { type: 'rich_text', id: 'rt2', content: {
-        type: 'doc', content: [
-          { type: 'paragraph', content: [
-            { type: 'text', text: 'B', marks: [{ type: EVENT_PAGE_INLINE_STYLE_MARK, attrs: { fontFamily: 'Inter, Arial, sans-serif' } }] },
-          ] },
-        ] } },
+      {
+        type: 'rich_text',
+        id: 'rt1',
+        content: {
+          type: 'doc',
+          content: [
+            {
+              type: 'paragraph',
+              content: [
+                {
+                  type: 'text',
+                  text: 'A',
+                  marks: [
+                    {
+                      type: EVENT_PAGE_INLINE_STYLE_MARK,
+                      attrs: { fontFamily: 'Inter, Arial, sans-serif' },
+                    },
+                  ],
+                },
+              ],
+            },
+          ],
+        },
+      },
+      {
+        type: 'rich_text',
+        id: 'rt2',
+        content: {
+          type: 'doc',
+          content: [
+            {
+              type: 'paragraph',
+              content: [
+                {
+                  type: 'text',
+                  text: 'B',
+                  marks: [
+                    {
+                      type: EVENT_PAGE_INLINE_STYLE_MARK,
+                      attrs: { fontFamily: 'Inter, Arial, sans-serif' },
+                    },
+                  ],
+                },
+              ],
+            },
+          ],
+        },
+      },
     ];
     const families = collectUsedFontFamilies(doc);
     expect(families).toEqual(['Inter, Arial, sans-serif']);
@@ -617,7 +694,11 @@ describe('Per-document Google Font loading', () => {
   });
 
   it('googleFontLinkTags includes only Google fonts when mixed with system fonts', () => {
-    const links = googleFontLinkTags(['Inter, Arial, sans-serif', 'Georgia, serif', 'Verdana, Geneva, sans-serif']);
+    const links = googleFontLinkTags([
+      'Inter, Arial, sans-serif',
+      'Georgia, serif',
+      'Verdana, Geneva, sans-serif',
+    ]);
     expect(links).toContain('family=Inter');
     expect(links).not.toContain('Georgia');
     expect(links).not.toContain('Verdana');

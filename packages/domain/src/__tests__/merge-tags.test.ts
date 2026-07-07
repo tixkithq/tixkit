@@ -180,7 +180,11 @@ describe('P0 lifecycle merge-tag variables', () => {
         walletAppleUrl: 'data:text/html,<script>alert(1)</script>',
         walletGoogleUrl: 'ftp://evil.example/pass',
       },
-      order: { ...baseContext.order, manageUrl: 'javascript:alert(1)', retryUrl: 'data:text/plain,x' },
+      order: {
+        ...baseContext.order,
+        manageUrl: 'javascript:alert(1)',
+        retryUrl: 'data:text/plain,x',
+      },
       device: { inviteUrl: 'file:///etc/passwd', permissionScope: 'x', expiresAt: 'x' },
     };
     const out = renderMergeTags(
@@ -225,7 +229,10 @@ describe('P1/P2 lifecycle merge-tag variables', () => {
   it('resolves P1/P2 lifecycle variables from context', () => {
     const ctx: MergeTagContext = {
       ...baseContext,
-      ticket: { ...baseContext.ticket, transferUrl: 'https://checkout.example.test/transfer/tkt_1/claim' },
+      ticket: {
+        ...baseContext.ticket,
+        transferUrl: 'https://checkout.example.test/transfer/tkt_1/claim',
+      },
       waitlist: {
         position: '12',
         inviteUrl: 'https://checkout.example.test/waitlist/claim/abc',
@@ -237,9 +244,17 @@ describe('P1/P2 lifecycle merge-tag variables', () => {
         dueAt: '2026-07-18',
         evidenceUrl: 'https://admin.example.test/disputes/dp_1',
       },
-      payout: { amount: '$1,250.00', eta: '2-3 business days', account: 'Bank ••••4242', period: 'June 2026' },
+      payout: {
+        amount: '$1,250.00',
+        eta: '2-3 business days',
+        account: 'Bank ••••4242',
+        period: 'June 2026',
+      },
       webhook: { endpointUrl: 'https://hooks.example.test/integrations/stripe', attempts: '5' },
-      integration: { name: 'Stripe', reconnectUrl: 'https://admin.example.test/integrations/stripe/reconnect' },
+      integration: {
+        name: 'Stripe',
+        reconnectUrl: 'https://admin.example.test/integrations/stripe/reconnect',
+      },
       salesDigest: { revenue: '$4,320.00', orders: '38', topTicketType: 'General Admission' },
     };
 
@@ -258,11 +273,19 @@ describe('P1/P2 lifecycle merge-tag variables', () => {
     );
 
     expect(out).toContain('Transfer https://checkout.example.test/transfer/tkt_1/claim.');
-    expect(out).toContain('Waitlist pos 12 invite https://checkout.example.test/waitlist/claim/abc exp 2026-07-04 19:00.');
-    expect(out).toContain('Chargeback dp_1 $45.00 due 2026-07-18 evidence https://admin.example.test/disputes/dp_1.');
-    expect(out).toContain('Payout $1,250.00 eta 2-3 business days account Bank ••••4242 period June 2026.');
+    expect(out).toContain(
+      'Waitlist pos 12 invite https://checkout.example.test/waitlist/claim/abc exp 2026-07-04 19:00.',
+    );
+    expect(out).toContain(
+      'Chargeback dp_1 $45.00 due 2026-07-18 evidence https://admin.example.test/disputes/dp_1.',
+    );
+    expect(out).toContain(
+      'Payout $1,250.00 eta 2-3 business days account Bank ••••4242 period June 2026.',
+    );
     expect(out).toContain('Webhook https://hooks.example.test/integrations/stripe attempts 5.');
-    expect(out).toContain('Integration Stripe reconnect https://admin.example.test/integrations/stripe/reconnect.');
+    expect(out).toContain(
+      'Integration Stripe reconnect https://admin.example.test/integrations/stripe/reconnect.',
+    );
     expect(out).toContain('Digest revenue $4,320.00 orders 38 top General Admission.');
   });
 

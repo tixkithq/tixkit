@@ -32,7 +32,23 @@ vi.mock('sonner', () => ({
 
 vi.mock('@/context/permission-provider', () => ({
   usePermissions: () => ({
-    permissions: ['events.read', 'events.write', 'tickets.write', 'orders.read', 'orders.write', 'refunds.write', 'attendees.read', 'attendees.write', 'checkins.read', 'checkins.write', 'messages.write', 'reports.read', 'settings.write', 'developers.write', 'billing.write'],
+    permissions: [
+      'events.read',
+      'events.write',
+      'tickets.write',
+      'orders.read',
+      'orders.write',
+      'refunds.write',
+      'attendees.read',
+      'attendees.write',
+      'checkins.read',
+      'checkins.write',
+      'messages.write',
+      'reports.read',
+      'settings.write',
+      'developers.write',
+      'billing.write',
+    ],
     can: () => true,
     loading: false,
     error: null,

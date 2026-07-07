@@ -50,7 +50,9 @@ describe('normalizeSurfaceHtml', () => {
   });
 
   it('collapses whitespace in text nodes', () => {
-    const root = html('<section class="tk-ep-hero" data-block-id="hero"><h1>  Hello   world  </h1></section>');
+    const root = html(
+      '<section class="tk-ep-hero" data-block-id="hero"><h1>  Hello   world  </h1></section>',
+    );
     expect(normalizeSurfaceHtml(root)).toBe(
       '<section class="tk-ep-hero" data-block-id="hero"><h1> Hello world </h1></section>',
     );
@@ -70,7 +72,11 @@ describe('normalizeBlocksByHtml', () => {
         '<section class="tk-ep-tickets" data-block-id="tickets"><h2>Tickets</h2></section></div>',
     );
     const blocks = normalizeBlocksByHtml(root);
-    expect(blocks.get('hero')).toBe('<section class="tk-ep-hero" data-block-id="hero"><h1>Title</h1></section>');
-    expect(blocks.get('tickets')).toBe('<section class="tk-ep-tickets" data-block-id="tickets"><h2>Tickets</h2></section>');
+    expect(blocks.get('hero')).toBe(
+      '<section class="tk-ep-hero" data-block-id="hero"><h1>Title</h1></section>',
+    );
+    expect(blocks.get('tickets')).toBe(
+      '<section class="tk-ep-tickets" data-block-id="tickets"><h2>Tickets</h2></section>',
+    );
   });
 });

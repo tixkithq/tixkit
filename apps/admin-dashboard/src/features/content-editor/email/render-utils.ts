@@ -1,8 +1,5 @@
 import { type EmailEditorProps } from '@react-email/editor';
-import {
-  applyEmailGlobalCssToHtml,
-  type EmailTemplateDocument,
-} from '@tixkit/content-email';
+import { applyEmailGlobalCssToHtml, type EmailTemplateDocument } from '@tixkit/content-email';
 import { MERGE_TAG_REGISTRY } from '@tixkit/domain';
 import type { SendMessageInput } from '@/lib/api';
 import {
@@ -158,7 +155,11 @@ function tipTapPlainTextFromJson(value: unknown): string {
     node.type === 'listItem'
       ? '\n'
       : '';
-  return parts.join(separator).replace(/[ \t]{2,}/g, ' ').replace(/\n{3,}/g, '\n\n').trim();
+  return parts
+    .join(separator)
+    .replace(/[ \t]{2,}/g, ' ')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim();
 }
 
 function mergeTagKeyFromJsonMarks(marks: unknown): string | null {

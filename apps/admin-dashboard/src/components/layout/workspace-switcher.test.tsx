@@ -78,15 +78,15 @@ describe('WorkspaceSwitcher', () => {
 
     render(<WorkspaceSwitcher />);
 
-    expect(
-      screen.getByRole('button', { name: /switch workspace and brand/i }),
-    ).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /switch workspace and brand/i })).toBeInTheDocument();
   });
 
   it('shows static info (no dropdown) when there is only one workspace and one brand', () => {
     render(<WorkspaceSwitcher />);
 
-    expect(screen.queryByRole('button', { name: /switch workspace and brand/i })).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole('button', { name: /switch workspace and brand/i }),
+    ).not.toBeInTheDocument();
     expect(screen.getAllByText('Tixkit Dev').length).toBeGreaterThanOrEqual(1);
   });
 

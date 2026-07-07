@@ -1,8 +1,5 @@
 import * as React from 'react';
-import type {
-  EventPageBlock,
-  EventPageDocument,
-} from '@tixkit/content-event-page';
+import type { EventPageBlock, EventPageDocument } from '@tixkit/content-event-page';
 
 export type SurfaceEditing = {
   /** Raw working document; blocks matched to resolved blocks by id. */

@@ -209,7 +209,9 @@ describe('renderEventPageDocument', () => {
       sanitizeEventPageHtml(
         '<p style="position:fixed;text-align:center;color:#0f766e;font-size:18px;line-height:140%">Good</p>',
       ),
-    ).toBe('<p style="color: #0f766e; font-size: 18px; line-height: 140%; text-align: center">Good</p>');
+    ).toBe(
+      '<p style="color: #0f766e; font-size: 18px; line-height: 140%; text-align: center">Good</p>',
+    );
   });
 
   it('rejects rich-text images with unsafe URLs or missing alt text', () => {

@@ -41,18 +41,9 @@ const VOID_ELEMENTS = new Set([
   'wbr',
 ]);
 
-const GLOBAL_STRIP_ATTRS = [
-  'contenteditable',
-  'spellcheck',
-  'aria-multiline',
-  'aria-disabled',
-];
+const GLOBAL_STRIP_ATTRS = ['contenteditable', 'spellcheck', 'aria-multiline', 'aria-disabled'];
 
-const EDITABLE_STRIP_ATTRS = [
-  'aria-label',
-  'data-placeholder',
-  'data-editable-field',
-];
+const EDITABLE_STRIP_ATTRS = ['aria-label', 'data-placeholder', 'data-editable-field'];
 
 const PROSEMIRROR_CLASSES = new Set([
   'ProseMirror',
@@ -68,7 +59,7 @@ function isEditableOrProseMirror(el: Element): boolean {
   return (
     el.hasAttribute('data-editable-field') ||
     el.classList.contains('ProseMirror') ||
-    (el.closest('.ProseMirror') !== null)
+    el.closest('.ProseMirror') !== null
   );
 }
 

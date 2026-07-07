@@ -9,10 +9,7 @@ import {
   type EventPageDocument,
   type EventPageRenderContext,
 } from '@tixkit/content-event-page';
-import {
-  EventPageSurface,
-  type SurfaceEditing,
-} from '@tixkit/content-event-page-react';
+import { EventPageSurface, type SurfaceEditing } from '@tixkit/content-event-page-react';
 import { EventPageRichTextEditor } from '@/components/event-page-rich-text-editor';
 
 const context: EventPageRenderContext = {
@@ -69,17 +66,25 @@ function docWithRichText(): EventPageDocument {
  */
 function normalizeInnerHtml(html: string): string {
   return html
-    .replace(/\s*(contenteditable|spellcheck|role|aria-multiline|aria-label|data-placeholder|translate|tabindex)="[^"]*"/g, '')
+    .replace(
+      /\s*(contenteditable|spellcheck|role|aria-multiline|aria-label|data-placeholder|translate|tabindex)="[^"]*"/g,
+      '',
+    )
     .replace(/\s*data-pm-[a-z-]+="[^"]*"/g, '')
     .replace(/class="([^"]*)"/g, (_m, classes: string) => {
       const kept = classes
         .split(/\s+/)
-        .filter((c) => c && c !== 'ProseMirror' && c !== 'tiptap' && c !== 'tk-ep-rich-text__content')
+        .filter(
+          (c) => c && c !== 'ProseMirror' && c !== 'tiptap' && c !== 'tk-ep-rich-text__content',
+        )
         .join(' ');
       return kept ? ` class="${kept}"` : '';
     })
     .replace(/\s+style="([^"]*)"/g, (_m, styles: string) => {
-      const norm = styles.replace(/\s*;\s*/g, ';').replace(/;$/, '').trim();
+      const norm = styles
+        .replace(/\s*;\s*/g, ';')
+        .replace(/;$/, '')
+        .trim();
       return norm ? ` style="${norm}"` : '';
     })
     .replace(/\s+>/g, '>')
@@ -102,9 +107,7 @@ function renderBoth() {
   const editSurface = render(
     <EventPageSurface resolvedPage={resolved} mode="edit" editing={editing} />,
   );
-  const publicSurface = render(
-    <EventPageSurface resolvedPage={resolved} mode="public" />,
-  );
+  const publicSurface = render(<EventPageSurface resolvedPage={resolved} mode="public" />);
   return { doc, resolved, editing, onChangeBlock, editSurface, publicSurface };
 }
 
@@ -132,9 +135,7 @@ describe('rich_text TipTap parity contract', () => {
     });
 
     // Edit: the TipTap content lives inside the .ProseMirror element.
-    const editContent = editSurface.container.querySelector(
-      '.ProseMirror',
-    ) as HTMLElement;
+    const editContent = editSurface.container.querySelector('.ProseMirror') as HTMLElement;
     // Public: the section innerHTML is the server-resolved HTML.
     const publicSection = publicSurface.container.querySelector(
       '[data-block-id="rich-parity"]',
@@ -157,9 +158,7 @@ describe('rich_text TipTap parity contract', () => {
 
     // Simulate a user keystroke by setting textContent and dispatching input.
     editor.innerHTML = '<p>Edited rich text</p>';
-    editSurface.container.dispatchEvent(
-      new Event('input', { bubbles: true }),
-    );
+    editSurface.container.dispatchEvent(new Event('input', { bubbles: true }));
 
     await waitFor(() => {
       expect(onChangeBlock).toHaveBeenCalledWith(

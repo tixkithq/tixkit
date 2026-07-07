@@ -352,7 +352,11 @@ describe('validateEmailTemplate', () => {
     expect(rendered.html).toContain('data-tixkit-global-css="true"');
     expect(rendered.html).toContain('.ticket-code { letter-spacing: 0.08em; }');
     expect(rendered.html).toContain('TKT-123');
-    expect(applyEmailGlobalCssToHtml(rendered.html, template.editor.globalCss).match(/data-tixkit-global-css/g)).toHaveLength(1);
+    expect(
+      applyEmailGlobalCssToHtml(rendered.html, template.editor.globalCss).match(
+        /data-tixkit-global-css/g,
+      ),
+    ).toHaveLength(1);
   });
 
   it('blocks unsafe Global CSS before render', async () => {
@@ -362,7 +366,8 @@ describe('validateEmailTemplate', () => {
         contentHtml: '<p>{{ticket.code}}</p>',
         contentText: '{{ticket.code}}',
         contentJson: { type: 'doc' },
-        globalCss: '@import "https://evil.example/style.css"; .x{background:url(javascript:alert(1))}',
+        globalCss:
+          '@import "https://evil.example/style.css"; .x{background:url(javascript:alert(1))}',
       },
     });
 
@@ -921,9 +926,7 @@ describe('getEmailTemplateLifecycleIssues', () => {
         category: 'transactional',
         sender: { fromEmail: 'tickets@example.test' },
       },
-      blocks: [
-        { type: 'event_hero', headline: '{{event.title}}', body: 'Hi {{recipient.name}}' },
-      ],
+      blocks: [{ type: 'event_hero', headline: '{{event.title}}', body: 'Hi {{recipient.name}}' }],
     });
 
     const issues = getEmailTemplateLifecycleIssues(template);
@@ -964,9 +967,7 @@ describe('getEmailTemplateLifecycleIssues', () => {
         category: 'transactional',
         sender: { fromEmail: 'tickets@example.test' },
       },
-      blocks: [
-        { type: 'event_hero', headline: '{{event.title}}', body: 'Hi {{recipient.name}}' },
-      ],
+      blocks: [{ type: 'event_hero', headline: '{{event.title}}', body: 'Hi {{recipient.name}}' }],
     });
 
     const result = validateEmailTemplate(template);

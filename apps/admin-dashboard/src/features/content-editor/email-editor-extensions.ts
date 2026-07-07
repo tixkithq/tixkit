@@ -15,16 +15,7 @@ import {
   imageSlashCommand,
   type EditorThemeInput,
 } from '@react-email/editor/plugins';
-import {
-  CalendarDays,
-  Code,
-  Image,
-  MapPin,
-  QrCode,
-  Share2,
-  Ticket,
-  Variable,
-} from 'lucide-react';
+import { CalendarDays, Code, Image, MapPin, QrCode, Share2, Ticket, Variable } from 'lucide-react';
 import { defaultSlashCommands, type SlashCommandItem } from '@react-email/editor/ui';
 
 type BrandEmailEditorThemeInput = {
@@ -61,21 +52,17 @@ export const tixkitMergeTagMarkName = 'tixkitMergeTag';
 export const tixkitInlineStyleMarkName = 'tixkitInlineStyle';
 
 type MergeTagPreviewPluginState = {
-  active:
-    | {
-        cursor?: number;
-        from: number;
-        key: string | null;
-        nodeName?: string;
-        scope?: 'node' | 'row' | 'text';
-        to: number;
-      }
-    | null;
+  active: {
+    cursor?: number;
+    from: number;
+    key: string | null;
+    nodeName?: string;
+    scope?: 'node' | 'row' | 'text';
+    to: number;
+  } | null;
 };
 
-const mergeTagPreviewPluginKey = new PluginKey<MergeTagPreviewPluginState>(
-  'tixkitMergeTagPreview',
-);
+const mergeTagPreviewPluginKey = new PluginKey<MergeTagPreviewPluginState>('tixkitMergeTagPreview');
 
 // Set briefly after a chip click so `apply` doesn't clear the active state
 // when a stray selectionchange event fires before the browser settles.
@@ -384,10 +371,7 @@ function escapeHtmlAttribute(value: string): string {
 }
 
 function escapeHtmlText(value: string): string {
-  return value
-    .replaceAll('&', '&amp;')
-    .replaceAll('<', '&lt;')
-    .replaceAll('>', '&gt;');
+  return value.replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;');
 }
 
 function renderMergeTagPreviewHtml(key: string): string {
@@ -560,16 +544,14 @@ export function orderedVariableOptions(mergeTags: readonly string[], currentKey:
 
 function isEmailInspectorTarget(target: EventTarget | null): boolean {
   return (
-    target instanceof HTMLElement &&
-    Boolean(target.closest('[data-tixkit-email-inspector="true"]'))
+    target instanceof HTMLElement && Boolean(target.closest('[data-tixkit-email-inspector="true"]'))
   );
 }
 
 function hasActiveEmailBubbleControlInteraction(): boolean {
   const until = Number(
-    globalThis.document?.documentElement.getAttribute(
-      'data-tixkit-email-bubble-control-until',
-    ) ?? '0',
+    globalThis.document?.documentElement.getAttribute('data-tixkit-email-bubble-control-until') ??
+      '0',
   );
   return Date.now() < until;
 }
@@ -583,12 +565,7 @@ type InlineStyleAttrs = {
 
 type InlineTextAlignment = 'left' | 'center' | 'right';
 
-const alignableNodeNames = new Set([
-  'button',
-  'image',
-  'section',
-  'columnsColumn',
-]);
+const alignableNodeNames = new Set(['button', 'image', 'section', 'columnsColumn']);
 
 function cleanInlineStyleAttrs(attrs: InlineStyleAttrs): InlineStyleAttrs {
   return Object.fromEntries(
@@ -598,7 +575,9 @@ function cleanInlineStyleAttrs(attrs: InlineStyleAttrs): InlineStyleAttrs {
   );
 }
 
-function readInlineStyleMark(mark: { attrs: Record<string, unknown> } | undefined): InlineStyleAttrs {
+function readInlineStyleMark(
+  mark: { attrs: Record<string, unknown> } | undefined,
+): InlineStyleAttrs {
   if (!mark) return {};
   return cleanInlineStyleAttrs({
     color: mark.attrs.color as string | undefined,
@@ -608,7 +587,9 @@ function readInlineStyleMark(mark: { attrs: Record<string, unknown> } | undefine
   });
 }
 
-function nodeInlineStyleAttrs(node: { attrs?: Record<string, unknown> } | null | undefined): InlineStyleAttrs {
+function nodeInlineStyleAttrs(
+  node: { attrs?: Record<string, unknown> } | null | undefined,
+): InlineStyleAttrs {
   if (!node?.attrs?.style || typeof node.attrs.style !== 'string') return {};
   const style = inlineStyleToReactStyle(node.attrs.style);
   if (!style) return {};
@@ -633,12 +614,11 @@ function computedStyleFromDom(view: EditorView, position: number): InlineStyleAt
   try {
     const pos = Math.max(0, Math.min(position, view.state.doc.content.size));
     const domInfo = view.domAtPos(pos);
-    let el =
-      domInfo.node instanceof HTMLElement
-        ? domInfo.node
-        : domInfo.node.parentElement;
+    let el = domInfo.node instanceof HTMLElement ? domInfo.node : domInfo.node.parentElement;
     if (!el) return {};
-    const themedEl = el.closest<HTMLElement>('h1, h2, h3, h4, h5, h6, p, [class*="node-h"], [class*="node-paragraph"]');
+    const themedEl = el.closest<HTMLElement>(
+      'h1, h2, h3, h4, h5, h6, p, [class*="node-h"], [class*="node-paragraph"]',
+    );
     if (themedEl) el = themedEl;
     const cs = globalThis.window.getComputedStyle(el);
     const fontSizePx = parseFloat(cs.fontSize);
@@ -658,11 +638,7 @@ function computedStyleFromDom(view: EditorView, position: number): InlineStyleAt
   }
 }
 
-function markOnlyStyleAttrsFromView(
-  view: EditorView,
-  from: number,
-  to: number,
-): InlineStyleAttrs {
+function markOnlyStyleAttrsFromView(view: EditorView, from: number, to: number): InlineStyleAttrs {
   const markType = view.state.schema.marks[tixkitInlineStyleMarkName];
   if (!markType || from === to) return {};
   let attrs: InlineStyleAttrs | null = null;
@@ -789,7 +765,10 @@ function preservedTextSelectionOrRange(
 ): TextSelection {
   if (state.selection.empty) {
     const candidate = state.selection.$from.parent.inlineContent ? state.selection.from : from;
-    const position = Math.max(0, Math.min(transaction.mapping.map(candidate), transaction.doc.content.size));
+    const position = Math.max(
+      0,
+      Math.min(transaction.mapping.map(candidate), transaction.doc.content.size),
+    );
     const resolved = transaction.doc.resolve(position);
     if (resolved.parent.inlineContent) {
       return TextSelection.create(transaction.doc, position);
@@ -824,17 +803,15 @@ function applyInlineStyleToRange(input: {
           transaction.mapping.map(input.cursor ?? state.selection.from, 1),
         )
       : preservedTextSelectionOrRange(state, transaction, input.from, input.to);
-  transaction = transaction
-    .setSelection(selection)
-    .setMeta(mergeTagPreviewPluginKey, {
-      active: {
-        cursor: input.scope === 'row' ? selection.from : undefined,
-        from: input.from,
-        key: findMergeTagRangeAtPosition(state, input.from)?.key ?? null,
-        scope: input.scope,
-        to: input.to,
-      },
-    });
+  transaction = transaction.setSelection(selection).setMeta(mergeTagPreviewPluginKey, {
+    active: {
+      cursor: input.scope === 'row' ? selection.from : undefined,
+      from: input.from,
+      key: findMergeTagRangeAtPosition(state, input.from)?.key ?? null,
+      scope: input.scope,
+      to: input.to,
+    },
+  });
   input.view.dispatch(transaction);
   input.view.dom.dispatchEvent(
     new CustomEvent('tixkit-email-selection-style-change', {
@@ -892,17 +869,15 @@ function applyTextAlignmentToRange(input: {
           transaction.mapping.map(input.cursor ?? state.selection.from, 1),
         )
       : preservedTextSelectionOrRange(state, transaction, from, to);
-  transaction = transaction
-    .setSelection(selection)
-    .setMeta(mergeTagPreviewPluginKey, {
-      active: {
-        cursor: input.scope === 'row' ? selection.from : undefined,
-        from,
-        key: findMergeTagRangeAtPosition(state, from)?.key ?? null,
-        scope: input.scope,
-        to,
-      },
-    });
+  transaction = transaction.setSelection(selection).setMeta(mergeTagPreviewPluginKey, {
+    active: {
+      cursor: input.scope === 'row' ? selection.from : undefined,
+      from,
+      key: findMergeTagRangeAtPosition(state, from)?.key ?? null,
+      scope: input.scope,
+      to,
+    },
+  });
   input.view.dispatch(transaction);
   input.view.focus();
 }
@@ -1001,7 +976,9 @@ function selectVariableToken(input: {
   input.view.focus();
 }
 
-function mergeTagKeyFromMark(marks: readonly { attrs?: Record<string, unknown>; type: { name: string } }[]) {
+function mergeTagKeyFromMark(
+  marks: readonly { attrs?: Record<string, unknown>; type: { name: string } }[],
+) {
   const mark = marks.find((candidate) => candidate.type.name === tixkitMergeTagMarkName);
   const key = mark?.attrs?.key;
   return typeof key === 'string' && key.trim() ? key.trim() : null;
@@ -1077,8 +1054,7 @@ function findMergeTagRangeAtPosition(
   );
   if (segmentIndex < 0 && normalizedPosition > 0) {
     segmentIndex = segments.findIndex(
-      (segment) =>
-        normalizedPosition - 1 >= segment.from && normalizedPosition - 1 <= segment.to,
+      (segment) => normalizedPosition - 1 >= segment.from && normalizedPosition - 1 <= segment.to,
     );
   }
   if (segmentIndex < 0) return null;
@@ -1209,10 +1185,7 @@ function findSelectedAlignableNodeRange(
   return null;
 }
 
-function createFloatingVariableMenu(input: {
-  mergeTags: readonly string[];
-  view: EditorView;
-}): {
+function createFloatingVariableMenu(input: { mergeTags: readonly string[]; view: EditorView }): {
   containsActiveElement: () => boolean;
   destroy: () => void;
   isConnected: () => boolean;
@@ -1269,9 +1242,10 @@ function createFloatingVariableMenu(input: {
 
   const positionMenu = () => {
     if (!menu || !activeRange) return;
-    const resolvedRange = activeRange.key && activeRange.scope !== 'node'
-      ? findMergeTagRangeAtPosition(input.view.state, activeRange.from)
-      : null;
+    const resolvedRange =
+      activeRange.key && activeRange.scope !== 'node'
+        ? findMergeTagRangeAtPosition(input.view.state, activeRange.from)
+        : null;
     if (activeRange.key && (!resolvedRange || resolvedRange.key !== activeRange.key)) {
       removeMenu();
       return;
@@ -1296,9 +1270,10 @@ function createFloatingVariableMenu(input: {
       return {
         cursor: currentActive.cursor,
         from: currentActive.from,
-        scope: currentActive.scope === 'row' || currentActive.scope === 'text'
-          ? currentActive.scope
-          : undefined,
+        scope:
+          currentActive.scope === 'row' || currentActive.scope === 'text'
+            ? currentActive.scope
+            : undefined,
         to: currentActive.to,
       };
     }
@@ -1326,11 +1301,7 @@ function createFloatingVariableMenu(input: {
       currentRange.from,
       currentRange.to,
     );
-    transaction.addMark(
-      currentRange.from,
-      nextTo,
-      markType.create(mergeTagMarkAttrs(nextKey)),
-    );
+    transaction.addMark(currentRange.from, nextTo, markType.create(mergeTagMarkAttrs(nextKey)));
     transaction.setSelection(TextSelection.create(transaction.doc, currentRange.from, nextTo));
     removeMenu();
     transaction.setMeta(mergeTagPreviewPluginKey, { active: null });
@@ -1352,16 +1323,22 @@ function createFloatingVariableMenu(input: {
   const isMenuForRange = (range: { from: number; key: string; to: number }) =>
     Boolean(
       menu &&
-        menu.dataset.variableKey === range.key &&
-        menu.dataset.variableFrom === String(range.from) &&
-        menu.dataset.variableTo === String(range.to),
+      menu.dataset.variableKey === range.key &&
+      menu.dataset.variableFrom === String(range.from) &&
+      menu.dataset.variableTo === String(range.to),
     );
 
   const openVariableMenu = (mode: 'open' | 'toggle') => {
     const currentActive = currentActiveRange();
-    const fallbackActive = !currentActive?.key && lastChipClickKey
-      ? { key: lastChipClickKey, from: lastChipClickRange?.from ?? 0, to: lastChipClickRange?.to ?? 0, scope: 'text' as const }
-      : null;
+    const fallbackActive =
+      !currentActive?.key && lastChipClickKey
+        ? {
+            key: lastChipClickKey,
+            from: lastChipClickRange?.from ?? 0,
+            to: lastChipClickRange?.to ?? 0,
+            scope: 'text' as const,
+          }
+        : null;
     const effectiveActive = currentActive?.key ? currentActive : fallbackActive;
     if (!effectiveActive?.key || effectiveActive.scope === 'node') {
       removeMenu();
@@ -1451,12 +1428,14 @@ function createFloatingVariableMenu(input: {
   };
 
   const handleSelectionFormat = (event: Event) => {
-    const detail = (event as CustomEvent<{
-      alignment?: InlineTextAlignment;
-      patch?: InlineStyleAttrs;
-      selection?: unknown;
-      variableKey?: string;
-    }>).detail;
+    const detail = (
+      event as CustomEvent<{
+        alignment?: InlineTextAlignment;
+        patch?: InlineStyleAttrs;
+        selection?: unknown;
+        variableKey?: string;
+      }>
+    ).detail;
     if (!detail || typeof detail !== 'object') return;
     event.preventDefault();
     const requestedActive = activeRangeFromSelectionDetail(detail.selection);
@@ -1473,12 +1452,15 @@ function createFloatingVariableMenu(input: {
   };
 
   const handleSelectionRestore = (event: Event) => {
-    const detail = (event as CustomEvent<
-      (MergeTagPreviewPluginState['active'] & {
-        focusEditor?: boolean;
-        softRestore?: boolean;
-      }) | null
-    >).detail;
+    const detail = (
+      event as CustomEvent<
+        | (MergeTagPreviewPluginState['active'] & {
+            focusEditor?: boolean;
+            softRestore?: boolean;
+          })
+        | null
+      >
+    ).detail;
     if (!detail) return;
     const from = Math.max(0, Math.min(detail.from, input.view.state.doc.content.size));
     const to = Math.max(from, Math.min(detail.to, input.view.state.doc.content.size));
@@ -1528,9 +1510,7 @@ function createFloatingVariableMenu(input: {
       if (!softRestore && detail.focusEditor !== false) input.view.focus();
       return;
     }
-    const mergeTagRange = detail.key
-      ? findMergeTagRangeAtPosition(input.view.state, from)
-      : null;
+    const mergeTagRange = detail.key ? findMergeTagRangeAtPosition(input.view.state, from) : null;
     const active = mergeTagRange
       ? { ...mergeTagRange, cursor: mergeTagRange.from + 1, scope: 'text' as const }
       : { from, key: null as string | null, scope: 'text' as const, to };
@@ -1777,11 +1757,11 @@ function createMergeTagPreviewExtension(mergeTags: readonly string[]) {
                 | undefined;
               if (meta && 'active' in meta) return { active: meta.active ?? null };
               if (transaction.selectionSet) {
-                if (pluginState.active && (hasActiveEmailBubbleControlInteraction() || Date.now() < chipClickGuardUntil)) {
-                  if (
-                    pluginState.active.scope === 'row' &&
-                    transaction.selection.empty
-                  ) {
+                if (
+                  pluginState.active &&
+                  (hasActiveEmailBubbleControlInteraction() || Date.now() < chipClickGuardUntil)
+                ) {
+                  if (pluginState.active.scope === 'row' && transaction.selection.empty) {
                     const $from = transaction.selection.$from;
                     if ($from.parent.inlineContent && $from.parent.content.size > 0) {
                       return {

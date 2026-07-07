@@ -29,12 +29,23 @@ const context: EventPageRenderContext = {
     refundUrl: 'https://example.test/refunds',
   },
   tickets: [
-    { id: 'tt_ga', name: 'General Admission', description: 'Standing room', status: 'active', priceLabel: '$35.00' },
+    {
+      id: 'tt_ga',
+      name: 'General Admission',
+      description: 'Standing room',
+      status: 'active',
+      priceLabel: '$35.00',
+    },
     { id: 'tt_hidden', name: 'Hidden comp', status: 'hidden', priceLabel: 'Free' },
   ],
   products: [{ id: 'prod_poster', name: 'Poster', priceLabel: '$10.00' }],
   resaleListings: [
-    { id: 'resale_1', ticketTypeName: 'General Admission', priceLabel: '$40.00', expiresAt: '2026-07-15T00:00:00.000Z' },
+    {
+      id: 'resale_1',
+      ticketTypeName: 'General Admission',
+      priceLabel: '$40.00',
+      expiresAt: '2026-07-15T00:00:00.000Z',
+    },
   ],
 };
 
@@ -59,7 +70,10 @@ function comprehensiveDocument(): EventPageDocument {
     {
       id: 'rich-1',
       type: 'rich_text',
-      content: { type: 'doc', content: [{ type: 'paragraph', content: [{ type: 'text', text: 'Extra copy' }] }] },
+      content: {
+        type: 'doc',
+        content: [{ type: 'paragraph', content: [{ type: 'text', text: 'Extra copy' }] }],
+      },
     },
     {
       id: 'products-1',
@@ -72,7 +86,14 @@ function comprehensiveDocument(): EventPageDocument {
       id: 'sponsors-1',
       type: 'sponsors',
       title: 'Sponsors',
-      items: [{ name: 'Acme Corp', url: 'https://acme.test', imageUrl: 'https://cdn.test/acme.png', imageAlt: 'Acme logo' }],
+      items: [
+        {
+          name: 'Acme Corp',
+          url: 'https://acme.test',
+          imageUrl: 'https://cdn.test/acme.png',
+          imageAlt: 'Acme logo',
+        },
+      ],
     },
     {
       id: 'speakers-1',
@@ -112,7 +133,10 @@ function comprehensiveDocument(): EventPageDocument {
  * is shared so derived content (tickets, products, resale) is identical.
  */
 function renderBoth(doc: EventPageDocument) {
-  const resolved = resolveEventPageDocument(doc, context, { allowUnsafeEmbeds: true, mode: 'edit' });
+  const resolved = resolveEventPageDocument(doc, context, {
+    allowUnsafeEmbeds: true,
+    mode: 'edit',
+  });
   const editing: SurfaceEditing = {
     document: doc,
     disabled: false,
@@ -124,8 +148,12 @@ function renderBoth(doc: EventPageDocument) {
   );
   return {
     resolved,
-    publicBlocks: normalizeBlocksByHtml(publicSurface.container.querySelector('.tixkit-event-page') as HTMLElement),
-    editBlocks: normalizeBlocksByHtml(editSurface.container.querySelector('.tixkit-event-page') as HTMLElement),
+    publicBlocks: normalizeBlocksByHtml(
+      publicSurface.container.querySelector('.tixkit-event-page') as HTMLElement,
+    ),
+    editBlocks: normalizeBlocksByHtml(
+      editSurface.container.querySelector('.tixkit-event-page') as HTMLElement,
+    ),
     publicContainer: publicSurface.container,
     editContainer: editSurface.container,
   };

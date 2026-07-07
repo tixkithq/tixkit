@@ -144,7 +144,9 @@ describe('CheckoutFlow buyer validation', () => {
         ]);
         let resaleListing = null;
         let cursor: string | undefined;
+        // eslint-disable-next-line no-unmodified-loop-condition -- pagination continues until the requested listing is found or exhausted.
         while (input?.resaleListingId) {
+          // eslint-disable-next-line no-await-in-loop -- each resale page depends on the previous cursor.
           const page = await publicApiMock.getResaleListings(
             eventId,
             signal,

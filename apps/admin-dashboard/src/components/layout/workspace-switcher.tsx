@@ -150,7 +150,9 @@ export function WorkspaceSwitcher() {
               {isCollapsed ? null : (
                 <span className="grid min-w-0 flex-1">
                   <span className="truncate font-bold">
-                    {loading ? 'Loading workspace...' : selectedOrganization?.name ?? 'No workspace'}
+                    {loading
+                      ? 'Loading workspace...'
+                      : (selectedOrganization?.name ?? 'No workspace')}
                   </span>
                   <span className="truncate text-xs text-muted-foreground">
                     {loading ? (
@@ -161,7 +163,7 @@ export function WorkspaceSwitcher() {
                     ) : error ? (
                       'Workspace unavailable'
                     ) : (
-                      selectedBrand?.name ?? 'No brand'
+                      (selectedBrand?.name ?? 'No brand')
                     )}
                   </span>
                 </span>

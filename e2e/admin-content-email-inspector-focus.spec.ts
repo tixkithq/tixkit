@@ -28,7 +28,9 @@ async function seedContentEvent(page: import('@playwright/test').Page, suffix: s
 test.describe('persisted admin email inspector focus stability', () => {
   test.describe.configure({ timeout: 180_000 });
 
-  test('keeps focus when clicking and typing in inspector style fields', async ({ page }, testInfo) => {
+  test('keeps focus when clicking and typing in inspector style fields', async ({
+    page,
+  }, testInfo) => {
     await requireReachable(page, adminBaseUrl, 'admin dashboard');
     await requireReachable(page, `${apiBaseUrl}/health`, 'api');
     const event = await seedContentEvent(

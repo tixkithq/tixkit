@@ -149,9 +149,9 @@ describe('resolveEventPageDocument', () => {
     const allowed = resolveEventPageDocument(document, context, { allowUnsafeEmbeds: true });
     expect(allowed.validation.valid).toBe(true);
     const allowedEmbed = allowed.blocks.find((block) => block.type === 'custom_embed');
-    expect(
-      allowedEmbed && allowedEmbed.type === 'custom_embed' && allowedEmbed.html,
-    ).toContain('https://player.example.test/video');
+    expect(allowedEmbed && allowedEmbed.type === 'custom_embed' && allowedEmbed.html).toContain(
+      'https://player.example.test/video',
+    );
   });
 });
 
@@ -283,9 +283,7 @@ describe('resolver XSS and URL safety hardening', () => {
     const document = baseDocument();
     const details = document.blocks.find((b) => b.type === 'event_details')!;
     if (details.type === 'event_details') {
-      details.items = [
-        { label: 'Price & availability', value: 'Free <ticket>' },
-      ];
+      details.items = [{ label: 'Price & availability', value: 'Free <ticket>' }];
     }
     const resolved = resolveEventPageDocument(document, context);
     const html = renderResolvedEventPageHtml(resolved);
@@ -356,9 +354,7 @@ describe('resolver XSS and URL safety hardening', () => {
         id: `rt-bulk-${i}`,
         content: {
           type: 'doc',
-          content: [
-            { type: 'paragraph', content: [{ type: 'text', text: `Paragraph ${i}` }] },
-          ],
+          content: [{ type: 'paragraph', content: [{ type: 'text', text: `Paragraph ${i}` }] }],
         },
       });
     }
@@ -420,9 +416,7 @@ describe('chrome blocks (event_header, resale_tickets, brand_footer)', () => {
     const resolved = resolveEventPageDocument(document, context);
     const block = resolved.blocks.find((b) => b.type === 'resale_tickets');
     expect(block && block.type === 'resale_tickets' && block.listings.length).toBe(1);
-    expect(
-      block && block.type === 'resale_tickets' && block.listings[0].priceLabel,
-    ).toBe('$40.00');
+    expect(block && block.type === 'resale_tickets' && block.listings[0].priceLabel).toBe('$40.00');
     const html = renderResolvedEventPageHtml(resolved);
     expect(html).toContain('tk-ep-resale');
     expect(html).toContain('General Admission');
@@ -473,7 +467,8 @@ describe('normalizeEventPageDocument chrome upgrade', () => {
     const legacy = {
       ...document,
       blocks: document.blocks.filter(
-        (b) => b.type !== 'event_header' && b.type !== 'resale_tickets' && b.type !== 'brand_footer',
+        (b) =>
+          b.type !== 'event_header' && b.type !== 'resale_tickets' && b.type !== 'brand_footer',
       ),
     };
     expect(legacy.blocks.length).toBe(document.blocks.length - 3);

@@ -58,6 +58,7 @@ export async function seedEmailTemplateDefaults(
 
     const seeded: TemplateKey[] = [];
     for (const key of SEED_EMAIL_TEMPLATE_KEYS) {
+      // eslint-disable-next-line no-await-in-loop -- Template seeding is sequential so validation and publishing errors point to one key.
       const existing = await repo.findPublishedEmailTemplate({
         tenantId: input.tenantId,
         brandId: input.brandId,
@@ -72,6 +73,7 @@ export async function seedEmailTemplateDefaults(
       if (!validation.valid) {
         throw new Error(`Generated default email template for ${key} failed validation`);
       }
+      // eslint-disable-next-line no-await-in-loop -- Each document must exist before its version and publish step.
       const created = await repo.createDocument({
         tenantId: input.tenantId,
         organizationId: input.organizationId,
@@ -82,6 +84,7 @@ export async function seedEmailTemplateDefaults(
         name: lifecycle?.name ?? key,
         locale: 'en',
       });
+      // eslint-disable-next-line no-await-in-loop -- Versions are tied to the document created in this iteration.
       const version = await repo.createVersion({
         documentId: created.id,
         subject: document.settings.subject,
@@ -91,6 +94,7 @@ export async function seedEmailTemplateDefaults(
         validation,
         createdBy,
       });
+      // eslint-disable-next-line no-await-in-loop -- Publish the version before reporting the key as seeded.
       await repo.publishVersion({ documentId: created.id, versionId: version.id });
       seeded.push(key);
     }

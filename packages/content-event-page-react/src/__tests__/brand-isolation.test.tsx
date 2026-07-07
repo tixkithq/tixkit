@@ -1,9 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { render } from '@testing-library/react';
-import {
-  EventPageSurface,
-  type SurfaceEditing,
-} from '../index.js';
+import { EventPageSurface, type SurfaceEditing } from '../index.js';
 import {
   createDefaultEventPageDocument,
   resolveEventPageDocument,
@@ -27,9 +24,7 @@ const brandA: EventPageRenderContext = {
     privacyUrl: 'https://a.test/privacy',
     refundUrl: 'https://a.test/refund',
   },
-  tickets: [
-    { id: 't1', name: 'GA', status: 'active', priceLabel: '$30' },
-  ],
+  tickets: [{ id: 't1', name: 'GA', status: 'active', priceLabel: '$30' }],
 };
 
 const brandB: EventPageRenderContext = {
@@ -49,9 +44,7 @@ const brandB: EventPageRenderContext = {
     privacyUrl: 'https://b.test/privacy',
     refundUrl: 'https://b.test/refund',
   },
-  tickets: [
-    { id: 't2', name: 'VIP', status: 'active', priceLabel: '£75' },
-  ],
+  tickets: [{ id: 't2', name: 'VIP', status: 'active', priceLabel: '£75' }],
 };
 
 describe('Two-brand isolation', () => {
@@ -68,12 +61,20 @@ describe('Two-brand isolation', () => {
     const resolvedA = resolveEventPageDocument(doc, brandA);
     const resolvedB = resolveEventPageDocument(doc, brandB);
 
-    const { container: containerA } = render(<EventPageSurface resolvedPage={resolvedA} mode="public" />);
-    const { container: containerB } = render(<EventPageSurface resolvedPage={resolvedB} mode="public" />);
+    const { container: containerA } = render(
+      <EventPageSurface resolvedPage={resolvedA} mode="public" />,
+    );
+    const { container: containerB } = render(
+      <EventPageSurface resolvedPage={resolvedB} mode="public" />,
+    );
 
     // Brand footer links should reflect each brand's URLs
-    const linksA = Array.from(containerA.querySelectorAll('.tk-ep-footer a')).map((el) => el.getAttribute('href'));
-    const linksB = Array.from(containerB.querySelectorAll('.tk-ep-footer a')).map((el) => el.getAttribute('href'));
+    const linksA = Array.from(containerA.querySelectorAll('.tk-ep-footer a')).map((el) =>
+      el.getAttribute('href'),
+    );
+    const linksB = Array.from(containerB.querySelectorAll('.tk-ep-footer a')).map((el) =>
+      el.getAttribute('href'),
+    );
 
     expect(linksA).toContain('https://a.test/support');
     expect(linksB).toContain('https://b.test/support');
@@ -90,8 +91,12 @@ describe('Two-brand isolation', () => {
     const resolvedA = resolveEventPageDocument(doc, brandA);
     const resolvedB = resolveEventPageDocument(doc, brandB);
 
-    const { container: containerA } = render(<EventPageSurface resolvedPage={resolvedA} mode="public" />);
-    const { container: containerB } = render(<EventPageSurface resolvedPage={resolvedB} mode="public" />);
+    const { container: containerA } = render(
+      <EventPageSurface resolvedPage={resolvedA} mode="public" />,
+    );
+    const { container: containerB } = render(
+      <EventPageSurface resolvedPage={resolvedB} mode="public" />,
+    );
 
     const titleA = containerA.querySelector('.tk-ep-header__title')?.textContent;
     const titleB = containerB.querySelector('.tk-ep-header__title')?.textContent;

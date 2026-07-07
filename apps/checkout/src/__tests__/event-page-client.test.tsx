@@ -17,6 +17,11 @@ import {
 
 const push = vi.fn();
 
+function userFacingMessage(error: unknown): string {
+  if (error instanceof Error) return error.message;
+  return 'Something went wrong. Please try again.';
+}
+
 vi.mock('next/navigation', () => ({
   useRouter: () => ({ push }),
 }));
@@ -32,11 +37,6 @@ vi.mock('@/lib/api', () => {
       super(message);
       this.name = 'CheckoutApiError';
     }
-  }
-
-  function userFacingMessage(error: unknown): string {
-    if (error instanceof Error) return error.message;
-    return 'Something went wrong. Please try again.';
   }
 
   return {

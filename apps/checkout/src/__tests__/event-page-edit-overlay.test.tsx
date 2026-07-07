@@ -227,7 +227,7 @@ describe('EventPageEditOverlay postMessage resolver loop', () => {
     const nextDocument = {
       ...defaultEventPageDocument(),
       blocks: defaultEventPageDocument().blocks.map((block) =>
-        block.id === 'hero' ? { ...block, headline: 'Document headline' } : block,
+        block.id === 'hero' ? Object.assign({}, block, { headline: 'Document headline' }) : block,
       ),
     };
     window.dispatchEvent(

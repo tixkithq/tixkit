@@ -170,7 +170,7 @@
   background: color-mix(in srgb, currentColor, transparent 85%);
 }
 
-.tk-ep-bubble__btn[aria-pressed="true"] {
+.tk-ep-bubble__btn[aria-pressed='true'] {
   background: color-mix(in srgb, currentColor, transparent 70%);
 }
 
@@ -223,18 +223,18 @@
 
 /* ---- Edit-mode inline editable affordances (non-layout only) ---- */
 
-[data-mode="edit"] [contenteditable="true"] {
+[data-mode='edit'] [contenteditable='true'] {
   outline: none;
   border-radius: 4px;
   min-width: 2rem;
   caret-color: var(--tk-ep-accent);
 }
 
-[data-mode="edit"] [contenteditable="true"]:focus {
+[data-mode='edit'] [contenteditable='true']:focus {
   box-shadow: 0 0 0 2px color-mix(in srgb, var(--tk-ep-accent), transparent 70%);
 }
 
-[data-mode="edit"] [contenteditable="true"][data-placeholder]:empty::before {
+[data-mode='edit'] [contenteditable='true'][data-placeholder]:empty::before {
   content: attr(data-placeholder);
   color: color-mix(in srgb, var(--tk-ep-fg), transparent 60%);
 }

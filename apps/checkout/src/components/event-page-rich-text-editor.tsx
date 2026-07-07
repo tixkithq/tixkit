@@ -53,15 +53,15 @@ function RichTextBubbleMenu({ editor }: { editor: Editor }) {
     editor.chain().focus().toggleLink({ href: url }).run();
   };
 
-  const currentFontFamily = (editor.getAttributes(EventPageInlineStyle.name).fontFamily as string) ?? '';
-  const currentAlignment = (editor.getAttributes('paragraph').textAlign as string) ??
-    (editor.getAttributes('heading').textAlign as string) ?? 'left';
+  const currentFontFamily =
+    (editor.getAttributes(EventPageInlineStyle.name).fontFamily as string) ?? '';
+  const currentAlignment =
+    (editor.getAttributes('paragraph').textAlign as string) ??
+    (editor.getAttributes('heading').textAlign as string) ??
+    'left';
 
   return (
-    <BubbleMenu
-      editor={editor}
-      className="tk-ep-bubble"
-    >
+    <BubbleMenu editor={editor} className="tk-ep-bubble">
       <button
         type="button"
         className="tk-ep-bubble__btn"
@@ -195,9 +195,7 @@ export function EventPageRichTextEditor({
   }, [editor, disabled]);
 
   if (!editor) {
-    return (
-      <div className="tk-ep-rich-text__content" data-placeholder="Loading editor..." />
-    );
+    return <div className="tk-ep-rich-text__content" data-placeholder="Loading editor..." />;
   }
 
   return (

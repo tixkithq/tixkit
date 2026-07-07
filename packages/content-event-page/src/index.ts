@@ -622,94 +622,94 @@ export function createDefaultEventPageDocument(input: {
   const checkoutUrl = input.checkoutUrl?.trim() || '{{event.checkoutUrl}}';
 
   const blocks: EventPageBlock[] = [
-      {
-        type: 'event_header',
-        id: 'header',
-        showBadge: true,
-        showDate: true,
-        showVenue: true,
-        showDescription: true,
-      },
-      {
-        type: 'hero',
-        id: 'hero',
-        eyebrow: input.brandName ?? '{{brand.name}}',
-        headline: input.eventTitle,
-        body: summary,
-        imageUrl: input.coverImageUrl ?? undefined,
-        imageAlt: input.coverImageUrl ? `${input.eventTitle} cover image` : undefined,
-        ctaLabel: 'Get tickets',
-        ctaUrl: checkoutUrl,
-      },
-      {
-        type: 'event_details',
-        id: 'details',
-        title: 'Event details',
-        items: [
-          { label: 'Starts', value: startsAt },
-          ...(endsAt ? [{ label: 'Ends', value: endsAt }] : []),
-          { label: 'Timezone', value: input.timezone ?? '{{event.timezone}}' },
-          { label: 'Venue', value: venueName },
-        ],
-      },
-      {
-        type: 'tickets',
-        id: 'tickets',
-        title: 'Tickets',
-        body: 'Choose your tickets and continue through secure checkout.',
-        ctaLabel: 'Get tickets',
-      },
-      {
-        type: 'schedule',
-        id: 'schedule',
-        title: 'Schedule',
-        items: [
-          {
-            title: input.eventTitle,
-            startsAt,
-            endsAt,
-            timezone: input.timezone ?? undefined,
-            venueName,
-          },
-        ],
-      },
-      {
-        type: 'venue_map',
-        id: 'venue',
-        title: 'Venue',
-        venueName,
-        address: formatAddress(input.venue),
-        mapUrl: input.venue?.mapUrl ?? undefined,
-      },
-      {
-        type: 'faq',
-        id: 'faq',
-        title: 'FAQ',
-        items: [
-          {
-            question: 'How do I get my tickets?',
-            answer:
-              'Tickets are delivered by email after checkout and can be opened from your confirmation page.',
-          },
-        ],
-      },
-      {
-        type: 'resale_tickets',
-        id: 'resale',
-        title: 'Resale tickets',
-        ctaLabel: 'Buy resale',
-        emptyStateText: 'No resale tickets available.',
-        showVerifiedBadge: true,
-      },
-      {
-        type: 'brand_footer',
-        id: 'footer',
-        showSupport: true,
-        showTerms: true,
-        showPrivacy: true,
-        showRefund: true,
-      },
-    ];
+    {
+      type: 'event_header',
+      id: 'header',
+      showBadge: true,
+      showDate: true,
+      showVenue: true,
+      showDescription: true,
+    },
+    {
+      type: 'hero',
+      id: 'hero',
+      eyebrow: input.brandName ?? '{{brand.name}}',
+      headline: input.eventTitle,
+      body: summary,
+      imageUrl: input.coverImageUrl ?? undefined,
+      imageAlt: input.coverImageUrl ? `${input.eventTitle} cover image` : undefined,
+      ctaLabel: 'Get tickets',
+      ctaUrl: checkoutUrl,
+    },
+    {
+      type: 'event_details',
+      id: 'details',
+      title: 'Event details',
+      items: [
+        { label: 'Starts', value: startsAt },
+        ...(endsAt ? [{ label: 'Ends', value: endsAt }] : []),
+        { label: 'Timezone', value: input.timezone ?? '{{event.timezone}}' },
+        { label: 'Venue', value: venueName },
+      ],
+    },
+    {
+      type: 'tickets',
+      id: 'tickets',
+      title: 'Tickets',
+      body: 'Choose your tickets and continue through secure checkout.',
+      ctaLabel: 'Get tickets',
+    },
+    {
+      type: 'schedule',
+      id: 'schedule',
+      title: 'Schedule',
+      items: [
+        {
+          title: input.eventTitle,
+          startsAt,
+          endsAt,
+          timezone: input.timezone ?? undefined,
+          venueName,
+        },
+      ],
+    },
+    {
+      type: 'venue_map',
+      id: 'venue',
+      title: 'Venue',
+      venueName,
+      address: formatAddress(input.venue),
+      mapUrl: input.venue?.mapUrl ?? undefined,
+    },
+    {
+      type: 'faq',
+      id: 'faq',
+      title: 'FAQ',
+      items: [
+        {
+          question: 'How do I get my tickets?',
+          answer:
+            'Tickets are delivered by email after checkout and can be opened from your confirmation page.',
+        },
+      ],
+    },
+    {
+      type: 'resale_tickets',
+      id: 'resale',
+      title: 'Resale tickets',
+      ctaLabel: 'Buy resale',
+      emptyStateText: 'No resale tickets available.',
+      showVerifiedBadge: true,
+    },
+    {
+      type: 'brand_footer',
+      id: 'footer',
+      showSupport: true,
+      showTerms: true,
+      showPrivacy: true,
+      showRefund: true,
+    },
+  ];
 
   return {
     schemaVersion: EVENT_PAGE_SCHEMA_VERSION,
@@ -1196,19 +1196,13 @@ function resolvedBlockHtml(block: ResolvedEventPageBlock): string {
     case 'event_header': {
       const meta: string[] = [];
       if (block.showDate && block.startsAt) {
-        meta.push(
-          `<div><dt>Date</dt><dd>${escapeHtml(block.startsAt)}</dd></div>`,
-        );
+        meta.push(`<div><dt>Date</dt><dd>${escapeHtml(block.startsAt)}</dd></div>`);
       }
       if (block.showDate && block.timezone) {
-        meta.push(
-          `<div><dt>Timezone</dt><dd>${escapeHtml(block.timezone)}</dd></div>`,
-        );
+        meta.push(`<div><dt>Timezone</dt><dd>${escapeHtml(block.timezone)}</dd></div>`);
       }
       if (block.showVenue && block.venueName) {
-        meta.push(
-          `<div><dt>Venue</dt><dd>${escapeHtml(block.venueName)}</dd></div>`,
-        );
+        meta.push(`<div><dt>Venue</dt><dd>${escapeHtml(block.venueName)}</dd></div>`);
       }
       return [
         `<section class="tk-ep-header" data-block-id="${escapeAttr(block.id)}">`,
@@ -1238,7 +1232,9 @@ function resolvedBlockHtml(block: ResolvedEventPageBlock): string {
     case 'brand_footer': {
       return block.links.length > 0
         ? `<footer class="tk-ep-footer" data-block-id="${escapeAttr(block.id)}"><ul class="tk-ep-footer__links">${block.links
-            .map((link) => `<li><a href="${escapeAttr(link.url)}">${escapeHtml(link.label)}</a></li>`)
+            .map(
+              (link) => `<li><a href="${escapeAttr(link.url)}">${escapeHtml(link.label)}</a></li>`,
+            )
             .join('')}</ul></footer>`
         : `<footer class="tk-ep-footer" data-block-id="${escapeAttr(block.id)}"></footer>`;
     }
@@ -1478,9 +1474,7 @@ export function normalizeEventPageDocument(value: unknown): EventPageDocument | 
   if (!isRecord(value.settings) || !Array.isArray(value.blocks)) return undefined;
   const rawBlocks = value.blocks as EventPageBlock[];
   const hasHeader = rawBlocks.some((block) => isRecord(block) && block.type === 'event_header');
-  const hasResale = rawBlocks.some(
-    (block) => isRecord(block) && block.type === 'resale_tickets',
-  );
+  const hasResale = rawBlocks.some((block) => isRecord(block) && block.type === 'resale_tickets');
   const hasFooter = rawBlocks.some((block) => isRecord(block) && block.type === 'brand_footer');
   const isUnified = isUnifiedEditorDocument(editor.document as JSONContent);
   if (hasHeader && hasResale && hasFooter && isUnified) {

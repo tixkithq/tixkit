@@ -324,7 +324,11 @@ export const MERGE_TAG_REGISTRY: readonly MergeTagVariable[] = [
     description: 'Check-in device invite URL',
     example: 'https://scan.example.test/invite/dev_123',
   },
-  { key: 'device.permissionScope', description: 'Scanner permission scope', example: 'checkins.write' },
+  {
+    key: 'device.permissionScope',
+    description: 'Scanner permission scope',
+    example: 'checkins.write',
+  },
   {
     key: 'device.expiresAt',
     description: 'Device invite expiration',
@@ -388,7 +392,11 @@ export const MERGE_TAG_REGISTRY: readonly MergeTagVariable[] = [
     description: 'Integration reconnect URL',
     example: 'https://admin.example.test/integrations/stripe/reconnect',
   },
-  { key: 'salesDigest.revenue', description: 'Daily sales revenue (formatted)', example: '$4,320.00' },
+  {
+    key: 'salesDigest.revenue',
+    description: 'Daily sales revenue (formatted)',
+    example: '$4,320.00',
+  },
   { key: 'salesDigest.orders', description: 'Daily order count', example: '38' },
   {
     key: 'salesDigest.topTicketType',

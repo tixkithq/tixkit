@@ -74,8 +74,7 @@ function hasRecentEmailBubbleControlInteraction(): boolean {
   );
   return (
     emailBubbleInteractionTime() - lastEmailBubbleControlInteractionAt <
-      emailBubbleControlFocusWindowMs ||
-    Date.now() < sharedUntil
+      emailBubbleControlFocusWindowMs || Date.now() < sharedUntil
   );
 }
 
@@ -527,28 +526,28 @@ export function TixkitEmailBubbleMenu() {
             </BubbleMenu.ItemGroup>
           )}
           <BubbleMenu.ItemGroup>
-              <BubbleMenu.Item
-                isActive={false}
-                name="Align left"
-                onCommand={() => formatCurrentSelection({ alignment: 'left' })}
-              >
-                <AlignLeftIcon />
-              </BubbleMenu.Item>
-              <BubbleMenu.Item
-                isActive={false}
-                name="Align center"
-                onCommand={() => formatCurrentSelection({ alignment: 'center' })}
-              >
-                <AlignCenterIcon />
-              </BubbleMenu.Item>
-              <BubbleMenu.Item
-                isActive={false}
-                name="Align right"
-                onCommand={() => formatCurrentSelection({ alignment: 'right' })}
-              >
-                <AlignRightIcon />
-              </BubbleMenu.Item>
-            </BubbleMenu.ItemGroup>
+            <BubbleMenu.Item
+              isActive={false}
+              name="Align left"
+              onCommand={() => formatCurrentSelection({ alignment: 'left' })}
+            >
+              <AlignLeftIcon />
+            </BubbleMenu.Item>
+            <BubbleMenu.Item
+              isActive={false}
+              name="Align center"
+              onCommand={() => formatCurrentSelection({ alignment: 'center' })}
+            >
+              <AlignCenterIcon />
+            </BubbleMenu.Item>
+            <BubbleMenu.Item
+              isActive={false}
+              name="Align right"
+              onCommand={() => formatCurrentSelection({ alignment: 'right' })}
+            >
+              <AlignRightIcon />
+            </BubbleMenu.Item>
+          </BubbleMenu.ItemGroup>
           {!isNodeSelection && (
             <BubbleMenu.ItemGroup className="tixkit-email-bubble-controls">
               <span

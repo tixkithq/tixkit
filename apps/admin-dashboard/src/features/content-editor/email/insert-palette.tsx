@@ -98,7 +98,9 @@ export function InsertPalette({
       if (typeof chain.setImage === 'function') {
         chain.setImage({ src: result.url, alt, alignment: 'center' }).run();
       } else {
-        chain.insertContent({ type: 'image', attrs: { src: result.url, alt, alignment: 'center' } }).run();
+        chain
+          .insertContent({ type: 'image', attrs: { src: result.url, alt, alignment: 'center' } })
+          .run();
       }
       completeInsert();
     } finally {

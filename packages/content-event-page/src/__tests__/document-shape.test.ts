@@ -34,12 +34,23 @@ const context: EventPageRenderContext = {
     refundUrl: 'https://example.test/refunds',
   },
   tickets: [
-    { id: 'tt_ga', name: 'General Admission', description: 'Standing room', status: 'active', priceLabel: '$35.00' },
+    {
+      id: 'tt_ga',
+      name: 'General Admission',
+      description: 'Standing room',
+      status: 'active',
+      priceLabel: '$35.00',
+    },
     { id: 'tt_hidden', name: 'Hidden comp', status: 'hidden', priceLabel: 'Free' },
   ],
   products: [{ id: 'prod_poster', name: 'Poster', priceLabel: '$10.00' }],
   resaleListings: [
-    { id: 'resale_1', ticketTypeName: 'General Admission', priceLabel: '$40.00', expiresAt: '2026-07-15T00:00:00.000Z' },
+    {
+      id: 'resale_1',
+      ticketTypeName: 'General Admission',
+      priceLabel: '$40.00',
+      expiresAt: '2026-07-15T00:00:00.000Z',
+    },
   ],
 };
 
@@ -66,7 +77,10 @@ function comprehensiveDocument(): EventPageDocument {
     {
       id: 'rich-1',
       type: 'rich_text',
-      content: { type: 'doc', content: [{ type: 'paragraph', content: [{ type: 'text', text: 'Extra copy' }] }] },
+      content: {
+        type: 'doc',
+        content: [{ type: 'paragraph', content: [{ type: 'text', text: 'Extra copy' }] }],
+      },
     },
     {
       id: 'products-1',
@@ -79,7 +93,14 @@ function comprehensiveDocument(): EventPageDocument {
       id: 'sponsors-1',
       type: 'sponsors',
       title: 'Sponsors',
-      items: [{ name: 'Acme Corp', url: 'https://acme.test', imageUrl: 'https://cdn.test/acme.png', imageAlt: 'Acme logo' }],
+      items: [
+        {
+          name: 'Acme Corp',
+          url: 'https://acme.test',
+          imageUrl: 'https://cdn.test/acme.png',
+          imageAlt: 'Acme logo',
+        },
+      ],
     },
     {
       id: 'speakers-1',
@@ -144,12 +165,27 @@ describe('Phase 0: dual-store document shape snapshot', () => {
     const doc = comprehensiveDocument();
     const blockTypes = new Set(doc.blocks.map((b) => b.type));
     expect(blockTypes.size).toBe(17);
-    expect(blockTypes).toEqual(new Set([
-      'event_header', 'hero', 'event_details', 'tickets', 'schedule',
-      'venue_map', 'faq', 'resale_tickets', 'brand_footer',
-      'rich_text', 'products', 'sponsors', 'speakers', 'button',
-      'divider', 'social_links', 'custom_embed',
-    ]));
+    expect(blockTypes).toEqual(
+      new Set([
+        'event_header',
+        'hero',
+        'event_details',
+        'tickets',
+        'schedule',
+        'venue_map',
+        'faq',
+        'resale_tickets',
+        'brand_footer',
+        'rich_text',
+        'products',
+        'sponsors',
+        'speakers',
+        'button',
+        'divider',
+        'social_links',
+        'custom_embed',
+      ]),
+    );
   });
 
   it('every block has a non-empty id', () => {
@@ -184,8 +220,22 @@ describe('Phase 0: round-trip stability', () => {
   it('normalize rejects non-canonical objects', () => {
     expect(normalizeEventPageDocument(null)).toBeUndefined();
     expect(normalizeEventPageDocument({})).toBeUndefined();
-    expect(normalizeEventPageDocument({ schemaVersion: 2, editor: { provider: '@tiptap/core', document: {} }, settings: { locale: 'en', ticketCtaLabel: 'x', discovery: { summary: '', tags: [] } }, blocks: [] })).toBeUndefined();
-    expect(normalizeEventPageDocument({ schemaVersion: 1, editor: { provider: 'other', document: {} }, settings: { locale: 'en', ticketCtaLabel: 'x', discovery: { summary: '', tags: [] } }, blocks: [] })).toBeUndefined();
+    expect(
+      normalizeEventPageDocument({
+        schemaVersion: 2,
+        editor: { provider: '@tiptap/core', document: {} },
+        settings: { locale: 'en', ticketCtaLabel: 'x', discovery: { summary: '', tags: [] } },
+        blocks: [],
+      }),
+    ).toBeUndefined();
+    expect(
+      normalizeEventPageDocument({
+        schemaVersion: 1,
+        editor: { provider: 'other', document: {} },
+        settings: { locale: 'en', ticketCtaLabel: 'x', discovery: { summary: '', tags: [] } },
+        blocks: [],
+      }),
+    ).toBeUndefined();
   });
 
   it('validateEventPageDocument passes for the default document', () => {
@@ -310,7 +360,10 @@ describe('Phase 1: unified editor.document (blocks <-> node tree)', () => {
   });
 
   it('editorDocumentToBlocks returns undefined for old-format documents', () => {
-    const oldDoc = { type: 'doc', content: [{ type: 'paragraph', content: [{ type: 'text', text: 'Summary' }] }] };
+    const oldDoc = {
+      type: 'doc',
+      content: [{ type: 'paragraph', content: [{ type: 'text', text: 'Summary' }] }],
+    };
     expect(editorDocumentToBlocks(oldDoc)).toBeUndefined();
   });
 
@@ -365,7 +418,10 @@ describe('Phase 1: normalize migrates old-format documents', () => {
       ...doc,
       editor: {
         provider: TIPTAP_EVENT_PAGE_PROVIDER,
-        document: { type: 'doc', content: [{ type: 'paragraph', content: [{ type: 'text', text: 'Old summary' }] }] },
+        document: {
+          type: 'doc',
+          content: [{ type: 'paragraph', content: [{ type: 'text', text: 'Old summary' }] }],
+        },
       },
     };
     expect(isUnifiedEditorDocument(oldDoc.editor.document)).toBe(false);
@@ -393,7 +449,10 @@ describe('Phase 1: normalize migrates old-format documents', () => {
       ...doc,
       editor: {
         provider: TIPTAP_EVENT_PAGE_PROVIDER,
-        document: { type: 'doc', content: [{ type: 'paragraph', content: [{ type: 'text', text: 'Old' }] }] },
+        document: {
+          type: 'doc',
+          content: [{ type: 'paragraph', content: [{ type: 'text', text: 'Old' }] }],
+        },
       },
       blocks: olderBlocks,
     };

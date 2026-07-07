@@ -38,9 +38,7 @@ export function validationIssueKey(issue: ContentValidationIssue): string {
   return `${issue.code}:${issue.field ?? ''}:${issue.message}:${issue.severity}`;
 }
 
-export function mergeValidationIssues(
-  issues: ContentValidationIssue[],
-): ContentValidationIssue[] {
+export function mergeValidationIssues(issues: ContentValidationIssue[]): ContentValidationIssue[] {
   const seen = new Set<string>();
   const uniqueIssues: ContentValidationIssue[] = [];
   const errors: ContentValidationIssue[] = [];

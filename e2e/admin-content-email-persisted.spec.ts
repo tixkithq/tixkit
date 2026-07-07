@@ -200,12 +200,8 @@ async function completeSeededFreeCheckout(input: {
   await input.page.goto(`${checkoutBaseUrl}/checkout?eventId=${input.eventId}`);
 
   await expect(input.page.getByRole('heading', { name: input.eventTitle })).toBeVisible();
-  await input.page
-    .getByRole('button', { name: `Increase ${input.ticketName} quantity` })
-    .click();
-  await input.page
-    .getByRole('button', { name: `Increase ${input.productName} quantity` })
-    .click();
+  await input.page.getByRole('button', { name: `Increase ${input.ticketName} quantity` }).click();
+  await input.page.getByRole('button', { name: `Increase ${input.productName} quantity` }).click();
   await input.page.getByLabel('Email').fill(input.buyerEmail);
   await input.page.getByLabel('First name').fill('Ada');
   await input.page.getByLabel('Last name').fill('Lovelace');
@@ -425,7 +421,7 @@ async function expectFriendlyVariableChip(page: Page): Promise<void> {
     .poll(() =>
       page
         .locator('.tixkit-email-variable-chip[data-variable-key="recipient.name"]')
-      .evaluate((element) => window.getComputedStyle(element).color),
+        .evaluate((element) => window.getComputedStyle(element).color),
     )
     .toBe('rgb(185, 28, 28)');
 
@@ -445,7 +441,9 @@ async function expectFriendlyVariableChip(page: Page): Promise<void> {
   expect(variableMenuSnapshot.fontSize).toBe('14px');
   expect(variableMenuSnapshot.position).toBe('fixed');
   await expect(variableMenu.getByLabel('Variable replacement')).toBeVisible();
-  await expect(variableMenu.getByRole('option', { name: 'Change variable to Event name' })).toBeVisible();
+  await expect(
+    variableMenu.getByRole('option', { name: 'Change variable to Event name' }),
+  ).toBeVisible();
   await expect(variableMenu.getByRole('button', { name: 'Close variable menu' })).toHaveCount(0);
   await variableOptionsButton.click();
   await expect(page.getByLabel('Edit variable')).toHaveCount(0);
@@ -491,7 +489,10 @@ async function expectFriendlyVariableChip(page: Page): Promise<void> {
         const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
         while (walker.nextNode()) {
           const node = walker.currentNode;
-          if (node.textContent?.includes('tickets') && !node.parentElement?.closest('.tixkit-email-variable-chip')) {
+          if (
+            node.textContent?.includes('tickets') &&
+            !node.parentElement?.closest('.tixkit-email-variable-chip')
+          ) {
             return window.getComputedStyle(node.parentElement!).fontSize;
           }
         }
@@ -520,7 +521,10 @@ async function expectFriendlyVariableChip(page: Page): Promise<void> {
         const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
         while (walker.nextNode()) {
           const node = walker.currentNode;
-          if (node.textContent?.includes('tickets') && !node.parentElement?.closest('.tixkit-email-variable-chip')) {
+          if (
+            node.textContent?.includes('tickets') &&
+            !node.parentElement?.closest('.tixkit-email-variable-chip')
+          ) {
             return window.getComputedStyle(node.parentElement!).color;
           }
         }
@@ -566,7 +570,7 @@ async function expectFriendlyVariableChip(page: Page): Promise<void> {
     .poll(() =>
       page
         .locator('.tixkit-email-variable-chip[data-variable-key="recipient.name"]')
-      .evaluate((element) => window.getComputedStyle(element).fontSize),
+        .evaluate((element) => window.getComputedStyle(element).fontSize),
     )
     .toBe('18px');
   await expect
@@ -595,7 +599,7 @@ async function expectFriendlyVariableChip(page: Page): Promise<void> {
     .poll(() =>
       page
         .locator('.tixkit-email-variable-chip[data-variable-key="ticket.type"]')
-      .evaluate((element) => window.getComputedStyle(element).fontSize),
+        .evaluate((element) => window.getComputedStyle(element).fontSize),
     )
     .toBe('18px');
   await expect
@@ -619,7 +623,6 @@ async function expectFriendlyVariableChip(page: Page): Promise<void> {
   await expect(replacementMenu).toBeVisible();
   await replacementMenu.getByRole('option', { name: 'Change variable to Attendee name' }).click();
   await expect(page.getByLabel('Edit variable')).toHaveCount(0);
-
 }
 
 test.describe('persisted admin email content editor', () => {
@@ -720,18 +723,18 @@ test.describe('persisted admin email content editor', () => {
     expect(
       persisted.versions.some(
         (version) =>
-              version.status === 'published' &&
-              version.contentJson.schemaVersion === 1 &&
-              version.contentJson.editor?.provider === '@react-email/editor' &&
-              /text-align:\s*center/.test(version.contentJson.editor.contentHtml ?? '') &&
-              /color:\s*#0f766e/.test(version.contentJson.editor.contentHtml ?? '') &&
-              /font-family:\s*Inter,\s*Arial,\s*sans-serif/.test(
-                version.contentJson.editor.contentHtml ?? '',
-              ) &&
-              /font-size:\s*18px/.test(version.contentJson.editor.contentHtml ?? '') &&
-              /line-height:\s*140%/.test(version.contentJson.editor.contentHtml ?? '') &&
-              version.contentJson.settings?.subject === subject &&
-              version.contentJson.blocks?.some(
+          version.status === 'published' &&
+          version.contentJson.schemaVersion === 1 &&
+          version.contentJson.editor?.provider === '@react-email/editor' &&
+          /text-align:\s*center/.test(version.contentJson.editor.contentHtml ?? '') &&
+          /color:\s*#0f766e/.test(version.contentJson.editor.contentHtml ?? '') &&
+          /font-family:\s*Inter,\s*Arial,\s*sans-serif/.test(
+            version.contentJson.editor.contentHtml ?? '',
+          ) &&
+          /font-size:\s*18px/.test(version.contentJson.editor.contentHtml ?? '') &&
+          /line-height:\s*140%/.test(version.contentJson.editor.contentHtml ?? '') &&
+          version.contentJson.settings?.subject === subject &&
+          version.contentJson.blocks?.some(
             (block) =>
               block.type === 'event_hero' &&
               typeof block.body === 'string' &&
@@ -812,9 +815,7 @@ test.describe('persisted admin email content editor', () => {
       'data-variable-key',
       'recipient.name',
     );
-    await expect
-      .poll(() => reloadedBody.innerText())
-      .toContain('Ada Lovelace');
+    await expect.poll(() => reloadedBody.innerText()).toContain('Ada Lovelace');
     expect((await reloadedBody.innerText()).replace(/\s+/g, ' ').trim()).not.toContain(
       '{{recipient.name}}',
     );
@@ -1094,8 +1095,9 @@ test.describe('persisted admin email content editor', () => {
     // The bubble color input should reflect the heading's theme color.
     const headingBubbleColor = await packageTooltip.getByLabel('Selection color').inputValue();
     // Convert computed rgb(r, g, b) to #rrggbb for comparison.
-    const headingHex = headingComputedColor!.replace(/rgba?\(\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)[^)]*\)/, (_, r, g, b) =>
-      `#${[r, g, b].map((v) => Number(v).toString(16).padStart(2, '0')).join('')}`,
+    const headingHex = headingComputedColor!.replace(
+      /rgba?\(\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)[^)]*\)/,
+      (_, r, g, b) => `#${[r, g, b].map((v) => Number(v).toString(16).padStart(2, '0')).join('')}`,
     );
     expect(headingBubbleColor.toLowerCase()).toBe(headingHex.toLowerCase());
 
@@ -1116,7 +1118,10 @@ test.describe('persisted admin email content editor', () => {
       const walker = document.createTreeWalker(p, NodeFilter.SHOW_TEXT);
       while (walker.nextNode()) {
         const node = walker.currentNode;
-        if (node.textContent?.trim() && !node.parentElement?.closest('.tixkit-email-variable-chip')) {
+        if (
+          node.textContent?.trim() &&
+          !node.parentElement?.closest('.tixkit-email-variable-chip')
+        ) {
           const range = document.createRange();
           range.selectNodeContents(node);
           const rect = range.getBoundingClientRect();
@@ -1129,8 +1134,9 @@ test.describe('persisted admin email content editor', () => {
     await page.mouse.click(paragraphPoint.x, paragraphPoint.y);
     await expect(packageTooltip).toBeVisible();
     const paragraphBubbleColor = await packageTooltip.getByLabel('Selection color').inputValue();
-    const paragraphHex = paragraphComputedColor!.replace(/rgba?\(\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)[^)]*\)/, (_, r, g, b) =>
-      `#${[r, g, b].map((v) => Number(v).toString(16).padStart(2, '0')).join('')}`,
+    const paragraphHex = paragraphComputedColor!.replace(
+      /rgba?\(\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)[^)]*\)/,
+      (_, r, g, b) => `#${[r, g, b].map((v) => Number(v).toString(16).padStart(2, '0')).join('')}`,
     );
     expect(paragraphBubbleColor.toLowerCase()).toBe(paragraphHex.toLowerCase());
 
@@ -1345,9 +1351,7 @@ test.describe('persisted admin email content editor', () => {
       await paddingInput.click();
       await page.waitForTimeout(500);
       await expect(inspectorHost.getByRole('button', { name: 'Text' })).toBeVisible();
-      const breadcrumbText = await inspectorHost
-        .locator('nav')
-        .textContent();
+      const breadcrumbText = await inspectorHost.locator('nav').textContent();
       expect(breadcrumbText?.trim().length).toBeGreaterThan(0);
     }
     // --- Inspector shows sections for node selections (no duplication) ---

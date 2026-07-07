@@ -124,9 +124,10 @@ describe('template lifecycle registry', () => {
     expect(bulkEntries.length).toBeGreaterThan(0);
 
     for (const entry of bulkEntries) {
-      expect(entry.compliance.requiresUnsubscribe, `${entry.key} bulk must require unsubscribe`).toBe(
-        true,
-      );
+      expect(
+        entry.compliance.requiresUnsubscribe,
+        `${entry.key} bulk must require unsubscribe`,
+      ).toBe(true);
       expect(entry.compliance.requiresConsent, `${entry.key} bulk must require consent`).toBe(true);
       expect(entry.compliance.bypassesMarketingOptOut).toBe(false);
     }
@@ -260,11 +261,10 @@ describe('template lifecycle registry', () => {
       'payout-paid',
       'payout-failed',
     ]);
-    // eslint-disable-next-line unicorn/no-array-sort -- ES2023 toSorted is not available in this package's TS lib target.
-    expect(listTemplateLifecyclesByFamily('integration').map((e) => e.key).sort()).toEqual([
-      'integration-disconnected',
-      'webhook-failed',
-    ]);
+    const integrationKeys = listTemplateLifecyclesByFamily('integration').map((e) => e.key);
+    // eslint-disable-next-line unicorn/no-array-sort -- Sorting a fresh key array keeps this assertion stable without requiring ES2023 toSorted.
+    integrationKeys.sort();
+    expect(integrationKeys).toEqual(['integration-disconnected', 'webhook-failed']);
     expect(listTemplateLifecyclesByFamily('reporting').map((e) => e.key)).toEqual([
       'daily-sales-digest',
     ]);

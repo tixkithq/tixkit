@@ -35,12 +35,12 @@ function makeDocument(): EventPageDocument {
   });
 }
 
-function renderEdit(
-  doc: EventPageDocument,
-  editing: Partial<SurfaceEditing> = {},
-) {
+function renderEdit(doc: EventPageDocument, editing: Partial<SurfaceEditing> = {}) {
   const onChangeBlock = vi.fn();
-  const resolved = resolveEventPageDocument(doc, context, { allowUnsafeEmbeds: true, mode: 'edit' });
+  const resolved = resolveEventPageDocument(doc, context, {
+    allowUnsafeEmbeds: true,
+    mode: 'edit',
+  });
   const editingValue: SurfaceEditing = {
     document: doc,
     disabled: false,
@@ -70,9 +70,9 @@ describe('EventPageSurface edit-mode behavior', () => {
   it('excludes hidden ticket types in edit mode (renders resolved tickets read-only)', () => {
     const doc = makeDocument();
     const { container } = renderEdit(doc);
-    const names = Array.from(
-      container.querySelectorAll('.tk-ep-tickets ul li strong'),
-    ).map((el) => el.textContent);
+    const names = Array.from(container.querySelectorAll('.tk-ep-tickets ul li strong')).map(
+      (el) => el.textContent,
+    );
     expect(names).toContain('General Admission');
     expect(names).not.toContain('Hidden comp');
   });
@@ -102,14 +102,25 @@ describe('EventPageSurface edit-mode behavior', () => {
     const richBlock: Extract<EventPageBlock, { type: 'rich_text' }> = {
       id: 'rich-1',
       type: 'rich_text',
-      content: { type: 'doc', content: [{ type: 'paragraph', content: [{ type: 'text', text: 'Copy' }] }] },
+      content: {
+        type: 'doc',
+        content: [{ type: 'paragraph', content: [{ type: 'text', text: 'Copy' }] }],
+      },
     };
     doc.blocks.push(richBlock);
     const slot = vi.fn(({ block, onChange }) => (
       <button
         type="button"
         data-testid="rich-slot"
-        onClick={() => onChange({ ...block, content: { type: 'doc', content: [{ type: 'paragraph', content: [{ type: 'text', text: 'Updated' }] }] } })}
+        onClick={() =>
+          onChange({
+            ...block,
+            content: {
+              type: 'doc',
+              content: [{ type: 'paragraph', content: [{ type: 'text', text: 'Updated' }] }],
+            },
+          })
+        }
       >
         WYSIWYG
       </button>
@@ -120,7 +131,10 @@ describe('EventPageSurface edit-mode behavior', () => {
     expect(input.block).toEqual(richBlock);
     const button = container.querySelector('[data-testid="rich-slot"]') as HTMLButtonElement;
     fireEvent.click(button);
-    expect(onChangeBlock).toHaveBeenCalledWith('rich-1', expect.objectContaining({ type: 'rich_text' }));
+    expect(onChangeBlock).toHaveBeenCalledWith(
+      'rich-1',
+      expect.objectContaining({ type: 'rich_text' }),
+    );
     const [, updated] = onChangeBlock.mock.calls[0];
     expect((updated as EventPageBlock).type === 'rich_text').toBe(true);
   });

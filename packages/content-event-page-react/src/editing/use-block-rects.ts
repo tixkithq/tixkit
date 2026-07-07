@@ -38,9 +38,7 @@ export function useBlockRects(
   canvasRef: React.RefObject<HTMLElement | null>,
   blockIds: readonly string[],
 ): ReadonlyMap<string, OverlayPlacement> {
-  const [rects, setRects] = React.useState<ReadonlyMap<string, OverlayPlacement>>(
-    new Map(),
-  );
+  const [rects, setRects] = React.useState<ReadonlyMap<string, OverlayPlacement>>(new Map());
 
   const blockIdsKey = blockIds.join('\n');
 
@@ -56,7 +54,10 @@ export function useBlockRects(
       for (const id of blockIds) {
         const el = canvasEl.querySelector(`[data-block-id="${cssEscape(id)}"]`);
         if (!el) continue;
-        next.set(id, computeOverlayPlacement(el.getBoundingClientRect(), canvasRect, { top: 0, left: 0 }));
+        next.set(
+          id,
+          computeOverlayPlacement(el.getBoundingClientRect(), canvasRect, { top: 0, left: 0 }),
+        );
       }
       setRects(next);
     };
@@ -70,16 +71,12 @@ export function useBlockRects(
     };
 
     const resizeObserver =
-      typeof ResizeObserver !== 'undefined'
-        ? new ResizeObserver(scheduleMeasure)
-        : null;
+      typeof ResizeObserver !== 'undefined' ? new ResizeObserver(scheduleMeasure) : null;
     resizeObserver?.observe(canvas);
     canvas.querySelectorAll('[data-block-id]').forEach((el) => resizeObserver?.observe(el));
 
     const mutationObserver =
-      typeof MutationObserver !== 'undefined'
-        ? new MutationObserver(scheduleMeasure)
-        : null;
+      typeof MutationObserver !== 'undefined' ? new MutationObserver(scheduleMeasure) : null;
     mutationObserver?.observe(canvas, { childList: true, subtree: true, attributes: true });
 
     window.addEventListener('resize', scheduleMeasure);

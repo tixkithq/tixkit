@@ -2,9 +2,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { render, fireEvent, act } from '@testing-library/react';
 import * as React from 'react';
 import { SurfaceText, SurfaceEditingContext, type SurfaceEditing } from '../index.js';
-import {
-  createDefaultEventPageDocument,
-} from '@tixkit/content-event-page';
+import { createDefaultEventPageDocument } from '@tixkit/content-event-page';
 
 function editingContext(overrides: Partial<SurfaceEditing> = {}): SurfaceEditing {
   const document = createDefaultEventPageDocument({
@@ -46,7 +44,14 @@ describe('SurfaceText (public mode)', () => {
 
   it('renders display when provided in public mode', () => {
     const { container } = render(
-      <SurfaceText as="h1" blockId="hero" field="headline" value="raw" display="resolved" onCommit={vi.fn()} />,
+      <SurfaceText
+        as="h1"
+        blockId="hero"
+        field="headline"
+        value="raw"
+        display="resolved"
+        onCommit={vi.fn()}
+      />,
     );
     expect(container.querySelector('h1')?.textContent).toBe('resolved');
   });
@@ -164,7 +169,13 @@ describe('SurfaceText (edit mode)', () => {
     expect(h1.textContent).toBe('Hello');
     rerender(
       <SurfaceEditingContext.Provider value={ctxValue}>
-        <SurfaceText as="h1" blockId="hero" field="headline" value="Externally updated" onCommit={vi.fn()} />
+        <SurfaceText
+          as="h1"
+          blockId="hero"
+          field="headline"
+          value="Externally updated"
+          onCommit={vi.fn()}
+        />
       </SurfaceEditingContext.Provider>,
     );
     expect(container.querySelector('h1')!.textContent).toBe('Externally updated');
@@ -189,7 +200,13 @@ describe('SurfaceText (edit mode)', () => {
     const committedValue = onCommit.mock.calls[0][0];
     rerender(
       <SurfaceEditingContext.Provider value={ctxValue}>
-        <SurfaceText as="h1" blockId="hero" field="headline" value={committedValue} onCommit={onCommit} />
+        <SurfaceText
+          as="h1"
+          blockId="hero"
+          field="headline"
+          value={committedValue}
+          onCommit={onCommit}
+        />
       </SurfaceEditingContext.Provider>,
     );
     // The effect must skip because the element is focused; textContent stays.

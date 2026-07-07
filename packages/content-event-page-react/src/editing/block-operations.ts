@@ -1,7 +1,4 @@
-import type {
-  EventPageBlock,
-  EventPageDocument,
-} from '@tixkit/content-event-page';
+import type { EventPageBlock, EventPageDocument } from '@tixkit/content-event-page';
 
 export const BLOCK_LABELS: Record<EventPageBlock['type'], string> = {
   hero: 'Hero',

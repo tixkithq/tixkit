@@ -304,9 +304,10 @@ test.describe('persisted admin event-page content editor', () => {
     await expect(page.getByTestId('preview-drawer')).toContainText(styledRichText);
     // The admin preview renders the shared event-page surface (parity with checkout).
     await expect(page.getByTestId('preview-surface').locator('.tixkit-event-page')).toBeVisible();
-    await expect(
-      page.getByTestId('preview-surface').locator('.tk-ep-hero'),
-    ).toHaveAttribute('data-block-id', 'hero');
+    await expect(page.getByTestId('preview-surface').locator('.tk-ep-hero')).toHaveAttribute(
+      'data-block-id',
+      'hero',
+    );
     const previewStyledText = page
       .getByTestId('preview-surface')
       .locator('span[data-event-page-inline-style="true"]')
@@ -385,9 +386,7 @@ test.describe('persisted admin event-page content editor', () => {
         (block) => block.type === 'hero' && block.id === 'hero',
       ),
     ).toBe(true);
-    expect(
-      publicPage.page.renderModel.blocks.some((block) => block.type === 'tickets'),
-    ).toBe(true);
+    expect(publicPage.page.renderModel.blocks.some((block) => block.type === 'tickets')).toBe(true);
     expect(
       publicPage.page.renderModel.blocks.some(
         (block) =>
@@ -411,10 +410,13 @@ test.describe('persisted admin event-page content editor', () => {
         .filter({ hasText: styledRichText }),
     ).toHaveCSS('font-family', /Georgia/);
     // The checkout public page renders the shared event-page surface from renderModel.
-    await expect(page.locator('[data-testid="published-event-page"] .tixkit-event-page')).toBeVisible();
     await expect(
-      page.locator('[data-testid="published-event-page"] .tk-ep-hero'),
-    ).toHaveAttribute('data-block-id', 'hero');
+      page.locator('[data-testid="published-event-page"] .tixkit-event-page'),
+    ).toBeVisible();
+    await expect(page.locator('[data-testid="published-event-page"] .tk-ep-hero')).toHaveAttribute(
+      'data-block-id',
+      'hero',
+    );
     await expect(
       page.locator('[data-testid="published-event-page"] .tk-ep-tickets'),
     ).toHaveAttribute('data-block-id', 'tickets');

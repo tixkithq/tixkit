@@ -558,10 +558,9 @@ export const publicApi = {
       contentPage?: PublicContentPage | null;
       availability?: AvailabilityItem[];
       resaleListings?: CheckoutResaleListingsResponse;
-    }>(
-      `/public/events/${encodeURIComponent(eventId)}/page-bootstrap${query ? `?${query}` : ''}`,
-      { signal },
-    );
+    }>(`/public/events/${encodeURIComponent(eventId)}/page-bootstrap${query ? `?${query}` : ''}`, {
+      signal,
+    });
     return {
       event: response.event,
       contentPage: response.contentPage ?? null,

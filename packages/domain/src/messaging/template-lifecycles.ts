@@ -164,9 +164,7 @@ export type TemplateLifecycle = {
  * unsubscribe footer. Staff/system emails are relationship/account-scoped and do
  * not require marketing consent or unsubscribe.
  */
-export function complianceForCategory(
-  category: TemplateCategory,
-): TemplateLifecycleCompliance {
+export function complianceForCategory(category: TemplateCategory): TemplateLifecycleCompliance {
   if (category === 'bulk') {
     return {
       requiresUnsubscribe: true,
@@ -445,7 +443,12 @@ export const TEMPLATE_LIFECYCLES: readonly TemplateLifecycle[] = [
     tier: 'P1',
     trigger: 'A waitlist hold is about to expire',
     defaultAudience: 'buyer',
-    requiredVariables: ['recipient.name', 'event.title', 'waitlist.inviteUrl', 'waitlist.expiresAt'],
+    requiredVariables: [
+      'recipient.name',
+      'event.title',
+      'waitlist.inviteUrl',
+      'waitlist.expiresAt',
+    ],
     optionalVariables: ['event.checkoutUrl'],
     variableGaps: [],
     defaultSubject: 'Your waitlist offer for {{event.title}} is expiring',

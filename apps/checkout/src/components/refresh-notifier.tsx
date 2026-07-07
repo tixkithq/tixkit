@@ -49,10 +49,7 @@ export function RefreshNotifier({ eventId }: Props) {
         if (cancelled || notified.current) return;
         if (revision !== initialRevision.current) {
           notified.current = true;
-          showToast(
-            'Event details have been updated',
-            'Refresh to see the latest changes.',
-          );
+          showToast('Event details have been updated', 'Refresh to see the latest changes.');
         }
       } catch {
         // Network errors are expected during offline periods; skip silently.

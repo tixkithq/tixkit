@@ -67,7 +67,23 @@ vi.mock('sonner', () => ({
 
 vi.mock('@/context/permission-provider', () => ({
   usePermissions: () => ({
-    permissions: ['events.read', 'events.write', 'tickets.write', 'orders.read', 'orders.write', 'refunds.write', 'attendees.read', 'attendees.write', 'checkins.read', 'checkins.write', 'messages.write', 'reports.read', 'settings.write', 'developers.write', 'billing.write'],
+    permissions: [
+      'events.read',
+      'events.write',
+      'tickets.write',
+      'orders.read',
+      'orders.write',
+      'refunds.write',
+      'attendees.read',
+      'attendees.write',
+      'checkins.read',
+      'checkins.write',
+      'messages.write',
+      'reports.read',
+      'settings.write',
+      'developers.write',
+      'billing.write',
+    ],
     can: () => true,
     loading: false,
     error: null,
@@ -284,9 +300,7 @@ describe('EventPagePersistedEditorView', () => {
     // Preview renders the shared event-page surface (parity with checkout public page).
     const previewSurface = screen.getByTestId('preview-surface');
     expect(previewSurface.querySelector('.tixkit-event-page')).not.toBeNull();
-    expect(previewSurface.querySelector('.tk-ep-hero')?.getAttribute('data-block-id')).toBe(
-      'hero',
-    );
+    expect(previewSurface.querySelector('.tk-ep-hero')?.getAttribute('data-block-id')).toBe('hero');
     // Raw HTML/text debug output is secondary, not the primary preview UX.
     expect(screen.queryByTestId('preview-html')).toBeNull();
     fireEvent.click(screen.getByRole('button', { name: 'HTML' }));
@@ -522,9 +536,7 @@ describe('EventPagePersistedEditorView', () => {
     expect(screen.getByRole('button', { name: 'Publish' })).toBeDisabled();
     openEventPageMoreActions();
     expect(screen.getByRole('menuitem', { name: 'Save draft' })).toHaveAttribute('data-disabled');
-    expect(screen.getByRole('menuitem', { name: 'Open preview' })).toHaveAttribute(
-      'data-disabled',
-    );
+    expect(screen.getByRole('menuitem', { name: 'Open preview' })).toHaveAttribute('data-disabled');
     expect(screen.getByRole('menuitem', { name: 'View public page' })).toHaveAttribute(
       'data-disabled',
     );
