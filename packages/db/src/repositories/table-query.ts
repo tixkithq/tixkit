@@ -481,7 +481,8 @@ function validateCursorSort(
     if (
       !cursorEntry ||
       cursorEntry.f !== requestedEntry.field ||
-      cursorEntry.d !== requestedEntry.direction
+      cursorEntry.d !== requestedEntry.direction ||
+      (typeof cursorEntry.v !== 'string' && typeof cursorEntry.v !== 'number')
     ) {
       throw new CursorError('sort entries do not match requested sort');
     }
@@ -495,25 +496,37 @@ function applyKeysetPagination(
   schema: TableSchema,
   serverFieldMap: Record<string, string>,
 ): any {
-  // For the common case of single sort field + PK tie-breaker
-  const firstSort = sort[0];
-  if (!firstSort) return q;
-
-  const sortServerField = serverFieldMap[firstSort.field] ?? firstSort.field;
   const pkServer = serverFieldMap[schema.primaryKey] ?? schema.primaryKey;
-  const cursorSortValue = payload.s[0]?.v;
   const cursorId = payload.id;
 
-  if (cursorSortValue === undefined || !cursorId) return q;
+  if (!cursorId) {
+    throw new CursorError('missing cursor id');
+  }
 
-  const sortOp = firstSort.direction === 'desc' ? '<' : '>';
-  const tieOp = firstSort.direction === 'desc' ? '<' : '>';
+  const terms = sort.map((sortEntry, index) => ({
+    serverField: serverFieldMap[sortEntry.field] ?? sortEntry.field,
+    direction: sortEntry.direction,
+    value: payload.s[index]?.v,
+  }));
+  terms.push({
+    serverField: pkServer,
+    direction: sort[sort.length - 1]?.direction ?? 'desc',
+    value: cursorId,
+  });
 
   return q.where((eb: any) =>
-    eb.or([
-      eb(sortServerField, sortOp, cursorSortValue),
-      eb.and([eb(sortServerField, '=', cursorSortValue), eb(pkServer, tieOp, cursorId)]),
-    ]),
+    eb.or(
+      terms.map((term, index) => {
+        const op = term.direction === 'desc' ? '<' : '>';
+        const comparison = eb(term.serverField, op, term.value);
+        if (index === 0) return comparison;
+
+        const priorEqualities = terms
+          .slice(0, index)
+          .map((priorTerm) => eb(priorTerm.serverField, '=', priorTerm.value));
+        return eb.and([...priorEqualities, comparison]);
+      }),
+    ),
   );
 }
 

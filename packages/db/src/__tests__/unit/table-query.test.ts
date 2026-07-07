@@ -14,6 +14,16 @@ const testSchema = defineTable('test', {
   ],
 });
 
+const multiSortSchema = defineTable('test-multi-sort', {
+  primaryKey: 'id',
+  defaultSort: { field: 'createdAt', direction: 'desc' },
+  columns: [
+    col.id('id').serverField('id'),
+    col.money('totalCents').serverField('total_cents').sortable(),
+    col.dateTime('createdAt').serverField('created_at').sortable(),
+  ],
+});
+
 describe('assertServerField', () => {
   it('returns the server field for a valid schema field', () => {
     expect(assertServerField(testSchema, 'buyerEmail')).toBe('buyer_email');
@@ -234,6 +244,64 @@ describe('executeTableQuery cursor validation', () => {
       ['id', 'asc'],
     ]);
     expect(JSON.stringify(queries[0]?.whereExpressions)).toContain('">"');
+  });
+
+  it('uses every sort field before the primary-key tie-breaker in cursor predicates', async () => {
+    const { db, queries } = createRecordingDb();
+    const cursor = encodeCursor(
+      [
+        { field: 'createdAt', direction: 'asc', value: '2026-01-03T00:00:00.000Z' },
+        { field: 'totalCents', direction: 'desc', value: 2500 },
+      ],
+      'ord_3',
+    );
+
+    await executeTableQuery(
+      db as never,
+      {
+        tableName: 'orders',
+        schema: multiSortSchema,
+        tenantId: 'tnt_1',
+        serialize: (row) => row,
+      },
+      {
+        cursor,
+        sort: [
+          { field: 'createdAt', direction: 'asc' },
+          { field: 'totalCents', direction: 'desc' },
+        ],
+        limit: 2,
+      },
+    );
+
+    expect(queries[0]?.orderBy).toEqual([
+      ['created_at', 'asc'],
+      ['total_cents', 'desc'],
+      ['id', 'desc'],
+    ]);
+    expect(queries[0]?.whereExpressions).toContainEqual(
+      expect.objectContaining({
+        type: 'or',
+        items: [
+          { field: 'created_at', op: '>', value: '2026-01-03T00:00:00.000Z' },
+          {
+            type: 'and',
+            items: [
+              { field: 'created_at', op: '=', value: '2026-01-03T00:00:00.000Z' },
+              { field: 'total_cents', op: '<', value: 2500 },
+            ],
+          },
+          {
+            type: 'and',
+            items: [
+              { field: 'created_at', op: '=', value: '2026-01-03T00:00:00.000Z' },
+              { field: 'total_cents', op: '=', value: 2500 },
+              { field: 'id', op: '<', value: 'ord_3' },
+            ],
+          },
+        ],
+      }),
+    );
   });
 
   it('uses a schema projection for data rows instead of selecting full records', async () => {
