@@ -13,7 +13,7 @@ import { usePermissions } from '@/context/permission-provider';
 import { useBootstrap } from '@/context/bootstrap-provider';
 import { getEventColumns } from './columns';
 import { CreateEventDrawer } from './create-event-drawer';
-import { formatDateTime } from '@/lib/format';
+import { formatCurrency } from '@/lib/format';
 
 export function EventsTable() {
   const [drawerOpen, setDrawerOpen] = React.useState(false);
@@ -136,7 +136,7 @@ function EventRowSheet({ event }: { event: AdminEventListItem }) {
         </div>
         <div>
           <dt className="text-muted-foreground">Gross Sales</dt>
-          <dd className="mt-1">{formatDateTime(event.startsAt)}</dd>
+          <dd className="mt-1">{formatCurrency(event.grossSalesCents, event.currency)}</dd>
         </div>
       </dl>
     </div>

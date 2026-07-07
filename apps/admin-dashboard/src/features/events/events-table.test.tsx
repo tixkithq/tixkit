@@ -8,6 +8,10 @@ const permissionsMock = vi.hoisted(() => ({
   can: vi.fn(),
 }));
 
+const eventRows = vi.hoisted(() => ({
+  current: [] as Array<Record<string, unknown>>,
+}));
+
 vi.mock('@/context/permission-provider', () => ({
   usePermissions: () => permissionsMock,
 }));
@@ -31,7 +35,7 @@ vi.mock('@/hooks/use-admin-table-data', async (importOriginal) => {
   return {
     ...actual,
     useAdminTableData: () => ({
-      data: undefined,
+      data: eventRows.current,
       items: [],
       loading: false,
       error: undefined,
@@ -54,15 +58,20 @@ vi.mock('@/components/data-table', async (importOriginal) => {
       hasActiveFilters: false,
     }),
     DataTable: ({
+      data,
+      renderRowSheet,
       toolbarActions,
       emptyState,
     }: {
+      data?: Array<Record<string, unknown>>;
+      renderRowSheet?: (row?: Record<string, unknown>) => React.ReactNode;
       toolbarActions?: React.ReactNode;
       emptyState?: React.ReactNode;
     }) => (
       <section>
         <div data-testid="toolbar-actions">{toolbarActions}</div>
         <div data-testid="empty-state">{emptyState}</div>
+        <div data-testid="row-sheet">{renderRowSheet?.(data?.[0])}</div>
       </section>
     ),
   };
@@ -74,6 +83,7 @@ vi.mock('./create-event-drawer', () => ({
 
 beforeEach(() => {
   permissionsMock.can.mockImplementation((permission?: string) => permission === 'events.write');
+  eventRows.current = [];
 });
 
 describe('Events table columns', () => {
@@ -139,5 +149,29 @@ describe('Events table columns', () => {
 
     expect(screen.getAllByRole('button', { name: 'Create event' })).toHaveLength(2);
     expect(screen.getByTestId('create-event-drawer')).toBeInTheDocument();
+  });
+
+  it('renders row sheet gross sales as currency', () => {
+    eventRows.current = [
+      {
+        id: 'evt_1',
+        title: 'Rooftop Showcase',
+        status: 'published',
+        startsAt: '2026-08-15T20:30:00.000Z',
+        venueName: 'Skyline Hall',
+        city: 'Chicago',
+        ticketsSold: 42,
+        grossSalesCents: 123456,
+        currency: 'USD',
+      },
+    ];
+
+    render(<EventsTable />);
+
+    const rowSheet = screen.getByTestId('row-sheet');
+    expect(rowSheet).toHaveTextContent('Gross Sales');
+    const grossSalesLabel = screen.getByText('Gross Sales');
+    expect(grossSalesLabel.nextElementSibling).toHaveTextContent('$1,234.56');
+    expect(grossSalesLabel.nextElementSibling).not.toHaveTextContent('Aug 15, 2026');
   });
 });
