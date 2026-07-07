@@ -54,6 +54,12 @@ export const TEMPLATE_KEYS = [
 
 export type TemplateKey = (typeof TEMPLATE_KEYS)[number];
 
+const TEMPLATE_KEY_SET: ReadonlySet<string> = new Set(TEMPLATE_KEYS);
+
+export function isTemplateKey(value: string): value is TemplateKey {
+  return TEMPLATE_KEY_SET.has(value);
+}
+
 export const P0_TEMPLATE_KEYS: readonly TemplateKey[] = [
   'order-confirmed',
   'tickets-issued',

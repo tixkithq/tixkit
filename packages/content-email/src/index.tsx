@@ -360,12 +360,24 @@ export function createDefaultEmailTemplateForKey(key: TemplateKey): EmailTemplat
   if (!lifecycle) {
     throw new Error(`No lifecycle metadata registered for template key: ${key}`);
   }
+  const editor =
+    key === 'waitlist-invite'
+      ? {
+          provider: REACT_EMAIL_EDITOR_PACKAGE,
+          contentHtml: [
+            '<h1>Tickets are available for {{event.title}}</h1>',
+            '<p>Hi {{recipient.name}}, claim your waitlist offer at {{waitlist.inviteUrl}}.</p>',
+          ].join(''),
+          contentText:
+            'Tickets are available for {{event.title}}\nHi {{recipient.name}}, claim your waitlist offer at {{waitlist.inviteUrl}}.',
+        }
+      : {
+          provider: REACT_EMAIL_EDITOR_PACKAGE,
+          contentHtml: '<h1>{{event.title}}</h1><p>Hi {{recipient.name}},</p>',
+        };
   return {
     schemaVersion: 1,
-    editor: {
-      provider: REACT_EMAIL_EDITOR_PACKAGE,
-      contentHtml: '<h1>{{event.title}}</h1><p>Hi {{recipient.name}},</p>',
-    },
+    editor,
     settings: {
       templateKey: key,
       subject: lifecycle.defaultSubject,
@@ -547,6 +559,26 @@ function defaultBlocksForKey(key: TemplateKey): EmailTemplateBlock[] {
           body: 'Hi {{recipient.name}}, you are invited to scan for this event.',
         },
         { type: 'calendar_button', label: 'Open scanner', url: '{{device.inviteUrl}}' },
+      ];
+    case 'waitlist-invite':
+      return [
+        {
+          type: 'event_hero',
+          headline: 'Tickets are available for {{event.title}}',
+          body: 'Hi {{recipient.name}}, your spot on the waitlist is ready.',
+          ctaLabel: 'Claim tickets',
+          ctaUrl: '{{waitlist.inviteUrl}}',
+        },
+        {
+          type: 'ticket_summary',
+          title: 'Offer details',
+          body: '{{ticket.type}}',
+        },
+        {
+          type: 'order_summary',
+          title: 'Claim before it expires',
+          rows: [{ label: 'Expires', value: '{{waitlist.expiresAt}}' }],
+        },
       ];
     default:
       // P1/P2 keys are not seeded yet; provide a minimal generic block so the
@@ -1467,6 +1499,11 @@ function sampleContext(): MergeTagContext {
       expiresAt: '2026-07-17 19:00',
     },
     dashboard: { url: 'https://admin.example.test/events/evt_demo_001' },
+    waitlist: {
+      position: '3',
+      inviteUrl: 'https://checkout.example.test/waitlist/claim/demo',
+      expiresAt: '2026-07-17 20:00',
+    },
   };
 }
 

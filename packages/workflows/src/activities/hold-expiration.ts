@@ -1,10 +1,12 @@
 import { createHash, randomBytes } from 'node:crypto';
 import { createDb, EmailJobRepository, type Database } from '@tixkit/db';
+import type { TemplateKey } from '@tixkit/domain';
 import type { WorkflowActivityResult } from '../shared/types.js';
 import { okResult, errResult } from '../shared/types.js';
 
 const CHECKOUT_BASE_URL =
   process.env.CHECKOUT_URL ?? process.env.NEXT_PUBLIC_CHECKOUT_URL ?? 'https://checkout.tixkit.com';
+const WAITLIST_INVITE_TEMPLATE_KEY: TemplateKey = 'waitlist-invite';
 
 function hashWaitlistClaimToken(token: string): string {
   return createHash('sha256').update(token).digest('hex');
@@ -276,17 +278,27 @@ export async function processWaitlistOffersActivity(): Promise<
         .select(['version.id'])
         .where('template.tenant_id', '=', candidate.tenant_id)
         .where('template.brand_id', '=', candidate.brand_id)
-        .where('template.key', '=', 'waitlist-offer')
+        .where('template.key', '=', WAITLIST_INVITE_TEMPLATE_KEY)
         .where('version.is_default', '=', true)
         .executeTakeFirst();
-      if (!route || !templateVersion) continue;
+      if (!route || !templateVersion) {
+        console.warn('WAITLIST_OFFER_EMAIL_SKIPPED', {
+          tenantId: candidate.tenant_id,
+          brandId: candidate.brand_id,
+          waitlistEntryId: candidate.entry_id,
+          templateKey: WAITLIST_INVITE_TEMPLATE_KEY,
+          missingRoute: !route,
+          missingTemplateVersion: !templateVersion,
+        });
+        continue;
+      }
 
       // eslint-disable-next-line no-await-in-loop -- idempotency is checked per entry before queueing its notification job.
       const existingJob = await db
         .selectFrom('email_jobs')
         .select('id')
         .where('tenant_id', '=', candidate.tenant_id)
-        .where('idempotency_key', '=', `waitlist-offer:${candidate.entry_id}`)
+        .where('idempotency_key', '=', `${WAITLIST_INVITE_TEMPLATE_KEY}:${candidate.entry_id}`)
         .executeTakeFirst();
       if (existingJob) continue;
 
@@ -294,7 +306,7 @@ export async function processWaitlistOffersActivity(): Promise<
       await new EmailJobRepository(db).create({
         tenantId: candidate.tenant_id,
         brandId: candidate.brand_id,
-        templateKey: 'waitlist-offer',
+        templateKey: WAITLIST_INVITE_TEMPLATE_KEY,
         templateVersionId: templateVersion.id,
         toEmail: candidate.buyer_email,
         toName:
@@ -312,7 +324,7 @@ export async function processWaitlistOffersActivity(): Promise<
         },
         providerRouteId: route.id,
         priority: 'high',
-        idempotencyKey: `waitlist-offer:${candidate.entry_id}`,
+        idempotencyKey: `${WAITLIST_INVITE_TEMPLATE_KEY}:${candidate.entry_id}`,
       });
       queuedEmailCount += 1;
     }

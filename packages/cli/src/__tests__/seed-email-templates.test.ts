@@ -42,8 +42,10 @@ vi.mock('@tixkit/db', () => {
   };
 });
 
-const { seedEmailTemplateDefaults } = await import('../seed-email-templates.js');
-const { P0_TEMPLATE_KEYS } = await import('@tixkit/domain');
+const { seedEmailTemplateDefaults, SEED_EMAIL_TEMPLATE_KEYS } = await import(
+  '../seed-email-templates.js'
+);
+const { getTemplateLifecycle, validateMergeTags } = await import('@tixkit/domain');
 
 describe('seedEmailTemplateDefaults', () => {
   beforeEach(() => {
@@ -77,16 +79,16 @@ describe('seedEmailTemplateDefaults', () => {
     });
 
     expect(result.ok).toBe(true);
-    expect(result.seeded).toEqual([...P0_TEMPLATE_KEYS]);
-    expect(mockState.createdDocuments).toHaveLength(P0_TEMPLATE_KEYS.length);
-    expect(mockState.createdVersions).toHaveLength(P0_TEMPLATE_KEYS.length);
-    expect(mockState.publishedVersions).toHaveLength(P0_TEMPLATE_KEYS.length);
+    expect(result.seeded).toEqual([...SEED_EMAIL_TEMPLATE_KEYS]);
+    expect(mockState.createdDocuments).toHaveLength(SEED_EMAIL_TEMPLATE_KEYS.length);
+    expect(mockState.createdVersions).toHaveLength(SEED_EMAIL_TEMPLATE_KEYS.length);
+    expect(mockState.publishedVersions).toHaveLength(SEED_EMAIL_TEMPLATE_KEYS.length);
 
-    // Every P0 key got a unique email-channel document scoped to the brand.
+    // Every seeded key got a unique email-channel document scoped to the brand.
     const seededKeys = new Set(
       mockState.createdDocuments.map((doc) => doc.key as string),
     );
-    expect(seededKeys).toEqual(new Set(P0_TEMPLATE_KEYS));
+    expect(seededKeys).toEqual(new Set(SEED_EMAIL_TEMPLATE_KEYS));
     for (const doc of mockState.createdDocuments) {
       expect(doc.channel).toBe('email');
       expect(doc.tenantId).toBe('tnt_1');
@@ -111,8 +113,8 @@ describe('seedEmailTemplateDefaults', () => {
       expect(version.contentJson).toBeTypeOf('object');
     }
 
-    // Every P0 key was probed for an existing published version, scoped to the brand.
-    expect(mockState.findPublishedCalls).toHaveLength(P0_TEMPLATE_KEYS.length);
+    // Every seeded key was probed for an existing published version, scoped to the brand.
+    expect(mockState.findPublishedCalls).toHaveLength(SEED_EMAIL_TEMPLATE_KEYS.length);
     for (const call of mockState.findPublishedCalls) {
       expect(call.tenantId).toBe('tnt_1');
       expect(call.brandId).toBe('brd_1');
@@ -136,7 +138,7 @@ describe('seedEmailTemplateDefaults', () => {
   });
 
   it('is idempotent: skips every key that already has a published template', async () => {
-    mockState.publishedKeys = new Set(P0_TEMPLATE_KEYS);
+    mockState.publishedKeys = new Set(SEED_EMAIL_TEMPLATE_KEYS);
 
     const result = await seedEmailTemplateDefaults({
       tenantId: 'tnt_1',
@@ -149,11 +151,11 @@ describe('seedEmailTemplateDefaults', () => {
     expect(mockState.createdDocuments).toHaveLength(0);
     expect(mockState.createdVersions).toHaveLength(0);
     expect(mockState.publishedVersions).toHaveLength(0);
-    expect(mockState.findPublishedCalls).toHaveLength(P0_TEMPLATE_KEYS.length);
+    expect(mockState.findPublishedCalls).toHaveLength(SEED_EMAIL_TEMPLATE_KEYS.length);
   });
 
   it('seeds only the missing keys when some templates already exist', async () => {
-    const [existingKey, ...missingKeys] = P0_TEMPLATE_KEYS;
+    const [existingKey, ...missingKeys] = SEED_EMAIL_TEMPLATE_KEYS;
     mockState.publishedKeys = new Set([existingKey]);
 
     const result = await seedEmailTemplateDefaults({
@@ -166,5 +168,37 @@ describe('seedEmailTemplateDefaults', () => {
     expect(result.seeded).toEqual(missingKeys);
     expect(mockState.createdDocuments).toHaveLength(missingKeys.length);
     expect(mockState.publishedVersions).toHaveLength(missingKeys.length);
+  });
+
+  it('seeds waitlist invite content with registry-required merge tags', async () => {
+    await seedEmailTemplateDefaults({
+      tenantId: 'tnt_1',
+      organizationId: 'org_1',
+      brandId: 'brd_1',
+    });
+
+    const version = mockState.createdVersions.find(
+      (createdVersion) =>
+        (createdVersion.contentJson as { settings?: { templateKey?: string } }).settings
+          ?.templateKey === 'waitlist-invite',
+    );
+    expect(version).toBeDefined();
+    const document = version!.contentJson as {
+      settings: { subject: string; previewText?: string };
+      blocks: unknown[];
+    };
+    const renderedTemplate = [
+      document.settings.subject,
+      document.settings.previewText,
+      JSON.stringify(document.blocks),
+    ]
+      .filter(Boolean)
+      .join('\n');
+    const validation = validateMergeTags(renderedTemplate);
+    const lifecycle = getTemplateLifecycle('waitlist-invite')!;
+    expect(validation.unknownTags).toEqual([]);
+    for (const requiredVariable of lifecycle.requiredVariables) {
+      expect(renderedTemplate).toContain(`{{${requiredVariable}}}`);
+    }
   });
 });

@@ -41,6 +41,11 @@ const EMAIL_VARIABLE_DEFINITIONS = MERGE_TAG_REGISTRY.map((variable) => ({
   description: variable.description,
 }));
 
+export const SEED_EMAIL_TEMPLATE_KEYS: readonly TemplateKey[] = [
+  ...P0_TEMPLATE_KEYS,
+  'waitlist-invite',
+];
+
 export async function seedEmailTemplateDefaults(
   input: SeedEmailTemplatesInput,
 ): Promise<SeedEmailTemplatesResult> {
@@ -59,7 +64,7 @@ export async function seedEmailTemplateDefaults(
     const createdBy = input.createdBy ?? 'system-seed';
 
     const results = await Promise.all(
-      P0_TEMPLATE_KEYS.map(async (key) => {
+      SEED_EMAIL_TEMPLATE_KEYS.map(async (key) => {
         const existing = await repo.findPublishedEmailTemplate({
           tenantId: input.tenantId,
           brandId: input.brandId,

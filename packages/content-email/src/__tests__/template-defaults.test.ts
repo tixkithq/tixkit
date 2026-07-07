@@ -56,6 +56,11 @@ const distinctiveContext: MergeTagContext = {
     expiresAt: '2026-07-17 19:00',
   },
   dashboard: { url: 'https://admin.example.test/events/evt-1' },
+  waitlist: {
+    position: '3',
+    inviteUrl: 'https://checkout.example.test/waitlist/claim/abc',
+    expiresAt: '2026-07-18 19:00',
+  },
 };
 
 const requiredVarValue: Record<string, string> = {
@@ -70,6 +75,8 @@ const requiredVarValue: Record<string, string> = {
   'refund.amount': distinctiveContext.refund!.amount!,
   'event.startsAt': distinctiveContext.event!.startsAt!,
   'event.venueName': distinctiveContext.event!.venueName!,
+  'waitlist.inviteUrl': distinctiveContext.waitlist!.inviteUrl!,
+  'waitlist.expiresAt': distinctiveContext.waitlist!.expiresAt!,
 };
 
 describe('createDefaultEmailTemplateForKey', () => {
@@ -117,6 +124,19 @@ describe('createDefaultEmailTemplateForKey', () => {
         }
       }),
     );
+  });
+
+  it('renders every required merge tag for the waitlist invite default', async () => {
+    const entry = getTemplateLifecycle('waitlist-invite')!;
+    const doc = createDefaultEmailTemplateForKey('waitlist-invite');
+    const rendered = await renderEmailTemplate(doc, distinctiveContext);
+    expect(rendered.validation.valid).toBe(true);
+    const output = `${rendered.html}\n${rendered.text}`;
+    for (const requiredVar of entry.requiredVariables) {
+      const expected = requiredVarValue[requiredVar];
+      expect(expected, `no expected value mapped for {{${requiredVar}}}`).toBeDefined();
+      expect(output).toContain(expected);
+    }
   });
 
   it('requires an unsubscribe footer only for the bulk attendee-message default', () => {
