@@ -1,0 +1,80 @@
+{
+  "$schema": "./scripts/performance-budgets.schema.json",
+  "lighthouseReports": [
+    {
+      "label": "checkout flow Lighthouse",
+      "path": "artifacts/performance/lighthouse/checkout-flow.json",
+      "minPerformanceScore": 0.8,
+      "audits": [
+        {
+          "label": "largest contentful paint",
+          "id": "largest-contentful-paint",
+          "maxNumericValue": 2500,
+          "unit": "ms"
+        },
+        {
+          "label": "total blocking time",
+          "id": "total-blocking-time",
+          "maxNumericValue": 300,
+          "unit": "ms"
+        },
+        {
+          "label": "cumulative layout shift",
+          "id": "cumulative-layout-shift",
+          "maxNumericValue": 0.1,
+          "unit": "score"
+        }
+      ]
+    },
+    {
+      "label": "hosted event page Lighthouse",
+      "path": "artifacts/performance/lighthouse/hosted-event-page.json",
+      "minPerformanceScore": 0.8,
+      "audits": [
+        {
+          "label": "largest contentful paint",
+          "id": "largest-contentful-paint",
+          "maxNumericValue": 2500,
+          "unit": "ms"
+        },
+        {
+          "label": "total blocking time",
+          "id": "total-blocking-time",
+          "maxNumericValue": 300,
+          "unit": "ms"
+        },
+        {
+          "label": "cumulative layout shift",
+          "id": "cumulative-layout-shift",
+          "maxNumericValue": 0.1,
+          "unit": "score"
+        }
+      ]
+    },
+    {
+      "label": "admin shell Lighthouse",
+      "path": "artifacts/performance/lighthouse/admin-shell.json",
+      "minPerformanceScore": 0.75,
+      "audits": [
+        {
+          "label": "largest contentful paint",
+          "id": "largest-contentful-paint",
+          "maxNumericValue": 3000,
+          "unit": "ms"
+        },
+        {
+          "label": "total blocking time",
+          "id": "total-blocking-time",
+          "maxNumericValue": 500,
+          "unit": "ms"
+        },
+        {
+          "label": "cumulative layout shift",
+          "id": "cumulative-layout-shift",
+          "maxNumericValue": 0.1,
+          "unit": "score"
+        }
+      ]
+    }
+  ]
+}

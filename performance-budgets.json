@@ -1,0 +1,30 @@
+{
+  "$schema": "./scripts/performance-budgets.schema.json",
+  "files": [
+    {
+      "label": "widget bundle",
+      "path": "packages/widget/dist/tixkit-widget.js",
+      "maxBytes": 45000
+    }
+  ],
+  "nextRoutes": [
+    {
+      "label": "checkout flow first-load JS",
+      "appDir": "apps/checkout",
+      "route": "/checkout",
+      "maxBytes": 720000
+    },
+    {
+      "label": "hosted event page first-load JS",
+      "appDir": "apps/checkout",
+      "route": "/e/[eventId]",
+      "maxBytes": 2100000
+    },
+    {
+      "label": "admin shell first-load JS",
+      "appDir": "apps/admin-dashboard",
+      "route": "/",
+      "maxBytes": 900000
+    }
+  ]
+}

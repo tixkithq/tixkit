@@ -1,0 +1,68 @@
+{
+  "$schema": "./scripts/performance-budgets.schema.json",
+  "metrics": [
+    {
+      "label": "API checkout reservation p50",
+      "path": "artifacts/performance/load-harness-metrics.json",
+      "metric": "checkoutReservationP50Ms",
+      "max": 1000,
+      "unit": "ms"
+    },
+    {
+      "label": "API checkout reservation p95",
+      "path": "artifacts/performance/load-harness-metrics.json",
+      "metric": "checkoutReservationP95Ms",
+      "max": 2000,
+      "unit": "ms"
+    },
+    {
+      "label": "API checkout reservation DB queries",
+      "path": "artifacts/performance/load-harness-metrics.json",
+      "metric": "checkoutReservationQueryCount",
+      "max": 2000,
+      "unit": "queries"
+    },
+    {
+      "label": "API checkout reservation heap delta",
+      "path": "artifacts/performance/load-harness-metrics.json",
+      "metric": "checkoutReservationHeapDeltaBytes",
+      "max": 67108864,
+      "unit": "bytes"
+    },
+    {
+      "label": "API scanner check-in p50",
+      "path": "artifacts/performance/load-harness-metrics.json",
+      "metric": "scannerCheckInP50Ms",
+      "max": 250,
+      "unit": "ms"
+    },
+    {
+      "label": "API scanner check-in p95",
+      "path": "artifacts/performance/load-harness-metrics.json",
+      "metric": "scannerCheckInP95Ms",
+      "max": 500,
+      "unit": "ms"
+    },
+    {
+      "label": "API scanner check-in DB queries",
+      "path": "artifacts/performance/load-harness-metrics.json",
+      "metric": "scannerCheckInQueryCount",
+      "max": 1000,
+      "unit": "queries"
+    },
+    {
+      "label": "API scanner check-in heap delta",
+      "path": "artifacts/performance/load-harness-metrics.json",
+      "metric": "scannerCheckInHeapDeltaBytes",
+      "max": 67108864,
+      "unit": "bytes"
+    },
+    {
+      "label": "streamed CSV export heap delta",
+      "path": "artifacts/performance/load-harness-metrics.json",
+      "metric": "exportStreamHeapDeltaBytes",
+      "max": 67108864,
+      "unit": "bytes"
+    }
+  ]
+}

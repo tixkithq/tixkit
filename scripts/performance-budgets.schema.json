@@ -1,0 +1,80 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "files": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["label", "path", "maxBytes"],
+        "properties": {
+          "label": { "type": "string" },
+          "path": { "type": "string" },
+          "maxBytes": { "type": "integer", "minimum": 1 }
+        }
+      }
+    },
+    "nextRoutes": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["label", "appDir", "route", "maxBytes"],
+        "properties": {
+          "label": { "type": "string" },
+          "appDir": { "type": "string" },
+          "route": { "type": "string" },
+          "maxBytes": { "type": "integer", "minimum": 1 }
+        }
+      }
+    },
+    "metrics": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["label", "path", "metric"],
+        "oneOf": [{ "required": ["max"] }, { "required": ["min"] }],
+        "properties": {
+          "label": { "type": "string" },
+          "path": { "type": "string" },
+          "metric": { "type": "string" },
+          "max": { "type": "number" },
+          "min": { "type": "number" },
+          "unit": { "type": "string" }
+        }
+      }
+    },
+    "lighthouseReports": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["label", "path"],
+        "properties": {
+          "label": { "type": "string" },
+          "path": { "type": "string" },
+          "minPerformanceScore": { "type": "number", "minimum": 0, "maximum": 1 },
+          "audits": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["id"],
+              "oneOf": [{ "required": ["maxNumericValue"] }, { "required": ["minNumericValue"] }],
+              "properties": {
+                "label": { "type": "string" },
+                "id": { "type": "string" },
+                "maxNumericValue": { "type": "number" },
+                "minNumericValue": { "type": "number" },
+                "unit": { "type": "string" }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}
