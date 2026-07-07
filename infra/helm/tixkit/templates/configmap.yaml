@@ -8,6 +8,7 @@ data:
   NODE_ENV: {{ .Values.global.environment | quote }}
   API_BASE_URL: {{ .Values.global.apiBaseUrl | quote }}
   CORS_ALLOWED_ORIGINS: {{ join "," .Values.global.corsAllowedOrigins | quote }}
+  CUSTOM_DOMAIN_CORS_ENABLED: {{ .Values.global.customDomainCorsEnabled | quote }}
   TRUST_PROXY: {{ .Values.api.trustProxy | quote }}
   NEXT_PUBLIC_TIXKIT_API_BASE_URL: {{ printf "%s/v1" .Values.global.apiBaseUrl | quote }}
   NEXT_PUBLIC_ADMIN_API_BASE_URL: {{ .Values.global.apiBaseUrl | quote }}

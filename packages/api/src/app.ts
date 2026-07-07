@@ -6,7 +6,7 @@ import rateLimit from '@fastify/rate-limit';
 import type { RateLimitPluginOptions } from '@fastify/rate-limit';
 import { ulid } from 'ulid';
 import { Redis } from 'ioredis';
-import { createDb, type Database } from '@tixkit/db';
+import { BrandRepository, createDb, type Database } from '@tixkit/db';
 import { pinoRedactionPaths, redactErrorFields, redactObject, redactString } from '@tixkit/shared';
 import { config } from './config/index.js';
 import { ClerkAuthService, createAuthMiddleware } from './auth/clerk.js';
@@ -55,6 +55,10 @@ import type {
 } from '@tixkit/domain';
 
 type CorsOriginCallback = (error: Error | null, allow: boolean) => void;
+type CorsOriginValidatorOptions = {
+  customDomainCorsEnabled?: boolean;
+  isVerifiedCustomDomainHost?: (host: string) => Promise<boolean>;
+};
 
 export type AppContext = {
   db: Database;
@@ -124,10 +128,56 @@ function sanitizeErrorDetails(details: unknown): Record<string, unknown> | undef
   return toJsonSafeErrorDetail(redactObject(details)) as Record<string, unknown>;
 }
 
-export function createCorsOriginValidator(allowedOrigins: readonly string[]) {
+function customDomainHostFromCorsOrigin(origin: string): string | null {
+  let parsed: URL;
+  try {
+    parsed = new URL(origin);
+  } catch {
+    return null;
+  }
+
+  if (parsed.protocol !== 'https:' || parsed.port || parsed.pathname !== '/') return null;
+  if (parsed.username || parsed.password || parsed.search || parsed.hash) return null;
+
+  const host = parsed.hostname.trim().toLowerCase();
+  return host.length > 0 ? host : null;
+}
+
+async function isVerifiedCustomDomainCorsHost(db: Database, host: string): Promise<boolean> {
+  const brand = await new BrandRepository(db).findByActiveDomain(host);
+  return brand !== null;
+}
+
+export function createCorsOriginValidator(
+  allowedOrigins: readonly string[],
+  options: CorsOriginValidatorOptions = {},
+) {
   const allowed = new Set(allowedOrigins);
   return (origin: string | undefined, callback: CorsOriginCallback): void => {
-    callback(null, origin === undefined || allowed.has(origin));
+    if (origin === undefined || allowed.has(origin)) {
+      callback(null, true);
+      return;
+    }
+
+    if (!options.customDomainCorsEnabled || !options.isVerifiedCustomDomainHost) {
+      callback(null, false);
+      return;
+    }
+
+    const host = customDomainHostFromCorsOrigin(origin);
+    if (host === null) {
+      callback(null, false);
+      return;
+    }
+
+    void options
+      .isVerifiedCustomDomainHost(host)
+      .then((isVerified) => {
+        callback(null, isVerified);
+      })
+      .catch(() => {
+        callback(null, false);
+      });
   };
 }
 
@@ -281,11 +331,15 @@ export async function buildApp(): Promise<FastifyInstance> {
   app.addHook('onClose', async () => {
     rateLimitRedis?.disconnect();
   });
+  const db = createDb(config.databaseUrl);
 
   // Plugins
   await app.register(helmet);
   await app.register(cors, {
-    origin: createCorsOriginValidator(config.corsAllowedOrigins),
+    origin: createCorsOriginValidator(config.corsAllowedOrigins, {
+      customDomainCorsEnabled: config.customDomainCorsEnabled,
+      isVerifiedCustomDomainHost: (host) => isVerifiedCustomDomainCorsHost(db, host),
+    }),
     credentials: true,
   });
   await app.register(compress, {
@@ -295,7 +349,6 @@ export async function buildApp(): Promise<FastifyInstance> {
   });
 
   // Initialize services
-  const db = createDb(config.databaseUrl);
   const pricingEngine = new PricingEngine();
   const inventoryService = new InventoryService(db);
   const qrService = new QrService();

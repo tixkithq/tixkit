@@ -13,6 +13,7 @@ const ENV_KEYS = [
   'CLERK_SECRET_KEY',
   'CLERK_WEBHOOK_SECRET',
   'CORS_ALLOWED_ORIGINS',
+  'CUSTOM_DOMAIN_CORS_ENABLED',
   'DATABASE_URL',
   'METRICS_BEARER_TOKEN',
   'NODE_ENV',
@@ -126,6 +127,78 @@ describe('API CORS configuration', () => {
 
     await app.close();
   });
+
+  it('allows verified active custom checkout domains when dynamic domain CORS is enabled', async () => {
+    const verifiedHosts: string[] = [];
+    const app = Fastify({ logger: false });
+    await app.register(cors, {
+      origin: createCorsOriginValidator(['https://admin.example.com'], {
+        customDomainCorsEnabled: true,
+        isVerifiedCustomDomainHost: async (host) => {
+          verifiedHosts.push(host);
+          return host === 'tickets.customer.example';
+        },
+      }),
+      credentials: true,
+    });
+    app.get('/probe', async () => ({ ok: true }));
+
+    const verified = await app.inject({
+      method: 'GET',
+      url: '/probe',
+      headers: { origin: 'https://tickets.customer.example' },
+    });
+    const attacker = await app.inject({
+      method: 'GET',
+      url: '/probe',
+      headers: { origin: 'https://attacker.customer.example' },
+    });
+    const insecure = await app.inject({
+      method: 'GET',
+      url: '/probe',
+      headers: { origin: 'http://tickets.customer.example' },
+    });
+    const portScoped = await app.inject({
+      method: 'GET',
+      url: '/probe',
+      headers: { origin: 'https://tickets.customer.example:8443' },
+    });
+
+    expect(verified.statusCode).toBe(200);
+    expect(verified.headers['access-control-allow-origin']).toBe(
+      'https://tickets.customer.example',
+    );
+    expect(verified.headers['access-control-allow-credentials']).toBe('true');
+    expect(attacker.headers['access-control-allow-origin']).toBeUndefined();
+    expect(insecure.headers['access-control-allow-origin']).toBeUndefined();
+    expect(portScoped.headers['access-control-allow-origin']).toBeUndefined();
+    expect(verifiedHosts).toEqual(['tickets.customer.example', 'attacker.customer.example']);
+
+    await app.close();
+  });
+
+  it('keeps custom checkout domains disabled until explicitly enabled', async () => {
+    const app = Fastify({ logger: false });
+    await app.register(cors, {
+      origin: createCorsOriginValidator(['https://admin.example.com'], {
+        customDomainCorsEnabled: false,
+        isVerifiedCustomDomainHost: async () => true,
+      }),
+      credentials: true,
+    });
+    app.get('/probe', async () => ({ ok: true }));
+
+    const response = await app.inject({
+      method: 'GET',
+      url: '/probe',
+      headers: { origin: 'https://tickets.customer.example' },
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.headers['access-control-allow-origin']).toBeUndefined();
+
+    await app.close();
+  });
 });
 
 describe('API exposure config parsing', () => {
@@ -144,6 +217,18 @@ describe('API exposure config parsing', () => {
     ]);
     expect(config.metricsBearerToken).toBe('metrics-token');
     expect(config.trustProxy).toEqual(['10.0.0.0/8', '192.168.0.0/16']);
+    expect(config.customDomainCorsEnabled).toBe(false);
+  });
+
+  it('parses CUSTOM_DOMAIN_CORS_ENABLED strictly', () => {
+    process.env.CUSTOM_DOMAIN_CORS_ENABLED = 'true';
+    expect(loadConfig().customDomainCorsEnabled).toBe(true);
+
+    process.env.CUSTOM_DOMAIN_CORS_ENABLED = 'false';
+    expect(loadConfig().customDomainCorsEnabled).toBe(false);
+
+    process.env.CUSTOM_DOMAIN_CORS_ENABLED = '1';
+    expect(() => loadConfig()).toThrow('CUSTOM_DOMAIN_CORS_ENABLED must be true or false');
   });
 
   it('parses TRUST_PROXY booleans, hop counts, and single proxy CIDRs', () => {

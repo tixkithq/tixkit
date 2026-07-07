@@ -29,6 +29,7 @@ export type AppConfig = {
   s3Region: string;
   apiBaseUrl: string;
   corsAllowedOrigins: string[];
+  customDomainCorsEnabled: boolean;
   metricsBearerToken: string;
   rateLimitMax: number;
   rateLimitTimeWindow: string;
@@ -242,6 +243,15 @@ function parsePositiveIntegerConfig(
   return parsed;
 }
 
+function parseBooleanConfig(name: string, value: string | undefined, fallback: boolean): boolean {
+  const candidate = value?.trim().toLowerCase();
+  if (!candidate) return fallback;
+  if (candidate === 'true') return true;
+  if (candidate === 'false') return false;
+
+  throw new Error(`${name} must be true or false`);
+}
+
 function parseRateLimitTimeWindow(value: string | undefined, fallback: string): string {
   const candidate = value === undefined ? fallback : value.trim().toLowerCase();
   const match = /^([1-9]\d*)\s*(milliseconds?|ms|seconds?|s|minutes?|m|hours?|h|days?|d)$/.exec(
@@ -306,6 +316,11 @@ export function loadConfig(): AppConfig {
     s3Region: process.env.S3_REGION ?? 'us-east-1',
     apiBaseUrl: process.env.API_BASE_URL ?? 'http://localhost:4000',
     corsAllowedOrigins: resolveCorsAllowedOrigins(process.env.CORS_ALLOWED_ORIGINS, nodeEnv),
+    customDomainCorsEnabled: parseBooleanConfig(
+      'CUSTOM_DOMAIN_CORS_ENABLED',
+      process.env.CUSTOM_DOMAIN_CORS_ENABLED,
+      false,
+    ),
     metricsBearerToken: process.env.METRICS_BEARER_TOKEN?.trim() ?? '',
     rateLimitMax: parsePositiveIntegerConfig(
       'RATE_LIMIT_MAX',

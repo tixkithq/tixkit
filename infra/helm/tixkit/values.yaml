@@ -8,6 +8,7 @@ global:
   corsAllowedOrigins:
     - https://checkout.tixkit.com
     - https://admin.tixkit.com
+  customDomainCorsEnabled: true
 
 secrets:
   create: true

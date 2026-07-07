@@ -548,6 +548,7 @@ for render_api_required_env in \
 done
 require_render_service_env_value tixkit-api AUTH_PROVIDER clerk
 require_render_service_env_value tixkit-api API_BASE_URL "${expected_render_api_origin}"
+require_render_service_env_value tixkit-api CUSTOM_DOMAIN_CORS_ENABLED true
 require_render_service_env_key tixkit-checkout NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY
 
 grep -Eq '^[[:space:]]*TRUST_PROXY[[:space:]]*=[[:space:]]*"1"[[:space:]]*$' infra/fly/api.toml ||
@@ -556,18 +557,24 @@ grep -Eq '^[[:space:]]*TRUST_PROXY[[:space:]]*=[[:space:]]*"1"[[:space:]]*$' inf
 grep -Fq "CORS_ALLOWED_ORIGINS = \"${expected_fly_cors_origins}\"" infra/fly/api.toml ||
   fail "infra/fly/api.toml must set API CORS_ALLOWED_ORIGINS to ${expected_fly_cors_origins}"
 
+grep -Eq '^[[:space:]]*CUSTOM_DOMAIN_CORS_ENABLED[[:space:]]*=[[:space:]]*"true"[[:space:]]*$' infra/fly/api.toml ||
+  fail 'infra/fly/api.toml must enable API CUSTOM_DOMAIN_CORS_ENABLED'
+
 awk -v expected_cors_origins="${expected_render_cors_origins}" '
   function reset_service_state() {
     pending_trust_proxy_value = 0
     pending_cors_origins_value = 0
+    pending_custom_domain_cors_value = 0
     pending_temporal_task_queue_value = 0
     trust_proxy_count = 0
     cors_origins_count = 0
+    custom_domain_cors_count = 0
     temporal_address_count = 0
     temporal_namespace_count = 0
     temporal_task_queue_count = 0
     bad_trust_proxy_value = 0
     bad_cors_origins_value = 0
+    bad_custom_domain_cors_value = 0
     bad_temporal_task_queue_value = 0
   }
   function finish_service() {
@@ -579,8 +586,9 @@ awk -v expected_cors_origins="${expected_render_cors_origins}" '
       temporal_task_queue_count != 1 || bad_temporal_task_queue_value ||
       pending_temporal_task_queue_value
     has_bad_api_config = in_api && (trust_proxy_count != 1 || cors_origins_count != 1 ||
-      bad_trust_proxy_value || bad_cors_origins_value ||
-      pending_trust_proxy_value || pending_cors_origins_value)
+      custom_domain_cors_count != 1 || bad_trust_proxy_value || bad_cors_origins_value ||
+      bad_custom_domain_cors_value || pending_trust_proxy_value || pending_cors_origins_value ||
+      pending_custom_domain_cors_value)
     if (has_bad_api_config || has_bad_temporal_config) {
       exit 1
     }
@@ -636,6 +644,22 @@ awk -v expected_cors_origins="${expected_render_cors_origins}" '
     bad_cors_origins_value = 1
     pending_cors_origins_value = 0
   }
+  in_api && /^[[:space:]]*- key: CUSTOM_DOMAIN_CORS_ENABLED$/ {
+    custom_domain_cors_count += 1
+    pending_custom_domain_cors_value = 1
+    next
+  }
+  in_api && pending_custom_domain_cors_value && /^[[:space:]]*value:/ {
+    if ($0 !~ /^[[:space:]]*value:[[:space:]]*true[[:space:]]*$/) {
+      bad_custom_domain_cors_value = 1
+    }
+    pending_custom_domain_cors_value = 0
+    next
+  }
+  in_api && pending_custom_domain_cors_value && /^[[:space:]]*- key:/ {
+    bad_custom_domain_cors_value = 1
+    pending_custom_domain_cors_value = 0
+  }
   (in_api || in_worker) && /^[[:space:]]*- key: TEMPORAL_ADDRESS$/ {
     temporal_address_count += 1
     next
@@ -665,7 +689,7 @@ awk -v expected_cors_origins="${expected_render_cors_origins}" '
     exit found_api && found_worker ? 0 : 1
   }
 ' infra/render.yaml ||
-  fail "infra/render.yaml must set tixkit-api TRUST_PROXY=1, CORS_ALLOWED_ORIGINS=${expected_render_cors_origins}, and explicit TEMPORAL_ADDRESS/TEMPORAL_NAMESPACE/TEMPORAL_TASK_QUEUE=tixkit-production for tixkit-api and tixkit-worker"
+  fail "infra/render.yaml must set tixkit-api TRUST_PROXY=1, CORS_ALLOWED_ORIGINS=${expected_render_cors_origins}, CUSTOM_DOMAIN_CORS_ENABLED=true, and explicit TEMPORAL_ADDRESS/TEMPORAL_NAMESPACE/TEMPORAL_TASK_QUEUE=tixkit-production for tixkit-api and tixkit-worker"
 
 awk '
   function reset_service_state() {
@@ -937,6 +961,14 @@ awk -v api_origin="${expected_helm_api_origin}" \
     }
     next
   }
+  in_global && /^[[:space:]]*customDomainCorsEnabled:/ {
+    value = $0
+    sub(/^[[:space:]]*customDomainCorsEnabled:[[:space:]]*/, "", value)
+    if (strip(value) == "true") {
+      custom_domain_cors = 1
+    }
+    next
+  }
   in_global && /^[[:space:]]*corsAllowedOrigins:$/ {
     in_cors = 1
     next
@@ -988,10 +1020,10 @@ awk -v api_origin="${expected_helm_api_origin}" \
   }
   END {
     exit api_base && checkout_url && admin_url && checkout_cors && admin_cors &&
-      api_host && checkout_host && admin_host ? 0 : 1
+      custom_domain_cors && api_host && checkout_host && admin_host ? 0 : 1
   }
 ' infra/helm/tixkit/values.yaml ||
-  fail "infra/helm/tixkit/values.yaml must set production API/admin/checkout origins and CORS origins to ${expected_helm_cors_origins}"
+  fail "infra/helm/tixkit/values.yaml must set production API/admin/checkout origins, CORS origins to ${expected_helm_cors_origins}, and customDomainCorsEnabled=true"
 
 if command -v helm >/dev/null 2>&1; then
   rendered_chart="$(helm template tixkit infra/helm/tixkit --namespace tixkit)"
@@ -1029,6 +1061,8 @@ if command -v helm >/dev/null 2>&1; then
     fail "rendered Helm ConfigMap must set API_BASE_URL to ${expected_helm_api_origin}"
   printf '%s\n' "${rendered_config}" | grep -Fq "CORS_ALLOWED_ORIGINS: \"${expected_helm_cors_origins}\"" ||
     fail "rendered Helm ConfigMap must set API CORS_ALLOWED_ORIGINS to ${expected_helm_cors_origins}"
+  printf '%s\n' "${rendered_config}" | grep -Fq 'CUSTOM_DOMAIN_CORS_ENABLED: "true"' ||
+    fail 'rendered Helm ConfigMap must enable CUSTOM_DOMAIN_CORS_ENABLED'
   printf '%s\n' "${rendered_config}" | grep -Fq "NEXT_PUBLIC_TIXKIT_API_BASE_URL: \"${expected_helm_api_origin}/v1\"" ||
     fail "rendered Helm ConfigMap must set NEXT_PUBLIC_TIXKIT_API_BASE_URL to ${expected_helm_api_origin}/v1"
   printf '%s\n' "${rendered_config}" | grep -Fq "NEXT_PUBLIC_ADMIN_API_BASE_URL: \"${expected_helm_api_origin}\"" ||
