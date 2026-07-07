@@ -128,16 +128,13 @@ export async function refreshInventoryHoldGauge(
   metrics: TixkitMetrics,
   db: Database,
 ): Promise<void> {
-  const rows = await db
+  const row = await db
     .selectFrom('checkout_holds')
-    .select(['quantity'])
+    .select(({ fn }) => fn.sum<number>('quantity').as('quantity'))
     .where('status', '=', 'active')
     .where('expires_at', '>', new Date())
-    .execute();
-  metrics.metrics.inventoryActiveHolds.set(
-    { scope: 'global' },
-    rows.reduce((sum, row) => sum + Number(row.quantity), 0),
-  );
+    .executeTakeFirst();
+  metrics.metrics.inventoryActiveHolds.set({ scope: 'global' }, Number(row?.quantity ?? 0));
 }
 
 function finishRequestObservability(

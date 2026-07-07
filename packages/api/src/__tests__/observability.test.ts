@@ -12,15 +12,30 @@ import {
 } from '../observability.js';
 import { config } from '../config/index.js';
 
-function createHoldDb(rows: Array<{ quantity: number | string }>): Database {
+type HoldQuery = {
+  executeTakeFirst: ReturnType<typeof vi.fn>;
+  execute: ReturnType<typeof vi.fn>;
+};
+
+type HoldDb = Database & {
+  query: HoldQuery;
+};
+
+function createHoldDb(quantity: number | string | null): HoldDb {
   const query = {
     select: () => query,
     where: () => query,
-    execute: async () => rows,
+    executeTakeFirst: vi.fn(async () => ({ quantity })),
+    execute: vi.fn(async () => {
+      throw new Error('refreshInventoryHoldGauge should use an aggregate query');
+    }),
   };
-  return {
-    selectFrom: () => query,
-  } as unknown as Database;
+  return Object.assign(
+    {
+      selectFrom: () => query,
+    } as unknown as Database,
+    { query },
+  );
 }
 
 describe('API observability', () => {
@@ -148,7 +163,7 @@ describe('API observability', () => {
   it('refreshes active inventory hold gauge before metrics are scraped', async () => {
     const app = Fastify({ logger: false });
     const observability: ApiObservability = { metrics: createTixkitMetrics('test-api-metrics') };
-    const db = createHoldDb([{ quantity: 2 }, { quantity: '3' }]);
+    const db = createHoldDb('5');
     registerMetricsRoute(app, observability, () => db, {
       bearerToken: 'metrics-token',
       requireBearerToken: true,
@@ -165,6 +180,8 @@ describe('API observability', () => {
     expect(response.body).toContain('tixkit_inventory_active_holds');
     expect(response.body).toContain('service="test-api-metrics"');
     expect(response.body).toMatch(/tixkit_inventory_active_holds\{[^}]*scope="global"[^}]*\} 5/);
+    expect(db.query.executeTakeFirst).toHaveBeenCalledTimes(1);
+    expect(db.query.execute).not.toHaveBeenCalled();
 
     await app.close();
   });
@@ -174,7 +191,7 @@ describe('API observability', () => {
     const observability: ApiObservability = {
       metrics: createTixkitMetrics('test-api-metrics-auth'),
     };
-    const dbProvider = vi.fn(() => createHoldDb([{ quantity: 7 }]));
+    const dbProvider = vi.fn(() => createHoldDb(7));
     registerMetricsRoute(app, observability, dbProvider, {
       bearerToken: 'metrics-token',
       requireBearerToken: true,
@@ -213,7 +230,7 @@ describe('API observability', () => {
     const observability: ApiObservability = {
       metrics: createTixkitMetrics('test-api-metrics-rate-limit'),
     };
-    const dbProvider = vi.fn(() => createHoldDb([{ quantity: 7 }]));
+    const dbProvider = vi.fn(() => createHoldDb(7));
     registerMetricsRoute(app, observability, dbProvider, {
       bearerToken: 'metrics-token',
       requireBearerToken: true,
@@ -251,7 +268,7 @@ describe('API observability', () => {
     const observability: ApiObservability = {
       metrics: createTixkitMetrics('test-api-metrics-default-auth'),
     };
-    const dbProvider = vi.fn(() => createHoldDb([{ quantity: 7 }]));
+    const dbProvider = vi.fn(() => createHoldDb(7));
 
     try {
       registerMetricsRoute(app, observability, dbProvider);
@@ -276,11 +293,20 @@ describe('API observability', () => {
 
   it('can refresh the inventory gauge independently for integration tests', async () => {
     const metrics = createTixkitMetrics('test-api-refresh');
-    await refreshInventoryHoldGauge(metrics, createHoldDb([{ quantity: 4 }]));
+    await refreshInventoryHoldGauge(metrics, createHoldDb(4));
 
     const output = await metrics.registry.metrics();
     expect(output).toContain('tixkit_inventory_active_holds');
     expect(output).toContain('service="test-api-refresh"');
     expect(output).toMatch(/tixkit_inventory_active_holds\{[^}]*scope="global"[^}]*\} 4/);
+  });
+
+  it('sets the inventory gauge to zero when no active holds are present', async () => {
+    const metrics = createTixkitMetrics('test-api-refresh-empty');
+    await refreshInventoryHoldGauge(metrics, createHoldDb(null));
+
+    const output = await metrics.registry.metrics();
+    expect(output).toContain('tixkit_inventory_active_holds');
+    expect(output).toMatch(/tixkit_inventory_active_holds\{[^}]*scope="global"[^}]*\} 0/);
   });
 });
