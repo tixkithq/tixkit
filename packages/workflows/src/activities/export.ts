@@ -218,16 +218,6 @@ async function recordExportJobStatus(
   return result;
 }
 
-function toCsv(rows: Record<string, unknown>[]): string {
-  if (rows.length === 0) return '';
-  const headers = Object.keys(rows[0]);
-  const lines = [headers.join(',')];
-  for (const row of rows) {
-    lines.push(headers.map((h) => escapeCsv(row[h])).join(','));
-  }
-  return lines.join('\n');
-}
-
 function escapeCsv(val: unknown): string {
   if (val === null || val === undefined) return '';
   const str = String(val);
@@ -248,7 +238,7 @@ class ExportDataWriter {
 
   constructor(
     private readonly format: string,
-    private readonly writeChunk?: (chunk: string) => Promise<void> | void,
+    private readonly writeChunk?: (chunk: string | Buffer) => Promise<void> | void,
   ) {}
 
   async appendRows(rows: Record<string, unknown>[]): Promise<void> {
@@ -296,7 +286,7 @@ class ExportDataWriter {
     this.chunks.push(chunk);
   }
 
-  async data(): Promise<string> {
+  async data(): Promise<string | Buffer> {
     if (this.finalized) return this.writeChunk ? '' : this.chunks.join('');
     this.finalized = true;
     if (this.format === 'xlsx') {
@@ -315,8 +305,7 @@ class ExportDataWriter {
   }
 }
 
-async function toXlsx(rows: Record<string, unknown>[]): Promise<string> {
-  // exceljs is an optional dependency for xlsx export.
+async function toXlsx(rows: Record<string, unknown>[]): Promise<Buffer> {
   try {
     // @ts-expect-error - exceljs is an optional dependency
     const ExcelJS = (await import('exceljs')).default;
@@ -330,10 +319,11 @@ async function toXlsx(rows: Record<string, unknown>[]): Promise<string> {
       }
     }
     const buffer = await workbook.xlsx.writeBuffer();
-    return Buffer.from(buffer).toString('base64');
-  } catch {
-    // Fallback to CSV if exceljs is not installed.
-    return toCsv(rows);
+    return Buffer.from(buffer);
+  } catch (err) {
+    throw new Error(
+      `XLSX export generation failed: ${err instanceof Error ? err.message : 'Unknown error'}`,
+    );
   }
 }
 
@@ -512,7 +502,7 @@ async function generateExportWithWriter(
     format: string;
   },
   writer: ExportDataWriter,
-): Promise<WorkflowActivityResult<{ data: string; rowCount: number }>> {
+): Promise<WorkflowActivityResult<{ data: string | Buffer; rowCount: number }>> {
   const db = getActivityDb();
   try {
     const { exportJob } = await recordExportJobStatus(db, {
@@ -867,13 +857,13 @@ export async function generateExportActivity(input: {
   exportId: string;
   type: string;
   format: string;
-}): Promise<WorkflowActivityResult<{ data: string; rowCount: number }>> {
+}): Promise<WorkflowActivityResult<{ data: string | Buffer; rowCount: number }>> {
   return generateExportWithWriter(input, new ExportDataWriter(input.format));
 }
 
 export async function uploadFileActivity(input: {
   exportId: string;
-  data: string;
+  data: string | Buffer;
   format: string;
 }): Promise<WorkflowActivityResult<{ fileUrl: string }>> {
   try {
@@ -888,7 +878,11 @@ export async function uploadFileActivity(input: {
   }
 }
 
-async function uploadExportData(exportId: string, data: string, format: string): Promise<string> {
+async function uploadExportData(
+  exportId: string,
+  data: string | Buffer,
+  format: string,
+): Promise<string> {
   return uploadExportBody(exportId, data, format);
 }
 
@@ -936,7 +930,7 @@ async function uploadExportBody(exportId: string, body: unknown, format: string)
   return fileUrl;
 }
 
-function writeExportStreamChunk(stream: PassThrough, chunk: string): Promise<void> {
+function writeExportStreamChunk(stream: PassThrough, chunk: string | Buffer): Promise<void> {
   if (stream.destroyed) return Promise.reject(new Error('Export upload stream was closed'));
   if (stream.write(chunk)) return Promise.resolve();
 

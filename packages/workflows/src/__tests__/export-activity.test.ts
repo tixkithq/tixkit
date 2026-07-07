@@ -63,6 +63,31 @@ const s3Mock = vi.hoisted(() => {
   };
 });
 
+const excelMock = vi.hoisted(() => ({
+  failImport: false,
+  writeBuffer: vi.fn(async () => Buffer.from([0x50, 0x4b, 0x03, 0x04, 0x78, 0x6c, 0x73, 0x78])),
+}));
+
+vi.mock('exceljs', () => {
+  if (excelMock.failImport) {
+    throw new Error('exceljs unavailable');
+  }
+
+  class Worksheet {
+    addRow = vi.fn();
+  }
+
+  class Workbook {
+    readonly xlsx = {
+      writeBuffer: excelMock.writeBuffer,
+    };
+
+    addWorksheet = vi.fn(() => new Worksheet());
+  }
+
+  return { default: { Workbook } };
+});
+
 vi.mock('@aws-sdk/client-s3', () => {
   class S3Client {
     constructor(config: unknown) {
@@ -475,6 +500,11 @@ describe('uploadFileActivity', () => {
     s3Mock.putObjectInputs.length = 0;
     s3Mock.send.mockReset();
     s3Mock.send.mockImplementation(s3Mock.defaultSend);
+    excelMock.failImport = false;
+    excelMock.writeBuffer.mockReset();
+    excelMock.writeBuffer.mockResolvedValue(
+      Buffer.from([0x50, 0x4b, 0x03, 0x04, 0x78, 0x6c, 0x73, 0x78]),
+    );
     process.env.NODE_ENV = originalNodeEnv;
     delete process.env.EXPORT_PAGE_SIZE;
     delete process.env.EXPORT_STORAGE_MODE;
@@ -619,6 +649,54 @@ describe('uploadFileActivity', () => {
     expect(s3Mock.putObjectInputs[0].Body).toEqual(
       expect.objectContaining({ pipe: expect.any(Function) }),
     );
+  });
+
+  it('uploads generated XLSX exports as binary ZIP data', async () => {
+    process.env.NODE_ENV = 'production';
+    process.env.S3_EXPORT_BUCKET = 'exports-bucket';
+    process.env.S3_EXPORT_REGION = 'us-west-2';
+
+    const result = await generateAndUploadExportActivity({
+      exportId: 'exp_1',
+      type: 'attendees',
+      format: 'xlsx',
+    });
+
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.value.rowCount).toBe(1);
+      expect(result.value.fileUrl).toContain('exp_1.xlsx');
+    }
+    expect(s3Mock.send).toHaveBeenCalledTimes(1);
+    expect(s3Mock.putObjectInputs[0]).toMatchObject({
+      Bucket: 'exports-bucket',
+      Key: 'exports/exp_1.xlsx',
+      ContentType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+    });
+    const body = s3Mock.putObjectInputs[0].Body;
+    expect(Buffer.isBuffer(body)).toBe(true);
+    expect((body as Buffer).subarray(0, 2).toString('utf8')).toBe('PK');
+  });
+
+  it('fails XLSX generation instead of uploading CSV with XLSX metadata', async () => {
+    process.env.NODE_ENV = 'production';
+    process.env.S3_EXPORT_BUCKET = 'exports-bucket';
+    process.env.S3_EXPORT_REGION = 'us-west-2';
+    excelMock.writeBuffer.mockRejectedValueOnce(new Error('excel writer unavailable'));
+
+    const result = await generateAndUploadExportActivity({
+      exportId: 'exp_1',
+      type: 'attendees',
+      format: 'xlsx',
+    });
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.errorCode).toBe('EXPORT_GENERATION_FAILED');
+      expect(result.message).toContain('XLSX export generation failed');
+    }
+    expect(s3Mock.send).not.toHaveBeenCalled();
+    expect(s3Mock.putObjectInputs).toEqual([]);
   });
 
   it('records bounded heap growth for a streamed generated CSV export', async () => {
@@ -899,7 +977,11 @@ describe('notifyExportCompleteActivity', () => {
  * commas, doubled-quote escapes, and newlines. Splits on `\n` (the export
  * activity joins rows with `\n`).
  */
-function parseCsv(csv: string): string[][] {
+function parseCsv(csv: string | Buffer): string[][] {
+  if (Buffer.isBuffer(csv)) {
+    throw new Error('Expected CSV export data to be text');
+  }
+
   const rows: string[][] = [];
   let row: string[] = [];
   let field = '';
