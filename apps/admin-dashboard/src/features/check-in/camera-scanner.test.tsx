@@ -2,7 +2,8 @@ import { render, screen, act, fireEvent } from '@testing-library/react';
 import '@testing-library/jest-dom/vitest';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { CheckInScanResult } from '@/lib/api';
-import { CameraScanner, isCameraSupported } from './camera-scanner';
+import { CameraScanner } from './camera-scanner';
+import { isCameraSupported } from './camera-support';
 
 // --- Mock @zxing/browser ---
 // The mock reader captures the continuous decode callback so tests can fire
@@ -59,11 +60,7 @@ function removeMediaDevices() {
 
 function fireDecode(payload: string) {
   act(() => {
-    mockDecodeCallback?.(
-      { getText: () => payload },
-      undefined,
-      { stop: vi.fn() },
-    );
+    mockDecodeCallback?.({ getText: () => payload }, undefined, { stop: vi.fn() });
   });
 }
 
@@ -118,9 +115,7 @@ describe('isCameraSupported', () => {
 describe('CameraScanner', () => {
   it('renders the unsupported fallback when no camera is available', async () => {
     removeMediaDevices();
-    render(
-      <CameraScanner onScan={vi.fn()} />,
-    );
+    render(<CameraScanner onScan={vi.fn()} />);
     expect(await screen.findByTestId('camera-fallback')).toBeInTheDocument();
     expect(screen.getByText('Camera not available')).toBeInTheDocument();
   });
@@ -139,7 +134,9 @@ describe('CameraScanner', () => {
   it('calls onScan with the decoded QR payload', async () => {
     const onScan = vi.fn().mockResolvedValue(makeAcceptedResult());
     render(
-      <CameraScanner onScan={onScan as unknown as (p: string) => Promise<CheckInScanResult | null>} />,
+      <CameraScanner
+        onScan={onScan as unknown as (p: string) => Promise<CheckInScanResult | null>}
+      />,
     );
     await screen.findByTestId('camera-viewport');
     fireDecode('tkt_demo_001');
@@ -149,7 +146,9 @@ describe('CameraScanner', () => {
   it('ignores empty QR payloads', async () => {
     const onScan = vi.fn().mockResolvedValue(makeAcceptedResult());
     render(
-      <CameraScanner onScan={onScan as unknown as (p: string) => Promise<CheckInScanResult | null>} />,
+      <CameraScanner
+        onScan={onScan as unknown as (p: string) => Promise<CheckInScanResult | null>}
+      />,
     );
     await screen.findByTestId('camera-viewport');
     fireDecode('   ');
@@ -183,7 +182,9 @@ describe('CameraScanner', () => {
   it('allows a different QR to be scanned without waiting for cooldown', async () => {
     const onScan = vi.fn().mockResolvedValue(makeAcceptedResult());
     render(
-      <CameraScanner onScan={onScan as unknown as (p: string) => Promise<CheckInScanResult | null>} />,
+      <CameraScanner
+        onScan={onScan as unknown as (p: string) => Promise<CheckInScanResult | null>}
+      />,
     );
     await screen.findByTestId('camera-viewport');
     fireDecode('tkt_a');
@@ -237,9 +238,7 @@ describe('CameraScanner', () => {
   });
 
   it('shows a generic error fallback with a retry button', async () => {
-    mockDecodeFromVideoDevice = vi.fn(() =>
-      Promise.reject(new Error('Something broke')),
-    );
+    mockDecodeFromVideoDevice = vi.fn(() => Promise.reject(new Error('Something broke')));
     render(<CameraScanner onScan={vi.fn()} />);
     expect(await screen.findByText('Camera error')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Retry camera' })).toBeInTheDocument();

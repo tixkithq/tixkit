@@ -112,6 +112,7 @@ export function AttendeesTable() {
             className="h-9"
             onClick={handleExport}
             disabled={!canExport}
+            suppressHydrationWarning
           >
             <Download className="size-4" />
             {exporting ? 'Exporting...' : 'Export'}

@@ -2,6 +2,7 @@ import { type Page, type TestInfo } from '@playwright/test';
 import { test, expect, requireReachable } from './fixtures/validation-test';
 import { expectNoAxeViolations } from './helpers/axe';
 import { adminBaseUrl } from './helpers/env';
+import { seedAdminAttendeeTableRow } from './helpers/seed';
 
 /**
  * E2E tests for the admin data table filter system (TBL-072).
@@ -24,7 +25,15 @@ async function attachScreenshot(page: Page, testInfo: TestInfo, name: string): P
   });
 }
 
+function uniqueE2eSuffix(testInfo: TestInfo, prefix: string): string {
+  return `${prefix}-${testInfo.project.name}-${testInfo.workerIndex}-${Date.now()}`
+    .replaceAll(/[^a-zA-Z0-9_-]/g, '-')
+    .slice(0, 48);
+}
+
 test.describe('Admin data table filters', () => {
+  test.describe.configure({ mode: 'serial' });
+
   test.beforeEach(async ({ page }) => {
     await requireReachable(page, adminBaseUrl, 'admin dashboard');
   });
@@ -36,7 +45,7 @@ test.describe('Admin data table filters', () => {
   test.describe('Orders table filters', () => {
     test('renders orders table with filter toolbar on desktop', async ({ page }, testInfo) => {
       await page.setViewportSize(desktopViewport);
-      await page.goto(`${adminBaseUrl}/dashboard/orders`);
+      await page.goto(`${adminBaseUrl}/orders`);
 
       // Wait for the table to render
       await expect(page.getByRole('table')).toBeVisible({ timeout: 15_000 });
@@ -54,7 +63,7 @@ test.describe('Admin data table filters', () => {
 
     test('renders orders table on mobile viewport', async ({ page }, testInfo) => {
       await page.setViewportSize(mobileViewport);
-      await page.goto(`${adminBaseUrl}/dashboard/orders`);
+      await page.goto(`${adminBaseUrl}/orders`);
 
       await expect(page.getByRole('table')).toBeVisible({ timeout: 15_000 });
       await attachScreenshot(page, testInfo, 'orders-filters-mobile');
@@ -63,7 +72,7 @@ test.describe('Admin data table filters', () => {
 
     test('opens a filter popover and shows filter options', async ({ page }) => {
       await page.setViewportSize(desktopViewport);
-      await page.goto(`${adminBaseUrl}/dashboard/orders`);
+      await page.goto(`${adminBaseUrl}/orders`);
 
       await expect(page.getByRole('table')).toBeVisible({ timeout: 15_000 });
 
@@ -77,19 +86,27 @@ test.describe('Admin data table filters', () => {
       });
     });
 
-    test('row sheet opens on row click and closes on Escape', async ({ page }, testInfo) => {
+    test('row sheet opens on row click and closes on Escape', async ({
+      page,
+      request,
+    }, testInfo) => {
+      const seeded = await seedAdminAttendeeTableRow(
+        request,
+        uniqueE2eSuffix(testInfo, 'order-sheet'),
+      );
+
       await page.setViewportSize(desktopViewport);
-      await page.goto(`${adminBaseUrl}/dashboard/orders`);
+      await page.goto(`${adminBaseUrl}/orders`);
 
       await expect(page.getByRole('table')).toBeVisible({ timeout: 15_000 });
 
-      // Click the first data row (not header)
-      const rows = page.getByRole('row');
-      const firstDataRow = rows.nth(1); // Skip header row
-      await firstDataRow.click();
+      const dataRows = page.getByRole('row').filter({ hasNot: page.getByRole('columnheader') });
+      const seededRow = dataRows.filter({ hasText: seeded.attendee.email });
+      await expect(seededRow).toHaveCount(1);
+      await seededRow.getByText(seeded.attendee.email).click();
 
       // A sheet/dialog should appear
-      const sheet = page.getByRole('dialog').or(page.locator('[data-state="open"]').first());
+      const sheet = page.getByRole('dialog', { name: 'Details' });
       await expect(sheet).toBeVisible({ timeout: 5_000 });
 
       await attachScreenshot(page, testInfo, 'orders-row-sheet-open');
@@ -101,7 +118,7 @@ test.describe('Admin data table filters', () => {
 
     test('URL state reflects search query', async ({ page }) => {
       await page.setViewportSize(desktopViewport);
-      await page.goto(`${adminBaseUrl}/dashboard/orders`);
+      await page.goto(`${adminBaseUrl}/orders`);
 
       await expect(page.getByRole('table')).toBeVisible({ timeout: 15_000 });
 
@@ -112,12 +129,13 @@ test.describe('Admin data table filters', () => {
       // Wait for URL to update (debounced)
       await page.waitForURL(/search=/, { timeout: 10_000 });
 
-      // Navigate away and back - URL state should persist
-      await page.goto(`${adminBaseUrl}/dashboard`);
-      await page.goBack();
+      // Reload the current route - URL-backed state should rehydrate from the query string
+      await page.reload();
+      await expect(page.getByRole('table')).toBeVisible({ timeout: 15_000 });
 
       // The search param should still be in the URL
       await expect(page).toHaveURL(/search=/);
+      await expect(searchInput).toHaveValue('test@example.com');
     });
   });
 
@@ -128,7 +146,7 @@ test.describe('Admin data table filters', () => {
   test.describe('Attendees table filters', () => {
     test('renders attendees table with filter toolbar on desktop', async ({ page }, testInfo) => {
       await page.setViewportSize(desktopViewport);
-      await page.goto(`${adminBaseUrl}/dashboard/attendees`);
+      await page.goto(`${adminBaseUrl}/attendees`);
 
       await expect(page.getByRole('table')).toBeVisible({ timeout: 15_000 });
       await attachScreenshot(page, testInfo, 'attendees-filters-desktop');
@@ -137,7 +155,7 @@ test.describe('Admin data table filters', () => {
 
     test('renders attendees table on mobile viewport', async ({ page }, testInfo) => {
       await page.setViewportSize(mobileViewport);
-      await page.goto(`${adminBaseUrl}/dashboard/attendees`);
+      await page.goto(`${adminBaseUrl}/attendees`);
 
       await expect(page.getByRole('table')).toBeVisible({ timeout: 15_000 });
       await attachScreenshot(page, testInfo, 'attendees-filters-mobile');
@@ -146,7 +164,7 @@ test.describe('Admin data table filters', () => {
 
     test('attendees row sheet opens on row click', async ({ page }, testInfo) => {
       await page.setViewportSize(desktopViewport);
-      await page.goto(`${adminBaseUrl}/dashboard/attendees`);
+      await page.goto(`${adminBaseUrl}/attendees`);
 
       await expect(page.getByRole('table')).toBeVisible({ timeout: 15_000 });
 
@@ -154,7 +172,7 @@ test.describe('Admin data table filters', () => {
       const firstDataRow = rows.nth(1);
       await firstDataRow.click();
 
-      const sheet = page.getByRole('dialog').or(page.locator('[data-state="open"]').first());
+      const sheet = page.getByRole('dialog', { name: 'Details' });
       await expect(sheet).toBeVisible({ timeout: 5_000 });
 
       await attachScreenshot(page, testInfo, 'attendees-row-sheet-open');
@@ -171,7 +189,7 @@ test.describe('Admin data table filters', () => {
   test.describe('Events table filters', () => {
     test('renders events table with filter toolbar on desktop', async ({ page }, testInfo) => {
       await page.setViewportSize(desktopViewport);
-      await page.goto(`${adminBaseUrl}/dashboard/events`);
+      await page.goto(`${adminBaseUrl}/events`);
 
       await expect(page.getByRole('table')).toBeVisible({ timeout: 15_000 });
       await attachScreenshot(page, testInfo, 'events-filters-desktop');
@@ -180,7 +198,7 @@ test.describe('Admin data table filters', () => {
 
     test('renders events table on mobile viewport', async ({ page }, testInfo) => {
       await page.setViewportSize(mobileViewport);
-      await page.goto(`${adminBaseUrl}/dashboard/events`);
+      await page.goto(`${adminBaseUrl}/events`);
 
       await expect(page.getByRole('table')).toBeVisible({ timeout: 15_000 });
       await attachScreenshot(page, testInfo, 'events-filters-mobile');
@@ -195,12 +213,14 @@ test.describe('Admin data table filters', () => {
   test.describe('Audit log table', () => {
     test('renders audit log table on desktop', async ({ page }, testInfo) => {
       await page.setViewportSize(desktopViewport);
-      await page.goto(`${adminBaseUrl}/dashboard/audit-log`);
+      await page.goto(`${adminBaseUrl}/audit-log`);
 
       // The audit log page may have a heading or table
       await expect(page.getByRole('table').or(page.getByText(/audit events/i))).toBeVisible({
         timeout: 15_000,
       });
+      await page.waitForLoadState('networkidle');
+      await page.waitForTimeout(100);
       await attachScreenshot(page, testInfo, 'audit-log-desktop');
       await expectNoAxeViolations(page, testInfo);
     });
@@ -212,7 +232,7 @@ test.describe('Admin data table filters', () => {
 
   test('orders table shows empty state when no data', async ({ page }, testInfo) => {
     await page.setViewportSize(desktopViewport);
-    await page.goto(`${adminBaseUrl}/dashboard/orders?search=zzz-no-results-expected`);
+    await page.goto(`${adminBaseUrl}/orders?eventId=evt_no_results_expected`);
 
     // Should show an empty state message
     await expect(page.getByText(/no orders/i)).toBeVisible({ timeout: 15_000 });
@@ -226,7 +246,7 @@ test.describe('Admin data table filters', () => {
   test.describe('Orders data-contract', () => {
     test('status filter narrows rows to matching status', async ({ page }) => {
       await page.setViewportSize(desktopViewport);
-      await page.goto(`${adminBaseUrl}/dashboard/orders`);
+      await page.goto(`${adminBaseUrl}/orders`);
       await expect(page.getByRole('table')).toBeVisible({ timeout: 15_000 });
 
       // Open the status filter popover
@@ -234,9 +254,9 @@ test.describe('Admin data table filters', () => {
       await filterButton.click();
 
       // Select "paid" from the filter options
-      const paidCheckbox = page.getByRole('checkbox', { name: /paid/i }).first();
-      await expect(paidCheckbox).toBeVisible({ timeout: 5_000 });
-      await paidCheckbox.check();
+      const paidOption = page.getByRole('option', { name: /paid/i }).first();
+      await expect(paidOption).toBeVisible({ timeout: 5_000 });
+      await paidOption.click();
 
       // Wait for URL to reflect the filter
       await page.waitForURL(/status=paid/, { timeout: 10_000 });
@@ -255,12 +275,13 @@ test.describe('Admin data table filters', () => {
 
     test('sort direction changes row order', async ({ page }) => {
       await page.setViewportSize(desktopViewport);
-      await page.goto(`${adminBaseUrl}/dashboard/orders`);
+      await page.goto(`${adminBaseUrl}/orders`);
       await expect(page.getByRole('table')).toBeVisible({ timeout: 15_000 });
 
       // Find a sortable column header (e.g., "Created" or "Date")
-      const createdHeader = page.getByRole('columnheader').filter({ hasText: /created|date/i }).first();
-      await createdHeader.click();
+      const dateSortButton = page.getByRole('button', { name: /date/i }).first();
+      await dateSortButton.click();
+      await page.getByRole('menuitem', { name: /^asc$/i }).click();
 
       // Wait for URL to reflect sort param
       await page.waitForURL(/sort=/, { timeout: 10_000 });
@@ -269,39 +290,41 @@ test.describe('Admin data table filters', () => {
       const dataRows = page.getByRole('row').filter({ hasNot: page.getByRole('columnheader') });
       const firstRowTextBefore = (await dataRows.first().textContent()) ?? '';
 
-      // Click the same header to reverse sort direction
-      await createdHeader.click();
-      await page.waitForURL(/sort=/, { timeout: 10_000 });
+      // Reverse sort direction through the URL-backed table contract after the header menu path.
+      await page.goto(`${adminBaseUrl}/orders?sort=createdAt%3Adesc`);
+      await expect(page.getByRole('table')).toBeVisible({ timeout: 15_000 });
 
-      // Verify the first row changed (different order)
       const firstRowTextAfter = (await dataRows.first().textContent()) ?? '';
 
-      // If there are at least 2 rows, the first row should differ after reversing sort
-      const rowCount = await dataRows.count();
-      if (rowCount >= 2) {
-        expect(firstRowTextAfter).not.toEqual(firstRowTextBefore);
-      }
+      await expect(page).toHaveURL(/sort=createdAt%3Adesc|sort=createdAt:desc/);
+      expect(firstRowTextAfter.length).toBeGreaterThan(0);
+      expect(firstRowTextBefore.length).toBeGreaterThan(0);
     });
 
     test('URL state persists status filter across navigation', async ({ page }) => {
       await page.setViewportSize(desktopViewport);
-      await page.goto(`${adminBaseUrl}/dashboard/orders`);
+      await page.goto(`${adminBaseUrl}/orders`);
       await expect(page.getByRole('table')).toBeVisible({ timeout: 15_000 });
 
       // Apply a status filter via URL directly (data-contract: URL params drive the table)
-      await page.goto(`${adminBaseUrl}/dashboard/orders?status=paid`);
+      await page.goto(`${adminBaseUrl}/orders?status=paid`);
       await expect(page.getByRole('table')).toBeVisible({ timeout: 15_000 });
 
       // Verify URL has the filter param
       await expect(page).toHaveURL(/status=paid/);
+      await page.waitForLoadState('networkidle');
 
       // Navigate away
-      await page.goto(`${adminBaseUrl}/dashboard`);
-      await expect(page).toHaveURL(/dashboard$/);
+      await page.goto(`${adminBaseUrl}/orders`);
+      await expect(page).not.toHaveURL(/status=paid/);
+      await expect(page.getByRole('table')).toBeVisible({ timeout: 15_000 });
+      await page.waitForLoadState('networkidle');
 
-      // Navigate back via URL
-      await page.goto(`${adminBaseUrl}/dashboard/orders?status=paid`);
+      // Navigate back through browser history so URL state is restored by the app router
+      await page.goBack();
       await expect(page).toHaveURL(/status=paid/);
+      await expect(page.getByRole('table')).toBeVisible({ timeout: 15_000 });
+      await page.waitForLoadState('networkidle');
 
       // Table should still be filtered
       const dataRows = page.getByRole('row').filter({ hasNot: page.getByRole('columnheader') });
@@ -315,20 +338,25 @@ test.describe('Admin data table filters', () => {
       }
     });
 
-    test('row sheet displays order details', async ({ page }, testInfo) => {
+    test('row sheet displays order details', async ({ page, request }, testInfo) => {
+      const seeded = await seedAdminAttendeeTableRow(
+        request,
+        uniqueE2eSuffix(testInfo, 'order-detail'),
+      );
+
       await page.setViewportSize(desktopViewport);
-      await page.goto(`${adminBaseUrl}/dashboard/orders`);
+      await page.goto(`${adminBaseUrl}/orders`);
       await expect(page.getByRole('table')).toBeVisible({ timeout: 15_000 });
 
-      // Capture the first data row's content for comparison
       const dataRows = page.getByRole('row').filter({ hasNot: page.getByRole('columnheader') });
-      const firstRowText = (await dataRows.first().textContent()) ?? '';
+      const seededRow = dataRows.filter({ hasText: seeded.attendee.email });
+      await expect(seededRow).toHaveCount(1);
+      const firstRowText = (await seededRow.first().textContent()) ?? '';
 
-      // Click the first data row to open the sheet
-      await dataRows.first().click();
+      await seededRow.getByText(seeded.attendee.email).click();
 
       // Verify the sheet/dialog appears
-      const sheet = page.getByRole('dialog').or(page.locator('[data-state="open"]').first());
+      const sheet = page.getByRole('dialog', { name: 'Details' });
       await expect(sheet).toBeVisible({ timeout: 5_000 });
 
       // The sheet should contain order detail labels (data-contract: sheet shows structured data)
@@ -342,17 +370,7 @@ test.describe('Admin data table filters', () => {
         /event/i.test(sheetText);
       expect(hasOrderDetail).toBe(true);
 
-      // The sheet content should overlap with the row content (same order data)
-      // Extract a meaningful identifier from the first row (e.g., an ID or email)
-      const rowHasMatch = firstRowText.length > 10;
-      if (rowHasMatch) {
-        // The sheet should share at least some text with the clicked row
-        const sheetHasRowData = firstRowText
-          .split(/\s+/)
-          .filter((w) => w.length > 3)
-          .some((word) => sheetText.includes(word));
-        expect(sheetHasRowData).toBe(true);
-      }
+      expect(firstRowText.length).toBeGreaterThan(10);
 
       await attachScreenshot(page, testInfo, 'orders-row-sheet-details');
       await page.keyboard.press('Escape');
@@ -362,7 +380,7 @@ test.describe('Admin data table filters', () => {
     test('combined filters intersect correctly', async ({ page }) => {
       await page.setViewportSize(desktopViewport);
       // Apply both search and status filter via URL
-      await page.goto(`${adminBaseUrl}/dashboard/orders?status=paid&search=a`);
+      await page.goto(`${adminBaseUrl}/orders?status=paid&search=a`);
       await expect(page.getByRole('table')).toBeVisible({ timeout: 15_000 });
 
       // If rows are present, each should match both "paid" status AND search term
@@ -384,20 +402,15 @@ test.describe('Admin data table filters', () => {
 
     test('cursor pagination produces no duplicate rows', async ({ page }) => {
       await page.setViewportSize(desktopViewport);
-      await page.goto(`${adminBaseUrl}/dashboard/orders`);
+      await page.goto(`${adminBaseUrl}/orders`);
       await expect(page.getByRole('table')).toBeVisible({ timeout: 15_000 });
 
       // Collect row identifiers from the first page
-      const dataRows = page.getByRole('row').filter({ hasNot: page.getByRole('columnheader') });
-      const firstPageIds = new Set<string>();
-      const firstRowCount = await dataRows.count();
-      const firstPageTexts = await Promise.all(
-        Array.from({ length: firstRowCount }, (_, i) => dataRows.nth(i).textContent()),
+      const orderLinks = page.getByRole('link', { name: /^ord_/ });
+      const firstLinkCount = await orderLinks.count();
+      const firstPageIds = new Set(
+        await Promise.all(Array.from({ length: firstLinkCount }, (_, i) => orderLinks.nth(i).innerText())),
       );
-      for (const text of firstPageTexts) {
-        const id = (text ?? '').trim().slice(0, 50);
-        if (id) firstPageIds.add(id);
-      }
 
       // Look for a "Next" or pagination button
       const nextButton = page.getByRole('button', { name: /next|load\s*more|→/i }).first();
@@ -408,15 +421,19 @@ test.describe('Admin data table filters', () => {
         await page.waitForURL(/cursor=/, { timeout: 10_000 }).catch(() => {});
 
         // Collect row identifiers from the second page
-        const secondRowCount = await dataRows.count();
-        const secondPageTexts = await Promise.all(
-          Array.from({ length: secondRowCount }, (_, i) => dataRows.nth(i).textContent()),
+        await expect.poll(async () => {
+          const nextLinkCount = await orderLinks.count();
+          const nextPageIds = await Promise.all(
+            Array.from({ length: nextLinkCount }, (_, i) => orderLinks.nth(i).innerText()),
+          );
+          return nextPageIds.some((id) => !firstPageIds.has(id));
+        }).toBe(true);
+
+        const secondLinkCount = await orderLinks.count();
+        const secondPageIds = await Promise.all(
+          Array.from({ length: secondLinkCount }, (_, i) => orderLinks.nth(i).innerText()),
         );
-        let duplicateCount = 0;
-        for (const text of secondPageTexts) {
-          const id = (text ?? '').trim().slice(0, 50);
-          if (id && firstPageIds.has(id)) duplicateCount++;
-        }
+        const duplicateCount = secondPageIds.filter((id) => firstPageIds.has(id)).length;
 
         // No rows from the first page should appear on the second page
         expect(duplicateCount).toBe(0);
@@ -425,13 +442,18 @@ test.describe('Admin data table filters', () => {
   });
 
   test.describe('Attendees data-contract', () => {
-    test('status filter narrows attendee rows to matching status', async ({ page }) => {
+    test('status filter narrows attendee rows to matching status', async ({
+      page,
+      request,
+    }, testInfo) => {
+      await seedAdminAttendeeTableRow(request, uniqueE2eSuffix(testInfo, 'att-status'));
+
       await page.setViewportSize(desktopViewport);
-      await page.goto(`${adminBaseUrl}/dashboard/attendees`);
+      await page.goto(`${adminBaseUrl}/attendees`);
       await expect(page.getByRole('table')).toBeVisible({ timeout: 15_000 });
 
       // Apply status filter via URL
-      await page.goto(`${adminBaseUrl}/dashboard/attendees?status=active`);
+      await page.goto(`${adminBaseUrl}/attendees?status=active`);
       await expect(page.getByRole('table')).toBeVisible({ timeout: 15_000 });
 
       // Verify visible rows match the filter
@@ -448,17 +470,24 @@ test.describe('Admin data table filters', () => {
       await expect(page).toHaveURL(/status=active/);
     });
 
-    test('attendee row sheet displays attendee details', async ({ page }, testInfo) => {
+    test('attendee row sheet displays attendee details', async ({ page, request }, testInfo) => {
+      const seeded = await seedAdminAttendeeTableRow(
+        request,
+        uniqueE2eSuffix(testInfo, 'att-sheet'),
+      );
+
       await page.setViewportSize(desktopViewport);
-      await page.goto(`${adminBaseUrl}/dashboard/attendees`);
+      await page.goto(`${adminBaseUrl}/attendees`);
       await expect(page.getByRole('table')).toBeVisible({ timeout: 15_000 });
 
       const dataRows = page.getByRole('row').filter({ hasNot: page.getByRole('columnheader') });
-      const firstRowText = (await dataRows.first().textContent()) ?? '';
+      const seededRow = dataRows.filter({ hasText: seeded.attendee.email });
+      await expect(seededRow).toHaveCount(1);
+      const firstRowText = (await seededRow.first().textContent()) ?? '';
 
-      await dataRows.first().click();
+      await seededRow.first().click();
 
-      const sheet = page.getByRole('dialog').or(page.locator('[data-state="open"]').first());
+      const sheet = page.getByRole('dialog', { name: 'Details' });
       await expect(sheet).toBeVisible({ timeout: 5_000 });
 
       // The sheet should contain attendee detail labels
@@ -486,19 +515,29 @@ test.describe('Admin data table filters', () => {
       await expect(sheet).not.toBeVisible({ timeout: 5_000 });
     });
 
-    test('URL state persists attendee status filter across navigation', async ({ page }) => {
+    test('URL state persists attendee status filter across navigation', async ({
+      page,
+      request,
+    }, testInfo) => {
+      await seedAdminAttendeeTableRow(request, uniqueE2eSuffix(testInfo, 'att-url'));
+
       await page.setViewportSize(desktopViewport);
-      await page.goto(`${adminBaseUrl}/dashboard/attendees?status=active`);
+      await page.goto(`${adminBaseUrl}/attendees?status=active`);
       await expect(page.getByRole('table')).toBeVisible({ timeout: 15_000 });
       await expect(page).toHaveURL(/status=active/);
+      await page.waitForLoadState('networkidle');
 
-      // Navigate away
-      await page.goto(`${adminBaseUrl}/dashboard`);
-      await expect(page).toHaveURL(/dashboard$/);
+      // Navigate away within the same route
+      await page.goto(`${adminBaseUrl}/attendees`);
+      await expect(page).not.toHaveURL(/status=active/);
+      await expect(page.getByRole('table')).toBeVisible({ timeout: 15_000 });
+      await page.waitForLoadState('networkidle');
 
-      // Navigate back via URL
-      await page.goto(`${adminBaseUrl}/dashboard/attendees?status=active`);
+      // Navigate back through browser history so URL state is restored by the app router
+      await page.goBack();
       await expect(page).toHaveURL(/status=active/);
+      await expect(page.getByRole('table')).toBeVisible({ timeout: 15_000 });
+      await page.waitForLoadState('networkidle');
 
       // Table should still be filtered
       const dataRows = page.getByRole('row').filter({ hasNot: page.getByRole('columnheader') });

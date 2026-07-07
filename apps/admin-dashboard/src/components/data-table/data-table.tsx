@@ -3,8 +3,10 @@
 import * as React from 'react';
 import {
   type ColumnDef,
+  type SortingState,
   type Table as TanstackTable,
   flexRender,
+  functionalUpdate,
   getCoreRowModel,
   useReactTable,
 } from '@tanstack/react-table';
@@ -66,11 +68,40 @@ export function DataTable<TData>({
   const rowClickRef = React.useRef<HTMLElement | null>(null);
 
   const items = data?.items ?? [];
+  const sortableFields = React.useMemo(
+    () => new Set(schema.columns.filter((column) => column.sortable).map((column) => column.id)),
+    [schema],
+  );
+  const sorting = React.useMemo<SortingState>(
+    () =>
+      (query.sort ?? [])
+        .filter((sort) => sortableFields.has(sort.field))
+        .map((sort) => ({ id: sort.field, desc: sort.direction === 'desc' })),
+    [query.sort, sortableFields],
+  );
 
   const table = useReactTable({
     data: items,
     columns,
-    state: {},
+    state: { sorting },
+    manualSorting: true,
+    onSortingChange: (updater) => {
+      const nextSorting = functionalUpdate(updater, sorting).filter((sort) =>
+        sortableFields.has(sort.id),
+      );
+      onQueryChange((prev) => ({
+        ...prev,
+        cursor: undefined,
+        direction: undefined,
+        sort:
+          nextSorting.length > 0
+            ? nextSorting.map((sort) => ({
+                field: sort.id,
+                direction: sort.desc ? 'desc' : 'asc',
+              }))
+            : undefined,
+      }));
+    },
     getRowId,
     getCoreRowModel: getCoreRowModel(),
   });

@@ -5522,15 +5522,15 @@ export const adminApi: AdminApi = {
         return result;
       },
       () => {
-        const now = new Date().toISOString();
+        const createdAt = new Date().toISOString();
         const list: AdminCheckInList = {
           id: `cil_${Date.now()}`,
           eventId,
           name: input.name,
           ticketTypeIds: input.ticketTypeIds ?? [],
           status: 'active',
-          createdAt: now,
-          updatedAt: now,
+          createdAt,
+          updatedAt: createdAt,
         };
         const existing = fixtureCheckInLists[eventId] ?? [];
         fixtureCheckInLists[eventId] = [...existing, list];
@@ -5754,7 +5754,7 @@ export const adminApi: AdminApi = {
       () =>
         request<{ document: AdminContentDocument; version: AdminContentDocumentVersion }>(
           `/v1/content-documents/${documentId}/versions/${versionId}/publish`,
-          { method: 'POST' },
+          { method: 'POST', body: JSON.stringify({}) },
         ),
       () =>
         err<{ document: AdminContentDocument; version: AdminContentDocumentVersion }>(
@@ -5768,6 +5768,7 @@ export const adminApi: AdminApi = {
       () =>
         request<AdminContentDocument>(`/v1/content-documents/${documentId}/archive`, {
           method: 'POST',
+          body: JSON.stringify({}),
         }),
       () =>
         err<AdminContentDocument>(

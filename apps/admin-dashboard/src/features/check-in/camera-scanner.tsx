@@ -6,6 +6,7 @@ import type { Result } from '@zxing/library';
 import { CameraOff, Loader2, RefreshCw, ScanLine } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import type { CheckInScanResult } from '@/lib/api';
+import { isCameraSupported } from './camera-support';
 
 export type CameraScannerProps = {
   /**
@@ -20,28 +21,9 @@ export type CameraScannerProps = {
   cooldownMs?: number;
 };
 
-type CameraStatus =
-  | 'starting'
-  | 'scanning'
-  | 'paused'
-  | 'denied'
-  | 'unsupported'
-  | 'error';
+type CameraStatus = 'starting' | 'scanning' | 'paused' | 'denied' | 'unsupported' | 'error';
 
 const COOLDOWN_DEFAULT_MS = 1500;
-
-/**
- * Detects whether the current environment can access a camera. Guarded so it
- * never throws during SSR or in jsdom (where `navigator.mediaDevices` is
- * undefined).
- */
-export function isCameraSupported(): boolean {
-  if (typeof navigator === 'undefined') return false;
-  if (!navigator.mediaDevices) return false;
-  if (typeof navigator.mediaDevices.getUserMedia !== 'function') return false;
-  if (typeof window !== 'undefined' && window.isSecureContext === false) return false;
-  return true;
-}
 
 /**
  * Live camera QR scanner built on @zxing/browser. Auto-starts on mount when a

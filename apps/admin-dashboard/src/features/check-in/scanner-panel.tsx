@@ -8,7 +8,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { isCameraSupported, CameraScanner } from './camera-scanner';
+import { isCameraSupported } from './camera-support';
 import { ScanResult } from './scan-result';
 
 export type ScannerPanelProps = {
@@ -22,6 +22,11 @@ export type ScannerPanelProps = {
 };
 
 type ScanMode = 'camera' | 'manual';
+
+const CameraScanner = React.lazy(async () => {
+  const module = await import('./camera-scanner');
+  return { default: module.CameraScanner };
+});
 
 /**
  * Shared scan card with a Camera / Manual toggle. Both modes route through
@@ -106,7 +111,18 @@ export function ScannerPanel({
           <TabsContent value="camera" className="mt-4">
             {/* Only mount the camera when the tab is active so the stream is
             released immediately when switching to Manual. */}
-            <CameraScanner onScan={onScan} disabled={scanning} />
+            {mode === 'camera' && (
+              <React.Suspense
+                fallback={
+                  <div
+                    className="relative w-full overflow-hidden rounded-lg border bg-black aspect-[4/3]"
+                    aria-label="Loading camera scanner"
+                  />
+                }
+              >
+                <CameraScanner onScan={onScan} disabled={scanning} />
+              </React.Suspense>
+            )}
           </TabsContent>
 
           <TabsContent value="manual" className="mt-4">

@@ -32,7 +32,7 @@ export function DataTablePagination({
 }: DataTablePaginationProps) {
   const limit = query.limit ?? schema.defaultPageSize;
   const hasNext = Boolean(data?.nextCursor);
-  const hasPrev = Boolean(data?.prevCursor) || Boolean(query.cursor);
+  const hasPrev = Boolean(data?.prevCursor);
   const total = data?.total;
   const filterTotal = data?.filterTotal;
 
@@ -71,17 +71,13 @@ export function DataTablePagination({
       )}
     >
       <div className="text-sm text-muted-foreground">
-        {loading ? (
-          'Loading…'
-        ) : total !== undefined ? (
-          filterTotal !== undefined && filterTotal !== total ? (
-            `${filterTotal} of ${total} rows`
-          ) : (
-            `${total} row${total === 1 ? '' : 's'}`
-          )
-        ) : (
-          `${rowCount} row${rowCount === 1 ? '' : 's'}`
-        )}
+        {loading
+          ? 'Loading…'
+          : total !== undefined
+            ? filterTotal !== undefined && filterTotal !== total
+              ? `${filterTotal} of ${total} rows`
+              : `${total} row${total === 1 ? '' : 's'}`
+            : `${rowCount} row${rowCount === 1 ? '' : 's'}`}
       </div>
       <div className="flex flex-wrap items-center gap-4 sm:gap-6 lg:gap-8">
         <div className="flex items-center gap-2">
@@ -106,6 +102,7 @@ export function DataTablePagination({
             className="size-8"
             onClick={goToPrev}
             disabled={!hasPrev || loading}
+            suppressHydrationWarning
             aria-label="Previous page"
           >
             <ChevronLeft />
@@ -116,6 +113,7 @@ export function DataTablePagination({
             className="size-8"
             onClick={goToNext}
             disabled={!hasNext || loading}
+            suppressHydrationWarning
             aria-label="Next page"
           >
             <ChevronRight />

@@ -1,7 +1,7 @@
 'use client';
 
 import * as React from 'react';
-import { Check, PlusCircle } from 'lucide-react';
+import { Check, PlusCircle, Search } from 'lucide-react';
 import type {
   TableSchema,
   ColumnSpec,
@@ -14,15 +14,6 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
-import {
-  Command,
-  CommandEmpty,
-  CommandGroup,
-  CommandInput,
-  CommandItem,
-  CommandList,
-  CommandSeparator,
-} from '@/components/ui/command';
 
 type DataTableFilterPopoverProps = {
   schema: TableSchema;
@@ -31,6 +22,10 @@ type DataTableFilterPopoverProps = {
   onChange: (value: AdminTableFilterValue | undefined) => void;
   facet?: AdminTableFacet;
 };
+
+const SELECT_OPTION_ROW_HEIGHT = 34;
+const SELECT_OPTION_MAX_VISIBLE_ROWS = 8;
+const SELECT_OPTION_OVERSCAN = 3;
 
 export function DataTableFilterPopover({
   column,
@@ -66,29 +61,13 @@ export function DataTableFilterPopover({
                   <SelectedLabels value={value} />
                 )}
               </div>
-              <button
-                type="button"
-                className="ms-1 rounded-sm opacity-70 hover:opacity-100"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  onChange(undefined);
-                }}
-                aria-label={`Clear ${column.label} filter`}
-              >
-                <PlusCircle className="size-3.5 rotate-45" />
-              </button>
             </>
           )}
         </Button>
       </PopoverTrigger>
       <PopoverContent className="w-[220px] p-0" align="start">
         {column.filterType === 'select' && (
-          <SelectFilterContent
-            column={column}
-            value={value}
-            onChange={onChange}
-            facet={facet}
-          />
+          <SelectFilterContent column={column} value={value} onChange={onChange} facet={facet} />
         )}
         {column.filterType === 'boolean' && (
           <BooleanFilterContent column={column} value={value} onChange={onChange} facet={facet} />
@@ -116,9 +95,10 @@ function SelectFilterContent({
   facet?: AdminTableFacet;
 }) {
   const options = column.options ?? [];
-  const selectedValues = new Set(
-    value?.type === 'select' ? value.values : [],
-  );
+  const [searchValue, setSearchValue] = React.useState('');
+  const scrollRef = React.useRef<HTMLDivElement | null>(null);
+  const [scrollTop, setScrollTop] = React.useState(0);
+  const selectedValues = new Set(value?.type === 'select' ? value.values : []);
 
   const facetCounts = React.useMemo(() => {
     const map = new Map<string, number>();
@@ -130,61 +110,116 @@ function SelectFilterContent({
     return map;
   }, [facet]);
 
+  const filteredOptions = React.useMemo(() => {
+    const normalizedSearch = searchValue.trim().toLowerCase();
+    if (!normalizedSearch) return options;
+    return options.filter((option) =>
+      formatOptionLabel(option).toLowerCase().includes(normalizedSearch),
+    );
+  }, [options, searchValue]);
+
+  React.useEffect(() => {
+    setScrollTop(0);
+    if (scrollRef.current) scrollRef.current.scrollTop = 0;
+  }, [searchValue]);
+
+  const viewportHeight =
+    Math.min(filteredOptions.length, SELECT_OPTION_MAX_VISIBLE_ROWS) * SELECT_OPTION_ROW_HEIGHT;
+  const totalHeight = filteredOptions.length * SELECT_OPTION_ROW_HEIGHT;
+  const startIndex = Math.max(
+    0,
+    Math.floor(scrollTop / SELECT_OPTION_ROW_HEIGHT) - SELECT_OPTION_OVERSCAN,
+  );
+  const visibleCount =
+    Math.ceil(Math.max(viewportHeight, SELECT_OPTION_ROW_HEIGHT) / SELECT_OPTION_ROW_HEIGHT) +
+    SELECT_OPTION_OVERSCAN * 2;
+  const endIndex = Math.min(filteredOptions.length, startIndex + visibleCount);
+  const visibleOptions = filteredOptions.slice(startIndex, endIndex);
+  const topOffset = startIndex * SELECT_OPTION_ROW_HEIGHT;
+
+  const toggleOption = (option: string) => {
+    const nextSelectedValues = new Set(selectedValues);
+    if (nextSelectedValues.has(option)) {
+      nextSelectedValues.delete(option);
+    } else {
+      nextSelectedValues.add(option);
+    }
+    const values = Array.from(nextSelectedValues);
+    onChange(values.length > 0 ? { type: 'select', values } : undefined);
+  };
+
   return (
-    <Command>
-      <CommandInput placeholder={column.label} />
-      <CommandList>
-        <CommandEmpty>No options found.</CommandEmpty>
-        <CommandGroup>
-          {options.map((option) => {
-            const isSelected = selectedValues.has(option);
-            const count = facetCounts.get(option);
-            return (
-              <CommandItem
-                key={option}
-                onSelect={() => {
-                  if (isSelected) {
-                    selectedValues.delete(option);
-                  } else {
-                    selectedValues.add(option);
-                  }
-                  const values = Array.from(selectedValues);
-                  onChange(values.length > 0 ? { type: 'select', values } : undefined);
-                }}
-              >
-                <div
-                  className={cn(
-                    'flex size-4 items-center justify-center rounded-[4px] border',
-                    isSelected
-                      ? 'border-primary bg-primary text-primary-foreground'
-                      : 'opacity-50',
-                  )}
-                >
-                  {isSelected && <Check className="size-3.5" />}
-                </div>
-                <span className="capitalize">{option.replace(/_/g, ' ')}</span>
-                {count !== undefined && (
-                  <span className="ms-auto flex size-4 items-center justify-center font-mono text-xs">
-                    {count}
-                  </span>
-                )}
-              </CommandItem>
-            );
-          })}
-          {selectedValues.size > 0 && (
-            <>
-              <CommandSeparator />
-              <CommandItem
-                onSelect={() => onChange(undefined)}
-                className="justify-center text-center"
-              >
-                Clear filter
-              </CommandItem>
-            </>
-          )}
-        </CommandGroup>
-      </CommandList>
-    </Command>
+    <div className="overflow-hidden rounded-md bg-popover text-popover-foreground">
+      <div className="flex h-9 items-center gap-2 border-b px-3">
+        <Search className="size-4 shrink-0 opacity-50" />
+        <Input
+          value={searchValue}
+          onChange={(event) => setSearchValue(event.target.value)}
+          placeholder={column.label}
+          className="h-8 border-0 bg-transparent px-0 py-0 shadow-none focus-visible:ring-0"
+        />
+      </div>
+      {filteredOptions.length === 0 ? (
+        <div className="py-6 text-center text-sm">No options found.</div>
+      ) : (
+        <div
+          ref={scrollRef}
+          className="overflow-x-hidden overflow-y-auto p-1"
+          style={{ height: viewportHeight }}
+          onScroll={(event) => setScrollTop(event.currentTarget.scrollTop)}
+        >
+          <div className="relative" style={{ height: totalHeight }}>
+            <div
+              className="absolute inset-x-0 top-0"
+              style={{ transform: `translateY(${topOffset}px)` }}
+            >
+              {visibleOptions.map((option) => {
+                const isSelected = selectedValues.has(option);
+                const count = facetCounts.get(option);
+                return (
+                  <button
+                    key={option}
+                    type="button"
+                    className="flex w-full cursor-default items-center gap-2 rounded-sm px-2 py-1.5 text-start text-sm outline-hidden select-none hover:bg-accent hover:text-accent-foreground focus-visible:bg-accent focus-visible:text-accent-foreground"
+                    style={{ height: SELECT_OPTION_ROW_HEIGHT }}
+                    onClick={() => toggleOption(option)}
+                  >
+                    <div
+                      className={cn(
+                        'flex size-4 items-center justify-center rounded-[4px] border',
+                        isSelected
+                          ? 'border-primary bg-primary text-primary-foreground'
+                          : 'opacity-50',
+                      )}
+                    >
+                      {isSelected && <Check className="size-3.5" />}
+                    </div>
+                    <span className="truncate capitalize">{formatOptionLabel(option)}</span>
+                    {count !== undefined && (
+                      <span className="ms-auto flex size-4 shrink-0 items-center justify-center font-mono text-xs">
+                        {count}
+                      </span>
+                    )}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        </div>
+      )}
+      {selectedValues.size > 0 && (
+        <>
+          <div className="h-px bg-border" />
+          <button
+            type="button"
+            onClick={() => onChange(undefined)}
+            className="flex w-full items-center justify-center px-2 py-1.5 text-center text-sm hover:bg-accent"
+          >
+            Clear filter
+          </button>
+        </>
+      )}
+    </div>
   );
 }
 
@@ -211,13 +246,17 @@ function BooleanFilterContent({
           label="Yes"
           count={trueCount}
           isSelected={currentValue === true}
-          onSelect={() => onChange(currentValue === true ? undefined : { type: 'boolean', value: true })}
+          onSelect={() =>
+            onChange(currentValue === true ? undefined : { type: 'boolean', value: true })
+          }
         />
         <BooleanOption
           label="No"
           count={falseCount}
           isSelected={currentValue === false}
-          onSelect={() => onChange(currentValue === false ? undefined : { type: 'boolean', value: false })}
+          onSelect={() =>
+            onChange(currentValue === false ? undefined : { type: 'boolean', value: false })
+          }
         />
       </div>
       {currentValue !== undefined && (
@@ -279,8 +318,8 @@ function DateRangeFilterContent({
   value: AdminTableFilterValue | undefined;
   onChange: (value: AdminTableFilterValue | undefined) => void;
 }) {
-  const from = value?.type === 'date_range' ? value.from ?? '' : '';
-  const to = value?.type === 'date_range' ? value.to ?? '' : '';
+  const from = value?.type === 'date_range' ? (value.from ?? '') : '';
+  const to = value?.type === 'date_range' ? (value.to ?? '') : '';
 
   const handleFromChange = (newFrom: string) => {
     const hasFrom = newFrom.trim().length > 0;
@@ -288,7 +327,11 @@ function DateRangeFilterContent({
     if (!hasFrom && !hasTo) {
       onChange(undefined);
     } else {
-      onChange({ type: 'date_range', from: hasFrom ? newFrom : undefined, to: hasTo ? to : undefined });
+      onChange({
+        type: 'date_range',
+        from: hasFrom ? newFrom : undefined,
+        to: hasTo ? to : undefined,
+      });
     }
   };
 
@@ -298,7 +341,11 @@ function DateRangeFilterContent({
     if (!hasFrom && !hasTo) {
       onChange(undefined);
     } else {
-      onChange({ type: 'date_range', from: hasFrom ? from : undefined, to: hasTo ? newTo : undefined });
+      onChange({
+        type: 'date_range',
+        from: hasFrom ? from : undefined,
+        to: hasTo ? newTo : undefined,
+      });
     }
   };
 
@@ -420,17 +467,13 @@ function NumberRangeFilterContent({
   );
 }
 
-function SelectedLabels({
-  value,
-}: {
-  value: AdminTableFilterValue | undefined;
-}) {
+function SelectedLabels({ value }: { value: AdminTableFilterValue | undefined }) {
   if (value?.type === 'select') {
     return (
       <>
         {value.values.slice(0, 2).map((v) => (
           <Badge key={v} variant="secondary" className="rounded-sm px-1 font-normal">
-            {v.replace(/_/g, ' ')}
+            {formatOptionLabel(v)}
           </Badge>
         ))}
       </>
@@ -466,7 +509,12 @@ function getSelectedCount(value: AdminTableFilterValue | undefined): number {
   if (value.type === 'select') return value.values.length;
   if (value.type === 'boolean') return 1;
   if (value.type === 'date_range') return (value.from ? 1 : 0) + (value.to ? 1 : 0);
-  if (value.type === 'number_range') return (value.min !== undefined ? 1 : 0) + (value.max !== undefined ? 1 : 0);
+  if (value.type === 'number_range')
+    return (value.min !== undefined ? 1 : 0) + (value.max !== undefined ? 1 : 0);
   if (value.type === 'text') return value.value.trim() ? 1 : 0;
   return 0;
+}
+
+function formatOptionLabel(value: string): string {
+  return value.replace(/_/g, ' ');
 }
