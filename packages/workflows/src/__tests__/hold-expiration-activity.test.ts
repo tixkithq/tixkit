@@ -439,9 +439,10 @@ describe('processWaitlistOffersActivity', () => {
     });
     expect(String(dbState.emailJobs[0].variables.claimUrl)).toContain('claimToken=');
     expect(dbState.tables.waitlist_entries[0].status).toBe('offered');
+    expect(dbState.tables.waitlist_entries[0].claim_token_hash).toEqual(expect.any(String));
   });
 
-  it('warns when an offered waitlist entry cannot resolve a template', async () => {
+  it('leaves joined waitlist entries unoffered when the invite template is missing', async () => {
     seedOfferableWaitlistEntry();
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
 
@@ -449,9 +450,13 @@ describe('processWaitlistOffersActivity', () => {
 
     expect(result).toEqual({
       ok: true,
-      value: { expiredCount: 0, offeredCount: 1, queuedEmailCount: 0 },
+      value: { expiredCount: 0, offeredCount: 0, queuedEmailCount: 0 },
     });
     expect(dbState.emailJobs).toEqual([]);
+    expect(dbState.tables.waitlist_entries[0].status).toBe('joined');
+    expect(dbState.tables.waitlist_entries[0]).not.toHaveProperty('claim_token_hash');
+    expect(dbState.tables.waitlist_entries[0]).not.toHaveProperty('offer_expires_at');
+    expect(dbState.tables.waitlist_entries[0]).not.toHaveProperty('offered_at');
     expect(warn).toHaveBeenCalledWith('WAITLIST_OFFER_EMAIL_SKIPPED', {
       tenantId: 'tnt_1',
       brandId: 'brd_1',
@@ -459,6 +464,38 @@ describe('processWaitlistOffersActivity', () => {
       templateKey: 'waitlist-invite',
       missingRoute: false,
       missingTemplateVersion: true,
+    });
+  });
+
+  it('leaves joined waitlist entries unoffered when the invite route is missing', async () => {
+    seedOfferableWaitlistEntry();
+    dbState.tables.email_provider_routes = [];
+    dbState.tables.notification_templates = [
+      { id: 'ntpl_1', tenant_id: 'tnt_1', brand_id: 'brd_1', key: 'waitlist-invite' },
+    ];
+    dbState.tables.notification_template_versions = [
+      { id: 'ntv_1', template_id: 'ntpl_1', is_default: true },
+    ];
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+
+    const result = await processWaitlistOffersActivity();
+
+    expect(result).toEqual({
+      ok: true,
+      value: { expiredCount: 0, offeredCount: 0, queuedEmailCount: 0 },
+    });
+    expect(dbState.emailJobs).toEqual([]);
+    expect(dbState.tables.waitlist_entries[0].status).toBe('joined');
+    expect(dbState.tables.waitlist_entries[0]).not.toHaveProperty('claim_token_hash');
+    expect(dbState.tables.waitlist_entries[0]).not.toHaveProperty('offer_expires_at');
+    expect(dbState.tables.waitlist_entries[0]).not.toHaveProperty('offered_at');
+    expect(warn).toHaveBeenCalledWith('WAITLIST_OFFER_EMAIL_SKIPPED', {
+      tenantId: 'tnt_1',
+      brandId: 'brd_1',
+      waitlistEntryId: 'wle_1',
+      templateKey: 'waitlist-invite',
+      missingRoute: true,
+      missingTemplateVersion: false,
     });
   });
 });

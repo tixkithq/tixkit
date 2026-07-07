@@ -199,6 +199,8 @@ export async function processWaitlistOffersActivity(): Promise<
         candidate: (typeof candidates)[number];
         claimToken: string;
         offerExpiresAt: Date;
+        providerRouteId: string;
+        templateVersionId: string;
       }> = [];
       const reservedByPool = new Map<string, number>();
       const activeOffersByPool = new Map<string, number>();
@@ -251,6 +253,51 @@ export async function processWaitlistOffersActivity(): Promise<
           alreadyOffered;
         if (available < Number(candidate.quantity)) continue;
 
+        // eslint-disable-next-line no-await-in-loop -- each candidate must have a verified route before it can consume waitlist capacity.
+        const route = await trx
+          .selectFrom('email_provider_routes')
+          .select(['id'])
+          .where('tenant_id', '=', candidate.tenant_id)
+          .where('brand_id', '=', candidate.brand_id)
+          .where('status', '=', 'active')
+          .where('smoke_send_verified', '=', true)
+          .orderBy('priority', 'asc')
+          .executeTakeFirst();
+        // eslint-disable-next-line no-await-in-loop -- the invite template must be ready before this entry is marked offered.
+        const templateVersion = await trx
+          .selectFrom('notification_templates as template')
+          .innerJoin(
+            'notification_template_versions as version',
+            'version.template_id',
+            'template.id',
+          )
+          .select(['version.id'])
+          .where('template.tenant_id', '=', candidate.tenant_id)
+          .where('template.brand_id', '=', candidate.brand_id)
+          .where('template.key', '=', WAITLIST_INVITE_TEMPLATE_KEY)
+          .where('version.is_default', '=', true)
+          .executeTakeFirst();
+        if (!route || !templateVersion) {
+          console.warn('WAITLIST_OFFER_EMAIL_SKIPPED', {
+            tenantId: candidate.tenant_id,
+            brandId: candidate.brand_id,
+            waitlistEntryId: candidate.entry_id,
+            templateKey: WAITLIST_INVITE_TEMPLATE_KEY,
+            missingRoute: !route,
+            missingTemplateVersion: !templateVersion,
+          });
+          continue;
+        }
+
+        // eslint-disable-next-line no-await-in-loop -- idempotency is checked per entry before reserving capacity for its notification.
+        const existingJob = await trx
+          .selectFrom('email_jobs')
+          .select('id')
+          .where('tenant_id', '=', candidate.tenant_id)
+          .where('idempotency_key', '=', `${WAITLIST_INVITE_TEMPLATE_KEY}:${candidate.entry_id}`)
+          .executeTakeFirst();
+        if (existingJob) continue;
+
         const claimToken = randomBytes(24).toString('base64url');
         const offerTtlMinutes = Number(candidate.waitlist_offer_ttl_minutes ?? 1440);
         const offerExpiresAt = new Date(now.getTime() + offerTtlMinutes * 60_000);
@@ -272,65 +319,32 @@ export async function processWaitlistOffersActivity(): Promise<
 
         offeredCount += 1;
         reservedByPool.set(inventoryPoolId, alreadyOffered + Number(candidate.quantity));
-        offeredCandidates.push({ candidate, claimToken, offerExpiresAt });
+        offeredCandidates.push({
+          candidate,
+          claimToken,
+          offerExpiresAt,
+          providerRouteId: route.id,
+          templateVersionId: templateVersion.id,
+        });
       }
 
       return { expired, offeredCount, offeredCandidates };
     });
 
     let queuedEmailCount = 0;
-    for (const { candidate, claimToken, offerExpiresAt } of offerResult.offeredCandidates) {
-      // eslint-disable-next-line no-await-in-loop -- email route selection belongs to the entry just offered.
-      const route = await db
-        .selectFrom('email_provider_routes')
-        .select(['id'])
-        .where('tenant_id', '=', candidate.tenant_id)
-        .where('brand_id', '=', candidate.brand_id)
-        .where('status', '=', 'active')
-        .where('smoke_send_verified', '=', true)
-        .orderBy('priority', 'asc')
-        .executeTakeFirst();
-      // eslint-disable-next-line no-await-in-loop -- template lookup must match the route and brand for the current offer.
-      const templateVersion = await db
-        .selectFrom('notification_templates as template')
-        .innerJoin(
-          'notification_template_versions as version',
-          'version.template_id',
-          'template.id',
-        )
-        .select(['version.id'])
-        .where('template.tenant_id', '=', candidate.tenant_id)
-        .where('template.brand_id', '=', candidate.brand_id)
-        .where('template.key', '=', WAITLIST_INVITE_TEMPLATE_KEY)
-        .where('version.is_default', '=', true)
-        .executeTakeFirst();
-      if (!route || !templateVersion) {
-        console.warn('WAITLIST_OFFER_EMAIL_SKIPPED', {
-          tenantId: candidate.tenant_id,
-          brandId: candidate.brand_id,
-          waitlistEntryId: candidate.entry_id,
-          templateKey: WAITLIST_INVITE_TEMPLATE_KEY,
-          missingRoute: !route,
-          missingTemplateVersion: !templateVersion,
-        });
-        continue;
-      }
-
-      // eslint-disable-next-line no-await-in-loop -- idempotency is checked per entry before queueing its notification job.
-      const existingJob = await db
-        .selectFrom('email_jobs')
-        .select('id')
-        .where('tenant_id', '=', candidate.tenant_id)
-        .where('idempotency_key', '=', `${WAITLIST_INVITE_TEMPLATE_KEY}:${candidate.entry_id}`)
-        .executeTakeFirst();
-      if (existingJob) continue;
-
+    for (const {
+      candidate,
+      claimToken,
+      offerExpiresAt,
+      providerRouteId,
+      templateVersionId,
+    } of offerResult.offeredCandidates) {
       // eslint-disable-next-line no-await-in-loop -- notification jobs are queued only after this offer's claim token is persisted.
       await new EmailJobRepository(db).create({
         tenantId: candidate.tenant_id,
         brandId: candidate.brand_id,
         templateKey: WAITLIST_INVITE_TEMPLATE_KEY,
-        templateVersionId: templateVersion.id,
+        templateVersionId,
         toEmail: candidate.buyer_email,
         toName:
           [candidate.buyer_first_name, candidate.buyer_last_name].filter(Boolean).join(' ') ||
@@ -345,7 +359,7 @@ export async function processWaitlistOffersActivity(): Promise<
           expiresAt: offerExpiresAt.toISOString(),
           notificationType: 'transactional',
         },
-        providerRouteId: route.id,
+        providerRouteId,
         priority: 'high',
         idempotencyKey: `${WAITLIST_INVITE_TEMPLATE_KEY}:${candidate.entry_id}`,
       });
