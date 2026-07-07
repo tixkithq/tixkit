@@ -6,7 +6,7 @@ import { ulid } from 'ulid';
 import { ClerkAuthService, parseOAuthScopes } from '../../auth/clerk.js';
 import { parseJsonValue } from '../../http/contracts.js';
 import { oauthRedirectUrlSchema, parseBody } from '../../http/schemas.js';
-import type { Permission } from '@tixkit/domain';
+import type { Permission, Principal } from '@tixkit/domain';
 import { ForbiddenError, UnauthorizedError, ValidationError } from '@tixkit/domain';
 
 const authorizeQuerySchema = z
@@ -94,6 +94,14 @@ function assertPrincipalCanAuthorizeOrganizationWideOAuth(principal: {
   }
 }
 
+function assertPrincipalCanAuthorizeResourceOwnerOAuth(
+  principal: Principal,
+): asserts principal is Principal & { type: 'user' } {
+  if (principal.type !== 'user') {
+    throw new ForbiddenError('Only user principals can authorize OAuth applications');
+  }
+}
+
 export const oauthAuthorizeRoutes: FastifyPluginAsync = async (app) => {
   const db = app.context.db;
 
@@ -103,6 +111,7 @@ export const oauthAuthorizeRoutes: FastifyPluginAsync = async (app) => {
     const oauthApp = await loadClient(db, query.client_id);
     ClerkAuthService.requireResourceTenant(principal, oauthApp, 'OAuthApplication', oauthApp.id);
     ClerkAuthService.requireOrganizationScope(principal, oauthApp.organization_id);
+    assertPrincipalCanAuthorizeResourceOwnerOAuth(principal);
     assertPrincipalCanAuthorizeOrganizationWideOAuth(principal);
 
     const redirectUris = parseStringArray(oauthApp.redirect_uris);
@@ -122,7 +131,7 @@ export const oauthAuthorizeRoutes: FastifyPluginAsync = async (app) => {
         oauth_application_id: oauthApp.id,
         tenant_id: oauthApp.tenant_id,
         organization_id: oauthApp.organization_id,
-        user_id: principal.type === 'user' ? principal.id : null,
+        user_id: principal.id,
         code_hash: hashSecret(code),
         redirect_uri: query.redirect_uri,
         scopes: JSON.stringify(scopes),
@@ -162,6 +171,9 @@ export const oauthTokenRoutes: FastifyPluginAsync = async (app) => {
         new Date(code.expires_at) <= now ||
         code.redirect_uri !== body.redirect_uri
       ) {
+        throw new UnauthorizedError('Invalid or expired authorization code');
+      }
+      if (!code.user_id) {
         throw new UnauthorizedError('Invalid or expired authorization code');
       }
       const codeScopes = parseOAuthScopes(code.scopes);

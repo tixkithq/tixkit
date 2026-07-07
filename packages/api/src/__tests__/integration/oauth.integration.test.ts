@@ -179,6 +179,39 @@ async function setupOAuthApp(tables: Tables, principal: Principal = makePrincipa
 }
 
 describe('OAuth scoped principal authorization', () => {
+  it.each([
+    ['organization-wide API key', { type: 'api_key' as const, id: 'key_1' }],
+    ['OAuth token principal', { type: 'api_key' as const, id: 'ort_1' }],
+    ['mobile device principal', { type: 'mobile_device' as const, id: 'mob_1' }],
+    ['system principal', { type: 'system' as const, id: 'sys_1' }],
+  ])(
+    'rejects an %s before redirecting or issuing an authorization code',
+    async (_label, principalOverrides) => {
+      const tables: Tables = {
+        oauth_applications: [oauthApplicationRow()],
+        oauth_authorization_codes: [],
+      };
+      const app = await setupOAuthApp(tables, {
+        ...makePrincipal(),
+        ...principalOverrides,
+      });
+
+      const res = await app.inject({
+        method: 'GET',
+        url: '/oauth/authorize?response_type=code&client_id=tk_oauth_legacy&redirect_uri=https%3A%2F%2Fexample.com%2Fcallback&scope=events.read&state=abc',
+      });
+
+      expect(res.statusCode).toBe(403);
+      expect(res.headers.location).toBeUndefined();
+      expect(res.json()).toMatchObject({
+        error: 'Forbidden',
+        message: 'Only user principals can authorize OAuth applications',
+      });
+      expect(tables.oauth_authorization_codes).toHaveLength(0);
+      await app.close();
+    },
+  );
+
   it('rejects an event-scoped principal before redirecting or issuing an authorization code', async () => {
     const tables: Tables = {
       oauth_applications: [oauthApplicationRow()],
@@ -186,8 +219,6 @@ describe('OAuth scoped principal authorization', () => {
     };
     const app = await setupOAuthApp(tables, {
       ...makePrincipal(),
-      type: 'api_key',
-      id: 'key_1',
       scopes: ['events.read', 'developers.write'],
       eventIds: ['evt_1'],
     });
@@ -303,6 +334,35 @@ describe('OAuth redirect URI validation', () => {
 });
 
 describe('OAuth authorization code redemption', () => {
+  it('rejects a legacy authorization code without a user before consuming it or issuing tokens', async () => {
+    const tables: Tables = {
+      oauth_applications: [oauthApplicationRow()],
+      oauth_authorization_codes: [authorizationCodeRow({ user_id: null })],
+      oauth_refresh_tokens: [],
+      oauth_access_tokens: [],
+    };
+    const app = await setupOAuthApp(tables);
+
+    const res = await app.inject({
+      method: 'POST',
+      url: '/oauth/token',
+      payload: {
+        grant_type: 'authorization_code',
+        client_id: 'tk_oauth_legacy',
+        client_secret: 'tk_secret_legacy',
+        code: 'tk_oac_legacy',
+        redirect_uri: 'https://example.com/callback',
+      },
+    });
+
+    expect(res.statusCode).toBe(401);
+    expect(res.json().message).toBe('Invalid or expired authorization code');
+    expect(tables.oauth_authorization_codes?.[0]?.consumed_at).toBeNull();
+    expect(tables.oauth_refresh_tokens).toHaveLength(0);
+    expect(tables.oauth_access_tokens).toHaveLength(0);
+    await app.close();
+  });
+
   it('issues tokens for a valid authorization code redemption', async () => {
     const tables: Tables = {
       oauth_applications: [oauthApplicationRow()],
