@@ -204,7 +204,7 @@ function questionToValues(
     description: question?.description ?? '',
     required: question?.required ?? false,
     appliesTo: question?.appliesTo ?? 'attendee',
-    ticketTypeId: question?.ticketTypeId ?? allTicketsValue,
+    ticketTypeId: question?.ticketTypeId || allTicketsValue,
     optionsText: question?.options?.join('\n') ?? '',
     placeholder: question?.placeholder ?? '',
     validationPattern: question?.validationPattern ?? '',
@@ -228,7 +228,9 @@ function valuesToInput(values: CheckoutQuestionFormValues): CreateCheckoutQuesti
     description: values.description?.trim() || undefined,
     required: values.required,
     appliesTo: values.appliesTo,
-    ticketTypeId: values.ticketTypeId === allTicketsValue ? undefined : values.ticketTypeId,
+    ticketTypeId: values.ticketTypeId === allTicketsValue || !values.ticketTypeId
+      ? undefined
+      : values.ticketTypeId,
     options: values.type === 'select' || values.type === 'multiselect' ? options : undefined,
     placeholder: values.placeholder?.trim() || undefined,
     validationPattern: values.validationPattern?.trim() || undefined,
@@ -295,7 +297,7 @@ export function EventCheckoutFormView({ eventId }: { eventId: string }) {
   const duplicateQuestion = async (question: AdminCheckoutQuestion) => {
     setSubmittingId(question.id);
     const result = await adminApi.createCheckoutQuestion(eventId, {
-      ticketTypeId: question.ticketTypeId,
+      ticketTypeId: question.ticketTypeId || undefined,
       type: question.type,
       label: `${question.label} copy`,
       description: question.description,

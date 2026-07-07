@@ -277,7 +277,13 @@ function DynamicQuestionField({
           disabled={disabled}
           placeholder={question.placeholder}
           required={question.required}
+          aria-describedby={descriptionId}
         />
+        {question.description ? (
+          <p id={descriptionId} className="text-xs text-muted-foreground">
+            {question.description}
+          </p>
+        ) : null}
       </div>
     );
   }
@@ -293,6 +299,7 @@ function DynamicQuestionField({
           onChange={(e) => onChange(e.target.value)}
           disabled={disabled}
           required={question.required}
+          aria-describedby={descriptionId}
           className="h-9 w-full rounded-md border border-input bg-transparent px-3 text-sm shadow-xs focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50"
         >
           <option value="">Select…</option>
@@ -302,6 +309,11 @@ function DynamicQuestionField({
             </option>
           ))}
         </select>
+        {question.description ? (
+          <p id={descriptionId} className="text-xs text-muted-foreground">
+            {question.description}
+          </p>
+        ) : null}
       </div>
     );
   }
@@ -324,7 +336,7 @@ function DynamicQuestionField({
     };
 
     return (
-      <fieldset className="grid gap-2" id={id} name={question.id}>
+      <fieldset className="grid gap-2" id={id} name={question.id} aria-describedby={descriptionId}>
         {label}
         <div className="space-y-2">
           {question.options?.map((opt) => {
@@ -356,7 +368,9 @@ function DynamicQuestionField({
           required={question.required}
         />
         {question.description ? (
-          <p className="text-xs text-muted-foreground">{question.description}</p>
+          <p id={descriptionId} className="text-xs text-muted-foreground">
+            {question.description}
+          </p>
         ) : null}
       </fieldset>
     );
@@ -375,6 +389,7 @@ function DynamicQuestionField({
           type="file"
           disabled={disabled || uploading || !eventId}
           required={question.required && !uploaded}
+          aria-describedby={descriptionId}
           onChange={async (event) => {
             const file = event.target.files?.[0];
             if (!file || !eventId) return;
@@ -399,7 +414,9 @@ function DynamicQuestionField({
           <p className="text-xs text-destructive">{uploadError}</p>
         ) : null}
         {question.description ? (
-          <p className="text-xs text-muted-foreground">{question.description}</p>
+          <p id={descriptionId} className="text-xs text-muted-foreground">
+            {question.description}
+          </p>
         ) : null}
       </div>
     );
@@ -456,9 +473,12 @@ function DynamicQuestionField({
         disabled={disabled}
         placeholder={question.placeholder}
         required={question.required}
+        aria-describedby={descriptionId}
       />
       {question.description ? (
-        <p className="text-xs text-muted-foreground">{question.description}</p>
+        <p id={descriptionId} className="text-xs text-muted-foreground">
+          {question.description}
+        </p>
       ) : null}
     </div>
   );

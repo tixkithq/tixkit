@@ -318,6 +318,144 @@ test.describe('paid checkout capture workflow', () => {
     }
   });
 
+  test('renders attendee-scoped checkout questions after ticket selection', async ({
+    page,
+    request,
+  }, testInfo) => {
+    await requireReachable(page, `${apiBaseUrl}/health`, 'api');
+    await requireReachable(page, checkoutBaseUrl, 'checkout app');
+
+    const suffix = `attendee-questions-${testInfo.workerIndex}-${Date.now()}`;
+    const { event, ticketType, inventoryPool } = await seedPaidCheckoutEvent(request, suffix);
+
+    // Create attendee-scoped questions (the gap in existing coverage).
+    const phoneQuestion = (await expectJsonResponse(
+      await request.post(`${apiBaseUrl}/v1/events/${event.id}/questions`, {
+        data: {
+          type: 'phone',
+          label: 'Phone Number',
+          description: 'Required for entry.',
+          required: true,
+          appliesTo: 'attendee',
+        },
+      }),
+      201,
+    )) as { id: string };
+
+    const dobQuestion = (await expectJsonResponse(
+      await request.post(`${apiBaseUrl}/v1/events/${event.id}/questions`, {
+        data: {
+          type: 'date',
+          label: 'D.O.B',
+          description: 'Date of birth for age verification.',
+          required: true,
+          appliesTo: 'attendee',
+        },
+      }),
+      201,
+    )) as { id: string };
+
+    await page.goto(`${checkoutBaseUrl}/checkout?eventId=${event.id}`);
+    await expect(page.getByRole('heading', { name: event.title })).toBeVisible();
+
+    // Attendee fields must NOT be visible before a ticket is selected.
+    await expect(page.getByText(`${ticketType.name} - attendee details`)).not.toBeVisible();
+    await expect(page.getByLabel(/Phone Number/)).not.toBeVisible();
+    await expect(page.getByLabel(/D\.O\.B/)).not.toBeVisible();
+
+    // Select one ticket to reveal per-attendee question groups.
+    await page.getByRole('button', { name: `Increase ${ticketType.name} quantity` }).click();
+
+    // The attendee section now appears with the configured fields.
+    await expect(page.getByText(`${ticketType.name} - attendee details`)).toBeVisible();
+    await expect(page.getByText('Attendee 1')).toBeVisible();
+
+    const phoneInput = page.getByLabel(/Phone Number\s+\*/);
+    await expect(phoneInput).toBeVisible();
+    await expect(phoneInput).toHaveAttribute('required', '');
+    await expect(phoneInput).toHaveAttribute('type', 'tel');
+    await expect(page.getByText('Required for entry.')).toBeVisible();
+
+    const dobInput = page.getByLabel(/D\.O\.B\s+\*/);
+    await expect(dobInput).toBeVisible();
+    await expect(dobInput).toHaveAttribute('required', '');
+    await expect(dobInput).toHaveAttribute('type', 'date');
+    await expect(page.getByText('Date of birth for age verification.')).toBeVisible();
+
+    await attachScreenshot(page, testInfo, 'hosted-attendee-questions-visible');
+
+    // Continue without filling required attendee fields.
+    await page.getByLabel('Email').fill(`attendee-q+${suffix}@example.com`);
+    await page.getByLabel('First name').fill('Attendee');
+    await page.getByLabel('Last name').fill('Buyer');
+    await page.getByRole('button', { name: 'Continue' }).click();
+
+    await expect(
+      page.getByText(`Please complete Phone Number for ${ticketType.name} attendee 1.`),
+    ).toBeVisible();
+
+    // Fill attendee fields and proceed to payment.
+    await phoneInput.fill('555-123-4567');
+    await dobInput.fill('1990-01-15');
+    await page.getByRole('button', { name: 'Continue' }).click();
+
+    await expect(page.getByRole('button', { name: 'Pay $25.00' })).toBeVisible();
+    await page.getByRole('button', { name: 'Pay $25.00' }).click();
+    await expect(page.getByRole('heading', { name: 'Order confirmed' })).toBeVisible();
+
+    const confirmationUrl = new URL(page.url());
+    const sessionId = confirmationUrl.searchParams.get('sessionId');
+    const orderId = confirmationUrl.searchParams.get('orderId');
+    expect(sessionId).toEqual(expect.any(String));
+    expect(orderId).toEqual(expect.any(String));
+
+    const state = await readPaidCheckoutCaptureState(sessionId!, inventoryPool.id);
+    expect(state.session).toMatchObject({ status: 'completed', orderId });
+    expect(state.ticketCount).toBe(1);
+  });
+
+  test('renders attendee-scoped questions per attendee when multiple tickets are selected', async ({
+    page,
+    request,
+  }, testInfo) => {
+    await requireReachable(page, `${apiBaseUrl}/health`, 'api');
+    await requireReachable(page, checkoutBaseUrl, 'checkout app');
+
+    const suffix = `attendee-multi-${testInfo.workerIndex}-${Date.now()}`;
+    const { event, ticketType } = await seedPaidCheckoutEvent(request, suffix);
+
+    await expectJsonResponse(
+      await request.post(`${apiBaseUrl}/v1/events/${event.id}/questions`, {
+        data: {
+          type: 'text',
+          label: 'Full Name',
+          required: true,
+          appliesTo: 'attendee',
+        },
+      }),
+      201,
+    );
+
+    await page.goto(`${checkoutBaseUrl}/checkout?eventId=${event.id}`);
+    await expect(page.getByRole('heading', { name: event.title })).toBeVisible();
+
+    // Select two tickets.
+    await page.getByRole('button', { name: `Increase ${ticketType.name} quantity` }).click();
+    await page.getByRole('button', { name: `Increase ${ticketType.name} quantity` }).click();
+
+    // Two attendee blocks should render, each with its own Full Name field.
+    await expect(page.getByText(`${ticketType.name} - attendee details`)).toBeVisible();
+    await expect(page.getByText('Attendee 1')).toBeVisible();
+    await expect(page.getByText('Attendee 2')).toBeVisible();
+
+    const nameFields = page.getByLabel(/Full Name\s+\*/);
+    await expect(nameFields).toHaveCount(2);
+
+    // Each attendee field has a unique DOM id.
+    const ids = await nameFields.evaluateAll((els) => els.map((el) => el.id));
+    expect(new Set(ids).size).toBe(2);
+  });
+
   test('keeps primary event tickets purchasable when resale listings fail', async ({ page }) => {
     await requireReachable(page, checkoutBaseUrl, 'checkout app');
 

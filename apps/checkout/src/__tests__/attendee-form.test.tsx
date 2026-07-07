@@ -328,7 +328,7 @@ describe('AttendeeForm dynamic question types', () => {
       });
     }
 
-    const view = render(<PatternHarness />);
+    const view = render(React.createElement(PatternHarness));
 
     const input = view.getByLabelText(/Member ID/) as HTMLInputElement;
     fireEvent.change(input, { target: { value: 'BAD' } });
@@ -374,5 +374,90 @@ describe('AttendeeForm dynamic question types', () => {
     expect(container.querySelector('img')).toBeNull();
     expect(container.querySelector('script')).toBeNull();
     expect(container.querySelector('[onload]')).toBeNull();
+  });
+
+  it('links descriptions via aria-describedby for text, phone, and date fields', () => {
+    const questions: CheckoutQuestion[] = [
+      {
+        id: 'q_text',
+        label: 'Nickname',
+        description: 'What should we call you?',
+        type: 'text',
+        required: false,
+        appliesTo: 'buyer',
+      },
+      {
+        id: 'q_phone',
+        label: 'Phone Number',
+        description: 'Required for entry.',
+        type: 'phone',
+        required: true,
+        appliesTo: 'buyer',
+      },
+      {
+        id: 'q_date',
+        label: 'D.O.B',
+        description: 'Date of birth for age verification.',
+        type: 'date',
+        required: true,
+        appliesTo: 'buyer',
+      },
+    ];
+
+    const view = render(
+      createAttendeeForm({
+        buyerQuestions: questions,
+        buyerAnswers: {},
+        onBuyerAnswersChange: () => {},
+      }),
+    );
+
+    for (const question of questions) {
+      const input = view.getByLabelText(new RegExp(question.label)) as HTMLInputElement;
+      const describedBy = input.getAttribute('aria-describedby');
+      expect(describedBy).toBeTruthy();
+      const descriptionEl = view.container.querySelector(`#${describedBy}`);
+      expect(descriptionEl).not.toBeNull();
+      expect(descriptionEl?.textContent).toBe(question.description);
+    }
+  });
+
+  it('links descriptions via aria-describedby for textarea and select fields', () => {
+    const questions: CheckoutQuestion[] = [
+      {
+        id: 'q_textarea',
+        label: 'Dietary requirements',
+        description: 'Tell us about allergies.',
+        type: 'textarea',
+        required: false,
+        appliesTo: 'buyer',
+      },
+      {
+        id: 'q_select',
+        label: 'T-shirt size',
+        description: 'Pick your size.',
+        type: 'select',
+        required: false,
+        appliesTo: 'buyer',
+        options: ['S', 'M', 'L'],
+      },
+    ];
+
+    const view = render(
+      createAttendeeForm({
+        buyerQuestions: questions,
+        buyerAnswers: {},
+        onBuyerAnswersChange: () => {},
+      }),
+    );
+
+    for (const question of questions) {
+      const input = view.getByLabelText(new RegExp(question.label)) as HTMLElement;
+      const describedBy = input.getAttribute('aria-describedby');
+      expect(describedBy).toBeTruthy();
+      const descriptionEl = view.container.querySelector(`#${describedBy}`);
+      expect(descriptionEl).not.toBeNull();
+      expect(descriptionEl?.textContent).toBe(question.description);
+    }
   });
 });
