@@ -104,9 +104,7 @@ describe('queryToParams / paramsToQuery round-trip', () => {
 
   it('round-trips sort', () => {
     const query = {
-      sort: [
-        { field: 'createdAt', direction: 'desc' as const },
-      ],
+      sort: [{ field: 'createdAt', direction: 'desc' as const }],
     };
     const params = queryToParams(schema, query);
     expect(params.get('sort')).toBe('createdAt:desc');
@@ -117,9 +115,7 @@ describe('queryToParams / paramsToQuery round-trip', () => {
 
   it('round-trips multiple sort entries', () => {
     const query = {
-      sort: [
-        { field: 'createdAt', direction: 'desc' as const },
-      ],
+      sort: [{ field: 'createdAt', direction: 'desc' as const }],
     };
     const params = queryToParams(schema, query);
     const result = paramsToQuery(schema, params);
@@ -226,10 +222,40 @@ describe('invalid param handling', () => {
     expect(result.rejected).toContain('sort');
   });
 
+  it('rejects unknown table query params', () => {
+    const result = paramsToQuery(schema, new URLSearchParams('badField=test&status=paid'));
+    expect(result.rejected).toContain('badField');
+    expect(result.query.filters?.status).toEqual({ type: 'select', values: ['paid'] });
+  });
+
   it('rejects invalid select option values', () => {
     const result = paramsToQuery(schema, new URLSearchParams('status=invalid_option'));
-    // Invalid options are silently filtered out; if none remain, the filter is not set
     expect(result.query.filters?.status).toBeUndefined();
+    expect(result.rejected).toContain('status');
+  });
+
+  it('rejects mixed valid and invalid select option values', () => {
+    const result = paramsToQuery(schema, new URLSearchParams('status=paid,invalid_option'));
+    expect(result.query.filters?.status).toBeUndefined();
+    expect(result.rejected).toContain('status');
+  });
+
+  it('rejects malformed boolean filter values', () => {
+    const result = paramsToQuery(schema, new URLSearchParams('refundState=yes'));
+    expect(result.query.filters?.refundState).toBeUndefined();
+    expect(result.rejected).toContain('refundState');
+  });
+
+  it('rejects malformed date range filter values', () => {
+    const result = paramsToQuery(schema, new URLSearchParams('createdAtFrom=not-a-date'));
+    expect(result.query.filters?.createdAt).toBeUndefined();
+    expect(result.rejected).toContain('createdAtFrom');
+  });
+
+  it('rejects malformed number range filter values', () => {
+    const result = paramsToQuery(schema, new URLSearchParams('totalCentsMin=not-a-number'));
+    expect(result.query.filters?.totalCents).toBeUndefined();
+    expect(result.rejected).toContain('totalCentsMin');
   });
 
   it('ignores one bad param without breaking others', () => {
@@ -275,10 +301,7 @@ describe('backward compatibility', () => {
   it('preserves eventId-style params through paramAlias', () => {
     const eventSchema = defineTable('attendees', {
       primaryKey: 'id',
-      columns: [
-        col.id('id'),
-        col.enum('eventId', []).facet(),
-      ],
+      columns: [col.id('id'), col.enum('eventId', []).facet()],
     });
     const result = paramsToQuery(eventSchema, new URLSearchParams('eventId=evt_123'));
     expect(result.query.filters?.eventId).toEqual({ type: 'select', values: ['evt_123'] });

@@ -19,6 +19,78 @@ import { withIdempotency, hashRequest } from '../../services/idempotency.js';
 import { config } from '../../config/index.js';
 
 const exportEventChannel = (exportId: string) => `tixkit:export-job:${exportId}:events`;
+const DEFAULT_REPORTING_CACHE_TTL_MS = 30_000;
+const MIN_REPORTING_CACHE_TTL_MS = 15_000;
+const MAX_REPORTING_CACHE_TTL_MS = 60_000;
+const MAX_REPORTING_CACHE_ENTRIES = 512;
+
+type ReportingCacheEntry = {
+  expiresAt: number;
+  value: unknown;
+};
+
+function reportingCacheTtlMs(): number {
+  const raw = process.env.REPORTING_CACHE_TTL_MS;
+  if (raw === undefined || raw.trim() === '') return DEFAULT_REPORTING_CACHE_TTL_MS;
+
+  const parsed = Number.parseInt(raw, 10);
+  if (!Number.isFinite(parsed) || parsed < 0) return DEFAULT_REPORTING_CACHE_TTL_MS;
+  if (parsed === 0) return 0;
+  return Math.min(MAX_REPORTING_CACHE_TTL_MS, Math.max(MIN_REPORTING_CACHE_TTL_MS, parsed));
+}
+
+function createReportingCacheKey(input: {
+  route: string;
+  tenantId: string;
+  eventId: string;
+  organizationId?: string;
+  brandId?: string;
+  from?: Date;
+  to?: Date;
+}): string {
+  return JSON.stringify({
+    route: input.route,
+    tenantId: input.tenantId,
+    eventId: input.eventId,
+    organizationId: input.organizationId ?? null,
+    brandId: input.brandId ?? null,
+    from: input.from?.toISOString() ?? null,
+    to: input.to?.toISOString() ?? null,
+  });
+}
+
+function readReportingCache(
+  cache: Map<string, ReportingCacheEntry>,
+  key: string,
+  now: number,
+): unknown | undefined {
+  const entry = cache.get(key);
+  if (!entry) return undefined;
+  if (entry.expiresAt <= now) {
+    cache.delete(key);
+    return undefined;
+  }
+  return entry.value;
+}
+
+function writeReportingCache(
+  cache: Map<string, ReportingCacheEntry>,
+  key: string,
+  value: unknown,
+  ttlMs: number,
+  now: number,
+) {
+  if (ttlMs <= 0) return;
+  cache.set(key, { value, expiresAt: now + ttlMs });
+
+  if (cache.size <= MAX_REPORTING_CACHE_ENTRIES) return;
+  for (const [entryKey, entry] of cache) {
+    if (entry.expiresAt <= now || cache.size > MAX_REPORTING_CACHE_ENTRIES) {
+      cache.delete(entryKey);
+    }
+    if (cache.size <= MAX_REPORTING_CACHE_ENTRIES) return;
+  }
+}
 
 function normalizeDiscountCode(code: string): string {
   return code.trim().toUpperCase();
@@ -119,6 +191,8 @@ function requireUnscopedOrganizationReportPrincipal(principal: Principal) {
 
 export const reportingRoutes: FastifyPluginAsync = async (app) => {
   const db = app.context.db;
+  const reportCache = new Map<string, ReportingCacheEntry>();
+  const reportCacheTtlMs = reportingCacheTtlMs();
 
   const loadEvent = async (eventId: string) => {
     const eventRepo = new EventRepository(db);
@@ -160,6 +234,18 @@ export const reportingRoutes: FastifyPluginAsync = async (app) => {
     const event = await loadEvent(eventId);
     requireReportEventAccess(principal, event, eventId);
     const eventScope = getEventReportScope(event);
+    const cacheKey = createReportingCacheKey({
+      route: 'event-sales',
+      tenantId: principal.tenantId,
+      eventId,
+      organizationId: eventScope.organizationId,
+      brandId: eventScope.brandId,
+      from,
+      to,
+    });
+    const now = Date.now();
+    const cached = readReportingCache(reportCache, cacheKey, now);
+    if (cached) return cached;
 
     let totalsQuery = db
       .selectFrom('orders')
@@ -329,7 +415,7 @@ export const reportingRoutes: FastifyPluginAsync = async (app) => {
       .where('status', '=', 'checked_in')
       .executeTakeFirst();
 
-    return {
+    const report = {
       eventId,
       currency: firstOrder?.currency ?? event.currency ?? 'USD',
       grossSalesCents: grossSales,
@@ -351,6 +437,8 @@ export const reportingRoutes: FastifyPluginAsync = async (app) => {
         to: to?.toISOString() ?? lastOrder?.created_at?.toISOString() ?? new Date().toISOString(),
       },
     };
+    writeReportingCache(reportCache, cacheKey, report, reportCacheTtlMs, now);
+    return report;
   });
 
   app.get('/events/:eventId/reports/tax', async (request) => {
@@ -890,7 +978,7 @@ export const reportingRoutes: FastifyPluginAsync = async (app) => {
     return serializeExportJob(exportJob);
   });
 
-  app.get('/exports/:exportId/events', async (request, reply) => {
+  app.get('/exports/:exportId/events', { compress: false }, async (request, reply) => {
     const principal = request.principal!;
     ClerkAuthService.requirePermission(principal, 'reports.read');
     const { exportId } = request.params as { exportId: string };
@@ -971,7 +1059,7 @@ export const reportingRoutes: FastifyPluginAsync = async (app) => {
     })();
   });
 
-  app.get('/exports/:exportId/download', async (request, reply) => {
+  app.get('/exports/:exportId/download', { compress: false }, async (request, reply) => {
     const principal = request.principal!;
     ClerkAuthService.requirePermission(principal, 'reports.read');
     const { exportId } = request.params as { exportId: string };

@@ -41,6 +41,8 @@ export type TableQueryConfig<T> = {
   scope?: Record<string, string | string[] | undefined>;
   /** Serialize raw DB rows into the response type. */
   serialize: (row: Record<string, unknown>) => T;
+  /** Explicit DB columns needed by the serializer. Defaults to schema columns. */
+  selectFields?: readonly string[];
   /** Custom filter handlers for computed/virtual fields (e.g. refundState). */
   customFilters?: Record<string, (q: any, value: AdminTableFilterValue, driver: string) => any>;
   /** Custom facet handlers for computed/virtual fields (e.g. refundState, checkInStatus). */
@@ -48,6 +50,54 @@ export type TableQueryConfig<T> = {
   /** When true, unknown filter/sort fields cause a 400 instead of being silently dropped. */
   strictValidation?: boolean;
 };
+
+function projectionFieldsForDataQuery(
+  schema: TableSchema,
+  serverFieldMap: Record<string, string>,
+  sort: AdminTableSort[],
+  selectFields?: readonly string[],
+): string[] {
+  const fields = new Set<string>();
+  if (selectFields) {
+    for (const field of selectFields) {
+      assertSafeServerFieldName(field);
+      fields.add(field);
+    }
+  } else {
+    for (const column of schema.columns) {
+      fields.add(column.serverField ?? column.id);
+    }
+  }
+
+  fields.add(serverFieldMap[schema.primaryKey] ?? schema.primaryKey);
+  for (const sortEntry of sort) {
+    fields.add(serverFieldMap[sortEntry.field] ?? sortEntry.field);
+  }
+
+  return [...fields];
+}
+
+async function mapWithConcurrency<TInput, TOutput>(
+  inputs: TInput[],
+  concurrency: number,
+  mapper: (input: TInput) => Promise<TOutput>,
+): Promise<TOutput[]> {
+  const results = Array.from<TOutput>({ length: inputs.length });
+  let nextIndex = 0;
+  const workerCount = Math.max(1, Math.min(concurrency, inputs.length));
+
+  await Promise.all(
+    Array.from({ length: workerCount }, async () => {
+      while (nextIndex < inputs.length) {
+        const index = nextIndex;
+        nextIndex += 1;
+        results[index] = await mapper(inputs[index]);
+      }
+    }),
+  );
+
+  return results;
+}
 
 // ---------------------------------------------------------------------------
 // Main entry point
@@ -58,7 +108,17 @@ export async function executeTableQuery<T>(
   config: TableQueryConfig<T>,
   query: AdminTableQuery,
 ): Promise<AdminTablePage<T>> {
-  const { schema, tableName, tenantId, scope = {}, serialize, customFilters, customFacets, strictValidation = false } = config;
+  const {
+    schema,
+    tableName,
+    tenantId,
+    scope = {},
+    serialize,
+    selectFields,
+    customFilters,
+    customFacets,
+    strictValidation = false,
+  } = config;
   const driver = getDriver();
   const serverFieldMap = getServerFieldMap(schema);
   const limit = Math.min(query.limit ?? schema.defaultPageSize, schema.maxPageSize);
@@ -87,10 +147,7 @@ export async function executeTableQuery<T>(
   };
 
   // Apply filters to a query builder
-  const applyFilters = (
-    q: any,
-    skipField?: string,
-  ): any => {
+  const applyFilters = (q: any, skipField?: string): any => {
     if (search) {
       q = applyTextSearch(q, schema, serverFieldMap, search, driver);
     }
@@ -110,43 +167,41 @@ export async function executeTableQuery<T>(
   };
 
   // Apply sorting to a query builder
-  const applySorting = (q: any): any => {
-    for (const s of sort) {
+  const applySorting = (q: any, sortOrder: AdminTableSort[]): any => {
+    for (const s of sortOrder) {
       const serverField = serverFieldMap[s.field] ?? s.field;
       q = q.orderBy(serverField, s.direction);
     }
     // Always add primary key as tie-breaker
     const pkServer = serverFieldMap[schema.primaryKey] ?? schema.primaryKey;
-    const lastSort = sort[sort.length - 1];
+    const lastSort = sortOrder[sortOrder.length - 1];
     q = q.orderBy(pkServer, lastSort?.direction ?? 'desc');
     return q;
   };
 
   // Apply cursor pagination
-  const applyCursor = (q: any): any => {
+  const applyCursor = (q: any, sortOrder: AdminTableSort[]): any => {
     if (!query.cursor) return q;
     try {
       const payload = decodeCursor(query.cursor, DEFAULT_CURSOR_VERSION);
-      return applyKeysetPagination(q, payload, sort, schema, serverFieldMap);
+      return applyKeysetPagination(q, payload, sortOrder, schema, serverFieldMap);
     } catch (e) {
       if (e instanceof CursorError) {
-        throw new Error(`Invalid cursor: ${e.message}`);
+        throw new ValidationError(`Invalid cursor: ${e.message}`, { field: 'cursor' });
       }
       throw e;
     }
   };
 
   // --- Data query ---
-  let dataQuery = buildBaseQuery().selectAll();
+  const effectiveSort = query.direction === 'prev' ? reverseSort(sort) : sort;
+  let dataQuery = buildBaseQuery().select(
+    projectionFieldsForDataQuery(schema, serverFieldMap, sort, selectFields),
+  );
   dataQuery = applyFilters(dataQuery);
-  dataQuery = applySorting(dataQuery);
-  dataQuery = applyCursor(dataQuery);
+  dataQuery = applySorting(dataQuery, effectiveSort);
+  dataQuery = applyCursor(dataQuery, effectiveSort);
   dataQuery = dataQuery.limit(limit + 1);
-
-  if (query.direction === 'prev') {
-    // Reverse the sort for prev direction, then reverse results
-    dataQuery = reverseSort(dataQuery, sort, schema, serverFieldMap);
-  }
 
   const rows: Selectable<any>[] = await dataQuery.execute();
 
@@ -159,39 +214,47 @@ export async function executeTableQuery<T>(
   }
 
   // --- Build cursors ---
-  const nextCursor = hasMore && query.direction !== 'prev'
-    ? buildCursorFromRow(pageRows[pageRows.length - 1], sort, schema, serverFieldMap)
-    : undefined;
-  const prevCursor = query.cursor
-    ? buildCursorFromRow(pageRows[0], sort, schema, serverFieldMap)
-    : undefined;
+  const nextCursor =
+    pageRows.length > 0 && (query.direction === 'prev' || hasMore)
+      ? buildCursorFromRow(pageRows[pageRows.length - 1], sort, schema, serverFieldMap)
+      : undefined;
+  const prevCursor =
+    pageRows.length > 0 && query.cursor && (query.direction !== 'prev' || hasMore)
+      ? buildCursorFromRow(pageRows[0], sort, schema, serverFieldMap)
+      : undefined;
 
   // --- Count queries (SQL COUNT(*) via executeTakeFirst, not in-memory .length) ---
-  const [total, filterTotal] = await Promise.all([
-    buildBaseQuery()
-      .select((eb: any) => eb.fn.countAll().as('total'))
-      .executeTakeFirst()
-      .then((r: any) => Number(r?.total ?? 0)),
-    hasActiveFilters({ ...query, filters })
-      ? applyFilters(buildBaseQuery())
-          .select((eb: any) => eb.fn.countAll().as('total'))
-          .executeTakeFirst()
-          .then((r: any) => Number(r?.total ?? 0))
-      : Promise.resolve(undefined),
-  ]);
+  const [total, filterTotal] =
+    query.includeTotal === true
+      ? await Promise.all([
+          buildBaseQuery()
+            .select((eb: any) => eb.fn.countAll().as('total'))
+            .executeTakeFirst()
+            .then((r: any) => Number(r?.total ?? 0)),
+          hasActiveFilters({ ...query, filters })
+            ? applyFilters(buildBaseQuery())
+                .select((eb: any) => eb.fn.countAll().as('total'))
+                .executeTakeFirst()
+                .then((r: any) => Number(r?.total ?? 0))
+            : Promise.resolve(undefined),
+        ])
+      : [undefined, undefined];
 
   // --- Facet queries (three-pass strategy) ---
   let facets: Record<string, AdminTableFacet> | undefined;
   if (query.includeFacets) {
     facets = {};
     const customFacetFields = customFacets ? Object.keys(customFacets) : [];
+    const facetTasks: Array<{ field: string; run: () => Promise<AdminTableFacet> }> = [];
 
     // Process custom facets first (may overlap with schema facetFields or be additional)
     for (const facetField of customFacetFields) {
       if (!customFacets?.[facetField]) continue;
       // Build facet query with all filters EXCEPT this field's own filter
-      const facetQuery = applyFilters(buildBaseQuery(), facetField);
-      facets[facetField] = await customFacets[facetField](facetQuery, driver);
+      facetTasks.push({
+        field: facetField,
+        run: () => customFacets[facetField](applyFilters(buildBaseQuery(), facetField), driver),
+      });
     }
 
     // Process remaining schema facet fields that don't have custom handlers
@@ -201,32 +264,47 @@ export async function executeTableQuery<T>(
       if (!column || !column.facet) continue;
       const serverField = serverFieldMap[facetField] ?? facetField;
 
-      // Build facet query with all filters EXCEPT this field's own filter
-      const facetQuery = applyFilters(buildBaseQuery(), facetField);
-
       if (column.filterType === 'select' || column.filterType === 'boolean') {
-        const facetRows = await facetQuery
-          .select([serverField, sql`count(*)`.as('total')])
-          .groupBy(serverField)
-          .execute();
-        facets[facetField] = {
-          rows: facetRows.map((r: any) => ({
-            value: r[serverField],
-            total: Number(r.total),
-          })),
-        };
+        facetTasks.push({
+          field: facetField,
+          run: async () => {
+            const facetRows = await applyFilters(buildBaseQuery(), facetField)
+              .select([serverField, sql`count(*)`.as('total')])
+              .groupBy(serverField)
+              .execute();
+            return {
+              rows: facetRows.map((r: any) => ({
+                value: r[serverField],
+                total: Number(r.total),
+              })),
+            };
+          },
+        });
       } else if (column.filterType === 'number_range' || column.filterType === 'date_range') {
-        const rangeRow = await facetQuery
-          .select([
-            sql`min(${sql.ref(serverField)})`.as('min'),
-            sql`max(${sql.ref(serverField)})`.as('max'),
-          ])
-          .executeTakeFirst();
-        facets[facetField] = {
-          min: rangeRow?.min != null ? Number(rangeRow.min) : undefined,
-          max: rangeRow?.max != null ? Number(rangeRow.max) : undefined,
-        };
+        facetTasks.push({
+          field: facetField,
+          run: async () => {
+            const rangeRow = await applyFilters(buildBaseQuery(), facetField)
+              .select([
+                sql`min(${sql.ref(serverField)})`.as('min'),
+                sql`max(${sql.ref(serverField)})`.as('max'),
+              ])
+              .executeTakeFirst();
+            return {
+              min: rangeRow?.min != null ? Number(rangeRow.min) : undefined,
+              max: rangeRow?.max != null ? Number(rangeRow.max) : undefined,
+            };
+          },
+        });
       }
+    }
+
+    const facetResults = await mapWithConcurrency(facetTasks, 3, async (task) => ({
+      field: task.field,
+      facet: await task.run(),
+    }));
+    for (const { field, facet } of facetResults) {
+      facets[field] = facet;
     }
   }
 
@@ -293,9 +371,10 @@ function validateFilters(
     }
   }
   if (strict && rejected.length > 0) {
-    const allowed = getFilterableColumns(schema)
-      .map((c) => `${c.id}(${c.filterType})`)
-      .join(', ') || '(none)';
+    const allowed =
+      getFilterableColumns(schema)
+        .map((c) => `${c.id}(${c.filterType})`)
+        .join(', ') || '(none)';
     throw new ValidationError(
       `Unknown or type-mismatched filter fields: ${rejected.join(', ')}. Allowed filter fields: ${allowed}`,
     );
@@ -407,29 +486,16 @@ function applyKeysetPagination(
   return q.where((eb: any) =>
     eb.or([
       eb(sortServerField, sortOp, cursorSortValue),
-      eb.and([
-        eb(sortServerField, '=', cursorSortValue),
-        eb(pkServer, tieOp, cursorId),
-      ]),
+      eb.and([eb(sortServerField, '=', cursorSortValue), eb(pkServer, tieOp, cursorId)]),
     ]),
   );
 }
 
-function reverseSort(
-  q: any,
-  sort: AdminTableSort[],
-  schema: TableSchema,
-  serverFieldMap: Record<string, string>,
-): any {
-  // Reverse sort direction for prev cursor
-  for (const s of sort) {
-    const serverField = serverFieldMap[s.field] ?? s.field;
-    q = q.orderBy(serverField, s.direction === 'asc' ? 'desc' : 'asc');
-  }
-  const pkServer = serverFieldMap[schema.primaryKey] ?? schema.primaryKey;
-  const lastSort = sort[sort.length - 1];
-  q = q.orderBy(pkServer, lastSort?.direction === 'asc' ? 'desc' : 'asc');
-  return q;
+function reverseSort(sort: AdminTableSort[]): AdminTableSort[] {
+  return sort.map((s) => ({
+    ...s,
+    direction: s.direction === 'asc' ? 'desc' : 'asc',
+  }));
 }
 
 function buildCursorFromRow(
@@ -460,23 +526,24 @@ function buildCursorFromRow(
 // SQL injection prevention: server field validation
 // ---------------------------------------------------------------------------
 
+function assertSafeServerFieldName(serverField: string): void {
+  // Validate that serverField only contains safe identifier characters
+  if (!/^[a-z_][a-z0-9_]*$/i.test(serverField)) {
+    throw new Error(`Invalid server field name: ${serverField}`);
+  }
+}
+
 /**
  * Assert that a field name is in the server schema whitelist.
  * This prevents client-provided field names from becoming SQL identifiers.
  */
-export function assertServerField(
-  schema: TableSchema,
-  field: string,
-): string {
+export function assertServerField(schema: TableSchema, field: string): string {
   const column = getColumn(schema, field);
   if (!column) {
     throw new Error(`Unknown field: ${field}`);
   }
   const serverField = column.serverField ?? field;
-  // Validate that serverField only contains safe identifier characters
-  if (!/^[a-z_][a-z0-9_]*$/i.test(serverField)) {
-    throw new Error(`Invalid server field name: ${serverField}`);
-  }
+  assertSafeServerFieldName(serverField);
   return serverField;
 }
 

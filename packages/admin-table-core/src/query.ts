@@ -4,7 +4,7 @@
  * These types form the shared contract between the API server
  * (`packages/api`) and the admin client (`apps/admin-dashboard`).
  *
- * See `docs/openstatus-data-table-filters-implementation-plan.md` Decision 3
+ * See `docs/archive/openstatus-data-table-filters-implementation-plan.md` Decision 3
  * for the locked query envelope shape.
  */
 
@@ -29,6 +29,7 @@ export type AdminTableQuery = {
   search?: string;
   sort?: AdminTableSort[];
   filters?: Record<string, AdminTableFilterValue>;
+  includeTotal?: boolean;
   includeFacets?: boolean;
 };
 

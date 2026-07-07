@@ -35,6 +35,7 @@ export const adminTableQuerySchema = z.object({
   search: z.string().optional(),
   sort: z.array(adminTableSortSchema).optional(),
   filters: z.record(z.string(), adminTableFilterValueSchema).optional(),
+  includeTotal: z.boolean().optional(),
   includeFacets: z.boolean().optional(),
 });
 

@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
-import { col, defineTable } from '@tixkit/admin-table-core';
-import { assertServerField } from '../../repositories/table-query.js';
+import { col, defineTable, encodeCursor } from '@tixkit/admin-table-core';
+import { assertServerField, executeTableQuery } from '../../repositories/table-query.js';
 
 const testSchema = defineTable('test', {
   primaryKey: 'id',
@@ -49,10 +49,7 @@ describe('assertServerField', () => {
   it('rejects server field names with special characters', () => {
     const badSchema = defineTable('bad2', {
       primaryKey: 'id',
-      columns: [
-        col.id('id'),
-        col.text('inject').serverField('name; DROP').filterable(),
-      ],
+      columns: [col.id('id'), col.text('inject').serverField('name; DROP').filterable()],
     });
     expect(() => assertServerField(badSchema, 'inject')).toThrow('Invalid server field name');
   });
@@ -78,5 +75,139 @@ describe('table query schema validation', () => {
 
   it('schema searchableFields are correctly derived', () => {
     expect(testSchema.searchableFields).toEqual(['buyerEmail']);
+  });
+});
+
+function createRecordingDb() {
+  type QueryRecord = {
+    orderBy: Array<[string, string]>;
+    whereExpressions: unknown[];
+    selectedFields: unknown[];
+    selectAllCalled: boolean;
+  };
+  const queries: QueryRecord[] = [];
+
+  const makeExpressionBuilder = () => {
+    const eb = ((field: string, op: string, value: unknown) => ({ field, op, value })) as {
+      (field: string, op: string, value: unknown): unknown;
+      or: (items: unknown[]) => unknown;
+      and: (items: unknown[]) => unknown;
+    };
+    eb.or = (items) => ({ type: 'or', items });
+    eb.and = (items) => ({ type: 'and', items });
+    return eb;
+  };
+
+  const db = {
+    selectFrom: () => {
+      const record: QueryRecord = {
+        orderBy: [],
+        whereExpressions: [],
+        selectedFields: [],
+        selectAllCalled: false,
+      };
+      queries.push(record);
+      const query = {
+        selectAll: () => {
+          record.selectAllCalled = true;
+          return query;
+        },
+        select: (fields: unknown) => {
+          record.selectedFields.push(fields);
+          return query;
+        },
+        where: (...args: unknown[]) => {
+          if (typeof args[0] === 'function') {
+            record.whereExpressions.push(args[0](makeExpressionBuilder()));
+          } else {
+            record.whereExpressions.push(args);
+          }
+          return query;
+        },
+        orderBy: (field: string, direction: string) => {
+          record.orderBy.push([field, direction]);
+          return query;
+        },
+        limit: () => query,
+        groupBy: () => query,
+        execute: async () => [],
+        executeTakeFirst: async () => ({ total: 0 }),
+      };
+      return query;
+    },
+  };
+
+  return { db, queries };
+}
+
+describe('executeTableQuery cursor validation', () => {
+  it('rejects malformed cursors as validation errors', async () => {
+    const { db } = createRecordingDb();
+
+    await expect(
+      executeTableQuery(
+        db as never,
+        {
+          tableName: 'orders',
+          schema: testSchema,
+          tenantId: 'tnt_1',
+          serialize: (row) => row,
+        },
+        { cursor: 'bad-cursor' },
+      ),
+    ).rejects.toMatchObject({
+      code: 'VALIDATION_ERROR',
+      statusCode: 400,
+      details: { field: 'cursor' },
+    });
+  });
+
+  it('reverses sort order and cursor comparison for previous pages', async () => {
+    const { db, queries } = createRecordingDb();
+    const cursor = encodeCursor(
+      [{ field: 'createdAt', direction: 'desc', value: '2026-01-03T00:00:00.000Z' }],
+      'ord_3',
+    );
+
+    await executeTableQuery(
+      db as never,
+      {
+        tableName: 'orders',
+        schema: testSchema,
+        tenantId: 'tnt_1',
+        serialize: (row) => row,
+      },
+      { cursor, direction: 'prev', limit: 2 },
+    );
+
+    expect(queries[0]?.orderBy).toEqual([
+      ['created_at', 'asc'],
+      ['id', 'asc'],
+    ]);
+    expect(JSON.stringify(queries[0]?.whereExpressions)).toContain('">"');
+  });
+
+  it('uses a schema projection for data rows instead of selecting full records', async () => {
+    const { db, queries } = createRecordingDb();
+
+    await executeTableQuery(
+      db as never,
+      {
+        tableName: 'orders',
+        schema: testSchema,
+        tenantId: 'tnt_1',
+        serialize: (row) => row,
+      },
+      { limit: 2 },
+    );
+
+    expect(queries[0]?.selectAllCalled).toBe(false);
+    expect(queries[0]?.selectedFields[0]).toEqual([
+      'id',
+      'buyer_email',
+      'status',
+      'total_cents',
+      'created_at',
+    ]);
   });
 });

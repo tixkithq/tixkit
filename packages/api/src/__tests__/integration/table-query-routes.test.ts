@@ -5,7 +5,6 @@ import type { Database } from '@tixkit/db';
 import type { AppContext } from '../../app.js';
 import { orderRoutes } from '../../routes/modules/orders.js';
 import { checkInRoutes } from '../../routes/modules/checkin.js';
-import { ValidationError } from '@tixkit/domain';
 
 // Mock executeTableQuery to capture config and return controlled results
 const executeTableQueryMock = vi.hoisted(() => vi.fn());
@@ -61,7 +60,9 @@ function createMockDb() {
     insertInto: vi.fn(() => ({
       values: vi.fn(() => ({ returningAll: vi.fn(() => ({ executeTakeFirstOrThrow: vi.fn() })) })),
     })),
-    transaction: vi.fn(() => ({ execute: async (fn: (trx: unknown) => Promise<unknown>) => fn({}) })),
+    transaction: vi.fn(() => ({
+      execute: async (fn: (trx: unknown) => Promise<unknown>) => fn({}),
+    })),
     destroy: vi.fn(),
     events,
     ticketTypes,
@@ -293,16 +294,33 @@ describe('orders table query route', () => {
   });
 
   it('returns 400 when strict validation rejects an unknown filter', async () => {
-    executeTableQueryMock.mockRejectedValue(
-      new ValidationError('Unknown filter fields: badField'),
-    );
-
     const app = await setupOrdersApp(makePrincipal(), db);
     const res = await app.inject({ method: 'GET', url: '/orders?badField=test' });
 
     expect(res.statusCode).toBe(400);
     const body = res.json();
     expect(body.error.message).toContain('badField');
+    expect(executeTableQueryMock).not.toHaveBeenCalled();
+    await app.close();
+  });
+
+  it('returns 400 when strict validation rejects a malformed boolean filter', async () => {
+    const app = await setupOrdersApp(makePrincipal(), db);
+    const res = await app.inject({ method: 'GET', url: '/orders?refundState=yes' });
+
+    expect(res.statusCode).toBe(400);
+    expect(res.json().error.message).toContain('refundState');
+    expect(executeTableQueryMock).not.toHaveBeenCalled();
+    await app.close();
+  });
+
+  it('returns 400 when strict validation rejects a malformed select filter', async () => {
+    const app = await setupOrdersApp(makePrincipal(), db);
+    const res = await app.inject({ method: 'GET', url: '/orders?status=paid,bogus' });
+
+    expect(res.statusCode).toBe(400);
+    expect(res.json().error.message).toContain('status');
+    expect(executeTableQueryMock).not.toHaveBeenCalled();
     await app.close();
   });
 
@@ -480,14 +498,12 @@ describe('attendees table query route', () => {
   });
 
   it('returns 400 for unknown attendee filter in strict mode', async () => {
-    executeTableQueryMock.mockRejectedValue(
-      new ValidationError('Unknown filter fields: badField'),
-    );
-
     const app = await setupCheckinApp(makePrincipal(), db);
     const res = await app.inject({ method: 'GET', url: '/attendees?badField=test' });
 
     expect(res.statusCode).toBe(400);
+    expect(res.json().error.message).toContain('badField');
+    expect(executeTableQueryMock).not.toHaveBeenCalled();
     await app.close();
   });
 

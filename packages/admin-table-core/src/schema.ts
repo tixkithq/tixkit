@@ -1,9 +1,9 @@
 /**
  * Table schema primitives for Tixkit admin tables.
  *
- * Inspired by the OpenStatus `data-table-schema` block (MIT, see
- * THIRD_PARTY_NOTICES.md). Adapted to Tixkit's conventions: server-owned
- * field whitelists, permission gating, and serializable specs.
+ * Inspired by the OpenStatus `data-table-schema` block and adapted to Tixkit's
+ * conventions: server-owned field whitelists, permission gating, and
+ * serializable specs.
  *
  * The `col.*` factories create column definitions with chainable metadata.
  * A `TableSchema` is built via `defineTable()` and serves as the single source

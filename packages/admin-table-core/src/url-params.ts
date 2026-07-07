@@ -21,10 +21,7 @@ import { getColumn } from './schema.js';
 // Serialization: AdminTableQuery -> URLSearchParams
 // ---------------------------------------------------------------------------
 
-export function queryToParams(
-  schema: TableSchema,
-  query: AdminTableQuery,
-): URLSearchParams {
+export function queryToParams(schema: TableSchema, query: AdminTableQuery): URLSearchParams {
   const params = new URLSearchParams();
 
   if (query.limit !== undefined) {
@@ -44,6 +41,9 @@ export function queryToParams(
   }
   if (query.includeFacets) {
     params.set('includeFacets', 'true');
+  }
+  if (query.includeTotal) {
+    params.set('includeTotal', 'true');
   }
 
   if (query.filters) {
@@ -102,13 +102,22 @@ export type ParseResult = {
   rejected: string[];
 };
 
-export function paramsToQuery(
-  schema: TableSchema,
-  params: URLSearchParams,
-): ParseResult {
+type FilterParseResult =
+  | { status: 'absent' }
+  | { status: 'invalid'; rejected: string[] }
+  | { status: 'valid'; value: AdminTableFilterValue };
+
+export function paramsToQuery(schema: TableSchema, params: URLSearchParams): ParseResult {
   const rejected: string[] = [];
   const query: AdminTableQuery = {};
   const filters: Record<string, AdminTableFilterValue> = {};
+  const allowedParams = allowedQueryParams(schema);
+
+  for (const key of params.keys()) {
+    if (!allowedParams.has(key) && !rejected.includes(key)) {
+      rejected.push(key);
+    }
+  }
 
   // Pagination
   if (params.has('limit')) {
@@ -152,14 +161,22 @@ export function paramsToQuery(
   if (params.has('includeFacets')) {
     query.includeFacets = params.get('includeFacets') === 'true';
   }
+  if (params.has('includeTotal')) {
+    query.includeTotal = params.get('includeTotal') === 'true';
+  }
 
   // Filters - iterate schema filterable columns to find matching params
   for (const column of schema.columns) {
     if (!column.filterable || !column.filterType) continue;
     const paramName = column.paramAlias ?? column.id;
-    const filterValue = parseFilterParam(params, paramName, column);
-    if (filterValue !== null) {
-      filters[column.id] = filterValue;
+    const filterResult = parseFilterParam(params, paramName, column);
+    if (filterResult.status === 'valid') {
+      filters[column.id] = filterResult.value;
+    }
+    if (filterResult.status === 'invalid') {
+      for (const rejectedParam of filterResult.rejected) {
+        if (!rejected.includes(rejectedParam)) rejected.push(rejectedParam);
+      }
     }
   }
 
@@ -183,7 +200,10 @@ export function paramsToQuery(
 }
 
 function parseSortParam(raw: string, schema: TableSchema): AdminTableSort[] {
-  const parts = raw.split(',').map((p) => p.trim()).filter(Boolean);
+  const parts = raw
+    .split(',')
+    .map((p) => p.trim())
+    .filter(Boolean);
   const result: AdminTableSort[] = [];
   for (const part of parts) {
     const colonIndex = part.lastIndexOf(':');
@@ -201,58 +221,67 @@ function parseFilterParam(
   params: URLSearchParams,
   paramName: string,
   column: ColumnSpec,
-): AdminTableFilterValue | null {
+): FilterParseResult {
   switch (column.filterType) {
     case 'text': {
       const value = params.get(paramName);
-      if (value === null) return null;
-      if (!value.trim()) return null;
-      return { type: 'text', value };
+      if (value === null) return { status: 'absent' };
+      if (!value.trim()) return { status: 'absent' };
+      return { status: 'valid', value: { type: 'text', value } };
     }
     case 'select': {
       const value = params.get(paramName);
-      if (value === null) return null;
+      if (value === null) return { status: 'absent' };
       const values = value
         .split(',')
         .map((v) => v.trim())
         .filter(Boolean);
-      if (values.length === 0) return null;
+      if (values.length === 0) return { status: 'invalid', rejected: [paramName] };
       // Validate against options if defined
       if (column.options && column.options.length > 0) {
         const valid = values.filter((v) => column.options!.includes(v));
-        if (valid.length === 0) return null;
-        return { type: 'select', values: valid };
+        if (valid.length !== values.length) return { status: 'invalid', rejected: [paramName] };
+        return { status: 'valid', value: { type: 'select', values: valid } };
       }
-      return { type: 'select', values };
+      return { status: 'valid', value: { type: 'select', values } };
     }
     case 'boolean': {
       const value = params.get(paramName);
-      if (value === null) return null;
-      if (value === 'true') return { type: 'boolean', value: true };
-      if (value === 'false') return { type: 'boolean', value: false };
-      return null;
+      if (value === null) return { status: 'absent' };
+      if (value === 'true') return { status: 'valid', value: { type: 'boolean', value: true } };
+      if (value === 'false') return { status: 'valid', value: { type: 'boolean', value: false } };
+      return { status: 'invalid', rejected: [paramName] };
     }
     case 'date_range': {
       const from = params.get(`${paramName}From`) ?? undefined;
       const to = params.get(`${paramName}To`) ?? undefined;
-      if (!from && !to) return null;
+      if (!from && !to) return { status: 'absent' };
       // Basic date validation
-      if (from && !isValidDateString(from)) return null;
-      if (to && !isValidDateString(to)) return null;
-      return { type: 'date_range', from: from || undefined, to: to || undefined };
+      const rejected = [
+        from && !isValidDateString(from) ? `${paramName}From` : undefined,
+        to && !isValidDateString(to) ? `${paramName}To` : undefined,
+      ].filter((param): param is string => Boolean(param));
+      if (rejected.length > 0) return { status: 'invalid', rejected };
+      return {
+        status: 'valid',
+        value: { type: 'date_range', from: from || undefined, to: to || undefined },
+      };
     }
     case 'number_range': {
       const minRaw = params.get(`${paramName}Min`);
       const maxRaw = params.get(`${paramName}Max`);
-      if (minRaw === null && maxRaw === null) return null;
+      if (minRaw === null && maxRaw === null) return { status: 'absent' };
       const min = minRaw !== null ? Number(minRaw) : undefined;
       const max = maxRaw !== null ? Number(maxRaw) : undefined;
-      if (min !== undefined && !Number.isFinite(min)) return null;
-      if (max !== undefined && !Number.isFinite(max)) return null;
-      return { type: 'number_range', min, max };
+      const rejected = [
+        min !== undefined && !Number.isFinite(min) ? `${paramName}Min` : undefined,
+        max !== undefined && !Number.isFinite(max) ? `${paramName}Max` : undefined,
+      ].filter((param): param is string => Boolean(param));
+      if (rejected.length > 0) return { status: 'invalid', rejected };
+      return { status: 'valid', value: { type: 'number_range', min, max } };
     }
     default:
-      return null;
+      return { status: 'absent' };
   }
 }
 
@@ -268,4 +297,36 @@ function isValidDateString(value: string): boolean {
 
 export function searchToQuery(schema: TableSchema, searchString: string): ParseResult {
   return paramsToQuery(schema, new URLSearchParams(searchString));
+}
+
+function allowedQueryParams(schema: TableSchema): Set<string> {
+  const allowed = new Set([
+    'limit',
+    'cursor',
+    'direction',
+    'search',
+    'sort',
+    'includeFacets',
+    'includeTotal',
+  ]);
+
+  for (const column of schema.columns) {
+    if (!column.filterable || !column.filterType) continue;
+    const paramName = column.paramAlias ?? column.id;
+    switch (column.filterType) {
+      case 'date_range':
+        allowed.add(`${paramName}From`);
+        allowed.add(`${paramName}To`);
+        break;
+      case 'number_range':
+        allowed.add(`${paramName}Min`);
+        allowed.add(`${paramName}Max`);
+        break;
+      default:
+        allowed.add(paramName);
+        break;
+    }
+  }
+
+  return allowed;
 }
