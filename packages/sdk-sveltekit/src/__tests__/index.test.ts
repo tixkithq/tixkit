@@ -1,4 +1,8 @@
 import { createHmac } from 'node:crypto';
+import { execFileSync } from 'node:child_process';
+import { readFileSync } from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { describe, expect, it, vi } from 'vitest';
 import {
   completeResaleListing,
@@ -20,9 +24,23 @@ import {
   parseTixkitWidgetMessage,
 } from '../client.js';
 
+const packageRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
+
 function signature(body: string, secret: string, timestamp: number): string {
   const digest = createHmac('sha256', secret).update(`${timestamp}.${body}`).digest('hex');
   return `t=${timestamp},v1=${digest}`;
+}
+
+function exportedPackageTargets(value: unknown): string[] {
+  if (typeof value === 'string') {
+    return value.startsWith('./') ? [value.slice(2)] : [];
+  }
+
+  if (!value || typeof value !== 'object') {
+    return [];
+  }
+
+  return Object.values(value).flatMap((entry) => exportedPackageTargets(entry));
 }
 
 describe('SvelteKit server helpers', () => {
@@ -363,6 +381,39 @@ describe('SvelteKit client helpers', () => {
     expect(componentSource).toContain('<svelte:window onmessage={handleMessage} />');
     expect(componentSource).toContain('<iframe');
     expect(declarationSource).toContain('export type TixkitWidgetProps');
+  });
+
+  it('packs every package export target', async () => {
+    const packageJson = JSON.parse(readFileSync(path.join(packageRoot, 'package.json'), 'utf-8'));
+    const packJson = execFileSync('npm', ['pack', '--dry-run', '--json'], {
+      cwd: packageRoot,
+      encoding: 'utf-8',
+      env: {
+        ...process.env,
+        npm_config_loglevel: 'silent',
+      },
+    });
+    const [pack] = JSON.parse(packJson) as [{ files: Array<{ path: string }> }];
+    const packedFiles = new Set(pack.files.map((file) => file.path));
+
+    expect(packedFiles).toContain('dist/TixkitWidget.svelte');
+    expect(packedFiles).toContain('dist/TixkitWidget.svelte.d.ts');
+    expect(exportedPackageTargets(packageJson.exports)).toEqual(
+      expect.arrayContaining([
+        'dist/index.js',
+        'dist/index.d.ts',
+        'dist/server.js',
+        'dist/server.d.ts',
+        'dist/client.js',
+        'dist/client.d.ts',
+        'dist/TixkitWidget.svelte',
+        'dist/TixkitWidget.svelte.d.ts',
+      ]),
+    );
+
+    for (const target of exportedPackageTargets(packageJson.exports)) {
+      expect(packedFiles, `missing packed export target ${target}`).toContain(target);
+    }
   });
 });
 

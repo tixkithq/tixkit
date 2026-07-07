@@ -18,20 +18,24 @@
       "import": "./dist/client.js"
     },
     "./TixkitWidget.svelte": {
-      "types": "./src/TixkitWidget.svelte.d.ts",
-      "svelte": "./src/TixkitWidget.svelte",
-      "default": "./src/TixkitWidget.svelte"
+      "types": "./dist/TixkitWidget.svelte.d.ts",
+      "svelte": "./dist/TixkitWidget.svelte",
+      "default": "./dist/TixkitWidget.svelte"
     }
   },
   "scripts": {
-    "build": "tsc",
+    "build": "tsc && cp src/TixkitWidget.svelte src/TixkitWidget.svelte.d.ts dist/",
     "lint": "oxlint src",
+    "prepack": "bun run build",
     "typecheck": "tsc --noEmit",
     "test:unit": "vitest run",
     "clean": "rm -rf dist"
   },
   "dependencies": {
     "@tixkit/js": "workspace:*"
+  },
+  "peerDependencies": {
+    "svelte": "^5.0.0"
   },
   "devDependencies": {
     "typescript": "5.9.3",
