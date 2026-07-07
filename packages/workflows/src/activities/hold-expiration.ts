@@ -159,113 +159,127 @@ export async function processWaitlistOffersActivity(): Promise<
   const db = createDb();
   try {
     const now = new Date();
-    const expired = await db
-      .updateTable('waitlist_entries')
-      .set({ status: 'expired', updated_at: now })
-      .where('status', '=', 'offered')
-      .where('offer_expires_at', '<=', now)
-      .execute();
-
-    const candidates = await db
-      .selectFrom('waitlist_entries as entry')
-      .innerJoin('ticket_types as ticket_type', 'ticket_type.id', 'entry.ticket_type_id')
-      .innerJoin('events as event', 'event.id', 'entry.event_id')
-      .select([
-        'entry.id as entry_id',
-        'entry.tenant_id',
-        'entry.brand_id',
-        'entry.event_id',
-        'entry.ticket_type_id',
-        'entry.buyer_email',
-        'entry.buyer_first_name',
-        'entry.buyer_last_name',
-        'entry.quantity',
-        'ticket_type.name as ticket_name',
-        'ticket_type.inventory_pool_id',
-        'event.title as event_title',
-        'event.waitlist_auto_offer_enabled',
-        'event.waitlist_offer_ttl_minutes',
-      ])
-      .where('entry.status', '=', 'joined')
-      .where('event.waitlist_auto_offer_enabled', '=', true)
-      .orderBy('entry.created_at', 'asc')
-      .limit(100)
-      .execute();
-
-    let offeredCount = 0;
-    let queuedEmailCount = 0;
-    const reservedByPool = new Map<string, number>();
-    const activeOffersByPool = new Map<string, number>();
-    for (const candidate of candidates) {
-      const inventoryPoolId = candidate.inventory_pool_id;
-      // eslint-disable-next-line no-await-in-loop -- waitlist offers must preserve FIFO order and per-pool reserved capacity accounting.
-      const pool = await db
-        .selectFrom('inventory_pools')
-        .select(['total_capacity', 'sold_count'])
-        .where('id', '=', inventoryPoolId)
-        .executeTakeFirst();
-      if (!pool) continue;
-
-      // eslint-disable-next-line no-await-in-loop -- availability must include active holds before this candidate can reserve capacity.
-      const activeHolds = await db
-        .selectFrom('checkout_holds')
-        .select(({ fn }) => fn.sum<number>('quantity').as('quantity'))
-        .where('inventory_pool_id', '=', inventoryPoolId)
-        .where('status', '=', 'active')
-        .where('expires_at', '>', now)
-        .executeTakeFirst();
-      // Cache active offers per pool to avoid MySQL timestamp precision issues
-      // where offered_at < now can match offers made earlier in the same run
-      // due to second-level truncation.
-      let activeOffersQty = activeOffersByPool.get(inventoryPoolId);
-      if (activeOffersQty === undefined) {
-        // eslint-disable-next-line no-await-in-loop -- query once per pool before any offers are made for it.
-        const activeOffers = await db
-          .selectFrom('waitlist_entries as active_entry')
-          .innerJoin(
-            'ticket_types as active_ticket_type',
-            'active_ticket_type.id',
-            'active_entry.ticket_type_id',
-          )
-          .select(({ fn }) => fn.sum<number>('active_entry.quantity').as('quantity'))
-          .where('active_ticket_type.inventory_pool_id', '=', inventoryPoolId)
-          .where('active_entry.status', '=', 'offered')
-          .where('active_entry.offer_expires_at', '>', now)
-          .executeTakeFirst();
-        activeOffersQty = Number(activeOffers?.quantity ?? 0);
-        activeOffersByPool.set(inventoryPoolId, activeOffersQty);
-      }
-      const alreadyOffered = reservedByPool.get(inventoryPoolId) ?? 0;
-      const available =
-        Number(pool.total_capacity) -
-        Number(pool.sold_count) -
-        Number(activeHolds?.quantity ?? 0) -
-        activeOffersQty -
-        alreadyOffered;
-      if (available < Number(candidate.quantity)) continue;
-
-      const claimToken = randomBytes(24).toString('base64url');
-      const offerTtlMinutes = Number(candidate.waitlist_offer_ttl_minutes ?? 1440);
-      const offerExpiresAt = new Date(now.getTime() + offerTtlMinutes * 60_000);
-      // eslint-disable-next-line no-await-in-loop -- each entry is atomically claimed before later candidates consume remaining capacity.
-      const update = await db
+    const offerResult = await db.transaction().execute(async (trx) => {
+      const expired = await trx
         .updateTable('waitlist_entries')
-        .set({
-          status: 'offered',
-          claim_token_hash: hashWaitlistClaimToken(claimToken),
-          offer_expires_at: offerExpiresAt,
-          offered_at: now,
-          updated_at: now,
-        })
-        .where('id', '=', candidate.entry_id)
-        .where('status', '=', 'joined')
-        .executeTakeFirst();
-      const changedRows = Number((update as { numUpdatedRows?: bigint }).numUpdatedRows ?? 0);
-      if (changedRows === 0) continue;
+        .set({ status: 'expired', updated_at: now })
+        .where('status', '=', 'offered')
+        .where('offer_expires_at', '<=', now)
+        .execute();
 
-      offeredCount += 1;
-      reservedByPool.set(inventoryPoolId, alreadyOffered + Number(candidate.quantity));
+      const candidates = await trx
+        .selectFrom('waitlist_entries as entry')
+        .innerJoin('ticket_types as ticket_type', 'ticket_type.id', 'entry.ticket_type_id')
+        .innerJoin('events as event', 'event.id', 'entry.event_id')
+        .select([
+          'entry.id as entry_id',
+          'entry.tenant_id',
+          'entry.brand_id',
+          'entry.event_id',
+          'entry.ticket_type_id',
+          'entry.buyer_email',
+          'entry.buyer_first_name',
+          'entry.buyer_last_name',
+          'entry.quantity',
+          'ticket_type.name as ticket_name',
+          'ticket_type.inventory_pool_id',
+          'event.title as event_title',
+          'event.waitlist_auto_offer_enabled',
+          'event.waitlist_offer_ttl_minutes',
+        ])
+        .where('entry.status', '=', 'joined')
+        .where('event.waitlist_auto_offer_enabled', '=', true)
+        .orderBy('entry.created_at', 'asc')
+        .limit(100)
+        .forUpdate()
+        .execute();
 
+      let offeredCount = 0;
+      const offeredCandidates: Array<{
+        candidate: (typeof candidates)[number];
+        claimToken: string;
+        offerExpiresAt: Date;
+      }> = [];
+      const reservedByPool = new Map<string, number>();
+      const activeOffersByPool = new Map<string, number>();
+      for (const candidate of candidates) {
+        const inventoryPoolId = candidate.inventory_pool_id;
+        // eslint-disable-next-line no-await-in-loop -- waitlist offers must preserve FIFO order and lock per-pool capacity before accounting.
+        const pool = await trx
+          .selectFrom('inventory_pools')
+          .select(['total_capacity', 'sold_count'])
+          .where('id', '=', inventoryPoolId)
+          .forUpdate()
+          .executeTakeFirst();
+        if (!pool) continue;
+
+        // eslint-disable-next-line no-await-in-loop -- availability must include active holds before this candidate can reserve capacity.
+        const activeHolds = await trx
+          .selectFrom('checkout_holds')
+          .select(({ fn }) => fn.sum<number>('quantity').as('quantity'))
+          .where('inventory_pool_id', '=', inventoryPoolId)
+          .where('status', '=', 'active')
+          .where('expires_at', '>', now)
+          .executeTakeFirst();
+        // Cache active offers per pool to avoid MySQL timestamp precision issues
+        // where offered_at < now can match offers made earlier in the same run
+        // due to second-level truncation.
+        let activeOffersQty = activeOffersByPool.get(inventoryPoolId);
+        if (activeOffersQty === undefined) {
+          // eslint-disable-next-line no-await-in-loop -- query once per pool after locking the pool and before any offers are made for it.
+          const activeOffers = await trx
+            .selectFrom('waitlist_entries as active_entry')
+            .innerJoin(
+              'ticket_types as active_ticket_type',
+              'active_ticket_type.id',
+              'active_entry.ticket_type_id',
+            )
+            .select(({ fn }) => fn.sum<number>('active_entry.quantity').as('quantity'))
+            .where('active_ticket_type.inventory_pool_id', '=', inventoryPoolId)
+            .where('active_entry.status', '=', 'offered')
+            .where('active_entry.offer_expires_at', '>', now)
+            .executeTakeFirst();
+          activeOffersQty = Number(activeOffers?.quantity ?? 0);
+          activeOffersByPool.set(inventoryPoolId, activeOffersQty);
+        }
+        const alreadyOffered = reservedByPool.get(inventoryPoolId) ?? 0;
+        const available =
+          Number(pool.total_capacity) -
+          Number(pool.sold_count) -
+          Number(activeHolds?.quantity ?? 0) -
+          activeOffersQty -
+          alreadyOffered;
+        if (available < Number(candidate.quantity)) continue;
+
+        const claimToken = randomBytes(24).toString('base64url');
+        const offerTtlMinutes = Number(candidate.waitlist_offer_ttl_minutes ?? 1440);
+        const offerExpiresAt = new Date(now.getTime() + offerTtlMinutes * 60_000);
+        // eslint-disable-next-line no-await-in-loop -- each entry is atomically claimed before later candidates consume remaining capacity.
+        const update = await trx
+          .updateTable('waitlist_entries')
+          .set({
+            status: 'offered',
+            claim_token_hash: hashWaitlistClaimToken(claimToken),
+            offer_expires_at: offerExpiresAt,
+            offered_at: now,
+            updated_at: now,
+          })
+          .where('id', '=', candidate.entry_id)
+          .where('status', '=', 'joined')
+          .executeTakeFirst();
+        const changedRows = Number((update as { numUpdatedRows?: bigint }).numUpdatedRows ?? 0);
+        if (changedRows === 0) continue;
+
+        offeredCount += 1;
+        reservedByPool.set(inventoryPoolId, alreadyOffered + Number(candidate.quantity));
+        offeredCandidates.push({ candidate, claimToken, offerExpiresAt });
+      }
+
+      return { expired, offeredCount, offeredCandidates };
+    });
+
+    let queuedEmailCount = 0;
+    for (const { candidate, claimToken, offerExpiresAt } of offerResult.offeredCandidates) {
       // eslint-disable-next-line no-await-in-loop -- email route selection belongs to the entry just offered.
       const route = await db
         .selectFrom('email_provider_routes')
@@ -340,9 +354,9 @@ export async function processWaitlistOffersActivity(): Promise<
 
     return okResult({
       expiredCount: Number(
-        (expired[0] as { numUpdatedRows?: bigint } | undefined)?.numUpdatedRows ?? 0,
+        (offerResult.expired[0] as { numUpdatedRows?: bigint } | undefined)?.numUpdatedRows ?? 0,
       ),
-      offeredCount,
+      offeredCount: offerResult.offeredCount,
       queuedEmailCount,
     });
   } catch (err) {

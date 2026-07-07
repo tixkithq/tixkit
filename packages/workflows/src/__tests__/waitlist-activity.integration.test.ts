@@ -208,6 +208,33 @@ describe.skipIf(!dbUrl)('processWaitlistOffersActivity', () => {
     expect(candidate.status).toBe('joined');
     expect(candidate.claim_token_hash).toBeNull();
   });
+
+  it('does not over-offer one freed slot across concurrent maintenance runs', async () => {
+    const firstEntryId = await createWaitlistEntry(db, 'concurrent-1@example.com', {
+      createdAt: new Date(Date.now() - 60_000),
+    });
+    const secondEntryId = await createWaitlistEntry(db, 'concurrent-2@example.com', {
+      createdAt: new Date(Date.now() - 50_000),
+    });
+
+    const results = await Promise.all([
+      processWaitlistOffersActivity(),
+      processWaitlistOffersActivity(),
+    ]);
+
+    expect(results.every((result) => result.ok)).toBe(true);
+    const rows = await db
+      .selectFrom('waitlist_entries')
+      .select(['id', 'status', 'claim_token_hash'])
+      .where('id', 'in', [firstEntryId, secondEntryId])
+      .orderBy('created_at', 'asc')
+      .execute();
+
+    expect(rows).toHaveLength(2);
+    expect(rows.filter((row) => row.status === 'offered')).toHaveLength(1);
+    expect(rows.filter((row) => row.status === 'joined')).toHaveLength(1);
+    expect(rows.filter((row) => /^[a-f0-9]{64}$/.test(row.claim_token_hash ?? ''))).toHaveLength(1);
+  });
 });
 
 async function seedBaseRows(db: Database) {
