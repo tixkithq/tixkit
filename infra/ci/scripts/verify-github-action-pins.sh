@@ -23,6 +23,26 @@ while IFS=: read -r path line raw_line; do
   fi
 done < <(rg --no-heading --line-number '^[[:space:]-]*uses:[[:space:]]*' .github/workflows .github/actions)
 
+while IFS=: read -r path line raw_line; do
+  image="${raw_line#*image:}"
+  image="${image%%#*}"
+  image="${image#\"}"
+  image="${image%\"}"
+  image="${image#\'}"
+  image="${image%\'}"
+  image="${image#"${image%%[![:space:]]*}"}"
+  image="${image%"${image##*[![:space:]]}"}"
+
+  if [[ -z "${image}" ]]; then
+    continue
+  fi
+
+  if [[ ! "${image}" =~ ^[^[:space:]@]+@sha256:[0-9a-f]{64}$ ]]; then
+    printf '%s:%s uses mutable or malformed service image: %s\n' "${path}" "${line}" "${image}" >&2
+    failures=1
+  fi
+done < <(rg --no-heading --line-number '^[[:space:]]*image:[[:space:]]*' .github/workflows)
+
 while IFS= read -r workflow; do
   if ! awk '
     /^permissions:[[:space:]]*$/ {

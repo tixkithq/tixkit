@@ -145,7 +145,7 @@ jobs:
     runs-on: ubuntu-latest
     services:
       postgres:
-        image: postgres:16-alpine
+        image: postgres:16-alpine@sha256:e013e867e712fec275706a6c51c966f0bb0c93cfa8f51000f85a15f9865a28cb
         env:
           POSTGRES_USER: tixkit
           POSTGRES_PASSWORD: tixkit
@@ -158,7 +158,7 @@ jobs:
           --health-timeout 3s
           --health-retries 10
       redis:
-        image: redis:7-alpine
+        image: redis:7-alpine@sha256:6ab0b6e7381779332f97b8ca76193e45b0756f38d4c0dcda72dbb3c32061ab99
         ports:
           - 6379:6379
         options: >-
@@ -167,7 +167,7 @@ jobs:
           --health-timeout 3s
           --health-retries 10
       temporal:
-        image: temporalio/auto-setup:1.24
+        image: temporalio/auto-setup:1.24@sha256:98cdb6b5e02d64cb933864a9ba91cb66065eb320623a0dafdf44beba535bca88
         ports:
           - 7233:7233
         env:
@@ -204,7 +204,7 @@ jobs:
     runs-on: ubuntu-latest
     services:
       mysql:
-        image: mysql:8.4
+        image: mysql:8.4@sha256:d36d39a64cd12a5c1cc9e6aa2bfb5f8d4c81a2f6586e0a04a9ae13939db02209
         env:
           MYSQL_ROOT_PASSWORD: tixkit
           MYSQL_DATABASE: tixkit
@@ -218,7 +218,7 @@ jobs:
           --health-timeout 5s
           --health-retries 10
       redis:
-        image: redis:7-alpine
+        image: redis:7-alpine@sha256:6ab0b6e7381779332f97b8ca76193e45b0756f38d4c0dcda72dbb3c32061ab99
         ports:
           - 6379:6379
         options: >-
@@ -227,7 +227,7 @@ jobs:
           --health-timeout 3s
           --health-retries 10
       temporal:
-        image: temporalio/auto-setup:1.24
+        image: temporalio/auto-setup:1.24@sha256:98cdb6b5e02d64cb933864a9ba91cb66065eb320623a0dafdf44beba535bca88
         ports:
           - 7233:7233
         env:
@@ -271,7 +271,7 @@ jobs:
     if: ${{ vars.RUN_MSSQL_TESTS == '1' }}
     services:
       mssql:
-        image: mcr.microsoft.com/mssql/server:2022-latest
+        image: mcr.microsoft.com/mssql/server:2022-latest@sha256:e07b9699a2b749969f19d86563ceeea22bd3a69f7f1db85a8d1ac4bdaf0c6f56
         env:
           ACCEPT_EULA: 'Y'
           MSSQL_SA_PASSWORD: 'Test-password-12345'

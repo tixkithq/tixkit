@@ -18,7 +18,7 @@ jobs:
     runs-on: tixkit-epyc-trusted
     services:
       postgres:
-        image: postgres:16-alpine
+        image: postgres:16-alpine@sha256:e013e867e712fec275706a6c51c966f0bb0c93cfa8f51000f85a15f9865a28cb
         env:
           POSTGRES_USER: tixkit
           POSTGRES_PASSWORD: tixkit
@@ -31,7 +31,7 @@ jobs:
           --health-timeout 3s
           --health-retries 10
       mysql:
-        image: mysql:8.4
+        image: mysql:8.4@sha256:d36d39a64cd12a5c1cc9e6aa2bfb5f8d4c81a2f6586e0a04a9ae13939db02209
         env:
           MYSQL_ROOT_PASSWORD: tixkit
           MYSQL_DATABASE: tixkit
@@ -45,7 +45,7 @@ jobs:
           --health-timeout 5s
           --health-retries 10
       redis:
-        image: redis:7-alpine
+        image: redis:7-alpine@sha256:6ab0b6e7381779332f97b8ca76193e45b0756f38d4c0dcda72dbb3c32061ab99
         ports:
           - 6379:6379
         options: >-
