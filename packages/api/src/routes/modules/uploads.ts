@@ -13,6 +13,7 @@ import {
   completeUploadArtifact,
   createUploadArtifact,
   getUploadArtifactDownloadUrl,
+  streamBrandLogo,
   streamContentEmailImage,
   uploadTokenMatches,
   type UploadPurpose,
@@ -236,10 +237,16 @@ export const publicUploadRoutes: FastifyPluginAsync = async (app) => {
     const { artifactId } = request.params as { artifactId: string };
     const { stream, contentType, fileName } = await streamContentEmailImage(db, artifactId);
     reply.header('Content-Type', contentType);
-    reply.header(
-      'Content-Disposition',
-      `inline; filename="${fileName.replaceAll('"', '')}"`,
-    );
+    reply.header('Content-Disposition', `inline; filename="${fileName.replaceAll('"', '')}"`);
+    reply.header('Cache-Control', 'public, max-age=31536000, immutable');
+    return reply.send(stream);
+  });
+
+  app.get('/public/brand-logos/:artifactId', async (request, reply) => {
+    const { artifactId } = request.params as { artifactId: string };
+    const { stream, contentType, fileName } = await streamBrandLogo(db, artifactId);
+    reply.header('Content-Type', contentType);
+    reply.header('Content-Disposition', `inline; filename="${fileName.replaceAll('"', '')}"`);
     reply.header('Cache-Control', 'public, max-age=31536000, immutable');
     return reply.send(stream);
   });
@@ -359,6 +366,13 @@ export const uploadRoutes: FastifyPluginAsync = async (app) => {
     if (!artifact) throw new NotFoundError('UploadArtifact', artifactId);
     ClerkAuthService.requireResourceTenant(principal, artifact, 'UploadArtifact', artifactId);
     requireUploadArtifactAccess(principal, artifact, 'download');
+
+    if (artifact.purpose === 'brand_logo') {
+      return {
+        downloadUrl: `/v1/public/brand-logos/${artifactId}`,
+        durable: true,
+      };
+    }
 
     if (artifact.purpose === 'content_email_image') {
       return {

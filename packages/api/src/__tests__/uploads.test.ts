@@ -10,6 +10,7 @@ import {
   completeUploadArtifact,
   createUploadArtifact,
   getContentEmailImageArtifact,
+  getBrandLogoArtifact,
   getUploadArtifactDownloadUrl,
   scanUploadBuffer,
 } from '../services/uploads.js';
@@ -1490,6 +1491,42 @@ describe('upload artifact routes', () => {
     await app.close();
   });
 
+  it('returns a durable public URL for clean brand-logo artifact downloads', async () => {
+    const { db } = createMockDb({
+      upload_artifacts: [
+        {
+          id: 'upl_logo_clean',
+          tenant_id: 'tnt_1',
+          organization_id: 'org_1',
+          brand_id: 'brd_1',
+          event_id: null,
+          purpose: 'brand_logo',
+          status: 'uploaded',
+          scan_status: 'clean',
+          bucket: 'tixkit',
+          object_key: 'uploads/tnt_1/brand-logos/brd_1/final/upl_logo_clean.png',
+          content_type: 'image/png',
+          file_name: 'logo.png',
+          size_bytes: 12,
+        },
+      ],
+    });
+    const app = await setupUploadApp(db, uploadRoutes);
+
+    const download = await app.inject({
+      method: 'GET',
+      url: '/upload-artifacts/upl_logo_clean/download',
+    });
+
+    expect(download.statusCode).toBe(200);
+    expect(signedUrlInputs).toHaveLength(0);
+    expect(download.json()).toMatchObject({
+      downloadUrl: '/v1/public/brand-logos/upl_logo_clean',
+      durable: true,
+    });
+    await app.close();
+  });
+
   it('serves content email images via the public route with inline disposition and long cache lifetime', async () => {
     const { Readable } = await import('node:stream');
     const { db } = createMockDb({
@@ -1524,6 +1561,45 @@ describe('upload artifact routes', () => {
     expect(res.headers['content-type']).toBe('image/png');
     expect(res.headers['content-disposition']).toContain('inline');
     expect(res.headers['content-disposition']).toContain('hero.png');
+    expect(res.headers['cache-control']).toContain('max-age=31536000');
+    expect(res.headers['cache-control']).toContain('immutable');
+    await app.close();
+  });
+
+  it('serves brand logos via the public route with inline disposition and long cache lifetime', async () => {
+    const { Readable } = await import('node:stream');
+    const { db } = createMockDb({
+      upload_artifacts: [
+        {
+          id: 'upl_logo_clean',
+          tenant_id: 'tnt_1',
+          organization_id: 'org_1',
+          brand_id: 'brd_1',
+          event_id: null,
+          purpose: 'brand_logo',
+          status: 'uploaded',
+          scan_status: 'clean',
+          bucket: 'tixkit',
+          object_key: 'uploads/tnt_1/brand-logos/brd_1/final/upl_logo_clean.png',
+          content_type: 'image/png',
+          file_name: 'logo.png',
+          size_bytes: 12,
+        },
+      ],
+    });
+    const app = await setupUploadApp(db, publicUploadRoutes);
+    const imageStream = Readable.from([Buffer.from('logo-data')]);
+    s3Send.mockResolvedValueOnce({ Body: imageStream, ContentType: 'image/png' });
+
+    const res = await app.inject({
+      method: 'GET',
+      url: '/public/brand-logos/upl_logo_clean',
+    });
+
+    expect(res.statusCode).toBe(200);
+    expect(res.headers['content-type']).toBe('image/png');
+    expect(res.headers['content-disposition']).toContain('inline');
+    expect(res.headers['content-disposition']).toContain('logo.png');
     expect(res.headers['cache-control']).toContain('max-age=31536000');
     expect(res.headers['cache-control']).toContain('immutable');
     await app.close();
@@ -1619,6 +1695,35 @@ describe('upload artifact routes', () => {
       objectKey: 'uploads/tnt_1/content-email-images/evt_1/final/upl_email_clean.png',
       contentType: 'image/png',
       fileName: 'hero.png',
+    });
+  });
+
+  it('getBrandLogoArtifact returns artifact metadata for clean brand_logo', async () => {
+    const { db } = createMockDb({
+      upload_artifacts: [
+        {
+          id: 'upl_logo_clean',
+          tenant_id: 'tnt_1',
+          organization_id: 'org_1',
+          brand_id: 'brd_1',
+          event_id: null,
+          purpose: 'brand_logo',
+          status: 'uploaded',
+          scan_status: 'clean',
+          bucket: 'tixkit',
+          object_key: 'uploads/tnt_1/brand-logos/brd_1/final/upl_logo_clean.png',
+          content_type: 'image/png',
+          file_name: 'logo.png',
+        },
+      ],
+    });
+
+    const artifact = await getBrandLogoArtifact(db, 'upl_logo_clean');
+    expect(artifact).toMatchObject({
+      bucket: 'tixkit',
+      objectKey: 'uploads/tnt_1/brand-logos/brd_1/final/upl_logo_clean.png',
+      contentType: 'image/png',
+      fileName: 'logo.png',
     });
   });
 

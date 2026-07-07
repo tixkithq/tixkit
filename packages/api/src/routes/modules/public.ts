@@ -14,6 +14,7 @@ import { accessRuleMatches, NotFoundError, ValidationError } from '@tixkit/domai
 import type { AccessRuleRecord, Question } from '@tixkit/domain';
 import {
   parseJsonValue,
+  serializeBrandTheme,
   serializeEventOccurrenceStatus,
   serializeMarketingIntegration,
   serializeResalePolicy,
@@ -346,7 +347,7 @@ export const publicRoutes: FastifyPluginAsync = async (app) => {
       name: brand.name,
       slug: brand.slug,
       status: brand.status,
-      theme: parseJsonValue(brand.theme, {}),
+      theme: serializeBrandTheme(brand.theme),
       supportUrl: brand.support_url ?? undefined,
       legalUrls: parseJsonValue(brand.legal_urls, {}),
       whiteLabel: brand.white_label,

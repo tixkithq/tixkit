@@ -584,17 +584,18 @@ export async function getUploadArtifactDownloadUrl(
   );
 }
 
-export type ContentEmailImageArtifact = {
+export type PublicUploadArtifact = {
   bucket: string;
   objectKey: string;
   contentType: string;
   fileName: string;
 };
 
-export async function getContentEmailImageArtifact(
+async function getPublicUploadArtifact(
   db: Database,
   artifactId: string,
-): Promise<ContentEmailImageArtifact> {
+  purpose: 'brand_logo' | 'content_email_image',
+): Promise<PublicUploadArtifact> {
   const artifact = await db
     .selectFrom('upload_artifacts')
     .selectAll()
@@ -602,7 +603,7 @@ export async function getContentEmailImageArtifact(
     .executeTakeFirst();
   if (
     !artifact ||
-    artifact.purpose !== 'content_email_image' ||
+    artifact.purpose !== purpose ||
     artifact.status !== 'uploaded' ||
     artifact.scan_status !== 'clean'
   ) {
@@ -616,15 +617,25 @@ export async function getContentEmailImageArtifact(
   };
 }
 
-export async function streamContentEmailImage(
+export async function getContentEmailImageArtifact(
   db: Database,
   artifactId: string,
-): Promise<{
+): Promise<PublicUploadArtifact> {
+  return getPublicUploadArtifact(db, artifactId, 'content_email_image');
+}
+
+export async function getBrandLogoArtifact(
+  db: Database,
+  artifactId: string,
+): Promise<PublicUploadArtifact> {
+  return getPublicUploadArtifact(db, artifactId, 'brand_logo');
+}
+
+async function streamPublicUploadArtifact(artifact: PublicUploadArtifact): Promise<{
   stream: NodeJS.ReadableStream;
   contentType: string;
   fileName: string;
 }> {
-  const artifact = await getContentEmailImageArtifact(db, artifactId);
   const s3 = createS3Client();
   const response = await s3.send(
     new GetObjectCommand({
@@ -641,6 +652,28 @@ export async function streamContentEmailImage(
     contentType: artifact.contentType,
     fileName: artifact.fileName,
   };
+}
+
+export async function streamContentEmailImage(
+  db: Database,
+  artifactId: string,
+): Promise<{
+  stream: NodeJS.ReadableStream;
+  contentType: string;
+  fileName: string;
+}> {
+  return streamPublicUploadArtifact(await getContentEmailImageArtifact(db, artifactId));
+}
+
+export async function streamBrandLogo(
+  db: Database,
+  artifactId: string,
+): Promise<{
+  stream: NodeJS.ReadableStream;
+  contentType: string;
+  fileName: string;
+}> {
+  return streamPublicUploadArtifact(await getBrandLogoArtifact(db, artifactId));
 }
 
 function uploadArtifactAnswerEntries(answers: Record<string, unknown>): Array<[string, string]> {

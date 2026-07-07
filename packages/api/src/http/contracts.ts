@@ -591,6 +591,18 @@ export function serializeOrganization(row: Record<string, unknown>) {
   };
 }
 
+export function serializeBrandTheme(value: unknown): Record<string, unknown> {
+  const theme = parseJsonValue<Record<string, unknown>>(value, {});
+  const logoArtifactId = theme.logoArtifactId;
+  if (typeof logoArtifactId === 'string' && logoArtifactId.trim() !== '') {
+    return {
+      ...theme,
+      logoUrl: `/v1/public/brand-logos/${encodeURIComponent(logoArtifactId)}`,
+    };
+  }
+  return theme;
+}
+
 export function serializeBrand(row: Record<string, unknown>) {
   return {
     id: row.id,
@@ -599,7 +611,7 @@ export function serializeBrand(row: Record<string, unknown>) {
     name: row.name,
     slug: row.slug,
     status: row.status,
-    theme: parseJsonValue(row.theme, {}),
+    theme: serializeBrandTheme(row.theme),
     emailIdentityId: row.email_identity_id ?? undefined,
     smsIdentityId: row.sms_identity_id ?? undefined,
     paymentAccountId: row.payment_account_id ?? undefined,

@@ -8,7 +8,12 @@ import {
   registerHealthRoute,
   registerJsonBodyParser,
 } from '../app.js';
-import { pageEnvelope, parsePagination, serializeOrder } from '../http/contracts.js';
+import {
+  pageEnvelope,
+  parsePagination,
+  serializeBrandTheme,
+  serializeOrder,
+} from '../http/contracts.js';
 import { MAX_OFFLINE_SYNC_SCANS, OFFLINE_SYNC_JSON_BODY_LIMIT_BYTES } from '../http/schemas.js';
 
 describe('API contract helpers', () => {
@@ -41,6 +46,20 @@ describe('API contract helpers', () => {
       items: [{ id: 'row_1' }],
       nextCursor: null,
       hasMore: false,
+    });
+  });
+
+  it('derives durable brand logo URLs from logo artifact IDs', () => {
+    expect(
+      serializeBrandTheme({
+        primaryColor: '#222222',
+        logoArtifactId: 'upl_logo',
+        logoUrl: 'https://s3.test/logo.png?X-Amz-Signature=expired',
+      }),
+    ).toEqual({
+      primaryColor: '#222222',
+      logoArtifactId: 'upl_logo',
+      logoUrl: '/v1/public/brand-logos/upl_logo',
     });
   });
 

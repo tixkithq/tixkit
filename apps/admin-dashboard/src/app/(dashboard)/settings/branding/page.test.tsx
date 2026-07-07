@@ -170,4 +170,51 @@ describe('BrandingPage', () => {
     expect(apiMock.updateBrand).not.toHaveBeenCalled();
     expect(toastMock.error).toHaveBeenCalledWith('Brand name is required');
   });
+
+  it('persists a durable brand logo URL after upload', async () => {
+    apiMock.uploadArtifact.mockResolvedValue({
+      ok: true,
+      data: {
+        artifactId: 'upl_logo',
+        status: 'uploaded',
+        scanStatus: 'clean',
+        downloadUrl: 'http://localhost:4000/v1/public/brand-logos/upl_logo',
+      },
+    });
+    apiMock.updateBrand.mockResolvedValue({
+      ok: true,
+      data: {
+        ...bootstrapState.value.availableBrands[0],
+        theme: {
+          primaryColor: '#222222',
+          logoArtifactId: 'upl_logo',
+          logoUrl: 'http://localhost:4000/v1/public/brand-logos/upl_logo',
+        },
+      },
+    });
+
+    render(<BrandingPage />);
+
+    const file = new File(['png'], 'logo.png', { type: 'image/png' });
+    fireEvent.change(await screen.findByLabelText('Upload Logo'), {
+      target: { files: [file] },
+    });
+
+    await waitFor(() => expect(apiMock.uploadArtifact).toHaveBeenCalledTimes(1));
+    expect(apiMock.uploadArtifact).toHaveBeenCalledWith({
+      purpose: 'brand_logo',
+      file,
+      brandId: 'brd_1',
+      metadata: { source: 'admin_branding' },
+    });
+    await waitFor(() => expect(apiMock.updateBrand).toHaveBeenCalledTimes(1));
+    expect(apiMock.updateBrand).toHaveBeenCalledWith('brd_1', {
+      theme: {
+        primaryColor: '#222222',
+        logoArtifactId: 'upl_logo',
+        logoUrl: 'http://localhost:4000/v1/public/brand-logos/upl_logo',
+      },
+    });
+    expect(apiMock.updateBrand.mock.calls[0]?.[1].theme.logoUrl).not.toContain('X-Amz-Signature');
+  });
 });

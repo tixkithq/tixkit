@@ -2179,6 +2179,10 @@ function normalizeBrand(value: Record<string, unknown>): AdminBrand {
     ? value.domains.map((domain) => normalizeBrandDomain(asRecord(domain)))
     : [];
   const legalUrls = parseJsonRecord(value.legalUrls ?? value.legal_urls);
+  const theme = parseJsonRecord(value.theme);
+  if (typeof theme.logoUrl === 'string' && theme.logoUrl.startsWith('/v1/')) {
+    theme.logoUrl = `${getAdminApiBaseUrl()}${theme.logoUrl}`;
+  }
   return {
     id: String(value.id),
     tenantId: String(value.tenantId ?? value.tenant_id ?? ''),
@@ -2186,7 +2190,7 @@ function normalizeBrand(value: Record<string, unknown>): AdminBrand {
     name: stringValue(value.name, 'Untitled brand'),
     slug: stringValue(value.slug, ''),
     status,
-    theme: parseJsonRecord(value.theme),
+    theme,
     domains,
     supportUrl: stringValue(value.supportUrl ?? value.support_url, undefined),
     legalUrls: {
@@ -3970,8 +3974,14 @@ export const adminApi: AdminApi = {
           `/v1/upload-artifacts/${completeResult.data.artifactId}/download`,
           { method: 'GET' },
         );
-        const rawDownloadUrl = downloadResult.ok ? downloadResult.data.downloadUrl : undefined;
-        const downloadUrl = rawDownloadUrl?.startsWith('/v1/')
+        if (!downloadResult.ok) return downloadResult;
+        const rawDownloadUrl = downloadResult.data.downloadUrl;
+        if (typeof rawDownloadUrl !== 'string' || rawDownloadUrl.trim() === '') {
+          return err(
+            apiError('upload_download_url_missing', 'Upload completed without a usable URL'),
+          );
+        }
+        const downloadUrl = rawDownloadUrl.startsWith('/v1/')
           ? `${getAdminApiBaseUrl()}${rawDownloadUrl}`
           : rawDownloadUrl;
         return ok({
