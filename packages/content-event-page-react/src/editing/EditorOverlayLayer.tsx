@@ -40,7 +40,7 @@ export function EditorOverlayLayer({
   const [hoveredId, setHoveredId] = React.useState<string | undefined>(undefined);
 
   return (
-    <div className="tk-ep-overlay" data-editor-chrome aria-hidden>
+    <div className="tk-ep-overlay" data-editor-chrome>
       {blocks.map((block, index) => {
         const placement = rects.get(block.id);
         if (!placement) return null;
@@ -55,29 +55,27 @@ export function EditorOverlayLayer({
             style={slotStyle(placement)}
             data-editor-chrome
           >
-            <button
-              type="button"
+            <div
               className={
-                selected
-                  ? 'tk-ep-overlay__hit tk-ep-overlay__hit--selected'
-                  : 'tk-ep-overlay__hit'
+                selected ? 'tk-ep-overlay__hit tk-ep-overlay__hit--selected' : 'tk-ep-overlay__hit'
               }
               style={{ pointerEvents: selected || disabled ? 'none' : 'auto' }}
               data-overlay-hit={block.id}
-              tabIndex={-1}
-              aria-label={`Select ${block.label} block`}
+              aria-hidden="true"
               onClick={() => {
                 if (!disabled && !selected) onSelectBlock(block.id);
               }}
               onMouseEnter={() => setHoveredId(block.id)}
-              onMouseLeave={() => setHoveredId((current) => (current === block.id ? undefined : current))}
+              onMouseLeave={() =>
+                setHoveredId((current) => (current === block.id ? undefined : current))
+              }
             />
             {!selected && hoveredId === block.id ? (
-              <div className="tk-ep-overlay__hover" data-editor-chrome />
+              <div className="tk-ep-overlay__hover" data-editor-chrome aria-hidden="true" />
             ) : null}
             {selected ? (
               <>
-                <div className="tk-ep-overlay__selected" data-editor-chrome />
+                <div className="tk-ep-overlay__selected" data-editor-chrome aria-hidden="true" />
                 <div
                   className={
                     flipBelow
@@ -85,6 +83,8 @@ export function EditorOverlayLayer({
                       : 'tk-ep-overlay__toolbar'
                   }
                   data-editor-chrome
+                  role="toolbar"
+                  aria-label={`${block.label} block actions`}
                 >
                   <span className="tk-ep-overlay__toolbar-label" data-editor-chrome>
                     {block.label}

@@ -1,5 +1,5 @@
 import { describe, expect, it, vi, afterEach, beforeEach } from 'vitest';
-import { render, fireEvent, cleanup } from '@testing-library/react';
+import { render, fireEvent, cleanup, within } from '@testing-library/react';
 import * as React from 'react';
 import { EditorOverlayLayer } from '../index.js';
 
@@ -108,6 +108,22 @@ describe('EditorOverlayLayer', () => {
     expect(toolbars[0].textContent).toBe('Tickets');
   });
 
+  it('exposes selected block toolbar actions outside aria-hidden chrome', () => {
+    const { getByRole } = renderOverlay({ selectedBlockId: 'b' });
+    const toolbar = getByRole('toolbar', { name: 'Tickets block actions' });
+    const buttons = [
+      within(toolbar).getByRole('button', { name: 'Move Tickets up' }),
+      within(toolbar).getByRole('button', { name: 'Move Tickets down' }),
+      within(toolbar).getByRole('button', { name: 'Duplicate Tickets' }),
+      within(toolbar).getByRole('button', { name: 'Delete Tickets' }),
+    ];
+
+    expect(toolbar.closest('[aria-hidden="true"]')).toBeNull();
+    for (const button of buttons) {
+      expect(button.closest('[aria-hidden="true"]')).toBeNull();
+    }
+  });
+
   it('disables move up for the first block and move down for the last block', () => {
     const { container } = renderOverlay({ selectedBlockId: 'a' });
     const moveUp = container.querySelector<HTMLButtonElement>('[aria-label="Move Hero up"]')!;
@@ -120,7 +136,9 @@ describe('EditorOverlayLayer', () => {
     setupRectMock();
     const last = renderOverlay({ selectedBlockId: 'c' });
     const lastUp = last.container.querySelector<HTMLButtonElement>('[aria-label="Move FAQ up"]')!;
-    const lastDown = last.container.querySelector<HTMLButtonElement>('[aria-label="Move FAQ down"]')!;
+    const lastDown = last.container.querySelector<HTMLButtonElement>(
+      '[aria-label="Move FAQ down"]',
+    )!;
     expect(lastUp.disabled).toBe(false);
     expect(lastDown.disabled).toBe(true);
   });
