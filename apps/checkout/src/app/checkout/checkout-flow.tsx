@@ -47,6 +47,7 @@ import {
   isRequiredCheckoutAnswerMissing,
   normalizeCheckoutAnswers,
   questionPatternValidationMessage,
+  questionTypeValidationMessage,
   visibleCheckoutQuestions,
 } from '@/lib/checkout-questions';
 import { trackMarketingEvent, type MarketingEventItem } from '@/lib/marketing';
@@ -395,6 +396,12 @@ export default function CheckoutFlow({
               setAttendeeQuestionErrors({ [key]: message });
               return message;
             }
+            const typeError = questionTypeValidationMessage(q, answer);
+            if (typeError) {
+              const message = `${typeError} for ${ticketType?.name ?? 'this ticket'} attendee ${i + 1}.`;
+              setAttendeeQuestionErrors({ [key]: message });
+              return message;
+            }
             const patternError = questionPatternValidationMessage(q, answer);
             if (patternError) {
               const message = `${patternError} for ${ticketType?.name ?? 'this ticket'} attendee ${i + 1}.`;
@@ -415,6 +422,12 @@ export default function CheckoutFlow({
               : q.type === 'multiselect'
                 ? `Choose at least one option for ${q.label}.`
                 : `Please complete ${q.label}.`;
+          setBuyerQuestionErrors({ [q.id]: message });
+          return message;
+        }
+        const typeError = questionTypeValidationMessage(q, answer);
+        if (typeError) {
+          const message = `${typeError}.`;
           setBuyerQuestionErrors({ [q.id]: message });
           return message;
         }

@@ -255,6 +255,7 @@ function DynamicQuestionField({
             disabled={disabled}
             required={question.required}
             aria-required={question.required || undefined}
+            aria-invalid={validationError ? true : undefined}
             aria-describedby={describedBy}
             onChange={(e) => onChange(e.target.checked)}
             className="size-4 rounded border-input accent-primary"
@@ -289,6 +290,7 @@ function DynamicQuestionField({
           disabled={disabled}
           placeholder={question.placeholder}
           required={question.required}
+          aria-invalid={validationError ? true : undefined}
           aria-describedby={describedBy}
         />
         {question.description ? (
@@ -311,6 +313,7 @@ function DynamicQuestionField({
           onChange={(e) => onChange(e.target.value)}
           disabled={disabled}
           required={question.required}
+          aria-invalid={validationError ? true : undefined}
           aria-describedby={describedBy}
           className="h-9 w-full rounded-md border border-input bg-transparent px-3 text-sm shadow-xs focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50"
         >
@@ -412,6 +415,7 @@ function DynamicQuestionField({
           type="file"
           disabled={disabled || uploading || !eventId}
           required={question.required && !uploaded}
+          aria-invalid={validationError ? true : undefined}
           aria-describedby={describedBy}
           onChange={async (event) => {
             const file = event.target.files?.[0];
@@ -457,6 +461,7 @@ function DynamicQuestionField({
             disabled={disabled}
             required={question.required}
             aria-required={question.required || undefined}
+            aria-invalid={validationError ? true : undefined}
             aria-describedby={describedBy}
             onChange={(e) => onChange(e.target.checked)}
             className="size-4 rounded border-input accent-primary"
@@ -496,8 +501,14 @@ function DynamicQuestionField({
         disabled={disabled}
         placeholder={question.placeholder}
         required={question.required}
+        aria-invalid={validationError ? true : undefined}
         aria-describedby={describedBy}
       />
+      {validationError ? (
+        <p id={errorId} className="text-sm text-destructive">
+          {validationError}
+        </p>
+      ) : null}
       {question.description ? (
         <p id={descriptionId} className="text-xs text-muted-foreground">
           {question.description}

@@ -99,6 +99,35 @@ describe('AttendeeForm dynamic question types', () => {
     expect(checkbox).toHaveAttribute('aria-invalid', 'true');
   });
 
+  it('marks invalid dynamic question controls with an associated error description', () => {
+    const question: CheckoutQuestion = {
+      id: 'q_contact',
+      label: 'Backup email',
+      description: 'Used if your receipt bounces.',
+      type: 'email',
+      required: false,
+      appliesTo: 'buyer',
+    };
+
+    const view = render(
+      createAttendeeForm({
+        buyerQuestions: [question],
+        buyerAnswers: { q_contact: 'not-an-email' },
+        buyerQuestionErrors: {
+          q_contact: 'Backup email must be a valid email.',
+        },
+        onBuyerAnswersChange: () => {},
+      }),
+    );
+
+    const input = view.getByLabelText('Backup email') as HTMLInputElement;
+
+    expect(input).toHaveAttribute('aria-invalid', 'true');
+    expect(input).toHaveAccessibleDescription(
+      /Used if your receipt bounces\.[\s\S]*Backup email must be a valid email\./,
+    );
+  });
+
   it('renders conditional questions only when their condition matches', () => {
     const questions: CheckoutQuestion[] = [
       {

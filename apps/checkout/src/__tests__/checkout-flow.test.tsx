@@ -222,6 +222,39 @@ describe('CheckoutFlow buyer validation', () => {
     expect(checkoutApiMock.createSession).not.toHaveBeenCalled();
   });
 
+  it('blocks checkout before the API when a buyer email question has an invalid value', async () => {
+    publicApiMock.getQuestions.mockResolvedValue({
+      buyerQuestions: [
+        {
+          id: 'q_backup_email',
+          label: 'Backup email',
+          description: 'Used if your receipt bounces.',
+          type: 'email',
+          required: false,
+          appliesTo: 'buyer',
+        },
+      ],
+      attendeeQuestions: [],
+    });
+    const view = renderCheckoutFlow();
+
+    await view.findByText('General Admission');
+    await view.findByLabelText('Backup email');
+    fireEvent.click(view.getByRole('button', { name: 'Increase General Admission quantity' }));
+    fireEvent.change(view.getByLabelText(/Email/), {
+      target: { value: 'buyer@example.com' },
+    });
+    fireEvent.change(view.getByLabelText('Backup email'), {
+      target: { value: 'not-an-email' },
+    });
+    fireEvent.click(view.getByRole('button', { name: 'Continue' }));
+
+    const message = 'Backup email must be a valid email.';
+    expect(await view.findAllByText(message)).toHaveLength(2);
+    expect(view.getByLabelText('Backup email')).toHaveAttribute('aria-invalid', 'true');
+    expect(checkoutApiMock.createSession).not.toHaveBeenCalled();
+  });
+
   it('blocks checkout before the API when a buyer question fails its validation pattern', async () => {
     publicApiMock.getQuestions.mockResolvedValue({
       buyerQuestions: [
@@ -249,7 +282,8 @@ describe('CheckoutFlow buyer validation', () => {
     });
     fireEvent.click(view.getByRole('button', { name: 'Continue' }));
 
-    expect(await view.findByText('Member ID format is invalid.')).toBeInTheDocument();
+    expect(await view.findAllByText('Member ID format is invalid.')).toHaveLength(2);
+    expect(view.getByLabelText(/Member ID/)).toHaveAttribute('aria-invalid', 'true');
     expect(checkoutApiMock.createSession).not.toHaveBeenCalled();
   });
 
