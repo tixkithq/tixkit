@@ -93,9 +93,7 @@ export function EventsTable() {
             }
           />
         }
-        renderRowSheet={(row) =>
-          row ? <EventRowSheet event={row} /> : null
-        }
+        renderRowSheet={(row) => (row ? <EventRowSheet event={row} /> : null)}
       />
       {canWriteEvents && (
         <CreateEventDrawer

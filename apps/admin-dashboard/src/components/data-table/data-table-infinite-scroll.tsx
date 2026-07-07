@@ -44,12 +44,7 @@ export function DataTableInfiniteScroll({
   if (!hasNextPage && !isFetching) return null;
 
   return (
-    <div
-      ref={sentinelRef}
-      className={className}
-      aria-busy={isFetching}
-      aria-live="polite"
-    >
+    <div ref={sentinelRef} className={className} aria-busy={isFetching} aria-live="polite">
       {isFetching && (
         <div className="flex items-center justify-center gap-2 py-4 text-sm text-muted-foreground">
           <Loader2 className="size-4 animate-spin" />

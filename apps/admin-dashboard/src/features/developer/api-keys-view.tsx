@@ -32,9 +32,8 @@ export function ApiKeysView() {
   const [revokingKey, setRevokingKey] = React.useState<AdminApiKey | null>(null);
   const [revokeOpen, setRevokeOpen] = React.useState(false);
   const { organizationId } = useBootstrap();
-  const { data, loading, error, refetch } = useAdminQuery(
-    ['listApiKeys', organizationId],
-    () => adminApi.listApiKeys(organizationId ? { organizationId } : undefined),
+  const { data, loading, error, refetch } = useAdminQuery(['listApiKeys', organizationId], () =>
+    adminApi.listApiKeys(organizationId ? { organizationId } : undefined),
   );
 
   const apiKeys = data ?? [];

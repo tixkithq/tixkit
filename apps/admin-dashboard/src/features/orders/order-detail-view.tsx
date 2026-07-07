@@ -2,7 +2,16 @@
 
 import * as React from 'react';
 import Link from 'next/link';
-import { ArrowLeft, Ban, RotateCcw, Mail, User, ClipboardList, Truck, Calendar } from 'lucide-react';
+import {
+  ArrowLeft,
+  Ban,
+  RotateCcw,
+  Mail,
+  User,
+  ClipboardList,
+  Truck,
+  Calendar,
+} from 'lucide-react';
 import { adminApi } from '@/lib/api';
 import { routes } from '@/lib/routes';
 import { Button } from '@/components/ui/button';

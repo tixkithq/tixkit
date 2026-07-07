@@ -55,11 +55,16 @@ vi.mock('@/hooks/use-admin-table-data', async (importOriginal) => {
     ...actual,
     useAdminQuery: (
       queryKey: unknown[],
-      fetcher: () => Promise<{ ok: true; data: unknown } | { ok: false; error: { code: string; message: string; status?: number } }>,
+      fetcher: () => Promise<
+        | { ok: true; data: unknown }
+        | { ok: false; error: { code: string; message: string; status?: number } }
+      >,
     ) => {
       const [data, setData] = React.useState<unknown>(undefined);
       const [loading, setLoading] = React.useState(true);
-      const [error, setError] = React.useState<{ code: string; message: string; status?: number } | undefined>(undefined);
+      const [error, setError] = React.useState<
+        { code: string; message: string; status?: number } | undefined
+      >(undefined);
       const [nonce, setNonce] = React.useState(0);
       // Serialize query key for dep tracking (JSON.stringify is stable enough for tests)
       const keyStr = JSON.stringify(queryKey);
@@ -75,11 +80,19 @@ vi.mock('@/hooks/use-admin-table-data', async (importOriginal) => {
             else setError(result.error);
           })
           .catch((e: unknown) => {
-            if (!cancelled) setError({ code: 'fetch_error', message: e instanceof Error ? e.message : 'Failed to fetch' });
+            if (!cancelled)
+              setError({
+                code: 'fetch_error',
+                message: e instanceof Error ? e.message : 'Failed to fetch',
+              });
           })
-          .finally(() => { if (!cancelled) setLoading(false); });
-        return () => { cancelled = true; };
-      // eslint-disable-next-line react-hooks/exhaustive-deps
+          .finally(() => {
+            if (!cancelled) setLoading(false);
+          });
+        return () => {
+          cancelled = true;
+        };
+        // eslint-disable-next-line react-hooks/exhaustive-deps
       }, [nonce, keyStr]);
 
       return { data, loading, error, refetch: () => setNonce((n) => n + 1) };

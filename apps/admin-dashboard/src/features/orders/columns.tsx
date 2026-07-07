@@ -121,7 +121,8 @@ export function getOrderColumns(
         const [pending, setPending] = React.useState(false);
 
         const canCancel =
-          Boolean(options.canCancelOrders) && (order.status === 'pending' || order.status === 'paid');
+          Boolean(options.canCancelOrders) &&
+          (order.status === 'pending' || order.status === 'paid');
         const canRefund =
           Boolean(options.canRefundOrders) &&
           (order.status === 'paid' || order.status === 'partially_refunded');

@@ -183,7 +183,9 @@ export function EventProductsView({ eventId }: { eventId: string }) {
     loading: categoriesLoading,
     error: categoriesError,
     refetch: refetchCategories,
-  } = useAdminQuery(['listProductCategories', eventId], () => adminApi.listProductCategories(eventId));
+  } = useAdminQuery(['listProductCategories', eventId], () =>
+    adminApi.listProductCategories(eventId),
+  );
   const {
     data: products,
     loading: productsLoading,

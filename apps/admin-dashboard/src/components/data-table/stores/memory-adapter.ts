@@ -25,12 +25,9 @@ export function useMemoryTableState(initialQuery?: AdminTableQuery): MemoryAdapt
     setQueryState(newQuery);
   }, []);
 
-  const updateQuery = React.useCallback(
-    (updater: (prev: AdminTableQuery) => AdminTableQuery) => {
-      setQueryState((prev) => updater(prev));
-    },
-    [],
-  );
+  const updateQuery = React.useCallback((updater: (prev: AdminTableQuery) => AdminTableQuery) => {
+    setQueryState((prev) => updater(prev));
+  }, []);
 
   const resetFilters = React.useCallback(() => {
     setQueryState((prev) => ({

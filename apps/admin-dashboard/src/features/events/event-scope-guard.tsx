@@ -24,7 +24,9 @@ export function EventScopeGuard({
 }) {
   const router = useRouter();
   const { organizationId, brandId, setOrganizationId, setBrandId } = useBootstrap();
-  const { data: event, loading } = useAdminQuery(['getEvent', eventId], () => adminApi.getEvent(eventId));
+  const { data: event, loading } = useAdminQuery(['getEvent', eventId], () =>
+    adminApi.getEvent(eventId),
+  );
 
   // Tracks the scope we most recently auto-aligned to, so we can distinguish
   // an auto-align from a manual switch and avoid a redirect race.

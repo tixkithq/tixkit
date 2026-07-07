@@ -66,7 +66,12 @@ beforeEach(() => {
 
 describe('EventScopeGuard', () => {
   it('renders children while the event is loading', () => {
-    useAdminDataMock.mockReturnValue({ data: undefined, loading: true, error: undefined, refetch: vi.fn() });
+    useAdminDataMock.mockReturnValue({
+      data: undefined,
+      loading: true,
+      error: undefined,
+      refetch: vi.fn(),
+    });
 
     const { getByText } = render(
       <EventScopeGuard eventId="evt_1">
@@ -79,7 +84,12 @@ describe('EventScopeGuard', () => {
 
   it('auto-aligns scope to the event brand when it differs', async () => {
     const event = makeEvent();
-    useAdminDataMock.mockReturnValue({ data: event, loading: false, error: undefined, refetch: vi.fn() });
+    useAdminDataMock.mockReturnValue({
+      data: event,
+      loading: false,
+      error: undefined,
+      refetch: vi.fn(),
+    });
 
     render(
       <EventScopeGuard eventId="evt_1">
@@ -97,7 +107,12 @@ describe('EventScopeGuard', () => {
     useBootstrapMock.organizationId = 'org_1';
     useBootstrapMock.brandId = 'brd_1';
     const event = makeEvent();
-    useAdminDataMock.mockReturnValue({ data: event, loading: false, error: undefined, refetch: vi.fn() });
+    useAdminDataMock.mockReturnValue({
+      data: event,
+      loading: false,
+      error: undefined,
+      refetch: vi.fn(),
+    });
 
     render(
       <EventScopeGuard eventId="evt_1">
@@ -111,7 +126,12 @@ describe('EventScopeGuard', () => {
 
   it('redirects to /events when the scope is manually switched to a mismatched brand', async () => {
     const event = makeEvent();
-    useAdminDataMock.mockReturnValue({ data: event, loading: false, error: undefined, refetch: vi.fn() });
+    useAdminDataMock.mockReturnValue({
+      data: event,
+      loading: false,
+      error: undefined,
+      refetch: vi.fn(),
+    });
 
     // First render: scope mismatches, auto-align is pending.
     const { rerender } = render(
@@ -151,7 +171,12 @@ describe('EventScopeGuard', () => {
 
   it('does not redirect when the event lacks organization/brand ids', () => {
     const event = makeEvent({ organizationId: undefined, brandId: undefined });
-    useAdminDataMock.mockReturnValue({ data: event, loading: false, error: undefined, refetch: vi.fn() });
+    useAdminDataMock.mockReturnValue({
+      data: event,
+      loading: false,
+      error: undefined,
+      refetch: vi.fn(),
+    });
 
     render(
       <EventScopeGuard eventId="evt_1">

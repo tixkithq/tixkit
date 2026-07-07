@@ -81,9 +81,8 @@ async function copyClaimLinkToClipboard(claimUrl: string): Promise<boolean> {
 export function EventTicketsView({ eventId }: { eventId: string }) {
   const [drawerOpen, setDrawerOpen] = React.useState(false);
   const [editingTicket, setEditingTicket] = React.useState<AdminTicketType | undefined>(undefined);
-  const { data, loading, error, refetch } = useAdminQuery(
-    ['listTicketTypes', eventId],
-    () => adminApi.listTicketTypes(eventId),
+  const { data, loading, error, refetch } = useAdminQuery(['listTicketTypes', eventId], () =>
+    adminApi.listTicketTypes(eventId),
   );
   const {
     data: waitlistData,
@@ -96,7 +95,9 @@ export function EventTicketsView({ eventId }: { eventId: string }) {
     loading: occurrencesLoading,
     error: occurrencesError,
     refetch: refetchOccurrences,
-  } = useAdminQuery(['listEventOccurrences', eventId], () => adminApi.listEventOccurrences(eventId));
+  } = useAdminQuery(['listEventOccurrences', eventId], () =>
+    adminApi.listEventOccurrences(eventId),
+  );
   const {
     data: resalePolicy,
     loading: resalePolicyLoading,

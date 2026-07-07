@@ -94,7 +94,7 @@ function SelectFilterContent({
   onChange: (value: AdminTableFilterValue | undefined) => void;
   facet?: AdminTableFacet;
 }) {
-  const options = column.options ?? [];
+  const options = React.useMemo(() => column.options ?? [], [column.options]);
   const [searchValue, setSearchValue] = React.useState('');
   const scrollRef = React.useRef<HTMLDivElement | null>(null);
   const [scrollTop, setScrollTop] = React.useState(0);

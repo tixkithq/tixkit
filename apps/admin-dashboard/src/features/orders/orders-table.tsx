@@ -56,9 +56,7 @@ export function OrdersTable() {
           description="Orders will appear here once attendees start buying tickets."
         />
       }
-      renderRowSheet={(row) =>
-        row ? <OrderRowSheetContent order={row} /> : null
-      }
+      renderRowSheet={(row) => (row ? <OrderRowSheetContent order={row} /> : null)}
     />
   );
 }
@@ -133,4 +131,3 @@ function OrderRowSheetContent({ order }: { order: AdminOrderListItem }) {
     </div>
   );
 }
-

@@ -23,7 +23,9 @@ export function OrderScopeGuard({
 }) {
   const router = useRouter();
   const { organizationId, brandId, setOrganizationId, setBrandId } = useBootstrap();
-  const { data: order, loading } = useAdminQuery(['getOrder', orderId], () => adminApi.getOrder(orderId));
+  const { data: order, loading } = useAdminQuery(['getOrder', orderId], () =>
+    adminApi.getOrder(orderId),
+  );
 
   const pendingAutoAlign = React.useRef<string | null>(null);
 

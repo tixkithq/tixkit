@@ -272,9 +272,9 @@ function DataTableSkeleton({ columnCount }: { columnCount: number }) {
         <Skeleton className="h-9 w-[180px]" />
         <Skeleton className="h-9 w-[100px]" />
       </div>
-      {Array.from({ length: 5 }).map((_, i) => (
+      {Array.from({ length: 5 }).map((_row, i) => (
         <div key={i} className="flex items-center border-b last:border-0">
-          {Array.from({ length: Math.min(columnCount, 6) }).map((_, j) => (
+          {Array.from({ length: Math.min(columnCount, 6) }).map((_column, j) => (
             <Skeleton key={j} className="m-2 h-4 flex-1" />
           ))}
         </div>

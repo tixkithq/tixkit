@@ -25,6 +25,13 @@ async function attachScreenshot(page: Page, testInfo: TestInfo, name: string): P
   });
 }
 
+async function attachJsonEvidence(testInfo: TestInfo, name: string, value: unknown): Promise<void> {
+  await testInfo.attach(name, {
+    body: JSON.stringify(value, null, 2),
+    contentType: 'application/json',
+  });
+}
+
 function uniqueE2eSuffix(testInfo: TestInfo, prefix: string): string {
   return `${prefix}-${testInfo.project.name}-${testInfo.workerIndex}-${Date.now()}`
     .replaceAll(/[^a-zA-Z0-9_-]/g, '-')
@@ -400,6 +407,56 @@ test.describe('Admin data table filters', () => {
       await expect(page).toHaveURL(/search=a/);
     });
 
+    test('captures live table API evidence for filter, sort, and pagination state', async ({
+      page,
+    }, testInfo) => {
+      await page.setViewportSize(desktopViewport);
+      const ordersResponse = page.waitForResponse(
+        (response) => {
+          const url = new URL(response.url());
+          return (
+            url.pathname.endsWith('/v1/orders') &&
+            url.searchParams.toString().length > 0 &&
+            response.status() === 200
+          );
+        },
+        { timeout: 15_000 },
+      );
+
+      await page.goto(`${adminBaseUrl}/orders?status=paid&sort=createdAt%3Adesc&limit=5`);
+      await expect(page.getByRole('table')).toBeVisible({ timeout: 15_000 });
+
+      const response = await ordersResponse;
+      const requestUrl = new URL(response.url());
+      const payload = await response.json();
+      const items = Array.isArray(payload.items) ? payload.items : [];
+      const itemIds = items
+        .map((item: unknown) =>
+          item && typeof item === 'object' && 'id' in item
+            ? String((item as { id: unknown }).id)
+            : undefined,
+        )
+        .filter((id): id is string => Boolean(id));
+
+      expect(requestUrl.search).toContain('sort=');
+      expect(requestUrl.search).toContain('limit=5');
+      expect(payload).toMatchObject({
+        items: expect.any(Array),
+        hasMore: expect.any(Boolean),
+      });
+      expect(itemIds.length).toBeLessThanOrEqual(5);
+
+      await attachJsonEvidence(testInfo, 'orders-table-api-contract', {
+        requestPath: `${requestUrl.pathname}${requestUrl.search}`,
+        status: response.status(),
+        itemCount: itemIds.length,
+        itemIds,
+        hasMore: payload.hasMore,
+        nextCursor: payload.nextCursor ?? null,
+      });
+      await attachScreenshot(page, testInfo, 'orders-table-filter-sort-pagination-evidence');
+    });
+
     test('cursor pagination produces no duplicate rows', async ({ page }) => {
       await page.setViewportSize(desktopViewport);
       await page.goto(`${adminBaseUrl}/orders`);
@@ -409,7 +466,9 @@ test.describe('Admin data table filters', () => {
       const orderLinks = page.getByRole('link', { name: /^ord_/ });
       const firstLinkCount = await orderLinks.count();
       const firstPageIds = new Set(
-        await Promise.all(Array.from({ length: firstLinkCount }, (_, i) => orderLinks.nth(i).innerText())),
+        await Promise.all(
+          Array.from({ length: firstLinkCount }, (_, i) => orderLinks.nth(i).innerText()),
+        ),
       );
 
       // Look for a "Next" or pagination button
@@ -421,13 +480,15 @@ test.describe('Admin data table filters', () => {
         await page.waitForURL(/cursor=/, { timeout: 10_000 }).catch(() => {});
 
         // Collect row identifiers from the second page
-        await expect.poll(async () => {
-          const nextLinkCount = await orderLinks.count();
-          const nextPageIds = await Promise.all(
-            Array.from({ length: nextLinkCount }, (_, i) => orderLinks.nth(i).innerText()),
-          );
-          return nextPageIds.some((id) => !firstPageIds.has(id));
-        }).toBe(true);
+        await expect
+          .poll(async () => {
+            const nextLinkCount = await orderLinks.count();
+            const nextPageIds = await Promise.all(
+              Array.from({ length: nextLinkCount }, (_, i) => orderLinks.nth(i).innerText()),
+            );
+            return nextPageIds.some((id) => !firstPageIds.has(id));
+          })
+          .toBe(true);
 
         const secondLinkCount = await orderLinks.count();
         const secondPageIds = await Promise.all(

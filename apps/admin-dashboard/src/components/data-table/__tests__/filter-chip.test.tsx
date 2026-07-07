@@ -76,11 +76,7 @@ describe('DataTableFilterChip', () => {
 
   it('returns null for empty text filter', () => {
     const { container } = render(
-      <DataTableFilterChip
-        label="Email"
-        value={{ type: 'text', value: '' }}
-        onRemove={() => {}}
-      />,
+      <DataTableFilterChip label="Email" value={{ type: 'text', value: '' }} onRemove={() => {}} />,
     );
     expect(container.firstChild).toBeNull();
   });

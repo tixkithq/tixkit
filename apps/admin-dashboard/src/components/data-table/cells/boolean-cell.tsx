@@ -10,12 +10,7 @@ type BooleanCellProps = {
   className?: string;
 };
 
-export function BooleanCell({
-  value,
-  trueLabel,
-  falseLabel,
-  className,
-}: BooleanCellProps) {
+export function BooleanCell({ value, trueLabel, falseLabel, className }: BooleanCellProps) {
   if (value === null || value === undefined) {
     return <span className={cn('text-sm text-muted-foreground', className)}>—</span>;
   }

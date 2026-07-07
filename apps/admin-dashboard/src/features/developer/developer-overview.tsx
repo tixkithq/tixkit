@@ -19,18 +19,16 @@ export function DeveloperOverview() {
     loading: keysLoading,
     error: keysError,
     refetch: refetchKeys,
-  } = useAdminQuery(
-    ['listApiKeys', organizationId],
-    () => adminApi.listApiKeys(organizationId ? { organizationId } : undefined),
+  } = useAdminQuery(['listApiKeys', organizationId], () =>
+    adminApi.listApiKeys(organizationId ? { organizationId } : undefined),
   );
   const {
     data: webhooks,
     loading: webhooksLoading,
     error: webhooksError,
     refetch: refetchWebhooks,
-  } = useAdminQuery(
-    ['listWebhookEndpoints', organizationId],
-    () => adminApi.listWebhookEndpoints(organizationId ? { organizationId } : undefined),
+  } = useAdminQuery(['listWebhookEndpoints', organizationId], () =>
+    adminApi.listWebhookEndpoints(organizationId ? { organizationId } : undefined),
   );
 
   const activeKeys = (apiKeys ?? []).length;

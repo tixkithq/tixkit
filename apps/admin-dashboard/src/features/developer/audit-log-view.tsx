@@ -73,7 +73,9 @@ const privacyRequestColumns: ColumnDef<AdminPrivacyRequest>[] = [
     header: 'Subject',
     cell: ({ row }) => (
       <div>
-        <div className="text-sm">{row.original.subjectEmail ?? row.original.subjectId ?? 'Subject'}</div>
+        <div className="text-sm">
+          {row.original.subjectEmail ?? row.original.subjectId ?? 'Subject'}
+        </div>
         <div className="text-xs text-muted-foreground">{row.original.subjectType}</div>
       </div>
     ),
@@ -226,9 +228,7 @@ export function AuditLogView() {
               description="Adjust filters or create a privileged change to generate an audit event."
             />
           }
-          renderRowSheet={(row) =>
-            row ? <AuditLogRowSheet row={row} /> : null
-          }
+          renderRowSheet={(row) => (row ? <AuditLogRowSheet row={row} /> : null)}
         />
       </section>
 
@@ -301,9 +301,7 @@ export function AuditLogView() {
               description="Data exports and erasures queued from this page will appear here."
             />
           }
-          renderRowSheet={(row) =>
-            row ? <PrivacyRequestRowSheet row={row} /> : null
-          }
+          renderRowSheet={(row) => (row ? <PrivacyRequestRowSheet row={row} /> : null)}
         />
       </section>
     </div>
@@ -317,7 +315,9 @@ function AuditLogRowSheet({ row }: { row: AdminAuditLog }) {
       <dl className="grid grid-cols-2 gap-3 text-sm">
         <div>
           <dt className="text-muted-foreground">Actor</dt>
-          <dd className="mt-1 font-mono text-xs"><TextCell value={row.actorId} /></dd>
+          <dd className="mt-1 font-mono text-xs">
+            <TextCell value={row.actorId} />
+          </dd>
         </div>
         <div>
           <dt className="text-muted-foreground">Resource</dt>
@@ -328,19 +328,27 @@ function AuditLogRowSheet({ row }: { row: AdminAuditLog }) {
         </div>
         <div>
           <dt className="text-muted-foreground">Organization</dt>
-          <dd className="mt-1"><TextCell value={row.organizationId ?? 'tenant'} /></dd>
+          <dd className="mt-1">
+            <TextCell value={row.organizationId ?? 'tenant'} />
+          </dd>
         </div>
         <div>
           <dt className="text-muted-foreground">Brand</dt>
-          <dd className="mt-1"><TextCell value={row.brandId ?? 'all brands'} /></dd>
+          <dd className="mt-1">
+            <TextCell value={row.brandId ?? 'all brands'} />
+          </dd>
         </div>
         <div>
           <dt className="text-muted-foreground">Request ID</dt>
-          <dd className="mt-1 font-mono text-xs"><TextCell value={row.requestId ?? '-'} /></dd>
+          <dd className="mt-1 font-mono text-xs">
+            <TextCell value={row.requestId ?? '-'} />
+          </dd>
         </div>
         <div>
           <dt className="text-muted-foreground">Created</dt>
-          <dd className="mt-1"><TimestampCell value={row.createdAt} showTime /></dd>
+          <dd className="mt-1">
+            <TimestampCell value={row.createdAt} showTime />
+          </dd>
         </div>
       </dl>
     </div>
@@ -366,20 +374,28 @@ function PrivacyRequestRowSheet({ row }: { row: AdminPrivacyRequest }) {
         </div>
         <div>
           <dt className="text-muted-foreground">Subject Email</dt>
-          <dd className="mt-1"><TextCell value={row.subjectEmail ?? '-'} /></dd>
+          <dd className="mt-1">
+            <TextCell value={row.subjectEmail ?? '-'} />
+          </dd>
         </div>
         <div>
           <dt className="text-muted-foreground">Subject ID</dt>
-          <dd className="mt-1 font-mono text-xs"><TextCell value={row.subjectId ?? '-'} /></dd>
+          <dd className="mt-1 font-mono text-xs">
+            <TextCell value={row.subjectId ?? '-'} />
+          </dd>
         </div>
         <div>
           <dt className="text-muted-foreground">Requested</dt>
-          <dd className="mt-1"><TimestampCell value={row.createdAt} showTime /></dd>
+          <dd className="mt-1">
+            <TimestampCell value={row.createdAt} showTime />
+          </dd>
         </div>
         {row.completedAt && (
           <div>
             <dt className="text-muted-foreground">Completed</dt>
-            <dd className="mt-1"><TimestampCell value={row.completedAt} showTime /></dd>
+            <dd className="mt-1">
+              <TimestampCell value={row.completedAt} showTime />
+            </dd>
           </div>
         )}
         {row.error && (

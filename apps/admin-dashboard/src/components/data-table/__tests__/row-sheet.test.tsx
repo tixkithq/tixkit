@@ -3,6 +3,21 @@ import { render, screen, fireEvent } from '@testing-library/react';
 import * as React from 'react';
 import { DataTableRowSheet } from '@/components/data-table/data-table-row-sheet';
 
+function FocusTest() {
+  const [open, setOpen] = React.useState(false);
+  const ref = React.useRef<HTMLButtonElement | null>(null);
+  return (
+    <div>
+      <button ref={ref} onClick={() => setOpen(true)} data-testid="trigger">
+        Open sheet
+      </button>
+      <DataTableRowSheet open={open} onOpenChange={setOpen} focusReturnRef={ref}>
+        <div>Content</div>
+      </DataTableRowSheet>
+    </div>
+  );
+}
+
 describe('DataTableRowSheet', () => {
   it('renders children when open', () => {
     render(
@@ -51,24 +66,6 @@ describe('DataTableRowSheet', () => {
   });
 
   it('restores focus to triggering element on close', () => {
-    const FocusTest = () => {
-      const [open, setOpen] = React.useState(false);
-      const ref = React.useRef<HTMLButtonElement | null>(null);
-      return (
-        <div>
-          <button ref={ref} onClick={() => setOpen(true)} data-testid="trigger">
-            Open sheet
-          </button>
-          <DataTableRowSheet
-            open={open}
-            onOpenChange={setOpen}
-            focusReturnRef={ref}
-          >
-            <div>Content</div>
-          </DataTableRowSheet>
-        </div>
-      );
-    };
     render(<FocusTest />);
 
     const trigger = screen.getByTestId('trigger');

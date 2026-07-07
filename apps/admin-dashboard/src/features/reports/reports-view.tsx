@@ -120,7 +120,9 @@ export function ReportsView({ eventId }: ReportsViewProps) {
     organizationId: bootstrapOrgId,
     brandId: bootstrapBrandId,
   });
-  const organizationsState = useAdminQuery(['listOrganizations'], () => adminApi.listOrganizations());
+  const organizationsState = useAdminQuery(['listOrganizations'], () =>
+    adminApi.listOrganizations(),
+  );
   const events = eventId ? [] : allEvents.events;
   const eventsLoading = eventId ? false : allEvents.loading;
   const eventsError = eventId ? undefined : allEvents.error;
@@ -151,26 +153,20 @@ export function ReportsView({ eventId }: ReportsViewProps) {
         ? adminApi.getTaxReport(selectedEventId, range)
         : emptyResult<AdminTaxReport>(),
   );
-  const attendanceState = useAdminQuery(
-    ['getAttendanceReport', activeTab, selectedEventId],
-    () =>
-      selectedEventId && activeTab === 'attendance'
-        ? adminApi.getAttendanceReport(selectedEventId)
-        : emptyResult<AdminAttendanceReport>(),
+  const attendanceState = useAdminQuery(['getAttendanceReport', activeTab, selectedEventId], () =>
+    selectedEventId && activeTab === 'attendance'
+      ? adminApi.getAttendanceReport(selectedEventId)
+      : emptyResult<AdminAttendanceReport>(),
   );
-  const promoState = useAdminQuery(
-    ['getPromoReport', activeTab, selectedEventId],
-    () =>
-      selectedEventId && activeTab === 'promo'
-        ? adminApi.getPromoReport(selectedEventId)
-        : emptyResult<AdminPromoReport>(),
+  const promoState = useAdminQuery(['getPromoReport', activeTab, selectedEventId], () =>
+    selectedEventId && activeTab === 'promo'
+      ? adminApi.getPromoReport(selectedEventId)
+      : emptyResult<AdminPromoReport>(),
   );
-  const conversionState = useAdminQuery(
-    ['getConversionReport', activeTab, selectedEventId],
-    () =>
-      selectedEventId && activeTab === 'conversion'
-        ? adminApi.getConversionReport(selectedEventId)
-        : emptyResult<AdminConversionReport>(),
+  const conversionState = useAdminQuery(['getConversionReport', activeTab, selectedEventId], () =>
+    selectedEventId && activeTab === 'conversion'
+      ? adminApi.getConversionReport(selectedEventId)
+      : emptyResult<AdminConversionReport>(),
   );
   const affiliateState = useAdminQuery(
     ['getAffiliateReport', activeTab, selectedOrganizationId],
@@ -240,9 +236,7 @@ export function ReportsView({ eventId }: ReportsViewProps) {
   }
 
   if (eventsError && !eventId) {
-    return (
-      <ApiErrorState error={eventsError} onRetry={allEvents.refetch} className="h-96" />
-    );
+    return <ApiErrorState error={eventsError} onRetry={allEvents.refetch} className="h-96" />;
   }
 
   const currency = salesState.data?.currency ?? selectedEvent?.currency ?? 'USD';

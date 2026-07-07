@@ -7,10 +7,7 @@ import { attendeesTableSchema } from '@/lib/table-schemas';
 import { Button } from '@/components/ui/button';
 import { EmptyState } from '@/components/empty-state';
 import { DataTable, useUrlTableState } from '@/components/data-table';
-import {
-  TextCell,
-  TimestampCell,
-} from '@/components/data-table/cells';
+import { TextCell, TimestampCell } from '@/components/data-table/cells';
 import { useAdminTableData } from '@/hooks/use-admin-table-data';
 import { usePermissions } from '@/context/permission-provider';
 import { useBootstrap } from '@/context/bootstrap-provider';
@@ -125,9 +122,7 @@ export function AttendeesTable() {
             description="Attendees are added automatically as orders are completed."
           />
         }
-        renderRowSheet={(row) =>
-          row ? <AttendeeRowSheetContent attendee={row} /> : null
-        }
+        renderRowSheet={(row) => (row ? <AttendeeRowSheetContent attendee={row} /> : null)}
       />
       <AttendeeFormDialog
         attendee={editingAttendee}
@@ -144,9 +139,7 @@ function AttendeeRowSheetContent({ attendee }: { attendee: AdminAttendeeListItem
     <div className="space-y-4">
       <div className="space-y-2">
         <h3 className="text-lg font-semibold">{attendee.name}</h3>
-        {attendee.email && (
-          <p className="text-sm text-muted-foreground">{attendee.email}</p>
-        )}
+        {attendee.email && <p className="text-sm text-muted-foreground">{attendee.email}</p>}
       </div>
       <dl className="grid grid-cols-2 gap-3 text-sm">
         <div>

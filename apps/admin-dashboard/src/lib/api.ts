@@ -16,7 +16,13 @@ export { getAdminApiAuthHeaders, getAdminApiBaseUrl } from './api-http';
 export { hasClerkKey } from '@/lib/auth';
 import type { AdminTableQuery, AdminTablePage } from '@tixkit/admin-table-core';
 import { queryToParams } from '@tixkit/admin-table-core';
-import { ordersTableSchema, attendeesTableSchema, auditLogTableSchema, privacyRequestTableSchema, eventsTableSchema } from './table-schemas';
+import {
+  ordersTableSchema,
+  attendeesTableSchema,
+  auditLogTableSchema,
+  privacyRequestTableSchema,
+  eventsTableSchema,
+} from './table-schemas';
 
 // ---------------------------------------------------------------------------
 // Result / pagination envelopes
@@ -1803,9 +1809,7 @@ export type AdminApi = {
   mintPreviewToken(
     documentId: string,
     input?: { versionId?: string },
-  ): Promise<
-    ApiResult<{ token: string; url: string; expiresAt: string; versionId: string }>
-  >;
+  ): Promise<ApiResult<{ token: string; url: string; expiresAt: string; versionId: string }>>;
   migrateEventPageChrome(): Promise<
     ApiResult<{
       documentsScanned: number;
@@ -1904,9 +1908,9 @@ export type AdminApi = {
   createApiKey(input: CreateApiKeyInput): Promise<ApiResult<AdminApiKey>>;
   revokeApiKey(apiKeyId: string): Promise<ApiResult<AdminApiKey>>;
 
-  listWebhookEndpoints(
-    input?: { organizationId?: string },
-  ): Promise<ApiResult<AdminWebhookEndpoint[]>>;
+  listWebhookEndpoints(input?: {
+    organizationId?: string;
+  }): Promise<ApiResult<AdminWebhookEndpoint[]>>;
   createWebhookEndpoint(
     input: CreateWebhookEndpointInput,
   ): Promise<ApiResult<AdminWebhookEndpoint>>;
@@ -4026,7 +4030,11 @@ export const adminApi: AdminApi = {
         }
         if (input?.filters) {
           if (input.filters.status?.type === 'select') {
-            events = events.filter((e) => input.filters!.status!.type === 'select' && input.filters!.status!.values.includes(e.status));
+            events = events.filter(
+              (e) =>
+                input.filters!.status!.type === 'select' &&
+                input.filters!.status!.values.includes(e.status),
+            );
           }
         }
         if (input?.search) {
@@ -4034,7 +4042,11 @@ export const adminApi: AdminApi = {
           events = events.filter((e) => e.title.toLowerCase().includes(q));
         }
         const page = paginate(events, input?.cursor, input?.limit);
-        return ok({ ...page, total: events.length, filterTotal: events.length } as AdminTablePage<AdminEventListItem>);
+        return ok({
+          ...page,
+          total: events.length,
+          filterTotal: events.length,
+        } as AdminTablePage<AdminEventListItem>);
       },
     );
   },
@@ -5251,7 +5263,9 @@ export const adminApi: AdminApi = {
           }
           if (tableInput.filters.paymentProvider?.type === 'select') {
             const providers = tableInput.filters.paymentProvider.values;
-            orders = orders.filter((o) => o.paymentProvider && providers.includes(o.paymentProvider));
+            orders = orders.filter(
+              (o) => o.paymentProvider && providers.includes(o.paymentProvider),
+            );
           }
           if (tableInput.filters.refundState?.type === 'boolean') {
             orders = orders.filter((o) =>
@@ -5264,7 +5278,9 @@ export const adminApi: AdminApi = {
           if (tableInput.filters.totalCents?.type === 'number_range') {
             const { min, max } = tableInput.filters.totalCents;
             orders = orders.filter(
-              (o) => (min === undefined || o.totalCents >= min) && (max === undefined || o.totalCents <= max),
+              (o) =>
+                (min === undefined || o.totalCents >= min) &&
+                (max === undefined || o.totalCents <= max),
             );
           }
         }
@@ -5385,9 +5401,7 @@ export const adminApi: AdminApi = {
         if (brandId) params.set('brandId', brandId);
         if (checkInListId) params.set('checkInListId', checkInListId);
         const qs = params.toString();
-        const path = eventId
-          ? `/v1/events/${eventId}/attendees`
-          : '/v1/attendees';
+        const path = eventId ? `/v1/events/${eventId}/attendees` : '/v1/attendees';
         const result = await request<AdminTablePage<AdminAttendeeListItem>>(
           `${path}${qs ? `?${qs}` : ''}`,
           { method: 'GET' },
@@ -5406,9 +5420,7 @@ export const adminApi: AdminApi = {
           if (input.search) {
             const q = input.search.toLowerCase();
             attendees = attendees.filter(
-              (a) =>
-                a.name.toLowerCase().includes(q) ||
-                a.email?.toLowerCase().includes(q),
+              (a) => a.name.toLowerCase().includes(q) || a.email?.toLowerCase().includes(q),
             );
           }
           if (input.filters) {
@@ -5459,9 +5471,7 @@ export const adminApi: AdminApi = {
         if (input.search) {
           const q = input.search.toLowerCase();
           attendees = attendees.filter(
-            (a) =>
-              a.name.toLowerCase().includes(q) ||
-              a.email?.toLowerCase().includes(q),
+            (a) => a.name.toLowerCase().includes(q) || a.email?.toLowerCase().includes(q),
           );
         }
         const page = paginate(attendees, input.cursor, input.limit);
@@ -5509,16 +5519,13 @@ export const adminApi: AdminApi = {
   async createCheckInList(eventId, input) {
     return withFixture(
       async () => {
-        const result = await request<AdminCheckInList>(
-          `/v1/events/${eventId}/check-in-lists`,
-          {
-            method: 'POST',
-            body: JSON.stringify({
-              name: input.name,
-              ticketTypeIds: input.ticketTypeIds ?? [],
-            }),
-          },
-        );
+        const result = await request<AdminCheckInList>(`/v1/events/${eventId}/check-in-lists`, {
+          method: 'POST',
+          body: JSON.stringify({
+            name: input.name,
+            ticketTypeIds: input.ticketTypeIds ?? [],
+          }),
+        });
         return result;
       },
       () => {
@@ -6161,14 +6168,26 @@ export const adminApi: AdminApi = {
         }
         if (input?.filters) {
           if (input.filters.action?.type === 'select') {
-            rows = rows.filter((r) => input.filters!.action!.type === 'select' && input.filters!.action!.values.includes(r.action));
+            rows = rows.filter(
+              (r) =>
+                input.filters!.action!.type === 'select' &&
+                input.filters!.action!.values.includes(r.action),
+            );
           }
           if (input.filters.resourceType?.type === 'select') {
-            rows = rows.filter((r) => input.filters!.resourceType!.type === 'select' && input.filters!.resourceType!.values.includes(r.resourceType));
+            rows = rows.filter(
+              (r) =>
+                input.filters!.resourceType!.type === 'select' &&
+                input.filters!.resourceType!.values.includes(r.resourceType),
+            );
           }
         }
         const page = paginate(rows, input?.cursor, input?.limit);
-        return ok({ ...page, total: rows.length, filterTotal: rows.length } as AdminTablePage<AdminAuditLog>);
+        return ok({
+          ...page,
+          total: rows.length,
+          filterTotal: rows.length,
+        } as AdminTablePage<AdminAuditLog>);
       },
     );
   },
@@ -6199,14 +6218,26 @@ export const adminApi: AdminApi = {
         }
         if (input?.filters) {
           if (input.filters.status?.type === 'select') {
-            rows = rows.filter((r) => input.filters!.status!.type === 'select' && input.filters!.status!.values.includes(r.status));
+            rows = rows.filter(
+              (r) =>
+                input.filters!.status!.type === 'select' &&
+                input.filters!.status!.values.includes(r.status),
+            );
           }
           if (input.filters.requestType?.type === 'select') {
-            rows = rows.filter((r) => input.filters!.requestType!.type === 'select' && input.filters!.requestType!.values.includes(r.requestType));
+            rows = rows.filter(
+              (r) =>
+                input.filters!.requestType!.type === 'select' &&
+                input.filters!.requestType!.values.includes(r.requestType),
+            );
           }
         }
         const page = paginate(rows, input?.cursor, input?.limit);
-        return ok({ ...page, total: rows.length, filterTotal: rows.length } as AdminTablePage<AdminPrivacyRequest>);
+        return ok({
+          ...page,
+          total: rows.length,
+          filterTotal: rows.length,
+        } as AdminTablePage<AdminPrivacyRequest>);
       },
     );
   },

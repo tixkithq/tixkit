@@ -16,9 +16,8 @@ import { MessageCampaignDetailPanel } from '@/features/messages/messages-view';
 export function EventMessagesView({ eventId }: { eventId: string }) {
   const [dialogOpen, setDialogOpen] = React.useState(false);
   const [selectedCampaignId, setSelectedCampaignId] = React.useState<string>('');
-  const { data, loading, error, refetch } = useAdminQuery(
-    ['listMessages', eventId],
-    () => adminApi.listMessages(eventId),
+  const { data, loading, error, refetch } = useAdminQuery(['listMessages', eventId], () =>
+    adminApi.listMessages(eventId),
   );
 
   const campaigns = data ?? [];

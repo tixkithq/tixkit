@@ -26,24 +26,21 @@ test.describe('events list sales stats', () => {
     const { event, ticketType } = await seedPaidCheckoutEvent(request, suffix);
 
     // Place a box-office cash order for 1 ticket at $25.00.
-    const orderRes = await request.post(
-      `${apiBaseUrl}/v1/events/${event.id}/box-office/orders`,
-      {
-        headers: { 'Idempotency-Key': `e2e-sales-stats-${suffix}` },
-        data: {
-          tenderType: 'cash',
-          amountCents: 2500,
-          items: [{ ticketTypeId: ticketType.id, quantity: 1 }],
-          buyer: {
-            email: `sales-stats-${suffix}@example.com`,
-            firstName: 'Sales',
-            lastName: 'Stats',
-          },
-          notes: `E2E sales stats ${suffix}`,
+    const orderRes = await request.post(`${apiBaseUrl}/v1/events/${event.id}/box-office/orders`, {
+      headers: { 'Idempotency-Key': `e2e-sales-stats-${suffix}` },
+      data: {
+        tenderType: 'cash',
+        amountCents: 2500,
+        items: [{ ticketTypeId: ticketType.id, quantity: 1 }],
+        buyer: {
+          email: `sales-stats-${suffix}@example.com`,
+          firstName: 'Sales',
+          lastName: 'Stats',
         },
-        failOnStatusCode: false,
+        notes: `E2E sales stats ${suffix}`,
       },
-    );
+      failOnStatusCode: false,
+    });
     const orderBody = await orderRes.json();
     expect(orderRes.status(), JSON.stringify(orderBody, null, 2)).toBe(201);
 
@@ -56,12 +53,14 @@ test.describe('events list sales stats', () => {
     );
     expect(listRes.status()).toBe(200);
     const listBody = await listRes.json();
-    const listEvent = listBody.items.find(
-      (e: { id: string }) => e.id === event.id,
-    );
+    const listEvent = listBody.items.find((e: { id: string }) => e.id === event.id);
     expect(listEvent, 'seeded event should appear in events list').toBeDefined();
-    expect(listEvent.grossSalesCents, 'grossSalesCents should be non-zero in list').toBeGreaterThan(0);
-    expect(listEvent.ticketsSold, 'ticketsSold should be non-zero in list').toBeGreaterThanOrEqual(1);
+    expect(listEvent.grossSalesCents, 'grossSalesCents should be non-zero in list').toBeGreaterThan(
+      0,
+    );
+    expect(listEvent.ticketsSold, 'ticketsSold should be non-zero in list').toBeGreaterThanOrEqual(
+      1,
+    );
 
     // Verify GET /v1/events/:eventId also returns non-zero stats.
     const detailRes = await request.get(`${apiBaseUrl}/v1/events/${event.id}`, {
@@ -69,8 +68,14 @@ test.describe('events list sales stats', () => {
     });
     expect(detailRes.status()).toBe(200);
     const detailBody = await detailRes.json();
-    expect(detailBody.grossSalesCents, 'grossSalesCents should be non-zero in detail').toBeGreaterThan(0);
-    expect(detailBody.ticketsSold, 'ticketsSold should be non-zero in detail').toBeGreaterThanOrEqual(1);
+    expect(
+      detailBody.grossSalesCents,
+      'grossSalesCents should be non-zero in detail',
+    ).toBeGreaterThan(0);
+    expect(
+      detailBody.ticketsSold,
+      'ticketsSold should be non-zero in detail',
+    ).toBeGreaterThanOrEqual(1);
   });
 
   test('dashboard overview displays non-zero sales stats after a box-office order', async ({
@@ -99,24 +104,21 @@ test.describe('events list sales stats', () => {
     const { event, ticketType } = await seedPaidCheckoutEvent(request, suffix);
 
     // Place a box-office cash order for 1 ticket at $25.00.
-    const orderRes = await request.post(
-      `${apiBaseUrl}/v1/events/${event.id}/box-office/orders`,
-      {
-        headers: { 'Idempotency-Key': `e2e-sales-stats-dash-${suffix}` },
-        data: {
-          tenderType: 'cash',
-          amountCents: 2500,
-          items: [{ ticketTypeId: ticketType.id, quantity: 1 }],
-          buyer: {
-            email: `sales-stats-dash-${suffix}@example.com`,
-            firstName: 'Sales',
-            lastName: 'Dashboard',
-          },
-          notes: `E2E sales stats dashboard ${suffix}`,
+    const orderRes = await request.post(`${apiBaseUrl}/v1/events/${event.id}/box-office/orders`, {
+      headers: { 'Idempotency-Key': `e2e-sales-stats-dash-${suffix}` },
+      data: {
+        tenderType: 'cash',
+        amountCents: 2500,
+        items: [{ ticketTypeId: ticketType.id, quantity: 1 }],
+        buyer: {
+          email: `sales-stats-dash-${suffix}@example.com`,
+          firstName: 'Sales',
+          lastName: 'Dashboard',
         },
-        failOnStatusCode: false,
+        notes: `E2E sales stats dashboard ${suffix}`,
       },
-    );
+      failOnStatusCode: false,
+    });
     expect(orderRes.status(), JSON.stringify(await orderRes.json(), null, 2)).toBe(201);
 
     // Navigate to the dashboard overview and verify stats cards show non-zero values.
@@ -132,9 +134,7 @@ test.describe('events list sales stats', () => {
     await expect(grossSalesValue).not.toHaveText('$0.00');
 
     // The Tickets Sold value should not be 0 after a box-office order.
-    const ticketsSoldCard = page
-      .locator('[data-slot="card"]')
-      .filter({ hasText: 'Tickets Sold' });
+    const ticketsSoldCard = page.locator('[data-slot="card"]').filter({ hasText: 'Tickets Sold' });
     await expect(ticketsSoldCard).toBeVisible();
     const ticketsSoldValue = ticketsSoldCard.locator('.text-2xl');
     await expect(ticketsSoldValue).toBeVisible();

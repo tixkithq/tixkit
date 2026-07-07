@@ -73,14 +73,10 @@ export function DataTableToolbar({
   }, [onQueryChange]);
 
   // Find text filter columns for search input
-  const searchColumn = schema.columns.find(
-    (c) => c.filterable && c.filterType === 'text',
-  );
+  const searchColumn = schema.columns.find((c) => c.filterable && c.filterType === 'text');
 
   // Non-text filterable columns for popover filters
-  const popoverFilters = schema.columns.filter(
-    (c) => c.filterable && c.filterType !== 'text',
-  );
+  const popoverFilters = schema.columns.filter((c) => c.filterable && c.filterType !== 'text');
 
   return (
     <div className="flex flex-wrap items-center justify-between gap-2">

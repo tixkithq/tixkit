@@ -228,9 +228,10 @@ function valuesToInput(values: CheckoutQuestionFormValues): CreateCheckoutQuesti
     description: values.description?.trim() || undefined,
     required: values.required,
     appliesTo: values.appliesTo,
-    ticketTypeId: values.ticketTypeId === allTicketsValue || !values.ticketTypeId
-      ? undefined
-      : values.ticketTypeId,
+    ticketTypeId:
+      values.ticketTypeId === allTicketsValue || !values.ticketTypeId
+        ? undefined
+        : values.ticketTypeId,
     options: values.type === 'select' || values.type === 'multiselect' ? options : undefined,
     placeholder: values.placeholder?.trim() || undefined,
     validationPattern: values.validationPattern?.trim() || undefined,
@@ -255,8 +256,12 @@ export function EventCheckoutFormView({ eventId }: { eventId: string }) {
     loading,
     error,
     refetch,
-  } = useAdminQuery(['listCheckoutQuestions', eventId], () => adminApi.listCheckoutQuestions(eventId));
-  const { data: ticketTypes } = useAdminQuery(['listTicketTypes', eventId], () => adminApi.listTicketTypes(eventId));
+  } = useAdminQuery(['listCheckoutQuestions', eventId], () =>
+    adminApi.listCheckoutQuestions(eventId),
+  );
+  const { data: ticketTypes } = useAdminQuery(['listTicketTypes', eventId], () =>
+    adminApi.listTicketTypes(eventId),
+  );
   const [drawerOpen, setDrawerOpen] = React.useState(false);
   const [editingQuestion, setEditingQuestion] = React.useState<AdminCheckoutQuestion>();
   const [deleteTarget, setDeleteTarget] = React.useState<AdminCheckoutQuestion>();

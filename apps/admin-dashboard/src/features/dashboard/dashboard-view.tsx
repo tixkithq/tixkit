@@ -31,19 +31,16 @@ export function DashboardView() {
     loading: ordersLoading,
     error: ordersError,
     refetch: refetchOrders,
-  } = useAdminQuery(
-    ['listOrders', organizationId, brandId],
-    () => {
-      const params: {
-        limit: number;
-        organizationId?: string;
-        brandId?: string;
-      } = { limit: 5 };
-      if (organizationId) params.organizationId = organizationId;
-      if (brandId) params.brandId = brandId;
-      return adminApi.listOrders(params);
-    },
-  );
+  } = useAdminQuery(['listOrders', organizationId, brandId], () => {
+    const params: {
+      limit: number;
+      organizationId?: string;
+      brandId?: string;
+    } = { limit: 5 };
+    if (organizationId) params.organizationId = organizationId;
+    if (brandId) params.brandId = brandId;
+    return adminApi.listOrders(params);
+  });
 
   const recentOrders = ordersData?.items ?? [];
 

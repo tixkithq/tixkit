@@ -49,10 +49,11 @@ export function EventDetailView({ eventId }: { eventId: string }) {
     error,
     refetch,
   } = useAdminQuery(['getEvent', eventId], () => adminApi.getEvent(eventId));
-  const { data: ticketTypes } = useAdminQuery(['listTicketTypes', eventId], () => adminApi.listTicketTypes(eventId));
-  const { data: ordersData } = useAdminQuery(
-    ['listOrders', eventId],
-    () => adminApi.listOrders({ filters: { eventId: { type: 'select', values: [eventId] } }, limit: 5 }),
+  const { data: ticketTypes } = useAdminQuery(['listTicketTypes', eventId], () =>
+    adminApi.listTicketTypes(eventId),
+  );
+  const { data: ordersData } = useAdminQuery(['listOrders', eventId], () =>
+    adminApi.listOrders({ filters: { eventId: { type: 'select', values: [eventId] } }, limit: 5 }),
   );
   const { data: marketingIntegrations, refetch: refetchMarketing } = useAdminQuery(
     ['listMarketingIntegrations', eventId],

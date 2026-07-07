@@ -45,7 +45,12 @@ export function useAllEvents(scope?: UseAllEventsScope): UseAllEventsResult {
         const all: AdminEventListItem[] = [];
         let cursor: string | undefined;
         for (let i = 0; i < MAX_PAGES; i++) {
-          const params: { cursor?: string; limit: number; organizationId?: string; brandId?: string } = {
+          const params: {
+            cursor?: string;
+            limit: number;
+            organizationId?: string;
+            brandId?: string;
+          } = {
             cursor,
             limit: PAGE_SIZE,
           };

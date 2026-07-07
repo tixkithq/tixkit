@@ -40,15 +40,13 @@ export function MessagesView() {
     refetch: refetchEvents,
   } = useAllEvents({ organizationId, brandId });
 
-  const { data, loading, error, refetch } = useAdminQuery(
-    ['listMessages', selectedEventId],
-    () =>
-      selectedEventId
-        ? adminApi.listMessages(selectedEventId)
-        : Promise.resolve({
-            ok: true as const,
-            data: [] as AdminMessageCampaign[],
-          }),
+  const { data, loading, error, refetch } = useAdminQuery(['listMessages', selectedEventId], () =>
+    selectedEventId
+      ? adminApi.listMessages(selectedEventId)
+      : Promise.resolve({
+          ok: true as const,
+          data: [] as AdminMessageCampaign[],
+        }),
   );
 
   // Reset the selected event/campaign when the workspace/brand scope changes so
@@ -199,17 +197,14 @@ export function MessageCampaignDetailPanel({
   eventId: string;
   campaignId: string;
 }) {
-  const detailState = useAdminQuery(
-    ['getMessage', eventId, campaignId],
-    () => adminApi.getMessage(eventId, campaignId),
+  const detailState = useAdminQuery(['getMessage', eventId, campaignId], () =>
+    adminApi.getMessage(eventId, campaignId),
   );
-  const jobsState = useAdminQuery(
-    ['listMessageJobs', eventId, campaignId],
-    () => adminApi.listMessageJobs(eventId, campaignId),
+  const jobsState = useAdminQuery(['listMessageJobs', eventId, campaignId], () =>
+    adminApi.listMessageJobs(eventId, campaignId),
   );
-  const deliveriesState = useAdminQuery(
-    ['listMessageDeliveryLogs', eventId, campaignId],
-    () => adminApi.listMessageDeliveryLogs(eventId, campaignId),
+  const deliveriesState = useAdminQuery(['listMessageDeliveryLogs', eventId, campaignId], () =>
+    adminApi.listMessageDeliveryLogs(eventId, campaignId),
   );
   const providerEventsState = useAdminQuery(
     ['listMessageProviderEvents', eventId, campaignId],

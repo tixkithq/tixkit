@@ -55,15 +55,13 @@ export function CheckInView() {
     loading: checkInListsLoading,
     error: checkInListsError,
     refetch: refetchLists,
-  } = useAdminQuery(
-    ['listCheckInLists', selectedEventId],
-    () =>
-      selectedEventId
-        ? adminApi.listCheckInLists(selectedEventId)
-        : Promise.resolve({
-            ok: true as const,
-            data: EMPTY_CHECK_IN_LISTS,
-          }),
+  } = useAdminQuery(['listCheckInLists', selectedEventId], () =>
+    selectedEventId
+      ? adminApi.listCheckInLists(selectedEventId)
+      : Promise.resolve({
+          ok: true as const,
+          data: EMPTY_CHECK_IN_LISTS,
+        }),
   );
 
   const checkInLists = checkInListsData ?? EMPTY_CHECK_IN_LISTS;
@@ -165,7 +163,7 @@ export function CheckInView() {
                     <SelectItem key={list.id} value={list.id}>
                       {list.name}
                     </SelectItem>
-                ))}
+                  ))}
                 </SelectContent>
               </Select>
               <CreateCheckInListDialog

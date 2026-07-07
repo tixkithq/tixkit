@@ -51,7 +51,9 @@ describe('useAllEvents', () => {
       .mockResolvedValueOnce({
         ok: true,
         data: {
-          items: Array.from({ length: 20 }, (_, i) => makeEvent(`evt_${50 + i}`, `Event ${50 + i}`)),
+          items: Array.from({ length: 20 }, (_, i) =>
+            makeEvent(`evt_${50 + i}`, `Event ${50 + i}`),
+          ),
           nextCursor: undefined,
         },
       });
@@ -101,18 +103,20 @@ describe('useAllEvents', () => {
     });
 
     expect(result.current.events).toHaveLength(0);
-    expect(result.current.error).toEqual({ code: 'events_unavailable', message: 'Events unavailable' });
+    expect(result.current.error).toEqual({
+      code: 'events_unavailable',
+      message: 'Events unavailable',
+    });
   });
 
   it('refetches all pages when refetch is called', async () => {
-    listEventsMock
-      .mockResolvedValue({
-        ok: true,
-        data: {
-          items: [makeEvent('evt_1', 'Event 1')],
-          nextCursor: undefined,
-        },
-      });
+    listEventsMock.mockResolvedValue({
+      ok: true,
+      data: {
+        items: [makeEvent('evt_1', 'Event 1')],
+        nextCursor: undefined,
+      },
+    });
 
     const { result } = renderHook(() => useAllEvents());
 

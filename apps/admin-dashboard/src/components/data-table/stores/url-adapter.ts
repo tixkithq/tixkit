@@ -60,7 +60,12 @@ export function useUrlTableState(schema: TableSchema): UrlAdapterResult {
   );
 
   const resetFilters = React.useCallback(() => {
-    const cleared: AdminTableQuery = { ...query, filters: undefined, search: undefined, sort: undefined };
+    const cleared: AdminTableQuery = {
+      ...query,
+      filters: undefined,
+      search: undefined,
+      sort: undefined,
+    };
     updateUrl(cleared);
   }, [query, updateUrl]);
 

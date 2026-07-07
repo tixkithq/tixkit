@@ -69,7 +69,12 @@ beforeEach(() => {
 
 describe('OrderScopeGuard', () => {
   it('renders children while the order is loading', () => {
-    useAdminDataMock.mockReturnValue({ data: undefined, loading: true, error: undefined, refetch: vi.fn() });
+    useAdminDataMock.mockReturnValue({
+      data: undefined,
+      loading: true,
+      error: undefined,
+      refetch: vi.fn(),
+    });
 
     const { getByText } = render(
       <OrderScopeGuard orderId="ord_1">
@@ -82,7 +87,12 @@ describe('OrderScopeGuard', () => {
 
   it('auto-aligns scope to the order brand when it differs', async () => {
     const order = makeOrder();
-    useAdminDataMock.mockReturnValue({ data: order, loading: false, error: undefined, refetch: vi.fn() });
+    useAdminDataMock.mockReturnValue({
+      data: order,
+      loading: false,
+      error: undefined,
+      refetch: vi.fn(),
+    });
 
     render(
       <OrderScopeGuard orderId="ord_1">
@@ -100,7 +110,12 @@ describe('OrderScopeGuard', () => {
     useBootstrapMock.organizationId = 'org_1';
     useBootstrapMock.brandId = 'brd_1';
     const order = makeOrder();
-    useAdminDataMock.mockReturnValue({ data: order, loading: false, error: undefined, refetch: vi.fn() });
+    useAdminDataMock.mockReturnValue({
+      data: order,
+      loading: false,
+      error: undefined,
+      refetch: vi.fn(),
+    });
 
     render(
       <OrderScopeGuard orderId="ord_1">
@@ -114,7 +129,12 @@ describe('OrderScopeGuard', () => {
 
   it('redirects to /orders when the scope is manually switched to a mismatched brand', async () => {
     const order = makeOrder();
-    useAdminDataMock.mockReturnValue({ data: order, loading: false, error: undefined, refetch: vi.fn() });
+    useAdminDataMock.mockReturnValue({
+      data: order,
+      loading: false,
+      error: undefined,
+      refetch: vi.fn(),
+    });
 
     const { rerender } = render(
       <OrderScopeGuard orderId="ord_1">
@@ -150,7 +170,12 @@ describe('OrderScopeGuard', () => {
 
   it('does not redirect when the order lacks organization/brand ids', () => {
     const order = makeOrder({ organizationId: undefined, brandId: undefined });
-    useAdminDataMock.mockReturnValue({ data: order, loading: false, error: undefined, refetch: vi.fn() });
+    useAdminDataMock.mockReturnValue({
+      data: order,
+      loading: false,
+      error: undefined,
+      refetch: vi.fn(),
+    });
 
     render(
       <OrderScopeGuard orderId="ord_1">
