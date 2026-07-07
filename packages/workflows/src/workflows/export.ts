@@ -54,6 +54,18 @@ async function runExportStep<T>(
   return result!;
 }
 
+async function markExportFailedOrThrow(input: {
+  exportId: string;
+  reason?: string;
+}): Promise<void> {
+  const result = await runExportStep(() => markExportFailedActivity(input));
+  if (!result.ok) {
+    throw new Error(
+      `Export failed status could not be recorded (${result.errorCode}): ${result.message}`,
+    );
+  }
+}
+
 export async function exportWorkflow(input: ExportWorkflowInput): Promise<{ status: string }> {
   const genResult = await runExportStep(() =>
     generateAndUploadExportActivity({
@@ -64,7 +76,7 @@ export async function exportWorkflow(input: ExportWorkflowInput): Promise<{ stat
   );
 
   if (!genResult.ok) {
-    await markExportFailedActivity({ exportId: input.exportId, reason: genResult.message });
+    await markExportFailedOrThrow({ exportId: input.exportId, reason: genResult.message });
     return { status: 'failed' };
   }
 
@@ -81,7 +93,7 @@ export async function exportWorkflow(input: ExportWorkflowInput): Promise<{ stat
     if (notifyResult.errorCode === 'EXPORT_NOTIFICATION_FAILED') {
       return { status: 'completed' };
     }
-    await markExportFailedActivity({ exportId: input.exportId, reason: notifyResult.message });
+    await markExportFailedOrThrow({ exportId: input.exportId, reason: notifyResult.message });
     return { status: 'failed' };
   }
 
