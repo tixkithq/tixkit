@@ -71,6 +71,12 @@ function requireAnyPermission(principal: Principal, permissions: Permission[]): 
   }
 }
 
+function requireBrandCreationPrincipal(principal: Principal): void {
+  if (principal.brandIds?.length || principal.eventIds?.length) {
+    throw new ForbiddenError('Scoped principals cannot create brands');
+  }
+}
+
 const dashboardContextPermissions: Permission[] = [
   'events.read',
   'events.write',
@@ -457,6 +463,7 @@ export const tenantRoutes: FastifyPluginAsync = async (app) => {
   app.post('/brands', async (request, reply) => {
     const principal = request.principal!;
     ClerkAuthService.requirePermission(principal, 'settings.write');
+    requireBrandCreationPrincipal(principal);
     const body = parseBody(createBrandSchema, request.body);
 
     const organization = await new OrganizationRepository(db).findById(body.organizationId);

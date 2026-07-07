@@ -682,6 +682,72 @@ describe('tenant settings list permission gates', () => {
     await app.close();
   });
 
+  it('POST /brands rejects brand-scoped principals', async () => {
+    const tables: Tables = {
+      organizations: [organizationRow({ id: 'org_1' })],
+      brands: [],
+    };
+    const app = await setupApp(
+      tenantRoutes,
+      makePrincipal({
+        type: 'api_key',
+        id: 'ak_brand_scoped',
+        organizationIds: ['org_1'],
+        brandIds: ['brd_1'],
+        scopes: ['settings.write'],
+      }),
+      tables,
+    );
+
+    const res = await app.inject({
+      method: 'POST',
+      url: '/brands',
+      payload: {
+        organizationId: 'org_1',
+        name: 'Scoped Brand',
+        slug: 'scoped-brand',
+      },
+    });
+
+    expect(res.statusCode).toBe(403);
+    expect(res.json().message).toContain('Scoped principals cannot create brands');
+    expect(tables.brands).toEqual([]);
+    await app.close();
+  });
+
+  it('POST /brands rejects event-scoped principals', async () => {
+    const tables: Tables = {
+      organizations: [organizationRow({ id: 'org_1' })],
+      brands: [],
+    };
+    const app = await setupApp(
+      tenantRoutes,
+      makePrincipal({
+        type: 'api_key',
+        id: 'ak_event_scoped',
+        organizationIds: ['org_1'],
+        eventIds: ['evt_1'],
+        scopes: ['settings.write'],
+      }),
+      tables,
+    );
+
+    const res = await app.inject({
+      method: 'POST',
+      url: '/brands',
+      payload: {
+        organizationId: 'org_1',
+        name: 'Event Scoped Brand',
+        slug: 'event-scoped-brand',
+      },
+    });
+
+    expect(res.statusCode).toBe(403);
+    expect(res.json().message).toContain('Scoped principals cannot create brands');
+    expect(tables.brands).toEqual([]);
+    await app.close();
+  });
+
   it('GET /brands remains scoped for principals with settings.write', async () => {
     const app = await setupApp(
       tenantRoutes,
