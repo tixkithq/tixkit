@@ -115,26 +115,21 @@ async function runReconciliationActivity(
 
 async function reconcileWithBoundedRetry(
   input: PaymentReconciliationWorkflowInput,
+  attempt = 1,
 ): Promise<ReconciliationResult> {
-  let attempt = 1;
-
-  while (true) {
-    // eslint-disable-next-line no-await-in-loop -- retries must be sequential and durable.
-    const result = await runReconciliationActivity(input);
-    if (result.ok || !result.retryable) {
-      return result;
-    }
-
-    if (attempt >= RECONCILIATION_MAX_ATTEMPTS) {
-      throw new Error(
-        `Payment reconciliation failed (${result.errorCode}): ${result.message} (attempts exhausted after ${attempt} attempts)`,
-      );
-    }
-
-    // eslint-disable-next-line no-await-in-loop -- Temporal sleep records the retry boundary.
-    await sleep(RECONCILIATION_RETRY_DELAY);
-    attempt += 1;
+  const result = await runReconciliationActivity(input);
+  if (result.ok || !result.retryable) {
+    return result;
   }
+
+  if (attempt >= RECONCILIATION_MAX_ATTEMPTS) {
+    throw new Error(
+      `Payment reconciliation failed (${result.errorCode}): ${result.message} (attempts exhausted after ${attempt} attempts)`,
+    );
+  }
+
+  await sleep(RECONCILIATION_RETRY_DELAY);
+  return reconcileWithBoundedRetry(input, attempt + 1);
 }
 
 export async function paymentReconciliationWorkflow(

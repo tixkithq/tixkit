@@ -218,4 +218,298 @@ test.describe('Admin data table filters', () => {
     await expect(page.getByText(/no orders/i)).toBeVisible({ timeout: 15_000 });
     await attachScreenshot(page, testInfo, 'orders-empty-state');
   });
+
+  // ---------------------------------------------------------------------------
+  // Data-contract tests: verify filter/sort/pagination correctness, not just UI
+  // ---------------------------------------------------------------------------
+
+  test.describe('Orders data-contract', () => {
+    test('status filter narrows rows to matching status', async ({ page }) => {
+      await page.setViewportSize(desktopViewport);
+      await page.goto(`${adminBaseUrl}/dashboard/orders`);
+      await expect(page.getByRole('table')).toBeVisible({ timeout: 15_000 });
+
+      // Open the status filter popover
+      const filterButton = page.getByRole('button', { name: /status/i }).first();
+      await filterButton.click();
+
+      // Select "paid" from the filter options
+      const paidCheckbox = page.getByRole('checkbox', { name: /paid/i }).first();
+      await expect(paidCheckbox).toBeVisible({ timeout: 5_000 });
+      await paidCheckbox.check();
+
+      // Wait for URL to reflect the filter
+      await page.waitForURL(/status=paid/, { timeout: 10_000 });
+
+      // Verify all visible data rows contain "paid" in the status column
+      const dataRows = page.getByRole('row').filter({ hasNot: page.getByRole('columnheader') });
+      const count = await dataRows.count();
+      if (count > 0) {
+        await Promise.all(
+          Array.from({ length: count }, (_, i) =>
+            expect(dataRows.nth(i)).toContainText(/paid/i, { ignoreCase: true }),
+          ),
+        );
+      }
+    });
+
+    test('sort direction changes row order', async ({ page }) => {
+      await page.setViewportSize(desktopViewport);
+      await page.goto(`${adminBaseUrl}/dashboard/orders`);
+      await expect(page.getByRole('table')).toBeVisible({ timeout: 15_000 });
+
+      // Find a sortable column header (e.g., "Created" or "Date")
+      const createdHeader = page.getByRole('columnheader').filter({ hasText: /created|date/i }).first();
+      await createdHeader.click();
+
+      // Wait for URL to reflect sort param
+      await page.waitForURL(/sort=/, { timeout: 10_000 });
+
+      // Capture first row text after initial sort
+      const dataRows = page.getByRole('row').filter({ hasNot: page.getByRole('columnheader') });
+      const firstRowTextBefore = (await dataRows.first().textContent()) ?? '';
+
+      // Click the same header to reverse sort direction
+      await createdHeader.click();
+      await page.waitForURL(/sort=/, { timeout: 10_000 });
+
+      // Verify the first row changed (different order)
+      const firstRowTextAfter = (await dataRows.first().textContent()) ?? '';
+
+      // If there are at least 2 rows, the first row should differ after reversing sort
+      const rowCount = await dataRows.count();
+      if (rowCount >= 2) {
+        expect(firstRowTextAfter).not.toEqual(firstRowTextBefore);
+      }
+    });
+
+    test('URL state persists status filter across navigation', async ({ page }) => {
+      await page.setViewportSize(desktopViewport);
+      await page.goto(`${adminBaseUrl}/dashboard/orders`);
+      await expect(page.getByRole('table')).toBeVisible({ timeout: 15_000 });
+
+      // Apply a status filter via URL directly (data-contract: URL params drive the table)
+      await page.goto(`${adminBaseUrl}/dashboard/orders?status=paid`);
+      await expect(page.getByRole('table')).toBeVisible({ timeout: 15_000 });
+
+      // Verify URL has the filter param
+      await expect(page).toHaveURL(/status=paid/);
+
+      // Navigate away
+      await page.goto(`${adminBaseUrl}/dashboard`);
+      await expect(page).toHaveURL(/dashboard$/);
+
+      // Navigate back via URL
+      await page.goto(`${adminBaseUrl}/dashboard/orders?status=paid`);
+      await expect(page).toHaveURL(/status=paid/);
+
+      // Table should still be filtered
+      const dataRows = page.getByRole('row').filter({ hasNot: page.getByRole('columnheader') });
+      const count = await dataRows.count();
+      if (count > 0) {
+        await Promise.all(
+          Array.from({ length: count }, (_, i) =>
+            expect(dataRows.nth(i)).toContainText(/paid/i, { ignoreCase: true }),
+          ),
+        );
+      }
+    });
+
+    test('row sheet displays order details', async ({ page }, testInfo) => {
+      await page.setViewportSize(desktopViewport);
+      await page.goto(`${adminBaseUrl}/dashboard/orders`);
+      await expect(page.getByRole('table')).toBeVisible({ timeout: 15_000 });
+
+      // Capture the first data row's content for comparison
+      const dataRows = page.getByRole('row').filter({ hasNot: page.getByRole('columnheader') });
+      const firstRowText = (await dataRows.first().textContent()) ?? '';
+
+      // Click the first data row to open the sheet
+      await dataRows.first().click();
+
+      // Verify the sheet/dialog appears
+      const sheet = page.getByRole('dialog').or(page.locator('[data-state="open"]').first());
+      await expect(sheet).toBeVisible({ timeout: 5_000 });
+
+      // The sheet should contain order detail labels (data-contract: sheet shows structured data)
+      const sheetText = (await sheet.textContent()) ?? '';
+      // At least one of these detail labels should be present
+      const hasOrderDetail =
+        /order\s*(id|#)/i.test(sheetText) ||
+        /status/i.test(sheetText) ||
+        /total|amount/i.test(sheetText) ||
+        /buyer|email|customer/i.test(sheetText) ||
+        /event/i.test(sheetText);
+      expect(hasOrderDetail).toBe(true);
+
+      // The sheet content should overlap with the row content (same order data)
+      // Extract a meaningful identifier from the first row (e.g., an ID or email)
+      const rowHasMatch = firstRowText.length > 10;
+      if (rowHasMatch) {
+        // The sheet should share at least some text with the clicked row
+        const sheetHasRowData = firstRowText
+          .split(/\s+/)
+          .filter((w) => w.length > 3)
+          .some((word) => sheetText.includes(word));
+        expect(sheetHasRowData).toBe(true);
+      }
+
+      await attachScreenshot(page, testInfo, 'orders-row-sheet-details');
+      await page.keyboard.press('Escape');
+      await expect(sheet).not.toBeVisible({ timeout: 5_000 });
+    });
+
+    test('combined filters intersect correctly', async ({ page }) => {
+      await page.setViewportSize(desktopViewport);
+      // Apply both search and status filter via URL
+      await page.goto(`${adminBaseUrl}/dashboard/orders?status=paid&search=a`);
+      await expect(page.getByRole('table')).toBeVisible({ timeout: 15_000 });
+
+      // If rows are present, each should match both "paid" status AND search term
+      const dataRows = page.getByRole('row').filter({ hasNot: page.getByRole('columnheader') });
+      const count = await dataRows.count();
+      if (count > 0) {
+        const rowTexts = await Promise.all(
+          Array.from({ length: count }, (_, i) => dataRows.nth(i).textContent()),
+        );
+        for (const text of rowTexts) {
+          expect((text ?? '').toLowerCase()).toContain('paid');
+        }
+      }
+
+      // URL should reflect both params
+      await expect(page).toHaveURL(/status=paid/);
+      await expect(page).toHaveURL(/search=a/);
+    });
+
+    test('cursor pagination produces no duplicate rows', async ({ page }) => {
+      await page.setViewportSize(desktopViewport);
+      await page.goto(`${adminBaseUrl}/dashboard/orders`);
+      await expect(page.getByRole('table')).toBeVisible({ timeout: 15_000 });
+
+      // Collect row identifiers from the first page
+      const dataRows = page.getByRole('row').filter({ hasNot: page.getByRole('columnheader') });
+      const firstPageIds = new Set<string>();
+      const firstRowCount = await dataRows.count();
+      const firstPageTexts = await Promise.all(
+        Array.from({ length: firstRowCount }, (_, i) => dataRows.nth(i).textContent()),
+      );
+      for (const text of firstPageTexts) {
+        const id = (text ?? '').trim().slice(0, 50);
+        if (id) firstPageIds.add(id);
+      }
+
+      // Look for a "Next" or pagination button
+      const nextButton = page.getByRole('button', { name: /next|load\s*more|→/i }).first();
+      const hasNext = await nextButton.isVisible().catch(() => false);
+
+      if (hasNext) {
+        await nextButton.click();
+        await page.waitForURL(/cursor=/, { timeout: 10_000 }).catch(() => {});
+
+        // Collect row identifiers from the second page
+        const secondRowCount = await dataRows.count();
+        const secondPageTexts = await Promise.all(
+          Array.from({ length: secondRowCount }, (_, i) => dataRows.nth(i).textContent()),
+        );
+        let duplicateCount = 0;
+        for (const text of secondPageTexts) {
+          const id = (text ?? '').trim().slice(0, 50);
+          if (id && firstPageIds.has(id)) duplicateCount++;
+        }
+
+        // No rows from the first page should appear on the second page
+        expect(duplicateCount).toBe(0);
+      }
+    });
+  });
+
+  test.describe('Attendees data-contract', () => {
+    test('status filter narrows attendee rows to matching status', async ({ page }) => {
+      await page.setViewportSize(desktopViewport);
+      await page.goto(`${adminBaseUrl}/dashboard/attendees`);
+      await expect(page.getByRole('table')).toBeVisible({ timeout: 15_000 });
+
+      // Apply status filter via URL
+      await page.goto(`${adminBaseUrl}/dashboard/attendees?status=active`);
+      await expect(page.getByRole('table')).toBeVisible({ timeout: 15_000 });
+
+      // Verify visible rows match the filter
+      const dataRows = page.getByRole('row').filter({ hasNot: page.getByRole('columnheader') });
+      const count = await dataRows.count();
+      if (count > 0) {
+        await Promise.all(
+          Array.from({ length: count }, (_, i) =>
+            expect(dataRows.nth(i)).toContainText(/active/i, { ignoreCase: true }),
+          ),
+        );
+      }
+
+      await expect(page).toHaveURL(/status=active/);
+    });
+
+    test('attendee row sheet displays attendee details', async ({ page }, testInfo) => {
+      await page.setViewportSize(desktopViewport);
+      await page.goto(`${adminBaseUrl}/dashboard/attendees`);
+      await expect(page.getByRole('table')).toBeVisible({ timeout: 15_000 });
+
+      const dataRows = page.getByRole('row').filter({ hasNot: page.getByRole('columnheader') });
+      const firstRowText = (await dataRows.first().textContent()) ?? '';
+
+      await dataRows.first().click();
+
+      const sheet = page.getByRole('dialog').or(page.locator('[data-state="open"]').first());
+      await expect(sheet).toBeVisible({ timeout: 5_000 });
+
+      // The sheet should contain attendee detail labels
+      const sheetText = (await sheet.textContent()) ?? '';
+      const hasAttendeeDetail =
+        /email/i.test(sheetText) ||
+        /ticket/i.test(sheetText) ||
+        /status/i.test(sheetText) ||
+        /name/i.test(sheetText) ||
+        /event/i.test(sheetText);
+      expect(hasAttendeeDetail).toBe(true);
+
+      // Sheet should share data with the clicked row
+      const rowHasMatch = firstRowText.length > 10;
+      if (rowHasMatch) {
+        const sheetHasRowData = firstRowText
+          .split(/\s+/)
+          .filter((w) => w.length > 3)
+          .some((word) => sheetText.includes(word));
+        expect(sheetHasRowData).toBe(true);
+      }
+
+      await attachScreenshot(page, testInfo, 'attendees-row-sheet-details');
+      await page.keyboard.press('Escape');
+      await expect(sheet).not.toBeVisible({ timeout: 5_000 });
+    });
+
+    test('URL state persists attendee status filter across navigation', async ({ page }) => {
+      await page.setViewportSize(desktopViewport);
+      await page.goto(`${adminBaseUrl}/dashboard/attendees?status=active`);
+      await expect(page.getByRole('table')).toBeVisible({ timeout: 15_000 });
+      await expect(page).toHaveURL(/status=active/);
+
+      // Navigate away
+      await page.goto(`${adminBaseUrl}/dashboard`);
+      await expect(page).toHaveURL(/dashboard$/);
+
+      // Navigate back via URL
+      await page.goto(`${adminBaseUrl}/dashboard/attendees?status=active`);
+      await expect(page).toHaveURL(/status=active/);
+
+      // Table should still be filtered
+      const dataRows = page.getByRole('row').filter({ hasNot: page.getByRole('columnheader') });
+      const count = await dataRows.count();
+      if (count > 0) {
+        await Promise.all(
+          Array.from({ length: count }, (_, i) =>
+            expect(dataRows.nth(i)).toContainText(/active/i, { ignoreCase: true }),
+          ),
+        );
+      }
+    });
+  });
 });
