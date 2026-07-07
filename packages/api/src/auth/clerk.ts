@@ -697,6 +697,17 @@ export class ClerkAuthService {
   }
 
   /**
+   * Requires the principal not to be limited to specific events before using
+   * organization-wide or brand-wide surfaces that do not derive brand scope
+   * from event IDs.
+   */
+  static requireNoEventScope(principal: Principal, resourceName: string): void {
+    if (principal.eventIds && principal.eventIds.length > 0) {
+      throw new ForbiddenError(`Event-scoped principals cannot access ${resourceName}`);
+    }
+  }
+
+  /**
    * Requires the principal to have access to the requested event.
    */
   static requireEventScope(principal: Principal, eventId?: string): void {

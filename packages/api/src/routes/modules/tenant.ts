@@ -313,6 +313,7 @@ export const tenantRoutes: FastifyPluginAsync = async (app) => {
   app.get('/bootstrap-context', async (request) => {
     const principal = request.principal!;
     requireAnyPermission(principal, dashboardContextPermissions);
+    ClerkAuthService.requireNoEventScope(principal, 'brand-wide dashboard context');
     const includeSettings = ClerkAuthService.hasPermission(principal, 'settings.write');
     const [organizations, brands] = await Promise.all([
       scopedOrganizationsFor(principal),
@@ -508,6 +509,7 @@ export const tenantRoutes: FastifyPluginAsync = async (app) => {
   app.patch('/brands/:brandId', async (request) => {
     const principal = request.principal!;
     ClerkAuthService.requirePermission(principal, 'settings.write');
+    ClerkAuthService.requireNoEventScope(principal, 'brand settings');
     const { brandId } = request.params as { brandId: string };
     const body = parseBody(updateBrandSchema, request.body);
 
@@ -575,6 +577,7 @@ export const tenantRoutes: FastifyPluginAsync = async (app) => {
   app.post('/brands/:brandId/domains', async (request, reply) => {
     const principal = request.principal!;
     ClerkAuthService.requirePermission(principal, 'settings.write');
+    ClerkAuthService.requireNoEventScope(principal, 'brand domains');
     const { brandId } = request.params as { brandId: string };
     const body = parseBody(addBrandDomainSchema, request.body);
 
@@ -599,6 +602,7 @@ export const tenantRoutes: FastifyPluginAsync = async (app) => {
   app.get('/brands/:brandId/email-sender-identities', async (request) => {
     const principal = request.principal!;
     requireAnyPermission(principal, ['settings.write', 'messages.write']);
+    ClerkAuthService.requireNoEventScope(principal, 'brand sender identities');
     const { brandId } = request.params as { brandId: string };
 
     const brand = await new BrandRepository(db).findById(brandId);
@@ -619,6 +623,7 @@ export const tenantRoutes: FastifyPluginAsync = async (app) => {
   app.get('/brands', async (request) => {
     const principal = request.principal!;
     ClerkAuthService.requirePermission(principal, 'settings.write');
+    ClerkAuthService.requireNoEventScope(principal, 'brand settings');
     const scopedBrands = await scopedBrandsFor(principal);
     const brandIds = scopedBrands.map((brand) => String(brand.id));
     const domains =

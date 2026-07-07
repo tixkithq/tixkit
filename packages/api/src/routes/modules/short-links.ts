@@ -18,6 +18,7 @@ export const shortLinkRoutes: FastifyPluginAsync = async (app) => {
   app.post('/short-links', async (request) => {
     const principal = request.principal!;
     ClerkAuthService.requirePermission(principal, 'messages.write');
+    ClerkAuthService.requireNoEventScope(principal, 'short links');
     const body = request.body as {
       destinationUrl?: string;
       slug?: string;
@@ -74,6 +75,7 @@ export const shortLinkRoutes: FastifyPluginAsync = async (app) => {
   app.get('/short-links', async (request) => {
     const principal = request.principal!;
     ClerkAuthService.requirePermission(principal, 'messages.write');
+    ClerkAuthService.requireNoEventScope(principal, 'short links');
     const repo = new ShortLinkRepository(db);
     const scopedBrandIds = principal.brandIds?.length ? principal.brandIds : undefined;
     const links = scopedBrandIds
@@ -93,6 +95,7 @@ export const shortLinkRoutes: FastifyPluginAsync = async (app) => {
   app.get('/short-links/:id/clicks', async (request) => {
     const principal = request.principal!;
     ClerkAuthService.requirePermission(principal, 'messages.write');
+    ClerkAuthService.requireNoEventScope(principal, 'short links');
     const { id } = request.params as { id: string };
     const repo = new ShortLinkRepository(db);
     const link = await repo.findById(id);

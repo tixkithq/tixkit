@@ -2284,6 +2284,95 @@ describe('brand and event scope denial', () => {
     await app.close();
   });
 
+  it('rejects event-scoped principals from tenant brand and bootstrap surfaces', async () => {
+    const principal = makePrincipal({
+      type: 'api_key',
+      id: 'ak_event_scoped',
+      eventIds: ['evt_A'],
+      scopes: ['events.read', 'messages.write', 'settings.write'],
+    });
+    const tables: Tables = {
+      organizations: [organizationRow({ id: 'org_1' })],
+      brands: [brandRow({ id: 'brd_A', organization_id: 'org_1' })],
+    };
+    const app = await setupApp(tenantRoutes, principal, tables);
+
+    const bootstrap = await app.inject({ method: 'GET', url: '/bootstrap-context' });
+    expect(bootstrap.statusCode).toBe(403);
+    expect(bootstrap.json().message).toContain('Event-scoped principals cannot access');
+
+    const brands = await app.inject({ method: 'GET', url: '/brands' });
+    expect(brands.statusCode).toBe(403);
+
+    const patch = await app.inject({
+      method: 'PATCH',
+      url: '/brands/brd_A',
+      payload: { name: 'Event Scoped Edit' },
+    });
+    expect(patch.statusCode).toBe(403);
+    expect(tables.brands[0]?.name).toBe('Brand1');
+
+    const domain = await app.inject({
+      method: 'POST',
+      url: '/brands/brd_A/domains',
+      payload: { domain: 'event-scoped.example.com', isPrimary: true },
+    });
+    expect(domain.statusCode).toBe(403);
+
+    const senders = await app.inject({
+      method: 'GET',
+      url: '/brands/brd_A/email-sender-identities',
+    });
+    expect(senders.statusCode).toBe(403);
+
+    await app.close();
+  });
+
+  it('rejects event-scoped principals from tenant-wide short-link surfaces', async () => {
+    const principal = makePrincipal({
+      type: 'api_key',
+      id: 'ak_event_scoped',
+      eventIds: ['evt_A'],
+      scopes: ['messages.write'],
+    });
+    const tables: Tables = {
+      short_links: [
+        {
+          id: 'slk_tenant',
+          tenant_id: 'tnt_1',
+          brand_id: null,
+          slug: 'tenant-wide',
+          destination_url: 'https://example.com/tenant',
+          utm_params: null,
+          clicks: 1,
+          expires_at: null,
+          created_at: new Date('2026-06-01T00:00:00.000Z'),
+          updated_at: new Date('2026-06-01T00:00:00.000Z'),
+        },
+      ],
+    };
+    const app = await setupApp(shortLinkRoutes, principal, tables);
+
+    const list = await app.inject({ method: 'GET', url: '/short-links' });
+    expect(list.statusCode).toBe(403);
+
+    const clicks = await app.inject({ method: 'GET', url: '/short-links/slk_tenant/clicks' });
+    expect(clicks.statusCode).toBe(403);
+
+    const create = await app.inject({
+      method: 'POST',
+      url: '/short-links',
+      payload: {
+        destinationUrl: 'https://example.com/tickets',
+        slug: 'event-scoped-link',
+      },
+    });
+    expect(create.statusCode).toBe(403);
+    expect(tables.short_links).toHaveLength(1);
+
+    await app.close();
+  });
+
   it('GET /attendees only returns permitted event attendees for event-scoped keys', async () => {
     const principal = makePrincipal({
       type: 'api_key',
