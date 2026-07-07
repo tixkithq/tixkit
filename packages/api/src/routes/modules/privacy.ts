@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import type { FastifyPluginAsync, FastifyReply, FastifyRequest } from 'fastify';
 import { z } from 'zod';
 import {
@@ -72,6 +73,22 @@ const privacyRequestSchema = z
 type PrivacyRequestBody = z.infer<typeof privacyRequestSchema> & {
   subjectEmail?: string;
 };
+
+function deterministicPrivacyRequestId(input: {
+  tenantId: string;
+  idempotencyKey: string;
+  requestHash: string;
+}): string {
+  const digest = createHash('sha256')
+    .update(input.tenantId)
+    .update('\0')
+    .update(input.idempotencyKey)
+    .update('\0')
+    .update(input.requestHash)
+    .digest('hex')
+    .slice(0, 26);
+  return `prv_${digest}`;
+}
 
 function parsePrivacyBody(body: unknown): PrivacyRequestBody {
   const parsed = privacyRequestSchema.safeParse(body);
@@ -261,24 +278,41 @@ export const privacyRoutes: FastifyPluginAsync = async (app) => {
       throw new ValidationError('Idempotency-Key header is required for privacy requests');
     }
 
+    const requestHash = hashRequest({ requestType, ...body });
+    const requestId = deterministicPrivacyRequestId({
+      tenantId: principal.tenantId,
+      idempotencyKey,
+      requestHash,
+    });
+
     const result = await withIdempotency(
       db,
       {
         key: idempotencyKey,
         tenantId: principal.tenantId,
-        requestHash: hashRequest({ requestType, ...body }),
+        requestHash,
       },
       async () => {
-        const row = await privacyRepo().create({
-          tenantId: principal.tenantId,
-          organizationId: body.organizationId,
-          brandId: body.brandId ?? null,
-          requestType,
-          subjectType: body.subjectType,
-          subjectId: body.subjectId ?? null,
-          subjectEmail: body.subjectEmail ?? null,
-          requestedBy: principal.id,
-        });
+        let row = await privacyRepo().findById(requestId);
+        if (!row) {
+          try {
+            row = await privacyRepo().create({
+              id: requestId,
+              tenantId: principal.tenantId,
+              organizationId: body.organizationId,
+              brandId: body.brandId ?? null,
+              requestType,
+              subjectType: body.subjectType,
+              subjectId: body.subjectId ?? null,
+              subjectEmail: body.subjectEmail ?? null,
+              requestedBy: principal.id,
+            });
+          } catch (error) {
+            const existing = await privacyRepo().findById(requestId);
+            if (!existing) throw error;
+            row = existing;
+          }
+        }
 
         await app.context.temporalClient.startPrivacyRequest({ requestId: row.id });
 

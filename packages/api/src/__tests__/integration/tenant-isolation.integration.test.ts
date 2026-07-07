@@ -16,6 +16,7 @@ import { messagingRoutes } from '../../routes/modules/messaging.js';
 import { waitlistRoutes } from '../../routes/modules/waitlist.js';
 import { contentRoutes } from '../../routes/modules/content.js';
 import { shortLinkRoutes } from '../../routes/modules/short-links.js';
+import { privacyRoutes } from '../../routes/modules/privacy.js';
 import { hashRequest } from '../../services/idempotency.js';
 
 /**
@@ -60,10 +61,17 @@ function matchesWheres(
   return true;
 }
 
-function createDelete(_table: string) {
+function createDelete(table: string, tables: Tables) {
+  const wheres: Array<{ column: string; op: string; value: unknown }> = [];
   return {
-    where() {
-      return { execute: async () => {} };
+    where(column: string, op: string, value: unknown) {
+      wheres.push({ column, op, value });
+      return {
+        execute: async () => {
+          const rows = tables[table] ?? [];
+          tables[table] = rows.filter((row) => !matchesWheres(row, wheres));
+        },
+      };
     },
   };
 }
@@ -173,7 +181,7 @@ function createMockDb(tables: Tables = {}): unknown {
     selectFrom: createQuery,
     updateTable: createUpdate,
     insertInto: createInsert,
-    deleteFrom: createDelete,
+    deleteFrom: (table: string) => createDelete(table, tables),
     transaction: () => ({
       execute: async (fn: (trx: unknown) => Promise<unknown>) => fn(db),
     }),
@@ -539,6 +547,7 @@ async function setupApp(
       startSmsDelivery: vi.fn(),
       startCheckoutSession: vi.fn(),
       startWebhookDelivery: vi.fn(),
+      startPrivacyRequest: vi.fn(),
       getCheckoutState: vi.fn(),
     },
     ...contextOverrides,
@@ -1037,6 +1046,62 @@ describe('tenant settings list permission gates', () => {
     expect(domainRes.json()).not.toHaveProperty('brand_id');
     expect(domainRes.json()).not.toHaveProperty('is_primary');
     expect(domainRes.json()).not.toHaveProperty('ssl_status');
+    await app.close();
+  });
+});
+
+describe('privacy idempotency recovery', () => {
+  it('POST /privacy/data-exports reuses the pending request when workflow start fails before retry', async () => {
+    const startPrivacyRequest = vi
+      .fn()
+      .mockRejectedValueOnce(new Error('temporal unavailable'))
+      .mockResolvedValueOnce(undefined);
+    const tables: Tables = {
+      organizations: [organizationRow()],
+      privacy_requests: [],
+      idempotency_records: [],
+      audit_logs: [],
+    };
+    const app = await setupApp(privacyRoutes, makePrincipal(), tables, {
+      temporalClient: {
+        startPrivacyRequest,
+      },
+    });
+    const payload = {
+      organizationId: 'org_1',
+      subjectType: 'buyer',
+      subjectEmail: 'BUYER@example.test',
+    };
+
+    const first = await app.inject({
+      method: 'POST',
+      url: '/privacy/data-exports',
+      headers: { 'idempotency-key': 'privacy-export-key' },
+      payload,
+    });
+    expect(first.statusCode).toBe(500);
+    expect(tables.privacy_requests).toHaveLength(1);
+    const requestId = tables.privacy_requests[0]?.id;
+
+    const retry = await app.inject({
+      method: 'POST',
+      url: '/privacy/data-exports',
+      headers: { 'idempotency-key': 'privacy-export-key' },
+      payload,
+    });
+
+    expect(retry.statusCode).toBe(202);
+    expect(retry.json()).toMatchObject({
+      id: requestId,
+      subjectEmail: 'buyer@example.test',
+      status: 'pending',
+    });
+    expect(tables.privacy_requests).toHaveLength(1);
+    expect(tables.idempotency_records).toHaveLength(1);
+    expect(tables.idempotency_records[0]).toMatchObject({ status: 'completed' });
+    expect(startPrivacyRequest).toHaveBeenCalledTimes(2);
+    expect(startPrivacyRequest).toHaveBeenNthCalledWith(1, { requestId });
+    expect(startPrivacyRequest).toHaveBeenNthCalledWith(2, { requestId });
     await app.close();
   });
 });

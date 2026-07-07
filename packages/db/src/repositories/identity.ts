@@ -295,6 +295,7 @@ export class AuditLogRepository extends BaseRepository {
 
 export class PrivacyRequestRepository extends BaseRepository {
   async create(input: {
+    id?: string;
     tenantId: string;
     organizationId: string;
     brandId?: string | null;
@@ -304,7 +305,7 @@ export class PrivacyRequestRepository extends BaseRepository {
     subjectEmail?: string | null;
     requestedBy: string;
   }) {
-    const id = `prv_${ulid()}`;
+    const id = input.id ?? `prv_${ulid()}`;
     return this.insertReturning(
       'privacy_requests',
       {
