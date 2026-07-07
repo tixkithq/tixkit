@@ -65,6 +65,8 @@ describe('Generated client compile validation (T33)', () => {
 
     for (const path of [
       '/public/events/{eventId}/page',
+      '/public/events/{eventId}/bootstrap',
+      '/public/events/{eventId}/page-bootstrap',
       '/public/events/{eventId}/content-page',
       '/public/events/{eventId}/discovery-card',
       '/public/events/{eventId}/draft-preview',
@@ -72,6 +74,7 @@ describe('Generated client compile validation (T33)', () => {
       '/public/events/{eventId}/revision',
       '/public/events/{eventId}/resale-listings',
       '/public/events/by-slug/{slug}/page',
+      '/public/events/by-slug/{slug}/page-bootstrap',
       '/public/brand-logos/{artifactId}',
       '/s/{slug}',
       '/tickets/{ticketId}/resale-listings',
@@ -84,6 +87,8 @@ describe('Generated client compile validation (T33)', () => {
 
     for (const schema of [
       'PublicContentPage',
+      'PublicCheckoutBootstrap',
+      'PublicEventPageBootstrap',
       'DraftPreviewPage',
       'PublicEvent',
       'PublicMarketingIntegration',

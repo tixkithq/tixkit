@@ -16,7 +16,9 @@ import {
   type OrderDetail,
   type PrivacyRequestInput,
   type PublicAvailabilityItem,
+  type PublicCheckoutBootstrap,
   type PublicEvent,
+  type PublicEventPageBootstrap,
   type SmsTemplateDocument,
   type UploadArtifactDownload,
   type UploadPurpose,
@@ -2595,6 +2597,27 @@ describe('TixkitClient new resource methods', () => {
     expect(call.url).toBe('https://api.test/v1/public/events/evt_1');
   });
 
+  it('public.getEventBySlug sends host-scoped public event GET without auth', async () => {
+    const fm = mockFetch(200, {
+      id: 'evt_1',
+      slug: 'all-access',
+      title: 'All Access',
+      status: 'published',
+      timezone: 'America/Chicago',
+      startsAt: '2026-07-07T20:00:00.000Z',
+      brandId: 'brd_1',
+      marketingIntegrations: [],
+    });
+    const c = new TixkitClient({ apiBaseUrl: 'https://api.test', maxRetries: 0 });
+    const event = await c.public.getEventBySlug('all-access', { host: 'events.example.com' });
+
+    expectTypeOf(event).toEqualTypeOf<PublicEvent>();
+    expect(getCall(fm).url).toBe(
+      'https://api.test/v1/public/events/by-slug/all-access?host=events.example.com',
+    );
+    expect(getCall(fm).method).toBe('GET');
+  });
+
   it('public.getEventRevision sends GET without auth', async () => {
     const fm = mockFetch(200, { revision: '2026-07-07T04:31:00.000Z' });
     const c = new TixkitClient({ apiBaseUrl: 'https://api.test', maxRetries: 0 });
@@ -2615,6 +2638,41 @@ describe('TixkitClient new resource methods', () => {
       'https://api.test/v1/public/events/evt_1/resale-listings?cursor=lst_0&limit=25',
     );
     expect(call.method).toBe('GET');
+  });
+
+  it('public bootstrap helpers send documented public GET routes without auth', async () => {
+    const fm = mockFetch(200, {});
+    const c = new TixkitClient({ apiBaseUrl: 'https://api.test', maxRetries: 0 });
+
+    const checkoutBootstrap = await c.public.getCheckoutBootstrap('evt_1', {
+      products: ['tt_1', 'prd_1'],
+      resaleListingId: 'tl_1',
+    });
+    expectTypeOf(checkoutBootstrap).toEqualTypeOf<PublicCheckoutBootstrap>();
+    expect(getCall(fm, 0).url).toBe(
+      'https://api.test/v1/public/events/evt_1/bootstrap?products=tt_1%2Cprd_1&resaleListingId=tl_1',
+    );
+    expect(getCall(fm, 0).method).toBe('GET');
+
+    await c.public.getCheckoutBootstrap('evt_1', { products: 'tt_1' });
+    expect(getCall(fm, 1).url).toBe(
+      'https://api.test/v1/public/events/evt_1/bootstrap?products=tt_1',
+    );
+
+    const pageBootstrap = await c.public.getEventPageBootstrap('evt_1', { locale: 'en' });
+    expectTypeOf(pageBootstrap).toEqualTypeOf<PublicEventPageBootstrap>();
+    expect(getCall(fm, 2).url).toBe(
+      'https://api.test/v1/public/events/evt_1/page-bootstrap?locale=en',
+    );
+
+    const slugPageBootstrap = await c.public.getEventPageBootstrapBySlug('all-access', {
+      host: 'events.example.com',
+      locale: 'en',
+    });
+    expectTypeOf(slugPageBootstrap).toEqualTypeOf<PublicEventPageBootstrap>();
+    expect(getCall(fm, 3).url).toBe(
+      'https://api.test/v1/public/events/by-slug/all-access/page-bootstrap?host=events.example.com&locale=en',
+    );
   });
 
   it('public.getAvailability sends product filters and returns product rows', async () => {

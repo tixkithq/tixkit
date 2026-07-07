@@ -512,6 +512,31 @@ export type PublicContentPage = {
   };
 };
 
+export type PublicQuestionsResponse = {
+  buyerQuestions: Question[];
+  attendeeQuestions: Question[];
+};
+
+export type PublicTicketListingPage = {
+  items: PublicTicketListing[];
+  nextCursor?: string | null;
+  hasMore?: boolean;
+};
+
+export type PublicCheckoutBootstrap = {
+  event: PublicEvent;
+  availability: PublicAvailabilityItem[];
+  questions: PublicQuestionsResponse;
+  resaleListing: PublicTicketListing | null;
+};
+
+export type PublicEventPageBootstrap = {
+  event: PublicEvent;
+  contentPage: PublicContentPage | null;
+  availability: PublicAvailabilityItem[];
+  resaleListings: PublicTicketListingPage;
+};
+
 export type PublicEventRevision = {
   revision: string | null;
 };
@@ -3215,6 +3240,11 @@ class PublicResource {
   async getEvent(eventId: string): Promise<PublicEvent> {
     return this.client.request('GET', `/public/events/${eventId}`);
   }
+  async getEventBySlug(slug: string, params: { host: string }): Promise<PublicEvent> {
+    return this.client.request('GET', `/public/events/by-slug/${slug}`, {
+      params: { host: params.host },
+    });
+  }
   async getEventRevision(eventId: string): Promise<PublicEventRevision> {
     return this.client.request('GET', `/public/events/${eventId}/revision`);
   }
@@ -3233,6 +3263,34 @@ class PublicResource {
     params: { host: string; locale?: string },
   ): Promise<PublicContentPage> {
     return this.client.request('GET', `/public/events/by-slug/${slug}/page`, {
+      params: params.locale ? { host: params.host, locale: params.locale } : { host: params.host },
+    });
+  }
+  async getCheckoutBootstrap(
+    eventId: string,
+    params?: { products?: string | string[]; resaleListingId?: string },
+  ): Promise<PublicCheckoutBootstrap> {
+    const products = Array.isArray(params?.products) ? params.products.join(',') : params?.products;
+    return this.client.request('GET', `/public/events/${eventId}/bootstrap`, {
+      params: {
+        ...(products ? { products } : {}),
+        ...(params?.resaleListingId ? { resaleListingId: params.resaleListingId } : {}),
+      },
+    });
+  }
+  async getEventPageBootstrap(
+    eventId: string,
+    params?: { locale?: string },
+  ): Promise<PublicEventPageBootstrap> {
+    return this.client.request('GET', `/public/events/${eventId}/page-bootstrap`, {
+      params: params?.locale ? { locale: params.locale } : undefined,
+    });
+  }
+  async getEventPageBootstrapBySlug(
+    slug: string,
+    params: { host: string; locale?: string },
+  ): Promise<PublicEventPageBootstrap> {
+    return this.client.request('GET', `/public/events/by-slug/${slug}/page-bootstrap`, {
       params: params.locale ? { host: params.host, locale: params.locale } : { host: params.host },
     });
   }
